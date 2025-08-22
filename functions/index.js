@@ -236,6 +236,52 @@ exports.notifyWaitlist = functions.https.onRequest((req, res) => {
   });
 });
 
+// ==========================================================================
+// PARENT-BOOKED CHILD NOTIFICATION (Courier)
+// ==========================================================================
+
+exports.onBookingCreateNotifyChild = functions.firestore
+  .document('bookings/{bookingId}')
+  .onCreate(async (snap, context) => {
+    try {
+      const booking = snap.data() || {};
+      const parentId = booking.parentId;
+      const userId = booking.userId; // who the booking is for (child or self)
+      const childId = booking.childId || (parentId && parentId !== userId ? userId : null);
+
+      // Only notify when a parent books for a child (parentId present and distinct)
+      if (!parentId || !childId || parentId === childId) return;
+
+      const [childProfile, parentProfile] = await Promise.all([
+        getUserProfile(childId),
+        getUserProfile(parentId)
+      ]);
+
+      if (!childProfile) return;
+
+      const sessionType = booking.sessionType || booking.packageType || 'Training Session';
+      const dateStr = booking.date || (booking.sessionData && booking.sessionData.date) || '';
+      const timeStr = booking.time || (booking.sessionData && booking.sessionData.time) || '';
+      const location = booking.location || (booking.sessionData && booking.sessionData.location) || '';
+      const parentName = (parentProfile && (parentProfile.displayName || parentProfile.email)) || 'Your parent';
+
+      const title = 'You have a new session booked';
+      const body = `${parentName} booked a ${sessionType}${dateStr || timeStr ? ' on ' : ''}${[dateStr, timeStr].filter(Boolean).join(' at ')}${location ? ' • ' + location : ''}.`;
+
+      await sendCourierNotification({
+        eventId: process.env.COURIER_EVENT_CHILD_BOOKED || null,
+        toProfile: {
+          email: childProfile.email,
+          phone_number: childProfile.phoneNumber,
+        },
+        content: { title, body },
+        channels: { sms: {}, email: {} }
+      });
+    } catch (err) {
+      console.error('onBookingCreateNotifyChild error:', err);
+    }
+  });
+
 // Simple test endpoint to verify Courier configuration (no UI impact)
 exports.testCourier = functions.https.onRequest((req, res) => {
   cors(req, res, async () => {
