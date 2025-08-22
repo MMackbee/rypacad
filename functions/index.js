@@ -14,12 +14,45 @@ const twilio = require('twilio')(
   process.env.TWILIO_ACCOUNT_SID,
   process.env.TWILIO_AUTH_TOKEN
 );
+const { CourierClient } = require('@trycourier/courier');
 const cors = require('cors')({ origin: true });
 
 // Initialize Firebase Admin
 admin.initializeApp();
 
 const db = admin.firestore();
+
+// Initialize Courier
+const courierAuthToken = process.env.COURIER_AUTH_TOKEN;
+const courier = courierAuthToken ? CourierClient({ authorizationToken: courierAuthToken }) : null;
+
+async function sendCourierNotification({ toProfile = {}, toUserId = null, eventId = null, content = {}, channels = {} }) {
+  if (!courier) {
+    console.warn('Courier client not configured. Skipping notification.');
+    return { skipped: true };
+  }
+  try {
+    const message = {};
+    if (eventId) {
+      message.eventId = eventId; // Courier Studio template event id
+    } else {
+      message.content = content; // Ad-hoc content if no template
+    }
+    if (toUserId) {
+      message.recipient = toUserId;
+    } else {
+      message.profile = toProfile; // { email, phone_number, fcm: { token }, etc }
+    }
+    if (channels && Object.keys(channels).length > 0) {
+      message.channels = channels; // e.g., { sms: {}, email: {} }
+    }
+    const resp = await courier.send({ message });
+    return resp;
+  } catch (err) {
+    console.error('Courier send error:', err);
+    return { error: err.message };
+  }
+}
 
 // ============================================================================
 // STRIPE PAYMENT FUNCTIONS
@@ -86,12 +119,44 @@ exports.handlePaymentSuccess = functions.https.onRequest((req, res) => {
       // Create booking record
       await createBookingRecord(userId, packageId, addOns, paymentIntentId);
 
-      // Send confirmation SMS
-      await sendPaymentConfirmationSMS(userId, packageId, addOns);
+      // Send confirmation via Courier (email/SMS based on profile)
+      try {
+        const userDoc = await db.collection('users').doc(userId).get();
+        const user = userDoc.exists ? userDoc.data() : {};
+        await sendCourierNotification({
+          eventId: process.env.COURIER_EVENT_PAYMENT_SUCCESS || null,
+          toProfile: {
+            email: user.email,
+            phone_number: user.phoneNumber,
+          },
+          content: {
+            title: 'Payment Confirmed',
+            body: `Your purchase was successful${packageId ? ` for ${getPackageData(packageId).title}` : ''}.`
+          }
+        });
+      } catch (e) {
+        console.warn('Courier payment notification skipped:', e.message);
+      }
 
       res.json({ success: true, message: 'Payment processed successfully' });
     } catch (error) {
       console.error('Error handling payment success:', error);
+      res.status(500).json({ error: error.message });
+    }
+  });
+});
+
+// Simple test endpoint to verify Courier configuration (no UI impact)
+exports.testCourier = functions.https.onRequest((req, res) => {
+  cors(req, res, async () => {
+    try {
+      const { email, phone, message = 'Hello from RYP via Courier' } = req.body || {};
+      const result = await sendCourierNotification({
+        toProfile: { email, phone_number: phone },
+        content: { title: 'Test Notification', body: message },
+      });
+      res.json({ success: true, result });
+    } catch (error) {
       res.status(500).json({ error: error.message });
     }
   });
