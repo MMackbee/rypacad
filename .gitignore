@@ -1,3 +1,33 @@
+# Node / JS
+node_modules/
+frontend/node_modules/
+functions/node_modules/
+npm-debug.log*
+yarn-error.log*
+
+# Build artifacts
+frontend/build/
+
+# Env files
+frontend/.env
+frontend/.env.local
+functions/.env
+backend/.env
+
+# Python
+backend/venv/
+__pycache__/
+*.pyc
+
+# Secrets
+backend/serviceAccountKey.json
+
+# OS
+.DS_Store
+frontend/.DS_Store
+
+# Other
+dispcirclesapp/
 # Logs
 logs
 *.log
