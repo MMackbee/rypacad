@@ -146,6 +146,96 @@ exports.handlePaymentSuccess = functions.https.onRequest((req, res) => {
   });
 });
 
+// ==========================================================================
+// WAITLIST NOTIFICATIONS (Courier)
+// ==========================================================================
+
+async function getUserProfile(userId) {
+  if (!userId) return null;
+  const snap = await db.collection('users').doc(userId).get();
+  return snap.exists ? snap.data() : null;
+}
+
+async function notifyWaitlistForSession(sessionId, maxToNotify = 1) {
+  const sessionRef = db.collection('sessions').doc(sessionId);
+  const sessionSnap = await sessionRef.get();
+  if (!sessionSnap.exists) return { skipped: 'session_not_found' };
+  const session = sessionSnap.data() || {};
+
+  const capacity = Number(session.capacity || 0);
+  const participants = Array.isArray(session.participants) ? session.participants : [];
+  const waitlist = Array.isArray(session.waitlist) ? session.waitlist : [];
+
+  const available = Math.max(capacity - participants.length, 0);
+  if (available <= 0 || waitlist.length === 0) {
+    return { skipped: true, available, waitlist: waitlist.length };
+  }
+
+  const toNotifyCount = Math.min(available, maxToNotify, waitlist.length);
+  const notifyUserIds = waitlist.slice(0, toNotifyCount);
+
+  const results = [];
+  for (const uid of notifyUserIds) {
+    const user = await getUserProfile(uid);
+    if (!user) {
+      results.push({ uid, error: 'user_not_found' });
+      continue;
+    }
+    const title = 'A spot just opened up!';
+    const body = `Session: ${session.type || 'Training'} on ${session.date || ''} at ${session.time || ''}.`;
+    const resp = await sendCourierNotification({
+      eventId: process.env.COURIER_EVENT_WAITLIST_OPEN || null,
+      toProfile: {
+        email: user.email,
+        phone_number: user.phoneNumber,
+      },
+      content: { title, body },
+    });
+    results.push({ uid, resp });
+  }
+
+  return { notified: results.length, results };
+}
+
+// Firestore trigger: when a session is updated, if capacity opens up, notify waitlist
+exports.onSessionUpdateNotifyWaitlist = functions.firestore
+  .document('sessions/{sessionId}')
+  .onUpdate(async (change, context) => {
+    try {
+      const before = change.before.data() || {};
+      const after = change.after.data() || {};
+
+      const capacity = Number(after.capacity || 0);
+      const beforeParticipants = Array.isArray(before.participants) ? before.participants.length : 0;
+      const afterParticipants = Array.isArray(after.participants) ? after.participants.length : 0;
+      const waitlistLength = Array.isArray(after.waitlist) ? after.waitlist.length : 0;
+
+      // Only act when available slots increased and there is a waitlist
+      const beforeAvailable = Math.max(capacity - beforeParticipants, 0);
+      const afterAvailable = Math.max(capacity - afterParticipants, 0);
+      if (afterAvailable > beforeAvailable && waitlistLength > 0 && capacity > 0) {
+        const delta = afterAvailable - beforeAvailable;
+        await notifyWaitlistForSession(context.params.sessionId, delta);
+      }
+    } catch (err) {
+      console.error('onSessionUpdateNotifyWaitlist error:', err);
+    }
+  });
+
+// Manual endpoint to trigger waitlist notifications for a session
+exports.notifyWaitlist = functions.https.onRequest((req, res) => {
+  cors(req, res, async () => {
+    try {
+      const { sessionId, max = 1 } = req.body || {};
+      if (!sessionId) return res.status(400).json({ error: 'sessionId required' });
+      const result = await notifyWaitlistForSession(sessionId, Number(max));
+      res.json({ success: true, result });
+    } catch (error) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+});
+
 // Simple test endpoint to verify Courier configuration (no UI impact)
 exports.testCourier = functions.https.onRequest((req, res) => {
   cors(req, res, async () => {
