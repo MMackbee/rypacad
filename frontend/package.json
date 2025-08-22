@@ -1,0 +1,44 @@
+{
+    "name": "frontend",
+    "version": "0.1.0",
+    "private": true,
+    "dependencies": {
+        "@stripe/react-stripe-js": "^2.9.0",
+        "@stripe/stripe-js": "^1.54.2",
+        "firebase": "^9.22.0",
+        "papaparse": "^5.5.3",
+        "react": "^18.2.0",
+        "react-dom": "^18.2.0",
+        "react-dropzone": "^14.3.8",
+        "react-router-dom": "^6.11.0",
+        "react-scripts": "5.0.1"
+    },
+    "scripts": {
+        "start": "react-scripts start",
+        "build": "react-scripts build",
+        "test": "react-scripts test",
+        "eject": "react-scripts eject",
+        "deploy": "npm run build && firebase deploy --only hosting",
+        "deploy:staging": "npm run build && firebase use staging && firebase deploy --only hosting",
+        "deploy:production": "npm run build && firebase use production && firebase deploy --only hosting"
+    },
+    "proxy": "http://localhost:5000",
+    "eslintConfig": {
+        "extends": [
+            "react-app",
+            "react-app/jest"
+        ]
+    },
+    "browserslist": {
+        "production": [
+            ">0.2%",
+            "not dead",
+            "not op_mini all"
+        ],
+        "development": [
+            "last 1 chrome version",
+            "last 1 firefox version",
+            "last 1 safari version"
+        ]
+    }
+}

@@ -1,0 +1,83 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // Users can read/write their own data
+    match /users/{userId} {
+      allow read, write: if request.auth != null && request.auth.uid == userId;
+    }
+    
+    // Token management - users can only access their own tokens
+    match /userTokens/{userId} {
+      allow read, write: if request.auth != null && request.auth.uid == userId;
+    }
+    
+    // Family relationships - users can access their family data
+    match /families/{familyId} {
+      allow read, write: if request.auth != null && 
+        (resource.data.parentId == request.auth.uid || 
+         resource.data.childId == request.auth.uid);
+    }
+    
+    // Bookings - users can access their own bookings
+    match /bookings/{bookingId} {
+      allow read, write: if request.auth != null && 
+        resource.data.userId == request.auth.uid;
+    }
+    
+    // Sessions - authenticated users can read, any authenticated user can write for now
+    match /sessions/{sessionId} {
+      allow read: if request.auth != null;
+      allow write: if request.auth != null;
+    }
+    
+    // SMS logs - any authenticated user can read/write for now
+    match /smsLogs/{logId} {
+      allow read, write: if request.auth != null;
+    }
+    
+    // Payment records - users can read their own, any authenticated user can write for now
+    match /paymentRecords/{recordId} {
+      allow read: if request.auth != null && 
+        (resource.data.userId == request.auth.uid);
+      allow write: if request.auth != null;
+    }
+    
+    // Child accounts - parents can access their children's accounts
+    match /childAccounts/{childId} {
+      allow read, write: if request.auth != null && 
+        (request.auth.uid == childId || 
+         exists(/databases/$(database)/documents/families/$(request.auth.uid + '_' + childId)));
+    }
+    
+    // Funding records - parents can access their funding records
+    match /fundingRecords/{recordId} {
+      allow read, write: if request.auth != null && 
+        (resource.data.parentId == request.auth.uid);
+    }
+    
+    // Purchase records - users can access their own purchases
+    match /purchaseRecords/{recordId} {
+      allow read, write: if request.auth != null && 
+        (resource.data.userId == request.auth.uid || 
+         resource.data.parentId == request.auth.uid);
+    }
+    
+    // Programs and packages - everyone can read
+    match /programs/{programId} {
+      allow read: if true;
+      allow write: if request.auth != null;
+    }
+    
+    // Coaches - everyone can read, any authenticated user can write for now
+    match /coaches/{coachId} {
+      allow read: if true;
+      allow write: if request.auth != null;
+    }
+    
+    // Allow authenticated users to read/write all documents for now
+    // This is more permissive for development/testing
+    match /{document=**} {
+      allow read, write: if request.auth != null;
+    }
+  }
+}

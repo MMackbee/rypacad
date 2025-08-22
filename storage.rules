@@ -1,0 +1,38 @@
+rules_version = '2';
+service firebase.storage {
+  match /b/{bucket}/o {
+    // Allow authenticated users to read files
+    match /{allPaths=**} {
+      allow read: if request.auth != null;
+    }
+    
+    // Allow coaches and admins to upload files
+    match /coaches/{coachId}/{allPaths=**} {
+      allow write: if request.auth != null && 
+        (request.auth.token.role == 'coach' || request.auth.token.role == 'admin') &&
+        request.auth.uid == coachId;
+    }
+    
+    // Allow admins to upload to any location
+    match /{allPaths=**} {
+      allow write: if request.auth != null && request.auth.token.role == 'admin';
+    }
+    
+    // Allow users to upload profile pictures
+    match /users/{userId}/profile/{allPaths=**} {
+      allow write: if request.auth != null && request.auth.uid == userId;
+    }
+    
+    // Allow users to upload session videos/photos
+    match /sessions/{sessionId}/media/{allPaths=**} {
+      allow write: if request.auth != null && 
+        (request.auth.token.role == 'coach' || request.auth.token.role == 'admin');
+    }
+    
+    // Allow users to upload tournament materials
+    match /tournaments/{tournamentId}/materials/{allPaths=**} {
+      allow write: if request.auth != null && 
+        (request.auth.token.role == 'coach' || request.auth.token.role == 'admin');
+    }
+  }
+}

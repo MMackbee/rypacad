@@ -1,0 +1,7 @@
+{
+  "projects": {
+    "default": "rypacad",
+    "production": "rypacad",
+    "staging": "ryp-academy-app"
+  }
+}
