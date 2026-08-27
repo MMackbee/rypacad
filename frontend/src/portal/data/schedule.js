@@ -70,9 +70,13 @@ function blocksForDay(dayIndex, { friday }) {
  *   block is 3:00 PM, so nothing runs anyway.
  * @param {boolean} [opts.friday]      Enable Friday overflow blocks.
  * @param {object} [opts.capacity]     Override CAPACITY.
+ * @param {Array} [opts.extras]        Explicitly dated sessions outside the weekly
+ *   pattern — the holiday tournaments, which run on days the Academy is otherwise
+ *   closed. Each needs { date, time, type }; `special` and `label` are optional.
+ *   Extras are not subject to `closures`, which is the point of them.
  * @returns {Array} sessions, ascending by date then block order.
  */
-export function generateSeason({ start, end, closures = [], friday = false, capacity = CAPACITY }) {
+export function generateSeason({ start, end, closures = [], friday = false, capacity = CAPACITY, extras = [] }) {
   const closed = new Set(closures);
   const sessions = [];
   const cursor = new Date(start + 'T00:00:00Z');
@@ -96,7 +100,28 @@ export function generateSeason({ start, end, closures = [], friday = false, capa
     }
     cursor.setUTCDate(cursor.getUTCDate() + 1);
   }
-  return sessions;
+
+  // Holiday tournaments run on closed days, so they are added after the closure
+  // filter rather than through it. Anything outside the season bounds is dropped
+  // — a date typo should not silently extend the season.
+  extras
+    .filter((e) => e.date >= start && e.date <= end)
+    .forEach((e, i) => {
+      sessions.push({
+        id: `${e.date}-x${i}`,
+        date: e.date,
+        time: e.time,
+        type: e.type,
+        overflow: false,
+        special: true,
+        label: e.label || null,
+        capacity: e.capacity || capacity[e.type],
+        booked: 0,
+        coachId: null,
+      });
+    });
+
+  return sessions.sort((a, b) => (a.date === b.date ? a.id.localeCompare(b.id) : a.date < b.date ? -1 : 1));
 }
 
 /**

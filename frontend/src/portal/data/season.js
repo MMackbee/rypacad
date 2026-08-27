@@ -21,36 +21,75 @@ import { ROTATIONS } from '../tokens';
  * Passed to generateSeason as an argument. When the real calendar lands, this
  * constant changes and nothing else does.
  */
-export const HOLIDAY_CLOSURES_2027 = [
-  '2027-02-15', // Presidents' Day — closed to classes, tournament runs separately
+export const HOLIDAY_CLOSURES_2026_27 = [
+  // Thanksgiving Break — Nov 25 (noon) to Nov 29. The handbook closes at noon and
+  // the first block is 3:00 PM, so a half-day is a closed day here.
+  '2026-11-25', '2026-11-26', '2026-11-27', '2026-11-28', '2026-11-29',
+  // Christmas & New Year Break — Dec 23 (noon) to Jan 3.
+  '2026-12-23', '2026-12-24', '2026-12-25', '2026-12-26', '2026-12-27',
+  '2026-12-28', '2026-12-29', '2026-12-30', '2026-12-31',
+  '2027-01-01', '2027-01-02', '2027-01-03',
+  // Presidents' Day.
+  '2027-02-15',
 ];
 
 /**
- * PROVISIONAL — season bounds are a working assumption, not a published date.
- * Winter/spring stretch after the Christmas break ends Jan 3.
+ * PROVISIONAL — the tournaments that run on closed days.
+ *
+ * Three of the closures above are closed to classes but open to tournament
+ * competitors: the Post-Thanksgiving tournament (Nov 27-28), the Holiday
+ * tournament (Dec 28-29), and Presidents' Day (Feb 15). Two of those fall on
+ * weekdays, which carry no tournament block in the weekly pattern, so they
+ * cannot be expressed as a closure exception — they are explicitly dated
+ * sessions layered on top.
+ *
+ * Times are a working assumption. The Blueprint gives the dates but not the
+ * format, and a holiday tournament may well run longer than a Saturday block.
+ * Confirm before these reach a family.
  */
-export const SEASON_BOUNDS = { start: '2027-01-04', end: '2027-05-02' };
+export const HOLIDAY_TOURNAMENTS_2026_27 = [
+  { date: '2026-11-27', time: '10:30 AM', type: 'tournament', label: 'Post-Thanksgiving Tournament' },
+  { date: '2026-11-28', time: '10:30 AM', type: 'tournament', label: 'Post-Thanksgiving Tournament' },
+  { date: '2026-12-28', time: '10:30 AM', type: 'tournament', label: 'Holiday Tournament' },
+  { date: '2026-12-29', time: '10:30 AM', type: 'tournament', label: 'Holiday Tournament' },
+  { date: '2027-02-15', time: '10:30 AM', type: 'tournament', label: "Presidents' Day Tournament" },
+];
+
+/**
+ * PROVISIONAL — but anchored to the handbook rather than invented.
+ *
+ * The Annual Operating Cycle runs Season Startup in October, In-Season November
+ * through January, Wind Down in February, and teardown in March. Sessions
+ * therefore run early November to late February. The bays are disassembled and
+ * in the garage from March, so generating past that would schedule athletes into
+ * an empty room.
+ *
+ * Ends on a Saturday so the final week is whole. 25/26 ran 212 sessions across
+ * 17 weeks, which is the number to sanity-check against.
+ */
+export const SEASON_BOUNDS = { start: '2026-11-02', end: '2027-02-27' };
 
 /**
  * @param {object} [opts]
  * @param {string[]} [opts.closures]  Defaults to the provisional calendar above.
+ * @param {Array} [opts.extras]       Defaults to the holiday tournaments above.
  * @param {boolean} [opts.friday]     Friday overflow blocks, off by default.
  */
-export function buildSeason({ closures = HOLIDAY_CLOSURES_2027, friday = false } = {}) {
-  return generateSeason({ ...SEASON_BOUNDS, closures, friday });
+export function buildSeason({
+  closures = HOLIDAY_CLOSURES_2026_27,
+  extras = HOLIDAY_TOURNAMENTS_2026_27,
+  friday = false,
+} = {}) {
+  return generateSeason({ ...SEASON_BOUNDS, closures, extras, friday });
 }
 
 /**
  * Built once at module load. The generator is deterministic, so rebuilding it
- * per render would burn work to produce an identical 269-element array — and
- * hand the hook seam a new array identity every time.
+ * per render would burn work to produce an identical array — and hand the hook
+ * seam a new array identity every time.
  */
 export const SEASON = buildSeason();
 
-/**
- * The date the scaffold is "today", matching the artboards: Thursday Feb 18,
- * with the Presidents' Day closure the Monday before.
- */
 export const SCAFFOLD_TODAY = '2027-02-18';
 
 /** "2027-02-20" -> { date: "20", dow: "Sat" }, for the booking date strip. */
