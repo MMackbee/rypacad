@@ -93,7 +93,11 @@ node_modules/
 .yarn-integrity
 
 # dotenv environment variables file
+# `.env` alone does not match `.env.local` — that file was committed once
+# already, so the variants are listed explicitly.
 .env
+.env.local
+.env.*.local
 
 # dataconnect generated files
 .dataconnect
