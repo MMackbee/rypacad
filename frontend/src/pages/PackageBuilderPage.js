@@ -99,83 +99,6 @@ function PackageBuilderPage() {
           'Flexible scheduling'
         ]
       }
-    ],
-    adult: [
-      {
-        id: 'adult-starter',
-        title: 'Starter',
-        subtitle: 'Perfect for beginners',
-        description: 'Ideal for adult golfers starting their journey',
-        price: 240,
-        period: 'per month',
-        features: [
-          '4 Sessions per Month',
-          '2 Tournaments per Month',
-          'Professional coaching',
-          'Equipment provided',
-          'Progress tracking'
-        ]
-      },
-      {
-        id: 'adult-developer',
-        title: 'Developer',
-        subtitle: 'For improving players',
-        description: 'Take your game to the next level',
-        price: 456,
-        period: 'per month',
-        features: [
-          '8 Sessions per Month',
-          '3 Tournaments per Month',
-          'Advanced skill development',
-          'Video analysis',
-          'Mental game training'
-        ]
-      },
-      {
-        id: 'adult-elite',
-        title: 'Elite',
-        subtitle: 'For serious competitors',
-        description: 'Maximum training and tournament exposure',
-        price: 648,
-        period: 'per month',
-        features: [
-          '12 Sessions per Month',
-          '4 Tournaments per Month',
-          'Elite coaching',
-          'Performance analytics',
-          'Tournament preparation'
-        ]
-      },
-      {
-        id: 'adult-champion',
-        title: 'Champion',
-        subtitle: 'For tournament champions',
-        description: 'The ultimate package for championship success',
-        price: 816,
-        period: 'per month',
-        features: [
-          '16 Sessions per Month',
-          '4 Tournaments per Month',
-          'Championship coaching',
-          'Advanced analytics',
-          'Tournament prep guidance'
-        ]
-      },
-      {
-        id: 'adult-casual',
-        title: 'Casual Session',
-        subtitle: 'One-off training',
-        description: 'Perfect for trying out our coaching',
-        price: 60,
-        period: 'one-off',
-        features: [
-          'Single session',
-          'Professional coaching',
-          'Equipment provided',
-          'Skill assessment',
-          'Flexible scheduling'
-        ]
-      }
     ]
   };
 
@@ -721,12 +644,6 @@ function PackageBuilderPage() {
           onClick={() => setSelectedCategory('youth')}
         >
           Youth Programs (Ages 6-17)
-        </button>
-        <button
-          style={selectedCategory === 'adult' ? activeCategoryTabStyle : categoryTabStyle}
-          onClick={() => setSelectedCategory('adult')}
-        >
-          Adult Programs (18+)
         </button>
       </div>
 

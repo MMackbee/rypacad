@@ -64,7 +64,6 @@ This scoresheet is designed for comprehensive evaluation of the RYP Golf Academy
 **Grade: _____ / 5**
 
 **Features Tested:**
-- [ ] Age category selection (Youth/Adult)
 - [ ] Package selection (Starter/Developer/Elite/Champion)
 - [ ] Add-on selection (Fitness/Mental Performance/Tournament Prep)
 - [ ] Dynamic pricing calculations

@@ -89,7 +89,6 @@ firebase deploy --only functions:sendSMS
    - Youth Developer Package ($380)
    - Youth Elite Package ($540)
    - Youth Champion Package ($680)
-   - Adult packages (20% premium)
 
 ### **Step 5: Test Payments**
 Use these test card numbers:

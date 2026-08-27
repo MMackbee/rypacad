@@ -218,84 +218,6 @@ function ProgramListPage() {
     }
   ];
 
-  const adultPrograms = [
-    {
-      id: 'adult-starter',
-      title: 'Starter',
-      subtitle: 'Perfect for beginners',
-      description: 'Ideal for adult golfers starting their journey. Build fundamental skills and develop a love for the game.',
-      features: [
-        '4 Sessions per Month',
-        '2 Tournaments per Month',
-        'Professional coaching',
-        'Equipment provided',
-        'Progress tracking'
-      ],
-      price: '$240',
-      period: 'per month'
-    },
-    {
-      id: 'adult-developer',
-      title: 'Developer',
-      subtitle: 'For improving players',
-      description: 'Take your game to the next level with more intensive training and competitive opportunities.',
-      features: [
-        '8 Sessions per Month',
-        '3 Tournaments per Month',
-        'Advanced skill development',
-        'Video analysis',
-        'Mental game training'
-      ],
-      price: '$456',
-      period: 'per month'
-    },
-    {
-      id: 'adult-elite',
-      title: 'Elite',
-      subtitle: 'For serious competitors',
-      description: 'Maximum training and tournament exposure for adult players committed to competitive golf.',
-      features: [
-        '12 Sessions per Month',
-        '4 Tournaments per Month',
-        'Elite coaching',
-        'Performance analytics',
-        'Tournament preparation'
-      ],
-      price: '$648',
-      period: 'per month'
-    },
-    {
-      id: 'adult-champion',
-      title: 'Champion',
-      subtitle: 'For tournament champions',
-      description: 'The ultimate option for adult players aiming for championship success and competitive golf opportunities.',
-      features: [
-        '16 Sessions per Month',
-        '4 Tournaments per Month',
-        'Championship coaching',
-        'Advanced analytics',
-        'Tournament prep guidance'
-      ],
-      price: '$816',
-      period: 'per month'
-    },
-    {
-      id: 'adult-casual',
-      title: 'Casual Session',
-      subtitle: 'One-off training',
-      description: 'Perfect for trying out our coaching or for occasional training sessions.',
-      features: [
-        'Single session',
-        'Professional coaching',
-        'Equipment provided',
-        'Skill assessment',
-        'Flexible scheduling'
-      ],
-      price: '$60',
-      period: 'one-off'
-    }
-  ];
-
   const addOnPrograms = [
     {
       id: 'ryp-academy-starter',
@@ -374,7 +296,7 @@ function ProgramListPage() {
     }
   ];
 
-  const currentPrograms = selectedCategory === 'youth' ? youthPrograms : adultPrograms;
+  const currentPrograms = youthPrograms;
 
   return (
     <div style={containerStyle}>
@@ -420,12 +342,6 @@ function ProgramListPage() {
           onClick={() => setSelectedCategory('youth')}
         >
           Youth Programs (Ages 6-17)
-        </button>
-        <button
-          style={selectedCategory === 'adult' ? activeCategoryTabStyle : categoryTabStyle}
-          onClick={() => setSelectedCategory('adult')}
-        >
-          Adult Programs (18+)
         </button>
         <button
           style={selectedCategory === 'addons' ? activeCategoryTabStyle : categoryTabStyle}
@@ -515,9 +431,6 @@ function ProgramListPage() {
                 ))}
               </ul>
               <div style={priceStyle}>{program.price} {program.period}</div>
-              {selectedCategory === 'adult' && (
-                <div style={priceNoteStyle}>* 20% premium for adult programs</div>
-              )}
             </Link>
           ))}
         </div>

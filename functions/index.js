@@ -712,11 +712,7 @@ function getPackageTokens(packageId) {
     'youth-starter': { groupSessions: 4, tournaments: 2 },
     'youth-developer': { groupSessions: 8, tournaments: 3 },
     'youth-elite': { groupSessions: 12, tournaments: 4 },
-    'youth-champion': { groupSessions: 16, tournaments: 4 },
-    'adult-starter': { groupSessions: 4, tournaments: 2 },
-    'adult-developer': { groupSessions: 8, tournaments: 3 },
-    'adult-elite': { groupSessions: 12, tournaments: 4 },
-    'adult-champion': { groupSessions: 16, tournaments: 4 }
+    'youth-champion': { groupSessions: 16, tournaments: 4 }
   };
 
   return packageTokens[packageId] || {};
@@ -739,11 +735,7 @@ function getPackageData(packageId) {
     'youth-starter': { title: 'Starter', price: 200 },
     'youth-developer': { title: 'Developer', price: 380 },
     'youth-elite': { title: 'Elite', price: 540 },
-    'youth-champion': { title: 'Champion', price: 680 },
-    'adult-starter': { title: 'Adult Starter', price: 240 },
-    'adult-developer': { title: 'Adult Developer', price: 456 },
-    'adult-elite': { title: 'Adult Elite', price: 648 },
-    'adult-champion': { title: 'Adult Champion', price: 816 }
+    'youth-champion': { title: 'Champion', price: 680 }
   };
 
   return packages[packageId] || { title: 'Unknown Package', price: 0 };

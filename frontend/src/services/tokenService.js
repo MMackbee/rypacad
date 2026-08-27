@@ -207,22 +207,6 @@ export const tokenService = {
       'youth-champion': {
         groupSessions: 16,
         tournaments: 4
-      },
-      'adult-starter': {
-        groupSessions: 4,
-        tournaments: 2
-      },
-      'adult-developer': {
-        groupSessions: 8,
-        tournaments: 3
-      },
-      'adult-elite': {
-        groupSessions: 12,
-        tournaments: 4
-      },
-      'adult-champion': {
-        groupSessions: 16,
-        tournaments: 4
       }
     };
 

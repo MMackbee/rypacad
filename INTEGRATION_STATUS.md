@@ -148,10 +148,6 @@ Collections:
 - **Mental Performance**: $100/month - 2 sessions with Coach Yannick
 - **Tournament Prep**: $400 - One-time with Coach Yannick
 
-### **Adult Packages**
-- Same structure as youth packages with 20% price premium
-- Not explicitly advertised in UI
-
 ### **Discount Structure**
 - 20% discount for one add-on
 - 30% discount for both fitness and mental add-ons
