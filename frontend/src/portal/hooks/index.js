@@ -118,10 +118,13 @@ export function useBooking({ variant = 'open', today = SCAFFOLD_TODAY } = {}) {
       time: s.time,
       type: s.type,
       overflow: s.overflow,
-      name: rotationFor(s),
+      // A special (a holiday tournament) carries its own name and is not part
+      // of the Workshop / Lab / Arena rotation - the label wins over the
+      // placeholder rotation cycle.
+      name: s.label || rotationFor(s),
       // The generator assigns no coach or bay - coachId is null by design, so
       // nothing is invented here. Overflow is the one fact a block carries.
-      meta: s.overflow ? 'Friday overflow block' : null,
+      meta: s.special ? 'Holiday event · open to tournament competitors' : s.overflow ? 'Friday overflow block' : null,
       capacity:
         variant === 'full'
           ? { state: 'full', label: 'Full' }
@@ -186,7 +189,7 @@ export function useSession({ today = SCAFFOLD_TODAY, blockIndex = 1 } = {}) {
         id: session.id,
         type: session.type,
         blockLabel: `Block ${blockIndex + 1} of ${onDate.length}`,
-        name: rotationFor(session),
+        name: session.label || rotationFor(session),
         meta: `${blockRange(session.time)} · ${session.capacity} capacity · ${ROSTER.length} expected`,
         startsIn: SESSION.startsIn,
       }
