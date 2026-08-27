@@ -1,0 +1,376 @@
+import React from 'react';
+import { color, font } from './tokens';
+
+import AthleteRow, { AttendanceControls } from './components/AthleteRow';
+import BottomTabBar from './components/BottomTabBar';
+import Button from './components/Button';
+import DayGridCell, { DayGridLegend } from './components/DayGridCell';
+import Field from './components/Field';
+import MediaPlaceholder from './components/MediaPlaceholder';
+import NumericField from './components/NumericField';
+import ProgressMeter from './components/ProgressMeter';
+import SequenceLadder from './components/SequenceLadder';
+import SessionCard from './components/SessionCard';
+import StatusBadge, { CapacityPill } from './components/StatusBadge';
+import TierCard from './components/TierCard';
+import ToggleRow from './components/Toggle';
+import TypeChip from './components/TypeChip';
+import { Card } from './components/Primitives';
+
+import SignIn from './screens/SignIn';
+import Registration from './screens/Registration';
+import MySchedule from './screens/MySchedule';
+import BookSession from './screens/BookSession';
+import ParentDashboard from './screens/ParentDashboard';
+import CoachDashboard from './screens/CoachDashboard';
+import Roster from './screens/Roster';
+import DiagnosticCapture from './screens/DiagnosticCapture';
+
+import { TIERS } from './data/seed';
+
+/**
+ * Review harness. Renders every component variant and every screen state side
+ * by side so the build can be diffed against the artboards in
+ * docs/portal/design-handoff.md.
+ *
+ * Development only - this is not a portal route a member ever reaches.
+ */
+
+/** Every screen with the exact state list the handoff specifies for it. */
+export const SCREEN_STATES = [
+  { id: '01', title: 'Sign In', Screen: SignIn, role: 'public',
+    states: [['idle', 'Default'], ['loading', 'Loading'], ['invalid', 'Invalid'], ['locked', 'Locked']] },
+  { id: '02', title: 'Registration', Screen: Registration, role: 'public',
+    states: [['guardian', '1 Guardian'], ['athlete', '2 Athlete · error'], ['tier', '3 Tier'],
+             ['consent', '4 Consent'], ['submitting', 'Submitting'], ['success', 'Success']] },
+  { id: '04', title: 'My Schedule', Screen: MySchedule, role: 'athlete',
+    states: [['upcoming', 'Upcoming'], ['empty', 'Empty'], ['cancelled', 'Cancelled']] },
+  { id: '05', title: 'Book a Session', Screen: BookSession, role: 'athlete',
+    states: [['open', 'Blocks open'], ['full', 'Block full'],
+             ['limitTraining', 'Training spent'], ['limitTournament', 'Tournaments spent'],
+             ['confirmed', 'Confirmed']] },
+  { id: '08', title: 'Parent Dashboard', Screen: ParentDashboard, role: 'parent',
+    states: [['one', 'One child'], ['three', 'Three children'], ['payment', 'Payment issue']] },
+  { id: '12', title: 'Coach Dashboard', Screen: CoachDashboard, role: 'coach',
+    states: [['today', 'Sessions today'], ['concurrent', 'Concurrent'], ['none', 'None today']] },
+  { id: '13', title: 'Session Roster & Attendance', Screen: Roster, role: 'coach',
+    states: [['pre', 'Pre-session'], ['progress', 'In progress'], ['complete', 'Completed'],
+             ['noshow', 'No-shows']] },
+  { id: '14', title: 'Diagnostic Capture', Screen: DiagnosticCapture, role: 'coach',
+    states: [['empty', 'Empty'], ['uploading', 'Uploading'], ['partial', 'Partial'],
+             ['complete', 'Complete']] },
+];
+
+export default function StatesHarness() {
+  return (
+    <div style={{ background: '#080808', minHeight: '100vh', padding: '44px 48px 90px' }}>
+      <Header />
+      <ComponentGallery />
+      <ScreenGallery />
+    </div>
+  );
+}
+
+function Header() {
+  const total = SCREEN_STATES.reduce((n, s) => n + s.states.length, 0);
+  return (
+    <div style={{ marginBottom: 46, maxWidth: 820 }}>
+      <div
+        style={{
+          font: `700 13px ${font.head}`,
+          color: color.text,
+          letterSpacing: '.24em',
+          textTransform: 'uppercase',
+        }}
+      >
+        RYP Academy
+      </div>
+      <h1
+        style={{
+          font: `700 42px/1.1 ${font.head}`,
+          color: color.text,
+          letterSpacing: '-.01em',
+          margin: '14px 0 0',
+        }}
+      >
+        Portal component system and critical path
+      </h1>
+      <p style={{ font: `400 16px/1.6 ${font.body}`, color: color.textSecondary, maxWidth: 730 }}>
+        {SCREEN_STATES.length} screens, {total} states. Built against
+        docs/portal/design-handoff.md. Remaining artboards (03, 06, 07, 09, 10, 11, 15, 16, 17, 18,
+        08·L) are not in this pass.
+      </p>
+    </div>
+  );
+}
+
+function Section({ title, subtitle, children }) {
+  return (
+    <section style={{ marginBottom: 54 }}>
+      <div style={{ display: 'flex', alignItems: 'baseline', gap: 14, marginBottom: 20 }}>
+        <h2
+          style={{
+            font: `700 22px ${font.head}`,
+            color: color.text,
+            letterSpacing: '.1em',
+            textTransform: 'uppercase',
+            margin: 0,
+          }}
+        >
+          {title}
+        </h2>
+        {subtitle ? (
+          <span style={{ font: `400 14px ${font.body}`, color: color.textTertiary }}>
+            {subtitle}
+          </span>
+        ) : null}
+      </div>
+      {children}
+    </section>
+  );
+}
+
+function Spec({ label, children, width = 360 }) {
+  return (
+    <div style={{ width, flex: 'none' }}>
+      <div
+        style={{
+          font: `600 10px ${font.body}`,
+          letterSpacing: '.14em',
+          textTransform: 'uppercase',
+          color: color.textTertiary,
+          marginBottom: 11,
+        }}
+      >
+        {label}
+      </div>
+      <Card large>{children}</Card>
+    </div>
+  );
+}
+
+function ComponentGallery() {
+  return (
+    <Section title="Components" subtitle="Five core units plus six that repeat across four or more screens">
+      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 22 }}>
+        <Spec label="Session card · 5 variants">
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+            <SessionCard time="4:00" type="training" name="The Lab" meta="Sim 2 · Luke"
+              trailing={<StatusBadge tone="green">Confirmed</StatusBadge>} />
+            <SessionCard time="4:00" type="training" name="The Lab" meta="Sim 2 · Luke"
+              variant="live" trailing={<StatusBadge tone="green">Now</StatusBadge>} />
+            <SessionCard time="8:30" meridiem="AM" type="tournament" name="The Arena"
+              meta="Brock · net scoring" variant="tournament" />
+            <SessionCard time="5:00" type="cancelled" name="The Workshop" variant="cancelled" />
+            <SessionCard time="4:00" type="training" name="The Lab" meta="Sim 2" variant="full"
+              trailing={<CapacityPill state="full">Full</CapacityPill>} />
+          </div>
+        </Spec>
+
+        <Spec label="Athlete row · 4 trailing slots">
+          <div style={{ display: 'flex', flexDirection: 'column' }}>
+            <AthleteRow name="A. Nguyen" meta="Age 12 · 4th month" divider
+              trailing={<StatusBadge tone="green">On track</StatusBadge>} />
+            <AthleteRow name="M. Okonkwo" meta="3 no-shows" divider
+              trailing={<AttendanceControls value={null} onChange={() => {}} />} />
+            <AthleteRow name="R. Sandoval" meta="Contract behind" divider
+              trailing={<div style={{ width: 90 }}><ProgressMeter value={54} size="inline" /></div>} />
+            <AthleteRow name="J. Whitfield" meta="Age 13"
+              trailing={<span style={{ color: color.textTertiary }}>›</span>} />
+          </div>
+        </Spec>
+
+        <Spec label="Progress meter · never red">
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+            <MeterRow label="on track · ≥80%" value={92} />
+            <MeterRow label="behind · 40–79%" value={54} />
+            <MeterRow label="no data · <40%" value={null} />
+            <MeterRow label="hero, 10px" value={92} size="hero" />
+          </div>
+        </Spec>
+
+        <Spec label="Status badge · outline = state, dashed = pending">
+          <div style={{ display: 'flex', gap: 7, flexWrap: 'wrap' }}>
+            <StatusBadge tone="green">Confirmed</StatusBadge>
+            <StatusBadge tone="yellow">Outstanding</StatusBadge>
+            <StatusBadge tone="red">Restricted</StatusBadge>
+            <StatusBadge tone="neutral">Neutral</StatusBadge>
+            <StatusBadge tone="neutral" dashed>Pending</StatusBadge>
+            <CapacityPill state="available">2 left</CapacityPill>
+            <CapacityPill state="capped">Capped</CapacityPill>
+          </div>
+          <div style={{ font: `400 11px/1.5 ${font.body}`, color: color.textTertiary, marginTop: 12 }}>
+            Solid fill is reachable only through Button and CapacityPill — both tappable. See the
+            flag-02 note in StatusBadge.js.
+          </div>
+        </Spec>
+
+        <Spec label="Tier card · renders from data" width={380}>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 11 }}>
+            <TierCard tier={TIERS[0]} />
+            <TierCard tier={TIERS[2]} />
+          </div>
+        </Spec>
+
+        <Spec label="Type chip · not optional on a session card">
+          <div style={{ display: 'flex', gap: 7, flexWrap: 'wrap' }}>
+            {['training', 'tournament', 'cancelled', 'makeup', 'diagnostic'].map((t) => (
+              <TypeChip key={t} type={t} />
+            ))}
+          </div>
+        </Spec>
+
+        <Spec label="Attendance controls · 64×48, 7px gap">
+          <AttendanceStates />
+        </Spec>
+
+        <Spec label="Buttons">
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+            <Button>Primary</Button>
+            <Button variant="secondary" style={{ boxShadow: 'none' }}>Secondary</Button>
+            <Button variant="caution" style={{ boxShadow: 'none' }}>Close block · 2 unmarked</Button>
+            <Button variant="danger">Update payment method</Button>
+            <Button loading>Signing in</Button>
+            <Button disabled>Disabled</Button>
+          </div>
+        </Spec>
+
+        <Spec label="Field · inline validation on blur">
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+            <Field label="Email" value="dana@email.com" onChange={() => {}} />
+            <Field label="Date of birth" value="" placeholder="MM / DD / YYYY" onChange={() => {}}
+              error="Date of birth is required — it determines U13 vs U18 eligibility." />
+          </div>
+        </Spec>
+
+        <Spec label="Numeric field · unit outside the input">
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 9 }}>
+            <NumericField label="Clubhead speed" unit="mph" value="98" onChange={() => {}} />
+            <NumericField label="Hip rotation" unit="°" value="42" onChange={() => {}} />
+            <NumericField label="3 ft made" unit="/10" value="8" onChange={() => {}} />
+          </div>
+        </Spec>
+
+        <Spec label="Day grid cell · closed ≠ missed">
+          <div style={{ display: 'flex', gap: 6, marginBottom: 14 }}>
+            <DayGridCell state="logged" day={16} />
+            <DayGridCell state="logged" day={17} />
+            <DayGridCell state="open" day={18} />
+            <DayGridCell state="closed" day={15} />
+            <DayGridCell state="future" day={19} />
+          </div>
+          <DayGridLegend />
+        </Spec>
+
+        <Spec label="Toggle · 42×25, row is the tap target">
+          <ToggleStates />
+        </Spec>
+
+        <Spec label="Sequence ladder · graded escalation">
+          <SequenceLadder
+            current={2}
+            rungs={[
+              { label: 'Invoice issued', detail: 'Feb 12', step: 0 },
+              { label: 'Retry 1', detail: 'Feb 15 · card declined', step: 1 },
+              { label: 'Retry 2', detail: 'Feb 22 · next attempt', step: 2 },
+              { label: 'Retry 3', detail: 'Feb 25', step: 3 },
+              { label: 'Booking restricted', detail: 'Feb 26', step: 4 },
+            ]}
+          />
+        </Spec>
+
+        <Spec label="Media placeholder · marks real content">
+          <MediaPlaceholder height={96} caption="SWING VIDEO — 4 angles" />
+        </Spec>
+
+        <Spec label="Bottom tab bar · 4 items per role">
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+            {['athlete', 'parent', 'coach'].map((role) => (
+              <BottomTabBar key={role} role={role} active={undefined} onChange={() => {}} />
+            ))}
+          </div>
+        </Spec>
+      </div>
+    </Section>
+  );
+}
+
+function MeterRow({ label, value, size = 'card' }) {
+  return (
+    <div>
+      <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 6 }}>
+        <span style={{ font: `400 11px ${font.body}`, color: color.textTertiary }}>{label}</span>
+        <span style={{ font: `600 11px ${font.body}`, color: color.textSecondary }}>
+          {value == null ? '—' : `${value}%`}
+        </span>
+      </div>
+      <ProgressMeter value={value} size={size} />
+    </div>
+  );
+}
+
+function AttendanceStates() {
+  const [a, setA] = React.useState(null);
+  const [b, setB] = React.useState('in');
+  const [c, setC] = React.useState('out');
+
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+      <Labelled label="Unmarked"><AttendanceControls value={a} onChange={setA} /></Labelled>
+      <Labelled label="Marked in"><AttendanceControls value={b} onChange={setB} /></Labelled>
+      <Labelled label="Marked out"><AttendanceControls value={c} onChange={setC} /></Labelled>
+      <div style={{ font: `400 11px/1.5 ${font.body}`, color: color.textTertiary }}>
+        Three states, not two. Tapping the active button clears it.
+      </div>
+    </div>
+  );
+}
+
+function ToggleStates() {
+  const [on, setOn] = React.useState(true);
+  const [off, setOff] = React.useState(false);
+  return (
+    <div>
+      <ToggleRow label="Schedule changes" description="Email and SMS" checked={on} onChange={setOn} />
+      <ToggleRow label="Rewards" description="Email only" checked={off} onChange={setOff} />
+    </div>
+  );
+}
+
+function Labelled({ label, children }) {
+  return (
+    <div style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
+      <span style={{ width: 92, font: `400 11px ${font.body}`, color: color.textTertiary }}>
+        {label}
+      </span>
+      {children}
+    </div>
+  );
+}
+
+function ScreenGallery() {
+  return (
+    <>
+      {SCREEN_STATES.map(({ id, title, Screen, role, states }) => (
+        <Section key={id} title={`${id} · ${title}`} subtitle={`${role} · ${states.length} states`}>
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 42 }}>
+            {states.map(([variant, label]) => (
+              <div key={variant}>
+                <div
+                  style={{
+                    font: `500 12px ${font.body}`,
+                    color: color.textTertiary,
+                    marginBottom: 11,
+                  }}
+                >
+                  {label}
+                </div>
+                <Screen variant={variant} />
+              </div>
+            ))}
+          </div>
+        </Section>
+      ))}
+    </>
+  );
+}

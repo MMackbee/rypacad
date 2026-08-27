@@ -1,7 +1,7 @@
 // src/App.js
 
 import React from 'react';
-import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-dom';
+import { BrowserRouter as Router, Routes, Route, Navigate, useLocation } from 'react-router-dom';
 import { UserProvider } from './contexts/UserContext';
 import ProtectedRoute from './components/ProtectedRoute';
 import ErrorBoundary from './components/ErrorBoundary';
@@ -25,6 +25,18 @@ import SMSTestPage from './pages/SMSTestPage';
 import UnauthorizedPage from './pages/UnauthorizedPage';
 import DrivingTestPage from './pages/DrivingTestPage';
 import RegistrationPage from './pages/RegistrationPage';
+import PortalRoutes from './portal/PortalRoutes';
+
+/**
+ * The portal ships its own chrome — a bottom tab bar per role, and a header
+ * inside each 390pt frame. Rendering the desktop Navbar above it would give a
+ * phone screen two navigations, so it is suppressed under /portal.
+ */
+function ChromeNavbar() {
+  const { pathname } = useLocation();
+  if (pathname === '/portal' || pathname.startsWith('/portal/')) return null;
+  return <Navbar />;
+}
 
 function App() {
   return (
@@ -32,8 +44,11 @@ function App() {
       <UserProvider>
         <Router>
           <div className="App">
-            <Navbar />
+            <ChromeNavbar />
             <Routes>
+              {/* Member portal — the Phase 1 scaffold. See docs/portal/design-handoff.md. */}
+              <Route path="/portal/*" element={<PortalRoutes />} />
+
               <Route path="/" element={<Navigate to="/login" replace />} />
               <Route path="/login" element={<LoginPage />} />
               <Route path="/register" element={<RegistrationPage />} />
