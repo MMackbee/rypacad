@@ -7,24 +7,16 @@ import ProtectedRoute from './components/ProtectedRoute';
 import ErrorBoundary from './components/ErrorBoundary';
 import Navbar from './components/Navbar';
 import LoginPage from './pages/LoginPage';
-import DashboardPage from './pages/DashboardPage';
 import AdminDashboardPage from './pages/AdminDashboardPage';
-import CoachDashboardPage from './pages/CoachDashboardPage';
-import ParentDashboard from './components/ParentDashboard';
-import ProgramListPage from './pages/ProgramListPage';
-import ProgramDetailPage from './pages/ProgramDetailPage';
-import BookingPage from './pages/BookingPage';
 import AdminWaitlistPage from './pages/AdminWaitlistPage';
 import ProfilePage from './pages/ProfilePage';
 import VideosPage from './pages/VideosPage';
-import MyBookingsPage from './pages/MyBookingsPage';
 import SessionsPage from './pages/SessionsPage';
 import MentalPerformancePage from './pages/MentalPerformancePage';
 import DataUploadPage from './pages/DataUploadPage';
 import SMSTestPage from './pages/SMSTestPage';
 import UnauthorizedPage from './pages/UnauthorizedPage';
 import DrivingTestPage from './pages/DrivingTestPage';
-import RegistrationPage from './pages/RegistrationPage';
 import PortalRoutes from './portal/PortalRoutes';
 
 /**
@@ -51,61 +43,38 @@ function App() {
 
               <Route path="/" element={<Navigate to="/login" replace />} />
               <Route path="/login" element={<LoginPage />} />
-              <Route path="/register" element={<RegistrationPage />} />
               <Route path="/unauthorized" element={<UnauthorizedPage />} />
-              
+
+              {/*
+                The 2025 enrollment, booking, dashboard and programs routes are
+                gone — the portal supersedes them. /programs in particular was
+                live, serving Starter / Developer / Elite / Champion at
+                $200-$680: programs that no longer exist, at prices that were
+                never 26/27 pricing.
+
+                Redirected rather than dropped, so a bookmark or an emailed link
+                lands somewhere sensible instead of on a blank router miss.
+              */}
+              <Route path="/register" element={<Navigate to="/portal/register" replace />} />
+              <Route path="/dashboard" element={<Navigate to="/portal/schedule" replace />} />
+              <Route path="/coach" element={<Navigate to="/portal/coach" replace />} />
+              <Route path="/parent" element={<Navigate to="/portal/family" replace />} />
+              <Route path="/booking" element={<Navigate to="/portal/book" replace />} />
+              <Route path="/my-bookings" element={<Navigate to="/portal/schedule" replace />} />
+              <Route path="/programs" element={<Navigate to="/portal/register" replace />} />
+              <Route path="/programs/:id" element={<Navigate to="/portal/register" replace />} />
+
               {/* Protected Routes */}
-              <Route 
-                path="/dashboard" 
-                element={
-                  <ProtectedRoute>
-                    <DashboardPage />
-                  </ProtectedRoute>
-                } 
-              />
-              
-              <Route 
-                path="/admin" 
+              <Route
+                path="/admin"
                 element={
                   <ProtectedRoute requiredRole="admin">
                     <AdminDashboardPage />
                   </ProtectedRoute>
-                } 
+                }
               />
-              
-              <Route 
-                path="/coach" 
-                element={
-                  <ProtectedRoute requiredRole="coach">
-                    <CoachDashboardPage />
-                  </ProtectedRoute>
-                } 
-              />
-              
-              <Route 
-                path="/parent" 
-                element={
-                  <ProtectedRoute>
-                    <ParentDashboard />
-                  </ProtectedRoute>
-                } 
-              />
-              
-              <Route path="/programs" element={<ProgramListPage />} />
-              <Route path="/programs/:id" element={<ProgramDetailPage />} />
-              
-              {/* Removed legacy Package Builder route; Programs is the hub */}
-              
-              <Route 
-                path="/booking" 
-                element={
-                  <ProtectedRoute>
-                    <BookingPage />
-                  </ProtectedRoute>
-                } 
-              />
-              
-              <Route 
+
+              <Route
                 path="/profile" 
                 element={
                   <ProtectedRoute>
@@ -123,17 +92,8 @@ function App() {
                 } 
               />
               
-              <Route 
-                path="/my-bookings" 
-                element={
-                  <ProtectedRoute>
-                    <MyBookingsPage />
-                  </ProtectedRoute>
-                } 
-              />
-              
-              <Route 
-                path="/driving-test" 
+              <Route
+                path="/driving-test"
                 element={
                   <ProtectedRoute>
                     <DrivingTestPage />
