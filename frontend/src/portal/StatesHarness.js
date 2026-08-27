@@ -12,7 +12,8 @@ import ProgressMeter from './components/ProgressMeter';
 import SequenceLadder from './components/SequenceLadder';
 import SessionCard from './components/SessionCard';
 import StatusBadge, { CapacityPill } from './components/StatusBadge';
-import TierCard from './components/TierCard';
+import PackageCard from './components/PackageCard';
+import AllowancePools from './components/AllowancePools';
 import ToggleRow from './components/Toggle';
 import TypeChip from './components/TypeChip';
 import { Card } from './components/Primitives';
@@ -26,7 +27,8 @@ import CoachDashboard from './screens/CoachDashboard';
 import Roster from './screens/Roster';
 import DiagnosticCapture from './screens/DiagnosticCapture';
 
-import { TIERS } from './data/seed';
+import { ALLOWANCE, ALLOWANCE_NO_TOURNAMENTS } from './data/seed';
+import { ELITE_TIERS, FITNESS_PACKAGES, GOLF_PACKAGES } from './data/packages';
 
 /**
  * Review harness. Renders every component variant and every screen state side
@@ -41,7 +43,7 @@ export const SCREEN_STATES = [
   { id: '01', title: 'Sign In', Screen: SignIn, role: 'public',
     states: [['idle', 'Default'], ['loading', 'Loading'], ['invalid', 'Invalid'], ['locked', 'Locked']] },
   { id: '02', title: 'Registration', Screen: Registration, role: 'public',
-    states: [['guardian', '1 Guardian'], ['athlete', '2 Athlete · error'], ['tier', '3 Tier'],
+    states: [['guardian', '1 Guardian'], ['athlete', '2 Athlete · error'], ['tier', '3 Package'],
              ['consent', '4 Consent'], ['submitting', 'Submitting'], ['success', 'Success']] },
   { id: '04', title: 'My Schedule', Screen: MySchedule, role: 'athlete',
     states: [['upcoming', 'Upcoming'], ['empty', 'Empty'], ['cancelled', 'Cancelled']] },
@@ -205,10 +207,21 @@ function ComponentGallery() {
           </div>
         </Spec>
 
-        <Spec label="Tier card · renders from data" width={380}>
+        <Spec label="Package card · confirmed pricing" width={380}>
           <div style={{ display: 'flex', flexDirection: 'column', gap: 11 }}>
-            <TierCard tier={TIERS[0]} />
-            <TierCard tier={TIERS[2]} />
+            <PackageCard pkg={GOLF_PACKAGES[1]} onSelect={() => {}} />
+            <PackageCard pkg={FITNESS_PACKAGES[1]} onSelect={() => {}} selected />
+            <PackageCard pkg={ELITE_TIERS[0]} emphasised onSelect={() => {}} />
+          </div>
+        </Spec>
+
+        <Spec label="Allowance pools · two, never one">
+          <AllowancePools allowance={ALLOWANCE} />
+          <div style={{ height: 1, background: color.rule, margin: '16px 0' }} />
+          <AllowancePools allowance={ALLOWANCE_NO_TOURNAMENTS} />
+          <div style={{ font: `400 11px/1.5 ${font.body}`, color: color.textTertiary, marginTop: 14 }}>
+            Training and tournament entitlements do not substitute for each other, so a spent
+            pool never implies the other is spent.
           </div>
         </Spec>
 

@@ -3,14 +3,13 @@ import { BLOCK_RANGE_LABEL, color, font, radius, tint } from '../tokens';
 import Button, { Spinner } from '../components/Button';
 import Field, { SelectField } from '../components/Field';
 import PhoneFrame from '../components/PhoneFrame';
-import TierCard from '../components/TierCard';
-import { BackLink, Banner, Body, Card, ScreenTitle, Tick } from '../components/Primitives';
-import { useTiers } from '../hooks';
+import PackageStep from './PackageStep';
+import { BackLink, Body, Card, ScreenTitle, Tick } from '../components/Primitives';
 import { CONSENTS, RELATIONSHIPS } from '../data/seed';
 
 /**
  * 02 · Registration - public, multi-step.
- * States: Step 1 Guardian, Step 2 Athlete with validation error, Step 3 Tier,
+ * States: Step 1 Guardian, Step 2 Athlete with validation error, Step 3 Package,
  * Step 4 Consent, Submitting, Success.
  *
  * @param {'guardian'|'athlete'|'tier'|'consent'|'submitting'|'success'} variant
@@ -20,7 +19,7 @@ const STEP_INDEX = { guardian: 0, athlete: 1, tier: 2, consent: 3, submitting: 3
 const STEP_TITLES = [
   'Guardian contact',
   'Athlete details',
-  'Membership tier',
+  'Choose a package',
   'Consent and waiver',
 ];
 
@@ -39,7 +38,7 @@ export default function Registration({ variant = 'guardian', bare = false, onBac
       <div style={{ padding: '20px 22px 24px', position: 'relative' }}>
         {step === 0 ? <GuardianStep /> : null}
         {step === 1 ? <AthleteStep /> : null}
-        {step === 2 ? <TierStep /> : null}
+        {step === 2 ? <PackageStep /> : null}
         {step === 3 ? <ConsentStep /> : null}
       </div>
 
@@ -187,42 +186,9 @@ function AthleteStep() {
   );
 }
 
-function TierStep() {
-  const { data: tiers } = useTiers();
-  const [selected, setSelected] = useState(null);
-
-  return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 13 }}>
-      <Banner tone="yellow" title="Tiers not decided">
-        Names, count, and prices are all open. This list renders from data — {tiers?.length ?? 0}{' '}
-        shown, one of them unlimited.
-      </Banner>
-
-      {(tiers ?? []).map((tier) => (
-        <TierCard
-          key={tier.id}
-          tier={tier}
-          selected={selected === tier.id}
-          onSelect={() => setSelected(tier.id)}
-        />
-      ))}
-
-      <div
-        style={{
-          border: `1px dashed ${color.border}`,
-          borderRadius: radius.card,
-          padding: '14px 12px',
-          textAlign: 'center',
-          font: `400 11px/1.6 ${font.mono}`,
-          color: color.captionText,
-        }}
-      >
-        TIER SLOT — rendered from data. No hardcoded name, count, or price; add or remove a tier
-        without touching the layout.
-      </div>
-    </div>
-  );
-}
+// Step 3 is PackageStep — see ./PackageStep.js. The rev-2 "TIERS NOT DECIDED"
+// banner, the dashed `$ ——` slots and the "TIER SLOT" marker are gone with the
+// pricing being confirmed.
 
 function ConsentStep() {
   const [checked, setChecked] = useState(() =>

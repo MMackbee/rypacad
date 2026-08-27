@@ -28,7 +28,6 @@ import {
   SCHEDULE,
   CANCELLED_SESSION,
   SLOTS,
-  TIERS,
   ALLOWANCE,
   ALLOWANCE_NO_TRAINING,
   ALLOWANCE_NO_TOURNAMENTS,
@@ -99,11 +98,6 @@ export function useCoachDay({ variant = 'today' } = {}) {
 /** GET /coach/roster/:sessionId - the session header only; marks live in useRoster. */
 export function useSession() {
   return useSeedResource(SESSION);
-}
-
-/** GET /tiers - never hardcoded into a screen. Exactly one is unlimited. */
-export function useTiers() {
-  return useSeedResource(TIERS);
 }
 
 /** GET /athletes/:id/diagnostics (14). */

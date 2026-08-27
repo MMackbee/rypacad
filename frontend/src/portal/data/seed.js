@@ -18,52 +18,6 @@ import { GOLF_PACKAGES, makeAllowance } from './packages';
 
 export const TODAY = 'Thursday, Feb 18';
 
-/**
- * Flag 06: tier names, count, prices and inclusions are all open. The only
- * decided fact is that exactly one tier is unlimited. Nothing here is a proposed
- * name - "Tier A/B/C" are deliberately placeholder labels, and the inclusions
- * are the Blueprint's real comparison axes (days per week, coach access, licence
- * access, application requirement) rather than invented benefits.
- */
-export const TIERS = [
-  {
-    id: 'tier-a',
-    name: 'Tier A',
-    season: 'Limited access',
-    rows: [
-      'Booking limit per billing cycle',
-      'Unlimited makeup rescheduling',
-      'Fitness logging and Commitment Contract',
-    ],
-    foot: null,
-    unlimited: false,
-  },
-  {
-    id: 'tier-b',
-    name: 'Tier B',
-    season: 'Limited access',
-    rows: [
-      'Higher booking limit',
-      'Saturday tournament eligibility',
-      'Fitness logging and Commitment Contract',
-    ],
-    foot: null,
-    unlimited: false,
-  },
-  {
-    id: 'tier-c',
-    name: 'Tier C',
-    season: 'Unlimited access',
-    rows: [
-      'Books any open block, any date',
-      'Saturday tournament eligibility',
-      'Priority on Friday overflow blocks',
-    ],
-    foot: 'One tier grants unlimited access - decided. Which tier, and what it is called, is not.',
-    unlimited: true,
-  },
-];
-
 /** Three separate decisions. Media release is optional and never bundled. */
 export const CONSENTS = [
   {
