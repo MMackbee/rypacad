@@ -7,7 +7,7 @@ import StatusBadge from '../components/StatusBadge';
 import TypeChip from '../components/TypeChip';
 import { BackLink, ScreenTitle } from '../components/Primitives';
 import useRoster from '../hooks/useRoster';
-import { SESSION } from '../data/seed';
+import { useSession } from '../hooks';
 
 /**
  * 13 · Session Roster & Attendance - coach.
@@ -26,12 +26,15 @@ import { SESSION } from '../data/seed';
  */
 export default function Roster({ variant = 'pre', bare = false, onBack }) {
   const { roster, marks, mark, counts, sessionState } = useRoster({ variant });
+  // The block comes out of the generated season, so the header matches what the
+  // schedule says is actually running rather than a hand-written constant.
+  const { data: session } = useSession();
 
   const started = sessionState !== 'pre';
   const completed = sessionState === 'completed';
 
   const statusPill = {
-    pre: { tone: 'neutral', label: SESSION.startsIn },
+    pre: { tone: 'neutral', label: session?.startsIn },
     progress: { tone: 'green', label: 'In progress' },
     completed:
       counts.out > 0
@@ -51,15 +54,15 @@ export default function Roster({ variant = 'pre', bare = false, onBack }) {
           </div>
 
           <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
-            <TypeChip type={SESSION.type} />
+            <TypeChip type={session?.type} />
             <span style={{ font: `400 11px ${font.body}`, color: color.textTertiary }}>
-              {SESSION.blockLabel}
+              {session?.blockLabel}
             </span>
           </div>
 
-          <ScreenTitle size={21}>{SESSION.name}</ScreenTitle>
+          <ScreenTitle size={21}>{session?.name}</ScreenTitle>
           <div style={{ font: `400 12px ${font.body}`, color: color.textSecondary, marginTop: 5 }}>
-            {SESSION.meta}
+            {session?.meta}
           </div>
 
           <CounterRow counts={counts} started={started} />

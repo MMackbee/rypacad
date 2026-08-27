@@ -24,13 +24,17 @@ import { poolFor } from '../data/packages';
  */
 export default function BookSession({ variant = 'open', bare = false, onBack }) {
   const { data } = useBooking({ variant });
-  const [selected, setSelected] = useState('18');
-
-  if (variant === 'confirmed') return <Confirmed bare={bare} onBack={onBack} />;
+  const [selected, setSelected] = useState(null);
 
   const dates = data?.dates ?? [];
-  const slots = data?.slots ?? [];
   const allowance = data?.allowance;
+
+  // Default to the first day the season actually has sessions on, rather than a
+  // hardcoded date that a closure could silently empty.
+  const activeDate = selected ?? dates[0]?.iso ?? null;
+  const slots = (data?.slots ?? []).filter((s) => s.date === activeDate);
+
+  if (variant === 'confirmed') return <Confirmed bare={bare} onBack={onBack} />;
 
   return (
     <PhoneFrame
@@ -47,7 +51,7 @@ export default function BookSession({ variant = 'open', bare = false, onBack }) 
           <AllowanceBanner allowance={allowance} />
         </div>
 
-        <DateStrip dates={dates} selected={selected} onSelect={setSelected} />
+        <DateStrip dates={dates} selected={activeDate} onSelect={setSelected} />
 
         <div style={{ padding: '0 22px', display: 'flex', flexDirection: 'column', gap: 10 }}>
           {slots.map((slot) => {
@@ -150,23 +154,22 @@ function DateStrip({ dates, selected, onSelect }) {
       }}
     >
       {dates.map((d) => {
-        const on = d.date === selected;
+        const on = d.iso === selected;
         return (
           <button
-            key={d.date}
+            key={d.iso}
             type="button"
-            disabled={!d.available}
-            onClick={() => onSelect(d.date)}
+            onClick={() => onSelect(d.iso)}
             style={{
               width: 50,
               flex: 'none',
               padding: '9px 0',
               borderRadius: radius.counter,
               background: on ? color.primary : 'transparent',
-              border: on ? 'none' : `1px solid ${d.available ? color.border : color.toggleOff}`,
+              border: on ? 'none' : `1px solid ${color.border}`,
               boxShadow: on ? glow.datePill : 'none',
-              color: on ? '#000' : d.available ? color.text : color.faintText,
-              cursor: d.available ? 'pointer' : 'default',
+              color: on ? '#000' : color.text,
+              cursor: 'pointer',
             }}
           >
             <div

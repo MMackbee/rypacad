@@ -122,60 +122,6 @@ export const CANCELLED_SESSION = {
   },
 };
 
-/** Screen 05. Slots are generated against the one BLOCKS constant. */
-export const BOOKING_DATES = [
-  { date: '18', dow: 'Thu', available: true },
-  { date: '19', dow: 'Fri', available: true },
-  { date: '20', dow: 'Sat', available: true },
-  { date: '22', dow: 'Mon', available: true },
-  { date: '23', dow: 'Tue', available: true },
-  { date: '24', dow: 'Wed', available: false },
-  { date: '25', dow: 'Thu', available: true },
-];
-
-export const SLOTS = [
-  {
-    id: 'b1',
-    time: BLOCKS[0],
-    type: 'training',
-    name: 'The Workshop',
-    meta: 'Sim 1 · Luke',
-    capacity: { state: 'available', label: '6 left' },
-  },
-  {
-    id: 'b2',
-    time: BLOCKS[1],
-    type: 'training',
-    name: 'The Lab',
-    meta: 'Sim 2 · Luke',
-    capacity: { state: 'full', label: 'Full' },
-    note:
-      'Join the waitlist - you are notified if a spot opens, and unlimited makeups still apply.',
-  },
-  {
-    id: 'b3',
-    time: BLOCKS[2],
-    type: 'training',
-    name: 'The Arena',
-    meta: 'Bay 4 · Brock',
-    capacity: { state: 'available', label: '2 left' },
-  },
-  /**
-   * A tournament block in the same list as training blocks — this is the case
-   * the one-pool model could not express. It spends a different entitlement, so
-   * it stays bookable when training is exhausted and blocked when tournaments
-   * are, independently of everything above it.
-   */
-  {
-    id: 'b4',
-    time: '10:30 AM',
-    type: 'tournament',
-    name: 'The Arena',
-    meta: 'Sat Feb 20 · Brock · net scoring',
-    capacity: { state: 'available', label: '9 left' },
-  },
-];
-
 /**
  * The athlete's allowance — two pools, not one.
  *
