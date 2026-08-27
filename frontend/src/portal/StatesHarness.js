@@ -26,6 +26,15 @@ import ParentDashboard from './screens/ParentDashboard';
 import CoachDashboard from './screens/CoachDashboard';
 import Roster from './screens/Roster';
 import DiagnosticCapture from './screens/DiagnosticCapture';
+import AthleteDashboard from './screens/AthleteDashboard';
+import PracticeDNA from './screens/PracticeDNA';
+import CommitmentContract from './screens/CommitmentContract';
+import AthleteDetail from './screens/AthleteDetail';
+import Billing from './screens/Billing';
+import NotificationPreferences from './screens/NotificationPreferences';
+import AdminDashboard from './screens/AdminDashboard';
+import StaffRoles from './screens/StaffRoles';
+import NewsletterComposer from './screens/NewsletterComposer';
 
 import { ALLOWANCE, ALLOWANCE_NO_TOURNAMENTS } from './data/seed';
 import { ELITE_TIERS, FITNESS_PACKAGES, GOLF_PACKAGES } from './data/packages';
@@ -45,14 +54,28 @@ export const SCREEN_STATES = [
   { id: '02', title: 'Registration', Screen: Registration, role: 'public',
     states: [['guardian', '1 Guardian'], ['athlete', '2 Athlete · error'], ['tier', '3 Package'],
              ['consent', '4 Consent'], ['submitting', 'Submitting'], ['success', 'Success']] },
+  { id: '03', title: 'Athlete Dashboard', Screen: AthleteDashboard, role: 'athlete',
+    states: [['populated', 'Populated'], ['new', 'New athlete'], ['empty', 'No sessions']] },
   { id: '04', title: 'My Schedule', Screen: MySchedule, role: 'athlete',
     states: [['upcoming', 'Upcoming'], ['empty', 'Empty'], ['cancelled', 'Cancelled']] },
   { id: '05', title: 'Book a Session', Screen: BookSession, role: 'athlete',
     states: [['open', 'Blocks open'], ['full', 'Block full'],
              ['limitTraining', 'Training spent'], ['limitTournament', 'Tournaments spent'],
              ['confirmed', 'Confirmed']] },
+  { id: '06', title: 'Practice DNA', Screen: PracticeDNA, role: 'athlete',
+    states: [['complete', 'Complete'], ['partial', 'Partial'], ['pending', 'Pending']] },
+  { id: '07', title: 'Commitment Contract', Screen: CommitmentContract, role: 'athlete',
+    states: [['ontrack', 'On track'], ['behind', 'Behind'], ['complete', 'Month complete'],
+             ['none', 'No contract']] },
   { id: '08', title: 'Parent Dashboard', Screen: ParentDashboard, role: 'parent',
     states: [['one', 'One child'], ['three', 'Three children'], ['payment', 'Payment issue']] },
+  { id: '09', title: 'Athlete Detail', Screen: AthleteDetail, role: 'parent',
+    states: [['populated', 'Populated'], ['limited', 'Limited data']] },
+  { id: '10', title: 'Billing & Subscription', Screen: Billing, role: 'parent',
+    states: [['active', 'Active'], ['retry1', 'Retry 1'], ['retry3', 'Retry 3'],
+             ['restricted', 'Restricted'], ['updating', 'Updating card']] },
+  { id: '11', title: 'Notification Preferences', Screen: NotificationPreferences, role: 'parent',
+    states: [['default', 'Default'], ['saved', 'Saved']] },
   { id: '12', title: 'Coach Dashboard', Screen: CoachDashboard, role: 'coach',
     states: [['today', 'Sessions today'], ['concurrent', 'Concurrent'], ['none', 'None today']] },
   { id: '13', title: 'Session Roster & Attendance', Screen: Roster, role: 'coach',
@@ -61,6 +84,13 @@ export const SCREEN_STATES = [
   { id: '14', title: 'Diagnostic Capture', Screen: DiagnosticCapture, role: 'coach',
     states: [['empty', 'Empty'], ['uploading', 'Uploading'], ['partial', 'Partial'],
              ['complete', 'Complete']] },
+  { id: '15', title: 'Admin Dashboard', Screen: AdminDashboard, role: 'ops admin',
+    states: [['populated', 'Populated'], ['filtered', 'Filtered']] },
+  { id: '16', title: 'Staff & Roles', Screen: StaffRoles, role: 'owner',
+    states: [['populated', 'Populated'], ['add', 'Add staff']] },
+  { id: '17', title: 'Newsletter Composer', Screen: NewsletterComposer, role: 'admin',
+    states: [['missing', 'Sections missing'], ['ready', 'All sections in'],
+             ['scheduled', 'Scheduled'], ['sent', 'Sent']] },
 ];
 
 export default function StatesHarness() {
@@ -99,8 +129,7 @@ function Header() {
       </h1>
       <p style={{ font: `400 16px/1.6 ${font.body}`, color: color.textSecondary, maxWidth: 730 }}>
         {SCREEN_STATES.length} screens, {total} states. Built against
-        docs/portal/design-handoff.md. Remaining artboards (03, 06, 07, 09, 10, 11, 15, 16, 17, 18,
-        08·L) are not in this pass.
+        docs/portal/design-handoff.md. Screens 08·L and 18 are additions outside the brief’s seventeen and are not in this pass.
       </p>
     </div>
   );

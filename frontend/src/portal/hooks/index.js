@@ -41,6 +41,48 @@ import {
   sessionsForDate,
   upcomingDates,
 } from '../data/season';
+import {
+  ATHLETE,
+  NEXT_SESSION,
+  CONTRACT_SUMMARY,
+  CODE_OF_GRIT,
+  ONBOARDING,
+  DNA_MODULES,
+  DNA_STATES,
+  DNA_SUMMARY,
+  CONTRACT_MONTH,
+  CONTRACT_TIERS,
+  CONTRACT_STATES,
+  CONTRACT_TOTAL_DAYS,
+  contractGrid,
+} from '../data/athlete';
+import {
+  ATHLETE_DETAIL,
+  CONTRACT_HISTORY,
+  LIMITED_DATA_CHECKLIST,
+  DUNNING_LADDER,
+  BILLING_STATES,
+  MEMBERSHIP,
+  PAYMENT_METHOD,
+  INVOICES,
+  NOTIFICATION_CATEGORIES,
+  NOTIFICATION_NOTE,
+} from '../data/parent';
+import {
+  OUTSTANDING,
+  ADMIN_METRICS,
+  ENROLLMENT_BY_PACKAGE,
+  BLOCK_FILL,
+  TIER_FILTERS,
+  STAFF,
+  STAFF_ROLES,
+  AUDIT_NOTE,
+  SCREENING_NOTE,
+  NEWSLETTER_SECTIONS,
+  NEWSLETTER_LANDED,
+  NEWSLETTER_ISSUE,
+  NEWSLETTER_STATES,
+} from '../data/admin';
 
 export { default as useSeedResource } from './useSeedResource';
 export { default as useAuthSession } from './useAuthSession';
@@ -166,5 +208,113 @@ export function useDiagnostic() {
   return useSeedResource({
     athlete: DIAGNOSTIC_ATHLETE,
     sections: DIAGNOSTIC_SECTIONS,
+  });
+}
+
+/** GET /athletes/:id + next session + contract summary (03). */
+export function useAthleteDashboard({ variant = 'populated' } = {}) {
+  return useSeedResource({
+    athlete: ATHLETE,
+    nextSession: variant === 'populated' ? NEXT_SESSION : null,
+    contract: variant === 'new' ? null : CONTRACT_SUMMARY,
+    onboarding: variant === 'new' ? ONBOARDING : null,
+    codeOfGrit: CODE_OF_GRIT,
+  });
+}
+
+/**
+ * GET /athletes/:id/diagnostics (06).
+ *
+ * Returns raw captured measurements and nothing else. No score, grade, letter
+ * or percentile is derived anywhere in this path — the Blueprint measures an
+ * athlete against their own future progress, not a model swing, and a rating
+ * computed here would leak onto the screen.
+ */
+export function usePracticeDNA({ variant = 'complete' } = {}) {
+  const captured = DNA_STATES[variant] ?? DNA_STATES.complete;
+  return useSeedResource({
+    summary: DNA_SUMMARY[variant] ?? DNA_SUMMARY.complete,
+    modules: DNA_MODULES.map((m) => ({ ...m, captured: captured.includes(m.id) })),
+  });
+}
+
+/** GET + POST /athletes/:id/commitment-contract (07). */
+export function useContract({ variant = 'ontrack' } = {}) {
+  const hasContract = variant !== 'none';
+  return useSeedResource({
+    month: CONTRACT_MONTH,
+    totalDays: CONTRACT_TOTAL_DAYS,
+    tiers: CONTRACT_TIERS,
+    state: hasContract ? CONTRACT_STATES[variant] : null,
+    grid: hasContract ? contractGrid(variant) : [],
+    tierMinutes: 45,
+  });
+}
+
+/** GET /athletes/:id (09) — parent view of one linked athlete. */
+export function useAthleteDetail({ variant = 'populated' } = {}) {
+  const full = variant === 'populated';
+  return useSeedResource({
+    athlete: ATHLETE_DETAIL,
+    history: full ? CONTRACT_HISTORY : [],
+    checklist: full ? [] : LIMITED_DATA_CHECKLIST,
+    hasEnoughData: full,
+  });
+}
+
+/** GET /billing/:householdId + /invoices (10). */
+export function useBilling({ variant = 'active' } = {}) {
+  const state = BILLING_STATES[variant] ?? BILLING_STATES.active;
+  return useSeedResource({
+    state,
+    ladder: DUNNING_LADDER,
+    membership: MEMBERSHIP,
+    paymentMethod: PAYMENT_METHOD,
+    invoices: INVOICES,
+    declining: variant !== 'active',
+  });
+}
+
+/** GET/PUT /guardians/:id/notification-preferences (11). */
+export function useNotificationPrefs({ variant = 'default' } = {}) {
+  return useSeedResource({
+    categories: NOTIFICATION_CATEGORIES,
+    note: NOTIFICATION_NOTE,
+    saved: variant === 'saved',
+  });
+}
+
+/** GET /admin/fitness-completion + enrollment + block fill (15). */
+export function useAdminDashboard({ variant = 'populated' } = {}) {
+  const filtered = variant === 'filtered';
+  return useSeedResource({
+    outstanding: filtered ? OUTSTANDING.filter((o) => o.tone === 'red') : OUTSTANDING,
+    metrics: ADMIN_METRICS,
+    enrollment: ENROLLMENT_BY_PACKAGE,
+    blockFill: BLOCK_FILL,
+    filter: filtered ? TIER_FILTERS[1] : TIER_FILTERS[0],
+  });
+}
+
+/** GET/POST /admin/staff-accounts (16) — owner only. */
+export function useStaff({ variant = 'populated' } = {}) {
+  return useSeedResource({
+    staff: STAFF,
+    roles: STAFF_ROLES,
+    auditNote: AUDIT_NOTE,
+    screeningNote: SCREENING_NOTE,
+    adding: variant === 'add',
+  });
+}
+
+/** GET /newsletter/issues/:id (17). */
+export function useNewsletter({ variant = 'missing' } = {}) {
+  const landed = NEWSLETTER_LANDED[variant] ?? [];
+  return useSeedResource({
+    issue: NEWSLETTER_ISSUE,
+    state: NEWSLETTER_STATES[variant] ?? NEWSLETTER_STATES.missing,
+    sections: NEWSLETTER_SECTIONS.map((s) => ({ ...s, landed: landed.includes(s.id) })),
+    outstandingCount: NEWSLETTER_SECTIONS.length - landed.length,
+    status: variant,
   });
 }
