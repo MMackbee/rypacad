@@ -1,0 +1,9 @@
+{
+  "name": "rypacad",
+  "private": true,
+  "description": "Repo-level scripts for the Firestore emulator workflow. The app lives in frontend/, functions in functions/ — this package intentionally has no dependencies.",
+  "scripts": {
+    "emulator": "npx firebase-tools emulators:start --only firestore,auth",
+    "seed:emulator": "node --env-file=scripts/emulator.env scripts/seed-firestore.mjs"
+  }
+}

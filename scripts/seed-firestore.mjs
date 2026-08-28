@@ -1,0 +1,287 @@
+#!/usr/bin/env node
+/**
+ * Seed the Firestore EMULATOR with the portal's demo data.
+ *
+ *   node scripts/seed-firestore.mjs --dry-run     # print what would be written
+ *   npm run seed:emulator                          # seed a running emulator
+ *
+ * What it seeds (data contract v1, docs/portal/TEAM.md):
+ *   packages    — the 2026-27 catalogue from frontend/src/portal/data/packages.js
+ *   sessions    — the generated season (buildSeason() from season.js)
+ *   households  — the Whitfield demo household from seed.js
+ *   athletes    — the three Whitfield athletes with their packageIds
+ *   users       — one parent, one athlete, one coach, one owner
+ *
+ * Two hard guarantees:
+ *   1. NEVER touches production. Writes require FIRESTORE_EMULATOR_HOST, and the
+ *      host must be local (localhost/127.0.0.1/::1/0.0.0.0) or the script exits.
+ *   2. NEVER retypes generated or scaffold data. The season generator and the
+ *      catalogue are bundled from frontend source with esbuild and executed —
+ *      if season.js changes, the seed changes with it.
+ *
+ * Policy: no dollar amounts anywhere in seed data — the catalogue's `price`
+ * field is deliberately stripped before writing (see DATA-MODEL.md). Stripe
+ * fields are ids only, and no real ids exist for a demo household, so they are
+ * seeded null. No medical documents are seeded: athletes/{id}/private/medical
+ * exists for rules to scope, and inventing medical info for minors would
+ * violate data minimization.
+ *
+ * The script is dependency-free (Node >= 20: global fetch, --env-file). It
+ * talks to the emulator over the Firestore REST API, so nothing needs
+ * installing at the repo root. esbuild is fetched by npx per the repo pattern.
+ */
+
+import { execSync } from 'node:child_process';
+import { createRequire } from 'node:module';
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+
+const DRY_RUN = process.argv.includes('--dry-run');
+const PROJECT_ID = 'rypacad';
+
+const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
+const dataDir = path.join(repoRoot, 'frontend', 'src', 'portal', 'data');
+
+// ---------------------------------------------------------------------------
+// Emulator guard — the only network target this script will ever accept.
+// ---------------------------------------------------------------------------
+
+const LOCAL_HOSTS = new Set(['localhost', '127.0.0.1', '0.0.0.0', '::1', '[::1]']);
+
+function emulatorHost() {
+  const host = process.env.FIRESTORE_EMULATOR_HOST;
+  if (!host) {
+    console.error(
+      'FIRESTORE_EMULATOR_HOST is not set.\n' +
+        'This script only writes to the Firestore emulator, never to production.\n' +
+        'Start the emulator (npm run emulator), then either:\n' +
+        '  npm run seed:emulator                (sets the variable via scripts/emulator.env)\n' +
+        "  $env:FIRESTORE_EMULATOR_HOST='127.0.0.1:8080'; node scripts/seed-firestore.mjs\n" +
+        'Or pass --dry-run to print what would be written without an emulator.'
+    );
+    process.exit(1);
+  }
+  const name = host.replace(/:\d+$/, '');
+  if (!LOCAL_HOSTS.has(name)) {
+    console.error(
+      `Refusing to seed: FIRESTORE_EMULATOR_HOST="${host}" is not a local address.\n` +
+        'This script never writes to a remote Firestore.'
+    );
+    process.exit(1);
+  }
+  return host;
+}
+
+// ---------------------------------------------------------------------------
+// Bundle the frontend data modules so they run under Node. Repo pattern:
+//   npx esbuild <entry> --bundle --format=cjs --platform=node --outfile=<tmp>
+// The entry re-exports exactly the symbols the seed needs; esbuild follows the
+// import graph (schedule.js, tokens.js, packages.js, calendar.js -> date-fns).
+// ---------------------------------------------------------------------------
+
+function loadPortalData() {
+  const tmp = mkdtempSync(path.join(tmpdir(), 'ryp-seed-'));
+  const entry = path.join(tmp, 'entry.js');
+  const outfile = path.join(tmp, 'portal-data.cjs');
+  const fwd = (p) => p.split(path.sep).join('/');
+
+  writeFileSync(
+    entry,
+    [
+      `export { buildSeason, SEASON_BOUNDS } from '${fwd(path.join(dataDir, 'season.js'))}';`,
+      `export { GOLF_PACKAGES, DROP_IN, FITNESS_PACKAGES, ELITE_TIERS } from '${fwd(path.join(dataDir, 'packages.js'))}';`,
+      `export { HOUSEHOLD, COACH } from '${fwd(path.join(dataDir, 'seed.js'))}';`,
+    ].join('\n')
+  );
+
+  try {
+    execSync(
+      `npx esbuild "${entry}" --bundle --format=cjs --platform=node --outfile="${outfile}" --log-level=warning`,
+      { stdio: ['ignore', 'inherit', 'inherit'], cwd: repoRoot }
+    );
+  } catch {
+    console.error(
+      '\nesbuild bundling failed. If the error above mentions an unresolved package\n' +
+        '(e.g. date-fns), install the frontend dependencies first:  cd frontend && npm install\n' +
+        '(or point NODE_PATH at an installed frontend/node_modules).'
+    );
+    process.exit(1);
+  }
+
+  const data = createRequire(import.meta.url)(outfile);
+  rmSync(tmp, { recursive: true, force: true });
+  return data;
+}
+
+// ---------------------------------------------------------------------------
+// Build the documents. Shapes follow the data contract v1 in TEAM.md; the
+// field-by-field spec is docs/portal/DATA-MODEL.md.
+// ---------------------------------------------------------------------------
+
+function buildDocs(portal) {
+  const { buildSeason, GOLF_PACKAGES, DROP_IN, FITNESS_PACKAGES, ELITE_TIERS, HOUSEHOLD, COACH } = portal;
+
+  // packages — price is stripped (no dollar amounts in seed data, policy) and
+  // id becomes the doc id rather than a duplicated field.
+  const packages = new Map();
+  const fields = ({ id, price, ...rest }) => rest;
+  for (const p of GOLF_PACKAGES) packages.set(p.id, { ...fields(p), kind: 'golf' });
+  packages.set(DROP_IN.id, { ...fields(DROP_IN), kind: 'drop-in' });
+  for (const p of FITNESS_PACKAGES) packages.set(p.id, { ...fields(p), kind: 'fitness' });
+  for (const p of ELITE_TIERS) packages.set(p.id, { ...fields(p), kind: 'elite' });
+
+  // sessions — straight from the generator; ids stay the generator's
+  // `YYYY-MM-DD-<block>`. Normalized only where the generator omits a field on
+  // regular sessions (special/label exist on extras alone).
+  const sessions = new Map();
+  for (const s of buildSeason()) {
+    const { id, ...fields } = s;
+    sessions.set(id, {
+      date: fields.date,
+      time: fields.time,
+      type: fields.type,
+      capacity: fields.capacity,
+      booked: fields.booked,
+      coachId: fields.coachId ?? null,
+      label: fields.label ?? null,
+      special: !!fields.special,
+      overflow: !!fields.overflow,
+    });
+  }
+
+  // households — guardian contact from the scaffold (dana@email.com is the
+  // parent email seed.js uses). Stripe ids are null: ids only, and a demo
+  // household has none.
+  const householdId = 'whitfield';
+  const households = new Map([
+    [
+      householdId,
+      {
+        name: HOUSEHOLD.name,
+        guardian: { name: 'Dana', email: 'dana@email.com', phone: null },
+        stripeCustomerId: null,
+        stripeSubscriptionId: null,
+      },
+    ],
+  ]);
+
+  // athletes — from seed.js HOUSEHOLD. contractMinutes is parsed from the
+  // scaffold's ageLine ("45 min tier"), not retyped. dob is null: the scaffold
+  // gives ages only and this repo does not invent birthdays. Jordan is on
+  // Luke's roster in the scaffold ("J. Whitfield"), so Jordan carries the
+  // coach assignment; the others are unassigned.
+  const coachUid = 'coach-luke';
+  const athletes = new Map();
+  for (const child of HOUSEHOLD.children) {
+    const minutes = child.ageLine && child.ageLine.match(/(\d+)\s*min tier/);
+    athletes.set(child.id, {
+      name: `${child.name} Whitfield`,
+      dob: null,
+      householdId,
+      packageId: child.packageId,
+      contractMinutes: minutes ? Number(minutes[1]) : null,
+      coachId: child.id === 'jordan' ? coachUid : null,
+    });
+  }
+  // athletes/{id}/private/medical is deliberately NOT seeded — see header.
+
+  // users — one per portal role in this sprint's scope. In production these
+  // doc ids are Firebase Auth uids; the emulator seed uses readable slugs.
+  const users = new Map([
+    ['parent-dana', { role: 'parent', householdId, athleteId: null, staff: false, displayName: 'Dana', email: 'dana@email.com' }],
+    ['athlete-jordan', { role: 'athlete', athleteId: 'jordan', householdId: null, staff: false, displayName: 'Jordan Whitfield', email: null }],
+    [coachUid, { role: 'coach', athleteId: null, householdId: null, staff: true, displayName: COACH.name, email: null }],
+    ['owner', { role: 'owner', athleteId: null, householdId: null, staff: true, displayName: null, email: null }],
+  ]);
+
+  return { packages, sessions, households, athletes, users };
+}
+
+// ---------------------------------------------------------------------------
+// Firestore REST encoding — keeps the script dependency-free.
+// ---------------------------------------------------------------------------
+
+function fsValue(v) {
+  if (v === null || v === undefined) return { nullValue: null };
+  if (typeof v === 'boolean') return { booleanValue: v };
+  if (typeof v === 'number') return Number.isInteger(v) ? { integerValue: String(v) } : { doubleValue: v };
+  if (typeof v === 'string') return { stringValue: v };
+  if (v instanceof Date) return { timestampValue: v.toISOString() };
+  if (Array.isArray(v)) return { arrayValue: { values: v.map(fsValue) } };
+  if (typeof v === 'object') return { mapValue: { fields: fsFields(v) } };
+  throw new Error(`Unsupported value type: ${typeof v}`);
+}
+
+function fsFields(obj) {
+  return Object.fromEntries(Object.entries(obj).map(([k, v]) => [k, fsValue(v)]));
+}
+
+async function commit(host, writes) {
+  const url = `http://${host}/v1/projects/${PROJECT_ID}/databases/(default)/documents:commit`;
+  const res = await fetch(url, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Authorization: 'Bearer owner' },
+    body: JSON.stringify({ writes }),
+  });
+  if (!res.ok) throw new Error(`Emulator commit failed (${res.status}): ${await res.text()}`);
+}
+
+// ---------------------------------------------------------------------------
+// Main
+// ---------------------------------------------------------------------------
+
+async function main() {
+  const host = DRY_RUN ? null : emulatorHost();
+
+  console.log(`Bundling portal data modules with esbuild...`);
+  const portal = loadPortalData();
+  const collections = buildDocs(portal);
+
+  const sessionDocs = [...collections.sessions.values()];
+  const trainingCount = sessionDocs.filter((s) => s.type === 'training').length;
+  const tournamentCount = sessionDocs.filter((s) => s.type === 'tournament').length;
+  console.log(
+    `Season ${portal.SEASON_BOUNDS.start} -> ${portal.SEASON_BOUNDS.end}: ` +
+      `${sessionDocs.length} sessions (${trainingCount} training, ${tournamentCount} tournament)\n`
+  );
+
+  let total = 0;
+  for (const [name, docs] of Object.entries(collections)) {
+    total += docs.size;
+    console.log(`${name}: ${docs.size} doc${docs.size === 1 ? '' : 's'}`);
+    const [sampleId, sampleDoc] = docs.entries().next().value;
+    console.log(`  sample ${name}/${sampleId}: ${JSON.stringify(sampleDoc)}`);
+  }
+  console.log(`total: ${total} docs across ${Object.keys(collections).length} collections`);
+
+  if (DRY_RUN) {
+    console.log('\n[dry-run] nothing written. Set FIRESTORE_EMULATOR_HOST and re-run to seed the emulator.');
+    return;
+  }
+
+  console.log(`\nWriting to Firestore emulator at ${host} (project ${PROJECT_ID})...`);
+  const writes = [];
+  for (const [name, docs] of Object.entries(collections)) {
+    for (const [id, doc] of docs) {
+      writes.push({
+        update: {
+          name: `projects/${PROJECT_ID}/databases/(default)/documents/${name}/${id}`,
+          fields: fsFields(doc),
+        },
+      });
+    }
+  }
+  const BATCH = 400; // Firestore commit limit is 500 writes
+  for (let i = 0; i < writes.length; i += BATCH) {
+    await commit(host, writes.slice(i, i + BATCH));
+    console.log(`  committed ${Math.min(i + BATCH, writes.length)}/${writes.length}`);
+  }
+  console.log(`Done: ${writes.length} documents seeded.`);
+}
+
+main().catch((err) => {
+  console.error(err.message || err);
+  process.exit(1);
+});
