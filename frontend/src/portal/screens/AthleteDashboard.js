@@ -7,7 +7,8 @@ import MediaPlaceholder, { Avatar } from '../components/MediaPlaceholder';
 import PhoneFrame from '../components/PhoneFrame';
 import ProgressMeter from '../components/ProgressMeter';
 import TypeChip from '../components/TypeChip';
-import { Body, Card, ScreenTitle, SectionLabel, Tick } from '../components/Primitives';
+import SkeletonCard, { SkeletonBar } from '../components/Skeleton';
+import { Body, Card, ErrorNotice, ScreenTitle, SectionLabel, Tick } from '../components/Primitives';
 import { useAthleteDashboard } from '../hooks';
 
 /**
@@ -15,9 +16,10 @@ import { useAthleteDashboard } from '../hooks';
  * States: Populated, New athlete, No upcoming sessions.
  *
  * @param {'populated'|'new'|'empty'} variant
+ * @param {() => void} [onRetry]  Re-fetch after a load failure.
  */
-export default function AthleteDashboard({ variant = 'populated', bare = false, onLog, onBook }) {
-  const { data } = useAthleteDashboard({ variant });
+export default function AthleteDashboard({ variant = 'populated', bare = false, onLog, onBook, onRetry }) {
+  const { data, loading, error } = useAthleteDashboard({ variant });
   const athlete = data?.athlete;
   const next = data?.nextSession;
   const contract = data?.contract;
@@ -28,16 +30,35 @@ export default function AthleteDashboard({ variant = 'populated', bare = false, 
       header={
         <div style={{ padding: '8px 22px 16px', display: 'flex', alignItems: 'center', gap: 12 }}>
           <div style={{ flex: 1, minWidth: 0 }}>
-            <div style={{ font: `400 12px ${font.body}`, color: color.textTertiary }}>
-              {athlete?.date}
-            </div>
-            <ScreenTitle style={{ marginTop: 3 }}>{athlete?.name}</ScreenTitle>
+            {loading ? (
+              // Sized like the date line + name so the header holds its height.
+              <>
+                <SkeletonBar width={96} height={12} />
+                <SkeletonBar width={150} height={24} style={{ marginTop: 8 }} />
+              </>
+            ) : (
+              <>
+                <div style={{ font: `400 12px ${font.body}`, color: color.textTertiary }}>
+                  {athlete?.date}
+                </div>
+                <ScreenTitle style={{ marginTop: 3 }}>{athlete?.name}</ScreenTitle>
+              </>
+            )}
           </div>
           <Avatar size={40} />
         </div>
       }
       footer={<BottomTabBar role="athlete" active="home" />}
     >
+      {loading ? (
+        <DashboardSkeleton />
+      ) : error ? (
+        <div style={{ padding: '0 22px 24px' }}>
+          <ErrorNotice title="Dashboard didn't load" onRetry={onRetry}>
+            Your dashboard didn't load. Check your connection and try again.
+          </ErrorNotice>
+        </div>
+      ) : (
       <div style={{ padding: '0 22px 24px', display: 'flex', flexDirection: 'column', gap: 12 }}>
         {variant === 'new' ? <StartHere onBook={onBook} /> : null}
         {variant === 'new' ? <OnboardingChecklist items={data?.onboarding ?? []} /> : null}
@@ -67,7 +88,75 @@ export default function AthleteDashboard({ variant = 'populated', bare = false, 
 
         <CodeOfGrit items={data?.codeOfGrit ?? []} />
       </div>
+      )}
     </PhoneFrame>
+  );
+}
+
+/**
+ * The loading layout in the loaded layout's geometry: the next-session card,
+ * the contract card, the allowance card, then the quick-action pair. No
+ * spinner — see components/Skeleton.js.
+ */
+function DashboardSkeleton() {
+  return (
+    <div
+      role="status"
+      aria-label="Loading dashboard"
+      style={{ padding: '0 22px 24px', display: 'flex', flexDirection: 'column', gap: 12 }}
+    >
+      {/* Next session: label row, chip, 20px name, three meta columns. */}
+      <SkeletonCard large>
+        <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+          <SkeletonBar tone="raised" width={118} height={10} />
+          <SkeletonBar tone="raised" width={56} height={10} />
+        </div>
+        <SkeletonBar tone="raised" width={72} height={17} r={5} style={{ marginTop: 12 }} />
+        <SkeletonBar tone="raised" width="58%" height={17} style={{ marginTop: 10 }} />
+        <div style={{ display: 'flex', marginTop: 16 }}>
+          {[0, 1, 2].map((i) => (
+            <div key={i} style={{ flex: 1 }}>
+              <SkeletonBar tone="raised" width={30} height={9} />
+              <SkeletonBar tone="raised" width={54} height={12} style={{ marginTop: 6 }} />
+            </div>
+          ))}
+        </div>
+      </SkeletonCard>
+
+      {/* Contract: label row, the 40px number, meter, a line of copy. */}
+      <SkeletonCard large>
+        <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+          <SkeletonBar tone="raised" width={140} height={10} />
+          <SkeletonBar tone="raised" width={48} height={10} />
+        </div>
+        <div style={{ display: 'flex', alignItems: 'flex-end', gap: 10, marginTop: 12 }}>
+          <SkeletonBar tone="raised" width={46} height={34} />
+          <SkeletonBar tone="raised" width={130} height={12} style={{ marginBottom: 4 }} />
+        </div>
+        <SkeletonBar tone="raised" height={5} r={3} style={{ marginTop: 14 }} />
+        <SkeletonBar tone="raised" width="86%" height={9} style={{ marginTop: 14 }} />
+      </SkeletonCard>
+
+      {/* Allowance: label + the two pools. */}
+      <SkeletonCard>
+        <SkeletonBar tone="raised" width={132} height={10} />
+        {[0, 1].map((i) => (
+          <div key={i} style={{ marginTop: i ? 11 : 15 }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 5 }}>
+              <SkeletonBar tone="raised" width={64} height={11} />
+              <SkeletonBar tone="raised" width={90} height={11} />
+            </div>
+            <SkeletonBar tone="raised" height={6} r={3} />
+          </div>
+        ))}
+      </SkeletonCard>
+
+      {/* Quick actions: two 78px tiles. */}
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
+        <SkeletonCard height={78} />
+        <SkeletonCard height={78} />
+      </div>
+    </div>
   );
 }
 

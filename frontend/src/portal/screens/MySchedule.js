@@ -7,7 +7,8 @@ import PhoneFrame from '../components/PhoneFrame';
 import SessionCard from '../components/SessionCard';
 import StatusBadge from '../components/StatusBadge';
 import AllowancePools from '../components/AllowancePools';
-import { Banner, Body, Card, ScreenTitle, SectionLabel } from '../components/Primitives';
+import SkeletonCard, { SkeletonBar, SkeletonSessionCard } from '../components/Skeleton';
+import { Banner, Body, Card, ErrorNotice, ScreenTitle, SectionLabel } from '../components/Primitives';
 import { useSchedule } from '../hooks';
 
 /**
@@ -15,9 +16,10 @@ import { useSchedule } from '../hooks';
  * States: Upcoming, Empty, Cancelled session shown.
  *
  * @param {'upcoming'|'empty'|'cancelled'} variant
+ * @param {() => void} [onRetry]  Re-fetch after a load failure.
  */
-export default function MySchedule({ variant = 'upcoming', bare = false, onBook }) {
-  const { data } = useSchedule({ variant });
+export default function MySchedule({ variant = 'upcoming', bare = false, onBook, onRetry }) {
+  const { data, loading, error } = useSchedule({ variant });
   const [tab, setTab] = useState('upcoming');
 
   const past = tab === 'past';
@@ -46,8 +48,35 @@ export default function MySchedule({ variant = 'upcoming', bare = false, onBook 
       footer={<BottomTabBar role="athlete" active="schedule" />}
     >
       <div style={{ padding: '0 22px 24px', display: 'flex', flexDirection: 'column', gap: 18 }}>
+        {/* The tabs are local UI state, not fetched data — they stay live (and
+            hold their place) while the list loads or fails. */}
         <Segmented value={tab} onChange={setTab} />
 
+        {loading ? (
+          <ScheduleSkeleton />
+        ) : error ? (
+          <ErrorNotice title="Schedule didn't load" onRetry={onRetry}>
+            Your schedule didn't load — your bookings are unaffected. Check your connection and
+            try again.
+          </ErrorNotice>
+        ) : (
+          <ScheduleBody
+            past={past}
+            sessions={sessions}
+            cancelled={cancelled}
+            allowance={allowance}
+            days={days}
+            onBook={onBook}
+          />
+        )}
+      </div>
+    </PhoneFrame>
+  );
+}
+
+function ScheduleBody({ past, sessions, cancelled, allowance, days, onBook }) {
+  return (
+    <>
         {/*
           Two numbers, never one. Training and tournament entitlements are
           separate pools, so a single "N bookings left" would be wrong for every
@@ -125,8 +154,47 @@ export default function MySchedule({ variant = 'upcoming', bare = false, onBook 
             ))}
           </div>
         ))}
+    </>
+  );
+}
+
+/**
+ * The loading layout in the loaded layout's geometry: allowance card, a day
+ * label, then session cards on 04's default 52px gutter. No spinner — see
+ * components/Skeleton.js.
+ */
+function ScheduleSkeleton() {
+  return (
+    <div
+      role="status"
+      aria-label="Loading schedule"
+      style={{ display: 'flex', flexDirection: 'column', gap: 18 }}
+    >
+      <SkeletonCard>
+        <SkeletonBar tone="raised" width={132} height={10} />
+        {[0, 1].map((i) => (
+          <div key={i} style={{ marginTop: i ? 11 : 15 }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 5 }}>
+              <SkeletonBar tone="raised" width={64} height={11} />
+              <SkeletonBar tone="raised" width={90} height={11} />
+            </div>
+            <SkeletonBar tone="raised" height={6} r={3} />
+          </div>
+        ))}
+        <SkeletonBar tone="raised" width="80%" height={9} style={{ marginTop: 14 }} />
+      </SkeletonCard>
+
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 9 }}>
+        <SkeletonBar width={104} height={10} />
+        <SkeletonSessionCard />
+        <SkeletonSessionCard />
       </div>
-    </PhoneFrame>
+
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 9 }}>
+        <SkeletonBar width={82} height={10} />
+        <SkeletonSessionCard />
+      </div>
+    </div>
   );
 }
 

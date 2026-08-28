@@ -62,6 +62,12 @@ export const tint = {
   redStrong: 'rgba(255,68,68,.10)',
   redBorder: 'rgba(255,68,68,.45)',
   overlay: 'rgba(0,0,0,.55)',
+  /**
+   * The loading CTA fill, verbatim from the handoff (02's submitting step:
+   * "CTA becomes rgba(0,175,81,.45) with a spinner"). Strong enough over the
+   * black frame to keep the black label and spinner legible.
+   */
+  greenLoading: 'rgba(0,175,81,.45)',
 };
 
 export const font = {

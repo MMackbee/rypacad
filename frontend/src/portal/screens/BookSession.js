@@ -1,12 +1,13 @@
-import React, { useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { color, font, glow, radius, tint } from '../tokens';
 import BottomTabBar from '../components/BottomTabBar';
 import Button from '../components/Button';
 import PhoneFrame from '../components/PhoneFrame';
 import SessionCard from '../components/SessionCard';
+import SkeletonCard, { SkeletonBar, SkeletonSessionCard } from '../components/Skeleton';
 import { CapacityPill } from '../components/StatusBadge';
 import AllowancePools, { SpendNote } from '../components/AllowancePools';
-import { Banner, Body, Card, ScreenTitle, Tick } from '../components/Primitives';
+import { Banner, Body, Card, ErrorNotice, ScreenTitle, Tick } from '../components/Primitives';
 import { useBooking } from '../hooks';
 // poolFor is domain logic, not response data - the pure helpers in packages.js
 // stay importable; it is the data that has to travel through the hook seam.
@@ -22,13 +23,54 @@ import { poolFor } from '../data/packages';
  * so "limit reached" is never a property of the screen, only of one pool.
  *
  * @param {'open'|'full'|'limitTraining'|'limitTournament'|'confirmed'} variant
+ * @param {(slot) => Promise} [onBook]
+ *   The live reservation call. While it is pending the tapped block shows the
+ *   handoff's button-level pattern (spinner + "Reserving…"); a rejection
+ *   renders inline with its reason and the block stays selectable. With no
+ *   onBook the tap confirms instantly — exactly the pre-live behavior.
+ * @param {() => void} [onRetry]  Re-fetch after a load failure.
  */
-export default function BookSession({ variant = 'open', bare = false, onBack }) {
-  const { data } = useBooking({ variant });
+export default function BookSession({ variant = 'open', bare = false, onBack, onBook, onRetry }) {
+  const { data, loading, error } = useBooking({ variant });
   const [selected, setSelected] = useState(null);
   // The slot the athlete just booked. Persistence is the API's job later; the
   // flow - tap a block, land on the confirmation - has to work now.
   const [booked, setBooked] = useState(null);
+  // The in-flight reservation (slot id) and the last attempt's failure.
+  const [reserving, setReserving] = useState(null);
+  const [failure, setFailure] = useState(null);
+
+  // A booking can resolve after the athlete has navigated away.
+  const live = useRef(true);
+  useEffect(() => () => { live.current = false; }, []);
+
+  const book = (slot) => {
+    if (reserving) return;
+    if (!onBook) {
+      setBooked(slot);
+      return;
+    }
+    setFailure(null);
+    setReserving(slot.id);
+    Promise.resolve()
+      .then(() => onBook(slot))
+      .then(() => {
+        if (!live.current) return;
+        setReserving(null);
+        setBooked(slot);
+      })
+      .catch((err) => {
+        if (!live.current) return;
+        setReserving(null);
+        // The reason travels as-is when it is human text; anything else (a
+        // stack, an SDK code object) falls back to plain copy rather than
+        // leaking onto the screen.
+        setFailure({
+          slotId: slot.id,
+          reason: err && typeof err.message === 'string' && err.message ? err.message : null,
+        });
+      });
+  };
 
   const dates = data?.dates ?? [];
   const allowance = data?.allowance;
@@ -69,58 +111,87 @@ export default function BookSession({ variant = 'open', bare = false, onBack }) 
       footer={<BottomTabBar role="athlete" active="schedule" />}
     >
       <div style={{ padding: '0 0 24px', display: 'flex', flexDirection: 'column', gap: 18 }}>
-        <div style={{ padding: '0 22px', display: 'flex', flexDirection: 'column', gap: 12 }}>
-          <AllowanceBanner allowance={allowance} />
-          {data?.seasonNote ? (
-            <Banner tone="green" title="Season">
-              {data.seasonNote}
-            </Banner>
-          ) : null}
-        </div>
+        {loading ? (
+          <BookingSkeleton />
+        ) : error ? (
+          <div style={{ padding: '0 22px' }}>
+            <ErrorNotice title="Open blocks didn't load" onRetry={onRetry}>
+              The schedule didn't load, and nothing was reserved. Check your connection and try
+              again.
+            </ErrorNotice>
+          </div>
+        ) : (
+          <>
+            <div style={{ padding: '0 22px', display: 'flex', flexDirection: 'column', gap: 12 }}>
+              <AllowanceBanner allowance={allowance} />
+              {data?.seasonNote ? (
+                <Banner tone="green" title="Season">
+                  {data.seasonNote}
+                </Banner>
+              ) : null}
+            </div>
 
-        <DateStrip dates={dates} selected={activeDate} onSelect={setSelected} />
+            <DateStrip dates={dates} selected={activeDate} onSelect={setSelected} />
 
-        <div style={{ padding: '0 22px', display: 'flex', flexDirection: 'column', gap: 10 }}>
-          {slots.map((slot) => {
-            const [time, meridiem] = slot.time.split(' ');
-            const isFull = slot.capacity.state === 'full';
-            const pool = poolFor(slot.type);
-            // Two independent reasons a slot cannot be booked, and they need
-            // different copy: the block itself is full, or the athlete has
-            // nothing left in the pool this block would spend.
-            const poolSpent = allowance ? allowance[pool].left === 0 : false;
+            <div style={{ padding: '0 22px', display: 'flex', flexDirection: 'column', gap: 10 }}>
+              {failure ? (
+                <Banner tone="red" title="Booking didn't go through">
+                  {failure.reason || 'The reservation could not be completed.'} Nothing was
+                  reserved — tap the block to try again.
+                </Banner>
+              ) : null}
+              {slots.map((slot) => {
+                const [time, meridiem] = slot.time.split(' ');
+                const isFull = slot.capacity.state === 'full';
+                const pool = poolFor(slot.type);
+                // Two independent reasons a slot cannot be booked, and they need
+                // different copy: the block itself is full, or the athlete has
+                // nothing left in the pool this block would spend.
+                const poolSpent = allowance ? allowance[pool].left === 0 : false;
+                const pending = reserving === slot.id;
 
-            return (
-              <SessionCard
-                key={slot.id}
-                time={time}
-                meridiem={meridiem}
-                type={slot.type}
-                name={slot.name}
-                meta={slot.meta}
-                variant={isFull || poolSpent ? 'full' : 'default'}
-                gutter={54}
-                ruleHeight={36}
-                // Tapping a bookable block books it; full or pool-spent blocks
-                // stay inert rather than failing at a later submit.
-                onClick={isFull || poolSpent ? undefined : () => setBooked(slot)}
-                spendNote={<SpendNote pool={pool} allowance={allowance} />}
-                trailing={
-                  <CapacityPill state={isFull ? 'full' : poolSpent ? 'capped' : slot.capacity.state}>
-                    {isFull ? 'Full' : poolSpent ? 'No entries' : slot.capacity.label}
-                  </CapacityPill>
-                }
-                footnote={
-                  isFull
-                    ? slot.note
-                    : poolSpent
-                    ? `Your ${pool === 'tournaments' ? 'tournament entries' : 'training sessions'} reset ${allowance.resetsOn}. This block has space — it is your allowance that is spent, not the session.`
-                    : null
-                }
-              />
-            );
-          })}
-        </div>
+                return (
+                  <SessionCard
+                    key={slot.id}
+                    time={time}
+                    meridiem={meridiem}
+                    type={slot.type}
+                    name={slot.name}
+                    meta={slot.meta}
+                    variant={isFull || poolSpent ? 'full' : 'default'}
+                    gutter={54}
+                    ruleHeight={36}
+                    // Tapping a bookable block books it; full or pool-spent blocks
+                    // stay inert rather than failing at a later submit. While one
+                    // reservation is in flight nothing else is tappable — two
+                    // concurrent bookings is not a state this screen can honor.
+                    onClick={isFull || poolSpent || reserving ? undefined : () => book(slot)}
+                    spendNote={<SpendNote pool={pool} allowance={allowance} />}
+                    action={
+                      pending ? (
+                        <Button loading height={46} style={{ font: `600 14px ${font.body}` }}>
+                          Reserving…
+                        </Button>
+                      ) : null
+                    }
+                    trailing={
+                      <CapacityPill state={isFull ? 'full' : poolSpent ? 'capped' : slot.capacity.state}>
+                        {isFull ? 'Full' : poolSpent ? 'No entries' : slot.capacity.label}
+                      </CapacityPill>
+                    }
+                    footnote={
+                      isFull
+                        ? slot.note
+                        : poolSpent
+                        ? `Your ${pool === 'tournaments' ? 'tournament entries' : 'training sessions'} reset ${allowance.resetsOn}. This block has space — it is your allowance that is spent, not the session.`
+                        : null
+                    }
+                  />
+                );
+              })}
+            </div>
+          </>
+        )}
       </div>
     </PhoneFrame>
   );
@@ -169,6 +240,50 @@ function AllowanceBanner({ allowance }) {
         </>
       )}
     </Banner>
+  );
+}
+
+/**
+ * The loading layout, in the loaded layout's geometry: allowance banner, seven
+ * 50px date pills, three slot cards on the 54px gutter. No spinner — lists load
+ * behind skeletons; spinners are for actions (see components/Skeleton.js).
+ */
+function BookingSkeleton() {
+  return (
+    <div
+      role="status"
+      aria-label="Loading open blocks"
+      style={{ display: 'flex', flexDirection: 'column', gap: 18 }}
+    >
+      <div style={{ padding: '0 22px' }}>
+        <SkeletonCard>
+          <SkeletonBar tone="raised" width={150} height={11} />
+          {[0, 1].map((i) => (
+            <div key={i} style={{ marginTop: i ? 11 : 14 }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 5 }}>
+                <SkeletonBar tone="raised" width={64} height={11} />
+                <SkeletonBar tone="raised" width={90} height={11} />
+              </div>
+              <SkeletonBar tone="raised" height={6} r={3} />
+            </div>
+          ))}
+          <SkeletonBar tone="raised" width="92%" height={9} style={{ marginTop: 12 }} />
+          <SkeletonBar tone="raised" width="55%" height={9} style={{ marginTop: 6 }} />
+        </SkeletonCard>
+      </div>
+
+      <div style={{ display: 'flex', gap: 7, overflow: 'hidden', padding: '0 22px' }}>
+        {[0, 1, 2, 3, 4, 5, 6].map((i) => (
+          <SkeletonBar key={i} width={50} height={53} r={radius.counter} />
+        ))}
+      </div>
+
+      <div style={{ padding: '0 22px', display: 'flex', flexDirection: 'column', gap: 10 }}>
+        {[0, 1, 2].map((i) => (
+          <SkeletonSessionCard key={i} gutter={54} />
+        ))}
+      </div>
+    </div>
   );
 }
 

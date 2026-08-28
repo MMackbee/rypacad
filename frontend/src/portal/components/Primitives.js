@@ -1,5 +1,6 @@
 import React from 'react';
 import { TOUCH_MIN, color, font, radius, tint } from '../tokens';
+import Button from './Button';
 
 /**
  * Header back affordance ("‹ Today", "‹ Cancel", "‹ Back").
@@ -152,6 +153,38 @@ export function Banner({ tone = 'neutral', title, children, action, style }) {
       <Body size={12}>{children}</Body>
       {action ? <div style={{ marginTop: 12 }}>{action}</div> : null}
     </div>
+  );
+}
+
+/**
+ * The load-failure treatment — screens 03, 04, 05, 08 when their hook reports
+ * `error`.
+ *
+ * A red-tinted Banner, not a bare line of text, because a failed fetch changes
+ * what the whole screen can claim and deserves the same standing weight as the
+ * booking rule or a billing flag. The copy is plain language the screen chooses
+ * for its own context; whatever the hook's error object carries (a stack, a
+ * Firestore code) stays out of the UI.
+ *
+ * "Try again" renders only when a retry handler is actually wired — a dead
+ * retry button would be the UI inventing a capability it does not have.
+ */
+export function ErrorNotice({ title = "This didn't load", children, onRetry, style }) {
+  return (
+    <Banner
+      tone="red"
+      title={title}
+      style={style}
+      action={
+        onRetry ? (
+          <Button variant="outline" height={46} onClick={onRetry} style={{ font: `600 14px ${font.body}` }}>
+            Try again
+          </Button>
+        ) : null
+      }
+    >
+      {children ?? 'Check your connection and try again.'}
+    </Banner>
   );
 }
 

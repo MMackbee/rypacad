@@ -14,9 +14,10 @@ import SessionCard from './components/SessionCard';
 import StatusBadge, { CapacityPill } from './components/StatusBadge';
 import PackageCard from './components/PackageCard';
 import AllowancePools from './components/AllowancePools';
+import SkeletonCard, { SkeletonBar, SkeletonSessionCard } from './components/Skeleton';
 import ToggleRow from './components/Toggle';
 import TypeChip from './components/TypeChip';
-import { Card } from './components/Primitives';
+import { Card, ErrorNotice } from './components/Primitives';
 
 import SignIn from './screens/SignIn';
 import Registration from './screens/Registration';
@@ -59,7 +60,20 @@ export const SCREEN_STATES = [
   { id: '04', title: 'My Schedule', Screen: MySchedule, role: 'athlete',
     states: [['upcoming', 'Upcoming'], ['empty', 'Empty'], ['cancelled', 'Cancelled']] },
   { id: '05', title: 'Book a Session', Screen: BookSession, role: 'athlete',
-    states: [['open', 'Blocks open'], ['full', 'Block full'],
+    states: [['open', 'Blocks open'],
+             // Interactive: tap a block to see the button-level "Reserving…"
+             // pattern, then the inline failure. The rejection message here
+             // only exercises the pipe - the live path supplies real reasons.
+             ['open', 'Reserve fails · tap a block', {
+               onBook: () =>
+                 new Promise((resolve, reject) => {
+                   setTimeout(
+                     () => reject(new Error('That block filled before the reservation completed.')),
+                     1400
+                   );
+                 }),
+             }],
+             ['full', 'Block full'],
              ['limitTraining', 'Training spent'], ['limitTournament', 'Tournaments spent'],
              ['confirmed', 'Confirmed']] },
   { id: '06', title: 'Practice DNA', Screen: PracticeDNA, role: 'athlete',
@@ -277,6 +291,35 @@ function ComponentGallery() {
           </div>
         </Spec>
 
+        <Spec label="Skeleton · list loads never spin">
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+            <SkeletonBar tone="raised" width="62%" height={12} />
+            <SkeletonBar tone="raised" width="38%" height={9} />
+            <SkeletonCard height={78} style={{ marginTop: 6 }} />
+            <SkeletonSessionCard style={{ marginTop: 4 }} />
+          </div>
+          <div style={{ font: `400 11px/1.5 ${font.body}`, color: color.textTertiary, marginTop: 12 }}>
+            Bar and card variants, composed per screen in the loaded layout’s geometry so nothing
+            jumps when data lands. The spinner stays a button-level treatment for an action the
+            member just took; a list that is still fetching never spins.
+          </div>
+        </Spec>
+
+        <Spec label="Load failure · plain language, retriable">
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+            <ErrorNotice title="Schedule didn't load" onRetry={() => {}}>
+              Your schedule didn't load — your bookings are unaffected. Check your connection and
+              try again.
+            </ErrorNotice>
+            <ErrorNotice title="Open blocks didn't load" />
+          </div>
+          <div style={{ font: `400 11px/1.5 ${font.body}`, color: color.textTertiary, marginTop: 12 }}>
+            No stack traces and no invented causes — the screen writes its own plain line. “Try
+            again” renders only when a retry handler is wired; the second card is the un-wired
+            state, with no dead button.
+          </div>
+        </Spec>
+
         <Spec label="Field · inline validation on blur">
           <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
             <Field label="Email" value="dana@email.com" onChange={() => {}} />
@@ -396,8 +439,11 @@ function ScreenGallery() {
       {SCREEN_STATES.map(({ id, title, Screen, role, states }) => (
         <Section key={id} title={`${id} · ${title}`} subtitle={`${role} · ${states.length} states`}>
           <div style={{ display: 'flex', flexWrap: 'wrap', gap: 42 }}>
-            {states.map(([variant, label]) => (
-              <div key={variant}>
+            {/* A state can carry extra props (third element) for behavior the
+                variant alone cannot express, like 05's rejecting onBook. The
+                key is the label because a variant can appear twice. */}
+            {states.map(([variant, label, props]) => (
+              <div key={label}>
                 <div
                   style={{
                     font: `500 12px ${font.body}`,
@@ -407,7 +453,7 @@ function ScreenGallery() {
                 >
                   {label}
                 </div>
-                <Screen variant={variant} />
+                <Screen variant={variant} {...(props || null)} />
               </div>
             ))}
           </div>

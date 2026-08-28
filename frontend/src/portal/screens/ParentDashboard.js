@@ -8,7 +8,8 @@ import StatusBadge from '../components/StatusBadge';
 import TypeChip from '../components/TypeChip';
 import { Avatar } from '../components/MediaPlaceholder';
 import AllowancePools from '../components/AllowancePools';
-import { AlertGlyph, Body, Card, ScreenTitle } from '../components/Primitives';
+import SkeletonCard, { SkeletonBar } from '../components/Skeleton';
+import { AlertGlyph, Body, Card, ErrorNotice, ScreenTitle } from '../components/Primitives';
 import { useHousehold } from '../hooks';
 
 /**
@@ -20,14 +21,16 @@ import { useHousehold } from '../hooks';
  * wrong default.
  *
  * @param {'one'|'three'|'payment'} variant
+ * @param {() => void} [onRetry]  Re-fetch after a load failure.
  */
 export default function ParentDashboard({
   variant = 'three',
   bare = false,
   onLinkAthlete,
   onOpenAthlete,
+  onRetry,
 }) {
-  const { data } = useHousehold({ variant });
+  const { data, loading, error } = useHousehold({ variant });
   const children = data?.children ?? [];
   const billing = data?.billing;
   const flagged = billing?.status === 'failed';
@@ -45,14 +48,33 @@ export default function ParentDashboard({
           }}
         >
           <div style={{ flex: 1, minWidth: 0 }}>
-            <div style={{ font: `400 12px ${font.body}`, color: color.textTertiary }}>{data?.date}</div>
-            <ScreenTitle style={{ marginTop: 3 }}>{data?.name}</ScreenTitle>
+            {loading ? (
+              // Sized like the date line + household name so nothing jumps.
+              <>
+                <SkeletonBar width={96} height={12} />
+                <SkeletonBar width={168} height={24} style={{ marginTop: 8 }} />
+              </>
+            ) : (
+              <>
+                <div style={{ font: `400 12px ${font.body}`, color: color.textTertiary }}>{data?.date}</div>
+                <ScreenTitle style={{ marginTop: 3 }}>{data?.name}</ScreenTitle>
+              </>
+            )}
           </div>
           <Avatar size={40} />
         </div>
       }
       footer={<BottomTabBar role="parent" active="home" />}
     >
+      {loading ? (
+        <HouseholdSkeleton />
+      ) : error ? (
+        <div style={{ padding: '0 22px 24px' }}>
+          <ErrorNotice title="Family overview didn't load" onRetry={onRetry}>
+            Your family's overview didn't load. Check your connection and try again.
+          </ErrorNotice>
+        </div>
+      ) : (
       <div style={{ padding: '0 22px 24px', display: 'flex', flexDirection: 'column', gap: 12 }}>
         {/*
           Billing is one household-level banner, not a per-child badge - the
@@ -91,7 +113,43 @@ export default function ParentDashboard({
           </button>
         )}
       </div>
+      )}
     </PhoneFrame>
+  );
+}
+
+/**
+ * The loading layout in the loaded layout's geometry: two child cards at the
+ * real card's 198px minimum — avatar row, rule, then the Next / Contract /
+ * Left meta rows. No spinner — see components/Skeleton.js.
+ */
+function HouseholdSkeleton() {
+  return (
+    <div
+      role="status"
+      aria-label="Loading family overview"
+      style={{ padding: '0 22px 24px', display: 'flex', flexDirection: 'column', gap: 12 }}
+    >
+      {[0, 1].map((i) => (
+        <SkeletonCard key={i} large style={{ minHeight: 198 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+            <SkeletonBar tone="raised" width={44} height={44} r="50%" />
+            <div style={{ flex: 1 }}>
+              <SkeletonBar tone="raised" width={104} height={13} />
+              <SkeletonBar tone="raised" width={70} height={9} style={{ marginTop: 6 }} />
+            </div>
+            <SkeletonBar tone="raised" width={64} height={20} r={5} />
+          </div>
+          <div style={{ height: 1, background: color.rule, margin: '14px 0 13px' }} />
+          {[0, 1, 2].map((row) => (
+            <div key={row} style={{ display: 'flex', gap: 10, marginTop: row ? 12 : 0 }}>
+              <SkeletonBar tone="raised" width={66} height={9} style={{ marginTop: 3 }} />
+              <SkeletonBar tone="raised" width="55%" height={13} />
+            </div>
+          ))}
+        </SkeletonCard>
+      ))}
+    </div>
   );
 }
 
