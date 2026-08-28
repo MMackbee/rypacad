@@ -92,7 +92,9 @@ export default function Button({
 }) {
   const isOff = disabled || loading;
   const base = isOff && disabled ? VARIANTS.disabled : VARIANTS[variant] || VARIANTS.primary;
-  const dimmed = loading ? { background: tint.greenSoft, boxShadow: 'none' } : null;
+  // The handoff's loading fill is rgba(0,175,81,.45) — tint.greenSoft (.09)
+  // here left the black label unreadable over a near-black button.
+  const dimmed = loading ? { background: tint.greenLoading, boxShadow: 'none' } : null;
 
   return (
     <button
