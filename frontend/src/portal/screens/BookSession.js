@@ -28,10 +28,28 @@ import { poolFor } from '../data/packages';
  *   handoff's button-level pattern (spinner + "Reserving…"); a rejection
  *   renders inline with its reason and the block stays selectable. With no
  *   onBook the tap confirms instantly — exactly the pre-live behavior.
+ * @param {boolean} [practice]
+ *   Onboarding practice mode (docs/portal/TEAM.md, "Onboarding program v1").
+ *   Forwarded to useBooking as its pinned `{ practice: true }` option, which
+ *   pins the hook to the seed source regardless of REACT_APP_PORTAL_LIVE_DATA.
+ *   Zero Firestore writes: the booking stays in this component's state exactly
+ *   as the pre-live flow does, and resets on unmount.
+ * @param {(booked) => void} [onConfirmed]
+ *   Fires once when the confirmation renders after a tap-through booking —
+ *   `{ name, when, pool }`. This is the onboarding step's completion signal:
+ *   the step advances on the real confirmation, never on "Next" alone.
  * @param {() => void} [onRetry]  Re-fetch after a load failure.
  */
-export default function BookSession({ variant = 'open', bare = false, onBack, onBook, onRetry }) {
-  const { data, loading, error } = useBooking({ variant });
+export default function BookSession({
+  variant = 'open',
+  bare = false,
+  practice = false,
+  onBack,
+  onBook,
+  onConfirmed,
+  onRetry,
+}) {
+  const { data, loading, error } = useBooking({ variant, practice });
   const [selected, setSelected] = useState(null);
   // The slot the athlete just booked. Persistence is the API's job later; the
   // flow - tap a block, land on the confirmation - has to work now.
@@ -50,6 +68,21 @@ export default function BookSession({ variant = 'open', bare = false, onBack, on
     live.current = true;
     return () => { live.current = false; };
   }, []);
+
+  // The completion signal for the onboarding walkthrough: fires exactly when
+  // the athlete's own tap-through reaches the confirmation. `booked` only ever
+  // transitions null → slot, so this fires once per booking. The 'confirmed'
+  // demo variant does not fire it — a variant is not an action completing.
+  useEffect(() => {
+    if (booked && onConfirmed) {
+      onConfirmed({
+        name: booked.name,
+        when: `${booked.dayLabel} · ${booked.time}`,
+        pool: poolFor(booked.type),
+      });
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [booked]);
 
   const book = (slot) => {
     if (reserving) return;

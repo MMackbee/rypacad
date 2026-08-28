@@ -4,6 +4,7 @@ import { Route, Routes, useNavigate } from 'react-router-dom';
 import StatesHarness from './StatesHarness';
 import SignIn from './screens/SignIn';
 import Registration from './screens/Registration';
+import { OnboardingWelcomeRoute } from './screens/OnboardingFlow';
 import MySchedule from './screens/MySchedule';
 import BookSession from './screens/BookSession';
 import ParentDashboard from './screens/ParentDashboard';
@@ -66,8 +67,10 @@ export default function PortalRoutes() {
       />
       <Route
         path="register"
-        element={<Registration bare onBack={go('/portal/signin')} onFinish={go('/portal/family')} />}
+        element={<Registration bare onBack={go('/portal/signin')} onFinish={go('/portal/welcome')} />}
       />
+      {/* Onboarding walkthrough (Sprint 3) — frontend lane's one route line, per the PM exception in TEAM.md. */}
+      <Route path="welcome" element={<OnboardingWelcomeRoute />} />
 
       {/* Athlete */}
       <Route

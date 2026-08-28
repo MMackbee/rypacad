@@ -336,7 +336,12 @@ function Success({ bare, onFinish }) {
       bare={bare}
       footer={
         <div style={{ borderTop: `1px solid ${color.frameRule}`, padding: '14px 22px 22px' }}>
-          <Button onClick={onFinish}>Go to dashboard</Button>
+          {/*
+            Leads into the onboarding walkthrough (/portal/welcome) rather than
+            a cold dashboard — a family's first minutes in the portal are the
+            guided practice run, per TEAM.md "Onboarding program v1".
+          */}
+          <Button onClick={onFinish}>Start the walkthrough</Button>
         </div>
       }
     >

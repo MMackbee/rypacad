@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { createContext, useContext } from 'react';
 import { color, font, glow, radius } from '../tokens';
 
 /**
@@ -9,6 +9,23 @@ import { color, font, glow, radius } from '../tokens';
  * app fills the viewport. `bare` renders the same layout without the device
  * bezel so a screen can be dropped straight into a full-viewport route.
  */
+
+/**
+ * Embedding seam for the onboarding walkthrough (docs/portal/TEAM.md,
+ * "Onboarding program v1"): OnboardingFlow wraps the REAL screens under its own
+ * stepper chrome, and a screen's bare frame is hard-sized to the viewport
+ * (100dvh) — two of those nested means two viewports. A provider lets the host
+ * re-size the bare frame without any wrapped screen changing:
+ *
+ * - 'fill': the frame fills its flex parent (one screen under the stepper,
+ *   internal scrolling intact — pinned CTAs and tab bars stay pinned).
+ * - 'flow': the frame takes its natural height so several screens can stack in
+ *   one scroll (the parent scrolls; the frame does not).
+ *
+ * Default null leaves every existing use — routes and harness — untouched.
+ */
+export const FrameEmbedContext = createContext(null);
+
 export default function PhoneFrame({
   width = 390,
   height = 812,
@@ -18,6 +35,7 @@ export default function PhoneFrame({
   children,
   style,
 }) {
+  const embed = useContext(FrameEmbedContext);
   // Bare mode is the shipping shell: the app fills the viewport. It sizes to
   // the dynamic viewport rather than 100% because the ancestors (.App, body)
   // have auto height — 100% against those collapses instead of filling, and
@@ -29,14 +47,34 @@ export default function PhoneFrame({
   // across 1400px, which is how the contract calendar ended up with
   // 190px-square day cells in desktop testing.
   const frame = bare
-    ? {
-        width: '100%',
-        maxWidth: 430,
-        margin: '0 auto',
-        height: '100dvh',
-        minHeight: '100vh',
-        background: color.bg,
-      }
+    ? embed === 'fill'
+      ? {
+          // Fills the host's flex column (OnboardingFlow's content area) —
+          // definite height from the parent, so internal scrolling still works.
+          width: '100%',
+          maxWidth: 430,
+          margin: '0 auto',
+          flex: '1 1 auto',
+          minHeight: 0,
+          background: color.bg,
+        }
+      : embed === 'flow'
+      ? {
+          // Natural height: the host scrolls a stack of screens as one page.
+          width: '100%',
+          maxWidth: 430,
+          margin: '0 auto',
+          flex: 'none',
+          background: color.bg,
+        }
+      : {
+          width: '100%',
+          maxWidth: 430,
+          margin: '0 auto',
+          height: '100dvh',
+          minHeight: '100vh',
+          background: color.bg,
+        }
     : {
         width,
         height,
