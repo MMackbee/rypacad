@@ -50,56 +50,32 @@ export const CONSENTS = [
 
 export const RELATIONSHIPS = ['Mother', 'Father', 'Guardian', 'Grandparent', 'Other'];
 
-/** Screen 04 sample data, revision-2 accurate. */
-export const SCHEDULE = [
-  {
-    id: 's1',
-    dayLabel: 'Today',
-    isToday: true,
-    time: '4:00',
-    meridiem: 'PM',
-    type: 'training',
-    name: 'The Lab',
-    meta: 'Sim 2 · Luke',
-    badge: { tone: 'green', label: 'Confirmed' },
-  },
-  {
-    id: 's2',
-    dayLabel: 'Friday, Feb 19',
-    time: '4:00',
-    meridiem: 'PM',
-    type: 'training',
-    name: 'The Workshop',
-    meta: 'Overflow · Luke',
-    badge: { tone: 'neutral', label: 'Friday overflow block' },
-  },
-  {
-    id: 's3',
-    dayLabel: 'Saturday, Feb 20',
-    time: '8:30',
-    meridiem: 'AM',
-    type: 'tournament',
-    name: 'The Arena',
-    meta: 'Brock · net scoring',
-  },
-  {
-    id: 's4',
-    dayLabel: 'Saturday, Feb 20',
-    time: '10:30',
-    meridiem: 'AM',
-    type: 'training',
-    name: 'The Lab',
-    meta: 'Bay 4 · Luke',
-  },
-  {
-    id: 's5',
-    dayLabel: 'Monday, Feb 22',
-    time: '5:00',
-    meridiem: 'PM',
-    type: 'training',
-    name: 'The Workshop',
-    meta: 'Sim 1 · Luke',
-  },
+/**
+ * Screen 04 — the athlete's bookings, as references into the generated season.
+ *
+ * These are { date, block } pairs resolved through resolveBooking() in
+ * season.js, never freestanding session objects. The first build hand-wrote
+ * this list and it contradicted the season within a week: it showed a Friday
+ * block the generator doesn't produce (overflow is off) and inverted
+ * training/tournament on the Saturday slots, so the same block spent a
+ * different allowance pool on My Schedule than on Book a Session. A reference
+ * cannot drift: if the schedule changes, the resolved session changes with it,
+ * and a reference into a closure resolves to null instead of inventing a
+ * session.
+ */
+export const BOOKED_UPCOMING = [
+  { date: '2027-02-18', block: 1, badge: { tone: 'green', label: 'Confirmed' } }, // today 4:00 PM
+  { date: '2027-02-20', block: 1 }, // Sat 10:30 AM — tournament, spends the other pool
+  { date: '2027-02-20', block: 2 }, // Sat 12:30 PM training
+  { date: '2027-02-22', block: 2 }, // Mon 5:00 PM
+  { date: '2027-02-25', block: 0 }, // Thu 3:00 PM
+];
+
+/** Sessions already attended, for the Past tab. */
+export const BOOKED_PAST = [
+  { date: '2027-02-16', block: 1 },
+  { date: '2027-02-13', block: 0 }, // Sat 8:30 AM training
+  { date: '2027-02-11', block: 1 },
 ];
 
 /**

@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { Route, Routes, useNavigate } from 'react-router-dom';
 
 import StatesHarness from './StatesHarness';
@@ -31,6 +31,26 @@ import NewsletterComposer from './screens/NewsletterComposer';
  * explicit that route guarding is not a substitute for server-side checks:
  * every request must re-check the caller's role *and* row-level ownership.
  */
+
+/**
+ * Staff & Roles flips between its list and add-member views in place - the add
+ * view is a step of the same owner task, not a separate destination, so it is
+ * local state rather than a route. Its back affordance previously pointed at
+ * /portal/staff, which is this route: a self-navigation that could never leave
+ * the view it was trying to leave.
+ */
+function StaffScreen() {
+  const [adding, setAdding] = useState(false);
+  return (
+    <StaffRoles
+      bare
+      variant={adding ? 'add' : 'populated'}
+      onAdd={() => setAdding(true)}
+      onBack={() => setAdding(false)}
+    />
+  );
+}
+
 export default function PortalRoutes() {
   const navigate = useNavigate();
   const go = (path) => () => navigate(path);
@@ -61,7 +81,10 @@ export default function PortalRoutes() {
       <Route path="dna" element={<PracticeDNA bare />} />
 
       {/* Parent */}
-      <Route path="family" element={<ParentDashboard bare />} />
+      <Route
+        path="family"
+        element={<ParentDashboard bare onOpenAthlete={() => navigate('/portal/athlete')} />}
+      />
       <Route path="athlete" element={<AthleteDetail bare onBack={go('/portal/family')} />} />
       <Route path="billing" element={<Billing bare />} />
       <Route path="settings" element={<NotificationPreferences bare />} />
@@ -76,7 +99,7 @@ export default function PortalRoutes() {
 
       {/* Ops / owner */}
       <Route path="admin" element={<AdminDashboard bare />} />
-      <Route path="staff" element={<StaffRoles bare onBack={go('/portal/staff')} />} />
+      <Route path="staff" element={<StaffScreen />} />
       <Route path="newsletter" element={<NewsletterComposer bare />} />
     </Routes>
   );

@@ -2,13 +2,10 @@ import React, { useState } from 'react';
 import { color, font, radius } from '../tokens';
 import PackageCard from '../components/PackageCard';
 import { Body, SectionLabel } from '../components/Primitives';
-import {
-  DROP_IN,
-  ELITE_TIERS,
-  FITNESS_PACKAGES,
-  GOLF_PACKAGES,
-  monthlyTotal,
-} from '../data/packages';
+// Pure pricing helpers stay importable; the catalogue itself arrives through
+// usePackages so a price change is data, not a code change in this screen.
+import { DROP_IN, monthlyTotal } from '../data/packages';
+import { usePackages } from '../hooks';
 
 /**
  * 02 · Registration, step 3 — package selection.
@@ -29,6 +26,7 @@ import {
  * legible if the total is visible while the parent builds the stack.
  */
 export default function PackageStep() {
+  const { data: catalogue } = usePackages();
   const [golf, setGolf] = useState(null);
   const [fitness, setFitness] = useState(null);
   const [elite, setElite] = useState(null);
@@ -54,7 +52,7 @@ export default function PackageStep() {
     <div style={{ display: 'flex', flexDirection: 'column', gap: 22 }}>
       <section style={{ display: 'flex', flexDirection: 'column', gap: 11 }}>
         <SectionLabel>Golf package</SectionLabel>
-        {GOLF_PACKAGES.map((p) => (
+        {(catalogue?.golf ?? []).map((p) => (
           <PackageCard
             key={p.id}
             pkg={p}
@@ -62,13 +60,15 @@ export default function PackageStep() {
             onSelect={() => pickGolf(p)}
           />
         ))}
-        <PackageCard
-          pkg={DROP_IN}
-          cadence="per session"
-          selected={golf?.id === DROP_IN.id}
-          onSelect={() => pickGolf(DROP_IN)}
-          footnote="No monthly commitment. Booking opens three days ahead rather than on the full schedule."
-        />
+        {catalogue?.dropIn ? (
+          <PackageCard
+            pkg={catalogue.dropIn}
+            cadence="per session"
+            selected={golf?.id === catalogue.dropIn.id}
+            onSelect={() => pickGolf(catalogue.dropIn)}
+            footnote="No monthly commitment. Booking opens three days ahead rather than on the full schedule."
+          />
+        ) : null}
       </section>
 
       <section style={{ display: 'flex', flexDirection: 'column', gap: 11 }}>
@@ -78,7 +78,7 @@ export default function PackageStep() {
             optional, bought separately
           </span>
         </div>
-        {FITNESS_PACKAGES.map((p) => (
+        {(catalogue?.fitness ?? []).map((p) => (
           <PackageCard
             key={p.id}
             pkg={p}
@@ -95,7 +95,7 @@ export default function PackageStep() {
             replaces the two above
           </span>
         </div>
-        {ELITE_TIERS.map((t) => (
+        {(catalogue?.elite ?? []).map((t) => (
           <PackageCard
             key={t.id}
             pkg={t}
@@ -158,11 +158,29 @@ function EliteOpenItems({ tier }) {
 /**
  * The running total. Present even at zero, because its job is to be the thing
  * the parent watches while combining a package with an add-on.
+ *
+ * Drop-in is priced per session, not per month, so it never folds into a
+ * monthly number - "$65 / session + $200 / mo" is two figures, and collapsing
+ * them into "$265 / mo" would present a package half the price of 8 + 3 while
+ * delivering eleven fewer sessions.
  */
 function TotalRow({ total, elite, golf, fitness }) {
+  const dropIn = golf?.id === DROP_IN.id;
+
   const parts = elite
     ? [elite.name]
     : [golf && golf.name, fitness && `fitness ${fitness.name}`].filter(Boolean);
+
+  const figures = elite
+    ? [{ amount: elite.price, unit: '/ mo' }]
+    : dropIn
+    ? [
+        { amount: golf.price, unit: '/ session' },
+        ...(fitness ? [{ amount: fitness.price, unit: '/ mo' }] : []),
+      ]
+    : total
+    ? [{ amount: total, unit: '/ mo' }]
+    : [];
 
   return (
     <div
@@ -175,16 +193,33 @@ function TotalRow({ total, elite, golf, fitness }) {
       }}
     >
       <div style={{ flex: 1, minWidth: 0 }}>
-        <SectionLabel>Monthly total</SectionLabel>
+        <SectionLabel>{dropIn ? 'Total' : 'Monthly total'}</SectionLabel>
         <Body size={11} tone={color.textTertiary} style={{ marginTop: 5 }}>
           {parts.length ? parts.join(' + ') : 'Nothing selected yet'}
         </Body>
       </div>
       <div style={{ textAlign: 'right', flex: 'none' }}>
-        <span style={{ font: `700 26px ${font.head}`, color: total ? color.primary : color.faintText }}>
-          ${total}
-        </span>
-        <span style={{ font: `400 12px ${font.body}`, color: color.textTertiary }}> / mo</span>
+        {figures.length === 0 ? (
+          <>
+            <span style={{ font: `700 26px ${font.head}`, color: color.faintText }}>$0</span>
+            <span style={{ font: `400 12px ${font.body}`, color: color.textTertiary }}> / mo</span>
+          </>
+        ) : (
+          figures.map((f, i) => (
+            <span key={f.unit}>
+              {i > 0 ? (
+                <span style={{ font: `400 14px ${font.body}`, color: color.textTertiary }}> + </span>
+              ) : null}
+              <span style={{ font: `700 ${i === 0 ? 26 : 20}px ${font.head}`, color: color.primary }}>
+                ${f.amount}
+              </span>
+              <span style={{ font: `400 12px ${font.body}`, color: color.textTertiary }}>
+                {' '}
+                {f.unit}
+              </span>
+            </span>
+          ))
+        )}
       </div>
     </div>
   );

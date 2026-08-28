@@ -5,7 +5,7 @@ import Field, { SelectField } from '../components/Field';
 import PhoneFrame from '../components/PhoneFrame';
 import PackageStep from './PackageStep';
 import { BackLink, Body, Card, ScreenTitle, Tick } from '../components/Primitives';
-import { CONSENTS, RELATIONSHIPS } from '../data/seed';
+import { useEnrollmentForm } from '../hooks';
 
 /**
  * 02 · Registration - public, multi-step.
@@ -111,6 +111,7 @@ function StepFooter({ variant, step }) {
 }
 
 function GuardianStep() {
+  const { data } = useEnrollmentForm();
   const [relationship, setRelationship] = useState('');
 
   return (
@@ -127,7 +128,7 @@ function GuardianStep() {
       <SelectField
         label="Relationship to athlete"
         value={relationship}
-        options={RELATIONSHIPS}
+        options={data?.relationships ?? []}
         onChange={setRelationship}
       />
     </div>
@@ -191,9 +192,13 @@ function AthleteStep() {
 // pricing being confirmed.
 
 function ConsentStep() {
-  const [checked, setChecked] = useState(() =>
-    CONSENTS.reduce((acc, c) => ({ ...acc, [c.id]: c.checked }), {})
-  );
+  const { data } = useEnrollmentForm();
+  const consents = data?.consents ?? [];
+
+  // Overrides only - the defaults stay derived from hook data at render time,
+  // so a consent list arriving asynchronously still renders checked correctly.
+  const [overrides, setOverrides] = useState({});
+  const isChecked = (c) => overrides[c.id] ?? c.checked;
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 13 }}>
@@ -206,12 +211,12 @@ function ConsentStep() {
         declining it does not block enrollment - bundling it with the injury
         waiver would weaken both.
       */}
-      {CONSENTS.map((consent) => (
+      {consents.map((consent) => (
         <Card key={consent.id} large>
           <div style={{ display: 'flex', gap: 13 }}>
             <Checkbox
-              checked={checked[consent.id]}
-              onChange={(v) => setChecked((prev) => ({ ...prev, [consent.id]: v }))}
+              checked={isChecked(consent)}
+              onChange={(v) => setOverrides((prev) => ({ ...prev, [consent.id]: v }))}
               label={consent.title}
             />
             <div style={{ flex: 1, minWidth: 0 }}>

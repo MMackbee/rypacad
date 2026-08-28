@@ -10,12 +10,17 @@
  * to answer "who needs a conversation this week", and counts are context for
  * that list rather than the point of the screen.
  */
+/**
+ * `packageIds` is what the tier filter cuts on: the packages of the athletes a
+ * row concerns. A row with no packageIds is org-level (the newsletter) and
+ * survives every filter — filtering it out would hide work that still exists.
+ */
 export const OUTSTANDING = [
-  { id: 'o1', who: 'Whitfield household', why: 'Payment failed — retry 2 of 3', tag: 'Billing', tone: 'red' },
-  { id: 'o2', who: 'M. Okonkwo', why: '3 no-shows this month', tag: 'Attendance', tone: 'red' },
-  { id: 'o3', who: 'R. Sandoval', why: 'Contract at 54% with 6 days left', tag: 'Contract', tone: 'yellow' },
-  { id: 'o4', who: '2 athletes', why: 'Diagnostic not entered since enrollment', tag: 'Onboarding', tone: 'yellow' },
-  { id: 'o5', who: 'Issue 14 newsletter', why: 'Fitness Corner outstanding, deadline passed', tag: 'Newsletter', tone: 'yellow' },
+  { id: 'o1', who: 'Whitfield household', why: 'Payment failed — retry 2 of 3', tag: 'Billing', tone: 'red', packageIds: ['g-8-3', 'g-4-2'] },
+  { id: 'o2', who: 'M. Okonkwo', why: '3 no-shows this month', tag: 'Attendance', tone: 'red', packageIds: ['g-8-3'] },
+  { id: 'o3', who: 'R. Sandoval', why: 'Contract at 54% with 6 days left', tag: 'Contract', tone: 'yellow', packageIds: ['g-4-2'] },
+  { id: 'o4', who: '2 athletes', why: 'Diagnostic not entered since enrollment', tag: 'Onboarding', tone: 'yellow', packageIds: ['g-4-2'] },
+  { id: 'o5', who: 'Issue 14 newsletter', why: 'Fitness Corner outstanding, deadline passed', tag: 'Newsletter', tone: 'yellow', packageIds: null },
 ];
 
 export const ADMIN_METRICS = {

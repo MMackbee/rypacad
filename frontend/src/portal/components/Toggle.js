@@ -9,6 +9,9 @@ import { color, font } from '../tokens';
  */
 export function Toggle({ checked, onChange, label }) {
   return (
+    // The button is the hit area (52x44, above the 44px touch floor); the
+    // 42x25 track inside it is only the visual. Making the track itself the
+    // button is how screen 11 shipped with every switch at 25px tall.
     <button
       type="button"
       role="switch"
@@ -16,28 +19,41 @@ export function Toggle({ checked, onChange, label }) {
       aria-label={label}
       onClick={() => onChange && onChange(!checked)}
       style={{
-        width: 42,
-        height: 25,
+        width: 52,
+        height: 44,
         flex: 'none',
-        borderRadius: 999,
         border: 'none',
-        padding: 3,
-        background: checked ? color.primary : color.toggleOff,
-        display: 'flex',
-        justifyContent: checked ? 'flex-end' : 'flex-start',
-        alignItems: 'center',
+        padding: 0,
+        background: 'transparent',
+        display: 'grid',
+        placeItems: 'center',
         cursor: 'pointer',
       }}
     >
       <span
+        aria-hidden="true"
         style={{
-          width: 19,
-          height: 19,
-          borderRadius: '50%',
-          background: checked ? '#000' : color.mutedText,
-          display: 'block',
+          width: 42,
+          height: 25,
+          borderRadius: 999,
+          padding: 3,
+          boxSizing: 'border-box',
+          background: checked ? color.primary : color.toggleOff,
+          display: 'flex',
+          justifyContent: checked ? 'flex-end' : 'flex-start',
+          alignItems: 'center',
         }}
-      />
+      >
+        <span
+          style={{
+            width: 19,
+            height: 19,
+            borderRadius: '50%',
+            background: checked ? '#000' : color.mutedText,
+            display: 'block',
+          }}
+        />
+      </span>
     </button>
   );
 }

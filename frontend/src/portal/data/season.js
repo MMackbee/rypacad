@@ -102,6 +102,38 @@ export function datePill(iso) {
   };
 }
 
+const DAY_NAMES = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+const MONTH_NAMES = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+
+/** "2027-02-20" -> "Saturday, Feb 20" — or "Today" when it is. */
+export function dayLabel(iso, today) {
+  if (iso === today) return 'Today';
+  const d = new Date(iso + 'T00:00:00Z');
+  return `${DAY_NAMES[d.getUTCDay()]}, ${MONTH_NAMES[d.getUTCMonth()]} ${d.getUTCDate()}`;
+}
+
+/**
+ * Sessions grouped by date, built once beside SEASON. The season is sorted, so
+ * the map's key order is chronological — `upcomingDates` walks keys instead of
+ * rescanning all ~240 sessions per date per render.
+ */
+export const SEASON_BY_DATE = SEASON.reduce((map, s) => {
+  const list = map.get(s.date);
+  if (list) list.push(s);
+  else map.set(s.date, [s]);
+  return map;
+}, new Map());
+
+/**
+ * Resolve a booking reference { date, block } against the season. Returns null
+ * for a reference pointing at a closure or an out-of-range block, so a stale
+ * booking cannot invent a session the schedule does not have.
+ */
+export function resolveBooking(ref) {
+  const onDate = SEASON_BY_DATE.get(ref.date);
+  return (onDate && onDate[ref.block]) || null;
+}
+
 /**
  * OPEN — which rotation runs in which block is not specified anywhere.
  *

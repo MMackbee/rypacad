@@ -24,7 +24,12 @@ import {
   DIAGNOSTIC_SECTIONS,
   HOUSEHOLD,
   BILLING_ISSUE,
-  SCHEDULE,
+  TODAY,
+  CONSENTS,
+  RELATIONSHIPS,
+  BOOKED_UPCOMING,
+  BOOKED_PAST,
+  BOOKING_CONFIRMATION,
   CANCELLED_SESSION,
   ALLOWANCE,
   ALLOWANCE_NO_TRAINING,
@@ -33,12 +38,20 @@ import {
   ROSTER,
 } from '../data/seed';
 import {
+  DROP_IN,
+  ELITE_TIERS,
+  FITNESS_PACKAGES,
+  GOLF_PACKAGES,
+} from '../data/packages';
+import {
   SCAFFOLD_TODAY,
   SEASON,
+  SEASON_BY_DATE,
   capacityFor,
   datePill,
+  dayLabel,
+  resolveBooking,
   rotationFor,
-  sessionsForDate,
   upcomingDates,
 } from '../data/season';
 import {
@@ -88,20 +101,61 @@ export { default as useSeedResource } from './useSeedResource';
 export { default as useAuthSession } from './useAuthSession';
 export { default as useRoster } from './useRoster';
 
-/** GET /schedule/availability + GET /athletes/:id/allowance (04). */
-export function useSchedule({ variant = 'upcoming' } = {}) {
-  const sessions = variant === 'empty' ? [] : SCHEDULE;
+/** How a season session renders on a schedule or booking list. */
+function displaySession(s, today) {
+  const [time, meridiem] = s.time.split(' ');
+  return {
+    id: s.id,
+    date: s.date,
+    dayLabel: dayLabel(s.date, today),
+    isToday: s.date === today,
+    time,
+    meridiem,
+    type: s.type,
+    // A special (a holiday tournament) carries its own name and is not part of
+    // the Workshop / Lab / Arena rotation - the label wins over the placeholder
+    // rotation cycle.
+    name: s.label || rotationFor(s),
+    // The generator assigns no coach or bay - coachId is null by design, so
+    // nothing is invented here.
+    meta: s.special
+      ? 'Holiday event · open to tournament competitors'
+      : s.overflow
+      ? 'Friday overflow block'
+      : null,
+  };
+}
+
+/**
+ * GET /schedule/availability + GET /athletes/:id/allowance (04).
+ *
+ * The athlete's bookings are { date, block } references resolved against the
+ * generated season, so what My Schedule shows can never contradict what Book a
+ * Session offers - same session objects, same types, same times. A reference
+ * into a closure resolves to null and is dropped rather than rendered.
+ */
+export function useSchedule({ variant = 'upcoming', today = SCAFFOLD_TODAY } = {}) {
+  const resolve = (refs) =>
+    refs
+      .map((ref) => {
+        const s = resolveBooking(ref);
+        return s ? { ...displaySession(s, today), badge: ref.badge ?? null } : null;
+      })
+      .filter(Boolean);
+
+  const sessions = variant === 'empty' ? [] : resolve(BOOKED_UPCOMING);
+  const past = variant === 'empty' ? [] : resolve(BOOKED_PAST);
   const cancelled = variant === 'cancelled' ? CANCELLED_SESSION : null;
-  return useSeedResource({ sessions, cancelled, allowance: ALLOWANCE });
+
+  return useSeedResource({ sessions, past, cancelled, allowance: ALLOWANCE });
 }
 
 /**
  * GET /schedule/availability + GET /athletes/:id/allowance (05).
  *
- * Availability now comes from the generated season rather than a hand-written
- * slot list, so what the screen shows is the real weekly pattern with closures
- * applied. Only the visible window is passed through the seam - the full season
- * is 269 sessions and the screen renders one day at a time.
+ * Availability comes from the generated season, so what the screen shows is the
+ * real weekly pattern with closures applied. Only the visible window is passed
+ * through the seam - the screen renders one day at a time.
  *
  * The limit states are per pool, because the pools are independent: a spent
  * tournament allowance leaves every training block bookable, and the reverse.
@@ -111,20 +165,11 @@ export function useBooking({ variant = 'open', today = SCAFFOLD_TODAY } = {}) {
   const dates = upcomingDates(SEASON, today, 7).map(datePill);
 
   const slots = dates.flatMap((d) =>
-    sessionsForDate(SEASON, d.iso).map((s) => ({
-      id: s.id,
-      iso: s.iso ?? d.iso,
-      date: d.iso,
+    (SEASON_BY_DATE.get(d.iso) ?? []).map((s) => ({
+      ...displaySession(s, today),
+      // The screen splits the day list on this; displaySession's date is the
+      // same value, kept under both names until the screen is reworked.
       time: s.time,
-      type: s.type,
-      overflow: s.overflow,
-      // A special (a holiday tournament) carries its own name and is not part
-      // of the Workshop / Lab / Arena rotation - the label wins over the
-      // placeholder rotation cycle.
-      name: s.label || rotationFor(s),
-      // The generator assigns no coach or bay - coachId is null by design, so
-      // nothing is invented here. Overflow is the one fact a block carries.
-      meta: s.special ? 'Holiday event · open to tournament competitors' : s.overflow ? 'Friday overflow block' : null,
       capacity:
         variant === 'full'
           ? { state: 'full', label: 'Full' }
@@ -142,7 +187,7 @@ export function useBooking({ variant = 'open', today = SCAFFOLD_TODAY } = {}) {
     limitTournament: ALLOWANCE_NO_TOURNAMENTS,
   }[variant] || ALLOWANCE;
 
-  return useSeedResource({ dates, slots, allowance });
+  return useSeedResource({ dates, slots, allowance, confirmation: BOOKING_CONFIRMATION });
 }
 
 /** GET /athletes?guardian=:id + GET /billing/:householdId (08). */
@@ -150,7 +195,31 @@ export function useHousehold({ variant = 'three' } = {}) {
   const children =
     variant === 'one' ? HOUSEHOLD.children.slice(0, 1) : HOUSEHOLD.children;
   const billing = variant === 'payment' ? BILLING_ISSUE : HOUSEHOLD.billing;
-  return useSeedResource({ ...HOUSEHOLD, children, billing });
+  return useSeedResource({ ...HOUSEHOLD, date: TODAY, children, billing });
+}
+
+/**
+ * GET /enrollment/form (02) - the consent copy and relationship options.
+ * Legal copy is content the academy edits, not something a screen hardcodes.
+ */
+export function useEnrollmentForm() {
+  return useSeedResource({ consents: CONSENTS, relationships: RELATIONSHIPS });
+}
+
+/**
+ * GET /packages (02 step 3, and later 10 and 15).
+ *
+ * The catalogue reads through the seam like everything else: the handoff's
+ * state list has `tiers[]` arriving from the API, and a hardcoded import is a
+ * screen that cannot survive a price change without a deploy.
+ */
+export function usePackages() {
+  return useSeedResource({
+    golf: GOLF_PACKAGES,
+    dropIn: DROP_IN,
+    fitness: FITNESS_PACKAGES,
+    elite: ELITE_TIERS,
+  });
 }
 
 /** GET /coach/blocks?date=today - filtered by coach assignment, not role (12). */
@@ -179,8 +248,12 @@ export function useCoachDay({ variant = 'today' } = {}) {
  * running: same date, same block order, same capacity.
  */
 export function useSession({ today = SCAFFOLD_TODAY, blockIndex = 1 } = {}) {
-  const onDate = sessionsForDate(SEASON, today);
-  const session = onDate[blockIndex] || onDate[0];
+  const onDate = SEASON_BY_DATE.get(today) ?? [];
+  // Clamp rather than fall back: a day with fewer blocks than the requested
+  // index (a holiday-tournament day has one) must not label its only session
+  // "Block 2 of 1".
+  const index = Math.min(blockIndex, Math.max(0, onDate.length - 1));
+  const session = onDate[index];
 
   // Built unconditionally - a bare `return` before useSeedResource would make
   // this a conditional hook call.
@@ -188,7 +261,7 @@ export function useSession({ today = SCAFFOLD_TODAY, blockIndex = 1 } = {}) {
     ? {
         id: session.id,
         type: session.type,
-        blockLabel: `Block ${blockIndex + 1} of ${onDate.length}`,
+        blockLabel: `Block ${index + 1} of ${onDate.length}`,
         name: session.label || rotationFor(session),
         meta: `${blockRange(session.time)} · ${session.capacity} capacity · ${ROSTER.length} expected`,
         startsIn: SESSION.startsIn,
@@ -198,12 +271,22 @@ export function useSession({ today = SCAFFOLD_TODAY, blockIndex = 1 } = {}) {
   return useSeedResource(value);
 }
 
-/** "4:00 PM" -> "4:00-5:00 PM". Blocks are one hour. */
+/**
+ * "4:00 PM" -> "4:00-5:00 PM", "12:30 PM" -> "12:30-1:30 PM",
+ * "11:30 AM" -> "11:30-12:30 PM". Blocks are one hour, so the end keeps the
+ * start's minutes and the meridiem flips across noon/midnight.
+ */
 function blockRange(time) {
-  const hour = parseInt(time, 10);
-  const meridiem = time.slice(-2);
-  const end = (hour % 12) + 1;
-  return `${time.replace(/ [AP]M$/, '')}-${end}:00 ${meridiem}`;
+  const [clock, meridiem] = time.split(' ');
+  const [h, m] = clock.split(':').map(Number);
+  // Total minutes on a 24h clock, then add the hour.
+  const start24 = ((h % 12) + (meridiem === 'PM' ? 12 : 0)) * 60 + m;
+  const end24 = (start24 + 60) % (24 * 60);
+  const endH24 = Math.floor(end24 / 60);
+  const endH = endH24 % 12 === 0 ? 12 : endH24 % 12;
+  const endMeridiem = endH24 < 12 ? 'AM' : 'PM';
+  const mm = String(m).padStart(2, '0');
+  return `${clock}-${endH}:${mm} ${endMeridiem}`;
 }
 
 /** GET /athletes/:id/diagnostics (14). */
@@ -287,15 +370,30 @@ export function useNotificationPrefs({ variant = 'default' } = {}) {
   });
 }
 
-/** GET /admin/fitness-completion + enrollment + block fill (15). */
+/**
+ * GET /admin/fitness-completion + enrollment + block fill (15).
+ *
+ * The filter cuts by package, matching a row's packageIds against the filter
+ * id. Org-level rows (packageIds: null) survive every filter — that work still
+ * exists whichever tier Phil is looking at. The enrolled count follows the
+ * filter so the header's number and the stat card cannot disagree; block fill
+ * is facility-wide and cannot be cut by tier, which the screen says.
+ */
 export function useAdminDashboard({ variant = 'populated' } = {}) {
-  const filtered = variant === 'filtered';
+  const filter = variant === 'filtered' ? TIER_FILTERS[1] : TIER_FILTERS[0];
+  const matches = (o) =>
+    filter.id === 'all' || o.packageIds == null || o.packageIds.includes(filter.id);
+
   return useSeedResource({
-    outstanding: filtered ? OUTSTANDING.filter((o) => o.tone === 'red') : OUTSTANDING,
-    metrics: ADMIN_METRICS,
+    outstanding: OUTSTANDING.filter(matches),
+    metrics:
+      filter.id === 'all'
+        ? ADMIN_METRICS
+        : { ...ADMIN_METRICS, enrolled: filter.count, enrolledLabel: `athletes on ${filter.label.replace(' only', '')}` },
     enrollment: ENROLLMENT_BY_PACKAGE,
+    highlightPackage: filter.id === 'all' ? null : filter.id,
     blockFill: BLOCK_FILL,
-    filter: filtered ? TIER_FILTERS[1] : TIER_FILTERS[0],
+    filter,
   });
 }
 

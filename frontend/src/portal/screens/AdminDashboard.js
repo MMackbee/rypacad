@@ -1,7 +1,6 @@
 import React from 'react';
 import { color, font, radius } from '../tokens';
 import PhoneFrame from '../components/PhoneFrame';
-import ProgressMeter from '../components/ProgressMeter';
 import StatusBadge from '../components/StatusBadge';
 import { Body, Card, ScreenTitle, SectionLabel } from '../components/Primitives';
 import { useAdminDashboard } from '../hooks';
@@ -43,8 +42,8 @@ export default function AdminDashboard({ variant = 'populated', bare = false }) 
       <div style={{ padding: '0 22px 24px', display: 'flex', flexDirection: 'column', gap: 12 }}>
         <OutstandingCard items={data?.outstanding ?? []} />
         <MetricGrid metrics={data?.metrics} />
-        <EnrollmentCard rows={data?.enrollment ?? []} total={data?.metrics?.enrolled} />
-        <BlockFillCard bars={data?.blockFill ?? []} />
+        <EnrollmentCard rows={data?.enrollment ?? []} highlight={data?.highlightPackage} />
+        <BlockFillCard bars={data?.blockFill ?? []} filtered={filtered} />
       </div>
     </PhoneFrame>
   );
@@ -153,44 +152,69 @@ function MetricGrid({ metrics }) {
   );
 }
 
-/** One labelled meter row per package, rendered from data. */
-function EnrollmentCard({ rows, total }) {
+/**
+ * One labelled share bar per package, rendered from data.
+ *
+ * Deliberately not <ProgressMeter>: that component's colour scale means
+ * contract completion (green on-track / yellow behind / grey no-data), and a
+ * package holding 32% of enrollment is not "behind" anything. A share is
+ * neutral, so every bar is the same colour and scaled against the largest
+ * package rather than a percentage-of-total that would render every bar short.
+ */
+function EnrollmentCard({ rows, highlight }) {
+  const max = Math.max(1, ...rows.map((r) => r.athletes));
+
   return (
     <Card large>
       <SectionLabel style={{ marginBottom: 14 }}>Enrollment by package</SectionLabel>
       <div style={{ display: 'flex', flexDirection: 'column', gap: 11 }}>
-        {rows.map((row) => (
-          <div key={row.id} style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-            <span
-              style={{
-                width: 52,
-                flex: 'none',
-                font: `500 12px ${font.body}`,
-                color: color.textSecondary,
-              }}
+        {rows.map((row) => {
+          const dimmed = highlight && row.id !== highlight;
+          return (
+            <div
+              key={row.id}
+              style={{ display: 'flex', alignItems: 'center', gap: 12, opacity: dimmed ? 0.45 : 1 }}
             >
-              {row.name}
-            </span>
-            <ProgressMeter value={total ? (row.athletes / total) * 100 : 0} size="inline" />
-            <span
-              style={{
-                width: 28,
-                flex: 'none',
-                textAlign: 'right',
-                font: `600 12px ${font.body}`,
-                color: color.text,
-              }}
-            >
-              {row.athletes}
-            </span>
-          </div>
-        ))}
+              <span
+                style={{
+                  width: 52,
+                  flex: 'none',
+                  font: `500 12px ${font.body}`,
+                  color: color.textSecondary,
+                }}
+              >
+                {row.name}
+              </span>
+              <div style={{ flex: 1, height: 6, background: color.track, borderRadius: 3, overflow: 'hidden' }}>
+                <div
+                  style={{
+                    width: `${(row.athletes / max) * 100}%`,
+                    height: '100%',
+                    background: color.primary,
+                    borderRadius: 3,
+                  }}
+                />
+              </div>
+              <span
+                style={{
+                  width: 28,
+                  flex: 'none',
+                  textAlign: 'right',
+                  font: `600 12px ${font.body}`,
+                  color: color.text,
+                }}
+              >
+                {row.athletes}
+              </span>
+            </div>
+          );
+        })}
       </div>
     </Card>
   );
 }
 
-function BlockFillCard({ bars }) {
+function BlockFillCard({ bars, filtered }) {
   const barColor = (pct) => {
     if (pct >= 90) return color.primary;
     if (pct >= 50) return 'rgba(0,175,81,.55)';
@@ -222,6 +246,9 @@ function BlockFillCard({ bars }) {
         fill there is the schedule working as designed.
       */}
       <Body size={11} tone={color.textTertiary} style={{ marginTop: 14 }}>
+        {filtered
+          ? 'Facility-wide — block fill cannot be cut by tier. '
+          : ''}
         Friday is the overflow block — low fill there is expected, not a problem.
       </Body>
     </Card>

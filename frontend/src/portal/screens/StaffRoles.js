@@ -25,7 +25,7 @@ import { useStaff } from '../hooks';
  *
  * @param {'populated'|'add'} variant
  */
-export default function StaffRoles({ variant = 'populated', bare = false, onBack }) {
+export default function StaffRoles({ variant = 'populated', bare = false, onBack, onAdd }) {
   const { data } = useStaff({ variant });
 
   if (variant === 'add') return <AddStaff bare={bare} roles={data?.roles ?? []} note={data?.screeningNote} onBack={onBack} />;
@@ -89,6 +89,7 @@ export default function StaffRoles({ variant = 'populated', bare = false, onBack
 
         <button
           type="button"
+          onClick={onAdd}
           style={{
             border: `1px dashed ${color.border}`,
             background: 'transparent',

@@ -20,8 +20,11 @@ export default function MySchedule({ variant = 'upcoming', bare = false, onBook 
   const { data } = useSchedule({ variant });
   const [tab, setTab] = useState('upcoming');
 
-  const sessions = data?.sessions ?? [];
-  const cancelled = data?.cancelled ?? null;
+  const past = tab === 'past';
+  const sessions = (past ? data?.past : data?.sessions) ?? [];
+  // The cancellation notice belongs to the upcoming view - it is a claim about
+  // a session that will not run, not a record of one that did.
+  const cancelled = past ? null : data?.cancelled ?? null;
   const allowance = data?.allowance ?? null;
 
   // Group by day header so a day is announced once, not per card.
@@ -89,7 +92,15 @@ export default function MySchedule({ variant = 'upcoming', bare = false, onBook 
           </div>
         ) : null}
 
-        {sessions.length === 0 && !cancelled ? <EmptyState onBook={onBook} /> : null}
+        {sessions.length === 0 && !cancelled ? (
+          past ? (
+            <Body size={12} tone={color.textTertiary} style={{ textAlign: 'center', padding: '20px 0' }}>
+              Nothing attended yet this season.
+            </Body>
+          ) : (
+            <EmptyState onBook={onBook} />
+          )
+        ) : null}
 
         {days.map((day) => (
           <div key={day.label} style={{ display: 'flex', flexDirection: 'column', gap: 9 }}>

@@ -10,7 +10,6 @@ import { Avatar } from '../components/MediaPlaceholder';
 import AllowancePools from '../components/AllowancePools';
 import { AlertGlyph, Body, Card, ScreenTitle } from '../components/Primitives';
 import { useHousehold } from '../hooks';
-import { TODAY } from '../data/seed';
 
 /**
  * 08 · Parent Dashboard - parent.
@@ -22,7 +21,12 @@ import { TODAY } from '../data/seed';
  *
  * @param {'one'|'three'|'payment'} variant
  */
-export default function ParentDashboard({ variant = 'three', bare = false, onLinkAthlete }) {
+export default function ParentDashboard({
+  variant = 'three',
+  bare = false,
+  onLinkAthlete,
+  onOpenAthlete,
+}) {
   const { data } = useHousehold({ variant });
   const children = data?.children ?? [];
   const billing = data?.billing;
@@ -41,7 +45,7 @@ export default function ParentDashboard({ variant = 'three', bare = false, onLin
           }}
         >
           <div style={{ flex: 1, minWidth: 0 }}>
-            <div style={{ font: `400 12px ${font.body}`, color: color.textTertiary }}>{TODAY}</div>
+            <div style={{ font: `400 12px ${font.body}`, color: color.textTertiary }}>{data?.date}</div>
             <ScreenTitle style={{ marginTop: 3 }}>{data?.name}</ScreenTitle>
           </div>
           <Avatar size={40} />
@@ -59,7 +63,12 @@ export default function ParentDashboard({ variant = 'three', bare = false, onLin
         {flagged ? <PaymentBanner billing={billing} /> : null}
 
         {children.map((child) => (
-          <ChildCard key={child.id} child={child} onHold={flagged} />
+          <ChildCard
+            key={child.id}
+            child={child}
+            onHold={flagged}
+            onOpen={onOpenAthlete ? () => onOpenAthlete(child.id) : undefined}
+          />
         ))}
 
         {/* Hidden while billing is flagged - adding an athlete to a household
@@ -118,13 +127,16 @@ function PaymentBanner({ billing }) {
  * differently shaped blocks. Nico has no contract data and the card still holds
  * its shape.
  */
-function ChildCard({ child, onHold }) {
+function ChildCard({ child, onHold, onOpen }) {
   const standing = onHold
     ? { tone: 'red', label: 'On hold' }
     : child.standing;
 
   return (
-    <Card large style={{ minHeight: 198 }}>
+    // The whole card opens the athlete's detail (09) - the handoff's flow has
+    // 08's child cards leading there, and a card this dense has no room for a
+    // separate affordance.
+    <Card large onClick={onOpen} style={{ minHeight: 198 }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
         <Avatar size={44} />
         <div style={{ flex: 1, minWidth: 0 }}>

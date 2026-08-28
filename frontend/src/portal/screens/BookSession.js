@@ -8,7 +8,8 @@ import { CapacityPill } from '../components/StatusBadge';
 import AllowancePools, { SpendNote } from '../components/AllowancePools';
 import { Banner, Body, Card, ScreenTitle, Tick } from '../components/Primitives';
 import { useBooking } from '../hooks';
-import { BOOKING_CONFIRMATION } from '../data/seed';
+// poolFor is domain logic, not response data - the pure helpers in packages.js
+// stay importable; it is the data that has to travel through the hook seam.
 import { poolFor } from '../data/packages';
 
 /**
@@ -34,7 +35,9 @@ export default function BookSession({ variant = 'open', bare = false, onBack }) 
   const activeDate = selected ?? dates[0]?.iso ?? null;
   const slots = (data?.slots ?? []).filter((s) => s.date === activeDate);
 
-  if (variant === 'confirmed') return <Confirmed bare={bare} onBack={onBack} />;
+  if (variant === 'confirmed') {
+    return <Confirmed bare={bare} confirmation={data?.confirmation} onBack={onBack} />;
+  }
 
   return (
     <PhoneFrame
@@ -189,8 +192,9 @@ function DateStrip({ dates, selected, onSelect }) {
   );
 }
 
-function Confirmed({ bare, onBack }) {
-  const c = BOOKING_CONFIRMATION;
+function Confirmed({ bare, confirmation, onBack }) {
+  const c = confirmation;
+  if (!c) return null;
 
   return (
     <PhoneFrame

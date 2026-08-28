@@ -23,15 +23,17 @@ import { useNotificationPrefs } from '../hooks';
  */
 export default function NotificationPreferences({ variant = 'default', bare = false }) {
   const { data } = useNotificationPrefs({ variant });
-  const [prefs, setPrefs] = useState(() =>
-    (data?.categories ?? []).reduce(
-      (acc, c) => ({ ...acc, [c.id]: { email: c.email, sms: c.sms } }),
-      {}
-    )
-  );
 
-  const set = (id, channel, value) =>
-    setPrefs((prev) => ({ ...prev, [id]: { ...prev[id], [channel]: value } }));
+  // Local state holds only the parent's changes, keyed "categoryId.channel";
+  // anything untouched reads its default from the hook data at render time.
+  // Seeding a useState from `data` would freeze empty the moment the seam
+  // returns asynchronously - the first render of a real fetch has data: null,
+  // and a lazy initializer never runs again.
+  const [overrides, setOverrides] = useState({});
+
+  const valueFor = (cat, channel) => overrides[`${cat.id}.${channel}`] ?? cat[channel];
+  const set = (cat, channel, value) =>
+    setOverrides((prev) => ({ ...prev, [`${cat.id}.${channel}`]: value }));
 
   return (
     <PhoneFrame
@@ -52,8 +54,8 @@ export default function NotificationPreferences({ variant = 'default', bare = fa
           <CategoryCard
             key={cat.id}
             category={cat}
-            value={prefs[cat.id] ?? { email: cat.email, sms: cat.sms }}
-            onChange={(channel, v) => set(cat.id, channel, v)}
+            value={{ email: valueFor(cat, 'email'), sms: valueFor(cat, 'sms') }}
+            onChange={(channel, v) => set(cat, channel, v)}
           />
         ))}
 
@@ -172,33 +174,46 @@ function CategoryCard({ category, value, onChange }) {
  */
 function LockedToggle({ label }) {
   return (
+    // Same 52x44 footprint as the live Toggle so the columns align and the
+    // (deliberately inert) control still meets the touch floor.
     <span
       role="switch"
       aria-checked="true"
       aria-disabled="true"
       aria-label={`${label} — always on`}
       style={{
-        width: 42,
-        height: 25,
-        borderRadius: radius.round,
-        background: 'rgba(0,175,81,.35)',
-        border: '1px solid rgba(0,175,81,.5)',
-        padding: 2,
-        display: 'flex',
-        justifyContent: 'flex-end',
-        alignItems: 'center',
+        width: 52,
+        height: 44,
+        display: 'grid',
+        placeItems: 'center',
         cursor: 'not-allowed',
       }}
     >
       <span
+        aria-hidden="true"
         style={{
-          width: 19,
-          height: 19,
-          borderRadius: '50%',
-          background: tint.greenStrong,
-          display: 'block',
+          width: 42,
+          height: 25,
+          borderRadius: radius.round,
+          background: 'rgba(0,175,81,.35)',
+          border: '1px solid rgba(0,175,81,.5)',
+          padding: 2,
+          boxSizing: 'border-box',
+          display: 'flex',
+          justifyContent: 'flex-end',
+          alignItems: 'center',
         }}
-      />
+      >
+        <span
+          style={{
+            width: 19,
+            height: 19,
+            borderRadius: '50%',
+            background: tint.greenStrong,
+            display: 'block',
+          }}
+        />
+      </span>
     </span>
   );
 }
