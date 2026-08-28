@@ -10,10 +10,30 @@
  * only. The handoff is explicit that every request must re-check the caller's
  * role *and* row-level ownership server-side - a parent must never be able to
  * reach another family's records by guessing an id. Nothing in this directory
- * substitutes for that.
+ * substitutes for that. For the live path, firestore.rules is that boundary.
+ *
+ * Live data: when REACT_APP_PORTAL_LIVE_DATA === 'true', useSchedule and
+ * useBooking source from the Firestore adapter in ./live.js instead of seed
+ * data - same payload shapes, arriving async through useSeedResource's
+ * source mode, so screens see {data: null, loading: true} first and cannot
+ * tell the modes apart. With the flag unset the seed path is untouched and
+ * the demo needs no emulator, no network, and no signed-in user.
  */
 
+import { useRef } from 'react';
 import useSeedResource from './useSeedResource';
+import {
+  ERR,
+  LiveDataError,
+  createBooking,
+  fetchAthlete,
+  fetchBookings,
+  fetchCurrentUser,
+  fetchPackage,
+  fetchSessions,
+  fetchSessionsByIds,
+  isLive,
+} from './live';
 import {
   COACH,
   COACH_BLOCKS,
@@ -42,6 +62,8 @@ import {
   ELITE_TIERS,
   FITNESS_PACKAGES,
   GOLF_PACKAGES,
+  makeAllowance,
+  poolFor,
 } from '../data/packages';
 import {
   HOLIDAY_CLOSURES_2026_27,
@@ -65,6 +87,7 @@ import {
 import {
   buildContractMonth,
   longDayLabel,
+  nextMonthFirstShort,
   pickDueDates,
   todayISO,
 } from '../data/calendar';
@@ -127,14 +150,148 @@ function displaySession(s, today) {
 }
 
 /**
+ * Shared copy for the booking waitlist note - one string, both data modes.
+ */
+const WAITLIST_NOTE =
+  'Join the waitlist - you are notified if a spot opens, and unlimited makeups still apply.';
+
+/* ------------------------------------------------------------------------- *
+ * Live assembly - Firestore docs (via ./live.js) into the exact payload
+ * shapes the seed path produces. Screens must not be able to tell the modes
+ * apart, so any shape decision here defers to the seed code above/below it.
+ * ------------------------------------------------------------------------- */
+
+/**
+ * Who the signed-in user is and what they may book against: their users doc,
+ * their athlete record, its package, and every booking on file. This sprint
+ * wires the athlete surface only - a parent booking for a linked athlete
+ * needs an athlete picker first, which is a frontend/PM sequencing question.
+ */
+async function liveAthleteContext() {
+  const profile = await fetchCurrentUser();
+  if (!profile.athleteId) {
+    throw new LiveDataError(
+      ERR.INVALID,
+      `users/${profile.uid} has no athleteId - the live schedule and booking ` +
+        'surfaces are wired for athlete-linked accounts only in this sprint.'
+    );
+  }
+  const athlete = await fetchAthlete(profile.athleteId);
+  const pkg = athlete.packageId ? await fetchPackage(athlete.packageId) : null;
+  const bookings = await fetchBookings(profile.athleteId);
+  return { profile, athlete, pkg, bookings };
+}
+
+/**
+ * The two-pool allowance, derived by counting this cycle's bookings against
+ * the package limits - per the contract there is no stored counter to drift.
+ * Cancelled bookings do not spend; attended/no-show ones already did.
+ * The cycle is the calendar month, resetting on the first (matching the
+ * seed's RESETS_ON); true Stripe billing anchors are a later refinement.
+ */
+function deriveAllowance(pkg, bookings, today) {
+  if (!pkg) return null;
+  const cycleStart = `${today.slice(0, 7)}-01`;
+  const spent = bookings.filter((b) => b.status !== 'cancelled' && b.date >= cycleStart);
+  return makeAllowance(pkg, {
+    trainingUsed: spent.filter((b) => b.pool === 'training').length,
+    tournamentsUsed: spent.filter((b) => b.pool === 'tournaments').length,
+    resetsOn: nextMonthFirstShort(today),
+  });
+}
+
+/** Sort key: chronological, then block order (session ids end in the block index). */
+function byDateThenId(a, b) {
+  return a.date === b.date ? (a.id < b.id ? -1 : 1) : a.date < b.date ? -1 : 1;
+}
+
+/** Live payload for useSchedule - same shape as the seed branch produces. */
+async function liveSchedule(today) {
+  const ctx = await liveAthleteContext();
+  const active = ctx.bookings.filter((b) => b.status !== 'cancelled');
+
+  // Join bookings to their session docs - time, label and overflow/special
+  // flags live on the session, and a booking whose session no longer exists
+  // is dropped rather than rendered, mirroring the seed's null-resolve rule.
+  const sessionsById = new Map(
+    (await fetchSessionsByIds(active.map((b) => b.sessionId))).map((s) => [s.id, s])
+  );
+  const resolve = (b) => {
+    const s = sessionsById.get(b.sessionId);
+    return s
+      ? {
+          ...displaySession(s, today),
+          badge: b.status === 'confirmed' ? { tone: 'green', label: 'Confirmed' } : null,
+        }
+      : null;
+  };
+
+  const upcoming = active.filter((b) => b.date >= today).map(resolve).filter(Boolean);
+  const past = active.filter((b) => b.date < today).map(resolve).filter(Boolean);
+  upcoming.sort(byDateThenId);
+  past.sort((a, b) => -byDateThenId(a, b)); // most recent first
+
+  return {
+    sessions: upcoming,
+    past,
+    // Academy-cancellation banners need a cancellation reason the contract
+    // does not carry yet - flagged in the routing report, null until then.
+    cancelled: null,
+    allowance: deriveAllowance(ctx.pkg, ctx.bookings, today),
+  };
+}
+
+/**
+ * Live payload for useBooking, plus the identity the book() action needs.
+ * The hook strips `identity` off before it reaches the screen - the payload
+ * the screen sees is shape-identical to the seed branch.
+ */
+async function liveBooking(today) {
+  const ctx = await liveAthleteContext();
+  const sessions = await fetchSessions(today, 7);
+  sessions.sort(byDateThenId);
+
+  const dates = [...new Set(sessions.map((s) => s.date))].map(datePill);
+  const slots = sessions.map((s) => ({
+    ...displaySession(s, today),
+    time: s.time,
+    capacity: capacityFor(s),
+    note: WAITLIST_NOTE,
+  }));
+
+  const seasonNote =
+    dates.length && dates[0].iso > today
+      ? `The 26/27 season opens ${dayLabel(dates[0].iso, today)} — these are the first bookable blocks.`
+      : null;
+
+  return {
+    dates,
+    slots,
+    allowance: deriveAllowance(ctx.pkg, ctx.bookings, today),
+    seasonNote,
+    // Same shape as the seed confirmation; the email is the real account's,
+    // and name/when/pool are filled by the screen from the booked slot.
+    confirmation: { ...BOOKING_CONFIRMATION, email: ctx.profile.email },
+    identity: { athleteId: ctx.athlete.id, householdId: ctx.athlete.householdId },
+  };
+}
+
+/**
  * GET /schedule/availability + GET /athletes/:id/allowance (04).
  *
- * The athlete's bookings are { date, block } references resolved against the
- * generated season, so what My Schedule shows can never contradict what Book a
- * Session offers - same session objects, same types, same times. A reference
- * into a closure resolves to null and is dropped rather than rendered.
+ * Seed mode: the athlete's bookings are { date, block } references resolved
+ * against the generated season, so what My Schedule shows can never contradict
+ * what Book a Session offers - same session objects, same types, same times. A
+ * reference into a closure resolves to null and is dropped rather than
+ * rendered.
+ *
+ * Live mode: bookings/{athleteId} joined to their session docs, same shape.
+ * The demo-state `variant` knob only applies to seed data - live data shows
+ * whatever is real.
  */
 export function useSchedule({ variant = 'upcoming', today = todayISO() } = {}) {
+  const live = isLive();
+
   const resolve = (refs) =>
     refs
       .map((ref) => {
@@ -147,7 +304,10 @@ export function useSchedule({ variant = 'upcoming', today = todayISO() } = {}) {
   const past = variant === 'empty' ? [] : resolve(BOOKED_PAST);
   const cancelled = variant === 'cancelled' ? CANCELLED_SESSION : null;
 
-  return useSeedResource({ sessions, past, cancelled, allowance: ALLOWANCE });
+  return useSeedResource(
+    live ? undefined : { sessions, past, cancelled, allowance: ALLOWANCE },
+    live ? { source: () => liveSchedule(today), deps: ['schedule', today] } : undefined
+  );
 }
 
 /**
@@ -160,8 +320,20 @@ export function useSchedule({ variant = 'upcoming', today = todayISO() } = {}) {
  * The limit states are per pool, because the pools are independent: a spent
  * tournament allowance leaves every training block bookable, and the reverse.
  * A single `limit` variant could not express either case honestly.
+ *
+ * Live mode sources sessions and the derived allowance from Firestore, and
+ * the returned `book(slot)` persists a booking through the adapter - which
+ * pool it spends is recorded on the write, and firestore.rules re-checks it
+ * against the session's real type. In seed mode book(slot) resolves locally,
+ * matching today's screen behavior (the screen keeps the booked slot in
+ * component state).
  */
 export function useBooking({ variant = 'open', today = todayISO() } = {}) {
+  const live = isLive();
+  // Who the booking is for, captured when the live source resolves. A ref,
+  // not state: it never drives a render, only the book() write.
+  const identityRef = useRef(null);
+
   const dates = upcomingDates(SEASON, today, 7).map(datePill);
 
   const slots = dates.flatMap((d) =>
@@ -174,8 +346,7 @@ export function useBooking({ variant = 'open', today = todayISO() } = {}) {
         variant === 'full'
           ? { state: 'full', label: 'Full' }
           : capacityFor(s),
-      note:
-        'Join the waitlist - you are notified if a spot opens, and unlimited makeups still apply.',
+      note: WAITLIST_NOTE,
     }))
   );
 
@@ -194,7 +365,45 @@ export function useBooking({ variant = 'open', today = todayISO() } = {}) {
       ? `The 26/27 season opens ${dayLabel(dates[0].iso, today)} — these are the first bookable blocks.`
       : null;
 
-  return useSeedResource({ dates, slots, allowance, seasonNote, confirmation: BOOKING_CONFIRMATION });
+  const state = useSeedResource(
+    live ? undefined : { dates, slots, allowance, seasonNote, confirmation: BOOKING_CONFIRMATION },
+    live
+      ? {
+          source: async () => {
+            const { identity, ...payload } = await liveBooking(today);
+            identityRef.current = identity;
+            return payload;
+          },
+          deps: ['booking', today],
+        }
+      : undefined
+  );
+
+  /**
+   * Persist a booking for a slot off this hook's `data.slots`. Additive to the
+   * {data, loading, error} contract - existing screens ignore it; wiring the
+   * confirm tap to `await book(slot)` is the frontend lane's move.
+   */
+  const book = async (slot) => {
+    if (!live) return slot;
+    const identity = identityRef.current;
+    if (!identity) {
+      throw new LiveDataError(
+        ERR.INVALID,
+        'book() called before the booking data finished loading.'
+      );
+    }
+    return createBooking({
+      athleteId: identity.athleteId,
+      sessionId: slot.id,
+      date: slot.date,
+      type: slot.type,
+      pool: poolFor(slot.type),
+      householdId: identity.householdId,
+    });
+  };
+
+  return { ...state, book };
 }
 
 /** GET /athletes?guardian=:id + GET /billing/:householdId (08). */
