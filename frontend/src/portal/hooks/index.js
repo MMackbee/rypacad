@@ -18,6 +18,17 @@
  * source mode, so screens see {data: null, loading: true} first and cannot
  * tell the modes apart. With the flag unset the seed path is untouched and
  * the demo needs no emulator, no network, and no signed-in user.
+ *
+ * Practice mode (Onboarding program v1, docs/portal/TEAM.md): useSchedule and
+ * useBooking accept { practice: true }, which pins the hook to the seed source
+ * even when REACT_APP_PORTAL_LIVE_DATA === 'true'. INVARIANT: onboarding /
+ * practice performs ZERO Firestore writes (and no live reads either) — the
+ * practice check short-circuits before isLive() is consulted, so nothing in
+ * ./live.js can execute, and book() resolves locally. Why: onboarding is a
+ * family learning the app by doing the real actions on the real screens, and
+ * a learner must not be able to create a real booking (or spend a real
+ * allowance) by practicing. Practice entries are component state, badged
+ * PRACTICE, and reset on exit.
  */
 
 import { useRef } from 'react';
@@ -122,6 +133,7 @@ import {
 export { default as useSeedResource } from './useSeedResource';
 export { default as useAuthSession } from './useAuthSession';
 export { default as useRoster } from './useRoster';
+export { default as useOnboardingStatus } from './onboarding';
 
 /**
  * Harness demo states (contract v1.1): every data-bearing hook accepts
@@ -301,9 +313,14 @@ async function liveBooking(today) {
  * Live mode: bookings/{athleteId} joined to their session docs, same shape.
  * The demo-state `variant` knob only applies to seed data - live data shows
  * whatever is real.
+ *
+ * `practice: true` (onboarding) pins this hook to the seed source regardless
+ * of the live flag — see the practice-mode invariant in the file header.
  */
-export function useSchedule({ variant = 'upcoming', today = todayISO() } = {}) {
-  const live = isLive();
+export function useSchedule({ variant = 'upcoming', today = todayISO(), practice = false } = {}) {
+  // Practice short-circuits before isLive(): with practice set, the live
+  // source below is unreachable and ./live.js never runs.
+  const live = !practice && isLive();
 
   const resolve = (refs) =>
     refs
@@ -341,9 +358,16 @@ export function useSchedule({ variant = 'upcoming', today = todayISO() } = {}) {
  * against the session's real type. In seed mode book(slot) resolves locally,
  * matching today's screen behavior (the screen keeps the booked slot in
  * component state).
+ *
+ * `practice: true` (onboarding) pins this hook to the seed source regardless
+ * of the live flag, and book(slot) resolves locally exactly as seed mode
+ * does — see the practice-mode invariant in the file header.
  */
-export function useBooking({ variant = 'open', today = todayISO() } = {}) {
-  const live = isLive();
+export function useBooking({ variant = 'open', today = todayISO(), practice = false } = {}) {
+  // Practice short-circuits before isLive(): with practice set, the live
+  // source below is unreachable, ./live.js never runs, and book() takes the
+  // local (seed) branch — a practice booking cannot become a real one.
+  const live = !practice && isLive();
   // Who the booking is for, captured when the live source resolves. A ref,
   // not state: it never drives a render, only the book() write.
   const identityRef = useRef(null);
