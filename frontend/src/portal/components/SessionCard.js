@@ -31,7 +31,7 @@ const VARIANTS = {
  * @param {string} time      "4:00"
  * @param {string} meridiem  "PM"
  * @param {'training'|'tournament'|'cancelled'|'makeup'|'diagnostic'} type
- * @param {string} name      Rotation name, e.g. "The Lab"
+ * @param {string} name      Block name, e.g. "Training block" or a real event label
  * @param {string} meta      "Sim 2 · Luke"
  * @param {React.ReactNode} trailing  Status badge or capacity pill.
  * @param {React.ReactNode} footnote  Expanded note, separated by a rule.

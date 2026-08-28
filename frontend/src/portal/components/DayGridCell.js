@@ -73,50 +73,6 @@ export default function DayGridCell({ state = 'open', day, size, onClick }) {
   );
 }
 
-const WEEKDAY_LETTERS = ['M', 'T', 'W', 'T', 'F', 'S', 'S'];
-
-/**
- * Monday-first month grid.
- *
- * Read-only by design: tapping a past day opens a sheet rather than editing
- * inline, so a mis-tap while walking cannot silently change a record.
- */
-export function DayGrid({ days = [], onSelectDay }) {
-  return (
-    <div>
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(7, 1fr)', gap: 5, marginBottom: 5 }}>
-        {WEEKDAY_LETTERS.map((letter, i) => (
-          <div
-            key={`${letter}-${i}`}
-            style={{
-              textAlign: 'center',
-              font: `500 10px ${font.body}`,
-              color: i >= 5 ? '#4a4a4a' : color.textTertiary,
-            }}
-          >
-            {letter}
-          </div>
-        ))}
-      </div>
-
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(7, 1fr)', gap: 5 }}>
-        {days.map((d) => (
-          <DayGridCell
-            key={d.day}
-            state={d.state}
-            day={d.day}
-            onClick={
-              onSelectDay && (d.state === 'missed' || d.state === 'logged')
-                ? () => onSelectDay(d)
-                : undefined
-            }
-          />
-        ))}
-      </div>
-    </div>
-  );
-}
-
 /** Legend, so "closed" reading as "missed" is impossible on first look. */
 export function DayGridLegend() {
   const items = [

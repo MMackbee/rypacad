@@ -3,7 +3,8 @@ import { color, font, glow, radius, tint } from '../tokens';
 import BottomTabBar from '../components/BottomTabBar';
 import Button from '../components/Button';
 import PhoneFrame from '../components/PhoneFrame';
-import { DayGrid, DayGridLegend } from '../components/DayGridCell';
+import ContractCalendar from '../components/ContractCalendar';
+import { DayGridLegend } from '../components/DayGridCell';
 import { Body, Card, ScreenTitle } from '../components/Primitives';
 import { useContract } from '../hooks';
 
@@ -55,20 +56,24 @@ export default function CommitmentContract({ variant = 'ontrack', bare = false, 
       footer={<ContractFooter complete={complete} hint={state?.hint} onLog={onLog} minutes={data?.tierMinutes} />}
     >
       <div style={{ padding: '0 22px 20px', display: 'flex', flexDirection: 'column', gap: 14, position: 'relative' }}>
-        <HeroCard state={state} total={data?.totalDays} behind={behind} complete={complete} />
+        <HeroCard state={state} stats={data?.stats} behind={behind} complete={complete} />
 
         <Card large>
-          <DayGrid days={data?.grid ?? []} onSelectDay={setSheetDay} />
+          {/* FullCalendar draws the real current month; we only paint states. */}
+          <ContractCalendar
+            start={data?.month?.start}
+            dayStates={data?.dayStates ?? {}}
+            onSelectDay={setSheetDay}
+          />
           <Body size={11} tone={color.textTertiary} style={{ marginTop: 13 }}>
-            Weekends are not contract days. Feb 15 was a Presidents’ Day closure and does not count
-            against you.
+            {data?.caption}
           </Body>
           <div style={{ marginTop: 12 }}>
             <DayGridLegend />
           </div>
         </Card>
 
-        <StatsRow state={state} />
+        <StatsRow stats={data?.stats} />
       </div>
 
       {sheetDay ? <DaySheet day={sheetDay} onClose={() => setSheetDay(null)} /> : null}
@@ -103,9 +108,11 @@ function StatusPill({ badge }) {
   );
 }
 
-function HeroCard({ state, total, behind, complete }) {
+function HeroCard({ state, stats, behind, complete }) {
   const border = behind ? color.error : complete ? color.secondary : color.primary;
-  const pct = total ? Math.round((state.logged / total) * 100) : 0;
+  const total = stats?.contractDays ?? 0;
+  const logged = stats?.logged ?? 0;
+  const pct = total ? Math.round((logged / total) * 100) : 0;
 
   return (
     <div
@@ -124,7 +131,7 @@ function HeroCard({ state, total, behind, complete }) {
             color: behind ? color.error : color.text,
           }}
         >
-          {state.logged}
+          {logged}
         </span>
         <span style={{ font: `400 15px ${font.body}`, color: color.textSecondary }}>
           of {total} contract days
@@ -161,16 +168,16 @@ function HeroCard({ state, total, behind, complete }) {
   );
 }
 
-function StatsRow({ state }) {
-  const stats = [
-    [state.streak, 'day streak'],
-    [state.minutes, 'minutes logged'],
-    [state.daysLeft, 'days left'],
+function StatsRow({ stats }) {
+  const rows = [
+    [stats?.streak ?? 0, 'day streak'],
+    [stats?.minutes ?? 0, 'minutes logged'],
+    [stats?.daysLeft ?? 0, 'days left'],
   ];
 
   return (
     <div style={{ display: 'flex' }}>
-      {stats.map(([value, label], i) => (
+      {rows.map(([value, label], i) => (
         <div
           key={label}
           style={{
@@ -233,6 +240,12 @@ function ContractFooter({ complete, hint, onLog, minutes }) {
 }
 
 /** Read-only grid: a past day opens this rather than toggling in place. */
+/** '2026-08-14' -> 'August 14', via the platform, not hand math. */
+function sheetTitle(iso) {
+  const [y, m, d] = iso.split('-').map(Number);
+  return new Date(y, m - 1, d).toLocaleDateString('en-US', { month: 'long', day: 'numeric' });
+}
+
 function DaySheet({ day, onClose }) {
   return (
     <div
@@ -255,7 +268,7 @@ function DaySheet({ day, onClose }) {
           padding: '20px 22px 26px',
         }}
       >
-        <ScreenTitle size={19}>February {day.day}</ScreenTitle>
+        <ScreenTitle size={19}>{sheetTitle(day.iso)}</ScreenTitle>
         <Body size={12} style={{ marginTop: 8 }}>
           {day.state === 'logged'
             ? 'Logged. Tap below to remove this entry if it was recorded by mistake.'

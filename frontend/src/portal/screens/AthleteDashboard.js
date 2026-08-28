@@ -76,29 +76,27 @@ function NextSessionCard({ next }) {
     <Card tone="green" large style={{ boxShadow: glow.emphasisCard }}>
       <div style={{ display: 'flex', alignItems: 'baseline', gap: 10 }}>
         <SectionLabel tone={color.primary} style={{ flex: 1 }}>
-          {next.label}
+          {next.isToday ? 'Next session · today' : 'Next session'}
         </SectionLabel>
         <span style={{ font: `500 11px ${font.body}`, color: color.textSecondary }}>
-          {next.countdown}
+          {next.dayLabel}
         </span>
       </div>
 
       <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 12 }}>
         <TypeChip type={next.type} />
-        <span style={{ font: `400 11px ${font.body}`, color: color.textTertiary }}>
-          {next.block}
-        </span>
       </div>
 
       <div style={{ font: `700 20px ${font.head}`, color: color.text, marginTop: 8 }}>
-        {next.rotation}
+        {next.name}
       </div>
 
+      {/* Coach and bay are unassigned in the schedule - nothing is invented. */}
       <div style={{ display: 'flex', gap: 0, marginTop: 14 }}>
         {[
-          ['Time', next.time],
-          ['Bay', next.bay],
-          ['Coach', next.coach],
+          ['Time', `${next.time} ${next.meridiem}`],
+          ['Day', next.dayLabel],
+          ['Type', next.type === 'tournament' ? 'Tournament' : 'Training'],
         ].map(([label, value]) => (
           <div key={label} style={{ flex: 1 }}>
             <div

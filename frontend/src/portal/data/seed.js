@@ -9,14 +9,22 @@
  * directly - they read through the hooks in ../hooks, which is the seam that
  * gets swapped for the real API.
  *
- * The scaffold is set in February 2027, matching the artboards (Thursday Feb 18,
- * Presidents' Day closure Mon Feb 15, billing cycle resetting Mar 1).
+ * Dates key off the real calendar (see ./calendar.js): headers show the actual
+ * today, allowances reset on the first of the next real month, and bookings
+ * reference the generated season's opening week. Session names are the generic
+ * "Training block" / "Tournament block" - the Workshop/Lab/Arena rotation was a
+ * placeholder, and no invented name ships before real sessions exist to book.
  */
 
 import { BLOCKS } from '../tokens';
 import { GOLF_PACKAGES, makeAllowance } from './packages';
+import { longDayLabel, nextMonthFirstShort, todayISO } from './calendar';
 
-export const TODAY = 'Thursday, Feb 18';
+/** The real current date, formatted for screen headers. */
+export const TODAY = longDayLabel(todayISO());
+
+/** Allowances reset on the first of the next real month. */
+const RESETS_ON = nextMonthFirstShort(todayISO());
 
 /** Three separate decisions. Media release is optional and never bundled. */
 export const CONSENTS = [
@@ -64,19 +72,18 @@ export const RELATIONSHIPS = ['Mother', 'Father', 'Guardian', 'Grandparent', 'Ot
  * session.
  */
 export const BOOKED_UPCOMING = [
-  { date: '2027-02-18', block: 1, badge: { tone: 'green', label: 'Confirmed' } }, // today 4:00 PM
-  { date: '2027-02-20', block: 1 }, // Sat 10:30 AM — tournament, spends the other pool
-  { date: '2027-02-20', block: 2 }, // Sat 12:30 PM training
-  { date: '2027-02-22', block: 2 }, // Mon 5:00 PM
-  { date: '2027-02-25', block: 0 }, // Thu 3:00 PM
+  { date: '2026-11-02', block: 1, badge: { tone: 'green', label: 'Confirmed' } }, // Mon 4:00 PM, season opener
+  { date: '2026-11-07', block: 1 }, // Sat 10:30 AM tournament — spends the other pool
+  { date: '2026-11-07', block: 2 }, // Sat 12:30 PM training
+  { date: '2026-11-09', block: 2 }, // Mon 5:00 PM
+  { date: '2026-11-12', block: 0 }, // Thu 3:00 PM
 ];
 
-/** Sessions already attended, for the Past tab. */
-export const BOOKED_PAST = [
-  { date: '2027-02-16', block: 1 },
-  { date: '2027-02-13', block: 0 }, // Sat 8:30 AM training
-  { date: '2027-02-11', block: 1 },
-];
+/**
+ * Sessions already attended. Empty before the season opens — the Past tab says
+ * "Nothing attended yet this season" rather than showing future dates as past.
+ */
+export const BOOKED_PAST = [];
 
 /**
  * Presidents' Day, Mon Feb 15 2027 - a Blueprint closure date. A cancelled block
@@ -89,7 +96,7 @@ export const CANCELLED_SESSION = {
   time: '4:00',
   meridiem: 'PM',
   type: 'cancelled',
-  name: 'The Workshop',
+  name: 'Training block',
   meta: 'Facility closed',
   banner: {
     title: 'Cancelled by academy',
@@ -114,27 +121,27 @@ export const ATHLETE_PACKAGE = GOLF_PACKAGES.find((p) => p.id === 'g-8-3');
 export const ALLOWANCE = makeAllowance(ATHLETE_PACKAGE, {
   trainingUsed: 3,
   tournamentsUsed: 1,
-  resetsOn: 'Mar 1',
+  resetsOn: RESETS_ON,
 });
 
 /** Same package, tournament pool spent — the state a single-pool model hid. */
 export const ALLOWANCE_NO_TOURNAMENTS = makeAllowance(ATHLETE_PACKAGE, {
   trainingUsed: 3,
   tournamentsUsed: ATHLETE_PACKAGE.tournaments,
-  resetsOn: 'Mar 1',
+  resetsOn: RESETS_ON,
 });
 
 /** Training pool spent, tournament entries still available. */
 export const ALLOWANCE_NO_TRAINING = makeAllowance(ATHLETE_PACKAGE, {
   trainingUsed: ATHLETE_PACKAGE.training,
   tournamentsUsed: 1,
-  resetsOn: 'Mar 1',
+  resetsOn: RESETS_ON,
 });
 
 export const BOOKING_CONFIRMATION = {
-  name: 'The Workshop',
-  when: 'Thu Feb 18 · 3:00 PM',
-  coach: 'Luke',
+  name: 'Training block',
+  when: 'Mon Nov 2 · 4:00 PM',
+  pool: 'training',
   email: 'dana@email.com',
   note:
     'Cancel up to 12 hours ahead to keep this as an unlimited makeup rather than a used session.',
@@ -150,13 +157,13 @@ export const HOUSEHOLD = {
       age: 13,
       ageLine: 'Age 13 · 45 min tier',
       standing: { tone: 'green', label: 'On track' },
-      next: { type: 'training', when: 'Today 4:00 PM', meta: 'The Lab · Sim 2 · Luke' },
+      next: { type: 'training', when: 'Mon 4:00 PM', meta: 'Training block' },
       contract: 92,
       packageId: 'g-8-3',
       allowance: makeAllowance(GOLF_PACKAGES.find((p) => p.id === 'g-8-3'), {
         trainingUsed: 3,
         tournamentsUsed: 1,
-        resetsOn: 'Mar 1',
+        resetsOn: RESETS_ON,
       }),
     },
     {
@@ -165,7 +172,7 @@ export const HOUSEHOLD = {
       age: 11,
       ageLine: 'Age 11 · 20 min tier',
       standing: { tone: 'yellow', label: 'Behind' },
-      next: { type: 'tournament', when: 'Sat 8:30 AM', meta: 'The Arena · Brock' },
+      next: { type: 'tournament', when: 'Sat 10:30 AM', meta: 'Tournament block' },
       contract: 54,
       packageId: 'g-4-2',
       /**
@@ -176,7 +183,7 @@ export const HOUSEHOLD = {
       allowance: makeAllowance(GOLF_PACKAGES.find((p) => p.id === 'g-4-2'), {
         trainingUsed: 2,
         tournamentsUsed: 2,
-        resetsOn: 'Mar 1',
+        resetsOn: RESETS_ON,
       }),
     },
     {
@@ -185,13 +192,13 @@ export const HOUSEHOLD = {
       age: 9,
       ageLine: 'Age 9 · new Feb 8',
       standing: { tone: 'neutral', label: 'New', dashed: true },
-      next: { type: 'training', when: 'Mon 5:00 PM', meta: 'The Workshop · Luke' },
+      next: { type: 'training', when: 'Mon 5:00 PM', meta: 'Training block' },
       contract: null,
       packageId: 'g-4-2',
       allowance: makeAllowance(GOLF_PACKAGES.find((p) => p.id === 'g-4-2'), {
         trainingUsed: 0,
         tournamentsUsed: 0,
-        resetsOn: 'Mar 1',
+        resetsOn: RESETS_ON,
       }),
     },
   ],
@@ -214,7 +221,7 @@ export const COACH_BLOCKS = [
     id: 'cb1',
     time: BLOCKS[0],
     type: 'training',
-    name: 'The Workshop',
+    name: 'Training block',
     meta: 'Sim 1 · 5 expected',
     status: 'closed',
   },
@@ -222,7 +229,7 @@ export const COACH_BLOCKS = [
     id: 'cb2',
     time: BLOCKS[1],
     type: 'training',
-    name: 'The Lab',
+    name: 'Training block',
     meta: 'Sim Bay 2 · 6 expected',
     status: 'now',
   },
@@ -230,7 +237,7 @@ export const COACH_BLOCKS = [
     id: 'cb3',
     time: BLOCKS[2],
     type: 'training',
-    name: 'The Arena',
+    name: 'Training block',
     meta: 'Bay 4 · 4 expected',
     status: 'next',
   },
@@ -245,7 +252,7 @@ export const COACH_BLOCKS_CONCURRENT = [
     id: 'cc1',
     time: BLOCKS[1],
     type: 'training',
-    name: 'The Lab',
+    name: 'Training block',
     meta: 'Sim Bay 2 · 6 expected',
     status: 'now',
   },
@@ -275,7 +282,7 @@ export const SESSION = {
   id: 'cb2',
   type: 'training',
   blockLabel: 'Block 2 of 3',
-  name: 'The Lab',
+  name: 'Training block',
   meta: '4:00-5:00 PM · Sim Bay 2 · 6 expected',
   startsIn: 'Starts in 12 min',
 };

@@ -186,14 +186,14 @@ function ComponentGallery() {
       <div style={{ display: 'flex', flexWrap: 'wrap', gap: 22 }}>
         <Spec label="Session card · 5 variants">
           <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-            <SessionCard time="4:00" type="training" name="The Lab" meta="Sim 2 · Luke"
+            <SessionCard time="4:00" type="training" name="Training block" meta="Sim 2 · Luke"
               trailing={<StatusBadge tone="green">Confirmed</StatusBadge>} />
-            <SessionCard time="4:00" type="training" name="The Lab" meta="Sim 2 · Luke"
+            <SessionCard time="4:00" type="training" name="Training block" meta="Sim 2 · Luke"
               variant="live" trailing={<StatusBadge tone="green">Now</StatusBadge>} />
-            <SessionCard time="8:30" meridiem="AM" type="tournament" name="The Arena"
+            <SessionCard time="8:30" meridiem="AM" type="tournament" name="Tournament block"
               meta="Brock · net scoring" variant="tournament" />
-            <SessionCard time="5:00" type="cancelled" name="The Workshop" variant="cancelled" />
-            <SessionCard time="4:00" type="training" name="The Lab" meta="Sim 2" variant="full"
+            <SessionCard time="5:00" type="cancelled" name="Training block" variant="cancelled" />
+            <SessionCard time="4:00" type="training" name="Training block" meta="Sim 2" variant="full"
               trailing={<CapacityPill state="full">Full</CapacityPill>} />
           </div>
         </Spec>

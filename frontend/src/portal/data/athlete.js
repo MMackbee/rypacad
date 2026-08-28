@@ -5,36 +5,16 @@
  * Read through the hooks in ../hooks, never imported by a screen directly.
  */
 
-import { ALLOWANCE } from './seed';
+import { ALLOWANCE, TODAY } from './seed';
 
 export const ATHLETE = {
   name: 'Jordan',
   fullName: 'Jordan Whitfield',
-  date: 'Thursday, Feb 18',
+  date: TODAY,
   allowance: ALLOWANCE,
 };
 
 /* ---------------------------------------------------------------- 03 ----- */
-
-export const NEXT_SESSION = {
-  label: 'Next session · today',
-  countdown: 'in 5h 20m',
-  type: 'training',
-  block: 'Block 2 of 3',
-  rotation: 'The Lab',
-  time: '4:00 PM',
-  bay: 'Sim 2',
-  coach: 'Luke',
-};
-
-export const CONTRACT_SUMMARY = {
-  logged: 12,
-  total: 13,
-  month: 'February',
-  pct: 92,
-  tierMinutes: 45,
-  line: '45 min per day, 5 days a week. 6 contract days left this month.',
-};
 
 /** Blueprint section 1.2, quoted on the dashboard. */
 export const CODE_OF_GRIT = [
@@ -155,16 +135,6 @@ export const DNA_SUMMARY = {
 
 /* ---------------------------------------------------------------- 07 ----- */
 
-/**
- * February 2027 starts on a Monday, so a Monday-first grid needs no offset and
- * the month is exactly 28 cells / 4 rows.
- *
- * Contract days are weekdays only. Feb 15 is a Presidents' Day closure, which
- * is why the month has 19 contract days rather than 20 — a closure is never
- * counted against an athlete, and renders visually distinct from a missed day.
- */
-export const CONTRACT_MONTH = { label: 'February 2027', days: 28, closures: [15], today: 18 };
-
 export const CONTRACT_TIERS = [
   { minutes: 20, description: 'A focused block. Enough to hold a habit through the season.' },
   { minutes: 45, description: 'The standard commitment.', footnote: 'Most common tier' },
@@ -175,52 +145,5 @@ export const CONTRACT_TIERS = [
   },
 ];
 
-/** Day-by-day grid for a given state. Weekends and closures are recessive. */
-export function contractGrid(state) {
-  const { days, closures, today } = CONTRACT_MONTH;
-  const missedDays = state === 'behind' ? [3, 5, 10, 11, 17, 18] : [11];
 
-  return Array.from({ length: days }, (_, i) => {
-    const day = i + 1;
-    const dow = (day - 1) % 7; // 0 = Monday, February 2027 starts on a Monday
-    const weekend = dow >= 5;
 
-    if (weekend) return { day, state: 'weekend' };
-    if (closures.includes(day)) return { day, state: 'closed' };
-    if (state === 'complete') return { day, state: 'logged' };
-    if (day > today) return { day, state: 'open' };
-    return { day, state: missedDays.includes(day) ? 'missed' : 'logged' };
-  });
-}
-
-export const CONTRACT_STATES = {
-  ontrack: {
-    badge: { tone: 'green', label: 'On track' },
-    logged: 12,
-    line: '12 of 13 days due so far. Six contract days left — one miss still keeps the month.',
-    hint: 'One tap. Nothing else on this screen needs typing.',
-    streak: 4,
-    minutes: 540,
-    daysLeft: 6,
-  },
-  behind: {
-    badge: { tone: 'red', label: 'Behind' },
-    logged: 7,
-    line: 'Six days behind with six contract days left. Every remaining day has to be logged to make the Commitment Board.',
-    hint: 'Missed a day? Tap it in the grid to add a late entry.',
-    streak: 0,
-    minutes: 315,
-    daysLeft: 6,
-  },
-  complete: {
-    badge: { tone: 'yellow', label: 'Complete' },
-    logged: 19,
-    line: 'All 19 contract days logged. You are on February’s Commitment Board.',
-    hint: 'Weekends are not contract days.',
-    streak: 19,
-    minutes: 855,
-    daysLeft: 0,
-  },
-};
-
-export const CONTRACT_TOTAL_DAYS = 19;

@@ -26,6 +26,9 @@ import { poolFor } from '../data/packages';
 export default function BookSession({ variant = 'open', bare = false, onBack }) {
   const { data } = useBooking({ variant });
   const [selected, setSelected] = useState(null);
+  // The slot the athlete just booked. Persistence is the API's job later; the
+  // flow - tap a block, land on the confirmation - has to work now.
+  const [booked, setBooked] = useState(null);
 
   const dates = data?.dates ?? [];
   const allowance = data?.allowance;
@@ -34,6 +37,22 @@ export default function BookSession({ variant = 'open', bare = false, onBack }) 
   // hardcoded date that a closure could silently empty.
   const activeDate = selected ?? dates[0]?.iso ?? null;
   const slots = (data?.slots ?? []).filter((s) => s.date === activeDate);
+
+  if (booked) {
+    return (
+      <Confirmed
+        bare={bare}
+        confirmation={{
+          name: booked.name,
+          when: `${booked.dayLabel} · ${booked.time}`,
+          pool: poolFor(booked.type),
+          email: data?.confirmation?.email,
+          note: data?.confirmation?.note,
+        }}
+        onBack={() => setBooked(null)}
+      />
+    );
+  }
 
   if (variant === 'confirmed') {
     return <Confirmed bare={bare} confirmation={data?.confirmation} onBack={onBack} />;
@@ -50,8 +69,13 @@ export default function BookSession({ variant = 'open', bare = false, onBack }) 
       footer={<BottomTabBar role="athlete" active="schedule" />}
     >
       <div style={{ padding: '0 0 24px', display: 'flex', flexDirection: 'column', gap: 18 }}>
-        <div style={{ padding: '0 22px' }}>
+        <div style={{ padding: '0 22px', display: 'flex', flexDirection: 'column', gap: 12 }}>
           <AllowanceBanner allowance={allowance} />
+          {data?.seasonNote ? (
+            <Banner tone="green" title="Season">
+              {data.seasonNote}
+            </Banner>
+          ) : null}
         </div>
 
         <DateStrip dates={dates} selected={activeDate} onSelect={setSelected} />
@@ -77,6 +101,9 @@ export default function BookSession({ variant = 'open', bare = false, onBack }) 
                 variant={isFull || poolSpent ? 'full' : 'default'}
                 gutter={54}
                 ruleHeight={36}
+                // Tapping a bookable block books it; full or pool-spent blocks
+                // stay inert rather than failing at a later submit.
+                onClick={isFull || poolSpent ? undefined : () => setBooked(slot)}
                 spendNote={<SpendNote pool={pool} allowance={allowance} />}
                 trailing={
                   <CapacityPill state={isFull ? 'full' : poolSpent ? 'capped' : slot.capacity.state}>
@@ -250,7 +277,10 @@ function Confirmed({ bare, confirmation, onBack }) {
           <div style={{ font: `700 19px ${font.head}`, color: color.text }}>{c.name}</div>
           <div style={{ display: 'flex', gap: 26, marginTop: 14 }}>
             <MetaCol label="When" value={c.when} />
-            <MetaCol label="Coach" value={c.coach} />
+            <MetaCol
+              label="Spends"
+              value={c.pool === 'tournaments' ? '1 tournament entry' : '1 training session'}
+            />
           </div>
           <div
             style={{

@@ -44,31 +44,30 @@ import {
   GOLF_PACKAGES,
 } from '../data/packages';
 import {
-  SCAFFOLD_TODAY,
+  HOLIDAY_CLOSURES_2026_27,
   SEASON,
   SEASON_BY_DATE,
   capacityFor,
   datePill,
   dayLabel,
   resolveBooking,
-  rotationFor,
   upcomingDates,
 } from '../data/season';
 import {
   ATHLETE,
-  NEXT_SESSION,
-  CONTRACT_SUMMARY,
   CODE_OF_GRIT,
   ONBOARDING,
   DNA_MODULES,
   DNA_STATES,
   DNA_SUMMARY,
-  CONTRACT_MONTH,
   CONTRACT_TIERS,
-  CONTRACT_STATES,
-  CONTRACT_TOTAL_DAYS,
-  contractGrid,
 } from '../data/athlete';
+import {
+  buildContractMonth,
+  longDayLabel,
+  pickDueDates,
+  todayISO,
+} from '../data/calendar';
 import {
   ATHLETE_DETAIL,
   CONTRACT_HISTORY,
@@ -112,10 +111,11 @@ function displaySession(s, today) {
     time,
     meridiem,
     type: s.type,
-    // A special (a holiday tournament) carries its own name and is not part of
-    // the Workshop / Lab / Arena rotation - the label wins over the placeholder
-    // rotation cycle.
-    name: s.label || rotationFor(s),
+    // A special (a holiday tournament) carries its real event name. Everything
+    // else is the generic block for its type - the Workshop/Lab/Arena rotation
+    // was an invented placeholder, and no made-up name ships before real
+    // sessions exist to book.
+    name: s.label || (s.type === 'tournament' ? 'Tournament block' : 'Training block'),
     // The generator assigns no coach or bay - coachId is null by design, so
     // nothing is invented here.
     meta: s.special
@@ -134,7 +134,7 @@ function displaySession(s, today) {
  * Session offers - same session objects, same types, same times. A reference
  * into a closure resolves to null and is dropped rather than rendered.
  */
-export function useSchedule({ variant = 'upcoming', today = SCAFFOLD_TODAY } = {}) {
+export function useSchedule({ variant = 'upcoming', today = todayISO() } = {}) {
   const resolve = (refs) =>
     refs
       .map((ref) => {
@@ -161,7 +161,7 @@ export function useSchedule({ variant = 'upcoming', today = SCAFFOLD_TODAY } = {
  * tournament allowance leaves every training block bookable, and the reverse.
  * A single `limit` variant could not express either case honestly.
  */
-export function useBooking({ variant = 'open', today = SCAFFOLD_TODAY } = {}) {
+export function useBooking({ variant = 'open', today = todayISO() } = {}) {
   const dates = upcomingDates(SEASON, today, 7).map(datePill);
 
   const slots = dates.flatMap((d) =>
@@ -187,7 +187,14 @@ export function useBooking({ variant = 'open', today = SCAFFOLD_TODAY } = {}) {
     limitTournament: ALLOWANCE_NO_TOURNAMENTS,
   }[variant] || ALLOWANCE;
 
-  return useSeedResource({ dates, slots, allowance, confirmation: BOOKING_CONFIRMATION });
+  // Before the season opens, the first bookable day is weeks out - say so
+  // rather than presenting November dates as if they were this week.
+  const seasonNote =
+    dates.length && dates[0].iso > today
+      ? `The 26/27 season opens ${dayLabel(dates[0].iso, today)} — these are the first bookable blocks.`
+      : null;
+
+  return useSeedResource({ dates, slots, allowance, seasonNote, confirmation: BOOKING_CONFIRMATION });
 }
 
 /** GET /athletes?guardian=:id + GET /billing/:householdId (08). */
@@ -247,7 +254,7 @@ export function useCoachDay({ variant = 'today' } = {}) {
  * constant, so the roster header matches what the schedule actually says is
  * running: same date, same block order, same capacity.
  */
-export function useSession({ today = SCAFFOLD_TODAY, blockIndex = 1 } = {}) {
+export function useSession({ today = todayISO(), blockIndex = 1 } = {}) {
   const onDate = SEASON_BY_DATE.get(today) ?? [];
   // Clamp rather than fall back: a day with fewer blocks than the requested
   // index (a holiday-tournament day has one) must not label its only session
@@ -262,7 +269,7 @@ export function useSession({ today = SCAFFOLD_TODAY, blockIndex = 1 } = {}) {
         id: session.id,
         type: session.type,
         blockLabel: `Block ${index + 1} of ${onDate.length}`,
-        name: session.label || rotationFor(session),
+        name: session.label || (session.type === 'tournament' ? 'Tournament block' : 'Training block'),
         meta: `${blockRange(session.time)} · ${session.capacity} capacity · ${ROSTER.length} expected`,
         startsIn: SESSION.startsIn,
       }
@@ -298,11 +305,31 @@ export function useDiagnostic() {
 }
 
 /** GET /athletes/:id + next session + contract summary (03). */
-export function useAthleteDashboard({ variant = 'populated' } = {}) {
+export function useAthleteDashboard({ variant = 'populated', today = todayISO() } = {}) {
+  // The next session is the athlete's first booked reference, resolved against
+  // the season - the old seed invented "The Lab · Sim 2 · Luke" wholesale.
+  const firstRef = BOOKED_UPCOMING[0];
+  const resolved = variant === 'populated' && firstRef ? resolveBooking(firstRef) : null;
+  const nextSession = resolved ? displaySession(resolved, today) : null;
+
+  // The contract summary derives from the same real-month build the Contract
+  // screen uses, so the dashboard card and the full screen cannot disagree.
+  const summary = variant === 'new' ? null : contractFor('ontrack', today);
+
   return useSeedResource({
     athlete: ATHLETE,
-    nextSession: variant === 'populated' ? NEXT_SESSION : null,
-    contract: variant === 'new' ? null : CONTRACT_SUMMARY,
+    nextSession,
+    contract: summary
+      ? {
+          logged: summary.stats.logged,
+          total: summary.stats.dueSoFar,
+          month: summary.month.name,
+          pct: summary.stats.dueSoFar
+            ? Math.round((summary.stats.logged / summary.stats.dueSoFar) * 100)
+            : 0,
+          line: summary.state.line,
+        }
+      : null,
     onboarding: variant === 'new' ? ONBOARDING : null,
     codeOfGrit: CODE_OF_GRIT,
   });
@@ -325,14 +352,75 @@ export function usePracticeDNA({ variant = 'complete' } = {}) {
 }
 
 /** GET + POST /athletes/:id/commitment-contract (07). */
-export function useContract({ variant = 'ontrack' } = {}) {
-  const hasContract = variant !== 'none';
+/**
+ * The contract month for a demo state, built from the real current month.
+ * date-fns/FullCalendar own the calendar shape; this only decides which due
+ * days read as missed for each state and writes the copy from the numbers.
+ */
+function contractFor(variant, today) {
+  const closures = HOLIDAY_CLOSURES_2026_27;
+  const missedDates =
+    variant === 'behind'
+      ? pickDueDates({ today, closures, count: 6, spread: 2 })
+      : variant === 'ontrack'
+      ? pickDueDates({ today, closures, count: 1, spread: 4 })
+      : [];
+
+  const m = buildContractMonth({
+    today,
+    closures,
+    missedDates,
+    completeAll: variant === 'complete',
+    minutesPerDay: 45,
+  });
+
+  const state = {
+    ontrack: {
+      badge: { tone: 'green', label: 'On track' },
+      line: `${m.logged} of ${m.dueSoFar} days due so far. ${m.daysLeft} contract days left — one miss still keeps the month.`,
+      hint: 'One tap. Nothing else on this screen needs typing.',
+    },
+    behind: {
+      badge: { tone: 'red', label: 'Behind' },
+      line: `${m.missed} days behind with ${m.daysLeft} contract days left. Every remaining day has to be logged to make the Commitment Board.`,
+      hint: 'Missed a day? Tap it in the grid to add a late entry.',
+    },
+    complete: {
+      badge: { tone: 'yellow', label: 'Complete' },
+      line: `All ${m.contractDays} contract days logged. You are on ${m.month}’s Commitment Board.`,
+      hint: 'Weekends are not contract days.',
+    },
+  }[variant];
+
+  const caption = [
+    'Weekends are not contract days.',
+    ...m.monthClosures.map(
+      (c) => `${longDayLabel(c)} is an academy closure and does not count against you.`
+    ),
+  ].join(' ');
+
+  return {
+    month: { label: m.label, name: m.month, start: m.start },
+    dayStates: m.dayStates,
+    stats: {
+      logged: m.logged,
+      contractDays: m.contractDays,
+      dueSoFar: m.dueSoFar,
+      missed: m.missed,
+      daysLeft: m.daysLeft,
+      streak: m.streak,
+      minutes: m.minutes,
+    },
+    state,
+    caption,
+  };
+}
+
+export function useContract({ variant = 'ontrack', today = todayISO() } = {}) {
+  const built = variant === 'none' ? null : contractFor(variant, today);
   return useSeedResource({
-    month: CONTRACT_MONTH,
-    totalDays: CONTRACT_TOTAL_DAYS,
+    ...(built ?? { month: null, dayStates: {}, stats: null, state: null, caption: null }),
     tiers: CONTRACT_TIERS,
-    state: hasContract ? CONTRACT_STATES[variant] : null,
-    grid: hasContract ? contractGrid(variant) : [],
     tierMinutes: 45,
   });
 }

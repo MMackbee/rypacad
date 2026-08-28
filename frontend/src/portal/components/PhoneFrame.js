@@ -22,8 +22,21 @@ export default function PhoneFrame({
   // the dynamic viewport rather than 100% because the ancestors (.App, body)
   // have auto height — 100% against those collapses instead of filling, and
   // dvh also accounts for mobile browser chrome showing and hiding.
+  //
+  // Capped at a phone-ish column on wide viewports: these screens are
+  // phone-native by intent (the handoff is explicit that 07 and 13 must not be
+  // re-laid-out for desktop), and unconstrained they stretch a month grid
+  // across 1400px, which is how the contract calendar ended up with
+  // 190px-square day cells in desktop testing.
   const frame = bare
-    ? { width: '100%', height: '100dvh', minHeight: '100vh', background: color.bg }
+    ? {
+        width: '100%',
+        maxWidth: 430,
+        margin: '0 auto',
+        height: '100dvh',
+        minHeight: '100vh',
+        background: color.bg,
+      }
     : {
         width,
         height,
