@@ -14,7 +14,6 @@
  */
 
 import {
-  addDoc,
   collection,
   doc,
   documentId,
@@ -24,6 +23,7 @@ import {
   orderBy,
   query,
   serverTimestamp,
+  setDoc,
   where,
 } from 'firebase/firestore';
 import { auth, db } from '../../firebase';
@@ -248,8 +248,13 @@ export async function createBooking({ athleteId, sessionId, date, type, pool, ho
     createdAt: serverTimestamp(),
   };
   try {
-    const ref = await addDoc(collection(db, 'bookings'), booking);
-    return { id: ref.id, ...booking, createdAt: null };
+    // Contract v1.1: the booking id IS `{athleteId}_{sessionId}` — the
+    // keyspace makes a second booking of the same session an overwrite
+    // attempt, which the create-only rules reject. addDoc's random ids were
+    // rejected by the deployed rules' id-format check.
+    const id = `${athleteId}_${sessionId}`;
+    await setDoc(doc(db, 'bookings', id), booking);
+    return { id, ...booking, createdAt: null };
   } catch (err) {
     throw wrap(err, 'createBooking');
   }

@@ -67,7 +67,11 @@ export default function PortalRoutes() {
       />
       <Route
         path="register"
-        element={<Registration bare onBack={go('/portal/signin')} onFinish={go('/portal/welcome')} />}
+        element={
+          // The person finishing enrollment is a guardian by definition, so
+          // the walkthrough opens on the parent track rather than the chooser.
+          <Registration bare onBack={go('/portal/signin')} onFinish={go('/portal/welcome?track=parent')} />
+        }
       />
       {/* Onboarding walkthrough (Sprint 3) — frontend lane's one route line, per the PM exception in TEAM.md. */}
       <Route path="welcome" element={<OnboardingWelcomeRoute />} />
