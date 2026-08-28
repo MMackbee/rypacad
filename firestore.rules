@@ -141,9 +141,17 @@ service cloud.firestore {
       // createdBy == request.auth.uid (in shape), caller is the athlete's own
       // user or the athlete's household parent, and householdId is the
       // athlete's real household — never caller-invented.
+      //
+      // The doc id must be exactly `{athleteId}_{sessionId}` (contract v1.1,
+      // ratified from the db lane's schema): the keyspace itself makes a
+      // second booking of the same session by the same athlete an overwrite
+      // attempt on an existing doc — which create rejects — rather than a
+      // duplicate that inflates counts.
       allow create: if signedIn()
         && bookingShapeOk()
         && bookingMatchesSession()
+        && bookingId
+             == request.resource.data.athleteId + '_' + request.resource.data.sessionId
         && request.resource.data.householdId
              == athleteData(request.resource.data.athleteId).householdId
         && (

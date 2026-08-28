@@ -54,6 +54,25 @@ contradictions are not.
   by querying bookings; there is no stored counter to drift.
 - `contractLogs/{athleteId_date}` — athleteId, date, minutes.
 
+### v1.1 ratifications (PM, Sprint 1 review)
+
+- **Booking id is `{athleteId}_{sessionId}`** — the keyspace enforces one
+  booking per athlete per session; re-booking after a cancellation flips
+  `status` on the same doc. Rules enforce the id format on create.
+- **`packages.kind`**: `golf | drop-in | fitness | elite` discriminator.
+- **`coachId` is the coach's auth uid** on both athletes and sessions.
+- **Live errors are user-facing**: anything `live.js` throws that reaches a
+  screen carries a plain-language `message`; SDK errors are wrapped, never
+  surfaced verbatim.
+- **Allowance semantics**: `cancelled` bookings never spend; `confirmed`,
+  `attended` and `noshow` spend. The 12-hour late-cancel nuance lands with the
+  cancellation flow and its own rules.
+- **Deploy gate**: the v1 rules remove the legacy `/{document=**}` catch-all,
+  which cuts the 2025 app's collections off from clients. Rules do not deploy
+  until that migration is sequenced, and deploys are the user's call.
+- **Prices**: seeds never carry dollar amounts; `packages.price` reaches the
+  live project only via a user-approved import at deploy time.
+
 Access matrix (routing implements in rules; the handoff's table is the spec):
 athlete → own records; parent → linked athletes, reflection **summaries only**;
 coach → assigned athletes only; mental → academy-wide reads, all logged;

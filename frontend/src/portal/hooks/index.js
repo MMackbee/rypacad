@@ -123,6 +123,19 @@ export { default as useSeedResource } from './useSeedResource';
 export { default as useAuthSession } from './useAuthSession';
 export { default as useRoster } from './useRoster';
 
+/**
+ * Harness demo states (contract v1.1): every data-bearing hook accepts
+ * variant 'loading' (perpetually {data: null, loading: true}) and 'error'
+ * (a user-facing failure), so the skeleton and error treatments are
+ * reviewable per screen. Demo variants never touch the live source.
+ */
+const DEMO_DELAY_FOREVER = 2147483647; // setTimeout's max; larger fires instantly
+function demoOpts(variant, message) {
+  if (variant === 'loading') return { delay: DEMO_DELAY_FOREVER };
+  if (variant === 'error') return { error: new Error(message) };
+  return null;
+}
+
 /** How a season session renders on a schedule or booking list. */
 function displaySession(s, today) {
   const [time, meridiem] = s.time.split(' ');
@@ -304,9 +317,10 @@ export function useSchedule({ variant = 'upcoming', today = todayISO() } = {}) {
   const past = variant === 'empty' ? [] : resolve(BOOKED_PAST);
   const cancelled = variant === 'cancelled' ? CANCELLED_SESSION : null;
 
+  const demo = demoOpts(variant, "Your schedule didn't load.");
   return useSeedResource(
-    live ? undefined : { sessions, past, cancelled, allowance: ALLOWANCE },
-    live ? { source: () => liveSchedule(today), deps: ['schedule', today] } : undefined
+    demo || live ? null : { sessions, past, cancelled, allowance: ALLOWANCE },
+    demo ?? (live ? { source: () => liveSchedule(today), deps: ['schedule', today] } : undefined)
   );
 }
 
@@ -365,18 +379,20 @@ export function useBooking({ variant = 'open', today = todayISO() } = {}) {
       ? `The 26/27 season opens ${dayLabel(dates[0].iso, today)} — these are the first bookable blocks.`
       : null;
 
+  const demo = demoOpts(variant, "Open blocks didn't load.");
   const state = useSeedResource(
-    live ? undefined : { dates, slots, allowance, seasonNote, confirmation: BOOKING_CONFIRMATION },
-    live
-      ? {
-          source: async () => {
-            const { identity, ...payload } = await liveBooking(today);
-            identityRef.current = identity;
-            return payload;
-          },
-          deps: ['booking', today],
-        }
-      : undefined
+    demo || live ? null : { dates, slots, allowance, seasonNote, confirmation: BOOKING_CONFIRMATION },
+    demo ??
+      (live
+        ? {
+            source: async () => {
+              const { identity, ...payload } = await liveBooking(today);
+              identityRef.current = identity;
+              return payload;
+            },
+            deps: ['booking', today],
+          }
+        : undefined)
   );
 
   /**
@@ -408,10 +424,14 @@ export function useBooking({ variant = 'open', today = todayISO() } = {}) {
 
 /** GET /athletes?guardian=:id + GET /billing/:householdId (08). */
 export function useHousehold({ variant = 'three' } = {}) {
+  const demo = demoOpts(variant, "Your family's data didn't load.");
   const children =
     variant === 'one' ? HOUSEHOLD.children.slice(0, 1) : HOUSEHOLD.children;
   const billing = variant === 'payment' ? BILLING_ISSUE : HOUSEHOLD.billing;
-  return useSeedResource({ ...HOUSEHOLD, date: TODAY, children, billing });
+  return useSeedResource(
+    demo ? null : { ...HOUSEHOLD, date: TODAY, children, billing },
+    demo ?? undefined
+  );
 }
 
 /**
@@ -515,6 +535,8 @@ export function useDiagnostic() {
 
 /** GET /athletes/:id + next session + contract summary (03). */
 export function useAthleteDashboard({ variant = 'populated', today = todayISO() } = {}) {
+  const demo = demoOpts(variant, "Your dashboard didn't load.");
+
   // The next session is the athlete's first booked reference, resolved against
   // the season - the old seed invented "The Lab · Sim 2 · Luke" wholesale.
   const firstRef = BOOKED_UPCOMING[0];
@@ -523,9 +545,9 @@ export function useAthleteDashboard({ variant = 'populated', today = todayISO() 
 
   // The contract summary derives from the same real-month build the Contract
   // screen uses, so the dashboard card and the full screen cannot disagree.
-  const summary = variant === 'new' ? null : contractFor('ontrack', today);
+  const summary = variant === 'new' || demo ? null : contractFor('ontrack', today);
 
-  return useSeedResource({
+  return useSeedResource(demo ? null : {
     athlete: ATHLETE,
     nextSession,
     contract: summary
@@ -541,7 +563,7 @@ export function useAthleteDashboard({ variant = 'populated', today = todayISO() 
       : null,
     onboarding: variant === 'new' ? ONBOARDING : null,
     codeOfGrit: CODE_OF_GRIT,
-  });
+  }, demo ?? undefined);
 }
 
 /**
