@@ -5,8 +5,11 @@ import Button from '../components/Button';
 import PhoneFrame from '../components/PhoneFrame';
 import ContractCalendar from '../components/ContractCalendar';
 import { DayGridLegend } from '../components/DayGridCell';
-import { Body, Card, ScreenTitle } from '../components/Primitives';
+import { Body, Card, ScreenTitle, Tick } from '../components/Primitives';
 import { useContract } from '../hooks';
+// todayISO is a pure calendar helper, not response data — like poolFor in
+// BookSession, the helpers stay importable; data travels through the hook seam.
+import { todayISO } from '../data/calendar';
 
 /**
  * 07 · Commitment Contract - athlete. ⭐
@@ -26,16 +29,53 @@ import { useContract } from '../hooks';
  * tap - so the meter is a bar, not a button, and only the CTA is filled.
  *
  * @param {'ontrack'|'behind'|'complete'|'none'} variant
+ * @param {boolean} [practice]
+ *   Onboarding practice mode (docs/portal/TEAM.md, "Onboarding program v1").
+ *   "Log today" logs locally: today's cell flips to logged and the hero count
+ *   moves, all in component state — the real one-tap habit, demonstrated on
+ *   the real grid, with zero Firestore writes. Resets on unmount. Default off,
+ *   so the non-onboarding screen is byte-for-byte unchanged in behavior.
+ * @param {(entry) => void} [onLogged]
+ *   Practice mode only: fires once when the practice day is logged —
+ *   `{ iso }`. The onboarding step's completion signal.
  */
-export default function CommitmentContract({ variant = 'ontrack', bare = false, onLog }) {
+export default function CommitmentContract({
+  variant = 'ontrack',
+  bare = false,
+  practice = false,
+  onLog,
+  onLogged,
+}) {
   const { data } = useContract({ variant });
   const [sheetDay, setSheetDay] = useState(null);
+  // The practice log lives here and nowhere else — component state is the
+  // whole record, per the practice-mode invariant (zero Firestore writes).
+  const [practiceLogged, setPracticeLogged] = useState(null);
 
   if (variant === 'none') return <NoContract bare={bare} data={data} />;
 
   const state = data?.state;
   const behind = variant === 'behind';
   const complete = variant === 'complete';
+
+  // Practice overlays, derived at render: the grid and the hero count move the
+  // moment the tap lands, from the same single piece of state — they cannot
+  // disagree. Off (null) leaves the hook's data untouched.
+  const dayStates = practiceLogged
+    ? { ...(data?.dayStates ?? {}), [practiceLogged]: 'logged' }
+    : data?.dayStates ?? {};
+  const stats = practiceLogged && data?.stats
+    ? { ...data.stats, logged: data.stats.logged + 1 }
+    : data?.stats;
+
+  const handleLog = practice
+    ? () => {
+        if (practiceLogged) return;
+        const iso = todayISO();
+        setPracticeLogged(iso);
+        if (onLogged) onLogged({ iso });
+      }
+    : onLog;
 
   return (
     <PhoneFrame
@@ -53,16 +93,24 @@ export default function CommitmentContract({ variant = 'ontrack', bare = false, 
           <StatusPill badge={state?.badge} />
         </div>
       }
-      footer={<ContractFooter complete={complete} hint={state?.hint} onLog={onLog} minutes={data?.tierMinutes} />}
+      footer={
+        <ContractFooter
+          complete={complete}
+          hint={state?.hint}
+          onLog={handleLog}
+          minutes={data?.tierMinutes}
+          logged={Boolean(practiceLogged)}
+        />
+      }
     >
       <div style={{ padding: '0 22px 20px', display: 'flex', flexDirection: 'column', gap: 14, position: 'relative' }}>
-        <HeroCard state={state} stats={data?.stats} behind={behind} complete={complete} />
+        <HeroCard state={state} stats={stats} behind={behind} complete={complete} />
 
         <Card large>
           {/* FullCalendar draws the real current month; we only paint states. */}
           <ContractCalendar
             start={data?.month?.start}
-            dayStates={data?.dayStates ?? {}}
+            dayStates={dayStates}
             onSelectDay={setSheetDay}
           />
           <Body size={11} tone={color.textTertiary} style={{ marginTop: 13 }}>
@@ -73,7 +121,7 @@ export default function CommitmentContract({ variant = 'ontrack', bare = false, 
           </div>
         </Card>
 
-        <StatsRow stats={data?.stats} />
+        <StatsRow stats={stats} />
       </div>
 
       {sheetDay ? <DaySheet day={sheetDay} onClose={() => setSheetDay(null)} /> : null}
@@ -199,8 +247,12 @@ function StatsRow({ stats }) {
 /**
  * Pinned, 56px, inside thumb reach, and it never scrolls away. The daily task
  * is one tap from a cold open.
+ *
+ * `logged` (practice mode): the CTA's slot becomes a green-tinted status bar —
+ * not a Button, per flag 02: solid green fill means tap, and a logged day is a
+ * state, not an action.
  */
-function ContractFooter({ complete, hint, onLog, minutes }) {
+function ContractFooter({ complete, hint, onLog, minutes, logged = false }) {
   return (
     <>
       <div
@@ -210,7 +262,25 @@ function ContractFooter({ complete, hint, onLog, minutes }) {
           padding: '13px 22px 14px',
         }}
       >
-        {complete ? (
+        {logged ? (
+          <div
+            style={{
+              height: 56,
+              borderRadius: 10,
+              background: tint.green,
+              border: `1px solid ${color.primary}`,
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              gap: 10,
+              font: `600 17px ${font.body}`,
+              color: color.primary,
+            }}
+          >
+            <Tick size={14} color={color.primary} thickness={2.5} />
+            <span>Logged today · {minutes} min</span>
+          </div>
+        ) : complete ? (
           <Button variant="outline" height={56} style={{ borderRadius: 10, boxShadow: 'none' }}>
             View Commitment Board
           </Button>

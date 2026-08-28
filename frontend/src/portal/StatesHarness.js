@@ -36,6 +36,7 @@ import NotificationPreferences from './screens/NotificationPreferences';
 import AdminDashboard from './screens/AdminDashboard';
 import StaffRoles from './screens/StaffRoles';
 import NewsletterComposer from './screens/NewsletterComposer';
+import OnboardingFlow from './screens/OnboardingFlow';
 
 import { ALLOWANCE, ALLOWANCE_NO_TOURNAMENTS } from './data/seed';
 import { ELITE_TIERS, FITNESS_PACKAGES, GOLF_PACKAGES } from './data/packages';
@@ -105,6 +106,21 @@ export const SCREEN_STATES = [
   { id: '17', title: 'Newsletter Composer', Screen: NewsletterComposer, role: 'admin',
     states: [['missing', 'Sections missing'], ['ready', 'All sections in'],
              ['scheduled', 'Scheduled'], ['sent', 'Sent']] },
+  /*
+   * Onboarding walkthrough — practice mode on the real screens (TEAM.md,
+   * "Onboarding program v1"). Not a numbered handoff artboard, so it sits
+   * after the seventeen. The action steps are interactive here: book a block
+   * or tap Log today and the step's gate opens. `initialStep` deep-mounts a
+   * step; deep-mounting Done never marks a track complete, so browsing this
+   * gallery cannot flip the localStorage completion flags.
+   */
+  { id: 'OB', title: 'Onboarding walkthrough', Screen: OnboardingFlow, role: 'parent + athlete',
+    states: [
+      ['chooser', 'Track chooser', { track: null }],
+      ['athlete-book', 'Athlete · book practice', { track: 'athlete', initialStep: 2 }],
+      ['parent-family', 'Parent · your family', { track: 'parent', initialStep: 1 }],
+      ['athlete-done', 'Done · practice recap', { track: 'athlete', initialStep: 5 }],
+    ] },
 ];
 
 export default function StatesHarness() {
