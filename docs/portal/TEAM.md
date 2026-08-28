@@ -107,6 +107,38 @@ reached, day logged), never on "Next" alone — with a skip affordance always
 visible. Practice data is the existing seed (Whitfield family); nothing new is
 invented.
 
+## Sprint 4 pins — booking live end to end
+
+Contract v1.2 extensions:
+- `sessions.status`: `'scheduled' | 'cancelled'` (default scheduled). The
+  calendar sync sets cancelled — never deletes — when a calendar instance
+  disappears but the session has bookings, so families are told rather than
+  ghosted. Sessions with no bookings whose instance disappears are deleted.
+- `sessions.gcalEventId`: the calendar instance id a synced session came from
+  (null for generator-seeded sessions).
+- The calendar sync is the **third sanctioned production writer** (with
+  provision-owner and the future billing integration). It maps events by the
+  title convention — `Training block` → bookable training, `Tournament` →
+  bookable tournament, anything else skipped (display-only) — with session id
+  `YYYY-MM-DD-<n>` by start-time order within the day. Emulator always;
+  prod runs are user-gated commands.
+
+Auth seam (pinned so frontend and routing build in parallel):
+- `useAuthSession()` (routing lane, replaces the scaffold stub) returns
+  `{ user: { uid, email, role, athleteId, householdId } | null,
+     provisioned: boolean, loading, error, signIn(), signOut() }`.
+  signIn() runs the existing Google popup (src/firebase.js provider);
+  role resolution reads users/{uid}; a signed-in account with no users doc
+  returns user with role null and provisioned false.
+- `<RequireRole roles={[...]}>` guard (routing lane, exported from
+  PortalRoutes or hooks) wraps role-gated routes; unauthenticated → SignIn,
+  provisioned-but-wrong-role → /portal/unauthorized equivalent.
+- Frontend owns the SignIn screen wiring to that hook (its four states are
+  already designed), the not-provisioned screen, role-based landing after
+  sign-in (athlete → home, parent → family, coach → coach, staff → admin),
+  and a "Replay the walkthrough" row in Notification Preferences' screen
+  footer area.
+
 ## Invariants every lane honors
 
 - Two-pool allowances: training and tournaments never substitute.
