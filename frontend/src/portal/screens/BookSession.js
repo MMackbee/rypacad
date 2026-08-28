@@ -42,7 +42,14 @@ export default function BookSession({ variant = 'open', bare = false, onBack, on
 
   // A booking can resolve after the athlete has navigated away.
   const live = useRef(true);
-  useEffect(() => () => { live.current = false; }, []);
+  // Reset on run, not just clear on cleanup: React 18 StrictMode
+  // mounts-unmounts-remounts in dev, and a cleanup-only guard stays false
+  // after the simulated unmount — which swallowed every booking resolution
+  // and left the card on "Reserving…" forever.
+  useEffect(() => {
+    live.current = true;
+    return () => { live.current = false; };
+  }, []);
 
   const book = (slot) => {
     if (reserving) return;
