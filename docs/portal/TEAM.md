@@ -78,6 +78,35 @@ athlete → own records; parent → linked athletes, reflection **summaries only
 coach → assigned athletes only; mental → academy-wide reads, all logged;
 ops → completion/billing/enrollment, no coaching or mental writes; owner → all.
 
+## Onboarding program v1 (pinned for Sprint 3)
+
+A guided first-run walkthrough for parents and athletes, built as **practice
+mode on the real screens** — no tour overlays, no duplicated mock screens. The
+learner performs each core action once on practice data: a parent books a
+practice session through the real Book a Session flow; an athlete logs a
+practice contract day and watches the real grid update.
+
+Pinned interfaces:
+- `screens/OnboardingFlow.js` (frontend lane) — default export, props
+  `{ track: null | 'parent' | 'athlete', bare }`; null renders the track
+  chooser. Route `/portal/welcome` (+`?track=`), added by the frontend lane
+  under a standing PM exception for this one line in PortalRoutes.
+- `hooks/onboarding.js` (routing lane) — `useOnboardingStatus()` returning
+  `{ completed: {parent, athlete}, markComplete(track), reset() }`, backed by
+  localStorage keys `ryp.onboarding.parent` / `ryp.onboarding.athlete`.
+  Future home is `users.onboardedAt` (contract v1.2 candidate; needs a
+  diff-key rules allowance — not this sprint).
+- `useBooking` / `useSchedule` accept `{ practice: true }` (routing lane):
+  practice forces the seed source regardless of REACT_APP_PORTAL_LIVE_DATA.
+
+Invariants: practice mode performs **zero Firestore writes** — practice
+entries are component state, visibly badged PRACTICE, and reset on exit.
+Stepper chrome reuses Registration's step-header pattern; instruction copy is
+plain language; steps advance on the real action completing (confirmation
+reached, day logged), never on "Next" alone — with a skip affordance always
+visible. Practice data is the existing seed (Whitfield family); nothing new is
+invented.
+
 ## Invariants every lane honors
 
 - Two-pool allowances: training and tournaments never substitute.
