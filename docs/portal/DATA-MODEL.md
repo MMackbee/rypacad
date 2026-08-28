@@ -158,12 +158,15 @@ All composite indexes live in `firestore.indexes.json`. Single-field lookups
 (booking by `sessionId` alone, sessions by `date` alone) ride Firestore's
 automatic single-field indexes and are not listed.
 
-### 1. `sessions (date ASC, __name__ ASC)` — season browsing
+### 1. Season browsing — no composite needed (deploy-verified)
 
-Serves: `sessions where date >= :today orderBy date, __name__` — the Book-a-
-Session list and date strip, paged with a cursor. Because session ids are
-date-prefixed and blocks sort within a day (`-0`, `-1`, `-2`), `__name__` as
-the explicit tiebreak yields a stable chronological cursor across pages.
+The Book-a-Session query — `sessions where date >= :today orderBy date,
+__name__` — rides Firestore's automatic single-field index on `date`:
+`__name__` is the implicit tiebreaker on every single-field index, so the
+composite `(date ASC, __name__ ASC)` is redundant, and the deploy API rejects
+it outright ("this index is not necessary, configure using single field index
+controls"). The chronological-cursor property still holds, because session ids
+are date-prefixed and blocks sort within a day (`-0`, `-1`, `-2`).
 
 ### 2. `bookings (athleteId ASC, date ASC)` — My Schedule
 
