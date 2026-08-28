@@ -82,14 +82,8 @@ function Navbar() {
               Portal
             </Link>
 
-            {user.role !== 'coach' && (
-              <Link to="/videos" style={linkStyle}>
-                Training Videos
-              </Link>
-            )}
-
             {user.role === 'admin' && (
-              <Link to="/admin" style={linkStyle}>
+              <Link to="/portal/admin" style={linkStyle}>
                 Admin
               </Link>
             )}
@@ -100,9 +94,6 @@ function Navbar() {
       <div style={{ display: 'flex', alignItems: 'center', gap: theme.spacing.md }}>
         {user ? (
           <>
-            <Link to="/profile" style={linkStyle}>
-              Profile
-            </Link>
             <span style={{ fontSize: '0.9rem' }}>
               Welcome, {user.displayName || user.email}
             </span>
