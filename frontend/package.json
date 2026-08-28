@@ -5,6 +5,7 @@
     "dependencies": {
         "@fullcalendar/core": "^6.1.21",
         "@fullcalendar/daygrid": "^6.1.21",
+        "@fullcalendar/google-calendar": "^6.1.21",
         "@fullcalendar/react": "^6.1.21",
         "@stripe/react-stripe-js": "^2.9.0",
         "@stripe/stripe-js": "^1.54.2",

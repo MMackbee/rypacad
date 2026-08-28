@@ -12,6 +12,7 @@ import Roster from './screens/Roster';
 import DiagnosticCapture from './screens/DiagnosticCapture';
 import AthleteDashboard from './screens/AthleteDashboard';
 import PracticeDNA from './screens/PracticeDNA';
+import SeasonSchedule from './screens/SeasonSchedule';
 import CommitmentContract from './screens/CommitmentContract';
 import AthleteDetail from './screens/AthleteDetail';
 import Billing from './screens/Billing';
@@ -79,6 +80,7 @@ export default function PortalRoutes() {
       <Route path="book" element={<BookSession bare onBack={go('/portal/schedule')} />} />
       <Route path="contract" element={<CommitmentContract bare />} />
       <Route path="dna" element={<PracticeDNA bare />} />
+      <Route path="season" element={<SeasonSchedule bare />} />
 
       {/* Parent */}
       <Route
