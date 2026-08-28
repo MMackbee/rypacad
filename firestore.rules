@@ -1,83 +1,246 @@
 rules_version = '2';
+
+// RYP Academy portal — Firestore security rules, data contract v1.
+//
+// Spec: docs/portal/TEAM.md ("Data contract v1" + access matrix) and
+// docs/portal/design-handoff.md §"Access control". Most portal users are
+// minors: deny-by-default, and every allow below cites the matrix line it
+// implements. There is no catch-all — any collection not matched here is
+// unreadable and unwritable from the client, on purpose.
+//
+// Identity model: every request is keyed off users/{request.auth.uid}, whose
+// doc carries role ('athlete'|'parent'|'coach'|'mental'|'ops'|'owner') plus
+// athleteId (athlete) or householdId (parent). Role docs are provisioned by
+// the Admin SDK (which bypasses rules); no client can write its own role.
+//
+// Assumption (flagged in the routing report): athletes/{id}.coachId and
+// sessions.coachId store the coach's auth uid, so "assigned coach" is
+// resource.data.coachId == request.auth.uid.
+//
+// NOTE for the deploy gate (PM/user only — agents never deploy): this file
+// replaces the legacy dev-permissive rules, including the `/{document=**}`
+// allow-any-authenticated catch-all. Legacy collections used by the 2025 app
+// (userTokens, families, childAccounts, paymentRecords, purchaseRecords,
+// fundingRecords, smsLogs, programs, coaches, legacy-shaped bookings) lose
+// client access the moment this deploys. Sequence deployment with the
+// migration off those surfaces.
+//
+// The "every mental read is logged" requirement cannot be expressed in rules;
+// read auditing is a server-side concern (Admin SDK / telemetry), tracked as
+// an open question in the routing report.
+
 service cloud.firestore {
   match /databases/{database}/documents {
-    // Users can read/write their own data
+
+    // ---- helpers -------------------------------------------------------
+
+    function signedIn() {
+      return request.auth != null;
+    }
+
+    // The caller's users/{uid} doc. A missing doc makes every role check
+    // error, and an errored condition denies — an authenticated stranger
+    // with no role doc can read nothing.
+    function me() {
+      return get(/databases/$(database)/documents/users/$(request.auth.uid)).data;
+    }
+
+    function athleteData(athleteId) {
+      return get(/databases/$(database)/documents/athletes/$(athleteId)).data;
+    }
+
+    // ---- users ---------------------------------------------------------
+    // Matrix: "users self-read" (+ owner → all). No client writes: roles and
+    // household/athlete links are provisioned server-side, because a
+    // self-writable role field is a privilege-escalation path.
     match /users/{userId} {
-      allow read, write: if request.auth != null && request.auth.uid == userId;
+      allow read: if signedIn()
+        && (request.auth.uid == userId || me().role == 'owner');
+      // No write rule: deny-by-default stands.
     }
-    
-    // Token management - users can only access their own tokens
-    match /userTokens/{userId} {
-      allow read, write: if request.auth != null && request.auth.uid == userId;
+
+    // ---- athletes ------------------------------------------------------
+    // Matrix: "athlete → own records; parent → linked athletes; coach →
+    // assigned athletes only (coachId match, never just role); mental →
+    // academy-wide reads; ops → enrollment/completion; owner → all".
+    // List queries must carry the matching equality filter (parent:
+    // householdId ==, coach: coachId ==) or the query is denied wholesale.
+    match /athletes/{athleteId} {
+      allow read: if signedIn() && (
+        (me().role == 'athlete' && me().athleteId == athleteId)
+        || (me().role == 'parent' && resource.data.householdId == me().householdId)
+        || (me().role == 'coach' && resource.data.coachId == request.auth.uid)
+        || me().role in ['mental', 'ops', 'owner']
+      );
+      // No client writes in v1: enrollment and coach assignment are
+      // server-side (Admin SDK) operations.
+
+      // ---- athletes/{id}/private/medical -------------------------------
+      // Matrix + handoff 02: medical/emergency info is "visible to on-site
+      // coaching staff during live sessions only. Not shown in admin views."
+      // Readable ONLY by the assigned coach, mental, and owner. Deliberately
+      // NOT readable by ops (admin surface) and NOT by the parent's admin
+      // surface — the guardian supplied it at enrollment; the portal never
+      // reflects it back through a guessable read.
+      match /private/medical {
+        allow read: if signedIn() && (
+          me().role in ['mental', 'owner']
+          || (me().role == 'coach'
+              && athleteData(athleteId).coachId == request.auth.uid)
+        );
+        // No client writes: medical info is written once by the enrollment
+        // flow, server-side.
+      }
     }
-    
-    // Family relationships - users can access their family data
-    match /families/{familyId} {
-      allow read, write: if request.auth != null && 
-        (resource.data.parentId == request.auth.uid || 
-         resource.data.childId == request.auth.uid);
-    }
-    
-    // Bookings - users can access their own bookings
-    match /bookings/{bookingId} {
-      allow read, write: if request.auth != null && 
-        resource.data.userId == request.auth.uid;
-    }
-    
-    // Sessions - authenticated users can read, any authenticated user can write for now
+
+    // ---- sessions ------------------------------------------------------
+    // Matrix: the schedule is not per-family data — "sessions readable by
+    // any authenticated user". Writes are the seed script's job (Admin SDK):
+    // capacity/booked counts must never be client-mutable.
     match /sessions/{sessionId} {
-      allow read: if request.auth != null;
-      allow write: if request.auth != null;
+      allow read: if signedIn();
     }
-    
-    // SMS logs - any authenticated user can read/write for now
-    match /smsLogs/{logId} {
-      allow read, write: if request.auth != null;
+
+    // ---- bookings ------------------------------------------------------
+    // Matrix: "bookings creatable by the athlete's own user or their
+    // household parent; readable by that household + assigned coach + staff".
+    // A booking write records which pool it spends (two-pool allowance is
+    // routing truth), and allowance usage is derived by querying bookings —
+    // so the shape is locked to the contract and the pool must match the
+    // session's type: a tournament block can never be recorded as spending
+    // the training pool.
+    match /bookings/{bookingId} {
+
+      // Contract shape, exactly: athleteId, sessionId, date, type, pool,
+      // status, householdId, createdBy, createdAt — nothing else.
+      function bookingShapeOk() {
+        let d = request.resource.data;
+        return d.keys().hasAll(['athleteId', 'sessionId', 'date', 'type', 'pool',
+                                'status', 'householdId', 'createdBy', 'createdAt'])
+          && d.keys().hasOnly(['athleteId', 'sessionId', 'date', 'type', 'pool',
+                               'status', 'householdId', 'createdBy', 'createdAt'])
+          && d.athleteId is string
+          && d.sessionId is string
+          && d.date is string
+          && d.type in ['training', 'tournament']
+          && d.pool == (d.type == 'tournament' ? 'tournaments' : 'training')
+          && d.status == 'confirmed'
+          && d.createdBy == request.auth.uid
+          && d.createdAt == request.time;
+      }
+
+      // The booking must reference a real session and agree with it on date
+      // and type — the pool spent is anchored to the schedule, not to what
+      // the client claims.
+      function bookingMatchesSession() {
+        let s = get(/databases/$(database)/documents/sessions/$(request.resource.data.sessionId)).data;
+        return s.date == request.resource.data.date
+          && s.type == request.resource.data.type;
+      }
+
+      // createdBy == request.auth.uid (in shape), caller is the athlete's own
+      // user or the athlete's household parent, and householdId is the
+      // athlete's real household — never caller-invented.
+      allow create: if signedIn()
+        && bookingShapeOk()
+        && bookingMatchesSession()
+        && request.resource.data.householdId
+             == athleteData(request.resource.data.athleteId).householdId
+        && (
+          (me().role == 'athlete'
+            && me().athleteId == request.resource.data.athleteId)
+          || (me().role == 'parent'
+            && me().householdId == request.resource.data.householdId)
+        );
+
+      // Readable by that household (athlete's own user + household parent),
+      // the assigned coach, and staff (mental / ops / owner). Coach access is
+      // by assignment on the athlete doc, never by role alone.
+      allow read: if signedIn() && (
+        (me().role == 'athlete' && me().athleteId == resource.data.athleteId)
+        || (me().role == 'parent' && me().householdId == resource.data.householdId)
+        || (me().role == 'coach'
+            && athleteData(resource.data.athleteId).coachId == request.auth.uid)
+        || me().role in ['mental', 'ops', 'owner']
+      );
+
+      // No update/delete in v1: status transitions (cancelled / attended /
+      // noshow) belong to flows not yet built (cancellation policy, roster
+      // close-out) and land with their own rules. Open question in the report.
     }
-    
-    // Payment records - users can read their own, any authenticated user can write for now
-    match /paymentRecords/{recordId} {
-      allow read: if request.auth != null && 
-        (resource.data.userId == request.auth.uid);
-      allow write: if request.auth != null;
+
+    // ---- contractLogs --------------------------------------------------
+    // Matrix: "contractLogs writable by the athlete's own user only", doc id
+    // `athleteId_date` enforced so one day is one doc — a second log of the
+    // same day is an overwrite of the same id, never a duplicate. Contract:
+    // { athleteId, date, minutes }.
+    match /contractLogs/{logId} {
+
+      function logShapeOk() {
+        let d = request.resource.data;
+        return d.keys().hasAll(['athleteId', 'date', 'minutes'])
+          && d.keys().hasOnly(['athleteId', 'date', 'minutes'])
+          && d.athleteId is string
+          && d.date is string
+          && d.minutes is int
+          && d.minutes > 0;
+      }
+
+      // Writable by the athlete's own user only; the doc id must be exactly
+      // athleteId + '_' + date, which also pins athleteId/date on update.
+      allow create, update: if signedIn()
+        && me().role == 'athlete'
+        && me().athleteId == request.resource.data.athleteId
+        && logId == request.resource.data.athleteId + '_' + request.resource.data.date
+        && logShapeOk();
+
+      // Reads follow the athlete-record matrix line: own user, household
+      // parent, assigned coach, mental (all), ops (completion surface),
+      // owner. Parent/coach list queries must filter athleteId == for the
+      // athleteData() lookup to be provable.
+      allow read: if signedIn() && (
+        (me().role == 'athlete' && me().athleteId == resource.data.athleteId)
+        || (me().role == 'parent'
+            && athleteData(resource.data.athleteId).householdId == me().householdId)
+        || (me().role == 'coach'
+            && athleteData(resource.data.athleteId).coachId == request.auth.uid)
+        || me().role in ['mental', 'ops', 'owner']
+      );
+
+      // No delete: a logged day is a record. Un-logging is a product
+      // decision that has not been made.
     }
-    
-    // Child accounts - parents can access their children's accounts
-    match /childAccounts/{childId} {
-      allow read, write: if request.auth != null && 
-        (request.auth.uid == childId || 
-         exists(/databases/$(database)/documents/families/$(request.auth.uid + '_' + childId)));
+
+    // ---- packages ------------------------------------------------------
+    // Matrix: "packages read-only authenticated, writes owner-only". The
+    // catalogue is not sensitive, but prices changing under a family's feet
+    // is an owner-level action.
+    match /packages/{packageId} {
+      allow read: if signedIn();
+      allow write: if signedIn() && me().role == 'owner';
     }
-    
-    // Funding records - parents can access their funding records
-    match /fundingRecords/{recordId} {
-      allow read, write: if request.auth != null && 
-        (resource.data.parentId == request.auth.uid);
+
+    // ---- households ----------------------------------------------------
+    // Matrix: "households readable/writable by their own parent + ops/owner".
+    // Contract: guardian contact + stripeCustomerId/stripeSubscriptionId,
+    // never card data. Parents may edit their own contact fields but not the
+    // Stripe linkage — those ids are written by the billing integration and
+    // a parent-editable subscription pointer is a billing integrity hole.
+    match /households/{householdId} {
+      allow read: if signedIn() && (
+        (me().role == 'parent' && me().householdId == householdId)
+        || me().role in ['ops', 'owner']
+      );
+      allow create, delete: if signedIn() && me().role in ['ops', 'owner'];
+      allow update: if signedIn() && (
+        me().role in ['ops', 'owner']
+        || (me().role == 'parent'
+            && me().householdId == householdId
+            && !request.resource.data.diff(resource.data).affectedKeys()
+                 .hasAny(['stripeCustomerId', 'stripeSubscriptionId']))
+      );
     }
-    
-    // Purchase records - users can access their own purchases
-    match /purchaseRecords/{recordId} {
-      allow read, write: if request.auth != null && 
-        (resource.data.userId == request.auth.uid || 
-         resource.data.parentId == request.auth.uid);
-    }
-    
-    // Programs and packages - everyone can read
-    match /programs/{programId} {
-      allow read: if true;
-      allow write: if request.auth != null;
-    }
-    
-    // Coaches - everyone can read, any authenticated user can write for now
-    match /coaches/{coachId} {
-      allow read: if true;
-      allow write: if request.auth != null;
-    }
-    
-    // Allow authenticated users to read/write all documents for now
-    // This is more permissive for development/testing
-    match /{document=**} {
-      allow read, write: if request.auth != null;
-    }
+
+    // No catch-all. Everything not matched above is denied.
   }
 }
