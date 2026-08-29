@@ -20,6 +20,7 @@ import TypeChip from './components/TypeChip';
 import { Card, ErrorNotice } from './components/Primitives';
 
 import SignIn from './screens/SignIn';
+import NotProvisioned from './screens/NotProvisioned';
 import Registration from './screens/Registration';
 import MySchedule from './screens/MySchedule';
 import BookSession from './screens/BookSession';
@@ -106,6 +107,14 @@ export const SCREEN_STATES = [
   { id: '17', title: 'Newsletter Composer', Screen: NewsletterComposer, role: 'admin',
     states: [['missing', 'Sections missing'], ['ready', 'All sections in'],
              ['scheduled', 'Scheduled'], ['sent', 'Sent']] },
+  /*
+   * Not provisioned (Sprint 4) — the honest state for a signed-in Google
+   * account with no users/ doc. Not a numbered handoff artboard, so it sits
+   * after the seventeen. The demo variant renders the established demo
+   * guardian's email and never reads the live auth seam.
+   */
+  { id: 'NP', title: 'Not provisioned', Screen: NotProvisioned, role: 'signed-in · no portal role',
+    states: [['default', 'Default']] },
   /*
    * Onboarding walkthrough — practice mode on the real screens (TEAM.md,
    * "Onboarding program v1"). Not a numbered handoff artboard, so it sits
