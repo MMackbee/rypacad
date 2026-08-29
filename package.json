@@ -4,6 +4,7 @@
   "description": "Repo-level scripts for the Firestore emulator workflow. The app lives in frontend/, functions in functions/ — this package intentionally has no dependencies.",
   "scripts": {
     "emulator": "npx firebase-tools emulators:start --only firestore,auth",
-    "seed:emulator": "node --env-file=scripts/emulator.env scripts/seed-firestore.mjs"
+    "seed:emulator": "node --env-file=scripts/emulator.env scripts/seed-firestore.mjs",
+    "sync:emulator": "node --env-file=scripts/emulator.env scripts/sync-calendar-sessions.mjs"
   }
 }
