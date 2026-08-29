@@ -1,8 +1,11 @@
 import React, { useState } from 'react';
-import { Route, Routes, useNavigate } from 'react-router-dom';
+import { Navigate, Route, Routes, useNavigate } from 'react-router-dom';
 
+import useAuthSession from './hooks/useAuthSession';
+import { isLive } from './hooks/live';
 import StatesHarness from './StatesHarness';
 import SignIn from './screens/SignIn';
+import NotProvisioned from './screens/NotProvisioned';
 import Registration from './screens/Registration';
 import { OnboardingWelcomeRoute } from './screens/OnboardingFlow';
 import MySchedule from './screens/MySchedule';
@@ -28,11 +31,55 @@ import NewsletterComposer from './screens/NewsletterComposer';
  * Screens render with `bare` so they fill the viewport - the 390x812 device
  * bezel in StatesHarness is a review affordance, not part of the app.
  *
- * These routes are deliberately unguarded for now. Wiring them behind the
- * existing ProtectedRoute is part of the integration pass, and the handoff is
+ * Routes are role-guarded by <RequireRole> below (Sprint 4). The handoff is
  * explicit that route guarding is not a substitute for server-side checks:
- * every request must re-check the caller's role *and* row-level ownership.
+ * every request must re-check the caller's role *and* row-level ownership —
+ * firestore.rules is the actual boundary, this is navigation UX.
  */
+
+/** Where each role lands - a wrong-role visit redirects here, never to an error. */
+const ROLE_HOME = {
+  athlete: '/portal/home',
+  parent: '/portal/family',
+  coach: '/portal/coach',
+  mental: '/portal/admin',
+  ops: '/portal/admin',
+  owner: '/portal/admin',
+};
+
+/**
+ * Role guard for portal routes: `<RequireRole roles={['athlete', ...]}>`.
+ *
+ * Live mode: loading → nothing (no flash of a redirect while the session is
+ * still resolving); unauthenticated → /portal/signin; signed-in but not
+ * provisioned (real Google account, no users/{uid} doc) → the Not Provisioned
+ * screen; provisioned with a role this route does not accept → that role's own
+ * home, so a shared or stale link lands somewhere useful. An unknown role
+ * falls back to Not Provisioned - the account exists but cannot be routed.
+ *
+ * Seed/demo compatibility: when REACT_APP_PORTAL_LIVE_DATA is not 'true' the
+ * portal is the review scaffold - the harness and every screen must keep
+ * rendering with no emulator, no network and no signed-in user, so the guard
+ * passes everyone through unguarded. Real guarding activates exactly when
+ * live data does; the isLive() check is explicit so that coupling is visible.
+ * The variant passed below keeps useAuthSession in its demo mode in that
+ * case (no auth subscription, no Firestore read); isLive() is a build-time
+ * constant, so the hook's mode never flips across renders.
+ */
+export function RequireRole({ roles, children }) {
+  const live = isLive();
+  const { user, provisioned, loading } = useAuthSession(live ? undefined : { variant: 'idle' });
+
+  if (!live) return children;
+
+  if (loading) return null;
+  if (!user) return <Navigate to="/portal/signin" replace />;
+  if (!provisioned) return <Navigate to="/portal/not-provisioned" replace />;
+  if (!roles.includes(user.role)) {
+    return <Navigate to={ROLE_HOME[user.role] || '/portal/not-provisioned'} replace />;
+  }
+  return children;
+}
 
 /**
  * Staff & Roles flips between its list and add-member views in place - the add
@@ -75,41 +122,149 @@ export default function PortalRoutes() {
       />
       {/* Onboarding walkthrough (Sprint 3) — frontend lane's one route line, per the PM exception in TEAM.md. */}
       <Route path="welcome" element={<OnboardingWelcomeRoute />} />
+      {/* Signed in with a real Google account but no users/{uid} doc yet — the
+          guard's landing for unprovisioned accounts. Public by necessity: the
+          people sent here are exactly those with no role. Screen is the
+          frontend lane's pinned NotProvisioned (Sprint 4). */}
+      <Route path="not-provisioned" element={<NotProvisioned bare />} />
 
-      {/* Athlete */}
+      {/* Athlete — athlete-only, except Book a Session which parents also use
+          to book for a linked athlete (Sprint 4 pin). */}
       <Route
         path="home"
         element={
-          <AthleteDashboard bare onLog={go('/portal/contract')} onBook={go('/portal/book')} />
+          <RequireRole roles={['athlete']}>
+            <AthleteDashboard bare onLog={go('/portal/contract')} onBook={go('/portal/book')} />
+          </RequireRole>
         }
       />
-      <Route path="schedule" element={<MySchedule bare onBook={go('/portal/book')} />} />
-      <Route path="book" element={<BookSession bare onBack={go('/portal/schedule')} />} />
-      <Route path="contract" element={<CommitmentContract bare />} />
-      <Route path="dna" element={<PracticeDNA bare />} />
-      <Route path="season" element={<SeasonSchedule bare />} />
+      <Route
+        path="schedule"
+        element={
+          <RequireRole roles={['athlete']}>
+            <MySchedule bare onBook={go('/portal/book')} />
+          </RequireRole>
+        }
+      />
+      <Route
+        path="book"
+        element={
+          <RequireRole roles={['athlete', 'parent']}>
+            <BookSession bare onBack={go('/portal/schedule')} />
+          </RequireRole>
+        }
+      />
+      <Route
+        path="contract"
+        element={
+          <RequireRole roles={['athlete']}>
+            <CommitmentContract bare />
+          </RequireRole>
+        }
+      />
+      <Route
+        path="dna"
+        element={
+          <RequireRole roles={['athlete']}>
+            <PracticeDNA bare />
+          </RequireRole>
+        }
+      />
+      <Route
+        path="season"
+        element={
+          <RequireRole roles={['athlete']}>
+            <SeasonSchedule bare />
+          </RequireRole>
+        }
+      />
 
       {/* Parent */}
       <Route
         path="family"
-        element={<ParentDashboard bare onOpenAthlete={() => navigate('/portal/athlete')} />}
+        element={
+          <RequireRole roles={['parent']}>
+            <ParentDashboard bare onOpenAthlete={() => navigate('/portal/athlete')} />
+          </RequireRole>
+        }
       />
-      <Route path="athlete" element={<AthleteDetail bare onBack={go('/portal/family')} />} />
-      <Route path="billing" element={<Billing bare />} />
-      <Route path="settings" element={<NotificationPreferences bare />} />
+      <Route
+        path="athlete"
+        element={
+          <RequireRole roles={['parent']}>
+            <AthleteDetail bare onBack={go('/portal/family')} />
+          </RequireRole>
+        }
+      />
+      <Route
+        path="billing"
+        element={
+          <RequireRole roles={['parent']}>
+            <Billing bare />
+          </RequireRole>
+        }
+      />
+      <Route
+        path="settings"
+        element={
+          <RequireRole roles={['parent']}>
+            <NotificationPreferences bare />
+          </RequireRole>
+        }
+      />
 
       {/* Coach */}
       <Route
         path="coach"
-        element={<CoachDashboard bare onOpenRoster={go('/portal/roster')} />}
+        element={
+          <RequireRole roles={['coach']}>
+            <CoachDashboard bare onOpenRoster={go('/portal/roster')} />
+          </RequireRole>
+        }
       />
-      <Route path="roster" element={<Roster bare onBack={go('/portal/coach')} />} />
-      <Route path="capture" element={<DiagnosticCapture bare onCancel={go('/portal/coach')} />} />
+      <Route
+        path="roster"
+        element={
+          <RequireRole roles={['coach']}>
+            <Roster bare onBack={go('/portal/coach')} />
+          </RequireRole>
+        }
+      />
+      <Route
+        path="capture"
+        element={
+          <RequireRole roles={['coach']}>
+            <DiagnosticCapture bare onCancel={go('/portal/coach')} />
+          </RequireRole>
+        }
+      />
 
-      {/* Ops / owner */}
-      <Route path="admin" element={<AdminDashboard bare />} />
-      <Route path="staff" element={<StaffScreen />} />
-      <Route path="newsletter" element={<NewsletterComposer bare />} />
+      {/* Staff — admin admits every staff role's read surface; Staff & Roles
+          is owner-only; the newsletter is ops/owner. */}
+      <Route
+        path="admin"
+        element={
+          <RequireRole roles={['ops', 'owner', 'mental']}>
+            <AdminDashboard bare />
+          </RequireRole>
+        }
+      />
+      <Route
+        path="staff"
+        element={
+          <RequireRole roles={['owner']}>
+            <StaffScreen />
+          </RequireRole>
+        }
+      />
+      <Route
+        path="newsletter"
+        element={
+          <RequireRole roles={['ops', 'owner']}>
+            <NewsletterComposer bare />
+          </RequireRole>
+        }
+      />
     </Routes>
   );
 }
