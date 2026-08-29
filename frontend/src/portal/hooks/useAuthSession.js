@@ -151,7 +151,9 @@ export default function useAuthSession({ variant } = {}) {
       // Success lands via onAuthStateChanged — nothing to set here.
     } catch (err) {
       // The user closing the popup is a change of mind, not an error state.
-      if (err && err.code === 'auth/popup-closed-by-user') return;
+      // Closing the popup and double-clicking the button are both the user
+      // changing their mind, not failures — neither deserves an error state.
+      if (err && (err.code === 'auth/popup-closed-by-user' || err.code === 'auth/cancelled-popup-request')) return;
       setSession((s) => ({
         ...s,
         loading: false,

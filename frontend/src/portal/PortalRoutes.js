@@ -4,7 +4,7 @@ import { Navigate, Route, Routes, useNavigate } from 'react-router-dom';
 import useAuthSession from './hooks/useAuthSession';
 import { isLive } from './hooks/live';
 import StatesHarness from './StatesHarness';
-import SignIn from './screens/SignIn';
+import SignIn, { LANDING_BY_ROLE } from './screens/SignIn';
 import NotProvisioned from './screens/NotProvisioned';
 import Registration from './screens/Registration';
 import { OnboardingWelcomeRoute } from './screens/OnboardingFlow';
@@ -37,15 +37,10 @@ import NewsletterComposer from './screens/NewsletterComposer';
  * firestore.rules is the actual boundary, this is navigation UX.
  */
 
-/** Where each role lands - a wrong-role visit redirects here, never to an error. */
-const ROLE_HOME = {
-  athlete: '/portal/home',
-  parent: '/portal/family',
-  coach: '/portal/coach',
-  mental: '/portal/admin',
-  ops: '/portal/admin',
-  owner: '/portal/admin',
-};
+// Where each role lands lives in ONE place - SignIn exports it (both lanes
+// built identical copies in parallel; two role maps is exactly the drift the
+// review exists to catch). PortalRoutes already imports SignIn, so the named
+// import adds no cycle.
 
 /**
  * Role guard for portal routes: `<RequireRole roles={['athlete', ...]}>`.
@@ -76,7 +71,7 @@ export function RequireRole({ roles, children }) {
   if (!user) return <Navigate to="/portal/signin" replace />;
   if (!provisioned) return <Navigate to="/portal/not-provisioned" replace />;
   if (!roles.includes(user.role)) {
-    return <Navigate to={ROLE_HOME[user.role] || '/portal/not-provisioned'} replace />;
+    return <Navigate to={LANDING_BY_ROLE[user.role] || '/portal/not-provisioned'} replace />;
   }
   return children;
 }
