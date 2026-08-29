@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
-import { color, font, radius, tint } from '../tokens';
+import { useNavigate } from 'react-router-dom';
+import { TOUCH_MIN, color, font, radius, tint } from '../tokens';
 import BottomTabBar from '../components/BottomTabBar';
 import PhoneFrame from '../components/PhoneFrame';
 import { Toggle } from '../components/Toggle';
@@ -62,8 +63,47 @@ export default function NotificationPreferences({ variant = 'default', bare = fa
         <Body size={11} tone={color.textTertiary}>
           {data?.note}
         </Body>
+
+        <ReplayWalkthroughRow />
       </div>
     </PhoneFrame>
+  );
+}
+
+/**
+ * Footer row: re-enter the onboarding walkthrough (Sprint 4, TEAM.md pins).
+ * Settings is where a parent goes looking for it months later, so the entry
+ * lives here rather than on a dashboard. Green text is the tappable-link idiom
+ * ("Forgot password", "Start enrollment"); the button box keeps the 44px
+ * touch floor even though the label is one line.
+ */
+function ReplayWalkthroughRow() {
+  const navigate = useNavigate();
+  return (
+    <div style={{ borderTop: `1px solid ${color.rule}`, marginTop: 8, paddingTop: 4 }}>
+      <button
+        type="button"
+        onClick={() => navigate('/portal/welcome')}
+        style={{
+          background: 'none',
+          border: 'none',
+          padding: '0 2px',
+          width: '100%',
+          minHeight: TOUCH_MIN,
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'space-between',
+          font: `500 13px ${font.body}`,
+          color: color.primary,
+          cursor: 'pointer',
+        }}
+      >
+        <span>Replay the walkthrough</span>
+        <span aria-hidden="true" style={{ color: color.textTertiary }}>
+          ›
+        </span>
+      </button>
+    </div>
   );
 }
 
