@@ -102,9 +102,12 @@ other.
 
 ### `sessions/{sessionId}`
 
-One doc per schedulable block, seeded from `buildSeason()` in
-`frontend/src/portal/data/season.js` — **never retyped by hand**. Doc id is
-the generator's own id.
+One doc per schedulable block. Two sanctioned writers, never a hand: seeded
+from `buildSeason()` in `frontend/src/portal/data/season.js`, and synced from
+the Google Calendar by `scripts/sync-calendar-sessions.mjs`
+([below](#calendar--sessions-sync)) — the calendar is the session source of
+truth per the Sprint 4 pins in TEAM.md. Doc id is `YYYY-MM-DD-<n>` in both
+cases.
 
 | Field | Type | Notes |
 |---|---|---|
@@ -117,6 +120,68 @@ the generator's own id.
 | `label` | string \| null | Real event names only ("Holiday Tournament"); null for regular blocks. |
 | `special` | boolean | True for explicitly-dated extras (holiday tournaments on closed days). |
 | `overflow` | boolean | True for Friday overflow blocks (off by default in the generator). |
+| `status` | string | **Contract v1.2.** `scheduled \| cancelled`, default `scheduled`. The calendar sync sets `cancelled` — never deletes — when a synced session's calendar instance disappears but the session has bookings, so families are told rather than ghosted. |
+| `gcalEventId` | string \| null | **Contract v1.2.** The calendar instance id a synced session came from; null for generator-seeded sessions. The sync matches sessions by this id, so a retitled or retimed event updates its session instead of duplicating it. |
+
+### Calendar → sessions sync
+
+`scripts/sync-calendar-sessions.mjs` turns Google Calendar events into
+bookable session docs — the calendar is the session source of truth
+(Sprint 4 pin, TEAM.md), and this script is the **third sanctioned production
+writer** (with `provision-owner.mjs` and the future billing integration).
+Emulator always; production runs are user-gated commands.
+
+```
+npm run sync:emulator -- --from 2026-11-02 --to 2027-02-27   # sync a running emulator
+node scripts/sync-calendar-sessions.mjs --from ... --to ... --dry-run     # plan only, no writes
+node scripts/sync-calendar-sessions.mjs --from ... --to ... --dry-run \
+  --fixture scripts/fixtures/gcal-sample-events.json                      # deterministic, no network
+```
+
+**Title convention** (pinned in TEAM.md — the mapper implements exactly this):
+
+| Calendar event | Becomes |
+|---|---|
+| summary starts with `Training block`, timed (`start.dateTime`) | bookable session, `type: 'training'` |
+| summary starts with `Tournament`, timed | bookable session, `type: 'tournament'` |
+| all-day event (`start.date` only) | skipped — display-only, whatever the title |
+| any other summary | skipped — display-only (counted, e.g. legacy `Academy Training`) |
+
+Mapped fields: id `YYYY-MM-DD-<n>` where n is the 0-based start-time order of
+that day's **bookable** events; `time` formatted like the generator
+(`'3:00 PM'`); `capacity` from `CAPACITY` in
+`frontend/src/portal/data/schedule.js` (replicated in the script with a source
+note); `label` null for the generic titles (`Training block`, `Tournament`,
+`Tournament block`) and the event summary verbatim otherwise; `booked` 0,
+`coachId` null, `special`/`overflow` false, `status` `'scheduled'`,
+`gcalEventId` the instance id. Times are read in `America/Chicago`, the
+calendar's timezone.
+
+**Upsert / cancel / delete semantics** (per run, over the `--from..--to` window):
+
+- **New** event → session created.
+- **Existing** session, matched by `gcalEventId` — falling back to doc id, but
+  only onto docs with *no* `gcalEventId`, which is how the sync adopts
+  generator-seeded sessions (and their bookings) without stealing a doc that
+  belongs to a different instance → masked patch of
+  `date/time/type/label/status/gcalEventId` only. **`booked`, coach
+  assignments and all bookings are preserved.**
+- Synced session whose calendar instance no longer exists → **deleted** if
+  `booked === 0`, else `status: 'cancelled'`. A session with bookings is never
+  deleted.
+- Generator-seeded sessions (`gcalEventId` null) not adopted by id are left
+  untouched — reaping those is not this script's call.
+- An instance whose date/day-order changed maps to a new id: the old doc is
+  deleted-and-recreated when empty, but patched in place (id kept, flagged as
+  a CONFLICT in the run report) when it has bookings — preserving bookings
+  outranks the id convention.
+
+Same production guard as the seed script: writes require
+`FIRESTORE_EMULATOR_HOST` pointing at a local host or the script exits;
+`--dry-run` may read the real calendar but writes nothing. Calendar
+credentials (`REACT_APP_GCAL_CALENDAR_ID` / `REACT_APP_GCAL_API_KEY`) are read
+from `frontend/.env` at runtime, never hardcoded; the key is
+referer-restricted, so the script sends `Referer: http://localhost:3000/`.
 
 ### `bookings/{bookingId}`
 
@@ -211,6 +276,7 @@ commands resolve their config; neither the CRA app in `frontend/` nor the
 ```
 npm run emulator         # firestore :8080, auth :9099, emulator UI (firebase.json)
 npm run seed:emulator    # seed the running emulator (env via scripts/emulator.env)
+npm run sync:emulator -- --from ... --to ...   # calendar -> sessions sync (see above)
 node scripts/seed-firestore.mjs --dry-run   # print counts + samples, write nothing
 ```
 

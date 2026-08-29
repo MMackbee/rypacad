@@ -1,0 +1,56 @@
+{
+  "kind": "calendar#events",
+  "summary": "RYP Academy schedule (sample fixture)",
+  "timeZone": "America/Chicago",
+  "description": "API-shaped sample of a Google Calendar events.list response (singleEvents=true, timeZone=America/Chicago) for sync-calendar-sessions.mjs --fixture. Covers: two 'Training block' events on the same day (deliberately listed out of start-time order to prove the mapper sorts -> ids -0/-1), one 'Tournament' with a real event label (reused from season.js), one all-day event (skipped even though titled 'Training block'), one 'Academy Training' legacy title (skipped, display-only), and one non-convention timed event (skipped, display-only).",
+  "items": [
+    {
+      "kind": "calendar#event",
+      "id": "fix-tb-0105-1600",
+      "status": "confirmed",
+      "summary": "Training block",
+      "start": { "dateTime": "2026-01-05T16:00:00-06:00", "timeZone": "America/Chicago" },
+      "end": { "dateTime": "2026-01-05T17:00:00-06:00", "timeZone": "America/Chicago" }
+    },
+    {
+      "kind": "calendar#event",
+      "id": "fix-tb-0105-1500",
+      "status": "confirmed",
+      "summary": "Training block",
+      "start": { "dateTime": "2026-01-05T15:00:00-06:00", "timeZone": "America/Chicago" },
+      "end": { "dateTime": "2026-01-05T16:00:00-06:00", "timeZone": "America/Chicago" }
+    },
+    {
+      "kind": "calendar#event",
+      "id": "fix-tn-0110-1030",
+      "status": "confirmed",
+      "summary": "Tournament — Holiday Tournament",
+      "start": { "dateTime": "2026-01-10T10:30:00-06:00", "timeZone": "America/Chicago" },
+      "end": { "dateTime": "2026-01-10T12:30:00-06:00", "timeZone": "America/Chicago" }
+    },
+    {
+      "kind": "calendar#event",
+      "id": "fix-allday-0106",
+      "status": "confirmed",
+      "summary": "Training block",
+      "start": { "date": "2026-01-06" },
+      "end": { "date": "2026-01-07" }
+    },
+    {
+      "kind": "calendar#event",
+      "id": "fix-legacy-0106-1500",
+      "status": "confirmed",
+      "summary": "Academy Training",
+      "start": { "dateTime": "2026-01-06T15:00:00-06:00", "timeZone": "America/Chicago" },
+      "end": { "dateTime": "2026-01-06T16:00:00-06:00", "timeZone": "America/Chicago" }
+    },
+    {
+      "kind": "calendar#event",
+      "id": "fix-misc-0107-1700",
+      "status": "confirmed",
+      "summary": "Facility maintenance",
+      "start": { "dateTime": "2026-01-07T17:00:00-06:00", "timeZone": "America/Chicago" },
+      "end": { "dateTime": "2026-01-07T18:00:00-06:00", "timeZone": "America/Chicago" }
+    }
+  ]
+}
