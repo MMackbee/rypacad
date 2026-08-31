@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useMemo } from 'react';
 import { color, font, radius } from '../tokens';
 import BottomTabBar from '../components/BottomTabBar';
 import Button from '../components/Button';
@@ -8,7 +8,37 @@ import SequenceLadder from '../components/SequenceLadder';
 import StatusBadge from '../components/StatusBadge';
 import Field from '../components/Field';
 import { Body, Card, ScreenTitle, SectionLabel } from '../components/Primitives';
-import { useBilling } from '../hooks';
+import * as hooksModule from '../hooks';
+import { useBilling, useHousehold } from '../hooks';
+import { GOLF_PACKAGES } from '../data/packages';
+
+/**
+ * Sprint 5 pin (TEAM.md): `useBillingSummary()` -> `{ data: { rows: [{
+ * athleteId, name, packageName, price, status }] } }`, one row per child.
+ * Resolved off the namespace (see CoachDashboard.js for why - the export
+ * does not exist in hooks/index.js on this branch yet). Falls back to the
+ * household's existing children joined against the confirmed package
+ * catalogue (the same GOLF_PACKAGES StatesHarness.js already reads directly)
+ * so the section still demonstrates real rows pre-merge.
+ */
+const pinnedUseBillingSummary = hooksModule.useBillingSummary;
+function useBillingSummaryFallback() {
+  const { data: household, loading, error } = useHousehold({ variant: 'three' });
+  return useMemo(() => {
+    if (loading || error || !household) return { data: null, loading, error };
+    const rows = household.children.map((c) => {
+      const pkg = GOLF_PACKAGES.find((p) => p.id === c.packageId);
+      return {
+        athleteId: c.id,
+        name: c.name,
+        packageName: pkg ? pkg.name : '—',
+        price: pkg ? pkg.price : null,
+        status: 'active',
+      };
+    });
+    return { data: { rows }, loading: false, error: null };
+  }, [household, loading, error]);
+}
 
 /**
  * 10 · Billing & Subscription - parent.
@@ -32,6 +62,7 @@ import { useBilling } from '../hooks';
  */
 export default function Billing({ variant = 'active', bare = false }) {
   const { data } = useBilling({ variant: variant === 'updating' ? 'retry3' : variant });
+  const summary = pinnedUseBillingSummary ? pinnedUseBillingSummary() : useBillingSummaryFallback();
 
   if (variant === 'updating') return <UpdatingCard bare={bare} />;
 
@@ -58,11 +89,45 @@ export default function Billing({ variant = 'active', bare = false }) {
           </Card>
         ) : null}
 
+        <SubscriptionRows rows={summary.data?.rows ?? []} />
         <MembershipCard membership={data?.membership} />
         <PaymentMethodCard method={data?.paymentMethod} declining={data?.declining} />
         <InvoiceHistory invoices={data?.invoices ?? []} />
       </div>
     </PhoneFrame>
+  );
+}
+
+/** One subscription row per child (Sprint 5 pin) - package, price, status. */
+function SubscriptionRows({ rows }) {
+  if (!rows.length) return null;
+  return (
+    <Card large>
+      <SectionLabel style={{ marginBottom: 6 }}>Athletes on this plan</SectionLabel>
+      {rows.map((row, i) => (
+        <div
+          key={row.athleteId}
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: 12,
+            padding: '13px 0',
+            borderBottom: i < rows.length - 1 ? `1px solid ${color.ruleSoft}` : 'none',
+          }}
+        >
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <div style={{ font: `600 13px ${font.body}`, color: color.text }}>{row.name}</div>
+            <div style={{ font: `400 11px ${font.body}`, color: color.textTertiary, marginTop: 2 }}>
+              {row.packageName}
+              {row.price != null ? ` · $${row.price}/mo` : ''}
+            </div>
+          </div>
+          <StatusBadge tone={row.status === 'active' ? 'green' : 'neutral'}>
+            {row.status}
+          </StatusBadge>
+        </div>
+      ))}
+    </Card>
   );
 }
 

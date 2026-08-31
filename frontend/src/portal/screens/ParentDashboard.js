@@ -1,5 +1,5 @@
 import React from 'react';
-import { color, font, radius } from '../tokens';
+import { color, font } from '../tokens';
 import BottomTabBar from '../components/BottomTabBar';
 import Button from '../components/Button';
 import PhoneFrame from '../components/PhoneFrame';
@@ -20,13 +20,17 @@ import { useHousehold } from '../hooks';
  * stated norm, and a layout that only looks right with a single card is the
  * wrong default.
  *
+ * Sprint 5 pin (TEAM.md): "Link another athlete" moved to Settings
+ * (NotificationPreferences.js) - it no longer renders here.
+ *
  * @param {'one'|'three'|'payment'} variant
  * @param {() => void} [onRetry]  Re-fetch after a load failure.
+ * @param {(athleteId: string) => void} [onOpenAthlete]  Each child card calls
+ *   this with its own id - routing wires it to /portal/athlete/:athleteId.
  */
 export default function ParentDashboard({
   variant = 'three',
   bare = false,
-  onLinkAthlete,
   onOpenAthlete,
   onRetry,
 }) {
@@ -92,26 +96,6 @@ export default function ParentDashboard({
             onOpen={onOpenAthlete ? () => onOpenAthlete(child.id) : undefined}
           />
         ))}
-
-        {/* Hidden while billing is flagged - adding an athlete to a household
-            that cannot pay for the ones it has is not the next step. */}
-        {flagged ? null : (
-          <button
-            type="button"
-            onClick={onLinkAthlete}
-            style={{
-              border: `1px dashed ${color.border}`,
-              background: 'transparent',
-              borderRadius: radius.card,
-              padding: '15px 0',
-              font: `500 13px ${font.body}`,
-              color: color.primary,
-              cursor: 'pointer',
-            }}
-          >
-            + Link another athlete
-          </button>
-        )}
       </div>
       )}
     </PhoneFrame>
