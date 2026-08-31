@@ -207,15 +207,70 @@ package, or allowance anywhere, so there is nothing to drift when a booking is
 cancelled, a session is closed, or a write is retried. (`sessions.booked` is a
 per-session capacity display counter, not an allowance counter.)
 
-### `contractLogs/{athleteId_date}`
+### `contractLogs/{athleteId}_{date}`
 
-Commitment Contract practice log — one per athlete per day, id-enforced.
+Commitment Contract practice log — one per athlete per day, id-enforced. Field
+set is **contract v1.3** (Sprint 5 pin, TEAM.md): `contractMinutes`,
+`createdBy` and `createdAt` are additions over v1's `athleteId, date, minutes`.
 
 | Field | Type | Notes |
 |---|---|---|
 | `athleteId` | string | Matches the id prefix. |
-| `date` | string | `YYYY-MM-DD`, matches the id suffix. |
-| `minutes` | number | Minutes logged that day. |
+| `date` | string | `YYYY-MM-DD` (ISO), matches the id suffix. |
+| `minutes` | number | Integer > 0. The real practiced amount that day — variable, not a fixed block length. |
+| `contractMinutes` | number | **Snapshot** of the athlete's `contractMinutes` tier at the moment this log was created — copied from `athletes/{athleteId}.contractMinutes`, not read live. This is what lets history survive a later tier change: a log written against the 45-min tier still reads as fulfilled/not against 45 forever, even if the athlete moves to the 95-min tier next month. |
+| `createdBy` | string | uid of the account that wrote the log (athlete or parent). |
+| `createdAt` | timestamp | Server write time. |
+
+**One log per athlete per day** via the doc-id keyspace — same pattern as
+`bookings`' `{athleteId}_{sessionId}`. A second log for the same
+athlete/date overwrites the first rather than creating a duplicate.
+
+**Fulfilled = `minutes >= contractMinutes`.** Surplus minutes never bank an
+extra fulfilled day — 90 minutes logged against a 45-minute contract is
+**one** fulfilled day that happens to record 90, not two days' worth of
+credit. There is no rollover or banking concept anywhere in this collection.
+
+**Any date is loggable.** Closures are a *scheduling* fact (they constrain
+which `sessions` are bookable) — they are not a *practice* fact, because kids
+practice outside the academy. The contract calendar has no `closed` state;
+every calendar date accepts a log.
+
+### Billing rows (derived, no new collection)
+
+Sprint 5 adds a per-child billing list to the parent surface. It is **not** a
+stored collection — each row is derived at read time by joining one
+`athletes` doc to its `packages` doc:
+
+- one row per athlete: `{ athleteId, name, packageName: packages[packageId].name, price, status }`
+- `price` comes **only** from the frontend's `packages.js` source (the same
+  module `seed-firestore.mjs` and `provision-family.mjs` bundle from) —
+  Firestore's `packages/{id}.price` field is never populated (policy: no
+  dollar amounts in Firestore; see the `packages` collection notes above), so
+  the derivation reads the number out of the bundled catalogue, not out of a
+  document.
+- `status` is a hardcoded `'active'` placeholder until Stripe wiring lands;
+  it is not read from `households.stripeSubscriptionId` this sprint.
+
+### Query semantics (v1.3 access patterns)
+
+Three read patterns the Sprint 5 hook seam relies on, pinned here so the
+index reasoning below has a fixed target:
+
+- **Coach roster** — "every athlete assigned to a coach" is not attendance
+  for one session; it is `athletes where coachId == :coachUid`, full stop.
+  This is a real roster query against the athlete's standing assignment
+  (`athletes.coachId`), not a derivation from `sessions`/`bookings`.
+- **Parent household list** — a parent's children list (and the billing
+  rows above) come from `athletes where householdId == :parentHouseholdId`.
+  This is the query the rules must be able to prove is scoped to the
+  caller's own household (`request.auth`-derived equality filter), per the
+  Sprint 5 access-matrix ruling in TEAM.md.
+- **Month session grid** — `useMonthSessions(monthISO)` reads
+  `sessions where date >= :monthStart and date <= :monthEnd orderBy date`,
+  the same range-on-the-ordered-field shape as the existing Book-a-Session
+  query ([index 1](#1-season-browsing--no-composite-needed-deploy-verified)),
+  just bounded to one calendar month instead of the whole season.
 
 ## Indexes
 
@@ -265,6 +320,41 @@ reconcile that can rebuild `sessions.booked` from truth.
 Serves: `contractLogs where athleteId == :id and date >= :monthStart and
 date <= :monthEnd orderBy date` — the contract month grid, streaks, and
 attendance percentage on the parent's child-detail screen.
+
+### v1.3 query additions (Sprint 5) — no `firestore.indexes.json` changes
+
+Every new/changed query the Sprint 5 hook seam needs was checked against the
+existing composites and Firestore's automatic single-field indexes.
+**Nothing was added** — each one either rides an index that already exists or
+rides the automatic single-field index that a composite would duplicate:
+
+- **`contractLogs` variable-minutes practice log** (`usePracticeLog`) — the
+  read is `contractLogs where athleteId == :id and date >= :cycleStart and
+  date <= :cycleEnd orderBy date`, the exact shape [index 6](#6-contractlogs-athleteid-asc-date-asc--contract-history)
+  already serves. Contract v1.3 added fields (`contractMinutes`, `createdBy`,
+  `createdAt`) to the document, not to the query's filter/sort clauses, so
+  the existing 2-field composite is untouched and already sufficient.
+- **`athletes where householdId == :id`** (`useHouseholdAthletes`, and the
+  billing derivation) — a single equality filter with no `orderBy` on a
+  different field. Firestore's automatic single-field index answers this
+  directly. Adding a `(householdId ASC)` "composite" here is exactly the
+  redundant-index shape production rejects at deploy time with "this index
+  is not necessary, configure using single field index controls" — which
+  aborts the whole `firestore deploy --only firestore:indexes` run, not just
+  that one index. Left off the file entirely, on purpose.
+- **`athletes where coachId == :uid`** (`useCoachRoster`) — same reasoning
+  as `householdId` above: single equality filter, automatic single-field
+  index, no composite.
+- **`sessions` month range** (`useMonthSessions`) — `date >= :monthStart and
+  date <= :monthEnd orderBy date` is a range filter and `orderBy` on the
+  *same* field, the identical shape already established as composite-free in
+  [index 1](#1-season-browsing--no-composite-needed-deploy-verified) (and
+  deploy-verified there). Narrowing the range to one month instead of the
+  whole season doesn't change which index type answers it.
+
+If a future sprint adds a *second* sort/filter field to any of these four
+queries (e.g. ordering the roster by name, or paginating billing rows), that
+is the point a real composite becomes necessary — not before.
 
 ## Seeding & emulator workflow
 
