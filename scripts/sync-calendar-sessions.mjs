@@ -56,9 +56,9 @@
  */
 
 import { readFileSync } from 'node:fs';
-import { homedir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { prodAccessToken } from './lib/prod-auth.mjs';
 
 const PROJECT_ID = 'rypacad';
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -137,47 +137,8 @@ function localEmulatorHost({ required }) {
   return host;
 }
 
-// ---------------------------------------------------------------------------
-// Production auth — the developer's own firebase-tools CLI login, exactly as
-// provision-owner.mjs does it. The client id/secret are firebase-tools' public
-// installed-app OAuth client, embedded in the open-source CLI; the refresh
-// token is the developer's login. Tokens are never printed.
-// ---------------------------------------------------------------------------
-
-const CLI_CLIENT_ID = '563584335869-fgrhgmd47bqnekij5i8b5pr03ho849e6.apps.googleusercontent.com';
-const CLI_CLIENT_SECRET = 'j9iVZfS8kkCEFUPaAeJV0sAi';
-
-function cliRefreshToken() {
-  const store = path.join(homedir(), '.config', 'configstore', 'firebase-tools.json');
-  try {
-    const cfg = JSON.parse(readFileSync(store, 'utf8'));
-    const token = cfg?.tokens?.refresh_token;
-    if (!token) throw new Error('no refresh_token in configstore');
-    return token;
-  } catch (e) {
-    console.error(`Could not read the firebase-tools login (${store}): ${e.message}`);
-    console.error('Run `npx firebase-tools login` first.');
-    process.exit(1);
-  }
-}
-
-async function prodAccessToken() {
-  const res = await fetch('https://oauth2.googleapis.com/token', {
-    method: 'POST',
-    headers: { 'content-type': 'application/x-www-form-urlencoded' },
-    body: new URLSearchParams({
-      grant_type: 'refresh_token',
-      refresh_token: cliRefreshToken(),
-      client_id: CLI_CLIENT_ID,
-      client_secret: CLI_CLIENT_SECRET,
-    }),
-  });
-  if (!res.ok) {
-    console.error(`Token exchange failed (${res.status}). Re-run \`npx firebase-tools login\`.`);
-    process.exit(1);
-  }
-  return (await res.json()).access_token;
-}
+// Production auth lives in lib/prod-auth.mjs — the same CLI-login mechanism
+// every sanctioned writer uses.
 
 // ---------------------------------------------------------------------------
 // Calendar fetch — frontend/.env credentials, referer-restricted key,

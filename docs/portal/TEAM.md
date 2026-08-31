@@ -116,12 +116,21 @@ Contract v1.2 extensions:
   ghosted. Sessions with no bookings whose instance disappears are deleted.
 - `sessions.gcalEventId`: the calendar instance id a synced session came from
   (null for generator-seeded sessions).
-- The calendar sync is the **third sanctioned production writer** (with
-  provision-owner and the future billing integration). It maps events by the
+- The calendar sync is a **sanctioned production writer** (with
+  provision-owner, provision-family, and the future billing integration; all
+  share scripts/lib/prod-auth.mjs). It maps events by the
   title convention — `Training block` → bookable training, `Tournament` →
   bookable tournament, anything else skipped (display-only) — with session id
-  `YYYY-MM-DD-<n>` by start-time order within the day. Emulator always;
-  prod runs are user-gated commands.
+  `YYYY-MM-DD-<n>` by start-time order within the day. Emulator by default;
+  `--prod` targets production and a prod write requires `--yes` after a
+  printed plan. All prod runs are user-gated commands.
+- provision-family.mjs stands up the four-account test family: the packages
+  catalogue (bundled from packages.js, price stripped), the `mackbee`
+  household, the `makel-test` athlete (g-8-3, 45-min tier), and a users doc
+  per account — owner makel@rypgolf.com, athlete makelmackbee@gmail.com,
+  parent makelmackbee@live.com, coach makel@pixelcaddie.com. Uids resolve
+  from emails via Identity Toolkit, so each account signs in once first;
+  idempotent re-runs fill in accounts that were missing.
 
 Auth seam (pinned so frontend and routing build in parallel):
 - `useAuthSession()` (routing lane, replaces the scaffold stub) returns

@@ -14,24 +14,18 @@
  * apply to IAM-authenticated admin traffic, which is the point.
  *
  * Safety posture:
- *   - This is one of exactly two sanctioned production writers (the other is
- *     the future billing integration). Everything else is emulator-only.
+ *   - This is one of the sanctioned production writers (with
+ *     provision-family.mjs, sync-calendar-sessions.mjs --prod, and the future
+ *     billing integration). Everything else is emulator-only.
  *   - It writes a single document, only in the `users` collection, and prints
  *     what it wrote. It never prints tokens.
  *   - Running it is a PM/user-gated action per docs/portal/TEAM.md.
  */
 
-import { readFileSync } from 'node:fs';
-import { homedir } from 'node:os';
-import path from 'node:path';
+import { prodAccessToken } from './lib/prod-auth.mjs';
 
 const PROJECT_ID = 'rypacad';
 const ROLES = ['athlete', 'parent', 'coach', 'mental', 'ops', 'owner'];
-
-// firebase-tools' public installed-app OAuth client (embedded in the
-// open-source CLI); the refresh token below is the developer's own login.
-const CLIENT_ID = '563584335869-fgrhgmd47bqnekij5i8b5pr03ho849e6.apps.googleusercontent.com';
-const CLIENT_SECRET = 'j9iVZfS8kkCEFUPaAeJV0sAi';
 
 function arg(name) {
   const i = process.argv.indexOf(`--${name}`);
@@ -47,38 +41,6 @@ const displayName = arg('name') ?? null;
 if (!uid || !email || !ROLES.includes(role)) {
   console.error('Usage: node scripts/provision-owner.mjs --uid <authUid> --email <email> --role <' + ROLES.join('|') + '> [--name "Display Name"] [--dry-run]');
   process.exit(1);
-}
-
-function cliRefreshToken() {
-  const store = path.join(homedir(), '.config', 'configstore', 'firebase-tools.json');
-  try {
-    const cfg = JSON.parse(readFileSync(store, 'utf8'));
-    const token = cfg?.tokens?.refresh_token;
-    if (!token) throw new Error('no refresh_token in configstore');
-    return token;
-  } catch (e) {
-    console.error(`Could not read the firebase-tools login (${store}): ${e.message}`);
-    console.error('Run `npx firebase-tools login` first.');
-    process.exit(1);
-  }
-}
-
-async function accessToken() {
-  const res = await fetch('https://oauth2.googleapis.com/token', {
-    method: 'POST',
-    headers: { 'content-type': 'application/x-www-form-urlencoded' },
-    body: new URLSearchParams({
-      grant_type: 'refresh_token',
-      refresh_token: cliRefreshToken(),
-      client_id: CLIENT_ID,
-      client_secret: CLIENT_SECRET,
-    }),
-  });
-  if (!res.ok) {
-    console.error(`Token exchange failed (${res.status}). Re-run \`npx firebase-tools login\`.`);
-    process.exit(1);
-  }
-  return (await res.json()).access_token;
 }
 
 const fields = {
@@ -100,7 +62,7 @@ if (DRY_RUN) {
   process.exit(0);
 }
 
-const token = await accessToken();
+const token = await prodAccessToken();
 const res = await fetch(url, {
   method: 'PATCH',
   headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' },
