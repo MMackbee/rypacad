@@ -16,24 +16,30 @@ import { useDiagnostic } from '../hooks';
  * minutes and will be interrupted; a form that only persists on submit loses an
  * hour of a coach's work the first time someone walks over to ask a question.
  *
- * Six modules total, per the Blueprint's Diagnostic Protocol: swing video, the
- * four numeric sections here, and Yannick's mental-game intake (captured
- * elsewhere, counted here).
+ * Sprint 5 pin (TEAM.md): trimmed to what is actually assessable inside the
+ * indoor facility - swing video, launch monitor numbers, and putting.
+ * Mobility & Stability (movement/balance work) and Short Game (30/50/70 yd
+ * wedge dispersion) both need real distance or open floor space the indoor
+ * bays don't have; they are DEFERRED, not faked, and are filtered out below
+ * rather than removed from data/seed.js (data/ is not this lane's to edit).
+ * Mental-game intake stays counted per the Blueprint - Yannick captures it
+ * elsewhere, this screen only reflects it in the module count.
  *
  * @param {'empty'|'uploading'|'partial'|'complete'} variant
  */
-const TOTAL_MODULES = 6;
+const INDOOR_SECTION_IDS = ['launch', 'putting'];
+const TOTAL_MODULES = 4; // swing video + launch + putting + mental intake (elsewhere)
 
 export default function DiagnosticCapture({ variant = 'empty', bare = false, onCancel }) {
   const { data } = useDiagnostic();
   const [values, setValues] = useState({});
 
-  const sections = data?.sections ?? [];
+  const sections = (data?.sections ?? []).filter((s) => INDOOR_SECTION_IDS.includes(s.id));
   const uploading = variant === 'uploading';
   const complete = variant === 'complete';
   const partial = variant === 'partial';
 
-  const completedModules = complete ? TOTAL_MODULES : partial ? 3 : uploading ? 1 : 0;
+  const completedModules = complete ? TOTAL_MODULES : partial ? 2 : uploading ? 1 : 0;
 
   const saveStatus = {
     empty: { label: 'Not saved', tone: color.faintText },
@@ -130,6 +136,11 @@ export default function DiagnosticCapture({ variant = 'empty', bare = false, onC
             </div>
           </Card>
         ))}
+
+        <Body size={11} tone={color.textTertiary}>
+          Mobility & Stability and Short Game need real distance and open floor space the indoor
+          bays don't have. Deferred to the outdoor Diagnostic, not captured here.
+        </Body>
       </div>
     </PhoneFrame>
   );

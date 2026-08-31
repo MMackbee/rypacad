@@ -3,6 +3,43 @@ import { TOUCH_MIN, color, font, radius, tint } from '../tokens';
 import Button from './Button';
 
 /**
+ * Header sign-out affordance (Sprint 5 pin, TEAM.md): every role needs a
+ * visible sign-out control. Screens receive `onSignOut` from the routing
+ * lane; the harness and any bare demo mount pass nothing, so the affordance
+ * hides itself rather than rendering a dead button. Subtle by design - small
+ * uppercase text, not a button - findable without competing with the header's
+ * primary content.
+ */
+export function SignOutButton({ onSignOut, style }) {
+  if (!onSignOut) return null;
+  const bleed = -(TOUCH_MIN - 14) / 2;
+  return (
+    <button
+      type="button"
+      onClick={onSignOut}
+      style={{
+        background: 'none',
+        border: 'none',
+        padding: 0,
+        minHeight: TOUCH_MIN,
+        marginTop: bleed,
+        marginBottom: bleed,
+        display: 'inline-flex',
+        alignItems: 'center',
+        font: `500 10px ${font.body}`,
+        letterSpacing: '.08em',
+        textTransform: 'uppercase',
+        color: color.textTertiary,
+        cursor: 'pointer',
+        ...style,
+      }}
+    >
+      Sign out
+    </button>
+  );
+}
+
+/**
  * Header back affordance ("‹ Today", "‹ Cancel", "‹ Back").
  *
  * The label is only ~16px tall, which is well under the 44px touch floor. The

@@ -8,7 +8,7 @@ import PhoneFrame from '../components/PhoneFrame';
 import ProgressMeter from '../components/ProgressMeter';
 import TypeChip from '../components/TypeChip';
 import SkeletonCard, { SkeletonBar } from '../components/Skeleton';
-import { Body, Card, ErrorNotice, ScreenTitle, SectionLabel, Tick } from '../components/Primitives';
+import { Body, Card, ErrorNotice, ScreenTitle, SectionLabel, SignOutButton, Tick } from '../components/Primitives';
 import { useAthleteDashboard } from '../hooks';
 
 /**
@@ -17,8 +17,10 @@ import { useAthleteDashboard } from '../hooks';
  *
  * @param {'populated'|'new'|'empty'} variant
  * @param {() => void} [onRetry]  Re-fetch after a load failure.
+ * @param {() => void} [onSignOut]  Sprint 5 pin: hidden when not supplied
+ *   (harness/demo mode); routing wires useAuthSession().signOut() to it.
  */
-export default function AthleteDashboard({ variant = 'populated', bare = false, onLog, onBook, onRetry }) {
+export default function AthleteDashboard({ variant = 'populated', bare = false, onLog, onBook, onRetry, onSignOut }) {
   const { data, loading, error } = useAthleteDashboard({ variant });
   const athlete = data?.athlete;
   const next = data?.nextSession;
@@ -45,7 +47,10 @@ export default function AthleteDashboard({ variant = 'populated', bare = false, 
               </>
             )}
           </div>
-          <Avatar size={40} />
+          <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 6 }}>
+            <Avatar size={40} />
+            <SignOutButton onSignOut={onSignOut} />
+          </div>
         </div>
       }
       footer={<BottomTabBar role="athlete" active="home" />}
@@ -85,8 +90,6 @@ export default function AthleteDashboard({ variant = 'populated', bare = false, 
         ) : null}
 
         {variant === 'populated' ? <QuickActions onLog={onLog} onBook={onBook} /> : null}
-
-        <CodeOfGrit items={data?.codeOfGrit ?? []} />
       </div>
       )}
     </PhoneFrame>
@@ -247,33 +250,6 @@ function QuickActions({ onLog, onBook }) {
         Book a slot
       </Button>
     </div>
-  );
-}
-
-function CodeOfGrit({ items }) {
-  return (
-    <Card>
-      <SectionLabel style={{ marginBottom: 12 }}>Code of Grit</SectionLabel>
-      <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-        {items.map((line) => (
-          <div key={line} style={{ display: 'flex', gap: 9, alignItems: 'flex-start' }}>
-            <span
-              style={{
-                width: 4,
-                height: 4,
-                marginTop: 7,
-                flex: 'none',
-                background: color.primary,
-                borderRadius: 2,
-              }}
-            />
-            <span style={{ font: `400 13px/1.5 ${font.body}`, color: color.textSecondary }}>
-              {line}
-            </span>
-          </div>
-        ))}
-      </div>
-    </Card>
   );
 }
 

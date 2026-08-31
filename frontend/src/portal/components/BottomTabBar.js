@@ -29,12 +29,12 @@ export const TABS = {
     { key: 'billing', label: 'Billing', icon: 'card', route: '/portal/billing' },
     { key: 'settings', label: 'Settings', icon: 'settings', route: '/portal/settings' },
   ],
+  // Sprint 5 pin (TEAM.md): the Me tab is removed - the coach profile screen
+  // was never built and the slot had no route to send anyone to.
   coach: [
     { key: 'today', label: 'Today', icon: 'today', route: '/portal/coach' },
     { key: 'roster', label: 'Roster', icon: 'list', route: '/portal/roster' },
     { key: 'capture', label: 'Capture', icon: 'camera', route: '/portal/capture' },
-    // The coach profile screen is not in Phase 1's seventeen; no route yet.
-    { key: 'me', label: 'Me', icon: 'profile', route: null },
   ],
 };
 

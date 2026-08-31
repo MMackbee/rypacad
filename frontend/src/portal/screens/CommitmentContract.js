@@ -1,15 +1,33 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { color, font, glow, radius, tint } from '../tokens';
 import BottomTabBar from '../components/BottomTabBar';
 import Button from '../components/Button';
+import NumericField from '../components/NumericField';
 import PhoneFrame from '../components/PhoneFrame';
 import ContractCalendar from '../components/ContractCalendar';
 import { DayGridLegend } from '../components/DayGridCell';
 import { Body, Card, ScreenTitle, Tick } from '../components/Primitives';
+import * as hooksModule from '../hooks';
 import { useContract } from '../hooks';
 // todayISO is a pure calendar helper, not response data — like poolFor in
 // BookSession, the helpers stay importable; data travels through the hook seam.
 import { todayISO } from '../data/calendar';
+
+/**
+ * Sprint 5 pin (TEAM.md): `usePracticeLog()` adds `logPractice({ minutes })`
+ * and exposes `totalMinutes` for the cycle, alongside the day grid. Resolved
+ * off the namespace (see CoachDashboard.js for why - the export does not
+ * exist in hooks/index.js on this branch yet). The fallback keeps a local
+ * running total seeded from the existing contract stats so Save still moves
+ * a real number pre-merge; it is not persisted, and is superseded
+ * automatically once the routing lane's branch lands the real hook.
+ */
+const pinnedUsePracticeLog = hooksModule.usePracticeLog;
+function usePracticeLogFallback(seedMinutes) {
+  const [total, setTotal] = useState(() => seedMinutes ?? 0);
+  const logPractice = ({ minutes }) => setTotal((t) => t + minutes);
+  return { totalMinutes: total, logPractice };
+}
 
 /**
  * 07 · Commitment Contract - athlete. ⭐
@@ -51,6 +69,16 @@ export default function CommitmentContract({
   // The practice log lives here and nowhere else — component state is the
   // whole record, per the practice-mode invariant (zero Firestore writes).
   const [practiceLogged, setPracticeLogged] = useState(null);
+  // Real (non-practice) logging: the timer/manual entry sheet, and the
+  // minutes actually saved today once the coach... athlete taps Save. The
+  // contract tier is a minimum, not a unit (Sprint 5 pin) — this is the
+  // real practiced amount, which can run above or below the tier.
+  const [showLogSheet, setShowLogSheet] = useState(false);
+  const [todayLog, setTodayLog] = useState(null); // minutes, or null if not logged today
+
+  const practiceLog = pinnedUsePracticeLog
+    ? pinnedUsePracticeLog()
+    : usePracticeLogFallback(data?.stats?.minutes);
 
   if (variant === 'none') return <NoContract bare={bare} data={data} />;
 
@@ -67,6 +95,9 @@ export default function CommitmentContract({
   const stats = practiceLogged && data?.stats
     ? { ...data.stats, logged: data.stats.logged + 1 }
     : data?.stats;
+  // Minutes logged this cycle reads from the practice log, not the tier-times-
+  // days placeholder — a day fulfilled at 90 against a 45 contract shows 90.
+  const displayStats = stats ? { ...stats, minutes: practiceLog.totalMinutes } : stats;
 
   const handleLog = practice
     ? () => {
@@ -75,7 +106,14 @@ export default function CommitmentContract({
         setPracticeLogged(iso);
         if (onLogged) onLogged({ iso });
       }
-    : onLog;
+    : () => setShowLogSheet(true);
+
+  const handleSaveLog = (minutes) => {
+    practiceLog.logPractice({ minutes });
+    setTodayLog(minutes);
+    setShowLogSheet(false);
+    if (onLog) onLog(minutes);
+  };
 
   return (
     <PhoneFrame
@@ -99,7 +137,8 @@ export default function CommitmentContract({
           hint={state?.hint}
           onLog={handleLog}
           minutes={data?.tierMinutes}
-          logged={Boolean(practiceLogged)}
+          logged={Boolean(practiceLogged) || todayLog != null}
+          loggedMinutes={todayLog ?? data?.tierMinutes}
         />
       }
     >
@@ -121,10 +160,17 @@ export default function CommitmentContract({
           </div>
         </Card>
 
-        <StatsRow stats={stats} />
+        <StatsRow stats={displayStats} />
       </div>
 
       {sheetDay ? <DaySheet day={sheetDay} onClose={() => setSheetDay(null)} /> : null}
+      {showLogSheet ? (
+        <LogSheet
+          contractMinutes={data?.tierMinutes}
+          onClose={() => setShowLogSheet(false)}
+          onSave={handleSaveLog}
+        />
+      ) : null}
     </PhoneFrame>
   );
 }
@@ -248,11 +294,14 @@ function StatsRow({ stats }) {
  * Pinned, 56px, inside thumb reach, and it never scrolls away. The daily task
  * is one tap from a cold open.
  *
- * `logged` (practice mode): the CTA's slot becomes a green-tinted status bar —
- * not a Button, per flag 02: solid green fill means tap, and a logged day is a
- * state, not an action.
+ * `logged`: the CTA's slot becomes a green-tinted status bar — not a Button,
+ * per flag 02: solid green fill means tap, and a logged day is a state, not
+ * an action. `loggedMinutes` is the real amount saved (practice mode: the
+ * tier minutes, matching its one-tap semantics; real mode: whatever the
+ * timer or manual entry actually recorded, which can be above or below the
+ * tier — see LogSheet).
  */
-function ContractFooter({ complete, hint, onLog, minutes, logged = false }) {
+function ContractFooter({ complete, hint, onLog, minutes, logged = false, loggedMinutes }) {
   return (
     <>
       <div
@@ -278,7 +327,7 @@ function ContractFooter({ complete, hint, onLog, minutes, logged = false }) {
             }}
           >
             <Tick size={14} color={color.primary} thickness={2.5} />
-            <span>Logged today · {minutes} min</span>
+            <span>Logged today · {loggedMinutes ?? minutes} min</span>
           </div>
         ) : complete ? (
           <Button variant="outline" height={56} style={{ borderRadius: 10, boxShadow: 'none' }}>
@@ -351,6 +400,128 @@ function DaySheet({ day, onClose }) {
           style={{ marginTop: 16, boxShadow: 'none' }}
         >
           {day.state === 'logged' ? 'Remove entry' : 'Add late entry'}
+        </Button>
+      </div>
+    </div>
+  );
+}
+
+/**
+ * Sprint 5 pin: variable practice logging. The contract tier is a minimum,
+ * not a unit — this sheet captures the real minutes practiced, two ways: a
+ * running timer (no typing) or a manual entry (for a session already run
+ * elsewhere). Whichever mode is showing when Save is tapped is what gets
+ * logged; switching modes does not combine them.
+ */
+function LogSheet({ contractMinutes, onClose, onSave }) {
+  const [mode, setMode] = useState('timer');
+  const [running, setRunning] = useState(false);
+  const [elapsedSec, setElapsedSec] = useState(0);
+  const [manualMinutes, setManualMinutes] = useState('');
+
+  useEffect(() => {
+    if (!running) return undefined;
+    const id = setInterval(() => setElapsedSec((s) => s + 1), 1000);
+    return () => clearInterval(id);
+  }, [running]);
+
+  const timerMinutes = Math.floor(elapsedSec / 60);
+  const mm = String(timerMinutes).padStart(2, '0');
+  const ss = String(elapsedSec % 60).padStart(2, '0');
+
+  const manualValue = Math.max(0, Math.round(Number(manualMinutes) || 0));
+  const minutesToSave = mode === 'timer' ? timerMinutes : manualValue;
+  const canSave = minutesToSave > 0;
+
+  return (
+    <div
+      onClick={onClose}
+      style={{
+        position: 'absolute',
+        inset: 0,
+        background: tint.overlay,
+        display: 'flex',
+        alignItems: 'flex-end',
+      }}
+    >
+      <div
+        onClick={(e) => e.stopPropagation()}
+        style={{
+          width: '100%',
+          background: color.surface,
+          borderTop: `1px solid ${color.border}`,
+          borderRadius: `${radius.cardLarge} ${radius.cardLarge} 0 0`,
+          padding: '20px 22px 26px',
+        }}
+      >
+        <ScreenTitle size={19}>Log practice</ScreenTitle>
+        <Body size={12} style={{ marginTop: 8 }}>
+          {contractMinutes
+            ? `${contractMinutes} min is the contract minimum, not a unit — log the real time practiced.`
+            : 'Log the real time practiced.'}
+        </Body>
+
+        <div
+          style={{
+            display: 'flex',
+            marginTop: 16,
+            background: color.dimmed,
+            border: `1px solid ${color.border}`,
+            borderRadius: radius.control,
+            padding: 3,
+          }}
+        >
+          {[['timer', 'Timer'], ['manual', 'Enter minutes']].map(([key, label]) => {
+            const on = key === mode;
+            return (
+              <button
+                key={key}
+                type="button"
+                onClick={() => setMode(key)}
+                style={{
+                  flex: 1,
+                  height: 36,
+                  border: 'none',
+                  borderRadius: radius.pill,
+                  background: on ? color.primary : 'transparent',
+                  font: `${on ? 600 : 500} 13px ${font.body}`,
+                  color: on ? '#000' : color.textTertiary,
+                  cursor: 'pointer',
+                }}
+              >
+                {label}
+              </button>
+            );
+          })}
+        </div>
+
+        {mode === 'timer' ? (
+          <div style={{ textAlign: 'center', marginTop: 22 }}>
+            <div style={{ font: `700 44px ${font.head}`, color: color.text, letterSpacing: '.04em' }}>
+              {mm}:{ss}
+            </div>
+            <Button
+              variant={running ? 'dangerOutline' : 'primary'}
+              height={50}
+              style={{ marginTop: 16, boxShadow: 'none' }}
+              onClick={() => setRunning((r) => !r)}
+            >
+              {running ? 'Stop' : elapsedSec > 0 ? 'Resume' : 'Start'}
+            </Button>
+          </div>
+        ) : (
+          <div style={{ marginTop: 18 }}>
+            <NumericField
+              label="Minutes practiced"
+              unit="min"
+              value={manualMinutes}
+              onChange={setManualMinutes}
+            />
+          </div>
+        )}
+
+        <Button height={54} disabled={!canSave} style={{ marginTop: 22 }} onClick={() => onSave(minutesToSave)}>
+          {canSave ? `Save · ${minutesToSave} min` : 'Save'}
         </Button>
       </div>
     </div>

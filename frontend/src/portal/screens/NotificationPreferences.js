@@ -20,9 +20,15 @@ import { useNotificationPrefs } from '../hooks';
  * marketing, and a parent who silenced them would stop hearing that their
  * child's booking is about to be restricted.
  *
+ * Sprint 5 pins (TEAM.md): "Link another athlete" moves here from the family
+ * dashboard, and every role needs a visible sign-out affordance - Settings is
+ * where the parent's lives, at the bottom of the screen.
+ *
  * @param {'default'|'saved'} variant
+ * @param {() => void} [onLinkAthlete]  Opens 08·L. Row hides without it.
+ * @param {() => void} [onSignOut]  Hidden when not supplied (harness/demo).
  */
-export default function NotificationPreferences({ variant = 'default', bare = false }) {
+export default function NotificationPreferences({ variant = 'default', bare = false, onLinkAthlete, onSignOut }) {
   const { data } = useNotificationPrefs({ variant });
 
   // Local state holds only the parent's changes, keyed "categoryId.channel";
@@ -64,9 +70,74 @@ export default function NotificationPreferences({ variant = 'default', bare = fa
           {data?.note}
         </Body>
 
+        {onLinkAthlete ? <LinkAthleteRow onLinkAthlete={onLinkAthlete} /> : null}
         <ReplayWalkthroughRow />
+        <SignOutRow onSignOut={onSignOut} />
       </div>
     </PhoneFrame>
+  );
+}
+
+/**
+ * Moved here from the family dashboard (Sprint 5 pin) - same green-link row
+ * idiom as "Replay the walkthrough" below it.
+ */
+function LinkAthleteRow({ onLinkAthlete }) {
+  return (
+    <div style={{ borderTop: `1px solid ${color.rule}`, marginTop: 8, paddingTop: 4 }}>
+      <button
+        type="button"
+        onClick={onLinkAthlete}
+        style={{
+          background: 'none',
+          border: 'none',
+          padding: '0 2px',
+          width: '100%',
+          minHeight: TOUCH_MIN,
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'space-between',
+          font: `500 13px ${font.body}`,
+          color: color.primary,
+          cursor: 'pointer',
+        }}
+      >
+        <span>+ Link another athlete</span>
+        <span aria-hidden="true" style={{ color: color.textTertiary }}>
+          ›
+        </span>
+      </button>
+    </div>
+  );
+}
+
+/**
+ * Sign-out row, bottom of Settings (Sprint 5 pin) - hidden without
+ * `onSignOut`, exactly like every other role's affordance.
+ */
+function SignOutRow({ onSignOut }) {
+  if (!onSignOut) return null;
+  return (
+    <div style={{ borderTop: `1px solid ${color.rule}`, marginTop: 4, paddingTop: 4 }}>
+      <button
+        type="button"
+        onClick={onSignOut}
+        style={{
+          background: 'none',
+          border: 'none',
+          padding: '0 2px',
+          width: '100%',
+          minHeight: TOUCH_MIN,
+          display: 'flex',
+          alignItems: 'center',
+          font: `500 13px ${font.body}`,
+          color: color.error,
+          cursor: 'pointer',
+        }}
+      >
+        Sign out
+      </button>
+    </div>
   );
 }
 
