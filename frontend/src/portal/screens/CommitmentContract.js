@@ -7,27 +7,10 @@ import PhoneFrame from '../components/PhoneFrame';
 import ContractCalendar from '../components/ContractCalendar';
 import { DayGridLegend } from '../components/DayGridCell';
 import { Body, Card, ScreenTitle, Tick } from '../components/Primitives';
-import * as hooksModule from '../hooks';
-import { useContract } from '../hooks';
+import { useContract, usePracticeLog } from '../hooks';
 // todayISO is a pure calendar helper, not response data — like poolFor in
 // BookSession, the helpers stay importable; data travels through the hook seam.
 import { todayISO } from '../data/calendar';
-
-/**
- * Sprint 5 pin (TEAM.md): `usePracticeLog()` adds `logPractice({ minutes })`
- * and exposes `totalMinutes` for the cycle, alongside the day grid. Resolved
- * off the namespace (see CoachDashboard.js for why - the export does not
- * exist in hooks/index.js on this branch yet). The fallback keeps a local
- * running total seeded from the existing contract stats so Save still moves
- * a real number pre-merge; it is not persisted, and is superseded
- * automatically once the routing lane's branch lands the real hook.
- */
-const pinnedUsePracticeLog = hooksModule.usePracticeLog;
-function usePracticeLogFallback(seedMinutes) {
-  const [total, setTotal] = useState(() => seedMinutes ?? 0);
-  const logPractice = ({ minutes }) => setTotal((t) => t + minutes);
-  return { totalMinutes: total, logPractice };
-}
 
 /**
  * 07 · Commitment Contract - athlete. ⭐
@@ -76,9 +59,7 @@ export default function CommitmentContract({
   const [showLogSheet, setShowLogSheet] = useState(false);
   const [todayLog, setTodayLog] = useState(null); // minutes, or null if not logged today
 
-  const practiceLog = pinnedUsePracticeLog
-    ? pinnedUsePracticeLog()
-    : usePracticeLogFallback(data?.stats?.minutes);
+  const practiceLog = usePracticeLog();
 
   if (variant === 'none') return <NoContract bare={bare} data={data} />;
 

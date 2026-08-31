@@ -1,4 +1,4 @@
-import React, { useMemo } from 'react';
+import React from 'react';
 import { color, font, radius } from '../tokens';
 import BottomTabBar from '../components/BottomTabBar';
 import Button from '../components/Button';
@@ -8,37 +8,7 @@ import SequenceLadder from '../components/SequenceLadder';
 import StatusBadge from '../components/StatusBadge';
 import Field from '../components/Field';
 import { Body, Card, ScreenTitle, SectionLabel } from '../components/Primitives';
-import * as hooksModule from '../hooks';
-import { useBilling, useHousehold } from '../hooks';
-import { GOLF_PACKAGES } from '../data/packages';
-
-/**
- * Sprint 5 pin (TEAM.md): `useBillingSummary()` -> `{ data: { rows: [{
- * athleteId, name, packageName, price, status }] } }`, one row per child.
- * Resolved off the namespace (see CoachDashboard.js for why - the export
- * does not exist in hooks/index.js on this branch yet). Falls back to the
- * household's existing children joined against the confirmed package
- * catalogue (the same GOLF_PACKAGES StatesHarness.js already reads directly)
- * so the section still demonstrates real rows pre-merge.
- */
-const pinnedUseBillingSummary = hooksModule.useBillingSummary;
-function useBillingSummaryFallback() {
-  const { data: household, loading, error } = useHousehold({ variant: 'three' });
-  return useMemo(() => {
-    if (loading || error || !household) return { data: null, loading, error };
-    const rows = household.children.map((c) => {
-      const pkg = GOLF_PACKAGES.find((p) => p.id === c.packageId);
-      return {
-        athleteId: c.id,
-        name: c.name,
-        packageName: pkg ? pkg.name : '—',
-        price: pkg ? pkg.price : null,
-        status: 'active',
-      };
-    });
-    return { data: { rows }, loading: false, error: null };
-  }, [household, loading, error]);
-}
+import { useBilling, useBillingSummary } from '../hooks';
 
 /**
  * 10 · Billing & Subscription - parent.
@@ -62,7 +32,7 @@ function useBillingSummaryFallback() {
  */
 export default function Billing({ variant = 'active', bare = false }) {
   const { data } = useBilling({ variant: variant === 'updating' ? 'retry3' : variant });
-  const summary = pinnedUseBillingSummary ? pinnedUseBillingSummary() : useBillingSummaryFallback();
+  const summary = useBillingSummary();
 
   if (variant === 'updating') return <UpdatingCard bare={bare} />;
 

@@ -7,25 +7,7 @@ import PhoneFrame from '../components/PhoneFrame';
 import SessionCard from '../components/SessionCard';
 import StatusBadge from '../components/StatusBadge';
 import { Body, Card, ScreenTitle, SectionLabel, SignOutButton } from '../components/Primitives';
-import * as hooksModule from '../hooks';
-import { useCoachDay } from '../hooks';
-import useRoster from '../hooks/useRoster';
-
-/**
- * Sprint 5 pin (TEAM.md): `useCoachRoster()` -> `{ data: [athletes] }`, the
- * coach's full assigned roster (routing lane owns it). Named import would
- * fail this branch's esbuild check today - the export does not exist in
- * hooks/index.js yet - so it is resolved off the namespace instead, which
- * only warns. Falls back to the existing session roster's seed shape (the
- * only athlete list already flowing through a hook on this branch) so the
- * Students tab still demonstrates real rows; swap-in is automatic once the
- * routing lane's branch lands the real hook.
- */
-const pinnedUseCoachRoster = hooksModule.useCoachRoster;
-function useCoachRosterFallback() {
-  const { roster } = useRoster({ variant: 'complete' });
-  return { data: roster, loading: false, error: null };
-}
+import { useCoachDay, useCoachRoster } from '../hooks';
 
 /**
  * 12 · Coach Dashboard - coach.
@@ -46,7 +28,7 @@ function useCoachRosterFallback() {
 export default function CoachDashboard({ variant = 'today', bare = false, onOpenRoster, onSignOut }) {
   const { data } = useCoachDay({ variant });
   const [tab, setTab] = useState('overview');
-  const roster = pinnedUseCoachRoster ? pinnedUseCoachRoster() : useCoachRosterFallback();
+  const roster = useCoachRoster();
 
   const blocks = data?.blocks ?? [];
   const none = blocks.length === 0;

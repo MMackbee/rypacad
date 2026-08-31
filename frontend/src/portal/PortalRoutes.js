@@ -249,7 +249,13 @@ export default function PortalRoutes() {
         path="settings"
         element={
           <RequireRole roles={['parent']}>
-            <NotificationPreferences bare onSignOut={onSignOut} />
+            {/* Link-another-athlete opens enrollment until screen 08·L (the
+                add-a-child-to-this-household flow) is built — swap then. */}
+            <NotificationPreferences
+              bare
+              onSignOut={onSignOut}
+              onLinkAthlete={go('/portal/register')}
+            />
           </RequireRole>
         }
       />

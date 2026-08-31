@@ -8,20 +8,7 @@ import StatusBadge from '../components/StatusBadge';
 import TypeChip from '../components/TypeChip';
 import { BackLink, Body, Card, ScreenTitle, SectionLabel, SignOutButton } from '../components/Primitives';
 import useRoster from '../hooks/useRoster';
-import * as hooksModule from '../hooks';
-import { useSession } from '../hooks';
-
-/**
- * Sprint 5 pin (TEAM.md): `useCoachRoster()` -> `{ data: [athletes] }`.
- * Resolved off the namespace (see CoachDashboard.js for why) so this branch's
- * esbuild check passes before the routing lane's hook lands; falls back to
- * the existing session roster's seed shape in the meantime.
- */
-const pinnedUseCoachRoster = hooksModule.useCoachRoster;
-function useCoachRosterFallback() {
-  const { roster } = useRoster({ variant: 'complete' });
-  return { data: roster, loading: false, error: null };
-}
+import { useCoachRoster, useSession } from '../hooks';
 
 /**
  * Roster - coach. The coach's full assigned roster, not one session's
@@ -38,7 +25,7 @@ function useCoachRosterFallback() {
  * follow-up this split needs.
  */
 export default function Roster({ bare = false, onSignOut }) {
-  const rosterState = pinnedUseCoachRoster ? pinnedUseCoachRoster() : useCoachRosterFallback();
+  const rosterState = useCoachRoster();
   const athletes = rosterState.data ?? [];
 
   return (

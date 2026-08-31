@@ -2,7 +2,7 @@ import React from 'react';
 import FullCalendar from '@fullcalendar/react';
 import dayGridPlugin from '@fullcalendar/daygrid';
 import googleCalendarPlugin from '@fullcalendar/google-calendar';
-import { color, font } from '../tokens';
+import { color } from '../tokens';
 import BottomTabBar from '../components/BottomTabBar';
 import PhoneFrame from '../components/PhoneFrame';
 import { Banner, Body, ScreenTitle } from '../components/Primitives';

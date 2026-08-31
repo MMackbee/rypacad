@@ -9,8 +9,7 @@ import SkeletonCard, { SkeletonBar } from '../components/Skeleton';
 import { CapacityPill } from '../components/StatusBadge';
 import AllowancePools, { SpendNote } from '../components/AllowancePools';
 import { Banner, Body, Card, ErrorNotice, ScreenTitle, Tick } from '../components/Primitives';
-import * as hooksModule from '../hooks';
-import { useBooking } from '../hooks';
+import { useBooking, useMonthSessions } from '../hooks';
 // Pure calendar/season helpers, not response data — same pattern as poolFor
 // below: the data itself travels through the hook seam, but a formatting
 // helper that is already imported elsewhere in this file stays importable.
@@ -18,52 +17,8 @@ import { poolFor } from '../data/packages';
 import { capacityFor, dayLabel } from '../data/season';
 import { monthLabel, todayISO } from '../data/calendar';
 
-/**
- * Sprint 5 pin (TEAM.md): `useMonthSessions(monthISO)` -> `{ data: { month,
- * days: [{ date, sessions }] }, loading, error }`, bookable sessions grouped
- * by date for one calendar month. Resolved off the namespace (see
- * CoachDashboard.js for why - the export does not exist in hooks/index.js on
- * this branch yet).
- *
- * The fallback below reuses the existing `useBooking` hook's slot list (the
- * only session data already flowing through a hook on this branch) rather
- * than reaching into data/season.js's raw SEASON_BY_DATE directly, which
- * would bypass the hook seam entirely. `useBooking` only ever fetches a
- * rolling 7-day window, so months outside it read as empty here until the
- * routing lane's real hook lands — the empty-month state below is honest
- * either way, just not always for the reason it displays.
- */
-const pinnedUseMonthSessions = hooksModule.useMonthSessions;
-function useMonthSessionsFallback(monthISO, bookingData) {
-  const [state, setState] = useState(null);
-  useEffect(() => {
-    if (!bookingData) return;
-    const byDate = new Map();
-    for (const slot of bookingData.slots ?? []) {
-      const list = byDate.get(slot.date) ?? [];
-      // Preserve the pinned raw shape (id, date, time, type, capacity,
-      // booked, label, status) as far as this branch can reconstruct it —
-      // useBooking's slots already carry a formatted `capacity` object
-      // rather than raw numbers, which formatCapacity() below accounts for.
-      list.push({
-        id: slot.id,
-        date: slot.date,
-        time: slot.time,
-        type: slot.type,
-        capacity: slot.capacity,
-        label: slot.name === 'Training block' || slot.name === 'Tournament block' ? null : slot.name,
-        status: 'scheduled',
-      });
-      byDate.set(slot.date, list);
-    }
-    setState({ month: monthLabel(monthISO), days: [...byDate.entries()].map(([date, sessions]) => ({ date, sessions })) });
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [monthISO, bookingData]);
-
-  return { data: state, loading: !state, error: null };
-}
-
-/** Either shape `useMonthSessions` can hand back (see the fallback above). */
+/** Sessions arrive raw (numeric capacity/booked) from useMonthSessions;
+    useBooking's slots carry a pre-formatted capacity object. Accept both. */
 function formatCapacity(session) {
   if (session.capacity && typeof session.capacity === 'object') return session.capacity;
   return capacityFor(session);
@@ -125,9 +80,7 @@ export default function BookSession({
   // copy — exactly the contract the screen already had (Sprint 5 pin).
   const { data, loading, error, book } = useBooking({ variant, practice });
   const [monthISO, setMonthISO] = useState(() => `${todayISO().slice(0, 7)}-01`);
-  const monthState = pinnedUseMonthSessions
-    ? pinnedUseMonthSessions(monthISO)
-    : useMonthSessionsFallback(monthISO, data);
+  const monthState = useMonthSessions(monthISO);
 
   const [selectedDate, setSelectedDate] = useState(null);
   // The slot the athlete just booked. Persistence is the API's job later; the
@@ -157,16 +110,18 @@ export default function BookSession({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [booked]);
 
+  // The reservation call: the onBook prop when a flow supplies one (the
+  // onboarding walkthrough's practice path), otherwise the hook's own book()
+  // — which is the real Firestore write in live mode and an instant no-op in
+  // seed mode. Skipping book() when no prop was passed would confirm locally
+  // without ever writing the booking.
+  const reserve = onBook ?? book;
   const confirmBooking = (session) => {
     if (reserving) return;
-    if (!onBook) {
-      finalizeBooked(session);
-      return;
-    }
     setFailure(null);
     setReserving(session.id);
     Promise.resolve()
-      .then(() => onBook(session))
+      .then(() => reserve(session))
       .then(() => {
         if (!live.current) return;
         setReserving(null);

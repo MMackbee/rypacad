@@ -489,7 +489,10 @@ function groupSessionsByDate(sessions, today) {
   for (const s of sessions) {
     if (s.status === 'cancelled') continue;
     const list = byDate.get(s.date);
-    const row = displaySession(s, today);
+    // The pinned month-session shape keeps the raw numbers alongside the
+    // display fields: the booking sheet computes spots-left from
+    // capacity/booked, which displaySession (a list formatter) drops.
+    const row = { ...displaySession(s, today), capacity: s.capacity, booked: s.booked };
     if (list) list.push(row);
     else byDate.set(s.date, [row]);
   }
