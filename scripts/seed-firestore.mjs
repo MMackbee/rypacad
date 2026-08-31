@@ -11,6 +11,10 @@
  *   households  — the Whitfield demo household from seed.js
  *   athletes    — the three Whitfield athletes with their packageIds
  *   users       — one parent, one athlete, one coach, one owner
+ *   contractLogs — Jordan's practice log history for the last ~2 weeks
+ *                  (contract v1.3: variable minutes, some below the 45-min
+ *                  tier, so the fulfilled/not-fulfilled UI has real contrast
+ *                  to render)
  *
  * Two hard guarantees:
  *   1. NEVER touches production. Writes require FIRESTORE_EMULATOR_HOST, and the
@@ -169,9 +173,12 @@ function buildDocs(portal) {
 
   // athletes — from seed.js HOUSEHOLD. contractMinutes is parsed from the
   // scaffold's ageLine ("45 min tier"), not retyped. dob is null: the scaffold
-  // gives ages only and this repo does not invent birthdays. Jordan is on
-  // Luke's roster in the scaffold ("J. Whitfield"), so Jordan carries the
-  // coach assignment; the others are unassigned.
+  // gives ages only and this repo does not invent birthdays. The seed data
+  // has exactly one coach account (coach-luke), so all three Whitfield
+  // athletes are assigned to him — Sprint 5 turns the coach roster into a
+  // real "athletes where coachId == uid" query (TEAM.md), and a roster of
+  // one (Jordan only, the v1 behavior) wouldn't exercise that; a roster of
+  // three does.
   const coachUid = 'coach-luke';
   const athletes = new Map();
   for (const child of HOUSEHOLD.children) {
@@ -182,10 +189,48 @@ function buildDocs(portal) {
       householdId,
       packageId: child.packageId,
       contractMinutes: minutes ? Number(minutes[1]) : null,
-      coachId: child.id === 'jordan' ? coachUid : null,
+      coachId: coachUid,
     });
   }
   // athletes/{id}/private/medical is deliberately NOT seeded — see header.
+
+  // contractLogs — Jordan's practice history for the last ~2 weeks (contract
+  // v1.3, TEAM.md Sprint 5 pins): variable minutes, some at/above the
+  // 45-min tier and some below, plus a couple of skipped days (no doc at
+  // all) so "not logged" and "logged short" are visibly different states.
+  // contractMinutes is a fixed 45 snapshot, matching Jordan's actual tier —
+  // real usage snapshots athletes.contractMinutes at write time, but this
+  // seed only ever runs against the current tier, so the snapshot and the
+  // live value are the same number here.
+  const contractLogs = new Map();
+  const jordanContractMinutes = 45;
+  // [daysAgo, minutes] — 0 minutes means "skipped that day", no doc written.
+  // Includes an exact-tier edge case (45) and a surplus day (90) to prove
+  // surplus minutes don't bank an extra fulfilled day.
+  const JORDAN_PRACTICE_LOG = [
+    [14, 50], [13, 30], [12, 0], [11, 65], [10, 45], [9, 20], [8, 90],
+    [7, 0], [6, 40], [5, 45], [4, 15], [3, 70], [2, 35], [1, 55],
+  ];
+  const isoDate = (d) =>
+    `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+  const today = new Date();
+  for (const [daysAgo, minutes] of JORDAN_PRACTICE_LOG) {
+    if (minutes <= 0) continue; // skipped day — no log
+    const logDate = new Date(today);
+    logDate.setDate(logDate.getDate() - daysAgo);
+    const dateStr = isoDate(logDate);
+    // Logged in the evening of the practice day — a plausible createdAt.
+    const createdAt = new Date(logDate);
+    createdAt.setHours(19, 30, 0, 0);
+    contractLogs.set(`jordan_${dateStr}`, {
+      athleteId: 'jordan',
+      date: dateStr,
+      minutes,
+      contractMinutes: jordanContractMinutes,
+      createdBy: 'athlete-jordan',
+      createdAt,
+    });
+  }
 
   // users — one per portal role in this sprint's scope. In production these
   // doc ids are Firebase Auth uids; the emulator seed uses readable slugs.
@@ -196,7 +241,7 @@ function buildDocs(portal) {
     ['owner', { role: 'owner', athleteId: null, householdId: null, staff: true, displayName: null, email: null }],
   ]);
 
-  return { packages, sessions, households, athletes, users };
+  return { packages, sessions, households, athletes, users, contractLogs };
 }
 
 // ---------------------------------------------------------------------------
