@@ -159,3 +159,67 @@ Auth seam (pinned so frontend and routing build in parallel):
   `ContractCalendar`/`season.js`).
 - Live data sits behind `REACT_APP_PORTAL_LIVE_DATA` with seed fallback.
 - Minors' data minimization; MFA required for staff roles at setup.
+
+## Sprint 5 pins — user acceptance punch list (2026-08-31)
+
+Source: owner's first full four-role test. Rulings and interface pins below;
+lane split lives in the agent tasks.
+
+Data contract v1.3 (db lane owns the rules/docs diff):
+- `contractLogs/{athleteId}_{date}`: `{ athleteId, date, minutes,
+  contractMinutes, createdBy, createdAt }`. One log per athlete per day —
+  the doc-id keyspace enforces it exactly like bookings. `minutes` is the
+  real practiced amount (variable; 90 logged against a 45 contract is ONE
+  fulfilled day that recorded 90 — extra minutes never bank extra days).
+  `contractMinutes` is a snapshot of the tier at log time so history
+  survives tier changes. Fulfilled = minutes >= contractMinutes.
+- Closures are schedule facts, not practice facts: contract logging is
+  legal on ANY date (kids practice outside the academy). The contract
+  calendar drops the 'closed' state entirely; closures still matter to
+  session booking only.
+- athletes reads: parent may read athletes where householdId == theirs
+  (list query must carry the equality filter the rules can prove); coach
+  may read athletes where coachId == their uid; staff read any.
+- Billing rows derive from athletes×packages (one row per child, package
+  name + monthly price from packages.js source, status 'active'
+  placeholder) — no Stripe wiring this sprint.
+
+Hook seam additions (routing lane owns; frontend codes against these):
+- `useHouseholdAthletes()` -> `{ data: [{ id, name, packageId, packageName,
+  allowance }] }` — every athlete in the signed-in parent's household.
+- `useBillingSummary()` -> `{ data: { rows: [{ athleteId, name, packageName,
+  price, status }] } }`.
+- `useMonthSessions(monthISO)` -> `{ data: { month, days: [{ date,
+  sessions }] } }` — bookable sessions grouped by date for one calendar
+  month, for the booking calendar.
+- `usePracticeLog()` -> adds `logPractice({ minutes })` and exposes
+  `totalMinutes` for the cycle alongside the day grid.
+- `useCoachRoster()` -> every athlete assigned to the coach — a real
+  roster, not one session's attendance.
+- Athlete detail routes by id: `/portal/athlete/:athleteId`. Parent: only
+  athletes in their household; staff (ops/owner/mental): any athlete.
+  PortalRoutes passes `athleteId` into the screen; screens never read
+  route params directly.
+- Sign-out: `useAuthSession().signOut()` already exists — every role gets
+  a visible affordance (frontend lane).
+
+UI rulings (frontend lane):
+- Athlete dashboard: Code of Grit card removed.
+- Book a Session becomes a month calendar in the commitment-contract
+  calendar's visual language: tap a date -> that day's sessions ->
+  select -> confirm. Empty months say plainly that no sessions are
+  scheduled yet.
+- Coach: session start is never time-gated (always startable); fix the
+  start-session submit; Overview / Students / Sessions must be three
+  genuinely different views; the Me tab is removed from the coach tab bar.
+- Parent: children list navigates per child; "Link another athlete" moves
+  to Settings; Billing lists one row per child.
+- Admin: fix the All-tiers filter; athlete names link to
+  /portal/athlete/:id (contact info lives there).
+
+Direction-only this sprint (structural seams, no invented integrations):
+- DNA modules gain `source: 'measured' | 'self' | 'upload' | 'parallax'`;
+  self-reported modules get an entry form, upload modules a dropzone stub,
+  Parallax stays a named seam with no API invented.
+- Diagnostic capture trims to what is assessable in the indoor facility;
+  the rest is deferred, not faked.
