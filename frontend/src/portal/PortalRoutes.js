@@ -12,7 +12,7 @@ import MySchedule from './screens/MySchedule';
 import BookSession from './screens/BookSession';
 import ParentDashboard from './screens/ParentDashboard';
 import CoachDashboard from './screens/CoachDashboard';
-import Roster from './screens/Roster';
+import Roster, { SessionAttendance } from './screens/Roster';
 import DiagnosticCapture from './screens/DiagnosticCapture';
 import AthleteDashboard from './screens/AthleteDashboard';
 import PracticeDNA from './screens/PracticeDNA';
@@ -254,12 +254,14 @@ export default function PortalRoutes() {
         }
       />
 
-      {/* Coach */}
+      {/* Coach. A block's "Start session" opens the IN/OUT attendance flow
+          (SessionAttendance, handoff screen 13); the bottom tab's Roster is
+          the full assigned-athlete list — two different jobs, two routes. */}
       <Route
         path="coach"
         element={
           <RequireRole roles={['coach']}>
-            <CoachDashboard bare onOpenRoster={go('/portal/roster')} onSignOut={onSignOut} />
+            <CoachDashboard bare onOpenRoster={go('/portal/attendance')} onSignOut={onSignOut} />
           </RequireRole>
         }
       />
@@ -268,6 +270,14 @@ export default function PortalRoutes() {
         element={
           <RequireRole roles={['coach']}>
             <Roster bare onBack={go('/portal/coach')} />
+          </RequireRole>
+        }
+      />
+      <Route
+        path="attendance"
+        element={
+          <RequireRole roles={['coach']}>
+            <SessionAttendance bare onBack={go('/portal/coach')} />
           </RequireRole>
         }
       />
