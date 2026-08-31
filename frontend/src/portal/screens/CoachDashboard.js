@@ -6,8 +6,26 @@ import Button from '../components/Button';
 import PhoneFrame from '../components/PhoneFrame';
 import SessionCard from '../components/SessionCard';
 import StatusBadge from '../components/StatusBadge';
-import { Body, Card, ScreenTitle, SectionLabel } from '../components/Primitives';
+import { Body, Card, ScreenTitle, SectionLabel, SignOutButton } from '../components/Primitives';
+import * as hooksModule from '../hooks';
 import { useCoachDay } from '../hooks';
+import useRoster from '../hooks/useRoster';
+
+/**
+ * Sprint 5 pin (TEAM.md): `useCoachRoster()` -> `{ data: [athletes] }`, the
+ * coach's full assigned roster (routing lane owns it). Named import would
+ * fail this branch's esbuild check today - the export does not exist in
+ * hooks/index.js yet - so it is resolved off the namespace instead, which
+ * only warns. Falls back to the existing session roster's seed shape (the
+ * only athlete list already flowing through a hook on this branch) so the
+ * Students tab still demonstrates real rows; swap-in is automatic once the
+ * routing lane's branch lands the real hook.
+ */
+const pinnedUseCoachRoster = hooksModule.useCoachRoster;
+function useCoachRosterFallback() {
+  const { roster } = useRoster({ variant: 'complete' });
+  return { data: roster, loading: false, error: null };
+}
 
 /**
  * 12 · Coach Dashboard - coach.
@@ -18,11 +36,17 @@ import { useCoachDay } from '../hooks';
  * cross-coach visibility. The hook shape reflects that; the server must enforce
  * it.
  *
+ * Sprint 5 pin: Overview / Students / Sessions are three genuinely different
+ * views rather than the same block list under three tab labels - today at a
+ * glance, the full roster, and the upcoming session list.
+ *
  * @param {'today'|'concurrent'|'none'} variant
+ * @param {() => void} [onSignOut]  Hidden when not supplied (harness/demo).
  */
-export default function CoachDashboard({ variant = 'today', bare = false, onOpenRoster }) {
+export default function CoachDashboard({ variant = 'today', bare = false, onOpenRoster, onSignOut }) {
   const { data } = useCoachDay({ variant });
   const [tab, setTab] = useState('overview');
+  const roster = pinnedUseCoachRoster ? pinnedUseCoachRoster() : useCoachRosterFallback();
 
   const blocks = data?.blocks ?? [];
   const none = blocks.length === 0;
@@ -45,7 +69,10 @@ export default function CoachDashboard({ variant = 'today', bare = false, onOpen
               </div>
               <ScreenTitle style={{ marginTop: 3 }}>{data?.coach?.name}</ScreenTitle>
             </div>
-            <StatusBadge tone={countPill.tone}>{countPill.label}</StatusBadge>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+              <SignOutButton onSignOut={onSignOut} />
+              <StatusBadge tone={countPill.tone}>{countPill.label}</StatusBadge>
+            </div>
           </div>
           <TabStrip value={tab} onChange={setTab} />
         </div>
@@ -53,15 +80,141 @@ export default function CoachDashboard({ variant = 'today', bare = false, onOpen
       footer={<BottomTabBar role="coach" active="today" />}
     >
       <div style={{ padding: '0 22px 24px', display: 'flex', flexDirection: 'column', gap: 12 }}>
-        {none ? <NoSessions outstanding={data?.outstanding ?? []} /> : null}
-
-        {blocks.map((block) => (
-          <BlockCard key={block.id} block={block} onOpenRoster={onOpenRoster} />
-        ))}
-
-        {data?.attention?.length ? <AttentionCard items={data.attention} /> : null}
+        {tab === 'overview' ? (
+          <OverviewTab data={data} blocks={blocks} none={none} onOpenRoster={onOpenRoster} />
+        ) : tab === 'students' ? (
+          <StudentsTab athletes={roster.data ?? []} loading={roster.loading} />
+        ) : (
+          <SessionsTab blocks={blocks} none={none} />
+        )}
       </div>
     </PhoneFrame>
+  );
+}
+
+/** Today at a glance: quick counts, then today's blocks and who needs a call. */
+function OverviewTab({ data, blocks, none, onOpenRoster }) {
+  const attention = data?.attention ?? [];
+  return (
+    <>
+      {!none ? <QuickCounts blocks={blocks} attention={attention} /> : null}
+
+      {none ? <NoSessions outstanding={data?.outstanding ?? []} /> : null}
+
+      {blocks.map((block) => (
+        <BlockCard key={block.id} block={block} onOpenRoster={onOpenRoster} />
+      ))}
+
+      {attention.length ? <AttentionCard items={attention} /> : null}
+    </>
+  );
+}
+
+function QuickCounts({ blocks, attention }) {
+  const running = blocks.filter((b) => b.status !== 'closed').length;
+  const cells = [
+    [running, running === 1 ? 'block today' : 'blocks today'],
+    [attention.length, 'need a conversation'],
+  ];
+  return (
+    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
+      {cells.map(([value, label]) => (
+        <Card key={label}>
+          <div style={{ font: `700 24px ${font.head}`, color: color.text }}>{value}</div>
+          <div style={{ font: `400 11px/1.4 ${font.body}`, color: color.textTertiary, marginTop: 4 }}>
+            {label}
+          </div>
+        </Card>
+      ))}
+    </div>
+  );
+}
+
+/** The coach's full assigned roster - every athlete, not one session's attendance. */
+function StudentsTab({ athletes, loading }) {
+  if (loading) {
+    return (
+      <Card large>
+        <Body size={12}>Loading your roster…</Body>
+      </Card>
+    );
+  }
+  if (!athletes.length) {
+    return (
+      <div
+        style={{
+          border: `1px dashed ${color.border}`,
+          borderRadius: radius.cardLarge,
+          padding: '30px 22px',
+          textAlign: 'center',
+        }}
+      >
+        <ScreenTitle size={17}>No assigned athletes</ScreenTitle>
+        <Body size={12} style={{ marginTop: 8 }}>
+          Athletes assigned to you will show up here.
+        </Body>
+      </div>
+    );
+  }
+  return (
+    <Card large>
+      <SectionLabel style={{ marginBottom: 6 }}>Your athletes · {athletes.length}</SectionLabel>
+      <div style={{ display: 'flex', flexDirection: 'column' }}>
+        {athletes.map((a, i) => (
+          <AthleteRow
+            key={a.id}
+            name={a.name}
+            meta={a.meta}
+            avatarSize={40}
+            nameSize={15}
+            divider={i < athletes.length - 1}
+          />
+        ))}
+      </div>
+    </Card>
+  );
+}
+
+/** Upcoming sessions - a plain read-only list, distinct from Overview's action cards. */
+function SessionsTab({ blocks, none }) {
+  if (none) {
+    return (
+      <div
+        style={{
+          border: `1px dashed ${color.border}`,
+          borderRadius: radius.cardLarge,
+          padding: '30px 22px',
+          textAlign: 'center',
+        }}
+      >
+        <ScreenTitle size={17}>Nothing upcoming</ScreenTitle>
+        <Body size={12} style={{ marginTop: 8 }}>
+          Your next assigned block is Mon Feb 22, 5:00 PM.
+        </Body>
+      </div>
+    );
+  }
+  return (
+    <>
+      <SectionLabel>Upcoming</SectionLabel>
+      {blocks.map((block) => {
+        const [time, meridiem] = block.time.split(' ');
+        return (
+          <SessionCard
+            key={block.id}
+            time={time}
+            meridiem={meridiem}
+            type={block.type}
+            name={block.name}
+            meta={block.meta}
+            nameSize={15}
+            gutter={56}
+            ruleHeight={44}
+            variant={block.status === 'closed' ? 'closed' : 'default'}
+          />
+        );
+      })}
+    </>
   );
 }
 

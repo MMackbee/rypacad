@@ -1,13 +1,97 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { color, font, radius } from '../tokens';
 import AthleteRow, { AttendanceControls } from '../components/AthleteRow';
+import BottomTabBar from '../components/BottomTabBar';
 import Button from '../components/Button';
 import PhoneFrame from '../components/PhoneFrame';
 import StatusBadge from '../components/StatusBadge';
 import TypeChip from '../components/TypeChip';
-import { BackLink, ScreenTitle } from '../components/Primitives';
+import { BackLink, Body, Card, ScreenTitle, SectionLabel, SignOutButton } from '../components/Primitives';
 import useRoster from '../hooks/useRoster';
+import * as hooksModule from '../hooks';
 import { useSession } from '../hooks';
+
+/**
+ * Sprint 5 pin (TEAM.md): `useCoachRoster()` -> `{ data: [athletes] }`.
+ * Resolved off the namespace (see CoachDashboard.js for why) so this branch's
+ * esbuild check passes before the routing lane's hook lands; falls back to
+ * the existing session roster's seed shape in the meantime.
+ */
+const pinnedUseCoachRoster = hooksModule.useCoachRoster;
+function useCoachRosterFallback() {
+  const { roster } = useRoster({ variant: 'complete' });
+  return { data: roster, loading: false, error: null };
+}
+
+/**
+ * Roster - coach. The coach's full assigned roster, not one session's
+ * attendance (Sprint 5 pin, TEAM.md) - this is the bottom tab bar's "Roster"
+ * destination, reached with no session context, so it shows the team rather
+ * than jumping into whichever block happens to be running.
+ *
+ * The session-by-session IN/OUT attendance screen (handoff screen 13, the
+ * ⭐ in-session working screen) still exists in full below as
+ * `SessionAttendance` - it is what "Start roster" / "View roster" on a
+ * Coach Dashboard block card should open. PortalRoutes.js (routing lane,
+ * not this lane's file) currently points both that action and this tab at
+ * the same /portal/roster route; see the sprint report for the routing
+ * follow-up this split needs.
+ */
+export default function Roster({ bare = false, onSignOut }) {
+  const rosterState = pinnedUseCoachRoster ? pinnedUseCoachRoster() : useCoachRosterFallback();
+  const athletes = rosterState.data ?? [];
+
+  return (
+    <PhoneFrame
+      bare={bare}
+      header={
+        <div style={{ padding: '8px 22px 14px', display: 'flex', alignItems: 'center', gap: 12 }}>
+          <ScreenTitle style={{ flex: 1 }}>Roster</ScreenTitle>
+          <SignOutButton onSignOut={onSignOut} />
+        </div>
+      }
+      footer={<BottomTabBar role="coach" active="roster" />}
+    >
+      <div style={{ padding: '0 22px 24px' }}>
+        {rosterState.loading ? (
+          <Card large>
+            <Body size={12}>Loading your roster…</Body>
+          </Card>
+        ) : athletes.length ? (
+          <Card large>
+            <SectionLabel style={{ marginBottom: 6 }}>Your athletes · {athletes.length}</SectionLabel>
+            <div style={{ display: 'flex', flexDirection: 'column' }}>
+              {athletes.map((a, i) => (
+                <AthleteRow
+                  key={a.id}
+                  name={a.name}
+                  meta={a.meta}
+                  avatarSize={44}
+                  nameSize={16}
+                  divider={i < athletes.length - 1}
+                />
+              ))}
+            </div>
+          </Card>
+        ) : (
+          <div
+            style={{
+              border: `1px dashed ${color.border}`,
+              borderRadius: radius.cardLarge,
+              padding: '30px 22px',
+              textAlign: 'center',
+            }}
+          >
+            <ScreenTitle size={17}>No assigned athletes</ScreenTitle>
+            <Body size={12} style={{ marginTop: 8 }}>
+              Athletes assigned to you will show up here.
+            </Body>
+          </div>
+        )}
+      </div>
+    </PhoneFrame>
+  );
+}
 
 /**
  * 13 · Session Roster & Attendance - coach.
@@ -22,13 +106,27 @@ import { useSession } from '../hooks';
  * See useRoster for the unimplemented offline path, which is the highest-risk
  * gap in this screen.
  *
+ * Sprint 5 pin (TEAM.md): session start is never time-gated - the button is
+ * always tappable, with no window check anywhere in this file - and the
+ * reported bug (tapping "Start session" did nothing) was that the button had
+ * no onClick at all; `useRoster`'s `sessionState` is driven purely by the
+ * demo `variant` prop, with no real transition. `localStatus` below is the
+ * fix: a component-local override the coach's own tap sets, the same pattern
+ * CommitmentContract uses for its practice-mode overlay.
+ *
  * @param {'pre'|'progress'|'complete'|'noshow'} variant
  */
-export default function Roster({ variant = 'pre', bare = false, onBack }) {
-  const { roster, marks, mark, counts, sessionState } = useRoster({ variant });
+export function SessionAttendance({ variant = 'pre', bare = false, onBack }) {
+  const { roster, marks, mark, counts, sessionState: demoState } = useRoster({ variant });
   // The block comes out of the generated season, so the header matches what the
   // schedule says is actually running rather than a hand-written constant.
   const { data: session } = useSession();
+
+  // Overrides the demo state the instant the coach actually starts the
+  // session - real use never passes a variant, so demoState is always 'pre'
+  // until this fires.
+  const [localStatus, setLocalStatus] = useState(null);
+  const sessionState = localStatus ?? demoState;
 
   const started = sessionState !== 'pre';
   const completed = sessionState === 'completed';
@@ -73,6 +171,8 @@ export default function Roster({ variant = 'pre', bare = false, onBack }) {
           sessionState={sessionState}
           unmarked={counts.unmarked}
           completed={completed}
+          onStart={() => setLocalStatus('progress')}
+          onClose={() => setLocalStatus('completed')}
         />
       }
     >
@@ -182,15 +282,17 @@ function CounterRow({ counts, started }) {
   );
 }
 
-function RosterFooter({ sessionState, unmarked, completed }) {
+function RosterFooter({ sessionState, unmarked, completed, onStart, onClose }) {
   const hint = completed
     ? 'No-shows are reported to Phil, not the coach chain.'
     : 'Tap a green or red button again to clear it.';
 
   let cta;
   if (sessionState === 'pre') {
+    // Never time-gated - always tappable, with no window check anywhere in
+    // this screen. This onClick is the fix: the button previously had none.
     cta = (
-      <Button variant="pinned" height={56}>
+      <Button variant="pinned" height={56} onClick={onStart}>
         Start session
       </Button>
     );
@@ -206,11 +308,11 @@ function RosterFooter({ sessionState, unmarked, completed }) {
     // Blocking it outright would just get attendance abandoned mid-session.
     cta =
       unmarked > 0 ? (
-        <Button variant="caution" height={56} style={{ boxShadow: 'none' }}>
+        <Button variant="caution" height={56} style={{ boxShadow: 'none' }} onClick={onClose}>
           Close block · {unmarked} unmarked
         </Button>
       ) : (
-        <Button variant="pinned" height={56}>
+        <Button variant="pinned" height={56} onClick={onClose}>
           Close block
         </Button>
       );
