@@ -31,18 +31,23 @@
  * PRACTICE, and reset on exit.
  */
 
-import { useRef } from 'react';
+import { useRef, useState } from 'react';
 import useSeedResource from './useSeedResource';
 import {
   ERR,
   LiveDataError,
   createBooking,
+  createContractLog,
   fetchAthlete,
   fetchBookings,
+  fetchCoachAthletes,
+  fetchContractLogs,
   fetchCurrentUser,
+  fetchHouseholdAthletes,
   fetchPackage,
   fetchSessions,
   fetchSessionsByIds,
+  fetchSessionsInRange,
   isLive,
 } from './live';
 import {
@@ -77,7 +82,6 @@ import {
   poolFor,
 } from '../data/packages';
 import {
-  HOLIDAY_CLOSURES_2026_27,
   SEASON,
   SEASON_BY_DATE,
   capacityFor,
@@ -97,7 +101,7 @@ import {
 } from '../data/athlete';
 import {
   buildContractMonth,
-  longDayLabel,
+  monthBounds,
   nextMonthFirstShort,
   pickDueDates,
   todayISO,
@@ -205,6 +209,34 @@ async function liveAthleteContext() {
   const pkg = athlete.packageId ? await fetchPackage(athlete.packageId) : null;
   const bookings = await fetchBookings(profile.athleteId);
   return { profile, athlete, pkg, bookings };
+}
+
+/**
+ * The signed-in athlete's profile + athlete doc only - no package or booking
+ * fetch, unlike liveAthleteContext above, since practice logging needs
+ * neither. Shared by usePracticeLog's read and write paths.
+ */
+async function liveAthleteIdentity() {
+  const profile = await fetchCurrentUser();
+  if (!profile.athleteId) {
+    throw new LiveDataError(
+      ERR.INVALID,
+      `users/${profile.uid} has no athleteId - practice logging is wired for ` +
+        'athlete-linked accounts only.'
+    );
+  }
+  const athlete = await fetchAthlete(profile.athleteId);
+  return { profile, athlete };
+}
+
+/**
+ * The full package catalogue as one flat list, and a lookup by id - used to
+ * join an athlete's packageId to its name (and, for billing only, its
+ * STATIC price; Firestore package docs carry no price by policy).
+ */
+const PACKAGE_CATALOGUE = [...GOLF_PACKAGES, DROP_IN, ...FITNESS_PACKAGES, ...ELITE_TIERS];
+function packageById(packageId) {
+  return PACKAGE_CATALOGUE.find((p) => p.id === packageId) || null;
 }
 
 /**
@@ -446,6 +478,62 @@ export function useBooking({ variant = 'open', today = todayISO(), practice = fa
   return { ...state, book };
 }
 
+/**
+ * Bookable sessions for one calendar month, grouped by date - the shape the
+ * new Book a Session month calendar (Sprint 5 UI ruling) reads instead of a
+ * flat 7-day list. Cancelled sessions are excluded here so a screen never has
+ * to re-check status. Shared by the seed and live branches below.
+ */
+function groupSessionsByDate(sessions, today) {
+  const byDate = new Map();
+  for (const s of sessions) {
+    if (s.status === 'cancelled') continue;
+    const list = byDate.get(s.date);
+    const row = displaySession(s, today);
+    if (list) list.push(row);
+    else byDate.set(s.date, [row]);
+  }
+  return [...byDate.keys()].sort().map((date) => ({ date, sessions: byDate.get(date) }));
+}
+
+/**
+ * Live payload for useMonthSessions - a single date-range query (>= start,
+ * <= end, both on the 'date' field) plus orderBy('date'), so only the
+ * automatic single-field index is needed, never a composite one.
+ */
+async function liveMonthSessions(monthISO, today) {
+  const { start, end, label } = monthBounds(monthISO);
+  const sessions = await fetchSessionsInRange(start, end);
+  sessions.sort(byDateThenId);
+  return { month: label, days: groupSessionsByDate(sessions, today) };
+}
+
+/**
+ * GET /schedule/month?month=:monthISO (Sprint 5) - the booking calendar's
+ * data source: tap a date, see that day's sessions, pick one. `monthISO` is
+ * 'yyyy-MM' or any 'yyyy-MM-dd' within the month; defaults to the current
+ * month. Seed: the generated season, filtered to the requested month - the
+ * same SEASON useBooking reads, so the two surfaces cannot disagree.
+ */
+export function useMonthSessions(monthISO) {
+  const live = isLive();
+  const today = todayISO();
+  const resolvedMonth = monthISO || today;
+
+  const seedValue = () => {
+    const { start, end, label } = monthBounds(resolvedMonth);
+    const inMonth = SEASON.filter((s) => s.date >= start && s.date <= end);
+    return { month: label, days: groupSessionsByDate(inMonth, today) };
+  };
+
+  return useSeedResource(
+    live ? null : seedValue(),
+    live
+      ? { source: () => liveMonthSessions(resolvedMonth, today), deps: ['month-sessions', resolvedMonth] }
+      : undefined
+  );
+}
+
 /** GET /athletes?guardian=:id + GET /billing/:householdId (08). */
 export function useHousehold({ variant = 'three' } = {}) {
   const demo = demoOpts(variant, "Your family's data didn't load.");
@@ -455,6 +543,98 @@ export function useHousehold({ variant = 'three' } = {}) {
   return useSeedResource(
     demo ? null : { ...HOUSEHOLD, date: TODAY, children, billing },
     demo ?? undefined
+  );
+}
+
+/**
+ * Live payload for useHouseholdAthletes - every athlete in the household,
+ * joined to their package for packageName + allowance limits, usage derived
+ * from bookings the same way liveSchedule/liveBooking do (no stored counter
+ * to drift).
+ */
+async function liveHouseholdAthletes(today) {
+  const profile = await fetchCurrentUser();
+  if (!profile.householdId) {
+    throw new LiveDataError(
+      ERR.INVALID,
+      `users/${profile.uid} has no householdId - this surface is wired for ` +
+        'parent accounts only.'
+    );
+  }
+  const athletes = await fetchHouseholdAthletes(profile.householdId);
+  return Promise.all(
+    athletes.map(async (a) => {
+      const pkg = a.packageId ? await fetchPackage(a.packageId) : null;
+      const bookings = await fetchBookings(a.id);
+      return {
+        id: a.id,
+        name: a.name,
+        packageId: a.packageId ?? null,
+        packageName: pkg ? pkg.name : null,
+        allowance: deriveAllowance(pkg, bookings, today),
+      };
+    })
+  );
+}
+
+/**
+ * GET /athletes?householdId=:id (Sprint 5) - every athlete in the signed-in
+ * parent's household, replacing the hard-coded Whitfield seed on surfaces
+ * that need the real roster (not the fixed-shape dashboard cards
+ * useHousehold serves). Live: athletes where householdId == the caller's
+ * householdId - the equality filter firestore.rules can prove on a list read.
+ */
+export function useHouseholdAthletes() {
+  const live = isLive();
+  const today = todayISO();
+  const seedRows = HOUSEHOLD.children.map((c) => ({
+    id: c.id,
+    name: c.name,
+    packageId: c.packageId,
+    packageName: packageById(c.packageId)?.name ?? null,
+    allowance: c.allowance,
+  }));
+  return useSeedResource(
+    live ? null : seedRows,
+    live ? { source: () => liveHouseholdAthletes(today), deps: ['household-athletes'] } : undefined
+  );
+}
+
+/**
+ * GET /billing/:householdId (Sprint 5) - one row per child: package name and
+ * price from the STATIC catalogue (data/packages.js), never from a Firestore
+ * package doc, which by policy carries no price. Status is an 'active'
+ * placeholder until Stripe wiring lands.
+ */
+export function useBillingSummary() {
+  const live = isLive();
+  const rowFor = (id, name, packageId) => {
+    const pkg = packageById(packageId);
+    return {
+      athleteId: id,
+      name,
+      packageName: pkg ? pkg.name : null,
+      price: pkg ? pkg.price : null,
+      status: 'active',
+    };
+  };
+  const seedRows = HOUSEHOLD.children.map((c) => rowFor(c.id, c.name, c.packageId));
+
+  const liveBillingSummary = async () => {
+    const profile = await fetchCurrentUser();
+    if (!profile.householdId) {
+      throw new LiveDataError(
+        ERR.INVALID,
+        `users/${profile.uid} has no householdId - billing is a parent surface only.`
+      );
+    }
+    const athletes = await fetchHouseholdAthletes(profile.householdId);
+    return { rows: athletes.map((a) => rowFor(a.id, a.name, a.packageId)) };
+  };
+
+  return useSeedResource(
+    live ? null : { rows: seedRows },
+    live ? { source: liveBillingSummary, deps: ['billing-summary'] } : undefined
   );
 }
 
@@ -498,6 +678,34 @@ export function useCoachDay({ variant = 'today' } = {}) {
     attention: ATTENTION_LIST,
     outstanding: COACH_OUTSTANDING,
   });
+}
+
+/**
+ * GET /coach/roster (Sprint 5) - every athlete assigned to the coach, a real
+ * roster rather than one session's attendance (that stays useRoster, screen
+ * 13). Live: athletes where coachId == the signed-in coach's uid - the
+ * equality filter firestore.rules can prove on a list read.
+ */
+export function useCoachRoster() {
+  const live = isLive();
+
+  const liveCoachRoster = async () => {
+    const profile = await fetchCurrentUser();
+    const athletes = await fetchCoachAthletes(profile.uid);
+    return athletes
+      .slice()
+      .sort((a, b) => (a.name || '').localeCompare(b.name || ''))
+      .map((a) => ({
+        id: a.id,
+        name: a.name,
+        meta: a.contractMinutes != null ? `${a.contractMinutes} min tier` : null,
+      }));
+  };
+
+  return useSeedResource(
+    live ? null : ROSTER,
+    live ? { source: liveCoachRoster, deps: ['coach-roster'] } : undefined
+  );
 }
 
 /**
@@ -613,17 +821,15 @@ export function usePracticeDNA({ variant = 'complete' } = {}) {
  * days read as missed for each state and writes the copy from the numbers.
  */
 function contractFor(variant, today) {
-  const closures = HOLIDAY_CLOSURES_2026_27;
   const missedDates =
     variant === 'behind'
-      ? pickDueDates({ today, closures, count: 6, spread: 2 })
+      ? pickDueDates({ today, count: 6, spread: 2 })
       : variant === 'ontrack'
-      ? pickDueDates({ today, closures, count: 1, spread: 4 })
+      ? pickDueDates({ today, count: 1, spread: 4 })
       : [];
 
   const m = buildContractMonth({
     today,
-    closures,
     missedDates,
     completeAll: variant === 'complete',
     minutesPerDay: 45,
@@ -647,12 +853,9 @@ function contractFor(variant, today) {
     },
   }[variant];
 
-  const caption = [
-    'Weekends are not contract days.',
-    ...m.monthClosures.map(
-      (c) => `${longDayLabel(c)} is an academy closure and does not count against you.`
-    ),
-  ].join(' ');
+  // Sprint 5 ruling: closures are schedule facts, not practice facts, and no
+  // longer excuse a contract day - the caption no longer calls one out.
+  const caption = 'Weekends are not contract days.';
 
   return {
     month: { label: m.label, name: m.month, start: m.start },
@@ -680,15 +883,145 @@ export function useContract({ variant = 'ontrack', today = todayISO() } = {}) {
   });
 }
 
-/** GET /athletes/:id (09) — parent view of one linked athlete. */
-export function useAthleteDetail({ variant = 'populated' } = {}) {
+/**
+ * Live payload for usePracticeLog - this cycle's logged minutes, derived
+ * client-side from an unfiltered per-athlete query (fetchContractLogs), the
+ * same pattern deriveAllowance() uses for bookings: no stored counter to
+ * drift, no composite index to provision.
+ */
+async function livePracticeLog(today) {
+  const { athlete } = await liveAthleteIdentity();
+  const logs = await fetchContractLogs(athlete.id);
+  const cycleStart = `${today.slice(0, 7)}-01`;
+  const cycleLogs = logs.filter((l) => l.date >= cycleStart && l.date <= today);
+  return {
+    totalMinutes: cycleLogs.reduce((sum, l) => sum + (l.minutes || 0), 0),
+    loggedToday: logs.some((l) => l.date === today),
+    contractMinutes: athlete.contractMinutes ?? null,
+  };
+}
+
+/**
+ * POST /athletes/:id/contract-logs (Sprint 5, contract v1.3) - logs a real
+ * practice day with a real minutes value, replacing the fixed-tier-only tap
+ * the Commitment Contract screen has today. Additive to the {data, loading,
+ * error} contract: `logPractice({ minutes })` writes one contractLogs doc
+ * (id `{athleteId}_{date}`) via live.js's createContractLog, snapshotting
+ * `contractMinutes` off the athlete doc at log time so a later tier change
+ * cannot rewrite history. Fulfilled = minutes >= contractMinutes - extra
+ * minutes never bank extra days.
+ *
+ * Seed mode keeps the logged entry in this hook's own component state - the
+ * same simulation the contract screen already does for onboarding practice,
+ * carrying a real minutes value instead of a bare logged/not-logged flag.
+ * Nothing here writes live unless isLive().
+ */
+export function usePracticeLog({ today = todayISO() } = {}) {
+  const live = isLive();
+  const [seedEntry, setSeedEntry] = useState(null); // { date, minutes } | null
+  const [refreshKey, setRefreshKey] = useState(0); // bumped to re-run the live source after a write
+
+  const SEED_CONTRACT_MINUTES = 45; // matches the seed athlete's tier (ATHLETE, HOUSEHOLD's Jordan)
+  const seedLoggedToday = Boolean(seedEntry && seedEntry.date === today);
+  const seedValue = {
+    totalMinutes: seedLoggedToday ? seedEntry.minutes : 0,
+    loggedToday: seedLoggedToday,
+    contractMinutes: SEED_CONTRACT_MINUTES,
+  };
+
+  const state = useSeedResource(
+    live ? null : seedValue,
+    live
+      ? { source: () => livePracticeLog(today), deps: ['practice-log', today, refreshKey] }
+      : undefined
+  );
+
+  const logPractice = async ({ minutes }) => {
+    if (!live) {
+      const entry = { date: today, minutes };
+      setSeedEntry(entry);
+      return entry;
+    }
+    const { athlete } = await liveAthleteIdentity();
+    const result = await createContractLog({
+      athleteId: athlete.id,
+      date: today,
+      minutes,
+      contractMinutes: athlete.contractMinutes ?? null,
+    });
+    setRefreshKey((k) => k + 1); // pick up the new total on the next render
+    return result;
+  };
+
+  return { ...state, logPractice, totalMinutes: state.data?.totalMinutes ?? 0 };
+}
+
+/**
+ * The seed household's kid ids - useAthleteDetail falls back to the seed
+ * ATHLETE_DETAIL record for any of these (or when no id is passed at all),
+ * exactly as the screen behaved before athleteId existed as a concept.
+ */
+const SEED_KID_IDS = new Set(HOUSEHOLD.children.map((c) => c.id));
+
+/**
+ * Live payload for useAthleteDetail. Attendance history, the Commitment
+ * Board count and month-over-month contract history are not sourced live
+ * this sprint - there is no attendance-marking write path yet (see
+ * useRoster.js) and no aggregation over contractLogs - so those fields are
+ * placeholders ('—'), never invented numbers, and `hasEnoughData` stays true
+ * so a long-enrolled real athlete does not get told they are new.
+ */
+async function liveAthleteDetail(athleteId) {
+  const athlete = await fetchAthlete(athleteId);
+  const pkg = athlete.packageId ? await fetchPackage(athlete.packageId) : null;
+  const subline =
+    [
+      athlete.contractMinutes != null ? `${athlete.contractMinutes} min tier` : null,
+      pkg ? `${pkg.name} package` : null,
+    ]
+      .filter(Boolean)
+      .join(' · ') || null;
+
+  return {
+    athlete: {
+      name: athlete.name,
+      subline,
+      attendance: '—',
+      attendanceLabel: 'attendance — not tracked live yet',
+      board: '—',
+      boardLabel: 'months on the Board — not tracked live yet',
+    },
+    history: [],
+    checklist: [],
+    hasEnoughData: true,
+  };
+}
+
+/**
+ * GET /athletes/:id (09) — athlete detail. Parent: their own linked
+ * athlete(s). Staff (ops/owner/mental): any athlete. Routed by id
+ * (Sprint 5): PortalRoutes reads /portal/athlete/:athleteId and passes
+ * `athleteId` in as a prop - this hook never reads the route itself.
+ *
+ * Live only when isLive() AND athleteId is a real (non-seed) id; an
+ * undefined athleteId or one of the seed household's kid ids always falls
+ * back to seed data, so the harness and an un-migrated caller keep working.
+ */
+export function useAthleteDetail({ athleteId, variant = 'populated' } = {}) {
+  const live = isLive() && athleteId != null && !SEED_KID_IDS.has(athleteId);
   const full = variant === 'populated';
-  return useSeedResource({
+  const seedValue = {
     athlete: ATHLETE_DETAIL,
     history: full ? CONTRACT_HISTORY : [],
     checklist: full ? [] : LIMITED_DATA_CHECKLIST,
     hasEnoughData: full,
-  });
+  };
+  return useSeedResource(
+    live ? null : seedValue,
+    live
+      ? { source: () => liveAthleteDetail(athleteId), deps: ['athlete-detail', athleteId] }
+      : undefined
+  );
 }
 
 /** GET /billing/:householdId + /invoices (10). */

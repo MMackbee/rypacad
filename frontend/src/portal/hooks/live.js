@@ -195,6 +195,70 @@ export async function fetchSessionsByIds(ids) {
 }
 
 /**
+ * Every athlete in one household — the equality filter firestore.rules
+ * proves a parent's list read against (resource.data.householdId ==
+ * me().householdId). Powers useHouseholdAthletes and useBillingSummary.
+ */
+export async function fetchHouseholdAthletes(householdId) {
+  if (!householdId) {
+    throw new LiveDataError(ERR.INVALID, 'fetchHouseholdAthletes: householdId is required.');
+  }
+  try {
+    const snap = await getDocs(
+      query(collection(db, 'athletes'), where('householdId', '==', householdId))
+    );
+    return snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+  } catch (err) {
+    throw wrap(err, 'fetchHouseholdAthletes');
+  }
+}
+
+/**
+ * Every athlete assigned to one coach — the equality filter firestore.rules
+ * proves a coach's list read against (resource.data.coachId ==
+ * request.auth.uid). Powers useCoachRoster: a real roster, not one session's
+ * attendance.
+ */
+export async function fetchCoachAthletes(coachUid) {
+  if (!coachUid) {
+    throw new LiveDataError(ERR.INVALID, 'fetchCoachAthletes: coachUid is required.');
+  }
+  try {
+    const snap = await getDocs(
+      query(collection(db, 'athletes'), where('coachId', '==', coachUid))
+    );
+    return snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+  } catch (err) {
+    throw wrap(err, 'fetchCoachAthletes');
+  }
+}
+
+/**
+ * Sessions within one inclusive date range — powers useMonthSessions. Both
+ * bounds are range filters on the same field ('date'), plus an orderBy on
+ * that same field, so this needs only the automatic single-field index, not
+ * a composite one.
+ */
+export async function fetchSessionsInRange(fromDate, toDate) {
+  if (!fromDate || !toDate) {
+    throw new LiveDataError(ERR.INVALID, 'fetchSessionsInRange: fromDate and toDate are required.');
+  }
+  try {
+    const snap = await getDocs(
+      query(
+        collection(db, 'sessions'),
+        where('date', '>=', fromDate),
+        where('date', '<=', toDate),
+        orderBy('date')
+      )
+    );
+    return snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+  } catch (err) {
+    throw wrap(err, 'fetchSessionsInRange');
+  }
+}
+
+/**
  * Every booking for one athlete, unfiltered — the hooks split upcoming/past
  * and derive allowance usage from these rows, because per the contract there
  * is no stored counter to drift.
@@ -257,5 +321,60 @@ export async function createBooking({ athleteId, sessionId, date, type, pool, ho
     return { id, ...booking, createdAt: null };
   } catch (err) {
     throw wrap(err, 'createBooking');
+  }
+}
+
+/**
+ * Every contractLog for one athlete, unfiltered — mirrors fetchBookings:
+ * a single equality filter needs no composite index, and usePracticeLog
+ * derives the current cycle's total client-side from these rows, the same
+ * way deriveAllowance() derives booking usage. There is no stored counter to
+ * drift either way.
+ */
+export async function fetchContractLogs(athleteId) {
+  if (!athleteId) {
+    throw new LiveDataError(ERR.INVALID, 'fetchContractLogs: athleteId is required.');
+  }
+  try {
+    const snap = await getDocs(
+      query(collection(db, 'contractLogs'), where('athleteId', '==', athleteId))
+    );
+    return snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+  } catch (err) {
+    throw wrap(err, 'fetchContractLogs');
+  }
+}
+
+/**
+ * Create (or overwrite the same day's) contractLog — contract v1.3 shape.
+ * Doc id is `{athleteId}_{date}`, which is both how one-log-per-day is
+ * enforced (a second log the same day overwrites the same doc rather than
+ * duplicating) and how firestore.rules pins date to the id. `contractMinutes`
+ * is a snapshot the caller supplies (the athlete's tier at log time), not
+ * re-derived here, so a later tier change cannot rewrite history. The server
+ * stamps createdAt; createdBy is the signed-in uid, both re-checked by rules.
+ */
+export async function createContractLog({ athleteId, date, minutes, contractMinutes = null }) {
+  if (!athleteId || !date || minutes == null) {
+    throw new LiveDataError(
+      ERR.INVALID,
+      'createContractLog: athleteId, date and minutes are all required.'
+    );
+  }
+  const user = requireUser();
+  const log = {
+    athleteId,
+    date,
+    minutes,
+    contractMinutes,
+    createdBy: user.uid,
+    createdAt: serverTimestamp(),
+  };
+  try {
+    const id = `${athleteId}_${date}`;
+    await setDoc(doc(db, 'contractLogs', id), log);
+    return { id, ...log, createdAt: null };
+  } catch (err) {
+    throw wrap(err, 'createContractLog');
   }
 }
