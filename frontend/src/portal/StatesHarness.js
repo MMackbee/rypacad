@@ -26,7 +26,7 @@ import MySchedule from './screens/MySchedule';
 import BookSession from './screens/BookSession';
 import ParentDashboard from './screens/ParentDashboard';
 import CoachDashboard from './screens/CoachDashboard';
-import Roster from './screens/Roster';
+import Roster, { SessionAttendance } from './screens/Roster';
 import DiagnosticCapture from './screens/DiagnosticCapture';
 import AthleteDashboard from './screens/AthleteDashboard';
 import PracticeDNA from './screens/PracticeDNA';
@@ -63,10 +63,11 @@ export const SCREEN_STATES = [
     states: [['upcoming', 'Upcoming'], ['empty', 'Empty'], ['cancelled', 'Cancelled']] },
   { id: '05', title: 'Book a Session', Screen: BookSession, role: 'athlete',
     states: [['open', 'Blocks open'],
-             // Interactive: tap a block to see the button-level "Reserving…"
-             // pattern, then the inline failure. The rejection message here
-             // only exercises the pipe - the live path supplies real reasons.
-             ['open', 'Reserve fails · tap a block', {
+             // Interactive: tap a marked date to open its sessions, then a
+             // session to see the button-level "Reserving…" pattern and the
+             // inline failure. The rejection message here only exercises the
+             // pipe - the live path supplies real reasons.
+             ['open', 'Reserve fails · pick a session', {
                onBook: () =>
                  new Promise((resolve, reject) => {
                    setTimeout(
@@ -94,9 +95,18 @@ export const SCREEN_STATES = [
     states: [['default', 'Default'], ['saved', 'Saved']] },
   { id: '12', title: 'Coach Dashboard', Screen: CoachDashboard, role: 'coach',
     states: [['today', 'Sessions today'], ['concurrent', 'Concurrent'], ['none', 'None today']] },
-  { id: '13', title: 'Session Roster & Attendance', Screen: Roster, role: 'coach',
+  { id: '13', title: 'Session Roster & Attendance', Screen: SessionAttendance, role: 'coach',
     states: [['pre', 'Pre-session'], ['progress', 'In progress'], ['complete', 'Completed'],
              ['noshow', 'No-shows']] },
+  /*
+   * Roster - coach (Sprint 5 pin, TEAM.md): the bottom tab bar's "Roster"
+   * destination is now the coach's full assigned roster, not one session's
+   * attendance - split out from the screen above, which still holds the
+   * in-session IN/OUT flow for when routing wires a session-specific entry
+   * point to it.
+   */
+  { id: '13R', title: 'Roster (coach)', Screen: Roster, role: 'coach',
+    states: [['default', 'Populated']] },
   { id: '14', title: 'Diagnostic Capture', Screen: DiagnosticCapture, role: 'coach',
     states: [['empty', 'Empty'], ['uploading', 'Uploading'], ['partial', 'Partial'],
              ['complete', 'Complete']] },
@@ -361,15 +371,20 @@ function ComponentGallery() {
           </div>
         </Spec>
 
-        <Spec label="Day grid cell · closed ≠ missed">
+        <Spec label="Day grid cell · logged ≠ missed ≠ open">
           <div style={{ display: 'flex', gap: 6, marginBottom: 14 }}>
             <DayGridCell state="logged" day={16} />
             <DayGridCell state="logged" day={17} />
+            <DayGridCell state="missed" day={14} />
             <DayGridCell state="open" day={18} />
-            <DayGridCell state="closed" day={15} />
-            <DayGridCell state="future" day={19} />
+            <DayGridCell state="available" day={19} />
           </div>
           <DayGridLegend />
+          <div style={{ font: `400 11px/1.5 ${font.body}`, color: color.textTertiary, marginTop: 12 }}>
+            No more `closed` state (Sprint 5 pin) — logging is legal on any date, so a closure
+            paints as an ordinary open day. `available` (rightmost) is the Book a Session month
+            calendar reusing this same cell.
+          </div>
         </Spec>
 
         <Spec label="Toggle · 42×25, row is the tap target">
