@@ -12,8 +12,14 @@
  *                  seed-firestore.mjs does (never retyped; price stripped —
  *                  no dollar amounts in Firestore, only Stripe holds money).
  *   households   — the MackBee test household.
- *   athletes     — one test athlete on the g-8-3 package, coached by the
- *                  test coach account.
+ *   athletes     — three MackBee siblings (Sprint 5 pin, TEAM.md), coached by
+ *                  the test coach account: the original makel-test account
+ *                  athlete plus two siblings so the parent's multi-child
+ *                  surfaces (children list, per-child billing) have more
+ *                  than one row to render. Only makel-test is linked to a
+ *                  login (FAMILY below) — the siblings are athletes/ docs
+ *                  with no auth account and no users/ doc, same as any real
+ *                  athlete who isn't also a portal login.
  *   users        — one doc per FAMILY account below, keyed by auth uid.
  *
  * Auth uids are resolved from emails via the Identity Toolkit admin API, so
@@ -51,6 +57,17 @@ const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..'
 const HOUSEHOLD_ID = 'mackbee';
 const ATHLETE_ID = 'makel-test';
 const PACKAGE_ID = 'g-8-3'; // 8 training + 3 tournaments / month
+
+// Three MackBee siblings, one household. makel-test is the only one with a
+// portal login (see FAMILY below); Avery and Quinn are athletes/ docs only —
+// athletes exist independently of logins, and provisioning them here is what
+// lets the parent surfaces (children list, per-child billing) exercise more
+// than one child.
+const ATHLETES = [
+  { id: ATHLETE_ID, name: 'Makel MackBee', packageId: PACKAGE_ID, contractMinutes: 45 },
+  { id: 'makel-test-2', name: 'Avery MackBee', packageId: 'g-4-2', contractMinutes: 20 },
+  { id: 'makel-test-3', name: 'Quinn MackBee', packageId: 'elite', contractMinutes: 95 },
+];
 
 const FAMILY = [
   { email: 'makel@rypgolf.com',      role: 'owner',   displayName: 'Makel' },
@@ -196,25 +213,29 @@ async function main() {
       stripeSubscriptionId: null,
     },
   ]);
-  docs.push([
-    'athletes',
-    ATHLETE_ID,
-    {
-      name: 'Makel MackBee',
-      dob: null,
-      householdId: HOUSEHOLD_ID,
-      packageId: PACKAGE_ID,
-      contractMinutes: 45,
-      coachId: coach ? coach.uid : null, // filled on re-run once the coach signs in
-    },
-  ]);
+  for (const a of ATHLETES) {
+    docs.push([
+      'athletes',
+      a.id,
+      {
+        name: a.name,
+        dob: null,
+        householdId: HOUSEHOLD_ID,
+        packageId: a.packageId,
+        contractMinutes: a.contractMinutes,
+        coachId: coach ? coach.uid : null, // filled on re-run once the coach signs in
+      },
+    ]);
+  }
   for (const m of found) docs.push(['users', m.uid, userDoc(m)]);
 
-  console.log(`\nPlan: ${docs.length} doc(s) — ${packages.size} packages, 1 household, 1 athlete, ${found.length} users`);
+  console.log(`\nPlan: ${docs.length} doc(s) — ${packages.size} packages, 1 household, ${ATHLETES.length} athletes, ${found.length} users`);
   for (const [col, id, doc] of docs) {
     if (col !== 'packages') console.log(`  ${col}/${id}: ${JSON.stringify(doc)}`);
   }
-  if (!coach) console.log('  note: athletes/' + ATHLETE_ID + '.coachId is null until the coach account exists.');
+  if (!coach) {
+    for (const a of ATHLETES) console.log('  note: athletes/' + a.id + '.coachId is null until the coach account exists.');
+  }
 
   if (DRY_RUN) {
     console.log('\n[dry-run] nothing written.');
