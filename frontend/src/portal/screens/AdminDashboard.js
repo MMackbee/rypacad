@@ -1,8 +1,8 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { color, font, radius } from '../tokens';
 import PhoneFrame from '../components/PhoneFrame';
 import StatusBadge from '../components/StatusBadge';
-import { Body, Card, ScreenTitle, SectionLabel } from '../components/Primitives';
+import { Body, Card, ScreenTitle, SectionLabel, SignOutButton } from '../components/Primitives';
 import { useAdminDashboard } from '../hooks';
 
 /**
@@ -18,29 +18,41 @@ import { useAdminDashboard } from '../hooks';
  * Phase 1 screens where a wider table genuinely beats a phone. Built
  * phone-first here, which the layout survives.
  *
+ * Sprint 5 pin (TEAM.md): the "All tiers" filter button was dead - it had no
+ * onClick at all, so tapping it did nothing regardless of the underlying
+ * filter data (which already matched correctly). `filtered` below is now
+ * local state the pill itself drives, toggling between TIER_FILTERS' two
+ * entries.
+ *
  * @param {'populated'|'filtered'} variant
+ * @param {() => void} [onSignOut]  Hidden when not supplied (harness/demo).
  */
-export default function AdminDashboard({ variant = 'populated', bare = false }) {
-  const { data } = useAdminDashboard({ variant });
-  const filtered = variant === 'filtered';
+export default function AdminDashboard({ variant = 'populated', bare = false, onSignOut, onOpenAthlete }) {
+  const [filtered, setFiltered] = useState(variant === 'filtered');
+  const { data } = useAdminDashboard({ variant: filtered ? 'filtered' : 'populated' });
 
   return (
     <PhoneFrame
       bare={bare}
       header={
         <div style={{ padding: '8px 22px 14px' }}>
-          <div style={{ font: `400 12px ${font.body}`, color: color.textTertiary }}>
-            Week of Feb 15
+          <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <div style={{ font: `400 12px ${font.body}`, color: color.textTertiary }}>
+                Week of Feb 15
+              </div>
+              <ScreenTitle size={24} style={{ marginTop: 3 }}>
+                Who needs a call
+              </ScreenTitle>
+            </div>
+            <SignOutButton onSignOut={onSignOut} />
           </div>
-          <ScreenTitle size={24} style={{ marginTop: 3 }}>
-            Who needs a call
-          </ScreenTitle>
-          <TierFilter filter={data?.filter} active={filtered} />
+          <TierFilter filter={data?.filter} active={filtered} onToggle={() => setFiltered((f) => !f)} />
         </div>
       }
     >
       <div style={{ padding: '0 22px 24px', display: 'flex', flexDirection: 'column', gap: 12 }}>
-        <OutstandingCard items={data?.outstanding ?? []} />
+        <OutstandingCard items={data?.outstanding ?? []} onOpenAthlete={onOpenAthlete} />
         <MetricGrid metrics={data?.metrics} />
         <EnrollmentCard rows={data?.enrollment ?? []} highlight={data?.highlightPackage} />
         <BlockFillCard bars={data?.blockFill ?? []} filtered={filtered} />
@@ -49,11 +61,14 @@ export default function AdminDashboard({ variant = 'populated', bare = false }) 
   );
 }
 
-function TierFilter({ filter, active }) {
+function TierFilter({ filter, active, onToggle }) {
   if (!filter) return null;
   return (
-    <div
+    <button
+      type="button"
+      onClick={onToggle}
       style={{
+        width: '100%',
         height: 42,
         marginTop: 14,
         background: color.surface,
@@ -69,6 +84,7 @@ function TierFilter({ filter, active }) {
       <span
         style={{
           flex: 1,
+          textAlign: 'left',
           font: `500 13px ${font.body}`,
           color: active ? color.primary : color.textSecondary,
         }}
@@ -86,12 +102,21 @@ function TierFilter({ filter, active }) {
           marginBottom: 4,
         }}
       />
-    </div>
+    </button>
   );
 }
 
-/** The named list, first. */
-function OutstandingCard({ items }) {
+/**
+ * The named list, first.
+ *
+ * Sprint 5 pin: athlete names become links to /portal/athlete/:id, where
+ * contact info lives. Wired defensively - `item.athleteId` does not exist on
+ * the seed rows yet (data/admin.js is the db lane's; OUTSTANDING only carries
+ * `who` as free text, and several rows name a household or a group, not one
+ * athlete) - so a row renders as a link only once an id is present, and stays
+ * plain text otherwise. See the sprint report for the data-lane follow-up.
+ */
+function OutstandingCard({ items, onOpenAthlete }) {
   return (
     <div
       style={{
@@ -105,28 +130,49 @@ function OutstandingCard({ items }) {
         Outstanding · {items.length}
       </SectionLabel>
 
-      {items.map((item, i) => (
-        <div
-          key={item.id}
-          style={{
-            display: 'flex',
-            alignItems: 'flex-start',
-            gap: 12,
-            padding: '13px 0',
-            borderBottom: i < items.length - 1 ? `1px solid ${color.ruleSoft}` : 'none',
-          }}
-        >
-          <div style={{ flex: 1, minWidth: 0 }}>
-            <div style={{ font: `600 13px ${font.body}`, color: color.text }}>{item.who}</div>
-            <div
-              style={{ font: `400 11px/1.5 ${font.body}`, color: color.textSecondary, marginTop: 3 }}
-            >
-              {item.why}
+      {items.map((item, i) => {
+        const linkable = onOpenAthlete && item.athleteId;
+        return (
+          <div
+            key={item.id}
+            style={{
+              display: 'flex',
+              alignItems: 'flex-start',
+              gap: 12,
+              padding: '13px 0',
+              borderBottom: i < items.length - 1 ? `1px solid ${color.ruleSoft}` : 'none',
+            }}
+          >
+            <div style={{ flex: 1, minWidth: 0 }}>
+              {linkable ? (
+                <button
+                  type="button"
+                  onClick={() => onOpenAthlete(item.athleteId)}
+                  style={{
+                    background: 'none',
+                    border: 'none',
+                    padding: 0,
+                    font: `600 13px ${font.body}`,
+                    color: color.primary,
+                    cursor: 'pointer',
+                    textAlign: 'left',
+                  }}
+                >
+                  {item.who}
+                </button>
+              ) : (
+                <div style={{ font: `600 13px ${font.body}`, color: color.text }}>{item.who}</div>
+              )}
+              <div
+                style={{ font: `400 11px/1.5 ${font.body}`, color: color.textSecondary, marginTop: 3 }}
+              >
+                {item.why}
+              </div>
             </div>
+            <StatusBadge tone={item.tone}>{item.tag}</StatusBadge>
           </div>
-          <StatusBadge tone={item.tone}>{item.tag}</StatusBadge>
-        </div>
-      ))}
+        );
+      })}
     </div>
   );
 }
