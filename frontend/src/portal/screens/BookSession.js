@@ -1,32 +1,104 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { color, font, glow, radius, tint } from '../tokens';
+import { color, font, radius, tint } from '../tokens';
 import BottomTabBar from '../components/BottomTabBar';
 import Button from '../components/Button';
 import PhoneFrame from '../components/PhoneFrame';
+import ContractCalendar from '../components/ContractCalendar';
 import SessionCard from '../components/SessionCard';
-import SkeletonCard, { SkeletonBar, SkeletonSessionCard } from '../components/Skeleton';
+import SkeletonCard, { SkeletonBar } from '../components/Skeleton';
 import { CapacityPill } from '../components/StatusBadge';
 import AllowancePools, { SpendNote } from '../components/AllowancePools';
 import { Banner, Body, Card, ErrorNotice, ScreenTitle, Tick } from '../components/Primitives';
+import * as hooksModule from '../hooks';
 import { useBooking } from '../hooks';
-// poolFor is domain logic, not response data - the pure helpers in packages.js
-// stay importable; it is the data that has to travel through the hook seam.
+// Pure calendar/season helpers, not response data — same pattern as poolFor
+// below: the data itself travels through the hook seam, but a formatting
+// helper that is already imported elsewhere in this file stays importable.
 import { poolFor } from '../data/packages';
+import { capacityFor, dayLabel } from '../data/season';
+import { monthLabel, todayISO } from '../data/calendar';
+
+/**
+ * Sprint 5 pin (TEAM.md): `useMonthSessions(monthISO)` -> `{ data: { month,
+ * days: [{ date, sessions }] }, loading, error }`, bookable sessions grouped
+ * by date for one calendar month. Resolved off the namespace (see
+ * CoachDashboard.js for why - the export does not exist in hooks/index.js on
+ * this branch yet).
+ *
+ * The fallback below reuses the existing `useBooking` hook's slot list (the
+ * only session data already flowing through a hook on this branch) rather
+ * than reaching into data/season.js's raw SEASON_BY_DATE directly, which
+ * would bypass the hook seam entirely. `useBooking` only ever fetches a
+ * rolling 7-day window, so months outside it read as empty here until the
+ * routing lane's real hook lands — the empty-month state below is honest
+ * either way, just not always for the reason it displays.
+ */
+const pinnedUseMonthSessions = hooksModule.useMonthSessions;
+function useMonthSessionsFallback(monthISO, bookingData) {
+  const [state, setState] = useState(null);
+  useEffect(() => {
+    if (!bookingData) return;
+    const byDate = new Map();
+    for (const slot of bookingData.slots ?? []) {
+      const list = byDate.get(slot.date) ?? [];
+      // Preserve the pinned raw shape (id, date, time, type, capacity,
+      // booked, label, status) as far as this branch can reconstruct it —
+      // useBooking's slots already carry a formatted `capacity` object
+      // rather than raw numbers, which formatCapacity() below accounts for.
+      list.push({
+        id: slot.id,
+        date: slot.date,
+        time: slot.time,
+        type: slot.type,
+        capacity: slot.capacity,
+        label: slot.name === 'Training block' || slot.name === 'Tournament block' ? null : slot.name,
+        status: 'scheduled',
+      });
+      byDate.set(slot.date, list);
+    }
+    setState({ month: monthLabel(monthISO), days: [...byDate.entries()].map(([date, sessions]) => ({ date, sessions })) });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [monthISO, bookingData]);
+
+  return { data: state, loading: !state, error: null };
+}
+
+/** Either shape `useMonthSessions` can hand back (see the fallback above). */
+function formatCapacity(session) {
+  if (session.capacity && typeof session.capacity === 'object') return session.capacity;
+  return capacityFor(session);
+}
+
+function displayNameFor(session) {
+  return session.label || (session.type === 'tournament' ? 'Tournament block' : 'Training block');
+}
+
+/** First-of-month ISO, shifted by whole months — day-of-month is always 1. */
+function shiftMonth(monthISO, delta) {
+  const [y, m] = monthISO.split('-').map(Number);
+  const d = new Date(Date.UTC(y, m - 1 + delta, 1));
+  return `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, '0')}-01`;
+}
 
 /**
  * 05 · Book a Session - athlete.
  * States: Blocks open, Block full, Training limit reached, Tournament limit
  * reached, Confirmed.
  *
- * The two limit states are separate because the allowance is two pools. A spent
- * tournament entitlement leaves every training block bookable, and the reverse —
- * so "limit reached" is never a property of the screen, only of one pool.
+ * Sprint 5 redesign (TEAM.md pin): a month calendar in the Commitment
+ * Contract calendar's visual language (ContractCalendar/DayGridCell, reused
+ * rather than forked). Days with bookable sessions are marked and tappable;
+ * tapping one opens that day's sessions below the grid for the athlete to
+ * pick and confirm. The two limit states are separate because the allowance
+ * is two pools. A spent tournament entitlement leaves every training block
+ * bookable, and the reverse — so "limit reached" is never a property of the
+ * screen, only of one pool.
  *
  * @param {'open'|'full'|'limitTraining'|'limitTournament'|'confirmed'} variant
  * @param {(slot) => Promise} [onBook]
- *   The live reservation call. While it is pending the tapped block shows the
- *   handoff's button-level pattern (spinner + "Reserving…"); a rejection
- *   renders inline with its reason and the block stays selectable. With no
+ *   The live reservation call. While it is pending the tapped session shows
+ *   the handoff's button-level pattern (spinner + "Reserving…"); a rejection
+ *   renders inline with its reason and the day sheet stays open. With no
  *   onBook the tap confirms instantly — exactly the pre-live behavior.
  * @param {boolean} [practice]
  *   Onboarding practice mode (docs/portal/TEAM.md, "Onboarding program v1").
@@ -49,30 +121,31 @@ export default function BookSession({
   onConfirmed,
   onRetry,
 }) {
-  const { data, loading, error } = useBooking({ variant, practice });
-  const [selected, setSelected] = useState(null);
+  // Kept for the existing booking behavior: book(), allowance, confirmation
+  // copy — exactly the contract the screen already had (Sprint 5 pin).
+  const { data, loading, error, book } = useBooking({ variant, practice });
+  const [monthISO, setMonthISO] = useState(() => `${todayISO().slice(0, 7)}-01`);
+  const monthState = pinnedUseMonthSessions
+    ? pinnedUseMonthSessions(monthISO)
+    : useMonthSessionsFallback(monthISO, data);
+
+  const [selectedDate, setSelectedDate] = useState(null);
   // The slot the athlete just booked. Persistence is the API's job later; the
-  // flow - tap a block, land on the confirmation - has to work now.
+  // flow - tap a day, pick a session, land on the confirmation - has to work now.
   const [booked, setBooked] = useState(null);
-  // The in-flight reservation (slot id) and the last attempt's failure.
+  // The in-flight reservation (session id) and the last attempt's failure.
   const [reserving, setReserving] = useState(null);
   const [failure, setFailure] = useState(null);
 
   // A booking can resolve after the athlete has navigated away.
   const live = useRef(true);
-  // Reset on run, not just clear on cleanup: React 18 StrictMode
-  // mounts-unmounts-remounts in dev, and a cleanup-only guard stays false
-  // after the simulated unmount — which swallowed every booking resolution
-  // and left the card on "Reserving…" forever.
   useEffect(() => {
     live.current = true;
     return () => { live.current = false; };
   }, []);
 
   // The completion signal for the onboarding walkthrough: fires exactly when
-  // the athlete's own tap-through reaches the confirmation. `booked` only ever
-  // transitions null → slot, so this fires once per booking. The 'confirmed'
-  // demo variant does not fire it — a variant is not an action completing.
+  // the athlete's own tap-through reaches the confirmation.
   useEffect(() => {
     if (booked && onConfirmed) {
       onConfirmed({
@@ -84,41 +157,52 @@ export default function BookSession({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [booked]);
 
-  const book = (slot) => {
+  const confirmBooking = (session) => {
     if (reserving) return;
     if (!onBook) {
-      setBooked(slot);
+      finalizeBooked(session);
       return;
     }
     setFailure(null);
-    setReserving(slot.id);
+    setReserving(session.id);
     Promise.resolve()
-      .then(() => onBook(slot))
+      .then(() => onBook(session))
       .then(() => {
         if (!live.current) return;
         setReserving(null);
-        setBooked(slot);
+        finalizeBooked(session);
       })
       .catch((err) => {
         if (!live.current) return;
         setReserving(null);
-        // The reason travels as-is when it is human text; anything else (a
-        // stack, an SDK code object) falls back to plain copy rather than
-        // leaking onto the screen.
         setFailure({
-          slotId: slot.id,
+          sessionId: session.id,
           reason: err && typeof err.message === 'string' && err.message ? err.message : null,
         });
       });
   };
 
-  const dates = data?.dates ?? [];
-  const allowance = data?.allowance;
+  const finalizeBooked = (session) => {
+    const [time, meridiem] = session.time.split(' ');
+    setBooked({
+      ...session,
+      time,
+      meridiem,
+      name: displayNameFor(session),
+      dayLabel: dayLabel(session.date, todayISO()),
+    });
+  };
 
-  // Default to the first day the season actually has sessions on, rather than a
-  // hardcoded date that a closure could silently empty.
-  const activeDate = selected ?? dates[0]?.iso ?? null;
-  const slots = (data?.slots ?? []).filter((s) => s.date === activeDate);
+  const allowance = data?.allowance;
+  const days = monthState.data?.days ?? [];
+  const dayStates = {};
+  const sessionsByDate = {};
+  for (const d of days) {
+    sessionsByDate[d.date] = d.sessions;
+    dayStates[d.date] = d.sessions.length ? 'available' : 'open';
+  }
+  const monthHasSessions = days.some((d) => d.sessions.length > 0);
+  const selectedSessions = selectedDate ? sessionsByDate[selectedDate] ?? [] : [];
 
   if (booked) {
     return (
@@ -171,65 +255,62 @@ export default function BookSession({
               ) : null}
             </div>
 
-            <DateStrip dates={dates} selected={activeDate} onSelect={setSelected} />
-
-            <div style={{ padding: '0 22px', display: 'flex', flexDirection: 'column', gap: 10 }}>
-              {failure ? (
-                <Banner tone="red" title="Booking didn't go through">
-                  {failure.reason || 'The reservation could not be completed.'} Nothing was
-                  reserved — tap the block to try again.
-                </Banner>
-              ) : null}
-              {slots.map((slot) => {
-                const [time, meridiem] = slot.time.split(' ');
-                const isFull = slot.capacity.state === 'full';
-                const pool = poolFor(slot.type);
-                // Two independent reasons a slot cannot be booked, and they need
-                // different copy: the block itself is full, or the athlete has
-                // nothing left in the pool this block would spend.
-                const poolSpent = allowance ? allowance[pool].left === 0 : false;
-                const pending = reserving === slot.id;
-
-                return (
-                  <SessionCard
-                    key={slot.id}
-                    time={time}
-                    meridiem={meridiem}
-                    type={slot.type}
-                    name={slot.name}
-                    meta={slot.meta}
-                    variant={isFull || poolSpent ? 'full' : 'default'}
-                    gutter={54}
-                    ruleHeight={36}
-                    // Tapping a bookable block books it; full or pool-spent blocks
-                    // stay inert rather than failing at a later submit. While one
-                    // reservation is in flight nothing else is tappable — two
-                    // concurrent bookings is not a state this screen can honor.
-                    onClick={isFull || poolSpent || reserving ? undefined : () => book(slot)}
-                    spendNote={<SpendNote pool={pool} allowance={allowance} />}
-                    action={
-                      pending ? (
-                        <Button loading height={46} style={{ font: `600 14px ${font.body}` }}>
-                          Reserving…
-                        </Button>
-                      ) : null
-                    }
-                    trailing={
-                      <CapacityPill state={isFull ? 'full' : poolSpent ? 'capped' : slot.capacity.state}>
-                        {isFull ? 'Full' : poolSpent ? 'No entries' : slot.capacity.label}
-                      </CapacityPill>
-                    }
-                    footnote={
-                      isFull
-                        ? slot.note
-                        : poolSpent
-                        ? `Your ${pool === 'tournaments' ? 'tournament entries' : 'training sessions'} reset ${allowance.resetsOn}. This block has space — it is your allowance that is spent, not the session.`
-                        : null
-                    }
-                  />
-                );
-              })}
+            <div style={{ padding: '0 22px' }}>
+              <Card large>
+                <MonthNav
+                  label={monthLabel(monthISO)}
+                  onPrev={() => {
+                    setSelectedDate(null);
+                    setMonthISO((m) => shiftMonth(m, -1));
+                  }}
+                  onNext={() => {
+                    setSelectedDate(null);
+                    setMonthISO((m) => shiftMonth(m, 1));
+                  }}
+                />
+                {monthState.loading ? (
+                  <SkeletonBar height={220} style={{ marginTop: 14 }} />
+                ) : (
+                  <div style={{ marginTop: 10 }}>
+                    <ContractCalendar
+                      key={monthISO}
+                      start={monthISO}
+                      dayStates={dayStates}
+                      variant="booking"
+                      selected={selectedDate}
+                      onSelectDay={(day) => setSelectedDate(day.iso)}
+                    />
+                  </div>
+                )}
+                {!monthState.loading && !monthHasSessions ? (
+                  <Body size={12} style={{ marginTop: 14, textAlign: 'center' }}>
+                    No sessions are scheduled yet.
+                  </Body>
+                ) : (
+                  <Body size={11} tone={color.textTertiary} style={{ marginTop: 13 }}>
+                    Days marked green have bookable sessions — tap one to see times.
+                  </Body>
+                )}
+              </Card>
             </div>
+
+            {selectedDate ? (
+              <div style={{ padding: '0 22px', display: 'flex', flexDirection: 'column', gap: 10 }}>
+                {failure ? (
+                  <Banner tone="red" title="Booking didn't go through">
+                    {failure.reason || 'The reservation could not be completed.'} Nothing was
+                    reserved — tap the session to try again.
+                  </Banner>
+                ) : null}
+                <DaySessionList
+                  iso={selectedDate}
+                  sessions={selectedSessions}
+                  allowance={allowance}
+                  reserving={reserving}
+                  onSelect={confirmBooking}
+                />
+              </div>
+            ) : null}
           </>
         )}
       </div>
@@ -237,8 +318,112 @@ export default function BookSession({
   );
 }
 
+function MonthNav({ label, onPrev, onNext }) {
+  return (
+    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+      <NavArrow direction="prev" onClick={onPrev} />
+      <ScreenTitle size={17}>{label}</ScreenTitle>
+      <NavArrow direction="next" onClick={onNext} />
+    </div>
+  );
+}
+
+function NavArrow({ direction, onClick }) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      aria-label={direction === 'prev' ? 'Previous month' : 'Next month'}
+      style={{
+        width: 32,
+        height: 32,
+        flex: 'none',
+        border: `1px solid ${color.border}`,
+        borderRadius: radius.input,
+        background: 'transparent',
+        display: 'grid',
+        placeItems: 'center',
+        cursor: 'pointer',
+      }}
+    >
+      <span
+        aria-hidden="true"
+        style={{
+          width: 7,
+          height: 7,
+          borderRight: `1.5px solid ${color.textSecondary}`,
+          borderBottom: `1.5px solid ${color.textSecondary}`,
+          transform: direction === 'prev' ? 'rotate(135deg)' : 'rotate(-45deg)',
+        }}
+      />
+    </button>
+  );
+}
+
 /**
- * Persistent, above the date strip, never a dismissible toast.
+ * The tapped day's sessions — time, type chip, spots left, which allowance
+ * pool it spends. Tapping a bookable one confirms it; a full or pool-spent
+ * one stays inert rather than failing at a later submit.
+ */
+function DaySessionList({ iso, sessions, allowance, reserving, onSelect }) {
+  return (
+    <>
+      <div style={{ font: `600 13px ${font.body}`, color: color.text, padding: '2px 0 2px' }}>
+        {dayLabel(iso, todayISO())}
+      </div>
+      {sessions.length === 0 ? (
+        <Body size={12}>No sessions are scheduled yet.</Body>
+      ) : (
+        sessions.map((session) => {
+          const [time, meridiem] = session.time.split(' ');
+          const cap = formatCapacity(session);
+          const isFull = cap.state === 'full';
+          const pool = poolFor(session.type);
+          // Two independent reasons a session cannot be booked, and they need
+          // different copy: the block itself is full, or the athlete has
+          // nothing left in the pool this block would spend.
+          const poolSpent = allowance ? allowance[pool].left === 0 : false;
+          const pending = reserving === session.id;
+
+          return (
+            <SessionCard
+              key={session.id}
+              time={time}
+              meridiem={meridiem}
+              type={session.type}
+              name={displayNameFor(session)}
+              variant={isFull || poolSpent ? 'full' : 'default'}
+              gutter={54}
+              ruleHeight={36}
+              onClick={isFull || poolSpent || reserving ? undefined : () => onSelect(session)}
+              spendNote={<SpendNote pool={pool} allowance={allowance} />}
+              action={
+                pending ? (
+                  <Button loading height={46} style={{ font: `600 14px ${font.body}` }}>
+                    Reserving…
+                  </Button>
+                ) : null
+              }
+              trailing={
+                <CapacityPill state={isFull ? 'full' : poolSpent ? 'capped' : cap.state}>
+                  {isFull ? 'Full' : poolSpent ? 'No entries' : cap.label}
+                </CapacityPill>
+              }
+              footnote={
+                poolSpent && !isFull
+                  ? `Your ${pool === 'tournaments' ? 'tournament entries' : 'training sessions'} reset ${allowance.resetsOn}. This block has space — it is your allowance that is spent, not the session.`
+                  : null
+              }
+            />
+          );
+        })
+      )}
+    </>
+  );
+}
+
+/**
+ * Persistent, above the calendar, never a dismissible toast.
  *
  * A limited package hits a ceiling on every visit, so the balance has to be
  * standing context. Surfacing it only at submit turns a known constraint into a
@@ -284,9 +469,9 @@ function AllowanceBanner({ allowance }) {
 }
 
 /**
- * The loading layout, in the loaded layout's geometry: allowance banner, seven
- * 50px date pills, three slot cards on the 54px gutter. No spinner — lists load
- * behind skeletons; spinners are for actions (see components/Skeleton.js).
+ * The loading layout, in the loaded layout's geometry: allowance banner, then
+ * the month calendar card. No spinner — lists load behind skeletons; spinners
+ * are for actions (see components/Skeleton.js).
  */
 function BookingSkeleton() {
   return (
@@ -307,69 +492,12 @@ function BookingSkeleton() {
               <SkeletonBar tone="raised" height={6} r={3} />
             </div>
           ))}
-          <SkeletonBar tone="raised" width="92%" height={9} style={{ marginTop: 12 }} />
-          <SkeletonBar tone="raised" width="55%" height={9} style={{ marginTop: 6 }} />
         </SkeletonCard>
       </div>
 
-      <div style={{ display: 'flex', gap: 7, overflow: 'hidden', padding: '0 22px' }}>
-        {[0, 1, 2, 3, 4, 5, 6].map((i) => (
-          <SkeletonBar key={i} width={50} height={53} r={radius.counter} />
-        ))}
+      <div style={{ padding: '0 22px' }}>
+        <SkeletonCard large height={260} />
       </div>
-
-      <div style={{ padding: '0 22px', display: 'flex', flexDirection: 'column', gap: 10 }}>
-        {[0, 1, 2].map((i) => (
-          <SkeletonSessionCard key={i} gutter={54} />
-        ))}
-      </div>
-    </div>
-  );
-}
-
-function DateStrip({ dates, selected, onSelect }) {
-  return (
-    <div
-      style={{
-        display: 'flex',
-        gap: 7,
-        overflowX: 'auto',
-        padding: '0 22px',
-        scrollbarWidth: 'none',
-      }}
-    >
-      {dates.map((d) => {
-        const on = d.iso === selected;
-        return (
-          <button
-            key={d.iso}
-            type="button"
-            onClick={() => onSelect(d.iso)}
-            style={{
-              width: 50,
-              flex: 'none',
-              padding: '9px 0',
-              borderRadius: radius.counter,
-              background: on ? color.primary : 'transparent',
-              border: on ? 'none' : `1px solid ${color.border}`,
-              boxShadow: on ? glow.datePill : 'none',
-              color: on ? '#000' : color.text,
-              cursor: 'pointer',
-            }}
-          >
-            <div
-              style={{
-                font: `400 10px ${font.body}`,
-                textTransform: 'uppercase',
-                opacity: 0.7,
-              }}
-            >
-              {d.dow}
-            </div>
-            <div style={{ font: `700 17px ${font.body}` }}>{d.date}</div>
-          </button>
-        );
-      })}
     </div>
   );
 }
