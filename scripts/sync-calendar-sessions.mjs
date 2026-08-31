@@ -32,11 +32,20 @@
  *   - generator-seeded sessions (gcalEventId null) not adopted by id are left
  *     untouched and counted.
  *
- * Production guard (same as seed-firestore.mjs): writes require
- * FIRESTORE_EMULATOR_HOST pointing at a local host, or the script exits.
- * `--dry-run` may READ the real calendar but writes nothing; it also reads
- * the emulator for the diff when FIRESTORE_EMULATOR_HOST is set, and
+ * Production guard: without --prod, writes require FIRESTORE_EMULATOR_HOST
+ * pointing at a local host, or the script exits (same posture as
+ * seed-firestore.mjs). `--dry-run` may READ the real calendar but writes
+ * nothing; it reads the target for the diff when one is resolvable, and
  * otherwise diffs against an empty target.
+ *
+ * --prod targets PRODUCTION Firestore, authenticated as the developer's own
+ * firebase-tools CLI login (identical mechanism to provision-owner.mjs) —
+ * this is the third sanctioned production writer, and running it is a
+ * PM/user-gated action per docs/portal/TEAM.md. Two extra guards:
+ *   - a prod WRITE additionally requires --yes; without it the plan prints
+ *     and the script exits, so the first prod run is always a review.
+ *   - --fixture never combines with --prod: production only syncs from the
+ *     real calendar.
  *
  * Credentials: REACT_APP_GCAL_CALENDAR_ID / REACT_APP_GCAL_API_KEY are read
  * from frontend/.env at runtime — never hardcoded here. The key is
@@ -47,6 +56,7 @@
  */
 
 import { readFileSync } from 'node:fs';
+import { homedir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -71,6 +81,8 @@ function arg(name) {
   return i > -1 ? process.argv[i + 1] : null;
 }
 const DRY_RUN = process.argv.includes('--dry-run');
+const PROD = process.argv.includes('--prod');
+const YES = process.argv.includes('--yes');
 const FROM = arg('from');
 const TO = arg('to');
 const FIXTURE = arg('fixture');
@@ -78,7 +90,18 @@ const FIXTURE = arg('fixture');
 const ISO_DATE = /^\d{4}-\d{2}-\d{2}$/;
 if (!ISO_DATE.test(FROM || '') || !ISO_DATE.test(TO || '') || FROM > TO) {
   console.error(
-    'Usage: node scripts/sync-calendar-sessions.mjs --from YYYY-MM-DD --to YYYY-MM-DD [--dry-run] [--fixture <path>]'
+    'Usage: node scripts/sync-calendar-sessions.mjs --from YYYY-MM-DD --to YYYY-MM-DD [--dry-run] [--fixture <path>] [--prod [--yes]]'
+  );
+  process.exit(1);
+}
+if (PROD && FIXTURE) {
+  console.error('Refusing --fixture with --prod: production only syncs from the real calendar.');
+  process.exit(1);
+}
+if (PROD && process.env.FIRESTORE_EMULATOR_HOST) {
+  console.error(
+    'Refusing --prod while FIRESTORE_EMULATOR_HOST is set — the target is ambiguous.\n' +
+      'Unset the variable to sync production, or drop --prod to sync the emulator.'
   );
   process.exit(1);
 }
@@ -107,11 +130,53 @@ function localEmulatorHost({ required }) {
   if (!LOCAL_HOSTS.has(name)) {
     console.error(
       `Refusing to run: FIRESTORE_EMULATOR_HOST="${host}" is not a local address.\n` +
-        'This script never touches a remote Firestore.'
+        'This script never touches a remote Firestore without --prod.'
     );
     process.exit(1);
   }
   return host;
+}
+
+// ---------------------------------------------------------------------------
+// Production auth — the developer's own firebase-tools CLI login, exactly as
+// provision-owner.mjs does it. The client id/secret are firebase-tools' public
+// installed-app OAuth client, embedded in the open-source CLI; the refresh
+// token is the developer's login. Tokens are never printed.
+// ---------------------------------------------------------------------------
+
+const CLI_CLIENT_ID = '563584335869-fgrhgmd47bqnekij5i8b5pr03ho849e6.apps.googleusercontent.com';
+const CLI_CLIENT_SECRET = 'j9iVZfS8kkCEFUPaAeJV0sAi';
+
+function cliRefreshToken() {
+  const store = path.join(homedir(), '.config', 'configstore', 'firebase-tools.json');
+  try {
+    const cfg = JSON.parse(readFileSync(store, 'utf8'));
+    const token = cfg?.tokens?.refresh_token;
+    if (!token) throw new Error('no refresh_token in configstore');
+    return token;
+  } catch (e) {
+    console.error(`Could not read the firebase-tools login (${store}): ${e.message}`);
+    console.error('Run `npx firebase-tools login` first.');
+    process.exit(1);
+  }
+}
+
+async function prodAccessToken() {
+  const res = await fetch('https://oauth2.googleapis.com/token', {
+    method: 'POST',
+    headers: { 'content-type': 'application/x-www-form-urlencoded' },
+    body: new URLSearchParams({
+      grant_type: 'refresh_token',
+      refresh_token: cliRefreshToken(),
+      client_id: CLI_CLIENT_ID,
+      client_secret: CLI_CLIENT_SECRET,
+    }),
+  });
+  if (!res.ok) {
+    console.error(`Token exchange failed (${res.status}). Re-run \`npx firebase-tools login\`.`);
+    process.exit(1);
+  }
+  return (await res.json()).access_token;
 }
 
 // ---------------------------------------------------------------------------
@@ -280,7 +345,9 @@ function mapEvents(items, from, to) {
 }
 
 // ---------------------------------------------------------------------------
-// Firestore REST (emulator only) — encode/decode + query + commit.
+// Firestore REST — encode/decode + query + commit against a target: the
+// emulator (default) or production (--prod). A target is
+// { label, base, auth }; the query/commit shapes are identical for both.
 // ---------------------------------------------------------------------------
 
 function fsValue(v) {
@@ -307,11 +374,11 @@ function fsDecode(fields = {}) {
 
 const docName = (id) => `projects/${PROJECT_ID}/databases/(default)/documents/sessions/${id}`;
 
-async function fetchExistingSessions(host, from, to) {
-  const url = `http://${host}/v1/projects/${PROJECT_ID}/databases/(default)/documents:runQuery`;
+async function fetchExistingSessions(target, from, to) {
+  const url = `${target.base}/projects/${PROJECT_ID}/databases/(default)/documents:runQuery`;
   const res = await fetch(url, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json', Authorization: 'Bearer owner' },
+    headers: { 'Content-Type': 'application/json', Authorization: target.auth },
     body: JSON.stringify({
       structuredQuery: {
         from: [{ collectionId: 'sessions' }],
@@ -327,7 +394,7 @@ async function fetchExistingSessions(host, from, to) {
       },
     }),
   });
-  if (!res.ok) throw new Error(`Emulator query failed (${res.status}): ${await res.text()}`);
+  if (!res.ok) throw new Error(`Query against ${target.label} failed (${res.status}): ${await res.text()}`);
   const rows = await res.json();
   const existing = new Map();
   for (const row of rows) {
@@ -338,14 +405,14 @@ async function fetchExistingSessions(host, from, to) {
   return existing;
 }
 
-async function commit(host, writes) {
-  const url = `http://${host}/v1/projects/${PROJECT_ID}/databases/(default)/documents:commit`;
+async function commit(target, writes) {
+  const url = `${target.base}/projects/${PROJECT_ID}/databases/(default)/documents:commit`;
   const res = await fetch(url, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json', Authorization: 'Bearer owner' },
+    headers: { 'Content-Type': 'application/json', Authorization: target.auth },
     body: JSON.stringify({ writes }),
   });
-  if (!res.ok) throw new Error(`Emulator commit failed (${res.status}): ${await res.text()}`);
+  if (!res.ok) throw new Error(`Commit against ${target.label} failed (${res.status}): ${await res.text()}`);
 }
 
 // ---------------------------------------------------------------------------
@@ -440,7 +507,18 @@ function planWrites(plan) {
 // ---------------------------------------------------------------------------
 
 async function main() {
-  const host = localEmulatorHost({ required: !DRY_RUN });
+  let target = null;
+  if (PROD) {
+    console.log(`TARGET: PRODUCTION Firestore (project ${PROJECT_ID})${DRY_RUN ? ' — dry run, read-only' : ''}`);
+    target = {
+      label: `production (project ${PROJECT_ID})`,
+      base: 'https://firestore.googleapis.com/v1',
+      auth: `Bearer ${await prodAccessToken()}`,
+    };
+  } else {
+    const host = localEmulatorHost({ required: !DRY_RUN });
+    if (host) target = { label: `emulator at ${host}`, base: `http://${host}/v1`, auth: 'Bearer owner' };
+  }
 
   const items = FIXTURE ? loadFixture(FIXTURE) : await fetchCalendarEvents(FROM, TO);
   const { sessions: desired, counts } = mapEvents(items, FROM, TO);
@@ -453,9 +531,9 @@ async function main() {
   );
   for (const [id, doc] of desired) console.log(`  session ${id}: ${JSON.stringify(doc)}`);
 
-  const existing = host ? await fetchExistingSessions(host, FROM, TO) : new Map();
-  if (!host) console.log('(no emulator host set: diffing against an empty target)');
-  else console.log(`Existing sessions in window: ${existing.size}`);
+  const existing = target ? await fetchExistingSessions(target, FROM, TO) : new Map();
+  if (!target) console.log('(no emulator host set: diffing against an empty target)');
+  else console.log(`Existing sessions in window (${target.label}): ${existing.size}`);
 
   const plan = planSync(desired, existing);
   console.log(
@@ -479,10 +557,14 @@ async function main() {
     console.log('\nNothing to write: target already in sync.');
     return;
   }
-  console.log(`\nWriting to Firestore emulator at ${host} (project ${PROJECT_ID})...`);
+  if (PROD && !YES) {
+    console.log('\nThis is the plan for PRODUCTION. Nothing written — re-run with --yes to apply it.');
+    process.exit(1);
+  }
+  console.log(`\nWriting to ${target.label}...`);
   const BATCH = 400; // Firestore commit limit is 500 writes
   for (let i = 0; i < writes.length; i += BATCH) {
-    await commit(host, writes.slice(i, i + BATCH));
+    await commit(target, writes.slice(i, i + BATCH));
     console.log(`  committed ${Math.min(i + BATCH, writes.length)}/${writes.length}`);
   }
   console.log('Done.');
