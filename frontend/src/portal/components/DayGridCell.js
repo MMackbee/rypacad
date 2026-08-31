@@ -2,18 +2,22 @@ import React from 'react';
 import { color, font } from '../tokens';
 
 /**
- * Day grid cell — screens 07 (Commitment Contract) and 09 (Athlete Detail).
+ * Day grid cell — screens 07 (Commitment Contract), 09 (Athlete Detail), and
+ * the Book a Session month calendar.
  *
- * Five states, and the distinctions between them are load-bearing:
+ * The distinctions between states are load-bearing:
  *
  *   - `missed` is a contract day that went unlogged, and reads as a real miss
- *   - `closed` is a day the Academy was shut. It must never look like a miss —
- *     a closure is not counted against an athlete, and showing it as one is the
- *     fastest way to generate a support text
  *   - `weekend` is not a contract day at all, so it recedes furthest
+ *   - `available` marks a day with bookable sessions on the booking calendar
  *
- * Weekend and closure cells are deliberately recessive so the eye reads only
- * contract days.
+ * Weekend cells are deliberately recessive so the eye reads only contract
+ * days.
+ *
+ * Sprint 5 pin (TEAM.md): the `closed` state is removed entirely. Kids
+ * practice outside the academy, so a closure is not a reason a contract day
+ * cannot be logged — closures matter to session booking only, where a day
+ * with no bookable sessions now reads as plain `open`, never `closed`.
  */
 
 const STATES = {
@@ -35,11 +39,12 @@ const STATES = {
     color: color.textTertiary,
     fontWeight: 500,
   },
-  closed: {
-    background: 'repeating-linear-gradient(45deg,#141414 0 3px,#1f1f1f 3px 6px)',
-    border: `1px solid ${color.ruleFaint}`,
-    color: color.faintText,
-    fontWeight: 500,
+  /** Book a Session's month calendar: a day with bookable sessions. */
+  available: {
+    background: 'rgba(0,175,81,.12)',
+    border: `1px solid ${color.primary}`,
+    color: color.text,
+    fontWeight: 600,
   },
   weekend: {
     background: 'transparent',
@@ -73,12 +78,11 @@ export default function DayGridCell({ state = 'open', day, size, onClick }) {
   );
 }
 
-/** Legend, so "closed" reading as "missed" is impossible on first look. */
+/** Legend, so a missed day is never ambiguous with an ordinary open one. */
 export function DayGridLegend() {
   const items = [
     ['logged', 'Logged'],
     ['missed', 'Missed'],
-    ['closed', 'Academy closed'],
   ];
   return (
     <div style={{ display: 'flex', gap: 14, flexWrap: 'wrap' }}>
