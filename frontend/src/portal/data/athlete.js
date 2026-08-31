@@ -40,6 +40,12 @@ export const ONBOARDING = [
  * only — the Blueprint is explicit that athletes are measured against their own
  * future progress, not a model swing. `stats` below are raw measurements, never
  * a rating.
+ *
+ * `source` (Sprint 5, direction-only): where the module's data comes from —
+ * 'measured' (captured on facility equipment), 'self' (athlete-reported,
+ * needs an entry form), 'upload' (athlete/guardian-submitted, needs a
+ * dropzone stub), or 'parallax' (a named future integration, no API invented
+ * yet). Screens render badges/forms off this field.
  */
 export const DNA_MODULES = [
   {
@@ -48,6 +54,7 @@ export const DNA_MODULES = [
     descriptor: 'Multi-angle video at key positions',
     kind: 'media',
     caption: 'SWING CAPTURE — 4 angles · Nov 14',
+    source: 'measured',
   },
   {
     id: 'launch',
@@ -59,6 +66,7 @@ export const DNA_MODULES = [
       { key: 'Ball speed', value: '128 mph' },
       { key: 'Carry 7i', value: '142 yd' },
     ],
+    source: 'parallax',
   },
   {
     id: 'mobility',
@@ -70,6 +78,7 @@ export const DNA_MODULES = [
       { key: 'Shoulder', value: '86°' },
       { key: 'Balance', value: '22 sec' },
     ],
+    source: 'measured',
   },
   {
     id: 'shortgame',
@@ -81,6 +90,7 @@ export const DNA_MODULES = [
       { key: '50 yd', value: '14 ft' },
       { key: '70 yd', value: '19 ft' },
     ],
+    source: 'self',
   },
   {
     id: 'putting',
@@ -92,6 +102,7 @@ export const DNA_MODULES = [
       { key: '6 ft', value: '6 / 10' },
       { key: '10 ft', value: '72%' },
     ],
+    source: 'self',
   },
   {
     id: 'mental',
@@ -99,6 +110,7 @@ export const DNA_MODULES = [
     descriptor: 'Yannick’s questionnaire — pressure and routine',
     kind: 'media',
     caption: 'INTAKE RESPONSES — seeds the Debrief prompts',
+    source: 'upload',
   },
 ];
 
