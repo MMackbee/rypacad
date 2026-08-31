@@ -1,5 +1,10 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { onAuthStateChanged, signInWithPopup, signOut as firebaseSignOut } from 'firebase/auth';
+import {
+  onAuthStateChanged,
+  signInWithEmailAndPassword,
+  signInWithPopup,
+  signOut as firebaseSignOut,
+} from 'firebase/auth';
 import { auth, provider } from '../../firebase';
 import { ERR, LiveDataError, fetchCurrentUser } from './live';
 
@@ -166,6 +171,38 @@ export default function useAuthSession({ variant } = {}) {
     }
   }, []);
 
+  // Email/password sign-in. Unlike the popup there is no user-cancel branch,
+  // so `loading` flips on immediately and only an error turns it back off —
+  // success hands off to onAuthStateChanged like the popup does. Credential
+  // errors get one deliberately unspecific message (which of the two fields
+  // is wrong is not the caller's business, per the designed invalid state).
+  const signInWithEmail = useCallback(async (email, password) => {
+    setSession((s) => ({ ...s, loading: true, error: null }));
+    try {
+      await signInWithEmailAndPassword(auth, email, password);
+      // Success lands via onAuthStateChanged — nothing to set here.
+    } catch (err) {
+      const code = err && err.code;
+      const credential =
+        code === 'auth/invalid-credential' ||
+        code === 'auth/user-not-found' ||
+        code === 'auth/wrong-password' ||
+        code === 'auth/invalid-email';
+      const message = credential
+        ? 'Email or password is incorrect.'
+        : code === 'auth/too-many-requests'
+          ? 'Too many attempts — wait a few minutes, then try again.'
+          : code === 'auth/operation-not-allowed'
+            ? 'Email sign-in is not enabled yet — use Continue with Google.'
+            : 'Sign-in did not complete. Please try again.';
+      setSession((s) => ({
+        ...s,
+        loading: false,
+        error: new LiveDataError(credential ? ERR.INVALID : ERR.UNAVAILABLE, message, err),
+      }));
+    }
+  }, []);
+
   const signOut = useCallback(async () => {
     try {
       await firebaseSignOut(auth); // the auth listener emits the signed-out state
@@ -195,6 +232,7 @@ export default function useAuthSession({ variant } = {}) {
     loading: session.loading,
     error: session.error,
     signIn,
+    signInWithEmail,
     signOut,
   };
 }

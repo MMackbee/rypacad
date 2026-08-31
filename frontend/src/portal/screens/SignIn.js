@@ -17,10 +17,10 @@ import useAuthSession from '../hooks/useAuthSession';
  *   Loading, Invalid credentials, Account locked - exactly as the handoff drew
  *   them, driven by the hook's demo state machine. Never touches live auth.
  * - no variant (the /portal/signin route): runs on the real auth seam
- *   (useAuthSession(), TEAM.md "Sprint 4 pins"). Google is the only wired
- *   sign-in method, so both buttons run the popup, and the designed
- *   email/password form renders inert with honest copy instead of swallowing
- *   input into a path that does not exist yet.
+ *   (useAuthSession(), TEAM.md "Sprint 4 pins"). The designed email/password
+ *   form is live (signInWithEmail — accounts are created out-of-band, there
+ *   is no self-serve sign-up), and Continue with Google runs the popup for
+ *   Google-account families.
  *
  * First impression for a parent who just received the enrollment email.
  *
@@ -52,8 +52,16 @@ export const LANDING_BY_ROLE = {
  * ------------------------------------------------------------------------- */
 
 function LiveSignIn({ bare = false, onStartEnrollment, onSignedIn }) {
-  const { user, provisioned, loading, error, signIn } = useAuthSession();
+  const { user, provisioned, loading, error, signIn, signInWithEmail } = useAuthSession();
   const navigate = useNavigate();
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
+  const [showPassword, setShowPassword] = useState(false);
+
+  const canSubmit = email.trim() !== '' && password !== '' && !loading;
+  const submitEmail = () => {
+    if (canSubmit) signInWithEmail(email.trim(), password);
+  };
 
   // Navigation is an effect of the seam reporting a signed-in user - not a
   // click handler - so a session restored on mount routes the same way a
@@ -77,19 +85,32 @@ function LiveSignIn({ bare = false, onStartEnrollment, onSignedIn }) {
       <div style={{ padding: '0 24px 24px', display: 'flex', flexDirection: 'column', flex: 1 }}>
         <BrandHeader />
 
-        {/*
-          The handoff designed email/password as the primary form, but no email
-          auth exists yet. The fields render inert - dimmed boxes, nothing
-          focusable, honest copy - rather than as live inputs that swallow
-          what a parent types. When email auth lands, this block becomes the
-          demo layout's real form.
-        */}
-        <div style={{ flex: 'none', display: 'flex', flexDirection: 'column', gap: 14 }}>
-          <InertField label="Email" />
-          <InertField label="Password" />
-          <Body size={12} tone={color.textTertiary}>
-            Email sign-in is coming soon — for now, both buttons use your Google account.
-          </Body>
+        {/* The designed form, live. Enter submits from either field; accounts
+            are provisioned out-of-band, so there is no sign-up path here. */}
+        <div
+          style={{ flex: 'none', display: 'flex', flexDirection: 'column', gap: 14 }}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter') submitEmail();
+          }}
+        >
+          <Field label="Email" type="email" value={email} onChange={setEmail} dimmed={loading} />
+          <Field
+            label="Password"
+            type={showPassword ? 'text' : 'password'}
+            value={password}
+            onChange={setPassword}
+            dimmed={loading}
+            trailing={
+              password ? (
+                <span
+                  onClick={() => setShowPassword((v) => !v)}
+                  style={{ font: `500 13px ${font.body}`, color: color.primary, cursor: 'pointer' }}
+                >
+                  {showPassword ? 'Hide' : 'Show'}
+                </span>
+              ) : null
+            }
+          />
         </div>
 
         {error ? (
@@ -111,10 +132,10 @@ function LiveSignIn({ bare = false, onStartEnrollment, onSignedIn }) {
             gap: 13,
           }}
         >
-          {/* Both actions run the popup - Google is the only wired method,
-              and the inert form's copy says so. The arrow keeps the click
-              event out of the seam's signIn(). */}
-          <Button loading={loading} onClick={() => signIn()}>
+          {/* Sign in submits the email form and stays disabled until both
+              fields have something - a disabled button explains itself better
+              than an error for an empty form. Google runs the popup. */}
+          <Button loading={loading} disabled={!canSubmit} onClick={submitEmail}>
             {loading ? 'Signing in' : 'Sign in'}
           </Button>
 
@@ -135,39 +156,6 @@ function LiveSignIn({ bare = false, onStartEnrollment, onSignedIn }) {
         <EnrollmentFooter onStartEnrollment={onStartEnrollment} />
       </div>
     </PhoneFrame>
-  );
-}
-
-/**
- * The inert email/password treatment: the design's dimmed-field idiom (see the
- * demo's locked state) with no input element at all - an empty box cannot
- * swallow a password. aria-hidden keeps it out of the accessibility tree; the
- * honest copy below the pair is the explanation.
- */
-function InertField({ label }) {
-  return (
-    <div>
-      <div
-        style={{
-          font: `500 11px ${font.body}`,
-          letterSpacing: '.1em',
-          textTransform: 'uppercase',
-          color: color.textTertiary,
-          marginBottom: 7,
-        }}
-      >
-        {label}
-      </div>
-      <div
-        aria-hidden="true"
-        style={{
-          height: 52,
-          background: color.dimmed,
-          border: `1px solid ${color.rule}`,
-          borderRadius: radius.input,
-        }}
-      />
-    </div>
   );
 }
 
