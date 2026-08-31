@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Navigate, Route, Routes, useNavigate } from 'react-router-dom';
+import { Navigate, Route, Routes, useNavigate, useParams } from 'react-router-dom';
 
 import useAuthSession from './hooks/useAuthSession';
 import { isLive } from './hooks/live';
@@ -77,6 +77,39 @@ export function RequireRole({ roles, children }) {
 }
 
 /**
+ * The sign-out affordance every signed-in role screen gets (Sprint 5 pin),
+ * wired once here rather than copy-pasted per route. Live mode signs out via
+ * useAuthSession() and lands on /portal/signin; when the portal is not live
+ * this returns undefined, so the demo/harness screens hide the affordance
+ * instead of wiring a no-op.
+ *
+ * Same rules-of-hooks discipline as RequireRole above: isLive() is a
+ * build-time constant, so useAuthSession's demo/real mode never flips across
+ * renders even though which branch of `live` we act on does.
+ */
+function useSignOutHandler() {
+  const live = isLive();
+  const { signOut } = useAuthSession(live ? undefined : { variant: 'idle' });
+  const navigate = useNavigate();
+  if (!live) return undefined;
+  return async () => {
+    await signOut();
+    navigate('/portal/signin');
+  };
+}
+
+/**
+ * Athlete detail is routed by id (Sprint 5): PortalRoutes reads the param
+ * here and passes `athleteId` in as a prop - screens never read route
+ * params directly, per the pattern StaffScreen below already follows for
+ * local view state.
+ */
+function AthleteDetailRoute({ onBack }) {
+  const { athleteId } = useParams();
+  return <AthleteDetail bare athleteId={athleteId} onBack={onBack} />;
+}
+
+/**
  * Staff & Roles flips between its list and add-member views in place - the add
  * view is a step of the same owner task, not a separate destination, so it is
  * local state rather than a route. Its back affordance previously pointed at
@@ -98,6 +131,8 @@ function StaffScreen() {
 export default function PortalRoutes() {
   const navigate = useNavigate();
   const go = (path) => () => navigate(path);
+  const onSignOut = useSignOutHandler();
+  const openAthlete = (athleteId) => navigate(`/portal/athlete/${athleteId}`);
 
   return (
     <Routes>
@@ -129,7 +164,12 @@ export default function PortalRoutes() {
         path="home"
         element={
           <RequireRole roles={['athlete']}>
-            <AthleteDashboard bare onLog={go('/portal/contract')} onBook={go('/portal/book')} />
+            <AthleteDashboard
+              bare
+              onLog={go('/portal/contract')}
+              onBook={go('/portal/book')}
+              onSignOut={onSignOut}
+            />
           </RequireRole>
         }
       />
@@ -179,18 +219,24 @@ export default function PortalRoutes() {
         path="family"
         element={
           <RequireRole roles={['parent']}>
-            <ParentDashboard bare onOpenAthlete={() => navigate('/portal/athlete')} />
+            <ParentDashboard bare onOpenAthlete={openAthlete} onSignOut={onSignOut} />
           </RequireRole>
         }
       />
+      {/* Athlete detail is routed by id (Sprint 5): parents reach their own
+          household's athletes; staff (ops/owner/mental) reach any athlete —
+          admin names link to profiles from the same route. */}
       <Route
-        path="athlete"
+        path="athlete/:athleteId"
         element={
-          <RequireRole roles={['parent']}>
-            <AthleteDetail bare onBack={go('/portal/family')} />
+          <RequireRole roles={['parent', 'ops', 'owner', 'mental']}>
+            <AthleteDetailRoute onBack={go('/portal/family')} />
           </RequireRole>
         }
       />
+      {/* The old bare /portal/athlete has no id to resolve — redirect rather
+          than render a screen that can no longer pick an athlete for itself. */}
+      <Route path="athlete" element={<Navigate to="/portal/family" replace />} />
       <Route
         path="billing"
         element={
@@ -203,7 +249,7 @@ export default function PortalRoutes() {
         path="settings"
         element={
           <RequireRole roles={['parent']}>
-            <NotificationPreferences bare />
+            <NotificationPreferences bare onSignOut={onSignOut} />
           </RequireRole>
         }
       />
@@ -213,7 +259,7 @@ export default function PortalRoutes() {
         path="coach"
         element={
           <RequireRole roles={['coach']}>
-            <CoachDashboard bare onOpenRoster={go('/portal/roster')} />
+            <CoachDashboard bare onOpenRoster={go('/portal/roster')} onSignOut={onSignOut} />
           </RequireRole>
         }
       />
@@ -240,7 +286,7 @@ export default function PortalRoutes() {
         path="admin"
         element={
           <RequireRole roles={['ops', 'owner', 'mental']}>
-            <AdminDashboard bare />
+            <AdminDashboard bare onOpenAthlete={openAthlete} onSignOut={onSignOut} />
           </RequireRole>
         }
       />

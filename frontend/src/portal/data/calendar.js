@@ -50,6 +50,26 @@ export function nextMonthFirstShort(iso) {
   return format(startOfMonth(addMonths(parseISO(iso), 1)), 'MMM d');
 }
 
+/** 'yyyy-MM' or 'yyyy-MM-dd' -> a full 'yyyy-MM-dd' within that month. */
+function normalizeMonthInput(monthISO) {
+  return monthISO && monthISO.length === 7 ? `${monthISO}-01` : monthISO;
+}
+
+/**
+ * First/last day ('yyyy-MM-dd') of the month containing `monthISO`, plus its
+ * label — the window a month-at-a-time surface (the booking calendar) queries
+ * and captions against. Accepts either 'yyyy-MM' or a full 'yyyy-MM-dd'.
+ */
+export function monthBounds(monthISO) {
+  const full = normalizeMonthInput(monthISO);
+  const anchor = parseISO(full);
+  return {
+    start: format(startOfMonth(anchor), 'yyyy-MM-dd'),
+    end: format(endOfMonth(anchor), 'yyyy-MM-dd'),
+    label: monthLabel(full),
+  };
+}
+
 /**
  * The contract month as domain facts: a date→state map for the calendar to
  * paint, plus every number the contract screens show — computed from the same
@@ -57,18 +77,22 @@ export function nextMonthFirstShort(iso) {
  * disagree.
  *
  * States: 'logged' | 'missed' | 'open' (today, still loggable) | 'future' |
- * 'closed' (academy closure) | 'weekend' (not a contract day).
+ * 'weekend' (not a contract day).
+ *
+ * Sprint 5 ruling (docs/portal/TEAM.md): closures are schedule facts, not
+ * practice facts. Contract logging is legal on ANY non-weekend date — kids
+ * practice outside the academy — so this builder no longer takes a closures
+ * list or produces a 'closed' state. Closures still matter to session
+ * booking, which reads them from season.js instead.
  *
  * @param {object} opts
  * @param {string} opts.today            'yyyy-MM-dd'.
- * @param {string[]} [opts.closures]     Season closure dates.
  * @param {string[]} [opts.missedDates]  Dates logged as missed.
  * @param {boolean} [opts.completeAll]   Demo state: every contract day logged.
  * @param {number} [opts.minutesPerDay]  Contract tier, for the minutes stat.
  */
 export function buildContractMonth({
   today,
-  closures = [],
   missedDates = [],
   completeAll = false,
   minutesPerDay = 45,
@@ -76,20 +100,15 @@ export function buildContractMonth({
   const anchor = parseISO(today);
   const days = eachDayOfInterval({ start: startOfMonth(anchor), end: endOfMonth(anchor) });
   const missed = new Set(missedDates);
-  const closed = new Set(closures);
 
   const dayStates = {};
   const tally = { contractDays: 0, dueSoFar: 0, logged: 0, missed: 0, daysLeft: 0 };
-  const monthClosures = [];
 
   for (const d of days) {
     const iso = format(d, 'yyyy-MM-dd');
     let state;
     if (isSaturday(d) || isSunday(d)) state = 'weekend';
-    else if (closed.has(iso)) {
-      state = 'closed';
-      monthClosures.push(iso);
-    } else {
+    else {
       tally.contractDays++;
       if (completeAll) {
         state = 'logged';
@@ -114,7 +133,7 @@ export function buildContractMonth({
   let streak = 0;
   for (let i = days.length - 1; i >= 0; i--) {
     const state = dayStates[format(days[i], 'yyyy-MM-dd')];
-    if (state === 'weekend' || state === 'closed' || state === 'future' || state === 'open') continue;
+    if (state === 'weekend' || state === 'future' || state === 'open') continue;
     if (state === 'logged') streak++;
     else break;
   }
@@ -127,7 +146,6 @@ export function buildContractMonth({
     ...tally,
     streak,
     minutes: tally.logged * minutesPerDay,
-    monthClosures,
   };
 }
 
@@ -135,8 +153,8 @@ export function buildContractMonth({
  * Day numbers of the first `count` due contract days, for seeding demo missed
  * dates in a real month without hardcoding which month it is.
  */
-export function pickDueDates({ today, closures = [], count, spread = 1 }) {
-  const base = buildContractMonth({ today, closures });
+export function pickDueDates({ today, count, spread = 1 }) {
+  const base = buildContractMonth({ today });
   const due = Object.entries(base.dayStates)
     .filter(([, s]) => s === 'logged')
     .map(([iso]) => iso);
