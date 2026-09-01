@@ -581,7 +581,11 @@ function groupSessionsByDate(sessions, today) {
     // The pinned month-session shape keeps the raw numbers alongside the
     // display fields: the booking sheet computes spots-left from
     // capacity/booked, which displaySession (a list formatter) drops.
-    const row = { ...displaySession(s, today), capacity: s.capacity, booked: s.booked };
+    // `time` stays the doc's FULL string ("9:00 AM") — displaySession
+    // pre-splits it into time/meridiem, and the booking sheet splits again,
+    // which left meridiem undefined and let SessionCard's default label
+    // every session PM (invisible until Saturday-morning blocks existed).
+    const row = { ...displaySession(s, today), time: s.time, capacity: s.capacity, booked: s.booked };
     if (list) list.push(row);
     else byDate.set(s.date, [row]);
   }

@@ -43,7 +43,9 @@ const VARIANTS = {
  */
 export default function SessionCard({
   time,
-  meridiem = 'PM',
+  // No default meridiem: rendering nothing for a missing value is an honest
+  // visible gap; defaulting to 'PM' relabeled every morning session.
+  meridiem = '',
   type = 'training',
   name,
   meta,
