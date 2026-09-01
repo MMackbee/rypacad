@@ -8,8 +8,8 @@ import SessionCard from '../components/SessionCard';
 import SkeletonCard, { SkeletonBar } from '../components/Skeleton';
 import { CapacityPill } from '../components/StatusBadge';
 import AllowancePools, { SpendNote } from '../components/AllowancePools';
-import { Banner, Body, Card, ErrorNotice, ScreenTitle, Tick } from '../components/Primitives';
-import { useBooking, useMonthSessions } from '../hooks';
+import { Banner, Body, Card, ErrorNotice, ScreenTitle, SectionLabel, Tick } from '../components/Primitives';
+import { useBooking, useHouseholdAthletes, useMonthSessions } from '../hooks';
 // Pure calendar/season helpers, not response data — same pattern as poolFor
 // below: the data itself travels through the hook seam, but a formatting
 // helper that is already imported elsewhere in this file stays importable.
@@ -49,7 +49,18 @@ function shiftMonth(monthISO, delta) {
  * bookable, and the reverse — so "limit reached" is never a property of the
  * screen, only of one pool.
  *
+ * Sprint 6 pin (TEAM.md, QA #2): a parent booking for a linked athlete gets a
+ * child selector above the calendar - which household athlete the booking is
+ * for - sourced from the pinned `useHouseholdAthletes()` hook. The selection
+ * travels into the reservation call as `book(slot, { athleteId })`; the
+ * athlete flow is unaffected (no selector, no second argument). An athlete
+ * account never sees the selector.
+ *
  * @param {'open'|'full'|'limitTraining'|'limitTournament'|'confirmed'} variant
+ * @param {'athlete'|'parent'} [role]
+ *   Who is booking. Athlete (default) behaves exactly as before - no
+ *   selector, own allowance. Parent renders the child selector and books
+ *   against the selected child's allowance and identity.
  * @param {(slot) => Promise} [onBook]
  *   The live reservation call. While it is pending the tapped session shows
  *   the handoff's button-level pattern (spinner + "Reserving…"); a rejection
@@ -69,6 +80,7 @@ function shiftMonth(monthISO, delta) {
  */
 export default function BookSession({
   variant = 'open',
+  role = 'athlete',
   bare = false,
   practice = false,
   onBack,
@@ -81,6 +93,23 @@ export default function BookSession({
   const { data, loading, error, book } = useBooking({ variant, practice });
   const [monthISO, setMonthISO] = useState(() => `${todayISO().slice(0, 7)}-01`);
   const monthState = useMonthSessions(monthISO, { practice });
+
+  // Household athletes for the parent flow (Sprint 6 pin, QA #2) - always
+  // called (rules of hooks); its result is only read when role === 'parent'.
+  const household = useHouseholdAthletes();
+  const isParent = role === 'parent';
+  const [selectedAthleteId, setSelectedAthleteId] = useState(null);
+  const householdAthletes = household.data ?? [];
+  // Default to the first child once the household loads, without overriding
+  // a parent's own switch.
+  useEffect(() => {
+    if (!isParent || selectedAthleteId || !householdAthletes.length) return;
+    setSelectedAthleteId(householdAthletes[0].id);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isParent, householdAthletes.length]);
+  const selectedAthlete = isParent
+    ? householdAthletes.find((a) => a.id === selectedAthleteId) ?? null
+    : null;
 
   // Before the season opens, today's month has nothing to book — jump the
   // calendar to the first bookable date's month so the athlete's first visit
@@ -135,10 +164,13 @@ export default function BookSession({
   const reserve = onBook ?? book;
   const confirmBooking = (session) => {
     if (reserving) return;
+    // A parent with nothing selected yet has no athlete to book against —
+    // stay put rather than send an ambiguous reservation.
+    if (isParent && !selectedAthleteId) return;
     setFailure(null);
     setReserving(session.id);
     Promise.resolve()
-      .then(() => reserve(session))
+      .then(() => reserve(session, isParent ? { athleteId: selectedAthleteId } : undefined))
       .then(() => {
         if (!live.current) return;
         setReserving(null);
@@ -165,7 +197,11 @@ export default function BookSession({
     });
   };
 
-  const allowance = data?.allowance;
+  // A parent's balance is the SELECTED child's, not the signed-in account's
+  // own (a parent has no allowance of their own - the athlete does). The
+  // schedule/slots themselves are athlete-agnostic (the same open blocks),
+  // so only the allowance source changes for the parent flow.
+  const allowance = isParent ? selectedAthlete?.allowance : data?.allowance;
   const days = monthState.data?.days ?? [];
   const dayStates = {};
   const sessionsByDate = {};
@@ -204,7 +240,7 @@ export default function BookSession({
           <ScreenTitle>Book a Session</ScreenTitle>
         </div>
       }
-      footer={<BottomTabBar role="athlete" active="schedule" />}
+      footer={<BottomTabBar role={role} active={isParent ? undefined : 'schedule'} />}
     >
       <div style={{ padding: '0 0 24px', display: 'flex', flexDirection: 'column', gap: 18 }}>
         {loading ? (
@@ -218,6 +254,17 @@ export default function BookSession({
           </div>
         ) : (
           <>
+            {isParent ? (
+              <div style={{ padding: '0 22px' }}>
+                <AthleteSelector
+                  athletes={householdAthletes}
+                  loading={household.loading}
+                  selectedId={selectedAthleteId}
+                  onSelect={setSelectedAthleteId}
+                />
+              </div>
+            ) : null}
+
             <div style={{ padding: '0 22px', display: 'flex', flexDirection: 'column', gap: 12 }}>
               <AllowanceBanner allowance={allowance} />
               {data?.seasonNote ? (
@@ -279,6 +326,9 @@ export default function BookSession({
                   sessions={selectedSessions}
                   allowance={allowance}
                   reserving={reserving}
+                  // A parent with nothing selected has no athlete to spend an
+                  // allowance for yet - sessions stay visible but inert.
+                  disabled={isParent && !selectedAthleteId}
                   onSelect={confirmBooking}
                 />
               </div>
@@ -337,7 +387,7 @@ function NavArrow({ direction, onClick }) {
  * pool it spends. Tapping a bookable one confirms it; a full or pool-spent
  * one stays inert rather than failing at a later submit.
  */
-function DaySessionList({ iso, sessions, allowance, reserving, onSelect }) {
+function DaySessionList({ iso, sessions, allowance, reserving, disabled, onSelect }) {
   return (
     <>
       <div style={{ font: `600 13px ${font.body}`, color: color.text, padding: '2px 0 2px' }}>
@@ -367,7 +417,7 @@ function DaySessionList({ iso, sessions, allowance, reserving, onSelect }) {
               variant={isFull || poolSpent ? 'full' : 'default'}
               gutter={54}
               ruleHeight={36}
-              onClick={isFull || poolSpent || reserving ? undefined : () => onSelect(session)}
+              onClick={isFull || poolSpent || reserving || disabled ? undefined : () => onSelect(session)}
               spendNote={<SpendNote pool={pool} allowance={allowance} />}
               action={
                 pending ? (
@@ -391,6 +441,57 @@ function DaySessionList({ iso, sessions, allowance, reserving, onSelect }) {
         })
       )}
     </>
+  );
+}
+
+/**
+ * Sprint 6 pin (TEAM.md, QA #2) — which household athlete this booking is
+ * for, above the calendar so the choice is made before the athlete-agnostic
+ * calendar and allowance render for someone. Real names only, from
+ * useHouseholdAthletes(); no household means nothing to select, so the card
+ * disappears rather than showing an empty chooser.
+ */
+function AthleteSelector({ athletes, loading, selectedId, onSelect }) {
+  if (loading) {
+    return (
+      <Card large>
+        <SkeletonBar tone="raised" width={110} height={10} />
+        <SkeletonBar tone="raised" height={44} r={radius.input} style={{ marginTop: 12 }} />
+      </Card>
+    );
+  }
+  if (!athletes.length) return null;
+
+  return (
+    <Card large>
+      <SectionLabel style={{ marginBottom: 12 }}>Booking for</SectionLabel>
+      <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+        {athletes.map((a) => {
+          const on = a.id === selectedId;
+          return (
+            <button
+              key={a.id}
+              type="button"
+              onClick={() => onSelect(a.id)}
+              style={{
+                height: 44,
+                padding: '0 16px',
+                display: 'inline-flex',
+                alignItems: 'center',
+                borderRadius: radius.input,
+                border: `1px solid ${on ? color.primary : color.border}`,
+                background: on ? color.primary : 'transparent',
+                font: `600 13px ${font.body}`,
+                color: on ? '#000' : color.text,
+                cursor: 'pointer',
+              }}
+            >
+              {a.name}
+            </button>
+          );
+        })}
+      </div>
+    </Card>
   );
 }
 
@@ -523,9 +624,17 @@ function Confirmed({ bare, confirmation, onBack }) {
 
         <div style={{ textAlign: 'center' }}>
           <ScreenTitle size={26}>Slot reserved</ScreenTitle>
-          <Body size={13} style={{ marginTop: 8 }}>
-            Confirmation sent to {c.email}
-          </Body>
+          {/*
+            QA #13: never a dangling "Confirmation sent to " with nothing
+            after it. Show the line only when the data actually provides a
+            guardian/account email; drop it entirely otherwise rather than
+            rendering half a sentence.
+          */}
+          {c.email ? (
+            <Body size={13} style={{ marginTop: 8 }}>
+              Confirmation sent to {c.email}
+            </Body>
+          ) : null}
         </div>
 
         <Card tone="green" large style={{ width: '100%', marginTop: 6 }}>
