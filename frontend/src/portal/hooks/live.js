@@ -22,11 +22,14 @@ import {
   limit,
   orderBy,
   query,
+  runTransaction,
   serverTimestamp,
   setDoc,
+  updateDoc,
   where,
 } from 'firebase/firestore';
 import { auth, db } from '../../firebase';
+import { bump } from './invalidate';
 
 /** Stable error codes the hooks (and screens, via `error`) can branch on. */
 export const ERR = {
@@ -119,6 +122,25 @@ export async function fetchAthlete(athleteId) {
     return { id: snap.id, ...snap.data() };
   } catch (err) {
     throw wrap(err, 'fetchAthlete');
+  }
+}
+
+/**
+ * One households/{id} doc — name + guardian contact, never card data (Sprint 6,
+ * QA #3: the parent home screen's household name and per-child cards).
+ */
+export async function fetchHousehold(householdId) {
+  if (!householdId) {
+    throw new LiveDataError(ERR.INVALID, 'fetchHousehold: householdId is required.');
+  }
+  try {
+    const snap = await getDoc(doc(db, 'households', householdId));
+    if (!snap.exists()) {
+      throw new LiveDataError(ERR.NOT_FOUND, `No households/${householdId} doc.`);
+    }
+    return { id: snap.id, ...snap.data() };
+  } catch (err) {
+    throw wrap(err, 'fetchHousehold');
   }
 }
 
@@ -281,10 +303,20 @@ export async function fetchBookings(athleteId) {
 }
 
 /**
- * Create one booking in the contract shape. The server stamps createdAt;
- * createdBy is the signed-in uid, which firestore.rules re-checks along with
- * the household linkage, the session's real date/type, and the pool the
- * booking spends — a tournament block can never spend the training pool.
+ * Create one booking in the contract shape, inside a Firestore transaction
+ * (Sprint 6, QA #5) — reads the session, requires booked < capacity, requires
+ * no existing booking at this id, then writes the booking AND increments
+ * session.booked by 1 in the same atomic operation, so two families racing
+ * for the last spot can never both win it (firestore.rules re-checks the
+ * booked diff is exactly +1 within [0, capacity] independently — this
+ * transaction is the client-side half of that guarantee, not a substitute
+ * for it). The server stamps createdAt; createdBy is the signed-in uid.
+ *
+ * QA #8: every rejection here is a LiveDataError with a plain-language
+ * message — full session and already-booked are the two friendly cases the
+ * client can detect itself; anything the rules deny for another reason still
+ * reaches the caller wrapped (never a raw PERMISSION_DENIED), via the catch
+ * below.
  */
 export async function createBooking({ athleteId, sessionId, date, type, pool, householdId }) {
   if (!athleteId || !sessionId || !date || !type || !pool || !householdId) {
@@ -300,6 +332,13 @@ export async function createBooking({ athleteId, sessionId, date, type, pool, ho
     );
   }
   const user = requireUser();
+  // Contract v1.1: the booking id IS `{athleteId}_{sessionId}` — the
+  // keyspace makes a second booking of the same session an overwrite
+  // attempt, which the create-only rules reject. addDoc's random ids were
+  // rejected by the deployed rules' id-format check.
+  const id = `${athleteId}_${sessionId}`;
+  const bookingRef = doc(db, 'bookings', id);
+  const sessionRef = doc(db, 'sessions', sessionId);
   const booking = {
     athleteId,
     sessionId,
@@ -312,12 +351,44 @@ export async function createBooking({ athleteId, sessionId, date, type, pool, ho
     createdAt: serverTimestamp(),
   };
   try {
-    // Contract v1.1: the booking id IS `{athleteId}_{sessionId}` — the
-    // keyspace makes a second booking of the same session an overwrite
-    // attempt, which the create-only rules reject. addDoc's random ids were
-    // rejected by the deployed rules' id-format check.
-    const id = `${athleteId}_${sessionId}`;
-    await setDoc(doc(db, 'bookings', id), booking);
+    await runTransaction(db, async (tx) => {
+      // All reads before any write — Firestore transaction requirement.
+      const [sessionSnap, bookingSnap] = await Promise.all([tx.get(sessionRef), tx.get(bookingRef)]);
+
+      if (!sessionSnap.exists()) {
+        throw new LiveDataError(ERR.NOT_FOUND, 'That session no longer exists.');
+      }
+      if (bookingSnap.exists()) {
+        // Re-booking after a cancellation (flipping status on the same doc)
+        // is a flow that has not been built yet (open question, routing
+        // report) — any existing doc at this id, cancelled or not, blocks a
+        // new create today, so the message stays generic on purpose.
+        throw new LiveDataError(ERR.INVALID, 'This athlete already has this session booked.');
+      }
+
+      const s = sessionSnap.data();
+      if (s.status === 'cancelled') {
+        throw new LiveDataError(ERR.INVALID, 'This session was cancelled by the academy.');
+      }
+      if (s.date !== date || s.type !== type) {
+        throw new LiveDataError(
+          ERR.INVALID,
+          'This session changed since you loaded it — refresh and try again.'
+        );
+      }
+      const capacity = s.capacity ?? 0;
+      const booked = s.booked ?? 0;
+      if (booked >= capacity) {
+        throw new LiveDataError(ERR.INVALID, 'This session is full.');
+      }
+
+      tx.set(bookingRef, booking);
+      tx.update(sessionRef, { booked: booked + 1 });
+    });
+    // Post-write invalidation seam (Sprint 6 pin): every hook reading
+    // bookings or sessions re-runs, not just this one.
+    bump('bookings');
+    bump('sessions');
     return { id, ...booking, createdAt: null };
   } catch (err) {
     throw wrap(err, 'createBooking');
@@ -373,8 +444,77 @@ export async function createContractLog({ athleteId, date, minutes, contractMinu
   try {
     const id = `${athleteId}_${date}`;
     await setDoc(doc(db, 'contractLogs', id), log);
+    // Post-write invalidation seam (Sprint 6 pin): usePracticeLog AND
+    // useContract AND useAthleteDashboard all re-run, not just whichever
+    // hook made the write.
+    bump('contractLogs');
     return { id, ...log, createdAt: null };
   } catch (err) {
     throw wrap(err, 'createContractLog');
+  }
+}
+
+/**
+ * Every non-cancelled booking for one session — the coach's live attendance
+ * roster (Sprint 6, QA #7). Read authorization is the EXISTING bookings-read
+ * rule's coach clause (athleteData(resource.data.athleteId).coachId ==
+ * caller) — Firestore evaluates that per candidate document for list/query
+ * reads too (get()-indirection keyed off a field the query does NOT filter
+ * on is the well-established "join" pattern for row-level list security), so
+ * no new rules grant was needed; verified against the emulator (routing
+ * report). A side effect worth knowing: on a block shared across coaches,
+ * each coach's roster silently shows only their own assigned athletes,
+ * consistent with "coach → assigned athletes only, by assignment not role."
+ *
+ * Query: sessionId == AND status in [...] rides the existing
+ * (sessionId ASC, status ASC) composite (firestore.indexes.json) — no new
+ * index needed.
+ */
+export async function fetchBookingsBySession(sessionId) {
+  if (!sessionId) {
+    throw new LiveDataError(ERR.INVALID, 'fetchBookingsBySession: sessionId is required.');
+  }
+  try {
+    const snap = await getDocs(
+      query(
+        collection(db, 'bookings'),
+        where('sessionId', '==', sessionId),
+        where('status', 'in', ['confirmed', 'attended', 'noshow'])
+      )
+    );
+    return snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+  } catch (err) {
+    throw wrap(err, 'fetchBookingsBySession');
+  }
+}
+
+/**
+ * Mark attendance (Sprint 6, QA #6/#7): bookings.status is attendance — coach
+ * IN -> 'attended', OUT -> 'noshow', un-marking -> back to 'confirmed'.
+ * firestore.rules restricts this to the athlete's assigned coach and to the
+ * status field only, transitioning only among confirmed|attended|noshow.
+ */
+export async function updateBookingStatus({ bookingId, status }) {
+  if (!bookingId || !status) {
+    throw new LiveDataError(
+      ERR.INVALID,
+      'updateBookingStatus: bookingId and status are both required.'
+    );
+  }
+  if (!['confirmed', 'attended', 'noshow'].includes(status)) {
+    throw new LiveDataError(
+      ERR.INVALID,
+      `updateBookingStatus: status must be confirmed, attended or noshow - got "${status}".`
+    );
+  }
+  requireUser();
+  try {
+    await updateDoc(doc(db, 'bookings', bookingId), { status });
+    // Post-write invalidation seam (Sprint 6 pin): every hook reading
+    // bookings re-runs, including other coaches' or the family's own view.
+    bump('bookings');
+    return { id: bookingId, status };
+  } catch (err) {
+    throw wrap(err, 'updateBookingStatus');
   }
 }

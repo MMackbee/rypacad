@@ -95,10 +95,32 @@ service cloud.firestore {
 
     // ---- sessions ------------------------------------------------------
     // Matrix: the schedule is not per-family data — "sessions readable by
-    // any authenticated user". Writes are the seed script's job (Admin SDK):
-    // capacity/booked counts must never be client-mutable.
+    // any authenticated user". Writes are the seed/sync scripts' job (Admin
+    // SDK) EXCEPT the one client mutation below.
     match /sessions/{sessionId} {
       allow read: if signedIn();
+
+      // Sprint 6 pin (QA #5): booking capacity is enforced client-
+      // transactionally — createBooking reads the session, requires
+      // booked < capacity, writes the booking, and increments booked by 1,
+      // all inside one Firestore transaction. This rule is the server-side
+      // half of that guarantee: `booked` is the ONLY field a client may ever
+      // touch on a session, it may only move by exactly +1 (a new booking)
+      // or -1 (a future cancellation flow, not built yet — the range is
+      // pre-approved so that flow needs no second rules change), and it must
+      // stay within [0, capacity]. Every other field (capacity, coachId,
+      // date, label, status, gcalEventId, ...) stays Admin-SDK-only.
+      function bookedDiffOk() {
+        let before = resource.data;
+        let after = request.resource.data;
+        return after.diff(before).affectedKeys().hasOnly(['booked'])
+          && after.booked is int
+          && (after.booked == before.booked + 1 || after.booked == before.booked - 1)
+          && after.booked >= 0
+          && after.booked <= before.capacity;
+      }
+
+      allow update: if signedIn() && bookedDiffOk();
     }
 
     // ---- bookings ------------------------------------------------------
@@ -164,17 +186,61 @@ service cloud.firestore {
       // Readable by that household (athlete's own user + household parent),
       // the assigned coach, and staff (mental / ops / owner). Coach access is
       // by assignment on the athlete doc, never by role alone.
+      //
+      // Sprint 6 pin (QA #7 — "narrowest read grant, flagged prominently"):
+      // useSessionAttendance's roster query is `bookings where sessionId ==
+      // AND status in [...]` — a LIST query. The athleteId-based coach clause
+      // above only ever worked for single-document reads; verified against
+      // the emulator that a get()-indirection rule keyed off a field the
+      // query does NOT filter on (athleteId here) makes the ENTIRE list
+      // request fail with an evaluation error, not a silently-filtered
+      // subset — this is NOT "coach sees nothing," it is "coach sees
+      // PERMISSION_DENIED," which is why this second, narrower clause exists.
+      // It is provable because sessionId IS the query's own equality filter:
+      // a coach may list bookings for a session THEY are assigned to run
+      // (sessions.coachId), regardless of which coach each individual
+      // athlete in that block is assigned to elsewhere. This is intentionally
+      // a different, wider boundary than "assigned athlete only" for this one
+      // read path — flagged here and in the routing report for PM review;
+      // the attendance WRITE below stays scoped to athlete.coachId exactly as
+      // pinned, so a coach can see a shared block's full roster but can only
+      // mark the athletes actually assigned to them.
+      function sessionCoachMatches() {
+        return get(/databases/$(database)/documents/sessions/$(resource.data.sessionId)).data.coachId
+          == request.auth.uid;
+      }
+
       allow read: if signedIn() && (
         (me().role == 'athlete' && me().athleteId == resource.data.athleteId)
         || (me().role == 'parent' && me().householdId == resource.data.householdId)
         || (me().role == 'coach'
             && athleteData(resource.data.athleteId).coachId == request.auth.uid)
+        || (me().role == 'coach' && sessionCoachMatches())
         || me().role in ['mental', 'ops', 'owner']
       );
 
-      // No update/delete in v1: status transitions (cancelled / attended /
-      // noshow) belong to flows not yet built (cancellation policy, roster
-      // close-out) and land with their own rules. Open question in the report.
+      // Sprint 6 pin (QA #6/#7): attendance IS bookings.status — coach IN ->
+      // 'attended', OUT -> 'noshow', un-marking -> back to 'confirmed'. The
+      // assigned coach (athlete.coachId == caller, never role alone) may
+      // flip status among confirmed|attended|noshow and touch NO other
+      // field. Cancellation (status: 'cancelled') is still a flow that has
+      // not been built — before/after both exclude it on purpose, so this
+      // rule cannot be used to cancel or un-cancel a booking. Open question
+      // (cancellation policy, roster close-out) carried over in the report.
+      function attendanceUpdateOk() {
+        let before = resource.data;
+        let after = request.resource.data;
+        return after.diff(before).affectedKeys().hasOnly(['status'])
+          && before.status in ['confirmed', 'attended', 'noshow']
+          && after.status in ['confirmed', 'attended', 'noshow'];
+      }
+
+      allow update: if signedIn()
+        && me().role == 'coach'
+        && athleteData(resource.data.athleteId).coachId == request.auth.uid
+        && attendanceUpdateOk();
+
+      // No delete in v1.
     }
 
     // ---- contractLogs --------------------------------------------------

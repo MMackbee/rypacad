@@ -16,6 +16,7 @@
 
 import {
   addMonths,
+  differenceInYears,
   eachDayOfInterval,
   endOfMonth,
   format,
@@ -147,6 +148,83 @@ export function buildContractMonth({
     streak,
     minutes: tally.logged * minutesPerDay,
   };
+}
+
+/**
+ * Live counterpart to buildContractMonth (Sprint 6, QA #4): the same
+ * date -> state map and stats, but 'logged'/'missed' come from real
+ * contractLogs minutes instead of a demo missedDates set — a due day (before
+ * today) is 'logged' when it has a logged amount >= contractMinutes,
+ * 'missed' otherwise (contract v1.3: fulfilled = minutes >= contractMinutes,
+ * surplus minutes never bank an extra day). Shape matches buildContractMonth
+ * exactly, so useContract's live branch and the seed branch above produce
+ * the same payload for ContractCalendar/the stats row.
+ *
+ * @param {object} opts
+ * @param {string} opts.today
+ * @param {Map<string, number>} opts.minutesByDate  date -> minutes logged.
+ * @param {number} opts.contractMinutes  the athlete's tier; callers must not
+ *   call this with a null tier — there is no contract to grid.
+ */
+export function buildContractMonthFromLogs({ today, minutesByDate, contractMinutes }) {
+  const anchor = parseISO(today);
+  const days = eachDayOfInterval({ start: startOfMonth(anchor), end: endOfMonth(anchor) });
+
+  const dayStates = {};
+  const tally = { contractDays: 0, dueSoFar: 0, logged: 0, missed: 0, daysLeft: 0 };
+  const fulfilled = (iso) => (minutesByDate.get(iso) || 0) >= contractMinutes;
+
+  for (const d of days) {
+    const iso = format(d, 'yyyy-MM-dd');
+    let state;
+    if (isSaturday(d) || isSunday(d)) state = 'weekend';
+    else {
+      tally.contractDays++;
+      if (iso > today) {
+        state = 'future';
+        tally.daysLeft++;
+      } else if (iso === today) {
+        state = 'open'; // loggable via the pinned CTA, not yet a miss
+        tally.daysLeft++;
+      } else {
+        tally.dueSoFar++;
+        state = fulfilled(iso) ? 'logged' : 'missed';
+        tally[state]++;
+      }
+    }
+    dayStates[iso] = state;
+  }
+
+  // Consecutive logged contract days, walking back from the most recent due day.
+  let streak = 0;
+  for (let i = days.length - 1; i >= 0; i--) {
+    const state = dayStates[format(days[i], 'yyyy-MM-dd')];
+    if (state === 'weekend' || state === 'future' || state === 'open') continue;
+    if (state === 'logged') streak++;
+    else break;
+  }
+
+  // Real minutes actually logged this month (not logged-day-count x tier —
+  // that was the seed's simulation; here the numbers are real), summed only
+  // over this month's dates so an unfiltered per-athlete log map is safe to
+  // pass in.
+  let minutes = 0;
+  for (const iso of Object.keys(dayStates)) minutes += minutesByDate.get(iso) || 0;
+
+  return {
+    label: monthLabel(today),
+    month: monthName(today),
+    start: format(startOfMonth(anchor), 'yyyy-MM-dd'),
+    dayStates,
+    ...tally,
+    streak,
+    minutes,
+  };
+}
+
+/** dob ('yyyy-MM-dd') -> whole years old, or null when dob is unknown — never invented. */
+export function ageFromDob(dob) {
+  return dob ? differenceInYears(new Date(), parseISO(dob)) : null;
 }
 
 /**
