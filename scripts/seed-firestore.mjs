@@ -15,6 +15,13 @@
  *                  (contract v1.3: variable minutes, some below the 45-min
  *                  tier, so the fulfilled/not-fulfilled UI has real contrast
  *                  to render)
+ *   bookings    — a few real bookings for Jordan against real generated
+ *                  session ids (contract v1.4: the booking transaction,
+ *                  attendance, and parent-linkage rules), covering both
+ *                  `confirmed` and `attended` so the live-wired dashboards
+ *                  have something to render in QA. The referenced sessions'
+ *                  `booked` counts are incremented to match, the same
+ *                  invariant the real booking transaction maintains.
  *
  * Two hard guarantees:
  *   1. NEVER touches production. Writes require FIRESTORE_EMULATOR_HOST, and the
@@ -95,7 +102,7 @@ function loadPortalData() {
     entry,
     [
       `export { buildSeason, SEASON_BOUNDS } from '${fwd(path.join(dataDir, 'season.js'))}';`,
-      `export { GOLF_PACKAGES, DROP_IN, FITNESS_PACKAGES, ELITE_TIERS } from '${fwd(path.join(dataDir, 'packages.js'))}';`,
+      `export { GOLF_PACKAGES, DROP_IN, FITNESS_PACKAGES, ELITE_TIERS, poolFor } from '${fwd(path.join(dataDir, 'packages.js'))}';`,
       `export { HOUSEHOLD, COACH } from '${fwd(path.join(dataDir, 'seed.js'))}';`,
     ].join('\n')
   );
@@ -125,7 +132,7 @@ function loadPortalData() {
 // ---------------------------------------------------------------------------
 
 function buildDocs(portal) {
-  const { buildSeason, GOLF_PACKAGES, DROP_IN, FITNESS_PACKAGES, ELITE_TIERS, HOUSEHOLD, COACH } = portal;
+  const { buildSeason, GOLF_PACKAGES, DROP_IN, FITNESS_PACKAGES, ELITE_TIERS, HOUSEHOLD, COACH, poolFor } = portal;
 
   // packages — price is stripped (no dollar amounts in seed data, policy) and
   // id becomes the doc id rather than a duplicated field.
@@ -194,6 +201,57 @@ function buildDocs(portal) {
   }
   // athletes/{id}/private/medical is deliberately NOT seeded — see header.
 
+  // bookings — a few REAL bookings for jordan against real seeded session ids
+  // (contract v1.4, docs/portal/TEAM.md "Sprint 6 pins"), so the live-wired
+  // dashboards (My Schedule, the parent household view, the coach roster)
+  // have something real to render in QA instead of an empty state. Doc id is
+  // `{athleteId}_{sessionId}` (contract v1.1). Ids below double as the
+  // scaffold's practice-mode references (seed.js BOOKED_UPCOMING) where they
+  // line up, so the two demo datasets tell one consistent story instead of
+  // two unrelated ones:
+  //   2026-11-02-1 (Mon 4:00 PM training) — the scaffold's season-opener
+  //     "Confirmed" booking; self-booked by the athlete.
+  //   2026-11-07-1 (Sat 10:30 AM tournament) — booked by the parent, so this
+  //     seed exercises the parent-linkage path (createdBy != athleteId's own
+  //     account) as well as the athlete-booked path above; also the other
+  //     allowance pool, per the two-pool invariant.
+  //   2026-11-09-2 (Mon 5:00 PM training) — already `attended`, so the
+  //     coach's roster and any "past sessions" UI have a real history entry
+  //     to show, not just upcoming confirmeds.
+  // `sessions.booked` on each referenced session is incremented below in the
+  // same loop that builds these docs — the transaction's other write (v1.4)
+  // — so the seed is internally consistent the way a real booking would
+  // leave it: a QA pass checking `booked` against `bookings` sees them agree.
+  const JORDAN_BOOKINGS = [
+    ['2026-11-02-1', 'confirmed', 'athlete-jordan'],
+    ['2026-11-07-1', 'confirmed', 'parent-dana'],
+    ['2026-11-09-2', 'attended', 'athlete-jordan'],
+  ];
+  const bookings = new Map();
+  const bookingCreatedAt = new Date();
+  for (const [sessionId, status, createdBy] of JORDAN_BOOKINGS) {
+    const session = sessions.get(sessionId);
+    if (!session) {
+      throw new Error(
+        `Seed booking references sessions/${sessionId}, which buildSeason() did not generate ` +
+          `(the season config in season.js changed under this seed). Update JORDAN_BOOKINGS in ` +
+          `scripts/seed-firestore.mjs to reference real generated session ids.`
+      );
+    }
+    bookings.set(`jordan_${sessionId}`, {
+      athleteId: 'jordan',
+      sessionId,
+      date: session.date,
+      type: session.type,
+      pool: poolFor(session.type),
+      status,
+      householdId,
+      createdBy,
+      createdAt: bookingCreatedAt,
+    });
+    session.booked += 1; // same write the real booking transaction makes
+  }
+
   // contractLogs — Jordan's practice history for the last ~2 weeks (contract
   // v1.3, TEAM.md Sprint 5 pins): variable minutes, some at/above the
   // 45-min tier and some below, plus a couple of skipped days (no doc at
@@ -247,7 +305,7 @@ function buildDocs(portal) {
     ['ops', { role: 'ops', athleteId: null, householdId: null, staff: true, displayName: 'Ops', email: null }],
   ]);
 
-  return { packages, sessions, households, athletes, users, contractLogs };
+  return { packages, sessions, households, athletes, users, bookings, contractLogs };
 }
 
 // ---------------------------------------------------------------------------
@@ -306,6 +364,15 @@ async function main() {
     console.log(`  sample ${name}/${sampleId}: ${JSON.stringify(sampleDoc)}`);
   }
   console.log(`total: ${total} docs across ${Object.keys(collections).length} collections`);
+
+  console.log('\nJordan bookings (contract v1.4) and the sessions.booked they drive:');
+  for (const [id, doc] of collections.bookings) {
+    const session = collections.sessions.get(doc.sessionId);
+    console.log(
+      `  bookings/${id}: status=${doc.status} pool=${doc.pool} createdBy=${doc.createdBy}` +
+        ` -> sessions/${doc.sessionId}.booked=${session.booked}/${session.capacity}`
+    );
+  }
 
   if (DRY_RUN) {
     console.log('\n[dry-run] nothing written. Set FIRESTORE_EMULATOR_HOST and re-run to seed the emulator.');

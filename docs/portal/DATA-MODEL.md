@@ -115,7 +115,7 @@ cases.
 | `time` | string | Block start, e.g. "3:00 PM". |
 | `type` | string | `training \| tournament` — decides which allowance pool a booking spends. |
 | `capacity` | number | From the generator's capacity config. |
-| `booked` | number | Denormalized confirmed-booking count for capacity display. Must be updated in the same transaction as a booking create/cancel (data-routing lane). The roster truth is always the bookings query — this is a display counter, and a reconcile can rebuild it from bookings at any time. |
+| `booked` | number | Denormalized confirmed-booking count for capacity display. Must be updated in the same transaction as a booking create/cancel (data-routing lane). The roster truth is always the bookings query — this is a display counter, and a reconcile can rebuild it from bookings at any time. **Contract v1.4** (Sprint 6): the exact transaction that maintains this field is pinned in [Booking transaction, attendance, and parent linkage](#booking-transaction-attendance-and-parent-linkage-contract-v14-sprint-6) below. |
 | `coachId` | string \| null | Assigned coach uid. |
 | `label` | string \| null | Real event names only ("Holiday Tournament"); null for regular blocks. |
 | `special` | boolean | True for explicitly-dated extras (holiday tournaments on closed days). |
@@ -194,9 +194,9 @@ One doc per athlete-session reservation. Doc id `{athleteId}_{sessionId}`.
 | `date` | string | `YYYY-MM-DD`, copied from the session so date-range queries need no join. |
 | `type` | string | `training \| tournament` — the session's type at booking time. |
 | `pool` | string | `training \| tournaments` — which allowance pool this spends (`poolFor()` in packages.js). Stored, not derived, so the cycle-usage query is a pure index scan. |
-| `status` | string | `confirmed \| cancelled \| attended \| noshow` |
+| `status` | string | `confirmed \| cancelled \| attended \| noshow`. **Contract v1.4** (Sprint 6): the `confirmed -> attended \| noshow` transitions are attendance, pinned below. |
 | `householdId` | string | Denormalized from the athlete for the parent's cross-children view and household-scoped rules. |
-| `createdBy` | string | uid of the account that made the booking (parent or athlete). |
+| `createdBy` | string | uid of the account that made the booking (parent or athlete). **Contract v1.4:** for a parent-created booking this is the *parent's* uid, not the athlete's — see the linkage note below. |
 | `createdAt` | timestamp | |
 
 **Allowance usage is derived, never stored.** "Used 3 of 8" comes from
@@ -206,6 +206,85 @@ makes that a cheap indexed read. There is no `used` counter on the athlete,
 package, or allowance anywhere, so there is nothing to drift when a booking is
 cancelled, a session is closed, or a write is retried. (`sessions.booked` is a
 per-session capacity display counter, not an allowance counter.)
+
+### Booking transaction, attendance, and parent linkage (contract v1.4, Sprint 6)
+
+Pinned by the Sprint 6 QA burn-down rulings (TEAM.md "Sprint 6 pins") to close
+the gap between what the screens showed and what Firestore actually enforced
+— QA found booking capacity, attendance, and parent booking all client-side
+only, with nothing in `firestore.rules` backing them up.
+
+**Booking is one client transaction, and the only writer of `booked`.**
+Creating a booking is never two writes — it is a single Firestore transaction
+that:
+
+1. reads `sessions/{sessionId}`;
+2. requires `booked < capacity`, aborting the transaction otherwise (the
+   plain-language "this session is full" rejection the screen shows);
+3. creates `bookings/{athleteId}_{sessionId}` — the deterministic id from
+   contract v1.1, so a duplicate booking attempt lands on the same doc and is
+   rejected by the rules instead of creating a second record (surfaced in
+   plain language as "the athlete already has this session booked", QA #8);
+4. updates `sessions/{sessionId}.booked` to `booked + 1`.
+
+Rules addition (data-routing lane): a `sessions` update is allowed only when
+the caller is a signed-in portal user **and** the diff is exactly
+`booked + 1` while staying within `capacity` (or, for the future cancellation
+path below, exactly `booked - 1` and never below `0`) — no other field of
+`sessions` may change in the same write as a `booked` delta, and no other
+delta on `booked` is legal at all. This is the only writer of `booked`
+anywhere in the app; the seed script (below) sets `booked` directly because it
+is standing up state that *represents* the outcome of transactions that never
+literally ran, not because `booked` has a second real writer.
+
+`booked` remains authoritative for **capacity display only** — the
+roster/attendance truth is always the `bookings` query
+([index 5](#5-bookings-sessionid-asc-status-asc--session-roster), reasoning
+updated below for v1.4). A future **cancellation** path is this transaction's
+mirror image: read the booking, flip `status` to `cancelled`, decrement
+`sessions.booked` by `booked - 1` (never below 0) in the same transaction —
+not built this sprint, but the field, the rules shape, and the "one writer"
+invariant are already correct for it, so cancellation lands without a schema
+change.
+
+**Attendance is derived state on the booking — there is no `attendance`
+collection.** A coach marks a booked athlete IN or OUT during a live session;
+that write is a `status` transition on the existing `bookings` doc, nothing
+else:
+
+- `confirmed -> attended` (coach marks IN)
+- `confirmed -> noshow` (coach marks OUT)
+
+Only the **assigned coach** may make this transition — `athletes/{athleteId}.coachId
+== request.auth.uid`, resolved through the booking's `athleteId` (routing
+lane implements the `get()` in `firestore.rules`) — and the write may change
+**only** the `status` field; `athleteId`, `sessionId`, `date`, `type`, `pool`,
+`householdId`, `createdBy`, and `createdAt` are immutable after create.
+Marking attendance never touches `sessions.booked`: the athlete already held
+the seat from the moment of booking, so `attended`/`noshow` records what
+happened in an already-counted seat, not a new capacity event.
+
+**Parent-created bookings.** A parent books for a child in their household —
+`createdBy` is the **parent's uid**, so `createdBy != athleteId`'s owning
+account is the expected shape for these, not an anomaly. The linkage the
+rules must prove on create is a three-way match: the caller's own
+`users/{request.auth.uid}.householdId` equals both the write's own
+`householdId` field and the target athlete's `athletes/{athleteId}.householdId`
+(a `get()`). A parent can book only into their own household's athletes —
+never a neighbor's — and the booking's `householdId` can't be forged to a
+household different from the one the athlete actually belongs to.
+
+**Post-write refresh (routing lane; documented here for the data-contract
+record).** Sprint 6 also fixes the "confirm a booking, the dashboard still
+shows the old count" friction (QA #3/#5/#7) with a **read-refresh seam**, not
+a new stored counter: after `createBooking` / `createContractLog` / an
+attendance update, the routing lane's dependent hooks re-run and re-derive
+their view from Firestore (generalizing `usePracticeLog`'s existing
+`refreshKey` pattern — no global state library, no cache to invalidate wrong).
+Contract v1.4 adds **zero** new denormalized fields for this: `sessions.booked`
+remains the only stored counter anywhere in the schema; allowance usage,
+attendance history, and the roster are all live queries, so there is nothing
+else that can drift.
 
 ### `contractLogs/{athleteId}_{date}`
 
@@ -312,8 +391,26 @@ athlete; a fourth index field would buy nothing measurable.
 ### 5. `bookings (sessionId ASC, status ASC)` — session roster
 
 Serves: `bookings where sessionId == :id and status == 'confirmed'` — the
-coach's live roster and attendance list for one block, and the capacity
-reconcile that can rebuild `sessions.booked` from truth.
+capacity reconcile that can rebuild `sessions.booked` from truth (count
+non-cancelled bookings for a session and compare against the stored
+counter).
+
+**v1.4 note (Sprint 6):** this is **not** the query behind the coach's
+attendance roster — the list a coach sees to mark a block IN/OUT. That list
+must keep showing a booking after it flips to `attended` or `noshow` (a
+booking that vanished from the roster the moment it was marked would be
+useless for a coach reviewing who's already been checked), so it reads
+*every* booking for the session regardless of status:
+`bookings where sessionId == :id` alone. That is a single equality filter on
+one field, which rides Firestore's automatic single-field index on
+`sessionId` — no composite involved, and this one specifically. This
+composite index stays in the file for the narrower reconcile query above,
+which genuinely does filter on two distinct fields (`sessionId` and
+`status`) — unlike [index 1](#1-season-browsing--no-composite-needed-deploy-verified)'s
+redundant `(date, __name__)` case, a two-distinct-field composite is never
+"not necessary" from Firestore's perspective, so it isn't at risk of the
+deploy-time rejection; it's simply the index for a different, narrower query
+than the roster now uses.
 
 ### 6. `contractLogs (athleteId ASC, date ASC)` — contract history
 
@@ -356,6 +453,38 @@ If a future sprint adds a *second* sort/filter field to any of these four
 queries (e.g. ordering the roster by name, or paginating billing rows), that
 is the point a real composite becomes necessary — not before.
 
+### v1.4 query additions (Sprint 6) — no `firestore.indexes.json` changes
+
+Every Sprint 6 read/write pattern (booking transaction, attendance, parent
+linkage — [pinned above](#booking-transaction-attendance-and-parent-linkage-contract-v14-sprint-6))
+was checked against the existing composites and against what actually needs
+an index at all. **Nothing was added:**
+
+- **Attendance roster** (`bookings where sessionId == :id`) — a single
+  equality filter on one field, so it rides Firestore's automatic
+  single-field index on `sessionId`. See the v1.4 note on
+  [index 5](#5-bookings-sessionid-asc-status-asc--session-roster) above for
+  why this is a *different* (narrower, unindexed-by-composite) query than
+  the one that index actually serves.
+- **Booking-capacity transaction** — reads `sessions/{sessionId}` and writes
+  `bookings/{athleteId}_{sessionId}` plus `sessions/{sessionId}.booked` by
+  **document id**, never by query. Document gets/sets have no index
+  implication at all.
+- **Attendance status transition** — same reasoning: a
+  `bookings/{athleteId}_{sessionId}` update by id, not a query.
+- **Parent-created booking linkage check** — a rules-time comparison of
+  already-resolved values (the caller's own `users` doc via
+  `request.auth.uid`, the write's own `householdId` field, and one `get()`
+  on the target `athletes` doc) evaluated at write time in
+  `firestore.rules`. It is not a query the client SDK runs, so it has no
+  index implication either.
+
+If a future sprint adds a genuine second *query* dimension to the attendance
+roster (e.g., a coach paging results, or ordering by athlete name), that is
+the point a `(sessionId ASC, <field> ASC)` composite becomes real — not
+before, and not the existing `(sessionId ASC, status ASC)` one, which already
+exists to serve a different query.
+
 ## Seeding & emulator workflow
 
 Both npm scripts live in the **root `package.json`** (created for this — the
@@ -379,4 +508,9 @@ The seed script:
 - refuses to run without `FIRESTORE_EMULATOR_HOST` (unless `--dry-run`), and
   refuses any non-local host, so it structurally cannot write to production;
 - writes via the Firestore REST API, so the repo root needs no dependencies;
-- seeds no dollar amounts, no Stripe ids (null), and no medical documents.
+- seeds no dollar amounts, no Stripe ids (null), and no medical documents;
+- seeds a handful of real `bookings` for `jordan` against real generated
+  session ids (contract v1.4) and increments each referenced session's
+  `booked` to match — the same invariant the booking transaction maintains
+  live, so `booked` and the `bookings` collection agree from the first seed
+  rather than only after a QA pass exercises real bookings.
