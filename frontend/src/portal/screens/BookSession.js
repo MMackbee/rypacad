@@ -29,7 +29,7 @@ function displayNameFor(session) {
 }
 
 /** First-of-month ISO, shifted by whole months — day-of-month is always 1. */
-function shiftMonth(monthISO, delta) {
+export function shiftMonth(monthISO, delta) {
   const [y, m] = monthISO.split('-').map(Number);
   const d = new Date(Date.UTC(y, m - 1 + delta, 1));
   return `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, '0')}-01`;
@@ -344,7 +344,7 @@ export default function BookSession({
   );
 }
 
-function MonthNav({ label, onPrev, onNext }) {
+export function MonthNav({ label, onPrev, onNext }) {
   return (
     <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
       <NavArrow direction="prev" onClick={onPrev} />

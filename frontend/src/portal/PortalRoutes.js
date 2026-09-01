@@ -13,7 +13,7 @@ import BookSession from './screens/BookSession';
 import ParentDashboard from './screens/ParentDashboard';
 import CoachDashboard from './screens/CoachDashboard';
 import Roster, { SessionAttendance } from './screens/Roster';
-import DiagnosticCapture from './screens/DiagnosticCapture';
+import { CaptureFlow } from './screens/DiagnosticCapture';
 import AthleteDashboard from './screens/AthleteDashboard';
 import SeasonSchedule from './screens/SeasonSchedule';
 import CommitmentContract from './screens/CommitmentContract';
@@ -345,7 +345,8 @@ export default function PortalRoutes() {
         path="capture"
         element={
           <RequireRole roles={['coach']}>
-            <DiagnosticCapture bare onCancel={go('/portal/coach')} />
+            {/* Roster-first: pick the kid, then capture (owner's flow). */}
+            <CaptureFlow bare onCancel={go('/portal/coach')} />
           </RequireRole>
         }
       />

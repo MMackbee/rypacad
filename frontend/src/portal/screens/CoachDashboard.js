@@ -1,13 +1,20 @@
-import React, { useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { color, font, glow, radius } from '../tokens';
 import AthleteRow from '../components/AthleteRow';
 import BottomTabBar from '../components/BottomTabBar';
 import Button from '../components/Button';
+import ContractCalendar from '../components/ContractCalendar';
 import PhoneFrame from '../components/PhoneFrame';
 import SessionCard from '../components/SessionCard';
+import { SkeletonBar } from '../components/Skeleton';
 import StatusBadge from '../components/StatusBadge';
 import { Body, Card, ScreenTitle, SectionLabel, SignOutButton } from '../components/Primitives';
-import { useCoachDay, useCoachRoster } from '../hooks';
+import { useCoachDay, useCoachRoster, useMonthSessions } from '../hooks';
+// The booking screen's month-nav pieces, reused rather than reforked — the
+// coach Sessions tab is the booking view pointed at rosters (owner's call,
+// 2026-09-01). Pure calendar label helpers ride along per the seam rule.
+import { MonthNav, shiftMonth } from './BookSession';
+import { monthLabel, todayISO } from '../data/calendar';
 
 /**
  * 12 · Coach Dashboard - coach.
@@ -67,7 +74,10 @@ export default function CoachDashboard({ variant = 'today', bare = false, onOpen
         ) : tab === 'students' ? (
           <StudentsTab athletes={roster.data ?? []} loading={roster.loading} />
         ) : (
-          <SessionsTab blocks={blocks} none={none} />
+          <SessionsTab
+            firstSessionDate={blocks[0]?.sessionId?.slice(0, 10) ?? null}
+            onOpenRoster={onOpenRoster}
+          />
         )}
       </div>
     </PhoneFrame>
@@ -157,45 +167,100 @@ function StudentsTab({ athletes, loading }) {
   );
 }
 
-/** Upcoming sessions - a plain read-only list, distinct from Overview's action cards. */
-function SessionsTab({ blocks, none }) {
-  if (none) {
-    return (
-      <div
-        style={{
-          border: `1px dashed ${color.border}`,
-          borderRadius: radius.cardLarge,
-          padding: '30px 22px',
-          textAlign: 'center',
-        }}
-      >
-        <ScreenTitle size={17}>Nothing upcoming</ScreenTitle>
-        <Body size={12} style={{ marginTop: 8 }}>
-          Your next assigned block is Mon Feb 22, 5:00 PM.
-        </Body>
-      </div>
-    );
+/**
+ * Sessions tab: the booking view pointed at rosters (owner's call,
+ * 2026-09-01) — the same month calendar the athlete books from, but tapping
+ * a session opens ITS roster/attendance instead of reserving a spot. Runs
+ * on the same useMonthSessions feed, so what the coach browses is exactly
+ * what families can book.
+ */
+function SessionsTab({ firstSessionDate, onOpenRoster }) {
+  const [monthISO, setMonthISO] = useState(() => `${todayISO().slice(0, 7)}-01`);
+  const [selectedDate, setSelectedDate] = useState(null);
+  const monthState = useMonthSessions(monthISO);
+
+  // Same pre-season courtesy as BookSession: open on the first month that
+  // has sessions until the coach navigates themselves.
+  const monthTouched = useRef(false);
+  useEffect(() => {
+    if (monthTouched.current || !firstSessionDate) return;
+    const opening = `${firstSessionDate.slice(0, 7)}-01`;
+    setMonthISO((cur) => (opening > cur ? opening : cur));
+  }, [firstSessionDate]);
+  const changeMonth = (next) => {
+    monthTouched.current = true;
+    setSelectedDate(null);
+    setMonthISO(next);
+  };
+
+  const days = monthState.data?.days ?? [];
+  const dayStates = {};
+  const sessionsByDate = {};
+  for (const d of days) {
+    sessionsByDate[d.date] = d.sessions;
+    dayStates[d.date] = d.sessions.length ? 'available' : 'open';
   }
+  const monthHasSessions = days.some((d) => d.sessions.length > 0);
+  const selectedSessions = selectedDate ? sessionsByDate[selectedDate] ?? [] : [];
+
   return (
     <>
-      <SectionLabel>Upcoming</SectionLabel>
-      {blocks.map((block) => {
-        const [time, meridiem] = block.time.split(' ');
-        return (
-          <SessionCard
-            key={block.id}
-            time={time}
-            meridiem={meridiem}
-            type={block.type}
-            name={block.name}
-            meta={block.meta}
-            nameSize={15}
-            gutter={56}
-            ruleHeight={44}
-            variant={block.status === 'closed' ? 'closed' : 'default'}
-          />
-        );
-      })}
+      <Card large>
+        <MonthNav
+          label={monthLabel(monthISO)}
+          onPrev={() => changeMonth(shiftMonth(monthISO, -1))}
+          onNext={() => changeMonth(shiftMonth(monthISO, 1))}
+        />
+        {monthState.loading ? (
+          <SkeletonBar height={220} style={{ marginTop: 14 }} />
+        ) : (
+          <div style={{ marginTop: 10 }}>
+            <ContractCalendar
+              key={monthISO}
+              start={monthISO}
+              dayStates={dayStates}
+              variant="booking"
+              selected={selectedDate}
+              onSelectDay={(day) => setSelectedDate(day.iso)}
+            />
+          </div>
+        )}
+        {!monthState.loading && !monthHasSessions ? (
+          <Body size={12} style={{ marginTop: 14, textAlign: 'center' }}>
+            No sessions are scheduled this month.
+          </Body>
+        ) : (
+          <Body size={11} tone={color.textTertiary} style={{ marginTop: 13 }}>
+            Days marked green have sessions — tap one, then tap a session for its roster.
+          </Body>
+        )}
+      </Card>
+
+      {selectedDate ? (
+        selectedSessions.length === 0 ? (
+          <Body size={12} style={{ textAlign: 'center' }}>
+            No sessions on this day.
+          </Body>
+        ) : (
+          selectedSessions.map((session) => {
+            const [time, meridiem] = String(session.time).split(' ');
+            return (
+              <SessionCard
+                key={session.id}
+                time={time}
+                meridiem={meridiem}
+                type={session.type}
+                name={session.name}
+                meta={`${session.booked ?? 0} of ${session.capacity ?? '—'} booked`}
+                nameSize={15}
+                gutter={56}
+                ruleHeight={44}
+                onClick={() => onOpenRoster && onOpenRoster({ sessionId: session.id })}
+              />
+            );
+          })
+        )
+      ) : null}
     </>
   );
 }

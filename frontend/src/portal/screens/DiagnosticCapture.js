@@ -1,12 +1,13 @@
 import React, { useState } from 'react';
 import { color, font, radius } from '../tokens';
+import AthleteRow from '../components/AthleteRow';
 import Button from '../components/Button';
 import MediaPlaceholder, { Avatar } from '../components/MediaPlaceholder';
 import NumericField from '../components/NumericField';
 import PhoneFrame from '../components/PhoneFrame';
 import ProgressMeter from '../components/ProgressMeter';
 import { BackLink, Body, Card, ScreenTitle, SectionLabel } from '../components/Primitives';
-import { useDiagnostic } from '../hooks';
+import { useCoachRoster, useDiagnostic } from '../hooks';
 
 /**
  * 14 · Diagnostic Capture - coach/staff.
@@ -30,9 +31,12 @@ import { useDiagnostic } from '../hooks';
 const INDOOR_SECTION_IDS = ['launch', 'putting'];
 const TOTAL_MODULES = 4; // swing video + launch + putting + mental intake (elsewhere)
 
-export default function DiagnosticCapture({ variant = 'empty', bare = false, onCancel }) {
+export default function DiagnosticCapture({ variant = 'empty', bare = false, athlete, onCancel }) {
   const { data } = useDiagnostic();
   const [values, setValues] = useState({});
+  // Who this capture is FOR comes from the picker (CaptureFlow below) in the
+  // real app; the harness's direct mounts keep the seed athlete.
+  const subject = athlete ?? data?.athlete;
 
   const sections = (data?.sections ?? []).filter((s) => INDOOR_SECTION_IDS.includes(s.id));
   const uploading = variant === 'uploading';
@@ -66,7 +70,7 @@ export default function DiagnosticCapture({ variant = 'empty', bare = false, onC
           <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
             <Avatar size={40} />
             <div style={{ flex: 1, minWidth: 0 }}>
-              <ScreenTitle size={18}>{data?.athlete?.name}</ScreenTitle>
+              <ScreenTitle size={18}>{subject?.name}</ScreenTitle>
               <div
                 style={{
                   font: `400 11px ${font.body}`,
@@ -74,7 +78,7 @@ export default function DiagnosticCapture({ variant = 'empty', bare = false, onC
                   marginTop: 3,
                 }}
               >
-                {data?.athlete?.meta}
+                {subject?.meta}
               </div>
             </div>
           </div>
@@ -177,5 +181,60 @@ function VideoSection({ uploading, complete }) {
         </div>
       ) : null}
     </Card>
+  );
+}
+
+/**
+ * The real capture flow (owner's call, 2026-09-01): Capture -> roster ->
+ * pick the kid -> input capture data. The picker is the coach's real
+ * assigned roster; the harness keeps mounting DiagnosticCapture directly
+ * with its seed athlete, so the designed states are unchanged there.
+ */
+export function CaptureFlow({ bare = false, onCancel }) {
+  const roster = useCoachRoster();
+  const [athlete, setAthlete] = useState(null);
+
+  if (athlete) {
+    return <DiagnosticCapture bare={bare} athlete={athlete} onCancel={() => setAthlete(null)} />;
+  }
+
+  const athletes = roster.data ?? [];
+  return (
+    <PhoneFrame
+      bare={bare}
+      header={
+        <div style={{ padding: '8px 22px 14px' }}>
+          <BackLink onClick={onCancel}>Today</BackLink>
+          <ScreenTitle style={{ marginTop: 8 }}>Diagnostic Capture</ScreenTitle>
+          <Body size={12} style={{ marginTop: 4 }}>
+            Who is this capture for?
+          </Body>
+        </div>
+      }
+    >
+      <div style={{ padding: '0 22px 24px' }}>
+        <Card large>
+          {roster.loading ? (
+            <Body size={12}>Loading your roster…</Body>
+          ) : athletes.length === 0 ? (
+            <Body size={12}>No assigned athletes yet.</Body>
+          ) : (
+            <div style={{ display: 'flex', flexDirection: 'column' }}>
+              {athletes.map((a, i) => (
+                <AthleteRow
+                  key={a.id}
+                  name={a.name}
+                  meta={a.meta}
+                  avatarSize={40}
+                  nameSize={15}
+                  divider={i < athletes.length - 1}
+                  onClick={() => setAthlete(a)}
+                />
+              ))}
+            </div>
+          )}
+        </Card>
+      </div>
+    </PhoneFrame>
   );
 }
