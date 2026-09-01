@@ -8,10 +8,11 @@
  *
  * The Google Calendar is the session source of truth (Sprint 4 pin,
  * docs/portal/TEAM.md). This script turns its events into bookable Firestore
- * sessions by the pinned title convention:
+ * sessions by the pinned title convention (case-insensitive on the first
+ * word, so the hand-entered "Training Session" counts):
  *
- *   summary starts with "Training block"  -> bookable, type 'training'
- *   summary starts with "Tournament"      -> bookable, type 'tournament'
+ *   summary's first word is "training"    -> bookable, type 'training'
+ *   summary's first word is "tournament"  -> bookable, type 'tournament'
  *   anything else, and every all-day event -> skipped (display-only)
  *
  * Bookable events must carry a real start.dateTime; all-day events (start.date
@@ -69,8 +70,20 @@ const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..'
 // schedule.js changes CAPACITY, change this too.
 const CAPACITY = { training: 14, tournament: 14 };
 
-// Titles that mean "a regular block, no event name": label stays null.
-const GENERIC_TITLES = new Set(['Training block', 'Tournament', 'Tournament block']);
+// Title convention, deliberately forgiving: the calendar is entered by hand,
+// so any title whose first word is "training"/"tournament" (any case) is
+// bookable — the real 26/27 entry used "Training Session", and renaming 600
+// events to satisfy a stricter spelling would be the tail wagging the dog.
+function classifyTitle(summary) {
+  if (/^training\b/i.test(summary)) return 'training';
+  if (/^tournament\b/i.test(summary)) return 'tournament';
+  return null; // anything else (and every all-day event) is display-only
+}
+
+// A title that is JUST the generic phrase means "a regular block, no event
+// name": label stays null and the app shows its own generic display name.
+// Anything longer ("Tournament — Holiday Classic") is kept as the label.
+const GENERIC_TITLE = /^(?:training|tournament)(?:\s+(?:block|session))?$/i;
 
 // ---------------------------------------------------------------------------
 // Args
@@ -256,9 +269,7 @@ function mapEvents(items, from, to) {
       continue;
     }
     const summary = (ev.summary || '').trim();
-    let type = null;
-    if (summary.startsWith('Training block')) type = 'training';
-    else if (summary.startsWith('Tournament')) type = 'tournament';
+    const type = classifyTitle(summary);
     const m = dt.match(/^(\d{4}-\d{2}-\d{2})T(\d{2}):(\d{2})/);
     if (!type || !m) {
       counts.displayOnly += 1; // not the convention (or unparseable start)
@@ -276,7 +287,7 @@ function mapEvents(items, from, to) {
       date,
       time: formatTime(Number(hh), Number(mm)),
       type,
-      label: GENERIC_TITLES.has(summary) ? null : summary,
+      label: GENERIC_TITLE.test(summary) ? null : summary,
       gcalEventId: ev.id,
     });
     byDate.set(date, list);
