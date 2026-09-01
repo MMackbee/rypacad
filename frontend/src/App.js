@@ -1,61 +1,42 @@
 // src/App.js
 
 import React from 'react';
-import { BrowserRouter as Router, Routes, Route, Navigate, useLocation } from 'react-router-dom';
-import { UserProvider } from './contexts/UserContext';
+import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-dom';
 import ErrorBoundary from './components/ErrorBoundary';
-import Navbar from './components/Navbar';
-import LoginPage from './pages/LoginPage';
-import UnauthorizedPage from './pages/UnauthorizedPage';
 import PortalRoutes from './portal/PortalRoutes';
 
 /**
- * The portal ships its own chrome — a bottom tab bar per role, and a header
- * inside each 390pt frame. Rendering the desktop Navbar above it would give a
- * phone screen two navigations, so it is suppressed under /portal.
+ * The portal IS the app. The 2025 shell (Navbar, LoginPage, UnauthorizedPage,
+ * UserContext) is retired — the portal ships its own chrome and its own auth
+ * seam (portal/hooks/useAuthSession), and every legacy path redirects
+ * somewhere sensible so a bookmark or an emailed link never lands on a blank
+ * router miss.
  */
-function ChromeNavbar() {
-  const { pathname } = useLocation();
-  if (pathname === '/portal' || pathname.startsWith('/portal/')) return null;
-  return <Navbar />;
-}
-
 function App() {
   return (
     <ErrorBoundary>
-      <UserProvider>
-        <Router>
-          <div className="App">
-            <ChromeNavbar />
-            <Routes>
-              {/* Member portal — the Phase 1 scaffold. See docs/portal/design-handoff.md. */}
-              <Route path="/portal/*" element={<PortalRoutes />} />
+      <Router>
+        <div className="App">
+          <Routes>
+            {/* Member portal — Phase 1. See docs/portal/design-handoff.md. */}
+            <Route path="/portal/*" element={<PortalRoutes />} />
 
-              <Route path="/" element={<Navigate to="/login" replace />} />
-              <Route path="/login" element={<LoginPage />} />
-              <Route path="/unauthorized" element={<UnauthorizedPage />} />
-
-              {/*
-                The 2025 surfaces are gone — the portal supersedes them. Paths
-                with a portal equivalent redirect, so a bookmark or an emailed
-                link lands somewhere sensible instead of on a blank router
-                miss. Retired paths with no equivalent (/videos, /profile,
-                /sessions, /mental-performance, /data-upload, /driving-test,
-                /sms-test, /admin/waitlist) simply fall away.
-              */}
-              <Route path="/register" element={<Navigate to="/portal/register" replace />} />
-              <Route path="/dashboard" element={<Navigate to="/portal/schedule" replace />} />
-              <Route path="/coach" element={<Navigate to="/portal/coach" replace />} />
-              <Route path="/parent" element={<Navigate to="/portal/family" replace />} />
-              <Route path="/booking" element={<Navigate to="/portal/book" replace />} />
-              <Route path="/my-bookings" element={<Navigate to="/portal/schedule" replace />} />
-              <Route path="/programs" element={<Navigate to="/portal/register" replace />} />
-              <Route path="/programs/:id" element={<Navigate to="/portal/register" replace />} />
-              <Route path="/admin" element={<Navigate to="/portal/admin" replace />} />
-            </Routes>
-          </div>
-        </Router>
-      </UserProvider>
+            {/* Legacy entry points, all superseded by the portal. */}
+            <Route path="/" element={<Navigate to="/portal/signin" replace />} />
+            <Route path="/login" element={<Navigate to="/portal/signin" replace />} />
+            <Route path="/unauthorized" element={<Navigate to="/portal/signin" replace />} />
+            <Route path="/register" element={<Navigate to="/portal/register" replace />} />
+            <Route path="/dashboard" element={<Navigate to="/portal/schedule" replace />} />
+            <Route path="/coach" element={<Navigate to="/portal/coach" replace />} />
+            <Route path="/parent" element={<Navigate to="/portal/family" replace />} />
+            <Route path="/booking" element={<Navigate to="/portal/book" replace />} />
+            <Route path="/my-bookings" element={<Navigate to="/portal/schedule" replace />} />
+            <Route path="/programs" element={<Navigate to="/portal/register" replace />} />
+            <Route path="/programs/:id" element={<Navigate to="/portal/register" replace />} />
+            <Route path="/admin" element={<Navigate to="/portal/admin" replace />} />
+          </Routes>
+        </div>
+      </Router>
     </ErrorBoundary>
   );
 }
