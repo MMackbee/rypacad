@@ -83,8 +83,8 @@ function OverviewTab({ data, blocks, none, onOpenRoster }) {
 
       {none ? <NoSessions outstanding={data?.outstanding ?? []} /> : null}
 
-      {blocks.map((block) => (
-        <BlockCard key={block.id} block={block} onOpenRoster={onOpenRoster} />
+      {blocks.map((block, i) => (
+        <BlockCard key={block.id} block={block} blockIndex={i} onOpenRoster={onOpenRoster} />
       ))}
 
       {attention.length ? <AttentionCard items={attention} /> : null}
@@ -250,9 +250,23 @@ function TabStrip({ value, onChange }) {
  * Concurrent blocks stay as two peer cards, each with its own Start roster
  * button, rather than a combined floor view. A coach running two groups needs
  * two separate attendance records, not one merged list.
+ *
+ * QA #6 fix (Sprint 6, TEAM.md): each row's action must open ITS OWN block's
+ * roster, never whichever block happened to render first. This card already
+ * closes over its own `block` prop per iteration - the bug a reviewer sees
+ * (View roster under 5:00 PM opening the 4:00 PM roster) is downstream of
+ * PortalRoutes.js's onOpenRoster, which today is `go('/portal/attendance')` -
+ * a zero-arg navigate that drops whatever is passed to it, so every row lands
+ * on Roster.js's default block regardless of which one was tapped. This
+ * screen's fix is to stop being ambiguous about which block a tap means:
+ * `blockIndex` (this block's position among today's blocks) travels alongside
+ * it so a route/prop that does carry it through can resolve the exact same
+ * block Roster.js/SessionAttendance would pick via useSession({ blockIndex }).
+ * See the sprint report for the PortalRoutes follow-up this still needs.
  */
-function BlockCard({ block, onOpenRoster }) {
+function BlockCard({ block, blockIndex, onOpenRoster }) {
   const [time, meridiem] = block.time.split(' ');
+  const openThisRoster = () => onOpenRoster && onOpenRoster({ ...block, blockIndex });
 
   const pill = {
     now: <StatusBadge tone="green">Now</StatusBadge>,
@@ -262,14 +276,14 @@ function BlockCard({ block, onOpenRoster }) {
 
   const action =
     block.status === 'now' ? (
-      <Button height={50} onClick={() => onOpenRoster && onOpenRoster(block)}>
+      <Button height={50} onClick={openThisRoster}>
         Start roster
       </Button>
     ) : block.status === 'next' ? (
       <Button
         variant="outline"
         height={46}
-        onClick={() => onOpenRoster && onOpenRoster(block)}
+        onClick={openThisRoster}
         style={{ font: `600 14px ${font.body}` }}
       >
         View roster
