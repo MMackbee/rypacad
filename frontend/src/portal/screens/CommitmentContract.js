@@ -59,7 +59,7 @@ export default function CommitmentContract({
   const [showLogSheet, setShowLogSheet] = useState(false);
   const [todayLog, setTodayLog] = useState(null); // minutes, or null if not logged today
 
-  const practiceLog = usePracticeLog();
+  const practiceLog = usePracticeLog({ practice });
 
   if (variant === 'none') return <NoContract bare={bare} data={data} />;
 

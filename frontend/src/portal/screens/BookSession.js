@@ -80,7 +80,24 @@ export default function BookSession({
   // copy — exactly the contract the screen already had (Sprint 5 pin).
   const { data, loading, error, book } = useBooking({ variant, practice });
   const [monthISO, setMonthISO] = useState(() => `${todayISO().slice(0, 7)}-01`);
-  const monthState = useMonthSessions(monthISO);
+  const monthState = useMonthSessions(monthISO, { practice });
+
+  // Before the season opens, today's month has nothing to book — jump the
+  // calendar to the first bookable date's month so the athlete's first visit
+  // (and the walkthrough's booking step) opens on real sessions instead of
+  // an empty grid three taps away from one. Only until the athlete navigates
+  // themselves; their prev/next choices are never overridden.
+  const monthTouched = useRef(false);
+  const firstBookable = data?.slots?.[0]?.date ?? null;
+  useEffect(() => {
+    if (monthTouched.current || !firstBookable) return;
+    const openingMonth = `${firstBookable.slice(0, 7)}-01`;
+    setMonthISO((cur) => (openingMonth > cur ? openingMonth : cur));
+  }, [firstBookable]);
+  const changeMonth = (next) => {
+    monthTouched.current = true;
+    setMonthISO(next);
+  };
 
   const [selectedDate, setSelectedDate] = useState(null);
   // The slot the athlete just booked. Persistence is the API's job later; the
@@ -216,11 +233,11 @@ export default function BookSession({
                   label={monthLabel(monthISO)}
                   onPrev={() => {
                     setSelectedDate(null);
-                    setMonthISO((m) => shiftMonth(m, -1));
+                    changeMonth(shiftMonth(monthISO, -1));
                   }}
                   onNext={() => {
                     setSelectedDate(null);
-                    setMonthISO((m) => shiftMonth(m, 1));
+                    changeMonth(shiftMonth(monthISO, 1));
                   }}
                 />
                 {monthState.loading ? (

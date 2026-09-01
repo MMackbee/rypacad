@@ -518,8 +518,10 @@ async function liveMonthSessions(monthISO, today) {
  * month. Seed: the generated season, filtered to the requested month - the
  * same SEASON useBooking reads, so the two surfaces cannot disagree.
  */
-export function useMonthSessions(monthISO) {
-  const live = isLive();
+export function useMonthSessions(monthISO, { practice = false } = {}) {
+  // Practice pins the seed source (onboarding invariant, TEAM.md): the
+  // walkthrough's booking step must work signed-out with zero network.
+  const live = !practice && isLive();
   const today = todayISO();
   const resolvedMonth = monthISO || today;
 
@@ -919,8 +921,10 @@ async function livePracticeLog(today) {
  * carrying a real minutes value instead of a bare logged/not-logged flag.
  * Nothing here writes live unless isLive().
  */
-export function usePracticeLog({ today = todayISO() } = {}) {
-  const live = isLive();
+export function usePracticeLog({ today = todayISO(), practice = false } = {}) {
+  // Practice pins the seed branch (onboarding invariant): no live query, and
+  // logPractice stays a local no-op-persist — never a contractLogs write.
+  const live = !practice && isLive();
   const [seedEntry, setSeedEntry] = useState(null); // { date, minutes } | null
   const [refreshKey, setRefreshKey] = useState(0); // bumped to re-run the live source after a write
 
