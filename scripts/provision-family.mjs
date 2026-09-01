@@ -48,40 +48,50 @@ const PROJECT_ID = 'rypacad';
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 
 // ---------------------------------------------------------------------------
-// The family. "Admin" in conversation is the `owner` role in the contract —
-// owner reaches /portal/admin and is the only role that reaches /portal/staff.
-// NOTE: provisioning overwrites each account's existing users doc, so the
-// gmail account's previous owner role becomes athlete by design.
+// The test families. "Admin" in conversation is the `owner` role in the
+// contract — owner reaches /portal/admin and is the only role that reaches
+// /portal/staff. Provisioning overwrites each account's existing users doc.
+// Athletes exist independently of logins: an athlete entry with no matching
+// account (the MackBee siblings) is an athletes/ doc only.
 // ---------------------------------------------------------------------------
 
-const HOUSEHOLD_ID = 'mackbee';
-const ATHLETE_ID = 'makel-test';
-const PACKAGE_ID = 'g-8-3'; // 8 training + 3 tournaments / month
-
-// Three MackBee siblings, one household. makel-test is the only one with a
-// portal login (see FAMILY below); Avery and Quinn are athletes/ docs only —
-// athletes exist independently of logins, and provisioning them here is what
-// lets the parent surfaces (children list, per-child billing) exercise more
-// than one child.
-const ATHLETES = [
-  { id: ATHLETE_ID, name: 'Makel MackBee', packageId: PACKAGE_ID, contractMinutes: 45 },
-  { id: 'makel-test-2', name: 'Avery MackBee', packageId: 'g-4-2', contractMinutes: 20 },
-  { id: 'makel-test-3', name: 'Quinn MackBee', packageId: 'elite', contractMinutes: 95 },
+const FAMILIES = [
+  {
+    householdId: 'mackbee',
+    household: { name: 'MackBee', guardian: { name: 'Makel', email: 'makelmackbee@live.com', phone: null } },
+    athletes: [
+      { id: 'makel-test', name: 'Makel MackBee', packageId: 'g-8-3', contractMinutes: 45 },
+      { id: 'makel-test-2', name: 'Avery MackBee', packageId: 'g-4-2', contractMinutes: 20 },
+      { id: 'makel-test-3', name: 'Quinn MackBee', packageId: 'elite', contractMinutes: 95 },
+    ],
+    accounts: [
+      { email: 'makel@rypgolf.com', role: 'owner', displayName: 'Makel' },
+      { email: 'makelmackbee@gmail.com', role: 'athlete', displayName: 'Makel MackBee', athleteId: 'makel-test' },
+      { email: 'makelmackbee@live.com', role: 'parent', displayName: 'Makel' },
+      { email: 'makel@pixelcaddie.com', role: 'coach', displayName: 'Coach Makel' },
+    ],
+  },
+  // Mike's family (2026-09-01) — a second full tester set.
+  {
+    householdId: 'eisele',
+    household: { name: 'Eisele', guardian: { name: 'Mike', email: 'eisele.mike@gmail.com', phone: null } },
+    athletes: [
+      { id: 'mike-test', name: 'Mike Eisele Jr.', packageId: 'g-8-3', contractMinutes: 45 },
+    ],
+    accounts: [
+      { email: 'mike@rypgolf.com', role: 'owner', displayName: 'Mike' },
+      { email: 'eisele.mike@gmail.com', role: 'parent', displayName: 'Mike' },
+      { email: 'eisemi01@yahoo.com', role: 'athlete', displayName: 'Mike Eisele Jr.', athleteId: 'mike-test' },
+    ],
+  },
 ];
 
-const FAMILY = [
-  { email: 'makel@rypgolf.com',      role: 'owner',   displayName: 'Makel' },
-  { email: 'makelmackbee@gmail.com', role: 'athlete', displayName: 'Makel MackBee' },
-  { email: 'makelmackbee@live.com',  role: 'parent',  displayName: 'Makel' },
-  { email: 'makel@pixelcaddie.com',  role: 'coach',   displayName: 'Coach Makel' },
-];
-
-function userDoc({ role, displayName, email }) {
+function userDoc(family, { role, displayName, email, athleteId }) {
   const staff = role === 'coach' || role === 'owner';
   return {
     role,
-    athleteId: role === 'athlete' ? ATHLETE_ID : null,
-    householdId: role === 'athlete' || role === 'parent' ? HOUSEHOLD_ID : null,
+    athleteId: role === 'athlete' ? athleteId ?? null : null,
+    householdId: role === 'athlete' || role === 'parent' ? family.householdId : null,
     staff,
     displayName,
     email,
@@ -187,55 +197,59 @@ async function main() {
   console.log(`TARGET: PRODUCTION Firestore (project ${PROJECT_ID})${DRY_RUN ? ' — dry run, read-only' : ''}\n`);
   const token = await prodAccessToken();
 
-  const uidByEmail = await lookupUids(token, FAMILY.map((f) => f.email));
+  const allAccounts = FAMILIES.flatMap((f) => f.accounts.map((a) => ({ ...a, family: f })));
+  const uidByEmail = await lookupUids(token, allAccounts.map((a) => a.email));
   const found = [];
   const missing = [];
-  for (const member of FAMILY) {
+  for (const member of allAccounts) {
     const uid = uidByEmail.get(member.email.toLowerCase()) ?? null;
     (uid ? found : missing).push({ ...member, uid });
   }
   for (const m of found) console.log(`  ${m.email} -> uid ${m.uid} (${m.role})`);
   for (const m of missing)
-    console.log(`  ${m.email} -> NO AUTH RECORD (${m.role}) — sign in once at /portal/signin, then re-run.`);
+    console.log(
+      `  ${m.email} -> NO AUTH RECORD (${m.role}) — create it in Firebase console (Authentication > Add user) or sign in once, then re-run.`
+    );
 
+  // One academy coach for now: every test athlete rides the same coach uid so
+  // rosters and attendance have someone to answer to.
   const coach = found.find((m) => m.role === 'coach') ?? null;
   const packages = loadPackages();
 
   const docs = []; // [collection, id, doc]
   for (const [id, doc] of packages) docs.push(['packages', id, doc]);
-  docs.push([
-    'households',
-    HOUSEHOLD_ID,
-    {
-      name: 'MackBee',
-      guardian: { name: 'Makel', email: 'makelmackbee@live.com', phone: null },
-      stripeCustomerId: null,
-      stripeSubscriptionId: null,
-    },
-  ]);
-  for (const a of ATHLETES) {
+  let athleteCount = 0;
+  for (const f of FAMILIES) {
     docs.push([
-      'athletes',
-      a.id,
-      {
-        name: a.name,
-        dob: null,
-        householdId: HOUSEHOLD_ID,
-        packageId: a.packageId,
-        contractMinutes: a.contractMinutes,
-        coachId: coach ? coach.uid : null, // filled on re-run once the coach signs in
-      },
+      'households',
+      f.householdId,
+      { ...f.household, stripeCustomerId: null, stripeSubscriptionId: null },
     ]);
+    for (const a of f.athletes) {
+      athleteCount++;
+      docs.push([
+        'athletes',
+        a.id,
+        {
+          name: a.name,
+          dob: null,
+          householdId: f.householdId,
+          packageId: a.packageId,
+          contractMinutes: a.contractMinutes,
+          coachId: coach ? coach.uid : null, // filled on re-run once the coach account exists
+        },
+      ]);
+    }
   }
-  for (const m of found) docs.push(['users', m.uid, userDoc(m)]);
+  for (const m of found) docs.push(['users', m.uid, userDoc(m.family, m)]);
 
-  console.log(`\nPlan: ${docs.length} doc(s) — ${packages.size} packages, 1 household, ${ATHLETES.length} athletes, ${found.length} users`);
+  console.log(
+    `\nPlan: ${docs.length} doc(s) — ${packages.size} packages, ${FAMILIES.length} households, ${athleteCount} athletes, ${found.length} users`
+  );
   for (const [col, id, doc] of docs) {
     if (col !== 'packages') console.log(`  ${col}/${id}: ${JSON.stringify(doc)}`);
   }
-  if (!coach) {
-    for (const a of ATHLETES) console.log('  note: athletes/' + a.id + '.coachId is null until the coach account exists.');
-  }
+  if (!coach) console.log('  note: athlete coachId is null until the coach account exists.');
 
   if (DRY_RUN) {
     console.log('\n[dry-run] nothing written.');
@@ -253,7 +267,9 @@ async function main() {
     await commit(token, writes.slice(i, i + BATCH));
     console.log(`committed ${Math.min(i + BATCH, writes.length)}/${writes.length}`);
   }
-  console.log(`Done. ${missing.length ? `Re-run after the ${missing.length} missing account(s) sign in.` : 'All four accounts provisioned.'}`);
+  console.log(
+    `Done. ${missing.length ? `Re-run after the ${missing.length} missing account(s) exist.` : 'Every account provisioned.'}`
+  );
 }
 
 main().catch((err) => {
