@@ -60,7 +60,7 @@ export default function Billing({ variant = 'active', bare = false }) {
         ) : null}
 
         <SubscriptionRows rows={summary.data?.rows ?? []} />
-        <MembershipCard membership={data?.membership} />
+        <MembershipCard rows={summary.data?.rows ?? []} />
         <PaymentMethodCard method={data?.paymentMethod} declining={data?.declining} />
         <InvoiceHistory invoices={data?.invoices ?? []} />
       </div>
@@ -142,16 +142,30 @@ function HeroCard({ state }) {
   );
 }
 
-function MembershipCard({ membership }) {
-  if (!membership) return null;
+/**
+ * QA #12 fix (Sprint 6, TEAM.md): this card said "2 athletes" from
+ * data/parent.js's static MEMBERSHIP seed while SubscriptionRows above it
+ * renders one row per child from the live billing summary - the two could
+ * only agree by coincidence. Derived from the exact same `rows` the list
+ * renders instead, so the count can never drift again. Package name follows
+ * the same rule: the household's children are not all on the same package
+ * (Sprint 5 pin, "Billing lists one row per child"), so a single tier name
+ * is only shown when every row actually shares one - otherwise every
+ * distinct package the household is on is listed, never one picked at
+ * random.
+ */
+function MembershipCard({ rows }) {
+  if (!rows.length) return null;
+  const uniqueNames = [...new Set(rows.map((r) => r.packageName).filter(Boolean))];
+
   return (
     <Card large>
       <SectionLabel style={{ marginBottom: 12 }}>Membership</SectionLabel>
       <div style={{ font: `600 15px ${font.body}`, color: color.text }}>
-        {membership.packageName}
+        {uniqueNames.length ? uniqueNames.join(' · ') : '—'}
       </div>
       <div style={{ font: `400 12px ${font.body}`, color: color.textTertiary, marginTop: 4 }}>
-        {membership.meta}
+        {rows.length} {rows.length === 1 ? 'athlete' : 'athletes'} · billed monthly
       </div>
     </Card>
   );
