@@ -187,23 +187,35 @@ function ChildCard({ child, onHold, onOpen }) {
             {child.ageLine}
           </div>
         </div>
-        <StatusBadge tone={standing.tone} dashed={standing.dashed}>
-          {standing.label}
-        </StatusBadge>
+        {/* Live cards carry honest nulls the seed never did (QA hotfix):
+            no standing signal -> no badge, nothing booked -> plain copy. */}
+        {standing ? (
+          <StatusBadge tone={standing.tone} dashed={standing.dashed}>
+            {standing.label}
+          </StatusBadge>
+        ) : null}
       </div>
 
       <div style={{ height: 1, background: color.rule, margin: '14px 0 13px' }} />
 
       <MetaRow label="Next">
-        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-          <TypeChip type={child.next.type} />
-          <span style={{ font: `600 13px ${font.body}`, color: color.text }}>
-            {child.next.when}
+        {child.next ? (
+          <>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+              <TypeChip type={child.next.type} />
+              <span style={{ font: `600 13px ${font.body}`, color: color.text }}>
+                {child.next.when}
+              </span>
+            </div>
+            <div style={{ font: `400 11px ${font.body}`, color: color.textSecondary, marginTop: 4 }}>
+              {child.next.meta}
+            </div>
+          </>
+        ) : (
+          <span style={{ font: `400 12px ${font.body}`, color: color.textTertiary }}>
+            Nothing booked yet
           </span>
-        </div>
-        <div style={{ font: `400 11px ${font.body}`, color: color.textSecondary, marginTop: 4 }}>
-          {child.next.meta}
-        </div>
+        )}
       </MetaRow>
 
       <MetaRow label="Contract" style={{ marginTop: 12 }}>
@@ -230,7 +242,11 @@ function ChildCard({ child, onHold, onOpen }) {
         left" and hidden the conflict entirely.
       */}
       <MetaRow label="Left" style={{ marginTop: 12 }}>
-        <AllowancePools allowance={child.allowance} compact />
+        {child.allowance ? (
+          <AllowancePools allowance={child.allowance} compact />
+        ) : (
+          <span style={{ font: `400 12px ${font.body}`, color: color.textTertiary }}>—</span>
+        )}
       </MetaRow>
     </Card>
   );

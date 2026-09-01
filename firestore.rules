@@ -183,40 +183,36 @@ service cloud.firestore {
             && me().householdId == request.resource.data.householdId)
         );
 
-      // Readable by that household (athlete's own user + household parent),
-      // the assigned coach, and staff (mental / ops / owner). Coach access is
-      // by assignment on the athlete doc, never by role alone.
-      //
-      // Sprint 6 pin (QA #7 — "narrowest read grant, flagged prominently"):
-      // useSessionAttendance's roster query is `bookings where sessionId ==
-      // AND status in [...]` — a LIST query. The athleteId-based coach clause
-      // above only ever worked for single-document reads; verified against
-      // the emulator that a get()-indirection rule keyed off a field the
-      // query does NOT filter on (athleteId here) makes the ENTIRE list
-      // request fail with an evaluation error, not a silently-filtered
-      // subset — this is NOT "coach sees nothing," it is "coach sees
-      // PERMISSION_DENIED," which is why this second, narrower clause exists.
-      // It is provable because sessionId IS the query's own equality filter:
-      // a coach may list bookings for a session THEY are assigned to run
-      // (sessions.coachId), regardless of which coach each individual
-      // athlete in that block is assigned to elsewhere. This is intentionally
-      // a different, wider boundary than "assigned athlete only" for this one
-      // read path — flagged here and in the routing report for PM review;
-      // the attendance WRITE below stays scoped to athlete.coachId exactly as
-      // pinned, so a coach can see a shared block's full roster but can only
-      // mark the athletes actually assigned to them.
-      function sessionCoachMatches() {
-        return get(/databases/$(database)/documents/sessions/$(resource.data.sessionId)).data.coachId
-          == request.auth.uid;
+      // The booking transaction's existence check reads a doc that may not
+      // exist yet — `resource` is null then, and the data-based clauses
+      // below crash the whole evaluation (QA re-sweep #5: "Null value
+      // error"), which broke every first-time booking. Nonexistence is
+      // only revealed inside the caller's own keyspace: the doc id IS
+      // `{athleteId}_{sessionId}`, so the id's athlete prefix scopes who
+      // may probe. Athlete ids never contain underscores (enforced nowhere
+      // better than here: a first '_' always ends the athleteId segment).
+      function nullReadOk() {
+        let idAthlete = bookingId.split('_')[0];
+        return (me().role == 'athlete' && me().athleteId == idAthlete)
+          || (me().role == 'parent'
+              && exists(/databases/$(database)/documents/athletes/$(idAthlete))
+              && athleteData(idAthlete).householdId == me().householdId)
+          || me().role in ['coach', 'mental', 'ops', 'owner'];
       }
 
+      // Coach reads like staff (PM ruling, post-re-sweep): real sessions
+      // carry coachId null — there is no session-assignment system yet — so
+      // both coach clauses (athlete-indirection, sessionCoachMatches) denied
+      // every real roster list. A coach at a one-coach academy reads any
+      // roster; the attendance WRITE below stays scoped to athlete.coachId.
       allow read: if signedIn() && (
-        (me().role == 'athlete' && me().athleteId == resource.data.athleteId)
-        || (me().role == 'parent' && me().householdId == resource.data.householdId)
-        || (me().role == 'coach'
-            && athleteData(resource.data.athleteId).coachId == request.auth.uid)
-        || (me().role == 'coach' && sessionCoachMatches())
-        || me().role in ['mental', 'ops', 'owner']
+        resource == null
+          ? nullReadOk()
+          : (
+            (me().role == 'athlete' && me().athleteId == resource.data.athleteId)
+            || (me().role == 'parent' && me().householdId == resource.data.householdId)
+            || me().role in ['coach', 'mental', 'ops', 'owner']
+          )
       );
 
       // Sprint 6 pin (QA #6/#7): attendance IS bookings.status — coach IN ->

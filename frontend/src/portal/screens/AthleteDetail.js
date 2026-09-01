@@ -20,8 +20,11 @@ import { useAthleteDetail } from '../hooks';
  *
  * @param {'populated'|'limited'} variant
  */
-export default function AthleteDetail({ variant = 'populated', bare = false, onBack }) {
-  const { data } = useAthleteDetail({ variant });
+export default function AthleteDetail({ variant = 'populated', bare = false, athleteId, onBack }) {
+  // athleteId comes from the route (/portal/athlete/:athleteId) — dropping it
+  // here was QA re-sweep #1: the hook's by-id fetch was fixed but never
+  // received an id, so every child rendered as the seed athlete.
+  const { data } = useAthleteDetail({ variant, athleteId });
   const athlete = data?.athlete;
 
   return (

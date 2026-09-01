@@ -6,7 +6,8 @@ import NumericField from '../components/NumericField';
 import PhoneFrame from '../components/PhoneFrame';
 import ContractCalendar from '../components/ContractCalendar';
 import { DayGridLegend } from '../components/DayGridCell';
-import { Body, Card, ScreenTitle, Tick } from '../components/Primitives';
+import { Body, Card, ErrorNotice, ScreenTitle, Tick } from '../components/Primitives';
+import SkeletonCard from '../components/Skeleton';
 import { useContract, usePracticeLog } from '../hooks';
 // todayISO is a pure calendar helper, not response data — like poolFor in
 // BookSession, the helpers stay importable; data travels through the hook seam.
@@ -47,7 +48,7 @@ export default function CommitmentContract({
   onLog,
   onLogged,
 }) {
-  const { data } = useContract({ variant });
+  const { data, loading, error } = useContract({ variant });
   const [sheetDay, setSheetDay] = useState(null);
   // The practice log lives here and nowhere else — component state is the
   // whole record, per the practice-mode invariant (zero Firestore writes).
@@ -62,6 +63,26 @@ export default function CommitmentContract({
   const practiceLog = usePracticeLog({ practice });
 
   if (variant === 'none') return <NoContract bare={bare} data={data} />;
+
+  // The screen predates the hook's live branch, which made data async — every
+  // render below assumed it synchronously; rendering through with data still
+  // undefined crashed HeroCard (QA re-sweep #4). Loading and error get their
+  // own honest frames before anything touches the payload.
+  if (loading || error || !data) {
+    return (
+      <PhoneFrame bare={bare}>
+        <div style={{ padding: '24px 22px' }}>
+          {error ? (
+            <ErrorNotice title="Contract didn't load">
+              Your contract didn't load. Check your connection and try again.
+            </ErrorNotice>
+          ) : (
+            <SkeletonCard large height={320} />
+          )}
+        </div>
+      </PhoneFrame>
+    );
+  }
 
   const state = data?.state;
   const behind = variant === 'behind';

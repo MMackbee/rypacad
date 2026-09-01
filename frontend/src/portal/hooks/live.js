@@ -285,17 +285,20 @@ export async function fetchSessionsInRange(fromDate, toDate) {
  * and derive allowance usage from these rows, because per the contract there
  * is no stored counter to drift.
  *
- * Note for later parent-surface wiring: this single equality filter is
- * provable for the athlete's own user and for staff. A parent reading a
- * child's bookings needs the compound query (athleteId == AND householdId ==)
- * for the rules to prove household membership on a list read.
+ * The single athleteId filter is provable for the athlete's own user and
+ * for staff. A parent's LIST read is only provable when the query ALSO
+ * filters householdId == theirs — the rules clause is
+ * `me().householdId == resource.data.householdId`, and a field the query
+ * does not constrain denies the whole list (QA re-sweep N1: the family
+ * dashboard hard-crashed on exactly this). Parent-context callers pass
+ * their householdId; own-athlete callers omit it.
  */
-export async function fetchBookings(athleteId) {
+export async function fetchBookings(athleteId, { householdId = null } = {}) {
   if (!athleteId) throw new LiveDataError(ERR.INVALID, 'fetchBookings: athleteId is required.');
   try {
-    const snap = await getDocs(
-      query(collection(db, 'bookings'), where('athleteId', '==', athleteId))
-    );
+    const filters = [where('athleteId', '==', athleteId)];
+    if (householdId) filters.push(where('householdId', '==', householdId));
+    const snap = await getDocs(query(collection(db, 'bookings'), ...filters));
     return snap.docs.map((d) => ({ id: d.id, ...d.data() }));
   } catch (err) {
     throw wrap(err, 'fetchBookings');

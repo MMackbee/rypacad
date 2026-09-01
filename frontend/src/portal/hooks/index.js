@@ -285,7 +285,14 @@ async function liveSchedule(today) {
     return s
       ? {
           ...displaySession(s, today),
-          badge: b.status === 'confirmed' ? { tone: 'green', label: 'Confirmed' } : null,
+          badge:
+            b.status === 'confirmed'
+              ? { tone: 'green', label: 'Confirmed' }
+              : b.status === 'attended'
+              ? { tone: 'neutral', label: 'Attended' }
+              : b.status === 'noshow'
+              ? { tone: 'red', label: 'No-show' }
+              : null,
         }
       : null;
   };
@@ -659,7 +666,9 @@ function shortWeekday(iso) {
  */
 async function liveChildCard(a, today) {
   const pkg = a.packageId ? await fetchPackage(a.packageId) : null;
-  const bookings = await fetchBookings(a.id);
+  // Parent context: the compound filter is what makes the list read
+  // provable under the rules (see fetchBookings).
+  const bookings = await fetchBookings(a.id, { householdId: a.householdId });
   const active = bookings.filter((b) => b.status !== 'cancelled');
   const upcoming = active.filter((b) => b.date >= today).sort(byDateThenId);
 
@@ -779,7 +788,8 @@ async function liveHouseholdAthletes(today) {
   return Promise.all(
     athletes.map(async (a) => {
       const pkg = a.packageId ? await fetchPackage(a.packageId) : null;
-      const bookings = await fetchBookings(a.id);
+      // Parent context — compound filter for rules provability (fetchBookings).
+      const bookings = await fetchBookings(a.id, { householdId: profile.householdId });
       return {
         id: a.id,
         name: a.name,
@@ -882,8 +892,22 @@ export function usePackages() {
   });
 }
 
-/** GET /coach/blocks?date=today - filtered by coach assignment, not role (12). */
+/**
+ * GET /coach/blocks?date=today (12).
+ *
+ * Live (QA re-sweep #6/#7/N4 — this hook had NO live branch, so the coach's
+ * Overview/Sessions/attendance all ran on seed fixtures and every block's
+ * sessionId was null): blocks are TODAY'S real sessions. Every block carries
+ * its real `sessionId`, which is what makes the attendance thread-through
+ * and useSessionAttendance's writes real. Coach assignment on sessions is
+ * still null in real data (one-coach academy), so the day view is today's
+ * schedule rather than an assignment-filtered subset; `expected` is the
+ * session's real booked count, and bay is never invented.
+ */
 export function useCoachDay({ variant = 'today' } = {}) {
+  const live = isLive();
+  const today = todayISO();
+
   const blocks =
     variant === 'concurrent'
       ? COACH_BLOCKS_CONCURRENT
@@ -891,13 +915,58 @@ export function useCoachDay({ variant = 'today' } = {}) {
       ? []
       : COACH_BLOCKS;
 
-  return useSeedResource({
-    coach: COACH,
-    blocks,
-    concurrent: variant === 'concurrent',
-    attention: ATTENTION_LIST,
-    outstanding: COACH_OUTSTANDING,
-  });
+  const liveCoachDay = async () => {
+    const profile = await fetchCurrentUser();
+    // The next day that actually has sessions — today when today does (the
+    // in-season case), otherwise the upcoming session day, so a pre-season
+    // coach sees their real next working day instead of months of "off".
+    const upcoming = (await fetchSessions(today, 1)).filter((s) => s.status !== 'cancelled');
+    const dayISO = upcoming[0]?.date ?? today;
+    const sessions = upcoming.filter((s) => s.date === dayISO);
+    const isToday = dayISO === today;
+    const nowMinutes = new Date().getHours() * 60 + new Date().getMinutes();
+    const toMinutes = (t) => {
+      const m = t.match(/(\d+):(\d+)\s*(AM|PM)/i);
+      if (!m) return 0;
+      const h = (Number(m[1]) % 12) + (m[3].toUpperCase() === 'PM' ? 12 : 0);
+      return h * 60 + Number(m[2]);
+    };
+    return {
+      coach: { name: profile.displayName ?? 'Coach', date: isToday ? today : `Next session day · ${dayISO}` },
+      blocks: sessions
+        .map((s) => {
+          const start = toMinutes(s.time);
+          const status = !isToday
+            ? 'next'
+            : nowMinutes >= start + 60 ? 'closed' : nowMinutes >= start ? 'now' : 'next';
+          return {
+            id: s.id,
+            sessionId: s.id,
+            time: s.time,
+            type: s.type,
+            name: s.label || (s.type === 'tournament' ? 'Tournament block' : 'Training block'),
+            meta: `${s.booked ?? 0} of ${s.capacity ?? '—'} booked`,
+            status,
+          };
+        }),
+      concurrent: false,
+      attention: [], // no live signal to derive this from yet — never invented
+      outstanding: [],
+    };
+  };
+
+  return useSeedResource(
+    live
+      ? null
+      : {
+          coach: COACH,
+          blocks,
+          concurrent: variant === 'concurrent',
+          attention: ATTENTION_LIST,
+          outstanding: COACH_OUTSTANDING,
+        },
+    live ? { source: liveCoachDay, deps: ['coach-day', today] } : undefined
+  );
 }
 
 /**

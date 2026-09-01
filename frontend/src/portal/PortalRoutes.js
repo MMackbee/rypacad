@@ -110,6 +110,21 @@ function AthleteDetailRoute({ onBack }) {
 }
 
 /**
+ * Bare /portal: the component-states harness is a REVIEW tool and belongs to
+ * seed mode only. In live mode the index redirects like any signed-in
+ * surface — role's own landing, or sign-in (QA re-sweep N3: the harness was
+ * reachable from the real app shell).
+ */
+function PortalIndex() {
+  const live = isLive();
+  const { user, provisioned, loading } = useAuthSession(live ? undefined : { variant: 'idle' });
+  if (!live) return <StatesHarness />;
+  if (loading) return null;
+  if (!user || !provisioned) return <Navigate to="/portal/signin" replace />;
+  return <Navigate to={LANDING_BY_ROLE[user.role] || '/portal/not-provisioned'} replace />;
+}
+
+/**
  * Book a Session needs to know whether the caller is a parent (child selector,
  * Sprint 6) — resolved from the live session the same disciplined way
  * RequireRole does it; seed mode stays the athlete flow.
@@ -181,7 +196,7 @@ export default function PortalRoutes() {
 
   return (
     <Routes>
-      <Route index element={<StatesHarness />} />
+      <Route index element={<PortalIndex />} />
 
       <Route
         path="signin"
