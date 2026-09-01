@@ -65,10 +65,12 @@ const PROJECT_ID = 'rypacad';
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 
 // Capacity per block, replicated from frontend/src/portal/data/schedule.js
-// (export const CAPACITY = { training: 14, tournament: 14 }) — replicated with
-// this source note rather than bundling the module for one constant. If
-// schedule.js changes CAPACITY, change this too.
-const CAPACITY = { training: 14, tournament: 14 };
+// (export const CAPACITY = { training: 15, tournament: 15 } — owner's rule:
+// max 15 kids per session) — replicated with this source note rather than
+// bundling the module for one constant. If schedule.js changes CAPACITY,
+// change this too; capacity is a SYNCED field, so a re-run propagates the
+// new number to existing sessions.
+const CAPACITY = { training: 15, tournament: 15 };
 
 // Title convention, deliberately forgiving: the calendar is entered by hand,
 // so any title whose first word is "training"/"tournament" (any case) is
@@ -391,7 +393,10 @@ async function commit(target, writes) {
 // Diff — desired vs existing, honoring the preserve/cancel/delete pins.
 // ---------------------------------------------------------------------------
 
-const SYNCED_FIELDS = ['date', 'time', 'type', 'label', 'status', 'gcalEventId'];
+// capacity is synced (not just set on create) so a capacity-rule change
+// reaches sessions that already exist; `booked` and coach assignments made
+// in the portal remain preserved by the mask.
+const SYNCED_FIELDS = ['date', 'time', 'type', 'capacity', 'label', 'status', 'gcalEventId'];
 
 function planSync(desired, existing) {
   const plan = { creates: [], updates: [], unchanged: [], deletes: [], cancels: [], conflicts: [], seededUntouched: [] };

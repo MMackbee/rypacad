@@ -34,14 +34,12 @@ export const SATURDAY_BLOCKS = [
 /**
  * Capacity per block.
  *
- * OPEN — and this is the one that decides whether the package entitlements hold.
- * Two Saturday tournament blocks at 14 serve ~121 entries a month; the packages
- * promise 2-4 each, which needs roughly 23 per block at break-even enrollment.
- * If tournaments run as a larger event across the bays, raise `tournament` here
- * and the arithmetic clears. If they run like a normal capped session, the
- * entitlements have to come down instead.
+ * DECIDED (owner, 2026-08-31, with the real 26/27 calendar entry): max 15
+ * kids per session, both types. The earlier open question about tournament
+ * arithmetic vs package entitlements is now a scheduling question — how many
+ * tournament blocks run — not a capacity one.
  */
-export const CAPACITY = { training: 14, tournament: 14 };
+export const CAPACITY = { training: 15, tournament: 15 };
 
 const DAY = { SUN: 0, MON: 1, TUE: 2, WED: 3, THU: 4, FRI: 5, SAT: 6 };
 
