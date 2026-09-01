@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useMemo, useState } from 'react';
 import { color, font, radius } from '../tokens';
 import AthleteRow, { AttendanceControls } from '../components/AthleteRow';
 import BottomTabBar from '../components/BottomTabBar';
@@ -8,7 +8,25 @@ import StatusBadge from '../components/StatusBadge';
 import TypeChip from '../components/TypeChip';
 import { BackLink, Body, Card, ScreenTitle, SectionLabel, SignOutButton } from '../components/Primitives';
 import useRoster from '../hooks/useRoster';
+import * as hooks from '../hooks';
 import { useCoachRoster, useSession } from '../hooks';
+import { isLive } from '../hooks/live';
+
+/**
+ * The routing lane is adding `useSessionAttendance(sessionId)` to hooks/index.js
+ * in parallel against the Sprint 6 pin (TEAM.md) - it does not exist in this
+ * worktree yet. A namespace import (`* as hooks` above) plus this fallback
+ * keeps the hook call below unconditional (rules of hooks) and keeps this
+ * screen buildable today; `hooks.useSessionAttendance` is resolved once per
+ * module load, never mid-render, so which function runs cannot flip across
+ * renders of a mounted screen. Once routing's export lands and the branches
+ * merge, this fallback stops being used automatically - nothing here needs
+ * to change.
+ */
+function useSessionAttendanceFallback() {
+  return { data: null, loading: false, error: null, mark: () => {} };
+}
+const useSessionAttendance = hooks.useSessionAttendance || useSessionAttendanceFallback;
 
 /**
  * Roster - coach. The coach's full assigned roster, not one session's
@@ -101,19 +119,83 @@ export default function Roster({ bare = false, onSignOut }) {
  * fix: a component-local override the coach's own tap sets, the same pattern
  * CommitmentContract uses for its practice-mode overlay.
  *
+ * Sprint 6 pin (TEAM.md, QA #6/#7): wired to the routing lane's pinned
+ * `useSessionAttendance(sessionId)` -> { data: [{ bookingId, athleteId, name,
+ * status }], loading, error, mark(bookingId, status) } when live and a real
+ * `sessionId` reaches this screen - IN marks 'attended', OUT marks 'noshow',
+ * clearing a mark returns it to 'confirmed'. `useRoster`'s demo/harness path
+ * is preserved exactly (unchanged when not live, or when no sessionId is
+ * passed) - both hooks are called unconditionally every render and this
+ * screen picks which result to use, the same split-on-a-stable-condition
+ * pattern PortalRoutes.js already uses for isLive().
+ *
+ * `sessionId` is meant to reach this screen as a prop from PortalRoutes.js
+ * (routing lane, not this lane's file) once the Coach Dashboard's "Start
+ * roster"/"View roster" tap threads a real session id through - it does not
+ * today (see CoachDashboard.js's BlockCard and the sprint report). Without
+ * it this screen falls back to the exact pre-Sprint-6 demo/seed behavior, so
+ * nothing regresses while that routing work lands; `blockIndex`, if passed,
+ * at least lets a seed-mode caller pick which of today's generated blocks the
+ * header describes (COACH_BLOCKS and the season's daily blocks share the same
+ * chronological order), closing QA #6 for the part this lane owns.
+ *
  * @param {'pre'|'progress'|'complete'|'noshow'} variant
+ * @param {string} [sessionId]   Real Firestore session id - live mode only.
+ * @param {number} [blockIndex]  Which of today's blocks (0-based) - seed mode.
  */
-export function SessionAttendance({ variant = 'pre', bare = false, onBack }) {
-  const { roster, marks, mark, counts, sessionState: demoState } = useRoster({ variant });
+export function SessionAttendance({ variant = 'pre', bare = false, onBack, sessionId, blockIndex }) {
+  const { roster: demoRoster, marks: demoMarks, mark: demoMark, counts: demoCounts, sessionState: demoState } =
+    useRoster({ variant });
   // The block comes out of the generated season, so the header matches what the
   // schedule says is actually running rather than a hand-written constant.
-  const { data: session } = useSession();
+  // blockIndex (from CoachDashboard's tapped block, seed mode) narrows it to
+  // the exact block that was tapped instead of always the default.
+  const { data: session } = useSession(blockIndex != null ? { blockIndex } : undefined);
+
+  // Live attendance rows for a real session, always called (rules of hooks) -
+  // only used when `live` below is true.
+  const liveAttendance = useSessionAttendance(sessionId);
+  const live = isLive() && sessionId != null;
+
+  const bookingByAthlete = useMemo(() => {
+    if (!liveAttendance.data) return new Map();
+    return new Map(liveAttendance.data.map((r) => [r.athleteId, r.bookingId]));
+  }, [liveAttendance.data]);
+
+  // bookings.status -> the roster's three-state mark (Sprint 6 pin: IN ->
+  // 'attended', OUT -> 'noshow', clearing a mark -> 'confirmed'/unmarked).
+  const roster = live
+    ? (liveAttendance.data ?? []).map((r) => ({ id: r.athleteId, name: r.name, meta: null }))
+    : demoRoster;
+  const marks = live
+    ? Object.fromEntries(
+        (liveAttendance.data ?? [])
+          .map((r) => [r.athleteId, r.status === 'attended' ? 'in' : r.status === 'noshow' ? 'out' : null])
+          .filter(([, v]) => v != null)
+      )
+    : demoMarks;
+  const counts = live
+    ? {
+        in: roster.filter((a) => marks[a.id] === 'in').length,
+        out: roster.filter((a) => marks[a.id] === 'out').length,
+        unmarked: roster.filter((a) => marks[a.id] == null).length,
+      }
+    : demoCounts;
+  const mark = live
+    ? (athleteId, next) => {
+        const bookingId = bookingByAthlete.get(athleteId);
+        if (!bookingId) return;
+        liveAttendance.mark(bookingId, next === 'in' ? 'attended' : next === 'out' ? 'noshow' : 'confirmed');
+      }
+    : demoMark;
 
   // Overrides the demo state the instant the coach actually starts the
   // session - real use never passes a variant, so demoState is always 'pre'
-  // until this fires.
+  // until this fires. Live mode has no persisted "session in progress" concept
+  // yet (only the attendance marks persist, per the Sprint 6 pin), so it
+  // starts 'pre' the same way and is driven by the same local override.
   const [localStatus, setLocalStatus] = useState(null);
-  const sessionState = localStatus ?? demoState;
+  const sessionState = localStatus ?? (live ? 'pre' : demoState);
 
   const started = sessionState !== 'pre';
   const completed = sessionState === 'completed';

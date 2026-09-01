@@ -20,16 +20,48 @@ import { useAdminDashboard } from '../hooks';
  *
  * Sprint 5 pin (TEAM.md): the "All tiers" filter button was dead - it had no
  * onClick at all, so tapping it did nothing regardless of the underlying
- * filter data (which already matched correctly). `filtered` below is now
- * local state the pill itself drives, toggling between TIER_FILTERS' two
- * entries.
+ * filter data (which already matched correctly).
+ *
+ * Sprint 6 pin (TEAM.md, QA #10): the button only ever toggled All <-> "8 + 3
+ * only" - `useAdminDashboard`'s `variant` param only distinguishes those two
+ * (`TIER_FILTERS` in data/admin.js has just those two entries). Cycling
+ * through every real tier needs a per-tier filter the hook doesn't expose, so
+ * this screen now fetches the full unfiltered payload once and does the
+ * cycling/filtering itself from `data.enrollment` - the same real,
+ * hook-provided per-package counts (ENROLLMENT_BY_PACKAGE) the "Enrollment by
+ * package" card already renders, so nothing here is invented and a future
+ * tier added to that catalogue extends the cycle with no screen edit. The
+ * outstanding-list filter mirrors the hook's own `matches()` predicate
+ * exactly (packageIds match, or the row is org-wide with packageIds: null).
  *
  * @param {'populated'|'filtered'} variant
  * @param {() => void} [onSignOut]  Hidden when not supplied (harness/demo).
  */
 export default function AdminDashboard({ variant = 'populated', bare = false, onSignOut, onOpenAthlete }) {
-  const [filtered, setFiltered] = useState(variant === 'filtered');
-  const { data } = useAdminDashboard({ variant: filtered ? 'filtered' : 'populated' });
+  const { data } = useAdminDashboard();
+  const enrollmentRows = data?.enrollment ?? [];
+  // All -> every real package row, in the catalogue's own order (4+2, 8+3,
+  // 12+4, 16+4, Elite per ENROLLMENT_BY_PACKAGE) -> back to All.
+  const cycle = [
+    { id: 'all', label: 'All tiers', count: data?.metrics?.enrolled ?? null },
+    ...enrollmentRows.map((r) => ({ id: r.id, label: `${r.name} only`, count: r.athletes })),
+  ];
+  // The harness's "Filtered by tier" demo state previously always meant
+  // "8 + 3 only" (TIER_FILTERS[1]) - index 2 in this cycle (All, 4+2, 8+3,
+  // 12+4, 16+4, Elite) preserves that exact starting point.
+  const [filterIndex, setFilterIndex] = useState(variant === 'filtered' ? 2 : 0);
+  const active = cycle[Math.min(filterIndex, cycle.length - 1)];
+  const filtered = active.id !== 'all';
+
+  const outstanding = filtered
+    ? (data?.outstanding ?? []).filter((o) => o.packageIds == null || o.packageIds.includes(active.id))
+    : data?.outstanding ?? [];
+
+  const metrics = data?.metrics
+    ? filtered
+      ? { ...data.metrics, enrolled: active.count, enrolledLabel: `athletes on ${active.label.replace(' only', '')}` }
+      : data.metrics
+    : null;
 
   return (
     <PhoneFrame
@@ -47,22 +79,27 @@ export default function AdminDashboard({ variant = 'populated', bare = false, on
             </div>
             <SignOutButton onSignOut={onSignOut} />
           </div>
-          <TierFilter filter={data?.filter} active={filtered} onToggle={() => setFiltered((f) => !f)} />
+          <TierFilter
+            active={active}
+            filtered={filtered}
+            onToggle={() => setFilterIndex((i) => (i + 1) % (cycle.length || 1))}
+          />
         </div>
       }
     >
       <div style={{ padding: '0 22px 24px', display: 'flex', flexDirection: 'column', gap: 12 }}>
-        <OutstandingCard items={data?.outstanding ?? []} onOpenAthlete={onOpenAthlete} />
-        <MetricGrid metrics={data?.metrics} />
-        <EnrollmentCard rows={data?.enrollment ?? []} highlight={data?.highlightPackage} />
+        <OutstandingCard items={outstanding} onOpenAthlete={onOpenAthlete} />
+        <MetricGrid metrics={metrics} />
+        <EnrollmentCard rows={enrollmentRows} highlight={filtered ? active.id : null} />
         <BlockFillCard bars={data?.blockFill ?? []} filtered={filtered} />
       </div>
     </PhoneFrame>
   );
 }
 
-function TierFilter({ filter, active, onToggle }) {
-  if (!filter) return null;
+/** Cycles through every real tier on tap - All -> 4+2 -> 8+3 -> 12+4 -> 16+4 -> Elite -> All. */
+function TierFilter({ active, filtered, onToggle }) {
+  if (!active) return null;
   return (
     <button
       type="button"
@@ -72,7 +109,7 @@ function TierFilter({ filter, active, onToggle }) {
         height: 42,
         marginTop: 14,
         background: color.surface,
-        border: `1px solid ${active ? color.primary : color.border}`,
+        border: `1px solid ${filtered ? color.primary : color.border}`,
         borderRadius: radius.control,
         display: 'flex',
         alignItems: 'center',
@@ -86,10 +123,10 @@ function TierFilter({ filter, active, onToggle }) {
           flex: 1,
           textAlign: 'left',
           font: `500 13px ${font.body}`,
-          color: active ? color.primary : color.textSecondary,
+          color: filtered ? color.primary : color.textSecondary,
         }}
       >
-        {filter.label} · {filter.count} athletes
+        {active.label} · {active.count != null ? active.count : '—'} athletes
       </span>
       <span
         aria-hidden="true"

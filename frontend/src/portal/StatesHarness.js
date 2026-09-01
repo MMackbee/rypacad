@@ -78,7 +78,10 @@ export const SCREEN_STATES = [
              }],
              ['full', 'Block full'],
              ['limitTraining', 'Training spent'], ['limitTournament', 'Tournaments spent'],
-             ['confirmed', 'Confirmed']] },
+             ['confirmed', 'Confirmed'],
+             // Sprint 6 pin (TEAM.md, QA #2): a parent gets the child selector
+             // above the calendar; an athlete never does.
+             ['open', 'Parent · pick a child', { role: 'parent' }]] },
   { id: '06', title: 'Practice DNA', Screen: PracticeDNA, role: 'athlete',
     states: [['complete', 'Complete'], ['partial', 'Partial'], ['pending', 'Pending']] },
   { id: '07', title: 'Commitment Contract', Screen: CommitmentContract, role: 'athlete',
