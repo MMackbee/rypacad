@@ -246,3 +246,41 @@ emulator seeded via `npm run seed:emulator` plus a calendar sync
 (`npm run sync:emulator -- --from ... --to ...`) so QA runs against the
 real season's data shape. Emulator writes are encouraged — a QA booking
 exercises the deployed rules' exact logic locally.
+
+## Sprint 6 pins — QA defect burn-down (2026-08-31, QA report on file)
+
+Theme: the five major defects are one disease — surfaces never live-wired
+plus no post-write refresh. Fix the disease, not five symptoms.
+
+Rulings (PM):
+- Past sessions read CLOSED/ended and are not startable — "never
+  time-gated" forbids PRE-start gates only (QA #9: by design, no change).
+- Admin outstanding-list name links stay inert until admin reads live data
+  (QA #11: documented, deferred).
+- Booking capacity is enforced client-transactionally (QA #5): booking =
+  one Firestore transaction (read session, require booked < capacity,
+  create booking, update booked+1). Rules addition: sessions update
+  allowed ONLY when the diff is exactly booked+1 within capacity (and
+  booked-1 >= 0 for future cancellation), by a signed-in portal user.
+- Attendance persists as bookings.status (QA #7): coach IN -> 'attended',
+  OUT -> 'noshow'; rules allow the assigned coach (athlete.coachId ==
+  caller) to update ONLY the status field between
+  confirmed|attended|noshow.
+- Parents can book (QA #2): sessions readable by role parent; bookings
+  create allowed for a parent whose householdId matches the booking AND
+  the athlete doc; BookSession gets a child selector when the signed-in
+  user is a parent (pinned hook: useHouseholdAthletes already returns the
+  choices; the screen passes athleteId through to book()).
+- Live-wiring completeness (QA #3, #4): useAthleteDashboard (allowance,
+  next session — derived from real bookings, nothing invented),
+  useHousehold's per-child cards, and useContract's day grid (from
+  contractLogs; fulfilled = minutes >= contractMinutes) all read live when
+  isLive(). No screen may show seed numbers in live mode.
+- Post-write refresh (QA #3/#5/#7 friction): routing owns one small
+  invalidation seam — after createBooking / createContractLog / attendance
+  update, dependent hooks re-run (generalize usePracticeLog's refreshKey;
+  no global state library).
+- useAthleteDetail in live mode ALWAYS fetches the passed athleteId — the
+  seed-kid-id shortcut caused QA #1 (always-Jordan) and is removed.
+- createBooking rejections are wrapped in plain language (QA #8): the
+  duplicate case says the athlete already has this session booked.
