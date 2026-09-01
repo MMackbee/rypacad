@@ -232,13 +232,19 @@ function buildDocs(portal) {
     });
   }
 
-  // users — one per portal role in this sprint's scope. In production these
-  // doc ids are Firebase Auth uids; the emulator seed uses readable slugs.
+  // users — one per portal role, ALL SIX (the QA test-account suite,
+  // TEAM.md "QA testing": window.__rypTestAuth.signInAs(<doc id>) signs in
+  // as any of these against the auth emulator). In production these doc ids
+  // are Firebase Auth uids; the emulator seed uses readable slugs. The
+  // athlete carries householdId too — the booking write path and its rules
+  // require the household linkage, matching production provisioning.
   const users = new Map([
     ['parent-dana', { role: 'parent', householdId, athleteId: null, staff: false, displayName: 'Dana', email: 'dana@email.com' }],
-    ['athlete-jordan', { role: 'athlete', athleteId: 'jordan', householdId: null, staff: false, displayName: 'Jordan Whitfield', email: null }],
+    ['athlete-jordan', { role: 'athlete', athleteId: 'jordan', householdId, staff: false, displayName: 'Jordan Whitfield', email: null }],
     [coachUid, { role: 'coach', athleteId: null, householdId: null, staff: true, displayName: COACH.name, email: null }],
     ['owner', { role: 'owner', athleteId: null, householdId: null, staff: true, displayName: null, email: null }],
+    ['mental', { role: 'mental', athleteId: null, householdId: null, staff: true, displayName: 'Yannick', email: null }],
+    ['ops', { role: 'ops', athleteId: null, householdId: null, staff: true, displayName: 'Ops', email: null }],
   ]);
 
   return { packages, sessions, households, athletes, users, contractLogs };

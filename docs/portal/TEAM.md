@@ -223,3 +223,26 @@ Direction-only this sprint (structural seams, no invented integrations):
   Parallax stays a named seam with no API invented.
 - Diagnostic capture trims to what is assessable in the indoor facility;
   the rest is deferred, not faked.
+
+## QA testing (2026-08-31)
+
+Fifth team role: `qa-tester` (definition in `.claude/agents/`) — tests in
+the browser under every role, files a defect report to the PM, never fixes.
+
+The sandbox: `REACT_APP_USE_EMULATORS=true` connects the app to the local
+emulators (auth :9099, Firestore :8080) and exposes
+`window.__rypTestAuth.signInAs(uid)` / `.signOut()` — sign-in via UNSIGNED
+custom tokens the auth emulator accepts, so no passwords exist anywhere in
+the QA flow, and none of it can ship: the hook and emulator connection are
+compiled out unless the env var is set at build time.
+
+Test-account suite (users/ doc ids in the seed, one per role):
+`athlete-jordan` (Whitfield household, g-8-3), `parent-dana`,
+`coach-luke`, `owner`, `mental`, `ops`.
+
+Standing posture: production dev server on :3000 (real Firebase), QA
+server on :3001 (`PORT=3001 REACT_APP_USE_EMULATORS=true npm start`),
+emulator seeded via `npm run seed:emulator` plus a calendar sync
+(`npm run sync:emulator -- --from ... --to ...`) so QA runs against the
+real season's data shape. Emulator writes are encouraged — a QA booking
+exercises the deployed rules' exact logic locally.
