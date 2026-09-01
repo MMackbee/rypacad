@@ -222,6 +222,10 @@ export default function BookSession({
           pool: poolFor(booked.type),
           email: data?.confirmation?.email,
           note: data?.confirmation?.note,
+          // For the add-to-calendar template link.
+          date: booked.date,
+          time: booked.time,
+          meridiem: booked.meridiem,
         }}
         onBack={() => setBooked(null)}
       />
@@ -575,9 +579,35 @@ function BookingSkeleton() {
   );
 }
 
+/**
+ * Google Calendar event-template URL for the booked block — floating local
+ * times pinned by ctz, so no timezone math happens in the client. One-hour
+ * blocks per the season convention. Null when the confirmation lacks a
+ * parseable date/time (the button hides rather than dead-clicking).
+ */
+function calendarTemplateUrl(c) {
+  const m = String(c.time || '').match(/(\d+):(\d+)/);
+  if (!c.date || !m) return null;
+  let h = Number(m[1]) % 12;
+  if (String(c.meridiem || '').toUpperCase() === 'PM') h += 12;
+  const mins = Number(m[2]);
+  const pad = (n) => String(n).padStart(2, '0');
+  const d = c.date.replace(/-/g, '');
+  const params = new URLSearchParams({
+    action: 'TEMPLATE',
+    text: `RYP Academy — ${c.name || 'Training block'}`,
+    dates: `${d}T${pad(h)}${pad(mins)}00/${d}T${pad(h + 1)}${pad(mins)}00`,
+    ctz: 'America/Chicago',
+    details: 'Booked through the RYP Academy portal.',
+    location: 'RYP Academy, Eden Prairie, MN',
+  });
+  return `https://calendar.google.com/calendar/render?${params}`;
+}
+
 function Confirmed({ bare, confirmation, onBack }) {
   const c = confirmation;
   if (!c) return null;
+  const calUrl = calendarTemplateUrl(c);
 
   return (
     <PhoneFrame
@@ -592,7 +622,11 @@ function Confirmed({ bare, confirmation, onBack }) {
             gap: 10,
           }}
         >
-          <Button>Add to calendar</Button>
+          {calUrl ? (
+            <Button onClick={() => window.open(calUrl, '_blank', 'noopener')}>
+              Add to calendar
+            </Button>
+          ) : null}
           <Button variant="secondary" onClick={onBack} style={{ boxShadow: 'none' }}>
             Back to schedule
           </Button>

@@ -139,8 +139,8 @@ export default function CommitmentContract({
           hint={state?.hint}
           onLog={handleLog}
           minutes={data?.tierMinutes}
-          logged={Boolean(practiceLogged) || todayLog != null}
-          loggedMinutes={todayLog ?? data?.tierMinutes}
+          logged={Boolean(practiceLogged) || todayLog != null || Boolean(practiceLog.data?.loggedToday)}
+          loggedMinutes={practiceLog.data?.todayMinutes || todayLog || data?.tierMinutes}
         />
       }
     >
@@ -330,6 +330,26 @@ function ContractFooter({ complete, hint, onLog, minutes, logged = false, logged
           >
             <Tick size={14} color={color.primary} thickness={2.5} />
             <span>Logged today · {loggedMinutes ?? minutes} min</span>
+            {/* Minutes accumulate (a morning and an evening session are one
+                day's total), so the logged state keeps a way back into the
+                sheet instead of going inert for the rest of the day. */}
+            {onLog ? (
+              <button
+                type="button"
+                onClick={onLog}
+                style={{
+                  background: 'none',
+                  border: 'none',
+                  padding: '4px 6px',
+                  font: `600 13px ${font.body}`,
+                  color: color.primary,
+                  textDecoration: 'underline',
+                  cursor: 'pointer',
+                }}
+              >
+                + Add more
+              </button>
+            ) : null}
           </div>
         ) : complete ? (
           <Button variant="outline" height={56} style={{ borderRadius: 10, boxShadow: 'none' }}>

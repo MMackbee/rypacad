@@ -21,11 +21,14 @@ export const TABS = {
     { key: 'home', label: 'Home', icon: 'home', route: '/portal/home' },
     { key: 'schedule', label: 'Schedule', icon: 'calendar', route: '/portal/schedule' },
     { key: 'contract', label: 'Contract', icon: 'target', route: '/portal/contract' },
-    { key: 'dna', label: 'DNA', icon: 'chart', route: '/portal/dna' },
+    // DNA is off for players (owner's call, 2026-09-01) — the screen stays
+    // built for the coach/staff capture flow to grow into.
   ],
   parent: [
+    // No separate Children tab: Home IS the children overview, and the old
+    // /portal/athlete route it pointed at now redirects to /portal/family —
+    // two tabs, one destination (owner's report, 2026-09-01).
     { key: 'home', label: 'Home', icon: 'home', route: '/portal/family' },
-    { key: 'children', label: 'Children', icon: 'children', route: '/portal/athlete' },
     { key: 'billing', label: 'Billing', icon: 'card', route: '/portal/billing' },
     { key: 'settings', label: 'Settings', icon: 'settings', route: '/portal/settings' },
   ],

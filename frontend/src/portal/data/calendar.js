@@ -184,8 +184,17 @@ export function buildContractMonthFromLogs({ today, minutesByDate, contractMinut
         state = 'future';
         tally.daysLeft++;
       } else if (iso === today) {
-        state = 'open'; // loggable via the pinned CTA, not yet a miss
-        tally.daysLeft++;
+        // Today goes green the moment it is fulfilled - hardcoding 'open'
+        // here meant a logged day never flipped until tomorrow (user
+        // report, 2026-09-01). Unfulfilled today stays 'open': loggable,
+        // not yet a miss.
+        if (fulfilled(iso)) {
+          state = 'logged';
+          tally.logged++;
+        } else {
+          state = 'open';
+          tally.daysLeft++;
+        }
       } else {
         tally.dueSoFar++;
         state = fulfilled(iso) ? 'logged' : 'missed';

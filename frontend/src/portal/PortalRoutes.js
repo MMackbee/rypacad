@@ -15,7 +15,6 @@ import CoachDashboard from './screens/CoachDashboard';
 import Roster, { SessionAttendance } from './screens/Roster';
 import DiagnosticCapture from './screens/DiagnosticCapture';
 import AthleteDashboard from './screens/AthleteDashboard';
-import PracticeDNA from './screens/PracticeDNA';
 import SeasonSchedule from './screens/SeasonSchedule';
 import CommitmentContract from './screens/CommitmentContract';
 import AthleteDetail from './screens/AthleteDetail';
@@ -257,14 +256,9 @@ export default function PortalRoutes() {
           </RequireRole>
         }
       />
-      <Route
-        path="dna"
-        element={
-          <RequireRole roles={['athlete']}>
-            <PracticeDNA bare />
-          </RequireRole>
-        }
-      />
+      {/* Practice DNA is turned off for players (owner's call, 2026-09-01);
+          the screen survives in the harness for the future staff flow. */}
+      <Route path="dna" element={<Navigate to="/portal/home" replace />} />
       <Route
         path="season"
         element={

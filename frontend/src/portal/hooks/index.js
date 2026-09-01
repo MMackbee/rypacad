@@ -1346,6 +1346,10 @@ async function livePracticeLog(today) {
   return {
     totalMinutes: cycleLogs.reduce((sum, l) => sum + (l.minutes || 0), 0),
     loggedToday: logs.some((l) => l.date === today),
+    // Today's already-logged minutes: a second entry the same day ADDS to
+    // this (a morning session plus an evening session is one day's total) —
+    // the original replace-on-relog silently discarded earlier practice.
+    todayMinutes: logs.find((l) => l.date === today)?.minutes ?? 0,
     contractMinutes: athlete.contractMinutes ?? null,
   };
 }
@@ -1394,19 +1398,24 @@ export function usePracticeLog({ today = todayISO(), practice = false } = {}) {
   );
 
   const logPractice = async ({ minutes }) => {
+    // A second entry the same day ACCUMULATES (owner's report, 2026-09-01:
+    // "my time logged resets on every entry") — one doc per day still, but
+    // its minutes are the day's running total, capped at the rules' 720.
     if (!live) {
-      const entry = { date: today, minutes };
+      const already = seedLoggedToday ? seedEntry.minutes : 0;
+      const entry = { date: today, minutes: Math.min(720, already + minutes) };
       setSeedEntry(entry);
       return entry;
     }
     const { athlete } = await liveAthleteIdentity();
+    const already = state.data?.todayMinutes ?? 0;
     // createContractLog bumps the 'contractLogs' generation itself on
     // success - this hook's own subscription above picks that up and
     // re-runs, so there is nothing to bump here directly.
     return createContractLog({
       athleteId: athlete.id,
       date: today,
-      minutes,
+      minutes: Math.min(720, already + minutes),
       contractMinutes: athlete.contractMinutes ?? null,
     });
   };
