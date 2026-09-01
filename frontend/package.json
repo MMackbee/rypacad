@@ -16,7 +16,8 @@
         "react-dom": "^18.2.0",
         "react-dropzone": "^14.3.8",
         "react-router-dom": "^6.11.0",
-        "react-scripts": "5.0.1"
+        "react-scripts": "5.0.1",
+        "serve": "^14.2.6"
     },
     "scripts": {
         "start": "react-scripts start",

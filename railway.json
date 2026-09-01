@@ -1,0 +1,12 @@
+{
+  "$schema": "https://railway.com/railway.schema.json",
+  "build": {
+    "builder": "RAILPACK",
+    "buildCommand": "cd frontend && npm ci && CI=false npm run build"
+  },
+  "deploy": {
+    "startCommand": "cd frontend && npx serve -s build -l ${PORT:-3000}",
+    "restartPolicyType": "ON_FAILURE",
+    "restartPolicyMaxRetries": 3
+  }
+}
