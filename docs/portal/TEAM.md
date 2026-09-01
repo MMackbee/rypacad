@@ -284,3 +284,19 @@ Rulings (PM):
   seed-kid-id shortcut caused QA #1 (always-Jordan) and is removed.
 - createBooking rejections are wrapped in plain language (QA #8): the
   duplicate case says the athlete already has this session booked.
+
+## Recurring booking pins (owner's ruling, 2026-09-01)
+
+- Recurrence = same weekday + same time, weekly, from the first booked
+  session through a chosen end date. Offered AFTER a successful single
+  booking, on the confirmation screen — the one-tap single flow is
+  untouched.
+- CAP RULE: each booking spends its own month's allowance, and the
+  recurrence never books past the monthly limit for its pool — when a
+  month's pool is exhausted it SKIPS to the next month (which resets).
+  Full sessions, missing weeks, and already-booked sessions are skipped
+  and reported, never errored.
+- Every recurring instance is the same individual booking transaction
+  (capacity check + booked+1); no new collection, no rules change — the
+  cap is client-derived exactly like the allowance itself.
+- The summary is honest: booked N, skipped M with reasons.

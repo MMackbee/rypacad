@@ -564,7 +564,104 @@ export function useBooking({ variant = 'open', today = todayISO(), practice = fa
     });
   };
 
-  return { ...state, book, bookingFor: identity ? identity.role : null };
+  /**
+   * Recurring booking (owner's ruling, TEAM.md "Recurring booking pins"):
+   * book the same weekday+time weekly, from the week AFTER `slot` through
+   * `untilISO`, capped at the monthly allowance for the slot's pool — a
+   * month whose pool is exhausted is skipped week by week until the next
+   * month resets it. Full sessions, missing weeks and already-booked
+   * sessions skip with a reason. Every instance is the same individual
+   * booking transaction as book(); nothing new is stored.
+   *
+   * Returns { booked: [{date,id}], skipped: [{date,reason}] }.
+   */
+  const bookRecurring = async (slot, { athleteId, untilISO } = {}) => {
+    if (!live) return { booked: [], skipped: [], simulated: true };
+    if (!identity) {
+      throw new LiveDataError(ERR.INVALID, 'bookRecurring() called before booking data loaded.');
+    }
+    if (!untilISO) {
+      throw new LiveDataError(ERR.INVALID, 'bookRecurring() needs { untilISO }.');
+    }
+    const forAthleteId = identity.role === 'parent' ? athleteId : identity.athleteId;
+    if (!forAthleteId) {
+      throw new LiveDataError(ERR.INVALID, 'bookRecurring() needs the child - pass { athleteId }.');
+    }
+
+    const athlete = await fetchAthlete(forAthleteId);
+    const pkg = athlete.packageId ? await fetchPackage(athlete.packageId) : null;
+    const pool = poolFor(slot.type);
+    const limit = pkg ? (pool === 'tournaments' ? pkg.tournaments : pkg.training) ?? 0 : 0;
+    const bookings = await fetchBookings(
+      forAthleteId,
+      identity.role === 'parent' ? { householdId: identity.householdId } : {}
+    );
+    // Per-month spend for this pool, and which sessions are already held -
+    // both derived, same as the allowance itself (no stored counters).
+    const tally = new Map();
+    const have = new Set();
+    for (const b of bookings) {
+      if (b.status === 'cancelled') continue;
+      have.add(b.sessionId);
+      if (b.pool === pool) {
+        const month = b.date.slice(0, 7);
+        tally.set(month, (tally.get(month) || 0) + 1);
+      }
+    }
+
+    const addDays = (iso, n) => {
+      const d = new Date(`${iso}T12:00:00Z`);
+      d.setUTCDate(d.getUTCDate() + n);
+      return d.toISOString().slice(0, 10);
+    };
+
+    const booked = [];
+    const skipped = [];
+    for (let date = addDays(slot.date, 7); date <= untilISO; date = addDays(date, 7)) {
+      const month = date.slice(0, 7);
+      if (limit > 0 && (tally.get(month) || 0) >= limit) {
+        skipped.push({ date, reason: 'monthly limit' });
+        continue;
+      }
+      const daySessions = (await fetchSessions(date, 1)).filter((s) => s.date === date);
+      const match = daySessions.find(
+        (s) => s.time === slot.time && s.type === slot.type && s.status !== 'cancelled'
+      );
+      if (!match) {
+        skipped.push({ date, reason: 'no session' });
+        continue;
+      }
+      if (have.has(match.id)) {
+        skipped.push({ date, reason: 'already booked' });
+        continue;
+      }
+      if ((match.booked ?? 0) >= (match.capacity ?? 0)) {
+        skipped.push({ date, reason: 'full' });
+        continue;
+      }
+      try {
+        await createBooking({
+          athleteId: forAthleteId,
+          sessionId: match.id,
+          date: match.date,
+          type: match.type,
+          pool,
+          householdId: identity.householdId,
+        });
+        booked.push({ date: match.date, id: match.id });
+        tally.set(month, (tally.get(month) || 0) + 1);
+        have.add(match.id);
+      } catch (err) {
+        skipped.push({
+          date,
+          reason: /already/i.test(err?.message || '') ? 'already booked' : 'full',
+        });
+      }
+    }
+    return { booked, skipped };
+  };
+
+  return { ...state, book, bookRecurring, bookingFor: identity ? identity.role : null };
 }
 
 /**
@@ -1442,6 +1539,33 @@ async function liveAthleteDetail(athleteId) {
       .filter(Boolean)
       .join(' · ') || null;
 
+  // Everything the kid has scheduled (owner's ask, 2026-09-01): the athlete's
+  // upcoming bookings joined to their sessions. The viewer decides the query
+  // shape - a parent's list read is only rules-provable with the household
+  // compound filter; staff query by athleteId alone.
+  const viewer = await fetchCurrentUser();
+  const bookings = await fetchBookings(
+    athleteId,
+    viewer.role === 'parent' ? { householdId: viewer.householdId } : {}
+  );
+  const today = todayISO();
+  const active = bookings.filter((b) => b.status !== 'cancelled' && b.date >= today);
+  active.sort(byDateThenId);
+  const sessionsById = new Map(
+    (await fetchSessionsByIds(active.map((b) => b.sessionId))).map((s) => [s.id, s])
+  );
+  const upcoming = active.map((b) => {
+    const s = sessionsById.get(b.sessionId);
+    return {
+      id: b.sessionId,
+      date: b.date,
+      dayLabel: dayLabel(b.date, today),
+      time: s?.time ?? null,
+      name: s?.label || (b.type === 'tournament' ? 'Tournament block' : 'Training block'),
+      status: b.status,
+    };
+  });
+
   return {
     athlete: {
       name: athlete.name,
@@ -1451,6 +1575,7 @@ async function liveAthleteDetail(athleteId) {
       board: '—',
       boardLabel: 'months on the Board — not tracked live yet',
     },
+    upcoming,
     history: [],
     checklist: [],
     hasEnoughData: true,

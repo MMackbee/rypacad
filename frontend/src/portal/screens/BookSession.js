@@ -90,7 +90,7 @@ export default function BookSession({
 }) {
   // Kept for the existing booking behavior: book(), allowance, confirmation
   // copy — exactly the contract the screen already had (Sprint 5 pin).
-  const { data, loading, error, book } = useBooking({ variant, practice });
+  const { data, loading, error, book, bookRecurring, bookingFor } = useBooking({ variant, practice });
   const [monthISO, setMonthISO] = useState(() => `${todayISO().slice(0, 7)}-01`);
   const monthState = useMonthSessions(monthISO, { practice });
 
@@ -186,7 +186,12 @@ export default function BookSession({
       });
   };
 
+  // The untouched slot the recurrence engine repeats from (its `time` is the
+  // full "3:00 PM" string the session docs use; `booked` below splits it for
+  // display).
+  const bookedRaw = useRef(null);
   const finalizeBooked = (session) => {
+    bookedRaw.current = session;
     const [time, meridiem] = session.time.split(' ');
     setBooked({
       ...session,
@@ -196,6 +201,17 @@ export default function BookSession({
       dayLabel: dayLabel(session.date, todayISO()),
     });
   };
+
+  // Recurrence rides the confirmation screen, live bookings only (the demo
+  // and the practice walkthrough never write, so they never offer repeats).
+  const handleRepeat =
+    bookingFor && !practice
+      ? (untilISO) =>
+          bookRecurring(bookedRaw.current, {
+            athleteId: isParent ? selectedAthleteId : undefined,
+            untilISO,
+          })
+      : undefined;
 
   // A parent's balance is the SELECTED child's, not the signed-in account's
   // own (a parent has no allowance of their own - the athlete does). The
@@ -227,6 +243,7 @@ export default function BookSession({
           time: booked.time,
           meridiem: booked.meridiem,
         }}
+        onRepeat={handleRepeat}
         onBack={() => setBooked(null)}
       />
     );
@@ -604,10 +621,21 @@ function calendarTemplateUrl(c) {
   return `https://calendar.google.com/calendar/render?${params}`;
 }
 
-function Confirmed({ bare, confirmation, onBack }) {
+function Confirmed({ bare, confirmation, onRepeat, onBack }) {
   const c = confirmation;
+  const calUrl = c ? calendarTemplateUrl(c) : null;
+  // Recurrence state: null (offer), 'working', or the engine's summary.
+  const [repeat, setRepeat] = useState(null);
   if (!c) return null;
-  const calUrl = calendarTemplateUrl(c);
+
+  const runRepeat = async (untilISO) => {
+    setRepeat('working');
+    try {
+      setRepeat(await onRepeat(untilISO));
+    } catch (err) {
+      setRepeat({ booked: [], skipped: [], failed: err?.message || 'Repeats did not go through.' });
+    }
+  };
 
   return (
     <PhoneFrame
@@ -690,8 +718,84 @@ function Confirmed({ bare, confirmation, onBack }) {
             <Body size={12}>{c.note}</Body>
           </div>
         </Card>
+
+        {onRepeat ? (
+          <Card large style={{ width: '100%', marginTop: 10 }}>
+            <SectionLabel style={{ marginBottom: 10 }}>Repeat weekly</SectionLabel>
+            {repeat === null ? (
+              <>
+                <Body size={12} style={{ marginBottom: 12 }}>
+                  Hold this same slot every week. Each week spends that month's allowance —
+                  months at their limit are skipped.
+                </Body>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                  {repeatPresets(c.date).map((p) => (
+                    <Button
+                      key={p.label}
+                      variant="outline"
+                      height={46}
+                      style={{ boxShadow: 'none' }}
+                      onClick={() => runRepeat(p.untilISO)}
+                    >
+                      {p.label}
+                    </Button>
+                  ))}
+                </div>
+              </>
+            ) : repeat === 'working' ? (
+              <Body size={12}>Booking your repeats…</Body>
+            ) : (
+              <RepeatSummary result={repeat} />
+            )}
+          </Card>
+        ) : null}
       </div>
     </PhoneFrame>
+  );
+}
+
+/** End-date presets for the weekly repeat, anchored to the booked date. */
+function repeatPresets(fromISO) {
+  const plus = (n) => {
+    const d = new Date(`${fromISO}T12:00:00Z`);
+    d.setUTCDate(d.getUTCDate() + n);
+    return d.toISOString().slice(0, 10);
+  };
+  const presets = [{ label: 'Next 4 weeks', untilISO: plus(28) }];
+  if (fromISO < '2026-12-31') presets.push({ label: 'Through December', untilISO: '2026-12-31' });
+  presets.push({ label: 'Full season (through Mar 31)', untilISO: '2027-03-31' });
+  return presets;
+}
+
+function RepeatSummary({ result }) {
+  if (result.failed) {
+    return (
+      <Body size={12} tone={color.error}>
+        {result.failed}
+      </Body>
+    );
+  }
+  const reasons = {};
+  for (const s of result.skipped) reasons[s.reason] = (reasons[s.reason] || 0) + 1;
+  const reasonText = Object.entries(reasons)
+    .map(([r, n]) => `${n} ${r}`)
+    .join(' · ');
+  return (
+    <>
+      <div style={{ font: `700 17px ${font.head}`, color: color.primary }}>
+        {result.booked.length} more week{result.booked.length === 1 ? '' : 's'} booked
+      </div>
+      {result.skipped.length ? (
+        <Body size={12} style={{ marginTop: 8 }}>
+          Skipped {result.skipped.length}: {reasonText}. Skipped weeks stay open to book
+          individually once an allowance resets.
+        </Body>
+      ) : (
+        <Body size={12} style={{ marginTop: 8 }}>
+          Every week through your end date is reserved.
+        </Body>
+      )}
+    </>
   );
 }
 

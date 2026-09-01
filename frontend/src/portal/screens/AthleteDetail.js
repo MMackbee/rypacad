@@ -52,6 +52,7 @@ export default function AthleteDetail({ variant = 'populated', bare = false, ath
         {data?.hasEnoughData ? (
           <>
             <StatGrid athlete={athlete} />
+            {data.upcoming ? <UpcomingSessions upcoming={data.upcoming} /> : null}
             <ContractHistory history={data.history} />
             <ProgressSummary />
           </>
@@ -235,5 +236,49 @@ function LimitedData({ checklist }) {
         </div>
       </Card>
     </>
+  );
+}
+
+/**
+ * Everything this kid has scheduled (owner's ask, 2026-09-01) — the athlete's
+ * upcoming bookings, live only (the hook adds `upcoming` in its live payload;
+ * seed detail predates the field and simply omits the card).
+ */
+function UpcomingSessions({ upcoming }) {
+  return (
+    <Card large>
+      <SectionLabel style={{ marginBottom: 12 }}>
+        Scheduled sessions · {upcoming.length}
+      </SectionLabel>
+      {upcoming.length === 0 ? (
+        <Body size={12}>Nothing booked yet.</Body>
+      ) : (
+        <div style={{ display: 'flex', flexDirection: 'column' }}>
+          {upcoming.map((u, i) => (
+            <div
+              key={u.id}
+              style={{
+                display: 'flex',
+                alignItems: 'baseline',
+                gap: 10,
+                padding: '9px 0',
+                borderBottom: i < upcoming.length - 1 ? `1px solid ${color.rule}` : 'none',
+              }}
+            >
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div style={{ font: `600 13px ${font.body}`, color: color.text }}>{u.name}</div>
+                <div style={{ font: `400 11px ${font.body}`, color: color.textTertiary, marginTop: 2 }}>
+                  {u.dayLabel}
+                  {u.time ? ` · ${u.time}` : ''}
+                </div>
+              </div>
+              <span style={{ font: `500 11px ${font.body}`, color: color.textSecondary }}>
+                {u.status === 'confirmed' ? 'Confirmed' : u.status}
+              </span>
+            </div>
+          ))}
+        </div>
+      )}
+    </Card>
   );
 }
