@@ -15,6 +15,15 @@ import { useAthleteDashboard } from '../hooks';
  * 03 · Athlete Dashboard - athlete.
  * States: Populated, New athlete, No upcoming sessions.
  *
+ * Sprint 6 pin (TEAM.md, QA #4): useAthleteDashboard's allowance and next
+ * session are live-wired this sprint - a real athlete with nothing booked
+ * reaches this screen as `variant: 'populated'` (the only variant a live
+ * caller ever passes) with `nextSession: null`, which is a state the demo
+ * harness never previously exercised outside `variant === 'empty'`. The
+ * designed empty state now renders whenever there is no next session,
+ * regardless of variant, so a live null and the demo 'empty' state are the
+ * same condition rather than two that could drift apart.
+ *
  * @param {'populated'|'new'|'empty'} variant
  * @param {() => void} [onRetry]  Re-fetch after a load failure.
  * @param {() => void} [onSignOut]  Sprint 5 pin: hidden when not supplied
@@ -71,8 +80,16 @@ export default function AthleteDashboard({ variant = 'populated', bare = false, 
           <MediaPlaceholder height={126} caption="WELCOME VIDEO — Luke, 60 sec — what the first week looks like" />
         ) : null}
 
-        {next ? <NextSessionCard next={next} /> : null}
-        {variant === 'empty' ? <NoSessions onBook={onBook} /> : null}
+        {next ? (
+          <NextSessionCard next={next} />
+        ) : variant !== 'new' ? (
+          // No invented session: null is the honest shape once live-wired
+          // (QA #4) - the same empty state the demo 'empty' variant already
+          // used, not a separate state to keep in sync by hand. Suppressed
+          // only for 'new', whose own "Start here" messaging already fills
+          // this space.
+          <NoSessions onBook={onBook} />
+        ) : null}
 
         {/*
           The contract card shows in the empty state too. Daily minutes are
