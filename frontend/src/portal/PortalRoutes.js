@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Navigate, Route, Routes, useNavigate, useParams } from 'react-router-dom';
+import { Navigate, Route, Routes, useLocation, useNavigate, useParams } from 'react-router-dom';
 
 import useAuthSession from './hooks/useAuthSession';
 import { isLive } from './hooks/live';
@@ -110,6 +110,51 @@ function AthleteDetailRoute({ onBack }) {
 }
 
 /**
+ * Book a Session needs to know whether the caller is a parent (child selector,
+ * Sprint 6) — resolved from the live session the same disciplined way
+ * RequireRole does it; seed mode stays the athlete flow.
+ */
+function BookSessionRoute({ onBack }) {
+  const live = isLive();
+  const { user } = useAuthSession(live ? undefined : { variant: 'idle' });
+  const role = live && user?.role === 'parent' ? 'parent' : 'athlete';
+  return <BookSession bare role={role} onBack={onBack} />;
+}
+
+/**
+ * The coach's tapped block travels to the attendance screen as navigation
+ * state — CoachDashboard hands `{ ...block, blockIndex }` to onOpenRoster,
+ * and SessionAttendance takes `sessionId` (live) / `blockIndex` (seed).
+ * Without this thread-through every tap landed on the default block (QA #6).
+ */
+function CoachDashboardRoute({ onSignOut }) {
+  const navigate = useNavigate();
+  return (
+    <CoachDashboard
+      bare
+      onSignOut={onSignOut}
+      onOpenRoster={(block) =>
+        navigate('/portal/attendance', {
+          state: { blockIndex: block?.blockIndex ?? null, sessionId: block?.sessionId ?? null },
+        })
+      }
+    />
+  );
+}
+
+function SessionAttendanceRoute({ onBack }) {
+  const { state } = useLocation();
+  return (
+    <SessionAttendance
+      bare
+      onBack={onBack}
+      blockIndex={state?.blockIndex ?? undefined}
+      sessionId={state?.sessionId ?? undefined}
+    />
+  );
+}
+
+/**
  * Staff & Roles flips between its list and add-member views in place - the add
  * view is a step of the same owner task, not a separate destination, so it is
  * local state rather than a route. Its back affordance previously pointed at
@@ -185,7 +230,7 @@ export default function PortalRoutes() {
         path="book"
         element={
           <RequireRole roles={['athlete', 'parent']}>
-            <BookSession bare onBack={go('/portal/schedule')} />
+            <BookSessionRoute onBack={go('/portal/schedule')} />
           </RequireRole>
         }
       />
@@ -267,7 +312,7 @@ export default function PortalRoutes() {
         path="coach"
         element={
           <RequireRole roles={['coach']}>
-            <CoachDashboard bare onOpenRoster={go('/portal/attendance')} onSignOut={onSignOut} />
+            <CoachDashboardRoute onSignOut={onSignOut} />
           </RequireRole>
         }
       />
@@ -283,7 +328,7 @@ export default function PortalRoutes() {
         path="attendance"
         element={
           <RequireRole roles={['coach']}>
-            <SessionAttendance bare onBack={go('/portal/coach')} />
+            <SessionAttendanceRoute onBack={go('/portal/coach')} />
           </RequireRole>
         }
       />
