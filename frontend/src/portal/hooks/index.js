@@ -31,8 +31,9 @@
  * PRACTICE, and reset on exit.
  */
 
-import { useRef, useState } from 'react';
+import { useState } from 'react';
 import useSeedResource from './useSeedResource';
+import { useInvalidation } from './invalidate';
 import {
   ERR,
   LiveDataError,
@@ -40,15 +41,18 @@ import {
   createContractLog,
   fetchAthlete,
   fetchBookings,
+  fetchBookingsBySession,
   fetchCoachAthletes,
   fetchContractLogs,
   fetchCurrentUser,
+  fetchHousehold,
   fetchHouseholdAthletes,
   fetchPackage,
   fetchSessions,
   fetchSessionsByIds,
   fetchSessionsInRange,
   isLive,
+  updateBookingStatus,
 } from './live';
 import {
   COACH,
@@ -100,7 +104,10 @@ import {
   CONTRACT_TIERS,
 } from '../data/athlete';
 import {
+  ageFromDob,
   buildContractMonth,
+  buildContractMonthFromLogs,
+  longDayLabel,
   monthBounds,
   nextMonthFirstShort,
   pickDueDates,
@@ -299,12 +306,37 @@ async function liveSchedule(today) {
 }
 
 /**
+ * Who is booking (Sprint 6 pin, QA #2): an athlete's own account, or a parent
+ * booking for one of their linked athletes. Distinct from liveAthleteContext,
+ * which assumes an athlete-linked account throws otherwise — a parent user
+ * has no athleteId of their own, and which child they are booking for is a
+ * per-call choice (book(slot, { athleteId })), not something resolved once
+ * up front here.
+ */
+async function liveBookingIdentity() {
+  const profile = await fetchCurrentUser();
+  if (profile.athleteId) return { role: 'athlete', profile };
+  if (profile.householdId) return { role: 'parent', profile };
+  throw new LiveDataError(
+    ERR.INVALID,
+    `users/${profile.uid} has neither athleteId nor householdId - the booking ` +
+      'surface is wired for athlete-linked or parent accounts only.'
+  );
+}
+
+/**
  * Live payload for useBooking, plus the identity the book() action needs.
  * The hook strips `identity` off before it reaches the screen - the payload
  * the screen sees is shape-identical to the seed branch.
+ *
+ * An athlete caller gets their own allowance up front, same as before. A
+ * parent caller has not chosen a child yet at this point - `allowance` is
+ * null rather than any one child's number (never invented, never picked for
+ * them); the screen's child picker reads each child's own allowance from
+ * useHouseholdAthletes(), which already returns it per athlete.
  */
 async function liveBooking(today) {
-  const ctx = await liveAthleteContext();
+  const who = await liveBookingIdentity();
   const sessions = await fetchSessions(today, 7);
   sessions.sort(byDateThenId);
 
@@ -321,15 +353,27 @@ async function liveBooking(today) {
       ? `The 26/27 season opens ${dayLabel(dates[0].iso, today)} — these are the first bookable blocks.`
       : null;
 
+  let allowance = null;
+  let identity;
+  if (who.role === 'athlete') {
+    const athlete = await fetchAthlete(who.profile.athleteId);
+    const pkg = athlete.packageId ? await fetchPackage(athlete.packageId) : null;
+    const bookings = await fetchBookings(athlete.id);
+    allowance = deriveAllowance(pkg, bookings, today);
+    identity = { role: 'athlete', athleteId: athlete.id, householdId: athlete.householdId };
+  } else {
+    identity = { role: 'parent', householdId: who.profile.householdId };
+  }
+
   return {
     dates,
     slots,
-    allowance: deriveAllowance(ctx.pkg, ctx.bookings, today),
+    allowance,
     seasonNote,
     // Same shape as the seed confirmation; the email is the real account's,
     // and name/when/pool are filled by the screen from the booked slot.
-    confirmation: { ...BOOKING_CONFIRMATION, email: ctx.profile.email },
-    identity: { athleteId: ctx.athlete.id, householdId: ctx.athlete.householdId },
+    confirmation: { ...BOOKING_CONFIRMATION, email: who.profile.email },
+    identity,
   };
 }
 
@@ -353,6 +397,9 @@ export function useSchedule({ variant = 'upcoming', today = todayISO(), practice
   // Practice short-circuits before isLive(): with practice set, the live
   // source below is unreachable and ./live.js never runs.
   const live = !practice && isLive();
+  // Post-write invalidation seam (Sprint 6 pin): re-run after any booking
+  // write, not just one made through this hook instance.
+  const bookingsGen = useInvalidation('bookings');
 
   const resolve = (refs) =>
     refs
@@ -369,7 +416,8 @@ export function useSchedule({ variant = 'upcoming', today = todayISO(), practice
   const demo = demoOpts(variant, "Your schedule didn't load.");
   return useSeedResource(
     demo || live ? null : { sessions, past, cancelled, allowance: ALLOWANCE },
-    demo ?? (live ? { source: () => liveSchedule(today), deps: ['schedule', today] } : undefined)
+    demo ??
+      (live ? { source: () => liveSchedule(today), deps: ['schedule', today, bookingsGen] } : undefined)
   );
 }
 
@@ -394,15 +442,24 @@ export function useSchedule({ variant = 'upcoming', today = todayISO(), practice
  * `practice: true` (onboarding) pins this hook to the seed source regardless
  * of the live flag, and book(slot) resolves locally exactly as seed mode
  * does — see the practice-mode invariant in the file header.
+ *
+ * Sprint 6 pin (QA #2): a parent account can book too, for a linked athlete
+ * they choose. `book(slot, { athleteId })` takes the chosen child at call
+ * time; `bookingFor` ('athlete' | 'parent' | null while loading/seed) tells
+ * the screen which case it is in, so it knows whether to show a child
+ * picker — the picker's own choices come from the existing
+ * useHouseholdAthletes(), not duplicated here.
  */
 export function useBooking({ variant = 'open', today = todayISO(), practice = false } = {}) {
   // Practice short-circuits before isLive(): with practice set, the live
   // source below is unreachable, ./live.js never runs, and book() takes the
   // local (seed) branch — a practice booking cannot become a real one.
   const live = !practice && isLive();
-  // Who the booking is for, captured when the live source resolves. A ref,
-  // not state: it never drives a render, only the book() write.
-  const identityRef = useRef(null);
+  // Who the booking is for, captured when the live source resolves - a
+  // parent's caller identity carries no athleteId until book() is called
+  // with one. State (not a ref): `bookingFor` below is derived from it and
+  // must trigger a render when the live source resolves.
+  const [identity, setIdentity] = useState(null);
 
   const dates = upcomingDates(SEASON, today, 7).map(datePill);
 
@@ -435,6 +492,12 @@ export function useBooking({ variant = 'open', today = todayISO(), practice = fa
       ? `The 26/27 season opens ${dayLabel(dates[0].iso, today)} — these are the first bookable blocks.`
       : null;
 
+  // Post-write invalidation seam (Sprint 6 pin): a booking changes both
+  // collections - re-run after either bumps, not just one made through this
+  // hook instance.
+  const bookingsGen = useInvalidation('bookings');
+  const sessionsGen = useInvalidation('sessions');
+
   const demo = demoOpts(variant, "Open blocks didn't load.");
   const state = useSeedResource(
     demo || live ? null : { dates, slots, allowance, seasonNote, confirmation: BOOKING_CONFIRMATION },
@@ -442,11 +505,11 @@ export function useBooking({ variant = 'open', today = todayISO(), practice = fa
       (live
         ? {
             source: async () => {
-              const { identity, ...payload } = await liveBooking(today);
-              identityRef.current = identity;
+              const { identity: id, ...payload } = await liveBooking(today);
+              setIdentity(id);
               return payload;
             },
-            deps: ['booking', today],
+            deps: ['booking', today, bookingsGen, sessionsGen],
           }
         : undefined)
   );
@@ -455,15 +518,34 @@ export function useBooking({ variant = 'open', today = todayISO(), practice = fa
    * Persist a booking for a slot off this hook's `data.slots`. Additive to the
    * {data, loading, error} contract - existing screens ignore it; wiring the
    * confirm tap to `await book(slot)` is the frontend lane's move.
+   *
+   * `athleteId` is required when the caller is a parent (bookingFor ===
+   * 'parent') - the screen must have a child selected before calling book().
+   * An athlete caller ignores the option (they can only ever book themselves).
    */
-  const book = async (slot) => {
+  const book = async (slot, { athleteId } = {}) => {
     if (!live) return slot;
-    const identity = identityRef.current;
     if (!identity) {
       throw new LiveDataError(
         ERR.INVALID,
         'book() called before the booking data finished loading.'
       );
+    }
+    if (identity.role === 'parent') {
+      if (!athleteId) {
+        throw new LiveDataError(
+          ERR.INVALID,
+          'book() needs the child to book for - pass { athleteId } for a parent account.'
+        );
+      }
+      return createBooking({
+        athleteId,
+        sessionId: slot.id,
+        date: slot.date,
+        type: slot.type,
+        pool: poolFor(slot.type),
+        householdId: identity.householdId,
+      });
     }
     return createBooking({
       athleteId: identity.athleteId,
@@ -475,7 +557,7 @@ export function useBooking({ variant = 'open', today = todayISO(), practice = fa
     });
   };
 
-  return { ...state, book };
+  return { ...state, book, bookingFor: identity ? identity.role : null };
 }
 
 /**
@@ -524,6 +606,10 @@ export function useMonthSessions(monthISO, { practice = false } = {}) {
   const live = !practice && isLive();
   const today = todayISO();
   const resolvedMonth = monthISO || today;
+  // Post-write invalidation seam (Sprint 6 pin): a booking changes
+  // sessions.booked - re-run so spots-left stays correct after a write made
+  // anywhere, not just through this hook instance.
+  const sessionsGen = useInvalidation('sessions');
 
   const seedValue = () => {
     const { start, end, label } = monthBounds(resolvedMonth);
@@ -534,20 +620,143 @@ export function useMonthSessions(monthISO, { practice = false } = {}) {
   return useSeedResource(
     live ? null : seedValue(),
     live
-      ? { source: () => liveMonthSessions(resolvedMonth, today), deps: ['month-sessions', resolvedMonth] }
+      ? {
+          source: () => liveMonthSessions(resolvedMonth, today),
+          deps: ['month-sessions', resolvedMonth, sessionsGen],
+        }
       : undefined
   );
 }
 
+/**
+ * '2026-11-02' -> 'Mon' — the short weekday the household card's compact
+ * `next.when` line needs ("Mon 4:00 PM", matching the seed shape). The only
+ * place this abbreviation is needed; displaySession's dayLabel (the long
+ * form, "Today" / "Monday, Nov 2") is what every other surface reads.
+ */
+function shortWeekday(iso) {
+  return new Intl.DateTimeFormat('en-US', { weekday: 'short', timeZone: 'UTC' }).format(
+    new Date(`${iso}T00:00:00Z`)
+  );
+}
+
+/**
+ * One household athlete's full home-card: package + allowance (same
+ * derivation as useHouseholdAthletes), their real next upcoming booking, and
+ * a contract standing/percentage built the same way liveContract() builds
+ * the full Contract screen (below) — so a child's card can never disagree
+ * with their own Contract screen. Sprint 6 pin: "useHousehold's per-child
+ * cards... real athletes + real allowances", read as covering every field a
+ * card shows, not just allowance — "no screen may show seed numbers in live
+ * mode."
+ *
+ * `standing` is null (no badge) rather than the seed's dashed 'New' state
+ * when there is no reliable "just enrolled" signal to read live (no
+ * enrollment-date field on the athlete doc) — an unbadged card, not an
+ * invented one. Same for `age`/`ageLine`: dob is frequently null (per
+ * DATA-MODEL.md, "no birthday is invented"), and a null dob renders no age
+ * rather than a fabricated one.
+ */
+async function liveChildCard(a, today) {
+  const pkg = a.packageId ? await fetchPackage(a.packageId) : null;
+  const bookings = await fetchBookings(a.id);
+  const active = bookings.filter((b) => b.status !== 'cancelled');
+  const upcoming = active.filter((b) => b.date >= today).sort(byDateThenId);
+
+  let next = null;
+  if (upcoming.length) {
+    const sessionsById = new Map(
+      (await fetchSessionsByIds([upcoming[0].sessionId])).map((s) => [s.id, s])
+    );
+    const s = sessionsById.get(upcoming[0].sessionId);
+    if (s) {
+      const disp = displaySession(s, today);
+      next = { type: disp.type, when: `${shortWeekday(s.date)} ${disp.time} ${disp.meridiem}`, meta: disp.name };
+    }
+  }
+
+  const contractMinutes = a.contractMinutes ?? null;
+  let standing = null;
+  let contract = null;
+  if (contractMinutes != null) {
+    const logs = await fetchContractLogs(a.id);
+    const minutesByDate = new Map(logs.map((l) => [l.date, l.minutes || 0]));
+    const m = buildContractMonthFromLogs({ today, minutesByDate, contractMinutes });
+    contract = m.dueSoFar ? Math.round((m.logged / m.dueSoFar) * 100) : 0;
+    standing = m.missed > 0 ? { tone: 'yellow', label: 'Behind' } : { tone: 'green', label: 'On track' };
+  }
+
+  const age = ageFromDob(a.dob ?? null);
+  const ageLine =
+    [age != null ? `Age ${age}` : null, contractMinutes != null ? `${contractMinutes} min tier` : null]
+      .filter(Boolean)
+      .join(' · ') || null;
+
+  return {
+    id: a.id,
+    name: a.name,
+    age,
+    ageLine,
+    standing,
+    next,
+    contract,
+    packageId: a.packageId ?? null,
+    allowance: deriveAllowance(pkg, bookings, today),
+  };
+}
+
+/**
+ * Live payload for useHousehold — the household's real name, every real
+ * child's real card (liveChildCard above), and a billing placeholder: Stripe
+ * wiring is out of scope this sprint (TEAM.md, Sprint 5 "Billing rows"), so
+ * `status: 'ok'` here is the same documented placeholder useBillingSummary's
+ * `status: 'active'` already uses, not a fabricated payment state.
+ */
+async function liveHousehold(today) {
+  const profile = await fetchCurrentUser();
+  if (!profile.householdId) {
+    throw new LiveDataError(
+      ERR.INVALID,
+      `users/${profile.uid} has no householdId - this surface is wired for ` +
+        'parent accounts only.'
+    );
+  }
+  const [household, athletes] = await Promise.all([
+    fetchHousehold(profile.householdId),
+    fetchHouseholdAthletes(profile.householdId),
+  ]);
+  const children = await Promise.all(athletes.map((a) => liveChildCard(a, today)));
+  return {
+    name: household.name ?? null,
+    date: longDayLabel(today),
+    children,
+    billing: { status: 'ok', retryStep: 0 },
+  };
+}
+
 /** GET /athletes?guardian=:id + GET /billing/:householdId (08). */
 export function useHousehold({ variant = 'three' } = {}) {
+  const live = isLive();
+  const today = todayISO();
+  // Post-write invalidation seam (Sprint 6 pin): a booking or a contract log
+  // can change a child's card - re-run after either bumps.
+  const bookingsGen = useInvalidation('bookings');
+  const contractLogsGen = useInvalidation('contractLogs');
+
   const demo = demoOpts(variant, "Your family's data didn't load.");
   const children =
     variant === 'one' ? HOUSEHOLD.children.slice(0, 1) : HOUSEHOLD.children;
   const billing = variant === 'payment' ? BILLING_ISSUE : HOUSEHOLD.billing;
+
   return useSeedResource(
-    demo ? null : { ...HOUSEHOLD, date: TODAY, children, billing },
-    demo ?? undefined
+    demo || live ? null : { ...HOUSEHOLD, date: TODAY, children, billing },
+    demo ??
+      (live
+        ? {
+            source: () => liveHousehold(today),
+            deps: ['household', today, bookingsGen, contractLogsGen],
+          }
+        : undefined)
   );
 }
 
@@ -592,6 +801,10 @@ async function liveHouseholdAthletes(today) {
 export function useHouseholdAthletes() {
   const live = isLive();
   const today = todayISO();
+  // Post-write invalidation seam (Sprint 6 pin): a new booking changes a
+  // child's allowance - re-run after any bookings write, including one made
+  // through useBooking's book() for this same child.
+  const bookingsGen = useInvalidation('bookings');
   const seedRows = HOUSEHOLD.children.map((c) => ({
     id: c.id,
     name: c.name,
@@ -601,7 +814,9 @@ export function useHouseholdAthletes() {
   }));
   return useSeedResource(
     live ? null : seedRows,
-    live ? { source: () => liveHouseholdAthletes(today), deps: ['household-athletes'] } : undefined
+    live
+      ? { source: () => liveHouseholdAthletes(today), deps: ['household-athletes', bookingsGen] }
+      : undefined
   );
 }
 
@@ -770,8 +985,100 @@ export function useDiagnostic() {
   });
 }
 
+/**
+ * Badge/line/hint for a contract month built from real logs (Sprint 6, QA
+ * #3/#4) — the live counterpart to contractFor()'s per-demo-variant copy
+ * below. Shared by liveAthleteDashboard's mini card and liveContract's full
+ * screen so the two read the same state off the same
+ * buildContractMonthFromLogs() result and can never disagree, mirroring the
+ * seed code's own stated goal for its variant-keyed `state` object.
+ */
+function liveContractState(m) {
+  if (m.missed > 0) {
+    return {
+      badge: { tone: 'red', label: 'Behind' },
+      line: `${m.missed} day${m.missed === 1 ? '' : 's'} behind with ${m.daysLeft} contract day${
+        m.daysLeft === 1 ? '' : 's'
+      } left. Every remaining day has to be logged to make the Commitment Board.`,
+      hint: 'Missed a day? Tap it in the grid to add a late entry.',
+    };
+  }
+  if (m.contractDays > 0 && m.logged === m.contractDays) {
+    return {
+      badge: { tone: 'yellow', label: 'Complete' },
+      line: `All ${m.contractDays} contract days logged. You are on ${m.month}’s Commitment Board.`,
+      hint: 'Weekends are not contract days.',
+    };
+  }
+  return {
+    badge: { tone: 'green', label: 'On track' },
+    line: `${m.logged} of ${m.dueSoFar} days due so far. ${m.daysLeft} contract day${
+      m.daysLeft === 1 ? '' : 's'
+    } left — one miss still keeps the month.`,
+    hint: 'One tap. Nothing else on this screen needs typing.',
+  };
+}
+
+/**
+ * Live payload for useAthleteDashboard (Sprint 6, QA #3): allowance and next
+ * session derived from real bookings — nothing invented, none upcoming ->
+ * null, matching the screen's own empty state rather than fabricating a
+ * session. The contract mini-card reuses buildContractMonthFromLogs, the
+ * same builder liveContract() (below) uses for the full screen.
+ */
+async function liveAthleteDashboard(today) {
+  const ctx = await liveAthleteContext();
+  const active = ctx.bookings.filter((b) => b.status !== 'cancelled');
+  const upcoming = active.filter((b) => b.date >= today).sort(byDateThenId);
+
+  let nextSession = null;
+  if (upcoming.length) {
+    const sessionsById = new Map(
+      (await fetchSessionsByIds([upcoming[0].sessionId])).map((s) => [s.id, s])
+    );
+    const s = sessionsById.get(upcoming[0].sessionId);
+    nextSession = s ? displaySession(s, today) : null;
+  }
+
+  const contractMinutes = ctx.athlete.contractMinutes ?? null;
+  let contract = null;
+  if (contractMinutes != null) {
+    const logs = await fetchContractLogs(ctx.athlete.id);
+    const minutesByDate = new Map(logs.map((l) => [l.date, l.minutes || 0]));
+    const m = buildContractMonthFromLogs({ today, minutesByDate, contractMinutes });
+    contract = {
+      logged: m.logged,
+      total: m.dueSoFar,
+      month: m.month,
+      pct: m.dueSoFar ? Math.round((m.logged / m.dueSoFar) * 100) : 0,
+      line: liveContractState(m).line,
+    };
+  }
+
+  return {
+    athlete: {
+      // Firestore stores one `name` field (no first/full split) - both keys
+      // carry the same real value rather than guessing a split.
+      name: ctx.athlete.name,
+      fullName: ctx.athlete.name,
+      date: longDayLabel(today),
+      allowance: deriveAllowance(ctx.pkg, ctx.bookings, today),
+    },
+    nextSession,
+    contract,
+    // No demo "new athlete" onboarding checklist concept in live mode.
+    onboarding: null,
+    codeOfGrit: CODE_OF_GRIT,
+  };
+}
+
 /** GET /athletes/:id + next session + contract summary (03). */
 export function useAthleteDashboard({ variant = 'populated', today = todayISO() } = {}) {
+  const live = isLive();
+  // Post-write invalidation seam (Sprint 6 pin): a booking or a contract log
+  // write changes this card - re-run after either bumps.
+  const bookingsGen = useInvalidation('bookings');
+  const contractLogsGen = useInvalidation('contractLogs');
   const demo = demoOpts(variant, "Your dashboard didn't load.");
 
   // The next session is the athlete's first booked reference, resolved against
@@ -784,23 +1091,34 @@ export function useAthleteDashboard({ variant = 'populated', today = todayISO() 
   // screen uses, so the dashboard card and the full screen cannot disagree.
   const summary = variant === 'new' || demo ? null : contractFor('ontrack', today);
 
-  return useSeedResource(demo ? null : {
-    athlete: ATHLETE,
-    nextSession,
-    contract: summary
-      ? {
-          logged: summary.stats.logged,
-          total: summary.stats.dueSoFar,
-          month: summary.month.name,
-          pct: summary.stats.dueSoFar
-            ? Math.round((summary.stats.logged / summary.stats.dueSoFar) * 100)
-            : 0,
-          line: summary.state.line,
-        }
-      : null,
-    onboarding: variant === 'new' ? ONBOARDING : null,
-    codeOfGrit: CODE_OF_GRIT,
-  }, demo ?? undefined);
+  return useSeedResource(
+    demo || live
+      ? null
+      : {
+          athlete: ATHLETE,
+          nextSession,
+          contract: summary
+            ? {
+                logged: summary.stats.logged,
+                total: summary.stats.dueSoFar,
+                month: summary.month.name,
+                pct: summary.stats.dueSoFar
+                  ? Math.round((summary.stats.logged / summary.stats.dueSoFar) * 100)
+                  : 0,
+                line: summary.state.line,
+              }
+            : null,
+          onboarding: variant === 'new' ? ONBOARDING : null,
+          codeOfGrit: CODE_OF_GRIT,
+        },
+    demo ??
+      (live
+        ? {
+            source: () => liveAthleteDashboard(today),
+            deps: ['athlete-dashboard', today, bookingsGen, contractLogsGen],
+          }
+        : undefined)
+  );
 }
 
 /**
@@ -879,13 +1197,66 @@ function contractFor(variant, today) {
   };
 }
 
-export function useContract({ variant = 'ontrack', today = todayISO() } = {}) {
-  const built = variant === 'none' ? null : contractFor(variant, today);
-  return useSeedResource({
-    ...(built ?? { month: null, dayStates: {}, stats: null, state: null, caption: null }),
+/** Shape returned when there is no contract month to show — no tier, or the 'none' demo variant. */
+const NO_CONTRACT_MONTH = { month: null, dayStates: {}, stats: null, state: null, caption: null };
+
+/**
+ * Live payload for useContract (Sprint 6, QA #4): dayStates/stats built from
+ * real contractLogs via buildContractMonthFromLogs, consistent with
+ * usePracticeLog's own live totals (both read fetchContractLogs for the
+ * signed-in athlete). A null contractMinutes tier means there is no contract
+ * to grid — NO_CONTRACT_MONTH, the same empty shape the seed 'none' variant
+ * already produces, rather than inventing a tier.
+ */
+async function liveContract(today) {
+  const { athlete } = await liveAthleteIdentity();
+  const contractMinutes = athlete.contractMinutes ?? null;
+  if (contractMinutes == null) {
+    return { ...NO_CONTRACT_MONTH, tiers: CONTRACT_TIERS, tierMinutes: null };
+  }
+  const logs = await fetchContractLogs(athlete.id);
+  const minutesByDate = new Map(logs.map((l) => [l.date, l.minutes || 0]));
+  const m = buildContractMonthFromLogs({ today, minutesByDate, contractMinutes });
+  return {
+    month: { label: m.label, name: m.month, start: m.start },
+    dayStates: m.dayStates,
+    stats: {
+      logged: m.logged,
+      contractDays: m.contractDays,
+      dueSoFar: m.dueSoFar,
+      missed: m.missed,
+      daysLeft: m.daysLeft,
+      streak: m.streak,
+      minutes: m.minutes,
+    },
+    state: liveContractState(m),
+    // Sprint 5 ruling: closures are schedule facts, not practice facts, and no
+    // longer excuse a contract day.
+    caption: 'Weekends are not contract days.',
     tiers: CONTRACT_TIERS,
-    tierMinutes: 45,
-  });
+    tierMinutes: contractMinutes,
+  };
+}
+
+export function useContract({ variant = 'ontrack', today = todayISO() } = {}) {
+  const live = isLive();
+  // Post-write invalidation seam (Sprint 6 pin): re-run after any
+  // contractLogs write, not just one made through this hook instance.
+  const contractLogsGen = useInvalidation('contractLogs');
+
+  const built = variant === 'none' ? null : contractFor(variant, today);
+  return useSeedResource(
+    live
+      ? null
+      : {
+          ...(built ?? NO_CONTRACT_MONTH),
+          tiers: CONTRACT_TIERS,
+          tierMinutes: 45,
+        },
+    live
+      ? { source: () => liveContract(today), deps: ['contract', today, contractLogsGen] }
+      : undefined
+  );
 }
 
 /**
@@ -920,13 +1291,19 @@ async function livePracticeLog(today) {
  * same simulation the contract screen already does for onboarding practice,
  * carrying a real minutes value instead of a bare logged/not-logged flag.
  * Nothing here writes live unless isLive().
+ *
+ * Sprint 6 pin ("post-write refresh"): the ad hoc local refreshKey this hook
+ * used to bump itself after its own write is now the shared invalidation
+ * seam (./invalidate) — createContractLog bumps 'contractLogs' itself, so
+ * this hook (and useContract, and useAthleteDashboard's contract card) all
+ * re-run together, not just whichever one made the write.
  */
 export function usePracticeLog({ today = todayISO(), practice = false } = {}) {
   // Practice pins the seed branch (onboarding invariant): no live query, and
   // logPractice stays a local no-op-persist — never a contractLogs write.
   const live = !practice && isLive();
   const [seedEntry, setSeedEntry] = useState(null); // { date, minutes } | null
-  const [refreshKey, setRefreshKey] = useState(0); // bumped to re-run the live source after a write
+  const contractLogsGen = useInvalidation('contractLogs');
 
   const SEED_CONTRACT_MINUTES = 45; // matches the seed athlete's tier (ATHLETE, HOUSEHOLD's Jordan)
   const seedLoggedToday = Boolean(seedEntry && seedEntry.date === today);
@@ -939,7 +1316,7 @@ export function usePracticeLog({ today = todayISO(), practice = false } = {}) {
   const state = useSeedResource(
     live ? null : seedValue,
     live
-      ? { source: () => livePracticeLog(today), deps: ['practice-log', today, refreshKey] }
+      ? { source: () => livePracticeLog(today), deps: ['practice-log', today, contractLogsGen] }
       : undefined
   );
 
@@ -950,25 +1327,19 @@ export function usePracticeLog({ today = todayISO(), practice = false } = {}) {
       return entry;
     }
     const { athlete } = await liveAthleteIdentity();
-    const result = await createContractLog({
+    // createContractLog bumps the 'contractLogs' generation itself on
+    // success - this hook's own subscription above picks that up and
+    // re-runs, so there is nothing to bump here directly.
+    return createContractLog({
       athleteId: athlete.id,
       date: today,
       minutes,
       contractMinutes: athlete.contractMinutes ?? null,
     });
-    setRefreshKey((k) => k + 1); // pick up the new total on the next render
-    return result;
   };
 
   return { ...state, logPractice, totalMinutes: state.data?.totalMinutes ?? 0 };
 }
-
-/**
- * The seed household's kid ids - useAthleteDetail falls back to the seed
- * ATHLETE_DETAIL record for any of these (or when no id is passed at all),
- * exactly as the screen behaved before athleteId existed as a concept.
- */
-const SEED_KID_IDS = new Set(HOUSEHOLD.children.map((c) => c.id));
 
 /**
  * Live payload for useAthleteDetail. Attendance history, the Commitment
@@ -1010,12 +1381,17 @@ async function liveAthleteDetail(athleteId) {
  * (Sprint 5): PortalRoutes reads /portal/athlete/:athleteId and passes
  * `athleteId` in as a prop - this hook never reads the route itself.
  *
- * Live only when isLive() AND athleteId is a real (non-seed) id; an
- * undefined athleteId or one of the seed household's kid ids always falls
- * back to seed data, so the harness and an un-migrated caller keep working.
+ * Live whenever isLive() AND an athleteId was passed — full stop. Sprint 6
+ * (QA #1, BLOCKER): this used to also fall back to seed data for any id that
+ * happened to match a seed household kid id (jordan/reese/nico), which meant
+ * a parent viewing Reese's real record got served Jordan's seed payload
+ * whenever Reese's real athleteId string collided with the seed id. Live
+ * mode now always fetches the passed athleteId; only a genuinely missing
+ * athleteId (the un-migrated/harness caller) falls back to seed data. Seed
+ * mode (isLive() false) is unchanged.
  */
 export function useAthleteDetail({ athleteId, variant = 'populated' } = {}) {
-  const live = isLive() && athleteId != null && !SEED_KID_IDS.has(athleteId);
+  const live = isLive() && athleteId != null;
   const full = variant === 'populated';
   const seedValue = {
     athlete: ATHLETE_DETAIL,
@@ -1101,4 +1477,71 @@ export function useNewsletter({ variant = 'missing' } = {}) {
     outstandingCount: NEWSLETTER_SECTIONS.length - landed.length,
     status: variant,
   });
+}
+
+/**
+ * Live payload for useSessionAttendance — every active booking for one
+ * session, joined to the athlete's name. Read authorization is the EXISTING
+ * bookings-read rule's coach clause (athleteData(resource.data.athleteId)
+ * .coachId == caller) — Firestore evaluates that per candidate document for
+ * list/query reads too (a get() keyed off a field the query does not itself
+ * filter on is the standard "join" pattern for row-level list security), so
+ * no new rules grant was needed for this hook; verified against the emulator
+ * (routing report). One consequence worth knowing: on a block shared across
+ * coaches, each coach's roster silently shows only their own assigned
+ * athletes — consistent with "coach → assigned athletes only, by assignment,
+ * never by role," not a bug.
+ *
+ * Per-athlete name lookups use fetchAthlete() (a single-document read,
+ * already coach-readable under the same assignment rule) rather than a
+ * batched by-id list query, which would need its own, unbuilt list-query
+ * grant on `athletes` for the coach role.
+ */
+async function liveSessionAttendance(sessionId) {
+  const bookings = await fetchBookingsBySession(sessionId);
+  const athletes = await Promise.all(bookings.map((b) => fetchAthlete(b.athleteId)));
+  const nameById = new Map(athletes.map((a) => [a.id, a.name]));
+  return bookings
+    .map((b) => ({
+      bookingId: b.id,
+      athleteId: b.athleteId,
+      name: nameById.get(b.athleteId) ?? null,
+      status: b.status,
+    }))
+    .sort((a, b) => (a.name || '').localeCompare(b.name || ''));
+}
+
+/**
+ * GET /sessions/:id/bookings + attendance marking (Sprint 6 pin, QA #6/#7) —
+ * pinned shape: { data: [{ bookingId, athleteId, name, status }], loading,
+ * error, mark(bookingId, status) }. `status` is confirmed|attended|noshow;
+ * attendance IS bookings.status (coach IN -> 'attended', OUT -> 'noshow',
+ * un-marking -> back to 'confirmed' is the caller's job to decide, not this
+ * hook's).
+ *
+ * Coach-only, sessionId-scoped, live-only surface — there is no seed/demo
+ * branch to keep in sync (no session-scoped seed roster exists), matching
+ * this file's existing "screens must not crash with the live flag off"
+ * convention: with isLive() false or no sessionId yet, this resolves to an
+ * empty list and a no-op mark() rather than touching ./live.js.
+ */
+export function useSessionAttendance(sessionId) {
+  const live = isLive();
+  // Post-write invalidation seam (Sprint 6 pin): a mark() from this hook OR
+  // any other coach's re-runs every mounted instance reading bookings.
+  const bookingsGen = useInvalidation('bookings');
+
+  const state = useSeedResource(
+    live && sessionId ? null : [],
+    live && sessionId
+      ? { source: () => liveSessionAttendance(sessionId), deps: ['session-attendance', sessionId, bookingsGen] }
+      : undefined
+  );
+
+  const mark = async (bookingId, status) => {
+    if (!live) return { id: bookingId, status };
+    return updateBookingStatus({ bookingId, status });
+  };
+
+  return { ...state, mark };
 }
