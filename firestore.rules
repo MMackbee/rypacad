@@ -281,13 +281,28 @@ service cloud.firestore {
       // parent, assigned coach, mental (all), ops (completion surface),
       // owner. Parent/coach list queries must filter athleteId == for the
       // athleteData() lookup to be provable.
+      //
+      // The accumulate transaction reads a day's log that may not exist yet
+      // — `resource` is null then, and the data-based clauses would crash
+      // the evaluation (the bookings null-read lesson, same fix): the id IS
+      // `{athleteId}_{date}`, so its prefix scopes who may probe
+      // nonexistence.
+      function logNullReadOk() {
+        return me().role == 'athlete' && me().athleteId == logId.split('_')[0]
+          || me().role in ['coach', 'mental', 'ops', 'owner'];
+      }
+
       allow read: if signedIn() && (
-        (me().role == 'athlete' && me().athleteId == resource.data.athleteId)
-        || (me().role == 'parent'
-            && athleteData(resource.data.athleteId).householdId == me().householdId)
-        || (me().role == 'coach'
-            && athleteData(resource.data.athleteId).coachId == request.auth.uid)
-        || me().role in ['mental', 'ops', 'owner']
+        resource == null
+          ? logNullReadOk()
+          : (
+            (me().role == 'athlete' && me().athleteId == resource.data.athleteId)
+            || (me().role == 'parent'
+                && athleteData(resource.data.athleteId).householdId == me().householdId)
+            || (me().role == 'coach'
+                && athleteData(resource.data.athleteId).coachId == request.auth.uid)
+            || me().role in ['mental', 'ops', 'owner']
+          )
       );
 
       // No delete: a logged day is a record. Un-logging is a product

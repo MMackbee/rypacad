@@ -24,7 +24,6 @@ import {
   query,
   runTransaction,
   serverTimestamp,
-  setDoc,
   updateDoc,
   where,
 } from 'firebase/firestore';
@@ -321,7 +320,40 @@ export async function fetchBookings(athleteId, { householdId = null } = {}) {
  * reaches the caller wrapped (never a raw PERMISSION_DENIED), via the catch
  * below.
  */
-export async function createBooking({ athleteId, sessionId, date, type, pool, householdId }) {
+/**
+ * Monthly-allowance guard at the writer, not just the UI (code review
+ * 2026-09-04, finding 2): before any booking lands, count the athlete's
+ * non-cancelled bookings for this pool in the session's month against the
+ * package limit. A limit of 0 means the pool has NO allowance and every
+ * booking is refused (finding 1: `limit > 0` gates treated zero as
+ * unlimited). This is client-side derivation like the allowance itself —
+ * a true server-side count awaits a Cloud Function, documented in
+ * DATA-MODEL.md. Callers that already maintain a running tally
+ * (bookRecurring) pass skipCapCheck to avoid re-querying per instance.
+ */
+async function assertWithinMonthlyCap({ athleteId, householdId, date, pool }) {
+  const athlete = await fetchAthlete(athleteId);
+  const pkg = athlete.packageId ? await fetchPackage(athlete.packageId) : null;
+  const limit = (pool === 'tournaments' ? pkg?.tournaments : pkg?.training) ?? 0;
+  const month = date.slice(0, 7);
+  const bookings = await fetchBookings(athleteId, { householdId });
+  const spent = bookings.filter(
+    (b) => b.status !== 'cancelled' && b.pool === pool && b.date.slice(0, 7) === month
+  ).length;
+  if (spent >= limit) {
+    throw new LiveDataError(
+      ERR.INVALID,
+      limit === 0
+        ? `This package has no ${pool === 'tournaments' ? 'tournament entries' : 'training sessions'}.`
+        : `That month's ${pool === 'tournaments' ? 'tournament entries' : 'training sessions'} are already fully booked (${spent} of ${limit}).`
+    );
+  }
+}
+
+export async function createBooking(
+  { athleteId, sessionId, date, type, pool, householdId },
+  { skipCapCheck = false, silent = false } = {}
+) {
   if (!athleteId || !sessionId || !date || !type || !pool || !householdId) {
     throw new LiveDataError(
       ERR.INVALID,
@@ -335,6 +367,7 @@ export async function createBooking({ athleteId, sessionId, date, type, pool, ho
     );
   }
   const user = requireUser();
+  if (!skipCapCheck) await assertWithinMonthlyCap({ athleteId, householdId, date, pool });
   // Contract v1.1: the booking id IS `{athleteId}_{sessionId}` — the
   // keyspace makes a second booking of the same session an overwrite
   // attempt, which the create-only rules reject. addDoc's random ids were
@@ -389,9 +422,13 @@ export async function createBooking({ athleteId, sessionId, date, type, pool, ho
       tx.update(sessionRef, { booked: booked + 1 });
     });
     // Post-write invalidation seam (Sprint 6 pin): every hook reading
-    // bookings or sessions re-runs, not just this one.
-    bump('bookings');
-    bump('sessions');
+    // bookings or sessions re-runs, not just this one. `silent` lets a bulk
+    // caller (bookRecurring) bump ONCE after its loop instead of triggering
+    // a refetch storm per instance (code review 2026-09-04, finding 8).
+    if (!silent) {
+      bump('bookings');
+      bump('sessions');
+    }
     return { id, ...booking, createdAt: null };
   } catch (err) {
     throw wrap(err, 'createBooking');
@@ -420,13 +457,15 @@ export async function fetchContractLogs(athleteId) {
 }
 
 /**
- * Create (or overwrite the same day's) contractLog — contract v1.3 shape.
- * Doc id is `{athleteId}_{date}`, which is both how one-log-per-day is
- * enforced (a second log the same day overwrites the same doc rather than
- * duplicating) and how firestore.rules pins date to the id. `contractMinutes`
- * is a snapshot the caller supplies (the athlete's tier at log time), not
- * re-derived here, so a later tier change cannot rewrite history. The server
- * stamps createdAt; createdBy is the signed-in uid, both re-checked by rules.
+ * Log practice minutes for a day — contract v1.3 shape, ACCUMULATING.
+ * `minutes` here is the DELTA the athlete just practiced; the transaction
+ * reads the day's existing log and writes existing + delta (capped at the
+ * rules' 720), so two quick entries can never lose each other (code review
+ * 2026-09-04, finding 3: the old read-outside-write version let a fast
+ * second save overwrite from a stale base). Doc id `{athleteId}_{date}`
+ * stays the one-log-per-day keyspace; `contractMinutes` is the caller's
+ * tier snapshot, never re-derived, so later tier changes cannot rewrite
+ * history. Returns the day's new TOTAL in `minutes`.
  */
 export async function createContractLog({ athleteId, date, minutes, contractMinutes = null }) {
   if (!athleteId || !date || minutes == null) {
@@ -436,22 +475,28 @@ export async function createContractLog({ athleteId, date, minutes, contractMinu
     );
   }
   const user = requireUser();
-  const log = {
-    athleteId,
-    date,
-    minutes,
-    contractMinutes,
-    createdBy: user.uid,
-    createdAt: serverTimestamp(),
-  };
   try {
     const id = `${athleteId}_${date}`;
-    await setDoc(doc(db, 'contractLogs', id), log);
+    const ref = doc(db, 'contractLogs', id);
+    const total = await runTransaction(db, async (tx) => {
+      const snap = await tx.get(ref);
+      const already = snap.exists() ? snap.data().minutes || 0 : 0;
+      const newTotal = Math.min(720, already + minutes);
+      tx.set(ref, {
+        athleteId,
+        date,
+        minutes: newTotal,
+        contractMinutes,
+        createdBy: user.uid,
+        createdAt: serverTimestamp(),
+      });
+      return newTotal;
+    });
     // Post-write invalidation seam (Sprint 6 pin): usePracticeLog AND
     // useContract AND useAthleteDashboard all re-run, not just whichever
     // hook made the write.
     bump('contractLogs');
-    return { id, ...log, createdAt: null };
+    return { id, athleteId, date, minutes: total, contractMinutes };
   } catch (err) {
     throw wrap(err, 'createContractLog');
   }

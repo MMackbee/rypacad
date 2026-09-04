@@ -33,7 +33,7 @@
 
 import { useState } from 'react';
 import useSeedResource from './useSeedResource';
-import { useInvalidation } from './invalidate';
+import { bump, useInvalidation } from './invalidate';
 import {
   ERR,
   LiveDataError,
@@ -104,12 +104,14 @@ import {
   CONTRACT_TIERS,
 } from '../data/athlete';
 import {
+  addDaysISO,
   ageFromDob,
   buildContractMonth,
   buildContractMonthFromLogs,
   longDayLabel,
   monthBounds,
   nextMonthFirstShort,
+  parseTimeToMinutes,
   pickDueDates,
   todayISO,
 } from '../data/calendar';
@@ -591,7 +593,10 @@ export function useBooking({ variant = 'open', today = todayISO(), practice = fa
     const athlete = await fetchAthlete(forAthleteId);
     const pkg = athlete.packageId ? await fetchPackage(athlete.packageId) : null;
     const pool = poolFor(slot.type);
-    const limit = pkg ? (pool === 'tournaments' ? pkg.tournaments : pkg.training) ?? 0 : 0;
+    // A limit of 0 (drop-in tournaments, no package) means the pool has NO
+    // allowance: every week skips at 'monthly limit' — `limit > 0` gating
+    // treated real zeroes as unlimited (code review 2026-09-04, finding 1).
+    const limit = (pool === 'tournaments' ? pkg?.tournaments : pkg?.training) ?? 0;
     const bookings = await fetchBookings(
       forAthleteId,
       identity.role === 'parent' ? { householdId: identity.householdId } : {}
@@ -609,22 +614,33 @@ export function useBooking({ variant = 'open', today = todayISO(), practice = fa
       }
     }
 
-    const addDays = (iso, n) => {
-      const d = new Date(`${iso}T12:00:00Z`);
-      d.setUTCDate(d.getUTCDate() + n);
-      return d.toISOString().slice(0, 10);
-    };
+    // Every candidate week's sessions in ONE range query, matched locally —
+    // one query per week was ~25 serial round-trips (finding 8a).
+    const firstDate = addDaysISO(slot.date, 7);
+    const sessionsByDate = new Map();
+    let lastSessionDate = null;
+    if (firstDate <= untilISO) {
+      for (const s of await fetchSessionsInRange(firstDate, untilISO)) {
+        const list = sessionsByDate.get(s.date) ?? [];
+        list.push(s);
+        sessionsByDate.set(s.date, list);
+        if (!lastSessionDate || s.date > lastSessionDate) lastSessionDate = s.date;
+      }
+    }
+    // Stop at the last scheduled session rather than the requested end date:
+    // "rest of the season" means as far as the schedule actually goes, and
+    // weeks past it are not real skips worth reporting.
+    const endDate = lastSessionDate && lastSessionDate < untilISO ? lastSessionDate : untilISO;
 
     const booked = [];
     const skipped = [];
-    for (let date = addDays(slot.date, 7); date <= untilISO; date = addDays(date, 7)) {
+    for (let date = firstDate; date <= endDate; date = addDaysISO(date, 7)) {
       const month = date.slice(0, 7);
-      if (limit > 0 && (tally.get(month) || 0) >= limit) {
+      if ((tally.get(month) || 0) >= limit) {
         skipped.push({ date, reason: 'monthly limit' });
         continue;
       }
-      const daySessions = (await fetchSessions(date, 1)).filter((s) => s.date === date);
-      const match = daySessions.find(
+      const match = (sessionsByDate.get(date) ?? []).find(
         (s) => s.time === slot.time && s.type === slot.type && s.status !== 'cancelled'
       );
       if (!match) {
@@ -640,14 +656,21 @@ export function useBooking({ variant = 'open', today = todayISO(), practice = fa
         continue;
       }
       try {
-        await createBooking({
-          athleteId: forAthleteId,
-          sessionId: match.id,
-          date: match.date,
-          type: match.type,
-          pool,
-          householdId: identity.householdId,
-        });
+        // skipCapCheck: this loop maintains the running tally itself (the
+        // writer's own cap query per instance would be redundant reads);
+        // silent: one invalidation bump AFTER the loop instead of a refetch
+        // storm per iteration (finding 8b).
+        await createBooking(
+          {
+            athleteId: forAthleteId,
+            sessionId: match.id,
+            date: match.date,
+            type: match.type,
+            pool,
+            householdId: identity.householdId,
+          },
+          { skipCapCheck: true, silent: true }
+        );
         booked.push({ date: match.date, id: match.id });
         tally.set(month, (tally.get(month) || 0) + 1);
         have.add(match.id);
@@ -657,6 +680,10 @@ export function useBooking({ variant = 'open', today = todayISO(), practice = fa
           reason: /already/i.test(err?.message || '') ? 'already booked' : 'full',
         });
       }
+    }
+    if (booked.length) {
+      bump('bookings');
+      bump('sessions');
     }
     return { booked, skipped };
   };
@@ -678,11 +705,13 @@ function groupSessionsByDate(sessions, today) {
     // The pinned month-session shape keeps the raw numbers alongside the
     // display fields: the booking sheet computes spots-left from
     // capacity/booked, which displaySession (a list formatter) drops.
-    // `time` stays the doc's FULL string ("9:00 AM") — displaySession
-    // pre-splits it into time/meridiem, and the booking sheet splits again,
-    // which left meridiem undefined and let SessionCard's default label
-    // every session PM (invisible until Saturday-morning blocks existed).
-    const row = { ...displaySession(s, today), time: s.time, capacity: s.capacity, booked: s.booked };
+    // ONE canonical time shape for month rows: `time` is the doc's FULL
+    // string ("9:00 AM") and meridiem is REMOVED — carrying the full string
+    // next to displaySession's stale split meridiem left two incompatible
+    // shapes under the same field names (code review 2026-09-04): consumers
+    // split `time` themselves.
+    const { meridiem: _split, ...display } = displaySession(s, today);
+    const row = { ...display, time: s.time, capacity: s.capacity, booked: s.booked };
     if (list) list.push(row);
     else byDate.set(s.date, [row]);
   }
@@ -1026,12 +1055,7 @@ export function useCoachDay({ variant = 'today' } = {}) {
     const sessions = upcoming.filter((s) => s.date === dayISO);
     const isToday = dayISO === today;
     const nowMinutes = new Date().getHours() * 60 + new Date().getMinutes();
-    const toMinutes = (t) => {
-      const m = t.match(/(\d+):(\d+)\s*(AM|PM)/i);
-      if (!m) return 0;
-      const h = (Number(m[1]) % 12) + (m[3].toUpperCase() === 'PM' ? 12 : 0);
-      return h * 60 + Number(m[2]);
-    };
+    const toMinutes = (t) => parseTimeToMinutes(t) ?? 0;
     return {
       coach: { name: profile.displayName ?? 'Coach', date: isToday ? today : `Next session day · ${dayISO}` },
       blocks: sessions
@@ -1135,10 +1159,9 @@ export function useSession({ today = todayISO(), blockIndex = 1 } = {}) {
  * start's minutes and the meridiem flips across noon/midnight.
  */
 function blockRange(time) {
-  const [clock, meridiem] = time.split(' ');
-  const [h, m] = clock.split(':').map(Number);
-  // Total minutes on a 24h clock, then add the hour.
-  const start24 = ((h % 12) + (meridiem === 'PM' ? 12 : 0)) * 60 + m;
+  const [clock] = time.split(' ');
+  const [, m] = clock.split(':').map(Number);
+  const start24 = parseTimeToMinutes(time) ?? 0;
   const end24 = (start24 + 60) % (24 * 60);
   const endH24 = Math.floor(end24 / 60);
   const endH = endH24 % 12 === 0 ? 12 : endH24 % 12;
@@ -1484,6 +1507,9 @@ export function usePracticeLog({ today = todayISO(), practice = false } = {}) {
   const seedValue = {
     totalMinutes: seedLoggedToday ? seedEntry.minutes : 0,
     loggedToday: seedLoggedToday,
+    // Same field the live payload carries — the footer's day total read
+    // this and got nothing in seed mode (code review 2026-09-04, finding 4).
+    todayMinutes: seedLoggedToday ? seedEntry.minutes : 0,
     contractMinutes: SEED_CONTRACT_MINUTES,
   };
 
@@ -1496,8 +1522,11 @@ export function usePracticeLog({ today = todayISO(), practice = false } = {}) {
 
   const logPractice = async ({ minutes }) => {
     // A second entry the same day ACCUMULATES (owner's report, 2026-09-01:
-    // "my time logged resets on every entry") — one doc per day still, but
-    // its minutes are the day's running total, capped at the rules' 720.
+    // "my time logged resets on every entry"). `minutes` is the DELTA; the
+    // day total comes back in the result. Live accumulation happens INSIDE
+    // createContractLog's transaction — adding from this hook's last-loaded
+    // snapshot let a fast second save overwrite from a stale base (code
+    // review 2026-09-04, finding 3).
     if (!live) {
       const already = seedLoggedToday ? seedEntry.minutes : 0;
       const entry = { date: today, minutes: Math.min(720, already + minutes) };
@@ -1505,14 +1534,13 @@ export function usePracticeLog({ today = todayISO(), practice = false } = {}) {
       return entry;
     }
     const { athlete } = await liveAthleteIdentity();
-    const already = state.data?.todayMinutes ?? 0;
     // createContractLog bumps the 'contractLogs' generation itself on
     // success - this hook's own subscription above picks that up and
     // re-runs, so there is nothing to bump here directly.
     return createContractLog({
       athleteId: athlete.id,
       date: today,
-      minutes: Math.min(720, already + minutes),
+      minutes,
       contractMinutes: athlete.contractMinutes ?? null,
     });
   };

@@ -53,12 +53,12 @@ export default function CommitmentContract({
   // The practice log lives here and nowhere else — component state is the
   // whole record, per the practice-mode invariant (zero Firestore writes).
   const [practiceLogged, setPracticeLogged] = useState(null);
-  // Real (non-practice) logging: the timer/manual entry sheet, and the
-  // minutes actually saved today once the coach... athlete taps Save. The
-  // contract tier is a minimum, not a unit (Sprint 5 pin) — this is the
-  // real practiced amount, which can run above or below the tier.
+  // Real (non-practice) logging: just the sheet's open/closed state. The
+  // day's minutes come from usePracticeLog (which now reports todayMinutes
+  // in BOTH seed and live modes) — a local copy of the last delta was a
+  // third source of truth that showed the delta instead of the day's total
+  // (code review 2026-09-04, findings 3 and 4).
   const [showLogSheet, setShowLogSheet] = useState(false);
-  const [todayLog, setTodayLog] = useState(null); // minutes, or null if not logged today
 
   const practiceLog = usePracticeLog({ practice });
 
@@ -110,9 +110,10 @@ export default function CommitmentContract({
       }
     : () => setShowLogSheet(true);
 
+  // `minutes` is the DELTA just practiced; logPractice accumulates it into
+  // the day (transactionally in live mode) and the hook re-reports the total.
   const handleSaveLog = (minutes) => {
     practiceLog.logPractice({ minutes });
-    setTodayLog(minutes);
     setShowLogSheet(false);
     if (onLog) onLog(minutes);
   };
@@ -139,8 +140,12 @@ export default function CommitmentContract({
           hint={state?.hint}
           onLog={handleLog}
           minutes={data?.tierMinutes}
-          logged={Boolean(practiceLogged) || todayLog != null || Boolean(practiceLog.data?.loggedToday)}
-          loggedMinutes={practiceLog.data?.todayMinutes || todayLog || data?.tierMinutes}
+          logged={Boolean(practiceLogged) || Boolean(practiceLog.data?.loggedToday)}
+          loggedMinutes={practiceLog.data?.todayMinutes || data?.tierMinutes}
+          // Practice mode logs once per walkthrough step, so the logged
+          // state must not offer "+ Add more" — handleLog short-circuits
+          // there, making it a dead control (code review 2026-09-04).
+          canAddMore={!practice}
         />
       }
     >
@@ -303,7 +308,15 @@ function StatsRow({ stats }) {
  * timer or manual entry actually recorded, which can be above or below the
  * tier — see LogSheet).
  */
-function ContractFooter({ complete, hint, onLog, minutes, logged = false, loggedMinutes }) {
+function ContractFooter({
+  complete,
+  hint,
+  onLog,
+  minutes,
+  logged = false,
+  loggedMinutes,
+  canAddMore = true,
+}) {
   return (
     <>
       <div
@@ -333,7 +346,7 @@ function ContractFooter({ complete, hint, onLog, minutes, logged = false, logged
             {/* Minutes accumulate (a morning and an evening session are one
                 day's total), so the logged state keeps a way back into the
                 sheet instead of going inert for the rest of the day. */}
-            {onLog ? (
+            {onLog && canAddMore ? (
               <button
                 type="button"
                 onClick={onLog}

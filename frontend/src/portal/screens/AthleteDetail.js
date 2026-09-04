@@ -46,7 +46,10 @@ export default function AthleteDetail({ variant = 'populated', bare = false, ath
           </div>
         </div>
       }
-      footer={<BottomTabBar role="parent" active="children" />}
+      // 'home' IS the children overview since the duplicate Children tab
+      // was removed; active="children" matched no tab (code review
+      // 2026-09-04) and left the bar with nothing highlighted.
+      footer={<BottomTabBar role="parent" active="home" />}
     >
       <div style={{ padding: '0 22px 24px', display: 'flex', flexDirection: 'column', gap: 12 }}>
         {data?.hasEnoughData ? (

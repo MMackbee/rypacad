@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useState } from 'react';
 import { color, font, glow, radius } from '../tokens';
 import AthleteRow from '../components/AthleteRow';
 import BottomTabBar from '../components/BottomTabBar';
@@ -10,11 +10,13 @@ import { SkeletonBar } from '../components/Skeleton';
 import StatusBadge from '../components/StatusBadge';
 import { Body, Card, ScreenTitle, SectionLabel, SignOutButton } from '../components/Primitives';
 import { useCoachDay, useCoachRoster, useMonthSessions } from '../hooks';
-// The booking screen's month-nav pieces, reused rather than reforked — the
-// coach Sessions tab is the booking view pointed at rosters (owner's call,
-// 2026-09-01). Pure calendar label helpers ride along per the seam rule.
-import { MonthNav, shiftMonth } from './BookSession';
-import { monthLabel, todayISO } from '../data/calendar';
+// Shared calendar plumbing (components/MonthCalendar.js) — the coach
+// Sessions tab is the booking view pointed at rosters (owner's call,
+// 2026-09-01), and both screens paint from the same module so they cannot
+// drift. Pure calendar label helpers ride along per the seam rule.
+import { buildMonthDayMaps, MonthNav, useMonthNavState } from '../components/MonthCalendar';
+import { monthLabel, parseTimeToMinutes, todayISO } from '../data/calendar';
+import { SEASON_BOUNDS } from '../data/season';
 
 /**
  * 12 · Coach Dashboard - coach.
@@ -75,7 +77,11 @@ export default function CoachDashboard({ variant = 'today', bare = false, onOpen
           <StudentsTab athletes={roster.data ?? []} loading={roster.loading} />
         ) : (
           <SessionsTab
-            firstSessionDate={blocks[0]?.sessionId?.slice(0, 10) ?? null}
+            // Live blocks carry real sessionIds; seed blocks don't, so the
+            // demo/harness falls back to the generated season's opening day
+            // (code review 2026-09-04, finding 9a: the seed calendar never
+            // auto-jumped and showed an empty month).
+            firstSessionDate={blocks[0]?.sessionId?.slice(0, 10) ?? SEASON_BOUNDS.start}
             onOpenRoster={onOpenRoster}
           />
         )}
@@ -175,31 +181,31 @@ function StudentsTab({ athletes, loading }) {
  * what families can book.
  */
 function SessionsTab({ firstSessionDate, onOpenRoster }) {
-  const [monthISO, setMonthISO] = useState(() => `${todayISO().slice(0, 7)}-01`);
+  const today = todayISO();
+  // Month state + pre-season auto-jump from the shared calendar module, the
+  // same one BookSession uses (code review 2026-09-04: this was a verbatim
+  // copy that had already drifted).
+  const { monthISO, changeMonth } = useMonthNavState(firstSessionDate, today);
   const [selectedDate, setSelectedDate] = useState(null);
   const monthState = useMonthSessions(monthISO);
-
-  // Same pre-season courtesy as BookSession: open on the first month that
-  // has sessions until the coach navigates themselves.
-  const monthTouched = useRef(false);
-  useEffect(() => {
-    if (monthTouched.current || !firstSessionDate) return;
-    const opening = `${firstSessionDate.slice(0, 7)}-01`;
-    setMonthISO((cur) => (opening > cur ? opening : cur));
-  }, [firstSessionDate]);
-  const changeMonth = (next) => {
-    monthTouched.current = true;
+  const navMonth = (delta) => {
     setSelectedDate(null);
-    setMonthISO(next);
+    changeMonth(delta);
+  };
+
+  // A block that has already run reads 'closed', as the old list did — a
+  // coach browsing today must be able to tell a finished 3 PM block from the
+  // 7 PM one still ahead (code review 2026-09-04, finding 9b).
+  const nowMinutes = new Date().getHours() * 60 + new Date().getMinutes();
+  const isFinished = (session) => {
+    if (session.date < today) return true;
+    if (session.date > today) return false;
+    const start = parseTimeToMinutes(session.time);
+    return start != null && nowMinutes >= start + 60;
   };
 
   const days = monthState.data?.days ?? [];
-  const dayStates = {};
-  const sessionsByDate = {};
-  for (const d of days) {
-    sessionsByDate[d.date] = d.sessions;
-    dayStates[d.date] = d.sessions.length ? 'available' : 'open';
-  }
+  const { dayStates, sessionsByDate } = buildMonthDayMaps(days);
   const monthHasSessions = days.some((d) => d.sessions.length > 0);
   const selectedSessions = selectedDate ? sessionsByDate[selectedDate] ?? [] : [];
 
@@ -208,8 +214,8 @@ function SessionsTab({ firstSessionDate, onOpenRoster }) {
       <Card large>
         <MonthNav
           label={monthLabel(monthISO)}
-          onPrev={() => changeMonth(shiftMonth(monthISO, -1))}
-          onNext={() => changeMonth(shiftMonth(monthISO, 1))}
+          onPrev={() => navMonth(-1)}
+          onNext={() => navMonth(1)}
         />
         {monthState.loading ? (
           <SkeletonBar height={220} style={{ marginTop: 14 }} />
@@ -244,6 +250,7 @@ function SessionsTab({ firstSessionDate, onOpenRoster }) {
         ) : (
           selectedSessions.map((session) => {
             const [time, meridiem] = String(session.time).split(' ');
+            const finished = isFinished(session);
             return (
               <SessionCard
                 key={session.id}
@@ -255,6 +262,9 @@ function SessionsTab({ firstSessionDate, onOpenRoster }) {
                 nameSize={15}
                 gutter={56}
                 ruleHeight={44}
+                variant={finished ? 'closed' : 'default'}
+                // A finished block still opens its roster — attendance is
+                // marked after the session, not only during it.
                 onClick={() => onOpenRoster && onOpenRoster({ sessionId: session.id })}
               />
             );

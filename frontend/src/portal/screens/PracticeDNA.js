@@ -58,7 +58,9 @@ export default function PracticeDNA({ variant = 'complete', bare = false }) {
           <ScreenTitle size={26}>Practice DNA</ScreenTitle>
         </div>
       }
-      footer={<BottomTabBar role="athlete" active="dna" />}
+      // The DNA tab is off for players; this screen survives for the
+      // harness and the future staff flow, so no tab is active.
+      footer={<BottomTabBar role="athlete" active={null} />}
     >
       <div style={{ padding: '0 22px 24px', display: 'flex', flexDirection: 'column', gap: 12 }}>
         <Body size={12}>

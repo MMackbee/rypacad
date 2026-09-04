@@ -15,7 +15,8 @@ import { useBooking, useHouseholdAthletes, useMonthSessions } from '../hooks';
 // helper that is already imported elsewhere in this file stays importable.
 import { poolFor } from '../data/packages';
 import { capacityFor, dayLabel } from '../data/season';
-import { monthLabel, todayISO } from '../data/calendar';
+import { addDaysISO, monthLabel, parseTimeToMinutes, todayISO } from '../data/calendar';
+import { buildMonthDayMaps, MonthNav, useMonthNavState } from '../components/MonthCalendar';
 
 /** Sessions arrive raw (numeric capacity/booked) from useMonthSessions;
     useBooking's slots carry a pre-formatted capacity object. Accept both. */
@@ -29,11 +30,9 @@ function displayNameFor(session) {
 }
 
 /** First-of-month ISO, shifted by whole months — day-of-month is always 1. */
-export function shiftMonth(monthISO, delta) {
-  const [y, m] = monthISO.split('-').map(Number);
-  const d = new Date(Date.UTC(y, m - 1 + delta, 1));
-  return `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, '0')}-01`;
-}
+// shiftMonth/MonthNav moved to components/MonthCalendar.js (code review
+// 2026-09-04): shared calendar plumbing lives in components/, not in a
+// sibling screen other screens have to import from.
 
 /**
  * 05 · Book a Session - athlete.
@@ -91,7 +90,11 @@ export default function BookSession({
   // Kept for the existing booking behavior: book(), allowance, confirmation
   // copy — exactly the contract the screen already had (Sprint 5 pin).
   const { data, loading, error, book, bookRecurring, bookingFor } = useBooking({ variant, practice });
-  const [monthISO, setMonthISO] = useState(() => `${todayISO().slice(0, 7)}-01`);
+  // Month state + pre-season auto-jump live in the shared calendar module
+  // (components/MonthCalendar.js) so this screen and the coach's Sessions
+  // tab cannot drift.
+  const firstBookable = data?.slots?.[0]?.date ?? null;
+  const { monthISO, changeMonth } = useMonthNavState(firstBookable, todayISO());
   const monthState = useMonthSessions(monthISO, { practice });
 
   // Household athletes for the parent flow (Sprint 6 pin, QA #2) - always
@@ -110,23 +113,6 @@ export default function BookSession({
   const selectedAthlete = isParent
     ? householdAthletes.find((a) => a.id === selectedAthleteId) ?? null
     : null;
-
-  // Before the season opens, today's month has nothing to book — jump the
-  // calendar to the first bookable date's month so the athlete's first visit
-  // (and the walkthrough's booking step) opens on real sessions instead of
-  // an empty grid three taps away from one. Only until the athlete navigates
-  // themselves; their prev/next choices are never overridden.
-  const monthTouched = useRef(false);
-  const firstBookable = data?.slots?.[0]?.date ?? null;
-  useEffect(() => {
-    if (monthTouched.current || !firstBookable) return;
-    const openingMonth = `${firstBookable.slice(0, 7)}-01`;
-    setMonthISO((cur) => (openingMonth > cur ? openingMonth : cur));
-  }, [firstBookable]);
-  const changeMonth = (next) => {
-    monthTouched.current = true;
-    setMonthISO(next);
-  };
 
   const [selectedDate, setSelectedDate] = useState(null);
   // The slot the athlete just booked. Persistence is the API's job later; the
@@ -219,12 +205,7 @@ export default function BookSession({
   // so only the allowance source changes for the parent flow.
   const allowance = isParent ? selectedAthlete?.allowance : data?.allowance;
   const days = monthState.data?.days ?? [];
-  const dayStates = {};
-  const sessionsByDate = {};
-  for (const d of days) {
-    sessionsByDate[d.date] = d.sessions;
-    dayStates[d.date] = d.sessions.length ? 'available' : 'open';
-  }
+  const { dayStates, sessionsByDate } = buildMonthDayMaps(days);
   const monthHasSessions = days.some((d) => d.sessions.length > 0);
   const selectedSessions = selectedDate ? sessionsByDate[selectedDate] ?? [] : [];
 
@@ -301,11 +282,11 @@ export default function BookSession({
                   label={monthLabel(monthISO)}
                   onPrev={() => {
                     setSelectedDate(null);
-                    changeMonth(shiftMonth(monthISO, -1));
+                    changeMonth(-1);
                   }}
                   onNext={() => {
                     setSelectedDate(null);
-                    changeMonth(shiftMonth(monthISO, 1));
+                    changeMonth(1);
                   }}
                 />
                 {monthState.loading ? (
@@ -361,47 +342,7 @@ export default function BookSession({
   );
 }
 
-export function MonthNav({ label, onPrev, onNext }) {
-  return (
-    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-      <NavArrow direction="prev" onClick={onPrev} />
-      <ScreenTitle size={17}>{label}</ScreenTitle>
-      <NavArrow direction="next" onClick={onNext} />
-    </div>
-  );
-}
 
-function NavArrow({ direction, onClick }) {
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      aria-label={direction === 'prev' ? 'Previous month' : 'Next month'}
-      style={{
-        width: 32,
-        height: 32,
-        flex: 'none',
-        border: `1px solid ${color.border}`,
-        borderRadius: radius.input,
-        background: 'transparent',
-        display: 'grid',
-        placeItems: 'center',
-        cursor: 'pointer',
-      }}
-    >
-      <span
-        aria-hidden="true"
-        style={{
-          width: 7,
-          height: 7,
-          borderRight: `1.5px solid ${color.textSecondary}`,
-          borderBottom: `1.5px solid ${color.textSecondary}`,
-          transform: direction === 'prev' ? 'rotate(135deg)' : 'rotate(-45deg)',
-        }}
-      />
-    </button>
-  );
-}
 
 /**
  * The tapped day's sessions — time, type chip, spots left, which allowance
@@ -603,11 +544,12 @@ function BookingSkeleton() {
  * parseable date/time (the button hides rather than dead-clicking).
  */
 function calendarTemplateUrl(c) {
-  const m = String(c.time || '').match(/(\d+):(\d+)/);
-  if (!c.date || !m) return null;
-  let h = Number(m[1]) % 12;
-  if (String(c.meridiem || '').toUpperCase() === 'PM') h += 12;
-  const mins = Number(m[2]);
+  // The confirmation splits time/meridiem for display; rejoin for the one
+  // canonical 12-hour parser (data/calendar.js).
+  const startMinutes = parseTimeToMinutes(`${c.time} ${c.meridiem || ''}`);
+  if (!c.date || startMinutes == null) return null;
+  const h = Math.floor(startMinutes / 60);
+  const mins = startMinutes % 60;
   const pad = (n) => String(n).padStart(2, '0');
   const d = c.date.replace(/-/g, '');
   const params = new URLSearchParams({
@@ -755,16 +697,19 @@ function Confirmed({ bare, confirmation, onRepeat, onBack }) {
 }
 
 /** End-date presets for the weekly repeat, anchored to the booked date. */
+/**
+ * End-date choices for the weekly repeat, anchored to the booked date and
+ * free of season literals: the engine stops at the last SCHEDULED session,
+ * so "rest of the season" can ask for a year out and still end exactly
+ * where the calendar does — no date to rot when the 27/28 season lands
+ * (code review 2026-09-04).
+ */
 function repeatPresets(fromISO) {
-  const plus = (n) => {
-    const d = new Date(`${fromISO}T12:00:00Z`);
-    d.setUTCDate(d.getUTCDate() + n);
-    return d.toISOString().slice(0, 10);
-  };
-  const presets = [{ label: 'Next 4 weeks', untilISO: plus(28) }];
-  if (fromISO < '2026-12-31') presets.push({ label: 'Through December', untilISO: '2026-12-31' });
-  presets.push({ label: 'Full season (through Mar 31)', untilISO: '2027-03-31' });
-  return presets;
+  return [
+    { label: 'Next 4 weeks', untilISO: addDaysISO(fromISO, 28) },
+    { label: 'Next 3 months', untilISO: addDaysISO(fromISO, 91) },
+    { label: 'Rest of the season', untilISO: addDaysISO(fromISO, 400) },
+  ];
 }
 
 function RepeatSummary({ result }) {

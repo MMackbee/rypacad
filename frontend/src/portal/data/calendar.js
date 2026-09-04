@@ -15,6 +15,7 @@
  */
 
 import {
+  addDays,
   addMonths,
   differenceInYears,
   eachDayOfInterval,
@@ -29,6 +30,27 @@ import {
 /** Local calendar date as 'yyyy-MM-dd' — the family's wall-clock day. */
 export function todayISO() {
   return format(new Date(), 'yyyy-MM-dd');
+}
+
+/**
+ * 'yyyy-MM-dd' plus n days, via date-fns — THE date stepper (code review
+ * 2026-09-04: two hand-rolled UTC copies of this existed; date math never
+ * gets reimplemented here again).
+ */
+export function addDaysISO(iso, n) {
+  return format(addDays(parseISO(iso), n), 'yyyy-MM-dd');
+}
+
+/**
+ * Session time string ("9:00 AM", "12:30 PM") -> minutes since midnight,
+ * or null when unparseable. THE 12-hour parser (code review 2026-09-04:
+ * three regex copies existed; noon/midnight rules live here once).
+ */
+export function parseTimeToMinutes(timeStr) {
+  const m = String(timeStr || '').match(/(\d+):(\d+)\s*(AM|PM)/i);
+  if (!m) return null;
+  const h = (Number(m[1]) % 12) + (m[3].toUpperCase() === 'PM' ? 12 : 0);
+  return h * 60 + Number(m[2]);
 }
 
 /** '2026-08-28' -> 'Friday, Aug 28'. */
@@ -191,6 +213,9 @@ export function buildContractMonthFromLogs({ today, minutesByDate, contractMinut
         if (fulfilled(iso)) {
           state = 'logged';
           tally.logged++;
+          // A fulfilled today is due-and-done: counting it logged without
+          // counting it due made logged/dueSoFar read 120% ("6 of 5 days").
+          tally.dueSoFar++;
         } else {
           state = 'open';
           tally.daysLeft++;
