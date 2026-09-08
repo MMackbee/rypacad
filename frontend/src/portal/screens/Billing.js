@@ -220,16 +220,17 @@ function InvoiceHistory({ invoices }) {
               {inv.date}
             </div>
           </div>
-          {/*
-            Amounts stay as a dashed slot. The handoff's exclusion list ends with
-            "Any specific dollar figure, anywhere", and an invoice total is
-            exactly that - the confirmed package prices do not make a historical
-            charge a decided number.
-          */}
-          <span style={{ font: `600 11px ${font.mono}`, color: color.secondary }}>$ ——</span>
           <StatusBadge tone={inv.paid ? 'green' : 'red'}>{inv.paid ? 'Paid' : 'Unpaid'}</StatusBadge>
         </div>
       ))}
+      {/*
+        No per-row amount until Stripe: historical charges are not decided
+        numbers, and a dashed "$ ——" on every row read as broken data
+        (QA 2026-09-08 #4). The section says why once instead.
+      */}
+      <Body size={11} tone={color.textTertiary} style={{ marginTop: 10 }}>
+        Amounts appear here once billing is connected.
+      </Body>
     </Card>
   );
 }

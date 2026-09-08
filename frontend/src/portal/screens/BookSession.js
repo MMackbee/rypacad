@@ -217,7 +217,10 @@ export default function BookSession({
           name: booked.name,
           when: `${booked.dayLabel} · ${booked.time}`,
           pool: poolFor(booked.type),
-          email: data?.confirmation?.email,
+          // Practice mode sends nothing to anyone - the seed guardian email
+          // ("dana@email.com") read as a real notification in the athlete
+          // walkthrough (QA 2026-09-08 #9).
+          email: practice ? null : data?.confirmation?.email,
           note: data?.confirmation?.note,
           // For the add-to-calendar template link.
           date: booked.date,

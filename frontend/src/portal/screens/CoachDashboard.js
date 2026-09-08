@@ -264,8 +264,19 @@ function SessionsTab({ firstSessionDate, onOpenRoster }) {
                 ruleHeight={44}
                 variant={finished ? 'closed' : 'default'}
                 // A finished block still opens its roster — attendance is
-                // marked after the session, not only during it.
-                onClick={() => onOpenRoster && onOpenRoster({ sessionId: session.id })}
+                // marked after the session, not only during it. The display
+                // facts ride along so the attendance header names THIS block.
+                onClick={() =>
+                  onOpenRoster &&
+                  onOpenRoster({
+                    sessionId: session.id,
+                    date: session.date,
+                    time: session.time,
+                    type: session.type,
+                    name: session.name,
+                    meta: `${session.booked ?? 0} of ${session.capacity ?? '—'} booked`,
+                  })
+                }
               />
             );
           })

@@ -29,8 +29,16 @@ import { useAthleteDashboard } from '../hooks';
  * @param {() => void} [onSignOut]  Sprint 5 pin: hidden when not supplied
  *   (harness/demo mode); routing wires useAuthSession().signOut() to it.
  */
-export default function AthleteDashboard({ variant = 'populated', bare = false, onLog, onBook, onRetry, onSignOut }) {
-  const { data, loading, error } = useAthleteDashboard({ variant });
+export default function AthleteDashboard({
+  variant = 'populated',
+  bare = false,
+  practice = false,
+  onLog,
+  onBook,
+  onRetry,
+  onSignOut,
+}) {
+  const { data, loading, error } = useAthleteDashboard({ variant, practice });
   const athlete = data?.athlete;
   const next = data?.nextSession;
   const contract = data?.contract;
@@ -239,7 +247,10 @@ function ContractCard({ contract }) {
       <div style={{ display: 'flex', alignItems: 'baseline', gap: 10, marginTop: 12 }}>
         <span style={{ font: `700 40px ${font.head}`, color: color.text }}>{contract.logged}</span>
         <span style={{ font: `400 14px ${font.body}`, color: color.textSecondary }}>
-          of {contract.total} days · {contract.month}
+          {/* "due" is load-bearing: this denominator is days due SO FAR,
+              while the Contract screen counts the whole month - unlabeled,
+              the two numbers read as a contradiction (QA 2026-09-08 #6). */}
+          of {contract.total} days due · {contract.month}
         </span>
       </div>
 

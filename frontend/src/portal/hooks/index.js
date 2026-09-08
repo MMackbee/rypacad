@@ -1266,8 +1266,10 @@ async function liveAthleteDashboard(today) {
 }
 
 /** GET /athletes/:id + next session + contract summary (03). */
-export function useAthleteDashboard({ variant = 'populated', today = todayISO() } = {}) {
-  const live = isLive();
+export function useAthleteDashboard({ variant = 'populated', today = todayISO(), practice = false } = {}) {
+  // Practice pins the seed branch (onboarding invariant; QA 2026-09-08: the
+  // walkthrough's dashboard preview errored while signed out).
+  const live = !practice && isLive();
   // Post-write invalidation seam (Sprint 6 pin): a booking or a contract log
   // write changes this card - re-run after either bumps.
   const bookingsGen = useInvalidation('bookings');
@@ -1431,8 +1433,11 @@ async function liveContract(today) {
   };
 }
 
-export function useContract({ variant = 'ontrack', today = todayISO() } = {}) {
-  const live = isLive();
+export function useContract({ variant = 'ontrack', today = todayISO(), practice = false } = {}) {
+  // Practice pins the seed branch (onboarding invariant — the third hook to
+  // need this pin; QA 2026-09-08: the walkthrough's log step showed
+  // "CONTRACT DIDN'T LOAD" because this fetched live while signed out).
+  const live = !practice && isLive();
   // Post-write invalidation seam (Sprint 6 pin): re-run after any
   // contractLogs write, not just one made through this hook instance.
   const contractLogsGen = useInvalidation('contractLogs');

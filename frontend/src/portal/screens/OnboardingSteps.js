@@ -229,7 +229,7 @@ export const ATHLETE_STEPS = [
   welcomeStep([
     'Book your training and tournament blocks — two separate allowances, always shown as two numbers.',
     'Log your Commitment Contract day in one tap.',
-    'See your Practice DNA baseline — your own numbers, never a model swing.',
+    'Log your practice minutes and watch your commitment streak build.',
   ]),
   {
     id: 'dashboard',
@@ -241,7 +241,7 @@ export const ATHLETE_STEPS = [
     },
     render: () => (
       <Fill>
-        <AthleteDashboard bare variant="populated" />
+        <AthleteDashboard bare variant="populated" practice />
       </Fill>
     ),
   },

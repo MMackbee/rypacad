@@ -11,6 +11,27 @@ import useRoster from '../hooks/useRoster';
 import * as hooks from '../hooks';
 import { useCoachRoster, useSession } from '../hooks';
 import { isLive } from '../hooks/live';
+// Pure calendar/season helpers per the seam rule - data still travels
+// through the hooks above.
+import { parseTimeToMinutes, todayISO } from '../data/calendar';
+import { dayLabel } from '../data/season';
+
+/**
+ * An honest status label for a real block: a countdown only when the block
+ * genuinely starts within two hours, otherwise the day it runs. Replaces the
+ * seed constant that read "STARTS IN 12 MIN" for sessions months out.
+ */
+function realStartsIn(block) {
+  const today = todayISO();
+  if (!block.date || block.date > today) return block.date ? dayLabel(block.date, today) : null;
+  if (block.date < today) return 'Ended';
+  const start = parseTimeToMinutes(block.time);
+  if (start == null) return 'Today';
+  const diff = start - (new Date().getHours() * 60 + new Date().getMinutes());
+  if (diff > 120) return 'Today';
+  if (diff > 0) return `Starts in ${diff} min`;
+  return diff > -60 ? 'Now' : 'Ended';
+}
 
 /**
  * The routing lane is adding `useSessionAttendance(sessionId)` to hooks/index.js
@@ -143,14 +164,25 @@ export default function Roster({ bare = false, onSignOut }) {
  * @param {string} [sessionId]   Real Firestore session id - live mode only.
  * @param {number} [blockIndex]  Which of today's blocks (0-based) - seed mode.
  */
-export function SessionAttendance({ variant = 'pre', bare = false, onBack, sessionId, blockIndex }) {
+export function SessionAttendance({ variant = 'pre', bare = false, onBack, sessionId, blockIndex, block }) {
   const { roster: demoRoster, marks: demoMarks, mark: demoMark, counts: demoCounts, sessionState: demoState } =
     useRoster({ variant });
-  // The block comes out of the generated season, so the header matches what the
-  // schedule says is actually running rather than a hand-written constant.
-  // blockIndex (from CoachDashboard's tapped block, seed mode) narrows it to
-  // the exact block that was tapped instead of always the default.
-  const { data: session } = useSession(blockIndex != null ? { blockIndex } : undefined);
+  // Seed header: the generated season narrowed by blockIndex. Live header:
+  // the TAPPED block's real facts, passed through navigation as `block` —
+  // useSession reads the seed season at today's date, which pre-season is
+  // empty, so every live tap used to render the default seed block ("Block 2
+  // of 3 · Sim Bay 2") no matter which session was opened, and 'STARTS IN 12
+  // MIN' was a seed constant (QA 2026-09-08, blocker #1 and #8).
+  const { data: seedSession } = useSession(blockIndex != null ? { blockIndex } : undefined);
+  const session = block
+    ? {
+        type: block.type,
+        blockLabel: block.date ? dayLabel(block.date, todayISO()) : null,
+        name: block.name || (block.type === 'tournament' ? 'Tournament block' : 'Training block'),
+        meta: [block.time, block.meta].filter(Boolean).join(' · '),
+        startsIn: realStartsIn(block),
+      }
+    : seedSession;
 
   // Live attendance rows for a real session, always called (rules of hooks) -
   // only used when `live` below is true.

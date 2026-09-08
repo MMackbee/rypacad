@@ -149,7 +149,23 @@ function CoachDashboardRoute({ onSignOut }) {
       onSignOut={onSignOut}
       onOpenRoster={(block) =>
         navigate('/portal/attendance', {
-          state: { blockIndex: block?.blockIndex ?? null, sessionId: block?.sessionId ?? null },
+          state: {
+            blockIndex: block?.blockIndex ?? null,
+            sessionId: block?.sessionId ?? null,
+            // The tapped block's display facts, so the attendance header
+            // describes the REAL session rather than the seed default
+            // (QA 2026-09-08, blocker #1). Seed blocks (no sessionId) keep
+            // the seed header via blockIndex.
+            block: block?.sessionId
+              ? {
+                  date: block.date ?? String(block.sessionId).slice(0, 10),
+                  time: block.time ?? null,
+                  type: block.type ?? null,
+                  name: block.name ?? null,
+                  meta: block.meta ?? null,
+                }
+              : null,
+          },
         })
       }
     />
@@ -164,6 +180,7 @@ function SessionAttendanceRoute({ onBack }) {
       onBack={onBack}
       blockIndex={state?.blockIndex ?? undefined}
       sessionId={state?.sessionId ?? undefined}
+      block={state?.block ?? undefined}
     />
   );
 }

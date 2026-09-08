@@ -48,7 +48,7 @@ export default function CommitmentContract({
   onLog,
   onLogged,
 }) {
-  const { data, loading, error } = useContract({ variant });
+  const { data, loading, error } = useContract({ variant, practice });
   const [sheetDay, setSheetDay] = useState(null);
   // The practice log lives here and nowhere else — component state is the
   // whole record, per the practice-mode invariant (zero Firestore writes).
@@ -153,8 +153,12 @@ export default function CommitmentContract({
         <HeroCard state={state} stats={stats} behind={behind} complete={complete} />
 
         <Card large>
-          {/* FullCalendar draws the real current month; we only paint states. */}
+          {/* FullCalendar draws the real current month; we only paint states.
+              Keyed by the logged count so a fulfilled day repaints the moment
+              the hook re-derives - the grid otherwise held its mount-time
+              painting until a full reload (QA 2026-09-08 #5). */}
           <ContractCalendar
+            key={`${data?.month?.start}-${stats?.logged ?? 0}`}
             start={data?.month?.start}
             dayStates={dayStates}
             onSelectDay={setSheetDay}
