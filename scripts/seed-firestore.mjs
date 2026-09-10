@@ -9,7 +9,11 @@
  *   packages    — the 2026-27 catalogue from frontend/src/portal/data/packages.js
  *   sessions    — the generated season (buildSeason() from season.js)
  *   households  — the Whitfield demo household from seed.js
- *   athletes    — the three Whitfield athletes with their packageIds
+ *   athletes    — the three Whitfield athletes with their packageIds and,
+ *                  as of contract v1.6 (Sprint 8: age brackets), dobs chosen
+ *                  to stay consistent with seed.js's ageLine copy while
+ *                  landing the three kids in three different brackets as of
+ *                  SEASON_BOUNDS.start — see WHITFIELD_DOBS below.
  *   users       — one parent, one athlete, one coach, one owner
  *   contractLogs — Jordan's practice log history for the last ~2 weeks
  *                  (contract v1.3: variable minutes, some below the 45-min
@@ -26,11 +30,18 @@
  *                  `users` doc of their own. The referenced sessions'
  *                  `booked` counts are incremented to match, the same
  *                  invariant the real booking transaction maintains.
- *   tournamentResults — finishing positions for two real generated Saturday
- *                  tournament blocks (contract v1.5: the RYP Tour). Points
- *                  are never stored here — see DATA-MODEL.md and
- *                  `frontend/src/portal/data/tour.js` (routing lane) for the
- *                  derive-at-read TOUR_POINTS table.
+ *   tournamentResults — SCORES (strokes) for two real generated Saturday
+ *                  tournament blocks (contract v1.6, Sprint 8: coaches enter
+ *                  strokes now, not tap-order positions; a write-time age
+ *                  `bracket` snapshot is stored alongside). `position` is no
+ *                  longer written anywhere — it derives at read time, per
+ *                  (sessionId, bracket) group. Points are never stored either
+ *                  — see DATA-MODEL.md and `frontend/src/portal/data/tour.js`
+ *                  (routing lane) for the derive-at-read TOUR_POINTS table
+ *                  and the age-bracket definitions this script mirrors
+ *                  locally (see BRACKETS below — this script does not bundle
+ *                  tour.js, so the bracket thresholds are a dependency-free
+ *                  copy of the pinned contract, not an import).
  *
  * Two hard guarantees:
  *   1. NEVER touches production. Writes require FIRESTORE_EMULATOR_HOST, and the
@@ -136,12 +147,52 @@ function loadPortalData() {
 }
 
 // ---------------------------------------------------------------------------
+// Age brackets (contract v1.6, TEAM.md "Sprint 8 pins" — coaches enter
+// scores, standings split by age). Mirrors the BRACKETS table pinned for
+// `frontend/src/portal/data/tour.js` (data-routing lane owns that file and
+// lands `bracketFor()` there separately, in its own worktree). Duplicated
+// here in plain JS, dependency-free, on purpose: this script does not bundle
+// tour.js and must not assume a sibling lane's in-flight work has landed —
+// if the pinned thresholds ever change, both copies need the edit (flagged
+// in the report as a post-merge follow-up worth a shared helper).
+// ---------------------------------------------------------------------------
+
+const BRACKETS = [
+  { id: '10U', min: 0, max: 10 },
+  { id: '11-13', min: 11, max: 13 },
+  { id: '14+', min: 14, max: 999 },
+];
+
+/** Whole years old as of `asOfISO` ('YYYY-MM-DD'), plain date math (no
+ * date-fns dependency pulled in just for this). */
+function ageAsOf(dobISO, asOfISO) {
+  const [by, bm, bd] = dobISO.split('-').map(Number);
+  const [ay, am, ad] = asOfISO.split('-').map(Number);
+  let age = ay - by;
+  if (am < bm || (am === bm && ad < bd)) age -= 1;
+  return age;
+}
+
+/** dob -> bracket id, evaluated AS OF `asOfISO` — always SEASON_BOUNDS.start
+ * for tournament results (contract v1.6: age is computed as of season start,
+ * never the write date, so no kid changes brackets mid-season). No dob ->
+ * null; read paths group null under the 'open' bracket display-side, but the
+ * stored field itself is only ever one of the three ids or null, matching
+ * the rules shape. */
+function bracketForDob(dobISO, asOfISO) {
+  if (!dobISO) return null;
+  const age = ageAsOf(dobISO, asOfISO);
+  const b = BRACKETS.find((x) => age >= x.min && age <= x.max);
+  return b ? b.id : null;
+}
+
+// ---------------------------------------------------------------------------
 // Build the documents. Shapes follow the data contract v1 in TEAM.md; the
 // field-by-field spec is docs/portal/DATA-MODEL.md.
 // ---------------------------------------------------------------------------
 
 function buildDocs(portal) {
-  const { buildSeason, GOLF_PACKAGES, DROP_IN, FITNESS_PACKAGES, ELITE_TIERS, HOUSEHOLD, COACH, poolFor } = portal;
+  const { buildSeason, SEASON_BOUNDS, GOLF_PACKAGES, DROP_IN, FITNESS_PACKAGES, ELITE_TIERS, HOUSEHOLD, COACH, poolFor } = portal;
 
   // packages — price is stripped (no dollar amounts in seed data, policy) and
   // id becomes the doc id rather than a duplicated field.
@@ -188,20 +239,36 @@ function buildDocs(portal) {
   ]);
 
   // athletes — from seed.js HOUSEHOLD. contractMinutes is parsed from the
-  // scaffold's ageLine ("45 min tier"), not retyped. dob is null: the scaffold
-  // gives ages only and this repo does not invent birthdays. The seed data
-  // has exactly one coach account (coach-luke), so all three Whitfield
-  // athletes are assigned to him — Sprint 5 turns the coach roster into a
-  // real "athletes where coachId == uid" query (TEAM.md), and a roster of
-  // one (Jordan only, the v1 behavior) wouldn't exercise that; a roster of
-  // three does.
+  // scaffold's ageLine ("45 min tier"), not retyped. The seed data has
+  // exactly one coach account (coach-luke), so all three Whitfield athletes
+  // are assigned to him — Sprint 5 turns the coach roster into a real
+  // "athletes where coachId == uid" query (TEAM.md), and a roster of one
+  // (Jordan only, the v1 behavior) wouldn't exercise that; a roster of three
+  // does.
+  //
+  // dob (contract v1.6, TEAM.md "Sprint 8 pins"): chosen to stay consistent
+  // with seed.js's ageLine copy ("Age 13", "Age 11", "Age 9") as of roughly
+  // today, while landing the three kids in three DIFFERENT brackets as of
+  // SEASON_BOUNDS.start (2026-11-02) — the date bracket assignment always
+  // uses. Jordan's birthday (Oct 15) falls between today and season start:
+  // he reads as "13" right now (matching the existing copy) but turns 14 —
+  // crossing into the 14+ bracket — before the season opens. Reese's and
+  // Nico's birthdays already passed this year, so neither their displayed
+  // age nor their bracket moves in that window. This is a seed-data judgment
+  // call (no dob is handed down anywhere upstream), not a fact — flagged in
+  // the report.
+  const WHITFIELD_DOBS = {
+    jordan: '2012-10-15', // 13 today, 14 (bracket 14+) as of season start
+    reese: '2015-04-02', // 11 today and at season start (bracket 11-13)
+    nico: '2017-06-18', // 9 today and at season start (bracket 10U)
+  };
   const coachUid = 'coach-luke';
   const athletes = new Map();
   for (const child of HOUSEHOLD.children) {
     const minutes = child.ageLine && child.ageLine.match(/(\d+)\s*min tier/);
     athletes.set(child.id, {
       name: `${child.name} Whitfield`,
-      dob: null,
+      dob: WHITFIELD_DOBS[child.id] ?? null,
       householdId,
       packageId: child.packageId,
       contractMinutes: minutes ? Number(minutes[1]) : null,
@@ -281,37 +348,51 @@ function buildDocs(portal) {
     session.booked += 1; // same write the real booking transaction makes
   }
 
-  // tournamentResults — finishing positions for two real generated Saturday
-  // tournament blocks (contract v1.5, TEAM.md "Sprint 7 pins": the RYP Tour).
-  // POSITION IS THE ONLY FACT STORED. Points are never written here or
-  // anywhere in Firestore — they derive at read time from the TOUR_POINTS
-  // table in the frontend's `data/tour.js` (routing lane; this script does
-  // not import or duplicate that table), so retuning the table later
-  // rescores the whole season retroactively, same derive-don't-store rule as
-  // booking allowances (DATA-MODEL.md). Doc id is `{sessionId}_{athleteId}`
-  // (contract v1.5) — the keyspace gives one result per athlete per
-  // tournament; a correction is a same-id update, never a delete.
+  // tournamentResults — SCORES (strokes) for two real generated Saturday
+  // tournament blocks (contract v1.6, TEAM.md "Sprint 8 pins": coaches enter
+  // strokes now, not tap-order positions; standings split into age
+  // brackets). POSITION IS NO LONGER STORED — it derives at read time,
+  // ascending score within one (sessionId, bracket) group (competition
+  // ranking; ties share). Points are still never written here or anywhere in
+  // Firestore — they derive from the TOUR_POINTS table in the frontend's
+  // `data/tour.js` (routing lane; this script does not import or duplicate
+  // that table), same derive-don't-store rule as before. Doc id stays
+  // `{sessionId}_{athleteId}` (contract v1.5, unchanged) — the keyspace
+  // gives one result per athlete per tournament; a correction is a same-id
+  // update, never a delete.
   //
-  // Two Saturdays, all three Whitfield athletes, standings with real
-  // contrast (my judgment — no result is prescribed anywhere upstream):
-  //   2026-11-07-1 — jordan 1st, reese 2nd, nico 4th
-  //   2026-11-14-1 — reese 1st, nico 2nd, jordan 3rd
-  // Against the pinned TOUR_POINTS table ([100,80,65,55,...], positions
-  // 1-15), that totals jordan 165, reese 180, nico 135 across 2 events each —
-  // Reese leads the season standings despite being seed.js's "Behind"
-  // contract-standing kid. Deliberate: the Tour ranks tournament finishes,
-  // not practice compliance, and the seed should not imply those correlate.
+  // `bracket` is a write-time snapshot computed from the athlete's dob AS OF
+  // SEASON_BOUNDS.start (contract v1.6) — never the write date, never a live
+  // lookup — via bracketForDob() above, the same rationale as the v1.5.1
+  // `name` snapshot: the standings read never needs a cross-family athletes
+  // join.
+  //
+  // The three Whitfields land in three DIFFERENT brackets (jordan 14+, reese
+  // 11-13, nico 10U — see WHITFIELD_DOBS above), so each is the lone seeded
+  // entrant in their own bracket for both events: the DERIVED position is
+  // trivially 1st for all six docs (see the sanity output in main(), which
+  // computes and prints it). That is the correct behavior of the
+  // derivation, not a mistake — a real season fills in ~20 more kids per
+  // bracket that this two-tournament demo seed does not invent. The STROKES
+  // themselves still encode the old (pre-bracket) story — lower score =
+  // better finish, in the same relative order the dropped `position` values
+  // used to record — so the finishing order still reads correctly in the
+  // numbers even though three single-entrant brackets can't reproduce
+  // head-to-head placement on their own (my judgment call; flagged in the
+  // report):
+  //   2026-11-07-1 — jordan 41 (was 1st), reese 47 (was 2nd), nico 52 (was 4th)
+  //   2026-11-14-1 — reese 44 (was 1st), nico 49 (was 2nd), jordan 53 (was 3rd)
   const TOURNAMENT_RESULTS = [
-    ['2026-11-07-1', 'jordan', 1],
-    ['2026-11-07-1', 'reese', 2],
-    ['2026-11-07-1', 'nico', 4],
-    ['2026-11-14-1', 'reese', 1],
-    ['2026-11-14-1', 'nico', 2],
-    ['2026-11-14-1', 'jordan', 3],
+    ['2026-11-07-1', 'jordan', 41],
+    ['2026-11-07-1', 'reese', 47],
+    ['2026-11-07-1', 'nico', 52],
+    ['2026-11-14-1', 'reese', 44],
+    ['2026-11-14-1', 'nico', 49],
+    ['2026-11-14-1', 'jordan', 53],
   ];
   const tournamentResults = new Map();
   const resultsCreatedAt = new Date();
-  for (const [sessionId, athleteId, position] of TOURNAMENT_RESULTS) {
+  for (const [sessionId, athleteId, score] of TOURNAMENT_RESULTS) {
     const session = sessions.get(sessionId);
     if (!session) {
       throw new Error(
@@ -327,22 +408,28 @@ function buildDocs(portal) {
           `block, not a tournament.`
       );
     }
-    if (!Number.isInteger(position) || position < 1) {
-      throw new Error(`Seed tournament result for ${athleteId}@${sessionId} has invalid position ${position}.`);
+    if (!Number.isInteger(score) || score < 18 || score > 200) {
+      throw new Error(
+        `Seed tournament result for ${athleteId}@${sessionId} has invalid score ${score} ` +
+          `(must be an integer 18..200, strokes).`
+      );
     }
+    const athlete = athletes.get(athleteId);
     tournamentResults.set(`${sessionId}_${athleteId}`, {
       sessionId,
       athleteId,
-      // Write-time display-name snapshot (contract v1.5.1, TEAM.md Sprint 7
-      // integration) — looked up from the athletes map built above, never
-      // retyped, so the seed can't drift from the athlete doc it references.
-      // This is what lets the academy-public standings show every name to
-      // every role without widening athletes reads.
-      name: athletes.get(athleteId)?.name ?? null,
+      // Write-time display-name snapshot (contract v1.5.1, unchanged by
+      // v1.6) — looked up from the athletes map built above, never retyped,
+      // so the seed can't drift from the athlete doc it references.
+      name: athlete?.name ?? null,
+      // Write-time bracket snapshot (contract v1.6) — computed from the
+      // athlete's dob as of SEASON_BOUNDS.start, never live. null when the
+      // athlete has no dob (none of these three do, post-Sprint-8).
+      bracket: bracketForDob(athlete?.dob ?? null, SEASON_BOUNDS.start),
       // Must equal the session's own date (contract v1.5) — read off the
       // session itself so it can never drift from it.
       date: session.date,
-      position,
+      score,
       createdBy: coachUid,
       createdAt: resultsCreatedAt,
     });
@@ -423,6 +510,33 @@ function fsFields(obj) {
   return Object.fromEntries(Object.entries(obj).map(([k, v]) => [k, fsValue(v)]));
 }
 
+// Derived (NOT stored) — competition ranking within (sessionId, bracket),
+// ascending score, ties share a rank — computed here only so the sanity
+// output below can prove the stored score+bracket produce the intended
+// story, the same math the routing lane's read-time derivation will apply.
+function derivePositions(resultsMap) {
+  const groups = new Map(); // `${sessionId}::${bracket}` -> [{ id, score }]
+  for (const [id, doc] of resultsMap) {
+    const key = `${doc.sessionId}::${doc.bracket}`;
+    const list = groups.get(key) || [];
+    list.push({ id, score: doc.score });
+    groups.set(key, list);
+  }
+  const positions = new Map();
+  for (const list of groups.values()) {
+    list.sort((a, b) => a.score - b.score);
+    let lastScore = null;
+    let lastPos = 0;
+    list.forEach((row, i) => {
+      const pos = row.score === lastScore ? lastPos : i + 1;
+      lastScore = row.score;
+      lastPos = pos;
+      positions.set(row.id, pos);
+    });
+  }
+  return positions;
+}
+
 async function commit(host, writes) {
   const url = `http://${host}/v1/projects/${PROJECT_ID}/databases/(default)/documents:commit`;
   const res = await fetch(url, {
@@ -470,9 +584,17 @@ async function main() {
     );
   }
 
-  console.log('\ntournamentResults (contract v1.5) — position only, points derive at read time:');
+  console.log(
+    '\ntournamentResults (contract v1.6) — score+bracket stored; position is DERIVED at read time ' +
+      '(shown below for verification only, never written):'
+  );
+  const derivedPositions = derivePositions(collections.tournamentResults);
   for (const [id, doc] of collections.tournamentResults) {
-    console.log(`  tournamentResults/${id}: date=${doc.date} position=${doc.position} name=${doc.name} createdBy=${doc.createdBy}`);
+    console.log(
+      `  tournamentResults/${id}: date=${doc.date} score=${doc.score} bracket=${doc.bracket}` +
+        ` name=${doc.name} createdBy=${doc.createdBy}` +
+        ` -> derived position (within sessionId+bracket)=${derivedPositions.get(id)}`
+    );
   }
 
   if (DRY_RUN) {

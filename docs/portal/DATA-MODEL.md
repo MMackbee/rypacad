@@ -23,7 +23,7 @@ serves.
 | `sessions` | the generator's `YYYY-MM-DD-<block>` (`2026-11-02-0`; extras `2026-11-27-x0`) | Ids come from `generateSeason()` and are never invented elsewhere. Date-prefixed ids make `orderBy(date, __name__)` a stable chronological cursor. |
 | `bookings` | `{athleteId}_{sessionId}` | Deterministic id = one booking per athlete per session, enforced by the keyspace itself. Re-booking after a cancellation updates the same doc's `status` instead of creating a duplicate. |
 | `contractLogs` | `{athleteId}_{date}` | Pinned by contract v1: one log per athlete per day, duplicate-proof by construction. |
-| `tournamentResults` | `{sessionId}_{athleteId}` | **Contract v1.5.** One result per athlete per tournament, enforced by the keyspace itself — the same pattern as `bookings` and `contractLogs`. Corrections overwrite via update; there is no delete in v1. |
+| `tournamentResults` | `{sessionId}_{athleteId}` | **Contract v1.5, id scheme unchanged by v1.6.** One result per athlete per tournament, enforced by the keyspace itself — the same pattern as `bookings` and `contractLogs`. Corrections overwrite via update; there is no delete in v1. |
 
 ## Collections
 
@@ -59,7 +59,7 @@ needs — and nothing medical (see the subcollection below).
 | Field | Type | Notes |
 |---|---|---|
 | `name` | string | |
-| `dob` | string \| null | `YYYY-MM-DD`. Null in seed data — the scaffold gives ages only and no birthday is invented. |
+| `dob` | string \| null | `YYYY-MM-DD`, or null when unknown. **Contract v1.6 (Sprint 8):** `tournamentResults.bracket` snapshots this field at write time (see [below](#tournamentresultssessionid_athleteid-contract-v16-sprint-8)) — no dob means every result for that athlete lands in the display-only 'Open' bracket until one is set. `seed-firestore.mjs` sets the Whitfield demo athletes' dobs consistent with `seed.js`'s existing ageLine copy, landing the three kids across three different brackets (TEAM.md "Sprint 8 pins" — the exact values are the seed script's own judgment call, not a fact handed down anywhere upstream). `provision-family.mjs`'s real test families (MackBee, Eisele) stay null — a real kid's birthday is never invented; the owner supplies it later and provisioning writes it through unchanged via an optional `dob` per athlete entry. |
 | `householdId` | string | Parent link; rules grant guardians access through it. |
 | `packageId` | string | Into `packages/` — decides both monthly allowance pools. |
 | `contractMinutes` | number \| null | `20 \| 45 \| 95 \| null` — Commitment Contract tier. |
@@ -316,65 +316,98 @@ which `sessions` are bookable) — they are not a *practice* fact, because kids
 practice outside the academy. The contract calendar has no `closed` state;
 every calendar date accepts a log.
 
-### `tournamentResults/{sessionId}_{athleteId}` (contract v1.5, Sprint 7)
+### `tournamentResults/{sessionId}_{athleteId}` (contract v1.6, Sprint 8)
 
-One doc per athlete's finishing position in one Saturday tournament block —
-the fact record behind the "RYP Tour" season leaderboard (TEAM.md "Sprint 7
-pins"). Doc id `{sessionId}_{athleteId}`, same enforced-by-construction
-pattern as `bookings`' `{athleteId}_{sessionId}` and `contractLogs`'
-`{athleteId}_{date}`: the keyspace itself guarantees one result per athlete
-per tournament, and a correction is a same-id update — **there is no delete
-in v1**, so a bad entry is fixed by overwriting `position`, not by removing
-the doc.
+One doc per athlete's **score** in one Saturday tournament block — the fact
+record behind the "RYP Tour" season leaderboard, now split into age
+brackets (TEAM.md "Sprint 8 pins"). Doc id `{sessionId}_{athleteId}`,
+unchanged since v1.5 and shared with `bookings`' `{athleteId}_{sessionId}`
+and `contractLogs`' `{athleteId}_{date}` as the same
+enforced-by-construction pattern: the keyspace itself guarantees one result
+per athlete per tournament, and a correction is a same-id update — **there
+is no delete in v1**, so a bad entry is fixed by overwriting `score`, not by
+removing the doc.
+
+**Supersedes v1.5.1 for this collection's field shape.** Coaches now enter
+the actual strokes from the round instead of tapping athletes into finishing
+order; `position` is **no longer a field on the document at all** — it
+derives at read time, per age bracket (below). Production carries no
+`tournamentResults` docs yet and the emulator reseeds from scratch, so this
+is a field-shape change, not a migration.
 
 | Field | Type | Notes |
 |---|---|---|
 | `sessionId` | string | Into `sessions/` — must be a `type: 'tournament'` session. Matches the id prefix. |
 | `athleteId` | string | Into `athletes/`. Matches the id suffix. |
-| `name` | string \| null | **Contract v1.5.1 (Sprint 7 integration).** The athlete's display name, snapshotted at write time from the roster the staff member entering results is already reading. Pure display denormalization — the academy-public standings show every name to every role *without* widening the `athletes` read matrix (the full athlete doc carries dob/householdId/contractMinutes; this carries name alone). Read paths prefer this and fall back to a per-id athlete join only for pre-amendment docs. Points stay derived; this changes nothing about scoring. |
+| `name` | string \| null | **Contract v1.5.1, unchanged by v1.6.** The athlete's display name, snapshotted at write time from the roster the staff member entering results is already reading. Pure display denormalization — the academy-public standings show every name to every role *without* widening the `athletes` read matrix. Read paths prefer this and fall back to a per-id athlete join only for pre-amendment docs. |
+| `bracket` | string \| null | **Contract v1.6 (Sprint 8).** One of `'10U' \| '11-13' \| '14+'`, or `null`. A **write-time snapshot** — computed from `athletes/{athleteId}.dob` **as of `SEASON_BOUNDS.start`** (never the write date, and never read live at standings time) at the moment the result is entered, exactly the same rationale and mechanics as the `name` snapshot above: bracketing a result never needs a cross-family `athletes` read, so the "cross-family reads impossible" invariant from the v1.5.1 amendment holds for age too. The three buckets (`data/tour.js`'s `BRACKETS`, routing lane): `10U` = age 0-10, `11-13` = age 11-13, `14+` = age 14-999, age computed on the day the season opens so nobody changes brackets mid-season. An athlete with **no `dob` at write time** gets `bracket: null`, grouped under the display-only **'Open'** bucket at read time — nothing breaks, nothing is guessed. Like `name`, a bracket already written to a doc is never rewritten retroactively; once provisioning sets a real `dob`, only *results entered after that* pick up the real bracket. |
 | `date` | string | `YYYY-MM-DD`. **Must equal the referenced session's own `date`** — read off `sessions/{sessionId}.date` at write time (never typed independently), so the two can never disagree. |
-| `position` | number | Integer >= 1. Finishing place in that tournament block. |
+| `score` | number | **Contract v1.6 (Sprint 8).** Integer, strokes, `18..200`. Replaces `position` — see below for how a finishing place is recovered from this without ever storing one. |
 | `createdBy` | string | uid of the staff account (coach or ops/owner) that entered the result. |
 | `createdAt` | timestamp | Server write time. |
 
-**Points are never stored — position is the only fact in Firestore.** The
-season standings' point value for a given position comes from the
-`TOUR_POINTS` table in the frontend's `frontend/src/portal/data/tour.js`
-(positions 1-25 for the ~25-kid weekly field the owner sized on 2026-09-10 —
-winner 100, ~2.6x the median finisher, smoothly decaying to 14 at 25th; any
-position beyond the table scores a flat 12 participation points). Standings
-also apply the **drop-week rule** (`TOUR_DROP_RATE`, same file): each
-athlete's best `eventsHeld - floor(eventsHeld / 6)` weeks sum toward the
-season, so a missed Saturday becomes a dropped week rather than a permanent
-zero — both knobs computed at **read** time, in the hook that derives standings
-— never written back to a document. This is deliberate, for the same reason
-allowance usage is never a stored counter: if the owner retunes the points
-table (first place worth more, a narrower payout curve, whatever), that
-change **retroactively rescores the entire season** the next time standings
-are read, instead of requiring a migration over every past result. Storing a
-`points` field on this document would freeze every past tournament's scoring
-to whatever the table said on the day it was entered — exactly the drift this
-schema avoids everywhere else (`sessions.booked` aside, which is a display
-counter with its own single-writer transaction, not a derived value with a
-policy knob behind it).
+That is the complete shape — **exactly these eight keys**, nothing else
+(the rules' `tourShapeOk()` checks `hasOnly` as well as `hasAll`, per the
+Sprint 7 pin this inherits).
 
-**Standings derivation** (read-time, no stored aggregate): for the season
-window, sum each athlete's points across every `tournamentResults` doc with
-their `athleteId`, rank descending by that sum, and **let ties share a
-rank** (two athletes tied for the season lead are both "1st", the next
-distinct total is "3rd", not "2nd" — standard competition ranking, not
-dense ranking). "Events played" alongside each row is simply the count of
-that athlete's `tournamentResults` docs in the window — no separate counter,
-same derive-don't-store discipline as allowance usage and contract
-fulfillment elsewhere in this schema.
+**Position derives at read time, per (sessionId, bracket) group.** Within
+one tournament block, group that block's results by `bracket` (docs with
+`bracket: null` group under `'open'`), sort each group **ascending by
+`score`** (fewest strokes wins), and assign **competition ranking** exactly
+as before: equal scores share a place, and the next distinct score resumes
+at its 1-based index rather than the next integer (two 41s tie for 1st, the
+next score is 3rd, not 2nd). Points then come from that per-bracket position
+via `TOUR_POINTS` exactly as they came from the old stored `position` — the
+table and `pointsForPosition()` in `frontend/src/portal/data/tour.js` did
+not change, only what feeds them did. A tournament with only one entrant in
+a bracket derives that entrant as 1st in it, same as any group of one always
+would; the seed data below is exactly this case for two events, by
+construction (three seeded results, three different brackets).
+
+**Points are still never stored — score is the only numeric fact in
+Firestore.** Everything downstream of it (position, points, standings) is
+computed at **read** time, in the hook that derives standings, and never
+written back to a document — the same derive-don't-store discipline that
+already covered `position` in v1.5 now covers `score`, one layer further
+back. If the owner retunes `TOUR_POINTS`, the bracket boundaries, or the
+drop-week rate, that change **retroactively rescores the entire season** the
+next time standings are read, instead of requiring a migration over every
+past result. Storing a `position` or `points` field on this document would
+freeze every past tournament's scoring to whatever the rules said on the day
+it was entered — exactly the drift this schema avoids everywhere else
+(`sessions.booked` aside, a display counter with its own single-writer
+transaction, not a derived value with a policy knob behind it).
+
+**Standings derivation** (read-time, no stored aggregate) is now computed
+**per bracket**: within one bracket's set of athletes, sum each athlete's
+points (from their per-tournament bracket-scoped position, above) across the
+season window, rank descending by that sum, and **let ties share a rank**
+(two athletes tied for a bracket's lead are both "1st", the next distinct
+total is "3rd", not "2nd" — competition ranking, not dense ranking, same
+rule as before, just scoped narrower). "Events played" alongside each row is
+still simply the count of that athlete's `tournamentResults` docs in the
+window — no separate counter. An athlete never appears in two brackets: a
+`bracket` value is fixed per document at write time, and one athlete's dob
+does not change between one tournament and the next within a season, so
+every doc for a given athlete carries the same bracket all season (barring a
+coach correcting a bad entry). Only non-empty brackets are shown, in
+`BRACKETS` order, with `'open'` last.
 
 **Rules** (data-routing lane implements; noted here so the shape they
 enforce is on the record): create/update restricted to `coach` and staff
-roles (`ops`, `owner`, `mental` per the existing staff set); shape-checked —
-id must equal `{sessionId}_{athleteId}`, `position` an integer in `1..40`,
-`date` must match the referenced session's `date`; readable by any signed-in
-portal user (standings are public inside the academy, not scoped per
-household or per coach); **no delete** in v1.
+roles (`ops`, `owner`, `mental` per the existing staff set, unchanged);
+shape-checked — id must equal `{sessionId}_{athleteId}`, `score` an integer
+in `18..200`, `bracket` one of `'10U' \| '11-13' \| '14+'` or `null`, `date`
+must match the referenced session's `date` (the Sprint 7 hotfix's `matches()`
+pair, not `substring()` — rules strings still have no `substring()`);
+readable by any signed-in portal user (standings are public inside the
+academy, not scoped per household, per coach, or per bracket); **no delete**
+in v1.
+
+**Read paths skip any doc with no valid integer `score`** (defensive —
+nothing in the write path should ever produce one, but a hand-edited or
+pre-v1.6 doc reaching a v1.6 read path fails closed rather than crashing the
+standings screen).
 
 ### Billing rows (derived, no new collection)
 
@@ -412,10 +445,16 @@ index reasoning below has a fixed target:
   query ([index 1](#1-season-browsing--no-composite-needed-deploy-verified)),
   just bounded to one calendar month instead of the whole season.
 
-### RYP Tour query patterns (v1.5, Sprint 7)
+### RYP Tour query patterns (v1.5, Sprint 7; unchanged by v1.6)
 
 Three read patterns the Sprint 7 hook seam (`useTourStandings`,
-`useTournamentResults`) relies on against `tournamentResults`:
+`useTournamentResults`) relies on against `tournamentResults`. Age brackets
+(contract v1.6, Sprint 8) add a stored `bracket` field to what these reads
+return, but not a new filter or sort dimension — the per-bracket grouping
+`deriveTourStandings()` now does happens client-side, over docs these same
+three shapes already fetch, the same way position/points already derived
+client-side over `score`/the old `position`. None of the three patterns
+below changed:
 
 - **Season standings** — every result in the season window, summed and
   ranked per athlete. Two equivalent shapes answer it: an **unfiltered
@@ -575,7 +614,7 @@ exists to serve a different query.
 
 ### v1.5 query additions (Sprint 7 — RYP Tour) — no `firestore.indexes.json` changes
 
-All three [Tour query patterns](#ryp-tour-query-patterns-v15-sprint-7) were
+All three [Tour query patterns](#ryp-tour-query-patterns-v15-sprint-7-unchanged-by-v16) were
 checked against the existing composites and against what actually needs an
 index at all. **Nothing was added — expected, and worth spelling out why,
 since a wrong guess here doesn't fail loudly in dev, it fails at `firebase
@@ -611,6 +650,24 @@ necessary. Not before, and note the shape that would trigger it: two
 *distinct* fields in the filter/sort clause, not a range-plus-orderBy on the
 same field, which is what every query above already is.
 
+### v1.6 query additions (Sprint 8 — age brackets) — no `firestore.indexes.json` changes
+
+Age brackets add a stored `bracket` field to `tournamentResults` and a
+per-bracket grouping step to `deriveTourStandings()`, but **no new filter or
+sort dimension on the collection** — none of the three v1.5 query patterns
+above changed, and `bracket` rides along as an ordinary field on every doc
+those reads already fetch. Grouping by bracket, like grouping by session for
+the per-event podiums, happens **client-side in the hook**, over a result
+set Firestore already returned unfiltered-by-bracket — the same reasoning
+that kept v1.5 composite-free applies again: a `where bracket == :id` filter
+is never issued against Firestore at all, so there is nothing for an index
+(single-field or composite) to serve. If a future sprint adds a genuine
+server-side filter on `bracket` (e.g. a coach's results-entry screen paging
+one bracket's roster via a query instead of an in-memory filter), that is the
+point a `(bracket ASC, <field> ASC)` composite might become real — not
+before, and note it would need a second *distinct* field to be a composite
+at all, same caveat as every entry above.
+
 ## Seeding & emulator workflow
 
 Both npm scripts live in the **root `package.json`** (created for this — the
@@ -640,10 +697,21 @@ The seed script:
   session's `booked` to match — the same invariant the booking transaction
   maintains live, so `booked` and the `bookings` collection agree from the
   first seed rather than only after a QA pass exercises real bookings;
-- seeds `tournamentResults` (contract v1.5) for two real generated Saturday
+- seeds `athletes` with dobs for the three Whitfield kids (contract v1.6,
+  Sprint 8) chosen to stay consistent with the ageLine copy already in
+  `seed.js`, landing them in three different age brackets as of
+  `SEASON_BOUNDS.start` — see `WHITFIELD_DOBS` in the script for the exact
+  values and the reasoning (a judgment call, not a fact handed down
+  upstream).
+- seeds `tournamentResults` (contract v1.6) for two real generated Saturday
   tournament sessions, referenced by id and validated against `buildSeason()`
   the same way the bookings above are — a stale session id throws instead of
-  silently writing an orphaned result. `position` only; no points value is
-  ever written (see the collection's notes above). The referenced sessions'
-  attendance (`bookings.status`) is kept coherent with the results — every
-  athlete who has a result there is `attended`, not merely `confirmed`.
+  silently writing an orphaned result. `score` (strokes, validated integer
+  `18..200`) and a write-time `bracket` snapshot (computed from each
+  Whitfield athlete's seeded dob, evaluated as of `SEASON_BOUNDS.start`) are
+  written; `position` is never written anywhere — see the collection's notes
+  above for the derive-at-read math, and the script's own sanity output
+  (printed, never stored) for the derived per-bracket positions the seeded
+  scores produce. The referenced sessions' attendance (`bookings.status`) is
+  kept coherent with the results — every athlete who has a result there is
+  `attended`, not merely `confirmed`.
