@@ -91,6 +91,7 @@ import {
 } from '../data/packages';
 import {
   SEASON,
+  SEASON_BOUNDS,
   SEASON_BY_DATE,
   capacityFor,
   datePill,
@@ -146,7 +147,7 @@ import {
   NEWSLETTER_ISSUE,
   NEWSLETTER_STATES,
 } from '../data/admin';
-import { TOUR_SEED, deriveTourStandings } from '../data/tour';
+import { TOUR_SEED, bracketFor, deriveTourStandings } from '../data/tour';
 
 export { default as useSeedResource } from './useSeedResource';
 export { default as useAuthSession } from './useAuthSession';
@@ -1797,6 +1798,11 @@ export function useSessionAttendance(sessionId) {
  * data/tour.js's deriveTourStandings() (the SAME function the seed constant
  * below is computed with, so live and seed can never disagree on the math).
  *
+ * Contract v1.6 (Sprint 8): a doc with no int `score` cannot be ranked and
+ * is skipped defensively before anything else runs — none should exist
+ * (every write is shape-checked server-side), but a read path never trusts
+ * that blindly.
+ *
  * Name visibility (Sprint 7 open question — resolved as contract v1.5.1,
  * TEAM.md Sprint 7 integration): results written since the amendment carry
  * the athlete's display name snapshotted at write time, so this academy-
@@ -1807,10 +1813,13 @@ export function useSessionAttendance(sessionId) {
  * ./live.js for why a batched `in` query is unsafe), where an id the
  * caller cannot read still resolves to name: null rather than failing the
  * screen. Session labels (fetchSessionsByIds) have no such limit —
- * sessions are readable by any signed-in user unconditionally.
+ * sessions are readable by any signed-in user unconditionally. `bracket` is
+ * read straight off each doc (also a write-time snapshot, contract v1.6) —
+ * no join needed for it at all.
  */
 async function liveTourStandings() {
-  const results = await fetchTournamentResults();
+  const raw = await fetchTournamentResults();
+  const results = raw.filter((r) => Number.isInteger(r.score));
   const athleteIds = [...new Set(results.filter((r) => r.name == null).map((r) => r.athleteId))];
   const sessionIds = [...new Set(results.map((r) => r.sessionId))];
   const [athletes, sessions] = await Promise.all([
@@ -1823,23 +1832,25 @@ async function liveTourStandings() {
 }
 
 /**
- * GET /tour/standings (Sprint 7 pin, contract v1.5) — pinned shape:
- * { data: { standings: [{ athleteId, name, rank, points, events, wins }],
- *   events: [{ sessionId, date, label, top3: [{ name, position }] }],
- *   counting: { eventsHeld, counted, drops } },
- *   loading, error }. `counting` (owner's drop-week rule, 2026-09-10) says
- * how many of the season's weeks sum into `points` — see data/tour.js's
- * TOUR_DROP_RATE.
+ * GET /tour/standings (Sprint 8 pin, contract v1.6, supersedes v1.5.1) —
+ * pinned shape: { data: { brackets: [{ id, label, standings: [{ athleteId,
+ *   name, rank, points, events, wins }] }], events: [{ sessionId, date,
+ *   label, results: [{ athleteId, name, bracket, score, position }] }],
+ *   counting: { eventsHeld, counted, drops } }, loading, error }. `counting`
+ * (owner's drop-week rule, 2026-09-10) says how many of the season's weeks
+ * sum into each bracket's `points` — see data/tour.js's TOUR_DROP_RATE.
+ * Position is derived from `score`, never stored — see deriveTourStandings.
  *
  * Academy-wide and readable by every role (contract v1.5: "standings are
  * academy-public") — unlike every other hook in this file there is no role
  * branching on the read side; the only asymmetry is the name-resolution
  * limit documented on liveTourStandings above.
  *
- * Seed: TOUR_SEED (data/tour.js) — a believable demo season, always full
- * regardless of role. Live: subscribes to the 'tournamentResults'
- * invalidation generation, so a coach/staff saveResults() anywhere refreshes
- * every mounted standings screen (the Sprint 6 post-write-refresh pattern).
+ * Seed: TOUR_SEED (data/tour.js) — a believable demo season with all three
+ * brackets populated, always full regardless of role. Live: subscribes to
+ * the 'tournamentResults' invalidation generation, so a coach/staff
+ * saveResults() anywhere refreshes every mounted standings screen (the
+ * Sprint 6 post-write-refresh pattern).
  */
 export function useTourStandings() {
   const live = isLive();
@@ -1853,7 +1864,15 @@ export function useTourStandings() {
 
 /**
  * Live payload for useTournamentResults(sessionId) — one tournament's
- * existing results. Since contract v1.5.1 each doc carries its own name
+ * existing results, position included. Reuses deriveTourStandings itself
+ * (data/tour.js) rather than re-deriving position/ranking a second way: the
+ * results for a single sessionId are exactly one `events[]` entry, so
+ * running them through the same function useTourStandings uses guarantees
+ * identical math (and the same bracket-order-then-position sort the pinned
+ * shape wants) with no duplicated logic.
+ *
+ * Contract v1.6: a doc with no int `score` is skipped defensively, same as
+ * liveTourStandings. Since contract v1.5.1 each doc carries its own name
  * snapshot; the fetchAthletesByIds join (individual get()s — see the
  * name-visibility note on liveTourStandings) runs only for pre-amendment
  * docs missing one. Staff entering results already have the read access
@@ -1862,31 +1881,28 @@ export function useTourStandings() {
  * caller actually using this hook to enter results.
  */
 async function liveTournamentResults(sessionId) {
-  const results = await fetchTournamentResultsForSession(sessionId);
+  const raw = await fetchTournamentResultsForSession(sessionId);
+  const results = raw.filter((r) => Number.isInteger(r.score));
   const athletes = await fetchAthletesByIds(
     results.filter((r) => r.name == null).map((r) => r.athleteId)
   );
   const nameById = new Map(athletes.map((a) => [a.id, a.name]));
-  return {
-    results: results
-      .map((r) => ({
-        athleteId: r.athleteId,
-        name: r.name ?? nameById.get(r.athleteId) ?? null,
-        position: r.position,
-      }))
-      .sort((a, b) => a.position - b.position),
-  };
+  const { events } = deriveTourStandings(results, { nameById });
+  const event = events.find((e) => e.sessionId === sessionId);
+  return { results: event ? event.results : [] };
 }
 
 /**
- * GET /tournaments/:sessionId/results + result entry (Sprint 7 pin) —
- * pinned shape: { data: { results: [{ athleteId, name, position }] },
- * loading, error, saveResults(entries) } where entries =
- * [{ athleteId, name, position }] (name: the v1.5.1 write-time snapshot,
- * see saveTournamentResults). Coach/mental/ops/owner-only write surface
- * (enforced in firestore.rules, not here), sessionId-scoped, live-only - same
- * "no seed/demo branch to keep in sync" posture as useSessionAttendance:
- * with isLive() false or no sessionId yet, this resolves to an empty results
+ * GET /tournaments/:sessionId/results + result entry (Sprint 8 pin,
+ * contract v1.6, supersedes v1.5) — pinned shape: { data: { results:
+ * [{ athleteId, name, bracket, score, position }] }, loading, error,
+ * saveResults(entries) } where entries = [{ athleteId, name, bracket,
+ * score }] (name/bracket: write-time snapshots, see saveTournamentResults;
+ * `position` in the read shape is DERIVED, never part of what the caller
+ * sends). Coach/mental/ops/owner-only write surface (enforced in
+ * firestore.rules, not here), sessionId-scoped, live-only - same "no
+ * seed/demo branch to keep in sync" posture as useSessionAttendance: with
+ * isLive() false or no sessionId yet, this resolves to an empty results
  * list and a no-op saveResults(), so the results-entry screen never crashes
  * in the demo/harness.
  *
@@ -1923,4 +1939,55 @@ export function useTournamentResults(sessionId) {
   };
 
   return { ...state, saveResults };
+}
+
+/**
+ * GET .../athletes?ids=... resolved to age brackets (Sprint 8 pin, contract
+ * v1.6) — feeds the SCORE entry screen's per-athlete bracket chip, computed
+ * BEFORE a save so saveResults() can send the same write-time bracket
+ * snapshot tournamentResults docs carry (data/tour.js's bracketFor, as of
+ * SEASON_BOUNDS.start — never "today", so it always matches what the write
+ * will snapshot no matter when the coach saves). Returns a plain
+ * { [athleteId]: bracketId | null } map, not an array, so the screen can key
+ * straight off the athleteId it is already iterating (the roster) without a
+ * second lookup structure.
+ *
+ * Live: fetchAthletesByIds — the coach calling this already has the read
+ * access an athlete-by-id join needs for their own roster (assigned coach /
+ * staff clauses on the athletes matrix), same access this screen's roster
+ * fetch itself relies on. An id the caller cannot read is silently dropped
+ * (fetchAthletesByIds' own Promise.allSettled behavior) rather than failing
+ * the whole map.
+ *
+ * Seed mode never fetches — `data` is `{}` synchronously, matching the pin
+ * ("Seed mode: {} and never fetches"); the score-entry harness state does
+ * not need real brackets to render its chips.
+ *
+ * `athleteIds` is an array whose identity can change every render (a new
+ * literal built from the roster each time) — useSeedResource's `deps` must
+ * be a stable, comparable key, so this joins the de-duped, sorted ids into
+ * one string rather than depending on the array itself (which would refetch
+ * every render even when the actual ids never changed).
+ *
+ * Hooks stay unconditional regardless of live/seed/empty-ids: useSeedResource
+ * always runs here, exactly once, with its two arguments deciding which
+ * branch it takes internally — never a conditional hook call.
+ */
+export function useAthleteBrackets(athleteIds) {
+  const live = isLive();
+  const ids = Array.isArray(athleteIds) ? athleteIds.filter(Boolean) : [];
+  const idsKey = [...new Set(ids)].sort().join(',');
+  const shouldFetch = live && idsKey.length > 0;
+
+  const liveAthleteBrackets = async () => {
+    const athletes = await fetchAthletesByIds(ids);
+    const out = {};
+    for (const a of athletes) out[a.id] = bracketFor(a.dob ?? null, SEASON_BOUNDS.start);
+    return out;
+  };
+
+  return useSeedResource(
+    shouldFetch ? null : {},
+    shouldFetch ? { source: liveAthleteBrackets, deps: ['athlete-brackets', idsKey] } : undefined
+  );
 }
