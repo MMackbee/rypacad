@@ -300,3 +300,55 @@ Rulings (PM):
   (capacity check + booked+1); no new collection, no rules change — the
   cap is client-derived exactly like the allowance itself.
 - The summary is honest: booked N, skipped M with reasons.
+
+## Sprint 7 pins — RYP Tour, billing parked, parent booking front and center (2026-09-10)
+
+Owner's direction: billing is OUT of the app for now (energy goes to
+features); a "RYP Tour" leaderboard tracking weekend tournament results is
+IN; parents booking for kids is a first-class path (many kids will never
+have their own login).
+
+Data contract v1.5 (db lane documents; routing lane implements rules):
+- `tournamentResults/{sessionId}_{athleteId}`: { sessionId, athleteId,
+  date, position (int >= 1), createdBy, createdAt }. The keyspace gives
+  one result per athlete per tournament. POINTS ARE NEVER STORED —
+  position is the fact; points derive at read time from the table in
+  `data/tour.js`, so tuning the points table retroactively rescores the
+  whole Tour (same derive-don't-store rule as allowances).
+- `data/tour.js`: TOUR_POINTS = [100, 80, 65, 55, 50, 45, 40, 36, 32, 28,
+  24, 20, 16, 12, 8] (positions 1..15, matching capacity; beyond the
+  table = 5 participation points). Owner-tunable placeholder — the table
+  is the single knob.
+- Standings = sum of an athlete's points across the season window,
+  ranked; ties share a rank. Events-played count shown alongside.
+- Rules: tournamentResults create/update by coach + staff roles only
+  (shape-checked, id must equal `{sessionId}_{athleteId}`, position int
+  1..40, date matches the session); readable by any signed-in portal
+  user (standings are public inside the academy). No delete in v1 —
+  corrections overwrite via update.
+
+Hook seam (routing owns; frontend codes against):
+- `useTourStandings()` -> { data: { standings: [{ athleteId, name, rank,
+  points, events, wins }], events: [{ sessionId, date, label,
+  top3: [{name, position}] }] }, loading, error } — seed fallback with a
+  believable demo tour; live derives from tournamentResults + athletes.
+- `useTournamentResults(sessionId)` -> existing results for one session +
+  `saveResults(entries)` writing the batch (coach/staff only), entries =
+  [{ athleteId, position }].
+- Routes: `/portal/tour` for athlete, parent, coach, ops, owner, mental.
+  Parent's Billing tab is REPLACED by Tour; athlete tab bar gains Tour in
+  the retired DNA slot. /portal/billing route redirects to /portal/family
+  (screen survives in the harness for Stripe's return).
+- Book-for-kid deep link: BookSession accepts `initialAthleteId`; the
+  route wrapper reads it from navigation state; ParentDashboard kid cards
+  gain a per-kid Book action that navigates with that state.
+
+UI (frontend lane):
+- 'RYP Tour' screen: season standings (rank, name, events, points, wins
+  highlighted), recent tournaments with podium; empty state before any
+  results ("The Tour starts with the first Saturday tournament").
+- Results entry: from a TOURNAMENT session's attendance screen, staff see
+  "Enter results" — tap athletes in finishing order (1st, 2nd, ...),
+  reorder/undo, save once; re-entry pre-fills existing results.
+- Parent tab bar: Home / Tour / Settings. Athlete: Home / Schedule /
+  Contract / Tour.
