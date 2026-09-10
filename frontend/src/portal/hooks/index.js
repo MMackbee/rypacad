@@ -1834,8 +1834,10 @@ async function liveTourStandings() {
 /**
  * GET /tour/standings (Sprint 8 pin, contract v1.6, supersedes v1.5.1) —
  * pinned shape: { data: { brackets: [{ id, label, standings: [{ athleteId,
- *   name, rank, points, events, wins }] }], events: [{ sessionId, date,
- *   label, results: [{ athleteId, name, bracket, score, position }] }],
+ *   name, rank, points, events, wins }] }], events: [{ date, label,
+ *   results: [{ athleteId, name, bracket, score, position }] }] (v1.6.1:
+ *   an event is a DATE — all of one Saturday's blocks merged into one
+ *   weekly field, see deriveTourStandings),
  *   counting: { eventsHeld, counted, drops } }, loading, error }. `counting`
  * (owner's drop-week rule, 2026-09-10) says how many of the season's weeks
  * sum into each bracket's `points` — see data/tour.js's TOUR_DROP_RATE.
@@ -1888,7 +1890,9 @@ async function liveTournamentResults(sessionId) {
   );
   const nameById = new Map(athletes.map((a) => [a.id, a.name]));
   const { events } = deriveTourStandings(results, { nameById });
-  const event = events.find((e) => e.sessionId === sessionId);
+  // v1.6.1 events are keyed by DATE, and one session's rows all share the
+  // session's own date — so this is either exactly one event or none.
+  const event = events[0] ?? null;
   return { results: event ? event.results : [] };
 }
 

@@ -305,7 +305,7 @@ function ComponentGallery() {
               trailing={<AttendanceControls value={null} onChange={() => {}} />} />
             <AthleteRow name="R. Sandoval" meta="Contract behind" divider
               trailing={<div style={{ width: 90 }}><ProgressMeter value={54} size="inline" /></div>} />
-            <AthleteRow name="J. Whitfield" meta="Age 13"
+            <AthleteRow name="J. Whitfield" meta="Age 14"
               trailing={<span style={{ color: color.textTertiary }}>›</span>} />
           </div>
         </Spec>

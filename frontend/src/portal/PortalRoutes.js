@@ -162,7 +162,11 @@ function TourRoute({ onSignOut }) {
   const live = isLive();
   const { user } = useAuthSession(live ? undefined : { variant: 'idle' });
   const role = (live && user?.role) || 'athlete';
-  return <TourStandings bare role={role} onSignOut={onSignOut} />;
+  // Sprint 8: an athlete's own athleteId (from their users doc) default-
+  // selects their bracket and unlocks the "Your results" history card;
+  // every other role browses brackets with no personal view.
+  const athleteId = live && user?.role === 'athlete' ? user?.athleteId ?? undefined : undefined;
+  return <TourStandings bare role={role} athleteId={athleteId} onSignOut={onSignOut} />;
 }
 
 /**

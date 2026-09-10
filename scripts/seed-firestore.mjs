@@ -10,10 +10,10 @@
  *   sessions    — the generated season (buildSeason() from season.js)
  *   households  — the Whitfield demo household from seed.js
  *   athletes    — the three Whitfield athletes with their packageIds and,
- *                  as of contract v1.6 (Sprint 8: age brackets), dobs chosen
- *                  to stay consistent with seed.js's ageLine copy while
- *                  landing the three kids in three different brackets as of
- *                  SEASON_BOUNDS.start — see WHITFIELD_DOBS below.
+ *                  as of contract v1.6 (Sprint 8: age brackets), the
+ *                  OWNER-SUPPLIED dobs (2026-09-10), landing the three kids
+ *                  in three different brackets as of SEASON_BOUNDS.start —
+ *                  see WHITFIELD_DOBS below.
  *   users       — one parent, one athlete, one coach, one owner
  *   contractLogs — Jordan's practice log history for the last ~2 weeks
  *                  (contract v1.3: variable minutes, some below the 45-min
@@ -246,21 +246,15 @@ function buildDocs(portal) {
   // (Jordan only, the v1 behavior) wouldn't exercise that; a roster of three
   // does.
   //
-  // dob (contract v1.6, TEAM.md "Sprint 8 pins"): chosen to stay consistent
-  // with seed.js's ageLine copy ("Age 13", "Age 11", "Age 9") as of roughly
-  // today, while landing the three kids in three DIFFERENT brackets as of
-  // SEASON_BOUNDS.start (2026-11-02) — the date bracket assignment always
-  // uses. Jordan's birthday (Oct 15) falls between today and season start:
-  // he reads as "13" right now (matching the existing copy) but turns 14 —
-  // crossing into the 14+ bracket — before the season opens. Reese's and
-  // Nico's birthdays already passed this year, so neither their displayed
-  // age nor their bracket moves in that window. This is a seed-data judgment
-  // call (no dob is handed down anywhere upstream), not a fact — flagged in
-  // the report.
+  // dob (contract v1.6 + v1.6.1 amendment, TEAM.md): the OWNER-SUPPLIED
+  // birthdays (2026-09-10), not invented — they land the three kids in
+  // three different brackets as of SEASON_BOUNDS.start (2026-11-02), the
+  // date bracket assignment always uses. seed.js's ageLine copy was trued
+  // up to match at the same integration pass.
   const WHITFIELD_DOBS = {
-    jordan: '2012-10-15', // 13 today, 14 (bracket 14+) as of season start
-    reese: '2015-04-02', // 11 today and at season start (bracket 11-13)
-    nico: '2017-06-18', // 9 today and at season start (bracket 10U)
+    jordan: '2012-06-17', // 14 at season start -> bracket 14+
+    reese: '2014-03-02', // 12 at season start -> bracket 11-13
+    nico: '2017-09-09', // 9 at season start -> bracket 10U
   };
   const coachUid = 'coach-luke';
   const athletes = new Map();

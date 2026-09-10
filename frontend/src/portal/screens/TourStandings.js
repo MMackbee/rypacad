@@ -45,7 +45,7 @@ function ordinal(n) {
  * Sprint 8 pin (TEAM.md, contract v1.6): the leaderboard now splits into age
  * brackets. Pinned hook: useTourStandings() -> { data: { brackets: [{ id,
  * label, standings: [{ athleteId, name, rank, points, events, wins }] }],
- * events: [{ sessionId, date, label, results: [{ athleteId, name, bracket,
+ * events: [{ date, label, results: [{ athleteId, name, bracket,
  * score, position }] }], counting: { eventsHeld, counted, drops } }, loading,
  * error }. Only non-empty brackets are ever returned, in BRACKETS order with
  * 'open' last (data/tour.js) - this screen still filters defensively so a
@@ -413,8 +413,10 @@ function RecentTournaments({ events, bracketId }) {
     <div>
       <SectionLabel style={{ marginBottom: 10 }}>Recent tournaments</SectionLabel>
       <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+        {/* v1.6.1: an event is a DATE (all of one Saturday's blocks merged),
+            so the date is the identity. */}
         {events.map((e) => (
-          <EventCard key={e.sessionId} event={e} bracketId={bracketId} />
+          <EventCard key={e.date} event={e} bracketId={bracketId} />
         ))}
       </div>
     </div>
@@ -492,15 +494,17 @@ function YourResults({ events, athleteId }) {
   const rows = events.flatMap((e) =>
     (e.results ?? [])
       .filter((r) => r.athleteId === athleteId)
-      .map((r) => ({ ...r, date: e.date, sessionId: e.sessionId }))
+      .map((r) => ({ ...r, date: e.date }))
   );
   if (!rows.length) return null;
   return (
     <Card large>
       <SectionLabel style={{ marginBottom: 12 }}>Your results</SectionLabel>
       <div style={{ display: 'flex', flexDirection: 'column' }}>
+        {/* One row per Saturday per athlete (v1.6.1 weekly merge), so the
+            date is a unique key. */}
         {rows.map((r, i) => (
-          <YourResultRow key={r.sessionId} row={r} divider={i < rows.length - 1} />
+          <YourResultRow key={r.date} row={r} divider={i < rows.length - 1} />
         ))}
       </div>
     </Card>

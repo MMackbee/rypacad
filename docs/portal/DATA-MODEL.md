@@ -59,7 +59,7 @@ needs — and nothing medical (see the subcollection below).
 | Field | Type | Notes |
 |---|---|---|
 | `name` | string | |
-| `dob` | string \| null | `YYYY-MM-DD`, or null when unknown. **Contract v1.6 (Sprint 8):** `tournamentResults.bracket` snapshots this field at write time (see [below](#tournamentresultssessionid_athleteid-contract-v16-sprint-8)) — no dob means every result for that athlete lands in the display-only 'Open' bracket until one is set. `seed-firestore.mjs` sets the Whitfield demo athletes' dobs consistent with `seed.js`'s existing ageLine copy, landing the three kids across three different brackets (TEAM.md "Sprint 8 pins" — the exact values are the seed script's own judgment call, not a fact handed down anywhere upstream). `provision-family.mjs`'s real test families (MackBee, Eisele) stay null — a real kid's birthday is never invented; the owner supplies it later and provisioning writes it through unchanged via an optional `dob` per athlete entry. |
+| `dob` | string \| null | `YYYY-MM-DD`, or null when unknown. **Contract v1.6 (Sprint 8):** `tournamentResults.bracket` snapshots this field at write time (see [below](#tournamentresultssessionid_athleteid-contract-v16-sprint-8)) — no dob means every result for that athlete lands in the display-only 'Open' bracket until one is set. `seed-firestore.mjs` sets the Whitfield demo athletes' dobs to the OWNER-SUPPLIED values (TEAM.md Sprint 8 amendment v1.6.1, 2026-09-10), landing the three kids across three different brackets; `seed.js`'s ageLine copy was trued up to match. `provision-family.mjs`'s real test families (MackBee, Eisele) stay null — a real kid's birthday is never invented; the owner supplies it later and provisioning writes it through unchanged via an optional `dob` per athlete entry. |
 | `householdId` | string | Parent link; rules grant guardians access through it. |
 | `packageId` | string | Into `packages/` — decides both monthly allowance pools. |
 | `contractMinutes` | number \| null | `20 \| 45 \| 95 \| null` — Commitment Contract tier. |
@@ -350,19 +350,27 @@ That is the complete shape — **exactly these eight keys**, nothing else
 (the rules' `tourShapeOk()` checks `hasOnly` as well as `hasAll`, per the
 Sprint 7 pin this inherits).
 
-**Position derives at read time, per (sessionId, bracket) group.** Within
-one tournament block, group that block's results by `bracket` (docs with
+**Position derives at read time, per (date, bracket) group — an event is a
+DATE** (contract v1.6.1, TEAM.md Sprint 8 amendment, owner's ruling: "the
+scores from the 2 blocks would be combined a 1 weekly tournament"). Every
+tournament block on one Saturday pools into a single weekly field: group
+that date's results — across all of its blocks — by `bracket` (docs with
 `bracket: null` group under `'open'`), sort each group **ascending by
 `score`** (fewest strokes wins), and assign **competition ranking** exactly
 as before: equal scores share a place, and the next distinct score resumes
 at its 1-based index rather than the next integer (two 41s tie for 1st, the
-next score is 3rd, not 2nd). Points then come from that per-bracket position
-via `TOUR_POINTS` exactly as they came from the old stored `position` — the
-table and `pointsForPosition()` in `frontend/src/portal/data/tour.js` did
-not change, only what feeds them did. A tournament with only one entrant in
-a bracket derives that entrant as 1st in it, same as any group of one always
-would; the seed data below is exactly this case for two events, by
-construction (three seeded results, three different brackets).
+next score is 3rd, not 2nd). Docs stay per-session and the entry UX stays
+per-block — the merge is pure derivation. If an athlete somehow holds
+results in two blocks of the same date, their **lowest round counts** for
+that week (never summed — everyone else played one round) and the week
+counts once. The drop-week rule's `eventsHeld` counts distinct **dates**.
+Points then come from that per-bracket position via `TOUR_POINTS` exactly
+as they came from the old stored `position` — the table and
+`pointsForPosition()` in `frontend/src/portal/data/tour.js` did not change,
+only what feeds them did. A week with only one entrant in a bracket derives
+that entrant as 1st in it, same as any group of one always would; the seed
+data below is exactly this case for two events, by construction (three
+seeded results, three different brackets).
 
 **Points are still never stored — score is the only numeric fact in
 Firestore.** Everything downstream of it (position, points, standings) is
@@ -697,12 +705,10 @@ The seed script:
   session's `booked` to match — the same invariant the booking transaction
   maintains live, so `booked` and the `bookings` collection agree from the
   first seed rather than only after a QA pass exercises real bookings;
-- seeds `athletes` with dobs for the three Whitfield kids (contract v1.6,
-  Sprint 8) chosen to stay consistent with the ageLine copy already in
-  `seed.js`, landing them in three different age brackets as of
-  `SEASON_BOUNDS.start` — see `WHITFIELD_DOBS` in the script for the exact
-  values and the reasoning (a judgment call, not a fact handed down
-  upstream).
+- seeds `athletes` with the OWNER-SUPPLIED dobs for the three Whitfield
+  kids (contract v1.6 + the v1.6.1 amendment, 2026-09-10 — not invented),
+  landing them in three different age brackets as of `SEASON_BOUNDS.start`
+  — see `WHITFIELD_DOBS` in the script for the exact values.
 - seeds `tournamentResults` (contract v1.6) for two real generated Saturday
   tournament sessions, referenced by id and validated against `buildSeason()`
   the same way the bookings above are — a stale session id throws instead of
