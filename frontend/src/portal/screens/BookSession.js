@@ -71,6 +71,13 @@ function displayNameFor(session) {
  *   pins the hook to the seed source regardless of REACT_APP_PORTAL_LIVE_DATA.
  *   Zero Firestore writes: the booking stays in this component's state exactly
  *   as the pre-live flow does, and resets on unmount.
+ * @param {string} [initialAthleteId]
+ *   Sprint 7 pin (TEAM.md, "Book-for-kid deep link"): preferred over
+ *   defaulting to the first child once the household loads - only when it
+ *   matches one of the signed-in parent's own household athletes, so a stale
+ *   or foreign id can never select someone else's child. Routing reads this
+ *   off navigation state after ParentDashboard's per-kid Book chip. Ignored
+ *   entirely for the athlete flow (no selector to default).
  * @param {(booked) => void} [onConfirmed]
  *   Fires once when the confirmation renders after a tap-through booking —
  *   `{ name, when, pool }`. This is the onboarding step's completion signal:
@@ -82,6 +89,7 @@ export default function BookSession({
   role = 'athlete',
   bare = false,
   practice = false,
+  initialAthleteId,
   onBack,
   onBook,
   onConfirmed,
@@ -104,12 +112,18 @@ export default function BookSession({
   const [selectedAthleteId, setSelectedAthleteId] = useState(null);
   const householdAthletes = household.data ?? [];
   // Default to the first child once the household loads, without overriding
-  // a parent's own switch.
+  // a parent's own switch. Sprint 7 pin (TEAM.md): initialAthleteId - the
+  // Book chip's deep link - wins over that default, but ONLY when it names a
+  // real household athlete; a stale or foreign id falls back to the first
+  // child exactly as before rather than silently selecting nobody.
   useEffect(() => {
     if (!isParent || selectedAthleteId || !householdAthletes.length) return;
-    setSelectedAthleteId(householdAthletes[0].id);
+    const preferred = householdAthletes.some((a) => a.id === initialAthleteId)
+      ? initialAthleteId
+      : householdAthletes[0].id;
+    setSelectedAthleteId(preferred);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isParent, householdAthletes.length]);
+  }, [isParent, householdAthletes.length, initialAthleteId]);
   const selectedAthlete = isParent
     ? householdAthletes.find((a) => a.id === selectedAthleteId) ?? null
     : null;

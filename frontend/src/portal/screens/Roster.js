@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { color, font, radius } from '../tokens';
 import AthleteRow, { AttendanceControls } from '../components/AthleteRow';
 import BottomTabBar from '../components/BottomTabBar';
@@ -6,7 +6,7 @@ import Button from '../components/Button';
 import PhoneFrame from '../components/PhoneFrame';
 import StatusBadge from '../components/StatusBadge';
 import TypeChip from '../components/TypeChip';
-import { BackLink, Body, Card, ScreenTitle, SectionLabel, SignOutButton } from '../components/Primitives';
+import { BackLink, Body, Card, ScreenTitle, SectionLabel, SignOutButton, Tick } from '../components/Primitives';
 import useRoster from '../hooks/useRoster';
 import * as hooks from '../hooks';
 import { useCoachRoster, useSession } from '../hooks';
@@ -48,6 +48,31 @@ function useSessionAttendanceFallback() {
   return { data: null, loading: false, error: null, mark: () => {} };
 }
 const useSessionAttendance = hooks.useSessionAttendance || useSessionAttendanceFallback;
+
+/**
+ * Same parallel-lane situation as useSessionAttendance above, for the Sprint
+ * 7 pin (TEAM.md): `useTournamentResults(sessionId)` -> existing results for
+ * one session + `saveResults(entries)`, entries = [{ athleteId, position }].
+ * Shape-inferred to match this file's other paired read/write hooks
+ * (useSessionAttendance's own { data, loading, error, mark() }) - flagged in
+ * the sprint report for routing/PM to confirm once the real export lands.
+ * The fallback is inert (no data, no-op save), matching
+ * useSessionAttendance's own "screens must not crash with the live flag off"
+ * convention - harmless in seed/demo mode, where tap-to-assign still works
+ * entirely in this screen's local state and only the persisted save is a
+ * no-op.
+ */
+function useTournamentResultsFallback() {
+  return { data: null, loading: false, error: null, saveResults: async () => {} };
+}
+const useTournamentResults = hooks.useTournamentResults || useTournamentResultsFallback;
+
+/** 1 -> '1st', 2 -> '2nd', 3 -> '3rd', 4 -> '4th', 11 -> '11th', ... */
+function ordinal(n) {
+  const suffixes = ['th', 'st', 'nd', 'rd'];
+  const v = n % 100;
+  return `${n}${suffixes[(v - 20) % 10] || suffixes[v] || suffixes[0]}`;
+}
 
 /**
  * Roster - coach. The coach's full assigned roster, not one session's
@@ -189,6 +214,11 @@ export function SessionAttendance({ variant = 'pre', bare = false, onBack, sessi
   const liveAttendance = useSessionAttendance(sessionId);
   const live = isLive() && sessionId != null;
 
+  // Tournament results (Sprint 7 pin, TEAM.md), always called (rules of
+  // hooks) - only read/written once the coach opens the results view below.
+  const tournamentResults = useTournamentResults(sessionId);
+  const [view, setView] = useState('attendance'); // 'attendance' | 'results'
+
   const bookingByAthlete = useMemo(() => {
     if (!liveAttendance.data) return new Map();
     return new Map(liveAttendance.data.map((r) => [r.athleteId, r.bookingId]));
@@ -241,6 +271,22 @@ export function SessionAttendance({ variant = 'pre', bare = false, onBack, sessi
         : { tone: 'green', label: 'Completed' },
   }[sessionState];
 
+  // Sprint 7 pin (TEAM.md): results entry for a TOURNAMENT session, opened
+  // in place (same local-view-state pattern StaffScreen in PortalRoutes.js
+  // already uses for its add-mode). The attendance flow above is untouched
+  // for every other session type - this is the only branch point.
+  if (view === 'results') {
+    return (
+      <ResultsEntry
+        bare={bare}
+        session={session}
+        roster={roster}
+        resultsState={tournamentResults}
+        onBack={() => setView('attendance')}
+      />
+    );
+  }
+
   return (
     <PhoneFrame
       bare={bare}
@@ -278,6 +324,22 @@ export function SessionAttendance({ variant = 'pre', bare = false, onBack, sessi
       }
     >
       <div style={{ padding: '0 22px 20px' }}>
+        {/* Sprint 7 pin (TEAM.md): "Enter results" on a TOURNAMENT session
+            only - the block/type info the screen already receives. Never
+            time-gated, same as attendance's Start session - a coach may
+            legitimately enter or correct results at any point. */}
+        {session?.type === 'tournament' ? (
+          <div style={{ marginBottom: 16 }}>
+            <Button
+              variant="secondary"
+              height={46}
+              style={{ boxShadow: 'none' }}
+              onClick={() => setView('results')}
+            >
+              {tournamentResults.data?.length ? 'Edit results' : 'Enter results'}
+            </Button>
+          </div>
+        ) : null}
         {roster.map((athlete, i) => {
           const value = marks[athlete.id] ?? null;
           const noShow = value === 'out';
@@ -318,6 +380,157 @@ export function SessionAttendance({ variant = 'pre', bare = false, onBack, sessi
         })}
       </div>
     </PhoneFrame>
+  );
+}
+
+/**
+ * Results entry (Sprint 7 pin, TEAM.md) - tap roster athletes in finishing
+ * order; tapping an assigned athlete un-assigns and renumbers everyone after
+ * them (renumbering is automatic: position is derived from array index, not
+ * stored per-tap). Pre-fills from `resultsState.data` when the session
+ * already has results on file, keyed once so a mid-edit re-render (an
+ * invalidation bump from another coach's device) cannot silently overwrite
+ * an in-progress edit.
+ *
+ * Local `order` drives the UI in both seed and live mode - only the Save
+ * call is mode-specific (the hook's `saveResults` is a real write live, an
+ * inert no-op via the fallback otherwise), matching this screen's existing
+ * attendance flow (local marks, real write only when live).
+ */
+function ResultsEntry({ bare, session, roster, resultsState, onBack }) {
+  const [order, setOrder] = useState([]); // athleteId[], index 0 = 1st place
+  const seededRef = useRef(false);
+  const [saveState, setSaveState] = useState('idle'); // 'idle' | 'saving' | 'saved'
+  const [saveError, setSaveError] = useState(null);
+
+  // Pre-fill once, the first time real existing results arrive - never
+  // re-seeds after that, so a background refresh cannot clobber a coach's
+  // in-progress re-ordering.
+  useEffect(() => {
+    if (seededRef.current || !resultsState.data) return;
+    seededRef.current = true;
+    setOrder(
+      resultsState.data
+        .slice()
+        .sort((a, b) => a.position - b.position)
+        .map((r) => r.athleteId)
+    );
+  }, [resultsState.data]);
+
+  const toggle = (athleteId) => {
+    if (saveState === 'saving') return;
+    setOrder((prev) =>
+      prev.includes(athleteId) ? prev.filter((id) => id !== athleteId) : [...prev, athleteId]
+    );
+    setSaveState('idle');
+  };
+
+  const handleSave = async () => {
+    setSaveState('saving');
+    setSaveError(null);
+    try {
+      await resultsState.saveResults(order.map((athleteId, i) => ({ athleteId, position: i + 1 })));
+      setSaveState('saved');
+    } catch (err) {
+      setSaveState('idle');
+      setSaveError(err && typeof err.message === 'string' && err.message ? err.message : null);
+    }
+  };
+
+  const allAssigned = roster.length > 0 && order.length >= roster.length;
+
+  return (
+    <PhoneFrame
+      bare={bare}
+      header={
+        <div style={{ padding: '4px 22px 14px', background: color.bg }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 10 }}>
+            <BackLink onClick={onBack}>‹ Attendance</BackLink>
+          </div>
+          <ScreenTitle size={21}>Enter results</ScreenTitle>
+          <div style={{ font: `400 12px ${font.body}`, color: color.textSecondary, marginTop: 5 }}>
+            {session?.name}
+            {session?.meta ? ` · ${session.meta}` : ''}
+          </div>
+          <Body size={12} style={{ marginTop: 10 }}>
+            {allAssigned
+              ? 'Every athlete has a finish position.'
+              : `Tap athletes in finishing order. Next: ${ordinal(order.length + 1)}.`}
+          </Body>
+        </div>
+      }
+      footer={
+        <div style={{ borderTop: `1px solid ${color.frameRule}`, padding: '14px 22px 22px', background: color.bg }}>
+          {saveError ? (
+            <Body size={12} tone={color.error} style={{ marginBottom: 10 }}>
+              {saveError} Nothing was saved — tap Save results to try again.
+            </Body>
+          ) : null}
+          {saveState === 'saved' ? <SavedNotice /> : null}
+          <Button
+            variant="pinned"
+            height={56}
+            loading={saveState === 'saving'}
+            disabled={!order.length}
+            onClick={handleSave}
+            style={saveState === 'saved' ? { marginTop: 10 } : null}
+          >
+            {saveState === 'saving' ? 'Saving results' : 'Save results'}
+          </Button>
+        </div>
+      }
+    >
+      <div style={{ padding: '0 22px 20px' }}>
+        {roster.map((athlete, i) => {
+          const position = order.indexOf(athlete.id);
+          const assigned = position !== -1;
+          return (
+            <AthleteRow
+              key={athlete.id}
+              name={athlete.name}
+              meta={athlete.meta}
+              avatarSize={42}
+              nameSize={16}
+              divider={i < roster.length - 1}
+              onClick={() => toggle(athlete.id)}
+              trailing={assigned ? <StatusBadge tone="green">{ordinal(position + 1)}</StatusBadge> : null}
+            />
+          );
+        })}
+      </div>
+    </PhoneFrame>
+  );
+}
+
+/** Same green-toast idiom as NotificationPreferences' SavedToast. */
+function SavedNotice() {
+  return (
+    <div
+      style={{
+        background: 'rgba(0,175,81,.1)',
+        border: `1px solid ${color.primary}`,
+        borderRadius: 10,
+        padding: '11px 14px',
+        display: 'flex',
+        alignItems: 'center',
+        gap: 10,
+      }}
+    >
+      <span
+        style={{
+          width: 18,
+          height: 18,
+          borderRadius: '50%',
+          background: color.primary,
+          display: 'grid',
+          placeItems: 'center',
+          flex: 'none',
+        }}
+      >
+        <Tick size={9} />
+      </span>
+      <span style={{ font: `500 13px ${font.body}`, color: color.primary }}>Results saved</span>
+    </div>
   );
 }
 

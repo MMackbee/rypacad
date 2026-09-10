@@ -21,15 +21,20 @@ export const TABS = {
     { key: 'home', label: 'Home', icon: 'home', route: '/portal/home' },
     { key: 'schedule', label: 'Schedule', icon: 'calendar', route: '/portal/schedule' },
     { key: 'contract', label: 'Contract', icon: 'target', route: '/portal/contract' },
-    // DNA is off for players (owner's call, 2026-09-01) — the screen stays
-    // built for the coach/staff capture flow to grow into.
+    // DNA's old slot (off for players since 2026-09-01) is now Tour (Sprint 7
+    // pin, TEAM.md): the RYP Tour leaderboard, /portal/tour.
+    { key: 'tour', label: 'Tour', icon: 'trophy', route: '/portal/tour' },
   ],
   parent: [
     // No separate Children tab: Home IS the children overview, and the old
     // /portal/athlete route it pointed at now redirects to /portal/family —
     // two tabs, one destination (owner's report, 2026-09-01).
     { key: 'home', label: 'Home', icon: 'home', route: '/portal/family' },
-    { key: 'billing', label: 'Billing', icon: 'card', route: '/portal/billing' },
+    // Billing tab REMOVED, replaced by Tour (Sprint 7 pin, TEAM.md): billing
+    // is out of the app for now. Billing.js survives unrouted in the harness
+    // for Stripe's eventual return; /portal/billing redirects to /portal/family
+    // (routing lane).
+    { key: 'tour', label: 'Tour', icon: 'trophy', route: '/portal/tour' },
     { key: 'settings', label: 'Settings', icon: 'settings', route: '/portal/settings' },
   ],
   // Sprint 5 pin (TEAM.md): the Me tab is removed - the coach profile screen
