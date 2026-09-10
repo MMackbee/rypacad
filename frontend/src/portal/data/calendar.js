@@ -42,6 +42,21 @@ export function addDaysISO(iso, n) {
 }
 
 /**
+ * 'yyyy-MM-dd' -> the Saturday on or before it, via date-fns — for seed data
+ * that wants a believable "past tournament Saturday" without hand-picking a
+ * date that goes stale (Sprint 7, RYP Tour demo standings). Centralized here
+ * rather than reimplemented in data/tour.js, per this file's own rule: date
+ * math happens once.
+ */
+export function lastSaturdayOnOrBefore(iso) {
+  // Steps back a day at a time (at most 6 steps) - this is seed-data setup,
+  // not a hot path, so clarity wins over a modulo trick.
+  let cur = parseISO(iso);
+  for (let i = 0; i < 7 && !isSaturday(cur); i++) cur = addDays(cur, -1);
+  return format(cur, 'yyyy-MM-dd');
+}
+
+/**
  * Session time string ("9:00 AM", "12:30 PM") -> minutes since midnight,
  * or null when unparseable. THE 12-hour parser (code review 2026-09-04:
  * three regex copies existed; noon/midnight rules live here once).

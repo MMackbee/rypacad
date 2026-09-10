@@ -40,6 +40,7 @@ import {
   createBooking,
   createContractLog,
   fetchAthlete,
+  fetchAthletesByIds,
   fetchBookings,
   fetchBookingsBySession,
   fetchCoachAthletes,
@@ -51,7 +52,10 @@ import {
   fetchSessions,
   fetchSessionsByIds,
   fetchSessionsInRange,
+  fetchTournamentResults,
+  fetchTournamentResultsForSession,
   isLive,
+  saveTournamentResults,
   updateBookingStatus,
 } from './live';
 import {
@@ -142,6 +146,7 @@ import {
   NEWSLETTER_ISSUE,
   NEWSLETTER_STATES,
 } from '../data/admin';
+import { TOUR_SEED, deriveTourStandings } from '../data/tour';
 
 export { default as useSeedResource } from './useSeedResource';
 export { default as useAuthSession } from './useAuthSession';
@@ -1784,4 +1789,130 @@ export function useSessionAttendance(sessionId) {
   };
 
   return { ...state, mark };
+}
+
+/**
+ * Live payload for useTourStandings — every tournamentResults doc, joined to
+ * athlete names and each event's session label, run through
+ * data/tour.js's deriveTourStandings() (the SAME function the seed constant
+ * below is computed with, so live and seed can never disagree on the math).
+ *
+ * Name visibility (Sprint 7 open question, flagged in the routing report):
+ * fetchAthletesByIds joins by individual get() per athlete, not a batched
+ * `in` query — see its doc comment in ./live.js for why a batched query is
+ * unsafe here. The practical effect: mental/ops/owner resolve every name on
+ * this academy-wide leaderboard; an athlete, parent or coach resolves only
+ * the subset the existing "own records only" athletes matrix already grants
+ * them (self / own household / assigned roster) — everyone else's row shows
+ * name: null. Session labels (fetchSessionsByIds) have no such limit -
+ * sessions are readable by any signed-in user unconditionally.
+ */
+async function liveTourStandings() {
+  const results = await fetchTournamentResults();
+  const athleteIds = [...new Set(results.map((r) => r.athleteId))];
+  const sessionIds = [...new Set(results.map((r) => r.sessionId))];
+  const [athletes, sessions] = await Promise.all([
+    fetchAthletesByIds(athleteIds),
+    fetchSessionsByIds(sessionIds),
+  ]);
+  const nameById = new Map(athletes.map((a) => [a.id, a.name]));
+  const labelById = new Map(sessions.map((s) => [s.id, s.label]));
+  return deriveTourStandings(results, { nameById, labelById });
+}
+
+/**
+ * GET /tour/standings (Sprint 7 pin, contract v1.5) — pinned shape:
+ * { data: { standings: [{ athleteId, name, rank, points, events, wins }],
+ *   events: [{ sessionId, date, label, top3: [{ name, position }] }] },
+ *   loading, error }.
+ *
+ * Academy-wide and readable by every role (contract v1.5: "standings are
+ * academy-public") — unlike every other hook in this file there is no role
+ * branching on the read side; the only asymmetry is the name-resolution
+ * limit documented on liveTourStandings above.
+ *
+ * Seed: TOUR_SEED (data/tour.js) — a believable demo season, always full
+ * regardless of role. Live: subscribes to the 'tournamentResults'
+ * invalidation generation, so a coach/staff saveResults() anywhere refreshes
+ * every mounted standings screen (the Sprint 6 post-write-refresh pattern).
+ */
+export function useTourStandings() {
+  const live = isLive();
+  const resultsGen = useInvalidation('tournamentResults');
+
+  return useSeedResource(
+    live ? null : TOUR_SEED,
+    live ? { source: liveTourStandings, deps: ['tour-standings', resultsGen] } : undefined
+  );
+}
+
+/**
+ * Live payload for useTournamentResults(sessionId) — one tournament's
+ * existing results, joined to athlete names the same way liveTourStandings
+ * does (individual get()s; see the name-visibility note there). Staff
+ * entering results for a tournament they are allowed to write to already
+ * have the read access the join needs in this academy's current single-
+ * coach reality (mental/ops/owner unconditionally; coach's assigned-roster
+ * clause), so unlike the standings screen, every name is expected to
+ * resolve for the caller actually using this hook to enter results.
+ */
+async function liveTournamentResults(sessionId) {
+  const results = await fetchTournamentResultsForSession(sessionId);
+  const athletes = await fetchAthletesByIds(results.map((r) => r.athleteId));
+  const nameById = new Map(athletes.map((a) => [a.id, a.name]));
+  return {
+    results: results
+      .map((r) => ({
+        athleteId: r.athleteId,
+        name: nameById.get(r.athleteId) ?? null,
+        position: r.position,
+      }))
+      .sort((a, b) => a.position - b.position),
+  };
+}
+
+/**
+ * GET /tournaments/:sessionId/results + result entry (Sprint 7 pin) —
+ * pinned shape: { data: { results: [{ athleteId, name, position }] },
+ * loading, error, saveResults(entries) } where entries =
+ * [{ athleteId, position }]. Coach/mental/ops/owner-only write surface
+ * (enforced in firestore.rules, not here), sessionId-scoped, live-only - same
+ * "no seed/demo branch to keep in sync" posture as useSessionAttendance:
+ * with isLive() false or no sessionId yet, this resolves to an empty results
+ * list and a no-op saveResults(), so the results-entry screen never crashes
+ * in the demo/harness.
+ *
+ * `date` for the write is derived from the sessionId's own leading
+ * YYYY-MM-DD (sessions are always `YYYY-MM-DD-<block>`) — never a second
+ * fact the caller could pass out of sync with the id.
+ */
+export function useTournamentResults(sessionId) {
+  const live = isLive();
+  // Post-write invalidation seam (Sprint 6 pin, generalized here): a
+  // saveResults() from this hook OR from another coach's session re-runs
+  // every mounted instance reading tournamentResults, including
+  // useTourStandings.
+  const resultsGen = useInvalidation('tournamentResults');
+
+  const state = useSeedResource(
+    live && sessionId ? null : { results: [] },
+    live && sessionId
+      ? {
+          source: () => liveTournamentResults(sessionId),
+          deps: ['tournament-results', sessionId, resultsGen],
+        }
+      : undefined
+  );
+
+  const saveResults = async (entries) => {
+    if (!live || !sessionId) {
+      return { sessionId, count: Array.isArray(entries) ? entries.length : 0 };
+    }
+    const date = String(sessionId).slice(0, 10);
+    // saveTournamentResults bumps 'tournamentResults' itself on success -
+    // this hook's own subscription above picks that up and re-runs.
+    return saveTournamentResults(sessionId, date, entries);
+  };
+
+  return { ...state, saveResults };
 }

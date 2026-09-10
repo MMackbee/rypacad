@@ -339,6 +339,59 @@ service cloud.firestore {
       );
     }
 
+    // ---- tournamentResults ----------------------------------------------
+    // Sprint 7 pins + contract v1.5 (docs/portal/TEAM.md, "RYP Tour"): the
+    // weekend-tournament leaderboard. Standings are academy-public, so
+    // unlike every other collection above the read allow does not reference
+    // resource.data at all — signedIn() alone covers a real doc AND a probe
+    // of one that does not exist yet, so this collection needs no separate
+    // null-resource branch (the bookings/contractLogs nullReadOk lesson,
+    // satisfied here for free rather than worked around).
+    //
+    // POINTS ARE NEVER STORED: `position` is the only fact; points, rank and
+    // wins are derived at read time in hooks/index.js from the table in
+    // data/tour.js, so tuning that table retroactively rescores the whole
+    // season with no rules change.
+    match /tournamentResults/{resultId} {
+      allow read: if signedIn();
+
+      // Contract shape, exactly: sessionId, athleteId, date, position,
+      // createdBy, createdAt — nothing else (no `name`, no `points` — both
+      // derived, never stored). `date` must equal the payload's own
+      // sessionId's leading YYYY-MM-DD: sessions are always generated as
+      // `YYYY-MM-DD-<block>` (docs/portal/TEAM.md "Data contract v1"), so
+      // this ties the result to its tournament's actual calendar date
+      // without a second get() — a caller cannot claim one date in the
+      // payload while the id/sessionId says another.
+      function tourShapeOk() {
+        let d = request.resource.data;
+        return d.keys().hasAll(['sessionId', 'athleteId', 'date', 'position', 'createdBy', 'createdAt'])
+          && d.keys().hasOnly(['sessionId', 'athleteId', 'date', 'position', 'createdBy', 'createdAt'])
+          && d.sessionId is string
+          && d.athleteId is string
+          && d.date is string
+          && d.date == d.sessionId.substring(0, 10)
+          && d.position is int
+          && d.position >= 1
+          && d.position <= 40
+          && d.createdBy == request.auth.uid
+          && d.createdAt == request.time;
+      }
+
+      // Doc id IS `{sessionId}_{athleteId}` (mirrors bookings/contractLogs) -
+      // one result per athlete per tournament; a second entry for the same
+      // athlete at the same tournament is an overwrite of the same id, never
+      // a duplicate. Writable by staff who run results entry
+      // (coach/mental/ops/owner) only — never the athlete or parent roles,
+      // and never by role alone without also passing the shape/id checks.
+      allow create, update: if signedIn()
+        && me().role in ['coach', 'mental', 'ops', 'owner']
+        && tourShapeOk()
+        && resultId == request.resource.data.sessionId + '_' + request.resource.data.athleteId;
+
+      // No delete in v1 (contract v1.5): corrections overwrite via update.
+    }
+
     // No catch-all. Everything not matched above is denied.
   }
 }

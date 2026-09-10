@@ -18,11 +18,11 @@ import AthleteDashboard from './screens/AthleteDashboard';
 import SeasonSchedule from './screens/SeasonSchedule';
 import CommitmentContract from './screens/CommitmentContract';
 import AthleteDetail from './screens/AthleteDetail';
-import Billing from './screens/Billing';
 import NotificationPreferences from './screens/NotificationPreferences';
 import AdminDashboard from './screens/AdminDashboard';
 import StaffRoles from './screens/StaffRoles';
 import NewsletterComposer from './screens/NewsletterComposer';
+import TourStandings from './screens/TourStandings';
 
 /**
  * Portal route tree, mounted under /portal.
@@ -127,12 +127,28 @@ function PortalIndex() {
  * Book a Session needs to know whether the caller is a parent (child selector,
  * Sprint 6) — resolved from the live session the same disciplined way
  * RequireRole does it; seed mode stays the athlete flow.
+ *
+ * Book-for-kid deep link (Sprint 7 pin): a parent's per-kid "Book" action
+ * (ParentDashboard's onBookFor, wired below in the route element) navigates
+ * here with `{ state: { athleteId } }` so the child selector opens already
+ * pointed at that kid instead of defaulting to whichever child sorts first.
+ * Read from navigation state, never a route param — matches this file's
+ * existing AthleteDetailRoute/SessionAttendanceRoute convention of resolving
+ * routing-only facts here and passing plain props down.
  */
 function BookSessionRoute({ onBack }) {
   const live = isLive();
   const { user } = useAuthSession(live ? undefined : { variant: 'idle' });
+  const { state } = useLocation();
   const role = live && user?.role === 'parent' ? 'parent' : 'athlete';
-  return <BookSession bare role={role} onBack={onBack} />;
+  return (
+    <BookSession
+      bare
+      role={role}
+      initialAthleteId={state?.athleteId ?? undefined}
+      onBack={onBack}
+    />
+  );
 }
 
 /**
@@ -290,7 +306,18 @@ export default function PortalRoutes() {
         path="family"
         element={
           <RequireRole roles={['parent']}>
-            <ParentDashboard bare onOpenAthlete={openAthlete} onSignOut={onSignOut} />
+            <ParentDashboard
+              bare
+              onOpenAthlete={openAthlete}
+              onSignOut={onSignOut}
+              // Book-for-kid deep link (Sprint 7 pin): each kid card's Book
+              // action carries the chosen athleteId as navigation state, so
+              // BookSessionRoute can pass it through as initialAthleteId
+              // instead of BookSession defaulting to the household's first
+              // child. Many kids never get their own login - this is the
+              // first-class path for a parent booking on their behalf.
+              onBookFor={(athleteId) => navigate('/portal/book', { state: { athleteId } })}
+            />
           </RequireRole>
         }
       />
@@ -308,11 +335,23 @@ export default function PortalRoutes() {
       {/* The old bare /portal/athlete has no id to resolve — redirect rather
           than render a screen that can no longer pick an athlete for itself. */}
       <Route path="athlete" element={<Navigate to="/portal/family" replace />} />
+      {/* Billing is parked (Sprint 7 owner ruling: energy goes to features,
+          not billing, for now). The route survives only as a redirect so an
+          old bookmark or the Stripe return URL still lands somewhere real;
+          the screen itself stays in the harness for that eventual Stripe
+          return, imported there directly rather than from here (no
+          RequireRole needed - a bare redirect, same as the legacy
+          bare-/portal/athlete redirect above). */}
+      <Route path="billing" element={<Navigate to="/portal/family" replace />} />
+      {/* RYP Tour (Sprint 7 pin): the weekend-tournament leaderboard, open to
+          every signed-in portal role - standings are academy-public
+          (contract v1.5), so this is the one route in this file with the
+          full role list rather than a role-scoped subset. */}
       <Route
-        path="billing"
+        path="tour"
         element={
-          <RequireRole roles={['parent']}>
-            <Billing bare />
+          <RequireRole roles={['athlete', 'parent', 'coach', 'mental', 'ops', 'owner']}>
+            <TourStandings bare onSignOut={onSignOut} />
           </RequireRole>
         }
       />
