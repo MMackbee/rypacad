@@ -422,3 +422,85 @@ Also closed at integration:
   If ~25 kids will span multiple blocks in one "weekly tournament", the
   blocks should merge into one scored event (e.g. by date) — say the word
   and it's a small deriveTourStandings change.
+
+## Sprint 8 pins — scores, age brackets, player history (2026-09-10)
+
+Owner's direction: coaches input the SCORES from each tournament session
+(strokes, not tap-in-order positions); players see a log of how they've
+played in past events; the leaderboard splits into age brackets. Owner
+said "8-10, 11-13, 13+" — implemented as 10U / 11-13 / 14+ (a 13-year-old
+cannot live in two brackets; under-8s need a home). Age is computed AS OF
+SEASON START (SEASON_BOUNDS.start) so no kid changes brackets mid-season.
+
+Data contract v1.6 (supersedes v1.5.1 for tournamentResults; prod has no
+result docs yet and the emulator reseeds, so no migration):
+- tournamentResults/{sessionId}_{athleteId} = { sessionId, athleteId,
+  name (string|null), bracket ('10U'|'11-13'|'14+'|null), date,
+  score (int 18..200, strokes), createdBy, createdAt }. POSITION IS NO
+  LONGER STORED — it derives at read time: within one (sessionId, bracket)
+  group, ascending score; equal scores share a position, next distinct
+  score resumes at its 1-based index (competition ranking). Points then
+  derive from that position via TOUR_POINTS exactly as before, per
+  bracket. `bracket` is a write-time snapshot (same rationale and
+  mechanics as the v1.5.1 name snapshot): computed from the athlete's dob
+  at write time so standings never need cross-family athlete reads. dob
+  null -> bracket null -> grouped under 'open' ("Open") so nothing breaks.
+- data/tour.js gains: BRACKETS = [{ id: '10U', label: '10 & under', min:
+  0, max: 10 }, { id: '11-13', label: '11–13', min: 11, max: 13 },
+  { id: '14+', label: '14 & up', min: 14, max: 999 }] (+ implicit 'open'
+  fallback), and bracketFor(dob, asOfISO) -> bracket id | null.
+- Read paths SKIP docs with no int score (defensive; none should exist).
+- Rules (v1.6 tourShapeOk): keys exactly the eight above; score is int
+  18..200; bracket in ['10U','11-13','14+'] || null; NO substring()
+  ANYWHERE (rules strings don't have it — sprint 7 hotfix); keep the
+  matches() date/sessionId pair and the createdBy/createdAt pins; roles
+  unchanged (coach/mental/ops/owner write, any signed-in reads).
+
+Hook seam (routing owns; frontend codes against):
+- deriveTourStandings(results, { nameById, labelById }) ->
+  { brackets: [{ id, label, standings: [{ athleteId, name, rank, points,
+    events, wins }] }], events: [{ sessionId, date, label, results:
+    [{ athleteId, name, bracket, score, position }] }], counting:
+    { eventsHeld, counted, drops } }. Only non-empty brackets appear, in
+  BRACKETS order, 'open' last. Ranking/drop-week/tie rules unchanged,
+  applied per bracket; eventsHeld stays global. events sorted date desc,
+  each event's results sorted bracket order then position.
+- useTourStandings() -> { data: <that shape>, loading, error }. Seed:
+  TOUR_SEED reshaped — 8 existing kids spread across the three brackets
+  with believable 9-hole-ish scores; no new invented names.
+- useTournamentResults(sessionId) -> { data: { results: [{ athleteId,
+  name, bracket, score, position }] }, loading, error,
+  saveResults(entries) }, entries = [{ athleteId, name, bracket, score }].
+- NEW useAthleteBrackets(athleteIds) -> { data: { [athleteId]: bracketId
+  | null }, loading, error } via fetchAthletesByIds + bracketFor — for
+  the results-entry screen (coach can read assigned athletes). Seed mode:
+  {} and never fetches.
+- Player history NEEDS NO NEW HOOK: events[].results carries every row —
+  the athlete's log is a client-side filter by athleteId.
+
+UI (frontend lane):
+- Results entry becomes SCORE entry: each rostered athlete gets a strokes
+  field (numeric, 18..200) with their bracket shown as a chip; save-all
+  with the existing saving/saved/error states; re-entry pre-fills from
+  data.results. Derived standings are never edited by the coach.
+- TourStandings: bracket selector chips (only non-empty brackets);
+  standings card + recent-tournament podiums (top 3 of the SELECTED
+  bracket, showing scores) filter to the selection. Athlete role default-
+  selects their own bracket when they appear in one, and gains a "Your
+  results" card: date · score · position-in-bracket · points earned, most
+  recent first. Drop-week note unchanged.
+- StatesHarness: TOUR states updated; results-entry state renamed to the
+  score flow.
+
+Seed/provisioning (db lane):
+- seed-firestore.mjs: Whitfield athletes get dobs (consistent with any
+  existing ageLine copy) landing them across brackets; tournamentResults
+  gain score + bracket, drop position — pick scores whose DERIVED
+  per-bracket positions tell the same story the old positions did where
+  the bracket split allows. Update sanity output.
+- provision-family.mjs: accept an optional dob per athlete, written to
+  the athlete doc; REAL families (MackBee, Eisele) stay dob: null — never
+  invent a real kid's birthday. The owner supplies real dobs later.
+- DATA-MODEL.md: v1.6 section replaces the v1.5.1 field table; document
+  score/bracket, derived position, and the dob dependency (an athlete
+  with no dob competes in Open until provisioning sets one).
