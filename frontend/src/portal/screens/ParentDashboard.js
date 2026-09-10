@@ -1,5 +1,5 @@
 import React from 'react';
-import { color, font } from '../tokens';
+import { TOUCH_MIN, color, font, radius } from '../tokens';
 import BottomTabBar from '../components/BottomTabBar';
 import Button from '../components/Button';
 import PhoneFrame from '../components/PhoneFrame';
@@ -27,11 +27,18 @@ import { useHousehold } from '../hooks';
  * @param {() => void} [onRetry]  Re-fetch after a load failure.
  * @param {(athleteId: string) => void} [onOpenAthlete]  Each child card calls
  *   this with its own id - routing wires it to /portal/athlete/:athleteId.
+ * @param {(athleteId: string) => void} [onBookFor]  Sprint 7 pin (TEAM.md,
+ *   "Book-for-kid deep link"): each child card's compact Book chip calls this
+ *   with its own id - routing wires it to /portal/book, passing the id as
+ *   BookSession's initialAthleteId via navigation state. Sits beside the
+ *   card's existing open-profile tap without stealing it - the chip stops
+ *   its own click from bubbling to the card.
  */
 export default function ParentDashboard({
   variant = 'three',
   bare = false,
   onOpenAthlete,
+  onBookFor,
   onRetry,
 }) {
   const { data, loading, error } = useHousehold({ variant });
@@ -94,6 +101,7 @@ export default function ParentDashboard({
             child={child}
             onHold={flagged}
             onOpen={onOpenAthlete ? () => onOpenAthlete(child.id) : undefined}
+            onBookFor={onBookFor ? () => onBookFor(child.id) : undefined}
           />
         ))}
       </div>
@@ -169,7 +177,7 @@ function PaymentBanner({ billing }) {
  * differently shaped blocks. Nico has no contract data and the card still holds
  * its shape.
  */
-function ChildCard({ child, onHold, onOpen }) {
+function ChildCard({ child, onHold, onOpen, onBookFor }) {
   const standing = onHold
     ? { tone: 'red', label: 'On hold' }
     : child.standing;
@@ -187,13 +195,20 @@ function ChildCard({ child, onHold, onOpen }) {
             {child.ageLine}
           </div>
         </div>
-        {/* Live cards carry honest nulls the seed never did (QA hotfix):
-            no standing signal -> no badge, nothing booked -> plain copy. */}
-        {standing ? (
-          <StatusBadge tone={standing.tone} dashed={standing.dashed}>
-            {standing.label}
-          </StatusBadge>
-        ) : null}
+        <div style={{ flex: 'none', display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 6 }}>
+          {/* Live cards carry honest nulls the seed never did (QA hotfix):
+              no standing signal -> no badge, nothing booked -> plain copy. */}
+          {standing ? (
+            <StatusBadge tone={standing.tone} dashed={standing.dashed}>
+              {standing.label}
+            </StatusBadge>
+          ) : null}
+          {/* Sprint 7 pin (TEAM.md, "Book-for-kid deep link"): a compact
+              per-kid Book action beside the card's existing open-profile tap.
+              Hidden without onBookFor, same convention as every other
+              optional affordance in this file. */}
+          {onBookFor ? <BookChip onClick={onBookFor} /> : null}
+        </div>
       </div>
 
       <div style={{ height: 1, background: color.rule, margin: '14px 0 13px' }} />
@@ -249,6 +264,46 @@ function ChildCard({ child, onHold, onOpen }) {
         )}
       </MetaRow>
     </Card>
+  );
+}
+
+/**
+ * Compact Book chip on a child card - a real 44px touch target held to a
+ * ~22px visual footprint via the same negative-margin bleed trick
+ * SignOutButton and BackLink already use in Primitives.js, so it sits beside
+ * the standing badge without inflating the card's fixed height. Stops its own
+ * click from bubbling to the card's onClick (open profile) - the two
+ * affordances must not fight over one tap.
+ */
+function BookChip({ onClick }) {
+  const visual = 22;
+  const bleed = -(TOUCH_MIN - visual) / 2;
+  return (
+    <button
+      type="button"
+      onClick={(e) => {
+        e.stopPropagation();
+        onClick();
+      }}
+      style={{
+        background: 'transparent',
+        border: `1px solid ${color.primary}`,
+        borderRadius: radius.badge,
+        padding: '0 9px',
+        minHeight: TOUCH_MIN,
+        marginTop: bleed,
+        marginBottom: bleed,
+        display: 'inline-flex',
+        alignItems: 'center',
+        font: `600 10px ${font.body}`,
+        letterSpacing: '.04em',
+        textTransform: 'uppercase',
+        color: color.primary,
+        cursor: 'pointer',
+      }}
+    >
+      Book
+    </button>
   );
 }
 

@@ -47,7 +47,12 @@ export default function Billing({ variant = 'active', bare = false }) {
           <ScreenTitle size={22}>Billing</ScreenTitle>
         </div>
       }
-      footer={<BottomTabBar role="parent" active="billing" />}
+      // Billing tab REMOVED from the parent tab bar (Sprint 7 pin, TEAM.md —
+      // billing is out of the app for now, replaced by Tour). This screen
+      // survives unrouted, for the harness and Stripe's eventual return, so
+      // no tab is active — same treatment PracticeDNA already uses for its
+      // own retired tab slot.
+      footer={<BottomTabBar role="parent" active={null} />}
     >
       <div style={{ padding: '0 22px 24px', display: 'flex', flexDirection: 'column', gap: 12 }}>
         <HeroCard state={state} />

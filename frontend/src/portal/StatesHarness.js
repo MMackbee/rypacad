@@ -38,6 +38,7 @@ import AdminDashboard from './screens/AdminDashboard';
 import StaffRoles from './screens/StaffRoles';
 import NewsletterComposer from './screens/NewsletterComposer';
 import OnboardingFlow from './screens/OnboardingFlow';
+import TourStandings from './screens/TourStandings';
 
 import { ALLOWANCE, ALLOWANCE_NO_TOURNAMENTS } from './data/seed';
 import { ELITE_TIERS, FITNESS_PACKAGES, GOLF_PACKAGES } from './data/packages';
@@ -81,14 +82,24 @@ export const SCREEN_STATES = [
              ['confirmed', 'Confirmed'],
              // Sprint 6 pin (TEAM.md, QA #2): a parent gets the child selector
              // above the calendar; an athlete never does.
-             ['open', 'Parent · pick a child', { role: 'parent' }]] },
+             ['open', 'Parent · pick a child', { role: 'parent' }],
+             // Sprint 7 pin (TEAM.md, "Book-for-kid deep link"): initialAthleteId
+             // wins over the first-child default when it names a real household
+             // athlete - 'reese' here is the seed's second child, proving this
+             // isn't just re-selecting whatever the default would have picked.
+             ['open', 'Parent · deep link to Reese', { role: 'parent', initialAthleteId: 'reese' }]] },
   { id: '06', title: 'Practice DNA', Screen: PracticeDNA, role: 'athlete',
     states: [['complete', 'Complete'], ['partial', 'Partial'], ['pending', 'Pending']] },
   { id: '07', title: 'Commitment Contract', Screen: CommitmentContract, role: 'athlete',
     states: [['ontrack', 'On track'], ['behind', 'Behind'], ['complete', 'Month complete'],
              ['none', 'No contract']] },
   { id: '08', title: 'Parent Dashboard', Screen: ParentDashboard, role: 'parent',
-    states: [['one', 'One child'], ['three', 'Three children'], ['payment', 'Payment issue']] },
+    // onBookFor is a no-op here purely so the Book-for-kid chip (Sprint 7
+    // pin, TEAM.md) renders in the gallery - a real caller passes routing's
+    // navigate-to-/portal/book handler instead.
+    states: [['one', 'One child', { onBookFor: () => {} }],
+             ['three', 'Three children', { onBookFor: () => {} }],
+             ['payment', 'Payment issue', { onBookFor: () => {} }]] },
   { id: '09', title: 'Athlete Detail', Screen: AthleteDetail, role: 'parent',
     states: [['populated', 'Populated'], ['limited', 'Limited data']] },
   { id: '10', title: 'Billing & Subscription', Screen: Billing, role: 'parent',
@@ -100,7 +111,14 @@ export const SCREEN_STATES = [
     states: [['today', 'Sessions today'], ['concurrent', 'Concurrent'], ['none', 'None today']] },
   { id: '13', title: 'Session Roster & Attendance', Screen: SessionAttendance, role: 'coach',
     states: [['pre', 'Pre-session'], ['progress', 'In progress'], ['complete', 'Completed'],
-             ['noshow', 'No-shows']] },
+             ['noshow', 'No-shows'],
+             // Sprint 7 pin (TEAM.md): "Enter results" on a TOURNAMENT
+             // session. `name: null` so displaySession's own "Tournament
+             // block" fallback names it - no invented event name. Tap
+             // through the button to see the tap-to-assign flow; seed mode
+             // has no persisted results, so it always opens blank.
+             ['pre', 'Tournament · enter results',
+               { block: { type: 'tournament', name: null, time: '8:30 AM', date: null, meta: null } }]] },
   /*
    * Roster - coach (Sprint 5 pin, TEAM.md): the bottom tab bar's "Roster"
    * destination is now the coach's full assigned roster, not one session's
@@ -120,6 +138,17 @@ export const SCREEN_STATES = [
   { id: '17', title: 'Newsletter Composer', Screen: NewsletterComposer, role: 'admin',
     states: [['missing', 'Sections missing'], ['ready', 'All sections in'],
              ['scheduled', 'Scheduled'], ['sent', 'Sent']] },
+  /*
+   * RYP Tour (Sprint 7 pin, TEAM.md) — season standings for the weekend
+   * tournament leaderboard. Not a numbered handoff artboard (billing was
+   * parked and this replaced it this sprint), so it sits after the
+   * seventeen alongside 08·L and 18. useTourStandings() takes no options
+   * (see TourStandings.js), so loading/empty/error are driven by this
+   * screen's own `variant` prop rather than a hook demoOpts variant.
+   */
+  { id: 'TOUR', title: 'RYP Tour', Screen: TourStandings, role: 'athlete + parent + staff',
+    states: [['populated', 'Populated'], ['empty', 'Before first tournament'],
+             ['loading', 'Loading'], ['error', 'Load failure']] },
   /*
    * Not provisioned (Sprint 4) — the honest state for a signed-in Google
    * account with no users/ doc. Not a numbered handoff artboard, so it sits
