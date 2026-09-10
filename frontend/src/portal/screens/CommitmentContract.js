@@ -53,12 +53,13 @@ export default function CommitmentContract({
   // The practice log lives here and nowhere else — component state is the
   // whole record, per the practice-mode invariant (zero Firestore writes).
   const [practiceLogged, setPracticeLogged] = useState(null);
-  // Real (non-practice) logging: just the sheet's open/closed state. The
-  // day's minutes come from usePracticeLog (which now reports todayMinutes
-  // in BOTH seed and live modes) — a local copy of the last delta was a
-  // third source of truth that showed the delta instead of the day's total
-  // (code review 2026-09-04, findings 3 and 4).
-  const [showLogSheet, setShowLogSheet] = useState(false);
+  // Real (non-practice) logging: which day the LogSheet is open FOR — null
+  // is closed, an ISO date is open targeting that day (today via the footer
+  // CTA, a past day via the calendar's "Add late entry"; owner's report
+  // 2026-09-10: late entry did nothing). The day's minutes still come from
+  // usePracticeLog — a local copy of the last delta was a third source of
+  // truth (code review 2026-09-04, findings 3 and 4).
+  const [logSheetDate, setLogSheetDate] = useState(null);
 
   const practiceLog = usePracticeLog({ practice });
 
@@ -108,13 +109,13 @@ export default function CommitmentContract({
         setPracticeLogged(iso);
         if (onLogged) onLogged({ iso });
       }
-    : () => setShowLogSheet(true);
+    : () => setLogSheetDate(todayISO());
 
   // `minutes` is the DELTA just practiced; logPractice accumulates it into
   // the day (transactionally in live mode) and the hook re-reports the total.
   const handleSaveLog = (minutes) => {
-    practiceLog.logPractice({ minutes });
-    setShowLogSheet(false);
+    practiceLog.logPractice({ minutes, date: logSheetDate ?? undefined });
+    setLogSheetDate(null);
     if (onLog) onLog(minutes);
   };
 
@@ -174,11 +175,30 @@ export default function CommitmentContract({
         <StatsRow stats={displayStats} />
       </div>
 
-      {sheetDay ? <DaySheet day={sheetDay} onClose={() => setSheetDay(null)} /> : null}
-      {showLogSheet ? (
+      {sheetDay ? (
+        <DaySheet
+          day={sheetDay}
+          onClose={() => setSheetDay(null)}
+          // Practice mode keeps the sheet read-only — the walkthrough's
+          // one-log-per-step gate must not be sidestepped from a date cell.
+          // Real mode wires both actions (owner's report 2026-09-10: both
+          // buttons just closed the sheet).
+          onAddLate={
+            practice
+              ? undefined
+              : (iso) => {
+                  setSheetDay(null);
+                  setLogSheetDate(iso);
+                }
+          }
+          onRemove={practice ? undefined : (iso) => practiceLog.removeLog({ date: iso })}
+        />
+      ) : null}
+      {logSheetDate ? (
         <LogSheet
           contractMinutes={data?.tierMinutes}
-          onClose={() => setShowLogSheet(false)}
+          forDate={logSheetDate}
+          onClose={() => setLogSheetDate(null)}
           onSave={handleSaveLog}
         />
       ) : null}
@@ -404,10 +424,37 @@ function sheetTitle(iso) {
   return new Date(y, m - 1, d).toLocaleDateString('en-US', { month: 'long', day: 'numeric' });
 }
 
-function DaySheet({ day, onClose }) {
+function DaySheet({ day, onClose, onAddLate, onRemove }) {
+  const [removing, setRemoving] = useState(false);
+  const [removeError, setRemoveError] = useState(null);
+  const logged = day.state === 'logged';
+  // A day that hasn't happened cannot take a "late" entry — the rules would
+  // technically accept the write (any date is loggable), but logging future
+  // practice is a fiction this sheet won't offer.
+  const future = day.iso > todayISO();
+  const interactive = logged ? Boolean(onRemove) : Boolean(onAddLate) && !future;
+
+  const handleAction = async () => {
+    if (!interactive) return onClose();
+    if (!logged) return onAddLate(day.iso);
+    setRemoving(true);
+    setRemoveError(null);
+    try {
+      await onRemove(day.iso);
+      onClose();
+    } catch (err) {
+      setRemoving(false);
+      setRemoveError(
+        err && typeof err.message === 'string' && err.message
+          ? err.message
+          : 'The entry could not be removed. Try again.'
+      );
+    }
+  };
+
   return (
     <div
-      onClick={onClose}
+      onClick={removing ? undefined : onClose}
       style={{
         position: 'absolute',
         inset: 0,
@@ -428,17 +475,25 @@ function DaySheet({ day, onClose }) {
       >
         <ScreenTitle size={19}>{sheetTitle(day.iso)}</ScreenTitle>
         <Body size={12} style={{ marginTop: 8 }}>
-          {day.state === 'logged'
+          {logged
             ? 'Logged. Tap below to remove this entry if it was recorded by mistake.'
+            : future
+            ? 'This day has not happened yet — log it once it has.'
             : 'Not logged. A late entry is allowed until the month closes.'}
         </Body>
+        {removeError ? (
+          <Body size={12} tone={color.error} style={{ marginTop: 10 }}>
+            {removeError}
+          </Body>
+        ) : null}
         <Button
-          variant={day.state === 'logged' ? 'outline' : 'primary'}
+          variant={logged ? 'outline' : future ? 'outline' : 'primary'}
           height={50}
-          onClick={onClose}
+          loading={removing}
+          onClick={handleAction}
           style={{ marginTop: 16, boxShadow: 'none' }}
         >
-          {day.state === 'logged' ? 'Remove entry' : 'Add late entry'}
+          {logged ? 'Remove entry' : future ? 'Close' : 'Add late entry'}
         </Button>
       </div>
     </div>
@@ -452,8 +507,12 @@ function DaySheet({ day, onClose }) {
  * elsewhere). Whichever mode is showing when Save is tapped is what gets
  * logged; switching modes does not combine them.
  */
-function LogSheet({ contractMinutes, onClose, onSave }) {
-  const [mode, setMode] = useState('timer');
+function LogSheet({ contractMinutes, forDate, onClose, onSave }) {
+  // A late entry (forDate in the past) is a session already run elsewhere —
+  // the running timer makes no sense for it, so the sheet opens straight in
+  // manual mode and the mode toggle is hidden.
+  const late = Boolean(forDate) && forDate !== todayISO();
+  const [mode, setMode] = useState(late ? 'manual' : 'timer');
   const [running, setRunning] = useState(false);
   const [elapsedSec, setElapsedSec] = useState(0);
   const [manualMinutes, setManualMinutes] = useState('');
@@ -493,7 +552,7 @@ function LogSheet({ contractMinutes, onClose, onSave }) {
           padding: '20px 22px 26px',
         }}
       >
-        <ScreenTitle size={19}>Log practice</ScreenTitle>
+        <ScreenTitle size={19}>{late ? `Log practice · ${sheetTitle(forDate)}` : 'Log practice'}</ScreenTitle>
         <Body size={12} style={{ marginTop: 8 }}>
           {contractMinutes
             ? `${contractMinutes} min is the contract minimum, not a unit — log the real time practiced.`
@@ -502,7 +561,7 @@ function LogSheet({ contractMinutes, onClose, onSave }) {
 
         <div
           style={{
-            display: 'flex',
+            display: late ? 'none' : 'flex',
             marginTop: 16,
             background: color.dimmed,
             border: `1px solid ${color.border}`,

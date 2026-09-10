@@ -262,6 +262,49 @@ export function SessionAttendance({ variant = 'pre', bare = false, onBack, sessi
       }
     : demoMark;
 
+  // No-show reasons (owner's report 2026-09-10: "+ Add a reason" was an
+  // inert button). Saved to the booking's `noshowReason` through
+  // useSessionAttendance.setReason when live; a component-local record in
+  // seed/demo — the exact live/demo split `mark` above already follows.
+  // `localReasons` doubles as the optimistic echo in live mode, so the chip
+  // shows the saved text the moment Save lands rather than after refetch.
+  const [editingReason, setEditingReason] = useState(null); // athleteId | null
+  const [reasonDraft, setReasonDraft] = useState('');
+  const [savingReason, setSavingReason] = useState(false);
+  const [reasonError, setReasonError] = useState(null);
+  const [localReasons, setLocalReasons] = useState({});
+  const reasonFor = (athleteId) => {
+    if (localReasons[athleteId] !== undefined) return localReasons[athleteId];
+    if (!live) return null;
+    const row = (liveAttendance.data ?? []).find((r) => r.athleteId === athleteId);
+    return row?.noshowReason ?? null;
+  };
+  const startReason = (athleteId) => {
+    setEditingReason(athleteId);
+    setReasonError(null);
+    setReasonDraft(reasonFor(athleteId) || '');
+  };
+  const saveReason = async (athleteId) => {
+    const text = reasonDraft.trim();
+    setSavingReason(true);
+    setReasonError(null);
+    try {
+      if (live) {
+        const bookingId = bookingByAthlete.get(athleteId);
+        if (bookingId) await liveAttendance.setReason(bookingId, text || null);
+      }
+      setLocalReasons((m) => ({ ...m, [athleteId]: text || null }));
+      setEditingReason(null);
+    } catch (err) {
+      setReasonError(
+        err && typeof err.message === 'string' && err.message
+          ? err.message
+          : 'The reason could not be saved. Try again.'
+      );
+    }
+    setSavingReason(false);
+  };
+
   // Overrides the demo state the instant the coach actually starts the
   // session - real use never passes a variant, so demoState is always 'pre'
   // until this fires. Live mode has no persisted "session in progress" concept
@@ -370,9 +413,10 @@ export function SessionAttendance({ variant = 'pre', bare = false, onBack, sessi
                   />
                 }
               />
-              {/* Optional note chip, indented to align under the name. Never a
+              {/* Optional reason, indented to align under the name. Never a
                   required field - a required note is how attendance stops
-                  getting marked at all. */}
+                  getting marked at all. Tap the chip to add or edit; the
+                  saved text shows in place of the prompt. */}
               {noShow ? (
                 <div
                   style={{
@@ -383,7 +427,22 @@ export function SessionAttendance({ variant = 'pre', bare = false, onBack, sessi
                       i < roster.length - 1 ? `1px solid ${color.rowRule}` : 'none',
                   }}
                 >
-                  <NoteChip noShow />
+                  {editingReason === athlete.id ? (
+                    <ReasonEditor
+                      value={reasonDraft}
+                      onChange={setReasonDraft}
+                      onSave={() => saveReason(athlete.id)}
+                      onCancel={() => setEditingReason(null)}
+                      saving={savingReason}
+                      error={reasonError}
+                    />
+                  ) : (
+                    <NoteChip
+                      noShow
+                      reason={reasonFor(athlete.id)}
+                      onClick={() => startReason(athlete.id)}
+                    />
+                  )}
                 </div>
               ) : null}
             </div>
@@ -756,21 +815,98 @@ function RosterFooter({ sessionState, unmarked, completed, onStart, onClose }) {
   );
 }
 
-function NoteChip({ noShow }) {
+function NoteChip({ noShow, reason, onClick }) {
   return (
     <button
       type="button"
+      onClick={onClick}
       style={{
         background: noShow ? 'rgba(255,68,68,.08)' : '#161616',
         border: `1px solid ${noShow ? 'rgba(255,68,68,.4)' : color.rule}`,
         borderRadius: radius.badge,
         padding: '6px 10px',
+        maxWidth: '100%',
+        textAlign: 'left',
         font: `500 11px ${font.body}`,
         color: noShow ? color.error : color.textTertiary,
         cursor: 'pointer',
       }}
     >
-      {noShow ? '+ Add a reason (optional)' : '+ Add a note'}
+      {reason ? `${reason} · edit` : noShow ? '+ Add a reason (optional)' : '+ Add a note'}
     </button>
+  );
+}
+
+/**
+ * Inline reason editor (owner's report 2026-09-10) - a single short text
+ * field where the chip sat, saved on Enter or the Save chip, dismissed on
+ * Escape or Cancel. Deliberately tiny: the reason is one line for Phil's
+ * no-show report, not a note-taking surface (this screen's own rule - typing
+ * is never required to complete the core task).
+ */
+function ReasonEditor({ value, onChange, onSave, onCancel, saving, error }) {
+  return (
+    <div>
+      <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+        <input
+          autoFocus
+          value={value}
+          maxLength={200}
+          placeholder="e.g. Sick — parent texted ahead"
+          disabled={saving}
+          onChange={(e) => onChange(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter') onSave();
+            if (e.key === 'Escape') onCancel();
+          }}
+          style={{
+            flex: 1,
+            minWidth: 0,
+            height: 36,
+            background: color.dimmed,
+            border: `1px solid ${color.border}`,
+            borderRadius: radius.badge,
+            padding: '0 10px',
+            font: `400 12px ${font.body}`,
+            color: color.text,
+            outline: 'none',
+          }}
+        />
+        <button
+          type="button"
+          onClick={onSave}
+          disabled={saving}
+          style={{
+            background: 'transparent',
+            border: `1px solid ${color.primary}`,
+            borderRadius: radius.badge,
+            padding: '8px 12px',
+            font: `600 11px ${font.body}`,
+            color: color.primary,
+            cursor: 'pointer',
+          }}
+        >
+          {saving ? 'Saving…' : 'Save'}
+        </button>
+        <button
+          type="button"
+          onClick={onCancel}
+          disabled={saving}
+          style={{
+            background: 'transparent',
+            border: 'none',
+            padding: '8px 4px',
+            font: `500 11px ${font.body}`,
+            color: color.textTertiary,
+            cursor: 'pointer',
+          }}
+        >
+          Cancel
+        </button>
+      </div>
+      {error ? (
+        <div style={{ font: `400 11px ${font.body}`, color: color.error, marginTop: 6 }}>{error}</div>
+      ) : null}
+    </div>
   );
 }

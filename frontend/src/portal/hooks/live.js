@@ -15,6 +15,7 @@
 
 import {
   collection,
+  deleteDoc,
   doc,
   documentId,
   getDoc,
@@ -536,6 +537,34 @@ export async function createContractLog({ athleteId, date, minutes, contractMinu
 }
 
 /**
+ * Remove one day's practice log (owner's report, 2026-09-10: the contract
+ * calendar's "Remove entry" was an inert button). Deletes the
+ * `{athleteId}_{date}` doc outright — the keyspace makes the target exact,
+ * and a deleted day simply returns to "not logged", which the month
+ * derivation already renders. Athlete's own user only, enforced by the
+ * contractLogs delete rule, not here.
+ */
+export async function deleteContractLog({ athleteId, date }) {
+  if (!athleteId || !date) {
+    throw new LiveDataError(
+      ERR.INVALID,
+      'deleteContractLog: athleteId and date are both required.'
+    );
+  }
+  requireUser();
+  try {
+    const id = `${athleteId}_${date}`;
+    await deleteDoc(doc(db, 'contractLogs', id));
+    // Same invalidation the create path uses: every mounted contract surface
+    // re-derives, so the calendar cell repaints without a remount.
+    bump('contractLogs');
+    return { id, athleteId, date };
+  } catch (err) {
+    throw wrap(err, 'deleteContractLog');
+  }
+}
+
+/**
  * Every non-cancelled booking for one session — the coach's live attendance
  * roster (Sprint 6, QA #7). Read authorization is the EXISTING bookings-read
  * rule's coach clause (athleteData(resource.data.athleteId).coachId ==
@@ -597,6 +626,33 @@ export async function updateBookingStatus({ bookingId, status }) {
     return { id: bookingId, status };
   } catch (err) {
     throw wrap(err, 'updateBookingStatus');
+  }
+}
+
+/**
+ * Coach's optional no-show reason on one booking (owner's report,
+ * 2026-09-10: the roster's "+ Add a reason" chip was an inert button). A
+ * single free-text field on the booking doc — `noshowReason`, string <=200
+ * or null to clear — under the same assigned-coach attendance rule that
+ * governs status (the rules' attendanceUpdateOk now admits exactly this one
+ * extra key). Readable wherever the booking is readable, so the family sees
+ * the reason on their own records, which is the point of recording one.
+ */
+export async function setBookingNoshowReason({ bookingId, reason }) {
+  if (!bookingId) {
+    throw new LiveDataError(
+      ERR.INVALID,
+      'setBookingNoshowReason: bookingId is required.'
+    );
+  }
+  const clean = typeof reason === 'string' ? reason.trim().slice(0, 200) : null;
+  requireUser();
+  try {
+    await updateDoc(doc(db, 'bookings', bookingId), { noshowReason: clean || null });
+    bump('bookings');
+    return { id: bookingId, noshowReason: clean || null };
+  } catch (err) {
+    throw wrap(err, 'setBookingNoshowReason');
   }
 }
 

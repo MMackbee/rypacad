@@ -39,6 +39,7 @@ import {
   LiveDataError,
   createBooking,
   createContractLog,
+  deleteContractLog,
   fetchAthlete,
   fetchAthletesByIds,
   fetchBookings,
@@ -56,6 +57,7 @@ import {
   fetchTournamentResultsForSession,
   isLive,
   saveTournamentResults,
+  setBookingNoshowReason,
   updateBookingStatus,
 } from './live';
 import {
@@ -1531,14 +1533,25 @@ export function usePracticeLog({ today = todayISO(), practice = false } = {}) {
       : undefined
   );
 
-  const logPractice = async ({ minutes }) => {
+  const logPractice = async ({ minutes, date }) => {
     // A second entry the same day ACCUMULATES (owner's report, 2026-09-01:
     // "my time logged resets on every entry"). `minutes` is the DELTA; the
     // day total comes back in the result. Live accumulation happens INSIDE
     // createContractLog's transaction — adding from this hook's last-loaded
     // snapshot let a fast second save overwrite from a stale base (code
     // review 2026-09-04, finding 3).
+    //
+    // `date` (owner's report 2026-09-10: "late entry isn't working"): an
+    // optional target day, defaulting to today — the contract calendar's
+    // "Add late entry" logs a PAST date through this exact same path, and
+    // the rules already accept any date (the id pins athleteId+date, never
+    // "today"; DATA-MODEL: any date is loggable).
+    const target = date ?? today;
     if (!live) {
+      // Seed keeps its single-entry demo record. A late entry for another
+      // day is acknowledged but not tracked — seed's calendar comes from
+      // the static month builder, so there is nothing for it to repaint.
+      if (target !== today) return { date: target, minutes };
       const already = seedLoggedToday ? seedEntry.minutes : 0;
       const entry = { date: today, minutes: Math.min(720, already + minutes) };
       setSeedEntry(entry);
@@ -1550,13 +1563,28 @@ export function usePracticeLog({ today = todayISO(), practice = false } = {}) {
     // re-runs, so there is nothing to bump here directly.
     return createContractLog({
       athleteId: athlete.id,
-      date: today,
+      date: target,
       minutes,
       contractMinutes: athlete.contractMinutes ?? null,
     });
   };
 
-  return { ...state, logPractice, totalMinutes: state.data?.totalMinutes ?? 0 };
+  // Remove one day's log outright (owner's report 2026-09-10: "Remove
+  // entry" was inert). Live: deletes contractLogs/{athleteId}_{date} — the
+  // delete bumps 'contractLogs' so every contract surface repaints. Seed:
+  // clears the local entry when it matches, same no-op-persist posture as
+  // logPractice above.
+  const removeLog = async ({ date }) => {
+    if (!date) return null;
+    if (!live) {
+      if (seedEntry?.date === date) setSeedEntry(null);
+      return { date };
+    }
+    const { athlete } = await liveAthleteIdentity();
+    return deleteContractLog({ athleteId: athlete.id, date });
+  };
+
+  return { ...state, logPractice, removeLog, totalMinutes: state.data?.totalMinutes ?? 0 };
 }
 
 /**
@@ -1753,14 +1781,19 @@ async function liveSessionAttendance(sessionId) {
       athleteId: b.athleteId,
       name: nameById.get(b.athleteId) ?? null,
       status: b.status,
+      // Coach's optional no-show note (owner's report 2026-09-10) — absent
+      // on most bookings, so the row carries an honest null.
+      noshowReason: b.noshowReason ?? null,
     }))
     .sort((a, b) => (a.name || '').localeCompare(b.name || ''));
 }
 
 /**
  * GET /sessions/:id/bookings + attendance marking (Sprint 6 pin, QA #6/#7) —
- * pinned shape: { data: [{ bookingId, athleteId, name, status }], loading,
- * error, mark(bookingId, status) }. `status` is confirmed|attended|noshow;
+ * pinned shape: { data: [{ bookingId, athleteId, name, status,
+ * noshowReason }], loading, error, mark(bookingId, status),
+ * setReason(bookingId, reason) } (noshowReason/setReason added 2026-09-10,
+ * owner's report). `status` is confirmed|attended|noshow;
  * attendance IS bookings.status (coach IN -> 'attended', OUT -> 'noshow',
  * un-marking -> back to 'confirmed' is the caller's job to decide, not this
  * hook's).
@@ -1789,7 +1822,16 @@ export function useSessionAttendance(sessionId) {
     return updateBookingStatus({ bookingId, status });
   };
 
-  return { ...state, mark };
+  // Persist the coach's no-show reason (owner's report 2026-09-10: the
+  // "+ Add a reason" chip was inert). Same rules surface as mark() —
+  // setBookingNoshowReason bumps 'bookings' itself, so this hook's rows
+  // (and the family's views) refresh with the saved note.
+  const setReason = async (bookingId, reason) => {
+    if (!live) return { id: bookingId, noshowReason: reason || null };
+    return setBookingNoshowReason({ bookingId, reason });
+  };
+
+  return { ...state, mark, setReason };
 }
 
 /**

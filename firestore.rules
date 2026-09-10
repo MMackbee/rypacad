@@ -223,12 +223,23 @@ service cloud.firestore {
       // not been built — before/after both exclude it on purpose, so this
       // rule cannot be used to cancel or un-cancel a booking. Open question
       // (cancellation policy, roster close-out) carried over in the report.
+      // 2026-09-10 (owner's report — the roster's inert "+ Add a reason"):
+      // the same assigned-coach update may now also carry `noshowReason`, a
+      // single optional free-text note (string <=200, or null to clear). It
+      // rides the attendance rule rather than getting one of its own — same
+      // actor, same moment, same record — and status transitions stay
+      // exactly as pinned in Sprint 6.
       function attendanceUpdateOk() {
         let before = resource.data;
         let after = request.resource.data;
-        return after.diff(before).affectedKeys().hasOnly(['status'])
+        return after.diff(before).affectedKeys().hasOnly(['status', 'noshowReason'])
           && before.status in ['confirmed', 'attended', 'noshow']
-          && after.status in ['confirmed', 'attended', 'noshow'];
+          && after.status in ['confirmed', 'attended', 'noshow']
+          && (
+            !after.keys().hasAny(['noshowReason'])
+            || after.noshowReason == null
+            || (after.noshowReason is string && after.noshowReason.size() <= 200)
+          );
       }
 
       allow update: if signedIn()
@@ -276,6 +287,15 @@ service cloud.firestore {
         && me().athleteId == request.resource.data.athleteId
         && logId == request.resource.data.athleteId + '_' + request.resource.data.date
         && logShapeOk();
+
+      // 2026-09-10 (owner's report — the contract calendar's inert "Remove
+      // entry"): an athlete may delete their OWN day's log — a mistaken
+      // entry returns the day to "not logged", which the month derivation
+      // renders with no other cleanup. Same identity as create, scoped by
+      // the id's athleteId prefix (ids never contain '_' before the date).
+      allow delete: if signedIn()
+        && me().role == 'athlete'
+        && me().athleteId == logId.split('_')[0];
 
       // Reads follow the athlete-record matrix line: own user, household
       // parent, assigned coach, mental (all), ops (completion surface),
