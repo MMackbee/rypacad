@@ -1825,8 +1825,11 @@ async function liveTourStandings() {
 /**
  * GET /tour/standings (Sprint 7 pin, contract v1.5) — pinned shape:
  * { data: { standings: [{ athleteId, name, rank, points, events, wins }],
- *   events: [{ sessionId, date, label, top3: [{ name, position }] }] },
- *   loading, error }.
+ *   events: [{ sessionId, date, label, top3: [{ name, position }] }],
+ *   counting: { eventsHeld, counted, drops } },
+ *   loading, error }. `counting` (owner's drop-week rule, 2026-09-10) says
+ * how many of the season's weeks sum into `points` — see data/tour.js's
+ * TOUR_DROP_RATE.
  *
  * Academy-wide and readable by every role (contract v1.5: "standings are
  * academy-public") — unlike every other hook in this file there is no role

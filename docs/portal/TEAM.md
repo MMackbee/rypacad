@@ -394,3 +394,31 @@ Also closed at integration:
 - Parent onboarding walkthrough's Billing step replaced by a Tour +
   notifications step (billing is parked; the walkthrough taught a tab
   that no longer exists).
+
+## Sprint 7 addendum — scoring retune + rules hotfix (2026-09-10, same day)
+
+- RULES HOTFIX: firestore.rules strings have no `substring()` — the
+  emulator rejected EVERY tournamentResults write with "Function not found
+  error: Name: [substring]" (caught in the integration browser pass; the
+  routing lane had no emulator available and self-reviewed). The
+  date-matches-sessionId check is now a matches() pair: `date` pinned to a
+  literal `[0-9]{4}-[0-9]{2}-[0-9]{2}` (regex-inert), then
+  `sessionId.matches(date + '-.*')`. Verified live: coach save now lands.
+- SCORING RETUNE (owner, 2026-09-10): TOUR_POINTS extended to 25 places
+  for a ~25-kid weekly field — 100, 88, 78, 70, 64, 59, 55, 51, 48, 45,
+  42, 40, 38, 36, 34, 32, 30, 28, 26, 24, 22, 20, 18, 16, 14; beyond =
+  12 participation. Winner ~2.6x the median finisher; last place still
+  banks visible points.
+- DROP-WEEK RULE (owner: "miss a week and not be eliminated"):
+  standings sum each athlete's best (eventsHeld - drops) weeks, drops =
+  floor(eventsHeld / TOUR_DROP_RATE), rate = 6. A missed Saturday becomes
+  the dropped week; a full-attendance kid drops their worst finishes
+  instead. Phases in at 6 events; derive-don't-store, so retuning either
+  knob rescores the season retroactively. deriveTourStandings now returns
+  `counting: { eventsHeld, counted, drops }` and the standings screen
+  states the rule once drops are live.
+- OPEN PRODUCT QUESTION for the owner: a Saturday with TWO tournament
+  blocks scores as two separate events (two winners at 100 each week).
+  If ~25 kids will span multiple blocks in one "weekly tournament", the
+  blocks should merge into one scored event (e.g. by date) — say the word
+  and it's a small deriveTourStandings change.

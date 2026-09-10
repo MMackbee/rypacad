@@ -340,10 +340,13 @@ the doc.
 **Points are never stored — position is the only fact in Firestore.** The
 season standings' point value for a given position comes from the
 `TOUR_POINTS` table in the frontend's `frontend/src/portal/data/tour.js`
-(routing lane; positions 1-15 map to `[100, 80, 65, 55, 50, 45, 40, 36, 32,
-28, 24, 20, 16, 12, 8]`, matching the 15-athlete tournament capacity in
-`schedule.js`; any position beyond the table scores a flat 5 participation
-points) and is computed at **read** time, in the hook that derives standings
+(positions 1-25 for the ~25-kid weekly field the owner sized on 2026-09-10 —
+winner 100, ~2.6x the median finisher, smoothly decaying to 14 at 25th; any
+position beyond the table scores a flat 12 participation points). Standings
+also apply the **drop-week rule** (`TOUR_DROP_RATE`, same file): each
+athlete's best `eventsHeld - floor(eventsHeld / 6)` weeks sum toward the
+season, so a missed Saturday becomes a dropped week rather than a permanent
+zero — both knobs computed at **read** time, in the hook that derives standings
 — never written back to a document. This is deliberate, for the same reason
 allowance usage is never a stored counter: if the owner retunes the points
 table (first place worth more, a narrower payout curve, whatever), that

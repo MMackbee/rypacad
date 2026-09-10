@@ -104,7 +104,7 @@ export default function TourStandings({
         </div>
       ) : (
         <div style={{ padding: '0 22px 24px', display: 'flex', flexDirection: 'column', gap: 14 }}>
-          {standings.length ? <StandingsCard standings={standings} /> : null}
+          {standings.length ? <StandingsCard standings={standings} counting={data?.counting} /> : null}
           {events.length ? <RecentTournaments events={events} /> : null}
         </div>
       )}
@@ -162,10 +162,26 @@ function EmptyTour() {
   );
 }
 
-function StandingsCard({ standings }) {
+function StandingsCard({ standings, counting }) {
+  // Drop-week transparency (data/tour.js TOUR_DROP_RATE): once drops are in
+  // effect, say so — a parent comparing points-per-event against the total
+  // would otherwise read the dropped weeks as a math error. Silent until the
+  // season has run long enough to earn a drop.
+  const showDrops = counting != null && counting.drops > 0;
   return (
     <Card large>
-      <SectionLabel style={{ marginBottom: 12 }}>Standings · {standings.length}</SectionLabel>
+      <SectionLabel style={{ marginBottom: showDrops ? 4 : 12 }}>
+        Standings · {standings.length}
+      </SectionLabel>
+      {showDrops ? (
+        <Body size={11} tone={color.textTertiary} style={{ marginBottom: 12 }}>
+          Best {counting.counted} of {counting.eventsHeld} Saturdays count —{' '}
+          {counting.drops === 1
+            ? 'everyone drops their lowest week'
+            : `everyone drops their ${counting.drops} lowest weeks`}
+          , so a missed Saturday never ends a season.
+        </Body>
+      ) : null}
       <div style={{ display: 'flex', flexDirection: 'column' }}>
         {standings.map((s, i) => (
           <StandingsRow key={s.athleteId} standing={s} divider={i < standings.length - 1} />

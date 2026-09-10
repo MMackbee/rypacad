@@ -19,11 +19,44 @@
 
 import { addDaysISO, lastSaturdayOnOrBefore, todayISO } from './calendar';
 
-/** Position (1-indexed) -> points. Index 0 is 1st place. */
-export const TOUR_POINTS = [100, 80, 65, 55, 50, 45, 40, 36, 32, 28, 24, 20, 16, 12, 8];
+/**
+ * Position (1-indexed) -> points. Index 0 is 1st place.
+ *
+ * Tuned for a ~25-kid weekly field (owner's sizing, 2026-09-10): the winner
+ * earns ~2.6x the median finisher (100 vs 38 at 13th), the win premium is a
+ * clear 12 over 2nd, the decay is smooth and strictly non-increasing, and
+ * 25th still banks 14 — every finisher scores something that visibly moves
+ * their season total, so mid-pack kids stay engaged. Deliberately flatter
+ * than pro-tour tables: one hot Saturday should matter, not decide the
+ * season.
+ */
+export const TOUR_POINTS = [
+  100, 88, 78, 70, 64, 59, 55, 51, 48, 45, 42, 40, 38, 36, 34, 32, 30, 28,
+  26, 24, 22, 20, 18, 16, 14,
+];
 
-/** Beyond the table (finished, but outside the top 15) still banks a showing. */
-const PARTICIPATION_POINTS = 5;
+/** Beyond the table (finished, but outside the top 25) still banks a
+ * showing — just under 25th's 14, so showing up never outscores a recorded
+ * finish. */
+const PARTICIPATION_POINTS = 12;
+
+/**
+ * Missed-week forgiveness (owner's rule, 2026-09-10: "miss a week and not
+ * be eliminated from contention"): season standings count each athlete's
+ * BEST (eventsHeld - drops) weeks, where one drop is earned per this many
+ * tournaments held. A missed Saturday becomes a dropped week instead of a
+ * permanent zero, and a kid who played every week gets to drop their worst
+ * finishes instead — the standard scholastic-series mechanic. Phases in on
+ * its own (no drops until six events have run, when deficits are still
+ * naturally recoverable) and stays derive-don't-store: retuning it rescores
+ * the whole season at the next read, exactly like TOUR_POINTS.
+ */
+export const TOUR_DROP_RATE = 6;
+
+/** Season events held -> how many lowest weeks every athlete may drop. */
+export function droppedWeeks(eventsHeld) {
+  return Math.floor(eventsHeld / TOUR_DROP_RATE);
+}
 
 /**
  * Position -> points. Positions are 1-indexed to match how a tournament
@@ -40,7 +73,13 @@ export function pointsForPosition(position) {
 /**
  * Raw finishing-order rows -> the pinned useTourStandings shape:
  * { standings: [{ athleteId, name, rank, points, events, wins }],
- *   events: [{ sessionId, date, label, top3: [{ name, position }] }] }.
+ *   events: [{ sessionId, date, label, top3: [{ name, position }] }],
+ *   counting: { eventsHeld, counted, drops } }.
+ *
+ * `points` is each athlete's best `counted` weeks summed (the drop-week
+ * rule above); `events` and `wins` still count everything played.
+ * `counting` is the transparency payload the standings screen renders when
+ * drops are in effect.
  *
  * `results` is [{ sessionId, date, athleteId, position, name? }] — the
  * tournamentResults contract shape (minus the write-only createdBy/
@@ -61,20 +100,32 @@ export function deriveTourStandings(results, { nameById = new Map(), labelById =
   const labelOf = (sessionId) =>
     (labelById.get ? labelById.get(sessionId) : labelById[sessionId]) || 'Tournament block';
 
+  const eventsHeld = new Set(results.map((r) => r.sessionId)).size;
+  const drops = droppedWeeks(eventsHeld);
+  const counted = Math.max(eventsHeld - drops, 1);
+
   const byAthlete = new Map();
   for (const r of results) {
     const cur = byAthlete.get(r.athleteId) || {
       athleteId: r.athleteId,
       name: null,
-      points: 0,
+      scores: [],
       events: 0,
       wins: 0,
     };
     if (r.name) cur.name = r.name;
-    cur.points += pointsForPosition(r.position);
+    cur.scores.push(pointsForPosition(r.position));
     cur.events += 1;
     if (r.position === 1) cur.wins += 1;
     byAthlete.set(r.athleteId, cur);
+  }
+  // Best `counted` weeks sum toward the season (drop-week rule); an athlete
+  // with fewer played weeks simply sums what they have — no penalty zeros.
+  for (const cur of byAthlete.values()) {
+    cur.points = cur.scores
+      .sort((a, b) => b - a)
+      .slice(0, counted)
+      .reduce((sum, p) => sum + p, 0);
   }
 
   const ranked = [...byAthlete.values()].sort((a, b) => b.points - a.points);
@@ -115,7 +166,7 @@ export function deriveTourStandings(results, { nameById = new Map(), labelById =
         .map((r) => ({ name: r.name ?? nameOf(r.athleteId), position: r.position })),
     }));
 
-  return { standings, events };
+  return { standings, events, counting: { eventsHeld, counted, drops } };
 }
 
 /* ------------------------------------------------------------------------- *
