@@ -24,6 +24,7 @@ import {
   query,
   runTransaction,
   serverTimestamp,
+  setDoc,
   updateDoc,
   where,
 } from 'firebase/firestore';
@@ -122,6 +123,38 @@ export async function fetchAthlete(athleteId) {
   } catch (err) {
     throw wrap(err, 'fetchAthlete');
   }
+}
+
+/**
+ * Athlete records by id, individually — deliberately NOT the batched
+ * `where(documentId(), 'in', chunk)` pattern fetchSessionsByIds uses below.
+ * That pattern is safe for sessions because sessions' read rule is
+ * unconditional (`signedIn()`); athletes' read rule is per-role and keys off
+ * resource.data (own athlete / own household / assigned coach / staff), so a
+ * multi-id `in` query only stays provable — and Firestore denies it WHOLESALE
+ * otherwise, same as the "list queries must carry the matching equality
+ * filter" limit already on fetchHouseholdAthletes/fetchCoachAthletes — when
+ * every possible match satisfies the SAME unconditional clause. That is only
+ * true for mental/ops/owner. Individual get()s are evaluated per document
+ * instead, exactly like liveSessionAttendance's existing per-booking
+ * fetchAthlete() join, so each id succeeds or fails on its own; ids the
+ * caller cannot read are silently dropped (Promise.allSettled) rather than
+ * failing the whole join or crashing the screen.
+ *
+ * This is the routing lane's answer to the Sprint 7 "join athlete names"
+ * pin for an ACADEMY-WIDE surface (useTourStandings): opening athletes to a
+ * plain `signedIn()` list read so every role could batch-resolve every name
+ * would satisfy the join but breaks the access matrix's "cross-family reads
+ * impossible" rule for the WHOLE athlete doc (dob, householdId, coachId,
+ * contractMinutes ride along with name). Kept scoped instead — see the
+ * routing report's open question on partial name visibility for
+ * athlete/parent/coach callers.
+ */
+export async function fetchAthletesByIds(ids) {
+  const unique = [...new Set(ids)].filter(Boolean);
+  if (unique.length === 0) return [];
+  const settled = await Promise.allSettled(unique.map((id) => fetchAthlete(id)));
+  return settled.filter((r) => r.status === 'fulfilled').map((r) => r.value);
 }
 
 /**
@@ -564,5 +597,104 @@ export async function updateBookingStatus({ bookingId, status }) {
     return { id: bookingId, status };
   } catch (err) {
     throw wrap(err, 'updateBookingStatus');
+  }
+}
+
+/**
+ * Every tournamentResults doc, unfiltered (Sprint 7 pin) — powers
+ * useTourStandings. The read rule is `signedIn()` alone (contract v1.5:
+ * standings are academy-public), so no equality filter is needed to make an
+ * unfiltered read provable. The season's tournament count is small (a
+ * handful of Saturdays), so one plain read is simpler than a date-range
+ * query and costs the same.
+ */
+export async function fetchTournamentResults() {
+  try {
+    const snap = await getDocs(query(collection(db, 'tournamentResults'), orderBy('date')));
+    return snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+  } catch (err) {
+    throw wrap(err, 'fetchTournamentResults');
+  }
+}
+
+/**
+ * tournamentResults for one session — powers useTournamentResults's read
+ * side (results entry screen, pre-filled on re-entry). Single equality
+ * filter needs no composite index; provable for every role since the read
+ * rule does not depend on resource.data at all.
+ */
+export async function fetchTournamentResultsForSession(sessionId) {
+  if (!sessionId) {
+    throw new LiveDataError(
+      ERR.INVALID,
+      'fetchTournamentResultsForSession: sessionId is required.'
+    );
+  }
+  try {
+    const snap = await getDocs(
+      query(collection(db, 'tournamentResults'), where('sessionId', '==', sessionId))
+    );
+    return snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+  } catch (err) {
+    throw wrap(err, 'fetchTournamentResultsForSession');
+  }
+}
+
+/**
+ * Save one tournament's finishing order (Sprint 7 pin) — coach/mental/ops/
+ * owner only, enforced by firestore.rules, not here. One setDoc PER ENTRY
+ * (a create for a new athlete result, an overwrite for a correction —
+ * contract v1.5: "no delete in v1, corrections overwrite via update"), each
+ * carrying the pinned shape exactly: sessionId, athleteId, date, position,
+ * createdBy, createdAt. Doc id is `{sessionId}_{athleteId}`, mirroring
+ * bookings/contractLogs — one result per athlete per tournament.
+ *
+ * `date` is the CALLER's job to pass, but it must equal the sessionId's own
+ * leading YYYY-MM-DD (sessions are always `YYYY-MM-DD-<block>`) — the rule
+ * checks that independently, so a mismatched date here is rejected
+ * server-side, not just client-side.
+ *
+ * Entries are validated up front, before any write starts, so a bad entry
+ * anywhere in the list never leaves a partial save in flight.
+ *
+ * ONE bump('tournamentResults') after every entry lands, not per entry (the
+ * refetch-storm lesson, mirroring createBooking's bulk `silent` pattern) —
+ * every mounted useTourStandings/useTournamentResults instance re-runs
+ * exactly once per save, not once per athlete.
+ */
+export async function saveTournamentResults(sessionId, date, entries) {
+  if (!sessionId || !date || !Array.isArray(entries) || entries.length === 0) {
+    throw new LiveDataError(
+      ERR.INVALID,
+      'saveTournamentResults: sessionId, date and a non-empty entries array are required.'
+    );
+  }
+  for (const entry of entries) {
+    if (!entry || !entry.athleteId || !Number.isInteger(entry.position) || entry.position < 1) {
+      throw new LiveDataError(
+        ERR.INVALID,
+        'saveTournamentResults: every entry needs an athleteId and a finishing position >= 1.'
+      );
+    }
+  }
+  const user = requireUser();
+  try {
+    await Promise.all(
+      entries.map(({ athleteId, position }) => {
+        const id = `${sessionId}_${athleteId}`;
+        return setDoc(doc(db, 'tournamentResults', id), {
+          sessionId,
+          athleteId,
+          date,
+          position,
+          createdBy: user.uid,
+          createdAt: serverTimestamp(),
+        });
+      })
+    );
+    bump('tournamentResults');
+    return { sessionId, count: entries.length };
+  } catch (err) {
+    throw wrap(err, 'saveTournamentResults');
   }
 }
