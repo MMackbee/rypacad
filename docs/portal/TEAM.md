@@ -504,3 +504,25 @@ Seed/provisioning (db lane):
 - DATA-MODEL.md: v1.6 section replaces the v1.5.1 field table; document
   score/bracket, derived position, and the dob dependency (an athlete
   with no dob competes in Open until provisioning sets one).
+
+## Sprint 8 amendment v1.6.1 — weekly events + real dobs (2026-09-10, mid-sprint)
+
+Owner's rulings, relayed to the running lanes by PM message (their
+worktree TEAM.md copies predate this note):
+- BLOCKS MERGE BY DATE: "the scores from the 2 blocks would be combined
+  a 1 weekly tournament." An EVENT is a DATE (Saturday), not a sessionId.
+  Doc shape, keyspace, rules, and the per-block score-entry UX are all
+  UNCHANGED — the merge is read-time derivation only: position derives
+  from score asc within (date, bracket) across every tournament block
+  that date; events[] is keyed/grouped by date ({ date, label, results });
+  eventsHeld for the drop-week rule = distinct DATES (which is what
+  "miss a week" always meant); event label = any explicit session label
+  on that date, else 'Tournament block'. If one athlete somehow has
+  results in two blocks of the same date, their LOWEST score counts for
+  that week's ranking and the week counts once (flagged as PM judgment —
+  a same-day double entry is 18 holes vs everyone's 18, never summed).
+- REAL DOBS (owner): jordan 2012-06-17, reese 2014-03-02, nico
+  2017-09-09. As of season start 2026-11-02 that is 14 / 12 / 9 ->
+  brackets 14+ / 11-13 / 10U — one Whitfield per bracket, so the emulator
+  seed shows three one-kid brackets (expected; the harness TOUR_SEED
+  carries the multi-kid bracket contrast).
