@@ -19,7 +19,13 @@
  *                  than one row to render. Only makel-test is linked to a
  *                  login (FAMILY below) — the siblings are athletes/ docs
  *                  with no auth account and no users/ doc, same as any real
- *                  athlete who isn't also a portal login.
+ *                  athlete who isn't also a portal login. Each athlete entry
+ *                  accepts an optional `dob` (YYYY-MM-DD), written straight
+ *                  to the athlete doc (contract v1.6, Sprint 8: age
+ *                  brackets read it). The FAMILIES below stay `dob: null` —
+ *                  these are REAL kids, and this script never invents a
+ *                  real birthday; the owner supplies real dobs later and
+ *                  they get filled in here at that point.
  *   users        — one doc per FAMILY account below, keyed by auth uid.
  *
  * Auth uids are resolved from emails via the Identity Toolkit admin API, so
@@ -59,10 +65,13 @@ const FAMILIES = [
   {
     householdId: 'mackbee',
     household: { name: 'MackBee', guardian: { name: 'Makel', email: 'makelmackbee@live.com', phone: null } },
+    // dob: null — REAL kids. Never invent a real birthday; the owner
+    // supplies real dobs later and they land here as a `dob` value per
+    // member (see userDoc()/the athletes doc-build loop below).
     athletes: [
-      { id: 'makel-test', name: 'Makel MackBee', packageId: 'g-8-3', contractMinutes: 45 },
-      { id: 'makel-test-2', name: 'Avery MackBee', packageId: 'g-4-2', contractMinutes: 20 },
-      { id: 'makel-test-3', name: 'Quinn MackBee', packageId: 'elite', contractMinutes: 95 },
+      { id: 'makel-test', name: 'Makel MackBee', packageId: 'g-8-3', contractMinutes: 45, dob: null },
+      { id: 'makel-test-2', name: 'Avery MackBee', packageId: 'g-4-2', contractMinutes: 20, dob: null },
+      { id: 'makel-test-3', name: 'Quinn MackBee', packageId: 'elite', contractMinutes: 95, dob: null },
     ],
     accounts: [
       { email: 'makel@rypgolf.com', role: 'owner', displayName: 'Makel' },
@@ -75,8 +84,9 @@ const FAMILIES = [
   {
     householdId: 'eisele',
     household: { name: 'Eisele', guardian: { name: 'Mike', email: 'eisele.mike@gmail.com', phone: null } },
+    // dob: null — same rule as MackBee above: real kid, never invented.
     athletes: [
-      { id: 'mike-test', name: 'Mike Eisele Jr.', packageId: 'g-8-3', contractMinutes: 45 },
+      { id: 'mike-test', name: 'Mike Eisele Jr.', packageId: 'g-8-3', contractMinutes: 45, dob: null },
     ],
     accounts: [
       { email: 'mike@rypgolf.com', role: 'owner', displayName: 'Mike' },
@@ -232,7 +242,11 @@ async function main() {
         a.id,
         {
           name: a.name,
-          dob: null,
+          // Contract v1.6: optional per-member dob, written through as-is.
+          // Every FAMILIES entry above sets this to null explicitly — this
+          // script never invents one; a non-null value only ever gets here
+          // because someone edited the athlete entry with a real birthday.
+          dob: a.dob ?? null,
           householdId: f.householdId,
           packageId: a.packageId,
           contractMinutes: a.contractMinutes,
