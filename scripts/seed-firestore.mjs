@@ -333,6 +333,12 @@ function buildDocs(portal) {
     tournamentResults.set(`${sessionId}_${athleteId}`, {
       sessionId,
       athleteId,
+      // Write-time display-name snapshot (contract v1.5.1, TEAM.md Sprint 7
+      // integration) — looked up from the athletes map built above, never
+      // retyped, so the seed can't drift from the athlete doc it references.
+      // This is what lets the academy-public standings show every name to
+      // every role without widening athletes reads.
+      name: athletes.get(athleteId)?.name ?? null,
       // Must equal the session's own date (contract v1.5) — read off the
       // session itself so it can never drift from it.
       date: session.date,
@@ -466,7 +472,7 @@ async function main() {
 
   console.log('\ntournamentResults (contract v1.5) — position only, points derive at read time:');
   for (const [id, doc] of collections.tournamentResults) {
-    console.log(`  tournamentResults/${id}: date=${doc.date} position=${doc.position} createdBy=${doc.createdBy}`);
+    console.log(`  tournamentResults/${id}: date=${doc.date} position=${doc.position} name=${doc.name} createdBy=${doc.createdBy}`);
   }
 
   if (DRY_RUN) {

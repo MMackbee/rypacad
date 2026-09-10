@@ -352,3 +352,45 @@ UI (frontend lane):
   reorder/undo, save once; re-entry pre-fills existing results.
 - Parent tab bar: Home / Tour / Settings. Athlete: Home / Schedule /
   Contract / Tour.
+
+## Sprint 7 integration — contract v1.5.1 amendment (PM merge, 2026-09-10)
+
+All three lanes merged clean (db 0aeb603, routing ccdc67f, frontend
+17095f7). Two open questions from the lane reports, resolved at merge:
+
+1. NAME VISIBILITY (routing's flag): under the v1.5 rules, live Tour
+   standings resolved athlete names per the existing "own records only"
+   athletes matrix — mental/ops/owner saw every name, but an athlete,
+   parent or coach saw `null` for every kid outside their own visibility,
+   defeating the academy-wide leaderboard. RESOLVED as v1.5.1: each
+   tournamentResults doc now carries `name` (string | null) — the
+   athlete's display name snapshotted AT WRITE TIME from the roster the
+   staff member entering results is already reading. Display
+   denormalization only: points stay derived, the athletes read matrix is
+   untouched ("cross-family reads impossible" holds — name alone travels,
+   never dob/householdId/contractMinutes). Read paths prefer the stored
+   name and fall back to the per-id athlete join only for docs written
+   before the amendment. Rules require the key on every write (string or
+   null). Options (a) athletePublic directory and (c) accept-nulls were
+   rejected: (a) adds a second writable collection for one field, (c)
+   ships a leaderboard most roles can't read.
+
+2. MENTAL ROLE ON RESULTS ENTRY (db lane's question): stands as
+   implemented — create/update by coach + the existing staff set (mental,
+   ops, owner), matching the pin's "coach + staff" as this codebase has
+   always defined staff. Narrowing mental out would be a new distinction
+   no other collection draws.
+
+Also closed at integration:
+- Sync delete-guard gap (db lane's flag): sync-calendar-sessions.mjs now
+  reads tournamentResults session ids and treats a results-bearing
+  session like a booked one — cancel, never delete, both in the
+  moved-instance and removed-instance branches.
+- useTournamentResults shape reconciled in Roster.js (frontend lane's
+  guess was a bare array; the pinned envelope is { results: [...] }), and
+  results entries now carry the v1.5.1 name snapshot.
+- /portal/tour now resolves the signed-in role (TourRoute) so parents get
+  the parent tab bar, not the athlete default.
+- Parent onboarding walkthrough's Billing step replaced by a Tour +
+  notifications step (billing is parked; the walkthrough taught a tab
+  that no longer exists).

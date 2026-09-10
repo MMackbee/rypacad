@@ -331,6 +331,7 @@ the doc.
 |---|---|---|
 | `sessionId` | string | Into `sessions/` — must be a `type: 'tournament'` session. Matches the id prefix. |
 | `athleteId` | string | Into `athletes/`. Matches the id suffix. |
+| `name` | string \| null | **Contract v1.5.1 (Sprint 7 integration).** The athlete's display name, snapshotted at write time from the roster the staff member entering results is already reading. Pure display denormalization — the academy-public standings show every name to every role *without* widening the `athletes` read matrix (the full athlete doc carries dob/householdId/contractMinutes; this carries name alone). Read paths prefer this and fall back to a per-id athlete join only for pre-amendment docs. Points stay derived; this changes nothing about scoring. |
 | `date` | string | `YYYY-MM-DD`. **Must equal the referenced session's own `date`** — read off `sessions/{sessionId}.date` at write time (never typed independently), so the two can never disagree. |
 | `position` | number | Integer >= 1. Finishing place in that tournament block. |
 | `createdBy` | string | uid of the staff account (coach or ops/owner) that entered the result. |

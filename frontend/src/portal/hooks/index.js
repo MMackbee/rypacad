@@ -1797,19 +1797,21 @@ export function useSessionAttendance(sessionId) {
  * data/tour.js's deriveTourStandings() (the SAME function the seed constant
  * below is computed with, so live and seed can never disagree on the math).
  *
- * Name visibility (Sprint 7 open question, flagged in the routing report):
- * fetchAthletesByIds joins by individual get() per athlete, not a batched
- * `in` query — see its doc comment in ./live.js for why a batched query is
- * unsafe here. The practical effect: mental/ops/owner resolve every name on
- * this academy-wide leaderboard; an athlete, parent or coach resolves only
- * the subset the existing "own records only" athletes matrix already grants
- * them (self / own household / assigned roster) — everyone else's row shows
- * name: null. Session labels (fetchSessionsByIds) have no such limit -
+ * Name visibility (Sprint 7 open question — resolved as contract v1.5.1,
+ * TEAM.md Sprint 7 integration): results written since the amendment carry
+ * the athlete's display name snapshotted at write time, so this academy-
+ * public leaderboard shows every name to every role without widening the
+ * athletes read matrix. deriveTourStandings prefers each row's own name;
+ * the fetchAthletesByIds join below runs only for pre-amendment docs with
+ * no name — an individual get() per athlete (see its doc comment in
+ * ./live.js for why a batched `in` query is unsafe), where an id the
+ * caller cannot read still resolves to name: null rather than failing the
+ * screen. Session labels (fetchSessionsByIds) have no such limit —
  * sessions are readable by any signed-in user unconditionally.
  */
 async function liveTourStandings() {
   const results = await fetchTournamentResults();
-  const athleteIds = [...new Set(results.map((r) => r.athleteId))];
+  const athleteIds = [...new Set(results.filter((r) => r.name == null).map((r) => r.athleteId))];
   const sessionIds = [...new Set(results.map((r) => r.sessionId))];
   const [athletes, sessions] = await Promise.all([
     fetchAthletesByIds(athleteIds),
@@ -1848,23 +1850,25 @@ export function useTourStandings() {
 
 /**
  * Live payload for useTournamentResults(sessionId) — one tournament's
- * existing results, joined to athlete names the same way liveTourStandings
- * does (individual get()s; see the name-visibility note there). Staff
- * entering results for a tournament they are allowed to write to already
- * have the read access the join needs in this academy's current single-
- * coach reality (mental/ops/owner unconditionally; coach's assigned-roster
- * clause), so unlike the standings screen, every name is expected to
- * resolve for the caller actually using this hook to enter results.
+ * existing results. Since contract v1.5.1 each doc carries its own name
+ * snapshot; the fetchAthletesByIds join (individual get()s — see the
+ * name-visibility note on liveTourStandings) runs only for pre-amendment
+ * docs missing one. Staff entering results already have the read access
+ * that fallback join needs (mental/ops/owner unconditionally; coach's
+ * assigned-roster clause), so every name is expected to resolve for the
+ * caller actually using this hook to enter results.
  */
 async function liveTournamentResults(sessionId) {
   const results = await fetchTournamentResultsForSession(sessionId);
-  const athletes = await fetchAthletesByIds(results.map((r) => r.athleteId));
+  const athletes = await fetchAthletesByIds(
+    results.filter((r) => r.name == null).map((r) => r.athleteId)
+  );
   const nameById = new Map(athletes.map((a) => [a.id, a.name]));
   return {
     results: results
       .map((r) => ({
         athleteId: r.athleteId,
-        name: nameById.get(r.athleteId) ?? null,
+        name: r.name ?? nameById.get(r.athleteId) ?? null,
         position: r.position,
       }))
       .sort((a, b) => a.position - b.position),
@@ -1875,7 +1879,8 @@ async function liveTournamentResults(sessionId) {
  * GET /tournaments/:sessionId/results + result entry (Sprint 7 pin) —
  * pinned shape: { data: { results: [{ athleteId, name, position }] },
  * loading, error, saveResults(entries) } where entries =
- * [{ athleteId, position }]. Coach/mental/ops/owner-only write surface
+ * [{ athleteId, name, position }] (name: the v1.5.1 write-time snapshot,
+ * see saveTournamentResults). Coach/mental/ops/owner-only write surface
  * (enforced in firestore.rules, not here), sessionId-scoped, live-only - same
  * "no seed/demo branch to keep in sync" posture as useSessionAttendance:
  * with isLive() false or no sessionId yet, this resolves to an empty results

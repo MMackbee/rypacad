@@ -348,6 +348,36 @@ function fsDecode(fields = {}) {
 
 const docName = (id) => `projects/${PROJECT_ID}/databases/(default)/documents/sessions/${id}`;
 
+/**
+ * Session ids that hold at least one tournamentResults doc (the db lane's
+ * Sprint 7 gap report): a results-bearing session is never deleted, even at
+ * booked === 0 — deleting it would orphan the RYP Tour's fact records the
+ * standings derive from. The season's results collection is small (a handful
+ * of Saturdays), so one unfiltered read is simpler than per-id probes.
+ */
+async function fetchResultSessionIds(target) {
+  const url = `${target.base}/projects/${PROJECT_ID}/databases/(default)/documents:runQuery`;
+  const res = await fetch(url, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Authorization: target.auth },
+    body: JSON.stringify({
+      structuredQuery: {
+        from: [{ collectionId: 'tournamentResults' }],
+        select: { fields: [{ fieldPath: 'sessionId' }] },
+      },
+    }),
+  });
+  if (!res.ok) throw new Error(`Query against ${target.label} failed (${res.status}): ${await res.text()}`);
+  const rows = await res.json();
+  const ids = new Set();
+  for (const row of rows) {
+    if (!row.document) continue;
+    const sessionId = row.document.fields?.sessionId?.stringValue;
+    if (sessionId) ids.add(sessionId);
+  }
+  return ids;
+}
+
 async function fetchExistingSessions(target, from, to) {
   const url = `${target.base}/projects/${PROJECT_ID}/databases/(default)/documents:runQuery`;
   const res = await fetch(url, {
@@ -398,7 +428,7 @@ async function commit(target, writes) {
 // in the portal remain preserved by the mask.
 const SYNCED_FIELDS = ['date', 'time', 'type', 'capacity', 'label', 'status', 'gcalEventId'];
 
-function planSync(desired, existing) {
+function planSync(desired, existing, resultSessionIds = new Set()) {
   const plan = { creates: [], updates: [], unchanged: [], deletes: [], cancels: [], conflicts: [], seededUntouched: [] };
   const byGcal = new Map();
   for (const [id, doc] of existing) {
@@ -422,13 +452,14 @@ function planSync(desired, existing) {
 
     if (matchId !== id) {
       // The instance moved (date or day-order changed) so its pinned id changed.
-      if ((cur.booked ?? 0) === 0) {
+      if ((cur.booked ?? 0) === 0 && !resultSessionIds.has(matchId)) {
         plan.deletes.push({ id: matchId, booked: 0, reason: `moved to ${id}` });
         plan.creates.push({ id, doc });
       } else {
-        // Never orphan bookings by moving the doc; patch in place and flag it.
+        // Never orphan bookings — or tournament results (contract v1.5.1) —
+        // by moving the doc; patch in place and flag it.
         plan.updates.push({ id: matchId, doc, keptId: true });
-        plan.conflicts.push(`sessions/${matchId} has ${cur.booked} booking(s) but its event now maps to ${id}; patched in place — id no longer encodes day-order.`);
+        plan.conflicts.push(`sessions/${matchId} has ${cur.booked ?? 0} booking(s)${resultSessionIds.has(matchId) ? ' and tournament results' : ''} but its event now maps to ${id}; patched in place — id no longer encodes day-order.`);
       }
       continue;
     }
@@ -445,8 +476,10 @@ function planSync(desired, existing) {
       continue;
     }
     // Synced session whose calendar instance no longer exists in the window.
-    if ((doc.booked ?? 0) === 0) plan.deletes.push({ id, booked: 0, reason: 'instance removed' });
-    else plan.cancels.push({ id, booked: doc.booked });
+    // A session holding tournament results is cancelled, never deleted, even
+    // with zero bookings — the Tour's fact records reference it.
+    if ((doc.booked ?? 0) === 0 && !resultSessionIds.has(id)) plan.deletes.push({ id, booked: 0, reason: 'instance removed' });
+    else plan.cancels.push({ id, booked: doc.booked ?? 0 });
   }
 
   // A create landing on a path being deleted is a clean replace (full-doc
@@ -509,10 +542,11 @@ async function main() {
   for (const [id, doc] of desired) console.log(`  session ${id}: ${JSON.stringify(doc)}`);
 
   const existing = target ? await fetchExistingSessions(target, FROM, TO) : new Map();
+  const resultSessionIds = target ? await fetchResultSessionIds(target) : new Set();
   if (!target) console.log('(no emulator host set: diffing against an empty target)');
-  else console.log(`Existing sessions in window (${target.label}): ${existing.size}`);
+  else console.log(`Existing sessions in window (${target.label}): ${existing.size}; sessions with tournament results (delete-protected): ${resultSessionIds.size}`);
 
-  const plan = planSync(desired, existing);
+  const plan = planSync(desired, existing, resultSessionIds);
   console.log(
     `Plan: ${plan.creates.length} create, ${plan.updates.length} update, ${plan.unchanged.length} unchanged, ` +
       `${plan.deletes.length} delete, ${plan.cancels.length} cancel, ${plan.seededUntouched.length} seeded-untouched`

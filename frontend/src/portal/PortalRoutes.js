@@ -152,6 +152,20 @@ function BookSessionRoute({ onBack }) {
 }
 
 /**
+ * The Tour is the one route every role reaches, but TourStandings renders a
+ * role-appropriate bottom tab bar (athlete and parent have one; staff roles
+ * do not) — so the signed-in role has to reach it as a prop. Resolved from
+ * the live session exactly the way BookSessionRoute above does it; seed mode
+ * stays the athlete default the harness already exercises.
+ */
+function TourRoute({ onSignOut }) {
+  const live = isLive();
+  const { user } = useAuthSession(live ? undefined : { variant: 'idle' });
+  const role = (live && user?.role) || 'athlete';
+  return <TourStandings bare role={role} onSignOut={onSignOut} />;
+}
+
+/**
  * The coach's tapped block travels to the attendance screen as navigation
  * state — CoachDashboard hands `{ ...block, blockIndex }` to onOpenRoster,
  * and SessionAttendance takes `sessionId` (live) / `blockIndex` (seed).
@@ -351,7 +365,7 @@ export default function PortalRoutes() {
         path="tour"
         element={
           <RequireRole roles={['athlete', 'parent', 'coach', 'mental', 'ops', 'owner']}>
-            <TourStandings bare onSignOut={onSignOut} />
+            <TourRoute onSignOut={onSignOut} />
           </RequireRole>
         }
       />

@@ -223,7 +223,7 @@ function TrackChooser({ onPick }) {
     {
       id: 'parent',
       title: 'I’m a parent',
-      body: 'Your family’s view: each athlete’s standing, booking for them, billing, and how the academy reaches you.',
+      body: 'Your family’s view: each athlete’s standing, booking for them, the RYP Tour, and how the academy reaches you.',
     },
     {
       id: 'athlete',

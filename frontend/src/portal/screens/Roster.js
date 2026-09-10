@@ -51,11 +51,11 @@ const useSessionAttendance = hooks.useSessionAttendance || useSessionAttendanceF
 
 /**
  * Same parallel-lane situation as useSessionAttendance above, for the Sprint
- * 7 pin (TEAM.md): `useTournamentResults(sessionId)` -> existing results for
- * one session + `saveResults(entries)`, entries = [{ athleteId, position }].
- * Shape-inferred to match this file's other paired read/write hooks
- * (useSessionAttendance's own { data, loading, error, mark() }) - flagged in
- * the sprint report for routing/PM to confirm once the real export lands.
+ * 7 pin (TEAM.md): `useTournamentResults(sessionId)` -> { data: { results:
+ * [{ athleteId, name, position }] }, loading, error, saveResults(entries) },
+ * entries = [{ athleteId, name, position }] (the real shape routing shipped,
+ * reconciled at merge - the sprint report's flagged guess said data was a
+ * bare array; every read below goes through `data?.results`).
  * The fallback is inert (no data, no-op save), matching
  * useSessionAttendance's own "screens must not crash with the live flag off"
  * convention - harmless in seed/demo mode, where tap-to-assign still works
@@ -336,7 +336,7 @@ export function SessionAttendance({ variant = 'pre', bare = false, onBack, sessi
               style={{ boxShadow: 'none' }}
               onClick={() => setView('results')}
             >
-              {tournamentResults.data?.length ? 'Edit results' : 'Enter results'}
+              {tournamentResults.data?.results?.length ? 'Edit results' : 'Enter results'}
             </Button>
           </div>
         ) : null}
@@ -405,12 +405,13 @@ function ResultsEntry({ bare, session, roster, resultsState, onBack }) {
 
   // Pre-fill once, the first time real existing results arrive - never
   // re-seeds after that, so a background refresh cannot clobber a coach's
-  // in-progress re-ordering.
+  // in-progress re-ordering. `data.results` is the hook's pinned envelope.
   useEffect(() => {
-    if (seededRef.current || !resultsState.data) return;
+    const rows = resultsState.data?.results;
+    if (seededRef.current || !rows) return;
     seededRef.current = true;
     setOrder(
-      resultsState.data
+      rows
         .slice()
         .sort((a, b) => a.position - b.position)
         .map((r) => r.athleteId)
@@ -429,7 +430,17 @@ function ResultsEntry({ bare, session, roster, resultsState, onBack }) {
     setSaveState('saving');
     setSaveError(null);
     try {
-      await resultsState.saveResults(order.map((athleteId, i) => ({ athleteId, position: i + 1 })));
+      // Each entry carries the athlete's display name off this very roster
+      // (contract v1.5.1): the write-time snapshot that lets the academy-
+      // public Tour standings show every name to every role.
+      const nameById = new Map(roster.map((a) => [a.id, a.name]));
+      await resultsState.saveResults(
+        order.map((athleteId, i) => ({
+          athleteId,
+          name: nameById.get(athleteId) ?? null,
+          position: i + 1,
+        }))
+      );
       setSaveState('saved');
     } catch (err) {
       setSaveState('idle');

@@ -645,9 +645,17 @@ export async function fetchTournamentResultsForSession(sessionId) {
  * owner only, enforced by firestore.rules, not here. One setDoc PER ENTRY
  * (a create for a new athlete result, an overwrite for a correction —
  * contract v1.5: "no delete in v1, corrections overwrite via update"), each
- * carrying the pinned shape exactly: sessionId, athleteId, date, position,
- * createdBy, createdAt. Doc id is `{sessionId}_{athleteId}`, mirroring
- * bookings/contractLogs — one result per athlete per tournament.
+ * carrying the pinned shape exactly: sessionId, athleteId, name, date,
+ * position, createdBy, createdAt. Doc id is `{sessionId}_{athleteId}`,
+ * mirroring bookings/contractLogs — one result per athlete per tournament.
+ *
+ * `name` (contract v1.5.1, TEAM.md Sprint 7 integration): the athlete's
+ * display name, snapshotted at write time from the roster the staff member
+ * entering results is already reading. Points stay derived — the name is
+ * pure display denormalization so the academy-public standings can show
+ * every name to every role WITHOUT widening the athletes read matrix (the
+ * full athlete doc carries dob/householdId/contractMinutes; this carries
+ * name alone). String or null — a missing roster name never blocks a save.
  *
  * `date` is the CALLER's job to pass, but it must equal the sessionId's own
  * leading YYYY-MM-DD (sessions are always `YYYY-MM-DD-<block>`) — the rule
@@ -680,11 +688,12 @@ export async function saveTournamentResults(sessionId, date, entries) {
   const user = requireUser();
   try {
     await Promise.all(
-      entries.map(({ athleteId, position }) => {
+      entries.map(({ athleteId, position, name }) => {
         const id = `${sessionId}_${athleteId}`;
         return setDoc(doc(db, 'tournamentResults', id), {
           sessionId,
           athleteId,
+          name: typeof name === 'string' && name ? name : null,
           date,
           position,
           createdBy: user.uid,

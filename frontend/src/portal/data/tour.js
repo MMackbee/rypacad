@@ -42,12 +42,15 @@ export function pointsForPosition(position) {
  * { standings: [{ athleteId, name, rank, points, events, wins }],
  *   events: [{ sessionId, date, label, top3: [{ name, position }] }] }.
  *
- * `results` is [{ sessionId, date, athleteId, position }] — exactly the
+ * `results` is [{ sessionId, date, athleteId, position, name? }] — the
  * tournamentResults contract shape (minus the write-only createdBy/
- * createdAt). `nameById`/`labelById` are plain objects or Maps the caller
- * has already resolved (seed: the constants below; live: athletes/sessions
- * fetched by id) — this function does no fetching of its own, so it works
- * identically over seed and live data.
+ * createdAt). `name` is the v1.5.1 write-time snapshot (TEAM.md, Sprint 7
+ * integration): results written since the amendment carry the athlete's
+ * display name, and a row's own name always wins here. `nameById`/
+ * `labelById` are plain objects or Maps the caller has already resolved
+ * (seed: the constants below; live: a per-id athlete join, now only needed
+ * as the fallback for pre-amendment docs) — this function does no fetching
+ * of its own, so it works identically over seed and live data.
  *
  * Ranking is shared-tie ("1224") competition ranking: equal point totals
  * share a rank, and the next distinct total resumes at its 1-based index
@@ -62,10 +65,12 @@ export function deriveTourStandings(results, { nameById = new Map(), labelById =
   for (const r of results) {
     const cur = byAthlete.get(r.athleteId) || {
       athleteId: r.athleteId,
+      name: null,
       points: 0,
       events: 0,
       wins: 0,
     };
+    if (r.name) cur.name = r.name;
     cur.points += pointsForPosition(r.position);
     cur.events += 1;
     if (r.position === 1) cur.wins += 1;
@@ -82,7 +87,7 @@ export function deriveTourStandings(results, { nameById = new Map(), labelById =
     lastRank = rank;
     standings.push({
       athleteId: row.athleteId,
-      name: nameOf(row.athleteId),
+      name: row.name ?? nameOf(row.athleteId),
       rank,
       points: row.points,
       events: row.events,
@@ -107,7 +112,7 @@ export function deriveTourStandings(results, { nameById = new Map(), labelById =
         .slice()
         .sort((a, b) => a.position - b.position)
         .slice(0, 3)
-        .map((r) => ({ name: nameOf(r.athleteId), position: r.position })),
+        .map((r) => ({ name: r.name ?? nameOf(r.athleteId), position: r.position })),
     }));
 
   return { standings, events };

@@ -355,9 +355,14 @@ service cloud.firestore {
     match /tournamentResults/{resultId} {
       allow read: if signedIn();
 
-      // Contract shape, exactly: sessionId, athleteId, date, position,
-      // createdBy, createdAt — nothing else (no `name`, no `points` — both
-      // derived, never stored). `date` must equal the payload's own
+      // Contract shape, exactly: sessionId, athleteId, name, date, position,
+      // createdBy, createdAt — nothing else (no `points`, ever — points are
+      // derived at read time). `name` (contract v1.5.1, TEAM.md Sprint 7
+      // integration) is the athlete's display name snapshotted at write time
+      // — string or null, never absent — so the academy-public standings can
+      // show every name to every role without widening the athletes read
+      // matrix (the full athlete doc carries dob/householdId/contractMinutes;
+      // this carries name alone). `date` must equal the payload's own
       // sessionId's leading YYYY-MM-DD: sessions are always generated as
       // `YYYY-MM-DD-<block>` (docs/portal/TEAM.md "Data contract v1"), so
       // this ties the result to its tournament's actual calendar date
@@ -365,10 +370,11 @@ service cloud.firestore {
       // payload while the id/sessionId says another.
       function tourShapeOk() {
         let d = request.resource.data;
-        return d.keys().hasAll(['sessionId', 'athleteId', 'date', 'position', 'createdBy', 'createdAt'])
-          && d.keys().hasOnly(['sessionId', 'athleteId', 'date', 'position', 'createdBy', 'createdAt'])
+        return d.keys().hasAll(['sessionId', 'athleteId', 'name', 'date', 'position', 'createdBy', 'createdAt'])
+          && d.keys().hasOnly(['sessionId', 'athleteId', 'name', 'date', 'position', 'createdBy', 'createdAt'])
           && d.sessionId is string
           && d.athleteId is string
+          && (d.name is string || d.name == null)
           && d.date is string
           && d.date == d.sessionId.substring(0, 10)
           && d.position is int

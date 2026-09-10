@@ -8,7 +8,7 @@ import AthleteDashboard from './AthleteDashboard';
 import BookSession from './BookSession';
 import CommitmentContract from './CommitmentContract';
 import ParentDashboard from './ParentDashboard';
-import Billing from './Billing';
+import TourStandings from './TourStandings';
 import NotificationPreferences from './NotificationPreferences';
 import { useSchedule } from '../hooks';
 // Pure calendar helper, not response data — the seam rule from BookSession.
@@ -40,7 +40,7 @@ function Fill({ children }) {
   return <FrameEmbedContext.Provider value="fill">{children}</FrameEmbedContext.Provider>;
 }
 
-/** Real screens stacked in one scroll (parent billing + notifications step). */
+/** Real screens stacked in one scroll (parent Tour + notifications step). */
 function Flow({ children }) {
   return <FrameEmbedContext.Provider value="flow">{children}</FrameEmbedContext.Provider>;
 }
@@ -285,7 +285,7 @@ export const PARENT_STEPS = [
   welcomeStep([
     'Book training and tournament blocks for your athletes — two separate allowances, always shown as two numbers.',
     'See each athlete’s Commitment Contract standing at a glance.',
-    'Manage billing and choose exactly how the academy reaches you.',
+    'Follow the RYP Tour — the season leaderboard for Saturday tournaments — and choose exactly how the academy reaches you.',
   ]),
   {
     id: 'family',
@@ -305,16 +305,19 @@ export const PARENT_STEPS = [
     'Book a block the way you would for your athlete: pick a day, tap an open block, reach the confirmation. Each block says which pool it spends before you commit.'
   ),
   {
-    id: 'billing',
-    title: 'Billing & notifications',
+    // Billing's old walkthrough slot (Sprint 7: billing is parked, its tab
+    // replaced by the Tour) — the step teaches the two remaining tabs the
+    // family step and book step haven't already covered.
+    id: 'tour',
+    title: 'The RYP Tour & notifications',
     instruction: {
       title: 'Two quick stops',
       body:
-        'Billing shows your membership, payment method, and invoices — and exactly where a failed payment stands, if that ever happens. Below it, Notifications is where you choose email or text per category. Scroll through, then continue.',
+        'The Tour tab is the season leaderboard: every Saturday tournament banks points toward the standings, and the whole academy is on the board. Below it, Notifications is where you choose email or text per category. Scroll through, then continue.',
     },
     render: () => (
       <Flow>
-        <Billing bare variant="active" />
+        <TourStandings bare role="parent" />
         <NotificationPreferences bare variant="default" />
       </Flow>
     ),
