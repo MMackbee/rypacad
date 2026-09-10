@@ -15,13 +15,22 @@
  *                  (contract v1.3: variable minutes, some below the 45-min
  *                  tier, so the fulfilled/not-fulfilled UI has real contrast
  *                  to render)
- *   bookings    — a few real bookings for Jordan against real generated
- *                  session ids (contract v1.4: the booking transaction,
- *                  attendance, and parent-linkage rules), covering both
- *                  `confirmed` and `attended` so the live-wired dashboards
- *                  have something to render in QA. The referenced sessions'
+ *   bookings    — real bookings for the three Whitfield athletes against real
+ *                  generated session ids (contract v1.4: the booking
+ *                  transaction, attendance, and parent-linkage rules),
+ *                  covering `confirmed` and `attended` so the live-wired
+ *                  dashboards have something to render in QA. Reese and
+ *                  Nico's bookings are all parent-created (contract v1.5:
+ *                  many kids never get their own login), which also exercises
+ *                  the parent-linkage path for two athletes who have no
+ *                  `users` doc of their own. The referenced sessions'
  *                  `booked` counts are incremented to match, the same
  *                  invariant the real booking transaction maintains.
+ *   tournamentResults — finishing positions for two real generated Saturday
+ *                  tournament blocks (contract v1.5: the RYP Tour). Points
+ *                  are never stored here — see DATA-MODEL.md and
+ *                  `frontend/src/portal/data/tour.js` (routing lane) for the
+ *                  derive-at-read TOUR_POINTS table.
  *
  * Two hard guarantees:
  *   1. NEVER touches production. Writes require FIRESTORE_EMULATOR_HOST, and the
@@ -201,45 +210,65 @@ function buildDocs(portal) {
   }
   // athletes/{id}/private/medical is deliberately NOT seeded — see header.
 
-  // bookings — a few REAL bookings for jordan against real seeded session ids
-  // (contract v1.4, docs/portal/TEAM.md "Sprint 6 pins"), so the live-wired
-  // dashboards (My Schedule, the parent household view, the coach roster)
-  // have something real to render in QA instead of an empty state. Doc id is
-  // `{athleteId}_{sessionId}` (contract v1.1). Ids below double as the
-  // scaffold's practice-mode references (seed.js BOOKED_UPCOMING) where they
-  // line up, so the two demo datasets tell one consistent story instead of
-  // two unrelated ones:
-  //   2026-11-02-1 (Mon 4:00 PM training) — the scaffold's season-opener
-  //     "Confirmed" booking; self-booked by the athlete.
-  //   2026-11-07-1 (Sat 10:30 AM tournament) — booked by the parent, so this
-  //     seed exercises the parent-linkage path (createdBy != athleteId's own
-  //     account) as well as the athlete-booked path above; also the other
-  //     allowance pool, per the two-pool invariant.
-  //   2026-11-09-2 (Mon 5:00 PM training) — already `attended`, so the
+  // bookings — REAL bookings for the three Whitfield athletes against real
+  // seeded session ids (contract v1.4, docs/portal/TEAM.md "Sprint 6 pins"),
+  // so the live-wired dashboards (My Schedule, the parent household view, the
+  // coach roster) have something real to render in QA instead of an empty
+  // state. Doc id is `{athleteId}_{sessionId}` (contract v1.1). Jordan's ids
+  // double as the scaffold's practice-mode references (seed.js
+  // BOOKED_UPCOMING) where they line up, so the two demo datasets tell one
+  // consistent story instead of two unrelated ones:
+  //   jordan 2026-11-02-1 (Mon 4:00 PM training) — the scaffold's
+  //     season-opener "Confirmed" booking; self-booked by the athlete.
+  //   jordan 2026-11-07-1 (Sat 10:30 AM tournament) — `attended` (contract
+  //     v1.5: flipped from the earlier `confirmed` now that a tournament
+  //     result exists for this session below — a result implies the athlete
+  //     showed up). Booked by the parent, so this seed exercises the
+  //     parent-linkage path (createdBy != athleteId's own account) as well as
+  //     the athlete-booked path above; also the other allowance pool, per the
+  //     two-pool invariant.
+  //   jordan 2026-11-09-2 (Mon 5:00 PM training) — already `attended`, so the
   //     coach's roster and any "past sessions" UI have a real history entry
   //     to show, not just upcoming confirmeds.
+  //   jordan 2026-11-14-1 (Sat 10:30 AM tournament) — `attended`, added
+  //     alongside the tournamentResults below: this is the second tournament
+  //     Jordan places in (3rd), so the attendance story matches the result.
+  //   reese / nico 2026-11-07-1 and 2026-11-14-1 — both tournament blocks,
+  //     both `attended`, both `createdBy: 'parent-dana'`. Reese and Nico have
+  //     no `users` doc of their own (see below), so every one of their
+  //     bookings is the parent-books-for-a-kid path Sprint 7 makes
+  //     first-class — not an edge case for them, the only case. Each seeded
+  //     against exactly their package's `tournaments` allowance (`g-4-2` = 2
+  //     tournament entries/month, and each has exactly 2 here), so the
+  //     allowance UI reads "2 of 2 used" rather than something that looks
+  //     broken.
   // `sessions.booked` on each referenced session is incremented below in the
   // same loop that builds these docs — the transaction's other write (v1.4)
   // — so the seed is internally consistent the way a real booking would
   // leave it: a QA pass checking `booked` against `bookings` sees them agree.
-  const JORDAN_BOOKINGS = [
-    ['2026-11-02-1', 'confirmed', 'athlete-jordan'],
-    ['2026-11-07-1', 'confirmed', 'parent-dana'],
-    ['2026-11-09-2', 'attended', 'athlete-jordan'],
+  const WHITFIELD_BOOKINGS = [
+    ['jordan', '2026-11-02-1', 'confirmed', 'athlete-jordan'],
+    ['jordan', '2026-11-07-1', 'attended', 'parent-dana'],
+    ['jordan', '2026-11-09-2', 'attended', 'athlete-jordan'],
+    ['jordan', '2026-11-14-1', 'attended', 'parent-dana'],
+    ['reese', '2026-11-07-1', 'attended', 'parent-dana'],
+    ['reese', '2026-11-14-1', 'attended', 'parent-dana'],
+    ['nico', '2026-11-07-1', 'attended', 'parent-dana'],
+    ['nico', '2026-11-14-1', 'attended', 'parent-dana'],
   ];
   const bookings = new Map();
   const bookingCreatedAt = new Date();
-  for (const [sessionId, status, createdBy] of JORDAN_BOOKINGS) {
+  for (const [athleteId, sessionId, status, createdBy] of WHITFIELD_BOOKINGS) {
     const session = sessions.get(sessionId);
     if (!session) {
       throw new Error(
         `Seed booking references sessions/${sessionId}, which buildSeason() did not generate ` +
-          `(the season config in season.js changed under this seed). Update JORDAN_BOOKINGS in ` +
+          `(the season config in season.js changed under this seed). Update WHITFIELD_BOOKINGS in ` +
           `scripts/seed-firestore.mjs to reference real generated session ids.`
       );
     }
-    bookings.set(`jordan_${sessionId}`, {
-      athleteId: 'jordan',
+    bookings.set(`${athleteId}_${sessionId}`, {
+      athleteId,
       sessionId,
       date: session.date,
       type: session.type,
@@ -250,6 +279,67 @@ function buildDocs(portal) {
       createdAt: bookingCreatedAt,
     });
     session.booked += 1; // same write the real booking transaction makes
+  }
+
+  // tournamentResults — finishing positions for two real generated Saturday
+  // tournament blocks (contract v1.5, TEAM.md "Sprint 7 pins": the RYP Tour).
+  // POSITION IS THE ONLY FACT STORED. Points are never written here or
+  // anywhere in Firestore — they derive at read time from the TOUR_POINTS
+  // table in the frontend's `data/tour.js` (routing lane; this script does
+  // not import or duplicate that table), so retuning the table later
+  // rescores the whole season retroactively, same derive-don't-store rule as
+  // booking allowances (DATA-MODEL.md). Doc id is `{sessionId}_{athleteId}`
+  // (contract v1.5) — the keyspace gives one result per athlete per
+  // tournament; a correction is a same-id update, never a delete.
+  //
+  // Two Saturdays, all three Whitfield athletes, standings with real
+  // contrast (my judgment — no result is prescribed anywhere upstream):
+  //   2026-11-07-1 — jordan 1st, reese 2nd, nico 4th
+  //   2026-11-14-1 — reese 1st, nico 2nd, jordan 3rd
+  // Against the pinned TOUR_POINTS table ([100,80,65,55,...], positions
+  // 1-15), that totals jordan 165, reese 180, nico 135 across 2 events each —
+  // Reese leads the season standings despite being seed.js's "Behind"
+  // contract-standing kid. Deliberate: the Tour ranks tournament finishes,
+  // not practice compliance, and the seed should not imply those correlate.
+  const TOURNAMENT_RESULTS = [
+    ['2026-11-07-1', 'jordan', 1],
+    ['2026-11-07-1', 'reese', 2],
+    ['2026-11-07-1', 'nico', 4],
+    ['2026-11-14-1', 'reese', 1],
+    ['2026-11-14-1', 'nico', 2],
+    ['2026-11-14-1', 'jordan', 3],
+  ];
+  const tournamentResults = new Map();
+  const resultsCreatedAt = new Date();
+  for (const [sessionId, athleteId, position] of TOURNAMENT_RESULTS) {
+    const session = sessions.get(sessionId);
+    if (!session) {
+      throw new Error(
+        `Seed tournament result references sessions/${sessionId}, which buildSeason() did not ` +
+          `generate (the season config in season.js changed under this seed). Update ` +
+          `TOURNAMENT_RESULTS in scripts/seed-firestore.mjs to reference a real generated ` +
+          `Saturday tournament session id.`
+      );
+    }
+    if (session.type !== 'tournament') {
+      throw new Error(
+        `Seed tournament result references sessions/${sessionId}, which is a '${session.type}' ` +
+          `block, not a tournament.`
+      );
+    }
+    if (!Number.isInteger(position) || position < 1) {
+      throw new Error(`Seed tournament result for ${athleteId}@${sessionId} has invalid position ${position}.`);
+    }
+    tournamentResults.set(`${sessionId}_${athleteId}`, {
+      sessionId,
+      athleteId,
+      // Must equal the session's own date (contract v1.5) — read off the
+      // session itself so it can never drift from it.
+      date: session.date,
+      position,
+      createdBy: coachUid,
+      createdAt: resultsCreatedAt,
+    });
   }
 
   // contractLogs — Jordan's practice history for the last ~2 weeks (contract
@@ -305,7 +395,7 @@ function buildDocs(portal) {
     ['ops', { role: 'ops', athleteId: null, householdId: null, staff: true, displayName: 'Ops', email: null }],
   ]);
 
-  return { packages, sessions, households, athletes, users, bookings, contractLogs };
+  return { packages, sessions, households, athletes, users, bookings, contractLogs, tournamentResults };
 }
 
 // ---------------------------------------------------------------------------
@@ -365,13 +455,18 @@ async function main() {
   }
   console.log(`total: ${total} docs across ${Object.keys(collections).length} collections`);
 
-  console.log('\nJordan bookings (contract v1.4) and the sessions.booked they drive:');
+  console.log('\nWhitfield bookings (contract v1.4) and the sessions.booked they drive:');
   for (const [id, doc] of collections.bookings) {
     const session = collections.sessions.get(doc.sessionId);
     console.log(
       `  bookings/${id}: status=${doc.status} pool=${doc.pool} createdBy=${doc.createdBy}` +
         ` -> sessions/${doc.sessionId}.booked=${session.booked}/${session.capacity}`
     );
+  }
+
+  console.log('\ntournamentResults (contract v1.5) — position only, points derive at read time:');
+  for (const [id, doc] of collections.tournamentResults) {
+    console.log(`  tournamentResults/${id}: date=${doc.date} position=${doc.position} createdBy=${doc.createdBy}`);
   }
 
   if (DRY_RUN) {

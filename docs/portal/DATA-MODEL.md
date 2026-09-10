@@ -23,6 +23,7 @@ serves.
 | `sessions` | the generator's `YYYY-MM-DD-<block>` (`2026-11-02-0`; extras `2026-11-27-x0`) | Ids come from `generateSeason()` and are never invented elsewhere. Date-prefixed ids make `orderBy(date, __name__)` a stable chronological cursor. |
 | `bookings` | `{athleteId}_{sessionId}` | Deterministic id = one booking per athlete per session, enforced by the keyspace itself. Re-booking after a cancellation updates the same doc's `status` instead of creating a duplicate. |
 | `contractLogs` | `{athleteId}_{date}` | Pinned by contract v1: one log per athlete per day, duplicate-proof by construction. |
+| `tournamentResults` | `{sessionId}_{athleteId}` | **Contract v1.5.** One result per athlete per tournament, enforced by the keyspace itself — the same pattern as `bookings` and `contractLogs`. Corrections overwrite via update; there is no delete in v1. |
 
 ## Collections
 
@@ -315,6 +316,62 @@ which `sessions` are bookable) — they are not a *practice* fact, because kids
 practice outside the academy. The contract calendar has no `closed` state;
 every calendar date accepts a log.
 
+### `tournamentResults/{sessionId}_{athleteId}` (contract v1.5, Sprint 7)
+
+One doc per athlete's finishing position in one Saturday tournament block —
+the fact record behind the "RYP Tour" season leaderboard (TEAM.md "Sprint 7
+pins"). Doc id `{sessionId}_{athleteId}`, same enforced-by-construction
+pattern as `bookings`' `{athleteId}_{sessionId}` and `contractLogs`'
+`{athleteId}_{date}`: the keyspace itself guarantees one result per athlete
+per tournament, and a correction is a same-id update — **there is no delete
+in v1**, so a bad entry is fixed by overwriting `position`, not by removing
+the doc.
+
+| Field | Type | Notes |
+|---|---|---|
+| `sessionId` | string | Into `sessions/` — must be a `type: 'tournament'` session. Matches the id prefix. |
+| `athleteId` | string | Into `athletes/`. Matches the id suffix. |
+| `date` | string | `YYYY-MM-DD`. **Must equal the referenced session's own `date`** — read off `sessions/{sessionId}.date` at write time (never typed independently), so the two can never disagree. |
+| `position` | number | Integer >= 1. Finishing place in that tournament block. |
+| `createdBy` | string | uid of the staff account (coach or ops/owner) that entered the result. |
+| `createdAt` | timestamp | Server write time. |
+
+**Points are never stored — position is the only fact in Firestore.** The
+season standings' point value for a given position comes from the
+`TOUR_POINTS` table in the frontend's `frontend/src/portal/data/tour.js`
+(routing lane; positions 1-15 map to `[100, 80, 65, 55, 50, 45, 40, 36, 32,
+28, 24, 20, 16, 12, 8]`, matching the 15-athlete tournament capacity in
+`schedule.js`; any position beyond the table scores a flat 5 participation
+points) and is computed at **read** time, in the hook that derives standings
+— never written back to a document. This is deliberate, for the same reason
+allowance usage is never a stored counter: if the owner retunes the points
+table (first place worth more, a narrower payout curve, whatever), that
+change **retroactively rescores the entire season** the next time standings
+are read, instead of requiring a migration over every past result. Storing a
+`points` field on this document would freeze every past tournament's scoring
+to whatever the table said on the day it was entered — exactly the drift this
+schema avoids everywhere else (`sessions.booked` aside, which is a display
+counter with its own single-writer transaction, not a derived value with a
+policy knob behind it).
+
+**Standings derivation** (read-time, no stored aggregate): for the season
+window, sum each athlete's points across every `tournamentResults` doc with
+their `athleteId`, rank descending by that sum, and **let ties share a
+rank** (two athletes tied for the season lead are both "1st", the next
+distinct total is "3rd", not "2nd" — standard competition ranking, not
+dense ranking). "Events played" alongside each row is simply the count of
+that athlete's `tournamentResults` docs in the window — no separate counter,
+same derive-don't-store discipline as allowance usage and contract
+fulfillment elsewhere in this schema.
+
+**Rules** (data-routing lane implements; noted here so the shape they
+enforce is on the record): create/update restricted to `coach` and staff
+roles (`ops`, `owner`, `mental` per the existing staff set); shape-checked —
+id must equal `{sessionId}_{athleteId}`, `position` an integer in `1..40`,
+`date` must match the referenced session's `date`; readable by any signed-in
+portal user (standings are public inside the academy, not scoped per
+household or per coach); **no delete** in v1.
+
 ### Billing rows (derived, no new collection)
 
 Sprint 5 adds a per-child billing list to the parent surface. It is **not** a
@@ -350,6 +407,33 @@ index reasoning below has a fixed target:
   the same range-on-the-ordered-field shape as the existing Book-a-Session
   query ([index 1](#1-season-browsing--no-composite-needed-deploy-verified)),
   just bounded to one calendar month instead of the whole season.
+
+### RYP Tour query patterns (v1.5, Sprint 7)
+
+Three read patterns the Sprint 7 hook seam (`useTourStandings`,
+`useTournamentResults`) relies on against `tournamentResults`:
+
+- **Season standings** — every result in the season window, summed and
+  ranked per athlete. Two equivalent shapes answer it: an **unfiltered
+  collection read** (`tournamentResults` with no filter at all — the whole
+  collection is the season, since v1 has no result outside the current
+  season and no archival concept yet), or a **date-range read**
+  (`tournamentResults where date >= :seasonStart and date <= :seasonEnd
+  orderBy date`, the identical range-plus-orderBy-on-the-same-field shape as
+  [index 1](#1-season-browsing--no-composite-needed-deploy-verified)/the
+  month-session-grid pattern above). Either way the aggregation (sum points
+  per athlete, rank, tie-handling) happens client-side after the read, the
+  same as every other derived value in this schema — there is nothing to
+  aggregate at the database layer for a collection this size (at most ~3-4
+  dozen tournament blocks in a season x up to 15 athletes each).
+- **Per-session results** (`useTournamentResults(sessionId)`, and the
+  results-entry screen's pre-fill) — `tournamentResults where sessionId ==
+  :id`. A single equality filter on one field.
+- **Per-athlete history** — an athlete's own tournament record —
+  `tournamentResults where athleteId == :id`. Also a single equality filter
+  on one field; the result set is small enough (a season's worth of
+  tournaments for one kid) to sort client-side rather than needing an
+  `orderBy` in the query.
 
 ## Indexes
 
@@ -485,6 +569,44 @@ the point a `(sessionId ASC, <field> ASC)` composite becomes real — not
 before, and not the existing `(sessionId ASC, status ASC)` one, which already
 exists to serve a different query.
 
+### v1.5 query additions (Sprint 7 — RYP Tour) — no `firestore.indexes.json` changes
+
+All three [Tour query patterns](#ryp-tour-query-patterns-v15-sprint-7) were
+checked against the existing composites and against what actually needs an
+index at all. **Nothing was added — expected, and worth spelling out why,
+since a wrong guess here doesn't fail loudly in dev, it fails at `firebase
+deploy --only firestore:indexes` in front of the whole team:**
+
+- **Season standings** — either candidate shape is composite-free. The
+  unfiltered collection read has no filter or sort at all, so there is
+  nothing for a composite to serve. The date-range alternative
+  (`date >= :start and date <= :end orderBy date`) is a range filter and
+  `orderBy` on the *same* field — the exact shape already established as
+  riding Firestore's automatic single-field index in
+  [index 1](#1-season-browsing--no-composite-needed-deploy-verified) and in
+  the v1.3 month-session-grid note above. Adding a `(date ASC)` "composite"
+  for either shape is precisely the redundant-index case production's deploy
+  API rejects outright ("this index is not necessary, configure using single
+  field index controls") — and that rejection **aborts the entire indexes
+  deploy**, not just this one entry, which is why this collection stays out
+  of `firestore.indexes.json` on purpose rather than "to be safe."
+- **Per-session results** (`tournamentResults where sessionId == :id`) — a
+  single equality filter on one field, riding the automatic single-field
+  index on `sessionId`. Same shape as the bookings-by-session case
+  ([index 5](#5-bookings-sessionid-asc-status-asc--session-roster)'s v1.4
+  note), just on a different collection.
+- **Per-athlete history** (`tournamentResults where athleteId == :id`) — same
+  reasoning again: single equality filter, automatic single-field index, no
+  `orderBy` clause to force a composite.
+
+If a future sprint adds a genuine second filter/sort dimension to any of
+these three — e.g. standings scoped to a date range *and* a specific coach's
+roster in one query, or paginating per-athlete history with a secondary
+sort — that is the point a real `tournamentResults` composite becomes
+necessary. Not before, and note the shape that would trigger it: two
+*distinct* fields in the filter/sort clause, not a range-plus-orderBy on the
+same field, which is what every query above already is.
+
 ## Seeding & emulator workflow
 
 Both npm scripts live in the **root `package.json`** (created for this — the
@@ -509,8 +631,15 @@ The seed script:
   refuses any non-local host, so it structurally cannot write to production;
 - writes via the Firestore REST API, so the repo root needs no dependencies;
 - seeds no dollar amounts, no Stripe ids (null), and no medical documents;
-- seeds a handful of real `bookings` for `jordan` against real generated
-  session ids (contract v1.4) and increments each referenced session's
-  `booked` to match — the same invariant the booking transaction maintains
-  live, so `booked` and the `bookings` collection agree from the first seed
-  rather than only after a QA pass exercises real bookings.
+- seeds real `bookings` for all three Whitfield athletes against real
+  generated session ids (contract v1.4) and increments each referenced
+  session's `booked` to match — the same invariant the booking transaction
+  maintains live, so `booked` and the `bookings` collection agree from the
+  first seed rather than only after a QA pass exercises real bookings;
+- seeds `tournamentResults` (contract v1.5) for two real generated Saturday
+  tournament sessions, referenced by id and validated against `buildSeason()`
+  the same way the bookings above are — a stale session id throws instead of
+  silently writing an orphaned result. `position` only; no points value is
+  ever written (see the collection's notes above). The referenced sessions'
+  attendance (`bookings.status`) is kept coherent with the results — every
+  athlete who has a result there is `attended`, not merely `confirmed`.
