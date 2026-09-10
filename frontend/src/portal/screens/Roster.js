@@ -51,14 +51,14 @@ const useSessionAttendance = hooks.useSessionAttendance || useSessionAttendanceF
 
 /**
  * Same parallel-lane situation as useSessionAttendance above, for the Sprint
- * 7 pin (TEAM.md): `useTournamentResults(sessionId)` -> { data: { results:
- * [{ athleteId, name, position }] }, loading, error, saveResults(entries) },
- * entries = [{ athleteId, name, position }] (the real shape routing shipped,
- * reconciled at merge - the sprint report's flagged guess said data was a
- * bare array; every read below goes through `data?.results`).
- * The fallback is inert (no data, no-op save), matching
+ * 7 pin (TEAM.md), now superseded by the Sprint 8 pin (contract v1.6):
+ * `useTournamentResults(sessionId)` -> { data: { results: [{ athleteId,
+ * name, bracket, score, position }] }, loading, error, saveResults(entries) },
+ * entries = [{ athleteId, name, bracket, score }] - POSITION IS NO LONGER
+ * WRITTEN, it derives downstream from score; every read below goes through
+ * `data?.results`. The fallback is inert (no data, no-op save), matching
  * useSessionAttendance's own "screens must not crash with the live flag off"
- * convention - harmless in seed/demo mode, where tap-to-assign still works
+ * convention - harmless in seed/demo mode, where score entry still works
  * entirely in this screen's local state and only the persisted save is a
  * no-op.
  */
@@ -67,12 +67,23 @@ function useTournamentResultsFallback() {
 }
 const useTournamentResults = hooks.useTournamentResults || useTournamentResultsFallback;
 
-/** 1 -> '1st', 2 -> '2nd', 3 -> '3rd', 4 -> '4th', 11 -> '11th', ... */
-function ordinal(n) {
-  const suffixes = ['th', 'st', 'nd', 'rd'];
-  const v = n % 100;
-  return `${n}${suffixes[(v - 20) % 10] || suffixes[v] || suffixes[0]}`;
+/**
+ * NEW hook for Sprint 8 (TEAM.md "Hook seam", contract v1.6):
+ * `useAthleteBrackets(athleteIds)` -> { data: { [athleteId]: bracketId |
+ * null }, loading, error } - resolves each rostered athlete's age bracket
+ * (computed from dob as of season start) for the score-entry screen's
+ * per-row chip. Same parallel-lane situation as the two hooks above, but
+ * this export does not exist AT ALL in this worktree yet (confirmed: no
+ * `useAthleteBrackets` in hooks/index.js) - the routing lane is building it
+ * against v1.6 in a parallel worktree. The fallback is the exact inert
+ * shape the pin specifies - `{}` and never fetches - so every row's chip
+ * reads "Open" (unknown bracket) until the real hook lands; nothing here
+ * needs to change once it does.
+ */
+function useAthleteBracketsFallback() {
+  return { data: {}, loading: false, error: null };
 }
+const useAthleteBrackets = hooks.useAthleteBrackets || useAthleteBracketsFallback;
 
 /**
  * Roster - coach. The coach's full assigned roster, not one session's
@@ -384,71 +395,101 @@ export function SessionAttendance({ variant = 'pre', bare = false, onBack, sessi
 }
 
 /**
- * Results entry (Sprint 7 pin, TEAM.md) - tap roster athletes in finishing
- * order; tapping an assigned athlete un-assigns and renumbers everyone after
- * them (renumbering is automatic: position is derived from array index, not
- * stored per-tap). Pre-fills from `resultsState.data` when the session
- * already has results on file, keyed once so a mid-edit re-render (an
- * invalidation bump from another coach's device) cannot silently overwrite
- * an in-progress edit.
+ * Results entry becomes SCORE entry (Sprint 8 pin, TEAM.md, contract v1.6):
+ * a coach types each rostered athlete's strokes (18..200) instead of
+ * tapping a finishing order - the derive-don't-store rule now covers
+ * position too (data/tour.js's deriveTourStandings computes position from
+ * score at read time, grouped by bracket). This screen never computes or
+ * displays a position; it only collects scores.
  *
- * Local `order` drives the UI in both seed and live mode - only the Save
- * call is mode-specific (the hook's `saveResults` is a real write live, an
- * inert no-op via the fallback otherwise), matching this screen's existing
- * attendance flow (local marks, real write only when live).
+ * Each row also shows the athlete's age bracket as a small status chip
+ * (contract v1.6: a write-time snapshot of the athlete's dob-derived
+ * bracket) via the NEW `useAthleteBrackets(athleteIds)` hook (TEAM.md's
+ * pinned seam, stubbed above - see its fallback comment). An athlete whose
+ * bracket cannot be resolved reads "Open" - the pin's own fallback label
+ * for the 'open' group, not an invented value.
+ *
+ * Pre-fills from `resultsState.data?.results` (each row now carries
+ * `score`, not `position`) the first time real existing results arrive -
+ * same seeded-once guard as before, so a background refresh cannot clobber
+ * a coach's in-progress edit. An athlete with no entered (or out-of-range)
+ * score is simply left out of the save, never coerced to 0 or clamped -
+ * "no score yet" and "scored zero" are different facts.
+ *
+ * Local `scores` (athleteId -> raw input string) drives the UI in both seed
+ * and live mode - only the Save call is mode-specific (the hook's
+ * `saveResults` is a real write live, an inert no-op via the fallback
+ * otherwise), matching this screen's existing attendance flow.
  */
 function ResultsEntry({ bare, session, roster, resultsState, onBack }) {
-  const [order, setOrder] = useState([]); // athleteId[], index 0 = 1st place
+  const [scores, setScores] = useState({}); // { [athleteId]: rawInputString }
   const seededRef = useRef(false);
   const [saveState, setSaveState] = useState('idle'); // 'idle' | 'saving' | 'saved'
   const [saveError, setSaveError] = useState(null);
 
+  const athleteIds = useMemo(() => roster.map((a) => a.id), [roster]);
+  const bracketsState = useAthleteBrackets(athleteIds);
+  const bracketByAthlete = bracketsState.data ?? {};
+
   // Pre-fill once, the first time real existing results arrive - never
   // re-seeds after that, so a background refresh cannot clobber a coach's
-  // in-progress re-ordering. `data.results` is the hook's pinned envelope.
+  // in-progress edit. `data.results` is the hook's pinned v1.6 envelope,
+  // each row now carrying `score` rather than `position`.
   useEffect(() => {
     const rows = resultsState.data?.results;
     if (seededRef.current || !rows) return;
     seededRef.current = true;
-    setOrder(
-      rows
-        .slice()
-        .sort((a, b) => a.position - b.position)
-        .map((r) => r.athleteId)
-    );
+    const seeded = {};
+    rows.forEach((r) => {
+      if (r.score != null) seeded[r.athleteId] = String(r.score);
+    });
+    setScores(seeded);
   }, [resultsState.data]);
 
-  const toggle = (athleteId) => {
+  const setScore = (athleteId, raw) => {
     if (saveState === 'saving') return;
-    setOrder((prev) =>
-      prev.includes(athleteId) ? prev.filter((id) => id !== athleteId) : [...prev, athleteId]
-    );
+    // Digits only, capped at 3 characters - the pin's max (200) is 3 digits.
+    const cleaned = raw.replace(/[^0-9]/g, '').slice(0, 3);
+    setScores((prev) => ({ ...prev, [athleteId]: cleaned }));
     setSaveState('idle');
   };
+
+  // Only a real, in-range strokes count is "entered" - 18..200 per the pin.
+  // Empty or out-of-range input is treated exactly like "no score yet":
+  // left out of both the count and the save, never coerced or clamped.
+  const validScore = (athleteId) => {
+    const raw = scores[athleteId];
+    if (raw === undefined || raw === '') return null;
+    const n = Number(raw);
+    return Number.isInteger(n) && n >= 18 && n <= 200 ? n : null;
+  };
+
+  const enteredCount = roster.filter((a) => validScore(a.id) != null).length;
+  const allScored = roster.length > 0 && enteredCount >= roster.length;
 
   const handleSave = async () => {
     setSaveState('saving');
     setSaveError(null);
     try {
       // Each entry carries the athlete's display name off this very roster
-      // (contract v1.5.1): the write-time snapshot that lets the academy-
-      // public Tour standings show every name to every role.
+      // (contract v1.5.1, unchanged by v1.6) plus its bracket snapshot -
+      // null when useAthleteBrackets hasn't resolved one.
       const nameById = new Map(roster.map((a) => [a.id, a.name]));
-      await resultsState.saveResults(
-        order.map((athleteId, i) => ({
-          athleteId,
-          name: nameById.get(athleteId) ?? null,
-          position: i + 1,
+      const entries = roster
+        .map((a) => ({
+          athleteId: a.id,
+          name: nameById.get(a.id) ?? null,
+          bracket: bracketByAthlete[a.id] ?? null,
+          score: validScore(a.id),
         }))
-      );
+        .filter((e) => e.score != null);
+      await resultsState.saveResults(entries);
       setSaveState('saved');
     } catch (err) {
       setSaveState('idle');
       setSaveError(err && typeof err.message === 'string' && err.message ? err.message : null);
     }
   };
-
-  const allAssigned = roster.length > 0 && order.length >= roster.length;
 
   return (
     <PhoneFrame
@@ -458,15 +499,15 @@ function ResultsEntry({ bare, session, roster, resultsState, onBack }) {
           <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 10 }}>
             <BackLink onClick={onBack}>‹ Attendance</BackLink>
           </div>
-          <ScreenTitle size={21}>Enter results</ScreenTitle>
+          <ScreenTitle size={21}>Enter scores</ScreenTitle>
           <div style={{ font: `400 12px ${font.body}`, color: color.textSecondary, marginTop: 5 }}>
             {session?.name}
             {session?.meta ? ` · ${session.meta}` : ''}
           </div>
           <Body size={12} style={{ marginTop: 10 }}>
-            {allAssigned
-              ? 'Every athlete has a finish position.'
-              : `Tap athletes in finishing order. Next: ${ordinal(order.length + 1)}.`}
+            {allScored
+              ? 'Every athlete has a score.'
+              : "Enter each athlete's strokes. Standings are calculated automatically."}
           </Body>
         </div>
       }
@@ -474,7 +515,7 @@ function ResultsEntry({ bare, session, roster, resultsState, onBack }) {
         <div style={{ borderTop: `1px solid ${color.frameRule}`, padding: '14px 22px 22px', background: color.bg }}>
           {saveError ? (
             <Body size={12} tone={color.error} style={{ marginBottom: 10 }}>
-              {saveError} Nothing was saved — tap Save results to try again.
+              {saveError} Nothing was saved — tap Save scores to try again.
             </Body>
           ) : null}
           {saveState === 'saved' ? <SavedNotice /> : null}
@@ -482,34 +523,83 @@ function ResultsEntry({ bare, session, roster, resultsState, onBack }) {
             variant="pinned"
             height={56}
             loading={saveState === 'saving'}
-            disabled={!order.length}
+            disabled={!enteredCount}
             onClick={handleSave}
             style={saveState === 'saved' ? { marginTop: 10 } : null}
           >
-            {saveState === 'saving' ? 'Saving results' : 'Save results'}
+            {saveState === 'saving' ? 'Saving scores' : 'Save scores'}
           </Button>
         </div>
       }
     >
       <div style={{ padding: '0 22px 20px' }}>
-        {roster.map((athlete, i) => {
-          const position = order.indexOf(athlete.id);
-          const assigned = position !== -1;
-          return (
-            <AthleteRow
-              key={athlete.id}
-              name={athlete.name}
-              meta={athlete.meta}
-              avatarSize={42}
-              nameSize={16}
-              divider={i < roster.length - 1}
-              onClick={() => toggle(athlete.id)}
-              trailing={assigned ? <StatusBadge tone="green">{ordinal(position + 1)}</StatusBadge> : null}
-            />
-          );
-        })}
+        {roster.map((athlete, i) => (
+          <AthleteRow
+            key={athlete.id}
+            name={athlete.name}
+            meta={athlete.meta}
+            avatarSize={42}
+            nameSize={16}
+            divider={i < roster.length - 1}
+            trailing={
+              <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                <BracketChip bracket={bracketByAthlete[athlete.id] ?? null} />
+                <ScoreField
+                  value={scores[athlete.id] ?? ''}
+                  onChange={(v) => setScore(athlete.id, v)}
+                  disabled={saveState === 'saving'}
+                />
+              </div>
+            }
+          />
+        ))}
       </div>
     </PhoneFrame>
+  );
+}
+
+/**
+ * Age-bracket chip (Sprint 8 pin, TEAM.md, contract v1.6) - a status, not a
+ * control, so per flag 02 (StatusBadge.js) it's the outline/tint treatment,
+ * never a solid fill. Shows the bracket id verbatim ('10U' / '11-13' /
+ * '14+') to match the owner's own naming; an athlete with no resolvable
+ * bracket (no dob on file, or the stubbed hook above) reads "Open" - the
+ * pin's own fallback label for the 'open' group, not an invented value.
+ */
+function BracketChip({ bracket }) {
+  return <StatusBadge tone="neutral">{bracket || 'Open'}</StatusBadge>;
+}
+
+/**
+ * Strokes input - same visual idiom as NumericField's input (screen 14,
+ * Diagnostic Capture): track fill, 1px border, 8px radius, right-aligned
+ * 600-weight figures. Purpose-built rather than reusing NumericField
+ * directly because NumericField's layout is a left label + right unit
+ * column built for a stacked list of metrics under one athlete, not one
+ * compact field sitting in an AthleteRow's trailing slot beside a
+ * BracketChip.
+ */
+function ScoreField({ value, onChange, disabled }) {
+  return (
+    <input
+      inputMode="numeric"
+      value={value}
+      disabled={disabled}
+      placeholder="—"
+      onChange={(e) => onChange(e.target.value)}
+      style={{
+        width: 64,
+        height: 44,
+        background: color.track,
+        border: `1px solid ${color.border}`,
+        borderRadius: radius.input,
+        font: `600 15px ${font.body}`,
+        color: disabled ? color.mutedText : color.text,
+        textAlign: 'right',
+        padding: '0 10px',
+        outline: 'none',
+      }}
+    />
   );
 }
 
@@ -540,7 +630,7 @@ function SavedNotice() {
       >
         <Tick size={9} />
       </span>
-      <span style={{ font: `500 13px ${font.body}`, color: color.primary }}>Results saved</span>
+      <span style={{ font: `500 13px ${font.body}`, color: color.primary }}>Scores saved</span>
     </div>
   );
 }

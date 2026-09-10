@@ -113,11 +113,17 @@ export const SCREEN_STATES = [
     states: [['pre', 'Pre-session'], ['progress', 'In progress'], ['complete', 'Completed'],
              ['noshow', 'No-shows'],
              // Sprint 7 pin (TEAM.md): "Enter results" on a TOURNAMENT
-             // session. `name: null` so displaySession's own "Tournament
-             // block" fallback names it - no invented event name. Tap
-             // through the button to see the tap-to-assign flow; seed mode
-             // has no persisted results, so it always opens blank.
-             ['pre', 'Tournament · enter results',
+             // session, now the Sprint 8 SCORE-entry flow (contract v1.6) -
+             // a coach types strokes per athlete instead of tapping a
+             // finishing order; position derives downstream. `name: null`
+             // so displaySession's own "Tournament block" fallback names it
+             // - no invented event name. Tap through the button to see the
+             // score-entry flow; seed mode has no persisted results, so it
+             // always opens blank, and every row's bracket chip reads
+             // "Open" - `useAthleteBrackets` has no export in this worktree
+             // yet (Sprint 8 hook seam, TEAM.md), so Roster.js's inert
+             // fallback (`{}`, never fetches) is what's live here.
+             ['pre', 'Tournament · enter scores',
                { block: { type: 'tournament', name: null, time: '8:30 AM', date: null, meta: null } }]] },
   /*
    * Roster - coach (Sprint 5 pin, TEAM.md): the bottom tab bar's "Roster"
@@ -145,9 +151,21 @@ export const SCREEN_STATES = [
    * seventeen alongside 08·L and 18. useTourStandings() takes no options
    * (see TourStandings.js), so loading/empty/error are driven by this
    * screen's own `variant` prop rather than a hook demoOpts variant.
+   *
+   * Sprint 8 pin (TEAM.md, contract v1.6) added the age-bracket split and
+   * an athlete-only "Your results" card. 'jordan' below is the seed's own
+   * athleteId (data/tour.js's TOUR_SEED_RESULTS already has Jordan Whitfield
+   * finishing several tournaments) - not an invented id - so this state
+   * proves the own-bracket default and results log against real seed data.
+   * The plain 'Populated' state (no athleteId) exercises the graceful
+   * degrade every non-athlete role and PortalRoutes.js itself get this
+   * sprint: first bracket selected, no "Your results" card - see the sprint
+   * report.
    */
   { id: 'TOUR', title: 'RYP Tour', Screen: TourStandings, role: 'athlete + parent + staff',
-    states: [['populated', 'Populated'], ['empty', 'Before first tournament'],
+    states: [['populated', 'Populated'],
+             ['populated', 'Athlete · own bracket + results', { role: 'athlete', athleteId: 'jordan' }],
+             ['empty', 'Before first tournament'],
              ['loading', 'Loading'], ['error', 'Load failure']] },
   /*
    * Not provisioned (Sprint 4) — the honest state for a signed-in Google
