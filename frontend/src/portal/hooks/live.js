@@ -641,21 +641,28 @@ export async function fetchTournamentResultsForSession(sessionId) {
 }
 
 /**
- * Save one tournament's finishing order (Sprint 7 pin) — coach/mental/ops/
- * owner only, enforced by firestore.rules, not here. One setDoc PER ENTRY
- * (a create for a new athlete result, an overwrite for a correction —
- * contract v1.5: "no delete in v1, corrections overwrite via update"), each
- * carrying the pinned shape exactly: sessionId, athleteId, name, date,
- * position, createdBy, createdAt. Doc id is `{sessionId}_{athleteId}`,
- * mirroring bookings/contractLogs — one result per athlete per tournament.
+ * Save one tournament's raw SCORES (Sprint 8 pin, contract v1.6, supersedes
+ * v1.5.1) — coach/mental/ops/owner only, enforced by firestore.rules, not
+ * here. One setDoc PER ENTRY (a create for a new athlete result, an
+ * overwrite for a correction — contract v1.5: "no delete in v1, corrections
+ * overwrite via update"), each carrying the pinned shape exactly: sessionId,
+ * athleteId, name, bracket, date, score, createdBy, createdAt. POSITION IS
+ * NO LONGER STORED — it derives at read time from score within each
+ * (sessionId, bracket) group (data/tour.js's deriveTourStandings). Doc id is
+ * `{sessionId}_{athleteId}`, mirroring bookings/contractLogs — one result
+ * per athlete per tournament.
  *
- * `name` (contract v1.5.1, TEAM.md Sprint 7 integration): the athlete's
- * display name, snapshotted at write time from the roster the staff member
- * entering results is already reading. Points stay derived — the name is
- * pure display denormalization so the academy-public standings can show
- * every name to every role WITHOUT widening the athletes read matrix (the
- * full athlete doc carries dob/householdId/contractMinutes; this carries
- * name alone). String or null — a missing roster name never blocks a save.
+ * `name` (contract v1.5.1) and `bracket` (contract v1.6) are both write-time
+ * snapshots the CALLER supplies — this function does no athlete lookups of
+ * its own. `name` is the athlete's display name from the roster the staff
+ * member entering results is already reading; `bracket` is computed by the
+ * caller via useAthleteBrackets (data/tour.js's bracketFor, as of
+ * SEASON_BOUNDS.start) before saveResults() is invoked. Both stay pure
+ * display denormalization — points/position derive from `score` alone — so
+ * the academy-public standings can show every name and group by bracket
+ * WITHOUT widening the athletes read matrix (the full athlete doc carries
+ * dob/householdId/contractMinutes; these carry name/bracket alone). Both are
+ * string or null — a missing roster name or unset dob never blocks a save.
  *
  * `date` is the CALLER's job to pass, but it must equal the sessionId's own
  * leading YYYY-MM-DD (sessions are always `YYYY-MM-DD-<block>`) — the rule
@@ -663,7 +670,9 @@ export async function fetchTournamentResultsForSession(sessionId) {
  * server-side, not just client-side.
  *
  * Entries are validated up front, before any write starts, so a bad entry
- * anywhere in the list never leaves a partial save in flight.
+ * anywhere in the list never leaves a partial save in flight: every entry
+ * needs an athleteId and an int score in [18, 200] (strokes); name/bracket,
+ * when present, must be strings (null is fine — never required).
  *
  * ONE bump('tournamentResults') after every entry lands, not per entry (the
  * refetch-storm lesson, mirroring createBooking's bulk `silent` pattern) —
@@ -678,24 +687,30 @@ export async function saveTournamentResults(sessionId, date, entries) {
     );
   }
   for (const entry of entries) {
-    if (!entry || !entry.athleteId || !Number.isInteger(entry.position) || entry.position < 1) {
+    const scoreOk =
+      entry && Number.isInteger(entry.score) && entry.score >= 18 && entry.score <= 200;
+    const nameOk = !entry || entry.name == null || typeof entry.name === 'string';
+    const bracketOk = !entry || entry.bracket == null || typeof entry.bracket === 'string';
+    if (!entry || !entry.athleteId || !scoreOk || !nameOk || !bracketOk) {
       throw new LiveDataError(
         ERR.INVALID,
-        'saveTournamentResults: every entry needs an athleteId and a finishing position >= 1.'
+        'saveTournamentResults: every entry needs an athleteId and an int score between 18 ' +
+          'and 200 (name/bracket, if present, must be strings).'
       );
     }
   }
   const user = requireUser();
   try {
     await Promise.all(
-      entries.map(({ athleteId, position, name }) => {
+      entries.map(({ athleteId, score, name, bracket }) => {
         const id = `${sessionId}_${athleteId}`;
         return setDoc(doc(db, 'tournamentResults', id), {
           sessionId,
           athleteId,
           name: typeof name === 'string' && name ? name : null,
+          bracket: typeof bracket === 'string' && bracket ? bracket : null,
           date,
-          position,
+          score,
           createdBy: user.uid,
           createdAt: serverTimestamp(),
         });
