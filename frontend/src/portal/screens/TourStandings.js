@@ -98,8 +98,13 @@ export default function TourStandings({
       : variant === 'populated'
       ? hookState.error
       : null;
-  const data =
-    variant === 'empty' ? { brackets: [], events: [] } : variant === 'populated' ? hookState.data : null;
+  // Memoized so the harness's 'empty' variant doesn't mint a fresh object
+  // every render and thrash the brackets memo below (CRA exhaustive-deps).
+  const data = useMemo(
+    () =>
+      variant === 'empty' ? { brackets: [], events: [] } : variant === 'populated' ? hookState.data : null,
+    [variant, hookState.data]
+  );
 
   // Only non-empty brackets ever reach the selector - see the hook's own
   // contract above; filtering again here is a defensive no-op against it,
@@ -112,9 +117,9 @@ export default function TourStandings({
   // refresh (the effect below leaves a still-valid selection alone). Default:
   // the athlete's own bracket when the viewer is an athlete who appears in
   // exactly one bracket's standings; the first bracket otherwise, including
-  // every non-athlete role and every athlete for whom `athleteId` is absent
-  // (PortalRoutes.js does not thread it through this sprint - see the
-  // component doc comment).
+  // every non-athlete role and any athlete whose `athleteId` is absent
+  // (PortalRoutes.js's TourRoute threads it through since the Sprint 8
+  // integration pass; the harness never passes one).
   const [selectedBracketId, setSelectedBracketId] = useState(null);
   useEffect(() => {
     if (!brackets.length) return;
