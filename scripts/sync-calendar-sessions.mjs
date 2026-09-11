@@ -11,9 +11,15 @@
  * sessions by the pinned title convention (case-insensitive on the first
  * word, so the hand-entered "Training Session" counts):
  *
- *   summary's first word is "training"    -> bookable, type 'training'
- *   summary's first word is "tournament"  -> bookable, type 'tournament'
+ *   summary's first word is "training"          -> bookable, type 'training'
+ *   summary's first word is "tournament"        -> bookable, type 'tournament'
+ *   summary's first word is "phil"               -> bookable, type 'phil'
+ *   summary's first word is "mental" or "yannick" -> bookable, type 'mental'
  *   anything else, and every all-day event -> skipped (display-only)
+ *
+ * 'phil' and 'mental' are the specialist 1-on-1 types (contract v1.7, Sprint
+ * 9: Phil/performance and Yannick/mental game) — each session of either type
+ * carries capacity 1, everything else stays at 15 (see CAPACITY below).
  *
  * Bookable events must carry a real start.dateTime; all-day events (start.date
  * only) are never bookable regardless of title. Session id is
@@ -64,13 +70,19 @@ import { prodAccessToken } from './lib/prod-auth.mjs';
 const PROJECT_ID = 'rypacad';
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 
-// Capacity per block, replicated from frontend/src/portal/data/schedule.js
-// (export const CAPACITY = { training: 15, tournament: 15 } — owner's rule:
-// max 15 kids per session) — replicated with this source note rather than
-// bundling the module for one constant. If schedule.js changes CAPACITY,
-// change this too; capacity is a SYNCED field, so a re-run propagates the
-// new number to existing sessions.
-const CAPACITY = { training: 15, tournament: 15 };
+// Capacity per block. training/tournament are replicated from
+// frontend/src/portal/data/schedule.js (export const CAPACITY = { training:
+// 15, tournament: 15 } — owner's rule: max 15 kids per session) — replicated
+// with this source note rather than bundling the module for one constant. If
+// schedule.js changes CAPACITY, change this too; capacity is a SYNCED field
+// (SYNCED_FIELDS below), so a re-run propagates a changed number to existing
+// sessions, not just new ones.
+//
+// phil/mental (contract v1.7, Sprint 9 pin, TEAM.md): the two specialist
+// 1-on-1 types are capacity 1 by design ("a specialist 1-on-1 IS a session
+// with capacity 1") — not sourced from schedule.js, which only ever defines
+// the two group-block types.
+const CAPACITY = { training: 15, tournament: 15, phil: 1, mental: 1 };
 
 // Title convention, deliberately forgiving: the calendar is entered by hand,
 // so any title whose first word is "training"/"tournament" (any case) is
@@ -79,6 +91,11 @@ const CAPACITY = { training: 15, tournament: 15 };
 function classifyTitle(summary) {
   if (/^training\b/i.test(summary)) return 'training';
   if (/^tournament\b/i.test(summary)) return 'tournament';
+  // Specialist 1-on-1s (contract v1.7, Sprint 9 pin): 'phil' -> performance
+  // coaching, 'mental'/'yannick' -> mental game — same case-insensitive
+  // first-word convention as training/tournament above.
+  if (/^phil\b/i.test(summary)) return 'phil';
+  if (/^(?:mental|yannick)\b/i.test(summary)) return 'mental';
   return null; // anything else (and every all-day event) is display-only
 }
 

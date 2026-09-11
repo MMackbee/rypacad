@@ -20,7 +20,7 @@ serves.
 | `households` | slug / auto-id | Referenced by `users.householdId`, `athletes.householdId`, `bookings.householdId`. |
 | `athletes` | slug / auto-id | Referenced by `users.athleteId`, `bookings.athleteId`, `contractLogs.athleteId`. |
 | `packages` | catalogue id (`g-8-3`, `f-4`, `elite`, `drop-in`) | Matches `frontend/src/portal/data/packages.js` exactly, so the client and the database name the same package the same way. |
-| `sessions` | the generator's `YYYY-MM-DD-<block>` (`2026-11-02-0`; extras `2026-11-27-x0`) | Ids come from `generateSeason()` and are never invented elsewhere. Date-prefixed ids make `orderBy(date, __name__)` a stable chronological cursor. |
+| `sessions` | the generator's `YYYY-MM-DD-<block>` (`2026-11-02-0`; extras `2026-11-27-x0`); specialist 1-on-1s `YYYY-MM-DD-s<n>` (`2026-09-15-s0` — **contract v1.7, Sprint 9**) | Regular/extras ids come from `generateSeason()`. The `-s<n>` slots are the one exception: `scripts/seed-firestore.mjs` hand-adds them for the emulator (the generator never invents Phil/Yannick slots — see [below](#specialist-1-on-1-sessions-phil-and-mental-contract-v17-sprint-9)); production sources them from the calendar sync exactly like training/tournament. Date-prefixed ids make `orderBy(date, __name__)` a stable chronological cursor for every session type alike. |
 | `bookings` | `{athleteId}_{sessionId}` | Deterministic id = one booking per athlete per session, enforced by the keyspace itself. Re-booking after a cancellation updates the same doc's `status` instead of creating a duplicate. |
 | `contractLogs` | `{athleteId}_{date}` | Pinned by contract v1: one log per athlete per day, duplicate-proof by construction. |
 | `tournamentResults` | `{sessionId}_{athleteId}` | **Contract v1.5, id scheme unchanged by v1.6.** One result per athlete per tournament, enforced by the keyspace itself — the same pattern as `bookings` and `contractLogs`. Corrections overwrite via update; there is no delete in v1. |
@@ -114,8 +114,8 @@ cases.
 |---|---|---|
 | `date` | string | `YYYY-MM-DD` (matches the id prefix). |
 | `time` | string | Block start, e.g. "3:00 PM". |
-| `type` | string | `training \| tournament` — decides which allowance pool a booking spends. |
-| `capacity` | number | From the generator's capacity config. |
+| `type` | string | `training \| tournament \| phil \| mental` — decides which allowance pool a booking spends. **`phil`/`mental` are contract v1.7 (Sprint 9)** — see [Specialist 1-on-1 sessions](#specialist-1-on-1-sessions-phil-and-mental-contract-v17-sprint-9) below. |
+| `capacity` | number | From the generator's capacity config for `training`/`tournament` (15, both). **`phil`/`mental` are always 1** (contract v1.7) — "a specialist 1-on-1 IS a session with capacity 1," per TEAM.md's Sprint 9 design keystone. |
 | `booked` | number | Denormalized confirmed-booking count for capacity display. Must be updated in the same transaction as a booking create/cancel (data-routing lane). The roster truth is always the bookings query — this is a display counter, and a reconcile can rebuild it from bookings at any time. **Contract v1.4** (Sprint 6): the exact transaction that maintains this field is pinned in [Booking transaction, attendance, and parent linkage](#booking-transaction-attendance-and-parent-linkage-contract-v14-sprint-6) below. |
 | `coachId` | string \| null | Assigned coach uid. |
 | `label` | string \| null | Real event names only ("Holiday Tournament"); null for regular blocks. |
@@ -123,6 +123,71 @@ cases.
 | `overflow` | boolean | True for Friday overflow blocks (off by default in the generator). |
 | `status` | string | **Contract v1.2.** `scheduled \| cancelled`, default `scheduled`. The calendar sync sets `cancelled` — never deletes — when a synced session's calendar instance disappears but the session has bookings, so families are told rather than ghosted. |
 | `gcalEventId` | string \| null | **Contract v1.2.** The calendar instance id a synced session came from; null for generator-seeded sessions. The sync matches sessions by this id, so a retitled or retimed event updates its session instead of duplicating it. |
+
+### Specialist 1-on-1 sessions: phil and mental (contract v1.7, Sprint 9)
+
+Owner's direction (TEAM.md "Sprint 9 pins"): sessions with Yannick (mental
+game) and Phil (performance) become handleable through the app, in the
+Life Time class-scheduling idiom. **Design keystone: a specialist 1-on-1 IS a
+session with capacity 1 and its own pool.** Nothing else about the schema is
+new — the existing booking transaction, parent book-for-kid, My Schedule
+derivation, and attendance all apply to `type: 'phil'`/`'mental'` sessions
+completely unchanged; only `capacity` (always 1) and `bookings.pool` (always
+`'specialist'`, [below](#bookingsbookingid)) differ from a training/tournament
+block.
+
+- **Production source stays the Google Calendar sync** (Sprint 4 pin,
+  unchanged): `scripts/sync-calendar-sessions.mjs`'s `classifyTitle()` gains
+  two branches, same case-insensitive-first-word convention as
+  training/tournament — summary starts with `Phil` → `type: 'phil'`; summary
+  starts with `Mental` or `Yannick` → `type: 'mental'`. Capacity is looked up
+  per type (`CAPACITY = { training: 15, tournament: 15, phil: 1, mental: 1 }`
+  in the script) and, because `capacity` is one of `SYNCED_FIELDS`, a re-sync
+  corrects it on an *existing* session too, not only on create — see
+  [Calendar → sessions sync](#calendar--sessions-sync) below for the updated
+  title-convention table.
+- **The emulator seed hand-adds slots** — `scripts/seed-firestore.mjs`'s
+  `addSpecialistSessions()` — because there is no calendar to sync against in
+  the emulator. Ids are `YYYY-MM-DD-s<n>` ([id-conventions table](#id-conventions)
+  above): the same `-x<n>` "extras, not from `generateSeason()`'s weekly
+  pattern" convention the holiday tournaments use, on a new letter (`s`, for
+  "specialist") so the two extras families can never collide. Covers the
+  `SPECIALIST_BOOKING_WINDOW_DAYS` days starting the day the script *runs*,
+  computed off the runtime clock (never hardcoded, so a re-run always covers
+  "the next two weeks" relative to whenever it actually runs) — Yannick works
+  Tue/Thu, late afternoon; Phil works Mon/Wed/Fri; both run three 45-minute
+  slots per working day. Every field this document defines for `sessions` is
+  written: `status: 'scheduled'`, `booked: 0`, `gcalEventId: null`
+  (hand-seeded, never a synced-from-calendar doc), `label: null`, `coachId:
+  null`, `special: false`, `overflow: false` — only `capacity: 1` and `type`
+  differ session-to-session. **Pre-existing gap, noted here rather than
+  silently carried forward:** the *generator-derived* sessions this same
+  script builds from `buildSeason()` do not currently write `status` or
+  `gcalEventId` at all (checked against the running code, not assumed) —
+  those two contract-v1.2 fields land only on hand-seeded sessions
+  (specialist slots here, and the holiday-tournament extras already inside
+  `buildSeason()`'s own output). Out of Sprint 9's scope to fix (it predates
+  this pin and touches the shared generator-sessions loop, not the
+  specialist addition) — flagged for the PM in the Sprint 9 report instead.
+  See the [seeding workflow](#seeding--emulator-workflow) below for the
+  sanity-output lines this produces.
+- **`data/specialists.js`** (new file, **routing lane owns it**, like
+  `tour.js`) is the single source for the specialist catalogue and its two
+  tunable knobs — this document names them rather than restating their
+  values, so a retune can't leave the docs stale:
+  - `SPECIALISTS` — the `{ id, name, discipline, sessionNoun }` catalogue;
+    `id` doubles as the session `type` and the catalogue's
+    `philSessions`/`yannickSessions` stems.
+  - `SPECIALIST_MONTHLY_CAP` — the monthly cap `createBooking`'s pool check
+    enforces per specialist **type**, per athlete, per calendar month (phil
+    and mental capped independently) — see the bookings cap note
+    [below](#bookingsbookingid).
+  - `SPECIALIST_BOOKING_WINDOW_DAYS` — the rolling booking-window length
+    `useSpecialistSlots()` shows and the seed's `addSpecialistSessions()`
+    mirrors (as a locally-named constant, not an import — this script does
+    not bundle `data/specialists.js`, the same "don't assume a sibling lane's
+    in-flight work has landed" call `seed-firestore.mjs` already makes for
+    `tour.js`'s `BRACKETS`).
 
 ### Calendar → sessions sync
 
@@ -145,18 +210,25 @@ node scripts/sync-calendar-sessions.mjs --from ... --to ... --dry-run \
 |---|---|
 | summary starts with `Training block`, timed (`start.dateTime`) | bookable session, `type: 'training'` |
 | summary starts with `Tournament`, timed | bookable session, `type: 'tournament'` |
+| summary starts with `Phil`, timed | bookable session, `type: 'phil'` — **contract v1.7 (Sprint 9)** |
+| summary starts with `Mental` or `Yannick`, timed | bookable session, `type: 'mental'` — **contract v1.7 (Sprint 9)** |
 | all-day event (`start.date` only) | skipped — display-only, whatever the title |
 | any other summary | skipped — display-only (counted, e.g. legacy `Academy Training`) |
 
 Mapped fields: id `YYYY-MM-DD-<n>` where n is the 0-based start-time order of
 that day's **bookable** events; `time` formatted like the generator
-(`'3:00 PM'`); `capacity` from `CAPACITY` in
-`frontend/src/portal/data/schedule.js` (replicated in the script with a source
-note); `label` null for the generic titles (`Training block`, `Tournament`,
-`Tournament block`) and the event summary verbatim otherwise; `booked` 0,
-`coachId` null, `special`/`overflow` false, `status` `'scheduled'`,
-`gcalEventId` the instance id. Times are read in `America/Chicago`, the
-calendar's timezone.
+(`'3:00 PM'`); `capacity` **per type** — `training`/`tournament` from
+`CAPACITY` in `frontend/src/portal/data/schedule.js` (replicated in the
+script with a source note), `phil`/`mental` always `1` (contract v1.7); since
+`capacity` is one of the script's `SYNCED_FIELDS` (see the masked-patch note
+just below) this corrects an existing session's capacity on re-sync too, not
+just a new one's. `label` null for the generic titles (`Training block`,
+`Tournament block`) and the event summary verbatim otherwise — this applies
+unchanged to `phil`/`mental` titles (a bare `"Phil"` or `"Yannick"` is not one
+of the generic phrases, so it becomes the label verbatim; nothing in v1.7
+special-cases specialist titles here). `booked` 0, `coachId` null,
+`special`/`overflow` false, `status` `'scheduled'`, `gcalEventId` the instance
+id. Times are read in `America/Chicago`, the calendar's timezone.
 
 **Upsert / cancel / delete semantics** (per run, over the `--from..--to` window):
 
@@ -193,9 +265,9 @@ One doc per athlete-session reservation. Doc id `{athleteId}_{sessionId}`.
 | `athleteId` | string | |
 | `sessionId` | string | Into `sessions/` — the session carries time/type/label; the booking does not duplicate them beyond the query fields below. |
 | `date` | string | `YYYY-MM-DD`, copied from the session so date-range queries need no join. |
-| `type` | string | `training \| tournament` — the session's type at booking time. |
-| `pool` | string | `training \| tournaments` — which allowance pool this spends (`poolFor()` in packages.js). Stored, not derived, so the cycle-usage query is a pure index scan. |
-| `status` | string | `confirmed \| cancelled \| attended \| noshow`. **Contract v1.4** (Sprint 6): the `confirmed -> attended \| noshow` transitions are attendance, pinned below. |
+| `type` | string | `training \| tournament \| phil \| mental` — the session's type at booking time. `phil`/`mental` are **contract v1.7 (Sprint 9)**. |
+| `pool` | string | `training \| tournaments \| specialist` — which allowance pool this spends (`poolFor()` in packages.js). Stored, not derived, so the cycle-usage query is a pure index scan. **`specialist`** is **contract v1.7 (Sprint 9)**: both `phil` and `mental` bookings carry it, and it is a **third, separate pool** — it never touches the `training`/`tournaments` allowances, automatically, because [the cycle-usage query](#4-bookings-athleteid-asc-pool-asc-date-asc--cycle-usage) filters on `pool`, and `poolFor('phil' \| 'mental')` never returns `'training'` or `'tournaments'`. A `specialist` booking is capped separately too — see the monthly-cap note below. |
+| `status` | string | `confirmed \| cancelled \| attended \| noshow`. **Contract v1.4** (Sprint 6): the `confirmed -> attended \| noshow` transitions are attendance, pinned below. **Contract v1.7** (Sprint 9) adds a **member-initiated** transition, `confirmed <-> cancelled`, on any pool — see [Cancellation and re-booking](#cancellation-and-re-booking-contract-v17-sprint-9) below. |
 | `householdId` | string | Denormalized from the athlete for the parent's cross-children view and household-scoped rules. |
 | `createdBy` | string | uid of the account that made the booking (parent or athlete). **Contract v1.4:** for a parent-created booking this is the *parent's* uid, not the athlete's — see the linkage note below. |
 | `createdAt` | timestamp | |
@@ -207,6 +279,17 @@ makes that a cheap indexed read. There is no `used` counter on the athlete,
 package, or allowance anywhere, so there is nothing to drift when a booking is
 cancelled, a session is closed, or a write is retried. (`sessions.booked` is a
 per-session capacity display counter, not an allowance counter.)
+
+**The specialist monthly cap is derived the same way (contract v1.7, Sprint
+9).** `createBooking`'s pool check for `pool == 'specialist'` counts the
+athlete's **non-cancelled** `bookings` of that **type** (`phil` or `mental`,
+counted independently) within the current calendar month, and caps at
+`SPECIALIST_MONTHLY_CAP` — the tunable knob named in
+[Specialist 1-on-1 sessions](#specialist-1-on-1-sessions-phil-and-mental-contract-v17-sprint-9)
+above and owned by `data/specialists.js` (routing lane); this document names
+it rather than restating its value so retuning it can't leave the docs stale.
+Same discipline as every other allowance in this schema: nothing is stored,
+so nothing can drift.
 
 ### Booking transaction, attendance, and parent linkage (contract v1.4, Sprint 6)
 
@@ -286,6 +369,58 @@ Contract v1.4 adds **zero** new denormalized fields for this: `sessions.booked`
 remains the only stored counter anywhere in the schema; allowance usage,
 attendance history, and the roster are all live queries, so there is nothing
 else that can drift.
+
+### Cancellation and re-booking (contract v1.7, Sprint 9)
+
+New in Sprint 9 (TEAM.md "Sprint 9 pins"), and **applies to every booking
+pool** — training, tournaments, and specialist alike, not just the new
+specialist types. A capacity-1 specialist slot is what made this urgent (an
+unused 1-on-1 is a dead hour for the specialist), but the schema and
+transaction are pool-agnostic.
+
+**Who:** the athlete's own `users` account, or the household's parent, may
+cancel a `confirmed` booking of their own athlete's.
+
+**Cancel is one transaction — the exact mirror of create.** Reads the
+booking, then writes both of:
+
+1. `bookings/{athleteId}_{sessionId}.status` `confirmed -> cancelled`;
+2. `sessions/{sessionId}.booked` `- 1` (never below `0`) — the same
+   [single-writer `booked` rule](#booking-transaction-attendance-and-parent-linkage-contract-v14-sprint-6)
+   from contract v1.4, whose rules clause already reserved the `booked - 1`
+   shape for "the future cancellation path below." Sprint 9 is that path
+   landing: no rules shape change, only the routing lane's rules
+   verifying/extending the existing diff check for `-1` the same way it
+   already does for `+1`.
+
+**Client gate, not a stored field:** cancellable through the day *before* the
+session; day-of shows a "contact the academy" message instead of the button.
+This is a UI-layer check against `sessions.date` — nothing new is stored for
+it. **Accepted v1 gap:** `firestore.rules` allows the `confirmed -> cancelled`
+transition without re-checking the date server-side (flagged in TEAM.md as a
+deliberate v1 gap, not an oversight).
+
+**Re-booking a cancelled doc is an UPDATE, not a new doc.** Because the
+booking id is deterministic (`{athleteId}_{sessionId}`, contract v1.1), a
+member booking the *same* athlete back into the *same* session after
+cancelling hits the existing doc. `createBooking`'s transaction treats an
+existing doc whose `status` is already `'cancelled'` as its update path
+instead of its create path: `status -> 'confirmed'`, `sessions.booked + 1`,
+same doc id, same keyspace guarantee (one booking per athlete per session)
+that has held since v1.1 — a cancel-then-rebook never produces two docs for
+one athlete/session pair.
+
+**Rules shape (routing lane implements; documented here as the schema
+record):** a new *member-booking update* branch, distinct from the existing
+*coach-attendance* update branch — own athlete or own household's parent
+(the same three-way linkage check as create, [above](#booking-transaction-attendance-and-parent-linkage-contract-v14-sprint-6)),
+diff `hasOnly(['status'])`, and the transition must be **exactly**
+`confirmed -> cancelled` or `cancelled -> confirmed` — no other `status`
+value pair is a legal member-initiated write (a member can't self-mark
+`attended`/`noshow`, and can't cancel an already-`attended`/`noshow`
+booking). Per the Sprint 7 hotfix precedent elsewhere in this schema, the
+rule needs no `substring()` — a `status`-pair equality check, not a
+string-matching one.
 
 ### `contractLogs/{athleteId}_{date}`
 
@@ -676,6 +811,33 @@ point a `(bracket ASC, <field> ASC)` composite might become real — not
 before, and note it would need a second *distinct* field to be a composite
 at all, same caveat as every entry above.
 
+### v1.7 query additions (Sprint 9 — specialist sessions, cancellation) — no `firestore.indexes.json` changes
+
+Two new read patterns, both already served:
+
+- **Specialist monthly cap check** — `bookings where athleteId == :id and
+  pool == 'specialist' and date >= :monthStart and date <= :monthEnd`, then
+  filtered to one `type` (`phil` or `mental`) and non-`cancelled` `status` in
+  memory. This is the **identical shape** to the existing
+  [cycle-usage index](#4-bookings-athleteid-asc-pool-asc-date-asc--cycle-usage)
+  (`athleteId ASC, pool ASC, date ASC`) that already serves the
+  training/tournaments allowance check — `pool == 'specialist'` rides that
+  same composite, and `type`/`status` are filtered client-side exactly the
+  way `status` already is for the other two pools (the same "a cycle holds at
+  most a couple dozen docs" reasoning that index's own note gives). Nothing
+  added.
+- **Cancel and re-book** — both are a `bookings/{athleteId}_{sessionId}`
+  read-then-write **by document id**, the identical shape the
+  [booking-capacity transaction](#v14-query-additions-sprint-6--no-firestoreindexesjson-changes)
+  already established has no index implication at all. Document gets/sets
+  never touch a query index.
+
+If a future sprint needs a query that filters specialist bookings by `type`
+at the database layer instead of in memory (e.g. a specialist's own roster of
+their upcoming 1-on-1s, deferred per TEAM.md's Sprint 9 "Deferred, on the
+record" note), that is the point a `(type ASC, date ASC)` or similar
+composite becomes real — not before.
+
 ## Seeding & emulator workflow
 
 Both npm scripts live in the **root `package.json`** (created for this — the
@@ -721,3 +883,17 @@ The seed script:
   scores produce. The referenced sessions' attendance (`bookings.status`) is
   kept coherent with the results — every athlete who has a result there is
   `attended`, not merely `confirmed`.
+- seeds specialist 1-on-1 `sessions` (contract v1.7, Sprint 9) —
+  `addSpecialistSessions()` hand-adds `YYYY-MM-DD-s<n>` slots (Yannick
+  Tue/Thu late afternoon, Phil Mon/Wed/Fri, three 45-minute slots per working
+  day) for the `SPECIALIST_BOOKING_WINDOW_DAYS` days starting the day the
+  script *runs* — computed off `new Date()` at run time, never a hardcoded
+  date, so the window always tracks "the next two weeks" relative to whenever
+  the seed actually runs — plus ONE pre-booked `mental` booking for jordan
+  (`pool: 'specialist'`, `status: 'confirmed'`, `createdBy: 'parent-dana'`)
+  against the first Yannick slot the window generates, with that session's
+  `booked` incremented to match (the same invariant as the Whitfield bookings
+  above). See [Specialist 1-on-1 sessions](#specialist-1-on-1-sessions-phil-and-mental-contract-v17-sprint-9)
+  above for the full field shape and the id convention. The script's sanity
+  output lists every hand-seeded specialist session and the pre-booked
+  booking by id.
