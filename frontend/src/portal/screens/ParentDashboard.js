@@ -34,12 +34,22 @@ import { useHousehold } from '../hooks';
  *   navigation state. Lives at the card's foot (owner's report 2026-09-10:
  *   the old corner chip crowded the standing badge) and stops its own click
  *   from bubbling to the card's open-profile tap.
+ * @param {() => void} [onBookCoaching]  Sprint 9 pin (TEAM.md, "specialist
+ *   1-on-1s"): the ONE full-width "Book 1-on-1 coaching" action under the
+ *   kid cards (not per-card - SpecialistBooking itself carries the child
+ *   selector once opened, via its own initialAthleteId prop). Routing wires
+ *   this to a plain navigate('/portal/coaching') the same way onBookFor
+ *   navigates to /portal/book; PortalRoutes.js wiring is the PM's call at
+ *   integration (this lane only adds the prop and the button - flagged in
+ *   the sprint report). Hidden when not supplied, same convention as every
+ *   other optional affordance in this file.
  */
 export default function ParentDashboard({
   variant = 'three',
   bare = false,
   onOpenAthlete,
   onBookFor,
+  onBookCoaching,
   onRetry,
 }) {
   const { data, loading, error } = useHousehold({ variant });
@@ -105,6 +115,27 @@ export default function ParentDashboard({
             onBookFor={onBookFor ? () => onBookFor(child.id) : undefined}
           />
         ))}
+
+        {/*
+          Sprint 9 pin (TEAM.md): ONE full-width coaching entry point under
+          the kid cards, not a per-card affordance - SpecialistBooking's own
+          "Booking for" selector (Sprint 9's mirror of BookSession's child
+          picker) is where a specific child gets chosen. Secondary variant,
+          same footer-Button precedent as each ChildCard's own "Book a
+          session" button (Sprint 7) - a solid green fill here would read as
+          equal or higher priority than the per-kid Book buttons above it,
+          which flag 02 reserves for a screen's one primary action.
+        */}
+        {onBookCoaching ? (
+          <Button
+            variant="secondary"
+            height={44}
+            style={{ boxShadow: 'none' }}
+            onClick={onBookCoaching}
+          >
+            Book 1-on-1 coaching
+          </Button>
+        ) : null}
       </div>
       )}
     </PhoneFrame>

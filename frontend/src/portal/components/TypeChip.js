@@ -14,6 +14,13 @@ const TYPES = {
   cancelled: { label: 'Cancelled', fg: color.error, bg: tint.red, bd: tint.redBorder },
   makeup: { label: 'Makeup', fg: color.primary, bg: tint.green, bd: color.primary },
   diagnostic: { label: 'Diagnostic', fg: color.primary, bg: tint.green, bd: color.primary },
+  // Sprint 9 pins (docs/portal/TEAM.md, contract v1.7): specialist 1-on-1s
+  // with Phil (performance) and Yannick (mental game). Same green treatment
+  // as makeup/diagnostic - a specialist session is a positive-value booking,
+  // not a caution/error state - distinguished from those by label text alone
+  // rather than a new tint (no new colors per the frontend lane's brief).
+  phil: { label: 'Phil 1-on-1', fg: color.primary, bg: tint.green, bd: color.primary },
+  mental: { label: 'Mental game', fg: color.primary, bg: tint.green, bd: color.primary },
 };
 
 export default function TypeChip({ type = 'training', style }) {

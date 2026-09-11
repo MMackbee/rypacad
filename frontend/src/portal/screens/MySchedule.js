@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { BLOCKS, BLOCK_DAYS, color, font, radius } from '../tokens';
+import { BLOCKS, BLOCK_DAYS, color, font, radius, tint } from '../tokens';
 import BottomTabBar from '../components/BottomTabBar';
 import Button from '../components/Button';
 import MediaPlaceholder from '../components/MediaPlaceholder';
@@ -10,20 +10,60 @@ import AllowancePools from '../components/AllowancePools';
 import SkeletonCard, { SkeletonBar, SkeletonSessionCard } from '../components/Skeleton';
 import { Banner, Body, Card, ErrorNotice, ScreenTitle, SectionLabel } from '../components/Primitives';
 import { useSchedule } from '../hooks';
+// Pure calendar helper, not response data - same seam rule BookSession and
+// CommitmentContract already follow (see their own imports of this module).
+import { todayISO } from '../data/calendar';
 
 /**
  * 04 · My Schedule - athlete.
  * States: Upcoming, Empty, Cancelled session shown.
  *
+ * Sprint 9 pin (TEAM.md, "specialist 1-on-1s", cancellation): specialist
+ * bookings render with the same SessionCard/TypeChip path as every other
+ * session (the type chip picks up 'phil'/'mental' from TypeChip.js, and the
+ * name is whatever the hook's displaySession already formatted - "<sessionNoun>
+ * · <name>" for an unlabeled specialist session - this screen renders it
+ * verbatim, never re-derives it). Every cancellable upcoming item now gets a
+ * "Cancel reservation" affordance behind a confirm sheet; a day-of item shows
+ * the call-the-academy line instead, since the pinned `cancellable` rule
+ * (status 'confirmed' && date > today) already excludes today by itself.
+ *
  * @param {'upcoming'|'empty'|'cancelled'} variant
  * @param {() => void} [onRetry]  Re-fetch after a load failure.
+ * @param {boolean} [demoCancellable]  HARNESS-ONLY, not part of the pinned
+ *   contract. useSchedule doesn't return `cancellable`/`bookingId` per item
+ *   in this worktree yet (routing lane's parallel worktree owns hooks/
+ *   index.js) - the whole cancel UI is honestly unreachable on real seed/live
+ *   data until that lands, same as a missing hook export elsewhere in this
+ *   codebase (Roster.js, TourStandings.js). This flag lets the states gallery
+ *   preview the cancel flow by patching cancellable/bookingId onto each
+ *   non-today upcoming item locally, purely for review - no real caller ever
+ *   passes it. Flagged in the sprint report.
  */
-export default function MySchedule({ variant = 'upcoming', bare = false, onBook, onRetry }) {
-  const { data, loading, error } = useSchedule({ variant });
+export default function MySchedule({ variant = 'upcoming', bare = false, onBook, onRetry, demoCancellable = false }) {
+  const scheduleState = useSchedule({ variant });
+  const { data, loading, error } = scheduleState;
   const [tab, setTab] = useState('upcoming');
+  // The upcoming item currently in the confirm sheet ('keep it' / 'cancel
+  // reservation'), or null when the sheet is closed.
+  const [cancelTarget, setCancelTarget] = useState(null);
 
   const past = tab === 'past';
-  const sessions = (past ? data?.past : data?.sessions) ?? [];
+  const today = todayISO();
+  /**
+   * See the `demoCancellable` doc above - a non-today item gets a synthetic
+   * `cancellable`/`bookingId` so the harness can exercise the real cancel
+   * sheet below without a live hook. A no-op when the flag is off, and a
+   * no-op for any item that already carries its own real `cancellable` once
+   * routing's hook update lands (the ?? below never overrides a real value).
+   */
+  const withDemoCancel = (list) =>
+    demoCancellable
+      ? list.map((s) =>
+          s.date === today ? s : { ...s, cancellable: s.cancellable ?? true, bookingId: s.bookingId ?? s.id }
+        )
+      : list;
+  const sessions = withDemoCancel((past ? data?.past : data?.sessions) ?? []);
   // The cancellation notice belongs to the upcoming view - it is a claim about
   // a session that will not run, not a record of one that did.
   const cancelled = past ? null : data?.cancelled ?? null;
@@ -36,6 +76,23 @@ export default function MySchedule({ variant = 'upcoming', bare = false, onBook,
     else acc.push({ label: s.dayLabel, isToday: s.isToday, items: [s] });
     return acc;
   }, []);
+
+  /**
+   * Sprint 9 pin (TEAM.md): "useSchedule ... gains cancel(bookingId)" - not
+   * present on this hook's return in this worktree yet, the same
+   * missing-export situation Roster.js/TourStandings.js handle with a
+   * namespace-import fallback, scoped here to one method on an
+   * already-existing hook's return value rather than the whole hook (useSchedule
+   * itself is real; only this additional method is pending). Falling back to
+   * a rejecting stub keeps the confirm sheet's action honestly failing - an
+   * inline error in the sheet, never a silent no-op - until the real method
+   * lands.
+   */
+  const cancel =
+    scheduleState.cancel ||
+    (async () => {
+      throw new Error('Cancelling is not available yet.');
+    });
 
   return (
     <PhoneFrame
@@ -67,14 +124,24 @@ export default function MySchedule({ variant = 'upcoming', bare = false, onBook,
             allowance={allowance}
             days={days}
             onBook={onBook}
+            onCancelRequest={setCancelTarget}
           />
         )}
       </div>
+
+      {cancelTarget ? (
+        <CancelSheet
+          session={cancelTarget}
+          onClose={() => setCancelTarget(null)}
+          onConfirm={() => cancel(cancelTarget.bookingId)}
+          onCancelled={() => setCancelTarget(null)}
+        />
+      ) : null}
     </PhoneFrame>
   );
 }
 
-function ScheduleBody({ past, sessions, cancelled, allowance, days, onBook }) {
+function ScheduleBody({ past, sessions, cancelled, allowance, days, onBook, onCancelRequest }) {
   return (
     <>
         {/*
@@ -136,25 +203,127 @@ function ScheduleBody({ past, sessions, cancelled, allowance, days, onBook }) {
             <SectionLabel tone={day.isToday ? color.primary : color.textTertiary}>
               {day.label}
             </SectionLabel>
-            {day.items.map((s) => (
-              <SessionCard
-                key={s.id}
-                time={s.time}
-                meridiem={s.meridiem}
-                type={s.type}
-                name={s.name}
-                meta={s.meta}
-                variant={s.isToday ? 'live' : 'default'}
-                trailing={
-                  s.badge ? (
-                    <StatusBadge tone={s.badge.tone}>{s.badge.label}</StatusBadge>
-                  ) : null
-                }
-              />
-            ))}
+            {day.items.map((s) => {
+              // Sprint 9 pin (TEAM.md): the pinned cancellable rule (status
+              // 'confirmed' && date > today) already excludes a day-of item -
+              // this screen shows the honest reason (call the front desk)
+              // rather than silently rendering nothing where a control might
+              // otherwise be.
+              const dayOf = !past && s.isToday;
+              return (
+                <SessionCard
+                  key={s.id}
+                  time={s.time}
+                  meridiem={s.meridiem}
+                  type={s.type}
+                  name={s.name}
+                  meta={s.meta}
+                  variant={s.isToday ? 'live' : 'default'}
+                  trailing={
+                    s.badge ? (
+                      <StatusBadge tone={s.badge.tone}>{s.badge.label}</StatusBadge>
+                    ) : null
+                  }
+                  action={
+                    past ? null : dayOf ? (
+                      <Body size={11} tone={color.textTertiary}>
+                        Same-day cancellations aren't available in the app — contact the front
+                        desk.
+                      </Body>
+                    ) : s.cancellable && s.bookingId ? (
+                      <Button
+                        variant="dangerOutline"
+                        height={44}
+                        style={{ boxShadow: 'none' }}
+                        onClick={() => onCancelRequest(s)}
+                      >
+                        Cancel reservation
+                      </Button>
+                    ) : null
+                  }
+                />
+              );
+            })}
           </div>
         ))}
     </>
+  );
+}
+
+/**
+ * Sprint 9 pin (TEAM.md, "specialist 1-on-1s", cancellation) - "tap ->
+ * sheet: keep / cancel", the same bottom-sheet idiom CommitmentContract's
+ * DaySheet already uses (overlay + slide-up panel, saving/error state local
+ * to the sheet). Restates the session's own facts so the tap being confirmed
+ * is unambiguous, and never closes itself on failure - a failed cancel
+ * leaves the booking exactly as it was, sheet open, honest inline error.
+ */
+function CancelSheet({ session, onClose, onConfirm, onCancelled }) {
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState(null);
+
+  const handleCancel = async () => {
+    setSaving(true);
+    setError(null);
+    try {
+      await onConfirm();
+      onCancelled();
+    } catch (err) {
+      setSaving(false);
+      setError(
+        err && typeof err.message === 'string' && err.message
+          ? err.message
+          : 'The reservation could not be cancelled. Try again.'
+      );
+    }
+  };
+
+  return (
+    <div
+      onClick={saving ? undefined : onClose}
+      style={{
+        position: 'absolute',
+        inset: 0,
+        background: tint.overlay,
+        display: 'flex',
+        alignItems: 'flex-end',
+      }}
+    >
+      <div
+        onClick={(e) => e.stopPropagation()}
+        style={{
+          width: '100%',
+          background: color.surface,
+          borderTop: `1px solid ${color.border}`,
+          borderRadius: `${radius.cardLarge} ${radius.cardLarge} 0 0`,
+          padding: '20px 22px 26px',
+        }}
+      >
+        <ScreenTitle size={19}>Cancel this reservation?</ScreenTitle>
+        <Body size={12} style={{ marginTop: 8 }}>
+          {session.dayLabel} · {session.time} {session.meridiem} · {session.name}
+        </Body>
+        {error ? (
+          <Body size={12} tone={color.error} style={{ marginTop: 10 }}>
+            {error}
+          </Body>
+        ) : null}
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 10, marginTop: 16 }}>
+          <Button
+            variant="dangerOutline"
+            height={50}
+            loading={saving}
+            style={{ boxShadow: 'none' }}
+            onClick={handleCancel}
+          >
+            {saving ? 'Cancelling' : 'Cancel reservation'}
+          </Button>
+          <Button variant="outline" height={50} disabled={saving} style={{ boxShadow: 'none' }} onClick={onClose}>
+            Keep it
+          </Button>
+        </div>
+      </div>
+    </div>
   );
 }
 
