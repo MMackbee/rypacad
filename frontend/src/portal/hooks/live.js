@@ -15,6 +15,7 @@
 
 import {
   collection,
+  collectionGroup,
   deleteDoc,
   doc,
   documentId,
@@ -28,6 +29,7 @@ import {
   setDoc,
   updateDoc,
   where,
+  writeBatch,
 } from 'firebase/firestore';
 import { auth, db } from '../../firebase';
 import { bump } from './invalidate';
@@ -881,5 +883,436 @@ export async function saveTournamentResults(sessionId, date, entries) {
     return { sessionId, count: entries.length };
   } catch (err) {
     throw wrap(err, 'saveTournamentResults');
+  }
+}
+
+/* ------------------------------------------------------------------------- *
+ * Sprint 10 ("make it real": intake paths + live staff surfaces) — contract
+ * v1.8. Same discipline as everything above: one Firestore touchpoint per
+ * function, LiveDataError throughout, bump() the affected collection(s)
+ * exactly once per write, never more than the write actually changed.
+ * ------------------------------------------------------------------------- */
+
+/**
+ * One enrollmentRequests/{uid} doc, or null when the guardian has never
+ * submitted (contract v1.8, A). Unlike every other fetch* in this file this
+ * one does NOT throw NOT_FOUND for a missing doc — "no request yet" is a
+ * defined UI state (NotProvisioned's "start enrollment"), not an error.
+ */
+export async function fetchEnrollmentRequest(uid) {
+  if (!uid) throw new LiveDataError(ERR.INVALID, 'fetchEnrollmentRequest: uid is required.');
+  try {
+    const snap = await getDoc(doc(db, 'enrollmentRequests', uid));
+    return snap.exists() ? { id: snap.id, ...snap.data() } : null;
+  } catch (err) {
+    throw wrap(err, 'fetchEnrollmentRequest');
+  }
+}
+
+/** The signed-in guardian's own request — used before a users/{uid} doc exists, so this reads auth directly rather than through fetchCurrentUser(). */
+export async function fetchMyEnrollmentRequest() {
+  const user = requireUser();
+  return fetchEnrollmentRequest(user.uid);
+}
+
+/**
+ * Submit or resubmit the signed-in guardian's enrollment request — ONE
+ * function for both, matching firestore.rules' single update clause: create
+ * when no doc exists yet, otherwise update (the 'declined' -> 'pending'
+ * resubmit is just an update whose current status happens to be 'declined').
+ * `guardian`/`athletes`/`consents` are exactly the contract v1.8 shape; the
+ * caller (useEnrollment) is responsible for their contents, this function
+ * only adds the identity/status/timestamp fields the rules require.
+ */
+export async function submitMyEnrollmentRequest({ guardian, athletes, consents }) {
+  const user = requireUser();
+  const ref = doc(db, 'enrollmentRequests', user.uid);
+  try {
+    const existing = await getDoc(ref);
+    const now = serverTimestamp();
+    const payload = { guardian, athletes, consents, status: 'pending', updatedAt: now };
+    if (existing.exists()) {
+      await updateDoc(ref, payload);
+    } else {
+      await setDoc(ref, { ...payload, declineReason: null, createdAt: now, reviewedBy: null, reviewedAt: null });
+    }
+    bump('enrollmentRequests');
+    return { id: user.uid, ...payload, updatedAt: null };
+  } catch (err) {
+    throw wrap(err, 'submitMyEnrollmentRequest');
+  }
+}
+
+/** Every pending enrollmentRequests doc — the ops/owner approval queue. */
+export async function fetchPendingEnrollmentRequests() {
+  try {
+    const snap = await getDocs(query(collection(db, 'enrollmentRequests'), where('status', '==', 'pending')));
+    return snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+  } catch (err) {
+    throw wrap(err, 'fetchPendingEnrollmentRequests');
+  }
+}
+
+/**
+ * Approve one enrollmentRequests/{uid} — the pinned "one batched write"
+ * (contract v1.8, A): households/{autoId} from guardian, athletes/{autoId}
+ * per submitted athlete (all in the new household, coachId null — coach
+ * assignment is a separate, unbuilt admin action), users/{uid} for the
+ * guardian as a parent, and the request itself flipped to 'approved'. All
+ * five-plus writes land in one writeBatch so a half-approved family (a
+ * household with no linked users doc, say) can never happen.
+ *
+ * households.guardian mirrors DATA-MODEL.md's existing shape exactly
+ * ({ name, email, phone } as one map) rather than inventing flat
+ * guardianEmail/guardianPhone fields.
+ *
+ * Kids' own logins are NOT created here (contract v1.8: "a later
+ * provisioning step, parent-managed is the default") — only the guardian's
+ * users doc is written.
+ */
+export async function approveEnrollmentRequest(uid) {
+  if (!uid) throw new LiveDataError(ERR.INVALID, 'approveEnrollmentRequest: uid is required.');
+  const user = requireUser();
+  try {
+    const reqSnap = await getDoc(doc(db, 'enrollmentRequests', uid));
+    if (!reqSnap.exists()) {
+      throw new LiveDataError(ERR.NOT_FOUND, 'This enrollment request no longer exists.');
+    }
+    const request = reqSnap.data();
+    const batch = writeBatch(db);
+
+    const householdRef = doc(collection(db, 'households'));
+    batch.set(householdRef, {
+      name: request.guardian?.name ? `${request.guardian.name} family` : 'New family',
+      guardian: {
+        name: request.guardian?.name ?? null,
+        email: request.guardian?.email ?? null,
+        phone: request.guardian?.phone ?? null,
+      },
+      stripeCustomerId: null,
+      stripeSubscriptionId: null,
+    });
+
+    const athleteIds = [];
+    for (const a of request.athletes || []) {
+      const athleteRef = doc(collection(db, 'athletes'));
+      batch.set(athleteRef, {
+        name: a.name ?? null,
+        dob: a.dob ?? null,
+        householdId: householdRef.id,
+        packageId: a.packageId ?? null,
+        contractMinutes: a.contractMinutes ?? null,
+        coachId: null,
+      });
+      athleteIds.push(athleteRef.id);
+    }
+
+    const userRef = doc(db, 'users', uid);
+    batch.set(userRef, {
+      role: 'parent',
+      householdId: householdRef.id,
+      athleteId: null,
+      staff: false,
+      specialistId: null,
+      displayName: request.guardian?.name ?? null,
+      email: request.guardian?.email ?? null,
+    });
+
+    batch.update(doc(db, 'enrollmentRequests', uid), {
+      status: 'approved',
+      reviewedBy: user.uid,
+      reviewedAt: serverTimestamp(),
+      updatedAt: serverTimestamp(),
+    });
+
+    await batch.commit();
+    // Four collections changed - one bump each, matching the "single bump()
+    // per write" discipline (bump the collection, not per-document).
+    bump('households');
+    bump('athletes');
+    bump('users');
+    bump('enrollmentRequests');
+    return { uid, householdId: householdRef.id, athleteIds };
+  } catch (err) {
+    throw wrap(err, 'approveEnrollmentRequest');
+  }
+}
+
+/** Decline one enrollmentRequests/{uid} with a reason the guardian will see. */
+export async function declineEnrollmentRequest(uid, reason) {
+  if (!uid) throw new LiveDataError(ERR.INVALID, 'declineEnrollmentRequest: uid is required.');
+  const user = requireUser();
+  try {
+    await updateDoc(doc(db, 'enrollmentRequests', uid), {
+      status: 'declined',
+      declineReason: typeof reason === 'string' && reason.trim() ? reason.trim() : null,
+      reviewedBy: user.uid,
+      reviewedAt: serverTimestamp(),
+      updatedAt: serverTimestamp(),
+    });
+    bump('enrollmentRequests');
+    return { uid, status: 'declined' };
+  } catch (err) {
+    throw wrap(err, 'declineEnrollmentRequest');
+  }
+}
+
+/**
+ * Set (or clear) an athlete's Commitment Contract tier (contract v1.8, B) —
+ * the athlete's own user or the household parent, enforced by
+ * firestore.rules' contractMinutesUpdateOk(), not here. `minutes` must be
+ * one of the three real tiers or null (no tier / "not started").
+ */
+export async function setContractTier({ athleteId, minutes }) {
+  if (!athleteId) throw new LiveDataError(ERR.INVALID, 'setContractTier: athleteId is required.');
+  if (minutes != null && ![20, 45, 95].includes(minutes)) {
+    throw new LiveDataError(ERR.INVALID, 'setContractTier: minutes must be 20, 45, 95 or null.');
+  }
+  requireUser();
+  try {
+    await updateDoc(doc(db, 'athletes', athleteId), { contractMinutes: minutes });
+    bump('athletes');
+    return { athleteId, contractMinutes: minutes };
+  } catch (err) {
+    throw wrap(err, 'setContractTier');
+  }
+}
+
+/**
+ * Every diagnostics capture for one athlete (contract v1.8, C), newest
+ * first. `publishedOnly` is how a member caller (athlete/parent) stays
+ * inside firestore.rules' PUBLISHED-only read grant; a staff caller omits it
+ * and sees drafts too. Sorted client-side rather than via orderBy() so no
+ * new composite index is needed for a subcollection this small (a handful
+ * of captures per athlete, ever).
+ */
+export async function fetchAthleteDiagnostics(athleteId, { publishedOnly = false } = {}) {
+  if (!athleteId) {
+    throw new LiveDataError(ERR.INVALID, 'fetchAthleteDiagnostics: athleteId is required.');
+  }
+  try {
+    const filters = publishedOnly ? [where('status', '==', 'published')] : [];
+    const snap = await getDocs(query(collection(db, 'athletes', athleteId, 'diagnostics'), ...filters));
+    const rows = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+    rows.sort((a, b) => (b.capturedAt?.toMillis?.() ?? 0) - (a.capturedAt?.toMillis?.() ?? 0));
+    return rows;
+  } catch (err) {
+    throw wrap(err, 'fetchAthleteDiagnostics');
+  }
+}
+
+/**
+ * Save a diagnostics capture (contract v1.8, C) — upserts the athlete's
+ * single OPEN draft (queried by status == 'draft', never a guessed id: this
+ * collection uses auto-ids, so there is no `{athleteId}_{x}` keyspace to
+ * probe the way bookings/contractLogs do). `publish: true` flips the
+ * capture to 'published'; because the query only ever finds a doc whose
+ * status is still 'draft', a SECOND save after publishing finds nothing and
+ * creates a fresh capture instead of reopening the published one — exactly
+ * "a second publish creates a new capture; history is the collection."
+ */
+export async function saveDiagnosticCapture(athleteId, { values, notes = null, publish = false }) {
+  if (!athleteId) {
+    throw new LiveDataError(ERR.INVALID, 'saveDiagnosticCapture: athleteId is required.');
+  }
+  const user = requireUser();
+  try {
+    const status = publish ? 'published' : 'draft';
+    const now = serverTimestamp();
+    const openDraft = await getDocs(
+      query(collection(db, 'athletes', athleteId, 'diagnostics'), where('status', '==', 'draft'))
+    );
+    if (!openDraft.empty) {
+      const ref = openDraft.docs[0].ref;
+      await updateDoc(ref, { values, notes, status, updatedAt: now });
+      bump('diagnostics');
+      return { id: ref.id, athleteId, status };
+    }
+    const ref = doc(collection(db, 'athletes', athleteId, 'diagnostics'));
+    await setDoc(ref, {
+      athleteId,
+      capturedBy: user.uid,
+      capturedAt: now,
+      updatedAt: now,
+      status,
+      values,
+      notes,
+    });
+    bump('diagnostics');
+    return { id: ref.id, athleteId, status };
+  } catch (err) {
+    throw wrap(err, 'saveDiagnosticCapture');
+  }
+}
+
+/**
+ * Every athlete, unfiltered (contract v1.8, D) — the admin dashboard's
+ * enrolled-count/by-package/who-needs-a-call surfaces. Provable for
+ * mental/ops/owner unconditionally (the athletes read rule's staff clause
+ * does not reference resource.data at all), so no equality filter is
+ * needed the way parent/coach list reads require one.
+ */
+export async function fetchAllAthletes() {
+  try {
+    const snap = await getDocs(collection(db, 'athletes'));
+    return snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+  } catch (err) {
+    throw wrap(err, 'fetchAllAthletes');
+  }
+}
+
+/**
+ * Non-cancelled... actually EVERY booking with status 'noshow' from a given
+ * date onward (contract v1.8, D's "no-shows this month"). Needs a NEW
+ * composite index — bookings (status ASC, date ASC) — that this routing
+ * lane does NOT own (firestore.indexes.json is the db lane's file); flagged
+ * prominently in the routing report as a cross-lane dependency. Provable for
+ * staff the same unconditional way fetchAllAthletes is.
+ */
+export async function fetchNoShowBookingsSince(dateISO) {
+  if (!dateISO) {
+    throw new LiveDataError(ERR.INVALID, 'fetchNoShowBookingsSince: dateISO is required.');
+  }
+  try {
+    const snap = await getDocs(
+      query(collection(db, 'bookings'), where('status', '==', 'noshow'), where('date', '>=', dateISO))
+    );
+    return snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+  } catch (err) {
+    throw wrap(err, 'fetchNoShowBookingsSince');
+  }
+}
+
+/**
+ * Every contractLogs doc from a given date onward, across every athlete
+ * (contract v1.8, D's "contract behind" — ONE range query, single-field
+ * filter, no composite index needed, per the pin's own "db lane confirms
+ * the query is index-free"). Provable for staff unconditionally, same as
+ * fetchAllAthletes.
+ */
+export async function fetchContractLogsSince(dateISO) {
+  if (!dateISO) {
+    throw new LiveDataError(ERR.INVALID, 'fetchContractLogsSince: dateISO is required.');
+  }
+  try {
+    const snap = await getDocs(query(collection(db, 'contractLogs'), where('date', '>=', dateISO)));
+    return snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+  } catch (err) {
+    throw wrap(err, 'fetchContractLogsSince');
+  }
+}
+
+/**
+ * Every diagnostics capture academy-wide, via the collectionGroup read
+ * firestore.rules' `/{path=**}/diagnostics/{captureId}` match grants
+ * (contract v1.8, C + D). Unfiltered and sorted/filtered client-side
+ * (status === 'published' for the "no diagnostic yet" list) rather than a
+ * `where('status', ...)` server-side filter, so this needs no
+ * collection-group-scoped index at all — the routing lane's own
+ * "index-free where reasonably possible" preference, since collection-group
+ * equality indexes are NOT automatic the way single-collection ones are.
+ */
+export async function fetchAllDiagnostics() {
+  try {
+    const snap = await getDocs(collectionGroup(db, 'diagnostics'));
+    return snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+  } catch (err) {
+    throw wrap(err, 'fetchAllDiagnostics');
+  }
+}
+
+/**
+ * Every users doc with staff == true (contract v1.8, E) — the Staff & Roles
+ * list. Single-field equality, automatically indexed, provable for
+ * ops/owner per the widened users read rule.
+ */
+export async function fetchStaffUsers() {
+  try {
+    const snap = await getDocs(query(collection(db, 'users'), where('staff', '==', true)));
+    return snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+  } catch (err) {
+    throw wrap(err, 'fetchStaffUsers');
+  }
+}
+
+/** Every pending staffInvites doc (contract v1.8, E). */
+export async function fetchPendingStaffInvites() {
+  try {
+    const snap = await getDocs(query(collection(db, 'staffInvites'), where('status', '==', 'pending')));
+    return snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+  } catch (err) {
+    throw wrap(err, 'fetchPendingStaffInvites');
+  }
+}
+
+/**
+ * Create a staff invite (contract v1.8, E) — owner-only, enforced by
+ * firestore.rules, not here. Email is lowercased CLIENT-side (the rules
+ * deliberately do not re-check it — see the staffInvites match's own
+ * comment on why). Consumed later by scripts/provision-family.mjs (db
+ * lane), which looks the auth uid up by email and marks this 'provisioned'
+ * — nothing in this file marks an invite provisioned; that is a
+ * server-side/script action, not a client one.
+ */
+export async function createStaffInvite({ email, role, displayName = null, specialistId = null }) {
+  if (!email || !role) {
+    throw new LiveDataError(ERR.INVALID, 'createStaffInvite: email and role are both required.');
+  }
+  const user = requireUser();
+  try {
+    const ref = doc(collection(db, 'staffInvites'));
+    await setDoc(ref, {
+      email: String(email).trim().toLowerCase(),
+      role,
+      displayName,
+      specialistId,
+      status: 'pending',
+      createdBy: user.uid,
+      createdAt: serverTimestamp(),
+    });
+    bump('staffInvites');
+    return { id: ref.id, email, role, displayName, specialistId, status: 'pending' };
+  } catch (err) {
+    throw wrap(err, 'createStaffInvite');
+  }
+}
+
+/**
+ * Persist the signed-in user's own notification preferences (contract v1.8,
+ * G) — the ONE self-write the users collection grants, enforced by
+ * firestore.rules' diff hasOnly(['notificationPrefs']). `prefs` is the
+ * COMPLETE desired map ({ [categoryId]: { email, sms } }) — the caller
+ * (useNotificationPrefs) merges its locally-edited categories onto the
+ * currently-loaded set before calling this, since a partial map here would
+ * silently drop every category not included.
+ */
+export async function saveNotificationPrefs(prefs) {
+  const user = requireUser();
+  try {
+    await updateDoc(doc(db, 'users', user.uid), { notificationPrefs: prefs });
+    bump('users');
+    return { notificationPrefs: prefs };
+  } catch (err) {
+    throw wrap(err, 'saveNotificationPrefs');
+  }
+}
+
+/**
+ * Set (or clear) a session's coach note (contract v1.8, H) — string <=500 or
+ * null, the one field firestore.rules' coachNoteUpdateOk() admits. Mirrors
+ * setBookingNoshowReason's trim/cap/null-on-empty discipline exactly.
+ */
+export async function setSessionCoachNote({ sessionId, note }) {
+  if (!sessionId) {
+    throw new LiveDataError(ERR.INVALID, 'setSessionCoachNote: sessionId is required.');
+  }
+  const clean = typeof note === 'string' ? note.trim().slice(0, 500) : null;
+  requireUser();
+  try {
+    await updateDoc(doc(db, 'sessions', sessionId), { coachNote: clean || null });
+    bump('sessions');
+    return { id: sessionId, coachNote: clean || null };
+  } catch (err) {
+    throw wrap(err, 'setSessionCoachNote');
   }
 }

@@ -82,6 +82,32 @@ export function RequireRole({ roles, children }) {
 }
 
 /**
+ * Signed-in-only guard, for routes that must NOT be reachable signed out but
+ * that every signed-in account may reach regardless of role or provisioned
+ * status (Sprint 10, contract v1.8 A): /portal/register. Unlike RequireRole
+ * this never checks `provisioned` or a role list — an unprovisioned account
+ * is exactly who this route exists for (the whole point of the enrollment
+ * self-serve path), and a provisioned parent reaches it too, deliberately
+ * (NotificationPreferences' existing "Link another athlete" row already
+ * navigates here for that account).
+ *
+ * DEVIATION FLAGGED: /portal/register was previously reachable signed OUT
+ * (no guard at all) - submit() would have failed anyway (it requires
+ * requireUser()), but the page itself rendered for anyone. This tightens it
+ * to match the pin's "A new family signs in..., is unprovisioned, and is
+ * routed to /portal/register" framing (sign-in comes first), consistent
+ * with useEnrollment()'s own identity requirement.
+ */
+function RequireSignedIn({ children }) {
+  const live = isLive();
+  const { user, loading } = useAuthSession(live ? undefined : { variant: 'idle' });
+  if (!live) return children;
+  if (loading) return null;
+  if (!user) return <Navigate to="/portal/signin" replace />;
+  return children;
+}
+
+/**
  * Where a signed-in user lands (Sprint 9 amendment v1.7.1): a specialist —
  * any account whose users doc carries specialistId (Yannick, Phil) — lands
  * on their own My Sessions day view; everyone else keeps the Sprint 4
@@ -119,10 +145,23 @@ function useSignOutHandler() {
  * here and passes `athleteId` in as a prop - screens never read route
  * params directly, per the pattern StaffScreen below already follows for
  * local view state.
+ *
+ * Sprint 10 (pin I): coach joins this route's roles ("Coach roster rows tap
+ * through to AthleteDetail" — firestore.rules already scopes a coach's
+ * athlete read to their own assigned roster, no rules change needed). Back
+ * target is now role-aware, same pattern CoachingRoute already uses below —
+ * a coach arriving from Roster must return to /portal/roster, not
+ * /portal/family (which every OTHER role here still uses; ops/owner/mental
+ * hitting /portal/family bounce via RequireRole's own role-mismatch
+ * redirect, a pre-existing wrinkle this change does not touch).
  */
-function AthleteDetailRoute({ onBack }) {
+function AthleteDetailRoute() {
   const { athleteId } = useParams();
-  return <AthleteDetail bare athleteId={athleteId} onBack={onBack} />;
+  const live = isLive();
+  const { user } = useAuthSession(live ? undefined : { variant: 'idle' });
+  const navigate = useNavigate();
+  const back = live && user?.role === 'coach' ? '/portal/roster' : '/portal/family';
+  return <AthleteDetail bare athleteId={athleteId} onBack={() => navigate(back)} />;
 }
 
 /**
@@ -321,7 +360,7 @@ function SessionAttendanceRoute({ onBack }) {
  * /portal/staff, which is this route: a self-navigation that could never leave
  * the view it was trying to leave.
  */
-function StaffScreen() {
+function StaffScreen({ onSignOut }) {
   const [adding, setAdding] = useState(false);
   return (
     <StaffRoles
@@ -329,6 +368,7 @@ function StaffScreen() {
       variant={adding ? 'add' : 'populated'}
       onAdd={() => setAdding(true)}
       onBack={() => setAdding(false)}
+      onSignOut={onSignOut}
     />
   );
 }
@@ -350,9 +390,16 @@ export default function PortalRoutes() {
       <Route
         path="register"
         element={
-          // The person finishing enrollment is a guardian by definition, so
-          // the walkthrough opens on the parent track rather than the chooser.
-          <Registration bare onBack={go('/portal/signin')} onFinish={go('/portal/welcome?track=parent')} />
+          // Sprint 10 (contract v1.8, A): signed-in-only now (RequireSignedIn
+          // above) — an unprovisioned account reaches this from
+          // NotProvisioned's "start enrollment" CTA (below), and a
+          // provisioned parent reaches it from Settings' existing "Link
+          // another athlete" row. The person finishing enrollment is a
+          // guardian by definition, so the walkthrough opens on the parent
+          // track rather than the chooser.
+          <RequireSignedIn>
+            <Registration bare onBack={go('/portal/signin')} onFinish={go('/portal/welcome?track=parent')} />
+          </RequireSignedIn>
         }
       />
       {/* Onboarding walkthrough (Sprint 3) — frontend lane's one route line, per the PM exception in TEAM.md. */}
@@ -360,8 +407,15 @@ export default function PortalRoutes() {
       {/* Signed in with a real Google account but no users/{uid} doc yet — the
           guard's landing for unprovisioned accounts. Public by necessity: the
           people sent here are exactly those with no role. Screen is the
-          frontend lane's pinned NotProvisioned (Sprint 4). */}
-      <Route path="not-provisioned" element={<NotProvisioned bare />} />
+          frontend lane's pinned NotProvisioned (Sprint 4); Sprint 10 (contract
+          v1.8, A) has it read the caller's own enrollmentRequest state
+          (useEnrollment(), routing-owned) and offer /portal/register as the
+          "start enrollment" move — onStartEnrollment mirrors SignIn's
+          existing onStartEnrollment prop below. */}
+      <Route
+        path="not-provisioned"
+        element={<NotProvisioned bare onStartEnrollment={go('/portal/register')} />}
+      />
 
       {/* Athlete — athlete-only, except Book a Session which parents also use
           to book for a linked athlete (Sprint 4 pin). */}
@@ -468,8 +522,8 @@ export default function PortalRoutes() {
       <Route
         path="athlete/:athleteId"
         element={
-          <RequireRole roles={['parent', 'ops', 'owner', 'mental']}>
-            <AthleteDetailRoute onBack={go('/portal/family')} />
+          <RequireRole roles={['parent', 'coach', 'ops', 'owner', 'mental']}>
+            <AthleteDetailRoute />
           </RequireRole>
         }
       />
@@ -564,7 +618,10 @@ export default function PortalRoutes() {
         path="staff"
         element={
           <RequireRole roles={['owner']}>
-            <StaffScreen />
+            {/* Sprint 10 (pin F): the scan found Staff & Roles with no
+                sign-out affordance — the handler is threaded through here;
+                rendering the button is the frontend lane's StaffRoles change. */}
+            <StaffScreen onSignOut={onSignOut} />
           </RequireRole>
         }
       />
@@ -572,7 +629,9 @@ export default function PortalRoutes() {
         path="newsletter"
         element={
           <RequireRole roles={['ops', 'owner']}>
-            <NewsletterComposer bare />
+            {/* Parked (Sprint 10): stays out of every tab set (frontend's
+                TABS), but a direct hit still gets a working sign-out. */}
+            <NewsletterComposer bare onSignOut={onSignOut} />
           </RequireRole>
         }
       />

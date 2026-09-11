@@ -50,13 +50,50 @@ service cloud.firestore {
     }
 
     // ---- users ---------------------------------------------------------
-    // Matrix: "users self-read" (+ owner → all). No client writes: roles and
-    // household/athlete links are provisioned server-side, because a
-    // self-writable role field is a privilege-escalation path.
+    // Matrix: "users self-read" (+ owner → all). Sprint 10 (contract v1.8,
+    // "make it real"): ops now reads the full users collection too (E,
+    // "Staff & Roles live" — the staff list and the enrollment approval
+    // flow's staffInvites lookups both need it), and two client write paths
+    // open up where none existed before:
+    //   1. PROVISIONING (A, E): ops/owner may create/update ANY uid's doc —
+    //      this is how enrollment approval (a client write from the ops/owner
+    //      user, not the Admin SDK) creates the guardian's users doc, and how
+    //      staffInvites provisioning will write a new staff account. Still
+    //      denies privilege escalation: a non-owner staff member can never
+    //      touch their OWN 'role' field through this clause (self-provisioning
+    //      your way from ops to owner stays impossible) — only a genuine
+    //      owner may touch their own role, and in practice this clause only
+    //      ever fires against a DIFFERENT uid's doc anyway, because `me()`
+    //      requires the caller's OWN doc to already exist with an ops/owner
+    //      role before this clause can pass at all (a not-yet-provisioned
+    //      caller has no doc for `me()` to read, so the condition errors closed).
+    //   2. THE ONE SELF-WRITE (G): any signed-in user may update ONLY their
+    //      own notificationPrefs field on their own doc — never role,
+    //      household/athlete/specialist links, or staff status. This is
+    //      deliberately the sole self-writable path the users collection
+    //      ever grants.
     match /users/{userId} {
       allow read: if signedIn()
-        && (request.auth.uid == userId || me().role == 'owner');
-      // No write rule: deny-by-default stands.
+        && (request.auth.uid == userId || me().role in ['ops', 'owner']);
+
+      allow create: if signedIn() && me().role in ['ops', 'owner'];
+
+      allow update: if signedIn() && (
+        (
+          me().role in ['ops', 'owner']
+          && !(
+            userId == request.auth.uid
+            && me().role != 'owner'
+            && request.resource.data.diff(resource.data).affectedKeys().hasAny(['role'])
+          )
+        )
+        || (
+          request.auth.uid == userId
+          && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['notificationPrefs'])
+          && (request.resource.data.notificationPrefs is map
+              || request.resource.data.notificationPrefs == null)
+        )
+      );
     }
 
     // ---- athletes ------------------------------------------------------
@@ -79,8 +116,108 @@ service cloud.firestore {
         || me().role in ['mental', 'ops', 'owner']
         || me().get('specialistId', null) != null
       );
-      // No client writes in v1: enrollment and coach assignment are
-      // server-side (Admin SDK) operations.
+
+      // Sprint 10 (contract v1.8, A "Enrollment"): the FIRST client write on
+      // this collection — enrollment approval creates one athletes doc per
+      // enrolled kid, run by the ops/owner user approving the request (a
+      // client write, not the Admin SDK, per the pin's "one batched write"
+      // instruction). Kept permissive on extra fields (hasAll, not hasOnly)
+      // rather than the tight hasOnly() shape locks bookings/contractLogs
+      // use — this is a staff-only admin surface where the schema is
+      // expected to grow (packageId, future fields), matching the existing
+      // households create grant just below in this file, which has no shape
+      // check at all; contractMinutes/dob still get real type checks because
+      // minors' data deserves it even on a permissive surface. coachId must
+      // be null at create — coach assignment stays a separate, unbuilt admin
+      // action (unchanged from the original "no client writes" comment this
+      // replaces).
+      function athleteCreateShapeOk() {
+        let d = request.resource.data;
+        return d.keys().hasAll(['name', 'householdId', 'contractMinutes', 'coachId'])
+          && d.name is string
+          && d.householdId is string
+          && (d.dob is string || d.dob == null)
+          && (d.contractMinutes in [20, 45, 95] || d.contractMinutes == null)
+          && d.coachId == null;
+      }
+      allow create: if signedIn() && me().role in ['ops', 'owner'] && athleteCreateShapeOk();
+
+      // Sprint 10 (contract v1.8, B "Contract intake"): the athlete's own
+      // user OR the household parent may set their OWN tier — the ONE
+      // member-writable field on this collection, mirroring users'
+      // notificationPrefs self-write just above: one field, hasOnly-locked,
+      // nothing else on the profile ever becomes member-writable through it.
+      function contractMinutesUpdateOk() {
+        let after = request.resource.data;
+        return after.diff(resource.data).affectedKeys().hasOnly(['contractMinutes'])
+          && (after.contractMinutes in [20, 45, 95] || after.contractMinutes == null);
+      }
+      allow update: if signedIn() && contractMinutesUpdateOk() && (
+        (me().role == 'athlete' && me().athleteId == athleteId)
+        || (me().role == 'parent' && resource.data.householdId == me().householdId)
+      );
+
+      // ---- athletes/{id}/diagnostics/{captureId} -----------------------
+      // Sprint 10 (contract v1.8, C "Diagnostics persistence"). Shape:
+      // { athleteId, capturedBy (uid), capturedAt, updatedAt,
+      //   status: 'draft'|'published', values: map, notes: string|null }.
+      // Writers: the assigned coach, any specialist (me().get('specialistId',
+      // null) != null — Sprint 9's null-safe pattern, reused verbatim), or
+      // mental/ops/owner — the SAME set that already writes tournamentResults
+      // and reads athletes academy-wide. Readers: the athlete's own user and
+      // the household parent see PUBLISHED captures only (never a draft mid-
+      // capture); staff (the same writer set) see everything, drafts
+      // included, so a coach can resume their own in-progress capture.
+      //
+      // No null-resource read branch is needed here (unlike bookings/
+      // contractLogs' `{athleteId}_{date}`-style deterministic-id probes):
+      // captureId is an auto-id, never guessed by a client transaction —
+      // saveDraft's upsert finds an existing open draft via a QUERY
+      // (hooks/live.js), not a get() on a constructed id, so `resource` is
+      // never null for a write this rule evaluates.
+      match /diagnostics/{captureId} {
+        function diagnosticStaffOk() {
+          return me().role in ['mental', 'ops', 'owner']
+            || (me().role == 'coach' && athleteData(athleteId).coachId == request.auth.uid)
+            || me().get('specialistId', null) != null;
+        }
+        // Field/type checks only — caller-identity on capturedBy is handled
+        // separately per create/update below, because the two operations
+        // mean different things for that field (see the comment there).
+        function diagnosticFieldsOk() {
+          let d = request.resource.data;
+          return d.keys().hasAll(['athleteId', 'capturedBy', 'capturedAt', 'updatedAt', 'status', 'values', 'notes'])
+            && d.keys().hasOnly(['athleteId', 'capturedBy', 'capturedAt', 'updatedAt', 'status', 'values', 'notes'])
+            && d.athleteId == athleteId
+            && d.capturedBy is string
+            && d.status in ['draft', 'published']
+            && d.values is map
+            && (d.notes is string || d.notes == null);
+        }
+        // On CREATE, capturedBy is who is capturing right now — the caller.
+        allow create: if signedIn() && diagnosticStaffOk() && diagnosticFieldsOk()
+          && request.resource.data.capturedBy == request.auth.uid
+          && request.resource.data.capturedAt == request.time
+          && request.resource.data.updatedAt == request.time;
+        // On UPDATE, capturedBy/capturedAt stay whatever they originally
+        // were — immutable history, NOT re-pinned to the current caller.
+        // Deliberately does NOT require the current editor to be the
+        // original capturer: any qualifying staff member (diagnosticStaffOk)
+        // may continue or publish a draft someone else opened — a
+        // specialist finishing a coach's in-progress capture is a real
+        // workflow, not an edge case to block.
+        allow update: if signedIn() && diagnosticStaffOk() && diagnosticFieldsOk()
+          && request.resource.data.capturedAt == resource.data.capturedAt
+          && request.resource.data.capturedBy == resource.data.capturedBy
+          && request.resource.data.updatedAt == request.time;
+        allow read: if signedIn() && (
+          diagnosticStaffOk()
+          || (me().role == 'athlete' && me().athleteId == athleteId && resource.data.status == 'published')
+          || (me().role == 'parent'
+              && athleteData(athleteId).householdId == me().householdId
+              && resource.data.status == 'published')
+        );
+      }
 
       // ---- athletes/{id}/private/medical -------------------------------
       // Matrix + handoff 02: medical/emergency info is "visible to on-site
@@ -98,6 +235,38 @@ service cloud.firestore {
         // No client writes: medical info is written once by the enrollment
         // flow, server-side.
       }
+    }
+
+    // ---- diagnostics collection-group read ------------------------------
+    // Sprint 10 (contract v1.8, C + D): the Admin "athletes with no
+    // published diagnostic" list is one collectionGroup('diagnostics')
+    // query rather than an N-athlete fan-out, and Firestore requires a
+    // rule matched via the {path=**} recursive wildcard for a
+    // collection-group query to be allowed at all (the nested
+    // /athletes/{athleteId}/diagnostics/{captureId} rule above governs
+    // normal per-athlete reads/writes but does NOT, by itself, license a
+    // cross-athlete group query).
+    //
+    // Deliberately narrower than a literal reading of the pin's "coach/
+    // mental/ops/owner/specialists" list: mental/ops/owner and any
+    // specialist are academy-wide by the SAME precedent as the athletes
+    // matrix's v1.7.1 specialist widening, so they read unconditionally.
+    // A plain coach does NOT get an unconditional academy-wide grant here —
+    // that would let a group query return every OTHER coach's assigned
+    // athletes' diagnostics too, which is exactly the cross-family leak this
+    // file's own non-negotiable ("assigned athletes only, by assignment,
+    // never by role") exists to prevent. Instead a coach's read is proven
+    // per-document the same way the bookings/contractLogs coach clauses
+    // already do it: athleteData(resource.data.athleteId).coachId == caller,
+    // which the diagnostics shape guarantees resource.data.athleteId always
+    // carries. Flagged in the routing report as a deliberate tightening
+    // beyond the pin's literal wording, not an oversight.
+    match /{path=**}/diagnostics/{captureId} {
+      allow read: if signedIn() && (
+        me().role in ['mental', 'ops', 'owner']
+        || me().get('specialistId', null) != null
+        || (me().role == 'coach' && athleteData(resource.data.athleteId).coachId == request.auth.uid)
+      );
     }
 
     // ---- sessions ------------------------------------------------------
@@ -137,6 +306,32 @@ service cloud.firestore {
       }
 
       allow update: if signedIn() && bookedDiffOk();
+
+      // Sprint 10 (contract v1.8, H "Session notes"): a second, independent
+      // field-limited update branch — coachNote (string <=500 or null) is
+      // the ONLY field this grants, entirely separate from bookedDiffOk's
+      // booked-only diff above (Firestore ORs multiple `allow update`
+      // blocks on the same match, same pattern the bookings match uses for
+      // its own two independent update rules).
+      //
+      // "The assigned coach" per the pin, but sessions.coachId is null on
+      // every real session (there is no session-assignment system — the
+      // SAME fact that made the Sprint 6 attendance-roster rule fall back to
+      // "coach reads like staff" rather than resource.data.coachId ==
+      // caller, documented above on bookedDiffOk's neighbor). Checking
+      // resource.data.coachId here would silently deny every real coach
+      // note. This mirrors that precedent: any coach role, plus any
+      // specialist (their own group/1-on-1 blocks), plus mental/ops/owner.
+      function coachNoteUpdateOk() {
+        let after = request.resource.data;
+        return after.diff(resource.data).affectedKeys().hasOnly(['coachNote'])
+          && (after.coachNote == null
+              || (after.coachNote is string && after.coachNote.size() <= 500));
+      }
+      allow update: if signedIn() && coachNoteUpdateOk() && (
+        me().role in ['coach', 'mental', 'ops', 'owner']
+        || me().get('specialistId', null) != null
+      );
     }
 
     // ---- bookings ------------------------------------------------------
@@ -520,6 +715,106 @@ service cloud.firestore {
         && resultId == request.resource.data.sessionId + '_' + request.resource.data.athleteId;
 
       // No delete in v1 (contract v1.5): corrections overwrite via update.
+    }
+
+    // ---- enrollmentRequests ---------------------------------------------
+    // Sprint 10 (contract v1.8, A "Enrollment"). Doc id == the guardian's own
+    // auth uid — the keyspace pins identity the same way bookings/
+    // contractLogs pin theirs to an id prefix, just simpler here (whole id,
+    // not a split prefix). Shape: { guardian: {name,email,phone},
+    // athletes: [{name, dob, packageId, contractMinutes}], consents: {...},
+    // status: 'pending'|'approved'|'declined', declineReason, createdAt,
+    // updatedAt, reviewedBy, reviewedAt }.
+    //
+    // No null-resource read branch needed: the read rule below never
+    // touches resource.data (uid-equality or role alone), so it is provable
+    // whether or not the doc exists yet — same free pass tournamentResults'
+    // read rule gets, documented on that match block above.
+    match /enrollmentRequests/{uid} {
+      function enrollmentShapeOk() {
+        let d = request.resource.data;
+        return d.keys().hasAll(['guardian', 'athletes', 'consents', 'status', 'declineReason',
+                                'createdAt', 'updatedAt', 'reviewedBy', 'reviewedAt'])
+          && d.keys().hasOnly(['guardian', 'athletes', 'consents', 'status', 'declineReason',
+                               'createdAt', 'updatedAt', 'reviewedBy', 'reviewedAt'])
+          && d.guardian is map
+          && d.athletes is list
+          && d.consents is map
+          && d.status in ['pending', 'approved', 'declined'];
+      }
+
+      // The submitting guardian (own uid) creates the doc once, always at
+      // 'pending' — 'approved' is never a value the submitter can write, on
+      // create or update, anywhere in this file.
+      allow create: if signedIn() && request.auth.uid == uid && enrollmentShapeOk()
+        && request.resource.data.status == 'pending'
+        && request.resource.data.declineReason == null
+        && request.resource.data.reviewedBy == null
+        && request.resource.data.reviewedAt == null
+        && request.resource.data.createdAt == request.time
+        && request.resource.data.updatedAt == request.time;
+
+      // The submitting guardian may edit their own request while it is
+      // 'pending' (correcting details never flips status), OR resubmit a
+      // 'declined' one — the pin's own NotProvisioned UX ("declined -> the
+      // reason + 'edit and resubmit', sets status back to pending"). Both
+      // cases land at the SAME single clause: the caller may never write
+      // anything but 'pending' here (never 'approved' — that is ops/owner's
+      // clause below, never), and declineReason/reviewedBy/reviewedAt are
+      // permanently out of the guardian's diff — a resubmit's stale
+      // declineReason is harmless because the screen only ever displays it
+      // while status == 'declined', which resubmitting immediately leaves.
+      allow update: if signedIn() && request.auth.uid == uid && enrollmentShapeOk()
+        && resource.data.status in ['pending', 'declined']
+        && request.resource.data.status == 'pending'
+        && request.resource.data.diff(resource.data).affectedKeys()
+             .hasOnly(['guardian', 'athletes', 'consents', 'status', 'updatedAt']);
+
+      // ops/owner: status-only updates (approve/decline), the OTHER half of
+      // this collection's write surface — never guardian/athletes/consents,
+      // which stay the submitter's own words.
+      allow update: if signedIn() && me().role in ['ops', 'owner']
+        && request.resource.data.diff(resource.data).affectedKeys()
+             .hasOnly(['status', 'declineReason', 'reviewedBy', 'reviewedAt'])
+        && request.resource.data.status in ['approved', 'declined']
+        && request.resource.data.reviewedBy == request.auth.uid
+        && request.resource.data.reviewedAt == request.time;
+
+      allow read: if signedIn() && (request.auth.uid == uid || me().role in ['ops', 'owner']);
+    }
+
+    // ---- staffInvites -----------------------------------------------------
+    // Sprint 10 (contract v1.8, E "Staff & roles live"). Shape: { email,
+    // role, displayName, specialistId, status: 'pending'|'provisioned',
+    // createdBy, createdAt }. Owner-only create (the screen that issues
+    // staff access is owner-gated, matching the existing /portal/staff
+    // route); ops joins owner on read (the staff list surface). No delete —
+    // an unwanted invite is left pending or provisioned, matching the
+    // 'no delete in v1' posture every other write-once collection here uses.
+    //
+    // `email` is NOT re-validated as lowercase here: `.lower()`'s
+    // availability in this ruleset is unverified without an emulator, and
+    // this file's own hotfix history (substring(), Sprint 7) is the reason
+    // to stay conservative about unverified string methods — lowercasing is
+    // enforced client-side (hooks/live.js#createStaffInvite) instead.
+    match /staffInvites/{inviteId} {
+      function staffInviteShapeOk() {
+        let d = request.resource.data;
+        return d.keys().hasAll(['email', 'role', 'displayName', 'specialistId', 'status', 'createdBy', 'createdAt'])
+          && d.keys().hasOnly(['email', 'role', 'displayName', 'specialistId', 'status', 'createdBy', 'createdAt'])
+          && d.email is string
+          && d.role in ['coach', 'mental', 'ops', 'owner']
+          && (d.displayName is string || d.displayName == null)
+          && (d.specialistId in ['phil', 'mental'] || d.specialistId == null)
+          && d.status == 'pending'
+          && d.createdBy == request.auth.uid
+          && d.createdAt == request.time;
+      }
+      allow create: if signedIn() && me().role == 'owner' && staffInviteShapeOk();
+      allow read: if signedIn() && me().role in ['owner', 'ops'];
+      allow update: if signedIn() && me().role == 'owner'
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status'])
+        && request.resource.data.status in ['pending', 'provisioned'];
     }
 
     // No catch-all. Everything not matched above is denied.

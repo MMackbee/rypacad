@@ -37,28 +37,45 @@ import { bump, useInvalidation } from './invalidate';
 import {
   ERR,
   LiveDataError,
+  approveEnrollmentRequest,
   cancelBooking,
   createBooking,
   createContractLog,
+  createStaffInvite,
+  declineEnrollmentRequest,
   deleteContractLog,
+  fetchAllAthletes,
+  fetchAllDiagnostics,
   fetchAthlete,
+  fetchAthleteDiagnostics,
   fetchAthletesByIds,
   fetchBookings,
   fetchBookingsBySession,
   fetchCoachAthletes,
   fetchContractLogs,
+  fetchContractLogsSince,
   fetchCurrentUser,
   fetchHousehold,
   fetchHouseholdAthletes,
+  fetchMyEnrollmentRequest,
+  fetchNoShowBookingsSince,
   fetchPackage,
+  fetchPendingEnrollmentRequests,
+  fetchPendingStaffInvites,
   fetchSessions,
   fetchSessionsByIds,
   fetchSessionsInRange,
+  fetchStaffUsers,
   fetchTournamentResults,
   fetchTournamentResultsForSession,
   isLive,
+  saveDiagnosticCapture,
+  saveNotificationPrefs,
   saveTournamentResults,
   setBookingNoshowReason,
+  setContractTier,
+  setSessionCoachNote,
+  submitMyEnrollmentRequest,
   updateBookingStatus,
 } from './live';
 import {
@@ -1189,9 +1206,13 @@ export function useHousehold({ variant = 'three' } = {}) {
   const live = isLive();
   const today = todayISO();
   // Post-write invalidation seam (Sprint 6 pin): a booking or a contract log
-  // can change a child's card - re-run after either bumps.
+  // can change a child's card - re-run after either bumps. Sprint 10:
+  // 'athletes' too - AthleteDetail's parent-facing tier picker (contract
+  // v1.8, B) writes contractMinutes, which liveChildCard's `contract` field
+  // reads.
   const bookingsGen = useInvalidation('bookings');
   const contractLogsGen = useInvalidation('contractLogs');
+  const athletesGen = useInvalidation('athletes');
 
   const demo = demoOpts(variant, "Your family's data didn't load.");
   const children =
@@ -1204,7 +1225,7 @@ export function useHousehold({ variant = 'three' } = {}) {
       (live
         ? {
             source: () => liveHousehold(today),
-            deps: ['household', today, bookingsGen, contractLogsGen],
+            deps: ['household', today, bookingsGen, contractLogsGen, athletesGen],
           }
         : undefined)
   );
@@ -1254,8 +1275,11 @@ export function useHouseholdAthletes() {
   const today = todayISO();
   // Post-write invalidation seam (Sprint 6 pin): a new booking changes a
   // child's allowance - re-run after any bookings write, including one made
-  // through useBooking's book() for this same child.
+  // through useBooking's book() for this same child. Sprint 10: 'athletes'
+  // too, so a parent's tier pick on AthleteDetail (contract v1.8, B) is
+  // reflected here without a remount.
   const bookingsGen = useInvalidation('bookings');
+  const athletesGen = useInvalidation('athletes');
   const seedRows = HOUSEHOLD.children.map((c) => ({
     id: c.id,
     name: c.name,
@@ -1266,7 +1290,7 @@ export function useHouseholdAthletes() {
   return useSeedResource(
     live ? null : seedRows,
     live
-      ? { source: () => liveHouseholdAthletes(today), deps: ['household-athletes', bookingsGen] }
+      ? { source: () => liveHouseholdAthletes(today), deps: ['household-athletes', bookingsGen, athletesGen] }
       : undefined
   );
 }
@@ -1318,6 +1342,79 @@ export function useEnrollmentForm() {
 }
 
 /**
+ * The signed-in guardian's OWN enrollment request (contract v1.8, A) —
+ * pinned shape: { data: { request: {...enrollmentRequests doc} | null },
+ * loading, error, submit({ guardian, athletes, consents }) }. `request`
+ * null means "never submitted" (NotProvisioned's "start enrollment" state);
+ * a real doc's `status` is 'pending' | 'approved' | 'declined'.
+ *
+ * Used by a SIGNED-IN BUT UNPROVISIONED account by definition — there is no
+ * users/{uid} doc yet, so this goes through live.js's
+ * fetchMyEnrollmentRequest/submitMyEnrollmentRequest (raw Firebase Auth
+ * identity), never fetchCurrentUser(), which would throw NOT_FOUND for
+ * exactly this caller.
+ *
+ * Seed mode returns no request (the harness demonstrates the enrollment
+ * FORM itself, via useEnrollmentForm above, not a submitted-request state)
+ * and submit() is a local no-op echo, matching this file's usual seed
+ * posture for write actions.
+ */
+export function useEnrollment() {
+  const live = isLive();
+  const gen = useInvalidation('enrollmentRequests');
+
+  const state = useSeedResource(
+    live ? null : { request: null },
+    live
+      ? { source: async () => ({ request: await fetchMyEnrollmentRequest() }), deps: ['enrollment', gen] }
+      : undefined
+  );
+
+  const submit = async ({ guardian, athletes, consents }) => {
+    if (!live) return { request: { status: 'pending' }, simulated: true };
+    return submitMyEnrollmentRequest({ guardian, athletes, consents });
+  };
+
+  return { ...state, submit };
+}
+
+/**
+ * The ops/owner enrollment approval queue (contract v1.8, A + D's "Admin
+ * section") — pinned shape: { data: { requests: [...pending
+ * enrollmentRequests docs] }, loading, error, approve(uid), decline(uid,
+ * reason) }. approve() runs the pinned one-batched-write approval (live.js's
+ * approveEnrollmentRequest); decline() sets status/declineReason.
+ *
+ * Live-only, no seed/demo branch to keep in sync (this file's established
+ * "screens must not crash with the live flag off" posture for staff-only
+ * live surfaces, same as useSessionAttendance/useTournamentResults): with
+ * isLive() false this resolves to an empty queue and no-op actions rather
+ * than inventing a fake pending-families list.
+ */
+export function useEnrollmentQueue() {
+  const live = isLive();
+  const gen = useInvalidation('enrollmentRequests');
+
+  const state = useSeedResource(
+    live ? null : { requests: [] },
+    live
+      ? { source: async () => ({ requests: await fetchPendingEnrollmentRequests() }), deps: ['enrollment-queue', gen] }
+      : undefined
+  );
+
+  const approve = async (uid) => {
+    if (!live) return { uid, status: 'approved', simulated: true };
+    return approveEnrollmentRequest(uid);
+  };
+  const decline = async (uid, reason) => {
+    if (!live) return { uid, status: 'declined', simulated: true };
+    return declineEnrollmentRequest(uid, reason);
+  };
+
+  return { ...state, approve, decline };
+}
+
+/**
  * GET /packages (02 step 3, and later 10 and 15).
  *
  * The catalogue reads through the seam like everything else: the handoff's
@@ -1348,6 +1445,11 @@ export function usePackages() {
 export function useCoachDay({ variant = 'today' } = {}) {
   const live = isLive();
   const today = todayISO();
+  // Sprint 10 (pin I): Overview's counts (booked/capacity per block) are
+  // stale after a booking or a cancellation elsewhere until this bumps -
+  // the same post-write-refresh discipline every other live hook here uses.
+  const sessionsGen = useInvalidation('sessions');
+  const bookingsGen = useInvalidation('bookings');
 
   const blocks =
     variant === 'concurrent'
@@ -1401,7 +1503,7 @@ export function useCoachDay({ variant = 'today' } = {}) {
           attention: ATTENTION_LIST,
           outstanding: COACH_OUTSTANDING,
         },
-    live ? { source: liveCoachDay, deps: ['coach-day', today] } : undefined
+    live ? { source: liveCoachDay, deps: ['coach-day', today, sessionsGen, bookingsGen] } : undefined
   );
 }
 
@@ -1481,12 +1583,71 @@ function blockRange(time) {
   return `${clock}-${endH}:${mm} ${endMeridiem}`;
 }
 
-/** GET /athletes/:id/diagnostics (14). */
-export function useDiagnostic() {
-  return useSeedResource({
-    athlete: DIAGNOSTIC_ATHLETE,
-    sections: DIAGNOSTIC_SECTIONS,
-  });
+/**
+ * Live payload for useDiagnostic(athleteId) (contract v1.8, C) — the
+ * athlete's latest PUBLISHED capture (or null, "no capture yet"), their
+ * single open DRAFT (or null), and the section/field catalogue every
+ * capture's `values` are keyed against. Caller access (assigned coach /
+ * specialist / mental / ops / owner see both; athlete/parent see published
+ * only, draft always null for them) is firestore.rules' job, not this
+ * function's — it fetches both lists and lets a caller who cannot read
+ * drafts simply get an empty one back from fetchAthleteDiagnostics rather
+ * than branching on role here.
+ */
+async function liveDiagnostic(athleteId) {
+  const all = await fetchAthleteDiagnostics(athleteId);
+  const latest = all.find((d) => d.status === 'published') ?? null;
+  const draft = all.find((d) => d.status === 'draft') ?? null;
+  return { latest, draft, sections: DIAGNOSTIC_SECTIONS };
+}
+
+/**
+ * GET /athletes/:id/diagnostics (14) — contract v1.8, C. PINNED SHAPE
+ * (supersedes the prior no-arg, seed-only version): { data: { latest
+ * (published capture | null), draft (open draft | null), sections },
+ * loading, error, saveDraft(values, notes), publish(values, notes) }.
+ *
+ * DEVIATION FLAGGED: the old signature took no athleteId and returned
+ * { athlete, sections } with no latest/draft/save actions at all — this is
+ * a breaking payload shape change, called out per this lane's "changing a
+ * payload shape requires stating it in the report" rule. DiagnosticCapture
+ * (frontend lane's, in parallel) must be updated to call
+ * useDiagnostic(athleteId) and read data.latest/data.draft instead of
+ * data.athlete.
+ *
+ * Seed mode keeps DIAGNOSTIC_ATHLETE's synthetic capture as `latest` (never
+ * a draft — the harness demonstrates the capture FORM against
+ * DIAGNOSTIC_SECTIONS, not a resume-a-draft state) so the harness's
+ * existing states keep rendering; saveDraft/publish are local no-op echoes
+ * there, matching every other write action's seed posture in this file.
+ */
+export function useDiagnostic(athleteId) {
+  const live = isLive() && athleteId != null;
+  const diagnosticsGen = useInvalidation('diagnostics');
+
+  const state = useSeedResource(
+    live
+      ? null
+      : {
+          latest: { athlete: DIAGNOSTIC_ATHLETE, values: {}, notes: null },
+          draft: null,
+          sections: DIAGNOSTIC_SECTIONS,
+        },
+    live
+      ? { source: () => liveDiagnostic(athleteId), deps: ['diagnostic', athleteId, diagnosticsGen] }
+      : undefined
+  );
+
+  const saveDraft = async (values, notes = null) => {
+    if (!live) return { athleteId, status: 'draft', simulated: true };
+    return saveDiagnosticCapture(athleteId, { values, notes, publish: false });
+  };
+  const publish = async (values, notes = null) => {
+    if (!live) return { athleteId, status: 'published', simulated: true };
+    return saveDiagnosticCapture(athleteId, { values, notes, publish: true });
+  };
+
+  return { ...state, saveDraft, publish };
 }
 
 /**
@@ -1582,9 +1743,12 @@ export function useAthleteDashboard({ variant = 'populated', today = todayISO(),
   // walkthrough's dashboard preview errored while signed out).
   const live = !practice && isLive();
   // Post-write invalidation seam (Sprint 6 pin): a booking or a contract log
-  // write changes this card - re-run after either bumps.
+  // write changes this card - re-run after either bumps. Sprint 10:
+  // 'athletes' too - setTier() (useContract, contract v1.8 B) changes
+  // whether this card has a contract summary at all.
   const bookingsGen = useInvalidation('bookings');
   const contractLogsGen = useInvalidation('contractLogs');
+  const athletesGen = useInvalidation('athletes');
   const demo = demoOpts(variant, "Your dashboard didn't load.");
 
   // The next session is the athlete's first booked reference, resolved against
@@ -1621,7 +1785,7 @@ export function useAthleteDashboard({ variant = 'populated', today = todayISO(),
       (live
         ? {
             source: () => liveAthleteDashboard(today),
-            deps: ['athlete-dashboard', today, bookingsGen, contractLogsGen],
+            deps: ['athlete-dashboard', today, bookingsGen, contractLogsGen, athletesGen],
           }
         : undefined)
   );
@@ -1752,9 +1916,15 @@ export function useContract({ variant = 'ontrack', today = todayISO(), practice 
   // Post-write invalidation seam (Sprint 6 pin): re-run after any
   // contractLogs write, not just one made through this hook instance.
   const contractLogsGen = useInvalidation('contractLogs');
+  // Sprint 10 (contract v1.8, B): setTier() below writes athletes.
+  // contractMinutes - without this subscription a NoContract screen that
+  // just called setTier would keep rendering NO_CONTRACT_MONTH until an
+  // unrelated bookings/contractLogs write happened to bump something else,
+  // exactly the "post-write refresh" defect class Sprint 6 was cut to fix.
+  const athletesGen = useInvalidation('athletes');
 
   const built = variant === 'none' ? null : contractFor(variant, today);
-  return useSeedResource(
+  const state = useSeedResource(
     live
       ? null
       : {
@@ -1763,9 +1933,23 @@ export function useContract({ variant = 'ontrack', today = todayISO(), practice 
           tierMinutes: 45,
         },
     live
-      ? { source: () => liveContract(today), deps: ['contract', today, contractLogsGen] }
+      ? { source: () => liveContract(today), deps: ['contract', today, contractLogsGen, athletesGen] }
       : undefined
   );
+
+  /**
+   * Start (or change, or clear) the signed-in athlete's Commitment Contract
+   * tier (contract v1.8, B) — wires the NoContract tier picker's "Start the
+   * N min contract" CTA. Seed mode is a local no-op echo, matching every
+   * other write action's seed posture in this file (createBooking et al.).
+   */
+  const setTier = async (minutes) => {
+    if (!live) return { contractMinutes: minutes, simulated: true };
+    const { athlete } = await liveAthleteIdentity();
+    return setContractTier({ athleteId: athlete.id, minutes });
+  };
+
+  return { ...state, setTier };
 }
 
 /**
@@ -1944,6 +2128,10 @@ async function liveAthleteDetail(athleteId) {
       attendanceLabel: 'attendance — not tracked live yet',
       board: '—',
       boardLabel: 'months on the Board — not tracked live yet',
+      // Sprint 10 (contract v1.8, B): additive field so AthleteDetail's
+      // parent-facing "Start a contract" tier picker card knows whether to
+      // render (null = no tier yet, matches NoContract's own convention).
+      contractMinutes: athlete.contractMinutes ?? null,
     },
     upcoming,
     history: [],
@@ -1970,6 +2158,12 @@ async function liveAthleteDetail(athleteId) {
 export function useAthleteDetail({ athleteId, variant = 'populated' } = {}) {
   const live = isLive() && athleteId != null;
   const full = variant === 'populated';
+  // Sprint 10 (contract v1.8, B): the parent-facing "Start a contract" tier
+  // picker on this screen writes athletes.contractMinutes via useContract's
+  // setTier() (called with THIS athleteId, not the caller's own) - without
+  // this subscription the screen would keep showing NoContract after a
+  // successful pick until an unrelated write happened to bump something.
+  const athletesGen = useInvalidation('athletes');
   const seedValue = {
     athlete: ATHLETE_DETAIL,
     history: full ? CONTRACT_HISTORY : [],
@@ -1979,7 +2173,7 @@ export function useAthleteDetail({ athleteId, variant = 'populated' } = {}) {
   return useSeedResource(
     live ? null : seedValue,
     live
-      ? { source: () => liveAthleteDetail(athleteId), deps: ['athlete-detail', athleteId] }
+      ? { source: () => liveAthleteDetail(athleteId), deps: ['athlete-detail', athleteId, athletesGen] }
       : undefined
   );
 }
@@ -1997,13 +2191,270 @@ export function useBilling({ variant = 'active' } = {}) {
   });
 }
 
-/** GET/PUT /guardians/:id/notification-preferences (11). */
+/**
+ * Live payload for useNotificationPrefs — NOTIFICATION_CATEGORIES' static
+ * metadata (name/description/locked/footnote) overlaid with the signed-in
+ * user's saved per-category channel choices (users.notificationPrefs). A
+ * locked category (billing) always reads true/true regardless of what is
+ * saved — mirroring the seed data's own locked-category convention — so a
+ * stray saved override can never silently turn off a transactional notice.
+ */
+async function liveNotificationPrefs() {
+  const profile = await fetchCurrentUser();
+  const saved = profile.notificationPrefs || {};
+  const categories = NOTIFICATION_CATEGORIES.map((c) => ({
+    ...c,
+    email: c.locked ? true : saved[c.id]?.email ?? c.email,
+    sms: c.locked ? true : saved[c.id]?.sms ?? c.sms,
+  }));
+  return { categories, note: NOTIFICATION_NOTE, saved: false };
+}
+
+/**
+ * GET/PUT /guardians/:id/notification-preferences (11) — contract v1.8, G.
+ * Live adds `save(prefs)`: `prefs` must be the COMPLETE desired
+ * { [categoryId]: { email, sms } } map (the caller/screen merges its
+ * locally-edited categories onto `data.categories` before calling — a
+ * partial map would silently drop every category left out, since
+ * live.js#saveNotificationPrefs replaces the whole notificationPrefs field
+ * in one write). `data.saved` stays false in live mode — a real "just
+ * saved" toast is the SCREEN's own local state after save() resolves
+ * (frontend lane's Shared SavedToast, pin I), not a flag this hook fakes.
+ */
 export function useNotificationPrefs({ variant = 'default' } = {}) {
-  return useSeedResource({
-    categories: NOTIFICATION_CATEGORIES,
-    note: NOTIFICATION_NOTE,
-    saved: variant === 'saved',
+  const live = isLive();
+  const gen = useInvalidation('users');
+
+  const state = useSeedResource(
+    live ? null : { categories: NOTIFICATION_CATEGORIES, note: NOTIFICATION_NOTE, saved: variant === 'saved' },
+    live ? { source: liveNotificationPrefs, deps: ['notification-prefs', gen] } : undefined
+  );
+
+  const save = async (prefs) => {
+    if (!live) return { notificationPrefs: prefs, simulated: true };
+    return saveNotificationPrefs(prefs);
+  };
+
+  return { ...state, save };
+}
+
+/**
+ * 'yyyy-MM-dd' -> the ISO date of that week's Monday (UTC). Self-contained
+ * date math (no new data/calendar.js helper — this lane does not touch
+ * data/ this sprint) built on addDaysISO, already imported here.
+ */
+function mondayOfWeek(todayIso) {
+  const dow = new Date(`${todayIso}T00:00:00Z`).getUTCDay(); // 0=Sun..6=Sat
+  const diff = dow === 0 ? -6 : 1 - dow;
+  return addDaysISO(todayIso, diff);
+}
+
+/**
+ * Pure derivation for the Admin dashboard's "who needs a call" grouping
+ * (contract v1.8, D) — no Firestore, no hooks, so it is independently
+ * Node-assertable against a fabricated bookings/contractLogs/athletes array
+ * (see the routing report's verification section). Reuses
+ * buildContractMonthFromLogs (already imported in this file, data/calendar)
+ * for (3) exactly as liveContractState/liveChildCard already do, rather than
+ * re-deriving "behind" a second way.
+ *
+ * @param {object} args
+ * @param {Array} args.athletes - every athletes doc ({id, name, contractMinutes, packageId, ...}).
+ * @param {number} args.pendingCount - pending enrollmentRequests count.
+ * @param {Array} args.noshowBookings - bookings with status 'noshow', date >= monthStart.
+ * @param {Array} args.contractLogs - contractLogs with date >= monthStart, every athlete.
+ * @param {Array} args.publishedDiagnosticAthleteIds - athleteIds with >=1 published diagnostic.
+ * @param {string} args.today - ISO 'yyyy-MM-dd'.
+ */
+export function deriveWhoNeedsCall({
+  athletes,
+  pendingCount,
+  noshowBookings,
+  contractLogs,
+  publishedDiagnosticAthleteIds,
+  today,
+}) {
+  const nameById = new Map(athletes.map((a) => [a.id, a.name ?? null]));
+
+  const noshowCounts = new Map();
+  for (const b of noshowBookings) {
+    noshowCounts.set(b.athleteId, (noshowCounts.get(b.athleteId) || 0) + 1);
+  }
+  const noshows = [...noshowCounts.entries()]
+    .map(([athleteId, count]) => ({ athleteId, name: nameById.get(athleteId) ?? null, count }))
+    .sort((a, b) => b.count - a.count);
+
+  const logsByAthlete = new Map();
+  for (const l of contractLogs) {
+    const list = logsByAthlete.get(l.athleteId) ?? [];
+    list.push(l);
+    logsByAthlete.set(l.athleteId, list);
+  }
+  const contractBehind = [];
+  for (const a of athletes) {
+    if (a.contractMinutes == null) continue;
+    const logs = logsByAthlete.get(a.id) ?? [];
+    const minutesByDate = new Map(logs.map((l) => [l.date, l.minutes || 0]));
+    const m = buildContractMonthFromLogs({ today, minutesByDate, contractMinutes: a.contractMinutes });
+    if (m.missed > 0) {
+      contractBehind.push({ athleteId: a.id, name: a.name ?? null, missed: m.missed, daysLeft: m.daysLeft });
+    }
+  }
+  contractBehind.sort((a, b) => b.missed - a.missed);
+
+  const publishedSet = new Set(publishedDiagnosticAthleteIds ?? []);
+  const missingDiagnostic = athletes
+    .filter((a) => !publishedSet.has(a.id))
+    .map((a) => ({ athleteId: a.id, name: a.name ?? null }));
+
+  return {
+    pendingEnrollment: { count: pendingCount },
+    noshows,
+    contractBehind,
+    missingDiagnostic,
+  };
+}
+
+/**
+ * Live payload for useAdminDashboard (contract v1.8, D) — built entirely
+ * from existing collections, no new store. Enrolled count and
+ * enrollment-by-package come from a full athletes read; block fill sums
+ * booked/capacity across THIS WEEK's sessions grouped by session TYPE
+ * (training/tournament/phil/mental), not by day the way the seed's
+ * BLOCK_FILL mockup is — the pin's "group type only" is read here as a
+ * deliberate live-mode shape choice, flagged in the routing report since it
+ * diverges from BLOCK_FILL's {day, pct} shape to {type, pct}.
+ *
+ * `outstanding` keeps the SEED's existing row shape ({id, who, why, tag,
+ * tone, packageIds}) so nothing downstream needs a shape migration, plus
+ * two ADDITIVE fields (`kind`, `athleteId`) so a real tap can route
+ * somewhere real (the pin's "every card TAPS to somewhere real") — flagged
+ * as an additive, backward-compatible shape extension in the report.
+ *
+ * The existing tier filter (TIER_FILTERS/`filter`) stays a
+ * seed/demo-harness-only affordance this sprint: live mode always returns
+ * the unfiltered 'all tiers' view (no interactive filter setter exists on
+ * this hook to drive a live re-query from) — reported as not done rather
+ * than half-built.
+ */
+async function liveAdminDashboard(today) {
+  const monthStart = `${today.slice(0, 7)}-01`;
+  const weekStart = mondayOfWeek(today);
+  const weekEnd = addDaysISO(weekStart, 6);
+
+  const [athletes, sessionsThisWeek, pending, noshowBookings, contractLogs, diagnostics] = await Promise.all([
+    fetchAllAthletes(),
+    fetchSessionsInRange(weekStart, weekEnd),
+    fetchPendingEnrollmentRequests(),
+    fetchNoShowBookingsSince(monthStart),
+    fetchContractLogsSince(monthStart),
+    fetchAllDiagnostics(),
+  ]);
+
+  const publishedDiagnosticAthleteIds = diagnostics
+    .filter((d) => d.status === 'published')
+    .map((d) => d.athleteId);
+  const who = deriveWhoNeedsCall({
+    athletes,
+    pendingCount: pending.length,
+    noshowBookings,
+    contractLogs,
+    publishedDiagnosticAthleteIds,
+    today,
   });
+
+  const outstanding = [];
+  if (who.pendingEnrollment.count > 0) {
+    outstanding.push({
+      id: 'enrollment-pending',
+      kind: 'enrollment',
+      athleteId: null,
+      who: `${who.pendingEnrollment.count} pending enrollment${who.pendingEnrollment.count === 1 ? '' : 's'}`,
+      why: 'Awaiting review in the enrollment queue',
+      tag: 'Enrollment',
+      tone: 'yellow',
+      packageIds: null,
+    });
+  }
+  for (const n of who.noshows) {
+    outstanding.push({
+      id: `noshow-${n.athleteId}`,
+      kind: 'noshow',
+      athleteId: n.athleteId,
+      who: n.name ?? n.athleteId,
+      why: `${n.count} no-show${n.count === 1 ? '' : 's'} this month`,
+      tag: 'Attendance',
+      tone: 'red',
+      packageIds: null,
+    });
+  }
+  for (const c of who.contractBehind) {
+    outstanding.push({
+      id: `contract-${c.athleteId}`,
+      kind: 'contract',
+      athleteId: c.athleteId,
+      who: c.name ?? c.athleteId,
+      why: `Contract behind — ${c.missed} day${c.missed === 1 ? '' : 's'} missed, ${c.daysLeft} left`,
+      tag: 'Contract',
+      tone: 'yellow',
+      packageIds: null,
+    });
+  }
+  for (const d of who.missingDiagnostic) {
+    outstanding.push({
+      id: `diagnostic-${d.athleteId}`,
+      kind: 'diagnostic',
+      athleteId: d.athleteId,
+      who: d.name ?? d.athleteId,
+      why: 'Diagnostic not entered',
+      tag: 'Onboarding',
+      tone: 'yellow',
+      packageIds: null,
+    });
+  }
+
+  const byPackage = new Map();
+  for (const a of athletes) {
+    if (!a.packageId) continue;
+    byPackage.set(a.packageId, (byPackage.get(a.packageId) || 0) + 1);
+  }
+  const enrollment = [...byPackage.entries()].map(([id, count]) => ({
+    id,
+    name: packageById(id)?.name ?? id,
+    athletes: count,
+  }));
+
+  const fillByType = new Map();
+  let totalBooked = 0;
+  let totalCapacity = 0;
+  for (const s of sessionsThisWeek) {
+    if (s.status === 'cancelled') continue;
+    const t = fillByType.get(s.type) ?? { booked: 0, capacity: 0 };
+    t.booked += s.booked ?? 0;
+    t.capacity += s.capacity ?? 0;
+    fillByType.set(s.type, t);
+    totalBooked += s.booked ?? 0;
+    totalCapacity += s.capacity ?? 0;
+  }
+  const blockFill = [...fillByType.entries()].map(([type, v]) => ({
+    type,
+    pct: v.capacity ? Math.round((v.booked / v.capacity) * 100) : 0,
+  }));
+
+  return {
+    outstanding,
+    metrics: {
+      enrolled: athletes.length,
+      fill: totalCapacity ? `${Math.round((totalBooked / totalCapacity) * 100)}%` : '—',
+      fillLabel: 'average block fill this week',
+      enrolledLabel: 'enrolled athletes',
+    },
+    enrollment,
+    highlightPackage: null,
+    blockFill,
+    filter: TIER_FILTERS[0],
+    weekLabel: `Week of ${longDayLabel(weekStart)}`,
+  };
 }
 
 /**
@@ -2014,34 +2465,118 @@ export function useNotificationPrefs({ variant = 'default' } = {}) {
  * exists whichever tier Phil is looking at. The enrolled count follows the
  * filter so the header's number and the stat card cannot disagree; block fill
  * is facility-wide and cannot be cut by tier, which the screen says.
+ *
+ * Live (contract v1.8, D): see liveAdminDashboard above. Subscribed to every
+ * collection its derivation reads from, so an approval, a no-show mark, a
+ * contract log, or a diagnostic publish anywhere all refresh this screen.
  */
 export function useAdminDashboard({ variant = 'populated' } = {}) {
+  const live = isLive();
+  const today = todayISO();
   const filter = variant === 'filtered' ? TIER_FILTERS[1] : TIER_FILTERS[0];
   const matches = (o) =>
     filter.id === 'all' || o.packageIds == null || o.packageIds.includes(filter.id);
 
-  return useSeedResource({
-    outstanding: OUTSTANDING.filter(matches),
-    metrics:
-      filter.id === 'all'
-        ? ADMIN_METRICS
-        : { ...ADMIN_METRICS, enrolled: filter.count, enrolledLabel: `athletes on ${filter.label.replace(' only', '')}` },
-    enrollment: ENROLLMENT_BY_PACKAGE,
-    highlightPackage: filter.id === 'all' ? null : filter.id,
-    blockFill: BLOCK_FILL,
-    filter,
-  });
+  const athletesGen = useInvalidation('athletes');
+  const bookingsGen = useInvalidation('bookings');
+  const contractLogsGen = useInvalidation('contractLogs');
+  const diagnosticsGen = useInvalidation('diagnostics');
+  const enrollmentGen = useInvalidation('enrollmentRequests');
+
+  return useSeedResource(
+    live
+      ? null
+      : {
+          outstanding: OUTSTANDING.filter(matches),
+          metrics:
+            filter.id === 'all'
+              ? ADMIN_METRICS
+              : { ...ADMIN_METRICS, enrolled: filter.count, enrolledLabel: `athletes on ${filter.label.replace(' only', '')}` },
+          enrollment: ENROLLMENT_BY_PACKAGE,
+          highlightPackage: filter.id === 'all' ? null : filter.id,
+          blockFill: BLOCK_FILL,
+          filter,
+          weekLabel: null,
+        },
+    live
+      ? {
+          source: () => liveAdminDashboard(today),
+          deps: ['admin-dashboard', today, athletesGen, bookingsGen, contractLogsGen, diagnosticsGen, enrollmentGen],
+        }
+      : undefined
+  );
 }
 
-/** GET/POST /admin/staff-accounts (16) — owner only. */
-export function useStaff({ variant = 'populated' } = {}) {
-  return useSeedResource({
-    staff: STAFF,
+/**
+ * Live payload for useStaff — every users doc with staff == true, plus the
+ * pending staffInvites queue (contract v1.8, E). `mfa`/`note` are never
+ * invented per-account signals (no such field exists in the schema — the
+ * seed's STAFF rows hand-write them as review copy) — null here, matching
+ * this file's "never invented" discipline elsewhere (liveChildCard's
+ * standing/age, liveAthleteDetail's attendance placeholders).
+ */
+async function liveStaff() {
+  const [staffUsers, invites] = await Promise.all([fetchStaffUsers(), fetchPendingStaffInvites()]);
+  return {
+    staff: staffUsers
+      .map((u) => ({
+        id: u.id,
+        name: u.displayName ?? u.email ?? u.id,
+        role: u.role ?? null,
+        specialistId: u.specialistId ?? null,
+        mfa: null,
+        note: null,
+      }))
+      .sort((a, b) => (a.name || '').localeCompare(b.name || '')),
+    pendingInvites: invites.map((i) => ({
+      id: i.id,
+      email: i.email,
+      role: i.role,
+      displayName: i.displayName ?? null,
+      specialistId: i.specialistId ?? null,
+    })),
     roles: STAFF_ROLES,
     auditNote: AUDIT_NOTE,
     screeningNote: SCREENING_NOTE,
-    adding: variant === 'add',
-  });
+  };
+}
+
+/**
+ * GET/POST /admin/staff-accounts (16) — owner (+ ops read, contract v1.8 E)
+ * only. Live: pinned shape adds `pendingInvites` (additive — the seed shape
+ * has no such list since the harness never invented "provisioning" state)
+ * alongside the existing `staff`/`roles`/`auditNote`/`screeningNote` fields,
+ * plus `invite({ email, role, displayName, specialistId })` writing a
+ * staffInvites doc (owner-only, enforced by firestore.rules).
+ * scripts/provision-family.mjs (db lane) is what actually turns a pending
+ * invite into a real users doc when the person first signs in — this hook
+ * only ever creates the invite record.
+ */
+export function useStaff({ variant = 'populated' } = {}) {
+  const live = isLive();
+  const gen = useInvalidation('users');
+  const invitesGen = useInvalidation('staffInvites');
+
+  const state = useSeedResource(
+    live
+      ? null
+      : {
+          staff: STAFF,
+          pendingInvites: [],
+          roles: STAFF_ROLES,
+          auditNote: AUDIT_NOTE,
+          screeningNote: SCREENING_NOTE,
+          adding: variant === 'add',
+        },
+    live ? { source: liveStaff, deps: ['staff', gen, invitesGen] } : undefined
+  );
+
+  const invite = async ({ email, role, displayName = null, specialistId = null }) => {
+    if (!live) return { email, role, displayName, specialistId, status: 'pending', simulated: true };
+    return createStaffInvite({ email, role, displayName, specialistId });
+  };
+
+  return { ...state, invite };
 }
 
 /** GET /newsletter/issues/:id (17). */
@@ -2134,7 +2669,19 @@ export function useSessionAttendance(sessionId) {
     return setBookingNoshowReason({ bookingId, reason });
   };
 
-  return { ...state, mark, setReason };
+  /**
+   * Sprint 10 (contract v1.8, H): the session-level coach note ("Add a
+   * session note" — the roster's third inert-button instance) — a field on
+   * the SESSION doc, not the booking, so it takes the session's real id
+   * rather than a bookingId the way mark()/setReason() do. Seed/offline
+   * posture matches mark()/setReason() above.
+   */
+  const setSessionNote = async (targetSessionId, note) => {
+    if (!live) return { id: targetSessionId, coachNote: note || null, simulated: true };
+    return setSessionCoachNote({ sessionId: targetSessionId, note });
+  };
+
+  return { ...state, mark, setReason, setSessionNote };
 }
 
 /**
