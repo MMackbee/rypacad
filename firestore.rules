@@ -58,15 +58,23 @@ service cloud.firestore {
     //   1. PROVISIONING (A, E): ops/owner may create/update ANY uid's doc —
     //      this is how enrollment approval (a client write from the ops/owner
     //      user, not the Admin SDK) creates the guardian's users doc, and how
-    //      staffInvites provisioning will write a new staff account. Still
-    //      denies privilege escalation: a non-owner staff member can never
-    //      touch their OWN 'role' field through this clause (self-provisioning
-    //      your way from ops to owner stays impossible) — only a genuine
-    //      owner may touch their own role, and in practice this clause only
-    //      ever fires against a DIFFERENT uid's doc anyway, because `me()`
-    //      requires the caller's OWN doc to already exist with an ops/owner
-    //      role before this clause can pass at all (a not-yet-provisioned
-    //      caller has no doc for `me()` to read, so the condition errors closed).
+    //      staffInvites provisioning will write a new staff account. Two
+    //      privilege-escalation guards, both non-owner-only (an owner is
+    //      trusted with all of this by definition):
+    //        - a non-owner staff member can never touch their OWN 'role'
+    //          field through this clause (self-provisioning your way from
+    //          ops to owner stays impossible);
+    //        - a non-owner staff member can never write role == 'owner' on
+    //          ANY doc, self or otherwise (an ops account minting a NEW
+    //          owner account — for a colluding party, say — would be the
+    //          same escalation by a different door; the pin's "ops/owner may
+    //          create/update ANY uid" grants ops write access, not the
+    //          ability to grant OWNER access, which only an owner may do).
+    //      In practice this clause almost always fires against a DIFFERENT
+    //      uid's doc anyway, because `me()` requires the caller's OWN doc to
+    //      already exist with an ops/owner role before this clause can pass
+    //      at all (a not-yet-provisioned caller has no doc for `me()` to
+    //      read, so the condition errors closed).
     //   2. THE ONE SELF-WRITE (G): any signed-in user may update ONLY their
     //      own notificationPrefs field on their own doc — never role,
     //      household/athlete/specialist links, or staff status. This is
@@ -76,11 +84,13 @@ service cloud.firestore {
       allow read: if signedIn()
         && (request.auth.uid == userId || me().role in ['ops', 'owner']);
 
-      allow create: if signedIn() && me().role in ['ops', 'owner'];
+      allow create: if signedIn() && me().role in ['ops', 'owner']
+        && (me().role == 'owner' || request.resource.data.role != 'owner');
 
       allow update: if signedIn() && (
         (
           me().role in ['ops', 'owner']
+          && (me().role == 'owner' || request.resource.data.role != 'owner')
           && !(
             userId == request.auth.uid
             && me().role != 'owner'
