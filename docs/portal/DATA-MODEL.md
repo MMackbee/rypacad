@@ -24,6 +24,9 @@ serves.
 | `bookings` | `{athleteId}_{sessionId}` | Deterministic id = one booking per athlete per session, enforced by the keyspace itself. Re-booking after a cancellation updates the same doc's `status` instead of creating a duplicate. |
 | `contractLogs` | `{athleteId}_{date}` | Pinned by contract v1: one log per athlete per day, duplicate-proof by construction. |
 | `tournamentResults` | `{sessionId}_{athleteId}` | **Contract v1.5, id scheme unchanged by v1.6.** One result per athlete per tournament, enforced by the keyspace itself — the same pattern as `bookings` and `contractLogs`. Corrections overwrite via update; there is no delete in v1. |
+| `enrollmentRequests` | the guardian's Firebase Auth uid | **Contract v1.8, Sprint 10.** Same rationale as `users`: the caller-identity check in rules (`request.auth.uid == uid`) is a plain equality against the doc id, no `get()` needed. Seed uses a readable slug (`parent-new`) like every other uid-keyed doc in the emulator. |
+| `athletes/{athleteId}/diagnostics` | auto id | **Contract v1.8, Sprint 10.** A capture history, not a keyspace-enforced singleton — an athlete gets many captures over time, so there is no natural deterministic key the way `bookings`/`contractLogs`/`tournamentResults` have one. Seed uses readable slugs (`published-1`, `draft-1`) in the same "readable over random, the emulator mints no real auto-ids anyway" spirit as the `users` row above. |
+| `staffInvites` | auto id | **Contract v1.8, Sprint 10.** Not a keyspace-enforced collection either — many invites can exist over time, including two for the same email (a re-invite after one lapses). Seed uses a readable slug (`invite-1`). |
 
 ## Collections
 
@@ -37,8 +40,10 @@ The role document rules key off. One per authenticated account.
 | `athleteId` | string \| null | Set when `role == 'athlete'` — the athlete doc this account is. |
 | `householdId` | string \| null | Set when `role == 'parent'` — the household this guardian belongs to. |
 | `staff` | boolean | True for `coach`, `mental`, `ops`, `owner`. MFA is required for staff at setup (enforced at the auth layer, not stored here). |
+| `specialistId` | string \| null | `'phil' \| 'mental' \| null`. **Contract v1.7.1 (Sprint 9 integration)** — links a staff account to the specialist whose sessions it runs (`== sessions.type`); written by provisioning. Rules key `/portal/my-sessions` access and specialist-own-session attendance updates off it (`me().get('specialistId', null)`, null-safe). Documented here now as a pre-existing gap in this table (implemented and seeded since Sprint 9, never added to this row until this v1.8 pass — flagged in the Sprint 10 report, not a new field). |
 | `displayName` | string \| null | |
 | `email` | string \| null | |
+| `notificationPrefs` | map \| null | **Contract v1.8 (Sprint 10 pin G).** `{ <categoryId>: { email: boolean, sms: boolean } }`, one entry per category the NotificationPreferences screen renders (`NOTIFICATION_CATEGORIES` in `frontend/src/portal/data/parent.js` — `billing`, `schedule`, `newsletter`, `progress` as of this sprint; `billing` is UI-locked always-on but still gets a stored entry, since the map records a preference per category the screen renders, not per toggle a parent can actually flip). `null` until a user has saved once. **The one self-write the `users` collection allows:** rules permit a user to update ONLY this field on their own doc (`diff.hasOnly(['notificationPrefs'])`) — it cannot touch `role`/`householdId`/`athleteId`/`specialistId`, so a self-write can never be a privilege escalation. |
 
 ### `households/{householdId}`
 
@@ -62,7 +67,7 @@ needs — and nothing medical (see the subcollection below).
 | `dob` | string \| null | `YYYY-MM-DD`, or null when unknown. **Contract v1.6 (Sprint 8):** `tournamentResults.bracket` snapshots this field at write time (see [below](#tournamentresultssessionid_athleteid-contract-v16-sprint-8)) — no dob means every result for that athlete lands in the display-only 'Open' bracket until one is set. `seed-firestore.mjs` sets the Whitfield demo athletes' dobs to the OWNER-SUPPLIED values (TEAM.md Sprint 8 amendment v1.6.1, 2026-09-10), landing the three kids across three different brackets; `seed.js`'s ageLine copy was trued up to match. `provision-family.mjs`'s real test families (MackBee, Eisele) stay null — a real kid's birthday is never invented; the owner supplies it later and provisioning writes it through unchanged via an optional `dob` per athlete entry. |
 | `householdId` | string | Parent link; rules grant guardians access through it. |
 | `packageId` | string | Into `packages/` — decides both monthly allowance pools. |
-| `contractMinutes` | number \| null | `20 \| 45 \| 95 \| null` — Commitment Contract tier. |
+| `contractMinutes` | number \| null | `20 \| 45 \| 95 \| null` — Commitment Contract tier. **Contract v1.8 (Sprint 10 pin B): client-settable.** Rules allow an update of ONLY this field (`diff.hasOnly(['contractMinutes'])`) by two callers: the athlete's own `users` account, or the household's parent — the same three-way linkage reasoning as a booking create (own athlete, or own household's athlete via `get()`), not open to any signed-in user. This is what lets `useContract().setTier(minutes)` back the NoContract tier picker's CTA (athlete) and AthleteDetail's "Start a contract" card (parent) instead of both being dead ends. `nico` stays seeded `null` on purpose (below) so this intake path always has a real no-tier athlete to exercise. |
 | `coachId` | string \| null | uid of a `users` doc with `role == 'coach'`. Coach access filters on this assignment, never on role alone. |
 
 ### `athletes/{athleteId}/private/medical`
@@ -123,6 +128,7 @@ cases.
 | `overflow` | boolean | True for Friday overflow blocks (off by default in the generator). |
 | `status` | string | **Contract v1.2.** `scheduled \| cancelled`, default `scheduled`. The calendar sync sets `cancelled` — never deletes — when a synced session's calendar instance disappears but the session has bookings, so families are told rather than ghosted. |
 | `gcalEventId` | string \| null | **Contract v1.2.** The calendar instance id a synced session came from; null for generator-seeded sessions. The sync matches sessions by this id, so a retitled or retimed event updates its session instead of duplicating it. |
+| `coachNote` | string \| null | `<= 500` chars. **Contract v1.8 (Sprint 10 pin H).** Rules allow an update of ONLY this field (a second field-limited branch beside the `booked`-diff clause) by the assigned coach, any specialist, or mental/ops/owner. Backs `useSessionAttendance().setSessionNote(sessionId, note)` and the roster's "Add a session note" editor — the same inline-editor idiom the no-show reason already uses. Null on every seeded session except one past attended training block (see the [seeding workflow](#seeding--emulator-workflow) below). |
 
 ### Specialist 1-on-1 sessions: phil and mental (contract v1.7, Sprint 9)
 
@@ -552,6 +558,178 @@ nothing in the write path should ever produce one, but a hand-edited or
 pre-v1.6 doc reaching a v1.6 read path fails closed rather than crashing the
 standings screen).
 
+### `enrollmentRequests/{uid}` (contract v1.8, Sprint 10)
+
+Self-serve intake with owner approval — the data-loss path the Sprint 10 scan
+flagged first (TEAM.md pin A): a new family signing in and landing at a dead
+end instead of a real registration flow. Doc id is the signed-in guardian's
+own Firebase Auth uid — one open request per account, the same
+one-per-caller enforcement the `users` id gives, and the natural key since
+the whole point is "does *this* signed-in account have a request on file."
+
+| Field | Type | Notes |
+|---|---|---|
+| `guardian` | map | `{ name, email, phone }` — same shape as `households.guardian`. |
+| `athletes` | array of map | `{ name, dob (string YYYY-MM-DD \| null), packageId, contractMinutes (20\|45\|95\|null) }` per child. `dob`/`contractMinutes` are nullable — a family may not have decided a tier, or (rare) not know a birthdate at submission — but `packageId` is always set: a package choice is part of registration regardless of whether the tier is. |
+| `consents` | map | `{ dataCollection, videoCapture, mediaRelease }`, all booleans — the same three ids as `CONSENTS` in `frontend/src/portal/data/seed.js`. |
+| `status` | string | `pending \| approved \| declined`. |
+| `declineReason` | string \| null | Set by ops/owner on decline; null otherwise. |
+| `createdAt` | timestamp | |
+| `updatedAt` | timestamp | Bumped on every edit, including a submitter's own edit to a still-pending request and a resubmit after decline. |
+| `reviewedBy` | string \| null | uid of the ops/owner account that last changed `status`; null while `pending`. |
+| `reviewedAt` | timestamp \| null | |
+
+**Rules** (routing lane implements; shape noted here as the schema record):
+create/update by `request.auth.uid == uid` **only while `status` is
+`'pending'`** — a submitter can edit their own pending request (fix a typo,
+add a consent) but can never flip `status` themselves, including back to
+`'pending'` after a decline (that resubmit path is an ops/owner-mediated
+`status` change in the UI's model, not a self-write — see NotProvisioned's
+decline-state copy in TEAM.md pin A). Read: own uid, plus ops/owner (the
+admin enrollment queue). ops/owner may update `status` / `declineReason` /
+`reviewedBy` / `reviewedAt` only — never the guardian/athletes/consents
+content a family submitted.
+
+**Approval is one batched write** (owner/ops client, TEAM.md pin A) — not a
+Cloud Function, not multiple independent writes a partial failure could
+split:
+
+1. `households/{autoId}` from `guardian`;
+2. `athletes/{autoId}` per athlete entry — `name`, `dob`, `packageId`,
+   `contractMinutes`, `householdId` (the new household's id), `coachId: null`
+   (assignment is a separate staff action, unchanged from every other
+   athlete-creation path in this schema);
+3. `users/{uid}` for the guardian — `{ role: 'parent', householdId,
+   athleteId: null, staff: false, specialistId: null, displayName, email }`,
+   `uid` being the enrollment request's own doc id (the guardian's already-
+   signed-in account, resolved to a real portal account for the first time);
+4. the request doc's own `status -> 'approved'` (`reviewedBy`, `reviewedAt`
+   set).
+
+Kids getting their own logins is a **later**, separate provisioning step
+(parent-managed is the Sprint 7 default) — approval never creates a
+`users` doc for an athlete, only for the guardian.
+
+**Rules gain** (routing lane): `athletes` create by ops/owner (new —
+previously nothing created an `athletes` doc from the client at all, only
+seed/provision scripts); `users` create/update by ops/owner **for any uid**
+(new — previously the only `users` writes were the notificationPrefs
+self-write above and the scripts' admin-authenticated writes, which rules
+don't gate at all). Both are staff-only capability grants, not a widening of
+what a non-staff caller can do — **self-role-change by a non-owner stays
+denied**, exactly as before; an owner/ops account approving a request is
+setting up *someone else's* account, never elevating its own.
+
+### `athletes/{athleteId}/diagnostics/{captureId}` (contract v1.8, Sprint 10)
+
+Diagnostic capture persistence — the second silent data-loss path the scan
+flagged (TEAM.md pin C): a coach filling out the Diagnostic Capture screen
+had nothing backing it, so every capture vanished on refresh. Doc id is an
+auto id (no natural key — an athlete accumulates a capture history over
+time, the same shape as a photo or note log, not a one-per-day or
+one-per-session record like `contractLogs`/`bookings`).
+
+| Field | Type | Notes |
+|---|---|---|
+| `athleteId` | string | Matches the parent path segment — carried on the doc too so a collection-group read (below) doesn't need to parse the path to know whose capture it is. |
+| `capturedBy` | string | uid of the staff account that took the capture. |
+| `capturedAt` | timestamp | |
+| `updatedAt` | timestamp | |
+| `status` | string | `draft \| published`. A capture starts as a draft and is explicitly published — see the save/publish split below. |
+| `values` | map | `{ <fieldId>: number \| string \| null }`, keyed by the **existing `DIAGNOSTIC_SECTIONS` field ids** in `frontend/src/portal/data/seed.js` (the same catalogue the Diagnostic Capture screen renders its input rows from — never a second, independently-typed field list; the full enumerated key list is just below). A draft's `values` map holds only the fields entered so far; a published capture is expected to hold all of them, though the schema does not itself enforce completeness (a coach can publish a partial capture — the UI, not the rules, is where "are you sure" lives). |
+| `notes` | string \| null | Free-text, coach-entered. |
+
+That is the complete shape — six keys, `values` doing the heavy lifting.
+
+**The `values` key list**, enumerated by reading `DIAGNOSTIC_SECTIONS` in
+`seed.js` directly rather than retyped independently — thirteen field ids
+across four sections:
+
+| Section | Field ids |
+|---|---|
+| `launch` (Launch monitor) | `clubhead`, `ball`, `smash`, `carry7i` |
+| `mobility` (Mobility & stability) | `hip`, `shoulder`, `balance` |
+| `shortgame` (Short game) | `d30`, `d50`, `d70` |
+| `putting` (Putting) | `p3`, `p6`, `p10` |
+
+If a future sprint adds or renames a `DIAGNOSTIC_SECTIONS` field, this table
+goes stale until updated — it is a documentation mirror of `seed.js`, not a
+second source of truth the rules or the hook read from.
+
+**Rules** (routing lane implements): create/update by the assigned coach
+(`athleteData(athleteId).coachId == uid`), any specialist
+(`me().get('specialistId', null) != null`), or mental/ops/owner. Read: the
+athlete's own user and the household parent see **published only**
+(`resource.data.status == 'published'`) — a draft is a coach's working copy,
+never a family-facing document; staff see all (draft and published), the
+same "coach/specialist/mental/ops/owner" set as write.
+
+**Collection-group read** (routing lane implements; named here since it is
+the reason this document defines an `athleteId` field at all): a `match
+/{path=**}/diagnostics/{id}` rule allowing read for coach/mental/ops/owner/
+specialists turns "which athletes have no diagnostic yet" from an
+N-athletes-worth-of-reads admin problem into **one query** —
+`collectionGroup('diagnostics')` with no filter, read once, then diffed
+client-side against the full `athletes` list. See
+[Indexes](#indexes) below for why this specific read needs no index.
+
+**Hooks** (routing lane owns): `useDiagnostic(athleteId)` live ->
+`{ data: { latest (published capture \| null), draft (open draft \| null),
+sections }, saveDraft(values, notes), publish(values, notes) }`.
+`saveDraft` **upserts the athlete's single open draft** — a coach saving
+twice before publishing updates the same doc, not a second one; `publish`
+flips the open draft's `status` to `'published'`. A **second** publish (a
+follow-up capture weeks later) creates a **new** doc rather than overwriting
+the published one — history is the collection, exactly like
+`tournamentResults`' "no delete, corrections are same-id updates" precedent
+does NOT apply here: a diagnostic capture is a point-in-time record, and a
+newer capture is a new fact, not a correction of the old one.
+
+### `staffInvites/{id}` (contract v1.8, Sprint 10)
+
+Backs "Add staff" on Staff & Roles (TEAM.md pin E) — the third scan-flagged
+inert surface. Doc id is an auto id (many invites can exist over the life of
+the academy, including a re-invite after one lapses unresolved — no natural
+one-per-anything key).
+
+| Field | Type | Notes |
+|---|---|---|
+| `email` | string | Lowercased at write time — the field provisioning matches an auth account against. |
+| `role` | string | `coach \| mental \| ops \| owner`. |
+| `displayName` | string | |
+| `specialistId` | string \| null | `'phil' \| 'mental' \| null` — same meaning as `users.specialistId` above; carried on the invite so provisioning can write it straight through without a second staff decision at consumption time. |
+| `status` | string | `pending \| provisioned`. |
+| `createdBy` | string | uid of the owner account that created the invite. |
+| `createdAt` | timestamp | |
+| `provisionedUid` | string \| null | **Set by `provision-family.mjs`**, not by the client — the resolved auth uid once the invited person has signed in at least once and provisioning has run. Null while `pending`. |
+
+**Rules** (routing lane implements): create by owner only; read by owner/ops
+(the Staff & Roles pending-invites list, with its honest "provisions when
+they first sign in" line — TEAM.md pin E). No update/delete path from the
+client at all in v1 — the only writer of `status`/`provisionedUid` is the
+provisioning script below, which authenticates as IAM admin traffic rules
+don't gate (the same posture as every other `provision-*.mjs` write).
+
+**Consumption (`scripts/provision-family.mjs`, contract v1.8 pin E):** reads
+the `staffInvites` collection from production (same `prodAccessToken()`
+principal as every other write in the script), filters to `status ==
+'pending'`, and resolves each invite's `email` to an auth uid via the
+existing `lookupUids()` Identity Toolkit call — the identical resolution
+path the FAMILIES/STAFF accounts already go through, not a second mechanism.
+Found: writes `users/{uid}` — `{ role, athleteId: null, householdId: null,
+staff: true, specialistId, displayName, email }` — and updates the invite
+doc to `status: 'provisioned'`, `provisionedUid: uid` (a same-id update,
+full-document write like every other write in this script — there is no
+partial-field merge anywhere in these REST-API scripts, by construction).
+Not found: prints the identical "NO AUTH RECORD — create it in Firebase
+console" line the FAMILIES/STAFF accounts print when their auth record
+doesn't exist yet, and leaves the invite `pending` for the next run — the
+script is idempotent the same way it already was for families. **The
+`STAFF` array in the script is unchanged and stays the seed of record for
+Yannick and Phil** — `staffInvites` consumption is a second, parallel
+provisioning path for invites created through the live app, not a
+replacement for the hand-maintained real-specialist entries.
+
 ### Billing rows (derived, no new collection)
 
 Sprint 5 adds a per-child billing list to the parent surface. It is **not** a
@@ -687,6 +865,23 @@ than the roster now uses.
 Serves: `contractLogs where athleteId == :id and date >= :monthStart and
 date <= :monthEnd orderBy date` — the contract month grid, streaks, and
 attendance percentage on the parent's child-detail screen.
+
+### 7. `bookings (status ASC, date ASC)` — admin no-show query (contract v1.8, Sprint 10)
+
+Serves: `bookings where status == 'noshow' and date >= :monthStart` — the
+live admin "Who needs a call" card's no-shows-this-month list (TEAM.md pin
+D), grouped by `athleteId` client-side afterward with names via the per-id
+join. **Genuinely needs a composite**, unlike every other admin-derivation
+read this sprint adds ([confirmed index-free below](#v18-query-additions-sprint-10--live-admin-enrollment-diagnostics)):
+this is an equality filter on one field (`status`) **and** a range filter on
+a *different* field (`date`) in the same query — the two-distinct-field
+shape that has triggered every other real composite in this file (the same
+reasoning [index 4](#4-bookings-athleteid-asc-pool-asc-date-asc--cycle-usage)
+and [index 5](#5-bookings-sessionid-asc-status-asc--session-roster) already
+established for `bookings`), not the range-plus-orderBy-on-the-same-field
+shape that rides an automatic single-field index for free
+([index 1](#1-season-browsing--no-composite-needed-deploy-verified) and
+everywhere that cites it).
 
 ### v1.3 query additions (Sprint 5) — no `firestore.indexes.json` changes
 
@@ -838,6 +1033,64 @@ their upcoming 1-on-1s, deferred per TEAM.md's Sprint 9 "Deferred, on the
 record" note), that is the point a `(type ASC, date ASC)` or similar
 composite becomes real — not before.
 
+### v1.8 query additions (Sprint 10 — live admin, enrollment, diagnostics)
+
+`useAdminDashboard`'s live rebuild (TEAM.md pin D) is four read patterns
+over existing collections, no new store. Checked individually against the
+existing composites and against what genuinely needs an index at all — only
+**one** of the four does, and it is [index 7](#7-bookings-status-asc-date-asc--admin-no-show-query-contract-v18-sprint-10)
+above:
+
+- **Enrolled athletes / enrollment by package** — a full, unfiltered
+  `athletes` collection read (count the docs; group by `packageId`
+  client-side). No filter, no sort — nothing for an index to serve, the
+  same reasoning as the unfiltered `tournamentResults` season-standings read
+  in the [v1.5 notes](#ryp-tour-query-patterns-v15-sprint-7-unchanged-by-v16)
+  above.
+- **Block fill this week** — `sessions where date >= :weekStart and date <=
+  :weekEnd`, summed `booked`/`capacity` grouped by `type` client-side. A
+  range filter (and, if the client orders it, `orderBy`) on `date` alone —
+  the identical shape [index 1](#1-season-browsing--no-composite-needed-deploy-verified)
+  and the v1.3 month-session-grid note already established rides Firestore's
+  automatic single-field index. Nothing added.
+- **No-shows this month** — `bookings where status == 'noshow' and date >=
+  :monthStart`, grouped by `athleteId` client-side. Two *distinct* fields in
+  the filter clause (equality on `status`, range on `date`) — this is the
+  one pattern here that is NOT composite-free, and [index 7](#7-bookings-status-asc-date-asc--admin-no-show-query-contract-v18-sprint-10)
+  is exactly it.
+- **Contract behind** — `contractLogs where date >= :monthStart` (no
+  `athleteId` equality filter — this is the admin-wide scan across every
+  athlete's logs for the month, unlike [index 6](#6-contractlogs-athleteid-asc-date-asc--contract-history)'s
+  per-athlete version), grouped by `athleteId` client-side and compared
+  against each athlete's tier over the month's contract days. A single
+  range filter on one field, with or without an `orderBy` on that same
+  field — composite-free for the same reason the month-session-grid and
+  season-standings range reads are, above.
+- **Athletes with no published diagnostic** — the `diagnostics`
+  [collection-group read](#athletesathleteiddiagnosticscaptureid-contract-v18-sprint-10)
+  minus the full `athletes` list, both already covered: the collection-group
+  read carries **no filter at all** (`collectionGroup('diagnostics').get()`,
+  filtered to `status == 'published'` client-side, same "filter in memory
+  because the collection is small" call this schema already makes for
+  `bookings`' cycle-usage `status` and `tournamentResults`' read-time
+  position), so there is nothing for an index to serve — a genuinely
+  unfiltered collection-group read needs no more of an index than a plain
+  collection `.get()` does. The `athletes` half rides the same unfiltered
+  read as the first bullet above.
+
+Two more v1.8 reads, both single equality filters on one field — automatic
+single-field index, no composite, same reasoning as every other
+single-equality-filter case in this file:
+
+- **Enrollment queue** (admin section, TEAM.md pin D/A) —
+  `enrollmentRequests where status == 'pending'`.
+- **Pending staff invites** (Staff & Roles list, pin E, and
+  `provision-family.mjs`'s consumption) — in practice an unfiltered read of
+  the whole `staffInvites` collection (it is small; both the screen and the
+  script filter to `status == 'pending'` client-side rather than issuing a
+  second query shape), which is even more trivially index-free than the
+  equality-filter version would have been.
+
 ## Seeding & emulator workflow
 
 Both npm scripts live in the **root `package.json`** (created for this — the
@@ -897,3 +1150,31 @@ The seed script:
   above for the full field shape and the id convention. The script's sanity
   output lists every hand-seeded specialist session and the pre-booked
   booking by id.
+- bundles `data/parent.js` too (contract v1.8, Sprint 10), so
+  `NOTIFICATION_CATEGORIES` is read off the same module the screen renders
+  from rather than retyped — see the `notificationPrefs` bullet below.
+- seeds ONE pending `enrollmentRequests` doc (contract v1.8, pin A) keyed
+  `parent-new` — a NEW, unprovisioned QA uid; no `users/parent-new` doc
+  exists (the sanity output prints `exists=false` for it, so the invariant
+  is checked every run, not just asserted in a comment). Two athletes, one
+  with a dob and tier, one with neither; all three consents true.
+- seeds two `athletes/jordan/diagnostics` captures (contract v1.8, pin C):
+  an older `published-1` with a value for **every** `DIAGNOSTIC_SECTIONS`
+  field id (13, enumerated [above](#athletesathleteiddiagnosticscaptureid-contract-v18-sprint-10)),
+  and a newer `draft-1` with just the launch monitor's first two fields —
+  both `capturedBy: 'coach-luke'`.
+- seeds ONE pending `staffInvites` doc (contract v1.8, pin E) at a
+  clearly-fake address (`invite-test@example.com`, role coach,
+  `specialistId: null`) — never a real person's email. There is no
+  matching auth account for it anywhere, so it stays `pending`;
+  `provision-family.mjs` is what would resolve and consume it, against
+  production, not this script.
+- seeds `notificationPrefs` (contract v1.8, pin G) on every `users` doc:
+  parent-dana gets a real map, one entry per `NOTIFICATION_CATEGORIES` id,
+  each `{ email: true, sms: false }`; every other seeded `users` doc gets
+  `notificationPrefs: null`.
+- seeds `coachNote` (contract v1.8, pin H) as `null` on every session
+  **except** jordan's past attended training block `2026-11-09-2` (already
+  in the `bookings` seed above), which gets a real note — so the roster's
+  session-note editor has one real pre-filled example alongside the blank
+  default.
