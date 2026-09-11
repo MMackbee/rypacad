@@ -7,7 +7,15 @@
  *
  * What it seeds (data contract v1, docs/portal/TEAM.md):
  *   packages    — the 2026-27 catalogue from frontend/src/portal/data/packages.js
- *   sessions    — the generated season (buildSeason() from season.js)
+ *   sessions    — the generated season (buildSeason() from season.js), PLUS
+ *                  contract v1.7 (Sprint 9): hand-seeded specialist 1-on-1
+ *                  slots for Phil ('phil') and Yannick ('mental') covering the
+ *                  SPECIALIST_BOOKING_WINDOW_DAYS days starting the day this
+ *                  script runs (computed off the runtime clock, never
+ *                  hardcoded — see SPECIALIST_SLOT_TIMES below). The generator
+ *                  never invents these; ids use a new `-s<n>` letter on the
+ *                  existing `-x<n>` extras convention (season.js's
+ *                  generateSeason() step for holiday tournaments).
  *   households  — the Whitfield demo household from seed.js
  *   athletes    — the three Whitfield athletes with their packageIds and,
  *                  as of contract v1.6 (Sprint 8: age brackets), the
@@ -29,7 +37,12 @@
  *                  the parent-linkage path for two athletes who have no
  *                  `users` doc of their own. The referenced sessions'
  *                  `booked` counts are incremented to match, the same
- *                  invariant the real booking transaction maintains.
+ *                  invariant the real booking transaction maintains. Also
+ *                  contract v1.7 (Sprint 9): ONE pre-booked specialist
+ *                  booking for jordan against the first hand-seeded Yannick
+ *                  ('mental') slot, pool 'specialist', so schedule display,
+ *                  the monthly cap, and cancellation all have something real
+ *                  to exercise in QA.
  *   tournamentResults — SCORES (strokes) for two real generated Saturday
  *                  tournament blocks (contract v1.6, Sprint 8: coaches enter
  *                  strokes now, not tap-order positions; a write-time age
@@ -186,6 +199,85 @@ function bracketForDob(dobISO, asOfISO) {
   return b ? b.id : null;
 }
 
+/** 'YYYY-MM-DD' for a local Date, no date-fns dependency. Shared by the
+ * specialist-session generator below and the contractLogs builder further
+ * down (hoisted here rather than left as a contractLogs-local, now that two
+ * call sites need it). */
+function isoDate(d) {
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+}
+
+// ---------------------------------------------------------------------------
+// Specialist 1-on-1 sessions — Phil (type 'phil') and Yannick (type
+// 'mental') — contract v1.7, TEAM.md "Sprint 9 pins". A specialist 1-on-1 IS
+// a session with capacity 1 and its own pool ('specialist' on the booking,
+// set where the booking is built below); the generator never invents these
+// (buildSeason() only knows training/tournament), so this script hand-adds
+// them the same way it hand-adds nothing else in `sessions` — everything
+// else in that collection comes straight from season.js.
+//
+// Ids: the existing `-x<n>` extras convention (season.js's generateSeason(),
+// used for the holiday tournaments) with a NEW letter, 's' (specialist):
+// `YYYY-MM-DD-s0`, `-s1`, ... — 0-based order of that day's specialist slots.
+// Documented in DATA-MODEL.md's id-conventions table.
+//
+// Window: SPECIALIST_BOOKING_WINDOW_DAYS days starting the day this script
+// runs — computed off `new Date()` at run time, NEVER hardcoded, so a re-run
+// always covers "the next two weeks" relative to whenever it actually runs.
+// This mirrors data/specialists.js's SPECIALIST_BOOKING_WINDOW_DAYS (routing
+// lane owns that file; the number is named, not imported — this script does
+// not bundle data/specialists.js, matching the BRACKETS precedent above) and
+// the useSpecialistSlots() seed fallback's "next N days from today" window
+// (TEAM.md hook-seam pin).
+//
+// Pattern: Yannick works Tue/Thu, late afternoon; Phil works Mon/Wed/Fri.
+// Both run three 45-minute slots per working day — invented times only, no
+// invented people, same call TEAM.md's hook-seam note makes for the live
+// hook's own seed fallback.
+const SPECIALIST_BOOKING_WINDOW_DAYS = 14;
+const SPECIALIST_SLOT_TIMES = {
+  phil: ['3:00 PM', '3:45 PM', '4:30 PM'], // Mon/Wed/Fri
+  mental: ['4:00 PM', '4:45 PM', '5:30 PM'], // Tue/Thu, late afternoon
+};
+// JS Date#getDay(): Sun=0, Mon=1, ... Sat=6.
+const SPECIALIST_WEEKDAY_TYPE = { 1: 'phil', 3: 'phil', 5: 'phil', 2: 'mental', 4: 'mental' };
+
+/**
+ * Generates the hand-seeded specialist session docs and merges them into
+ * `sessions` (mutated in place — same map every other session lives in,
+ * since a specialist slot is a session like any other). Returns the slot ids
+ * in generation order (chronological, then Phil/Yannick's own slot order)
+ * for the sanity output and for picking jordan's pre-booked slot below.
+ */
+function addSpecialistSessions(sessions, runDate = new Date()) {
+  const slotIds = [];
+  for (let i = 0; i < SPECIALIST_BOOKING_WINDOW_DAYS; i++) {
+    const d = new Date(runDate);
+    d.setDate(d.getDate() + i);
+    const type = SPECIALIST_WEEKDAY_TYPE[d.getDay()];
+    if (!type) continue; // weekend, or a weekday neither specialist works
+    const dateStr = isoDate(d);
+    SPECIALIST_SLOT_TIMES[type].forEach((time, n) => {
+      const id = `${dateStr}-s${n}`;
+      sessions.set(id, {
+        date: dateStr,
+        time,
+        type,
+        capacity: 1, // contract v1.7: a specialist 1-on-1 IS a session with capacity 1
+        booked: 0,
+        coachId: null,
+        label: null,
+        special: false,
+        overflow: false,
+        status: 'scheduled',
+        gcalEventId: null, // hand-seeded, never a synced-from-calendar doc
+      });
+      slotIds.push({ id, type });
+    });
+  }
+  return slotIds;
+}
+
 // ---------------------------------------------------------------------------
 // Build the documents. Shapes follow the data contract v1 in TEAM.md; the
 // field-by-field spec is docs/portal/DATA-MODEL.md.
@@ -221,6 +313,11 @@ function buildDocs(portal) {
       overflow: !!fields.overflow,
     });
   }
+
+  // specialist 1-on-1 sessions (contract v1.7, Sprint 9) — hand-added into
+  // the same `sessions` map, never from buildSeason(); see
+  // addSpecialistSessions() above for the id/window/pattern rationale.
+  const specialistSlotIds = addSpecialistSessions(sessions);
 
   // households — guardian contact from the scaffold (dana@email.com is the
   // parent email seed.js uses). Stripe ids are null: ids only, and a demo
@@ -342,6 +439,48 @@ function buildDocs(portal) {
     session.booked += 1; // same write the real booking transaction makes
   }
 
+  // ONE pre-booked specialist booking for jordan (contract v1.7, TEAM.md
+  // "Sprint 9 pins" DB lane bullet: "so schedule display, the cap, and
+  // cancel have something real"). Picks the first Yannick ('mental') slot
+  // addSpecialistSessions() generated above — deterministic regardless of
+  // which weekday the script happens to run on.
+  const jordanMentalSlot = specialistSlotIds.find((s) => s.type === 'mental');
+  if (!jordanMentalSlot) {
+    throw new Error(
+      'addSpecialistSessions() produced no Yannick (mental) slot in the ' +
+        `${SPECIALIST_BOOKING_WINDOW_DAYS}-day window — cannot seed the pinned pre-booked jordan booking. ` +
+        'Widen SPECIALIST_BOOKING_WINDOW_DAYS or check SPECIALIST_WEEKDAY_TYPE.'
+    );
+  }
+  {
+    const session = sessions.get(jordanMentalSlot.id);
+    bookings.set(`jordan_${jordanMentalSlot.id}`, {
+      athleteId: 'jordan',
+      sessionId: jordanMentalSlot.id,
+      date: session.date,
+      type: session.type, // 'mental'
+      // pool 'specialist' (contract v1.7) — written as a LITERAL, not via
+      // poolFor(session.type). poolFor() in
+      // frontend/src/portal/data/packages.js maps phil|mental -> 'specialist'
+      // as the ROUTING lane's edit (TEAM.md: "ROUTING lane makes that one
+      // edit... db lane consumes it via its existing bundle, edits nothing
+      // there"), which lands in a parallel worktree this one doesn't see. As
+      // bundled in THIS worktree, poolFor('mental') still falls through to
+      // its `=== 'tournament' ? 'tournaments' : 'training'` ternary and
+      // silently returns 'training' — wrong for a specialist booking — so
+      // the literal is used instead of trusting an import that hasn't landed
+      // yet. `pool` is stored, not derived (see the bookings field notes in
+      // DATA-MODEL.md), so this doc is correct today and stays correct once
+      // poolFor() itself is fixed at merge.
+      pool: 'specialist',
+      status: 'confirmed',
+      householdId,
+      createdBy: 'parent-dana',
+      createdAt: bookingCreatedAt,
+    });
+    session.booked += 1; // same invariant as the WHITFIELD_BOOKINGS loop above
+  }
+
   // tournamentResults — SCORES (strokes) for two real generated Saturday
   // tournament blocks (contract v1.6, TEAM.md "Sprint 8 pins": coaches enter
   // strokes now, not tap-order positions; standings split into age
@@ -446,8 +585,7 @@ function buildDocs(portal) {
     [14, 50], [13, 30], [12, 0], [11, 65], [10, 45], [9, 20], [8, 90],
     [7, 0], [6, 40], [5, 45], [4, 15], [3, 70], [2, 35], [1, 55],
   ];
-  const isoDate = (d) =>
-    `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+  // isoDate() is hoisted above (shared with addSpecialistSessions()).
   const today = new Date();
   for (const [daysAgo, minutes] of JORDAN_PRACTICE_LOG) {
     if (minutes <= 0) continue; // skipped day — no log
@@ -555,9 +693,12 @@ async function main() {
   const sessionDocs = [...collections.sessions.values()];
   const trainingCount = sessionDocs.filter((s) => s.type === 'training').length;
   const tournamentCount = sessionDocs.filter((s) => s.type === 'tournament').length;
+  const philCount = sessionDocs.filter((s) => s.type === 'phil').length;
+  const mentalCount = sessionDocs.filter((s) => s.type === 'mental').length;
   console.log(
     `Season ${portal.SEASON_BOUNDS.start} -> ${portal.SEASON_BOUNDS.end}: ` +
-      `${sessionDocs.length} sessions (${trainingCount} training, ${tournamentCount} tournament)\n`
+      `${sessionDocs.length} sessions (${trainingCount} training, ${tournamentCount} tournament, ` +
+      `${philCount} phil, ${mentalCount} mental)\n`
   );
 
   let total = 0;
@@ -571,6 +712,24 @@ async function main() {
 
   console.log('\nWhitfield bookings (contract v1.4) and the sessions.booked they drive:');
   for (const [id, doc] of collections.bookings) {
+    const session = collections.sessions.get(doc.sessionId);
+    console.log(
+      `  bookings/${id}: status=${doc.status} pool=${doc.pool} createdBy=${doc.createdBy}` +
+        ` -> sessions/${doc.sessionId}.booked=${session.booked}/${session.capacity}`
+    );
+  }
+
+  console.log('\nSpecialist 1-on-1 sessions (contract v1.7) — hand-seeded, never from buildSeason():');
+  for (const [id, doc] of collections.sessions) {
+    if (doc.type !== 'phil' && doc.type !== 'mental') continue;
+    console.log(
+      `  sessions/${id}: type=${doc.type} date=${doc.date} time=${doc.time} status=${doc.status}` +
+        ` capacity=${doc.capacity} booked=${doc.booked} gcalEventId=${doc.gcalEventId}`
+    );
+  }
+  console.log('\nPre-booked specialist booking (jordan, contract v1.7):');
+  for (const [id, doc] of collections.bookings) {
+    if (doc.pool !== 'specialist') continue;
     const session = collections.sessions.get(doc.sessionId);
     console.log(
       `  bookings/${id}: status=${doc.status} pool=${doc.pool} createdBy=${doc.createdBy}` +
