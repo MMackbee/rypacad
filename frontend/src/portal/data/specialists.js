@@ -4,13 +4,22 @@
  * docs/portal/TEAM.md "Sprint 9 pins — specialist 1-on-1s (Phil & Yannick),
  * Lifetime-style booking, cancellation" + contract v1.7).
  *
- * Design keystone (the pin's own words): a specialist 1-on-1 IS a session
- * with capacity 1 and its own pool. Nothing new is invented at the data-model
- * level — the existing booking transaction (hooks/live.js#createBooking),
- * parent book-for-kid, My Schedule derivation and attendance all apply
- * UNCHANGED. This file is the one small catalogue those paths (and
- * hooks/index.js#useSpecialistSlots) read from — the same job data/tour.js
- * does for the Tour.
+ * Design keystone (the pin's own words): a specialist session IS a session
+ * with its own capacity and its own pool. Nothing new is invented at the
+ * data-model level — the existing booking transaction
+ * (hooks/live.js#createBooking), parent book-for-kid, My Schedule derivation
+ * and attendance all apply UNCHANGED. This file is the one small catalogue
+ * those paths (and hooks/index.js#useSpecialistSlots) read from — the same
+ * job data/tour.js does for the Tour.
+ *
+ * Capacity (amendment v1.7.1, owner's ruling 2026-09-11): Phil's sessions
+ * "operate just like academy training session just at a cap of 6-7 kids" —
+ * capacity 6 (a one-value change here + the sync script's mirrored map if
+ * the owner says 7). Yannick's stay true 1:1 at capacity 1. `capacity` here
+ * feeds the demo/seed branches; PRODUCTION capacity is written by
+ * scripts/sync-calendar-sessions.mjs's own per-type map (a dependency-free
+ * mirror, same arrangement as the seed script's BRACKETS copy — change one,
+ * change both).
  *
  * `id` doubles as the sessions.type value a specialist slot carries in
  * Firestore. Production sessions come from the Google Calendar sync (db
@@ -20,8 +29,23 @@
  * the season — the generator never invents them, and neither does this file.
  */
 export const SPECIALISTS = [
-  { id: 'phil', name: 'Phil', discipline: 'Performance coaching', sessionNoun: 'Performance session' },
-  { id: 'mental', name: 'Yannick', discipline: 'Mental game', sessionNoun: 'Mental game session' },
+  {
+    id: 'phil',
+    name: 'Phil',
+    discipline: 'Performance coaching',
+    sessionNoun: 'Performance session',
+    capacity: 6,
+    whatToExpect:
+      'Small-group performance training — strength, speed and athleticism for golf, capped at six athletes.',
+  },
+  {
+    id: 'mental',
+    name: 'Yannick',
+    discipline: 'Mental game',
+    sessionNoun: 'Mental game session',
+    capacity: 1,
+    whatToExpect: 'One-on-one mental game work — focus, routine and course management.',
+  },
 ];
 
 /**

@@ -700,3 +700,29 @@ entitlement derives from the athlete's fitness package `sessions` count
 stays the flat knob until the Elite yannickSessions count is decided.
 Sprint 9 ships with the flat cap for both types so the feature is usable
 before package assignment exists.
+
+## Sprint 9 integration notes + Sprint 10 queue addition (2026-09-11)
+
+Integration applied on merge (PM): the v1.7.1 rulings (phil capacity 6
+everywhere + "N spots left" slot rows; mental stays 1:1), the frontend
+lane's fallbacks reconciled (SPECIALISTS gained capacity + whatToExpect;
+reservation rides useBooking.book() per routing's ruling), role-aware back
+from /portal/coaching, ParentDashboard onBookCoaching wired, and the
+specialist-side access set: users.specialistId, /portal/my-sessions
+(SpecialistDay screen + useSpecialistSessions hook), specialist landing
+override, attendance route widened, and two rules additions (specialists
+read athletes academy-wide like mental — medical subcollection untouched —
+and run attendanceUpdateOk on bookings of their own session type via
+me().get('specialistId', null), null-safe for every pre-existing users
+doc). Seed adds the 'phil' QA account (signInAs('phil')). Yannick/Phil
+production emails are in provision-family.mjs (owner-supplied).
+
+SPRINT 10 QUEUE ADDITION (owner's Life Time Reservations screenshot,
+2026-09-11): a family-grouped Reservations view for parents — one screen,
+sections per household member ("You / Peggy / Maeve" in the reference),
+date-block rows with time · duration · instructor, waitlist state later —
+pairs naturally with the membership/permissions surface already queued.
+
+Still open from the db lane (pre-existing, deferred): generator-seeded
+sessions never write status/gcalEventId though DATA-MODEL documents both
+since v1.2 — emulator-only inconsistency, follow-up candidate.

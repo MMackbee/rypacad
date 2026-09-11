@@ -28,6 +28,7 @@ import AdminDashboard from './screens/AdminDashboard';
 import StaffRoles from './screens/StaffRoles';
 import NewsletterComposer from './screens/NewsletterComposer';
 import TourStandings from './screens/TourStandings';
+import SpecialistDay from './screens/SpecialistDay';
 
 /**
  * Portal route tree, mounted under /portal.
@@ -75,9 +76,20 @@ export function RequireRole({ roles, children }) {
   if (!user) return <Navigate to="/portal/signin" replace />;
   if (!provisioned) return <Navigate to="/portal/not-provisioned" replace />;
   if (!roles.includes(user.role)) {
-    return <Navigate to={LANDING_BY_ROLE[user.role] || '/portal/not-provisioned'} replace />;
+    return <Navigate to={landingFor(user)} replace />;
   }
   return children;
+}
+
+/**
+ * Where a signed-in user lands (Sprint 9 amendment v1.7.1): a specialist —
+ * any account whose users doc carries specialistId (Yannick, Phil) — lands
+ * on their own My Sessions day view; everyone else keeps the Sprint 4
+ * role mapping. SignIn.js applies the same override post-login.
+ */
+function landingFor(user) {
+  if (user?.specialistId) return '/portal/my-sessions';
+  return LANDING_BY_ROLE[user?.role] || '/portal/not-provisioned';
 }
 
 /**
@@ -125,7 +137,7 @@ function PortalIndex() {
   if (!live) return <StatesHarness />;
   if (loading) return null;
   if (!user || !provisioned) return <Navigate to="/portal/signin" replace />;
-  return <Navigate to={LANDING_BY_ROLE[user.role] || '/portal/not-provisioned'} replace />;
+  return <Navigate to={landingFor(user)} replace />;
 }
 
 /**
@@ -165,17 +177,61 @@ function BookSessionRoute({ onBack }) {
  * exactly like /portal/book, so the child selector opens already pointed at
  * that kid instead of defaulting to whichever child sorts first.
  */
-function CoachingRoute({ onBack }) {
+function CoachingRoute() {
   const live = isLive();
   const { user } = useAuthSession(live ? undefined : { variant: 'idle' });
   const { state } = useLocation();
+  const navigate = useNavigate();
   const role = live && user?.role === 'parent' ? 'parent' : 'athlete';
+  // Role-aware back (routing lane's flagged judgment call, resolved at PM
+  // integration): a parent came from Family, an athlete from Home.
+  const back = role === 'parent' ? '/portal/family' : '/portal/home';
   return (
     <SpecialistBooking
       bare
       role={role}
       initialAthleteId={state?.athleteId ?? undefined}
-      onBack={onBack}
+      onBack={() => navigate(back)}
+    />
+  );
+}
+
+/**
+ * The specialist's own day view (Sprint 9 amendment v1.7.1). Identity comes
+ * from the users doc: Yannick's specialistId is 'mental', Phil's 'phil'.
+ * ops/owner have none and get the in-screen switcher instead. A coach with
+ * no specialist link has no business here and goes to their own dashboard.
+ * Tapping a session opens the SAME attendance screen coaches use, with the
+ * session's real facts as navigation state and this view as the way back.
+ */
+function SpecialistDayRoute({ onSignOut }) {
+  const live = isLive();
+  const { user } = useAuthSession(live ? undefined : { variant: 'idle' });
+  const navigate = useNavigate();
+  const specialistId = (live && user?.specialistId) || (!live ? 'mental' : null);
+  const canSwitch = live && !user?.specialistId && ['ops', 'owner'].includes(user?.role ?? '');
+  if (live && !specialistId && !canSwitch) return <Navigate to="/portal/coach" replace />;
+  return (
+    <SpecialistDay
+      bare
+      specialistId={specialistId ?? undefined}
+      canSwitch={canSwitch}
+      onSignOut={onSignOut}
+      onOpenSession={(s) =>
+        navigate('/portal/attendance', {
+          state: {
+            sessionId: s.sessionId,
+            backTo: '/portal/my-sessions',
+            block: {
+              date: s.date,
+              time: s.time ?? null,
+              type: s.type ?? null,
+              name: null,
+              meta: null,
+            },
+          },
+        })
+      }
     />
   );
 }
@@ -237,10 +293,15 @@ function CoachDashboardRoute({ onSignOut }) {
 
 function SessionAttendanceRoute({ onBack }) {
   const { state } = useLocation();
+  const navigate = useNavigate();
+  // v1.7.1: a specialist arrives from /portal/my-sessions and must return
+  // there, not to the golf coach's dashboard — the caller says so via
+  // navigation state; the coach flow's fixed back target is unchanged.
+  const back = state?.backTo ? () => navigate(state.backTo) : onBack;
   return (
     <SessionAttendance
       bare
-      onBack={onBack}
+      onBack={back}
       blockIndex={state?.blockIndex ?? undefined}
       sessionId={state?.sessionId ?? undefined}
       block={state?.block ?? undefined}
@@ -338,7 +399,18 @@ export default function PortalRoutes() {
         path="coaching"
         element={
           <RequireRole roles={['athlete', 'parent']}>
-            <CoachingRoute onBack={go('/portal/home')} />
+            <CoachingRoute />
+          </RequireRole>
+        }
+      />
+      {/* The specialist's own booked-session view (v1.7.1): Yannick and
+          Phil land here after sign-in; ops/owner reach it with the
+          in-screen specialist switcher. */}
+      <Route
+        path="my-sessions"
+        element={
+          <RequireRole roles={['coach', 'mental', 'ops', 'owner']}>
+            <SpecialistDayRoute onSignOut={onSignOut} />
           </RequireRole>
         }
       />
@@ -378,6 +450,9 @@ export default function PortalRoutes() {
               // child. Many kids never get their own login - this is the
               // first-class path for a parent booking on their behalf.
               onBookFor={(athleteId) => navigate('/portal/book', { state: { athleteId } })}
+              // Sprint 9: one full-width coaching action under the kid
+              // cards; SpecialistBooking carries its own child selector.
+              onBookCoaching={() => navigate('/portal/coaching')}
             />
           </RequireRole>
         }
@@ -450,10 +525,12 @@ export default function PortalRoutes() {
           </RequireRole>
         }
       />
+      {/* v1.7.1: specialists (mental, and ops/owner oversight) run
+          attendance on their own sessions through this same screen. */}
       <Route
         path="attendance"
         element={
-          <RequireRole roles={['coach']}>
+          <RequireRole roles={['coach', 'mental', 'ops', 'owner']}>
             <SessionAttendanceRoute onBack={go('/portal/coach')} />
           </RequireRole>
         }

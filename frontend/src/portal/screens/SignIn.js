@@ -77,7 +77,13 @@ function LiveSignIn({ bare = false, onStartEnrollment, onSignedIn }) {
       onSignedIn(user);
       return;
     }
-    navigate(LANDING_BY_ROLE[user.role] ?? '/portal/not-provisioned', { replace: true });
+    // v1.7.1: a specialist account (users.specialistId — Yannick, Phil)
+    // lands on their own My Sessions view; PortalRoutes.landingFor applies
+    // the same override on the index redirect.
+    navigate(
+      user.specialistId ? '/portal/my-sessions' : LANDING_BY_ROLE[user.role] ?? '/portal/not-provisioned',
+      { replace: true }
+    );
   }, [user, provisioned, onSignedIn, navigate]);
 
   return (

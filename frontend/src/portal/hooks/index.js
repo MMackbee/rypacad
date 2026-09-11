@@ -875,19 +875,26 @@ export function seedSpecialistDays(specialistId, today) {
   const onMental = specialistId === 'mental';
   const weekdays = onMental ? MENTAL_WEEKDAYS : PHIL_WEEKDAYS;
   const times = onMental ? MENTAL_TIMES : PHIL_TIMES;
+  // v1.7.1: capacity comes from the SPECIALISTS registry — phil is a group
+  // session of 6, mental a true 1:1. A phil demo slot carries a believable
+  // partial fill so the "spots left" treatment is reviewable in seed mode.
+  const capacity = SPECIALISTS.find((s) => s.id === specialistId)?.capacity ?? 1;
 
   const days = [];
   for (let i = 0; i < SPECIALIST_BOOKING_WINDOW_DAYS; i++) {
     const date = addDaysISO(today, i);
     const dow = new Date(`${date}T00:00:00Z`).getUTCDay();
     const slots = weekdays.has(dow)
-      ? times.map((time, idx) => ({
-          sessionId: `${date}-s${idx}`,
-          time,
-          booked: 0,
-          capacity: 1,
-          open: true,
-        }))
+      ? times.map((time, idx) => {
+          const booked = capacity > 1 ? (i + idx) % capacity : 0;
+          return {
+            sessionId: `${date}-s${idx}`,
+            time,
+            booked,
+            capacity,
+            open: booked < capacity,
+          };
+        })
       : [];
     days.push({ date, dayLabel: dayLabel(date, today), slots });
   }
@@ -964,6 +971,90 @@ export function useSpecialistSlots(specialistId) {
       ? {
           source: () => liveSpecialistSlots(specialistId, today),
           deps: ['specialist-slots', specialistId, today, sessionsGen, bookingsGen],
+        }
+      : undefined
+  );
+}
+
+/**
+ * Seed branch for useSpecialistSessions — the same fortnight
+ * seedSpecialistDays generates, flattened to the specialist's own day-view
+ * shape. Roster names stay EMPTY in seed mode (no invented people; the
+ * screen renders the booked count and, live, the real names).
+ */
+function seedSpecialistDaySessions(specialistId, today) {
+  return seedSpecialistDays(specialistId, today)
+    .flatMap((d) =>
+      d.slots.map((s) => ({
+        sessionId: s.sessionId,
+        date: d.date,
+        dayLabel: d.dayLabel,
+        time: s.time,
+        booked: s.booked,
+        capacity: s.capacity,
+        athletes: [],
+      }))
+    );
+}
+
+/**
+ * Live payload for useSpecialistSessions — the specialist's OWN upcoming
+ * sessions over the same rolling window the booking screen shows, each
+ * joined to its live roster (non-cancelled bookings -> athlete names via
+ * the per-id join; a name the caller cannot read renders as a count, not a
+ * crash). Powers the "My sessions" day view (Sprint 9 amendment v1.7.1:
+ * specialist-side access).
+ */
+async function liveSpecialistSessions(specialistId, today) {
+  const toDate = addDaysISO(today, SPECIALIST_BOOKING_WINDOW_DAYS - 1);
+  const sessions = await fetchSessionsInRange(today, toDate);
+  const mine = sessions
+    .filter((s) => s.type === specialistId && s.status !== 'cancelled')
+    .sort(byDateThenId);
+
+  const withRosters = await Promise.all(
+    mine.map(async (s) => {
+      const bookings = await fetchBookingsBySession(s.id);
+      const active = bookings.filter((b) => b.status !== 'cancelled');
+      const athletes = await fetchAthletesByIds(active.map((b) => b.athleteId));
+      const nameById = new Map(athletes.map((a) => [a.id, a.name]));
+      return {
+        sessionId: s.id,
+        date: s.date,
+        dayLabel: dayLabel(s.date, today),
+        time: s.time,
+        booked: active.length,
+        capacity: s.capacity ?? 1,
+        athletes: active.map((b) => ({
+          athleteId: b.athleteId,
+          name: nameById.get(b.athleteId) ?? null,
+        })),
+      };
+    })
+  );
+  return { sessions: withRosters };
+}
+
+/**
+ * GET /specialists/:id/my-sessions (Sprint 9 amendment v1.7.1) — the
+ * signed-in specialist's upcoming sessions with per-session rosters:
+ * { data: { sessions: [{ sessionId, date, dayLabel, time, booked,
+ *   capacity, athletes: [{ athleteId, name }] }] }, loading, error }.
+ * Subscribed to both invalidation generations, so a family's booking or
+ * cancellation refreshes an open specialist day view immediately.
+ */
+export function useSpecialistSessions(specialistId) {
+  const live = isLive();
+  const today = todayISO();
+  const sessionsGen = useInvalidation('sessions');
+  const bookingsGen = useInvalidation('bookings');
+
+  return useSeedResource(
+    live && specialistId ? null : { sessions: specialistId ? seedSpecialistDaySessions(specialistId, today) : [] },
+    live && specialistId
+      ? {
+          source: () => liveSpecialistSessions(specialistId, today),
+          deps: ['specialist-sessions', specialistId, today, sessionsGen, bookingsGen],
         }
       : undefined
   );

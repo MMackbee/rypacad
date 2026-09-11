@@ -1,62 +1,75 @@
-Read `docs/portal/handoff-r3-update.md` first. You built the portal scaffold
-against revision 2 of the design handoff, which said tier names, count and
-prices were undecided. They're decided now, and that update note is the delta.
+The portal scaffold is complete — 18 screens, all reading seed data through the
+`useSeedResource` seam. Nothing touches Firebase yet. This stretch turns the
+first slice into a real application.
 
-Two new files are already in the tree and are the source of truth for what they
-cover — don't re-derive them:
-- `frontend/src/portal/data/packages.js` — the confirmed 26/27 price list, the
-  two-pool allowance helpers, and the Elite tiers
-- `frontend/src/portal/data/schedule.js` — `generateSeason()` and the capacity
-  helpers, replacing the static sessions in `seed.js`
+Read `docs/portal/booking-contract.md` first. It specifies the write path in
+detail and explains why booking comes before auth.
 
-Run `git status` before you start. Those two files plus the update note are
-untracked additions from outside your session.
+There is a decision meeting on **Thursday Sept 3**. Anything you hit that needs
+a human answer goes in `docs/portal/DECISION-GAPS.md` — see the last section.
 
-Work in this order, one commit per step:
+## 1. Booking write path
 
-**1. Two-pool allowances — do this before building any more screens.**
-`seed.js` has `TIER_RULE = { used: 3, limit: 8 }` and the copy says "3 OF 8
-BOOKINGS USED". That models one booking pool. Every package sells *training +
-tournaments* as two allowances that don't substitute for each other — an athlete
-can have training left with no tournaments remaining. Use `makeAllowance()` and
-`poolFor()` from `packages.js`. Update Book a Session (show which pool a slot
-spends before the athlete commits, and make "limit reached" pool-specific),
-My Schedule, and Parent Dashboard. Every screen built on the one-pool assumption
-before this lands is a screen that gets reworked.
+Implement `bookSession` and `cancelBooking` as callable Cloud Functions in
+`functions/`, following the transaction in the contract exactly. The three
+invariants — capacity, the correct allowance pool, guardian linkage — must hold
+together inside one Firestore transaction. Distinct error codes per failure, as
+the UI already distinguishes them.
 
-**2. Wire `packages.js` into Registration step 3.**
-Delete the `TIERS NOT DECIDED` caution banner, the dashed `$ ——` price slots,
-and the "TIER SLOT — rendered from data" marker. Rendering from data was right
-and stays — it's the banner and the empty slots that are now wrong on screen.
-Registration needs golf package + optional fitness add-on as stacking
-selections, with a running monthly total; Elite is a separate choice that
-replaces both. Leave `philSessions` and `yannickSessions` rendering as null —
-those counts genuinely aren't set. Do not invent them.
+Do not let the client write sessions, bookings or allowances. That is the whole
+point of the design.
 
-**3. Delete the 2025 surface in one commit.**
-The delete list is in §4 of the update note. Delete the six dead files whole
-rather than editing them down, and unroute the superseded pages. `/programs` is
-live right now serving programs that no longer exist at prices that were never
-26/27 pricing — that one matters most.
+## 2. Security rules
 
-Do not touch `services/` or `functions/index.js`. The Twilio and Courier wiring
-is the strongest salvage in the repo and it's staying.
+`firestore.rules.r3` is written and reviewed but not live. The current
+`firestore.rules` is the 2025 file and lets any authenticated user write any
+session document. Swap it in, run the emulator suite against it, and write tests
+for at least: a parent reading another family's athlete (deny), a client writing
+a session (deny), a coach reading an unassigned athlete (deny), a parent reading
+mentalGame (deny).
 
-**4. Wire `schedule.js` into Book a Session and the coach Roster.**
-`generateSeason()` produces dated sessions from the weekly pattern plus a
-closure list. The holiday calendar isn't final, so take closures as a parameter
-rather than hardcoding dates. Two values in that file are marked OPEN — Saturday
-block start times and `CAPACITY.tournament` — leave them as written and flagged.
+Roles come from custom claims, set server-side. Never from a user document.
 
-**5. Then the nine Phase 1 screens not yet built:**
-Athlete Dashboard, Practice DNA, Commitment Contract, Athlete Detail, Billing,
-Notification Preferences, Admin Dashboard, Staff & Roles, Newsletter Composer.
+## 3. Auth
 
-Constraints:
-- Scheduling is the critical path — Uschedule and SignupGenius are being retired
-  and nothing else covers booking. Prioritise accordingly.
-- Keep the `useSeedResource` hook seam. It's the right shape and it's how seed
-  data gets swapped for the real API later without touching screens.
-- `docs/portal/design-handoff.md` still says "3–7 PM" in two places (screen 02's
-  success step, screen 12's flow caption). Three one-hour blocks from 3:00 end at
-  6:00. `tokens.js` already derives around this; the doc is what's stale.
+`useAuthSession` presents a lockout it does not enforce — the comment in it is
+accurate about why. Wire it to the Firebase auth already configured in
+`src/firebase.js`. Attempt counting and lockout move server-side. MFA required
+on all staff roles; parent and athlete accounts stay standard.
+
+## 4. Read path, one hook at a time
+
+Swap hooks from seed to Firestore individually, starting with the ones booking
+depends on: `useBooking`, then `useSchedule`, then the rosters. Keep the rest on
+seed. The seam exists so this is incremental — resist a big-bang swap.
+
+`schedule.js` and `season.js` stay the source of truth for the session pattern.
+Seed the `sessions` collection from `buildSeason()` rather than hand-writing
+documents, so the generated schedule and the database cannot drift.
+
+## Constraints
+
+- Do not touch `services/` or `functions/index.js`'s existing Twilio/Courier
+  wiring. Reuse it for waitlist and booking notifications rather than rebuilding.
+- Every athlete record is a minor's record. Any query that could return another
+  family's data is a bug, not a preference.
+- Keep commits one-concern. The last stretch was clean; stay that way.
+
+## Decision gaps — write these down
+
+You will hit places where the code needs a number or a rule nobody has decided.
+Do not guess and do not stall. Create and maintain
+`docs/portal/DECISION-GAPS.md` with one entry per gap:
+
+- what the code needs
+- what you assumed to keep moving (and where that assumption lives)
+- what breaks if the real answer differs
+- who can answer it
+
+Known open already, so start with these: tournament block capacity
+(`CAPACITY.tournament`, currently 14); makeup eligibility (one-for-one against a
+missed booking, or open within the cycle); waitlist policy on a freed seat;
+Elite's Phil and Yannick session counts; the holiday calendar, still provisional
+in `season.js`.
+
+That file is the agenda for Thursday. Make it good.

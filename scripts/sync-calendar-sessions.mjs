@@ -82,7 +82,11 @@ const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..'
 // 1-on-1 types are capacity 1 by design ("a specialist 1-on-1 IS a session
 // with capacity 1") — not sourced from schedule.js, which only ever defines
 // the two group-block types.
-const CAPACITY = { training: 15, tournament: 15, phil: 1, mental: 1 };
+// v1.7.1 (owner, 2026-09-11): Phil's sessions "operate just like academy
+// training session just at a cap of 6-7 kids" — 6, mirrored in
+// data/specialists.js's SPECIALISTS capacity (change one, change both).
+// Yannick stays a true 1:1 at capacity 1.
+const CAPACITY = { training: 15, tournament: 15, phil: 6, mental: 1 };
 
 // Title convention, deliberately forgiving: the calendar is entered by hand,
 // so any title whose first word is "training"/"tournament" (any case) is

@@ -66,11 +66,18 @@ service cloud.firestore {
     // List queries must carry the matching equality filter (parent:
     // householdId ==, coach: coachId ==) or the query is denied wholesale.
     match /athletes/{athleteId} {
+      // v1.7.1: a specialist (users.specialistId — Yannick, Phil) teaches
+      // sessions any academy athlete can book, so they read athlete
+      // profiles academy-wide like mental does — their roster and
+      // attendance views need every booked kid's name, not just an
+      // assigned subset. The medical subcollection below is deliberately
+      // NOT widened (assigned coach / mental / owner only, unchanged).
       allow read: if signedIn() && (
         (me().role == 'athlete' && me().athleteId == athleteId)
         || (me().role == 'parent' && resource.data.householdId == me().householdId)
         || (me().role == 'coach' && resource.data.coachId == request.auth.uid)
         || me().role in ['mental', 'ops', 'owner']
+        || me().get('specialistId', null) != null
       );
       // No client writes in v1: enrollment and coach assignment are
       // server-side (Admin SDK) operations.
@@ -267,6 +274,18 @@ service cloud.firestore {
       allow update: if signedIn()
         && me().role == 'coach'
         && athleteData(resource.data.athleteId).coachId == request.auth.uid
+        && attendanceUpdateOk();
+
+      // v1.7.1 (owner: specialists get "access to the back end of the
+      // booked session side"): a SPECIALIST — any account whose users doc
+      // carries specialistId (Yannick 'mental', Phil 'phil', written by
+      // provisioning) — runs the same attendance transitions on bookings
+      // for THEIR OWN session type. bookings carry `type`, so the match is
+      // one field read with NO extra get(); me().get() with a null default
+      // keeps every pre-v1.7.1 users doc (no specialistId field at all)
+      // from erroring this condition into a global deny.
+      allow update: if signedIn()
+        && me().get('specialistId', null) == resource.data.type
         && attendanceUpdateOk();
 
       // Sprint 9 pin (contract v1.7, cancellation): the athlete's own user

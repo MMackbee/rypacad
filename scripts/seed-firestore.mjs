@@ -263,7 +263,10 @@ function addSpecialistSessions(sessions, runDate = new Date()) {
         date: dateStr,
         time,
         type,
-        capacity: 1, // contract v1.7: a specialist 1-on-1 IS a session with capacity 1
+        // v1.7.1 (owner, 2026-09-11): phil sessions are GROUP sessions at a
+        // cap of 6 — only mental is the true capacity-1 1:1. Mirrors the
+        // sync script's CAPACITY map and data/specialists.js.
+        capacity: type === 'phil' ? 6 : 1,
         booked: 0,
         coachId: null,
         label: null,
@@ -611,13 +614,19 @@ function buildDocs(portal) {
   // are Firebase Auth uids; the emulator seed uses readable slugs. The
   // athlete carries householdId too — the booking write path and its rules
   // require the household linkage, matching production provisioning.
+  // v1.7.1: `specialistId` links a staff user to the specialist whose
+  // sessions they run (== sessions.type; provisioning writes the same field
+  // in production). The 'mental' QA account IS Yannick; 'phil' is the new
+  // QA account for Phil — window.__rypTestAuth.signInAs('phil') drives his
+  // My Sessions view. Neither is ever an athlete's assigned golf coach.
   const users = new Map([
-    ['parent-dana', { role: 'parent', householdId, athleteId: null, staff: false, displayName: 'Dana', email: 'dana@email.com' }],
-    ['athlete-jordan', { role: 'athlete', athleteId: 'jordan', householdId, staff: false, displayName: 'Jordan Whitfield', email: null }],
-    [coachUid, { role: 'coach', athleteId: null, householdId: null, staff: true, displayName: COACH.name, email: null }],
-    ['owner', { role: 'owner', athleteId: null, householdId: null, staff: true, displayName: null, email: null }],
-    ['mental', { role: 'mental', athleteId: null, householdId: null, staff: true, displayName: 'Yannick', email: null }],
-    ['ops', { role: 'ops', athleteId: null, householdId: null, staff: true, displayName: 'Ops', email: null }],
+    ['parent-dana', { role: 'parent', householdId, athleteId: null, staff: false, specialistId: null, displayName: 'Dana', email: 'dana@email.com' }],
+    ['athlete-jordan', { role: 'athlete', athleteId: 'jordan', householdId, staff: false, specialistId: null, displayName: 'Jordan Whitfield', email: null }],
+    [coachUid, { role: 'coach', athleteId: null, householdId: null, staff: true, specialistId: null, displayName: COACH.name, email: null }],
+    ['owner', { role: 'owner', athleteId: null, householdId: null, staff: true, specialistId: null, displayName: null, email: null }],
+    ['mental', { role: 'mental', athleteId: null, householdId: null, staff: true, specialistId: 'mental', displayName: 'Yannick', email: null }],
+    ['ops', { role: 'ops', athleteId: null, householdId: null, staff: true, specialistId: null, displayName: 'Ops', email: null }],
+    ['phil', { role: 'coach', athleteId: null, householdId: null, staff: true, specialistId: 'phil', displayName: 'Phil', email: null }],
   ]);
 
   return { packages, sessions, households, athletes, users, bookings, contractLogs, tournamentResults };

@@ -17,8 +17,8 @@ import {
   SignOutButton,
   Tick,
 } from '../components/Primitives';
-import { useHouseholdAthletes } from '../hooks';
-import * as hooks from '../hooks';
+import { seedSpecialistDays, useBooking, useHouseholdAthletes, useSpecialistSlots } from '../hooks';
+import { SPECIALISTS } from '../data/specialists';
 // Pure calendar/season helpers per the seam rule already established in
 // BookSession.js/CommitmentContract.js/TourStandings.js - data still travels
 // through the hook seam below; these are formatting helpers, not response
@@ -35,119 +35,15 @@ import { dayLabel, datePill } from '../data/season';
  * idiom (practice/live split aside - this flow has no practice mode; the
  * pin does not ask for one).
  *
- * ============================================================================
- * FLAGGED FALLBACKS - both routing-lane deliverables this screen codes
- * against, neither of which exists in this worktree yet (confirmed absent:
- * no data/specialists.js, no hooks.useSpecialistSlots, as of this branch).
- * The routing lane owns both in a parallel worktree (agent/routing/sprint9-
- * specialists). Everything below marked FALLBACK is a local stand-in only;
- * delete it once both land and this branch merges with routing's.
- *
- * 1. data/specialists.js (SPECIALISTS, SPECIALIST_BOOKING_WINDOW_DAYS) - a
- *    plain data import this screen is pinned to use, but the FILE itself
- *    does not exist in this worktree, which is a different situation from
- *    Roster.js/TourStandings.js's missing-EXPORT-in-an-existing-module case:
- *    a static import of a nonexistent file fails esbuild's bundle outright,
- *    so the namespace-import-with-fallback pattern those two files use does
- *    not apply here (it needs the module to exist, just not export the
- *    name yet). SPECIALISTS_FALLBACK below carries only the two facts
- *    TEAM.md pins verbatim per specialist (id/name/discipline/sessionNoun -
- *    real people, not invented) plus a one-line "what to expect" description
- *    - authored UI copy in the same spirit as every other hand-written
- *    screen description in this codebase (PackageCard's inclusion bullets,
- *    CommitmentContract's tier descriptions), never a fabricated business
- *    fact like a price, count or credential.
- * 2. hooks.useSpecialistSlots(specialistId) - genuinely missing from
- *    hooks/index.js in this worktree (confirmed via grep), so THIS one
- *    follows the real Roster.js/TourStandings.js pattern: namespace import +
- *    inert fallback, called unconditionally every render. The pin doesn't
- *    name where the actual reservation call lives beyond "the existing
- *    createBooking, unchanged signature - BookSession's confirmation idiom
- *    is the model" - I assumed the hook bundles its own `book(slot,
- *    {athleteId})` the exact way useBooking bundles its own book(). If
- *    routing lands it as a separately named export instead, this file's
- *    call site is a one-line rename, nothing structural. Until the real hook
- *    exists, `days` falls back to demoDaysFor() below - a believable
- *    fortnight matching the pin's own seed description ("Yannick Tue/Thu
- *    late afternoons, Phil Mon/Wed/Fri, 45-min slots" - invented TIMES only,
- *    per the pin's own explicit allowance for this exact seed, never
- *    invented people) - so the screen is reviewable end to end today.
- * ============================================================================
+ * Integration note (PM merge, Sprint 9): this screen was built against
+ * pinned shapes with local fallbacks while the routing lane's
+ * data/specialists.js and useSpecialistSlots landed in a parallel worktree.
+ * Those fallbacks are GONE — SPECIALISTS (including each specialist's
+ * whatToExpect copy and capacity) and the slots hook are the real imports
+ * above, the harness stages seed off the hook's own exported
+ * seedSpecialistDays, and the reservation call rides useBooking's book()
+ * (the routing lane's ruling: no booking action lives on the slots hook).
  */
-
-const SPECIALISTS_FALLBACK = [
-  {
-    id: 'phil',
-    name: 'Phil',
-    discipline: 'Performance coaching',
-    sessionNoun: 'Performance session',
-    whatToExpect: 'One-on-one performance coaching, built around your swing and technique.',
-  },
-  {
-    id: 'mental',
-    name: 'Yannick',
-    discipline: 'Mental game',
-    sessionNoun: 'Mental game session',
-    whatToExpect: 'One-on-one mental game work — focus, routine and course management.',
-  },
-];
-const SPECIALIST_BOOKING_WINDOW_DAYS_FALLBACK = 14;
-
-function useSpecialistSlotsFallback() {
-  return {
-    data: null,
-    loading: false,
-    error: null,
-    // Inert: resolves the tapped slot locally, the same no-op shape
-    // useBooking's book() takes when the app isn't live (see BookSession.js).
-    book: async (slot) => slot,
-  };
-}
-const useSpecialistSlots = hooks.useSpecialistSlots || useSpecialistSlotsFallback;
-// Resolved once per module load alongside the fallback above (never
-// mid-render, same invariant Roster.js documents) - tells the demo-data path
-// below whether it's standing in for a genuinely absent hook (true, this
-// worktree today) or riding shotgun on the real one once it lands (false).
-const usingFallbackSpecialistHook = !hooks.useSpecialistSlots;
-
-/**
- * Local stand-in for the real hook's seed branch (see the flagged-fallback
- * note above) - a believable 14-day fortnight, Yannick Tue/Thu, Phil
- * Mon/Wed/Fri, one demo slot per active day, every 5th active day already
- * "Booked" so both capacity states are reviewable. Dates derive from
- * todayISO()/addDaysISO() per this codebase's own rule that dates never get
- * hardcoded - only the CLOCK TIME is invented, exactly as the pin sanctions
- * for this screen's real seed branch.
- */
-function demoDaysFor(specialistId) {
-  const today = todayISO();
-  const activeDows = specialistId === 'mental' ? [2, 4] : [1, 3, 5]; // Tue/Thu vs Mon/Wed/Fri
-  const time = specialistId === 'mental' ? '4:30 PM' : '3:30 PM';
-  const days = [];
-  let activeIndex = 0;
-  for (let i = 0; i < SPECIALIST_BOOKING_WINDOW_DAYS_FALLBACK; i++) {
-    const date = addDaysISO(today, i);
-    const dow = new Date(`${date}T00:00:00Z`).getUTCDay();
-    const active = activeDows.includes(dow);
-    if (active) activeIndex++;
-    days.push({
-      date,
-      dayLabel: dayLabel(date, today),
-      slots: active
-        ? [
-            {
-              sessionId: `${date}-demo-${specialistId}`,
-              time,
-              capacity: 1,
-              booked: activeIndex % 5 === 0 ? 1 : 0,
-              open: activeIndex % 5 !== 0,
-            },
-          ]
-        : [],
-    });
-  }
-  return days;
-}
 
 /**
  * @param {boolean} [bare]
@@ -177,28 +73,23 @@ export default function SpecialistBooking({
   onSignOut,
   harnessStage,
 }) {
-  const initialSpecialistId = harnessStage ? SPECIALISTS_FALLBACK[0].id : null;
+  const initialSpecialistId = harnessStage ? SPECIALISTS[0].id : null;
   const [specialistId, setSpecialistId] = useState(initialSpecialistId);
-  const specialist = SPECIALISTS_FALLBACK.find((s) => s.id === specialistId) || null;
+  const specialist = SPECIALISTS.find((s) => s.id === specialistId) || null;
 
   const slotsState = useSpecialistSlots(specialistId);
-  // Memoized so its identity only changes when specialistId or the real
-  // hook's data actually changes - the effects below key off that stability
-  // rather than an array literal rebuilt (and therefore "changed") on every
-  // render. Falls back to the local demo fortnight ONLY while the real hook
-  // is genuinely absent (see usingFallbackSpecialistHook) - once it lands,
-  // a real loading state shows the skeleton honestly instead of demo data.
-  const days = useMemo(() => {
-    if (slotsState.data?.days) return slotsState.data.days;
-    if (usingFallbackSpecialistHook && specialistId) return demoDaysFor(specialistId);
-    return [];
-  }, [specialistId, slotsState.data]);
+  // Memoized so its identity only changes when specialistId or the hook's
+  // data actually changes - the effects below key off that stability rather
+  // than an array literal rebuilt (and therefore "changed") on every render.
+  const days = useMemo(() => slotsState.data?.days ?? [], [slotsState.data]);
   const loading = specialistId != null && slotsState.loading;
   const error = specialistId != null ? slotsState.error : null;
 
+  // Harness stages seed off the hook's own exported seed generator, so the
+  // gallery can never drift from what the real seed branch renders.
   const [selectedDate, setSelectedDate] = useState(() => {
     if (!initialSpecialistId) return null;
-    const demo = demoDaysFor(initialSpecialistId);
+    const demo = seedSpecialistDays(initialSpecialistId, todayISO());
     const pick =
       harnessStage === 'empty-day'
         ? demo.find((d) => d.slots.length === 0)
@@ -207,7 +98,7 @@ export default function SpecialistBooking({
   });
   const [sheetSlot, setSheetSlot] = useState(() => {
     if (harnessStage !== 'sheet' || !initialSpecialistId) return null;
-    const demo = demoDaysFor(initialSpecialistId);
+    const demo = seedSpecialistDays(initialSpecialistId, todayISO());
     const day = demo.find((d) => d.slots.some((s) => s.open));
     const slot = day?.slots.find((s) => s.open);
     return slot && day ? { ...slot, date: day.date } : null;
@@ -216,7 +107,7 @@ export default function SpecialistBooking({
   const [failure, setFailure] = useState(null);
   const [booked, setBooked] = useState(() => {
     if (harnessStage !== 'confirmed') return null;
-    return { specialist: SPECIALISTS_FALLBACK[0], date: todayISO(), time: '3:30 PM' };
+    return { specialist: SPECIALISTS[0], date: todayISO(), time: '3:30 PM' };
   });
 
   // Selecting a new specialist starts a fresh day/sheet - carrying over a
@@ -264,7 +155,13 @@ export default function SpecialistBooking({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isParent, householdAthletes.length, initialAthleteId]);
 
-  const reserve = slotsState.book || (async (slot) => slot);
+  // Reservation rides BookSession's own seam (routing's ruling: no booking
+  // action lives on the slots hook): useBooking's book() with the tapped
+  // slot translated to its shape - { id, date, type }; the pool derives from
+  // the type inside book() via poolFor, and seed mode resolves locally.
+  const booking = useBooking();
+  const reserve = (slot, opts) =>
+    booking.book({ id: slot.sessionId, date: slot.date, type: specialistId }, opts);
   const disabledForNoAthlete = isParent && !selectedAthleteId;
 
   const confirmReserve = (slot) => {
@@ -326,7 +223,7 @@ export default function SpecialistBooking({
             <Body size={12}>
               Sessions with Phil and Yannick don't use your training or tournament allowance.
             </Body>
-            {SPECIALISTS_FALLBACK.map((s) => (
+            {SPECIALISTS.map((s) => (
               <SpecialistCard key={s.id} specialist={s} onSelect={() => setSpecialistId(s.id)} />
             ))}
           </div>
@@ -497,10 +394,20 @@ function DayStrip({ days, selectedDate, onSelect }) {
 }
 
 /**
- * The picked day's slots - time, 45 min, Open/Booked (capacity 1, so
- * binary). An empty day (no slots scheduled at all) gets the pinned quiet
- * line rather than an empty list.
+ * The picked day's slots - time, 45 min, and the spot state. v1.7.1: Phil's
+ * sessions are GROUP sessions (capacity 6), so a capacity-above-1 slot says
+ * how many spots remain ("4 spots left") the way Life Time's own class rows
+ * do; a capacity-1 slot (Yannick) stays the binary Open/Booked. An empty day
+ * (no slots scheduled at all) gets the pinned quiet line rather than an
+ * empty list.
  */
+function spotLabel(slot) {
+  if (slot.capacity <= 1) return slot.open ? 'Open' : 'Booked';
+  if (!slot.open) return 'Full';
+  const left = slot.capacity - slot.booked;
+  return `${left} spot${left === 1 ? '' : 's'} left`;
+}
+
 function SlotList({ day, specialist, disabled, reserving, onSelect }) {
   if (!day) return null;
   const slots = day.slots || [];
@@ -525,7 +432,7 @@ function SlotList({ day, specialist, disabled, reserving, onSelect }) {
               onClick={slot.open && !disabled && !pending ? () => onSelect(slot, day.date) : undefined}
               trailing={
                 <CapacityPill state={slot.open ? 'available' : 'full'}>
-                  {slot.open ? 'Open' : 'Booked'}
+                  {spotLabel(slot)}
                 </CapacityPill>
               }
             />
