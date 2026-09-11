@@ -39,6 +39,7 @@ import StaffRoles from './screens/StaffRoles';
 import NewsletterComposer from './screens/NewsletterComposer';
 import OnboardingFlow from './screens/OnboardingFlow';
 import TourStandings from './screens/TourStandings';
+import SpecialistBooking from './screens/SpecialistBooking';
 
 import { ALLOWANCE, ALLOWANCE_NO_TOURNAMENTS } from './data/seed';
 import { ELITE_TIERS, FITNESS_PACKAGES, GOLF_PACKAGES } from './data/packages';
@@ -61,7 +62,17 @@ export const SCREEN_STATES = [
   { id: '03', title: 'Athlete Dashboard', Screen: AthleteDashboard, role: 'athlete',
     states: [['populated', 'Populated'], ['new', 'New athlete'], ['empty', 'No sessions']] },
   { id: '04', title: 'My Schedule', Screen: MySchedule, role: 'athlete',
-    states: [['upcoming', 'Upcoming'], ['empty', 'Empty'], ['cancelled', 'Cancelled']] },
+    states: [['upcoming', 'Upcoming'], ['empty', 'Empty'], ['cancelled', 'Cancelled'],
+             // Sprint 9 pin (TEAM.md, "specialist 1-on-1s", cancellation):
+             // useSchedule doesn't return cancellable/bookingId per item in
+             // this worktree yet (routing lane's parallel worktree) - the
+             // real cancel UI is honestly unreachable on today's seed data,
+             // same as any other missing hook export in this codebase.
+             // demoCancellable is a harness-only flag (see MySchedule.js's
+             // own doc comment) that previews the confirm-sheet flow by
+             // patching cancellable/bookingId onto the non-today upcoming
+             // items - no real caller ever passes it.
+             ['upcoming', 'Cancel flow', { demoCancellable: true }]] },
   { id: '05', title: 'Book a Session', Screen: BookSession, role: 'athlete',
     states: [['open', 'Blocks open'],
              // Interactive: tap a marked date to open its sessions, then a
@@ -94,12 +105,13 @@ export const SCREEN_STATES = [
     states: [['ontrack', 'On track'], ['behind', 'Behind'], ['complete', 'Month complete'],
              ['none', 'No contract']] },
   { id: '08', title: 'Parent Dashboard', Screen: ParentDashboard, role: 'parent',
-    // onBookFor is a no-op here purely so the Book-for-kid chip (Sprint 7
-    // pin, TEAM.md) renders in the gallery - a real caller passes routing's
-    // navigate-to-/portal/book handler instead.
-    states: [['one', 'One child', { onBookFor: () => {} }],
-             ['three', 'Three children', { onBookFor: () => {} }],
-             ['payment', 'Payment issue', { onBookFor: () => {} }]] },
+    // onBookFor/onBookCoaching are no-ops here purely so the Book-for-kid
+    // chip (Sprint 7 pin) and the new "Book 1-on-1 coaching" footer button
+    // (Sprint 9 pin, TEAM.md) render in the gallery - a real caller passes
+    // routing's navigate handlers instead.
+    states: [['one', 'One child', { onBookFor: () => {}, onBookCoaching: () => {} }],
+             ['three', 'Three children', { onBookFor: () => {}, onBookCoaching: () => {} }],
+             ['payment', 'Payment issue', { onBookFor: () => {}, onBookCoaching: () => {} }]] },
   { id: '09', title: 'Athlete Detail', Screen: AthleteDetail, role: 'parent',
     states: [['populated', 'Populated'], ['limited', 'Limited data']] },
   { id: '10', title: 'Billing & Subscription', Screen: Billing, role: 'parent',
@@ -167,6 +179,26 @@ export const SCREEN_STATES = [
              ['populated', 'Athlete · own bracket + results', { role: 'athlete', athleteId: 'jordan' }],
              ['empty', 'Before first tournament'],
              ['loading', 'Loading'], ['error', 'Load failure']] },
+  /*
+   * Specialist Booking (Sprint 9 pin, TEAM.md, "specialist 1-on-1s") - the
+   * Life Time-style 1-on-1 booking flow for Phil and Yannick. Not a numbered
+   * handoff artboard, so it sits after the seventeen alongside Tour. This
+   * screen has no `variant` prop in the Sprint 9 pin's five-prop contract
+   * (unlike every hook-backed demo variant elsewhere) - `harnessStage` is a
+   * harness-only addition (see the screen's own doc comment) that mounts
+   * directly into the slots/sheet/confirmed/empty-day states without
+   * scripting real taps, the same problem TourStandings solved with its own
+   * harness-local `variant`. The first tuple element is unused by this
+   * screen (no real `variant` prop) and is only a label convenience.
+   */
+  { id: 'S9', title: 'Specialist Booking', Screen: SpecialistBooking, role: 'athlete + parent',
+    states: [['picker', 'Specialist picker'],
+             ['slots', 'Day strip + slot list', { harnessStage: 'slots' }],
+             ['sheet', 'Detail sheet', { harnessStage: 'sheet' }],
+             ['confirmed', 'Confirmed', { harnessStage: 'confirmed' }],
+             ['empty-day', 'Empty day', { harnessStage: 'empty-day' }],
+             // Parent's 'Booking for' selector, same idiom as BookSession's.
+             ['slots', 'Parent · pick a child', { harnessStage: 'slots', role: 'parent' }]] },
   /*
    * Not provisioned (Sprint 4) — the honest state for a signed-in Google
    * account with no users/ doc. Not a numbered handoff artboard, so it sits

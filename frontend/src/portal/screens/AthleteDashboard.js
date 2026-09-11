@@ -1,4 +1,5 @@
 import React from 'react';
+import { useNavigate } from 'react-router-dom';
 import { color, font, glow, radius } from '../tokens';
 import AllowancePools from '../components/AllowancePools';
 import BottomTabBar from '../components/BottomTabBar';
@@ -42,6 +43,12 @@ export default function AthleteDashboard({
   const athlete = data?.athlete;
   const next = data?.nextSession;
   const contract = data?.contract;
+  // Sprint 9 pin (TEAM.md, "specialist 1-on-1s"): the coaching entry point
+  // navigates by path string - /portal/coaching is routing-lane work landing
+  // in parallel (this lane never edits PortalRoutes.js). Consistent with how
+  // BottomTabBar already navigates internally rather than every screen
+  // threading an onNavigate prop through.
+  const navigate = useNavigate();
 
   return (
     <PhoneFrame
@@ -115,6 +122,13 @@ export default function AthleteDashboard({
         ) : null}
 
         {variant === 'populated' ? <QuickActions onLog={onLog} onBook={onBook} /> : null}
+        {/* Sprint 9 pin (TEAM.md): one entry point to the specialist 1-on-1
+            flow, same gating as QuickActions above it (populated only) so
+            the empty/new states stay exactly as designed - not a restructure,
+            an addition below the existing action hierarchy. */}
+        {variant === 'populated' ? (
+          <CoachingAction onOpen={() => navigate('/portal/coaching')} />
+        ) : null}
       </div>
       )}
     </PhoneFrame>
@@ -278,6 +292,31 @@ function QuickActions({ onLog, onBook }) {
         Book a slot
       </Button>
     </div>
+  );
+}
+
+/**
+ * Sprint 9 pin (TEAM.md, "specialist 1-on-1s"): a single tappable row into
+ * the new SpecialistBooking flow. Deliberately not styled as a second
+ * primary CTA - QuickActions above already carries the screen's one solid
+ * green fill (Log today), and flag 02 reserves that treatment for the
+ * screen's primary action. A plain bordered Card row, same open-a-detail
+ * idiom as ParentDashboard's ChildCard, keeps this a clear but secondary
+ * action.
+ */
+function CoachingAction({ onOpen }) {
+  return (
+    <Card onClick={onOpen} style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+      <div style={{ flex: 1, minWidth: 0 }}>
+        <div style={{ font: `600 14px ${font.body}`, color: color.text }}>1-on-1 coaching</div>
+        <div style={{ font: `400 11px ${font.body}`, color: color.textTertiary, marginTop: 3 }}>
+          Book time with Phil or Yannick
+        </div>
+      </div>
+      <span aria-hidden="true" style={{ font: `400 18px ${font.body}`, color: color.textTertiary, flex: 'none' }}>
+        ›
+      </span>
+    </Card>
   );
 }
 
