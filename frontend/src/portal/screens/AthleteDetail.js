@@ -7,7 +7,7 @@ import { Avatar } from '../components/MediaPlaceholder';
 import PhoneFrame from '../components/PhoneFrame';
 import ProgressMeter, { meterColor } from '../components/ProgressMeter';
 import SavedToast from '../components/SavedToast';
-import { BackLink, Body, Card, ScreenTitle, SectionLabel } from '../components/Primitives';
+import { BackLink, Body, Card, ScreenTitle, SectionLabel, Tick } from '../components/Primitives';
 import { useAthleteDetail } from '../hooks';
 
 /**
@@ -20,7 +20,16 @@ import { useAthleteDetail } from '../hooks';
  */
 function useLatestDiagnostic(athleteId) {
   const state = hooks.useDiagnostic(athleteId);
-  return { latest: state.data?.latest ?? null, loading: state.loading, error: state.error };
+  // `sections` is the field catalogue the capture's `values` are keyed
+  // against — it lives BESIDE `latest` in the hook payload, not inside it
+  // (PM integration browser pass: the card read latest.sections, which a
+  // capture doc never carries, so it rendered "No capture yet" forever).
+  return {
+    latest: state.data?.latest ?? null,
+    sections: state.data?.sections ?? [],
+    loading: state.loading,
+    error: state.error,
+  };
 }
 
 /** The pinned contract tier set (contract v1.8 §B) - not invented. */
@@ -62,7 +71,13 @@ export default function AthleteDetail({ variant = 'populated', bare = false, ath
    * useAthleteDetail). The `noTier` prop lets a caller (or the harness)
    * override the heuristic outright once/while that gap exists.
    */
-  const hasNoTier = noTier ?? (Boolean(athlete) && !/min tier/i.test(athlete?.subline || ''));
+  // useAthleteDetail's live payload now carries `contractMinutes` (routing
+  // lane, v1.8 B); the subline regex only remains as the seed-mode fallback.
+  const hasNoTier =
+    noTier ??
+    (athlete && 'contractMinutes' in athlete
+      ? athlete.contractMinutes == null
+      : Boolean(athlete) && !/min tier/i.test(athlete?.subline || ''));
 
   return (
     <PhoneFrame
@@ -96,7 +111,7 @@ export default function AthleteDetail({ variant = 'populated', bare = false, ath
             <StatGrid athlete={athlete} />
             {data.upcoming ? <UpcomingSessions upcoming={data.upcoming} /> : null}
             <ContractHistory history={data.history} />
-            <ProgressSummary latest={diagnostic.latest} />
+            <ProgressSummary latest={diagnostic.latest} sections={diagnostic.sections} />
           </>
         ) : (
           <LimitedData checklist={data?.checklist ?? []} />
@@ -179,8 +194,23 @@ function ContractHistory({ history }) {
  * exactly as they were entered, or the honest empty state when there is
  * none - never a promise about a future phase.
  */
-function ProgressSummary({ latest }) {
-  const sections = latest?.sections ?? [];
+function ProgressSummary({ latest, sections: catalogue = [] }) {
+  // A capture doc is { values: { <fieldId>: number|string }, ... }; the
+  // display groups those values by the catalogue's sections and shows only
+  // the sections/fields the coach actually entered (an indoor capture
+  // never fills the outdoor sections, and a blank row is not a result).
+  const values = latest?.values ?? null;
+  const sections = values
+    ? catalogue
+        .map((s) => ({
+          id: s.id,
+          title: s.title,
+          fields: (s.fields ?? [])
+            .filter((f) => values[f.id] !== undefined && values[f.id] !== null && values[f.id] !== '')
+            .map((f) => ({ id: f.id, label: f.label, unit: f.unit, value: values[f.id] })),
+        }))
+        .filter((s) => s.fields.length > 0)
+    : [];
   return (
     <Card large>
       <SectionLabel style={{ marginBottom: 13 }}>Diagnostic capture</SectionLabel>
@@ -281,7 +311,10 @@ function StartContractCard({ athleteId, athleteName }) {
   const [saved, setSaved] = useState(false);
   const [error, setError] = useState(null);
 
-  const setTier = async (minutes) => ({ athleteId, contractMinutes: minutes, simulated: true });
+  // The athleteId-aware tier write the routing seam now provides
+  // (useAthleteTier, PM integration) — the household parent's own path.
+  const tier = hooks.useAthleteTier();
+  const setTier = (minutes) => tier.setTier(athleteId, minutes);
 
   const handleStart = async () => {
     if (!selected) return;

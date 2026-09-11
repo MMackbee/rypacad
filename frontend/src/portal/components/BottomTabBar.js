@@ -52,9 +52,12 @@ export const TABS = {
    * every existing `<BottomTabBar role="coach" .../>` call site is untouched.
    */
   coachSpecialist: [
+    // No Roster tab for Phil (PM integration): rosters are assignment-based
+    // and a specialist coach is nobody's assigned golf coach, so that tab
+    // would always be empty for him. Tour replaces it.
     { key: 'sessions', label: 'Sessions', icon: 'today', route: '/portal/my-sessions' },
-    { key: 'roster', label: 'Roster', icon: 'list', route: '/portal/roster' },
     { key: 'capture', label: 'Capture', icon: 'camera', route: '/portal/capture' },
+    { key: 'tour', label: 'Tour', icon: 'trophy', route: '/portal/tour' },
   ],
   /**
    * Sprint 10 pin F: the three staff role tab sets, all pointing at the same

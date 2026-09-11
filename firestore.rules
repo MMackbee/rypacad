@@ -242,8 +242,11 @@ service cloud.firestore {
           || (me().role == 'coach'
               && athleteData(athleteId).coachId == request.auth.uid)
         );
-        // No client writes: medical info is written once by the enrollment
-        // flow, server-side.
+        // Sprint 10 (contract v1.8 A, PM amendment): the enrollment flow is
+        // now the ops/owner APPROVAL batch running on the client, so the
+        // one-time write moves here — ops/owner create only, still no
+        // update/delete from any client, still unreadable by ops/parents.
+        allow create: if signedIn() && me().role in ['ops', 'owner'];
       }
     }
 
@@ -743,13 +746,17 @@ service cloud.firestore {
     match /enrollmentRequests/{uid} {
       function enrollmentShapeOk() {
         let d = request.resource.data;
-        return d.keys().hasAll(['guardian', 'athletes', 'consents', 'status', 'declineReason',
-                                'createdAt', 'updatedAt', 'reviewedBy', 'reviewedAt'])
-          && d.keys().hasOnly(['guardian', 'athletes', 'consents', 'status', 'declineReason',
-                               'createdAt', 'updatedAt', 'reviewedBy', 'reviewedAt'])
+        // guardianNotes (map | null): emergency contact + medical free text
+        // the form collects; approval moves it into each athlete's
+        // private/medical doc (PM integration, v1.8 amendment).
+        return d.keys().hasAll(['guardian', 'athletes', 'consents', 'guardianNotes', 'status',
+                                'declineReason', 'createdAt', 'updatedAt', 'reviewedBy', 'reviewedAt'])
+          && d.keys().hasOnly(['guardian', 'athletes', 'consents', 'guardianNotes', 'status',
+                               'declineReason', 'createdAt', 'updatedAt', 'reviewedBy', 'reviewedAt'])
           && d.guardian is map
           && d.athletes is list
           && d.consents is map
+          && (d.guardianNotes is map || d.guardianNotes == null)
           && d.status in ['pending', 'approved', 'declined'];
       }
 
@@ -778,14 +785,17 @@ service cloud.firestore {
         && resource.data.status in ['pending', 'declined']
         && request.resource.data.status == 'pending'
         && request.resource.data.diff(resource.data).affectedKeys()
-             .hasOnly(['guardian', 'athletes', 'consents', 'status', 'updatedAt']);
+             .hasOnly(['guardian', 'athletes', 'consents', 'guardianNotes', 'status', 'updatedAt']);
 
       // ops/owner: status-only updates (approve/decline), the OTHER half of
       // this collection's write surface — never guardian/athletes/consents,
       // which stay the submitter's own words.
+      // updatedAt rides every status flip (the approval batch stamps it) —
+      // caught live at PM integration: without it here the batch's request
+      // update was cleanly denied and the whole approval rolled back.
       allow update: if signedIn() && me().role in ['ops', 'owner']
         && request.resource.data.diff(resource.data).affectedKeys()
-             .hasOnly(['status', 'declineReason', 'reviewedBy', 'reviewedAt'])
+             .hasOnly(['status', 'declineReason', 'reviewedBy', 'reviewedAt', 'updatedAt'])
         && request.resource.data.status in ['approved', 'declined']
         && request.resource.data.reviewedBy == request.auth.uid
         && request.resource.data.reviewedAt == request.time;

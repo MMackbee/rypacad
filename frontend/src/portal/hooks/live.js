@@ -924,13 +924,23 @@ export async function fetchMyEnrollmentRequest() {
  * caller (useEnrollment) is responsible for their contents, this function
  * only adds the identity/status/timestamp fields the rules require.
  */
-export async function submitMyEnrollmentRequest({ guardian, athletes, consents }) {
+export async function submitMyEnrollmentRequest({ guardian, athletes, consents, guardianNotes = null }) {
   const user = requireUser();
   const ref = doc(db, 'enrollmentRequests', user.uid);
   try {
     const existing = await getDoc(ref);
     const now = serverTimestamp();
-    const payload = { guardian, athletes, consents, status: 'pending', updatedAt: now };
+    // guardianNotes: { emergencyContact, medical } free text or null — the
+    // registration form collects it; approval moves it to each athlete's
+    // private/medical doc (never surfaced on the request after that).
+    const notes =
+      guardianNotes && (guardianNotes.emergencyContact || guardianNotes.medical)
+        ? {
+            emergencyContact: guardianNotes.emergencyContact ?? null,
+            medical: guardianNotes.medical ?? null,
+          }
+        : null;
+    const payload = { guardian, athletes, consents, guardianNotes: notes, status: 'pending', updatedAt: now };
     if (existing.exists()) {
       await updateDoc(ref, payload);
     } else {
@@ -947,7 +957,10 @@ export async function submitMyEnrollmentRequest({ guardian, athletes, consents }
 export async function fetchPendingEnrollmentRequests() {
   try {
     const snap = await getDocs(query(collection(db, 'enrollmentRequests'), where('status', '==', 'pending')));
-    return snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+    // The doc id IS the guardian's auth uid — exposed under both names so
+    // the queue's approve(uid)/decline(uid) calls and the row keys read it
+    // by either (PM integration: the card read `.uid` and got undefined).
+    return snap.docs.map((d) => ({ id: d.id, uid: d.id, ...d.data() }));
   } catch (err) {
     throw wrap(err, 'fetchPendingEnrollmentRequests');
   }
@@ -979,11 +992,33 @@ export async function approveEnrollmentRequest(uid) {
       throw new LiveDataError(ERR.NOT_FOUND, 'This enrollment request no longer exists.');
     }
     const request = reqSnap.data();
+
+    // NOT the single 7-write batch the pin first described: in the live
+    // emulator every rule's me() get() across that many writes ran into
+    // Firestore's document-access cap for multi-document requests and the
+    // batch errored partway (PM integration, 2026-09-11) — production has
+    // the same cap. Three requests instead, made RETRY-SAFE: a re-approval
+    // after a partial failure finds the family's household by guardian
+    // email and skips straight to whatever is still missing, so a
+    // half-approved family self-heals on the next tap instead of
+    // duplicating.
+    const email = request.guardian?.email ?? null;
+    let householdId = null;
+    let athleteIds = [];
+    if (email) {
+      const found = await getDocs(query(collection(db, 'households'), where('guardian.email', '==', email)));
+      if (!found.empty) householdId = found.docs[0].id;
+    }
+
+    if (!householdId) {
     const batch = writeBatch(db);
 
     const householdRef = doc(collection(db, 'households'));
+    // "Whitfield family", not "Dana Whitfield family": the surname is the
+    // last word of the guardian's name (PM integration reconciliation).
+    const surname = (request.guardian?.name ?? '').trim().split(/\s+/).pop();
     batch.set(householdRef, {
-      name: request.guardian?.name ? `${request.guardian.name} family` : 'New family',
+      name: surname ? `${surname} family` : 'New family',
       guardian: {
         name: request.guardian?.name ?? null,
         email: request.guardian?.email ?? null,
@@ -993,7 +1028,6 @@ export async function approveEnrollmentRequest(uid) {
       stripeSubscriptionId: null,
     });
 
-    const athleteIds = [];
     for (const a of request.athletes || []) {
       const athleteRef = doc(collection(db, 'athletes'));
       batch.set(athleteRef, {
@@ -1005,12 +1039,37 @@ export async function approveEnrollmentRequest(uid) {
         coachId: null,
       });
       athleteIds.push(athleteRef.id);
+      // Emergency contact + medical notes the guardian typed at enrollment
+      // land in the athlete's private/medical doc — the data-minimization
+      // home the rules already scope to on-site staff (contract v1.8
+      // amendment at PM integration). Household-level notes apply to every
+      // kid on the request.
+      const notes = request.guardianNotes;
+      if (notes && (notes.emergencyContact || notes.medical)) {
+        batch.set(doc(db, 'athletes', athleteRef.id, 'private', 'medical'), {
+          emergencyContact: { name: notes.emergencyContact ?? null, phone: null, relationship: null },
+          medicalNotes: notes.medical ?? null,
+          updatedAt: serverTimestamp(),
+        });
+      }
     }
 
-    const userRef = doc(db, 'users', uid);
-    batch.set(userRef, {
+    // Family creation (household + athletes + their medical docs) commits
+    // together — a handful of writes, well under the access cap.
+    await batch.commit();
+    householdId = householdRef.id;
+    } else {
+      // Retry path: the household already exists from an earlier partial
+      // approval — reuse its athletes rather than creating a second set.
+      const kids = await getDocs(query(collection(db, 'athletes'), where('householdId', '==', householdId)));
+      athleteIds = kids.docs.map((d) => d.id);
+    }
+
+    // The guardian's own users doc — its own request (the users rules make
+    // several me() reads of their own).
+    await setDoc(doc(db, 'users', uid), {
       role: 'parent',
-      householdId: householdRef.id,
+      householdId,
       athleteId: null,
       staff: false,
       specialistId: null,
@@ -1018,21 +1077,22 @@ export async function approveEnrollmentRequest(uid) {
       email: request.guardian?.email ?? null,
     });
 
-    batch.update(doc(db, 'enrollmentRequests', uid), {
+    // Status last: if anything above failed, the request stays pending and
+    // the next Approve tap resumes from the household lookup.
+    await updateDoc(doc(db, 'enrollmentRequests', uid), {
       status: 'approved',
       reviewedBy: user.uid,
       reviewedAt: serverTimestamp(),
       updatedAt: serverTimestamp(),
     });
 
-    await batch.commit();
     // Four collections changed - one bump each, matching the "single bump()
     // per write" discipline (bump the collection, not per-document).
     bump('households');
     bump('athletes');
     bump('users');
     bump('enrollmentRequests');
-    return { uid, householdId: householdRef.id, athleteIds };
+    return { uid, householdId, athleteIds };
   } catch (err) {
     throw wrap(err, 'approveEnrollmentRequest');
   }
@@ -1086,12 +1146,18 @@ export async function setContractTier({ athleteId, minutes }) {
  * new composite index is needed for a subcollection this small (a handful
  * of captures per athlete, ever).
  */
-export async function fetchAthleteDiagnostics(athleteId, { publishedOnly = false } = {}) {
+export async function fetchAthleteDiagnostics(athleteId, { publishedOnly = false, draftOnly = false } = {}) {
   if (!athleteId) {
     throw new LiveDataError(ERR.INVALID, 'fetchAthleteDiagnostics: athleteId is required.');
   }
   try {
-    const filters = publishedOnly ? [where('status', '==', 'published')] : [];
+    // One status per query: the published-only read rule makes an
+    // unfiltered list unprovable for athletes/parents (see liveDiagnostic).
+    const filters = publishedOnly
+      ? [where('status', '==', 'published')]
+      : draftOnly
+      ? [where('status', '==', 'draft')]
+      : [];
     const snap = await getDocs(query(collection(db, 'athletes', athleteId, 'diagnostics'), ...filters));
     const rows = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
     rows.sort((a, b) => (b.capturedAt?.toMillis?.() ?? 0) - (a.capturedAt?.toMillis?.() ?? 0));

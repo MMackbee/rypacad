@@ -932,3 +932,61 @@ Sequencing inside each lane (report what is NOT done rather than rush):
 A (enrollment) and C (diagnostics) first — they are the two silent
 data-loss / dead-end paths; then D/E/F (staff real + nav); then B, G, H;
 quick wins last.
+
+## Sprint 10 integration notes (PM merge + live pass, 2026-09-11)
+
+All three lanes merged clean. Reconciled at integration: useEnrollment
+exposes top-level `status`; guardianNotes (emergency contact + medical
+free text) rides enrollmentRequests and lands in each approved athlete's
+private/medical doc (rules: ops/owner create there); household name is
+"<surname> family"; block fill is per-day over group sessions (the pin's
+"group type only" meant exclude specialist slots); useAthleteTier gives
+the parent an athleteId-aware tier write; useSessionAttendance also READS
+the session's coachNote; AthleteDetail keys "no tier" off the real
+contractMinutes field; the athlete home's Start-here card keys off a live
+diagnosticCaptured flag; Phil's tab set is Sessions · Capture · Tour (no
+assignment-based Roster); AdminRoute/SpecialistDayRoute resolve `role`;
+coach roster and dashboard rows open AthleteDetail.
+
+Live emulator pass (every new rules branch exercised) — defects found and
+fixed before commit:
+1. APPROVAL BATCH: the pinned single 7-write batch errored — every
+   rule's me() get() across that many writes hit Firestore's document-
+   access cap for multi-document requests (production has the same cap).
+   Approval is now three small requests made retry-safe: household +
+   athletes + medical in one batch, then the parent's users doc, then the
+   request status; a re-approval finds the household by guardian email
+   and resumes. Also the ops/owner request-update rule lacked updatedAt
+   in its allowed keys (clean denial) — added.
+2. Enrollment queue rows now carry `uid` as well as `id` (the card called
+   approve(req.uid) and got undefined).
+3. DiagnosticCapture: the draft never prefilled (useState seeded before
+   the hook loaded — now a one-time seed effect); Publish could never
+   render (completion counted the uncapturable swing-video slot); the
+   header claimed "All sections complete" whenever an older publication
+   existed.
+4. liveDiagnostic queried every status in one list — Firestore denies a
+   list wholesale when any doc could fail the rule, so parents (published-
+   only readers) saw "No capture yet" for kids with captures. Now two
+   queries (published; draft tolerated as denied for non-staff).
+5. AthleteDetail's capture card read latest.sections (a capture doc has no
+   sections — the catalogue lives beside it); it now groups latest.values
+   by the catalogue and renders only entered fields.
+6. Coach-day (Luke's Today) listed Phil's sessions as his blocks —
+   specialist filter added (the Sprint 9 fix covered booking hooks only).
+
+Verified end to end: unprovisioned parent -> "under review" -> owner
+approves from the live admin queue -> parent lands on "Contreras family"
+with the enrolled kids -> parent starts a kid's contract tier; coach saves
++ publishes a diagnostic -> parent and owner see its values; owner staff
+invite; parent notification prefs persist; coach session note reads and
+writes. Admin dashboard derives its call list, counts and package bars
+from real records.
+
+Cosmetic follow-ups (seed copy on live screens, not blocking): AthleteDetail
+back link hardcodes "Whitfield family"; its CONTRACT HISTORY caption
+references the December closure for a kid with no history; Admin's block-
+fill footnote "Friday is the overflow block" is seed copy; the attendance
+footer still says "Add a session note" when a note exists ("Edit note").
+Deploy now includes firestore.indexes.json (the bookings status+date
+composite the admin no-show query needs).

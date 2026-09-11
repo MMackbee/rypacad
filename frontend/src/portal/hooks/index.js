@@ -1363,16 +1363,28 @@ export function useEnrollment() {
   const live = isLive();
   const gen = useInvalidation('enrollmentRequests');
 
+  // `status` is surfaced at the top level ('none' when there is no request)
+  // so NotProvisioned/Registration branch on one field — the frontend lane
+  // coded against exactly that (PM integration reconciliation).
   const state = useSeedResource(
-    live ? null : { request: null },
+    live ? null : { request: null, status: 'none' },
     live
-      ? { source: async () => ({ request: await fetchMyEnrollmentRequest() }), deps: ['enrollment', gen] }
+      ? {
+          source: async () => {
+            const request = await fetchMyEnrollmentRequest();
+            return { request, status: request?.status ?? 'none' };
+          },
+          deps: ['enrollment', gen],
+        }
       : undefined
   );
 
-  const submit = async ({ guardian, athletes, consents }) => {
-    if (!live) return { request: { status: 'pending' }, simulated: true };
-    return submitMyEnrollmentRequest({ guardian, athletes, consents });
+  // guardianNotes (emergency contact + medical, free text) rides the
+  // request and lands in athletes/{id}/private/medical on approval — the
+  // data-minimization home for it (PM integration, v1.8 amendment).
+  const submit = async ({ guardian, athletes, consents, guardianNotes = null }) => {
+    if (!live) return { request: { status: 'pending' }, status: 'pending', simulated: true };
+    return submitMyEnrollmentRequest({ guardian, athletes, consents, guardianNotes });
   };
 
   return { ...state, submit };
@@ -1463,7 +1475,12 @@ export function useCoachDay({ variant = 'today' } = {}) {
     // The next day that actually has sessions — today when today does (the
     // in-season case), otherwise the upcoming session day, so a pre-season
     // coach sees their real next working day instead of months of "off".
-    const upcoming = (await fetchSessions(today, 1)).filter((s) => s.status !== 'cancelled');
+    // Group flow only (surface-scan follow-through, PM integration): Phil's
+    // and Yannick's slots are not the golf coach's blocks — without this
+    // filter Luke's Today overview listed Phil's sessions as his own.
+    const upcoming = (await fetchSessions(today, 1)).filter(
+      (s) => s.status !== 'cancelled' && !isSpecialistType(s.type)
+    );
     const dayISO = upcoming[0]?.date ?? today;
     const sessions = upcoming.filter((s) => s.date === dayISO);
     const isToday = dayISO === today;
@@ -1595,10 +1612,22 @@ function blockRange(time) {
  * than branching on role here.
  */
 async function liveDiagnostic(athleteId) {
-  const all = await fetchAthleteDiagnostics(athleteId);
-  const latest = all.find((d) => d.status === 'published') ?? null;
-  const draft = all.find((d) => d.status === 'draft') ?? null;
-  return { latest, draft, sections: DIAGNOSTIC_SECTIONS };
+  // TWO queries, not one over every status (PM integration browser pass):
+  // a parent's read rule is published-only, and Firestore denies a LIST
+  // wholesale when any document could fail the rule — so the single
+  // all-statuses query errored for every parent and their kid's detail
+  // read "No capture yet" despite two published captures. The published
+  // query is provable for every reader; the draft query is only provable
+  // for staff, so a denial there means "no draft for you", not a failure.
+  const published = await fetchAthleteDiagnostics(athleteId, { publishedOnly: true });
+  let draft = null;
+  try {
+    const drafts = await fetchAthleteDiagnostics(athleteId, { draftOnly: true });
+    draft = drafts[0] ?? null;
+  } catch (err) {
+    if (err?.code !== ERR.PERMISSION) throw err;
+  }
+  return { latest: published[0] ?? null, draft, sections: DIAGNOSTIC_SECTIONS };
 }
 
 /**
@@ -1720,6 +1749,11 @@ async function liveAthleteDashboard(today) {
     };
   }
 
+  // Whether a published diagnostic exists yet (contract v1.8 C): the home
+  // screen's "Start here" card keys off this in live mode instead of the
+  // demo-only `variant === 'new'` flag (PM integration reconciliation).
+  const published = await fetchAthleteDiagnostics(ctx.athlete.id, { publishedOnly: true });
+
   return {
     athlete: {
       // Firestore stores one `name` field (no first/full split) - both keys
@@ -1733,6 +1767,7 @@ async function liveAthleteDashboard(today) {
     contract,
     // No demo "new athlete" onboarding checklist concept in live mode.
     onboarding: null,
+    diagnosticCaptured: published.length > 0,
     codeOfGrit: CODE_OF_GRIT,
   };
 }
@@ -1950,6 +1985,22 @@ export function useContract({ variant = 'ontrack', today = todayISO(), practice 
   };
 
   return { ...state, setTier };
+}
+
+/**
+ * Set a contract tier for a NAMED athlete (contract v1.8, B) — the parent's
+ * "Start a contract" card on AthleteDetail, for a kid with no login of
+ * their own. useContract's setTier is self-only by construction (it resolves
+ * the signed-in athlete); this is the household-parent path, and the rules'
+ * contractMinutesUpdateOk() decides who may write it. Seed: local echo.
+ */
+export function useAthleteTier() {
+  const live = isLive();
+  const setTier = async (athleteId, minutes) => {
+    if (!live) return { athleteId, contractMinutes: minutes, simulated: true };
+    return setContractTier({ athleteId, minutes });
+  };
+  return { setTier };
 }
 
 /**
@@ -2424,20 +2475,24 @@ async function liveAdminDashboard(today) {
     athletes: count,
   }));
 
-  const fillByType = new Map();
+  // Block fill is PER DAY (Mon..Sat, the seed BLOCK_FILL shape the admin
+  // bars render) over GROUP sessions only — the pin's "group type only"
+  // meant "exclude specialist slots", not "group by type" (PM integration
+  // reconciliation of the routing lane's flagged reading).
+  const fillByDay = new Map(['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'].map((d) => [d, { booked: 0, capacity: 0 }]));
   let totalBooked = 0;
   let totalCapacity = 0;
   for (const s of sessionsThisWeek) {
-    if (s.status === 'cancelled') continue;
-    const t = fillByType.get(s.type) ?? { booked: 0, capacity: 0 };
-    t.booked += s.booked ?? 0;
-    t.capacity += s.capacity ?? 0;
-    fillByType.set(s.type, t);
+    if (s.status === 'cancelled' || isSpecialistType(s.type)) continue;
+    const day = fillByDay.get(shortWeekday(s.date));
+    if (!day) continue; // Sunday: no group blocks by design
+    day.booked += s.booked ?? 0;
+    day.capacity += s.capacity ?? 0;
     totalBooked += s.booked ?? 0;
     totalCapacity += s.capacity ?? 0;
   }
-  const blockFill = [...fillByType.entries()].map(([type, v]) => ({
-    type,
+  const blockFill = [...fillByDay.entries()].map(([day, v]) => ({
+    day,
     pct: v.capacity ? Math.round((v.booked / v.capacity) * 100) : 0,
   }));
 
@@ -2681,7 +2736,24 @@ export function useSessionAttendance(sessionId) {
     return setSessionCoachNote({ sessionId: targetSessionId, note });
   };
 
-  return { ...state, mark, setReason, setSessionNote };
+  // The session's CURRENT note, so the roster shows/prefills it on a
+  // revisit rather than only after this device saved one (PM integration:
+  // the frontend lane flagged the missing read half). Its own small
+  // resource — the rows above are pinned as a bare array.
+  const sessionsGen = useInvalidation('sessions');
+  const noteState = useSeedResource(
+    live && sessionId ? null : { coachNote: null },
+    live && sessionId
+      ? {
+          source: async () => ({
+            coachNote: (await fetchSessionsByIds([sessionId]))[0]?.coachNote ?? null,
+          }),
+          deps: ['session-note', sessionId, sessionsGen],
+        }
+      : undefined
+  );
+
+  return { ...state, mark, setReason, setSessionNote, sessionNote: noteState.data?.coachNote ?? null };
 }
 
 /**

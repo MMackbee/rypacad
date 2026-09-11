@@ -6,7 +6,6 @@ import Button from '../components/Button';
 import PhoneFrame from '../components/PhoneFrame';
 import StatusBadge from '../components/StatusBadge';
 import TypeChip from '../components/TypeChip';
-import SavedToast from '../components/SavedToast';
 import { BackLink, Body, Card, ScreenTitle, SectionLabel, SignOutButton, Tick } from '../components/Primitives';
 import useRoster from '../hooks/useRoster';
 import * as hooks from '../hooks';
@@ -341,7 +340,10 @@ export function SessionAttendance({ variant = 'pre', bare = false, onBack, sessi
   const [noteDraft, setNoteDraft] = useState('');
   const [savingNote, setSavingNote] = useState(false);
   const [noteError, setNoteError] = useState(null);
-  const [sessionNote, setSessionNoteLocal] = useState(null);
+  // Local echo after a save on this device; otherwise the hook's read of the
+  // session's stored note, so a revisit shows what was written before.
+  const [localNote, setSessionNoteLocal] = useState(null);
+  const sessionNote = localNote ?? liveAttendance.sessionNote ?? null;
 
   const startNote = () => {
     setNoteDraft(sessionNote || '');

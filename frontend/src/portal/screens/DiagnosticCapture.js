@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { color, font, radius } from '../tokens';
 import * as hooks from '../hooks';
 import AthleteRow from '../components/AthleteRow';
@@ -103,14 +103,28 @@ export default function DiagnosticCapture({ variant, bare = false, athlete, athl
 
   const setValue = (id, v) => setValues((prev) => ({ ...prev, [id]: v }));
 
-  // Real progress: every indoor section's fields, plus one slot for video -
-  // never the old hardcoded TOTAL_MODULES = 4.
-  const totalFields = sections.reduce((n, s) => n + s.fields.length, 0) + 1;
-  const filledFields =
-    sections.reduce(
-      (n, s) => n + s.fields.filter((f) => values[f.id] !== undefined && values[f.id] !== '').length,
-      0
-    ) + (videoAttached ? 1 : 0);
+  // Seed from the athlete's open draft ONCE, the first time it arrives —
+  // the useState initializer above runs before the hook has loaded it, so
+  // on its own a saved draft never prefilled (PM integration browser pass:
+  // "0 of 8" right after a 7-field save). Never re-seeds after that, so a
+  // background refresh cannot clobber in-progress typing (the same guard
+  // Roster's ResultsEntry uses).
+  const seededRef = useRef(false);
+  useEffect(() => {
+    if (seededRef.current || !diag.draft?.values) return;
+    seededRef.current = true;
+    setValues(diag.draft.values);
+  }, [diag.draft]);
+
+  // Real progress over the fields this indoor form can actually capture.
+  // The swing video is NOT a field here (its placeholder says "not yet
+  // captured" by design), so it does not count toward completion — with it
+  // in the total, Publish could never render (PM integration browser pass).
+  const totalFields = sections.reduce((n, s) => n + s.fields.length, 0);
+  const filledFields = sections.reduce(
+    (n, s) => n + s.fields.filter((f) => values[f.id] !== undefined && values[f.id] !== '').length,
+    0
+  );
   const allComplete = totalFields > 0 && filledFields === totalFields;
 
   const saveStatus = uploading
@@ -119,7 +133,9 @@ export default function DiagnosticCapture({ variant, bare = false, athlete, athl
     ? { label: 'Saving…', tone: color.secondary }
     : saving === 'publish'
     ? { label: 'Publishing…', tone: color.secondary }
-    : justSaved === 'publish' || diag.latest || allComplete
+    // THIS capture's completeness only — an older published capture
+    // (diag.latest) is history, not a statement about the open draft.
+    : justSaved === 'publish' || allComplete
     ? { label: 'All sections complete', tone: color.primary }
     : diag.draft || justSaved === 'draft'
     ? { label: 'Draft saved', tone: color.textSecondary }

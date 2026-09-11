@@ -89,7 +89,9 @@ export default function AthleteDashboard({
         </div>
       ) : (
       <div style={{ padding: '0 22px 24px', display: 'flex', flexDirection: 'column', gap: 12 }}>
-        {variant === 'new' ? <StartHere onBook={onBook} /> : null}
+        {/* Live: shown until a published diagnostic exists (contract v1.8 C);
+            seed: the demo 'new' variant. */}
+        {variant === 'new' || data?.diagnosticCaptured === false ? <StartHere onBook={onBook} /> : null}
         {variant === 'new' ? <OnboardingChecklist items={data?.onboarding ?? []} /> : null}
         {variant === 'new' ? (
           <MediaPlaceholder height={126} caption="WELCOME VIDEO — Luke, 60 sec — what the first week looks like" />

@@ -243,6 +243,18 @@ function CoachingRoute() {
  * Tapping a session opens the SAME attendance screen coaches use, with the
  * session's real facts as navigation state and this view as the way back.
  */
+/**
+ * The admin dashboard picks its staff tab set from the signed-in role
+ * (Sprint 10 pin F) — resolved here, the way every other role-aware route
+ * in this file does it; seed mode stays the owner default.
+ */
+function AdminRoute({ onOpenAthlete, onSignOut }) {
+  const live = isLive();
+  const { user } = useAuthSession(live ? undefined : { variant: 'idle' });
+  const role = (live && user?.role) || 'owner';
+  return <AdminDashboard bare role={role} onOpenAthlete={onOpenAthlete} onSignOut={onSignOut} />;
+}
+
 function SpecialistDayRoute({ onSignOut }) {
   const live = isLive();
   const { user, loading } = useAuthSession(live ? undefined : { variant: 'idle' });
@@ -258,6 +270,7 @@ function SpecialistDayRoute({ onSignOut }) {
   return (
     <SpecialistDay
       bare
+      role={(live && user?.role) || 'mental'}
       specialistId={specialistId ?? undefined}
       canSwitch={canSwitch}
       onSignOut={onSignOut}
@@ -304,12 +317,13 @@ function TourRoute({ onSignOut }) {
  * and SessionAttendance takes `sessionId` (live) / `blockIndex` (seed).
  * Without this thread-through every tap landed on the default block (QA #6).
  */
-function CoachDashboardRoute({ onSignOut }) {
+function CoachDashboardRoute({ onSignOut, onOpenAthlete }) {
   const navigate = useNavigate();
   return (
     <CoachDashboard
       bare
       onSignOut={onSignOut}
+      onOpenAthlete={onOpenAthlete}
       onOpenRoster={(block) =>
         navigate('/portal/attendance', {
           state: {
@@ -572,7 +586,7 @@ export default function PortalRoutes() {
         path="coach"
         element={
           <RequireRole roles={['coach']}>
-            <CoachDashboardRoute onSignOut={onSignOut} />
+            <CoachDashboardRoute onSignOut={onSignOut} onOpenAthlete={openAthlete} />
           </RequireRole>
         }
       />
@@ -580,7 +594,7 @@ export default function PortalRoutes() {
         path="roster"
         element={
           <RequireRole roles={['coach']}>
-            <Roster bare onBack={go('/portal/coach')} />
+            <Roster bare onSignOut={onSignOut} onOpenAthlete={openAthlete} />
           </RequireRole>
         }
       />
@@ -610,7 +624,7 @@ export default function PortalRoutes() {
         path="admin"
         element={
           <RequireRole roles={['ops', 'owner', 'mental']}>
-            <AdminDashboard bare onOpenAthlete={openAthlete} onSignOut={onSignOut} />
+            <AdminRoute onOpenAthlete={openAthlete} onSignOut={onSignOut} />
           </RequireRole>
         }
       />

@@ -791,6 +791,14 @@ function buildDocs(portal) {
           { name: 'Sofia Contreras', dob: null, packageId: 'g-4-2', contractMinutes: null },
         ],
         consents: { dataCollection: true, videoCapture: true, mediaRelease: true },
+        // v1.8 amendment (PM integration): free-text emergency contact +
+        // medical notes ride the request and land in each approved
+        // athlete's private/medical doc. Fabricated for a fabricated
+        // family — never real people.
+        guardianNotes: {
+          emergencyContact: 'Luis Contreras (uncle) — 612-555-0142',
+          medical: 'Mateo: mild peanut allergy, carries an EpiPen.',
+        },
         status: 'pending',
         declineReason: null,
         createdAt: enrollmentCreatedAt,
