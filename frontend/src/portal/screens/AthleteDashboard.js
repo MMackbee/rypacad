@@ -7,7 +7,7 @@ import Button from '../components/Button';
 import MediaPlaceholder, { Avatar } from '../components/MediaPlaceholder';
 import PhoneFrame from '../components/PhoneFrame';
 import ProgressMeter from '../components/ProgressMeter';
-import TypeChip from '../components/TypeChip';
+import TypeChip, { TYPES } from '../components/TypeChip';
 import SkeletonCard, { SkeletonBar } from '../components/Skeleton';
 import { Body, Card, ErrorNotice, ScreenTitle, SectionLabel, SignOutButton, Tick } from '../components/Primitives';
 import { useAthleteDashboard } from '../hooks';
@@ -227,7 +227,10 @@ function NextSessionCard({ next }) {
         {[
           ['Time', `${next.time} ${next.meridiem}`],
           ['Day', next.dayLabel],
-          ['Type', next.type === 'tournament' ? 'Tournament' : 'Training'],
+          // The chip's own label map, not a binary ternary — a mental/phil
+          // session read "Training" here while the chip above said
+          // otherwise (surface scan 2026-09-11, finding 9).
+          ['Type', TYPES[next.type]?.label ?? 'Training'],
         ].map(([label, value]) => (
           <div key={label} style={{ flex: 1 }}>
             <div

@@ -8,7 +8,7 @@ import { color, font, radius, tint } from '../tokens';
  * the only thing that distinguishes them at a glance.
  */
 
-const TYPES = {
+export const TYPES = {
   training: { label: 'Training', fg: color.textSecondary, bg: 'transparent', bd: color.border },
   tournament: { label: 'Tournament', fg: color.secondary, bg: tint.yellow, bd: tint.yellowBorder },
   cancelled: { label: 'Cancelled', fg: color.error, bg: tint.red, bd: tint.redBorder },

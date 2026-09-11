@@ -49,6 +49,21 @@ export const SPECIALISTS = [
 ];
 
 /**
+ * The session types that belong to the specialist surfaces and NOT to the
+ * group training/tournament booking flow. The group surfaces (Book a
+ * Session's week list and month calendar, the coach's own day) filter on
+ * this — a specialist slot leaking into them crashed the two-pool
+ * allowance math, which has no 'specialist' pool by design (surface scan,
+ * 2026-09-11, blocker D1).
+ */
+export const SPECIALIST_TYPE_IDS = new Set(SPECIALISTS.map((s) => s.id));
+
+/** Whether a sessions.type belongs to a specialist, not the group flow. */
+export function isSpecialistType(type) {
+  return SPECIALIST_TYPE_IDS.has(type);
+}
+
+/**
  * Per-athlete, per-specialist-TYPE, per-calendar-month cap — owner-tunable,
  * this is the single knob. Phil and Yannick each get their OWN
  * SPECIALIST_MONTHLY_CAP (a kid can book 2 Phil sessions AND 2 Yannick

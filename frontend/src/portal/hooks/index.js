@@ -151,7 +151,7 @@ import {
   NEWSLETTER_STATES,
 } from '../data/admin';
 import { TOUR_SEED, bracketFor, deriveTourStandings } from '../data/tour';
-import { SPECIALISTS, SPECIALIST_BOOKING_WINDOW_DAYS } from '../data/specialists';
+import { SPECIALISTS, SPECIALIST_BOOKING_WINDOW_DAYS, isSpecialistType } from '../data/specialists';
 
 export { default as useSeedResource } from './useSeedResource';
 export { default as useAuthSession } from './useAuthSession';
@@ -386,7 +386,11 @@ async function liveBookingIdentity() {
  */
 async function liveBooking(today) {
   const who = await liveBookingIdentity();
-  const sessions = await fetchSessions(today, 7);
+  // Group flow only (surface scan 2026-09-11, blocker D1): specialist
+  // slots have their own screen and their own pool — leaking them here
+  // crashed the two-pool allowance math (`allowance['specialist']` does
+  // not exist, by design).
+  const sessions = (await fetchSessions(today, 7)).filter((s) => !isSpecialistType(s.type));
   sessions.sort(byDateThenId);
 
   const dates = [...new Set(sessions.map((s) => s.date))].map(datePill);
@@ -708,6 +712,8 @@ export function useBooking({ variant = 'open', today = todayISO(), practice = fa
     let lastSessionDate = null;
     if (firstDate <= untilISO) {
       for (const s of await fetchSessionsInRange(firstDate, untilISO)) {
+        if (isSpecialistType(s.type)) continue; // recurrence is a group-flow feature
+
         const list = sessionsByDate.get(s.date) ?? [];
         list.push(s);
         sessionsByDate.set(s.date, list);
@@ -812,7 +818,12 @@ function groupSessionsByDate(sessions, today) {
  */
 async function liveMonthSessions(monthISO, today) {
   const { start, end, label } = monthBounds(monthISO);
-  const sessions = await fetchSessionsInRange(start, end);
+  // Same group-flow filter as liveBooking above: the month calendar feeds
+  // Book a Session and the coach's own day — specialist slots live on
+  // /portal/coaching and /portal/my-sessions instead.
+  const sessions = (await fetchSessionsInRange(start, end)).filter(
+    (s) => !isSpecialistType(s.type)
+  );
   sessions.sort(byDateThenId);
   return { month: label, days: groupSessionsByDate(sessions, today) };
 }

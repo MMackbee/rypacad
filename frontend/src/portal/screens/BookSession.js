@@ -383,7 +383,10 @@ function DaySessionList({ iso, sessions, allowance, reserving, disabled, onSelec
           // Two independent reasons a session cannot be booked, and they need
           // different copy: the block itself is full, or the athlete has
           // nothing left in the pool this block would spend.
-          const poolSpent = allowance ? allowance[pool].left === 0 : false;
+          // Optional-chained (surface scan 2026-09-11, blocker D1): the
+          // hooks now filter specialist types out of this flow, but a pool
+          // this map doesn't know must degrade to "not spent", never crash.
+          const poolSpent = allowance ? allowance[pool]?.left === 0 : false;
           const pending = reserving === session.id;
 
           return (

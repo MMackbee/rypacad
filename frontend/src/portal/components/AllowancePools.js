@@ -100,6 +100,10 @@ export default function AllowancePools({ allowance, compact = false, style }) {
 export function SpendNote({ pool, allowance }) {
   if (!allowance || !pool) return null;
   const p = allowance[pool];
+  // A pool this two-pool component doesn't model (e.g. 'specialist', which
+  // has its own screen and no group allowance) simply shows no spend note,
+  // rather than crashing on `p.left` (surface scan 2026-09-11, blocker D1).
+  if (!p) return null;
   const noun = pool === 'tournaments' ? 'tournament entry' : 'training session';
   const tone = p.left === 0 ? color.error : color.textTertiary;
 
