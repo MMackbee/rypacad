@@ -96,13 +96,34 @@ const FAMILIES = [
   },
 ];
 
-function userDoc(family, { role, displayName, email, athleteId }) {
-  const staff = role === 'coach' || role === 'owner';
+// Real academy specialists, provisioned OUTSIDE any family (owner's
+// direction, 2026-09-11: Yannick and Phil get their own accounts with
+// access to the booked-session side). `specialistId` links a staff user to
+// the specialist whose sessions they run (== sessions.type, == SPECIALISTS
+// ids in frontend/src/portal/data/specialists.js) — the specialist day
+// view and the specialist-attendance rule key off it. EMAILS ARE THE
+// OWNER'S TO SUPPLY (Yannick books through Calendly today, Phil through
+// SignUp Genius — their real addresses are not this script's to invent):
+// a null email is skipped with a loud note and the entry provisions
+// cleanly on re-run once filled in.
+const STAFF = [
+  { email: null, role: 'mental', displayName: 'Yannick', specialistId: 'mental' },
+  // Phil's sessions run like academy training at a smaller cap (owner,
+  // 2026-09-11), so he provisions as a coach with a specialist link — not
+  // a second owner. He is never the athletes' assigned golf coach; the
+  // coach-selection below excludes specialist coaches on purpose.
+  { email: null, role: 'coach', displayName: 'Phil', specialistId: 'phil' },
+];
+
+function userDoc(family, { role, displayName, email, athleteId, specialistId }) {
+  const staff = role === 'coach' || role === 'owner' || role === 'mental' || role === 'ops';
   return {
     role,
     athleteId: role === 'athlete' ? athleteId ?? null : null,
-    householdId: role === 'athlete' || role === 'parent' ? family.householdId : null,
+    householdId: role === 'athlete' || role === 'parent' ? family?.householdId ?? null : null,
     staff,
+    // Contract v1.7: null for everyone except the two specialists above.
+    specialistId: specialistId ?? null,
     displayName,
     email,
   };
@@ -207,7 +228,17 @@ async function main() {
   console.log(`TARGET: PRODUCTION Firestore (project ${PROJECT_ID})${DRY_RUN ? ' — dry run, read-only' : ''}\n`);
   const token = await prodAccessToken();
 
-  const allAccounts = FAMILIES.flatMap((f) => f.accounts.map((a) => ({ ...a, family: f })));
+  const staffWithEmail = STAFF.filter((s) => s.email).map((s) => ({ ...s, family: null }));
+  for (const s of STAFF.filter((x) => !x.email)) {
+    console.log(
+      `  ${s.displayName} (${s.role}, specialist '${s.specialistId}') — NO EMAIL YET; skipped. ` +
+        `Add the real address to STAFF in this script and re-run.`
+    );
+  }
+  const allAccounts = [
+    ...FAMILIES.flatMap((f) => f.accounts.map((a) => ({ ...a, family: f }))),
+    ...staffWithEmail,
+  ];
   const uidByEmail = await lookupUids(token, allAccounts.map((a) => a.email));
   const found = [];
   const missing = [];
@@ -221,9 +252,11 @@ async function main() {
       `  ${m.email} -> NO AUTH RECORD (${m.role}) — create it in Firebase console (Authentication > Add user) or sign in once, then re-run.`
     );
 
-  // One academy coach for now: every test athlete rides the same coach uid so
-  // rosters and attendance have someone to answer to.
-  const coach = found.find((m) => m.role === 'coach') ?? null;
+  // One academy GOLF coach for now: every test athlete rides the same coach
+  // uid so rosters and attendance have someone to answer to. Specialist
+  // coaches (Phil) are excluded — a specialist link never makes someone an
+  // athlete's assigned golf coach.
+  const coach = found.find((m) => m.role === 'coach' && !m.specialistId) ?? null;
   const packages = loadPackages();
 
   const docs = []; // [collection, id, doc]

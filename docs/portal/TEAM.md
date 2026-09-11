@@ -651,3 +651,52 @@ DB lane:
 Deferred, on the record: the specialist-side day view (Yannick/Phil
 seeing their own booked 1-on-1s) — next sprint; v1 rides the existing
 staff surfaces. Server-side cancel-window enforcement — accepted gap.
+
+## Sprint 9 amendment v1.7.1 — owner rulings mid-sprint (2026-09-11)
+
+Relayed by PM at integration (lane worktree TEAM.md copies predate this):
+
+1. PHIL'S SESSIONS ARE GROUP SESSIONS, not 1-on-1s (owner: "operate just
+   like academy training session just at a cap of 6-7 kids"). Capacity for
+   type 'phil' = 6 (PM pick from "6-7"; a one-value sync-knob change if
+   the owner says 7) — sync CAPACITY map, seed docs, DATA-MODEL all say 6.
+   Yannick ('mental') stays capacity 1 — true 1:1, owner-confirmed.
+   UI: slot rows for capacity > 1 show "N spots left", not the binary
+   Open/Booked the capacity-1 pin assumed.
+2. YANNICK MONTHLY RESTRICTION confirmed: the SPECIALIST_MONTHLY_CAP knob
+   is the mechanism; number pending from the owner (default stays 2 per
+   athlete per month until then).
+3. SPECIALIST-SIDE ACCESS moves from deferred to IN SCOPE at integration
+   (owner: "provision Yannick and Phils account seperately to have access
+   to the back end of the booked session side"):
+   - users docs gain optional `specialistId` ('phil'|'mental'|null) —
+     written by provisioning, links a staff account to the sessions it
+     runs (== sessions.type). provision-family.mjs already carries the
+     STAFF entries (Yannick: role mental; Phil: role coach, never the
+     athletes' assigned golf coach) with email: null until the owner
+     supplies real addresses.
+   - NEW SpecialistDay screen (PM builds at integration): the signed-in
+     specialist's upcoming sessions of their type with per-session booked
+     count and roster names; tapping one opens the existing
+     SessionAttendance. Route /portal/my-sessions, roles mental + coach
+     (gated by specialistId != null) + ops/owner (with a specialist
+     picker).
+   - Rules: attendance updates (status + noshowReason) also allowed when
+     the caller's users doc `specialistId` == the booking's own `type` —
+     bookings carry type, so NO extra get(). Yannick/Phil mark their own
+     sessions' attendance; the golf-coach clause is unchanged.
+4. AVAILABILITY MIGRATION (context, no code): Yannick books via Calendly
+   and Phil via SignUp Genius today. Their availability moves onto the
+   shared Google Calendar as 'Mental ...' / 'Phil ...' events — the sync
+   already turns those into bookable slots; no importer built. The owner
+   is getting Phil's updated training times.
+
+QUEUED AS SPRINT 10 (owner, same day): the parked Billing surface returns
+as a MEMBERSHIP/PERMISSIONS page — no payments — listing each athlete's
+golf package AND fitness package with what they entitle, and letting
+ops/owner assign packages per athlete/family. Then Phil's monthly
+entitlement derives from the athlete's fitness package `sessions` count
+(FITNESS_PACKAGES already carry it) instead of the flat cap; Yannick's
+stays the flat knob until the Elite yannickSessions count is decided.
+Sprint 9 ships with the flat cap for both types so the feature is usable
+before package assignment exists.
