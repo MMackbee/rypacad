@@ -1,11 +1,30 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { color, font, radius } from '../tokens';
+import * as hooks from '../hooks';
 import BottomTabBar from '../components/BottomTabBar';
-import MediaPlaceholder, { Avatar } from '../components/MediaPlaceholder';
+import Button from '../components/Button';
+import { Avatar } from '../components/MediaPlaceholder';
 import PhoneFrame from '../components/PhoneFrame';
 import ProgressMeter, { meterColor } from '../components/ProgressMeter';
-import { BackLink, Body, Card, ScreenTitle, SectionLabel, Tick } from '../components/Primitives';
+import SavedToast from '../components/SavedToast';
+import { BackLink, Body, Card, ScreenTitle, SectionLabel } from '../components/Primitives';
 import { useAthleteDetail } from '../hooks';
+
+/**
+ * Sprint 10 pin C: same fallback rationale as DiagnosticCapture.js's own
+ * useDiagnosticState - useDiagnostic() in this worktree takes no argument
+ * and returns { athlete, sections }, not the pinned { latest, draft,
+ * sections }. Called with the pinned athleteId argument regardless (the old
+ * implementation just ignores it); `latest` defaults to null (honest "no
+ * capture yet") until routing lands the real shape.
+ */
+function useLatestDiagnostic(athleteId) {
+  const state = hooks.useDiagnostic(athleteId);
+  return { latest: state.data?.latest ?? null, loading: state.loading, error: state.error };
+}
+
+/** The pinned contract tier set (contract v1.8 §B) - not invented. */
+const TIER_MINUTES = [20, 45, 95];
 
 /**
  * 09 · Athlete Detail - parent view of one linked athlete.
@@ -19,13 +38,31 @@ import { useAthleteDetail } from '../hooks';
  * deliberate.
  *
  * @param {'populated'|'limited'} variant
+ * @param {boolean} [noTier]  Sprint 10 pin B, harness/PM override: force the
+ *   "Start a contract" card on regardless of the subline heuristic below -
+ *   see that card's own doc comment for why a real signal doesn't exist yet.
  */
-export default function AthleteDetail({ variant = 'populated', bare = false, athleteId, onBack }) {
+export default function AthleteDetail({ variant = 'populated', bare = false, athleteId, noTier, onBack }) {
   // athleteId comes from the route (/portal/athlete/:athleteId) — dropping it
   // here was QA re-sweep #1: the hook's by-id fetch was fixed but never
   // received an id, so every child rendered as the seed athlete.
   const { data } = useAthleteDetail({ variant, athleteId });
   const athlete = data?.athlete;
+  const diagnostic = useLatestDiagnostic(athleteId);
+
+  /**
+   * Sprint 10 pin B: whether this kid has no contract tier yet. useAthleteDetail's
+   * payload carries no explicit contractMinutes/tier field to check directly
+   * (confirmed: neither the seed ATHLETE_DETAIL nor the live payload in
+   * hooks/index.js expose one) - only a human-readable `subline` that
+   * INCLUDES "N min tier" when a tier is set. Absent a real boolean, this
+   * falls back to parsing that string, which is fragile and flagged loudly
+   * in the sprint report as a real data-shape gap for routing to close
+   * (expose athlete.contractMinutes, or a `hasTier` boolean, from
+   * useAthleteDetail). The `noTier` prop lets a caller (or the harness)
+   * override the heuristic outright once/while that gap exists.
+   */
+  const hasNoTier = noTier ?? (Boolean(athlete) && !/min tier/i.test(athlete?.subline || ''));
 
   return (
     <PhoneFrame
@@ -52,12 +89,14 @@ export default function AthleteDetail({ variant = 'populated', bare = false, ath
       footer={<BottomTabBar role="parent" active="home" />}
     >
       <div style={{ padding: '0 22px 24px', display: 'flex', flexDirection: 'column', gap: 12 }}>
+        {hasNoTier ? <StartContractCard athleteId={athleteId} athleteName={athlete?.name} /> : null}
+
         {data?.hasEnoughData ? (
           <>
             <StatGrid athlete={athlete} />
             {data.upcoming ? <UpcomingSessions upcoming={data.upcoming} /> : null}
             <ContractHistory history={data.history} />
-            <ProgressSummary />
+            <ProgressSummary latest={diagnostic.latest} />
           </>
         ) : (
           <LimitedData checklist={data?.checklist ?? []} />
@@ -133,23 +172,61 @@ function ContractHistory({ history }) {
   );
 }
 
-function ProgressSummary() {
+/**
+ * Sprint 10 pin C: the scan found this card shipping developer commentary
+ * ("arrives here in a later phase") straight to a parent. It now shows the
+ * latest PUBLISHED diagnostic capture's real values, grouped by section
+ * exactly as they were entered, or the honest empty state when there is
+ * none - never a promise about a future phase.
+ */
+function ProgressSummary({ latest }) {
+  const sections = latest?.sections ?? [];
   return (
     <Card large>
-      <SectionLabel style={{ marginBottom: 13 }}>Progress summary</SectionLabel>
-      <MediaPlaceholder height={96} caption="COACH SUMMARY — written before Phil's monthly call" />
-      <Body size={11} tone={color.textTertiary} style={{ marginTop: 12 }}>
-        Practice and course-performance data arrives here in a later phase, read-only from the
-        ecosystem database.
-      </Body>
+      <SectionLabel style={{ marginBottom: 13 }}>Diagnostic capture</SectionLabel>
+      {sections.length === 0 ? (
+        <Body size={12}>No capture yet — the coach records this at a session.</Body>
+      ) : (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+          {sections.map((section) => (
+            <div key={section.id ?? section.title}>
+              <div style={{ font: `600 12px ${font.body}`, color: color.text, marginBottom: 6 }}>
+                {section.title}
+              </div>
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 14 }}>
+                {(section.fields ?? []).map((f) => (
+                  <div key={f.id ?? f.label} style={{ minWidth: 70 }}>
+                    <div
+                      style={{
+                        font: `400 9px ${font.body}`,
+                        textTransform: 'uppercase',
+                        letterSpacing: '.08em',
+                        color: color.textTertiary,
+                      }}
+                    >
+                      {f.label}
+                    </div>
+                    <div style={{ font: `600 15px ${font.body}`, color: color.text, marginTop: 2 }}>
+                      {f.value ?? '—'}
+                      {f.unit ? <span style={{ font: `400 11px ${font.body}` }}> {f.unit}</span> : null}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
     </Card>
   );
 }
 
 /**
- * The boundary is stated, not hidden. A parent who can see the card and read
- * why it is limited is less likely to ask for the transcript than one who finds
- * an unexplained gap.
+ * The boundary is stated, not hidden - but stated for a parent reading it,
+ * not for the next engineer (Sprint 10 pin C: the scan flagged the previous
+ * copy, "that boundary is enforced server-side, not by hiding this card",
+ * as developer commentary that leaked into a parent-facing screen). Same
+ * real point, reworded: a parent gets the gist, never the transcript.
  */
 function ReflectionCard() {
   return (
@@ -179,11 +256,107 @@ function ReflectionCard() {
           Reflection summaries
         </div>
         <Body size={11} tone={color.textTertiary} style={{ marginTop: 6 }}>
-          Summary level only. Full transcripts are never shown to a parent account — that boundary
-          is enforced server-side, not by hiding this card.
+          You'll see a summary of Yannick's mental-game sessions here, never the full conversation.
         </Body>
       </div>
     </div>
+  );
+}
+
+/**
+ * Sprint 10 pin B (contract v1.8 §B): a parent's move for a kid with no
+ * contract tier yet. FALLBACK FLAG: `useContract` (hooks/index.js) resolves
+ * the SIGNED-IN user's OWN athlete record (liveAthleteIdentity throws for a
+ * parent, who has no athleteId of their own) - it has no path to "set the
+ * tier for THIS athleteId" for any caller, parent or staff, in this
+ * worktree. That is a different gap than a missing export, but the same
+ * shape of problem, so it gets the same treatment: `setTier` below is a
+ * local, athleteId-scoped no-op echo rather than a mis-wired call into the
+ * wrong identity. Flagged loudly in the sprint report - routing needs an
+ * athleteId-aware tier-set mutation for the parent/staff case.
+ */
+function StartContractCard({ athleteId, athleteName }) {
+  const [selected, setSelected] = useState(null);
+  const [saving, setSaving] = useState(false);
+  const [saved, setSaved] = useState(false);
+  const [error, setError] = useState(null);
+
+  const setTier = async (minutes) => ({ athleteId, contractMinutes: minutes, simulated: true });
+
+  const handleStart = async () => {
+    if (!selected) return;
+    setSaving(true);
+    setError(null);
+    try {
+      await setTier(selected);
+      setSaved(true);
+    } catch (err) {
+      setError(
+        err && typeof err.message === 'string' && err.message
+          ? err.message
+          : 'The contract could not be started. Try again.'
+      );
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  if (saved) {
+    return <SavedToast message={`Contract started — ${selected} min / day`} />;
+  }
+
+  return (
+    <Card tone="yellow" large>
+      <SectionLabel tone={color.secondary} style={{ marginBottom: 8 }}>
+        Start a contract
+      </SectionLabel>
+      <Body size={12} style={{ marginBottom: 12 }}>
+        {athleteName || 'This athlete'} doesn't have a Commitment Contract tier yet. Pick a daily
+        minimum to get started — your coach countersigns at the next block.
+      </Body>
+      <div style={{ display: 'flex', gap: 8 }}>
+        {TIER_MINUTES.map((m) => {
+          const on = selected === m;
+          return (
+            <button
+              key={m}
+              type="button"
+              aria-pressed={on}
+              onClick={() => setSelected(on ? null : m)}
+              style={{
+                flex: 1,
+                height: 50,
+                borderRadius: radius.card,
+                border: `1px solid ${on ? color.primary : color.border}`,
+                background: on ? 'rgba(0,175,81,.12)' : color.surface,
+                display: 'flex',
+                flexDirection: 'column',
+                alignItems: 'center',
+                justifyContent: 'center',
+                cursor: 'pointer',
+              }}
+            >
+              <span style={{ font: `700 16px ${font.head}`, color: on ? color.primary : color.text }}>{m}</span>
+              <span style={{ font: `400 9px ${font.body}`, color: color.textTertiary }}>min/day</span>
+            </button>
+          );
+        })}
+      </div>
+      {error ? (
+        <Body size={12} tone={color.error} style={{ marginTop: 10 }}>
+          {error}
+        </Body>
+      ) : null}
+      <Button
+        height={44}
+        disabled={!selected}
+        loading={saving}
+        onClick={handleStart}
+        style={{ marginTop: 13 }}
+      >
+        {selected ? `Start the ${selected} min contract` : 'Select a tier to continue'}
+      </Button>
+    </Card>
   );
 }
 
