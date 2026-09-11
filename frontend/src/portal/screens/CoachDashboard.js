@@ -15,7 +15,7 @@ import { useCoachDay, useCoachRoster, useMonthSessions } from '../hooks';
 // 2026-09-01), and both screens paint from the same module so they cannot
 // drift. Pure calendar label helpers ride along per the seam rule.
 import { buildMonthDayMaps, MonthNav, useMonthNavState } from '../components/MonthCalendar';
-import { monthLabel, parseTimeToMinutes, todayISO } from '../data/calendar';
+import { longDayLabel, monthLabel, parseTimeToMinutes, todayISO } from '../data/calendar';
 import { SEASON_BOUNDS } from '../data/season';
 
 /**
@@ -34,7 +34,22 @@ import { SEASON_BOUNDS } from '../data/season';
  * @param {'today'|'concurrent'|'none'} variant
  * @param {() => void} [onSignOut]  Hidden when not supplied (harness/demo).
  */
-export default function CoachDashboard({ variant = 'today', bare = false, onOpenRoster, onSignOut }) {
+/**
+ * Sprint 10 pin I: the header date, "formatted like every other role" - the
+ * live branch of useCoachDay (hooks/index.js) hands back a raw ISO date
+ * ("2026-09-11") on a today, or "Next session day · 2026-09-11" otherwise,
+ * neither of which match every other role's long-form date (data/seed.js's
+ * own TODAY constant is already `longDayLabel(todayISO())`, so seed mode
+ * needs no fix here). hooks/ is not this lane's to edit, so the raw ISO
+ * segment is reformatted at the screen level instead.
+ */
+const ISO_RE = /\d{4}-\d{2}-\d{2}/;
+function formatCoachDate(raw) {
+  if (!raw || !ISO_RE.test(raw)) return raw;
+  return raw.replace(ISO_RE, (iso) => longDayLabel(iso));
+}
+
+export default function CoachDashboard({ variant = 'today', bare = false, onOpenRoster, onOpenAthlete, onSignOut }) {
   const { data } = useCoachDay({ variant });
   const [tab, setTab] = useState('overview');
   const roster = useCoachRoster();
@@ -56,7 +71,7 @@ export default function CoachDashboard({ variant = 'today', bare = false, onOpen
           <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
             <div style={{ flex: 1, minWidth: 0 }}>
               <div style={{ font: `400 12px ${font.body}`, color: color.textTertiary }}>
-                {data?.coach?.date}
+                {formatCoachDate(data?.coach?.date)}
               </div>
               <ScreenTitle style={{ marginTop: 3 }}>{data?.coach?.name}</ScreenTitle>
             </div>
@@ -74,7 +89,7 @@ export default function CoachDashboard({ variant = 'today', bare = false, onOpen
         {tab === 'overview' ? (
           <OverviewTab data={data} blocks={blocks} none={none} onOpenRoster={onOpenRoster} />
         ) : tab === 'students' ? (
-          <StudentsTab athletes={roster.data ?? []} loading={roster.loading} />
+          <StudentsTab athletes={roster.data ?? []} loading={roster.loading} onOpenAthlete={onOpenAthlete} />
         ) : (
           <SessionsTab
             // Live blocks carry real sessionIds; seed blocks don't, so the
@@ -129,7 +144,7 @@ function QuickCounts({ blocks, attention }) {
 }
 
 /** The coach's full assigned roster - every athlete, not one session's attendance. */
-function StudentsTab({ athletes, loading }) {
+function StudentsTab({ athletes, loading, onOpenAthlete }) {
   if (loading) {
     return (
       <Card large>
@@ -166,6 +181,7 @@ function StudentsTab({ athletes, loading }) {
             avatarSize={40}
             nameSize={15}
             divider={i < athletes.length - 1}
+            onClick={onOpenAthlete ? () => onOpenAthlete(a.id) : undefined}
           />
         ))}
       </div>
@@ -432,8 +448,15 @@ function NoSessions({ outstanding }) {
         }}
       >
         <ScreenTitle size={17}>No sessions today</ScreenTitle>
+        {/*
+          Sprint 10 pin I: this used to hardcode "Mon Feb 22, 5:00 PM" - the
+          real next-session date isn't in useCoachDay's payload (it only
+          resolves today's or the next WORKING day's blocks, not a specific
+          far-future date to print here), so rather than invent one this
+          points at the Sessions tab, which reads the real month calendar.
+        */}
         <Body size={12} style={{ marginTop: 8 }}>
-          Your next assigned block is Mon Feb 22, 5:00 PM.
+          Check the Sessions tab above for your next scheduled block.
         </Body>
       </div>
 

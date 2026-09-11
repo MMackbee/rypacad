@@ -6,6 +6,7 @@ import Button from '../components/Button';
 import PhoneFrame from '../components/PhoneFrame';
 import StatusBadge from '../components/StatusBadge';
 import TypeChip from '../components/TypeChip';
+import SavedToast from '../components/SavedToast';
 import { BackLink, Body, Card, ScreenTitle, SectionLabel, SignOutButton, Tick } from '../components/Primitives';
 import useRoster from '../hooks/useRoster';
 import * as hooks from '../hooks';
@@ -99,7 +100,7 @@ const useAthleteBrackets = hooks.useAthleteBrackets || useAthleteBracketsFallbac
  * the same /portal/roster route; see the sprint report for the routing
  * follow-up this split needs.
  */
-export default function Roster({ bare = false, onSignOut }) {
+export default function Roster({ bare = false, onSignOut, onOpenAthlete }) {
   const rosterState = useCoachRoster();
   const athletes = rosterState.data ?? [];
 
@@ -131,6 +132,11 @@ export default function Roster({ bare = false, onSignOut }) {
                   avatarSize={44}
                   nameSize={16}
                   divider={i < athletes.length - 1}
+                  // Sprint 10 pin I: coach roster rows tap through to
+                  // AthleteDetail. Optional-affordance convention - a plain
+                  // (non-tappable) row without a prop, same as every other
+                  // row in this codebase that gates onClick behind a prop.
+                  onClick={onOpenAthlete ? () => onOpenAthlete(a.id) : undefined}
                 />
               ))}
             </div>
@@ -319,6 +325,47 @@ export function SessionAttendance({ variant = 'pre', bare = false, onBack, sessi
   const started = sessionState !== 'pre';
   const completed = sessionState === 'completed';
 
+  /**
+   * Sprint 10 pin H (TEAM.md, contract v1.8 §H): the completed-state footer
+   * "Add a session note" button (the scan's third inert-button instance)
+   * opens the exact same inline editor the no-show reason uses. FALLBACK
+   * FLAG: `useSessionAttendance` has no `setSessionNote(sessionId, note)`
+   * export in this worktree yet (confirmed via grep) - defaults to a local
+   * no-op echo. Same live/demo split every other attendance write on this
+   * screen already follows: real only when `live && sessionId`, a
+   * component-local record otherwise (this screen has no session-scoped
+   * seed data to persist a note against).
+   */
+  const setSessionNote = liveAttendance.setSessionNote || (async () => {});
+  const [editingNote, setEditingNote] = useState(false);
+  const [noteDraft, setNoteDraft] = useState('');
+  const [savingNote, setSavingNote] = useState(false);
+  const [noteError, setNoteError] = useState(null);
+  const [sessionNote, setSessionNoteLocal] = useState(null);
+
+  const startNote = () => {
+    setNoteDraft(sessionNote || '');
+    setNoteError(null);
+    setEditingNote(true);
+  };
+  const saveNote = async () => {
+    const text = noteDraft.trim();
+    setSavingNote(true);
+    setNoteError(null);
+    try {
+      if (live && sessionId) await setSessionNote(sessionId, text || null);
+      setSessionNoteLocal(text || null);
+      setEditingNote(false);
+    } catch (err) {
+      setNoteError(
+        err && typeof err.message === 'string' && err.message
+          ? err.message
+          : 'The note could not be saved. Try again.'
+      );
+    }
+    setSavingNote(false);
+  };
+
   const statusPill = {
     pre: { tone: 'neutral', label: session?.startsIn },
     progress: { tone: 'green', label: 'In progress' },
@@ -377,10 +424,56 @@ export function SessionAttendance({ variant = 'pre', bare = false, onBack, sessi
           completed={completed}
           onStart={() => setLocalStatus('progress')}
           onClose={() => setLocalStatus('completed')}
+          onAddNote={startNote}
         />
       }
     >
       <div style={{ padding: '0 22px 20px' }}>
+        {/*
+          Sprint 10 pin H: the session note, completed state only - a real
+          write against sessions.coachNote (live), or a component-local
+          record (seed/demo), same split every other attendance write on
+          this screen already follows.
+        */}
+        {completed ? (
+          <div style={{ marginBottom: 16 }}>
+            {editingNote ? (
+              <Card large>
+                <SectionLabel style={{ marginBottom: 10 }}>Session note</SectionLabel>
+                <ReasonEditor
+                  value={noteDraft}
+                  onChange={setNoteDraft}
+                  onSave={saveNote}
+                  onCancel={() => setEditingNote(false)}
+                  saving={savingNote}
+                  error={noteError}
+                  maxLength={500}
+                  placeholder="e.g. Ran short groups today, cones set up for Thursday"
+                />
+              </Card>
+            ) : sessionNote ? (
+              <Card>
+                <SectionLabel style={{ marginBottom: 6 }}>Session note</SectionLabel>
+                <Body size={12}>{sessionNote}</Body>
+                <button
+                  type="button"
+                  onClick={startNote}
+                  style={{
+                    background: 'none',
+                    border: 'none',
+                    padding: '8px 0 0',
+                    font: `500 12px ${font.body}`,
+                    color: color.primary,
+                    cursor: 'pointer',
+                  }}
+                >
+                  Edit
+                </button>
+              </Card>
+            ) : null}
+          </div>
+        ) : null}
+
         {/* Sprint 7 pin (TEAM.md): "Enter results" on a TOURNAMENT session
             only - the block/type info the screen already receives. Never
             time-gated, same as attendance's Start session - a coach may
@@ -759,7 +852,7 @@ function CounterRow({ counts, started }) {
   );
 }
 
-function RosterFooter({ sessionState, unmarked, completed, onStart, onClose }) {
+function RosterFooter({ sessionState, unmarked, completed, onStart, onClose, onAddNote }) {
   const hint = completed
     ? 'No-shows are reported to Phil, not the coach chain.'
     : 'Tap a green or red button again to clear it.';
@@ -774,8 +867,10 @@ function RosterFooter({ sessionState, unmarked, completed, onStart, onClose }) {
       </Button>
     );
   } else if (completed) {
+    // Sprint 10 pin H: was inert (no onClick at all) - opens the session
+    // note editor rendered above the roster list.
     cta = (
-      <Button variant="outline" height={56} style={{ boxShadow: 'none' }}>
+      <Button variant="outline" height={56} onClick={onAddNote} style={{ boxShadow: 'none' }}>
         Add a session note
       </Button>
     );
@@ -846,16 +941,29 @@ function NoteChip({ noShow, reason, onClick }) {
  * Escape or Cancel. Deliberately tiny: the reason is one line for Phil's
  * no-show report, not a note-taking surface (this screen's own rule - typing
  * is never required to complete the core task).
+ *
+ * Sprint 10 pin H reuses this same idiom for the session note
+ * (sessions.coachNote, up to 500 chars) - `maxLength`/`placeholder` are
+ * overridable so the one editor serves both without a second component.
  */
-function ReasonEditor({ value, onChange, onSave, onCancel, saving, error }) {
+function ReasonEditor({
+  value,
+  onChange,
+  onSave,
+  onCancel,
+  saving,
+  error,
+  maxLength = 200,
+  placeholder = 'e.g. Sick — parent texted ahead',
+}) {
   return (
     <div>
       <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
         <input
           autoFocus
           value={value}
-          maxLength={200}
-          placeholder="e.g. Sick — parent texted ahead"
+          maxLength={maxLength}
+          placeholder={placeholder}
           disabled={saving}
           onChange={(e) => onChange(e.target.value)}
           onKeyDown={(e) => {
