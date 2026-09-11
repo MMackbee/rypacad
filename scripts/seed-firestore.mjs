@@ -55,6 +55,33 @@
  *                  locally (see BRACKETS below — this script does not bundle
  *                  tour.js, so the bracket thresholds are a dependency-free
  *                  copy of the pinned contract, not an import).
+ *   enrollmentRequests — ONE pending request (contract v1.8, Sprint 10 pin A)
+ *                  keyed `parent-new`, a NEW unprovisioned QA uid — no
+ *                  `users` doc exists for it, on purpose, so the intake path
+ *                  (NotProvisioned -> /portal/register) has a real
+ *                  not-yet-a-family account to route to. Two athletes: one
+ *                  with a dob and a chosen tier, one with neither. All three
+ *                  consents true.
+ *   diagnostics — two `athletes/jordan/diagnostics` captures (contract v1.8,
+ *                  Sprint 10 pin C): an older PUBLISHED one with a value for
+ *                  every DIAGNOSTIC_SECTIONS field id, and a newer DRAFT with
+ *                  just a couple of fields filled in — both `capturedBy:
+ *                  'coach-luke'`. Field ids are read straight off
+ *                  DIAGNOSTIC_SECTIONS in seed.js and enumerated in
+ *                  DATA-MODEL.md, never retyped independently.
+ *   staffInvites — ONE pending invite (contract v1.8, Sprint 10 pin E) at a
+ *                  clearly-fake address (`invite-test@example.com`), role
+ *                  coach, specialistId null — provision-family.mjs is what
+ *                  consumes these in production (looks up the uid, writes the
+ *                  users doc, marks the invite provisioned).
+ *   notificationPrefs — parent-dana's `users` doc gets a real map (contract
+ *                  v1.8, Sprint 10 pin G), one entry per NOTIFICATION_
+ *                  CATEGORIES id from data/parent.js (bundled, never
+ *                  retyped), each `{ email: true, sms: false }`. Every other
+ *                  seeded `users` doc gets `notificationPrefs: null`.
+ *   sessions also gain `coachNote` (contract v1.8, Sprint 10 pin H): null on
+ *                  every session except one PAST attended training block
+ *                  (`2026-11-09-2`), which gets a real note.
  *
  * Two hard guarantees:
  *   1. NEVER touches production. Writes require FIRESTORE_EMULATOR_HOST, and the
@@ -137,6 +164,10 @@ function loadPortalData() {
       `export { buildSeason, SEASON_BOUNDS } from '${fwd(path.join(dataDir, 'season.js'))}';`,
       `export { GOLF_PACKAGES, DROP_IN, FITNESS_PACKAGES, ELITE_TIERS, poolFor } from '${fwd(path.join(dataDir, 'packages.js'))}';`,
       `export { HOUSEHOLD, COACH } from '${fwd(path.join(dataDir, 'seed.js'))}';`,
+      // contract v1.8, Sprint 10 pin G — the notification-category catalogue
+      // the NotificationPreferences screen renders; bundled like everything
+      // else here rather than retyped, so a category add/remove can't drift.
+      `export { NOTIFICATION_CATEGORIES } from '${fwd(path.join(dataDir, 'parent.js'))}';`,
     ].join('\n')
   );
 
@@ -274,6 +305,7 @@ function addSpecialistSessions(sessions, runDate = new Date()) {
         overflow: false,
         status: 'scheduled',
         gcalEventId: null, // hand-seeded, never a synced-from-calendar doc
+        coachNote: null, // contract v1.8, Sprint 10 pin H
       });
       slotIds.push({ id, type });
     });
@@ -287,7 +319,18 @@ function addSpecialistSessions(sessions, runDate = new Date()) {
 // ---------------------------------------------------------------------------
 
 function buildDocs(portal) {
-  const { buildSeason, SEASON_BOUNDS, GOLF_PACKAGES, DROP_IN, FITNESS_PACKAGES, ELITE_TIERS, HOUSEHOLD, COACH, poolFor } = portal;
+  const {
+    buildSeason,
+    SEASON_BOUNDS,
+    GOLF_PACKAGES,
+    DROP_IN,
+    FITNESS_PACKAGES,
+    ELITE_TIERS,
+    HOUSEHOLD,
+    COACH,
+    poolFor,
+    NOTIFICATION_CATEGORIES,
+  } = portal;
 
   // packages — price is stripped (no dollar amounts in seed data, policy) and
   // id becomes the doc id rather than a duplicated field.
@@ -314,6 +357,7 @@ function buildDocs(portal) {
       label: fields.label ?? null,
       special: !!fields.special,
       overflow: !!fields.overflow,
+      coachNote: null, // contract v1.8, Sprint 10 pin H — set on one session below
     });
   }
 
@@ -440,6 +484,26 @@ function buildDocs(portal) {
       createdAt: bookingCreatedAt,
     });
     session.booked += 1; // same write the real booking transaction makes
+  }
+
+  // coachNote (contract v1.8, Sprint 10 pin H) — a real note on ONE PAST
+  // attended training session, so the roster's "Add a session note" editor
+  // has something real to pre-fill and edit instead of always starting
+  // blank. 2026-11-09-2 is already jordan's second `attended` training
+  // booking above (WHITFIELD_BOOKINGS) — reusing it here keeps the two demo
+  // facts (attendance + note) about the same real session, not two
+  // unrelated ones.
+  {
+    const notedSession = sessions.get('2026-11-09-2');
+    if (!notedSession) {
+      throw new Error(
+        "Seed coachNote references sessions/2026-11-09-2, which buildSeason() did not generate " +
+          '(the season config in season.js changed under this seed). Update the coachNote target ' +
+          'in scripts/seed-firestore.mjs to reference a real generated PAST training session id.'
+      );
+    }
+    notedSession.coachNote =
+      'Takeaway tempo was noticeably steadier by the back half of reps — keep an eye on grip pressure creeping up under fatigue next block.';
   }
 
   // ONE pre-booked specialist booking for jordan (contract v1.7, TEAM.md
@@ -571,6 +635,68 @@ function buildDocs(portal) {
     });
   }
 
+  // athletes/jordan/diagnostics (contract v1.8, Sprint 10 pin C) — two
+  // captures keyed by the same DIAGNOSTIC_SECTIONS field ids the Diagnostic
+  // Capture screen renders (read straight off seed.js, enumerated in
+  // DATA-MODEL.md so the key list can't drift from what this script writes):
+  //   published-1 — the older, COMPLETE capture: every one of the 13 field
+  //     ids across all four sections has a value, status 'published', so the
+  //     parent/athlete PUBLISHED-only read and the AthleteDetail "Progress
+  //     summary" replacement (pin C) both have something real to render.
+  //   draft-1 — the newer, IN-PROGRESS capture: only the launch monitor's
+  //     first two fields are filled in, status 'draft' — a parent/athlete
+  //     read must never see this one; only staff/coach/specialist reads do.
+  // Both capturedBy coach-luke, jordan's assigned coach.
+  const diagCapturedAtPublished = new Date();
+  diagCapturedAtPublished.setDate(diagCapturedAtPublished.getDate() - 30);
+  diagCapturedAtPublished.setHours(16, 0, 0, 0);
+  const diagCapturedAtDraft = new Date();
+  diagCapturedAtDraft.setDate(diagCapturedAtDraft.getDate() - 2);
+  diagCapturedAtDraft.setHours(16, 30, 0, 0);
+  const jordanDiagnostics = new Map([
+    [
+      'published-1',
+      {
+        athleteId: 'jordan',
+        capturedBy: coachUid,
+        capturedAt: diagCapturedAtPublished,
+        updatedAt: diagCapturedAtPublished,
+        status: 'published',
+        // Every DIAGNOSTIC_SECTIONS field id (13, across launch/mobility/
+        // shortgame/putting) — see DATA-MODEL.md for the enumerated list.
+        values: {
+          clubhead: 88,
+          ball: 118,
+          smash: 1.34,
+          carry7i: 145,
+          hip: 42,
+          shoulder: 85,
+          balance: 22,
+          d30: 6,
+          d50: 9,
+          d70: 13,
+          p3: 9,
+          p6: 6,
+          p10: 55,
+        },
+        notes: 'Full capture, all four sections — clean session, no equipment issues.',
+      },
+    ],
+    [
+      'draft-1',
+      {
+        athleteId: 'jordan',
+        capturedBy: coachUid,
+        capturedAt: diagCapturedAtDraft,
+        updatedAt: diagCapturedAtDraft,
+        status: 'draft',
+        // Only a couple of fields — an in-progress capture, on purpose.
+        values: { clubhead: 90, ball: 121 },
+        notes: null,
+      },
+    ],
+  ]);
+
   // contractLogs — Jordan's practice history for the last ~2 weeks (contract
   // v1.3, TEAM.md Sprint 5 pins): variable minutes, some at/above the
   // 45-min tier and some below, plus a couple of skipped days (no doc at
@@ -619,17 +745,98 @@ function buildDocs(portal) {
   // in production). The 'mental' QA account IS Yannick; 'phil' is the new
   // QA account for Phil — window.__rypTestAuth.signInAs('phil') drives his
   // My Sessions view. Neither is ever an athlete's assigned golf coach.
+  // notificationPrefs (contract v1.8, Sprint 10 pin G) — parent-dana gets a
+  // real map, one entry per NOTIFICATION_CATEGORIES id (bundled from
+  // data/parent.js above, never retyped — includes the locked 'billing'
+  // category too, since the map stores a preference per category the screen
+  // renders regardless of which toggles the UI lets a parent actually flip),
+  // each `{ email: true, sms: false }`. Every other seeded users doc below
+  // gets `notificationPrefs: null` — the field exists, nothing else has
+  // opted in yet.
+  const danaNotificationPrefs = Object.fromEntries(
+    NOTIFICATION_CATEGORIES.map((cat) => [cat.id, { email: true, sms: false }])
+  );
+
   const users = new Map([
-    ['parent-dana', { role: 'parent', householdId, athleteId: null, staff: false, specialistId: null, displayName: 'Dana', email: 'dana@email.com' }],
-    ['athlete-jordan', { role: 'athlete', athleteId: 'jordan', householdId, staff: false, specialistId: null, displayName: 'Jordan Whitfield', email: null }],
-    [coachUid, { role: 'coach', athleteId: null, householdId: null, staff: true, specialistId: null, displayName: COACH.name, email: null }],
-    ['owner', { role: 'owner', athleteId: null, householdId: null, staff: true, specialistId: null, displayName: null, email: null }],
-    ['mental', { role: 'mental', athleteId: null, householdId: null, staff: true, specialistId: 'mental', displayName: 'Yannick', email: null }],
-    ['ops', { role: 'ops', athleteId: null, householdId: null, staff: true, specialistId: null, displayName: 'Ops', email: null }],
-    ['phil', { role: 'coach', athleteId: null, householdId: null, staff: true, specialistId: 'phil', displayName: 'Phil', email: null }],
+    ['parent-dana', { role: 'parent', householdId, athleteId: null, staff: false, specialistId: null, displayName: 'Dana', email: 'dana@email.com', notificationPrefs: danaNotificationPrefs }],
+    ['athlete-jordan', { role: 'athlete', athleteId: 'jordan', householdId, staff: false, specialistId: null, displayName: 'Jordan Whitfield', email: null, notificationPrefs: null }],
+    [coachUid, { role: 'coach', athleteId: null, householdId: null, staff: true, specialistId: null, displayName: COACH.name, email: null, notificationPrefs: null }],
+    ['owner', { role: 'owner', athleteId: null, householdId: null, staff: true, specialistId: null, displayName: null, email: null, notificationPrefs: null }],
+    ['mental', { role: 'mental', athleteId: null, householdId: null, staff: true, specialistId: 'mental', displayName: 'Yannick', email: null, notificationPrefs: null }],
+    ['ops', { role: 'ops', athleteId: null, householdId: null, staff: true, specialistId: null, displayName: 'Ops', email: null, notificationPrefs: null }],
+    ['phil', { role: 'coach', athleteId: null, householdId: null, staff: true, specialistId: 'phil', displayName: 'Phil', email: null, notificationPrefs: null }],
   ]);
 
-  return { packages, sessions, households, athletes, users, bookings, contractLogs, tournamentResults };
+  // enrollmentRequests (contract v1.8, Sprint 10 pin A) — ONE pending
+  // request, keyed by a NEW, unprovisioned QA uid: 'parent-new'. The point is
+  // that users/parent-new does NOT exist (see the users map above — it is
+  // deliberately absent, never added), so NotProvisioned's "start
+  // enrollment" / "under review" states have a real not-yet-a-family account
+  // to exercise, the same way parent-dana exercises the already-provisioned
+  // path. Two athletes: one arrives with a dob and a chosen contract tier,
+  // one arrives with neither (contract intake, pin B, is what fills that in
+  // after approval) — both still carry a packageId, since a family picks a
+  // package during registration regardless of whether the tier is decided.
+  // All three consents true (a family that got as far as submitting checked
+  // every box). guardian/athlete names are invented demo-family data, same
+  // as Whitfield/MackBee/Eisele elsewhere in this seed — never a real family.
+  const enrollmentCreatedAt = new Date();
+  const enrollmentRequests = new Map([
+    [
+      'parent-new',
+      {
+        guardian: { name: 'Priya Contreras', email: 'priya.contreras@example.com', phone: null },
+        athletes: [
+          { name: 'Mateo Contreras', dob: '2016-02-20', packageId: 'g-4-2', contractMinutes: 20 },
+          { name: 'Sofia Contreras', dob: null, packageId: 'g-4-2', contractMinutes: null },
+        ],
+        consents: { dataCollection: true, videoCapture: true, mediaRelease: true },
+        status: 'pending',
+        declineReason: null,
+        createdAt: enrollmentCreatedAt,
+        updatedAt: enrollmentCreatedAt,
+        reviewedBy: null,
+        reviewedAt: null,
+      },
+    ],
+  ]);
+
+  // staffInvites (contract v1.8, Sprint 10 pin E) — ONE pending invite at a
+  // clearly-fake address (invent nothing real, per policy — this is never a
+  // real hire's email). provision-family.mjs (production) is what consumes
+  // these: looks up the auth uid by email, writes the users doc, and marks
+  // the invite 'provisioned' + provisionedUid. The emulator seed leaves it
+  // 'pending' — there is no auth account behind invite-test@example.com for
+  // anything in this worktree to resolve it against.
+  const staffInviteCreatedAt = new Date();
+  const staffInvites = new Map([
+    [
+      'invite-1',
+      {
+        email: 'invite-test@example.com',
+        role: 'coach',
+        displayName: 'New Coach',
+        specialistId: null,
+        status: 'pending',
+        createdBy: 'owner',
+        createdAt: staffInviteCreatedAt,
+      },
+    ],
+  ]);
+
+  return {
+    packages,
+    sessions,
+    households,
+    athletes,
+    users,
+    bookings,
+    contractLogs,
+    tournamentResults,
+    enrollmentRequests,
+    'athletes/jordan/diagnostics': jordanDiagnostics,
+    staffInvites,
+  };
 }
 
 // ---------------------------------------------------------------------------
@@ -757,6 +964,43 @@ async function main() {
         ` name=${doc.name} createdBy=${doc.createdBy}` +
         ` -> derived position (within sessionId+bracket)=${derivedPositions.get(id)}`
     );
+  }
+
+  console.log('\nenrollmentRequests (contract v1.8):');
+  for (const [id, doc] of collections.enrollmentRequests) {
+    console.log(
+      `  enrollmentRequests/${id}: status=${doc.status} guardian=${doc.guardian.email}` +
+        ` athletes=${doc.athletes.length} (users/${id} exists=${collections.users.has(id)})`
+    );
+    doc.athletes.forEach((a, i) =>
+      console.log(`    athletes[${i}]: name=${a.name} dob=${a.dob} packageId=${a.packageId} contractMinutes=${a.contractMinutes}`)
+    );
+  }
+
+  console.log('\nathletes/jordan/diagnostics (contract v1.8):');
+  for (const [id, doc] of collections['athletes/jordan/diagnostics']) {
+    console.log(
+      `  athletes/jordan/diagnostics/${id}: status=${doc.status} capturedBy=${doc.capturedBy}` +
+        ` fields=${Object.keys(doc.values).length}/13 notes=${JSON.stringify(doc.notes)}`
+    );
+  }
+
+  console.log('\nstaffInvites (contract v1.8):');
+  for (const [id, doc] of collections.staffInvites) {
+    console.log(`  staffInvites/${id}: email=${doc.email} role=${doc.role} specialistId=${doc.specialistId} status=${doc.status}`);
+  }
+
+  console.log('\nnotificationPrefs (contract v1.8):');
+  for (const [id, doc] of collections.users) {
+    console.log(
+      `  users/${id}: notificationPrefs=${doc.notificationPrefs ? Object.keys(doc.notificationPrefs).join(',') : 'null'}`
+    );
+  }
+
+  console.log('\ncoachNote (contract v1.8):');
+  {
+    const notedSession = collections.sessions.get('2026-11-09-2');
+    console.log(`  sessions/2026-11-09-2: coachNote=${JSON.stringify(notedSession.coachNote)}`);
   }
 
   if (DRY_RUN) {

@@ -27,6 +27,20 @@
  *                  real birthday; the owner supplies real dobs later and
  *                  they get filled in here at that point.
  *   users        — one doc per FAMILY account below, keyed by auth uid.
+ *   staffInvites — (contract v1.8, Sprint 10 pin E) CONSUMED, not written by
+ *                  the script's own data: reads the pending docs the live
+ *                  Staff & Roles screen created, resolves each `email` to an
+ *                  auth uid the same way FAMILY/STAFF accounts are resolved
+ *                  below, writes the resulting `users/{uid}` doc
+ *                  ({ role, athleteId: null, householdId: null, staff: true,
+ *                  specialistId, displayName, email }), and marks the invite
+ *                  `status: 'provisioned'` + `provisionedUid`. The STAFF
+ *                  array below stays the seed of record for Yannick/Phil —
+ *                  this is a separate, parallel path for invites created
+ *                  through the app, not a replacement for it. An invite
+ *                  whose email has no auth record yet prints the identical
+ *                  "NO AUTH RECORD" line the FAMILY/STAFF accounts do, and is
+ *                  left `pending` for the next run.
  *
  * Auth uids are resolved from emails via the Identity Toolkit admin API, so
  * each account must have signed in at /portal/signin at least once (that
@@ -206,6 +220,52 @@ function fsValue(v) {
 }
 const fsFields = (obj) => Object.fromEntries(Object.entries(obj).map(([k, v]) => [k, fsValue(v)]));
 
+// Decode — the reverse of fsValue/fsFields, needed only for staffInvites
+// consumption (contract v1.8, Sprint 10 pin E): this script now READS a
+// production collection, not just writes to one.
+function parseFsValue(v) {
+  if (!v || v.nullValue !== undefined) return null;
+  if (v.booleanValue !== undefined) return v.booleanValue;
+  if (v.integerValue !== undefined) return Number(v.integerValue);
+  if (v.doubleValue !== undefined) return v.doubleValue;
+  if (v.stringValue !== undefined) return v.stringValue;
+  if (v.timestampValue !== undefined) return v.timestampValue;
+  if (v.arrayValue !== undefined) return (v.arrayValue.values || []).map(parseFsValue);
+  if (v.mapValue !== undefined) return parseFsFields(v.mapValue.fields || {});
+  return null;
+}
+const parseFsFields = (fields) =>
+  Object.fromEntries(Object.entries(fields).map(([k, v]) => [k, parseFsValue(v)]));
+
+/**
+ * Lists every document in a top-level production Firestore collection,
+ * decoded to plain JS objects keyed by doc id. A read, same IAM principal as
+ * every write in this script — safe under --dry-run (read-only by design).
+ * Paginates via pageToken; staffInvites will never realistically need a
+ * second page, but the loop costs nothing and is correct if it ever does.
+ */
+async function fetchCollection(token, collectionPath) {
+  const docs = new Map();
+  let pageToken;
+  do {
+    const url = new URL(
+      `https://firestore.googleapis.com/v1/projects/${PROJECT_ID}/databases/(default)/documents/${collectionPath}`
+    );
+    if (pageToken) url.searchParams.set('pageToken', pageToken);
+    const res = await fetch(url, { headers: { authorization: `Bearer ${token}` } });
+    if (!res.ok) {
+      console.error(`Reading ${collectionPath} failed (${res.status}): ${await res.text()}`);
+      process.exit(1);
+    }
+    const body = await res.json();
+    for (const doc of body.documents || []) {
+      docs.set(doc.name.split('/').pop(), parseFsFields(doc.fields || {}));
+    }
+    pageToken = body.nextPageToken;
+  } while (pageToken);
+  return docs;
+}
+
 async function commit(token, writes) {
   const res = await fetch(
     `https://firestore.googleapis.com/v1/projects/${PROJECT_ID}/databases/(default)/documents:commit`,
@@ -253,6 +313,49 @@ async function main() {
       `  ${m.email} -> NO AUTH RECORD (${m.role}) — create it in Firebase console (Authentication > Add user) or sign in once, then re-run.`
     );
 
+  // ---------------------------------------------------------------------
+  // staffInvites consumption (contract v1.8, Sprint 10 pin E). Reads the
+  // pending docs the live Staff & Roles screen created, resolves each
+  // `email` to an auth uid the same way the FAMILY/STAFF accounts above
+  // are resolved, and queues a `users/{uid}` write + an invite update
+  // (status -> 'provisioned', provisionedUid set). The STAFF array above
+  // stays the seed of record for Yannick/Phil — this is a separate,
+  // parallel path, not a replacement for it. A read, same as the uid
+  // lookups above: safe under --dry-run.
+  // ---------------------------------------------------------------------
+  console.log('\nStaff invites (contract v1.8):');
+  const staffInvites = await fetchCollection(token, 'staffInvites');
+  const pendingInvites = [...staffInvites].filter(([, doc]) => doc.status === 'pending');
+  const inviteUidByEmail = pendingInvites.length
+    ? await lookupUids(token, pendingInvites.map(([, doc]) => doc.email))
+    : new Map();
+  const inviteDocs = []; // [collection, id, doc] — same shape as `docs` below
+  for (const [inviteId, invite] of pendingInvites) {
+    const uid = inviteUidByEmail.get(invite.email.toLowerCase()) ?? null;
+    if (!uid) {
+      console.log(
+        `  ${invite.email} -> NO AUTH RECORD (${invite.role}) — create it in Firebase console (Authentication > Add user) or sign in once, then re-run.`
+      );
+      continue;
+    }
+    console.log(`  ${invite.email} -> uid ${uid} (${invite.role}, specialist '${invite.specialistId}') — provisioning`);
+    inviteDocs.push([
+      'users',
+      uid,
+      {
+        role: invite.role,
+        athleteId: null,
+        householdId: null,
+        staff: true,
+        specialistId: invite.specialistId ?? null,
+        displayName: invite.displayName,
+        email: invite.email,
+      },
+    ]);
+    inviteDocs.push(['staffInvites', inviteId, { ...invite, status: 'provisioned', provisionedUid: uid }]);
+  }
+  if (pendingInvites.length === 0) console.log('  none pending.');
+
   // One academy GOLF coach for now: every test athlete rides the same coach
   // uid so rosters and attendance have someone to answer to. Specialist
   // coaches (Phil) are excluded — a specialist link never makes someone an
@@ -291,8 +394,12 @@ async function main() {
   }
   for (const m of found) docs.push(['users', m.uid, userDoc(m.family, m)]);
 
+  const provisionedInviteCount = inviteDocs.filter(([col]) => col === 'staffInvites').length;
+  for (const entry of inviteDocs) docs.push(entry);
+
   console.log(
-    `\nPlan: ${docs.length} doc(s) — ${packages.size} packages, ${FAMILIES.length} households, ${athleteCount} athletes, ${found.length} users`
+    `\nPlan: ${docs.length} doc(s) — ${packages.size} packages, ${FAMILIES.length} households, ` +
+      `${athleteCount} athletes, ${found.length} users, ${provisionedInviteCount} staffInvites provisioned`
   );
   for (const [col, id, doc] of docs) {
     if (col !== 'packages') console.log(`  ${col}/${id}: ${JSON.stringify(doc)}`);
