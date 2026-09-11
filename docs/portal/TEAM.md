@@ -726,3 +726,209 @@ pairs naturally with the membership/permissions surface already queued.
 Still open from the db lane (pre-existing, deferred): generator-seeded
 sessions never write status/gcalEventId though DATA-MODEL documents both
 since v1.2 — emulator-only inconsistency, follow-up candidate.
+
+## Sprint 10 pins — "make it real": intake paths + live staff surfaces (2026-09-11)
+
+Origin: the 2026-09-11 three-agent surface scan (browser sweep + member
+code scan + staff code scan). Owner's ruling on the burn-down: BE
+INTENTIONAL — approach every finding from the larger lens of the missing
+capability, not the symptom. Example given: the Commitment Contract crash
+for a no-tier athlete isn't a null guard, it's that there is NO contract
+intake. This pin is organized by capability accordingly. Already fixed
+before this pin: the group-booking crash (specialist slots leaking into
+the two-pool flow) and the next-session Type mislabel.
+
+Root diagnosis the scan surfaced: the member side got its live wiring
+across Sprints 5-9; the staff side and every INTAKE path (enrollment,
+contract tier, diagnostics, staff invites, notification prefs) were
+scaffolded against seed data and never wired. Sprint 10 closes that.
+
+Explicitly PARKED (not built, made honest instead): the Newsletter
+composer (invented scaffold; route leaves staff nav, screen stays in the
+harness); billing-failure UI on the parent dashboard (billing is parked —
+the PaymentBanner never renders in live mode); Practice DNA stays retired
+(copy stops promising it). The membership/permissions surface and the
+family-grouped Reservations view move to Sprint 11.
+
+Data contract v1.8 (db lane documents; routing implements rules):
+
+A. ENROLLMENT — self-serve with owner approval. A new family signs in
+   (Google or email — auth already exists), is unprovisioned, and is
+   routed to /portal/register instead of a dead end.
+   - enrollmentRequests/{uid} (uid = the signed-in guardian's auth uid):
+     { guardian: { name, email, phone }, athletes: [{ name, dob (string
+     YYYY-MM-DD | null), packageId, contractMinutes (20|45|95|null) }],
+     consents: { dataCollection, videoCapture, mediaRelease } (booleans),
+     status: 'pending'|'approved'|'declined', declineReason (string|null),
+     createdAt, updatedAt, reviewedBy (uid|null), reviewedAt }.
+     Rules: create/update by request.auth.uid == uid ONLY while status is
+     'pending' (a submitter can edit their pending request, never flip
+     status); read by own uid + ops/owner; ops/owner may update status/
+     declineReason/reviewedBy/reviewedAt only.
+   - APPROVAL (owner/ops client, one batched write): households/{autoId}
+     from guardian; athletes/{autoId} per athlete (name, dob, packageId,
+     contractMinutes, householdId, coachId: null); users/{uid} for the
+     guardian { role:'parent', householdId, athleteId:null, staff:false,
+     specialistId:null, displayName, email }; request status ->
+     'approved'. Rules gain: athletes create by ops/owner; users create/
+     update by ops/owner for ANY uid (never self-role change by non-owner
+     — self-write stays denied). Kids' own logins remain a later
+     provisioning step (parent-managed is the default, Sprint 7).
+   - NotProvisioned shows the request's state: none -> "start
+     enrollment"; pending -> "under review" with what was submitted;
+     declined -> the reason + "edit and resubmit" (sets status back to
+     pending).
+
+B. CONTRACT INTAKE — athletes.contractMinutes becomes settable by the
+   athlete's own user OR the household parent: int in [20, 45, 95] or
+   null; rules allow update of ONLY that field by those two callers
+   (diff hasOnly(['contractMinutes'])). Hook: useContract gains
+   setTier(minutes). Screens: the existing NoContract tier picker's CTA
+   ("Start the N min contract") is wired (athlete); AthleteDetail (parent)
+   gets a "Start a contract" tier picker card for a kid with no tier;
+   CommitmentContract renders NoContract (never crashes) whenever
+   data.tierMinutes is null in live mode. Registration captures an
+   initial tier per athlete (nullable).
+
+C. DIAGNOSTICS PERSISTENCE — athletes/{athleteId}/diagnostics/{captureId}
+   (auto id): { athleteId, capturedBy (uid), capturedAt, updatedAt,
+   status: 'draft'|'published', values: { <fieldId>: number|string|null
+   } keyed by the existing DIAGNOSTIC_SECTIONS field ids (db lane reads
+   data/seed.js to enumerate them and documents the key list), notes
+   (string|null) }. Rules: create/update by the assigned coach
+   (athleteData(athleteId).coachId == uid), any specialist
+   (me().get('specialistId', null) != null), mental/ops/owner; read: the
+   athlete's own user and the household parent see PUBLISHED only
+   (resource.data.status == 'published'), staff see all. Plus a
+   collection-group read for staff so the admin "no diagnostic yet" list
+   is one query: match /{path=**}/diagnostics/{id} allow read for
+   coach/mental/ops/owner/specialists. Hooks: useDiagnostic(athleteId)
+   live -> { data: { latest (published|null), draft (draft|null),
+   sections }, saveDraft(values, notes), publish(values, notes) } —
+   saveDraft upserts the athlete's single open draft, publish flips it to
+   published (a second publish creates a new capture; history is the
+   collection). DiagnosticCapture wires both footer buttons with a shared
+   Saved toast; AthleteDetail's "Progress summary" and "Reflection
+   summaries" placeholders (the scan found developer commentary shipped
+   to parents) are replaced by the latest PUBLISHED capture's values (or
+   an honest "no capture yet"); the athlete home "Start here" card reads
+   the same state.
+
+D. LIVE ADMIN — useAdminDashboard gets a live source built from existing
+   collections, no new store: enrolled athletes (athletes count),
+   enrollment by package (group athletes.packageId), block fill this week
+   (sessions in the current week: sum booked / sum capacity, group type
+   only), and "Who needs a call" derived: (1) pending enrollment requests
+   (count, links to the queue), (2) no-shows this month — bookings where
+   status == 'noshow' and date >= monthStart (NEW composite index bookings
+   (status ASC, date ASC), db lane adds it to firestore.indexes.json),
+   grouped by athleteId with names via the per-id join, (3) contract
+   behind — ONE contractLogs range query (date >= monthStart) grouped by
+   athleteId, compared to each athlete's tier over the month's contract
+   days (reuse the existing month derivation; db lane confirms the query
+   is index-free), (4) athletes with no published diagnostic (the
+   collection-group read minus athletes). Every card TAPS to somewhere
+   real: athlete detail (route already exists for staff), the enrollment
+   queue (new Admin section), the roster. Header reads the real week
+   ("Week of <this Monday's long date>"). Billing card is gone in live
+   mode. Seed mode keeps the existing demo payload untouched.
+   The ENROLLMENT QUEUE lives on the Admin screen as its own section:
+   pending requests with guardian + athletes summary, Approve / Decline
+   (with reason) — approve runs the batched write in A.
+
+E. STAFF & ROLES LIVE — useStaff live: users where staff == true (owner
+   reads all users; ops gets the same list — rules: users read by ops
+   too, reads only). "Add staff" becomes real: staffInvites/{autoId}
+   { email (lowercased), role ('coach'|'mental'|'ops'|'owner'),
+   displayName, specialistId ('phil'|'mental'|null), status:
+   'pending'|'provisioned', createdBy, createdAt } — create by owner
+   only; read owner/ops. The screen lists pending invites under the
+   staff list with an honest "provisions when they first sign in" line.
+   scripts/provision-family.mjs (db lane) consumes pending staffInvites:
+   looks up the auth uid by email, writes the users doc, marks the invite
+   'provisioned' — the STAFF array in the script stays as the seed of
+   record for Yannick/Phil.
+
+F. STAFF NAVIGATION — BottomTabBar gains staff tab sets (frontend lane
+   owns TABS; routing owns the routes they point at): owner -> Admin
+   (/portal/admin) · Sessions (/portal/my-sessions) · Staff
+   (/portal/staff) · Tour; ops -> Admin · Sessions · Tour; mental ->
+   Sessions · Admin · Tour; a coach WITH specialistId (Phil) -> Sessions
+   (/portal/my-sessions) · Roster · Capture; plain coach unchanged.
+   BottomTabBar takes an optional specialistId to pick the Phil variant.
+   Every staff screen renders the bar AND a SignOutButton (the scan found
+   Staff & Roles and the Newsletter with neither). Newsletter leaves
+   every tab set (parked).
+
+G. NOTIFICATION PREFS PERSIST — users.notificationPrefs (map of
+   category -> { email: bool, sms: bool }, shape from the existing
+   screen's categories); rules: a user may update ONLY that field on
+   their own users doc (diff hasOnly(['notificationPrefs'])) — the one
+   self-write the users collection ever allows, and it cannot touch
+   role/household/athlete/specialist links. Hook: useNotificationPrefs
+   gains save(prefs); the Saved toast fires on a real save.
+
+H. SESSION NOTES — sessions.coachNote (string <= 500 | null): rules let
+   the assigned coach / any specialist / mental / ops / owner update ONLY
+   that field (a second field-limited branch beside bookedDiffOk).
+   useSessionAttendance gains setSessionNote(sessionId, note); the
+   roster's "Add a session note" (the scan's third inert-button instance)
+   opens the same inline editor the no-show reason uses.
+
+I. QUICK WINS (frontend lane, with the routing bits noted):
+   - Forgot password: a real link on LiveSignIn calling Firebase
+     sendPasswordResetEmail (routing adds requestPasswordReset(email) to
+     useAuthSession/live.js) with sent/error states.
+   - Vocabulary: every CTA for the group flow says "Book a session"
+     ("Book a slot" on the athlete home goes); session-card names stay
+     ("Training block").
+   - Coach dashboard: header date formatted like every other role; the
+     NoSessions copy's hardcoded "Mon Feb 22, 5:00 PM" derives from the
+     real next session or is dropped. Coach Overview counts subscribe to
+     sessions/bookings invalidation (routing, useCoachDay).
+   - Coach roster rows tap through to AthleteDetail (routing adds coach
+     to the route's roles — rules already scope coach reads to assigned
+     athletes).
+   - Truncation audit: AthleteRow/SessionCard names ellipsize only when
+     genuinely out of room (the scan saw "Jordan Whitfi..." with space
+     to spare).
+   - Keyboard access: password show/hide is a real button; calendar day
+     cells (DayGridCell + ContractCalendar's delegated container) get
+     role/tabIndex/Enter-Space handling.
+   - Practice DNA copy on the athlete home stops naming a screen that
+     does not exist (reads diagnostics state instead, per C).
+   - MediaPlaceholder captions stop inviting taps ("TAP TO RECORD") until
+     capture exists.
+   - SpecialistDay: a pinned "Today" section above the rest; reuse the
+     day strip only if it extracts cleanly — otherwise leave the list.
+   - Shared SavedToast component (the practice-log "no refresh" report
+     did NOT reproduce on a clean server — stale watcher — but toast-less
+     writes were the sweep's top friction item; use it on log, capture,
+     prefs, notes, contract tier).
+
+Ownership:
+- DB lane: DATA-MODEL v1.8 (A-H shapes + the collection-group + index),
+  firestore.indexes.json, seed (a pending enrollmentRequests/parent-new
+  doc — a NEW unprovisioned QA uid; one draft + one older published
+  diagnostic for jordan with values for every section field; one pending
+  staffInvites doc; users.notificationPrefs on parent-dana; a coachNote
+  on one past session; nico keeps contractMinutes null so the intake is
+  exercisable), provision-family.mjs staffInvites consumption.
+- Routing lane: firestore.rules (every branch above, NO substring(),
+  me().get() null-safety on every new field, null-resource read branches
+  where a transaction probes nonexistence), hooks/live.js + hooks/index.js
+  (every hook named above), PortalRoutes (register gating from
+  not-provisioned, staff routes, coach on athlete detail, newsletter
+  route parked), useAuthSession (password reset).
+- Frontend lane: Registration, NotProvisioned, CommitmentContract/
+  NoContract, AthleteDetail, DiagnosticCapture, AdminDashboard (+ queue),
+  StaffRoles, BottomTabBar, Roster (session note), NotificationPreferences,
+  SignIn (forgot password), CoachDashboard copy/date, AthleteDashboard
+  copy, SpecialistDay today section, components (SavedToast,
+  MediaPlaceholder copy, AthleteRow/SessionCard truncation, DayGridCell
+  a11y), StatesHarness.
+
+Sequencing inside each lane (report what is NOT done rather than rush):
+A (enrollment) and C (diagnostics) first — they are the two silent
+data-loss / dead-end paths; then D/E/F (staff real + nav); then B, G, H;
+quick wins last.
