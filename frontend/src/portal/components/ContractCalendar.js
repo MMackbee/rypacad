@@ -55,18 +55,33 @@ export default function ContractCalendar({ start, dayStates = {}, onSelectDay, v
   // Plain event delegation instead of the interaction plugin: every day cell
   // carries data-date, so one listener on the wrapper covers the whole grid
   // and works for any click or tap the platform produces.
-  const handleClick = (e) => {
+  const resolveCell = (e) => {
     const cell = e.target.closest('[data-date]');
-    if (!cell || !onSelectDay) return;
+    if (!cell || !onSelectDay) return null;
     const iso = cell.getAttribute('data-date');
     const { state } = stateFor(new Date(`${iso}T00:00:00`));
-    if (tappable(state)) {
-      onSelectDay({ iso, day: Number(iso.slice(8)), state });
+    return tappable(state) ? { iso, day: Number(iso.slice(8)), state } : null;
+  };
+  const handleClick = (e) => {
+    const day = resolveCell(e);
+    if (day) onSelectDay(day);
+  };
+  // Sprint 10 pin I: keyboard access on the delegated container - the same
+  // Enter/Space convention every other custom tappable control in this
+  // codebase follows. Each tappable cell is made a real focus stop by
+  // dayCellDidMount below (role="button" + tabindex="0"), so a native
+  // keydown on the focused cell bubbles to this one wrapper listener.
+  const handleKeyDown = (e) => {
+    if (e.key !== 'Enter' && e.key !== ' ') return;
+    const day = resolveCell(e);
+    if (day) {
+      e.preventDefault();
+      onSelectDay(day);
     }
   };
 
   return (
-    <div className="ryp-contract-cal" onClick={handleClick}>
+    <div className="ryp-contract-cal" onClick={handleClick} onKeyDown={handleKeyDown}>
       <style>{CALENDAR_CSS}</style>
       <FullCalendar
         plugins={[dayGridPlugin]}
@@ -85,6 +100,16 @@ export default function ContractCalendar({ start, dayStates = {}, onSelectDay, v
           if (tappable(state)) classes.push('ryp-day-tappable');
           if (selected && iso === selected) classes.push('ryp-day-selected');
           return classes;
+        }}
+        dayCellDidMount={(arg) => {
+          const { state } = stateFor(arg.date);
+          if (tappable(state)) {
+            arg.el.setAttribute('role', 'button');
+            arg.el.setAttribute('tabindex', '0');
+          } else {
+            arg.el.removeAttribute('role');
+            arg.el.removeAttribute('tabindex');
+          }
         }}
       />
     </div>
