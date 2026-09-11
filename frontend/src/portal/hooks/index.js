@@ -949,18 +949,21 @@ async function liveSpecialistSlots(specialistId, today) {
 export function useSpecialistSlots(specialistId) {
   const live = isLive();
   const today = todayISO();
-  // Post-write invalidation seam (Sprint 6 pin): a booking (or a cancel)
-  // changes sessions.booked - re-run so open/booked stays correct after a
-  // write made anywhere, mirroring useMonthSessions' own single-collection
-  // subscription above.
+  // Post-write invalidation seam (Sprint 6 pin), both collections per the
+  // Sprint 9 pin: a booking or a cancel always bumps 'bookings' AND
+  // 'sessions' together (createBooking/cancelBooking, live.js) - subscribing
+  // to both here (rather than 'sessions' alone, as useMonthSessions does)
+  // re-runs this hook on either bump, not just the one that happens to fire
+  // second.
   const sessionsGen = useInvalidation('sessions');
+  const bookingsGen = useInvalidation('bookings');
 
   return useSeedResource(
     live ? null : { days: seedSpecialistDays(specialistId, today) },
     live
       ? {
           source: () => liveSpecialistSlots(specialistId, today),
-          deps: ['specialist-slots', specialistId, today, sessionsGen],
+          deps: ['specialist-slots', specialistId, today, sessionsGen, bookingsGen],
         }
       : undefined
   );
