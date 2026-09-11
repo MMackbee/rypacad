@@ -292,7 +292,7 @@ function QuickActions({ onLog, onBook }) {
         height={78}
         style={{ borderRadius: radius.card, font: `600 14px ${font.body}`, boxShadow: 'none' }}
       >
-        Book a slot
+        Book a session
       </Button>
     </div>
   );
@@ -323,6 +323,19 @@ function CoachingAction({ onOpen }) {
   );
 }
 
+/**
+ * Sprint 10 pin C/I: this card's copy named "Practice DNA" as a destination
+ * - Practice DNA is explicitly PARKED this sprint (TEAM.md: "stays retired
+ * (copy stops promising it)", its tab left the bottom nav back in Sprint 7).
+ * The card now describes the diagnostic itself - your baseline capture,
+ * read back on Athlete Detail once a coach publishes it (see AthleteDetail's
+ * new "Diagnostic capture" card) - rather than naming a screen nobody can
+ * reach. This card's gate is still the `variant === 'new'` demo/seed signal
+ * (a brand-new athlete has nothing captured by definition); a real live
+ * gate keyed off the athlete's own diagnostic status would need
+ * useAthleteDashboard to expose one, which it does not yet - flagged for
+ * routing in the sprint report rather than wired against a guess.
+ */
 function StartHere({ onBook }) {
   return (
     <Card tone="yellow" large>
@@ -331,8 +344,8 @@ function StartHere({ onBook }) {
         Book your Diagnostic
       </ScreenTitle>
       <Body size={12} style={{ marginTop: 8 }}>
-        Everything starts with objective data. Your baseline capture sets the Practice DNA you’ll be
-        measured against — your own numbers, not a model swing.
+        Everything starts with objective data. Your baseline capture sets your own numbers as the
+        benchmark you're measured against — never a model swing.
       </Body>
       <Button height={46} onClick={onBook} style={{ marginTop: 14 }}>
         Find a time

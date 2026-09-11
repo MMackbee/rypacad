@@ -1,13 +1,50 @@
 import React, { useState } from 'react';
 import { color, font, radius } from '../tokens';
+import * as hooks from '../hooks';
 import AthleteRow from '../components/AthleteRow';
 import Button from '../components/Button';
 import MediaPlaceholder, { Avatar } from '../components/MediaPlaceholder';
 import NumericField from '../components/NumericField';
 import PhoneFrame from '../components/PhoneFrame';
 import ProgressMeter from '../components/ProgressMeter';
+import SavedToast from '../components/SavedToast';
 import { BackLink, Body, Card, ScreenTitle, SectionLabel } from '../components/Primitives';
-import { useCoachRoster, useDiagnostic } from '../hooks';
+import { useCoachRoster } from '../hooks';
+
+/**
+ * Sprint 10 pin C (TEAM.md, contract v1.8 §C): useDiagnostic(athleteId) ->
+ * { data: { latest (published|null), draft (draft|null), sections },
+ * saveDraft(values, notes), publish(values, notes) }. This worktree's
+ * useDiagnostic() still takes NO argument and returns the Sprint-1 shape
+ * { athlete, sections } (confirmed - no `latest`, `draft`, `saveDraft` or
+ * `publish` anywhere in hooks/index.js). The hook EXISTS, unlike a fully
+ * missing export, so it is called normally with the pinned athleteId
+ * argument (which the old implementation simply ignores - no crash, extra
+ * args to a JS function are just dropped) and every new field/action is
+ * defaulted defensively: `latest`/`draft` read undefined -> null (an
+ * honest "no capture yet", never invented), and saveDraft/publish fall
+ * back to a local no-op echo that resolves successfully without
+ * persisting anything. Flagged loudly in the sprint report.
+ */
+function useDiagnosticState(athleteId) {
+  const state = hooks.useDiagnostic(athleteId);
+  return {
+    sections: state.data?.sections ?? [],
+    latest: state.data?.latest ?? null,
+    draft: state.data?.draft ?? null,
+    // Old-shape fallback only - the pinned shape carries no bare `athlete`
+    // field, but the seed/demo data this worktree still returns does.
+    athleteInfo: state.data?.athlete ?? null,
+    loading: state.loading,
+    error: state.error,
+    saveDraft:
+      state.saveDraft ||
+      (async (values, notes) => ({ values, notes, status: 'draft', simulated: true })),
+    publish:
+      state.publish ||
+      (async (values, notes) => ({ values, notes, status: 'published', simulated: true })),
+  };
+}
 
 /**
  * 14 · Diagnostic Capture - coach/staff.
@@ -26,33 +63,105 @@ import { useCoachRoster, useDiagnostic } from '../hooks';
  * Mental-game intake stays counted per the Blueprint - Yannick captures it
  * elsewhere, this screen only reflects it in the module count.
  *
- * @param {'empty'|'uploading'|'partial'|'complete'} variant
+ * Sprint 10 pin C: both footer buttons are wired to a real saveDraft()/
+ * publish() with saving/error state and the shared SavedToast; the "N of M"
+ * progress and the header's save-status label both read the REAL working
+ * values instead of a demo `variant` switch (M itself is the real section
+ * field count + one video slot - never a hardcoded 4); a real camera/upload
+ * pathway still doesn't exist (same honest stub as PracticeDNA's upload
+ * modules), so the video slot only completes via the harness's demo states.
+ *
+ * @param {'empty'|'uploading'|'partial'|'complete'} [variant]  Harness only.
+ * @param {string} [athleteId]  Real caller: which athlete this capture is
+ *   for - threads into useDiagnostic(athleteId).
  */
 const INDOOR_SECTION_IDS = ['launch', 'putting'];
-const TOTAL_MODULES = 4; // swing video + launch + putting + mental intake (elsewhere)
 
-export default function DiagnosticCapture({ variant = 'empty', bare = false, athlete, onCancel }) {
-  const { data } = useDiagnostic();
-  const [values, setValues] = useState({});
-  // Who this capture is FOR comes from the picker (CaptureFlow below) in the
-  // real app; the harness's direct mounts keep the seed athlete.
-  const subject = athlete ?? data?.athlete;
+export default function DiagnosticCapture({ variant, bare = false, athlete, athleteId, onCancel }) {
+  const demo = variant != null;
+  const diag = useDiagnosticState(athleteId);
+  // Who this capture is FOR: the picker (CaptureFlow below) passes a real
+  // athlete; the harness's direct mounts fall back to whatever this
+  // worktree's seed/demo data still carries under the old `athlete` field.
+  const subject = athlete ?? diag.athleteInfo;
 
-  const sections = (data?.sections ?? []).filter((s) => INDOOR_SECTION_IDS.includes(s.id));
-  const uploading = variant === 'uploading';
-  const complete = variant === 'complete';
-  const partial = variant === 'partial';
+  const sections = diag.sections.filter((s) => INDOOR_SECTION_IDS.includes(s.id));
 
-  const completedModules = complete ? TOTAL_MODULES : partial ? 2 : uploading ? 1 : 0;
-
-  const saveStatus = {
-    empty: { label: 'Not saved', tone: color.faintText },
-    uploading: { label: 'Uploading…', tone: color.secondary },
-    partial: { label: 'Draft saved 2 min ago', tone: color.textSecondary },
-    complete: { label: 'All sections complete', tone: color.primary },
-  }[variant];
+  // Seed working state from a real open draft when one exists - never from
+  // `latest` (a published capture is history, read-only, not an editable
+  // draft). Demo states seed a believable snapshot so the four designed
+  // states stay reviewable without a real draft to load from.
+  const demoValues = demo && (variant === 'partial' || variant === 'complete')
+    ? Object.fromEntries(sections.flatMap((s) => s.fields.map((f, i) => [f.id, variant === 'complete' || i === 0 ? '42' : ''])).filter(([, v]) => v !== ''))
+    : {};
+  const [values, setValues] = useState(() => diag.draft?.values ?? demoValues);
+  const [videoAttached] = useState(demo && variant === 'complete');
+  const [uploading] = useState(demo && variant === 'uploading');
+  const [saving, setSaving] = useState(null); // null | 'draft' | 'publish'
+  const [saveError, setSaveError] = useState(null);
+  const [justSaved, setJustSaved] = useState(null); // null | 'draft' | 'publish'
 
   const setValue = (id, v) => setValues((prev) => ({ ...prev, [id]: v }));
+
+  // Real progress: every indoor section's fields, plus one slot for video -
+  // never the old hardcoded TOTAL_MODULES = 4.
+  const totalFields = sections.reduce((n, s) => n + s.fields.length, 0) + 1;
+  const filledFields =
+    sections.reduce(
+      (n, s) => n + s.fields.filter((f) => values[f.id] !== undefined && values[f.id] !== '').length,
+      0
+    ) + (videoAttached ? 1 : 0);
+  const allComplete = totalFields > 0 && filledFields === totalFields;
+
+  const saveStatus = uploading
+    ? { label: 'Uploading…', tone: color.secondary }
+    : saving === 'draft'
+    ? { label: 'Saving…', tone: color.secondary }
+    : saving === 'publish'
+    ? { label: 'Publishing…', tone: color.secondary }
+    : justSaved === 'publish' || diag.latest || allComplete
+    ? { label: 'All sections complete', tone: color.primary }
+    : diag.draft || justSaved === 'draft'
+    ? { label: 'Draft saved', tone: color.textSecondary }
+    : { label: 'Not saved', tone: color.faintText };
+
+  const handleSaveDraft = async () => {
+    setSaving('draft');
+    setSaveError(null);
+    try {
+      await diag.saveDraft(values, null);
+      setJustSaved('draft');
+      // "…and exit" is the button's own label - a brief confirmation, then
+      // the same exit Cancel takes, rather than stranding the coach on a
+      // screen that just told them it's done.
+      setTimeout(() => onCancel && onCancel(), 900);
+    } catch (err) {
+      setSaveError(
+        err && typeof err.message === 'string' && err.message
+          ? err.message
+          : 'The draft could not be saved. Try again.'
+      );
+    } finally {
+      setSaving(null);
+    }
+  };
+
+  const handlePublish = async () => {
+    setSaving('publish');
+    setSaveError(null);
+    try {
+      await diag.publish(values, null);
+      setJustSaved('publish');
+    } catch (err) {
+      setSaveError(
+        err && typeof err.message === 'string' && err.message
+          ? err.message
+          : 'This could not be published. Try again.'
+      );
+    } finally {
+      setSaving(null);
+    }
+  };
 
   return (
     <PhoneFrame
@@ -84,10 +193,7 @@ export default function DiagnosticCapture({ variant = 'empty', bare = false, ath
           </div>
 
           <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginTop: 14 }}>
-            <ProgressMeter
-              value={(completedModules / TOTAL_MODULES) * 100}
-              size="thin"
-            />
+            <ProgressMeter value={totalFields ? (filledFields / totalFields) * 100 : 0} size="thin" />
             <span
               style={{
                 flex: 'none',
@@ -95,7 +201,7 @@ export default function DiagnosticCapture({ variant = 'empty', bare = false, ath
                 color: color.textSecondary,
               }}
             >
-              {completedModules} of {TOTAL_MODULES}
+              {filledFields} of {totalFields}
             </span>
           </div>
         </div>
@@ -107,14 +213,32 @@ export default function DiagnosticCapture({ variant = 'empty', bare = false, ath
             padding: '14px 22px 22px',
           }}
         >
-          {complete ? (
-            <Button height={56}>Publish to Practice DNA</Button>
+          {saveError ? (
+            <Body size={12} tone={color.error} style={{ marginBottom: 10, textAlign: 'center' }}>
+              {saveError}
+            </Body>
+          ) : justSaved && !saveError ? (
+            <SavedToast
+              message={justSaved === 'publish' ? 'Published to Practice DNA' : 'Draft saved'}
+              style={{ marginBottom: 10 }}
+            />
+          ) : null}
+          {allComplete ? (
+            <Button height={56} loading={saving === 'publish'} onClick={handlePublish}>
+              Publish to Practice DNA
+            </Button>
           ) : uploading ? (
             <Button height={56} disabled>
               Waiting on upload
             </Button>
           ) : (
-            <Button variant="outline" height={56} style={{ boxShadow: 'none' }}>
+            <Button
+              variant="outline"
+              height={56}
+              loading={saving === 'draft'}
+              onClick={handleSaveDraft}
+              style={{ boxShadow: 'none' }}
+            >
               Save draft and exit
             </Button>
           )}
@@ -122,7 +246,7 @@ export default function DiagnosticCapture({ variant = 'empty', bare = false, ath
       }
     >
       <div style={{ padding: '0 22px 24px', display: 'flex', flexDirection: 'column', gap: 14 }}>
-        <VideoSection uploading={uploading} complete={complete || partial} />
+        <VideoSection uploading={uploading} attached={videoAttached} />
 
         {sections.map((section) => (
           <Card key={section.id} large>
@@ -150,10 +274,16 @@ export default function DiagnosticCapture({ variant = 'empty', bare = false, ath
   );
 }
 
-function VideoSection({ uploading, complete }) {
-  const caption = complete
+function VideoSection({ uploading, attached }) {
+  // Sprint 10 pin I: no more imperative "TAP TO..." caption - there is no
+  // real capture/upload pathway wired yet (the same honest stub
+  // PracticeDNA's upload modules already use), so the placeholder states
+  // what is true rather than inviting a tap that does nothing.
+  const caption = attached
     ? 'SWING VIDEO — 4 angles attached'
-    : 'TAP TO RECORD OR ATTACH — face-on · down-the-line · overhead · rear';
+    : uploading
+    ? 'SWING VIDEO — uploading'
+    : 'SWING VIDEO — not yet captured';
 
   return (
     <Card large>
@@ -195,7 +325,14 @@ export function CaptureFlow({ bare = false, onCancel }) {
   const [athlete, setAthlete] = useState(null);
 
   if (athlete) {
-    return <DiagnosticCapture bare={bare} athlete={athlete} onCancel={() => setAthlete(null)} />;
+    return (
+      <DiagnosticCapture
+        bare={bare}
+        athlete={athlete}
+        athleteId={athlete.id}
+        onCancel={() => setAthlete(null)}
+      />
+    );
   }
 
   const athletes = roster.data ?? [];

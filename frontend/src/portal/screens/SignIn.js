@@ -52,11 +52,41 @@ export const LANDING_BY_ROLE = {
  * ------------------------------------------------------------------------- */
 
 function LiveSignIn({ bare = false, onStartEnrollment, onSignedIn }) {
-  const { user, provisioned, loading, error, signIn, signInWithEmail } = useAuthSession();
+  const auth = useAuthSession();
+  const { user, provisioned, loading, error, signIn, signInWithEmail } = auth;
+  /**
+   * Sprint 10 pin I: "Forgot password" wired to a real
+   * sendPasswordResetEmail. FALLBACK FLAG: useAuthSession has no
+   * requestPasswordReset(email) export in this worktree yet (confirmed via
+   * grep of hooks/useAuthSession.js) - the routing lane owns adding it to
+   * both useAuthSession and live.js. Defaults to a local echo that resolves
+   * successfully without sending anything, so the sent/error UI is fully
+   * wired and reviewable without a crash until it lands.
+   */
+  const requestPasswordReset = auth.requestPasswordReset || (async () => {});
   const navigate = useNavigate();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
+  const [resetStatus, setResetStatus] = useState(null); // null | 'sending' | 'sent' | error string
+
+  const handleForgotPassword = async () => {
+    if (!email.trim()) {
+      setResetStatus('Enter your email above first.');
+      return;
+    }
+    setResetStatus('sending');
+    try {
+      await requestPasswordReset(email.trim());
+      setResetStatus('sent');
+    } catch (err) {
+      setResetStatus(
+        err && typeof err.message === 'string' && err.message
+          ? err.message
+          : 'The reset email could not be sent. Try again.'
+      );
+    }
+  };
 
   const canSubmit = email.trim() !== '' && password !== '' && !loading;
   const submitEmail = () => {
@@ -108,15 +138,64 @@ function LiveSignIn({ bare = false, onStartEnrollment, onSignedIn }) {
             dimmed={loading}
             trailing={
               password ? (
-                <span
+                // Sprint 10 pin I: a real, keyboard-reachable button - was a
+                // bare <span onClick>, invisible to Tab and Enter/Space.
+                <button
+                  type="button"
                   onClick={() => setShowPassword((v) => !v)}
-                  style={{ font: `500 13px ${font.body}`, color: color.primary, cursor: 'pointer' }}
+                  style={{
+                    background: 'none',
+                    border: 'none',
+                    padding: 0,
+                    font: `500 13px ${font.body}`,
+                    color: color.primary,
+                    cursor: 'pointer',
+                  }}
                 >
                   {showPassword ? 'Hide' : 'Show'}
-                </span>
+                </button>
               ) : null
             }
           />
+
+          {/*
+            Sprint 10 pin I: a real link, not the demo's decorative span -
+            calls the pinned requestPasswordReset(email) and shows a real
+            sent/error state right below it.
+          */}
+          <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
+            <button
+              type="button"
+              onClick={handleForgotPassword}
+              disabled={resetStatus === 'sending'}
+              style={{
+                background: 'none',
+                border: 'none',
+                padding: 0,
+                font: `500 13px ${font.body}`,
+                color: color.primary,
+                cursor: 'pointer',
+              }}
+            >
+              Forgot password
+            </button>
+          </div>
+          {resetStatus ? (
+            <div
+              style={{
+                textAlign: 'right',
+                font: `400 12px ${font.body}`,
+                color: resetStatus === 'sent' ? color.primary : resetStatus === 'sending' ? color.textTertiary : color.error,
+                marginTop: -6,
+              }}
+            >
+              {resetStatus === 'sent'
+                ? `Reset email sent to ${email.trim()}.`
+                : resetStatus === 'sending'
+                ? 'Sending…'
+                : resetStatus}
+            </div>
+          ) : null}
         </div>
 
         {error ? (

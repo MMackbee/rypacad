@@ -60,6 +60,21 @@ export default function DayGridCell({ state = 'open', day, size, onClick }) {
   return (
     <div
       onClick={onClick}
+      // Sprint 10 pin I: keyboard access - a tappable cell is a real focus
+      // stop with Enter/Space triggering the same action a tap does. A
+      // non-interactive cell (no onClick) stays out of the tab order.
+      role={onClick ? 'button' : undefined}
+      tabIndex={onClick ? 0 : undefined}
+      onKeyDown={
+        onClick
+          ? (e) => {
+              if (e.key === 'Enter' || e.key === ' ') {
+                e.preventDefault();
+                onClick();
+              }
+            }
+          : undefined
+      }
       title={state}
       style={{
         ...(size ? { width: size, height: size } : { aspectRatio: '1' }),

@@ -286,7 +286,7 @@ function UploadBody({ module }) {
     <div style={{ marginTop: 13 }}>
       <MediaPlaceholder
         height={72}
-        caption={`DROP A FILE OR TAP TO CHOOSE — ${module.name.toUpperCase()} · upload isn't wired yet`}
+        caption={`${module.name.toUpperCase()} — upload isn't wired yet`}
       />
     </div>
   );

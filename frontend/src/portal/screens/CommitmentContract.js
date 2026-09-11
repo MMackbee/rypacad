@@ -7,6 +7,7 @@ import PhoneFrame from '../components/PhoneFrame';
 import ContractCalendar from '../components/ContractCalendar';
 import { DayGridLegend } from '../components/DayGridCell';
 import { Body, Card, ErrorNotice, ScreenTitle, Tick } from '../components/Primitives';
+import SavedToast from '../components/SavedToast';
 import SkeletonCard from '../components/Skeleton';
 import { useContract, usePracticeLog } from '../hooks';
 // todayISO is a pure calendar helper, not response data — like poolFor in
@@ -48,7 +49,8 @@ export default function CommitmentContract({
   onLog,
   onLogged,
 }) {
-  const { data, loading, error } = useContract({ variant, practice });
+  const contractHook = useContract({ variant, practice });
+  const { data, loading, error } = contractHook;
   const [sheetDay, setSheetDay] = useState(null);
   // The practice log lives here and nowhere else — component state is the
   // whole record, per the practice-mode invariant (zero Firestore writes).
@@ -63,7 +65,18 @@ export default function CommitmentContract({
 
   const practiceLog = usePracticeLog({ practice });
 
-  if (variant === 'none') return <NoContract bare={bare} data={data} />;
+  /**
+   * Sprint 10 pin B (TEAM.md, contract v1.8 §B): "CommitmentContract renders
+   * NoContract (never crashes) whenever data.tierMinutes is null in live
+   * mode." The demo variant='none' branch already existed for the harness;
+   * a real live athlete with no contractMinutes on file reaches this screen
+   * with the routing wrapper's default variant ('ontrack') and would
+   * otherwise fall through to HeroCard/the grid with tierMinutes undefined.
+   * Checked only once data has actually loaded - a still-loading or errored
+   * fetch must not be misread as "no contract".
+   */
+  const noContract = variant === 'none' || (!loading && !error && data && data.tierMinutes == null);
+  if (noContract) return <NoContract bare={bare} data={data} setTier={contractHook.setTier} />;
 
   // The screen predates the hook's live branch, which made data async — every
   // render below assumed it synchronously; rendering through with data still
@@ -626,8 +639,40 @@ function LogSheet({ contractMinutes, forDate, onClose, onSave }) {
   );
 }
 
-function NoContract({ bare, data }) {
+/**
+ * Sprint 10 pin B (contract v1.8 §B): the tier picker's CTA is wired for
+ * real. FALLBACK FLAG: `useContract` has no `setTier(minutes)` export in
+ * this worktree yet (confirmed via grep of hooks/index.js) - unlike
+ * AthleteDetail's parent-facing card, this IS the signed-in athlete setting
+ * their OWN tier, so the identity resolution useContract already does is
+ * the right one; only the action itself is missing. Defaults to a local
+ * no-op echo (resolves successfully, persists nothing) until routing adds
+ * it - flagged in the sprint report.
+ */
+function NoContract({ bare, data, setTier }) {
   const [selected, setSelected] = useState(null);
+  const [saving, setSaving] = useState(false);
+  const [saved, setSaved] = useState(false);
+  const [error, setError] = useState(null);
+  const commit = setTier || (async (minutes) => ({ contractMinutes: minutes, simulated: true }));
+
+  const handleStart = async () => {
+    if (!selected) return;
+    setSaving(true);
+    setError(null);
+    try {
+      await commit(selected);
+      setSaved(true);
+    } catch (err) {
+      setError(
+        err && typeof err.message === 'string' && err.message
+          ? err.message
+          : 'The contract could not be started. Try again.'
+      );
+    } finally {
+      setSaving(false);
+    }
+  };
 
   return (
     <PhoneFrame
@@ -635,8 +680,23 @@ function NoContract({ bare, data }) {
       footer={
         <>
           <div style={{ borderTop: `1px solid ${color.frameRule}`, padding: '13px 22px 14px' }}>
-            <Button height={56} disabled={!selected} style={{ borderRadius: 10 }}>
-              {selected ? `Start the ${selected} min contract` : 'Select a tier to continue'}
+            {error ? (
+              <Body size={12} tone={color.error} style={{ marginBottom: 10, textAlign: 'center' }}>
+                {error}
+              </Body>
+            ) : null}
+            <Button
+              height={56}
+              disabled={!selected || saved}
+              loading={saving}
+              onClick={handleStart}
+              style={{ borderRadius: 10 }}
+            >
+              {saved
+                ? 'Contract started'
+                : selected
+                ? `Start the ${selected} min contract`
+                : 'Select a tier to continue'}
             </Button>
           </div>
           <BottomTabBar role="athlete" active="contract" />
@@ -645,16 +705,20 @@ function NoContract({ bare, data }) {
     >
       <div style={{ padding: '20px 22px 24px', display: 'flex', flexDirection: 'column', gap: 13 }}>
         <ScreenTitle size={24}>Pick your daily investment</ScreenTitle>
-        <Body size={13}>
-          Five days a week, every week. Complete the month and you go on the Commitment Board.
-        </Body>
+        {saved ? (
+          <SavedToast message={`Contract started — ${selected} min / day`} />
+        ) : (
+          <Body size={13}>
+            Five days a week, every week. Complete the month and you go on the Commitment Board.
+          </Body>
+        )}
 
         {(data?.tiers ?? []).map((tier) => (
           <TierChoice
             key={tier.minutes}
             tier={tier}
             selected={selected === tier.minutes}
-            onSelect={() => setSelected(tier.minutes)}
+            onSelect={() => !saved && setSelected(tier.minutes)}
           />
         ))}
 

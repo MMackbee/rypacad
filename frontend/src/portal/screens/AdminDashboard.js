@@ -1,9 +1,35 @@
 import React, { useState } from 'react';
+import { format, startOfWeek } from 'date-fns';
 import { color, font, radius } from '../tokens';
+import * as hooks from '../hooks';
+import BottomTabBar from '../components/BottomTabBar';
+import Button from '../components/Button';
 import PhoneFrame from '../components/PhoneFrame';
 import StatusBadge from '../components/StatusBadge';
 import { Body, Card, ScreenTitle, SectionLabel, SignOutButton } from '../components/Primitives';
 import { useAdminDashboard } from '../hooks';
+
+/**
+ * Sprint 10 pin D (TEAM.md, contract v1.8): useEnrollmentQueue() does not
+ * exist ANYWHERE in this worktree's hooks/index.js (confirmed by grep) - the
+ * routing lane is building it in a parallel worktree against the pinned
+ * shape: pending enrollmentRequests joined to guardian + athlete summaries,
+ * plus approve(uid)/decline(uid, reason) actions running the batched
+ * approval write from contract v1.8 section A. Namespace-import + inert-
+ * fallback pattern (Roster.js/TourStandings.js/SpecialistBooking.js) - the
+ * hook call stays unconditional (rules of hooks); an empty queue and no-op
+ * actions render honestly rather than crashing until routing's export lands.
+ */
+function useEnrollmentQueueFallback() {
+  return {
+    data: null,
+    loading: false,
+    error: null,
+    approve: async () => {},
+    decline: async () => {},
+  };
+}
+const useEnrollmentQueue = hooks.useEnrollmentQueue || useEnrollmentQueueFallback;
 
 /**
  * 15 · Admin Dashboard (Ops) - Phil's monthly-check-in-call prep surface.
@@ -34,10 +60,31 @@ import { useAdminDashboard } from '../hooks';
  * outstanding-list filter mirrors the hook's own `matches()` predicate
  * exactly (packageIds match, or the row is org-wide with packageIds: null).
  *
+ * Sprint 10 pin D (TEAM.md, contract v1.8): adds the ENROLLMENT QUEUE section
+ * - pending enrollmentRequests with guardian + athletes summary, Approve
+ * (the batched write from contract v1.8 §A) and Decline (reason sheet). The
+ * queue's own outstanding count also earns a row in OUTSTANDING so "who
+ * needs a call" and the queue itself can never disagree about how many are
+ * pending - see EnrollmentQueueRow below. Billing has no card on this screen
+ * already (the pin says it should stay gone in live mode - there never was
+ * one to remove).
+ *
  * @param {'populated'|'filtered'} variant
+ * @param {'owner'|'ops'|'mental'} [role]  Sprint 10 pin F: which staff tab
+ *   set the footer shows - the three roles that land here get different
+ *   sets (owner: Admin/Sessions/Staff/Tour; ops: Admin/Sessions/Tour;
+ *   mental: Sessions/Admin/Tour). Routing knows the signed-in role; this
+ *   defaults to 'owner' (the superset) only for the harness/an un-wired
+ *   caller - see the sprint report.
  * @param {() => void} [onSignOut]  Hidden when not supplied (harness/demo).
  */
-export default function AdminDashboard({ variant = 'populated', bare = false, onSignOut, onOpenAthlete }) {
+export default function AdminDashboard({
+  variant = 'populated',
+  bare = false,
+  role = 'owner',
+  onSignOut,
+  onOpenAthlete,
+}) {
   const { data } = useAdminDashboard();
   const enrollmentRows = data?.enrollment ?? [];
   // All -> every real package row, in the catalogue's own order (4+2, 8+3,
@@ -63,6 +110,13 @@ export default function AdminDashboard({ variant = 'populated', bare = false, on
       : data.metrics
     : null;
 
+  // Real week header (Sprint 10 pin D) - the device's own wall-clock Monday,
+  // via date-fns (never hand-rolled), matching todayISO()'s own "family's
+  // wall-clock day" rule in data/calendar.js.
+  const weekLabel = `Week of ${format(startOfWeek(new Date(), { weekStartsOn: 1 }), 'MMMM d')}`;
+
+  const queue = useEnrollmentQueue();
+
   return (
     <PhoneFrame
       bare={bare}
@@ -71,7 +125,7 @@ export default function AdminDashboard({ variant = 'populated', bare = false, on
           <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
             <div style={{ flex: 1, minWidth: 0 }}>
               <div style={{ font: `400 12px ${font.body}`, color: color.textTertiary }}>
-                Week of Feb 15
+                {weekLabel}
               </div>
               <ScreenTitle size={24} style={{ marginTop: 3 }}>
                 Who needs a call
@@ -86,14 +140,190 @@ export default function AdminDashboard({ variant = 'populated', bare = false, on
           />
         </div>
       }
+      footer={<BottomTabBar role={role} active="admin" />}
     >
       <div style={{ padding: '0 22px 24px', display: 'flex', flexDirection: 'column', gap: 12 }}>
         <OutstandingCard items={outstanding} onOpenAthlete={onOpenAthlete} />
+        <EnrollmentQueueCard state={queue} />
         <MetricGrid metrics={metrics} />
         <EnrollmentCard rows={enrollmentRows} highlight={filtered ? active.id : null} />
         <BlockFillCard bars={data?.blockFill ?? []} filtered={filtered} />
+        {/* Billing card: hidden in live mode per the pin - there was never
+            one on this screen to remove; billing stays parked. */}
       </div>
     </PhoneFrame>
+  );
+}
+
+/**
+ * ENROLLMENT QUEUE (Sprint 10 pin D, contract v1.8 §A). Pending
+ * enrollmentRequests with a guardian + athletes summary, Approve (the
+ * batched households/athletes/users write) and Decline (a reason sheet -
+ * reused inline here rather than a separate route, same "sheet on the same
+ * screen" idiom the no-show ReasonEditor uses in Roster.js). Every action
+ * carries its own saving state and a plain-language error.
+ */
+function EnrollmentQueueCard({ state }) {
+  const [decliningId, setDecliningId] = useState(null);
+  const [reasonDraft, setReasonDraft] = useState('');
+  const [busyId, setBusyId] = useState(null);
+  const [actionError, setActionError] = useState(null);
+
+  const requests = state.data?.requests ?? [];
+
+  const handleApprove = async (req) => {
+    setBusyId(req.uid);
+    setActionError(null);
+    try {
+      await state.approve(req.uid);
+    } catch (err) {
+      setActionError(
+        err && typeof err.message === 'string' && err.message
+          ? err.message
+          : 'The request could not be approved. Try again.'
+      );
+    } finally {
+      setBusyId(null);
+    }
+  };
+
+  const startDecline = (req) => {
+    setDecliningId(req.uid);
+    setReasonDraft('');
+    setActionError(null);
+  };
+
+  const submitDecline = async (req) => {
+    setBusyId(req.uid);
+    setActionError(null);
+    try {
+      await state.decline(req.uid, reasonDraft.trim() || null);
+      setDecliningId(null);
+    } catch (err) {
+      setActionError(
+        err && typeof err.message === 'string' && err.message
+          ? err.message
+          : 'The request could not be declined. Try again.'
+      );
+    } finally {
+      setBusyId(null);
+    }
+  };
+
+  return (
+    <Card large>
+      <SectionLabel style={{ marginBottom: 6 }}>Enrollment queue · {requests.length}</SectionLabel>
+
+      {state.loading ? (
+        <Body size={12} style={{ marginTop: 8 }}>
+          Loading requests…
+        </Body>
+      ) : state.error ? (
+        <Body size={12} tone={color.error} style={{ marginTop: 8 }}>
+          The queue didn't load. Check your connection and try again.
+        </Body>
+      ) : requests.length === 0 ? (
+        <Body size={12} style={{ marginTop: 8 }}>
+          Nothing pending — new families land here after they submit enrollment.
+        </Body>
+      ) : (
+        <div style={{ display: 'flex', flexDirection: 'column', marginTop: 4 }}>
+          {requests.map((req, i) => (
+            <div
+              key={req.uid}
+              style={{
+                paddingTop: i ? 14 : 4,
+                marginTop: i ? 0 : 0,
+                borderTop: i ? `1px solid ${color.ruleFaint}` : 'none',
+              }}
+            >
+              <div style={{ font: `600 13px ${font.body}`, color: color.text }}>
+                {req.guardian?.name ?? '—'}
+              </div>
+              <div style={{ font: `400 11px ${font.body}`, color: color.textTertiary, marginTop: 3 }}>
+                {req.guardian?.email ?? '—'}
+                {req.guardian?.phone ? ` · ${req.guardian.phone}` : ''}
+              </div>
+              <div style={{ font: `400 12px ${font.body}`, color: color.textSecondary, marginTop: 6 }}>
+                {(req.athletes ?? []).map((a) => a.name).filter(Boolean).join(', ') ||
+                  'No athletes listed'}
+              </div>
+
+              {decliningId === req.uid ? (
+                <div style={{ marginTop: 11 }}>
+                  <textarea
+                    autoFocus
+                    rows={2}
+                    maxLength={300}
+                    placeholder="Reason (shown to the family so they can edit and resubmit)"
+                    value={reasonDraft}
+                    onChange={(e) => setReasonDraft(e.target.value)}
+                    style={{
+                      width: '100%',
+                      background: color.dimmed,
+                      border: `1px solid ${color.border}`,
+                      borderRadius: radius.input,
+                      padding: 10,
+                      font: `400 12px ${font.body}`,
+                      color: color.text,
+                      outline: 'none',
+                      resize: 'none',
+                      boxSizing: 'border-box',
+                    }}
+                  />
+                  <div style={{ display: 'flex', gap: 8, marginTop: 8 }}>
+                    <Button
+                      variant="dangerOutline"
+                      height={38}
+                      loading={busyId === req.uid}
+                      onClick={() => submitDecline(req)}
+                      style={{ flex: 1 }}
+                    >
+                      Confirm decline
+                    </Button>
+                    <Button
+                      variant="outline"
+                      height={38}
+                      disabled={busyId === req.uid}
+                      onClick={() => setDecliningId(null)}
+                      style={{ flex: 1, boxShadow: 'none' }}
+                    >
+                      Cancel
+                    </Button>
+                  </div>
+                </div>
+              ) : (
+                <div style={{ display: 'flex', gap: 8, marginTop: 11 }}>
+                  <Button
+                    height={38}
+                    loading={busyId === req.uid}
+                    onClick={() => handleApprove(req)}
+                    style={{ flex: 1 }}
+                  >
+                    Approve
+                  </Button>
+                  <Button
+                    variant="dangerOutline"
+                    height={38}
+                    disabled={busyId === req.uid}
+                    onClick={() => startDecline(req)}
+                    style={{ flex: 1 }}
+                  >
+                    Decline
+                  </Button>
+                </div>
+              )}
+            </div>
+          ))}
+        </div>
+      )}
+
+      {actionError ? (
+        <Body size={11} tone={color.error} style={{ marginTop: 12 }}>
+          {actionError}
+        </Body>
+      ) : null}
+    </Card>
   );
 }
 

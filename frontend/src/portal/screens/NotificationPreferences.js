@@ -3,8 +3,9 @@ import { useNavigate } from 'react-router-dom';
 import { TOUCH_MIN, color, font, radius, tint } from '../tokens';
 import BottomTabBar from '../components/BottomTabBar';
 import PhoneFrame from '../components/PhoneFrame';
+import SavedToast from '../components/SavedToast';
 import { Toggle } from '../components/Toggle';
-import { Body, Card, ScreenTitle, Tick } from '../components/Primitives';
+import { Body, Card, ScreenTitle } from '../components/Primitives';
 import { useNotificationPrefs } from '../hooks';
 
 /**
@@ -29,7 +30,19 @@ import { useNotificationPrefs } from '../hooks';
  * @param {() => void} [onSignOut]  Hidden when not supplied (harness/demo).
  */
 export default function NotificationPreferences({ variant = 'default', bare = false, onLinkAthlete, onSignOut }) {
-  const { data } = useNotificationPrefs({ variant });
+  const prefsState = useNotificationPrefs({ variant });
+  const { data } = prefsState;
+  /**
+   * Sprint 10 pin G (TEAM.md, contract v1.8): useNotificationPrefs gains
+   * save(prefs) writing the whole notificationPrefs map in one shot (rules:
+   * the one self-write the users collection allows, hasOnly(['notificationPrefs'])).
+   * FALLBACK FLAG: this worktree's useNotificationPrefs has no `save` export
+   * yet (routing lane's parallel worktree) — the inert fallback below echoes
+   * the object back successfully so the toggle → save → toast flow is fully
+   * wired and reviewable, but nothing persists until routing lands the real
+   * write. Flagged in the sprint report.
+   */
+  const save = prefsState.save || (async (prefs) => prefs);
 
   // Local state holds only the parent's changes, keyed "categoryId.channel";
   // anything untouched reads its default from the hook data at render time.
@@ -37,10 +50,51 @@ export default function NotificationPreferences({ variant = 'default', bare = fa
   // returns asynchronously - the first render of a real fetch has data: null,
   // and a lazy initializer never runs again.
   const [overrides, setOverrides] = useState({});
+  const [saving, setSaving] = useState(false);
+  const [saveError, setSaveError] = useState(null);
+  const [justSaved, setJustSaved] = useState(false);
+  const savedTimer = React.useRef(null);
+  React.useEffect(() => () => savedTimer.current && clearTimeout(savedTimer.current), []);
 
   const valueFor = (cat, channel) => overrides[`${cat.id}.${channel}`] ?? cat[channel];
-  const set = (cat, channel, value) =>
-    setOverrides((prev) => ({ ...prev, [`${cat.id}.${channel}`]: value }));
+
+  // A real save, not just local state: every toggle persists the FULL prefs
+  // map immediately (the rules-gated field is a whole-map replace, not a
+  // per-toggle patch), then the shared SavedToast confirms it landed.
+  const persist = async (nextOverrides) => {
+    const categories = data?.categories ?? [];
+    const prefs = {};
+    categories.forEach((cat) => {
+      prefs[cat.id] = {
+        email: nextOverrides[`${cat.id}.email`] ?? cat.email,
+        sms: nextOverrides[`${cat.id}.sms`] ?? cat.sms,
+      };
+    });
+    setSaving(true);
+    setSaveError(null);
+    try {
+      await save(prefs);
+      setJustSaved(true);
+      if (savedTimer.current) clearTimeout(savedTimer.current);
+      savedTimer.current = setTimeout(() => setJustSaved(false), 2600);
+    } catch (err) {
+      setSaveError(
+        err && typeof err.message === 'string' && err.message
+          ? err.message
+          : 'Your preferences did not save. Try again.'
+      );
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const set = (cat, channel, value) => {
+    setOverrides((prev) => {
+      const next = { ...prev, [`${cat.id}.${channel}`]: value };
+      persist(next);
+      return next;
+    });
+  };
 
   return (
     <PhoneFrame
@@ -53,7 +107,13 @@ export default function NotificationPreferences({ variant = 'default', bare = fa
       footer={<BottomTabBar role="parent" active="settings" />}
     >
       <div style={{ padding: '0 22px 24px', display: 'flex', flexDirection: 'column', gap: 12 }}>
-        {data?.saved ? <SavedToast /> : null}
+        {saveError ? (
+          <Body size={12} tone={color.error}>
+            {saveError}
+          </Body>
+        ) : justSaved || data?.saved ? (
+          <SavedToast message={saving ? 'Saving…' : 'Preferences saved'} />
+        ) : null}
 
         <ChannelHeader />
 
@@ -178,36 +238,6 @@ function ReplayWalkthroughRow() {
   );
 }
 
-function SavedToast() {
-  return (
-    <div
-      style={{
-        background: 'rgba(0,175,81,.1)',
-        border: `1px solid ${color.primary}`,
-        borderRadius: 10,
-        padding: '11px 14px',
-        display: 'flex',
-        alignItems: 'center',
-        gap: 10,
-      }}
-    >
-      <span
-        style={{
-          width: 18,
-          height: 18,
-          borderRadius: '50%',
-          background: color.primary,
-          display: 'grid',
-          placeItems: 'center',
-          flex: 'none',
-        }}
-      >
-        <Tick size={9} />
-      </span>
-      <span style={{ font: `500 13px ${font.body}`, color: color.primary }}>Preferences saved</span>
-    </div>
-  );
-}
 
 /** Labels the two 52px toggle columns once, rather than per card. */
 function ChannelHeader() {

@@ -9,6 +9,7 @@ import Field from './components/Field';
 import MediaPlaceholder from './components/MediaPlaceholder';
 import NumericField from './components/NumericField';
 import ProgressMeter from './components/ProgressMeter';
+import SavedToast from './components/SavedToast';
 import SequenceLadder from './components/SequenceLadder';
 import SessionCard from './components/SessionCard';
 import StatusBadge, { CapacityPill } from './components/StatusBadge';
@@ -40,6 +41,7 @@ import NewsletterComposer from './screens/NewsletterComposer';
 import OnboardingFlow from './screens/OnboardingFlow';
 import TourStandings from './screens/TourStandings';
 import SpecialistBooking from './screens/SpecialistBooking';
+import SpecialistDay from './screens/SpecialistDay';
 
 import { ALLOWANCE, ALLOWANCE_NO_TOURNAMENTS } from './data/seed';
 import { ELITE_TIERS, FITNESS_PACKAGES, GOLF_PACKAGES } from './data/packages';
@@ -113,7 +115,12 @@ export const SCREEN_STATES = [
              ['three', 'Three children', { onBookFor: () => {}, onBookCoaching: () => {} }],
              ['payment', 'Payment issue', { onBookFor: () => {}, onBookCoaching: () => {} }]] },
   { id: '09', title: 'Athlete Detail', Screen: AthleteDetail, role: 'parent',
-    states: [['populated', 'Populated'], ['limited', 'Limited data']] },
+    states: [['populated', 'Populated'], ['limited', 'Limited data'],
+             // Sprint 10 pin B (TEAM.md): the "Start a contract" card for a
+             // kid with no tier yet - `noTier` overrides the (fragile,
+             // flagged) subline heuristic so this state is reviewable
+             // regardless of what the seed subline happens to say.
+             ['populated', 'No contract tier', { noTier: true }]] },
   { id: '10', title: 'Billing & Subscription', Screen: Billing, role: 'parent',
     states: [['active', 'Active'], ['retry1', 'Retry 1'], ['retry3', 'Retry 3'],
              ['restricted', 'Restricted'], ['updating', 'Updating card']] },
@@ -150,7 +157,10 @@ export const SCREEN_STATES = [
     states: [['empty', 'Empty'], ['uploading', 'Uploading'], ['partial', 'Partial'],
              ['complete', 'Complete']] },
   { id: '15', title: 'Admin Dashboard', Screen: AdminDashboard, role: 'ops admin',
-    states: [['populated', 'Populated'], ['filtered', 'Filtered']] },
+    // 'ops' previews the Sprint 10 pin F tab set (Admin/Sessions/Tour, no
+    // Staff) alongside the default owner set the other two states show.
+    states: [['populated', 'Populated'], ['filtered', 'Filtered'],
+             ['populated', 'Ops · tab set', { role: 'ops' }]] },
   { id: '16', title: 'Staff & Roles', Screen: StaffRoles, role: 'owner',
     states: [['populated', 'Populated'], ['add', 'Add staff']] },
   { id: '17', title: 'Newsletter Composer', Screen: NewsletterComposer, role: 'admin',
@@ -200,13 +210,28 @@ export const SCREEN_STATES = [
              // Parent's 'Booking for' selector, same idiom as BookSession's.
              ['slots', 'Parent · pick a child', { harnessStage: 'slots', role: 'parent' }]] },
   /*
-   * Not provisioned (Sprint 4) — the honest state for a signed-in Google
-   * account with no users/ doc. Not a numbered handoff artboard, so it sits
-   * after the seventeen. The demo variant renders the established demo
-   * guardian's email and never reads the live auth seam.
+   * Specialist Day / My Sessions (Sprint 9 amendment v1.7.1; nav + Today
+   * section added Sprint 10 pins F/I) - the specialist's own day view, not
+   * a numbered handoff artboard. No `variant` prop - it always reads real
+   * seed/live data via useSpecialistSessions, so each state below only
+   * varies who is looking (Phil's own coach-set footer, Yannick's mental
+   * set, and ops/owner's switcher).
+   */
+  { id: 'SD', title: 'Specialist Day (My Sessions)', Screen: SpecialistDay, role: 'mental · coach(phil) · ops/owner',
+    states: [
+      ['default', 'Yannick · mental', { specialistId: 'mental', role: 'mental' }],
+      ['default', 'Phil · coach set', { specialistId: 'phil' }],
+      ['default', 'Ops · switcher', { canSwitch: true, role: 'ops' }],
+    ] },
+  /*
+   * Not provisioned (Sprint 4, real enrollment states added Sprint 10 pin
+   * A) — the honest state for a signed-in Google account with no users/
+   * doc. Not a numbered handoff artboard, so it sits after the seventeen.
+   * The demo variant renders the established demo guardian's email and
+   * never reads the live auth/enrollment seam.
    */
   { id: 'NP', title: 'Not provisioned', Screen: NotProvisioned, role: 'signed-in · no portal role',
-    states: [['default', 'Default']] },
+    states: [['none', 'No enrollment'], ['pending', 'Under review'], ['declined', 'Declined']] },
   /*
    * Onboarding walkthrough — practice mode on the real screens (TEAM.md,
    * "Onboarding program v1"). Not a numbered handoff artboard, so it sits
@@ -490,11 +515,35 @@ function ComponentGallery() {
           <MediaPlaceholder height={96} caption="SWING VIDEO — 4 angles" />
         </Spec>
 
-        <Spec label="Bottom tab bar · 4 items per role">
+        {/* Sprint 10 pin F: the shared "saved" toast, new this sprint - used
+            by contract logging, diagnostic capture, notification prefs,
+            session notes and contract tier (see SavedToast.js). */}
+        <Spec label="Saved toast · shared across every real save">
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+            <SavedToast />
+            <SavedToast message="Draft saved" />
+            <SavedToast message="Published to Practice DNA" />
+          </div>
+        </Spec>
+
+        <Spec label="Bottom tab bar · member roles" width={200}>
           <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
             {['athlete', 'parent', 'coach'].map((role) => (
               <BottomTabBar key={role} role={role} active={undefined} onChange={() => {}} />
             ))}
+          </div>
+        </Spec>
+
+        {/*
+          Sprint 10 pin F: the staff tab sets (owner/ops/mental) and the
+          coach-with-specialistId variant (Phil), new this sprint.
+        */}
+        <Spec label="Bottom tab bar · staff roles" width={200}>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+            {['owner', 'ops', 'mental'].map((role) => (
+              <BottomTabBar key={role} role={role} active={undefined} onChange={() => {}} />
+            ))}
+            <BottomTabBar role="coach" specialistId="phil" active={undefined} onChange={() => {}} />
           </div>
         </Spec>
       </div>
