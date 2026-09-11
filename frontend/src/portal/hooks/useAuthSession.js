@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import {
   onAuthStateChanged,
+  sendPasswordResetEmail,
   signInWithEmailAndPassword,
   signInWithPopup,
   signOut as firebaseSignOut,
@@ -208,6 +209,41 @@ export default function useAuthSession({ variant } = {}) {
     }
   }, []);
 
+  // Forgot password (Sprint 10, pin I "Quick wins") — the SignIn screen's
+  // real "Forgot password" link (frontend lane wires the sent/error states;
+  // this only sends the email). Placed here rather than live.js: it is an
+  // auth action with no Firestore query behind it, colocated with
+  // signIn/signOut/signInWithEmail rather than added to the Firestore-only
+  // adapter file for a single unrelated Auth SDK call — the routing
+  // report flags this file choice explicitly, as instructed.
+  //
+  // Deliberately does NOT distinguish "no account for that email" from
+  // "sent" — email enumeration (letting a caller probe which addresses
+  // have accounts) is a real leak for a minors-heavy user base, so
+  // auth/user-not-found resolves as if the email had been sent, same as
+  // every other outcome. Only a malformed address or a genuine send
+  // failure surfaces as an error.
+  const requestPasswordReset = useCallback(async (email) => {
+    try {
+      await sendPasswordResetEmail(auth, email);
+      return { sent: true };
+    } catch (err) {
+      const code = err && err.code;
+      if (code === 'auth/user-not-found') return { sent: true };
+      const message =
+        code === 'auth/invalid-email'
+          ? 'Enter a valid email address.'
+          : code === 'auth/too-many-requests'
+            ? 'Too many attempts — wait a few minutes, then try again.'
+            : 'Could not send the reset email. Please try again.';
+      throw new LiveDataError(
+        code === 'auth/invalid-email' ? ERR.INVALID : ERR.UNAVAILABLE,
+        message,
+        err
+      );
+    }
+  }, []);
+
   const signOut = useCallback(async () => {
     try {
       await firebaseSignOut(auth); // the auth listener emits the signed-out state
@@ -239,5 +275,6 @@ export default function useAuthSession({ variant } = {}) {
     signIn,
     signInWithEmail,
     signOut,
+    requestPasswordReset,
   };
 }
