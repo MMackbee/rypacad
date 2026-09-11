@@ -37,6 +37,7 @@ import { bump, useInvalidation } from './invalidate';
 import {
   ERR,
   LiveDataError,
+  cancelBooking,
   createBooking,
   createContractLog,
   deleteContractLog,
@@ -150,6 +151,7 @@ import {
   NEWSLETTER_STATES,
 } from '../data/admin';
 import { TOUR_SEED, bracketFor, deriveTourStandings } from '../data/tour';
+import { SPECIALISTS, SPECIALIST_BOOKING_WINDOW_DAYS } from '../data/specialists';
 
 export { default as useSeedResource } from './useSeedResource';
 export { default as useAuthSession } from './useAuthSession';
@@ -169,6 +171,28 @@ function demoOpts(variant, message) {
   return null;
 }
 
+/** id -> catalogue entry (data/specialists.js) — Phil/Yannick, never invented. */
+const SPECIALIST_BY_ID = new Map(SPECIALISTS.map((sp) => [sp.id, sp]));
+
+/**
+ * The generic name a session with no explicit label falls back to —
+ * 'Tournament block' / 'Training block' for the generator's two original
+ * types, or (Sprint 9 pin, contract v1.7) '<sessionNoun> · <name>' for a
+ * specialist 1-on-1 (data/specialists.js), e.g. "Mental game session ·
+ * Yannick" — NEVER 'Training block' for a phil/mental session. Shared by
+ * every place a bare session type becomes a readable name: displaySession
+ * below, plus useCoachDay's live day view and liveAthleteDetail's upcoming
+ * list, which each had their own copy of the same ternary before this
+ * sprint (useSession, the one other copy, reads only the generated season,
+ * which never produces a phil/mental type — routed through this helper too
+ * anyway, so a fourth divergent copy can never reappear here).
+ */
+function genericSessionName(type) {
+  const specialist = SPECIALIST_BY_ID.get(type);
+  if (specialist) return `${specialist.sessionNoun} · ${specialist.name}`;
+  return type === 'tournament' ? 'Tournament block' : 'Training block';
+}
+
 /** How a season session renders on a schedule or booking list. */
 function displaySession(s, today) {
   const [time, meridiem] = s.time.split(' ');
@@ -184,7 +208,7 @@ function displaySession(s, today) {
     // else is the generic block for its type - the Workshop/Lab/Arena rotation
     // was an invented placeholder, and no made-up name ships before real
     // sessions exist to book.
-    name: s.label || (s.type === 'tournament' ? 'Tournament block' : 'Training block'),
+    name: s.label || genericSessionName(s.type),
     // The generator assigns no coach or bay - coachId is null by design, so
     // nothing is invented here.
     meta: s.special
@@ -303,6 +327,14 @@ async function liveSchedule(today) {
               : b.status === 'noshow'
               ? { tone: 'red', label: 'No-show' }
               : null,
+          // Sprint 9 pin: cancel(bookingId) below needs the real booking id
+          // (never the session id displaySession already carries as `id`),
+          // and `cancellable` is the exact pinned formula - status
+          // 'confirmed' AND still in the future. Past items compute false
+          // here for free (their date is always < today).
+          bookingId: b.id,
+          status: b.status,
+          cancellable: b.status === 'confirmed' && b.date > today,
         }
       : null;
   };
@@ -395,6 +427,21 @@ async function liveBooking(today) {
 }
 
 /**
+ * The seed cast's one athlete id (matches data/tour.js's TOUR_SEED_NAMES and
+ * the real Whitfield athleteId elsewhere in this repo — never a fresh
+ * invented id). Seed mode has no real booking docs to read an id off of, so
+ * cancel(bookingId) needs SOMETHING to echo back; this mirrors the live
+ * keyspace's own `{athleteId}_{sessionId}` formula (docs/portal/TEAM.md
+ * "Booking id is `{athleteId}_{sessionId}`") purely for shape parity with
+ * live mode. It is never looked up against anything - seed's cancel() is a
+ * local no-op (see useSchedule below).
+ */
+const SEED_ATHLETE_ID = 'jordan';
+function seedBookingId(sessionId) {
+  return `${SEED_ATHLETE_ID}_${sessionId}`;
+}
+
+/**
  * GET /schedule/availability + GET /athletes/:id/allowance (04).
  *
  * Seed mode: the athlete's bookings are { date, block } references resolved
@@ -422,7 +469,21 @@ export function useSchedule({ variant = 'upcoming', today = todayISO(), practice
     refs
       .map((ref) => {
         const s = resolveBooking(ref);
-        return s ? { ...displaySession(s, today), badge: ref.badge ?? null } : null;
+        if (!s) return null;
+        return {
+          ...displaySession(s, today),
+          badge: ref.badge ?? null,
+          // Sprint 9 pin: same three fields the live branch's resolve()
+          // adds, so cancel()/`cancellable` behave identically in both
+          // modes. Every BOOKED_UPCOMING/BOOKED_PAST reference is a
+          // confirmed booking by construction (there is no seed concept of
+          // attended/no-show/cancelled bookings yet), so `status` is fixed
+          // and `cancellable` reduces to the same date check the live
+          // branch runs.
+          bookingId: seedBookingId(s.id),
+          status: 'confirmed',
+          cancellable: s.date > today,
+        };
       })
       .filter(Boolean);
 
@@ -431,11 +492,29 @@ export function useSchedule({ variant = 'upcoming', today = todayISO(), practice
   const cancelled = variant === 'cancelled' ? CANCELLED_SESSION : null;
 
   const demo = demoOpts(variant, "Your schedule didn't load.");
-  return useSeedResource(
+  const state = useSeedResource(
     demo || live ? null : { sessions, past, cancelled, allowance: ALLOWANCE },
     demo ??
       (live ? { source: () => liveSchedule(today), deps: ['schedule', today, bookingsGen] } : undefined)
   );
+
+  /**
+   * Cancel a booking off this hook's own list (Sprint 9 pin). Additive to
+   * the {data, loading, error} contract, same idiom as useBooking's book():
+   * live mode calls the real transaction (live.js's cancelBooking, which
+   * bumps 'bookings' and 'sessions' itself on success - the invalidation
+   * seam above re-runs this hook, and every other mounted hook watching
+   * either collection, with no extra wiring here); seed mode is a LOCAL
+   * NO-OP ECHO, matching useBooking's book() in seed mode - there is no real
+   * document to mutate, so it resolves without touching the static seed
+   * arrays.
+   */
+  const cancel = async (bookingId) => {
+    if (!live) return { id: bookingId, status: 'cancelled', simulated: true };
+    return cancelBooking({ bookingId });
+  };
+
+  return { ...state, cancel };
 }
 
 /**
@@ -774,6 +853,120 @@ export function useMonthSessions(monthISO, { practice = false } = {}) {
 }
 
 /**
+ * Seed fortnight pattern for useSpecialistSlots (Sprint 9 pin) — a
+ * DETERMINISTIC, believable schedule, not real production data (production
+ * comes from the Google Calendar sync per contract v1.7; the db lane's
+ * emulator seed hand-adds slots following this SAME weekday/time pattern so
+ * the demo and the emulator tell the same story). Yannick (mental) sits
+ * Tue/Thu late afternoon; Phil (phil) sits Mon/Wed/Fri, earlier in the
+ * afternoon; both 45-minute 1-on-1s, capacity 1 — the times are invented
+ * (there is no real production schedule to read yet), the PEOPLE are not
+ * (SPECIALISTS, data/specialists.js). Session ids follow the real seed
+ * convention (`YYYY-MM-DD-s<n>`, docs/portal/TEAM.md's "-x0 extras"
+ * convention, new letter) purely for shape parity with live mode - nothing
+ * here is ever written anywhere.
+ */
+const PHIL_WEEKDAYS = new Set([1, 3, 5]); // Mon, Wed, Fri (Date#getUTCDay)
+const MENTAL_WEEKDAYS = new Set([2, 4]); // Tue, Thu
+const PHIL_TIMES = ['3:00 PM', '3:45 PM'];
+const MENTAL_TIMES = ['4:30 PM', '5:15 PM'];
+
+export function seedSpecialistDays(specialistId, today) {
+  const onMental = specialistId === 'mental';
+  const weekdays = onMental ? MENTAL_WEEKDAYS : PHIL_WEEKDAYS;
+  const times = onMental ? MENTAL_TIMES : PHIL_TIMES;
+
+  const days = [];
+  for (let i = 0; i < SPECIALIST_BOOKING_WINDOW_DAYS; i++) {
+    const date = addDaysISO(today, i);
+    const dow = new Date(`${date}T00:00:00Z`).getUTCDay();
+    const slots = weekdays.has(dow)
+      ? times.map((time, idx) => ({
+          sessionId: `${date}-s${idx}`,
+          time,
+          booked: 0,
+          capacity: 1,
+          open: true,
+        }))
+      : [];
+    days.push({ date, dayLabel: dayLabel(date, today), slots });
+  }
+  return days;
+}
+
+/**
+ * Live payload for useSpecialistSlots — the same fetchSessionsInRange
+ * useMonthSessions already reads (single-field 'date' range + orderBy, no
+ * composite index), filtered down to this specialist's own session type and
+ * grouped by date. Cancelled-by-academy sessions (sessions.status, Sprint 4
+ * pin) are dropped like any other closure. EVERY day in the window is
+ * emitted, even ones with no matching session at all - the day strip needs
+ * a pill for every day, not just the ones with slots - which fetchSessions
+ * InRange's result alone cannot guarantee (a day with zero specialist
+ * sessions produces zero rows, not an empty-array placeholder).
+ */
+async function liveSpecialistSlots(specialistId, today) {
+  const toDate = addDaysISO(today, SPECIALIST_BOOKING_WINDOW_DAYS - 1);
+  const sessions = await fetchSessionsInRange(today, toDate);
+
+  const byDate = new Map();
+  for (const s of sessions) {
+    if (s.type !== specialistId || s.status === 'cancelled') continue;
+    const list = byDate.get(s.date);
+    if (list) list.push(s);
+    else byDate.set(s.date, [s]);
+  }
+
+  const days = [];
+  for (let i = 0; i < SPECIALIST_BOOKING_WINDOW_DAYS; i++) {
+    const date = addDaysISO(today, i);
+    const onDate = (byDate.get(date) ?? [])
+      .slice()
+      .sort((a, b) => (parseTimeToMinutes(a.time) ?? 0) - (parseTimeToMinutes(b.time) ?? 0));
+    days.push({
+      date,
+      dayLabel: dayLabel(date, today),
+      slots: onDate.map((s) => {
+        const capacity = s.capacity ?? 1;
+        const booked = s.booked ?? 0;
+        return { sessionId: s.id, time: s.time, booked, capacity, open: booked < capacity };
+      }),
+    });
+  }
+  return { days };
+}
+
+/**
+ * GET /specialists/:id/slots (Sprint 9 pin, contract v1.7) — one specialist's
+ * bookable 1-on-1 slots over the rolling SPECIALIST_BOOKING_WINDOW_DAYS
+ * window (data/specialists.js), the Life-Time-style booking screen's day
+ * strip + slot list. `specialistId` is 'phil' | 'mental' (SPECIALISTS' own
+ * ids, which double as the sessions.type value). Booking a slot goes through
+ * the EXISTING createBooking (poolFor('phil'|'mental') === 'specialist',
+ * data/packages.js) - unchanged signature, no booking action lives on this
+ * hook.
+ */
+export function useSpecialistSlots(specialistId) {
+  const live = isLive();
+  const today = todayISO();
+  // Post-write invalidation seam (Sprint 6 pin): a booking (or a cancel)
+  // changes sessions.booked - re-run so open/booked stays correct after a
+  // write made anywhere, mirroring useMonthSessions' own single-collection
+  // subscription above.
+  const sessionsGen = useInvalidation('sessions');
+
+  return useSeedResource(
+    live ? null : { days: seedSpecialistDays(specialistId, today) },
+    live
+      ? {
+          source: () => liveSpecialistSlots(specialistId, today),
+          deps: ['specialist-slots', specialistId, today, sessionsGen],
+        }
+      : undefined
+  );
+}
+
+/**
  * '2026-11-02' -> 'Mon' — the short weekday the household card's compact
  * `next.when` line needs ("Mon 4:00 PM", matching the seed shape). The only
  * place this abbreviation is needed; displaySession's dayLabel (the long
@@ -1077,7 +1270,7 @@ export function useCoachDay({ variant = 'today' } = {}) {
             sessionId: s.id,
             time: s.time,
             type: s.type,
-            name: s.label || (s.type === 'tournament' ? 'Tournament block' : 'Training block'),
+            name: s.label || genericSessionName(s.type),
             meta: `${s.booked ?? 0} of ${s.capacity ?? '—'} booked`,
             status,
           };
@@ -1152,7 +1345,7 @@ export function useSession({ today = todayISO(), blockIndex = 1 } = {}) {
         id: session.id,
         type: session.type,
         blockLabel: `Block ${index + 1} of ${onDate.length}`,
-        name: session.label || (session.type === 'tournament' ? 'Tournament block' : 'Training block'),
+        name: session.label || genericSessionName(session.type),
         meta: `${blockRange(session.time)} · ${session.capacity} capacity · ${ROSTER.length} expected`,
         startsIn: SESSION.startsIn,
       }
@@ -1628,7 +1821,7 @@ async function liveAthleteDetail(athleteId) {
       date: b.date,
       dayLabel: dayLabel(b.date, today),
       time: s?.time ?? null,
-      name: s?.label || (b.type === 'tournament' ? 'Tournament block' : 'Training block'),
+      name: s?.label || genericSessionName(b.type),
       status: b.status,
     };
   });

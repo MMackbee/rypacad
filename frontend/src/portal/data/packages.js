@@ -87,7 +87,17 @@ export function makeAllowance(pkg, { trainingUsed = 0, tournamentsUsed = 0, rese
   };
 }
 
-/** Which pool a slot spends. Booking UI must show this before the athlete commits. */
+/**
+ * Which pool a slot spends. Booking UI must show this before the athlete
+ * commits. Sprint 9 pin (contract v1.7): a specialist 1-on-1 (session type
+ * 'phil' | 'mental', data/specialists.js) spends its OWN pool, 'specialist'
+ * — it never touches the training or tournament allowance, so the two-pool
+ * model becomes three, still non-substitutable, and exclusion from the
+ * older two pools is automatic (both derive their own spend by filtering on
+ * their own pool value).
+ */
 export function poolFor(sessionType) {
-  return sessionType === 'tournament' ? 'tournaments' : 'training';
+  if (sessionType === 'tournament') return 'tournaments';
+  if (sessionType === 'phil' || sessionType === 'mental') return 'specialist';
+  return 'training';
 }

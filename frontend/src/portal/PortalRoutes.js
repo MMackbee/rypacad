@@ -10,6 +10,11 @@ import Registration from './screens/Registration';
 import { OnboardingWelcomeRoute } from './screens/OnboardingFlow';
 import MySchedule from './screens/MySchedule';
 import BookSession from './screens/BookSession';
+// Sprint 9 pin (specialist 1-on-1 booking) - the frontend lane builds this
+// screen in a parallel worktree; imported normally here (per TEAM.md's
+// process for exactly this situation, first done for TourStandings/Sprint
+// 7) so the route is real the moment both branches merge.
+import SpecialistBooking from './screens/SpecialistBooking';
 import ParentDashboard from './screens/ParentDashboard';
 import CoachDashboard from './screens/CoachDashboard';
 import Roster, { SessionAttendance } from './screens/Roster';
@@ -143,6 +148,30 @@ function BookSessionRoute({ onBack }) {
   const role = live && user?.role === 'parent' ? 'parent' : 'athlete';
   return (
     <BookSession
+      bare
+      role={role}
+      initialAthleteId={state?.athleteId ?? undefined}
+      onBack={onBack}
+    />
+  );
+}
+
+/**
+ * Specialist 1-on-1 booking (Sprint 9 pin, contract v1.7) — athlete + parent
+ * both reach this screen, same role resolution BookSessionRoute above uses
+ * (seed mode stays the athlete flow; live mode reads the signed-in user's
+ * real role). Parent deep link — a future ParentDashboard "Book 1-on-1
+ * coaching" action (frontend lane) — carries `{ state: { athleteId } }`
+ * exactly like /portal/book, so the child selector opens already pointed at
+ * that kid instead of defaulting to whichever child sorts first.
+ */
+function CoachingRoute({ onBack }) {
+  const live = isLive();
+  const { user } = useAuthSession(live ? undefined : { variant: 'idle' });
+  const { state } = useLocation();
+  const role = live && user?.role === 'parent' ? 'parent' : 'athlete';
+  return (
+    <SpecialistBooking
       bare
       role={role}
       initialAthleteId={state?.athleteId ?? undefined}
@@ -296,6 +325,20 @@ export default function PortalRoutes() {
         element={
           <RequireRole roles={['athlete', 'parent']}>
             <BookSessionRoute onBack={go('/portal/schedule')} />
+          </RequireRole>
+        }
+      />
+      {/* Specialist 1-on-1s (Sprint 9 pin): athlete Home's action card and
+          ParentDashboard's full-width action both land here, same as
+          /portal/book above - back is pinned to /portal/home for both
+          entry roles, mirroring this file's existing precedent of one fixed
+          back target regardless of which role's screen sent the caller
+          (AthleteDetailRoute/BookSessionRoute do the same). */}
+      <Route
+        path="coaching"
+        element={
+          <RequireRole roles={['athlete', 'parent']}>
+            <CoachingRoute onBack={go('/portal/home')} />
           </RequireRole>
         }
       />
