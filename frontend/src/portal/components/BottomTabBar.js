@@ -44,10 +44,51 @@ export const TABS = {
     { key: 'roster', label: 'Roster', icon: 'list', route: '/portal/roster' },
     { key: 'capture', label: 'Capture', icon: 'camera', route: '/portal/capture' },
   ],
+  /**
+   * Sprint 10 pin F (TEAM.md, "STAFF NAVIGATION"): a coach WITH specialistId
+   * (Phil) - Sessions / Roster / Capture, the plain coach set with Today
+   * swapped for the specialist's own My Sessions day view. Selected below via
+   * the `specialistId` prop rather than a `role="coachSpecialist"` string, so
+   * every existing `<BottomTabBar role="coach" .../>` call site is untouched.
+   */
+  coachSpecialist: [
+    { key: 'sessions', label: 'Sessions', icon: 'today', route: '/portal/my-sessions' },
+    { key: 'roster', label: 'Roster', icon: 'list', route: '/portal/roster' },
+    { key: 'capture', label: 'Capture', icon: 'camera', route: '/portal/capture' },
+  ],
+  /**
+   * Sprint 10 pin F: the three staff role tab sets, all pointing at the same
+   * three staff-surface routes in a per-role order/subset - Admin
+   * (AdminDashboard), Sessions (SpecialistDay/My Sessions - ops/owner get the
+   * specialist switcher there per that screen's `canSwitch`), Staff (owner
+   * only, StaffRoles), and Tour (every role already gets this one).
+   */
+  owner: [
+    { key: 'admin', label: 'Admin', icon: 'admin', route: '/portal/admin' },
+    { key: 'sessions', label: 'Sessions', icon: 'today', route: '/portal/my-sessions' },
+    { key: 'staff', label: 'Staff', icon: 'people', route: '/portal/staff' },
+    { key: 'tour', label: 'Tour', icon: 'trophy', route: '/portal/tour' },
+  ],
+  ops: [
+    { key: 'admin', label: 'Admin', icon: 'admin', route: '/portal/admin' },
+    { key: 'sessions', label: 'Sessions', icon: 'today', route: '/portal/my-sessions' },
+    { key: 'tour', label: 'Tour', icon: 'trophy', route: '/portal/tour' },
+  ],
+  mental: [
+    { key: 'sessions', label: 'Sessions', icon: 'today', route: '/portal/my-sessions' },
+    { key: 'admin', label: 'Admin', icon: 'admin', route: '/portal/admin' },
+    { key: 'tour', label: 'Tour', icon: 'trophy', route: '/portal/tour' },
+  ],
 };
 
-export default function BottomTabBar({ role = 'athlete', active, onChange }) {
-  const items = TABS[role] || TABS.athlete;
+/**
+ * @param {string} [specialistId]  Sprint 10 pin F: when `role === 'coach'`
+ *   and this is set (Phil's own account, users.specialistId), the Phil tab
+ *   set (Sessions / Roster / Capture) renders instead of the plain coach one.
+ *   Ignored for every other role.
+ */
+export default function BottomTabBar({ role = 'athlete', active, onChange, specialistId }) {
+  const items = role === 'coach' && specialistId ? TABS.coachSpecialist : TABS[role] || TABS.athlete;
   const navigate = useNavigate();
 
   const select = (tab) => {
