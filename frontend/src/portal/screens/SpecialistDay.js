@@ -42,7 +42,9 @@ export default function SpecialistDay({
   const [activeId, setActiveId] = useState(specialistId ?? SPECIALISTS[0].id);
   const specialist = SPECIALISTS.find((s) => s.id === activeId) ?? SPECIALISTS[0];
   const { data, loading, error } = useSpecialistSessions(activeId);
-  const sessions = data?.sessions ?? [];
+  // Memoized so the day-grouping memo below keys off real data changes,
+  // not a fresh [] minted every render (CRA exhaustive-deps).
+  const sessions = useMemo(() => data?.sessions ?? [], [data]);
 
   // Day-grouped, preserving the hook's own date order.
   const byDay = useMemo(() => {

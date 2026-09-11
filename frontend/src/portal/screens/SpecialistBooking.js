@@ -23,8 +23,8 @@ import { SPECIALISTS } from '../data/specialists';
 // BookSession.js/CommitmentContract.js/TourStandings.js - data still travels
 // through the hook seam below; these are formatting helpers, not response
 // data.
-import { addDaysISO, longDayLabel, todayISO } from '../data/calendar';
-import { dayLabel, datePill } from '../data/season';
+import { longDayLabel, todayISO } from '../data/calendar';
+import { datePill } from '../data/season';
 
 /**
  * 05·S · Specialist Booking - athlete + parent (Sprint 9 pin, docs/portal/
@@ -134,11 +134,15 @@ export default function SpecialistBooking({
   // that effect) because the reset effect above needs this one to refire the
   // moment it clears selectedDate back to null.
   useEffect(() => {
-    if (!specialistId || selectedDate || !days.length) return;
+    // `loading` in the guard: while a fresh fetch runs, whatever days are
+    // in hand are the PREVIOUS query's — picking a default off them landed
+    // on an empty today instead of the first day with availability
+    // (integration browser pass).
+    if (!specialistId || selectedDate || loading || !days.length) return;
     const withSlots = days.find((d) => d.slots.length > 0);
     setSelectedDate((withSlots ?? days[0]).date);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [specialistId, days, selectedDate]);
+  }, [specialistId, days, selectedDate, loading]);
 
   // Parent 'Booking for' selector - the exact pattern BookSession.js already
   // uses (read there for the household + preferred-id logic this mirrors).

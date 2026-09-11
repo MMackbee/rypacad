@@ -187,7 +187,7 @@ const SPECIALIST_BY_ID = new Map(SPECIALISTS.map((sp) => [sp.id, sp]));
  * which never produces a phil/mental type — routed through this helper too
  * anyway, so a fourth divergent copy can never reappear here).
  */
-function genericSessionName(type) {
+export function genericSessionName(type) {
   const specialist = SPECIALIST_BY_ID.get(type);
   if (specialist) return `${specialist.sessionNoun} · ${specialist.name}`;
   return type === 'tournament' ? 'Tournament block' : 'Training block';
@@ -965,9 +965,14 @@ export function useSpecialistSlots(specialistId) {
   const sessionsGen = useInvalidation('sessions');
   const bookingsGen = useInvalidation('bookings');
 
+  // No specialist picked yet (the picker stage) -> no query at all. Running
+  // the live source with specialistId null returned 14 honest-but-empty
+  // days, which then sat as STALE data while the real fetch ran after a
+  // pick — the screen's default-day effect read them and landed on today
+  // instead of the first day with availability (integration browser pass).
   return useSeedResource(
-    live ? null : { days: seedSpecialistDays(specialistId, today) },
-    live
+    live && specialistId ? null : { days: specialistId ? seedSpecialistDays(specialistId, today) : [] },
+    live && specialistId
       ? {
           source: () => liveSpecialistSlots(specialistId, today),
           deps: ['specialist-slots', specialistId, today, sessionsGen, bookingsGen],

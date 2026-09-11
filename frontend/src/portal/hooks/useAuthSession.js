@@ -45,7 +45,11 @@ export const MAX_ATTEMPTS = 5;
 
 const SIGNED_OUT = { user: null, provisioned: false, loading: false, error: null };
 
-/** The pinned five-key user object — nothing extra leaks from the users doc. */
+/** The pinned user object — nothing extra leaks from the users doc.
+ * `specialistId` joined the set with v1.7.1 (Sprint 9 integration): it is
+ * what routes Yannick and Phil to their My Sessions view; without it here
+ * the landing override read undefined and specialists landed on the admin
+ * dashboard (caught in the integration browser pass). */
 function toUser(profile) {
   return {
     uid: profile.uid,
@@ -53,6 +57,7 @@ function toUser(profile) {
     role: profile.role != null ? profile.role : null,
     athleteId: profile.athleteId != null ? profile.athleteId : null,
     householdId: profile.householdId != null ? profile.householdId : null,
+    specialistId: profile.specialistId != null ? profile.specialistId : null,
   };
 }
 

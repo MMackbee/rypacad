@@ -214,7 +214,10 @@ export function SessionAttendance({ variant = 'pre', bare = false, onBack, sessi
     ? {
         type: block.type,
         blockLabel: block.date ? dayLabel(block.date, todayISO()) : null,
-        name: block.name || (block.type === 'tournament' ? 'Tournament block' : 'Training block'),
+        // v1.7.1: the shared naming helper covers specialist types too — a
+        // Yannick session opened from My Sessions must not read as a
+        // 'Training block' (the old binary fallback did exactly that).
+        name: block.name || hooks.genericSessionName(block.type),
         meta: [block.time, block.meta].filter(Boolean).join(' · '),
         startsIn: realStartsIn(block),
       }

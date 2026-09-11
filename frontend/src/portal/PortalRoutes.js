@@ -206,10 +206,15 @@ function CoachingRoute() {
  */
 function SpecialistDayRoute({ onSignOut }) {
   const live = isLive();
-  const { user } = useAuthSession(live ? undefined : { variant: 'idle' });
+  const { user, loading } = useAuthSession(live ? undefined : { variant: 'idle' });
   const navigate = useNavigate();
   const specialistId = (live && user?.specialistId) || (!live ? 'mental' : null);
   const canSwitch = live && !user?.specialistId && ['ops', 'owner'].includes(user?.role ?? '');
+  // This route's OWN auth subscription starts loading even after
+  // RequireRole's finished — deciding (and redirecting) off a still-null
+  // user looped Navigate against RequireRole's own redirect (integration
+  // browser pass: "maximum update depth exceeded"). Wait like RequireRole.
+  if (live && loading) return null;
   if (live && !specialistId && !canSwitch) return <Navigate to="/portal/coach" replace />;
   return (
     <SpecialistDay
