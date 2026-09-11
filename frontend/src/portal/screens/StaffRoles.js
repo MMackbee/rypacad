@@ -1,12 +1,30 @@
 import React, { useState } from 'react';
 import { color, font, radius } from '../tokens';
 import AthleteRow from '../components/AthleteRow';
+import BottomTabBar from '../components/BottomTabBar';
 import Button from '../components/Button';
-import Field from '../components/Field';
+import Field, { SelectField } from '../components/Field';
 import PhoneFrame from '../components/PhoneFrame';
+import SavedToast from '../components/SavedToast';
 import StatusBadge from '../components/StatusBadge';
-import { BackLink, Body, Card, ScreenTitle, SectionLabel } from '../components/Primitives';
+import { BackLink, Body, Card, ScreenTitle, SectionLabel, SignOutButton } from '../components/Primitives';
 import { useStaff } from '../hooks';
+import { SPECIALISTS } from '../data/specialists';
+
+/**
+ * Sprint 10 pin E (TEAM.md, contract v1.8): useStaff() in this worktree
+ * still returns the Sprint-1-era shape - { staff, roles, auditNote,
+ * screeningNote, adding } - with no `invite(fields)` action and no
+ * `pendingInvites` list (confirmed: no `invite` or `pendingInvites` anywhere
+ * in hooks/index.js). The routing lane is adding both against the pin in a
+ * parallel worktree: staffInvites/{autoId} { email, role, displayName,
+ * specialistId, status, createdBy, createdAt }. Defensive defaults below
+ * (not the Roster.js namespace-fallback pattern, since useStaff itself
+ * already exists and is called normally) keep the form honestly inert -
+ * invite() resolves locally without persisting anything, and the pending-
+ * invites list reads empty - until that lands. Flagged loudly in the sprint
+ * report.
+ */
 
 /**
  * 16 · Staff & Roles - owner only.
@@ -24,11 +42,24 @@ import { useStaff } from '../hooks';
  * confirmation checkbox on invite recording who asserted it and when.
  *
  * @param {'populated'|'add'} variant
+ * @param {() => void} [onSignOut]  Hidden when not supplied (harness/demo).
  */
-export default function StaffRoles({ variant = 'populated', bare = false, onBack, onAdd }) {
-  const { data } = useStaff({ variant });
+export default function StaffRoles({ variant = 'populated', bare = false, onBack, onAdd, onSignOut }) {
+  const staffState = useStaff({ variant });
+  const { data } = staffState;
+  const invite = staffState.invite || (async (fields) => ({ ...fields, status: 'pending', simulated: true }));
+  const pendingInvites = data?.pendingInvites ?? [];
 
-  if (variant === 'add') return <AddStaff bare={bare} roles={data?.roles ?? []} note={data?.screeningNote} onBack={onBack} />;
+  if (variant === 'add')
+    return (
+      <AddStaff
+        bare={bare}
+        roles={data?.roles ?? []}
+        note={data?.screeningNote}
+        onBack={onBack}
+        invite={invite}
+      />
+    );
 
   const staff = data?.staff ?? [];
 
@@ -43,9 +74,13 @@ export default function StaffRoles({ variant = 'populated', bare = false, onBack
               Staff &amp; roles
             </ScreenTitle>
           </div>
-          <StatusBadge tone="neutral">{staff.length} accounts</StatusBadge>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+            <SignOutButton onSignOut={onSignOut} />
+            <StatusBadge tone="neutral">{staff.length} accounts</StatusBadge>
+          </div>
         </div>
       }
+      footer={<BottomTabBar role="owner" active="staff" />}
     >
       <div style={{ padding: '0 22px 24px', display: 'flex', flexDirection: 'column', gap: 12 }}>
         <Card large>
@@ -87,6 +122,14 @@ export default function StaffRoles({ variant = 'populated', bare = false, onBack
           ))}
         </Card>
 
+        {/*
+          Sprint 10 pin E: pending staffInvites, listed under the staff list
+          with the honest "provisions when they first sign in" line - an
+          invite is not a login until the invited person actually signs in
+          and provisioning matches the doc by email.
+        */}
+        <PendingInvitesCard invites={pendingInvites} loading={staffState.loading} />
+
         <button
           type="button"
           onClick={onAdd}
@@ -111,8 +154,111 @@ export default function StaffRoles({ variant = 'populated', bare = false, onBack
   );
 }
 
-function AddStaff({ bare, roles, note, onBack }) {
+function PendingInvitesCard({ invites, loading }) {
+  if (loading) return null;
+  return (
+    <Card large>
+      <SectionLabel style={{ marginBottom: 12 }}>Pending invites · {invites.length}</SectionLabel>
+      {invites.length === 0 ? (
+        <Body size={12}>No pending invites.</Body>
+      ) : (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 11 }}>
+          {invites.map((inv, i) => (
+            <div
+              key={inv.id ?? inv.email}
+              style={{
+                paddingTop: i ? 11 : 0,
+                borderTop: i ? `1px solid ${color.ruleFaint}` : 'none',
+              }}
+            >
+              <div style={{ display: 'flex', justifyContent: 'space-between', gap: 10 }}>
+                <span style={{ font: `600 13px ${font.body}`, color: color.text }}>
+                  {inv.displayName || inv.email}
+                </span>
+                <StatusBadge tone="yellow" dashed>
+                  Pending
+                </StatusBadge>
+              </div>
+              <div style={{ font: `400 11px ${font.body}`, color: color.textTertiary, marginTop: 3 }}>
+                {inv.role}
+                {inv.specialistId ? ` · ${inv.specialistId}` : ''} · {inv.email}
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+      <Body size={11} tone={color.textTertiary} style={{ marginTop: invites.length ? 13 : 10 }}>
+        Provisions when they first sign in.
+      </Body>
+    </Card>
+  );
+}
+
+/**
+ * Sprint 10 pin E: real field state, the existing role picker wired to
+ * selection, an optional specialist link when the role is coach or mental
+ * (Yannick/Phil - "never the athletes' assigned golf coach", TEAM.md Sprint
+ * 9), and invite() wired with saving/sent/error.
+ */
+function AddStaff({ bare, roles, note, onBack, invite }) {
+  const [name, setName] = useState('');
+  const [email, setEmail] = useState('');
   const [role, setRole] = useState(null);
+  const [specialistId, setSpecialistId] = useState('');
+  const [sending, setSending] = useState(false);
+  const [sent, setSent] = useState(false);
+  const [error, setError] = useState(null);
+
+  const showSpecialistPicker = role === 'coach' || role === 'mental';
+  const canSend = name.trim() !== '' && /\S+@\S+\.\S+/.test(email.trim()) && role && !sending;
+
+  const handleSend = async () => {
+    if (!canSend) return;
+    setSending(true);
+    setError(null);
+    try {
+      await invite({
+        displayName: name.trim(),
+        email: email.trim().toLowerCase(),
+        role,
+        specialistId: showSpecialistPicker && specialistId ? specialistId : null,
+      });
+      setSent(true);
+    } catch (err) {
+      setError(
+        err && typeof err.message === 'string' && err.message
+          ? err.message
+          : 'The invite could not be sent. Try again.'
+      );
+    } finally {
+      setSending(false);
+    }
+  };
+
+  if (sent) {
+    return (
+      <PhoneFrame
+        bare={bare}
+        header={
+          <div style={{ padding: '4px 22px 14px' }}>
+            <BackLink onClick={onBack}>‹ Staff</BackLink>
+          </div>
+        }
+        footer={
+          <div style={{ borderTop: `1px solid ${color.frameRule}`, padding: '14px 22px 22px' }}>
+            <Button onClick={onBack}>Back to staff</Button>
+          </div>
+        }
+      >
+        <div style={{ padding: '20px 22px 24px' }}>
+          <SavedToast message={`Invite sent to ${email.trim()}`} />
+          <Body size={12} style={{ marginTop: 14 }}>
+            {name.trim()} provisions the account the first time they sign in with that email.
+          </Body>
+        </div>
+      </PhoneFrame>
+    );
+  }
 
   return (
     <PhoneFrame
@@ -127,18 +273,46 @@ function AddStaff({ bare, roles, note, onBack }) {
       }
       footer={
         <div style={{ borderTop: `1px solid ${color.frameRule}`, padding: '14px 22px 22px' }}>
-          <Button disabled={!role}>Send invite</Button>
+          {error ? (
+            <Body size={12} tone={color.error} style={{ marginBottom: 10, textAlign: 'center' }}>
+              {error}
+            </Body>
+          ) : null}
+          <Button disabled={!canSend} loading={sending} onClick={handleSend}>
+            {sending ? 'Sending invite' : 'Send invite'}
+          </Button>
         </div>
       }
     >
       <div style={{ padding: '0 22px 24px', display: 'flex', flexDirection: 'column', gap: 14 }}>
-        <Field label="Name" value="" placeholder="Full name" onChange={() => {}} />
-        <Field label="Work email" type="email" value="" placeholder="name@rypgolf.com" onChange={() => {}} />
+        <Field label="Name" value={name} placeholder="Full name" onChange={setName} />
+        <Field
+          label="Work email"
+          type="email"
+          value={email}
+          placeholder="name@rypgolf.com"
+          onChange={setEmail}
+        />
 
         <SectionLabel style={{ marginTop: 4 }}>Role</SectionLabel>
         {roles.map((r) => (
           <RoleCard key={r.id} role={r} selected={role === r.id} onSelect={() => setRole(r.id)} />
         ))}
+
+        {/*
+          Optional specialist link (Sprint 10 pin E) - coach or mental only,
+          matching users.specialistId ('phil'|'mental'|null); left unset for
+          a plain coach or Yannick's mental role is a plain mental account,
+          not a Phil/Yannick 1-on-1 provider.
+        */}
+        {showSpecialistPicker ? (
+          <SelectField
+            label="Specialist link (optional)"
+            value={specialistId}
+            options={SPECIALISTS.map((s) => s.id)}
+            onChange={setSpecialistId}
+          />
+        ) : null}
 
         {/*
           Flag 08: the screening fields left this screen in revision 2 but the
