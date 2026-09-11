@@ -106,10 +106,19 @@ service cloud.firestore {
       // all inside one Firestore transaction. This rule is the server-side
       // half of that guarantee: `booked` is the ONLY field a client may ever
       // touch on a session, it may only move by exactly +1 (a new booking)
-      // or -1 (a future cancellation flow, not built yet — the range is
-      // pre-approved so that flow needs no second rules change), and it must
-      // stay within [0, capacity]. Every other field (capacity, coachId,
-      // date, label, status, gcalEventId, ...) stays Admin-SDK-only.
+      // or -1 (cancellation, and re-booking's +1 mirrors it exactly), and it
+      // must stay within [0, capacity]. Every other field (capacity, coachId,
+      // date, label, status, gcalEventId, type, ...) stays Admin-SDK-only —
+      // `type` is never constrained to a specific list here (or anywhere
+      // else in this file), so 'phil'/'mental' sessions (Sprint 9, contract
+      // v1.7) need no rules change to be readable/bookable-against.
+      //
+      // Sprint 9 verification (routing report): the -1 branch below was
+      // PRE-APPROVED at Sprint 6 for "a future cancellation flow, not built
+      // yet" — that flow is cancelBooking() (hooks/live.js) as of this
+      // sprint, and it needed no change here: caller scope was already any
+      // signedIn() user (never role-restricted), which already covers the
+      // athlete/parent callers cancellation adds.
       function bookedDiffOk() {
         let before = resource.data;
         let after = request.resource.data;
@@ -135,6 +144,14 @@ service cloud.firestore {
 
       // Contract shape, exactly: athleteId, sessionId, date, type, pool,
       // status, householdId, createdBy, createdAt — nothing else.
+      //
+      // Sprint 9 (contract v1.7): 'phil' and 'mental' join 'training' and
+      // 'tournament' as bookable types — a specialist 1-on-1 IS a session
+      // (capacity 1, its own pool) and rides this exact same create path.
+      // The pool pin is now three-way: tournament -> 'tournaments',
+      // phil/mental -> 'specialist' (never training or tournaments — the
+      // two-pool allowance stays non-substitutable, now with a third pool
+      // that is non-substitutable with either), everything else -> 'training'.
       function bookingShapeOk() {
         let d = request.resource.data;
         return d.keys().hasAll(['athleteId', 'sessionId', 'date', 'type', 'pool',
@@ -144,8 +161,12 @@ service cloud.firestore {
           && d.athleteId is string
           && d.sessionId is string
           && d.date is string
-          && d.type in ['training', 'tournament']
-          && d.pool == (d.type == 'tournament' ? 'tournaments' : 'training')
+          && d.type in ['training', 'tournament', 'phil', 'mental']
+          && d.pool == (
+               d.type == 'tournament' ? 'tournaments'
+               : (d.type == 'phil' || d.type == 'mental') ? 'specialist'
+               : 'training'
+             )
           && d.status == 'confirmed'
           && d.createdBy == request.auth.uid
           && d.createdAt == request.time;
@@ -219,10 +240,11 @@ service cloud.firestore {
       // 'attended', OUT -> 'noshow', un-marking -> back to 'confirmed'. The
       // assigned coach (athlete.coachId == caller, never role alone) may
       // flip status among confirmed|attended|noshow and touch NO other
-      // field. Cancellation (status: 'cancelled') is still a flow that has
-      // not been built — before/after both exclude it on purpose, so this
-      // rule cannot be used to cancel or un-cancel a booking. Open question
-      // (cancellation policy, roster close-out) carried over in the report.
+      // field. 'cancelled' is deliberately excluded from both before/after
+      // here — cancellation (Sprint 9) is now built, but as its OWN rule
+      // below (memberBookingUpdateOk, athlete/parent only): a coach cannot
+      // cancel a booking through this attendance rule, and this rule cannot
+      // be used to un-cancel one either.
       // 2026-09-10 (owner's report — the roster's inert "+ Add a reason"):
       // the same assigned-coach update may now also carry `noshowReason`, a
       // single optional free-text note (string <=200, or null to clear). It
@@ -246,6 +268,50 @@ service cloud.firestore {
         && me().role == 'coach'
         && athleteData(resource.data.athleteId).coachId == request.auth.uid
         && attendanceUpdateOk();
+
+      // Sprint 9 pin (contract v1.7, cancellation): the athlete's own user
+      // or the household parent may cancel a CONFIRMED booking, or re-book a
+      // CANCELLED one (the RE-BOOK direction — createBooking's transaction
+      // treats an existing cancelled doc as the update path, same doc id per
+      // the keyspace) — status flips, nothing else. This is IN ADDITION to
+      // the coach attendanceUpdateOk() branch above (a second `allow update`
+      // for this match block; Firestore ORs multiple allow statements for
+      // the same operation) — a coach's attendance transitions and a
+      // member's cancel/re-book are different actors touching the same
+      // field for different reasons, so they get their own rule rather than
+      // one combined condition.
+      //
+      // Capacity is deliberately NOT re-verified here with a second get():
+      // the +1/-1 side of a cancel or re-book is a session.booked write in
+      // the SAME client transaction (hooks/live.js's cancelBooking /
+      // createBooking's re-book path), and that write is independently
+      // guarded by the sessions match block's bookedDiffOk() above (which
+      // already enforces booked staying within [0, capacity]). A get() here
+      // would only re-read a doc this same transaction already reads
+      // elsewhere, for no additional guarantee — capacity enforcement is the
+      // transaction's job client-side and bookedDiffOk()'s job server-side,
+      // not this rule's.
+      //
+      // The 12-hour-before cancel window (My Schedule copy: "day-of = contact
+      // the academy") is a CLIENT-side gate only — an accepted server-side
+      // gap, flagged in TEAM.md's Sprint 9 pins and carried into the routing
+      // report. This rule allows the transition with no date check in v1.
+      function memberBookingUpdateOk() {
+        let before = resource.data;
+        let after = request.resource.data;
+        return after.diff(before).affectedKeys().hasOnly(['status'])
+          && (
+            (before.status == 'confirmed' && after.status == 'cancelled')
+            || (before.status == 'cancelled' && after.status == 'confirmed')
+          );
+      }
+
+      allow update: if signedIn()
+        && memberBookingUpdateOk()
+        && (
+          (me().role == 'athlete' && me().athleteId == resource.data.athleteId)
+          || (me().role == 'parent' && me().householdId == resource.data.householdId)
+        );
 
       // No delete in v1.
     }

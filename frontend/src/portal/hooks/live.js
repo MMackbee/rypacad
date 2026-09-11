@@ -31,6 +31,11 @@ import {
 } from 'firebase/firestore';
 import { auth, db } from '../../firebase';
 import { bump } from './invalidate';
+import { poolFor } from '../data/packages';
+import { SPECIALISTS, SPECIALIST_MONTHLY_CAP } from '../data/specialists';
+
+/** id -> catalogue entry, for the specialist-cap error copy below. */
+const SPECIALIST_BY_ID = new Map(SPECIALISTS.map((s) => [s.id, s]));
 
 /** Stable error codes the hooks (and screens, via `error`) can branch on. */
 export const ERR = {
@@ -364,13 +369,40 @@ export async function fetchBookings(athleteId, { householdId = null } = {}) {
  * a true server-side count awaits a Cloud Function, documented in
  * DATA-MODEL.md. Callers that already maintain a running tally
  * (bookRecurring) pass skipCapCheck to avoid re-querying per instance.
+ *
+ * Sprint 9 pin (contract v1.7): pool 'specialist' (phil/mental) does not
+ * answer to a package limit at all — Elite's philSessions/yannickSessions
+ * stay null/undecided (parked with billing, data/specialists.js) — so this
+ * takes an entirely separate branch, capped instead at
+ * SPECIALIST_MONTHLY_CAP PER SESSION TYPE (phil and mental each get their
+ * own count), counted from the athlete's non-cancelled bookings of that
+ * `type` in the month. `type` is required for this branch only — the
+ * existing training/tournament branch below is unchanged and still keys off
+ * `pool` alone.
  */
-async function assertWithinMonthlyCap({ athleteId, householdId, date, pool }) {
+async function assertWithinMonthlyCap({ athleteId, householdId, date, pool, type }) {
+  const month = date.slice(0, 7);
+  const bookings = await fetchBookings(athleteId, { householdId });
+
+  if (pool === 'specialist') {
+    const spent = bookings.filter(
+      (b) => b.status !== 'cancelled' && b.type === type && b.date.slice(0, 7) === month
+    ).length;
+    if (spent >= SPECIALIST_MONTHLY_CAP) {
+      const specialist = SPECIALIST_BY_ID.get(type);
+      const who = specialist ? specialist.name : 'this specialist';
+      const noun = specialist ? specialist.sessionNoun.toLowerCase() : 'session';
+      throw new LiveDataError(
+        ERR.INVALID,
+        `That month's ${noun}s with ${who} are already booked (${spent} of ${SPECIALIST_MONTHLY_CAP}).`
+      );
+    }
+    return;
+  }
+
   const athlete = await fetchAthlete(athleteId);
   const pkg = athlete.packageId ? await fetchPackage(athlete.packageId) : null;
   const limit = (pool === 'tournaments' ? pkg?.tournaments : pkg?.training) ?? 0;
-  const month = date.slice(0, 7);
-  const bookings = await fetchBookings(athleteId, { householdId });
   const spent = bookings.filter(
     (b) => b.status !== 'cancelled' && b.pool === pool && b.date.slice(0, 7) === month
   ).length;
@@ -394,14 +426,17 @@ export async function createBooking(
       'createBooking: athleteId, sessionId, date, type, pool and householdId are all required.'
     );
   }
-  if (pool !== (type === 'tournament' ? 'tournaments' : 'training')) {
+  // poolFor() (data/packages.js) is the one place the type->pool mapping is
+  // decided - Sprint 9 extended it with 'specialist' (phil/mental) rather
+  // than duplicating the mapping here as a second ternary that could drift.
+  if (pool !== poolFor(type)) {
     throw new LiveDataError(
       ERR.INVALID,
-      `createBooking: a ${type} session cannot spend the ${pool} pool - the two allowances never substitute.`
+      `createBooking: a ${type} session cannot spend the ${pool} pool - the pools never substitute.`
     );
   }
   const user = requireUser();
-  if (!skipCapCheck) await assertWithinMonthlyCap({ athleteId, householdId, date, pool });
+  if (!skipCapCheck) await assertWithinMonthlyCap({ athleteId, householdId, date, pool, type });
   // Contract v1.1: the booking id IS `{athleteId}_{sessionId}` — the
   // keyspace makes a second booking of the same session an overwrite
   // attempt, which the create-only rules reject. addDoc's random ids were
@@ -428,11 +463,13 @@ export async function createBooking(
       if (!sessionSnap.exists()) {
         throw new LiveDataError(ERR.NOT_FOUND, 'That session no longer exists.');
       }
-      if (bookingSnap.exists()) {
-        // Re-booking after a cancellation (flipping status on the same doc)
-        // is a flow that has not been built yet (open question, routing
-        // report) — any existing doc at this id, cancelled or not, blocks a
-        // new create today, so the message stays generic on purpose.
+      // Sprint 9 pin (contract v1.7): re-booking after a cancellation flips
+      // status on the SAME doc (the keyspace's whole point — one booking per
+      // athlete per session, ever) rather than being blocked. Any OTHER
+      // existing status (confirmed/attended/noshow) still blocks a new
+      // create, message unchanged.
+      const isRebook = bookingSnap.exists() && bookingSnap.data().status === 'cancelled';
+      if (bookingSnap.exists() && !isRebook) {
         throw new LiveDataError(ERR.INVALID, 'This athlete already has this session booked.');
       }
 
@@ -452,7 +489,16 @@ export async function createBooking(
         throw new LiveDataError(ERR.INVALID, 'This session is full.');
       }
 
-      tx.set(bookingRef, booking);
+      if (isRebook) {
+        // updateDoc-style partial write, NOT tx.set(bookingRef, booking) —
+        // firestore.rules' new memberBookingUpdateOk() only admits a diff
+        // hasOnly(['status']); rewriting the whole doc (even with identical
+        // values) would re-stamp createdAt via serverTimestamp() and widen
+        // the diff, and the rule would reject it.
+        tx.update(bookingRef, { status: 'confirmed' });
+      } else {
+        tx.set(bookingRef, booking);
+      }
       tx.update(sessionRef, { booked: booked + 1 });
     });
     // Post-write invalidation seam (Sprint 6 pin): every hook reading
@@ -466,6 +512,65 @@ export async function createBooking(
     return { id, ...booking, createdAt: null };
   } catch (err) {
     throw wrap(err, 'createBooking');
+  }
+}
+
+/**
+ * Cancel a CONFIRMED booking (Sprint 9 pin, contract v1.7) — the athlete's
+ * own user or the household parent may cancel; firestore.rules'
+ * memberBookingUpdateOk() is the server-side half (diff hasOnly(['status']),
+ * confirmed->cancelled only from this function — the re-book direction,
+ * cancelled->confirmed, lives in createBooking's transaction above, not
+ * here). One transaction: read the booking (must exist and be 'confirmed')
+ * and its session, then flip booking.status to 'cancelled' AND give the
+ * slot back on its session (booked - 1, floored at 0) — the EXACT mirror of
+ * createBooking's +1, covered by the sessions match block's existing
+ * bookedDiffOk() clause with no rules change (verified in the routing
+ * report). Mirrors createBooking's error-code discipline throughout
+ * (LiveDataError codes, wrap()).
+ *
+ * Client-side cancel-window gating (My Schedule: cancellable until the day
+ * before; day-of shows a "contact the academy" line instead of the button)
+ * is the CALLER's job — this function performs no date check itself,
+ * matching the rules' own accepted gap for v1.
+ */
+export async function cancelBooking({ bookingId }) {
+  if (!bookingId) {
+    throw new LiveDataError(ERR.INVALID, 'cancelBooking: bookingId is required.');
+  }
+  requireUser();
+  const bookingRef = doc(db, 'bookings', bookingId);
+  try {
+    await runTransaction(db, async (tx) => {
+      // All reads before any write — Firestore transaction requirement.
+      const bookingSnap = await tx.get(bookingRef);
+      if (!bookingSnap.exists()) {
+        throw new LiveDataError(ERR.NOT_FOUND, 'This booking no longer exists.');
+      }
+      const booking = bookingSnap.data();
+      if (booking.status !== 'confirmed') {
+        throw new LiveDataError(
+          ERR.INVALID,
+          `Only a confirmed booking can be cancelled (this one is ${booking.status}).`
+        );
+      }
+      const sessionRef = doc(db, 'sessions', booking.sessionId);
+      const sessionSnap = await tx.get(sessionRef);
+      if (!sessionSnap.exists()) {
+        throw new LiveDataError(ERR.NOT_FOUND, 'That session no longer exists.');
+      }
+      const booked = sessionSnap.data().booked ?? 0;
+
+      tx.update(bookingRef, { status: 'cancelled' });
+      tx.update(sessionRef, { booked: Math.max(0, booked - 1) });
+    });
+    // Post-write invalidation seam (Sprint 6 pin): both collections changed,
+    // same discipline as createBooking — one bump each, after the commit.
+    bump('bookings');
+    bump('sessions');
+    return { id: bookingId, status: 'cancelled' };
+  } catch (err) {
+    throw wrap(err, 'cancelBooking');
   }
 }
 
