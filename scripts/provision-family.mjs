@@ -107,12 +107,13 @@ const FAMILIES = [
 // a null email is skipped with a loud note and the entry provisions
 // cleanly on re-run once filled in.
 const STAFF = [
-  { email: null, role: 'mental', displayName: 'Yannick', specialistId: 'mental' },
+  // Real addresses supplied by the owner, 2026-09-11.
+  { email: 'yannick@rypgolf.com', role: 'mental', displayName: 'Yannick', specialistId: 'mental' },
   // Phil's sessions run like academy training at a smaller cap (owner,
   // 2026-09-11), so he provisions as a coach with a specialist link — not
   // a second owner. He is never the athletes' assigned golf coach; the
   // coach-selection below excludes specialist coaches on purpose.
-  { email: null, role: 'coach', displayName: 'Phil', specialistId: 'phil' },
+  { email: 'phil@rypgolf.com', role: 'coach', displayName: 'Phil', specialistId: 'phil' },
 ];
 
 function userDoc(family, { role, displayName, email, athleteId, specialistId }) {
