@@ -526,3 +526,128 @@ worktree TEAM.md copies predate this note):
   brackets 14+ / 11-13 / 10U — one Whitfield per bracket, so the emulator
   seed shows three one-kid brackets (expected; the harness TOUR_SEED
   carries the multi-kid bracket contrast).
+
+## Sprint 9 pins — specialist 1-on-1s (Phil & Yannick), Lifetime-style booking, cancellation (2026-09-11)
+
+Owner's direction: sessions with Yannick (mental game) and Phil
+(performance) become handleable through the app. UI reference: Life Time's
+class-scheduling flow — instructor-led browsing, a horizontal day strip, a
+slot list, a detail sheet with one Reserve CTA, reservations visible in
+"my schedule", and reservation CANCELLATION (which a capacity-1 session
+needs — an unused 1-on-1 slot is a dead hour for the specialist).
+
+Design keystone: a specialist 1-on-1 IS a session with capacity 1 and its
+own pool. The existing booking transaction, parent book-for-kid, My
+Schedule derivation, and attendance all apply unchanged.
+
+Data contract v1.7:
+- sessions gain two types: 'phil' and 'mental'. capacity 1. Production
+  source stays the Google Calendar via sync (title first word 'Phil' ->
+  phil; 'Mental' or 'Yannick' -> mental); the emulator seed hand-adds
+  slots with ids `YYYY-MM-DD-s<n>` (the '-x0' extras convention, new
+  letter) — the generator never invents them.
+- NEW data/specialists.js (routing lane owns, like tour.js):
+  SPECIALISTS = [
+    { id: 'phil', name: 'Phil', discipline: 'Performance coaching',
+      sessionNoun: 'Performance session' },
+    { id: 'mental', name: 'Yannick', discipline: 'Mental game',
+      sessionNoun: 'Mental game session' },
+  ] (id == session type == the catalogue's philSessions/yannickSessions
+  stems); SPECIALIST_MONTHLY_CAP = 2 (per specialist TYPE, per athlete,
+  per calendar month — owner-tunable single knob; Elite package
+  entitlements stay parked with billing, and philSessions/yannickSessions
+  counts remain null/undecided — DO NOT surface or invent them);
+  SPECIALIST_BOOKING_WINDOW_DAYS = 14 (rolling, from today).
+- bookings for specialist sessions carry pool 'specialist' — they NEVER
+  touch the training/tournament allowances (both tallies filter on their
+  own pool, so exclusion is automatic). poolFor(type) in
+  frontend/src/portal/data/packages.js maps phil|mental -> 'specialist'
+  — ROUTING lane makes that one edit (db lane consumes it via its
+  existing bundle, edits nothing there).
+- createBooking's cap check: pool 'specialist' caps at
+  SPECIALIST_MONTHLY_CAP per session TYPE per month (phil and mental
+  each get their own 2), counted from the athlete's non-cancelled
+  bookings of that type — derive-don't-store, same as allowances.
+- CANCELLATION (new, all booking types): the athlete's own user or the
+  household parent may cancel a CONFIRMED booking. One transaction:
+  booking.status -> 'cancelled' AND sessions.booked - 1 (the exact
+  mirror of create's +1, under the session rule's existing booked-diff
+  clause — routing verifies/extends it for -1). Client gate: cancellable
+  until the day BEFORE the session (day-of = contact the academy; copy
+  says so); rules allow the transition without the date check in v1
+  (flagged as an accepted server-side gap). RE-BOOKING a cancelled doc:
+  createBooking's transaction treats an existing doc with status
+  'cancelled' as the update path (status -> 'confirmed', booked + 1,
+  same doc id per the keyspace); rules gain a member-booking update
+  branch: own athlete/parent, diff hasOnly(['status']), exactly
+  confirmed->cancelled or cancelled->confirmed. NO substring() in rules.
+
+Hook seam (routing owns; frontend codes against):
+- useSpecialistSlots(specialistId) -> { data: { days: [{ date, dayLabel,
+  slots: [{ sessionId, time, booked, capacity, open }] }] }, loading,
+  error }. The next SPECIALIST_BOOKING_WINDOW_DAYS days from today; days
+  with no slots INCLUDED with slots: [] (the day strip needs every day);
+  live via the existing range fetch filtered by type; seed synthesizes a
+  believable fortnight (Yannick Tue/Thu late afternoons, Phil
+  Mon/Wed/Fri, 45-min slots) — invented times only, no invented people.
+- Booking a slot: the existing createBooking, unchanged signature —
+  BookSession's confirmation idiom is the model.
+- useSchedule (or whichever hook MySchedule actually reads — routing
+  confirms and reports the name) gains `cancel(bookingId)`; each
+  upcoming item gains `cancellable` (status 'confirmed' && date >
+  today). live.js gains cancelBooking({ bookingId }) doing the
+  transaction above, then bump('bookings') and bump('sessions') once
+  each after the commit.
+- Routes (PortalRoutes): /portal/coaching -> SpecialistBooking, roles
+  athlete + parent; parent deep-link carries { state: { athleteId } }
+  exactly like /portal/book (BookSessionRoute is the model, including
+  the role resolution).
+- displaySession/session naming: an unlabeled specialist session reads
+  '<sessionNoun> · <name>' (e.g. 'Mental game session · Yannick'), never
+  'Training block'.
+
+UI (frontend lane) — the Life Time flow, translated:
+- NEW screens/SpecialistBooking.js: (1) specialist picker — one card per
+  SPECIALISTS entry (avatar placeholder, name, discipline, one-line
+  blurb); (2) horizontal DAY STRIP of the 14-day window (today first,
+  tappable pills: weekday + date, dot when the day has open slots);
+  (3) the picked day's slot list — time, 45 min, spots ('Open' /
+  'Booked' — capacity 1 so it is binary); (4) tap -> bottom DETAIL SHEET
+  (the existing sheet idiom): specialist, day/time, what-to-expect line,
+  a 'does not use your training or tournament allowance' line, one
+  Reserve CTA -> saving -> confirmed state (BookSession's confirmation
+  pattern, including practice/live split and the parent 'Booking for'
+  selector via initialAthleteId).
+- MySchedule: specialist bookings render with the specialist chip/name;
+  every cancellable upcoming booking gets 'Cancel reservation' behind a
+  confirm step (tap -> sheet: keep / cancel; Lifetime's own pattern);
+  day-of shows the call-the-academy line instead of the button.
+  Cancelled items use the existing cancelled treatment.
+- TypeChip: 'phil' and 'mental' variants (short labels consistent with
+  the chip system).
+- Entry points: athlete Home gets a '1-on-1 coaching' action card;
+  ParentDashboard gets ONE full-width 'Book 1-on-1 coaching' action
+  under the kid cards (not per-card — the coaching screen itself has
+  the child selector).
+- StatesHarness: SpecialistBooking gallery (picker / slots / sheet /
+  confirmed / empty-day) + MySchedule cancel states.
+
+DB lane:
+- sync-calendar-sessions.mjs: classifyTitle gains 'phil' -> phil,
+  'mental'|'yannick' -> mental (case-insensitive first word, existing
+  convention); capacity by type: specialist types 1, others 15; nothing
+  else changes (delete/cancel guards apply as-is).
+- seed-firestore.mjs: hand-seeded specialist sessions over the two weeks
+  after TODAY's date at seed time (ids `YYYY-MM-DD-s0`, `-s1`...,
+  capacity 1, correct full shape incl. gcalEventId null) matching the
+  pattern the hook's seed branch fakes (Yannick Tue/Thu, Phil
+  Mon/Wed/Fri); ONE pre-booked mental session for jordan (pool
+  'specialist', booked 1) so schedule display, the cap, and cancel have
+  something real; sanity output lists them.
+- DATA-MODEL.md v1.7: specialist types + capacity, pool 'specialist',
+  the cancellation + re-book semantics and their rules shape, seed id
+  convention, sync title convention. provision-family untouched.
+
+Deferred, on the record: the specialist-side day view (Yannick/Phil
+seeing their own booked 1-on-1s) — next sprint; v1 rides the existing
+staff surfaces. Server-side cancel-window enforcement — accepted gap.
