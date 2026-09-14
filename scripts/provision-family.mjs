@@ -22,10 +22,10 @@
  *                  athlete who isn't also a portal login. Each athlete entry
  *                  accepts an optional `dob` (YYYY-MM-DD), written straight
  *                  to the athlete doc (contract v1.6, Sprint 8: age
- *                  brackets read it). The FAMILIES below stay `dob: null` —
- *                  these are REAL kids, and this script never invents a
- *                  real birthday; the owner supplies real dobs later and
- *                  they get filled in here at that point.
+ *                  brackets read it). The FAMILIES below are the owner's
+ *                  fictional tester kids (confirmed 2026-09-14), so their
+ *                  dobs are assigned here to spread them across all three
+ *                  brackets as of the season start.
  *   users        — one doc per FAMILY account below, keyed by auth uid.
  *   staffInvites — (contract v1.8, Sprint 10 pin E) CONSUMED, not written by
  *                  the script's own data: reads the pending docs the live
@@ -79,13 +79,12 @@ const FAMILIES = [
   {
     householdId: 'mackbee',
     household: { name: 'MackBee', guardian: { name: 'Makel', email: 'makelmackbee@live.com', phone: null } },
-    // dob: null — REAL kids. Never invent a real birthday; the owner
-    // supplies real dobs later and they land here as a `dob` value per
-    // member (see userDoc()/the athletes doc-build loop below).
+    // Fictional tester kids: dobs chosen so the household spans every
+    // bracket as of the 2026-11-02 season start (15 / 12 / 9).
     athletes: [
-      { id: 'makel-test', name: 'Makel MackBee', packageId: 'g-8-3', contractMinutes: 45, dob: null },
-      { id: 'makel-test-2', name: 'Avery MackBee', packageId: 'g-4-2', contractMinutes: 20, dob: null },
-      { id: 'makel-test-3', name: 'Quinn MackBee', packageId: 'elite', contractMinutes: 95, dob: null },
+      { id: 'makel-test', name: 'Makel MackBee', packageId: 'g-8-3', contractMinutes: 45, dob: '2011-08-14' },
+      { id: 'makel-test-2', name: 'Avery MackBee', packageId: 'g-4-2', contractMinutes: 20, dob: '2014-05-22' },
+      { id: 'makel-test-3', name: 'Quinn MackBee', packageId: 'elite', contractMinutes: 95, dob: '2017-01-18' },
     ],
     accounts: [
       { email: 'makel@rypgolf.com', role: 'owner', displayName: 'Makel' },
@@ -98,9 +97,10 @@ const FAMILIES = [
   {
     householdId: 'eisele',
     household: { name: 'Eisele', guardian: { name: 'Mike', email: 'eisele.mike@gmail.com', phone: null } },
-    // dob: null — same rule as MackBee above: real kid, never invented.
+    // Fictional tester kid: 12 at season start, turns 13 on 11-27 — exercises
+    // the "bracket is fixed as of season start" rule.
     athletes: [
-      { id: 'mike-test', name: 'Mike Eisele Jr.', packageId: 'g-8-3', contractMinutes: 45, dob: null },
+      { id: 'mike-test', name: 'Mike Eisele Jr.', packageId: 'g-8-3', contractMinutes: 45, dob: '2013-11-27' },
     ],
     accounts: [
       { email: 'mike@rypgolf.com', role: 'owner', displayName: 'Mike' },
