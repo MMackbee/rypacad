@@ -1157,3 +1157,36 @@ Worktrees: wt-db / wt-routing / wt-frontend, siblings of rypacad, on
 agent/<lane>/sprint11-membership off portal/r3 at this pin's commit; PM
 merges db → routing → frontend, integrates, browser-passes on :3001,
 removes worktrees.
+
+## Sprint 11 amendment v1.9.1 — owner ruling mid-sprint (2026-09-15)
+
+Relayed by PM to all three lanes while they run (lane worktree TEAM.md
+copies predate this):
+
+ELITE INCLUDES 16 PHIL SESSIONS A MONTH (owner: "elite gets you 16
+sessions with phil"). This is the number section C's elite branch was
+waiting on, and it matches the catalogue's own arithmetic — Elite's $1,000
+is exactly the top golf package ($740) plus the 16-session fitness package
+($260), so Elite carries f-16's Phil count.
+
+- data/packages.js: ELITE_TIERS.philSessions = 16 on BOTH 'elite' and
+  'elite-247' (PM assumption: 24/7 is Elite plus facility access with the
+  same Phil count — flag if wrong). yannickSessions stays null: still
+  undecided, so mental stays the flat SPECIALIST_MONTHLY_CAP.
+- entitlementsFor (routing): phil precedence unchanged — an explicit
+  fitnessPackageId still wins, then Elite, then none — but the Elite
+  branch's limit is now the golf package's philSessions (16), no longer
+  the SPECIALIST_MONTHLY_CAP fallback. source stays 'elite'.
+- data/specialists.js: the comment forbidding any read of
+  philSessions is retired for phil (it stays true for yannickSessions).
+- Copy (frontend): "Included with Elite — 3 of 16 used this month" on the
+  booking summary and the Membership performance card; the ops/owner
+  editor shows "Elite already includes Phil sessions" beside the fitness
+  select when the golf package is Elite (assigning one anyway is allowed
+  and still wins, per the precedence above).
+- Data (db): the seed's and the provisioner's packages docs derive from
+  packages.js, so philSessions: 16 flows into packages/elite and
+  packages/elite-247 on the next seed / user-gated provisioning run —
+  DATA-MODEL's packages table notes the field is now set for phil and
+  still null for yannick. Quinn MackBee (elite) is the production athlete
+  this exercises.
