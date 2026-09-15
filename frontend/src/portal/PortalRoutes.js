@@ -3,6 +3,7 @@ import { Navigate, Route, Routes, useLocation, useNavigate, useParams } from 're
 
 import useAuthSession from './hooks/useAuthSession';
 import { isLive } from './hooks/live';
+import { useHouseholdReservations, useMembership } from './hooks';
 import StatesHarness from './StatesHarness';
 import SignIn, { LANDING_BY_ROLE } from './screens/SignIn';
 import NotProvisioned from './screens/NotProvisioned';
@@ -368,6 +369,79 @@ function SessionAttendanceRoute({ onBack }) {
 }
 
 /**
+ * Membership (Sprint 11 pin D, contract v1.9) and Reservations (pin F) —
+ * the frontend lane builds screens/Membership.js and screens/Reservations.js
+ * in a parallel worktree; NEITHER EXISTS in this worktree as of this commit
+ * (checked: `git ls-tree` has no such paths here). The Sprint 7/9 precedent
+ * for exactly this situation (TourStandings, then SpecialistBooking) was a
+ * plain `import X from './screens/X'` committed ahead of the frontend
+ * lane's file landing — but that import does not resolve in the committing
+ * lane's OWN worktree either (confirmed against both of those historical
+ * commits: the screen file is absent from the tree at commit time), so it
+ * could never have satisfied THIS sprint's own gate ("esbuild bundle of
+ * frontend/src/index.js exits 0"). Adapted instead, per this sprint's own
+ * instruction to use "a minimal placeholder element" when the plain-import
+ * precedent cannot compile standalone: two local placeholders, swapped for
+ * real imports (`import Membership from './screens/Membership';` /
+ * `import Reservations from './screens/Reservations';`) at merge — see the
+ * routing report for the exact prop contract each route already passes,
+ * which the real screens should match rather than the routes being
+ * rewritten around them.
+ */
+/**
+ * Both placeholders below call the REAL hook (useMembership / useHouseholdReservations)
+ * and dump its {loading, error, data} JSON rather than rendering nothing — this
+ * doubles as this lane's own end-to-end verification (the hook seam, live.js's
+ * queries and firestore.rules all actually run) and as a live shape reference
+ * for the frontend lane to build the real screen against, without guessing.
+ */
+function MembershipPlaceholder({ role, onBack }) {
+  const { data, loading, error } = useMembership();
+  return (
+    <div style={{ padding: 24, background: '#000', color: '#fff', minHeight: '100%' }}>
+      <p>Membership screen not yet merged from the frontend lane (role: {role}).</p>
+      <p>useMembership(): loading={String(loading)} error={error ? error.message : 'null'}</p>
+      <pre style={{ whiteSpace: 'pre-wrap', fontSize: 12 }}>{JSON.stringify(data, null, 2)}</pre>
+      {onBack && (
+        <button type="button" onClick={onBack}>
+          Back
+        </button>
+      )}
+    </div>
+  );
+}
+function ReservationsPlaceholder({ onBack }) {
+  const { data, loading, error } = useHouseholdReservations();
+  return (
+    <div style={{ padding: 24, background: '#000', color: '#fff', minHeight: '100%' }}>
+      <p>Reservations screen not yet merged from the frontend lane.</p>
+      <p>useHouseholdReservations(): loading={String(loading)} error={error ? error.message : 'null'}</p>
+      <pre style={{ whiteSpace: 'pre-wrap', fontSize: 12 }}>{JSON.stringify(data, null, 2)}</pre>
+      {onBack && (
+        <button type="button" onClick={onBack}>
+          Back
+        </button>
+      )}
+    </div>
+  );
+}
+
+/**
+ * Membership is reachable by both parent and athlete (Sprint 11 pin D) —
+ * same role resolution BookSessionRoute/CoachingRoute above use; back target
+ * is role-aware the same way AthleteDetailRoute's is, mirroring this file's
+ * own established precedent rather than inventing a new pattern.
+ */
+function MembershipRoute({ onSignOut }) {
+  const live = isLive();
+  const { user } = useAuthSession(live ? undefined : { variant: 'idle' });
+  const navigate = useNavigate();
+  const role = live && user?.role === 'athlete' ? 'athlete' : 'parent';
+  const back = role === 'athlete' ? '/portal/home' : '/portal/family';
+  return <MembershipPlaceholder bare role={role} onSignOut={onSignOut} onBack={() => navigate(back)} />;
+}
+
+/**
  * Staff & Roles flips between its list and add-member views in place - the add
  * view is a step of the same owner task, not a separate destination, so it is
  * local state rather than a route. Its back affordance previously pointed at
@@ -544,14 +618,38 @@ export default function PortalRoutes() {
       {/* The old bare /portal/athlete has no id to resolve — redirect rather
           than render a screen that can no longer pick an athlete for itself. */}
       <Route path="athlete" element={<Navigate to="/portal/family" replace />} />
-      {/* Billing is parked (Sprint 7 owner ruling: energy goes to features,
-          not billing, for now). The route survives only as a redirect so an
-          old bookmark or the Stripe return URL still lands somewhere real;
-          the screen itself stays in the harness for that eventual Stripe
-          return, imported there directly rather than from here (no
-          RequireRole needed - a bare redirect, same as the legacy
-          bare-/portal/athlete redirect above). */}
-      <Route path="billing" element={<Navigate to="/portal/family" replace />} />
+      {/* Billing is still parked as its OWN concept (no Stripe, no amounts
+          due) — but Sprint 11 pin D replaces it with Membership, a real
+          screen showing what each package ENTITLES an athlete to. The
+          redirect now lands there instead of /portal/family (superseding
+          the Sprint 7 redirect); the Billing.js screen itself stays
+          unrouted in the harness, untouched, per that same Sprint 7 ruling
+          — this is a redirect-target change only, not a Billing revival. */}
+      <Route path="billing" element={<Navigate to="/portal/membership" replace />} />
+      {/* Membership (Sprint 11 pin D, contract v1.9): parent + athlete both
+          reach it — same role resolution this file's other dual-role routes
+          use (BookSessionRoute, CoachingRoute). Screen pending the frontend
+          lane's merge (see MembershipRoute/MembershipPlaceholder above). */}
+      <Route
+        path="membership"
+        element={
+          <RequireRole roles={['parent', 'athlete']}>
+            <MembershipRoute onSignOut={onSignOut} />
+          </RequireRole>
+        }
+      />
+      {/* Family Reservations (Sprint 11 pin F, contract v1.9): parent only —
+          the family-grouped view the owner's Life Time reference showed, one
+          section per household member. Screen pending the frontend lane's
+          merge (see ReservationsPlaceholder above). */}
+      <Route
+        path="reservations"
+        element={
+          <RequireRole roles={['parent']}>
+            <ReservationsPlaceholder onBack={go('/portal/family')} />
+          </RequireRole>
+        }
+      />
       {/* RYP Tour (Sprint 7 pin): the weekend-tournament leaderboard, open to
           every signed-in portal role - standings are academy-public
           (contract v1.5), so this is the one route in this file with the
