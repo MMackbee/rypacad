@@ -25,7 +25,14 @@
  *                  brackets read it). The FAMILIES below are the owner's
  *                  fictional tester kids (confirmed 2026-09-14), so their
  *                  dobs are assigned here to spread them across all three
- *                  brackets as of the season start.
+ *                  brackets as of the season start. Contract v1.9 (Sprint
+ *                  11 pin A): this script NEVER writes `fitnessPackageId` —
+ *                  only the ops/owner Membership editor does. The athlete
+ *                  write is `updateMask`-scoped to exactly the fields above
+ *                  (ATHLETE_UPDATE_MASK, near where the write is built) so a
+ *                  re-run can never silently erase a live assignment; see
+ *                  that constant's comment for why leaving the key out of
+ *                  the object literal alone would not have been enough.
  *   users        — one doc per FAMILY account below, keyed by auth uid.
  *   staffInvites — (contract v1.8, Sprint 10 pin E) CONSUMED, not written by
  *                  the script's own data: reads the pending docs the live
@@ -363,7 +370,25 @@ async function main() {
   const coach = found.find((m) => m.role === 'coach' && !m.specialistId) ?? null;
   const packages = loadPackages();
 
-  const docs = []; // [collection, id, doc]
+  // Contract v1.9 (Sprint 11 pin A): the fields THIS script is authoritative
+  // for on an athlete doc — everything below is deliberately absent from
+  // that list, most importantly `fitnessPackageId`. An `update` Write with
+  // no `updateMask` is a FULL DOCUMENT REPLACE in the Firestore REST API
+  // (verified against the emulator while building this: an `update` write
+  // that omits a field wipes that field if the doc already had it, not just
+  // "leaves it alone") — so simply leaving `fitnessPackageId` out of the
+  // object literal below does NOT, on its own, protect an ops/owner's live
+  // Membership-editor assignment (pin B) from being erased the next time
+  // this script re-runs (e.g. to fill in a still-missing account). The
+  // `updateMask` on the athletes write further down pins Firestore to ONLY
+  // these fields, so anything this script has no opinion on — today that's
+  // `fitnessPackageId` and the assignment branch's `updatedAt` — is left
+  // untouched on the server, exactly like the mask's own semantics an
+  // untouched read shows. This is the actual enforcement; the field simply
+  // not appearing in the object below is necessary but not sufficient.
+  const ATHLETE_UPDATE_MASK = ['name', 'dob', 'householdId', 'packageId', 'contractMinutes', 'coachId'];
+
+  const docs = []; // [collection, id, doc, updateMask?]
   for (const [id, doc] of packages) docs.push(['packages', id, doc]);
   let athleteCount = 0;
   for (const f of FAMILIES) {
@@ -388,7 +413,13 @@ async function main() {
           packageId: a.packageId,
           contractMinutes: a.contractMinutes,
           coachId: coach ? coach.uid : null, // filled on re-run once the coach account exists
+          // fitnessPackageId is DELIBERATELY NOT SET HERE — see
+          // ATHLETE_UPDATE_MASK above. Absent and explicit null read
+          // identically everywhere per contract v1.9, so provisioning
+          // simply never has an opinion on it; only the Membership editor
+          // (ops/owner, live.js's setAthletePackages) ever writes it.
         },
+        ATHLETE_UPDATE_MASK,
       ]);
     }
   }
@@ -401,8 +432,10 @@ async function main() {
     `\nPlan: ${docs.length} doc(s) — ${packages.size} packages, ${FAMILIES.length} households, ` +
       `${athleteCount} athletes, ${found.length} users, ${provisionedInviteCount} staffInvites provisioned`
   );
-  for (const [col, id, doc] of docs) {
-    if (col !== 'packages') console.log(`  ${col}/${id}: ${JSON.stringify(doc)}`);
+  for (const [col, id, doc, mask] of docs) {
+    if (col === 'packages') continue;
+    const maskNote = mask ? ` [masked write: ${mask.join(', ')} only — other fields on the live doc are left alone]` : '';
+    console.log(`  ${col}/${id}: ${JSON.stringify(doc)}${maskNote}`);
   }
   if (!coach) console.log('  note: athlete coachId is null until the coach account exists.');
 
@@ -411,11 +444,21 @@ async function main() {
     return;
   }
 
-  const writes = docs.map(([col, id, doc]) => ({
+  // Contract v1.9: a doc entry carrying a `mask` (athletes, above) commits
+  // as a Firestore `updateMask`-scoped write — Firestore leaves every field
+  // NOT in the mask untouched on the server, rather than replacing the
+  // whole document with exactly what this script sends (the REST API's
+  // default `update` behavior when no mask is given, confirmed against the
+  // emulator: an unmasked `update` silently drops any field the caller
+  // omits). Every other collection here keeps that full-replace default —
+  // this script IS the sole owner of packages/households/users/staffInvites
+  // shapes, so a full replace is exactly right for those.
+  const writes = docs.map(([col, id, doc, mask]) => ({
     update: {
       name: `projects/${PROJECT_ID}/databases/(default)/documents/${col}/${id}`,
       fields: fsFields(doc),
     },
+    ...(mask ? { updateMask: { fieldPaths: mask } } : {}),
   }));
   const BATCH = 400;
   for (let i = 0; i < writes.length; i += BATCH) {

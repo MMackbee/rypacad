@@ -21,7 +21,10 @@
  *                  as of contract v1.6 (Sprint 8: age brackets), the
  *                  OWNER-SUPPLIED dobs (2026-09-10), landing the three kids
  *                  in three different brackets as of SEASON_BOUNDS.start —
- *                  see WHITFIELD_DOBS below.
+ *                  see WHITFIELD_DOBS below. Contract v1.9 (Sprint 11 pin A):
+ *                  jordan and reese also get a `fitnessPackageId` (f-8, f-4);
+ *                  nico's is explicit `null` — see WHITFIELD_FITNESS_PACKAGE_IDS
+ *                  below for why null over omitting the key.
  *   users       — one parent, one athlete, one coach, one owner
  *   contractLogs — Jordan's practice log history for the last ~2 weeks
  *                  (contract v1.3: variable minutes, some below the 45-min
@@ -42,7 +45,20 @@
  *                  booking for jordan against the first hand-seeded Yannick
  *                  ('mental') slot, pool 'specialist', so schedule display,
  *                  the monthly cap, and cancellation all have something real
- *                  to exercise in QA.
+ *                  to exercise in QA. Contract v1.9 (Sprint 11): TWO PAST
+ *                  'phil' bookings for jordan against hand-seeded past Phil
+ *                  sessions earlier in the current calendar month (both
+ *                  'attended'), so entitlementsFor()'s derived Phil "used"
+ *                  is non-zero the moment the emulator loads (2 of jordan's
+ *                  f-8 package's 8) — matches TEAM.md pin G's own example
+ *                  copy. Plus ONE upcoming 'phil' booking for reese against
+ *                  the first hand-seeded upcoming Phil slot, so the Family
+ *                  Reservations view (pin F) has a specialist row for a
+ *                  second household member too. jordan's upcoming
+ *                  '2026-11-02-1' training booking also gets a real
+ *                  `sessions.coachId` (the generator always leaves it null)
+ *                  so Reservations' `instructor` field has a real value for
+ *                  at least one training row.
  *   tournamentResults — SCORES (strokes) for two real generated Saturday
  *                  tournament blocks (contract v1.6, Sprint 8: coaches enter
  *                  strokes now, not tap-order positions; a write-time age
@@ -314,6 +330,55 @@ function addSpecialistSessions(sessions, runDate = new Date()) {
 }
 
 // ---------------------------------------------------------------------------
+// PAST Phil sessions — contract v1.9, TEAM.md "Sprint 11 pins" DB lane
+// bullet: "two PAST 'phil' bookings for jordan in the CURRENT calendar month
+// so derived 'used' is non-zero." addSpecialistSessions() above only ever
+// generates FORWARD from the day this script runs (the booking-window
+// convention it shares with the live useSpecialistSlots() fallback), so it
+// can never produce a session that has already happened — this is a
+// separate, small hand-add for exactly that gap.
+//
+// Walks backward day by day from the run date, inside the SAME calendar
+// month only (stops rather than reaching into last month), collecting two of
+// Phil's own working days (Mon/Wed/Fri, SPECIALIST_WEEKDAY_TYPE above) and
+// hand-adding a single slot 0 session on each — same id convention
+// (`YYYY-MM-DD-s0`), same doc shape as addSpecialistSessions(), same Phil
+// capacity-6 group-session rule (v1.7.1). Computed off `runDate`, never
+// hardcoded, so "past, this month" tracks whenever the seed actually runs —
+// same discipline as the forward window.
+// ---------------------------------------------------------------------------
+function addPastPhilSessions(sessions, runDate = new Date()) {
+  const ids = [];
+  for (let back = 1; ids.length < 2; back++) {
+    const d = new Date(runDate);
+    d.setDate(d.getDate() - back);
+    if (d.getMonth() !== runDate.getMonth() || d.getFullYear() !== runDate.getFullYear()) {
+      break; // ran out of past days in the current calendar month
+    }
+    if (SPECIALIST_WEEKDAY_TYPE[d.getDay()] !== 'phil') continue;
+    const dateStr = isoDate(d);
+    const id = `${dateStr}-s0`;
+    if (sessions.has(id)) continue; // don't collide with an existing slot
+    sessions.set(id, {
+      date: dateStr,
+      time: SPECIALIST_SLOT_TIMES.phil[0],
+      type: 'phil',
+      capacity: 6, // v1.7.1: Phil sessions are group sessions, cap 6
+      booked: 0,
+      coachId: null,
+      label: null,
+      special: false,
+      overflow: false,
+      status: 'scheduled',
+      gcalEventId: null, // hand-seeded, never a synced-from-calendar doc
+      coachNote: null, // contract v1.8, Sprint 10 pin H
+    });
+    ids.push(id);
+  }
+  return ids;
+}
+
+// ---------------------------------------------------------------------------
 // Build the documents. Shapes follow the data contract v1 in TEAM.md; the
 // field-by-field spec is docs/portal/DATA-MODEL.md.
 // ---------------------------------------------------------------------------
@@ -366,6 +431,20 @@ function buildDocs(portal) {
   // addSpecialistSessions() above for the id/window/pattern rationale.
   const specialistSlotIds = addSpecialistSessions(sessions);
 
+  // PAST Phil sessions (contract v1.9, Sprint 11) — see addPastPhilSessions()
+  // above. Must find two or the pinned jordan bookings below have nothing
+  // real to reference.
+  const pastPhilIds = addPastPhilSessions(sessions);
+  if (pastPhilIds.length < 2) {
+    throw new Error(
+      `Only found ${pastPhilIds.length} past Phil working day(s) (Mon/Wed/Fri) earlier in the ` +
+        'current calendar month — the seed pins two PAST phil bookings for jordan so ' +
+        'entitlementsFor() has a non-zero Phil "used" this month (TEAM.md Sprint 11 DB lane ' +
+        'bullet). This can happen near the start of a month; re-run later in the month, or widen ' +
+        'the lookback in addPastPhilSessions() if this becomes a recurring problem.'
+    );
+  }
+
   // households — guardian contact from the scaffold (dana@email.com is the
   // parent email seed.js uses). Stripe ids are null: ids only, and a demo
   // household has none.
@@ -400,6 +479,16 @@ function buildDocs(portal) {
     reese: '2014-03-02', // 12 at season start -> bracket 11-13
     nico: '2017-09-09', // 9 at season start -> bracket 10U
   };
+  // fitnessPackageId (contract v1.9, Sprint 11 pin A) — jordan and reese get
+  // a real fitness package; nico gets an EXPLICIT null (not an omitted key —
+  // see DATA-MODEL.md's seeding note for why: one consistent "always present,
+  // sometimes null" rule for every package-shaped pointer on this document,
+  // matching contractMinutes' own explicit-null treatment for nico below).
+  const WHITFIELD_FITNESS_PACKAGE_IDS = {
+    jordan: 'f-8',
+    reese: 'f-4',
+    nico: null,
+  };
   const coachUid = 'coach-luke';
   const athletes = new Map();
   for (const child of HOUSEHOLD.children) {
@@ -409,6 +498,7 @@ function buildDocs(portal) {
       dob: WHITFIELD_DOBS[child.id] ?? null,
       householdId,
       packageId: child.packageId,
+      fitnessPackageId: WHITFIELD_FITNESS_PACKAGE_IDS[child.id] ?? null,
       contractMinutes: minutes ? Number(minutes[1]) : null,
       coachId: coachUid,
     });
@@ -546,6 +636,75 @@ function buildDocs(portal) {
       createdAt: bookingCreatedAt,
     });
     session.booked += 1; // same invariant as the WHITFIELD_BOOKINGS loop above
+  }
+
+  // TWO PAST 'phil' bookings for jordan (contract v1.9, Sprint 11 DB lane
+  // bullet) — against the two sessions addPastPhilSessions() hand-added
+  // above, both already occurred (status 'attended'). Together with
+  // jordan's f-8 fitnessPackageId above, this makes entitlementsFor()'s
+  // derived Phil `used` 2 of 8 — see DATA-MODEL.md's seeding note for why
+  // that specific number matches TEAM.md pin G's example copy verbatim.
+  for (const sessionId of pastPhilIds) {
+    const session = sessions.get(sessionId);
+    bookings.set(`jordan_${sessionId}`, {
+      athleteId: 'jordan',
+      sessionId,
+      date: session.date,
+      type: 'phil',
+      pool: 'specialist', // literal — see the mental booking note above for why
+      status: 'attended',
+      householdId,
+      createdBy: 'athlete-jordan',
+      createdAt: bookingCreatedAt,
+    });
+    session.booked += 1; // same invariant as every other booking above
+  }
+
+  // ONE upcoming 'phil' booking for reese (contract v1.9, Sprint 11 DB lane
+  // bullet) — the household's second specialist row (jordan's upcoming
+  // mental booking above is the first), so Family Reservations (pin F) has
+  // more than one member's specialist row to render. Picks the first Phil
+  // slot addSpecialistSessions() generated, the same
+  // deterministic-regardless-of-weekday pattern as jordanMentalSlot above.
+  const reeseUpcomingPhilSlot = specialistSlotIds.find((s) => s.type === 'phil');
+  if (!reeseUpcomingPhilSlot) {
+    throw new Error(
+      'addSpecialistSessions() produced no Phil slot in the ' +
+        `${SPECIALIST_BOOKING_WINDOW_DAYS}-day window — cannot seed the pinned upcoming reese booking. ` +
+        'Widen SPECIALIST_BOOKING_WINDOW_DAYS or check SPECIALIST_WEEKDAY_TYPE.'
+    );
+  }
+  {
+    const session = sessions.get(reeseUpcomingPhilSlot.id);
+    bookings.set(`reese_${reeseUpcomingPhilSlot.id}`, {
+      athleteId: 'reese',
+      sessionId: reeseUpcomingPhilSlot.id,
+      date: session.date,
+      type: session.type, // 'phil'
+      pool: 'specialist', // literal — see the mental booking note above for why
+      status: 'confirmed',
+      householdId,
+      createdBy: 'parent-dana', // reese has no users doc of her own
+      createdAt: bookingCreatedAt,
+    });
+    session.booked += 1; // same invariant as every other booking above
+  }
+
+  // sessions.coachId on jordan's upcoming '2026-11-02-1' training booking
+  // (contract v1.9, Sprint 11 DB lane bullet) — buildSeason() always leaves
+  // coachId null (schedule.js never assigns one), so without this the
+  // Family Reservations view's derived `instructor` field would have no
+  // real training-block example anywhere in this seed.
+  {
+    const upcomingTrainingSession = sessions.get('2026-11-02-1');
+    if (!upcomingTrainingSession) {
+      throw new Error(
+        "Seed coachId references sessions/2026-11-02-1, which buildSeason() did not generate " +
+          '(the season config in season.js changed under this seed). Update the target in ' +
+          'scripts/seed-firestore.mjs to reference a real generated UPCOMING training session id.'
+      );
+    }
+    upcomingTrainingSession.coachId = coachUid;
   }
 
   // tournamentResults — SCORES (strokes) for two real generated Saturday
@@ -951,12 +1110,12 @@ async function main() {
         ` capacity=${doc.capacity} booked=${doc.booked} gcalEventId=${doc.gcalEventId}`
     );
   }
-  console.log('\nPre-booked specialist booking (jordan, contract v1.7):');
+  console.log('\nSpecialist ("specialist"-pool) bookings (contract v1.7 + v1.9):');
   for (const [id, doc] of collections.bookings) {
     if (doc.pool !== 'specialist') continue;
     const session = collections.sessions.get(doc.sessionId);
     console.log(
-      `  bookings/${id}: status=${doc.status} pool=${doc.pool} createdBy=${doc.createdBy}` +
+      `  bookings/${id}: status=${doc.status} type=${doc.type} pool=${doc.pool} createdBy=${doc.createdBy}` +
         ` -> sessions/${doc.sessionId}.booked=${session.booked}/${session.capacity}`
     );
   }
@@ -1009,6 +1168,17 @@ async function main() {
   {
     const notedSession = collections.sessions.get('2026-11-09-2');
     console.log(`  sessions/2026-11-09-2: coachNote=${JSON.stringify(notedSession.coachNote)}`);
+  }
+
+  console.log('\nathletes.fitnessPackageId (contract v1.9):');
+  for (const [id, doc] of collections.athletes) {
+    console.log(`  athletes/${id}: fitnessPackageId=${JSON.stringify(doc.fitnessPackageId)} packageId=${doc.packageId}`);
+  }
+
+  console.log('\nsessions.coachId on an upcoming booked training session (contract v1.9):');
+  {
+    const coachedSession = collections.sessions.get('2026-11-02-1');
+    console.log(`  sessions/2026-11-02-1: coachId=${JSON.stringify(coachedSession.coachId)}`);
   }
 
   if (DRY_RUN) {
