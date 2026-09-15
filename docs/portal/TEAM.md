@@ -1190,3 +1190,91 @@ is exactly the top golf package ($740) plus the 16-session fitness package
   DATA-MODEL's packages table notes the field is now set for phil and
   still null for yannick. Quinn MackBee (elite) is the production athlete
   this exercises.
+
+## Sprint 11 integration notes (PM merge + live pass, 2026-09-15)
+
+All three lanes merged clean (db -> routing -> frontend, --no-ff).
+Reconciled at integration:
+- The frontend lane's screen-local fallbacks (components/useMembershipCompat.js,
+  the demoMembership/demoReservations fixtures, the useAssignPackages stub)
+  are removed; Membership.js, Reservations.js, AthleteMembershipCard.js and
+  SpecialistBooking.js import the routing lane's real hooks by name. The
+  harness `variant` prop survives on the two new screens as harness-only:
+  'populated' is the real hook in seed mode, loading/error/empty drive the
+  branches locally (TourStandings' precedent).
+- SpecialistBooking reads the entitlement off useSpecialistSlots' own
+  payload (`data.entitlement`, scoped by the parent's selected child via
+  the hook's athleteId option), not off useMembership; the selectedAthleteId
+  state moved above the hook call so it can scope it. `demoEntitlementSource`
+  is now an explicit harness override with no default.
+- useAthleteDetail exposes `packageId` and `fitnessPackageId` on `athlete`
+  (both modes), which the editor's selects preselect from.
+- PortalRoutes: the two placeholder components are gone; /portal/membership
+  and /portal/reservations render the real screens; /portal/settings admits
+  athletes through a role-resolving SettingsRoute; AthleteDetailRoute passes
+  the signed-in role (the editor card and the tab bar key off it) plus a
+  role-aware back target and label (Admin / Roster / My sessions; parents
+  keep the derived household name).
+- Frontend-lane finding worth keeping: CRA's webpack build hard-fails on a
+  statically-known namespace property (`hooks.useX`, `hooks['useX']`) whose
+  export is absent - only a variable key escapes the check. The precedent
+  comments in Roster/TourStandings are stale, not proof of safety. Lanes
+  should not build against missing exports at all; placeholders in the
+  routing lane (as this sprint did) are the right shape.
+
+Live emulator pass (parent-dana, athlete-jordan, owner, coach-luke) -
+defects found and fixed before commit:
+1. SpecialistBooking's summary never rendered: the integration read
+   `slotsState.entitlement`; the payload is `slotsState.data.entitlement`.
+2. AthleteDetail never received the signed-in role from its route, so the
+   staff-only membership editor could not render and staff saw the parent
+   tab bar and a "Family" back link.
+3. The editor seeded its selects once at mount, before the athlete record
+   loaded - the golf select stayed blank and Save was a no-op. A sync effect
+   now follows the loaded values (and the post-save refetch).
+4. The emulator's packages/elite doc predated amendment v1.9.1 (seeded
+   from the db worktree before routing's philSessions change), so Elite
+   read "0 of 0" until a re-seed from the merged checkout. PRODUCTION HAS
+   THE SAME GAP: packages/elite and packages/elite-247 carry philSessions
+   null until the owner re-runs provision-family.mjs (a full-replace write
+   on packages docs), which is now a listed deploy step.
+
+Verified end to end: parent Membership (three members, Elite "0 of 16",
+fitness "2 of 8", "1 of 4", prices as catalogue facts, no "billing");
+Reservations (sections per member, Upcoming/Past, instructor on specialist
+rows, same-day rule, cancel sheet -> booking cancelled + session booked
+decremented); specialist booking entitlement states per selected child
+(fitness / Elite / none with Reserve disabled) and Yannick's flat-cap copy;
+athlete self-only Membership + Settings row; owner editor (preselect,
+assign f-4 -> doc + updatedAt, Elite hint, restore to null); coach read-only
+card, "‹ Roster" back, coach tab set; admin block-fill footnote hidden when
+the week has no Friday block.
+
+Decisions recorded:
+- Instructor names on training/tournament rows stay null for parents (no
+  rules-compliant read of a coach's users doc; widening it would expose
+  staff emails to every family) - the row omits the segment. Specialist
+  rows name Phil/Yannick with no extra read. Revisit only if coach
+  assignment becomes a real production workflow.
+- The notification category "Billing" (charges, failed payments, invoice
+  receipts) stays on Settings: it is a transactional notice about
+  out-of-app billing, keyed by the stored notificationPrefs.billing entry,
+  not an in-app billing surface.
+- Seed quirk carried forward (emulator-only, pre-existing): Whitfield
+  bookings on Nov 7/9/14 are seeded `attended` though the dates are in the
+  future, so they list under Upcoming without a cancel affordance.
+  Correct per the cancellable rule; a seed follow-up if it confuses QA.
+- Queued (db lane flag, out of scope): provision-family.mjs's users write
+  is a full replace and would reset a parent's saved notificationPrefs on
+  re-run - the same updateMask treatment the athletes write now has.
+- PortalRoutes.js (703 lines) and SpecialistBooking.js (747) remain over
+  the 500-line guideline, both pre-existing; grandfathered like hooks/.
+
+Deploy steps (owner-gated): push portal/r3:main; deploy
+firestore:rules (the package-assignment branch); re-run
+provision-family.mjs so packages/elite* carry philSessions 16 (athlete
+docs are mask-protected, so any fitness package assigned in the app
+survives the re-run).
+
+Not exercised live: the attendance footer "Edit session note" state (needs
+a completed session carrying a note; harness-verified by the frontend lane).

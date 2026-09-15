@@ -19,7 +19,6 @@ import {
   SignOutButton,
   Tick,
 } from '../components/Primitives';
-import { useMembership, usingRealMembershipHook } from '../components/useMembershipCompat';
 import { seedSpecialistDays, useBooking, useHouseholdAthletes, useSpecialistSlots } from '../hooks';
 import { SPECIALISTS } from '../data/specialists';
 // Pure calendar/season helpers per the seam rule already established in
@@ -31,14 +30,13 @@ import { datePill } from '../data/season';
 
 /**
  * Sprint 11 pin G addendum (TEAM.md, contract v1.9): the summary line and
- * the "no fitness package" blocking notice both read the relevant athlete's
- * Phil/mental entitlement off useMembership() (contract v1.9 D) — the SAME
- * derived numbers Membership.js shows, never recomputed here. See
- * components/useMembershipCompat.js for the fallback swap rationale (the
- * hook does not exist in this worktree yet) and components/EntitlementSummary.js
- * for the copy derivation and the blocking-notice component itself — both
- * extracted out of this file to keep it closer to the project's file-size
- * convention.
+ * the "no fitness package" blocking notice read the relevant athlete's
+ * Phil/mental entitlement off useSpecialistSlots' own `entitlement` (the
+ * parent's selected child via athleteId, else the athlete's own record) -
+ * the SAME entitlementsFor derivation Membership.js shows, never recomputed
+ * here. components/EntitlementSummary.js holds the copy derivation and the
+ * blocking-notice component (extracted to keep this file near the project's
+ * file-size convention).
  *
  * 05·S · Specialist Booking - athlete + parent (Sprint 9 pin, docs/portal/
  * TEAM.md, "specialist 1-on-1s"). Life Time's own class-scheduling flow,
@@ -78,10 +76,9 @@ import { datePill } from '../data/season';
  *   picker, exactly matching the pinned contract. Flagged in the sprint
  *   report.
  * @param {'fitness'|'elite'|'none'} [demoEntitlementSource]  HARNESS-ONLY,
- *   same category as `harnessStage` above — previews Phil's three summary/
- *   blocking states (G) while useMembership() is missing (see the fallback
- *   doc above demoEntitlement). Ignored the moment the real hook lands; no
- *   real caller ever passes it.
+ *   same category as `harnessStage` above - previews Phil's three summary/
+ *   blocking states (G) in place of the hook's own entitlement. No real
+ *   caller ever passes it.
  * @param {string} [harnessSpecialistId]  HARNESS-ONLY — which specialist
  *   `harnessStage` mounts directly into (defaults to SPECIALISTS[0], Phil).
  *   Lets the gallery deep-mount Yannick's flat-cap state too, the same way
@@ -95,7 +92,7 @@ export default function SpecialistBooking({
   onBack,
   onSignOut,
   harnessStage,
-  demoEntitlementSource = 'fitness',
+  demoEntitlementSource,
   harnessSpecialistId,
 }) {
   const navigate = useNavigate();
@@ -103,7 +100,11 @@ export default function SpecialistBooking({
   const [specialistId, setSpecialistId] = useState(initialSpecialistId);
   const specialist = SPECIALISTS.find((s) => s.id === specialistId) || null;
 
-  const slotsState = useSpecialistSlots(specialistId);
+  // Declared ahead of useSpecialistSlots so the parent's selected child can
+  // scope the hook's entitlement (Sprint 11 pin G); stays null for an
+  // athlete, whose own record the hook resolves by itself.
+  const [selectedAthleteId, setSelectedAthleteId] = useState(null);
+  const slotsState = useSpecialistSlots(specialistId, { athleteId: selectedAthleteId ?? undefined });
   // Memoized so its identity only changes when specialistId or the hook's
   // data actually changes - the effects below key off that stability rather
   // than an array literal rebuilt (and therefore "changed") on every render.
@@ -178,7 +179,6 @@ export default function SpecialistBooking({
   // uses (read there for the household + preferred-id logic this mirrors).
   const household = useHouseholdAthletes();
   const isParent = role === 'parent';
-  const [selectedAthleteId, setSelectedAthleteId] = useState(null);
   const householdAthletes = household.data ?? [];
   useEffect(() => {
     if (!isParent || selectedAthleteId || !householdAthletes.length) return;
@@ -198,23 +198,13 @@ export default function SpecialistBooking({
     booking.book({ id: slot.sessionId, date: slot.date, type: specialistId }, opts);
   const disabledForNoAthlete = isParent && !selectedAthleteId;
 
-  /**
-   * Sprint 11 pin G: the summary line and the "no fitness package" blocking
-   * notice both read the relevant athlete's own entitlement — the parent's
-   * selected child, or the athlete's own single self-only member. See the
-   * useMembership fallback doc above for why this reads `demoEntitlement`
-   * while the real hook is missing.
-   */
-  const membershipState = useMembership();
-  const membershipMembers = usingRealMembershipHook ? membershipState.data?.members ?? [] : [];
-  const member = usingRealMembershipHook
-    ? (isParent ? membershipMembers.find((m) => m.athleteId === selectedAthleteId) : membershipMembers[0]) ?? null
-    : null;
-  const entitlement = usingRealMembershipHook
-    ? member?.entitlements?.[specialistId] ?? null
-    : specialistId
-    ? demoEntitlement(specialistId, demoEntitlementSource)
-    : null;
+  // Sprint 11 pin G: the entitlement of the athlete being booked for - the
+  // hook scoped it by athleteId above. `demoEntitlementSource` is the
+  // harness's override for previewing Phil's three states.
+  const entitlement =
+    demoEntitlementSource && specialistId
+      ? demoEntitlement(specialistId, demoEntitlementSource)
+      : slotsState.data?.entitlement ?? null;
   // Only Phil gates the reserve CTA — Yannick's flat cap has no 0-limit
   // state (it is never sourced from a package), so 'none' cannot occur for
   // mental (contract v1.9 C).

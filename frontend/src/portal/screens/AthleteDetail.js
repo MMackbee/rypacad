@@ -61,7 +61,7 @@ const TIER_MINUTES = [20, 45, 95];
  *   AthleteDetailRoute (PortalRoutes.js is not this lane's to edit — see the
  *   sprint report) now that Sprint 10 pin I already routes coach here too.
  */
-export default function AthleteDetail({ variant = 'populated', bare = false, athleteId, noTier, role = 'parent', onBack }) {
+export default function AthleteDetail({ variant = 'populated', bare = false, athleteId, noTier, role = 'parent', backLabel, onBack }) {
   // athleteId comes from the route (/portal/athlete/:athleteId) — dropping it
   // here was QA re-sweep #1: the hook's by-id fetch was fixed but never
   // received an id, so every child rendered as the seed athlete.
@@ -79,7 +79,10 @@ export default function AthleteDetail({ variant = 'populated', bare = false, ath
    * cannot be true for that viewer.
    */
   const household = useHousehold();
-  const householdName = household.data?.name || 'Family';
+  // A parent's back link names their own household (derived, never a
+  // hardcoded family - Sprint 11 H); staff callers pass the surface they
+  // came from instead, since they have no household to name.
+  const householdName = backLabel ?? (household.data?.name || 'Family');
 
   /**
    * Sprint 10 pin B: whether this kid has no contract tier yet. useAthleteDetail's
@@ -123,7 +126,7 @@ export default function AthleteDetail({ variant = 'populated', bare = false, ath
       // 'home' IS the children overview since the duplicate Children tab
       // was removed; active="children" matched no tab (code review
       // 2026-09-04) and left the bar with nothing highlighted.
-      footer={<BottomTabBar role="parent" active="home" />}
+      footer={<BottomTabBar role={role} active={role === 'parent' ? 'home' : undefined} />}
     >
       <div style={{ padding: '0 22px 24px', display: 'flex', flexDirection: 'column', gap: 12 }}>
         <AthleteMembershipCard athleteId={athleteId} athlete={athlete} role={role} />

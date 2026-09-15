@@ -226,7 +226,7 @@ export const SCREEN_STATES = [
              // Sprint 11 pin G (TEAM.md, contract v1.9): the entitlement
              // summary / blocking states, previewed off `demoEntitlementSource`
              // (harness-only, see the screen's own doc comment) since
-             // useMembership() doesn't exist in this worktree yet.
+             // an explicit harness override of the hook's own entitlement.
              ['slots', 'Phil · fitness source', { harnessStage: 'slots', demoEntitlementSource: 'fitness' }],
              ['slots', 'Phil · Elite source (v1.9.1)', { harnessStage: 'slots', demoEntitlementSource: 'elite' }],
              ['slots', 'Phil · no fitness package', { harnessStage: 'slots', demoEntitlementSource: 'none' }],
@@ -248,9 +248,8 @@ export const SCREEN_STATES = [
   /*
    * Membership (Sprint 11 pin D, TEAM.md, contract v1.9) — the retired
    * Billing surface's replacement, member-facing. Not a numbered handoff
-   * artboard, so it sits after the seventeen. `useMembership()` doesn't
-   * exist in this worktree yet (see the screen's own doc comment) — its
-   * `variant` prop drives every state below locally, the same escape hatch
+   * artboard, so it sits after the seventeen. Its `variant` prop is harness-only: 'populated' is the real hook
+   * (seed mode), the rest drive the state locally, the same escape hatch
    * TourStandings uses.
    */
   { id: 'MEM', title: 'Membership', Screen: Membership, role: 'parent + athlete',
@@ -264,9 +263,8 @@ export const SCREEN_STATES = [
   /*
    * Family Reservations (Sprint 11 pin F, TEAM.md, contract v1.9) — the
    * parent tab bar's new stop, replacing Billing's old slot. Not a numbered
-   * handoff artboard. `useHouseholdReservations()` doesn't exist in this
-   * worktree yet (see the screen's own doc comment) — its `variant` prop
-   * drives every state below locally.
+   * handoff artboard. Its `variant` prop is harness-only: 'populated' is the real hook (seed
+   * mode), the rest drive the state locally.
    */
   { id: 'RES', title: 'Family Reservations', Screen: Reservations, role: 'parent',
     states: [

@@ -2619,6 +2619,11 @@ async function liveAthleteDetail(athleteId) {
       // parent-facing "Start a contract" tier picker card knows whether to
       // render (null = no tier yet, matches NoContract's own convention).
       contractMinutes: athlete.contractMinutes ?? null,
+      // Sprint 11 (contract v1.9, E): the two package pointers the
+      // AthleteDetail membership editor preselects from - additive, the
+      // same way contractMinutes was added above.
+      packageId: athlete.packageId ?? null,
+      fitnessPackageId: athlete.fitnessPackageId ?? null,
     },
     upcoming,
     history: [],

@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { color, font } from '../tokens';
-import * as hooks from '../hooks';
+import { useAssignPackages } from '../hooks';
 import Button from './Button';
 import { SelectField } from './Field';
 import SavedToast from './SavedToast';
@@ -24,46 +24,7 @@ import { GOLF_PACKAGES, ELITE_TIERS, DROP_IN, FITNESS_PACKAGES } from '../data/p
  * nothing here — their own view is screens/Membership.js. "No separate
  * staff route": this is the same /portal/athlete/:athleteId screen every
  * role already reaches, gated by `role` alone.
- *
- * FALLBACK FLAG: `useAssignPackages()` -> `{ assign(athleteId, { packageId,
- * fitnessPackageId }), saving, error }` does not exist in this worktree yet
- * — routing lane's parallel worktree owns hooks/index.js. Same
- * fixed-reference fallback swap every other missing export in this codebase
- * uses (Roster.js, TourStandings.js, AthleteDetail.js's own useAthleteTier
- * precedent): calling `hooks.useAssignPackages` conditionally would break
- * rules of hooks, so the swap happens once at module load. The fallback's
- * `assign` rejects, so the saving/error UI below is honestly exercised (the
- * same "rejecting stub" choice MySchedule.js's cancel fallback makes) rather
- * than silently succeeding. Flagged in the sprint report.
- *
- * HOOK-SHAPE GAP (also flagged in the sprint report): useAthleteDetail's
- * `athlete` payload does not expose `packageId`/`fitnessPackageId` yet —
- * only a human-readable `subline` that bakes the golf package NAME in, not
- * its id (see liveAthleteDetail in hooks/index.js). Both reads below fall
- * back to `null` (an honest "not yet known", never a guessed id) until
- * routing adds those two fields to the payload the same additive way
- * `contractMinutes` was added in Sprint 10 — the selects simply render with
- * nothing preselected in the meantime, rather than crashing or inventing a
- * selection.
  */
-function useAssignPackagesFallback() {
-  return {
-    assign: async () => {
-      throw new Error('Assigning packages is not available yet.');
-    },
-    saving: false,
-    error: null,
-  };
-}
-// Looked up via a variable key, not `hooks.useAssignPackages` or
-// `hooks['useAssignPackages']` — see components/useMembershipCompat.js's own
-// doc for the full explanation: CRA's webpack build hard-errors "export not
-// found" on EITHER form of a statically-known namespace property access
-// that is genuinely absent from hooks/index.js (confirmed against the real
-// dev server), unlike esbuild which only warns. Only a property name
-// webpack cannot read directly out of the AST avoids the check.
-const ASSIGN_PACKAGES_KEY = 'useAssignPackages';
-const useAssignPackages = hooks[ASSIGN_PACKAGES_KEY] || useAssignPackagesFallback;
 
 const ALL_GOLF_PACKAGES = [...GOLF_PACKAGES, DROP_IN, ...ELITE_TIERS];
 const ELITE_IDS = new Set(ELITE_TIERS.map((p) => p.id));
@@ -73,8 +34,8 @@ export default function AthleteMembershipCard({ athleteId, athlete, role }) {
   const canView = canEdit || role === 'coach' || role === 'mental';
   if (!canView) return null;
 
-  const currentGolfId = athlete && 'packageId' in athlete ? athlete.packageId ?? null : null;
-  const currentFitnessId = athlete && 'fitnessPackageId' in athlete ? athlete.fitnessPackageId ?? null : null;
+  const currentGolfId = athlete?.packageId ?? null;
+  const currentFitnessId = athlete?.fitnessPackageId ?? null;
 
   if (!canEdit) {
     const golfName = ALL_GOLF_PACKAGES.find((p) => p.id === currentGolfId)?.name ?? '—';
@@ -117,6 +78,13 @@ const GOLF_SELECT_OPTIONS = ALL_GOLF_PACKAGES.map((p) => ({ value: p.id, label: 
 function MembershipEditor({ athleteId, currentGolfId, currentFitnessId }) {
   const [golfId, setGolfId] = useState(currentGolfId ?? '');
   const [fitnessId, setFitnessId] = useState(currentFitnessId ?? FITNESS_NONE);
+  // The athlete record loads after mount, so the selects follow the loaded
+  // values once they arrive - and after a save, when the bump refetches
+  // them (a no-op then, since they already match what was just chosen).
+  React.useEffect(() => {
+    setGolfId(currentGolfId ?? '');
+    setFitnessId(currentFitnessId ?? FITNESS_NONE);
+  }, [currentGolfId, currentFitnessId]);
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
   const [error, setError] = useState(null);

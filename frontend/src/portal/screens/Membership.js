@@ -7,10 +7,7 @@ import MemberSection from '../components/MemberSection';
 import PhoneFrame from '../components/PhoneFrame';
 import SkeletonCard, { SkeletonBar } from '../components/Skeleton';
 import { BackLink, Body, Card, ErrorNotice, ScreenTitle, SectionLabel } from '../components/Primitives';
-import { useMembership, usingRealMembershipHook } from '../components/useMembershipCompat';
-import { GOLF_PACKAGES, ELITE_TIERS, DROP_IN, FITNESS_PACKAGES } from '../data/packages';
-import { SPECIALIST_MONTHLY_CAP } from '../data/specialists';
-import { nextMonthFirstShort, todayISO } from '../data/calendar';
+import { useMembership } from '../hooks';
 
 /**
  * 19 · Membership — parent + athlete (Sprint 11 pin D, contract v1.9).
@@ -28,23 +25,12 @@ import { nextMonthFirstShort, todayISO } from '../data/calendar';
  * keystone) — every number below is exactly what useMembership()'s
  * `entitlements` returns, never recomputed here.
  *
- * FALLBACK FLAG: `useMembership()` does not exist in this worktree yet — the
- * routing lane's parallel worktree owns hooks/index.js (contract v1.9 D).
- * The fixed-reference fallback swap lives in components/useMembershipCompat.js
- * (shared with SpecialistBooking.js and AthleteDetail's membership card,
- * which all read the same not-yet-landed hook) — `usingRealMembershipHook`
- * is false while it is in effect, and this screen's own `variant` prop
- * drives every state locally instead, the exact same escape hatch
- * TourStandings.js documents for a hook that has no demoOpts of its own.
- * The moment routing's real export lands, `usingRealMembershipHook` flips
- * true and every line below is a pure pass-through of the real hook's
- * {data, loading, error} — `variant='populated'` (the default, and the only
- * variant a live route ever passes) never touches the local demo data
- * again. Flagged in the sprint report.
+ * `variant` is harness-only: every live route passes the default
+ * 'populated', a pure pass-through of useMembership() (seed or live). The
+ * other three states need no data and drive the same branches locally, the
+ * way TourStandings' variant does.
  *
- * @param {'populated'|'loading'|'error'|'empty'} variant  Harness-only while
- *   the fallback above is in effect (see doc above); ignored once the real
- *   hook lands, same as TourStandings' own `variant`.
+ * @param {'populated'|'loading'|'error'|'empty'} variant  Harness-only (see above).
  * @param {'parent'|'athlete'} [role]
  * @param {() => void} [onBack]  Hidden when not supplied.
  * @param {() => void} [onRetry]  Re-fetch after a load failure.
@@ -53,19 +39,10 @@ export default function Membership({ variant = 'populated', bare = false, role =
   const hookState = useMembership();
   const navigate = useNavigate();
 
-  const loading = usingRealMembershipHook ? hookState.loading : variant === 'loading';
-  const error = usingRealMembershipHook
-    ? hookState.error
-    : variant === 'error'
-    ? new Error("Membership didn't load.")
-    : null;
-  const data = usingRealMembershipHook
-    ? hookState.data
-    : variant === 'empty'
-    ? { household: null, members: [] }
-    : variant === 'populated'
-    ? demoMembership()
-    : null;
+  const demo = variant !== 'populated';
+  const loading = demo ? variant === 'loading' : hookState.loading;
+  const error = demo ? (variant === 'error' ? new Error("Membership didn't load.") : null) : hookState.error;
+  const data = demo ? (variant === 'empty' ? { household: null, members: [] } : null) : hookState.data;
 
   const allMembers = data?.members ?? [];
   const members = role === 'athlete' ? allMembers.slice(0, 1) : allMembers;
@@ -244,97 +221,3 @@ function MembershipSkeleton() {
   );
 }
 
-/* ------------------------------------------------------------------------ *
- * HARNESS-ONLY fallback data — see the module doc above. Mirrors contract
- * v1.9 D's member shape exactly, using the real catalogue constants
- * (data/packages.js, data/specialists.js) so the numbers are at least
- * internally consistent even though the usage counts (`used`) are invented
- * for preview — there is no bookings query available without the real hook.
- * Never reached once hooks.useMembership exists (usingRealMembershipHook above).
- * ------------------------------------------------------------------------ */
-
-const DEMO_RESETS_ON = nextMonthFirstShort(todayISO());
-const ALL_GOLF = [...GOLF_PACKAGES, DROP_IN, ...ELITE_TIERS];
-
-function golfById(id) {
-  const p = ALL_GOLF.find((g) => g.id === id);
-  return p ? { ...p, kind: ELITE_TIERS.some((e) => e.id === id) ? 'elite' : id === 'drop-in' ? 'drop-in' : 'golf' } : null;
-}
-
-function fitnessById(id) {
-  return FITNESS_PACKAGES.find((f) => f.id === id) ?? null;
-}
-
-function pool(used, limit) {
-  return { used, limit, left: Math.max(0, (limit ?? 0) - used) };
-}
-
-/**
- * Elite's Phil inclusion — owner ruling, Sprint 11 amendment v1.9.1: 16
- * sessions a month. This constant exists ONLY to seed the harness preview
- * below; the real render path never hardcodes it (see philSummary above,
- * which always reads `phil.limit` off the hook's own entitlements object).
- * ELITE_TIERS.philSessions itself stays null in data/packages.js until
- * routing's entitlementsFor (contract v1.9 C) lands the real derivation —
- * that file is not this lane's to edit.
- */
-const ELITE_PHIL_SESSIONS_DEMO = 16;
-
-function demoMembership() {
-  const golf83 = golfById('g-8-3');
-  const golf42 = golfById('g-4-2');
-  const elite = golfById('elite');
-  const f8 = fitnessById('f-8');
-
-  return {
-    household: { id: 'demo-household', name: 'Household' },
-    members: [
-      {
-        athleteId: 'jordan',
-        name: 'Jordan',
-        golf: golf83,
-        fitness: f8,
-        contractMinutes: 45,
-        resetsOn: DEMO_RESETS_ON,
-        entitlements: {
-          training: pool(3, golf83.training),
-          tournaments: pool(1, golf83.tournaments),
-          phil: { ...pool(2, f8.sessions), source: 'fitness' },
-          mental: { ...pool(0, SPECIALIST_MONTHLY_CAP), source: 'flat' },
-        },
-      },
-      {
-        athleteId: 'reese',
-        name: 'Reese',
-        golf: golf42,
-        fitness: null,
-        contractMinutes: 20,
-        resetsOn: DEMO_RESETS_ON,
-        entitlements: {
-          training: pool(2, golf42.training),
-          tournaments: pool(2, golf42.tournaments),
-          phil: { ...pool(0, 0), source: 'none' },
-          mental: { ...pool(1, SPECIALIST_MONTHLY_CAP), source: 'flat' },
-        },
-      },
-      {
-        // Preview-only: the real seed's nico carries g-4-2, not Elite (see
-        // TEAM.md's Sprint 11 ownership note) — this entry exists purely to
-        // exercise the source:'elite' copy in the harness and never coexists
-        // with real data (usingRealMembershipHook gates the whole function).
-        athleteId: 'demo-elite',
-        name: 'Nico',
-        golf: elite,
-        fitness: null,
-        contractMinutes: null,
-        resetsOn: DEMO_RESETS_ON,
-        entitlements: {
-          training: pool(4, elite.training),
-          tournaments: pool(0, elite.tournaments),
-          phil: { ...pool(3, ELITE_PHIL_SESSIONS_DEMO), source: 'elite' },
-          mental: { ...pool(0, SPECIALIST_MONTHLY_CAP), source: 'flat' },
-        },
-      },
-    ],
-  };
-}

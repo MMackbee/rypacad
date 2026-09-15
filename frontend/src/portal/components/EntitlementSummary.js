@@ -8,8 +8,8 @@ import { Banner, Body } from './Primitives';
  * pin G, contract v1.9). Extracted out of screens/SpecialistBooking.js to
  * keep that screen closer to the project's file-size convention — this
  * piece is self-contained (pure copy derivation plus one small component)
- * and the screen only needs to resolve `entitlement` (off useMembership(),
- * see components/useMembershipCompat.js) and pass it in.
+ * and the screen only needs to resolve `entitlement` (off useSpecialistSlots' own `entitlement`,
+ * the parent-selected child or the athlete themself) and pass it in.
  *
  * "2 of 8 performance sessions used this month" (fitness) / "Included with
  * Elite — 3 of 16 used this month" (elite, Sprint 11 amendment v1.9.1 — the
@@ -23,8 +23,8 @@ import { Banner, Body } from './Primitives';
  */
 
 /**
- * HARNESS-ONLY preview data for while useMembership() is missing — see
- * useMembershipCompat.js's own doc. Never reached once the real hook lands.
+ * HARNESS-ONLY preview data, used only when
+ * the harness passes an explicit source. Never used by a real caller.
  */
 export function demoEntitlement(specialistId, source) {
   if (specialistId === 'mental') {

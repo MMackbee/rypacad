@@ -3,7 +3,6 @@ import { Navigate, Route, Routes, useLocation, useNavigate, useParams } from 're
 
 import useAuthSession from './hooks/useAuthSession';
 import { isLive } from './hooks/live';
-import { useHouseholdReservations, useMembership } from './hooks';
 import StatesHarness from './StatesHarness';
 import SignIn, { LANDING_BY_ROLE } from './screens/SignIn';
 import NotProvisioned from './screens/NotProvisioned';
@@ -24,7 +23,9 @@ import AthleteDashboard from './screens/AthleteDashboard';
 import SeasonSchedule from './screens/SeasonSchedule';
 import CommitmentContract from './screens/CommitmentContract';
 import AthleteDetail from './screens/AthleteDetail';
+import Membership from './screens/Membership';
 import NotificationPreferences from './screens/NotificationPreferences';
+import Reservations from './screens/Reservations';
 import AdminDashboard from './screens/AdminDashboard';
 import StaffRoles from './screens/StaffRoles';
 import NewsletterComposer from './screens/NewsletterComposer';
@@ -161,8 +162,29 @@ function AthleteDetailRoute() {
   const live = isLive();
   const { user } = useAuthSession(live ? undefined : { variant: 'idle' });
   const navigate = useNavigate();
-  const back = live && user?.role === 'coach' ? '/portal/roster' : '/portal/family';
-  return <AthleteDetail bare athleteId={athleteId} onBack={() => navigate(back)} />;
+  // Sprint 11 integration: the screen needs the real role (its staff-only
+  // membership editor and its tab bar key off it), and staff arrive from a
+  // work surface rather than the family home - the back link names it.
+  const role = live ? user?.role ?? 'parent' : 'parent';
+  const [back, backLabel] =
+    role === 'coach'
+      ? user?.specialistId
+        ? ['/portal/my-sessions', 'My sessions']
+        : ['/portal/roster', 'Roster']
+      : role === 'ops' || role === 'owner'
+      ? ['/portal/admin', 'Admin']
+      : role === 'mental'
+      ? ['/portal/my-sessions', 'My sessions']
+      : ['/portal/family', null];
+  return (
+    <AthleteDetail
+      bare
+      athleteId={athleteId}
+      role={role}
+      backLabel={backLabel}
+      onBack={() => navigate(back)}
+    />
+  );
 }
 
 /**
@@ -368,63 +390,6 @@ function SessionAttendanceRoute({ onBack }) {
   );
 }
 
-/**
- * Membership (Sprint 11 pin D, contract v1.9) and Reservations (pin F) —
- * the frontend lane builds screens/Membership.js and screens/Reservations.js
- * in a parallel worktree; NEITHER EXISTS in this worktree as of this commit
- * (checked: `git ls-tree` has no such paths here). The Sprint 7/9 precedent
- * for exactly this situation (TourStandings, then SpecialistBooking) was a
- * plain `import X from './screens/X'` committed ahead of the frontend
- * lane's file landing — but that import does not resolve in the committing
- * lane's OWN worktree either (confirmed against both of those historical
- * commits: the screen file is absent from the tree at commit time), so it
- * could never have satisfied THIS sprint's own gate ("esbuild bundle of
- * frontend/src/index.js exits 0"). Adapted instead, per this sprint's own
- * instruction to use "a minimal placeholder element" when the plain-import
- * precedent cannot compile standalone: two local placeholders, swapped for
- * real imports (`import Membership from './screens/Membership';` /
- * `import Reservations from './screens/Reservations';`) at merge — see the
- * routing report for the exact prop contract each route already passes,
- * which the real screens should match rather than the routes being
- * rewritten around them.
- */
-/**
- * Both placeholders below call the REAL hook (useMembership / useHouseholdReservations)
- * and dump its {loading, error, data} JSON rather than rendering nothing — this
- * doubles as this lane's own end-to-end verification (the hook seam, live.js's
- * queries and firestore.rules all actually run) and as a live shape reference
- * for the frontend lane to build the real screen against, without guessing.
- */
-function MembershipPlaceholder({ role, onBack }) {
-  const { data, loading, error } = useMembership();
-  return (
-    <div style={{ padding: 24, background: '#000', color: '#fff', minHeight: '100%' }}>
-      <p>Membership screen not yet merged from the frontend lane (role: {role}).</p>
-      <p>useMembership(): loading={String(loading)} error={error ? error.message : 'null'}</p>
-      <pre style={{ whiteSpace: 'pre-wrap', fontSize: 12 }}>{JSON.stringify(data, null, 2)}</pre>
-      {onBack && (
-        <button type="button" onClick={onBack}>
-          Back
-        </button>
-      )}
-    </div>
-  );
-}
-function ReservationsPlaceholder({ onBack }) {
-  const { data, loading, error } = useHouseholdReservations();
-  return (
-    <div style={{ padding: 24, background: '#000', color: '#fff', minHeight: '100%' }}>
-      <p>Reservations screen not yet merged from the frontend lane.</p>
-      <p>useHouseholdReservations(): loading={String(loading)} error={error ? error.message : 'null'}</p>
-      <pre style={{ whiteSpace: 'pre-wrap', fontSize: 12 }}>{JSON.stringify(data, null, 2)}</pre>
-      {onBack && (
-        <button type="button" onClick={onBack}>
-          Back
-        </button>
-      )}
-    </div>
-  );
-}
 
 /**
  * Membership is reachable by both parent and athlete (Sprint 11 pin D) —
@@ -432,13 +397,24 @@ function ReservationsPlaceholder({ onBack }) {
  * is role-aware the same way AthleteDetailRoute's is, mirroring this file's
  * own established precedent rather than inventing a new pattern.
  */
-function MembershipRoute({ onSignOut }) {
+function MembershipRoute() {
   const live = isLive();
   const { user } = useAuthSession(live ? undefined : { variant: 'idle' });
   const navigate = useNavigate();
   const role = live && user?.role === 'athlete' ? 'athlete' : 'parent';
   const back = role === 'athlete' ? '/portal/home' : '/portal/family';
-  return <MembershipPlaceholder bare role={role} onSignOut={onSignOut} onBack={() => navigate(back)} />;
+  return <Membership bare role={role} onBack={() => navigate(back)} />;
+}
+
+/**
+ * Settings is reachable by parent and athlete (Sprint 11 pin D: the
+ * Membership row serves both) - same role resolution as MembershipRoute.
+ */
+function SettingsRoute({ onSignOut, onLinkAthlete }) {
+  const live = isLive();
+  const { user } = useAuthSession(live ? undefined : { variant: 'idle' });
+  const role = live && user?.role === 'athlete' ? 'athlete' : 'parent';
+  return <NotificationPreferences bare role={role} onSignOut={onSignOut} onLinkAthlete={onLinkAthlete} />;
 }
 
 /**
@@ -628,25 +604,25 @@ export default function PortalRoutes() {
       <Route path="billing" element={<Navigate to="/portal/membership" replace />} />
       {/* Membership (Sprint 11 pin D, contract v1.9): parent + athlete both
           reach it — same role resolution this file's other dual-role routes
-          use (BookSessionRoute, CoachingRoute). Screen pending the frontend
-          lane's merge (see MembershipRoute/MembershipPlaceholder above). */}
+          use (BookSessionRoute, CoachingRoute). Screen: screens/Membership.js (frontend
+          lane, merged at Sprint 11 integration). */}
       <Route
         path="membership"
         element={
           <RequireRole roles={['parent', 'athlete']}>
-            <MembershipRoute onSignOut={onSignOut} />
+            <MembershipRoute />
           </RequireRole>
         }
       />
       {/* Family Reservations (Sprint 11 pin F, contract v1.9): parent only —
           the family-grouped view the owner's Life Time reference showed, one
-          section per household member. Screen pending the frontend lane's
-          merge (see ReservationsPlaceholder above). */}
+          section per household member. Screen: screens/Reservations.js (frontend
+          lane, merged at Sprint 11 integration). */}
       <Route
         path="reservations"
         element={
           <RequireRole roles={['parent']}>
-            <ReservationsPlaceholder onBack={go('/portal/family')} />
+            <Reservations bare onBook={go('/portal/book')} />
           </RequireRole>
         }
       />
@@ -665,14 +641,10 @@ export default function PortalRoutes() {
       <Route
         path="settings"
         element={
-          <RequireRole roles={['parent']}>
+          <RequireRole roles={['parent', 'athlete']}>
             {/* Link-another-athlete opens enrollment until screen 08·L (the
                 add-a-child-to-this-household flow) is built — swap then. */}
-            <NotificationPreferences
-              bare
-              onSignOut={onSignOut}
-              onLinkAthlete={go('/portal/register')}
-            />
+            <SettingsRoute onSignOut={onSignOut} onLinkAthlete={go('/portal/register')} />
           </RequireRole>
         }
       />

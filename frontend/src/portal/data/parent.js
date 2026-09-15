@@ -8,6 +8,10 @@
 export const ATHLETE_DETAIL = {
   name: 'Jordan Whitfield',
   subline: 'Enrolled Nov 3 · 45 min tier · 8 + 3 package',
+  // Sprint 11 (contract v1.9, E): the two package pointers the membership
+  // editor preselects from; matches the emulator seed's jordan.
+  packageId: 'g-8-3',
+  fitnessPackageId: 'f-8',
   attendance: '94%',
   attendanceLabel: 'attendance since Nov',
   board: '3 of 4',
