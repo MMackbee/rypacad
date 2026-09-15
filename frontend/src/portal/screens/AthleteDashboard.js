@@ -118,7 +118,29 @@ export default function AthleteDashboard({
         {/* Two numbers, never one - see AllowancePools. */}
         {athlete?.allowance ? (
           <Card>
-            <SectionLabel style={{ marginBottom: 12 }}>Remaining this cycle</SectionLabel>
+            <div style={{ display: 'flex', alignItems: 'baseline', gap: 10, marginBottom: 12 }}>
+              <SectionLabel style={{ flex: 1 }}>Remaining this cycle</SectionLabel>
+              {/*
+                Sprint 11 pin D entry point: "AthleteDashboard's allowance
+                card gets a 'Membership' link." Direct navigate(), same
+                precedent CoachingAction below already sets for this screen
+                (this lane never edits PortalRoutes.js).
+              */}
+              <button
+                type="button"
+                onClick={() => navigate('/portal/membership')}
+                style={{
+                  background: 'none',
+                  border: 'none',
+                  padding: 0,
+                  font: `500 11px ${font.body}`,
+                  color: color.primary,
+                  cursor: 'pointer',
+                }}
+              >
+                Membership ›
+              </button>
+            </div>
             <AllowancePools allowance={athlete.allowance} />
           </Card>
         ) : null}
