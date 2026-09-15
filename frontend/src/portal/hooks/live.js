@@ -33,8 +33,8 @@ import {
 } from 'firebase/firestore';
 import { auth, db } from '../../firebase';
 import { bump } from './invalidate';
-import { poolFor } from '../data/packages';
-import { SPECIALISTS, SPECIALIST_MONTHLY_CAP } from '../data/specialists';
+import { entitlementsFor, poolFor } from '../data/packages';
+import { SPECIALISTS } from '../data/specialists';
 
 /** id -> catalogue entry, for the specialist-cap error copy below. */
 const SPECIALIST_BY_ID = new Map(SPECIALISTS.map((s) => [s.id, s]));
@@ -51,14 +51,25 @@ export const ERR = {
 
 /**
  * The typed error every adapter function throws. `code` is always one of ERR;
- * `cause` keeps the underlying Firestore error for logging.
+ * `cause` keeps the underlying Firestore error for logging. `reason`
+ * (Sprint 11, contract v1.9 pin C) is an OPTIONAL, more specific label a few
+ * call sites attach beyond `code` — today just the specialist booking gate's
+ * 'no-fitness-package' (a 0-limit Phil attempt) and 'cap-reached' (the
+ * monthly cap already spent) — so a screen can branch on a stable string
+ * instead of pattern-matching `message`. `null` for every other throw in
+ * this file; wrap() below preserves whatever `reason` a LiveDataError
+ * already carries (it returns the SAME instance for one), so the reason
+ * survives from assertWithinMonthlyCap through createBooking's catch,
+ * through useBooking's book(), to the screen's own catch — no rethrow
+ * anywhere in that chain replaces the error object.
  */
 export class LiveDataError extends Error {
-  constructor(code, message, cause = null) {
+  constructor(code, message, cause = null, reason = null) {
     super(message);
     this.name = 'LiveDataError';
     this.code = code;
     this.cause = cause;
+    this.reason = reason;
   }
 }
 
@@ -346,6 +357,30 @@ export async function fetchBookings(athleteId, { householdId = null } = {}) {
 }
 
 /**
+ * Every booking across an ENTIRE household, every member at once — Sprint 11
+ * pin F (family Reservations, contract v1.9). One query on the `householdId`
+ * equality filter alone (DATA-MODEL.md index 3: `bookings (householdId ASC,
+ * date ASC)`), distinct from fetchBookings above (which always requires
+ * athleteId and adds householdId only as a second, narrowing filter for one
+ * athlete's own list). The bookings read rule's parent clause,
+ * `me().householdId == resource.data.householdId`, is exactly this query's
+ * own filter — VERIFIED against the emulator (routing report), not widened.
+ */
+export async function fetchHouseholdBookings(householdId) {
+  if (!householdId) {
+    throw new LiveDataError(ERR.INVALID, 'fetchHouseholdBookings: householdId is required.');
+  }
+  try {
+    const snap = await getDocs(
+      query(collection(db, 'bookings'), where('householdId', '==', householdId))
+    );
+    return snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+  } catch (err) {
+    throw wrap(err, 'fetchHouseholdBookings');
+  }
+}
+
+/**
  * Create one booking in the contract shape, inside a Firestore transaction
  * (Sprint 6, QA #5) — reads the session, requires booked < capacity, requires
  * no existing booking at this id, then writes the booking AND increments
@@ -372,31 +407,56 @@ export async function fetchBookings(athleteId, { householdId = null } = {}) {
  * DATA-MODEL.md. Callers that already maintain a running tally
  * (bookRecurring) pass skipCapCheck to avoid re-querying per instance.
  *
- * Sprint 9 pin (contract v1.7): pool 'specialist' (phil/mental) does not
- * answer to a package limit at all — Elite's philSessions/yannickSessions
- * stay null/undecided (parked with billing, data/specialists.js) — so this
- * takes an entirely separate branch, capped instead at
- * SPECIALIST_MONTHLY_CAP PER SESSION TYPE (phil and mental each get their
- * own count), counted from the athlete's non-cancelled bookings of that
- * `type` in the month. `type` is required for this branch only — the
- * existing training/tournament branch below is unchanged and still keys off
- * `pool` alone.
+ * Sprint 9 pin (contract v1.7), UPDATED Sprint 11 (contract v1.9 pin C):
+ * pool 'specialist' (phil/mental) no longer answers to one flat cap for
+ * every athlete — it answers to entitlementsFor's per-type limit
+ * (data/packages.js), the SAME derivation Membership and SpecialistBooking's
+ * summary read, so the booking gate can never disagree with what either
+ * screen displayed. That derivation needs the athlete doc and (when set)
+ * the athlete's golf/fitness package docs, read here rather than inside the
+ * booking transaction itself — a monthly-cap check has always been this
+ * client-side pre-check, not part of the atomic transaction (capacity is
+ * the transaction's job; the cap is this function's, same split as before).
+ * `type` is required for this branch only — the existing training/tournament
+ * branch below is unchanged and still keys off `pool` alone.
+ *
+ * Two typed failure reasons (LiveDataError#reason) a specialist attempt can
+ * fail with, for useBooking to surface to SpecialistBooking (pin G):
+ * 'no-fitness-package' — entry.limit is 0 (a Phil attempt with no fitness
+ * package on file and no Elite package either; Yannick's limit is never 0,
+ * it always has the flat SPECIALIST_MONTHLY_CAP floor) — and 'cap-reached'
+ * — a real, positive limit already fully spent this month.
  */
 async function assertWithinMonthlyCap({ athleteId, householdId, date, pool, type }) {
   const month = date.slice(0, 7);
   const bookings = await fetchBookings(athleteId, { householdId });
 
   if (pool === 'specialist') {
-    const spent = bookings.filter(
-      (b) => b.status !== 'cancelled' && b.type === type && b.date.slice(0, 7) === month
-    ).length;
-    if (spent >= SPECIALIST_MONTHLY_CAP) {
-      const specialist = SPECIALIST_BY_ID.get(type);
-      const who = specialist ? specialist.name : 'this specialist';
-      const noun = specialist ? specialist.sessionNoun.toLowerCase() : 'session';
+    const athlete = await fetchAthlete(athleteId);
+    const [golfPkg, fitnessPkg] = await Promise.all([
+      athlete.packageId ? fetchPackage(athlete.packageId) : Promise.resolve(null),
+      athlete.fitnessPackageId ? fetchPackage(athlete.fitnessPackageId) : Promise.resolve(null),
+    ]);
+    const entitlements = entitlementsFor(athlete, [golfPkg, fitnessPkg], bookings, month);
+    const entry = entitlements[type]; // type is 'phil' | 'mental' - entitlementsFor's own keys
+    const specialist = SPECIALIST_BY_ID.get(type);
+    const who = specialist ? specialist.name : 'this specialist';
+    const noun = specialist ? specialist.sessionNoun.toLowerCase() : 'session';
+
+    if (!entry || entry.limit <= 0) {
       throw new LiveDataError(
         ERR.INVALID,
-        `That month's ${noun}s with ${who} are already booked (${spent} of ${SPECIALIST_MONTHLY_CAP}).`
+        `No fitness package on file for ${who}'s sessions — ask the academy to assign one.`,
+        null,
+        'no-fitness-package'
+      );
+    }
+    if (entry.used >= entry.limit) {
+      throw new LiveDataError(
+        ERR.INVALID,
+        `That month's ${noun}s with ${who} are already booked (${entry.used} of ${entry.limit}).`,
+        null,
+        'cap-reached'
       );
     }
     return;
@@ -1135,6 +1195,44 @@ export async function setContractTier({ athleteId, minutes }) {
     return { athleteId, contractMinutes: minutes };
   } catch (err) {
     throw wrap(err, 'setContractTier');
+  }
+}
+
+/**
+ * Assign an athlete's golf package and/or fitness package (contract v1.9,
+ * pin B) — ops/owner only, enforced by firestore.rules'
+ * packageAssignmentUpdateOk(), not here. `packageId` is required (every
+ * athlete always carries a golf package); `fitnessPackageId` is a package id
+ * or null (clearing a fitness package is a real, supported assignment, not
+ * an error) — never omitted from the write itself, so a client can always
+ * clear a previously-assigned fitness package back to "none" rather than the
+ * update silently leaving a stale one in place. Assignment is IMMEDIATE and
+ * un-prorated (the pin's own words): nothing already booked is touched, no
+ * cancellations, no refunds — there is no money here, only which package
+ * pointers the athlete's entitlements derive from going forward.
+ */
+export async function setAthletePackages(athleteId, { packageId, fitnessPackageId }) {
+  if (!athleteId) {
+    throw new LiveDataError(ERR.INVALID, 'setAthletePackages: athleteId is required.');
+  }
+  if (typeof packageId !== 'string' || !packageId) {
+    throw new LiveDataError(ERR.INVALID, 'setAthletePackages: packageId is required.');
+  }
+  if (fitnessPackageId != null && typeof fitnessPackageId !== 'string') {
+    throw new LiveDataError(ERR.INVALID, 'setAthletePackages: fitnessPackageId must be a string or null.');
+  }
+  requireUser();
+  const nextFitnessPackageId = fitnessPackageId ?? null;
+  try {
+    await updateDoc(doc(db, 'athletes', athleteId), {
+      packageId,
+      fitnessPackageId: nextFitnessPackageId,
+      updatedAt: serverTimestamp(),
+    });
+    bump('athletes');
+    return { athleteId, packageId, fitnessPackageId: nextFitnessPackageId };
+  } catch (err) {
+    throw wrap(err, 'setAthletePackages');
   }
 }
 

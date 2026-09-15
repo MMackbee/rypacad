@@ -57,6 +57,7 @@ import {
   fetchCurrentUser,
   fetchHousehold,
   fetchHouseholdAthletes,
+  fetchHouseholdBookings,
   fetchMyEnrollmentRequest,
   fetchNoShowBookingsSince,
   fetchPackage,
@@ -72,6 +73,7 @@ import {
   saveDiagnosticCapture,
   saveNotificationPrefs,
   saveTournamentResults,
+  setAthletePackages,
   setBookingNoshowReason,
   setContractTier,
   setSessionCoachNote,
@@ -106,6 +108,7 @@ import {
   ELITE_TIERS,
   FITNESS_PACKAGES,
   GOLF_PACKAGES,
+  entitlementsFor,
   makeAllowance,
   poolFor,
 } from '../data/packages';
@@ -639,6 +642,16 @@ export function useBooking({ variant = 'open', today = todayISO(), practice = fa
    * `athleteId` is required when the caller is a parent (bookingFor ===
    * 'parent') - the screen must have a child selected before calling book().
    * An athlete caller ignores the option (they can only ever book themselves).
+   *
+   * Reason plumbing (Sprint 11 pin C/G, contract v1.9): book() takes no
+   * try/catch of its own on purpose - a specialist rejection from
+   * createBooking's assertWithinMonthlyCap (live.js) is a LiveDataError
+   * whose `.reason` is 'no-fitness-package' or 'cap-reached', and wrap()
+   * returns that SAME instance unchanged for anything already a
+   * LiveDataError, so the reason reaches the caller exactly as thrown - a
+   * screen may read `err.reason` directly (no import needed, same
+   * plain-object convention `err.message` already relies on) alongside the
+   * existing plain-language `err.message` fallback for every other case.
    */
   const book = async (slot, { athleteId } = {}) => {
     if (!live) return slot;
@@ -940,7 +953,7 @@ export function seedSpecialistDays(specialistId, today) {
  * InRange's result alone cannot guarantee (a day with zero specialist
  * sessions produces zero rows, not an empty-array placeholder).
  */
-async function liveSpecialistSlots(specialistId, today) {
+async function liveSpecialistDays(specialistId, today) {
   const toDate = addDaysISO(today, SPECIALIST_BOOKING_WINDOW_DAYS - 1);
   const sessions = await fetchSessionsInRange(today, toDate);
 
@@ -968,7 +981,56 @@ async function liveSpecialistSlots(specialistId, today) {
       }),
     });
   }
-  return { days };
+  return days;
+}
+
+/**
+ * One athlete's entitlement for ONE specialist type (Sprint 11 pin G,
+ * contract v1.9) - the SAME entitlementsFor derivation useMembership and the
+ * booking gate (live.js#assertWithinMonthlyCap) read, so SpecialistBooking's
+ * summary line and reserve-CTA gating can never disagree with what booking
+ * itself will do. `athleteId` is explicit rather than always "the signed-in
+ * user" because a PARENT caller has no athlete of their own - the screen's
+ * child selector supplies it once chosen (mirrors book(slot, {athleteId})'s
+ * own optional-override shape elsewhere in this file). Falls back to the
+ * signed-in athlete's own id when omitted; resolves to null for a parent
+ * with no child chosen yet (same "nothing to show before a pick" posture
+ * useBooking's own `allowance: null` already has).
+ */
+async function liveSpecialistEntitlement(specialistId, athleteIdOverride, today) {
+  let athleteId = athleteIdOverride;
+  if (!athleteId) {
+    const profile = await fetchCurrentUser();
+    if (!profile.athleteId) return null;
+    athleteId = profile.athleteId;
+  }
+  const athlete = await fetchAthlete(athleteId);
+  const [golfPkg, fitnessPkg, bookings] = await Promise.all([
+    athlete.packageId ? fetchPackage(athlete.packageId) : null,
+    athlete.fitnessPackageId ? fetchPackage(athlete.fitnessPackageId) : null,
+    fetchBookings(athleteId, { householdId: athlete.householdId }),
+  ]);
+  const entitlements = entitlementsFor(athlete, [golfPkg, fitnessPkg], bookings, today.slice(0, 7));
+  return entitlements[specialistId] ?? null;
+}
+
+/** Live payload for useSpecialistSlots - days plus the chosen athlete's
+ * entitlement for this specialist, fetched in parallel. */
+async function liveSpecialistSlots(specialistId, athleteId, today) {
+  const [days, entitlement] = await Promise.all([
+    liveSpecialistDays(specialistId, today),
+    liveSpecialistEntitlement(specialistId, athleteId, today),
+  ]);
+  return { days, entitlement };
+}
+
+/** Seed entitlement for useSpecialistSlots - the same seed entitlement
+ * derivation useMembership's seed branch uses, for one named child
+ * (defaulting to the seed's one "signed-in athlete" fixture, jordan). */
+function seedSpecialistEntitlement(specialistId, athleteId, today) {
+  const child = seedChildById(athleteId || SEED_ATHLETE_ID);
+  if (!child) return null;
+  return seedEntitlementsForChild(child, today)[specialistId] ?? null;
 }
 
 /**
@@ -980,8 +1042,15 @@ async function liveSpecialistSlots(specialistId, today) {
  * the EXISTING createBooking (poolFor('phil'|'mental') === 'specialist',
  * data/packages.js) - unchanged signature, no booking action lives on this
  * hook.
+ *
+ * Sprint 11 pin G adds `entitlement` to the payload — `{ used, limit, left,
+ * source }` (data/packages.js#entitlementsFor's own per-type shape) or null
+ * before a caller/athlete is resolvable — so SpecialistBooking's summary
+ * line and reserve-CTA gating read off the SAME derivation the booking gate
+ * enforces. `athleteId` (optional second-arg override) is the child a
+ * PARENT caller has picked; an athlete caller ignores it (always their own).
  */
-export function useSpecialistSlots(specialistId) {
+export function useSpecialistSlots(specialistId, { athleteId } = {}) {
   const live = isLive();
   const today = todayISO();
   // Post-write invalidation seam (Sprint 6 pin), both collections per the
@@ -989,9 +1058,11 @@ export function useSpecialistSlots(specialistId) {
   // 'sessions' together (createBooking/cancelBooking, live.js) - subscribing
   // to both here (rather than 'sessions' alone, as useMonthSessions does)
   // re-runs this hook on either bump, not just the one that happens to fire
-  // second.
+  // second. Sprint 11: 'athletes' too - a package assignment (pin B) changes
+  // `entitlement` without touching bookings or sessions at all.
   const sessionsGen = useInvalidation('sessions');
   const bookingsGen = useInvalidation('bookings');
+  const athletesGen = useInvalidation('athletes');
 
   // No specialist picked yet (the picker stage) -> no query at all. Running
   // the live source with specialistId null returned 14 honest-but-empty
@@ -999,11 +1070,16 @@ export function useSpecialistSlots(specialistId) {
   // pick — the screen's default-day effect read them and landed on today
   // instead of the first day with availability (integration browser pass).
   return useSeedResource(
-    live && specialistId ? null : { days: specialistId ? seedSpecialistDays(specialistId, today) : [] },
+    live && specialistId
+      ? null
+      : {
+          days: specialistId ? seedSpecialistDays(specialistId, today) : [],
+          entitlement: specialistId ? seedSpecialistEntitlement(specialistId, athleteId, today) : null,
+        },
     live && specialistId
       ? {
-          source: () => liveSpecialistSlots(specialistId, today),
-          deps: ['specialist-slots', specialistId, today, sessionsGen, bookingsGen],
+          source: () => liveSpecialistSlots(specialistId, athleteId, today),
+          deps: ['specialist-slots', specialistId, athleteId, today, sessionsGen, bookingsGen, athletesGen],
         }
       : undefined
   );
@@ -1331,6 +1407,366 @@ export function useBillingSummary() {
     live ? null : { rows: seedRows },
     live ? { source: liveBillingSummary, deps: ['billing-summary'] } : undefined
   );
+}
+
+/* ------------------------------------------------------------------------- *
+ * Membership & entitlements (Sprint 11, contract v1.9). "Billing" leaves the
+ * live member surface this sprint (owner ruling) - these hooks derive what
+ * an athlete's packages ENTITLE them to, never what is owed. Both data modes
+ * route every number through data/packages.js#entitlementsFor, the one pure
+ * function useBooking's live.js#assertWithinMonthlyCap ALSO reads, so
+ * Membership, SpecialistBooking's summary and the booking gate itself can
+ * never disagree.
+ * ------------------------------------------------------------------------- */
+
+/** One seed HOUSEHOLD child by id, or null - shared by the membership and
+ * specialist-entitlement seed branches below. */
+function seedChildById(athleteId) {
+  return HOUSEHOLD.children.find((c) => c.id === athleteId) ?? null;
+}
+
+/**
+ * Raw contract-tier minutes per seed child - HOUSEHOLD.children only carries
+ * the derived `ageLine` copy ("45 min tier") and a completion percentage,
+ * not the raw number entitlementsFor's caller-shape wants. Extracted here
+ * rather than invented: these are the SAME three values ageLine already
+ * states in prose (nico stays null on purpose, same as his live seed - "no
+ * tier" needs a real exercisable case).
+ */
+const SEED_CONTRACT_MINUTES = { jordan: 45, reese: 20, nico: null };
+
+/**
+ * Believable non-zero specialist usage for the seed demo, jordan only (the
+ * one seed kid with a fitness package big enough that "used" being nonzero
+ * reads as normal) - mirrors the DB lane's own live-emulator seed plan
+ * (TEAM.md Sprint 11 pin: "two past 'phil' bookings for jordan... so 'used'
+ * is non-zero"). Nothing invented for reese/nico beyond zero.
+ */
+const SEED_SPECIALIST_USED = {
+  jordan: { phil: 2, mental: 0 },
+  reese: { phil: 0, mental: 0 },
+  nico: { phil: 0, mental: 0 },
+};
+
+/**
+ * Booking-shaped rows for one seed child, built to reproduce the EXACT
+ * used-counts already baked into that child's existing `allowance` object
+ * (HOUSEHOLD.children) plus the specialist counts above - so entitlementsFor
+ * run over these rows lands on the SAME training/tournament numbers the rest
+ * of the app already shows for this child, not a second, independently
+ * guessed set. Dates are `today` unconditionally (never a fixed seed date)
+ * so these always land "in the current month" whenever the demo is viewed.
+ */
+function seedMembershipBookings(child, today) {
+  const used = SEED_SPECIALIST_USED[child.id] ?? { phil: 0, mental: 0 };
+  const rows = [];
+  const add = (n, type, pool) => {
+    for (let i = 0; i < n; i++) rows.push({ athleteId: child.id, type, pool, date: today, status: 'confirmed' });
+  };
+  add(child.allowance?.training?.used ?? 0, 'training', 'training');
+  add(child.allowance?.tournaments?.used ?? 0, 'tournament', 'tournaments');
+  add(used.phil, 'phil', 'specialist');
+  add(used.mental, 'mental', 'specialist');
+  return rows;
+}
+
+/** entitlementsFor, run for one seed child - shared by useMembership's seed
+ * branch and useSpecialistSlots' seed entitlement below. */
+function seedEntitlementsForChild(child, today) {
+  const athleteLike = { packageId: child.packageId, fitnessPackageId: child.fitnessPackageId ?? null };
+  const packages = [packageById(child.packageId), child.fitnessPackageId ? packageById(child.fitnessPackageId) : null];
+  return entitlementsFor(athleteLike, packages, seedMembershipBookings(child, today), today.slice(0, 7));
+}
+
+/** One useMembership member row for a seed child - same field set the live
+ * branch (memberEntry below) produces. */
+function seedMemberEntry(child, today) {
+  const golfPkg = packageById(child.packageId);
+  const fitnessPkg = child.fitnessPackageId ? packageById(child.fitnessPackageId) : null;
+  return {
+    athleteId: child.id,
+    name: child.name,
+    golf: golfPkg
+      ? { id: golfPkg.id, name: golfPkg.name, price: golfPkg.price ?? null, training: golfPkg.training ?? null, tournaments: golfPkg.tournaments ?? null, kind: golfPkg.kind ?? null }
+      : null,
+    fitness: fitnessPkg
+      ? { id: fitnessPkg.id, name: fitnessPkg.name, price: fitnessPkg.price ?? null, sessions: fitnessPkg.sessions ?? null }
+      : null,
+    contractMinutes: SEED_CONTRACT_MINUTES[child.id] ?? null,
+    resetsOn: nextMonthFirstShort(today),
+    entitlements: seedEntitlementsForChild(child, today),
+  };
+}
+
+/**
+ * One useMembership member row, live mode - the athlete's golf/fitness
+ * package facts (never a Firestore price, by the same no-dollar-amounts
+ * policy useBillingSummary already follows) plus entitlementsFor's full
+ * derivation off the athlete's real bookings this month.
+ */
+async function liveMemberEntry(a, today) {
+  const monthISO = today.slice(0, 7);
+  const [golfPkg, fitnessPkg, bookings] = await Promise.all([
+    a.packageId ? fetchPackage(a.packageId) : null,
+    a.fitnessPackageId ? fetchPackage(a.fitnessPackageId) : null,
+    fetchBookings(a.id, { householdId: a.householdId }),
+  ]);
+  const entitlements = entitlementsFor(a, [golfPkg, fitnessPkg], bookings, monthISO);
+  // Price comes from the STATIC catalogue (packageById), never the Firestore
+  // doc's own `price` field - policy: no dollar amounts in Firestore (same
+  // reasoning DATA-MODEL.md gives for useBillingSummary's rows). Verified
+  // live: a Firestore package doc's `price` reads back null in this
+  // emulator, same as production will until a deploy-time price import.
+  return {
+    athleteId: a.id,
+    name: a.name,
+    golf: golfPkg
+      ? {
+          id: golfPkg.id,
+          name: golfPkg.name,
+          price: packageById(golfPkg.id)?.price ?? null,
+          training: golfPkg.training ?? null,
+          tournaments: golfPkg.tournaments ?? null,
+          kind: golfPkg.kind ?? null,
+        }
+      : null,
+    fitness: fitnessPkg
+      ? {
+          id: fitnessPkg.id,
+          name: fitnessPkg.name,
+          price: packageById(fitnessPkg.id)?.price ?? null,
+          sessions: fitnessPkg.sessions ?? null,
+        }
+      : null,
+    contractMinutes: a.contractMinutes ?? null,
+    resetsOn: nextMonthFirstShort(today),
+    entitlements,
+  };
+}
+
+/**
+ * Live payload for useMembership - `household: null` and a single self-entry
+ * for an athlete-linked account; the real household plus every member in
+ * fetchHouseholdAthletes' own order for a parent. Whichever role, screens
+ * cannot tell (the pinned shape is identical either way).
+ */
+async function liveMembership(today) {
+  const profile = await fetchCurrentUser();
+  if (profile.athleteId) {
+    const athlete = await fetchAthlete(profile.athleteId);
+    return { household: null, members: [await liveMemberEntry(athlete, today)] };
+  }
+  if (profile.householdId) {
+    const [household, athletes] = await Promise.all([
+      fetchHousehold(profile.householdId),
+      fetchHouseholdAthletes(profile.householdId),
+    ]);
+    const members = await Promise.all(athletes.map((a) => liveMemberEntry(a, today)));
+    return { household: { id: household.id, name: household.name ?? null }, members };
+  }
+  throw new LiveDataError(
+    ERR.INVALID,
+    `users/${profile.uid} has neither athleteId nor householdId - membership is wired for ` +
+      'athlete-linked or parent accounts only.'
+  );
+}
+
+/**
+ * GET /membership (Sprint 11 pin D, contract v1.9) - the parked Billing
+ * surface's replacement: what each athlete's packages ENTITLE them to, never
+ * what is owed. `{ data: { household: {id,name}|null, members: [{ athleteId,
+ * name, golf, fitness, contractMinutes, resetsOn, entitlements }] },
+ * loading, error }`. Parent: every household athlete, household order.
+ * Athlete: self only, household null.
+ */
+export function useMembership() {
+  const live = isLive();
+  const today = todayISO();
+  const bookingsGen = useInvalidation('bookings');
+  const athletesGen = useInvalidation('athletes');
+
+  const seedMembers = HOUSEHOLD.children.map((c) => seedMemberEntry(c, today));
+
+  return useSeedResource(
+    live ? null : { household: { id: 'whitfield', name: HOUSEHOLD.name }, members: seedMembers },
+    live
+      ? { source: () => liveMembership(today), deps: ['membership', today, bookingsGen, athletesGen] }
+      : undefined
+  );
+}
+
+/**
+ * `assign(athleteId, { packageId, fitnessPackageId })` (Sprint 11 pin B,
+ * contract v1.9) - ops/owner only, enforced by firestore.rules'
+ * packageAssignmentUpdateOk(), not here; live.js's setAthletePackages does
+ * the one-shot updateDoc + bump('athletes'). `saving`/`error` are hook-owned
+ * state (AthleteDetail's membership editor reads them directly for its Save
+ * button, rather than each caller re-deriving the same try/finally). Seed
+ * mode is a local echo, same discipline as useAthleteTier/useNotificationPrefs.
+ */
+export function useAssignPackages() {
+  const live = isLive();
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState(null);
+
+  const assign = async (athleteId, { packageId, fitnessPackageId }) => {
+    setSaving(true);
+    setError(null);
+    try {
+      if (!live) {
+        return { athleteId, packageId, fitnessPackageId: fitnessPackageId ?? null, simulated: true };
+      }
+      return await setAthletePackages(athleteId, { packageId, fitnessPackageId });
+    } catch (err) {
+      setError(err);
+      throw err;
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return { assign, saving, error };
+}
+
+/**
+ * One reservation row - the SAME shape useSchedule's own resolve() produces
+ * (displaySession fields + bookingId/status/cancellable), plus the three
+ * fields Sprint 11 pin F adds: athleteId (which household member), instructor,
+ * durationMinutes. Shared by the live and seed branches below so the two can
+ * never diverge in shape.
+ *
+ * `instructor`: the specialist's own name for phil/mental
+ * (data/specialists.js - academy-public, no extra read). For training/
+ * tournament this needs the session's assigned coachId resolved to a
+ * display name, and there is currently NO rules-compliant read for a parent
+ * to resolve an arbitrary coach's users doc - the users collection's read
+ * rule is self/ops/owner only (firestore.rules), and widening it to every
+ * signed-in caller is a real privacy tradeoff for a minors' app, not this
+ * lane's unilateral call. `instructor` resolves to null for training/
+ * tournament in LIVE mode until the PM decides between a denormalized
+ * `sessions.coachName` snapshot (the tournamentResults `name` precedent,
+ * v1.5.1) or a narrow rules widening - flagged in the routing report, not
+ * silently invented. Seed mode uses the seed's own named coach fixture
+ * (COACH.name, 'Luke' - already established elsewhere, not a new invention)
+ * since seed data has no rules boundary to respect.
+ *
+ * `durationMinutes`: 60 for a generator block, 45 for any specialist slot
+ * (data/specialists.js's seeded 45-minute slots) - the pin's own numbers.
+ */
+function reservationRow(s, b, today, instructor) {
+  const specialist = SPECIALIST_BY_ID.get(s.type);
+  return {
+    ...displaySession(s, today),
+    badge:
+      b.status === 'confirmed'
+        ? { tone: 'green', label: 'Confirmed' }
+        : b.status === 'attended'
+        ? { tone: 'neutral', label: 'Attended' }
+        : b.status === 'noshow'
+        ? { tone: 'red', label: 'No-show' }
+        : null,
+    bookingId: b.bookingId,
+    status: b.status,
+    cancellable: b.status === 'confirmed' && s.date > today,
+    athleteId: b.athleteId,
+    instructor: instructor ?? (specialist ? specialist.name : null),
+    durationMinutes: specialist ? 45 : 60,
+  };
+}
+
+/**
+ * Live payload for useHouseholdReservations - ONE query on (householdId,
+ * date) [DATA-MODEL.md index 3, fetchHouseholdBookings], joined to sessions
+ * for display facts, grouped per household member into upcoming/past.
+ */
+async function liveHouseholdReservations(today) {
+  const profile = await fetchCurrentUser();
+  if (!profile.householdId) {
+    throw new LiveDataError(
+      ERR.INVALID,
+      `users/${profile.uid} has no householdId - Reservations is a parent surface only.`
+    );
+  }
+  const [athletes, bookings] = await Promise.all([
+    fetchHouseholdAthletes(profile.householdId),
+    fetchHouseholdBookings(profile.householdId),
+  ]);
+  const active = bookings.filter((b) => b.status !== 'cancelled');
+  const sessionsById = new Map(
+    (await fetchSessionsByIds(active.map((b) => b.sessionId))).map((s) => [s.id, s])
+  );
+
+  const byAthlete = new Map(athletes.map((a) => [a.id, { athleteId: a.id, name: a.name, upcoming: [], past: [] }]));
+  for (const b of active) {
+    const s = sessionsById.get(b.sessionId);
+    const bucket = byAthlete.get(b.athleteId);
+    if (!s || !bucket) continue; // dropped, same null-resolve rule as useSchedule/liveSchedule above
+    const row = reservationRow(s, { bookingId: b.id, status: b.status, athleteId: b.athleteId }, today, null);
+    (s.date >= today ? bucket.upcoming : bucket.past).push(row);
+  }
+  const members = athletes.map((a) => byAthlete.get(a.id));
+  for (const m of members) {
+    m.upcoming.sort(byDateThenId);
+    m.past.sort((x, y) => -byDateThenId(x, y));
+  }
+  return { members };
+}
+
+/** Seed member row for one household child - jordan (SEED_ATHLETE_ID) reuses
+ * the SAME BOOKED_UPCOMING/BOOKED_PAST references useSchedule's own seed
+ * branch resolves (never a second, independently invented booking list);
+ * reese/nico get the honest empty state the pin's UI section calls for. */
+function seedReservationMember(child, today) {
+  if (child.id !== SEED_ATHLETE_ID) {
+    return { athleteId: child.id, name: child.name, upcoming: [], past: [] };
+  }
+  const resolve = (refs) =>
+    refs
+      .map((ref) => {
+        const s = resolveBooking(ref);
+        if (!s) return null;
+        return reservationRow(
+          s,
+          { bookingId: seedBookingId(s.id), status: 'confirmed', athleteId: child.id },
+          today,
+          isSpecialistType(s.type) ? null : COACH.name
+        );
+      })
+      .filter(Boolean);
+  const upcoming = resolve(BOOKED_UPCOMING).sort(byDateThenId);
+  const past = resolve(BOOKED_PAST).sort((a, b) => -byDateThenId(a, b));
+  return { athleteId: child.id, name: child.name, upcoming, past };
+}
+
+/**
+ * GET /reservations (Sprint 11 pin F, contract v1.9) - the family-grouped
+ * Reservations view: `{ data: { members: [{ athleteId, name, upcoming: [item],
+ * past: [item] }] }, loading, error, cancel(bookingId) }`. `cancel` reuses
+ * the existing cancelBooking transaction (live.js) - same one it is,
+ * MySchedule's own cancel() calls, so a cancellation here and one from My
+ * Schedule are indistinguishable to the rules and to every other mounted
+ * hook watching 'bookings'.
+ */
+export function useHouseholdReservations() {
+  const live = isLive();
+  const today = todayISO();
+  const bookingsGen = useInvalidation('bookings');
+
+  const seedMembers = HOUSEHOLD.children.map((c) => seedReservationMember(c, today));
+
+  const state = useSeedResource(
+    live ? null : { members: seedMembers },
+    live
+      ? { source: () => liveHouseholdReservations(today), deps: ['household-reservations', today, bookingsGen] }
+      : undefined
+  );
+
+  const cancel = async (bookingId) => {
+    if (!live) return { id: bookingId, status: 'cancelled', simulated: true };
+    return cancelBooking({ bookingId });
+  };
+
+  return { ...state, cancel };
 }
 
 /**

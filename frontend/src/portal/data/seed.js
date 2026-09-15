@@ -162,6 +162,13 @@ export const HOUSEHOLD = {
       next: { type: 'training', when: 'Mon 4:00 PM', meta: 'Training block' },
       contract: 92,
       packageId: 'g-8-3',
+      // Sprint 11 (contract v1.9, pin A): mirrors the DB lane's real
+      // Firestore seed exactly (jordan f-8, reese f-4, nico null) so the
+      // static demo/harness and the live emulator tell the same believable
+      // story - useMembership/useSpecialistSlots derive Jordan's Phil
+      // entitlement off this the same way live mode derives it off the
+      // Firestore field.
+      fitnessPackageId: 'f-8',
       allowance: makeAllowance(GOLF_PACKAGES.find((p) => p.id === 'g-8-3'), {
         trainingUsed: 3,
         tournamentsUsed: 1,
@@ -178,6 +185,7 @@ export const HOUSEHOLD = {
       next: { type: 'tournament', when: 'Sat 10:30 AM', meta: 'Tournament block' },
       contract: 54,
       packageId: 'g-4-2',
+      fitnessPackageId: 'f-4', // Sprint 11 pin A - mirrors the real Firestore seed (see jordan above).
       /**
        * Reese has training left but no tournament entries — and a tournament is
        * her next session. A single-pool balance would have shown "2 left" and
@@ -198,6 +206,11 @@ export const HOUSEHOLD = {
       next: { type: 'training', when: 'Mon 5:00 PM', meta: 'Training block' },
       contract: null,
       packageId: 'g-4-2',
+      // Sprint 11 pin A: nico stays null on purpose here too, same reason
+      // his contractMinutes is seeded null - the "no fitness package on
+      // file" state (entitlementsFor's `source: 'none'`) needs a real,
+      // exercisable no-tier athlete in the demo, not just in the emulator.
+      fitnessPackageId: null,
       allowance: makeAllowance(GOLF_PACKAGES.find((p) => p.id === 'g-4-2'), {
         trainingUsed: 0,
         tournamentsUsed: 0,
