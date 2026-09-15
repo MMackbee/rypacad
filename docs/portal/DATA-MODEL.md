@@ -66,7 +66,9 @@ needs — and nothing medical (see the subcollection below).
 | `name` | string | |
 | `dob` | string \| null | `YYYY-MM-DD`, or null when unknown. **Contract v1.6 (Sprint 8):** `tournamentResults.bracket` snapshots this field at write time (see [below](#tournamentresultssessionid_athleteid-contract-v16-sprint-8)) — no dob means every result for that athlete lands in the display-only 'Open' bracket until one is set. `seed-firestore.mjs` sets the Whitfield demo athletes' dobs to the OWNER-SUPPLIED values (TEAM.md Sprint 8 amendment v1.6.1, 2026-09-10), landing the three kids across three different brackets; `seed.js`'s ageLine copy was trued up to match. `provision-family.mjs`'s real test families (MackBee, Eisele) stay null — a real kid's birthday is never invented; the owner supplies it later and provisioning writes it through unchanged via an optional `dob` per athlete entry. |
 | `householdId` | string | Parent link; rules grant guardians access through it. |
-| `packageId` | string | Into `packages/` — decides both monthly allowance pools. |
+| `packageId` | string | Into `packages/` (`kind == 'golf' \| 'drop-in' \| 'elite'`) — decides the two-pool golf allowances (training/tournaments). **Contract v1.9 (Sprint 11):** paired with `fitnessPackageId` right below as the athlete's *second*, independent package pointer — two stored facts, not one; see that row for the shared ops/owner assignment branch both fields go through. |
+| `fitnessPackageId` | string \| null | Into `packages/` where `kind == 'fitness'` (`f-4 \| f-8 \| f-12 \| f-16` — all four already in the catalogue, the seed, and the provisioner). **Contract v1.9 (Sprint 11 pin A) — design keystone: entitlements are DERIVED from packages, never stored; this pointer plus `packageId` above are the only two stored facts driving every "N of M left" surface, Phil included.** ABSENT and explicit `null` read identically EVERYWHERE: rules read it `resource.data.get('fitnessPackageId', null)`, hooks read it `?? null`, and `entitlementsFor()` treats both as "no fitness package" (`source: 'none'` — unless the golf package's `kind == 'elite'`, in which case Phil falls back to the flat `SPECIALIST_MONTHLY_CAP`, `source: 'elite'`). `provision-family.mjs` never writes this key at all, and — see the [seeding note](#seeding--emulator-workflow) below — that write is also **mask-protected**, not merely key-omitted, so a re-run can never wipe an ops/owner assignment back to absent either. Seed: jordan `f-8`, reese `f-4`, nico explicit `null` (a real, chosen value, not an omitted key — see the seeding note for why). |
+| `updatedAt` | timestamp \| absent | **Contract v1.9 (Sprint 11 pin B).** Written ONLY by the ops/owner package-assignment branch: `after.diff(resource.data).affectedKeys().hasOnly(['packageId', 'fitnessPackageId', 'updatedAt'])`, caller `ops \| owner` — a second, parallel field-limited update on `athletes`, alongside `contractMinutes`' own single-field branch in this table. Backs `setAthletePackages(athleteId, { packageId, fitnessPackageId })` → `useAssignPackages()`; one `bump('athletes')` per write. Assignment is IMMEDIATE and un-prorated — entitlements are derived, so headroom changes for the *next* booking only; nothing already booked is touched (no cancellations, no refunds — there is no money here to refund). Absent on every seeded/provisioned athlete until the first reassignment through this branch; not backfilled, since "never reassigned yet" is the honest starting state, the same reasoning `fitnessPackageId`'s absence carries above. |
 | `contractMinutes` | number \| null | `20 \| 45 \| 95 \| null` — Commitment Contract tier. **Contract v1.8 (Sprint 10 pin B): client-settable.** Rules allow an update of ONLY this field (`diff.hasOnly(['contractMinutes'])`) by two callers: the athlete's own `users` account, or the household's parent — the same three-way linkage reasoning as a booking create (own athlete, or own household's athlete via `get()`), not open to any signed-in user. This is what lets `useContract().setTier(minutes)` back the NoContract tier picker's CTA (athlete) and AthleteDetail's "Start a contract" card (parent) instead of both being dead ends. `nico` stays seeded `null` on purpose (below) so this intake path always has a real no-tier athlete to exercise. |
 | `coachId` | string \| null | uid of a `users` doc with `role == 'coach'`. Coach access filters on this assignment, never on role alone. |
 
@@ -102,8 +104,8 @@ other.
 | `training` | number | Training sessions per month (golf/elite/drop-in). |
 | `tournaments` | number | Tournament entries per month (golf/elite/drop-in). |
 | `sessions` | number | Fitness packages only — fitness sessions per month. |
-| `philSessions` | number \| null | Elite only. Null until decided — nulls are seeded as nulls, per the catalogue. |
-| `yannickSessions` | number \| null | Elite only. Null until decided. |
+| `philSessions` | number \| null | Elite only. **Contract v1.9.1 (owner ruling, Sprint 11 amendment):** `16` on both `elite` and `elite-247` — Elite includes 16 Phil sessions a month. `entitlementsFor()`'s elite branch (TEAM.md pin C) reads this instead of the flat `SPECIALIST_MONTHLY_CAP` once it is set; before this amendment it was null and the flat cap was the fallback. Seeded/provisioned from `ELITE_TIERS` in `frontend/src/portal/data/packages.js` (routing lane owns that file) exactly like every other package field — this script never hand-copies catalogue values, so the `16` flows through the same `{ ...fields(p), kind: 'elite' }` spread as everything else, with no seed/provisioner code change needed for the value itself. |
+| `yannickSessions` | number \| null | Elite only. Still null — **unchanged by the v1.9.1 amendment**, which set `philSessions` only. Not invented; nulls are seeded as nulls, per the catalogue. |
 | `facility247` | boolean | Elite only. |
 
 ### `sessions/{sessionId}`
@@ -1091,6 +1093,49 @@ single-equality-filter case in this file:
   second query shape), which is even more trivially index-free than the
   equality-filter version would have been.
 
+### v1.9 query additions (Sprint 11 — membership & entitlements, family Reservations) — no `firestore.indexes.json` changes
+
+Every new read this sprint adds was checked against the existing composites.
+**Nothing was added** — all three ride a shape this file already established:
+
+- **Package assignment** (pin B) — `setAthletePackages()` reads and writes
+  `athletes/{athleteId}` **by document id**, inside the field-limited update
+  described [above](#athletesathleteid). Document gets/sets have no index
+  implication at all, the same reasoning as every other by-id write in this
+  file (e.g. the [booking-capacity transaction](#v14-query-additions-sprint-6--no-firestoreindexesjson-changes)).
+- **Entitlement derivation** (pin C) — Phil's `used` this month is
+  `bookings where athleteId == :id and pool == 'specialist' and
+  date >= :monthStart and date <= :monthEnd`, filtered to `type == 'phil'`
+  and non-`cancelled` `status` client-side — the **identical shape**
+  [index 4](#4-bookings-athleteid-asc-pool-asc-date-asc--cycle-usage)
+  already serves (the same composite the v1.7 specialist monthly-cap check
+  rides — [see that note](#v17-query-additions-sprint-9--specialist-sessions-cancellation--no-firestoreindexesjson-changes)).
+  A fitness package only changes the *limit* Phil's derivation compares
+  `used` against (`fitness.sessions` instead of the flat
+  `SPECIALIST_MONTHLY_CAP`); it never changes the query shape. Mental's
+  derivation is unchanged since v1.7.
+- **Family Reservations** (pin F) — `useHouseholdReservations()` is **one**
+  query: `bookings where householdId == :id and date >= :today orderBy
+  date` (upcoming) and the `date < :today` variant (past) — the exact shape
+  [index 3](#3-bookings-householdid-asc-date-asc--parent-household-view)
+  already serves, unchanged since Sprint 6 (the parent home screen's
+  "next session per child" query is the same household-wide read). Grouping
+  the results into one section per household member, splitting Upcoming/
+  Past, and joining each booking's `sessionId` to its session doc for
+  `instructor`/`durationMinutes` all happen **client-side in the hook** over
+  a result set Firestore already returned — no new filter or sort dimension
+  on `bookings`, so no new composite. **Verify, don't widen**, per TEAM.md
+  pin F: parents already read every booking for their household through
+  this same index for the existing household view; Reservations is a new
+  screen over an old read, not a new read.
+
+Nothing in this sprint's read set adds a genuine second *distinct* filter/
+sort field to any collection — the trigger every real composite in this file
+has needed so far ([index 4](#4-bookings-athleteid-asc-pool-asc-date-asc--cycle-usage),
+[index 5](#5-bookings-sessionid-asc-status-asc--session-roster),
+[index 7](#7-bookings-status-asc-date-asc--admin-no-show-query-contract-v18-sprint-10)) —
+so `firestore.indexes.json` is unchanged this sprint.
+
 ## Seeding & emulator workflow
 
 Both npm scripts live in the **root `package.json`** (created for this — the
@@ -1178,3 +1223,65 @@ The seed script:
   in the `bookings` seed above), which gets a real note — so the roster's
   session-note editor has one real pre-filled example alongside the blank
   default.
+- seeds `athletes.fitnessPackageId` (contract v1.9, Sprint 11 pin A):
+  `WHITFIELD_FITNESS_PACKAGE_IDS` sets jordan `f-8`, reese `f-4`, and nico an
+  **explicit `null`** — chosen over omitting the key. All three other
+  package-shaped pointers on `athletes` (`packageId`, `contractMinutes`,
+  `coachId`) are always-present fields that are sometimes null, never an
+  absent key, and nico already carries that "here's the real empty state"
+  role for `contractMinutes` (above) — giving `fitnessPackageId` the same
+  treatment keeps one consistent rule for the whole document instead of two
+  different ways to mean "nothing here," and it means the emulator's raw
+  Firestore data (e.g. the Emulator UI, or a REST read) shows the field on
+  every athlete rather than requiring a reader to already know which keys
+  can be silently missing. Rules/hooks/`entitlementsFor()` don't care either
+  way — absent and explicit `null` are pinned to read identically.
+- seeds TWO PAST `phil` bookings for jordan (contract v1.9, Sprint 11 DB
+  lane bullet) — `addPastPhilSessions()` hand-adds two `phil` sessions on
+  the two most recent Phil working days (Mon/Wed/Fri) strictly earlier in
+  the **current calendar month** relative to when the script runs (never
+  the generated season, which starts 2026-11-02 — the current date can
+  precede season start, as it does for this pin), then books jordan into
+  both with `status: 'attended'` (both already happened) and `pool:
+  'specialist'`. Together with jordan's `f-8` fitness package above, this
+  makes `entitlementsFor()`'s derived Phil `used` **2 of 8** the moment the
+  emulator loads — matching TEAM.md pin G's own example copy
+  ("2 of 8 performance sessions used this month") verbatim, not a
+  coincidence. Throws if fewer than two such days exist earlier in the
+  current month (possible in the first few days of a month) rather than
+  silently seeding less than the pin asks for.
+- seeds ONE upcoming `phil` booking for reese (contract v1.9, Sprint 11 DB
+  lane bullet) — against the first Phil slot `addSpecialistSessions()`'s
+  forward window generates, `status: 'confirmed'`, `createdBy: 'parent-dana'`
+  (reese has no `users` doc of her own, same parent-linkage reasoning as her
+  other bookings above). Combined with jordan's existing upcoming `mental`
+  booking (contract v1.7, above), the household now has an upcoming
+  specialist row for **two different members**, not just one, so the Family
+  Reservations view (pin F) has more than a single-member story to render.
+- sets a real `sessions.coachId` on jordan's upcoming `2026-11-02-1`
+  training booking (contract v1.9, Sprint 11 DB lane bullet) — `buildSeason()`
+  always leaves `coachId` null (schedule.js never assigns one), so without
+  this the Reservations view's derived `instructor` field would have no
+  real training-block example anywhere in the seed. Set to `coach-luke`,
+  jordan's own assigned coach, after the `WHITFIELD_BOOKINGS` loop builds
+  that session's booking.
+- **contract v1.9.1 (owner ruling, Sprint 11 amendment, applied mid-sprint):**
+  `packages/elite` and `packages/elite-247` now carry `philSessions: 16`
+  (routing lane's edit to `ELITE_TIERS` in `frontend/src/portal/data/packages.js`;
+  `yannickSessions` stays null, unchanged). Both this script and
+  `provision-family.mjs` bundle `ELITE_TIERS` from that file and spread every
+  field through unchanged (`{ ...fields(p), kind: 'elite' }` — see
+  `buildDocs()`/`loadPackages()`), so the `16` reaches `packages/elite*` with
+  **no script change** the moment routing's edit merges; neither script ever
+  hand-copies a catalogue value. **No emulator athlete is seeded on an Elite
+  package** — all three Whitfield kids are `g-8-3`/`g-4-2` golf packages
+  (`seed.js`), so `entitlementsFor()`'s `source: 'elite'` branch for Phil is
+  not exercisable against this emulator seed at all. Not fixed by reassigning
+  a Whitfield package (no invented data on top of an existing real demo
+  story) — flagged here instead: `provision-family.mjs`'s MackBee household
+  already has a real Elite athlete for this, Quinn MackBee (`makel-test-3`,
+  `packageId: 'elite'`), but that only reaches **production**, gated behind
+  a signed-in account and never run by this seed. If the PM wants the Elite
+  branch exercisable in the emulator for the live pass, that needs a new
+  seeded athlete (or a deliberate package change on an existing one), which
+  is a product decision, not this report's call to make unilaterally.
