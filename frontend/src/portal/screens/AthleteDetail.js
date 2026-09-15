@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { color, font, radius } from '../tokens';
 import * as hooks from '../hooks';
+import AthleteMembershipCard from '../components/AthleteMembershipCard';
 import BottomTabBar from '../components/BottomTabBar';
 import Button from '../components/Button';
 import { Avatar } from '../components/MediaPlaceholder';
@@ -8,7 +9,7 @@ import PhoneFrame from '../components/PhoneFrame';
 import ProgressMeter, { meterColor } from '../components/ProgressMeter';
 import SavedToast from '../components/SavedToast';
 import { BackLink, Body, Card, ScreenTitle, SectionLabel, Tick } from '../components/Primitives';
-import { useAthleteDetail } from '../hooks';
+import { useAthleteDetail, useHousehold } from '../hooks';
 
 /**
  * Sprint 10 pin C: same fallback rationale as DiagnosticCapture.js's own
@@ -50,14 +51,35 @@ const TIER_MINUTES = [20, 45, 95];
  * @param {boolean} [noTier]  Sprint 10 pin B, harness/PM override: force the
  *   "Start a contract" card on regardless of the subline heuristic below -
  *   see that card's own doc comment for why a real signal doesn't exist yet.
+ * @param {'parent'|'athlete'|'coach'|'mental'|'ops'|'owner'} [role]
+ *   Sprint 11 pin E (TEAM.md): gates the new Membership card — ops/owner get
+ *   the editable package pickers, coach/mental see the same facts read-only,
+ *   parent/athlete get nothing here (their own view is screens/Membership.js
+ *   instead — this card is staff-only, "no separate staff route"). Defaults
+ *   to 'parent', matching every existing caller of this screen today; routing
+ *   needs to start passing the signed-in user's real role at
+ *   AthleteDetailRoute (PortalRoutes.js is not this lane's to edit — see the
+ *   sprint report) now that Sprint 10 pin I already routes coach here too.
  */
-export default function AthleteDetail({ variant = 'populated', bare = false, athleteId, noTier, onBack }) {
+export default function AthleteDetail({ variant = 'populated', bare = false, athleteId, noTier, role = 'parent', onBack }) {
   // athleteId comes from the route (/portal/athlete/:athleteId) — dropping it
   // here was QA re-sweep #1: the hook's by-id fetch was fixed but never
   // received an id, so every child rendered as the seed athlete.
   const { data } = useAthleteDetail({ variant, athleteId });
   const athlete = data?.athlete;
   const diagnostic = useLatestDiagnostic(athleteId);
+  /**
+   * Sprint 11 pin H (quick win): the back link used to read the hardcoded
+   * seed string "Whitfield family" regardless of whose record this actually
+   * is. useHousehold() already exposes the real household name (live: the
+   * households/{id}.name doc field; seed: the same cast every other screen
+   * reads) — a staff viewer has no household of their own, so the live
+   * source throws inside the hook and `data` simply stays null, which this
+   * falls back to a generic, non-invented label for rather than a name that
+   * cannot be true for that viewer.
+   */
+  const household = useHousehold();
+  const householdName = household.data?.name || 'Family';
 
   /**
    * Sprint 10 pin B: whether this kid has no contract tier yet. useAthleteDetail's
@@ -84,7 +106,7 @@ export default function AthleteDetail({ variant = 'populated', bare = false, ath
       bare={bare}
       header={
         <div style={{ padding: '4px 22px 14px' }}>
-          <BackLink onClick={onBack}>‹ Whitfield family</BackLink>
+          <BackLink onClick={onBack}>‹ {householdName}</BackLink>
           <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginTop: 10 }}>
             <Avatar size={48} />
             <div style={{ flex: 1, minWidth: 0 }}>
@@ -104,6 +126,8 @@ export default function AthleteDetail({ variant = 'populated', bare = false, ath
       footer={<BottomTabBar role="parent" active="home" />}
     >
       <div style={{ padding: '0 22px 24px', display: 'flex', flexDirection: 'column', gap: 12 }}>
+        <AthleteMembershipCard athleteId={athleteId} athlete={athlete} role={role} />
+
         {hasNoTier ? <StartContractCard athleteId={athleteId} athleteName={athlete?.name} /> : null}
 
         {data?.hasEnoughData ? (
@@ -176,12 +200,18 @@ function ContractHistory({ history }) {
         ))}
       </div>
       {/*
-        Naming the reason matters: a parent seeing December low without this
-        reads it as their child slipping, not as the academy being shut.
+        Sprint 11 pin H (quick win): this caption named a specific closure
+        ("Dec 23 - Jan 3") as though every history row were being explained
+        by it, regardless of which months `history` actually contains or
+        whether a closure landed in any of them. The general rule (closure
+        days are excluded from the denominator) is always true and worth
+        stating; citing December's own closure by name is not, once this
+        card renders real live history instead of the fixed Nov-Feb seed
+        rows the copy was written against.
       */}
       <Body size={11} tone={color.textTertiary} style={{ marginTop: 13 }}>
-        Dec sits low because of the Dec 23 – Jan 3 closure. Closure days are excluded from the
-        denominator.
+        A low month can reflect an academy closure — closure days are excluded from the
+        denominator, so they never count against attendance.
       </Body>
     </Card>
   );
