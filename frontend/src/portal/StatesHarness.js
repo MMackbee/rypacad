@@ -42,6 +42,8 @@ import OnboardingFlow from './screens/OnboardingFlow';
 import TourStandings from './screens/TourStandings';
 import SpecialistBooking from './screens/SpecialistBooking';
 import SpecialistDay from './screens/SpecialistDay';
+import Membership from './screens/Membership';
+import Reservations from './screens/Reservations';
 
 import { ALLOWANCE, ALLOWANCE_NO_TOURNAMENTS } from './data/seed';
 import { ELITE_TIERS, FITNESS_PACKAGES, GOLF_PACKAGES } from './data/packages';
@@ -114,18 +116,30 @@ export const SCREEN_STATES = [
     states: [['one', 'One child', { onBookFor: () => {}, onBookCoaching: () => {} }],
              ['three', 'Three children', { onBookFor: () => {}, onBookCoaching: () => {} }],
              ['payment', 'Payment issue', { onBookFor: () => {}, onBookCoaching: () => {} }]] },
-  { id: '09', title: 'Athlete Detail', Screen: AthleteDetail, role: 'parent',
+  { id: '09', title: 'Athlete Detail', Screen: AthleteDetail, role: 'parent + staff',
     states: [['populated', 'Populated'], ['limited', 'Limited data'],
              // Sprint 10 pin B (TEAM.md): the "Start a contract" card for a
              // kid with no tier yet - `noTier` overrides the (fragile,
              // flagged) subline heuristic so this state is reviewable
              // regardless of what the seed subline happens to say.
-             ['populated', 'No contract tier', { noTier: true }]] },
+             ['populated', 'No contract tier', { noTier: true }],
+             // Sprint 11 pin E (TEAM.md, contract v1.9): the new Membership
+             // card - ops/owner get the editable package pickers, coach/
+             // mental see the same facts read-only, parent (the default
+             // above) sees nothing here (their own view is Membership.js).
+             ['populated', 'Ops · membership editor', { role: 'ops' }],
+             ['populated', 'Coach · membership read-only', { role: 'coach' }]] },
   { id: '10', title: 'Billing & Subscription', Screen: Billing, role: 'parent',
     states: [['active', 'Active'], ['retry1', 'Retry 1'], ['retry3', 'Retry 3'],
              ['restricted', 'Restricted'], ['updating', 'Updating card']] },
-  { id: '11', title: 'Notification Preferences', Screen: NotificationPreferences, role: 'parent',
-    states: [['default', 'Default'], ['saved', 'Saved']] },
+  { id: '11', title: 'Notification Preferences', Screen: NotificationPreferences, role: 'parent + athlete',
+    // Sprint 11 pin D entry point (TEAM.md): the new Membership row renders
+    // for both roles; `role: 'athlete'` also previews the tab-bar/footnote
+    // gap flagged in this screen's own doc comment (PortalRoutes' /portal/
+    // settings route is still parent-only, so an athlete cannot reach this
+    // screen live yet even with the row added here).
+    states: [['default', 'Default'], ['saved', 'Saved'],
+             ['default', 'Athlete', { role: 'athlete' }]] },
   { id: '12', title: 'Coach Dashboard', Screen: CoachDashboard, role: 'coach',
     states: [['today', 'Sessions today'], ['concurrent', 'Concurrent'], ['none', 'None today']] },
   { id: '13', title: 'Session Roster & Attendance', Screen: SessionAttendance, role: 'coach',
@@ -208,7 +222,15 @@ export const SCREEN_STATES = [
              ['confirmed', 'Confirmed', { harnessStage: 'confirmed' }],
              ['empty-day', 'Empty day', { harnessStage: 'empty-day' }],
              // Parent's 'Booking for' selector, same idiom as BookSession's.
-             ['slots', 'Parent · pick a child', { harnessStage: 'slots', role: 'parent' }]] },
+             ['slots', 'Parent · pick a child', { harnessStage: 'slots', role: 'parent' }],
+             // Sprint 11 pin G (TEAM.md, contract v1.9): the entitlement
+             // summary / blocking states, previewed off `demoEntitlementSource`
+             // (harness-only, see the screen's own doc comment) since
+             // useMembership() doesn't exist in this worktree yet.
+             ['slots', 'Phil · fitness source', { harnessStage: 'slots', demoEntitlementSource: 'fitness' }],
+             ['slots', 'Phil · Elite source (v1.9.1)', { harnessStage: 'slots', demoEntitlementSource: 'elite' }],
+             ['slots', 'Phil · no fitness package', { harnessStage: 'slots', demoEntitlementSource: 'none' }],
+             ['slots', 'Yannick · flat cap', { harnessStage: 'slots', harnessSpecialistId: 'mental' }]] },
   /*
    * Specialist Day / My Sessions (Sprint 9 amendment v1.7.1; nav + Today
    * section added Sprint 10 pins F/I) - the specialist's own day view, not
@@ -222,6 +244,36 @@ export const SCREEN_STATES = [
       ['default', 'Yannick · mental', { specialistId: 'mental', role: 'mental' }],
       ['default', 'Phil · coach set', { specialistId: 'phil' }],
       ['default', 'Ops · switcher', { canSwitch: true, role: 'ops' }],
+    ] },
+  /*
+   * Membership (Sprint 11 pin D, TEAM.md, contract v1.9) — the retired
+   * Billing surface's replacement, member-facing. Not a numbered handoff
+   * artboard, so it sits after the seventeen. `useMembership()` doesn't
+   * exist in this worktree yet (see the screen's own doc comment) — its
+   * `variant` prop drives every state below locally, the same escape hatch
+   * TourStandings uses.
+   */
+  { id: 'MEM', title: 'Membership', Screen: Membership, role: 'parent + athlete',
+    states: [
+      ['populated', 'Parent · household'],
+      ['populated', 'Athlete · self only', { role: 'athlete' }],
+      ['loading', 'Loading'],
+      ['error', 'Load failure'],
+      ['empty', 'No linked athletes'],
+    ] },
+  /*
+   * Family Reservations (Sprint 11 pin F, TEAM.md, contract v1.9) — the
+   * parent tab bar's new stop, replacing Billing's old slot. Not a numbered
+   * handoff artboard. `useHouseholdReservations()` doesn't exist in this
+   * worktree yet (see the screen's own doc comment) — its `variant` prop
+   * drives every state below locally.
+   */
+  { id: 'RES', title: 'Family Reservations', Screen: Reservations, role: 'parent',
+    states: [
+      ['populated', 'Populated · Upcoming', { onBook: () => {} }],
+      ['loading', 'Loading'],
+      ['error', 'Load failure'],
+      ['empty', 'No linked athletes', { onBook: () => {} }],
     ] },
   /*
    * Not provisioned (Sprint 4, real enrollment states added Sprint 10 pin

@@ -1,7 +1,9 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { color, font, glow, radius, tint } from '../tokens';
 import BottomTabBar from '../components/BottomTabBar';
 import Button from '../components/Button';
+import EntitlementSummary, { demoEntitlement } from '../components/EntitlementSummary';
 import PhoneFrame from '../components/PhoneFrame';
 import SessionCard from '../components/SessionCard';
 import { CapacityPill } from '../components/StatusBadge';
@@ -17,6 +19,7 @@ import {
   SignOutButton,
   Tick,
 } from '../components/Primitives';
+import { useMembership, usingRealMembershipHook } from '../components/useMembershipCompat';
 import { seedSpecialistDays, useBooking, useHouseholdAthletes, useSpecialistSlots } from '../hooks';
 import { SPECIALISTS } from '../data/specialists';
 // Pure calendar/season helpers per the seam rule already established in
@@ -27,6 +30,16 @@ import { longDayLabel, todayISO } from '../data/calendar';
 import { datePill } from '../data/season';
 
 /**
+ * Sprint 11 pin G addendum (TEAM.md, contract v1.9): the summary line and
+ * the "no fitness package" blocking notice both read the relevant athlete's
+ * Phil/mental entitlement off useMembership() (contract v1.9 D) — the SAME
+ * derived numbers Membership.js shows, never recomputed here. See
+ * components/useMembershipCompat.js for the fallback swap rationale (the
+ * hook does not exist in this worktree yet) and components/EntitlementSummary.js
+ * for the copy derivation and the blocking-notice component itself — both
+ * extracted out of this file to keep it closer to the project's file-size
+ * convention.
+ *
  * 05·S · Specialist Booking - athlete + parent (Sprint 9 pin, docs/portal/
  * TEAM.md, "specialist 1-on-1s"). Life Time's own class-scheduling flow,
  * translated: (1) a specialist picker, (2) a horizontal 14-day strip,
@@ -64,6 +77,16 @@ import { datePill } from '../data/season';
  *   Real callers (routing) never pass this; omitted it defaults to the
  *   picker, exactly matching the pinned contract. Flagged in the sprint
  *   report.
+ * @param {'fitness'|'elite'|'none'} [demoEntitlementSource]  HARNESS-ONLY,
+ *   same category as `harnessStage` above — previews Phil's three summary/
+ *   blocking states (G) while useMembership() is missing (see the fallback
+ *   doc above demoEntitlement). Ignored the moment the real hook lands; no
+ *   real caller ever passes it.
+ * @param {string} [harnessSpecialistId]  HARNESS-ONLY — which specialist
+ *   `harnessStage` mounts directly into (defaults to SPECIALISTS[0], Phil).
+ *   Lets the gallery deep-mount Yannick's flat-cap state too, the same way
+ *   `harnessStage` itself skips the picker tap. No real caller ever passes
+ *   this — routing always starts at the picker.
  */
 export default function SpecialistBooking({
   bare = false,
@@ -72,8 +95,11 @@ export default function SpecialistBooking({
   onBack,
   onSignOut,
   harnessStage,
+  demoEntitlementSource = 'fitness',
+  harnessSpecialistId,
 }) {
-  const initialSpecialistId = harnessStage ? SPECIALISTS[0].id : null;
+  const navigate = useNavigate();
+  const initialSpecialistId = harnessStage ? harnessSpecialistId || SPECIALISTS[0].id : null;
   const [specialistId, setSpecialistId] = useState(initialSpecialistId);
   const specialist = SPECIALISTS.find((s) => s.id === specialistId) || null;
 
@@ -105,6 +131,9 @@ export default function SpecialistBooking({
   });
   const [reserving, setReserving] = useState(null);
   const [failure, setFailure] = useState(null);
+  // Sprint 11 pin G: the typed reason behind `failure`'s message, when the
+  // hook supplies one — see confirmReserve's catch block below.
+  const [failureReason, setFailureReason] = useState(null);
   const [booked, setBooked] = useState(() => {
     if (harnessStage !== 'confirmed') return null;
     return { specialist: SPECIALISTS[0], date: todayISO(), time: '3:30 PM' };
@@ -124,6 +153,7 @@ export default function SpecialistBooking({
     setSelectedDate(null);
     setSheetSlot(null);
     setFailure(null);
+    setFailureReason(null);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [specialistId]);
 
@@ -168,10 +198,33 @@ export default function SpecialistBooking({
     booking.book({ id: slot.sessionId, date: slot.date, type: specialistId }, opts);
   const disabledForNoAthlete = isParent && !selectedAthleteId;
 
+  /**
+   * Sprint 11 pin G: the summary line and the "no fitness package" blocking
+   * notice both read the relevant athlete's own entitlement — the parent's
+   * selected child, or the athlete's own single self-only member. See the
+   * useMembership fallback doc above for why this reads `demoEntitlement`
+   * while the real hook is missing.
+   */
+  const membershipState = useMembership();
+  const membershipMembers = usingRealMembershipHook ? membershipState.data?.members ?? [] : [];
+  const member = usingRealMembershipHook
+    ? (isParent ? membershipMembers.find((m) => m.athleteId === selectedAthleteId) : membershipMembers[0]) ?? null
+    : null;
+  const entitlement = usingRealMembershipHook
+    ? member?.entitlements?.[specialistId] ?? null
+    : specialistId
+    ? demoEntitlement(specialistId, demoEntitlementSource)
+    : null;
+  // Only Phil gates the reserve CTA — Yannick's flat cap has no 0-limit
+  // state (it is never sourced from a package), so 'none' cannot occur for
+  // mental (contract v1.9 C).
+  const noFitnessPackage = specialistId === 'phil' && entitlement?.source === 'none';
+
   const confirmReserve = (slot) => {
     if (reserving) return;
-    if (disabledForNoAthlete) return;
+    if (disabledForNoAthlete || noFitnessPackage) return;
     setFailure(null);
+    setFailureReason(null);
     setReserving(slot.sessionId);
     Promise.resolve()
       .then(() => reserve(slot, isParent ? { athleteId: selectedAthleteId } : undefined))
@@ -182,6 +235,13 @@ export default function SpecialistBooking({
       })
       .catch((err) => {
         setReserving(null);
+        // Sprint 11 pin C/G: live.js's assertWithinMonthlyCap is supposed to
+        // throw a typed `reason` ('no-fitness-package' | 'cap-reached')
+        // alongside `.message` once routing lands it — not present in this
+        // worktree yet, so `err.reason` is read defensively and the sheet
+        // falls back to the plain message, same graceful-degrade every other
+        // typed-error consumer in this codebase already follows.
+        setFailureReason(err && err.reason ? err.reason : null);
         setFailure(err && typeof err.message === 'string' && err.message ? err.message : null);
       });
   };
@@ -247,6 +307,9 @@ export default function SpecialistBooking({
               <SpecialistHeader specialist={specialist} />
             </div>
             <div style={{ padding: '0 22px' }}>
+              <EntitlementSummary specialistId={specialistId} entitlement={entitlement} onSeeMembership={() => navigate('/portal/membership')} />
+            </div>
+            <div style={{ padding: '0 22px' }}>
               <DayStrip days={days} selectedDate={selectedDate} onSelect={setSelectedDate} />
             </div>
             <div style={{ padding: '0 22px', display: 'flex', flexDirection: 'column', gap: 9 }}>
@@ -271,11 +334,15 @@ export default function SpecialistBooking({
           slot={sheetSlot}
           saving={reserving === sheetSlot.sessionId}
           failure={failure}
-          disabled={disabledForNoAthlete}
+          failureReason={failureReason}
+          disabled={disabledForNoAthlete || noFitnessPackage}
+          noFitnessPackage={noFitnessPackage}
+          onSeeMembership={() => navigate('/portal/membership')}
           onClose={() => {
             if (reserving) return;
             setSheetSlot(null);
             setFailure(null);
+            setFailureReason(null);
           }}
           onReserve={() => confirmReserve(sheetSlot)}
         />
@@ -453,8 +520,31 @@ function SlotList({ day, specialist, disabled, reserving, onSelect }) {
  * single Reserve CTA with a saving state. Same bottom-sheet idiom
  * CommitmentContract's DaySheet/LogSheet already use.
  */
-function DetailSheet({ specialist, slot, saving, failure, disabled, onClose, onReserve }) {
+function DetailSheet({
+  specialist,
+  slot,
+  saving,
+  failure,
+  failureReason,
+  disabled,
+  noFitnessPackage,
+  onSeeMembership,
+  onClose,
+  onReserve,
+}) {
   const [time, meridiem] = (slot.time || '').split(' ');
+  /**
+   * Sprint 11 pin G: the typed reason from useBooking's book() (once routing
+   * lands it — see confirmReserve's catch block) gets its own copy rather
+   * than the raw thrown message; anything else falls back to the message
+   * verbatim, same as this sheet has always done.
+   */
+  const reasonCopy =
+    failureReason === 'no-fitness-package'
+      ? "No fitness package on file — Phil's performance sessions come from one."
+      : failureReason === 'cap-reached'
+      ? "This month's cap for this session type is already booked."
+      : null;
   return (
     <div
       onClick={saving ? undefined : onClose}
@@ -492,9 +582,23 @@ function DetailSheet({ specialist, slot, saving, failure, disabled, onClose, onR
         <Body size={12} tone={color.textTertiary} style={{ marginTop: 10 }}>
           This session does not use your training or tournament allowance.
         </Body>
+        {noFitnessPackage ? (
+          <div style={{ marginTop: 12 }}>
+            <Body size={12} tone={color.secondary}>
+              No fitness package on file.{' '}
+              <button
+                type="button"
+                onClick={onSeeMembership}
+                style={{ background: 'none', border: 'none', padding: 0, font: `500 12px ${font.body}`, color: color.primary, cursor: 'pointer' }}
+              >
+                See membership ›
+              </button>
+            </Body>
+          </div>
+        ) : null}
         {failure ? (
           <Body size={12} tone={color.error} style={{ marginTop: 12 }}>
-            {failure} Nothing was reserved — try again.
+            {reasonCopy ?? failure} Nothing was reserved — try again.
           </Body>
         ) : null}
         <Button height={54} loading={saving} disabled={disabled} style={{ marginTop: 18 }} onClick={onReserve}>

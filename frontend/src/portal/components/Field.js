@@ -92,8 +92,17 @@ export default function Field({
   );
 }
 
-/** Select with the 8px CSS chevron the design uses (no icon set supplied yet). */
+/**
+ * Select with the 8px CSS chevron the design uses (no icon set supplied yet).
+ *
+ * `options` accepts either plain strings (the existing callers — the value
+ * shown IS the value stored, e.g. "Mother") or `{value, label}` objects
+ * (Sprint 11 pin E's package pickers — a package id like 'g-8-3' needs to
+ * store the id but display the catalogue name "8 + 3"). Both forms coexist
+ * in the same array without a caller ever needing to normalize first.
+ */
 export function SelectField({ label, value, options = [], onChange, style }) {
+  const normalized = options.map((o) => (typeof o === 'object' && o !== null ? o : { value: o, label: o }));
   return (
     <div style={style}>
       {label ? (
@@ -136,9 +145,9 @@ export function SelectField({ label, value, options = [], onChange, style }) {
           <option value="" disabled>
             Select
           </option>
-          {options.map((o) => (
-            <option key={o} value={o} style={{ background: color.surface }}>
-              {o}
+          {normalized.map((o) => (
+            <option key={o.value} value={o.value} style={{ background: color.surface }}>
+              {o.label}
             </option>
           ))}
         </select>

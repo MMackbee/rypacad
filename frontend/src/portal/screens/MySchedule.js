@@ -1,9 +1,11 @@
 import React, { useState } from 'react';
-import { BLOCKS, BLOCK_DAYS, color, font, radius, tint } from '../tokens';
+import { BLOCKS, BLOCK_DAYS, color, font, radius } from '../tokens';
 import BottomTabBar from '../components/BottomTabBar';
 import Button from '../components/Button';
+import CancelSheet from '../components/CancelSheet';
 import MediaPlaceholder from '../components/MediaPlaceholder';
 import PhoneFrame from '../components/PhoneFrame';
+import Segmented from '../components/Segmented';
 import SessionCard from '../components/SessionCard';
 import StatusBadge from '../components/StatusBadge';
 import AllowancePools from '../components/AllowancePools';
@@ -131,7 +133,7 @@ export default function MySchedule({ variant = 'upcoming', bare = false, onBook,
 
       {cancelTarget ? (
         <CancelSheet
-          session={cancelTarget}
+          summary={`${cancelTarget.dayLabel} · ${cancelTarget.time} ${cancelTarget.meridiem} · ${cancelTarget.name}`}
           onClose={() => setCancelTarget(null)}
           onConfirm={() => cancel(cancelTarget.bookingId)}
           onCancelled={() => setCancelTarget(null)}
@@ -251,83 +253,6 @@ function ScheduleBody({ past, sessions, cancelled, allowance, days, onBook, onCa
 }
 
 /**
- * Sprint 9 pin (TEAM.md, "specialist 1-on-1s", cancellation) - "tap ->
- * sheet: keep / cancel", the same bottom-sheet idiom CommitmentContract's
- * DaySheet already uses (overlay + slide-up panel, saving/error state local
- * to the sheet). Restates the session's own facts so the tap being confirmed
- * is unambiguous, and never closes itself on failure - a failed cancel
- * leaves the booking exactly as it was, sheet open, honest inline error.
- */
-function CancelSheet({ session, onClose, onConfirm, onCancelled }) {
-  const [saving, setSaving] = useState(false);
-  const [error, setError] = useState(null);
-
-  const handleCancel = async () => {
-    setSaving(true);
-    setError(null);
-    try {
-      await onConfirm();
-      onCancelled();
-    } catch (err) {
-      setSaving(false);
-      setError(
-        err && typeof err.message === 'string' && err.message
-          ? err.message
-          : 'The reservation could not be cancelled. Try again.'
-      );
-    }
-  };
-
-  return (
-    <div
-      onClick={saving ? undefined : onClose}
-      style={{
-        position: 'absolute',
-        inset: 0,
-        background: tint.overlay,
-        display: 'flex',
-        alignItems: 'flex-end',
-      }}
-    >
-      <div
-        onClick={(e) => e.stopPropagation()}
-        style={{
-          width: '100%',
-          background: color.surface,
-          borderTop: `1px solid ${color.border}`,
-          borderRadius: `${radius.cardLarge} ${radius.cardLarge} 0 0`,
-          padding: '20px 22px 26px',
-        }}
-      >
-        <ScreenTitle size={19}>Cancel this reservation?</ScreenTitle>
-        <Body size={12} style={{ marginTop: 8 }}>
-          {session.dayLabel} · {session.time} {session.meridiem} · {session.name}
-        </Body>
-        {error ? (
-          <Body size={12} tone={color.error} style={{ marginTop: 10 }}>
-            {error}
-          </Body>
-        ) : null}
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 10, marginTop: 16 }}>
-          <Button
-            variant="dangerOutline"
-            height={50}
-            loading={saving}
-            style={{ boxShadow: 'none' }}
-            onClick={handleCancel}
-          >
-            {saving ? 'Cancelling' : 'Cancel reservation'}
-          </Button>
-          <Button variant="outline" height={50} disabled={saving} style={{ boxShadow: 'none' }} onClick={onClose}>
-            Keep it
-          </Button>
-        </div>
-      </div>
-    </div>
-  );
-}
-
-/**
  * The loading layout in the loaded layout's geometry: allowance card, a day
  * label, then session cards on 04's default 52px gutter. No spinner — see
  * components/Skeleton.js.
@@ -363,48 +288,6 @@ function ScheduleSkeleton() {
         <SkeletonBar width={82} height={10} />
         <SkeletonSessionCard />
       </div>
-    </div>
-  );
-}
-
-function Segmented({ value, onChange }) {
-  const options = [
-    ['upcoming', 'Upcoming'],
-    ['past', 'Past'],
-  ];
-
-  return (
-    <div
-      style={{
-        background: color.surface,
-        border: `1px solid ${color.border}`,
-        borderRadius: radius.control,
-        padding: 3,
-        display: 'flex',
-      }}
-    >
-      {options.map(([key, label]) => {
-        const on = key === value;
-        return (
-          <button
-            key={key}
-            type="button"
-            onClick={() => onChange(key)}
-            style={{
-              flex: 1,
-              height: 38,
-              border: 'none',
-              borderRadius: radius.pill,
-              background: on ? color.primary : 'transparent',
-              font: `${on ? 600 : 500} 13px ${font.body}`,
-              color: on ? '#000' : color.textTertiary,
-              cursor: 'pointer',
-            }}
-          >
-            {label}
-          </button>
-        );
-      })}
     </div>
   );
 }

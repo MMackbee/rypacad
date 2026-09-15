@@ -534,6 +534,23 @@ function BlockFillCard({ bars, filtered }) {
     return color.controlBorder;
   };
 
+  /**
+   * Sprint 11 pin H (quick win): this footnote used to name Friday as the
+   * overflow block on every render, regardless of whether Friday actually
+   * ran that week — Friday is "off by default" (tokens.js/schedule.js), so
+   * a week with no Friday sessions at all still got a claim about its
+   * "expected" low fill. `blockFill`'s shape (hooks/index.js) only exposes
+   * `{day, pct}`, not a day's capacity, so a 0% Friday from zero capacity
+   * and a 0% Friday from a real-but-unbooked block are indistinguishable
+   * here — this reads the best available proxy (pct > 0 implies at least
+   * one booking landed, which implies capacity existed) rather than a true
+   * "did Friday run" signal. HOOK-SHAPE GAP flagged in the sprint report:
+   * blockFill should expose each day's capacity (or a `scheduled: boolean`)
+   * so this can gate on the real fact instead of a proxy.
+   */
+  const fridayBar = bars.find((b) => b.day === 'Fri');
+  const showFridayNote = Boolean(fridayBar && fridayBar.pct > 0);
+
   return (
     <Card large>
       <SectionLabel style={{ marginBottom: 16 }}>Block fill this week</SectionLabel>
@@ -554,16 +571,12 @@ function BlockFillCard({ bars, filtered }) {
         ))}
       </div>
 
-      {/*
-        Said plainly so nobody chases it: Friday is the overflow block, so low
-        fill there is the schedule working as designed.
-      */}
-      <Body size={11} tone={color.textTertiary} style={{ marginTop: 14 }}>
-        {filtered
-          ? 'Facility-wide — block fill cannot be cut by tier. '
-          : ''}
-        Friday is the overflow block — low fill there is expected, not a problem.
-      </Body>
+      {filtered || showFridayNote ? (
+        <Body size={11} tone={color.textTertiary} style={{ marginTop: 14 }}>
+          {filtered ? 'Facility-wide — block fill cannot be cut by tier. ' : ''}
+          {showFridayNote ? 'Friday is the overflow block — low fill there is expected, not a problem.' : ''}
+        </Body>
+      ) : null}
     </Card>
   );
 }

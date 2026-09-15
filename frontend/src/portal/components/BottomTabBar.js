@@ -30,10 +30,13 @@ export const TABS = {
     // /portal/athlete route it pointed at now redirects to /portal/family —
     // two tabs, one destination (owner's report, 2026-09-01).
     { key: 'home', label: 'Home', icon: 'home', route: '/portal/family' },
-    // Billing tab REMOVED, replaced by Tour (Sprint 7 pin, TEAM.md): billing
-    // is out of the app for now. Billing.js survives unrouted in the harness
-    // for Stripe's eventual return; /portal/billing redirects to /portal/family
-    // (routing lane).
+    // Sprint 11 pin F (TEAM.md, contract v1.9): Reservations replaces
+    // Billing's old tab slot (Billing itself was already removed, Sprint 7 —
+    // this is the second tab-bar swap in that slot, not a Billing return).
+    // Uses the 'calendar' icon already in the icon-set list (BottomTabBar's
+    // athlete 'schedule' tab uses the same glyph meaning) rather than adding
+    // a new icon name nobody has drawn yet.
+    { key: 'reservations', label: 'Reservations', icon: 'calendar', route: '/portal/reservations' },
     { key: 'tour', label: 'Tour', icon: 'trophy', route: '/portal/tour' },
     { key: 'settings', label: 'Settings', icon: 'settings', route: '/portal/settings' },
   ],

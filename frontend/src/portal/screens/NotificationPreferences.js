@@ -25,11 +25,29 @@ import { useNotificationPrefs } from '../hooks';
  * dashboard, and every role needs a visible sign-out affordance - Settings is
  * where the parent's lives, at the bottom of the screen.
  *
+ * Sprint 11 pin D entry point (TEAM.md, contract v1.9): "Settings gains a
+ * 'Membership' row (parent + athlete)." `role` is new this sprint, defaulting
+ * to 'parent' to match every existing caller — PortalRoutes' /portal/settings
+ * route is still `RequireRole roles={['parent']}` only (PortalRoutes.js is
+ * not this lane's to edit) and this screen's own footer/copy were parent-only
+ * throughout, so an athlete cannot reach this screen at all yet even with the
+ * row added here. Flagged in the sprint report: routing needs to widen that
+ * RequireRole to include 'athlete' and give athlete's tab bar (which has no
+ * Settings slot — components/BottomTabBar.js's TABS.athlete) some way in.
+ *
  * @param {'default'|'saved'} variant
- * @param {() => void} [onLinkAthlete]  Opens 08·L. Row hides without it.
+ * @param {'parent'|'athlete'} [role]
+ * @param {() => void} [onLinkAthlete]  Opens 08·L. Row hides without it
+ *   (also parent-only — an athlete has no household to link a sibling into).
  * @param {() => void} [onSignOut]  Hidden when not supplied (harness/demo).
  */
-export default function NotificationPreferences({ variant = 'default', bare = false, onLinkAthlete, onSignOut }) {
+export default function NotificationPreferences({
+  variant = 'default',
+  bare = false,
+  role = 'parent',
+  onLinkAthlete,
+  onSignOut,
+}) {
   const prefsState = useNotificationPrefs({ variant });
   const { data } = prefsState;
   /**
@@ -104,7 +122,10 @@ export default function NotificationPreferences({ variant = 'default', bare = fa
           <ScreenTitle size={22}>Notifications</ScreenTitle>
         </div>
       }
-      footer={<BottomTabBar role="parent" active="settings" />}
+      // athlete's tab set has no Settings slot (BottomTabBar.js's
+      // TABS.athlete) — active stays unset for that role, same convention
+      // every other tab-less destination in this codebase already uses.
+      footer={<BottomTabBar role={role} active={role === 'parent' ? 'settings' : undefined} />}
     >
       <div style={{ padding: '0 22px 24px', display: 'flex', flexDirection: 'column', gap: 12 }}>
         {saveError ? (
@@ -131,6 +152,7 @@ export default function NotificationPreferences({ variant = 'default', bare = fa
         </Body>
 
         {onLinkAthlete ? <LinkAthleteRow onLinkAthlete={onLinkAthlete} /> : null}
+        <MembershipRow />
         <ReplayWalkthroughRow />
         <SignOutRow onSignOut={onSignOut} />
       </div>
@@ -163,6 +185,44 @@ function LinkAthleteRow({ onLinkAthlete }) {
         }}
       >
         <span>+ Link another athlete</span>
+        <span aria-hidden="true" style={{ color: color.textTertiary }}>
+          ›
+        </span>
+      </button>
+    </div>
+  );
+}
+
+/**
+ * Sprint 11 pin D entry point (TEAM.md, contract v1.9): "Settings gains a
+ * 'Membership' row (parent + athlete)." Same green-link row idiom as
+ * "Replay the walkthrough" below it, and the same direct-navigate()
+ * precedent AthleteDashboard's own membership link and CoachingAction
+ * already use (this lane never edits PortalRoutes.js) — one static internal
+ * route needs no caller-supplied callback prop.
+ */
+function MembershipRow() {
+  const navigate = useNavigate();
+  return (
+    <div style={{ borderTop: `1px solid ${color.rule}`, marginTop: 8, paddingTop: 4 }}>
+      <button
+        type="button"
+        onClick={() => navigate('/portal/membership')}
+        style={{
+          background: 'none',
+          border: 'none',
+          padding: '0 2px',
+          width: '100%',
+          minHeight: TOUCH_MIN,
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'space-between',
+          font: `500 13px ${font.body}`,
+          color: color.primary,
+          cursor: 'pointer',
+        }}
+      >
+        <span>Membership</span>
         <span aria-hidden="true" style={{ color: color.textTertiary }}>
           ›
         </span>

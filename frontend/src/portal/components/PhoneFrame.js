@@ -85,7 +85,21 @@ export default function PhoneFrame({
       };
 
   return (
-    <div style={{ ...frame, overflow: 'hidden', display: 'flex', flexDirection: 'column', ...style }}>
+    // position: relative — Sprint 11 browser-verification fix: every bottom
+    // sheet in the app (CancelSheet, DetailSheet, CommitmentContract's
+    // DaySheet/LogSheet) is `position: absolute; inset: 0`, meant to overlay
+    // this frame. Without a positioned ancestor here, that absolute
+    // positioning resolved against the page's initial containing block
+    // instead — invisible in the harness gallery (many frames stacked on
+    // one long page, so the sheet rendered off in whatever the FIRST
+    // positioned ancestor up the tree happened to be, nowhere near its own
+    // frame) and only accidentally looked right in a routed `bare` view
+    // where the frame already fills the viewport. Confirmed via the DOM
+    // (the sheet's own content and disabled/enabled state were always
+    // correct) — this was a pure CSS containment gap, not a logic bug, and
+    // predates this sprint; fixed here since every sheet in the app shares
+    // this one root.
+    <div style={{ ...frame, position: 'relative', overflow: 'hidden', display: 'flex', flexDirection: 'column', ...style }}>
       {bare ? null : <StatusBar />}
       {header ? <div style={{ flex: 'none' }}>{header}</div> : null}
       <div

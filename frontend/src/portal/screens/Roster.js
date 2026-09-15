@@ -424,6 +424,7 @@ export function SessionAttendance({ variant = 'pre', bare = false, onBack, sessi
           sessionState={sessionState}
           unmarked={counts.unmarked}
           completed={completed}
+          hasNote={Boolean(sessionNote)}
           onStart={() => setLocalStatus('progress')}
           onClose={() => setLocalStatus('completed')}
           onAddNote={startNote}
@@ -854,7 +855,7 @@ function CounterRow({ counts, started }) {
   );
 }
 
-function RosterFooter({ sessionState, unmarked, completed, onStart, onClose, onAddNote }) {
+function RosterFooter({ sessionState, unmarked, completed, hasNote, onStart, onClose, onAddNote }) {
   const hint = completed
     ? 'No-shows are reported to Phil, not the coach chain.'
     : 'Tap a green or red button again to clear it.';
@@ -870,10 +871,13 @@ function RosterFooter({ sessionState, unmarked, completed, onStart, onClose, onA
     );
   } else if (completed) {
     // Sprint 10 pin H: was inert (no onClick at all) - opens the session
-    // note editor rendered above the roster list.
+    // note editor rendered above the roster list. Sprint 11 pin H (quick
+    // win): the label always said "Add" even when a note already existed
+    // and this same button opened it for editing - "Edit" when one is
+    // already on file.
     cta = (
       <Button variant="outline" height={56} onClick={onAddNote} style={{ boxShadow: 'none' }}>
-        Add a session note
+        {hasNote ? 'Edit session note' : 'Add a session note'}
       </Button>
     );
   } else {

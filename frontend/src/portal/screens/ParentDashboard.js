@@ -1,4 +1,5 @@
 import React from 'react';
+import { useNavigate } from 'react-router-dom';
 import { color, font } from '../tokens';
 import BottomTabBar from '../components/BottomTabBar';
 import Button from '../components/Button';
@@ -11,6 +12,21 @@ import AllowancePools from '../components/AllowancePools';
 import SkeletonCard, { SkeletonBar } from '../components/Skeleton';
 import { AlertGlyph, Body, Card, ErrorNotice, ScreenTitle } from '../components/Primitives';
 import { useHousehold } from '../hooks';
+import { GOLF_PACKAGES, ELITE_TIERS, DROP_IN } from '../data/packages';
+
+/**
+ * Sprint 11 pin D entry point (TEAM.md, contract v1.9): "the ParentDashboard
+ * child card's package label taps into /portal/membership." useHousehold's
+ * child shape carries `packageId` but not a resolved `packageName` (only
+ * useHouseholdAthletes does that join, and this screen intentionally reads
+ * the fixed-card useHousehold instead — see its own header comment) — this
+ * is a client-side lookup against the real catalogue, the same kind of pure
+ * derivation PackageCard.js already does, not an invented name.
+ */
+const ALL_GOLF_PACKAGES = [...GOLF_PACKAGES, DROP_IN, ...ELITE_TIERS];
+function golfPackageName(packageId) {
+  return ALL_GOLF_PACKAGES.find((p) => p.id === packageId)?.name ?? null;
+}
 
 /**
  * 08 · Parent Dashboard - parent.
@@ -56,6 +72,11 @@ export default function ParentDashboard({
   const children = data?.children ?? [];
   const billing = data?.billing;
   const flagged = billing?.status === 'failed';
+  // Sprint 11 pin D entry point: same direct-navigate() precedent
+  // AthleteDashboard's own coaching/membership links already use (this lane
+  // never edits PortalRoutes.js) rather than a new onOpenMembership prop —
+  // one static internal route, no routing wiring needed.
+  const navigate = useNavigate();
 
   return (
     <PhoneFrame
@@ -113,6 +134,7 @@ export default function ParentDashboard({
             onHold={flagged}
             onOpen={onOpenAthlete ? () => onOpenAthlete(child.id) : undefined}
             onBookFor={onBookFor ? () => onBookFor(child.id) : undefined}
+            onOpenMembership={() => navigate('/portal/membership')}
           />
         ))}
 
@@ -209,10 +231,11 @@ function PaymentBanner({ billing }) {
  * differently shaped blocks. Nico has no contract data and the card still holds
  * its shape.
  */
-function ChildCard({ child, onHold, onOpen, onBookFor }) {
+function ChildCard({ child, onHold, onOpen, onBookFor, onOpenMembership }) {
   const standing = onHold
     ? { tone: 'red', label: 'On hold' }
     : child.standing;
+  const packageName = golfPackageName(child.packageId);
 
   return (
     // The whole card opens the athlete's detail (09) - the handoff's flow has
@@ -226,6 +249,34 @@ function ChildCard({ child, onHold, onOpen, onBookFor }) {
           <div style={{ font: `400 11px ${font.body}`, color: color.textTertiary, marginTop: 2 }}>
             {child.ageLine}
           </div>
+          {/*
+            Sprint 11 pin D entry point: the package label taps into
+            /portal/membership rather than the card's own onOpen (athlete
+            detail) — stops its own click from bubbling, same convention
+            onBookFor already uses below for the identical open-profile
+            conflict. Hidden without a resolvable package name or the
+            callback, matching every other optional affordance in this file.
+          */}
+          {packageName && onOpenMembership ? (
+            <button
+              type="button"
+              onClick={(e) => {
+                e.stopPropagation();
+                onOpenMembership();
+              }}
+              style={{
+                background: 'none',
+                border: 'none',
+                padding: 0,
+                marginTop: 3,
+                font: `500 11px ${font.body}`,
+                color: color.primary,
+                cursor: 'pointer',
+              }}
+            >
+              {packageName} ›
+            </button>
+          ) : null}
         </div>
         <div style={{ flex: 'none', display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 6 }}>
           {/* Live cards carry honest nulls the seed never did (QA hotfix):
