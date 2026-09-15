@@ -167,6 +167,40 @@ service cloud.firestore {
         || (me().role == 'parent' && resource.data.householdId == me().householdId)
       );
 
+      // Sprint 11 (contract v1.9, B "Package assignment"): ops/owner assign
+      // an athlete's golf package and/or fitness package — a SECOND
+      // field-limited update branch beside contractMinutesUpdateOk just
+      // above, same one-purpose-per-branch shape this file already uses for
+      // sessions (bookedDiffOk / coachNoteUpdateOk) and bookings
+      // (attendanceUpdateOk / memberBookingUpdateOk): a member's tier write
+      // and a staff package write are different actors touching different
+      // fields, so they get their own rule rather than one combined
+      // condition that could accidentally let either caller touch the
+      // other's field.
+      //
+      // fitnessPackageId is read null-safely off `after` (the value being
+      // WRITTEN, i.e. the resulting document) via .get('fitnessPackageId',
+      // null) — contract v1.9 pin A's own null-safe discipline
+      // (`resource.data.get('fitnessPackageId', null)` for the CURRENT
+      // doc), applied here to the document this write PRODUCES: an
+      // ops/owner write that only ever touches packageId (fitnessPackageId
+      // left alone) resolves `after` to whatever the field already was —
+      // absent entirely on every pre-existing athlete doc, since
+      // provision-family.mjs never writes it (contract v1.9 pin A). Plain
+      // dot access (`after.fitnessPackageId`) errors on a missing key and
+      // denies the whole write; `.get(..., null)` treats absence as null,
+      // exactly the "ABSENT == null everywhere" rule the pin states.
+      // packageId, by contrast, is not null-safe-read here: every athlete
+      // doc has always carried it as a required string (contract v1, the
+      // athletes field table) and this branch does not change that.
+      function packageAssignmentUpdateOk() {
+        let after = request.resource.data;
+        return after.diff(resource.data).affectedKeys().hasOnly(['packageId', 'fitnessPackageId', 'updatedAt'])
+          && after.packageId is string
+          && (after.get('fitnessPackageId', null) is string || after.get('fitnessPackageId', null) == null);
+      }
+      allow update: if signedIn() && me().role in ['ops', 'owner'] && packageAssignmentUpdateOk();
+
       // ---- athletes/{id}/diagnostics/{captureId} -----------------------
       // Sprint 10 (contract v1.8, C "Diagnostics persistence"). Shape:
       // { athleteId, capturedBy (uid), capturedAt, updatedAt,
@@ -441,6 +475,17 @@ service cloud.firestore {
       // both coach clauses (athlete-indirection, sessionCoachMatches) denied
       // every real roster list. A coach at a one-coach academy reads any
       // roster; the attendance WRITE below stays scoped to athlete.coachId.
+      //
+      // VERIFIED, not widened (Sprint 11, contract v1.9 pin F — family
+      // Reservations): the parent clause just below,
+      // `me().householdId == resource.data.householdId`, is already exactly
+      // what a `bookings where householdId == :id and date >= :today`
+      // list query (DATA-MODEL.md index 3) needs proved — the query's own
+      // equality filter on `householdId` matches the rule's own equality
+      // check field-for-field, so useHouseholdReservations' one query reads
+      // every member's bookings under this SAME pre-existing grant. No rule
+      // change was made for pin F; confirmed against the emulator (routing
+      // report) with parent-dana's own household id and a neighbor's.
       allow read: if signedIn() && (
         resource == null
           ? nullReadOk()

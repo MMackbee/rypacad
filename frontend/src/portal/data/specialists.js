@@ -74,14 +74,20 @@ export function isSpecialistType(type) {
  * branch) — there is no stored counter to drift, and retuning this number
  * changes nothing already booked, only what books next.
  *
- * Deliberately NOT the Elite package's philSessions/yannickSessions fields
- * (data/packages.js's ELITE_TIERS): those counts are still `null` — pricing
- * a specialist entitlement is a billing decision, and billing is parked
- * (owner's Sprint 7 ruling: "energy goes to features, not billing, for
- * now"). Until that is priced, EVERY athlete's specialist bookings — Elite
- * or not — answer to this one cap and nothing else. Do not read
- * philSessions/yannickSessions from here or from anywhere a specialist
- * booking is gated; they stay unsurfaced by design, not by oversight.
+ * Deliberately NOT the Elite package's yannickSessions field (data/packages.js's
+ * ELITE_TIERS): that count is still `null` — Yannick's entitlement for an
+ * Elite athlete is undecided, so EVERY athlete's Yannick (mental) bookings —
+ * Elite or not — answer to this one flat cap and nothing else. Do not read
+ * yannickSessions from here or from anywhere a mental booking is gated; it
+ * stays unsurfaced by design, not by oversight.
+ *
+ * Phil is DIFFERENT as of Sprint 11 amendment v1.9.1 (owner ruling,
+ * 2026-09-15, "Elite includes 16 Phil sessions a month"): ELITE_TIERS'
+ * `philSessions` is now a real, decided number (16) that
+ * data/packages.js#entitlementsFor reads directly for an Elite athlete with
+ * no fitness package — this cap (SPECIALIST_MONTHLY_CAP) only backs Phil's
+ * entitlement when neither a fitness package nor Elite applies (source
+ * 'none' in entitlementsFor's terms, i.e. limit 0 - no cap benefit at all).
  */
 export const SPECIALIST_MONTHLY_CAP = 2;
 
