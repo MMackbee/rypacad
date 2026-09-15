@@ -990,3 +990,170 @@ fill footnote "Friday is the overflow block" is seed copy; the attendance
 footer still says "Add a session note" when a note exists ("Edit note").
 Deploy now includes firestore.indexes.json (the bookings status+date
 composite the admin no-show query needs).
+
+## Sprint 11 pins — membership & entitlements (no payments) + family Reservations (2026-09-15)
+
+Origin: the owner's Sprint 9 ruling ("Phil has fitness packages that we
+will need to work into the old 'billing' which wont actually handle
+billing but needs to be updated with permissions for each player and
+family"), the Sprint 10 queue (the parked Billing surface returns as a
+MEMBERSHIP/PERMISSIONS page; Phil's monthly entitlement derives from the
+athlete's fitness package instead of the flat cap), and the owner's Life
+Time Reservations reference (one family-grouped view, a section per
+household member). Production going in: rules v1.8 + indexes live;
+Yannick, Phil and the Eisele parent provisioned 2026-09-15; the tester
+kids carry dobs; NO athlete carries a fitness package yet — assignment is
+exactly what this sprint builds.
+
+Design keystone: ENTITLEMENTS ARE DERIVED FROM PACKAGES, NEVER STORED.
+An athlete's two package pointers (golf `packageId`, new fitness
+`fitnessPackageId`) are the only stored facts; every "N of M left" on
+every surface derives from the package doc plus the athlete's bookings,
+exactly the way the two-pool allowance already does. No payments, no
+Stripe, no invoices, no "billing status" — the word "billing" leaves every
+live member surface this sprint (Billing.js itself stays unrouted in the
+harness, untouched, per the Sprint 7 ruling).
+
+Data contract v1.9 (db lane documents; routing implements rules):
+
+A. FITNESS PACKAGE ON THE ATHLETE — `athletes.fitnessPackageId` (string |
+   null, into `packages/` where kind == 'fitness'; f-4/f-8/f-12/f-16
+   already exist in prod and seed). ABSENT == null everywhere: rules read
+   it as `resource.data.get('fitnessPackageId', null)`, hooks as `?? null`,
+   and provision-family.mjs does NOT write the field at all, so a re-run
+   can never clobber a UI assignment. Seed: jordan f-8, reese f-4, nico
+   null (the "no fitness package" state stays exercisable, like nico's
+   null tier).
+
+B. PACKAGE ASSIGNMENT (ops/owner) — a second field-limited update branch
+   on athletes beside contractMinutesUpdateOk:
+   `after.diff(resource.data).affectedKeys().hasOnly(['packageId',
+   'fitnessPackageId', 'updatedAt'])`, packageId a string,
+   fitnessPackageId string | null, caller ops/owner. live.js
+   `setAthletePackages(athleteId, { packageId, fitnessPackageId })` →
+   hook `useAssignPackages()` → `{ assign(athleteId, { packageId,
+   fitnessPackageId }), saving, error }`; one `bump('athletes')` per write.
+   Assignment is IMMEDIATE and un-prorated: allowances are derived, so
+   headroom changes for the next booking; nothing already booked is
+   touched (no cancellations, no refunds — there is no money here).
+
+C. ENTITLEMENT DERIVATION — one pure function, `entitlementsFor(athlete,
+   packages, bookings, monthISO)` in data/packages.js (routing lane owns;
+   both data modes call it):
+   - training / tournaments: the unchanged two-pool math (makeAllowance).
+   - phil: limit = fitness.sessions when fitnessPackageId is set; else,
+     if the golf package's kind == 'elite', SPECIALIST_MONTHLY_CAP (Elite
+     includes Phil, count still undecided — ELITE_TIERS.philSessions stays
+     null, do not invent); else 0. used = the athlete's non-cancelled
+     'phil' bookings in the calendar month. `source: 'fitness' | 'elite'
+     | 'none'`.
+   - mental: limit = SPECIALIST_MONTHLY_CAP (the flat knob stays, owner
+     ruling v1.7.1); used likewise. `source: 'flat'`.
+   - Booking gate: live.js's specialist branch of assertWithinMonthlyCap
+     uses this per-type limit (it reads the athlete and, when set, the
+     fitness package inside the transaction). A 0-limit Phil attempt
+     fails with typed reason 'no-fitness-package'; a cap hit stays
+     'cap-reached'. useBooking surfaces the reason so SpecialistBooking
+     can render it (G).
+
+D. MEMBERSHIP SURFACE (member side) — NEW screens/Membership.js, route
+   /portal/membership, roles parent + athlete; the old /portal/billing
+   redirect now lands here. Hook `useMembership()` →
+   `{ data: { household: {id,name} | null, members: [{ athleteId, name,
+   golf: {id,name,price,training,tournaments,kind} | null, fitness:
+   {id,name,price,sessions} | null, contractMinutes, resetsOn,
+   entitlements: { training:{used,limit,left}, tournaments:{used,limit,
+   left}, phil:{used,limit,left,source}, mental:{used,limit,left,source}
+   } }] }, loading, error }` — parent: every household athlete in
+   household order; athlete: self only. Layout (Life Time reference): one
+   section per member; inside it a Golf card (package name, the two pools
+   via the existing AllowancePools), a Performance card (fitness package
+   name + Phil used/limit, or "No fitness package on file — ask the
+   academy"), a Mental game line (Yannick's cap), and the contract tier
+   line linking to /portal/contract (athlete) or the AthleteDetail
+   contract card (parent). Prices render as catalogue facts ("$200 /
+   month"), never as amounts due. Entry points: Settings gains a
+   "Membership" row (parent + athlete); the ParentDashboard child card's
+   package label taps into it; AthleteDashboard's allowance card gets a
+   "Membership" link.
+
+E. MEMBERSHIP EDITOR (staff side) — AthleteDetail gains a Membership card:
+   ops/owner get a golf package select (GOLF_PACKAGES + ELITE_TIERS +
+   DROP_IN) and a fitness package select (none + FITNESS_PACKAGES), Save →
+   useAssignPackages, SavedToast, derived entitlements re-render off the
+   bump; coach and specialists see the same card read-only. No separate
+   staff route.
+
+F. FAMILY RESERVATIONS — NEW screens/Reservations.js, route
+   /portal/reservations, role parent; the parent tab set becomes Home ·
+   Reservations · Tour · Settings. Hook `useHouseholdReservations()` →
+   `{ data: { members: [{ athleteId, name, upcoming: [item], past:
+   [item] }] }, loading, error, cancel(bookingId) }` where item == the
+   useSchedule item (displaySession fields + bookingId/status/cancellable)
+   plus `athleteId`, `instructor` (the assigned coach's displayName for
+   training/tournament when one is set, the specialist's name for
+   phil/mental, else null) and `durationMinutes` (60 for generator blocks;
+   specialist slots as seeded). One query on the existing (householdId,
+   date) bookings index; parents already read household bookings — verify
+   the rule, do not widen it. Sections per member in household order,
+   Upcoming / Past tabs, date-block rows (date · time · duration ·
+   instructor · type chip), "Cancel reservation" reusing MySchedule's
+   confirm sheet and the same cancellable rule (confirmed && date >
+   today). No waitlist state (later). Per-member empty state ("No upcoming
+   reservations — Book a session") and a household-wide one.
+
+G. SPECIALIST BOOKING STATES — SpecialistBooking's summary reads the
+   entitlement: "2 of 8 performance sessions used this month" (fitness),
+   "Included with Elite — up to 2 this month" (elite), and for source
+   'none' a blocking notice "No fitness package on file" with a "See
+   membership" link — slots still render, the reserve CTA is disabled
+   with that reason. Yannick's copy stays "up to 2 mental game sessions a
+   month".
+
+H. QUICK WINS (frontend lane; logged from the Sprint 10 live pass):
+   AthleteDetail's back link derives the household name (no hardcoded
+   "Whitfield family"); the CONTRACT HISTORY empty-state caption stops
+   citing the December closure; Admin's block-fill footnote "Friday is the
+   overflow block" renders only when a Friday block exists in the data;
+   the attendance footer says "Edit note" when a note already exists.
+
+Ownership:
+- DB lane: DATA-MODEL v1.9 (A's field row + the absent-as-null rule, B's
+  branch, F's query note), seed (jordan f-8 / reese f-4 / nico null; two
+  past 'phil' bookings for jordan in the current month so "used" is
+  non-zero; one upcoming phil + one upcoming mental booking for the
+  Reservations view; a coachId on at least one upcoming booked training
+  session so `instructor` has a real value), provision-family.mjs (does
+  NOT write fitnessPackageId — the comment says why), verify packages
+  docs carry `kind` + `sessions` in seed and provisioner, indexes (none
+  expected — say so explicitly if none).
+- Routing lane: firestore.rules (B's branch; A's null-safe get; verify
+  F's parent read), data/packages.js entitlementsFor (C), hooks/live.js
+  (setAthletePackages, fetch helpers, assertWithinMonthlyCap per-type
+  limit + typed reasons), hooks/index.js (useMembership,
+  useAssignPackages, useHouseholdReservations, useBooking reason
+  plumbing, useSpecialistSlots/summary entitlement), PortalRoutes
+  (/portal/membership, /portal/reservations, the billing redirect).
+- Frontend lane: Membership.js, Reservations.js, AthleteDetail membership
+  card + editor, SpecialistBooking entitlement states, Settings row,
+  ParentDashboard/AthleteDashboard entry points, BottomTabBar parent tabs,
+  quick wins (H), StatesHarness entries. Hook fallbacks: until routing's
+  hooks land, screens import from '../hooks' and tolerate a missing
+  export the way Roster/TourStandings did — report it, never stub a fake
+  into hooks/.
+
+Invariants (the standing list plus): no substring() in rules; one bump
+per write; derive-don't-store; no invented numbers (Elite
+philSessions/yannickSessions stay null); the word "billing" appears on no
+live member surface after this sprint; files under 500 lines —
+Membership.js and Reservations.js each stand alone and share via
+components/.
+
+Sequencing: A + B + C first in db/routing (the entitlement rule is what
+everything else reads), then D/E, then F, G, H last. Report what is NOT
+done rather than rush it.
+
+Worktrees: wt-db / wt-routing / wt-frontend, siblings of rypacad, on
+agent/<lane>/sprint11-membership off portal/r3 at this pin's commit; PM
+merges db → routing → frontend, integrates, browser-passes on :3001,
+removes worktrees.
