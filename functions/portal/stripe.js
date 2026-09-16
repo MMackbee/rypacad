@@ -361,11 +361,11 @@ async function handleEvent(event) {
   let outcome = planned.outcome;
   let summary = null;
   if (planned.followUp === 'revoke') {
-    summary = await revoke.revokeHousehold(planned.household);
+    summary = await revoke.revokeHousehold(planned.household, event.id);
     outcome = 'lapsed';
   } else if (planned.followUp === 'downgrade') {
     summary = await revoke.trimDowngrade(
-        planned.household, planned.detail);
+        planned.household, planned.detail, event.id);
     outcome = 'downgraded';
   }
   if (outcome !== planned.outcome) {
