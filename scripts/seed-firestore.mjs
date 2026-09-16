@@ -29,6 +29,31 @@
  *                 — TEAM.md's DB-lane bullet asks for both facts and does not
  *                 require them to be different households).
  *
+ * CONTRACT v2.1 (Sprint 13 pin, "token model Part 2: issuance, grace,
+ * waitlist, Stripe", TEAM.md): the four Part 2 collections are now BUILT
+ * (v2.0 seeded them empty). Exactly the seed facts the pin lists, no more:
+ *   tokenPeriods — jordan_<currentPeriodKey>, granted from her live t-12
+ *                 package, source 'stripe', a fake eventId.
+ *   graceTokens — one unconsumed doc for reese (reason 'session-cancelled'),
+ *                 combined with the cancelled-session/cancelled-booking fact
+ *                 below into one coherent minting scenario (pin E's own two
+ *                 triggers) rather than two unrelated facts.
+ *   sessions/bookings/waitlist — ONE seed-only FULL session (capacity 2 —
+ *                 the single exception to the flat 15 cap anywhere in this
+ *                 seed, hand-added on a new `-w0` letter), booked by jordan
+ *                 and reese, with nico waitlisted.
+ *   households.membership — absent on whitfield (active); `past_due` on
+ *                 parker, which also gets `stripeCustomerId: 'cus_seed_parker'`.
+ *   stripeEvents — one `invoice.payment_failed` doc matching parker's
+ *                 past_due state (`evt_seed_2`, referenced by
+ *                 households.parker.membership.lastEventId).
+ *   bookings.cancelledBy/cancelReason — reese's booking on the cancelled
+ *                 session above (`cancelledBy: 'system'`,
+ *                 `cancelReason: 'session-cancelled'`), so the reason line
+ *                 has a real doc to render against.
+ * See the dedicated block comments right before the `return` in buildDocs()
+ * for the exact ids and the reasoning behind each choice.
+ *
  * What it seeds (data contract v1, docs/portal/TEAM.md, updated to v2.0 above):
  *   sessions    — the generated season (buildSeason() from season.js), PLUS
  *                  contract v1.7 (Sprint 9): hand-seeded specialist 1-on-1
@@ -142,12 +167,9 @@
  * installing at the repo root. esbuild is fetched by npx per the repo pattern.
  */
 
-import { execSync } from 'node:child_process';
-import { createRequire } from 'node:module';
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { bundleFrontend, fwdPath } from './lib/bundle-frontend.mjs';
 
 const DRY_RUN = process.argv.includes('--dry-run');
 const PROJECT_ID = 'rypacad';
@@ -193,46 +215,25 @@ function emulatorHost() {
 // ---------------------------------------------------------------------------
 
 function loadPortalData() {
-  const tmp = mkdtempSync(path.join(tmpdir(), 'ryp-seed-'));
-  const entry = path.join(tmp, 'entry.js');
-  const outfile = path.join(tmp, 'portal-data.cjs');
-  const fwd = (p) => p.split(path.sep).join('/');
-
-  writeFileSync(
-    entry,
-    [
-      `export { buildSeason, SEASON_BOUNDS } from '${fwd(path.join(dataDir, 'season.js'))}';`,
-      // contract v2.0 (Sprint 12 pin A/B/L/M) — the ONE token catalogue and
-      // the period math, off the PM seam (frontend/src/portal/data/packages.js
-      // above its DEPRECATED banner). GOLF_PACKAGES/DROP_IN/FITNESS_PACKAGES/
-      // ELITE_TIERS/poolFor (below the banner) are gone from this bundle —
-      // nothing here reads them anymore.
-      `export { ALL_PACKAGES, periodFor } from '${fwd(path.join(dataDir, 'packages.js'))}';`,
-      `export { HOUSEHOLD, COACH } from '${fwd(path.join(dataDir, 'seed.js'))}';`,
-      // contract v1.8, Sprint 10 pin G — the notification-category catalogue
-      // the NotificationPreferences screen renders; bundled like everything
-      // else here rather than retyped, so a category add/remove can't drift.
-      `export { NOTIFICATION_CATEGORIES } from '${fwd(path.join(dataDir, 'parent.js'))}';`,
-    ].join('\n')
-  );
-
-  try {
-    execSync(
-      `npx esbuild "${entry}" --bundle --format=cjs --platform=node --outfile="${outfile}" --log-level=warning`,
-      { stdio: ['ignore', 'inherit', 'inherit'], cwd: repoRoot }
-    );
-  } catch {
-    console.error(
-      '\nesbuild bundling failed. If the error above mentions an unresolved package\n' +
-        '(e.g. date-fns), install the frontend dependencies first:  cd frontend && npm install\n' +
-        '(or point NODE_PATH at an installed frontend/node_modules).'
-    );
-    process.exit(1);
-  }
-
-  const data = createRequire(import.meta.url)(outfile);
-  rmSync(tmp, { recursive: true, force: true });
-  return data;
+  // Extracted to scripts/lib/bundle-frontend.mjs (contract v2.1, Sprint 13) —
+  // export-memberships.mjs needs the identical esbuild-bundle-and-require
+  // dance for a different symbol list, and this file is already grandfathered
+  // over the 500-line guideline, so the shared mechanics live in lib/ rather
+  // than growing a third inline copy.
+  return bundleFrontend(repoRoot, [
+    `export { buildSeason, SEASON_BOUNDS } from '${fwdPath(path.join(dataDir, 'season.js'))}';`,
+    // contract v2.0 (Sprint 12 pin A/B/L/M) — the ONE token catalogue and
+    // the period math, off the PM seam (frontend/src/portal/data/packages.js
+    // above its DEPRECATED banner). GOLF_PACKAGES/DROP_IN/FITNESS_PACKAGES/
+    // ELITE_TIERS/poolFor (below the banner) are gone from this bundle —
+    // nothing here reads them anymore.
+    `export { ALL_PACKAGES, periodFor } from '${fwdPath(path.join(dataDir, 'packages.js'))}';`,
+    `export { HOUSEHOLD, COACH } from '${fwdPath(path.join(dataDir, 'seed.js'))}';`,
+    // contract v1.8, Sprint 10 pin G — the notification-category catalogue
+    // the NotificationPreferences screen renders; bundled like everything
+    // else here rather than retyped, so a category add/remove can't drift.
+    `export { NOTIFICATION_CATEGORIES } from '${fwdPath(path.join(dataDir, 'parent.js'))}';`,
+  ], { tmpPrefix: 'ryp-seed-' });
 }
 
 // ---------------------------------------------------------------------------
@@ -1058,6 +1059,206 @@ function buildDocs(portal) {
     ],
   ]);
 
+  // =========================================================================
+  // Contract v2.1 (Sprint 13 pin, TEAM.md "token model Part 2: issuance,
+  // grace, waitlist, Stripe") — the four Part 2 collections, BUILT and seeded
+  // now instead of the v2.0 "documented now, seeded empty" placeholder.
+  // =========================================================================
+
+  // C. TOKEN ISSUANCE — jordan's CURRENT period's tokenPeriods doc, standing
+  // in for a `invoice.paid` Stripe event that already landed this cycle.
+  // periodKey/periodEnd are computed off the runtime clock (`today`, already
+  // built above for the contractLogs block — never hardcoded, same
+  // discipline as addSpecialistSessions()'s forward window) against
+  // Whitfield's own anchor (1), so a re-run always seeds "the period
+  // containing whenever this script actually runs", not a frozen date.
+  const todayISO = isoDate(today);
+  const jordanCurrentPeriod = periodFor(todayISO, WHITFIELD_ANCHOR_DAY);
+  const tokenPeriods = new Map([
+    [
+      `jordan_${jordanCurrentPeriod.periodKey}`,
+      {
+        athleteId: 'jordan',
+        householdId,
+        periodKey: jordanCurrentPeriod.periodKey,
+        periodEnd: jordanCurrentPeriod.periodEnd,
+        // granted is a STORED fact about an issuance event (contract C — the
+        // same class as tournamentResults.score), not a derivation. It reads
+        // off jordan's actual t-12 package here (packages.get(), not a
+        // hand-typed 12) purely because this seed's fabricated "Stripe
+        // event" is standing in for her real current package — in general
+        // tokenPeriods.granted can outlive a later package change.
+        granted: packages.get(WHITFIELD_PACKAGE_IDS.jordan).tokens,
+        source: 'stripe',
+        eventId: 'evt_seed_1', // fake — no real Stripe event backs this seed
+        createdAt: today,
+      },
+    ],
+  ]);
+
+  // E. GRACE TOKENS + the cancelled-session/cancelled-booking pair (pin G) —
+  // combined into ONE coherent scenario rather than two unrelated facts,
+  // because pin E's own two minting triggers make that the natural story: a
+  // real generated session reese was confirmed on gets cancelled by staff,
+  // her booking flips to `cancelled` with the system reason, and she is
+  // minted exactly one grace token referencing it. `2026-11-11-0` (a real
+  // Wednesday 3 PM training block from buildSeason(), not otherwise
+  // referenced by any WHITFIELD_BOOKINGS/specialist entry above) plays the
+  // cancelled session.
+  const CANCELLED_SESSION_ID = '2026-11-11-0';
+  const cancelledSession = sessions.get(CANCELLED_SESSION_ID);
+  if (!cancelledSession) {
+    throw new Error(
+      `Seed grace-token scenario references sessions/${CANCELLED_SESSION_ID}, which buildSeason() did ` +
+        'not generate (the season config in season.js changed under this seed). Update ' +
+        'CANCELLED_SESSION_ID in scripts/seed-firestore.mjs to reference a real generated training session id.'
+    );
+  }
+  // `status` is set explicitly here even though the *generic* session-build
+  // loop above never writes it (the pre-existing gap DATA-MODEL.md flags:
+  // generator-seeded sessions carry no `status`/`gcalEventId` at all). That
+  // gap is out of this pass's scope to fix broadly, but THIS one doc's
+  // `status` is a genuine fact this seed needs to tell (a cancelled
+  // session), not a cosmetic default, so it gets the field the way
+  // addSpecialistSessions() always has.
+  cancelledSession.status = 'cancelled';
+  const reeseGraceExpiry = new Date(today);
+  reeseGraceExpiry.setDate(reeseGraceExpiry.getDate() + 20);
+  const graceTokens = new Map([
+    [
+      'grace-1', // readable slug — same "emulator mints no real auto-ids" convention as diagnostics/staffInvites ids
+      {
+        athleteId: 'reese',
+        householdId,
+        expiresAt: isoDate(reeseGraceExpiry), // today + 20 days
+        reason: 'session-cancelled',
+        sourceSessionId: CANCELLED_SESSION_ID,
+        createdBy: 'ops',
+        createdAt: today,
+      },
+    ],
+  ]);
+  // Reese's cancelled booking on that session (pin G): the confirmed seat
+  // she held is what the grace token is compensating for. She has no
+  // `users` doc of her own, so `createdBy` stays the parent (contract v1.5,
+  // unchanged by cancellation) even though the CANCEL itself was staff's.
+  {
+    const periodKey = periodFor(cancelledSession.date, WHITFIELD_ANCHOR_DAY).periodKey;
+    bookings.set(`reese_${CANCELLED_SESSION_ID}`, {
+      athleteId: 'reese',
+      sessionId: CANCELLED_SESSION_ID,
+      date: cancelledSession.date,
+      type: cancelledSession.type,
+      periodKey,
+      status: 'cancelled',
+      cancelledBy: 'system',
+      cancelReason: 'session-cancelled',
+      householdId,
+      createdBy: 'parent-dana',
+      createdAt: bookingCreatedAt,
+    });
+    // No confirmed booking remains on a cancelled session — booked reflects
+    // that (the mirror of the +1/-1 invariant every other booking loop in
+    // this script maintains), never left at a stale pre-cancel count.
+    cancelledSession.booked = 0;
+  }
+
+  // F. WAITLIST — ONE seed-only FULL session, capacity 2 (booked by jordan
+  // and reese, both confirmed), with nico waitlisted. **This is the single
+  // deliberate exception to the flat capacity-15 rule (contract v2.0 pin J)
+  // anywhere in this seed** — a hand-added session, the same idiom as the
+  // specialist `-s<n>` slots and the holiday `-x<n>` extras (new letter,
+  // `-w0`, "waitlist"), kept at capacity 2 purely so a THIRD athlete can
+  // fill it and be waitlisted without needing 15 fabricated bookings. Dated
+  // 2026-11-16 (a real, non-closure Monday inside SEASON_BOUNDS) so
+  // `periodFor()` and the Whitfield anchor behave exactly as they would for
+  // any other November session.
+  const FULL_SESSION_ID = '2026-11-16-w0';
+  if (sessions.has(FULL_SESSION_ID)) {
+    throw new Error(`Seed FULL-session id ${FULL_SESSION_ID} collides with an existing sessions doc.`);
+  }
+  const fullSessionDate = '2026-11-16';
+  sessions.set(FULL_SESSION_ID, {
+    date: fullSessionDate,
+    time: '3:30 PM',
+    type: 'training',
+    capacity: 2, // <-- the one exception to CAPACITY = 15, see comment above
+    booked: 2,
+    coachId: null,
+    label: null,
+    special: false,
+    bookable: true,
+    status: 'scheduled',
+    gcalEventId: null,
+    coachNote: null,
+  });
+  const fullSessionPeriodKey = periodFor(fullSessionDate, WHITFIELD_ANCHOR_DAY).periodKey;
+  bookings.set(`jordan_${FULL_SESSION_ID}`, {
+    athleteId: 'jordan',
+    sessionId: FULL_SESSION_ID,
+    date: fullSessionDate,
+    type: 'training',
+    periodKey: fullSessionPeriodKey,
+    status: 'confirmed',
+    householdId,
+    createdBy: 'athlete-jordan',
+    createdAt: bookingCreatedAt,
+  });
+  bookings.set(`reese_${FULL_SESSION_ID}`, {
+    athleteId: 'reese',
+    sessionId: FULL_SESSION_ID,
+    date: fullSessionDate,
+    type: 'training',
+    periodKey: fullSessionPeriodKey,
+    status: 'confirmed',
+    householdId,
+    createdBy: 'parent-dana',
+    createdAt: bookingCreatedAt,
+  });
+  const nicoJoinedAt = new Date();
+  const waitlist = new Map([
+    [
+      `${FULL_SESSION_ID}_nico`,
+      {
+        sessionId: FULL_SESSION_ID,
+        athleteId: 'nico',
+        householdId,
+        date: fullSessionDate,
+        periodKey: fullSessionPeriodKey,
+        joinedAt: nicoJoinedAt,
+        createdBy: 'parent-dana', // nico has no users doc of his own, same as every other nico booking above
+      },
+    ],
+  ]);
+
+  // H. MEMBERSHIP STATUS + STRIPE — whitfield stays ABSENT (contract:
+  // absent == active; every household provisioned before Part 2 stays
+  // bookable with zero migration). `parker` (anchor 15, already this seed's
+  // one Elite athlete's household) plays the past_due case instead, so both
+  // membership states are exercisable in the emulator from one seed run.
+  const parkerPeriod = periodFor(todayISO, households.get(parkerHouseholdId).periodAnchorDay);
+  households.get(parkerHouseholdId).stripeCustomerId = 'cus_seed_parker';
+  households.get(parkerHouseholdId).membership = {
+    status: 'past_due',
+    stripeSubscriptionStatus: 'past_due',
+    currentPeriodStart: parkerPeriod.periodKey,
+    currentPeriodEnd: parkerPeriod.periodEnd,
+    lastEventId: 'evt_seed_2',
+    updatedAt: today,
+  };
+  const stripeEvents = new Map([
+    [
+      'evt_seed_2',
+      {
+        type: 'invoice.payment_failed',
+        customer: 'cus_seed_parker',
+        householdId: parkerHouseholdId,
+        receivedAt: today,
+        outcome: 'past_due',
+      },
+    ],
+  ]);
+
   return {
     packages,
     sessions,
@@ -1070,6 +1271,10 @@ function buildDocs(portal) {
     enrollmentRequests,
     'athletes/jordan/diagnostics': jordanDiagnostics,
     staffInvites,
+    tokenPeriods,
+    graceTokens,
+    waitlist,
+    stripeEvents,
   };
 }
 
@@ -1278,6 +1483,53 @@ async function main() {
     const sage = collections.athletes.get('sage-parker');
     console.log(`  households/parker: periodAnchorDay=${parker.periodAnchorDay}`);
     console.log(`  athletes/sage-parker: packageId=${sage.packageId} householdId=${sage.householdId}`);
+  }
+
+  console.log('\ntokenPeriods (contract v2.1, pin C):');
+  for (const [id, doc] of collections.tokenPeriods) {
+    console.log(
+      `  tokenPeriods/${id}: granted=${doc.granted} source=${doc.source} eventId=${doc.eventId}` +
+        ` periodKey=${doc.periodKey} periodEnd=${doc.periodEnd}`
+    );
+  }
+
+  console.log('\ngraceTokens (contract v2.1, pin E):');
+  for (const [id, doc] of collections.graceTokens) {
+    console.log(
+      `  graceTokens/${id}: athleteId=${doc.athleteId} reason=${doc.reason}` +
+        ` sourceSessionId=${doc.sourceSessionId} expiresAt=${doc.expiresAt} createdBy=${doc.createdBy}`
+    );
+  }
+
+  console.log('\nCancelled session + booking (contract v2.1, pin E/G — the grace token above is minted for this):');
+  {
+    const s = collections.sessions.get('2026-11-11-0');
+    console.log(`  sessions/2026-11-11-0: status=${s.status} booked=${s.booked}/${s.capacity}`);
+    const b = collections.bookings.get('reese_2026-11-11-0');
+    console.log(`  bookings/reese_2026-11-11-0: status=${b.status} cancelledBy=${b.cancelledBy} cancelReason=${b.cancelReason}`);
+  }
+
+  console.log('\nFULL session + waitlist (contract v2.1, pin F — the ONE exception to capacity 15):');
+  {
+    const s = collections.sessions.get('2026-11-16-w0');
+    console.log(`  sessions/2026-11-16-w0: capacity=${s.capacity} booked=${s.booked} status=${s.status}`);
+    for (const athleteId of ['jordan', 'reese']) {
+      const b = collections.bookings.get(`${athleteId}_2026-11-16-w0`);
+      console.log(`  bookings/${athleteId}_2026-11-16-w0: status=${b.status} periodKey=${b.periodKey}`);
+    }
+    for (const [id, doc] of collections.waitlist) {
+      console.log(`  waitlist/${id}: athleteId=${doc.athleteId} periodKey=${doc.periodKey} joinedAt=${doc.joinedAt.toISOString()}`);
+    }
+  }
+
+  console.log('\nhouseholds.membership (contract v2.1, pin H):');
+  for (const [id, doc] of collections.households) {
+    console.log(`  households/${id}: membership=${doc.membership ? JSON.stringify(doc.membership) : 'absent (== active)'} stripeCustomerId=${doc.stripeCustomerId}`);
+  }
+
+  console.log('\nstripeEvents (contract v2.1, pin H):');
+  for (const [id, doc] of collections.stripeEvents) {
+    console.log(`  stripeEvents/${id}: type=${doc.type} customer=${doc.customer} householdId=${doc.householdId} outcome=${doc.outcome}`);
   }
 
   if (DRY_RUN) {
