@@ -6,11 +6,19 @@
  *   node scripts/provision-family.mjs --dry-run   # look up accounts, print the plan
  *   node scripts/provision-family.mjs             # write it
  *
+ * CONTRACT v2.0 (Sprint 12 pin, "the token model", Part 1 only): ONE token
+ * catalogue (t-6/t-12/t-16/t-20/elite/single) replaces the two-pool
+ * golf/fitness/elite-247/drop-in catalogue. Production is the ONE place
+ * prices reach Firestore (v1.1 rule — seed-firestore.mjs strips price, this
+ * script doesn't), so this bundle keeps `price` and the new `pending` flag
+ * on every package doc. The ten retired ids (see RETIRED_PACKAGE_IDS below)
+ * are explicit **deletes** in the plan, since pin A retires them outright.
+ *
  * What it writes (data contract, docs/portal/DATA-MODEL.md):
- *   packages     — the full 2026-27 catalogue, bundled from
- *                  frontend/src/portal/data/packages.js exactly as
- *                  seed-firestore.mjs does (never retyped; price stripped —
- *                  no dollar amounts in Firestore, only Stripe holds money).
+ *   packages     — the full token catalogue (six docs, prices included),
+ *                  bundled from frontend/src/portal/data/packages.js exactly
+ *                  as seed-firestore.mjs bundles it (never retyped) — PLUS
+ *                  deletes of the ten retired ids above.
  *   households   — the MackBee test household.
  *   athletes     — three MackBee siblings (Sprint 5 pin, TEAM.md), coached by
  *                  the test coach account: the original makel-test account
@@ -82,6 +90,9 @@ const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..'
 // account (the MackBee siblings) is an athletes/ doc only.
 // ---------------------------------------------------------------------------
 
+// Contract v2.0 (pin A) package mapping below — closest token equivalent,
+// not invented: g-8-3 (mid golf tier) -> t-12; g-4-2 (smallest) -> t-6;
+// elite -> elite unchanged.
 const FAMILIES = [
   {
     householdId: 'mackbee',
@@ -89,8 +100,8 @@ const FAMILIES = [
     // Fictional tester kids: dobs chosen so the household spans every
     // bracket as of the 2026-11-02 season start (15 / 12 / 9).
     athletes: [
-      { id: 'makel-test', name: 'Makel MackBee', packageId: 'g-8-3', contractMinutes: 45, dob: '2011-08-14' },
-      { id: 'makel-test-2', name: 'Avery MackBee', packageId: 'g-4-2', contractMinutes: 20, dob: '2014-05-22' },
+      { id: 'makel-test', name: 'Makel MackBee', packageId: 't-12', contractMinutes: 45, dob: '2011-08-14' }, // was g-8-3
+      { id: 'makel-test-2', name: 'Avery MackBee', packageId: 't-6', contractMinutes: 20, dob: '2014-05-22' }, // was g-4-2
       { id: 'makel-test-3', name: 'Quinn MackBee', packageId: 'elite', contractMinutes: 95, dob: '2017-01-18' },
     ],
     accounts: [
@@ -107,7 +118,7 @@ const FAMILIES = [
     // Fictional tester kid: 12 at season start, turns 13 on 11-27 — exercises
     // the "bracket is fixed as of season start" rule.
     athletes: [
-      { id: 'mike-test', name: 'Mike Eisele Jr.', packageId: 'g-8-3', contractMinutes: 45, dob: '2013-11-27' },
+      { id: 'mike-test', name: 'Mike Eisele Jr.', packageId: 't-12', contractMinutes: 45, dob: '2013-11-27' }, // was g-8-3
     ],
     accounts: [
       { email: 'mike@rypgolf.com', role: 'owner', displayName: 'Mike' },
@@ -153,7 +164,18 @@ function userDoc(family, { role, displayName, email, athleteId, specialistId }) 
 
 // ---------------------------------------------------------------------------
 // Packages — bundled from frontend source with esbuild, the seed's pattern.
+// Contract v2.0 (pin A): ONE catalogue now (ALL_PACKAGES, above the seam's
+// DEPRECATED banner). Unlike seed-firestore.mjs, `price`/`pending` are KEPT
+// — production is the one place a real price reaches Firestore (v1.1 rule).
 // ---------------------------------------------------------------------------
+
+// The ten retired ids (pin A) may already exist in production from every
+// provisioning run before this sprint — listed as explicit DELETES below.
+const RETIRED_PACKAGE_IDS = [
+  'g-4-2', 'g-8-3', 'g-12-4', 'g-16-4', // golf
+  'f-4', 'f-8', 'f-12', 'f-16', // fitness
+  'drop-in', 'elite-247',
+];
 
 function loadPackages() {
   const dataDir = path.join(repoRoot, 'frontend', 'src', 'portal', 'data');
@@ -164,7 +186,7 @@ function loadPackages() {
 
   writeFileSync(
     entry,
-    `export { GOLF_PACKAGES, DROP_IN, FITNESS_PACKAGES, ELITE_TIERS } from '${fwd(path.join(dataDir, 'packages.js'))}';`
+    `export { ALL_PACKAGES } from '${fwd(path.join(dataDir, 'packages.js'))}';`
   );
   try {
     execSync(
@@ -175,15 +197,12 @@ function loadPackages() {
     console.error('\nesbuild bundling failed — install frontend deps first (cd frontend && npm install).');
     process.exit(1);
   }
-  const { GOLF_PACKAGES, DROP_IN, FITNESS_PACKAGES, ELITE_TIERS } = createRequire(import.meta.url)(outfile);
+  const { ALL_PACKAGES } = createRequire(import.meta.url)(outfile);
   rmSync(tmp, { recursive: true, force: true });
 
   const packages = new Map();
-  const fields = ({ id, price, ...rest }) => rest; // price stripped, id -> doc id
-  for (const p of GOLF_PACKAGES) packages.set(p.id, { ...fields(p), kind: 'golf' });
-  packages.set(DROP_IN.id, { ...fields(DROP_IN), kind: 'drop-in' });
-  for (const p of FITNESS_PACKAGES) packages.set(p.id, { ...fields(p), kind: 'fitness' });
-  for (const p of ELITE_TIERS) packages.set(p.id, { ...fields(p), kind: 'elite' });
+  const fields = ({ id, ...rest }) => rest; // id -> doc id; price/pending KEPT (see header)
+  for (const p of ALL_PACKAGES) packages.set(p.id, fields(p));
   return packages;
 }
 
@@ -370,26 +389,23 @@ async function main() {
   const coach = found.find((m) => m.role === 'coach' && !m.specialistId) ?? null;
   const packages = loadPackages();
 
-  // Contract v1.9 (Sprint 11 pin A): the fields THIS script is authoritative
-  // for on an athlete doc — everything below is deliberately absent from
-  // that list, most importantly `fitnessPackageId`. An `update` Write with
-  // no `updateMask` is a FULL DOCUMENT REPLACE in the Firestore REST API
-  // (verified against the emulator while building this: an `update` write
-  // that omits a field wipes that field if the doc already had it, not just
-  // "leaves it alone") — so simply leaving `fitnessPackageId` out of the
-  // object literal below does NOT, on its own, protect an ops/owner's live
-  // Membership-editor assignment (pin B) from being erased the next time
-  // this script re-runs (e.g. to fill in a still-missing account). The
-  // `updateMask` on the athletes write further down pins Firestore to ONLY
-  // these fields, so anything this script has no opinion on — today that's
-  // `fitnessPackageId` and the assignment branch's `updatedAt` — is left
-  // untouched on the server, exactly like the mask's own semantics an
-  // untouched read shows. This is the actual enforcement; the field simply
-  // not appearing in the object below is necessary but not sufficient.
+  // The fields THIS script is authoritative for on an athlete doc. An
+  // `update` Write with no `updateMask` is a FULL DOCUMENT REPLACE in the
+  // Firestore REST API (verified against the emulator: an omitted field
+  // wipes that field if the doc already had it), so this mask is what
+  // actually protects anything outside it — e.g. the assignment branch's
+  // `updatedAt` (pin B) — from being erased on re-run; leaving a field out
+  // of the object literal below is necessary but not sufficient on its own.
+  // Contract v2.0 (pin A): `fitnessPackageId` was never in this mask (v1.9)
+  // and is now a deleted field schema-wide, so there is nothing to add here.
   const ATHLETE_UPDATE_MASK = ['name', 'dob', 'householdId', 'packageId', 'contractMinutes', 'coachId'];
 
   const docs = []; // [collection, id, doc, updateMask?]
   for (const [id, doc] of packages) docs.push(['packages', id, doc]);
+  // Contract v2.0 (pin A) — the ten retired package ids are explicit
+  // DELETES, listed separately from `docs` (a delete write has no `doc` body
+  // to encode) but folded into the same plan print and commit batch below.
+  const packageDeletes = RETIRED_PACKAGE_IDS;
   let athleteCount = 0;
   for (const f of FAMILIES) {
     docs.push([
@@ -413,11 +429,6 @@ async function main() {
           packageId: a.packageId,
           contractMinutes: a.contractMinutes,
           coachId: coach ? coach.uid : null, // filled on re-run once the coach account exists
-          // fitnessPackageId is DELIBERATELY NOT SET HERE — see
-          // ATHLETE_UPDATE_MASK above. Absent and explicit null read
-          // identically everywhere per contract v1.9, so provisioning
-          // simply never has an opinion on it; only the Membership editor
-          // (ops/owner, live.js's setAthletePackages) ever writes it.
         },
         ATHLETE_UPDATE_MASK,
       ]);
@@ -429,14 +440,17 @@ async function main() {
   for (const entry of inviteDocs) docs.push(entry);
 
   console.log(
-    `\nPlan: ${docs.length} doc(s) — ${packages.size} packages, ${FAMILIES.length} households, ` +
-      `${athleteCount} athletes, ${found.length} users, ${provisionedInviteCount} staffInvites provisioned`
+    `\nPlan: ${docs.length} doc(s) — ${packages.size} packages (+ ${packageDeletes.length} retired ` +
+      `package ids DELETED), ${FAMILIES.length} households, ${athleteCount} athletes, ${found.length} users, ` +
+      `${provisionedInviteCount} staffInvites provisioned`
   );
   for (const [col, id, doc, mask] of docs) {
     if (col === 'packages') continue;
     const maskNote = mask ? ` [masked write: ${mask.join(', ')} only — other fields on the live doc are left alone]` : '';
     console.log(`  ${col}/${id}: ${JSON.stringify(doc)}${maskNote}`);
   }
+  console.log('  DELETE (contract v2.0, pin A — retired two-pool package ids):');
+  for (const id of packageDeletes) console.log(`    packages/${id}`);
   if (!coach) console.log('  note: athlete coachId is null until the coach account exists.');
 
   if (DRY_RUN) {
@@ -460,6 +474,12 @@ async function main() {
     },
     ...(mask ? { updateMask: { fieldPaths: mask } } : {}),
   }));
+  // Contract v2.0 (pin A) — the retired package ids are hard deletes, not
+  // writes; a `delete` entry in the same commit batch as every `update` above
+  // (the Firestore REST commit endpoint accepts both write kinds together).
+  for (const id of packageDeletes) {
+    writes.push({ delete: `projects/${PROJECT_ID}/databases/(default)/documents/packages/${id}` });
+  }
   const BATCH = 400;
   for (let i = 0; i < writes.length; i += BATCH) {
     await commit(token, writes.slice(i, i + BATCH));
