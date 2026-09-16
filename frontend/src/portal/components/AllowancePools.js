@@ -1,5 +1,6 @@
 import React from 'react';
 import { color, font, radius } from '../tokens';
+import { longDayLabel } from '../data/calendar';
 
 /**
  * The token meter — screens 03, 04, 05, 08, 19 (Sprint 12, contract v2.0).
@@ -83,17 +84,37 @@ export default function AllowancePools({ tokens, compact = false, style }) {
 }
 
 /**
- * "1 bonus token, expires <date>" — the pin's own grace-line wording
- * (Membership.js). Reads the soonest-expiry entry only; `tokensFor()` already
- * sorts `grace` soonest-first, so index 0 is always the one that would be
- * spent next.
+ * Sprint 13 (contract v2.1, pin E): "the grace line names the reason and
+ * expiry" — a grace token is minted only by a supply failure (contract §4),
+ * so the line says which one. `graceTokens.reason` is 'session-cancelled' |
+ * 'waitlist-expired' (the two minting triggers, pin E); the pinned hook shape
+ * (`members[].tokens.grace: [{ id, expiresAt, reason }]`) carries no session
+ * date to name a specific block by, so this states the trigger rather than
+ * inventing a "the Nov 9 block" detail the hook doesn't supply — see the
+ * sprint report.
+ */
+const GRACE_REASON_COPY = {
+  'session-cancelled': 'a session was cancelled',
+  'waitlist-expired': "a waitlist spot wasn't filled in time",
+};
+
+/**
+ * "Bonus token — a session was cancelled — expires <date>" (falls back to
+ * the plain "1 bonus token, expires <date>" when no reason accompanies the
+ * entry — e.g. a seed/harness fixture built before this sprint). Reads the
+ * soonest-expiry entry only; `tokensFor()` already sorts `grace`
+ * soonest-first, so index 0 is always the one that would be spent next.
  */
 export function GraceLine({ tokens, style }) {
   const grace = tokens?.grace?.[0];
   if (!grace) return null;
+  const reasonText = GRACE_REASON_COPY[grace.reason];
+  const expiresLabel = grace.expiresAt ? longDayLabel(grace.expiresAt) : null;
   return (
     <div style={{ font: `400 11px ${font.body}`, color: color.secondary, marginTop: 6, ...style }}>
-      1 bonus token{grace.expiresAt ? `, expires ${grace.expiresAt}` : ''}
+      {reasonText
+        ? `Bonus token — ${reasonText}${expiresLabel ? ` — expires ${expiresLabel}` : ''}`
+        : `1 bonus token${expiresLabel ? `, expires ${expiresLabel}` : ''}`}
     </div>
   );
 }

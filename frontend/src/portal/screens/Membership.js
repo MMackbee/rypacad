@@ -6,7 +6,7 @@ import BottomTabBar from '../components/BottomTabBar';
 import MemberSection from '../components/MemberSection';
 import PhoneFrame from '../components/PhoneFrame';
 import SkeletonCard, { SkeletonBar } from '../components/Skeleton';
-import { BackLink, Body, Card, ErrorNotice, ScreenTitle, SectionLabel } from '../components/Primitives';
+import { BackLink, Banner, Body, Card, ErrorNotice, ScreenTitle, SectionLabel } from '../components/Primitives';
 import { useMembership } from '../hooks';
 
 /**
@@ -27,6 +27,15 @@ import { useMembership } from '../hooks';
  * Golf/Performance cards and the old Mental line are deleted — this sprint
  * replaced the two-pool entitlement model wholesale (TEAM.md "Sprint 12
  * pins — the token model").
+ *
+ * Sprint 13 (contract v2.1, pin H): a household status line, once per
+ * household, above the member sections — `data.household.membership` is
+ * `{ status, currentPeriodEnd } | null`, and null means active (the pin's
+ * own absent-as-null rule) — active renders nothing loud, past_due and
+ * lapsed render the pin's exact copy. An athlete-linked account's own
+ * `household` is always null (useMembership's single-self-entry branch), so
+ * this line only ever appears on the parent view — consistent with a
+ * household's Stripe status being the payer's concern, not shown as a gap.
  *
  * ENTITLEMENTS ARE DERIVED, NEVER STORED (the pin's own keystone) — every
  * number below is exactly what useMembership()'s `tokens` returns.
@@ -49,16 +58,28 @@ import { useMembership } from '../hooks';
  *   rendered as if `variant === 'populated'` had returned it. Real routes
  *   never pass this; it exists only so the states gallery can preview
  *   the tokens/Elite/grace-token member shapes the seed doesn't produce yet.
+ * @param {object} [demoHousehold]  HARNESS-ONLY, same category as
+ *   `demoMembers` — overrides `data.household` so the states gallery can
+ *   preview the Sprint 13 past_due/lapsed status line, which no seed
+ *   household carries yet. No real caller ever passes it.
  */
-export default function Membership({ variant = 'populated', bare = false, role = 'parent', onBack, onRetry, demoMembers }) {
+export default function Membership({
+  variant = 'populated',
+  bare = false,
+  role = 'parent',
+  onBack,
+  onRetry,
+  demoMembers,
+  demoHousehold,
+}) {
   const hookState = useMembership();
   const navigate = useNavigate();
 
-  const demo = variant !== 'populated' || Boolean(demoMembers);
+  const demo = variant !== 'populated' || Boolean(demoMembers) || Boolean(demoHousehold);
   const loading = demoMembers ? false : demo ? variant === 'loading' : hookState.loading;
   const error = demoMembers ? null : demo ? (variant === 'error' ? new Error("Membership didn't load.") : null) : hookState.error;
-  const data = demoMembers
-    ? { household: null, members: demoMembers }
+  const data = demoMembers || demoHousehold
+    ? { household: demoHousehold ?? null, members: demoMembers ?? [] }
     : demo
     ? variant === 'empty'
       ? { household: null, members: [] }
@@ -102,25 +123,53 @@ export default function Membership({ variant = 'populated', bare = false, role =
             </Body>
           </Card>
         ) : (
-          members.map((member) => (
-            <MemberSection key={member.athleteId} name={member.name}>
-              {member.package?.kind === 'elite' ? (
-                <EliteCard pkg={member.package} />
-              ) : (
-                <TokensCard pkg={member.package} tokens={member.tokens} />
-              )}
-              <CoachingLine coaching={member.coaching} />
-              <ContractLine
-                contractMinutes={member.contractMinutes}
-                onOpen={() => openContract(member)}
-                role={role}
-              />
-            </MemberSection>
-          ))
+          <>
+            <HouseholdStatusBanner membership={data?.household?.membership} />
+            {members.map((member) => (
+              <MemberSection key={member.athleteId} name={member.name}>
+                {member.package?.kind === 'elite' ? (
+                  <EliteCard pkg={member.package} />
+                ) : (
+                  <TokensCard pkg={member.package} tokens={member.tokens} />
+                )}
+                <CoachingLine coaching={member.coaching} />
+                <ContractLine
+                  contractMinutes={member.contractMinutes}
+                  onOpen={() => openContract(member)}
+                  role={role}
+                />
+              </MemberSection>
+            ))}
+          </>
         )}
       </div>
     </PhoneFrame>
   );
+}
+
+/**
+ * Sprint 13 pin H's exact copy: active renders nothing loud (null/'active'
+ * short-circuits), past_due and lapsed state plainly what changed and what
+ * did not. "billing" appears nowhere in this — a membership *status* line is
+ * not the parked billing surface (Sprint 11 ruling, restated in the pin).
+ */
+function HouseholdStatusBanner({ membership }) {
+  if (!membership || membership.status === 'active') return null;
+  if (membership.status === 'past_due') {
+    return (
+      <Banner tone="yellow" title="Payment didn't go through">
+        New bookings are paused until it clears; everything already booked is kept.
+      </Banner>
+    );
+  }
+  if (membership.status === 'lapsed') {
+    return (
+      <Banner tone="red" title="Membership lapsed">
+        Upcoming bookings were released. Once payment resumes, book again from what's open.
+      </Banner>
+    );
+  }
+  return null;
 }
 
 /** Catalogue price as a fact, never an amount due — "pending" when the catalogue flags it. */

@@ -77,6 +77,10 @@ const useEnrollmentQueue = hooks.useEnrollmentQueue || useEnrollmentQueueFallbac
  *   defaults to 'owner' (the superset) only for the harness/an un-wired
  *   caller - see the sprint report.
  * @param {() => void} [onSignOut]  Hidden when not supplied (harness/demo).
+ * @param {object} [demoMembership]  HARNESS-ONLY (Sprint 13, contract v2.1) —
+ *   overrides the Membership card's data. useAdminDashboard's seed branch
+ *   does not produce a `membership` field in this worktree yet (routing
+ *   lane's parallel worktree); no real caller ever passes this.
  */
 export default function AdminDashboard({
   variant = 'populated',
@@ -84,6 +88,7 @@ export default function AdminDashboard({
   role = 'owner',
   onSignOut,
   onOpenAthlete,
+  demoMembership,
 }) {
   const { data } = useAdminDashboard();
   const enrollmentRows = data?.enrollment ?? [];
@@ -146,6 +151,7 @@ export default function AdminDashboard({
         <OutstandingCard items={outstanding} onOpenAthlete={onOpenAthlete} />
         <EnrollmentQueueCard state={queue} />
         <MetricGrid metrics={metrics} />
+        <MembershipCard membership={demoMembership ?? data?.membership} />
         <EnrollmentCard rows={enrollmentRows} highlight={filtered ? active.id : null} />
         <BlockFillCard bars={data?.blockFill ?? []} filtered={filtered} />
         {/* Billing card: hidden in live mode per the pin - there was never
@@ -462,6 +468,54 @@ function MetricGrid({ metrics }) {
         </Card>
       ))}
     </div>
+  );
+}
+
+/**
+ * "Membership" card (Sprint 13 pin, contract v2.1) — active/past due/lapsed
+ * counts and the lapsed households list, off `useAdminDashboard().data.
+ * membership` (an EXISTING hook gaining this field — read directly, absent
+ * gracefully renders nothing rather than a zeroed-out card). Lapsed
+ * households carry only `{ id, name }` — no athlete/household detail route
+ * is pinned for this list, so the rows are informational, not tappable
+ * (never wiring a tap to a destination that doesn't exist).
+ */
+function MembershipCard({ membership }) {
+  if (!membership) return null;
+  const stats = [
+    ['Active', membership.active, 'green'],
+    ['Past due', membership.pastDue, 'yellow'],
+    ['Lapsed', membership.lapsed, 'red'],
+  ];
+
+  return (
+    <Card large>
+      <SectionLabel style={{ marginBottom: 14 }}>Membership</SectionLabel>
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 10 }}>
+        {stats.map(([label, value, tone]) => (
+          <div key={label} style={{ textAlign: 'center' }}>
+            <div style={{ font: `700 22px ${font.head}`, color: color.text }}>{value ?? 0}</div>
+            <div style={{ marginTop: 6 }}>
+              <StatusBadge tone={tone}>{label}</StatusBadge>
+            </div>
+          </div>
+        ))}
+      </div>
+      {membership.lapsedHouseholds?.length ? (
+        <div style={{ marginTop: 16, borderTop: `1px solid ${color.rule}`, paddingTop: 14 }}>
+          <SectionLabel tone={color.error} style={{ marginBottom: 8 }}>
+            Lapsed households
+          </SectionLabel>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+            {membership.lapsedHouseholds.map((h) => (
+              <div key={h.id} style={{ font: `500 13px ${font.body}`, color: color.text }}>
+                {h.name}
+              </div>
+            ))}
+          </div>
+        </div>
+      ) : null}
+    </Card>
   );
 }
 

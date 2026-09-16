@@ -65,7 +65,11 @@ const TOKENS_GRACE = {
   reserved: 0,
   left: 0,
   unlimited: false,
-  grace: [{ id: 'g1', expiresAt: addDaysISO(todayISO(), 18) }],
+  // Sprint 13 (contract v2.1, pin E): the grace line now names the reason
+  // (GraceLine, components/AllowancePools.js) — this fixture carries one so
+  // the states gallery previews it (the seed hasn't been rebuilt against the
+  // Part 2 tokenPeriods/graceTokens shapes yet).
+  grace: [{ id: 'g1', expiresAt: addDaysISO(todayISO(), 18), reason: 'session-cancelled' }],
   nextPeriod: { periodKey: null, booked: 0 },
 };
 const TOKENS_ELITE = { granted: null, used: 0, reserved: 0, left: null, unlimited: true, grace: [], nextPeriod: { periodKey: null, booked: 1 } };
@@ -86,6 +90,32 @@ const MEMBER_GRACE = {
   tokens: TOKENS_GRACE, coaching: null, contractMinutes: null, periodEnd: addDaysISO(todayISO(), 3),
 };
 const TOKEN_MEMBERS_FIXTURE = [MEMBER_TOKENS, MEMBER_ELITE, MEMBER_GRACE];
+
+/**
+ * Household membership-status fixtures (Sprint 13, contract v2.1, pin H) —
+ * `useMembership().data.household.membership` shape. No seed household
+ * carries a non-active status yet, so Membership.js's `demoHousehold` prop
+ * (harness-only, see the screen's own doc comment) renders these directly.
+ */
+const HOUSEHOLD_PAST_DUE = {
+  id: 'whitfield', name: 'Whitfield family', periodAnchorDay: 1,
+  membership: { status: 'past_due', currentPeriodEnd: addDaysISO(todayISO(), 9) },
+};
+const HOUSEHOLD_LAPSED = {
+  id: 'whitfield', name: 'Whitfield family', periodAnchorDay: 1,
+  membership: { status: 'lapsed', currentPeriodEnd: addDaysISO(todayISO(), -4) },
+};
+
+/**
+ * Admin "Membership" card fixture (Sprint 13 pin) —
+ * useAdminDashboard().data.membership shape. The seed hasn't been rebuilt
+ * against it yet, so AdminDashboard.js's `demoMembership` prop (harness-only)
+ * renders this directly.
+ */
+const ADMIN_MEMBERSHIP_FIXTURE = {
+  active: 11, pastDue: 2, lapsed: 1,
+  lapsedHouseholds: [{ id: 'parker', name: 'Parker family' }],
+};
 
 /**
  * Review harness. Renders every component variant and every screen state side
@@ -115,7 +145,12 @@ export const SCREEN_STATES = [
              // own doc comment) that previews the confirm-sheet flow by
              // patching cancellable/bookingId onto the non-today upcoming
              // items - no real caller ever passes it.
-             ['upcoming', 'Cancel flow', { demoCancellable: true }]] },
+             ['upcoming', 'Cancel flow', { demoCancellable: true }],
+             // Sprint 13 pin F: the waitlisted row (position + "Leave
+             // waitlist") - same missing-field situation as demoCancellable
+             // above (waitlistPosition/status:'waitlisted' aren't on
+             // useSchedule's items in this worktree yet).
+             ['upcoming', 'Waitlisted', { demoWaitlisted: true }]] },
   { id: '05', title: 'Book a Session', Screen: BookSession, role: 'athlete',
     states: [['open', 'Blocks open'],
              // Interactive: tap a marked date to open its sessions, then a
@@ -147,7 +182,20 @@ export const SCREEN_STATES = [
              // via demoSelectedDate (harness-only, BookSession.js's own doc
              // comment) since the default 32-day window makes this state
              // otherwise unreachable without a month-navigation sequence.
-             ['open', 'Window locked', { demoSelectedDate: addDaysISO(todayISO(), 60) }]] },
+             ['open', 'Window locked', { demoSelectedDate: addDaysISO(todayISO(), 60) }],
+             // Sprint 13 pin F: a full session offers "Join waitlist" instead
+             // of a dead Full pill - interactive, tap a marked date then any
+             // session (demoForceFull makes every session in the tapped day
+             // read as full, since the real season generator never produces
+             // one - see BookSession.js's own doc comment).
+             ['open', 'Join waitlist · tap a day, tap a session', { demoForceFull: true }],
+             // The waitlisted confirmation card (position line + "you'll be
+             // notified") - deep-mounted since seed mode's book() has no
+             // typed status yet (see BookSession.js's demoBookedWaitlisted note).
+             ['open', 'Waitlisted confirmation', {
+               demoForceFull: true,
+               demoSelectedDate: addDaysISO(todayISO(), 3),
+             }]] },
   { id: '06', title: 'Practice DNA', Screen: PracticeDNA, role: 'athlete',
     states: [['complete', 'Complete'], ['partial', 'Partial'], ['pending', 'Pending']] },
   { id: '07', title: 'Commitment Contract', Screen: CommitmentContract, role: 'athlete',
@@ -202,7 +250,12 @@ export const SCREEN_STATES = [
              // yet (Sprint 8 hook seam, TEAM.md), so Roster.js's inert
              // fallback (`{}`, never fetches) is what's live here.
              ['pre', 'Tournament · enter scores',
-               { block: { type: 'tournament', name: null, time: '8:30 AM', date: null, meta: null } }]] },
+               { block: { type: 'tournament', name: null, time: '8:30 AM', date: null, meta: null } }],
+             // Sprint 13 pin E: staff-only "Cancel session" - ops/owner see
+             // it regardless of live/sessionId (Roster.js's own doc comment
+             // on canCancelSession); tap through to the confirm sheet, which
+             // states the booking/grace-token count.
+             ['pre', 'Ops · cancel session', { role: 'ops' }]] },
   /*
    * Roster - coach (Sprint 5 pin, TEAM.md): the bottom tab bar's "Roster"
    * destination is now the coach's full assigned roster, not one session's
@@ -219,7 +272,12 @@ export const SCREEN_STATES = [
     // 'ops' previews the Sprint 10 pin F tab set (Admin/Sessions/Tour, no
     // Staff) alongside the default owner set the other two states show.
     states: [['populated', 'Populated'], ['filtered', 'Filtered'],
-             ['populated', 'Ops · tab set', { role: 'ops' }]] },
+             ['populated', 'Ops · tab set', { role: 'ops' }],
+             // Sprint 13 pin: the "Membership" card (active/past due/lapsed
+             // counts + lapsed households) - demoMembership (harness-only,
+             // see AdminDashboard.js's own doc comment) since the seed
+             // hasn't been rebuilt against useAdminDashboard's new field yet.
+             ['populated', 'Membership card', { demoMembership: ADMIN_MEMBERSHIP_FIXTURE }]] },
   { id: '16', title: 'Staff & Roles', Screen: StaffRoles, role: 'owner',
     states: [['populated', 'Populated'], ['add', 'Add staff']] },
   { id: '17', title: 'Newsletter Composer', Screen: NewsletterComposer, role: 'admin',
@@ -273,7 +331,13 @@ export const SCREEN_STATES = [
              // ordinary token, no separate gating state) — `demoCapReached`
              // (harness-only, see the screen's own doc comment) previews it.
              ['slots', 'Yannick · flat cap', { harnessStage: 'slots', harnessSpecialistId: 'mental' }],
-             ['slots', 'Yannick · cap reached', { harnessStage: 'slots', harnessSpecialistId: 'mental', demoCapReached: true }]] },
+             ['slots', 'Yannick · cap reached', { harnessStage: 'slots', harnessSpecialistId: 'mental', demoCapReached: true }],
+             // Sprint 13 pin F: a full slot's detail sheet offers "Join
+             // waitlist" instead of Reserve - 'sheet-full' forces a slot
+             // closed (see the screen's own doc comment) since the seed
+             // rarely has one in the visible window.
+             ['sheet-full', 'Detail sheet · full', { harnessStage: 'sheet-full' }],
+             ['confirmed-waitlisted', 'Waitlisted confirmation', { harnessStage: 'confirmed-waitlisted' }]] },
   /*
    * Specialist Day / My Sessions (Sprint 9 amendment v1.7.1; nav + Today
    * section added Sprint 10 pins F/I) - the specialist's own day view, not
@@ -310,6 +374,11 @@ export const SCREEN_STATES = [
       ['populated', 'Elite · no countdown', { demoMembers: [MEMBER_ELITE] }],
       ['populated', 'Grace token', { demoMembers: [MEMBER_GRACE] }],
       ['populated', 'Household · all three', { demoMembers: TOKEN_MEMBERS_FIXTURE }],
+      // Sprint 13 (contract v2.1, pin H): the household status line -
+      // demoHousehold (harness-only, see Membership.js's own doc comment)
+      // since no seed household carries a non-active status yet.
+      ['populated', 'Past due', { demoMembers: [MEMBER_TOKENS], demoHousehold: HOUSEHOLD_PAST_DUE }],
+      ['populated', 'Lapsed', { demoMembers: [MEMBER_TOKENS], demoHousehold: HOUSEHOLD_LAPSED }],
     ] },
   /*
    * Family Reservations (Sprint 11 pin F, TEAM.md, contract v1.9) — the
@@ -334,6 +403,21 @@ export const SCREEN_STATES = [
             id: 'r1', bookingId: 'r1', time: '4:00', meridiem: 'PM', type: 'training',
             name: 'Training block', dayLabel: 'Mon, Oct 12', durationMinutes: 60,
             isToday: false, cancellable: true, nextPeriod: true,
+          }],
+          past: [],
+        }],
+      }],
+      // Sprint 13 pin F: the waitlisted row (position + "Leave waitlist"),
+      // same demoMembers-fixture idiom as the next-period state above - no
+      // seed reservation carries status 'waitlisted' yet.
+      ['populated', 'Waitlisted', {
+        onBook: () => {},
+        demoMembers: [{
+          athleteId: 'nico', name: 'Nico Whitfield',
+          upcoming: [{
+            id: 'r2', bookingId: 'r2', sessionId: 'r2-session', time: '5:00', meridiem: 'PM', type: 'training',
+            name: 'Training block', dayLabel: 'Wed, Oct 14', durationMinutes: 60,
+            isToday: false, status: 'waitlisted', waitlistPosition: 2,
           }],
           past: [],
         }],

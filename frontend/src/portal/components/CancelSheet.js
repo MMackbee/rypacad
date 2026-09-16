@@ -15,17 +15,36 @@ import { Body, ScreenTitle } from './Primitives';
  * and never closes itself on failure — a failed cancel leaves the booking
  * exactly as it was, sheet open, honest inline error.
  *
- * @param {string} summary  The one-line "Tue Nov 4 · 4:00 PM · Training block"
- *   restatement of what is being cancelled — the caller formats it, since
- *   MySchedule and Reservations compose the pieces slightly differently
- *   (Reservations rows carry an athlete name, MySchedule's don't).
+ * Sprint 13 (contract v2.1): Roster.js's staff-only "Cancel session" action
+ * (pin E) reuses this same sheet for its confirm step — the copy differs
+ * (title, confirm label, and a richer summary stating the blast radius:
+ * bookings cancelled, grace tokens minted) but the never-close-on-failure/
+ * honest-inline-error behavior is identical, so `title`/`confirmLabel`/
+ * `keepLabel` are now overridable rather than duplicating the sheet.
+ *
+ * @param {string} title  Defaults to the member-cancel wording.
+ * @param {React.ReactNode} summary  The one-line "Tue Nov 4 · 4:00 PM ·
+ *   Training block" restatement of what is being cancelled — the caller
+ *   formats it, since MySchedule/Reservations/Roster compose the pieces
+ *   differently (Reservations rows carry an athlete name; Roster's own
+ *   cancel-session sheet states a booking + grace-token count instead).
+ * @param {string} [confirmLabel]  Defaults to "Cancel reservation".
+ * @param {string} [keepLabel]  Defaults to "Keep it".
  * @param {() => Promise<any>} onConfirm  Must reject with a human-readable
  *   `.message` on failure — this sheet renders it verbatim, never a generic
  *   "something went wrong".
- * @param {() => void} onClose  Fires from "Keep it" and the overlay tap.
+ * @param {() => void} onClose  Fires from the keep button and the overlay tap.
  * @param {() => void} onCancelled  Fires after onConfirm resolves.
  */
-export default function CancelSheet({ summary, onClose, onConfirm, onCancelled }) {
+export default function CancelSheet({
+  title = 'Cancel this reservation?',
+  summary,
+  confirmLabel = 'Cancel reservation',
+  keepLabel = 'Keep it',
+  onClose,
+  onConfirm,
+  onCancelled,
+}) {
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState(null);
 
@@ -66,7 +85,7 @@ export default function CancelSheet({ summary, onClose, onConfirm, onCancelled }
           padding: '20px 22px 26px',
         }}
       >
-        <ScreenTitle size={19}>Cancel this reservation?</ScreenTitle>
+        <ScreenTitle size={19}>{title}</ScreenTitle>
         <Body size={12} style={{ marginTop: 8 }}>
           {summary}
         </Body>
@@ -83,10 +102,10 @@ export default function CancelSheet({ summary, onClose, onConfirm, onCancelled }
             style={{ boxShadow: 'none' }}
             onClick={handleCancel}
           >
-            {saving ? 'Cancelling' : 'Cancel reservation'}
+            {saving ? 'Cancelling' : confirmLabel}
           </Button>
           <Button variant="outline" height={50} disabled={saving} style={{ boxShadow: 'none' }} onClick={onClose}>
-            Keep it
+            {keepLabel}
           </Button>
         </div>
       </div>
