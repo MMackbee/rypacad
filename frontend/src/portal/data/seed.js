@@ -10,21 +10,42 @@
  * gets swapped for the real API.
  *
  * Dates key off the real calendar (see ./calendar.js): headers show the actual
- * today, allowances reset on the first of the next real month, and bookings
- * reference the generated season's opening week. Session names are the generic
- * "Training block" / "Tournament block" - the Workshop/Lab/Arena rotation was a
- * placeholder, and no invented name ships before real sessions exist to book.
+ * today, token periods anchor on PERIOD_ANCHOR_DAY (below) and roll from
+ * there, and bookings reference the generated season's opening week. Session
+ * names are the generic "Training block" / "Tournament block" - the
+ * Workshop/Lab/Arena rotation was a placeholder, and no invented name ships
+ * before real sessions exist to book.
+ *
+ * Contract v2.0 (Sprint 12, TEAM.md "Sprint 12 pins - the token model"): the
+ * two-pool GOLF_PACKAGES/makeAllowance shapes this file used to build are
+ * retired in favour of the ONE token catalogue (TOKEN_PACKAGES) and the
+ * derived token position (tokensFor) - see TOKENS/TOKENS_EXHAUSTED and each
+ * HOUSEHOLD child's `tokens` field below.
  */
 
 import { BLOCKS } from '../tokens';
+import { TOKEN_PACKAGES, periodFor, tokensFor } from './packages';
+// DEPRECATED (contract v2.0) - kept ONLY so StatesHarness.js (frontend-
+// owned, not this lane's to edit) keeps compiling until the frontend lane
+// moves its two-pool AllowancePools gallery states onto the token shapes
+// below. See the DEPRECATED block near the bottom of this file and
+// packages.js's own DEPRECATED banner, which these two names read from.
 import { GOLF_PACKAGES, makeAllowance } from './packages';
 import { longDayLabel, nextMonthFirstShort, todayISO } from './calendar';
 
 /** The real current date, formatted for screen headers. */
 export const TODAY = longDayLabel(todayISO());
 
-/** Allowances reset on the first of the next real month. */
-const RESETS_ON = nextMonthFirstShort(todayISO());
+/**
+ * The seed household's billing-period anchor (contract v2.0, pin B):
+ * absent-on-the-real-doc means 1, so this mirrors that default rather than
+ * inventing a different one for the demo. `PERIOD` is the current period
+ * this anchor produces for `todayISO()` - computed once so every export
+ * below (seed dates are always "today", never a fixed calendar date) shares
+ * the exact same period boundaries.
+ */
+export const PERIOD_ANCHOR_DAY = 1;
+const PERIOD = periodFor(todayISO(), PERIOD_ANCHOR_DAY);
 
 /** Three separate decisions. Media release is optional and never bundled. */
 export const CONSENTS = [
@@ -65,15 +86,15 @@ export const RELATIONSHIPS = ['Mother', 'Father', 'Guardian', 'Grandparent', 'Ot
  * season.js, never freestanding session objects. The first build hand-wrote
  * this list and it contradicted the season within a week: it showed a Friday
  * block the generator doesn't produce (overflow is off) and inverted
- * training/tournament on the Saturday slots, so the same block spent a
- * different allowance pool on My Schedule than on Book a Session. A reference
+ * training/tournament on the Saturday slots, so the same block read as a
+ * different session type on My Schedule than on Book a Session. A reference
  * cannot drift: if the schedule changes, the resolved session changes with it,
  * and a reference into a closure resolves to null instead of inventing a
  * session.
  */
 export const BOOKED_UPCOMING = [
   { date: '2026-11-02', block: 1, badge: { tone: 'green', label: 'Confirmed' } }, // Mon 4:00 PM, season opener
-  { date: '2026-11-07', block: 1 }, // Sat 10:30 AM tournament — spends the other pool
+  { date: '2026-11-07', block: 1 }, // Sat 10:30 AM tournament
   { date: '2026-11-07', block: 2 }, // Sat 12:30 PM training
   { date: '2026-11-09', block: 2 }, // Mon 5:00 PM
   { date: '2026-11-12', block: 0 }, // Thu 3:00 PM
@@ -106,45 +127,55 @@ export const CANCELLED_SESSION = {
 };
 
 /**
- * The athlete's allowance — two pools, not one.
- *
- * Replaces the old `TIER_RULE = { used: 3, limit: 8 }`, which modelled a single
- * booking pool. Training and tournament entitlements do not substitute for each
- * other: an athlete can have training left with no tournament entries remaining,
- * and every screen that shows a balance has to show both numbers.
- *
- * Jordan is on the 8 + 3 package, which preserves the artboards' "3 of 8" for
- * the training pool while making the second pool visible.
+ * The athlete's ONE token pool (contract v2.0, Sprint 12 pin B/N — replaces
+ * the two-pool ALLOWANCE this file used to build). t-12 is the pinned seed
+ * package ("the seed athlete on t-12 with a periodAnchorDay 1 household",
+ * TEAM.md Sprint 12 pins) — 12 tokens/period, a reasonable successor to the
+ * old 8+3 golf package's 11 sessions/month.
  */
-export const ATHLETE_PACKAGE = GOLF_PACKAGES.find((p) => p.id === 'g-8-3');
+export const ATHLETE_PACKAGE = TOKEN_PACKAGES.find((p) => p.id === 't-12');
 
-export const ALLOWANCE = makeAllowance(ATHLETE_PACKAGE, {
-  trainingUsed: 3,
-  tournamentsUsed: 1,
-  resetsOn: RESETS_ON,
+/**
+ * Synthetic booking rows spending `n` tokens THIS period - dates are `today`
+ * unconditionally (never a fixed seed date) so these always land in the
+ * live period whenever the demo is viewed, mirroring the old ALLOWANCE's
+ * dynamic RESETS_ON.
+ */
+function tokenRows(n) {
+  const today = todayISO();
+  const rows = [];
+  for (let i = 0; i < n; i++) rows.push({ periodKey: PERIOD.periodKey, status: 'confirmed', date: today });
+  return rows;
+}
+
+/**
+ * The athlete's token position — one pool, not two. 4 used mirrors the old
+ * two-pool demo's total spend exactly (3 training + 1 tournament).
+ */
+export const TOKENS = tokensFor(null, ATHLETE_PACKAGE, tokenRows(4), [], [], PERIOD.periodKey, {
+  today: todayISO(),
 });
 
-/** Same package, tournament pool spent — the state a single-pool model hid. */
-export const ALLOWANCE_NO_TOURNAMENTS = makeAllowance(ATHLETE_PACKAGE, {
-  trainingUsed: 3,
-  tournamentsUsed: ATHLETE_PACKAGE.tournaments,
-  resetsOn: RESETS_ON,
-});
-
-/** Training pool spent, tournament entries still available. */
-export const ALLOWANCE_NO_TRAINING = makeAllowance(ATHLETE_PACKAGE, {
-  trainingUsed: ATHLETE_PACKAGE.training,
-  tournamentsUsed: 1,
-  resetsOn: RESETS_ON,
-});
+/**
+ * Same package, every token spent — the "nothing left" demo state the old
+ * two independent pool-exhaustion states (ALLOWANCE_NO_TOURNAMENTS/
+ * ALLOWANCE_NO_TRAINING) both collapse into under one pool.
+ */
+export const TOKENS_EXHAUSTED = tokensFor(
+  null,
+  ATHLETE_PACKAGE,
+  tokenRows(ATHLETE_PACKAGE.tokens),
+  [],
+  [],
+  PERIOD.periodKey,
+  { today: todayISO() }
+);
 
 export const BOOKING_CONFIRMATION = {
   name: 'Training block',
   when: 'Mon Nov 2 · 4:00 PM',
-  pool: 'training',
   email: 'dana@email.com',
-  note:
-    'Cancel up to 12 hours ahead to keep this as an unlimited makeup rather than a used session.',
+  note: 'Cancel until the day before the session to keep your token.',
 };
 
 /** Screen 08. Fixed-height cards regardless of how much data a child has. */
@@ -161,18 +192,12 @@ export const HOUSEHOLD = {
       standing: { tone: 'green', label: 'On track' },
       next: { type: 'training', when: 'Mon 4:00 PM', meta: 'Training block' },
       contract: 92,
-      packageId: 'g-8-3',
-      // Sprint 11 (contract v1.9, pin A): mirrors the DB lane's real
-      // Firestore seed exactly (jordan f-8, reese f-4, nico null) so the
-      // static demo/harness and the live emulator tell the same believable
-      // story - useMembership/useSpecialistSlots derive Jordan's Phil
-      // entitlement off this the same way live mode derives it off the
-      // Firestore field.
-      fitnessPackageId: 'f-8',
-      allowance: makeAllowance(GOLF_PACKAGES.find((p) => p.id === 'g-8-3'), {
-        trainingUsed: 3,
-        tournamentsUsed: 1,
-        resetsOn: RESETS_ON,
+      // Contract v2.0 pin A: `fitnessPackageId` is retired - one package
+      // pointer now. t-12 matches ATHLETE_PACKAGE/TOKENS above (jordan is
+      // the seed's "signed-in athlete" fixture, SEED_ATHLETE_ID in hooks).
+      packageId: 't-12',
+      tokens: tokensFor(null, TOKEN_PACKAGES.find((p) => p.id === 't-12'), tokenRows(4), [], [], PERIOD.periodKey, {
+        today: todayISO(),
       }),
     },
     {
@@ -184,17 +209,11 @@ export const HOUSEHOLD = {
       standing: { tone: 'yellow', label: 'Behind' },
       next: { type: 'tournament', when: 'Sat 10:30 AM', meta: 'Tournament block' },
       contract: 54,
-      packageId: 'g-4-2',
-      fitnessPackageId: 'f-4', // Sprint 11 pin A - mirrors the real Firestore seed (see jordan above).
-      /**
-       * Reese has training left but no tournament entries — and a tournament is
-       * her next session. A single-pool balance would have shown "2 left" and
-       * hidden that entirely.
-       */
-      allowance: makeAllowance(GOLF_PACKAGES.find((p) => p.id === 'g-4-2'), {
-        trainingUsed: 2,
-        tournamentsUsed: 2,
-        resetsOn: RESETS_ON,
+      packageId: 't-6',
+      // 4 of 6 used - the same total spend her old two-pool demo modelled
+      // (2 training + 2 tournament), now one number under one pool.
+      tokens: tokensFor(null, TOKEN_PACKAGES.find((p) => p.id === 't-6'), tokenRows(4), [], [], PERIOD.periodKey, {
+        today: todayISO(),
       }),
     },
     {
@@ -205,16 +224,9 @@ export const HOUSEHOLD = {
       standing: { tone: 'neutral', label: 'New', dashed: true },
       next: { type: 'training', when: 'Mon 5:00 PM', meta: 'Training block' },
       contract: null,
-      packageId: 'g-4-2',
-      // Sprint 11 pin A: nico stays null on purpose here too, same reason
-      // his contractMinutes is seeded null - the "no fitness package on
-      // file" state (entitlementsFor's `source: 'none'`) needs a real,
-      // exercisable no-tier athlete in the demo, not just in the emulator.
-      fitnessPackageId: null,
-      allowance: makeAllowance(GOLF_PACKAGES.find((p) => p.id === 'g-4-2'), {
-        trainingUsed: 0,
-        tournamentsUsed: 0,
-        resetsOn: RESETS_ON,
+      packageId: 't-6',
+      tokens: tokensFor(null, TOKEN_PACKAGES.find((p) => p.id === 't-6'), tokenRows(0), [], [], PERIOD.periodKey, {
+        today: todayISO(),
       }),
     },
   ],
@@ -364,3 +376,26 @@ export const CODE_OF_GRIT = [
   'Train Smart',
   'Support Each Other & Enjoy the Journey',
 ];
+
+/* ========================================================================== *
+ * DEPRECATED (contract v2.0, Sprint 12) - the two-pool demo allowances this
+ * file used to build for every athlete. TOKENS/TOKENS_EXHAUSTED above are
+ * the replacement; every hook/screen this lane owns has moved off these two.
+ * They stay ONLY because StatesHarness.js (frontend-owned) still imports
+ * them for its AllowancePools gallery states - deleted once the frontend
+ * lane moves that gallery onto the token shapes, same as packages.js's own
+ * DEPRECATED banner. Do not add new callers.
+ * ========================================================================== */
+const DEPRECATED_GOLF_PACKAGE = GOLF_PACKAGES.find((p) => p.id === 'g-8-3');
+
+export const ALLOWANCE = makeAllowance(DEPRECATED_GOLF_PACKAGE, {
+  trainingUsed: 3,
+  tournamentsUsed: 1,
+  resetsOn: nextMonthFirstShort(todayISO()),
+});
+
+export const ALLOWANCE_NO_TOURNAMENTS = makeAllowance(DEPRECATED_GOLF_PACKAGE, {
+  trainingUsed: 3,
+  tournamentsUsed: DEPRECATED_GOLF_PACKAGE.tournaments,
+  resetsOn: nextMonthFirstShort(todayISO()),
+});
