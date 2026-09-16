@@ -3,6 +3,8 @@ import { color, font, radius, WEEKLY_SCHEDULE_LABEL } from '../tokens';
 import BottomTabBar from '../components/BottomTabBar';
 import Button from '../components/Button';
 import CancelSheet from '../components/CancelSheet';
+import { cancelReasonCopy } from '../components/BookingReasons';
+import { LeaveWaitlistButton, WaitlistPositionLine } from '../components/WaitlistAction';
 import MediaPlaceholder from '../components/MediaPlaceholder';
 import PhoneFrame from '../components/PhoneFrame';
 import Segmented from '../components/Segmented';
@@ -41,14 +43,28 @@ import { todayISO } from '../data/calendar';
  *   preview the cancel flow by patching cancellable/bookingId onto each
  *   non-today upcoming item locally, purely for review - no real caller ever
  *   passes it. Flagged in the sprint report.
+ * @param {boolean} [demoWaitlisted]  HARNESS-ONLY, same category as
+ *   `demoCancellable` (Sprint 13, contract v2.1 pin F): useSchedule doesn't
+ *   return a 'waitlisted' item / `waitlistPosition` in this worktree yet -
+ *   patches the first upcoming item to that state for review.
  */
-export default function MySchedule({ variant = 'upcoming', bare = false, onBook, onRetry, demoCancellable = false }) {
+export default function MySchedule({
+  variant = 'upcoming',
+  bare = false,
+  onBook,
+  onRetry,
+  demoCancellable = false,
+  demoWaitlisted = false,
+}) {
   const scheduleState = useSchedule({ variant });
   const { data, loading, error } = scheduleState;
   const [tab, setTab] = useState('upcoming');
   // The upcoming item currently in the confirm sheet ('keep it' / 'cancel
   // reservation'), or null when the sheet is closed.
   const [cancelTarget, setCancelTarget] = useState(null);
+  // Which waitlisted bookingId is mid-leave, for LeaveWaitlistButton's own
+  // loading state (no confirm sheet - leaving costs nothing already spent).
+  const [leavingId, setLeavingId] = useState(null);
 
   const past = tab === 'past';
   const today = todayISO();
@@ -65,7 +81,15 @@ export default function MySchedule({ variant = 'upcoming', bare = false, onBook,
           s.date === today ? s : { ...s, cancellable: s.cancellable ?? true, bookingId: s.bookingId ?? s.id }
         )
       : list;
-  const sessions = withDemoCancel((past ? data?.past : data?.sessions) ?? []);
+  // Same harness-only patch shape as withDemoCancel, for the 'waitlisted'
+  // item state (see demoWaitlisted's own doc above) - the first upcoming item.
+  const withDemoWaitlisted = (list) =>
+    demoWaitlisted && list.length
+      ? list.map((s, i) =>
+          i === 0 ? { ...s, status: 'waitlisted', waitlistPosition: 2, bookingId: s.bookingId ?? s.id } : s
+        )
+      : list;
+  const sessions = withDemoWaitlisted(withDemoCancel((past ? data?.past : data?.sessions) ?? []));
   // The cancellation notice belongs to the upcoming view - it is a claim about
   // a session that will not run, not a record of one that did.
   const cancelled = past ? null : data?.cancelled ?? null;
@@ -95,6 +119,23 @@ export default function MySchedule({ variant = 'upcoming', bare = false, onBook,
     (async () => {
       throw new Error('Cancelling is not available yet.');
     });
+
+  /**
+   * "Leave waitlist" (Sprint 13 pin F). INTEGRATION: wire
+   * useWaitlist(item.sessionId, { athleteId }).leave() — NEW hook, not in
+   * this worktree's hooks/index.js yet (do not import it per TEAM.md's
+   * Sprint 11/12 lesson on missing named exports). A local echo stands in
+   * until it lands, same honest-inline-error posture as `cancel` above.
+   */
+  const handleLeaveWaitlist = async (item) => {
+    setLeavingId(item.bookingId);
+    try {
+      // await useWaitlist(item.sessionId, { athleteId }).leave();
+      await Promise.resolve();
+    } finally {
+      setLeavingId(null);
+    }
+  };
 
   return (
     <PhoneFrame
@@ -127,6 +168,8 @@ export default function MySchedule({ variant = 'upcoming', bare = false, onBook,
             days={days}
             onBook={onBook}
             onCancelRequest={setCancelTarget}
+            onLeaveWaitlist={handleLeaveWaitlist}
+            leavingId={leavingId}
           />
         )}
       </div>
@@ -143,7 +186,7 @@ export default function MySchedule({ variant = 'upcoming', bare = false, onBook,
   );
 }
 
-function ScheduleBody({ past, sessions, cancelled, tokens, days, onBook, onCancelRequest }) {
+function ScheduleBody({ past, sessions, cancelled, tokens, days, onBook, onCancelRequest, onLeaveWaitlist, leavingId }) {
   return (
     <>
         {/*
@@ -183,6 +226,9 @@ function ScheduleBody({ past, sessions, cancelled, tokens, days, onBook, onCance
               name={cancelled.name}
               meta={cancelled.meta}
               variant="cancelled"
+              // Pin G: the system cancellation reasons state plainly what
+              // happened; a member's own cancel ('member') has nothing to add.
+              footnote={cancelReasonCopy(cancelled.cancelReason)}
             />
           </div>
         ) : null}
@@ -209,17 +255,27 @@ function ScheduleBody({ past, sessions, cancelled, tokens, days, onBook, onCance
               // rather than silently rendering nothing where a control might
               // otherwise be.
               const dayOf = !past && s.isToday;
+              // Sprint 13 (contract v2.1, pin F/G): a waitlisted or a
+              // system-cancelled item can now ride the same sessions/past
+              // arrays (once routing's hook update lands) - both get their
+              // own trailing/footnote/action treatment below rather than the
+              // ordinary confirmed row's.
+              const waitlisted = s.status === 'waitlisted';
+              const rowCancelled = s.status === 'cancelled';
               return (
                 <SessionCard
                   key={s.id}
                   time={s.time}
                   meridiem={s.meridiem}
-                  type={s.type}
+                  type={rowCancelled ? 'cancelled' : s.type}
                   name={s.name}
                   meta={s.meta}
-                  variant={s.isToday ? 'live' : 'default'}
+                  variant={rowCancelled ? 'cancelled' : s.isToday ? 'live' : 'default'}
+                  footnote={rowCancelled ? cancelReasonCopy(s.cancelReason) : null}
                   trailing={
-                    s.badge ? (
+                    waitlisted ? (
+                      <StatusBadge tone="yellow">Waitlisted</StatusBadge>
+                    ) : s.badge ? (
                       <StatusBadge tone={s.badge.tone}>{s.badge.label}</StatusBadge>
                     ) : s.nextPeriod ? (
                       // Sprint 12 (contract v2.0, pin B): a booking charges
@@ -229,7 +285,15 @@ function ScheduleBody({ past, sessions, cancelled, tokens, days, onBook, onCance
                     ) : null
                   }
                   action={
-                    past ? null : dayOf ? (
+                    past || rowCancelled ? null : waitlisted ? (
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                        <WaitlistPositionLine position={s.waitlistPosition} />
+                        <LeaveWaitlistButton
+                          loading={leavingId === s.bookingId}
+                          onClick={() => onLeaveWaitlist(s)}
+                        />
+                      </div>
+                    ) : dayOf ? (
                       <Body size={11} tone={color.textTertiary}>
                         Same-day cancellations aren't available in the app — contact the front
                         desk.

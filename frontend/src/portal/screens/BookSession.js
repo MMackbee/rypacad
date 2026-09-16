@@ -1,4 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { color, font, radius, tint } from '../tokens';
 import BottomTabBar from '../components/BottomTabBar';
 import Button from '../components/Button';
@@ -8,7 +9,8 @@ import SessionCard from '../components/SessionCard';
 import SkeletonCard, { SkeletonBar } from '../components/Skeleton';
 import { CapacityPill } from '../components/StatusBadge';
 import AllowancePools, { GraceLine, SpendNote } from '../components/AllowancePools';
-import { LockedDayNotice, reasonCopy } from '../components/BookingReasons';
+import { LockedDayNotice, reasonCopy, SeeMembershipLink } from '../components/BookingReasons';
+import { JoinWaitlistButton, WaitlistedConfirmationBody } from '../components/WaitlistAction';
 import { Banner, Body, Card, ErrorNotice, ScreenTitle, SectionLabel, Tick } from '../components/Primitives';
 import { useBooking, useHouseholdAthletes, useMembership, useMonthSessions } from '../hooks';
 // Pure calendar/season helpers, not response data - the data itself travels
@@ -90,6 +92,10 @@ function displayNameFor(session) {
  *   caller ever passes it; it exists so the states gallery can deep-mount
  *   the "past the booking window" locked state (pin D) without scripting
  *   a month-navigation + tap sequence.
+ * @param {boolean} [demoForceFull]  HARNESS-ONLY (pin F) — every session in
+ *   the tapped day reads as full, so the gallery can preview "Join
+ *   waitlist" without depending on a genuinely full session existing in the
+ *   real season generator's output. No real caller ever passes it.
  */
 export default function BookSession({
   variant = 'open',
@@ -102,7 +108,9 @@ export default function BookSession({
   onConfirmed,
   onRetry,
   demoSelectedDate,
+  demoForceFull = false,
 }) {
+  const navigate = useNavigate();
   // Kept for the existing booking behavior: book(), allowance, confirmation
   // copy — exactly the contract the screen already had (Sprint 5 pin).
   const { data, loading, error, book, bookRecurring, bookingFor } = useBooking({ variant, practice });
@@ -156,7 +164,14 @@ export default function BookSession({
   const [selectedDate, setSelectedDate] = useState(() => demoSelectedDate ?? null);
   // The slot the athlete just booked. Persistence is the API's job later; the
   // flow - tap a day, pick a session, land on the confirmation - has to work now.
-  const [booked, setBooked] = useState(null);
+  // demoBookedWaitlisted (HARNESS-ONLY, pin F): seed mode's book() has no
+  // typed status yet (routing lane), so the waitlisted confirmation card is
+  // otherwise unreachable by tapping through - this deep-mounts it directly.
+  const [booked, setBooked] = useState(() =>
+    demoForceFull && demoSelectedDate
+      ? { name: 'Training block', dayLabel: dayLabel(demoSelectedDate, todayISO()), time: '4:00', meridiem: 'PM', waitlisted: true }
+      : null
+  );
   // The in-flight reservation (session id) and the last attempt's failure.
   const [reserving, setReserving] = useState(null);
   const [failure, setFailure] = useState(null);
@@ -195,19 +210,19 @@ export default function BookSession({
     setReserving(session.id);
     Promise.resolve()
       .then(() => reserve(session, isParent ? { athleteId: selectedAthleteId } : undefined))
-      .then(() => {
+      .then((result) => {
         if (!live.current) return;
         setReserving(null);
-        finalizeBooked(session);
+        // Pin F: book() now resolves { status: 'waitlisted' } for a full
+        // session instead of rejecting 'full' — same `booked` state either way.
+        finalizeBooked(session, result && result.status === 'waitlisted');
       })
       .catch((err) => {
         if (!live.current) return;
         setReserving(null);
-        // Sprint 12 (contract v2.0): useBooking().book() rejects with a
-        // typed err.reason ('no-tokens-left' | 'outside-window' |
-        // 'cap-reached' | 'full') alongside the plain-language err.message —
-        // the reason drives reasonCopy() below; the message is the
-        // fallback when a reason isn't one of the typed four.
+        // err.reason: 'no-tokens-left' | 'outside-window' | 'cap-reached' |
+        // 'full' | 'membership-inactive' — drives reasonCopy() below; falls
+        // back to err.message for anything else.
         setFailure({
           sessionId: session.id,
           reason: err && err.reason ? err.reason : null,
@@ -220,7 +235,7 @@ export default function BookSession({
   // full "3:00 PM" string the session docs use; `booked` below splits it for
   // display).
   const bookedRaw = useRef(null);
-  const finalizeBooked = (session) => {
+  const finalizeBooked = (session, waitlisted = false) => {
     bookedRaw.current = session;
     const [time, meridiem] = session.time.split(' ');
     setBooked({
@@ -229,6 +244,7 @@ export default function BookSession({
       meridiem,
       name: displayNameFor(session),
       dayLabel: dayLabel(session.date, todayISO()),
+      waitlisted,
     });
   };
 
@@ -253,7 +269,10 @@ export default function BookSession({
   const days = monthState.data?.days ?? [];
   const { dayStates, sessionsByDate } = buildMonthDayMaps(days);
   const monthHasSessions = days.some((d) => d.sessions.length > 0);
-  const selectedSessions = selectedDate ? sessionsByDate[selectedDate] ?? [] : [];
+  const selectedSessionsRaw = selectedDate ? sessionsByDate[selectedDate] ?? [] : [];
+  const selectedSessions = demoForceFull
+    ? selectedSessionsRaw.map((s) => ({ ...s, capacity: { state: 'full', label: 'Full' } }))
+    : selectedSessionsRaw;
   const selectedDateLocked = Boolean(selectedDate) && selectedDate > openThroughDate;
 
   if (booked) {
@@ -273,8 +292,13 @@ export default function BookSession({
           date: booked.date,
           time: booked.time,
           meridiem: booked.meridiem,
+          waitlisted: booked.waitlisted,
+          // INTEGRATION: wire useWaitlist(booked.id, { athleteId }).position
+          // — NEW hook, not in hooks/index.js yet. WaitlistPositionLine
+          // degrades to a generic line while this is null.
+          position: null,
         }}
-        onRepeat={handleRepeat}
+        onRepeat={booked.waitlisted ? undefined : handleRepeat}
         onBack={() => setBooked(null)}
       />
     );
@@ -375,6 +399,9 @@ export default function BookSession({
                   <Banner tone="red" title="Booking didn't go through">
                     {reasonCopy(failure.reason) ?? failure.message ?? 'The reservation could not be completed.'} Nothing
                     was reserved — tap the session to try again.
+                    {failure.reason === 'membership-inactive' ? (
+                      <SeeMembershipLink onClick={() => navigate('/portal/membership')} style={{ marginTop: 8 }} />
+                    ) : null}
                   </Banner>
                 ) : null}
                 <DaySessionList
@@ -401,8 +428,10 @@ export default function BookSession({
 /**
  * The tapped day's sessions — time, type chip, spots left, and what the
  * booking would spend (Sprint 12, contract v2.0: one token pool, not a
- * per-session pool). Tapping a bookable one confirms it; a full or
- * tokens-spent one stays inert rather than failing at a later submit.
+ * per-session pool). Tapping a bookable one confirms it; a tokens-spent one
+ * stays inert rather than failing at a later submit. A full one is no longer
+ * dead (pin F): its tap now offers "Join waitlist" through the SAME
+ * onSelect()/book() call — the server decides confirmed vs. waitlisted.
  */
 function DaySessionList({ iso, sessions, tokens, reserving, disabled, onSelect }) {
   return (
@@ -426,6 +455,10 @@ function DaySessionList({ iso, sessions, tokens, reserving, disabled, onSelect }
           // Contract v2.0 pin J: the Saturday adult block is display-only -
           // adults pay at the front desk; it is never a junior booking.
           const displayOnly = session.bookable === false;
+          const canWaitlist = isFull && !tokensSpent && !displayOnly;
+          // A full card is never directly tappable - only its JoinWaitlistButton
+          // is, so a tap can't double-fire book() via bubbling.
+          const tappable = !displayOnly && !tokensSpent && !reserving && !disabled && !isFull;
 
           return (
             <SessionCard
@@ -437,13 +470,15 @@ function DaySessionList({ iso, sessions, tokens, reserving, disabled, onSelect }
               variant={isFull || tokensSpent || displayOnly ? 'full' : 'default'}
               gutter={54}
               ruleHeight={36}
-              onClick={displayOnly || isFull || tokensSpent || reserving || disabled ? undefined : () => onSelect(session)}
+              onClick={tappable ? () => onSelect(session) : undefined}
               spendNote={displayOnly ? null : <SpendNote tokens={tokens} />}
               action={
                 pending ? (
                   <Button loading height={46} style={{ font: `600 14px ${font.body}` }}>
-                    Reserving…
+                    {canWaitlist ? 'Joining waitlist…' : 'Reserving…'}
                   </Button>
+                ) : canWaitlist ? (
+                  <JoinWaitlistButton onClick={() => onSelect(session)} disabled={disabled} />
                 ) : null
               }
               trailing={
@@ -630,6 +665,29 @@ function Confirmed({ bare, confirmation, onRepeat, onBack }) {
   // Recurrence state: null (offer), 'working', or the engine's summary.
   const [repeat, setRepeat] = useState(null);
   if (!c) return null;
+
+  // Pin F: a waitlisted join renders the shared WaitlistedConfirmationBody
+  // (components/WaitlistAction.js) - no repeat offer, no add-to-calendar.
+  if (c.waitlisted) {
+    return (
+      <PhoneFrame
+        bare={bare}
+        footer={
+          <div style={{ borderTop: `1px solid ${color.frameRule}`, padding: '14px 22px 22px' }}>
+            <Button variant="secondary" onClick={onBack} style={{ boxShadow: 'none' }}>
+              Back to schedule
+            </Button>
+          </div>
+        }
+      >
+        <div
+          style={{ padding: '56px 22px 24px', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 18 }}
+        >
+          <WaitlistedConfirmationBody name={c.name} when={c.when} position={c.position} />
+        </div>
+      </PhoneFrame>
+    );
+  }
 
   const runRepeat = async (untilISO) => {
     setRepeat('working');

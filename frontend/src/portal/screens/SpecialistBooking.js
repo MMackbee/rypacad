@@ -2,7 +2,8 @@ import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { color, font, glow, radius, tint } from '../tokens';
 import { SpendNote } from '../components/AllowancePools';
-import { capReachedCopy, LockedDayNotice, reasonCopy } from '../components/BookingReasons';
+import { capReachedCopy, LockedDayNotice, reasonCopy, SeeMembershipLink } from '../components/BookingReasons';
+import { JoinWaitlistButton, WaitlistedConfirmationBody } from '../components/WaitlistAction';
 import BottomTabBar from '../components/BottomTabBar';
 import Button from '../components/Button';
 import EntitlementSummary from '../components/EntitlementSummary';
@@ -62,7 +63,7 @@ import { datePill } from '../data/season';
  *   Ignored for the athlete flow.
  * @param {() => void} [onBack]  Fires from the Confirmed view's Done button.
  * @param {() => void} [onSignOut]  Hidden when not supplied (harness/demo).
- * @param {'slots'|'sheet'|'confirmed'|'empty-day'} [harnessStage]
+ * @param {'slots'|'sheet'|'sheet-full'|'confirmed'|'confirmed-waitlisted'|'empty-day'} [harnessStage]
  *   HARNESS-ONLY - not part of the Sprint 9 pin's five-prop list. This
  *   screen has no `variant` prop in the pin (unlike every hook-backed demo
  *   variant elsewhere), so there is no other way to mount the gallery
@@ -124,8 +125,15 @@ export default function SpecialistBooking({
     return (pick ?? demo[0])?.date ?? null;
   });
   const [sheetSlot, setSheetSlot] = useState(() => {
-    if (harnessStage !== 'sheet' || !initialSpecialistId) return null;
+    if ((harnessStage !== 'sheet' && harnessStage !== 'sheet-full') || !initialSpecialistId) return null;
     const demo = seedSpecialistDays(initialSpecialistId, todayISO());
+    // Pin F: 'sheet-full' forces a slot closed so the gallery can preview
+    // the waitlist CTA without depending on a genuinely full seed slot.
+    if (harnessStage === 'sheet-full') {
+      const day = demo.find((d) => d.slots.length > 0);
+      const slot = day?.slots[0];
+      return slot && day ? { ...slot, date: day.date, open: false } : null;
+    }
     const day = demo.find((d) => d.slots.some((s) => s.open));
     const slot = day?.slots.find((s) => s.open);
     return slot && day ? { ...slot, date: day.date } : null;
@@ -136,6 +144,9 @@ export default function SpecialistBooking({
   // hook supplies one — see confirmReserve's catch block below.
   const [failureReason, setFailureReason] = useState(null);
   const [booked, setBooked] = useState(() => {
+    if (harnessStage === 'confirmed-waitlisted') {
+      return { specialist: SPECIALISTS[0], date: todayISO(), time: '3:30 PM', waitlisted: true };
+    }
     if (harnessStage !== 'confirmed') return null;
     return { specialist: SPECIALISTS[0], date: todayISO(), time: '3:30 PM' };
   });
@@ -222,18 +233,17 @@ export default function SpecialistBooking({
     setReserving(slot.sessionId);
     Promise.resolve()
       .then(() => reserve(slot, isParent ? { athleteId: selectedAthleteId } : undefined))
-      .then(() => {
+      .then((result) => {
         setReserving(null);
         setSheetSlot(null);
-        setBooked({ specialist, date: slot.date, time: slot.time, tokens });
+        // Pin F: book() resolves { status: 'waitlisted' } for a full slot.
+        setBooked({ specialist, date: slot.date, time: slot.time, tokens, waitlisted: result && result.status === 'waitlisted' });
       })
       .catch((err) => {
         setReserving(null);
-        // Sprint 12 (contract v2.0): useBooking().book() rejects with a
-        // typed err.reason among 'no-tokens-left' | 'outside-window' |
-        // 'cap-reached' | 'full' — read defensively; a non-typed rejection
-        // falls back to the plain message, same graceful-degrade every
-        // other typed-error consumer in this codebase follows.
+        // err.reason: 'no-tokens-left' | 'outside-window' | 'cap-reached' |
+        // 'full' | 'membership-inactive' — read defensively; a non-typed
+        // rejection falls back to the plain message.
         setFailureReason(err && err.reason ? err.reason : null);
         setFailure(err && typeof err.message === 'string' && err.message ? err.message : null);
       });
@@ -348,6 +358,7 @@ export default function SpecialistBooking({
             setFailureReason(null);
           }}
           onReserve={() => confirmReserve(sheetSlot)}
+          onSeeMembership={() => navigate('/portal/membership')}
         />
       ) : null}
     </PhoneFrame>
@@ -503,7 +514,9 @@ function SlotList({ day, specialist, disabled, reserving, onSelect }) {
               name={specialist.sessionNoun}
               meta="45 min"
               variant={slot.open ? 'default' : 'full'}
-              onClick={slot.open && !disabled && !pending ? () => onSelect(slot, day.date) : undefined}
+              // Pin F: a full slot's tap still opens the detail sheet - its
+              // Reserve CTA becomes "Join waitlist" there (DetailSheet below).
+              onClick={!disabled && !pending ? () => onSelect(slot, day.date) : undefined}
               trailing={
                 <CapacityPill state={slot.open ? 'available' : 'full'}>
                   {spotLabel(slot)}
@@ -535,8 +548,10 @@ function DetailSheet({
   capReached,
   onClose,
   onReserve,
+  onSeeMembership,
 }) {
   const [time, meridiem] = (slot.time || '').split(' ');
+  const full = !slot.open;
   return (
     <div
       onClick={saving ? undefined : onClose}
@@ -574,19 +589,33 @@ function DetailSheet({
         <div style={{ marginTop: 10 }}>
           <SpendNote tokens={tokens} />
         </div>
+        {full ? (
+          <Body size={12} tone={color.secondary} style={{ marginTop: 12 }}>
+            This time is full — joining the waitlist reserves one token.
+          </Body>
+        ) : null}
         {capReached ? (
           <Body size={12} tone={color.secondary} style={{ marginTop: 12 }}>
             {capReachedCopy()}
           </Body>
         ) : null}
         {failure ? (
-          <Body size={12} tone={color.error} style={{ marginTop: 12 }}>
-            {reasonCopy(failureReason) ?? failure} Nothing was reserved — try again.
-          </Body>
+          <div style={{ marginTop: 12 }}>
+            <Body size={12} tone={color.error}>
+              {reasonCopy(failureReason) ?? failure} Nothing was reserved — try again.
+            </Body>
+            {failureReason === 'membership-inactive' ? (
+              <SeeMembershipLink onClick={onSeeMembership} style={{ marginTop: 6 }} />
+            ) : null}
+          </div>
         ) : null}
-        <Button height={54} loading={saving} disabled={disabled} style={{ marginTop: 18 }} onClick={onReserve}>
-          {saving ? 'Reserving' : 'Reserve'}
-        </Button>
+        {full ? (
+          <JoinWaitlistButton loading={saving} disabled={disabled} height={54} onClick={onReserve} style={{ marginTop: 18 }} />
+        ) : (
+          <Button height={54} loading={saving} disabled={disabled} style={{ marginTop: 18 }} onClick={onReserve}>
+            {saving ? 'Reserving' : 'Reserve'}
+          </Button>
+        )}
       </div>
     </div>
   );
@@ -688,34 +717,47 @@ function Confirmed({ bare, booked, onBack }) {
           gap: 18,
         }}
       >
-        <div
-          style={{
-            width: 72,
-            height: 72,
-            borderRadius: '50%',
-            background: tint.green,
-            border: `2px solid ${color.primary}`,
-            display: 'grid',
-            placeItems: 'center',
-          }}
-        >
-          <Tick size={26} color={color.primary} thickness={3} />
-        </div>
+        {booked.waitlisted ? (
+          // Pin F: book() resolved { status: 'waitlisted' } for a full slot -
+          // INTEGRATION: wire useWaitlist(booked.sessionId, { athleteId })
+          // .position - NEW hook, not in hooks/index.js yet.
+          <WaitlistedConfirmationBody
+            name={booked.specialist.sessionNoun}
+            when={`${longDayLabel(booked.date)} · ${booked.time}`}
+            position={null}
+          />
+        ) : (
+          <>
+            <div
+              style={{
+                width: 72,
+                height: 72,
+                borderRadius: '50%',
+                background: tint.green,
+                border: `2px solid ${color.primary}`,
+                display: 'grid',
+                placeItems: 'center',
+              }}
+            >
+              <Tick size={26} color={color.primary} thickness={3} />
+            </div>
 
-        <ScreenTitle size={26}>Reservation confirmed</ScreenTitle>
+            <ScreenTitle size={26}>Reservation confirmed</ScreenTitle>
 
-        <Card tone="green" large style={{ width: '100%', marginTop: 6 }}>
-          <div style={{ font: `700 19px ${font.head}`, color: color.text }}>
-            {booked.specialist.sessionNoun}
-          </div>
-          <div style={{ display: 'flex', gap: 26, marginTop: 14 }}>
-            <MetaCol label="When" value={`${longDayLabel(booked.date)} · ${booked.time}`} />
-            <MetaCol label="With" value={booked.specialist.name} />
-          </div>
-          <div style={{ borderTop: `1px solid ${color.border}`, marginTop: 14, paddingTop: 12 }}>
-            <Body size={12}>Spends {spendLabelFor(booked.tokens)}.</Body>
-          </div>
-        </Card>
+            <Card tone="green" large style={{ width: '100%', marginTop: 6 }}>
+              <div style={{ font: `700 19px ${font.head}`, color: color.text }}>
+                {booked.specialist.sessionNoun}
+              </div>
+              <div style={{ display: 'flex', gap: 26, marginTop: 14 }}>
+                <MetaCol label="When" value={`${longDayLabel(booked.date)} · ${booked.time}`} />
+                <MetaCol label="With" value={booked.specialist.name} />
+              </div>
+              <div style={{ borderTop: `1px solid ${color.border}`, marginTop: 14, paddingTop: 12 }}>
+                <Body size={12}>Spends {spendLabelFor(booked.tokens)}.</Body>
+              </div>
+            </Card>
+          </>
+        )}
       </div>
     </PhoneFrame>
   );

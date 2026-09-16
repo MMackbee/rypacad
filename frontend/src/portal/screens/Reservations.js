@@ -4,6 +4,8 @@ import { useHouseholdReservations } from '../hooks';
 import BottomTabBar from '../components/BottomTabBar';
 import Button from '../components/Button';
 import CancelSheet from '../components/CancelSheet';
+import { cancelReasonCopy } from '../components/BookingReasons';
+import { LeaveWaitlistButton, WaitlistPositionLine } from '../components/WaitlistAction';
 import MediaPlaceholder from '../components/MediaPlaceholder';
 import MemberSection from '../components/MemberSection';
 import PhoneFrame from '../components/PhoneFrame';
@@ -42,6 +44,18 @@ export default function Reservations({ variant = 'populated', bare = false, onBo
   const hookState = useHouseholdReservations();
   const [tab, setTab] = useState('upcoming');
   const [cancelTarget, setCancelTarget] = useState(null);
+  // Mirrors MySchedule's own leave-waitlist state — see its INTEGRATION note.
+  const [leavingId, setLeavingId] = useState(null);
+  const handleLeaveWaitlist = async (item) => {
+    setLeavingId(item.bookingId);
+    try {
+      // INTEGRATION: wire useWaitlist(item.sessionId, { athleteId:
+      // item.athleteId }).leave() — NEW hook, not in hooks/index.js yet.
+      await Promise.resolve();
+    } finally {
+      setLeavingId(null);
+    }
+  };
 
   const demo = variant !== 'populated' || Boolean(demoMembers);
   const loading = demoMembers ? false : demo ? variant === 'loading' : hookState.loading;
@@ -81,6 +95,8 @@ export default function Reservations({ variant = 'populated', bare = false, onBo
                 past={tab === 'past'}
                 onBook={onBook}
                 onCancelRequest={(item) => setCancelTarget({ ...item, athleteName: member.name })}
+                onLeaveWaitlist={(item) => handleLeaveWaitlist({ ...item, athleteId: member.athleteId })}
+                leavingId={leavingId}
               />
             </MemberSection>
           ))
@@ -99,7 +115,7 @@ export default function Reservations({ variant = 'populated', bare = false, onBo
   );
 }
 
-function MemberList({ items, past, onBook, onCancelRequest }) {
+function MemberList({ items, past, onBook, onCancelRequest, onLeaveWaitlist, leavingId }) {
   if (!items || items.length === 0) {
     return (
       <Body size={12} tone={color.textTertiary} style={{ padding: '4px 2px' }}>
@@ -137,6 +153,11 @@ function MemberList({ items, past, onBook, onCancelRequest }) {
     <div style={{ display: 'flex', flexDirection: 'column', gap: 9 }}>
       {items.map((item) => {
         const dayOf = !past && item.isToday;
+        // Sprint 13 (contract v2.1, pin F/G): a waitlisted or system-
+        // cancelled item can ride the same upcoming/past arrays (once
+        // routing's hook update lands) — see MySchedule.js's own comment.
+        const waitlisted = item.status === 'waitlisted';
+        const rowCancelled = item.status === 'cancelled';
         const metaParts = [item.dayLabel, `${item.durationMinutes} min`];
         if (item.instructor) metaParts.push(item.instructor);
         return (
@@ -144,20 +165,33 @@ function MemberList({ items, past, onBook, onCancelRequest }) {
             key={item.id ?? item.bookingId}
             time={item.time}
             meridiem={item.meridiem}
-            type={item.type}
+            type={rowCancelled ? 'cancelled' : item.type}
             name={item.name}
             meta={metaParts.join(' · ')}
-            variant={item.isToday ? 'live' : 'default'}
+            variant={rowCancelled ? 'cancelled' : item.isToday ? 'live' : 'default'}
+            footnote={rowCancelled ? cancelReasonCopy(item.cancelReason) : null}
             trailing={
-              // Sprint 12 (contract v2.0, pin B): a booking charges against
+              waitlisted ? (
+                <StatusBadge tone="yellow">Waitlisted</StatusBadge>
+              ) : // Sprint 12 (contract v2.0, pin B): a booking charges against
               // the period its session date falls in, not the period it was
               // made in - a future-period booking is a confirmed booking
               // whose period hasn't been reached yet, badged so rather than
               // hidden.
-              !past && item.nextPeriod ? <StatusBadge tone="neutral">Next period</StatusBadge> : null
+              !past && item.nextPeriod ? (
+                <StatusBadge tone="neutral">Next period</StatusBadge>
+              ) : null
             }
             action={
-              past ? null : dayOf ? (
+              past || rowCancelled ? null : waitlisted ? (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                  <WaitlistPositionLine position={item.waitlistPosition} />
+                  <LeaveWaitlistButton
+                    loading={leavingId === item.bookingId}
+                    onClick={() => onLeaveWaitlist(item)}
+                  />
+                </div>
+              ) : dayOf ? (
                 <Body size={11} tone={color.textTertiary}>
                   Same-day cancellations aren't available in the app — contact the front desk.
                 </Body>
