@@ -1,0 +1,22 @@
+{
+  "functions": [
+    {
+      "source": "functions",
+      "codebase": "default",
+      "ignore": ["node_modules", ".git", "firebase-debug.log", "*.local"]
+    }
+  ],
+  "firestore": {
+    "rules": "firestore.rules",
+    "indexes": "firestore.indexes.json"
+  },
+  "emulators": {
+    "firestore": { "port": 8082 },
+    "auth": { "port": 9098 },
+    "functions": { "port": 5001 },
+    "hub": { "port": 4401 },
+    "logging": { "port": 4502 },
+    "ui": { "enabled": false },
+    "singleProjectMode": true
+  }
+}
