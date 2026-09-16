@@ -7,15 +7,17 @@ import ContractCalendar from '../components/ContractCalendar';
 import SessionCard from '../components/SessionCard';
 import SkeletonCard, { SkeletonBar } from '../components/Skeleton';
 import { CapacityPill } from '../components/StatusBadge';
-import AllowancePools, { SpendNote } from '../components/AllowancePools';
+import AllowancePools, { GraceLine, SpendNote } from '../components/AllowancePools';
+import { LockedDayNotice, reasonCopy } from '../components/BookingReasons';
 import { Banner, Body, Card, ErrorNotice, ScreenTitle, SectionLabel, Tick } from '../components/Primitives';
-import { useBooking, useHouseholdAthletes, useMonthSessions } from '../hooks';
-// Pure calendar/season helpers, not response data — same pattern as poolFor
-// below: the data itself travels through the hook seam, but a formatting
-// helper that is already imported elsewhere in this file stays importable.
-import { poolFor } from '../data/packages';
+import { useBooking, useHouseholdAthletes, useMembership, useMonthSessions } from '../hooks';
+// Pure calendar/season helpers, not response data - the data itself travels
+// through the hook seam, but a formatting/derivation helper already imported
+// elsewhere in this file stays importable (data/calendar.js's own header
+// comment: "both data modes call it").
+import { windowDaysFor } from '../data/packages';
 import { capacityFor, dayLabel } from '../data/season';
-import { addDaysISO, monthLabel, parseTimeToMinutes, todayISO } from '../data/calendar';
+import { addDaysISO, monthLabel, openThrough, parseTimeToMinutes, todayISO } from '../data/calendar';
 import { buildMonthDayMaps, MonthNav, useMonthNavState } from '../components/MonthCalendar';
 
 /** Sessions arrive raw (numeric capacity/booked) from useMonthSessions;
@@ -80,9 +82,14 @@ function displayNameFor(session) {
  *   entirely for the athlete flow (no selector to default).
  * @param {(booked) => void} [onConfirmed]
  *   Fires once when the confirmation renders after a tap-through booking —
- *   `{ name, when, pool }`. This is the onboarding step's completion signal:
- *   the step advances on the real confirmation, never on "Next" alone.
+ *   `{ name, when }`. This is the onboarding step's completion signal: the
+ *   step advances on the real confirmation, never on "Next" alone.
  * @param {() => void} [onRetry]  Re-fetch after a load failure.
+ * @param {string} [demoSelectedDate]  HARNESS-ONLY — pre-selects a date
+ *   (yyyy-MM-dd) on mount, bypassing the normal tap-a-day flow. No real
+ *   caller ever passes it; it exists so the states gallery can deep-mount
+ *   the "past the booking window" locked state (pin D) without scripting
+ *   a month-navigation + tap sequence.
  */
 export default function BookSession({
   variant = 'open',
@@ -94,6 +101,7 @@ export default function BookSession({
   onBook,
   onConfirmed,
   onRetry,
+  demoSelectedDate,
 }) {
   // Kept for the existing booking behavior: book(), allowance, confirmation
   // copy — exactly the contract the screen already had (Sprint 5 pin).
@@ -128,7 +136,24 @@ export default function BookSession({
     ? householdAthletes.find((a) => a.id === selectedAthleteId) ?? null
     : null;
 
-  const [selectedDate, setSelectedDate] = useState(null);
+  // Sprint 12 (contract v2.0, pin B/D): useMembership() is the pinned source
+  // for a member's `package`/`tokens` shape - used here for the booking
+  // window (package.windowDays) and, for the athlete flow, the tokens
+  // banner/spend notes. The parent flow keeps reading tokens off
+  // useHouseholdAthletes() (renamed alongside every other allowance->tokens
+  // field in this sprint - see the sprint report) since it already carries
+  // per-child data scoped to the household; useMembership() here supplies
+  // only the window, matched by athleteId, so a stale membership fetch can
+  // never show the wrong child's balance.
+  const membershipState = useMembership();
+  const membershipMembers = membershipState.data?.members ?? [];
+  const selfMember = isParent
+    ? membershipMembers.find((m) => m.athleteId === selectedAthleteId) ?? null
+    : membershipMembers[0] ?? null;
+  const windowDays = windowDaysFor(selfMember?.package ?? null);
+  const openThroughDate = openThrough(new Date(), windowDays);
+
+  const [selectedDate, setSelectedDate] = useState(() => demoSelectedDate ?? null);
   // The slot the athlete just booked. Persistence is the API's job later; the
   // flow - tap a day, pick a session, land on the confirmation - has to work now.
   const [booked, setBooked] = useState(null);
@@ -150,7 +175,6 @@ export default function BookSession({
       onConfirmed({
         name: booked.name,
         when: `${booked.dayLabel} · ${booked.time}`,
-        pool: poolFor(booked.type),
       });
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -179,9 +203,15 @@ export default function BookSession({
       .catch((err) => {
         if (!live.current) return;
         setReserving(null);
+        // Sprint 12 (contract v2.0): useBooking().book() rejects with a
+        // typed err.reason ('no-tokens-left' | 'outside-window' |
+        // 'cap-reached' | 'full') alongside the plain-language err.message —
+        // the reason drives reasonCopy() below; the message is the
+        // fallback when a reason isn't one of the typed four.
         setFailure({
           sessionId: session.id,
-          reason: err && typeof err.message === 'string' && err.message ? err.message : null,
+          reason: err && err.reason ? err.reason : null,
+          message: err && typeof err.message === 'string' && err.message ? err.message : null,
         });
       });
   };
@@ -214,14 +244,17 @@ export default function BookSession({
       : undefined;
 
   // A parent's balance is the SELECTED child's, not the signed-in account's
-  // own (a parent has no allowance of their own - the athlete does). The
+  // own (a parent has no tokens of their own - the athlete does). The
   // schedule/slots themselves are athlete-agnostic (the same open blocks),
-  // so only the allowance source changes for the parent flow.
-  const allowance = isParent ? selectedAthlete?.allowance : data?.allowance;
+  // so only the tokens source changes for the parent flow. Sprint 12
+  // (contract v2.0): ONE pool now - `tokens`, not `allowance` (renamed
+  // alongside useMembership's own shape, per the sprint report).
+  const tokens = isParent ? selectedAthlete?.tokens : data?.tokens;
   const days = monthState.data?.days ?? [];
   const { dayStates, sessionsByDate } = buildMonthDayMaps(days);
   const monthHasSessions = days.some((d) => d.sessions.length > 0);
   const selectedSessions = selectedDate ? sessionsByDate[selectedDate] ?? [] : [];
+  const selectedDateLocked = Boolean(selectedDate) && selectedDate > openThroughDate;
 
   if (booked) {
     return (
@@ -230,7 +263,7 @@ export default function BookSession({
         confirmation={{
           name: booked.name,
           when: `${booked.dayLabel} · ${booked.time}`,
-          pool: poolFor(booked.type),
+          spendLabel: spendLabelFor(tokens),
           // Practice mode sends nothing to anyone - the seed guardian email
           // ("dana@email.com") read as a real notification in the athlete
           // walkthrough (QA 2026-09-08 #9).
@@ -285,7 +318,7 @@ export default function BookSession({
             ) : null}
 
             <div style={{ padding: '0 22px', display: 'flex', flexDirection: 'column', gap: 12 }}>
-              <AllowanceBanner allowance={allowance} />
+              <TokensBanner tokens={tokens} />
               {data?.seasonNote ? (
                 <Banner tone="green" title="Season">
                   {data.seasonNote}
@@ -332,21 +365,25 @@ export default function BookSession({
               </Card>
             </div>
 
-            {selectedDate ? (
+            {selectedDate && selectedDateLocked ? (
+              <div style={{ padding: '0 22px' }}>
+                <LockedDayNotice date={selectedDate} windowDays={windowDays} />
+              </div>
+            ) : selectedDate ? (
               <div style={{ padding: '0 22px', display: 'flex', flexDirection: 'column', gap: 10 }}>
                 {failure ? (
                   <Banner tone="red" title="Booking didn't go through">
-                    {failure.reason || 'The reservation could not be completed.'} Nothing was
-                    reserved — tap the session to try again.
+                    {reasonCopy(failure.reason) ?? failure.message ?? 'The reservation could not be completed.'} Nothing
+                    was reserved — tap the session to try again.
                   </Banner>
                 ) : null}
                 <DaySessionList
                   iso={selectedDate}
                   sessions={selectedSessions}
-                  allowance={allowance}
+                  tokens={tokens}
                   reserving={reserving}
-                  // A parent with nothing selected has no athlete to spend an
-                  // allowance for yet - sessions stay visible but inert.
+                  // A parent with nothing selected has no athlete to spend a
+                  // token for yet - sessions stay visible but inert.
                   disabled={isParent && !selectedAthleteId}
                   onSelect={confirmBooking}
                 />
@@ -362,11 +399,12 @@ export default function BookSession({
 
 
 /**
- * The tapped day's sessions — time, type chip, spots left, which allowance
- * pool it spends. Tapping a bookable one confirms it; a full or pool-spent
- * one stays inert rather than failing at a later submit.
+ * The tapped day's sessions — time, type chip, spots left, and what the
+ * booking would spend (Sprint 12, contract v2.0: one token pool, not a
+ * per-session pool). Tapping a bookable one confirms it; a full or
+ * tokens-spent one stays inert rather than failing at a later submit.
  */
-function DaySessionList({ iso, sessions, allowance, reserving, disabled, onSelect }) {
+function DaySessionList({ iso, sessions, tokens, reserving, disabled, onSelect }) {
   return (
     <>
       <div style={{ font: `600 13px ${font.body}`, color: color.text, padding: '2px 0 2px' }}>
@@ -379,14 +417,11 @@ function DaySessionList({ iso, sessions, allowance, reserving, disabled, onSelec
           const [time, meridiem] = session.time.split(' ');
           const cap = formatCapacity(session);
           const isFull = cap.state === 'full';
-          const pool = poolFor(session.type);
-          // Two independent reasons a session cannot be booked, and they need
-          // different copy: the block itself is full, or the athlete has
-          // nothing left in the pool this block would spend.
-          // Optional-chained (surface scan 2026-09-11, blocker D1): the
-          // hooks now filter specialist types out of this flow, but a pool
-          // this map doesn't know must degrade to "not spent", never crash.
-          const poolSpent = allowance ? allowance[pool]?.left === 0 : false;
+          // Two independent reasons a session cannot be booked, and they
+          // need different copy: the block itself is full, or the athlete
+          // has no tokens left (and no grace token standing in) to spend.
+          const hasGrace = (tokens?.grace?.length ?? 0) > 0;
+          const tokensSpent = tokens ? !tokens.unlimited && tokens.left === 0 && !hasGrace : false;
           const pending = reserving === session.id;
 
           return (
@@ -396,11 +431,11 @@ function DaySessionList({ iso, sessions, allowance, reserving, disabled, onSelec
               meridiem={meridiem}
               type={session.type}
               name={displayNameFor(session)}
-              variant={isFull || poolSpent ? 'full' : 'default'}
+              variant={isFull || tokensSpent ? 'full' : 'default'}
               gutter={54}
               ruleHeight={36}
-              onClick={isFull || poolSpent || reserving || disabled ? undefined : () => onSelect(session)}
-              spendNote={<SpendNote pool={pool} allowance={allowance} />}
+              onClick={isFull || tokensSpent || reserving || disabled ? undefined : () => onSelect(session)}
+              spendNote={<SpendNote tokens={tokens} />}
               action={
                 pending ? (
                   <Button loading height={46} style={{ font: `600 14px ${font.body}` }}>
@@ -409,13 +444,13 @@ function DaySessionList({ iso, sessions, allowance, reserving, disabled, onSelec
                 ) : null
               }
               trailing={
-                <CapacityPill state={isFull ? 'full' : poolSpent ? 'capped' : cap.state}>
-                  {isFull ? 'Full' : poolSpent ? 'No entries' : cap.label}
+                <CapacityPill state={isFull ? 'full' : tokensSpent ? 'capped' : cap.state}>
+                  {isFull ? 'Full' : tokensSpent ? 'No tokens' : cap.label}
                 </CapacityPill>
               }
               footnote={
-                poolSpent && !isFull
-                  ? `Your ${pool === 'tournaments' ? 'tournament entries' : 'training sessions'} reset ${allowance.resetsOn}. This block has space — it is your allowance that is spent, not the session.`
+                tokensSpent && !isFull
+                  ? 'This block has space — it is your tokens that are spent, not the session.'
                   : null
               }
             />
@@ -424,6 +459,23 @@ function DaySessionList({ iso, sessions, allowance, reserving, disabled, onSelec
       )}
     </>
   );
+}
+
+/** "elite" | "grace" | "token" — which the next booking would spend, charge
+ * order per contract §6 (Elite first, then a grace token, then a period
+ * token). Used both for the pre-tap spend note and the Confirmed screen. */
+function chargeKindFor(tokens) {
+  if (!tokens) return 'token';
+  if (tokens.unlimited) return 'elite';
+  if ((tokens.grace?.length ?? 0) > 0) return 'grace';
+  return 'token';
+}
+
+function spendLabelFor(tokens) {
+  const kind = chargeKindFor(tokens);
+  if (kind === 'elite') return 'Included with Elite';
+  if (kind === 'grace') return 'a bonus token';
+  return '1 token';
 }
 
 /**
@@ -480,45 +532,29 @@ function AthleteSelector({ athletes, loading, selectedId, onSelect }) {
 /**
  * Persistent, above the calendar, never a dismissible toast.
  *
- * A limited package hits a ceiling on every visit, so the balance has to be
- * standing context. Surfacing it only at submit turns a known constraint into a
- * failed action, which is why this is a banner and not an error.
- *
- * It always shows both pools. When one is spent the banner says which, and says
- * plainly that the other is unaffected — the single most likely misreading here
- * is a parent seeing "limit reached" and assuming all booking has stopped.
+ * Sprint 12 (contract v2.0): ONE token pool now, so this collapses from the
+ * two-pool banner to a single balance. A limited package hits a ceiling on
+ * every visit, so the balance has to be standing context — surfacing it only
+ * at submit turns a known constraint into a failed action, which is why this
+ * is a banner and not an error. Elite shows no number (pin L).
  */
-function AllowanceBanner({ allowance }) {
-  if (!allowance) return null;
+function TokensBanner({ tokens }) {
+  if (!tokens) return null;
+  if (tokens.unlimited) {
+    return (
+      <Banner tone="green" title="Elite">
+        Unlimited · every session type · no countdown.
+      </Banner>
+    );
+  }
 
-  const spent = ['training', 'tournaments'].filter((k) => allowance[k].left === 0);
-  const tone = spent.length ? 'red' : 'neutral';
-
-  const title = spent.length
-    ? spent.length === 2
-      ? 'No sessions left this cycle'
-      : spent[0] === 'tournaments'
-      ? 'No tournament entries left'
-      : 'No training sessions left'
-    : 'Your allowance this cycle';
+  const hasGrace = (tokens.grace?.length ?? 0) > 0;
+  const spent = tokens.left === 0 && !hasGrace;
 
   return (
-    <Banner tone={tone} title={title}>
-      <AllowancePools allowance={allowance} style={{ margin: '4px 0 10px' }} />
-      {spent.length === 1 ? (
-        <>
-          Your {spent[0] === 'tournaments' ? 'tournament entries' : 'training sessions'} reset{' '}
-          {allowance.resetsOn}.{' '}
-          {spent[0] === 'tournaments'
-            ? 'Training blocks are unaffected — the two allowances do not substitute for each other.'
-            : 'Tournament entries are unaffected — the two allowances do not substitute for each other.'}
-        </>
-      ) : (
-        <>
-          Both reset {allowance.resetsOn}. Rescheduling a missed block does not count against
-          either allowance.
-        </>
-      )}
+    <Banner tone={spent ? 'red' : 'neutral'} title={spent ? 'No tokens left this period' : 'Your tokens this period'}>
+      <AllowancePools tokens={tokens} style={{ margin: '4px 0 6px' }} />
+      {hasGrace ? <GraceLine tokens={tokens} /> : null}
     </Banner>
   );
 }
@@ -665,10 +701,7 @@ function Confirmed({ bare, confirmation, onRepeat, onBack }) {
           <div style={{ font: `700 19px ${font.head}`, color: color.text }}>{c.name}</div>
           <div style={{ display: 'flex', gap: 26, marginTop: 14 }}>
             <MetaCol label="When" value={c.when} />
-            <MetaCol
-              label="Spends"
-              value={c.pool === 'tournaments' ? '1 tournament entry' : '1 training session'}
-            />
+            <MetaCol label="Spends" value={c.spendLabel ?? '1 token'} />
           </div>
           <div
             style={{
@@ -687,8 +720,8 @@ function Confirmed({ bare, confirmation, onRepeat, onBack }) {
             {repeat === null ? (
               <>
                 <Body size={12} style={{ marginBottom: 12 }}>
-                  Hold this same slot every week. Each week spends that month's allowance —
-                  months at their limit are skipped.
+                  Hold this same slot every week. Each week spends a token from that week's
+                  period — periods with no tokens left are skipped.
                 </Body>
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
                   {repeatPresets(c.date).map((p) => (
@@ -753,7 +786,7 @@ function RepeatSummary({ result }) {
       {result.skipped.length ? (
         <Body size={12} style={{ marginTop: 8 }}>
           Skipped {result.skipped.length}: {reasonText}. Skipped weeks stay open to book
-          individually once an allowance resets.
+          individually once that period's tokens reset.
         </Body>
       ) : (
         <Body size={12} style={{ marginTop: 8 }}>
