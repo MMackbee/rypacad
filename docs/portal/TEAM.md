@@ -2033,3 +2033,88 @@ Worktrees: wt-db / wt-routing / wt-frontend / wt-functions on
 `agent/<lane>/sprint13-part2` off `portal/r3` at this pin's commit; PM
 merges db → routing → frontend → functions, integrates, browser-passes on
 :3001 (client) and replays the functions lane's event sequence (server).
+
+## Sprint 13 integration notes (Part 2 - PM merge, replay + live pass, 2026-09-16)
+
+Four lanes merged clean (db -> functions -> routing -> frontend; functions
+overlaps no other lane, so it landed as soon as its replay passed). PM
+commits alongside: the functions replay harness kept as committed dev
+tooling (`functions/test/verify-lane.js` + `firebase.functions-lane.json`,
+excluded from the deploy lint and bundle), DECISION-GAPS.md updated.
+
+Reconciled at integration:
+- Waitlist rule + promotion trigger treat an absent `sessions.status` as
+  'scheduled' (generator-written sessions carry none; synced ones do) -
+  relayed mid-sprint to both lanes from the db lane's finding.
+- Promoted bookings carry `createdBy: 'system'`; no bookings rule keys off
+  `createdBy == request.auth.uid` (verified by the routing lane).
+- MySchedule / Reservations "Leave waitlist" goes through
+  `hooks/waitlist.js#leaveWaitlist`; join and leave both bump `bookings`
+  so the lists refresh through their existing seam. The Leave button
+  compared `leavingId === item.bookingId`, and a waitlisted row has no
+  bookingId while the idle state is null - it booted stuck in "Leaving…";
+  now keyed off a non-null row key.
+- The waitlisted booking result carries `position` (queue length once the
+  entry is in) for the confirmation screens.
+- `assertPeriodTokensLeft` reads `tokenPeriods/{athleteId}_{periodKey}` and
+  honours an issued grant over the package default (the routing lane
+  flagged this as its own follow-up).
+- `useIssueTokens` wired into the editor; `SessionAttendanceRoute` resolves
+  and passes the signed-in role so ops/owner reach "Cancel session";
+  `tokens.grace[]` carries `sourceSessionId` so the grace line reads "the
+  Wednesday, Nov 11 block was cancelled".
+- Waitlist READ is academy-wide (`signedIn()`), not family-scoped: the
+  pinned position needs every entry on the session and a family-scoped
+  rule cannot make that list query provable. Entries hold opaque ids only.
+  PM sign-off recorded here.
+
+Server replay (PM, merged checkout, isolated emulator 8082/5001): ALL
+CHECKS PASSED - invoice.paid issues per athlete, sets the anchor and
+active; payment_failed freezes (bookings kept); final failure lapses,
+revokes future confirmed bookings with reason 'lapsed', releases seats and
+promotion fires grace-holders first; reinstatement re-issues and leaves
+revoked bookings cancelled; a subscription downgrade trims future-period
+bookings newest-first with reason 'downgrade'; a duplicate event id is a
+no-op; an unmatched customer is recorded and skipped; a forged signature
+is 400 with nothing written.
+
+Client pass (parent-dana, owner) on the Part 2 seed: Membership shows no
+banner for the active household, Jordan's grant from the issued period
+doc, the grace line naming the cancelled block; Reservations shows Nico
+"#1 on the waitlist", the system-cancelled reason line, and Leave waitlist
+deletes the entry; the owner's editor issues a next-period grant (doc
+verified, then removed) and saves Stripe ids (verified, then reset); the
+owner's Sessions -> attendance -> Cancel session flow cancels the session
+and its booking (reason 'session-cancelled', cancelledBy the owner) and
+mints a 30-day grace token naming the session; Admin's Membership card
+reads 1 active / 1 past due / 0 lapsed. Console clean throughout.
+
+Not exercised live: Join waitlist through the UI (every seeded full
+session sits outside today's booking window; the routing lane verified
+the join path by rules test, the frontend by harness), the past-due
+booking block in the UI (routing verified it live in its own pass), the
+promotion trigger against the shared emulator (verified in the isolated
+replay only - the shared instance runs no functions).
+
+Cosmetic follow-ups: the owner's Sessions screen lists today's specialist
+sessions twice (the pinned "Today" section and the day list both include
+today - Sprint 10 quick win, pre-existing); cancelSession leaves
+`sessions.booked` at its pre-cancel count on purpose (the session is
+gone), which the DATA-MODEL should say explicitly.
+
+Deploy (owner-gated, in this order): push portal/r3:main and let Railway
+build; deploy firestore:rules and firestore:indexes (the four new
+collections, the membership freeze, the graceTokens index); THEN
+`firebase deploy --only functions` (lint passes; STRIPE_WEBHOOK_SECRET
+and optional COURIER_/TWILIO_ keys must be set in the functions
+environment first); THEN in the Stripe dashboard create the endpoint
+https://us-central1-rypacad.cloudfunctions.net/stripeWebhook for
+invoice.paid, invoice.payment_failed, customer.subscription.updated,
+customer.subscription.deleted and copy its signing secret into the
+functions environment; set `households.stripeCustomerId` per household
+from the editor and `packages.stripePriceId` per catalogue doc. Until
+customer ids are set every event records outcome 'unmatched' and changes
+nothing - a safe rollout. The daily scripts: `node scripts/export-
+memberships.mjs --prod` (read-only; STRIPE_SECRET_KEY for live status)
+and `node scripts/sweep-waitlist.mjs --prod --yes` (writes; dry-run
+without --yes).
