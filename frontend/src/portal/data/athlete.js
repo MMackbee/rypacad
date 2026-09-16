@@ -5,13 +5,15 @@
  * Read through the hooks in ../hooks, never imported by a screen directly.
  */
 
-import { ALLOWANCE, TODAY } from './seed';
+import { TOKENS, TODAY } from './seed';
 
 export const ATHLETE = {
   name: 'Jordan',
   fullName: 'Jordan Whitfield',
   date: TODAY,
-  allowance: ALLOWANCE,
+  // `allowance` -> `tokens` (contract v2.0, Sprint 12): the two-pool shape
+  // is retired in favour of the one derived token position.
+  tokens: TOKENS,
 };
 
 /* ---------------------------------------------------------------- 03 ----- */
