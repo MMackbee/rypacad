@@ -167,8 +167,10 @@ service cloud.firestore {
         || (me().role == 'parent' && resource.data.householdId == me().householdId)
       );
 
-      // Sprint 11 (contract v1.9, B "Package assignment"): ops/owner assign
-      // an athlete's golf package and/or fitness package — a SECOND
+      // Sprint 11 (contract v1.9, B "Package assignment"); NARROWED Sprint 12
+      // (contract v2.0, pin A "one catalogue") — `fitnessPackageId` is
+      // retired along with the fitness catalogue it pointed into, so this
+      // branch drops back to the single field it started as. Still a SECOND
       // field-limited update branch beside contractMinutesUpdateOk just
       // above, same one-purpose-per-branch shape this file already uses for
       // sessions (bookedDiffOk / coachNoteUpdateOk) and bookings
@@ -178,26 +180,13 @@ service cloud.firestore {
       // condition that could accidentally let either caller touch the
       // other's field.
       //
-      // fitnessPackageId is read null-safely off `after` (the value being
-      // WRITTEN, i.e. the resulting document) via .get('fitnessPackageId',
-      // null) — contract v1.9 pin A's own null-safe discipline
-      // (`resource.data.get('fitnessPackageId', null)` for the CURRENT
-      // doc), applied here to the document this write PRODUCES: an
-      // ops/owner write that only ever touches packageId (fitnessPackageId
-      // left alone) resolves `after` to whatever the field already was —
-      // absent entirely on every pre-existing athlete doc, since
-      // provision-family.mjs never writes it (contract v1.9 pin A). Plain
-      // dot access (`after.fitnessPackageId`) errors on a missing key and
-      // denies the whole write; `.get(..., null)` treats absence as null,
-      // exactly the "ABSENT == null everywhere" rule the pin states.
-      // packageId, by contrast, is not null-safe-read here: every athlete
-      // doc has always carried it as a required string (contract v1, the
-      // athletes field table) and this branch does not change that.
+      // packageId is not null-safe-read here: every athlete doc has always
+      // carried it as a required string (contract v1, the athletes field
+      // table) and this branch does not change that.
       function packageAssignmentUpdateOk() {
         let after = request.resource.data;
-        return after.diff(resource.data).affectedKeys().hasOnly(['packageId', 'fitnessPackageId', 'updatedAt'])
-          && after.packageId is string
-          && (after.get('fitnessPackageId', null) is string || after.get('fitnessPackageId', null) == null);
+        return after.diff(resource.data).affectedKeys().hasOnly(['packageId', 'updatedAt'])
+          && after.packageId is string;
       }
       allow update: if signedIn() && me().role in ['ops', 'owner'] && packageAssignmentUpdateOk();
 
@@ -384,50 +373,66 @@ service cloud.firestore {
     // ---- bookings ------------------------------------------------------
     // Matrix: "bookings creatable by the athlete's own user or their
     // household parent; readable by that household + assigned coach + staff".
-    // A booking write records which pool it spends (two-pool allowance is
-    // routing truth), and allowance usage is derived by querying bookings —
-    // so the shape is locked to the contract and the pool must match the
-    // session's type: a tournament block can never be recorded as spending
-    // the training pool.
+    // Contract v2.0 (Sprint 12): ONE token pool, derived — token usage is
+    // derived by querying bookings for a periodKey, never stored, so the
+    // shape is locked to the contract and a booking's `periodKey` must
+    // agree with its session's real date (bookingMatchesSession, below).
     match /bookings/{bookingId} {
 
-      // Contract shape, exactly: athleteId, sessionId, date, type, pool,
+      // Contract shape, exactly: athleteId, sessionId, date, type, periodKey,
       // status, householdId, createdBy, createdAt — nothing else.
       //
-      // Sprint 9 (contract v1.7): 'phil' and 'mental' join 'training' and
-      // 'tournament' as bookable types — a specialist 1-on-1 IS a session
-      // (capacity 1, its own pool) and rides this exact same create path.
-      // The pool pin is now three-way: tournament -> 'tournaments',
-      // phil/mental -> 'specialist' (never training or tournaments — the
-      // two-pool allowance stays non-substitutable, now with a third pool
-      // that is non-substitutable with either), everything else -> 'training'.
+      // Sprint 9 (contract v1.7) added 'phil'/'mental' as bookable types.
+      // Sprint 12 (contract v2.0, pin B) retires `pool` — a token is spent
+      // by any non-cancelled booking of any session type, so there is no
+      // per-type pool field left to shape-check — and adds `periodKey`: a
+      // WRITE-ONCE 'YYYY-MM-DD' string naming the billing period the
+      // booking's session date falls in (data/packages.js#periodFor).
+      // Correctness (does this periodKey actually match the household's
+      // anchor day and the session's date?) is CLIENT-DERIVED, the same
+      // accepted-gap class as the token cap check itself — the rule below
+      // only proves the SHAPE (a real date-like string), not the math.
       function bookingShapeOk() {
         let d = request.resource.data;
-        return d.keys().hasAll(['athleteId', 'sessionId', 'date', 'type', 'pool',
+        return d.keys().hasAll(['athleteId', 'sessionId', 'date', 'type', 'periodKey',
                                 'status', 'householdId', 'createdBy', 'createdAt'])
-          && d.keys().hasOnly(['athleteId', 'sessionId', 'date', 'type', 'pool',
+          && d.keys().hasOnly(['athleteId', 'sessionId', 'date', 'type', 'periodKey',
                                'status', 'householdId', 'createdBy', 'createdAt'])
           && d.athleteId is string
           && d.sessionId is string
           && d.date is string
           && d.type in ['training', 'tournament', 'phil', 'mental']
-          && d.pool == (
-               d.type == 'tournament' ? 'tournaments'
-               : (d.type == 'phil' || d.type == 'mental') ? 'specialist'
-               : 'training'
-             )
+          && d.periodKey is string
+          && d.periodKey.matches('[0-9]{4}-[0-9]{2}-[0-9]{2}')
           && d.status == 'confirmed'
           && d.createdBy == request.auth.uid
           && d.createdAt == request.time;
       }
 
       // The booking must reference a real session and agree with it on date
-      // and type — the pool spent is anchored to the schedule, not to what
-      // the client claims.
+      // and type — what a booking spends is anchored to the schedule, not to
+      // what the client claims.
       function bookingMatchesSession() {
         let s = get(/databases/$(database)/documents/sessions/$(request.resource.data.sessionId)).data;
         return s.date == request.resource.data.date
           && s.type == request.resource.data.type;
+      }
+
+      // Hard OUTER bound on how far out a booking may reach (contract v2.0,
+      // pin D) — a genuine server-side gate, not the client's own window
+      // display: no package this catalogue can ever carry books further
+      // than Elite's 45-day window, so 46 days is a fixed ceiling nothing
+      // legitimate ever needs to cross, independent of any per-package
+      // windowDays math (which stays client-derived, same accepted-gap
+      // class as the token cap). Expressible with no substring() — `split()`
+      // on the date string (already used elsewhere in this file, e.g.
+      // nullReadOk's bookingId.split('_')) plus the rules language's
+      // `int()` conversion and `timestamp.date()`/`duration.value()`
+      // constructors, verified against the emulator (routing report).
+      function withinOuterBookingBound() {
+        let parts = request.resource.data.date.split('-');
+        let sessionDate = timestamp.date(int(parts[0]), int(parts[1]), int(parts[2]));
+        return sessionDate <= request.time + duration.value(46, 'd');
       }
 
       // createdBy == request.auth.uid (in shape), caller is the athlete's own
@@ -442,6 +447,7 @@ service cloud.firestore {
       allow create: if signedIn()
         && bookingShapeOk()
         && bookingMatchesSession()
+        && withinOuterBookingBound()
         && bookingId
              == request.resource.data.athleteId + '_' + request.resource.data.sessionId
         && request.resource.data.householdId
@@ -682,18 +688,47 @@ service cloud.firestore {
     // never card data. Parents may edit their own contact fields but not the
     // Stripe linkage — those ids are written by the billing integration and
     // a parent-editable subscription pointer is a billing integrity hole.
+    //
+    // Sprint 12 (contract v2.0, pin B): an ATHLETE account now needs to read
+    // its OWN household too — periodFor()'s anchor day lives there, and
+    // every token-position derivation (schedule, booking, dashboard) reads
+    // it for an athlete-linked caller exactly like a parent one. Resolved
+    // via athleteData(me().athleteId).householdId rather than trusting
+    // me().householdId directly — the users field table documents
+    // householdId as parent-only, so an athlete doc's own copy (if any) is
+    // not a contract guarantee to read from here.
     match /households/{householdId} {
       allow read: if signedIn() && (
         (me().role == 'parent' && me().householdId == householdId)
+        || (me().role == 'athlete' && athleteData(me().athleteId).householdId == householdId)
         || me().role in ['ops', 'owner']
       );
       allow create, delete: if signedIn() && me().role in ['ops', 'owner'];
+
+      // Sprint 12 (contract v2.0, pin B "Periods"): the household's billing-
+      // period anchor day, ops/owner-settable in the Membership editor.
+      // Value-validated (1-28, the pin's own clamp range — matches
+      // data/packages.js#normalizeAnchorDay) and field-limited — the ONE
+      // path `periodAnchorDay` may change through. The broad ops/owner
+      // branch just below explicitly excludes this field (hasAny check) so
+      // a stray out-of-range value can never slip in through the wider
+      // grant instead.
+      function householdPeriodUpdateOk() {
+        let after = request.resource.data;
+        return after.diff(resource.data).affectedKeys().hasOnly(['periodAnchorDay', 'updatedAt'])
+          && after.periodAnchorDay is int
+          && after.periodAnchorDay >= 1
+          && after.periodAnchorDay <= 28;
+      }
+      allow update: if signedIn() && me().role in ['ops', 'owner'] && householdPeriodUpdateOk();
+
       allow update: if signedIn() && (
-        me().role in ['ops', 'owner']
+        (me().role in ['ops', 'owner']
+          && !request.resource.data.diff(resource.data).affectedKeys().hasAny(['periodAnchorDay']))
         || (me().role == 'parent'
             && me().householdId == householdId
             && !request.resource.data.diff(resource.data).affectedKeys()
-                 .hasAny(['stripeCustomerId', 'stripeSubscriptionId']))
+                 .hasAny(['stripeCustomerId', 'stripeSubscriptionId', 'periodAnchorDay']))
       );
     }
 
