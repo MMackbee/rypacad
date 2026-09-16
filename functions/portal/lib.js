@@ -239,21 +239,41 @@ function membershipAllowsBooking(household) {
 }
 
 /**
- * Resolve a Stripe customer to a household (pin H). An unmatched event is
- * recorded and skipped, never thrown — hence null rather than an error.
+ * The household-by-Stripe-customer query (pin H). Exposed separately so the
+ * webhook can run it inside a transaction (`tx.get(query)`) and the
+ * follow-up phases can run it directly.
+ * @param {!Object} db An admin `Firestore`.
+ * @param {string} customerId `event.data.object.customer`.
+ * @return {!Object} A Firestore `Query` returning at most one household.
+ */
+function householdByCustomerQuery(db, customerId) {
+  return db.collection('households')
+      .where('stripeCustomerId', '==', customerId)
+      .limit(1);
+}
+
+/**
+ * The one household a Stripe customer maps to, or null. An unmatched event
+ * is recorded and skipped, never thrown — hence null rather than an error.
  * @param {!Object} db An admin `Firestore`.
  * @param {?string} customerId `event.data.object.customer`.
  * @return {!Promise<?{id: string, data: !Object}>} The household or null.
  */
 async function householdByCustomer(db, customerId) {
   if (!customerId) return null;
-  const snap = await db.collection('households')
-      .where('stripeCustomerId', '==', customerId)
-      .limit(1)
-      .get();
-  if (snap.empty) return null;
+  return householdFromSnap(
+      await householdByCustomerQuery(db, customerId).get());
+}
+
+/**
+ * Unwrap a household lookup snapshot.
+ * @param {!Object} snap A `QuerySnapshot` from `householdByCustomerQuery`.
+ * @return {?{id: string, data: !Object, ref: !Object}} The household or null.
+ */
+function householdFromSnap(snap) {
+  if (!snap || snap.empty) return null;
   const doc = snap.docs[0];
-  return {id: doc.id, data: doc.data() || {}};
+  return {id: doc.id, data: doc.data() || {}, ref: doc.ref};
 }
 
 /** @param {string} a Athlete id.
@@ -314,6 +334,8 @@ module.exports = {
   chicagoDate,
   chicagoDateFromUnix,
   householdByCustomer,
+  householdByCustomerQuery,
+  householdFromSnap,
   isUnlimited,
   membershipAllowsBooking,
   nextPeriod,
