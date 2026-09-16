@@ -20,6 +20,8 @@ const admin = require('firebase-admin');
 // survive the Functions emulator's admin stub; the modular export does.
 const {FieldValue} = require('firebase-admin/firestore');
 const lib = require('./lib');
+const notices = require('./notices');
+const notify = require('./notify');
 
 /** Firestore's per-commit write budget, with headroom. @const {number} */
 const BATCH_LIMIT = 400;
@@ -101,6 +103,33 @@ async function deleteAll(query) {
 }
 
 /**
+ * Tell the household its upcoming bookings were released — ONE notice per
+ * household per Stripe event (contract v2.2), not one per booking: this
+ * module already knows the count after its batch, and a family that loses
+ * six sessions to one failed card gets one message about it. Billing
+ * category, parents only. Never throws.
+ * @param {!Object} hh The resolved household `{id, data, ref}`.
+ * @param {?string} eventId The Stripe `event.id` driving this revoke; it
+ *     makes the ledger id retry-stable.
+ * @param {number} count How many bookings were cancelled.
+ * @param {string} reason 'lapsed' or 'downgrade'.
+ * @return {!Promise<void>} Resolves when the notice has been recorded.
+ */
+async function notifyRevoked(hh, eventId, count, reason) {
+  if (count <= 0) return;
+  const copy = notices.bookingRevoked({count, reason});
+  await notify.sendNotice({
+    kind: 'booking-revoked',
+    category: 'billing',
+    householdId: hh.id,
+    athleteId: null,
+    subjectKey: `${hh.id}_${eventId || 'no-event'}`,
+    title: copy.title,
+    body: copy.body,
+  });
+}
+
+/**
  * The lapse follow-up (pin H): every household booking with `date > today`
  * and status 'confirmed' is cancelled with reason 'lapsed', its seat is
  * released, and every waitlist entry the household holds is deleted. No
@@ -111,9 +140,11 @@ async function deleteAll(query) {
  * index 3); `status` is filtered in memory, the same discipline the rest of
  * the schema uses.
  * @param {!Object} hh The resolved household `{id, data, ref}`.
+ * @param {?string=} eventId The Stripe `event.id`, for the notice's ledger
+ *     id.
  * @return {!Promise<!Object>} A summary for the event ledger.
  */
-async function revokeHousehold(hh) {
+async function revokeHousehold(hh, eventId) {
   const today = lib.todayISO();
   const snap = await db().collection('bookings')
       .where('householdId', '==', hh.id)
@@ -124,6 +155,7 @@ async function revokeHousehold(hh) {
   const cancelled = await cancelBookings(confirmed, 'lapsed');
   const waitlistDeleted = await deleteAll(db().collection('waitlist')
       .where('householdId', '==', hh.id));
+  await notifyRevoked(hh, eventId, cancelled.cancelled, 'lapsed');
   return Object.assign({today, waitlistDeleted}, cancelled);
 }
 
@@ -160,9 +192,11 @@ async function futurePeriodBookings(athleteId, currentEnd, anchorDay) {
  * @param {!Object} hh The resolved household `{id, data, ref}`.
  * @param {{tokens: ?number, athleteIds: !Array<string>}} detail The plan the
  *     transaction produced.
+ * @param {?string=} eventId The Stripe `event.id`, for the notice's ledger
+ *     id.
  * @return {!Promise<!Object>} A summary for the event ledger.
  */
-async function trimDowngrade(hh, detail) {
+async function trimDowngrade(hh, detail, eventId) {
   // An upgrade to Elite (tokens: null) can never have excess.
   if (detail.tokens === null || detail.tokens === undefined) {
     return {cancelled: 0, sessions: 0, periods: 0, grant: null};
@@ -194,6 +228,7 @@ async function trimDowngrade(hh, detail) {
     }
   }
   const cancelled = await cancelBookings(excess, 'downgrade');
+  await notifyRevoked(hh, eventId, cancelled.cancelled, 'downgrade');
   return Object.assign({periods, grant: detail.tokens}, cancelled);
 }
 
@@ -201,6 +236,7 @@ module.exports = {
   BATCH_LIMIT,
   cancelBookings,
   deleteAll,
+  notifyRevoked,
   revokeHousehold,
   trimDowngrade,
 };
