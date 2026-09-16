@@ -22,11 +22,29 @@
 
 const functions = require('firebase-functions/v1');
 const admin = require('firebase-admin');
+// See the note in portal/stripe.js: admin.firestore.FieldValue does not
+// survive the Functions emulator's admin stub; the modular export does.
+const {FieldValue} = require('firebase-admin/firestore');
 const lib = require('./lib');
 const notify = require('./notify');
 
 /** A safety stop; a session's capacity is 15, so this can never bind. */
 const MAX_PROMOTIONS_PER_EVENT = 25;
+
+/**
+ * A session's effective status. Sessions written by the season generator
+ * carry NO `status` field at all - only calendar-synced production sessions
+ * and the hand-seeded specialist slots do - so ABSENT MEANS SCHEDULED (db
+ * lane reconciliation, Sprint 13). Gating on a bare `!== 'scheduled'` would
+ * silently refuse to promote into every generated block, which is most of
+ * the schedule.
+ * @param {?Object} session A `sessions/{id}` document body.
+ * @return {string} 'scheduled' or 'cancelled'.
+ */
+function sessionStatus(session) {
+  const s = session && session.status;
+  return s === undefined || s === null ? 'scheduled' : s;
+}
 
 /**
  * @return {!Object} The admin Firestore, resolved lazily.
@@ -185,7 +203,7 @@ function promotedBooking(cand, sessionId, session) {
     chargedFrom: cand.charge.chargedFrom,
     createdBy: 'system',
     promotedFromWaitlist: true,
-    createdAt: admin.firestore.FieldValue.serverTimestamp(),
+    createdAt: FieldValue.serverTimestamp(),
   };
 }
 
@@ -209,7 +227,7 @@ async function promoteOneSeat(sessionId, today) {
       return Object.assign({}, none, {reason: 'session-missing'});
     }
     const session = sessionSnap.data() || {};
-    if (session.status !== 'scheduled') {
+    if (sessionStatus(session) !== 'scheduled') {
       return Object.assign({}, none, {reason: 'session-not-scheduled'});
     }
     const booked = Number(session.booked || 0);
@@ -345,7 +363,7 @@ const onSessionBookedDecrease = functions.firestore
       const capacity = Number(after.capacity || 0);
 
       if (!(afterBooked < beforeBooked)) return null;
-      if (after.status !== 'scheduled') return null;
+      if (sessionStatus(after) !== 'scheduled') return null;
       if (!(afterBooked < capacity)) return null;
 
       try {
@@ -365,4 +383,5 @@ module.exports = {
   onSessionBookedDecrease,
   orderCandidates,
   promoteOneSeat,
+  sessionStatus,
 };

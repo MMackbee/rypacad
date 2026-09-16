@@ -37,6 +37,7 @@
 
 const functions = require('firebase-functions/v1');
 const admin = require('firebase-admin');
+const {FieldValue} = require('firebase-admin/firestore');
 const twilioLib = require('twilio');
 
 // Initialize Firebase Admin before anything reads Firestore.
@@ -154,7 +155,7 @@ async function logSMS(to, message, type, messageId) {
     message,
     type,
     messageId,
-    timestamp: admin.firestore.FieldValue.serverTimestamp(),
+    timestamp: FieldValue.serverTimestamp(),
   });
 }
 

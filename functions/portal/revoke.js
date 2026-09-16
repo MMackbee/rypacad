@@ -16,6 +16,9 @@
 'use strict';
 
 const admin = require('firebase-admin');
+// See the note in portal/stripe.js: admin.firestore.FieldValue does not
+// survive the Functions emulator's admin stub; the modular export does.
+const {FieldValue} = require('firebase-admin/firestore');
 const lib = require('./lib');
 
 /** Firestore's per-commit write budget, with headroom. @const {number} */
@@ -28,7 +31,7 @@ function db() {
 
 /** @return {!Object} A server timestamp sentinel. */
 function now() {
-  return admin.firestore.FieldValue.serverTimestamp();
+  return FieldValue.serverTimestamp();
 }
 
 /**

@@ -297,10 +297,11 @@ test('householdByCustomer: resolves, or null when unmatched', async () => {
       get: async () => ({empty: docs.length === 0, docs}),
     }),
   });
-  const hit = await lib.householdByCustomer(
-      fakeDb([{id: 'whitfield', data: () => ({name: 'Whitfield family'})}]),
-      'cus_123');
-  assert.deepEqual(hit, {id: 'whitfield', data: {name: 'Whitfield family'}});
+  const ref = {path: 'households/whitfield'};
+  const doc = {id: 'whitfield', ref, data: () => ({name: 'Whitfield family'})};
+  const hit = await lib.householdByCustomer(fakeDb([doc]), 'cus_123');
+  assert.deepEqual(hit,
+      {id: 'whitfield', data: {name: 'Whitfield family'}, ref});
   assert.equal(await lib.householdByCustomer(fakeDb([]), 'cus_nope'), null);
   assert.equal(await lib.householdByCustomer(fakeDb([]), null), null);
 });

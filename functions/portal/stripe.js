@@ -25,6 +25,10 @@
 
 const functions = require('firebase-functions/v1');
 const admin = require('firebase-admin');
+// The modular entry point, not admin.firestore.FieldValue: the Functions
+// emulator replaces the admin.firestore namespace with a plain function, so
+// the sentinel is undefined there and every write throws at runtime.
+const {FieldValue} = require('firebase-admin/firestore');
 const Stripe = require('stripe');
 const lib = require('./lib');
 const revoke = require('./revoke');
@@ -60,7 +64,7 @@ function db() {
 
 /** @return {!Object} A server timestamp sentinel. */
 function now() {
-  return admin.firestore.FieldValue.serverTimestamp();
+  return FieldValue.serverTimestamp();
 }
 
 /**
