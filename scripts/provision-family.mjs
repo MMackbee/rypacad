@@ -33,7 +33,17 @@
  *                  re-run can never silently erase a live assignment; see
  *                  that constant's comment for why leaving the key out of
  *                  the object literal alone would not have been enough.
- *   users        — one doc per FAMILY account below, keyed by auth uid.
+ *   users        — one doc per FAMILY/STAFF account below, keyed by auth uid.
+ *                  Contract v1.8 (Sprint 10 pin G) made `notificationPrefs`
+ *                  the ONE field a signed-in user self-writes on their own
+ *                  users doc. This script never sets it, and — the same
+ *                  mechanism as the athletes write — the users write is
+ *                  `updateMask`-scoped to exactly the fields userDoc() sets
+ *                  (USER_UPDATE_MASK, right after userDoc), so a re-run can
+ *                  never erase saved preferences. Every already-resolved
+ *                  account is re-written on EVERY run, not just newly
+ *                  resolved ones, so this protects each re-run, not only
+ *                  the first.
  *   staffInvites — (contract v1.8, Sprint 10 pin E) CONSUMED, not written by
  *                  the script's own data: reads the pending docs the live
  *                  Staff & Roles screen created, resolves each `email` to an
@@ -59,7 +69,8 @@
  * developer's own firebase-tools CLI login, writes are IAM-admin traffic that
  * rules do not gate, and running it is a PM/user-gated action per
  * docs/portal/TEAM.md. It creates/overwrites only the specific doc ids named
- * in the plan it prints; it deletes nothing.
+ * in the plan it prints (masked writes touch only their listed fields); it
+ * deletes nothing.
  */
 
 import { execSync } from 'node:child_process';
@@ -77,7 +88,9 @@ const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..'
 // ---------------------------------------------------------------------------
 // The test families. "Admin" in conversation is the `owner` role in the
 // contract — owner reaches /portal/admin and is the only role that reaches
-// /portal/staff. Provisioning overwrites each account's existing users doc.
+// /portal/staff. Provisioning re-writes the provisioning-owned fields of each
+// account's existing users doc (USER_UPDATE_MASK below); notificationPrefs
+// is left exactly as the user saved it.
 // Athletes exist independently of logins: an athlete entry with no matching
 // account (the MackBee siblings) is an athletes/ doc only.
 // ---------------------------------------------------------------------------
@@ -150,6 +163,21 @@ function userDoc(family, { role, displayName, email, athleteId, specialistId }) 
     email,
   };
 }
+
+// The fields THIS script is authoritative for on a users doc — exactly the
+// keys userDoc() returns, nothing else. Same enforcement as
+// ATHLETE_UPDATE_MASK in main(): an `update` Write with no `updateMask` is a
+// FULL DOCUMENT REPLACE in the Firestore REST API, so before this mask every
+// run replaced each already-resolved account's users doc with these seven
+// fields and silently erased `notificationPrefs` — the one field a signed-in
+// user self-writes through NotificationPreferences (contract v1.8, Sprint 10
+// pin G; rules' diff.hasOnly(['notificationPrefs'])). Verified against the
+// emulator the same way the athletes fix was: an unmasked re-run drops the
+// field, a masked re-run keeps it, and a masked write still CREATES a
+// not-yet-existing doc, so a newly-signed-in account provisions exactly as
+// before. Keep this list and userDoc()'s keys in lockstep — a key in the
+// mask but absent from the payload is a DELETE of that field, not a no-op.
+const USER_UPDATE_MASK = ['role', 'athleteId', 'householdId', 'staff', 'specialistId', 'displayName', 'email'];
 
 // ---------------------------------------------------------------------------
 // Packages — bundled from frontend source with esbuild, the seed's pattern.
@@ -358,6 +386,7 @@ async function main() {
         displayName: invite.displayName,
         email: invite.email,
       },
+      USER_UPDATE_MASK, // same users write, same protection — see the constant
     ]);
     inviteDocs.push(['staffInvites', inviteId, { ...invite, status: 'provisioned', provisionedUid: uid }]);
   }
@@ -423,7 +452,7 @@ async function main() {
       ]);
     }
   }
-  for (const m of found) docs.push(['users', m.uid, userDoc(m.family, m)]);
+  for (const m of found) docs.push(['users', m.uid, userDoc(m.family, m), USER_UPDATE_MASK]);
 
   const provisionedInviteCount = inviteDocs.filter(([col]) => col === 'staffInvites').length;
   for (const entry of inviteDocs) docs.push(entry);
@@ -444,15 +473,16 @@ async function main() {
     return;
   }
 
-  // Contract v1.9: a doc entry carrying a `mask` (athletes, above) commits
-  // as a Firestore `updateMask`-scoped write — Firestore leaves every field
-  // NOT in the mask untouched on the server, rather than replacing the
-  // whole document with exactly what this script sends (the REST API's
-  // default `update` behavior when no mask is given, confirmed against the
-  // emulator: an unmasked `update` silently drops any field the caller
-  // omits). Every other collection here keeps that full-replace default —
-  // this script IS the sole owner of packages/households/users/staffInvites
-  // shapes, so a full replace is exactly right for those.
+  // A doc entry carrying a `mask` (athletes — contract v1.9; users —
+  // USER_UPDATE_MASK) commits as a Firestore `updateMask`-scoped write —
+  // Firestore leaves every field NOT in the mask untouched on the server,
+  // rather than replacing the whole document with exactly what this script
+  // sends (the REST API's default `update` behavior when no mask is given,
+  // confirmed against the emulator: an unmasked `update` silently drops any
+  // field the caller omits). packages/households/staffInvites keep that
+  // full-replace default — this script IS the sole owner of those shapes,
+  // so a full replace is exactly right for them. users is deliberately NOT
+  // in that list: notificationPrefs on a users doc is user-owned.
   const writes = docs.map(([col, id, doc, mask]) => ({
     update: {
       name: `projects/${PROJECT_ID}/databases/(default)/documents/${col}/${id}`,

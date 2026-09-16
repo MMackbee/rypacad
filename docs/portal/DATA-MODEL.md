@@ -43,7 +43,7 @@ The role document rules key off. One per authenticated account.
 | `specialistId` | string \| null | `'phil' \| 'mental' \| null`. **Contract v1.7.1 (Sprint 9 integration)** — links a staff account to the specialist whose sessions it runs (`== sessions.type`); written by provisioning. Rules key `/portal/my-sessions` access and specialist-own-session attendance updates off it (`me().get('specialistId', null)`, null-safe). Documented here now as a pre-existing gap in this table (implemented and seeded since Sprint 9, never added to this row until this v1.8 pass — flagged in the Sprint 10 report, not a new field). |
 | `displayName` | string \| null | |
 | `email` | string \| null | |
-| `notificationPrefs` | map \| null | **Contract v1.8 (Sprint 10 pin G).** `{ <categoryId>: { email: boolean, sms: boolean } }`, one entry per category the NotificationPreferences screen renders (`NOTIFICATION_CATEGORIES` in `frontend/src/portal/data/parent.js` — `billing`, `schedule`, `newsletter`, `progress` as of this sprint; `billing` is UI-locked always-on but still gets a stored entry, since the map records a preference per category the screen renders, not per toggle a parent can actually flip). `null` until a user has saved once. **The one self-write the `users` collection allows:** rules permit a user to update ONLY this field on their own doc (`diff.hasOnly(['notificationPrefs'])`) — it cannot touch `role`/`householdId`/`athleteId`/`specialistId`, so a self-write can never be a privilege escalation. |
+| `notificationPrefs` | map \| null | **Contract v1.8 (Sprint 10 pin G).** `{ <categoryId>: { email: boolean, sms: boolean } }`, one entry per category the NotificationPreferences screen renders (`NOTIFICATION_CATEGORIES` in `frontend/src/portal/data/parent.js` — `billing`, `schedule`, `newsletter`, `progress` as of this sprint; `billing` is UI-locked always-on but still gets a stored entry, since the map records a preference per category the screen renders, not per toggle a parent can actually flip). `null` until a user has saved once. **The one self-write the `users` collection allows:** rules permit a user to update ONLY this field on their own doc (`diff.hasOnly(['notificationPrefs'])`) — it cannot touch `role`/`householdId`/`athleteId`/`specialistId`, so a self-write can never be a privilege escalation. **Provisioning never touches it (fix applied 2026-09-15):** `provision-family.mjs` never sets this key, and its `users` write is `updateMask`-scoped to exactly the seven provisioning-owned fields above (`USER_UPDATE_MASK`, defined right after `userDoc()` — the same enforcement as the athletes write's `ATHLETE_UPDATE_MASK`, contract v1.9), so a re-run — which re-writes EVERY already-resolved FAMILIES/STAFF account's `users` doc, not only newly resolved ones — leaves a saved map exactly as the user left it. Before that mask, the write was an unmasked REST `update`, i.e. a full-document replace (verified against the emulator: an unmasked re-run drops the field, a masked re-run keeps it, and a masked write still creates a not-yet-existing doc), so every production re-run between v1.8 going live and the fix silently reset any saved map to **absent** — the same stored state as never having saved. A user who saved before then and finds the screen back at its defaults hit exactly this; saving once more restores it, and no other field on the doc was affected. |
 
 ### `households/{householdId}`
 
@@ -720,9 +720,17 @@ existing `lookupUids()` Identity Toolkit call — the identical resolution
 path the FAMILIES/STAFF accounts already go through, not a second mechanism.
 Found: writes `users/{uid}` — `{ role, athleteId: null, householdId: null,
 staff: true, specialistId, displayName, email }` — and updates the invite
-doc to `status: 'provisioned'`, `provisionedUid: uid` (a same-id update,
-full-document write like every other write in this script — there is no
-partial-field merge anywhere in these REST-API scripts, by construction).
+doc to `status: 'provisioned'`, `provisionedUid: uid` (a same-id, full-document
+write — the script owns the whole `staffInvites` shape). The `users/{uid}`
+write here is the same `updateMask`-scoped write the FAMILIES/STAFF path
+uses (`USER_UPDATE_MASK`, the seven provisioning-owned fields — see the
+[`notificationPrefs` row](#usersuid)), so consuming an invite for a uid that
+already has a `users` doc cannot erase that user's saved `notificationPrefs`
+either. Those two masked writes — `users` (2026-09-15 fix) and `athletes`
+(`ATHLETE_UPDATE_MASK`, contract v1.9) — are the ONLY partial-field writes
+in these REST-API scripts; `packages`/`households`/`staffInvites` stay
+full-document replaces on purpose, because the script is the sole owner of
+those shapes.
 Not found: prints the identical "NO AUTH RECORD — create it in Firebase
 console" line the FAMILIES/STAFF accounts print when their auth record
 doesn't exist yet, and leaves the invite `pending` for the next run — the
