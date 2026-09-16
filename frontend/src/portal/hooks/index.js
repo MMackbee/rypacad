@@ -960,11 +960,17 @@ export function useBooking({ variant = 'open', today = todayISO(), practice = fa
     // Per-PERIOD spend (a booking spends the period its SESSION DATE falls
     // in, contract v2.0 §6), and which sessions are already held - both
     // derived, same as the token position itself (no stored counters).
+    // Contract v2.1, pin E's seam amendment: a grace-charged booking
+    // (graceTokenId set) never counts as a period spend - the SAME
+    // exclusion assertPeriodTokensLeft/tokensFor both apply, kept in
+    // lockstep here so this tally can never diverge from what actually
+    // gates a real booking.
     const tally = new Map();
     const have = new Set();
     for (const b of bookings) {
       if (b.status === 'cancelled') continue;
       have.add(b.sessionId);
+      if (b.graceTokenId) continue;
       const key = b.periodKey ?? periodFor(b.date, anchorDay).periodKey;
       tally.set(key, (tally.get(key) || 0) + 1);
     }
@@ -1017,7 +1023,7 @@ export function useBooking({ variant = 'open', today = todayISO(), practice = fa
         // writer's own cap query per instance would be redundant reads);
         // silent: one invalidation bump AFTER the loop instead of a refetch
         // storm per iteration (finding 8b).
-        await createBooking(
+        const result = await createBooking(
           {
             athleteId: forAthleteId,
             sessionId: match.id,
@@ -1027,8 +1033,21 @@ export function useBooking({ variant = 'open', today = todayISO(), practice = fa
           },
           { skipCapCheck: true, silent: true }
         );
+        // Contract v2.1: createBooking still tries a grace token first even
+        // under skipCapCheck (a real one is honored if it covers the date) -
+        // a grace-charged instance must NOT inflate this loop's own tally,
+        // matching the seam amendment above. A race that fills the session
+        // between this loop's own pre-check and the transaction resolves as
+        // 'waitlisted' instead of 'confirmed' - reported as skipped, not
+        // counted as booked (contract v2.1, pin F).
+        if (result.status === 'waitlisted') {
+          skipped.push({ date, reason: 'full' });
+          continue;
+        }
         booked.push({ date: match.date, id: match.id });
-        tally.set(periodKey, (tally.get(periodKey) || 0) + 1);
+        if (result.chargedFrom !== 'grace') {
+          tally.set(periodKey, (tally.get(periodKey) || 0) + 1);
+        }
         have.add(match.id);
       } catch (err) {
         skipped.push({
