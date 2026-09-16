@@ -3,6 +3,7 @@ import { color, font, radius } from '../tokens';
 import AthleteRow, { AttendanceControls } from '../components/AthleteRow';
 import BottomTabBar from '../components/BottomTabBar';
 import Button from '../components/Button';
+import CancelSheet from '../components/CancelSheet';
 import PhoneFrame from '../components/PhoneFrame';
 import StatusBadge from '../components/StatusBadge';
 import TypeChip from '../components/TypeChip';
@@ -201,11 +202,23 @@ export default function Roster({ bare = false, onSignOut, onOpenAthlete }) {
  * header describes (COACH_BLOCKS and the season's daily blocks share the same
  * chronological order), closing QA #6 for the part this lane owns.
  *
+ * Sprint 13 pin E (contract v2.1): staff "Cancel session" — ops/owner only
+ * (`role`, defaulting to 'coach' so every existing caller, none of which
+ * pass it today, is unaffected — PortalRoutes.js does not thread the
+ * signed-in role to this screen yet; flagged in the sprint report). Behind a
+ * confirm sheet stating how many bookings will be cancelled and how many
+ * grace tokens minted (one per confirmed booking, contract §4/pin E), it
+ * calls `useSessionAttendance().cancelSession(sessionId)` — a field/method
+ * the hook gains this sprint (an EXISTING hook, coded to directly per
+ * TEAM.md's Sprint 11/12 lesson) — and the session then renders cancelled.
+ *
  * @param {'pre'|'progress'|'complete'|'noshow'} variant
  * @param {string} [sessionId]   Real Firestore session id - live mode only.
  * @param {number} [blockIndex]  Which of today's blocks (0-based) - seed mode.
+ * @param {'coach'|'ops'|'owner'} [role]  Who is viewing - "Cancel session"
+ *   only renders for ops/owner.
  */
-export function SessionAttendance({ variant = 'pre', bare = false, onBack, sessionId, blockIndex, block }) {
+export function SessionAttendance({ variant = 'pre', bare = false, onBack, sessionId, blockIndex, block, role = 'coach' }) {
   const { roster: demoRoster, marks: demoMarks, mark: demoMark, counts: demoCounts, sessionState: demoState } =
     useRoster({ variant });
   // Seed header: the generated season narrowed by blockIndex. Live header:
@@ -368,14 +381,44 @@ export function SessionAttendance({ variant = 'pre', bare = false, onBack, sessi
     setSavingNote(false);
   };
 
-  const statusPill = {
-    pre: { tone: 'neutral', label: session?.startsIn },
-    progress: { tone: 'green', label: 'In progress' },
-    completed:
-      counts.out > 0
-        ? { tone: 'red', label: `${counts.out} no-shows` }
-        : { tone: 'green', label: 'Completed' },
-  }[sessionState];
+  /**
+   * Sprint 13 pin E: "Cancel session" — ops/owner only. `cancelSession` is a
+   * field `useSessionAttendance` gains this sprint; same graceful-degrade
+   * idiom as `setSessionNote` above (an honest rejecting stub until routing's
+   * export lands). The confirm sheet states the exact blast radius: one
+   * grace token per bookings row still in 'confirmed' — attended/no-show
+   * rows already happened and mint nothing.
+   */
+  const cancelSession =
+    liveAttendance.cancelSession ||
+    (async () => {
+      throw new Error('Cancelling this session is not available yet.');
+    });
+  // Live: bookings still 'confirmed' on the real session. Seed/demo (no real
+  // sessionId - the states gallery): the demo roster's own unmarked count is
+  // the closest analog, so the confirm sheet previews a believable number.
+  const cancellableCount = live
+    ? (liveAttendance.data ?? []).filter((r) => r.status === 'confirmed').length
+    : counts.unmarked;
+  const [cancelSheetOpen, setCancelSheetOpen] = useState(false);
+  const [localCancelled, setLocalCancelled] = useState(false);
+  const sessionCancelled = localCancelled || liveAttendance.sessionStatus === 'cancelled';
+  // Visible for ops/owner regardless of live/sessionId - the confirm sheet
+  // itself needs neither (and is what the states gallery reviews); the WRITE
+  // (cancelSession(sessionId)) is what still needs a real session, honestly
+  // rejecting via the fallback above when there isn't one.
+  const canCancelSession = (role === 'ops' || role === 'owner') && !sessionCancelled;
+
+  const statusPill = sessionCancelled
+    ? { tone: 'red', label: 'Cancelled' }
+    : {
+        pre: { tone: 'neutral', label: session?.startsIn },
+        progress: { tone: 'green', label: 'In progress' },
+        completed:
+          counts.out > 0
+            ? { tone: 'red', label: `${counts.out} no-shows` }
+            : { tone: 'green', label: 'Completed' },
+      }[sessionState];
 
   // Sprint 7 pin (TEAM.md): results entry for a TOURNAMENT session, opened
   // in place (same local-view-state pattern StaffScreen in PortalRoutes.js
@@ -417,9 +460,20 @@ export function SessionAttendance({ variant = 'pre', bare = false, onBack, sessi
           </div>
 
           <CounterRow counts={counts} started={started} />
+
+          {canCancelSession ? (
+            <Button
+              variant="dangerOutline"
+              height={44}
+              style={{ boxShadow: 'none', marginTop: 12 }}
+              onClick={() => setCancelSheetOpen(true)}
+            >
+              Cancel session
+            </Button>
+          ) : null}
         </div>
       }
-      footer={
+      footer={sessionCancelled ? null : (
         <RosterFooter
           sessionState={sessionState}
           unmarked={counts.unmarked}
@@ -429,9 +483,17 @@ export function SessionAttendance({ variant = 'pre', bare = false, onBack, sessi
           onClose={() => setLocalStatus('completed')}
           onAddNote={startNote}
         />
-      }
+      )}
     >
       <div style={{ padding: '0 22px 20px' }}>
+        {sessionCancelled ? (
+          <Card tone="red" large style={{ marginBottom: 16 }}>
+            <Body size={12}>
+              This session was cancelled. Every confirmed booking on it was cancelled and a bonus
+              token was added for each.
+            </Body>
+          </Card>
+        ) : null}
         {/*
           Sprint 10 pin H: the session note, completed state only - a real
           write against sessions.coachNote (live), or a component-local
@@ -506,10 +568,14 @@ export function SessionAttendance({ variant = 'pre', bare = false, onBack, sessi
                 nameSize={16}
                 divider={i < roster.length - 1 && !noShow}
                 trailing={
-                  <AttendanceControls
-                    value={value}
-                    onChange={(next) => mark(athlete.id, next)}
-                  />
+                  sessionCancelled ? (
+                    <StatusBadge tone="muted">Cancelled</StatusBadge>
+                  ) : (
+                    <AttendanceControls
+                      value={value}
+                      onChange={(next) => mark(athlete.id, next)}
+                    />
+                  )
                 }
               />
               {/* Optional reason, indented to align under the name. Never a
@@ -548,6 +614,25 @@ export function SessionAttendance({ variant = 'pre', bare = false, onBack, sessi
           );
         })}
       </div>
+
+      {cancelSheetOpen ? (
+        <CancelSheet
+          title="Cancel this session?"
+          confirmLabel="Cancel session"
+          keepLabel="Keep session"
+          summary={`This cancels ${cancellableCount} confirmed booking${
+            cancellableCount === 1 ? '' : 's'
+          } and mints ${cancellableCount} bonus token${
+            cancellableCount === 1 ? '' : 's'
+          } (one per cancelled booking). This cannot be undone.`}
+          onClose={() => setCancelSheetOpen(false)}
+          onConfirm={() => cancelSession(sessionId)}
+          onCancelled={() => {
+            setCancelSheetOpen(false);
+            setLocalCancelled(true);
+          }}
+        />
+      ) : null}
     </PhoneFrame>
   );
 }
