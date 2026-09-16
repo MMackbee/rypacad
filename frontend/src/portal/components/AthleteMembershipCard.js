@@ -2,11 +2,13 @@ import React, { useState } from 'react';
 import { color, font } from '../tokens';
 import { useAssignPackages, useHouseholdSettings } from '../hooks';
 import Button from './Button';
-import { SelectField } from './Field';
+import Field, { SelectField } from './Field';
 import NumericField from './NumericField';
 import SavedToast from './SavedToast';
+import Segmented from './Segmented';
 import { Body, Card, SectionLabel } from './Primitives';
-import { ALL_PACKAGES } from '../data/packages';
+import { ALL_PACKAGES, packageById, periodFor } from '../data/packages';
+import { addDaysISO, todayISO } from '../data/calendar';
 
 /**
  * AthleteDetail's staff-side Membership card (Sprint 12 pin, TEAM.md
@@ -25,6 +27,20 @@ import { ALL_PACKAGES } from '../data/packages';
  * (routing lane; wired at Sprint 12 integration). The household and its
  * current anchor arrive on the athlete-detail payload (householdId,
  * periodAnchorDay), which is why the card needs no household hook of its own.
+ *
+ * Sprint 13 (contract v2.1, pin C/H): two more ops/owner-only controls below
+ * the anchor rule. "Issue tokens" (the cash/comp case, pin C) - period select
+ * (this period / next, derived client-side via periodFor(today, anchorDay)
+ * off the athlete's own periodAnchorDay, since useAthleteDetail's payload
+ * carries no periodKey/nextPeriod field of its own), granted prefilled from
+ * the assigned package's `tokens`. Hidden for Elite (tokens: null - contract
+ * §C: "Elite athletes get no doc"). INTEGRATION: useIssueTokens() is a NEW
+ * hook, not in this worktree's hooks/index.js yet - see IssueTokensEditor's
+ * own comment (TEAM.md's Sprint 11/12 lesson: do not import a missing named
+ * export). The household's Stripe customer/subscription id fields (pin H)
+ * save through useHouseholdSettings(householdId).setStripeIds(...) - an
+ * EXISTING hook gaining a method, coded directly per the same lesson's other
+ * half, same as setPeriodAnchorDay above.
  */
 
 const PACKAGE_SELECT_OPTIONS = ALL_PACKAGES.map((p) => ({
@@ -135,7 +151,163 @@ function MembershipEditor({ athleteId, currentPackageId, householdId, initialAnc
       <div style={{ height: 1, background: color.rule, margin: '16px 0' }} />
 
       <PeriodAnchorEditor householdId={householdId} initialAnchorDay={initialAnchorDay} />
+
+      <div style={{ height: 1, background: color.rule, margin: '16px 0' }} />
+
+      <IssueTokensEditor
+        athleteId={athleteId}
+        packageId={currentPackageId}
+        anchorDay={initialAnchorDay}
+      />
+
+      <div style={{ height: 1, background: color.rule, margin: '16px 0' }} />
+
+      <StripeIdsEditor householdId={householdId} />
     </Card>
+  );
+}
+
+/**
+ * "Issue tokens" (Sprint 13 pin C) — the cash/comp case: ops writes a
+ * `tokenPeriods` doc directly rather than waiting on Stripe. Period select
+ * defaults to the CURRENT period; granted defaults to the assigned
+ * package's own token count, editable (a comp grant may differ from the
+ * catalogue). Elite has no tokenPeriods doc (unlimited already), so this
+ * control does not render for it.
+ */
+function IssueTokensEditor({ athleteId, packageId, anchorDay }) {
+  const pkg = packageById(packageId);
+  const today = todayISO();
+  const thisPeriod = periodFor(today, anchorDay);
+  const nextPeriod = periodFor(addDaysISO(thisPeriod.periodEnd, 1), anchorDay);
+  const [periodChoice, setPeriodChoice] = useState('this');
+  const periodKey = periodChoice === 'this' ? thisPeriod.periodKey : nextPeriod.periodKey;
+
+  const [granted, setGranted] = useState(pkg?.tokens ?? 0);
+  React.useEffect(() => {
+    setGranted(pkg?.tokens ?? 0);
+  }, [packageId]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const [issuing, setIssuing] = useState(false);
+  const [saved, setSaved] = useState(false);
+  const [error, setError] = useState(null);
+
+  if (!pkg || pkg.tokens === null) return null;
+
+  const handleIssue = async () => {
+    setIssuing(true);
+    setError(null);
+    setSaved(false);
+    try {
+      // INTEGRATION: wire useIssueTokens().issue(athleteId, periodKey,
+      // granted) — NEW hook, not in this worktree's hooks/index.js yet.
+      // await useIssueTokens().issue(athleteId, periodKey, granted);
+      await Promise.resolve({ athleteId, periodKey, granted });
+      setSaved(true);
+      setTimeout(() => setSaved(false), 2600);
+    } catch (err) {
+      setError(
+        err && typeof err.message === 'string' && err.message
+          ? err.message
+          : 'Tokens could not be issued. Try again.'
+      );
+    } finally {
+      setIssuing(false);
+    }
+  };
+
+  return (
+    <div>
+      <SectionLabel style={{ marginBottom: 10 }}>Issue tokens</SectionLabel>
+      <Body size={11} tone={color.textTertiary} style={{ marginBottom: 10 }}>
+        Writes a token grant directly — the cash/comp path, alongside Stripe's own
+        invoice.paid issuance.
+      </Body>
+      <Segmented
+        value={periodChoice}
+        onChange={setPeriodChoice}
+        options={[
+          ['this', `This period · ${thisPeriod.periodKey}`],
+          ['next', `Next period · ${nextPeriod.periodKey}`],
+        ]}
+      />
+      <div style={{ display: 'flex', gap: 10, alignItems: 'flex-end', marginTop: 12 }}>
+        <div style={{ flex: 1 }}>
+          <NumericField label="Granted" value={granted} onChange={(v) => setGranted(Math.max(0, Number(v) || 0))} />
+        </div>
+        <Button height={44} loading={issuing} onClick={handleIssue} style={{ flex: 'none', width: 120 }}>
+          {issuing ? 'Issuing' : 'Issue'}
+        </Button>
+      </div>
+      {error ? (
+        <Body size={12} tone={color.error} style={{ marginTop: 11 }}>
+          {error}
+        </Body>
+      ) : null}
+      {saved ? <SavedToast message="Tokens issued" style={{ marginTop: 11 }} /> : null}
+    </div>
+  );
+}
+
+/**
+ * Household Stripe customer/subscription id (Sprint 13 pin H) — how a
+ * webhook resolves an event to a household (`where stripeCustomerId ==
+ * event.data.object.customer`). No prefill source exists yet (the
+ * athlete-detail payload carries no stripeCustomerId/stripeSubscriptionId
+ * field) — blank renders as visibly unset rather than a fabricated value,
+ * per the team's own "unset values render as visibly unset" rule.
+ */
+function StripeIdsEditor({ householdId }) {
+  const [stripeCustomerId, setStripeCustomerId] = useState('');
+  const [stripeSubscriptionId, setStripeSubscriptionId] = useState('');
+  const settings = useHouseholdSettings(householdId);
+  const [saved, setSaved] = useState(false);
+  const [error, setError] = useState(null);
+
+  const handleSave = async () => {
+    setSaved(false);
+    setError(null);
+    try {
+      await settings.setStripeIds({ stripeCustomerId: stripeCustomerId || null, stripeSubscriptionId: stripeSubscriptionId || null });
+      setSaved(true);
+      setTimeout(() => setSaved(false), 2600);
+    } catch (err) {
+      setError(
+        err && typeof err.message === 'string' && err.message
+          ? err.message
+          : 'The Stripe ids could not be saved. Try again.'
+      );
+    }
+  };
+
+  return (
+    <div>
+      <SectionLabel style={{ marginBottom: 10 }}>Stripe (household)</SectionLabel>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+        <Field label="Stripe customer id" value={stripeCustomerId} placeholder="cus_…" onChange={setStripeCustomerId} />
+        <Field
+          label="Stripe subscription id"
+          value={stripeSubscriptionId}
+          placeholder="sub_…"
+          onChange={setStripeSubscriptionId}
+        />
+      </div>
+      <Button
+        height={44}
+        disabled={!householdId || (!stripeCustomerId && !stripeSubscriptionId)}
+        loading={settings.saving}
+        onClick={handleSave}
+        style={{ marginTop: 12 }}
+      >
+        {settings.saving ? 'Saving' : 'Save Stripe ids'}
+      </Button>
+      {error ? (
+        <Body size={12} tone={color.error} style={{ marginTop: 11 }}>
+          {error}
+        </Body>
+      ) : null}
+      {saved ? <SavedToast message="Stripe ids saved" style={{ marginTop: 11 }} /> : null}
+    </div>
   );
 }
 
