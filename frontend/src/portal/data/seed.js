@@ -30,7 +30,7 @@ import { TOKEN_PACKAGES, periodFor, tokensFor } from './packages';
 // moves its two-pool AllowancePools gallery states onto the token shapes
 // below. See the DEPRECATED block near the bottom of this file and
 // packages.js's own DEPRECATED banner, which these two names read from.
-import { longDayLabel, todayISO } from './calendar';
+import { addDaysISO, longDayLabel, todayISO } from './calendar';
 
 /** The real current date, formatted for screen headers. */
 export const TODAY = longDayLabel(todayISO());
@@ -368,6 +368,47 @@ export const DIAGNOSTIC_SECTIONS = [
     ],
   },
 ];
+
+/**
+ * One live grace token for the harness (contract v2.1, Sprint 13 pin E) —
+ * reese (HOUSEHOLD's second child) holds a bonus token from a session the
+ * academy cancelled, expiring 20 days out from whenever the demo is viewed
+ * (never a fixed calendar date — this file's "today, unconditionally"
+ * discipline for every seed date, same as PERIOD/TOKENS above).
+ */
+export const GRACE_TOKEN = {
+  id: 'seed-grace-1',
+  athleteId: 'reese',
+  expiresAt: addDaysISO(todayISO(), 20),
+  reason: 'session-cancelled',
+};
+
+/**
+ * One waitlisted entry for the harness (contract v2.1, Sprint 13 pin F) —
+ * nico (HOUSEHOLD's third child) waitlisted for a real generated-season
+ * block, position 2 (a believable non-1 position so the "position" copy is
+ * exercised, not the trivial case). `sessionRef` follows the exact
+ * `{date, block}` convention BOOKED_UPCOMING/BOOKED_PAST already use —
+ * resolved against the real season by hooks/index.js's resolveBooking, the
+ * same "a reference cannot drift" discipline those lists document.
+ */
+export const WAITLIST_ENTRY = {
+  athleteId: 'nico',
+  sessionRef: { date: '2026-11-09', block: 0 }, // Mon 3:00 PM, distinct from jordan's own Nov 9 booking (block 2)
+  position: 2,
+};
+
+/**
+ * A past_due membership variant for the harness (contract v2.1, Sprint 13
+ * pin H) — the Membership screen's status-line demo state. The live
+ * HOUSEHOLD fixture stays active (mirroring the emulator's real Whitfield
+ * seed); this is a second, harness-only shape so StatesHarness can show the
+ * paused-bookings copy without a second live household to maintain.
+ */
+export const PAST_DUE_MEMBERSHIP = {
+  status: 'past_due',
+  currentPeriodEnd: PERIOD.periodEnd,
+};
 
 /** Code of Grit - Blueprint section 1.2, quoted on the athlete dashboard. */
 export const CODE_OF_GRIT = [
