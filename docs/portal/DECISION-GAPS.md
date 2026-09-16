@@ -89,3 +89,23 @@ integration notes in `TEAM.md`; nothing here is resolved by guessing.
 - **`sendDailyReminders` was deleted, not fixed.** It read `participants`
   and called an HTTP export as a function. Session reminders, if wanted,
   are a Courier job over `bookings` in Part 2.
+
+## Sprint 14 — notifications (owner rulings needed)
+
+Built to the pinned defaults (TEAM.md "Sprint 14 pins"); each is a one-line
+constant change if the owner rules otherwise.
+
+1. **Reminder timing** — 24 hours ahead, sent at 17:00 America/Chicago
+   (`sessionReminders` schedule). Alternative: morning-of.
+2. **Expiry warning lead** — 3 days before the period ends (tokens) or the
+   grace token expires (`tokenExpiryReminders`, 09:00 Chicago), once per
+   period/token. Alternative: 7 days, or a second warning the day before.
+3. **A member's own cancellation** — no notice in v1 (the screen confirms
+   it). Staff cancellations and revocations always notify.
+4. **Progress / check-in notices** — not built (`checkin-due` when the
+   Yannick cadence is overdue); needs the mental-cap cadence ruling above
+   (item 4 of the Sprint 12 list) first.
+5. **Deploy** — every sender is a Cloud Function: nothing sends until the
+   project is on Blaze and `firebase deploy --only functions` runs with
+   `COURIER_AUTH_TOKEN` (email) and the `TWILIO_*` keys (SMS) set. The
+   ledger and the Settings list work without either (outcomes 'skipped').

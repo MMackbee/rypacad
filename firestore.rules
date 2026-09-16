@@ -1274,6 +1274,28 @@ service cloud.firestore {
       // entry and creates a booking instead).
     }
 
+    // ---- notifications ----------------------------------------------------
+    // Sprint 14 (contract v2.2). The notification LEDGER - one doc per notice
+    // sent, { kind, category, householdId, athleteId|null, sessionId|null,
+    // bookingId|null, subjectKey, title, body, recipients[], sentAt,
+    // createdAt } - written ONLY by the Cloud Functions that send it (admin
+    // SDK), keyed {kind}_{subjectKey} so the id is the idempotency key. No
+    // client may ever create, update or delete one, so there is no write
+    // clause at all (deny-by-default, same as stripeEvents below). Members
+    // read their own: a parent's query carries `householdId ==
+    // me().householdId`, an athlete's `athleteId == me().athleteId` - both
+    // provable because the filtered field is exactly the field the rule
+    // checks (the graceTokens precedent above); ops/owner read academy-wide
+    // (the staff-sees-everything precedent). Settings renders the newest
+    // ten as "Recent notices".
+    match /notifications/{noticeId} {
+      allow read: if signedIn() && (
+        (me().role == 'parent' && resource.data.householdId == me().householdId)
+        || (me().role == 'athlete' && resource.data.athleteId == me().athleteId)
+        || me().role in ['ops', 'owner']
+      );
+    }
+
     // ---- stripeEvents -----------------------------------------------------
     // Sprint 13 (contract v2.1, pin H). The Stripe webhook handler's
     // idempotency ledger - { type, customer, householdId|null, receivedAt,

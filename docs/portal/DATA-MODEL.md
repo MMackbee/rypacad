@@ -47,7 +47,7 @@ The role document rules key off. One per authenticated account.
 | `specialistId` | string \| null | `'phil' \| 'mental' \| null`. **Contract v1.7.1 (Sprint 9 integration)** — links a staff account to the specialist whose sessions it runs (`== sessions.type`); written by provisioning. Rules key `/portal/my-sessions` access and specialist-own-session attendance updates off it (`me().get('specialistId', null)`, null-safe). Documented here now as a pre-existing gap in this table (implemented and seeded since Sprint 9, never added to this row until this v1.8 pass — flagged in the Sprint 10 report, not a new field). |
 | `displayName` | string \| null | |
 | `email` | string \| null | |
-| `notificationPrefs` | map \| null | **Contract v1.8 (Sprint 10 pin G).** `{ <categoryId>: { email: boolean, sms: boolean } }`, one entry per category the NotificationPreferences screen renders (`NOTIFICATION_CATEGORIES` in `frontend/src/portal/data/parent.js` — `billing`, `schedule`, `newsletter`, `progress` as of this sprint; `billing` is UI-locked always-on but still gets a stored entry, since the map records a preference per category the screen renders, not per toggle a parent can actually flip). `null` until a user has saved once. **The one self-write the `users` collection allows:** rules permit a user to update ONLY this field on their own doc (`diff.hasOnly(['notificationPrefs'])`) — it cannot touch `role`/`householdId`/`athleteId`/`specialistId`, so a self-write can never be a privilege escalation. **Provisioning never touches it (fix applied 2026-09-15):** `provision-family.mjs` never sets this key, and its `users` write is `updateMask`-scoped to exactly the seven provisioning-owned fields above (`USER_UPDATE_MASK`, defined right after `userDoc()` — the same enforcement as the athletes write's `ATHLETE_UPDATE_MASK`, contract v1.9), so a re-run — which re-writes EVERY already-resolved FAMILIES/STAFF account's `users` doc, not only newly resolved ones — leaves a saved map exactly as the user left it. Before that mask, the write was an unmasked REST `update`, i.e. a full-document replace (verified against the emulator: an unmasked re-run drops the field, a masked re-run keeps it, and a masked write still creates a not-yet-existing doc), so every production re-run between v1.8 going live and the fix silently reset any saved map to **absent** — the same stored state as never having saved. A user who saved before then and finds the screen back at its defaults hit exactly this; saving once more restores it, and no other field on the doc was affected. |
+| `notificationPrefs` | map \| null | **Contract v1.8 (Sprint 10 pin G).** `{ <categoryId>: { email: boolean, sms: boolean } }`, one entry per category the NotificationPreferences screen renders (`NOTIFICATION_CATEGORIES` in `frontend/src/portal/data/parent.js` — `billing`, `schedule`, `newsletter`, `progress` as of this sprint; `billing` is UI-locked always-on but still gets a stored entry, since the map records a preference per category the screen renders, not per toggle a parent can actually flip). `null` until a user has saved once. **The one self-write the `users` collection allows:** rules permit a user to update ONLY this field on their own doc (`diff.hasOnly(['notificationPrefs'])`) — it cannot touch `role`/`householdId`/`athleteId`/`specialistId`, so a self-write can never be a privilege escalation. **Provisioning never touches it (fix applied 2026-09-15):** `provision-family.mjs` never sets this key, and its `users` write is `updateMask`-scoped to exactly the seven provisioning-owned fields above (`USER_UPDATE_MASK`, defined right after `userDoc()` — the same enforcement as the athletes write's `ATHLETE_UPDATE_MASK`, contract v1.9), so a re-run — which re-writes EVERY already-resolved FAMILIES/STAFF account's `users` doc, not only newly resolved ones — leaves a saved map exactly as the user left it. Before that mask, the write was an unmasked REST `update`, i.e. a full-document replace (verified against the emulator: an unmasked re-run drops the field, a masked re-run keeps it, and a masked write still creates a not-yet-existing doc), so every production re-run between v1.8 going live and the fix silently reset any saved map to **absent** — the same stored state as never having saved. A user who saved before then and finds the screen back at its defaults hit exactly this; saving once more restores it, and no other field on the doc was affected. **Contract v2.2 (Sprint 14):** the sending functions read this map to decide each channel per notice (`functions/portal/notify.js` mirrors the same defaults — change one, change both); `billing` email always sends. |
 | `phone` | string \| null | **2026-09-16 (owner feedback).** The member's own mobile number for text notices, set from Settings → Profile; trimmed, ≤ 32 characters, empty clears to null. The second and last member self-write on `users` (rules: `diff.hasOnly(['notificationPrefs', 'phone'])`). Never written by provisioning (`USER_UPDATE_MASK` excludes it). The Part 2 promotion notifier reads it (`phone` / `phoneNumber`) and falls back to email when absent. |
 
 ### `households/{householdId}`
@@ -1408,6 +1408,56 @@ Seed: **one fake doc**, `stripeEvents/evt_seed_2` — `{ type:
 `households/parker.membership.lastEventId: 'evt_seed_2'` above — the three
 facts cross-reference exactly as a real webhook write would leave them,
 never independent fixtures that happen to share a prefix.
+
+### `notifications` (contract v2.2, Sprint 14)
+
+**BUILT, Sprint 14 (the writers are Cloud Functions, live once the project
+is on Blaze and the functions deploy; the read side ships with the app).**
+`notifications/{kind}_{subjectKey}` — the notification LEDGER: one document
+per notice attempted, written by the sending function under the admin SDK
+in the same step as the send, and keyed so a retried trigger or a re-run
+scheduled job finds its own row and sends nothing twice (the `stripeEvents`
+"id is the dedupe key" idea, applied to outbound messages). Shape: `{ kind,
+category, householdId, athleteId: string \| null, sessionId: string \|
+null, bookingId: string \| null, subjectKey, title, body, recipients:
+[{ uid, email, sms }], sentAt, createdAt }`. Each channel outcome is one of
+`'sent' \| 'skipped' \| 'failed' \| 'off'` (`sms` also `'no-phone'`):
+`off` = the recipient's `users.notificationPrefs[category]` has that
+channel switched off (absent map or category == the defaults in
+`data/parent.js`; `billing` email is always on), `skipped` = the provider
+is not configured or SMS quiet hours (outside 08:00–21:00 America/Chicago),
+`no-phone` = no `users.phone`. Kinds by category — schedule:
+`booking-confirmed`, `promoted`, `session-cancelled`, `reminder-24h`;
+billing: `booking-revoked`, `tokens-expiring`, `grace-expiring`,
+`membership` (TEAM.md "Sprint 14 pins" has the trigger and copy per kind).
+Titles and bodies are stored as sent, so the in-app list re-renders nothing
+from the underlying booking or session. **Clients never write** (no allow
+clause in `firestore.rules`); members read own — parent by `householdId
+==`, athlete by `athleteId ==` — and ops/owner read all. Settings shows
+the newest ten as "Recent notices" (`hooks/notices.js`).
+
+Seed: **three docs for the Whitfields** — a `booking-confirmed` for
+jordan's booking on the full `-w0` session, the `session-cancelled` for
+reese's cancelled `2026-11-11-0` booking (the grace-token scenario above),
+and a `tokens-expiring` for jordan's current period — each with the
+recipients' outcomes exactly as the emulator functions leave them with no
+provider configured (`email: 'skipped'`, `sms: 'no-phone'`), timestamps
+relative to the seed run.
+
+### v2.2 index reasoning (Sprint 14 — notifications)
+
+- **`notifications (householdId ASC, createdAt DESC)` and `notifications
+  (athleteId ASC, createdAt DESC)` — new, added this sprint.** The Recent
+  notices read is an equality filter plus an `orderBy` on a different field
+  with a `limit` — the same two-distinct-field shape as `graceTokens
+  (athleteId, expiresAt)` above. One composite per member role because the
+  parent's query filters the household and the athlete's the athlete — the
+  fields the rule proves the read against. The functions' own reads
+  (`notifications` by document id for the idempotency check; `bookings
+  where status == 'confirmed' and date == :tomorrow` for reminders, riding
+  [index 7](#7-bookings-status-asc-date-asc--admin-no-show-query-contract-v18-sprint-10);
+  `graceTokens where expiresAt == :date`, a single equality filter) add
+  nothing.
 
 ### v2.1 index reasoning (Sprint 13 — token model Part 2)
 

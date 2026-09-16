@@ -92,6 +92,7 @@ import {
 // useRoster.js's own existing pattern), never the other way.
 import useIssueTokens, { cancelSession, fetchTokenPeriod, setHouseholdStripeIds } from './grace';
 import useWaitlist, { fetchWaitlistByAthlete, fetchWaitlistByHousehold, fetchWaitlistBySession } from './waitlist';
+import useRecentNotices from './notices';
 import {
   COACH,
   COACH_BLOCKS,
@@ -201,7 +202,7 @@ export { default as useOnboardingStatus } from './onboarding';
 // useIssueTokens both need to be in this file's own scope to be usable by
 // its other hooks/helpers); re-exported here so screens keep importing
 // every portal hook from this one seam, same as every hook above.
-export { useIssueTokens, useWaitlist };
+export { useIssueTokens, useRecentNotices, useWaitlist };
 
 /**
  * Harness demo states (contract v1.1): every data-bearing hook accepts

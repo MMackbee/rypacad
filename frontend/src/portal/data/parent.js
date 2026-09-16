@@ -120,17 +120,17 @@ export const INVOICES = [
 export const NOTIFICATION_CATEGORIES = [
   {
     id: 'billing',
-    name: 'Billing',
-    description: 'Charges, failed payments, invoice receipts',
+    name: 'Membership & tokens',
+    description: 'Payment problems, token expiry, membership changes',
     email: true,
     sms: true,
     locked: true,
-    footnote: 'Failed-payment notices always send on at least one channel.',
+    footnote: 'Always sent by email; texts are your choice.',
   },
   {
     id: 'schedule',
-    name: 'Schedule changes',
-    description: 'Cancellations, closures, block moves',
+    name: 'Sessions',
+    description: 'Confirmations, reminders, waitlist spots, cancellations',
     email: true,
     sms: true,
   },
@@ -151,4 +151,56 @@ export const NOTIFICATION_CATEGORIES = [
 ];
 
 export const NOTIFICATION_NOTE =
-  'Failed-payment notices are transactional, not marketing, and stay on by channel choice only. A parent who has switched both channels off still sees the banner on Billing.';
+  'Membership and token notices are transactional, not marketing, and always go out by email. A parent who has switched texts off still sees the banner on Billing.';
+
+/**
+ * Practice-mode "Recent notices" (contract v2.2, Sprint 14): the sample
+ * Whitfield household's newest ledger rows, in the exact shape the Cloud
+ * Functions write to `notifications/{kind}_{subjectKey}` — titles and
+ * bodies as sent, a channel outcome per recipient. Times are relative to now
+ * so the "ago" labels read naturally whenever the walkthrough runs.
+ */
+export const SEED_NOTICES = [
+  {
+    id: 'tokens-expiring_jordan_sample',
+    kind: 'tokens-expiring',
+    category: 'billing',
+    householdId: 'whitfield',
+    athleteId: 'jordan',
+    sessionId: null,
+    bookingId: null,
+    title: 'Tokens expiring soon',
+    body: 'Jordan has 3 tokens left that expire at the end of this period. Book before then.',
+    recipients: [{ uid: 'parent-dana', email: 'sent', sms: 'no-phone' }],
+    createdAt: new Date(Date.now() - 5 * 60 * 60 * 1000).toISOString(),
+  },
+  {
+    id: 'session-cancelled_reese_2026-11-11-0',
+    kind: 'session-cancelled',
+    category: 'schedule',
+    householdId: 'whitfield',
+    athleteId: 'reese',
+    sessionId: '2026-11-11-0',
+    bookingId: 'reese_2026-11-11-0',
+    title: 'A session was cancelled',
+    body: "The Wednesday training block on Nov 11 was cancelled by the academy. A bonus token was added to Reese's account.",
+    recipients: [{ uid: 'parent-dana', email: 'sent', sms: 'no-phone' }],
+    createdAt: new Date(Date.now() - 2 * 86400000).toISOString(),
+  },
+  {
+    id: 'booking-confirmed_jordan_2026-11-16-w0',
+    kind: 'booking-confirmed',
+    category: 'schedule',
+    householdId: 'whitfield',
+    athleteId: 'jordan',
+    sessionId: '2026-11-16-w0',
+    bookingId: 'jordan_2026-11-16-w0',
+    title: 'Jordan is booked',
+    body: 'Jordan is booked: training block, Mon, Nov 16 at 3:30 PM.',
+    recipients: [
+      { uid: 'athlete-jordan', email: 'sent', sms: 'no-phone' },
+      { uid: 'parent-dana', email: 'sent', sms: 'no-phone' },
+    ],
+    createdAt: new Date(Date.now() - 4 * 86400000).toISOString(),
+  },
+];

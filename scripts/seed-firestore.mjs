@@ -44,6 +44,11 @@
  *                 and reese, with nico waitlisted.
  *   households.membership — absent on whitfield (active); `past_due` on
  *                 parker, which also gets `stripeCustomerId: 'cus_seed_parker'`.
+ *   notifications — three Whitfield ledger rows (contract v2.2, Sprint 14):
+ *                 jordan's booking-confirmed on the full -w0 session, reese's
+ *                 session-cancelled on 2026-11-11-0, jordan's tokens-expiring
+ *                 for the current period — outcomes as the emulator functions
+ *                 leave them with no provider configured.
  *   stripeEvents — one `invoice.payment_failed` doc matching parker's
  *                 past_due state (`evt_seed_2`, referenced by
  *                 households.parker.membership.lastEventId).
@@ -1259,6 +1264,76 @@ function buildDocs(portal) {
     ],
   ]);
 
+  // I. NOTIFICATIONS (contract v2.2, Sprint 14) — the ledger rows the Cloud
+  // Functions would have written for three facts this seed already holds:
+  // jordan's confirmed booking on the full -w0 session (booking-confirmed),
+  // reese's cancelled 2026-11-11-0 booking + grace token (session-cancelled),
+  // and jordan's current period (tokens-expiring). Ids are {kind}_{subjectKey}
+  // exactly as functions/portal/notify.js keys them; outcomes are what the
+  // emulator leaves with no Courier/Twilio configured and no users.phone.
+  const hoursAgo = (h) => new Date(today.getTime() - h * 60 * 60 * 1000);
+  const niceDate = (iso) =>
+    new Date(`${iso}T12:00:00`).toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' });
+  const graceExpiry = niceDate(graceTokens.get('grace-1').expiresAt);
+  const notifications = new Map([
+    [
+      `booking-confirmed_jordan_${FULL_SESSION_ID}`,
+      {
+        kind: 'booking-confirmed',
+        category: 'schedule',
+        householdId,
+        athleteId: 'jordan',
+        sessionId: FULL_SESSION_ID,
+        bookingId: `jordan_${FULL_SESSION_ID}`,
+        subjectKey: `jordan_${FULL_SESSION_ID}`,
+        title: 'Jordan is booked',
+        body: 'Jordan is booked: training block, Mon, Nov 16 at 3:30 PM.',
+        recipients: [
+          { uid: 'athlete-jordan', email: 'skipped', sms: 'no-phone' },
+          { uid: 'parent-dana', email: 'skipped', sms: 'no-phone' },
+        ],
+        sentAt: hoursAgo(96),
+        createdAt: hoursAgo(96),
+      },
+    ],
+    [
+      'session-cancelled_reese_2026-11-11-0',
+      {
+        kind: 'session-cancelled',
+        category: 'schedule',
+        householdId,
+        athleteId: 'reese',
+        sessionId: '2026-11-11-0',
+        bookingId: 'reese_2026-11-11-0',
+        subjectKey: 'reese_2026-11-11-0',
+        title: 'A session was cancelled',
+        body:
+          'The Wednesday training block on Nov 11 was cancelled by the academy. ' +
+          `A bonus token was added to Reese's account (expires ${graceExpiry}).`,
+        recipients: [{ uid: 'parent-dana', email: 'skipped', sms: 'no-phone' }],
+        sentAt: hoursAgo(48),
+        createdAt: hoursAgo(48),
+      },
+    ],
+    [
+      `tokens-expiring_jordan_${jordanCurrentPeriod.periodKey}`,
+      {
+        kind: 'tokens-expiring',
+        category: 'billing',
+        householdId,
+        athleteId: 'jordan',
+        sessionId: null,
+        bookingId: null,
+        subjectKey: `jordan_${jordanCurrentPeriod.periodKey}`,
+        title: 'Tokens expiring soon',
+        body: `Jordan has tokens left that expire ${niceDate(jordanCurrentPeriod.periodEnd)}. Book before then.`,
+        recipients: [{ uid: 'parent-dana', email: 'skipped', sms: 'no-phone' }],
+        sentAt: hoursAgo(5),
+        createdAt: hoursAgo(5),
+      },
+    ],
+  ]);
+
   return {
     packages,
     sessions,
@@ -1275,6 +1350,7 @@ function buildDocs(portal) {
     graceTokens,
     waitlist,
     stripeEvents,
+    notifications,
   };
 }
 

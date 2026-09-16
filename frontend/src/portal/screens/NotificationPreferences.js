@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { TOUCH_MIN, color, font, radius, tint } from '../tokens';
 import BottomTabBar from '../components/BottomTabBar';
 import ProfileCard from '../components/ProfileCard';
+import RecentNotices from '../components/RecentNotices';
 import PhoneFrame from '../components/PhoneFrame';
 import SavedToast from '../components/SavedToast';
 import { Toggle } from '../components/Toggle';
@@ -154,6 +155,8 @@ export default function NotificationPreferences({
         <Body size={11} tone={color.textTertiary}>
           {data?.note}
         </Body>
+
+        <RecentNotices style={{ marginTop: 6 }} />
 
         {onLinkAthlete ? <LinkAthleteRow onLinkAthlete={onLinkAthlete} /> : null}
         <MembershipRow />
