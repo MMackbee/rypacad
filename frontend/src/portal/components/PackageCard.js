@@ -1,19 +1,16 @@
 import React from 'react';
 import { color, font, glow, radius } from '../tokens';
-import { ratePerSession } from '../data/packages';
 
 /**
- * Package card — screens 02, 10, 15.
+ * Package card — screens 02, 10, 15 (Sprint 12 pin, contract v2.0).
  *
  * This is the handoff's "tier card" unit under revision 3's vocabulary: what it
- * renders is now a *package*, and "tier" means specifically the Elite tiers.
- *
- * Under revision 2 prices were undecided, so this rendered a dashed `$ ——` slot
- * and the comparison axis had to be the inclusion list. Prices are confirmed, so
- * the slot is gone and the price is the headline. What has not changed: nothing
- * here is hardcoded. The layout still survives 1..n packages and a package with
- * fields still unset — see `philSessions` on Elite, which renders as absent
- * rather than as a fabricated number.
+ * renders is now a *package* from the one token catalogue (data/packages.js's
+ * TOKEN_PACKAGES/ELITE/SINGLE_TOKEN) — no golf/fitness stack, no `ratePerSession`
+ * (deleted with the two-pool model; the per-token rate below is derived inline,
+ * price / tokens, only for the packages that actually sell tokens). Prices
+ * render with "pending" beside them when the catalogue flags `pending: true`
+ * (contract §1) — never hardcoded, never silently dropped.
  */
 export default function PackageCard({
   pkg,
@@ -22,7 +19,7 @@ export default function PackageCard({
   onSelect,
   rows = [],
   footnote,
-  cadence = '/ mo',
+  cadence = '/ period',
   style,
 }) {
   const outlined = selected || emphasised;
@@ -61,8 +58,15 @@ export default function PackageCard({
 
         <div style={{ textAlign: 'right', flex: 'none' }}>
           <div style={{ font: `700 19px ${font.head}`, color: color.text }}>${pkg.price}</div>
-          <div style={{ font: `400 10px ${font.body}`, color: color.textTertiary, marginTop: 2 }}>
+          <div
+            style={{
+              font: `400 10px ${font.body}`,
+              color: pkg.pending ? color.secondary : color.textTertiary,
+              marginTop: 2,
+            }}
+          >
             {cadence}
+            {pkg.pending ? ' · pending' : ''}
           </div>
         </div>
       </div>
@@ -106,16 +110,17 @@ export default function PackageCard({
   );
 }
 
-/** Training + tournaments, or session count for a fitness package. */
+/**
+ * Elite: unlimited + the differentiators, no token count (pin L). A token
+ * package: count + the per-token rate, derived here (price / tokens) rather
+ * than stored — the contract's own §1 table is exactly this division.
+ */
 function entitlementLine(pkg) {
-  if (pkg.sessions != null) return `${pkg.sessions} sessions a month`;
-
-  const parts = [];
-  if (pkg.training) parts.push(`${pkg.training} training`);
-  if (pkg.tournaments) parts.push(`${pkg.tournaments} tournament${pkg.tournaments === 1 ? '' : 's'}`);
-  const rate = ratePerSession(pkg);
-  const rateText = rate ? ` · $${Math.round(rate)} a session` : '';
-  return parts.length ? parts.join(' · ') + rateText : 'Single session';
+  if (pkg.kind === 'elite') return `Unlimited · 24/7 access · books ${pkg.windowDays} days out`;
+  if (pkg.tokens == null) return null;
+  if (pkg.tokens === 1) return `1 token · books ${pkg.windowDays} days out`;
+  const rate = pkg.price / pkg.tokens;
+  return `${pkg.tokens} tokens a period · $${rate.toFixed(2)} a token`;
 }
 
 function SelectDot({ selected }) {

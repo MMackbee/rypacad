@@ -9,6 +9,7 @@ import MemberSection from '../components/MemberSection';
 import PhoneFrame from '../components/PhoneFrame';
 import Segmented from '../components/Segmented';
 import SessionCard from '../components/SessionCard';
+import StatusBadge from '../components/StatusBadge';
 import { SkeletonBar, SkeletonSessionCard } from '../components/Skeleton';
 import { Body, ErrorNotice, ScreenTitle } from '../components/Primitives';
 
@@ -31,17 +32,21 @@ import { Body, ErrorNotice, ScreenTitle } from '../components/Primitives';
  * @param {'populated'|'loading'|'error'|'empty'} variant  Harness-only (see above).
  * @param {() => void} [onBook]  "Book a session" in the empty states.
  * @param {() => void} [onRetry]  Re-fetch after a load failure.
+ * @param {Array} [demoMembers]  HARNESS-ONLY — an explicit members array,
+ *   rendered as if `variant === 'populated'` had returned it. Real routes
+ *   never pass this; it exists so the states gallery can preview the
+ *   `nextPeriod: true` badge (pin B) the seed doesn't produce yet.
  */
 
-export default function Reservations({ variant = 'populated', bare = false, onBook, onRetry }) {
+export default function Reservations({ variant = 'populated', bare = false, onBook, onRetry, demoMembers }) {
   const hookState = useHouseholdReservations();
   const [tab, setTab] = useState('upcoming');
   const [cancelTarget, setCancelTarget] = useState(null);
 
-  const demo = variant !== 'populated';
-  const loading = demo ? variant === 'loading' : hookState.loading;
-  const error = demo ? (variant === 'error' ? new Error("Reservations didn't load.") : null) : hookState.error;
-  const data = demo ? (variant === 'empty' ? { members: [] } : null) : hookState.data;
+  const demo = variant !== 'populated' || Boolean(demoMembers);
+  const loading = demoMembers ? false : demo ? variant === 'loading' : hookState.loading;
+  const error = demoMembers ? null : demo ? (variant === 'error' ? new Error("Reservations didn't load.") : null) : hookState.error;
+  const data = demoMembers ? { members: demoMembers } : demo ? (variant === 'empty' ? { members: [] } : null) : hookState.data;
   const cancel = hookState.cancel;
 
   const members = data?.members ?? [];
@@ -143,6 +148,14 @@ function MemberList({ items, past, onBook, onCancelRequest }) {
             name={item.name}
             meta={metaParts.join(' · ')}
             variant={item.isToday ? 'live' : 'default'}
+            trailing={
+              // Sprint 12 (contract v2.0, pin B): a booking charges against
+              // the period its session date falls in, not the period it was
+              // made in - a future-period booking is a confirmed booking
+              // whose period hasn't been reached yet, badged so rather than
+              // hidden.
+              !past && item.nextPeriod ? <StatusBadge tone="neutral">Next period</StatusBadge> : null
+            }
             action={
               past ? null : dayOf ? (
                 <Body size={11} tone={color.textTertiary}>

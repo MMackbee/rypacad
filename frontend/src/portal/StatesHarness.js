@@ -14,7 +14,7 @@ import SequenceLadder from './components/SequenceLadder';
 import SessionCard from './components/SessionCard';
 import StatusBadge, { CapacityPill } from './components/StatusBadge';
 import PackageCard from './components/PackageCard';
-import AllowancePools from './components/AllowancePools';
+import AllowancePools, { GraceLine } from './components/AllowancePools';
 import SkeletonCard, { SkeletonBar, SkeletonSessionCard } from './components/Skeleton';
 import ToggleRow from './components/Toggle';
 import TypeChip from './components/TypeChip';
@@ -45,8 +45,47 @@ import SpecialistDay from './screens/SpecialistDay';
 import Membership from './screens/Membership';
 import Reservations from './screens/Reservations';
 
-import { ALLOWANCE, ALLOWANCE_NO_TOURNAMENTS } from './data/seed';
-import { ELITE_TIERS, FITNESS_PACKAGES, GOLF_PACKAGES } from './data/packages';
+import { ALL_PACKAGES, ELITE, TOKEN_PACKAGES } from './data/packages';
+import { addDaysISO, todayISO } from './data/calendar';
+
+/**
+ * Sprint 12 (TEAM.md "Sprint 12 pins — the token model", contract v2.0):
+ * token fixtures for the harness. The seed (data/seed.js) still produces the
+ * OLD two-pool shapes until the db/routing lanes' own Sprint 12 passes land
+ * (this lane's report flags it) — these are hand-built, matching exactly
+ * the `tokensFor()` shape (data/packages.js) and useMembership()'s pinned
+ * per-member `tokens` field, so every token/Elite/grace state below is
+ * reviewable without a live hook.
+ */
+const TOKENS_FIXTURE = { granted: 12, used: 5, reserved: 0, left: 7, unlimited: false, grace: [], nextPeriod: { periodKey: null, booked: 2 } };
+const TOKENS_LOW = { granted: 12, used: 12, reserved: 0, left: 0, unlimited: false, grace: [], nextPeriod: { periodKey: null, booked: 0 } };
+const TOKENS_GRACE = {
+  granted: 12,
+  used: 12,
+  reserved: 0,
+  left: 0,
+  unlimited: false,
+  grace: [{ id: 'g1', expiresAt: addDaysISO(todayISO(), 18) }],
+  nextPeriod: { periodKey: null, booked: 0 },
+};
+const TOKENS_ELITE = { granted: null, used: 0, reserved: 0, left: null, unlimited: true, grace: [], nextPeriod: { periodKey: null, booked: 1 } };
+
+const MEMBER_TOKENS = {
+  athleteId: 'jordan', name: 'Jordan Whitfield',
+  package: { id: 't-12', name: '12 tokens', price: 570, pending: true, tokens: 12, windowDays: 32, kind: 'tokens' },
+  tokens: TOKENS_FIXTURE, coaching: { used: 1, limit: 1 }, contractMinutes: 45, periodEnd: addDaysISO(todayISO(), 14),
+};
+const MEMBER_ELITE = {
+  athleteId: 'reese', name: 'Reese Whitfield',
+  package: { id: 'elite', name: 'Elite', price: 1000, pending: false, tokens: null, windowDays: 45, kind: 'elite', access247: true },
+  tokens: TOKENS_ELITE, coaching: { used: 0, limit: 1 }, contractMinutes: 20, periodEnd: addDaysISO(todayISO(), 29),
+};
+const MEMBER_GRACE = {
+  athleteId: 'nico', name: 'Nico Whitfield',
+  package: { id: 't-6', name: '6 tokens', price: 300, pending: true, tokens: 6, windowDays: 32, kind: 'tokens' },
+  tokens: TOKENS_GRACE, coaching: null, contractMinutes: null, periodEnd: addDaysISO(todayISO(), 3),
+};
+const TOKEN_MEMBERS_FIXTURE = [MEMBER_TOKENS, MEMBER_ELITE, MEMBER_GRACE];
 
 /**
  * Review harness. Renders every component variant and every screen state side
@@ -102,7 +141,13 @@ export const SCREEN_STATES = [
              // wins over the first-child default when it names a real household
              // athlete - 'reese' here is the seed's second child, proving this
              // isn't just re-selecting whatever the default would have picked.
-             ['open', 'Parent · deep link to Reese', { role: 'parent', initialAthleteId: 'reese' }]] },
+             ['open', 'Parent · deep link to Reese', { role: 'parent', initialAthleteId: 'reese' }],
+             // Sprint 12 (contract v2.0, pin D): a date past the booking
+             // window renders locked, "opens 7 AM on <date>" — deep-mounted
+             // via demoSelectedDate (harness-only, BookSession.js's own doc
+             // comment) since the default 32-day window makes this state
+             // otherwise unreachable without a month-navigation sequence.
+             ['open', 'Window locked', { demoSelectedDate: addDaysISO(todayISO(), 60) }]] },
   { id: '06', title: 'Practice DNA', Screen: PracticeDNA, role: 'athlete',
     states: [['complete', 'Complete'], ['partial', 'Partial'], ['pending', 'Pending']] },
   { id: '07', title: 'Commitment Contract', Screen: CommitmentContract, role: 'athlete',
@@ -223,14 +268,12 @@ export const SCREEN_STATES = [
              ['empty-day', 'Empty day', { harnessStage: 'empty-day' }],
              // Parent's 'Booking for' selector, same idiom as BookSession's.
              ['slots', 'Parent · pick a child', { harnessStage: 'slots', role: 'parent' }],
-             // Sprint 11 pin G (TEAM.md, contract v1.9): the entitlement
-             // summary / blocking states, previewed off `demoEntitlementSource`
-             // (harness-only, see the screen's own doc comment) since
-             // an explicit harness override of the hook's own entitlement.
-             ['slots', 'Phil · fitness source', { harnessStage: 'slots', demoEntitlementSource: 'fitness' }],
-             ['slots', 'Phil · Elite source (v1.9.1)', { harnessStage: 'slots', demoEntitlementSource: 'elite' }],
-             ['slots', 'Phil · no fitness package', { harnessStage: 'slots', demoEntitlementSource: 'none' }],
-             ['slots', 'Yannick · flat cap', { harnessStage: 'slots', harnessSpecialistId: 'mental' }]] },
+             // Sprint 12 pin K (TEAM.md, contract v2.0): Yannick's flat
+             // monthly cadence is the only cap left (Phil now spends an
+             // ordinary token, no separate gating state) — `demoCapReached`
+             // (harness-only, see the screen's own doc comment) previews it.
+             ['slots', 'Yannick · flat cap', { harnessStage: 'slots', harnessSpecialistId: 'mental' }],
+             ['slots', 'Yannick · cap reached', { harnessStage: 'slots', harnessSpecialistId: 'mental', demoCapReached: true }]] },
   /*
    * Specialist Day / My Sessions (Sprint 9 amendment v1.7.1; nav + Today
    * section added Sprint 10 pins F/I) - the specialist's own day view, not
@@ -259,6 +302,14 @@ export const SCREEN_STATES = [
       ['loading', 'Loading'],
       ['error', 'Load failure'],
       ['empty', 'No linked athletes'],
+      // Sprint 12 (contract v2.0): token / Elite / grace-token member
+      // shapes, via demoMembers (harness-only — see Membership.js's own
+      // doc comment) since the seed hasn't been rebuilt against the new
+      // useMembership() payload yet.
+      ['populated', 'Tokens', { demoMembers: [MEMBER_TOKENS] }],
+      ['populated', 'Elite · no countdown', { demoMembers: [MEMBER_ELITE] }],
+      ['populated', 'Grace token', { demoMembers: [MEMBER_GRACE] }],
+      ['populated', 'Household · all three', { demoMembers: TOKEN_MEMBERS_FIXTURE }],
     ] },
   /*
    * Family Reservations (Sprint 11 pin F, TEAM.md, contract v1.9) — the
@@ -272,6 +323,21 @@ export const SCREEN_STATES = [
       ['loading', 'Loading'],
       ['error', 'Load failure'],
       ['empty', 'No linked athletes', { onBook: () => {} }],
+      // Sprint 12 (contract v2.0, pin B): the "next period" badge on a
+      // booking whose session date falls in a period not yet reached, via
+      // demoMembers (harness-only — see Reservations.js's own doc comment).
+      ['populated', 'Next period badge', {
+        onBook: () => {},
+        demoMembers: [{
+          athleteId: 'jordan', name: 'Jordan Whitfield',
+          upcoming: [{
+            id: 'r1', bookingId: 'r1', time: '4:00', meridiem: 'PM', type: 'training',
+            name: 'Training block', dayLabel: 'Mon, Oct 12', durationMinutes: 60,
+            isToday: false, cancellable: true, nextPeriod: true,
+          }],
+          past: [],
+        }],
+      }],
     ] },
   /*
    * Not provisioned (Sprint 4, real enrollment states added Sprint 10 pin
@@ -442,21 +508,29 @@ function ComponentGallery() {
           </div>
         </Spec>
 
-        <Spec label="Package card · confirmed pricing" width={380}>
+        <Spec label="Package card · one token catalogue" width={380}>
           <div style={{ display: 'flex', flexDirection: 'column', gap: 11 }}>
-            <PackageCard pkg={GOLF_PACKAGES[1]} onSelect={() => {}} />
-            <PackageCard pkg={FITNESS_PACKAGES[1]} onSelect={() => {}} selected />
-            <PackageCard pkg={ELITE_TIERS[0]} emphasised onSelect={() => {}} />
+            <PackageCard pkg={TOKEN_PACKAGES[0]} onSelect={() => {}} />
+            <PackageCard pkg={TOKEN_PACKAGES[2]} onSelect={() => {}} selected />
+            <PackageCard pkg={ELITE} emphasised onSelect={() => {}} />
+          </div>
+          <div style={{ font: `400 11px/1.5 ${font.body}`, color: color.textTertiary, marginTop: 12 }}>
+            {ALL_PACKAGES.length} packages in the catalogue — prices carry "pending" until Luke's OK.
           </div>
         </Spec>
 
-        <Spec label="Allowance pools · two, never one">
-          <AllowancePools allowance={ALLOWANCE} />
+        <Spec label="Token meter · one pool, never two">
+          <AllowancePools tokens={TOKENS_FIXTURE} />
           <div style={{ height: 1, background: color.rule, margin: '16px 0' }} />
-          <AllowancePools allowance={ALLOWANCE_NO_TOURNAMENTS} />
+          <AllowancePools tokens={TOKENS_LOW} />
+          <div style={{ height: 1, background: color.rule, margin: '16px 0' }} />
+          <AllowancePools tokens={TOKENS_ELITE} />
+          <div style={{ height: 1, background: color.rule, margin: '16px 0' }} />
+          <AllowancePools tokens={TOKENS_GRACE} />
+          <GraceLine tokens={TOKENS_GRACE} />
           <div style={{ font: `400 11px/1.5 ${font.body}`, color: color.textTertiary, marginTop: 14 }}>
-            Training and tournament entitlements do not substitute for each other, so a spent
-            pool never implies the other is spent.
+            A token is spent by any bookable session now — training, tournament, Phil, Yannick.
+            Elite shows no number.
           </div>
         </Spec>
 

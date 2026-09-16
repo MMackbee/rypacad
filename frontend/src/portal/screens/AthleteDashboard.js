@@ -1,7 +1,7 @@
 import React from 'react';
 import { useNavigate } from 'react-router-dom';
 import { color, font, glow, radius } from '../tokens';
-import AllowancePools from '../components/AllowancePools';
+import AllowancePools, { GraceLine } from '../components/AllowancePools';
 import BottomTabBar from '../components/BottomTabBar';
 import Button from '../components/Button';
 import MediaPlaceholder, { Avatar } from '../components/MediaPlaceholder';
@@ -115,11 +115,13 @@ export default function AthleteDashboard({
         */}
         {contract ? <ContractCard contract={contract} /> : null}
 
-        {/* Two numbers, never one - see AllowancePools. */}
-        {athlete?.allowance ? (
+        {/* Sprint 12 (contract v2.0): the allowance card becomes the tokens
+            card - ONE number; Elite shows no number, "Elite · unlimited"
+            (AllowancePools' own unlimited branch). */}
+        {athlete?.tokens ? (
           <Card>
             <div style={{ display: 'flex', alignItems: 'baseline', gap: 10, marginBottom: 12 }}>
-              <SectionLabel style={{ flex: 1 }}>Remaining this cycle</SectionLabel>
+              <SectionLabel style={{ flex: 1 }}>Tokens this period</SectionLabel>
               {/*
                 Sprint 11 pin D entry point: "AthleteDashboard's allowance
                 card gets a 'Membership' link." Direct navigate(), same
@@ -141,7 +143,8 @@ export default function AthleteDashboard({
                 Membership ›
               </button>
             </div>
-            <AllowancePools allowance={athlete.allowance} />
+            <AllowancePools tokens={athlete.tokens} />
+            <GraceLine tokens={athlete.tokens} />
           </Card>
         ) : null}
 
@@ -203,18 +206,16 @@ function DashboardSkeleton() {
         <SkeletonBar tone="raised" width="86%" height={9} style={{ marginTop: 14 }} />
       </SkeletonCard>
 
-      {/* Allowance: label + the two pools. */}
+      {/* Tokens: label + the one meter (Sprint 12: one pool, not two). */}
       <SkeletonCard>
         <SkeletonBar tone="raised" width={132} height={10} />
-        {[0, 1].map((i) => (
-          <div key={i} style={{ marginTop: i ? 11 : 15 }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 5 }}>
-              <SkeletonBar tone="raised" width={64} height={11} />
-              <SkeletonBar tone="raised" width={90} height={11} />
-            </div>
-            <SkeletonBar tone="raised" height={6} r={3} />
+        <div style={{ marginTop: 15 }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 5 }}>
+            <SkeletonBar tone="raised" width={64} height={11} />
+            <SkeletonBar tone="raised" width={90} height={11} />
           </div>
-        ))}
+          <SkeletonBar tone="raised" height={6} r={3} />
+        </div>
       </SkeletonCard>
 
       {/* Quick actions: two 78px tiles. */}
@@ -432,8 +433,8 @@ function NoSessions({ onBook }) {
       <MediaPlaceholder height={44} style={{ width: 44 }} />
       <ScreenTitle size={17}>No upcoming sessions</ScreenTitle>
       <Body size={12}>
-        Your last block was Thursday. Makeup sessions are unlimited within the billing cycle —
-        reschedule into any open age-appropriate block.
+        Nothing is on your schedule right now — book any open block. Cancelling with notice keeps
+        your token.
       </Body>
       <Button height={46} onClick={onBook} style={{ marginTop: 4 }}>
         Browse open slots

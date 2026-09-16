@@ -3,56 +3,59 @@ import { color, font } from '../tokens';
 import { useAssignPackages } from '../hooks';
 import Button from './Button';
 import { SelectField } from './Field';
+import NumericField from './NumericField';
 import SavedToast from './SavedToast';
 import { Body, Card, SectionLabel } from './Primitives';
-import { GOLF_PACKAGES, ELITE_TIERS, DROP_IN, FITNESS_PACKAGES } from '../data/packages';
+import { ALL_PACKAGES } from '../data/packages';
 
 /**
- * AthleteDetail's staff-side Membership card (Sprint 11 pin E, TEAM.md,
- * contract v1.9). Extracted out of screens/AthleteDetail.js into its own
- * component file to keep that screen under the project's file-size
- * convention — this card is self-contained (its own hook fallback, its own
- * local edit state) and AthleteDetail only needs to mount it and pass
- * `{athleteId, athlete, role}`.
+ * AthleteDetail's staff-side Membership card (Sprint 12 pin, TEAM.md
+ * "Sprint 12 pins — the token model", contract v2.0). Rewritten from the
+ * Sprint 11 two-select (golf + fitness) editor: ONE package select spanning
+ * the whole catalogue (t-6 … t-20, elite, single — `ALL_PACKAGES` from
+ * data/packages.js, names + price with "pending" when the catalogue flags
+ * it), plus a period-anchor-day control (1-28) that calls
+ * useHouseholdSettings().setPeriodAnchorDay. Save -> useAssignPackages().
+ * assign(athleteId, { packageId }) — one field now, not two.
  *
- * ops/owner get a golf package select (GOLF_PACKAGES + ELITE_TIERS + DROP_IN)
- * and a fitness package select (none + FITNESS_PACKAGES), Save ->
- * useAssignPackages, SavedToast on success, derived entitlements re-render
- * off the bump (the hook bumps 'athletes'; this card just renders what
- * useAthleteDetail returns next, same as everywhere else in this app).
- * coach/mental see the identical facts read-only. parent/athlete see
- * nothing here — their own view is screens/Membership.js. "No separate
- * staff route": this is the same /portal/athlete/:athleteId screen every
- * role already reaches, gated by `role` alone.
+ * ops/owner get the editor; coach/mental see the identical facts read-only;
+ * parent/athlete see nothing here (their own view is screens/Membership.js).
+ *
+ * INTEGRATION: useHouseholdSettings() is a genuinely NEW hook (TEAM.md's
+ * Sprint 12 hook seam) that does not exist anywhere in this worktree's
+ * hooks/index.js yet (confirmed by grep) — CRA's webpack build hard-fails on
+ * a statically-known import of a missing export (the Sprint 11 lesson,
+ * TEAM.md integration notes), so it is NOT imported here. The anchor-day
+ * control below is driven by a local harness fixture instead (`anchorDay`
+ * state seeded from `initialAnchorDay`, save is a local no-op that resolves
+ * after a beat) — see the `// INTEGRATION:` comment at its call site. Routing
+ * wires the real hook at merge.
  */
 
-const ALL_GOLF_PACKAGES = [...GOLF_PACKAGES, DROP_IN, ...ELITE_TIERS];
-const ELITE_IDS = new Set(ELITE_TIERS.map((p) => p.id));
+const PACKAGE_SELECT_OPTIONS = ALL_PACKAGES.map((p) => ({
+  value: p.id,
+  label: `${p.name} — $${p.price}${p.pending ? ' (pending)' : ''}`,
+}));
 
-export default function AthleteMembershipCard({ athleteId, athlete, role }) {
+export default function AthleteMembershipCard({ athleteId, athlete, role, initialAnchorDay = 1 }) {
   const canEdit = role === 'ops' || role === 'owner';
   const canView = canEdit || role === 'coach' || role === 'mental';
   if (!canView) return null;
 
-  const currentGolfId = athlete?.packageId ?? null;
-  const currentFitnessId = athlete?.fitnessPackageId ?? null;
+  const currentPackageId = athlete?.packageId ?? null;
 
   if (!canEdit) {
-    const golfName = ALL_GOLF_PACKAGES.find((p) => p.id === currentGolfId)?.name ?? '—';
-    const fitnessName = currentFitnessId
-      ? FITNESS_PACKAGES.find((p) => p.id === currentFitnessId)?.name ?? '—'
-      : 'None on file';
+    const packageName = ALL_PACKAGES.find((p) => p.id === currentPackageId)?.name ?? '—';
     return (
       <Card large>
         <SectionLabel style={{ marginBottom: 12 }}>Membership</SectionLabel>
-        <ReadOnlyRow label="Golf package" value={golfName} />
-        <ReadOnlyRow label="Fitness package" value={fitnessName} style={{ marginTop: 10 }} />
+        <ReadOnlyRow label="Package" value={packageName} />
       </Card>
     );
   }
 
   return (
-    <MembershipEditor athleteId={athleteId} currentGolfId={currentGolfId} currentFitnessId={currentFitnessId} />
+    <MembershipEditor athleteId={athleteId} currentPackageId={currentPackageId} initialAnchorDay={initialAnchorDay} />
   );
 }
 
@@ -65,49 +68,31 @@ function ReadOnlyRow({ label, value, style }) {
   );
 }
 
-// A distinct sentinel from SelectField's own '' (its disabled "Select"
-// placeholder) — fitness genuinely has a valid "intentionally none" choice,
-// which '' would collide with (two options both matching value="").
-const FITNESS_NONE = 'none';
-const FITNESS_SELECT_OPTIONS = [
-  { value: FITNESS_NONE, label: 'None' },
-  ...FITNESS_PACKAGES.map((p) => ({ value: p.id, label: p.name })),
-];
-const GOLF_SELECT_OPTIONS = ALL_GOLF_PACKAGES.map((p) => ({ value: p.id, label: p.name }));
-
-function MembershipEditor({ athleteId, currentGolfId, currentFitnessId }) {
-  const [golfId, setGolfId] = useState(currentGolfId ?? '');
-  const [fitnessId, setFitnessId] = useState(currentFitnessId ?? FITNESS_NONE);
-  // The athlete record loads after mount, so the selects follow the loaded
-  // values once they arrive - and after a save, when the bump refetches
-  // them (a no-op then, since they already match what was just chosen).
+function MembershipEditor({ athleteId, currentPackageId, initialAnchorDay }) {
+  const [packageId, setPackageId] = useState(currentPackageId ?? '');
+  // The athlete record loads after mount, so the select follows the loaded
+  // value once it arrives - and after a save, when the bump refetches it (a
+  // no-op then, since it already matches what was just chosen).
   React.useEffect(() => {
-    setGolfId(currentGolfId ?? '');
-    setFitnessId(currentFitnessId ?? FITNESS_NONE);
-  }, [currentGolfId, currentFitnessId]);
+    setPackageId(currentPackageId ?? '');
+  }, [currentPackageId]);
+
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
   const [error, setError] = useState(null);
-  // Timed, not permanent (unlike AthleteDetail's own StartContractCard's
-  // one-shot toast) — ops/owner may reassign a package more than once in a
-  // sitting, and replacing the whole card with a toast forever would mean a
-  // remount just to edit again.
   const savedTimer = React.useRef(null);
   React.useEffect(() => () => savedTimer.current && clearTimeout(savedTimer.current), []);
 
   const assignState = useAssignPackages();
-  const dirty = golfId !== (currentGolfId ?? '') || fitnessId !== (currentFitnessId ?? FITNESS_NONE);
+  const dirty = packageId !== (currentPackageId ?? '');
 
   const handleSave = async () => {
-    if (!golfId) return;
+    if (!packageId) return;
     setSaving(true);
     setError(null);
     setSaved(false);
     try {
-      await assignState.assign(athleteId, {
-        packageId: golfId,
-        fitnessPackageId: fitnessId === FITNESS_NONE ? null : fitnessId,
-      });
+      await assignState.assign(athleteId, { packageId });
       setSaved(true);
       if (savedTimer.current) clearTimeout(savedTimer.current);
       savedTimer.current = setTimeout(() => setSaved(false), 2600);
@@ -122,35 +107,11 @@ function MembershipEditor({ athleteId, currentGolfId, currentFitnessId }) {
     }
   };
 
-  /**
-   * Sprint 11 amendment v1.9.1 (owner ruling, relayed mid-sprint): Elite
-   * already includes 16 Phil sessions a month, so pairing it with an
-   * explicit fitness package is unusual but never blocked — an explicit
-   * fitness package still wins in the derivation (contract v1.9 C). This
-   * hint reads the PENDING (unsaved) golf selection, not the saved athlete
-   * record, so it reacts the moment ops/owner picks Elite rather than only
-   * after a save.
-   */
-  const showEliteHint = ELITE_IDS.has(golfId);
-
   return (
     <Card large>
       <SectionLabel style={{ marginBottom: 12 }}>Membership</SectionLabel>
       <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
-        <SelectField label="Golf package" value={golfId} options={GOLF_SELECT_OPTIONS} onChange={setGolfId} />
-        <div>
-          <SelectField
-            label="Fitness package"
-            value={fitnessId}
-            options={FITNESS_SELECT_OPTIONS}
-            onChange={setFitnessId}
-          />
-          {showEliteHint ? (
-            <Body size={11} tone={color.secondary} style={{ marginTop: 6 }}>
-              Elite already includes Phil sessions.
-            </Body>
-          ) : null}
-        </div>
+        <SelectField label="Package" value={packageId} options={PACKAGE_SELECT_OPTIONS} onChange={setPackageId} />
       </div>
 
       {error ? (
@@ -163,13 +124,66 @@ function MembershipEditor({ athleteId, currentGolfId, currentFitnessId }) {
 
       <Button
         height={46}
-        disabled={!golfId || !dirty}
+        disabled={!packageId || !dirty}
         loading={saving}
         onClick={handleSave}
         style={{ marginTop: 13 }}
       >
         {saving ? 'Saving' : 'Save membership'}
       </Button>
+
+      <div style={{ height: 1, background: color.rule, margin: '16px 0' }} />
+
+      <PeriodAnchorEditor initialAnchorDay={initialAnchorDay} />
     </Card>
+  );
+}
+
+/**
+ * Period anchor day (1-28) — the household's token-period start (contract
+ * v2.0 pin B). See this file's header INTEGRATION note: useHouseholdSettings
+ * does not exist in this worktree's hooks yet, so this control runs on a
+ * local fixture rather than a real write.
+ */
+function PeriodAnchorEditor({ initialAnchorDay }) {
+  const [anchorDay, setAnchorDay] = useState(initialAnchorDay);
+  const [saving, setSaving] = useState(false);
+  const [saved, setSaved] = useState(false);
+  const dirty = anchorDay !== initialAnchorDay;
+
+  const handleSave = async () => {
+    setSaving(true);
+    setSaved(false);
+    // INTEGRATION: wire useHouseholdSettings().setPeriodAnchorDay(anchorDay)
+    // here once routing lands the hook — this resolve() stands in for it so
+    // the control is reviewable (Save/Saved cycle, dirty gating) without a
+    // real write.
+    await new Promise((resolve) => setTimeout(resolve, 500));
+    setSaving(false);
+    setSaved(true);
+    setTimeout(() => setSaved(false), 2600);
+  };
+
+  return (
+    <div>
+      <SectionLabel style={{ marginBottom: 10 }}>Period anchor</SectionLabel>
+      <Body size={11} tone={color.textTertiary} style={{ marginBottom: 10 }}>
+        Day of the month the household's token period starts and tokens expire (1-28).
+      </Body>
+      <div style={{ display: 'flex', gap: 10, alignItems: 'flex-end' }}>
+        <div style={{ flex: 1 }}>
+          <NumericField
+            label="Anchor day"
+            value={anchorDay}
+            unit="1-28"
+            onChange={(v) => setAnchorDay(Math.min(28, Math.max(1, Number(v) || 1)))}
+          />
+        </div>
+        <Button height={44} disabled={!dirty} loading={saving} onClick={handleSave} style={{ flex: 'none', width: 120 }}>
+          {saving ? 'Saving' : 'Save'}
+        </Button>
+      </div>
+      {saved ? <SavedToast message="Anchor day saved" style={{ marginTop: 11 }} /> : null}
+    </div>
   );
 }

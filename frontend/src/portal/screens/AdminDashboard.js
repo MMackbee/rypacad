@@ -527,29 +527,20 @@ function EnrollmentCard({ rows, highlight }) {
   );
 }
 
+/**
+ * Sprint 12 (TEAM.md "Sprint 12 pins — the token model", pin J): "the
+ * Friday is the overflow block" footnote is deleted — Friday is a regular
+ * scheduled day now (Fri 3-5 PM, 60-min blocks per the locked weekly
+ * schedule), and the `overflow` field the old footnote's proxy leaned on is
+ * gone from the schedule generator. Nothing replaces it; a quiet Friday now
+ * reads exactly like a quiet day anywhere else in the week.
+ */
 function BlockFillCard({ bars, filtered }) {
   const barColor = (pct) => {
     if (pct >= 90) return color.primary;
     if (pct >= 50) return 'rgba(0,175,81,.55)';
     return color.controlBorder;
   };
-
-  /**
-   * Sprint 11 pin H (quick win): this footnote used to name Friday as the
-   * overflow block on every render, regardless of whether Friday actually
-   * ran that week — Friday is "off by default" (tokens.js/schedule.js), so
-   * a week with no Friday sessions at all still got a claim about its
-   * "expected" low fill. `blockFill`'s shape (hooks/index.js) only exposes
-   * `{day, pct}`, not a day's capacity, so a 0% Friday from zero capacity
-   * and a 0% Friday from a real-but-unbooked block are indistinguishable
-   * here — this reads the best available proxy (pct > 0 implies at least
-   * one booking landed, which implies capacity existed) rather than a true
-   * "did Friday run" signal. HOOK-SHAPE GAP flagged in the sprint report:
-   * blockFill should expose each day's capacity (or a `scheduled: boolean`)
-   * so this can gate on the real fact instead of a proxy.
-   */
-  const fridayBar = bars.find((b) => b.day === 'Fri');
-  const showFridayNote = Boolean(fridayBar && fridayBar.pct > 0);
 
   return (
     <Card large>
@@ -571,10 +562,9 @@ function BlockFillCard({ bars, filtered }) {
         ))}
       </div>
 
-      {filtered || showFridayNote ? (
+      {filtered ? (
         <Body size={11} tone={color.textTertiary} style={{ marginTop: 14 }}>
-          {filtered ? 'Facility-wide — block fill cannot be cut by tier. ' : ''}
-          {showFridayNote ? 'Friday is the overflow block — low fill there is expected, not a problem.' : ''}
+          Facility-wide — block fill cannot be cut by tier.
         </Body>
       ) : null}
     </Card>

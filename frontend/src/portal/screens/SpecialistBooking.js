@@ -1,9 +1,11 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { color, font, glow, radius, tint } from '../tokens';
+import { SpendNote } from '../components/AllowancePools';
+import { capReachedCopy, LockedDayNotice, reasonCopy } from '../components/BookingReasons';
 import BottomTabBar from '../components/BottomTabBar';
 import Button from '../components/Button';
-import EntitlementSummary, { demoEntitlement } from '../components/EntitlementSummary';
+import EntitlementSummary from '../components/EntitlementSummary';
 import PhoneFrame from '../components/PhoneFrame';
 import SessionCard from '../components/SessionCard';
 import { CapacityPill } from '../components/StatusBadge';
@@ -19,24 +21,28 @@ import {
   SignOutButton,
   Tick,
 } from '../components/Primitives';
-import { seedSpecialistDays, useBooking, useHouseholdAthletes, useSpecialistSlots } from '../hooks';
+import { seedSpecialistDays, useBooking, useHouseholdAthletes, useMembership, useSpecialistSlots } from '../hooks';
 import { SPECIALISTS } from '../data/specialists';
+import { windowDaysFor } from '../data/packages';
 // Pure calendar/season helpers per the seam rule already established in
 // BookSession.js/CommitmentContract.js/TourStandings.js - data still travels
 // through the hook seam below; these are formatting helpers, not response
 // data.
-import { longDayLabel, todayISO } from '../data/calendar';
+import { longDayLabel, openThrough, todayISO } from '../data/calendar';
 import { datePill } from '../data/season';
 
 /**
- * Sprint 11 pin G addendum (TEAM.md, contract v1.9): the summary line and
- * the "no fitness package" blocking notice read the relevant athlete's
- * Phil/mental entitlement off useSpecialistSlots' own `entitlement` (the
- * parent's selected child via athleteId, else the athlete's own record) -
- * the SAME entitlementsFor derivation Membership.js shows, never recomputed
- * here. components/EntitlementSummary.js holds the copy derivation and the
- * blocking-notice component (extracted to keep this file near the project's
- * file-size convention).
+ * Sprint 12 pin K (TEAM.md "Sprint 12 pins — the token model", contract
+ * v2.0): Phil and Yannick sessions now spend an ORDINARY token — the old
+ * fitness-package-sourced "N of M performance sessions" summary and the
+ * "no fitness package on file" blocking notice are both deleted (fitness
+ * packages don't exist any more; there is one catalogue, one pool). Only
+ * Yannick's flat monthly cadence cap survives, per the pin: "the Sprint 11
+ * 'no-fitness-package'/'cap-reached' Phil states are deleted; Yannick's
+ * 'cap-reached' stays with copy 'next mental game session opens <date>'."
+ * `useSpecialistSlots().data.tokens` replaces the old `.entitlement` (same
+ * shape useMembership()'s per-member `tokens` returns, per the pinned hook
+ * seam) — components/EntitlementSummary.js holds the copy derivation.
  *
  * 05·S · Specialist Booking - athlete + parent (Sprint 9 pin, docs/portal/
  * TEAM.md, "specialist 1-on-1s"). Life Time's own class-scheduling flow,
@@ -45,15 +51,6 @@ import { datePill } from '../data/season';
  * CTA -> saving -> the confirmed state, following BookSession's confirmation
  * idiom (practice/live split aside - this flow has no practice mode; the
  * pin does not ask for one).
- *
- * Integration note (PM merge, Sprint 9): this screen was built against
- * pinned shapes with local fallbacks while the routing lane's
- * data/specialists.js and useSpecialistSlots landed in a parallel worktree.
- * Those fallbacks are GONE — SPECIALISTS (including each specialist's
- * whatToExpect copy and capacity) and the slots hook are the real imports
- * above, the harness stages seed off the hook's own exported
- * seedSpecialistDays, and the reservation call rides useBooking's book()
- * (the routing lane's ruling: no booking action lives on the slots hook).
  */
 
 /**
@@ -75,10 +72,9 @@ import { datePill } from '../data/season';
  *   Real callers (routing) never pass this; omitted it defaults to the
  *   picker, exactly matching the pinned contract. Flagged in the sprint
  *   report.
- * @param {'fitness'|'elite'|'none'} [demoEntitlementSource]  HARNESS-ONLY,
- *   same category as `harnessStage` above - previews Phil's three summary/
- *   blocking states (G) in place of the hook's own entitlement. No real
- *   caller ever passes it.
+ * @param {boolean} [demoCapReached]  HARNESS-ONLY, same category as
+ *   `harnessStage` above - previews Yannick's 'cap-reached' state (pin K) in
+ *   place of the hook's own data. No real caller ever passes it.
  * @param {string} [harnessSpecialistId]  HARNESS-ONLY — which specialist
  *   `harnessStage` mounts directly into (defaults to SPECIALISTS[0], Phil).
  *   Lets the gallery deep-mount Yannick's flat-cap state too, the same way
@@ -92,7 +88,7 @@ export default function SpecialistBooking({
   onBack,
   onSignOut,
   harnessStage,
-  demoEntitlementSource,
+  demoCapReached,
   harnessSpecialistId,
 }) {
   const navigate = useNavigate();
@@ -101,10 +97,14 @@ export default function SpecialistBooking({
   const specialist = SPECIALISTS.find((s) => s.id === specialistId) || null;
 
   // Declared ahead of useSpecialistSlots so the parent's selected child can
-  // scope the hook's entitlement (Sprint 11 pin G); stays null for an
-  // athlete, whose own record the hook resolves by itself.
+  // scope the hook's tokens (Sprint 12 pin K); stays null for an athlete,
+  // whose own record the hook resolves by itself.
   const [selectedAthleteId, setSelectedAthleteId] = useState(null);
   const slotsState = useSpecialistSlots(specialistId, { athleteId: selectedAthleteId ?? undefined });
+  // Pin D: every session type uses the athlete's own package window now
+  // (SPECIALIST_BOOKING_WINDOW_DAYS deleted) - useMembership() supplies it.
+  const membershipState = useMembership();
+  const membershipMembers = membershipState.data?.members ?? [];
   // Memoized so its identity only changes when specialistId or the hook's
   // data actually changes - the effects below key off that stability rather
   // than an array literal rebuilt (and therefore "changed") on every render.
@@ -189,30 +189,34 @@ export default function SpecialistBooking({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isParent, householdAthletes.length, initialAthleteId]);
 
+  const selfMember = isParent
+    ? membershipMembers.find((m) => m.athleteId === selectedAthleteId) ?? null
+    : membershipMembers[0] ?? null;
+  const windowDays = windowDaysFor(selfMember?.package ?? null);
+  const openThroughDate = openThrough(new Date(), windowDays);
+
   // Reservation rides BookSession's own seam (routing's ruling: no booking
   // action lives on the slots hook): useBooking's book() with the tapped
-  // slot translated to its shape - { id, date, type }; the pool derives from
-  // the type inside book() via poolFor, and seed mode resolves locally.
+  // slot translated to its shape - { id, date, type }.
   const booking = useBooking();
   const reserve = (slot, opts) =>
     booking.book({ id: slot.sessionId, date: slot.date, type: specialistId }, opts);
   const disabledForNoAthlete = isParent && !selectedAthleteId;
 
-  // Sprint 11 pin G: the entitlement of the athlete being booked for - the
-  // hook scoped it by athleteId above. `demoEntitlementSource` is the
-  // harness's override for previewing Phil's three states.
-  const entitlement =
-    demoEntitlementSource && specialistId
-      ? demoEntitlement(specialistId, demoEntitlementSource)
-      : slotsState.data?.entitlement ?? null;
-  // Only Phil gates the reserve CTA — Yannick's flat cap has no 0-limit
-  // state (it is never sourced from a package), so 'none' cannot occur for
-  // mental (contract v1.9 C).
-  const noFitnessPackage = specialistId === 'phil' && entitlement?.source === 'none';
+  // Pin K: an ordinary token now. `capReached` (Yannick's flat monthly cap)
+  // reads an optional slotsState.data.capReached, absent in the pinned hook
+  // seam today (INTEGRATION gap like Membership.js's `coaching` field) —
+  // degrades to "not reached"; `demoCapReached` is the harness override.
+  const tokens = slotsState.data?.tokens ?? null;
+  const capReached =
+    demoCapReached != null ? demoCapReached : specialistId === 'mental' && Boolean(slotsState.data?.capReached);
+  const hasGrace = (tokens?.grace?.length ?? 0) > 0;
+  const tokensSpent = tokens ? !tokens.unlimited && tokens.left === 0 && !hasGrace : false;
+  const blocked = tokensSpent || capReached;
 
   const confirmReserve = (slot) => {
     if (reserving) return;
-    if (disabledForNoAthlete || noFitnessPackage) return;
+    if (disabledForNoAthlete || blocked) return;
     setFailure(null);
     setFailureReason(null);
     setReserving(slot.sessionId);
@@ -221,16 +225,15 @@ export default function SpecialistBooking({
       .then(() => {
         setReserving(null);
         setSheetSlot(null);
-        setBooked({ specialist, date: slot.date, time: slot.time });
+        setBooked({ specialist, date: slot.date, time: slot.time, tokens });
       })
       .catch((err) => {
         setReserving(null);
-        // Sprint 11 pin C/G: live.js's assertWithinMonthlyCap is supposed to
-        // throw a typed `reason` ('no-fitness-package' | 'cap-reached')
-        // alongside `.message` once routing lands it — not present in this
-        // worktree yet, so `err.reason` is read defensively and the sheet
-        // falls back to the plain message, same graceful-degrade every other
-        // typed-error consumer in this codebase already follows.
+        // Sprint 12 (contract v2.0): useBooking().book() rejects with a
+        // typed err.reason among 'no-tokens-left' | 'outside-window' |
+        // 'cap-reached' | 'full' — read defensively; a non-typed rejection
+        // falls back to the plain message, same graceful-degrade every
+        // other typed-error consumer in this codebase follows.
         setFailureReason(err && err.reason ? err.reason : null);
         setFailure(err && typeof err.message === 'string' && err.message ? err.message : null);
       });
@@ -241,6 +244,7 @@ export default function SpecialistBooking({
   }
 
   const selectedDay = days.find((d) => d.date === selectedDate) || null;
+  const selectedDateLocked = Boolean(selectedDate) && selectedDate > openThroughDate;
 
   return (
     <PhoneFrame
@@ -274,9 +278,7 @@ export default function SpecialistBooking({
 
         {!specialist ? (
           <div style={{ padding: '0 22px', display: 'flex', flexDirection: 'column', gap: 12 }}>
-            <Body size={12}>
-              Sessions with Phil and Yannick don't use your training or tournament allowance.
-            </Body>
+            <Body size={12}>Sessions with Phil and Yannick use a token, same as any other session.</Body>
             {SPECIALISTS.map((s) => (
               <SpecialistCard key={s.id} specialist={s} onSelect={() => setSpecialistId(s.id)} />
             ))}
@@ -297,23 +299,34 @@ export default function SpecialistBooking({
               <SpecialistHeader specialist={specialist} />
             </div>
             <div style={{ padding: '0 22px' }}>
-              <EntitlementSummary specialistId={specialistId} entitlement={entitlement} onSeeMembership={() => navigate('/portal/membership')} />
+              <EntitlementSummary
+                specialistId={specialistId}
+                tokens={tokens}
+                capReached={capReached}
+                onSeeMembership={() => navigate('/portal/membership')}
+              />
             </div>
             <div style={{ padding: '0 22px' }}>
               <DayStrip days={days} selectedDate={selectedDate} onSelect={setSelectedDate} />
             </div>
-            <div style={{ padding: '0 22px', display: 'flex', flexDirection: 'column', gap: 9 }}>
-              <SlotList
-                day={selectedDay}
-                specialist={specialist}
-                disabled={disabledForNoAthlete}
-                reserving={reserving}
-                onSelect={(slot, date) => {
-                  setFailure(null);
-                  setSheetSlot({ ...slot, date });
-                }}
-              />
-            </div>
+            {selectedDateLocked ? (
+              <div style={{ padding: '0 22px' }}>
+                <LockedDayNotice date={selectedDate} windowDays={windowDays} />
+              </div>
+            ) : (
+              <div style={{ padding: '0 22px', display: 'flex', flexDirection: 'column', gap: 9 }}>
+                <SlotList
+                  day={selectedDay}
+                  specialist={specialist}
+                  disabled={disabledForNoAthlete || blocked}
+                  reserving={reserving}
+                  onSelect={(slot, date) => {
+                    setFailure(null);
+                    setSheetSlot({ ...slot, date });
+                  }}
+                />
+              </div>
+            )}
           </>
         )}
       </div>
@@ -322,12 +335,12 @@ export default function SpecialistBooking({
         <DetailSheet
           specialist={specialist}
           slot={sheetSlot}
+          tokens={tokens}
           saving={reserving === sheetSlot.sessionId}
           failure={failure}
           failureReason={failureReason}
-          disabled={disabledForNoAthlete || noFitnessPackage}
-          noFitnessPackage={noFitnessPackage}
-          onSeeMembership={() => navigate('/portal/membership')}
+          disabled={disabledForNoAthlete || blocked}
+          capReached={capReached}
           onClose={() => {
             if (reserving) return;
             setSheetSlot(null);
@@ -506,35 +519,24 @@ function SlotList({ day, specialist, disabled, reserving, onSelect }) {
 
 /**
  * Bottom detail sheet on tap - specialist + discipline, long day label +
- * time, one what-to-expect line, the pinned allowance-exemption line, and a
- * single Reserve CTA with a saving state. Same bottom-sheet idiom
- * CommitmentContract's DaySheet/LogSheet already use.
+ * time, one what-to-expect line, what the booking spends (pin K: an ordinary
+ * token now, not an allowance exemption), and a single Reserve CTA with a
+ * saving state. Same bottom-sheet idiom CommitmentContract's DaySheet/
+ * LogSheet already use.
  */
 function DetailSheet({
   specialist,
   slot,
+  tokens,
   saving,
   failure,
   failureReason,
   disabled,
-  noFitnessPackage,
-  onSeeMembership,
+  capReached,
   onClose,
   onReserve,
 }) {
   const [time, meridiem] = (slot.time || '').split(' ');
-  /**
-   * Sprint 11 pin G: the typed reason from useBooking's book() (once routing
-   * lands it — see confirmReserve's catch block) gets its own copy rather
-   * than the raw thrown message; anything else falls back to the message
-   * verbatim, same as this sheet has always done.
-   */
-  const reasonCopy =
-    failureReason === 'no-fitness-package'
-      ? "No fitness package on file — Phil's performance sessions come from one."
-      : failureReason === 'cap-reached'
-      ? "This month's cap for this session type is already booked."
-      : null;
   return (
     <div
       onClick={saving ? undefined : onClose}
@@ -569,26 +571,17 @@ function DetailSheet({
         <Body size={12} style={{ marginTop: 12 }}>
           {specialist.whatToExpect}
         </Body>
-        <Body size={12} tone={color.textTertiary} style={{ marginTop: 10 }}>
-          This session does not use your training or tournament allowance.
-        </Body>
-        {noFitnessPackage ? (
-          <div style={{ marginTop: 12 }}>
-            <Body size={12} tone={color.secondary}>
-              No fitness package on file.{' '}
-              <button
-                type="button"
-                onClick={onSeeMembership}
-                style={{ background: 'none', border: 'none', padding: 0, font: `500 12px ${font.body}`, color: color.primary, cursor: 'pointer' }}
-              >
-                See membership ›
-              </button>
-            </Body>
-          </div>
+        <div style={{ marginTop: 10 }}>
+          <SpendNote tokens={tokens} />
+        </div>
+        {capReached ? (
+          <Body size={12} tone={color.secondary} style={{ marginTop: 12 }}>
+            {capReachedCopy()}
+          </Body>
         ) : null}
         {failure ? (
           <Body size={12} tone={color.error} style={{ marginTop: 12 }}>
-            {reasonCopy ?? failure} Nothing was reserved — try again.
+            {reasonCopy(failureReason) ?? failure} Nothing was reserved — try again.
           </Body>
         ) : null}
         <Button height={54} loading={saving} disabled={disabled} style={{ marginTop: 18 }} onClick={onReserve}>
@@ -720,12 +713,20 @@ function Confirmed({ bare, booked, onBack }) {
             <MetaCol label="With" value={booked.specialist.name} />
           </div>
           <div style={{ borderTop: `1px solid ${color.border}`, marginTop: 14, paddingTop: 12 }}>
-            <Body size={12}>This session does not use your training or tournament allowance.</Body>
+            <Body size={12}>Spends {spendLabelFor(booked.tokens)}.</Body>
           </div>
         </Card>
       </div>
     </PhoneFrame>
   );
+}
+
+/** "elite" | "grace" | "token" spend copy — mirrors BookSession's own helper. */
+function spendLabelFor(tokens) {
+  if (!tokens) return '1 token';
+  if (tokens.unlimited) return 'nothing — included with Elite';
+  if ((tokens.grace?.length ?? 0) > 0) return 'a bonus token';
+  return '1 token';
 }
 
 function MetaCol({ label, value }) {

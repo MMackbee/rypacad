@@ -12,7 +12,7 @@ import AllowancePools from '../components/AllowancePools';
 import SkeletonCard, { SkeletonBar } from '../components/Skeleton';
 import { AlertGlyph, Body, Card, ErrorNotice, ScreenTitle } from '../components/Primitives';
 import { useHousehold } from '../hooks';
-import { GOLF_PACKAGES, ELITE_TIERS, DROP_IN } from '../data/packages';
+import { ALL_PACKAGES } from '../data/packages';
 
 /**
  * Sprint 11 pin D entry point (TEAM.md, contract v1.9): "the ParentDashboard
@@ -21,11 +21,12 @@ import { GOLF_PACKAGES, ELITE_TIERS, DROP_IN } from '../data/packages';
  * useHouseholdAthletes does that join, and this screen intentionally reads
  * the fixed-card useHousehold instead — see its own header comment) — this
  * is a client-side lookup against the real catalogue, the same kind of pure
- * derivation PackageCard.js already does, not an invented name.
+ * derivation PackageCard.js already does, not an invented name. Sprint 12:
+ * one catalogue now (`ALL_PACKAGES`, data/packages.js) — the golf/fitness/
+ * Elite-tier lookup this replaced is deleted with the two-pool model.
  */
-const ALL_GOLF_PACKAGES = [...GOLF_PACKAGES, DROP_IN, ...ELITE_TIERS];
-function golfPackageName(packageId) {
-  return ALL_GOLF_PACKAGES.find((p) => p.id === packageId)?.name ?? null;
+function packageName(packageId) {
+  return ALL_PACKAGES.find((p) => p.id === packageId)?.name ?? null;
 }
 
 /**
@@ -235,7 +236,7 @@ function ChildCard({ child, onHold, onOpen, onBookFor, onOpenMembership }) {
   const standing = onHold
     ? { tone: 'red', label: 'On hold' }
     : child.standing;
-  const packageName = golfPackageName(child.packageId);
+  const childPackageName = packageName(child.packageId);
 
   return (
     // The whole card opens the athlete's detail (09) - the handoff's flow has
@@ -257,7 +258,7 @@ function ChildCard({ child, onHold, onOpen, onBookFor, onOpenMembership }) {
             conflict. Hidden without a resolvable package name or the
             callback, matching every other optional affordance in this file.
           */}
-          {packageName && onOpenMembership ? (
+          {childPackageName && onOpenMembership ? (
             <button
               type="button"
               onClick={(e) => {
@@ -274,7 +275,7 @@ function ChildCard({ child, onHold, onOpen, onBookFor, onOpenMembership }) {
                 cursor: 'pointer',
               }}
             >
-              {packageName} ›
+              {childPackageName} ›
             </button>
           ) : null}
         </div>
@@ -329,14 +330,13 @@ function ChildCard({ child, onHold, onOpen, onBookFor, onOpenMembership }) {
       </MetaRow>
 
       {/*
-        Two numbers per child, not one. Reese is the case that makes this
-        necessary: she has training sessions left but no tournament entries, and
-        her next session is a tournament. A single balance would have read "2
-        left" and hidden the conflict entirely.
+        Sprint 12 (contract v2.0): one token pool, not two - a single number
+        per child now (Elite: "Elite · unlimited", AllowancePools' own
+        unlimited branch).
       */}
-      <MetaRow label="Left" style={{ marginTop: 12 }}>
-        {child.allowance ? (
-          <AllowancePools allowance={child.allowance} compact />
+      <MetaRow label="Tokens" style={{ marginTop: 12 }}>
+        {child.tokens ? (
+          <AllowancePools tokens={child.tokens} compact />
         ) : (
           <span style={{ font: `400 12px ${font.body}`, color: color.textTertiary }}>—</span>
         )}
