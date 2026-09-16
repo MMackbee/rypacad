@@ -1,7 +1,7 @@
 import React from 'react';
 import { useNavigate } from 'react-router-dom';
 import { color, font } from '../tokens';
-import AllowancePools from '../components/AllowancePools';
+import AllowancePools, { GraceLine } from '../components/AllowancePools';
 import BottomTabBar from '../components/BottomTabBar';
 import MemberSection from '../components/MemberSection';
 import PhoneFrame from '../components/PhoneFrame';
@@ -10,20 +10,35 @@ import { BackLink, Body, Card, ErrorNotice, ScreenTitle, SectionLabel } from '..
 import { useMembership } from '../hooks';
 
 /**
- * 19 · Membership — parent + athlete (Sprint 11 pin D, contract v1.9).
- * Route /portal/membership; the retired /portal/billing redirects here
- * (routing lane). Life Time-style: one section per household member (an
- * athlete's own view has exactly one — themselves); per member a Golf card
- * (package + the two pools via the existing AllowancePools), a Performance
- * card (fitness package + Phil used/limit, or the honest "no package on
- * file" line), a Mental game line (Yannick's flat cap), and a contract-tier
- * line linking onward. Prices are catalogue facts ("$260 / month"), never
- * amounts due — and the word "billing" appears nowhere on this screen, per
- * the sprint's own invariant.
+ * 19 · Membership — parent + athlete (Sprint 12 pin, contract v2.0). Route
+ * /portal/membership; the retired /portal/billing redirects here (routing
+ * lane). Life Time-style: one section per household member (an athlete's own
+ * view has exactly one — themselves); per member ONE Tokens card (used /
+ * granted / left, a grace line when a bonus token is on file, and an honest
+ * "N booked next period" line), one Coaching line (Yannick's flat monthly
+ * cadence, pin K), and the contract-tier line linking onward. Elite reads a
+ * single "Unlimited · 24/7 access · books N days out" line with no
+ * countdown anywhere (pin L) — no Tokens card, no Coaching cap, since Elite
+ * has neither. Prices are catalogue facts, never amounts due, rendered with
+ * "pending" when the catalogue flags them so — and the word "billing" stays
+ * off every live member surface (unchanged Sprint 11 ruling; a membership
+ * *status* line is Part 2 and is not billing).
  *
- * ENTITLEMENTS ARE DERIVED FROM PACKAGES, NEVER STORED (the pin's own
- * keystone) — every number below is exactly what useMembership()'s
- * `entitlements` returns, never recomputed here.
+ * Golf/Performance cards and the old Mental line are deleted — this sprint
+ * replaced the two-pool entitlement model wholesale (TEAM.md "Sprint 12
+ * pins — the token model").
+ *
+ * ENTITLEMENTS ARE DERIVED, NEVER STORED (the pin's own keystone) — every
+ * number below is exactly what useMembership()'s `tokens` returns.
+ *
+ * INTEGRATION: the hook seam pinned for Sprint 12 (TEAM.md) does not list a
+ * per-member "coaching"/mental field on useMembership() — only `package` and
+ * `tokens`. The Coaching line below reads an optional `member.coaching:
+ * { used, limit }` (Yannick's SPECIALIST_MONTHLY_CAP.mental cadence) and
+ * renders nothing when it is absent, so this screen degrades honestly rather
+ * than guessing a shape. Flagged in the sprint report — routing needs to add
+ * this field (or tell frontend where the mental-cap count should come from
+ * instead).
  *
  * `variant` is harness-only: every live route passes the default
  * 'populated', a pure pass-through of useMembership() (seed or live). The
@@ -34,15 +49,25 @@ import { useMembership } from '../hooks';
  * @param {'parent'|'athlete'} [role]
  * @param {() => void} [onBack]  Hidden when not supplied.
  * @param {() => void} [onRetry]  Re-fetch after a load failure.
+ * @param {Array} [demoMembers]  HARNESS-ONLY — an explicit members array,
+ *   rendered as if `variant === 'populated'` had returned it. Real routes
+ *   never pass this; it exists only so the states gallery can preview
+ *   the tokens/Elite/grace-token member shapes the seed doesn't produce yet.
  */
-export default function Membership({ variant = 'populated', bare = false, role = 'parent', onBack, onRetry }) {
+export default function Membership({ variant = 'populated', bare = false, role = 'parent', onBack, onRetry, demoMembers }) {
   const hookState = useMembership();
   const navigate = useNavigate();
 
-  const demo = variant !== 'populated';
-  const loading = demo ? variant === 'loading' : hookState.loading;
-  const error = demo ? (variant === 'error' ? new Error("Membership didn't load.") : null) : hookState.error;
-  const data = demo ? (variant === 'empty' ? { household: null, members: [] } : null) : hookState.data;
+  const demo = variant !== 'populated' || Boolean(demoMembers);
+  const loading = demoMembers ? false : demo ? variant === 'loading' : hookState.loading;
+  const error = demoMembers ? null : demo ? (variant === 'error' ? new Error("Membership didn't load.") : null) : hookState.error;
+  const data = demoMembers
+    ? { household: null, members: demoMembers }
+    : demo
+    ? variant === 'empty'
+      ? { household: null, members: [] }
+      : null
+    : hookState.data;
 
   const allMembers = data?.members ?? [];
   const members = role === 'athlete' ? allMembers.slice(0, 1) : allMembers;
@@ -83,9 +108,12 @@ export default function Membership({ variant = 'populated', bare = false, role =
         ) : (
           members.map((member) => (
             <MemberSection key={member.athleteId} name={member.name}>
-              <GolfCard golf={member.golf} entitlements={member.entitlements} resetsOn={member.resetsOn} />
-              <PerformanceCard fitness={member.fitness} phil={member.entitlements?.phil} />
-              <MentalLine mental={member.entitlements?.mental} />
+              {member.package?.kind === 'elite' ? (
+                <EliteCard pkg={member.package} />
+              ) : (
+                <TokensCard pkg={member.package} tokens={member.tokens} />
+              )}
+              <CoachingLine coaching={member.coaching} />
               <ContractLine
                 contractMinutes={member.contractMinutes}
                 onOpen={() => openContract(member)}
@@ -99,72 +127,67 @@ export default function Membership({ variant = 'populated', bare = false, role =
   );
 }
 
-/** Catalogue price as a fact, never an amount due — Drop-in is per-session, everything else monthly. */
+/** Catalogue price as a fact, never an amount due — "pending" when the catalogue flags it. */
 function priceLine(pkg) {
   if (!pkg) return null;
-  const cadence = pkg.id === 'drop-in' ? '/ session' : '/ month';
-  return `$${pkg.price} ${cadence}`;
+  return `$${pkg.price} / period${pkg.pending ? ' · pending' : ''}`;
 }
 
-function GolfCard({ golf, entitlements, resetsOn }) {
+function TokensCard({ pkg, tokens }) {
+  const nextPeriodBooked = tokens?.nextPeriod?.booked ?? 0;
   return (
     <Card large>
-      <SectionLabel style={{ marginBottom: 4 }}>Golf</SectionLabel>
-      {golf ? (
+      <SectionLabel style={{ marginBottom: 4 }}>Tokens</SectionLabel>
+      {pkg ? (
         <>
           <div style={{ display: 'flex', alignItems: 'baseline', gap: 8, marginTop: 6, marginBottom: 12 }}>
-            <span style={{ font: `600 15px ${font.body}`, color: color.text }}>{golf.name}</span>
-            <span style={{ font: `400 11px ${font.body}`, color: color.textTertiary }}>{priceLine(golf)}</span>
+            <span style={{ font: `600 15px ${font.body}`, color: color.text }}>{pkg.name}</span>
+            <span style={{ font: `400 11px ${font.body}`, color: color.textTertiary }}>{priceLine(pkg)}</span>
           </div>
-          <AllowancePools allowance={{ training: entitlements.training, tournaments: entitlements.tournaments, resetsOn }} />
+          <AllowancePools tokens={tokens} />
+          <GraceLine tokens={tokens} />
+          {nextPeriodBooked > 0 ? (
+            <Body size={11} tone={color.textTertiary} style={{ marginTop: 8 }}>
+              {nextPeriodBooked} booked next period
+            </Body>
+          ) : null}
         </>
       ) : (
         <Body size={12} style={{ marginTop: 8 }}>
-          No golf package on file — ask the academy.
+          No package on file — ask the academy.
         </Body>
       )}
     </Card>
   );
 }
 
-/** "2 of 8 performance sessions used this month" (fitness) / "Included with Elite — 3 of 16 used this month" (elite). */
-function philSummary(phil) {
-  if (!phil) return null;
-  if (phil.source === 'elite') return `Included with Elite — ${phil.used} of ${phil.limit} used this month`;
-  if (phil.source === 'fitness') return `${phil.used} of ${phil.limit} performance sessions used this month`;
-  return null;
-}
-
-function PerformanceCard({ fitness, phil }) {
-  const summary = philSummary(phil);
+/** Pin L: "Unlimited · 24/7 access · books N days out." No countdown anywhere. */
+function EliteCard({ pkg }) {
   return (
-    <Card large>
-      <SectionLabel style={{ marginBottom: 4 }}>Performance</SectionLabel>
-      {fitness ? (
-        <div style={{ display: 'flex', alignItems: 'baseline', gap: 8, marginTop: 6 }}>
-          <span style={{ font: `600 15px ${font.body}`, color: color.text }}>{fitness.name}</span>
-          <span style={{ font: `400 11px ${font.body}`, color: color.textTertiary }}>{priceLine(fitness)}</span>
-        </div>
-      ) : summary ? null : (
-        <Body size={12} style={{ marginTop: 8 }}>
-          No fitness package on file — ask the academy.
-        </Body>
-      )}
-      {summary ? (
-        <Body size={12} style={{ marginTop: 8 }}>
-          {summary}
-        </Body>
-      ) : null}
+    <Card large tone="green">
+      <SectionLabel style={{ marginBottom: 4 }}>Membership</SectionLabel>
+      <div style={{ display: 'flex', alignItems: 'baseline', gap: 8, marginTop: 6, marginBottom: 10 }}>
+        <span style={{ font: `600 15px ${font.body}`, color: color.text }}>{pkg.name}</span>
+        <span style={{ font: `400 11px ${font.body}`, color: color.textTertiary }}>{priceLine(pkg)}</span>
+      </div>
+      <Body size={13} tone={color.primary} style={{ fontWeight: 600 }}>
+        Unlimited · 24/7 access · books {pkg.windowDays} days out
+      </Body>
     </Card>
   );
 }
 
-/** A line, not a card — the pin's own layout (Yannick's cap is always the flat, un-tiered knob). */
-function MentalLine({ mental }) {
-  if (!mental) return null;
+/**
+ * "Yannick: 1 of 1 this month" — the mental frequency knob (pin K,
+ * SPECIALIST_MONTHLY_CAP.mental). A line, not a card, per the pin's own
+ * layout. See this file's header INTEGRATION note: `member.coaching` is not
+ * yet a field the pinned useMembership() hook seam returns.
+ */
+function CoachingLine({ coaching }) {
+  if (!coaching) return null;
   return (
     <Body size={12} tone={color.textSecondary} style={{ padding: '0 2px' }}>
-      Mental game — {mental.used} of {mental.limit} sessions used this month
+      Yannick: {coaching.used} of {coaching.limit} this month
     </Body>
   );
 }
@@ -208,11 +231,9 @@ function MembershipSkeleton() {
           <SkeletonCard large>
             <SkeletonBar tone="raised" width={110} height={10} />
             <SkeletonBar tone="raised" width={150} height={15} style={{ marginTop: 10 }} />
-            {[0, 1].map((j) => (
-              <div key={j} style={{ marginTop: j ? 11 : 15 }}>
-                <SkeletonBar tone="raised" height={6} r={3} />
-              </div>
-            ))}
+            <div style={{ marginTop: 15 }}>
+              <SkeletonBar tone="raised" height={6} r={3} />
+            </div>
           </SkeletonCard>
           <SkeletonCard large height={64} />
         </div>
@@ -220,4 +241,3 @@ function MembershipSkeleton() {
     </div>
   );
 }
-

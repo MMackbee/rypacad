@@ -105,29 +105,75 @@ export const radius = {
 };
 
 /**
- * Flag 07 (handoff "Open Decisions"): revision 2 says three weekday afternoon
- * blocks without naming them. The academy runs junior programming only, and the
- * three junior blocks on the Blueprint's afternoon grid are these.
- *
- * Every schedule, booking and roster screen reads from here. If the real answer
- * is 3:30/4:30/5:30, or the three are not consecutive, this is the only edit.
+ * Flag 07 (handoff "Open Decisions"), Sprint 1-11 shape: three weekday
+ * afternoon blocks, Monday-Thursday. KEPT AS-IS (Sprint 12): data/seed.js
+ * (db lane, not touched this sprint) still indexes `BLOCKS[0..2]` for the
+ * coach-dashboard demo blocks — changing this array's shape would break that
+ * file's runtime with no edit access to fix it. It no longer describes the
+ * real academy week (see WEEKLY_SCHEDULE below, which does) — it is now
+ * scoped to that one seed fixture only. The db lane's own Sprint 12 pass
+ * (pin J) moves schedule.js to per-day blocks; this array can retire once
+ * seed.js follows.
  */
 export const BLOCKS = ['3:00 PM', '4:00 PM', '5:00 PM'];
-export const BLOCK_DAYS = ['Monday', 'Tuesday', 'Wednesday', 'Thursday'];
-export const BLOCK_DAYS_SHORT = BLOCK_DAYS.map((d) => d.slice(0, 3));
 
 /**
- * "3-6 PM", derived so it cannot drift from BLOCKS.
- *
- * Note: the handoff still says "3-7 PM" in two places (02's success step and
- * 12's flow caption). That is a leftover from the four-block grid — three
- * one-hour blocks starting at 3:00 end at 6:00, not 7:00. Deriving the label
- * keeps the copy correct if the block list changes again.
+ * The real locked weekly schedule (Sprint 12 pin J, owner ruling
+ * 2026-09-15): 60-minute blocks. Mon/Wed 3-6 PM, Tue/Thu 3-7 PM, Fri 3-5 PM,
+ * Sat 9 AM-2 PM (9 AM training + four more 60-min blocks — the 2-4 PM
+ * college/Elite Am/Mid Am pair is adult, in-person Stripe, not bookable in
+ * the app, so it is not listed here). Production sessions come from the
+ * Google Calendar sync — the schedule is a calendar edit by the owner, not a
+ * code change (pin J) — so this is the frontend's own copy of those hours,
+ * for empty-state and summary copy only. Values are 24h block-start hours.
  */
-export const BLOCK_RANGE_LABEL = (() => {
-  const first = parseInt(BLOCKS[0], 10);
-  const last = parseInt(BLOCKS[BLOCKS.length - 1], 10);
-  return `${first}-${last + 1} PM`;
+export const WEEKLY_SCHEDULE = {
+  Monday: [15, 16, 17],
+  Tuesday: [15, 16, 17, 18],
+  Wednesday: [15, 16, 17],
+  Thursday: [15, 16, 17, 18],
+  Friday: [15, 16],
+  Saturday: [9, 10, 11, 12, 13],
+};
+
+export const SCHEDULE_DAYS = Object.keys(WEEKLY_SCHEDULE);
+
+const SHORT_DAY = {
+  Monday: 'Mon', Tuesday: 'Tue', Wednesday: 'Wed', Thursday: 'Thu', Friday: 'Fri', Saturday: 'Sat',
+};
+
+function hour12(h) {
+  return ((h + 11) % 12) + 1;
+}
+
+/** One day's span, honestly crossing noon: "3-6 PM" / "9 AM-2 PM". */
+function daySpanLabel(day) {
+  const hours = WEEKLY_SCHEDULE[day];
+  if (!hours || !hours.length) return null;
+  const start = hours[0];
+  const end = hours[hours.length - 1] + 1; // every block is 60 minutes
+  const startsPM = start >= 12;
+  const endsPM = end >= 12;
+  if (startsPM === endsPM) return `${hour12(start)}-${hour12(end)} ${endsPM ? 'PM' : 'AM'}`;
+  return `${hour12(start)} ${startsPM ? 'PM' : 'AM'}-${hour12(end)} ${endsPM ? 'PM' : 'AM'}`;
+}
+
+/**
+ * "Mon/Wed 3-6 PM, Tue/Thu 3-7 PM, Fri 3-5 PM, Sat 9 AM-2 PM" — derived from
+ * WEEKLY_SCHEDULE so this sentence can never hardcode a schedule the
+ * calendar has since moved past (WEEKLY_SCHEDULE above is the one place to
+ * edit; pin J: the schedule itself is a calendar edit, not a code change).
+ * Replaces the old BLOCK_RANGE_LABEL, which derived only Mon-Thu 3-6 PM.
+ */
+export const WEEKLY_SCHEDULE_LABEL = (() => {
+  const groups = [];
+  for (const day of SCHEDULE_DAYS) {
+    const span = daySpanLabel(day);
+    const last = groups[groups.length - 1];
+    if (last && last.span === span) last.days.push(day);
+    else groups.push({ span, days: [day] });
+  }
+  return groups.map((g) => `${g.days.map((d) => SHORT_DAY[d]).join('/')} ${g.span}`).join(', ');
 })();
 
 /** The three training environments an athlete rotates through. */

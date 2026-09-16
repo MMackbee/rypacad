@@ -2,111 +2,124 @@ import React from 'react';
 import { color, font, radius } from '../tokens';
 
 /**
- * The two-pool allowance display — screens 03, 04, 05, 08.
+ * The token meter — screens 03, 04, 05, 08, 19 (Sprint 12, contract v2.0).
  *
- * Every package sells training sessions and tournament entries as two separate
- * monthly entitlements that do not substitute for each other. An athlete can
- * have training left with no tournament entries remaining, so a balance is
- * always two numbers. Showing one total is the bug this component exists to
- * prevent.
+ * ONE POOL, DERIVED (TEAM.md "Sprint 12 pins — the token model"): a token is
+ * spent by any bookable session now — training, tournament, Phil, Yannick —
+ * so a balance is one number, never two. This replaces the Sprint 1-11
+ * two-pool (training/tournaments) component of the same name and file; the
+ * filename stays so every screen's import line is unchanged, only the prop
+ * shape moved from `allowance={{training,tournaments}}` to
+ * `tokens={{granted,used,reserved,left,unlimited,grace,nextPeriod}}` — the
+ * exact shape `tokensFor()` (data/packages.js) and useMembership() return.
  *
- * Deliberately not built on <ProgressMeter>: that component's colour scale means
- * "on track / behind / no data" for contract completion and is documented as
- * never red. Consumption of an allowance is a different meaning — a spent pool
- * is a hard stop on booking — so it gets its own bar rather than overloading
- * one whose semantics do not apply.
+ * Elite shows no number at all (pin L: "No countdown anywhere for Elite") —
+ * `tokens.unlimited` short-circuits every branch below to a plain label.
  */
 
-const POOLS = [
-  { key: 'training', label: 'Training', noun: 'training sessions' },
-  { key: 'tournaments', label: 'Tournaments', noun: 'tournament entries' },
-];
-
 /** Exhausted reads as a stop, matching the handoff's red "limit reached" tone. */
-function toneFor(pool) {
-  if (pool.left === 0) return color.error;
-  if (pool.left === 1) return color.secondary;
+function toneFor(left) {
+  if (left === 0) return color.error;
+  if (left === 1) return color.secondary;
   return color.primary;
 }
 
 /**
- * @param {object} allowance  From makeAllowance() in ../data/packages.
- * @param {boolean} compact   One line, for a dense card (08).
+ * @param {object} tokens  `{ granted, used, left, unlimited, grace }` — see
+ *   `tokensFor()` in ../data/packages. `null`/`undefined` renders nothing
+ *   (no package assigned yet).
+ * @param {boolean} compact  One line, for a dense card (08).
  */
-export default function AllowancePools({ allowance, compact = false, style }) {
-  if (!allowance) return null;
+export default function AllowancePools({ tokens, compact = false, style }) {
+  if (!tokens) return null;
 
-  if (compact) {
+  if (tokens.unlimited) {
     return (
-      <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', ...style }}>
-        {POOLS.map(({ key, label }) => {
-          const pool = allowance[key];
-          return (
-            <span key={key} style={{ font: `400 11px ${font.body}`, color: color.textTertiary }}>
-              <span style={{ font: `600 12px ${font.body}`, color: toneFor(pool) }}>
-                {pool.left}
-              </span>{' '}
-              {label.toLowerCase()} left
-            </span>
-          );
-        })}
+      <div style={{ font: `600 13px ${font.body}`, color: color.primary, ...style }}>
+        Elite · unlimited
       </div>
     );
   }
 
-  return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 11, ...style }}>
-      {POOLS.map(({ key, label }) => {
-        const pool = allowance[key];
-        const tone = toneFor(pool);
-        const pct = pool.limit ? (pool.used / pool.limit) * 100 : 0;
+  const tone = toneFor(tokens.left);
 
-        return (
-          <div key={key}>
-            <div style={{ display: 'flex', alignItems: 'baseline', gap: 8, marginBottom: 5 }}>
-              <span
-                style={{
-                  font: `500 11px ${font.body}`,
-                  letterSpacing: '.06em',
-                  textTransform: 'uppercase',
-                  color: color.textSecondary,
-                  flex: 1,
-                }}
-              >
-                {label}
-              </span>
-              <span style={{ font: `600 12px ${font.body}`, color: tone }}>
-                {pool.left === 0 ? 'None left' : `${pool.left} left`}
-              </span>
-              <span style={{ font: `400 11px ${font.body}`, color: color.textTertiary }}>
-                {pool.used} of {pool.limit} used
-              </span>
-            </div>
-            <div style={{ height: 6, background: color.track, borderRadius: 3, overflow: 'hidden' }}>
-              <div style={{ width: `${pct}%`, height: '100%', background: tone, borderRadius: 3 }} />
-            </div>
-          </div>
-        );
-      })}
+  if (compact) {
+    return (
+      <span style={{ font: `400 11px ${font.body}`, color: color.textTertiary, ...style }}>
+        <span style={{ font: `600 12px ${font.body}`, color: tone }}>{tokens.left}</span> token
+        {tokens.left === 1 ? '' : 's'} left
+      </span>
+    );
+  }
+
+  const pct = tokens.granted ? Math.min(100, (tokens.used / tokens.granted) * 100) : 0;
+
+  return (
+    <div style={style}>
+      <div style={{ display: 'flex', alignItems: 'baseline', gap: 8, marginBottom: 5 }}>
+        <span
+          style={{
+            font: `500 11px ${font.body}`,
+            letterSpacing: '.06em',
+            textTransform: 'uppercase',
+            color: color.textSecondary,
+            flex: 1,
+          }}
+        >
+          Tokens
+        </span>
+        <span style={{ font: `600 12px ${font.body}`, color: tone }}>
+          {tokens.left === 0 ? 'None left' : `${tokens.left} left`}
+        </span>
+        <span style={{ font: `400 11px ${font.body}`, color: color.textTertiary }}>
+          {tokens.used} of {tokens.granted} used
+        </span>
+      </div>
+      <div style={{ height: 6, background: color.track, borderRadius: 3, overflow: 'hidden' }}>
+        <div style={{ width: `${pct}%`, height: '100%', background: tone, borderRadius: 3 }} />
+      </div>
     </div>
   );
 }
 
 /**
- * The line a slot shows before the athlete commits: which pool it spends, and
- * what is left in that pool. The handoff update is explicit that this has to be
- * visible at the point of decision rather than discovered at submit.
+ * "1 bonus token, expires <date>" — the pin's own grace-line wording
+ * (Membership.js). Reads the soonest-expiry entry only; `tokensFor()` already
+ * sorts `grace` soonest-first, so index 0 is always the one that would be
+ * spent next.
  */
-export function SpendNote({ pool, allowance }) {
-  if (!allowance || !pool) return null;
-  const p = allowance[pool];
-  // A pool this two-pool component doesn't model (e.g. 'specialist', which
-  // has its own screen and no group allowance) simply shows no spend note,
-  // rather than crashing on `p.left` (surface scan 2026-09-11, blocker D1).
-  if (!p) return null;
-  const noun = pool === 'tournaments' ? 'tournament entry' : 'training session';
-  const tone = p.left === 0 ? color.error : color.textTertiary;
+export function GraceLine({ tokens, style }) {
+  const grace = tokens?.grace?.[0];
+  if (!grace) return null;
+  return (
+    <div style={{ font: `400 11px ${font.body}`, color: color.secondary, marginTop: 6, ...style }}>
+      1 bonus token{grace.expiresAt ? `, expires ${grace.expiresAt}` : ''}
+    </div>
+  );
+}
 
+/**
+ * The line a slot shows before the athlete commits: what booking it spends.
+ * Elite spends nothing; a grace token (when present) is always spent before
+ * a period token (contract §4), so the note says so rather than claiming a
+ * period token is used when it is not.
+ */
+export function SpendNote({ tokens, style }) {
+  if (!tokens) return null;
+  if (tokens.unlimited) return <SpendBadge tone={color.primary} style={style}>Included with Elite</SpendBadge>;
+
+  const hasGrace = (tokens.grace?.length ?? 0) > 0;
+  if (tokens.left === 0 && !hasGrace) {
+    return <SpendBadge tone={color.error} style={style}>No tokens left</SpendBadge>;
+  }
+  return (
+    <SpendBadge tone={color.textTertiary} style={style}>
+      {hasGrace ? 'Uses a bonus token' : `Spends 1 token · ${tokens.left} left`}
+    </SpendBadge>
+  );
+}
+
+function SpendBadge({ tone, children, style }) {
   return (
     <span
       style={{
@@ -116,14 +129,13 @@ export function SpendNote({ pool, allowance }) {
         letterSpacing: '.04em',
         textTransform: 'uppercase',
         color: tone,
-        border: `1px solid ${p.left === 0 ? color.error : color.ruleFaint}`,
+        border: `1px solid ${tone === color.error ? color.error : color.ruleFaint}`,
         borderRadius: radius.badge,
         padding: '3px 7px',
+        ...style,
       }}
     >
-      {p.left === 0
-        ? `No ${pool === 'tournaments' ? 'tournament entries' : 'training sessions'} left`
-        : `Spends 1 ${noun} · ${p.left} left`}
+      {children}
     </span>
   );
 }
