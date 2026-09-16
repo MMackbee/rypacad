@@ -1,13 +1,13 @@
 import React, { useState } from 'react';
-import { BLOCK_RANGE_LABEL, color, font, radius, tint } from '../tokens';
+import { color, font, radius, tint, WEEKLY_SCHEDULE_LABEL } from '../tokens';
 import * as hooks from '../hooks';
 import Button, { Spinner } from '../components/Button';
 import Field, { SelectField } from '../components/Field';
 import PhoneFrame from '../components/PhoneFrame';
 import PackageCard from '../components/PackageCard';
 import { BackLink, Body, Card, ScreenTitle, SectionLabel, Tick } from '../components/Primitives';
-import { useEnrollmentForm, usePackages } from '../hooks';
-import { DROP_IN } from '../data/packages';
+import { useEnrollmentForm } from '../hooks';
+import { ALL_PACKAGES } from '../data/packages';
 
 /**
  * Sprint 10 pin A (TEAM.md, contract v1.8 §A): useEnrollment() does not
@@ -430,25 +430,19 @@ function AthleteStep({
 
 /**
  * Package pick, per athlete (Sprint 10 pin A/B: athletes[].packageId,
- * athletes[].contractMinutes). Reuses the same catalogue PackageStep reads
- * (usePackages()) and the same PackageCard unit - golf packages, the Drop-in
- * single session, and the Elite tiers (which REPLACE a golf pick rather than
- * stacking, same rule as PackageStep). Fitness add-ons are deliberately not
- * offered here - they are a Sprint 11 concern once the membership/
- * permissions surface exists to assign them (TEAM.md, "QUEUED AS SPRINT
- * 10"/"move to Sprint 11"), and the pinned enrollmentRequests schema itself
- * carries only ONE packageId per athlete, not a golf+fitness combo. The
- * optional contract tier (20/45/95, contract v1.8 §B - these three numbers
- * are the pinned set, not invented) sits directly below each athlete's
- * package choice.
+ * athletes[].contractMinutes; Sprint 12 pin, contract v2.0: ONE token pool,
+ * ONE package catalogue). `usePackages()` is dropped — `ALL_PACKAGES` (data/
+ * packages.js) is already the static catalogue seam both data modes build
+ * against (its own header comment: "both data modes call it"), so there is
+ * nothing left for a seed/live hook to wrap. Renders the four token packages
+ * (t-6…t-20) plus Elite, which REPLACES a token pick rather than stacking —
+ * same one-of-N rule PackageStep (below) uses. The optional contract tier
+ * (20/45/95, contract v1.8 §B) sits directly below each athlete's choice.
  */
 function PackageStep({ athletes, onUpdate, showErrors }) {
-  const { data: catalogue } = usePackages();
   const [activeKey, setActiveKey] = useState(athletes[0]?.key);
   const active = athletes.find((a) => a.key === activeKey) ?? athletes[0];
   if (!active) return null;
-
-  const dropIn = catalogue?.dropIn ?? DROP_IN;
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
@@ -481,39 +475,15 @@ function PackageStep({ athletes, onUpdate, showErrors }) {
         </div>
       ) : null}
 
-      <SectionLabel>Golf package{active.name.trim() ? ` — ${active.name.trim()}` : ''}</SectionLabel>
+      <SectionLabel>Package{active.name.trim() ? ` — ${active.name.trim()}` : ''}</SectionLabel>
       <div style={{ display: 'flex', flexDirection: 'column', gap: 11, marginTop: -6 }}>
-        {(catalogue?.golf ?? []).map((p) => (
-            <PackageCard
-              key={p.id}
-              pkg={p}
-              selected={active.packageId === p.id}
-              onSelect={() => onUpdate(active.key, { packageId: p.id })}
-            />
-          ))}
-        {dropIn ? (
+        {ALL_PACKAGES.map((p) => (
           <PackageCard
-            pkg={dropIn}
-            cadence="per session"
-            selected={active.packageId === dropIn.id}
-            onSelect={() => onUpdate(active.key, { packageId: dropIn.id })}
-            footnote="No monthly commitment. Booking opens three days ahead rather than on the full schedule."
-          />
-        ) : null}
-      </div>
-
-      <div style={{ display: 'flex', alignItems: 'baseline', gap: 9, marginTop: 4 }}>
-        <SectionLabel>Or choose Elite</SectionLabel>
-        <span style={{ font: `400 11px ${font.body}`, color: color.textTertiary }}>replaces the above</span>
-      </div>
-      <div style={{ display: 'flex', flexDirection: 'column', gap: 11, marginTop: -6 }}>
-        {(catalogue?.elite ?? []).map((t) => (
-          <PackageCard
-            key={t.id}
-            pkg={t}
-            emphasised
-            selected={active.packageId === t.id}
-            onSelect={() => onUpdate(active.key, { packageId: t.id })}
+            key={p.id}
+            pkg={p}
+            emphasised={p.kind === 'elite'}
+            selected={active.packageId === p.id}
+            onSelect={() => onUpdate(active.key, { packageId: p.id })}
           />
         ))}
       </div>
@@ -793,7 +763,7 @@ function Success({ bare, onFinish }) {
   const steps = [
     'Diagnostic Protocol booked',
     'Commitment Contract tier selected with your coach',
-    `First block on the ${BLOCK_RANGE_LABEL} weekday schedule`,
+    `First block on the schedule — ${WEEKLY_SCHEDULE_LABEL}`,
   ];
 
   return (
