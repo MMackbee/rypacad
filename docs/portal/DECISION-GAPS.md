@@ -48,14 +48,36 @@ integration notes in `TEAM.md`; nothing here is resolved by guessing.
   `users.athleteId`, `users.householdId` ⇄ `athletes.householdId`, and
   `bookings.createdBy` here. Names in the code stay as they are.
 
-## Functions (Part 2 blockers)
+## Functions
 
-- **Lint blocks any functions deploy.** `functions/.eslintrc.js` enforces
-  double quotes (`eslint-config-google` + an explicit rule) while
-  `functions/index.js` is written in single quotes, and `firebase.json`
-  runs `npm --prefix functions run lint` as the functions predeploy hook.
-  The Part 2 lane must either fix the file's quoting or drop the rule
-  before the Stripe handler and promotion trigger can deploy.
+- ~~Lint blocks any functions deploy.~~ Resolved in Sprint 13: the quotes
+  rule now matches the file's single-quote convention, `linebreak-style`
+  is off (CRLF working tree), and `npm --prefix functions run lint` passes.
+- **The kept 2025 triggers run on the v1 API by explicit import.** In
+  firebase-functions v6 `require('firebase-functions')` resolves to v2,
+  where `functions.firestore.document` and `functions.pubsub.schedule` do
+  not exist — nothing in `functions/` was loadable before Sprint 13. The
+  fix is `require('firebase-functions/v1')`; migrating the kept triggers to
+  v2 is a deliberate separate change, not something to do in passing.
+- **Stripe billing cycles anchored on the 29th–31st map to the 28th.** The
+  app's periods are anchor-day based and clamp to 1–28, so an invoice
+  whose period starts on Jan 31 issues `tokenPeriods/{athlete}_2026-01-28`
+  (the only id a hook can look up). Contract call: accept the clamp, or
+  require Stripe subscriptions to bill on the 1st–28th.
+- **Promotion notifications are email-only unless users carry a phone.**
+  The `users` table documents no phone field; `notify.js` reads
+  `phoneNumber` or `phone` when present and otherwise sends email only
+  through Courier. Decide whether provisioning should capture a guardian
+  phone on the users doc (households.guardian.phone exists today).
+- **`stripeEvents.outcome == 'processing'`** on a record means a follow-up
+  phase (revocation or downgrade trimming) crashed after the event was
+  recorded — the daily export should flag those for a manual re-run.
+- **`handleSMSResponse` confirms and cancels nothing** (unchanged): a
+  YES/NO reply needs a phone → athlete mapping the data model lacks.
+- **`onSessionUpdateNotifyWaitlist` is gone** — replaced by the
+  `onSessionBookedDecrease` promotion trigger, which treats an absent
+  `sessions.status` as `'scheduled'` (generator-written sessions carry no
+  status; calendar-synced ones do).
 - **`handleSMSResponse` confirms and cancels nothing.** The YES/NO handlers
   are the 2025 stubs; the webhook now verifies Twilio's signature and
   answers the sender, and that is all. Wiring a reply to a real booking
