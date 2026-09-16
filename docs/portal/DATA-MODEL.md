@@ -27,10 +27,10 @@ serves.
 | `enrollmentRequests` | the guardian's Firebase Auth uid | **Contract v1.8, Sprint 10.** Same rationale as `users`: the caller-identity check in rules (`request.auth.uid == uid`) is a plain equality against the doc id, no `get()` needed. Seed uses a readable slug (`parent-new`) like every other uid-keyed doc in the emulator. |
 | `athletes/{athleteId}/diagnostics` | auto id | **Contract v1.8, Sprint 10.** A capture history, not a keyspace-enforced singleton — an athlete gets many captures over time, so there is no natural deterministic key the way `bookings`/`contractLogs`/`tournamentResults` have one. Seed uses readable slugs (`published-1`, `draft-1`) in the same "readable over random, the emulator mints no real auto-ids anyway" spirit as the `users` row above. |
 | `staffInvites` | auto id | **Contract v1.8, Sprint 10.** Not a keyspace-enforced collection either — many invites can exist over time, including two for the same email (a re-invite after one lapses). Seed uses a readable slug (`invite-1`). |
-| `tokenPeriods` | `{athleteId}_{periodKey}` | **Contract v2.0, Part 2 (Sprint 13) — documented now, seeded empty.** One issuance doc per athlete per period, keyspace-enforced like `bookings`/`contractLogs`. See [below](#tokenperiods-contract-v20-part-2). |
-| `graceTokens` | auto id | **Contract v2.0, Part 2 — documented now, seeded empty.** Many grace tokens can exist over an athlete's history (one per minting event), no natural deterministic key. See [below](#gracetokens-contract-v20-part-2). |
-| `waitlist` | `{sessionId}_{athleteId}` | **Contract v2.0, Part 2 — documented now, seeded empty.** One waitlist entry per athlete per session, the same keyspace shape as `bookings`. See [below](#waitlist-contract-v20-part-2). |
-| `stripeEvents` | the Stripe `event.id` | **Contract v2.0, Part 2 — documented now, seeded empty.** Idempotency ledger for the webhook handler — the id IS the dedupe key, the same rationale as every other keyspace-enforced collection in this table. See [below](#stripeevents-contract-v20-part-2). |
+| `tokenPeriods` | `{athleteId}_{periodKey}` | **Contract v2.1, Part 2 (Sprint 13) — BUILT.** One issuance doc per athlete per period, keyspace-enforced like `bookings`/`contractLogs`. Seed uses one real doc (`tokenPeriods/jordan_<currentPeriodKey>`); see [below](#tokenperiods-contract-v21-part-2). |
+| `graceTokens` | auto id | **Contract v2.1, Part 2 — BUILT.** Many grace tokens can exist over an athlete's history (one per minting event), no natural deterministic key. Seed uses a readable slug (`grace-1`), the same "emulator mints no real auto-ids" convention as `staffInvites`/diagnostics ids above; the sweep script (`scripts/sweep-waitlist.mjs`) mints its own with a `sweep-<sessionId>-<athleteId>-<n>` slug for the same reason. See [below](#gracetokens-contract-v21-part-2). |
+| `waitlist` | `{sessionId}_{athleteId}` | **Contract v2.1, Part 2 — BUILT.** One waitlist entry per athlete per session, the same keyspace shape as `bookings`. Seed uses one real doc, on the ONE seed-only capacity-2 session (see [below](#waitlist-contract-v21-part-2)). |
+| `stripeEvents` | the Stripe `event.id` | **Contract v2.1, Part 2 — BUILT.** Idempotency ledger for the webhook handler — the id IS the dedupe key, the same rationale as every other keyspace-enforced collection in this table. Seed uses one fake event id (`evt_seed_2`) matching the format a real Stripe event id would take, never a real one. See [below](#stripeevents-contract-v21-part-2). |
 
 ## Collections
 
@@ -57,10 +57,10 @@ Guardian + billing linkage. **Never card data** — Stripe ids only.
 |---|---|---|
 | `name` | string | e.g. "Whitfield family" |
 | `guardian` | map | `{ name, email, phone }` — guardian contact. |
-| `stripeCustomerId` | string \| null | Id only. Card data never touches Firestore. |
-| `stripeSubscriptionId` | string \| null | Id only. |
-| `periodAnchorDay` | number \| absent | **Contract v2.0 (Sprint 12 pin B).** Int `1..28`, ops/owner-settable (Membership editor, routing lane). **Absent == 1** — every household provisioned before this sprint is validly anchored on the 1st without a migration. `periodFor(dateISO, anchorDay)` (`frontend/src/portal/data/packages.js`) turns this into the `{ periodKey, periodEnd }` pair every booking's `periodKey` and every token derivation reads against — see [bookings](#bookingsbookingid) below. The provisioner (`provision-family.mjs`) deliberately never writes this field (ops sets it in the app, per the pin); the seed writes it explicitly (1 for Whitfield, 15 for the second demo household) rather than leaving it absent, so a raw Firestore/REST read of the emulator shows the fact instead of relying on the absent-means-1 rule being invisible. |
-| `membership` | map \| absent | **Contract v2.0, Part 2 (Sprint 13) — documented now, not built.** `{ status: 'active' \| 'past_due' \| 'lapsed', stripeSubscriptionStatus, currentPeriodStart, currentPeriodEnd, lastEventId, updatedAt }`. **Absent == `'active'`** (the same absent-as-default pattern `periodAnchorDay` and the pre-v2.0 `fitnessPackageId` both used) — every household stays bookable until the Part 2 Stripe webhook handler (admin SDK only; no member or staff client write) writes otherwise. Not seeded, not provisioned, not written by any Part 1 code path. |
+| `stripeCustomerId` | string \| null | Id only. Card data never touches Firestore. **Contract v2.1 (Sprint 13 pin H):** ops/owner-settable through the household settings branch (routing lane's rules, `hasOnly` grows by this and `stripeSubscriptionId`) — the Stripe handler resolves an event to a household with `where stripeCustomerId == event.data.object.customer`, so this id has to reach Firestore from somewhere other than the webhook itself. Seed writes a fake `'cus_seed_parker'` on `parker`, null on `whitfield` (the other demo household has no fabricated Stripe story). |
+| `stripeSubscriptionId` | string \| null | Id only. **Contract v2.1:** ops/owner-settable alongside `stripeCustomerId` above. Not seeded on either demo household (the export script's `export-memberships.mjs` treats an absent value as `'not-linked'`, distinct from a live Stripe lookup that fails). |
+| `periodAnchorDay` | number \| absent | **Contract v2.0 (Sprint 12 pin B).** Int `1..28`, ops/owner-settable (Membership editor, routing lane). **Absent == 1** — every household provisioned before this sprint is validly anchored on the 1st without a migration. `periodFor(dateISO, anchorDay)` (`frontend/src/portal/data/packages.js`) turns this into the `{ periodKey, periodEnd }` pair every booking's `periodKey` and every token derivation reads against — see [bookings](#bookingsbookingid) below. The provisioner (`provision-family.mjs`) deliberately never writes this field (ops sets it in the app, per the pin); the seed writes it explicitly (1 for Whitfield, 15 for the second demo household) rather than leaving it absent, so a raw Firestore/REST read of the emulator shows the fact instead of relying on the absent-means-1 rule being invisible. **Contract v2.1:** the Stripe handler's `invoice.paid` action also SETS this, to the invoice period start's day-of-month (clamped `1..28`) — so the app's derived periods stay aligned to Stripe once a real subscription exists, not just to whatever ops typed into the editor. |
+| `membership` | map \| absent | **Contract v2.1, Part 2 (Sprint 13) — BUILT.** `{ status: 'active' \| 'past_due' \| 'lapsed', stripeSubscriptionStatus, currentPeriodStart, currentPeriodEnd, lastEventId, updatedAt }`. **Absent == `'active'`** (the same absent-as-default pattern `periodAnchorDay` and the pre-v2.0 `fitnessPackageId` both used) — every household stays bookable until the Stripe webhook handler (functions lane, admin SDK only; no member or staff client write clause) writes otherwise. Rules gate on it too: booking create AND waitlist create each do one `get()` of the caller's household and deny when `status` is `'past_due'`/`'lapsed'` (null-safe) — the freeze, enforced server-side, not a client courtesy. Seed: **absent on `whitfield`** (stays active, zero migration) and `{ status: 'past_due', stripeSubscriptionStatus: 'past_due', currentPeriodStart, currentPeriodEnd, lastEventId: 'evt_seed_2', updatedAt }` on `parker` — `currentPeriodStart`/`currentPeriodEnd` are `periodFor(today, 15)`'s own output at seed-run time (never hand-typed; e.g. `2026-09-15`..`2026-10-14` when seeded on 2026-09-16, the anchor-15 period containing that run's "today"), so a re-run on a different day writes a different, still-correct pair. `lastEventId` points at the seeded `stripeEvents/evt_seed_2` doc below, so the two facts cross-reference exactly as a real webhook write would leave them. |
 
 ### `athletes/{athleteId}`
 
@@ -119,6 +119,7 @@ TEAM.md Sprint 12 pin).
 | `pending` | boolean | **New, contract v2.0.** `true` on every package whose price the owner hasn't confirmed yet (all four token packages, plus `single`; `elite`'s `$1,000` is the owner's own stated figure, not pending). The UI may render "pending" beside a pending price. **Stripped from every seeded doc** (seed-firestore.mjs) alongside `price` — a seed with no real prices has no business asserting they're settled either — but kept on the production write (provisioner), same reasoning as `price` itself. |
 | `windowDays` | number | Rolling booking-window length (contract v2.0 pin D): `32` for every token package and `single`, `45` for `elite`. Replaces the old flat `SPECIALIST_BOOKING_WINDOW_DAYS` — every session type now uses the athlete's OWN package window, not a specialist-specific one. See [Periods, tokens and booking windows](#periods-tokens-and-booking-windows-contract-v20-sprint-12-part-1) below. |
 | `access247` | boolean | **Elite only** (absent on every other package — Elite is the only package with this key at all, not merely the only one where it is `true`). The 24/7 facility-access differentiator (pin L). 24/7 paperwork (waiver, age rule, door credentials, insurance) is outside the app. |
+| `stripePriceId` | string \| null | **New, contract v2.1 (Sprint 13 pin H).** Maps a Stripe Price to this package, so `customer.subscription.updated` (a package change) can resolve the new price to a `packageId`. **Not yet in the seam:** `frontend/src/portal/data/packages.js`'s `ALL_PACKAGES` (Sprint 12's PM seam) carries no `stripePriceId` field on any entry as of this pass — checked directly, not assumed — so neither `provision-family.mjs` nor `seed-firestore.mjs` write it (both spread the seam's package objects straight through; a field the seam doesn't have never reaches either script without a separate edit neither made here). **Absent == null**, the same "nothing breaks before Stripe lands" posture the rest of Part 2 uses. Documented now so routing's rules and the functions lane's price→package lookup have a field name to agree on; populating it (owner-set through the provisioner catalogue, "for now") is a follow-up once real Stripe Price ids exist — flagged for the PM, not this pass's to invent. |
 
 ### `sessions/{sessionId}`
 
@@ -321,9 +322,13 @@ One doc per athlete-session reservation. Doc id `{athleteId}_{sessionId}`.
 | ~~`pool`~~ | — | **RETIRED, contract v2.0 (Sprint 12 pin A).** Writers stop setting it; readers stop filtering on it. **Existing docs keep the field harmlessly** — this is a retirement, not a migration; nothing deletes it off old documents, and the rules' create-shape check drops `pool` from the required keys rather than forbidding it. `poolFor()` in `packages.js` (the function this field used to come from) is deleted below the seam's DEPRECATED banner. |
 | `periodKey` | string | **New, contract v2.0 (Sprint 12 pin B).** `'YYYY-MM-DD'`, write-once at create — the period **start** the booking's **session date** falls in, per `periodFor(sessions.date, household.periodAnchorDay)`. **Charging rule: a booking is charged against the period its session date falls in, never the period it is made in** — a January-anchored family booking a February session in January still gets `periodKey` = February's start; there is no "provisional" status in Part 1 (Part 2's `tokenPeriods` doc is what would make that distinction real). Rules shape-check it is a `YYYY-MM-DD` string; correctness (that it actually matches `periodFor()`'s output) is client-derived, the same accepted-gap class the cap check itself already is. |
 | `status` | string | `confirmed \| cancelled \| attended \| noshow`. **Contract v1.4** (Sprint 6): the `confirmed -> attended \| noshow` transitions are attendance, pinned below. **Contract v1.7** (Sprint 9) adds a **member-initiated** transition, `confirmed <-> cancelled` — see [Cancellation and re-booking](#cancellation-and-re-booking-contract-v17-sprint-9) below. **Contract v2.0:** cancellation is unchanged (pin G — the Aug 27 12-hour rule was never built and is formally withdrawn; "until the day before" stands). |
+| `cancelledBy` | string \| null | **New, contract v2.1 (Sprint 13 pin G).** `uid \| 'system'`. A member's own cancel (the existing `confirmed -> cancelled` rules branch) writes the caller's own uid; the two admin-SDK-only system paths — staff "Cancel session" (pin E) and the Stripe handler's lapse/downgrade revoke (pin H) — write `'system'`. Absent on every pre-v2.1 cancelled booking (nothing backfills history). |
+| `cancelReason` | string \| null | **New, contract v2.1 (Sprint 13 pin G).** `'member' \| 'session-cancelled' \| 'lapsed' \| 'downgrade'`. A member's own cancel writes `'member'` — the existing member-booking update branch's `hasOnly(['status'])` grows to `hasOnly(['status', 'cancelledBy', 'cancelReason'])` exactly for this pair, still no other field movable. `'session-cancelled'` (staff cancels the whole session, pin E), `'lapsed'`/`'downgrade'` (the Stripe handler, pin H) are values only an admin-SDK writer ever produces — reaching them requires the staff "Cancel session" action or the Stripe handler, neither of which is the member-booking update branch. **Not specified by the pin:** whether the member branch's rules additionally pin `cancelReason == 'member'` as a value constraint (vs. merely widening the field mask) is routing's implementation call, not asserted here. Cancelled rows with a system reason render a reason line (frontend lane); "until the day before" governs only the *member* cancel path, unchanged. |
 | `householdId` | string | Denormalized from the athlete for the parent's cross-children view and household-scoped rules. |
 | `createdBy` | string | uid of the account that made the booking (parent or athlete). **Contract v1.4:** for a parent-created booking this is the *parent's* uid, not the athlete's — see the linkage note below. |
 | `createdAt` | timestamp | |
+| `graceTokenId` | string \| null | **New, contract v2.1 (Sprint 13 pin E).** Set when this booking was charged from a grace token instead of the period (`createBooking`'s charge order: Elite -> nothing; else the soonest-expiring unconsumed grace token with `expiresAt >= session.date` -> this field + `chargedFrom: 'grace'`; else the period). A grace-charged booking is EXCLUDED from `tokensFor()`'s `used` count (the Sprint 13 seam amendment landed in `packages.js` — a grace token is a second life for a token the Academy could not honor, never a period spend). Consumption is derived, never stored elsewhere: "is grace token X consumed" == "does some non-cancelled booking carry `graceTokenId == X`". Not yet exercised by any seeded booking (no seeded booking references `graceTokens/grace-1` — the seed demonstrates the grace token existing and unconsumed, not the charge-order client code that would set this field, which lands with the routing lane's Part 2 work). |
+| `chargedFrom` | string \| null | **New, contract v2.1 (Sprint 13 pin C/E).** `'elite' \| 'grace' \| 'period' \| null` — which source paid for this booking, per the charge order above. Not yet written by this seed for the same reason as `graceTokenId` (the client charge-order code is routing's Part 2 work); documented here so the field name is agreed before that code lands. |
 
 **Token usage is derived, never stored (contract v2.0, supersedes the v1
 "allowance usage" paragraph below in full).** "N left this period" comes from
@@ -1250,56 +1255,199 @@ period's bookings (+ waitlist/grace/`tokenPeriods` in Part 2) inside the
 transaction; skips when `pkg.tokens === null`; typed reasons
 `'no-tokens-left'`, `'outside-window'`, `'membership-inactive'` (Part 2).
 
-### `tokenPeriods` (contract v2.0, Part 2)
+### `tokenPeriods` (contract v2.1, Part 2)
 
-**Documented now, seeded empty — Sprint 13, not built this sprint.**
-`tokenPeriods/{athleteId}_{periodKey}`: `{ athleteId, householdId,
-periodKey, periodEnd, granted, source: 'stripe' \| 'ops', createdAt }`.
-`granted` is **stored**, not derived — it is a fact about a payment/issuance
-event (the same class as `tournamentResults.score`), not a tally. Written by
-the Stripe handler (admin SDK) or by ops/owner (rules: create-only,
-shape-checked, id must equal `{athleteId}_{periodKey}`). **Members read own;
-no member write.** **Absent == `pkg.tokens`** — nothing provisioned in Part
-1 breaks when Part 2 lands.
+**BUILT, Sprint 13.** `tokenPeriods/{athleteId}_{periodKey}`: `{ athleteId,
+householdId, periodKey, periodEnd, granted (int), source: 'stripe' \|
+'ops', eventId (Stripe event id \| null), createdAt }`. `granted` is
+**stored**, not derived — it is a fact about a payment/issuance event (the
+same class as `tournamentResults.score`), not a tally. Written by the
+Stripe handler (functions lane, admin SDK, `source: 'stripe'`, `eventId`
+set) on `invoice.paid`, or by ops/owner from the membership editor's "Issue
+tokens" action (`source: 'ops'`, `eventId: null` — the cash/comp case;
+rules: create-only, shape-checked, doc id must equal
+`{athleteId}_{periodKey}`, `granted` an int `0..40`, `source == 'ops'` on a
+client write so a member can never forge a `'stripe'`-sourced doc). Read:
+member reads own (own athlete, or the parent's own household via one
+`get()` on the athlete) — **no member write**, no update or delete from any
+client. `tokensFor()`'s `opts.tokenPeriod` reads this doc **by id**, for the
+current period and (separately) the next — no query, no index, a plain
+document get exactly like the booking-transaction reads elsewhere in this
+schema. **Absent == `pkg.tokens`** — nothing provisioned in Part 1 breaks.
 
-### `graceTokens` (contract v2.0, Part 2)
+Seed: **one real doc**, `tokenPeriods/jordan_<currentPeriodKey>` —
+`granted: 12` (read off jordan's live `t-12` package at seed-run time, not
+hand-typed), `source: 'stripe'`, `eventId: 'evt_seed_1'` (fake — no real
+Stripe event backs it). `<currentPeriodKey>` is `periodFor(today,
+whitfield.periodAnchorDay)`'s own output at seed-run time, so the doc id
+itself moves with whenever the seed actually runs (e.g.
+`tokenPeriods/jordan_2026-09-01` when seeded on 2026-09-16) — never a frozen
+date. This is the CURRENT period (September, as of this document's own
+verification run), distinct from the November period her regular
+training/tournament bookings fall in — **but not empty of spend**: the
+three pre-existing Sprint 9/11 specialist bookings (`jordan_2026-09-17-s0`
+mental, `jordan_2026-09-14-s0` and `jordan_2026-09-11-s0` phil, all dated
+inside this same run's "next two weeks"/"past two Phil days" windows) carry
+this exact `periodKey` too, so `tokensFor()` reads `used: 3` against this
+doc's `granted: 12` the moment the seed loads (verified: `export-
+memberships.mjs`'s emulator run below prints `jordan:12/3/0/0`) — matching
+the "3 of 12 used" the Sprint 12 integration notes already recorded live.
+This is a property of WHEN the seed happens to run relative to those
+specialist windows, not something this pass engineered; a seed run far
+enough from any specialist slot could see `used: 0` against this same doc
+instead, and that would be equally correct.
 
-**Documented now, seeded empty — Sprint 13, not built this sprint.**
-`graceTokens/{auto}`: `{ athleteId, householdId, expiresAt (ISO date,
-minted + 30 days), reason: 'session-cancelled' \| 'waitlist-expired',
-sourceSessionId, createdBy, createdAt }`. Created by ops/owner (rules,
-shape) or the sweep script (`scripts/sweep-waitlist.mjs`, Part 2, admin).
-Members read own. **Consumed is derived, never stored:** a non-cancelled
-booking with `graceTokenId == id`. Exactly two minting triggers (TEAM.md pin
-E): staff cancels a session (every confirmed booking on it), or a waitlist
-entry's session date passes unpromoted. An athlete's own cancellation,
-leaving a waitlist, or revocation mints nothing.
+### `graceTokens` (contract v2.1, Part 2)
 
-### `waitlist` (contract v2.0, Part 2)
+**BUILT, Sprint 13.** `graceTokens/{auto}`: `{ athleteId, householdId,
+expiresAt ('YYYY-MM-DD', minted + 30 days), reason: 'session-cancelled' \|
+'waitlist-expired', sourceSessionId, createdBy (uid \| 'sweep'), createdAt
+}`. Created by ops/owner (rules: create, shape-checked, `reason ==
+'session-cancelled'` only from a client — `'waitlist-expired'` is
+admin-only, the sweep script's own value) or `scripts/sweep-waitlist.mjs`
+(admin SDK). Members read own (query `athleteId ==`, index
+[below](#v21-index-reasoning-sprint-13--token-model-part-2)).
+**Consumed is derived, never stored:** a non-cancelled booking with
+`graceTokenId == id` (see the `bookings.graceTokenId` row above). Exactly
+two minting triggers (TEAM.md pin E): (1) staff "Cancel session" — every
+confirmed booking on the session gets cancelled with `cancelledBy`/
+`cancelReason` (pin G) and one grace token each, idempotent (an athlete
+already holding a grace token for that `sourceSessionId` is not minted
+twice — the client action's own idempotency, chunked in batches of <= 8
+writes per the Sprint 10 ~20-doc rules cap); (2) `scripts/sweep-waitlist.mjs`
+— a waitlist entry whose session date has passed unpromoted. An athlete's
+own cancellation, leaving a waitlist voluntarily, or revocation (lapse)
+mints nothing.
 
-**Documented now, seeded empty — Sprint 13, not built this sprint** (except
-its index, added now — see [v2.0 index reasoning](#v20-index-reasoning-sprint-12--the-token-model)
-below).
+Seed: **one real doc**, `graceTokens/grace-1` — `athleteId: 'reese'`,
+`reason: 'session-cancelled'`, `sourceSessionId: '2026-11-11-0'` (a real
+generated Wednesday training block, not otherwise referenced by any other
+booking in this seed), `expiresAt` = seed-run "today" + 20 days,
+`createdBy: 'ops'`. **Deliberately paired with the pin's separate
+cancelled-booking fact (pin G)** rather than left as two unrelated facts:
+`sessions/2026-11-11-0.status` is `'cancelled'` and
+`bookings/reese_2026-11-11-0` carries `status: 'cancelled'`,
+`cancelledBy: 'system'`, `cancelReason: 'session-cancelled'` — the exact
+shape a real staff "Cancel session" action would leave, with the grace
+token minted for precisely that event. `sessions/2026-11-11-0.booked` is
+written as `0` (no confirmed booking survives the cancel), matching the
+"keep `sessions.booked` consistent with `bookings`" instruction.
+**Reconciliation note for the PM:** `status` is set on this ONE session
+doc only — the *generic* generated-session build loop in
+`seed-firestore.mjs` still does not write `status` at all (the pre-existing
+gap this document has flagged since Sprint 9: "generator-seeded sessions
+never write status/gcalEventId"). That gap is unchanged by this pass on
+purpose (out of this task's scope to fix broadly), but it now has a
+concrete consequence worth the PM's attention: routing's pin-F waitlist-create
+rule requires `status == 'scheduled'`, which is **false, not true**, for
+every ordinary generated session that has no `status` field at all (`null
+== 'scheduled'` is false) — only the two hand-seeded exceptions in this
+seed (the specialist slots, which always set `status: 'scheduled'`
+explicitly, and the new FULL session below, same reason) can accept a
+waitlist join as currently seeded. See the FULL-session note just below,
+and the [Seeding & emulator workflow](#seeding--emulator-workflow) section
+for where this is set.
+
+### `waitlist` (contract v2.1, Part 2)
+
+**BUILT, Sprint 13** (its index landed a sprint early — [v2.0 index
+reasoning](#v20-index-reasoning-sprint-12--the-token-model) above).
 `waitlist/{sessionId}_{athleteId}`: `{ sessionId, athleteId, householdId,
 date, periodKey, joinedAt, createdBy }` — the same one-entry-per-athlete-
 per-session keyspace shape `bookings` uses. Member create (own athlete /
 household parent; rules `get()` the session and require `booked >=
-capacity` and `status == 'scheduled'`); member delete (leave); admin delete
-(promote / expire). Elite entries count `0` reserved. **Promotion is
-server-side** (Part 2 Firestore trigger on `sessions/{id}` where `booked`
-decreased) — not built in Part 1.
+capacity` and `status == 'scheduled'`, **plus** (pin H) one `get()` of the
+household denying `past_due`/`lapsed` membership — the same freeze booking
+create enforces); member delete (leave); admin delete (promote / expire).
+`tokensFor()`'s `reserved` counts entries carrying the current `periodKey`.
+Elite entries count `0` reserved. **Promotion is server-side** (functions
+lane: a Firestore trigger on `sessions/{id}` where `booked` decreased,
+picking the head of the waitlist — grace-token holders first, soonest
+expiry, then `joinedAt` ascending — auto-confirm, no acceptance window) —
+not built by this DB-lane pass; `scripts/sweep-waitlist.mjs` (below) is
+this collection's *other* writer, for the expiry side.
 
-### `stripeEvents` (contract v2.0, Part 2)
+Seed: **ONE seed-only FULL session**, capacity **2** — **the single
+deliberate exception to the flat capacity-15 rule (contract v2.0 pin J)
+anywhere in this seed**, called out here in bold rather than left for a
+reader to stumble on. `sessions/2026-11-16-w0` (a new hand-added letter,
+`-w`, "waitlist", on the existing `-s`/`-x` extras convention; a real
+non-closure Monday inside `SEASON_BOUNDS`), `capacity: 2`, `booked: 2`,
+`status: 'scheduled'` (set explicitly, the same hand-seeded-session
+exception to the generic-loop gap noted above — this session NEEDS
+`status == 'scheduled'` to be a legal waitlist-join target under routing's
+pin-F rule). Booked by `jordan` and `reese` (both `confirmed`,
+`periodKey` set via `periodFor()`), with `waitlist/2026-11-16-w0_nico`
+(`joinedAt`, `periodKey`, `householdId: 'whitfield'`) completing the
+scenario — kept purely so the waitlisted state (a row, a position, a "Join
+waitlist" affordance) is exercisable in the emulator without inventing 15
+fabricated bookings on a real session.
 
-**Documented now, seeded empty — Sprint 13, not built this sprint.**
-`stripeEvents/{eventId}` — the Stripe webhook handler's idempotency ledger,
-keyed by the Stripe `event.id` itself so a redelivered event is a no-op by
-construction (the same "id is the dedupe key" pattern this schema already
-uses for `bookings`/`contractLogs`/`tournamentResults`, just with an
-externally-assigned id instead of a composed one). **Admin-only collection**
-— no member or staff client read or write; the webhook handler (admin SDK)
-is the sole writer. Not seeded, not provisioned: this collection has zero
-documents until the Part 2 handler deploys.
+### `stripeEvents` (contract v2.1, Part 2)
+
+**BUILT, Sprint 13.** `stripeEvents/{eventId}` — the Stripe webhook
+handler's idempotency ledger, keyed by the Stripe `event.id` itself so a
+redelivered event is a no-op by construction (the same "id is the dedupe
+key" pattern this schema already uses for
+`bookings`/`contractLogs`/`tournamentResults`, just with an
+externally-assigned id instead of a composed one). Shape (as built, pin H):
+`{ type, customer, householdId: string \| null, receivedAt, outcome }`,
+written by the handler in the same transaction as its effect.
+**Admin-only collection** — no member or staff client read or write from
+`firestore.rules`; the webhook handler (admin SDK) is the sole writer. An
+event that cannot be resolved to a household (`customer` matches no
+`households.stripeCustomerId`) is still recorded, with `householdId: null`
+— never thrown away, per pin H ("an unmatched event is recorded and
+skipped, never thrown").
+
+Seed: **one fake doc**, `stripeEvents/evt_seed_2` — `{ type:
+'invoice.payment_failed', customer: 'cus_seed_parker', householdId:
+'parker', receivedAt, outcome: 'past_due' }`, paired with
+`households/parker.stripeCustomerId: 'cus_seed_parker'` and
+`households/parker.membership.lastEventId: 'evt_seed_2'` above — the three
+facts cross-reference exactly as a real webhook write would leave them,
+never independent fixtures that happen to share a prefix.
+
+### v2.1 index reasoning (Sprint 13 — token model Part 2)
+
+- **`graceTokens (athleteId ASC, expiresAt ASC)` — new, added this sprint.**
+  Serves the member-read pattern (`graceTokens where athleteId == :id`,
+  soonest-expiry sort for the "spent first, soonest-expiry first" charge
+  order in `tokensFor()`) — an equality filter and an `orderBy` on a
+  **different** field, the same two-distinct-field shape that already
+  forced every other real composite in this file
+  ([index 4](#4-bookings-athleteid-asc-pool-asc-date-asc--cycle-usage)/[index 5](#5-bookings-sessionid-asc-status-asc--session-roster)/[index 7](#7-bookings-status-asc-date-asc--admin-no-show-query-contract-v18-sprint-10)/`waitlist (sessionId, joinedAt)`
+  above). `scripts/sweep-waitlist.mjs`'s idempotency check and
+  `scripts/export-memberships.mjs`'s per-athlete grace count both read
+  `graceTokens where athleteId == :id` too (no `orderBy` needed for either,
+  but the composite's leading field still serves a bare equality filter,
+  same as any composite does for its own prefix).
+- **The revoke query (pin H: "every household booking with `date > today`
+  and `status 'confirmed'`") — rides the EXISTING
+  [index 3](#3-bookings-householdid-asc-date-asc--parent-household-view)
+  (`bookings (householdId ASC, date ASC)`), unchanged since Sprint 6.** The
+  Stripe handler's lapse/downgrade path (and `export-memberships.mjs`'s
+  "open confirmed bookings" column) both read
+  `bookings where householdId == :id and date >= :today`, filtering
+  `status == 'confirmed'` client/handler-side — the same "filter the extra
+  dimension in memory" discipline every other `bookings` composite read in
+  this file already uses for `status` ([index 4](#4-bookings-athleteid-asc-pool-asc-date-asc--cycle-usage)'s
+  own note, restated for [index 7](#7-bookings-status-asc-date-asc--admin-no-show-query-contract-v18-sprint-10)).
+  **No new composite needed or added.**
+- **The daily export's other reads are all either a document get, a single
+  equality filter, or a range read already established as composite-free:**
+  per-athlete token position rides
+  [index 2](#2-bookings-athleteid-asc-date-asc--my-schedule) (bookings) and
+  the new `graceTokens` composite above (grace); `tokenPeriods` reads are
+  by document id (no index at all, same reasoning as every by-id read in
+  this file); `waitlist where householdId == :id` and
+  `bookings where householdId == :id and date >= :today` (for the "open"
+  counts) are, respectively, a single equality filter (automatic
+  single-field index, same reasoning as `athletes where householdId ==
+  :id`) and the exact index-3 shape the revoke bullet above already covers.
+  **`firestore.indexes.json` gains exactly one entry this sprint** —
+  `graceTokens (athleteId, expiresAt)` — everything else in Part 2 rides an
+  index that already existed.
 
 ### v2.0 index reasoning (Sprint 12 — the token model)
 
@@ -1548,3 +1696,58 @@ The seed script:
   pin A) — 24/7 access is `packages/elite.access247: true` now, not a
   second tier — so this whole bullet's `philSessions`/`elite-247` mechanics
   are historical record of the v1.9.1 ruling, not current schema.
+- **contract v2.1 (Sprint 13 pin, "token model Part 2") — the exact seed
+  facts the pin lists**, no more, no fewer, all computed off the seed's own
+  runtime clock (`today`, already built for the `contractLogs` block) rather
+  than hardcoded, the same discipline every date-dependent fact in this
+  script already follows:
+  - `tokenPeriods/jordan_<currentPeriodKey>` — `granted` read off jordan's
+    live `t-12` package (not hand-typed 12, though it evaluates to 12),
+    `source: 'stripe'`, a fake `eventId: 'evt_seed_1'`. `<currentPeriodKey>`
+    is `periodFor(today, 1)`'s own output at run time, so the doc id itself
+    tracks whenever the seed actually runs.
+  - `graceTokens/grace-1` for reese (`reason: 'session-cancelled'`,
+    `sourceSessionId: '2026-11-11-0'`, `expiresAt` = today + 20 days,
+    `createdBy: 'ops'`) — combined with the next bullet into ONE coherent
+    minting scenario (my judgment call, flagged in the report: pin E's own
+    two minting triggers make "staff cancelled a session reese was
+    confirmed on" the natural story, not two unrelated facts that happen to
+    share a name).
+  - The cancelled-session/cancelled-booking pair (pin G): a real generated
+    session, `2026-11-11-0` (Wed 3 PM training, not otherwise referenced by
+    this seed), gets `status: 'cancelled'` and `booked: 0`; reese's booking
+    there, `reese_2026-11-11-0`, gets `status: 'cancelled'`,
+    `cancelledBy: 'system'`, `cancelReason: 'session-cancelled'` — the grace
+    token above is minted for exactly this event.
+  - ONE seed-only FULL session, `2026-11-16-w0` — **the single exception to
+    the flat capacity-15 rule (pin J) anywhere in this seed**, a new
+    hand-added letter (`-w`) on the existing `-s`/`-x` extras convention,
+    `capacity: 2`, booked by jordan and reese (both `confirmed`, `periodKey`
+    set via `periodFor()`), with `waitlist/2026-11-16-w0_nico` completing
+    the scenario so the waitlisted state (row, position, "Join waitlist")
+    is exercisable without inventing 15 fabricated bookings on a real
+    session. This session's `status` is set explicitly to `'scheduled'` —
+    unlike the generic generated-session loop, which still writes no
+    `status` field at all (the pre-existing gap this document has flagged
+    since Sprint 9); see the `waitlist` collection section above for why
+    this matters to routing's pin-F rule.
+  - `households.membership` — **absent on `whitfield`** (stays active, zero
+    migration) and `{ status: 'past_due', stripeSubscriptionStatus:
+    'past_due', currentPeriodStart, currentPeriodEnd, lastEventId:
+    'evt_seed_2', updatedAt }` on `parker` (its own anchor-15 period via
+    `periodFor()`, never hand-typed), plus `parker.stripeCustomerId:
+    'cus_seed_parker'` (was `null`).
+  - `stripeEvents/evt_seed_2` — `{ type: 'invoice.payment_failed', customer:
+    'cus_seed_parker', householdId: 'parker', receivedAt, outcome:
+    'past_due' }`, cross-referencing `parker`'s `stripeCustomerId` and
+    `membership.lastEventId` above rather than an independent fixture.
+  - `sessions.booked` stays consistent with `bookings` throughout (the same
+    invariant every earlier booking loop in this script maintains): the
+    cancelled session's `booked` drops to `0`, the FULL session's `booked`
+    is written as `2` (== its capacity), matching what a real transaction
+    sequence would have left behind.
+  - `main()`'s print-plan output gains five dedicated blocks (`tokenPeriods`,
+    `graceTokens`, the cancelled session/booking pair, the FULL
+    session/waitlist trio, `households.membership` + `stripeEvents`) listing
+    every new doc by id, alongside the generic per-collection sample dump
+    every collection already gets.
