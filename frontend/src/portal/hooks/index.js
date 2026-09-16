@@ -76,6 +76,7 @@ import {
   setAthletePackages,
   setBookingNoshowReason,
   setContractTier,
+  setHouseholdPeriodAnchorDay,
   setSessionCoachNote,
   submitMyEnrollmentRequest,
   updateBookingStatus,
@@ -97,20 +98,22 @@ import {
   BOOKED_PAST,
   BOOKING_CONFIRMATION,
   CANCELLED_SESSION,
-  ALLOWANCE,
-  ALLOWANCE_NO_TRAINING,
-  ALLOWANCE_NO_TOURNAMENTS,
+  TOKENS,
+  TOKENS_EXHAUSTED,
+  PERIOD_ANCHOR_DAY,
+  ATHLETE_PACKAGE,
   SESSION,
   ROSTER,
 } from '../data/seed';
 import {
-  DROP_IN,
-  ELITE_TIERS,
-  FITNESS_PACKAGES,
-  GOLF_PACKAGES,
-  entitlementsFor,
-  makeAllowance,
-  poolFor,
+  ELITE,
+  SINGLE_TOKEN,
+  TOKEN_PACKAGES,
+  normalizeAnchorDay,
+  packageById,
+  periodFor,
+  tokensFor,
+  windowDaysFor,
 } from '../data/packages';
 import {
   SEASON,
@@ -138,7 +141,7 @@ import {
   buildContractMonthFromLogs,
   longDayLabel,
   monthBounds,
-  nextMonthFirstShort,
+  openThrough,
   parseTimeToMinutes,
   pickDueDates,
   todayISO,
@@ -171,7 +174,7 @@ import {
   NEWSLETTER_STATES,
 } from '../data/admin';
 import { TOUR_SEED, bracketFor, deriveTourStandings } from '../data/tour';
-import { SPECIALISTS, SPECIALIST_BOOKING_WINDOW_DAYS, isSpecialistType } from '../data/specialists';
+import { SPECIALISTS, isSpecialistType } from '../data/specialists';
 
 export { default as useSeedResource } from './useSeedResource';
 export { default as useAuthSession } from './useAuthSession';
@@ -230,12 +233,10 @@ function displaySession(s, today) {
     // sessions exist to book.
     name: s.label || genericSessionName(s.type),
     // The generator assigns no coach or bay - coachId is null by design, so
-    // nothing is invented here.
-    meta: s.special
-      ? 'Holiday event · open to tournament competitors'
-      : s.overflow
-      ? 'Friday overflow block'
-      : null,
+    // nothing is invented here. `overflow` is retired (contract v2.0, pin J
+    // - the Friday overflow block concept is gone from the locked weekly
+    // schedule; the generator no longer produces the field at all).
+    meta: s.special ? 'Holiday event · open to tournament competitors' : null,
   };
 }
 
@@ -269,7 +270,10 @@ async function liveAthleteContext() {
   const athlete = await fetchAthlete(profile.athleteId);
   const pkg = athlete.packageId ? await fetchPackage(athlete.packageId) : null;
   const bookings = await fetchBookings(profile.athleteId);
-  return { profile, athlete, pkg, bookings };
+  // The household's periodAnchorDay (contract v2.0, pin B) - every token
+  // position and period badge this context feeds needs it; absent == 1.
+  const household = athlete.householdId ? await fetchHousehold(athlete.householdId) : null;
+  return { profile, athlete, pkg, bookings, household };
 }
 
 /**
@@ -290,32 +294,47 @@ async function liveAthleteIdentity() {
   return { profile, athlete };
 }
 
+// `packageById` (data/packages.js) is now imported directly - ONE catalogue
+// (TOKEN_PACKAGES + ELITE + SINGLE_TOKEN, contract v2.0 pin A), so there is
+// no second local lookup to keep in sync with it anymore.
+
 /**
- * The full package catalogue as one flat list, and a lookup by id - used to
- * join an athlete's packageId to its name (and, for billing only, its
- * STATIC price; Firestore package docs carry no price by policy).
+ * One athlete's token position for the CURRENT period (contract v2.0, pin B
+ * - replaces deriveAllowance and its two-pool math entirely), derived by
+ * counting this period's non-cancelled bookings against the package's
+ * grant - per the contract there is no stored counter to drift. `anchorDay`
+ * is the household's periodAnchorDay (normalizeAnchorDay already applied by
+ * the caller); the period itself is periodFor(today, anchorDay) - "today",
+ * not the session date, because this is a POSITION as of right now, the
+ * same thing the old allowance's "used/left" pair stated for its own cycle.
+ * No waitlist/graceTokens/tokenPeriods doc exist yet (Part 2) - tokensFor
+ * treats their absence as "none of those, and the package's own tokens is
+ * the grant" (pin C: "absent tokenPeriods == the package's grant").
  */
-const PACKAGE_CATALOGUE = [...GOLF_PACKAGES, DROP_IN, ...FITNESS_PACKAGES, ...ELITE_TIERS];
-function packageById(packageId) {
-  return PACKAGE_CATALOGUE.find((p) => p.id === packageId) || null;
+function deriveTokens(pkg, bookings, anchorDay, today) {
+  if (!pkg) return null;
+  const { periodKey } = periodFor(today, anchorDay);
+  return tokensFor(null, pkg, bookings, [], [], periodKey, { today });
 }
 
 /**
- * The two-pool allowance, derived by counting this cycle's bookings against
- * the package limits - per the contract there is no stored counter to drift.
- * Cancelled bookings do not spend; attended/no-show ones already did.
- * The cycle is the calendar month, resetting on the first (matching the
- * seed's RESETS_ON); true Stripe billing anchors are a later refinement.
+ * The FULL `members[].tokens` shape (contract v2.0, pin N) - deriveTokens'
+ * position plus `nextPeriod: { periodKey, booked }`: the period immediately
+ * after the current one, and how many non-cancelled bookings the athlete
+ * already holds in it (the advance-booking count the charging rule caps at
+ * one package's worth, contract v2.0 §6). Shared by useMembership's member
+ * rows and useSpecialistSlots' `tokens` field so neither can disagree with
+ * the other about what "next period" means for the same athlete.
  */
-function deriveAllowance(pkg, bookings, today) {
-  if (!pkg) return null;
-  const cycleStart = `${today.slice(0, 7)}-01`;
-  const spent = bookings.filter((b) => b.status !== 'cancelled' && b.date >= cycleStart);
-  return makeAllowance(pkg, {
-    trainingUsed: spent.filter((b) => b.pool === 'training').length,
-    tournamentsUsed: spent.filter((b) => b.pool === 'tournaments').length,
-    resetsOn: nextMonthFirstShort(today),
-  });
+function tokensWithNextPeriod(pkg, bookings, anchorDay, today) {
+  const position = deriveTokens(pkg, bookings, anchorDay, today);
+  if (!position) return null;
+  const { periodEnd } = periodFor(today, anchorDay);
+  const nextPeriodKey = periodFor(addDaysISO(periodEnd, 1), anchorDay).periodKey;
+  const booked = (bookings || []).filter(
+    (b) => b && b.status !== 'cancelled' && b.periodKey === nextPeriodKey
+  ).length;
+  return { ...position, nextPeriod: { periodKey: nextPeriodKey, booked } };
 }
 
 /** Sort key: chronological, then block order (session ids end in the block index). */
@@ -327,36 +346,46 @@ function byDateThenId(a, b) {
 async function liveSchedule(today) {
   const ctx = await liveAthleteContext();
   const active = ctx.bookings.filter((b) => b.status !== 'cancelled');
+  // Contract v2.0, pin N: items gain periodKey + nextPeriod (periodKey >
+  // today's own periodKey for the household).
+  const anchorDay = normalizeAnchorDay(ctx.household?.periodAnchorDay);
+  const currentPeriodKey = periodFor(today, anchorDay).periodKey;
 
-  // Join bookings to their session docs - time, label and overflow/special
-  // flags live on the session, and a booking whose session no longer exists
-  // is dropped rather than rendered, mirroring the seed's null-resolve rule.
+  // Join bookings to their session docs - time, label and special flags
+  // live on the session, and a booking whose session no longer exists is
+  // dropped rather than rendered, mirroring the seed's null-resolve rule.
   const sessionsById = new Map(
     (await fetchSessionsByIds(active.map((b) => b.sessionId))).map((s) => [s.id, s])
   );
   const resolve = (b) => {
     const s = sessionsById.get(b.sessionId);
-    return s
-      ? {
-          ...displaySession(s, today),
-          badge:
-            b.status === 'confirmed'
-              ? { tone: 'green', label: 'Confirmed' }
-              : b.status === 'attended'
-              ? { tone: 'neutral', label: 'Attended' }
-              : b.status === 'noshow'
-              ? { tone: 'red', label: 'No-show' }
-              : null,
-          // Sprint 9 pin: cancel(bookingId) below needs the real booking id
-          // (never the session id displaySession already carries as `id`),
-          // and `cancellable` is the exact pinned formula - status
-          // 'confirmed' AND still in the future. Past items compute false
-          // here for free (their date is always < today).
-          bookingId: b.id,
-          status: b.status,
-          cancellable: b.status === 'confirmed' && b.date > today,
-        }
-      : null;
+    if (!s) return null;
+    // Computed from the SESSION's own date (contract v2.0 §6: a booking is
+    // charged against the period its session date falls in) rather than
+    // trusted off the stored booking field, so display can never disagree
+    // with what createBooking itself derived at write time.
+    const periodKey = periodFor(s.date, anchorDay).periodKey;
+    return {
+      ...displaySession(s, today),
+      badge:
+        b.status === 'confirmed'
+          ? { tone: 'green', label: 'Confirmed' }
+          : b.status === 'attended'
+          ? { tone: 'neutral', label: 'Attended' }
+          : b.status === 'noshow'
+          ? { tone: 'red', label: 'No-show' }
+          : null,
+      // Sprint 9 pin: cancel(bookingId) below needs the real booking id
+      // (never the session id displaySession already carries as `id`),
+      // and `cancellable` is the exact pinned formula - status
+      // 'confirmed' AND still in the future. Past items compute false
+      // here for free (their date is always < today).
+      bookingId: b.id,
+      status: b.status,
+      cancellable: b.status === 'confirmed' && b.date > today,
+      periodKey,
+      nextPeriod: periodKey > currentPeriodKey,
+    };
   };
 
   const upcoming = active.filter((b) => b.date >= today).map(resolve).filter(Boolean);
@@ -370,7 +399,11 @@ async function liveSchedule(today) {
     // Academy-cancellation banners need a cancellation reason the contract
     // does not carry yet - flagged in the routing report, null until then.
     cancelled: null,
-    allowance: deriveAllowance(ctx.pkg, ctx.bookings, today),
+    // `allowance` -> `tokens` (contract v2.0): the two-pool shape is
+    // retired; this is the athlete's token position for the CURRENT
+    // period, same shape as useMembership's members[].tokens minus
+    // nextPeriod (a household/all-members concept, not a per-schedule one).
+    tokens: deriveTokens(ctx.pkg, ctx.bookings, anchorDay, today),
   };
 }
 
@@ -394,23 +427,61 @@ async function liveBookingIdentity() {
 }
 
 /**
+ * The widest booking window any package offers right now (Elite's 45 days,
+ * contract v2.0 pin L) - the safe fetch bound for a caller whose specific
+ * package is not yet known (a parent who has not picked a child). Computed
+ * from the catalogue rather than hardcoded so a future window change here
+ * needs no second edit.
+ */
+const MAX_WINDOW_DAYS = Math.max(...TOKEN_PACKAGES.map(windowDaysFor), windowDaysFor(ELITE), windowDaysFor(SINGLE_TOKEN));
+
+/**
  * Live payload for useBooking, plus the identity the book() action needs.
  * The hook strips `identity` off before it reaches the screen - the payload
  * the screen sees is shape-identical to the seed branch.
  *
- * An athlete caller gets their own allowance up front, same as before. A
- * parent caller has not chosen a child yet at this point - `allowance` is
+ * An athlete caller gets their own token position up front, same as before.
+ * A parent caller has not chosen a child yet at this point - `tokens` is
  * null rather than any one child's number (never invented, never picked for
- * them); the screen's child picker reads each child's own allowance from
- * useHouseholdAthletes(), which already returns it per athlete.
+ * them); the screen's child picker reads each child's own token position
+ * from useHouseholdAthletes(), which already returns it per athlete.
+ *
+ * Contract v2.0 pin D: the fetch window is no longer a fixed 7 days - it is
+ * openThrough(now, windowDaysFor(pkg)), the athlete's own package window
+ * (32 days, 45 for Elite). A parent caller has no specific child's package
+ * yet, so the fetch uses the WIDEST window any package offers (MAX_WINDOW_
+ * DAYS, currently Elite's 45) - a superset that never under-fetches what a
+ * child chosen afterward might need; per-day locking past THAT child's own,
+ * narrower window is the screen's job once a child is picked (it already
+ * has each child's packageId via useHouseholdAthletes).
  */
 async function liveBooking(today) {
   const who = await liveBookingIdentity();
+
+  let windowDays = MAX_WINDOW_DAYS;
+  let tokens = null;
+  let identity;
+  if (who.role === 'athlete') {
+    const athlete = await fetchAthlete(who.profile.athleteId);
+    const pkg = athlete.packageId ? await fetchPackage(athlete.packageId) : null;
+    const bookings = await fetchBookings(athlete.id);
+    const household = athlete.householdId ? await fetchHousehold(athlete.householdId) : null;
+    const anchorDay = normalizeAnchorDay(household?.periodAnchorDay);
+    windowDays = windowDaysFor(pkg);
+    tokens = deriveTokens(pkg, bookings, anchorDay, today);
+    identity = { role: 'athlete', athleteId: athlete.id, householdId: athlete.householdId };
+  } else {
+    identity = { role: 'parent', householdId: who.profile.householdId };
+  }
+
   // Group flow only (surface scan 2026-09-11, blocker D1): specialist
-  // slots have their own screen and their own pool — leaking them here
-  // crashed the two-pool allowance math (`allowance['specialist']` does
-  // not exist, by design).
-  const sessions = (await fetchSessions(today, 7)).filter((s) => !isSpecialistType(s.type));
+  // slots have their own screen — leaking them here crashed the
+  // two-pool allowance math when that existed, and still does not belong
+  // on this list under the token model either (SpecialistBooking is the
+  // one place a specialist slot is offered).
+  const sessions = (await fetchSessionsInRange(today, openThrough(new Date(), windowDays))).filter(
+    (s) => !isSpecialistType(s.type)
+  );
   sessions.sort(byDateThenId);
 
   const dates = [...new Set(sessions.map((s) => s.date))].map(datePill);
@@ -426,25 +497,13 @@ async function liveBooking(today) {
       ? `The 26/27 season opens ${dayLabel(dates[0].iso, today)} — these are the first bookable blocks.`
       : null;
 
-  let allowance = null;
-  let identity;
-  if (who.role === 'athlete') {
-    const athlete = await fetchAthlete(who.profile.athleteId);
-    const pkg = athlete.packageId ? await fetchPackage(athlete.packageId) : null;
-    const bookings = await fetchBookings(athlete.id);
-    allowance = deriveAllowance(pkg, bookings, today);
-    identity = { role: 'athlete', athleteId: athlete.id, householdId: athlete.householdId };
-  } else {
-    identity = { role: 'parent', householdId: who.profile.householdId };
-  }
-
   return {
     dates,
     slots,
-    allowance,
+    tokens,
     seasonNote,
     // Same shape as the seed confirmation; the email is the real account's,
-    // and name/when/pool are filled by the screen from the booked slot.
+    // and name/when are filled by the screen from the booked slot.
     confirmation: { ...BOOKING_CONFIRMATION, email: who.profile.email },
     identity,
   };
@@ -466,7 +525,7 @@ function seedBookingId(sessionId) {
 }
 
 /**
- * GET /schedule/availability + GET /athletes/:id/allowance (04).
+ * GET /schedule/availability + GET /athletes/:id/tokens (04).
  *
  * Seed mode: the athlete's bookings are { date, block } references resolved
  * against the generated season, so what My Schedule shows can never contradict
@@ -488,12 +547,17 @@ export function useSchedule({ variant = 'upcoming', today = todayISO(), practice
   // Post-write invalidation seam (Sprint 6 pin): re-run after any booking
   // write, not just one made through this hook instance.
   const bookingsGen = useInvalidation('bookings');
+  // Contract v2.0 pin N: items gain periodKey + nextPeriod, same as the live
+  // branch - the seed athlete's own package/anchor stand in for the real
+  // household's.
+  const currentPeriodKey = periodFor(today, PERIOD_ANCHOR_DAY).periodKey;
 
   const resolve = (refs) =>
     refs
       .map((ref) => {
         const s = resolveBooking(ref);
         if (!s) return null;
+        const periodKey = periodFor(s.date, PERIOD_ANCHOR_DAY).periodKey;
         return {
           ...displaySession(s, today),
           badge: ref.badge ?? null,
@@ -507,6 +571,8 @@ export function useSchedule({ variant = 'upcoming', today = todayISO(), practice
           bookingId: seedBookingId(s.id),
           status: 'confirmed',
           cancellable: s.date > today,
+          periodKey,
+          nextPeriod: periodKey > currentPeriodKey,
         };
       })
       .filter(Boolean);
@@ -517,7 +583,7 @@ export function useSchedule({ variant = 'upcoming', today = todayISO(), practice
 
   const demo = demoOpts(variant, "Your schedule didn't load.");
   const state = useSeedResource(
-    demo || live ? null : { sessions, past, cancelled, allowance: ALLOWANCE },
+    demo || live ? null : { sessions, past, cancelled, tokens: TOKENS },
     demo ??
       (live ? { source: () => liveSchedule(today), deps: ['schedule', today, bookingsGen] } : undefined)
   );
@@ -542,22 +608,23 @@ export function useSchedule({ variant = 'upcoming', today = todayISO(), practice
 }
 
 /**
- * GET /schedule/availability + GET /athletes/:id/allowance (05).
+ * GET /schedule/availability + GET /athletes/:id/tokens (05).
  *
  * Availability comes from the generated season, so what the screen shows is the
  * real weekly pattern with closures applied. Only the visible window is passed
  * through the seam - the screen renders one day at a time.
  *
- * The limit states are per pool, because the pools are independent: a spent
- * tournament allowance leaves every training block bookable, and the reverse.
- * A single `limit` variant could not express either case honestly.
+ * Contract v2.0: ONE token pool - `variant` still offers an exhausted demo
+ * state (TOKENS_EXHAUSTED), but there is no longer a per-pool split to
+ * express (the old two independent "limit" states are gone with the pools
+ * that produced them).
  *
- * Live mode sources sessions and the derived allowance from Firestore, and
- * the returned `book(slot)` persists a booking through the adapter - which
- * pool it spends is recorded on the write, and firestore.rules re-checks it
- * against the session's real type. In seed mode book(slot) resolves locally,
- * matching today's screen behavior (the screen keeps the booked slot in
- * component state).
+ * Live mode sources sessions (through the athlete's own package window,
+ * pin D) and the derived token position from Firestore, and the returned
+ * `book(slot)` persists a booking through the adapter - firestore.rules
+ * re-checks the session's real type and the caller's own token grant. In
+ * seed mode book(slot) resolves locally, matching today's screen behavior
+ * (the screen keeps the booked slot in component state).
  *
  * `practice: true` (onboarding) pins this hook to the seed source regardless
  * of the live flag, and book(slot) resolves locally exactly as seed mode
@@ -581,7 +648,11 @@ export function useBooking({ variant = 'open', today = todayISO(), practice = fa
   // must trigger a render when the live source resolves.
   const [identity, setIdentity] = useState(null);
 
-  const dates = upcomingDates(SEASON, today, 7).map(datePill);
+  // Contract v2.0 pin D: the fixed "next 7 days" is retired - the seed
+  // athlete's own package window (windowDaysFor, data/packages.js) is the
+  // count of distinct session-bearing dates upcomingDates gathers, the seed
+  // analog of the live fetch's openThrough() bound.
+  const dates = upcomingDates(SEASON, today, windowDaysFor(ATHLETE_PACKAGE)).map(datePill);
 
   const slots = dates.flatMap((d) =>
     (SEASON_BY_DATE.get(d.iso) ?? []).map((s) => ({
@@ -597,13 +668,17 @@ export function useBooking({ variant = 'open', today = todayISO(), practice = fa
     }))
   );
 
-  const allowance = {
-    open: ALLOWANCE,
-    full: ALLOWANCE,
-    confirmed: ALLOWANCE,
-    limitTraining: ALLOWANCE_NO_TRAINING,
-    limitTournament: ALLOWANCE_NO_TOURNAMENTS,
-  }[variant] || ALLOWANCE;
+  // `allowance` -> `tokens` (contract v2.0): one pool, so 'limitTraining'
+  // and 'limitTournament' now land on the SAME exhausted position - the
+  // variant names stay (StatesHarness/BookSession still pass them) but both
+  // map to the one "no tokens left" demo state.
+  const tokens = {
+    open: TOKENS,
+    full: TOKENS,
+    confirmed: TOKENS,
+    limitTraining: TOKENS_EXHAUSTED,
+    limitTournament: TOKENS_EXHAUSTED,
+  }[variant] || TOKENS;
 
   // Before the season opens, the first bookable day is weeks out - say so
   // rather than presenting November dates as if they were this week.
@@ -620,7 +695,7 @@ export function useBooking({ variant = 'open', today = todayISO(), practice = fa
 
   const demo = demoOpts(variant, "Open blocks didn't load.");
   const state = useSeedResource(
-    demo || live ? null : { dates, slots, allowance, seasonNote, confirmation: BOOKING_CONFIRMATION },
+    demo || live ? null : { dates, slots, tokens, seasonNote, confirmation: BOOKING_CONFIRMATION },
     demo ??
       (live
         ? {
@@ -643,15 +718,17 @@ export function useBooking({ variant = 'open', today = todayISO(), practice = fa
    * 'parent') - the screen must have a child selected before calling book().
    * An athlete caller ignores the option (they can only ever book themselves).
    *
-   * Reason plumbing (Sprint 11 pin C/G, contract v1.9): book() takes no
-   * try/catch of its own on purpose - a specialist rejection from
-   * createBooking's assertWithinMonthlyCap (live.js) is a LiveDataError
-   * whose `.reason` is 'no-fitness-package' or 'cap-reached', and wrap()
-   * returns that SAME instance unchanged for anything already a
-   * LiveDataError, so the reason reaches the caller exactly as thrown - a
-   * screen may read `err.reason` directly (no import needed, same
-   * plain-object convention `err.message` already relies on) alongside the
-   * existing plain-language `err.message` fallback for every other case.
+   * Reason plumbing (Sprint 11 pin C/G, contract v1.9; reasons updated
+   * Sprint 12, contract v2.0 pin B/D/K): book() takes no try/catch of its
+   * own on purpose - a rejection from createBooking's
+   * assertWithinPeriodCap (live.js) is a LiveDataError whose `.reason` is
+   * 'outside-window', 'no-tokens-left' or 'cap-reached' (Yannick's monthly
+   * frequency knob only), and wrap() returns that SAME instance unchanged
+   * for anything already a LiveDataError, so the reason reaches the caller
+   * exactly as thrown - a screen may read `err.reason` directly (no import
+   * needed, same plain-object convention `err.message` already relies on)
+   * alongside the existing plain-language `err.message` fallback for every
+   * other case.
    */
   const book = async (slot, { athleteId } = {}) => {
     if (!live) return slot;
@@ -673,7 +750,6 @@ export function useBooking({ variant = 'open', today = todayISO(), practice = fa
         sessionId: slot.id,
         date: slot.date,
         type: slot.type,
-        pool: poolFor(slot.type),
         householdId: identity.householdId,
       });
     }
@@ -682,19 +758,23 @@ export function useBooking({ variant = 'open', today = todayISO(), practice = fa
       sessionId: slot.id,
       date: slot.date,
       type: slot.type,
-      pool: poolFor(slot.type),
       householdId: identity.householdId,
     });
   };
 
   /**
-   * Recurring booking (owner's ruling, TEAM.md "Recurring booking pins"):
-   * book the same weekday+time weekly, from the week AFTER `slot` through
-   * `untilISO`, capped at the monthly allowance for the slot's pool — a
-   * month whose pool is exhausted is skipped week by week until the next
-   * month resets it. Full sessions, missing weeks and already-booked
-   * sessions skip with a reason. Every instance is the same individual
-   * booking transaction as book(); nothing new is stored.
+   * Recurring booking (owner's ruling, TEAM.md "Recurring booking pins";
+   * cap math rewritten Sprint 12, contract v2.0): book the same weekday+
+   * time weekly, from the week AFTER `slot` through `untilISO`, capped at
+   * the athlete's token grant for whichever PERIOD each candidate date
+   * falls in — a period whose tokens are exhausted is skipped week by week
+   * until the next period's grant applies (periods are ~32/45-day cycles
+   * now, not calendar months, but the "skip forward until it resets" shape
+   * is unchanged). Full sessions, missing weeks and already-booked sessions
+   * skip with a reason. Recurrence is a group-flow-only feature (specialist
+   * slots are filtered out of the range query below), so the mental
+   * frequency knob never applies here. Every instance is the same
+   * individual booking transaction as book(); nothing new is stored.
    *
    * Returns { booked: [{date,id}], skipped: [{date,reason}] }.
    */
@@ -713,26 +793,29 @@ export function useBooking({ variant = 'open', today = todayISO(), practice = fa
 
     const athlete = await fetchAthlete(forAthleteId);
     const pkg = athlete.packageId ? await fetchPackage(athlete.packageId) : null;
-    const pool = poolFor(slot.type);
-    // A limit of 0 (drop-in tournaments, no package) means the pool has NO
-    // allowance: every week skips at 'monthly limit' — `limit > 0` gating
-    // treated real zeroes as unlimited (code review 2026-09-04, finding 1).
-    const limit = (pool === 'tournaments' ? pkg?.tournaments : pkg?.training) ?? 0;
+    const household = athlete.householdId ? await fetchHousehold(athlete.householdId) : null;
+    const anchorDay = normalizeAnchorDay(household?.periodAnchorDay);
+    // Elite (pkg.tokens === null) has no pool to exhaust - Infinity skips
+    // the "period limit" branch below entirely, same as the cap check in
+    // live.js skipping outright when pkg.tokens === null. No package at all
+    // means 0 tokens: every week skips at 'period limit' (code review
+    // 2026-09-04, finding 1's "limit > 0" lesson still applies - a real
+    // zero is not unlimited).
+    const limit = pkg ? (pkg.tokens === null ? Infinity : pkg.tokens ?? 0) : 0;
     const bookings = await fetchBookings(
       forAthleteId,
       identity.role === 'parent' ? { householdId: identity.householdId } : {}
     );
-    // Per-month spend for this pool, and which sessions are already held -
-    // both derived, same as the allowance itself (no stored counters).
+    // Per-PERIOD spend (a booking spends the period its SESSION DATE falls
+    // in, contract v2.0 §6), and which sessions are already held - both
+    // derived, same as the token position itself (no stored counters).
     const tally = new Map();
     const have = new Set();
     for (const b of bookings) {
       if (b.status === 'cancelled') continue;
       have.add(b.sessionId);
-      if (b.pool === pool) {
-        const month = b.date.slice(0, 7);
-        tally.set(month, (tally.get(month) || 0) + 1);
-      }
+      const key = b.periodKey ?? periodFor(b.date, anchorDay).periodKey;
+      tally.set(key, (tally.get(key) || 0) + 1);
     }
 
     // Every candidate week's sessions in ONE range query, matched locally —
@@ -758,9 +841,9 @@ export function useBooking({ variant = 'open', today = todayISO(), practice = fa
     const booked = [];
     const skipped = [];
     for (let date = firstDate; date <= endDate; date = addDaysISO(date, 7)) {
-      const month = date.slice(0, 7);
-      if ((tally.get(month) || 0) >= limit) {
-        skipped.push({ date, reason: 'monthly limit' });
+      const periodKey = periodFor(date, anchorDay).periodKey;
+      if ((tally.get(periodKey) || 0) >= limit) {
+        skipped.push({ date, reason: 'period limit' });
         continue;
       }
       const match = (sessionsByDate.get(date) ?? []).find(
@@ -789,13 +872,12 @@ export function useBooking({ variant = 'open', today = todayISO(), practice = fa
             sessionId: match.id,
             date: match.date,
             type: match.type,
-            pool,
             householdId: identity.householdId,
           },
           { skipCapCheck: true, silent: true }
         );
         booked.push({ date: match.date, id: match.id });
-        tally.set(month, (tally.get(month) || 0) + 1);
+        tally.set(periodKey, (tally.get(periodKey) || 0) + 1);
         have.add(match.id);
       } catch (err) {
         skipped.push({
@@ -894,25 +976,31 @@ export function useMonthSessions(monthISO, { practice = false } = {}) {
 }
 
 /**
- * Seed fortnight pattern for useSpecialistSlots (Sprint 9 pin) — a
- * DETERMINISTIC, believable schedule, not real production data (production
- * comes from the Google Calendar sync per contract v1.7; the db lane's
- * emulator seed hand-adds slots following this SAME weekday/time pattern so
- * the demo and the emulator tell the same story). Yannick (mental) sits
- * Tue/Thu late afternoon; Phil (phil) sits Mon/Wed/Fri, earlier in the
- * afternoon; both 45-minute 1-on-1s, capacity 1 — the times are invented
- * (there is no real production schedule to read yet), the PEOPLE are not
- * (SPECIALISTS, data/specialists.js). Session ids follow the real seed
- * convention (`YYYY-MM-DD-s<n>`, docs/portal/TEAM.md's "-x0 extras"
+ * Seed pattern for useSpecialistSlots (Sprint 9 pin; window rewritten
+ * Sprint 12, contract v2.0 pin D) — a DETERMINISTIC, believable schedule,
+ * not real production data (production comes from the Google Calendar sync;
+ * the db lane's emulator seed hand-adds slots following this SAME weekday/
+ * time pattern so the demo and the emulator tell the same story). Yannick
+ * (mental) sits Tue/Thu late afternoon; Phil (phil) sits Mon/Wed/Fri,
+ * earlier in the afternoon; both 45-minute sessions — the times are
+ * invented (there is no real production schedule to read yet), the PEOPLE
+ * are not (SPECIALISTS, data/specialists.js). Session ids follow the real
+ * seed convention (`YYYY-MM-DD-s<n>`, docs/portal/TEAM.md's "-x0 extras"
  * convention, new letter) purely for shape parity with live mode - nothing
  * here is ever written anywhere.
+ *
+ * `windowDays` (contract v2.0 pin D, replaces the fixed
+ * SPECIALIST_BOOKING_WINDOW_DAYS): the viewing athlete's own package window
+ * via windowDaysFor - defaults to 32 (windowDaysFor's own no-package
+ * fallback) so existing callers that still pass only (specialistId, today)
+ * (e.g. SpecialistBooking.js's practice-mode branch) keep working.
  */
 const PHIL_WEEKDAYS = new Set([1, 3, 5]); // Mon, Wed, Fri (Date#getUTCDay)
 const MENTAL_WEEKDAYS = new Set([2, 4]); // Tue, Thu
 const PHIL_TIMES = ['3:00 PM', '3:45 PM'];
 const MENTAL_TIMES = ['4:30 PM', '5:15 PM'];
 
-export function seedSpecialistDays(specialistId, today) {
+export function seedSpecialistDays(specialistId, today, windowDays = 32) {
   const onMental = specialistId === 'mental';
   const weekdays = onMental ? MENTAL_WEEKDAYS : PHIL_WEEKDAYS;
   const times = onMental ? MENTAL_TIMES : PHIL_TIMES;
@@ -920,14 +1008,18 @@ export function seedSpecialistDays(specialistId, today) {
   // session of 6, mental a true 1:1. A phil demo slot carries a believable
   // partial fill so the "spots left" treatment is reviewable in seed mode.
   const capacity = SPECIALISTS.find((s) => s.id === specialistId)?.capacity ?? 1;
+  const toDate = openThrough(new Date(), windowDays);
 
   const days = [];
-  for (let i = 0; i < SPECIALIST_BOOKING_WINDOW_DAYS; i++) {
-    const date = addDaysISO(today, i);
+  let i = 0;
+  for (let date = today; date <= toDate; date = addDaysISO(date, 1), i++) {
     const dow = new Date(`${date}T00:00:00Z`).getUTCDay();
+    // `dayIndex` is a fresh per-iteration binding (no-loop-func: the map()
+    // callback below must not close over the outer, mutated `i` directly).
+    const dayIndex = i;
     const slots = weekdays.has(dow)
       ? times.map((time, idx) => {
-          const booked = capacity > 1 ? (i + idx) % capacity : 0;
+          const booked = capacity > 1 ? (dayIndex + idx) % capacity : 0;
           return {
             sessionId: `${date}-s${idx}`,
             time,
@@ -952,9 +1044,13 @@ export function seedSpecialistDays(specialistId, today) {
  * a pill for every day, not just the ones with slots - which fetchSessions
  * InRange's result alone cannot guarantee (a day with zero specialist
  * sessions produces zero rows, not an empty-array placeholder).
+ *
+ * `windowDays` (contract v2.0 pin D): openThrough(now, windowDays) replaces
+ * the fixed SPECIALIST_BOOKING_WINDOW_DAYS - the caller (liveSpecialistSlots
+ * below) resolves it from the viewing athlete's own package.
  */
-async function liveSpecialistDays(specialistId, today) {
-  const toDate = addDaysISO(today, SPECIALIST_BOOKING_WINDOW_DAYS - 1);
+async function liveSpecialistDays(specialistId, today, windowDays) {
+  const toDate = openThrough(new Date(), windowDays);
   const sessions = await fetchSessionsInRange(today, toDate);
 
   const byDate = new Map();
@@ -966,8 +1062,7 @@ async function liveSpecialistDays(specialistId, today) {
   }
 
   const days = [];
-  for (let i = 0; i < SPECIALIST_BOOKING_WINDOW_DAYS; i++) {
-    const date = addDaysISO(today, i);
+  for (let date = today; date <= toDate; date = addDaysISO(date, 1)) {
     const onDate = (byDate.get(date) ?? [])
       .slice()
       .sort((a, b) => (parseTimeToMinutes(a.time) ?? 0) - (parseTimeToMinutes(b.time) ?? 0));
@@ -985,70 +1080,81 @@ async function liveSpecialistDays(specialistId, today) {
 }
 
 /**
- * One athlete's entitlement for ONE specialist type (Sprint 11 pin G,
- * contract v1.9) - the SAME entitlementsFor derivation useMembership and the
- * booking gate (live.js#assertWithinMonthlyCap) read, so SpecialistBooking's
- * summary line and reserve-CTA gating can never disagree with what booking
- * itself will do. `athleteId` is explicit rather than always "the signed-in
- * user" because a PARENT caller has no athlete of their own - the screen's
- * child selector supplies it once chosen (mirrors book(slot, {athleteId})'s
- * own optional-override shape elsewhere in this file). Falls back to the
- * signed-in athlete's own id when omitted; resolves to null for a parent
- * with no child chosen yet (same "nothing to show before a pick" posture
- * useBooking's own `allowance: null` already has).
+ * The signed-in caller's own athleteId, or an explicit override (a parent's
+ * chosen child) - shared by the days-window and tokens halves of
+ * liveSpecialistSlots below so both agree on exactly the same athlete
+ * without two separate identity resolutions. null when neither resolves (a
+ * parent who has not chosen a child yet).
  */
-async function liveSpecialistEntitlement(specialistId, athleteIdOverride, today) {
-  let athleteId = athleteIdOverride;
-  if (!athleteId) {
-    const profile = await fetchCurrentUser();
-    if (!profile.athleteId) return null;
-    athleteId = profile.athleteId;
-  }
-  const athlete = await fetchAthlete(athleteId);
-  const [golfPkg, fitnessPkg, bookings] = await Promise.all([
-    athlete.packageId ? fetchPackage(athlete.packageId) : null,
-    athlete.fitnessPackageId ? fetchPackage(athlete.fitnessPackageId) : null,
-    fetchBookings(athleteId, { householdId: athlete.householdId }),
-  ]);
-  const entitlements = entitlementsFor(athlete, [golfPkg, fitnessPkg], bookings, today.slice(0, 7));
-  return entitlements[specialistId] ?? null;
-}
-
-/** Live payload for useSpecialistSlots - days plus the chosen athlete's
- * entitlement for this specialist, fetched in parallel. */
-async function liveSpecialistSlots(specialistId, athleteId, today) {
-  const [days, entitlement] = await Promise.all([
-    liveSpecialistDays(specialistId, today),
-    liveSpecialistEntitlement(specialistId, athleteId, today),
-  ]);
-  return { days, entitlement };
-}
-
-/** Seed entitlement for useSpecialistSlots - the same seed entitlement
- * derivation useMembership's seed branch uses, for one named child
- * (defaulting to the seed's one "signed-in athlete" fixture, jordan). */
-function seedSpecialistEntitlement(specialistId, athleteId, today) {
-  const child = seedChildById(athleteId || SEED_ATHLETE_ID);
-  if (!child) return null;
-  return seedEntitlementsForChild(child, today)[specialistId] ?? null;
+async function resolveSpecialistAthleteId(athleteIdOverride) {
+  if (athleteIdOverride) return athleteIdOverride;
+  const profile = await fetchCurrentUser();
+  return profile.athleteId ?? null;
 }
 
 /**
- * GET /specialists/:id/slots (Sprint 9 pin, contract v1.7) — one specialist's
- * bookable 1-on-1 slots over the rolling SPECIALIST_BOOKING_WINDOW_DAYS
- * window (data/specialists.js), the Life-Time-style booking screen's day
- * strip + slot list. `specialistId` is 'phil' | 'mental' (SPECIALISTS' own
- * ids, which double as the sessions.type value). Booking a slot goes through
- * the EXISTING createBooking (poolFor('phil'|'mental') === 'specialist',
- * data/packages.js) - unchanged signature, no booking action lives on this
- * hook.
+ * Live payload for useSpecialistSlots (contract v2.0, pin D/N — replaces
+ * Sprint 11's per-type `entitlement` with the athlete's FULL token
+ * position, same shape as useMembership's members[].tokens, and the fixed
+ * SPECIALIST_BOOKING_WINDOW_DAYS with the resolved athlete's own package
+ * window). `athleteId` is explicit rather than always "the signed-in user"
+ * because a PARENT caller has no athlete of their own - the screen's child
+ * selector supplies it once chosen (mirrors book(slot, {athleteId})'s own
+ * optional-override shape elsewhere in this file).
  *
- * Sprint 11 pin G adds `entitlement` to the payload — `{ used, limit, left,
- * source }` (data/packages.js#entitlementsFor's own per-type shape) or null
- * before a caller/athlete is resolvable — so SpecialistBooking's summary
- * line and reserve-CTA gating read off the SAME derivation the booking gate
- * enforces. `athleteId` (optional second-arg override) is the child a
- * PARENT caller has picked; an athlete caller ignores it (always their own).
+ * When no athlete resolves yet (a parent with no child chosen), the days
+ * list still needs to render - MAX_WINDOW_DAYS is the same safe superset
+ * liveBooking uses for exactly this case, and `tokens` is null (same
+ * "nothing to show before a pick" posture useBooking's own `tokens: null`
+ * already has).
+ */
+async function liveSpecialistSlots(specialistId, athleteIdOverride, today) {
+  const athleteId = await resolveSpecialistAthleteId(athleteIdOverride);
+  if (!athleteId) {
+    return { days: await liveSpecialistDays(specialistId, today, MAX_WINDOW_DAYS), tokens: null };
+  }
+  const athlete = await fetchAthlete(athleteId);
+  const pkg = athlete.packageId ? await fetchPackage(athlete.packageId) : null;
+  const [bookings, household] = await Promise.all([
+    fetchBookings(athleteId, { householdId: athlete.householdId }),
+    athlete.householdId ? fetchHousehold(athlete.householdId) : Promise.resolve(null),
+  ]);
+  const anchorDay = normalizeAnchorDay(household?.periodAnchorDay);
+  const windowDays = windowDaysFor(pkg);
+  const [days, tokens] = await Promise.all([
+    liveSpecialistDays(specialistId, today, windowDays),
+    Promise.resolve(tokensWithNextPeriod(pkg, bookings, anchorDay, today)),
+  ]);
+  return { days, tokens };
+}
+
+/** Seed tokens for useSpecialistSlots - the same seed token derivation
+ * useMembership's seed branch uses (seedMemberTokens, below), for one named
+ * child (defaulting to the seed's one "signed-in athlete" fixture, jordan). */
+function seedSpecialistTokens(specialistId, athleteId, today) {
+  const child = seedChildById(athleteId || SEED_ATHLETE_ID);
+  if (!child) return null;
+  return seedMemberTokens(child, today);
+}
+
+/**
+ * GET /specialists/:id/slots (Sprint 9 pin, contract v1.7; window and
+ * entitlement rewritten Sprint 12, contract v2.0 pins D/N) — one
+ * specialist's bookable slots over the athlete's own package window
+ * (data/packages.js#windowDaysFor via openThrough, replacing the fixed
+ * SPECIALIST_BOOKING_WINDOW_DAYS), the Life-Time-style booking screen's day
+ * strip + slot list. `specialistId` is 'phil' | 'mental' (SPECIALISTS' own
+ * ids, which double as the sessions.type value). Booking a slot goes
+ * through the EXISTING createBooking - unchanged signature, no booking
+ * action lives on this hook.
+ *
+ * `entitlement` is retired in favour of `tokens` — the athlete's FULL token
+ * position, same shape as useMembership's members[].tokens, or null before
+ * a caller/athlete is resolvable — so SpecialistBooking's summary line
+ * ("Uses 1 token · 7 left this period") and reserve-CTA gating read off the
+ * SAME derivation the booking gate enforces. `athleteId` (optional
+ * second-arg override) is the child a PARENT caller has picked; an athlete
+ * caller ignores it (always their own).
  */
 export function useSpecialistSlots(specialistId, { athleteId } = {}) {
   const live = isLive();
@@ -1059,22 +1165,22 @@ export function useSpecialistSlots(specialistId, { athleteId } = {}) {
   // to both here (rather than 'sessions' alone, as useMonthSessions does)
   // re-runs this hook on either bump, not just the one that happens to fire
   // second. Sprint 11: 'athletes' too - a package assignment (pin B) changes
-  // `entitlement` without touching bookings or sessions at all.
+  // `tokens` without touching bookings or sessions at all.
   const sessionsGen = useInvalidation('sessions');
   const bookingsGen = useInvalidation('bookings');
   const athletesGen = useInvalidation('athletes');
 
   // No specialist picked yet (the picker stage) -> no query at all. Running
-  // the live source with specialistId null returned 14 honest-but-empty
-  // days, which then sat as STALE data while the real fetch ran after a
-  // pick — the screen's default-day effect read them and landed on today
-  // instead of the first day with availability (integration browser pass).
+  // the live source with specialistId null returned honest-but-empty days,
+  // which then sat as STALE data while the real fetch ran after a pick —
+  // the screen's default-day effect read them and landed on today instead
+  // of the first day with availability (integration browser pass).
   return useSeedResource(
     live && specialistId
       ? null
       : {
-          days: specialistId ? seedSpecialistDays(specialistId, today) : [],
-          entitlement: specialistId ? seedSpecialistEntitlement(specialistId, athleteId, today) : null,
+          days: specialistId ? seedSpecialistDays(specialistId, today, windowDaysFor(ATHLETE_PACKAGE)) : [],
+          tokens: specialistId ? seedSpecialistTokens(specialistId, athleteId, today) : null,
         },
     live && specialistId
       ? {
@@ -1086,13 +1192,18 @@ export function useSpecialistSlots(specialistId, { athleteId } = {}) {
 }
 
 /**
- * Seed branch for useSpecialistSessions — the same fortnight
+ * Seed branch for useSpecialistSessions — the same pattern
  * seedSpecialistDays generates, flattened to the specialist's own day-view
  * shape. Roster names stay EMPTY in seed mode (no invented people; the
- * screen renders the booked count and, live, the real names).
+ * screen renders the booked count and, live, the real names). This is a
+ * STAFF operational view, not a member booking surface - it is not any one
+ * athlete's own window (contract v2.0 pin D retired the flat
+ * SPECIALIST_BOOKING_WINDOW_DAYS this used to read), so it uses
+ * MAX_WINDOW_DAYS, the widest window any package offers, ensuring Phil/
+ * Yannick always see everything any athlete could possibly have booked.
  */
 function seedSpecialistDaySessions(specialistId, today) {
-  return seedSpecialistDays(specialistId, today)
+  return seedSpecialistDays(specialistId, today, MAX_WINDOW_DAYS)
     .flatMap((d) =>
       d.slots.map((s) => ({
         sessionId: s.sessionId,
@@ -1108,14 +1219,14 @@ function seedSpecialistDaySessions(specialistId, today) {
 
 /**
  * Live payload for useSpecialistSessions — the specialist's OWN upcoming
- * sessions over the same rolling window the booking screen shows, each
- * joined to its live roster (non-cancelled bookings -> athlete names via
- * the per-id join; a name the caller cannot read renders as a count, not a
- * crash). Powers the "My sessions" day view (Sprint 9 amendment v1.7.1:
- * specialist-side access).
+ * sessions, each joined to its live roster (non-cancelled bookings ->
+ * athlete names via the per-id join; a name the caller cannot read renders
+ * as a count, not a crash). Powers the "My sessions" day view (Sprint 9
+ * amendment v1.7.1: specialist-side access). MAX_WINDOW_DAYS, not any one
+ * athlete's own window - see seedSpecialistDaySessions' comment above.
  */
 async function liveSpecialistSessions(specialistId, today) {
-  const toDate = addDaysISO(today, SPECIALIST_BOOKING_WINDOW_DAYS - 1);
+  const toDate = openThrough(new Date(), MAX_WINDOW_DAYS);
   const sessions = await fetchSessionsInRange(today, toDate);
   const mine = sessions
     .filter((s) => s.type === specialistId && s.status !== 'cancelled')
@@ -1182,23 +1293,25 @@ function shortWeekday(iso) {
 }
 
 /**
- * One household athlete's full home-card: package + allowance (same
+ * One household athlete's full home-card: package + token position (same
  * derivation as useHouseholdAthletes), their real next upcoming booking, and
  * a contract standing/percentage built the same way liveContract() builds
  * the full Contract screen (below) — so a child's card can never disagree
  * with their own Contract screen. Sprint 6 pin: "useHousehold's per-child
  * cards... real athletes + real allowances", read as covering every field a
- * card shows, not just allowance — "no screen may show seed numbers in live
- * mode."
+ * card shows, not just the token position — "no screen may show seed
+ * numbers in live mode."
  *
  * `standing` is null (no badge) rather than the seed's dashed 'New' state
  * when there is no reliable "just enrolled" signal to read live (no
  * enrollment-date field on the athlete doc) — an unbadged card, not an
  * invented one. Same for `age`/`ageLine`: dob is frequently null (per
  * DATA-MODEL.md, "no birthday is invented"), and a null dob renders no age
- * rather than a fabricated one.
+ * rather than a fabricated one. `anchorDay` (contract v2.0 pin B) is the
+ * household's periodAnchorDay, resolved once by the caller (liveHousehold)
+ * rather than re-fetched per child.
  */
-async function liveChildCard(a, today) {
+async function liveChildCard(a, today, anchorDay) {
   const pkg = a.packageId ? await fetchPackage(a.packageId) : null;
   // Parent context: the compound filter is what makes the list read
   // provable under the rules (see fetchBookings).
@@ -1244,7 +1357,7 @@ async function liveChildCard(a, today) {
     next,
     contract,
     packageId: a.packageId ?? null,
-    allowance: deriveAllowance(pkg, bookings, today),
+    tokens: deriveTokens(pkg, bookings, anchorDay, today),
   };
 }
 
@@ -1268,7 +1381,8 @@ async function liveHousehold(today) {
     fetchHousehold(profile.householdId),
     fetchHouseholdAthletes(profile.householdId),
   ]);
-  const children = await Promise.all(athletes.map((a) => liveChildCard(a, today)));
+  const anchorDay = normalizeAnchorDay(household.periodAnchorDay);
+  const children = await Promise.all(athletes.map((a) => liveChildCard(a, today, anchorDay)));
   return {
     name: household.name ?? null,
     date: longDayLabel(today),
@@ -1309,9 +1423,9 @@ export function useHousehold({ variant = 'three' } = {}) {
 
 /**
  * Live payload for useHouseholdAthletes - every athlete in the household,
- * joined to their package for packageName + allowance limits, usage derived
- * from bookings the same way liveSchedule/liveBooking do (no stored counter
- * to drift).
+ * joined to their package for packageName + token grant, usage derived from
+ * bookings the same way liveSchedule/liveBooking do (no stored counter to
+ * drift).
  */
 async function liveHouseholdAthletes(today) {
   const profile = await fetchCurrentUser();
@@ -1322,7 +1436,11 @@ async function liveHouseholdAthletes(today) {
         'parent accounts only.'
     );
   }
-  const athletes = await fetchHouseholdAthletes(profile.householdId);
+  const [household, athletes] = await Promise.all([
+    fetchHousehold(profile.householdId),
+    fetchHouseholdAthletes(profile.householdId),
+  ]);
+  const anchorDay = normalizeAnchorDay(household.periodAnchorDay);
   return Promise.all(
     athletes.map(async (a) => {
       const pkg = a.packageId ? await fetchPackage(a.packageId) : null;
@@ -1333,7 +1451,7 @@ async function liveHouseholdAthletes(today) {
         name: a.name,
         packageId: a.packageId ?? null,
         packageName: pkg ? pkg.name : null,
-        allowance: deriveAllowance(pkg, bookings, today),
+        tokens: deriveTokens(pkg, bookings, anchorDay, today),
       };
     })
   );
@@ -1350,10 +1468,10 @@ export function useHouseholdAthletes() {
   const live = isLive();
   const today = todayISO();
   // Post-write invalidation seam (Sprint 6 pin): a new booking changes a
-  // child's allowance - re-run after any bookings write, including one made
-  // through useBooking's book() for this same child. Sprint 10: 'athletes'
-  // too, so a parent's tier pick on AthleteDetail (contract v1.8, B) is
-  // reflected here without a remount.
+  // child's token position - re-run after any bookings write, including one
+  // made through useBooking's book() for this same child. Sprint 10:
+  // 'athletes' too, so a parent's tier pick on AthleteDetail (contract
+  // v1.8, B) is reflected here without a remount.
   const bookingsGen = useInvalidation('bookings');
   const athletesGen = useInvalidation('athletes');
   const seedRows = HOUSEHOLD.children.map((c) => ({
@@ -1361,7 +1479,7 @@ export function useHouseholdAthletes() {
     name: c.name,
     packageId: c.packageId,
     packageName: packageById(c.packageId)?.name ?? null,
-    allowance: c.allowance,
+    tokens: c.tokens,
   }));
   return useSeedResource(
     live ? null : seedRows,
@@ -1410,17 +1528,18 @@ export function useBillingSummary() {
 }
 
 /* ------------------------------------------------------------------------- *
- * Membership & entitlements (Sprint 11, contract v1.9). "Billing" leaves the
- * live member surface this sprint (owner ruling) - these hooks derive what
- * an athlete's packages ENTITLE them to, never what is owed. Both data modes
- * route every number through data/packages.js#entitlementsFor, the one pure
- * function useBooking's live.js#assertWithinMonthlyCap ALSO reads, so
- * Membership, SpecialistBooking's summary and the booking gate itself can
- * never disagree.
+ * Membership & tokens (Sprint 11, contract v1.9; REWRITTEN Sprint 12,
+ * contract v2.0 pin N — the two-pool golf/fitness entitlement split is
+ * retired for ONE package + ONE token position). "Billing" stays off the
+ * live member surface (owner ruling, unchanged). Both data modes route
+ * every number through data/packages.js#tokensFor via this file's own
+ * deriveTokens/tokensWithNextPeriod, the SAME derivation
+ * live.js#assertWithinPeriodCap reads, so Membership, SpecialistBooking's
+ * summary and the booking gate itself can never disagree.
  * ------------------------------------------------------------------------- */
 
 /** One seed HOUSEHOLD child by id, or null - shared by the membership and
- * specialist-entitlement seed branches below. */
+ * specialist-tokens seed branches below. */
 function seedChildById(athleteId) {
   return HOUSEHOLD.children.find((c) => c.id === athleteId) ?? null;
 }
@@ -1428,90 +1547,70 @@ function seedChildById(athleteId) {
 /**
  * Raw contract-tier minutes per seed child - HOUSEHOLD.children only carries
  * the derived `ageLine` copy ("45 min tier") and a completion percentage,
- * not the raw number entitlementsFor's caller-shape wants. Extracted here
- * rather than invented: these are the SAME three values ageLine already
- * states in prose (nico stays null on purpose, same as his live seed - "no
- * tier" needs a real exercisable case).
+ * not the raw number this hook's caller-shape wants. Extracted here rather
+ * than invented: these are the SAME three values ageLine already states in
+ * prose (nico stays null on purpose, same as his live seed - "no tier"
+ * needs a real exercisable case).
  */
 const SEED_CONTRACT_MINUTES = { jordan: 45, reese: 20, nico: null };
 
 /**
- * Believable non-zero specialist usage for the seed demo, jordan only (the
- * one seed kid with a fitness package big enough that "used" being nonzero
- * reads as normal) - mirrors the DB lane's own live-emulator seed plan
- * (TEAM.md Sprint 11 pin: "two past 'phil' bookings for jordan... so 'used'
- * is non-zero"). Nothing invented for reese/nico beyond zero.
+ * Believable non-zero token usage for the seed demo, this period - mirrors
+ * each child's pre-existing two-pool "used" total (jordan 3+1, reese 2+2,
+ * nico 0+0) collapsed into the one pool tokens now spends from. Nothing
+ * invented beyond reshaping numbers already in this file.
  */
-const SEED_SPECIALIST_USED = {
-  jordan: { phil: 2, mental: 0 },
-  reese: { phil: 0, mental: 0 },
-  nico: { phil: 0, mental: 0 },
-};
+const SEED_TOKENS_USED = { jordan: 4, reese: 4, nico: 0 };
 
 /**
- * Booking-shaped rows for one seed child, built to reproduce the EXACT
- * used-counts already baked into that child's existing `allowance` object
- * (HOUSEHOLD.children) plus the specialist counts above - so entitlementsFor
- * run over these rows lands on the SAME training/tournament numbers the rest
- * of the app already shows for this child, not a second, independently
- * guessed set. Dates are `today` unconditionally (never a fixed seed date)
- * so these always land "in the current month" whenever the demo is viewed.
+ * Booking-shaped rows for one seed child's CURRENT period, built to
+ * reproduce SEED_TOKENS_USED - so tokensFor run over these rows lands on a
+ * believable, non-invented position. Dates are `today` unconditionally
+ * (never a fixed seed date) so these always land in the live period
+ * whenever the demo is viewed.
  */
-function seedMembershipBookings(child, today) {
-  const used = SEED_SPECIALIST_USED[child.id] ?? { phil: 0, mental: 0 };
+function seedMemberBookingRows(child, today) {
+  const used = SEED_TOKENS_USED[child.id] ?? 0;
+  const periodKey = periodFor(today, PERIOD_ANCHOR_DAY).periodKey;
   const rows = [];
-  const add = (n, type, pool) => {
-    for (let i = 0; i < n; i++) rows.push({ athleteId: child.id, type, pool, date: today, status: 'confirmed' });
-  };
-  add(child.allowance?.training?.used ?? 0, 'training', 'training');
-  add(child.allowance?.tournaments?.used ?? 0, 'tournament', 'tournaments');
-  add(used.phil, 'phil', 'specialist');
-  add(used.mental, 'mental', 'specialist');
+  for (let i = 0; i < used; i++) rows.push({ periodKey, status: 'confirmed', date: today });
   return rows;
 }
 
-/** entitlementsFor, run for one seed child - shared by useMembership's seed
- * branch and useSpecialistSlots' seed entitlement below. */
-function seedEntitlementsForChild(child, today) {
-  const athleteLike = { packageId: child.packageId, fitnessPackageId: child.fitnessPackageId ?? null };
-  const packages = [packageById(child.packageId), child.fitnessPackageId ? packageById(child.fitnessPackageId) : null];
-  return entitlementsFor(athleteLike, packages, seedMembershipBookings(child, today), today.slice(0, 7));
+/** tokensWithNextPeriod, run for one seed child - shared by useMembership's
+ * seed branch and useSpecialistSlots' seed tokens above. */
+function seedMemberTokens(child, today) {
+  const pkg = packageById(child.packageId);
+  return tokensWithNextPeriod(pkg, seedMemberBookingRows(child, today), PERIOD_ANCHOR_DAY, today);
 }
 
 /** One useMembership member row for a seed child - same field set the live
- * branch (memberEntry below) produces. */
+ * branch (liveMemberEntry below) produces. */
 function seedMemberEntry(child, today) {
-  const golfPkg = packageById(child.packageId);
-  const fitnessPkg = child.fitnessPackageId ? packageById(child.fitnessPackageId) : null;
+  const pkg = packageById(child.packageId);
   return {
     athleteId: child.id,
     name: child.name,
-    golf: golfPkg
-      ? { id: golfPkg.id, name: golfPkg.name, price: golfPkg.price ?? null, training: golfPkg.training ?? null, tournaments: golfPkg.tournaments ?? null, kind: golfPkg.kind ?? null }
+    package: pkg
+      ? { id: pkg.id, name: pkg.name, price: pkg.price ?? null, tokens: pkg.tokens ?? null, windowDays: pkg.windowDays ?? null, kind: pkg.kind ?? null }
       : null,
-    fitness: fitnessPkg
-      ? { id: fitnessPkg.id, name: fitnessPkg.name, price: fitnessPkg.price ?? null, sessions: fitnessPkg.sessions ?? null }
-      : null,
+    tokens: seedMemberTokens(child, today),
     contractMinutes: SEED_CONTRACT_MINUTES[child.id] ?? null,
-    resetsOn: nextMonthFirstShort(today),
-    entitlements: seedEntitlementsForChild(child, today),
+    periodEnd: periodFor(today, PERIOD_ANCHOR_DAY).periodEnd,
   };
 }
 
 /**
- * One useMembership member row, live mode - the athlete's golf/fitness
- * package facts (never a Firestore price, by the same no-dollar-amounts
- * policy useBillingSummary already follows) plus entitlementsFor's full
- * derivation off the athlete's real bookings this month.
+ * One useMembership member row, live mode - the athlete's ONE package's
+ * facts (never a Firestore price, by the same no-dollar-amounts policy
+ * useBillingSummary already follows) plus the full token position off the
+ * athlete's real bookings this period.
  */
-async function liveMemberEntry(a, today) {
-  const monthISO = today.slice(0, 7);
-  const [golfPkg, fitnessPkg, bookings] = await Promise.all([
+async function liveMemberEntry(a, today, anchorDay) {
+  const [pkg, bookings] = await Promise.all([
     a.packageId ? fetchPackage(a.packageId) : null,
-    a.fitnessPackageId ? fetchPackage(a.fitnessPackageId) : null,
     fetchBookings(a.id, { householdId: a.householdId }),
   ]);
-  const entitlements = entitlementsFor(a, [golfPkg, fitnessPkg], bookings, monthISO);
   // Price comes from the STATIC catalogue (packageById), never the Firestore
   // doc's own `price` field - policy: no dollar amounts in Firestore (same
   // reasoning DATA-MODEL.md gives for useBillingSummary's rows). Verified
@@ -1520,49 +1619,48 @@ async function liveMemberEntry(a, today) {
   return {
     athleteId: a.id,
     name: a.name,
-    golf: golfPkg
+    package: pkg
       ? {
-          id: golfPkg.id,
-          name: golfPkg.name,
-          price: packageById(golfPkg.id)?.price ?? null,
-          training: golfPkg.training ?? null,
-          tournaments: golfPkg.tournaments ?? null,
-          kind: golfPkg.kind ?? null,
+          id: pkg.id,
+          name: pkg.name,
+          price: packageById(pkg.id)?.price ?? null,
+          tokens: pkg.tokens ?? null,
+          windowDays: pkg.windowDays ?? null,
+          kind: pkg.kind ?? null,
         }
       : null,
-    fitness: fitnessPkg
-      ? {
-          id: fitnessPkg.id,
-          name: fitnessPkg.name,
-          price: packageById(fitnessPkg.id)?.price ?? null,
-          sessions: fitnessPkg.sessions ?? null,
-        }
-      : null,
+    tokens: tokensWithNextPeriod(pkg, bookings, anchorDay, today),
     contractMinutes: a.contractMinutes ?? null,
-    resetsOn: nextMonthFirstShort(today),
-    entitlements,
+    periodEnd: periodFor(today, anchorDay).periodEnd,
   };
 }
 
 /**
  * Live payload for useMembership - `household: null` and a single self-entry
- * for an athlete-linked account; the real household plus every member in
- * fetchHouseholdAthletes' own order for a parent. Whichever role, screens
- * cannot tell (the pinned shape is identical either way).
+ * for an athlete-linked account; the real household (with its
+ * periodAnchorDay) plus every member in fetchHouseholdAthletes' own order
+ * for a parent. Whichever role, screens cannot tell (the pinned shape is
+ * identical either way).
  */
 async function liveMembership(today) {
   const profile = await fetchCurrentUser();
   if (profile.athleteId) {
     const athlete = await fetchAthlete(profile.athleteId);
-    return { household: null, members: [await liveMemberEntry(athlete, today)] };
+    const household = athlete.householdId ? await fetchHousehold(athlete.householdId) : null;
+    const anchorDay = normalizeAnchorDay(household?.periodAnchorDay);
+    return { household: null, members: [await liveMemberEntry(athlete, today, anchorDay)] };
   }
   if (profile.householdId) {
     const [household, athletes] = await Promise.all([
       fetchHousehold(profile.householdId),
       fetchHouseholdAthletes(profile.householdId),
     ]);
-    const members = await Promise.all(athletes.map((a) => liveMemberEntry(a, today)));
-    return { household: { id: household.id, name: household.name ?? null }, members };
+    const anchorDay = normalizeAnchorDay(household.periodAnchorDay);
+    const members = await Promise.all(athletes.map((a) => liveMemberEntry(a, today, anchorDay)));
+    return {
+      household: { id: household.id, name: household.name ?? null, periodAnchorDay: anchorDay },
+      members,
+    };
   }
   throw new LiveDataError(
     ERR.INVALID,
@@ -1572,10 +1670,11 @@ async function liveMembership(today) {
 }
 
 /**
- * GET /membership (Sprint 11 pin D, contract v1.9) - the parked Billing
- * surface's replacement: what each athlete's packages ENTITLE them to, never
- * what is owed. `{ data: { household: {id,name}|null, members: [{ athleteId,
- * name, golf, fitness, contractMinutes, resetsOn, entitlements }] },
+ * GET /membership (Sprint 11 pin D, contract v1.9; payload rewritten
+ * Sprint 12, contract v2.0 pin N) - the parked Billing surface's
+ * replacement: what each athlete's ONE package ENTITLES them to, never what
+ * is owed. `{ data: { household: {id,name,periodAnchorDay}|null, members:
+ * [{ athleteId, name, package, tokens, contractMinutes, periodEnd }] },
  * loading, error }`. Parent: every household athlete, household order.
  * Athlete: self only, household null.
  */
@@ -1588,7 +1687,9 @@ export function useMembership() {
   const seedMembers = HOUSEHOLD.children.map((c) => seedMemberEntry(c, today));
 
   return useSeedResource(
-    live ? null : { household: { id: 'whitfield', name: HOUSEHOLD.name }, members: seedMembers },
+    live
+      ? null
+      : { household: { id: 'whitfield', name: HOUSEHOLD.name, periodAnchorDay: PERIOD_ANCHOR_DAY }, members: seedMembers },
     live
       ? { source: () => liveMembership(today), deps: ['membership', today, bookingsGen, athletesGen] }
       : undefined
@@ -1596,8 +1697,9 @@ export function useMembership() {
 }
 
 /**
- * `assign(athleteId, { packageId, fitnessPackageId })` (Sprint 11 pin B,
- * contract v1.9) - ops/owner only, enforced by firestore.rules'
+ * `assign(athleteId, { packageId })` (Sprint 11 pin B, contract v1.9;
+ * narrowed Sprint 12, contract v2.0 pin A/B - one package, not a golf/
+ * fitness pair) - ops/owner only, enforced by firestore.rules'
  * packageAssignmentUpdateOk(), not here; live.js's setAthletePackages does
  * the one-shot updateDoc + bump('athletes'). `saving`/`error` are hook-owned
  * state (AthleteDetail's membership editor reads them directly for its Save
@@ -1609,14 +1711,14 @@ export function useAssignPackages() {
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState(null);
 
-  const assign = async (athleteId, { packageId, fitnessPackageId }) => {
+  const assign = async (athleteId, { packageId }) => {
     setSaving(true);
     setError(null);
     try {
       if (!live) {
-        return { athleteId, packageId, fitnessPackageId: fitnessPackageId ?? null, simulated: true };
+        return { athleteId, packageId, simulated: true };
       }
-      return await setAthletePackages(athleteId, { packageId, fitnessPackageId });
+      return await setAthletePackages(athleteId, { packageId });
     } catch (err) {
       setError(err);
       throw err;
@@ -1629,11 +1731,45 @@ export function useAssignPackages() {
 }
 
 /**
+ * `setPeriodAnchorDay(day)` (contract v2.0 pin B/N, new) - ops/owner only,
+ * enforced by firestore.rules' householdPeriodUpdateOk(), not here.
+ * live.js's setHouseholdPeriodAnchorDay does the one-shot updateDoc +
+ * bump('households'). The hook is scoped to ONE household (`householdId`,
+ * the family the caller is currently editing on the Membership screen) so
+ * the returned setter takes only the new day, matching AthleteDetail's
+ * existing useAssignPackages() call shape. Seed mode is a local echo, same
+ * discipline as useAssignPackages.
+ */
+export function useHouseholdSettings(householdId) {
+  const live = isLive();
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState(null);
+
+  const setPeriodAnchorDay = async (day) => {
+    setSaving(true);
+    setError(null);
+    try {
+      if (!live || !householdId) {
+        return { householdId, periodAnchorDay: normalizeAnchorDay(day), simulated: true };
+      }
+      return await setHouseholdPeriodAnchorDay(householdId, day);
+    } catch (err) {
+      setError(err);
+      throw err;
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return { setPeriodAnchorDay, saving, error };
+}
+
+/**
  * One reservation row - the SAME shape useSchedule's own resolve() produces
- * (displaySession fields + bookingId/status/cancellable), plus the three
- * fields Sprint 11 pin F adds: athleteId (which household member), instructor,
- * durationMinutes. Shared by the live and seed branches below so the two can
- * never diverge in shape.
+ * (displaySession fields + bookingId/status/cancellable), plus the fields
+ * Sprint 11 pin F adds (athleteId, instructor, durationMinutes) and Sprint
+ * 12 pin N adds (periodKey, nextPeriod). Shared by the live and seed
+ * branches below so the two can never diverge in shape.
  *
  * `instructor`: the specialist's own name for phil/mental
  * (data/specialists.js - academy-public, no extra read). For training/
@@ -1652,9 +1788,15 @@ export function useAssignPackages() {
  *
  * `durationMinutes`: 60 for a generator block, 45 for any specialist slot
  * (data/specialists.js's seeded 45-minute slots) - the pin's own numbers.
+ *
+ * `periodKey`/`nextPeriod`: computed from the SESSION's own date against
+ * the household's anchorDay, same convention as liveSchedule/useSchedule's
+ * resolve() above - a display read never needs to trust a possibly-missing
+ * stored field.
  */
-function reservationRow(s, b, today, instructor) {
+function reservationRow(s, b, today, instructor, anchorDay, currentPeriodKey) {
   const specialist = SPECIALIST_BY_ID.get(s.type);
+  const periodKey = periodFor(s.date, anchorDay).periodKey;
   return {
     ...displaySession(s, today),
     badge:
@@ -1671,6 +1813,8 @@ function reservationRow(s, b, today, instructor) {
     athleteId: b.athleteId,
     instructor: instructor ?? (specialist ? specialist.name : null),
     durationMinutes: specialist ? 45 : 60,
+    periodKey,
+    nextPeriod: periodKey > currentPeriodKey,
   };
 }
 
@@ -1687,10 +1831,13 @@ async function liveHouseholdReservations(today) {
       `users/${profile.uid} has no householdId - Reservations is a parent surface only.`
     );
   }
-  const [athletes, bookings] = await Promise.all([
+  const [household, athletes, bookings] = await Promise.all([
+    fetchHousehold(profile.householdId),
     fetchHouseholdAthletes(profile.householdId),
     fetchHouseholdBookings(profile.householdId),
   ]);
+  const anchorDay = normalizeAnchorDay(household.periodAnchorDay);
+  const currentPeriodKey = periodFor(today, anchorDay).periodKey;
   const active = bookings.filter((b) => b.status !== 'cancelled');
   const sessionsById = new Map(
     (await fetchSessionsByIds(active.map((b) => b.sessionId))).map((s) => [s.id, s])
@@ -1701,7 +1848,14 @@ async function liveHouseholdReservations(today) {
     const s = sessionsById.get(b.sessionId);
     const bucket = byAthlete.get(b.athleteId);
     if (!s || !bucket) continue; // dropped, same null-resolve rule as useSchedule/liveSchedule above
-    const row = reservationRow(s, { bookingId: b.id, status: b.status, athleteId: b.athleteId }, today, null);
+    const row = reservationRow(
+      s,
+      { bookingId: b.id, status: b.status, athleteId: b.athleteId },
+      today,
+      null,
+      anchorDay,
+      currentPeriodKey
+    );
     (s.date >= today ? bucket.upcoming : bucket.past).push(row);
   }
   const members = athletes.map((a) => byAthlete.get(a.id));
@@ -1717,6 +1871,7 @@ async function liveHouseholdReservations(today) {
  * branch resolves (never a second, independently invented booking list);
  * reese/nico get the honest empty state the pin's UI section calls for. */
 function seedReservationMember(child, today) {
+  const currentPeriodKey = periodFor(today, PERIOD_ANCHOR_DAY).periodKey;
   if (child.id !== SEED_ATHLETE_ID) {
     return { athleteId: child.id, name: child.name, upcoming: [], past: [] };
   }
@@ -1729,7 +1884,9 @@ function seedReservationMember(child, today) {
           s,
           { bookingId: seedBookingId(s.id), status: 'confirmed', athleteId: child.id },
           today,
-          isSpecialistType(s.type) ? null : COACH.name
+          isSpecialistType(s.type) ? null : COACH.name,
+          PERIOD_ANCHOR_DAY,
+          currentPeriodKey
         );
       })
       .filter(Boolean);
@@ -1868,13 +2025,18 @@ export function useEnrollmentQueue() {
  * The catalogue reads through the seam like everything else: the handoff's
  * state list has `tiers[]` arriving from the API, and a hardcoded import is a
  * screen that cannot survive a price change without a deploy.
+ *
+ * Contract v2.0 pin A: ONE catalogue - `golf`/`dropIn`/`fitness`/`elite`
+ * (four lists) collapses to `tokens` (the four token packages) plus
+ * `elite`/`single` (each one package). PAYLOAD SHAPE CHANGE - flagged for
+ * the PM/frontend lane, same as usePackages' callers (Registration,
+ * PackageStep) will need to read the new keys.
  */
 export function usePackages() {
   return useSeedResource({
-    golf: GOLF_PACKAGES,
-    dropIn: DROP_IN,
-    fitness: FITNESS_PACKAGES,
-    elite: ELITE_TIERS,
+    tokens: TOKEN_PACKAGES,
+    elite: ELITE,
+    single: SINGLE_TOKEN,
   });
 }
 
@@ -2197,7 +2359,9 @@ async function liveAthleteDashboard(today) {
       name: ctx.athlete.name,
       fullName: ctx.athlete.name,
       date: longDayLabel(today),
-      allowance: deriveAllowance(ctx.pkg, ctx.bookings, today),
+      // `allowance` -> `tokens` (contract v2.0): the AthleteDashboard
+      // allowance card becomes the tokens card (UI pin).
+      tokens: deriveTokens(ctx.pkg, ctx.bookings, normalizeAnchorDay(ctx.household?.periodAnchorDay), today),
     },
     nextSession,
     contract,
@@ -2442,7 +2606,7 @@ export function useAthleteTier() {
 /**
  * Live payload for usePracticeLog - this cycle's logged minutes, derived
  * client-side from an unfiltered per-athlete query (fetchContractLogs), the
- * same pattern deriveAllowance() uses for bookings: no stored counter to
+ * same pattern deriveTokens() uses for bookings: no stored counter to
  * drift, no composite index to provision.
  */
 async function livePracticeLog(today) {
@@ -2619,11 +2783,11 @@ async function liveAthleteDetail(athleteId) {
       // parent-facing "Start a contract" tier picker card knows whether to
       // render (null = no tier yet, matches NoContract's own convention).
       contractMinutes: athlete.contractMinutes ?? null,
-      // Sprint 11 (contract v1.9, E): the two package pointers the
-      // AthleteDetail membership editor preselects from - additive, the
-      // same way contractMinutes was added above.
+      // Sprint 11 (contract v1.9, E): the package pointer the AthleteDetail
+      // membership editor preselects from - additive, the same way
+      // contractMinutes was added above. `fitnessPackageId` is DROPPED
+      // (contract v2.0, pin A: the field is retired - one package now).
       packageId: athlete.packageId ?? null,
-      fitnessPackageId: athlete.fitnessPackageId ?? null,
     },
     upcoming,
     history: [],
