@@ -5,8 +5,31 @@
  *   node scripts/seed-firestore.mjs --dry-run     # print what would be written
  *   npm run seed:emulator                          # seed a running emulator
  *
- * What it seeds (data contract v1, docs/portal/TEAM.md):
- *   packages    — the 2026-27 catalogue from frontend/src/portal/data/packages.js
+ * CONTRACT v2.0 (Sprint 12 pin, "the token model", TEAM.md, Part 1 only):
+ * one fungible token pool replaces the two-pool golf/fitness model.
+ *   packages    — SIX docs now (t-6, t-12, t-16, t-20, elite, single) from the
+ *                 seam's TOKEN_PACKAGES/ELITE/SINGLE_TOKEN in packages.js —
+ *                 the g-*, f-*, drop-in, elite-247 catalogue is GONE. price
+ *                 and pending are both stripped before writing (no dollar
+ *                 amounts and no invented-price markers in seed data).
+ *   athletes    — `fitnessPackageId` is REMOVED (there is one package pointer
+ *                 now, `packageId`, into the token catalogue). Whitfield kids
+ *                 move off the old g- / f- ids onto token ids — see
+ *                 WHITFIELD_PACKAGE_IDS below.
+ *   bookings    — `pool` is no longer written (retired, contract v2.0 pin A —
+ *                 existing prod docs keep the field harmlessly, this seed just
+ *                 stops adding new docs with it). Every booking instead
+ *                 carries `periodKey` — the period start (`periodFor()` in the
+ *                 seam's packages.js) the booking's session date falls in,
+ *                 per the owning household's `periodAnchorDay`.
+ *   households  — gains `periodAnchorDay` (int 1-28). Whitfield is anchored on
+ *                 1; a second, small demo household (`parker`, below) is
+ *                 anchored on 15 so the mid-month cycle is exercised, and
+ *                 doubles as this seed's one Elite athlete (see PARKER_* below
+ *                 — TEAM.md's DB-lane bullet asks for both facts and does not
+ *                 require them to be different households).
+ *
+ * What it seeds (data contract v1, docs/portal/TEAM.md, updated to v2.0 above):
  *   sessions    — the generated season (buildSeason() from season.js), PLUS
  *                  contract v1.7 (Sprint 9): hand-seeded specialist 1-on-1
  *                  slots for Phil ('phil') and Yannick ('mental') covering the
@@ -16,15 +39,14 @@
  *                  never invents these; ids use a new `-s<n>` letter on the
  *                  existing `-x<n>` extras convention (season.js's
  *                  generateSeason() step for holiday tournaments).
- *   households  — the Whitfield demo household from seed.js
- *   athletes    — the three Whitfield athletes with their packageIds and,
- *                  as of contract v1.6 (Sprint 8: age brackets), the
- *                  OWNER-SUPPLIED dobs (2026-09-10), landing the three kids
- *                  in three different brackets as of SEASON_BOUNDS.start —
- *                  see WHITFIELD_DOBS below. Contract v1.9 (Sprint 11 pin A):
- *                  jordan and reese also get a `fitnessPackageId` (f-8, f-4);
- *                  nico's is explicit `null` — see WHITFIELD_FITNESS_PACKAGE_IDS
- *                  below for why null over omitting the key.
+ *   households  — the Whitfield demo household from seed.js, PLUS the new
+ *                  `parker` household (v2.0, anchor 15, Elite) above.
+ *   athletes    — the three Whitfield athletes with their (now token)
+ *                  packageIds and, as of contract v1.6 (Sprint 8: age
+ *                  brackets), the OWNER-SUPPLIED dobs (2026-09-10), landing
+ *                  the three kids in three different brackets as of
+ *                  SEASON_BOUNDS.start — see WHITFIELD_DOBS below. PLUS the
+ *                  new `parker` household's one Elite athlete (v2.0).
  *   users       — one parent, one athlete, one coach, one owner
  *   contractLogs — Jordan's practice log history for the last ~2 weeks
  *                  (contract v1.3: variable minutes, some below the 45-min
@@ -43,15 +65,17 @@
  *                  invariant the real booking transaction maintains. Also
  *                  contract v1.7 (Sprint 9): ONE pre-booked specialist
  *                  booking for jordan against the first hand-seeded Yannick
- *                  ('mental') slot, pool 'specialist', so schedule display,
- *                  the monthly cap, and cancellation all have something real
- *                  to exercise in QA. Contract v1.9 (Sprint 11): TWO PAST
- *                  'phil' bookings for jordan against hand-seeded past Phil
- *                  sessions earlier in the current calendar month (both
- *                  'attended'), so entitlementsFor()'s derived Phil "used"
- *                  is non-zero the moment the emulator loads (2 of jordan's
- *                  f-8 package's 8) — matches TEAM.md pin G's own example
- *                  copy. Plus ONE upcoming 'phil' booking for reese against
+ *                  ('mental') slot — v2.0: spends an ordinary token like any
+ *                  other booking (pin K), no `pool` field written — so
+ *                  schedule display and cancellation both have something real
+ *                  to exercise in QA. Contract v1.9 (Sprint 11), UPDATED for
+ *                  v2.0: TWO PAST 'phil' bookings for jordan against
+ *                  hand-seeded past Phil sessions earlier in the current
+ *                  calendar month (both 'attended') — under the token model
+ *                  these simply count against jordan's t-12 period like any
+ *                  other booking (no more separate Phil "used of 8"; pin K
+ *                  retires the old fitness-package Phil cap entirely). Plus
+ *                  ONE upcoming 'phil' booking for reese against
  *                  the first hand-seeded upcoming Phil slot, so the Family
  *                  Reservations view (pin F) has a specialist row for a
  *                  second household member too. jordan's upcoming
@@ -178,7 +202,12 @@ function loadPortalData() {
     entry,
     [
       `export { buildSeason, SEASON_BOUNDS } from '${fwd(path.join(dataDir, 'season.js'))}';`,
-      `export { GOLF_PACKAGES, DROP_IN, FITNESS_PACKAGES, ELITE_TIERS, poolFor } from '${fwd(path.join(dataDir, 'packages.js'))}';`,
+      // contract v2.0 (Sprint 12 pin A/B/L/M) — the ONE token catalogue and
+      // the period math, off the PM seam (frontend/src/portal/data/packages.js
+      // above its DEPRECATED banner). GOLF_PACKAGES/DROP_IN/FITNESS_PACKAGES/
+      // ELITE_TIERS/poolFor (below the banner) are gone from this bundle —
+      // nothing here reads them anymore.
+      `export { ALL_PACKAGES, periodFor } from '${fwd(path.join(dataDir, 'packages.js'))}';`,
       `export { HOUSEHOLD, COACH } from '${fwd(path.join(dataDir, 'seed.js'))}';`,
       // contract v1.8, Sprint 10 pin G — the notification-category catalogue
       // the NotificationPreferences screen renders; bundled like everything
@@ -318,7 +347,6 @@ function addSpecialistSessions(sessions, runDate = new Date()) {
         coachId: null,
         label: null,
         special: false,
-        overflow: false,
         status: 'scheduled',
         gcalEventId: null, // hand-seeded, never a synced-from-calendar doc
         coachNote: null, // contract v1.8, Sprint 10 pin H
@@ -368,7 +396,6 @@ function addPastPhilSessions(sessions, runDate = new Date()) {
       coachId: null,
       label: null,
       special: false,
-      overflow: false,
       status: 'scheduled',
       gcalEventId: null, // hand-seeded, never a synced-from-calendar doc
       coachNote: null, // contract v1.8, Sprint 10 pin H
@@ -387,28 +414,30 @@ function buildDocs(portal) {
   const {
     buildSeason,
     SEASON_BOUNDS,
-    GOLF_PACKAGES,
-    DROP_IN,
-    FITNESS_PACKAGES,
-    ELITE_TIERS,
+    ALL_PACKAGES,
+    periodFor,
     HOUSEHOLD,
     COACH,
-    poolFor,
     NOTIFICATION_CATEGORIES,
   } = portal;
 
-  // packages — price is stripped (no dollar amounts in seed data, policy) and
-  // id becomes the doc id rather than a duplicated field.
+  // packages (contract v2.0, pin A/L/M) — ONE catalogue, six docs
+  // (t-6/t-12/t-16/t-20/elite/single). price AND pending are both stripped
+  // before writing — no dollar amounts, and no invented-price markers,
+  // anywhere in seed data (the v1.1 "price stripped" rule, extended to
+  // `pending` by this sprint). id becomes the doc id rather than a
+  // duplicated field. `kind`/`tokens`/`windowDays`/`access247` (elite only)
+  // flow straight through from the seam, never hand-copied.
   const packages = new Map();
-  const fields = ({ id, price, ...rest }) => rest;
-  for (const p of GOLF_PACKAGES) packages.set(p.id, { ...fields(p), kind: 'golf' });
-  packages.set(DROP_IN.id, { ...fields(DROP_IN), kind: 'drop-in' });
-  for (const p of FITNESS_PACKAGES) packages.set(p.id, { ...fields(p), kind: 'fitness' });
-  for (const p of ELITE_TIERS) packages.set(p.id, { ...fields(p), kind: 'elite' });
+  const fields = ({ id, price, pending, ...rest }) => rest;
+  for (const p of ALL_PACKAGES) packages.set(p.id, fields(p));
 
   // sessions — straight from the generator; ids stay the generator's
   // `YYYY-MM-DD-<block>`. Normalized only where the generator omits a field on
-  // regular sessions (special/label exist on extras alone).
+  // regular sessions (special/label exist on extras alone). Contract v2.0
+  // (pin J): `overflow` is gone (deleted from the generator itself); `bookable`
+  // is new — false only for the seed-only Saturday 2-4 PM adult/college
+  // display entry, true everywhere else.
   const sessions = new Map();
   for (const s of buildSeason()) {
     const { id, ...fields } = s;
@@ -421,7 +450,7 @@ function buildDocs(portal) {
       coachId: fields.coachId ?? null,
       label: fields.label ?? null,
       special: !!fields.special,
-      overflow: !!fields.overflow,
+      bookable: fields.bookable !== false,
       coachNote: null, // contract v1.8, Sprint 10 pin H — set on one session below
     });
   }
@@ -447,7 +476,13 @@ function buildDocs(portal) {
 
   // households — guardian contact from the scaffold (dana@email.com is the
   // parent email seed.js uses). Stripe ids are null: ids only, and a demo
-  // household has none.
+  // household has none. `periodAnchorDay` (contract v2.0, pin B) is written
+  // EXPLICITLY as 1 rather than left absent — absent reads identically (the
+  // pin's own "absent == 1" rule), but an explicit value is what a raw
+  // Firestore/REST read of the emulator actually shows, matching this
+  // script's long-standing preference for a visible demo value over an
+  // invisible default (the same call WHITFIELD_FITNESS_PACKAGE_IDS's nico
+  // used to make for its own field, pre-v2.0 — see the athletes note below).
   const householdId = 'whitfield';
   const households = new Map([
     [
@@ -457,6 +492,7 @@ function buildDocs(portal) {
         guardian: { name: 'Dana', email: 'dana@email.com', phone: null },
         stripeCustomerId: null,
         stripeSubscriptionId: null,
+        periodAnchorDay: 1,
       },
     ],
   ]);
@@ -479,15 +515,21 @@ function buildDocs(portal) {
     reese: '2014-03-02', // 12 at season start -> bracket 11-13
     nico: '2017-09-09', // 9 at season start -> bracket 10U
   };
-  // fitnessPackageId (contract v1.9, Sprint 11 pin A) — jordan and reese get
-  // a real fitness package; nico gets an EXPLICIT null (not an omitted key —
-  // see DATA-MODEL.md's seeding note for why: one consistent "always present,
-  // sometimes null" rule for every package-shaped pointer on this document,
-  // matching contractMinutes' own explicit-null treatment for nico below).
-  const WHITFIELD_FITNESS_PACKAGE_IDS = {
-    jordan: 'f-8',
-    reese: 'f-4',
-    nico: null,
+  // packageId (contract v2.0, pin A) — seed.js's HOUSEHOLD still carries the
+  // RETIRED g-*/f-* ids (that file is the data-routing/frontend lanes' — not
+  // this script's to edit), so every child's package is overridden here onto
+  // the new token catalogue rather than read off `child.packageId` directly.
+  // jordan keeps her mid-tier package (was g-8-3, the "8 + 3" golf package;
+  // now t-12, the closest token equivalent); reese and nico both move off
+  // their shared g-4-2 (the smallest golf package) onto t-6, the smallest
+  // token package — "sensible t-* for reese/nico" per TEAM.md's DB-lane
+  // bullet, not an invented upgrade/downgrade. `fitnessPackageId` is GONE
+  // (pin A: one package pointer now) — the old WHITFIELD_FITNESS_PACKAGE_IDS
+  // map and its f-8/f-4/null split are deleted, not merely unused.
+  const WHITFIELD_PACKAGE_IDS = {
+    jordan: 't-12',
+    reese: 't-6',
+    nico: 't-6',
   };
   const coachUid = 'coach-luke';
   const athletes = new Map();
@@ -497,13 +539,45 @@ function buildDocs(portal) {
       name: `${child.name} Whitfield`,
       dob: WHITFIELD_DOBS[child.id] ?? null,
       householdId,
-      packageId: child.packageId,
-      fitnessPackageId: WHITFIELD_FITNESS_PACKAGE_IDS[child.id] ?? null,
+      packageId: WHITFIELD_PACKAGE_IDS[child.id],
       contractMinutes: minutes ? Number(minutes[1]) : null,
       coachId: coachUid,
     });
   }
   // athletes/{id}/private/medical is deliberately NOT seeded — see header.
+
+  // ---------------------------------------------------------------------
+  // `parker` household (contract v2.0, TEAM.md DB-lane bullet) — a second,
+  // SMALL, fully-invented demo household (never a real family, same class as
+  // Whitfield) that exists purely to seed two Sprint 12 facts the Whitfield
+  // household doesn't: a `periodAnchorDay` other than 1 (so the mid-month
+  // cycle math in `periodFor()` is exercised, not just the anchor-1 case),
+  // and one Elite athlete (the pin explicitly asks for one in the emulator —
+  // DATA-MODEL.md has flagged this as a gap since Sprint 11). The two facts
+  // are combined onto one household/athlete rather than two separate adds,
+  // since TEAM.md's bullet lists them together and nothing requires they be
+  // different households — noted explicitly here and in the report. No
+  // `users` doc is seeded for this household (no QA sign-in story is pinned
+  // for it); it exists as households/athletes docs only, the same shape the
+  // MackBee siblings have in provision-family.mjs.
+  // ---------------------------------------------------------------------
+  const parkerHouseholdId = 'parker';
+  households.set(parkerHouseholdId, {
+    name: 'Parker family',
+    guardian: { name: 'Sam Parker', email: 'sam.parker@example.com', phone: null },
+    stripeCustomerId: null,
+    stripeSubscriptionId: null,
+    periodAnchorDay: 15,
+  });
+  const parkerAthleteId = 'sage-parker';
+  athletes.set(parkerAthleteId, {
+    name: 'Sage Parker',
+    dob: '2013-05-10', // fabricated demo dob, same as the Contreras enrollment kids below
+    householdId: parkerHouseholdId,
+    packageId: 'elite',
+    contractMinutes: null,
+    coachId: null,
+  });
 
   // bookings — REAL bookings for the three Whitfield athletes against real
   // seeded session ids (contract v1.4, docs/portal/TEAM.md "Sprint 6 pins"),
@@ -515,32 +589,33 @@ function buildDocs(portal) {
   // consistent story instead of two unrelated ones:
   //   jordan 2026-11-02-1 (Mon 4:00 PM training) — the scaffold's
   //     season-opener "Confirmed" booking; self-booked by the athlete.
-  //   jordan 2026-11-07-1 (Sat 10:30 AM tournament) — `attended` (contract
+  //   jordan 2026-11-07-1 (Sat 10:00 AM tournament) — `attended` (contract
   //     v1.5: flipped from the earlier `confirmed` now that a tournament
   //     result exists for this session below — a result implies the athlete
   //     showed up). Booked by the parent, so this seed exercises the
   //     parent-linkage path (createdBy != athleteId's own account) as well as
-  //     the athlete-booked path above; also the other allowance pool, per the
-  //     two-pool invariant.
+  //     the athlete-booked path above.
   //   jordan 2026-11-09-2 (Mon 5:00 PM training) — already `attended`, so the
   //     coach's roster and any "past sessions" UI have a real history entry
   //     to show, not just upcoming confirmeds.
-  //   jordan 2026-11-14-1 (Sat 10:30 AM tournament) — `attended`, added
+  //   jordan 2026-11-14-1 (Sat 10:00 AM tournament) — `attended`, added
   //     alongside the tournamentResults below: this is the second tournament
   //     Jordan places in (3rd), so the attendance story matches the result.
   //   reese / nico 2026-11-07-1 and 2026-11-14-1 — both tournament blocks,
   //     both `attended`, both `createdBy: 'parent-dana'`. Reese and Nico have
   //     no `users` doc of their own (see below), so every one of their
   //     bookings is the parent-books-for-a-kid path Sprint 7 makes
-  //     first-class — not an edge case for them, the only case. Each seeded
-  //     against exactly their package's `tournaments` allowance (`g-4-2` = 2
-  //     tournament entries/month, and each has exactly 2 here), so the
-  //     allowance UI reads "2 of 2 used" rather than something that looks
-  //     broken.
+  //     first-class — not an edge case for them, the only case.
   // `sessions.booked` on each referenced session is incremented below in the
   // same loop that builds these docs — the transaction's other write (v1.4)
   // — so the seed is internally consistent the way a real booking would
   // leave it: a QA pass checking `booked` against `bookings` sees them agree.
+  //
+  // periodKey (contract v2.0, pin B) — write-once, the period START the
+  // SESSION's date falls in, per `periodFor(date, anchorDay)` and the owning
+  // household's `periodAnchorDay` (Whitfield: 1). `pool` is no longer written
+  // at all (pin A: retired) — every entry below drops it in favor of
+  // `periodKey`.
   const WHITFIELD_BOOKINGS = [
     ['jordan', '2026-11-02-1', 'confirmed', 'athlete-jordan'],
     ['jordan', '2026-11-07-1', 'attended', 'parent-dana'],
@@ -551,6 +626,7 @@ function buildDocs(portal) {
     ['nico', '2026-11-07-1', 'attended', 'parent-dana'],
     ['nico', '2026-11-14-1', 'attended', 'parent-dana'],
   ];
+  const WHITFIELD_ANCHOR_DAY = households.get(householdId).periodAnchorDay;
   const bookings = new Map();
   const bookingCreatedAt = new Date();
   for (const [athleteId, sessionId, status, createdBy] of WHITFIELD_BOOKINGS) {
@@ -567,7 +643,7 @@ function buildDocs(portal) {
       sessionId,
       date: session.date,
       type: session.type,
-      pool: poolFor(session.type),
+      periodKey: periodFor(session.date, WHITFIELD_ANCHOR_DAY).periodKey,
       status,
       householdId,
       createdBy,
@@ -616,20 +692,12 @@ function buildDocs(portal) {
       sessionId: jordanMentalSlot.id,
       date: session.date,
       type: session.type, // 'mental'
-      // pool 'specialist' (contract v1.7) — written as a LITERAL, not via
-      // poolFor(session.type). poolFor() in
-      // frontend/src/portal/data/packages.js maps phil|mental -> 'specialist'
-      // as the ROUTING lane's edit (TEAM.md: "ROUTING lane makes that one
-      // edit... db lane consumes it via its existing bundle, edits nothing
-      // there"), which lands in a parallel worktree this one doesn't see. As
-      // bundled in THIS worktree, poolFor('mental') still falls through to
-      // its `=== 'tournament' ? 'tournaments' : 'training'` ternary and
-      // silently returns 'training' — wrong for a specialist booking — so
-      // the literal is used instead of trusting an import that hasn't landed
-      // yet. `pool` is stored, not derived (see the bookings field notes in
-      // DATA-MODEL.md), so this doc is correct today and stays correct once
-      // poolFor() itself is fixed at merge.
-      pool: 'specialist',
+      // periodKey (contract v2.0, pin B) — a specialist 1-on-1 spends an
+      // ordinary token now (pin K: "Phil and Yannick sessions spend an
+      // ordinary token"); `pool` is retired, so this doc no longer carries
+      // one at all (it used to be a literal 'specialist' here — see git
+      // history if that reasoning is ever needed again).
+      periodKey: periodFor(session.date, WHITFIELD_ANCHOR_DAY).periodKey,
       status: 'confirmed',
       householdId,
       createdBy: 'parent-dana',
@@ -639,11 +707,10 @@ function buildDocs(portal) {
   }
 
   // TWO PAST 'phil' bookings for jordan (contract v1.9, Sprint 11 DB lane
-  // bullet) — against the two sessions addPastPhilSessions() hand-added
-  // above, both already occurred (status 'attended'). Together with
-  // jordan's f-8 fitnessPackageId above, this makes entitlementsFor()'s
-  // derived Phil `used` 2 of 8 — see DATA-MODEL.md's seeding note for why
-  // that specific number matches TEAM.md pin G's example copy verbatim.
+  // bullet, carried forward under v2.0) — against the two sessions
+  // addPastPhilSessions() hand-added above, both already occurred (status
+  // 'attended'). Under the token model these simply count against jordan's
+  // t-12 period like any other booking — no separate Phil "used of N" pool.
   for (const sessionId of pastPhilIds) {
     const session = sessions.get(sessionId);
     bookings.set(`jordan_${sessionId}`, {
@@ -651,7 +718,7 @@ function buildDocs(portal) {
       sessionId,
       date: session.date,
       type: 'phil',
-      pool: 'specialist', // literal — see the mental booking note above for why
+      periodKey: periodFor(session.date, WHITFIELD_ANCHOR_DAY).periodKey,
       status: 'attended',
       householdId,
       createdBy: 'athlete-jordan',
@@ -681,7 +748,7 @@ function buildDocs(portal) {
       sessionId: reeseUpcomingPhilSlot.id,
       date: session.date,
       type: session.type, // 'phil'
-      pool: 'specialist', // literal — see the mental booking note above for why
+      periodKey: periodFor(session.date, WHITFIELD_ANCHOR_DAY).periodKey,
       status: 'confirmed',
       householdId,
       createdBy: 'parent-dana', // reese has no users doc of her own
@@ -1078,10 +1145,11 @@ async function main() {
   const tournamentCount = sessionDocs.filter((s) => s.type === 'tournament').length;
   const philCount = sessionDocs.filter((s) => s.type === 'phil').length;
   const mentalCount = sessionDocs.filter((s) => s.type === 'mental').length;
+  const adultCount = sessionDocs.filter((s) => s.type === 'adult').length; // pin J: seed-only, display, bookable: false
   console.log(
     `Season ${portal.SEASON_BOUNDS.start} -> ${portal.SEASON_BOUNDS.end}: ` +
       `${sessionDocs.length} sessions (${trainingCount} training, ${tournamentCount} tournament, ` +
-      `${philCount} phil, ${mentalCount} mental)\n`
+      `${philCount} phil, ${mentalCount} mental, ${adultCount} adult display-only)\n`
   );
 
   let total = 0;
@@ -1097,7 +1165,7 @@ async function main() {
   for (const [id, doc] of collections.bookings) {
     const session = collections.sessions.get(doc.sessionId);
     console.log(
-      `  bookings/${id}: status=${doc.status} pool=${doc.pool} createdBy=${doc.createdBy}` +
+      `  bookings/${id}: status=${doc.status} periodKey=${doc.periodKey} createdBy=${doc.createdBy}` +
         ` -> sessions/${doc.sessionId}.booked=${session.booked}/${session.capacity}`
     );
   }
@@ -1110,12 +1178,12 @@ async function main() {
         ` capacity=${doc.capacity} booked=${doc.booked} gcalEventId=${doc.gcalEventId}`
     );
   }
-  console.log('\nSpecialist ("specialist"-pool) bookings (contract v1.7 + v1.9):');
+  console.log('\nSpecialist bookings (contract v1.7 + v1.9, v2.0: an ordinary token, no `pool`):');
   for (const [id, doc] of collections.bookings) {
-    if (doc.pool !== 'specialist') continue;
+    if (doc.type !== 'phil' && doc.type !== 'mental') continue;
     const session = collections.sessions.get(doc.sessionId);
     console.log(
-      `  bookings/${id}: status=${doc.status} type=${doc.type} pool=${doc.pool} createdBy=${doc.createdBy}` +
+      `  bookings/${id}: status=${doc.status} type=${doc.type} periodKey=${doc.periodKey} createdBy=${doc.createdBy}` +
         ` -> sessions/${doc.sessionId}.booked=${session.booked}/${session.capacity}`
     );
   }
@@ -1170,15 +1238,46 @@ async function main() {
     console.log(`  sessions/2026-11-09-2: coachNote=${JSON.stringify(notedSession.coachNote)}`);
   }
 
-  console.log('\nathletes.fitnessPackageId (contract v1.9):');
+  console.log('\nathletes.packageId (contract v2.0 — fitnessPackageId is gone, one pointer now):');
   for (const [id, doc] of collections.athletes) {
-    console.log(`  athletes/${id}: fitnessPackageId=${JSON.stringify(doc.fitnessPackageId)} packageId=${doc.packageId}`);
+    console.log(`  athletes/${id}: packageId=${doc.packageId} householdId=${doc.householdId}`);
+  }
+
+  console.log('\nhouseholds.periodAnchorDay (contract v2.0, pin B):');
+  for (const [id, doc] of collections.households) {
+    console.log(`  households/${id}: periodAnchorDay=${doc.periodAnchorDay}`);
   }
 
   console.log('\nsessions.coachId on an upcoming booked training session (contract v1.9):');
   {
     const coachedSession = collections.sessions.get('2026-11-02-1');
     console.log(`  sessions/2026-11-02-1: coachId=${JSON.stringify(coachedSession.coachId)}`);
+  }
+
+  console.log('\nFirst generated Saturday (contract v2.0, pin J — 9/10/11/12/1 + the adult entry):');
+  {
+    // Scan for the first date carrying an 'adult' block — that is Saturday,
+    // by construction (only blocksForDay(SAT) ever emits `type: 'adult'`).
+    const byDate = new Map();
+    for (const [id, doc] of collections.sessions) {
+      if (doc.type === 'adult' || ['training', 'tournament'].includes(doc.type)) {
+        const list = byDate.get(doc.date) || [];
+        list.push([id, doc]);
+        byDate.set(doc.date, list);
+      }
+    }
+    const firstSatDate = [...byDate.keys()].sort().find((d) => (byDate.get(d) || []).some(([, doc]) => doc.type === 'adult'));
+    for (const [id, doc] of (byDate.get(firstSatDate) || []).sort((a, b) => a[0].localeCompare(b[0]))) {
+      console.log(`  sessions/${id}: time=${doc.time} type=${doc.type} bookable=${doc.bookable} label=${JSON.stringify(doc.label)}`);
+    }
+  }
+
+  console.log('\nparker household — contract v2.0 anchor-15 + Elite exercise:');
+  {
+    const parker = collections.households.get('parker');
+    const sage = collections.athletes.get('sage-parker');
+    console.log(`  households/parker: periodAnchorDay=${parker.periodAnchorDay}`);
+    console.log(`  athletes/sage-parker: packageId=${sage.packageId} householdId=${sage.householdId}`);
   }
 
   if (DRY_RUN) {
