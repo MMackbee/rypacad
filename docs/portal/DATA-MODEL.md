@@ -1282,12 +1282,20 @@ Stripe event backs it). `<currentPeriodKey>` is `periodFor(today,
 whitfield.periodAnchorDay)`'s own output at seed-run time, so the doc id
 itself moves with whenever the seed actually runs (e.g.
 `tokenPeriods/jordan_2026-09-01` when seeded on 2026-09-16) — never a frozen
-date. Note this is the CURRENT period, not the November period her other
-seeded bookings fall in; no booking in this seed references
-`jordan_<currentPeriodKey>`'s period, so `used` for that specific period is
-`0` in the seed even though `granted` is `12` — an intentional "the
-issuance fact exists, the spend doesn't (yet)" demo state, not an
-inconsistency.
+date. This is the CURRENT period (September, as of this document's own
+verification run), distinct from the November period her regular
+training/tournament bookings fall in — **but not empty of spend**: the
+three pre-existing Sprint 9/11 specialist bookings (`jordan_2026-09-17-s0`
+mental, `jordan_2026-09-14-s0` and `jordan_2026-09-11-s0` phil, all dated
+inside this same run's "next two weeks"/"past two Phil days" windows) carry
+this exact `periodKey` too, so `tokensFor()` reads `used: 3` against this
+doc's `granted: 12` the moment the seed loads (verified: `export-
+memberships.mjs`'s emulator run below prints `jordan:12/3/0/0`) — matching
+the "3 of 12 used" the Sprint 12 integration notes already recorded live.
+This is a property of WHEN the seed happens to run relative to those
+specialist windows, not something this pass engineered; a seed run far
+enough from any specialist slot could see `used: 0` against this same doc
+instead, and that would be equally correct.
 
 ### `graceTokens` (contract v2.1, Part 2)
 
