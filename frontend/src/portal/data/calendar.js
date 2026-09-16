@@ -289,3 +289,40 @@ export function pickDueDates({ today, count, spread = 1 }) {
   for (let i = 0; i < due.length && picked.length < count; i += spread) picked.push(due[i]);
   return picked;
 }
+
+/* ------------------------------------------------------------------------- *
+ * Booking window (Sprint 12 pin D, contract section 5). The window ROLLS AT
+ * 07:00 America/Chicago, not midnight: before 7 AM the anchor is still
+ * yesterday. Pure; the routing lane's createBooking gate and every day strip
+ * read it, and BookSession/SpecialistBooking render days past it as locked
+ * with "opens 7 AM on <date>" (windowOpensOn).
+ * ------------------------------------------------------------------------- */
+
+const ACADEMY_TZ = 'America/Chicago';
+const WINDOW_ROLL_HOUR = 7;
+
+function academyLocalParts(date) {
+  const parts = new Intl.DateTimeFormat('en-US', {
+    timeZone: ACADEMY_TZ,
+    hour12: false,
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+  }).formatToParts(date);
+  const get = (type) => parts.find((p) => p.type === type)?.value;
+  // Some engines print midnight as "24" under hour12: false.
+  return { date: get('year') + '-' + get('month') + '-' + get('day'), hour: Number(get('hour')) % 24 };
+}
+
+/** The last session date bookable right now for a package with this window. */
+export function openThrough(now = new Date(), windowDays = 32) {
+  const { date, hour } = academyLocalParts(now);
+  const anchor = hour >= WINDOW_ROLL_HOUR ? date : addDaysISO(date, -1);
+  return addDaysISO(anchor, windowDays);
+}
+
+/** The local date on which a session date first enters the window (at 7 AM). */
+export function windowOpensOn(sessionDateISO, windowDays = 32) {
+  return addDaysISO(sessionDateISO, -windowDays);
+}
