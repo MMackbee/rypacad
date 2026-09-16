@@ -76,8 +76,15 @@ export class LiveDataError extends Error {
   }
 }
 
-/** Map a Firestore SDK error onto our codes; anything unrecognised is UNKNOWN. */
-function wrap(err, context) {
+/**
+ * Map a Firestore SDK error onto our codes; anything unrecognised is UNKNOWN.
+ * Exported (Sprint 13) so hooks/waitlist.js and hooks/grace.js — the two new
+ * Part 2 modules, kept out of this already-grandfathered file per the pin's
+ * own "split new code" instruction — can wrap their own SDK errors with the
+ * SAME discipline every function in this file already follows, rather than
+ * each re-implementing it.
+ */
+export function wrap(err, context) {
   if (err instanceof LiveDataError) return err;
   const code =
     {
@@ -101,7 +108,8 @@ export function isLive() {
   return process.env.REACT_APP_PORTAL_LIVE_DATA === 'true';
 }
 
-function requireUser() {
+/** Exported (Sprint 13) for the same reason wrap() is — see its comment. */
+export function requireUser() {
   const user = auth.currentUser;
   if (!user) {
     throw new LiveDataError(
@@ -384,6 +392,84 @@ export async function fetchHouseholdBookings(householdId) {
 }
 
 /**
+ * Every graceTokens doc for one athlete, unfiltered (contract v2.1, pin E) —
+ * the single equality filter (`athleteId ==`) firestore.rules proves the
+ * athlete's own query against directly, and a parent's query on one child's
+ * athleteId via the get()-indirection join the rules file documents on its
+ * own graceTokens match block. Consumed/expired filtering is the CALLER's
+ * job (packages.js#tokensFor and this file's own selectGraceToken below both
+ * do it) — this is a plain, unfiltered read of what exists.
+ */
+export async function fetchGraceTokensByAthlete(athleteId) {
+  if (!athleteId) {
+    throw new LiveDataError(ERR.INVALID, 'fetchGraceTokensByAthlete: athleteId is required.');
+  }
+  try {
+    const snap = await getDocs(
+      query(collection(db, 'graceTokens'), where('athleteId', '==', athleteId))
+    );
+    return snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+  } catch (err) {
+    throw wrap(err, 'fetchGraceTokensByAthlete');
+  }
+}
+
+/**
+ * Join the waitlist for a full session (contract v2.1, pin F) — one setDoc
+ * at the pinned `{sessionId}_{athleteId}` id, matching the rules' own create
+ * shape exactly (sessionId, athleteId, householdId, date, periodKey,
+ * joinedAt, createdBy). Called both directly (useWaitlist's join()) and from
+ * inside createBooking's full-session fallback below — one write path, no
+ * duplicated shape logic between the two callers.
+ */
+export async function joinWaitlist({ sessionId, athleteId, householdId, date, periodKey }) {
+  if (!sessionId || !athleteId || !householdId || !date || !periodKey) {
+    throw new LiveDataError(
+      ERR.INVALID,
+      'joinWaitlist: sessionId, athleteId, householdId, date and periodKey are all required.'
+    );
+  }
+  const user = requireUser();
+  try {
+    const id = `${sessionId}_${athleteId}`;
+    await setDoc(doc(db, 'waitlist', id), {
+      sessionId,
+      athleteId,
+      householdId,
+      date,
+      periodKey,
+      joinedAt: serverTimestamp(),
+      createdBy: user.uid,
+    });
+    bump('waitlist');
+    return { id, sessionId, athleteId, householdId, date, periodKey };
+  } catch (err) {
+    throw wrap(err, 'joinWaitlist');
+  }
+}
+
+/**
+ * The soonest-expiring, unconsumed grace token that covers a booking date
+ * (contract v2.1, pin E's charge order: "the soonest-expiring unconsumed
+ * grace token with expiresAt >= session.date"). Mirrors packages.js#tokensFor's
+ * own grace derivation (consumed == some non-cancelled booking references the
+ * id) so the SAME rule that decides what displays as "available" is what
+ * createBooking actually spends — but filters by the BOOKING'S date here,
+ * not "today" (tokensFor's own filter), since a grace token minted for a
+ * near-term makeup should not be offered for a booking made well before it
+ * expires but scheduled for a date the token itself would have already
+ * lapsed by.
+ */
+function selectGraceToken(bookings, graceTokens, date) {
+  const live = (bookings || []).filter((b) => b && b.status !== 'cancelled');
+  const consumed = new Set(live.map((b) => b.graceTokenId).filter(Boolean));
+  const candidates = (graceTokens || [])
+    .filter((g) => g && !consumed.has(g.id) && g.expiresAt >= date)
+    .sort((a, b) => String(a.expiresAt).localeCompare(String(b.expiresAt)));
+  return candidates[0] ?? null;
+}
+
+/**
  * Create one booking in the contract shape, inside a Firestore transaction
  * (Sprint 6, QA #5) — reads the session, requires booked < capacity, requires
  * no existing booking at this id, then writes the booking AND increments
@@ -400,49 +486,14 @@ export async function fetchHouseholdBookings(householdId) {
  * below.
  */
 /**
- * Token cap + booking-window guard at the writer, not just the UI (contract
- * v2.0, Sprint 12 pins B/D/K — replaces assertWithinMonthlyCap and its
- * two-pool + per-specialist-type math entirely). Three typed failure
- * reasons (LiveDataError#reason), checked in this order:
- *
- *   'outside-window'  the session's date is past what the athlete's
- *                      package allows right now — windowDaysFor(pkg) days
- *                      from openThrough()'s 07:00-America/Chicago anchor
- *                      (data/calendar.js). Checked before anything else:
- *                      a date the family cannot see yet is not bookable
- *                      regardless of tokens.
- *   'no-tokens-left'   the athlete's PERIOD for this session's date
- *                       (periodFor(date, household.periodAnchorDay),
- *                       data/packages.js) already has as many non-cancelled
- *                       bookings as the package grants. Skipped entirely
- *                       when pkg.tokens === null (Elite — unlimited, no
- *                       pool to cap) and when there is no package at all a
- *                       booking with 0 tokens granted fails here too.
- *   'cap-reached'      ONLY Yannick's frequency knob
- *                       (SPECIALIST_MONTHLY_CAP.mental, data/specialists.js)
- *                       — one attended-or-confirmed 'mental' booking per
- *                       CALENDAR month, independent of tokens (Elite
- *                       included: the cadence rule is not a pool). Phil's
- *                       own knob is null — tokens are Phil's only limit —
- *                       so there is no `type === 'phil'` branch anywhere in
- *                       this function, and the `type === 'mental'` check
- *                       below is the ONE place a cap check is allowed to
- *                       branch on session type (specialists.js's own
- *                       comment on SPECIALIST_MONTHLY_CAP names this as the
- *                       deliberate exception, not the pool model back).
- *
- * This is client-side derivation like the token position itself (see
- * data/packages.js#tokensFor's own doc comment) — a true server-side count
- * awaits Part 2 (tokenPeriods + the Stripe handler). Callers that already
- * maintain a running tally (bookRecurring) pass skipCapCheck to avoid
- * re-querying per instance; anchorDay, when the caller already has it
- * (createBooking below always does), is passed through to skip a second
- * households read.
+ * Booking-window guard (contract v2.0, pin D) — the ONE check that gates
+ * EVERY package alike, Elite included: a date the family cannot see yet is
+ * not bookable regardless of how it would be charged. Split out of the old
+ * assertWithinPeriodCap (Sprint 12) so createBooking (below) can run it
+ * unconditionally while the token-pool checks that follow it branch on
+ * chargedFrom.
  */
-async function assertWithinPeriodCap({ athleteId, householdId, date, type, anchorDay }) {
-  const athlete = await fetchAthlete(athleteId);
-  const pkg = athlete.packageId ? await fetchPackage(athlete.packageId) : null;
-
+function assertWithinBookingWindow(pkg, date) {
   const windowDays = windowDaysFor(pkg);
   if (date > openThrough(new Date(), windowDays)) {
     throw new LiveDataError(
@@ -452,31 +503,21 @@ async function assertWithinPeriodCap({ athleteId, householdId, date, type, ancho
       'outside-window'
     );
   }
+}
 
-  const bookings = await fetchBookings(athleteId, { householdId });
-
-  if (!pkg || pkg.tokens !== null) {
-    const anchor =
-      anchorDay ?? normalizeAnchorDay((await fetchHousehold(householdId)).periodAnchorDay);
-    const { periodKey } = periodFor(date, anchor);
-    const granted = pkg ? pkg.tokens ?? 0 : 0;
-    const used = bookings.filter((b) => b.status !== 'cancelled' && b.periodKey === periodKey).length;
-    if (used >= granted) {
-      throw new LiveDataError(
-        ERR.INVALID,
-        granted === 0
-          ? 'This package has no tokens to spend — ask the academy to assign one.'
-          : `This period's tokens are already fully booked (${used} of ${granted}).`,
-        null,
-        'no-tokens-left'
-      );
-    }
-  }
-
+/**
+ * Yannick's frequency knob (contract v2.0, pin K; unchanged by Part 2) — the
+ * ONE place a cap check is allowed to branch on session type
+ * (SPECIALIST_MONTHLY_CAP.mental, data/specialists.js). Runs regardless of
+ * how the booking ends up charged (grace, period or Elite): it is a cadence
+ * rule on how often the athlete sees Yannick, not a pool a grace token could
+ * exempt someone from.
+ */
+function assertMentalCadence(type, date, bookings) {
   const mentalCap = SPECIALIST_MONTHLY_CAP.mental;
   if (type === 'mental' && mentalCap != null) {
     const month = date.slice(0, 7);
-    const usedThisMonth = bookings.filter(
+    const usedThisMonth = (bookings || []).filter(
       (b) =>
         (b.status === 'attended' || b.status === 'confirmed') &&
         b.type === 'mental' &&
@@ -495,6 +536,42 @@ async function assertWithinPeriodCap({ athleteId, householdId, date, type, ancho
   }
 }
 
+/**
+ * The athlete's PERIOD cap (contract v2.0 pin B) — ONLY reached when the
+ * charge is falling through to 'period' (createBooking below skips this
+ * entirely for Elite and for a grace-charged booking, per contract v2.1 §6/
+ * pin E: "it never counts as a period spend"). `used` excludes grace-charged
+ * bookings (graceTokenId set) — the SAME seam amendment
+ * data/packages.js#tokensFor already applies, kept in lockstep here so the
+ * cap this function enforces never disagrees with what the token card
+ * displays as spent.
+ */
+function assertPeriodTokensLeft(pkg, bookings, periodKey) {
+  if (!pkg || pkg.tokens !== null) {
+    const granted = pkg ? pkg.tokens ?? 0 : 0;
+    const used = (bookings || []).filter(
+      (b) => b.status !== 'cancelled' && b.periodKey === periodKey && !b.graceTokenId
+    ).length;
+    if (used >= granted) {
+      throw new LiveDataError(
+        ERR.INVALID,
+        granted === 0
+          ? 'This package has no tokens to spend — ask the academy to assign one.'
+          : `This period's tokens are already fully booked (${used} of ${granted}).`,
+        null,
+        'no-tokens-left'
+      );
+    }
+  }
+}
+
+// Internal control-flow marker (contract v2.1, pin F): thrown from inside
+// createBooking's transaction when the session is full, caught by the outer
+// catch to divert to joinWaitlist() instead of surfacing as an error. Never
+// exported, never a real LiveDataError - a full session is not a failure,
+// it is the pinned "book() resolves { status: 'waitlisted' }" path.
+const SESSION_FULL = Symbol('session-full');
+
 export async function createBooking(
   { athleteId, sessionId, date, type, householdId },
   { skipCapCheck = false, silent = false } = {}
@@ -508,11 +585,49 @@ export async function createBooking(
   const user = requireUser();
   // The period a booking spends is the one its SESSION DATE falls in, never
   // the period it is made in (contract v2.0 §6, pin B) - read once here so
-  // both the cap check and the write itself agree on the same anchor.
+  // every check below and the write itself agree on the same anchor.
   const household = await fetchHousehold(householdId);
   const anchorDay = normalizeAnchorDay(household.periodAnchorDay);
   const { periodKey } = periodFor(date, anchorDay);
-  if (!skipCapCheck) await assertWithinPeriodCap({ athleteId, householdId, date, type, anchorDay });
+
+  const athlete = await fetchAthlete(athleteId);
+  const pkg = athlete.packageId ? await fetchPackage(athlete.packageId) : null;
+  const isElite = Boolean(pkg) && pkg.tokens === null;
+
+  // Charge order (contract v2.1 pin E): Elite -> nothing charged; else the
+  // soonest-expiring unconsumed grace token covering this date; else the
+  // period, subject to its own cap. Grace selection and the window/mental
+  // checks are client-side derivation like the cap check always was (see
+  // assertPeriodTokensLeft's own comment) - a query, so none of it can run
+  // INSIDE the transaction below (the client SDK only allows tx.get() on a
+  // single document reference, never a query); `skipCapCheck` (bookRecurring's
+  // own running tally) skips the window/mental/cap assertions exactly as
+  // before, but grace selection still runs even then - a real grace token is
+  // honored on a recurring instance if one happens to cover its date.
+  let bookings = null;
+  if (!skipCapCheck || !isElite) {
+    bookings = await fetchBookings(athleteId, { householdId });
+  }
+  if (!skipCapCheck) {
+    assertWithinBookingWindow(pkg, date);
+    assertMentalCadence(type, date, bookings);
+  }
+
+  let chargedFrom = 'period';
+  let graceTokenId = null;
+  if (isElite) {
+    chargedFrom = 'elite';
+  } else {
+    const graceTokens = await fetchGraceTokensByAthlete(athleteId);
+    const grace = selectGraceToken(bookings, graceTokens, date);
+    if (grace) {
+      chargedFrom = 'grace';
+      graceTokenId = grace.id;
+    } else if (!skipCapCheck) {
+      assertPeriodTokensLeft(pkg, bookings, periodKey);
+    }
+  }
+
   // Contract v1.1: the booking id IS `{athleteId}_{sessionId}` — the
   // keyspace makes a second booking of the same session an overwrite
   // attempt, which the create-only rules reject. addDoc's random ids were
@@ -520,25 +635,51 @@ export async function createBooking(
   const id = `${athleteId}_${sessionId}`;
   const bookingRef = doc(db, 'bookings', id);
   const sessionRef = doc(db, 'sessions', sessionId);
+  const householdRef = doc(db, 'households', householdId);
   const booking = {
     athleteId,
     sessionId,
     date,
     type,
-    // periodKey (contract v2.0, pin B): write-once at create - a re-book
-    // (the isRebook branch below) only ever updates `status`, so a booking
-    // keeps the period it was FIRST created against even across a
-    // cancel/re-book cycle.
+    // periodKey (contract v2.0, pin B) and chargedFrom/graceTokenId
+    // (contract v2.1, pin E) are ALL write-once at create - a re-book (the
+    // isRebook branch below) only ever updates `status`
+    // (memberBookingUpdateOk's own hasOnly), so a booking keeps whatever it
+    // was FIRST charged even across a cancel/re-book cycle - the same
+    // "history, not a live join" discipline periodKey already established.
     periodKey,
     status: 'confirmed',
     householdId,
     createdBy: user.uid,
     createdAt: serverTimestamp(),
+    chargedFrom,
+    ...(graceTokenId ? { graceTokenId } : {}),
   };
   try {
     await runTransaction(db, async (tx) => {
       // All reads before any write — Firestore transaction requirement.
-      const [sessionSnap, bookingSnap] = await Promise.all([tx.get(sessionRef), tx.get(bookingRef)]);
+      const [householdSnap, sessionSnap, bookingSnap] = await Promise.all([
+        tx.get(householdRef),
+        tx.get(sessionRef),
+        tx.get(bookingRef),
+      ]);
+
+      // The membership gate (contract v2.1, pin H) - read LIVE, inside the
+      // transaction, rather than trusting the pre-fetch above (which only
+      // exists for anchorDay math and could be stale by the time this
+      // commits): a household that went past_due/lapsed between the two
+      // reads is caught here, not just by the rules on the eventual write.
+      // Absent == active, the same default every other membership read uses.
+      const h = householdSnap.exists() ? householdSnap.data() : null;
+      const membershipStatus = h?.membership?.status ?? 'active';
+      if (membershipStatus === 'past_due' || membershipStatus === 'lapsed') {
+        throw new LiveDataError(
+          ERR.INVALID,
+          "This household's membership is not active right now — new bookings are paused until it's resolved.",
+          null,
+          'membership-inactive'
+        );
+      }
 
       if (!sessionSnap.exists()) {
         throw new LiveDataError(ERR.NOT_FOUND, 'That session no longer exists.');
@@ -554,7 +695,11 @@ export async function createBooking(
       }
 
       const s = sessionSnap.data();
-      if (s.status === 'cancelled') {
+      // `status` null-safe (db lane reconciliation, Sprint 13): the season
+      // generator's own seeded sessions still carry no status field at all;
+      // absent means the same thing 'scheduled' does everywhere else this
+      // file and firestore.rules read the field.
+      if ((s.status ?? 'scheduled') === 'cancelled') {
         throw new LiveDataError(ERR.INVALID, 'This session was cancelled by the academy.');
       }
       if (s.date !== date || s.type !== type) {
@@ -566,12 +711,15 @@ export async function createBooking(
       const capacity = s.capacity ?? 0;
       const booked = s.booked ?? 0;
       if (booked >= capacity) {
-        throw new LiveDataError(ERR.INVALID, 'This session is full.');
+        // Full session (contract v2.1, pin F): no charge is made here at
+        // all - joining the waitlist reserves nothing but a queue slot;
+        // the real charge happens at promotion (server-side trigger).
+        throw SESSION_FULL;
       }
 
       if (isRebook) {
         // updateDoc-style partial write, NOT tx.set(bookingRef, booking) —
-        // firestore.rules' new memberBookingUpdateOk() only admits a diff
+        // firestore.rules' memberBookingUpdateOk() only admits a diff
         // hasOnly(['status']); rewriting the whole doc (even with identical
         // values) would re-stamp createdAt via serverTimestamp() and widen
         // the diff, and the rule would reject it.
@@ -589,8 +737,23 @@ export async function createBooking(
       bump('bookings');
       bump('sessions');
     }
-    return { id, ...booking, createdAt: null };
+    return { id, ...booking, createdAt: null, status: 'confirmed' };
   } catch (err) {
+    if (err === SESSION_FULL) {
+      // joinWaitlist bumps 'waitlist' itself on success - nothing more to
+      // invalidate here (no bookings/sessions write happened on this path).
+      const entry = await joinWaitlist({ sessionId, athleteId, householdId, date, periodKey });
+      return {
+        id: entry.id,
+        athleteId,
+        sessionId,
+        date,
+        type,
+        householdId,
+        status: 'waitlisted',
+        chargedFrom: null,
+      };
+    }
     throw wrap(err, 'createBooking');
   }
 }
@@ -618,7 +781,7 @@ export async function cancelBooking({ bookingId }) {
   if (!bookingId) {
     throw new LiveDataError(ERR.INVALID, 'cancelBooking: bookingId is required.');
   }
-  requireUser();
+  const user = requireUser();
   const bookingRef = doc(db, 'bookings', bookingId);
   try {
     await runTransaction(db, async (tx) => {
@@ -641,7 +804,17 @@ export async function cancelBooking({ bookingId }) {
       }
       const booked = sessionSnap.data().booked ?? 0;
 
-      tx.update(bookingRef, { status: 'cancelled' });
+      // Contract v2.1, pin G: a member's own cancel is now traceable —
+      // cancelledBy the caller's own uid, cancelReason pinned to 'member'.
+      // Nothing about WHO created the booking matters here (a booking the
+      // system created via waitlist promotion, createdBy: 'system', is
+      // cancellable by its own athlete/household parent exactly the same
+      // way — firestore.rules' memberBookingUpdateOk() keys off the
+      // caller's athleteId/householdId match, never createdBy). Both new
+      // fields ride the SAME update as `status` so the rule's
+      // hasOnly(['status','cancelledBy','cancelReason']) is satisfied in
+      // one write, not a follow-up.
+      tx.update(bookingRef, { status: 'cancelled', cancelledBy: user.uid, cancelReason: 'member' });
       tx.update(sessionRef, { booked: Math.max(0, booked - 1) });
     });
     // Post-write invalidation seam (Sprint 6 pin): both collections changed,
@@ -1362,6 +1535,22 @@ export async function fetchAllAthletes() {
     return snap.docs.map((d) => ({ id: d.id, ...d.data() }));
   } catch (err) {
     throw wrap(err, 'fetchAllAthletes');
+  }
+}
+
+/**
+ * Every household, unfiltered (contract v2.1, pin H — useAdminDashboard's
+ * new membership card: active/past_due/lapsed counts and the lapsed
+ * households list). Provable for ops/owner unconditionally, same as
+ * fetchAllAthletes above — the households read rule's staff clause does not
+ * reference resource.data either.
+ */
+export async function fetchAllHouseholds() {
+  try {
+    const snap = await getDocs(collection(db, 'households'));
+    return snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+  } catch (err) {
+    throw wrap(err, 'fetchAllHouseholds');
   }
 }
 

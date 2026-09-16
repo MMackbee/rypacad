@@ -368,6 +368,27 @@ service cloud.firestore {
         me().role in ['coach', 'mental', 'ops', 'owner']
         || me().get('specialistId', null) != null
       );
+
+      // Sprint 13 (contract v2.1, pin E "Cancel session"): ops/owner flips
+      // a session to cancelled - the ONE field this THIRD independent
+      // update branch grants, entirely separate from bookedDiffOk (this
+      // rule never touches `booked` - cancelSession's client batch leaves
+      // it exactly where it was; the session is gone, not emptied) and
+      // coachNoteUpdateOk. Only a 'scheduled' session may be cancelled this
+      // way (never re-cancel, never touch an already-cancelled doc).
+      // `status` null-safe on the BEFORE side too (same generator gap
+      // waitlistSessionOk documents above) - a generator-seeded session with
+      // no status field is exactly as cancellable as one explicitly marked
+      // 'scheduled'; only an already-cancelled session (status == 'cancelled'
+      // literally) is excluded.
+      function sessionCancelOk() {
+        let after = request.resource.data;
+        return after.diff(resource.data).affectedKeys().hasOnly(['status'])
+          && resource.data.get('status', 'scheduled') == 'scheduled'
+          && after.status == 'cancelled';
+      }
+
+      allow update: if signedIn() && me().role in ['ops', 'owner'] && sessionCancelOk();
     }
 
     // ---- bookings ------------------------------------------------------
@@ -392,12 +413,21 @@ service cloud.firestore {
       // anchor day and the session's date?) is CLIENT-DERIVED, the same
       // accepted-gap class as the token cap check itself — the rule below
       // only proves the SHAPE (a real date-like string), not the math.
+      // Sprint 13 (contract v2.1, pin E "Grace tokens"): the shape grows by
+      // `chargedFrom` (required - always present, ONE of the three charge-
+      // order outcomes createBooking derives, hooks/live.js) and an OPTIONAL
+      // `graceTokenId` (present only when chargedFrom == 'grace' - a plain
+      // key-existence check, not a hasAll requirement, since most bookings
+      // never carry it). hasAll still pins the nine original keys plus
+      // chargedFrom as always-required; hasOnly widens by exactly one more
+      // (graceTokenId) to admit it WHEN present, never anything else.
       function bookingShapeOk() {
         let d = request.resource.data;
         return d.keys().hasAll(['athleteId', 'sessionId', 'date', 'type', 'periodKey',
-                                'status', 'householdId', 'createdBy', 'createdAt'])
+                                'status', 'householdId', 'createdBy', 'createdAt', 'chargedFrom'])
           && d.keys().hasOnly(['athleteId', 'sessionId', 'date', 'type', 'periodKey',
-                               'status', 'householdId', 'createdBy', 'createdAt'])
+                               'status', 'householdId', 'createdBy', 'createdAt', 'chargedFrom',
+                               'graceTokenId'])
           && d.athleteId is string
           && d.sessionId is string
           && d.date is string
@@ -405,8 +435,36 @@ service cloud.firestore {
           && d.periodKey is string
           && d.periodKey.matches('[0-9]{4}-[0-9]{2}-[0-9]{2}')
           && d.status == 'confirmed'
+          && d.chargedFrom in ['elite', 'grace', 'period']
+          && (!d.keys().hasAny(['graceTokenId']) || d.chargedFrom == 'grace')
           && d.createdBy == request.auth.uid
           && d.createdAt == request.time;
+      }
+
+      // Sprint 13, pin E: when a booking carries a graceTokenId, its grace
+      // doc must be a real, matching token that still covers this booking's
+      // date - one get(), same "anchor to a real record, never trust the
+      // client's claim" discipline bookingMatchesSession already applies to
+      // sessionId/date/type. `expiresAt >= date` uses the same lexical
+      // 'YYYY-MM-DD' string comparison the rest of this file relies on
+      // (periodKey.matches() above, tournamentResults' date checks).
+      function bookingGraceOk() {
+        let d = request.resource.data;
+        return !d.keys().hasAny(['graceTokenId'])
+          || (
+            d.graceTokenId is string
+            && get(/databases/$(database)/documents/graceTokens/$(d.graceTokenId)).data.athleteId == d.athleteId
+            && get(/databases/$(database)/documents/graceTokens/$(d.graceTokenId)).data.expiresAt >= d.date
+          );
+      }
+
+      // Sprint 13, pin H: the freeze, enforced server-side - one get() of
+      // the household, null-safe (membership absent == active, same
+      // absent-as-default pattern athletes.packageId/households.
+      // periodAnchorDay already use throughout this file).
+      function bookingHouseholdOk() {
+        let h = get(/databases/$(database)/documents/households/$(request.resource.data.householdId)).data;
+        return !(h.get('membership', null) != null && h.membership.status in ['past_due', 'lapsed']);
       }
 
       // The booking must reference a real session and agree with it on date
@@ -448,6 +506,8 @@ service cloud.firestore {
         && bookingShapeOk()
         && bookingMatchesSession()
         && withinOuterBookingBound()
+        && bookingGraceOk()
+        && bookingHouseholdOk()
         && bookingId
              == request.resource.data.athleteId + '_' + request.resource.data.sessionId
         && request.resource.data.householdId
@@ -574,14 +634,29 @@ service cloud.firestore {
       // the academy") is a CLIENT-side gate only — an accepted server-side
       // gap, flagged in TEAM.md's Sprint 9 pins and carried into the routing
       // report. This rule allows the transition with no date check in v1.
+      // Sprint 13 (contract v2.1, pin G "Cancellation reasons"): the
+      // confirmed->cancelled direction now REQUIRES cancelledBy (the
+      // caller's own uid) and cancelReason ('member' - the ONE value a
+      // member may ever write here; 'session-cancelled'/'lapsed'/
+      // 'downgrade' are staff/Admin-SDK-only reasons, never reachable
+      // through this branch). The cancelled->confirmed re-book direction
+      // stays exactly `hasOnly(['status'])` - re-booking never touches
+      // cancelledBy/cancelReason at all (hooks/live.js's isRebook branch
+      // only ever sends `{ status: 'confirmed' }`), so a malicious payload
+      // cannot smuggle a cancelledBy/cancelReason rewrite through the
+      // re-book direction by also flipping status.
       function memberBookingUpdateOk() {
         let before = resource.data;
         let after = request.resource.data;
-        return after.diff(before).affectedKeys().hasOnly(['status'])
-          && (
-            (before.status == 'confirmed' && after.status == 'cancelled')
-            || (before.status == 'cancelled' && after.status == 'confirmed')
-          );
+        let diffKeys = after.diff(before).affectedKeys();
+        return (
+          (before.status == 'confirmed' && after.status == 'cancelled'
+            && diffKeys.hasOnly(['status', 'cancelledBy', 'cancelReason'])
+            && after.cancelledBy == request.auth.uid
+            && after.cancelReason == 'member')
+          || (before.status == 'cancelled' && after.status == 'confirmed'
+              && diffKeys.hasOnly(['status']))
+        );
       }
 
       allow update: if signedIn()
@@ -590,6 +665,31 @@ service cloud.firestore {
           (me().role == 'athlete' && me().athleteId == resource.data.athleteId)
           || (me().role == 'parent' && me().householdId == resource.data.householdId)
         );
+
+      // Sprint 13 (contract v2.1, pin E "Cancel session"): ops/owner
+      // cancelling EVERY confirmed booking on a session they are cancelling
+      // from the attendance screen - a FOURTH independent update branch on
+      // this match (Firestore ORs multiple `allow update` blocks; this file
+      // already does exactly this for attendanceUpdateOk/the specialist
+      // clause/memberBookingUpdateOk above). Scoped to confirmed->cancelled
+      // ONLY - never attended/noshow/waitlisted/already-cancelled bookings,
+      // which cancelSession()'s own idempotent client loop already skips
+      // before it ever reaches this rule. `cancelReason` is pinned to the
+      // one value this specific staff action may ever write, distinct from
+      // a member's own 'member' reason above and from the Admin-SDK-only
+      // 'lapsed'/'downgrade' reasons the Stripe handler writes (bypassing
+      // rules entirely, so this branch never needs to admit them).
+      function staffSessionCancelOk() {
+        let before = resource.data;
+        let after = request.resource.data;
+        return before.status == 'confirmed'
+          && after.status == 'cancelled'
+          && after.diff(before).affectedKeys().hasOnly(['status', 'cancelledBy', 'cancelReason'])
+          && after.cancelledBy == request.auth.uid
+          && after.cancelReason == 'session-cancelled';
+      }
+
+      allow update: if signedIn() && me().role in ['ops', 'owner'] && staffSessionCancelOk();
 
       // No delete in v1.
     }
@@ -713,18 +813,37 @@ service cloud.firestore {
       // branch just below explicitly excludes this field (hasAny check) so
       // a stray out-of-range value can never slip in through the wider
       // grant instead.
-      function householdPeriodUpdateOk() {
+      // Sprint 13 (contract v2.1, pin H): the settings branch's hasOnly
+      // grows by stripeCustomerId/stripeSubscriptionId - ops/owner link a
+      // household to its Stripe customer/subscription (so the webhook can
+      // resolve `where stripeCustomerId == event.data.object.customer`)
+      // through this SAME shaped, field-limited branch periodAnchorDay
+      // already used, rather than the broad ops/owner grant just below -
+      // both Stripe ids are value-checked (string or null, the "never card
+      // data" policy this match's own header comment states: an id that
+      // POINTS at Stripe, never anything Stripe returns about a card).
+      function householdSettingsUpdateOk() {
         let after = request.resource.data;
-        return after.diff(resource.data).affectedKeys().hasOnly(['periodAnchorDay', 'updatedAt'])
-          && after.periodAnchorDay is int
-          && after.periodAnchorDay >= 1
-          && after.periodAnchorDay <= 28;
+        let diffKeys = after.diff(resource.data).affectedKeys();
+        return diffKeys.hasOnly(['periodAnchorDay', 'stripeCustomerId', 'stripeSubscriptionId', 'updatedAt'])
+          && (!diffKeys.hasAny(['periodAnchorDay'])
+              || (after.periodAnchorDay is int && after.periodAnchorDay >= 1 && after.periodAnchorDay <= 28))
+          && (!diffKeys.hasAny(['stripeCustomerId'])
+              || after.stripeCustomerId is string || after.stripeCustomerId == null)
+          && (!diffKeys.hasAny(['stripeSubscriptionId'])
+              || after.stripeSubscriptionId is string || after.stripeSubscriptionId == null);
       }
-      allow update: if signedIn() && me().role in ['ops', 'owner'] && householdPeriodUpdateOk();
+      allow update: if signedIn() && me().role in ['ops', 'owner'] && householdSettingsUpdateOk();
 
+      // The broad ops/owner grant (admin surfaces this file otherwise
+      // leaves unshaped, e.g. guardian contact edits) now excludes all
+      // three settings-branch fields - forcing periodAnchorDay AND the two
+      // Stripe ids through the shaped branch above exclusively, never
+      // through this wider, unchecked one.
       allow update: if signedIn() && (
         (me().role in ['ops', 'owner']
-          && !request.resource.data.diff(resource.data).affectedKeys().hasAny(['periodAnchorDay']))
+          && !request.resource.data.diff(resource.data).affectedKeys()
+               .hasAny(['periodAnchorDay', 'stripeCustomerId', 'stripeSubscriptionId']))
         || (me().role == 'parent'
             && me().householdId == householdId
             && !request.resource.data.diff(resource.data).affectedKeys()
@@ -915,6 +1034,253 @@ service cloud.firestore {
       allow update: if signedIn() && me().role == 'owner'
         && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status'])
         && request.resource.data.status in ['pending', 'provisioned'];
+    }
+
+    // ---- tokenPeriods -----------------------------------------------------
+    // Sprint 13 (contract v2.1, pin C "Token issuance"). Shape: { athleteId,
+    // householdId, periodKey, periodEnd, granted (int), source:
+    // 'stripe'|'ops', eventId (Stripe event id|null), createdAt }. Doc id
+    // MUST equal `{athleteId}_{periodKey}` (the bookings/contractLogs
+    // keyspace discipline: one issuance record per athlete per period; a
+    // second issuance for the same pair is an overwrite attempt on the same
+    // id, which create-only rules reject rather than double-issuing).
+    //
+    // The Stripe handler writes via the Admin SDK on `invoice.paid` and
+    // bypasses this file entirely. This rule governs the ONE client writer -
+    // ops/owner issuing tokens by hand from the membership editor (the pin's
+    // "cash and comp cases") - create-only, shape-checked, and `source`
+    // pinned to 'ops' so a client can never forge a 'stripe' provenance for
+    // its own write; `eventId` is therefore always null on a client write
+    // (only the Admin-SDK path ever sets a real one).
+    match /tokenPeriods/{periodId} {
+      function tokenPeriodShapeOk() {
+        let d = request.resource.data;
+        return d.keys().hasAll(['athleteId', 'householdId', 'periodKey', 'periodEnd', 'granted',
+                                'source', 'eventId', 'createdAt'])
+          && d.keys().hasOnly(['athleteId', 'householdId', 'periodKey', 'periodEnd', 'granted',
+                               'source', 'eventId', 'createdAt'])
+          && d.athleteId is string
+          && d.householdId is string
+          && d.periodKey is string
+          && d.periodKey.matches('[0-9]{4}-[0-9]{2}-[0-9]{2}')
+          && d.periodEnd is string
+          && d.granted is int
+          && d.granted >= 0
+          && d.granted <= 40
+          && d.source == 'ops'
+          && d.eventId == null
+          && d.createdAt == request.time;
+      }
+
+      allow create: if signedIn() && me().role in ['ops', 'owner'] && tokenPeriodShapeOk()
+        && periodId == request.resource.data.athleteId + '_' + request.resource.data.periodKey
+        && request.resource.data.householdId
+             == athleteData(request.resource.data.athleteId).householdId;
+
+      // Member read own (own athlete, or the parent whose household matches
+      // - ONE get() of the athlete doc to prove the link, the same join
+      // pattern private/medical and the bookings coach clause already use);
+      // ops/owner read academy-wide, matching this file's existing
+      // billing/allowance precedent (graceTokens below). This is always a
+      // GET BY ID (hooks read "the doc by id for the current period and the
+      // next, no query" per the pin) - the null-resource branch below is the
+      // COMMON case, since most periods have no ops/Stripe issuance yet
+      // (absent == the package's grant) and a get() on a non-existent doc
+      // still runs this rule with `resource == null` (the bookings/
+      // contractLogs null-read lesson: a bare resource.data reference here
+      // would crash every probe of an unissued period).
+      function tokenPeriodNullReadOk() {
+        let idAthlete = periodId.split('_')[0];
+        return (me().role == 'athlete' && me().athleteId == idAthlete)
+          || (me().role == 'parent'
+              && exists(/databases/$(database)/documents/athletes/$(idAthlete))
+              && athleteData(idAthlete).householdId == me().householdId)
+          || me().role in ['ops', 'owner'];
+      }
+
+      allow read: if signedIn() && (
+        resource == null
+          ? tokenPeriodNullReadOk()
+          : (
+            (me().role == 'athlete' && me().athleteId == resource.data.athleteId)
+            || (me().role == 'parent'
+                && athleteData(resource.data.athleteId).householdId == me().householdId)
+            || me().role in ['ops', 'owner']
+          )
+      );
+
+      // No client update or delete - a correction is a NEW issuance doc for
+      // a different period (contract v2.1: "no client update or delete").
+    }
+
+    // ---- graceTokens --------------------------------------------------
+    // Sprint 13 (contract v2.1, pin E "Grace tokens"). Shape: { athleteId,
+    // householdId, expiresAt ('YYYY-MM-DD', minted + 30 days), reason:
+    // 'session-cancelled'|'waitlist-expired', sourceSessionId, createdBy
+    // (uid|'sweep'), createdAt }. Auto-id doc - no deterministic keyspace to
+    // probe, so (unlike tokenPeriods above) there is no null-read branch to
+    // write: a client never get()s a guessed graceTokens id, only queries.
+    //
+    // Two minting triggers exist (contract v2.1, pin E): staff cancelling a
+    // session (THIS collection's one client writer, reason
+    // 'session-cancelled' only) and the waitlist expiry sweep (reason
+    // 'waitlist-expired', Admin SDK - bypasses this file, so the CLIENT
+    // shape check below never needs to admit that reason at all).
+    match /graceTokens/{graceId} {
+      function graceShapeOk() {
+        let d = request.resource.data;
+        return d.keys().hasAll(['athleteId', 'householdId', 'expiresAt', 'reason',
+                                'sourceSessionId', 'createdBy', 'createdAt'])
+          && d.keys().hasOnly(['athleteId', 'householdId', 'expiresAt', 'reason',
+                               'sourceSessionId', 'createdBy', 'createdAt'])
+          && d.athleteId is string
+          && d.householdId is string
+          && d.expiresAt is string
+          && d.expiresAt.matches('[0-9]{4}-[0-9]{2}-[0-9]{2}')
+          && d.reason == 'session-cancelled'
+          && d.sourceSessionId is string
+          && d.createdBy == request.auth.uid
+          && d.createdAt == request.time;
+      }
+
+      allow create: if signedIn() && me().role in ['ops', 'owner'] && graceShapeOk()
+        && request.resource.data.householdId
+             == athleteData(request.resource.data.athleteId).householdId;
+
+      // Members read own (query athleteId == - PROVABLE for the athlete's
+      // own query since the field the query itself filters on is exactly
+      // the field the rule checks, the same "list queries must carry the
+      // matching equality filter" precedent athletes/bookings establish
+      // above; a parent's query on one child's athleteId is proved instead
+      // via the get()-indirection "join" pattern this file has repeatedly
+      // verified against the emulator for exactly this shape - the coach-
+      // roster and diagnostics collection-group clauses elsewhere in this
+      // file). ops/owner read academy-wide - the same staff-sees-everything
+      // precedent bookings/athletes/diagnostics/contractLogs all already
+      // grant, extended here so a support call can see a family's grace
+      // token history same as every other allowance fact.
+      allow read: if signedIn() && (
+        (me().role == 'athlete' && me().athleteId == resource.data.athleteId)
+        || (me().role == 'parent'
+            && athleteData(resource.data.athleteId).householdId == me().householdId)
+        || me().role in ['ops', 'owner']
+      );
+
+      // No update/delete from any client - consumption is DERIVED (a
+      // non-cancelled booking whose graceTokenId == this id), never written
+      // back onto the grace doc itself.
+    }
+
+    // ---- waitlist -----------------------------------------------------
+    // Sprint 13 (contract v2.1, pin F "Waitlist"). Shape: { sessionId,
+    // athleteId, householdId, date, periodKey, joinedAt, createdBy }. Doc id
+    // `{sessionId}_{athleteId}` - one entry per athlete per session, the
+    // same keyspace discipline bookings/contractLogs/tokenPeriods use.
+    match /waitlist/{entryId} {
+      function waitlistShapeOk() {
+        let d = request.resource.data;
+        return d.keys().hasAll(['sessionId', 'athleteId', 'householdId', 'date', 'periodKey',
+                                'joinedAt', 'createdBy'])
+          && d.keys().hasOnly(['sessionId', 'athleteId', 'householdId', 'date', 'periodKey',
+                               'joinedAt', 'createdBy'])
+          && d.sessionId is string
+          && d.athleteId is string
+          && d.householdId is string
+          && d.date is string
+          && d.periodKey is string
+          && d.periodKey.matches('[0-9]{4}-[0-9]{2}-[0-9]{2}')
+          && d.createdBy == request.auth.uid
+          && d.joinedAt == request.time;
+      }
+
+      // The session must actually BE full and open right now - one get(),
+      // the same "anchor to a real record" discipline bookingMatchesSession
+      // uses for bookings; `date` is checked against the session's own too,
+      // so a client cannot claim a period-affecting date the schedule does
+      // not agree with.
+      // `status` is null-safe: the season generator never wrote the field at
+      // all until Sprint 4 (contract v1.2) added it, and the emulator's own
+      // generator-seeded sessions still carry none today (db lane, Sprint 13
+      // reconciliation) - only calendar-synced and hand-seeded sessions do.
+      // Absent means the same thing an explicit 'scheduled' means everywhere
+      // else this file reads the field (bookings' -1 branch comment already
+      // documents the same generator gap) - `get('status','scheduled')`.
+      function waitlistSessionOk() {
+        let s = get(/databases/$(database)/documents/sessions/$(request.resource.data.sessionId)).data;
+        return s.date == request.resource.data.date
+          && s.booked >= s.capacity
+          && s.get('status', 'scheduled') == 'scheduled';
+      }
+
+      // The freeze (contract v2.1, pin H), identical in shape to bookings'
+      // own bookingHouseholdOk just above: one get() of the household,
+      // null-safe, denying past_due/lapsed.
+      function waitlistHouseholdOk() {
+        let h = get(/databases/$(database)/documents/households/$(request.resource.data.householdId)).data;
+        return !(h.get('membership', null) != null && h.membership.status in ['past_due', 'lapsed']);
+      }
+
+      allow create: if signedIn()
+        && waitlistShapeOk()
+        && waitlistSessionOk()
+        && waitlistHouseholdOk()
+        && entryId == request.resource.data.sessionId + '_' + request.resource.data.athleteId
+        && request.resource.data.householdId
+             == athleteData(request.resource.data.athleteId).householdId
+        && (
+          (me().role == 'athlete' && me().athleteId == request.resource.data.athleteId)
+          || (me().role == 'parent' && me().householdId == request.resource.data.householdId)
+        );
+
+      // Leave (member delete own) - the athlete's own user or the household
+      // parent. Promotion and expiry deletes (contract v2.1: "admin delete -
+      // promote / expire") run under the Admin SDK (the promotion trigger,
+      // scripts/sweep-waitlist.mjs) and bypass this file entirely, so no
+      // separate ops/owner clause is needed here for those.
+      allow delete: if signedIn() && (
+        (me().role == 'athlete' && me().athleteId == resource.data.athleteId)
+        || (me().role == 'parent' && me().householdId == resource.data.householdId)
+      );
+
+      // READ - flagged as a deliberate widening, not an oversight (routing
+      // report elaborates). The pinned hook seam wants a 1-based `position`
+      // (useWaitlist), computed client-side from a `sessionId ==` list query
+      // across EVERY family waiting on that session. A family-scoped read
+      // rule cannot make that query provable - its own equality filter is
+      // sessionId, never householdId/athleteId, exactly the "list queries
+      // must carry the matching equality filter, or the query is denied
+      // wholesale" limit this file documents on athletes/bookings above -
+      // so a position query under a family-scoped rule would either fail
+      // outright or, best case, silently return only the caller's own
+      // entry, making `position` always read "1". A wrong number is worse
+      // than an unbuilt feature. A waitlist doc carries no name, dob,
+      // contact, or medical fact, only opaque athleteId/householdId keys
+      // that the athletes/households read rules keep locked down for every
+      // OTHER family regardless (an outsider resolves the id to nothing),
+      // plus schedule facts (date, periodKey) already visible academy-wide
+      // via sessions.booked. Queue order for a full session is treated as
+      // schedule-adjacent, the same call already made for sessions.read and
+      // tournamentResults.read (both signedIn()-only, no resource.data
+      // check) - not family data. PM may override.
+      allow read: if signedIn();
+
+      // No update ever - nothing on a waitlist entry is ever mutated; a
+      // change is always a delete (leave) or a promotion (which deletes the
+      // entry and creates a booking instead).
+    }
+
+    // ---- stripeEvents -----------------------------------------------------
+    // Sprint 13 (contract v2.1, pin H). The Stripe webhook handler's
+    // idempotency ledger - { type, customer, householdId|null, receivedAt,
+    // outcome } - written by the Admin SDK inside the SAME transaction as
+    // the event's effect (invoice.paid, payment_failed, etc.). No allow
+    // statement of any kind: Admin SDK writers bypass rules entirely, and
+    // this file has no catch-all, so deny-by-default already covers every
+    // client request here. This block exists purely to document that
+    // explicitly - "deny all clients" - rather than leave the collection
+    // unmentioned next to every other one this file names.
+    match /stripeEvents/{eventId} {
+      allow read, write: if false;
     }
 
     // No catch-all. Everything not matched above is denied.

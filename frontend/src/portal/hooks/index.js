@@ -46,6 +46,7 @@ import {
   deleteContractLog,
   fetchAllAthletes,
   fetchAllDiagnostics,
+  fetchAllHouseholds,
   fetchAthlete,
   fetchAthleteDiagnostics,
   fetchAthletesByIds,
@@ -55,6 +56,7 @@ import {
   fetchContractLogs,
   fetchContractLogsSince,
   fetchCurrentUser,
+  fetchGraceTokensByAthlete,
   fetchHousehold,
   fetchHouseholdAthletes,
   fetchHouseholdBookings,
@@ -81,6 +83,14 @@ import {
   submitMyEnrollmentRequest,
   updateBookingStatus,
 } from './live';
+// Sprint 13 (contract v2.1) — the two new Part 2 modules (routing lane's
+// "split new code" instruction): cancelSession/issueTokens/setHouseholdStripeIds/
+// fetchTokenPeriod own token issuance + grace + the staff cancel-session
+// action; fetchWaitlistBy*/leaveWaitlist/useWaitlist own the waitlist. Both
+// import FROM ./live (one-directional, matching useAuthSession.js/
+// useRoster.js's own existing pattern), never the other way.
+import useIssueTokens, { cancelSession, fetchTokenPeriod, setHouseholdStripeIds } from './grace';
+import useWaitlist, { fetchWaitlistByAthlete, fetchWaitlistByHousehold, fetchWaitlistBySession } from './waitlist';
 import {
   COACH,
   COACH_BLOCKS,
@@ -104,6 +114,12 @@ import {
   ATHLETE_PACKAGE,
   SESSION,
   ROSTER,
+  GRACE_TOKEN,
+  WAITLIST_ENTRY,
+  // PAST_DUE_MEMBERSHIP (contract v2.1, pin H) is exported from data/seed.js
+  // for the frontend lane's harness to import directly wherever it wires a
+  // past_due demo state — no hook here routes it (useMembership's default
+  // payload is always the active Whitfield story).
 } from '../data/seed';
 import {
   ELITE,
@@ -180,6 +196,11 @@ export { default as useSeedResource } from './useSeedResource';
 export { default as useAuthSession } from './useAuthSession';
 export { default as useRoster } from './useRoster';
 export { default as useOnboardingStatus } from './onboarding';
+// Sprint 13 (contract v2.1) — already imported by name above (useWaitlist,
+// useIssueTokens both need to be in this file's own scope to be usable by
+// its other hooks/helpers); re-exported here so screens keep importing
+// every portal hook from this one seam, same as every hook above.
+export { useIssueTokens, useWaitlist };
 
 /**
  * Harness demo states (contract v1.1): every data-bearing hook accepts
@@ -320,14 +341,18 @@ async function liveAthleteIdentity() {
  * the caller); the period itself is periodFor(today, anchorDay) - "today",
  * not the session date, because this is a POSITION as of right now, the
  * same thing the old allowance's "used/left" pair stated for its own cycle.
- * No waitlist/graceTokens/tokenPeriods doc exist yet (Part 2) - tokensFor
- * treats their absence as "none of those, and the package's own tokens is
- * the grant" (pin C: "absent tokenPeriods == the package's grant").
+ * `opts` (Sprint 13, contract v2.1, additive - every pre-existing call site
+ * keeps working unchanged with the defaults below): `graceTokens` and
+ * `waitlist` are now real collections (pins E/F), and `tokenPeriod` is the
+ * athlete's tokenPeriods doc for THIS period when one has been issued
+ * (pin C - "absent == the package's grant", still tokensFor's own default
+ * when `tokenPeriod` is omitted or null).
  */
-function deriveTokens(pkg, bookings, anchorDay, today) {
+function deriveTokens(pkg, bookings, anchorDay, today, opts = {}) {
   if (!pkg) return null;
+  const { graceTokens = [], waitlist = [], tokenPeriod = null } = opts;
   const { periodKey } = periodFor(today, anchorDay);
-  return tokensFor(null, pkg, bookings, [], [], periodKey, { today });
+  return tokensFor(null, pkg, bookings, waitlist, graceTokens, periodKey, { today, tokenPeriod });
 }
 
 /**
@@ -337,10 +362,11 @@ function deriveTokens(pkg, bookings, anchorDay, today) {
  * already holds in it (the advance-booking count the charging rule caps at
  * one package's worth, contract v2.0 §6). Shared by useMembership's member
  * rows and useSpecialistSlots' `tokens` field so neither can disagree with
- * the other about what "next period" means for the same athlete.
+ * the other about what "next period" means for the same athlete. `opts`
+ * passes straight through to deriveTokens - see its own comment.
  */
-function tokensWithNextPeriod(pkg, bookings, anchorDay, today) {
-  const position = deriveTokens(pkg, bookings, anchorDay, today);
+function tokensWithNextPeriod(pkg, bookings, anchorDay, today, opts = {}) {
+  const position = deriveTokens(pkg, bookings, anchorDay, today, opts);
   if (!position) return null;
   const { periodEnd } = periodFor(today, anchorDay);
   const nextPeriodKey = periodFor(addDaysISO(periodEnd, 1), anchorDay).periodKey;
@@ -365,24 +391,95 @@ function coachingFor(bookings, today) {
   return { used, limit, capReached: limit != null && used >= limit };
 }
 
+/**
+ * data/packages.js#tokensFor's own `grace` output is `{ id, expiresAt }`
+ * only (that file is db/routing-shared and not this lane's to grow); the
+ * hook seam wants `reason` on it too (contract v2.1: "grace: [{ id,
+ * expiresAt, reason }]"), so it is joined back on here from the raw
+ * graceTokens rows the caller already fetched - never re-derived, just
+ * carried through.
+ */
+function withGraceReasons(tokens, rawGraceTokens) {
+  if (!tokens || !tokens.grace || !tokens.grace.length) return tokens;
+  const reasonById = new Map((rawGraceTokens || []).map((g) => [g.id, g.reason ?? null]));
+  return { ...tokens, grace: tokens.grace.map((g) => ({ ...g, reason: reasonById.get(g.id) ?? null })) };
+}
+
 function byDateThenId(a, b) {
   return a.date === b.date ? (a.id < b.id ? -1 : 1) : a.date < b.date ? -1 : 1;
+}
+
+/**
+ * Waitlist entries resolved into rows shaped like a booking row (contract
+ * v2.1, pin F: "waitlisted items merged... with waitlistPosition"), shared
+ * by useSchedule and useHouseholdReservations' live branches so the two can
+ * never disagree about what a waitlisted row looks like. One
+ * fetchWaitlistBySession() per DISTINCT session among the entries (an
+ * athlete/household waitlists at most a handful of sessions at once) to
+ * compute each entry's 1-based position in its own queue - the SAME
+ * derivation useWaitlist's own position math uses. `sessionsById` is a
+ * pre-fetched map the caller already built (so this never issues its own
+ * redundant fetchSessionsByIds call).
+ */
+async function resolveWaitlistRows(entries, sessionsById, today, anchorDay, currentPeriodKey) {
+  if (!entries.length) return [];
+  const uniqueSessionIds = [...new Set(entries.map((e) => e.sessionId))];
+  const queues = new Map(
+    await Promise.all(uniqueSessionIds.map(async (id) => [id, await fetchWaitlistBySession(id)]))
+  );
+  return entries
+    .map((e) => {
+      const s = sessionsById.get(e.sessionId);
+      if (!s) return null; // dropped, same null-resolve rule as a booking whose session vanished
+      const queue = queues.get(e.sessionId) || [];
+      const idx = queue.findIndex((q) => q.athleteId === e.athleteId);
+      const periodKey = periodFor(s.date, anchorDay).periodKey;
+      const specialist = SPECIALIST_BY_ID.get(s.type);
+      return {
+        ...displaySession(s, today),
+        badge: { tone: 'yellow', label: 'Waitlisted' },
+        bookingId: null,
+        status: 'waitlisted',
+        waitlistPosition: idx >= 0 ? idx + 1 : null,
+        athleteId: e.athleteId,
+        // Shape parity with reservationRow's own confirmed-booking rows -
+        // durationMinutes/instructor read the same way regardless of status.
+        instructor: specialist ? specialist.name : null,
+        durationMinutes: specialist ? 45 : 60,
+        cancellable: false,
+        periodKey,
+        nextPeriod: periodKey > currentPeriodKey,
+      };
+    })
+    .filter(Boolean);
 }
 
 /** Live payload for useSchedule - same shape as the seed branch produces. */
 async function liveSchedule(today) {
   const ctx = await liveAthleteContext();
-  const active = ctx.bookings.filter((b) => b.status !== 'cancelled');
-  // Contract v2.0, pin N: items gain periodKey + nextPeriod (periodKey >
-  // today's own periodKey for the household).
+  // Contract v2.1, pin G: cancelled bookings are no longer dropped from the
+  // list - they render with cancelledBy/cancelReason (the cancelled row
+  // state and its "why" line need something real to read) rather than
+  // vanishing the moment a booking is cancelled.
   const anchorDay = normalizeAnchorDay(ctx.household?.periodAnchorDay);
   const currentPeriodKey = periodFor(today, anchorDay).periodKey;
 
-  // Join bookings to their session docs - time, label and special flags
-  // live on the session, and a booking whose session no longer exists is
-  // dropped rather than rendered, mirroring the seed's null-resolve rule.
+  const [waitlistEntries, graceTokens] = await Promise.all([
+    fetchWaitlistByAthlete(ctx.athlete.id),
+    fetchGraceTokensByAthlete(ctx.athlete.id),
+  ]);
+
+  // Join bookings AND waitlist entries to their session docs in ONE fetch -
+  // time, label and special flags live on the session, and an item whose
+  // session no longer exists is dropped rather than rendered, mirroring the
+  // seed's null-resolve rule.
   const sessionsById = new Map(
-    (await fetchSessionsByIds(active.map((b) => b.sessionId))).map((s) => [s.id, s])
+    (
+      await fetchSessionsByIds([
+        ...ctx.bookings.map((b) => b.sessionId),
+        ...waitlistEntries.map((w) => w.sessionId),
+      ])
+    ).map((s) => [s.id, s])
   );
   const resolve = (b) => {
     const s = sessionsById.get(b.sessionId);
@@ -401,6 +498,8 @@ async function liveSchedule(today) {
           ? { tone: 'neutral', label: 'Attended' }
           : b.status === 'noshow'
           ? { tone: 'red', label: 'No-show' }
+          : b.status === 'cancelled'
+          ? { tone: 'red', label: 'Cancelled' }
           : null,
       // Sprint 9 pin: cancel(bookingId) below needs the real booking id
       // (never the session id displaySession already carries as `id`),
@@ -410,13 +509,19 @@ async function liveSchedule(today) {
       bookingId: b.id,
       status: b.status,
       cancellable: b.status === 'confirmed' && b.date > today,
+      // Contract v2.1, pin G: present on a cancelled row only - absent
+      // (null) on every other status, never invented.
+      cancelReason: b.cancelReason ?? null,
+      cancelledBy: b.cancelledBy ?? null,
       periodKey,
       nextPeriod: periodKey > currentPeriodKey,
     };
   };
 
-  const upcoming = active.filter((b) => b.date >= today).map(resolve).filter(Boolean);
-  const past = active.filter((b) => b.date < today).map(resolve).filter(Boolean);
+  const resolved = ctx.bookings.map(resolve).filter(Boolean);
+  const waitlistRows = await resolveWaitlistRows(waitlistEntries, sessionsById, today, anchorDay, currentPeriodKey);
+  const upcoming = resolved.filter((r) => r.date >= today).concat(waitlistRows);
+  const past = resolved.filter((r) => r.date < today);
   upcoming.sort(byDateThenId);
   past.sort((a, b) => -byDateThenId(a, b)); // most recent first
 
@@ -430,7 +535,12 @@ async function liveSchedule(today) {
     // retired; this is the athlete's token position for the CURRENT
     // period, same shape as useMembership's members[].tokens minus
     // nextPeriod (a household/all-members concept, not a per-schedule one).
-    tokens: deriveTokens(ctx.pkg, ctx.bookings, anchorDay, today),
+    // Contract v2.1: now derived with the athlete's real grace tokens and
+    // waitlist entries (pin B's `reserved`), not the Part 1 empty arrays.
+    tokens: withGraceReasons(
+      deriveTokens(ctx.pkg, ctx.bookings, anchorDay, today, { graceTokens, waitlist: waitlistEntries }),
+      graceTokens
+    ),
   };
 }
 
@@ -598,12 +708,26 @@ export function useSchedule({ variant = 'upcoming', today = todayISO(), practice
           bookingId: seedBookingId(s.id),
           status: 'confirmed',
           cancellable: s.date > today,
+          // Contract v2.1, pin G: shape parity with the live branch's
+          // resolve() - always present, null on every seed row (the demo
+          // has no cancelled-booking story for the seed athlete; nico's
+          // WAITLIST_ENTRY below is the harness's cancellation-adjacent
+          // demo state instead).
+          cancelReason: null,
+          cancelledBy: null,
           periodKey,
           nextPeriod: periodKey > currentPeriodKey,
         };
       })
       .filter(Boolean);
 
+  // Contract v2.1, pin F: WAITLIST_ENTRY is nico's, not the seed's signed-in
+  // athlete (jordan/SEED_ATHLETE_ID) - jordan personally has nothing on any
+  // waitlist in the demo story, so useSchedule's OWN seed branch merges in
+  // nothing here (own-records-only holds even in seed mode); nico's row
+  // shows up where nico actually lives - useHouseholdReservations' seed
+  // branch, below. The merge CODE PATH itself (resolveWaitlistRows) is
+  // exercised live for whichever real athlete is signed in.
   const sessions = variant === 'empty' ? [] : resolve(BOOKED_UPCOMING);
   const past = variant === 'empty' ? [] : resolve(BOOKED_PAST);
   const cancelled = variant === 'cancelled' ? CANCELLED_SESSION : null;
@@ -836,11 +960,17 @@ export function useBooking({ variant = 'open', today = todayISO(), practice = fa
     // Per-PERIOD spend (a booking spends the period its SESSION DATE falls
     // in, contract v2.0 §6), and which sessions are already held - both
     // derived, same as the token position itself (no stored counters).
+    // Contract v2.1, pin E's seam amendment: a grace-charged booking
+    // (graceTokenId set) never counts as a period spend - the SAME
+    // exclusion assertPeriodTokensLeft/tokensFor both apply, kept in
+    // lockstep here so this tally can never diverge from what actually
+    // gates a real booking.
     const tally = new Map();
     const have = new Set();
     for (const b of bookings) {
       if (b.status === 'cancelled') continue;
       have.add(b.sessionId);
+      if (b.graceTokenId) continue;
       const key = b.periodKey ?? periodFor(b.date, anchorDay).periodKey;
       tally.set(key, (tally.get(key) || 0) + 1);
     }
@@ -893,7 +1023,7 @@ export function useBooking({ variant = 'open', today = todayISO(), practice = fa
         // writer's own cap query per instance would be redundant reads);
         // silent: one invalidation bump AFTER the loop instead of a refetch
         // storm per iteration (finding 8b).
-        await createBooking(
+        const result = await createBooking(
           {
             athleteId: forAthleteId,
             sessionId: match.id,
@@ -903,8 +1033,21 @@ export function useBooking({ variant = 'open', today = todayISO(), practice = fa
           },
           { skipCapCheck: true, silent: true }
         );
+        // Contract v2.1: createBooking still tries a grace token first even
+        // under skipCapCheck (a real one is honored if it covers the date) -
+        // a grace-charged instance must NOT inflate this loop's own tally,
+        // matching the seam amendment above. A race that fills the session
+        // between this loop's own pre-check and the transaction resolves as
+        // 'waitlisted' instead of 'confirmed' - reported as skipped, not
+        // counted as booked (contract v2.1, pin F).
+        if (result.status === 'waitlisted') {
+          skipped.push({ date, reason: 'full' });
+          continue;
+        }
         booked.push({ date: match.date, id: match.id });
-        tally.set(periodKey, (tally.get(periodKey) || 0) + 1);
+        if (result.chargedFrom !== 'grace') {
+          tally.set(periodKey, (tally.get(periodKey) || 0) + 1);
+        }
         have.add(match.id);
       } catch (err) {
         skipped.push({
@@ -964,7 +1107,33 @@ async function liveMonthSessions(monthISO, today) {
     (s) => !isSpecialistType(s.type)
   );
   sessions.sort(byDateThenId);
-  return { month: label, days: groupSessionsByDate(sessions, today) };
+  const days = groupSessionsByDate(sessions, today);
+
+  // Contract v2.1, pin F: annotate matching rows with the CALLER's OWN
+  // waitlist state - an athlete's own entries, or every entry across a
+  // parent's household (fetchWaitlistByHousehold, one query for every
+  // member) - never another family's, the same own-records-only scope
+  // every other read in this file keeps. Staff/coach callers (this view
+  // is readable by every role) simply get no annotation - the identity
+  // resolution errors closed to null instead of failing the whole month.
+  const who = await liveBookingIdentity().catch(() => null);
+  if (who) {
+    const entries = await (who.role === 'athlete'
+      ? fetchWaitlistByAthlete(who.profile.athleteId)
+      : fetchWaitlistByHousehold(who.profile.householdId));
+    const bySession = new Map(entries.map((e) => [e.sessionId, e]));
+    for (const day of days) {
+      for (const row of day.sessions) {
+        const entry = bySession.get(row.id);
+        if (!entry) continue;
+        const queue = await fetchWaitlistBySession(row.id);
+        const idx = queue.findIndex((q) => q.athleteId === entry.athleteId);
+        row.waitlisted = true;
+        row.waitlistPosition = idx >= 0 ? idx + 1 : null;
+      }
+    }
+  }
+  return { month: label, days };
 }
 
 /**
@@ -1611,11 +1780,24 @@ function seedMemberBookingRows(child, today) {
   return rows;
 }
 
+/**
+ * Grace tokens for one seed child (contract v2.1, Sprint 13) - GRACE_TOKEN
+ * (data/seed.js) is reese's alone; every other child sees none, matching
+ * the harness's one-grace-token story exactly.
+ */
+function seedMemberGraceTokens(child) {
+  return child.id === GRACE_TOKEN.athleteId ? [GRACE_TOKEN] : [];
+}
+
 /** tokensWithNextPeriod, run for one seed child - shared by useMembership's
  * seed branch and useSpecialistSlots' seed tokens above. */
 function seedMemberTokens(child, today) {
   const pkg = packageById(child.packageId);
-  return tokensWithNextPeriod(pkg, seedMemberBookingRows(child, today), PERIOD_ANCHOR_DAY, today);
+  const graceTokens = seedMemberGraceTokens(child);
+  return withGraceReasons(
+    tokensWithNextPeriod(pkg, seedMemberBookingRows(child, today), PERIOD_ANCHOR_DAY, today, { graceTokens }),
+    graceTokens
+  );
 }
 
 /** One useMembership member row for a seed child - same field set the live
@@ -1642,9 +1824,16 @@ function seedMemberEntry(child, today) {
  * athlete's real bookings this period.
  */
 async function liveMemberEntry(a, today, anchorDay) {
-  const [pkg, bookings] = await Promise.all([
+  const { periodKey } = periodFor(today, anchorDay);
+  const [pkg, bookings, graceTokens, waitlistEntries, tokenPeriod] = await Promise.all([
     a.packageId ? fetchPackage(a.packageId) : null,
     fetchBookings(a.id, { householdId: a.householdId }),
+    fetchGraceTokensByAthlete(a.id),
+    fetchWaitlistByAthlete(a.id),
+    // Contract v2.1, pin C: read BY ID for the current period only - "no
+    // query, no index". Absent (no doc issued yet) resolves to null, which
+    // tokensFor treats as "the package's own grant" (pin C's own words).
+    fetchTokenPeriod(a.id, periodKey),
   ]);
   // Price comes from the STATIC catalogue (packageById), never the Firestore
   // doc's own `price` field - policy: no dollar amounts in Firestore (same
@@ -1666,7 +1855,15 @@ async function liveMemberEntry(a, today, anchorDay) {
           kind: pkg.kind ?? null,
         }
       : null,
-    tokens: tokensWithNextPeriod(pkg, bookings, anchorDay, today),
+    // Contract v2.1: grace tokens, waitlist reservations and an ops/Stripe
+    // issuance (when one exists) all now feed the position - see
+    // tokensWithNextPeriod/deriveTokens' own comments. withGraceReasons adds
+    // the `reason` field the hook seam wants that tokensFor's own output
+    // does not carry.
+    tokens: withGraceReasons(
+      tokensWithNextPeriod(pkg, bookings, anchorDay, today, { graceTokens, waitlist: waitlistEntries, tokenPeriod }),
+      graceTokens
+    ),
     coaching: coachingFor(bookings, today),
     contractMinutes: a.contractMinutes ?? null,
     periodEnd: periodFor(today, anchorDay).periodEnd,
@@ -1696,7 +1893,20 @@ async function liveMembership(today) {
     const anchorDay = normalizeAnchorDay(household.periodAnchorDay);
     const members = await Promise.all(athletes.map((a) => liveMemberEntry(a, today, anchorDay)));
     return {
-      household: { id: household.id, name: household.name ?? null, periodAnchorDay: anchorDay },
+      household: {
+        id: household.id,
+        name: household.name ?? null,
+        periodAnchorDay: anchorDay,
+        // Contract v2.1, pin H: absent == active (households.membership is
+        // Admin-SDK/Stripe-handler-only - never written by this app's own
+        // client code). `status`/`currentPeriodEnd` only - stripeSubscriptionStatus/
+        // lastEventId/updatedAt are Stripe-handler bookkeeping the UI never
+        // needs to render.
+        membership: household.membership
+          ? { status: household.membership.status, currentPeriodEnd: household.membership.currentPeriodEnd ?? null }
+          : null,
+        stripeCustomerId: household.stripeCustomerId ?? null,
+      },
       members,
     };
   }
@@ -1727,7 +1937,20 @@ export function useMembership() {
   return useSeedResource(
     live
       ? null
-      : { household: { id: 'whitfield', name: HOUSEHOLD.name, periodAnchorDay: PERIOD_ANCHOR_DAY }, members: seedMembers },
+      : {
+          household: {
+            id: 'whitfield',
+            name: HOUSEHOLD.name,
+            periodAnchorDay: PERIOD_ANCHOR_DAY,
+            // Whitfield is active in the live emulator seed too (absent ==
+            // active) - the harness's past_due demo state is
+            // PAST_DUE_MEMBERSHIP (data/seed.js), for whichever screen wires
+            // a variant to it, not the default membership payload.
+            membership: null,
+            stripeCustomerId: null,
+          },
+          members: seedMembers,
+        },
     live
       ? { source: () => liveMembership(today), deps: ['membership', today, bookingsGen, athletesGen] }
       : undefined
@@ -1799,7 +2022,29 @@ export function useHouseholdSettings(householdId) {
     }
   };
 
-  return { setPeriodAnchorDay, saving, error };
+  /**
+   * `setStripeIds({ stripeCustomerId, stripeSubscriptionId })` (contract
+   * v2.1, pin H, new) - ops/owner only, enforced by firestore.rules'
+   * householdSettingsUpdateOk(), not here. Same saving/error/seed-echo
+   * discipline as setPeriodAnchorDay just above.
+   */
+  const setStripeIds = async ({ stripeCustomerId = null, stripeSubscriptionId = null } = {}) => {
+    setSaving(true);
+    setError(null);
+    try {
+      if (!live || !householdId) {
+        return { householdId, stripeCustomerId, stripeSubscriptionId, simulated: true };
+      }
+      return await setHouseholdStripeIds(householdId, { stripeCustomerId, stripeSubscriptionId });
+    } catch (err) {
+      setError(err);
+      throw err;
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return { setPeriodAnchorDay, setStripeIds, saving, error };
 }
 
 /**
@@ -1844,10 +2089,15 @@ function reservationRow(s, b, today, instructor, anchorDay, currentPeriodKey) {
         ? { tone: 'neutral', label: 'Attended' }
         : b.status === 'noshow'
         ? { tone: 'red', label: 'No-show' }
+        : b.status === 'cancelled'
+        ? { tone: 'red', label: 'Cancelled' }
         : null,
     bookingId: b.bookingId,
     status: b.status,
     cancellable: b.status === 'confirmed' && s.date > today,
+    // Contract v2.1, pin G: present on a cancelled row only.
+    cancelReason: b.cancelReason ?? null,
+    cancelledBy: b.cancelledBy ?? null,
     athleteId: b.athleteId,
     instructor: instructor ?? (specialist ? specialist.name : null),
     durationMinutes: specialist ? 45 : 60,
@@ -1869,32 +2119,46 @@ async function liveHouseholdReservations(today) {
       `users/${profile.uid} has no householdId - Reservations is a parent surface only.`
     );
   }
-  const [household, athletes, bookings] = await Promise.all([
+  const [household, athletes, bookings, waitlistEntries] = await Promise.all([
     fetchHousehold(profile.householdId),
     fetchHouseholdAthletes(profile.householdId),
     fetchHouseholdBookings(profile.householdId),
+    fetchWaitlistByHousehold(profile.householdId),
   ]);
   const anchorDay = normalizeAnchorDay(household.periodAnchorDay);
   const currentPeriodKey = periodFor(today, anchorDay).periodKey;
-  const active = bookings.filter((b) => b.status !== 'cancelled');
+  // Contract v2.1, pin G: cancelled bookings are no longer dropped - every
+  // status renders, with cancelReason/cancelledBy on the cancelled ones.
   const sessionsById = new Map(
-    (await fetchSessionsByIds(active.map((b) => b.sessionId))).map((s) => [s.id, s])
+    (
+      await fetchSessionsByIds([
+        ...bookings.map((b) => b.sessionId),
+        ...waitlistEntries.map((w) => w.sessionId),
+      ])
+    ).map((s) => [s.id, s])
   );
 
   const byAthlete = new Map(athletes.map((a) => [a.id, { athleteId: a.id, name: a.name, upcoming: [], past: [] }]));
-  for (const b of active) {
+  for (const b of bookings) {
     const s = sessionsById.get(b.sessionId);
     const bucket = byAthlete.get(b.athleteId);
     if (!s || !bucket) continue; // dropped, same null-resolve rule as useSchedule/liveSchedule above
     const row = reservationRow(
       s,
-      { bookingId: b.id, status: b.status, athleteId: b.athleteId },
+      { bookingId: b.id, status: b.status, athleteId: b.athleteId, cancelReason: b.cancelReason, cancelledBy: b.cancelledBy },
       today,
       null,
       anchorDay,
       currentPeriodKey
     );
     (s.date >= today ? bucket.upcoming : bucket.past).push(row);
+  }
+  // Contract v2.1, pin F: every member's waitlisted rows, one shared
+  // fetchWaitlistByHousehold query rather than per-athlete round trips.
+  const waitlistRows = await resolveWaitlistRows(waitlistEntries, sessionsById, today, anchorDay, currentPeriodKey);
+  for (const row of waitlistRows) {
+    const bucket = byAthlete.get(row.athleteId);
+    if (bucket) bucket.upcoming.push(row); // a waitlist entry is always for a future session
   }
   const members = athletes.map((a) => byAthlete.get(a.id));
   for (const m of members) {
@@ -1907,9 +2171,31 @@ async function liveHouseholdReservations(today) {
 /** Seed member row for one household child - jordan (SEED_ATHLETE_ID) reuses
  * the SAME BOOKED_UPCOMING/BOOKED_PAST references useSchedule's own seed
  * branch resolves (never a second, independently invented booking list);
- * reese/nico get the honest empty state the pin's UI section calls for. */
+ * nico gets WAITLIST_ENTRY's row (contract v2.1, pin F); reese gets the
+ * honest empty state the pin's UI section calls for. */
 function seedReservationMember(child, today) {
   const currentPeriodKey = periodFor(today, PERIOD_ANCHOR_DAY).periodKey;
+  if (child.id === WAITLIST_ENTRY.athleteId) {
+    const s = resolveBooking(WAITLIST_ENTRY.sessionRef);
+    const upcoming = s
+      ? [
+          {
+            ...displaySession(s, today),
+            badge: { tone: 'yellow', label: 'Waitlisted' },
+            bookingId: null,
+            status: 'waitlisted',
+            waitlistPosition: WAITLIST_ENTRY.position,
+            cancellable: false,
+            athleteId: child.id,
+            instructor: isSpecialistType(s.type) ? SPECIALIST_BY_ID.get(s.type)?.name ?? null : null,
+            durationMinutes: isSpecialistType(s.type) ? 45 : 60,
+            periodKey: periodFor(s.date, PERIOD_ANCHOR_DAY).periodKey,
+            nextPeriod: periodFor(s.date, PERIOD_ANCHOR_DAY).periodKey > currentPeriodKey,
+          },
+        ]
+      : [];
+    return { athleteId: child.id, name: child.name, upcoming, past: [] };
+  }
   if (child.id !== SEED_ATHLETE_ID) {
     return { athleteId: child.id, name: child.name, upcoming: [], past: [] };
   }
@@ -3045,14 +3331,31 @@ async function liveAdminDashboard(today) {
   const weekStart = mondayOfWeek(today);
   const weekEnd = addDaysISO(weekStart, 6);
 
-  const [athletes, sessionsThisWeek, pending, noshowBookings, contractLogs, diagnostics] = await Promise.all([
-    fetchAllAthletes(),
-    fetchSessionsInRange(weekStart, weekEnd),
-    fetchPendingEnrollmentRequests(),
-    fetchNoShowBookingsSince(monthStart),
-    fetchContractLogsSince(monthStart),
-    fetchAllDiagnostics(),
-  ]);
+  const [athletes, sessionsThisWeek, pending, noshowBookings, contractLogs, diagnostics, households] =
+    await Promise.all([
+      fetchAllAthletes(),
+      fetchSessionsInRange(weekStart, weekEnd),
+      fetchPendingEnrollmentRequests(),
+      fetchNoShowBookingsSince(monthStart),
+      fetchContractLogsSince(monthStart),
+      fetchAllDiagnostics(),
+      fetchAllHouseholds(),
+    ]);
+
+  // Contract v2.1, pin H: membership status counts + who's lapsed - absent
+  // == active, the same default every other membership read in this app
+  // uses. `lapsedHouseholds` links straight to nothing invented — just the
+  // household's own id/name, matching what the admin screen already knows
+  // how to show elsewhere.
+  const membership = { active: 0, pastDue: 0, lapsed: 0, lapsedHouseholds: [] };
+  for (const h of households) {
+    const status = h.membership?.status ?? 'active';
+    if (status === 'past_due') membership.pastDue += 1;
+    else if (status === 'lapsed') {
+      membership.lapsed += 1;
+      membership.lapsedHouseholds.push({ id: h.id, name: h.name ?? null });
+    } else membership.active += 1;
+  }
 
   const publishedDiagnosticAthleteIds = diagnostics
     .filter((d) => d.status === 'published')
@@ -3161,6 +3464,7 @@ async function liveAdminDashboard(today) {
     blockFill,
     filter: TIER_FILTERS[0],
     weekLabel: `Week of ${longDayLabel(weekStart)}`,
+    membership,
   };
 }
 
@@ -3189,6 +3493,7 @@ export function useAdminDashboard({ variant = 'populated' } = {}) {
   const contractLogsGen = useInvalidation('contractLogs');
   const diagnosticsGen = useInvalidation('diagnostics');
   const enrollmentGen = useInvalidation('enrollmentRequests');
+  const householdsGen = useInvalidation('households');
 
   return useSeedResource(
     live
@@ -3204,11 +3509,24 @@ export function useAdminDashboard({ variant = 'populated' } = {}) {
           blockFill: BLOCK_FILL,
           filter,
           weekLabel: null,
+          // Contract v2.1, pin H: the harness's one named seed household
+          // (HOUSEHOLD/Whitfield) is active — no invented lapsed/past_due
+          // household ships in the default demo state.
+          membership: { active: 1, pastDue: 0, lapsed: 0, lapsedHouseholds: [] },
         },
     live
       ? {
           source: () => liveAdminDashboard(today),
-          deps: ['admin-dashboard', today, athletesGen, bookingsGen, contractLogsGen, diagnosticsGen, enrollmentGen],
+          deps: [
+            'admin-dashboard',
+            today,
+            athletesGen,
+            bookingsGen,
+            contractLogsGen,
+            diagnosticsGen,
+            enrollmentGen,
+            householdsGen,
+          ],
         }
       : undefined
   );
@@ -3388,24 +3706,52 @@ export function useSessionAttendance(sessionId) {
     return setSessionCoachNote({ sessionId: targetSessionId, note });
   };
 
-  // The session's CURRENT note, so the roster shows/prefills it on a
-  // revisit rather than only after this device saved one (PM integration:
-  // the frontend lane flagged the missing read half). Its own small
-  // resource — the rows above are pinned as a bare array.
+  // The session's CURRENT note (and, Sprint 13, its status), so the roster
+  // shows/prefills the note on a revisit rather than only after this device
+  // saved one (PM integration: the frontend lane flagged the missing read
+  // half), and knows whether the session is already cancelled. Its own
+  // small resource — the rows above are pinned as a bare array.
   const sessionsGen = useInvalidation('sessions');
   const noteState = useSeedResource(
-    live && sessionId ? null : { coachNote: null },
+    live && sessionId ? null : { coachNote: null, status: 'scheduled' },
     live && sessionId
       ? {
-          source: async () => ({
-            coachNote: (await fetchSessionsByIds([sessionId]))[0]?.coachNote ?? null,
-          }),
+          source: async () => {
+            const s = (await fetchSessionsByIds([sessionId]))[0];
+            // `status` null-safe (the same generator gap firestore.rules'
+            // waitlistSessionOk/sessionCancelOk document) — absent means
+            // 'scheduled', never a crash on an older/generator-seeded doc.
+            return { coachNote: s?.coachNote ?? null, status: s?.status ?? 'scheduled' };
+          },
           deps: ['session-note', sessionId, sessionsGen],
         }
       : undefined
   );
 
-  return { ...state, mark, setReason, setSessionNote, sessionNote: noteState.data?.coachNote ?? null };
+  /**
+   * Staff "Cancel session" (contract v2.1, pin E) — ops/owner only,
+   * enforced by firestore.rules, not here. grace.js's cancelSession() bumps
+   * bookings/sessions/graceTokens itself on success, so this hook's own
+   * `state` (bookings) and `noteState` (sessions.status) both refresh
+   * through the SAME invalidation seam every other write in this file uses
+   * — no extra wiring here beyond calling it.
+   */
+  const doCancelSession = async () => {
+    if (!live || !sessionId) {
+      return { sessionId, cancelled: 0, graceTokensMinted: 0, simulated: true };
+    }
+    return cancelSession(sessionId);
+  };
+
+  return {
+    ...state,
+    mark,
+    setReason,
+    setSessionNote,
+    sessionNote: noteState.data?.coachNote ?? null,
+    sessionStatus: noteState.data?.status ?? 'scheduled',
+    cancelSession: doCancelSession,
+  };
 }
 
 /**
