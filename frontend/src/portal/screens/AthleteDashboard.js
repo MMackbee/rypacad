@@ -2,6 +2,7 @@ import React from 'react';
 import { useNavigate } from 'react-router-dom';
 import { color, font, glow, radius } from '../tokens';
 import AllowancePools, { GraceLine } from '../components/AllowancePools';
+import BookChooser, { bookNavigation } from '../components/BookChooser';
 import BottomTabBar from '../components/BottomTabBar';
 import Button from '../components/Button';
 import MediaPlaceholder, { Avatar } from '../components/MediaPlaceholder';
@@ -148,13 +149,18 @@ export default function AthleteDashboard({
           </Card>
         ) : null}
 
-        {variant === 'populated' ? <QuickActions onLog={onLog} onBook={onBook} /> : null}
+        {variant === 'populated' ? <QuickActions onLog={onLog} /> : null}
         {/* Sprint 9 pin (TEAM.md): one entry point to the specialist 1-on-1
             flow, same gating as QuickActions above it (populated only) so
             the empty/new states stay exactly as designed - not a restructure,
             an addition below the existing action hierarchy. */}
         {variant === 'populated' ? (
-          <CoachingAction onOpen={() => navigate('/portal/coaching')} />
+          <BookChooser
+            onPick={(option) => {
+              const [to, opts] = bookNavigation(option, null);
+              navigate(to, opts);
+            }}
+          />
         ) : null}
       </div>
       )}
@@ -305,21 +311,13 @@ function ContractCard({ contract }) {
   );
 }
 
-function QuickActions({ onLog, onBook }) {
+function QuickActions({ onLog }) {
+  // Booking moved into the three-way chooser below (owner feedback,
+  // 2026-09-16); logging the contract day stays the one-tap action.
   return (
-    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
-      <Button onClick={onLog} height={78} style={{ borderRadius: radius.card, font: `600 14px ${font.body}` }}>
-        Log today
-      </Button>
-      <Button
-        variant="secondary"
-        onClick={onBook}
-        height={78}
-        style={{ borderRadius: radius.card, font: `600 14px ${font.body}`, boxShadow: 'none' }}
-      >
-        Book a session
-      </Button>
-    </div>
+    <Button onClick={onLog} height={64} style={{ borderRadius: radius.card, font: `600 14px ${font.body}` }}>
+      Log today
+    </Button>
   );
 }
 
@@ -332,21 +330,6 @@ function QuickActions({ onLog, onBook }) {
  * idiom as ParentDashboard's ChildCard, keeps this a clear but secondary
  * action.
  */
-function CoachingAction({ onOpen }) {
-  return (
-    <Card onClick={onOpen} style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-      <div style={{ flex: 1, minWidth: 0 }}>
-        <div style={{ font: `600 14px ${font.body}`, color: color.text }}>1-on-1 coaching</div>
-        <div style={{ font: `400 11px ${font.body}`, color: color.textTertiary, marginTop: 3 }}>
-          Book time with Phil or Yannick
-        </div>
-      </div>
-      <span aria-hidden="true" style={{ font: `400 18px ${font.body}`, color: color.textTertiary, flex: 'none' }}>
-        ›
-      </span>
-    </Card>
-  );
-}
 
 /**
  * Sprint 10 pin C/I: this card's copy named "Practice DNA" as a destination

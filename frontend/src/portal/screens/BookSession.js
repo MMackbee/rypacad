@@ -11,7 +11,7 @@ import { CapacityPill } from '../components/StatusBadge';
 import AllowancePools, { GraceLine, SpendNote } from '../components/AllowancePools';
 import { LockedDayNotice, reasonCopy, SeeMembershipLink } from '../components/BookingReasons';
 import { JoinWaitlistButton, WaitlistedConfirmationBody } from '../components/WaitlistAction';
-import { Banner, Body, Card, ErrorNotice, ScreenTitle, SectionLabel, Tick } from '../components/Primitives';
+import { BackLink, Banner, Body, Card, ErrorNotice, ScreenTitle, SectionLabel, Tick } from '../components/Primitives';
 import { useBooking, useHouseholdAthletes, useMembership, useMonthSessions } from '../hooks';
 // Pure calendar/season helpers, not response data - the data itself travels
 // through the hook seam, but a formatting/derivation helper already imported
@@ -313,7 +313,8 @@ export default function BookSession({
       bare={bare}
       header={
         <div style={{ padding: '8px 22px 16px' }}>
-          <ScreenTitle>Book a Session</ScreenTitle>
+          {onBack ? <BackLink onClick={onBack}>‹ Back</BackLink> : null}
+          <ScreenTitle style={{ marginTop: onBack ? 6 : 0 }}>Book a Session</ScreenTitle>
         </div>
       }
       footer={<BottomTabBar role={role} active={isParent ? undefined : 'schedule'} />}

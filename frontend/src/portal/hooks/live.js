@@ -1698,6 +1698,23 @@ export async function saveNotificationPrefs(prefs) {
 }
 
 /**
+ * Self-service mobile phone for text notices - the second (and last) field a
+ * member writes on their own users doc (rules: hasOnly notificationPrefs +
+ * phone). Trimmed, capped at 32 characters, empty clears to null.
+ */
+export async function saveMyPhone(phone) {
+  const user = requireUser();
+  const clean = typeof phone === 'string' ? phone.trim().slice(0, 32) : '';
+  try {
+    await updateDoc(doc(db, 'users', user.uid), { phone: clean || null });
+    bump('users');
+    return { phone: clean || null };
+  } catch (err) {
+    throw wrap(err, 'saveMyPhone');
+  }
+}
+
+/**
  * Set (or clear) a session's coach note (contract v1.8, H) — string <=500 or
  * null, the one field firestore.rules' coachNoteUpdateOk() admits. Mirrors
  * setBookingNoshowReason's trim/cap/null-on-empty discipline exactly.

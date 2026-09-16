@@ -215,17 +215,20 @@ function PortalIndex() {
  * existing AthleteDetailRoute/SessionAttendanceRoute convention of resolving
  * routing-only facts here and passing plain props down.
  */
-function BookSessionRoute({ onBack }) {
+function BookSessionRoute() {
   const live = isLive();
   const { user } = useAuthSession(live ? undefined : { variant: 'idle' });
   const { state } = useLocation();
+  const navigate = useNavigate();
   const role = live && user?.role === 'parent' ? 'parent' : 'athlete';
+  // Back lands on the role's own home, not the athlete schedule for a parent.
+  const back = role === 'parent' ? '/portal/family' : '/portal/schedule';
   return (
     <BookSession
       bare
       role={role}
       initialAthleteId={state?.athleteId ?? undefined}
-      onBack={onBack}
+      onBack={() => navigate(back)}
     />
   );
 }
@@ -253,6 +256,7 @@ function CoachingRoute() {
       bare
       role={role}
       initialAthleteId={state?.athleteId ?? undefined}
+      initialSpecialist={state?.specialistId ?? undefined}
       onBack={() => navigate(back)}
     />
   );
@@ -514,7 +518,7 @@ export default function PortalRoutes() {
         path="book"
         element={
           <RequireRole roles={['athlete', 'parent']}>
-            <BookSessionRoute onBack={go('/portal/schedule')} />
+            <BookSessionRoute />
           </RequireRole>
         }
       />
@@ -572,16 +576,6 @@ export default function PortalRoutes() {
               bare
               onOpenAthlete={openAthlete}
               onSignOut={onSignOut}
-              // Book-for-kid deep link (Sprint 7 pin): each kid card's Book
-              // action carries the chosen athleteId as navigation state, so
-              // BookSessionRoute can pass it through as initialAthleteId
-              // instead of BookSession defaulting to the household's first
-              // child. Many kids never get their own login - this is the
-              // first-class path for a parent booking on their behalf.
-              onBookFor={(athleteId) => navigate('/portal/book', { state: { athleteId } })}
-              // Sprint 9: one full-width coaching action under the kid
-              // cards; SpecialistBooking carries its own child selector.
-              onBookCoaching={() => navigate('/portal/coaching')}
             />
           </RequireRole>
         }

@@ -2,10 +2,11 @@ import React, { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { TOUCH_MIN, color, font, radius, tint } from '../tokens';
 import BottomTabBar from '../components/BottomTabBar';
+import ProfileCard from '../components/ProfileCard';
 import PhoneFrame from '../components/PhoneFrame';
 import SavedToast from '../components/SavedToast';
 import { Toggle } from '../components/Toggle';
-import { Body, Card, ScreenTitle } from '../components/Primitives';
+import { SectionLabel, Body, Card, ScreenTitle } from '../components/Primitives';
 import { useNotificationPrefs } from '../hooks';
 
 /**
@@ -119,7 +120,7 @@ export default function NotificationPreferences({
       bare={bare}
       header={
         <div style={{ padding: '8px 22px 14px' }}>
-          <ScreenTitle size={22}>Notifications</ScreenTitle>
+          <ScreenTitle size={22}>Settings</ScreenTitle>
         </div>
       }
       // athlete's tab set has no Settings slot (BottomTabBar.js's
@@ -136,6 +137,9 @@ export default function NotificationPreferences({
           <SavedToast message={saving ? 'Saving…' : 'Preferences saved'} />
         ) : null}
 
+        <ProfileCard />
+
+        <SectionLabel style={{ marginTop: 6 }}>Notifications</SectionLabel>
         <ChannelHeader />
 
         {(data?.categories ?? []).map((cat) => (

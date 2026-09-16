@@ -98,10 +98,15 @@ service cloud.firestore {
           )
         )
         || (
+          // Member self-writes: notificationPrefs (v1.8) and the self-service
+          // phone for text notices (2026-09-16) - nothing else on the doc.
           request.auth.uid == userId
-          && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['notificationPrefs'])
-          && (request.resource.data.notificationPrefs is map
-              || request.resource.data.notificationPrefs == null)
+          && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['notificationPrefs', 'phone'])
+          && (request.resource.data.get('notificationPrefs', null) is map
+              || request.resource.data.get('notificationPrefs', null) == null)
+          && (request.resource.data.get('phone', null) == null
+              || (request.resource.data.get('phone', null) is string
+                  && request.resource.data.phone.size() <= 32))
         )
       );
     }

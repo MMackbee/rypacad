@@ -74,6 +74,7 @@ import {
   isLive,
   saveDiagnosticCapture,
   saveNotificationPrefs,
+  saveMyPhone,
   saveTournamentResults,
   setAthletePackages,
   setBookingNoshowReason,
@@ -3241,6 +3242,30 @@ export function useNotificationPrefs({ variant = 'default' } = {}) {
  * date math (no new data/calendar.js helper — this lane does not touch
  * data/ this sprint) built on addDaysISO, already imported here.
  */
+/**
+ * The signed-in person's own profile facts for Settings: the sign-in email
+ * (read-only) and the self-service phone that text notices go to. Seed: the
+ * Whitfield guardian; live: the users doc plus the auth email.
+ */
+export function useProfile() {
+  const live = isLive();
+  const gen = useInvalidation('users');
+  const state = useSeedResource(
+    live ? null : { email: 'dana@email.com', displayName: 'Dana Whitfield', phone: null },
+    live ? { source: liveProfile, deps: ['profile', gen] } : undefined
+  );
+  const savePhone = async (phone) => {
+    if (!live) return { phone, simulated: true };
+    return saveMyPhone(phone);
+  };
+  return { ...state, savePhone };
+}
+
+async function liveProfile() {
+  const me = await fetchCurrentUser();
+  return { email: me.email ?? null, displayName: me.displayName ?? null, phone: me.phone ?? null };
+}
+
 function mondayOfWeek(todayIso) {
   const dow = new Date(`${todayIso}T00:00:00Z`).getUTCDay(); // 0=Sun..6=Sat
   const diff = dow === 0 ? -6 : 1 - dow;

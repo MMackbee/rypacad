@@ -1,6 +1,7 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { color, font } from '../tokens';
+import BookChooser, { BookChooserSheet, bookNavigation } from '../components/BookChooser';
 import BottomTabBar from '../components/BottomTabBar';
 import Button from '../components/Button';
 import PhoneFrame from '../components/PhoneFrame';
@@ -65,8 +66,6 @@ export default function ParentDashboard({
   variant = 'three',
   bare = false,
   onOpenAthlete,
-  onBookFor,
-  onBookCoaching,
   onRetry,
 }) {
   const { data, loading, error } = useHousehold({ variant });
@@ -78,6 +77,15 @@ export default function ParentDashboard({
   // never edits PortalRoutes.js) rather than a new onOpenMembership prop —
   // one static internal route, no routing wiring needed.
   const navigate = useNavigate();
+  // Owner feedback (2026-09-16): a kid's "Book a session" opens the three-way
+  // chooser (golf / performance / mental game) for that kid; the same three
+  // options sit inline under the cards for a parent who has not picked a kid
+  // yet (the booking screens carry their own child selector).
+  const [bookFor, setBookFor] = useState(null);
+  const pick = (option, athleteId) => {
+    const [to, opts] = bookNavigation(option, athleteId);
+    navigate(to, opts);
+  };
 
   return (
     <PhoneFrame
@@ -134,7 +142,7 @@ export default function ParentDashboard({
             child={child}
             onHold={flagged}
             onOpen={onOpenAthlete ? () => onOpenAthlete(child.id) : undefined}
-            onBookFor={onBookFor ? () => onBookFor(child.id) : undefined}
+            onBookFor={() => setBookFor(child)}
             onOpenMembership={() => navigate('/portal/membership')}
           />
         ))}
@@ -149,16 +157,17 @@ export default function ParentDashboard({
           equal or higher priority than the per-kid Book buttons above it,
           which flag 02 reserves for a screen's one primary action.
         */}
-        {onBookCoaching ? (
-          <Button
-            variant="secondary"
-            height={44}
-            style={{ boxShadow: 'none' }}
-            onClick={onBookCoaching}
-          >
-            Book 1-on-1 coaching
-          </Button>
-        ) : null}
+        <BookChooser onPick={(option) => pick(option, null)} />
+        <BookChooserSheet
+          open={Boolean(bookFor)}
+          athleteName={bookFor?.name}
+          onPick={(option) => {
+            const child = bookFor;
+            setBookFor(null);
+            pick(option, child?.id ?? null);
+          }}
+          onClose={() => setBookFor(null)}
+        />
       </div>
       )}
     </PhoneFrame>

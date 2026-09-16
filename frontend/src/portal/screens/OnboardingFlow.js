@@ -153,6 +153,7 @@ function StepHeader({ title, stepIndex, stepCount, onBack, onSkip, instruction }
         {onBack ? <BackLink onClick={onBack}>‹ Back</BackLink> : null}
         <div style={{ flex: 1 }} />
         <StatusBadge tone="yellow">Practice</StatusBadge>
+        <StatusBadge tone="neutral">Sample family</StatusBadge>
         {onSkip ? <SkipLink onSkip={onSkip} /> : null}
       </div>
 
@@ -202,6 +203,7 @@ function ChooserHeader({ onSkip }) {
     <div style={{ padding: '12px 22px 14px', borderBottom: `1px solid ${color.frameRule}` }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
         <StatusBadge tone="yellow">Practice</StatusBadge>
+        <StatusBadge tone="neutral">Sample family</StatusBadge>
         <div style={{ flex: 1 }} />
         <SkipLink onSkip={onSkip} />
       </div>
@@ -209,8 +211,8 @@ function ChooserHeader({ onSkip }) {
         Welcome to the portal
       </ScreenTitle>
       <Body size={13} style={{ marginTop: 8 }}>
-        A short walkthrough on the real screens. Everything you try is practice — nothing you do
-        here becomes real.
+        A short walkthrough on the real screens, using a sample family — the Whitfields — so
+        nothing you try here becomes real. Your own athletes are waiting on Home when you finish.
       </Body>
     </div>
   );

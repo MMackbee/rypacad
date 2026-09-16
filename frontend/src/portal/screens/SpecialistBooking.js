@@ -86,6 +86,7 @@ export default function SpecialistBooking({
   bare = false,
   role = 'athlete',
   initialAthleteId,
+  initialSpecialist,
   onBack,
   onSignOut,
   harnessStage,
@@ -93,7 +94,9 @@ export default function SpecialistBooking({
   harnessSpecialistId,
 }) {
   const navigate = useNavigate();
-  const initialSpecialistId = harnessStage ? harnessSpecialistId || SPECIALISTS[0].id : null;
+  // A home-screen chooser deep-links straight to one specialist (initialSpecialist);
+  // the picker is still one back-tap away.
+  const initialSpecialistId = harnessStage ? harnessSpecialistId || SPECIALISTS[0].id : initialSpecialist ?? null;
   const [specialistId, setSpecialistId] = useState(initialSpecialistId);
   const specialist = SPECIALISTS.find((s) => s.id === specialistId) || null;
 
@@ -270,7 +273,8 @@ export default function SpecialistBooking({
             <BackLink onClick={() => setSpecialistId(null)}>‹ Specialists</BackLink>
           ) : (
             <div style={{ flex: 1, minWidth: 0 }}>
-              <ScreenTitle>1-on-1 Coaching</ScreenTitle>
+              {onBack ? <BackLink onClick={onBack}>‹ Back</BackLink> : null}
+              <ScreenTitle style={{ marginTop: onBack ? 6 : 0 }}>Coaching</ScreenTitle>
             </div>
           )}
           <div style={{ flex: 1 }} />
