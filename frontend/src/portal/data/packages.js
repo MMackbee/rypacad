@@ -102,7 +102,7 @@ export function periodFor(dateISO, anchorDay = 1) {
  * stored counter:
  *   granted    the package's tokens; Part 2 passes the period's tokenPeriods
  *              doc as opts.tokenPeriod and its granted wins (absent == grant)
- *   used       non-cancelled bookings carrying this periodKey
+ *   used       non-cancelled bookings carrying this periodKey and no graceTokenId
  *   reserved   waitlist entries carrying this periodKey
  *   grace      unconsumed, unexpired grace tokens, soonest expiry first
  *              (consumed == some non-cancelled booking references the id)
@@ -113,7 +113,9 @@ export function periodFor(dateISO, anchorDay = 1) {
 export function tokensFor(athlete, pkg, bookings, waitlist, graceTokens, periodKey, opts = {}) {
   const today = opts.today ?? fromUTC(new Date());
   const live = (bookings || []).filter((b) => b && b.status !== 'cancelled');
-  const used = live.filter((b) => b.periodKey === periodKey).length;
+  // A grace-charged booking (graceTokenId set) is a second life for a token
+  // the Academy could not honor - it never counts as a period spend.
+  const used = live.filter((b) => b.periodKey === periodKey && !b.graceTokenId).length;
   const reserved = (waitlist || []).filter((w) => w && w.periodKey === periodKey).length;
   const consumed = new Set(live.map((b) => b.graceTokenId).filter(Boolean));
   const grace = (graceTokens || [])

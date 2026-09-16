@@ -1783,3 +1783,253 @@ run only once the new build is live. Part 2 (Sprint 13: tokenPeriods, grace
 tokens, waitlist + promotion trigger, Stripe handler + membership status,
 the two scripts) starts from a fresh pin; the functions lint blocker in
 DECISION-GAPS.md gates any functions deploy.
+
+## Sprint 13 pins — token model Part 2: issuance, grace, waitlist, Stripe (2026-09-16)
+
+Origin: the Sprint 12 pin's Part 2 (its sections C, E, F, H, the Part 2
+lines of the hook seam and UI lists, and the functions lane), promoted to a
+sprint now that Part 1 is live in production (main @ 798bd85, rules v2.0
+released, packages migrated by the owner's provisioner run). Policy source
+stays tokens-and-billing-contract.md sections 1–11. Everything below is
+written to the architecture as built: client transactions gated by rules,
+derive-don't-store, sanctioned admin-SDK writers. The two new server
+writers — the Stripe handler and the promotion trigger — are the first
+production writers that are not user-gated scripts; they deploy last and
+carry their own emulator tests.
+
+Owner rulings still open (DECISION-GAPS.md) stay as pinned in Sprint 12:
+auto-confirm promotion with no acceptance window; mental cap 1 per month;
+athlete-attended 1:1; `single` as a period package; prices pending.
+
+Design keystones (unchanged): ONE POOL, DERIVED; charging never branches on
+`sessions.type`; `households.membership` absent == active; `tokenPeriods`
+absent == the package's grant; grace tokens are stored because they are
+events, their consumption is derived. New for this sprint: every Stripe
+handler is idempotent on `event.id`; promotion replicates every client gate
+under the admin SDK; no secret ever enters the repo.
+
+### Data contract v2.1 (db lane documents; routing implements rules)
+
+**C. TOKEN ISSUANCE.** `tokenPeriods/{athleteId}_{periodKey}`:
+`{ athleteId, householdId, periodKey, periodEnd, granted (int), source:
+'stripe' | 'ops', eventId (Stripe event id | null), createdAt }`. Written by
+the Stripe handler (admin SDK) on `invoice.paid`, or by ops/owner from the
+membership editor ("Issue tokens" for this period or the next — the cash
+and comp cases). Rules: member read own (own athlete, or the parent's
+household — one `get()` of the athlete); ops/owner CREATE only, shape-
+checked, doc id must equal `{athleteId}_{periodKey}`, `granted` an int in
+0..40, `source == 'ops'`; no client update or delete. Hooks read the doc by
+id for the current period and the next (no query, no index) and pass it as
+`tokensFor`'s `opts.tokenPeriod`; absent == the package's grant. Elite
+athletes get no doc.
+
+**E. GRACE TOKENS.** `graceTokens/{auto}`: `{ athleteId, householdId,
+expiresAt ('YYYY-MM-DD', minted + 30 days), reason: 'session-cancelled' |
+'waitlist-expired', sourceSessionId, createdBy (uid | 'sweep'), createdAt }`.
+Created by ops/owner (rules create, shape-checked, reason
+'session-cancelled' only from clients) or the sweep script (admin). Members
+read own (query `athleteId ==`; index `graceTokens (athleteId, expiresAt)`).
+Consumed is DERIVED: a non-cancelled booking whose `graceTokenId == id`.
+SEAM AMENDMENT (PM, landed with this pin): `tokensFor`'s `used` no longer
+counts grace-charged bookings (`graceTokenId` set) — a grace token is a
+second life for a token the Academy could not honor, not a period spend.
+`createBooking` charge order: Elite → nothing charged; else the soonest-
+expiring unconsumed grace token with `expiresAt >= session.date` →
+`booking.graceTokenId`, `chargedFrom: 'grace'`; else the period
+(`chargedFrom: 'period'`). Rules on a booking create carrying
+`graceTokenId`: one `get()` of the grace doc — its `athleteId` matches and
+`expiresAt >= request.resource.data.date`. Minting triggers are exactly
+two: (1) staff CANCEL SESSION — a new ops/owner action on the attendance
+screen: `sessions.status → 'cancelled'`, every confirmed booking on it →
+`cancelled` with `cancelledBy` = the staff uid and `cancelReason:
+'session-cancelled'`, one grace token per cancelled booking. Client-side,
+in chunked batches of at most 8 writes (the rules' ~20-document-access cap
+per batch, Sprint 10), idempotent: already-cancelled bookings are skipped
+and an athlete who already holds a grace token with this `sourceSessionId`
+is not minted twice. (2) the waitlist expiry sweep (F). An athlete's own
+cancellation, leaving a waitlist, or revocation mints nothing.
+
+**F. WAITLIST.** `waitlist/{sessionId}_{athleteId}`: `{ sessionId,
+athleteId, householdId, date, periodKey, joinedAt, createdBy }`. Member
+create (own athlete / household parent) — rules `get()` the session and
+require `booked >= capacity` and `status == 'scheduled'`, and (H) the
+household's membership not past_due/lapsed; member delete (leave); admin
+delete (promote / expire). `tokensFor`'s `reserved` counts entries with the
+periodKey; Elite is unlimited anyway. Index `waitlist (sessionId,
+joinedAt)` already exists. `useBooking().book()` on a full session joins
+the waitlist and resolves `{ status: 'waitlisted' }`. PROMOTION IS SERVER-
+SIDE (functions lane): a trigger on `sessions/{id}` update where `booked`
+decreased, `status == 'scheduled'` and `booked < capacity` picks the head —
+entries whose athlete holds an unconsumed, unexpired grace token first
+(soonest expiry), then `joinedAt` asc — replicates the gates under admin
+(membership active; period cap unless Elite, counting exactly as
+`tokensFor` does; grace-first charge), creates the booking
+`{ athleteId, sessionId, householdId, date, type, status: 'confirmed',
+periodKey, graceTokenId | null, chargedFrom, createdBy: 'system',
+promotedFromWaitlist: true, createdAt }` (no `pool`), `sessions.booked + 1`,
+deletes the entry, and notifies through the Courier helper (the athlete's
+and the household parent's users docs for email/phone). Repeats while seats
+and entries remain. Entries that fail a gate are deleted with no grace
+token. AUTO-CONFIRM, no acceptance window. Expiry sweep:
+`scripts/sweep-waitlist.mjs` (db lane; the sync's sanctioned-writer auth;
+`--dry-run` default, `--yes` writes; `FIRESTORE_EMULATOR_HOST` for the
+emulator): entries with `date < today` → delete + mint one grace token
+(reason 'waitlist-expired', createdBy 'sweep').
+
+**G. CANCELLATION REASONS.** `bookings` gain optional `cancelledBy` (uid |
+'system') and `cancelReason` ('member' | 'session-cancelled' | 'lapsed' |
+'downgrade'). A member's own cancel writes `cancelledBy` = uid and
+`cancelReason: 'member'` (the member confirmed→cancelled rules branch's
+hasOnly grows by exactly these two). Rows render a reason line for the
+system reasons; the client gate stays "until the day before".
+
+**H. MEMBERSHIP STATUS + STRIPE.** `households.membership`: `{ status:
+'active' | 'past_due' | 'lapsed', stripeSubscriptionStatus,
+currentPeriodStart, currentPeriodEnd, lastEventId, updatedAt }` — absent ==
+active; admin SDK only, no client write clause. `households.stripeCustomerId`
+and `stripeSubscriptionId` become ops/owner-settable through the household
+settings branch (hasOnly grows by them) so events resolve to a household:
+`where stripeCustomerId == event.data.object.customer`; an unmatched event
+is recorded and skipped, never thrown. `packages.stripePriceId` (string |
+null, ops-set through the provisioner catalogue for now) maps Stripe prices
+to packages. Rules on booking create AND waitlist create: one `get()` of
+the household; deny when `membership.status` is 'past_due' or 'lapsed'
+(null-safe) — the freeze, enforced server-side.
+
+Stripe handler (functions lane): `stripeWebhook`, an `onRequest` reading
+the raw body, verifying the signature with `STRIPE_WEBHOOK_SECRET`,
+idempotent on `event.id` via `stripeEvents/{eventId}` `{ type, customer,
+householdId | null, receivedAt, outcome }` written in the same transaction
+as its effect (clients: no access). Actions:
+- `invoice.paid` → resolve the household; for each of its athletes with a
+  token package: create `tokenPeriods` for the invoice line's period
+  (`periodKey` = the Stripe period start as an America/Chicago date), with
+  `granted` = the package's tokens, `source 'stripe'`, `eventId`; set
+  `households.periodAnchorDay` to that start's day-of-month clamped 1..28
+  (so the app's derived periods align with Stripe); set membership
+  `active` and the period fields. Elite athletes: no doc. Reinstatement
+  (paid after lapsed) is the same action; revoked bookings stay cancelled.
+- `invoice.payment_failed` → `past_due` (idempotent across retries).
+- `invoice.payment_failed` with `next_payment_attempt == null`, or
+  `customer.subscription.deleted` → `lapsed` + REVOKE: every household
+  booking with `date > today` and `status 'confirmed'` → `cancelled`,
+  `cancelledBy 'system'`, `cancelReason 'lapsed'`, `sessions.booked - 1`
+  each (which fires promotion); delete the household's waitlist entries.
+- `customer.subscription.updated` with a price change → map the new price
+  to a package via `packages.stripePriceId`; update `athletes.packageId`
+  for the household's athletes (unmapped price: record and skip); future-
+  period bookings beyond the new grant are cancelled newest-first with
+  `cancelReason 'downgrade'`.
+Daily export `scripts/export-memberships.mjs` (db lane): one row per
+household — app status, live `subscription.status` from the Stripe API
+(`STRIPE_SECRET_KEY` from the environment, read-only), period dates, per-
+athlete granted/used/reserved/grace, open bookings and waitlist entries,
+`MISMATCH` when app status and Stripe disagree; CSV to stdout; in emulator
+mode (`FIRESTORE_EMULATOR_HOST`) the Stripe column reads `skipped`.
+
+**I. FUNCTIONS DEPLOYABILITY** (functions lane): `npm --prefix functions
+run lint` must pass — align the ESLint quotes rule to the file's single-
+quote convention rather than rewriting the file, and fix whatever else lint
+reports. `firebase.json` gains the functions emulator (port 5001). Secrets
+never enter the repo: `functions/.env` is gitignored; `env.template` gains
+`STRIPE_WEBHOOK_SECRET`; the emulator runs on a local `.env` with test
+values. Files under `functions/` stay under 500 lines: `functions/portal/
+stripe.js`, `functions/portal/promotion.js`, `functions/portal/lib.js`
+(period math and the charge order mirrored from `data/packages.js` — change
+one, change both), `index.js` re-exporting them next to the kept helpers.
+
+### Hook seam (routing owns; frontend codes against)
+
+- `useMembership()`: `household` gains `membership: { status,
+  currentPeriodEnd } | null` (null == active) and `stripeCustomerId`;
+  `members[].tokens.grace` lists live grace tokens `[{ id, expiresAt,
+  reason }]`; `tokens.granted` reads the `tokenPeriods` doc when present;
+  `tokens.used` excludes grace-charged bookings (seam amendment).
+- `useBooking().book()` resolves `{ status: 'confirmed' | 'waitlisted',
+  chargedFrom: 'elite' | 'grace' | 'period' | null }`; reasons gain
+  `'membership-inactive'`.
+- New `useWaitlist(sessionId, { athleteId })` → `{ entry, position (1-based
+  by joinedAt), join(), leave(), saving, error }`.
+- `useSchedule` / `useHouseholdReservations` / `useMonthSessions` items:
+  `status` gains `'waitlisted'` (entries merged in, with `waitlistPosition`);
+  cancelled items carry `cancelReason` and `cancelledBy`.
+- `useSessionAttendance` (staff) gains `sessionStatus` and
+  `cancelSession(sessionId)` (E's chunked, idempotent client action).
+- New `useIssueTokens()` → `{ issue(athleteId, periodKey, granted), saving,
+  error }` (ops/owner).
+- `useHouseholdSettings(householdId)` gains `setStripeIds({ stripeCustomerId,
+  stripeSubscriptionId })`.
+- `useAdminDashboard` gains `membership: { active, pastDue, lapsed,
+  lapsedHouseholds: [{ id, name }] }`.
+
+### UI (frontend lane)
+
+- Membership.js: a status line per household — active: nothing loud;
+  past_due: "Payment didn't go through — new bookings are paused until it
+  clears; everything already booked is kept"; lapsed: "Membership lapsed —
+  upcoming bookings were released. Once payment resumes, book again from
+  what's open." The grace line shows the reason ("bonus token — the Nov 9
+  block was cancelled — expires <date>"). The word "billing" stays off
+  every live member surface.
+- BookSession / SpecialistBooking: a full session offers "Join waitlist ·
+  reserves one token" instead of a dead Full pill; the confirmation state
+  for a waitlisted booking says its position; the reason map gains
+  'membership-inactive' copy that points at Membership.
+- MySchedule / Reservations: a `waitlisted` row state (position + "Leave
+  waitlist"), and cancelled rows show the system reason line.
+- SessionAttendance / Roster (ops/owner): "Cancel session" behind a confirm
+  sheet that states how many bookings will be cancelled and how many grace
+  tokens minted; the session then renders as cancelled.
+- AthleteMembershipCard (ops/owner): "Issue tokens" (period: this / next,
+  granted prefilled from the package, source ops) with a SavedToast; the
+  household's Stripe customer / subscription id fields.
+- AdminDashboard: "Membership" card — active / past due / lapsed counts and
+  the lapsed households list.
+- StatesHarness entries for every state above.
+
+### DB lane
+
+- DATA-MODEL v2.1: the four Part 2 collections as built (C, E, F, H),
+  `bookings.cancelledBy` / `cancelReason`, `households.membership`,
+  `packages.stripePriceId`, and the index reasoning.
+- seed-firestore.mjs: jordan gets a `tokenPeriods` doc for the current
+  period (granted 12, source 'stripe', a fake eventId) and reese an
+  unconsumed grace token (reason 'session-cancelled', expiring in 20 days);
+  ONE seed-only full session — capacity 2, booked by jordan and reese, with
+  nico waitlisted — flagged in a comment as the one exception to the 15 cap
+  so the waitlist state is exercisable; `households.membership` absent on
+  whitfield (active) and `{ status: 'past_due' }` on parker; one
+  `stripeEvents` doc; a cancelled booking carrying `cancelReason
+  'session-cancelled'`.
+- firestore.indexes.json: `graceTokens (athleteId, expiresAt)`; say
+  explicitly which existing indexes serve the revoke and export queries.
+- scripts/sweep-waitlist.mjs and scripts/export-memberships.mjs as in F and
+  H, on `scripts/lib/prod-auth.mjs` like the sync, dry-run by default.
+- provision-family.mjs: unchanged except the catalogue bundle carrying
+  `stripePriceId: null` if the seam adds it (say so).
+
+### Functions lane (new)
+
+`functions/index.js` + `functions/portal/*` per H, F and I. Verification in
+an ISOLATED emulator: a scratch `firebase.functions-lane.json` (not
+committed) on ports 8082 firestore / 9098 auth / 5001 functions / 4401 hub,
+started with `--config`, so the shared instance on 8080/9099 is untouched;
+signed Stripe test events built with
+`stripe.webhooks.generateTestHeaderString` (no Stripe CLI on this machine)
+posted to the emulated `stripeWebhook`; promotion exercised by writing a
+full session + waitlist entries through the admin SDK against 8082 and
+decrementing `booked`. Report the exact event sequence tested. Deploy is
+owner-gated (`firebase deploy --only functions`) and last; the Stripe
+dashboard endpoint + secret are the owner's.
+
+### Sequencing
+
+C → E → G → F → H in db and routing (the rules and the charge order are
+what every screen reads); frontend builds to the seam shapes and reports
+every fallback; functions works independently and lands last. Report what
+is NOT done rather than rush it.
+
+Worktrees: wt-db / wt-routing / wt-frontend / wt-functions on
+`agent/<lane>/sprint13-part2` off `portal/r3` at this pin's commit; PM
+merges db → routing → frontend → functions, integrates, browser-passes on
+:3001 (client) and replays the functions lane's event sequence (server).
