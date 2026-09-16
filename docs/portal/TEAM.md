@@ -2118,3 +2118,174 @@ nothing - a safe rollout. The daily scripts: `node scripts/export-
 memberships.mjs --prod` (read-only; STRIPE_SECRET_KEY for live status)
 and `node scripts/sweep-waitlist.mjs --prod --yes` (writes; dry-run
 without --yes).
+
+## Owner UX pass — Mike's parent-account notes (2026-09-16, PM, commit 3ed773a)
+
+Source: Mike's Slack DM notes from testing the parent account on
+production the afternoon of 2026-09-16. Six of eight referred to
+screenshots the PM could not open (Claude in Chrome was offline), so the
+mapping below is inferred from the message text and the parent screens.
+
+1. "Do I need a profile view to set my phone/email for notifications?" →
+   Settings (retitled from "Notifications") gains a Profile card: the sign-in
+   email read-only and a self-service mobile phone, saved as `users.phone`
+   (the second and last member self-write; rules hasOnly notificationPrefs +
+   phone, ≤ 32 chars, null clears). The Part 2 promotion notifier already
+   reads `phone` — this is what text notices send to.
+2. "Should this be three boxes — Golf / PT / Mental? Not all of Phil's will
+   be 1-on-1" and "when I click Book a session should it go to an
+   intermediate page with those options, or show them here?" → one
+   BookChooser (golf session / performance session with Phil / mental game
+   session with Yannick) inline on both home screens, and as a sheet off a
+   kid's own "Book a session" on the parent home ("Book for Reese"). Each
+   option deep-links with the kid and, for specialists, the specialist
+   preselected (routes read athleteId / specialistId off navigation state;
+   SpecialistBooking gains `initialSpecialist`). "1-on-1 coaching" is gone
+   as an entry point; the coaching picker is titled "Coaching". The athlete
+   home's quick actions collapse to "Log today".
+3. "Can we have a back button on all of this?" → Back links on the coaching
+   picker and Book a Session (role-aware: parents return to the family home,
+   athletes to their schedule). Tab-root screens keep the tab bar only.
+4. "Is this kid name intentional? (tutorial)" → the walkthrough runs on the
+   sample Whitfield family by design (practice mode pins seed data, writes
+   nothing); it now says so — a "Sample family" badge beside "Practice" and
+   the intro copy names the Whitfields and points at Home for the real kids.
+5. "This button is not clickable — again" → not identified. The four
+   chevron rows on the parent flow were audited and all carry handlers;
+   the screenshot is needed.
+
+Verified on :3001 (parent-dana, athlete-jordan): the chooser, the per-kid
+sheet landing on Phil with Reese preselected (her balance shown), both
+Back links, the phone save (doc verified, reset), the athlete home, the
+walkthrough badges. Deploy: push + rules (the phone self-write branch).
+
+## Sprint 14 pins — notifications (2026-09-16)
+
+Origin: the owner (2026-09-16): "we need to build out a notification
+system, for waitlist, session reminders, package expiry reminders, etc."
+Built on what exists: `functions/portal/notify.js` (Courier helper,
+`recipientsForAthlete` = the athlete's own users doc + the household's
+parents), the Twilio `sendSms` helper in `functions/index.js`, the Part 2
+promotion notice, `users.notificationPrefs` (categories billing · schedule
+· newsletter · progress) and the new `users.phone` (owner UX pass).
+DEPLOY DEPENDENCY: every sender runs in Cloud Functions, which need the
+project on Blaze — parked by the owner. This sprint builds and verifies in
+the emulator; it goes live with the functions deploy.
+
+Design keystones:
+- SENDING IS SERVER-SIDE ONLY. No client ever sends, and no provider key
+  ever reaches the client bundle. Email through Courier, SMS through the
+  Twilio helper; each is skipped (recorded as 'skipped') when its key is
+  not configured, so the pipeline is testable with neither.
+- PREFERENCE-AWARE, PHONE-AWARE. Every notice carries a `category` mapped
+  onto the existing `notificationPrefs` ids; a channel sends only when the
+  recipient's preference for that category allows it (absent == the
+  category's default in `data/parent.js` — mirror the defaults server-side,
+  change one, change both), and SMS only when the recipient has a `phone`.
+  `billing` stays locked-on (transactional): membership status and token
+  expiry always reach at least email.
+- LEDGER-IDEMPOTENT. `notifications/{id}` is written once per event with a
+  deterministic id (below) inside the send; a scheduled job that runs twice
+  sends nothing twice. The ledger is the audit and, read-only, the in-app
+  "Recent notices" list.
+- DERIVE, DON'T STORE (unchanged): "tokens expiring" is computed from the
+  same period math as the app (`functions/portal/lib.js` mirrors
+  `data/packages.js`); nothing new is counted or cached.
+
+### Data contract v2.2 (PM documents; functions lane writes)
+
+`notifications/{id}`: `{ kind, category, householdId, athleteId | null,
+sessionId | null, bookingId | null, subjectKey (the deterministic key),
+title, body, recipients: [{ uid, email: 'sent' | 'skipped' | 'failed' |
+'off', sms: 'sent' | 'skipped' | 'failed' | 'off' | 'no-phone' }],
+sentAt, createdAt }`. Written by the functions under the admin SDK only.
+Rules: parent/athlete read where `householdId` == theirs (one get() of the
+athlete for an athlete user, `me().householdId` for a parent); ops/owner
+read all; no client write. Index `notifications (householdId ASC,
+createdAt DESC)`.
+
+Deterministic ids (`{kind}_{subject}`): `booking-confirmed_{bookingId}`,
+`promoted_{bookingId}`, `session-cancelled_{bookingId}`,
+`booking-revoked_{bookingId}` (lapsed / downgrade), `reminder-24h_{bookingId}`,
+`tokens-expiring_{athleteId}_{periodKey}`, `grace-expiring_{graceTokenId}`,
+`membership_{householdId}_{eventId}`.
+
+### Kinds (functions lane)
+
+| kind | category | trigger | recipients | copy (ad-hoc when no Courier template) |
+|---|---|---|---|---|
+| booking-confirmed | schedule | Firestore onCreate `bookings` with status 'confirmed' (client-created or promotion) | athlete + parents | "<Name> is booked: <session label>, <day> at <time>." |
+| promoted | schedule | the Part 2 promotion trigger — rewire `notifyWaitlistPromotion` onto this pipeline (same ledger, same gating) | athlete + parents | "A spot opened — <Name> is now booked for <session>, <day> at <time>." |
+| session-cancelled | schedule | onUpdate `bookings`: confirmed → cancelled with cancelReason 'session-cancelled' | athlete + parents | "<session> on <day> was cancelled by the academy. A bonus token was added to <Name>'s account (expires <date>)." |
+| booking-revoked | billing | onUpdate `bookings`: → cancelled with cancelReason 'lapsed' \| 'downgrade' — ONE notice per household per event (group by cancelledAt minute), not one per booking | parents | "<N> upcoming bookings were released because <reason>. Book again once payment resumes." |
+| reminder-24h | schedule | scheduled daily 17:00 America/Chicago: confirmed bookings dated tomorrow | athlete + parents | "Reminder: <Name> has <session> tomorrow at <time>." |
+| tokens-expiring | billing | scheduled daily 09:00 America/Chicago: athletes on a token package whose current period ends in exactly 3 days with `left > 0` (tokensFor mirror, grace excluded) | parents | "<Name> has <N> tokens left that expire <date>. Book before then." |
+| grace-expiring | billing | same job: unconsumed grace tokens expiring in exactly 3 days | parents | "<Name>'s bonus token expires <date>." |
+| membership | billing | onUpdate `households` when `membership.status` changes | parents | past_due: "A payment didn't go through — new bookings are paused until it clears." lapsed: "Membership lapsed — upcoming bookings were released." active after lapsed/past_due: "Payment received — booking is open again." |
+
+Scheduled jobs use the v1 API (`functions.pubsub.schedule(...).timeZone(
+'America/Chicago')`, matching the explicit `/v1` import). Each job's body
+is an exported plain function `runX({ now, db })` so the emulator harness
+can call it with a fixed clock; a second call with the same clock sends
+nothing (ledger). SMS never goes out before 08:00 or after 21:00 Chicago
+(defer to the next job run; reminders at 17:00 always qualify).
+Recipient/channel resolution lives in one place (`notify.js`):
+`sendNotice({ kind, category, householdId, athleteId, sessionId,
+bookingId, subjectKey, title, body })` resolves recipients, applies prefs
+and phone, sends per channel, writes the ledger doc, and returns it.
+Templates: `COURIER_EVENT_<KIND>` env per kind when set, else ad-hoc
+content — the same fallback the helper already has.
+
+Files: `functions/portal/notify.js` (sendNotice + gating; may grow past
+its current size — split `notify-send.js` / `notify-recipients.js` if it
+nears 500), `functions/portal/notices.js` (the per-kind copy builders),
+`functions/portal/jobs.js` (the two scheduled jobs' bodies),
+`functions/index.js` (exports: onBookingCreated replacing
+onBookingCreateNotifyChild, onBookingCancelled, onHouseholdMembership,
+sessionReminders, tokenExpiryReminders), `functions/env.template` (new
+COURIER_EVENT_* keys). `functions/portal/promotion.js` calls sendNotice.
+Delete the 2025 `onBookingCreateNotifyChild` (it reads `parentId` /
+`userId` / `childId` fields no v1+ booking carries).
+
+Verification (isolated emulator, `firebase.functions-lane.json`):
+`functions/test/verify-notifications.js` seeds households (one parent
+with phone, one without; one athlete user), athletes, sessions, bookings,
+a grace token; asserts a ledger doc with the expected recipients and
+per-channel outcomes for: a client booking create, a promotion, a staff
+session cancel, a lapse revoke (one household notice), the reminder job
+at a fixed clock (one per tomorrow booking; idempotent on re-run), the
+expiry job (tokens and grace, exactly 3 days out; nothing at 4), and a
+membership status flip. Courier and Twilio unconfigured → every channel
+'skipped' or 'off'/'no-phone' exactly per prefs. Report the sequence.
+
+### PM (this sprint's client and data pieces)
+
+- DATA-MODEL v2.2: the `notifications` table, the index, the kinds.
+- firestore.rules: `notifications` read own household / staff; deny writes.
+- `data/parent.js` category copy: billing → "Membership & tokens — payment
+  problems, token expiry, membership changes (always on)"; schedule →
+  "Sessions — confirmations, reminders, waitlist spots, cancellations".
+- Settings: a "Recent notices" list (last 10 ledger rows for the
+  household, title + relative time), read-only — the in-app inbox.
+- `scripts/seed-firestore.mjs`: three seeded notices for the Whitfields.
+
+### Open — owner rulings
+1. Reminder timing: 24 hours ahead at 17:00 Chicago as pinned, or morning-of.
+2. Expiry warning lead: 3 days as pinned.
+3. Whether members should also get a notice for their own cancellation
+   (not sent in v1).
+4. Progress/check-in notices (`checkin-due` when the Yannick cadence is
+   overdue) — not in v1; needs the cadence ruling first.
+
+Implementation notes (PM, after reading the current functions):
+- `profileFor` already reads `users.phone` (and the 2025 `phoneNumber`).
+- `sendSms` + `logSMS` move from index.js into `notify.js` (or a small
+  `sms.js`) with the Twilio client resolved LAZILY like `courier()` — no
+  key, no client, outcome 'skipped'. `handleSMSResponse` keeps using it.
+- `notificationPrefs` is `{ <categoryId>: { email, sms } }` or null (see
+  DATA-MODEL users). Defaults to mirror: billing email+sms, schedule
+  email+sms, newsletter email only, progress email only. Billing: email
+  always sends (locked); sms per pref.
+- `cleanupSMSLogs` shows the v1 `pubsub.schedule` shape; add `.timeZone`.
+- Copy builders take the session doc (`label`, `date`, `time`, `type`) and
+  the athlete's `firstName`; never the booking's 2025 fields.
