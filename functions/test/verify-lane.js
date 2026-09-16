@@ -65,7 +65,8 @@ async function waitFor(fn, label, timeoutMs = 20000) {
 }
 async function wipe() {
   for (const c of ['households', 'athletes', 'packages', 'sessions', 'bookings',
-    'waitlist', 'graceTokens', 'tokenPeriods', 'stripeEvents', 'users']) {
+    'waitlist', 'graceTokens', 'tokenPeriods', 'stripeEvents', 'users',
+    'notifications']) {
     const snap = await db.collection(c).get();
     await Promise.all(snap.docs.map((d) => d.ref.delete()));
   }
