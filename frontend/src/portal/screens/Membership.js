@@ -225,8 +225,8 @@ function EliteCard({ pkg }) {
 /**
  * "Yannick: 1 of 1 this month" — the mental frequency knob (pin K,
  * SPECIALIST_MONTHLY_CAP.mental). A line, not a card, per the pin's own
- * layout. See this file's header INTEGRATION note: `member.coaching` is not
- * yet a field the pinned useMembership() hook seam returns.
+ * layout. `member.coaching` is derived by useMembership() (Sprint 12
+ * integration).
  */
 function CoachingLine({ coaching }) {
   if (!coaching) return null;

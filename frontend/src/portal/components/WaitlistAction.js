@@ -13,12 +13,8 @@ import { Body, Card, ScreenTitle, Tick } from './Primitives';
  * `useWaitlist(sessionId, { athleteId })` (the position/leave() source) is a
  * NEW hook that does not exist in this worktree's hooks/index.js yet — every
  * caller of `WaitlistPositionLine`/`LeaveWaitlistButton` marks its own call
- * site with an `// INTEGRATION: wire useWaitlist` comment, per TEAM.md's
- * Sprint 11/12 lesson (do not build against a missing named export). Joining
- * a full session rides the EXISTING `useBooking().book()` call instead (the
- * pin's own "via book() resolving { status: 'waitlisted' } — or
- * useWaitlist(...).join()" — book() is the already-real path), so
- * `JoinWaitlistButton` below is a plain, hook-free button.
+ * Wired to hooks/waitlist.js (leaveWaitlist) and the booking result's
+ * position at Sprint 13 integration.
  */
 
 /**
@@ -63,10 +59,9 @@ export function LeaveWaitlistButton({ onClick, loading, style }) {
 /**
  * "You're #N on the waitlist." Degrades to a generic line when `position` is
  * unknown rather than inventing a number — every call site currently reads
- * `position` off either the pinned `waitlistPosition` field on a schedule/
- * reservation item (an EXISTING hook's changed payload — see MySchedule.js/
- * Reservations.js) or a not-yet-wired `useWaitlist(...).position` (NEW hook —
- * see BookSession.js/SpecialistBooking.js's own INTEGRATION comment).
+ * `position` off the pinned `waitlistPosition` field on a schedule/
+ * reservation item, or the booking result's `position` on the confirmation
+ * screens (Sprint 13 integration).
  */
 export function WaitlistPositionLine({ position, style }) {
   return (

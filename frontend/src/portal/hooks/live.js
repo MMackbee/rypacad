@@ -442,6 +442,7 @@ export async function joinWaitlist({ sessionId, athleteId, householdId, date, pe
       createdBy: user.uid,
     });
     bump('waitlist');
+    bump('bookings'); // the schedule/reservations lists subscribe to bookings
     return { id, sessionId, athleteId, householdId, date, periodKey };
   } catch (err) {
     throw wrap(err, 'joinWaitlist');
@@ -546,9 +547,11 @@ function assertMentalCadence(type, date, bookings) {
  * cap this function enforces never disagrees with what the token card
  * displays as spent.
  */
-function assertPeriodTokensLeft(pkg, bookings, periodKey) {
+function assertPeriodTokensLeft(pkg, bookings, periodKey, issuedGrant) {
   if (!pkg || pkg.tokens !== null) {
-    const granted = pkg ? pkg.tokens ?? 0 : 0;
+    // Contract v2.1 pin C: an issued tokenPeriods doc (Stripe or ops) is the
+    // grant when it exists; the package's own tokens are the fallback.
+    const granted = pkg ? issuedGrant ?? pkg.tokens ?? 0 : 0;
     const used = (bookings || []).filter(
       (b) => b.status !== 'cancelled' && b.periodKey === periodKey && !b.graceTokenId
     ).length;
@@ -624,7 +627,9 @@ export async function createBooking(
       chargedFrom = 'grace';
       graceTokenId = grace.id;
     } else if (!skipCapCheck) {
-      assertPeriodTokensLeft(pkg, bookings, periodKey);
+      const issued = await getDoc(doc(db, 'tokenPeriods', `${athleteId}_${periodKey}`)).catch(() => null);
+      const issuedGrant = issued && issued.exists() ? issued.data().granted : undefined;
+      assertPeriodTokensLeft(pkg, bookings, periodKey, issuedGrant);
     }
   }
 
@@ -743,6 +748,7 @@ export async function createBooking(
       // joinWaitlist bumps 'waitlist' itself on success - nothing more to
       // invalidate here (no bookings/sessions write happened on this path).
       const entry = await joinWaitlist({ sessionId, athleteId, householdId, date, periodKey });
+      const queue = await getDocs(query(collection(db, 'waitlist'), where('sessionId', '==', sessionId))).catch(() => null);
       return {
         id: entry.id,
         athleteId,
@@ -752,6 +758,7 @@ export async function createBooking(
         householdId,
         status: 'waitlisted',
         chargedFrom: null,
+        position: queue ? queue.size : null,
       };
     }
     throw wrap(err, 'createBooking');

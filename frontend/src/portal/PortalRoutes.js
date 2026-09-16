@@ -375,6 +375,11 @@ function CoachDashboardRoute({ onSignOut, onOpenAthlete }) {
 function SessionAttendanceRoute({ onBack }) {
   const { state } = useLocation();
   const navigate = useNavigate();
+  // Sprint 13 pin E: "Cancel session" is ops/owner-only, so the screen needs
+  // the signed-in role (the coach default keeps every existing caller as is).
+  const live = isLive();
+  const { user } = useAuthSession(live ? undefined : { variant: 'idle' });
+  const role = live ? user?.role ?? 'coach' : 'coach';
   // v1.7.1: a specialist arrives from /portal/my-sessions and must return
   // there, not to the golf coach's dashboard — the caller says so via
   // navigation state; the coach flow's fixed back target is unchanged.
@@ -386,6 +391,7 @@ function SessionAttendanceRoute({ onBack }) {
       blockIndex={state?.blockIndex ?? undefined}
       sessionId={state?.sessionId ?? undefined}
       block={state?.block ?? undefined}
+      role={role}
     />
   );
 }

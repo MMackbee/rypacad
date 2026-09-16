@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { color, font } from '../tokens';
-import { useAssignPackages, useHouseholdSettings } from '../hooks';
+import { useAssignPackages, useHouseholdSettings, useIssueTokens } from '../hooks';
 import Button from './Button';
 import Field, { SelectField } from './Field';
 import NumericField from './NumericField';
@@ -34,10 +34,8 @@ import { addDaysISO, todayISO } from '../data/calendar';
  * off the athlete's own periodAnchorDay, since useAthleteDetail's payload
  * carries no periodKey/nextPeriod field of its own), granted prefilled from
  * the assigned package's `tokens`. Hidden for Elite (tokens: null - contract
- * §C: "Elite athletes get no doc"). INTEGRATION: useIssueTokens() is a NEW
- * hook, not in this worktree's hooks/index.js yet - see IssueTokensEditor's
- * own comment (TEAM.md's Sprint 11/12 lesson: do not import a missing named
- * export). The household's Stripe customer/subscription id fields (pin H)
+ * §C: "Elite athletes get no doc"). Issues through useIssueTokens() (routing
+ * lane; wired at Sprint 13 integration). The household's Stripe customer/subscription id fields (pin H)
  * save through useHouseholdSettings(householdId).setStripeIds(...) - an
  * EXISTING hook gaining a method, coded directly per the same lesson's other
  * half, same as setPeriodAnchorDay above.
@@ -191,6 +189,7 @@ function IssueTokensEditor({ athleteId, packageId, anchorDay }) {
   const [issuing, setIssuing] = useState(false);
   const [saved, setSaved] = useState(false);
   const [error, setError] = useState(null);
+  const issueState = useIssueTokens();
 
   if (!pkg || pkg.tokens === null) return null;
 
@@ -199,10 +198,7 @@ function IssueTokensEditor({ athleteId, packageId, anchorDay }) {
     setError(null);
     setSaved(false);
     try {
-      // INTEGRATION: wire useIssueTokens().issue(athleteId, periodKey,
-      // granted) — NEW hook, not in this worktree's hooks/index.js yet.
-      // await useIssueTokens().issue(athleteId, periodKey, granted);
-      await Promise.resolve({ athleteId, periodKey, granted });
+      await issueState.issue(athleteId, periodKey, granted);
       setSaved(true);
       setTimeout(() => setSaved(false), 2600);
     } catch (err) {
@@ -313,9 +309,7 @@ function StripeIdsEditor({ householdId }) {
 
 /**
  * Period anchor day (1-28) — the household's token-period start (contract
- * v2.0 pin B). See this file's header INTEGRATION note: useHouseholdSettings
- * does not exist in this worktree's hooks yet, so this control runs on a
- * local fixture rather than a real write.
+ * v2.0 pin B), written through useHouseholdSettings(householdId).
  */
 function PeriodAnchorEditor({ householdId, initialAnchorDay }) {
   const [anchorDay, setAnchorDay] = useState(initialAnchorDay);

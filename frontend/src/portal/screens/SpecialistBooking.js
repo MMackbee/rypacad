@@ -214,10 +214,8 @@ export default function SpecialistBooking({
     booking.book({ id: slot.sessionId, date: slot.date, type: specialistId }, opts);
   const disabledForNoAthlete = isParent && !selectedAthleteId;
 
-  // Pin K: an ordinary token now. `capReached` (Yannick's flat monthly cap)
-  // reads an optional slotsState.data.capReached, absent in the pinned hook
-  // seam today (INTEGRATION gap like Membership.js's `coaching` field) —
-  // degrades to "not reached"; `demoCapReached` is the harness override.
+  // Pin K: an ordinary token now. `capReached` is the hook's own mental
+  // frequency flag; `demoCapReached` is the harness override.
   const tokens = slotsState.data?.tokens ?? null;
   const capReached =
     demoCapReached != null ? demoCapReached : specialistId === 'mental' && Boolean(slotsState.data?.capReached);
@@ -237,7 +235,14 @@ export default function SpecialistBooking({
         setReserving(null);
         setSheetSlot(null);
         // Pin F: book() resolves { status: 'waitlisted' } for a full slot.
-        setBooked({ specialist, date: slot.date, time: slot.time, tokens, waitlisted: result && result.status === 'waitlisted' });
+        setBooked({
+          specialist,
+          date: slot.date,
+          time: slot.time,
+          tokens,
+          waitlisted: result && result.status === 'waitlisted',
+          position: result && result.position != null ? result.position : null,
+        });
       })
       .catch((err) => {
         setReserving(null);
@@ -718,13 +723,12 @@ function Confirmed({ bare, booked, onBack }) {
         }}
       >
         {booked.waitlisted ? (
-          // Pin F: book() resolved { status: 'waitlisted' } for a full slot -
-          // INTEGRATION: wire useWaitlist(booked.sessionId, { athleteId })
-          // .position - NEW hook, not in hooks/index.js yet.
+          // Pin F: book() resolved { status: 'waitlisted', position } for a
+          // full slot.
           <WaitlistedConfirmationBody
             name={booked.specialist.sessionNoun}
             when={`${longDayLabel(booked.date)} · ${booked.time}`}
-            position={null}
+            position={booked.position ?? null}
           />
         ) : (
           <>

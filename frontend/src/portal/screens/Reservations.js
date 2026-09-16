@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { color, font } from '../tokens';
 import { useHouseholdReservations } from '../hooks';
+import { leaveWaitlist } from '../hooks/waitlist';
 import BottomTabBar from '../components/BottomTabBar';
 import Button from '../components/Button';
 import CancelSheet from '../components/CancelSheet';
@@ -44,14 +45,13 @@ export default function Reservations({ variant = 'populated', bare = false, onBo
   const hookState = useHouseholdReservations();
   const [tab, setTab] = useState('upcoming');
   const [cancelTarget, setCancelTarget] = useState(null);
-  // Mirrors MySchedule's own leave-waitlist state — see its INTEGRATION note.
+  // Mirrors MySchedule's leave-waitlist state; the write bumps bookings, so
+  // the household list refreshes through its own seam.
   const [leavingId, setLeavingId] = useState(null);
   const handleLeaveWaitlist = async (item) => {
-    setLeavingId(item.bookingId);
+    setLeavingId(item.bookingId ?? `${item.athleteId}_${item.id}`);
     try {
-      // INTEGRATION: wire useWaitlist(item.sessionId, { athleteId:
-      // item.athleteId }).leave() — NEW hook, not in hooks/index.js yet.
-      await Promise.resolve();
+      await leaveWaitlist({ sessionId: item.sessionId ?? item.id, athleteId: item.athleteId });
     } finally {
       setLeavingId(null);
     }
@@ -187,7 +187,7 @@ function MemberList({ items, past, onBook, onCancelRequest, onLeaveWaitlist, lea
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
                   <WaitlistPositionLine position={item.waitlistPosition} />
                   <LeaveWaitlistButton
-                    loading={leavingId === item.bookingId}
+                    loading={leavingId != null && leavingId === (item.bookingId ?? `${item.athleteId}_${item.id}`)}
                     onClick={() => onLeaveWaitlist(item)}
                   />
                 </div>

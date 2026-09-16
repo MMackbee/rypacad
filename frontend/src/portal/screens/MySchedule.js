@@ -14,6 +14,7 @@ import AllowancePools, { GraceLine } from '../components/AllowancePools';
 import SkeletonCard, { SkeletonBar, SkeletonSessionCard } from '../components/Skeleton';
 import { Banner, Body, Card, ErrorNotice, ScreenTitle, SectionLabel } from '../components/Primitives';
 import { useSchedule } from '../hooks';
+import { leaveWaitlist } from '../hooks/waitlist';
 // Pure calendar helper, not response data - same seam rule BookSession and
 // CommitmentContract already follow (see their own imports of this module).
 import { todayISO } from '../data/calendar';
@@ -120,18 +121,13 @@ export default function MySchedule({
       throw new Error('Cancelling is not available yet.');
     });
 
-  /**
-   * "Leave waitlist" (Sprint 13 pin F). INTEGRATION: wire
-   * useWaitlist(item.sessionId, { athleteId }).leave() — NEW hook, not in
-   * this worktree's hooks/index.js yet (do not import it per TEAM.md's
-   * Sprint 11/12 lesson on missing named exports). A local echo stands in
-   * until it lands, same honest-inline-error posture as `cancel` above.
-   */
+  // "Leave waitlist" (Sprint 13 pin F): the waitlisted row carries the
+  // session id (`id`) and the athlete it belongs to; the write bumps
+  // bookings, so this list refreshes through its own seam.
   const handleLeaveWaitlist = async (item) => {
-    setLeavingId(item.bookingId);
+    setLeavingId(item.bookingId ?? item.id);
     try {
-      // await useWaitlist(item.sessionId, { athleteId }).leave();
-      await Promise.resolve();
+      await leaveWaitlist({ sessionId: item.sessionId ?? item.id, athleteId: item.athleteId });
     } finally {
       setLeavingId(null);
     }
@@ -289,7 +285,7 @@ function ScheduleBody({ past, sessions, cancelled, tokens, days, onBook, onCance
                       <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
                         <WaitlistPositionLine position={s.waitlistPosition} />
                         <LeaveWaitlistButton
-                          loading={leavingId === s.bookingId}
+                          loading={leavingId != null && leavingId === (s.bookingId ?? s.id)}
                           onClick={() => onLeaveWaitlist(s)}
                         />
                       </div>

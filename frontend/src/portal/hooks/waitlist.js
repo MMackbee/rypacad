@@ -104,6 +104,7 @@ export async function leaveWaitlist({ sessionId, athleteId }) {
     const id = `${sessionId}_${athleteId}`;
     await deleteDoc(doc(db, 'waitlist', id));
     bump('waitlist');
+    bump('bookings'); // the schedule/reservations lists subscribe to bookings
     return { id };
   } catch (err) {
     throw wrap(err, 'leaveWaitlist');

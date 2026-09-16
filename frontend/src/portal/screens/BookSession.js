@@ -215,7 +215,7 @@ export default function BookSession({
         setReserving(null);
         // Pin F: book() now resolves { status: 'waitlisted' } for a full
         // session instead of rejecting 'full' — same `booked` state either way.
-        finalizeBooked(session, result && result.status === 'waitlisted');
+        finalizeBooked(session, result?.status === 'waitlisted', result?.position ?? null);
       })
       .catch((err) => {
         if (!live.current) return;
@@ -235,7 +235,7 @@ export default function BookSession({
   // full "3:00 PM" string the session docs use; `booked` below splits it for
   // display).
   const bookedRaw = useRef(null);
-  const finalizeBooked = (session, waitlisted = false) => {
+  const finalizeBooked = (session, waitlisted = false, position = null) => {
     bookedRaw.current = session;
     const [time, meridiem] = session.time.split(' ');
     setBooked({
@@ -245,6 +245,7 @@ export default function BookSession({
       name: displayNameFor(session),
       dayLabel: dayLabel(session.date, todayISO()),
       waitlisted,
+      position,
     });
   };
 
@@ -293,10 +294,9 @@ export default function BookSession({
           time: booked.time,
           meridiem: booked.meridiem,
           waitlisted: booked.waitlisted,
-          // INTEGRATION: wire useWaitlist(booked.id, { athleteId }).position
-          // — NEW hook, not in hooks/index.js yet. WaitlistPositionLine
-          // degrades to a generic line while this is null.
-          position: null,
+          // The waitlisted result carries the joiner's queue position; the
+          // line degrades to generic copy while it is null.
+          position: booked.position ?? null,
         }}
         onRepeat={booked.waitlisted ? undefined : handleRepeat}
         onBack={() => setBooked(null)}

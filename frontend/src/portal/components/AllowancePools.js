@@ -108,7 +108,13 @@ const GRACE_REASON_COPY = {
 export function GraceLine({ tokens, style }) {
   const grace = tokens?.grace?.[0];
   if (!grace) return null;
-  const reasonText = GRACE_REASON_COPY[grace.reason];
+  // A cancelled session's id starts with its date - name the block when we
+  // can, fall back to the generic reason copy when we cannot.
+  const sourceDate = /^\d{4}-\d{2}-\d{2}/.test(grace.sourceSessionId || '') ? grace.sourceSessionId.slice(0, 10) : null;
+  const reasonText =
+    grace.reason === 'session-cancelled' && sourceDate
+      ? `the ${longDayLabel(sourceDate)} block was cancelled`
+      : GRACE_REASON_COPY[grace.reason];
   const expiresLabel = grace.expiresAt ? longDayLabel(grace.expiresAt) : null;
   return (
     <div style={{ font: `400 11px ${font.body}`, color: color.secondary, marginTop: 6, ...style }}>

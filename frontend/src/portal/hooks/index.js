@@ -401,8 +401,17 @@ function coachingFor(bookings, today) {
  */
 function withGraceReasons(tokens, rawGraceTokens) {
   if (!tokens || !tokens.grace || !tokens.grace.length) return tokens;
-  const reasonById = new Map((rawGraceTokens || []).map((g) => [g.id, g.reason ?? null]));
-  return { ...tokens, grace: tokens.grace.map((g) => ({ ...g, reason: reasonById.get(g.id) ?? null })) };
+  const byId = new Map((rawGraceTokens || []).map((g) => [g.id, g]));
+  // reason + sourceSessionId ride along so the grace line can name the
+  // cancelled block ("the Nov 11 block was cancelled"), never a stored copy.
+  return {
+    ...tokens,
+    grace: tokens.grace.map((g) => ({
+      ...g,
+      reason: byId.get(g.id)?.reason ?? null,
+      sourceSessionId: byId.get(g.id)?.sourceSessionId ?? null,
+    })),
+  };
 }
 
 function byDateThenId(a, b) {
