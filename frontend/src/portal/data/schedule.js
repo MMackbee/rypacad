@@ -5,55 +5,93 @@
  * generates the real thing: every dated session for a season, from the weekly
  * pattern plus a closure list. Booking, rosters and capacity all read from it.
  *
- * Two facts drive the shape:
- *   - Adult programming is eliminated, so weekdays are three afternoon blocks,
- *     not six. The 6-7 PM adult block and the old 7-9 PM window are both gone.
- *   - Saturdays alternate training and tournament, which is why sessions carry
- *     a `type` and why allowances are tracked in two pools (see packages.js).
+ * CONTRACT v2.0 (Sprint 12 pin J, "the token model"): the locked weekly
+ * schedule the owner gave directly, per-day blocks, 60 minutes each —
+ * Mon/Wed 3, 4, 5 PM; Tue/Thu 3, 4, 5, 6 PM; Fri 3, 4 PM. Production sessions
+ * come from the Google Calendar sync (a calendar edit by the owner, not a
+ * code change) — this generator exists for **seed parity**, so the emulator
+ * shows the real locked schedule without a calendar to sync against.
  *
- * Friday is capacity overflow — off by default, switched on when enrollment
- * requires it. Generating with `friday: true` is how you see what it buys.
+ * There is no more Friday overflow toggle and no more `overflow` field: the
+ * two-pool-era "Friday is capacity surplus" framing is gone along with the
+ * pools themselves (one fungible token pool now, see packages.js). Every
+ * regular block is `bookable: true`; the one exception is the Saturday
+ * 2-4 PM adult/college block below, which is display-only.
  */
 
-export const WEEKDAY_BLOCKS = ['3:00 PM', '4:00 PM', '5:00 PM'];
+// Per-day weekday blocks (pin J), hour-of-day in 24h — one 60-minute session
+// per listed hour. Sat is handled separately (SATURDAY_BLOCKS) since it mixes
+// training/tournament and ends with a non-bookable display block.
+export const WEEKDAY_BLOCKS = {
+  Mon: [15, 16, 17],
+  Tue: [15, 16, 17, 18],
+  Wed: [15, 16, 17],
+  Thu: [15, 16, 17, 18],
+  Fri: [15, 16],
+};
+
+const WEEKDAY_KEY_BY_DAY_INDEX = { 1: 'Mon', 2: 'Tue', 3: 'Wed', 4: 'Thu', 5: 'Fri' };
+
+/** 24h hour -> "3:00 PM" etc. Every generated block is on the hour. */
+function formatHour(hour) {
+  const h12 = ((hour + 11) % 12) + 1;
+  return `${h12}:00 ${hour >= 12 ? 'PM' : 'AM'}`;
+}
 
 /**
- * Saturday runs four blocks alternating training, tournament, training,
- * tournament — training first.
- *
- * OPEN: these start times are a placeholder spread across the old 9-6 Saturday
- * window. Confirm against how tournaments actually run before publishing.
+ * Saturday (pin J): 9 AM training, then four 60-min blocks — 10/11 tournament,
+ * 12/1 training. **Open (pin J, #2 in TEAM.md):** whether 10-12 and 12-2 end
+ * up as single 2-hour events instead of two 60-min blocks each is an owner
+ * call made on the calendar, not here — if so, the owner titles one event per
+ * window and this generator follows; pinning the four-block shape for now
+ * since that is what is pinned today, not guessing at the merge.
  */
 export const SATURDAY_BLOCKS = [
-  { time: '8:30 AM',  type: 'training' },
-  { time: '10:30 AM', type: 'tournament' },
-  { time: '12:30 PM', type: 'training' },
-  { time: '2:30 PM',  type: 'tournament' },
+  { time: '9:00 AM', type: 'training' },
+  { time: '10:00 AM', type: 'tournament' },
+  { time: '11:00 AM', type: 'tournament' },
+  { time: '12:00 PM', type: 'training' },
+  { time: '1:00 PM', type: 'training' },
 ];
 
 /**
- * Capacity per block.
- *
- * DECIDED (owner, 2026-08-31, with the real 26/27 calendar entry): max 15
- * kids per session, both types. The earlier open question about tournament
- * arithmetic vs package entitlements is now a scheduling question — how many
- * tournament blocks run — not a capacity one.
+ * The Saturday 2-4 PM college / Elite Am / Mid Am block — collected in person
+ * via Stripe, ~$20, not in the app (pin J, out of scope per the tokens
+ * contract §"Out of scope"). It is titled on the calendar so `classifyTitle`
+ * in sync-calendar-sessions.mjs skips it (display-only, exactly as the sync
+ * was designed) — nothing to build there. This generator adds ONE seed-only
+ * display entry so the emulator shows the real Saturday; the sync never
+ * produces `type: 'adult'` at all.
  */
-export const CAPACITY = { training: 15, tournament: 15 };
+const SATURDAY_ADULT_BLOCK = {
+  time: '2:00 PM',
+  type: 'adult',
+  label: 'College / Elite Am / Mid Am',
+  bookable: false,
+};
+
+/**
+ * Capacity per session (contract v2.0, pin J): flat 15, every session, every
+ * type — the earlier per-type map (`{ training, tournament }`) is gone along
+ * with the two-pool model it served. `season.js`'s `capacityFor()` reads
+ * `session.capacity` as a plain number either way, so this flattening needs
+ * no change on that side.
+ */
+export const CAPACITY = 15;
 
 const DAY = { SUN: 0, MON: 1, TUE: 2, WED: 3, THU: 4, FRI: 5, SAT: 6 };
 
 const iso = (d) => d.toISOString().slice(0, 10);
 
 /** Blocks for a given weekday index, or [] if the Academy is dark that day. */
-function blocksForDay(dayIndex, { friday }) {
-  if (dayIndex >= DAY.MON && dayIndex <= DAY.THU) {
-    return WEEKDAY_BLOCKS.map((time) => ({ time, type: 'training' }));
+function blocksForDay(dayIndex) {
+  const key = WEEKDAY_KEY_BY_DAY_INDEX[dayIndex];
+  if (key) {
+    return WEEKDAY_BLOCKS[key].map((hour) => ({ time: formatHour(hour), type: 'training', bookable: true }));
   }
-  if (dayIndex === DAY.FRI && friday) {
-    return WEEKDAY_BLOCKS.map((time) => ({ time, type: 'training', overflow: true }));
+  if (dayIndex === DAY.SAT) {
+    return [...SATURDAY_BLOCKS.map((b) => ({ ...b, bookable: true })), { ...SATURDAY_ADULT_BLOCK }];
   }
-  if (dayIndex === DAY.SAT) return SATURDAY_BLOCKS.map((b) => ({ ...b }));
   return [];
 }
 
@@ -66,15 +104,14 @@ function blocksForDay(dayIndex, { friday }) {
  * @param {string[]} [opts.closures]   Dates the Academy is closed. Half-days
  *   before a holiday count as closed — the handbook closes at noon and the first
  *   block is 3:00 PM, so nothing runs anyway.
- * @param {boolean} [opts.friday]      Enable Friday overflow blocks.
- * @param {object} [opts.capacity]     Override CAPACITY.
+ * @param {number} [opts.capacity]     Override CAPACITY (flat number, pin J).
  * @param {Array} [opts.extras]        Explicitly dated sessions outside the weekly
  *   pattern — the holiday tournaments, which run on days the Academy is otherwise
  *   closed. Each needs { date, time, type }; `special` and `label` are optional.
  *   Extras are not subject to `closures`, which is the point of them.
  * @returns {Array} sessions, ascending by date then block order.
  */
-export function generateSeason({ start, end, closures = [], friday = false, capacity = CAPACITY, extras = [] }) {
+export function generateSeason({ start, end, closures = [], capacity = CAPACITY, extras = [] }) {
   const closed = new Set(closures);
   const sessions = [];
   const cursor = new Date(start + 'T00:00:00Z');
@@ -83,14 +120,15 @@ export function generateSeason({ start, end, closures = [], friday = false, capa
   while (cursor <= last) {
     const date = iso(cursor);
     if (!closed.has(date)) {
-      blocksForDay(cursor.getUTCDay(), { friday }).forEach((block, i) => {
+      blocksForDay(cursor.getUTCDay()).forEach((block, i) => {
         sessions.push({
           id: `${date}-${i}`,
           date,
           time: block.time,
           type: block.type,
-          overflow: !!block.overflow,
-          capacity: capacity[block.type],
+          label: block.label || null,
+          bookable: block.bookable !== false,
+          capacity,
           booked: 0,
           coachId: null,
         });
@@ -110,10 +148,10 @@ export function generateSeason({ start, end, closures = [], friday = false, capa
         date: e.date,
         time: e.time,
         type: e.type,
-        overflow: false,
-        special: true,
         label: e.label || null,
-        capacity: e.capacity || capacity[e.type],
+        bookable: true,
+        special: true,
+        capacity: e.capacity || capacity,
         booked: 0,
         coachId: null,
       });
@@ -123,41 +161,30 @@ export function generateSeason({ start, end, closures = [], friday = false, capa
 }
 
 /**
- * Weekly and monthly capacity, split by pool. Use this to sanity-check an
- * enrollment plan before it is sold — the two pools fill at very different rates.
+ * Season-wide seat supply vs. token demand — one number each (contract v2.0:
+ * one fungible pool, not training/tournament pools). Use this to sanity-check
+ * an enrollment plan before it is sold.
  */
 export function capacitySummary(sessions) {
-  const weeks = new Set(sessions.map((s) => {
+  const bookable = sessions.filter((s) => s.bookable !== false);
+  const weeks = new Set(bookable.map((s) => {
     const d = new Date(s.date + 'T00:00:00Z');
     d.setUTCDate(d.getUTCDate() - d.getUTCDay());
     return iso(d);
   })).size || 1;
 
-  const seat = (type) => sessions
-    .filter((s) => s.type === type)
-    .reduce((sum, s) => sum + s.capacity, 0);
+  const season = bookable.reduce((sum, s) => sum + s.capacity, 0);
 
-  const training = seat('training');
-  const tournament = seat('tournament');
-
-  return {
-    weeks,
-    training:   { season: training,   perWeek: training / weeks,   perMonth: (training / weeks) * 4.33 },
-    tournament: { season: tournament, perWeek: tournament / weeks, perMonth: (tournament / weeks) * 4.33 },
-  };
+  return { weeks, season, perWeek: season / weeks, perMonth: (season / weeks) * 4.33 };
 }
 
 /**
- * Demand implied by an enrollment plan, against the capacity above.
+ * Token demand implied by an enrollment plan, against the supply above — one
+ * number: Σ pkg.tokens × athletes, over `TOKEN_PACKAGES` (packages.js).
+ * Elite (`tokens: null`) contributes nothing countable here on purpose — it
+ * is the unlimited package the token model has no seat-demand number for.
  * @param {Array} enrolment  [{ pkg, athletes }] using packages from packages.js
  */
 export function demandSummary(enrolment) {
-  const perMonth = enrolment.reduce(
-    (acc, { pkg, athletes }) => ({
-      training:    acc.training    + pkg.training    * athletes,
-      tournaments: acc.tournaments + pkg.tournaments * athletes,
-    }),
-    { training: 0, tournaments: 0 }
-  );
-  return perMonth;
+  return enrolment.reduce((sum, { pkg, athletes }) => sum + (pkg.tokens || 0) * athletes, 0);
 }
