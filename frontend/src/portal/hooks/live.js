@@ -33,8 +33,9 @@ import {
 } from 'firebase/firestore';
 import { auth, db } from '../../firebase';
 import { bump } from './invalidate';
-import { entitlementsFor, poolFor } from '../data/packages';
-import { SPECIALISTS } from '../data/specialists';
+import { normalizeAnchorDay, periodFor, windowDaysFor } from '../data/packages';
+import { openThrough, windowOpensOn } from '../data/calendar';
+import { SPECIALISTS, SPECIALIST_MONTHLY_CAP } from '../data/specialists';
 
 /** id -> catalogue entry, for the specialist-cap error copy below. */
 const SPECIALIST_BY_ID = new Map(SPECIALISTS.map((s) => [s.id, s]));
@@ -52,16 +53,18 @@ export const ERR = {
 /**
  * The typed error every adapter function throws. `code` is always one of ERR;
  * `cause` keeps the underlying Firestore error for logging. `reason`
- * (Sprint 11, contract v1.9 pin C) is an OPTIONAL, more specific label a few
- * call sites attach beyond `code` — today just the specialist booking gate's
- * 'no-fitness-package' (a 0-limit Phil attempt) and 'cap-reached' (the
- * monthly cap already spent) — so a screen can branch on a stable string
- * instead of pattern-matching `message`. `null` for every other throw in
- * this file; wrap() below preserves whatever `reason` a LiveDataError
- * already carries (it returns the SAME instance for one), so the reason
- * survives from assertWithinMonthlyCap through createBooking's catch,
- * through useBooking's book(), to the screen's own catch — no rethrow
- * anywhere in that chain replaces the error object.
+ * (Sprint 11, contract v1.9 pin C; reasons updated Sprint 12, contract v2.0
+ * pin B/D/K) is an OPTIONAL, more specific label a few call sites attach
+ * beyond `code` — today the booking gate's 'outside-window' (past the
+ * package's booking window), 'no-tokens-left' (the period's grant is fully
+ * spent), and 'cap-reached' (Yannick's monthly frequency knob only) — so a
+ * screen can branch on a stable string instead of pattern-matching
+ * `message`. `null` for every other throw in this file; wrap() below
+ * preserves whatever `reason` a LiveDataError already carries (it returns
+ * the SAME instance for one), so the reason survives from
+ * assertWithinPeriodCap through createBooking's catch, through
+ * useBooking's book(), to the screen's own catch — no rethrow anywhere in
+ * that chain replaces the error object.
  */
 export class LiveDataError extends Error {
   constructor(code, message, cause = null, reason = null) {
@@ -397,108 +400,119 @@ export async function fetchHouseholdBookings(householdId) {
  * below.
  */
 /**
- * Monthly-allowance guard at the writer, not just the UI (code review
- * 2026-09-04, finding 2): before any booking lands, count the athlete's
- * non-cancelled bookings for this pool in the session's month against the
- * package limit. A limit of 0 means the pool has NO allowance and every
- * booking is refused (finding 1: `limit > 0` gates treated zero as
- * unlimited). This is client-side derivation like the allowance itself —
- * a true server-side count awaits a Cloud Function, documented in
- * DATA-MODEL.md. Callers that already maintain a running tally
- * (bookRecurring) pass skipCapCheck to avoid re-querying per instance.
+ * Token cap + booking-window guard at the writer, not just the UI (contract
+ * v2.0, Sprint 12 pins B/D/K — replaces assertWithinMonthlyCap and its
+ * two-pool + per-specialist-type math entirely). Three typed failure
+ * reasons (LiveDataError#reason), checked in this order:
  *
- * Sprint 9 pin (contract v1.7), UPDATED Sprint 11 (contract v1.9 pin C):
- * pool 'specialist' (phil/mental) no longer answers to one flat cap for
- * every athlete — it answers to entitlementsFor's per-type limit
- * (data/packages.js), the SAME derivation Membership and SpecialistBooking's
- * summary read, so the booking gate can never disagree with what either
- * screen displayed. That derivation needs the athlete doc and (when set)
- * the athlete's golf/fitness package docs, read here rather than inside the
- * booking transaction itself — a monthly-cap check has always been this
- * client-side pre-check, not part of the atomic transaction (capacity is
- * the transaction's job; the cap is this function's, same split as before).
- * `type` is required for this branch only — the existing training/tournament
- * branch below is unchanged and still keys off `pool` alone.
+ *   'outside-window'  the session's date is past what the athlete's
+ *                      package allows right now — windowDaysFor(pkg) days
+ *                      from openThrough()'s 07:00-America/Chicago anchor
+ *                      (data/calendar.js). Checked before anything else:
+ *                      a date the family cannot see yet is not bookable
+ *                      regardless of tokens.
+ *   'no-tokens-left'   the athlete's PERIOD for this session's date
+ *                       (periodFor(date, household.periodAnchorDay),
+ *                       data/packages.js) already has as many non-cancelled
+ *                       bookings as the package grants. Skipped entirely
+ *                       when pkg.tokens === null (Elite — unlimited, no
+ *                       pool to cap) and when there is no package at all a
+ *                       booking with 0 tokens granted fails here too.
+ *   'cap-reached'      ONLY Yannick's frequency knob
+ *                       (SPECIALIST_MONTHLY_CAP.mental, data/specialists.js)
+ *                       — one attended-or-confirmed 'mental' booking per
+ *                       CALENDAR month, independent of tokens (Elite
+ *                       included: the cadence rule is not a pool). Phil's
+ *                       own knob is null — tokens are Phil's only limit —
+ *                       so there is no `type === 'phil'` branch anywhere in
+ *                       this function, and the `type === 'mental'` check
+ *                       below is the ONE place a cap check is allowed to
+ *                       branch on session type (specialists.js's own
+ *                       comment on SPECIALIST_MONTHLY_CAP names this as the
+ *                       deliberate exception, not the pool model back).
  *
- * Two typed failure reasons (LiveDataError#reason) a specialist attempt can
- * fail with, for useBooking to surface to SpecialistBooking (pin G):
- * 'no-fitness-package' — entry.limit is 0 (a Phil attempt with no fitness
- * package on file and no Elite package either; Yannick's limit is never 0,
- * it always has the flat SPECIALIST_MONTHLY_CAP floor) — and 'cap-reached'
- * — a real, positive limit already fully spent this month.
+ * This is client-side derivation like the token position itself (see
+ * data/packages.js#tokensFor's own doc comment) — a true server-side count
+ * awaits Part 2 (tokenPeriods + the Stripe handler). Callers that already
+ * maintain a running tally (bookRecurring) pass skipCapCheck to avoid
+ * re-querying per instance; anchorDay, when the caller already has it
+ * (createBooking below always does), is passed through to skip a second
+ * households read.
  */
-async function assertWithinMonthlyCap({ athleteId, householdId, date, pool, type }) {
-  const month = date.slice(0, 7);
+async function assertWithinPeriodCap({ athleteId, householdId, date, type, anchorDay }) {
+  const athlete = await fetchAthlete(athleteId);
+  const pkg = athlete.packageId ? await fetchPackage(athlete.packageId) : null;
+
+  const windowDays = windowDaysFor(pkg);
+  if (date > openThrough(new Date(), windowDays)) {
+    throw new LiveDataError(
+      ERR.INVALID,
+      `That date opens for booking at 7 AM on ${windowOpensOn(date, windowDays)}.`,
+      null,
+      'outside-window'
+    );
+  }
+
   const bookings = await fetchBookings(athleteId, { householdId });
 
-  if (pool === 'specialist') {
-    const athlete = await fetchAthlete(athleteId);
-    const [golfPkg, fitnessPkg] = await Promise.all([
-      athlete.packageId ? fetchPackage(athlete.packageId) : Promise.resolve(null),
-      athlete.fitnessPackageId ? fetchPackage(athlete.fitnessPackageId) : Promise.resolve(null),
-    ]);
-    const entitlements = entitlementsFor(athlete, [golfPkg, fitnessPkg], bookings, month);
-    const entry = entitlements[type]; // type is 'phil' | 'mental' - entitlementsFor's own keys
-    const specialist = SPECIALIST_BY_ID.get(type);
-    const who = specialist ? specialist.name : 'this specialist';
-    const noun = specialist ? specialist.sessionNoun.toLowerCase() : 'session';
-
-    if (!entry || entry.limit <= 0) {
+  if (!pkg || pkg.tokens !== null) {
+    const anchor =
+      anchorDay ?? normalizeAnchorDay((await fetchHousehold(householdId)).periodAnchorDay);
+    const { periodKey } = periodFor(date, anchor);
+    const granted = pkg ? pkg.tokens ?? 0 : 0;
+    const used = bookings.filter((b) => b.status !== 'cancelled' && b.periodKey === periodKey).length;
+    if (used >= granted) {
       throw new LiveDataError(
         ERR.INVALID,
-        `No fitness package on file for ${who}'s sessions — ask the academy to assign one.`,
+        granted === 0
+          ? 'This package has no tokens to spend — ask the academy to assign one.'
+          : `This period's tokens are already fully booked (${used} of ${granted}).`,
         null,
-        'no-fitness-package'
+        'no-tokens-left'
       );
     }
-    if (entry.used >= entry.limit) {
+  }
+
+  const mentalCap = SPECIALIST_MONTHLY_CAP.mental;
+  if (type === 'mental' && mentalCap != null) {
+    const month = date.slice(0, 7);
+    const usedThisMonth = bookings.filter(
+      (b) =>
+        (b.status === 'attended' || b.status === 'confirmed') &&
+        b.type === 'mental' &&
+        (b.date || '').slice(0, 7) === month
+    ).length;
+    if (usedThisMonth >= mentalCap) {
+      const specialist = SPECIALIST_BY_ID.get('mental');
+      const who = specialist ? specialist.name : 'Yannick';
       throw new LiveDataError(
         ERR.INVALID,
-        `That month's ${noun}s with ${who} are already booked (${entry.used} of ${entry.limit}).`,
+        `${who}'s sessions are limited to ${mentalCap} a month, already booked this month.`,
         null,
         'cap-reached'
       );
     }
-    return;
-  }
-
-  const athlete = await fetchAthlete(athleteId);
-  const pkg = athlete.packageId ? await fetchPackage(athlete.packageId) : null;
-  const limit = (pool === 'tournaments' ? pkg?.tournaments : pkg?.training) ?? 0;
-  const spent = bookings.filter(
-    (b) => b.status !== 'cancelled' && b.pool === pool && b.date.slice(0, 7) === month
-  ).length;
-  if (spent >= limit) {
-    throw new LiveDataError(
-      ERR.INVALID,
-      limit === 0
-        ? `This package has no ${pool === 'tournaments' ? 'tournament entries' : 'training sessions'}.`
-        : `That month's ${pool === 'tournaments' ? 'tournament entries' : 'training sessions'} are already fully booked (${spent} of ${limit}).`
-    );
   }
 }
 
 export async function createBooking(
-  { athleteId, sessionId, date, type, pool, householdId },
+  { athleteId, sessionId, date, type, householdId },
   { skipCapCheck = false, silent = false } = {}
 ) {
-  if (!athleteId || !sessionId || !date || !type || !pool || !householdId) {
+  if (!athleteId || !sessionId || !date || !type || !householdId) {
     throw new LiveDataError(
       ERR.INVALID,
-      'createBooking: athleteId, sessionId, date, type, pool and householdId are all required.'
-    );
-  }
-  // poolFor() (data/packages.js) is the one place the type->pool mapping is
-  // decided - Sprint 9 extended it with 'specialist' (phil/mental) rather
-  // than duplicating the mapping here as a second ternary that could drift.
-  if (pool !== poolFor(type)) {
-    throw new LiveDataError(
-      ERR.INVALID,
-      `createBooking: a ${type} session cannot spend the ${pool} pool - the pools never substitute.`
+      'createBooking: athleteId, sessionId, date, type and householdId are all required.'
     );
   }
   const user = requireUser();
-  if (!skipCapCheck) await assertWithinMonthlyCap({ athleteId, householdId, date, pool, type });
+  // The period a booking spends is the one its SESSION DATE falls in, never
+  // the period it is made in (contract v2.0 §6, pin B) - read once here so
+  // both the cap check and the write itself agree on the same anchor.
+  const household = await fetchHousehold(householdId);
+  const anchorDay = normalizeAnchorDay(household.periodAnchorDay);
+  const { periodKey } = periodFor(date, anchorDay);
+  if (!skipCapCheck) await assertWithinPeriodCap({ athleteId, householdId, date, type, anchorDay });
   // Contract v1.1: the booking id IS `{athleteId}_{sessionId}` — the
   // keyspace makes a second booking of the same session an overwrite
   // attempt, which the create-only rules reject. addDoc's random ids were
@@ -511,7 +525,11 @@ export async function createBooking(
     sessionId,
     date,
     type,
-    pool,
+    // periodKey (contract v2.0, pin B): write-once at create - a re-book
+    // (the isRebook branch below) only ever updates `status`, so a booking
+    // keeps the period it was FIRST created against even across a
+    // cancel/re-book cycle.
+    periodKey,
     status: 'confirmed',
     householdId,
     createdBy: user.uid,
@@ -1199,40 +1217,62 @@ export async function setContractTier({ athleteId, minutes }) {
 }
 
 /**
- * Assign an athlete's golf package and/or fitness package (contract v1.9,
- * pin B) — ops/owner only, enforced by firestore.rules'
- * packageAssignmentUpdateOk(), not here. `packageId` is required (every
- * athlete always carries a golf package); `fitnessPackageId` is a package id
- * or null (clearing a fitness package is a real, supported assignment, not
- * an error) — never omitted from the write itself, so a client can always
- * clear a previously-assigned fitness package back to "none" rather than the
- * update silently leaving a stale one in place. Assignment is IMMEDIATE and
- * un-prorated (the pin's own words): nothing already booked is touched, no
- * cancellations, no refunds — there is no money here, only which package
- * pointers the athlete's entitlements derive from going forward.
+ * Assign an athlete's ONE package (contract v2.0, pin A/B — narrowed from
+ * Sprint 11's golf-plus-fitness pair now that fitnessPackageId is retired
+ * along with the fitness catalogue it pointed into) — ops/owner only,
+ * enforced by firestore.rules' packageAssignmentUpdateOk(), not here.
+ * `packageId` is required — every athlete always carries exactly one
+ * package (a token package, Elite, or Single). Assignment is IMMEDIATE and
+ * un-prorated (the pin's own words, unchanged): nothing already booked is
+ * touched, no cancellations, no refunds — there is no money here, only
+ * which package pointer the athlete's token position derives from going
+ * forward.
  */
-export async function setAthletePackages(athleteId, { packageId, fitnessPackageId }) {
+export async function setAthletePackages(athleteId, { packageId }) {
   if (!athleteId) {
     throw new LiveDataError(ERR.INVALID, 'setAthletePackages: athleteId is required.');
   }
   if (typeof packageId !== 'string' || !packageId) {
     throw new LiveDataError(ERR.INVALID, 'setAthletePackages: packageId is required.');
   }
-  if (fitnessPackageId != null && typeof fitnessPackageId !== 'string') {
-    throw new LiveDataError(ERR.INVALID, 'setAthletePackages: fitnessPackageId must be a string or null.');
-  }
   requireUser();
-  const nextFitnessPackageId = fitnessPackageId ?? null;
   try {
     await updateDoc(doc(db, 'athletes', athleteId), {
       packageId,
-      fitnessPackageId: nextFitnessPackageId,
       updatedAt: serverTimestamp(),
     });
     bump('athletes');
-    return { athleteId, packageId, fitnessPackageId: nextFitnessPackageId };
+    return { athleteId, packageId };
   } catch (err) {
     throw wrap(err, 'setAthletePackages');
+  }
+}
+
+/**
+ * Set a household's billing-PERIOD anchor day (contract v2.0, pin B) —
+ * ops/owner only, enforced by firestore.rules' householdPeriodUpdateOk(),
+ * not here. `day` is clamped to the pin's 1-28 range client-side via
+ * normalizeAnchorDay (data/packages.js) before it ever reaches the write;
+ * the rules re-check the same bound server-side. Every athlete in the
+ * household re-derives its token period the moment this lands (periodFor
+ * reads the household doc live, not a cached anchor), so this is the one
+ * write that can move where every member's "period" starts and ends.
+ */
+export async function setHouseholdPeriodAnchorDay(householdId, day) {
+  if (!householdId) {
+    throw new LiveDataError(ERR.INVALID, 'setHouseholdPeriodAnchorDay: householdId is required.');
+  }
+  requireUser();
+  const periodAnchorDay = normalizeAnchorDay(day);
+  try {
+    await updateDoc(doc(db, 'households', householdId), {
+      periodAnchorDay,
+      updatedAt: serverTimestamp(),
+    });
+    bump('households');
+    return { householdId, periodAnchorDay };
+  } catch (err) {
+    throw wrap(err, 'setHouseholdPeriodAnchorDay');
   }
 }
 
