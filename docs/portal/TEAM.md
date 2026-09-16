@@ -2289,3 +2289,85 @@ Implementation notes (PM, after reading the current functions):
 - `cleanupSMSLogs` shows the v1 `pubsub.schedule` shape; add `.timeZone`.
 - Copy builders take the session doc (`label`, `date`, `time`, `type`) and
   the athlete's `firstName`; never the booking's 2025 fields.
+
+## Sprint 14 integration notes (notifications - PM merge, replay + live pass, 2026-09-16)
+
+Lanes: one functions lane (Opus, worktree wt-functions, branch
+agent/functions/sprint14-notifications, three commits) merged at c30841d;
+the PM built the read side directly on portal/r3 (7b95641) and the
+integration edits after the merge. The lane was cut off once by the
+account's spend limit mid-run and resumed with its context intact.
+
+What landed (server, `functions/`): `portal/notify.js` `sendNotice` - the
+one sender: resolves recipients (athlete + household parents for schedule
+kinds, parents only for billing), applies `notificationPrefs` per channel
+with the client's defaults mirrored (`CATEGORY_DEFAULTS`; billing email
+locked on), claims the ledger row `notifications/{kind}_{subjectKey}` with
+`tx.create` BEFORE any provider call (attempted channels written 'failed'
+pessimistically, rewritten with the real outcome after), emails through
+Courier's email channel, texts through the new `portal/sms.js` (Twilio
+client resolved lazily - no key, outcome 'skipped'; 08:00-21:00 Chicago
+quiet hours, outside == 'skipped' and never re-sent). `portal/notices.js`
+builds copy per kind from the SESSION doc and `athletes.name` (there is
+no firstName field). `portal/jobs.js` `runSessionReminders` /
+`runTokenExpiryReminders` take `{ now, db }` so the harness drives them on
+a fixed clock. `index.js`: onBookingCreated, onBookingCancelled,
+onHouseholdMembership, sessionReminders (0 17 * * * Chicago),
+tokenExpiryReminders (0 9 * * * Chicago); the 2025 onBookingCreateNotifyChild
+is deleted; `revoke.js` sends ONE booking-revoked per household per Stripe
+event on both the lapse and downgrade paths; `env.template` lists
+COURIER_EVENT_<KIND> for all eight kinds (optional; ad-hoc content
+otherwise).
+
+What landed (client + data, PM): rules `notifications` branch (parent by
+householdId, athlete by athleteId, staff all, no client write), indexes
+`notifications (householdId, createdAt desc)` and `(athleteId, createdAt
+desc)`, `hooks/notices.js` + `components/RecentNotices.js` ("Recent
+notices" on Settings, newest ten, relative times), category copy
+"Membership & tokens" / "Sessions", `SEED_NOTICES` for practice mode,
+three seeded Whitfield notices, DATA-MODEL v2.2 `notifications` section,
+DECISION-GAPS Sprint 14 rulings.
+
+Deviations from the pin, accepted: `booking-revoked` is keyed
+`{householdId}_{stripeEventId}` (one per household per event, sent from
+revoke.js where the count is known), not per booking; `membership` is
+keyed `{householdId}_{triggerEventId}`; titles were not pinned - the lane's
+("Session booked", "A spot opened up", "Session cancelled", "Upcoming
+bookings released", "Session tomorrow", "Tokens expiring soon", "Bonus
+token expiring", "Payment problem" / "Membership lapsed" / "Payment
+received") stand; SMS carries the body verbatim; an account with no email
+address records 'skipped' (no 'no-email' value); tokens-expiring has no
+membership gate (a past_due family is exactly who should book before the
+tokens die); membership speaks only for past_due, lapsed, and active after
+one of those.
+
+Verified: isolated-emulator replay `functions/test/verify-notifications.js`
+from the MERGED checkout - all 7 steps pass (booking create -> one
+booking-confirmed with per-recipient outcomes off/no-phone/skipped exactly
+per prefs; promotion -> one promoted and no booking-confirmed; staff cancel
+-> session-cancelled naming the grace expiry, member's own cancel silent;
+reminders job at a fixed clock -> one per tomorrow booking, none for the
+cancelled or day-after bookings, idempotent re-run; expiry job -> tokens
+and grace at exactly 3 days, nothing at 4, consumed grace and Elite
+silent, idempotent re-run; three membership flips -> the pin's three
+bodies, parents only; Stripe lapse -> one booking-revoked for two bookings
+plus its own membership notice). `verify-lane.js` (Sprint 13) still passes
+after it. `npm run lint` clean, `lib.test.js` 27 passing. Shared emulator:
+the notifications rules probe (10 cases: parent/athlete own-only, staff
+all, coach denied, create/delete denied even for the owner) passes; :3001
+as parent-dana shows Settings with the three notices newest-first and the
+renamed categories.
+
+Not exercised: a real Courier or Twilio send (no credentials, by design -
+every allowed channel records 'skipped'); the two schedules firing (no
+pubsub emulator - their bodies were driven directly); the practice-mode
+sample list (:3001 runs live data; the seed path is the same seam).
+
+Deploy (owner-gated, in this order): push portal/r3:main (Railway builds
+the Settings list and copy); `firebase deploy --only
+firestore:rules,firestore:indexes` (the notifications branch + two
+indexes, and the phone self-write from the UX pass); THEN, once the
+project is on Blaze, `firebase deploy --only functions` with
+COURIER_AUTH_TOKEN and the TWILIO_* keys set - nothing sends until then,
+and the ledger stays empty in production, so Recent notices reads
+"Nothing sent yet" until the first function fires.

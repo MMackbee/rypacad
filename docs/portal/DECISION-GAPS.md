@@ -109,3 +109,15 @@ constant change if the owner rules otherwise.
    project is on Blaze and `firebase deploy --only functions` runs with
    `COURIER_AUTH_TOKEN` (email) and the `TWILIO_*` keys (SMS) set. The
    ledger and the Settings list work without either (outcomes 'skipped').
+6. **SMS quiet hours** — a text is never sent before 08:00 or after 21:00
+   America/Chicago; a notice generated outside the window records `sms:
+   'skipped'` and is NEVER re-sent later (the email still goes). Both
+   scheduled jobs run inside the window, so this only bites a night-time
+   staff cancellation, which then reaches parents by email only. Alternative:
+   queue the text for 08:00.
+
+Superseded by Sprint 14: the Functions note above that promotion notices
+are email-only — every notice now goes by email through Courier's email
+channel and by text through Twilio directly (`functions/portal/sms.js`),
+gated per recipient by `users.notificationPrefs` and `users.phone`, with the
+per-channel outcome recorded on the ledger row.

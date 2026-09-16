@@ -1417,7 +1417,16 @@ is on Blaze and the functions deploy; the read side ships with the app).**
 per notice attempted, written by the sending function under the admin SDK
 in the same step as the send, and keyed so a retried trigger or a re-run
 scheduled job finds its own row and sends nothing twice (the `stripeEvents`
-"id is the dedupe key" idea, applied to outbound messages). Shape: `{ kind,
+"id is the dedupe key" idea, applied to outbound messages). **Ids as
+built:** `{kind}_{bookingId}` for the per-booking kinds (`booking-confirmed`,
+`promoted`, `session-cancelled`, `reminder-24h`);
+`tokens-expiring_{athleteId}_{periodKey}`; `grace-expiring_{graceTokenId}`;
+`booking-revoked_{householdId}_{stripeEventId}` — ONE notice per household
+per Stripe event, sent by `functions/portal/revoke.js` after its batch (the
+pin's draft list said per booking; the count is only known there);
+`membership_{householdId}_{triggerEventId}` (the Firestore trigger's own
+retry-stable event id, so a redelivery sends nothing and a genuine second
+status flip is its own notice). Shape: `{ kind,
 category, householdId, athleteId: string \| null, sessionId: string \|
 null, bookingId: string \| null, subjectKey, title, body, recipients:
 [{ uid, email, sms }], sentAt, createdAt }`. Each channel outcome is one of
@@ -1431,7 +1440,13 @@ is not configured or SMS quiet hours (outside 08:00–21:00 America/Chicago),
 billing: `booking-revoked`, `tokens-expiring`, `grace-expiring`,
 `membership` (TEAM.md "Sprint 14 pins" has the trigger and copy per kind).
 Titles and bodies are stored as sent, so the in-app list re-renders nothing
-from the underlying booking or session. **Clients never write** (no allow
+from the underlying booking or session. Copy (`functions/portal/notices.js`)
+names the athlete by the first word of `athletes.name` — there is no
+`firstName` field anywhere in the schema — and the session by its `label`
+or, when null (every generated block), a label for its `type` (`training` →
+"Training", `tournament` → "Tournament", `phil` → "Phil 1-on-1", `mental` →
+"Mental session", `adult` → "Adult block"); dates read "Wed, Nov 11" and the
+time is the stored string. **Clients never write** (no allow
 clause in `firestore.rules`); members read own — parent by `householdId
 ==`, athlete by `athleteId ==` — and ops/owner read all. Settings shows
 the newest ten as "Recent notices" (`hooks/notices.js`).

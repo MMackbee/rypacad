@@ -1286,8 +1286,8 @@ function buildDocs(portal) {
         sessionId: FULL_SESSION_ID,
         bookingId: `jordan_${FULL_SESSION_ID}`,
         subjectKey: `jordan_${FULL_SESSION_ID}`,
-        title: 'Jordan is booked',
-        body: 'Jordan is booked: training block, Mon, Nov 16 at 3:30 PM.',
+        title: 'Session booked',
+        body: 'Jordan is booked: Training, Mon, Nov 16 at 3:30 PM.',
         recipients: [
           { uid: 'athlete-jordan', email: 'skipped', sms: 'no-phone' },
           { uid: 'parent-dana', email: 'skipped', sms: 'no-phone' },
@@ -1306,9 +1306,9 @@ function buildDocs(portal) {
         sessionId: '2026-11-11-0',
         bookingId: 'reese_2026-11-11-0',
         subjectKey: 'reese_2026-11-11-0',
-        title: 'A session was cancelled',
+        title: 'Session cancelled',
         body:
-          'The Wednesday training block on Nov 11 was cancelled by the academy. ' +
+          'Training on Wed, Nov 11 was cancelled by the academy. ' +
           `A bonus token was added to Reese's account (expires ${graceExpiry}).`,
         recipients: [{ uid: 'parent-dana', email: 'skipped', sms: 'no-phone' }],
         sentAt: hoursAgo(48),
@@ -1326,7 +1326,11 @@ function buildDocs(portal) {
         bookingId: null,
         subjectKey: `jordan_${jordanCurrentPeriod.periodKey}`,
         title: 'Tokens expiring soon',
-        body: `Jordan has tokens left that expire ${niceDate(jordanCurrentPeriod.periodEnd)}. Book before then.`,
+        // left == granted: none of jordan's seeded bookings fall in the
+        // current period, and the one waitlist entry is nico's.
+        body:
+          `Jordan has ${tokenPeriods.get(`jordan_${jordanCurrentPeriod.periodKey}`).granted} tokens left ` +
+          `that expire ${niceDate(jordanCurrentPeriod.periodEnd)}. Book before then.`,
         recipients: [{ uid: 'parent-dana', email: 'skipped', sms: 'no-phone' }],
         sentAt: hoursAgo(5),
         createdAt: hoursAgo(5),
