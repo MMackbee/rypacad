@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { BLOCKS, BLOCK_DAYS, color, font, radius } from '../tokens';
+import { color, font, radius, WEEKLY_SCHEDULE_LABEL } from '../tokens';
 import BottomTabBar from '../components/BottomTabBar';
 import Button from '../components/Button';
 import CancelSheet from '../components/CancelSheet';
@@ -8,7 +8,7 @@ import PhoneFrame from '../components/PhoneFrame';
 import Segmented from '../components/Segmented';
 import SessionCard from '../components/SessionCard';
 import StatusBadge from '../components/StatusBadge';
-import AllowancePools from '../components/AllowancePools';
+import AllowancePools, { GraceLine } from '../components/AllowancePools';
 import SkeletonCard, { SkeletonBar, SkeletonSessionCard } from '../components/Skeleton';
 import { Banner, Body, Card, ErrorNotice, ScreenTitle, SectionLabel } from '../components/Primitives';
 import { useSchedule } from '../hooks';
@@ -69,7 +69,7 @@ export default function MySchedule({ variant = 'upcoming', bare = false, onBook,
   // The cancellation notice belongs to the upcoming view - it is a claim about
   // a session that will not run, not a record of one that did.
   const cancelled = past ? null : data?.cancelled ?? null;
-  const allowance = data?.allowance ?? null;
+  const tokens = data?.tokens ?? null;
 
   // Group by day header so a day is announced once, not per card.
   const days = sessions.reduce((acc, s) => {
@@ -123,7 +123,7 @@ export default function MySchedule({ variant = 'upcoming', bare = false, onBook,
             past={past}
             sessions={sessions}
             cancelled={cancelled}
-            allowance={allowance}
+            tokens={tokens}
             days={days}
             onBook={onBook}
             onCancelRequest={setCancelTarget}
@@ -143,22 +143,19 @@ export default function MySchedule({ variant = 'upcoming', bare = false, onBook,
   );
 }
 
-function ScheduleBody({ past, sessions, cancelled, allowance, days, onBook, onCancelRequest }) {
+function ScheduleBody({ past, sessions, cancelled, tokens, days, onBook, onCancelRequest }) {
   return (
     <>
         {/*
-          Two numbers, never one. Training and tournament entitlements are
-          separate pools, so a single "N bookings left" would be wrong for every
-          athlete who has spent one and not the other.
+          Sprint 12 (contract v2.0): one token pool, not two - a single
+          balance now. Elite renders no number (AllowancePools' own
+          unlimited branch).
         */}
-        {allowance ? (
+        {tokens ? (
           <Card>
-            <SectionLabel style={{ marginBottom: 12 }}>Remaining this cycle</SectionLabel>
-            <AllowancePools allowance={allowance} />
-            <Body size={11} tone={color.textTertiary} style={{ marginTop: 12 }}>
-              Both reset {allowance.resetsOn}. A cancelled or rescheduled block does not count
-              against either.
-            </Body>
+            <SectionLabel style={{ marginBottom: 12 }}>Tokens this period</SectionLabel>
+            <AllowancePools tokens={tokens} />
+            <GraceLine tokens={tokens} />
           </Card>
         ) : null}
 
@@ -224,6 +221,11 @@ function ScheduleBody({ past, sessions, cancelled, allowance, days, onBook, onCa
                   trailing={
                     s.badge ? (
                       <StatusBadge tone={s.badge.tone}>{s.badge.label}</StatusBadge>
+                    ) : s.nextPeriod ? (
+                      // Sprint 12 (contract v2.0, pin B): a booking charges
+                      // against the period its session date falls in, not
+                      // the period it was made in.
+                      <StatusBadge tone="neutral">Next period</StatusBadge>
                     ) : null
                   }
                   action={
@@ -253,7 +255,7 @@ function ScheduleBody({ past, sessions, cancelled, allowance, days, onBook, onCa
 }
 
 /**
- * The loading layout in the loaded layout's geometry: allowance card, a day
+ * The loading layout in the loaded layout's geometry: tokens card, a day
  * label, then session cards on 04's default 52px gutter. No spinner — see
  * components/Skeleton.js.
  */
@@ -266,16 +268,13 @@ function ScheduleSkeleton() {
     >
       <SkeletonCard>
         <SkeletonBar tone="raised" width={132} height={10} />
-        {[0, 1].map((i) => (
-          <div key={i} style={{ marginTop: i ? 11 : 15 }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 5 }}>
-              <SkeletonBar tone="raised" width={64} height={11} />
-              <SkeletonBar tone="raised" width={90} height={11} />
-            </div>
-            <SkeletonBar tone="raised" height={6} r={3} />
+        <div style={{ marginTop: 15 }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 5 }}>
+            <SkeletonBar tone="raised" width={64} height={11} />
+            <SkeletonBar tone="raised" width={90} height={11} />
           </div>
-        ))}
-        <SkeletonBar tone="raised" width="80%" height={9} style={{ marginTop: 14 }} />
+          <SkeletonBar tone="raised" height={6} r={3} />
+        </div>
       </SkeletonCard>
 
       <div style={{ display: 'flex', flexDirection: 'column', gap: 9 }}>
@@ -293,11 +292,6 @@ function ScheduleSkeleton() {
 }
 
 function EmptyState({ onBook }) {
-  // Built from the BLOCKS constant so flag 07 stays single-source: if the real
-  // block times differ, this copy changes with them rather than drifting.
-  const blockList = `${BLOCKS.slice(0, -1).join(', ')}, and ${BLOCKS[BLOCKS.length - 1]}`;
-  const dayRange = `${BLOCK_DAYS[0]} through ${BLOCK_DAYS[BLOCK_DAYS.length - 1]}`;
-
   return (
     <div
       style={{
@@ -313,9 +307,7 @@ function EmptyState({ onBook }) {
     >
       <MediaPlaceholder height={56} style={{ width: 56 }} />
       <ScreenTitle size={18}>Nothing scheduled</ScreenTitle>
-      <Body size={12}>
-        Training blocks run {blockList}, {dayRange}. Saturdays alternate training and tournament.
-      </Body>
+      <Body size={12}>Training runs {WEEKLY_SCHEDULE_LABEL}.</Body>
       <Button height={46} onClick={onBook} style={{ marginTop: 6 }}>
         Book a session
       </Button>
