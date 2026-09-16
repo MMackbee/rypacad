@@ -19,7 +19,7 @@ serves.
 | `users` | Firebase Auth uid | Rules resolve the caller via `users/{request.auth.uid}`. Seed uses readable slugs (`parent-dana`) since the emulator mints no uids. |
 | `households` | slug / auto-id | Referenced by `users.householdId`, `athletes.householdId`, `bookings.householdId`. |
 | `athletes` | slug / auto-id | Referenced by `users.athleteId`, `bookings.athleteId`, `contractLogs.athleteId`. |
-| `packages` | catalogue id (`g-8-3`, `f-4`, `elite`, `drop-in`) | Matches `frontend/src/portal/data/packages.js` exactly, so the client and the database name the same package the same way. |
+| `packages` | catalogue id (`t-6`, `t-12`, `t-16`, `t-20`, `elite`, `single`) | **Contract v2.0 (Sprint 12 pin A), supersedes the v1 catalogue ids (`g-8-3`, `f-4`, `drop-in`, `elite-247`, now retired).** Matches `frontend/src/portal/data/packages.js`'s `ALL_PACKAGES` exactly, so the client and the database name the same package the same way. |
 | `sessions` | the generator's `YYYY-MM-DD-<block>` (`2026-11-02-0`; extras `2026-11-27-x0`); specialist 1-on-1s `YYYY-MM-DD-s<n>` (`2026-09-15-s0` — **contract v1.7, Sprint 9**) | Regular/extras ids come from `generateSeason()`. The `-s<n>` slots are the one exception: `scripts/seed-firestore.mjs` hand-adds them for the emulator (the generator never invents Phil/Yannick slots — see [below](#specialist-1-on-1-sessions-phil-and-mental-contract-v17-sprint-9)); production sources them from the calendar sync exactly like training/tournament. Date-prefixed ids make `orderBy(date, __name__)` a stable chronological cursor for every session type alike. |
 | `bookings` | `{athleteId}_{sessionId}` | Deterministic id = one booking per athlete per session, enforced by the keyspace itself. Re-booking after a cancellation updates the same doc's `status` instead of creating a duplicate. |
 | `contractLogs` | `{athleteId}_{date}` | Pinned by contract v1: one log per athlete per day, duplicate-proof by construction. |
@@ -27,6 +27,10 @@ serves.
 | `enrollmentRequests` | the guardian's Firebase Auth uid | **Contract v1.8, Sprint 10.** Same rationale as `users`: the caller-identity check in rules (`request.auth.uid == uid`) is a plain equality against the doc id, no `get()` needed. Seed uses a readable slug (`parent-new`) like every other uid-keyed doc in the emulator. |
 | `athletes/{athleteId}/diagnostics` | auto id | **Contract v1.8, Sprint 10.** A capture history, not a keyspace-enforced singleton — an athlete gets many captures over time, so there is no natural deterministic key the way `bookings`/`contractLogs`/`tournamentResults` have one. Seed uses readable slugs (`published-1`, `draft-1`) in the same "readable over random, the emulator mints no real auto-ids anyway" spirit as the `users` row above. |
 | `staffInvites` | auto id | **Contract v1.8, Sprint 10.** Not a keyspace-enforced collection either — many invites can exist over time, including two for the same email (a re-invite after one lapses). Seed uses a readable slug (`invite-1`). |
+| `tokenPeriods` | `{athleteId}_{periodKey}` | **Contract v2.0, Part 2 (Sprint 13) — documented now, seeded empty.** One issuance doc per athlete per period, keyspace-enforced like `bookings`/`contractLogs`. See [below](#tokenperiods-contract-v20-part-2). |
+| `graceTokens` | auto id | **Contract v2.0, Part 2 — documented now, seeded empty.** Many grace tokens can exist over an athlete's history (one per minting event), no natural deterministic key. See [below](#gracetokens-contract-v20-part-2). |
+| `waitlist` | `{sessionId}_{athleteId}` | **Contract v2.0, Part 2 — documented now, seeded empty.** One waitlist entry per athlete per session, the same keyspace shape as `bookings`. See [below](#waitlist-contract-v20-part-2). |
+| `stripeEvents` | the Stripe `event.id` | **Contract v2.0, Part 2 — documented now, seeded empty.** Idempotency ledger for the webhook handler — the id IS the dedupe key, the same rationale as every other keyspace-enforced collection in this table. See [below](#stripeevents-contract-v20-part-2). |
 
 ## Collections
 
@@ -55,6 +59,8 @@ Guardian + billing linkage. **Never card data** — Stripe ids only.
 | `guardian` | map | `{ name, email, phone }` — guardian contact. |
 | `stripeCustomerId` | string \| null | Id only. Card data never touches Firestore. |
 | `stripeSubscriptionId` | string \| null | Id only. |
+| `periodAnchorDay` | number \| absent | **Contract v2.0 (Sprint 12 pin B).** Int `1..28`, ops/owner-settable (Membership editor, routing lane). **Absent == 1** — every household provisioned before this sprint is validly anchored on the 1st without a migration. `periodFor(dateISO, anchorDay)` (`frontend/src/portal/data/packages.js`) turns this into the `{ periodKey, periodEnd }` pair every booking's `periodKey` and every token derivation reads against — see [bookings](#bookingsbookingid) below. The provisioner (`provision-family.mjs`) deliberately never writes this field (ops sets it in the app, per the pin); the seed writes it explicitly (1 for Whitfield, 15 for the second demo household) rather than leaving it absent, so a raw Firestore/REST read of the emulator shows the fact instead of relying on the absent-means-1 rule being invisible. |
+| `membership` | map \| absent | **Contract v2.0, Part 2 (Sprint 13) — documented now, not built.** `{ status: 'active' \| 'past_due' \| 'lapsed', stripeSubscriptionStatus, currentPeriodStart, currentPeriodEnd, lastEventId, updatedAt }`. **Absent == `'active'`** (the same absent-as-default pattern `periodAnchorDay` and the pre-v2.0 `fitnessPackageId` both used) — every household stays bookable until the Part 2 Stripe webhook handler (admin SDK only; no member or staff client write) writes otherwise. Not seeded, not provisioned, not written by any Part 1 code path. |
 
 ### `athletes/{athleteId}`
 
@@ -66,9 +72,9 @@ needs — and nothing medical (see the subcollection below).
 | `name` | string | |
 | `dob` | string \| null | `YYYY-MM-DD`, or null when unknown. **Contract v1.6 (Sprint 8):** `tournamentResults.bracket` snapshots this field at write time (see [below](#tournamentresultssessionid_athleteid-contract-v16-sprint-8)) — no dob means every result for that athlete lands in the display-only 'Open' bracket until one is set. `seed-firestore.mjs` sets the Whitfield demo athletes' dobs to the OWNER-SUPPLIED values (TEAM.md Sprint 8 amendment v1.6.1, 2026-09-10), landing the three kids across three different brackets; `seed.js`'s ageLine copy was trued up to match. `provision-family.mjs`'s real test families (MackBee, Eisele) stay null — a real kid's birthday is never invented; the owner supplies it later and provisioning writes it through unchanged via an optional `dob` per athlete entry. |
 | `householdId` | string | Parent link; rules grant guardians access through it. |
-| `packageId` | string | Into `packages/` (`kind == 'golf' \| 'drop-in' \| 'elite'`) — decides the two-pool golf allowances (training/tournaments). **Contract v1.9 (Sprint 11):** paired with `fitnessPackageId` right below as the athlete's *second*, independent package pointer — two stored facts, not one; see that row for the shared ops/owner assignment branch both fields go through. |
-| `fitnessPackageId` | string \| null | Into `packages/` where `kind == 'fitness'` (`f-4 \| f-8 \| f-12 \| f-16` — all four already in the catalogue, the seed, and the provisioner). **Contract v1.9 (Sprint 11 pin A) — design keystone: entitlements are DERIVED from packages, never stored; this pointer plus `packageId` above are the only two stored facts driving every "N of M left" surface, Phil included.** ABSENT and explicit `null` read identically EVERYWHERE: rules read it `resource.data.get('fitnessPackageId', null)`, hooks read it `?? null`, and `entitlementsFor()` treats both as "no fitness package" (`source: 'none'` — unless the golf package's `kind == 'elite'`, in which case Phil falls back to the flat `SPECIALIST_MONTHLY_CAP`, `source: 'elite'`). `provision-family.mjs` never writes this key at all, and — see the [seeding note](#seeding--emulator-workflow) below — that write is also **mask-protected**, not merely key-omitted, so a re-run can never wipe an ops/owner assignment back to absent either. Seed: jordan `f-8`, reese `f-4`, nico explicit `null` (a real, chosen value, not an omitted key — see the seeding note for why). |
-| `updatedAt` | timestamp \| absent | **Contract v1.9 (Sprint 11 pin B).** Written ONLY by the ops/owner package-assignment branch: `after.diff(resource.data).affectedKeys().hasOnly(['packageId', 'fitnessPackageId', 'updatedAt'])`, caller `ops \| owner` — a second, parallel field-limited update on `athletes`, alongside `contractMinutes`' own single-field branch in this table. Backs `setAthletePackages(athleteId, { packageId, fitnessPackageId })` → `useAssignPackages()`; one `bump('athletes')` per write. Assignment is IMMEDIATE and un-prorated — entitlements are derived, so headroom changes for the *next* booking only; nothing already booked is touched (no cancellations, no refunds — there is no money here to refund). Absent on every seeded/provisioned athlete until the first reassignment through this branch; not backfilled, since "never reassigned yet" is the honest starting state, the same reasoning `fitnessPackageId`'s absence carries above. |
+| `packageId` | string | Into `packages/` — one pointer into the ONE token catalogue (`kind == 'tokens' \| 'elite' \| 'single'`). **Contract v2.0 (Sprint 12 pin A) supersedes v1.9 here: `fitnessPackageId` is REMOVED (see below) — this is the athlete's ONLY package pointer now**, deciding the one fungible token pool (`tokensFor()` in `frontend/src/portal/data/packages.js`) instead of two separate golf/fitness entitlements. |
+| ~~`fitnessPackageId`~~ | — | **REMOVED, contract v2.0 (Sprint 12 pin A).** There is one package pointer now (`packageId` above) — the two-stored-facts design (v1.9 pin A) is gone along with the two-pool model it served. `provision-family.mjs` never wrote this field even under v1.9 (see that script's own header), so removing it is a rules/schema change only, not a prod backfill: no live document needs migrating, and any pre-v2.0 doc that does still carry the key is simply ignored (nothing reads it anymore). |
+| `updatedAt` | timestamp \| absent | **Contract v1.9 (Sprint 11 pin B), narrowed by v2.0 (Sprint 12 pin A).** Written ONLY by the ops/owner package-assignment branch: `after.diff(resource.data).affectedKeys().hasOnly(['packageId', 'updatedAt'])` — the mask narrows from `['packageId', 'fitnessPackageId', 'updatedAt']` now that there is one field to assign, not two. Caller `ops \| owner`, a field-limited update alongside `contractMinutes`' own single-field branch in this table. Backs `setAthletePackages(athleteId, { packageId })` → `useAssignPackages()` (routing lane); one `bump('athletes')` per write. Assignment is IMMEDIATE and un-prorated — token position is derived, so headroom changes for the *next* booking only; nothing already booked is touched. Absent on every seeded/provisioned athlete until the first reassignment through this branch. |
 | `contractMinutes` | number \| null | `20 \| 45 \| 95 \| null` — Commitment Contract tier. **Contract v1.8 (Sprint 10 pin B): client-settable.** Rules allow an update of ONLY this field (`diff.hasOnly(['contractMinutes'])`) by two callers: the athlete's own `users` account, or the household's parent — the same three-way linkage reasoning as a booking create (own athlete, or own household's athlete via `get()`), not open to any signed-in user. This is what lets `useContract().setTier(minutes)` back the NoContract tier picker's CTA (athlete) and AthleteDetail's "Start a contract" card (parent) instead of both being dead ends. `nico` stays seeded `null` on purpose (below) so this intake path always has a real no-tier athlete to exercise. |
 | `coachId` | string \| null | uid of a `users` doc with `role == 'coach'`. Coach access filters on this assignment, never on role alone. |
 
@@ -89,24 +95,30 @@ Blueprint holds structurally instead of by field-filtering discipline.
 The seed script never writes this document: inventing medical data for minors
 would defeat the point of minimizing it.
 
-### `packages/{packageId}`
+### `packages/{packageId}` (contract v2.0, Sprint 12 pin A/L/M)
 
-The 2026-27 catalogue, mirrored from `frontend/src/portal/data/packages.js`
-(the confirmed source). A package grants **two separate monthly allowances** —
-training sessions and tournament entries — that never substitute for each
-other.
+**Supersedes the v1 table below in full** — the two-pool catalogue
+(`golf | drop-in | fitness | elite` kinds, separate `training`/`tournaments`/
+`sessions` counters, `philSessions`/`yannickSessions`/`facility247` on Elite)
+is retired, not merely amended: `g-4-2`, `g-8-3`, `g-12-4`, `g-16-4`, `f-4`,
+`f-8`, `f-12`, `f-16`, `drop-in`, `elite-247` are all gone from the live
+catalogue (`provision-family.mjs` **deletes** these ten ids from production
+on its next user-approved run). ONE catalogue now, mirrored from
+`frontend/src/portal/data/packages.js`'s `ALL_PACKAGES` (the seam both other
+lanes build against). A package grants **one fungible token pool** — a token
+is spent by any non-cancelled booking of any session type; `sessions.type`
+is display/roster/Tour only and never decides charging (design keystone,
+TEAM.md Sprint 12 pin).
 
 | Field | Type | Notes |
 |---|---|---|
-| `name` | string | "8 + 3", "Drop-in", "Elite 24/7"… |
-| `kind` | string | `golf \| drop-in \| fitness \| elite` — catalogue grouping (extension to contract v1; the contract names the catalogue, this labels its four lists). |
-| `price` | number | Monthly price. **In the schema per contract v1 but never written by the seed script** — no dollar amounts in seed data, policy. How real prices enter the live project is a PM/user decision at deploy time. |
-| `training` | number | Training sessions per month (golf/elite/drop-in). |
-| `tournaments` | number | Tournament entries per month (golf/elite/drop-in). |
-| `sessions` | number | Fitness packages only — fitness sessions per month. |
-| `philSessions` | number \| null | Elite only. **Contract v1.9.1 (owner ruling, Sprint 11 amendment):** `16` on both `elite` and `elite-247` — Elite includes 16 Phil sessions a month. `entitlementsFor()`'s elite branch (TEAM.md pin C) reads this instead of the flat `SPECIALIST_MONTHLY_CAP` once it is set; before this amendment it was null and the flat cap was the fallback. Seeded/provisioned from `ELITE_TIERS` in `frontend/src/portal/data/packages.js` (routing lane owns that file) exactly like every other package field — this script never hand-copies catalogue values, so the `16` flows through the same `{ ...fields(p), kind: 'elite' }` spread as everything else, with no seed/provisioner code change needed for the value itself. |
-| `yannickSessions` | number \| null | Elite only. Still null — **unchanged by the v1.9.1 amendment**, which set `philSessions` only. Not invented; nulls are seeded as nulls, per the catalogue. |
-| `facility247` | boolean | Elite only. |
+| `name` | string | "6 tokens", "Elite", "Single token"… |
+| `kind` | string | `tokens \| elite \| single` — catalogue grouping. `tokens` covers the four `t-6`/`t-12`/`t-16`/`t-20` packages; `elite` and `single` are each their own one-package kind. |
+| `tokens` | number \| null | Tokens granted per billing period. **`null` means unlimited — Elite only** (`packages/elite`). No package at all (an athlete with no `packageId`) means zero tokens, never unlimited — `tokensFor()`'s own explicit rule. |
+| `price` | number | Per-period price. **In the schema per contract v1 but never written by the seed script** (no dollar amounts in seed data, policy — unchanged). `provision-family.mjs` DOES write it (production is the one place a real price reaches Firestore, the v1.1 rule). |
+| `pending` | boolean | **New, contract v2.0.** `true` on every package whose price the owner hasn't confirmed yet (all four token packages, plus `single`; `elite`'s `$1,000` is the owner's own stated figure, not pending). The UI may render "pending" beside a pending price. **Stripped from every seeded doc** (seed-firestore.mjs) alongside `price` — a seed with no real prices has no business asserting they're settled either — but kept on the production write (provisioner), same reasoning as `price` itself. |
+| `windowDays` | number | Rolling booking-window length (contract v2.0 pin D): `32` for every token package and `single`, `45` for `elite`. Replaces the old flat `SPECIALIST_BOOKING_WINDOW_DAYS` — every session type now uses the athlete's OWN package window, not a specialist-specific one. See [Periods, tokens and booking windows](#periods-tokens-and-booking-windows-contract-v20-sprint-12-part-1) below. |
+| `access247` | boolean | **Elite only** (absent on every other package — Elite is the only package with this key at all, not merely the only one where it is `true`). The 24/7 facility-access differentiator (pin L). 24/7 paperwork (waiver, age rule, door credentials, insurance) is outside the app. |
 
 ### `sessions/{sessionId}`
 
@@ -121,13 +133,14 @@ cases.
 |---|---|---|
 | `date` | string | `YYYY-MM-DD` (matches the id prefix). |
 | `time` | string | Block start, e.g. "3:00 PM". |
-| `type` | string | `training \| tournament \| phil \| mental` — decides which allowance pool a booking spends. **`phil`/`mental` are contract v1.7 (Sprint 9)** — see [Specialist 1-on-1 sessions](#specialist-1-on-1-sessions-phil-and-mental-contract-v17-sprint-9) below. |
-| `capacity` | number | From the generator's capacity config for `training`/`tournament` (15, both). **`phil`/`mental` are always 1** (contract v1.7) — "a specialist 1-on-1 IS a session with capacity 1," per TEAM.md's Sprint 9 design keystone. |
+| `type` | string | `training \| tournament \| phil \| mental` (plus seed-only `adult`, below) — display, roster and Tour standings only as of **contract v2.0 (Sprint 12 pin K)**: charging never branches on it (one fungible token pool — see [Periods, tokens and booking windows](#periods-tokens-and-booking-windows-contract-v20-sprint-12-part-1)). `phil`/`mental` are contract v1.7 (Sprint 9) — see [Specialist 1-on-1 sessions](#specialist-1-on-1-sessions-phil-and-mental-contract-v17-sprint-9) below. `adult` is **contract v2.0 (Sprint 12 pin J)**: the Saturday 2-4 PM college / Elite Am / Mid Am block, `bookable: false`, **seed-only** — the generator's Saturday output includes one so the emulator shows the real Saturday, but `sync-calendar-sessions.mjs` never produces this type at all (that block is titled on the real calendar so `classifyTitle` skips it as display-only, collected in person via Stripe, out of the app entirely). |
+| `capacity` | number | **Contract v2.0 (Sprint 12 pin J): flat 15, every generated session, every type** — the earlier per-type `{ training, tournament }` capacity map in `schedule.js` is gone (both values were already 15, so this is a shape simplification, not a numeric change). `phil`/`mental` hand-seeded slots keep their own v1.7.1 values (6 for `phil` group sessions, 1 for `mental` 1-on-1s), unchanged by v2.0 — pin K only changes what a booking spends, not the room's shape. |
+| `bookable` | boolean | **New, contract v2.0 (Sprint 12 pin J).** `true` on every regular generated session; `false` only on the seed-only Saturday `adult` display entry above. Not written by `sync-calendar-sessions.mjs` at all (production sessions have no opinion on this field in Part 1 — see the [sync note](#calendar--sessions-sync) below) and not written on the hand-seeded `phil`/`mental` specialist slots either (nothing currently reads this field outside the seed-only adult block, so there is no cross-lane inconsistency to reconcile yet — flagged for whoever wires the adult block's display treatment). |
 | `booked` | number | Denormalized confirmed-booking count for capacity display. Must be updated in the same transaction as a booking create/cancel (data-routing lane). The roster truth is always the bookings query — this is a display counter, and a reconcile can rebuild it from bookings at any time. **Contract v1.4** (Sprint 6): the exact transaction that maintains this field is pinned in [Booking transaction, attendance, and parent linkage](#booking-transaction-attendance-and-parent-linkage-contract-v14-sprint-6) below. |
 | `coachId` | string \| null | Assigned coach uid. |
-| `label` | string \| null | Real event names only ("Holiday Tournament"); null for regular blocks. |
+| `label` | string \| null | Real event names only ("Holiday Tournament"); null for regular blocks. **Contract v2.0:** the seed-only Saturday `adult` entry carries `"College / Elite Am / Mid Am"`, the same wording pin J uses for the block. |
 | `special` | boolean | True for explicitly-dated extras (holiday tournaments on closed days). |
-| `overflow` | boolean | True for Friday overflow blocks (off by default in the generator). |
+| ~~`overflow`~~ | — | **DELETED, contract v2.0 (Sprint 12 pin J).** Friday overflow (the toggle and the field) is gone along with the two-pool "Friday is capacity surplus" framing — the locked weekly schedule (Mon/Wed 3-5, Tue/Thu 3-6, Fri 3-4, all 60-min blocks) has no overflow concept anymore. `hooks/index.js`'s `s.overflow` read and AdminDashboard's `showFridayNote` (both routing/frontend lane files, out of DB-lane scope) still reference this field as of this sprint's DB-lane pass — flagged for those lanes, not fixed here. |
 | `status` | string | **Contract v1.2.** `scheduled \| cancelled`, default `scheduled`. The calendar sync sets `cancelled` — never deletes — when a synced session's calendar instance disappears but the session has bookings, so families are told rather than ghosted. |
 | `gcalEventId` | string \| null | **Contract v1.2.** The calendar instance id a synced session came from; null for generator-seeded sessions. The sync matches sessions by this id, so a retitled or retimed event updates its session instead of duplicating it. |
 | `coachNote` | string \| null | `<= 500` chars. **Contract v1.8 (Sprint 10 pin H).** Rules allow an update of ONLY this field (a second field-limited branch beside the `booked`-diff clause) by the assigned coach, any specialist, or mental/ops/owner. Backs `useSessionAttendance().setSessionNote(sessionId, note)` and the roster's "Add a session note" editor — the same inline-editor idiom the no-show reason already uses. Null on every seeded session except one past attended training block (see the [seeding workflow](#seeding--emulator-workflow) below). |
@@ -136,13 +149,24 @@ cases.
 
 Owner's direction (TEAM.md "Sprint 9 pins"): sessions with Yannick (mental
 game) and Phil (performance) become handleable through the app, in the
-Life Time class-scheduling idiom. **Design keystone: a specialist 1-on-1 IS a
-session with capacity 1 and its own pool.** Nothing else about the schema is
-new — the existing booking transaction, parent book-for-kid, My Schedule
-derivation, and attendance all apply to `type: 'phil'`/`'mental'` sessions
-completely unchanged; only `capacity` (always 1) and `bookings.pool` (always
-`'specialist'`, [below](#bookingsbookingid)) differ from a training/tournament
+Life Time class-scheduling idiom. **Design keystone (as of Sprint 9):** a
+specialist 1-on-1 IS a session with capacity 1 and its own pool. Nothing
+else about the schema was new then — the existing booking transaction,
+parent book-for-kid, My Schedule derivation, and attendance all apply to
+`type: 'phil'`/`'mental'` sessions completely unchanged; only `capacity`
+(always 1 for `mental`, 6 for `phil` per the v1.7.1 amendment below) and
+`bookings.pool` (always `'specialist'`) differed from a training/tournament
 block.
+
+**Superseded by contract v2.0 (Sprint 12 pin K): the "own pool" half of that
+keystone is gone.** A `phil` or `mental` booking spends an ordinary token
+now, same as any other type — `pool` is retired everywhere, not just here
+(see [`bookings`](#bookingsbookingid) below). What survives unchanged: the
+capacity-1/capacity-6 session shape itself, the booking transaction, parent
+book-for-kid, and `SPECIALIST_MONTHLY_CAP` as a **frequency** knob
+independent of tokens (`{ phil: null, mental: 1 }` — pin K). The rest of
+this section (production source, id convention, seed hand-add) is unchanged
+by v2.0 and stays accurate below.
 
 - **Production source stays the Google Calendar sync** (Sprint 4 pin,
   unchanged): `scripts/sync-calendar-sessions.mjs`'s `classifyTitle()` gains
@@ -225,18 +249,38 @@ node scripts/sync-calendar-sessions.mjs --from ... --to ... --dry-run \
 
 Mapped fields: id `YYYY-MM-DD-<n>` where n is the 0-based start-time order of
 that day's **bookable** events; `time` formatted like the generator
-(`'3:00 PM'`); `capacity` **per type** — `training`/`tournament` from
-`CAPACITY` in `frontend/src/portal/data/schedule.js` (replicated in the
-script with a source note), `phil`/`mental` always `1` (contract v1.7); since
-`capacity` is one of the script's `SYNCED_FIELDS` (see the masked-patch note
-just below) this corrects an existing session's capacity on re-sync too, not
-just a new one's. `label` null for the generic titles (`Training block`,
-`Tournament block`) and the event summary verbatim otherwise — this applies
-unchanged to `phil`/`mental` titles (a bare `"Phil"` or `"Yannick"` is not one
-of the generic phrases, so it becomes the label verbatim; nothing in v1.7
-special-cases specialist titles here). `booked` 0, `coachId` null,
-`special`/`overflow` false, `status` `'scheduled'`, `gcalEventId` the instance
-id. Times are read in `America/Chicago`, the calendar's timezone.
+(`'3:00 PM'`); `capacity` **per type** — its own local `CAPACITY = {
+training: 15, tournament: 15, phil: 6, mental: 1 }` map, **unchanged by
+contract v2.0** (TEAM.md's DB-lane bullet: "no capacity change... the sync's
+map stays"), even though `frontend/src/portal/data/schedule.js`'s own
+`CAPACITY` flattened from that same `{ training: 15, tournament: 15 }` shape
+to a plain `15` this sprint (pin J) — this script's `CAPACITY` was already a
+hand-replicated local copy with its own source-note comment, never an
+import, so the two constants simply drifted apart in *shape* while staying
+numerically identical; since `capacity` is one of the script's
+`SYNCED_FIELDS` (see the masked-patch note just below) this corrects an
+existing session's capacity on re-sync too, not just a new one's. `label`
+null for the generic titles (`Training block`, `Tournament block`) and the
+event summary verbatim otherwise — this applies unchanged to `phil`/`mental`
+titles (a bare `"Phil"` or `"Yannick"` is not one of the generic phrases, so
+it becomes the label verbatim; nothing in v1.7 special-cases specialist
+titles here). `booked` 0, `coachId` null, `special` false, `overflow` false,
+`status` `'scheduled'`, `gcalEventId` the instance id. **Contract v2.0:**
+this script never emitted `pool` (verified against the running code — `pool`
+never appears anywhere in its field-mapping) and needed no change for that
+reason; it does not write `bookable` (Part 1 leaves that field seed-only —
+see the `sessions` table's `bookable` row above). It **does still write
+`overflow: false`** on every new session it creates (checked against the
+running code, unchanged by this DB-lane pass per the explicit instruction to
+leave this script's capacity/classification logic alone) — the same
+**accepted-gap, harmless-legacy-field class as `pool`** on old `bookings`
+docs: `overflow` is deleted from the *generator's* output and from the
+`sessions` table's current-truth row above, but this production writer
+keeps setting it to `false` on create. Nothing reads it, so it is inert, not
+wrong — flagged here for the PM/routing lane as a follow-up cleanup, not
+fixed in this pass (out of this DB-lane task's explicit scope for this
+particular script). Times are read in `America/Chicago`, the calendar's
+timezone.
 
 **Upsert / cancel / delete semantics** (per run, over the `--from..--to` window):
 
@@ -273,31 +317,35 @@ One doc per athlete-session reservation. Doc id `{athleteId}_{sessionId}`.
 | `athleteId` | string | |
 | `sessionId` | string | Into `sessions/` — the session carries time/type/label; the booking does not duplicate them beyond the query fields below. |
 | `date` | string | `YYYY-MM-DD`, copied from the session so date-range queries need no join. |
-| `type` | string | `training \| tournament \| phil \| mental` — the session's type at booking time. `phil`/`mental` are **contract v1.7 (Sprint 9)**. |
-| `pool` | string | `training \| tournaments \| specialist` — which allowance pool this spends (`poolFor()` in packages.js). Stored, not derived, so the cycle-usage query is a pure index scan. **`specialist`** is **contract v1.7 (Sprint 9)**: both `phil` and `mental` bookings carry it, and it is a **third, separate pool** — it never touches the `training`/`tournaments` allowances, automatically, because [the cycle-usage query](#4-bookings-athleteid-asc-pool-asc-date-asc--cycle-usage) filters on `pool`, and `poolFor('phil' \| 'mental')` never returns `'training'` or `'tournaments'`. A `specialist` booking is capped separately too — see the monthly-cap note below. |
-| `status` | string | `confirmed \| cancelled \| attended \| noshow`. **Contract v1.4** (Sprint 6): the `confirmed -> attended \| noshow` transitions are attendance, pinned below. **Contract v1.7** (Sprint 9) adds a **member-initiated** transition, `confirmed <-> cancelled`, on any pool — see [Cancellation and re-booking](#cancellation-and-re-booking-contract-v17-sprint-9) below. |
+| `type` | string | `training \| tournament \| phil \| mental` — the session's type at booking time. `phil`/`mental` are **contract v1.7 (Sprint 9)**. **Contract v2.0 (Sprint 12 pin K):** display/roster/Tour only — a `phil` or `mental` booking spends an ordinary token like any other type now. |
+| ~~`pool`~~ | — | **RETIRED, contract v2.0 (Sprint 12 pin A).** Writers stop setting it; readers stop filtering on it. **Existing docs keep the field harmlessly** — this is a retirement, not a migration; nothing deletes it off old documents, and the rules' create-shape check drops `pool` from the required keys rather than forbidding it. `poolFor()` in `packages.js` (the function this field used to come from) is deleted below the seam's DEPRECATED banner. |
+| `periodKey` | string | **New, contract v2.0 (Sprint 12 pin B).** `'YYYY-MM-DD'`, write-once at create — the period **start** the booking's **session date** falls in, per `periodFor(sessions.date, household.periodAnchorDay)`. **Charging rule: a booking is charged against the period its session date falls in, never the period it is made in** — a January-anchored family booking a February session in January still gets `periodKey` = February's start; there is no "provisional" status in Part 1 (Part 2's `tokenPeriods` doc is what would make that distinction real). Rules shape-check it is a `YYYY-MM-DD` string; correctness (that it actually matches `periodFor()`'s output) is client-derived, the same accepted-gap class the cap check itself already is. |
+| `status` | string | `confirmed \| cancelled \| attended \| noshow`. **Contract v1.4** (Sprint 6): the `confirmed -> attended \| noshow` transitions are attendance, pinned below. **Contract v1.7** (Sprint 9) adds a **member-initiated** transition, `confirmed <-> cancelled` — see [Cancellation and re-booking](#cancellation-and-re-booking-contract-v17-sprint-9) below. **Contract v2.0:** cancellation is unchanged (pin G — the Aug 27 12-hour rule was never built and is formally withdrawn; "until the day before" stands). |
 | `householdId` | string | Denormalized from the athlete for the parent's cross-children view and household-scoped rules. |
 | `createdBy` | string | uid of the account that made the booking (parent or athlete). **Contract v1.4:** for a parent-created booking this is the *parent's* uid, not the athlete's — see the linkage note below. |
 | `createdAt` | timestamp | |
 
-**Allowance usage is derived, never stored.** "Used 3 of 8" comes from
-counting this collection for the athlete's current billing cycle — the
-[cycle-usage index](#4-bookings-athleteid-asc-pool-asc-date-asc--cycle-usage)
-makes that a cheap indexed read. There is no `used` counter on the athlete,
-package, or allowance anywhere, so there is nothing to drift when a booking is
-cancelled, a session is closed, or a write is retried. (`sessions.booked` is a
-per-session capacity display counter, not an allowance counter.)
+**Token usage is derived, never stored (contract v2.0, supersedes the v1
+"allowance usage" paragraph below in full).** "N left this period" comes from
+`tokensFor(athlete, pkg, bookings, waitlist, graceTokens, periodKey)`
+(`frontend/src/portal/data/packages.js`) counting **non-cancelled bookings
+carrying this `periodKey`** — a plain equality/range read over the athlete's
+bookings, not a `pool` filter. There is no `used` counter on the athlete,
+package, or period anywhere in Part 1 (Part 2's `tokenPeriods.granted` is a
+stored **fact about an issuance event**, not a `used` tally — see
+[below](#tokenperiods-contract-v20-part-2)). `sessions.booked` remains the
+one per-session capacity display counter, unrelated to token accounting.
 
-**The specialist monthly cap is derived the same way (contract v1.7, Sprint
-9).** `createBooking`'s pool check for `pool == 'specialist'` counts the
-athlete's **non-cancelled** `bookings` of that **type** (`phil` or `mental`,
-counted independently) within the current calendar month, and caps at
-`SPECIALIST_MONTHLY_CAP` — the tunable knob named in
-[Specialist 1-on-1 sessions](#specialist-1-on-1-sessions-phil-and-mental-contract-v17-sprint-9)
-above and owned by `data/specialists.js` (routing lane); this document names
-it rather than restating its value so retuning it can't leave the docs stale.
-Same discipline as every other allowance in this schema: nothing is stored,
-so nothing can drift.
+**The specialist monthly cap is now a frequency knob, not a pool (contract
+v2.0, Sprint 12 pin K) — supersedes the v1.7 "specialist monthly cap"
+paragraph in full.** Phil and Yannick sessions spend an ordinary token; what
+`SPECIALIST_MONTHLY_CAP` still gates is **frequency**, independent of
+tokens: `SPECIALIST_MONTHLY_CAP = { phil: null, mental: 1 }` — `phil: null`
+means tokens are the only limit (the old fitness-package Phil cap is
+deleted); `mental: 1` per calendar month is the owner's stated 3-4 week
+cadence, still counted the same **non-cancelled bookings of that type, exact
+calendar month** way the v1.7 cap always counted, just no longer creating an
+allowance of its own. `isSpecialistType` stays for display only.
 
 ### Booking transaction, attendance, and parent linkage (contract v1.4, Sprint 6)
 
@@ -1144,6 +1192,152 @@ has needed so far ([index 4](#4-bookings-athleteid-asc-pool-asc-date-asc--cycle-
 [index 7](#7-bookings-status-asc-date-asc--admin-no-show-query-contract-v18-sprint-10)) —
 so `firestore.indexes.json` is unchanged this sprint.
 
+## Periods, tokens and booking windows (contract v2.0, Sprint 12, Part 1)
+
+The token model (TEAM.md "Sprint 12 pins — the token model"). **Design
+keystone: ONE fungible token pool, derived, never stored.** A token is spent
+by any non-cancelled booking of any session type; `used` in a period is a
+count over `bookings`; `reserved` (Part 2) is a count over `waitlist`
+entries; a grace token (Part 2) is consumed when a booking references it.
+Charging never branches on `sessions.type` — see the amended invariant in
+TEAM.md's pin. Delivered in two parts (TEAM.md): **Part 1** (this document,
+current) covers A, B, D, K, L, M, J-code, I; **Part 2** (Sprint 13) covers C,
+E, F, H — interfaces pinned now, documented below, seeded empty, so Part 1
+data is valid Part 2 data the moment those land.
+
+**Periods.** A period is the household's billing cycle, anchored on a
+day-of-month via `households.periodAnchorDay` (int `1..28`, absent == 1) —
+**not** the calendar month. `periodFor(dateISO, anchorDay)`
+(`frontend/src/portal/data/packages.js`, pure, both data modes) returns
+`{ periodKey, periodEnd }`: `periodKey` is the period **start** as
+`'YYYY-MM-DD'`, the same string `bookings.periodKey` stores. Anchor 15 puts
+`2026-09-10` in the period `2026-08-15..2026-09-14`.
+
+**Charging rule.** A booking is charged against the period its
+**`sessions.date`** falls in — never the period it is made in. That is the
+whole of "hard expiry" in this design: a family can book into a future
+period today, and that booking's `periodKey` is simply that future period's
+start; there is no "provisional" status in Part 1 (Part 2's `tokenPeriods`
+is what would formalize the distinction between an issued and an
+as-yet-unissued period — see below). The **advance-booking cap falls out for
+free**: the client cap for any period is `pkg.tokens` (Part 1) or the
+period's `tokenPeriods` grant (Part 2), so a family can hold at most one
+package's worth of bookings in any single period, present or future.
+
+**`tokensFor(athlete, pkg, bookings, waitlist, graceTokens, periodKey)`** →
+`{ granted, used, reserved, grace, left, unlimited }` — every "N left this
+period" surface computes from this one function, so none can disagree:
+`granted` = `pkg.tokens` in Part 1 (Part 2 reads the period's `tokenPeriods`
+doc when one exists, falling back to `pkg.tokens` when absent); `used` =
+non-cancelled bookings carrying this `periodKey`; `reserved` = waitlist
+entries carrying this `periodKey` (Part 2; always 0 in Part 1, no
+`waitlist` collection is populated yet); `left` = `granted - used -
+reserved`, floored at 0; `unlimited` when `pkg.tokens === null` (Elite).
+**No package at all means zero tokens, not unlimited.**
+
+**Booking windows (pin D).** `SPECIALIST_BOOKING_WINDOW_DAYS` (the old flat
+specialist-only window) is gone from the booking-gate path — every session
+type now uses the athlete's own package window: `windowDaysFor(pkg)` → `32`
+for every token package and `single`, `45` for `elite`. The window **rolls
+at 07:00 America/Chicago**, not midnight: `anchor = localNow.hour >= 7 ?
+localToday : localToday - 1; openThrough = anchor + windowDays; bookable iff
+session.date <= openThrough`. Pure `openThrough(now, windowDays)` /
+`windowOpensOn(sessionDateISO, windowDays)` in
+`frontend/src/portal/data/calendar.js` (both already on the PM seam this
+sprint's worktrees share). `assertWithinMonthlyCap` in `live.js` (routing
+lane) becomes `assertWithinPeriodCap`: reads the athlete, its package, the
+period's bookings (+ waitlist/grace/`tokenPeriods` in Part 2) inside the
+transaction; skips when `pkg.tokens === null`; typed reasons
+`'no-tokens-left'`, `'outside-window'`, `'membership-inactive'` (Part 2).
+
+### `tokenPeriods` (contract v2.0, Part 2)
+
+**Documented now, seeded empty — Sprint 13, not built this sprint.**
+`tokenPeriods/{athleteId}_{periodKey}`: `{ athleteId, householdId,
+periodKey, periodEnd, granted, source: 'stripe' \| 'ops', createdAt }`.
+`granted` is **stored**, not derived — it is a fact about a payment/issuance
+event (the same class as `tournamentResults.score`), not a tally. Written by
+the Stripe handler (admin SDK) or by ops/owner (rules: create-only,
+shape-checked, id must equal `{athleteId}_{periodKey}`). **Members read own;
+no member write.** **Absent == `pkg.tokens`** — nothing provisioned in Part
+1 breaks when Part 2 lands.
+
+### `graceTokens` (contract v2.0, Part 2)
+
+**Documented now, seeded empty — Sprint 13, not built this sprint.**
+`graceTokens/{auto}`: `{ athleteId, householdId, expiresAt (ISO date,
+minted + 30 days), reason: 'session-cancelled' \| 'waitlist-expired',
+sourceSessionId, createdBy, createdAt }`. Created by ops/owner (rules,
+shape) or the sweep script (`scripts/sweep-waitlist.mjs`, Part 2, admin).
+Members read own. **Consumed is derived, never stored:** a non-cancelled
+booking with `graceTokenId == id`. Exactly two minting triggers (TEAM.md pin
+E): staff cancels a session (every confirmed booking on it), or a waitlist
+entry's session date passes unpromoted. An athlete's own cancellation,
+leaving a waitlist, or revocation mints nothing.
+
+### `waitlist` (contract v2.0, Part 2)
+
+**Documented now, seeded empty — Sprint 13, not built this sprint** (except
+its index, added now — see [v2.0 index reasoning](#v20-index-reasoning-sprint-12--the-token-model)
+below).
+`waitlist/{sessionId}_{athleteId}`: `{ sessionId, athleteId, householdId,
+date, periodKey, joinedAt, createdBy }` — the same one-entry-per-athlete-
+per-session keyspace shape `bookings` uses. Member create (own athlete /
+household parent; rules `get()` the session and require `booked >=
+capacity` and `status == 'scheduled'`); member delete (leave); admin delete
+(promote / expire). Elite entries count `0` reserved. **Promotion is
+server-side** (Part 2 Firestore trigger on `sessions/{id}` where `booked`
+decreased) — not built in Part 1.
+
+### `stripeEvents` (contract v2.0, Part 2)
+
+**Documented now, seeded empty — Sprint 13, not built this sprint.**
+`stripeEvents/{eventId}` — the Stripe webhook handler's idempotency ledger,
+keyed by the Stripe `event.id` itself so a redelivered event is a no-op by
+construction (the same "id is the dedupe key" pattern this schema already
+uses for `bookings`/`contractLogs`/`tournamentResults`, just with an
+externally-assigned id instead of a composed one). **Admin-only collection**
+— no member or staff client read or write; the webhook handler (admin SDK)
+is the sole writer. Not seeded, not provisioned: this collection has zero
+documents until the Part 2 handler deploys.
+
+### v2.0 index reasoning (Sprint 12 — the token model)
+
+- **`bookings` period-usage query — no new composite needed.** `tokensFor()`
+  filters an already-fetched bookings array by `periodKey` equality in
+  memory (the same "filter the extra dimension client-side" discipline
+  [index 4](#4-bookings-athleteid-asc-pool-asc-date-asc--cycle-usage)'s own
+  note already established for `status`) — the Firestore-side read is
+  `bookings where athleteId == :id and date >= :periodStart and date <=
+  :periodEnd`, because **`periodKey` is equivalent to a date range**
+  (`periodFor()` returns both the start, which IS `periodKey`, and the end).
+  That is exactly the shape [index 2](#2-bookings-athleteid-asc-date-asc--my-schedule)
+  (`athleteId ASC, date ASC`) already serves — a range filter on `date` plus
+  an equality on `athleteId`, unchanged from the query My Schedule has always
+  run. **`bookings (athleteId, periodKey)` is therefore not added** — it
+  would duplicate an index the athlete-scoped period read never actually
+  needs, since the date-range formulation already rides index 2.
+- **`waitlist (sessionId ASC, joinedAt ASC)` — added now, ahead of the
+  collection existing (Part 2).** The eventual promotion-trigger read is
+  `waitlist where sessionId == :id orderBy joinedAt asc` — an equality
+  filter and an `orderBy` on a **different** field, the same two-distinct-
+  field shape that already forced [index 4](#4-bookings-athleteid-asc-pool-asc-date-asc--cycle-usage)/[index 5](#5-bookings-sessionid-asc-status-asc--session-roster)/[index 7](#7-bookings-status-asc-date-asc--admin-no-show-query-contract-v18-sprint-10)
+  into real composites elsewhere in this file (unlike [index 1](#1-season-browsing--no-composite-needed-deploy-verified)'s
+  range-plus-orderBy-on-the-*same*-field case, which rides the automatic
+  single-field index for free). **Deploying a composite index for a
+  collection with zero documents is harmless** — Firestore does not require
+  the collection or its fields to already have data, so pinning this now
+  means Part 2's trigger never waits on an index build after the fact.
+- **`bookings (athleteId, pool, date)` (index 4) is now vestigial** — `pool`
+  is retired (pin A) and nothing in Part 1 queries `athleteId` + `pool` +
+  `date` together anymore (the period-usage read above rides index 2
+  instead, which does not include `pool`). **Left in
+  `firestore.indexes.json` rather than removed**: existing prod `bookings`
+  docs still carry `pool` harmlessly, and removing a deployed index is a
+  separate, deliberate deploy step this DB-lane pass does not take
+  unilaterally. Flagged here for the PM to decide whether to prune it in a
+  later sprint — not acted on in this pass.
+
 ## Seeding & emulator workflow
 
 Both npm scripts live in the **root `package.json`** (created for this — the
@@ -1163,11 +1357,63 @@ The seed script:
 - bundles `season.js` / `packages.js` / `seed.js` from frontend source with
   esbuild (`--bundle --format=cjs --platform=node`) and executes them — the
   season and catalogue are **never retyped**; requires `frontend/` deps
-  installed (date-fns) for the bundle step;
+  installed (date-fns) for the bundle step. **Contract v2.0 (Sprint 12):**
+  the packages bundle moves onto the seam's `ALL_PACKAGES`/`periodFor`
+  (above the DEPRECATED banner in `packages.js`) — `GOLF_PACKAGES`,
+  `DROP_IN`, `FITNESS_PACKAGES`, `ELITE_TIERS`, `poolFor` are no longer
+  imported by this script at all;
 - refuses to run without `FIRESTORE_EMULATOR_HOST` (unless `--dry-run`), and
   refuses any non-local host, so it structurally cannot write to production;
 - writes via the Firestore REST API, so the repo root needs no dependencies;
-- seeds no dollar amounts, no Stripe ids (null), and no medical documents;
+- seeds no dollar amounts, no Stripe ids (null), no `pending` markers
+  (contract v2.0 — stripped alongside `price`, both by the same `fields()`
+  helper), and no medical documents;
+- **contract v2.0 (Sprint 12 pin B) — `households.periodAnchorDay`:**
+  written explicitly (not left absent) on every seeded household so a raw
+  emulator read shows the fact directly. Whitfield: `1`. A second, small,
+  fully-invented demo household, **`parker`** (never a real family, same
+  class as Whitfield), is anchored on `15` — TEAM.md's DB-lane bullet asks
+  for the mid-month cycle to be exercised, and the Contreras family in
+  `enrollmentRequests` is only a pending *request*, not a provisioned
+  household, so it cannot carry an anchor. `parker`'s one athlete,
+  `sage-parker`, is also this seed's **one Elite athlete** — the pin asks
+  for one in the emulator (a gap this document flagged as unresolved back
+  in the Sprint 11 seeding notes below, "No emulator athlete is seeded on
+  an Elite package" — now closed); the two facts are combined onto one
+  household/athlete deliberately, since
+  nothing requires them to be different households. No `users` doc backs
+  `parker` (no QA sign-in story is pinned for it) — it is an
+  athletes/households pair only, the same shape the MackBee siblings have in
+  `provision-family.mjs`;
+- **contract v2.0 (Sprint 12 pin A) — `athletes.packageId` moves onto the
+  token catalogue and `fitnessPackageId` is deleted entirely** (not merely
+  left unset): jordan (was `g-8-3`) → `t-12`; reese and nico (both were
+  `g-4-2`) → `t-6` each — "sensible t-* for reese/nico" per TEAM.md, not an
+  invented upgrade. `seed.js`'s `HOUSEHOLD.children[].packageId` (still the
+  old two-pool ids — `seed.js` is the data-routing/frontend lanes' file, not
+  this script's to edit) is overridden locally via `WHITFIELD_PACKAGE_IDS`
+  rather than read through, the same "override the scaffold's stale ids
+  locally" move `WHITFIELD_DOBS` already makes for `dob`;
+- **contract v2.0 (Sprint 12 pin B) — every seeded `bookings` doc carries
+  `periodKey`**, computed with the seam's `periodFor(session.date,
+  household.periodAnchorDay)` — the Whitfield athletes' regular and
+  specialist bookings alike (jordan's past Phil bookings included), all
+  against `WHITFIELD_ANCHOR_DAY` (`1`). **`pool` is no longer written at
+  all** — the three literal `pool: 'specialist'` bookings from Sprint 9/11
+  now carry `periodKey` in its place, no `pool` key at all;
+- **contract v2.0 (Sprint 12 pin J) — the generated season's shape changes**
+  with `schedule.js`: per-day weekday blocks (Mon/Wed 3-5 PM, Tue/Thu 3-6 PM,
+  Fri 3-4 PM, 60 min each), Saturday 9 AM training + four 60-min blocks
+  (10/11 tournament, 12/1 training) plus ONE seed-only `type: 'adult',
+  bookable: false` display entry for the real Saturday 2-4 PM college /
+  Elite Am / Mid Am block. `overflow` and the `friday` generator option are
+  both deleted; every regular session gets `bookable: true`; `capacity` is a
+  flat `15` (was already `15` for both `training`/`tournament`, so no
+  numeric change, only a shape one). See
+  [Periods, tokens and booking windows](#periods-tokens-and-booking-windows-contract-v20-sprint-12-part-1)
+  above for the schema-level detail and
+  [Calendar → sessions sync](#calendar--sessions-sync) below for why
+  `sync-calendar-sessions.mjs` needed no equivalent change;
 - seeds real `bookings` for all three Whitfield athletes against real
   generated session ids (contract v1.4) and increments each referenced
   session's `booked` to match — the same invariant the booking transaction
@@ -1293,3 +1539,12 @@ The seed script:
   branch exercisable in the emulator for the live pass, that needs a new
   seeded athlete (or a deliberate package change on an existing one), which
   is a product decision, not this report's call to make unilaterally.
+  **Resolved, contract v2.0 (Sprint 12):** TEAM.md's Sprint 12 DB-lane bullet
+  makes that product decision explicitly ("one Elite athlete") — this seed
+  now adds the small `parker` household with one Elite athlete,
+  `sage-parker`, per the note earlier in this section (search
+  "`parker`" above), rather than reassigning a Whitfield package.
+  `packages/elite-247` no longer exists in the v2.0 catalogue (retired,
+  pin A) — 24/7 access is `packages/elite.access247: true` now, not a
+  second tier — so this whole bullet's `philSessions`/`elite-247` mechanics
+  are historical record of the v1.9.1 ruling, not current schema.

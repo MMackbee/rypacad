@@ -73,14 +73,12 @@ export const SEASON_BOUNDS = { start: '2026-11-02', end: '2027-02-27' };
  * @param {object} [opts]
  * @param {string[]} [opts.closures]  Defaults to the provisional calendar above.
  * @param {Array} [opts.extras]       Defaults to the holiday tournaments above.
- * @param {boolean} [opts.friday]     Friday overflow blocks, off by default.
  */
 export function buildSeason({
   closures = HOLIDAY_CLOSURES_2026_27,
   extras = HOLIDAY_TOURNAMENTS_2026_27,
-  friday = false,
 } = {}) {
-  return generateSeason({ ...SEASON_BOUNDS, closures, extras, friday });
+  return generateSeason({ ...SEASON_BOUNDS, closures, extras });
 }
 
 /**
@@ -167,13 +165,10 @@ export function upcomingDates(sessions, from, count = 7) {
 }
 
 /**
- * Capacity as the booking list shows it.
- *
- * Note this reads `CAPACITY.tournament`, which schedule.js flags as OPEN and
- * unresolved: at 14 per block the season serves far fewer tournament entries
- * than the packages promise. That arithmetic is a real problem, but it is a
- * scheduling decision rather than a UI one — the screens render whatever
- * capacity is configured and will stay correct when it changes.
+ * Capacity as the booking list shows it. `session.capacity` is a flat number
+ * on every session doc (contract v2.0, pin J) — the earlier per-type
+ * `CAPACITY.tournament`/`CAPACITY.training` split is gone along with the
+ * two-pool model it served, so this needs no per-type branch.
  */
 export function capacityFor(session) {
   const left = Math.max(0, session.capacity - session.booked);
