@@ -30,8 +30,7 @@ import { TOKEN_PACKAGES, periodFor, tokensFor } from './packages';
 // moves its two-pool AllowancePools gallery states onto the token shapes
 // below. See the DEPRECATED block near the bottom of this file and
 // packages.js's own DEPRECATED banner, which these two names read from.
-import { GOLF_PACKAGES, makeAllowance } from './packages';
-import { longDayLabel, nextMonthFirstShort, todayISO } from './calendar';
+import { longDayLabel, todayISO } from './calendar';
 
 /** The real current date, formatted for screen headers. */
 export const TODAY = longDayLabel(todayISO());
@@ -377,25 +376,3 @@ export const CODE_OF_GRIT = [
   'Support Each Other & Enjoy the Journey',
 ];
 
-/* ========================================================================== *
- * DEPRECATED (contract v2.0, Sprint 12) - the two-pool demo allowances this
- * file used to build for every athlete. TOKENS/TOKENS_EXHAUSTED above are
- * the replacement; every hook/screen this lane owns has moved off these two.
- * They stay ONLY because StatesHarness.js (frontend-owned) still imports
- * them for its AllowancePools gallery states - deleted once the frontend
- * lane moves that gallery onto the token shapes, same as packages.js's own
- * DEPRECATED banner. Do not add new callers.
- * ========================================================================== */
-const DEPRECATED_GOLF_PACKAGE = GOLF_PACKAGES.find((p) => p.id === 'g-8-3');
-
-export const ALLOWANCE = makeAllowance(DEPRECATED_GOLF_PACKAGE, {
-  trainingUsed: 3,
-  tournamentsUsed: 1,
-  resetsOn: nextMonthFirstShort(todayISO()),
-});
-
-export const ALLOWANCE_NO_TOURNAMENTS = makeAllowance(DEPRECATED_GOLF_PACKAGE, {
-  trainingUsed: 3,
-  tournamentsUsed: DEPRECATED_GOLF_PACKAGE.tournaments,
-  resetsOn: nextMonthFirstShort(todayISO()),
-});

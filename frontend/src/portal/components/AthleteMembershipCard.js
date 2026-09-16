@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { color, font } from '../tokens';
-import { useAssignPackages } from '../hooks';
+import { useAssignPackages, useHouseholdSettings } from '../hooks';
 import Button from './Button';
 import { SelectField } from './Field';
 import NumericField from './NumericField';
@@ -21,15 +21,10 @@ import { ALL_PACKAGES } from '../data/packages';
  * ops/owner get the editor; coach/mental see the identical facts read-only;
  * parent/athlete see nothing here (their own view is screens/Membership.js).
  *
- * INTEGRATION: useHouseholdSettings() is a genuinely NEW hook (TEAM.md's
- * Sprint 12 hook seam) that does not exist anywhere in this worktree's
- * hooks/index.js yet (confirmed by grep) — CRA's webpack build hard-fails on
- * a statically-known import of a missing export (the Sprint 11 lesson,
- * TEAM.md integration notes), so it is NOT imported here. The anchor-day
- * control below is driven by a local harness fixture instead (`anchorDay`
- * state seeded from `initialAnchorDay`, save is a local no-op that resolves
- * after a beat) — see the `// INTEGRATION:` comment at its call site. Routing
- * wires the real hook at merge.
+ * The period anchor control writes through useHouseholdSettings(householdId)
+ * (routing lane; wired at Sprint 12 integration). The household and its
+ * current anchor arrive on the athlete-detail payload (householdId,
+ * periodAnchorDay), which is why the card needs no household hook of its own.
  */
 
 const PACKAGE_SELECT_OPTIONS = ALL_PACKAGES.map((p) => ({
@@ -37,7 +32,7 @@ const PACKAGE_SELECT_OPTIONS = ALL_PACKAGES.map((p) => ({
   label: `${p.name} — $${p.price}${p.pending ? ' (pending)' : ''}`,
 }));
 
-export default function AthleteMembershipCard({ athleteId, athlete, role, initialAnchorDay = 1 }) {
+export default function AthleteMembershipCard({ athleteId, athlete, role }) {
   const canEdit = role === 'ops' || role === 'owner';
   const canView = canEdit || role === 'coach' || role === 'mental';
   if (!canView) return null;
@@ -55,7 +50,12 @@ export default function AthleteMembershipCard({ athleteId, athlete, role, initia
   }
 
   return (
-    <MembershipEditor athleteId={athleteId} currentPackageId={currentPackageId} initialAnchorDay={initialAnchorDay} />
+    <MembershipEditor
+      athleteId={athleteId}
+      currentPackageId={currentPackageId}
+      householdId={athlete?.householdId ?? null}
+      initialAnchorDay={athlete?.periodAnchorDay ?? 1}
+    />
   );
 }
 
@@ -68,7 +68,7 @@ function ReadOnlyRow({ label, value, style }) {
   );
 }
 
-function MembershipEditor({ athleteId, currentPackageId, initialAnchorDay }) {
+function MembershipEditor({ athleteId, currentPackageId, householdId, initialAnchorDay }) {
   const [packageId, setPackageId] = useState(currentPackageId ?? '');
   // The athlete record loads after mount, so the select follows the loaded
   // value once it arrives - and after a save, when the bump refetches it (a
@@ -134,7 +134,7 @@ function MembershipEditor({ athleteId, currentPackageId, initialAnchorDay }) {
 
       <div style={{ height: 1, background: color.rule, margin: '16px 0' }} />
 
-      <PeriodAnchorEditor initialAnchorDay={initialAnchorDay} />
+      <PeriodAnchorEditor householdId={householdId} initialAnchorDay={initialAnchorDay} />
     </Card>
   );
 }
@@ -145,23 +145,31 @@ function MembershipEditor({ athleteId, currentPackageId, initialAnchorDay }) {
  * does not exist in this worktree's hooks yet, so this control runs on a
  * local fixture rather than a real write.
  */
-function PeriodAnchorEditor({ initialAnchorDay }) {
+function PeriodAnchorEditor({ householdId, initialAnchorDay }) {
   const [anchorDay, setAnchorDay] = useState(initialAnchorDay);
-  const [saving, setSaving] = useState(false);
+  // The athlete record (and its household's anchor) loads after mount.
+  React.useEffect(() => {
+    setAnchorDay(initialAnchorDay);
+  }, [initialAnchorDay]);
+  const settings = useHouseholdSettings(householdId);
   const [saved, setSaved] = useState(false);
+  const [error, setError] = useState(null);
   const dirty = anchorDay !== initialAnchorDay;
 
   const handleSave = async () => {
-    setSaving(true);
     setSaved(false);
-    // INTEGRATION: wire useHouseholdSettings().setPeriodAnchorDay(anchorDay)
-    // here once routing lands the hook — this resolve() stands in for it so
-    // the control is reviewable (Save/Saved cycle, dirty gating) without a
-    // real write.
-    await new Promise((resolve) => setTimeout(resolve, 500));
-    setSaving(false);
-    setSaved(true);
-    setTimeout(() => setSaved(false), 2600);
+    setError(null);
+    try {
+      await settings.setPeriodAnchorDay(anchorDay);
+      setSaved(true);
+      setTimeout(() => setSaved(false), 2600);
+    } catch (err) {
+      setError(
+        err && typeof err.message === 'string' && err.message
+          ? err.message
+          : 'The anchor day could not be saved. Try again.'
+      );
+    }
   };
 
   return (
@@ -179,10 +187,21 @@ function PeriodAnchorEditor({ initialAnchorDay }) {
             onChange={(v) => setAnchorDay(Math.min(28, Math.max(1, Number(v) || 1)))}
           />
         </div>
-        <Button height={44} disabled={!dirty} loading={saving} onClick={handleSave} style={{ flex: 'none', width: 120 }}>
-          {saving ? 'Saving' : 'Save'}
+        <Button
+          height={44}
+          disabled={!dirty || !householdId}
+          loading={settings.saving}
+          onClick={handleSave}
+          style={{ flex: 'none', width: 120 }}
+        >
+          {settings.saving ? 'Saving' : 'Save'}
         </Button>
       </div>
+      {error ? (
+        <Body size={12} tone={color.error} style={{ marginTop: 11 }}>
+          {error}
+        </Body>
+      ) : null}
       {saved ? <SavedToast message="Anchor day saved" style={{ marginTop: 11 }} /> : null}
     </div>
   );

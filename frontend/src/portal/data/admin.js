@@ -16,10 +16,10 @@
  * survives every filter — filtering it out would hide work that still exists.
  */
 export const OUTSTANDING = [
-  { id: 'o1', who: 'Whitfield household', why: 'Payment failed — retry 2 of 3', tag: 'Billing', tone: 'red', packageIds: ['g-8-3', 'g-4-2'] },
-  { id: 'o2', who: 'M. Okonkwo', why: '3 no-shows this month', tag: 'Attendance', tone: 'red', packageIds: ['g-8-3'] },
-  { id: 'o3', who: 'R. Sandoval', why: 'Contract at 54% with 6 days left', tag: 'Contract', tone: 'yellow', packageIds: ['g-4-2'] },
-  { id: 'o4', who: '2 athletes', why: 'Diagnostic not entered since enrollment', tag: 'Onboarding', tone: 'yellow', packageIds: ['g-4-2'] },
+  { id: 'o1', who: 'Whitfield household', why: 'Payment failed — retry 2 of 3', tag: 'Billing', tone: 'red', packageIds: ['t-12', 't-6'] },
+  { id: 'o2', who: 'M. Okonkwo', why: '3 no-shows this month', tag: 'Attendance', tone: 'red', packageIds: ['t-12'] },
+  { id: 'o3', who: 'R. Sandoval', why: 'Contract at 54% with 6 days left', tag: 'Contract', tone: 'yellow', packageIds: ['t-6'] },
+  { id: 'o4', who: '2 athletes', why: 'Diagnostic not entered since enrollment', tag: 'Onboarding', tone: 'yellow', packageIds: ['t-6'] },
   { id: 'o5', who: 'Issue 14 newsletter', why: 'Fitness Corner outstanding, deadline passed', tag: 'Newsletter', tone: 'yellow', packageIds: null },
 ];
 
@@ -32,10 +32,10 @@ export const ADMIN_METRICS = {
 
 /** Rendered from data — package names and counts are never hardcoded in a screen. */
 export const ENROLLMENT_BY_PACKAGE = [
-  { id: 'g-4-2', name: '4 + 2', athletes: 38 },
-  { id: 'g-8-3', name: '8 + 3', athletes: 41 },
-  { id: 'g-12-4', name: '12 + 4', athletes: 24 },
-  { id: 'g-16-4', name: '16 + 4', athletes: 9 },
+  { id: 't-6', name: '6 tokens', athletes: 38 },
+  { id: 't-12', name: '12 tokens', athletes: 41 },
+  { id: 't-16', name: '16 tokens', athletes: 24 },
+  { id: 't-20', name: '20 tokens', athletes: 9 },
   { id: 'elite', name: 'Elite', athletes: 5 },
 ];
 
@@ -54,7 +54,7 @@ export const BLOCK_FILL = [
 
 export const TIER_FILTERS = [
   { id: 'all', label: 'All tiers', count: 117 },
-  { id: 'g-8-3', label: '8 + 3 only', count: 41 },
+  { id: 't-12', label: '8 + 3 only', count: 41 },
 ];
 
 /* ---------------------------------------------------------------- 16 ----- */

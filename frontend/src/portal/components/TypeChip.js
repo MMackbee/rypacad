@@ -22,6 +22,9 @@ export const TYPES = {
   // distinguished from those by label text alone rather than a new tint.
   phil: { label: 'Performance', fg: color.primary, bg: tint.green, bd: color.primary },
   mental: { label: 'Mental game', fg: color.primary, bg: tint.green, bd: color.primary },
+  // Contract v2.0 pin J: the Saturday 2-4 PM college / Elite Am / Mid Am
+  // block - display-only, never bookable here. Neutral, like training.
+  adult: { label: 'Adults', fg: color.textSecondary, bg: 'transparent', bd: color.border },
 };
 
 export default function TypeChip({ type = 'training', style }) {

@@ -94,7 +94,7 @@ function WelcomeStep({ bullets }) {
 }
 
 /**
- * The two-pool explainer. The allowance is the seed's, read through the pinned
+ * The tokens explainer. The position is the seed's, read through the pinned
  * practice seam — the same numbers every real screen in this walkthrough shows.
  */
 function PoolsStep() {
@@ -102,15 +102,14 @@ function PoolsStep() {
   return (
     <OwnStep>
       <Card large>
-        <SectionLabel style={{ marginBottom: 12 }}>Your allowance this cycle</SectionLabel>
-        <AllowancePools allowance={data?.allowance} />
+        <SectionLabel style={{ marginBottom: 12 }}>Your tokens this period</SectionLabel>
+        <AllowancePools tokens={data?.tokens} />
       </Card>
       <Card large>
         <Body size={13}>
-          Training sessions and tournament entries are two separate pools, and they never
-          substitute for each other: spending every tournament entry leaves all of your training
-          sessions bookable, and the reverse. Both reset each billing cycle, and every balance in
-          the portal shows both numbers.
+          Every session spends one token — training, tournaments, Phil's performance
+          sessions and Yannick's mental game sessions alike. Tokens are issued each billing
+          period and expire when it ends, and every balance in the portal is that one number.
         </Body>
       </Card>
     </OwnStep>
@@ -153,8 +152,7 @@ function DoneStep({ track, booking, loggedDay }) {
         </div>
         <Body size={13} style={{ marginTop: 14 }}>
           Those entries were practice, and they are already gone. Your real schedule, the
-          Commitment Contract, and both allowance pools — training and tournaments — are exactly
-          as they were.
+          Commitment Contract, and your token balance are exactly as they were.
         </Body>
       </Card>
     </OwnStep>
@@ -227,7 +225,7 @@ const doneStep = {
 
 export const ATHLETE_STEPS = [
   welcomeStep([
-    'Book your training and tournament blocks — two separate allowances, always shown as two numbers.',
+    'Book training and tournament blocks — every session spends one token from your period.',
     'Log your Commitment Contract day in one tap.',
     'Log your practice minutes and watch your commitment streak build.',
   ]),
@@ -237,7 +235,7 @@ export const ATHLETE_STEPS = [
     instruction: {
       title: 'Look around',
       body:
-        'This is your home screen: your next session, your Commitment Contract, and what is left of both allowance pools. Scroll it, then continue.',
+        'This is your home screen: your next session, your Commitment Contract, and the tokens you have left this period. Scroll it, then continue.',
     },
     render: () => (
       <Fill>
@@ -271,7 +269,7 @@ export const ATHLETE_STEPS = [
   },
   {
     id: 'pools',
-    title: 'Two allowances',
+    title: 'Your tokens',
     instruction: {
       title: 'One rule to keep',
       body: 'The single most useful thing to know before you book on your own.',
@@ -283,7 +281,7 @@ export const ATHLETE_STEPS = [
 
 export const PARENT_STEPS = [
   welcomeStep([
-    'Book training and tournament blocks for your athletes — two separate allowances, always shown as two numbers.',
+    'Book training and tournament blocks for your athletes — every session spends one token from that athlete\'s period.',
     'See each athlete’s Commitment Contract standing at a glance.',
     'Follow the RYP Tour — the season leaderboard for Saturday tournaments — and choose exactly how the academy reaches you.',
   ]),

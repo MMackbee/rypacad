@@ -12,6 +12,10 @@ export const ATHLETE_DETAIL = {
   // preselects from; matches the emulator seed's jordan. `fitnessPackageId`
   // is DROPPED (contract v2.0, Sprint 12 pin A: the field is retired).
   packageId: 't-12',
+  // Sprint 12 integration: the household the editor's period anchor belongs to.
+  householdId: 'whitfield',
+  householdName: 'Whitfield family',
+  periodAnchorDay: 1,
   attendance: '94%',
   attendanceLabel: 'attendance since Nov',
   board: '3 of 4',

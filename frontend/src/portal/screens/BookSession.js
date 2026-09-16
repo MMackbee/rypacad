@@ -423,6 +423,9 @@ function DaySessionList({ iso, sessions, tokens, reserving, disabled, onSelect }
           const hasGrace = (tokens?.grace?.length ?? 0) > 0;
           const tokensSpent = tokens ? !tokens.unlimited && tokens.left === 0 && !hasGrace : false;
           const pending = reserving === session.id;
+          // Contract v2.0 pin J: the Saturday adult block is display-only -
+          // adults pay at the front desk; it is never a junior booking.
+          const displayOnly = session.bookable === false;
 
           return (
             <SessionCard
@@ -431,11 +434,11 @@ function DaySessionList({ iso, sessions, tokens, reserving, disabled, onSelect }
               meridiem={meridiem}
               type={session.type}
               name={displayNameFor(session)}
-              variant={isFull || tokensSpent ? 'full' : 'default'}
+              variant={isFull || tokensSpent || displayOnly ? 'full' : 'default'}
               gutter={54}
               ruleHeight={36}
-              onClick={isFull || tokensSpent || reserving || disabled ? undefined : () => onSelect(session)}
-              spendNote={<SpendNote tokens={tokens} />}
+              onClick={displayOnly || isFull || tokensSpent || reserving || disabled ? undefined : () => onSelect(session)}
+              spendNote={displayOnly ? null : <SpendNote tokens={tokens} />}
               action={
                 pending ? (
                   <Button loading height={46} style={{ font: `600 14px ${font.body}` }}>
@@ -444,12 +447,14 @@ function DaySessionList({ iso, sessions, tokens, reserving, disabled, onSelect }
                 ) : null
               }
               trailing={
-                <CapacityPill state={isFull ? 'full' : tokensSpent ? 'capped' : cap.state}>
-                  {isFull ? 'Full' : tokensSpent ? 'No tokens' : cap.label}
+                <CapacityPill state={displayOnly || isFull ? 'full' : tokensSpent ? 'capped' : cap.state}>
+                  {displayOnly ? 'Front desk' : isFull ? 'Full' : tokensSpent ? 'No tokens' : cap.label}
                 </CapacityPill>
               }
               footnote={
-                tokensSpent && !isFull
+                displayOnly
+                  ? 'Adult block — booked and paid at the front desk, not through the portal.'
+                  : tokensSpent && !isFull
                   ? 'This block has space — it is your tokens that are spent, not the session.'
                   : null
               }

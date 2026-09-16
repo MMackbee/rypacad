@@ -174,7 +174,7 @@ import {
   NEWSLETTER_STATES,
 } from '../data/admin';
 import { TOUR_SEED, bracketFor, deriveTourStandings } from '../data/tour';
-import { SPECIALISTS, isSpecialistType } from '../data/specialists';
+import { SPECIALISTS, SPECIALIST_MONTHLY_CAP, isSpecialistType } from '../data/specialists';
 
 export { default as useSeedResource } from './useSeedResource';
 export { default as useAuthSession } from './useAuthSession';
@@ -217,6 +217,16 @@ export function genericSessionName(type) {
 }
 
 /** How a season session renders on a schedule or booking list. */
+/**
+ * Group-flow membership (Sprint 12 integration): a session the booking,
+ * recurrence, coach-day and admin-fill paths may count. Specialist slots
+ * live on their own surfaces, and the seed-only adult block (pin J) is
+ * display-only - it appears on the month calendar and nowhere else.
+ */
+function isGroupBookable(s) {
+  return !isSpecialistType(s.type) && s.bookable !== false;
+}
+
 function displaySession(s, today) {
   const [time, meridiem] = s.time.split(' ');
   return {
@@ -227,6 +237,9 @@ function displaySession(s, today) {
     time,
     meridiem,
     type: s.type,
+    // Contract v2.0 pin J: the seed-only Saturday adult block is display-only
+    // (bookable: false); every other session is bookable. Absent == true.
+    bookable: s.bookable !== false,
     // A special (a holiday tournament) carries its real event name. Everything
     // else is the generic block for its type - the Workshop/Lab/Arena rotation
     // was an invented placeholder, and no made-up name ships before real
@@ -338,6 +351,20 @@ function tokensWithNextPeriod(pkg, bookings, anchorDay, today) {
 }
 
 /** Sort key: chronological, then block order (session ids end in the block index). */
+/**
+ * Yannick's frequency line (pin K): non-cancelled 'mental' bookings in
+ * today's calendar month against the owner-tunable knob. A frequency rule,
+ * never an allowance - `limit` null means tokens are the only limit.
+ */
+function coachingFor(bookings, today) {
+  const month = today.slice(0, 7);
+  const used = (bookings || []).filter(
+    (b) => b && b.type === 'mental' && b.status !== 'cancelled' && (b.date || '').slice(0, 7) === month
+  ).length;
+  const limit = SPECIALIST_MONTHLY_CAP.mental ?? null;
+  return { used, limit, capReached: limit != null && used >= limit };
+}
+
 function byDateThenId(a, b) {
   return a.date === b.date ? (a.id < b.id ? -1 : 1) : a.date < b.date ? -1 : 1;
 }
@@ -480,7 +507,7 @@ async function liveBooking(today) {
   // on this list under the token model either (SpecialistBooking is the
   // one place a specialist slot is offered).
   const sessions = (await fetchSessionsInRange(today, openThrough(new Date(), windowDays))).filter(
-    (s) => !isSpecialistType(s.type)
+    (s) => isGroupBookable(s)
   );
   sessions.sort(byDateThenId);
 
@@ -825,7 +852,7 @@ export function useBooking({ variant = 'open', today = todayISO(), practice = fa
     let lastSessionDate = null;
     if (firstDate <= untilISO) {
       for (const s of await fetchSessionsInRange(firstDate, untilISO)) {
-        if (isSpecialistType(s.type)) continue; // recurrence is a group-flow feature
+        if (!isGroupBookable(s)) continue; // recurrence is a group-flow feature
 
         const list = sessionsByDate.get(s.date) ?? [];
         list.push(s);
@@ -1111,7 +1138,7 @@ async function resolveSpecialistAthleteId(athleteIdOverride) {
 async function liveSpecialistSlots(specialistId, athleteIdOverride, today) {
   const athleteId = await resolveSpecialistAthleteId(athleteIdOverride);
   if (!athleteId) {
-    return { days: await liveSpecialistDays(specialistId, today, MAX_WINDOW_DAYS), tokens: null };
+    return { days: await liveSpecialistDays(specialistId, today, MAX_WINDOW_DAYS), tokens: null, capReached: false };
   }
   const athlete = await fetchAthlete(athleteId);
   const pkg = athlete.packageId ? await fetchPackage(athlete.packageId) : null;
@@ -1125,7 +1152,8 @@ async function liveSpecialistSlots(specialistId, athleteIdOverride, today) {
     liveSpecialistDays(specialistId, today, windowDays),
     Promise.resolve(tokensWithNextPeriod(pkg, bookings, anchorDay, today)),
   ]);
-  return { days, tokens };
+  const capReached = specialistId === 'mental' && coachingFor(bookings, today).capReached;
+  return { days, tokens, capReached };
 }
 
 /** Seed tokens for useSpecialistSlots - the same seed token derivation
@@ -1135,6 +1163,11 @@ function seedSpecialistTokens(specialistId, athleteId, today) {
   const child = seedChildById(athleteId || SEED_ATHLETE_ID);
   if (!child) return null;
   return seedMemberTokens(child, today);
+}
+
+function seedSpecialistCapReached(specialistId, athleteId, today) {
+  const child = seedChildById(athleteId || SEED_ATHLETE_ID);
+  return specialistId === 'mental' && Boolean(child) && coachingFor(seedMemberBookingRows(child, today), today).capReached;
 }
 
 /**
@@ -1181,6 +1214,7 @@ export function useSpecialistSlots(specialistId, { athleteId } = {}) {
       : {
           days: specialistId ? seedSpecialistDays(specialistId, today, windowDaysFor(ATHLETE_PACKAGE)) : [],
           tokens: specialistId ? seedSpecialistTokens(specialistId, athleteId, today) : null,
+          capReached: specialistId ? seedSpecialistCapReached(specialistId, athleteId, today) : false,
         },
     live && specialistId
       ? {
@@ -1592,9 +1626,10 @@ function seedMemberEntry(child, today) {
     athleteId: child.id,
     name: child.name,
     package: pkg
-      ? { id: pkg.id, name: pkg.name, price: pkg.price ?? null, tokens: pkg.tokens ?? null, windowDays: pkg.windowDays ?? null, kind: pkg.kind ?? null }
+      ? { id: pkg.id, name: pkg.name, price: pkg.price ?? null, pending: pkg.pending ?? false, tokens: pkg.tokens ?? null, windowDays: pkg.windowDays ?? null, kind: pkg.kind ?? null }
       : null,
     tokens: seedMemberTokens(child, today),
+    coaching: coachingFor(seedMemberBookingRows(child, today), today),
     contractMinutes: SEED_CONTRACT_MINUTES[child.id] ?? null,
     periodEnd: periodFor(today, PERIOD_ANCHOR_DAY).periodEnd,
   };
@@ -1624,12 +1659,15 @@ async function liveMemberEntry(a, today, anchorDay) {
           id: pkg.id,
           name: pkg.name,
           price: packageById(pkg.id)?.price ?? null,
+          // Seeds strip price and pending; both are catalogue facts, read from it.
+          pending: packageById(pkg.id)?.pending ?? false,
           tokens: pkg.tokens ?? null,
           windowDays: pkg.windowDays ?? null,
           kind: pkg.kind ?? null,
         }
       : null,
     tokens: tokensWithNextPeriod(pkg, bookings, anchorDay, today),
+    coaching: coachingFor(bookings, today),
     contractMinutes: a.contractMinutes ?? null,
     periodEnd: periodFor(today, anchorDay).periodEnd,
   };
@@ -2077,7 +2115,7 @@ export function useCoachDay({ variant = 'today' } = {}) {
     // and Yannick's slots are not the golf coach's blocks — without this
     // filter Luke's Today overview listed Phil's sessions as his own.
     const upcoming = (await fetchSessions(today, 1)).filter(
-      (s) => s.status !== 'cancelled' && !isSpecialistType(s.type)
+      (s) => s.status !== 'cancelled' && isGroupBookable(s)
     );
     const dayISO = upcoming[0]?.date ?? today;
     const sessions = upcoming.filter((s) => s.date === dayISO);
@@ -2736,6 +2774,12 @@ export function usePracticeLog({ today = todayISO(), practice = false } = {}) {
 async function liveAthleteDetail(athleteId) {
   const athlete = await fetchAthlete(athleteId);
   const pkg = athlete.packageId ? await fetchPackage(athlete.packageId) : null;
+  // Sprint 12 integration: the membership editor sets the household's
+  // period anchor, so the payload names the household and its anchor (a
+  // coach may not be allowed to read households - tolerate a denial).
+  const household = athlete.householdId
+    ? await fetchHousehold(athlete.householdId).catch(() => null)
+    : null;
   const subline =
     [
       athlete.contractMinutes != null ? `${athlete.contractMinutes} min tier` : null,
@@ -2788,6 +2832,9 @@ async function liveAthleteDetail(athleteId) {
       // contractMinutes was added above. `fitnessPackageId` is DROPPED
       // (contract v2.0, pin A: the field is retired - one package now).
       packageId: athlete.packageId ?? null,
+      householdId: athlete.householdId ?? null,
+      householdName: household?.name ?? null,
+      periodAnchorDay: normalizeAnchorDay(household?.periodAnchorDay),
     },
     upcoming,
     history: [],
@@ -3088,7 +3135,7 @@ async function liveAdminDashboard(today) {
   let totalBooked = 0;
   let totalCapacity = 0;
   for (const s of sessionsThisWeek) {
-    if (s.status === 'cancelled' || isSpecialistType(s.type)) continue;
+    if (s.status === 'cancelled' || !isGroupBookable(s)) continue;
     const day = fillByDay.get(shortWeekday(s.date));
     if (!day) continue; // Sunday: no group blocks by design
     day.booked += s.booked ?? 0;

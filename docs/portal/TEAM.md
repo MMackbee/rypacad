@@ -1708,3 +1708,78 @@ merges db → routing → frontend, integrates, browser-passes on :3001.
 5. Whether `single` is a period package or a per-visit sale (M).
 6. Waitlist acceptance window — none in v1 as pinned; revisit if promotion
    into an unwanted slot becomes a support pattern.
+
+## Sprint 12 integration notes (Part 1 - PM merge + live pass, 2026-09-16)
+
+Landed ahead of the lanes as PM commits: the seam (f7d6d22 - TOKEN_PACKAGES /
+ELITE / SINGLE_TOKEN, packageById, windowDaysFor, normalizeAnchorDay,
+periodFor, tokensFor; calendar.js openThrough / windowOpensOn rolling at
+07:00 America/Chicago - all unit-checked), the functions cleanup (pin I,
+546e152: the thirteen unauthenticated 2025 onRequest endpoints, their
+2025-model helpers and sendDailyReminders deleted; Courier/Twilio helpers,
+the two Firestore triggers and cleanupSMSLogs kept; handleSMSResponse now
+verifies X-Twilio-Signature and uses a real sendSms helper - the old handler
+called an HTTP export as a function and could never have run), and
+DECISION-GAPS.md. The task-chip session's users-write updateMask fix landed
+as 13eefcd before the DB merge.
+
+All three lanes merged clean (db -> routing -> frontend, --no-ff).
+Reconciled at integration:
+- The DEPRECATED two-pool block in packages.js and the seed's ALLOWANCE
+  fixtures are deleted; packages.js is the 128-line seam. No importer of
+  GOLF_PACKAGES / FITNESS_PACKAGES / ELITE_TIERS / DROP_IN / makeAllowance /
+  poolFor / entitlementsFor / ratePerSession / monthlyTotal remains.
+- Two fields the frontend consumed optionally now exist: useMembership
+  members carry `coaching: { used, limit, capReached }` and
+  useSpecialistSlots data carries `capReached` - both derived by one
+  `coachingFor(bookings, today)` (non-cancelled 'mental' bookings in the
+  calendar month against SPECIALIST_MONTHLY_CAP.mental), in both modes.
+- useHouseholdSettings(householdId) is wired into the editor's period-anchor
+  control (the routing lane put the household id on the hook call rather
+  than the setter, since ops manage many households - accepted). The
+  household and its anchor ride the athlete-detail payload (householdId,
+  householdName, periodAnchorDay), fetched with a tolerated denial for
+  callers the rules keep out of households.
+- The seed-only adult block (pin J) flows through displaySession as
+  `bookable: false`; a `isGroupBookable()` predicate keeps it (and specialist
+  slots) out of the booking slots, recurrence, coach day and admin block
+  fill, while the month calendar still lists it and Book a Session renders
+  it as a display-only "Front desk" row. TypeChip gains `adult`.
+- OnboardingSteps (owned by no lane) moved off the two-pool copy and passes
+  `tokens` to the rewritten meter; data/admin.js demo ids moved to t-*.
+- Live membership entries now carry the catalogue's `pending` flag beside
+  price (seed docs strip both; they are catalogue facts).
+
+Live emulator pass (athlete-jordan, parent-dana, owner) on the token seed:
+athlete home and Book a Session show one number ("9 left · 3 of 12 used" -
+two attended Phil sessions and today's Yannick session all spend ordinary
+tokens); parent Membership shows a Tokens card per kid with "Yannick: 1 of
+1 this month"; Reservations badges every November row NEXT PERIOD; Yannick's
+booking screen shows the cap-reached state and Phil's says "SPENDS 1 TOKEN ·
+9 LEFT" on the summary and the sheet; the owner's editor preselects the
+package, lists "(pending)" prices, and writes households.periodAnchorDay
+(verified 15 on the doc, restored). Console clean apart from dev-server
+restart noise. Not exercised live: the adult row (season Saturdays sit
+outside every window at today's date - harness-verified), the window-locked
+day copy (the routing lane verified it live: "opens for booking at 7 AM on
+2026-10-03" for Nov 4).
+
+Process findings worth keeping:
+- A lane stopped its dev server with `taskkill /F /IM node.exe /T`, which
+  killed every Node process on the machine - the shared emulator (twice,
+  the "quiet exit code 1" seen since Sprint 11), the other lane's dev
+  server and the QA server. Lane briefs now say: kill by PID/port only.
+- Seed coaching rows carry no `type`/`date`, so seed-mode Membership shows
+  "Yannick: 0 of 1"; live mode is correct. Seed follow-up if it confuses QA.
+- SpecialistBooking.js (748) and BookSession.js (816) remain over the
+  500-line guideline; pre-existing, grandfathered like hooks/.
+
+Deploy (owner-gated, in this order): push portal/r3:main and let Railway
+build; deploy firestore:rules and firestore:indexes (the athletes package
+branch narrows, bookings require periodKey, households gain the anchor
+branch, athletes can read their household, the waitlist index); THEN re-run
+provision-family.mjs - it deletes the ten retired package docs, so it must
+run only once the new build is live. Part 2 (Sprint 13: tokenPeriods, grace
+tokens, waitlist + promotion trigger, Stripe handler + membership status,
+the two scripts) starts from a fresh pin; the functions lint blocker in
+DECISION-GAPS.md gates any functions deploy.

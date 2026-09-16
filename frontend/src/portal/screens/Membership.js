@@ -31,14 +31,10 @@ import { useMembership } from '../hooks';
  * ENTITLEMENTS ARE DERIVED, NEVER STORED (the pin's own keystone) — every
  * number below is exactly what useMembership()'s `tokens` returns.
  *
- * INTEGRATION: the hook seam pinned for Sprint 12 (TEAM.md) does not list a
- * per-member "coaching"/mental field on useMembership() — only `package` and
- * `tokens`. The Coaching line below reads an optional `member.coaching:
- * { used, limit }` (Yannick's SPECIALIST_MONTHLY_CAP.mental cadence) and
- * renders nothing when it is absent, so this screen degrades honestly rather
- * than guessing a shape. Flagged in the sprint report — routing needs to add
- * this field (or tell frontend where the mental-cap count should come from
- * instead).
+ * The Coaching line reads `member.coaching: { used, limit }` - Yannick's
+ * mental-game count for the calendar month against SPECIALIST_MONTHLY_CAP
+ * .mental (pin K), derived by useMembership() at Sprint 12 integration. It
+ * renders nothing when the field is absent.
  *
  * `variant` is harness-only: every live route passes the default
  * 'populated', a pure pass-through of useMembership() (seed or live). The
