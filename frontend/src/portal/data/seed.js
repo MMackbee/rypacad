@@ -408,6 +408,10 @@ export const WAITLIST_ENTRY = {
 export const PAST_DUE_MEMBERSHIP = {
   status: 'past_due',
   currentPeriodEnd: PERIOD.periodEnd,
+  // Contract v2.4 (Sprint 16): the retry position the Stripe handler records.
+  attemptCount: 1,
+  nextPaymentAttempt: addDaysISO(todayISO(), 3),
+  lastFailedAt: addDaysISO(todayISO(), -1),
 };
 
 /** Code of Grit - Blueprint section 1.2, quoted on the athlete dashboard. */

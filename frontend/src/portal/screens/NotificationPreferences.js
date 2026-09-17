@@ -161,7 +161,7 @@ export default function NotificationPreferences({
         <RecentNotices style={{ marginTop: 6 }} />
 
         {onLinkAthlete ? <LinkAthleteRow onLinkAthlete={onLinkAthlete} /> : null}
-        <MembershipRow />
+        <MembershipRow role={role} />
         <ReplayWalkthroughRow />
         <SignOutRow onSignOut={onSignOut} />
       </div>
@@ -210,13 +210,15 @@ function LinkAthleteRow({ onLinkAthlete }) {
  * already use (this lane never edits PortalRoutes.js) — one static internal
  * route needs no caller-supplied callback prop.
  */
-function MembershipRow() {
+function MembershipRow({ role = 'parent' }) {
   const navigate = useNavigate();
+  // Sprint 16: a parent's membership view is the Billing hub.
+  const parent = role !== 'athlete';
   return (
     <div style={{ borderTop: `1px solid ${color.rule}`, marginTop: 8, paddingTop: 4 }}>
       <button
         type="button"
-        onClick={() => navigate('/portal/membership')}
+        onClick={() => navigate(parent ? '/portal/billing' : '/portal/membership')}
         style={{
           background: 'none',
           border: 'none',
@@ -231,7 +233,7 @@ function MembershipRow() {
           cursor: 'pointer',
         }}
       >
-        <span>Membership</span>
+        <span>{parent ? 'Billing & tokens' : 'Membership'}</span>
         <span aria-hidden="true" style={{ color: color.textTertiary }}>
           ›
         </span>

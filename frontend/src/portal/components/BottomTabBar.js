@@ -37,6 +37,8 @@ export const TABS = {
     // athlete 'schedule' tab uses the same glyph meaning) rather than adding
     // a new icon name nobody has drawn yet.
     { key: 'reservations', label: 'Reservations', icon: 'calendar', route: '/portal/reservations' },
+    // Sprint 16 (contract v2.4): Billing returns as the parents' token hub.
+    { key: 'billing', label: 'Billing', icon: 'card', route: '/portal/billing' },
     { key: 'tour', label: 'Tour', icon: 'trophy', route: '/portal/tour' },
     { key: 'settings', label: 'Settings', icon: 'settings', route: '/portal/settings' },
   ],

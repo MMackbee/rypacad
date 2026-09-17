@@ -213,6 +213,7 @@ async function main() {
   hh = await get('households', 'whitfield');
   check('membership.status / subscriptionStatus / lastEventId', [hh.membership.status, hh.membership.stripeSubscriptionStatus, hh.membership.lastEventId], ['past_due', 'past_due', 'evt_2']);
   check('period fields PRESERVED through the freeze', [hh.membership.currentPeriodStart, hh.membership.currentPeriodEnd], ['2026-09-01', '2026-09-30']);
+  check('retry position recorded (v2.4): next attempt, attempt count absent -> null', [hh.membership.nextPaymentAttempt, hh.membership.attemptCount], ['2026-09-23', null]);
   check('FREEZE not revoke: jordan_2026-09-25-1 still confirmed', (await get('bookings', 'jordan_2026-09-25-1')).status, 'confirmed');
   check('tokenPeriods untouched', (await get('tokenPeriods', 'jordan_2026-09-01')).granted, 12);
 
@@ -251,6 +252,7 @@ async function main() {
   check('HTTP', [r.status, r.body.outcome], [200, 'issued']);
   hh = await get('households', 'whitfield');
   check('membership back to active', [hh.membership.status, hh.membership.lastEventId], ['active', 'evt_4']);
+  check('retry position cleared by the paid invoice (v2.4)', [hh.membership.attemptCount, hh.membership.nextPaymentAttempt, hh.membership.lastFailedAt], [null, null, null]);
   check('tokenPeriods/jordan_2026-09-01 re-issued by evt_4', (await get('tokenPeriods', 'jordan_2026-09-01')).eventId, 'evt_4');
   for (const id of ['jordan_2026-09-20-1', 'jordan_2026-09-25-1', 'jordan_2026-10-05-1']) {
     check(`revoked booking STAYS cancelled: ${id}`, [(await get('bookings', id)).status, (await get('bookings', id)).cancelReason], ['cancelled', 'lapsed']);

@@ -996,6 +996,8 @@ function buildDocs(portal) {
     ['owner', { role: 'owner', athleteId: null, householdId: null, staff: true, specialistId: null, displayName: null, email: null, notificationPrefs: null }],
     ['mental', { role: 'mental', athleteId: null, householdId: null, staff: true, specialistId: 'mental', displayName: 'Yannick', email: null, notificationPrefs: null }],
     ['ops', { role: 'ops', athleteId: null, householdId: null, staff: true, specialistId: null, displayName: 'Ops', email: null, notificationPrefs: null }],
+    // Sprint 16: the Parker guardian, so the past_due Billing hub is reachable in QA.
+    ['parent-sam', { role: 'parent', athleteId: null, householdId: parkerHouseholdId, staff: false, specialistId: null, displayName: 'Sam Parker', email: 'sam.parker@example.com', notificationPrefs: null }],
     ['phil', { role: 'coach', athleteId: null, householdId: null, staff: true, specialistId: 'phil', displayName: 'Phil', email: null, notificationPrefs: null }],
   ]);
 
@@ -1250,6 +1252,10 @@ function buildDocs(portal) {
     currentPeriodEnd: parkerPeriod.periodEnd,
     lastEventId: 'evt_seed_2',
     updatedAt: today,
+    // Contract v2.4 (Sprint 16): the retry position the Billing hub draws.
+    attemptCount: 1,
+    nextPaymentAttempt: isoDate(new Date(today.getTime() + 3 * 24 * 60 * 60 * 1000)),
+    lastFailedAt: isoDate(new Date(today.getTime() - 24 * 60 * 60 * 1000)),
   };
   const stripeEvents = new Map([
     [
@@ -1272,6 +1278,11 @@ function buildDocs(portal) {
   // exactly as functions/portal/notify.js keys them; outcomes are what the
   // emulator leaves with no Courier/Twilio configured and no users.phone.
   const hoursAgo = (h) => new Date(today.getTime() - h * 60 * 60 * 1000);
+  const jordanTokensLeft =
+    tokenPeriods.get(`jordan_${jordanCurrentPeriod.periodKey}`).granted -
+    [...bookings.values()].filter(
+      (b) => b.athleteId === 'jordan' && b.status !== 'cancelled' && b.periodKey === jordanCurrentPeriod.periodKey && !b.graceTokenId
+    ).length;
   const niceDate = (iso) =>
     new Date(`${iso}T12:00:00`).toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' });
   const graceExpiry = niceDate(graceTokens.get('grace-1').expiresAt);
@@ -1326,10 +1337,10 @@ function buildDocs(portal) {
         bookingId: null,
         subjectKey: `jordan_${jordanCurrentPeriod.periodKey}`,
         title: 'Tokens expiring soon',
-        // left == granted: none of jordan's seeded bookings fall in the
-        // current period, and the one waitlist entry is nico's.
+        // The same count the Billing hub derives (tokensFor): the period's
+        // grant minus jordan's non-cancelled, non-grace bookings in it.
         body:
-          `Jordan has ${tokenPeriods.get(`jordan_${jordanCurrentPeriod.periodKey}`).granted} tokens left ` +
+          `Jordan has ${jordanTokensLeft} tokens left ` +
           `that expire ${niceDate(jordanCurrentPeriod.periodEnd)}. Book before then.`,
         recipients: [{ uid: 'parent-dana', email: 'skipped', push: 'no-device' }],
         sentAt: hoursAgo(5),

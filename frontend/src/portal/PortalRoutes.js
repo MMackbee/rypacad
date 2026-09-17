@@ -24,11 +24,12 @@ import SeasonSchedule from './screens/SeasonSchedule';
 import CommitmentContract from './screens/CommitmentContract';
 import AthleteDetail from './screens/AthleteDetail';
 import Membership from './screens/Membership';
+import Billing from './screens/Billing';
+import { bump } from './hooks/invalidate';
 import NotificationPreferences from './screens/NotificationPreferences';
 import Reservations from './screens/Reservations';
 import AdminDashboard from './screens/AdminDashboard';
 import StaffRoles from './screens/StaffRoles';
-import NewsletterComposer from './screens/NewsletterComposer';
 import TourStandings from './screens/TourStandings';
 import SpecialistDay from './screens/SpecialistDay';
 
@@ -412,8 +413,9 @@ function MembershipRoute() {
   const { user } = useAuthSession(live ? undefined : { variant: 'idle' });
   const navigate = useNavigate();
   const role = live && user?.role === 'athlete' ? 'athlete' : 'parent';
-  const back = role === 'athlete' ? '/portal/home' : '/portal/family';
-  return <Membership bare role={role} onBack={() => navigate(back)} />;
+  // Sprint 16: a parent's membership view IS the Billing hub.
+  if (role === 'parent') return <Navigate to="/portal/billing" replace />;
+  return <Membership bare role={role} onBack={() => navigate('/portal/home')} />;
 }
 
 /**
@@ -601,7 +603,17 @@ export default function PortalRoutes() {
           the Sprint 7 redirect); the Billing.js screen itself stays
           unrouted in the harness, untouched, per that same Sprint 7 ruling
           — this is a redirect-target change only, not a Billing revival. */}
-      <Route path="billing" element={<Navigate to="/portal/membership" replace />} />
+      {/* Billing (Sprint 16, contract v2.4): the parents' hub - how many
+          tokens are left, per athlete, and the membership's standing. Parent
+          only; an athlete's own view stays Membership below. */}
+      <Route
+        path="billing"
+        element={
+          <RequireRole roles={['parent']}>
+            <Billing bare onRetry={() => bump('billing')} />
+          </RequireRole>
+        }
+      />
       {/* Membership (Sprint 11 pin D, contract v1.9): parent + athlete both
           reach it — same role resolution this file's other dual-role routes
           use (BookSessionRoute, CoachingRoute). Screen: screens/Membership.js (frontend
@@ -689,7 +701,7 @@ export default function PortalRoutes() {
       />
 
       {/* Staff — admin admits every staff role's read surface; Staff & Roles
-          is owner-only; the newsletter is ops/owner. */}
+          is owner-only. */}
       <Route
         path="admin"
         element={
@@ -706,16 +718,6 @@ export default function PortalRoutes() {
                 sign-out affordance — the handler is threaded through here;
                 rendering the button is the frontend lane's StaffRoles change. */}
             <StaffScreen onSignOut={onSignOut} />
-          </RequireRole>
-        }
-      />
-      <Route
-        path="newsletter"
-        element={
-          <RequireRole roles={['ops', 'owner']}>
-            {/* Parked (Sprint 10): stays out of every tab set (frontend's
-                TABS), but a direct hit still gets a working sign-out. */}
-            <NewsletterComposer bare onSignOut={onSignOut} />
           </RequireRole>
         }
       />

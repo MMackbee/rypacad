@@ -169,11 +169,6 @@ import {
   ATHLETE_DETAIL,
   CONTRACT_HISTORY,
   LIMITED_DATA_CHECKLIST,
-  DUNNING_LADDER,
-  BILLING_STATES,
-  MEMBERSHIP,
-  PAYMENT_METHOD,
-  INVOICES,
   NOTIFICATION_CATEGORIES,
   NOTIFICATION_NOTE,
 } from '../data/parent';
@@ -187,10 +182,6 @@ import {
   STAFF_ROLES,
   AUDIT_NOTE,
   SCREENING_NOTE,
-  NEWSLETTER_SECTIONS,
-  NEWSLETTER_LANDED,
-  NEWSLETTER_ISSUE,
-  NEWSLETTER_STATES,
 } from '../data/admin';
 import { TOUR_SEED, bracketFor, deriveTourStandings } from '../data/tour';
 import { SPECIALISTS, SPECIALIST_MONTHLY_CAP, isSpecialistType } from '../data/specialists';
@@ -203,7 +194,9 @@ export { default as useOnboardingStatus } from './onboarding';
 // useIssueTokens both need to be in this file's own scope to be usable by
 // its other hooks/helpers); re-exported here so screens keep importing
 // every portal hook from this one seam, same as every hook above.
-export { useIssueTokens, usePush, useRecentNotices, useWaitlist };
+// Sprint 16: hooks/billing.js derives the hub's coaching line with the same
+// helper useMembership uses, so the two can never disagree.
+export { coachingFor, useIssueTokens, usePush, useRecentNotices, useWaitlist };
 
 /**
  * Harness demo states (contract v1.1): every data-bearing hook accepts
@@ -3179,19 +3172,6 @@ export function useAthleteDetail({ athleteId, variant = 'populated' } = {}) {
   );
 }
 
-/** GET /billing/:householdId + /invoices (10). */
-export function useBilling({ variant = 'active' } = {}) {
-  const state = BILLING_STATES[variant] ?? BILLING_STATES.active;
-  return useSeedResource({
-    state,
-    ladder: DUNNING_LADDER,
-    membership: MEMBERSHIP,
-    paymentMethod: PAYMENT_METHOD,
-    invoices: INVOICES,
-    declining: variant !== 'active',
-  });
-}
-
 /**
  * Live payload for useNotificationPrefs — NOTIFICATION_CATEGORIES' static
  * metadata (name/description/locked/footnote) overlaid with the signed-in
@@ -3639,18 +3619,6 @@ export function useStaff({ variant = 'populated' } = {}) {
   };
 
   return { ...state, invite };
-}
-
-/** GET /newsletter/issues/:id (17). */
-export function useNewsletter({ variant = 'missing' } = {}) {
-  const landed = NEWSLETTER_LANDED[variant] ?? [];
-  return useSeedResource({
-    issue: NEWSLETTER_ISSUE,
-    state: NEWSLETTER_STATES[variant] ?? NEWSLETTER_STATES.missing,
-    sections: NEWSLETTER_SECTIONS.map((s) => ({ ...s, landed: landed.includes(s.id) })),
-    outstandingCount: NEWSLETTER_SECTIONS.length - landed.length,
-    status: variant,
-  });
 }
 
 /**

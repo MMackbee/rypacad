@@ -1,278 +1,272 @@
 import React from 'react';
+import { useNavigate } from 'react-router-dom';
 import { color, font, radius } from '../tokens';
 import BottomTabBar from '../components/BottomTabBar';
 import Button from '../components/Button';
-import MediaPlaceholder from '../components/MediaPlaceholder';
+import MemberSection from '../components/MemberSection';
 import PhoneFrame from '../components/PhoneFrame';
 import SequenceLadder from '../components/SequenceLadder';
+import SkeletonCard, { SkeletonBar } from '../components/Skeleton';
 import StatusBadge from '../components/StatusBadge';
-import Field from '../components/Field';
-import { Body, Card, ScreenTitle, SectionLabel } from '../components/Primitives';
-import { useBilling, useBillingSummary } from '../hooks';
+import TokenMeter from '../components/TokenMeter';
+import { Body, Card, ErrorNotice, ScreenTitle, SectionLabel } from '../components/Primitives';
+import { ordinal, statusFor } from '../data/billingHub';
+import useBillingHub from '../hooks/billing';
 
 /**
- * 10 · Billing & Subscription - parent.
- * States: Active, Retry 1, Retry 3, Access restricted, Updating card.
+ * 10 · Billing — the parents' hub (contract v2.4, Sprint 16: "the hub for
+ * parents to see how many tokens are left"). Route /portal/billing, the
+ * parent tab bar's Billing tab; a parent hitting /portal/membership lands
+ * here, an athlete keeps their own Membership view.
  *
- * This screen is where flag 04 is resolved. Stripe retries three times across
- * ten days before booking access is restricted, and the parent has to know
- * exactly where in that sequence they are. One red cannot express four
- * escalating states: a parent shown maximum alarm at retry 1 has learned to
- * ignore it by retry 3.
+ * Three questions, in order: is the membership in good standing (the hero,
+ * from households.membership — Stripe's status, never guessed); how many
+ * tokens does each athlete have left and why (TokenMeter, from the SAME
+ * tokensFor the booking gate runs, with the evidence one tap away); what is
+ * the plan (packages, billing day, catalogue prices marked pending).
  *
- * So the ladder grades - caution, amber-red, red, solid red - and the position
- * is drawn rather than implied. The amber-red mid value is `color.errorMid`,
- * the one token this adds to the brief.
+ * NO FAKE MONEY: no card art, no invoice rows, no amounts until Stripe data
+ * exists. "Update payment method" opens the Stripe customer portal login
+ * link when the academy configured one (REACT_APP_STRIPE_PORTAL_URL);
+ * otherwise the hero says to contact the academy.
  *
- * Card data never passes through app servers: the update flow is a Stripe
- * Elements iframe, and only stripe_customer_id / stripe_subscription_id are
- * stored.
- *
- * @param {'active'|'retry1'|'retry3'|'restricted'|'updating'} variant
+ * @param {'populated'|'past_due'|'lapsed'|'loading'|'error'|'empty'} variant
+ *   Harness-only. Live routes pass nothing.
  */
-export default function Billing({ variant = 'active', bare = false }) {
-  const { data } = useBilling({ variant: variant === 'updating' ? 'retry3' : variant });
-  const summary = useBillingSummary();
+export default function Billing({ variant = 'populated', bare = false, onRetry }) {
+  const hookVariant = variant === 'past_due' || variant === 'lapsed' ? variant : 'populated';
+  const hook = useBillingHub({ variant: hookVariant });
+  const navigate = useNavigate();
 
-  if (variant === 'updating') return <UpdatingCard bare={bare} />;
+  const demo = variant === 'loading' || variant === 'error' || variant === 'empty';
+  const loading = demo ? variant === 'loading' : hook.loading;
+  const error = demo ? (variant === 'error' ? new Error("Billing didn't load.") : null) : hook.error;
+  const data = demo
+    ? variant === 'empty'
+      ? { household: null, members: [], status: statusFor(null), portalUrl: null }
+      : null
+    : hook.data;
 
-  const state = data?.state;
-  const showLadder = state?.ladderAt != null;
+  const members = data?.members ?? [];
+  const status = data?.status ?? null;
+  const isEmpty = !loading && !error && members.length === 0;
 
   return (
     <PhoneFrame
       bare={bare}
       header={
-        <div style={{ padding: '8px 22px 14px' }}>
-          <ScreenTitle size={22}>Billing</ScreenTitle>
+        <div style={{ padding: '8px 22px 14px', display: 'flex', alignItems: 'center', gap: 12 }}>
+          <ScreenTitle size={22} style={{ flex: 1 }}>
+            Billing
+          </ScreenTitle>
+          {status && !loading && !error ? <StatusBadge tone={status.badge.tone}>{status.badge.label}</StatusBadge> : null}
         </div>
       }
-      // Billing tab REMOVED from the parent tab bar (Sprint 7 pin, TEAM.md —
-      // billing is out of the app for now, replaced by Tour). This screen
-      // survives unrouted, for the harness and Stripe's eventual return, so
-      // no tab is active — same treatment PracticeDNA already uses for its
-      // own retired tab slot.
-      footer={<BottomTabBar role="parent" active={null} />}
+      footer={<BottomTabBar role="parent" active="billing" />}
     >
-      <div style={{ padding: '0 22px 24px', display: 'flex', flexDirection: 'column', gap: 12 }}>
-        <HeroCard state={state} />
+      <div style={{ padding: '0 22px 24px', display: 'flex', flexDirection: 'column', gap: 18 }}>
+        {loading ? (
+          <BillingSkeleton />
+        ) : error ? (
+          <ErrorNotice title="Billing didn't load" onRetry={onRetry}>
+            Your tokens and membership didn't load. Check your connection and try again.
+          </ErrorNotice>
+        ) : (
+          <>
+            <StatusHero status={status} portalUrl={data?.portalUrl} />
+            {status?.ladder ? (
+              <Card large>
+                <SectionLabel style={{ marginBottom: 15 }}>Where this stands</SectionLabel>
+                <SequenceLadder rungs={status.ladder} current={status.ladderAt} />
+              </Card>
+            ) : null}
 
-        {showLadder ? (
-          <Card large>
-            <SectionLabel style={{ marginBottom: 15 }}>Retry sequence</SectionLabel>
-            <SequenceLadder rungs={data.ladder} current={state.ladderAt} />
-          </Card>
-        ) : null}
+            {isEmpty ? (
+              <Card large>
+                <SectionLabel style={{ marginBottom: 8 }}>No linked athletes</SectionLabel>
+                <Body size={12}>
+                  This household has no linked athletes yet — link one from Settings before there's anything to bill.
+                </Body>
+              </Card>
+            ) : (
+              members.map((member) => (
+                <MemberSection key={member.athleteId} name={member.name}>
+                  <TokenMeter member={member} defaultOpen={members.length === 1} />
+                  <CoachingLine coaching={member.coaching} />
+                  <ContractLine
+                    contractMinutes={member.contractMinutes}
+                    onOpen={() => navigate(`/portal/athlete/${member.athleteId}`)}
+                  />
+                </MemberSection>
+              ))
+            )}
 
-        <SubscriptionRows rows={summary.data?.rows ?? []} />
-        <MembershipCard rows={summary.data?.rows ?? []} />
-        <PaymentMethodCard method={data?.paymentMethod} declining={data?.declining} />
-        <InvoiceHistory invoices={data?.invoices ?? []} />
+            {members.length ? <PlanCard household={data?.household} members={members} /> : null}
+            <ConnectionCard household={data?.household} portalUrl={data?.portalUrl} />
+          </>
+        )}
       </div>
     </PhoneFrame>
   );
 }
 
-/** One subscription row per child (Sprint 5 pin) - package, price, status. */
-function SubscriptionRows({ rows }) {
-  if (!rows.length) return null;
+const SURFACES = {
+  default: { background: color.surface, border: color.border },
+  yellow: { background: 'rgba(244,238,25,.06)', border: color.secondary },
+  red: { background: 'rgba(255,68,68,.07)', border: color.error },
+};
+
+/** The membership's standing — Stripe's status, the contract's copy, dates only when recorded. */
+function StatusHero({ status, portalUrl }) {
+  if (!status) return null;
+  const s = SURFACES[status.tone] || SURFACES.default;
   return (
-    <Card large>
-      <SectionLabel style={{ marginBottom: 6 }}>Athletes on this plan</SectionLabel>
-      {rows.map((row, i) => (
-        <div
-          key={row.athleteId}
-          style={{
-            display: 'flex',
-            alignItems: 'center',
-            gap: 12,
-            padding: '13px 0',
-            borderBottom: i < rows.length - 1 ? `1px solid ${color.ruleSoft}` : 'none',
-          }}
-        >
-          <div style={{ flex: 1, minWidth: 0 }}>
-            <div style={{ font: `600 13px ${font.body}`, color: color.text }}>{row.name}</div>
-            <div style={{ font: `400 11px ${font.body}`, color: color.textTertiary, marginTop: 2 }}>
-              {row.packageName}
-              {row.price != null ? ` · $${row.price}/mo` : ''}
-            </div>
-          </div>
-          <StatusBadge tone={row.status === 'active' ? 'green' : 'neutral'}>
-            {row.status}
-          </StatusBadge>
-        </div>
-      ))}
-    </Card>
-  );
-}
-
-function HeroCard({ state }) {
-  if (!state) return null;
-
-  const surfaces = {
-    default: { background: color.surface, border: color.border },
-    yellow: { background: 'rgba(244,238,25,.06)', border: color.secondary },
-    red: { background: 'rgba(255,68,68,.07)', border: color.error },
-  };
-  const s = surfaces[state.tone] || surfaces.default;
-
-  return (
-    <div
-      style={{
-        background: s.background,
-        border: `1px solid ${s.border}`,
-        borderRadius: radius.cardLarge,
-        padding: 17,
-      }}
-    >
+    <div style={{ background: s.background, border: `1px solid ${s.border}`, borderRadius: radius.cardLarge, padding: 17 }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-        <SectionLabel style={{ flex: 1 }}>Subscription</SectionLabel>
-        <StatusBadge tone={state.badge.tone}>{state.badge.label}</StatusBadge>
+        <SectionLabel style={{ flex: 1 }}>Membership</SectionLabel>
+        <StatusBadge tone={status.badge.tone}>{status.badge.label}</StatusBadge>
       </div>
-
-      <ScreenTitle size={22} style={{ marginTop: 12 }}>
-        {state.title}
+      <ScreenTitle size={20} style={{ marginTop: 12 }}>
+        {status.title}
       </ScreenTitle>
-
       <Body size={13} style={{ marginTop: 10 }}>
-        {state.body}
+        {status.body}
       </Body>
-
-      {state.cta ? (
-        <Button variant={state.cta.variant} height={50} style={{ marginTop: 15, boxShadow: 'none' }}>
-          {state.cta.label}
-        </Button>
+      {status.cta ? (
+        portalUrl ? (
+          <Button
+            variant={status.tone === 'red' ? 'danger' : 'caution'}
+            height={50}
+            style={{ marginTop: 15, boxShadow: 'none' }}
+            onClick={() => window.open(portalUrl, '_blank', 'noopener')}
+          >
+            {status.cta}
+          </Button>
+        ) : (
+          <Body size={12} tone={color.textSecondary} style={{ marginTop: 12 }}>
+            To update your card, contact the academy. Booking reopens the same day the invoice clears.
+          </Body>
+        )
       ) : null}
     </div>
   );
 }
 
-/**
- * QA #12 fix (Sprint 6, TEAM.md): this card said "2 athletes" from
- * data/parent.js's static MEMBERSHIP seed while SubscriptionRows above it
- * renders one row per child from the live billing summary - the two could
- * only agree by coincidence. Derived from the exact same `rows` the list
- * renders instead, so the count can never drift again. Package name follows
- * the same rule: the household's children are not all on the same package
- * (Sprint 5 pin, "Billing lists one row per child"), so a single tier name
- * is only shown when every row actually shares one - otherwise every
- * distinct package the household is on is listed, never one picked at
- * random.
- */
-function MembershipCard({ rows }) {
-  if (!rows.length) return null;
-  const uniqueNames = [...new Set(rows.map((r) => r.packageName).filter(Boolean))];
-
+/** "Yannick: 1 of 1 this month" — the mental-game cadence, a line not a card. */
+function CoachingLine({ coaching }) {
+  if (!coaching || coaching.limit == null) return null;
   return (
-    <Card large>
-      <SectionLabel style={{ marginBottom: 12 }}>Membership</SectionLabel>
-      <div style={{ font: `600 15px ${font.body}`, color: color.text }}>
-        {uniqueNames.length ? uniqueNames.join(' · ') : '—'}
-      </div>
-      <div style={{ font: `400 12px ${font.body}`, color: color.textTertiary, marginTop: 4 }}>
-        {rows.length} {rows.length === 1 ? 'athlete' : 'athletes'} · billed monthly
-      </div>
-    </Card>
+    <Body size={12} tone={color.textSecondary} style={{ padding: '0 2px' }}>
+      Yannick: {coaching.used} of {coaching.limit} this month
+    </Body>
   );
 }
 
-function PaymentMethodCard({ method, declining }) {
-  if (!method) return null;
+function ContractLine({ contractMinutes, onOpen }) {
   return (
-    <Card large>
-      <SectionLabel style={{ marginBottom: 13 }}>Payment method</SectionLabel>
-      <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-        <MediaPlaceholder height={26} style={{ width: 40, flex: 'none' }} />
-        <div style={{ flex: 1, minWidth: 0 }}>
-          <div
-            style={{
-              font: `600 14px ${font.body}`,
-              color: declining ? color.error : color.text,
-            }}
-          >
-            {method.label}
-          </div>
-          <div style={{ font: `400 11px ${font.body}`, color: color.textTertiary, marginTop: 3 }}>
-            {declining ? method.declining : method.expires}
-          </div>
-        </div>
-        <span style={{ font: `500 13px ${font.body}`, color: color.primary, cursor: 'pointer' }}>
-          Change
-        </span>
-      </div>
-    </Card>
+    <button
+      type="button"
+      onClick={onOpen}
+      style={{
+        background: 'none',
+        border: 'none',
+        padding: '2px 2px',
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'space-between',
+        width: '100%',
+        minHeight: 44,
+        font: `500 13px ${font.body}`,
+        color: color.primary,
+        cursor: 'pointer',
+      }}
+    >
+      <span>{contractMinutes != null ? `${contractMinutes} min contract tier` : 'No contract tier yet'} · View athlete</span>
+      <span aria-hidden="true" style={{ color: color.textTertiary }}>
+        ›
+      </span>
+    </button>
   );
 }
 
-function InvoiceHistory({ invoices }) {
+/** The plan: one row per athlete, catalogue prices as facts, the billing day. */
+function PlanCard({ household, members }) {
+  const anyPending = members.some((m) => m.package?.pending);
   return (
     <Card large>
-      <SectionLabel style={{ marginBottom: 6 }}>Invoice history</SectionLabel>
-      {invoices.map((inv, i) => (
+      <SectionLabel style={{ marginBottom: 6 }}>Plan</SectionLabel>
+      {members.map((m, i) => (
         <div
-          key={inv.id}
+          key={m.athleteId}
           style={{
             display: 'flex',
             alignItems: 'center',
             gap: 12,
-            padding: '13px 0',
-            borderBottom: i < invoices.length - 1 ? `1px solid ${color.ruleSoft}` : 'none',
+            padding: '11px 0',
+            borderBottom: i < members.length - 1 ? `1px solid ${color.ruleSoft}` : 'none',
           }}
         >
           <div style={{ flex: 1, minWidth: 0 }}>
-            <div style={{ font: `500 13px ${font.body}`, color: color.text }}>{inv.month}</div>
+            <div style={{ font: `600 13px ${font.body}`, color: color.text }}>{m.name}</div>
             <div style={{ font: `400 11px ${font.body}`, color: color.textTertiary, marginTop: 2 }}>
-              {inv.date}
+              {!m.package
+                ? 'No package'
+                : m.package.kind === 'elite'
+                  ? `${m.package.name} · unlimited`
+                  : `${m.package.name} a period`}
+              {m.package?.windowDays ? ` · books ${m.package.windowDays} days out` : ''}
             </div>
           </div>
-          <StatusBadge tone={inv.paid ? 'green' : 'red'}>{inv.paid ? 'Paid' : 'Unpaid'}</StatusBadge>
+          <div style={{ font: `500 13px ${font.mono}`, color: m.package?.price != null ? color.text : color.textTertiary }}>
+            {m.package?.price != null ? `$${m.package.price}` : '—'}
+            {m.package?.pending ? <span style={{ font: `400 10px ${font.body}`, color: color.secondary }}> pending</span> : null}
+          </div>
         </div>
       ))}
-      {/*
-        No per-row amount until Stripe: historical charges are not decided
-        numbers, and a dashed "$ ——" on every row read as broken data
-        (QA 2026-09-08 #4). The section says why once instead.
-      */}
       <Body size={11} tone={color.textTertiary} style={{ marginTop: 10 }}>
-        Amounts appear here once billing is connected.
+        Billed monthly on the {ordinal(household?.anchorDay ?? 1)}. Tokens reset the same day.
+        {anyPending ? " Prices marked pending are awaiting the academy's confirmation." : ''}
       </Body>
     </Card>
   );
 }
 
-function UpdatingCard({ bare }) {
+/** No fake money: what is and isn't connected, in one honest line. */
+function ConnectionCard({ household, portalUrl }) {
+  const connected = Boolean(household?.stripeCustomerId);
   return (
-    <PhoneFrame
-      bare={bare}
-      header={
-        <div style={{ padding: '8px 22px 14px' }}>
-          <ScreenTitle size={22}>Update card</ScreenTitle>
-        </div>
-      }
-      footer={
-        <div style={{ borderTop: `1px solid ${color.frameRule}`, padding: '14px 22px 22px' }}>
-          <Button>Save and retry now</Button>
-        </div>
-      }
-    >
-      <div style={{ padding: '0 22px 24px', display: 'flex', flexDirection: 'column', gap: 14 }}>
-        {/*
-          Card fields render inside Stripe's iframe, never in our DOM. This
-          placeholder marks where it mounts - recreating those fields locally
-          would pull the app into PCI scope.
-        */}
-        <MediaPlaceholder
-          height={92}
-          caption="STRIPE ELEMENTS IFRAME — card fields never render in our DOM"
-        />
+    <Card large>
+      <SectionLabel style={{ marginBottom: 8 }}>Card &amp; invoices</SectionLabel>
+      <Body size={12}>
+        {connected
+          ? 'Your card and invoices are managed in Stripe. Invoice history will appear here once online billing is connected.'
+          : 'Card and invoice history appear here once online billing is connected.'}
+      </Body>
+      {portalUrl ? (
+        <Button variant="outline" height={42} style={{ marginTop: 12, boxShadow: 'none' }} onClick={() => window.open(portalUrl, '_blank', 'noopener')}>
+          Manage billing in Stripe
+        </Button>
+      ) : null}
+    </Card>
+  );
+}
 
-        <Field label="Billing postal code" value="" placeholder="55344" onChange={() => {}} />
-
-        <Body size={12}>
-          Saving a working card retries the open invoice immediately. If it clears, booking access is
-          restored the same minute.
-        </Body>
-      </div>
-    </PhoneFrame>
+function BillingSkeleton() {
+  return (
+    <div role="status" aria-label="Loading billing" style={{ display: 'flex', flexDirection: 'column', gap: 18 }}>
+      <SkeletonCard large height={118} />
+      {[0, 1].map((i) => (
+        <div key={i} style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+          <SkeletonBar width={96} height={16} />
+          <SkeletonCard large>
+            <SkeletonBar tone="raised" width={110} height={10} />
+            <SkeletonBar tone="raised" width={72} height={40} style={{ marginTop: 12 }} />
+            <div style={{ marginTop: 14 }}>
+              <SkeletonBar tone="raised" height={8} r={4} />
+            </div>
+          </SkeletonCard>
+        </div>
+      ))}
+    </div>
   );
 }

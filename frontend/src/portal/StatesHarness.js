@@ -37,7 +37,6 @@ import Billing from './screens/Billing';
 import NotificationPreferences from './screens/NotificationPreferences';
 import AdminDashboard from './screens/AdminDashboard';
 import StaffRoles from './screens/StaffRoles';
-import NewsletterComposer from './screens/NewsletterComposer';
 import OnboardingFlow from './screens/OnboardingFlow';
 import TourStandings from './screens/TourStandings';
 import SpecialistBooking from './screens/SpecialistBooking';
@@ -222,9 +221,12 @@ export const SCREEN_STATES = [
              // above) sees nothing here (their own view is Membership.js).
              ['populated', 'Ops · membership editor', { role: 'ops' }],
              ['populated', 'Coach · membership read-only', { role: 'coach' }]] },
-  { id: '10', title: 'Billing & Subscription', Screen: Billing, role: 'parent',
-    states: [['active', 'Active'], ['retry1', 'Retry 1'], ['retry3', 'Retry 3'],
-             ['restricted', 'Restricted'], ['updating', 'Updating card']] },
+  // Sprint 16 (contract v2.4): the Billing hub - tokens left per athlete
+  // from the same derivation the booking gate runs, plus the membership's
+  // Stripe standing. The retry/restricted states read households.membership.
+  { id: '10', title: 'Billing', Screen: Billing, role: 'parent',
+    states: [['populated', 'Active'], ['past_due', 'Past due'], ['lapsed', 'Lapsed'],
+             ['loading', 'Loading'], ['error', 'Error'], ['empty', 'No athletes']] },
   { id: '11', title: 'Notification Preferences', Screen: NotificationPreferences, role: 'parent + athlete',
     // Sprint 11 pin D entry point (TEAM.md): the new Membership row renders
     // for both roles; `role: 'athlete'` also previews the tab-bar/footnote
@@ -280,9 +282,6 @@ export const SCREEN_STATES = [
              ['populated', 'Membership card', { demoMembership: ADMIN_MEMBERSHIP_FIXTURE }]] },
   { id: '16', title: 'Staff & Roles', Screen: StaffRoles, role: 'owner',
     states: [['populated', 'Populated'], ['add', 'Add staff']] },
-  { id: '17', title: 'Newsletter Composer', Screen: NewsletterComposer, role: 'admin',
-    states: [['missing', 'Sections missing'], ['ready', 'All sections in'],
-             ['scheduled', 'Scheduled'], ['sent', 'Sent']] },
   /*
    * RYP Tour (Sprint 7 pin, TEAM.md) — season standings for the weekend
    * tournament leaderboard. Not a numbered handoff artboard (billing was

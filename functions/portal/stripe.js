@@ -184,6 +184,10 @@ async function applyInvoicePaid(tx, event, hh) {
         currentPeriodStart: period.start,
         currentPeriodEnd: period.end,
         lastEventId: event.id,
+        // Contract v2.4: a paid invoice ends the retry sequence.
+        attemptCount: null,
+        nextPaymentAttempt: null,
+        lastFailedAt: null,
       })));
 
   return {
@@ -201,10 +205,17 @@ async function applyInvoicePaid(tx, event, hh) {
  * @return {{outcome: string, detail: !Object}} What was applied.
  */
 function applyPastDue(tx, event, hh) {
+  // Contract v2.4 (Sprint 16): the retry position the Billing hub draws -
+  // Stripe's own attempt count and next attempt, plus when this one failed.
+  const inv = event.data.object || {};
   tx.update(hh.ref, membershipPatch({
     status: 'past_due',
     stripeSubscriptionStatus: 'past_due',
     lastEventId: event.id,
+    attemptCount: Number.isInteger(inv.attempt_count) ?
+      inv.attempt_count : null,
+    nextPaymentAttempt: lib.chicagoDateFromUnix(inv.next_payment_attempt),
+    lastFailedAt: lib.chicagoDateFromUnix(event.created),
   }));
   return {outcome: 'past_due', detail: {}};
 }

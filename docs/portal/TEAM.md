@@ -2466,3 +2466,125 @@ Owner setup, in this order:
 3. Push portal/r3:main; deploy rules + indexes; then (Blaze) deploy
    functions. Parents turn push on from Settings; on iPhone only after
    Add to Home Screen.
+
+## Sprint 16 pins — the Billing hub (contract v2.4, 2026-09-16)
+
+Origin: the owner: "scrap the newsletter composer. build out the billing
+suite to your best ability. Focus on this page being the hub for parents
+to see how many tokens are left. This part needs to be ROCK SOLID." This
+REVERSES the Sprint 7/11 ruling that kept "billing" off the live member
+surface. Built inline by the PM.
+
+Keystones:
+- ONE NUMBER, ONE DERIVATION. "Tokens left" on the hub is
+  `data/packages.js#tokensFor` over the athlete's real documents — the
+  SAME call the booking gate (`hooks/live.js`, `no-tokens-left`), the
+  Membership screen, the parent home's child cards and the booking
+  screens make. The hub adds no counter, no cache and no second formula;
+  it adds the evidence: WHICH bookings spent the tokens, which waitlist
+  entries reserve them, which bonus tokens are on file and when they
+  expire, when the period resets, and what next period grants. Every
+  claim on the page is traceable to a document.
+- `/portal/billing` is the parents' hub and gets a Billing tab (Home ·
+  Reservations · Billing · Tour · Settings). `/portal/membership` stays
+  the athlete's own view; a parent hitting it is redirected to the hub.
+  Settings' "Membership" row and the parent home's package links point at
+  the hub. The parent home shows the household's payment banner from the
+  same membership status the hub renders (it never rendered live before).
+- STATUS IS STRIPE'S, TOKENS ARE OURS. The hero reads
+  `households.membership` (absent == active): active / past due /
+  lapsed, with the retry position when the Stripe handler recorded it —
+  `attemptCount`, `nextPaymentAttempt`, `lastFailedAt` are NEW membership
+  fields written on `invoice.payment_failed` and cleared on `invoice.paid`.
+  The ladder draws only what is known; it never invents dates.
+- NO FAKE MONEY. No card art, no invoice rows, no amounts until Stripe
+  data exists: one line says card and invoices appear once online billing
+  is connected. Package prices are catalogue facts with "pending" where
+  flagged. "Update payment method" opens the Stripe no-code customer
+  portal login link when `REACT_APP_STRIPE_PORTAL_URL` is set (no server
+  needed); otherwise the hero says to contact the academy.
+- TESTED AS MATH, NOT AS PIXELS: `data/packages.test.js` pins periodFor
+  (anchors 1/15/28, February, year wrap) and tokensFor (cancelled and
+  grace-charged bookings excluded, waitlist reserved, expired and consumed
+  grace dropped, issued grant overrides the package, floor at zero, Elite
+  unlimited, no package == zero); `hooks/billing.test.js` pins the hub's
+  view model (spent rows, reservations, last period, reset date, expiry
+  nudge, status ladder). Then the emulator: the hub's numbers against the
+  seed, a booking and a cancellation moving "left" by exactly one, and
+  the past-due household's hero.
+- SCRAPPED: the Newsletter composer — screen, route, hook, seed fixtures,
+  harness entry, the admin "outstanding" seed row, and the `newsletter`
+  notification category (nothing sends one). Three categories remain.
+
+Data contract v2.4: `households.membership` gains `attemptCount: int |
+null`, `nextPaymentAttempt: 'YYYY-MM-DD' | null`, `lastFailedAt:
+'YYYY-MM-DD' | null` (admin-SDK-only, like the rest of the map). No new
+collection, no new index, no rules change.
+
+Open (owner): whether the hub should also list every booking in the
+period for Elite (unlimited) members — v1 shows "Unlimited" and the
+period's sessions as a plain list.
+
+## Sprint 16 integration notes (the Billing hub - PM build, tests + live pass, 2026-09-16)
+
+Built inline on portal/r3. New: `data/billingHub.js` (pure view model:
+`hubMemberFor`, `periodRows`, `statusFor`, `ordinal`, `daysBetween`),
+`hooks/billing.js` (`useBillingHub` - fetches the documents, derives
+nothing itself; seed branch for practice mode; re-fetches on bookings /
+waitlist / graceTokens / tokenPeriods / athletes / households / billing
+bumps), `components/TokenMeter.js` (the big number, the used+reserved bar,
+chips, bonus line, reset line, the expiry nudge inside the last week, and
+the "This period" evidence list with next- and last-period lines),
+`screens/Billing.js` rewritten (status hero, "Where this stands" ladder,
+per-athlete meters, Plan, Card & invoices). Routing: `/portal/billing` is
+a parent route with a Billing tab; a parent at `/portal/membership` is
+redirected; Settings' row reads "Billing & tokens" for parents; the parent
+home's child package link and its payment banner ("See billing") point
+here, and the banner + ON HOLD badges now follow `households.membership`
+live (they never rendered live before). The booking gate
+(`assertPeriodTokensLeft`) now counts the athlete's own waitlist entries
+in the period, as `tokensFor` always did, so "left" on the hub is exactly
+what the gate permits. Stripe: `applyPastDue` records `attemptCount`,
+`nextPaymentAttempt`, `lastFailedAt`; the paid path clears them. Push
+links for the billing kinds open the hub. Scrapped: NewsletterComposer,
+its route, `useNewsletter`, the admin fixtures and outstanding row, the
+harness entry, and the `newsletter` notification category (client + server
+defaults); the seed-only billing fixtures (`BILLING_STATES`,
+`DUNNING_LADDER`, `PAYMENT_METHOD`, `INVOICES`, `useBilling`) went with
+the old screen.
+
+Tests: `data/packages.test.js` (periodFor: anchors 1/15/28, February and a
+leap year, year wrap, clamping; tokensFor: cancelled and grace-charged
+bookings excluded, waitlist reserved, grace ordering/expiry/consumption,
+issued grant override, floor at zero, Elite unlimited, no package zero)
+and `data/billingHub.test.js` (evidence rows equal used/reserved, period
+and next/last period dates, issued grants, the nudge, Elite, no package,
+anchor 15, status hero for active/past_due/lapsed with and without
+recorded dates) - 27 passing via `react-scripts test`. Functions: lint
+clean, lib.test 27 passing, `verify-lane.js` passes with two new v2.4
+checks (retry position recorded on payment_failed, cleared on paid),
+`verify-notifications.js` passes.
+
+Live pass (:3001, emulator seed): Whitfield hub reads Jordan 9 of 12
+(three September specialist sessions listed, two attended, one booked),
+Nico 6 of 6, Reese 5 of 6 with the Nov 11 bonus token; Plan rows with
+pending prices and "Billed monthly on the 1st". A booking added for Jordan
+moved it to 8 of 12 with a fourth row; deleting it and adding a waitlist
+entry read 8 of 12 as USED 3 · WAITLIST 1 with the waitlist row; removed
+after. Parker (new seed user `parent-sam`): RETRY 1 OF 3, "Card declined
+Tuesday, Sep 15", next attempt Sep 19, the ladder at Retry 1, Elite
+unlimited, Stripe-managed card line; the parent home shows the banner
+with "See billing" and ON HOLD. Settings row and the membership redirect
+verified.
+
+Not exercised live: the gate refusing a booking at "0 left with a
+reservation" (needs nine waitlist entries; the count is three lines of
+code, mirrored from tokensFor and covered by the unit tests of the
+derivation), the Stripe portal button (no REACT_APP_STRIPE_PORTAL_URL in
+the sandbox), and practice mode (bundle-checked; seed branch shares the
+view model).
+
+Deploy: push portal/r3:main (Railway); no rules or index change this
+sprint; functions carry the retry-position fields for whenever Blaze
+lands. Optional: set REACT_APP_STRIPE_PORTAL_URL in Railway to Stripe's
+no-code customer portal login link.

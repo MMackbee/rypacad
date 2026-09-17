@@ -11,8 +11,8 @@ import { useMembership } from '../hooks';
 
 /**
  * 19 · Membership — parent + athlete (Sprint 12 pin, contract v2.0). Route
- * /portal/membership; the retired /portal/billing redirects here (routing
- * lane). Life Time-style: one section per household member (an athlete's own
+ * /portal/membership for athletes; a parent is redirected to the Billing
+ * hub (/portal/billing, Sprint 16, contract v2.4). Life Time-style: one section per household member (an athlete's own
  * view has exactly one — themselves); per member ONE Tokens card (used /
  * granted / left, a grace line when a bonus token is on file, and an honest
  * "N booked next period" line), one Coaching line (Yannick's flat monthly

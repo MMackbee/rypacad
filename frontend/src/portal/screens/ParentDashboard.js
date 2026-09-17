@@ -12,7 +12,7 @@ import { Avatar } from '../components/MediaPlaceholder';
 import AllowancePools from '../components/AllowancePools';
 import SkeletonCard, { SkeletonBar } from '../components/Skeleton';
 import { AlertGlyph, Body, Card, ErrorNotice, ScreenTitle } from '../components/Primitives';
-import { useHousehold } from '../hooks';
+import { useHousehold, useMembership } from '../hooks';
 import { ALL_PACKAGES } from '../data/packages';
 
 /**
@@ -72,6 +72,13 @@ export default function ParentDashboard({
   const children = data?.children ?? [];
   const billing = data?.billing;
   const flagged = billing?.status === 'failed';
+  // Sprint 16 (contract v2.4): the household's Stripe standing, the same
+  // households.membership the Billing hub renders - past_due and lapsed
+  // pause booking, so the banner and the ON HOLD badges follow it live.
+  // The seed 'payment' variant keeps driving the harness through `billing`.
+  const membershipStatus = useMembership().data?.household?.membership?.status ?? null;
+  const paused = membershipStatus === 'past_due' || membershipStatus === 'lapsed';
+  const onHold = flagged || paused;
   // Sprint 11 pin D entry point: same direct-navigate() precedent
   // AthleteDashboard's own coaching/membership links already use (this lane
   // never edits PortalRoutes.js) rather than a new onOpenMembership prop —
@@ -134,16 +141,18 @@ export default function ParentDashboard({
           standing badge does flip to ON HOLD, because booking is what actually
           gets restricted.
         */}
-        {flagged ? <PaymentBanner billing={billing} /> : null}
+        {onHold ? (
+          <PaymentBanner billing={flagged ? billing : bannerFor(membershipStatus)} onOpen={() => navigate('/portal/billing')} />
+        ) : null}
 
         {children.map((child) => (
           <ChildCard
             key={child.id}
             child={child}
-            onHold={flagged}
+            onHold={onHold}
             onOpen={onOpenAthlete ? () => onOpenAthlete(child.id) : undefined}
             onBookFor={() => setBookFor(child)}
-            onOpenMembership={() => navigate('/portal/membership')}
+            onOpenMembership={() => navigate('/portal/billing')}
           />
         ))}
 
@@ -209,7 +218,15 @@ function HouseholdSkeleton() {
   );
 }
 
-function PaymentBanner({ billing }) {
+/** The contract's own copy for a live status (Sprint 13 pin H), shaped like the seed's `billing`. */
+function bannerFor(status) {
+  if (status === 'lapsed') {
+    return { title: 'Membership lapsed', body: "Upcoming bookings were released. Once payment resumes, book again from what's open." };
+  }
+  return { title: "Payment didn't go through", body: 'New bookings are paused until it clears; everything already booked is kept.' };
+}
+
+function PaymentBanner({ billing, onOpen }) {
   return (
     <div
       style={{
@@ -228,8 +245,8 @@ function PaymentBanner({ billing }) {
           </Body>
         </div>
       </div>
-      <Button variant="danger" height={46} style={{ marginTop: 13 }}>
-        Update payment method
+      <Button variant="danger" height={46} style={{ marginTop: 13 }} onClick={onOpen}>
+        See billing
       </Button>
     </div>
   );

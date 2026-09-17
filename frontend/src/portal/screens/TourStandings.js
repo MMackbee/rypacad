@@ -40,7 +40,7 @@ function ordinal(n) {
  * (Sprint 7 pin, TEAM.md). Route /portal/tour, athlete tab bar's retired DNA
  * slot, parent tab bar in place of the removed Billing tab. Also reachable
  * by coach/ops/owner/mental (no bottom tab bar for those roles today — see
- * AdminDashboard/StaffRoles/NewsletterComposer, none of which render one).
+ * AdminDashboard/StaffRoles, neither of which renders one).
  *
  * Sprint 8 pin (TEAM.md, contract v1.6): the leaderboard now splits into age
  * brackets. Pinned hook: useTourStandings() -> { data: { brackets: [{ id,

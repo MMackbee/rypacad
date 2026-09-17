@@ -368,6 +368,22 @@ export async function fetchBookings(athleteId, { householdId = null } = {}) {
 }
 
 /**
+ * One athlete's own waitlist entries - the reservations the booking gate
+ * counts against the period's grant (Sprint 16, contract v2.4), so "tokens
+ * left" on the Billing hub and what the gate permits never disagree. Lives
+ * here (not hooks/waitlist.js) because that module imports this one.
+ */
+export async function fetchAthleteWaitlist(athleteId) {
+  if (!athleteId) return [];
+  try {
+    const snap = await getDocs(query(collection(db, 'waitlist'), where('athleteId', '==', athleteId)));
+    return snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+  } catch (err) {
+    throw wrap(err, 'fetchAthleteWaitlist');
+  }
+}
+
+/**
  * Every booking across an ENTIRE household, every member at once — Sprint 11
  * pin F (family Reservations, contract v1.9). One query on the `householdId`
  * equality filter alone (DATA-MODEL.md index 3: `bookings (householdId ASC,
@@ -545,9 +561,12 @@ function assertMentalCadence(type, date, bookings) {
  * bookings (graceTokenId set) — the SAME seam amendment
  * data/packages.js#tokensFor already applies, kept in lockstep here so the
  * cap this function enforces never disagrees with what the token card
- * displays as spent.
+ * displays as spent. `waitlist` (Sprint 16, contract v2.4): the athlete's
+ * own waitlist entries in this period RESERVE tokens - tokensFor subtracts
+ * them from `left`, so the gate does too; otherwise the hub could read
+ * "0 left" while a booking still went through.
  */
-function assertPeriodTokensLeft(pkg, bookings, periodKey, issuedGrant) {
+function assertPeriodTokensLeft(pkg, bookings, periodKey, issuedGrant, waitlist = []) {
   if (!pkg || pkg.tokens !== null) {
     // Contract v2.1 pin C: an issued tokenPeriods doc (Stripe or ops) is the
     // grant when it exists; the package's own tokens are the fallback.
@@ -555,12 +574,13 @@ function assertPeriodTokensLeft(pkg, bookings, periodKey, issuedGrant) {
     const used = (bookings || []).filter(
       (b) => b.status !== 'cancelled' && b.periodKey === periodKey && !b.graceTokenId
     ).length;
-    if (used >= granted) {
+    const reserved = (waitlist || []).filter((w) => w && w.periodKey === periodKey).length;
+    if (used + reserved >= granted) {
       throw new LiveDataError(
         ERR.INVALID,
         granted === 0
           ? 'This package has no tokens to spend — ask the academy to assign one.'
-          : `This period's tokens are already fully booked (${used} of ${granted}).`,
+          : `This period's tokens are already fully booked (${used} of ${granted}${reserved ? `, ${reserved} held on a waitlist` : ''}).`,
         null,
         'no-tokens-left'
       );
@@ -629,7 +649,8 @@ export async function createBooking(
     } else if (!skipCapCheck) {
       const issued = await getDoc(doc(db, 'tokenPeriods', `${athleteId}_${periodKey}`)).catch(() => null);
       const issuedGrant = issued && issued.exists() ? issued.data().granted : undefined;
-      assertPeriodTokensLeft(pkg, bookings, periodKey, issuedGrant);
+      const waitlist = await fetchAthleteWaitlist(athleteId);
+      assertPeriodTokensLeft(pkg, bookings, periodKey, issuedGrant, waitlist);
     }
   }
 

@@ -39,7 +39,6 @@ const push = require('./push');
 const CATEGORY_DEFAULTS = {
   billing: {email: true, push: true},
   schedule: {email: true, push: true},
-  newsletter: {email: true, push: false},
   progress: {email: true, push: false},
 };
 
@@ -49,10 +48,10 @@ const LINKS = {
   'promoted': '/portal/schedule',
   'session-cancelled': '/portal/schedule',
   'reminder-24h': '/portal/schedule',
-  'booking-revoked': '/portal/membership',
-  'tokens-expiring': '/portal/membership',
-  'grace-expiring': '/portal/membership',
-  'membership': '/portal/membership',
+  'booking-revoked': '/portal/billing',
+  'tokens-expiring': '/portal/billing',
+  'grace-expiring': '/portal/billing',
+  'membership': '/portal/billing',
 };
 
 /**

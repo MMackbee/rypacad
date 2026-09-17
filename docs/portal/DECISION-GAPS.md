@@ -122,3 +122,25 @@ notices are email-only — every notice now goes by email (SMTP or Courier,
 `functions/portal/email.js`) and by web push (`functions/portal/push.js`),
 gated per recipient by `users.notificationPrefs` and `users.pushTokens`,
 with the per-channel outcome recorded on the ledger row.
+
+## Sprint 16 — the Billing hub (owner rulings, 2026-09-16)
+
+1. **"Billing" is back on the live member surface** — the owner's ruling
+   ("build out the billing suite... the hub for parents to see how many
+   tokens are left") reverses Sprint 7/11. `/portal/billing` is the parent
+   hub with its own tab; the parent's old Membership route redirects there.
+2. **Waitlist reservations now block booking** — `assertPeriodTokensLeft`
+   counts the athlete's own waitlist entries in the period, matching
+   `tokensFor`'s `left` (which always subtracted them). Before this, a
+   parent could read "0 left" and still book. Ruling if unwanted: drop the
+   reservation from both, never from one.
+3. **Card updates** — no Stripe Checkout/Elements yet. Set
+   `REACT_APP_STRIPE_PORTAL_URL` to Stripe's no-code customer portal login
+   link and the hub's "Update payment method" opens it; until then the
+   hero says to contact the academy.
+4. **Newsletter scrapped** (owner) — composer, route, hook, fixtures and the
+   `newsletter` notification category are gone. A saved preference map that
+   still carries the key is ignored.
+5. **Elite on the hub** — reads "Unlimited" with the period's sessions as a
+   plain list. Whether to show more (attendance rate, 24/7 access log) is
+   open.
