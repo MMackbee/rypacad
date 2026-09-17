@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { color, font } from '../tokens';
 import { useAssignPackages, useHouseholdSettings, useIssueTokens } from '../hooks';
 import Button from './Button';
@@ -64,12 +65,47 @@ export default function AthleteMembershipCard({ athleteId, athlete, role }) {
   }
 
   return (
-    <MembershipEditor
-      athleteId={athleteId}
-      currentPackageId={currentPackageId}
-      householdId={athlete?.householdId ?? null}
-      initialAnchorDay={athlete?.periodAnchorDay ?? 1}
-    />
+    <>
+      <MembershipEditor
+        athleteId={athleteId}
+        currentPackageId={currentPackageId}
+        householdId={athlete?.householdId ?? null}
+        initialAnchorDay={athlete?.periodAnchorDay ?? 1}
+      />
+      {athlete?.householdId ? <HouseholdBillingLink householdId={athlete.householdId} /> : null}
+    </>
+  );
+}
+
+/**
+ * Sprint 17 (contract v2.5): the staff view of the household's Billing hub -
+ * tokens left per athlete and the Stripe standing, exactly what the parent
+ * sees. Same green-link row idiom as the Settings rows.
+ */
+function HouseholdBillingLink({ householdId }) {
+  const navigate = useNavigate();
+  return (
+    <button
+      type="button"
+      onClick={() => navigate(`/portal/admin/households/${householdId}`)}
+      style={{
+        background: 'none',
+        border: 'none',
+        padding: '10px 2px',
+        width: '100%',
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'space-between',
+        font: `500 13px ${font.body}`,
+        color: color.primary,
+        cursor: 'pointer',
+      }}
+    >
+      <span>View household billing — tokens left, standing</span>
+      <span aria-hidden="true" style={{ color: color.textTertiary }}>
+        ›
+      </span>
+    </button>
   );
 }
 

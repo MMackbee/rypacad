@@ -1306,8 +1306,13 @@ expiresAt ('YYYY-MM-DD', minted + 30 days), reason: 'session-cancelled' \|
 'waitlist-expired', sourceSessionId, createdBy (uid \| 'sweep'), createdAt
 }`. Created by ops/owner (rules: create, shape-checked, `reason ==
 'session-cancelled'` only from a client — `'waitlist-expired'` is
-admin-only, the sweep script's own value) or `scripts/sweep-waitlist.mjs`
-(admin SDK). Members read own (query `athleteId ==`, index
+admin-only, the sweep script's own value) or the `sweepWaitlist` Cloud Function — daily 06:00 America/Chicago,
+`functions/portal/sweep.js`, contract v2.5 (Sprint 17) — or its manual twin
+`scripts/sweep-waitlist.mjs` (admin SDK); both mint the id
+`{sessionId}_{athleteId}_waitlist` with `createdBy: 'sweep'`, skip an
+athlete who already holds a waitlist-expired token for that session (any
+id), delete the entry, and the function sends one `waitlist-expired`
+notice. Members read own (query `athleteId ==`, index
 [below](#v21-index-reasoning-sprint-13--token-model-part-2)).
 **Consumed is derived, never stored:** a non-cancelled booking with
 `graceTokenId == id` (see the `bookings.graceTokenId` row above). Exactly

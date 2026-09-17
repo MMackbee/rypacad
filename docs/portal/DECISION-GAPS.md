@@ -144,3 +144,13 @@ with the per-channel outcome recorded on the ledger row.
 5. **Elite on the hub** — reads "Unlimited" with the period's sessions as a
    plain list. Whether to show more (attendance rate, 24/7 access log) is
    open.
+
+## Sprint 17 — staff billing + the self-running token model (2026-09-17)
+
+No new rulings. Closed: the specialist Sessions screen listed today's
+sessions twice (Sprint 13 cosmetic follow-up) — the day list now skips
+today when the pinned section renders it. Note for the owner: the
+`sweepWaitlist` function replaces the daily manual
+`node scripts/sweep-waitlist.mjs --prod --yes` once functions deploy
+(Blaze); until then the script remains the way expired waitlist entries
+turn into bonus tokens, and the two now mint the same document id.

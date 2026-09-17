@@ -7,6 +7,7 @@ import Button from '../components/Button';
 import PhoneFrame from '../components/PhoneFrame';
 import StatusBadge from '../components/StatusBadge';
 import { Body, Card, ScreenTitle, SectionLabel, SignOutButton } from '../components/Primitives';
+import HouseholdsCard from '../components/HouseholdsCard';
 import { useAdminDashboard } from '../hooks';
 
 /**
@@ -88,6 +89,7 @@ export default function AdminDashboard({
   role = 'owner',
   onSignOut,
   onOpenAthlete,
+  onOpenHousehold,
   demoMembership,
 }) {
   const { data } = useAdminDashboard();
@@ -152,6 +154,9 @@ export default function AdminDashboard({
         <EnrollmentQueueCard state={queue} />
         <MetricGrid metrics={metrics} />
         <MembershipCard membership={demoMembership ?? data?.membership} />
+        {/* Sprint 17 (contract v2.5): every household -> its staff billing
+            view. Hidden when the route supplies no destination (harness). */}
+        {onOpenHousehold ? <HouseholdsCard onOpenHousehold={onOpenHousehold} /> : null}
         <EnrollmentCard rows={enrollmentRows} highlight={filtered ? active.id : null} />
         <BlockFillCard bars={data?.blockFill ?? []} filtered={filtered} />
         {/* Billing card: hidden in live mode per the pin - there was never

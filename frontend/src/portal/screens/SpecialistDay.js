@@ -71,6 +71,8 @@ export default function SpecialistDay({
   // extract cleanly for a single pinned section (it drives a 14-day picker,
   // not a highlight card), so per the pin's own fallback this leaves the
   // full day-grouped list below untouched and adds a highlight above it.
+  // Sprint 17: the day list now SKIPS today whenever the pinned section
+  // renders it - the owner's Sessions screen listed today's sessions twice.
   const todayGroup = byDay.find((g) => g.dayLabel === 'Today');
 
   // Coach-with-specialistId ('phil') gets the coach tab set variant;
@@ -160,7 +162,7 @@ export default function SpecialistDay({
             </Body>
           </div>
         ) : (
-          byDay.map((group) => (
+          byDay.filter((group) => !(todayGroup && group === todayGroup)).map((group) => (
             <div key={group.dayLabel} style={{ marginBottom: 10 }}>
               <SectionLabel style={{ margin: '8px 0' }}>{group.dayLabel}</SectionLabel>
               {group.sessions.map((s) => {

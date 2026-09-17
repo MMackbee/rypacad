@@ -235,6 +235,23 @@ function membership(args) {
   return null;
 }
 
+/**
+ * kind `waitlist-expired` - the session passed without a spot; a bonus
+ * token was minted (Sprint 17, contract v2.5).
+ * @param {{athlete: ?Object, session: ?Object, expiresAt: string}} args
+ *     Copy inputs.
+ * @return {{title: string, body: string}} The notice.
+ */
+function waitlistExpired(args) {
+  const name = firstNameOf(args.athlete);
+  return {
+    title: 'Waitlist closed',
+    body: `The waitlist for ${sessionPhrase(args.session)} closed without ` +
+        `a spot for ${name}. A bonus token was added to ${name}'s account ` +
+        `(expires ${dayLabel(args.expiresAt)}).`,
+  };
+}
+
 module.exports = {
   TYPE_LABELS,
   bookingConfirmed,
@@ -250,4 +267,5 @@ module.exports = {
   sessionPhrase,
   timeLabel,
   tokensExpiring,
+  waitlistExpired,
 };

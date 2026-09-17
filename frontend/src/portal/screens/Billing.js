@@ -9,7 +9,7 @@ import SequenceLadder from '../components/SequenceLadder';
 import SkeletonCard, { SkeletonBar } from '../components/Skeleton';
 import StatusBadge from '../components/StatusBadge';
 import TokenMeter from '../components/TokenMeter';
-import { Body, Card, ErrorNotice, ScreenTitle, SectionLabel } from '../components/Primitives';
+import { BackLink, Body, Card, ErrorNotice, ScreenTitle, SectionLabel } from '../components/Primitives';
 import { ordinal, statusFor } from '../data/billingHub';
 import useBillingHub from '../hooks/billing';
 
@@ -33,9 +33,19 @@ import useBillingHub from '../hooks/billing';
  * @param {'populated'|'past_due'|'lapsed'|'loading'|'error'|'empty'} variant
  *   Harness-only. Live routes pass nothing.
  */
-export default function Billing({ variant = 'populated', bare = false, onRetry }) {
+export default function Billing({
+  variant = 'populated',
+  bare = false,
+  onRetry,
+  // Sprint 17 (contract v2.5): the staff view of any household - same hub,
+  // read-only (no card CTA), back to Admin, the staff role's tab bar.
+  householdId = null,
+  staff = false,
+  role = 'parent',
+  onBack,
+}) {
   const hookVariant = variant === 'past_due' || variant === 'lapsed' ? variant : 'populated';
-  const hook = useBillingHub({ variant: hookVariant });
+  const hook = useBillingHub({ variant: hookVariant, householdId });
   const navigate = useNavigate();
 
   const demo = variant === 'loading' || variant === 'error' || variant === 'empty';
@@ -55,14 +65,18 @@ export default function Billing({ variant = 'populated', bare = false, onRetry }
     <PhoneFrame
       bare={bare}
       header={
-        <div style={{ padding: '8px 22px 14px', display: 'flex', alignItems: 'center', gap: 12 }}>
-          <ScreenTitle size={22} style={{ flex: 1 }}>
-            Billing
-          </ScreenTitle>
-          {status && !loading && !error ? <StatusBadge tone={status.badge.tone}>{status.badge.label}</StatusBadge> : null}
+        <div style={{ padding: '8px 22px 14px' }}>
+          {onBack ? <BackLink onClick={onBack}>‹ Admin</BackLink> : null}
+          <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginTop: onBack ? 8 : 0 }}>
+            <div style={{ flex: 1, minWidth: 0 }}>
+              {staff ? <SectionLabel style={{ marginBottom: 4 }}>Billing · staff view</SectionLabel> : null}
+              <ScreenTitle size={22}>{staff ? data?.household?.name || 'Household' : 'Billing'}</ScreenTitle>
+            </div>
+            {status && !loading && !error ? <StatusBadge tone={status.badge.tone}>{status.badge.label}</StatusBadge> : null}
+          </div>
         </div>
       }
-      footer={<BottomTabBar role="parent" active="billing" />}
+      footer={<BottomTabBar role={staff ? role : 'parent'} active={staff ? 'admin' : 'billing'} />}
     >
       <div style={{ padding: '0 22px 24px', display: 'flex', flexDirection: 'column', gap: 18 }}>
         {loading ? (
@@ -73,7 +87,7 @@ export default function Billing({ variant = 'populated', bare = false, onRetry }
           </ErrorNotice>
         ) : (
           <>
-            <StatusHero status={status} portalUrl={data?.portalUrl} />
+            <StatusHero status={status} portalUrl={staff ? null : data?.portalUrl} staff={staff} />
             {status?.ladder ? (
               <Card large>
                 <SectionLabel style={{ marginBottom: 15 }}>Where this stands</SectionLabel>
@@ -117,9 +131,11 @@ const SURFACES = {
 };
 
 /** The membership's standing — Stripe's status, the contract's copy, dates only when recorded. */
-function StatusHero({ status, portalUrl }) {
+function StatusHero({ status, portalUrl, staff = false }) {
   if (!status) return null;
   const s = SURFACES[status.tone] || SURFACES.default;
+  // Staff read the standing; only the payer updates the card.
+  const cta = staff ? null : status.cta;
   return (
     <div style={{ background: s.background, border: `1px solid ${s.border}`, borderRadius: radius.cardLarge, padding: 17 }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
@@ -132,7 +148,7 @@ function StatusHero({ status, portalUrl }) {
       <Body size={13} style={{ marginTop: 10 }}>
         {status.body}
       </Body>
-      {status.cta ? (
+      {cta ? (
         portalUrl ? (
           <Button
             variant={status.tone === 'red' ? 'danger' : 'caution'}
@@ -140,7 +156,7 @@ function StatusHero({ status, portalUrl }) {
             style={{ marginTop: 15, boxShadow: 'none' }}
             onClick={() => window.open(portalUrl, '_blank', 'noopener')}
           >
-            {status.cta}
+            {cta}
           </Button>
         ) : (
           <Body size={12} tone={color.textSecondary} style={{ marginTop: 12 }}>

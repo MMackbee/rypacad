@@ -73,37 +73,6 @@ const TOKENS_GRACE = {
 };
 const TOKENS_ELITE = { granted: null, used: 0, reserved: 0, left: null, unlimited: true, grace: [], nextPeriod: { periodKey: null, booked: 1 } };
 
-const MEMBER_TOKENS = {
-  athleteId: 'jordan', name: 'Jordan Whitfield',
-  package: { id: 't-12', name: '12 tokens', price: 570, pending: true, tokens: 12, windowDays: 32, kind: 'tokens' },
-  tokens: TOKENS_FIXTURE, coaching: { used: 1, limit: 1 }, contractMinutes: 45, periodEnd: addDaysISO(todayISO(), 14),
-};
-const MEMBER_ELITE = {
-  athleteId: 'reese', name: 'Reese Whitfield',
-  package: { id: 'elite', name: 'Elite', price: 1000, pending: false, tokens: null, windowDays: 45, kind: 'elite', access247: true },
-  tokens: TOKENS_ELITE, coaching: { used: 0, limit: 1 }, contractMinutes: 20, periodEnd: addDaysISO(todayISO(), 29),
-};
-const MEMBER_GRACE = {
-  athleteId: 'nico', name: 'Nico Whitfield',
-  package: { id: 't-6', name: '6 tokens', price: 300, pending: true, tokens: 6, windowDays: 32, kind: 'tokens' },
-  tokens: TOKENS_GRACE, coaching: null, contractMinutes: null, periodEnd: addDaysISO(todayISO(), 3),
-};
-const TOKEN_MEMBERS_FIXTURE = [MEMBER_TOKENS, MEMBER_ELITE, MEMBER_GRACE];
-
-/**
- * Household membership-status fixtures (Sprint 13, contract v2.1, pin H) —
- * `useMembership().data.household.membership` shape. No seed household
- * carries a non-active status yet, so Membership.js's `demoHousehold` prop
- * (harness-only, see the screen's own doc comment) renders these directly.
- */
-const HOUSEHOLD_PAST_DUE = {
-  id: 'whitfield', name: 'Whitfield family', periodAnchorDay: 1,
-  membership: { status: 'past_due', currentPeriodEnd: addDaysISO(todayISO(), 9) },
-};
-const HOUSEHOLD_LAPSED = {
-  id: 'whitfield', name: 'Whitfield family', periodAnchorDay: 1,
-  membership: { status: 'lapsed', currentPeriodEnd: addDaysISO(todayISO(), -4) },
-};
 
 /**
  * Admin "Membership" card fixture (Sprint 13 pin) —
@@ -358,27 +327,12 @@ export const SCREEN_STATES = [
    * (seed mode), the rest drive the state locally, the same escape hatch
    * TourStandings uses.
    */
-  { id: 'MEM', title: 'Membership', Screen: Membership, role: 'parent + athlete',
-    states: [
-      ['populated', 'Parent · household'],
-      ['populated', 'Athlete · self only', { role: 'athlete' }],
-      ['loading', 'Loading'],
-      ['error', 'Load failure'],
-      ['empty', 'No linked athletes'],
-      // Sprint 12 (contract v2.0): token / Elite / grace-token member
-      // shapes, via demoMembers (harness-only — see Membership.js's own
-      // doc comment) since the seed hasn't been rebuilt against the new
-      // useMembership() payload yet.
-      ['populated', 'Tokens', { demoMembers: [MEMBER_TOKENS] }],
-      ['populated', 'Elite · no countdown', { demoMembers: [MEMBER_ELITE] }],
-      ['populated', 'Grace token', { demoMembers: [MEMBER_GRACE] }],
-      ['populated', 'Household · all three', { demoMembers: TOKEN_MEMBERS_FIXTURE }],
-      // Sprint 13 (contract v2.1, pin H): the household status line -
-      // demoHousehold (harness-only, see Membership.js's own doc comment)
-      // since no seed household carries a non-active status yet.
-      ['populated', 'Past due', { demoMembers: [MEMBER_TOKENS], demoHousehold: HOUSEHOLD_PAST_DUE }],
-      ['populated', 'Lapsed', { demoMembers: [MEMBER_TOKENS], demoHousehold: HOUSEHOLD_LAPSED }],
-    ] },
+  // Sprint 17 (contract v2.5): the athlete's own meter over useMyTokens() -
+  // the same TokenMeter the Billing hub renders. Variants are seed-driven,
+  // like Billing's; the old demoMembers/demoHousehold props are gone.
+  { id: 'MEM', title: 'Membership', Screen: Membership, role: 'athlete',
+    states: [['populated', 'Athlete · tokens'], ['past_due', 'Past due'], ['lapsed', 'Lapsed'],
+             ['loading', 'Loading'], ['error', 'Load failure'], ['empty', 'No membership']] },
   /*
    * Family Reservations (Sprint 11 pin F, TEAM.md, contract v1.9) — the
    * parent tab bar's new stop, replacing Billing's old slot. Not a numbered

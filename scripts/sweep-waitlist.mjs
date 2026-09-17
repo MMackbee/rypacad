@@ -103,7 +103,6 @@ async function main() {
   const deletes = [];
   const creates = [];
   const skippedMints = [];
-  let n = 0;
   for (const entry of expired) {
     deletes.push({ delete: docName('waitlist', entry.id) });
     const key = `${entry.athleteId}::${entry.sessionId}`;
@@ -111,8 +110,9 @@ async function main() {
       skippedMints.push(entry);
       continue;
     }
-    n += 1;
-    const graceId = `sweep-${entry.sessionId}-${entry.athleteId}-${n}`;
+    // Same id the sweepWaitlist Cloud Function mints (functions/portal/sweep.js,
+    // Sprint 17) - the two sweeps must agree on it.
+    const graceId = `${entry.sessionId}_${entry.athleteId}_waitlist`;
     const doc = {
       athleteId: entry.athleteId,
       householdId: entry.householdId,

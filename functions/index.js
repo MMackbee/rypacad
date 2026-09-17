@@ -26,6 +26,7 @@
  *   onHouseholdMembership  households onUpdate, membership.status changed
  *   sessionReminders       daily 17:00 America/Chicago
  *   tokenExpiryReminders   daily 09:00 America/Chicago
+ *   sweepWaitlist          daily 06:00 America/Chicago (Sprint 17, v2.5)
  *
  * The 2025 `onBookingCreateNotifyChild` is DELETED with them: it read
  * `parentId` / `userId` / `childId`, fields no v1+ booking has ever carried,
@@ -67,6 +68,7 @@ const db = admin.firestore();
 const notify = require('./portal/notify');
 const notices = require('./portal/notices');
 const jobs = require('./portal/jobs');
+const sweep = require('./portal/sweep');
 const {stripeWebhook} = require('./portal/stripe');
 const {onSessionBookedDecrease} = require('./portal/promotion');
 
@@ -279,6 +281,24 @@ exports.tokenExpiryReminders = functions.pubsub
         await jobs.runTokenExpiryReminders({now: new Date(), db});
       } catch (err) {
         console.error('tokenExpiryReminders error:', err);
+      }
+      return null;
+    });
+
+/**
+ * Daily 06:00 America/Chicago - expire every waitlist entry whose session
+ * date has passed: mint the 'waitlist-expired' bonus token, delete the
+ * entry, notify (portal/sweep.js; contract v2.5). The manual
+ * scripts/sweep-waitlist.mjs does the same by hand.
+ */
+exports.sweepWaitlist = functions.pubsub
+    .schedule('0 6 * * *')
+    .timeZone('America/Chicago')
+    .onRun(async () => {
+      try {
+        await sweep.runWaitlistSweep({now: new Date(), db});
+      } catch (err) {
+        console.error('sweepWaitlist error:', err);
       }
       return null;
     });

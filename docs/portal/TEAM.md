@@ -2588,3 +2588,94 @@ Deploy: push portal/r3:main (Railway); no rules or index change this
 sprint; functions carry the retry-position fields for whenever Blaze
 lands. Optional: set REACT_APP_STRIPE_PORTAL_URL in Railway to Stripe's
 no-code customer portal login link.
+
+## Sprint 17 pins — staff billing + the self-running token model (contract v2.5, 2026-09-17)
+
+Origin: the owner: "continue on with the next sprint" after the Billing
+hub shipped. Two gaps the hub exposed: staff cannot see what a parent
+sees when the parent calls, and one leg of the token model still runs by
+hand (the waitlist sweep). Built inline by the PM.
+
+Keystones:
+- STAFF SEE THE SAME HUB. `/portal/admin/households/:householdId` (ops,
+  owner) renders the Billing hub for any household, read-only, from the
+  same `hubMemberFor` over the same documents — so a support call and the
+  parent's screen can never disagree. Reached from a new "Households"
+  card on the Admin dashboard (every household: name, standing badge,
+  athletes and packages) and from the athlete detail's membership card
+  ("View household billing"). Rules unchanged: ops/owner already read
+  households, athletes, bookings, waitlist, graceTokens and tokenPeriods
+  academy-wide; a parent cannot reach the route (RequireRole) or the data
+  (the parent clauses are householdId-scoped).
+- ATHLETES SEE THE SAME METER. The athlete's Membership view swaps its
+  token card for TokenMeter over `useMyTokens()` (self, own household's
+  anchor) — one component, one derivation, three audiences.
+- THE WAITLIST SWEEP BECOMES A FUNCTION. `sweepWaitlist`, daily 06:00
+  America/Chicago (v1 API, body `runWaitlistSweep({ now, db })` in
+  `functions/portal/sweep.js`): every waitlist entry whose session date
+  is before today is expired — mint a `graceTokens` doc (reason
+  'waitlist-expired', 30 days, `createdBy: 'sweep'`, id
+  `{sessionId}_{athleteId}_waitlist`, create-only so a re-run mints
+  nothing twice), delete the entry, and send ONE notice kind
+  `waitlist-expired` (schedule; subjectKey the grace id): "The waitlist
+  for <session> closed without a spot for <Name> — a bonus token was
+  added (expires <date>)." `scripts/sweep-waitlist.mjs` stays for manual
+  runs and must agree with the function on id and shape.
+- COSMETIC, CLOSED: the specialist Sessions screen listed today's
+  sessions twice (the pinned Today section and the day list); the day
+  list now skips today when the pinned section renders it.
+
+Verification: `functions/test/verify-sweep.js` on the isolated emulator
+(expired entry → grace doc + entry gone + one notice; re-run mints
+nothing; an unexpired entry untouched; an entry whose athlete already
+holds a waitlist-expired token for that session mints nothing); the
+existing harnesses still pass; :3001 — owner opens the Whitfield and
+Parker household hubs and reads the same numbers the parents read;
+athlete-jordan's Membership shows the meter; Phil's Sessions screen
+lists today once.
+
+Open: none new.
+
+## Sprint 17 integration notes (staff billing + the self-running token model - PM build, 2026-09-17)
+
+Built inline on portal/r3. Staff: `/portal/admin/households/:householdId`
+(ops/owner) renders `screens/Billing.js` in its staff mode — `useBillingHub(
+{ householdId })`, "Billing · staff view" header with the household name,
+back to Admin, the staff tab bar, no card CTA; reached from the new
+`components/HouseholdsCard.js` on the Admin dashboard (every household,
+standing badge, athletes and packages; `useHouseholdsDirectory()`) and from
+the athlete detail's membership editor ("View household billing"). Athlete:
+`screens/Membership.js` rewritten over `useMyTokens()` — the same TokenMeter,
+the paused-bookings banner when the household's standing bites, contract
+link; the harness's demoMembers/demoHousehold props and their fixtures are
+gone (variants are seed-driven like Billing's). Functions:
+`portal/sweep.js` `runWaitlistSweep({ now, db })` and the `sweepWaitlist`
+schedule (06:00 Chicago) — expired entries mint `graceTokens/{sessionId}_
+{athleteId}_waitlist` (30 days, `createdBy: 'sweep'`, create-only), are
+deleted, and send one `waitlist-expired` notice (`notices.waitlistExpired`);
+an athlete already holding a waitlist-expired token for that session under
+ANY id (the manual script's older `sweep-…` ids included) is not minted
+again; `scripts/sweep-waitlist.mjs` now mints the same deterministic id.
+Cosmetic: the specialist Sessions screen's day list skips today when the
+pinned Today section renders it. Fix found in the live pass: the Sprint 16
+parent redirect on `/portal/membership` fired before the auth session
+resolved, so an athlete was read as a parent, sent to Billing and bounced
+home — MembershipRoute now waits for the session.
+
+Verified: `verify-sweep.js` (isolated emulator; two expirations minted +
+notified with the pinned copy, one skipped for the script's existing token,
+the future entry untouched, idempotent re-run, a later run expiring the
+next entry with its own 30-day expiry) — all pass; `verify-lane.js` and
+`verify-notifications.js` still pass; functions lint clean, lib.test 27
+passing; frontend unit tests unchanged (27); bundle clean. :3001 as owner:
+Admin shows "Households · 2" (Parker past due, Whitfield active with three
+athletes and packages); Whitfield opens the staff view with exactly the
+parent's numbers (Jordan 9 of 12, Nico 6 of 6, Reese 5 of 6 + bonus).
+The seed has no Phil session today, so the Sessions dedupe was verified by
+reading, not by eye.
+
+Owner's amended pins found in the tree during this sprint (uncommitted,
+dated 2026-09-17: SPRINT-12-PINS.md v2.0.1 pricing sheet / facility access /
+Elite frequency caps, v2.0.2 capacity 14 + Tue/Thu 3 PM reserved;
+tokens-and-billing-contract.md §1) — NOT folded in here; they are the next
+sprint's pin.

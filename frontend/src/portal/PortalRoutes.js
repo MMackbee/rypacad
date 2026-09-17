@@ -276,11 +276,42 @@ function CoachingRoute() {
  * (Sprint 10 pin F) — resolved here, the way every other role-aware route
  * in this file does it; seed mode stays the owner default.
  */
+/**
+ * Staff view of one household's Billing hub (Sprint 17, contract v2.5):
+ * the same page the parent sees, read-only, for ops/owner.
+ */
+function StaffBillingRoute() {
+  const { householdId } = useParams();
+  const live = isLive();
+  const { user } = useAuthSession(live ? undefined : { variant: 'idle' });
+  const navigate = useNavigate();
+  const role = (live && user?.role) || 'owner';
+  return (
+    <Billing
+      bare
+      staff
+      role={role}
+      householdId={householdId}
+      onBack={() => navigate('/portal/admin')}
+      onRetry={() => bump('billing')}
+    />
+  );
+}
+
 function AdminRoute({ onOpenAthlete, onSignOut }) {
   const live = isLive();
   const { user } = useAuthSession(live ? undefined : { variant: 'idle' });
+  const navigate = useNavigate();
   const role = (live && user?.role) || 'owner';
-  return <AdminDashboard bare role={role} onOpenAthlete={onOpenAthlete} onSignOut={onSignOut} />;
+  return (
+    <AdminDashboard
+      bare
+      role={role}
+      onOpenAthlete={onOpenAthlete}
+      onOpenHousehold={(id) => navigate(`/portal/admin/households/${id}`)}
+      onSignOut={onSignOut}
+    />
+  );
 }
 
 function SpecialistDayRoute({ onSignOut }) {
@@ -410,8 +441,12 @@ function SessionAttendanceRoute({ onBack }) {
  */
 function MembershipRoute() {
   const live = isLive();
-  const { user } = useAuthSession(live ? undefined : { variant: 'idle' });
+  const { user, loading } = useAuthSession(live ? undefined : { variant: 'idle' });
   const navigate = useNavigate();
+  // Sprint 17 fix: decide the role only once the session has resolved - an
+  // athlete arriving while the session user was still null was read as a parent,
+  // redirected to Billing, and bounced home by that route's RequireRole.
+  if (live && loading) return null;
   const role = live && user?.role === 'athlete' ? 'athlete' : 'parent';
   // Sprint 16: a parent's membership view IS the Billing hub.
   if (role === 'parent') return <Navigate to="/portal/billing" replace />;
@@ -707,6 +742,16 @@ export default function PortalRoutes() {
         element={
           <RequireRole roles={['ops', 'owner', 'mental']}>
             <AdminRoute onOpenAthlete={openAthlete} onSignOut={onSignOut} />
+          </RequireRole>
+        }
+      />
+      {/* Staff billing view (Sprint 17, contract v2.5): the same hub a
+          parent sees, for any household, read-only. */}
+      <Route
+        path="admin/households/:householdId"
+        element={
+          <RequireRole roles={['ops', 'owner']}>
+            <StaffBillingRoute />
           </RequireRole>
         }
       />
