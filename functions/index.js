@@ -33,6 +33,12 @@
  * revoke.js knows the count after its batch and sends one notice per
  * household per Stripe event.
  *
+ * Sprint 15 (contract v2.3) retires SMS: the Twilio sender, the YES/NO
+ * reply webhook (handleSMSResponse) and the smsLogs sweep (cleanupSMSLogs)
+ * are deleted. The phone channel is web push through Firebase Cloud
+ * Messaging (portal/push.js, no vendor, no key); email goes through
+ * portal/email.js (SMTP or Courier).
+ *
  * `onSessionUpdateNotifyWaitlist` and `notifyWaitlistForSession` are DELETED
  * here: they read `sessions.participants` / `sessions.waitlist` arrays that
  * no v1+ session has ever carried, so the trigger could never fire.
@@ -52,7 +58,6 @@
 
 const functions = require('firebase-functions/v1');
 const admin = require('firebase-admin');
-const twilioLib = require('twilio');
 
 // Initialize Firebase Admin before anything reads Firestore.
 admin.initializeApp();
@@ -62,7 +67,6 @@ const db = admin.firestore();
 const notify = require('./portal/notify');
 const notices = require('./portal/notices');
 const jobs = require('./portal/jobs');
-const {sendSms} = require('./portal/sms');
 const {stripeWebhook} = require('./portal/stripe');
 const {onSessionBookedDecrease} = require('./portal/promotion');
 
@@ -277,110 +281,4 @@ exports.tokenExpiryReminders = functions.pubsub
         console.error('tokenExpiryReminders error:', err);
       }
       return null;
-    });
-
-// ==========================================================================
-// SMS (Twilio) - inbound reply handler
-// ==========================================================================
-
-// Reply-handler stubs - a YES/NO reply confirms or cancels nothing yet. The
-// real transition needs a phone -> athlete mapping the data model does not
-// have (DECISION-GAPS.md, "Functions (Part 2 blockers)"); Sprint 13 did not
-// resolve it, so these stay stubs and only log.
-/**
- * @param {string} phoneNumber The sender.
- * @param {string} messageId The Twilio sid.
- * @return {!Promise<void>} Resolves immediately.
- */
-async function confirmSession(phoneNumber, messageId) {
-  console.log(`SMS YES from ${phoneNumber} (${messageId}) - no booking ` +
-      'transition is wired; needs a phone -> athlete mapping.');
-}
-
-/**
- * @param {string} phoneNumber The sender.
- * @param {string} messageId The Twilio sid.
- * @return {!Promise<void>} Resolves immediately.
- */
-async function cancelSession(phoneNumber, messageId) {
-  console.log(`SMS NO from ${phoneNumber} (${messageId}) - no booking ` +
-      'transition is wired; needs a phone -> athlete mapping.');
-}
-
-/**
- * Twilio inbound-SMS webhook. Only Twilio may call it: the request must carry
- * a valid X-Twilio-Signature for this exact URL and body (the auth token is
- * the shared secret), otherwise 403. Twilio posts server-to-server, so there
- * is no CORS wrapper. The sender is portal/sms.js's `sendSms`, shared with
- * the notification pipeline and lazily configured - with no credentials it
- * reports 'skipped' instead of throwing.
- */
-exports.handleSMSResponse = functions.https.onRequest(async (req, res) => {
-  const signature = req.header('X-Twilio-Signature') || '';
-  const url = `https://${req.get('host')}${req.originalUrl}`;
-  const authToken = process.env.TWILIO_AUTH_TOKEN;
-  if (!authToken ||
-      !twilioLib.validateRequest(authToken, signature, url, req.body || {})) {
-    res.status(403).send('Invalid Twilio signature');
-    return;
-  }
-  try {
-    const {From, Body, MessageSid} = req.body;
-    const response = String(Body || '').trim().toUpperCase();
-
-    if (response === 'YES') {
-      await confirmSession(From, MessageSid);
-      await sendSms({
-        to: From,
-        message: '✅ Session confirmed! See you tomorrow.',
-        type: 'confirmation_response',
-      });
-    } else if (response === 'NO') {
-      await cancelSession(From, MessageSid);
-      await sendSms({
-        to: From,
-        message: '❌ Session cancelled. Contact us to reschedule.',
-        type: 'cancellation_response',
-      });
-    } else {
-      await sendSms({
-        to: From,
-        message: 'Please reply YES to confirm or NO to cancel.',
-        type: 'invalid_response',
-      });
-    }
-
-    res.json({success: true});
-  } catch (error) {
-    console.error('Error handling SMS response:', error);
-    res.status(500).json({error: error.message});
-  }
-});
-
-// ============================================================================
-// SCHEDULED FUNCTIONS
-// ============================================================================
-
-// Clean up old SMS logs (keep last 30 days)
-exports.cleanupSMSLogs = functions.pubsub.schedule('every day 02:00')
-    .timeZone('America/Chicago')
-    .onRun(async (context) => {
-      try {
-        const thirtyDaysAgo = new Date();
-        thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
-
-        const oldLogsSnapshot = await db.collection('smsLogs')
-            .where('timestamp', '<', thirtyDaysAgo)
-            .get();
-
-        const batch = db.batch();
-        oldLogsSnapshot.docs.forEach((doc) => {
-          batch.delete(doc.ref);
-        });
-
-        await batch.commit();
-        console.log(`Cleaned up ${oldLogsSnapshot.docs.length} old SMS logs`);
-      } catch (error) {
-        console.error('Error cleaning up SMS logs:', error);
-      }
     });

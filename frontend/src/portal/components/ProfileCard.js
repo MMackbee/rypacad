@@ -10,9 +10,9 @@ import { useProfile } from '../hooks';
  * The signed-in person's own profile facts on Settings (owner feedback,
  * 2026-09-16: "do i need a profile view where i can set my phone/email for
  * sms/email notifications?"). Email is the sign-in address and is read-only
- * here; the phone is the one field a member writes for themselves besides
- * their notification preferences, and it is what SMS notices (waitlist
- * promotion, Part 2) send to. Saved on the user's own users doc.
+ * here; the phone is a contact number the academy can reach the member at
+ * (since Sprint 15 no notice is texted - notices go by email and push).
+ * Saved on the user's own users doc.
  */
 export default function ProfileCard({ style }) {
   const { data, loading, error, savePhone } = useProfile();
@@ -63,7 +63,7 @@ export default function ProfileCard({ style }) {
         onChange={(v) => setPhone(typeof v === 'string' ? v : v?.target?.value ?? '')}
       />
       <Body size={11} tone={color.textTertiary} style={{ marginTop: 6 }}>
-        Text notices (a waitlist spot opening, a cancelled session) go to this number.
+        A number the academy can reach you at. Notices arrive by email and push, not text.
       </Body>
       {error ? (
         <Body size={12} tone={color.error} style={{ marginTop: 10 }}>

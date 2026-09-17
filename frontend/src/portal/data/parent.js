@@ -123,35 +123,35 @@ export const NOTIFICATION_CATEGORIES = [
     name: 'Membership & tokens',
     description: 'Payment problems, token expiry, membership changes',
     email: true,
-    sms: true,
+    push: true,
     locked: true,
-    footnote: 'Always sent by email; texts are your choice.',
+    footnote: 'Always sent by email; push is your choice.',
   },
   {
     id: 'schedule',
     name: 'Sessions',
     description: 'Confirmations, reminders, waitlist spots, cancellations',
     email: true,
-    sms: true,
+    push: true,
   },
   {
     id: 'newsletter',
     name: 'Weekly newsletter',
     description: 'Program updates, coach and fitness corners, alumni',
     email: true,
-    sms: false,
+    push: false,
   },
   {
     id: 'progress',
     name: 'Progress summaries',
     description: 'Monthly report ahead of the check-in call',
     email: true,
-    sms: false,
+    push: false,
   },
 ];
 
 export const NOTIFICATION_NOTE =
-  'Membership and token notices are transactional, not marketing, and always go out by email. A parent who has switched texts off still sees the banner on Billing.';
+  'Membership and token notices are transactional, not marketing, and always go out by email. A parent who has switched push off still sees the banner on Billing.';
 
 /**
  * Practice-mode "Recent notices" (contract v2.2, Sprint 14): the sample
@@ -171,7 +171,7 @@ export const SEED_NOTICES = [
     bookingId: null,
     title: 'Tokens expiring soon',
     body: 'Jordan has 3 tokens left that expire Wed, Sep 30. Book before then.',
-    recipients: [{ uid: 'parent-dana', email: 'sent', sms: 'no-phone' }],
+    recipients: [{ uid: 'parent-dana', email: 'sent', push: 'no-device' }],
     createdAt: new Date(Date.now() - 5 * 60 * 60 * 1000).toISOString(),
   },
   {
@@ -184,7 +184,7 @@ export const SEED_NOTICES = [
     bookingId: 'reese_2026-11-11-0',
     title: 'Session cancelled',
     body: "Training on Wed, Nov 11 was cancelled by the academy. A bonus token was added to Reese's account (expires Tue, Oct 6).",
-    recipients: [{ uid: 'parent-dana', email: 'sent', sms: 'no-phone' }],
+    recipients: [{ uid: 'parent-dana', email: 'sent', push: 'no-device' }],
     createdAt: new Date(Date.now() - 2 * 86400000).toISOString(),
   },
   {
@@ -198,8 +198,8 @@ export const SEED_NOTICES = [
     title: 'Session booked',
     body: 'Jordan is booked: Training, Mon, Nov 16 at 3:30 PM.',
     recipients: [
-      { uid: 'athlete-jordan', email: 'sent', sms: 'no-phone' },
-      { uid: 'parent-dana', email: 'sent', sms: 'no-phone' },
+      { uid: 'athlete-jordan', email: 'sent', push: 'no-device' },
+      { uid: 'parent-dana', email: 'sent', push: 'no-device' },
     ],
     createdAt: new Date(Date.now() - 4 * 86400000).toISOString(),
   },

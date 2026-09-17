@@ -2371,3 +2371,98 @@ project is on Blaze, `firebase deploy --only functions` with
 COURIER_AUTH_TOKEN and the TWILIO_* keys set - nothing sends until then,
 and the ledger stays empty in production, so Recent notices reads
 "Nothing sent yet" until the first function fires.
+
+## Sprint 15 pins — push replaces SMS (contract v2.3, 2026-09-16)
+
+Origin: the owner, after setting up Twilio: "there has to be a simpler way
+than that" → "ok push is fine + email". US carrier registration (10DLC /
+toll-free verification) is what made SMS a mess, and it follows every
+vendor, so SMS is RETIRED rather than re-vendored. Built inline by the PM
+(no lanes: a channel swap on a pipeline built the same day).
+
+Keystones:
+- The PHONE CHANNEL IS WEB PUSH through Firebase Cloud Messaging: no
+  vendor, no key on the server (the admin SDK sends with the project's own
+  credentials), free. A device registers by granting the browser's
+  permission on Settings → "Push notifications"; its FCM token goes on the
+  member's own `users.pushTokens` (list, ≤ 10, the third and last member
+  self-write). The functions send to every token and prune the dead ones.
+  iPhone: push works only once the portal is on the Home Screen (the card
+  says so); everywhere else it is one tap.
+- EMAIL GETS A SIMPLE TRANSPORT: `functions/portal/email.js` sends over
+  SMTP when `SMTP_HOST/USER/PASS` are set (a Google Workspace address + app
+  password), else Courier when its token is set, else 'skipped'. No
+  Courier account needed.
+- The ledger row's recipients become `{ uid, email, push }` with outcomes
+  'sent' | 'skipped' | 'failed' | 'off' and, for push, 'no-device'. The
+  preferences map stores `{ email, push }` per category; Settings shows
+  Email / Push columns; defaults: billing and schedule both on, newsletter
+  and progress email only. Billing email stays locked on.
+- DELETED: `functions/portal/sms.js`, `handleSMSResponse`,
+  `cleanupSMSLogs`, the `twilio` dependency, the quiet-hours rule, the
+  TWILIO_* env keys. `users.phone` stays as contact information; the
+  Profile card says so.
+- Client: `public/firebase-messaging-sw.js` (registered with the Firebase
+  config in its query string, so nothing is hardcoded), `hooks/push.js`
+  (`pushSupport` → ready | blocked | ios-install | unsupported |
+  unconfigured; `enablePush` / `disablePush`; foreground messages refresh
+  Recent notices), `components/PushCard.js` on Settings. Needs
+  `REACT_APP_FIREBASE_VAPID_KEY` in the build (Firebase console → Cloud
+  Messaging → Web Push certificates); until set the card reads "Push isn't
+  switched on for this site yet" and email still works.
+- Verification: the Sprint 14 replay harness re-pointed at push (users
+  with `pushTokens`, outcomes per prefs/devices, push 'skipped' from the
+  emulator since FCM is unreachable there); rules probe for the
+  pushTokens self-write; :3001 Settings shows the card's states.
+- Open: none new. Push is verified end-to-end only after the VAPID key
+  exists and the functions deploy (Blaze).
+
+## Sprint 15 integration notes (push replaces SMS - PM build, replay + live pass, 2026-09-16)
+
+Built inline by the PM on portal/r3 (no lanes). Server: `functions/portal/
+email.js` (SMTP via nodemailer when SMTP_HOST/USER/PASS are set, else
+Courier, else 'skipped'; `sendCourierNotification` and `courierEventId`
+moved here from notify.js), `functions/portal/push.js` (FCM
+`sendEachForMulticast` to every `users.pushTokens` entry, dead tokens
+pruned with arrayRemove, 'no-device' with no tokens, 'skipped' inside the
+Functions emulator unless PUSH_IN_EMULATOR=true, tap link from
+`PORTAL_URL` + a per-kind portal path), `notify.js` re-pointed at the two
+(`CATEGORY_DEFAULTS` now email/push, `planFor` → email/push, ledger rows
+`{ uid, email, push }`), `index.js` minus handleSMSResponse /
+cleanupSMSLogs / twilio, `jobs.js` minus the SMS clock argument,
+`portal/sms.js` deleted, `twilio` dependency removed and `nodemailer`
+added, env.template rewritten (SMTP_*, PORTAL_URL; TWILIO_* gone). Client:
+`public/firebase-messaging-sw.js`, `hooks/push.js`, `components/PushCard.js`
+on Settings, Email / Push columns and `{ email, push }` preference maps
+(a map saved before this sprint carries `sms`, which is simply ignored -
+the push default applies), `users.pushTokens` self-write in the rules
+(list ≤ 10), the Profile card's phone copy, DATA-MODEL v2.3 rows,
+DECISION-GAPS updated (quiet-hours item replaced by "SMS retired").
+
+Verified: isolated-emulator replay `verify-notifications.js` (re-pointed:
+users carry `pushTokens`, outcomes 'skipped' / 'off' / 'no-device' exactly
+per prefs and devices, push from the emulator 'skipped') - all steps pass;
+`verify-lane.js` passes after it; lint clean; lib.test 27 passing; the
+emulator loads with only `stripeWebhook` as an HTTP endpoint (the Twilio
+webhook is gone). Shared emulator: a pushTokens rules probe (own-doc
+write 200, other's doc 403, 11 tokens 403, non-list 403, pushTokens+role
+403) passes; :3001 as parent-dana shows the Push notifications card, the
+Email / Push columns and the reworded phone help.
+
+Not exercised: a real push. The sandbox build has no VAPID key, so the
+card sits in its "not switched on for this site yet" state; `enablePush`
+(permission prompt → service-worker registration → getToken → arrayUnion)
+runs for the first time once `REACT_APP_FIREBASE_VAPID_KEY` is in the
+build, and a real send once the functions deploy. No real email either
+(no SMTP credentials in the emulator).
+
+Owner setup, in this order:
+1. Firebase console → Project settings → Cloud Messaging → Web Push
+   certificates → Generate key pair; put the public key in Railway as
+   `REACT_APP_FIREBASE_VAPID_KEY` (and in frontend/.env for local runs).
+2. A Google Workspace app password for the sending address → functions env
+   `SMTP_HOST=smtp.gmail.com SMTP_PORT=465 SMTP_USER=… SMTP_PASS=…
+   SMTP_FROM="RYP Academy <…>"`, plus `PORTAL_URL`.
+3. Push portal/r3:main; deploy rules + indexes; then (Blaze) deploy
+   functions. Parents turn push on from Settings; on iPhone only after
+   Add to Home Screen.

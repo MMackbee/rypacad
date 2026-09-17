@@ -111,7 +111,6 @@ async function runSessionReminders(args) {
       subjectKey: doc.id,
       title: copy.title,
       body: copy.body,
-      now,
     });
     if (res.duplicate) summary.duplicate += 1;
     else summary.sent += 1;
@@ -199,7 +198,6 @@ async function remindTokenExpiry(store, clock, summary) {
       subjectKey: `${doc.id}_${period.periodKey}`,
       title: copy.title,
       body: copy.body,
-      now: clock.now,
     });
     if (res.duplicate) summary.duplicate += 1;
     else summary.tokens += 1;
@@ -240,7 +238,6 @@ async function remindGraceExpiry(store, clock, summary) {
       subjectKey: doc.id,
       title: copy.title,
       body: copy.body,
-      now: clock.now,
     });
     if (res.duplicate) summary.duplicate += 1;
     else summary.grace += 1;

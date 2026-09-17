@@ -93,6 +93,7 @@ import {
 import useIssueTokens, { cancelSession, fetchTokenPeriod, setHouseholdStripeIds } from './grace';
 import useWaitlist, { fetchWaitlistByAthlete, fetchWaitlistByHousehold, fetchWaitlistBySession } from './waitlist';
 import useRecentNotices from './notices';
+import usePush from './push';
 import {
   COACH,
   COACH_BLOCKS,
@@ -202,7 +203,7 @@ export { default as useOnboardingStatus } from './onboarding';
 // useIssueTokens both need to be in this file's own scope to be usable by
 // its other hooks/helpers); re-exported here so screens keep importing
 // every portal hook from this one seam, same as every hook above.
-export { useIssueTokens, useRecentNotices, useWaitlist };
+export { useIssueTokens, usePush, useRecentNotices, useWaitlist };
 
 /**
  * Harness demo states (contract v1.1): every data-bearing hook accepts
@@ -3205,7 +3206,8 @@ async function liveNotificationPrefs() {
   const categories = NOTIFICATION_CATEGORIES.map((c) => ({
     ...c,
     email: c.locked ? true : saved[c.id]?.email ?? c.email,
-    sms: c.locked ? true : saved[c.id]?.sms ?? c.sms,
+    // A map saved before Sprint 15 carries sms, not push: the default applies.
+    push: c.locked ? true : saved[c.id]?.push ?? c.push,
   }));
   return { categories, note: NOTIFICATION_NOTE, saved: false };
 }
@@ -3213,7 +3215,7 @@ async function liveNotificationPrefs() {
 /**
  * GET/PUT /guardians/:id/notification-preferences (11) — contract v1.8, G.
  * Live adds `save(prefs)`: `prefs` must be the COMPLETE desired
- * { [categoryId]: { email, sms } } map (the caller/screen merges its
+ * { [categoryId]: { email, push } } map (the caller/screen merges its
  * locally-edited categories onto `data.categories` before calling — a
  * partial map would silently drop every category left out, since
  * live.js#saveNotificationPrefs replaces the whole notificationPrefs field

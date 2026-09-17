@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { TOUCH_MIN, color, font, radius, tint } from '../tokens';
 import BottomTabBar from '../components/BottomTabBar';
 import ProfileCard from '../components/ProfileCard';
+import PushCard from '../components/PushCard';
 import RecentNotices from '../components/RecentNotices';
 import PhoneFrame from '../components/PhoneFrame';
 import SavedToast from '../components/SavedToast';
@@ -15,7 +16,7 @@ import { useNotificationPrefs } from '../hooks';
  * States: Default, Saved.
  *
  * Two channels per category, not one master toggle. Categories differ in
- * urgency: a schedule change 40 minutes before a block needs SMS, a newsletter
+ * urgency: a schedule change 40 minutes before a block needs a push, a newsletter
  * never does, and collapsing them into one switch forces a parent to choose
  * between being spammed and missing the thing that mattered.
  *
@@ -87,7 +88,7 @@ export default function NotificationPreferences({
     categories.forEach((cat) => {
       prefs[cat.id] = {
         email: nextOverrides[`${cat.id}.email`] ?? cat.email,
-        sms: nextOverrides[`${cat.id}.sms`] ?? cat.sms,
+        push: nextOverrides[`${cat.id}.push`] ?? cat.push,
       };
     });
     setSaving(true);
@@ -139,6 +140,7 @@ export default function NotificationPreferences({
         ) : null}
 
         <ProfileCard />
+        <PushCard />
 
         <SectionLabel style={{ marginTop: 6 }}>Notifications</SectionLabel>
         <ChannelHeader />
@@ -147,7 +149,7 @@ export default function NotificationPreferences({
           <CategoryCard
             key={cat.id}
             category={cat}
-            value={{ email: valueFor(cat, 'email'), sms: valueFor(cat, 'sms') }}
+            value={{ email: valueFor(cat, 'email'), push: valueFor(cat, 'push') }}
             onChange={(channel, v) => set(cat, channel, v)}
           />
         ))}
@@ -311,7 +313,7 @@ function ChannelHeader() {
   return (
     <div style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '0 15px' }}>
       <div style={{ flex: 1 }} />
-      {['Email', 'SMS'].map((label) => (
+      {['Email', 'Push'].map((label) => (
         <div
           key={label}
           style={{
@@ -346,7 +348,7 @@ function CategoryCard({ category, value, onChange }) {
           </div>
         </div>
 
-        {['email', 'sms'].map((channel) => (
+        {['email', 'push'].map((channel) => (
           <div key={channel} style={{ width: 52, flex: 'none', display: 'grid', placeItems: 'center' }}>
             {locked ? (
               <LockedToggle label={`${category.name} ${channel}`} />

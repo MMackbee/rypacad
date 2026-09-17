@@ -1681,7 +1681,7 @@ export async function createStaffInvite({ email, role, displayName = null, speci
  * Persist the signed-in user's own notification preferences (contract v1.8,
  * G) — the ONE self-write the users collection grants, enforced by
  * firestore.rules' diff hasOnly(['notificationPrefs']). `prefs` is the
- * COMPLETE desired map ({ [categoryId]: { email, sms } }) — the caller
+ * COMPLETE desired map ({ [categoryId]: { email, push } }) — the caller
  * (useNotificationPrefs) merges its locally-edited categories onto the
  * currently-loaded set before calling this, since a partial map here would
  * silently drop every category not included.

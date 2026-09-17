@@ -48,7 +48,8 @@ The role document rules key off. One per authenticated account.
 | `displayName` | string \| null | |
 | `email` | string \| null | |
 | `notificationPrefs` | map \| null | **Contract v1.8 (Sprint 10 pin G).** `{ <categoryId>: { email: boolean, sms: boolean } }`, one entry per category the NotificationPreferences screen renders (`NOTIFICATION_CATEGORIES` in `frontend/src/portal/data/parent.js` — `billing`, `schedule`, `newsletter`, `progress` as of this sprint; `billing` is UI-locked always-on but still gets a stored entry, since the map records a preference per category the screen renders, not per toggle a parent can actually flip). `null` until a user has saved once. **The one self-write the `users` collection allows:** rules permit a user to update ONLY this field on their own doc (`diff.hasOnly(['notificationPrefs'])`) — it cannot touch `role`/`householdId`/`athleteId`/`specialistId`, so a self-write can never be a privilege escalation. **Provisioning never touches it (fix applied 2026-09-15):** `provision-family.mjs` never sets this key, and its `users` write is `updateMask`-scoped to exactly the seven provisioning-owned fields above (`USER_UPDATE_MASK`, defined right after `userDoc()` — the same enforcement as the athletes write's `ATHLETE_UPDATE_MASK`, contract v1.9), so a re-run — which re-writes EVERY already-resolved FAMILIES/STAFF account's `users` doc, not only newly resolved ones — leaves a saved map exactly as the user left it. Before that mask, the write was an unmasked REST `update`, i.e. a full-document replace (verified against the emulator: an unmasked re-run drops the field, a masked re-run keeps it, and a masked write still creates a not-yet-existing doc), so every production re-run between v1.8 going live and the fix silently reset any saved map to **absent** — the same stored state as never having saved. A user who saved before then and finds the screen back at its defaults hit exactly this; saving once more restores it, and no other field on the doc was affected. **Contract v2.2 (Sprint 14):** the sending functions read this map to decide each channel per notice (`functions/portal/notify.js` mirrors the same defaults — change one, change both); `billing` email always sends. |
-| `phone` | string \| null | **2026-09-16 (owner feedback).** The member's own mobile number for text notices, set from Settings → Profile; trimmed, ≤ 32 characters, empty clears to null. The second and last member self-write on `users` (rules: `diff.hasOnly(['notificationPrefs', 'phone'])`). Never written by provisioning (`USER_UPDATE_MASK` excludes it). The Part 2 promotion notifier reads it (`phone` / `phoneNumber`) and falls back to email when absent. |
+| `phone` | string \| null | **2026-09-16 (owner feedback).** The member's own mobile number for text notices, set from Settings → Profile; trimmed, ≤ 32 characters, empty clears to null. The second and last member self-write on `users` (rules: `diff.hasOnly(['notificationPrefs', 'phone'])`). Never written by provisioning (`USER_UPDATE_MASK` excludes it). Contact information only since Sprint 15 (SMS retired): no notice is texted. |
+| `pushTokens` | array<string> \| null | **Contract v2.3 (Sprint 15).** This member's registered devices for web push: Firebase Cloud Messaging registration tokens, one per browser that granted notification permission on Settings → Push notifications (`hooks/push.js`, `arrayUnion` / `arrayRemove`). The third and last member self-write on `users` (rules: `diff.hasOnly(['notificationPrefs', 'phone', 'pushTokens'])`, a list of at most 10). The sending functions (`functions/portal/push.js`) send to every token and prune the ones FCM reports dead. Never written by provisioning. |
 
 ### `households/{householdId}`
 
@@ -1429,13 +1430,14 @@ retry-stable event id, so a redelivery sends nothing and a genuine second
 status flip is its own notice). Shape: `{ kind,
 category, householdId, athleteId: string \| null, sessionId: string \|
 null, bookingId: string \| null, subjectKey, title, body, recipients:
-[{ uid, email, sms }], sentAt, createdAt }`. Each channel outcome is one of
-`'sent' \| 'skipped' \| 'failed' \| 'off'` (`sms` also `'no-phone'`):
-`off` = the recipient's `users.notificationPrefs[category]` has that
-channel switched off (absent map or category == the defaults in
-`data/parent.js`; `billing` email is always on), `skipped` = the provider
-is not configured or SMS quiet hours (outside 08:00–21:00 America/Chicago),
-`no-phone` = no `users.phone`. Kinds by category — schedule:
+[{ uid, email, push }], sentAt, createdAt }` (v2.3: `push` replaced `sms`).
+Each channel outcome is one of `'sent' \| 'skipped' \| 'failed' \| 'off'`
+(`push` also `'no-device'`): `off` = the recipient's
+`users.notificationPrefs[category]` has that channel switched off (absent
+map or category == the defaults in `data/parent.js`; `billing` email is
+always on), `skipped` = no email transport configured (SMTP or Courier)
+or, for push, the Functions emulator, `no-device` = no `users.pushTokens`.
+Kinds by category — schedule:
 `booking-confirmed`, `promoted`, `session-cancelled`, `reminder-24h`;
 billing: `booking-revoked`, `tokens-expiring`, `grace-expiring`,
 `membership` (TEAM.md "Sprint 14 pins" has the trigger and copy per kind).
@@ -1456,7 +1458,7 @@ jordan's booking on the full `-w0` session, the `session-cancelled` for
 reese's cancelled `2026-11-11-0` booking (the grace-token scenario above),
 and a `tokens-expiring` for jordan's current period — each with the
 recipients' outcomes exactly as the emulator functions leave them with no
-provider configured (`email: 'skipped'`, `sms: 'no-phone'`), timestamps
+provider configured (`email: 'skipped'`, `push: 'no-device'`), timestamps
 relative to the seed run.
 
 ### v2.2 index reasoning (Sprint 14 — notifications)

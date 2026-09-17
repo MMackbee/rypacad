@@ -1289,8 +1289,8 @@ function buildDocs(portal) {
         title: 'Session booked',
         body: 'Jordan is booked: Training, Mon, Nov 16 at 3:30 PM.',
         recipients: [
-          { uid: 'athlete-jordan', email: 'skipped', sms: 'no-phone' },
-          { uid: 'parent-dana', email: 'skipped', sms: 'no-phone' },
+          { uid: 'athlete-jordan', email: 'skipped', push: 'no-device' },
+          { uid: 'parent-dana', email: 'skipped', push: 'no-device' },
         ],
         sentAt: hoursAgo(96),
         createdAt: hoursAgo(96),
@@ -1310,7 +1310,7 @@ function buildDocs(portal) {
         body:
           'Training on Wed, Nov 11 was cancelled by the academy. ' +
           `A bonus token was added to Reese's account (expires ${graceExpiry}).`,
-        recipients: [{ uid: 'parent-dana', email: 'skipped', sms: 'no-phone' }],
+        recipients: [{ uid: 'parent-dana', email: 'skipped', push: 'no-device' }],
         sentAt: hoursAgo(48),
         createdAt: hoursAgo(48),
       },
@@ -1331,7 +1331,7 @@ function buildDocs(portal) {
         body:
           `Jordan has ${tokenPeriods.get(`jordan_${jordanCurrentPeriod.periodKey}`).granted} tokens left ` +
           `that expire ${niceDate(jordanCurrentPeriod.periodEnd)}. Book before then.`,
-        recipients: [{ uid: 'parent-dana', email: 'skipped', sms: 'no-phone' }],
+        recipients: [{ uid: 'parent-dana', email: 'skipped', push: 'no-device' }],
         sentAt: hoursAgo(5),
         createdAt: hoursAgo(5),
       },

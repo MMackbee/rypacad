@@ -1,11 +1,13 @@
 /**
- * The notification pipeline (contract v2.2, TEAM.md Sprint 14 pins).
+ * The notification pipeline (contract v2.2, TEAM.md Sprint 14 pins; v2.3,
+ * Sprint 15: push replaces SMS).
  *
  * ONE ENTRY POINT: `sendNotice`. It resolves recipients, applies each
- * account's `notificationPrefs` per channel, sends email through Courier and
- * SMS through portal/sms.js, writes the `notifications/{kind}_{subjectKey}`
- * ledger row, and returns it. Triggers and scheduled jobs build copy
- * (portal/notices.js) and call this; nothing else sends.
+ * account's `notificationPrefs` per channel, emails through portal/email.js
+ * (SMTP or Courier) and pushes through portal/push.js (Firebase Cloud
+ * Messaging), writes the `notifications/{kind}_{subjectKey}` ledger row, and
+ * returns it. Triggers and scheduled jobs build copy (portal/notices.js) and
+ * call this; nothing else sends.
  *
  * LEDGER-IDEMPOTENT. The ledger row IS the send lock: it is created inside a
  * transaction with `tx.create`, so a concurrent trigger, a Firestore retry or
@@ -13,7 +15,7 @@
  * is written BEFORE the providers are called, with every attempted channel
  * recorded pessimistically as 'failed'; the outcomes are rewritten once the
  * sends return. A crash mid-send therefore leaves an honest 'failed' on the
- * record rather than a silent gap - and never a second text.
+ * record rather than a silent gap - and never a second push.
  *
  * NEVER THROWS. Every caller is a trigger or job whose write has already
  * committed; a notice failure must not roll one back.
@@ -22,45 +24,36 @@
  * `frontend/src/portal/data/parent.js` - change one, change both): absent
  * map or absent category == the category's default. `billing` email is
  * LOCKED ON - a transactional payment notice always reaches at least email -
- * while billing SMS follows the saved preference like every other channel.
+ * while billing push follows the saved preference like every other channel.
  */
 
 'use strict';
 
 const admin = require('firebase-admin');
-const {CourierClient} = require('@trycourier/courier');
 const {FieldValue} = require('firebase-admin/firestore');
+const email = require('./email');
 const notices = require('./notices');
-const sms = require('./sms');
+const push = require('./push');
 
 /** The `notificationPrefs` defaults, per category. @const {!Object} */
 const CATEGORY_DEFAULTS = {
-  billing: {email: true, sms: true},
-  schedule: {email: true, sms: true},
-  newsletter: {email: true, sms: false},
-  progress: {email: true, sms: false},
+  billing: {email: true, push: true},
+  schedule: {email: true, push: true},
+  newsletter: {email: true, push: false},
+  progress: {email: true, push: false},
 };
 
-let courierClient;
-let courierResolved = false;
-
-/**
- * The Courier client, or null when the token is not configured. Resolved
- * lazily so requiring this module never depends on load order.
- * @return {?Object} A Courier client or null.
- */
-function courier() {
-  if (!courierResolved) {
-    const token = process.env.COURIER_AUTH_TOKEN;
-    // @trycourier/courier v5 exports CourierClient as a FACTORY, not a
-    // constructor - `new` would change what comes back. The capitalized name
-    // is the SDK's, so the lint rule is wrong about this one call site.
-    // eslint-disable-next-line new-cap
-    courierClient = token ? CourierClient({authorizationToken: token}) : null;
-    courierResolved = true;
-  }
-  return courierClient;
-}
+/** Where a tapped push opens, per kind (a portal path). @const {!Object} */
+const LINKS = {
+  'booking-confirmed': '/portal/schedule',
+  'promoted': '/portal/schedule',
+  'session-cancelled': '/portal/schedule',
+  'reminder-24h': '/portal/schedule',
+  'booking-revoked': '/portal/membership',
+  'tokens-expiring': '/portal/membership',
+  'grace-expiring': '/portal/membership',
+  'membership': '/portal/membership',
+};
 
 /**
  * Firestore, resolved lazily so this module can be required before
@@ -69,49 +62,6 @@ function courier() {
  */
 function db() {
   return admin.firestore();
-}
-
-/**
- * Send one Courier message. Never throws: a notification failure must not
- * roll back a booking that already committed.
- * @param {{toProfile: (!Object|undefined), toUserId: (?string|undefined),
- *     eventId: (?string|undefined), content: (!Object|undefined),
- *     channels: (!Object|undefined)}} args The message.
- * @return {!Promise<!Object>} Courier's response, or `{skipped}`/`{error}`.
- */
-async function sendCourierNotification(args) {
-  const {
-    toProfile = {},
-    toUserId = null,
-    eventId = null,
-    content = {},
-    channels = {},
-  } = args || {};
-  const client = courier();
-  if (!client) {
-    console.warn('Courier client not configured. Skipping notification.');
-    return {skipped: true};
-  }
-  try {
-    const message = {};
-    if (eventId) {
-      message.eventId = eventId; // Courier Studio template event id
-    } else {
-      message.content = content; // Ad-hoc content if no template
-    }
-    if (toUserId) {
-      message.recipient = toUserId;
-    } else {
-      message.profile = toProfile; // { email, phone_number, ... }
-    }
-    if (channels && Object.keys(channels).length > 0) {
-      message.channels = channels; // e.g., { sms: {}, email: {} }
-    }
-    return await client.send({message});
-  } catch (err) {
-    console.error('Courier send error:', err);
-    return {error: err.message};
-  }
 }
 
 /**
@@ -126,38 +76,39 @@ async function getUserProfile(userId) {
 }
 
 /**
- * A Courier profile from a `users` document. Both phone spellings are read:
- * `phone` is the 2026 member-settable field (DATA-MODEL users), `phoneNumber`
- * the 2025 one some older documents still carry.
+ * A minimal profile from a `users` document: the address email goes to and
+ * the phone kept as contact information (no notice is texted since Sprint
+ * 15; both spellings are read for older documents).
  * @param {?Object} user A `users` document body.
- * @return {?{email: ?string, phone_number: ?string}} A Courier profile.
+ * @return {?{email: ?string, phone_number: ?string}} A profile, or null when
+ *     the document has neither.
  */
 function profileFor(user) {
   if (!user) return null;
-  const email = user.email || null;
+  const emailAddress = user.email || null;
   const phone = user.phoneNumber || user.phone || null;
-  if (!email && !phone) return null;
-  return {email, phone_number: phone};
+  if (!emailAddress && !phone) return null;
+  return {email: emailAddress, phone_number: phone};
 }
 
 /**
- * One recipient: the Courier profile plus what the gates need (the saved
- * preference map and the resolved address per channel).
+ * One recipient: what the gates need (the saved preference map, the email
+ * address, the registered push devices).
  * @param {!Object} doc A `users` QueryDocumentSnapshot.
- * @return {?{uid: string, profile: !Object, prefs: ?Object, email: ?string,
- *     phone: ?string}} A recipient, or null when the account has no address
- *     at all (nothing can reach it).
+ * @return {?{uid: string, prefs: ?Object, email: ?string,
+ *     tokens: !Array<string>}} A recipient, or null when nothing can reach
+ *     the account (no email and no device).
  */
 function recipientFrom(doc) {
   const user = doc.data() || {};
-  const profile = profileFor(user);
-  if (!profile) return null;
+  const emailAddress = user.email || null;
+  const tokens = push.cleanTokens(user.pushTokens);
+  if (!emailAddress && tokens.length === 0) return null;
   return {
     uid: doc.id,
-    profile,
     prefs: user.notificationPrefs || null,
-    email: profile.email,
-    phone: profile.phone_number,
+    email: emailAddress,
+    tokens,
   };
 }
 
@@ -232,29 +183,16 @@ async function resolveRecipients(args) {
  * Whether one channel may carry one category for one account.
  * @param {?Object} prefs `users.notificationPrefs`, possibly null.
  * @param {string} category The notice's category.
- * @param {string} channel 'email' or 'sms'.
+ * @param {string} channel 'email' or 'push'.
  * @return {boolean} True when the channel may send.
  */
 function channelAllowed(prefs, category, channel) {
   // Transactional and locked in the UI: a billing email always sends.
   if (category === 'billing' && channel === 'email') return true;
-  const defaults = CATEGORY_DEFAULTS[category] || {email: true, sms: false};
+  const defaults = CATEGORY_DEFAULTS[category] || {email: true, push: false};
   const saved = prefs && typeof prefs === 'object' ? prefs[category] : null;
   const value = saved && typeof saved === 'object' ? saved[channel] : undefined;
   return typeof value === 'boolean' ? value : Boolean(defaults[channel]);
-}
-
-/**
- * The Courier Studio template for a kind, when one is configured.
- * `booking-confirmed` -> `COURIER_EVENT_BOOKING_CONFIRMED`; unset means
- * ad-hoc `{title, body}` content, the same fallback the helper always had.
- * @param {string} kind The notice kind.
- * @return {?string} An event id or null.
- */
-function courierEventId(kind) {
-  const key = 'COURIER_EVENT_' +
-      String(kind || '').toUpperCase().replace(/-/g, '_');
-  return process.env[key] || null;
 }
 
 /**
@@ -263,43 +201,34 @@ function courierEventId(kind) {
  * value that still needs a provider call.
  * @param {!Object} recipient A resolved recipient.
  * @param {string} category The notice's category.
- * @param {?Date} now The clock the SMS window is judged against.
- * @return {{uid: string, recipient: !Object, email: string, sms: string}} The
- *     plan.
+ * @return {{uid: string, recipient: !Object, email: string, push: string}}
+ *     The plan.
  */
-function planFor(recipient, category, now) {
-  let email = 'skipped';
+function planFor(recipient, category) {
+  let mail = 'skipped';
   if (!channelAllowed(recipient.prefs, category, 'email')) {
-    email = 'off';
+    mail = 'off';
   } else if (recipient.email) {
-    email = 'attempt';
+    mail = 'attempt';
   }
-  let text = 'off';
-  if (channelAllowed(recipient.prefs, category, 'sms')) {
-    if (!recipient.phone) {
-      text = 'no-phone';
-    } else if (!sms.withinSmsWindow(now)) {
-      // Quiet hours. The ledger still records the notice: it is never
-      // re-sent later (pin), because a stale reminder is worse than none.
-      text = 'skipped';
-    } else {
-      text = 'attempt';
-    }
+  let device = 'off';
+  if (channelAllowed(recipient.prefs, category, 'push')) {
+    device = recipient.tokens.length > 0 ? 'attempt' : 'no-device';
   }
-  return {uid: recipient.uid, recipient, email, sms: text};
+  return {uid: recipient.uid, recipient, email: mail, push: device};
 }
 
 /**
  * The ledger's per-recipient row before any provider was called: an
  * attempted channel is pessimistically 'failed' until it reports otherwise.
  * @param {!Object} plan One `planFor` result.
- * @return {{uid: string, email: string, sms: string}} A ledger row.
+ * @return {{uid: string, email: string, push: string}} A ledger row.
  */
 function pessimistic(plan) {
   return {
     uid: plan.uid,
     email: plan.email === 'attempt' ? 'failed' : plan.email,
-    sms: plan.sms === 'attempt' ? 'failed' : plan.sms,
+    push: plan.push === 'attempt' ? 'failed' : plan.push,
   };
 }
 
@@ -307,28 +236,28 @@ function pessimistic(plan) {
  * Deliver one notice to one recipient and report the two outcomes.
  * @param {!Object} plan One `planFor` result.
  * @param {{kind: string, title: string, body: string}} notice The copy.
- * @return {!Promise<{uid: string, email: string, sms: string}>} The row.
+ * @return {!Promise<{uid: string, email: string, push: string}>} The row.
  */
 async function deliver(plan, notice) {
-  const row = {uid: plan.uid, email: plan.email, sms: plan.sms};
+  const row = {uid: plan.uid, email: plan.email, push: plan.push};
   if (plan.email === 'attempt') {
-    const resp = await sendCourierNotification({
-      eventId: courierEventId(notice.kind),
-      toProfile: {email: plan.recipient.email},
-      content: {title: notice.title, body: notice.body},
-      channels: {email: {}},
+    const resp = await email.sendEmail({
+      to: plan.recipient.email,
+      subject: notice.title,
+      text: notice.body,
+      kind: notice.kind,
     });
-    if (!resp || resp.error) row.email = 'failed';
-    else if (resp.skipped) row.email = 'skipped';
-    else row.email = 'sent';
+    row.email = resp.status;
   }
-  if (plan.sms === 'attempt') {
-    const resp = await sms.sendSms({
-      to: plan.recipient.phone,
-      message: notice.body,
-      type: notice.kind,
+  if (plan.push === 'attempt') {
+    const resp = await push.sendPush({
+      uid: plan.uid,
+      tokens: plan.recipient.tokens,
+      title: notice.title,
+      body: notice.body,
+      data: {kind: notice.kind, link: LINKS[notice.kind] || '/portal'},
     });
-    row.sms = resp.status;
+    row.push = resp.status;
   }
   return row;
 }
@@ -362,8 +291,7 @@ function ledgerDoc(args, recipients) {
  * @param {{kind: string, category: string, householdId: ?string,
  *     athleteId: (?string|undefined), sessionId: (?string|undefined),
  *     bookingId: (?string|undefined), subjectKey: string, title: string,
- *     body: string, now: (?Date|undefined)}} args The notice. `now` is
- *     injectable so a scheduled job's fixed clock judges the SMS window.
+ *     body: string}} args The notice.
  * @return {!Promise<{id: string, duplicate: boolean, sent: boolean,
  *     recipients: !Array<!Object>, error: ?string}>} The ledger row as
  *     written, or `duplicate: true` when it already existed.
@@ -376,7 +304,7 @@ async function sendNotice(args) {
   let plans = [];
   try {
     const recipients = await resolveRecipients(args);
-    plans = recipients.map((r) => planFor(r, args.category, args.now || null));
+    plans = recipients.map((r) => planFor(r, args.category));
     const claimed = await db().runTransaction(async (tx) => {
       const snap = await tx.get(ref);
       if (snap.exists) return false;
@@ -414,7 +342,7 @@ async function sendNotice(args) {
   result.sent = true;
   result.recipients = rows;
   console.log(`notice ${id} -> ` +
-      rows.map((r) => `${r.uid}:${r.email}/${r.sms}`).join(' '));
+      rows.map((r) => `${r.uid}:${r.email}/${r.push}`).join(' '));
   return result;
 }
 
@@ -448,13 +376,14 @@ async function notifyWaitlistPromotion(args) {
 
 module.exports = {
   CATEGORY_DEFAULTS,
+  LINKS,
   channelAllowed,
-  courierEventId,
+  courierEventId: email.courierEventId,
   getUserProfile,
   notifyWaitlistPromotion,
   parentsForHousehold,
   profileFor,
   recipientsForAthlete,
-  sendCourierNotification,
+  sendCourierNotification: email.sendCourierNotification,
   sendNotice,
 };

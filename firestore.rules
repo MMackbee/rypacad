@@ -98,15 +98,19 @@ service cloud.firestore {
           )
         )
         || (
-          // Member self-writes: notificationPrefs (v1.8) and the self-service
-          // phone for text notices (2026-09-16) - nothing else on the doc.
+          // Member self-writes: notificationPrefs (v1.8), the self-service
+          // phone (2026-09-16) and this device's push tokens (v2.3, Sprint
+          // 15: a list of FCM tokens, at most 10) - nothing else on the doc.
           request.auth.uid == userId
-          && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['notificationPrefs', 'phone'])
+          && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['notificationPrefs', 'phone', 'pushTokens'])
           && (request.resource.data.get('notificationPrefs', null) is map
               || request.resource.data.get('notificationPrefs', null) == null)
           && (request.resource.data.get('phone', null) == null
               || (request.resource.data.get('phone', null) is string
                   && request.resource.data.phone.size() <= 32))
+          && (request.resource.data.get('pushTokens', null) == null
+              || (request.resource.data.get('pushTokens', null) is list
+                  && request.resource.data.pushTokens.size() <= 10))
         )
       );
     }

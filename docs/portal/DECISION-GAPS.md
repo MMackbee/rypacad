@@ -107,17 +107,18 @@ constant change if the owner rules otherwise.
    (item 4 of the Sprint 12 list) first.
 5. **Deploy** — every sender is a Cloud Function: nothing sends until the
    project is on Blaze and `firebase deploy --only functions` runs with
-   `COURIER_AUTH_TOKEN` (email) and the `TWILIO_*` keys (SMS) set. The
-   ledger and the Settings list work without either (outcomes 'skipped').
-6. **SMS quiet hours** — a text is never sent before 08:00 or after 21:00
-   America/Chicago; a notice generated outside the window records `sms:
-   'skipped'` and is NEVER re-sent later (the email still goes). Both
-   scheduled jobs run inside the window, so this only bites a night-time
-   staff cancellation, which then reaches parents by email only. Alternative:
-   queue the text for 08:00.
+   the `SMTP_*` keys (or `COURIER_AUTH_TOKEN`) set for email; push needs no
+   key on the server, only `REACT_APP_FIREBASE_VAPID_KEY` in the client
+   build. The ledger and the Settings list work without any of them
+   (outcomes 'skipped').
+6. **SMS retired (owner, 2026-09-16: "push is fine + email")** — the
+   Twilio sender, its quiet-hours rule and the YES/NO reply webhook are
+   deleted in Sprint 15; web push through Firebase Cloud Messaging is the
+   phone channel and `users.phone` is contact information only. The two
+   `handleSMSResponse` entries in the Functions section above are moot.
 
-Superseded by Sprint 14: the Functions note above that promotion notices
-are email-only — every notice now goes by email through Courier's email
-channel and by text through Twilio directly (`functions/portal/sms.js`),
-gated per recipient by `users.notificationPrefs` and `users.phone`, with the
-per-channel outcome recorded on the ledger row.
+Superseded by Sprints 14–15: the Functions note above that promotion
+notices are email-only — every notice now goes by email (SMTP or Courier,
+`functions/portal/email.js`) and by web push (`functions/portal/push.js`),
+gated per recipient by `users.notificationPrefs` and `users.pushTokens`,
+with the per-channel outcome recorded on the ledger row.
