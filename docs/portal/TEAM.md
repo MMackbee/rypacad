@@ -2794,3 +2794,72 @@ Deploy (owner-gated): push portal/r3:main; `firebase deploy --only
 firestore:rules` (the facility-access branch); the calendar sync run so
 prod sessions take capacity 14; the provisioner's catalogue run so prod
 loses `t-20` and gets the new package docs (prices are never written).
+
+## Repo cleanup (owner request, 2026-09-17)
+
+Origin: the owner: "that whole dissected root folder bothers me... go ahead,
+delete the untracked ones too. Any dead or old context files can also be
+deleted." Done after a read-only audit (five auditors, three adversarial
+verifiers: build/deploy, tooling references, content loss) and a
+deterministic reachability check of `frontend/src` (esbuild metafile from
+`src/index.js`: 92 of 95 source files reachable).
+
+Removed (104 tracked files; all recoverable from the parent of this
+commit): `ryp-academy-frontend/` (the abandoned 2025 TypeScript prototype,
+81 files incl. a byte-identical `src_old/`), `backend/venv/` (a Flask stub
+and a file NAMED serviceAccountKey.json that was a 7-line code snippet, not
+a credential - verified, no key was ever tracked), `deploy.sh` (deployed
+everything ungated, to Firebase Hosting, and still told you to set up
+Twilio), the two root `INTEGRATION_*.md` and six 2025 guides in
+`frontend/`, `frontend/firebase.json` + `frontend/.firebaserc` (Firebase
+Hosting config; Railway is the host), `frontend/public/test.html` (was
+being served in production), a tracked `.DS_Store`, three unreachable
+source files (`components/LoadingSpinner.js`, `services/userSetupService.js`,
+`portal/screens/PackageStep.js`), and four dead context docs
+(`CHANGES-2026-09.md`, `NEXT-PROMPT.md`, `handoff-r3-update.md`,
+`booking-contract.md`) plus the dead rules draft `firestore.rules.r3`. The
+last two had never been committed; commit 8a9d206 archives them so they too
+are recoverable. Also removed from disk: the root `.env.local` (config for a
+non-rypacad project; nothing read it), three emulator debug logs,
+`frontend/build/`; and from the parent folder the July 2025 `App.jsx`
+prototype, the empty `wt-db/` and dead `.claude-flow/` tool state.
+
+Edits that went with it: `frontend/package.json` loses the three Firebase
+Hosting `deploy*` scripts and the `proxy` to the deleted Flask stub
+(dependencies untouched, so `npm ci` still matches the lockfile);
+`.gitignore` loses five entries that match nothing; the team agent
+definitions (`.claude/agents/frontend-dev.md`, `pm-senior.md`) no longer
+send lanes to the revision-3 handoff, which described the retired two-pool
+model - the spec of record is `design-handoff.md` (visual) plus the owner's
+`tokens-and-billing-contract.md` and `SPRINT-12-PINS.md` (policy).
+
+FIX FOUND BY THE AUDIT (a Sprint 18 miss): the "prices withheld from
+parents" gate had been applied to the orphaned `screens/PackageStep.js`,
+while the LIVE registration step renders `components/PackageCard.js`, which
+showed `$price` and a per-token rate unconditionally. `PackageCard` now
+takes `showPrices` defaulting to `PRICES_RELEASED`; with the flag false the
+card shows what a package includes and no dollar figure.
+
+Kept on purpose: `storage.rules` (firebase.json deploys it),
+`firebase.functions-lane.json` (the replay harnesses' isolated emulator),
+`frontend/src/components/ErrorBoundary.js` + `styles/theme.js` (App.js's
+crash fallback and its tokens), `frontend/.env.example`, every script and
+every functions file (each is required or cited), `design-handoff.md`
+(cited throughout the code).
+
+Pointers: `tokens-and-billing-contract.md` still cites `booking-contract.md`
+by name (the 12-hour cancellation rule, the transaction shape, and the
+OPEN makeup ruling whose terms `isMakeup` / `makeupFor` are defined only
+there) - read it with `git show 8a9d206:docs/portal/booking-contract.md`.
+The staging Firebase project `ryp-academy-app` is real but no longer
+referenced anywhere in the repo.
+
+Noticed, not fixed (needs an asset from the owner): `frontend/public/
+index.html` and `manifest.json` link `favicon.ico` and `logo192.png`, and
+neither file exists - the portal has no favicon or home-screen icon, which
+matters now that iPhone push depends on Add to Home Screen. The only copies
+in the old app were the stock React logo.
+
+Verified after the cleanup: bundle builds, 36 frontend unit tests, functions
+lint + 27 unit tests, every script parses, no live file references a
+deleted path.

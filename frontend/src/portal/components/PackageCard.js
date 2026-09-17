@@ -1,5 +1,6 @@
 import React from 'react';
 import { color, font, glow, radius } from '../tokens';
+import { PRICES_RELEASED } from '../data/packages';
 
 /**
  * Package card — screens 02, 10, 15 (Sprint 12 pin, contract v2.0).
@@ -11,6 +12,11 @@ import { color, font, glow, radius } from '../tokens';
  * price / tokens, only for the packages that actually sell tokens). Prices
  * render with "pending" beside them when the catalogue flags `pending: true`
  * (contract §1) — never hardcoded, never silently dropped.
+ *
+ * v2.0.1 (owner, 2026-09-17): prices are NOT released to parents. `showPrices`
+ * defaults to the catalogue's PRICES_RELEASED flag, so Registration's package
+ * step (the one live, parent-facing caller) shows what a package includes and
+ * no dollar figure or per-token rate until the owner releases pricing.
  */
 export default function PackageCard({
   pkg,
@@ -20,6 +26,7 @@ export default function PackageCard({
   rows = [],
   footnote,
   cadence = '/ period',
+  showPrices = PRICES_RELEASED,
   style,
 }) {
   const outlined = selected || emphasised;
@@ -52,10 +59,11 @@ export default function PackageCard({
         <div style={{ flex: 1, minWidth: 0 }}>
           <div style={{ font: `700 17px ${font.head}`, color: color.text }}>{pkg.name}</div>
           <div style={{ font: `400 11px ${font.body}`, color: color.textTertiary, marginTop: 3 }}>
-            {entitlementLine(pkg)}
+            {entitlementLine(pkg, showPrices)}
           </div>
         </div>
 
+        {showPrices ? (
         <div style={{ textAlign: 'right', flex: 'none' }}>
           <div style={{ font: `700 19px ${font.head}`, color: color.text }}>${pkg.price}</div>
           <div
@@ -69,6 +77,7 @@ export default function PackageCard({
             {pkg.pending ? ' · pending' : ''}
           </div>
         </div>
+        ) : null}
       </div>
 
       {rows.length ? (
@@ -115,10 +124,12 @@ export default function PackageCard({
  * package: count + the per-token rate, derived here (price / tokens) rather
  * than stored — the contract's own §1 table is exactly this division.
  */
-function entitlementLine(pkg) {
+function entitlementLine(pkg, showPrices) {
   if (pkg.kind === 'elite') return `Unlimited · 24/7 access · books ${pkg.windowDays} days out`;
   if (pkg.tokens == null) return null;
   if (pkg.tokens === 1) return `1 token · books ${pkg.windowDays} days out`;
+  // The per-token rate is a price: withheld with the rest (v2.0.1).
+  if (!showPrices) return `${pkg.tokens} tokens a period · books ${pkg.windowDays} days out`;
   const rate = pkg.price / pkg.tokens;
   return `${pkg.tokens} tokens a period · $${rate.toFixed(2)} a token`;
 }

@@ -2359,8 +2359,9 @@ export function useEnrollmentQueue() {
  * Contract v2.0 pin A: ONE catalogue - `golf`/`dropIn`/`fitness`/`elite`
  * (four lists) collapses to `tokens` (the four token packages) plus
  * `elite`/`single` (each one package). PAYLOAD SHAPE CHANGE - flagged for
- * the PM/frontend lane, same as usePackages' callers (Registration,
- * PackageStep) will need to read the new keys.
+ * the PM/frontend lane. (No live caller remains: Registration reads
+ * ALL_PACKAGES directly and the standalone PackageStep screen was deleted in
+ * the 2026-09-17 repo cleanup.)
  */
 export function usePackages() {
   return useSeedResource({

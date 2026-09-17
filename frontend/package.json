@@ -23,12 +23,8 @@
         "start": "react-scripts start",
         "build": "react-scripts build",
         "test": "react-scripts test",
-        "eject": "react-scripts eject",
-        "deploy": "npm run build && firebase deploy --only hosting",
-        "deploy:staging": "npm run build && firebase use staging && firebase deploy --only hosting",
-        "deploy:production": "npm run build && firebase use production && firebase deploy --only hosting"
+        "eject": "react-scripts eject"
     },
-    "proxy": "http://localhost:5000",
     "eslintConfig": {
         "extends": [
             "react-app",
