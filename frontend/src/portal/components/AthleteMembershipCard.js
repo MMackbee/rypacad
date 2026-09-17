@@ -3,19 +3,20 @@ import { useNavigate } from 'react-router-dom';
 import { color, font } from '../tokens';
 import { useAssignPackages, useHouseholdSettings, useIssueTokens } from '../hooks';
 import Button from './Button';
+import { Toggle } from './Toggle';
 import Field, { SelectField } from './Field';
 import NumericField from './NumericField';
 import SavedToast from './SavedToast';
 import Segmented from './Segmented';
 import { Body, Card, SectionLabel } from './Primitives';
-import { ALL_PACKAGES, packageById, periodFor } from '../data/packages';
+import { ALL_PACKAGES, FACILITY_ACCESS, packageById, periodFor } from '../data/packages';
 import { addDaysISO, todayISO } from '../data/calendar';
 
 /**
  * AthleteDetail's staff-side Membership card (Sprint 12 pin, TEAM.md
  * "Sprint 12 pins — the token model", contract v2.0). Rewritten from the
  * Sprint 11 two-select (golf + fitness) editor: ONE package select spanning
- * the whole catalogue (t-6 … t-20, elite, single — `ALL_PACKAGES` from
+ * the whole catalogue (t-6 … t-16, elite, single — `ALL_PACKAGES` from
  * data/packages.js, names + price with "pending" when the catalogue flags
  * it), plus a period-anchor-day control (1-28) that calls
  * useHouseholdSettings().setPeriodAnchorDay. Save -> useAssignPackages().
@@ -60,6 +61,7 @@ export default function AthleteMembershipCard({ athleteId, athlete, role }) {
       <Card large>
         <SectionLabel style={{ marginBottom: 12 }}>Membership</SectionLabel>
         <ReadOnlyRow label="Package" value={packageName} />
+        <ReadOnlyRow label="Facility access" value={athlete?.facilityAccess ? 'Yes' : 'No'} style={{ marginTop: 8 }} />
       </Card>
     );
   }
@@ -71,6 +73,8 @@ export default function AthleteMembershipCard({ athleteId, athlete, role }) {
         currentPackageId={currentPackageId}
         householdId={athlete?.householdId ?? null}
         initialAnchorDay={athlete?.periodAnchorDay ?? 1}
+        initialFacilityAccess={Boolean(athlete?.facilityAccess)}
+        hasConsent={Boolean(athlete?.facilityAccessConsent)}
       />
       {athlete?.householdId ? <HouseholdBillingLink householdId={athlete.householdId} /> : null}
     </>
@@ -118,8 +122,14 @@ function ReadOnlyRow({ label, value, style }) {
   );
 }
 
-function MembershipEditor({ athleteId, currentPackageId, householdId, initialAnchorDay }) {
+function MembershipEditor({ athleteId, currentPackageId, householdId, initialAnchorDay, initialFacilityAccess = false, hasConsent = false }) {
   const [packageId, setPackageId] = useState(currentPackageId ?? '');
+  // v2.0.1 (Sprint 18): the $300 facility-access add-on, switchable only
+  // once the signed waiver is on the athlete (rules enforce the same).
+  const [facilityAccess, setFacilityAccess] = useState(Boolean(initialFacilityAccess));
+  React.useEffect(() => {
+    setFacilityAccess(Boolean(initialFacilityAccess));
+  }, [initialFacilityAccess]);
   // The athlete record loads after mount, so the select follows the loaded
   // value once it arrives - and after a save, when the bump refetches it (a
   // no-op then, since it already matches what was just chosen).
@@ -134,7 +144,7 @@ function MembershipEditor({ athleteId, currentPackageId, householdId, initialAnc
   React.useEffect(() => () => savedTimer.current && clearTimeout(savedTimer.current), []);
 
   const assignState = useAssignPackages();
-  const dirty = packageId !== (currentPackageId ?? '');
+  const dirty = packageId !== (currentPackageId ?? '') || facilityAccess !== Boolean(initialFacilityAccess);
 
   const handleSave = async () => {
     if (!packageId) return;
@@ -142,7 +152,7 @@ function MembershipEditor({ athleteId, currentPackageId, householdId, initialAnc
     setError(null);
     setSaved(false);
     try {
-      await assignState.assign(athleteId, { packageId });
+      await assignState.assign(athleteId, { packageId, facilityAccess });
       setSaved(true);
       if (savedTimer.current) clearTimeout(savedTimer.current);
       savedTimer.current = setTimeout(() => setSaved(false), 2600);
@@ -162,6 +172,21 @@ function MembershipEditor({ athleteId, currentPackageId, householdId, initialAnc
       <SectionLabel style={{ marginBottom: 12 }}>Membership</SectionLabel>
       <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
         <SelectField label="Package" value={packageId} options={PACKAGE_SELECT_OPTIONS} onChange={setPackageId} />
+        <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <div style={{ font: `600 13px ${font.body}`, color: color.text }}>Facility access</div>
+            <div style={{ font: `400 11px ${font.body}`, color: color.textTertiary, marginTop: 2 }}>
+              {hasConsent
+                ? `+$${FACILITY_ACCESS.price} / month · waiver on file`
+                : 'Needs the signed facility-access waiver (enrollment consent) before it can be switched on'}
+            </div>
+          </div>
+          {hasConsent ? (
+            <Toggle checked={facilityAccess} onChange={setFacilityAccess} label="Facility access" />
+          ) : (
+            <span style={{ font: `500 12px ${font.body}`, color: color.textTertiary }}>{facilityAccess ? 'On' : 'Off'}</span>
+          )}
+        </div>
       </div>
 
       {error ? (

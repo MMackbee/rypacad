@@ -7,7 +7,7 @@
  *
  * CONTRACT v2.0 (Sprint 12 pin, "the token model", TEAM.md, Part 1 only):
  * one fungible token pool replaces the two-pool golf/fitness model.
- *   packages    — SIX docs now (t-6, t-12, t-16, t-20, elite, single) from the
+ *   packages    — FIVE docs (t-6, t-12, t-16, elite, single; t-20 retired v2.0.1) from the
  *                 seam's TOKEN_PACKAGES/ELITE/SINGLE_TOKEN in packages.js —
  *                 the g-*, f-*, drop-in, elite-247 catalogue is GONE. price
  *                 and pending are both stripped before writing (no dollar
@@ -428,7 +428,7 @@ function buildDocs(portal) {
   } = portal;
 
   // packages (contract v2.0, pin A/L/M) — ONE catalogue, six docs
-  // (t-6/t-12/t-16/t-20/elite/single). price AND pending are both stripped
+  // (t-6/t-12/t-16/elite/single). price AND pending are both stripped
   // before writing — no dollar amounts, and no invented-price markers,
   // anywhere in seed data (the v1.1 "price stripped" rule, extended to
   // `pending` by this sprint). id becomes the doc id rather than a
@@ -550,6 +550,12 @@ function buildDocs(portal) {
       coachId: coachUid,
     });
   }
+  // v2.0.1 (Sprint 18): the demo family's one facility-access add-on, with
+  // the signed waiver the editor and rules require (jordan only).
+  Object.assign(athletes.get('jordan'), {
+    facilityAccess: true,
+    facilityAccessConsent: { signedAt: new Date(), byUid: 'parent-dana' },
+  });
   // athletes/{id}/private/medical is deliberately NOT seeded — see header.
 
   // ---------------------------------------------------------------------
@@ -1024,7 +1030,7 @@ function buildDocs(portal) {
           { name: 'Mateo Contreras', dob: '2016-02-20', packageId: 'g-4-2', contractMinutes: 20 },
           { name: 'Sofia Contreras', dob: null, packageId: 'g-4-2', contractMinutes: null },
         ],
-        consents: { dataCollection: true, videoCapture: true, mediaRelease: true },
+        consents: { dataCollection: true, videoCapture: true, mediaRelease: true, facilityAccess: false },
         // v1.8 amendment (PM integration): free-text emergency contact +
         // medical notes ride the request and land in each approved
         // athlete's private/medical doc. Fabricated for a fabricated
@@ -1189,7 +1195,7 @@ function buildDocs(portal) {
     date: fullSessionDate,
     time: '3:30 PM',
     type: 'training',
-    capacity: 2, // <-- the one exception to CAPACITY = 15, see comment above
+    capacity: 2, // <-- the one exception to CAPACITY = 14, see comment above
     booked: 2,
     coachId: null,
     label: null,
@@ -1600,7 +1606,7 @@ async function main() {
     console.log(`  bookings/reese_2026-11-11-0: status=${b.status} cancelledBy=${b.cancelledBy} cancelReason=${b.cancelReason}`);
   }
 
-  console.log('\nFULL session + waitlist (contract v2.1, pin F — the ONE exception to capacity 15):');
+  console.log('\nFULL session + waitlist (contract v2.1, pin F — the ONE exception to capacity 14):');
   {
     const s = collections.sessions.get('2026-11-16-w0');
     console.log(`  sessions/2026-11-16-w0: capacity=${s.capacity} booked=${s.booked} status=${s.status}`);

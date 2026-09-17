@@ -7,7 +7,9 @@
  *
  * CONTRACT v2.0 (Sprint 12 pin J, "the token model"): the locked weekly
  * schedule the owner gave directly, per-day blocks, 60 minutes each —
- * Mon/Wed 3, 4, 5 PM; Tue/Thu 3, 4, 5, 6 PM; Fri 3, 4 PM. Production sessions
+ * Mon/Wed 3, 4, 5 PM; Tue/Thu 4, 5, 6 PM; Fri 3, 4 PM (v2.0.2, 2026-09-17:
+ * Tue/Thu 3 PM is RESERVED for an invite-only group and is not generated;
+ * capacity is 14). Production sessions
  * come from the Google Calendar sync (a calendar edit by the owner, not a
  * code change) — this generator exists for **seed parity**, so the emulator
  * shows the real locked schedule without a calendar to sync against.
@@ -24,9 +26,9 @@
 // training/tournament and ends with a non-bookable display block.
 export const WEEKDAY_BLOCKS = {
   Mon: [15, 16, 17],
-  Tue: [15, 16, 17, 18],
+  Tue: [16, 17, 18],
   Wed: [15, 16, 17],
-  Thu: [15, 16, 17, 18],
+  Thu: [16, 17, 18],
   Fri: [15, 16],
 };
 
@@ -71,13 +73,14 @@ const SATURDAY_ADULT_BLOCK = {
 };
 
 /**
- * Capacity per session (contract v2.0, pin J): flat 15, every session, every
+ * Capacity per session (contract v2.0, pin J; 14 since v2.0.2, 2026-09-17):
+ * flat, every session, every
  * type — the earlier per-type map (`{ training, tournament }`) is gone along
  * with the two-pool model it served. `season.js`'s `capacityFor()` reads
  * `session.capacity` as a plain number either way, so this flattening needs
  * no change on that side.
  */
-export const CAPACITY = 15;
+export const CAPACITY = 14;
 
 const DAY = { SUN: 0, MON: 1, TUE: 2, WED: 3, THU: 4, FRI: 5, SAT: 6 };
 

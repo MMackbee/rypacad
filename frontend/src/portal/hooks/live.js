@@ -33,9 +33,9 @@ import {
 } from 'firebase/firestore';
 import { auth, db } from '../../firebase';
 import { bump } from './invalidate';
-import { normalizeAnchorDay, periodFor, windowDaysFor } from '../data/packages';
+import { eliteDailyCapHit, normalizeAnchorDay, periodFor, windowDaysFor } from '../data/packages';
 import { openThrough, windowOpensOn } from '../data/calendar';
-import { SPECIALISTS, SPECIALIST_MONTHLY_CAP } from '../data/specialists';
+import { SPECIALISTS, mentalCapFor } from '../data/specialists';
 
 /** id -> catalogue entry, for the specialist-cap error copy below. */
 const SPECIALIST_BY_ID = new Map(SPECIALISTS.map((s) => [s.id, s]));
@@ -530,8 +530,9 @@ function assertWithinBookingWindow(pkg, date) {
  * rule on how often the athlete sees Yannick, not a pool a grace token could
  * exempt someone from.
  */
-function assertMentalCadence(type, date, bookings) {
-  const mentalCap = SPECIALIST_MONTHLY_CAP.mental;
+function assertMentalCadence(type, date, bookings, pkg) {
+  // v2.0.1 (Sprint 18): per package - Elite two a month, everyone else one.
+  const mentalCap = mentalCapFor(pkg);
   if (type === 'mental' && mentalCap != null) {
     const month = date.slice(0, 7);
     const usedThisMonth = (bookings || []).filter(
@@ -551,6 +552,25 @@ function assertMentalCadence(type, date, bookings) {
       );
     }
   }
+}
+
+/**
+ * Elite's frequency caps (contract v2.0.1, Sprint 18): at most one training-
+ * or-tournament booking per date and one Phil booking per date. Not a pool,
+ * never a charge - the same class of rule as the mental cadence above, and
+ * the other named exception to "charging never branches on type". Typed
+ * reason 'one-per-day' so the booking screens can say so.
+ */
+function assertEliteDailyCap(pkg, type, date, bookings) {
+  if (!eliteDailyCapHit(pkg, type, date, bookings)) return;
+  throw new LiveDataError(
+    ERR.INVALID,
+    type === 'phil'
+      ? "Elite includes one session with Phil a day, and there's already one booked that day."
+      : "Elite includes one golf session a day, and there's already one booked that day.",
+    null,
+    'one-per-day'
+  );
 }
 
 /**
@@ -633,7 +653,8 @@ export async function createBooking(
   }
   if (!skipCapCheck) {
     assertWithinBookingWindow(pkg, date);
-    assertMentalCadence(type, date, bookings);
+    assertMentalCadence(type, date, bookings, pkg);
+    assertEliteDailyCap(pkg, type, date, bookings);
   }
 
   let chargedFrom = 'period';
@@ -1316,6 +1337,13 @@ export async function approveEnrollmentRequest(uid) {
         packageId: a.packageId ?? null,
         contractMinutes: a.contractMinutes ?? null,
         coachId: null,
+        // v2.0.1 (Sprint 18): the add-on is never on by default; the signed
+        // waiver (enrollment consent) is what later lets ops switch it on.
+        facilityAccess: false,
+        facilityAccessConsent:
+          request.consents && request.consents.facilityAccess === true
+            ? { signedAt: serverTimestamp(), byUid: uid }
+            : null,
       });
       athleteIds.push(athleteRef.id);
       // Emergency contact + medical notes the guardian typed at enrollment
@@ -1429,7 +1457,7 @@ export async function setContractTier({ athleteId, minutes }) {
  * which package pointer the athlete's token position derives from going
  * forward.
  */
-export async function setAthletePackages(athleteId, { packageId }) {
+export async function setAthletePackages(athleteId, { packageId, facilityAccess }) {
   if (!athleteId) {
     throw new LiveDataError(ERR.INVALID, 'setAthletePackages: athleteId is required.');
   }
@@ -1438,12 +1466,14 @@ export async function setAthletePackages(athleteId, { packageId }) {
   }
   requireUser();
   try {
-    await updateDoc(doc(db, 'athletes', athleteId), {
-      packageId,
-      updatedAt: serverTimestamp(),
-    });
+    // v2.0.1 (Sprint 18): the facility-access add-on rides the same rules
+    // branch (hasOnly packageId/facilityAccess/updatedAt); written only when
+    // the editor sends a boolean, so older callers are untouched.
+    const patch = { packageId, updatedAt: serverTimestamp() };
+    if (typeof facilityAccess === 'boolean') patch.facilityAccess = facilityAccess;
+    await updateDoc(doc(db, 'athletes', athleteId), patch);
     bump('athletes');
-    return { athleteId, packageId };
+    return { athleteId, packageId, facilityAccess: patch.facilityAccess ?? null };
   } catch (err) {
     throw wrap(err, 'setAthletePackages');
   }

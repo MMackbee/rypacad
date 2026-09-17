@@ -87,7 +87,7 @@ export default function Registration({ variant, bare = false, onBack, onFinish }
   ]);
   const [emergencyContact, setEmergencyContact] = useState('');
   const [medical, setMedical] = useState('');
-  const [consents, setConsents] = useState({ dataCollection: true, videoCapture: true, mediaRelease: false });
+  const [consents, setConsents] = useState({ dataCollection: true, videoCapture: true, mediaRelease: false, facilityAccess: false });
   const [signatureName, setSignatureName] = useState('');
   const [showErrors, setShowErrors] = useState(false);
   const [submitError, setSubmitError] = useState(null);
@@ -435,7 +435,7 @@ function AthleteStep({
  * packages.js) is already the static catalogue seam both data modes build
  * against (its own header comment: "both data modes call it"), so there is
  * nothing left for a seed/live hook to wrap. Renders the four token packages
- * (t-6…t-20) plus Elite, which REPLACES a token pick rather than stacking —
+ * (t-6…t-16) plus Elite, which REPLACES a token pick rather than stacking —
  * same one-of-N rule PackageStep (below) uses. The optional contract tier
  * (20/45/95, contract v1.8 §B) sits directly below each athlete's choice.
  */

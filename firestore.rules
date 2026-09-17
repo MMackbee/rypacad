@@ -194,8 +194,14 @@ service cloud.firestore {
       // table) and this branch does not change that.
       function packageAssignmentUpdateOk() {
         let after = request.resource.data;
-        return after.diff(resource.data).affectedKeys().hasOnly(['packageId', 'updatedAt'])
-          && after.packageId is string;
+        return after.diff(resource.data).affectedKeys().hasOnly(['packageId', 'facilityAccess', 'updatedAt'])
+          && after.packageId is string
+          // v2.0.1 (Sprint 18): the $300 facility-access add-on may only be
+          // switched ON when the signed waiver is already on the athlete
+          // (copied from the enrollment consent at approval).
+          && after.get('facilityAccess', false) is bool
+          && (after.get('facilityAccess', false) == false
+              || resource.data.get('facilityAccessConsent', null) != null);
       }
       allow update: if signedIn() && me().role in ['ops', 'owner'] && packageAssignmentUpdateOk();
 

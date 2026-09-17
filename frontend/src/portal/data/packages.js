@@ -28,16 +28,19 @@
  * CONTRACT v2.0 (Sprint 12, TEAM.md "Sprint 12 pins - the token model").
  * ONE catalogue, ONE fungible token pool. Everything from here down to the
  * DEPRECATED banner is the live seam both lanes build against (pin A, B, D,
- * L, M). Prices carry pending: true until the owner's OK (contract section
- * 1); the UI may render "pending" beside them. Seeds never carry prices.
+ * L, M). Prices are the owner's own figures as of 2026-09-17 (v2.0.1) but
+ * are withheld from parents until released (PRICES_RELEASED). Seeds never
+ * carry prices.
  * ========================================================================== */
 
 /** Token packages (contract section 1): tokens per billing period. */
+// v2.0.1 (Sprint 18, the owner's pricing sheet of 2026-09-17): three token
+// packages - t-20 is RETIRED - at the owner's own figures (pending: false).
+// The prices are NOT released to parents: see PRICES_RELEASED below.
 export const TOKEN_PACKAGES = [
-  { id: 't-6',  name: '6 tokens',  kind: 'tokens', tokens: 6,  price: 300, pending: true, windowDays: 32 },
-  { id: 't-12', name: '12 tokens', kind: 'tokens', tokens: 12, price: 570, pending: true, windowDays: 32 },
-  { id: 't-16', name: '16 tokens', kind: 'tokens', tokens: 16, price: 720, pending: true, windowDays: 32 },
-  { id: 't-20', name: '20 tokens', kind: 'tokens', tokens: 20, price: 850, pending: true, windowDays: 32 },
+  { id: 't-6',  name: '6 tokens',  kind: 'tokens', tokens: 6,  price: 299, pending: false, windowDays: 32 },
+  { id: 't-12', name: '12 tokens', kind: 'tokens', tokens: 12, price: 569, pending: false, windowDays: 32 },
+  { id: 't-16', name: '16 tokens', kind: 'tokens', tokens: 16, price: 719, pending: false, windowDays: 32 },
 ];
 
 /**
@@ -46,13 +49,50 @@ export const TOKEN_PACKAGES = [
  * anywhere. The $1,000 is the owner's stated figure, not pending.
  */
 export const ELITE = {
-  id: 'elite', name: 'Elite', kind: 'elite', tokens: null, price: 1000, pending: false, windowDays: 45, access247: true,
+  id: 'elite', name: 'Elite', kind: 'elite', tokens: null, price: 999, pending: false, windowDays: 45, access247: true,
 };
 
 /** Single token (pin M): one token per period. Per-visit sale is a Stripe-sprint question. */
 export const SINGLE_TOKEN = { id: 'single', name: 'Single token', kind: 'single', tokens: 1, price: 65, pending: true, windowDays: 32 };
 
 export const ALL_PACKAGES = [...TOKEN_PACKAGES, ELITE, SINGLE_TOKEN];
+
+/**
+ * v2.0.1 (Sprint 18): the owner's prices are in the catalogue but NOT
+ * released to parents. Every parent/athlete-facing price render checks this;
+ * staff surfaces (the membership editor, the staff billing view) always show
+ * them. Flip to true when the owner releases pricing.
+ */
+export const PRICES_RELEASED = false;
+
+/**
+ * v2.0.1 (Sprint 18): 24/7 facility access is a $300/month ADD-ON on any
+ * package - a line item, never a session entitlement. Lives on the athlete
+ * as `facilityAccess` (ops/owner-set, needs the signed waiver in
+ * `facilityAccessConsent`). Elite includes it (`access247`).
+ */
+export const FACILITY_ACCESS = { id: 'facility-access', name: 'Facility access', price: 300, pending: false };
+
+/**
+ * Elite's frequency caps (v2.0.1, Sprint 18): at most ONE training-or-
+ * tournament booking per date and ONE Phil booking per date. Not a pool,
+ * never a charge - the same class of rule as Yannick's monthly cadence, and
+ * the other named exception to "charging never branches on type".
+ * @return {boolean} true when the athlete already holds a non-cancelled
+ *   booking of the same class on that date and the package is Elite.
+ */
+export function eliteDailyCapHit(pkg, type, date, bookings) {
+  if (!pkg || pkg.kind !== 'elite' || !date) return false;
+  const cls = type === 'training' || type === 'tournament' ? 'golf' : type === 'phil' ? 'phil' : null;
+  if (!cls) return false;
+  return (bookings || []).some(
+    (b) =>
+      b &&
+      b.status !== 'cancelled' &&
+      b.date === date &&
+      (cls === 'golf' ? b.type === 'training' || b.type === 'tournament' : b.type === 'phil')
+  );
+}
 
 export function packageById(id) {
   return ALL_PACKAGES.find((p) => p.id === id) ?? null;

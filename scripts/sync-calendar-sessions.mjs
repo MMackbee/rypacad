@@ -72,7 +72,8 @@ const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..'
 
 // Capacity per block. training/tournament are replicated from
 // frontend/src/portal/data/schedule.js (export const CAPACITY = { training:
-// 15, tournament: 15 } — owner's rule: max 15 kids per session) — replicated
+// 14, tournament: 14 } — owner's rule: max 14 kids per session, v2.0.2
+// 2026-09-17, was 15) — replicated
 // with this source note rather than bundling the module for one constant. If
 // schedule.js changes CAPACITY, change this too; capacity is a SYNCED field
 // (SYNCED_FIELDS below), so a re-run propagates a changed number to existing
@@ -86,7 +87,7 @@ const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..'
 // training session just at a cap of 6-7 kids" — 6, mirrored in
 // data/specialists.js's SPECIALISTS capacity (change one, change both).
 // Yannick stays a true 1:1 at capacity 1.
-const CAPACITY = { training: 15, tournament: 15, phil: 6, mental: 1 };
+const CAPACITY = { training: 14, tournament: 14, phil: 6, mental: 1 };
 
 // Title convention, deliberately forgiving: the calendar is entered by hand,
 // so any title whose first word is "training"/"tournament" (any case) is
@@ -100,6 +101,10 @@ function classifyTitle(summary) {
   // first-word convention as training/tournament above.
   if (/^phil\b/i.test(summary)) return 'phil';
   if (/^(?:mental|yannick)\b/i.test(summary)) return 'mental';
+  // v2.0.2 (2026-09-17): the reserved Tue/Thu 3 PM invite-only group must
+  // NOT be titled "Training…"/"Tournament…" - any other title lands here
+  // and stays display-only, which is the intended behaviour until its
+  // booking path is ruled on.
   return null; // anything else (and every all-day event) is display-only
 }
 

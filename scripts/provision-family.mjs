@@ -7,7 +7,7 @@
  *   node scripts/provision-family.mjs             # write it
  *
  * CONTRACT v2.0 (Sprint 12 pin, "the token model", Part 1 only): ONE token
- * catalogue (t-6/t-12/t-16/t-20/elite/single) replaces the two-pool
+ * catalogue (t-6/t-12/t-16/elite/single; t-20 retired v2.0.1) replaces the two-pool
  * golf/fitness/elite-247/drop-in catalogue. Production is the ONE place
  * prices reach Firestore (v1.1 rule — seed-firestore.mjs strips price, this
  * script doesn't), so this bundle keeps `price` and the new `pending` flag
@@ -200,6 +200,7 @@ const USER_UPDATE_MASK = ['role', 'athleteId', 'householdId', 'staff', 'speciali
 // The ten retired ids (pin A) may already exist in production from every
 // provisioning run before this sprint — listed as explicit DELETES below.
 const RETIRED_PACKAGE_IDS = [
+  't-20', // v2.0.1 (Sprint 18, 2026-09-17): the 20-token package is retired
   'g-4-2', 'g-8-3', 'g-12-4', 'g-16-4', // golf
   'f-4', 'f-8', 'f-12', 'f-16', // fitness
   'drop-in', 'elite-247',

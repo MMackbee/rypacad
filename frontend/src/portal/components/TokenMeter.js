@@ -134,9 +134,12 @@ function Toggle({ open, onToggle, count }) {
   );
 }
 
-export default function TokenMeter({ member, defaultOpen = false }) {
+export default function TokenMeter({ member, defaultOpen = false, showPrices = false }) {
   const [open, setOpen] = useState(defaultOpen);
   const { package: pkg, tokens, period, expiryNudge, spent, reserved } = member;
+  // v2.0.1 (Sprint 18): catalogue prices are withheld from parents and
+  // athletes; the staff view passes showPrices.
+  const price = showPrices ? priceLine(pkg) : null;
   const count = spent.length + reserved.length;
 
   if (!pkg) {
@@ -153,7 +156,7 @@ export default function TokenMeter({ member, defaultOpen = false }) {
       <Card large tone="green">
         <div style={{ display: 'flex', alignItems: 'baseline', gap: 8 }}>
           <SectionLabel style={{ flex: 1 }}>Tokens</SectionLabel>
-          <span style={{ font: `400 11px ${font.body}`, color: color.textTertiary }}>{priceLine(pkg)}</span>
+          <span style={{ font: `400 11px ${font.body}`, color: color.textTertiary }}>{price}</span>
         </div>
         <div style={{ font: `700 28px ${font.head}`, color: color.primary, marginTop: 8 }}>Unlimited</div>
         <Body size={12} tone={color.textSecondary} style={{ marginTop: 4 }}>
@@ -179,7 +182,7 @@ export default function TokenMeter({ member, defaultOpen = false }) {
         <SectionLabel style={{ flex: 1 }}>Tokens</SectionLabel>
         <span style={{ font: `400 11px ${font.body}`, color: color.textTertiary }}>
           {pkg.name}
-          {priceLine(pkg) ? ` · ${priceLine(pkg)}` : ''}
+          {price ? ` · ${price}` : ''}
         </span>
       </div>
 

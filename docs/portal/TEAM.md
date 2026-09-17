@@ -2679,3 +2679,118 @@ dated 2026-09-17: SPRINT-12-PINS.md v2.0.1 pricing sheet / facility access /
 Elite frequency caps, v2.0.2 capacity 14 + Tue/Thu 3 PM reserved;
 tokens-and-billing-contract.md §1) — NOT folded in here; they are the next
 sprint's pin.
+
+## Sprint 18 pins — the owner's amendments v2.0.1 / v2.0.2 (contract v2.6, 2026-09-17)
+
+Origin: the owner amended `docs/portal/SPRINT-12-PINS.md` (Sprint 12
+amendment v2.0.1 "owner's pricing sheet" and v2.0.2 "capacity 14") and
+`docs/portal/tokens-and-billing-contract.md` §1 in the working tree on
+2026-09-17. Those two documents are the source; this pin is the build
+plan against the tree as it stands after Sprint 17. Built inline by the PM.
+
+Keystones (from the amendments, restated as build facts):
+- CAPACITY 14 for training and tournament sessions (was 15). Phil 6,
+  Yannick 1 unchanged. `schedule.js` CAPACITY, the calendar sync's map,
+  seed and DATA-MODEL. `capacity` is a synced field: prod sessions take
+  14 on the next user-gated sync run; a session already above 14 keeps
+  its bookings. `data/tour.js` TOUR_POINTS has 25 positions (not 15) and
+  is unaffected: a 14-cap bracket simply never reaches the tail.
+- TUE/THU 3 PM IS RESERVED (invite-only higher-skill group): removed from
+  the generated weekday blocks (Tue/Thu are 4, 5, 6 PM). It is not on the
+  shared calendar until concrete; when it is, its title must not begin
+  "Training"/"Tournament" or `classifyTitle` makes it bookable by everyone
+  — any other title stays display-only. Its booking path is an owner
+  ruling for a later sprint (DECISION-GAPS).
+- THE CATALOGUE IS t-6 $299 · t-12 $569 · t-16 $719 · elite $999 · single
+  $65 (still pending). `t-20` is retired (catalogue, admin seed, comments;
+  the provisioner's catalogue run deletes it from prod). Prices are the
+  owner's figures now (`pending: false` except single) but are NOT
+  RELEASED TO PARENTS: `PRICES_RELEASED = false` in packages.js gates
+  every parent/athlete-facing price (Billing hub Plan and meters,
+  Membership, Registration's package step); staff surfaces keep them.
+- FACILITY ACCESS is a $300/month add-on on any package, never a session
+  entitlement: `athletes.facilityAccess: boolean` (absent == false),
+  ops/owner-settable in the Membership editor (rules branch widens to
+  `hasOnly(['packageId', 'facilityAccess', 'updatedAt'])`) but only when
+  `athletes.facilityAccessConsent: { signedAt, byUid } | null` is set —
+  the enrollment consent step gains a facility-access waiver + under-18
+  guardian permission checkbox (optional; enrollment proceeds without
+  it), stored on the request's `consents.facilityAccess` and copied to
+  the athlete at approval. Elite keeps `access247: true` as INCLUDED.
+  The hub's Plan shows "+ Facility access" (and Elite "includes facility
+  access"); prices, when released, add the $300 line.
+- ELITE FREQUENCY CAPS (not a pool, never a charge; the named exception
+  to "charging never branches on type", alongside K): at most one
+  training-or-tournament booking per date and at most one Phil booking
+  per date — `eliteDailyCapHit()` in packages.js, enforced in
+  createBooking with typed reason `'one-per-day'`; and the mental cap
+  becomes per package: `MENTAL_MONTHLY_CAP = { elite: 2, default: 1 }`,
+  `mentalCapFor(pkg)` in specialists.js, used by the gate, the coaching
+  line and the Yannick slot picker. A token-package athlete's Yannick 1:1
+  spends a token (unchanged); Elite's two are included.
+- Docs: DATA-MODEL (packages, athletes.facilityAccess /
+  facilityAccessConsent, enrollmentRequests.consents, sessions capacity,
+  schedule), the two owner documents committed as-is, DECISION-GAPS.
+
+Verification: unit tests (catalogue, eliteDailyCapHit, mentalCapFor,
+capacity/blocks); functions replays unchanged; the emulator re-seeded
+at 14 with Tue/Thu 3 PM gone; :3001 — a parent's hub and Registration
+show no prices, the staff view does; the editor's facility-access toggle
+locked without consent and saved with it (rules probe: ops sets
+facilityAccess true only with consent on the doc; any other key denied).
+
+## Sprint 18 integration notes (the owner's amendments - PM build, tests + live pass, 2026-09-17)
+
+Built inline on portal/r3 from the owner's amended documents (committed in
+this sprint as they were found in the tree). Catalogue: `TOKEN_PACKAGES`
+t-6 $299 / t-12 $569 / t-16 $719 (pending false), `t-20` gone, `ELITE`
+$999, `PRICES_RELEASED = false`, `FACILITY_ACCESS` ($300),
+`eliteDailyCapHit()`; `MENTAL_MONTHLY_CAP = { elite: 2, default: 1 }` +
+`mentalCapFor(pkg)` (SPECIALIST_MONTHLY_CAP.mental now reads the default);
+`coachingFor(bookings, today, pkg)` and `assertMentalCadence(..., pkg)`
+take the package; `assertEliteDailyCap` in createBooking with reason
+'one-per-day' (BookingReasons copy added). Schedule: CAPACITY 14, Tue/Thu
+blocks 4/5/6 PM (3 PM reserved, not generated), the sync's capacity map
+14/14/6/1 with a note on the reserved slot's title. Facility access:
+`athletes.facilityAccess` / `facilityAccessConsent`; the enrollment consent
+list gains the optional waiver card (`consents.facilityAccess`), approval
+copies it to `facilityAccessConsent: { signedAt, byUid }` and sets
+`facilityAccess: false`; the Membership editor gains the toggle (visible
+only with the waiver on file; otherwise the row says why) and
+`assign(athleteId, { packageId, facilityAccess })` writes it; the
+package-assignment rules branch widens to `hasOnly(['packageId',
+'facilityAccess', 'updatedAt'])` and refuses `true` without the consent;
+the athlete-detail payload carries both fields. Prices withheld: TokenMeter
+and the hub's Plan card take `showPrices` (staff view only), the Plan row
+shows "+ facility access" / "facility access included", Registration's
+package step says "Pricing from the academy". Seeds: jordan carries the
+add-on + waiver; the enrollment request's consents carry
+`facilityAccess: false`; `t-20` is out of the admin seed; the provisioner's
+RETIRED_PACKAGE_IDS gains `t-20`. Docs: DATA-MODEL (packages, the two
+athlete rows, capacity, a v2.6 section), DECISION-GAPS Sprint 18 (six
+items: the reserved slot's booking path, t-20 in prod, the sync run,
+PRICES_RELEASED, the server promotion not checking the per-day cap,
+facility access in Stripe). One pin correction: `data/tour.js` TOUR_POINTS
+has 25 positions, not 15 - untouched.
+
+Verified: `data/amendments.test.js` (catalogue ids/prices/pending,
+PRICES_RELEASED false, Elite $999 + access, eliteDailyCapHit for golf/Phil/
+Yannick/token packages/cancelled, mentalCapFor, CAPACITY 14, Tue/Thu
+blocks) + the earlier suites - 36 passing; bundle clean; the seed writes
+390 docs (31 fewer sessions: the Tue/Thu 3 PM blocks); rules probe on the
+shared emulator (ops on/off with the waiver, refused without it, package +
+access together, non-boolean and stray key refused, parent refused) - all
+pass; :3001 - parent-dana's hub renders no "$" anywhere and Jordan's Plan
+row reads "+ facility access"; the owner's staff view shows $569 / $299 and
+"$569 + $300"; the editor shows "+$300 / month · waiver on file" for jordan
+and the locked row for reese; the package select lists the three prices.
+
+Not exercised live: the Elite per-day gate (needs an Elite athlete booking
+two same-day sessions through the UI; the rule is the unit-tested
+`eliteDailyCapHit`), the enrollment waiver end to end (approval copies it -
+read, not run), the calendar sync at 14 against prod (user-gated).
+
+Deploy (owner-gated): push portal/r3:main; `firebase deploy --only
+firestore:rules` (the facility-access branch); the calendar sync run so
+prod sessions take capacity 14; the provisioner's catalogue run so prod
+loses `t-20` and gets the new package docs (prices are never written).

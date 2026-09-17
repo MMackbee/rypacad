@@ -33,7 +33,6 @@ export const ENROLLMENT_BY_PACKAGE = [
   { id: 't-6', name: '6 tokens', athletes: 38 },
   { id: 't-12', name: '12 tokens', athletes: 41 },
   { id: 't-16', name: '16 tokens', athletes: 24 },
-  { id: 't-20', name: '20 tokens', athletes: 9 },
   { id: 'elite', name: 'Elite', athletes: 5 },
 ];
 

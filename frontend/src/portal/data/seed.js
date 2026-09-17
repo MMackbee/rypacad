@@ -74,6 +74,18 @@ export const CONSENTS = [
     optional: true,
     footnote: 'Optional - enrollment continues either way',
   },
+  {
+    // v2.0.1 (Sprint 18): the $300/month facility-access add-on needs a
+    // signed waiver (and, for an athlete under 18, guardian permission).
+    id: 'facilityAccess',
+    title: 'Facility access waiver',
+    body:
+      'Only needed if you add 24/7 facility access to a package. Signing as the guardian also gives permission for an athlete under 18. You can add access later — the academy will ask for this then.',
+    link: 'Read the facility rules',
+    checked: false,
+    optional: true,
+    footnote: 'Optional - needed only for the facility access add-on',
+  },
 ];
 
 export const RELATIONSHIPS = ['Mother', 'Father', 'Guardian', 'Grandparent', 'Other'];

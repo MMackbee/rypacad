@@ -14,20 +14,23 @@
 
 ## 1. Products
 
-| Package | Tokens / period | Price / period | Per token |
-|---|---|---|---|
-| 6 | 6 | $300 *pending* | $50.00 |
-| 12 | 12 | $570 *pending* | $47.50 |
-| 16 | 16 | $720 *pending* | $45.00 |
-| 20 | 20 | $850 *pending* | $42.50 |
-| Elite | unlimited | $1,000 | — |
-| Single token | 1 | $65 *pending* | $65.00 |
+*Amended 2026-09-17 from the owner's pricing sheet. Prices are not released to parents.*
 
-A token is spent on any bookable session — training, tournament, fitness, Yannick-led, Yannick 1:1. Session `type` still exists for display, rosters, and Tour standings; it no longer affects charging.
+| Package | Sessions / period | Package price | + Facility access | Total |
+|---|---|---|---|---|
+| 6 | 6 | $299 | $300 | $599 |
+| 12 | 12 | $569 | $300 | $869 |
+| 16 | 16 | $719 | $300 | $1,019 |
+| Elite | unlimited, one per day | $999 all-in | included | $999 |
+| Single token | 1 | $65 *pending* | — | — |
 
-Elite adds: 24/7 facility access, a 45-day booking window (vs 32), and no token accounting. Elite is the only package where a booking spends nothing, which is why the Elite no-show tracker (already built) is the only brake on it.
+A token is spent on any bookable session — training, tournament, Phil's group PT, a Yannick 1:1. Session `type` is display/roster/Tour only; it never affects charging.
 
-Capacity is **15 per session**, every session, from the locked schedule.
+**Facility access** (24/7) is a $300/month add-on on any package, requiring a waiver and parent permission if under 18. It is a line item, not a session entitlement.
+
+**Elite** includes: unlimited golf sessions (one per day), unlimited group PT with Phil (one per day), two individual sessions with Yannick per month, and facility access. No token accounting; the per-day and per-month limits are frequency caps. The no-show tracker (built) is the other brake.
+
+Capacity is **14 per session** (Phil's group PT 6, Yannick 1:1 1). Reduced from 15 on 2026-09-17.
 
 ---
 

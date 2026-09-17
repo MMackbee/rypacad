@@ -2,20 +2,21 @@ import React, { useState } from 'react';
 import { color, font } from '../tokens';
 import PackageCard from '../components/PackageCard';
 import { Body, SectionLabel } from '../components/Primitives';
-import { ELITE, SINGLE_TOKEN, TOKEN_PACKAGES } from '../data/packages';
+import { ELITE, PRICES_RELEASED, SINGLE_TOKEN, TOKEN_PACKAGES } from '../data/packages';
 
 /**
  * 02 · Registration, step 3 — package selection (Sprint 12 pin, contract
  * v2.0, "the token model"). Rewritten from the Sprint 1-11 two-pool
  * golf+fitness stack: ONE package selection now, from the token catalogue
- * (`TOKEN_PACKAGES`, t-6…t-20) plus a single-token option (`SINGLE_TOKEN`,
+ * (`TOKEN_PACKAGES`, t-6…t-16) plus a single-token option (`SINGLE_TOKEN`,
  * the old Drop-in slot's equivalent — one token, no standing commitment) and
  * Elite as a distinct choice, not a tier that replaces a stack because there
  * is no longer a stack to replace. No fitness add-on step (fitness packages
  * are retired — a token buys any session type now, contract §1) and no
  * running total across multiple picks — a family chooses ONE package.
- * Prices render straight from the catalogue with "pending" beside them when
- * `pkg.pending` is true (contract §1: awaiting Luke's OK) — never hardcoded.
+ * Prices render straight from the catalogue (never hardcoded) — and only
+ * once the owner releases them (PRICES_RELEASED, v2.0.1); until then the
+ * selected row says pricing comes from the academy.
  */
 export default function PackageStep() {
   const [selected, setSelected] = useState(null);
@@ -81,7 +82,9 @@ function SelectedRow({ pkg }) {
         </Body>
       </div>
       <div style={{ textAlign: 'right', flex: 'none' }}>
-        {pkg ? (
+        {!PRICES_RELEASED ? (
+          <span style={{ font: `400 12px ${font.body}`, color: color.textTertiary }}>Pricing from the academy</span>
+        ) : pkg ? (
           <>
             <span style={{ font: `700 26px ${font.head}`, color: color.primary }}>${pkg.price}</span>
             <span style={{ font: `400 12px ${font.body}`, color: color.textTertiary }}>

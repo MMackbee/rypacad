@@ -184,7 +184,7 @@ import {
   SCREENING_NOTE,
 } from '../data/admin';
 import { TOUR_SEED, bracketFor, deriveTourStandings } from '../data/tour';
-import { SPECIALISTS, SPECIALIST_MONTHLY_CAP, isSpecialistType } from '../data/specialists';
+import { SPECIALISTS, isSpecialistType, mentalCapFor } from '../data/specialists';
 
 export { default as useSeedResource } from './useSeedResource';
 export { default as useAuthSession } from './useAuthSession';
@@ -378,12 +378,13 @@ function tokensWithNextPeriod(pkg, bookings, anchorDay, today, opts = {}) {
  * today's calendar month against the owner-tunable knob. A frequency rule,
  * never an allowance - `limit` null means tokens are the only limit.
  */
-function coachingFor(bookings, today) {
+function coachingFor(bookings, today, pkg = null) {
   const month = today.slice(0, 7);
   const used = (bookings || []).filter(
     (b) => b && b.type === 'mental' && b.status !== 'cancelled' && (b.date || '').slice(0, 7) === month
   ).length;
-  const limit = SPECIALIST_MONTHLY_CAP.mental ?? null;
+  // v2.0.1 (Sprint 18): per package - Elite two a month, everyone else one.
+  const limit = mentalCapFor(pkg);
   return { used, limit, capReached: limit != null && used >= limit };
 }
 
@@ -1326,7 +1327,7 @@ async function liveSpecialistSlots(specialistId, athleteIdOverride, today) {
     liveSpecialistDays(specialistId, today, windowDays),
     Promise.resolve(tokensWithNextPeriod(pkg, bookings, anchorDay, today)),
   ]);
-  const capReached = specialistId === 'mental' && coachingFor(bookings, today).capReached;
+  const capReached = specialistId === 'mental' && coachingFor(bookings, today, pkg).capReached;
   return { days, tokens, capReached };
 }
 
@@ -1341,7 +1342,7 @@ function seedSpecialistTokens(specialistId, athleteId, today) {
 
 function seedSpecialistCapReached(specialistId, athleteId, today) {
   const child = seedChildById(athleteId || SEED_ATHLETE_ID);
-  return specialistId === 'mental' && Boolean(child) && coachingFor(seedMemberBookingRows(child, today), today).capReached;
+  return specialistId === 'mental' && Boolean(child) && coachingFor(seedMemberBookingRows(child, today), today, packageById(child.packageId)).capReached;
 }
 
 /**
@@ -1816,7 +1817,7 @@ function seedMemberEntry(child, today) {
       ? { id: pkg.id, name: pkg.name, price: pkg.price ?? null, pending: pkg.pending ?? false, tokens: pkg.tokens ?? null, windowDays: pkg.windowDays ?? null, kind: pkg.kind ?? null }
       : null,
     tokens: seedMemberTokens(child, today),
-    coaching: coachingFor(seedMemberBookingRows(child, today), today),
+    coaching: coachingFor(seedMemberBookingRows(child, today), today, pkg),
     contractMinutes: SEED_CONTRACT_MINUTES[child.id] ?? null,
     periodEnd: periodFor(today, PERIOD_ANCHOR_DAY).periodEnd,
   };
@@ -1869,7 +1870,7 @@ async function liveMemberEntry(a, today, anchorDay) {
       tokensWithNextPeriod(pkg, bookings, anchorDay, today, { graceTokens, waitlist: waitlistEntries, tokenPeriod }),
       graceTokens
     ),
-    coaching: coachingFor(bookings, today),
+    coaching: coachingFor(bookings, today, pkg),
     contractMinutes: a.contractMinutes ?? null,
     periodEnd: periodFor(today, anchorDay).periodEnd,
   };
@@ -1977,14 +1978,14 @@ export function useAssignPackages() {
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState(null);
 
-  const assign = async (athleteId, { packageId }) => {
+  const assign = async (athleteId, { packageId, facilityAccess }) => {
     setSaving(true);
     setError(null);
     try {
       if (!live) {
-        return { athleteId, packageId, simulated: true };
+        return { athleteId, packageId, facilityAccess: facilityAccess ?? null, simulated: true };
       }
-      return await setAthletePackages(athleteId, { packageId });
+      return await setAthletePackages(athleteId, { packageId, facilityAccess });
     } catch (err) {
       setError(err);
       throw err;
@@ -3123,6 +3124,10 @@ async function liveAthleteDetail(athleteId) {
       // contractMinutes was added above. `fitnessPackageId` is DROPPED
       // (contract v2.0, pin A: the field is retired - one package now).
       packageId: athlete.packageId ?? null,
+      // v2.0.1 (Sprint 18): the facility-access add-on and its waiver, for
+      // the membership editor's toggle (locked without the waiver).
+      facilityAccess: Boolean(athlete.facilityAccess),
+      facilityAccessConsent: athlete.facilityAccessConsent ?? null,
       householdId: athlete.householdId ?? null,
       householdName: household?.name ?? null,
       periodAnchorDay: normalizeAnchorDay(household?.periodAnchorDay),

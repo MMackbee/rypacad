@@ -103,4 +103,16 @@ export function isSpecialistType(type) {
  * independent of the token pool (Elite has no pool to cap), and the owner's
  * "1:1 time" cadence applies to every athlete alike.
  */
-export const SPECIALIST_MONTHLY_CAP = { phil: null, mental: 1 };
+/**
+ * v2.0.1 (Sprint 18): Yannick's monthly cadence is PER PACKAGE - Elite
+ * includes two individual sessions a month, everyone else one. Owner-tunable
+ * here; `mentalCapFor(pkg)` is what the booking gate, the coaching line and
+ * the slot picker read.
+ */
+export const MENTAL_MONTHLY_CAP = { elite: 2, default: 1 };
+
+export function mentalCapFor(pkg) {
+  return pkg && pkg.kind === 'elite' ? MENTAL_MONTHLY_CAP.elite : MENTAL_MONTHLY_CAP.default;
+}
+
+export const SPECIALIST_MONTHLY_CAP = { phil: null, mental: MENTAL_MONTHLY_CAP.default };

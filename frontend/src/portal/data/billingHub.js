@@ -169,6 +169,8 @@ export function hubMemberFor(args) {
     lastPeriod,
     expiryNudge,
     contractMinutes: athlete.contractMinutes ?? null,
+    // v2.0.1 (Sprint 18): the $300 add-on, a line item on the Plan card.
+    facilityAccess: Boolean(athlete.facilityAccess),
   };
 }
 

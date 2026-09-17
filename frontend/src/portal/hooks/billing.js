@@ -104,7 +104,7 @@ async function liveMember(athlete, anchorDay, today) {
     anchorDay,
     today,
   });
-  return { ...entry, coaching: coachingFor(bookings, today) };
+  return { ...entry, coaching: coachingFor(bookings, today, pkg) };
 }
 
 async function liveHub(householdId, today) {
@@ -187,7 +187,7 @@ function seedMember(child, today, anchorDay) {
   }));
   const graceTokens = child.id === GRACE_TOKEN.athleteId ? [GRACE_TOKEN] : [];
   const entry = hubMemberFor({ athlete: child, pkg, bookings, waitlist: [], graceTokens, anchorDay, today });
-  return { ...entry, coaching: coachingFor(bookings, today) };
+  return { ...entry, coaching: coachingFor(bookings, today, pkg) };
 }
 
 function seedMembership(variant) {

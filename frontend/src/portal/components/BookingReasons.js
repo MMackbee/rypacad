@@ -26,6 +26,8 @@ export function reasonCopy(reason) {
   if (reason === 'no-tokens-left') return 'No tokens left this period.';
   if (reason === 'outside-window') return "That date isn't open for booking yet.";
   if (reason === 'cap-reached') return capReachedCopy();
+  // v2.0.1 (Sprint 18): Elite's per-day frequency caps.
+  if (reason === 'one-per-day') return "Elite includes one golf session and one Phil session a day — there's already one booked that day.";
   if (reason === 'full') return 'That block filled before the reservation completed.';
   if (reason === 'membership-inactive') return "This membership isn't active right now.";
   return null;

@@ -154,3 +154,25 @@ today when the pinned section renders it. Note for the owner: the
 `node scripts/sweep-waitlist.mjs --prod --yes` once functions deploy
 (Blaze); until then the script remains the way expired waitlist entries
 turn into bonus tokens, and the two now mint the same document id.
+
+## Sprint 18 — the owner's amendments v2.0.1 / v2.0.2 (2026-09-17)
+
+1. **Tue/Thu 3 PM (invite-only group)** — removed from the generated
+   schedule; its booking path is an owner ruling for a later sprint. When it
+   reaches the shared calendar its title must not begin "Training" or
+   "Tournament", or the sync makes it bookable by everyone.
+2. **`t-20` retired** — gone from the catalogue and seeds; production loses
+   the doc on the next user-gated `provision-family.mjs` catalogue run. Any
+   athlete still pointing at it reads "no package" until reassigned.
+3. **Capacity 14** — `capacity` is a synced field: prod sessions take 14 on
+   the next user-gated calendar sync run. `data/tour.js` TOUR_POINTS has 25
+   positions (the pin assumed 15) and is unaffected.
+4. **Prices withheld** — the owner's figures are in the catalogue;
+   `PRICES_RELEASED = false` hides them from parents and athletes (Billing
+   hub, Membership, Registration). Flip it when pricing is released.
+5. **Elite's per-day cap is client-side only** — the server promotion
+   trigger does not check it (an Elite athlete waitlisted twice on one date
+   could be promoted into both). Mirror it in `functions/portal/promotion.js`
+   if that ever happens; noted, not built.
+6. **Facility access and Stripe** — the $300 line item is displayed and
+   stored; carrying it as a subscription item is the Stripe sprint's.

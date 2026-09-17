@@ -28,7 +28,7 @@ matters, because several reverse things this team pinned as invariants.
 > gives up the seat. Hard expiry on tokens each period. Reconciliation as a
 > daily DB export, not a cloud function.
 
-> Weekly schedule, 60-min sessions, 15 hard cap: Mon/Wed 3–6, Tue/Thu 3–7,
+> Weekly schedule, 60-min sessions, 15 hard cap (reduced to **14** on 2026-09-17): Mon/Wed 3–6, Tue/Thu 3–7,
 > Fri 3–5; Sat 9–10 training, 10–12 and 12–2 tournament/training, 2–4
 > college / Elite Am / Mid Am (collected in person via Stripe, ~$20, not
 > in the app).
@@ -257,7 +257,12 @@ and handler call.
 **J. SCHEDULE.** Production sessions come from the Google Calendar sync,
 so the locked weekly schedule is a **calendar edit by the owner**, not a
 code change: "Training block" / "Tournament" events at Mon/Wed 3, 4, 5;
-Tue/Thu 3, 4, 5, 6; Fri 3, 4; Sat 9 (training), 10, 11, 12, 1 (as titled).
+Tue/Thu 4, 5, 6; Fri 3, 4; Sat 9 (training), 10, 11, 12, 1 (as titled).
+**Tue/Thu 3 PM is reserved** for an invite-only higher-skill group (owner,
+2026-09-17) — not public, not on the shared calendar until concrete. When it
+is, it must NOT be titled "Training block" or the sync makes it bookable by
+everyone; title it so `classifyTitle` skips it, and its booking path is an
+owner ruling for a later sprint.
 The Sat 2–4 college / Elite Am / Mid Am event is titled anything that does
 not match `classifyTitle` → skipped → display-only, exactly as the sync
 was designed; nothing to build. Yannick-led group blocks are titled
@@ -268,8 +273,11 @@ parity (`{ Mon: [15,16,17], Tue: [15,16,17,18], Wed: ..., Fri: [15,16] }`
 in 24h), the `friday` option and `overflow` field are deleted, Saturday
 generates 9 + four 60-min blocks with the 2–4 pair as `type: 'adult',
 bookable: false` (display only; sync never produces this type — it is
-seed-only so the emulator shows the real Saturday). `CAPACITY` stays 15;
-the sync's map stays `{ training: 15, tournament: 15, phil: 6, mental: 1 }`.
+seed-only so the emulator shows the real Saturday). `CAPACITY` drops to **14** (owner, 2026-09-17);
+the sync's map becomes `{ training: 14, tournament: 14, phil: 6, mental: 1 }`
+and the change is a SYNCED field, so existing prod sessions pick it up on the
+next sync run. `data/tour.js` TOUR_POINTS has 15 positions to match the old
+cap; trim to 14 or leave the 15th unreachable, db lane's call, say which.
 **Open:** whether 10–12 and 12–2 are single 2-hour events — if so the owner
 titles one event per window and the generator follows.
 
@@ -427,3 +435,70 @@ merges db → routing → frontend, integrates, browser-passes on :3001.
 5. Whether `single` is a period package or a per-visit sale (M).
 6. Waitlist acceptance window — none in v1 as pinned; revisit if promotion
    into an unwanted slot becomes a support pattern.
+
+## Sprint 12 amendment v2.0.1 — owner's pricing sheet (2026-09-17)
+
+Relayed from the owner's pricing sheet. Prices still do NOT go to parents;
+they reach prod only via the user-gated import, as before.
+
+| Package | Package | + Facility access | Total | Per session |
+|---|---|---|---|---|
+| 6 sessions | $299 | $300 | $599 | $50.00 |
+| 12 sessions | $569 | $300 | $869 | $47.50 |
+| 16 sessions | $719 | $300 | $1,019 | $45.00 |
+| Elite | $999 all-in | — | $999 | — |
+
+All monthly. Elite includes: unlimited golf sessions with coaching staff
+(**one per day**), unlimited group PT with Phil (**one per day**), **2
+individual mental-performance sessions with Yannick** (owner correction
+2026-09-17 — the sheet said 4), 24/7 facility access.
+Facility access on any package requires a waiver and parent permission if
+under 18.
+
+What changes in the pin:
+
+1. **`t-20` is gone.** Catalogue is `t-6`, `t-12`, `t-16`, `elite`, `single`.
+2. **Facility access is an add-on, not Elite's differentiator.**
+   `athletes.facilityAccess: boolean` (absent == false), ops/owner-settable in
+   the Membership editor alongside `packageId` — the assignment rules branch
+   widens to `hasOnly(['packageId', 'facilityAccess', 'updatedAt'])`. It is
+   a $300 line item, never a session entitlement; the app displays it and
+   (Part 2) Stripe carries it as a subscription item. `packages/elite`
+   keeps `access247: true` as *included*. The enrollment consent step gains
+   a facility-access waiver + under-18 parent permission checkbox, stored on
+   the enrollment request and copied to `athletes.facilityAccessConsent:
+   { signedAt, byUid } | null`; ops cannot set `facilityAccess: true`
+   without it (rules: one `get()` on the athlete).
+3. **Elite is not unlimited-everything.** `tokens: null` stays (no token
+   accounting), but Elite carries **frequency caps**, the same class as the
+   mental cap in K — not a pool, never a charge:
+   - `DAILY_CAP` for Elite: at most one `training|tournament` booking per
+     date, at most one `phil` booking per date. Client-derived in
+     `assertWithinPeriodCap` (count today's non-cancelled bookings of that
+     class); typed reason `'one-per-day'`.
+   - `SPECIALIST_MONTHLY_CAP.mental` becomes **per package**: Elite 2,
+     everyone else 1 (K's default). Owner-tunable in one map:
+     `MENTAL_MONTHLY_CAP = { elite: 2, default: 1 }`.
+   This is the one place a cap branches on `type` — the keystone's "never
+   in a charge path" holds; these are frequency rules and they say so in
+   the code comment.
+4. **Elite's price is $20 under 16 sessions + facility access ($1,019)**
+   while including more — a deliberate funnel. Membership copy for a
+   16+access family may say so ("Elite includes everything here for less").
+5. Contract §1 products table updated to match. `SINGLE_TOKEN` price still
+   pending.
+
+Open, added: whether a token-package athlete's Yannick 1:1 spends a token
+(as pinned — "sessions can be used as Yannick sessions") while Elite's two
+are a separate included count. Pinned as: yes for token packages; Elite's
+two are included and do not touch tokens (Elite has none).
+
+## Sprint 12 amendment v2.0.2 — capacity 14 (2026-09-17)
+
+Owner: training and tournament sessions cap at **14**, not 15. Sync `CAPACITY`
+map, `schedule.js` `CAPACITY`, seed docs, DATA-MODEL, and every "15" in copy
+or harness fixtures. Phil 6 and Yannick 1 unchanged. The Saturday 2–4 adult
+block is outside the app and keeps whatever head count the front desk uses.
+`capacity` is a synced field, so prod sessions update on the next
+user-gated sync run; bookings already above 14 on any session (none expected
+pre-season) are honored, not cancelled.

@@ -11,6 +11,7 @@ import StatusBadge from '../components/StatusBadge';
 import TokenMeter from '../components/TokenMeter';
 import { BackLink, Body, Card, ErrorNotice, ScreenTitle, SectionLabel } from '../components/Primitives';
 import { ordinal, statusFor } from '../data/billingHub';
+import { FACILITY_ACCESS } from '../data/packages';
 import useBillingHub from '../hooks/billing';
 
 /**
@@ -105,7 +106,7 @@ export default function Billing({
             ) : (
               members.map((member) => (
                 <MemberSection key={member.athleteId} name={member.name}>
-                  <TokenMeter member={member} defaultOpen={members.length === 1} />
+                  <TokenMeter member={member} defaultOpen={members.length === 1} showPrices={staff} />
                   <CoachingLine coaching={member.coaching} />
                   <ContractLine
                     contractMinutes={member.contractMinutes}
@@ -115,7 +116,7 @@ export default function Billing({
               ))
             )}
 
-            {members.length ? <PlanCard household={data?.household} members={members} /> : null}
+            {members.length ? <PlanCard household={data?.household} members={members} showPrices={staff} /> : null}
             <ConnectionCard household={data?.household} portalUrl={data?.portalUrl} />
           </>
         )}
@@ -206,8 +207,8 @@ function ContractLine({ contractMinutes, onOpen }) {
 }
 
 /** The plan: one row per athlete, catalogue prices as facts, the billing day. */
-function PlanCard({ household, members }) {
-  const anyPending = members.some((m) => m.package?.pending);
+function PlanCard({ household, members, showPrices = false }) {
+  const anyPending = showPrices && members.some((m) => m.package?.pending);
   return (
     <Card large>
       <SectionLabel style={{ marginBottom: 6 }}>Plan</SectionLabel>
@@ -231,12 +232,16 @@ function PlanCard({ household, members }) {
                   ? `${m.package.name} · unlimited`
                   : `${m.package.name} a period`}
               {m.package?.windowDays ? ` · books ${m.package.windowDays} days out` : ''}
+              {m.facilityAccess ? ' · + facility access' : m.package?.kind === 'elite' ? ' · facility access included' : ''}
             </div>
           </div>
-          <div style={{ font: `500 13px ${font.mono}`, color: m.package?.price != null ? color.text : color.textTertiary }}>
-            {m.package?.price != null ? `$${m.package.price}` : '—'}
-            {m.package?.pending ? <span style={{ font: `400 10px ${font.body}`, color: color.secondary }}> pending</span> : null}
-          </div>
+          {showPrices ? (
+            <div style={{ font: `500 13px ${font.mono}`, color: m.package?.price != null ? color.text : color.textTertiary, textAlign: 'right' }}>
+              {m.package?.price != null ? `$${m.package.price}` : '—'}
+              {m.facilityAccess && m.package?.kind !== 'elite' ? ` + $${FACILITY_ACCESS.price}` : ''}
+              {m.package?.pending ? <span style={{ font: `400 10px ${font.body}`, color: color.secondary }}> pending</span> : null}
+            </div>
+          ) : null}
         </div>
       ))}
       <Body size={11} tone={color.textTertiary} style={{ marginTop: 10 }}>
