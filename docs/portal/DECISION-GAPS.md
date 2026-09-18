@@ -182,3 +182,22 @@ turn into bonus tokens, and the two now mint the same document id.
    if that ever happens; noted, not built.
 6. **Facility access and Stripe** — the $300 line item is displayed and
    stored; carrying it as a subscription item is the Stripe sprint's.
+
+## Sprint 19 - UI redesign brief (owner rulings needed)
+
+Both surfaced by comparing Luke's draft marketing site against the portal
+while writing `docs/portal/ui-redesign-brief.md`. Neither blocks the brief -
+it tells the designer to put neither fact on a screen - but both need a ruling
+before the copy they touch can ship.
+
+1. **Which town is the academy in?** The draft site says Edina ("6529 Cecilia
+   Circle, Edina, MN 55439", on all nine pages plus its JSON-LD). The portal
+   says Eden Prairie - `screens/BookSession.js` puts `location: 'RYP Academy,
+   Eden Prairie, MN'` on the calendar invite a family receives, and
+   `design-handoff.md` opens with Eden Prairie too. One of them is wrong and
+   the wrong one is currently going out on booking invitations. Owner: which?
+2. **Commitment Contract top tier - 90 or 95 minutes?** The site's commitment
+   copy offers "20, 45 or 90 minutes a day"; `data/athlete.js` CONTRACT_TIERS
+   ships 20 / 45 / **95**. The 95 came from the original handoff ("two
+   sessions in a day"). If the owner has since settled on 90, the tier value,
+   its description and the contract screens follow. Owner: which number?

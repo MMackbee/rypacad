@@ -2923,3 +2923,52 @@ DECISION-GAPS. Verified: 37 unit tests (the generated week carries 14 / 25,
 a holiday extra follows its type or its own number, the flat override still
 wins), scripts parse, bundle builds. Production sessions take the new numbers
 on the next user-gated calendar sync run.
+
+## UI redesign brief for Claude Design (2026-09-18)
+
+The owner shared Luke's draft marketing-site redesign
+(`~/Downloads/RYP-Academy-preview/ryp-share`) with one instruction: "DO NOT USE
+THIS IS SOURCE OF TURTH. Just use it to reference a ui redisgn breif that will
+be given to claude design." Written as `docs/portal/ui-redesign-brief.md`:
+sections 3-4 carry the site's visual system (the #0D0D0D canvas, one green
+accent, Work Sans 900 + IBM Plex Mono labels, hairline ledgers, datum
+numerals, note cards, the instrument-panel idea) and say what to carry over,
+what to adapt for a phone-native app, and what to leave on the website;
+sections 1, 5 and 6 carry the product facts from the contract, the pins and
+the code. Section 8 is the firewall - every factual claim on the site that
+conflicts with the portal, with the portal's own answer beside it - plus 8.1,
+a vocabulary table so site words (makeup, Drop-In, class, 12U, "4 of 10
+open") cannot reach a mockup. Two errors of mine were caught before the file
+landed, both by reading the source rather than the summary: the brief said
+cancellation was the contract's 12-hour rule (pin G withdrew it - it is
+"until the day before", and `data/seed.js` says so in copy), and it gave the
+Tour brackets as the owner's original "8-10, 11-13, 13+" rather than the
+implemented 10U / 11-13 / 14+ / Open. Section 9 lists real defects the
+restyle should fix rather than reproduce - inputs set `outline: none` and the
+only global focus rule covers buttons and links, so text fields have no focus
+state at all; registration's inline field errors are unreachable because the
+step CTA disables first; selected and recommended package cards share one
+green border. Section 7.1 prices the work honestly: recolour, hairline, radii,
+glow and the heading font are close to a `tokens.js` edit, while type scale
+and spacing rhythm are literals across ~1,150 inline style objects. Then five read-only Opus critics reviewed the draft against both sources
+(portal facts, containment, design fidelity, designer usability, red team) and
+returned 48 findings; the two adversarial verifiers died on the account spend
+limit, so the findings were triaged by hand against source instead. The catch
+worth recording: an earlier reader had handed me a vocabulary row mapping the
+site's Four Zones to the portal's "Workshop / Lab / Arena" rotation, and I
+copied it into the one table the brief tells a designer is safe to ship from.
+Those names are retired - hooks/index.js says in as many words that the
+rotation "was an invented placeholder, and no made-up name ships" - so the
+brief would have put invented session names into production, the exact thing
+its own section 6 bans. Lesson: a summary from a reader is a lead, not
+evidence; the row that says "safe to ship" earns a source read every time.
+Other real fixes: the retry ladder is three rungs and there is no reinstated
+state; "revoked" has no UI and renders as a cancelled row with a reason line;
+Elite reserves nothing on a waitlist; a next-period booking carries a "next
+period" badge and provisional does not exist; Saturday sessions and the locked
+weekly-hours sentence are real shipped content the "no fixed timetable" rule
+would have deleted; the progress meter is never red, by design. The two
+mismatches the brief hands the owner (Edina vs Eden Prairie, contract tier 90
+vs 95) are now logged in DECISION-GAPS under Sprint 19, which is what the
+brief claims. Nothing in the app changed; this is a brief only. Not yet sent
+to Claude Design.
