@@ -30,6 +30,9 @@ const DEAD_TOKEN_CODES = new Set([
 /** Where a tapped notification opens when no per-kind link is given. */
 const PORTAL_URL = process.env.PORTAL_URL || 'https://rypacad.ryptest.com';
 
+/** The icon a push shows (frontend/public/logo192.png). @const {string} */
+const ICON_URL = `${PORTAL_URL}/logo192.png`;
+
 /**
  * Whether this process can reach FCM at all.
  * @return {boolean} True outside the emulator (or opted in inside it).
@@ -121,7 +124,9 @@ async function sendPush(args) {
       data,
       webpush: {
         fcmOptions: {link},
-        notification: {title, body, tag: data.kind || undefined},
+        notification: {
+          title, body, icon: ICON_URL, tag: data.kind || undefined,
+        },
       },
     });
     const dead = [];

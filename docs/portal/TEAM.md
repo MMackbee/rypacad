@@ -2863,3 +2863,23 @@ in the old app were the stock React logo.
 Verified after the cleanup: bundle builds, 36 frontend unit tests, functions
 lint + 27 unit tests, every script parses, no live file references a
 deleted path.
+
+## Brand icons (owner-supplied logo, 2026-09-18)
+
+The owner sent the RYP Academy logo (1200x1200, black on white), closing the
+gap the cleanup audit found: `index.html` and `manifest.json` linked
+`favicon.ico` and `logo192.png`, and neither file existed. Generated with
+Pillow from that one file into `frontend/public`: `logo512.png` and
+`logo192.png` (the full logo on white, 72% wide so it sits inside the
+maskable safe zone; the 512 is also declared maskable), `apple-touch-icon.png`
+(180x180 - the iPhone home-screen icon Sprint 15's push depends on) and
+`favicon.ico` (16/32/48/64). The favicon is the mark's "Y" alone - the grey
+chevron and the black slash, lifted by connected components - because the
+full wordmark is about 4:1 and unreadable at tab size; swap in an official
+icon mark if the academy has one. `index.html`: the real apple-touch-icon,
+title "RYP Academy" and a portal description (was the 2025 "Rypacad - Your
+fitness and wellness platform"); `manifest.json`: name and short_name "RYP
+Academy" plus the icon list; `functions/portal/push.js`: pushes carry
+`logo192.png` as their icon. Verified: every file present at its declared
+size, the manifest parses, functions lint and tests pass. Not verified in a
+browser tab or on a device.
