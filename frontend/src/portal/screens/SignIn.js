@@ -4,6 +4,7 @@ import { color, font, radius, tint } from '../tokens';
 import Button from '../components/Button';
 import Field from '../components/Field';
 import MediaPlaceholder from '../components/MediaPlaceholder';
+import logoWhite from '../assets/ryp-academy-logo-white.png';
 import PhoneFrame from '../components/PhoneFrame';
 import { AlertGlyph, Body } from '../components/Primitives';
 import useAuthSession from '../hooks/useAuthSession';
@@ -373,7 +374,12 @@ function DemoSignIn({ variant = 'idle', bare = false, onStartEnrollment }) {
  * Shared pieces - identical markup in both modes.
  * ------------------------------------------------------------------------- */
 
-/** The RYP mark and wordmark. Exported for the other auth-flow screens. */
+/**
+ * The academy's logo (owner-supplied, 2026-09-18: the white-on-transparent
+ * version, made for the portal's black) and the tagline. It replaces the
+ * dashed "RYP MARK" placeholder and the typed-out wordmark - the logo already
+ * says RYP Academy. Exported for the other auth-flow screens.
+ */
 export function BrandHeader() {
   return (
     <div
@@ -383,30 +389,12 @@ export function BrandHeader() {
         display: 'flex',
         flexDirection: 'column',
         alignItems: 'center',
-        gap: 18,
+        gap: 16,
       }}
     >
-      <MediaPlaceholder height={76} style={{ width: 76, borderRadius: 18 }} caption={'RYP\nMARK'} />
-      <div style={{ textAlign: 'center' }}>
-        <div
-          style={{
-            font: `700 15px ${font.head}`,
-            color: color.text,
-            letterSpacing: '.28em',
-            textTransform: 'uppercase',
-          }}
-        >
-          RYP Academy
-        </div>
-        <div
-          style={{
-            font: `400 13px ${font.body}`,
-            color: color.textSecondary,
-            marginTop: 7,
-          }}
-        >
-          Reach Your Potential
-        </div>
+      <img src={logoWhite} alt="RYP Academy" width={196} style={{ display: 'block', height: 'auto' }} />
+      <div style={{ font: `400 13px ${font.body}`, color: color.textSecondary, textAlign: 'center' }}>
+        Reach Your Potential
       </div>
     </div>
   );

@@ -2883,3 +2883,26 @@ Academy" plus the icon list; `functions/portal/push.js`: pushes carry
 `logo192.png` as their icon. Verified: every file present at its declared
 size, the manifest parses, functions lint and tests pass. Not verified in a
 browser tab or on a device.
+
+## Brand icons, revised - the white logo on black (2026-09-18, same day)
+
+Supersedes the tile colours in the note above. The owner then sent the
+REVERSED logo - white lettering with the grey chevron on a transparent
+background, made for dark surfaces ("will work good on black on app") - and
+the portal is black, so every icon was rebuilt from it on a black tile:
+`logo512.png`, `logo192.png`, `apple-touch-icon.png` (the full logo, 72-76%
+wide, maskable-safe) and `favicon.ico` (16/32/48/64: the mark's "Y", grey
+chevron + white slash, on black). `manifest.json` `background_color` is now
+`#000000`, so the install splash matches the tile and the app. In the app:
+`frontend/src/portal/assets/ryp-academy-logo-white.png` (760x303, trimmed,
+transparent, resized in premultiplied alpha so the white edges stay clean) is
+what `BrandHeader` in `screens/SignIn.js` renders at 196px - it replaces the
+dashed "RYP MARK" placeholder and the typed-out "RYP Academy" wordmark on the
+sign-in, reset and not-provisioned screens; the tagline stays. PM error worth
+recording: the white logo first read as "the chevron alone" because white
+lettering is invisible on a white preview - check the alpha channel, not the
+picture, before deciding what an asset contains. Verified on :3001: the logo
+loads (natural 760x303, shown 196x78), the placeholder text is gone, the tab
+title reads "RYP Academy", and /favicon.ico, /logo192.png, /logo512.png,
+/apple-touch-icon.png and /manifest.json all return 200. Not verified on a
+phone's home screen.
