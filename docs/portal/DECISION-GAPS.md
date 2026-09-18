@@ -164,7 +164,13 @@ turn into bonus tokens, and the two now mint the same document id.
 2. **`t-20` retired** — gone from the catalogue and seeds; production loses
    the doc on the next user-gated `provision-family.mjs` catalogue run. Any
    athlete still pointing at it reads "no package" until reassigned.
-3. **Capacity 14** — `capacity` is a synced field: prod sessions take 14 on
+3. **Capacity (revised 2026-09-18: training 14, tournament 25)** — the
+   pin asks for TOUR_POINTS to be extended from 15 positions to 25, but the
+   table in `data/tour.js` ALREADY has 25 positions (100 down to 14) with 12
+   participation points beyond, not 15 positions and 5 points - so a full
+   25-player field is scored position by position today and nothing was
+   changed. Owner: say so if you want a different tail. `capacity` is a
+   synced field: prod sessions take 14 / 25 on
    the next user-gated calendar sync run. `data/tour.js` TOUR_POINTS has 25
    positions (the pin assumed 15) and is unaffected.
 4. **Prices withheld** — the owner's figures are in the catalogue;

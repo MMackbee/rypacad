@@ -165,10 +165,11 @@ export function upcomingDates(sessions, from, count = 7) {
 }
 
 /**
- * Capacity as the booking list shows it. `session.capacity` is a flat number
- * on every session doc (contract v2.0, pin J) — the earlier per-type
- * `CAPACITY.tournament`/`CAPACITY.training` split is gone along with the
- * two-pool model it served, so this needs no per-type branch.
+ * Capacity as the booking list shows it. `session.capacity` is a plain number
+ * on every session doc, so this needs no per-type branch - the per-type rule
+ * (training 14, tournament 25, owner 2026-09-18) is applied where sessions
+ * are MADE (schedule.js CAPACITY_BY_TYPE, the calendar sync's map), never
+ * where they are read.
  */
 export function capacityFor(session) {
   const left = Math.max(0, session.capacity - session.booked);

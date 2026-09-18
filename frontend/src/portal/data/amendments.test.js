@@ -5,7 +5,7 @@
  */
 import { ALL_PACKAGES, ELITE, FACILITY_ACCESS, PRICES_RELEASED, TOKEN_PACKAGES, eliteDailyCapHit, packageById } from './packages';
 import { MENTAL_MONTHLY_CAP, SPECIALIST_MONTHLY_CAP, mentalCapFor } from './specialists';
-import { CAPACITY, WEEKDAY_BLOCKS } from './schedule';
+import { CAPACITY, CAPACITY_BY_TYPE, WEEKDAY_BLOCKS, capacityForType, generateSeason } from './schedule';
 
 describe('the catalogue (v2.0.1)', () => {
   test('three token packages at the pricing-sheet figures, t-20 retired', () => {
@@ -62,8 +62,28 @@ describe('the mental cadence is per package (v2.0.1)', () => {
 });
 
 describe('the schedule (v2.0.2)', () => {
-  test('capacity 14', () => {
+  test('capacity is per type: training 14, tournament 25 (owner, 2026-09-18)', () => {
+    expect(CAPACITY_BY_TYPE).toEqual({ training: 14, tournament: 25 });
     expect(CAPACITY).toBe(14);
+    expect(capacityForType('tournament')).toBe(25);
+    expect(capacityForType('training')).toBe(14);
+    expect(capacityForType('adult')).toBe(14);
+  });
+
+  test('the generated season carries each session type\'s own capacity', () => {
+    // Mon 2026-09-21 .. Sun 2026-09-27: weekday training blocks and a Saturday.
+    const week = generateSeason({ start: '2026-09-21', end: '2026-09-27' });
+    const byType = (t) => [...new Set(week.filter((s) => s.type === t).map((s) => s.capacity))];
+    expect(byType('training')).toEqual([14]);
+    expect(byType('tournament')).toEqual([25]);
+    // A holiday extra follows its type too, unless it names its own number.
+    const extras = generateSeason({
+      start: '2026-11-26', end: '2026-11-26', closures: ['2026-11-26'],
+      extras: [{ date: '2026-11-26', time: '9:00 AM', type: 'tournament' }, { date: '2026-11-26', time: '1:00 PM', type: 'tournament', capacity: 40 }],
+    });
+    expect(extras.map((s) => s.capacity)).toEqual([25, 40]);
+    // The flat override still wins when a caller passes one.
+    expect(new Set(generateSeason({ start: '2026-09-21', end: '2026-09-27', capacity: 9 }).map((s) => s.capacity))).toEqual(new Set([9]));
   });
 
   test('Tue/Thu 3 PM is reserved and not generated', () => {

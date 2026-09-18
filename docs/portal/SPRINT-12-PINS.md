@@ -28,7 +28,7 @@ matters, because several reverse things this team pinned as invariants.
 > gives up the seat. Hard expiry on tokens each period. Reconciliation as a
 > daily DB export, not a cloud function.
 
-> Weekly schedule, 60-min sessions, 15 hard cap (reduced to **14** on 2026-09-17): Mon/Wed 3–6, Tue/Thu 3–7,
+> Weekly schedule, 60-min sessions, 15 hard cap (now **14 training / 25 tournament**, 2026-09-17/18): Mon/Wed 3–6, Tue/Thu 3–7,
 > Fri 3–5; Sat 9–10 training, 10–12 and 12–2 tournament/training, 2–4
 > college / Elite Am / Mid Am (collected in person via Stripe, ~$20, not
 > in the app).
@@ -273,11 +273,13 @@ parity (`{ Mon: [15,16,17], Tue: [15,16,17,18], Wed: ..., Fri: [15,16] }`
 in 24h), the `friday` option and `overflow` field are deleted, Saturday
 generates 9 + four 60-min blocks with the 2–4 pair as `type: 'adult',
 bookable: false` (display only; sync never produces this type — it is
-seed-only so the emulator shows the real Saturday). `CAPACITY` drops to **14** (owner, 2026-09-17);
-the sync's map becomes `{ training: 14, tournament: 14, phil: 6, mental: 1 }`
-and the change is a SYNCED field, so existing prod sessions pick it up on the
-next sync run. `data/tour.js` TOUR_POINTS has 15 positions to match the old
-cap; trim to 14 or leave the 15th unreachable, db lane's call, say which.
+seed-only so the emulator shows the real Saturday). `CAPACITY` becomes **training 14, tournament 25** (owner, 2026-09-17/18);
+the sync's map becomes `{ training: 14, tournament: 25, phil: 6, mental: 1 }`.
+`capacity` is a SYNCED field, so prod sessions pick it up on the next sync
+run. Pre-launch, so apply it now; nothing to honor. `data/tour.js`
+TOUR_POINTS has 15 positions; extend to 25 (owner-tunable table, PM picks
+the tail values and flags them) or leave 16–25 on the 5-point participation
+fallback, db lane's call, say which.
 **Open:** whether 10–12 and 12–2 are single 2-hour events — if so the owner
 titles one event per window and the generator follows.
 
@@ -493,12 +495,19 @@ Open, added: whether a token-package athlete's Yannick 1:1 spends a token
 are a separate included count. Pinned as: yes for token packages; Elite's
 two are included and do not touch tokens (Elite has none).
 
-## Sprint 12 amendment v2.0.2 — capacity 14 (2026-09-17)
+## Sprint 12 amendment v2.0.2 — capacity 14 training / 25 tournament (2026-09-18)
 
-Owner: training and tournament sessions cap at **14**, not 15. Sync `CAPACITY`
-map, `schedule.js` `CAPACITY`, seed docs, DATA-MODEL, and every "15" in copy
-or harness fixtures. Phil 6 and Yannick 1 unchanged. The Saturday 2–4 adult
-block is outside the app and keeps whatever head count the front desk uses.
-`capacity` is a synced field, so prod sessions update on the next
-user-gated sync run; bookings already above 14 on any session (none expected
-pre-season) are honored, not cancelled.
+Owner: training sessions cap at **14**, tournament (RYP Tour) sessions cap
+at **25**. Phil 6 and Yannick 1 unchanged. Sync `CAPACITY` map,
+`schedule.js` `CAPACITY`, seed docs, DATA-MODEL, harness fixtures, and every
+"15" in copy. Pre-launch, so apply immediately; no existing bookings to
+honor. The Saturday 2–4 adult block is outside the app.
+
+`capacity` is per-type and per-session, so this is the one place `type`
+legitimately drives a number. It is a *room* fact, not a charge; the
+keystone holds.
+
+`data/tour.js`: TOUR_POINTS covers positions 1–15 with 5 participation
+points beyond. At 25 a field, positions 16–25 all score 5 unless the table
+is extended. PM extends the table to 25 with a flagged tail (owner-tunable,
+single knob, same as today) unless the owner prefers the flat fallback.

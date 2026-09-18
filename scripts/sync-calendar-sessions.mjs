@@ -19,7 +19,8 @@
  *
  * 'phil' and 'mental' are the specialist 1-on-1 types (contract v1.7, Sprint
  * 9: Phil/performance and Yannick/mental game) — each session of either type
- * carries capacity 1, everything else stays at 15 (see CAPACITY below).
+ * carries its own capacity (see CAPACITY below: training 14, tournament 25,
+ * phil 6, mental 1).
  *
  * Bookable events must carry a real start.dateTime; all-day events (start.date
  * only) are never bookable regardless of title. Session id is
@@ -71,9 +72,9 @@ const PROJECT_ID = 'rypacad';
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 
 // Capacity per block. training/tournament are replicated from
-// frontend/src/portal/data/schedule.js (export const CAPACITY = { training:
-// 14, tournament: 14 } — owner's rule: max 14 kids per session, v2.0.2
-// 2026-09-17, was 15) — replicated
+// frontend/src/portal/data/schedule.js (export const CAPACITY_BY_TYPE = {
+// training: 14, tournament: 25 } — owner's ruling of 2026-09-18: training 14,
+// RYP Tour tournaments 25; was a flat 15, then a flat 14) — replicated
 // with this source note rather than bundling the module for one constant. If
 // schedule.js changes CAPACITY, change this too; capacity is a SYNCED field
 // (SYNCED_FIELDS below), so a re-run propagates a changed number to existing
@@ -87,7 +88,7 @@ const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..'
 // training session just at a cap of 6-7 kids" — 6, mirrored in
 // data/specialists.js's SPECIALISTS capacity (change one, change both).
 // Yannick stays a true 1:1 at capacity 1.
-const CAPACITY = { training: 14, tournament: 14, phil: 6, mental: 1 };
+const CAPACITY = { training: 14, tournament: 25, phil: 6, mental: 1 };
 
 // Title convention, deliberately forgiving: the calendar is entered by hand,
 // so any title whose first word is "training"/"tournament" (any case) is

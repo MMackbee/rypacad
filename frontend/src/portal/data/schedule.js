@@ -73,14 +73,29 @@ const SATURDAY_ADULT_BLOCK = {
 };
 
 /**
- * Capacity per session (contract v2.0, pin J; 14 since v2.0.2, 2026-09-17):
- * flat, every session, every
+ * Capacity per session (contract v2.0, pin J; PER TYPE since the owner's
+ * 2026-09-18 ruling - see CAPACITY_BY_TYPE below). Earlier: flat, every
+ * session, every
  * type — the earlier per-type map (`{ training, tournament }`) is gone along
  * with the two-pool model it served. `season.js`'s `capacityFor()` reads
  * `session.capacity` as a plain number either way, so this flattening needs
  * no change on that side.
  */
-export const CAPACITY = 14;
+export const CAPACITY_BY_TYPE = { training: 14, tournament: 25 };
+
+/** The training number, kept under its old name for callers that want one default. */
+export const CAPACITY = CAPACITY_BY_TYPE.training;
+
+/**
+ * A generated session's capacity (owner, 2026-09-18): per TYPE - training 14,
+ * tournament (RYP Tour) 25. This is the one place `type` legitimately drives a
+ * number: it is a ROOM fact, never a charge, so the token model's keystone
+ * ("charging never branches on type") holds. Anything else generated here (the
+ * display-only adult block) takes the training number.
+ */
+export function capacityForType(type) {
+  return CAPACITY_BY_TYPE[type] ?? CAPACITY_BY_TYPE.training;
+}
 
 const DAY = { SUN: 0, MON: 1, TUE: 2, WED: 3, THU: 4, FRI: 5, SAT: 6 };
 
@@ -107,14 +122,17 @@ function blocksForDay(dayIndex) {
  * @param {string[]} [opts.closures]   Dates the Academy is closed. Half-days
  *   before a holiday count as closed — the handbook closes at noon and the first
  *   block is 3:00 PM, so nothing runs anyway.
- * @param {number} [opts.capacity]     Override CAPACITY (flat number, pin J).
+ * @param {number} [opts.capacity]     Override: ONE flat number for every
+ *   generated session. Omitted (the norm), each session takes its type's
+ *   capacity from CAPACITY_BY_TYPE.
  * @param {Array} [opts.extras]        Explicitly dated sessions outside the weekly
  *   pattern — the holiday tournaments, which run on days the Academy is otherwise
  *   closed. Each needs { date, time, type }; `special` and `label` are optional.
  *   Extras are not subject to `closures`, which is the point of them.
  * @returns {Array} sessions, ascending by date then block order.
  */
-export function generateSeason({ start, end, closures = [], capacity = CAPACITY, extras = [] }) {
+export function generateSeason({ start, end, closures = [], capacity = null, extras = [] }) {
+  const capFor = (type) => (typeof capacity === 'number' ? capacity : capacityForType(type));
   const closed = new Set(closures);
   const sessions = [];
   const cursor = new Date(start + 'T00:00:00Z');
@@ -131,7 +149,7 @@ export function generateSeason({ start, end, closures = [], capacity = CAPACITY,
           type: block.type,
           label: block.label || null,
           bookable: block.bookable !== false,
-          capacity,
+          capacity: capFor(block.type),
           booked: 0,
           coachId: null,
         });
@@ -154,7 +172,7 @@ export function generateSeason({ start, end, closures = [], capacity = CAPACITY,
         label: e.label || null,
         bookable: true,
         special: true,
-        capacity: e.capacity || capacity,
+        capacity: e.capacity || capFor(e.type),
         booked: 0,
         coachId: null,
       });

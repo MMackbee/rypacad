@@ -2906,3 +2906,20 @@ loads (natural 760x303, shown 196x78), the placeholder text is gone, the tab
 title reads "RYP Academy", and /favicon.ico, /logo192.png, /logo512.png,
 /apple-touch-icon.png and /manifest.json all return 200. Not verified on a
 phone's home screen.
+
+## Capacity per type - training 14, tournament 25 (owner ruling, 2026-09-18)
+
+The owner revised amendment v2.0.2 in `SPRINT-12-PINS.md` and the contract:
+training sessions cap at 14, RYP Tour tournaments at 25 (Phil 6, Yannick 1
+unchanged), to apply immediately (pre-launch, nothing to honor). Built as
+`CAPACITY_BY_TYPE` + `capacityForType()` in `data/schedule.js` - applied where
+sessions are MADE (`generateSeason`, holiday extras, and the calendar syncs
+`CAPACITY` map), while every reader still sees a plain `session.capacity`. It
+is a room fact, never a charge, so "charging never branches on type" holds.
+`CAPACITY` stays exported as the training number. The pin asks for TOUR_POINTS
+to grow from 15 positions to 25; the table already HAS 25 positions (100 to
+14) with 12 participation points beyond, so nothing changed there - logged in
+DECISION-GAPS. Verified: 37 unit tests (the generated week carries 14 / 25,
+a holiday extra follows its type or its own number, the flat override still
+wins), scripts parse, bundle builds. Production sessions take the new numbers
+on the next user-gated calendar sync run.

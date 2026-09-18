@@ -30,7 +30,7 @@ A token is spent on any bookable session — training, tournament, Phil's group 
 
 **Elite** includes: unlimited golf sessions (one per day), unlimited group PT with Phil (one per day), two individual sessions with Yannick per month, and facility access. No token accounting; the per-day and per-month limits are frequency caps. The no-show tracker (built) is the other brake.
 
-Capacity is **14 per session** (Phil's group PT 6, Yannick 1:1 1). Reduced from 15 on 2026-09-17.
+Capacity: **training 14, tournament (RYP Tour) 25**, Phil's group PT 6, Yannick 1:1 1. Set 2026-09-18.
 
 ---
 
