@@ -2972,3 +2972,83 @@ mismatches the brief hands the owner (Edina vs Eden Prairie, contract tier 90
 vs 95) are now logged in DECISION-GAPS under Sprint 19, which is what the
 brief claims. Nothing in the app changed; this is a brief only. Not yet sent
 to Claude Design.
+
+## Role testing guide and 45 confirmed defects (2026-09-21)
+
+The owner asked for a testing guide per profile to hand to the staff team. Published as a private
+Artifact, RYP Portal Test Guide: https://claude.ai/artifact/8e1wN3kwnYaq6BkPVD9NFj - 181 checks across
+five tabs (Athlete, Parent, New family, Coach & Phil, Owner/ops/Yannick), each with steps, what you
+should see, a Pass / Fail / Blocked control and a note box. Results are shared through the artifact's
+db (each tester writes only their own `results/<id>` doc; everyone reads all; only editors can start a
+new round), so Claude can read them back with ArtifactData to triage. Team members need "Can interact"
+on the share menu to record results; view-only falls back to results on their own device.
+
+How it was built, because the method is the point: the facts that shape every check were verified
+first - production is in live mode and `firebase functions:list --project rypacad` returns no
+functions, so no email, push, Stripe events, waitlist promotion or reminders exist in production and
+every check that depends on them is marked Not live. Five read-only writers drafted one lane each from
+the code, and five adversarial verifiers re-checked every case against the live code path (75
+corrections, e.g. exact curly apostrophes in copy, a check that asked a tester to reach a state the
+form cannot produce). The writers' 45 suspected bugs went to a separate four-agent refutation pass;
+all 45 held up, several with a sharper root cause, and I read the five money/access ones myself. A
+third pass tagged 95 checks with the known issue they run into and restated 72 "you should see"
+bullets that described a bug as correct - otherwise a tester would have passed the bug. That pass
+was not taken blind: 13 of its edits turned K30 (copy promising messages that cannot be sent yet)
+into "an email arrives" expectations, contradicting the Not-live rule, and were rejected. Lesson for
+the next guide: a verifier that checks "does the code do this" will faithfully certify a bug; the
+expected result has to describe intent, with the bug named beside it. The page itself was checked at
+320 and 375 px with every case expanded - the first pass found three tabs overflowing sideways (long
+portal addresses inside grid cells), fixed before publishing. K10 and K21 are deliberately left off
+the tester page (a security hole, and a consent-record gap testers cannot see).
+
+Owner ruling needed on K08: when the academy cancels a session, should a family get one token back
+or two (today: the booking's own token returns because cancelled bookings are not counted, and a
+bonus token is minted on top).
+
+Confirmed defects, most serious first (full evidence with each claim is in the verification run):
+
+- **K08** (serious) When staff cancel a session, each booked athlete gets their normal token back and also a bonus token, so they end up one token ahead. `hooks/grace.js:173-226`
+- **K10** (serious, not on the tester page) The parent update branch excludes only stripeCustomerId, stripeSubscriptionId and periodAnchorDay, so a parent can write membership (for example status back to 'active') through the SDK. Both the booking and waitlist create gates, and the client transaction, trust households.membership.status to freeze past_due/lapsed families, so that freeze can be bypassed. `firestore.rules:858-866`
+- **K12** (serious) If a new sign-up uses a guardian email that already belongs to another family, approving it gives that login access to the other family's account, and the new children are never added. `hooks/live.js:1305-1311`
+- **K25** (serious) From Settings, '+ Link another athlete' either fails with an error or, once staff approve it, adds no child. If a different email is typed, the parent can be moved into a new empty family and lose sight of their existing kids. `firestore.rules:998-1002 (update requires resource.data.status in ['pending'`
+- **K28** (serious) The enrollment form lets you type any email. If it matches an existing family's email, approving the request puts the new account into that other family. `screens/Registration.js:79-81 (email starts '' when not a demo`
+- **K01** (major) The number of tokens left on the Home screen and Book a Session can differ from Billing and My Schedule, for example after joining a waitlist, getting a bonus token or being given extra tokens by staff. `hooks/index.js:347-351`
+- **K02** (major) On Book a Session you can tap an earlier day this month that had sessions and book it, which spends a token on a session that already happened, and the app gives you no way to cancel it. `hooks/index.js:1107-1116 (month fetched from month start)`
+- **K03** (major) Using 'Repeat weekly' can book weeks further out than the family's booking window, double-book an Elite athlete on the same day, or use more tokens than the athlete has, and weeks that fail for other reasons are reported as 'full'. `hooks/index.js:938-1063`
+- **K04** (major) Once an athlete has used this month's Yannick session, the Yannick booking screen blocks every slot, including next month's that should be open, and the 'next session opens' date can name the wrong month. `hooks/index.js:381-389`
+- **K09** (major) A session staff cancelled in the app can come back as bookable after the next calendar sync, showing fewer open spots than it really has, and its bookings stay cancelled. `hooks/grace.js:198-212`
+- **K11** (major) A staff member can open the family sign-up page and submit a request; if someone approves it, that staff account becomes a parent account and loses its staff screens. `PortalRoutes.js:104-111`
+- **K13** (major) A golf coach who opens a session that includes a newly enrolled athlete gets an attendance screen that fails to load, with no athlete list. `hooks/index.js:3650-3651 (Promise.all over fetchAthlete)`
+- **K15** (major) A mental-performance coach who opens the Admin tab sees an empty dashboard with no numbers. `hooks/index.js:3351-3363 (one Promise.all that includes fetchPendingEnrollmentRequests and fetchAllHouseholds)`
+- **K16** (major) A staff invite sent by mistake can't be withdrawn in the app, and the next provisioning run gives that person the staff role anyway. `firestore.rules:1034-1055 (create`
+- **K21** (major, not on the tester page) The relationship to the athlete and the typed signature a family enters at registration are never saved. `screens/Registration.js:81`
+- **K23** (major) If a family refreshes the waiting page, it can wrongly say "No enrollment on file" and offer Start enrollment, even though their enrollment is pending, declined or approved. `hooks/index.js:2292-2303 (source with deps ['enrollment'`
+- **K29** (major) The practice walkthrough shows your real family and saves real notification changes, won't let you finish the practice booking until October, and still talks about two separate token pools. `screens/OnboardingSteps.js:286-300 (ParentDashboard variant='three'`
+- **K30** (major) The app promises emails and notifications (booking confirmation emails, waitlist alerts, 'email notices still arrive', an approval email), and says staff invites take effect on first sign-in, but none of this happens. An invited staff member lands on the 'not provisioned' screen. `screens/BookSession.js:757-761 with hooks/index.js:650 (live confirmation.email = the account email)`
+- **K40** (major) Phil's Capture tab always shows "No assigned athletes", its back link opens the group coach's Today page, and opening Tour as any staff member leaves you with no tab bar to get back. `screens/DiagnosticCapture.js:339-371 (useCoachRoster`
+- **K07** (minor) If you tap 'Join waitlist' again on a full session you are already waiting for, the app does not say you are already on the list and shows a technical permissions error instead. `screens/BookSession.js:446-483`
+- **K14** (minor) When an owner or ops user opens a session from My sessions and taps IN or OUT, nothing happens and no error is shown. `firestore.rules:606-624 (update allowed only for role=='coach' with an assigned athlete`
+- **K18** (minor) Typing or following a wrong portal address shows a blank white page instead of redirecting you. `PortalRoutes.js:494-770 (no path="*" route)`
+- **K19** (minor) Opening the attendance page directly, without picking a session, shows six made-up athlete names, and owners get a Cancel session button that pretends to succeed. `screens/Roster.js:243-266 (live = isLive() && sessionId != null`
+- **K20** (minor) During registration, the Continue button stays grey with no explanation of which field still needs filling in. `screens/Registration.js:106-120 (showErrors is set only inside handleContinue)`
+- **K24** (minor) Staff are told the decline reason lets the family edit and resubmit, but the family only gets a 'Resubmit for review' button that sends the same details again with nothing changed. `screens/NotProvisioned.js:226-283 (DeclinedState calls submit(request) with the stored request`
+- **K26** (minor) If enrolling or resubmitting fails, the family sees technical text such as 'submitMyEnrollmentRequest: Missing or insufficient permissions.' instead of a friendly message. `hooks/live.js:87-99 (wrap builds the message as `${context}: ${err.message}`)`
+- **K27** (minor) The date-of-birth field accepts a future date or an adult's birthday, and enrollment goes through anyway. `screens/Registration.js:103 (athletesValid only checks dob !== '')`
+- **K32** (minor) On any day with no session (for example a Sunday mid-season), Book a Session shows a green banner saying the season opens on the next session day. `hooks/index.js:638-641 (seasonNote whenever dates[0].iso > today)`
+- **K33** (minor) The athlete's Home page always shows the Commitment Contract as 'On track', even when the Contract tab says 'Behind'. `screens/AthleteDashboard.js:292 (hardcoded 'On track' span in ContractCard)`
+- **K34** (minor) A named calendar event (for example a holiday tournament) shows as plain 'Training block' or 'Tournament block' on Book a Session and on its confirmation, while My Schedule shows the real name. `hooks/index.js:1094-1095 (month rows spread displaySession output`
+- **K36** (minor) Opening an athlete that fails to load (or while it loads) shows a fake "Jordan enrolled Feb 8" message, and staff see a "Start a contract" card that errors when they try to save it. `screens/AthleteDetail.js:68 (only data used`
+- **K38** (minor) On a busy day with more than 6 sessions (including Phil/Yannick slots), the coach's Today screen can leave out later group blocks. `hooks/live.js:229-258 (MAX_BLOCKS_PER_DAY=6`
+- **K39** (minor) On the attendance screen, a slow or failed load looks like nobody is booked, and an IN/OUT tap that fails does nothing with no error message. `screens/Roster.js:245-284 (roster/marks from liveAttendance.data ?? []`
+- **K41** (minor) Pressing "Publish to Practice DNA" twice saves the same diagnostic twice, and the number boxes will accept pasted text. `components/NumericField.js:18-21`
+- **K42** (minor) A saved session note is hidden when you reopen a session; you only see it after tapping Start session and then Close block. `screens/Roster.js:335 (live always starts 'pre')`
+- **K43** (minor) Once a tour score is saved you can change it but never remove it; clearing the box and saving does not delete it. `screens/Roster.js:721-729 (.filter(e => e.score != null))`
+- **K44** (minor) The Stripe id boxes on an athlete's membership card always start empty, and saving just one id quietly erases the other. `components/AthleteMembershipCard.js:317-354 (useState('')`
+- **K45** (minor) A mental-coach account created without the specialist link opens on Admin, and tapping its Sessions tab just bounces back to Admin. `screens/SignIn.js:46 (mental -> /portal/admin)`
+- **K05** (cosmetic) A session the athlete missed (no-show) shows a grey 'Booked' badge on Membership and Billing instead of a red 'No-show' badge. `components/TokenMeter.js:34-42`
+- **K06** (cosmetic) On My Schedule, a booking in the next billing period shows 'Confirmed' and never shows the 'Next period' label. `screens/MySchedule.js:271-282`
+- **K17** (cosmetic) After a family is approved, the waiting page still says "Account not linked yet" as its heading, just above a green Approved message. `PortalRoutes.js:526-529 (no RequireRole or RequireSignedIn wrapper)`
+- **K22** (cosmetic) Tapping "Read the facility rules" at registration opens a panel titled "What is stored" that contains no facility rules. `data/seed.js:77-88 (facilityAccess consent with link 'Read the facility rules')`
+- **K31** (cosmetic) Under 'Membership & tokens' the note says push is your choice, but the push switch is locked on and can't be changed. `data/parent.js:53-61 (locked: true`
+- **K35** (cosmetic) After booking, the confirmation shows the time without AM/PM ("Tomorrow · 4:00"), and "Back to schedule" takes you back to the booking calendar, not My Schedule. `screens/BookSession.js:240-245 (time/meridiem split)`
+- **K37** (cosmetic) The coach's Today pill says "1 BLOCKS", and on a future session day the count card still says "blocks today". `screens/CoachDashboard.js:64 (`${...length} blocks`)`
