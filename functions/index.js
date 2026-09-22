@@ -150,7 +150,7 @@ exports.onBookingCreated = functions.firestore
           docBody('sessions', booking.sessionId),
           docBody('athletes', booking.athleteId),
         ]);
-        const copy = notices.bookingConfirmed({athlete, session});
+        const copy = notices.bookingConfirmed({athlete, session, booking});
         await notify.sendNotice({
           kind: 'booking-confirmed',
           category: 'schedule',

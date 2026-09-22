@@ -92,21 +92,36 @@ function sessionPhrase(session) {
 }
 
 /**
+ * The clause naming who is actually walking in. Only a Yannick 1:1 can
+ * carry `attendee: 'parent'` (contract v2.1, and the rules enforce it), so
+ * this is '' for every other booking and that copy is unchanged.
+ * @param {?Object} booking A `bookings/{id}` document body.
+ * @return {string} The clause, or ''.
+ */
+function attendeeNote(booking) {
+  return booking && booking.attendee === 'parent' ?
+      ' A parent is attending this one.' : '';
+}
+
+/**
  * kind `booking-confirmed`.
- * @param {{athlete: ?Object, session: ?Object}} args Copy inputs.
+ * @param {{athlete: ?Object, session: ?Object, booking: (?Object|undefined)}}
+ *     args Copy inputs.
  * @return {{title: string, body: string}} The notice.
  */
 function bookingConfirmed(args) {
   const name = firstNameOf(args.athlete);
   return {
     title: 'Session booked',
-    body: `${name} is booked: ${sessionPhrase(args.session)}.`,
+    body: `${name} is booked: ${sessionPhrase(args.session)}.` +
+        attendeeNote(args.booking),
   };
 }
 
 /**
  * kind `promoted` - a waitlist spot opened and was auto-confirmed.
- * @param {{athlete: ?Object, session: ?Object}} args Copy inputs.
+ * @param {{athlete: ?Object, session: ?Object, booking: (?Object|undefined)}}
+ *     args Copy inputs.
  * @return {{title: string, body: string}} The notice.
  */
 function promoted(args) {
@@ -114,7 +129,7 @@ function promoted(args) {
   return {
     title: 'A spot opened up',
     body: `A spot opened — ${name} is now booked for ` +
-        `${sessionPhrase(args.session)}.`,
+        `${sessionPhrase(args.session)}.` + attendeeNote(args.booking),
   };
 }
 
@@ -178,7 +193,8 @@ function bookingRevoked(args) {
 
 /**
  * kind `reminder-24h` - tomorrow's confirmed booking.
- * @param {{athlete: ?Object, session: ?Object}} args Copy inputs.
+ * @param {{athlete: ?Object, session: ?Object, booking: (?Object|undefined)}}
+ *     args Copy inputs.
  * @return {{title: string, body: string}} The notice.
  */
 function reminder24h(args) {
@@ -188,7 +204,7 @@ function reminder24h(args) {
   return {
     title: 'Session tomorrow',
     body: `Reminder: ${name} has ${sessionLabel(args.session)} ` +
-        `tomorrow${when}.`,
+        `tomorrow${when}.` + attendeeNote(args.booking),
   };
 }
 
@@ -274,6 +290,7 @@ function waitlistExpired(args) {
 
 module.exports = {
   TYPE_LABELS,
+  attendeeNote,
   bookingCancelled,
   bookingConfirmed,
   bookingRevoked,

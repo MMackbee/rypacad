@@ -14,6 +14,7 @@ import * as hooks from '../hooks';
 import { useCoachRoster, useSession } from '../hooks';
 import { isLive } from '../hooks/live';
 import { ageGroupFor } from '../data/schedule';
+import { attendeeNoteFor } from '../data/specialists';
 import { DEFAULT_DURATION_MINUTES } from '../data/schedule';
 // Pure calendar/season helpers per the seam rule - data still travels
 // through the hooks above.
@@ -267,7 +268,14 @@ export function SessionAttendance({ variant = 'pre', bare = false, onBack, sessi
   // bookings.status -> the roster's three-state mark (Sprint 6 pin: IN ->
   // 'attended', OUT -> 'noshow', clearing a mark -> 'confirmed'/unmarked).
   const roster = live
-    ? (liveAttendance.data ?? []).map((r) => ({ id: r.athleteId, name: r.name, meta: null }))
+    ? (liveAttendance.data ?? []).map((r) => ({
+        id: r.athleteId,
+        name: r.name,
+        // Contract v2.1: a Yannick 1:1 the family sent a parent to is still
+        // the athlete's row (their token paid for it) - the meta says who
+        // is actually in the room.
+        meta: attendeeNoteFor(r),
+      }))
     : demoRoster;
   const marks = live
     ? Object.fromEntries(

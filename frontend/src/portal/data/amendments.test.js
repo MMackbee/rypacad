@@ -4,7 +4,7 @@
  * the per-package mental cadence, capacity 14 and the reserved Tue/Thu slot.
  */
 import { ALL_PACKAGES, ELITE, FACILITY_ACCESS, PRICES_RELEASED, TOKEN_PACKAGES, eliteDailyCapHit, packageById } from './packages';
-import { MENTAL_MONTHLY_CAP, SPECIALIST_MONTHLY_CAP, mentalCapFor } from './specialists';
+import { MENTAL_MONTHLY_CAP, PARENT_ATTENDING_NOTE, SPECIALIST_MONTHLY_CAP, attendeeNoteFor, mentalCapFor, rosterNameFor } from './specialists';
 import { CAPACITY, CAPACITY_BY_TYPE, WEEKDAY_BLOCKS, capacityForType, generateSeason } from './schedule';
 
 describe('the catalogue (v2.0.1)', () => {
@@ -94,5 +94,30 @@ describe('the schedule (v2.0.2)', () => {
     expect(WEEKDAY_BLOCKS.Mon).toEqual([15, 16, 17, 18]);
     expect(WEEKDAY_BLOCKS.Wed).toEqual([15, 16, 17, 18]);
     expect(WEEKDAY_BLOCKS.Fri).toEqual([15, 16]);
+  });
+});
+
+describe('who attends a Yannick 1:1 (v2.0.4, owner 2026-09-22)', () => {
+  test('the note shows only for a parent-booked row', () => {
+    expect(attendeeNoteFor({ attendee: 'parent' })).toBe(PARENT_ATTENDING_NOTE);
+    expect(attendeeNoteFor({ attendee: 'athlete' })).toBeNull();
+    // Absent == the athlete: every booking written before the ruling, and
+    // every training/tournament/Phil booking, which may never carry it.
+    expect(attendeeNoteFor({})).toBeNull();
+    expect(attendeeNoteFor(null)).toBeNull();
+    expect(attendeeNoteFor(undefined)).toBeNull();
+  });
+
+  test('the roster name says who walks in without losing whose token paid', () => {
+    expect(rosterNameFor({ name: 'Ava', attendee: 'parent' })).toBe('Ava (parent)');
+    expect(rosterNameFor({ name: 'Ava', attendee: 'athlete' })).toBe('Ava');
+    expect(rosterNameFor({ name: 'Ava' })).toBe('Ava');
+  });
+
+  test('an unreadable athlete stays null rather than becoming a name', () => {
+    // SpecialistDay filters these out and falls back to the booked count.
+    expect(rosterNameFor({ name: null, attendee: 'parent' })).toBeNull();
+    expect(rosterNameFor({ name: '' })).toBeNull();
+    expect(rosterNameFor(null)).toBeNull();
   });
 });

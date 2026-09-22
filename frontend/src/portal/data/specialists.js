@@ -116,3 +116,35 @@ export function mentalCapFor(pkg) {
 }
 
 export const SPECIALIST_MONTHLY_CAP = { phil: null, mental: MENTAL_MONTHLY_CAP.default };
+
+/**
+ * WHO IS WALKING IN (owner ruling 2026-09-22, contract v2.1). A Yannick 1:1
+ * may be booked for the athlete OR for the parent, chosen at booking - the
+ * mental-performance work is often the parent's to do. ONLY a 'mental'
+ * booking may carry the field (firestore.rules enforces it), so an absent
+ * value always reads as the athlete and no other surface changes. The copy
+ * lives here, once, because four surfaces show it and they must not drift.
+ */
+export const PARENT_ATTENDING_NOTE = 'Parent attending';
+
+/**
+ * The meta line for a booking-backed row, or null when the athlete attends.
+ * @param {?{attendee: (string|undefined)}} row A booking-backed row.
+ * @return {?string} The note, or null.
+ */
+export function attendeeNoteFor(row) {
+  return row && row.attendee === 'parent' ? PARENT_ATTENDING_NOTE : null;
+}
+
+/**
+ * A roster name for the specialist's own day view: a parent-booked session
+ * reads "Ava (parent)", so Yannick knows who to expect without losing whose
+ * token paid for it. A null name (an athlete this caller cannot read) stays
+ * null - callers filter those out rather than inventing one.
+ * @param {?{name: ?string, attendee: (string|undefined)}} row A roster entry.
+ * @return {?string} The label, or null.
+ */
+export function rosterNameFor(row) {
+  if (!row || !row.name) return null;
+  return row.attendee === 'parent' ? `${row.name} (parent)` : row.name;
+}

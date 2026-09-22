@@ -352,13 +352,18 @@ async function sendNotice(args) {
  * portal/promotion.js changes minimally.
  * @param {{athleteId: string, householdId: ?string, athlete: (?Object|
  *     undefined), athleteName: (?string|undefined), session: !Object,
- *     sessionId: string, bookingId: (?string|undefined)}} args The promotion.
+ *     sessionId: string, bookingId: (?string|undefined),
+ *     attendee: (?string|undefined)}} args The promotion.
  * @return {!Promise<!Object>} The `sendNotice` result.
  */
 async function notifyWaitlistPromotion(args) {
   const athlete = args.athlete ||
       (args.athleteName ? {name: args.athleteName} : null);
-  const copy = notices.promoted({athlete, session: args.session});
+  const copy = notices.promoted({
+    athlete,
+    session: args.session,
+    booking: {attendee: args.attendee || null},
+  });
   const bookingId = args.bookingId || `${args.athleteId}_${args.sessionId}`;
   return sendNotice({
     kind: 'promoted',

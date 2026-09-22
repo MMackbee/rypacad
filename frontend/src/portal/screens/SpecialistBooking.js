@@ -146,6 +146,11 @@ export default function SpecialistBooking({
   // Sprint 11 pin G: the typed reason behind `failure`'s message, when the
   // hook supplies one — see confirmReserve's catch block below.
   const [failureReason, setFailureReason] = useState(null);
+  // Owner ruling 2026-09-22: a family chooses who attends a Yannick 1:1 - the
+  // athlete, or the parent instead. Whose TOKEN is spent is a different
+  // question, answered by the child selector above (a parent always books
+  // against a named child), so the two controls stay separate.
+  const [attendee, setAttendee] = useState('athlete');
   const [booked, setBooked] = useState(() => {
     if (harnessStage === 'confirmed-waitlisted') {
       return { specialist: SPECIALISTS[0], date: todayISO(), time: '3:30 PM', waitlisted: true };
@@ -169,6 +174,7 @@ export default function SpecialistBooking({
     setSheetSlot(null);
     setFailure(null);
     setFailureReason(null);
+    setAttendee('athlete');
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [specialistId]);
 
@@ -233,7 +239,11 @@ export default function SpecialistBooking({
     setFailureReason(null);
     setReserving(slot.sessionId);
     Promise.resolve()
-      .then(() => reserve(slot, isParent ? { athleteId: selectedAthleteId } : undefined))
+      .then(() =>
+        reserve(slot, {
+          ...(isParent ? { athleteId: selectedAthleteId } : {}),
+          ...(specialist.id === 'mental' ? { attendee } : {}),
+        }))
       .then((result) => {
         setReserving(null);
         setSheetSlot(null);
@@ -366,6 +376,8 @@ export default function SpecialistBooking({
             setFailure(null);
             setFailureReason(null);
           }}
+          attendee={attendee}
+          onAttendee={setAttendee}
           onReserve={() => confirmReserve(sheetSlot)}
           onSeeMembership={() => navigate('/portal/membership')}
         />
@@ -555,6 +567,8 @@ function DetailSheet({
   failureReason,
   disabled,
   capReached,
+  attendee,
+  onAttendee,
   onClose,
   onReserve,
   onSeeMembership,
@@ -598,6 +612,40 @@ function DetailSheet({
         <div style={{ marginTop: 10 }}>
           <SpendNote tokens={tokens} />
         </div>
+        {specialist.id === 'mental' && onAttendee ? (
+          <div style={{ marginTop: 14 }}>
+            <SectionLabel>Who is attending?</SectionLabel>
+            <div style={{ display: 'flex', gap: 8, marginTop: 8 }}>
+              {[['athlete', 'The athlete'], ['parent', 'A parent']].map(([value, label]) => {
+                const on = attendee === value;
+                return (
+                  <button
+                    key={value}
+                    type="button"
+                    aria-pressed={on}
+                    onClick={() => onAttendee(value)}
+                    style={{
+                      flex: 1,
+                      minHeight: 44,
+                      cursor: 'pointer',
+                      borderRadius: radius.input,
+                      border: `1px solid ${on ? color.primary : color.controlBorder}`,
+                      background: on ? tint.green : 'transparent',
+                      color: on ? color.primary : color.textSecondary,
+                      font: `600 13px ${font.body}`,
+                    }}
+                  >
+                    {label}
+                  </button>
+                );
+              })}
+            </div>
+            <Body size={11} tone={color.textTertiary} style={{ marginTop: 6 }}>
+              Either way this books the session for the athlete and spends
+              their token. Yannick sees who to expect.
+            </Body>
+          </div>
+        ) : null}
         {full ? (
           <Body size={12} tone={color.secondary} style={{ marginTop: 12 }}>
             This time is full — joining the waitlist reserves one token.

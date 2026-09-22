@@ -3134,3 +3134,41 @@ NOT verified: the notification harness needs the isolated emulator, which was
 not running, so the expiry-lead and cancel-receipt changes are unrun. Nothing
 reaches families until the rules deploy (the 90 tier) and the Blaze upgrade
 (any notice at all).
+
+## Who attends a Yannick 1:1 (owner ruling, 2026-09-22)
+
+The last of the Sprint 12 pin's open questions: a mental-performance 1:1 can
+be booked for the ATHLETE OR THE PARENT, and the family picks at booking. The
+sheet now asks "Who is attending?" on Yannick's slots and nowhere else.
+
+The choice rides `bookings.attendee` and `waitlist.attendee` (`'athlete' |
+'parent'`), and absent reads as the athlete, so every booking already written
+means what it always meant and nothing is backfilled. The rules admit the
+field ONLY when `type == 'mental'`, which is what keeps the contract's
+keystone honest: charging still never branches on type, and the athlete's own
+token pays either way - this is a display fact about who walks in, not a
+second kind of booking.
+
+The trap was the waitlist. Yannick's capacity is 1, so "full" is the ORDINARY
+path for his slots, not an edge case - a family that chose the parent would
+have had that choice dropped on the way in (the waitlist writer took no such
+argument) and dropped again at promotion (the promoted booking is written
+server-side from the entry). Both now carry it, and `promoteOneSeat` copies
+it onto the booking it writes.
+
+Read side: "Parent attending" on the family's own rows (Reservations and My
+Schedule), and "<Name> (parent)" on Yannick's day view and the coach roster,
+so the person running the session knows who to expect without losing whose
+token paid for it. The copy lives once in `data/specialists.js`
+(`attendeeNoteFor`, `rosterNameFor`) because four surfaces show it. The
+booked, reminder-24h and promoted notices gain one clause, "A parent is
+attending this one", built the same way - one helper, `notices.attendeeNote`.
+
+Verified: 63 unit tests pass (3 new, for the note and the roster name,
+including the unreadable-athlete null case), functions lint clean, production
+build compiles. NOT verified: nothing was exercised against the emulator this
+pass. BLOCKING for ship: the rules must deploy first - `bookingShapeOk` and
+`waitlistShapeOk` are closed `hasOnly` lists, so the live rules REFUSE a
+booking carrying `attendee` until `firebase deploy --only firestore:rules`
+runs (the same deploy the 90-minute contract tier needs). The notice clause
+waits on Blaze like every other notice.

@@ -445,7 +445,7 @@ export async function fetchGraceTokensByAthlete(athleteId) {
  * inside createBooking's full-session fallback below — one write path, no
  * duplicated shape logic between the two callers.
  */
-export async function joinWaitlist({ sessionId, athleteId, householdId, date, periodKey }) {
+export async function joinWaitlist({ sessionId, athleteId, householdId, date, periodKey, attendee }) {
   if (!sessionId || !athleteId || !householdId || !date || !periodKey) {
     throw new LiveDataError(
       ERR.INVALID,
@@ -463,6 +463,10 @@ export async function joinWaitlist({ sessionId, athleteId, householdId, date, pe
       periodKey,
       joinedAt: serverTimestamp(),
       createdBy: user.uid,
+      // Absent means the athlete attends. Only a Yannick 1:1 ever sets it
+      // (owner ruling, 2026-09-22), and the promotion trigger copies it onto
+      // the booking it writes.
+      ...(attendee === 'parent' ? { attendee } : {}),
     });
     bump('waitlist');
     bump('bookings'); // the schedule/reservations lists subscribe to bookings
@@ -623,7 +627,7 @@ function assertPeriodTokensLeft(pkg, bookings, periodKey, issuedGrant, waitlist 
 const SESSION_FULL = Symbol('session-full');
 
 export async function createBooking(
-  { athleteId, sessionId, date, type, householdId },
+  { athleteId, sessionId, date, type, householdId, attendee },
   { skipCapCheck = false, silent = false } = {}
 ) {
   if (!athleteId || !sessionId || !date || !type || !householdId) {
@@ -708,6 +712,11 @@ export async function createBooking(
     createdAt: serverTimestamp(),
     chargedFrom,
     ...(graceTokenId ? { graceTokenId } : {}),
+    // WHO ATTENDS a Yannick 1:1 (owner ruling, 2026-09-22) - the athlete by
+    // default, or the parent instead. It never touches the charge: the named
+    // athlete's token is spent either way, which is why it sits beside
+    // chargedFrom without being part of it. Write-once like its neighbours.
+    ...(type === 'mental' && attendee === 'parent' ? { attendee } : {}),
   };
   try {
     await runTransaction(db, async (tx) => {
@@ -796,7 +805,7 @@ export async function createBooking(
     if (err === SESSION_FULL) {
       // joinWaitlist bumps 'waitlist' itself on success - nothing more to
       // invalidate here (no bookings/sessions write happened on this path).
-      const entry = await joinWaitlist({ sessionId, athleteId, householdId, date, periodKey });
+      const entry = await joinWaitlist({ sessionId, athleteId, householdId, date, periodKey, attendee });
       const queue = await getDocs(query(collection(db, 'waitlist'), where('sessionId', '==', sessionId))).catch(() => null);
       return {
         id: entry.id,

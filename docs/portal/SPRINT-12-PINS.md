@@ -550,7 +550,8 @@ seed/emulator season generates all four immediately.
 
 ## Sprint 12 amendment v2.0.4 - the decision-gap pass (2026-09-22)
 
-Seven open questions answered in one sitting. Each is now the built behaviour.
+Eleven open questions answered in one sitting. Each is now the built
+behaviour.
 
 1. **Saturday 10-12 and 12-2 are SINGLE TWO-HOUR EVENTS**, not four 60-minute
    blocks. This closes pin J's own open question. Each still costs ONE token -
@@ -574,6 +575,26 @@ Seven open questions answered in one sitting. Each is now the built behaviour.
 7. **A family's own cancellation now sends a receipt** (it sent nothing).
    Staff cancellations keep their own notice and their bonus token; the
    self-cancel receipt says the token is back and nothing else.
+8. **The single token is $65 and no longer pending** - a real one-token
+   period package, priced and shown to staff like the others. Whether it is
+   ever sold per visit instead is a Stripe-sprint question and changes
+   nothing in the catalogue.
+9. **Elite shows a sessions-attended count.** Unlimited has no balance to
+   count down, so the billing hub's Elite row reports the period's booked,
+   attended and no-show counts instead of an empty meter.
+10. **The Tour points tail stays as it is.** A full 25-player field is
+    already scored position by position; the 12-point tail beyond 25 only
+    matters if a field ever exceeds the tournament capacity.
+11. **A Yannick 1:1 may be booked for the ATHLETE OR THE PARENT**, chosen
+    at booking. The mental-performance work is often the parent's to do,
+    and the Academy was already fielding the request. `bookings.attendee`
+    / `waitlist.attendee` (`'athlete' | 'parent'`) carry the choice;
+    absent reads as the athlete, so nothing already written changes. The
+    rules admit the field ONLY on a `mental` booking, which keeps the
+    keystone intact: charging still never branches on type, and the
+    athlete's own token pays either way. Yannick's capacity is 1, so the
+    waitlist carries it too - otherwise the common path (full, then
+    promoted) would silently drop the family's choice.
 
 Also ruled, and shaping the Stripe sprint rather than this one: **subscriptions
 must bill on the 1st-28th.** The portal's periods are anchor-day based and

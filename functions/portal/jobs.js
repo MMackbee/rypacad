@@ -105,7 +105,7 @@ async function runSessionReminders(args) {
     const booking = doc.data() || {};
     const session = await sessions(booking.sessionId);
     const athlete = await athletes(booking.athleteId);
-    const copy = notices.reminder24h({athlete, session});
+    const copy = notices.reminder24h({athlete, session, booking});
     const res = await notify.sendNotice({
       kind: 'reminder-24h',
       category: 'schedule',

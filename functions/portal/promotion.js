@@ -191,7 +191,7 @@ function orderCandidates(candidates) {
  * @return {!Object} The `bookings/{athleteId}_{sessionId}` body.
  */
 function promotedBooking(cand, sessionId, session) {
-  return {
+  const body = {
     athleteId: cand.athleteId,
     sessionId,
     householdId: cand.householdId || null,
@@ -205,6 +205,12 @@ function promotedBooking(cand, sessionId, session) {
     promotedFromWaitlist: true,
     createdAt: FieldValue.serverTimestamp(),
   };
+  // Contract v2.1: a family that chose the parent for a Yannick 1:1 keeps
+  // that choice through promotion - it is the same seat they waited for.
+  if (session.type === 'mental' && cand.entry.attendee === 'parent') {
+    body.attendee = 'parent';
+  }
+  return body;
 }
 
 /**
@@ -288,6 +294,7 @@ async function promoteOneSeat(sessionId, today) {
         athleteId: promoted.athleteId,
         householdId: promoted.householdId,
         athleteName: promoted.athlete.name || null,
+        attendee: promoted.entry.attendee || null,
         chargedFrom: promoted.charge.chargedFrom,
         graceTokenId: promoted.charge.graceTokenId,
         periodKey: promoted.period.periodKey,
@@ -337,6 +344,7 @@ async function fillOpenSeats(sessionId) {
         athleteId: p.athleteId,
         householdId: p.householdId,
         athleteName: p.athleteName,
+        attendee: p.attendee,
         sessionId,
         session: p.session,
       });

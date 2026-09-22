@@ -333,6 +333,7 @@ One doc per athlete-session reservation. Doc id `{athleteId}_{sessionId}`.
 | `createdBy` | string | uid of the account that made the booking (parent or athlete). **Contract v1.4:** for a parent-created booking this is the *parent's* uid, not the athlete's — see the linkage note below. |
 | `createdAt` | timestamp | |
 | `graceTokenId` | string \| null | **New, contract v2.1 (Sprint 13 pin E).** Set when this booking was charged from a grace token instead of the period (`createBooking`'s charge order: Elite -> nothing; else the soonest-expiring unconsumed grace token with `expiresAt >= session.date` -> this field + `chargedFrom: 'grace'`; else the period). A grace-charged booking is EXCLUDED from `tokensFor()`'s `used` count (the Sprint 13 seam amendment landed in `packages.js` — a grace token is a second life for a token the Academy could not honor, never a period spend). Consumption is derived, never stored elsewhere: "is grace token X consumed" == "does some non-cancelled booking carry `graceTokenId == X`". Not yet exercised by any seeded booking (no seeded booking references `graceTokens/grace-1` — the seed demonstrates the grace token existing and unconsumed, not the charge-order client code that would set this field, which lands with the routing lane's Part 2 work). |
+| `attendee` | string \| null | **New (owner ruling 2026-09-22, contract v2.1).** `'athlete' \| 'parent'` — who actually walks into a **Yannick 1:1**. The mental-performance work is often the parent's, so the family chooses at booking. Absent on every other booking and on every booking written before the ruling, and **absent always reads as `'athlete'`**, so nothing needs backfilling. The rules admit the field only when `type == 'mental'` (`bookingShapeOk`), so it can never appear on a training, tournament or Phil booking. **Display only**: charging never branches on it, exactly as charging never branches on `type`. Written by `createBooking`, carried through promotion (`functions/portal/promotion.js`), and read by the family's own schedule rows, the coach roster, Yannick's day view and the booked/reminder/promoted notices. |
 | `chargedFrom` | string \| null | **New, contract v2.1 (Sprint 13 pin C/E).** `'elite' \| 'grace' \| 'period' \| null` — which source paid for this booking, per the charge order above. Not yet written by this seed for the same reason as `graceTokenId` (the client charge-order code is routing's Part 2 work); documented here so the field name is agreed before that code lands. |
 
 **Token usage is derived, never stored (contract v2.0, supersedes the v1
@@ -1379,7 +1380,8 @@ for where this is set.
 **BUILT, Sprint 13** (its index landed a sprint early — [v2.0 index
 reasoning](#v20-index-reasoning-sprint-12--the-token-model) above).
 `waitlist/{sessionId}_{athleteId}`: `{ sessionId, athleteId, householdId,
-date, periodKey, joinedAt, createdBy }` — the same one-entry-per-athlete-
+date, periodKey, joinedAt, createdBy, attendee? }` — the same
+one-entry-per-athlete-
 per-session keyspace shape `bookings` uses. Member create (own athlete /
 household parent; rules `get()` the session and require `booked >=
 capacity` and `status == 'scheduled'`, **plus** (pin H) one `get()` of the
@@ -1392,6 +1394,13 @@ picking the head of the waitlist — grace-token holders first, soonest
 expiry, then `joinedAt` ascending — auto-confirm, no acceptance window) —
 not built by this DB-lane pass; `scripts/sweep-waitlist.mjs` (below) is
 this collection's *other* writer, for the expiry side.
+
+**`attendee` rides the entry too** (owner ruling 2026-09-22): Yannick's 1:1
+has capacity 1, so "full" is the ordinary path for it, and a family that
+chose the parent must not silently lose that choice when a seat opens.
+`promoteOneSeat` copies the field onto the booking it writes. Same rule as
+the booking field: `'athlete' | 'parent'`, admitted by the rules only on a
+`mental` entry, absent reads as the athlete.
 
 Seed: **ONE seed-only FULL session**, capacity **2** — **the single
 deliberate exception to the flat capacity-15 rule (contract v2.0 pin J)

@@ -3,6 +3,7 @@ import { color, font } from '../tokens';
 import { useHouseholdReservations } from '../hooks';
 import { leaveWaitlist } from '../hooks/waitlist';
 import { formatDuration } from '../data/calendar';
+import { attendeeNoteFor } from '../data/specialists';
 import BottomTabBar from '../components/BottomTabBar';
 import Button from '../components/Button';
 import CancelSheet from '../components/CancelSheet';
@@ -161,6 +162,10 @@ function MemberList({ items, past, onBook, onCancelRequest, onLeaveWaitlist, lea
         const rowCancelled = item.status === 'cancelled';
         const metaParts = [item.dayLabel, formatDuration(item.durationMinutes)].filter(Boolean);
         if (item.instructor) metaParts.push(item.instructor);
+        // Contract v2.1: only a Yannick 1:1 can be booked for the parent,
+        // and the family who chose that needs to see which row it was.
+        const attending = attendeeNoteFor(item);
+        if (attending) metaParts.push(attending);
         return (
           <SessionCard
             key={item.id ?? item.bookingId}

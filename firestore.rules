@@ -442,7 +442,7 @@ service cloud.firestore {
                                 'status', 'householdId', 'createdBy', 'createdAt', 'chargedFrom'])
           && d.keys().hasOnly(['athleteId', 'sessionId', 'date', 'type', 'periodKey',
                                'status', 'householdId', 'createdBy', 'createdAt', 'chargedFrom',
-                               'graceTokenId'])
+                               'graceTokenId', 'attendee'])
           && d.athleteId is string
           && d.sessionId is string
           && d.date is string
@@ -452,6 +452,10 @@ service cloud.firestore {
           && d.status == 'confirmed'
           && d.chargedFrom in ['elite', 'grace', 'period']
           && (!d.keys().hasAny(['graceTokenId']) || d.chargedFrom == 'grace')
+          // Absent means the athlete attends, which is every booking written
+          // before the choice existed and every group booking after it.
+          && (!d.keys().hasAny(['attendee'])
+              || (d.attendee in ['athlete', 'parent'] && d.type == 'mental'))
           && d.createdBy == request.auth.uid
           && d.createdAt == request.time;
       }
@@ -1197,13 +1201,15 @@ service cloud.firestore {
         return d.keys().hasAll(['sessionId', 'athleteId', 'householdId', 'date', 'periodKey',
                                 'joinedAt', 'createdBy'])
           && d.keys().hasOnly(['sessionId', 'athleteId', 'householdId', 'date', 'periodKey',
-                               'joinedAt', 'createdBy'])
+                               'joinedAt', 'createdBy', 'attendee'])
           && d.sessionId is string
           && d.athleteId is string
           && d.householdId is string
           && d.date is string
           && d.periodKey is string
           && d.periodKey.matches('[0-9]{4}-[0-9]{2}-[0-9]{2}')
+          // Carried so promotion can write the booking the family asked for.
+          && (!d.keys().hasAny(['attendee']) || d.attendee in ['athlete', 'parent'])
           && d.createdBy == request.auth.uid
           && d.joinedAt == request.time;
       }

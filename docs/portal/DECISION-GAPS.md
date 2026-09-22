@@ -21,15 +21,20 @@ record of what was decided:
 4. ~~**Waitlist acceptance window**~~ - none. Promotion auto-confirms (pin F,
    "owner: fine"). Revisit only if promotion into an unwanted slot becomes a
    support pattern.
+5. ~~**Yannick daytime 1:1 attendee**~~ - EITHER, chosen at booking. Built:
+   `bookings.attendee` / `waitlist.attendee` (`'athlete' | 'parent'`,
+   mental-only, absent reads as the athlete), the "Who is attending?"
+   control on the slot sheet, "Parent attending" on the family's own rows,
+   "<Name> (parent)" on Yannick's day view and the coach roster, and a
+   clause on the booked / reminder / promoted notices. The athlete's token
+   pays either way - charging does not branch on it.
+6. ~~**Single token price**~~ - $65, `pending: false`.
 
 Still open:
 
-1. **Yannick daytime 1:1 attendee** - athlete (built) or parent. Part 1 pins
-   the athlete-attended model; the parent-as-attendee shape (guardian attends,
-   a named child's token is spent) is not built.
-2. **`single`** - a period package (as seeded) or a per-visit sale, and
-   whether $65 is the price. A Stripe-sprint question; the catalogue entry
-   costs nothing while it waits.
+1. **Is `single` ever sold per visit?** The $65 one-token period package is
+   confirmed and built; selling a single visit a la carte is a Stripe-sprint
+   question. The catalogue entry costs nothing while it waits.
 
 ## Stale premises in the Sept 15 handoff (checked against the tree)
 
@@ -218,3 +223,18 @@ turn into bonus tokens, and the two now mint the same document id.
    that would need its own renderer). Neither is a chooser; say so if they should be added.
 4. **The demo harness's coach Today blocks show no hint** - those seed fixtures carry no date. The
    live and emulator path computes it, so only the design-review demo is affected.
+
+## Sprint 19 - who attends a Yannick 1:1 (2026-09-22)
+
+1. **The rules must deploy before this ships.** `bookingShapeOk` and
+   `waitlistShapeOk` are closed `hasOnly` field lists, so the LIVE rules
+   REFUSE any booking carrying `attendee` until
+   `firebase deploy --only firestore:rules` runs. That is the same deploy the
+   90-minute contract tier needs; until it happens, a parent-attending
+   booking fails rather than degrading to an athlete-attending one.
+2. **The notice copy does not reach anyone yet.** No functions are deployed
+   (Blaze), so the "A parent is attending this one" clause on the booked,
+   reminder and promoted notices is built and unsent.
+3. **The choice is per booking and is not remembered.** A family that always
+   sends the parent picks it every time. Say so if it should default to the
+   last choice made for that athlete.

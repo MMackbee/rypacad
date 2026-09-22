@@ -899,7 +899,7 @@ export function useBooking({ variant = 'open', today = todayISO(), practice = fa
    * alongside the existing plain-language `err.message` fallback for every
    * other case.
    */
-  const book = async (slot, { athleteId } = {}) => {
+  const book = async (slot, { athleteId, attendee } = {}) => {
     if (!live) return slot;
     if (!identity) {
       throw new LiveDataError(
@@ -920,6 +920,7 @@ export function useBooking({ variant = 'open', today = todayISO(), practice = fa
         date: slot.date,
         type: slot.type,
         householdId: identity.householdId,
+        attendee,
       });
     }
     return createBooking({
@@ -928,6 +929,7 @@ export function useBooking({ variant = 'open', today = todayISO(), practice = fa
       date: slot.date,
       type: slot.type,
       householdId: identity.householdId,
+      attendee,
     });
   };
 
@@ -1469,6 +1471,10 @@ async function liveSpecialistSessions(specialistId, today) {
         athletes: active.map((b) => ({
           athleteId: b.athleteId,
           name: nameById.get(b.athleteId) ?? null,
+          // Who is coming (owner ruling, 2026-09-22). The booking is still
+          // FOR the child - absent means they attend, which is every booking
+          // written before the choice existed.
+          attendee: b.attendee ?? 'athlete',
         })),
       };
     })
@@ -2117,6 +2123,9 @@ function reservationRow(s, b, today, instructor, anchorDay, currentPeriodKey) {
     cancelReason: b.cancelReason ?? null,
     cancelledBy: b.cancelledBy ?? null,
     athleteId: b.athleteId,
+    // Contract v2.1 (Sprint 12 pin): who the family said would walk in.
+    // Only a Yannick 1:1 can carry 'parent'; everything else is the athlete.
+    attendee: b.attendee ?? 'athlete',
     instructor: instructor ?? (specialist ? specialist.name : null),
     durationMinutes: specialist ? 45 : (s.durationMinutes ?? DEFAULT_DURATION_MINUTES),
     periodKey,
@@ -3674,6 +3683,7 @@ async function liveSessionAttendance(sessionId) {
       bookingId: b.id,
       athleteId: b.athleteId,
       name: nameById.get(b.athleteId) ?? null,
+      attendee: b.attendee ?? 'athlete',
       status: b.status,
       // Coach's optional no-show note (owner's report 2026-09-10) — absent
       // on most bookings, so the row carries an honest null.

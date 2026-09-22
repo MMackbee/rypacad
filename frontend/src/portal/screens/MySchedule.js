@@ -18,6 +18,7 @@ import { leaveWaitlist } from '../hooks/waitlist';
 // Pure calendar helper, not response data - same seam rule BookSession and
 // CommitmentContract already follow (see their own imports of this module).
 import { todayISO } from '../data/calendar';
+import { attendeeNoteFor } from '../data/specialists';
 
 /**
  * 04 · My Schedule - athlete.
@@ -266,7 +267,7 @@ function ScheduleBody({ past, sessions, cancelled, tokens, days, onBook, onCance
                   type={rowCancelled ? 'cancelled' : s.type}
                   ageGroup={rowCancelled ? null : s.ageGroup}
                   name={s.name}
-                  meta={s.meta}
+                  meta={attendeeNoteFor(s) ?? s.meta}
                   variant={rowCancelled ? 'cancelled' : s.isToday ? 'live' : 'default'}
                   footnote={rowCancelled ? cancelReasonCopy(s.cancelReason) : null}
                   trailing={

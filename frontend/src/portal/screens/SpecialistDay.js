@@ -6,7 +6,7 @@ import SessionCard from '../components/SessionCard';
 import { CapacityPill } from '../components/StatusBadge';
 import { Body, ScreenTitle, SectionLabel, SignOutButton } from '../components/Primitives';
 import { useSpecialistSessions } from '../hooks';
-import { SPECIALISTS } from '../data/specialists';
+import { SPECIALISTS, rosterNameFor } from '../data/specialists';
 
 /**
  * My Sessions - the specialist's own day view (Sprint 9 amendment v1.7.1,
@@ -167,7 +167,7 @@ export default function SpecialistDay({
               <SectionLabel style={{ margin: '8px 0' }}>{group.dayLabel}</SectionLabel>
               {group.sessions.map((s) => {
                 const [time, meridiem] = (s.time || '').split(' ');
-                const names = s.athletes.map((a) => a.name).filter(Boolean);
+                const names = s.athletes.map(rosterNameFor).filter(Boolean);
                 return (
                   <SessionCard
                     key={s.sessionId}
@@ -207,7 +207,7 @@ export default function SpecialistDay({
  */
 function TodaySessionCard({ session, specialist, onOpenSession }) {
   const [time, meridiem] = (session.time || '').split(' ');
-  const names = session.athletes.map((a) => a.name).filter(Boolean);
+  const names = session.athletes.map(rosterNameFor).filter(Boolean);
   return (
     <SessionCard
       time={time}
