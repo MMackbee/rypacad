@@ -156,7 +156,7 @@ service cloud.firestore {
           && d.name is string
           && d.householdId is string
           && (d.dob is string || d.dob == null)
-          && (d.contractMinutes in [20, 45, 95] || d.contractMinutes == null)
+          && (d.contractMinutes in [20, 45, 90, 95] || d.contractMinutes == null)
           && d.coachId == null;
       }
       allow create: if signedIn() && me().role in ['ops', 'owner'] && athleteCreateShapeOk();
@@ -169,7 +169,7 @@ service cloud.firestore {
       function contractMinutesUpdateOk() {
         let after = request.resource.data;
         return after.diff(resource.data).affectedKeys().hasOnly(['contractMinutes'])
-          && (after.contractMinutes in [20, 45, 95] || after.contractMinutes == null);
+          && (after.contractMinutes in [20, 45, 90, 95] || after.contractMinutes == null);
       }
       allow update: if signedIn() && contractMinutesUpdateOk() && (
         (me().role == 'athlete' && me().athleteId == athleteId)

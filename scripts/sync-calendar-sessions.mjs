@@ -90,6 +90,12 @@ const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..'
 // Yannick stays a true 1:1 at capacity 1.
 const CAPACITY = { training: 14, tournament: 25, phil: 6, mental: 1 };
 
+// A session runs an hour unless its calendar event says otherwise. Mirrors
+// DEFAULT_DURATION_MINUTES in frontend/src/portal/data/schedule.js: Saturday's
+// 10-12 tournament and 12-2 training are single two-hour events (owner ruling,
+// 2026-09-22), and the app measures every session by this field.
+const DEFAULT_DURATION_MINUTES = 60;
+
 // Title convention, deliberately forgiving: the calendar is entered by hand,
 // so any title whose first word is "training"/"tournament" (any case) is
 // bookable — the real 26/27 entry used "Training Session", and renaming 600
@@ -305,6 +311,18 @@ function mapEvents(items, from, to) {
       continue;
     }
     const [, date, hh, mm] = m;
+    // Duration from the event's own end time. Google always returns end for a
+    // timed event, but an unparseable or backwards end falls back to the
+    // 60-minute default rather than writing a nonsense length.
+    const endMatch = String((ev.end && ev.end.dateTime) || '').match(/^(d{4}-d{2}-d{2})T(d{2}):(d{2})/);
+    const startAbs = Number(hh) * 60 + Number(mm);
+    let durationMinutes = DEFAULT_DURATION_MINUTES;
+    if (endMatch) {
+      const [, endDate, eh, em] = endMatch;
+      const dayShift = endDate === date ? 0 : 24 * 60;
+      const span = Number(eh) * 60 + Number(em) + dayShift - startAbs;
+      if (span > 0 && span <= 12 * 60) durationMinutes = span;
+    }
     if (date < from || date > to) {
       counts.outOfWindow += 1; // widened UTC fetch window; local date decides
       continue;
@@ -315,6 +333,7 @@ function mapEvents(items, from, to) {
       minutes: Number(hh) * 60 + Number(mm),
       date,
       time: formatTime(Number(hh), Number(mm)),
+      durationMinutes,
       type,
       label: GENERIC_TITLE.test(summary) ? null : summary,
       gcalEventId: ev.id,
@@ -330,6 +349,7 @@ function mapEvents(items, from, to) {
       sessions.set(`${date}-${i}`, {
         date: s.date,
         time: s.time,
+        durationMinutes: s.durationMinutes,
         type: s.type,
         capacity: CAPACITY[s.type],
         booked: 0, // on create; existing sessions keep theirs (masked patch)
@@ -453,7 +473,7 @@ async function commit(target, writes) {
 // capacity is synced (not just set on create) so a capacity-rule change
 // reaches sessions that already exist; `booked` and coach assignments made
 // in the portal remain preserved by the mask.
-const SYNCED_FIELDS = ['date', 'time', 'type', 'capacity', 'label', 'status', 'gcalEventId'];
+const SYNCED_FIELDS = ['date', 'time', 'durationMinutes', 'type', 'capacity', 'label', 'status', 'gcalEventId'];
 
 function planSync(desired, existing, resultSessionIds = new Set()) {
   const plan = { creates: [], updates: [], unchanged: [], deletes: [], cancels: [], conflicts: [], seededUntouched: [] };

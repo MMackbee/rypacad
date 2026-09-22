@@ -1439,8 +1439,8 @@ export async function declineEnrollmentRequest(uid, reason) {
  */
 export async function setContractTier({ athleteId, minutes }) {
   if (!athleteId) throw new LiveDataError(ERR.INVALID, 'setContractTier: athleteId is required.');
-  if (minutes != null && ![20, 45, 95].includes(minutes)) {
-    throw new LiveDataError(ERR.INVALID, 'setContractTier: minutes must be 20, 45, 95 or null.');
+  if (minutes != null && ![20, 45, 90].includes(minutes)) {
+    throw new LiveDataError(ERR.INVALID, 'setContractTier: minutes must be 20, 45, 90 or null.');
   }
   requireUser();
   try {

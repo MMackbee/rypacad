@@ -184,7 +184,36 @@ exports.onBookingCancelled = functions.firestore
       if (before.status !== 'confirmed' || after.status !== 'cancelled') {
         return null;
       }
-      if (after.cancelReason !== 'session-cancelled') return null;
+      // Two different cancellations reach this trigger. The academy
+      // cancelling a block mints a bonus token and says so; a family
+      // cancelling their own booking gets a plain receipt (owner ruling,
+      // 2026-09-22). `cancelReason` is the only honest way to tell them
+      // apart - the rules pin it to 'member' for a self-cancel.
+      const byMember = after.cancelReason === 'member';
+      if (!byMember && after.cancelReason !== 'session-cancelled') return null;
+      if (byMember) {
+        try {
+          const [session, athlete] = await Promise.all([
+            docBody('sessions', after.sessionId),
+            docBody('athletes', after.athleteId),
+          ]);
+          const copy = notices.bookingCancelled({athlete, session});
+          await notify.sendNotice({
+            kind: 'booking-cancelled',
+            category: 'schedule',
+            householdId: after.householdId || null,
+            athleteId: after.athleteId || null,
+            sessionId: after.sessionId || null,
+            bookingId: context.params.bookingId,
+            subjectKey: context.params.bookingId,
+            title: copy.title,
+            body: copy.body,
+          });
+        } catch (err) {
+          console.error('onBookingCancelled (member) error:', err);
+        }
+        return null;
+      }
       try {
         const [session, athlete, graceExpiresAt] = await Promise.all([
           docBody('sessions', after.sessionId),

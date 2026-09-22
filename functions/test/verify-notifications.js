@@ -14,7 +14,7 @@
  * Every date is derived from the run's own clock, so this passes on any day.
  * The two jobs are called directly with a FIXED now (scheduled functions never
  * fire in the emulator); the expiry job's clock is chosen so the household's
- * anchor day puts the period end exactly 3 days out (and a second household
+ * anchor day puts the period end exactly EXPIRY_LEAD_DAYS out (and a second household
  * exactly 4, the negative case). */
 'use strict';
 
@@ -113,23 +113,26 @@ const plus2 = addDays(today, 2);
 const plus3 = addDays(today, 3);
 const graceCancelExpiry = addDays(today, 30);
 
-// The expiry job's fixed clock: the first day at least 60 days out whose
-// day-of-month is <= 23, so that dom+4 and dom+5 are both legal anchor days
-// (1..28) LATER in the same month. With anchor == dom+4 the period the day
-// falls in ends exactly 3 days out; with anchor == dom+5, exactly 4 (the
-// negative case). Derived, never hard-coded, so this holds on any run date.
+// The expiry job's fixed clock. LEAD is the job's own constant (7 since the
+// owner's 2026-09-22 ruling, was 3) — read from the job rather than repeated,
+// so changing the lead there cannot leave this harness asserting the old one.
+// We need a day whose day-of-month leaves both dom+LEAD+1 and dom+LEAD+2 as
+// legal anchor days (1..28) LATER in the same month: with anchor
+// == dom+LEAD+1 the period the day falls in ends exactly LEAD days out (the
+// warned case), and with dom+LEAD+2 one day further (the negative case).
+const LEAD = jobs.EXPIRY_LEAD_DAYS;
 function pickExpiryToday(from) {
   let d = from;
   for (let i = 0; i < 40; i += 1) {
-    if (dom(d) <= 23) return d;
+    if (dom(d) <= 28 - (LEAD + 2)) return d;
     d = addDays(d, 1);
   }
   return from;
 }
 const EXP_TODAY = pickExpiryToday(addDays(today, 60));
-const ANCHOR_3 = dom(addDays(EXP_TODAY, 4));
-const ANCHOR_4 = dom(addDays(EXP_TODAY, 5));
-const EXP_TARGET = addDays(EXP_TODAY, 3);
+const ANCHOR_3 = dom(addDays(EXP_TODAY, LEAD + 1));
+const ANCHOR_4 = dom(addDays(EXP_TODAY, LEAD + 2));
+const EXP_TARGET = addDays(EXP_TODAY, LEAD);
 const EXP_NOW = new Date(Date.UTC(Number(EXP_TODAY.slice(0, 4)), Number(EXP_TODAY.slice(5, 7)) - 1, dom(EXP_TODAY), 18));
 const HART_PERIOD = lib.periodFor(EXP_TODAY, ANCHOR_3);
 const LOPEZ_PERIOD = lib.periodFor(EXP_TODAY, ANCHOR_4);
@@ -252,7 +255,7 @@ async function main() {
   log(`seeded 3 households / 5 athletes / 11 sessions / ${seededConfirmed} confirmed bookings / 2 waitlist entries / 4 grace tokens\n`);
 
   log('STEP 0  the clock the time-based steps depend on');
-  check('hart period ends exactly 3 days out', HART_PERIOD.periodEnd, EXP_TARGET);
+  check(`hart period ends exactly ${LEAD} days out`, HART_PERIOD.periodEnd, EXP_TARGET);
   check('lopez period ends exactly 4 days out (the negative case)', LOPEZ_PERIOD.periodEnd, addDays(EXP_TODAY, 4));
   check('push: no device -> no-device; unreachable from the emulator -> skipped',
       [(await push.sendPush({uid: 'x', tokens: [], title: 't', body: 'b'})).status, (await push.sendPush({uid: 'x', tokens: ['tok'], title: 't', body: 'b'})).status], ['no-device', 'skipped']);

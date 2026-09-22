@@ -20,8 +20,13 @@ const lib = require('./lib');
 const notices = require('./notices');
 const notify = require('./notify');
 
-/** How many days ahead an expiry is warned about (pin: exactly 3). */
-const EXPIRY_LEAD_DAYS = 3;
+/**
+ * How many days ahead an expiry is warned about. Owner ruling 2026-09-22:
+ * SEVEN, so a family has a weekend in hand to use the sessions they paid for
+ * (it was 3). Still exactly one notice, on the day that is this many days out
+ * - never a range, so nobody is warned twice for the same expiry.
+ */
+const EXPIRY_LEAD_DAYS = 7;
 
 /**
  * `'YYYY-MM-DD'` plus N days, on the UTC-noon arithmetic `lib` uses so no
@@ -171,7 +176,8 @@ async function remindTokenExpiry(store, clock, summary) {
     const household = await households(athlete.householdId);
     const anchorDay = household && household.periodAnchorDay;
     const period = lib.periodFor(clock.today, anchorDay);
-    // Exactly three days out — never a range, so a family is warned once.
+    // Exactly EXPIRY_LEAD_DAYS days out - never a range, so a family is
+    // warned once.
     if (period.periodEnd !== clock.target) continue;
     const pkg = await packages(athlete.packageId);
     // Elite (`tokens: null`) is unlimited and has nothing to expire; an
@@ -246,7 +252,7 @@ async function remindGraceExpiry(store, clock, summary) {
 
 /**
  * Daily 09:00 America/Chicago: warn about period tokens and bonus tokens
- * that expire in exactly three days.
+ * that expire in exactly EXPIRY_LEAD_DAYS days (7).
  * @param {{now: (?Date|undefined), db: (?Object|undefined)}=} args The fixed
  *     clock and Firestore.
  * @return {!Promise<{today: string, target: string, tokens: number,

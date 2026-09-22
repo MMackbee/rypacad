@@ -20,6 +20,7 @@ import { useBooking, useHouseholdAthletes, useMembership, useMonthSessions } fro
 // comment: "both data modes call it").
 import { windowDaysFor } from '../data/packages';
 import { capacityFor, dayLabel } from '../data/season';
+import { DEFAULT_DURATION_MINUTES } from '../data/schedule';
 import { addDaysISO, monthLabel, openThrough, parseTimeToMinutes, todayISO } from '../data/calendar';
 import { buildMonthDayMaps, MonthNav, useMonthNavState } from '../components/MonthCalendar';
 
@@ -294,6 +295,8 @@ export default function BookSession({
           date: booked.date,
           time: booked.time,
           meridiem: booked.meridiem,
+          // So the event a family keeps ends when the session does.
+          durationMinutes: booked.durationMinutes,
           waitlisted: booked.waitlisted,
           // The waitlisted result carries the joiner's queue position; the
           // line degrades to generic copy while it is null.
@@ -651,17 +654,25 @@ function calendarTemplateUrl(c) {
   // canonical 12-hour parser (data/calendar.js).
   const startMinutes = parseTimeToMinutes(`${c.time} ${c.meridiem || ''}`);
   if (!c.date || startMinutes == null) return null;
+  // End when the session ends: Saturday's run two hours. Done in minutes so
+  // a late start can never produce hour 24.
+  const endMinutes = startMinutes + (c.durationMinutes || DEFAULT_DURATION_MINUTES);
   const h = Math.floor(startMinutes / 60);
   const mins = startMinutes % 60;
+  const endH = Math.floor(endMinutes / 60) % 24;
+  const endM = endMinutes % 60;
   const pad = (n) => String(n).padStart(2, '0');
   const d = c.date.replace(/-/g, '');
   const params = new URLSearchParams({
     action: 'TEMPLATE',
     text: `RYP Academy — ${c.name || 'Training block'}`,
-    dates: `${d}T${pad(h)}${pad(mins)}00/${d}T${pad(h + 1)}${pad(mins)}00`,
+    dates: `${d}T${pad(h)}${pad(mins)}00/${d}T${pad(endH)}${pad(endM)}00`,
     ctz: 'America/Chicago',
     details: 'Booked through the RYP Academy portal.',
-    location: 'RYP Academy, Eden Prairie, MN',
+    // Edina, not Eden Prairie (owner ruling, 2026-09-22): the invite carried
+    // the wrong town, which is the one line of this app that lands in a
+    // family's own calendar.
+    location: 'RYP Academy, Edina, MN',
   });
   return `https://calendar.google.com/calendar/render?${params}`;
 }

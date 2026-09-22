@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { color, font } from '../tokens';
 import { useHouseholdReservations } from '../hooks';
 import { leaveWaitlist } from '../hooks/waitlist';
+import { formatDuration } from '../data/calendar';
 import BottomTabBar from '../components/BottomTabBar';
 import Button from '../components/Button';
 import CancelSheet from '../components/CancelSheet';
@@ -158,7 +159,7 @@ function MemberList({ items, past, onBook, onCancelRequest, onLeaveWaitlist, lea
         // routing's hook update lands) — see MySchedule.js's own comment.
         const waitlisted = item.status === 'waitlisted';
         const rowCancelled = item.status === 'cancelled';
-        const metaParts = [item.dayLabel, `${item.durationMinutes} min`];
+        const metaParts = [item.dayLabel, formatDuration(item.durationMinutes)].filter(Boolean);
         if (item.instructor) metaParts.push(item.instructor);
         return (
           <SessionCard

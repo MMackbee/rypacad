@@ -144,7 +144,7 @@ import {
   resolveBooking,
   upcomingDates,
 } from '../data/season';
-import { ageGroupFor } from '../data/schedule';
+import { DEFAULT_DURATION_MINUTES, ageGroupFor } from '../data/schedule';
 import {
   ATHLETE,
   CODE_OF_GRIT,
@@ -275,6 +275,10 @@ function displaySession(s, today) {
     // stale meridiem away from labelling a morning block as an afternoon one.
     // null for tournaments, specialist sessions and any unmapped block.
     ageGroup: ageGroupFor(s),
+    // How long the session actually runs. Absent on a session doc written
+    // before the field existed, and on every weekday block, which is why the
+    // fallback is the 60-minute default rather than a guess per screen.
+    durationMinutes: s.durationMinutes ?? DEFAULT_DURATION_MINUTES,
   };
 }
 
@@ -459,7 +463,7 @@ async function resolveWaitlistRows(entries, sessionsById, today, anchorDay, curr
         // Shape parity with reservationRow's own confirmed-booking rows -
         // durationMinutes/instructor read the same way regardless of status.
         instructor: specialist ? specialist.name : null,
-        durationMinutes: specialist ? 45 : 60,
+        durationMinutes: specialist ? 45 : (s.durationMinutes ?? DEFAULT_DURATION_MINUTES),
         cancellable: false,
         periodKey,
         nextPeriod: periodKey > currentPeriodKey,
@@ -2114,7 +2118,7 @@ function reservationRow(s, b, today, instructor, anchorDay, currentPeriodKey) {
     cancelledBy: b.cancelledBy ?? null,
     athleteId: b.athleteId,
     instructor: instructor ?? (specialist ? specialist.name : null),
-    durationMinutes: specialist ? 45 : 60,
+    durationMinutes: specialist ? 45 : (s.durationMinutes ?? DEFAULT_DURATION_MINUTES),
     periodKey,
     nextPeriod: periodKey > currentPeriodKey,
   };
@@ -2202,7 +2206,7 @@ function seedReservationMember(child, today) {
             cancellable: false,
             athleteId: child.id,
             instructor: isSpecialistType(s.type) ? SPECIALIST_BY_ID.get(s.type)?.name ?? null : null,
-            durationMinutes: isSpecialistType(s.type) ? 45 : 60,
+            durationMinutes: isSpecialistType(s.type) ? 45 : (s.durationMinutes ?? DEFAULT_DURATION_MINUTES),
             periodKey: periodFor(s.date, PERIOD_ANCHOR_DAY).periodKey,
             nextPeriod: periodFor(s.date, PERIOD_ANCHOR_DAY).periodKey > currentPeriodKey,
           },
@@ -2428,9 +2432,12 @@ export function useCoachDay({ variant = 'today' } = {}) {
       blocks: sessions
         .map((s) => {
           const start = toMinutes(s.time);
+          // Not start + 60: a two-hour Saturday session would flip to
+          // 'closed' an hour early, taking its Start roster button with it.
+          const runs = s.durationMinutes ?? DEFAULT_DURATION_MINUTES;
           const status = !isToday
             ? 'next'
-            : nowMinutes >= start + 60 ? 'closed' : nowMinutes >= start ? 'now' : 'next';
+            : nowMinutes >= start + runs ? 'closed' : nowMinutes >= start ? 'now' : 'next';
           return {
             id: s.id,
             sessionId: s.id,
@@ -2443,6 +2450,7 @@ export function useCoachDay({ variant = 'today' } = {}) {
             // lives in `coach.date` as prose), so the group is resolved here,
             // where the raw session still has both halves.
             ageGroup: ageGroupFor(s),
+            durationMinutes: runs,
           };
         }),
       concurrent: false,

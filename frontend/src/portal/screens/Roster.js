@@ -14,6 +14,7 @@ import * as hooks from '../hooks';
 import { useCoachRoster, useSession } from '../hooks';
 import { isLive } from '../hooks/live';
 import { ageGroupFor } from '../data/schedule';
+import { DEFAULT_DURATION_MINUTES } from '../data/schedule';
 // Pure calendar/season helpers per the seam rule - data still travels
 // through the hooks above.
 import { parseTimeToMinutes, todayISO } from '../data/calendar';
@@ -33,7 +34,10 @@ function realStartsIn(block) {
   const diff = start - (new Date().getHours() * 60 + new Date().getMinutes());
   if (diff > 120) return 'Today';
   if (diff > 0) return `Starts in ${diff} min`;
-  return diff > -60 ? 'Now' : 'Ended';
+  // 'Now' until the session really ends - a coach halfway through a two-hour
+  // Saturday block was being told it had 'Ended'.
+  const runs = block.durationMinutes || DEFAULT_DURATION_MINUTES;
+  return diff > -runs ? 'Now' : 'Ended';
 }
 
 /**

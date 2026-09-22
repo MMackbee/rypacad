@@ -10,6 +10,7 @@ import { SkeletonBar } from '../components/Skeleton';
 import StatusBadge from '../components/StatusBadge';
 import { Body, Card, ScreenTitle, SectionLabel, SignOutButton } from '../components/Primitives';
 import { useCoachDay, useCoachRoster, useMonthSessions } from '../hooks';
+import { DEFAULT_DURATION_MINUTES } from '../data/schedule';
 // Shared calendar plumbing (components/MonthCalendar.js) — the coach
 // Sessions tab is the booking view pointed at rosters (owner's call,
 // 2026-09-01), and both screens paint from the same module so they cannot
@@ -217,7 +218,8 @@ function SessionsTab({ firstSessionDate, onOpenRoster }) {
     if (session.date < today) return true;
     if (session.date > today) return false;
     const start = parseTimeToMinutes(session.time);
-    return start != null && nowMinutes >= start + 60;
+    const runs = session.durationMinutes || DEFAULT_DURATION_MINUTES;
+    return start != null && nowMinutes >= start + runs;
   };
 
   const days = monthState.data?.days ?? [];

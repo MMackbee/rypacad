@@ -3092,3 +3092,45 @@ non-training carrying none, half-hour starts, bad input, and DST dates), product
 and the chips were read out of the live DOM on a demo server - Mon 4 PM "U13", Mon 5 PM "13+",
 Thu 4 PM "13+" (same clock hour as Monday's, opposite group) and Saturday tournaments carrying none.
 Not verified on a phone, and not seen in production, because the blocks themselves are not there yet.
+
+## The decision-gap pass (2026-09-22)
+
+Went through DECISION-GAPS.md with the owner and closed seven. Recorded as
+amendment v2.0.4 in SPRINT-12-PINS.md; the gaps file now separates what was
+answered from what is genuinely still open (the Yannick 1:1 attendee, and
+whether the single token is a period package or a per-visit sale).
+
+The one with teeth was Saturday: 10-12 and 12-2 become SINGLE two-hour events
+(pin J had left it open), each still costing one token. The app had assumed 60
+minutes in eight places, so this needed a real `durationMinutes` field rather
+than a second Saturday list. A survey found what would otherwise have broken:
+the Google Calendar invite a family keeps would have ended a two-hour
+tournament after an hour; the coach's Today card would have flipped to Closed
+at 11 AM, taking its Start roster button with it; the attendance header would
+have read Ended mid-session; Reservations would have said "60 min"; and the
+weekly-hours sentence families read would have claimed Saturday shuts at 1 PM.
+All fixed. The calendar sync now reads each event's end time (falling back to
+60 on a missing, backwards or absurd one) and the seeder writes the field, so
+the emulator measures sessions the way production will. A test caught a
+regression in the sentence itself: grouping days by adjacency spelled out all
+six once Mon and Wed stopped being neighbours, so it groups by span instead -
+"Mon/Wed 3-7 PM, Tue/Thu 4-8 PM, Fri 3-5 PM, Sat 9 AM-2 PM".
+
+Also ruled: the academy is in EDINA (the booking invite said Eden Prairie - the
+only place the app named a town, and it was wrong); the Commitment Contract's
+top tier is 90, not 95, which needed a rules change too because firestore.rules
+enforced [20, 45, 95] and would have refused every new contract (95 stays
+accepted so an athlete already holding it is not broken); prices stay hidden
+until enrollment opens; token expiry warns 7 days out instead of 3, and the
+harness now derives that lead from the job rather than repeating it; a family's
+own cancellation sends a receipt, built as the member branch of
+`onBookingCancelled`; and Stripe subscriptions must bill on the 1st-28th so
+portal periods and invoices agree.
+
+Verified: 57 unit tests pass (12 new, for duration and the weekly sentence),
+functions lint clean, production build compiles, and the demo server showed
+Saturday as two events with Reservations reading "2 hr" beside weekdays' "1 hr".
+NOT verified: the notification harness needs the isolated emulator, which was
+not running, so the expiry-lead and cancel-receipt changes are unrun. Nothing
+reaches families until the rules deploy (the 90 tier) and the Blaze upgrade
+(any notice at all).

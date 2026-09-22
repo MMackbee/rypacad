@@ -450,6 +450,10 @@ function buildDocs(portal) {
     sessions.set(id, {
       date: fields.date,
       time: fields.time,
+      // Owner ruling 2026-09-22: Saturday's 10-12 and 12-2 are single
+      // two-hour events. Written explicitly so the emulator measures sessions
+      // the same way production does once the calendar sync fills this in.
+      durationMinutes: fields.durationMinutes ?? 60,
       type: fields.type,
       capacity: fields.capacity,
       booked: fields.booked,

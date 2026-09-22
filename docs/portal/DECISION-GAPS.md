@@ -7,22 +7,29 @@ integration notes in `TEAM.md`; nothing here is resolved by guessing.
 
 ## Owner rulings needed (from the Sprint 12 pin, "Open")
 
-1. **Package prices** — pending Luke. Catalogue prices carry `pending: true`
-   and the UI renders "pending" beside them; seeds carry no prices; prod gets
-   them only through the user-gated provisioner run.
-2. **Saturday 10–12 / 12–2** — two 60-minute sessions or one 2-hour event
-   each. The generator produces four 60-minute blocks (10, 11 tournament;
-   12, 1 training) and says so in a comment; the calendar sync follows
-   whatever the owner titles.
-3. **Yannick daytime 1:1 attendee** — athlete (built) or parent (not
-   built). Part 1 pins the athlete-attended model; the parent-as-attendee
-   shape (guardian attends, a named child's token is spent) is not built.
-4. **`SPECIALIST_MONTHLY_CAP.mental`** — 1 per calendar month as pinned, or
-   a different cadence. It is a frequency knob, not a pool.
-5. **`single`** — a period package (as seeded) or a per-visit sale. Stripe
-   sprint question; the catalogue entry costs nothing now.
-6. **Waitlist acceptance window** — none in v1 (auto-confirm). Revisit if
-   promotion into an unwanted slot becomes a support pattern.
+Answered 2026-09-22 (see SPRINT-12-PINS amendment v2.0.4), kept here as the
+record of what was decided:
+
+1. ~~**Package prices**~~ - the owner's sheet landed 2026-09-17 (t-6 $299,
+   t-12 $569, t-16 $719, Elite $999, all `pending: false`). Prices stay hidden
+   from families until enrollment opens, then `PRICES_RELEASED = true`. The
+   SINGLE TOKEN is the one price still `pending: true` at $65 - see below.
+2. ~~**Saturday 10-12 / 12-2**~~ - one two-hour event each. Built:
+   `durationMinutes` on every session, 120 for those two.
+3. ~~**`SPECIALIST_MONTHLY_CAP.mental`**~~ - ruled in amendment v2.0.1: Elite
+   2 a month, everyone else 1.
+4. ~~**Waitlist acceptance window**~~ - none. Promotion auto-confirms (pin F,
+   "owner: fine"). Revisit only if promotion into an unwanted slot becomes a
+   support pattern.
+
+Still open:
+
+1. **Yannick daytime 1:1 attendee** - athlete (built) or parent. Part 1 pins
+   the athlete-attended model; the parent-as-attendee shape (guardian attends,
+   a named child's token is spent) is not built.
+2. **`single`** - a period package (as seeded) or a per-visit sale, and
+   whether $65 is the price. A Stripe-sprint question; the catalogue entry
+   costs nothing while it waits.
 
 ## Stale premises in the Sept 15 handoff (checked against the tree)
 
@@ -95,13 +102,13 @@ integration notes in `TEAM.md`; nothing here is resolved by guessing.
 Built to the pinned defaults (TEAM.md "Sprint 14 pins"); each is a one-line
 constant change if the owner rules otherwise.
 
-1. **Reminder timing** — 24 hours ahead, sent at 17:00 America/Chicago
-   (`sessionReminders` schedule). Alternative: morning-of.
-2. **Expiry warning lead** — 3 days before the period ends (tokens) or the
-   grace token expires (`tokenExpiryReminders`, 09:00 Chicago), once per
-   period/token. Alternative: 7 days, or a second warning the day before.
-3. **A member's own cancellation** — no notice in v1 (the screen confirms
-   it). Staff cancellations and revocations always notify.
+1. ~~**Reminder timing**~~ - RULED 2026-09-22: stays as built, 24 hours
+   ahead at 17:00 America/Chicago.
+2. ~~**Expiry warning lead**~~ - RULED 2026-09-22: SEVEN days, not three
+   (`EXPIRY_LEAD_DAYS`), still one notice per expiry.
+3. ~~**A member's own cancellation**~~ - RULED 2026-09-22: it now sends a
+   receipt ("the token is back in this period"). Built as the member branch of
+   `onBookingCancelled`; it sends when functions deploy.
 4. **Progress / check-in notices** — not built (`checkin-due` when the
    Yannick cadence is overdue); needs the mental-cap cadence ruling above
    (item 4 of the Sprint 12 list) first.
@@ -183,24 +190,12 @@ turn into bonus tokens, and the two now mint the same document id.
 6. **Facility access and Stripe** — the $300 line item is displayed and
    stored; carrying it as a subscription item is the Stripe sprint's.
 
-## Sprint 19 - UI redesign brief (owner rulings needed)
+## Sprint 19 - UI redesign brief (ANSWERED 2026-09-22)
 
-Both surfaced by comparing Luke's draft marketing site against the portal
-while writing `docs/portal/ui-redesign-brief.md`. Neither blocks the brief -
-it tells the designer to put neither fact on a screen - but both need a ruling
-before the copy they touch can ship.
-
-1. **Which town is the academy in?** The draft site says Edina ("6529 Cecilia
-   Circle, Edina, MN 55439", on all nine pages plus its JSON-LD). The portal
-   says Eden Prairie - `screens/BookSession.js` puts `location: 'RYP Academy,
-   Eden Prairie, MN'` on the calendar invite a family receives, and
-   `design-handoff.md` opens with Eden Prairie too. One of them is wrong and
-   the wrong one is currently going out on booking invitations. Owner: which?
-2. **Commitment Contract top tier - 90 or 95 minutes?** The site's commitment
-   copy offers "20, 45 or 90 minutes a day"; `data/athlete.js` CONTRACT_TIERS
-   ships 20 / 45 / **95**. The 95 came from the original handoff ("two
-   sessions in a day"). If the owner has since settled on 90, the tier value,
-   its description and the contract screens follow. Owner: which number?
+1. ~~**Which town is the academy in?**~~ - EDINA. The portal's calendar invite
+   said Eden Prairie and was wrong; fixed. Luke's site was right all along.
+2. ~~**Commitment Contract top tier**~~ - 90 minutes. `CONTRACT_TIERS`, the
+   client guard and the rules follow; the rules still accept a stored 95.
 
 ## Sprint 19 - suggested age groups (2026-09-22)
 

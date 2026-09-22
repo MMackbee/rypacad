@@ -152,13 +152,21 @@ export const BLOCKS = ['3:00 PM', '4:00 PM', '5:00 PM'];
  * code change (pin J) — so this is the frontend's own copy of those hours,
  * for empty-state and summary copy only. Values are 24h block-start hours.
  */
+const HOUR = (start) => ({ start, minutes: 60 });
+
 export const WEEKLY_SCHEDULE = {
-  Monday: [15, 16, 17, 18],
-  Tuesday: [16, 17, 18, 19],
-  Wednesday: [15, 16, 17, 18],
-  Thursday: [16, 17, 18, 19],
-  Friday: [15, 16],
-  Saturday: [9, 10, 11, 12, 13],
+  Monday: [15, 16, 17, 18].map(HOUR),
+  Tuesday: [16, 17, 18, 19].map(HOUR),
+  Wednesday: [15, 16, 17, 18].map(HOUR),
+  Thursday: [16, 17, 18, 19].map(HOUR),
+  Friday: [15, 16].map(HOUR),
+  // Saturday is the one day whose blocks are not all an hour (owner ruling,
+  // 2026-09-22): 9 AM training, then 10-12 tournament and 12-2 training as
+  // single two-hour events. Written with real lengths so the sentence below
+  // can say "9 AM-2 PM" instead of counting an hour per entry and stopping at
+  // 1 PM - which is what a family would have read while the room was still in
+  // use.
+  Saturday: [HOUR(9), { start: 10, minutes: 120 }, { start: 12, minutes: 120 }],
 };
 
 export const SCHEDULE_DAYS = Object.keys(WEEKLY_SCHEDULE);
@@ -173,10 +181,13 @@ function hour12(h) {
 
 /** One day's span, honestly crossing noon: "3-6 PM" / "9 AM-2 PM". */
 function daySpanLabel(day) {
-  const hours = WEEKLY_SCHEDULE[day];
-  if (!hours || !hours.length) return null;
-  const start = hours[0];
-  const end = hours[hours.length - 1] + 1; // every block is 60 minutes
+  const blocks = WEEKLY_SCHEDULE[day];
+  if (!blocks || !blocks.length) return null;
+  const start = blocks[0].start;
+  const last = blocks[blocks.length - 1];
+  // The day ends when its LAST block ends, which is not always an hour after
+  // it starts - Saturday's closing session runs two hours.
+  const end = last.start + last.minutes / 60;
   const startsPM = start >= 12;
   const endsPM = end >= 12;
   if (startsPM === endsPM) return `${hour12(start)}-${hour12(end)} ${endsPM ? 'PM' : 'AM'}`;
@@ -191,11 +202,15 @@ function daySpanLabel(day) {
  * Replaces the old BLOCK_RANGE_LABEL, which derived only Mon-Thu 3-6 PM.
  */
 export const WEEKLY_SCHEDULE_LABEL = (() => {
+  // Group days by the hours they keep, NOT by adjacency: Mon and Wed share a
+  // span but sit either side of Tuesday, so an adjacent-only grouping spelled
+  // out all six days ("Mon 3-7 PM, Tue 4-8 PM, Wed 3-7 PM, ..."). Order is
+  // first appearance, so the week still reads Monday onwards.
   const groups = [];
   for (const day of SCHEDULE_DAYS) {
     const span = daySpanLabel(day);
-    const last = groups[groups.length - 1];
-    if (last && last.span === span) last.days.push(day);
+    const group = groups.find((g) => g.span === span);
+    if (group) group.days.push(day);
     else groups.push({ span, days: [day] });
   }
   return groups.map((g) => `${g.days.map((d) => SHORT_DAY[d]).join('/')} ${g.span}`).join(', ');

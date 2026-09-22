@@ -119,6 +119,24 @@ function promoted(args) {
 }
 
 /**
+ * kind `booking-cancelled` - the FAMILY cancelled it themselves (owner
+ * ruling, 2026-09-22: send a receipt, so the other parent sees it too).
+ * Deliberately plain: the screen already confirmed it, so this is a record,
+ * not news. Says the token came back, because that is the thing a family
+ * wants confirmed in writing.
+ * @param {{athlete: ?Object, session: ?Object}} args Copy inputs.
+ * @return {{title: string, body: string}} The notice.
+ */
+function bookingCancelled(args) {
+  const name = firstNameOf(args.athlete);
+  return {
+    title: 'Booking cancelled',
+    body: `${name}'s booking for ${sessionPhrase(args.session)} was ` +
+        'cancelled. The token is back in this period.',
+  };
+}
+
+/**
  * kind `session-cancelled` - the academy cancelled the block. The grace
  * token sentence is omitted when no token was minted for this session.
  * @param {{athlete: ?Object, session: ?Object, graceExpiresAt: ?string}}
@@ -175,7 +193,8 @@ function reminder24h(args) {
 }
 
 /**
- * kind `tokens-expiring` - the period ends in three days with tokens left.
+ * kind `tokens-expiring` - the period ends in EXPIRY_LEAD_DAYS days (7
+ * since the 2026-09-22 ruling) with tokens left.
  * @param {{athlete: ?Object, left: number, periodEnd: string}} args Copy
  *     inputs.
  * @return {{title: string, body: string}} The notice.
@@ -192,7 +211,8 @@ function tokensExpiring(args) {
 }
 
 /**
- * kind `grace-expiring` - an unconsumed bonus token expires in three days.
+ * kind `grace-expiring` - an unconsumed bonus token expires in
+ * EXPIRY_LEAD_DAYS days (7).
  * @param {{athlete: ?Object, expiresAt: string}} args Copy inputs.
  * @return {{title: string, body: string}} The notice.
  */
@@ -254,6 +274,7 @@ function waitlistExpired(args) {
 
 module.exports = {
   TYPE_LABELS,
+  bookingCancelled,
   bookingConfirmed,
   bookingRevoked,
   dayLabel,

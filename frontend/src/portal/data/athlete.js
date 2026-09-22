@@ -153,7 +153,12 @@ export const CONTRACT_TIERS = [
   { minutes: 20, description: 'A focused block. Enough to hold a habit through the season.' },
   { minutes: 45, description: 'The standard commitment.', footnote: 'Most common tier' },
   {
-    minutes: 95,
+    // 90, not 95 (owner ruling, 2026-09-22): the academy's own commitment copy
+    // offers 20 / 45 / 90, and the portal was the only place saying 95 - it
+    // came from the original handoff's "two sessions in a day". An athlete
+    // whose record already holds 95 keeps it (the rules still accept the old
+    // value) and simply has no matching card until they pick again.
+    minutes: 90,
     description: 'Two sessions in a day for athletes chasing a college roster spot.',
     footnote: 'Split entries supported — see flag 05',
   },

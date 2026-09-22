@@ -547,3 +547,36 @@ had not been made when this landed, and production sessions come from that calen
 production keeps three weekday blocks, and the 6 PM / 7 PM blocks (and their hints) appear only after
 the owner edits the calendar and the next `node scripts/sync-calendar-sessions.mjs --prod` run. The
 seed/emulator season generates all four immediately.
+
+## Sprint 12 amendment v2.0.4 - the decision-gap pass (2026-09-22)
+
+Seven open questions answered in one sitting. Each is now the built behaviour.
+
+1. **Saturday 10-12 and 12-2 are SINGLE TWO-HOUR EVENTS**, not four 60-minute
+   blocks. This closes pin J's own open question. Each still costs ONE token -
+   length has never been what a session costs, and nothing about the charge
+   path changed. 9 AM stays a 60-minute training block; the 2-4 PM adult block
+   is unchanged and still display-only. The app now carries a real
+   `durationMinutes` on every session (absent == 60), because it had assumed
+   60 minutes in eight places, including the calendar invite a family keeps
+   and the coach's "is this block finished" check.
+2. **The academy is in EDINA**, not Eden Prairie. The calendar invite every
+   family receives on booking said Eden Prairie; it was the only place in the
+   app that named a town, and it was wrong.
+3. **The Commitment Contract's top tier is 90 minutes**, not 95, matching the
+   academy's own commitment copy. The rules still ACCEPT 95 so an athlete who
+   already holds it is not broken, but nothing offers it any more.
+4. **Prices stay hidden until enrollment opens.** `PRICES_RELEASED = false`
+   is now a launch-day flip rather than an open question.
+5. **Session reminders stay as built**: the day before, 17:00 America/Chicago.
+6. **Token expiry warns SEVEN days out**, not three, so a family has a weekend
+   in hand to use what they paid for. Still exactly one notice per expiry.
+7. **A family's own cancellation now sends a receipt** (it sent nothing).
+   Staff cancellations keep their own notice and their bonus token; the
+   self-cancel receipt says the token is back and nothing else.
+
+Also ruled, and shaping the Stripe sprint rather than this one: **subscriptions
+must bill on the 1st-28th.** The portal's periods are anchor-day based and
+clamp to 28, so a subscription billing on the 29th-31st would have shown period
+dates a few days off from the invoice. Constraining sign-ups keeps the two in
+agreement instead.

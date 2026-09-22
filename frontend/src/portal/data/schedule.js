@@ -105,19 +105,22 @@ function formatHour(hour) {
 }
 
 /**
- * Saturday (pin J): 9 AM training, then four 60-min blocks — 10/11 tournament,
- * 12/1 training. **Open (pin J, #2 in TEAM.md):** whether 10-12 and 12-2 end
- * up as single 2-hour events instead of two 60-min blocks each is an owner
- * call made on the calendar, not here — if so, the owner titles one event per
- * window and this generator follows; pinning the four-block shape for now
- * since that is what is pinned today, not guessing at the merge.
+ * Saturday: 9 AM training (60 min), then 10 AM-12 PM tournament and
+ * 12-2 PM training, each a SINGLE two-hour event.
+ *
+ * That was pin J's open question ("two 60-minute sessions or one 2-hour event
+ * each") and the owner answered it on 2026-09-22: one event each. Each spends
+ * one token, exactly like a 60-minute weekday block - a session's length has
+ * never been what it costs. The owner titles one calendar event per window and
+ * the sync follows; this generator matches it for seed parity.
  */
 export const SATURDAY_BLOCKS = [
-  { time: '9:00 AM', type: 'training' },
-  { time: '10:00 AM', type: 'tournament' },
-  { time: '11:00 AM', type: 'tournament' },
-  { time: '12:00 PM', type: 'training' },
-  { time: '1:00 PM', type: 'training' },
+  { time: '9:00 AM', type: 'training', durationMinutes: 60 },
+  // Owner ruling 2026-09-22: 10-12 is ONE two-hour tournament and 12-2 is ONE
+  // two-hour training session, not four 60-minute blocks. Each still spends a
+  // single token - length never changes what a session costs.
+  { time: '10:00 AM', type: 'tournament', durationMinutes: 120 },
+  { time: '12:00 PM', type: 'training', durationMinutes: 120 },
 ];
 
 /**
@@ -161,6 +164,13 @@ export function capacityForType(type) {
   return CAPACITY_BY_TYPE[type] ?? CAPACITY_BY_TYPE.training;
 }
 
+/**
+ * A block is 60 minutes unless it says otherwise. Sessions carry
+ * `durationMinutes` and anything reading one falls back to this, so a session
+ * doc written before the field existed still measures correctly.
+ */
+export const DEFAULT_DURATION_MINUTES = 60;
+
 const DAY = { SUN: 0, MON: 1, TUE: 2, WED: 3, THU: 4, FRI: 5, SAT: 6 };
 
 const iso = (d) => d.toISOString().slice(0, 10);
@@ -169,7 +179,12 @@ const iso = (d) => d.toISOString().slice(0, 10);
 function blocksForDay(dayIndex) {
   const key = WEEKDAY_KEY_BY_DAY_INDEX[dayIndex];
   if (key) {
-    return WEEKDAY_BLOCKS[key].map((hour) => ({ time: formatHour(hour), type: 'training', bookable: true }));
+    return WEEKDAY_BLOCKS[key].map((hour) => ({
+      time: formatHour(hour),
+      type: 'training',
+      bookable: true,
+      durationMinutes: DEFAULT_DURATION_MINUTES,
+    }));
   }
   if (dayIndex === DAY.SAT) {
     return [...SATURDAY_BLOCKS.map((b) => ({ ...b, bookable: true })), { ...SATURDAY_ADULT_BLOCK }];
@@ -213,6 +228,7 @@ export function generateSeason({ start, end, closures = [], capacity = null, ext
           type: block.type,
           label: block.label || null,
           bookable: block.bookable !== false,
+          durationMinutes: block.durationMinutes ?? DEFAULT_DURATION_MINUTES,
           capacity: capFor(block.type),
           booked: 0,
           coachId: null,
@@ -236,6 +252,7 @@ export function generateSeason({ start, end, closures = [], capacity = null, ext
         label: e.label || null,
         bookable: true,
         special: true,
+        durationMinutes: e.durationMinutes ?? DEFAULT_DURATION_MINUTES,
         capacity: e.capacity || capFor(e.type),
         booked: 0,
         coachId: null,

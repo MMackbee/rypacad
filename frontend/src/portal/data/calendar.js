@@ -68,6 +68,20 @@ export function parseTimeToMinutes(timeStr) {
   return h * 60 + Number(m[2]);
 }
 
+/**
+ * Minutes -> how long a session runs, as a person would say it: "45 min",
+ * "1 hr", "1 hr 30 min", "2 hr". Printing raw minutes reads fine at 45 and 60
+ * and badly at 120, which Saturday's sessions now are.
+ */
+export function formatDuration(minutes) {
+  const n = Number(minutes);
+  if (!Number.isFinite(n) || n <= 0) return null;
+  const hrs = Math.floor(n / 60);
+  const mins = n % 60;
+  if (!hrs) return `${mins} min`;
+  return mins ? `${hrs} hr ${mins} min` : `${hrs} hr`;
+}
+
 /** '2026-08-28' -> 'Friday, Aug 28'. */
 export function longDayLabel(iso) {
   return format(parseISO(iso), 'EEEE, MMM d');
