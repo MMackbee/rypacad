@@ -168,6 +168,18 @@ export function hubMemberFor(args) {
     },
     lastPeriod,
     expiryNudge,
+    // Elite has no countdown, so "how much did we use it" is the only honest
+    // measure of the period for them (owner ruling, 2026-09-22). Derived from
+    // the same rows the list below shows - never a stored counter. null for
+    // everyone else, whose meter already answers the question.
+    attendance: unlimited
+      ? {
+        booked: spent.length,
+        attended: spent.filter((r) => r.status === 'attended').length,
+        // Bookings store 'noshow'; there is no hyphen in the stored value.
+        noShows: spent.filter((r) => r.status === 'noshow').length,
+      }
+      : null,
     contractMinutes: athlete.contractMinutes ?? null,
     // v2.0.1 (Sprint 18): the $300 add-on, a line item on the Plan card.
     facilityAccess: Boolean(athlete.facilityAccess),

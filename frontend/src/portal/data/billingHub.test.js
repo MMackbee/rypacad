@@ -175,3 +175,36 @@ describe('small helpers', () => {
     expect(daysBetween('2026-12-31', '2027-01-01')).toBe(1);
   });
 });
+
+describe('the Elite attendance line (owner ruling, 2026-09-22)', () => {
+  // Elite has no token countdown, so the hub answers a different question:
+  // how much of the period did they actually use?
+  const elite = () => ({
+    ...fixture(),
+    pkg: ELITE,
+    bookings: [
+      b('e1', { date: '2026-09-03', status: 'attended' }),
+      b('e2', { date: '2026-09-05', status: 'attended' }),
+      b('e3', { date: '2026-09-08', status: 'noshow' }),
+      b('e4', { date: '2026-09-22' }),
+      b('e5', { date: '2026-09-12', status: 'cancelled' }),
+      b('e6', { date: '2026-10-05', periodKey: '2026-10-01', status: 'attended' }),
+    ],
+  });
+
+  test('counts this period only, and never the cancelled one', () => {
+    expect(hubMemberFor(elite()).attendance).toEqual({ booked: 4, attended: 2, noShows: 1 });
+  });
+
+  test('a no-show is counted on the stored value, not a hyphenated one', () => {
+    // Bookings store 'noshow'. A lookup keyed 'no-show' silently counted zero
+    // and showed the neutral "Booked" badge instead of "No-show" (K05).
+    const m = hubMemberFor(elite());
+    expect(m.attendance.noShows).toBe(1);
+    expect(m.spent.find((r) => r.id === 'e3').status).toBe('noshow');
+  });
+
+  test('nobody on a token package gets the line - their meter answers it', () => {
+    expect(hubMemberFor(fixture()).attendance).toBeNull();
+  });
+});

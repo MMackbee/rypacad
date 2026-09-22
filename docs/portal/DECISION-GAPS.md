@@ -148,9 +148,11 @@ with the per-channel outcome recorded on the ledger row.
 4. **Newsletter scrapped** (owner) — composer, route, hook, fixtures and the
    `newsletter` notification category are gone. A saved preference map that
    still carries the key is ignored.
-5. **Elite on the hub** — reads "Unlimited" with the period's sessions as a
-   plain list. Whether to show more (attendance rate, 24/7 access log) is
-   open.
+5. ~~**Elite on the hub**~~ — RULED 2026-09-22: it now also reads "N attended ·
+   N booked this period" (and no-shows when there are any), derived from the
+   same rows the session list shows. Elite has no countdown, so usage is the
+   only honest measure of their period. A 24/7 access log stays out — the
+   portal has no door data.
 
 ## Sprint 17 — staff billing + the self-running token model (2026-09-17)
 
@@ -171,7 +173,10 @@ turn into bonus tokens, and the two now mint the same document id.
 2. **`t-20` retired** — gone from the catalogue and seeds; production loses
    the doc on the next user-gated `provision-family.mjs` catalogue run. Any
    athlete still pointing at it reads "no package" until reassigned.
-3. **Capacity (revised 2026-09-18: training 14, tournament 25)** — the
+3. ~~**Capacity / Tour points tail**~~ — RULED 2026-09-22: the table stays as
+   it is. A full 25-player field is already scored position by position, and
+   the 12-point tail only matters if a field ever exceeds 25. The original
+   note, for the record: the
    pin asks for TOUR_POINTS to be extended from 15 positions to 25, but the
    table in `data/tour.js` ALREADY has 25 positions (100 down to 14) with 12
    participation points beyond, not 15 positions and 5 points - so a full

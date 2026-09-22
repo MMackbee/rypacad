@@ -34,7 +34,7 @@ function priceLine(pkg) {
 const STATUS_BADGE = {
   attended: { tone: 'green', label: 'Attended' },
   confirmed: { tone: 'neutral', label: 'Booked' },
-  'no-show': { tone: 'red', label: 'No-show' },
+  noshow: { tone: 'red', label: 'No-show' },
   waitlisted: { tone: 'yellow', label: 'Waitlist' },
 };
 
@@ -164,6 +164,13 @@ export default function TokenMeter({ member, defaultOpen = false, showPrices = f
           {pkg.access247 ? ' · 24/7 access' : ''}
           {pkg.windowDays ? ` · books ${pkg.windowDays} days out` : ''}
         </Body>
+        {member.attendance && member.attendance.booked ? (
+          <Body size={12} tone={color.textSecondary} style={{ marginTop: 6 }}>
+            {`${member.attendance.attended} attended`}
+            {` · ${member.attendance.booked} booked this period`}
+            {member.attendance.noShows ? ` · ${member.attendance.noShows} no-show${member.attendance.noShows === 1 ? '' : 's'}` : ''}
+          </Body>
+        ) : null}
         <Toggle open={open} onToggle={() => setOpen((v) => !v)} count={count} />
         {open ? <Evidence member={member} /> : null}
       </Card>

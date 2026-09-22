@@ -53,7 +53,11 @@ export const ELITE = {
 };
 
 /** Single token (pin M): one token per period. Per-visit sale is a Stripe-sprint question. */
-export const SINGLE_TOKEN = { id: 'single', name: 'Single token', kind: 'single', tokens: 1, price: 65, pending: true, windowDays: 32 };
+// $65 confirmed by the owner 2026-09-22, so it is no longer pending: the
+// single token is a real one-token period package, priced like the others and
+// shown to staff the same way. Whether it is ever sold per visit instead of as
+// a period package is a Stripe-sprint question and changes nothing here.
+export const SINGLE_TOKEN = { id: 'single', name: 'Single token', kind: 'single', tokens: 1, price: 65, pending: false, windowDays: 32 };
 
 export const ALL_PACKAGES = [...TOKEN_PACKAGES, ELITE, SINGLE_TOKEN];
 
