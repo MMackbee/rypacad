@@ -7,11 +7,13 @@ import CancelSheet from '../components/CancelSheet';
 import PhoneFrame from '../components/PhoneFrame';
 import StatusBadge from '../components/StatusBadge';
 import TypeChip from '../components/TypeChip';
+import AgeGroupChip from '../components/AgeGroupChip';
 import { BackLink, Body, Card, ScreenTitle, SectionLabel, SignOutButton, Tick } from '../components/Primitives';
 import useRoster from '../hooks/useRoster';
 import * as hooks from '../hooks';
 import { useCoachRoster, useSession } from '../hooks';
 import { isLive } from '../hooks/live';
+import { ageGroupFor } from '../data/schedule';
 // Pure calendar/season helpers per the seam rule - data still travels
 // through the hooks above.
 import { parseTimeToMinutes, todayISO } from '../data/calendar';
@@ -237,6 +239,8 @@ export function SessionAttendance({ variant = 'pre', bare = false, onBack, sessi
         // 'Training block' (the old binary fallback did exactly that).
         name: block.name || hooks.genericSessionName(block.type),
         meta: [block.time, block.meta].filter(Boolean).join(' · '),
+        // The suggested age group of the block the coach is about to run.
+        ageGroup: ageGroupFor({ date: block.date, time: block.time, type: block.type }),
         startsIn: realStartsIn(block),
       }
     : seedSession;
@@ -449,6 +453,7 @@ export function SessionAttendance({ variant = 'pre', bare = false, onBack, sessi
 
           <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
             <TypeChip type={session?.type} />
+            <AgeGroupChip group={session?.ageGroup} />
             <span style={{ font: `400 11px ${font.body}`, color: color.textTertiary }}>
               {session?.blockLabel}
             </span>

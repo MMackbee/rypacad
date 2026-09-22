@@ -166,6 +166,7 @@ function MemberList({ items, past, onBook, onCancelRequest, onLeaveWaitlist, lea
             time={item.time}
             meridiem={item.meridiem}
             type={rowCancelled ? 'cancelled' : item.type}
+            ageGroup={rowCancelled ? null : item.ageGroup}
             name={item.name}
             meta={metaParts.join(' · ')}
             variant={rowCancelled ? 'cancelled' : item.isToday ? 'live' : 'default'}

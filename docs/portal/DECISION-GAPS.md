@@ -201,3 +201,20 @@ before the copy they touch can ship.
    ships 20 / 45 / **95**. The 95 came from the original handoff ("two
    sessions in a day"). If the owner has since settled on 90, the tier value,
    its description and the contract screens follow. Owner: which number?
+
+## Sprint 19 - suggested age groups (2026-09-22)
+
+1. **The Google Calendar has not been updated.** The owner ruled the weekday pattern is now Mon/Wed
+   3-6 PM and Tue/Thu 4-7 PM, and said the calendar edit is still to come. Production sessions come
+   from that calendar, so until the owner edits it and runs
+   `node scripts/sync-calendar-sessions.mjs --prod` (dry-run first), production keeps three blocks a
+   day and the new 6 PM / 7 PM blocks - and their age hints - will not appear. The seed and emulator
+   generate all four immediately, so the two will disagree until that run.
+2. **Friday and Saturday carry no age hint**, by the owner's answer (Mon-Thu only). If families ask
+   about Friday's 3 and 4 PM blocks, that is a ruling to make, not a bug to fix.
+3. **Two surfaces do not show the hint yet**, both because their data shape would have to change:
+   the parent home's per-child "Next" row (`liveChildCard` hands the card one preformatted string,
+   "Mon 4:00 PM", with no date or type) and the season calendar (a third-party calendar component
+   that would need its own renderer). Neither is a chooser; say so if they should be added.
+4. **The demo harness's coach Today blocks show no hint** - those seed fixtures carry no date. The
+   live and emulator path computes it, so only the design-review demo is affected.

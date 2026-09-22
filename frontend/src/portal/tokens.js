@@ -34,6 +34,19 @@ export const color = {
   textSecondary: '#CCCCCC',
   textTertiary: '#888888',
 
+  /**
+   * Suggested age groups (owner, 2026-09-22). Two hues that mean nothing else
+   * in this app: green is "tappable / on track", yellow is caution, red is
+   * error and amber #FA9931 is the payment retry ladder, so an age hint gets
+   * its own space rather than borrowing a meaning. Both are legible small on
+   * both grounds - blue 6.85:1 on the card surface and 8.3:1 on the page,
+   * lavender 7.8:1 and 9.4:1. Colour is never the only signal: the chip always
+   * carries "13+" or "U13", which is what a red-green colour-blind viewer (and
+   * anyone glancing at a phone in sunlight) actually reads.
+   */
+  ageOlder: '#5AA9E6',
+  ageYounger: '#C79BF2',
+
   // Supporting values, used consistently across the artboards.
   track: '#111111',       // meter tracks, inset fields
   dimmed: '#141414',      // disabled / closed surfaces
@@ -68,6 +81,13 @@ export const tint = {
    * black frame to keep the black label and spinner legible.
    */
   greenLoading: 'rgba(0,175,81,.45)',
+
+  /** Age-group chips (2026-09-22): a wash, never a solid fill - a solid fill
+   *  reads as "tap me", and an age hint is not a control. */
+  ageOlder: 'rgba(90,169,230,.13)',
+  ageOlderBorder: 'rgba(90,169,230,.45)',
+  ageYounger: 'rgba(199,155,242,.13)',
+  ageYoungerBorder: 'rgba(199,155,242,.45)',
 };
 
 export const font = {
@@ -119,8 +139,13 @@ export const BLOCKS = ['3:00 PM', '4:00 PM', '5:00 PM'];
 
 /**
  * The real locked weekly schedule (Sprint 12 pin J, owner ruling
- * 2026-09-15): 60-minute blocks. Mon/Wed 3-6 PM, Tue/Thu 3-7 PM, Fri 3-5 PM,
- * Sat 9 AM-2 PM (9 AM training + four more 60-min blocks — the 2-4 PM
+ * 2026-09-15; amendment v2.0.3, 2026-09-22: a fourth weekday block — Mon/Wed
+ * gain 6 PM, Tue/Thu gain 7 PM): 60-minute blocks. Mon/Wed 3-7 PM, Tue/Thu
+ * 4-8 PM, Fri 3-5 PM, Sat 9 AM-2 PM. Tue/Thu 3 PM stays RESERVED for the
+ * invite-only group (v2.0.2) and is not listed, so the sentence this drives
+ * never offers a family a block it cannot book — it used to say "Tue/Thu 3-7
+ * PM", which included that reserved hour. (9 AM training + four more 60-min
+ * Saturday blocks — the 2-4 PM
  * college/Elite Am/Mid Am pair is adult, in-person Stripe, not bookable in
  * the app, so it is not listed here). Production sessions come from the
  * Google Calendar sync — the schedule is a calendar edit by the owner, not a
@@ -128,10 +153,10 @@ export const BLOCKS = ['3:00 PM', '4:00 PM', '5:00 PM'];
  * for empty-state and summary copy only. Values are 24h block-start hours.
  */
 export const WEEKLY_SCHEDULE = {
-  Monday: [15, 16, 17],
-  Tuesday: [15, 16, 17, 18],
-  Wednesday: [15, 16, 17],
-  Thursday: [15, 16, 17, 18],
+  Monday: [15, 16, 17, 18],
+  Tuesday: [16, 17, 18, 19],
+  Wednesday: [15, 16, 17, 18],
+  Thursday: [16, 17, 18, 19],
   Friday: [15, 16],
   Saturday: [9, 10, 11, 12, 13],
 };

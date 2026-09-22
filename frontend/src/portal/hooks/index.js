@@ -144,6 +144,7 @@ import {
   resolveBooking,
   upcomingDates,
 } from '../data/season';
+import { ageGroupFor } from '../data/schedule';
 import {
   ATHLETE,
   CODE_OF_GRIT,
@@ -267,6 +268,13 @@ function displaySession(s, today) {
     // - the Friday overflow block concept is gone from the locked weekly
     // schedule; the generator no longer produces the field at all).
     meta: s.special ? 'Holiday event · open to tournament competitors' : null,
+    // Suggested age group (owner, 2026-09-22), derived HERE rather than in a
+    // screen: this is the last place that holds the session's own date next
+    // to its full time string ("4:00 PM"). Below, `time` and `meridiem` are
+    // split into two fields, and a caller that rejoined them would be one
+    // stale meridiem away from labelling a morning block as an afternoon one.
+    // null for tournaments, specialist sessions and any unmapped block.
+    ageGroup: ageGroupFor(s),
   };
 }
 
@@ -2431,6 +2439,10 @@ export function useCoachDay({ variant = 'today' } = {}) {
             name: s.label || genericSessionName(s.type),
             meta: `${s.booked ?? 0} of ${s.capacity ?? '—'} booked`,
             status,
+            // The coach's day rows carry no `date` of their own (the day's ISO
+            // lives in `coach.date` as prose), so the group is resolved here,
+            // where the raw session still has both halves.
+            ageGroup: ageGroupFor(s),
           };
         }),
       concurrent: false,

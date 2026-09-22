@@ -226,7 +226,14 @@ export async function fetchPackage(packageId) {
  * are skipped the same way the seed's upcomingDates() skips them. Ordered by
  * date; single-field filter + order, so no composite index is needed.
  */
-const MAX_BLOCKS_PER_DAY = 6; // 4 Saturday blocks is the weekly max; 6 leaves holiday headroom.
+// Every session doc on a date counts against this, not just the golf blocks:
+// the callers filter specialists out AFTER the fetch, so Phil's and Yannick's
+// slots occupy slots here too. A weekday now carries four training blocks
+// (v2.0.3, 2026-09-22) plus those two, which is exactly 6 - the old cap left
+// no room at all and silently dropped the late blocks off the coach's day.
+// 12 covers a Saturday (5 blocks + the adult block) or a weekday plus holiday
+// extras, with headroom.
+const MAX_BLOCKS_PER_DAY = 12;
 
 export async function fetchSessions(fromDate, days = 7) {
   if (!fromDate) throw new LiveDataError(ERR.INVALID, 'fetchSessions: fromDate is required.');

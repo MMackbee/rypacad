@@ -3052,3 +3052,43 @@ Confirmed defects, most serious first (full evidence with each claim is in the v
 - **K31** (cosmetic) Under 'Membership & tokens' the note says push is your choice, but the push switch is locked on and can't be changed. `data/parent.js:53-61 (locked: true`
 - **K35** (cosmetic) After booking, the confirmation shows the time without AM/PM ("Tomorrow · 4:00"), and "Back to schedule" takes you back to the booking calendar, not My Schedule. `screens/BookSession.js:240-245 (time/meridiem split)`
 - **K37** (cosmetic) The coach's Today pill says "1 BLOCKS", and on a future session day the count card still says "blocks today". `screens/CoachDashboard.js:64 (`${...length} blocks`)`
+
+## Suggested age groups on training blocks (owner ruling, 2026-09-22)
+
+Owner: each weekday block gets a colour-coded age hint, and the weekday pattern gains a fourth
+block. Mon/Wed 3 PM and 5 PM are 13 & up, 4 PM and 6 PM under 13; Tue/Thu 4 PM and 6 PM are 13 & up,
+5 PM and 7 PM under 13. Recorded as amendment v2.0.3 in SPRINT-12-PINS.md.
+
+Built as `AGE_GROUPS` + `AGE_GROUP_BY_DAY` + `ageGroupFor(session)` in `data/schedule.js`: an
+explicit (weekday, start hour) lookup returning null for everything unmapped. Explicit on purpose -
+4 PM and 6 PM mean OPPOSITE groups on Mon/Wed versus Tue/Thu, so any odd/even or if/else shortcut
+gets half the week wrong, and a wrong age label is worse than none. Resolved ONCE in
+`displaySession` and `liveCoachDay` (hooks/index.js), where a session still holds its own date
+beside its full "4:00 PM" string - below those, `time` and `meridiem` are two separate fields and a
+caller that rejoined them would be one stale meridiem from labelling a morning block as afternoon.
+Rendered by `components/AgeGroupChip.js` beside the type chip, through one optional `ageGroup` prop
+on the shared `SessionCard`, which is what carries it to the booking day list (plus a one-line key
+above it), My Schedule, family Reservations, the athlete's next-session card and the coach's Today
+and Sessions lists; the attendance header sets it from the tapped block. Deliberately NOT on the
+month grid (every weekday carries both groups, so one cell colour would be a lie), not on the
+booking confirmation, and never on a cancelled row.
+
+Colours are new tokens (`color.ageOlder` #5AA9E6, `color.ageYounger` #C79BF2) because the palette
+was full of meanings: green is tap/on-track, yellow caution, red error, amber the payment ladder.
+6.85:1 and 7.8:1 on the card surface. Colour is never the only signal - the chip always prints "13+"
+or "U13", which is what survives colour blindness and a phone in sunlight.
+
+It is a SUGGESTION: booking is not age-gated, nothing branches on it in a charge path, and it shares
+no code with the RYP Tour's brackets (10 & under / 11-13 / 14 & up), which are dob-derived for
+scoring. The legend says so out loud: "suggested only, any block can be booked".
+
+Also in this change, because the fourth block caused it: `MAX_BLOCKS_PER_DAY` in hooks/live.js was
+6, and every session doc on a date counts against it (specialists are filtered out AFTER the fetch).
+Four training blocks + Phil + Yannick is exactly 6, so the coach's Today would have silently dropped
+its late blocks - that is known issue K38 made worse. Raised to 12.
+
+Verified: 48 unit tests pass (12 new, covering the mapping, the reserved Tue/Thu 3 PM, Fri/Sat and
+non-training carrying none, half-hour starts, bad input, and DST dates), production build compiles,
+and the chips were read out of the live DOM on a demo server - Mon 4 PM "U13", Mon 5 PM "13+",
+Thu 4 PM "13+" (same clock hour as Monday's, opposite group) and Saturday tournaments carrying none.
+Not verified on a phone, and not seen in production, because the blocks themselves are not there yet.

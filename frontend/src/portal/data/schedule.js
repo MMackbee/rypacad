@@ -7,9 +7,13 @@
  *
  * CONTRACT v2.0 (Sprint 12 pin J, "the token model"): the locked weekly
  * schedule the owner gave directly, per-day blocks, 60 minutes each —
- * Mon/Wed 3, 4, 5 PM; Tue/Thu 4, 5, 6 PM; Fri 3, 4 PM (v2.0.2, 2026-09-17:
- * Tue/Thu 3 PM is RESERVED for an invite-only group and is not generated;
- * capacity is 14). Production sessions
+ * Mon/Wed 3, 4, 5, 6 PM; Tue/Thu 4, 5, 6, 7 PM; Fri 3, 4 PM (v2.0.2,
+ * 2026-09-17: Tue/Thu 3 PM is RESERVED for an invite-only group and is not
+ * generated; capacity is 14. v2.0.3, 2026-09-22: the owner added a fourth
+ * weekday block — Mon/Wed gain 6 PM and Tue/Thu gain 7 PM — alongside the
+ * suggested age groups below; the owner had not yet made the matching Google
+ * Calendar edit when this landed, so production keeps three blocks a day
+ * until that edit and the next calendar sync). Production sessions
  * come from the Google Calendar sync (a calendar edit by the owner, not a
  * code change) — this generator exists for **seed parity**, so the emulator
  * shows the real locked schedule without a calendar to sync against.
@@ -21,18 +25,78 @@
  * 2-4 PM adult/college block below, which is display-only.
  */
 
+import { getDay, parseISO } from 'date-fns';
+
+import { parseTimeToMinutes } from './calendar';
+
 // Per-day weekday blocks (pin J), hour-of-day in 24h — one 60-minute session
 // per listed hour. Sat is handled separately (SATURDAY_BLOCKS) since it mixes
 // training/tournament and ends with a non-bookable display block.
 export const WEEKDAY_BLOCKS = {
-  Mon: [15, 16, 17],
-  Tue: [16, 17, 18],
-  Wed: [15, 16, 17],
-  Thu: [16, 17, 18],
+  Mon: [15, 16, 17, 18],
+  Tue: [16, 17, 18, 19],
+  Wed: [15, 16, 17, 18],
+  Thu: [16, 17, 18, 19],
   Fri: [15, 16],
 };
 
 const WEEKDAY_KEY_BY_DAY_INDEX = { 1: 'Mon', 2: 'Tue', 3: 'Wed', 4: 'Thu', 5: 'Fri' };
+
+/**
+ * SUGGESTED age groups (owner ruling, 2026-09-22, amendment v2.0.3).
+ *
+ * A hint for families choosing a block, nothing more: booking is NOT age-gated
+ * anywhere, any athlete may book any block, and nothing here touches what a
+ * booking costs (the keystone holds - a token is a token). It is also separate
+ * from the RYP Tour's brackets (10 & under / 11-13 / 14 & up, data/tour.js),
+ * which score competition and are derived from a date of birth; these two
+ * groupings answer different questions and are deliberately not shared.
+ */
+export const AGE_GROUPS = {
+  older: { id: 'older', label: '13 & up', short: '13+' },
+  younger: { id: 'younger', label: 'Under 13', short: 'U13' },
+};
+
+/**
+ * Block start hour (24h) -> suggested group, per weekday. Each day alternates
+ * from its own first block: Mon/Wed 3 PM and 5 PM are the older group, 4 PM
+ * and 6 PM the younger; Tue/Thu 4 PM and 6 PM older, 5 PM and 7 PM younger.
+ *
+ * Friday and Saturday are deliberately ABSENT: the owner ruled on Mon-Thu only
+ * (2026-09-22), so those days carry no suggestion rather than an invented one.
+ * The same goes for any hour not listed - a block the calendar adds at an
+ * unmapped time simply shows no age hint until the owner rules on it.
+ */
+export const AGE_GROUP_BY_DAY = {
+  Mon: { 15: 'older', 16: 'younger', 17: 'older', 18: 'younger' },
+  Tue: { 16: 'older', 17: 'younger', 18: 'older', 19: 'younger' },
+  Wed: { 15: 'older', 16: 'younger', 17: 'older', 18: 'younger' },
+  Thu: { 16: 'older', 17: 'younger', 18: 'older', 19: 'younger' },
+};
+
+/**
+ * The suggested age group for one session, or null when there is none.
+ *
+ * TRAINING ONLY: a tournament is the whole academy at once, and Phil's and
+ * Yannick's sessions are booked per athlete, so none of them carry a hint.
+ *
+ * Takes the session's own `date` ('yyyy-MM-dd') and `time` ('4:00 PM'), the
+ * two fields every session doc and every seed row carries. The date is parsed
+ * with date-fns `parseISO`, which reads a date-only string in LOCAL time - a
+ * bare `new Date('2026-09-21')` is UTC midnight and lands on the previous
+ * weekday west of Greenwich, which would shift every label by a day.
+ */
+export function ageGroupFor(session) {
+  const { date, time, type = 'training' } = session || {};
+  if (type !== 'training' || !date || !time) return null;
+  const parsed = parseISO(String(date));
+  if (Number.isNaN(parsed.getTime())) return null;
+  const minutes = parseTimeToMinutes(time);
+  // Only blocks that start on the hour are mapped; a :30 start is not a block.
+  if (minutes == null || minutes % 60 !== 0) return null;
+  const id = AGE_GROUP_BY_DAY[WEEKDAY_KEY_BY_DAY_INDEX[getDay(parsed)]]?.[minutes / 60];
+  return id ? AGE_GROUPS[id] : null;
+}
 
 /** 24h hour -> "3:00 PM" etc. Every generated block is on the hour. */
 function formatHour(hour) {

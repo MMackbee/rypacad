@@ -18,6 +18,8 @@ import AllowancePools, { GraceLine } from './components/AllowancePools';
 import SkeletonCard, { SkeletonBar, SkeletonSessionCard } from './components/Skeleton';
 import ToggleRow from './components/Toggle';
 import TypeChip from './components/TypeChip';
+import AgeGroupChip, { AgeGroupLegend } from './components/AgeGroupChip';
+import { ageGroupFor } from './data/schedule';
 import { Card, ErrorNotice } from './components/Primitives';
 
 import SignIn from './screens/SignIn';
@@ -576,6 +578,23 @@ function ComponentGallery() {
             {['training', 'tournament', 'cancelled', 'makeup', 'diagnostic'].map((t) => (
               <TypeChip key={t} type={t} />
             ))}
+          </div>
+        </Spec>
+
+        <Spec label="Age group · suggested, training blocks only (Mon-Thu)">
+          <div style={{ display: 'grid', gap: 10 }}>
+            <div style={{ display: 'flex', gap: 7, flexWrap: 'wrap', alignItems: 'center' }}>
+              <TypeChip type="training" />
+              <AgeGroupChip group={ageGroupFor({ date: '2026-11-02', time: '3:00 PM' })} />
+              <span style={{ font: '400 11px system-ui', color: '#888' }}>Mon 3 PM</span>
+              <TypeChip type="training" />
+              <AgeGroupChip group={ageGroupFor({ date: '2026-11-02', time: '4:00 PM' })} />
+              <span style={{ font: '400 11px system-ui', color: '#888' }}>Mon 4 PM</span>
+              <TypeChip type="training" />
+              <AgeGroupChip group={ageGroupFor({ date: '2026-11-05', time: '4:00 PM' })} />
+              <span style={{ font: '400 11px system-ui', color: '#888' }}>Thu 4 PM — same hour, other group</span>
+            </div>
+            <AgeGroupLegend />
           </div>
         </Spec>
 

@@ -273,6 +273,7 @@ function SessionsTab({ firstSessionDate, onOpenRoster }) {
                 time={time}
                 meridiem={meridiem}
                 type={session.type}
+                ageGroup={session.ageGroup}
                 name={session.name}
                 meta={`${session.booked ?? 0} of ${session.capacity ?? '—'} booked`}
                 nameSize={15}
@@ -397,6 +398,7 @@ function BlockCard({ block, blockIndex, onOpenRoster }) {
       time={time}
       meridiem={meridiem}
       type={block.type}
+      ageGroup={block.ageGroup}
       name={block.name}
       meta={block.meta}
       nameSize={15}

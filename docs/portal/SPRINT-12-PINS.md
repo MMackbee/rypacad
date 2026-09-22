@@ -511,3 +511,39 @@ keystone holds.
 points beyond. At 25 a field, positions 16–25 all score 5 unless the table
 is extended. PM extends the table to 25 with a flagged tail (owner-tunable,
 single knob, same as today) unless the owner prefers the flat fallback.
+
+## Sprint 12 amendment v2.0.3 — a fourth weekday block, and suggested age groups (2026-09-22)
+
+Owner, direct: the weekday pattern gains a block — **Mon/Wed 3, 4, 5, 6 PM; Tue/Thu 4, 5, 6, 7 PM**
+(Tue/Thu 3 PM stays reserved, v2.0.2; Fri 3, 4 PM and Saturday unchanged) — and each weekday
+block carries a **suggested age group**:
+
+| | 13 & up | Under 13 |
+|---|---|---|
+| Mon / Wed | 3 PM, 5 PM | 4 PM, 6 PM |
+| Tue / Thu | 4 PM, 6 PM | 5 PM, 7 PM |
+
+**It is a suggestion, and only that.** Booking is not age-gated anywhere and nothing here reaches a
+charge: the keystone ("charging never branches on type") is untouched, and this does not branch on
+type either — it is a room-and-roster hint keyed to weekday and start time. Any athlete may still
+book any block. It is also deliberately NOT the RYP Tour's brackets (10 & under / 11-13 / 14 & up,
+`data/tour.js`), which are derived from a date of birth to score competition; these two groupings
+answer different questions and share no code.
+
+Friday and Saturday carry **no** suggestion — the owner ruled on Mon-Thu only. Unmapped hours carry
+none either, so a block the calendar adds at, say, 4:30 PM simply shows no hint rather than a guess.
+
+Built as `AGE_GROUP_BY_DAY` + `ageGroupFor(session)` in `data/schedule.js` (an explicit lookup, not
+a parity trick — 4 PM and 6 PM mean OPPOSITE groups on Mon/Wed versus Tue/Thu, which is exactly the
+kind of rule an if/else gets wrong), resolved once in `displaySession` and `liveCoachDay`, where a
+session still has its date beside its full time string, and rendered as a chip beside the type chip.
+Surfaces: the booking day list (with a one-line key above it), My Schedule, family Reservations, the
+athlete's next-session card, the coach's Today and Sessions lists, and the attendance header. Not on
+the month grid (every weekday carries both groups, so one cell colour would be false), not on the
+booking confirmation, and never on a cancelled row.
+
+**The calendar is not updated yet.** The owner said the schedule changed but the Google Calendar edit
+had not been made when this landed, and production sessions come from that calendar via the sync. So
+production keeps three weekday blocks, and the 6 PM / 7 PM blocks (and their hints) appear only after
+the owner edits the calendar and the next `node scripts/sync-calendar-sessions.mjs --prod` run. The
+seed/emulator season generates all four immediately.

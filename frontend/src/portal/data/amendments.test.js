@@ -86,10 +86,13 @@ describe('the schedule (v2.0.2)', () => {
     expect(new Set(generateSeason({ start: '2026-09-21', end: '2026-09-27', capacity: 9 }).map((s) => s.capacity))).toEqual(new Set([9]));
   });
 
-  test('Tue/Thu 3 PM is reserved and not generated', () => {
-    expect(WEEKDAY_BLOCKS.Tue).toEqual([16, 17, 18]);
-    expect(WEEKDAY_BLOCKS.Thu).toEqual([16, 17, 18]);
-    expect(WEEKDAY_BLOCKS.Mon).toEqual([15, 16, 17]);
+  test('Tue/Thu 3 PM is reserved and not generated (v2.0.3: a fourth block a day)', () => {
+    // v2.0.3 (owner, 2026-09-22): Mon/Wed gain 6 PM, Tue/Thu gain 7 PM. The
+    // reserved Tue/Thu 3 PM is still absent - that is what this test guards.
+    expect(WEEKDAY_BLOCKS.Tue).toEqual([16, 17, 18, 19]);
+    expect(WEEKDAY_BLOCKS.Thu).toEqual([16, 17, 18, 19]);
+    expect(WEEKDAY_BLOCKS.Mon).toEqual([15, 16, 17, 18]);
+    expect(WEEKDAY_BLOCKS.Wed).toEqual([15, 16, 17, 18]);
     expect(WEEKDAY_BLOCKS.Fri).toEqual([15, 16]);
   });
 });

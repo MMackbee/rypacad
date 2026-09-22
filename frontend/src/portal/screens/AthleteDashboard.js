@@ -9,6 +9,7 @@ import MediaPlaceholder, { Avatar } from '../components/MediaPlaceholder';
 import PhoneFrame from '../components/PhoneFrame';
 import ProgressMeter from '../components/ProgressMeter';
 import TypeChip, { TYPES } from '../components/TypeChip';
+import AgeGroupChip from '../components/AgeGroupChip';
 import SkeletonCard, { SkeletonBar } from '../components/Skeleton';
 import { Body, Card, ErrorNotice, ScreenTitle, SectionLabel, SignOutButton, Tick } from '../components/Primitives';
 import { useAthleteDashboard } from '../hooks';
@@ -247,6 +248,7 @@ function NextSessionCard({ next }) {
 
       <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 12 }}>
         <TypeChip type={next.type} />
+        <AgeGroupChip group={next.ageGroup} />
       </div>
 
       <div style={{ font: `700 20px ${font.head}`, color: color.text, marginTop: 8 }}>
