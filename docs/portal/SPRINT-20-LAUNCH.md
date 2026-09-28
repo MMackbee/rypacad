@@ -45,12 +45,11 @@ function, which fixes five independent Payment-Link defects at once.
 12. **Season starts Nov 3** (Nov 2 is set-up day). `data/season.js`
     SEASON_BOUNDS.start moves 2026-11-02 -> 2026-11-03. Oct 10 + 30 = Nov
     9, so the first week is bookable from Oct 10 either way.
-13. **PENDING - mid-month joiners** (the owner's own open question).
-    Default written into this spec: a family joining after Nov 1 pays the
-    rest of the current month **prorated by days remaining** and gets that
-    month's tokens **prorated the same way (rounded up, never 0)**, then
-    bills in full on the next 1st. Alternative: full price and full tokens
-    regardless of join date. One constant flips it (4.2).
+13. **Mid-month joiners prorate both** (ruled 2026-09-28): a family joining
+    after Nov 1 pays the rest of the current month **prorated by days
+    remaining** and gets that month's tokens **prorated the same way
+    (rounded up, never 0)**, then bills in full on the next 1st.
+    `PRORATE_JOINERS = true` is the ruling, not a default (4.2).
 
 ## 1. Non-goals (explicitly out)
 
@@ -241,9 +240,9 @@ subscription anchors on the 1st forever after. Which month is prepaid:
   Dec 1. An Elite family may book at once (Phil/Yannick in October, golf
   from Nov 3); a token family's tokens are November's.
 - on or after Nov 1: **the current month**, amount = price x days
-  remaining / days in month (`PRORATE_JOINERS = true`, 0.13 default;
-  `false` = full price), `trial_end` = next 1st. The facility add-on uses
-  the same shape at $300.
+  remaining / days in month, tokens = ceil(tokens x the same fraction),
+  minimum 1 (`PRORATE_JOINERS = true`, ruling 0.13), `trial_end` = next
+  1st. The facility add-on uses the same shape at $300.
 
 Every household therefore anchors on the 1st, periods are calendar months,
 and the 29th-31st clamp never bites. `single` (1 token) works the same.
@@ -750,4 +749,4 @@ ids; sync-before-smoke ordering; test-then-live Stripe endpoints; the
 verification action URL; the cut line. Rejected: none. Owner rulings that
 followed: the checkout payment prepays November and recurring billing
 starts Dec 1 (0.11); season start Nov 3 (0.12); mid-month joiners
-prorated by default, pending (0.13).
+prorate both price and tokens (0.13).
