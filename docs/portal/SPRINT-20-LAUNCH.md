@@ -2,8 +2,8 @@
 
 Owner rulings of 2026-09-28. The sign-up email goes out **2026-10-01**;
 booking opens for token members **2026-10-10 07:00 America/Chicago**; the
-season starts **2026-11-02** (`data/season.js` SEASON_BOUNDS; the owner said
-"Nov 3" - reconcile, section 0.12). Everything here is the day-1 feature set
+season starts **2026-11-03** (Nov 2 is set-up day; `data/season.js`
+SEASON_BOUNDS.start moves accordingly). Everything here is the day-1 feature set
 plus the Blaze-dependent work the owner unblocked today by upgrading
 `rypacad` to Blaze. The coach-facing side is tabled.
 
@@ -38,15 +38,19 @@ function, which fixes five independent Payment-Link defects at once.
 10. **Facility access is its own add-on subscription** ($300/month), bought
     separately from the tier; the owner has further integrations planned
     behind it, so it stays a distinct Stripe product and a distinct field.
-11. **PENDING - October billing.** Default written into this spec: every
-    subscription anchors on the **1st**; token tiers charge nothing at
-    checkout and their first invoice lands **Nov 1**; Elite pays a prorated
-    October at checkout and books at once. Alternative the owner may pick:
-    charge everyone at sign-up (October = paid sign-up month, Phil/Yannick
-    only). The webhook and copy differ; see 4.4.
-12. **PENDING - season start**: `data/season.js` says 2026-11-02 (a Monday);
-    the owner said Nov 3. Whichever wins is the date the Oct 10 window
-    reaches first (Oct 10 + 30 = Nov 9 either way).
+11. **The sign-up payment IS November, prepaid.** Whatever a family pays at
+    checkout before Nov 1 buys the season's first month; recurring billing
+    starts **Dec 1** and every subscription anchors on the **1st** from
+    then on. Nobody pays twice before the first session. Mechanics in 4.2.
+12. **Season starts Nov 3** (Nov 2 is set-up day). `data/season.js`
+    SEASON_BOUNDS.start moves 2026-11-02 -> 2026-11-03. Oct 10 + 30 = Nov
+    9, so the first week is bookable from Oct 10 either way.
+13. **PENDING - mid-month joiners** (the owner's own open question).
+    Default written into this spec: a family joining after Nov 1 pays the
+    rest of the current month **prorated by days remaining** and gets that
+    month's tokens **prorated the same way (rounded up, never 0)**, then
+    bills in full on the next 1st. Alternative: full price and full tokens
+    regardless of join date. One constant flips it (4.2).
 
 ## 1. Non-goals (explicitly out)
 
@@ -224,13 +228,27 @@ ${PORTAL_URL}/portal/family?paid=${athleteId}&cs={CHECKOUT_SESSION_ID}`
 (athlete mode: `/portal/home?...`), `cancel_url` back to the same screen.
 Returns `{url}`; the browser navigates there.
 
-Billing anchor (ruling 0.11, default): `subscription_data.billing_cycle_anchor
-= <next 1st 00:00 America/Chicago>` and `proration_behavior: 'none'` for
-token tiers (nothing charged now, first invoice Nov 1), `'create_prorations'`
-for Elite (October remainder charged now). Every household therefore
-anchors on the 1st, periods are calendar months, and the 29th-31st clamp
-never bites. If the owner picks the alternative, no anchor is set and the
-first invoice is at checkout.
+**The prepaid month (rulings 0.11, 0.13).** The session carries TWO lines:
+the recurring tier price (quantity 1) and a one-time `price_data` line
+"<Tier> - <Month YYYY>, prepaid" (inline `product_data`, no dashboard
+product needed), with `subscription_data.trial_end` = 00:00
+America/Chicago on the first 1st AFTER the prepaid month. Stripe charges
+the one-time line at checkout (the documented "setup fee with trial"
+pattern), the recurring line first bills at `trial_end`, and the
+subscription anchors on the 1st forever after. Which month is prepaid:
+
+- before Nov 1: **November 2026** at the full tier price; `trial_end` =
+  Dec 1. An Elite family may book at once (Phil/Yannick in October, golf
+  from Nov 3); a token family's tokens are November's.
+- on or after Nov 1: **the current month**, amount = price x days
+  remaining / days in month (`PRORATE_JOINERS = true`, 0.13 default;
+  `false` = full price), `trial_end` = next 1st. The facility add-on uses
+  the same shape at $300.
+
+Every household therefore anchors on the 1st, periods are calendar months,
+and the 29th-31st clamp never bites. `single` (1 token) works the same.
+The functions lane verifies in Stripe test mode that the one-time line is
+collected at checkout with a trialing subscription before anything ships.
 
 **After payment**: the family lands on `/portal/family?paid=<athleteId>`;
 the screen shows "Confirming your payment..." and re-reads the athlete
@@ -274,11 +292,18 @@ active copy. The Success screen says this will happen.
 - **`invoice.paid`**: issues `tokenPeriods` only for the athlete whose
   subscription the invoice belongs to (today: every athlete in the
   household, `stripe.js:141-179`), sets that athlete's `billing.status:
-  'active'`, sets household `membership.status: 'active'` (from past_due /
-  lapsed as today), sets `periodAnchorDay` only when the household has none
-  (under 0.11's default this is always 1). A $0 first invoice (token tiers
-  under 0.11) still activates the athlete; the November invoice issues the
-  first tokens.
+  'active'` (a `trialing` subscription whose prepaid invoice is paid IS
+  active for the portal), sets household `membership.status: 'active'`
+  (from past_due / lapsed as today), and `periodAnchorDay: 1` when the
+  household has none. **Which period the tokens land in**: for
+  `billing_reason == 'subscription_create'` (the checkout invoice) the
+  period is the PREPAID month named in `subscription_data.metadata
+  .prepaidPeriodKey` (`2026-11-01` before Nov 1; the current month's first
+  after), and `granted` = `metadata.prepaidTokens` (the full package count,
+  or the prorated count under 0.13); for every later invoice
+  (`subscription_cycle`) the period is `lines[].period.start` as today. The
+  `tokenPeriods` doc records `source: 'stripe'` and `prepaid: true` on the
+  first one.
 - `invoice.payment_failed`, `customer.subscription.updated/deleted` resolve
   the same way; the failed/deleted state is written to the owning athlete's
   `billing.status` (or `facilityBilling.status`, which also clears
@@ -641,7 +666,7 @@ Indexes: none new (single-field or existing composites).
 
 | Lane | Owns |
 |---|---|
-| routing (`data-routing`) | rules (4.4 gate, 5, 6.1 cancel guard, `loginInvites`/`calendlyEvents` reads, athletes shape), `useAuthSession` create-login / `refresh()` / claim call / token refresh, `live.js` gates (billing status, opens-at, recurring window) and the callable clients, `packages.js`/`calendar.js` constants, `billingHub.statusFor('pending')` + `hooks/billing.js`, `useSignups`, Calendly link builder + gate, duration plumbing in hooks, admin `pending` bucket |
+| routing (`data-routing`) | rules (4.4 gate, 5, 6.1 cancel guard, `loginInvites`/`calendlyEvents` reads, athletes shape), `useAuthSession` create-login / `refresh()` / claim call / token refresh, `live.js` gates (billing status, opens-at, recurring window) and the callable clients, `packages.js`/`calendar.js`/`season.js` constants (SEASON_BOUNDS.start 2026-11-03), `billingHub.statusFor('pending')` + `hooks/billing.js`, `useSignups`, Calendly link builder + gate, duration plumbing in hooks, admin `pending` bucket |
 | frontend (`frontend-dev`) | `SignUp` screen, `Registration` (Step 1, link mode, handicap, own-login, adult copy, Success), family-home + athlete-home + Membership pending banners and pay buttons, `?paid=` confirming state, facility add-on card (4.5), `SignIn` create-login, NotProvisioned states (verify / check again / legacy), `SpecialistBooking` Calendly branch + durations + non-cancellable rows, `AdminSignups` screen, section 9 fixes |
 | db (`db-engineer`) | DATA-MODEL, `write-packages.mjs`, `stripe-catalogue.json`, sync classifier + regex fix, seeds (invites, billing pending, handicap, durations), docs (DECISION-GAPS, TEAM, contract), `functions/.env.local` split |
 | functions (`backend-dev`) | `createFamily`, `addAthletes`, `claimInvite`, `createCheckoutSession`, `calendlyWebhook`, `stripe.js` 4.3 (Basil shapes, resolution, per-athlete issuance, facility, payment-received notice), `lib.membershipAllowsBooking(athlete)`, `chicagoTime`, reminder/cancel skips, `runWith` secrets on every function, harnesses (11), deploy runbook |
@@ -677,9 +702,12 @@ packages, email.
 - Multi-child families share one Stripe customer when the second checkout
   reuses `stripeCustomerId`; if it does not (customer not yet written),
   `stripeCustomerIds` holds both.
-- Under ruling 0.11's default, an Elite family pays a prorated October and
-  a token family pays nothing until Nov 1; under the alternative, October
-  tokens expire unused unless the email says October is Phil/Yannick only.
+- Before Nov 1 every tier prepays November at full price whatever the
+  sign-up date; Elite's October access (Phil/Yannick) is included, not
+  charged. The `pkg.tokens` fallback for a period with no `tokenPeriods`
+  doc (needed for borrowing into the next period) means a joiner's first
+  partial month is never short-granted; it is never over-granted either,
+  because the prepaid doc is written before booking opens for them.
 - The Calendly link leaks via Calendly's own emails; early/over-cap
   bookings are flagged, not refused.
 - The Oct 10 gate is a constant; changing the date is a rules + client
@@ -715,5 +743,7 @@ in the subscription body, U+202F time formatting; provisioned users on the
 sign-up routes; stranger-vs-invited CTAs; pending copy in every membership
 reader; the right files for the 90-minute tier; a single source for price
 ids; sync-before-smoke ordering; test-then-live Stripe endpoints; the
-verification action URL; the cut line. Rejected: none. Deferred to owner:
-October billing (0.11), season date (0.12).
+verification action URL; the cut line. Rejected: none. Owner rulings that
+followed: the checkout payment prepays November and recurring billing
+starts Dec 1 (0.11); season start Nov 3 (0.12); mid-month joiners
+prorated by default, pending (0.13).
