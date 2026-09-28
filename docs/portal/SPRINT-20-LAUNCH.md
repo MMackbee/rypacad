@@ -615,10 +615,14 @@ Indexes: none new (single-field or existing composites).
 ## 12. Owner checklist (ordered; each blocks what follows it)
 
 1. **Firebase console**: Authentication -> Sign-in method -> Email/Password
-   ON; Templates -> verification email: sender name, and the **action URL
-   set to `https://rypacad.ryptest.com/portal/signin`** (default links go
-   to `rypacad.firebaseapp.com`); Authorized domains include
-   `rypacad.ryptest.com`. Firestore -> App Check is NOT required for
+   ON; Authentication -> Settings -> Authorized domains includes
+   `rypacad.ryptest.com`. Templates stay DEFAULT: the email's action link
+   must keep pointing at Firebase's own handler
+   (`rypacad.firebaseapp.com/__/auth/action`), which completes the
+   verification; the return-to-portal step is the `continueUrl` the code
+   passes to `sendEmailVerification(user, {url: 'https://rypacad.ryptest.com/portal/signin'})`
+   (routing lane). A custom action URL would need an in-app
+   `applyActionCode` handler that does not exist. Firestore -> App Check is NOT required for
    launch (household create is a callable; unverified spam is filtered by
    the report's *unpaid* view and deleted by ops).
 2. **Stripe dashboard**: one Product + monthly Price per tier and for
