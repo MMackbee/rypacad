@@ -184,6 +184,8 @@ exports.onBookingCancelled = functions.firestore
       if (before.status !== 'confirmed' || after.status !== 'cancelled') {
         return null;
       }
+      // A Calendly cancellation is Calendly's own email (spec 6.2).
+      if (after.cancelledBy === 'calendly') return null;
       // Two different cancellations reach this trigger. The academy
       // cancelling a block mints a bonus token and says so; a family
       // cancelling their own booking gets a plain receipt (owner ruling,

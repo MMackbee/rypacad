@@ -98,11 +98,17 @@ async function runSessionReminders(args) {
       .where('status', '==', 'confirmed')
       .where('date', '==', date)
       .get();
-  const summary = {date, considered: snap.size, sent: 0, duplicate: 0};
+  const summary = {date, considered: snap.size, sent: 0, duplicate: 0,
+    skipped: 0};
   const sessions = cachedReader(store, 'sessions');
   const athletes = cachedReader(store, 'athletes');
   for (const doc of snap.docs) {
     const booking = doc.data() || {};
+    // Calendly sends its own reminders for Yannick (spec 6.2 step 5).
+    if (booking.source === 'calendly') {
+      summary.skipped += 1;
+      continue;
+    }
     const session = await sessions(booking.sessionId);
     const athlete = await athletes(booking.athleteId);
     const copy = notices.reminder24h({athlete, session, booking});
