@@ -5,7 +5,7 @@ describe('Sprint 20 booking reasons (contract 3.6)', () => {
     expect(reasonCopy('billing-pending')).toBe('Payment pending - finish checkout to start booking');
   });
   test('booking not open names the gate', () => {
-    expect(reasonCopy('booking-not-open')).toBe('Booking opens Fri, Oct 10 at 7 AM');
+    expect(reasonCopy('booking-not-open')).toBe('Booking opens Sat, Oct 10 at 7 AM');
   });
   test('calendly rows are managed by Calendly', () => {
     expect(reasonCopy('calendly-managed')).toBe("Cancel or reschedule from Calendly's email");

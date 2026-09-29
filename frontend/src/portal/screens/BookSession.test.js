@@ -34,7 +34,7 @@ afterEach(() => { jest.useRealTimers(); });
 test('before Oct 10 a token athlete sees the banner and cannot reserve', async () => {
   jest.setSystemTime(BEFORE);
   const r = await renderScreen(<BookSession bare demoSelectedDate="2026-10-12" />);
-  expect(r.text()).toContain('Booking opens Fri, Oct 10 at 7 AM');
+  expect(r.text()).toContain('Booking opens Sat, Oct 10 at 7 AM');
   const card = sessionCard(r);
   expect(card).not.toBeNull();
   expect(card.style.cursor).toBe('default');
@@ -47,7 +47,7 @@ test('before Oct 10 a token athlete sees the banner and cannot reserve', async (
 test('at 07:00 Chicago on Oct 10 the banner is gone and a tap reserves', async () => {
   jest.setSystemTime(AT_OPEN);
   const r = await renderScreen(<BookSession bare demoSelectedDate="2026-10-12" />);
-  expect(r.text()).not.toContain('Booking opens Fri, Oct 10 at 7 AM');
+  expect(r.text()).not.toContain('Booking opens Sat, Oct 10 at 7 AM');
   const card = sessionCard(r);
   expect(card.style.cursor).toBe('pointer');
   await act(async () => { card.click(); });
@@ -60,7 +60,7 @@ test('Elite books before the gate (the paid package, spec 4.3)', async () => {
   jest.setSystemTime(BEFORE);
   mockPackage = { id: 'elite', kind: 'elite', windowDays: 45 };
   const r = await renderScreen(<BookSession bare demoSelectedDate="2026-10-12" />);
-  expect(r.text()).not.toContain('Booking opens Fri, Oct 10 at 7 AM');
+  expect(r.text()).not.toContain('Booking opens Sat, Oct 10 at 7 AM');
   expect(sessionCard(r).style.cursor).toBe('pointer');
   await r.unmount();
 });

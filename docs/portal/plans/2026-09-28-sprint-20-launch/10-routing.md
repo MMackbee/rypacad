@@ -90,7 +90,7 @@ describe('bookingOpen', () => {
   test('the gate is 07:00 America/Chicago on Oct 10 2026', () => {
     expect(BOOKING_OPENS_AT).toBe(1791633600000);
     expect(new Date(BOOKING_OPENS_AT).toISOString()).toBe('2026-10-10T12:00:00.000Z');
-    expect(BOOKING_OPENS_LABEL).toBe('Fri, Oct 10 at 7 AM');
+    expect(BOOKING_OPENS_LABEL).toBe('Sat, Oct 10 at 7 AM');
   });
   test('closed before, open at and after, for a token package', () => {
     const t6 = { id: 't-6', kind: 'tokens' };
@@ -134,7 +134,7 @@ describe('window defaults are 30 days', () => {
  * (GitHub #26).
  * ------------------------------------------------------------------------- */
 export const BOOKING_OPENS_AT = 1791633600000; // 2026-10-10T12:00:00Z = 07:00 America/Chicago
-export const BOOKING_OPENS_LABEL = 'Fri, Oct 10 at 7 AM';
+export const BOOKING_OPENS_LABEL = 'Sat, Oct 10 at 7 AM';
 export function bookingOpen(now = Date.now(), pkg = null) {
   const t = now instanceof Date ? now.getTime() : Number(now);
   return pkg?.kind === 'elite' || t >= BOOKING_OPENS_AT;

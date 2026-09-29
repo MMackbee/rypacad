@@ -10,7 +10,7 @@ describe('bookingOpen', () => {
   test('the gate is 07:00 America/Chicago on Oct 10 2026', () => {
     expect(BOOKING_OPENS_AT).toBe(1791633600000);
     expect(new Date(BOOKING_OPENS_AT).toISOString()).toBe('2026-10-10T12:00:00.000Z');
-    expect(BOOKING_OPENS_LABEL).toBe('Fri, Oct 10 at 7 AM');
+    expect(BOOKING_OPENS_LABEL).toBe('Sat, Oct 10 at 7 AM');
   });
   test('closed before, open at and after, for a token package', () => {
     const t6 = { id: 't-6', kind: 'tokens' };

@@ -28,7 +28,7 @@ describe('assertAthleteBillingActive', () => {
 describe('assertBookingOpen', () => {
   test('token package before the gate throws booking-not-open with the label', () => {
     expect(reasonOf(() => assertBookingOpen({ kind: 'tokens' }, BOOKING_OPENS_AT - 1)))
-      .toEqual([ERR.INVALID, 'booking-not-open', 'Booking opens Fri, Oct 10 at 7 AM']);
+      .toEqual([ERR.INVALID, 'booking-not-open', 'Booking opens Sat, Oct 10 at 7 AM']);
     expect(reasonOf(() => assertBookingOpen({ kind: 'tokens' }, BOOKING_OPENS_AT))).toBeNull();
     expect(reasonOf(() => assertBookingOpen({ kind: 'elite' }, 0))).toBeNull();
   });

@@ -124,7 +124,7 @@ test('gated copy replaces the button', async () => {
   mockSlots.data.billingStatus = 'active';
   mockSlots.data.bookingOpen = false;
   const g = await renderScreen(<SpecialistBooking bare initialSpecialist="mental" />);
-  expect(g.text()).toContain('Booking opens Fri, Oct 10 at 7 AM');
+  expect(g.text()).toContain('Booking opens Sat, Oct 10 at 7 AM');
   await g.unmount();
 });
 

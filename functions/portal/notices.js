@@ -301,7 +301,7 @@ function paymentReceived(args) {
     title: 'Payment received',
     body: open ?
       'Payment received — you\'re all set to book.' :
-      'Payment received — booking opens Fri, Oct 10 at 7 AM.',
+      'Payment received — booking opens Sat, Oct 10 at 7 AM.',
   };
 }
 

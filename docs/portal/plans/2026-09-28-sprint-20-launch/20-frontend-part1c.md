@@ -514,7 +514,7 @@ test('one pay button per athlete, the next steps, child-login instructions, no w
   expect(r.text()).toContain("You're in");
   expect(r.button("Pay for Jordan's 12 tokens|a1")).not.toBeNull();
   expect(r.button("Pay for Reese's Elite|a2")).not.toBeNull();
-  expect(r.text()).toContain('Booking opens Fri, Oct 10 at 7 AM');
+  expect(r.text()).toContain('Booking opens Sat, Oct 10 at 7 AM');
   expect(r.text()).toContain('Elite books right away once paid');
   expect(r.text()).toContain('you will be brought back here');
   expect(r.text()).toContain('reese@email.com');

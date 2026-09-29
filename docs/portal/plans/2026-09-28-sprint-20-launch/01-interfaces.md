@@ -204,7 +204,7 @@ and MUST NOT enter any client `hasOnly` list.
 
 ```js
 export const BOOKING_OPENS_AT = 1791633600000; // 2026-10-10T12:00:00Z = 07:00 America/Chicago (verified)
-export const BOOKING_OPENS_LABEL = 'Fri, Oct 10 at 7 AM';          // (chosen) the one string every banner reads
+export const BOOKING_OPENS_LABEL = 'Sat, Oct 10 at 7 AM';          // (chosen) the one string every banner reads
 export function bookingOpen(now = Date.now(), pkg = null) {
   const t = now instanceof Date ? now.getTime() : Number(now);
   return pkg?.kind === 'elite' || t >= BOOKING_OPENS_AT;
@@ -280,7 +280,7 @@ home banners. `useAdminDashboard` membership counts
 | reason | thrown by | copy (`BookingReasons.reasonCopy`) |
 |---|---|---|
 | `billing-pending` | `createBooking`, `joinWaitlist`, `bookRecurring` when `athlete.billing?.status` is not active/absent | "Payment pending - finish checkout to start booking" |
-| `booking-not-open` | same three when `!bookingOpen(Date.now(), pkg)` | "Booking opens Fri, Oct 10 at 7 AM" |
+| `booking-not-open` | same three when `!bookingOpen(Date.now(), pkg)` | "Booking opens Sat, Oct 10 at 7 AM" |
 | `calendly-managed` | `cancelBooking` when `booking.source === 'calendly'` | "Cancel or reschedule from Calendly's email" |
 
 Check order in `createBooking` (`live.js:647-669`): billing -> opens-at ->
@@ -668,7 +668,7 @@ deterministically in the harnesses (Task 13 STEP H's precondition; D15).
    plan card **"Billed monthly from the 1st once you've paid"**; connected card
    **"Your card and invoices are managed in Stripe."**
 2. Booking-opens banner (BookSession, SpecialistBooking, `reasonCopy`):
-   **"Booking opens Fri, Oct 10 at 7 AM"** (`BOOKING_OPENS_LABEL`).
+   **"Booking opens Sat, Oct 10 at 7 AM"** (`BOOKING_OPENS_LABEL`).
 3. Calendly: button **"Book with Yannick"**; note = `CALENDLY_NOTE` (3.4);
    non-cancellable row **"Cancel or reschedule from Calendly's email"**.
 4. Verify-email state (NotProvisioned, sign-up Step 0, pay gate):
@@ -683,7 +683,7 @@ deterministically in the harnesses (Task 13 STEP H's precondition; D15).
    then tap Check again."** and button **"Check again"**; legacy
    pending/declined **"Sign-up is now instant - start here"**.
 5. Payment-received notice (`notices.paymentReceived`, title **"Payment
-   received"**): body **"Payment received — booking opens Fri, Oct 10 at 7 AM."**
+   received"**): body **"Payment received — booking opens Sat, Oct 10 at 7 AM."**
    when `!bookingOpen`, else **"Payment received — you're all set to book."**
    (em dash, matching `notices.js:268`). D6: the emailed/push notice uses the
    em dash; the in-app line (the confirmed banner after `?paid=`, the billing

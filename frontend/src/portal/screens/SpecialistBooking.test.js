@@ -50,7 +50,7 @@ test('gated copy replaces the button', async () => {
   mockSlots.data.billingStatus = 'active';
   mockSlots.data.bookingOpen = false;
   const g = await renderScreen(<SpecialistBooking bare initialSpecialist="mental" />);
-  expect(g.text()).toContain('Booking opens Fri, Oct 10 at 7 AM');
+  expect(g.text()).toContain('Booking opens Sat, Oct 10 at 7 AM');
   await g.unmount();
 });
 
@@ -70,7 +70,7 @@ test('in-app branch before the gate: banner, inert cards, Reserve unreachable', 
   mockSlots.data = { ...mockSlots.data, bookingMode: 'in-app', calendlyUrl: null, bookingOpen: false,
     days: [{ date: '2026-10-12', dayLabel: 'Mon, Oct 12', slots: [{ sessionId: 's1', time: '4:00 PM', open: true, capacity: 1, booked: 0, durationMinutes: 30 }] }] };
   const r = await renderScreen(<SpecialistBooking bare initialSpecialist="mental" />);
-  expect(r.text()).toContain('Booking opens Fri, Oct 10 at 7 AM');
+  expect(r.text()).toContain('Booking opens Sat, Oct 10 at 7 AM');
   const card = [...r.container.querySelectorAll('div')].find((el) => el.textContent.startsWith('4:00') && el.textContent.includes('Mental'));
   expect(card.style.cursor).toBe('default');
   expect(r.button('Reserve')).toBeNull();
@@ -81,7 +81,7 @@ test('in-app branch after the gate: no banner, a tap opens the sheet with Reserv
   mockSlots.data = { ...mockSlots.data, bookingMode: 'in-app', calendlyUrl: null, bookingOpen: true,
     days: [{ date: '2026-10-12', dayLabel: 'Mon, Oct 12', slots: [{ sessionId: 's1', time: '4:00 PM', open: true, capacity: 1, booked: 0, durationMinutes: 30 }] }] };
   const r = await renderScreen(<SpecialistBooking bare initialSpecialist="mental" />);
-  expect(r.text()).not.toContain('Booking opens Fri, Oct 10 at 7 AM');
+  expect(r.text()).not.toContain('Booking opens Sat, Oct 10 at 7 AM');
   const card = [...r.container.querySelectorAll('div')].find((el) => el.textContent.startsWith('4:00') && el.textContent.includes('Mental'));
   expect(card.style.cursor).toBe('pointer');
   await act(async () => { card.click(); });

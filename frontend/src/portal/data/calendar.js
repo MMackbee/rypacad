@@ -350,7 +350,7 @@ export function windowOpensOn(sessionDateISO, windowDays = 30) {
  * (GitHub #26).
  * ------------------------------------------------------------------------- */
 export const BOOKING_OPENS_AT = 1791633600000; // 2026-10-10T12:00:00Z = 07:00 America/Chicago
-export const BOOKING_OPENS_LABEL = 'Fri, Oct 10 at 7 AM';
+export const BOOKING_OPENS_LABEL = 'Sat, Oct 10 at 7 AM';
 export function bookingOpen(now = Date.now(), pkg = null) {
   const t = now instanceof Date ? now.getTime() : Number(now);
   return pkg?.kind === 'elite' || t >= BOOKING_OPENS_AT;

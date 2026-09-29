@@ -353,7 +353,7 @@ active copy. The Success screen says this will happen.
   portal) so nobody double-subscribes.
 - Notice: the webhook sends the **payment-received** notice itself on an
   athlete's first `active` (kind `membership`, copy branched on
-  `bookingOpen`: "Payment received - booking opens Fri, Oct 10 at 7 AM" for
+  `bookingOpen`: "Payment received - booking opens Sat, Oct 10 at 7 AM" for
   a token family before the gate, "Payment received - you're all set to
   book" otherwise). `onHouseholdMembership`'s guard is unchanged (it only
   reports past_due/lapsed reinstatements).
@@ -840,7 +840,7 @@ v3.0.1 forced sixteen decisions. Each is now a fact in the contract (marked
   `noreply@<REACT_APP_FIREBASE_AUTH_DOMAIN>` (default
   `rypacad.firebaseapp.com`), not `SMTP_FROM` (3.2).
 - **D6** Copy: the in-app line uses a hyphen ("Payment received - booking
-  opens Fri, Oct 10 at 7 AM."), the emailed notice the em dash; both are
+  opens Sat, Oct 10 at 7 AM."), the emailed notice the em dash; both are
   sanctioned.
 - **D7** Error reasons added: `athlete-name-required` (createFamily /
   addAthletes), `invalid-product` (createCheckoutSession, checked right

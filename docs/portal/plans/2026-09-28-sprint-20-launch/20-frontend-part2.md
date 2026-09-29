@@ -32,7 +32,7 @@ import { billingBadge, confirmedLine, facilityCardState, facilityLine, loginStat
 test('section 9 strings', () => {
   expect(PENDING_TITLE).toBe('Payment pending - finish checkout to start booking');
   expect(PENDING_PLAN_LINE).toBe("Billed monthly from the 1st once you've paid");
-  expect(confirmedLine(false)).toBe('Payment received - booking opens Fri, Oct 10 at 7 AM.');
+  expect(confirmedLine(false)).toBe('Payment received - booking opens Sat, Oct 10 at 7 AM.');
   expect(confirmedLine(true)).toBe("Payment received - you're all set to book.");
 });
 

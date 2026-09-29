@@ -92,7 +92,7 @@ git commit -m "fix(portal): catch-all route, confirmation copy matches what send
 
 **Interfaces:**
 - Consumes: `bookingOpen(now, pkg)` and `BOOKING_OPENS_LABEL` from `data/calendar.js` (contract 3.1: `pkg?.kind === 'elite' || now >= BOOKING_OPENS_AT`); `useMembership().data.members[].package` (BookSession already reads it for the window at `:158-163`); `useSpecialistSlots().data.bookingOpen` (contract 4.3 - the hook computes `bookingOpen(Date.now(), pkg)`); `Banner` (`components/Primitives`).
-- Produces (new, not in contract): `BookingOpensBanner({ style })` - the one banner both screens render (contract 9.2 copy "Booking opens Fri, Oct 10 at 7 AM"); `BookSession` gate `gateOpen` (Reserve/Join waitlist inert and `confirmBooking` a no-op while closed); `SpecialistBooking` `gateOpen = data.bookingOpen ?? true` folded into `blocked`. The live rules and `createBooking` (routing Tasks 4, 7) still refuse independently - this is the proactive UI spec 5 asks for ("schedule visible, Reserve disabled, banner"), so nobody learns about the gate from an error.
+- Produces (new, not in contract): `BookingOpensBanner({ style })` - the one banner both screens render (contract 9.2 copy "Booking opens Sat, Oct 10 at 7 AM"); `BookSession` gate `gateOpen` (Reserve/Join waitlist inert and `confirmBooking` a no-op while closed); `SpecialistBooking` `gateOpen = data.bookingOpen ?? true` folded into `blocked`. The live rules and `createBooking` (routing Tasks 4, 7) still refuse independently - this is the proactive UI spec 5 asks for ("schedule visible, Reserve disabled, banner"), so nobody learns about the gate from an error.
 
 - [ ] **Step 1: Write the failing BookSession test** (jest 27 modern fake timers under react-scripts 5: `jest.useFakeTimers('modern')` + `jest.setSystemTime` fake `Date`; React's `act` flushes through `require('timers').setImmediate`, which the fake does not patch, so `await act()` still resolves - if a test hangs, swap to `jest.spyOn(Date, 'now').mockReturnValue(...)` and say so in the sprint report)
 
@@ -134,7 +134,7 @@ afterEach(() => { jest.useRealTimers(); });
 test('before Oct 10 a token athlete sees the banner and cannot reserve', async () => {
   jest.setSystemTime(BEFORE);
   const r = await renderScreen(<BookSession bare demoSelectedDate="2026-10-12" />);
-  expect(r.text()).toContain('Booking opens Fri, Oct 10 at 7 AM');
+  expect(r.text()).toContain('Booking opens Sat, Oct 10 at 7 AM');
   const card = sessionCard(r);
   expect(card).not.toBeNull();
   expect(card.style.cursor).toBe('default');
@@ -147,7 +147,7 @@ test('before Oct 10 a token athlete sees the banner and cannot reserve', async (
 test('at 07:00 Chicago on Oct 10 the banner is gone and a tap reserves', async () => {
   jest.setSystemTime(AT_OPEN);
   const r = await renderScreen(<BookSession bare demoSelectedDate="2026-10-12" />);
-  expect(r.text()).not.toContain('Booking opens Fri, Oct 10 at 7 AM');
+  expect(r.text()).not.toContain('Booking opens Sat, Oct 10 at 7 AM');
   const card = sessionCard(r);
   expect(card.style.cursor).toBe('pointer');
   await act(async () => { card.click(); });
@@ -160,7 +160,7 @@ test('Elite books before the gate (the paid package, spec 4.3)', async () => {
   jest.setSystemTime(BEFORE);
   mockPackage = { id: 'elite', kind: 'elite', windowDays: 45 };
   const r = await renderScreen(<BookSession bare demoSelectedDate="2026-10-12" />);
-  expect(r.text()).not.toContain('Booking opens Fri, Oct 10 at 7 AM');
+  expect(r.text()).not.toContain('Booking opens Sat, Oct 10 at 7 AM');
   expect(sessionCard(r).style.cursor).toBe('pointer');
   await r.unmount();
 });
@@ -246,7 +246,7 @@ test('in-app branch before the gate: banner, inert cards, Reserve unreachable', 
   mockSlots.data = { ...mockSlots.data, bookingMode: 'in-app', calendlyUrl: null, bookingOpen: false,
     days: [{ date: '2026-10-12', dayLabel: 'Mon, Oct 12', slots: [{ sessionId: 's1', time: '4:00 PM', open: true, capacity: 1, booked: 0, durationMinutes: 30 }] }] };
   const r = await renderScreen(<SpecialistBooking bare initialSpecialist="mental" />);
-  expect(r.text()).toContain('Booking opens Fri, Oct 10 at 7 AM');
+  expect(r.text()).toContain('Booking opens Sat, Oct 10 at 7 AM');
   const card = [...r.container.querySelectorAll('div')].find((el) => el.textContent.startsWith('4:00') && el.textContent.includes('Mental'));
   expect(card.style.cursor).toBe('default');
   expect(r.button('Reserve')).toBeNull();
@@ -257,7 +257,7 @@ test('in-app branch after the gate: no banner, a tap opens the sheet with Reserv
   mockSlots.data = { ...mockSlots.data, bookingMode: 'in-app', calendlyUrl: null, bookingOpen: true,
     days: [{ date: '2026-10-12', dayLabel: 'Mon, Oct 12', slots: [{ sessionId: 's1', time: '4:00 PM', open: true, capacity: 1, booked: 0, durationMinutes: 30 }] }] };
   const r = await renderScreen(<SpecialistBooking bare initialSpecialist="mental" />);
-  expect(r.text()).not.toContain('Booking opens Fri, Oct 10 at 7 AM');
+  expect(r.text()).not.toContain('Booking opens Sat, Oct 10 at 7 AM');
   const card = [...r.container.querySelectorAll('div')].find((el) => el.textContent.startsWith('4:00') && el.textContent.includes('Mental'));
   expect(card.style.cursor).toBe('pointer');
   await act(async () => { card.click(); });

@@ -191,7 +191,7 @@ describe('assertAthleteBillingActive', () => {
 describe('assertBookingOpen', () => {
   test('token package before the gate throws booking-not-open with the label', () => {
     expect(reasonOf(() => assertBookingOpen({ kind: 'tokens' }, BOOKING_OPENS_AT - 1)))
-      .toEqual([ERR.INVALID, 'booking-not-open', 'Booking opens Fri, Oct 10 at 7 AM']);
+      .toEqual([ERR.INVALID, 'booking-not-open', 'Booking opens Sat, Oct 10 at 7 AM']);
     expect(reasonOf(() => assertBookingOpen({ kind: 'tokens' }, BOOKING_OPENS_AT))).toBeNull();
     expect(reasonOf(() => assertBookingOpen({ kind: 'elite' }, 0))).toBeNull();
   });
@@ -319,7 +319,7 @@ Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>"
         continue;
       }
 ```
-- [ ] Verify: esbuild check on `index.js` - no errors; `... src/portal/hooks` - the Task 7 and Task 6 tests still PASS. Emulator check (routing dev server `PORT=3003 REACT_APP_USE_EMULATORS=true npm start` from `frontend/`, emulator seeded by the db lane): signed in as the seeded athlete (`window.__rypTestAuth.signInAs(<seed athlete uid>)`), Book a Session -> Repeat weekly -> rest of season: the result lists weeks past `openThrough(now, 30)` as "not open yet"; before Oct 10 the action itself is refused with "Booking opens Fri, Oct 10 at 7 AM" (the BookSession screen surfaces `error.reason === 'booking-not-open'` - frontend lane wires the copy).
+- [ ] Verify: esbuild check on `index.js` - no errors; `... src/portal/hooks` - the Task 7 and Task 6 tests still PASS. Emulator check (routing dev server `PORT=3003 REACT_APP_USE_EMULATORS=true npm start` from `frontend/`, emulator seeded by the db lane): signed in as the seeded athlete (`window.__rypTestAuth.signInAs(<seed athlete uid>)`), Book a Session -> Repeat weekly -> rest of season: the result lists weeks past `openThrough(now, 30)` as "not open yet"; before Oct 10 the action itself is refused with "Booking opens Sat, Oct 10 at 7 AM" (the BookSession screen surfaces `error.reason === 'booking-not-open'` - frontend lane wires the copy).
 - [ ] Commit:
 ```
 git add frontend/src/portal/hooks/index.js
