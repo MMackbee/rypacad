@@ -159,6 +159,7 @@ import {
 import {
   addDaysISO,
   ageFromDob,
+  bookingOpen,
   buildContractMonth,
   buildContractMonthFromLogs,
   longDayLabel,
@@ -188,6 +189,7 @@ import {
 } from '../data/admin';
 import { TOUR_SEED, bracketFor, deriveTourStandings } from '../data/tour';
 import { SPECIALISTS, isSpecialistType, mentalCapFor } from '../data/specialists';
+import { calendlyUrlFor } from '../data/calendly';
 
 export { default as useSeedResource } from './useSeedResource';
 export { default as useAuthSession } from './useAuthSession';
@@ -389,11 +391,12 @@ function tokensWithNextPeriod(pkg, bookings, anchorDay, today, opts = {}) {
 /** Sort key: chronological, then block order (session ids end in the block index). */
 /**
  * Yannick's frequency line (pin K): non-cancelled 'mental' bookings in
- * today's calendar month against the owner-tunable knob. A frequency rule,
- * never an allowance - `limit` null means tokens are the only limit.
+ * the given month (K04: the slot's, default today's) against the
+ * owner-tunable knob. A frequency rule, never an allowance - `limit` null
+ * means tokens are the only limit.
  */
-function coachingFor(bookings, today, pkg = null) {
-  const month = today.slice(0, 7);
+function coachingFor(bookings, today, pkg = null, monthISO = today.slice(0, 7)) {
+  const month = monthISO;
   const used = (bookings || []).filter(
     (b) => b && b.type === 'mental' && b.status !== 'cancelled' && (b.date || '').slice(0, 7) === month
   ).length;
@@ -677,6 +680,7 @@ async function liveBooking(today) {
  * local no-op (see useSchedule below).
  */
 const SEED_ATHLETE_ID = 'jordan';
+const SEED_HOUSEHOLD_ID = 'whitfield'; // the seed household's id (hooks/billing.js seedBillingHub, :1966)
 function seedBookingId(sessionId) {
   return `${SEED_ATHLETE_ID}_${sessionId}`;
 }
@@ -1212,7 +1216,7 @@ export function useMonthSessions(monthISO, { practice = false } = {}) {
  * the db lane's emulator seed hand-adds slots following this SAME weekday/
  * time pattern so the demo and the emulator tell the same story). Yannick
  * (mental) sits Tue/Thu late afternoon; Phil (phil) sits Mon/Wed/Fri,
- * earlier in the afternoon; both 45-minute sessions — the times are
+ * earlier in the afternoon; Phil 45-minute, Yannick 30-minute sessions — the times are
  * invented (there is no real production schedule to read yet), the PEOPLE
  * are not (SPECIALISTS, data/specialists.js). Session ids follow the real
  * seed convention (`YYYY-MM-DD-s<n>`, docs/portal/TEAM.md's "-x0 extras"
@@ -1228,7 +1232,9 @@ export function useMonthSessions(monthISO, { practice = false } = {}) {
 const PHIL_WEEKDAYS = new Set([1, 3, 5]); // Mon, Wed, Fri (Date#getUTCDay)
 const MENTAL_WEEKDAYS = new Set([2, 4]); // Tue, Thu
 const PHIL_TIMES = ['3:00 PM', '3:45 PM'];
-const MENTAL_TIMES = ['4:30 PM', '5:15 PM'];
+// Sprint 20 (spec 6.1): Yannick's sessions are 30 minutes at 4:00 / 4:30 /
+// 5:00 PM - the same three times seed-firestore.mjs writes.
+const MENTAL_TIMES = ['4:00 PM', '4:30 PM', '5:00 PM'];
 
 export function seedSpecialistDays(specialistId, today, windowDays = 30) {
   const onMental = specialistId === 'mental';
@@ -1238,6 +1244,7 @@ export function seedSpecialistDays(specialistId, today, windowDays = 30) {
   // session of 6, mental a true 1:1. A phil demo slot carries a believable
   // partial fill so the "spots left" treatment is reviewable in seed mode.
   const capacity = SPECIALISTS.find((s) => s.id === specialistId)?.capacity ?? 1;
+  const durationMinutes = SPECIALISTS.find((s) => s.id === specialistId)?.durationMinutes ?? DEFAULT_DURATION_MINUTES;
   const toDate = openThrough(new Date(), windowDays);
 
   const days = [];
@@ -1256,6 +1263,7 @@ export function seedSpecialistDays(specialistId, today, windowDays = 30) {
             booked,
             capacity,
             open: booked < capacity,
+            durationMinutes,
           };
         })
       : [];
@@ -1302,7 +1310,7 @@ async function liveSpecialistDays(specialistId, today, windowDays) {
       slots: onDate.map((s) => {
         const capacity = s.capacity ?? 1;
         const booked = s.booked ?? 0;
-        return { sessionId: s.id, time: s.time, booked, capacity, open: booked < capacity };
+        return { sessionId: s.id, time: s.time, booked, capacity, open: booked < capacity, durationMinutes: s.durationMinutes ?? (SPECIALIST_BY_ID.get(specialistId)?.durationMinutes ?? DEFAULT_DURATION_MINUTES) };
       }),
     });
   }
@@ -1339,9 +1347,15 @@ async function resolveSpecialistAthleteId(athleteIdOverride) {
  * already has).
  */
 async function liveSpecialistSlots(specialistId, athleteIdOverride, today) {
+  const specialist = SPECIALIST_BY_ID.get(specialistId);
   const athleteId = await resolveSpecialistAthleteId(athleteIdOverride);
   if (!athleteId) {
-    return { days: await liveSpecialistDays(specialistId, today, MAX_WINDOW_DAYS), tokens: null, capReached: false };
+    return {
+      days: await liveSpecialistDays(specialistId, today, MAX_WINDOW_DAYS),
+      tokens: null, capReached: false,
+      bookingMode: 'in-app', calendlyUrl: null, billingStatus: 'active',
+      bookingOpen: bookingOpen(Date.now(), null), athlete: null, guardian: null, householdId: null,
+    };
   }
   const athlete = await fetchAthlete(athleteId);
   const pkg = athlete.packageId ? await fetchPackage(athlete.packageId) : null;
@@ -1351,12 +1365,29 @@ async function liveSpecialistSlots(specialistId, athleteIdOverride, today) {
   ]);
   const anchorDay = normalizeAnchorDay(household?.periodAnchorDay);
   const windowDays = windowDaysFor(pkg);
-  const [days, tokens] = await Promise.all([
-    liveSpecialistDays(specialistId, today, windowDays),
-    Promise.resolve(tokensWithNextPeriod(pkg, bookings, anchorDay, today)),
-  ]);
+  const rawDays = await liveSpecialistDays(specialistId, today, windowDays);
+  // K04: the cadence is judged for each SLOT's month; the top-level
+  // capReached keeps today's month for the summary line.
+  const days = rawDays.map((d) => ({
+    ...d,
+    capReached: specialistId === 'mental' && coachingFor(bookings, today, pkg, d.date.slice(0, 7)).capReached,
+  }));
+  const tokens = tokensWithNextPeriod(pkg, bookings, anchorDay, today);
   const capReached = specialistId === 'mental' && coachingFor(bookings, today, pkg).capReached;
-  return { days, tokens, capReached };
+  // Sprint 20 (spec 6.1): Calendly only when the registry says so AND a URL
+  // is configured; otherwise the in-app list, so seed/emulator keep working.
+  const calendlyUrl = specialist?.bookingMode === 'calendly' ? calendlyUrlFor(pkg) : null;
+  return {
+    days, tokens, capReached,
+    bookingMode: calendlyUrl ? 'calendly' : 'in-app',
+    calendlyUrl,
+    billingStatus: athlete.billing?.status ?? 'active',
+    bookingOpen: bookingOpen(Date.now(), pkg),
+    athlete: { id: athlete.id, name: athlete.name ?? null, loginEmail: athlete.loginEmail ?? null },
+    guardian: { name: household?.guardian?.name ?? null, email: household?.guardian?.email ?? null },
+    // D9: the link builder's utm_campaign (calendlyLinkFor, data/calendly.js).
+    householdId: athlete?.householdId ?? null,
+  };
 }
 
 /** Seed tokens for useSpecialistSlots - the same seed token derivation
@@ -1368,9 +1399,20 @@ function seedSpecialistTokens(specialistId, athleteId, today) {
   return seedMemberTokens(child, today);
 }
 
-function seedSpecialistCapReached(specialistId, athleteId, today) {
+/** K04 in seed too: judged for `monthISO` (a slot's month), default today's. */
+function seedSpecialistCapReached(specialistId, athleteId, today, monthISO = today.slice(0, 7)) {
   const child = seedChildById(athleteId || SEED_ATHLETE_ID);
-  return specialistId === 'mental' && Boolean(child) && coachingFor(seedMemberBookingRows(child, today), today, packageById(child.packageId)).capReached;
+  return (
+    specialistId === 'mental' &&
+    Boolean(child) &&
+    coachingFor(seedMemberBookingRows(child, today), today, packageById(child.packageId), monthISO).capReached
+  );
+}
+
+/** Sprint 20: the seed child as the slot payload's `athlete` (no child logins in seed). */
+function seedSpecialistAthlete(athleteId) {
+  const c = seedChildById(athleteId || SEED_ATHLETE_ID);
+  return c ? { id: c.id, name: c.name, loginEmail: null } : null;
 }
 
 /**
@@ -1415,9 +1457,24 @@ export function useSpecialistSlots(specialistId, { athleteId } = {}) {
     live && specialistId
       ? null
       : {
-          days: specialistId ? seedSpecialistDays(specialistId, today, windowDaysFor(ATHLETE_PACKAGE)) : [],
+          days: specialistId
+            ? seedSpecialistDays(specialistId, today, windowDaysFor(ATHLETE_PACKAGE)).map((d) => ({
+                ...d,
+                capReached: seedSpecialistCapReached(specialistId, athleteId, today, d.date.slice(0, 7)),
+              }))
+            : [],
           tokens: specialistId ? seedSpecialistTokens(specialistId, athleteId, today) : null,
           capReached: specialistId ? seedSpecialistCapReached(specialistId, athleteId, today) : false,
+          // Sprint 20 (contract 4.3, D9): seed is always the in-app list (no
+          // Calendly URL in a jest/harness env), paid, open, one seed child of
+          // the one seed household; the same keys the live branch returns.
+          bookingMode: 'in-app',
+          calendlyUrl: null,
+          billingStatus: 'active',
+          bookingOpen: true,
+          athlete: specialistId ? seedSpecialistAthlete(athleteId) : null,
+          guardian: null,
+          householdId: SEED_HOUSEHOLD_ID,
         },
     live && specialistId
       ? {
