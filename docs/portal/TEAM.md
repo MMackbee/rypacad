@@ -3172,3 +3172,53 @@ pass. BLOCKING for ship: the rules must deploy first - `bookingShapeOk` and
 booking carrying `attendee` until `firebase deploy --only firestore:rules`
 runs (the same deploy the 90-minute contract tier needs). The notice clause
 waits on Blaze like every other notice.
+
+## Sprint 20 pins - launch (contract v3.0.1, 2026-09-28)
+
+Origin: `docs/portal/SPRINT-20-LAUNCH.md` (the owner's rulings of
+2026-09-28, four-lens review folded in as v3.0.1) and the cross-lane
+contract `docs/portal/plans/2026-09-28-sprint-20-launch/01-interfaces.md`.
+Lanes and plans: routing (`20-routing.md`), frontend (`40-frontend.md`),
+db (`30-db.md`), functions (`10-functions.md`); GitHub #1-#27.
+
+Keystones (build facts):
+- Sign-up is instant via `createFamily` (Admin-SDK transaction; the
+  browser cannot pass the rules' read cap); Stripe via Checkout Sessions;
+  per-athlete `athletes.billing` (absent == active) is the booking gate.
+- Window 30 (Elite 45); `BOOKING_OPENS_AT = 1791633600000` (Oct 10 07:00
+  Chicago); season starts Nov 3; the checkout payment prepays November,
+  recurring from Dec 1 anchored on the 1st; mid-month joiners prorate both.
+- Yannick books via Calendly (`calendlyWebhook` writes `sessions/cal-<uuid>`,
+  `bookings.source: 'calendly'`, flagged never refused); Phil stays on the
+  calendar with real `durationMinutes` (sync regex fix).
+- Stripe's 48-hour Checkout `trial_end` minimum rolls a checkout on the
+  29th-31st forward to prepay the NEXT month (DECISION-GAPS Sprint 20
+  ruling 4); a facility add-on lapse writes `facilityBilling` +
+  `facilityAccess: false` only, never the household freeze (ruling 5).
+
+Pins (change one, change both):
+- **`MENTAL_MONTHLY_CAP = { elite: 2, default: 1 }`** is duplicated in
+  `functions/portal/calendly.js` from
+  `frontend/src/portal/data/specialists.js:112` (the webhook judges
+  over-cadence server-side; the functions bundle cannot import the seam,
+  the same reason `lib.js` duplicates the period math). A change to
+  Yannick's monthly cadence edits BOTH and both tests
+  (`data/amendments.test.js`, `functions/test/verify-calendly.js` STEP G over-cadence).
+- `SPECIALIST_DURATION_MINUTES = { phil: 45, mental: 30 }` in
+  `scripts/seed-firestore.mjs` mirrors `data/specialists.js`
+  `durationMinutes` (routing lane) - the seed names the number rather than
+  importing it (BRACKETS precedent).
+
+DB lane (this sprint): `functions/config/stripe-catalogue.json` (one
+source, both modes) + `scripts/write-packages.mjs` (the only writer of
+`packages.stripePriceId`, `windowDays` 30/45, masked update, refuses
+households and nulls); sync drops `mental|yannick` and measures end times
+(`scripts/test/`); seeds gain `signup`, `billing: pending` (nico),
+`handicap`, `loginEmail`, `loginInvites`, the Calendly trio, specialist
+durations; `functions/env.template` splits secrets into `.env.local`;
+DATA-MODEL / DECISION-GAPS / contract docs restate the model. Handoffs:
+`packages.js` + `hooks/index.js` seed tables (routing), `lib.test.js`
+fixtures (functions). `firestore.indexes.json` unchanged (DATA-MODEL
+"v3.0 query additions").
+
+Integration notes: (PM appends at merge.)
