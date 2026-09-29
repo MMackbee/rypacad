@@ -1,4 +1,4 @@
-# Sprint 20 - Launch (contract v3.0)
+# Sprint 20 - Launch (contract v3.0.2)
 
 Owner rulings of 2026-09-28. The sign-up email goes out **2026-10-01**;
 booking opens for token members **2026-10-10 07:00 America/Chicago**; the
@@ -174,8 +174,10 @@ custom-token users have none - treated as "no invite"), the client calls
   'claimed', claimedBy: uid, claimedAt}` -> client `refresh()` ->
   `/portal/home`.
 - open + not verified -> `needs-verification` -> NotProvisioned state
-  **"Verify your email to finish"** naming the sender address, with
-  *Resend* and *I've verified*. **I've verified runs `await user.reload();
+  **"Verify your email to finish"** naming the sender address - Firebase
+  Auth's own, `noreply@<REACT_APP_FIREBASE_AUTH_DOMAIN>` (default
+  `noreply@rypacad.firebaseapp.com`), NOT `SMTP_FROM`, which only the
+  functions' notices use (D5) - with *Resend* and *I've verified*. **I've verified runs `await user.reload();
   await user.getIdToken(true);`** before calling again - a freshly verified
   password account otherwise presents a stale token with
   `email_verified: false` for up to an hour.
@@ -201,16 +203,19 @@ update on `loginInvites` or `users`.
 
 Stripe **Products + monthly Prices** per tier (t-6, t-12, t-16, Elite,
 single) and one for **facility-access** ($300/month), in BOTH test and live
-mode. `scripts/config/stripe-catalogue.json` (`{test: {...}, live: {...}}`,
-committed - price ids are public) is the ONLY source; a new
+mode. `functions/config/stripe-catalogue.json` (`{test: {...}, live: {...}}`,
+committed - price ids are public) is the ONLY source (D3: it sits under
+`functions/` because `firebase deploy` packages only `functions/` and cannot
+`require('../scripts/...')`; `write-packages.mjs` reads
+`../functions/config/stripe-catalogue.json`); a new
 `scripts/write-packages.mjs --prod --mode test|live --dry-run|--yes` writes
 `packages/{id}.stripePriceId` (and `windowDays: 30`) to the Firestore
 packages docs and nothing else - NOT `provision-family.mjs`, which
 full-replaces `households/mackbee` and `/eisele` (`:441-446`).
 `data/packages.js` does NOT carry price ids (two sources of truth would
 let the seed copy live ids into the emulator); the seed's field stripper
-drops them. The functions read the same JSON, keyed by
-`STRIPE_MODE` (`test` | `live`, functions `.env`).
+drops them. The functions read the same JSON (`functions/portal/catalogue.js`),
+keyed by `STRIPE_MODE` (`test` | `live`, functions `.env`).
 
 ### 4.2 `createCheckoutSession` (callable)
 
@@ -244,6 +249,15 @@ subscription anchors on the 1st forever after. Which month is prepaid:
   minimum 1 (`PRORATE_JOINERS = true`, ruling 0.13), `trial_end` = next
   1st. The facility add-on uses the same shape at $300.
 
+**The 48-hour rule (D11).** Stripe refuses a Checkout `trial_end` less than
+48 hours away. When the next 1st is under 49 hours off at checkout time (the
+29th, 30th or 31st - only reachable on or after Nov 1 under 0.13) the session
+prepays the NEXT month in full instead (full price, full tokens), `trial_end`
+is the 1st after that, and the remaining day or two of the current month is
+free. Ruled 2026-09-28, documented in the owner runbook, tested in
+`checkout.test.js`; before Nov 1 it never applies (Dec 1 is always far
+enough out). Contract 6.1 has the code (`prepaidFor` in `checkout.js`).
+
 Every household therefore anchors on the 1st, periods are calendar months,
 and the 29th-31st clamp never bites. `single` (1 token) works the same.
 The functions lane verifies in Stripe test mode that the one-time line is
@@ -275,9 +289,10 @@ active copy. The Success screen says this will happen.
   'facility'` -> `athletes.facilityBilling = {status, subscriptionId,
   priceId}` and `facilityAccess: true` (4.5). `households.stripeCustomerId`
   if null; `arrayUnion` into `stripeCustomerIds`. Line items are read via
-  `checkout.sessions.listLineItems` **before** `runTransaction`; more than
-  one line or quantity != 1 -> outcome `unexpected-quantity`, a flag row,
-  nothing written.
+  `checkout.sessions.listLineItems` **before** `runTransaction`; the only
+  accepted shape is exactly one recurring line plus at most one one-time line
+  (the prepaid month), every quantity 1 (D13); anything else -> outcome
+  `unexpected-quantity`, a flag row, nothing written.
 - **Resolution order** for every other event: `subscription_data.metadata`
   on the subscription object when present; `athletes where
   billing.subscriptionId == subId` (then `facilityBilling.subscriptionId`);
@@ -305,9 +320,12 @@ active copy. The Success screen says this will happen.
   first one.
 - `invoice.payment_failed`, `customer.subscription.updated/deleted` resolve
   the same way; the failed/deleted state is written to the owning athlete's
-  `billing.status` (or `facilityBilling.status`, which also clears
-  `facilityAccess`) AND to household membership exactly as today (one
-  failing card freezes the family - accepted, 14).
+  `billing.status` AND to household membership exactly as today (one
+  failing card freezes the family - accepted, 14). **Facility add-on (D10):**
+  when the resolved product is `facility`, the event writes
+  `facilityBilling.status` and `facilityAccess: false` ONLY - it never touches
+  household membership and never revokes bookings; the family keeps booking
+  on its tier.
 - Notice: the webhook sends the **payment-received** notice itself on an
   athlete's first `active` (kind `membership`, copy branched on
   `bookingOpen`: "Payment received - booking opens Fri, Oct 10 at 7 AM" for
@@ -315,8 +333,10 @@ active copy. The Success screen says this will happen.
   book" otherwise). `onHouseholdMembership`'s guard is unchanged (it only
   reports past_due/lapsed reinstatements).
 - Secrets: `STRIPE_WEBHOOK_SECRET`, `STRIPE_SECRET_KEY` (a **restricted**
-  key: Checkout Sessions write + read, Customers read; the same key serves
-  `createCheckoutSession`). Endpoint events: the four today +
+  key: Checkout Sessions write + read, Customers read, **Prices read** -
+  `createCheckoutSession` reads the price's `unit_amount` to build the
+  prepaid line, nothing in Firestore or the catalogue carries an amount (D12);
+  the same key serves `createCheckoutSession`). Endpoint events: the four today +
   `checkout.session.completed`.
 
 ### 4.4 Per-athlete paid status is the booking gate
@@ -344,7 +364,22 @@ membership counts gain a `pending` bucket so they agree with 7). Billing
 plan card for pending: "Billed monthly from the 1st once you've paid";
 connected card: "Your card and invoices are managed in Stripe."
 `REACT_APP_STRIPE_PORTAL_URL` (Stripe's no-code customer portal) is
-**required**, not optional, so a failed card has a self-serve fix.
+**required**, not optional, so a failed card has a self-serve fix. The build
+cannot fail on it (CRA bakes env at build time and the seed/demo build has
+none), so `hooks/billing.js` warns once at module load, right after the
+existing constant (`billing.js:45`; `isLive` is already imported from
+`./live` at `:39`; routing lane, which owns `hooks/billing.js`):
+
+```js
+/** The Stripe no-code customer portal login link, when the academy set one up. */
+export const STRIPE_PORTAL_URL = process.env.REACT_APP_STRIPE_PORTAL_URL || null;
+
+// Sprint 20 (spec 4.4): required on a live build - a failed card has no
+// self-serve fix without it. Module scope, so it logs once per page load.
+if (isLive() && !STRIPE_PORTAL_URL) {
+  console.warn('[billing] REACT_APP_STRIPE_PORTAL_URL is unset on a live build; the Stripe portal link will not render (spec 4.4).');
+}
+```
 
 ### 4.5 Facility access add-on (ruling 0.10)
 
@@ -627,9 +662,9 @@ Indexes: none new (single-field or existing composites).
 2. **Stripe dashboard**: one Product + monthly Price per tier and for
    facility access, in BOTH test and live mode; the no-code **customer
    portal** activated (its link -> `REACT_APP_STRIPE_PORTAL_URL`); a
-   restricted key per mode (Checkout Sessions write, Customers read) ->
-   `STRIPE_SECRET_KEY`. Paste the price ids into
-   `scripts/config/stripe-catalogue.json` (public ids).
+   restricted key per mode (Checkout Sessions write, Customers read, Prices
+   read - D12) -> `STRIPE_SECRET_KEY`. Paste the price ids into
+   `functions/config/stripe-catalogue.json` (public ids, both blocks; D3).
 3. `firebase deploy --only firestore:rules,firestore:indexes --project
    rypacad` (one deploy: per-athlete billing gate, Oct 10 gate, Calendly
    cancel guard, loginInvites/calendlyEvents reads, attendee field).
@@ -750,3 +785,74 @@ verification action URL; the cut line. Rejected: none. Owner rulings that
 followed: the checkout payment prepays November and recurring billing
 starts Dec 1 (0.11); season start Nov 3 (0.12); mid-month joiners
 prorate both price and tokens (0.13).
+
+**Plan check (v3.0.2, same day).** Writing the four lane plans against
+v3.0.1 forced sixteen decisions. Each is now a fact in the contract (marked
+`(D<n>)` where it lands) and, where it changes this spec, folded in above:
+
+- **D1** The frontend's report helpers move to
+  `frontend/src/portal/data/signupsReport.js` (+ `signupsReport.test.js`);
+  routing keeps `data/signups.js` (`buildSignupRows`), so the two lanes never
+  edit one file.
+- **D2** The attendance block's `durationMinutes` edit in `PortalRoutes.js`
+  belongs to routing Task 11 only; frontend Task 14 drops it.
+- **D3** The catalogue JSON lives at `functions/config/stripe-catalogue.json`
+  (4.1, 12.2). db Task 1 and functions Task 3 both create it with identical
+  content - add/add at integration, keep either.
+- **D4** The secret lists (`MAIL_SECRETS`, `STRIPE_WEBHOOK_SECRETS`,
+  `CHECKOUT_SECRETS`, `CALENDLY_SECRETS`) live in
+  `functions/portal/secrets.js`; `functions/index.js` requires them and
+  exports nothing but the 13 functions.
+- **D5** The verification email is Firebase Auth's own, from
+  `noreply@<REACT_APP_FIREBASE_AUTH_DOMAIN>` (default
+  `rypacad.firebaseapp.com`), not `SMTP_FROM` (3.2).
+- **D6** Copy: the in-app line uses a hyphen ("Payment received - booking
+  opens Fri, Oct 10 at 7 AM."), the emailed notice the em dash; both are
+  sanctioned.
+- **D7** Error reasons added: `athlete-name-required` (createFamily /
+  addAthletes), `invalid-product` (createCheckoutSession, checked right
+  after signed-out), `already-active` also for the facility product,
+  `child-email-duplicate` also against an existing open invite; `claimInvite`
+  returns `householdId` / `athleteId` only on `claimed`.
+- **D8** Fields added: `athletes.billing.lastEventId`;
+  `athletes.facilityBilling.customerId` / `checkoutSessionId` /
+  `lastEventId`; `calendlyEvents` outcome `malformed` and a `flag` field;
+  `stripeEvents.athleteId` / `via` and outcomes `facility-active`,
+  `no-period`.
+- **D9** `useSignups().data = { rows, counts: { all, unpaid, flagged,
+  unresolved }, unresolved: [...] }`; `useSpecialistSlots().data` gains
+  `householdId`; `liveAthleteDetail` and `liveChildCard` gain `loginEmail` +
+  `login { state: 'none'|'invited'|'invited-stale'|'claimed', claimedAt }`;
+  `hubMemberFor` gains `facilityAccessConsent`.
+- **D10** A facility-add-on `customer.subscription.deleted` /
+  `invoice.payment_failed` writes `facilityBilling.status` and
+  `facilityAccess: false` only - never household membership, never bookings
+  (4.3).
+- **D11** The 48-hour rule (4.2): a checkout with the next 1st under 48 h
+  away prepays the NEXT month in full and `trial_end` is the 1st after that;
+  the remaining day or two is free. Ruled, documented, tested.
+- **D12** The restricted Stripe key scopes: Checkout Sessions write,
+  Customers read, Prices read - `createCheckoutSession` reads `unit_amount`
+  from Stripe (4.3, 12.2).
+- **D13** `checkout.session.completed` accepts exactly one recurring line
+  plus at most one one-time line, every quantity 1; anything else is
+  `unexpected-quantity` (4.3).
+- **D14** Routing runs Tasks 1, 2, 3, 6, 9 first (the seams every frontend
+  screen imports), then 4/5 (rules), then 7, 8, 10, 11, 12, 13. Frontend
+  Day-2 rule: every screen that imports a routing seam keeps its jest virtual
+  mock AND, for anything on a day-1 route, guards the import at runtime with
+  the namespace-import + inert-fallback pattern (`Registration.js:27-35`,
+  `useEnrollmentFallback`) so `/portal/admin` never crashes before routing
+  Task 13 merges.
+- **D15** functions Task 11 lands after db Task 7 (the `env.template`
+  rewrite); the functions lane creates its own gitignored
+  `functions/.env.local` and `functions/.secret.local` in its worktree (a
+  step in Task 11) with `STRIPE_SECRET_KEY='sk_test_harness'`, so
+  `checkout.sessions.list` throws deterministically in the harnesses (Task
+  13 STEP H's precondition).
+- **D16** New frontend work: the proactive Oct 10 gate on BookSession
+  (Reserve disabled + the section 5 banner from `bookingOpen(Date.now(),
+  pkg)`) and on SpecialistBooking's in-app branch (`data.bookingOpen`);
+  AdminSignups renders `data.unresolved` as "Unmatched Calendly bookings"
+  and counts `counts.unresolved` inside the Flagged filter; ChildCard on the
+  parent home renders the login line.

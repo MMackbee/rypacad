@@ -1,17 +1,152 @@
-# Routing lane - Sprint 20 Implementation Plan (part 2 of 2)
+# Routing lane - Sprint 20 Implementation Plan (part 2 of 3)
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-Continues `10-routing.md` (header, Global Constraints, Tasks 1-6 live there and
-apply here unchanged). Tasks 7-13 consume Task 1's `bookingOpen`/`BOOKING_OPENS_LABEL`,
-Task 2's `calendlyUrlFor`, Task 6's `callClaimInvite`.
+Continues `10-routing.md` (header, Execution order, Global Constraints, Tasks 1-5
+live there and apply here unchanged). Tasks 7-11 consume Task 1's
+`bookingOpen`/`BOOKING_OPENS_LABEL`, Task 2's `calendlyUrlFor`, Task 6's
+`callClaimInvite`. Tasks 12, 12b and 13 are in `10-routing-part3.md`. Execution
+order (part 1): 1, 2, 3, **6, 9** first, then 4/5, then 7, 8, 10, 11, 12, 12b, 13.
 
-**Spec:** docs/portal/SPRINT-20-LAUNCH.md sections 3.2, 4.4, 5, 6.1, 7, 9 (K03/K04).
-**Interfaces:** docs/portal/plans/2026-09-28-sprint-20-launch/01-interfaces.md sections 3.6, 4.1-4.4.
-**GitHub issues:** #2 (Task 9), #3 (Task 7), #6 (Tasks 8, 10-13).
+**Spec:** docs/portal/SPRINT-20-LAUNCH.md sections 2.2, 3.2, 4.4, 5, 6.1, 9 (K03/K04).
+**Interfaces:** docs/portal/plans/2026-09-28-sprint-20-launch/01-interfaces.md sections 1.1, 3.6, 4.1, 4.3, 4.4.
+**GitHub issues:** #3 (Tasks 6, 7), #2 (Task 9), #6 (Tasks 8, 10, 11).
 
 Test command: `cd frontend && CI=true npx react-scripts test --watchAll=false <path>`.
 Compile check for hook files: `cd frontend && npx esbuild src/portal/hooks/<file>.js --bundle --platform=browser --outfile=/dev/null --log-level=error`.
+
+---
+
+### Task 6: Functions client plumbing - `firebase.js` + `hooks/callables.js` (closes #3)
+
+**Files:**
+- Modify: `frontend/src/firebase.js` (imports :1-10; export beside :62; emulator block :78-80)
+- Create: `frontend/src/portal/hooks/callables.js`
+- Create: `frontend/src/portal/hooks/callables.test.js`
+
+**Interfaces:** Produces `functions` (firebase.js), `callCreateFamily(payload)`, `callAddAthletes(payload)`, `callClaimInvite()`, `callCreateCheckoutSession(payload)`, `wrapCallable(err, context)` (contract 1.1). Consumes `ERR`, `LiveDataError` (live.js:44-77). The functions lane's callables are named `createFamily`, `addAthletes`, `claimInvite`, `createCheckoutSession` in `us-central1`. Reasons the functions lane may return beyond contract 1.2-1.5 (D7): `athlete-name-required` (createFamily/addAthletes), `invalid-product` (createCheckoutSession, right after `signed-out`), `already-active` also for product `'facility'`, `child-email-duplicate` also against an existing open invite; `claimInvite` returns `householdId`/`athleteId` only on `'claimed'` (null otherwise). All ride through `wrapCallable` unchanged - screens branch on `reason`.
+
+- [ ] Write the failing test `callables.test.js` (mocks keep Firebase out of jest):
+
+```js
+/**
+ * Callable clients (Sprint 20, contract 1.1): every rejection becomes a
+ * LiveDataError with the function's own plain-language message and the
+ * stable `details.reason`, so screens branch on `reason` like they do for
+ * the booking gate.
+ */
+jest.mock('../../firebase', () => ({ functions: {} }));
+jest.mock('firebase/functions', () => ({ httpsCallable: jest.fn(() => jest.fn()) }));
+jest.mock('firebase/firestore', () => ({}));
+
+import { ERR, LiveDataError } from './live';
+import { wrapCallable } from './callables';
+
+const httpsErr = (code, message, details) => Object.assign(new Error(message), { code, details });
+
+describe('wrapCallable', () => {
+  test('maps HttpsError codes incl. the two wrap() lacks', () => {
+    expect(wrapCallable(httpsErr('functions/already-exists', 'Already set up', { reason: 'already-provisioned' }), 'createFamily'))
+      .toMatchObject({ code: ERR.INVALID, reason: 'already-provisioned', message: 'Already set up' });
+    expect(wrapCallable(httpsErr('functions/failed-precondition', 'Verify first', { reason: 'email-unverified' }), 'x').code).toBe(ERR.INVALID);
+    expect(wrapCallable(httpsErr('functions/unauthenticated', 'Sign in', { reason: 'signed-out' }), 'x').code).toBe(ERR.UNAUTHENTICATED);
+    expect(wrapCallable(httpsErr('functions/permission-denied', 'No', { reason: 'not-owner' }), 'x').code).toBe(ERR.PERMISSION);
+    expect(wrapCallable(httpsErr('functions/not-found', 'Gone', { reason: 'athlete-not-found' }), 'x').code).toBe(ERR.NOT_FOUND);
+    expect(wrapCallable(httpsErr('functions/unavailable', 'Checkout is unavailable right now. Try again in a minute.', { reason: 'stripe-error' }), 'x').code).toBe(ERR.UNAVAILABLE);
+    expect(wrapCallable(httpsErr('functions/internal', 'Sign-up could not be saved. Try again.', { reason: 'write-failed' }), 'x').code).toBe(ERR.UNKNOWN);
+    // D7 additions pass through as plain reasons - no client-side enum.
+    expect(wrapCallable(httpsErr('functions/invalid-argument', 'Product must be tier or facility.', { reason: 'invalid-product' }), 'x').reason).toBe('invalid-product');
+    expect(wrapCallable(httpsErr('functions/invalid-argument', 'Every athlete needs a name.', { reason: 'athlete-name-required' }), 'x').reason).toBe('athlete-name-required');
+  });
+  test('a bare code (no functions/ prefix) and a missing details map both work', () => {
+    const e = wrapCallable(httpsErr('invalid-argument', 'Bad', undefined), 'x');
+    expect(e).toBeInstanceOf(LiveDataError);
+    expect(e).toMatchObject({ code: ERR.INVALID, reason: null, message: 'Bad' });
+  });
+  test('a LiveDataError passes through unchanged; a non-Error gets a context message', () => {
+    const own = new LiveDataError(ERR.INVALID, 'mine', null, 'r');
+    expect(wrapCallable(own, 'x')).toBe(own);
+    expect(wrapCallable('boom', 'claimInvite').message).toBe('claimInvite failed.');
+  });
+});
+```
+
+- [ ] Run `... src/portal/hooks/callables.test.js` - expect FAIL: cannot find module `./callables`.
+- [ ] `firebase.js`: add `import { connectFunctionsEmulator, getFunctions } from 'firebase/functions';` after the firestore import (:9); after `export const db = getFirestore(app);` (:62) add:
+
+```js
+// Cloud Functions callables (Sprint 20): createFamily, addAthletes,
+// claimInvite, createCheckoutSession - all deployed to us-central1.
+export const functions = getFunctions(app, 'us-central1');
+```
+  and inside the emulator block after `connectFirestoreEmulator(db, '127.0.0.1', 8080);` (:80): `connectFunctionsEmulator(functions, '127.0.0.1', 5001); // firebase.json emulators.functions.port`.
+- [ ] Create `callables.js`:
+
+```js
+/**
+ * Callable clients (Sprint 20, contract 1.1) - the browser side of the
+ * functions lane's onCall handlers. New code stays out of the grandfathered
+ * live.js (the grace.js/waitlist.js precedent). Each call unwraps
+ * `result.data`; each rejection becomes a LiveDataError whose `reason` is
+ * the function's stable `details.reason` and whose `message` is the
+ * function's own plain-language copy, surfaced verbatim.
+ */
+import { httpsCallable } from 'firebase/functions';
+import { functions } from '../../firebase';
+import { ERR, LiveDataError } from './live';
+
+// wrap()'s own map (live.js:89-96) plus the two HttpsError codes it lacks.
+const CODE_MAP = {
+  'permission-denied': ERR.PERMISSION,
+  'not-found': ERR.NOT_FOUND,
+  unavailable: ERR.UNAVAILABLE,
+  'deadline-exceeded': ERR.UNAVAILABLE,
+  unauthenticated: ERR.UNAUTHENTICATED,
+  'invalid-argument': ERR.INVALID,
+  'already-exists': ERR.INVALID,
+  'failed-precondition': ERR.INVALID,
+};
+
+export function wrapCallable(err, context) {
+  if (err instanceof LiveDataError) return err;
+  const raw = String((err && err.code) || '').replace(/^functions\//, '');
+  const code = CODE_MAP[raw] || ERR.UNKNOWN;
+  const reason = err && err.details && typeof err.details.reason === 'string' ? err.details.reason : null;
+  const message = err && err.message ? String(err.message) : `${context} failed.`;
+  return new LiveDataError(code, message, err, reason);
+}
+
+function callable(name) {
+  const fn = httpsCallable(functions, name);
+  return async (payload = {}) => {
+    try {
+      const result = await fn(payload);
+      return result.data;
+    } catch (err) {
+      throw wrapCallable(err, name);
+    }
+  };
+}
+
+/** `{ householdId, athleteIds }` (contract 1.2). */
+export const callCreateFamily = callable('createFamily');
+/** `{ householdId, athleteIds }` (contract 1.3). */
+export const callAddAthletes = callable('addAthletes');
+/** `{ url }` (contract 1.5). */
+export const callCreateCheckoutSession = callable('createCheckoutSession');
+const claimInvite = callable('claimInvite');
+/** `{ state, householdId, athleteId }` - ids only on 'claimed' (D7); never throws for an expected state (contract 1.4). */
+export const callClaimInvite = () => claimInvite({});
+```
+
+- [ ] Run `... src/portal/hooks/callables.test.js` - expect PASS. Run the esbuild check on `src/firebase.js` - expect no errors (`firebase/functions` ships with `firebase ^9.22.0`).
+- [ ] Commit:
+```
+git add frontend/src/firebase.js frontend/src/portal/hooks/callables.js frontend/src/portal/hooks/callables.test.js
+git commit -m "Sprint 20: functions client + callable wrappers (createFamily, addAthletes, claimInvite, createCheckoutSession)
+
+Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>"
+```
 
 ---
 
@@ -201,7 +336,7 @@ Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>"
 - Modify: `frontend/src/portal/hooks/useAuthSession.js` (imports :1-10; `toUser` :54-63; effect :101-155; return :270-279)
 - Create: `frontend/src/portal/hooks/useAuthSession.test.js`
 
-**Interfaces:** Consumes `callClaimInvite` (Task 6). Produces hook members `user.emailVerified`, `createLogin(email, password)`, `refresh()`, `claimState`, `checkInvite()`, `resendVerification()` (contract 4.1); exported pure helpers `claimStateOf(result)`, `createLoginError(err)`, `resendError(err)`, `verifyContinueUrl()` (new, not in contract - test seams).
+**Interfaces:** Consumes `callClaimInvite` (Task 6). Produces hook members `user.emailVerified`, `createLogin(email, password)`, `refresh()`, `claimState`, `checkInvite()`, `resendVerification()` (contract 4.1); exported pure helpers `claimStateOf(result)`, `createLoginError(err)`, `resendError(err)`, `verifyContinueUrl()`, `verificationSender()` (new, not in contract - test seams). The verification email's sender is Firebase's own, `noreply@<REACT_APP_FIREBASE_AUTH_DOMAIN>` (default `rypacad.firebaseapp.com`), NOT `SMTP_FROM` (D5) - `verificationSender()` is the one string NotProvisioned's "Verify your email to finish" body names.
 
 - [ ] Write the failing test `useAuthSession.test.js`:
 
@@ -219,7 +354,7 @@ jest.mock('firebase/firestore', () => ({}));
 jest.mock('firebase/functions', () => ({ httpsCallable: jest.fn(() => jest.fn()) }));
 
 import { ERR } from './live';
-import { claimStateOf, createLoginError, resendError, verifyContinueUrl } from './useAuthSession';
+import { claimStateOf, createLoginError, resendError, verificationSender, verifyContinueUrl } from './useAuthSession';
 
 describe('claimStateOf', () => {
   test('the four contract states pass through; anything else is error', () => {
@@ -250,6 +385,11 @@ test('resendError: throttled is UNAVAILABLE, anything else UNKNOWN', () => {
 
 test('the verification link returns to this origin\'s sign-in page', () => {
   expect(verifyContinueUrl()).toBe(`${window.location.origin}/portal/signin`);
+});
+
+test('the verification sender is Firebase\'s own noreply@<auth domain> (D5), never SMTP_FROM', () => {
+  // jest carries no REACT_APP_FIREBASE_AUTH_DOMAIN -> the project default.
+  expect(verificationSender()).toBe('noreply@rypacad.firebaseapp.com');
 });
 ```
 
@@ -289,6 +429,16 @@ export function claimStateOf(result) {
  */
 export function verifyContinueUrl() {
   return `${window.location.origin}/portal/signin`;
+}
+
+/**
+ * Who the verification email comes FROM (D5, spec 12.1: templates stay
+ * DEFAULT, so Firebase Auth sends it) - noreply@<auth domain>, never the
+ * functions' SMTP_FROM. NotProvisioned's "We sent a link to {email} from
+ * {sender}" names this.
+ */
+export function verificationSender() {
+  return `noreply@${process.env.REACT_APP_FIREBASE_AUTH_DOMAIN || 'rypacad.firebaseapp.com'}`;
 }
 
 export function createLoginError(err) {
@@ -446,10 +596,10 @@ Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>"
 ### Task 10: Specialist slots - durations, Calendly mode, gates, K04 month (closes #6) (MAY SLIP - Oct 10)
 
 **Files:**
-- Modify: `frontend/src/portal/hooks/index.js` (imports :157-168 / :188; `coachingFor` :393-401; `seedSpecialistDays` :1219-1258; `liveSpecialistDays` :1288-1292; `liveSpecialistSlots` :1327-1349; `useSpecialistSlots` seed branch :1413-1417)
+- Modify: `frontend/src/portal/hooks/index.js` (imports :157-168 / :188; `coachingFor` :393-401; `SEED_ATHLETE_ID` :677; `MENTAL_TIMES` :1217 + comment :1201; `seedSpecialistDays` :1219-1258; `liveSpecialistDays` :1288-1292; `liveSpecialistSlots` :1327-1349; `seedSpecialistCapReached` :1357-1360; `useSpecialistSlots` :1381-1415)
 - Create: `frontend/src/portal/hooks/index.test.js`
 
-**Interfaces:** Consumes `calendlyUrlFor` (Task 2), `bookingOpen` (Task 1), `SPECIALISTS[].durationMinutes/bookingMode` (Task 2). Produces `useSpecialistSlots().data` gaining `bookingMode`, `calendlyUrl`, `billingStatus`, `bookingOpen`, `athlete`, `guardian` (contract 4.3), `days[].slots[].durationMinutes`, `days[].capReached` (new, not in contract: K04 per slot month), and `coachingFor(bookings, today, pkg, monthISO)`.
+**Interfaces:** Consumes `calendlyUrlFor` (Task 2), `bookingOpen` (Task 1), `SPECIALISTS[].durationMinutes/bookingMode` (Task 2). Produces `useSpecialistSlots().data` gaining `bookingMode`, `calendlyUrl`, `billingStatus`, `bookingOpen`, `athlete`, `guardian` (contract 4.3) and `householdId` (D9 - the Calendly link's `utm_campaign`), `days[].slots[].durationMinutes`, `days[].capReached` (new, not in contract: K04 per slot month), and `coachingFor(bookings, today, pkg, monthISO)`.
 
 - [ ] Write the failing test `index.test.js`:
 
@@ -465,7 +615,7 @@ jest.mock('firebase/auth', () => ({}));
 jest.mock('firebase/functions', () => ({ httpsCallable: jest.fn(() => jest.fn()) }));
 jest.mock('firebase/messaging', () => ({ isSupported: jest.fn(async () => false) }));
 
-import { coachingFor } from './index';
+import { coachingFor, seedSpecialistDays } from './index';
 
 const mental = (date) => ({ id: date, type: 'mental', status: 'confirmed', date });
 
@@ -476,11 +626,27 @@ test('coachingFor judges the given month, defaulting to today\'s', () => {
   expect(coachingFor(bookings, '2026-10-20', null, '2026-12')).toEqual({ used: 0, limit: 1, capReached: false });
   expect(coachingFor(bookings, '2026-10-20', { kind: 'elite' }, '2026-10')).toEqual({ used: 1, limit: 2, capReached: false });
 });
+
+test('seed mental slots are the three 30-minute Yannick times; Phil slots are 45', () => {
+  const mentalDay = seedSpecialistDays('mental', '2026-10-06', 30).find((d) => d.slots.length); // Tue
+  expect(mentalDay.slots.map((s) => [s.time, s.durationMinutes])).toEqual([['4:00 PM', 30], ['4:30 PM', 30], ['5:00 PM', 30]]);
+  const philDay = seedSpecialistDays('phil', '2026-10-05', 30).find((d) => d.slots.length); // Mon
+  expect(philDay.slots.every((s) => s.durationMinutes === 45)).toBe(true);
+});
 ```
 
-- [ ] Run `... src/portal/hooks/index.test.js` - expect FAIL: `capReached` true for `'2026-12'` (the 4th arg is ignored today).
+- [ ] Run `... src/portal/hooks/index.test.js` - expect FAIL: `capReached` true for `'2026-12'` (the 4th arg is ignored today); mental times are `4:30 PM`/`5:15 PM` with no `durationMinutes`.
 - [ ] `coachingFor` (:393-401): signature `function coachingFor(bookings, today, pkg = null, monthISO = today.slice(0, 7))` and `const month = monthISO;`. Update its comment: "the given month (K04: the slot's, default today's)".
-- [ ] Imports: add `bookingOpen,` to the `../data/calendar` import list (:157-168) and `import { calendlyUrlFor } from '../data/calendly';` after the specialists import (:188).
+- [ ] Imports: add `bookingOpen,` to the `../data/calendar` import list (:157-168) and `import { calendlyUrlFor } from '../data/calendly';` after the specialists import (:188). Beside `const SEED_ATHLETE_ID = 'jordan';` (:677) add `const SEED_HOUSEHOLD_ID = 'whitfield'; // the seed household's id (hooks/billing.js seedBillingHub, :1966)`.
+- [ ] `MENTAL_TIMES` (:1217) - the seed's Yannick slots become the three 30-minute times `scripts/seed-firestore.mjs:320-323` writes (spec 6.1); the doc comment at :1201 "both 45-minute sessions" becomes "Phil 45-minute, Yannick 30-minute sessions":
+
+```diff
+ const PHIL_TIMES = ['3:00 PM', '3:45 PM'];
+-const MENTAL_TIMES = ['4:30 PM', '5:15 PM'];
++// Sprint 20 (spec 6.1): Yannick's sessions are 30 minutes at 4:00 / 4:30 /
++// 5:00 PM - the same three times seed-firestore.mjs writes.
++const MENTAL_TIMES = ['4:00 PM', '4:30 PM', '5:00 PM'];
+```
 - [ ] `seedSpecialistDays` (:1219): after `const capacity = ...` add `const durationMinutes = SPECIALISTS.find((s) => s.id === specialistId)?.durationMinutes ?? DEFAULT_DURATION_MINUTES;` and add `durationMinutes,` to the slot object (:1243). `liveSpecialistDays` slot (:1288-1292): return `{ sessionId: s.id, time: s.time, booked, capacity, open: booked < capacity, durationMinutes: s.durationMinutes ?? (SPECIALIST_BY_ID.get(specialistId)?.durationMinutes ?? DEFAULT_DURATION_MINUTES) }`.
 - [ ] Replace `liveSpecialistSlots` (:1327-1349):
 
@@ -493,7 +659,7 @@ async function liveSpecialistSlots(specialistId, athleteIdOverride, today) {
       days: await liveSpecialistDays(specialistId, today, MAX_WINDOW_DAYS),
       tokens: null, capReached: false,
       bookingMode: 'in-app', calendlyUrl: null, billingStatus: 'active',
-      bookingOpen: bookingOpen(Date.now(), null), athlete: null, guardian: null,
+      bookingOpen: bookingOpen(Date.now(), null), athlete: null, guardian: null, householdId: null,
     };
   }
   const athlete = await fetchAthlete(athleteId);
@@ -524,15 +690,70 @@ async function liveSpecialistSlots(specialistId, athleteIdOverride, today) {
     bookingOpen: bookingOpen(Date.now(), pkg),
     athlete: { id: athlete.id, name: athlete.name ?? null, loginEmail: athlete.loginEmail ?? null },
     guardian: { name: household?.guardian?.name ?? null, email: household?.guardian?.email ?? null },
+    // D9: the link builder's utm_campaign (calendlyLinkFor, data/calendly.js).
+    householdId: athlete?.householdId ?? null,
   };
 }
 ```
-  `useSpecialistSlots` seed branch (:1413-1417) gains the same keys: `bookingMode: 'in-app', calendlyUrl: null, billingStatus: 'active', bookingOpen: true, athlete: specialistId ? seedSpecialistAthlete(athleteId) : null, guardian: null` with, beside `seedSpecialistTokens`: `function seedSpecialistAthlete(athleteId) { const c = seedChildById(athleteId || SEED_ATHLETE_ID); return c ? { id: c.id, name: c.name, loginEmail: null } : null; }` and `days: specialistId ? seedSpecialistDays(...).map((d) => ({ ...d, capReached: seedSpecialistCapReached(specialistId, athleteId, today) })) : []`.
+
+- [ ] Seed parity. Replace `seedSpecialistCapReached` (:1357-1360) and add `seedSpecialistAthlete` beside `seedSpecialistTokens`:
+
+```js
+/** K04 in seed too: judged for `monthISO` (a slot's month), default today's. */
+function seedSpecialistCapReached(specialistId, athleteId, today, monthISO = today.slice(0, 7)) {
+  const child = seedChildById(athleteId || SEED_ATHLETE_ID);
+  return (
+    specialistId === 'mental' &&
+    Boolean(child) &&
+    coachingFor(seedMemberBookingRows(child, today), today, packageById(child.packageId), monthISO).capReached
+  );
+}
+
+/** Sprint 20: the seed child as the slot payload's `athlete` (no child logins in seed). */
+function seedSpecialistAthlete(athleteId) {
+  const c = seedChildById(athleteId || SEED_ATHLETE_ID);
+  return c ? { id: c.id, name: c.name, loginEmail: null } : null;
+}
+```
+  Then replace the whole `return useSeedResource(...)` of `useSpecialistSlots` (:1400-1414) with the seed branch carrying every live key:
+
+```js
+  return useSeedResource(
+    live && specialistId
+      ? null
+      : {
+          days: specialistId
+            ? seedSpecialistDays(specialistId, today, windowDaysFor(ATHLETE_PACKAGE)).map((d) => ({
+                ...d,
+                capReached: seedSpecialistCapReached(specialistId, athleteId, today, d.date.slice(0, 7)),
+              }))
+            : [],
+          tokens: specialistId ? seedSpecialistTokens(specialistId, athleteId, today) : null,
+          capReached: specialistId ? seedSpecialistCapReached(specialistId, athleteId, today) : false,
+          // Sprint 20 (contract 4.3, D9): seed is always the in-app list (no
+          // Calendly URL in a jest/harness env), paid, open, one seed child of
+          // the one seed household; the same keys the live branch returns.
+          bookingMode: 'in-app',
+          calendlyUrl: null,
+          billingStatus: 'active',
+          bookingOpen: true,
+          athlete: specialistId ? seedSpecialistAthlete(athleteId) : null,
+          guardian: null,
+          householdId: SEED_HOUSEHOLD_ID,
+        },
+    live && specialistId
+      ? {
+          source: () => liveSpecialistSlots(specialistId, athleteId, today),
+          deps: ['specialist-slots', specialistId, athleteId, today, sessionsGen, bookingsGen, athletesGen],
+        }
+      : undefined
+  );
+```
 - [ ] Run `... src/portal/hooks/index.test.js` - expect PASS; esbuild check on `index.js` - no errors. If jest cannot load `./index` because of a further Firebase import, add that module to the mock list at the top of the test (the five above cover every `firebase/*` import in `hooks/` as of today: `live.js`, `push.js`, `callables.js`, `useAuthSession.js`).
 - [ ] Commit:
 ```
 git add frontend/src/portal/hooks/index.js frontend/src/portal/hooks/index.test.js
-git commit -m "Sprint 20: specialist slots carry durations, Calendly mode, billing/opens-at gates and K04 per-month cadence
+git commit -m "Sprint 20: specialist slots carry durations, Calendly mode, billing/opens-at gates, householdId and K04 per-month cadence
 
 Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>"
 ```
@@ -542,15 +763,36 @@ Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>"
 ### Task 11: Rows carry `source` + real durations; Calendly rows not cancellable; attendance block duration (closes #6) (MAY SLIP - Oct 10)
 
 **Files:**
-- Modify: `frontend/src/portal/hooks/index.js` (`resolveWaitlistRows` :466; `liveSchedule` resolve :509-536; `liveSpecialistSessions` :1451-1483; `reservationRow` :2104-2134; caller :2175; `seedReservationMember` :2218)
-- Modify: `frontend/src/portal/PortalRoutes.js` (`SpecialistDayRoute` onOpenSession :336-348; `CoachDashboardRoute` block :386-404)
+- Modify: `frontend/src/portal/hooks/index.js` (`resolveWaitlistRows` :466; `liveSchedule` resolve :509-536; `seedSpecialistDaySessions` :1428-1441; `liveSpecialistSessions` :1451-1483; `reservationRow` :2104-2134; caller :2175; `seedReservationMember` :2218)
+- Modify: `frontend/src/portal/PortalRoutes.js` (`SpecialistDayRoute` onOpenSession :336-348; `CoachDashboardRoute` block :386-404) - **routing-owned (D2)**: the frontend plan's Task 14 does NOT touch these two `block` edits.
 
 **Interfaces:** Produces rows with `source: 'portal'|'calendly'`, `cancellable` false for Calendly rows, `durationMinutes` from the session doc else the specialist's registry length (contract 4.4); `useSpecialistSessions` rows gain `type`, `durationMinutes` (new, not in contract) so the attendance `block` can carry `durationMinutes`.
 
 - [ ] `reservationRow` (:2104-2134): add `const source = b.source ?? 'portal';` after `periodKey`; set `cancellable: b.status === 'confirmed' && s.date > today && source !== 'calendly',`; add `source,` after `athleteId: b.athleteId,`; replace the duration line with `durationMinutes: s.durationMinutes ?? (specialist ? specialist.durationMinutes : DEFAULT_DURATION_MINUTES),`. The caller (:2175) adds `source: b.source` to the second argument.
 - [ ] `liveSchedule` resolve (:509-536): add `const source = b.source ?? 'portal';` beside `periodKey`, `source,` after `status: b.status,`, and `cancellable: b.status === 'confirmed' && b.date > today && source !== 'calendly',`. Comment: `// Sprint 20 (spec 6.1): a Calendly-sourced booking is cancelled from Calendly's email, never here (My Schedule shows the note instead of Cancel).`
 - [ ] `resolveWaitlistRows` (:466): `durationMinutes: s.durationMinutes ?? (specialist ? specialist.durationMinutes : DEFAULT_DURATION_MINUTES),` and add `source: 'portal',` beside `cancellable: false,`. `seedReservationMember` (:2218): the same expression with `SPECIALIST_BY_ID.get(s.type)?.durationMinutes ?? DEFAULT_DURATION_MINUTES` in place of the literal 45.
-- [ ] `liveSpecialistSessions` (:1451-1483): the row gains `type: s.type,` and `durationMinutes: s.durationMinutes ?? (SPECIALIST_BY_ID.get(s.type)?.durationMinutes ?? DEFAULT_DURATION_MINUTES),` after `capacity: s.capacity ?? 1,`; the seed rows in `seedSpecialistDaySessions` (:1428-1449) gain `type: specialistId` and the slot's `durationMinutes` (Task 10 put it on the seed slot).
+- [ ] `liveSpecialistSessions` (:1451-1483): the row gains `type: s.type,` and `durationMinutes: s.durationMinutes ?? (SPECIALIST_BY_ID.get(s.type)?.durationMinutes ?? DEFAULT_DURATION_MINUTES),` after `capacity: s.capacity ?? 1,`. Replace `seedSpecialistDaySessions` (:1428-1441) with (Task 10 put `durationMinutes` on every seed slot):
+
+```js
+function seedSpecialistDaySessions(specialistId, today) {
+  return seedSpecialistDays(specialistId, today, MAX_WINDOW_DAYS)
+    .flatMap((d) =>
+      d.slots.map((s) => ({
+        sessionId: s.sessionId,
+        date: d.date,
+        dayLabel: d.dayLabel,
+        time: s.time,
+        booked: s.booked,
+        capacity: s.capacity,
+        // Sprint 20 (spec 6.1): the attendance `block` carries the length;
+        // `type` is the specialist id, which doubles as sessions.type.
+        type: specialistId,
+        durationMinutes: s.durationMinutes,
+        athletes: [],
+      }))
+    );
+}
+```
 - [ ] `PortalRoutes.js`: in `SpecialistDayRoute`'s `block` (:340-346) add `durationMinutes: s.durationMinutes ?? null,`; in `CoachDashboardRoute`'s `block` (:394-401) add `durationMinutes: block.durationMinutes ?? null,`. (SessionAttendance renders it - frontend lane.)
 - [ ] Verify: esbuild check on `index.js` and `PortalRoutes.js` - no errors; `... src/portal/hooks` - PASS. Emulator check: seed one Calendly-sourced booking for the seeded parent's child with the admin bypass, e.g. from the scratchpad
   `node -e "fetch('http://127.0.0.1:8080/v1/projects/rypacad/databases/(default)/documents/bookings/<athleteId>_cal-probe',{method:'PATCH',headers:{'content-type':'application/json',authorization:'Bearer owner'},body:JSON.stringify({fields:{athleteId:{stringValue:'<athleteId>'},sessionId:{stringValue:'cal-probe'},date:{stringValue:'2026-11-10'},type:{stringValue:'mental'},periodKey:{stringValue:'2026-11-01'},status:{stringValue:'confirmed'},householdId:{stringValue:'<householdId>'},createdBy:{stringValue:'system'},createdAt:{timestampValue:new Date().toISOString()},chargedFrom:{stringValue:'period'},source:{stringValue:'calendly'}}})}).then(r=>console.log(r.status))"`
@@ -565,259 +807,4 @@ Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>"
 
 ---
 
-### Task 12: Home and membership hooks expose the athlete's paid status (closes #6)
-
-**Files:**
-- Modify: `frontend/src/portal/hooks/index.js` (`liveChildCard` return :1580-1590; `useHousehold` seed :1638-1640; `liveHouseholdAthletes` :1679-1685; `useHouseholdAthletes` seed :1707-1713; `liveMemberEntry` :1868-1901; `seedMemberEntry` :1829; `liveAthleteDashboard.athlete` :2718-2726)
-
-**Interfaces:** Produces `billingStatus: 'pending'|'active'|'past_due'|'lapsed'` (absent == `'active'`) on `useHousehold().data.children[]`, `useHouseholdAthletes().data[]`, `useMembership().data.members[]` and `useAthleteDashboard().data.athlete` (new, not in contract - the frontend lane's pending banners and Pay buttons read it; the hub's own `members[].billing` comes from Task 3).
-
-- [ ] Add `billingStatus: a.billing?.status ?? 'active',` to the `liveChildCard` return (after `packageId`), to the `liveHouseholdAthletes` row (after `packageName`), to the `liveMemberEntry` return (after `name`), and `billingStatus: ctx.athlete.billing?.status ?? 'active',` to `liveAthleteDashboard`'s `athlete` object (after `date`). Comment once, on `liveChildCard`: `// Sprint 20 (spec 4.4): the parent home banner and Pay button key off this; absent == active.`
-- [ ] Seed parity: `useHousehold`'s seed children and `useHouseholdAthletes`' `seedRows` map gain `billingStatus: c.billingStatus ?? 'active'`; `seedMemberEntry` (:1829) returns `billingStatus: child.billingStatus ?? 'active'`; the athlete dashboard seed branch's `athlete` object gains `billingStatus: 'active'`.
-- [ ] Verify: esbuild check on `index.js`; `... src/portal/hooks` PASS; on :3003 as the seeded parent the family home renders (React DevTools: `children[].billingStatus` is `'pending'` for the db lane's pending child, `'active'` for the rest).
-- [ ] Commit:
-```
-git add frontend/src/portal/hooks/index.js
-git commit -m "Sprint 20: home, household-athletes, membership and athlete dashboard carry billingStatus
-
-Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>"
-```
-
----
-
-### Task 13: `useSignups` + the admin `pending` bucket (closes #6) (MAY SLIP - Oct 10)
-
-**Files:**
-- Create: `frontend/src/portal/data/signups.js`, `frontend/src/portal/data/signups.test.js`
-- Create: `frontend/src/portal/hooks/signups.js`
-- Modify: `frontend/src/portal/hooks/index.js` (imports :93-96; re-export :200; `liveAdminDashboard` :3402-3410; seed membership :3567)
-
-**Interfaces:** Consumes `packageById`. Produces `buildSignupRows({ households, athletes, invites, flaggedBookings, calendlyEvents, now })` (new, not in contract - the pure half of `useSignups`), `useSignups()` (contract 4.2) whose `data` also carries `unresolved: [{ id, outcome, receivedAt }]` and `counts.unresolved` (new, not in contract: an unresolved Calendly event has no household to hang off), `useAdminDashboard().data.membership.pending`.
-
-- [ ] Write the failing test `signups.test.js`:
-
-```js
-/**
- * The admin sign-ups report's row builder (Sprint 20, spec 7) - pure, so the
- * login/payment/flag columns are pinned without Firestore.
- */
-import { buildSignupRows } from './signups';
-
-const now = new Date('2026-10-05T15:00:00');
-const households = [
-  { id: 'h1', name: 'Kim family', signup: { at: new Date('2026-10-01T09:30:00'), mode: 'parent' }, guardian: { name: 'Dana', email: 'dana@x.com', phone: '555' } },
-  { id: 'legacy', name: 'Whitfield family', guardian: { name: 'W' } },
-  { id: 'h2', name: 'Solo', signup: { at: new Date('2026-10-03T08:00:00'), mode: 'athlete' }, guardian: { name: 'Sam', email: 's@x.com', phone: '1' } },
-];
-const athletes = [
-  { id: 'a1', householdId: 'h1', name: 'Ava', dob: '2012-06-17', packageId: 't-6', handicap: 20, loginEmail: 'ava@x.com', billing: { status: 'pending' } },
-  { id: 'a2', householdId: 'h1', name: 'Ben', dob: null, packageId: 'elite', handicap: null, loginEmail: 'ben@x.com', billing: { status: 'active' }, facilityBilling: { status: 'active' } },
-  { id: 'a3', householdId: 'h2', name: 'Sam', dob: '2005-01-01', packageId: 'single', loginEmail: null },
-  { id: 'w', householdId: 'legacy', name: 'Jordan', packageId: 't-12' },
-];
-const invites = [
-  { id: 'ava@x.com', athleteId: 'a1', householdId: 'h1', status: 'open', createdAt: new Date('2026-09-20T00:00:00') },
-  { id: 'ben@x.com', athleteId: 'a2', householdId: 'h1', status: 'claimed', claimedAt: new Date('2026-10-02T10:00:00') },
-];
-const flaggedBookings = [{ id: 'a3_cal-1', athleteId: 'a3', flag: 'before-open', date: '2026-10-08' }];
-const calendlyEvents = [{ id: 'ev-1', outcome: 'unresolved', receivedAt: new Date('2026-10-04T12:00:00'), householdId: null }];
-
-test('rows, columns and counts', () => {
-  const { rows, counts, unresolved } = buildSignupRows({ households, athletes, invites, flaggedBookings, calendlyEvents, now });
-  expect(rows.map((r) => r.householdId)).toEqual(['h1', 'h2']); // legacy (no signup) excluded, input order kept
-  const h1 = rows[0];
-  expect(h1).toMatchObject({ name: 'Kim family', signedUpAt: '2026-10-01T09:30', mode: 'parent', parent: { name: 'Dana', email: 'dana@x.com', phone: '555' }, unpaid: true, flagged: false });
-  expect(h1.athletes[0]).toEqual({ athleteId: 'a1', name: 'Ava', age: 14, packageId: 't-6', packageName: '6 tokens', handicap: 20, billing: 'pending', facility: null, login: 'invited-stale', loginEmail: 'ava@x.com', loginClaimedAt: null });
-  expect(h1.athletes[1]).toMatchObject({ age: null, packageName: 'Elite', handicap: null, billing: 'active', facility: 'active', login: 'claimed', loginClaimedAt: '2026-10-02T10:00' });
-  const h2 = rows[1];
-  expect(h2.athletes[0]).toMatchObject({ billing: 'active', login: 'none', loginEmail: null });
-  expect(h2.flags).toEqual([{ kind: 'booking', id: 'a3_cal-1', flag: 'before-open', date: '2026-10-08' }]);
-  expect(h2).toMatchObject({ unpaid: false, flagged: true });
-  expect(counts).toEqual({ all: 2, unpaid: 1, flagged: 1, unresolved: 1 });
-  expect(unresolved).toEqual([{ id: 'ev-1', outcome: 'unresolved', receivedAt: '2026-10-04T12:00' }]);
-});
-
-test('an open invite younger than 7 days is invited; orphaned reads none', () => {
-  const fresh = [{ id: 'ava@x.com', athleteId: 'a1', status: 'open', createdAt: new Date('2026-10-01T00:00:00') }];
-  expect(buildSignupRows({ households, athletes, invites: fresh, now }).rows[0].athletes[0].login).toBe('invited');
-  const orphan = [{ id: 'ava@x.com', athleteId: 'a1', status: 'orphaned', createdAt: new Date('2026-10-01T00:00:00') }];
-  expect(buildSignupRows({ households, athletes, invites: orphan, now }).rows[0].athletes[0].login).toBe('none');
-});
-```
-
-- [ ] Run `... src/portal/data/signups.test.js` - expect FAIL: cannot find module `./signups`.
-- [ ] Create `data/signups.js`:
-
-```js
-/**
- * The admin sign-ups report (Sprint 20, spec 7) - PURE row builder over the
- * documents hooks/signups.js fetches. One row per self-signed-up household
- * (`signup` present; legacy provisioned households are not sign-ups).
- */
-import { differenceInYears, format, parseISO } from 'date-fns';
-import { packageById } from './packages';
-
-const STALE_INVITE_DAYS = 7;
-
-function toDate(v) {
-  if (!v) return null;
-  if (v instanceof Date) return v;
-  if (typeof v.toDate === 'function') return v.toDate();
-  const d = new Date(v);
-  return Number.isNaN(d.getTime()) ? null : d;
-}
-const stamp = (v) => {
-  const d = toDate(v);
-  return d ? format(d, "yyyy-MM-dd'T'HH:mm") : null;
-};
-
-/** none | invited | invited-stale (open > 7 days) | claimed. */
-function loginFor(athlete, invite, now) {
-  const loginEmail = athlete.loginEmail ?? null;
-  if (!loginEmail || !invite || invite.status === 'orphaned') return { login: 'none', loginEmail, loginClaimedAt: null };
-  if (invite.status === 'claimed') return { login: 'claimed', loginEmail, loginClaimedAt: stamp(invite.claimedAt) };
-  const created = toDate(invite.createdAt);
-  const stale = created ? now.getTime() - created.getTime() > STALE_INVITE_DAYS * 86400000 : false;
-  return { login: stale ? 'invited-stale' : 'invited', loginEmail, loginClaimedAt: null };
-}
-
-export function buildSignupRows({ households = [], athletes = [], invites = [], flaggedBookings = [], calendlyEvents = [], now = new Date() }) {
-  const today = format(now, 'yyyy-MM-dd');
-  const inviteByAthlete = new Map(invites.map((i) => [i.athleteId, i]));
-  const byHousehold = new Map();
-  for (const a of athletes) {
-    if (!a.householdId) continue;
-    if (!byHousehold.has(a.householdId)) byHousehold.set(a.householdId, []);
-    byHousehold.get(a.householdId).push(a);
-  }
-  const rows = households
-    .filter((h) => h && h.signup)
-    .map((h) => {
-      const kids = byHousehold.get(h.id) ?? [];
-      const kidIds = new Set(kids.map((a) => a.id));
-      const rowAthletes = kids.map((a) => ({
-        athleteId: a.id,
-        name: a.name ?? a.id,
-        age: a.dob ? differenceInYears(parseISO(today), parseISO(a.dob)) : null,
-        packageId: a.packageId ?? null,
-        packageName: packageById(a.packageId)?.name ?? null,
-        handicap: Number.isInteger(a.handicap) ? a.handicap : null,
-        billing: a.billing?.status ?? 'active',
-        facility: a.facilityBilling?.status ?? null,
-        ...loginFor(a, inviteByAthlete.get(a.id), now),
-      }));
-      const flags = [
-        ...flaggedBookings.filter((b) => b.flag && kidIds.has(b.athleteId)).map((b) => ({ kind: 'booking', id: b.id, flag: b.flag, date: b.date ?? null })),
-        ...calendlyEvents.filter((e) => e.householdId && e.householdId === h.id).map((e) => ({ kind: 'calendly', id: e.id, outcome: e.outcome, receivedAt: stamp(e.receivedAt) })),
-      ];
-      return {
-        householdId: h.id,
-        name: h.name ?? null,
-        signedUpAt: stamp(h.signup.at),
-        mode: h.signup.mode ?? null,
-        parent: { name: h.guardian?.name ?? null, email: h.guardian?.email ?? null, phone: h.guardian?.phone ?? null },
-        athletes: rowAthletes,
-        flags,
-        unpaid: rowAthletes.some((a) => a.billing === 'pending'),
-        flagged: flags.length > 0,
-      };
-    });
-  // An unresolved Calendly booking has no household to hang off; it is its own list.
-  const unresolved = calendlyEvents.filter((e) => e.outcome === 'unresolved' && !e.householdId).map((e) => ({ id: e.id, outcome: e.outcome, receivedAt: stamp(e.receivedAt) }));
-  return {
-    rows,
-    counts: { all: rows.length, unpaid: rows.filter((r) => r.unpaid).length, flagged: rows.filter((r) => r.flagged).length, unresolved: unresolved.length },
-    unresolved,
-  };
-}
-```
-
-- [ ] Run `... src/portal/data/signups.test.js` - expect PASS.
-- [ ] Create `hooks/signups.js`:
-
-```js
-/**
- * The admin sign-ups report's data (Sprint 20, spec 7) - ops/owner only;
- * every query below is provable under the staff clauses (households,
- * athletes, loginInvites, bookings, calendlyEvents all grant ops/owner
- * unconditionally). New surface, kept out of live.js/index.js.
- */
-import { collection, getDocs, orderBy, query, where } from 'firebase/firestore';
-import { db } from '../../firebase';
-import { useInvalidation } from './invalidate';
-import useSeedResource from './useSeedResource';
-import { fetchAllAthletes, isLive, wrap } from './live';
-import { buildSignupRows } from '../data/signups';
-
-const rowsOf = (snap) => snap.docs.map((d) => ({ id: d.id, ...d.data() }));
-
-/** Self-signed-up households, newest first; households without `signup` are simply absent from the index. */
-export async function fetchSignupHouseholds() {
-  try {
-    return rowsOf(await getDocs(query(collection(db, 'households'), orderBy('signup.at', 'desc'))));
-  } catch (err) {
-    throw wrap(err, 'fetchSignupHouseholds');
-  }
-}
-
-export async function fetchLoginInvites() {
-  try {
-    return rowsOf(await getDocs(collection(db, 'loginInvites')));
-  } catch (err) {
-    throw wrap(err, 'fetchLoginInvites');
-  }
-}
-
-/** The closed flag list (contract section 2) - an `in` query, no composite index. */
-export const BOOKING_FLAGS = ['over-cap', 'over-cadence', 'membership-inactive', 'before-open'];
-export async function fetchFlaggedBookings() {
-  try {
-    return rowsOf(await getDocs(query(collection(db, 'bookings'), where('flag', 'in', BOOKING_FLAGS))));
-  } catch (err) {
-    throw wrap(err, 'fetchFlaggedBookings');
-  }
-}
-
-export async function fetchUnresolvedCalendlyEvents() {
-  try {
-    return rowsOf(await getDocs(query(collection(db, 'calendlyEvents'), where('outcome', '==', 'unresolved'))));
-  } catch (err) {
-    throw wrap(err, 'fetchUnresolvedCalendlyEvents');
-  }
-}
-
-async function liveSignups() {
-  const [households, athletes, invites, flaggedBookings, calendlyEvents] = await Promise.all([
-    fetchSignupHouseholds(), fetchAllAthletes(), fetchLoginInvites(), fetchFlaggedBookings(), fetchUnresolvedCalendlyEvents(),
-  ]);
-  return buildSignupRows({ households, athletes, invites, flaggedBookings, calendlyEvents, now: new Date() });
-}
-
-const EMPTY = { rows: [], counts: { all: 0, unpaid: 0, flagged: 0, unresolved: 0 }, unresolved: [] };
-
-/** `{ data: { rows, counts, unresolved } | null, loading, error }` - see data/signups.js for the row shape. */
-export default function useSignups() {
-  const live = isLive();
-  const gens = [useInvalidation('households'), useInvalidation('athletes'), useInvalidation('bookings'), useInvalidation('loginInvites')];
-  return useSeedResource(live ? null : EMPTY, live ? { source: liveSignups, deps: ['signups', ...gens] } : undefined);
-}
-```
-
-- [ ] `hooks/index.js`: add `import useSignups from './signups';` after `import usePush from './push';` (:96) and `useSignups,` to the re-export at :200. In `liveAdminDashboard` (:3402): `const membership = { active: 0, pastDue: 0, lapsed: 0, pending: 0, lapsedHouseholds: [] };` and after the households loop: `// Sprint 20 (spec 4.4/7): athletes still on checkout - an ATHLETE count beside the household counts, so the dashboard agrees with the sign-ups report.` `membership.pending = athletes.filter((a) => a.billing?.status === 'pending').length;`. Seed (:3567): `membership: { active: 1, pastDue: 0, lapsed: 0, pending: 0, lapsedHouseholds: [] }`.
-- [ ] Verify: esbuild check on `hooks/signups.js` and `index.js`; `... src/portal` - every test PASS. Emulator check on :3003 as the seeded owner: a component calling `useSignups()` (the frontend lane's AdminSignups; until it lands, `window.__rypTestAuth.signInAs(<owner uid>)` then in the console `fetch` is not needed - use React DevTools on `/portal/admin` to read `membership.pending`) shows the db lane's pending seed athlete counted once.
-- [ ] Commit:
-```
-git add frontend/src/portal/data/signups.js frontend/src/portal/data/signups.test.js frontend/src/portal/hooks/signups.js frontend/src/portal/hooks/index.js
-git commit -m "Sprint 20: useSignups (admin sign-ups report data) and the admin pending bucket
-
-Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>"
-```
-
----
-
-## Done when
-
-- `cd frontend && CI=true npx react-scripts test --watchAll=false` is green (calendar, packages, billingHub, calendly, signups, callables, live, useAuthSession, index tests).
-- `node --env-file=scripts/emulator.env scripts/verify-rules.mjs` prints `ALL PASS` against the shared emulator.
-- `wc -l` on every touched file is under 500 except the grandfathered `live.js`/`index.js` (net growth there is limited to the lines named above).
-- Every commit carries the trailer; nothing pushed; the owner deploys `firestore:rules` from the runbook (spec 12.3).
+Continue with `10-routing-part3.md` (Tasks 12, 12b, 13 and "Done when").

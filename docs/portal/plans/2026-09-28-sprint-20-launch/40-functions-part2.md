@@ -1,8 +1,8 @@
-# Functions - Sprint 20 Implementation Plan (part 2 of 5: Tasks 5-6)
+# Functions - Sprint 20 Implementation Plan (part 2 of 8: Tasks 5-6)
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-Read `40-functions.md` first: its Goal, Architecture, Global Constraints and emulator command apply here unchanged. This part covers the Stripe resolution order (Task 5) and the per-athlete billing writers (Task 6); Task 7 (the webhook rework that wires them) is in `40-functions-part3.md`.
+Read `40-functions.md` first: its Goal, Architecture, Global Constraints, Execution order and emulator command apply here unchanged. This part covers the Stripe resolution order (Task 5) and the per-athlete billing writers (Task 6); Task 7 (the webhook rework that wires them) is in `40-functions-part3.md`. Ledger fields and outcomes named here (`stripeEvents.athleteId`, `via`, outcomes `facility-active`, `no-period`; `athletes.billing.lastEventId`; `athletes.facilityBilling.customerId` / `checkoutSessionId` / `lastEventId`) are in the contract (decision D8).
 
 ---
 

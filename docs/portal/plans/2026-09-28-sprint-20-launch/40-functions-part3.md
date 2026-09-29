@@ -1,8 +1,8 @@
-# Functions - Sprint 20 Implementation Plan (part 3 of 5: Tasks 7-8)
+# Functions - Sprint 20 Implementation Plan (part 3 of 8: Task 7)
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-Read `40-functions.md` first: its Goal, Architecture, Global Constraints and emulator command apply here unchanged. Task 7 rewires `stripe.js` around Tasks 5-6 and adds the Stripe launch harness; Task 8 is `createCheckoutSession`.
+Read `40-functions.md` first: its Goal, Architecture, Global Constraints, Execution order and emulator command apply here unchanged. Task 7 rewires `stripe.js` around Tasks 5-6 and adds the Stripe launch harness. Task 8 (`family.js`) is in `40-functions-part4.md`, Task 9 (`createCheckoutSession`) in `40-functions-part5.md`.
 
 ---
 
@@ -14,7 +14,9 @@ Read `40-functions.md` first: its Goal, Architecture, Global Constraints and emu
 
 **Interfaces:**
 - Consumes: Tasks 3, 5, 6; `revoke.revokeHousehold`, `revoke.trimDowngrade` (`stripe.js:375-379`); `stripe.customerIdOf`, `invoicePeriod`, `applyInvoicePaid`, `applyPastDue`, `applyLapsed` (unchanged, the legacy household-wide path when no athlete resolves).
-- Produces: `stripe-checkout.readLineItems(stripe, sessionId) -> Promise<{ok: boolean, priceId: ?string, reason: ?string}>` (new); `stripe-checkout.applyCheckoutCompleted(tx, {db, event, session, ref, athlete, athleteRef, hh, packageIdForPrice}) -> {outcome, firstActive, detail}` (new); `stripe.js` re-exports `resolveSubject`, `subscriptionIdOf`, `periodOf`, `priceIdOf`; `stripeWebhook` declares `runWith({secrets: ['STRIPE_WEBHOOK_SECRET', 'STRIPE_SECRET_KEY', 'SMTP_USER', 'SMTP_PASS']})`.
+- Produces: `stripe-checkout.shapeOf(items) -> {ok: boolean, priceId: ?string, reason: ?string}` (new, pure: decision D13 - exactly one recurring line plus at most one one-time line, every quantity 1, else `'unexpected-quantity'`); `stripe-checkout.readLineItems(stripe, sessionId) -> Promise<{ok, priceId, reason}>` (new; `shapeOf` over `listLineItems`, or over the `STRIPE_LINE_ITEMS_STUB` entry under the emulator); `stripe-checkout.applyCheckoutCompleted(tx, {event, session, ref, priceId, athlete, athleteRef, hh, packageId}) -> {outcome, firstActive, detail}` (new); `stripe.js` exports `resolveSubject`, `subscriptionIdOf`, `periodOf`, `priceIdOf` from `stripe-resolve.js` beside its own names; `stripeWebhook` declares `runWith({secrets: ['STRIPE_WEBHOOK_SECRET', 'STRIPE_SECRET_KEY', 'SMTP_USER', 'SMTP_PASS']})` (Task 11 replaces the literal with `secrets.STRIPE_WEBHOOK_SECRETS`, the same list).
+- Facility add-on rule (decision D10): `customer.subscription.deleted` and `invoice.payment_failed` for `product === 'facility'` write `athletes.facilityBilling.status` (`'lapsed'` / `'past_due'`) and `facilityAccess: false` ONLY - they never touch household membership and never revoke bookings. The tier product keeps the household-wide path (`applyLapsed` / `applyPastDue` + the athlete's `billing.status`).
+- Ledger (contract 2, decision D8): `stripeEvents` rows carry `athleteId` and `via`; outcomes gain `facility-active` and `no-period` beside `applied-checkout`, `issued-prepaid`, `unexpected-quantity`, `stripe-lookup-failed`.
 
 - [ ] **Step 1: Write `stripe-checkout.js`**
 
@@ -22,7 +24,7 @@ Read `40-functions.md` first: its Goal, Architecture, Global Constraints and emu
 /**
  * `checkout.session.completed` (spec 4.3). Line items are read from Stripe
  * BEFORE the transaction; one recurring line (qty 1) plus at most one
- * one-time prepaid line (qty 1) is the only accepted shape.
+ * one-time prepaid line (qty 1) is the only accepted shape (decision D13).
  */
 'use strict';
 
@@ -31,23 +33,43 @@ const {parseClientReference} = require('./stripe-resolve');
 const {billingPatch} = require('./stripe-billing');
 
 /**
+ * The accepted line-item shape (D13): exactly one recurring line, at most
+ * one one-time line, every quantity 1, nothing without a price.
+ * @param {!Array<!Object>} items `listLineItems(...).data` (or the stub).
+ * @return {{ok: boolean, priceId: ?string, reason: ?string}} The recurring
+ *     price id, or `reason: 'unexpected-quantity'`.
+ */
+function shapeOf(items) {
+  const list = Array.isArray(items) ? items : [];
+  const recurring = list.filter((i) => i && i.price && i.price.recurring);
+  const oneTime = list.filter((i) => i && i.price && !i.price.recurring);
+  const badQty = list.some((i) => Number(i && i.quantity) !== 1);
+  if (recurring.length !== 1 || oneTime.length > 1 || badQty ||
+      list.length !== recurring.length + oneTime.length) {
+    return {ok: false, priceId: null, reason: 'unexpected-quantity'};
+  }
+  return {ok: true, priceId: recurring[0].price.id, reason: null};
+}
+
+/**
+ * The session's line items, shaped. Under the emulator ONLY, a JSON map
+ * `STRIPE_LINE_ITEMS_STUB` (sessionId -> items, functions/.env.local)
+ * stands in for Stripe so test/verify-stripe-launch.js runs offline; the
+ * guard is FUNCTIONS_EMULATOR, so production never reads it.
  * @param {!Object} stripe The Stripe client.
  * @param {string} sessionId The Checkout Session id.
  * @return {!Promise<{ok: boolean, priceId: ?string, reason: ?string}>}
  *     The recurring price, or why the shape is refused.
  */
 async function readLineItems(stripe, sessionId) {
+  if (process.env.FUNCTIONS_EMULATOR === 'true' &&
+      process.env.STRIPE_LINE_ITEMS_STUB) {
+    const stub = JSON.parse(process.env.STRIPE_LINE_ITEMS_STUB)[sessionId];
+    if (stub) return shapeOf(stub);
+  }
   const list = await stripe.checkout.sessions.listLineItems(sessionId,
       {limit: 10});
-  const items = (list && list.data) || [];
-  const recurring = items.filter((i) => i.price && i.price.recurring);
-  const oneTime = items.filter((i) => i.price && !i.price.recurring);
-  const badQty = items.some((i) => Number(i.quantity) !== 1);
-  if (recurring.length !== 1 || oneTime.length > 1 || badQty ||
-      items.length !== recurring.length + oneTime.length) {
-    return {ok: false, priceId: null, reason: 'unexpected-quantity'};
-  }
-  return {ok: true, priceId: recurring[0].price.id, reason: null};
+  return shapeOf((list && list.data) || []);
 }
 
 /**
@@ -90,7 +112,9 @@ function applyCheckoutCompleted(tx, args) {
       packageId: patch.packageId || null}};
 }
 
-module.exports = {applyCheckoutCompleted, parseClientReference, readLineItems};
+module.exports = {
+  applyCheckoutCompleted, parseClientReference, readLineItems, shapeOf,
+};
 ```
 
 - [ ] **Step 2: Rewrite `handleEvent` in `stripe.js`** (replace `:305-389`; add the requires `const catalogue = require('./catalogue'); const resolve = require('./stripe-resolve'); const billing = require('./stripe-billing'); const checkout = require('./stripe-checkout');` at `:34`; add `'checkout.session.completed'` to `HANDLED` at `:37-42`)
@@ -200,14 +224,28 @@ async function handleEvent(event) {
     } else if (event.type === 'invoice.payment_failed') {
       const final = object.next_payment_attempt === null ||
           object.next_payment_attempt === undefined;
-      applied = final ? applyLapsed(tx, event, hh, 'unpaid') :
-          applyPastDue(tx, event, hh);
-      billing.applyAthleteStatus(tx, {athleteRef, athlete, product,
-        status: final ? 'lapsed' : 'past_due', priceId: null});
+      const status = final ? 'lapsed' : 'past_due';
+      if (product === 'facility') {
+        // D10: the add-on fails alone - membership and bookings untouched.
+        applied = billing.applyAthleteStatus(tx, {athleteRef, athlete,
+          product, status, priceId: null});
+      } else {
+        applied = final ? applyLapsed(tx, event, hh, 'unpaid') :
+            applyPastDue(tx, event, hh);
+        billing.applyAthleteStatus(tx, {athleteRef, athlete, product,
+          status, priceId: null});
+      }
     } else if (event.type === 'customer.subscription.deleted') {
-      applied = applyLapsed(tx, event, hh, object.status || 'canceled');
-      billing.applyAthleteStatus(tx, {athleteRef, athlete, product,
-        status: 'lapsed', priceId: resolve.priceIdOf(object)});
+      if (product === 'facility') {
+        // D10: facilityBilling.status 'lapsed' + facilityAccess false ONLY;
+        // no applyLapsed, no followUp 'revoke'.
+        applied = billing.applyAthleteStatus(tx, {athleteRef, athlete,
+          product, status: 'lapsed', priceId: resolve.priceIdOf(object)});
+      } else {
+        applied = applyLapsed(tx, event, hh, object.status || 'canceled');
+        billing.applyAthleteStatus(tx, {athleteRef, athlete, product,
+          status: 'lapsed', priceId: resolve.priceIdOf(object)});
+      }
     } else if (event.type === 'customer.subscription.updated') {
       applied = await applyAthleteSubscriptionUpdated(tx, event, hh, athlete,
           athleteRef, product);
@@ -289,6 +327,8 @@ async function applyLegacy(tx, event, hh, object) {
 /**
  * `customer.subscription.updated` for ONE athlete: status, price, and a
  * package remap (with the downgrade follow-up) for that athlete alone.
+ * Signature `(tx, event, hh, athlete, athleteRef, product)` - exactly what
+ * `handleEvent` passes; the athlete's CURRENT package is not needed here.
  * @param {!Object} tx The transaction.
  * @param {!Object} event The event.
  * @param {!Object} hh The household.
@@ -298,7 +338,7 @@ async function applyLegacy(tx, event, hh, object) {
  * @return {!Promise<!Object>} What was applied.
  */
 async function applyAthleteSubscriptionUpdated(tx, event, hh, athlete,
-    athleteRef, product, pkg) {
+    athleteRef, product) {
   const sub = event.data.object || {};
   const priceId = resolve.priceIdOf(sub);
   const period = resolve.periodOf(sub);
@@ -332,17 +372,14 @@ async function applyAthleteSubscriptionUpdated(tx, event, hh, athlete,
 }
 ```
 
-(`pkg` - the CURRENT package - is unused by this helper; drop the parameter
-and the argument in `handleEvent`, and `await` the call there.)
-
 Change `:395` to
 `const stripeWebhook = functions.runWith({secrets: ['STRIPE_WEBHOOK_SECRET', 'STRIPE_SECRET_KEY', 'SMTP_USER', 'SMTP_PASS']}).https.onRequest(async (req, res) => {`
 and the export list to
 `{customerIdOf, handleEvent, invoicePeriod, periodOf: resolve.periodOf, priceIdOf: resolve.priceIdOf, resolveSubject: resolve.resolveSubject, stripeWebhook, subscriptionIdOf: resolve.subscriptionIdOf}`.
 `revoke.trimDowngrade` (`revoke.js:64-97`) is unchanged: it reads
 `detail.tokens` as the new grant (`:84`) and `detail.athleteIds` (`:74`).
-New ledger fields on `stripeEvents`: `athleteId`, `via` (new, not in
-contract; report-visible only).
+The ledger fields `stripeEvents.athleteId` and `via` this writes are in the
+contract (decision D8; report-visible).
 
 If `stripe.js` crosses 500 lines after this edit, move `applyLegacy`,
 `applyInvoicePaid`, `applyPastDue`, `applyLapsed` and
@@ -354,9 +391,77 @@ require them back.
 Run: `cd functions && npm run lint && node test/verify-lane.js`
 Expected: lint clean; `ALL CHECKS PASSED`.
 
-- [ ] **Step 4: Write `functions/test/verify-stripe-launch.js`** (same helpers as `verify-lane.js:6-65` - copy `check`, `checkTrue`, `post`, `get`, `exists`, `settle`, `wipe` verbatim; it wipes the same emulator, so never run together)
+- [ ] **Step 4: Write `functions/test/verify-stripe-launch.js`** (the header below is `verify-lane.js:6-65` copied - `check`, `checkTrue`, `secs`, `TS`, `get`, `exists`, `post`, `settle`, `wipe` verbatim, the same `SECRET` and `URL`; it wipes the same emulator instance, so never run two harnesses at once; `test/` is not linted, `.eslintignore:2`)
 
 ```js
+/* Sprint 20 Stripe launch replay harness - runs against the ISOLATED emulator
+ * (firestore 8082 / functions 5001, config firebase.functions-lane.json at the
+ * repo root). It WIPES and reseeds that instance; never point it at 8080.
+ *   cd functions && npx firebase-tools emulators:start --only firestore,functions --project rypacad --config ../firebase.functions-lane.json
+ *   node test/verify-stripe-launch.js   (from functions/)
+ * Needs functions/.env.local (Task 11 Step 4): STRIPE_WEBHOOK_SECRET equal to
+ * SECRET below, STRIPE_LINE_ITEMS_STUB for STEP B/C/E, and
+ * STRIPE_SECRET_KEY=sk_test_harness so Task 13 STEP H fails deterministically. */
+'use strict';
+
+process.env.FIRESTORE_EMULATOR_HOST = '127.0.0.1:8082';
+process.env.GCLOUD_PROJECT = 'rypacad';
+
+const admin = require('firebase-admin');
+const Stripe = require('stripe');
+
+const SECRET = 'whsec_functionslane_emulator_only_not_a_real_secret';
+const URL = 'http://127.0.0.1:5001/rypacad/us-central1/stripeWebhook';
+const stripe = new Stripe('sk_test_harness');
+
+admin.initializeApp({projectId: 'rypacad'});
+const db = admin.firestore();
+
+let failures = 0;
+const log = (...a) => console.log(...a);
+function check(label, actual, expected) {
+  const a = JSON.stringify(actual);
+  const e = JSON.stringify(expected);
+  if (a === e) { log(`    PASS  ${label} = ${a}`); }
+  else { failures++; log(`    FAIL  ${label}\n          expected ${e}\n          actual   ${a}`); }
+}
+function checkTrue(label, cond, detail) {
+  if (cond) log(`    PASS  ${label}`);
+  else { failures++; log(`    FAIL  ${label} ${detail === undefined ? '' : detail}`); }
+}
+
+const secs = (y, m, d) => Date.UTC(y, m - 1, d, 12) / 1000;
+const TS = (ms) => admin.firestore.Timestamp.fromMillis(ms);
+
+async function get(col, id) {
+  const s = await db.collection(col).doc(id).get();
+  return s.exists ? s.data() : null;
+}
+async function exists(col, id) {
+  return (await db.collection(col).doc(id).get()).exists;
+}
+async function post(event) {
+  const payload = JSON.stringify(event);
+  const sig = stripe.webhooks.generateTestHeaderString({payload, secret: SECRET});
+  const res = await fetch(URL, {
+    method: 'POST',
+    headers: {'content-type': 'application/json', 'stripe-signature': sig},
+    body: payload,
+  });
+  const text = await res.text();
+  let body; try { body = JSON.parse(text); } catch { body = text; }
+  return {status: res.status, body};
+}
+async function settle(ms) { await new Promise((r) => setTimeout(r, ms)); }
+async function wipe() {
+  for (const c of ['households', 'athletes', 'packages', 'sessions', 'bookings',
+    'waitlist', 'graceTokens', 'tokenPeriods', 'stripeEvents', 'users',
+    'notifications']) {
+    const snap = await db.collection(c).get();
+    await Promise.all(snap.docs.map((d) => d.ref.delete()));
+  }
+}
+
 async function seed() {
   await wipe();
   const B = db.batch();
@@ -468,22 +573,13 @@ main().catch((e) => {
 });
 ```
 
-The line-item stub: in `stripe-checkout.readLineItems`, before calling
-Stripe, add
-
-```js
-  if (process.env.FUNCTIONS_EMULATOR === 'true' &&
-      process.env.STRIPE_LINE_ITEMS_STUB) {
-    const stub = JSON.parse(process.env.STRIPE_LINE_ITEMS_STUB)[sessionId];
-    if (stub) return shapeOf(stub);
-  }
-```
-
-where `shapeOf(items)` is the body of `readLineItems` after the `list` call
-(extract it into a function). `functions/.env.local` (gitignored, emulator
-only) then carries
+The line-item stub `readLineItems` reads (Step 1) comes from
+`functions/.env.local` (gitignored by `functions/.gitignore` `*.local`,
+emulator only; the file is created in Task 11 Step 4 - see Execution order
+in `40-functions.md`), one line:
 `STRIPE_LINE_ITEMS_STUB={"cs_evt_b":[{"quantity":1,"price":{"id":"price_t6","recurring":{"interval":"month"}}},{"quantity":1,"price":{"id":"price_1x"}}],"cs_evt_c":[{"quantity":1,"price":{"id":"price_elite","recurring":{"interval":"month"}}}],"cs_evt_f":[{"quantity":2,"price":{"id":"price_t6","recurring":{"interval":"month"}}}]}`
-(one line). Never read in production: the guard is `FUNCTIONS_EMULATOR`.
+(Task 13 adds `cs_evt_g`). Never read in production: the guard is
+`FUNCTIONS_EMULATOR`. Restart the emulator after editing the file.
 
 - [ ] **Step 5: Run the new harness**
 
@@ -498,3 +594,6 @@ git add functions/portal/stripe.js functions/portal/stripe-checkout.js functions
 git commit -m "feat(functions): checkout.session.completed, per-athlete resolution, Basil shapes" -m "Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>"
 ```
 
+
+---
+Continue with `40-functions-part4.md` (Task 8, `family.js`).

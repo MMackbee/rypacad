@@ -2,9 +2,9 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**This plan is split in two files.** Tasks 1-6 are here; Tasks 7-13 are in
-`10-routing-part2.md` (same directory). Do them in order: 7-13 build on the
-names Tasks 1-6 produce.
+**This plan is split in three files.** Tasks 1-5 are here; Tasks 6-11 are in
+`10-routing-part2.md`; Tasks 12, 12b and 13 are in `10-routing-part3.md` (same
+directory). Follow the execution order below, not the file order.
 
 **Goal:** Ship the rules, data constants, gates, callable clients, auth-session
 claim flow and hook plumbing that make instant sign-up, per-athlete paid status,
@@ -30,6 +30,20 @@ closing): #1 rules, #2 `useAuthSession`, #3 `live.js` gates + callable clients,
 #4 data constants (`calendar.js`/`packages.js`/`season.js`/`calendly.js`),
 #5 `billingHub.statusFor('pending')` + `hooks/billing.js`, #6 `hooks/index.js` plumbing + `useSignups`.
 
+## Execution order
+
+**Tasks 1, 2, 3, 6, 9 first**, then **4 and 5** (rules), then **7, 8, 10, 11, 12,
+12b, 13**. Why: 1/2/3/6/9 produce the seams every frontend screen imports
+(`bookingOpen`/`BOOKING_OPENS_LABEL`, `calendlyLinkFor`, `hubMemberFor(...).billing`,
+`callCreateFamily`/`callClaimInvite`, `useAuthSession().createLogin/refresh/claimState`),
+and the frontend lane's Day-2 rule is that every screen importing a routing seam
+keeps its jest virtual mock AND, on a day-1 route, guards the import at runtime
+with the namespace-import + inert-fallback pattern (`Registration.js:27-35`,
+`useEnrollmentFallback`) so `/portal/admin` never crashes before Task 13 merges -
+landing the seams first shortens the window in which that fallback is what runs.
+The rules (4/5) import nothing and are exercised only on the emulator, so they
+sit between; the `hooks/index.js` plumbing (7-13) builds on everything before it.
+
 ## Global Constraints
 
 - Token window is **30 days** on t-6/t-12/t-16/single, Elite stays 45 (spec 0.5, 5).
@@ -37,6 +51,7 @@ closing): #1 rules, #2 `useAuthSession`, #3 `live.js` gates + callable clients,
 - Charging never branches on session type; the mental cadence and Elite daily caps remain the only named exceptions (spec 6.1, `packages.js:81-87`).
 - Tokens are derived, never stored (spec 4.4, 6.2 step 4; `packages.js:144-156`).
 - Rules keep closed `hasAll`/`hasOnly` field lists; `billing`, `facilityBilling`, `source`, `calendlyInviteeUri`, `flag` never enter a client `hasOnly` (contract section 2).
+- **Null-safe rule spellings (contract section 5).** Rules read every optional field null-safe: `!('billing' in a) || a.billing.status == 'active'`, `a.get('packageId', null) == 'elite'`, `resource.data.get('source', null) != 'calendly'`, `h.get('membership', null)`, `request.auth.token.get('email_verified', false) == true` and `request.auth.token.get('email', '').lower()`. Contract section 5 spells the same clauses as `a.packageId == 'elite'` and `request.auth.token.email_verified == true`; the `get(key, default)` / `'key' in map` forms in Tasks 4-5 are what ships. In the rules language a missing key is an evaluation error and an error denies the WHOLE request - an emulator custom-token user has no `email` claim at all, and every athlete provisioned before this sprint has no `billing` map.
 - Files stay under 500 lines; new code goes in new files (`callables.js`, `signups.js`, `calendly.js`), never into the grandfathered `live.js`/`index.js` beyond the edits named here.
 - No secrets in source; env names only (contract section 8).
 - Repo files are CRLF: edit with the Edit tool (preserves endings); never `sed -i`.
@@ -283,14 +298,15 @@ Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>"
 
 ---
 
-### Task 3: `statusFor('pending')`, per-athlete billing in the hub, `usePaymentConfirmation` (closes #5)
+### Task 3: `statusFor('pending')`, per-athlete billing in the hub, `usePaymentConfirmation`, the portal-URL warning (closes #5)
 
 **Files:**
 - Modify: `frontend/src/portal/data/billingHub.js` (`hubMemberFor` return :142-186; `statusFor` :202-257)
 - Modify: `frontend/src/portal/data/billingHub.test.js` (append)
-- Modify: `frontend/src/portal/hooks/billing.js` (imports :19-42; `liveHub` :110-122; `liveMyTokens` :134-150; append hook)
+- Modify: `frontend/src/portal/hooks/billing.js` (imports :19-42; `STRIPE_PORTAL_URL` :45; `liveHub` :110-122; `liveMyTokens` :134-150; append hook)
+- Create: `frontend/src/portal/hooks/billing.test.js`
 
-**Interfaces:** Consumes `hubMemberFor`, `statusFor` (billingHub.js). Produces `hubMemberFor(...).billing = { status, facility }`, `statusFor(membership, { pendingAthletes })` pending branch (contract 3.5), `usePaymentConfirmation(athleteId) -> { state, billingStatus }` (contract 4.5).
+**Interfaces:** Consumes `hubMemberFor`, `statusFor` (billingHub.js). Produces `hubMemberFor(...).billing = { status, facility }` and `hubMemberFor(...).facilityAccessConsent: boolean` (D9), `statusFor(membership, { pendingAthletes })` pending branch (contract 3.5), `usePaymentConfirmation(athleteId) -> { state, billingStatus }` (contract 4.5), `warnMissingPortalUrl({ live, url }) -> boolean` (new, not in contract - the one-shot console warning for a live build without `REACT_APP_STRIPE_PORTAL_URL`, spec 4.4 "required").
 
 - [ ] Append to `billingHub.test.js`:
 
@@ -302,6 +318,14 @@ describe('per-athlete billing (Sprint 20, spec 4.4)', () => {
     expect(pending.billing).toEqual({ status: 'pending', facility: null });
     const add = hubMemberFor({ ...fixture(), athlete: { ...athlete, billing: { status: 'active' }, facilityBilling: { status: 'active' } } });
     expect(add.billing).toEqual({ status: 'active', facility: 'active' });
+  });
+
+  test('hubMemberFor carries the facility waiver as a boolean (spec 4.5: "paid - waiver pending" vs "active")', () => {
+    expect(hubMemberFor(fixture()).facilityAccessConsent).toBe(false);
+    const nulled = hubMemberFor({ ...fixture(), athlete: { ...athlete, facilityAccessConsent: null } });
+    expect(nulled.facilityAccessConsent).toBe(false);
+    const signed = hubMemberFor({ ...fixture(), athlete: { ...athlete, facilityAccessConsent: { signedAt: '2026-09-01', byUid: 'p1' } } });
+    expect(signed.facilityAccessConsent).toBe(true);
   });
 
   test('statusFor pending: after past_due/lapsed, before active', () => {
@@ -321,10 +345,15 @@ describe('per-athlete billing (Sprint 20, spec 4.4)', () => {
 });
 ```
 
-- [ ] Run `... src/portal/data/billingHub.test.js` - expect FAIL: `billing` undefined; status `'active'`.
+- [ ] Run `... src/portal/data/billingHub.test.js` - expect FAIL: `billing` undefined; `facilityAccessConsent` undefined; status `'active'`.
 - [ ] In `hubMemberFor`'s return (after `facilityAccess: Boolean(athlete.facilityAccess),` :185) add:
 
 ```js
+    // Sprint 20 (spec 4.5): the signed waiver (`{ signedAt, byUid } | null`
+    // on the doc, DATA-MODEL:79, ops-verified) as a boolean, so the hub card
+    // can read "Facility access: paid - waiver pending" (facility billing
+    // active, consent absent) versus "active" (both).
+    facilityAccessConsent: Boolean(athlete.facilityAccessConsent),
     // Sprint 20 (spec 4.4): the per-athlete paid state that gates booking.
     // Absent == active for every athlete provisioned before this sprint;
     // `facility` is the add-on subscription's own state (null == no add-on).
@@ -368,12 +397,64 @@ function listNames(names) {
 ```
 
 - [ ] Run `... src/portal/data/billingHub.test.js` - expect PASS.
-- [ ] `hooks/billing.js`: add `import { useEffect, useState } from 'react';` at the top and `bump` to the `./invalidate` import (:23 -> `import { bump, useInvalidation } from './invalidate';`). In `liveHub` (:110-122) replace `status: statusFor(membership, { resetsOn, anchorDay }),` with:
+- [ ] Write the failing test `frontend/src/portal/hooks/billing.test.js` (the same five mocks Task 10's `index.test.js` uses - `billing.js` imports `./index` for `coachingFor`):
+
+```js
+/**
+ * hooks/billing.js' Sprint 20 guard (spec 4.4: REACT_APP_STRIPE_PORTAL_URL
+ * is REQUIRED in production): a live build without it warns ONCE per page
+ * load; seed mode and a set URL never warn. Firebase is mocked out.
+ */
+jest.mock('../../firebase', () => ({ __esModule: true, default: {}, auth: { currentUser: null }, db: {}, functions: {}, storage: {} }));
+jest.mock('firebase/firestore', () => ({}));
+jest.mock('firebase/auth', () => ({}));
+jest.mock('firebase/functions', () => ({ httpsCallable: jest.fn(() => jest.fn()) }));
+jest.mock('firebase/messaging', () => ({ isSupported: jest.fn(async () => false) }));
+
+import { warnMissingPortalUrl } from './billing';
+
+test('warnMissingPortalUrl fires once, only live, only when the URL is missing', () => {
+  const warn = jest.spyOn(console, 'warn').mockImplementation(() => {});
+  expect(warnMissingPortalUrl({ live: false, url: null })).toBe(false);
+  expect(warnMissingPortalUrl({ live: true, url: 'https://billing.stripe.com/p/login/test_x' })).toBe(false);
+  expect(warn).not.toHaveBeenCalled();
+  expect(warnMissingPortalUrl({ live: true, url: null })).toBe(true);
+  expect(warn).toHaveBeenCalledTimes(1);
+  expect(warn.mock.calls[0][0]).toContain('REACT_APP_STRIPE_PORTAL_URL');
+  expect(warnMissingPortalUrl({ live: true, url: null })).toBe(false); // once per page load
+  expect(warn).toHaveBeenCalledTimes(1);
+  warn.mockRestore();
+});
+```
+
+- [ ] Run `... src/portal/hooks/billing.test.js` - expect FAIL: `warnMissingPortalUrl` is not a function.
+- [ ] `hooks/billing.js`: add `import { useEffect, useState } from 'react';` at the top and `bump` to the `./invalidate` import (:23 -> `import { bump, useInvalidation } from './invalidate';`). Replace the `STRIPE_PORTAL_URL` block (:44-45) with:
+
+```js
+/**
+ * The Stripe no-code customer portal login link. Sprint 20 (spec 4.4): no
+ * longer optional - without it a failed card has no self-serve fix. The app
+ * still renders (the hub omits the link), but a LIVE build without it says
+ * so in the console once per page load; seed mode and jest never carry the
+ * var and never warn. `live`/`url` are injectable for the unit test.
+ */
+export const STRIPE_PORTAL_URL = process.env.REACT_APP_STRIPE_PORTAL_URL || null;
+let portalUrlWarned = false;
+export function warnMissingPortalUrl({ live = isLive(), url = STRIPE_PORTAL_URL } = {}) {
+  if (portalUrlWarned || !live || url) return false;
+  portalUrlWarned = true;
+  console.warn(
+    'REACT_APP_STRIPE_PORTAL_URL is not set: the billing hub cannot offer the Stripe customer portal, so a failed card has no self-serve fix (Sprint 20, spec 4.4 - required in production).'
+  );
+  return true;
+}
+```
+  In `liveHub` (:110-122) add `warnMissingPortalUrl();` as the first statement and replace `status: statusFor(membership, { resetsOn, anchorDay }),` with:
 
 ```js
     status: statusFor(membership, { resetsOn, anchorDay, pendingAthletes: pendingOf(members) }),
 ```
-  In `liveMyTokens` (:145-149) replace the `status:` line with `status: statusFor(membership, { resetsOn, anchorDay, pendingAthletes: pendingOf([member]) }),`. Add above `liveHub`:
+  In `liveMyTokens` (:134-150) add `warnMissingPortalUrl();` as the first statement and replace the `status:` line with `status: statusFor(membership, { resetsOn, anchorDay, pendingAthletes: pendingOf([member]) }),`. Add above `liveHub`:
 
 ```js
 /** The members still waiting on checkout (Sprint 20, spec 4.4) - drives statusFor's pending branch. */
@@ -439,11 +520,11 @@ export function usePaymentConfirmation(athleteId) {
 }
 ```
 
-- [ ] Run `cd frontend && npx esbuild src/portal/hooks/billing.js --bundle --platform=browser --outfile=/dev/null --log-level=error 2>&1 | head` (the repo's compile check; `esbuild` is under `frontend/node_modules/.bin`) - expect no output. Then `... src/portal/data` - expect PASS.
+- [ ] Run `cd frontend && npx esbuild src/portal/hooks/billing.js --bundle --platform=browser --outfile=/dev/null --log-level=error 2>&1 | head` (the repo's compile check; `esbuild` is under `frontend/node_modules/.bin`) - expect no output. Then `... src/portal/data` and `... src/portal/hooks/billing.test.js` - expect PASS.
 - [ ] Commit:
 ```
-git add frontend/src/portal/data/billingHub.js frontend/src/portal/data/billingHub.test.js frontend/src/portal/hooks/billing.js
-git commit -m "Sprint 20: billing hub pending state, per-athlete billing, usePaymentConfirmation
+git add frontend/src/portal/data/billingHub.js frontend/src/portal/data/billingHub.test.js frontend/src/portal/hooks/billing.js frontend/src/portal/hooks/billing.test.js
+git commit -m "Sprint 20: billing hub pending state, per-athlete billing + waiver flag, usePaymentConfirmation, portal-URL warning
 
 Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>"
 ```
@@ -456,7 +537,7 @@ Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>"
 - Modify: `firestore.rules` (helpers :48-50; athletes create :153-162; bookings create :524-539; waitlist create :1244-1254)
 - Create: `scripts/verify-rules.mjs` (emulator probe, ESM, dependency-free)
 
-**Interfaces:** Produces rules helpers `athleteBillingOk(a)`, `bookingOpenOk(a)`, `bookingAthleteOk()`, `waitlistAthleteOk()` (contract 5). `scripts/verify-rules.mjs` (new, not in contract) is this lane's emulator harness; Task 5 extends it.
+**Interfaces:** Produces rules helpers `athleteBillingOk(a)`, `bookingOpenOk(a)`, `bookingAthleteOk()`, `waitlistAthleteOk()` (contract 5). `scripts/verify-rules.mjs` (new, not in contract) is this lane's emulator harness; Task 5 extends it. The probe's grace-token booking is the spec 11 "parent+grace booking before Oct 10 stays under the read cap" check.
 
 - [ ] Add after `athleteData` (:48-50):
 
@@ -518,7 +599,7 @@ Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>"
       }
 ```
   and in `allow create` (:1244-1254) replace the `householdId == athleteData(...)` pair with `&& waitlistAthleteOk()`.
-- [ ] Create `scripts/verify-rules.mjs` (dependency-free; the Firestore emulator decodes an UNSIGNED `Bearer` JWT as `request.auth`, and `Bearer owner` bypasses rules - the same trick `frontend/src/firebase.js:82-96` uses for the auth emulator). Uses a throwaway project id so the `rypacad` seed is never touched (memory: emulator-admin-probe):
+- [ ] Create `scripts/verify-rules.mjs` (dependency-free; the Firestore emulator decodes an UNSIGNED `Bearer` JWT as `request.auth`, and `Bearer owner` bypasses rules - the same trick `frontend/src/firebase.js:82-96` uses for the auth emulator). Uses a throwaway project id so the `rypacad` seed is never touched (memory: emulator-admin-probe). The `graceTokens/grace-probe` doc follows DATA-MODEL "graceTokens (contract v2.1, Part 2)" (`{ athleteId, householdId, expiresAt 'YYYY-MM-DD', reason, sourceSessionId, createdBy, createdAt }`); `bookingGraceOk` (`firestore.rules:470-478`) checks `athleteId == d.athleteId` and `expiresAt >= d.date`:
 
 ```js
 /**
@@ -591,7 +672,14 @@ async function setup() {
     ['ath-elite-pending', { packageId: 'elite', billing: { status: 'pending' } }],
   ]) await seed('athletes', id, { name: id, householdId: 'hh', contractMinutes: null, coachId: null, ...extra });
   await seed('sessions', 's1', { date: '2026-11-04', time: '4:00 PM', type: 'training', capacity: 15, booked: 0, status: 'scheduled' });
+  await seed('sessions', 's2', { date: '2026-11-05', time: '4:00 PM', type: 'training', capacity: 15, booked: 0, status: 'scheduled' });
   await seed('sessions', 's-full', { date: '2026-11-04', time: '5:00 PM', type: 'training', capacity: 1, booked: 1, status: 'scheduled' });
+  // Sprint 20 read-cap check (spec 11): a grace-charged booking by the PARENT
+  // walks the longest create path - me() + sessions + graceTokens (x2, one
+  // doc) + households + athletes = 5 unique docs of the 10-doc cap. Held by
+  // ath-elite so the expectation is 200 before AND after the Oct 10 gate.
+  await seed('graceTokens', 'grace-probe', { athleteId: 'ath-elite', householdId: 'hh', expiresAt: '2026-12-31', reason: 'session-cancelled',
+    sourceSessionId: 's-cancelled', createdBy: uid.ops, createdAt: new Date() });
 }
 const booking = (athleteId) => ({ athleteId, sessionId: 's1', date: '2026-11-04', type: 'training', periodKey: '2026-11-01',
   status: 'confirmed', householdId: 'hh', createdBy: uid.parent, chargedFrom: 'period' });
@@ -609,15 +697,18 @@ export async function task4() {
   expect('booking: billing pending refused', await createAs(t.parent, 'bookings', 'ath-pending_s1', booking('ath-pending')), 403);
   expect('booking: paid Elite books before the gate', await createAs(t.parent, 'bookings', 'ath-elite_s1', booking('ath-elite')), 200);
   expect('booking: unpaid Elite refused', await createAs(t.parent, 'bookings', 'ath-elite-pending_s1', booking('ath-elite-pending')), 403);
+  expect('booking: parent + grace token stays under the read cap (paid Elite: open before the gate too)',
+    await createAs(t.parent, 'bookings', 'ath-elite_s2', { ...booking('ath-elite'), sessionId: 's2', date: '2026-11-05', chargedFrom: 'grace', graceTokenId: 'grace-probe' }), 200);
   expect('waitlist: pending refused', await createAs(t.parent, 'waitlist', 's-full_ath-pending', entry('ath-pending'), ['joinedAt']), 403);
   expect('waitlist: paid Elite allowed', await createAs(t.parent, 'waitlist', 's-full_ath-elite', entry('ath-elite'), ['joinedAt']), 200);
   expect('waitlist: active token athlete', await createAs(t.parent, 'waitlist', 's-full_ath-active', entry('ath-active'), ['joinedAt']), beforeGate ? 403 : 200);
 }
 
 async function teardown() {
-  for (const [c, ids] of Object.entries({ users: Object.values(uid), households: ['hh'], sessions: ['s1', 's-full'],
+  for (const [c, ids] of Object.entries({ users: Object.values(uid), households: ['hh'], sessions: ['s1', 's2', 's-full'],
     athletes: ['ath-active', 'ath-absent', 'ath-pending', 'ath-elite', 'ath-elite-pending', 'new-1', 'new-2', 'new-3', 'new-4'],
-    bookings: ['ath-active_s1', 'ath-absent_s1', 'ath-pending_s1', 'ath-elite_s1', 'ath-elite-pending_s1'],
+    bookings: ['ath-active_s1', 'ath-absent_s1', 'ath-pending_s1', 'ath-elite_s1', 'ath-elite-pending_s1', 'ath-elite_s2'],
+    graceTokens: ['grace-probe'],
     waitlist: ['s-full_ath-pending', 's-full_ath-elite', 's-full_ath-active'] })) for (const id of ids) await del(c, id);
 }
 
@@ -630,7 +721,7 @@ if (process.argv[1] && process.argv[1].endsWith('verify-rules.mjs')) {
 }
 ```
 
-- [ ] Start the shared emulator from this worktree (rules hot-reload on save): `npx firebase-tools emulators:start --only firestore,auth --project rypacad` in its own terminal (leave running; stop it by PID from `netstat -ano | findstr :8080`, never `taskkill /IM node.exe`). Run `node --env-file=scripts/emulator.env scripts/verify-rules.mjs` - expect every line PASS and `ALL PASS`. If the emulator reports a rules compile error on save, fix the rules before re-running (a `let` is only legal inside a function body; `'billing' in a` needs `a` to be a map).
+- [ ] Start the shared emulator from this worktree (rules hot-reload on save): `npx firebase-tools emulators:start --only firestore,auth --project rypacad` in its own terminal (leave running; stop it by PID from `netstat -ano | findstr :8080`, never `taskkill /IM node.exe`). Run `node --env-file=scripts/emulator.env scripts/verify-rules.mjs` - expect every line PASS and `ALL PASS`. If the grace line alone FAILs with 403 while `ath-elite_s1` passes, the rules evaluation blew the read cap: re-check that `bookingAthleteOk()` is the ONLY `athleteData()` call on the create path (the hoisted `let`) before touching anything else. If the emulator reports a rules compile error on save, fix the rules before re-running (a `let` is only legal inside a function body; `'billing' in a` needs `a` to be a map).
 - [ ] Commit:
 ```
 git add firestore.rules scripts/verify-rules.mjs
@@ -735,134 +826,4 @@ Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>"
 
 ---
 
-### Task 6: Functions client plumbing - `firebase.js` + `hooks/callables.js` (closes #3)
-
-**Files:**
-- Modify: `frontend/src/firebase.js` (imports :1-10; export beside :62; emulator block :78-80)
-- Create: `frontend/src/portal/hooks/callables.js`
-- Create: `frontend/src/portal/hooks/callables.test.js`
-
-**Interfaces:** Produces `functions` (firebase.js), `callCreateFamily(payload)`, `callAddAthletes(payload)`, `callClaimInvite()`, `callCreateCheckoutSession(payload)`, `wrapCallable(err, context)` (contract 1.1). Consumes `ERR`, `LiveDataError` (live.js:44-77). The functions lane's callables are named `createFamily`, `addAthletes`, `claimInvite`, `createCheckoutSession` in `us-central1`.
-
-- [ ] Write the failing test `callables.test.js` (mocks keep Firebase out of jest):
-
-```js
-/**
- * Callable clients (Sprint 20, contract 1.1): every rejection becomes a
- * LiveDataError with the function's own plain-language message and the
- * stable `details.reason`, so screens branch on `reason` like they do for
- * the booking gate.
- */
-jest.mock('../../firebase', () => ({ functions: {} }));
-jest.mock('firebase/functions', () => ({ httpsCallable: jest.fn(() => jest.fn()) }));
-jest.mock('firebase/firestore', () => ({}));
-
-import { ERR, LiveDataError } from './live';
-import { wrapCallable } from './callables';
-
-const httpsErr = (code, message, details) => Object.assign(new Error(message), { code, details });
-
-describe('wrapCallable', () => {
-  test('maps HttpsError codes incl. the two wrap() lacks', () => {
-    expect(wrapCallable(httpsErr('functions/already-exists', 'Already set up', { reason: 'already-provisioned' }), 'createFamily'))
-      .toMatchObject({ code: ERR.INVALID, reason: 'already-provisioned', message: 'Already set up' });
-    expect(wrapCallable(httpsErr('functions/failed-precondition', 'Verify first', { reason: 'email-unverified' }), 'x').code).toBe(ERR.INVALID);
-    expect(wrapCallable(httpsErr('functions/unauthenticated', 'Sign in', { reason: 'signed-out' }), 'x').code).toBe(ERR.UNAUTHENTICATED);
-    expect(wrapCallable(httpsErr('functions/permission-denied', 'No', { reason: 'not-owner' }), 'x').code).toBe(ERR.PERMISSION);
-    expect(wrapCallable(httpsErr('functions/not-found', 'Gone', { reason: 'athlete-not-found' }), 'x').code).toBe(ERR.NOT_FOUND);
-    expect(wrapCallable(httpsErr('functions/unavailable', 'Checkout is unavailable right now. Try again in a minute.', { reason: 'stripe-error' }), 'x').code).toBe(ERR.UNAVAILABLE);
-    expect(wrapCallable(httpsErr('functions/internal', 'Sign-up could not be saved. Try again.', { reason: 'write-failed' }), 'x').code).toBe(ERR.UNKNOWN);
-  });
-  test('a bare code (no functions/ prefix) and a missing details map both work', () => {
-    const e = wrapCallable(httpsErr('invalid-argument', 'Bad', undefined), 'x');
-    expect(e).toBeInstanceOf(LiveDataError);
-    expect(e).toMatchObject({ code: ERR.INVALID, reason: null, message: 'Bad' });
-  });
-  test('a LiveDataError passes through unchanged; a non-Error gets a context message', () => {
-    const own = new LiveDataError(ERR.INVALID, 'mine', null, 'r');
-    expect(wrapCallable(own, 'x')).toBe(own);
-    expect(wrapCallable('boom', 'claimInvite').message).toBe('claimInvite failed.');
-  });
-});
-```
-
-- [ ] Run `... src/portal/hooks/callables.test.js` - expect FAIL: cannot find module `./callables`.
-- [ ] `firebase.js`: add `import { connectFunctionsEmulator, getFunctions } from 'firebase/functions';` after the firestore import (:9); after `export const db = getFirestore(app);` (:62) add:
-
-```js
-// Cloud Functions callables (Sprint 20): createFamily, addAthletes,
-// claimInvite, createCheckoutSession - all deployed to us-central1.
-export const functions = getFunctions(app, 'us-central1');
-```
-  and inside the emulator block after `connectFirestoreEmulator(db, '127.0.0.1', 8080);` (:80): `connectFunctionsEmulator(functions, '127.0.0.1', 5001); // firebase.json emulators.functions.port`.
-- [ ] Create `callables.js`:
-
-```js
-/**
- * Callable clients (Sprint 20, contract 1.1) - the browser side of the
- * functions lane's onCall handlers. New code stays out of the grandfathered
- * live.js (the grace.js/waitlist.js precedent). Each call unwraps
- * `result.data`; each rejection becomes a LiveDataError whose `reason` is
- * the function's stable `details.reason` and whose `message` is the
- * function's own plain-language copy, surfaced verbatim.
- */
-import { httpsCallable } from 'firebase/functions';
-import { functions } from '../../firebase';
-import { ERR, LiveDataError } from './live';
-
-// wrap()'s own map (live.js:89-96) plus the two HttpsError codes it lacks.
-const CODE_MAP = {
-  'permission-denied': ERR.PERMISSION,
-  'not-found': ERR.NOT_FOUND,
-  unavailable: ERR.UNAVAILABLE,
-  'deadline-exceeded': ERR.UNAVAILABLE,
-  unauthenticated: ERR.UNAUTHENTICATED,
-  'invalid-argument': ERR.INVALID,
-  'already-exists': ERR.INVALID,
-  'failed-precondition': ERR.INVALID,
-};
-
-export function wrapCallable(err, context) {
-  if (err instanceof LiveDataError) return err;
-  const raw = String((err && err.code) || '').replace(/^functions\//, '');
-  const code = CODE_MAP[raw] || ERR.UNKNOWN;
-  const reason = err && err.details && typeof err.details.reason === 'string' ? err.details.reason : null;
-  const message = err && err.message ? String(err.message) : `${context} failed.`;
-  return new LiveDataError(code, message, err, reason);
-}
-
-function callable(name) {
-  const fn = httpsCallable(functions, name);
-  return async (payload = {}) => {
-    try {
-      const result = await fn(payload);
-      return result.data;
-    } catch (err) {
-      throw wrapCallable(err, name);
-    }
-  };
-}
-
-/** `{ householdId, athleteIds }` (contract 1.2). */
-export const callCreateFamily = callable('createFamily');
-/** `{ householdId, athleteIds }` (contract 1.3). */
-export const callAddAthletes = callable('addAthletes');
-/** `{ url }` (contract 1.5). */
-export const callCreateCheckoutSession = callable('createCheckoutSession');
-const claimInvite = callable('claimInvite');
-/** `{ state, householdId, athleteId }` - never throws for an expected state (contract 1.4). */
-export const callClaimInvite = () => claimInvite({});
-```
-
-- [ ] Run `... src/portal/hooks/callables.test.js` - expect PASS. Run the esbuild check on `src/firebase.js` - expect no errors (`firebase/functions` ships with `firebase ^9.22.0`).
-- [ ] Commit:
-```
-git add frontend/src/firebase.js frontend/src/portal/hooks/callables.js frontend/src/portal/hooks/callables.test.js
-git commit -m "Sprint 20: functions client + callable wrappers (createFamily, addAthletes, claimInvite, createCheckoutSession)
-
-Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>"
-```
-
----
-
-Continue with `10-routing-part2.md` (Tasks 7-13).
+Continue with `10-routing-part2.md` (Tasks 6-11) and `10-routing-part3.md` (Tasks 12, 12b, 13).

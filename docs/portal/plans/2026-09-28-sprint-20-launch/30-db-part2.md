@@ -9,22 +9,24 @@
 ### Task 7: `functions/` env split - secrets to `.env.local`, `STRIPE_MODE` in `.env` (closes #15)
 
 **Files:**
-- Modify: `functions/env.template:1-28,44-58`
-- Modify (local, untracked, never committed): `functions/.env`; Create (gitignored): `functions/.env.local`
+- Modify: `functions/env.template` (whole file - the full result is in Step 2; the current file is 61 lines, CRLF)
+- Modify (local, untracked, never committed): `functions/.env`; Create (gitignored by `functions/.gitignore:2` `*.local`): `functions/.env.local`, `functions/.secret.local`
 - Test: shell checks below (no values printed)
 
 **Interfaces:**
-- Consumes: interfaces 8 (`functions/.env` non-secret names: `PORTAL_URL`, `STRIPE_MODE`, `SMTP_HOST`, `SMTP_PORT`, `SMTP_SECURE`, `SMTP_FROM`, `PUSH_IN_EMULATOR`; `.env.local` secret names: `STRIPE_WEBHOOK_SECRET`, `STRIPE_SECRET_KEY`, `CALENDLY_WEBHOOK_SIGNING_KEY`, `SMTP_USER`, `SMTP_PASS`).
-- Produces: `STRIPE_MODE=test` present in `functions/.env`; no secret key in `functions/.env` (a key declared in `runWith({secrets})` AND present in `.env` fails `firebase deploy` with a conflict).
+- Consumes: interfaces 8 (`functions/.env` non-secret names: `PORTAL_URL`, `STRIPE_MODE`, `SMTP_HOST`, `SMTP_PORT`, `SMTP_SECURE`, `SMTP_FROM`, `PUSH_IN_EMULATOR`; `.env.local` secret names: `STRIPE_WEBHOOK_SECRET`, `STRIPE_SECRET_KEY`, `CALENDLY_WEBHOOK_SIGNING_KEY`, `SMTP_USER`, `SMTP_PASS`); PM rulings D12 (the restricted key's scopes: Checkout Sessions write, Customers read, Prices read - `createCheckoutSession` reads `unit_amount` from Stripe) and D15 (below).
+- Produces: `STRIPE_MODE=test` present in `functions/.env`; no secret key in `functions/.env` (a key declared in `runWith({secrets})` AND present in `.env` fails `firebase deploy` with a conflict); the template documents `.secret.local` and the emulator-only `STRIPE_LINE_ITEMS_STUB` (four session ids, `cs_evt_b`/`cs_evt_c`/`cs_evt_f`/`cs_evt_g`).
+
+**Sequencing (PM ruling D15):** functions Task 11 lands AFTER this task. The functions lane creates its OWN gitignored `functions/.env.local` and `functions/.secret.local` in its worktree (a step in functions Task 11) with `STRIPE_SECRET_KEY=sk_test_harness`, so its harnesses' `checkout.sessions.list` throws deterministically (functions Task 13 STEP H's stated precondition). This task edits the db worktree's untracked `functions/.env` and the tracked template only; functions Task 11 Step 4 then only VERIFIES the template's stub section (the block is already here - at integration, if that step appended a second copy, keep this one).
 
 - [ ] **Step 1: Baseline (names only)**
 
 Run: `cd C:\Users\Mac\Desktop\rypacadapp\rypacad && grep -c "^STRIPE_WEBHOOK_SECRET=" functions/.env; grep -c "^STRIPE_MODE=" functions/.env`
 Expected: `1` then `0`.
 
-- [ ] **Step 2: Rewrite the template's top section**
+- [ ] **Step 2: Rewrite the template - the FULL resulting file**
 
-Replace `functions/env.template:1-28` with:
+The current `functions/env.template` (61 lines) has one header, a Stripe section carrying `STRIPE_WEBHOOK_SECRET` + `STRIPE_SECRET_KEY` (the latter described as "NOT used by the webhook ... what scripts/export-memberships.mjs reads"), an Email section with `SMTP_HOST`/`SMTP_PORT`/`SMTP_SECURE`/`SMTP_USER`/`SMTP_PASS`/`SMTP_FROM`, a Push paragraph with `PORTAL_URL`, the Courier section (`COURIER_AUTH_TOKEN` + nine `COURIER_EVENT_*` keys and the retired-keys note), `FIREBASE_PROJECT_ID`, `SENTRY_DSN`, `SLACK_WEBHOOK_URL`. Replace the whole file with exactly this (CRLF, like the original; use the Write tool or a node script, never `sed -i`). Every placeholder value below is the template's own dummy, not a real value:
 
 ```
 # Cloud Functions environment - TWO files (Sprint 20, SPRINT-20-LAUNCH.md 8):
@@ -37,40 +39,122 @@ Replace `functions/env.template:1-28` with:
 #                         excluded from deploy (firebase.json functions.ignore
 #                         "*.local"). In production the same names are Secret
 #                         Manager secrets: `firebase functions:secrets:set NAME`,
-#                         bound per function by `.runWith({secrets: [...]})`.
-#                         A name declared there AND present in .env fails the
-#                         deploy with a conflict - keep them apart.
+#                         bound per function by `.runWith({secrets: [...]})`
+#                         (functions/portal/secrets.js lists them). A name
+#                         declared there AND present in .env fails the deploy
+#                         with a conflict - keep them apart.
+#   functions/.secret.local
+#                         The SAME secret names as .env.local, EMULATOR ONLY
+#                         (also gitignored by *.local). With runWith({secrets})
+#                         declared, the emulator reads a declared secret from
+#                         .secret.local first and only then asks Secret Manager
+#                         (an "Unable to access secret" line at startup when it
+#                         cannot). Copy the three STRIPE_/CALENDLY_ lines there
+#                         to keep the emulator quiet; .env.local still feeds
+#                         the runtime. Each worktree keeps its own pair.
 #
+# Copy the two blocks below into the two files and fill them in.
+
 # ---- functions/.env (non-secret) ---------------------------------------------
-# Which block of functions/config/stripe-catalogue.json the functions read
-# (createCheckoutSession price ids, the webhook's price -> package map).
-# `test` until the live endpoint exists (owner checklist 12.5 -> 12.9).
+# STRIPE_MODE: which block of functions/config/stripe-catalogue.json the
+# functions read (createCheckoutSession price ids, the webhook's price ->
+# package map). `test` until the live endpoint exists (owner checklist
+# 12.5 -> 12.9); `live` from then on.
 STRIPE_MODE=test
+
+# Email (contract v2.3, Sprint 15): SMTP through a Google Workspace address
+# with an app password (Google Account -> Security -> 2-Step Verification ->
+# App passwords). All three of SMTP_HOST / SMTP_USER / SMTP_PASS set = SMTP is
+# used; otherwise Courier below; with neither, every email records 'skipped'
+# on the ledger row and the triggers and jobs still complete. SMTP_FROM is the
+# notice sender; the sign-up VERIFICATION email is Firebase's own and comes
+# from noreply@<REACT_APP_FIREBASE_AUTH_DOMAIN> (rypacad.firebaseapp.com),
+# never from this address.
 SMTP_HOST=smtp.gmail.com
 SMTP_PORT=465
 SMTP_SECURE=true
 SMTP_FROM=RYP Academy <you@rypgolf.com>
+
+# Push (Sprint 15) needs NO key here: Firebase Cloud Messaging sends with the
+# project's own credentials. The CLIENT build needs REACT_APP_FIREBASE_VAPID_KEY
+# (Firebase console -> Project settings -> Cloud Messaging -> Web Push
+# certificates -> Generate key pair). PORTAL_URL is where a tapped
+# notification opens and the base of createCheckoutSession's success_url /
+# cancel_url; PUSH_IN_EMULATOR=true opts the emulator into real sends.
 PORTAL_URL=https://rypacad.ryptest.com
-# PUSH_IN_EMULATOR=true opts the emulator into real FCM sends.
 PUSH_IN_EMULATOR=false
+
+# Courier (optional; used only when no SMTP_* is set) -----------------------
+# COURIER_AUTH_TOKEN is a secret and lives in the .env.local block below: if
+# the owner creates it, it becomes a Secret Manager secret and is added to
+# MAIL_SECRETS (secrets.js) - a declared secret that does not exist fails the
+# deploy, so it is NOT declared until it exists.
+#
+# One OPTIONAL Courier Studio template event id per notice kind (contract
+# v2.2): COURIER_EVENT_<KIND>, the kind upper-cased with '-' as '_'. Unset
+# (the default) means the notice sends ad-hoc { title, body } content, which
+# is what portal/notices.js builds - nothing breaks without a template.
+COURIER_EVENT_BOOKING_CONFIRMED=
+COURIER_EVENT_PROMOTED=
+COURIER_EVENT_SESSION_CANCELLED=
+COURIER_EVENT_BOOKING_REVOKED=
+COURIER_EVENT_REMINDER_24H=
+COURIER_EVENT_TOKENS_EXPIRING=
+COURIER_EVENT_GRACE_EXPIRING=
+COURIER_EVENT_MEMBERSHIP=
+COURIER_EVENT_WAITLIST_EXPIRED=
+# Retired with the Sprint 14 pipeline: COURIER_EVENT_WAITLIST_PROMOTED /
+# COURIER_EVENT_WAITLIST_OPEN (now COURIER_EVENT_PROMOTED) and
+# COURIER_EVENT_CHILD_BOOKED (onBookingCreateNotifyChild is deleted).
+
+# Firebase ------------------------------------------------------------------
+# Auto-configured in a deployed function; set only for local scripts.
 FIREBASE_PROJECT_ID=rypacad
+
+# Optional: Sentry for error tracking
+SENTRY_DSN=your_sentry_dsn_here
+
+# Optional: Slack webhook for notifications
+SLACK_WEBHOOK_URL=https://hooks.slack.com/services/your/webhook/url
 
 # ---- functions/.env.local (emulator secrets; Secret Manager in prod) ---------
 # STRIPE_WEBHOOK_SECRET: the endpoint's signing secret (Developers -> Webhooks
-# -> endpoint -> "Signing secret", or `stripe listen`). The handler refuses
-# every request with 500 when unset. One per endpoint: TEST and LIVE differ.
+# -> endpoint -> "Signing secret", or `stripe listen`). stripeWebhook refuses
+# every request with 500 when unset (contract v2.1, pin H: an unverified
+# webhook is an open write endpoint). One per endpoint: TEST and LIVE differ.
 STRIPE_WEBHOOK_SECRET=whsec_your_webhook_secret_here
-# STRIPE_SECRET_KEY: a RESTRICTED key per mode (Checkout Sessions write,
-# Customers read) - createCheckoutSession and the webhook's lookups.
+# STRIPE_SECRET_KEY: a RESTRICTED key per mode with exactly three scopes -
+# Checkout Sessions: write, Customers: read, Prices: read (createCheckoutSession
+# reads the recurring price's unit_amount to build the prepaid line; the
+# webhook's last-resort lookup lists checkout sessions). Bound to
+# createCheckoutSession and stripeWebhook. scripts/export-memberships.mjs
+# reads the same name from its own shell environment, never from this file.
+# The functions harnesses set it to the dummy `sk_test_harness` so
+# checkout.sessions.list throws deterministically (verify-stripe-launch STEP H).
 STRIPE_SECRET_KEY=rk_test_your_restricted_key_here
 # CALENDLY_WEBHOOK_SIGNING_KEY: the signing_key sent in the POST
 # /webhook_subscriptions body (spec 6.3); calendlyWebhook verifies with it.
 CALENDLY_WEBHOOK_SIGNING_KEY=your_calendly_signing_key_here
+# SMTP_USER / SMTP_PASS: the sending Workspace address and its app password
+# (MAIL_SECRETS, bound to every function that calls sendNotice).
 SMTP_USER=you@rypgolf.com
 SMTP_PASS=your_app_password_here
+# COURIER_AUTH_TOKEN (optional, see the Courier section): uncomment only when
+# the owner has created the Secret Manager secret of the same name.
+# COURIER_AUTH_TOKEN=your_courier_auth_token_here
+
+# ---- emulator-only stubs (never set in production; guarded by ---------------
+# ---- FUNCTIONS_EMULATOR === 'true' in the code that reads them) -------------
+# STRIPE_LINE_ITEMS_STUB: JSON map Checkout session id -> line items that
+# stripe-checkout.readLineItems returns instead of calling Stripe. The four
+# ids are the ones functions/test/verify-stripe-launch.js replays: cs_evt_b
+# (tier + one-time prepaid line), cs_evt_c (Elite, recurring only), cs_evt_f
+# (quantity 2 -> unexpected-quantity), cs_evt_g (facility add-on + one-time
+# line). One line, no spaces inside the JSON.
+# STRIPE_LINE_ITEMS_STUB={"cs_evt_b":[{"quantity":1,"price":{"id":"price_t6","recurring":{"interval":"month"}}},{"quantity":1,"price":{"id":"price_1x"}}],"cs_evt_c":[{"quantity":1,"price":{"id":"price_elite","recurring":{"interval":"month"}}}],"cs_evt_f":[{"quantity":2,"price":{"id":"price_t6","recurring":{"interval":"month"}}}],"cs_evt_g":[{"quantity":1,"price":{"id":"price_fac","recurring":{"interval":"month"}}},{"quantity":1,"price":{"id":"price_1y"}}]}
 ```
 
-Then delete the now-duplicated `SMTP_HOST`..`SMTP_FROM` lines and `PORTAL_URL` from the old Email/Push sections (`:29-48` in the original numbering), keeping the Courier and Sentry/Slack sections as they are, and delete the old `FIREBASE_PROJECT_ID` line so it appears once.
+What changed against the original, for the reviewer: `STRIPE_WEBHOOK_SECRET`, `STRIPE_SECRET_KEY`, `SMTP_USER`, `SMTP_PASS` moved out of the `.env` block into the `.env.local` block (the old Stripe and Email sections are gone; nothing is stated twice); `STRIPE_MODE` and `PUSH_IN_EMULATOR` are new keys; `CALENDLY_WEBHOOK_SIGNING_KEY` is new; `COURIER_AUTH_TOKEN=...` moved into the `.env.local` block as a commented line (it is a secret and is not declared until it exists); the `.secret.local` paragraph (D15) and the stub section with `cs_evt_g` (functions Task 13) are new; every `COURIER_EVENT_*`, `FIREBASE_PROJECT_ID`, `SENTRY_DSN`, `SLACK_WEBHOOK_URL` line is verbatim from the original.
 
 - [ ] **Step 3: Move the local secret without printing it**
 
@@ -80,12 +164,24 @@ Run (values never echoed):
 node -e "const fs=require('fs');const p='functions/.env',q='functions/.env.local';const secret=/^(STRIPE_WEBHOOK_SECRET|STRIPE_SECRET_KEY|CALENDLY_WEBHOOK_SIGNING_KEY|SMTP_USER|SMTP_PASS)=/;const lines=fs.readFileSync(p,'utf8').split(/\r?\n/);const keep=lines.filter(l=>!secret.test(l));const move=lines.filter(l=>secret.test(l));if(!keep.some(l=>l.startsWith('STRIPE_MODE=')))keep.push('STRIPE_MODE=test');fs.writeFileSync(p,keep.join('\r\n'));const prev=fs.existsSync(q)?fs.readFileSync(q,'utf8').split(/\r?\n/).filter(Boolean):[];fs.writeFileSync(q,[...prev,...move].join('\r\n')+'\r\n');console.log('moved',move.length,'secret line(s); .env now has STRIPE_MODE');"
 ```
 
+- [ ] **Step 3b: Mirror the three declared secrets into `.secret.local` (D15; names only)**
+
+The emulator resolves a `runWith({secrets})` name from `functions/.secret.local` before Secret Manager; without the file it logs `Unable to access secret` per declared name at startup (functions Task 11 Step 5 expects a quiet start). Copy exactly the three Stripe/Calendly lines, never printing them:
+
+```powershell
+node -e "const fs=require('fs');const q='functions/.env.local',s='functions/.secret.local';const want=/^(STRIPE_WEBHOOK_SECRET|STRIPE_SECRET_KEY|CALENDLY_WEBHOOK_SIGNING_KEY)=/;const lines=fs.readFileSync(q,'utf8').split(/\r?\n/).filter(l=>want.test(l));fs.writeFileSync(s,lines.join('\r\n')+'\r\n');console.log('.secret.local:',lines.length,'line(s) (expect 3)');"
+```
+
+Expected: `.secret.local: 3 line(s) (expect 3)`. If `.env.local` lacks `STRIPE_SECRET_KEY` or `CALENDLY_WEBHOOK_SIGNING_KEY` (the pre-Sprint-20 `.env` only carried the webhook secret), first add the missing names to `.env.local` by hand with the template's dummy values (`rk_test_your_restricted_key_here`, `your_calendly_signing_key_here`) - the emulator only needs the names to exist; the functions lane's own worktree copies use `sk_test_harness` (functions Task 11).
+
 - [ ] **Step 4: Verify (names and counts only)**
 
-Run: `grep -c "^STRIPE_WEBHOOK_SECRET=" functions/.env; grep -c "^STRIPE_WEBHOOK_SECRET=" functions/.env.local; grep -c "^STRIPE_MODE=test" functions/.env; git check-ignore -q functions/.env.local && echo ignored; git check-ignore -q functions/.env && echo ignored`
-Expected: `0`, `1`, `1`, `ignored`, `ignored`.
+Run: `grep -c "^STRIPE_WEBHOOK_SECRET=" functions/.env; grep -c "^STRIPE_WEBHOOK_SECRET=" functions/.env.local; grep -c "^STRIPE_MODE=test" functions/.env; grep -cE "^(STRIPE_WEBHOOK_SECRET|STRIPE_SECRET_KEY|CALENDLY_WEBHOOK_SIGNING_KEY)=" functions/.secret.local; git check-ignore -q functions/.env.local && echo ignored; git check-ignore -q functions/.secret.local && echo ignored; git check-ignore -q functions/.env && echo ignored`
+Expected: `0`, `1`, `1`, `3`, `ignored`, `ignored`, `ignored`.
+Run: `grep -c "cs_evt_g" functions/env.template; grep -c "^# STRIPE_LINE_ITEMS_STUB=" functions/env.template; grep -cE "^(STRIPE_WEBHOOK_SECRET|STRIPE_SECRET_KEY|SMTP_USER|SMTP_PASS|CALENDLY_WEBHOOK_SIGNING_KEY)=" functions/env.template`
+Expected: `1`, `1`, `5` (the five secret placeholders appear once each, all below the `.env.local` banner - `grep -n` to confirm they sit after the line containing `functions/.env.local (emulator secrets`).
 Run: `git status --porcelain functions/`
-Expected: only `functions/env.template` and (from Task 1) `functions/config/` listed - never `.env` or `.env.local`.
+Expected: only `functions/env.template` and (from Task 1) `functions/config/` listed - never `.env`, `.env.local` or `.secret.local`.
 
 - [ ] **Step 5: Commit the template only**
 
@@ -104,7 +200,7 @@ Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>"
 - Modify: `docs/portal/DATA-MODEL.md:17-34 (id table),41 (users),59-66 (households),74-84 (athletes),124-126 (packages),138,142,150 (sessions),325-360 (bookings),760 (after staffInvites),1421-1445 (stripeEvents)`
 
 **Interfaces:**
-- Consumes: interfaces 2 (every shape and its "absent ==").
+- Consumes: interfaces 2 (every shape and its "absent ==") plus the PM rulings that extend it: D8 (`athletes.billing.lastEventId`; `athletes.facilityBilling.customerId` / `checkoutSessionId` / `lastEventId`; `calendlyEvents` outcome `malformed` and field `flag`; `stripeEvents.athleteId` / `via` and outcomes `facility-active` / `no-period`), D10 (a facility lapse never touches household membership or bookings), and the contract's `loginInvites.status: 'orphaned'` (1.4).
 - Produces: anchors `#logininvitesemaillower-contract-v301-sprint-20` and `#calendlyeventsid-contract-v301-sprint-20` that Task 9 links.
 
 - [ ] **Step 1: Id conventions - three rows**
@@ -112,7 +208,7 @@ Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>"
 After the `stripeEvents` row (`:34`) add:
 
 ```
-| `loginInvites` | the child's login email, lower-cased | **Contract v3.0.1 (Sprint 20).** One open invite per address by construction; `claimInvite` looks the caller's `token.email.lower()` up by id, no query. Contrast `staffInvites` (auto id, script-consumed). Seed: `reese.whitfield@example.com`. |
+| `loginInvites` | the child's login email, lower-cased | **Contract v3.0.1 (Sprint 20).** One open invite per address by construction; `claimInvite` looks the caller's `token.email.lower()` up by id, no query. `status` is `open` / `claimed` / `orphaned` (the athlete doc is gone). Contrast `staffInvites` (auto id, script-consumed). Seed: `reese.whitfield@example.com`. |
 | `calendlyEvents` | `{inviteeUuid}_{event}` | **Contract v3.0.1 (Sprint 20).** `calendlyWebhook`'s idempotency ledger, the `stripeEvents` pattern with a composed id (Calendly has no event id; the invitee uri's uuid + `invitee.created \| invitee.canceled` is unique per delivery). Seed: `seedinv0001_invitee.created`. |
 | `sessions` (Calendly) | `cal-<eventUuid>` | **Contract v3.0.1 (Sprint 20).** Written only by `calendlyWebhook`; never date-prefixed (the id is Calendly's event uuid, so a reschedule that moves the date keeps the doc), never carries tournament results, and invisible to the sync's reap (`gcalEventId: null`, so `planSync` files it under `seededUntouched`). |
 ```
@@ -134,8 +230,8 @@ After the `stripeEvents` row (`:34`) add:
 ```
 | `handicap` | int 0..54 \| null | **Contract v3.0.1 (Sprint 20).** Current handicap from sign-up ("none yet" == null). Rules admit it on create only in range; ops edits later. Absent == null. Seed: jordan 14, reese 27, nico null. |
 | `loginEmail` | string \| null | Sprint 20. The child's own login address, lower-cased by client AND function; null == the parent's account runs the child. Pairs with `loginInvites/{loginEmail}`. Absent == null. |
-| `billing` | map \| absent | **Sprint 20 - server-written only (`createFamily`, `stripeWebhook`), never in a client `hasOnly`.** `{ status: 'pending' \| 'active' \| 'past_due' \| 'lapsed', customerId, subscriptionId, priceId, checkoutSessionId, updatedAt }` (ids null until `checkout.session.completed`). **ABSENT == `active`** - every athlete provisioned before Sprint 20 books unchanged. `pending` is the booking gate (rules `athleteBillingOk`, client `billing-pending`). Seed: `pending` on nico only. |
-| `facilityBilling` | map \| absent | Sprint 20, webhook only. `{ status: 'active' \| 'past_due' \| 'lapsed', subscriptionId, priceId, updatedAt }` - the $300 add-on subscription; absent == no add-on. Paid -> `facilityAccess: true`; lapse/delete -> false. `facilityAccessConsent` stays ops-verified. |
+| `billing` | map \| absent | **Sprint 20 - server-written only (`createFamily`, `stripeWebhook`), never in a client `hasOnly`.** `{ status: 'pending' \| 'active' \| 'past_due' \| 'lapsed', customerId, subscriptionId, priceId, checkoutSessionId, lastEventId, updatedAt }` (ids null until `checkout.session.completed`; `lastEventId` is the Stripe `event.id` of the last webhook write, the same cross-reference `households.membership.lastEventId` keeps - PM ruling D8; `createFamily`'s `pending` map does not carry it, the webhook adds it on the first write, so absent == no webhook write yet). **ABSENT == `active`** - every athlete provisioned before Sprint 20 books unchanged. `pending` is the booking gate (rules `athleteBillingOk`, client `billing-pending`). Seed: `pending` on nico only, exactly as `createFamily` writes it (no `lastEventId`). |
+| `facilityBilling` | map \| absent | Sprint 20, webhook only. `{ status: 'active' \| 'past_due' \| 'lapsed', customerId, subscriptionId, priceId, checkoutSessionId, lastEventId, updatedAt }` - the same shape as `billing` minus `pending` (PM ruling D8; the webhook's `billingPatch` writes both maps through one helper) - the $300 add-on subscription; absent == no add-on. Paid -> `facilityAccess: true`; lapse/delete -> `facilityAccess: false`. **Scope of a facility lapse (PM ruling D10):** `customer.subscription.deleted` / `invoice.payment_failed` resolved to `product: 'facility'` write `facilityBilling.status` and `facilityAccess: false` ONLY - never `households.membership`, never `billing`, never a booking revocation. The household-freeze in spec 4.3 ("AND to household membership exactly as today") applies to the TIER subscription only. `facilityAccessConsent` stays ops-verified. |
 ```
 
 - [ ] **Step 5: `packages`** - at `:124` change ``32` for every token package and `single`` to ``30` for every token package and `single` (**Sprint 20 ruling 0.5; was 32**)``; at `:126` replace the `stripePriceId` note's text after the first sentence with: `**Sprint 20: populated.** Written ONLY by `scripts/write-packages.mjs --prod --mode test|live` from `functions/config/stripe-catalogue.json` (the one source, both modes; `facility-access` has no packages doc). `data/packages.js` never carries it and the seed writes `null` explicitly. Absent == null.` Append to the `windowDays` row: `**Sprint 20:** also written by `write-packages.mjs` (30 / 45) so production docs match the seam without a full `provision-family.mjs` catalogue run.`
@@ -165,7 +261,7 @@ and in `cancelledBy` (`:330`) change `` `uid \| 'system'` `` to `` `uid \| 'syst
 ```
 ### `loginInvites/{emailLower}` (contract v3.0.1, Sprint 20)
 
-Backs "own login?" at sign-up and the claim on first sign-in (SPRINT-20-LAUNCH.md 2.2, 3.2). Writers: `createFamily` / `addAthletes` (open), `claimInvite` (claimed, or `orphaned` when the athlete no longer exists). **No client create or update**; read by the email owner only when `request.auth.token.email_verified == true`, by the household's parent, or ops/owner.
+Backs "own login?" at sign-up and the claim on first sign-in (SPRINT-20-LAUNCH.md 2.2, 3.2). Writers: `createFamily` / `addAthletes` (open), `claimInvite` (claimed, or `orphaned` when the athlete no longer exists). **No client create or update**; read by the email owner only when `request.auth.token.email_verified == true`, by the household's parent, or ops/owner. `claimInvite` returns `householdId` / `athleteId` only on `state: 'claimed'` (null for `needs-verification`, `already-claimed`, `none`); `addAthletes` refuses `child-email-duplicate` against an existing `open` invite for the same address as well as against a sibling in the same call.
 
 | Field | Type | Notes |
 |---|---|---|
@@ -174,28 +270,37 @@ Backs "own login?" at sign-up and the claim on first sign-in (SPRINT-20-LAUNCH.m
 | `requestedBy` | `'guardian'` | |
 | `createdBy` | uid | The parent. |
 | `createdAt` | timestamp | An open invite older than 7 days shows as `invited-stale` in the sign-ups report. |
-| `status` | `'open' \| 'claimed' \| 'orphaned'` | |
-| `claimedBy`, `claimedAt` | uid \| null, timestamp \| null | Set together on claim. |
+| `status` | `'open' \| 'claimed' \| 'orphaned'` | `orphaned` (contract 1.4): `claimInvite` found the invite but `athletes/{athleteId}` no longer exists (ops deleted the athlete after the parent requested the login); the call returns `state: 'none'` and the doc is flipped so the report can show it. Never reopened; ops fixes it by deleting the doc or re-adding the athlete. |
+| `claimedBy`, `claimedAt` | uid \| null, timestamp \| null | Set together on claim; stay null on `orphaned`. |
 
 ### `calendlyEvents/{inviteeUuid}_{event}` (contract v3.0.1, Sprint 20)
 
-`calendlyWebhook`'s idempotency ledger (6.2), written in the same transaction as its effect; a repeat is `duplicate`. Admin-only (`ops`/`owner` read); the report lists `outcome == 'unresolved'` rows.
+`calendlyWebhook`'s idempotency ledger (6.2), written in the same transaction as its effect; a repeat is `duplicate`. Admin-only (`ops`/`owner` read); the report lists `outcome == 'unresolved'` rows as "Unmatched Calendly bookings".
 
 | Field | Type | Notes |
 |---|---|---|
 | `event` | `'invitee.created' \| 'invitee.canceled'` | |
 | `inviteeUri`, `eventUri` | string | Calendly resource uris. |
-| `athleteId`, `householdId` | string \| null | Null when `unresolved`. |
+| `athleteId`, `householdId` | string \| null | Null when `unresolved` or `malformed`. |
 | `receivedAt` | timestamp | |
-| `outcome` | string | `applied \| duplicate \| unresolved \| already-cancelled \| rescheduled \| not-found`. |
+| `outcome` | string | `applied \| duplicate \| unresolved \| already-cancelled \| rescheduled \| not-found \| malformed`. **`malformed` (PM ruling D8):** a verified body with no invitee uri or unparseable start/end times - nothing else can be keyed, so the row is written under the best id available and no session/booking is touched; HTTP 200. `ignored` (an event type the subscription never sends) is RETURNED to the caller only, never written. `duplicate` is likewise never written (the existing row is the guard). |
+| `flag` | string \| null | **PM ruling D8.** The booking's flag as written on `applied`: `'over-cap' \| 'over-cadence' \| 'membership-inactive' \| 'before-open' \| null` (clean); null on every non-`applied` outcome. Denormalized so the report reads flags from one collection scan. Precedence when several apply: `membership-inactive` > `before-open` > `over-cadence` > `over-cap`. |
 ```
 
-- [ ] **Step 9: `stripeEvents`** - in the section (`:1421-1445`) append a paragraph: `**Sprint 20:** outcomes gain `unexpected-quantity` (a checkout session with more than one recurring line or quantity != 1: recorded, nothing written), `stripe-lookup-failed` (the resolution fallback's Stripe read threw: recorded, HTTP 200, surfaced by `export-memberships.mjs`), `applied-checkout`, `issued-prepaid`. `HANDLED` gains `checkout.session.completed`; `client_reference_id` is `${householdId}__${athleteId}__${product}` (double underscore; athlete ids never contain `_`).`
+- [ ] **Step 9: `stripeEvents`** - in the section (`:1421-1445`), after the "Shape (as built, pin H)" sentence, append:
+
+```
+**Sprint 20 (contract v3.0.1, PM ruling D8):** the shape gains two fields — `{ type, customer, householdId: string | null, athleteId: string | null, via: string | null, receivedAt, outcome }`. `athleteId` is the athlete the event resolved to (null on the legacy household-wide path and on every unresolved row); `via` names WHICH step of the resolution order (interfaces 6.2) matched: `'metadata'` (subscription metadata), `'billing'` (`athletes.billing.subscriptionId`), `'facility'` (`athletes.facilityBilling.subscriptionId`), `'customer'` (`households.stripeCustomerId`), `'customer-ids'` (`stripeCustomerIds array-contains`), `'checkout-session'` (`checkout.sessions.list`), `'client-reference'` (`checkout.session.completed`'s own `client_reference_id`), or null. Both are audit fields: `export-memberships.mjs` and the sign-ups report never branch on them.
+
+Outcomes gain: `applied-checkout` (`checkout.session.completed` applied to the athlete's `billing` or `facilityBilling`); `issued-prepaid` (the `subscription_create` invoice's tokens landed in the prepaid period from `subscription_data.metadata`); `facility-active` (an `invoice.paid` for the facility add-on: `facilityBilling.status: 'active'`, no tokens issued, no payment-received notice); `no-period` (an `invoice.paid` for a token package whose invoice line carries no period and whose metadata names no prepaid period: billing flipped to active, NO `tokenPeriods` doc written — the daily export surfaces it); `unexpected-quantity` (the checkout's line items are not exactly one recurring line plus at most one one-time line, every quantity 1 — PM ruling D13: recorded, nothing written); `stripe-lookup-failed` (the last-resort `checkout.sessions.list` threw: recorded with `householdId: null`, HTTP 200, surfaced by `export-memberships.mjs`; a redelivery is then `duplicate`). `HANDLED` gains `checkout.session.completed`; `client_reference_id` is `${householdId}__${athleteId}__${product}` (double underscore; athlete ids never contain `_`).
+
+**Facility add-on events (PM ruling D10):** `customer.subscription.deleted` and `invoice.payment_failed` that resolve to `product: 'facility'` record their usual outcome (`lapsed` / `past_due`) but their ONLY writes are `athletes.facilityBilling.status` and `facilityAccess: false` — household `membership` is untouched and no booking is revoked. The household freeze and `revokeHousehold` belong to the tier subscription alone.
+```
 
 - [ ] **Step 10: Verify and commit**
 
 Run: `grep -c "Sprint 20" docs/portal/DATA-MODEL.md`
-Expected: >= 18. Run: `grep -n "windowDays.*32" docs/portal/DATA-MODEL.md` - Expected: only line 1267 remains (Task 9 fixes it).
+Expected: >= 20. Run: `grep -c "lastEventId" docs/portal/DATA-MODEL.md` - Expected: >= 5 (the two `membership` mentions plus `billing`, `facilityBilling`, and the seed line). Run: `grep -cE "facility-active|no-period|malformed|'via'|\bvia\b" docs/portal/DATA-MODEL.md` - Expected: >= 4. Run: `grep -n "windowDays.*32" docs/portal/DATA-MODEL.md` - Expected: only line 1267 remains (Task 9 fixes it).
 
 ```bash
 git add docs/portal/DATA-MODEL.md
@@ -304,7 +409,7 @@ Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>"
 - Modify: `docs/portal/TEAM.md` (append after line 3174)
 
 **Interfaces:**
-- Consumes: spec 0.11-0.13, 14; interfaces preamble.
+- Consumes: spec 0.11-0.13, 14; interfaces preamble; PM rulings D10 (a facility lapse never freezes the family) and D11 (the 48-hour Checkout `trial_end` rule) recorded as rulings 4 and 5; the functions lane's `MENTAL_MONTHLY_CAP` duplication (functions Handoff 8) recorded as a TEAM.md pin.
 - Produces: the TEAM.md section heading `## Sprint 20 pins - launch (contract v3.0.1, 2026-09-28)` the PM's integration notes extend.
 
 - [ ] **Step 1: Append to DECISION-GAPS.md**
@@ -324,14 +429,39 @@ Owner rulings, on the record (SPRINT-20-LAUNCH.md 0.11-0.13):
 3. **Mid-month joiners prorate both** price (days remaining / days in
    month) and tokens (same fraction, rounded up, never 0), then bill in full
    on the next 1st. `PRORATE_JOINERS = true` is the ruling, not a default.
+4. **The 48-hour rule (PM ruling D11, 2026-09-28).** Stripe refuses a
+   Checkout Session whose `subscription_data.trial_end` is under 48 hours
+   away. So a checkout started when the next 1st is under 48 h off (the
+   29th-31st, or the 30th/31st of a 31-day month - possible only from Nov 1,
+   when the prepaid month is the current one) prepays the NEXT month in full
+   and `trial_end` is the 1st after that; the remaining day or two of the
+   current month are free, not prorated and not blocked.
+   `createCheckoutSession`'s `prepaidFor` rolls the period forward with a
+   49-hour lead (`MIN_TRIAL_LEAD_MS`); unit-tested in
+   `functions/portal/checkout.test.js` ("under 48 h to the 1st: prepay next
+   month in full"). Ruled, not a default: the alternative (refusing checkout
+   on those days with a new reason) was rejected.
+5. **A facility add-on lapse never freezes the family (PM ruling D10,
+   2026-09-28).** `customer.subscription.deleted` and
+   `invoice.payment_failed` for `product: 'facility'` write
+   `athletes.facilityBilling.status` and `facilityAccess: false` and nothing
+   else - `households.membership` is untouched, no booking is revoked, the
+   tier `billing` keeps gating. Spec 4.3's "AND to household membership
+   exactly as today" is the TIER subscription's rule only. The webhook's
+   deleted/failed branches skip `applyLapsed` / `applyPastDue` when the
+   resolved product is `facility`; `verify-stripe-launch.js` STEP G
+   (functions Task 13, rewritten under D10) asserts `membership` unchanged
+   after the add-on's `subscription.deleted`.
 
 Accepted gaps (spec 14 - say so if any is wrong):
 
 - A stranger with an unverified password account can create a household;
   they cannot pay, claim or read invites unverified; ops deletes them from
   the report's *unpaid* view.
-- One failing card freezes the whole household (`membership` stays
-  household-level); per-athlete `billing` only gates who may book.
+- One failing card on the TIER subscription freezes the whole household
+  (`membership` stays household-level); per-athlete `billing` only gates
+  who may book. A failing card on the facility add-on freezes nothing
+  (ruling 5 above).
 - Multi-child families share one Stripe customer when the second checkout
   reuses `stripeCustomerId`; otherwise `stripeCustomerIds` holds both.
 - Before Nov 1 every tier prepays November at full price whatever the
@@ -377,6 +507,23 @@ Keystones (build facts):
 - Yannick books via Calendly (`calendlyWebhook` writes `sessions/cal-<uuid>`,
   `bookings.source: 'calendly'`, flagged never refused); Phil stays on the
   calendar with real `durationMinutes` (sync regex fix).
+- Stripe's 48-hour Checkout `trial_end` minimum rolls a checkout on the
+  29th-31st forward to prepay the NEXT month (DECISION-GAPS Sprint 20
+  ruling 4); a facility add-on lapse writes `facilityBilling` +
+  `facilityAccess: false` only, never the household freeze (ruling 5).
+
+Pins (change one, change both):
+- **`MENTAL_MONTHLY_CAP = { elite: 2, default: 1 }`** is duplicated in
+  `functions/portal/calendly.js` from
+  `frontend/src/portal/data/specialists.js:112` (the webhook judges
+  over-cadence server-side; the functions bundle cannot import the seam,
+  the same reason `lib.js` duplicates the period math). A change to
+  Yannick's monthly cadence edits BOTH and both tests
+  (`data/amendments.test.js`, `functions/portal/calendly.test.js`).
+- `SPECIALIST_DURATION_MINUTES = { phil: 45, mental: 30 }` in
+  `scripts/seed-firestore.mjs` mirrors `data/specialists.js`
+  `durationMinutes` (routing lane) - the seed names the number rather than
+  importing it (BRACKETS precedent).
 
 DB lane (this sprint): `functions/config/stripe-catalogue.json` (one
 source, both modes) + `scripts/write-packages.mjs` (the only writer of
@@ -395,8 +542,8 @@ Integration notes: (PM appends at merge.)
 
 - [ ] **Step 3: Verify and commit**
 
-Run: `grep -c "Sprint 20" docs/portal/DECISION-GAPS.md docs/portal/TEAM.md`
-Expected: `DECISION-GAPS.md:1` or more, `TEAM.md:1` or more. Run `node --test scripts/test/` once more - Expected: 9 pass.
+Run: `grep -c "Sprint 20" docs/portal/DECISION-GAPS.md docs/portal/TEAM.md; grep -c "48-hour rule" docs/portal/DECISION-GAPS.md; grep -c "MENTAL_MONTHLY_CAP" docs/portal/TEAM.md`
+Expected: `DECISION-GAPS.md:1` or more, `TEAM.md:1` or more, then `1`, then `1` or more. Run `node --test scripts/test/` once more - Expected: 9 pass.
 
 ```bash
 git add docs/portal/DECISION-GAPS.md docs/portal/TEAM.md

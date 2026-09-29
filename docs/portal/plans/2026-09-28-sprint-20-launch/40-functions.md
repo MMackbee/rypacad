@@ -2,16 +2,34 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**This plan is split in five files** (each under 900 lines; the header,
+**This plan is split in eight files** (each under 900 lines; the header,
 Global Constraints and emulator command below apply to every part; task
-numbering is continuous):
+numbering is continuous, 1-13):
 `40-functions.md` Tasks 1-4 (lib helpers, prepaid month, catalogue,
 notices/skips); `40-functions-part2.md` Tasks 5-6 (Stripe resolution and
-per-athlete billing writers); `40-functions-part3.md` Tasks 7-8 (the webhook
-rework, `createCheckoutSession`); `40-functions-part4.md` Tasks 9-10
-(validation, `createFamily`/`addAthletes`/`claimInvite`);
-`40-functions-part5.md` Tasks 11-14 (`calendlyWebhook`, `index.js` secret
-binding, env template, the deploy runbook).
+per-athlete billing writers); `40-functions-part3.md` Task 7 (the webhook
+rework + `verify-stripe-launch.js`); `40-functions-part4.md` Task 8
+(`secrets.js`, validation, `createFamily`/`addAthletes`/`claimInvite`);
+`40-functions-part5.md` Task 9 (`createCheckoutSession`);
+`40-functions-part6.md` Task 10 Steps 1-4 (`calendlyWebhook` + fixtures) and
+`40-functions-part6b.md` Task 10 Steps 5-7 (`verify-calendly.js`);
+`40-functions-part7.md` Tasks 11-13 (`index.js` secret binding + exports,
+the owner runbook, the Stripe harness top-up).
+
+## Execution order
+
+- **Tasks 1, 2, 3 first, in that order** - every later task imports
+  `lib.js`'s new helpers, `prepaid.js`, `tiny.js` or `catalogue.js`.
+- Then 4, 5, 6, 7 (7 needs 3, 5, 6), 8 (creates `secrets.js`, which 9, 10
+  and 11 bind), 9, 10.
+- **Task 11 lands AFTER db lane Task 7** (the `env.template` rewrite and the
+  `.env` / `.env.local` split, decision D15). Task 11 Step 4 creates this
+  worktree's gitignored `functions/.env.local` and `functions/.secret.local`
+  with the harness values; Task 7 Step 5 and Task 10 Step 6 (the emulator
+  harnesses) need those files too - do Task 11 Step 4 as soon as db Task 7
+  is merged into the worktree, or run those two harness steps after Task 11.
+- Task 12 (runbook) and 13 (harness top-up) last; 13 needs 11 (STEP H's
+  precondition is the `STRIPE_SECRET_KEY='sk_test_harness'` line from Step 4).
 
 **Goal:** Ship the five new Cloud Functions (`createFamily`, `addAthletes`,
 `claimInvite`, `createCheckoutSession`, `calendlyWebhook`) plus the
@@ -425,7 +443,7 @@ git commit -m "feat(functions): prepaidPeriodFor - November prepaid, prorated jo
 **Interfaces:**
 - Produces: `stripeMode() -> 'test'|'live'`; `priceIdFor(key, cat?) -> ?string`; `packageIdForPrice(priceId, cat?) -> ?string`; `FACILITY_KEY = 'facility-access'`; `loadCatalogue() -> object` (new, not in contract).
 
-- [ ] **Step 1: Write the JSON** (exactly twelve keys; the db lane writes the identical file - if it already exists, keep theirs)
+- [ ] **Step 1: Write the JSON** at `functions/config/stripe-catalogue.json` (decision D3: this path, not `scripts/config/`; spec 4.1 / 12.2 are updated to match). Exactly twelve keys. db lane Task 1 creates the same file with IDENTICAL content - **add/add at integration, keep either.**
 
 ```json
 {
@@ -487,8 +505,9 @@ Expected: `Cannot find module './catalogue'`.
 ```js
 /**
  * The ONE source of Stripe price ids (spec 4.1), keyed by STRIPE_MODE. The
- * JSON lives under functions/ because `firebase deploy` packages only this
- * folder (contract 6.5); scripts/write-packages.mjs reads the same file.
+ * JSON lives at functions/config/stripe-catalogue.json because
+ * `firebase deploy` packages only this folder (contract 6.5, decision D3);
+ * scripts/write-packages.mjs reads the same file.
  */
 'use strict';
 
