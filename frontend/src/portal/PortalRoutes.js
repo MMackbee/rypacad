@@ -344,6 +344,7 @@ function SpecialistDayRoute({ onSignOut }) {
               type: s.type ?? null,
               name: null,
               meta: null,
+              durationMinutes: s.durationMinutes ?? null,
             },
           },
         })
@@ -399,6 +400,7 @@ function CoachDashboardRoute({ onSignOut, onOpenAthlete }) {
                   type: block.type ?? null,
                   name: block.name ?? null,
                   meta: block.meta ?? null,
+                  durationMinutes: block.durationMinutes ?? null,
                 }
               : null,
           },

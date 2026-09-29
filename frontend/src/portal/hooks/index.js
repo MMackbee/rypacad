@@ -468,8 +468,9 @@ async function resolveWaitlistRows(entries, sessionsById, today, anchorDay, curr
         // Shape parity with reservationRow's own confirmed-booking rows -
         // durationMinutes/instructor read the same way regardless of status.
         instructor: specialist ? specialist.name : null,
-        durationMinutes: specialist ? 45 : (s.durationMinutes ?? DEFAULT_DURATION_MINUTES),
+        durationMinutes: s.durationMinutes ?? (specialist ? specialist.durationMinutes : DEFAULT_DURATION_MINUTES),
         cancellable: false,
+        source: 'portal',
         periodKey,
         nextPeriod: periodKey > currentPeriodKey,
       };
@@ -512,6 +513,8 @@ async function liveSchedule(today) {
     // trusted off the stored booking field, so display can never disagree
     // with what createBooking itself derived at write time.
     const periodKey = periodFor(s.date, anchorDay).periodKey;
+    // Sprint 20 (spec 6.1): a Calendly-sourced booking is cancelled from Calendly's email, never here (My Schedule shows the note instead of Cancel).
+    const source = b.source ?? 'portal';
     return {
       ...displaySession(s, today),
       badge:
@@ -531,7 +534,8 @@ async function liveSchedule(today) {
       // here for free (their date is always < today).
       bookingId: b.id,
       status: b.status,
-      cancellable: b.status === 'confirmed' && b.date > today,
+      source,
+      cancellable: b.status === 'confirmed' && b.date > today && source !== 'calendly',
       // Contract v2.1, pin G: present on a cancelled row only - absent
       // (null) on every other status, never invented.
       cancelReason: b.cancelReason ?? null,
@@ -1506,6 +1510,10 @@ function seedSpecialistDaySessions(specialistId, today) {
         time: s.time,
         booked: s.booked,
         capacity: s.capacity,
+        // Sprint 20 (spec 6.1): the attendance `block` carries the length;
+        // `type` is the specialist id, which doubles as sessions.type.
+        type: specialistId,
+        durationMinutes: s.durationMinutes,
         athletes: [],
       }))
     );
@@ -1539,6 +1547,8 @@ async function liveSpecialistSessions(specialistId, today) {
         time: s.time,
         booked: active.length,
         capacity: s.capacity ?? 1,
+        type: s.type,
+        durationMinutes: s.durationMinutes ?? (SPECIALIST_BY_ID.get(s.type)?.durationMinutes ?? DEFAULT_DURATION_MINUTES),
         athletes: active.map((b) => ({
           athleteId: b.athleteId,
           name: nameById.get(b.athleteId) ?? null,
@@ -2175,6 +2185,7 @@ export function useHouseholdSettings(householdId) {
 function reservationRow(s, b, today, instructor, anchorDay, currentPeriodKey) {
   const specialist = SPECIALIST_BY_ID.get(s.type);
   const periodKey = periodFor(s.date, anchorDay).periodKey;
+  const source = b.source ?? 'portal';
   return {
     ...displaySession(s, today),
     badge:
@@ -2189,16 +2200,17 @@ function reservationRow(s, b, today, instructor, anchorDay, currentPeriodKey) {
         : null,
     bookingId: b.bookingId,
     status: b.status,
-    cancellable: b.status === 'confirmed' && s.date > today,
+    cancellable: b.status === 'confirmed' && s.date > today && source !== 'calendly',
     // Contract v2.1, pin G: present on a cancelled row only.
     cancelReason: b.cancelReason ?? null,
     cancelledBy: b.cancelledBy ?? null,
     athleteId: b.athleteId,
+    source,
     // Contract v2.1 (Sprint 12 pin): who the family said would walk in.
     // Only a Yannick 1:1 can carry 'parent'; everything else is the athlete.
     attendee: b.attendee ?? 'athlete',
     instructor: instructor ?? (specialist ? specialist.name : null),
-    durationMinutes: specialist ? 45 : (s.durationMinutes ?? DEFAULT_DURATION_MINUTES),
+    durationMinutes: s.durationMinutes ?? (specialist ? specialist.durationMinutes : DEFAULT_DURATION_MINUTES),
     periodKey,
     nextPeriod: periodKey > currentPeriodKey,
   };
@@ -2243,7 +2255,7 @@ async function liveHouseholdReservations(today) {
     if (!s || !bucket) continue; // dropped, same null-resolve rule as useSchedule/liveSchedule above
     const row = reservationRow(
       s,
-      { bookingId: b.id, status: b.status, athleteId: b.athleteId, cancelReason: b.cancelReason, cancelledBy: b.cancelledBy },
+      { bookingId: b.id, status: b.status, athleteId: b.athleteId, cancelReason: b.cancelReason, cancelledBy: b.cancelledBy, source: b.source },
       today,
       null,
       anchorDay,
@@ -2286,7 +2298,7 @@ function seedReservationMember(child, today) {
             cancellable: false,
             athleteId: child.id,
             instructor: isSpecialistType(s.type) ? SPECIALIST_BY_ID.get(s.type)?.name ?? null : null,
-            durationMinutes: isSpecialistType(s.type) ? 45 : (s.durationMinutes ?? DEFAULT_DURATION_MINUTES),
+            durationMinutes: s.durationMinutes ?? (SPECIALIST_BY_ID.get(s.type)?.durationMinutes ?? DEFAULT_DURATION_MINUTES),
             periodKey: periodFor(s.date, PERIOD_ANCHOR_DAY).periodKey,
             nextPeriod: periodFor(s.date, PERIOD_ANCHOR_DAY).periodKey > currentPeriodKey,
           },
