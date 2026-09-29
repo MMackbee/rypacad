@@ -201,7 +201,9 @@ update on `loginInvites` or `users`.
 
 Stripe **Products + monthly Prices** per tier (t-6, t-12, t-16, Elite,
 single) and one for **facility-access** ($300/month), in BOTH test and live
-mode. `scripts/config/stripe-catalogue.json` (`{test: {...}, live: {...}}`,
+mode. `functions/config/stripe-catalogue.json` (`{test: {...}, live: {...}}`,
+committed under `functions/` because `firebase deploy` packages only that
+folder and `functions/portal/catalogue.js` requires it directly - decision D3;
 committed - price ids are public) is the ONLY source; a new
 `scripts/write-packages.mjs --prod --mode test|live --dry-run|--yes` writes
 `packages/{id}.stripePriceId` (and `windowDays: 30`) to the Firestore
@@ -629,7 +631,12 @@ Indexes: none new (single-field or existing composites).
    portal** activated (its link -> `REACT_APP_STRIPE_PORTAL_URL`); a
    restricted key per mode (Checkout Sessions write, Customers read) ->
    `STRIPE_SECRET_KEY`. Paste the price ids into
-   `scripts/config/stripe-catalogue.json` (public ids).
+   `functions/config/stripe-catalogue.json` (public ids). The six TEST
+   ids are committed (2026-09-29); the dashboard products are Tier 1 -> t-6,
+   Tier 2 -> t-12, Tier 3 -> t-16, Elite -> elite, Casual Coaching Session ->
+   single, Facility Access Add-on -> facility-access. Their no-code Payment
+   Links (payments.rypacademy.com/b/test_...) are ops reference only: the
+   portal creates Checkout Sessions (4.2) and never sends a family to them.
 3. `firebase deploy --only firestore:rules,firestore:indexes --project
    rypacad` (one deploy: per-athlete billing gate, Oct 10 gate, Calendly
    cancel guard, loginInvites/calendlyEvents reads, attendee field).
