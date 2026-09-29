@@ -66,8 +66,10 @@ export const HOLIDAY_TOURNAMENTS_2026_27 = [
  *
  * Ends on a Saturday so the final week is whole. 25/26 ran 212 sessions across
  * 17 weeks, which is the number to sanity-check against.
+ *
+ * Nov 2 is set-up day (owner ruling 2026-09-28); sessions start Nov 3.
  */
-export const SEASON_BOUNDS = { start: '2026-11-02', end: '2027-02-27' };
+export const SEASON_BOUNDS = { start: '2026-11-03', end: '2027-02-27' };
 
 /**
  * @param {object} [opts]

@@ -4,7 +4,8 @@
  * the booking gate, the Billing hub, Membership and the booking screens
  * share — these tests are the contract's edge cases written down.
  */
-import { ELITE, TOKEN_PACKAGES, normalizeAnchorDay, periodFor, tokensFor } from './packages';
+import { ALL_PACKAGES, ELITE, PRICES_RELEASED, SINGLE_TOKEN, TOKEN_PACKAGES, normalizeAnchorDay, periodFor, tokensFor, windowDaysFor } from './packages';
+import { SEASON_BOUNDS } from './season';
 
 const T12 = TOKEN_PACKAGES.find((p) => p.id === 't-12');
 
@@ -107,5 +108,21 @@ describe('tokensFor', () => {
     expect(elite).toMatchObject({ granted: null, left: null, unlimited: true, used: 1 });
     const none = tokensFor(null, null, [booking()], [], [], KEY, { today });
     expect(none).toMatchObject({ granted: 0, left: 0, unlimited: false, used: 1 });
+  });
+});
+
+describe('the catalogue after Sprint 20', () => {
+  test('token packages and single roll a 30-day window; Elite keeps 45', () => {
+    expect(TOKEN_PACKAGES.map((p) => p.windowDays)).toEqual([30, 30, 30]);
+    expect(SINGLE_TOKEN.windowDays).toBe(30);
+    expect(ELITE.windowDays).toBe(45);
+    expect(windowDaysFor(null)).toBe(30);
+  });
+  test('prices are released and the catalogue carries no Stripe ids', () => {
+    expect(PRICES_RELEASED).toBe(true);
+    for (const p of ALL_PACKAGES) expect(p).not.toHaveProperty('stripePriceId');
+  });
+  test('the season starts Nov 3', () => {
+    expect(SEASON_BOUNDS.start).toBe('2026-11-03');
   });
 });

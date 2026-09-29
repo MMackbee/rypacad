@@ -603,7 +603,7 @@ const MAX_WINDOW_DAYS = Math.max(...TOKEN_PACKAGES.map(windowDaysFor), windowDay
  *
  * Contract v2.0 pin D: the fetch window is no longer a fixed 7 days - it is
  * openThrough(now, windowDaysFor(pkg)), the athlete's own package window
- * (32 days, 45 for Elite). A parent caller has no specific child's package
+ * (30 days, 45 for Elite). A parent caller has no specific child's package
  * yet, so the fetch uses the WIDEST window any package offers (MAX_WINDOW_
  * DAYS, currently Elite's 45) - a superset that never under-fetches what a
  * child chosen afterward might need; per-day locking past THAT child's own,
@@ -1216,7 +1216,7 @@ const MENTAL_WEEKDAYS = new Set([2, 4]); // Tue, Thu
 const PHIL_TIMES = ['3:00 PM', '3:45 PM'];
 const MENTAL_TIMES = ['4:30 PM', '5:15 PM'];
 
-export function seedSpecialistDays(specialistId, today, windowDays = 32) {
+export function seedSpecialistDays(specialistId, today, windowDays = 30) {
   const onMental = specialistId === 'mental';
   const weekdays = onMental ? MENTAL_WEEKDAYS : PHIL_WEEKDAYS;
   const times = onMental ? MENTAL_TIMES : PHIL_TIMES;
