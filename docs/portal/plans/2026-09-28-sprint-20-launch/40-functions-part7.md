@@ -200,7 +200,7 @@ git commit -m "feat(functions): export the five launch callables, bind secrets o
 
 ---
 
-### Task 12: docs/portal/RUNBOOK-SPRINT-20.md - the owner deploy runbook (closes #29)
+### Task 12: docs/portal/RUNBOOK-SPRINT-20.md - the owner deploy runbook (supports #22; no lane issue of its own)
 
 **Files:**
 - Create: `docs/portal/RUNBOOK-SPRINT-20.md` (under 300 lines)
