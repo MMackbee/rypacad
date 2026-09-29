@@ -5,6 +5,7 @@ import useAuthSession from './hooks/useAuthSession';
 import { isLive } from './hooks/live';
 import StatesHarness from './StatesHarness';
 import SignIn, { LANDING_BY_ROLE } from './screens/SignIn';
+import SignUp from './screens/SignUp';
 import NotProvisioned from './screens/NotProvisioned';
 import Registration from './screens/Registration';
 import { OnboardingWelcomeRoute } from './screens/OnboardingFlow';
@@ -498,8 +499,9 @@ export default function PortalRoutes() {
 
       <Route
         path="signin"
-        element={<SignIn bare onStartEnrollment={go('/portal/register')} />}
+        element={<SignIn bare onStartEnrollment={go('/portal/signup')} />}
       />
+      <Route path="signup" element={<SignUp bare onSignIn={go('/portal/signin')} />} />
       <Route
         path="register"
         element={
