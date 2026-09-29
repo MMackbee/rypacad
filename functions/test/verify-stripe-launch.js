@@ -240,6 +240,58 @@ async function main() {
   r = await post(completed('evt_b', 'sub_lena', 'lena'));
   check('duplicate', [r.status, r.body.outcome], [200, 'duplicate']);
 
+  log('\nSTEP F  customer.subscription.updated, Basil shape (period on items.data[0]) -> lena only');
+  r = await post({id: 'evt_f2', object: 'event', type: 'customer.subscription.updated',
+    data: {object: {id: 'sub_lena', object: 'subscription', customer: 'cus_novak', status: 'past_due',
+      metadata: META('lena', 't-6'),
+      items: {object: 'list', data: [{id: 'si_lena', price: {id: 'price_t6', recurring: {interval: 'month'}},
+        current_period_start: secs(2026, 12, 1), current_period_end: secs(2026, 12, 31)}]}}}});
+  check('HTTP', [r.status, r.body.outcome], [200, 'no-change']);
+  const hhF = await get('households', 'novak');
+  check('period read from items.data[0] (Basil)', [hhF.membership.currentPeriodStart, hhF.membership.currentPeriodEnd, hhF.membership.stripeSubscriptionStatus],
+      ['2026-12-01', '2026-12-31', 'past_due']);
+  check('lena past_due via metadata, max untouched', [(await get('athletes', 'lena')).billing.status, (await get('athletes', 'max')).billing.status], ['past_due', 'active']);
+  r = await post({id: 'evt_f3', object: 'event', type: 'customer.subscription.updated',
+    data: {object: {id: 'sub_lena', object: 'subscription', customer: 'cus_novak', status: 'active', metadata: META('lena', 't-6'),
+      items: {object: 'list', data: [{id: 'si_lena', price: {id: 'price_t6', recurring: {interval: 'month'}},
+        current_period_start: secs(2026, 12, 1), current_period_end: secs(2026, 12, 31)}]}}}});
+  check('back to active', [r.body.outcome, (await get('athletes', 'lena')).billing.status], ['no-change', 'active']);
+
+  log('\nSTEP G  facility add-on: checkout completed -> facilityAccess true; subscription.deleted -> false ONLY (D10)');
+  r = await post({id: 'evt_g', object: 'event', type: 'checkout.session.completed', data: {object: {id: 'cs_evt_g',
+    object: 'checkout.session', mode: 'subscription', payment_status: 'paid', customer: 'cus_novak',
+    subscription: 'sub_lena_fac', client_reference_id: 'novak__lena__facility'}}});
+  check('HTTP', [r.status, r.body.outcome], [200, 'applied-checkout']);
+  let lenaG = await get('athletes', 'lena');
+  check('facilityBilling + facilityAccess', [lenaG.facilityBilling.status, lenaG.facilityBilling.subscriptionId, lenaG.facilityBilling.priceId, lenaG.facilityBilling.customerId, lenaG.facilityBilling.checkoutSessionId, lenaG.facilityAccess, lenaG.billing.status],
+      ['active', 'sub_lena_fac', 'price_fac', 'cus_novak', 'cs_evt_g', true, 'active']);
+  check('tier packageId untouched by a facility checkout', lenaG.packageId, 't-6');
+  check('no second payment-received notice for the add-on', (await db.collection('notifications').where('athleteId', '==', 'lena').get()).size, 1);
+  const hhBefore = await get('households', 'novak');
+  r = await post({id: 'evt_g2', object: 'event', type: 'customer.subscription.deleted', data: {object: {id: 'sub_lena_fac',
+    object: 'subscription', customer: 'cus_novak', status: 'canceled',
+    items: {object: 'list', data: [{id: 'si_fac', price: {id: 'price_fac', recurring: {interval: 'month'}}}]}}}});
+  check('HTTP (D10: the add-on lapses alone)', [r.status, r.body.outcome], [200, 'lapsed']);
+  lenaG = await get('athletes', 'lena');
+  check('facility lapsed, access cleared, tier billing untouched', [lenaG.facilityBilling.status, lenaG.facilityAccess, lenaG.billing.status, lenaG.facilityBilling.priceId], ['lapsed', false, 'active', 'price_fac']);
+  // STEP D's applyPastDue left membership.status 'past_due' and STEP F only
+  // wrote stripeSubscriptionStatus, so compare before/after, not literals.
+  const hhAfter = await get('households', 'novak');
+  check('household membership unchanged (no lapse, no lastEventId, no revoke)', [hhAfter.membership.status === hhBefore.membership.status, hhAfter.membership.stripeSubscriptionStatus === hhBefore.membership.stripeSubscriptionStatus, hhAfter.membership.lastEventId === hhBefore.membership.lastEventId, hhAfter.membership.lastEventId !== 'evt_g2', hhAfter.membership.status !== 'lapsed', r.body.summary],
+      [true, true, true, true, true, null]);
+  check('ledger via facilityBilling.subscriptionId, athleteId lena', [(await get('stripeEvents', 'evt_g2')).via, (await get('stripeEvents', 'evt_g2')).athleteId], ['facility', 'lena']);
+
+  log('\nSTEP H  stripe-lookup-failed: nothing resolves, checkout.sessions.list throws (STRIPE_SECRET_KEY=sk_test_harness, D15) -> 200, ledger row');
+  r = await post({id: 'evt_h', object: 'event', type: 'invoice.paid', data: {object: {id: 'in_h', object: 'invoice',
+    customer: 'cus_unknown', status: 'paid', billing_reason: 'subscription_cycle',
+    parent: {subscription_details: {subscription: 'sub_unknown'}},
+    lines: {data: [{period: {start: secs(2026, 12, 1), end: secs(2026, 12, 31)}, price: {id: 'price_t6'}}]}}}});
+  check('HTTP 200, not 500', [r.status, r.body.outcome], [200, 'stripe-lookup-failed']);
+  check('ledger row', [(await get('stripeEvents', 'evt_h')).outcome, (await get('stripeEvents', 'evt_h')).householdId], ['stripe-lookup-failed', null]);
+  check('no tokenPeriods from it', (await db.collection('tokenPeriods').where('eventId', '==', 'evt_h').get()).size, 0);
+  r = await post({id: 'evt_h', object: 'event', type: 'invoice.paid', data: {object: {id: 'in_h', object: 'invoice', customer: 'cus_unknown'}}});
+  check('a redelivery after stripe-lookup-failed is a duplicate (the row is the guard)', r.body.outcome, 'duplicate');
+
   log(`\n=== ${failures === 0 ? 'ALL CHECKS PASSED' :
       failures + ' CHECK(S) FAILED'} ===`);
   process.exitCode = failures === 0 ? 0 : 1;
