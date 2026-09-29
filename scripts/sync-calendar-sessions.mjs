@@ -507,6 +507,7 @@ function planSync(desired, existing, resultSessionIds = new Set()) {
   }
 
   const claimed = new Set();
+  const moves = []; // unbooked sessions whose day-order id changed - resolved below
   for (const [id, doc] of desired) {
     let matchId = byGcal.get(doc.gcalEventId) ?? null;
     // Fallback by doc id only onto docs with no gcalEventId: this adopts
@@ -524,8 +525,7 @@ function planSync(desired, existing, resultSessionIds = new Set()) {
     if (matchId !== id) {
       // The instance moved (date or day-order changed) so its pinned id changed.
       if ((cur.booked ?? 0) === 0 && !resultSessionIds.has(matchId)) {
-        plan.deletes.push({ id: matchId, booked: 0, reason: `moved to ${id}` });
-        plan.creates.push({ id, doc });
+        moves.push({ from: matchId, to: id, doc, cur });
       } else {
         // Never orphan bookings — or tournament results (contract v1.5.1) —
         // by moving the doc; patch in place and flag it.
@@ -554,13 +554,48 @@ function planSync(desired, existing, resultSessionIds = new Set()) {
   }
 
   // A create landing on a path being deleted is a clean replace (full-doc
-  // write). A create landing on a path being cancelled would repoint that
-  // session's bookings at a different event — refuse it and flag.
-  const cancelIds = new Set(plan.cancels.map((c) => c.id));
-  plan.creates = plan.creates.filter(({ id }) => {
-    if (!cancelIds.has(id)) return true;
-    plan.conflicts.push(`create ${id} skipped: that id holds a cancelled session with bookings.`);
-    return false;
+  // write). A create landing on a path that STAYS occupied - a booked
+  // session patched in place under its old id, or a cancelled session with
+  // bookings - would overwrite that doc (booked reset to 0, its bookings
+  // repointed at a different event) or be lost. Give the new event the next
+  // free id for its date instead (2026-09-29: an event added early in a day
+  // shifts the day-order ids of every later session; with bookings present
+  // the planner used to write two sessions to one id).
+  const held = new Set([
+    ...plan.updates.filter((u) => u.keptId).map((u) => u.id),
+    ...plan.cancels.map((c) => c.id),
+  ]);
+  // An unbooked session moves to its new day-order id - unless that id stays
+  // occupied, then it stays where it is (a re-run must not churn it to a
+  // fresh id every time). Staying put occupies its id in turn, so resolve
+  // until nothing changes.
+  let pending = moves;
+  for (let changed = true; changed; ) {
+    changed = false;
+    const next = [];
+    for (const m of pending) {
+      if (!held.has(m.to)) { next.push(m); continue; }
+      const dirty = SYNCED_FIELDS.some((f) => (m.cur[f] ?? null) !== m.doc[f]);
+      if (dirty) plan.updates.push({ id: m.from, doc: m.doc, keptId: true });
+      else plan.unchanged.push(m.from);
+      held.add(m.from);
+      changed = true;
+    }
+    pending = next;
+  }
+  for (const m of pending) {
+    plan.deletes.push({ id: m.from, booked: 0, reason: `moved to ${m.to}` });
+    plan.creates.push({ id: m.to, doc: m.doc });
+  }
+  const taken = new Set([...existing.keys(), ...desired.keys()]);
+  plan.creates = plan.creates.map(({ id, doc }) => {
+    if (!held.has(id)) return { id, doc };
+    let n = 0;
+    let fresh = `${doc.date}-${n}`;
+    while (taken.has(fresh)) fresh = `${doc.date}-${++n}`;
+    taken.add(fresh);
+    plan.conflicts.push(`create ${id} written as ${fresh}: ${id} is still held by another session (bookings kept in place).`);
+    return { id: fresh, doc };
   });
   const createIds = new Set(plan.creates.map((c) => c.id));
   plan.deletes = plan.deletes.filter(({ id }) => !createIds.has(id)); // replaced, not deleted
