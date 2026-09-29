@@ -1665,6 +1665,8 @@ async function liveChildCard(a, today, anchorDay) {
     next,
     contract,
     packageId: a.packageId ?? null,
+    // Sprint 20 (spec 4.4): the parent home banner and Pay button key off this; absent == active.
+    billingStatus: a.billing?.status ?? 'active',
     tokens: deriveTokens(pkg, bookings, anchorDay, today),
   };
 }
@@ -1713,8 +1715,10 @@ export function useHousehold({ variant = 'three' } = {}) {
   const athletesGen = useInvalidation('athletes');
 
   const demo = demoOpts(variant, "Your family's data didn't load.");
-  const children =
-    variant === 'one' ? HOUSEHOLD.children.slice(0, 1) : HOUSEHOLD.children;
+  const children = (variant === 'one' ? HOUSEHOLD.children.slice(0, 1) : HOUSEHOLD.children).map((c) => ({
+    ...c,
+    billingStatus: c.billingStatus ?? 'active',
+  }));
   const billing = variant === 'payment' ? BILLING_ISSUE : HOUSEHOLD.billing;
 
   return useSeedResource(
@@ -1759,6 +1763,7 @@ async function liveHouseholdAthletes(today) {
         name: a.name,
         packageId: a.packageId ?? null,
         packageName: pkg ? pkg.name : null,
+        billingStatus: a.billing?.status ?? 'active',
         tokens: deriveTokens(pkg, bookings, anchorDay, today),
       };
     })
@@ -1787,6 +1792,7 @@ export function useHouseholdAthletes() {
     name: c.name,
     packageId: c.packageId,
     packageName: packageById(c.packageId)?.name ?? null,
+    billingStatus: c.billingStatus ?? 'active',
     tokens: c.tokens,
   }));
   return useSeedResource(
@@ -1912,6 +1918,7 @@ function seedMemberEntry(child, today) {
   return {
     athleteId: child.id,
     name: child.name,
+    billingStatus: child.billingStatus ?? 'active',
     package: pkg
       ? { id: pkg.id, name: pkg.name, price: pkg.price ?? null, pending: pkg.pending ?? false, tokens: pkg.tokens ?? null, windowDays: pkg.windowDays ?? null, kind: pkg.kind ?? null }
       : null,
@@ -1948,6 +1955,7 @@ async function liveMemberEntry(a, today, anchorDay) {
   return {
     athleteId: a.id,
     name: a.name,
+    billingStatus: a.billing?.status ?? 'active',
     package: pkg
       ? {
           id: pkg.id,
@@ -2802,6 +2810,7 @@ async function liveAthleteDashboard(today) {
       name: ctx.athlete.name,
       fullName: ctx.athlete.name,
       date: longDayLabel(today),
+      billingStatus: ctx.athlete.billing?.status ?? 'active',
       // `allowance` -> `tokens` (contract v2.0): the AthleteDashboard
       // allowance card becomes the tokens card (UI pin).
       tokens: deriveTokens(ctx.pkg, ctx.bookings, normalizeAnchorDay(ctx.household?.periodAnchorDay), today),
@@ -2843,7 +2852,7 @@ export function useAthleteDashboard({ variant = 'populated', today = todayISO(),
     demo || live
       ? null
       : {
-          athlete: ATHLETE,
+          athlete: { ...ATHLETE, billingStatus: 'active' },
           nextSession,
           contract: summary
             ? {
