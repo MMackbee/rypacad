@@ -34,7 +34,7 @@ test('the committed catalogue has exactly the twelve keys; test ids present, liv
     assert.deepEqual(Object.keys(cat[mode]).sort(), [...CATALOGUE_KEYS].sort());
   }
   for (const key of CATALOGUE_KEYS) {
-    assert.match(cat.test[key], PRICE_ID_RE, `test.${key} was committed in 1b3dc3d - never overwrite it`);
+    assert.match(cat.test[key], PRICE_ID_RE, `test.${key} was committed in 995e677 - never overwrite it`);
     assert.ok(cat.live[key] === null || PRICE_ID_RE.test(cat.live[key]), `live.${key}`);
   }
   assert.throws(() => loadCatalogue(path.join(here, 'no-such-file.json')));
