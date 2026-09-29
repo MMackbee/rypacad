@@ -38,6 +38,8 @@ import {
   ERR,
   LiveDataError,
   approveEnrollmentRequest,
+  assertAthleteBillingActive,
+  assertBookingOpen,
   cancelBooking,
   createBooking,
   createContractLog,
@@ -966,6 +968,14 @@ export function useBooking({ variant = 'open', today = todayISO(), practice = fa
     const pkg = athlete.packageId ? await fetchPackage(athlete.packageId) : null;
     const household = athlete.householdId ? await fetchHousehold(athlete.householdId) : null;
     const anchorDay = normalizeAnchorDay(household?.periodAnchorDay);
+    // Sprint 20 (K03 + spec 4.4/5): the gates a single booking runs, ONCE
+    // before the loop - paid status, the Oct 10 gate, and the package's
+    // booking window as the loop's outer bound (weeks past it are reported
+    // 'not open yet' and never attempted; today this loop skipped the
+    // window check entirely).
+    assertAthleteBillingActive(athlete);
+    assertBookingOpen(pkg);
+    const windowEnd = openThrough(new Date(), windowDaysFor(pkg));
     // Elite (pkg.tokens === null) has no pool to exhaust - Infinity skips
     // the "period limit" branch below entirely, same as the cap check in
     // live.js skipping outright when pkg.tokens === null. No package at all
@@ -1018,6 +1028,10 @@ export function useBooking({ variant = 'open', today = todayISO(), practice = fa
     const booked = [];
     const skipped = [];
     for (let date = firstDate; date <= endDate; date = addDaysISO(date, 7)) {
+      if (date > windowEnd) {
+        skipped.push({ date, reason: 'not open yet' });
+        continue;
+      }
       const periodKey = periodFor(date, anchorDay).periodKey;
       if ((tally.get(periodKey) || 0) >= limit) {
         skipped.push({ date, reason: 'period limit' });
