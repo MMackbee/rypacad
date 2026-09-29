@@ -18,10 +18,11 @@ import { useBooking, useHouseholdAthletes, useMembership, useMonthSessions } fro
 // through the hook seam, but a formatting/derivation helper already imported
 // elsewhere in this file stays importable (data/calendar.js's own header
 // comment: "both data modes call it").
+import BookingOpensBanner from '../components/BookingOpensBanner';
 import { windowDaysFor } from '../data/packages';
 import { capacityFor, dayLabel } from '../data/season';
 import { DEFAULT_DURATION_MINUTES } from '../data/schedule';
-import { addDaysISO, monthLabel, openThrough, parseTimeToMinutes, todayISO } from '../data/calendar';
+import { addDaysISO, bookingOpen, monthLabel, openThrough, parseTimeToMinutes, todayISO } from '../data/calendar';
 import { buildMonthDayMaps, MonthNav, useMonthNavState } from '../components/MonthCalendar';
 
 /** Sessions arrive raw (numeric capacity/booked) from useMonthSessions;
@@ -162,6 +163,13 @@ export default function BookSession({
     : membershipMembers[0] ?? null;
   const windowDays = windowDaysFor(selfMember?.package ?? null);
   const openThroughDate = openThrough(new Date(), windowDays);
+  // Sprint 20 (spec 5, D16): the Oct 10 gate, proactively. Elite - the PAID
+  // package, since the webhook corrects packageId to the paid price (spec
+  // 4.3) - books at once; everyone else sees the schedule with Reserve inert
+  // and the banner until 07:00 America/Chicago on Oct 10. Read once per
+  // render off the same package the window comes from. The rules and
+  // createBooking refuse independently; this only stops the attempt.
+  const gateOpen = bookingOpen(Date.now(), selfMember?.package ?? null);
 
   const [selectedDate, setSelectedDate] = useState(() => demoSelectedDate ?? null);
   // The slot the athlete just booked. Persistence is the API's job later; the
@@ -208,6 +216,9 @@ export default function BookSession({
     // A parent with nothing selected yet has no athlete to book against —
     // stay put rather than send an ambiguous reservation.
     if (isParent && !selectedAthleteId) return;
+    // Closed gate: the card is inert already (DaySessionList `disabled`);
+    // this covers a stale closure firing at the boundary.
+    if (!gateOpen) return;
     setFailure(null);
     setReserving(session.id);
     Promise.resolve()
@@ -347,6 +358,7 @@ export default function BookSession({
             ) : null}
 
             <div style={{ padding: '0 22px', display: 'flex', flexDirection: 'column', gap: 12 }}>
+              {!gateOpen ? <BookingOpensBanner /> : null}
               <TokensBanner tokens={tokens} />
               {data?.seasonNote ? (
                 <Banner tone="green" title="Season">
@@ -415,8 +427,9 @@ export default function BookSession({
                   tokens={tokens}
                   reserving={reserving}
                   // A parent with nothing selected has no athlete to spend a
-                  // token for yet - sessions stay visible but inert.
-                  disabled={isParent && !selectedAthleteId}
+                  // token for yet, and before the Oct 10 gate nobody but Elite
+                  // reserves - sessions stay visible but inert either way.
+                  disabled={(isParent && !selectedAthleteId) || !gateOpen}
                   onSelect={confirmBooking}
                 />
               </div>
@@ -773,7 +786,7 @@ function Confirmed({ bare, confirmation, onRepeat, onBack }) {
           */}
           {c.email ? (
             <Body size={13} style={{ marginTop: 8 }}>
-              Confirmation sent to {c.email}
+              A confirmation is on its way to {c.email} - it also appears under your notices.
             </Body>
           ) : null}
         </div>

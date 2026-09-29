@@ -1,6 +1,10 @@
 import React, { useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import { color, font } from '../tokens';
+import PendingBanner from '../components/PendingBanner';
+import PaymentConfirming from '../components/PaymentConfirming';
+import useBillingHub from '../hooks/billing';
+import { billingBadge, loginStatusLine } from '../data/billingCopy';
 import BookChooser, { BookChooserSheet, bookNavigation } from '../components/BookChooser';
 import BottomTabBar from '../components/BottomTabBar';
 import Button from '../components/Button';
@@ -79,6 +83,14 @@ export default function ParentDashboard({
   const membershipStatus = useMembership().data?.household?.membership?.status ?? null;
   const paused = membershipStatus === 'past_due' || membershipStatus === 'lapsed';
   const onHold = flagged || paused;
+  // Sprint 20 (spec 4.4): per-athlete paid state from the same hub Billing
+  // renders; the household-level `membership` above keeps its meaning.
+  const hub = useBillingHub();
+  const hubStatus = hub.data?.status ?? null;
+  const pendingAthletes = hubStatus?.status === 'pending' ? hubStatus.pendingAthletes : [];
+  const billingById = new Map((hub.data?.members ?? []).map((m) => [m.athleteId, m.billing?.status ?? 'active']));
+  const [params] = useSearchParams();
+  const paidAthleteId = params.get('paid');
   // Sprint 11 pin D entry point: same direct-navigate() precedent
   // AthleteDashboard's own coaching/membership links already use (this lane
   // never edits PortalRoutes.js) rather than a new onOpenMembership prop —
@@ -141,6 +153,8 @@ export default function ParentDashboard({
           standing badge does flip to ON HOLD, because booking is what actually
           gets restricted.
         */}
+        <PaymentConfirming athleteId={paidAthleteId} />
+        <PendingBanner pendingAthletes={pendingAthletes} body={hubStatus?.body} title={hubStatus?.title} />
         {onHold ? (
           <PaymentBanner billing={flagged ? billing : bannerFor(membershipStatus)} onOpen={() => navigate('/portal/billing')} />
         ) : null}
@@ -150,6 +164,7 @@ export default function ParentDashboard({
             key={child.id}
             child={child}
             onHold={onHold}
+            billingStatus={billingById.get(child.id) ?? 'active'}
             onOpen={onOpenAthlete ? () => onOpenAthlete(child.id) : undefined}
             onBookFor={() => setBookFor(child)}
             onOpenMembership={() => navigate('/portal/billing')}
@@ -258,10 +273,8 @@ function PaymentBanner({ billing, onOpen }) {
  * differently shaped blocks. Nico has no contract data and the card still holds
  * its shape.
  */
-function ChildCard({ child, onHold, onOpen, onBookFor, onOpenMembership }) {
-  const standing = onHold
-    ? { tone: 'red', label: 'On hold' }
-    : child.standing;
+function ChildCard({ child, onHold, billingStatus, onOpen, onBookFor, onOpenMembership }) {
+  const standing = onHold ? { tone: 'red', label: 'On hold' } : billingBadge(billingStatus) ?? child.standing;
   const childPackageName = packageName(child.packageId);
 
   return (
@@ -276,6 +289,14 @@ function ChildCard({ child, onHold, onOpen, onBookFor, onOpenMembership }) {
           <div style={{ font: `400 11px ${font.body}`, color: color.textTertiary, marginTop: 2 }}>
             {child.ageLine}
           </div>
+          {/* Sprint 20 (spec 3.2, D9): the child-login state, from liveChildCard's
+              loginEmail + login. Legacy payloads and the seed carry neither key,
+              so nothing renders and the card keeps its shape. */}
+          {'loginEmail' in child ? (
+            <div style={{ font: `400 11px ${font.body}`, color: color.textTertiary, marginTop: 2 }}>
+              {loginStatusLine(child)}
+            </div>
+          ) : null}
           {/*
             Sprint 11 pin D entry point: the package label taps into
             /portal/membership rather than the card's own onOpen (athlete

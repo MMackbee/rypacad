@@ -10,6 +10,7 @@ import ProgressMeter, { meterColor } from '../components/ProgressMeter';
 import SavedToast from '../components/SavedToast';
 import { BackLink, Body, Card, ScreenTitle, SectionLabel, Tick } from '../components/Primitives';
 import { useAthleteDetail, useHousehold } from '../hooks';
+import { loginStatusLine } from '../data/billingCopy';
 
 /**
  * Sprint 10 pin C: same fallback rationale as DiagnosticCapture.js's own
@@ -34,7 +35,7 @@ function useLatestDiagnostic(athleteId) {
 }
 
 /** The pinned contract tier set (contract v1.8 §B) - not invented. */
-const TIER_MINUTES = [20, 45, 95];
+const TIER_MINUTES = [20, 45, 90];
 
 /**
  * 09 · Athlete Detail - parent view of one linked athlete.
@@ -130,6 +131,13 @@ export default function AthleteDetail({ variant = 'populated', bare = false, ath
     >
       <div style={{ padding: '0 22px 24px', display: 'flex', flexDirection: 'column', gap: 12 }}>
         <AthleteMembershipCard athleteId={athleteId} athlete={athlete} role={role} />
+        {/* Sprint 20 (spec 3.2): the child-login state. Rendered only when the
+            payload carries loginEmail (legacy athletes have neither field). */}
+        {athlete && 'loginEmail' in athlete ? (
+          <Card>
+            <Body size={12}>{loginStatusLine(athlete)}</Body>
+          </Card>
+        ) : null}
 
         {hasNoTier ? <StartContractCard athleteId={athleteId} athleteName={athlete?.name} /> : null}
 

@@ -7,7 +7,9 @@ import MediaPlaceholder from '../components/MediaPlaceholder';
 import logoWhite from '../assets/ryp-academy-logo-white.png';
 import PhoneFrame from '../components/PhoneFrame';
 import { AlertGlyph, Body } from '../components/Primitives';
+import CreateLoginSection from '../components/CreateLoginSection';
 import useAuthSession from '../hooks/useAuthSession';
+import { FAMILY_LINK_FAIL } from '../data/authCopy';
 
 /**
  * 01 · Sign In - public.
@@ -43,7 +45,8 @@ export const LANDING_BY_ROLE = {
   athlete: '/portal/home',
   parent: '/portal/family',
   coach: '/portal/coach',
-  mental: '/portal/admin',
+  // Sprint 20: admin is ops/owner only; Yannick lands on his sessions.
+  mental: '/portal/my-sessions',
   ops: '/portal/admin',
   owner: '/portal/admin',
 };
@@ -54,7 +57,7 @@ export const LANDING_BY_ROLE = {
 
 function LiveSignIn({ bare = false, onStartEnrollment, onSignedIn }) {
   const auth = useAuthSession();
-  const { user, provisioned, loading, error, signIn, signInWithEmail } = auth;
+  const { user, provisioned, loading, error, signIn, signInWithEmail, createLogin } = auth;
   /**
    * Sprint 10 pin I: "Forgot password" wired to a real
    * sendPasswordResetEmail. FALLBACK FLAG: useAuthSession has no
@@ -70,6 +73,7 @@ function LiveSignIn({ bare = false, onStartEnrollment, onSignedIn }) {
   const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
   const [resetStatus, setResetStatus] = useState(null); // null | 'sending' | 'sent' | error string
+  const [lastAction, setLastAction] = useState(null);
 
   const handleForgotPassword = async () => {
     if (!email.trim()) {
@@ -91,7 +95,9 @@ function LiveSignIn({ bare = false, onStartEnrollment, onSignedIn }) {
 
   const canSubmit = email.trim() !== '' && password !== '' && !loading;
   const submitEmail = () => {
-    if (canSubmit) signInWithEmail(email.trim(), password);
+    if (!canSubmit) return;
+    setLastAction('email');
+    signInWithEmail(email.trim(), password);
   };
 
   // Navigation is an effect of the seam reporting a signed-in user - not a
@@ -208,6 +214,9 @@ function LiveSignIn({ bare = false, onStartEnrollment, onSignedIn }) {
             </span>
           </div>
         ) : null}
+        {error && lastAction === 'google' ? (
+          <Body size={12} style={{ marginTop: 8 }}>{FAMILY_LINK_FAIL}</Body>
+        ) : null}
 
         <div
           style={{
@@ -230,11 +239,12 @@ function LiveSignIn({ bare = false, onStartEnrollment, onSignedIn }) {
           <Button
             variant="outline"
             disabled={loading}
-            onClick={() => signIn()}
+            onClick={() => { setLastAction('google'); signIn(); }}
             style={{ boxShadow: 'none' }}
           >
             <GoogleButtonLabel />
           </Button>
+          {typeof createLogin === 'function' ? <CreateLoginSection createLogin={createLogin} disabled={loading} /> : null}
         </div>
 
         <div style={{ flex: 1, minHeight: 20 }} />
@@ -443,7 +453,7 @@ function EnrollmentFooter({ onStartEnrollment }) {
         onClick={onStartEnrollment}
         style={{ color: color.primary, fontWeight: 600, cursor: 'pointer' }}
       >
-        Start enrollment
+        Start sign-up
       </span>
     </div>
   );

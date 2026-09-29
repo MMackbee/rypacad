@@ -7,7 +7,7 @@ import { attendeeNoteFor } from '../data/specialists';
 import BottomTabBar from '../components/BottomTabBar';
 import Button from '../components/Button';
 import CancelSheet from '../components/CancelSheet';
-import { cancelReasonCopy } from '../components/BookingReasons';
+import { CALENDLY_MANAGED_COPY, cancelReasonCopy } from '../components/BookingReasons';
 import { LeaveWaitlistButton, WaitlistPositionLine } from '../components/WaitlistAction';
 import MediaPlaceholder from '../components/MediaPlaceholder';
 import MemberSection from '../components/MemberSection';
@@ -198,6 +198,8 @@ function MemberList({ items, past, onBook, onCancelRequest, onLeaveWaitlist, lea
                     onClick={() => onLeaveWaitlist(item)}
                   />
                 </div>
+              ) : item.source === 'calendly' ? (
+                <Body size={11} tone={color.textTertiary}>{CALENDLY_MANAGED_COPY}</Body>
               ) : dayOf ? (
                 <Body size={11} tone={color.textTertiary}>
                   Same-day cancellations aren't available in the app — contact the front desk.
