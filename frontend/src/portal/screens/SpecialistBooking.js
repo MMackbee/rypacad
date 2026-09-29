@@ -4,6 +4,7 @@ import { color, font, glow, radius, tint } from '../tokens';
 import { SpendNote } from '../components/AllowancePools';
 import { capReachedCopy, LockedDayNotice, reasonCopy, SeeMembershipLink } from '../components/BookingReasons';
 import { JoinWaitlistButton, WaitlistedConfirmationBody } from '../components/WaitlistAction';
+import BookingOpensBanner from '../components/BookingOpensBanner';
 import BottomTabBar from '../components/BottomTabBar';
 import Button from '../components/Button';
 import CalendlyPanel from '../components/CalendlyPanel';
@@ -231,7 +232,11 @@ export default function SpecialistBooking({
     demoCapReached != null ? demoCapReached : specialistId === 'mental' && Boolean(slotsState.data?.capReached);
   const hasGrace = (tokens?.grace?.length ?? 0) > 0;
   const tokensSpent = tokens ? !tokens.unlimited && tokens.left === 0 && !hasGrace : false;
-  const blocked = tokensSpent || capReached;
+  // Sprint 20 (spec 5, D16): the hook computes bookingOpen(Date.now(), pkg)
+  // (contract 4.3); absent (routing Task 10 not merged yet) reads as open so
+  // the in-app list never locks on a missing field - the rules still refuse.
+  const gateOpen = slotsState.data?.bookingOpen ?? true;
+  const blocked = tokensSpent || capReached || !gateOpen;
   // Sprint 20 (spec 6.1): Yannick books through Calendly when the hook says so
   // (SPECIALISTS.mental.bookingMode === 'calendly' AND a URL is configured);
   // anything else - Phil, the seed, an emulator with no URL - keeps the slot
@@ -356,6 +361,11 @@ export default function SpecialistBooking({
               </div>
             ) : (
               <>
+                {!gateOpen ? (
+                  <div style={{ padding: '0 22px' }}>
+                    <BookingOpensBanner />
+                  </div>
+                ) : null}
                 <div style={{ padding: '0 22px' }}>
                   <DayStrip days={days} selectedDate={selectedDate} onSelect={setSelectedDate} />
                 </div>
