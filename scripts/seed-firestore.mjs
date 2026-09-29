@@ -441,7 +441,10 @@ function buildDocs(portal) {
   // duplicated field. `kind`/`tokens`/`windowDays`/`access247` (elite only)
   // flow straight through from the seam, never hand-copied.
   const packages = new Map();
-  const fields = ({ id, price, pending, ...rest }) => rest;
+  // Sprint 20 (spec 4.1): price ids never come from the seam - even if one
+  // ever appears there it is stripped, and the doc states null explicitly.
+  // write-packages.mjs is the ONLY writer of stripePriceId.
+  const fields = ({ id, price, pending, stripePriceId, ...rest }) => ({ ...rest, stripePriceId: null });
   for (const p of ALL_PACKAGES) packages.set(p.id, fields(p));
 
   // sessions — straight from the generator; ids stay the generator's
@@ -505,10 +508,17 @@ function buildDocs(portal) {
       householdId,
       {
         name: HOUSEHOLD.name,
-        guardian: { name: 'Dana', email: 'dana@email.com', phone: null },
+        guardian: { name: 'Dana', email: 'dana@email.com', phone: null, relationship: 'parent' },
         stripeCustomerId: null,
         stripeSubscriptionId: null,
+        stripeCustomerIds: [], // Sprint 20: arrayUnion target for the webhook
         periodAnchorDay: 1,
+        // Sprint 20 (createFamily shape, interfaces 2): whitfield plays the
+        // self-signed-up family so the admin sign-ups report has one row;
+        // parker stays legacy (no `signup`) and is excluded from it.
+        signup: { at: new Date(), by: 'parent-dana', source: 'self', mode: 'parent' },
+        createdBy: 'parent-dana',
+        emergencyContact: null,
       },
     ],
   ]);
@@ -547,6 +557,13 @@ function buildDocs(portal) {
     reese: 't-6',
     nico: 't-6',
   };
+  // Sprint 20 (interfaces 2): handicap int 0..54 | null ("none yet");
+  // loginEmail lower-cased | null (null == the parent's account runs the
+  // child). jordan already has her own legacy users doc (athlete-jordan,
+  // email null) so she stays null; reese is the invited-not-claimed case
+  // (loginInvites below); nico has no login and is the PAYMENT-PENDING case.
+  const WHITFIELD_HANDICAPS = { jordan: 14, reese: 27, nico: null };
+  const WHITFIELD_LOGIN_EMAILS = { jordan: null, reese: 'reese.whitfield@example.com', nico: null };
   const coachUid = 'coach-luke';
   const athletes = new Map();
   for (const child of HOUSEHOLD.children) {
@@ -558,6 +575,8 @@ function buildDocs(portal) {
       packageId: WHITFIELD_PACKAGE_IDS[child.id],
       contractMinutes: minutes ? Number(minutes[1]) : null,
       coachId: coachUid,
+      handicap: WHITFIELD_HANDICAPS[child.id] ?? null,
+      loginEmail: WHITFIELD_LOGIN_EMAILS[child.id] ?? null,
     });
   }
   // v2.0.1 (Sprint 18): the demo family's one facility-access add-on, with
@@ -566,6 +585,15 @@ function buildDocs(portal) {
     facilityAccess: true,
     facilityAccessConsent: { signedAt: new Date(), byUid: 'parent-dana' },
   });
+  // Sprint 20 (spec 4.4): nico is the athlete whose checkout has not completed.
+  // billing ABSENT == active (jordan, reese, every legacy athlete); `pending`
+  // is refused to book by the rules and the client. His seeded past bookings
+  // and waitlist entry predate the state (a real family could look like this
+  // after ops re-assigns a package) - the seed writes through the REST owner
+  // channel, so no rule runs.
+  athletes.get('nico').billing = {
+    status: 'pending', customerId: null, subscriptionId: null, priceId: null, checkoutSessionId: null, updatedAt: new Date(),
+  };
   // athletes/{id}/private/medical is deliberately NOT seeded — see header.
 
   // ---------------------------------------------------------------------
@@ -1082,6 +1110,29 @@ function buildDocs(portal) {
     ],
   ]);
 
+  // loginInvites/{emailLower} (Sprint 20, spec 2.2 / 3.2) - a CHILD login the
+  // parent requested, claimed by the child on first sign-in with that email
+  // (claimInvite). Keyed by the lower-cased email (one open invite per
+  // address), unlike staffInvites (auto id, script-consumed). Open here:
+  // the emulator has no auth account behind the address to claim it.
+  const loginInvites = new Map([
+    [
+      'reese.whitfield@example.com',
+      {
+        email: 'reese.whitfield@example.com',
+        householdId,
+        athleteId: 'reese',
+        athleteName: athletes.get('reese').name,
+        requestedBy: 'guardian',
+        createdBy: 'parent-dana',
+        createdAt: new Date(),
+        status: 'open',
+        claimedBy: null,
+        claimedAt: null,
+      },
+    ],
+  ]);
+
   // =========================================================================
   // Contract v2.1 (Sprint 13 pin, TEAM.md "token model Part 2: issuance,
   // grace, waitlist, Stripe") — the four Part 2 collections, BUILT and seeded
@@ -1377,6 +1428,7 @@ function buildDocs(portal) {
     enrollmentRequests,
     'athletes/jordan/diagnostics': jordanDiagnostics,
     staffInvites,
+    loginInvites,
     tokenPeriods,
     graceTokens,
     waitlist,
@@ -1541,6 +1593,12 @@ async function main() {
   console.log('\nstaffInvites (contract v1.8):');
   for (const [id, doc] of collections.staffInvites) {
     console.log(`  staffInvites/${id}: email=${doc.email} role=${doc.role} specialistId=${doc.specialistId} status=${doc.status}`);
+  }
+
+  console.log('\nloginInvites (Sprint 20) + per-athlete billing:');
+  for (const [id, doc] of collections.loginInvites) console.log(`  loginInvites/${id}: athleteId=${doc.athleteId} status=${doc.status}`);
+  for (const [id, doc] of collections.athletes) {
+    console.log(`  athletes/${id}: billing=${doc.billing ? doc.billing.status : 'absent (== active)'} handicap=${doc.handicap ?? 'null'} loginEmail=${doc.loginEmail ?? 'null'}`);
   }
 
   console.log('\nnotificationPrefs (contract v1.8):');
