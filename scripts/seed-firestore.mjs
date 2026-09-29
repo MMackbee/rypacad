@@ -313,14 +313,18 @@ function isoDate(d) {
 // (TEAM.md hook-seam pin).
 //
 // Pattern: Yannick works Tue/Thu, late afternoon; Phil works Mon/Wed/Fri.
-// Both run three 45-minute slots per working day — invented times only, no
+// Phil runs three 45-minute slots, Yannick three 30-minute slots per working day — invented times only, no
 // invented people, same call TEAM.md's hook-seam note makes for the live
 // hook's own seed fallback.
 const SPECIALIST_BOOKING_WINDOW_DAYS = 14;
 const SPECIALIST_SLOT_TIMES = {
-  phil: ['3:00 PM', '3:45 PM', '4:30 PM'], // Mon/Wed/Fri
-  mental: ['4:00 PM', '4:45 PM', '5:30 PM'], // Tue/Thu, late afternoon
+  phil: ['3:00 PM', '3:45 PM', '4:30 PM'], // Mon/Wed/Fri, 45-minute blocks
+  mental: ['4:00 PM', '4:30 PM', '5:00 PM'], // Tue/Thu - Sprint 20: Yannick's sessions are 30 minutes
 };
+// Sprint 20 (SPRINT-20-LAUNCH.md 6.1): phil 45, mental 30 - mirrors
+// data/specialists.js durationMinutes (routing lane) and hooks/index.js's
+// seedSpecialistDays; the number is named here, not imported (BRACKETS precedent).
+const SPECIALIST_DURATION_MINUTES = { phil: 45, mental: 30 };
 // JS Date#getDay(): Sun=0, Mon=1, ... Sat=6.
 const SPECIALIST_WEEKDAY_TYPE = { 1: 'phil', 3: 'phil', 5: 'phil', 2: 'mental', 4: 'mental' };
 
@@ -344,6 +348,7 @@ function addSpecialistSessions(sessions, runDate = new Date()) {
       sessions.set(id, {
         date: dateStr,
         time,
+        durationMinutes: SPECIALIST_DURATION_MINUTES[type],
         type,
         // v1.7.1 (owner, 2026-09-11): phil sessions are GROUP sessions at a
         // cap of 6 — only mental is the true capacity-1 1:1. Mirrors the
@@ -396,6 +401,7 @@ function addPastPhilSessions(sessions, runDate = new Date()) {
     sessions.set(id, {
       date: dateStr,
       time: SPECIALIST_SLOT_TIMES.phil[0],
+      durationMinutes: SPECIALIST_DURATION_MINUTES.phil,
       type: 'phil',
       capacity: 6, // v1.7.1: Phil sessions are group sessions, cap 6
       booked: 0,
@@ -1456,6 +1462,12 @@ async function main() {
     `Season ${portal.SEASON_BOUNDS.start} -> ${portal.SEASON_BOUNDS.end}: ` +
       `${sessionDocs.length} sessions (${trainingCount} training, ${tournamentCount} tournament, ` +
       `${philCount} phil, ${mentalCount} mental, ${adultCount} adult display-only)\n`
+  );
+  const specialistSample = sessionDocs.find((s) => s.type === 'mental');
+  const philSample = sessionDocs.find((s) => s.type === 'phil');
+  console.log(
+    `specialist durations (Sprint 20): phil ${philSample?.durationMinutes} min at ${philSample?.time}, ` +
+      `mental ${specialistSample?.durationMinutes} min at ${specialistSample?.time}\n`
   );
 
   let total = 0;
