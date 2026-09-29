@@ -1,7 +1,7 @@
 /* Global styles for RYP Golf */
 
-/* Import fonts */
-@import url('https://fonts.googleapis.com/css2?family=Raleway:wght@400;500;600;700&family=Work+Sans:wght@400;500;600;700&display=swap');
+/* Fonts are linked from public/index.html (with preconnects) so they load
+   in parallel with this stylesheet instead of after it. */
 
 /* Reset and base styles */
 * {

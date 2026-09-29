@@ -1,39 +1,53 @@
-import React, { useState } from 'react';
+import React, { Suspense, lazy, useState } from 'react';
 import { Navigate, Route, Routes, useLocation, useNavigate, useParams } from 'react-router-dom';
 
 import useAuthSession from './hooks/useAuthSession';
 import { isLive } from './hooks/live';
-import StatesHarness from './StatesHarness';
 import SignIn, { LANDING_BY_ROLE } from './screens/SignIn';
 import SignUp from './screens/SignUp';
 import NotProvisioned from './screens/NotProvisioned';
 import Registration from './screens/Registration';
-import { OnboardingWelcomeRoute } from './screens/OnboardingFlow';
-import MySchedule from './screens/MySchedule';
-import BookSession from './screens/BookSession';
 // Sprint 9 pin (specialist 1-on-1 booking) - the frontend lane builds this
 // screen in a parallel worktree; imported normally here (per TEAM.md's
 // process for exactly this situation, first done for TourStandings/Sprint
 // 7) so the route is real the moment both branches merge.
-import SpecialistBooking from './screens/SpecialistBooking';
 import ParentDashboard from './screens/ParentDashboard';
-import CoachDashboard from './screens/CoachDashboard';
-import Roster, { SessionAttendance } from './screens/Roster';
-import { CaptureFlow } from './screens/DiagnosticCapture';
 import AthleteDashboard from './screens/AthleteDashboard';
-import SeasonSchedule from './screens/SeasonSchedule';
-import CommitmentContract from './screens/CommitmentContract';
-import AthleteDetail from './screens/AthleteDetail';
-import Membership from './screens/Membership';
-import Billing from './screens/Billing';
 import { bump } from './hooks/invalidate';
-import NotificationPreferences from './screens/NotificationPreferences';
-import Reservations from './screens/Reservations';
-import AdminDashboard from './screens/AdminDashboard';
-import AdminSignups from './screens/AdminSignups';
-import StaffRoles from './screens/StaffRoles';
-import TourStandings from './screens/TourStandings';
-import SpecialistDay from './screens/SpecialistDay';
+
+/*
+ * Code splitting (2026-09-29): every screen used to ship in one 1.2 MB
+ * bundle. The first-visit path stays eager - SignIn, SignUp, Registration,
+ * NotProvisioned and the two home dashboards - and everything behind it
+ * loads as its own chunk when first routed to. RequireRole renders nothing
+ * while the session resolves, so a null Suspense fallback shows no flash.
+ * Named exports go through a `.then` that re-exports them as `default`.
+ */
+const named = (load, name) => lazy(() => load().then((m) => ({ default: m[name] })));
+// The review harness imports every screen, so it must be lazy too or it
+// drags the whole app back into the first bundle.
+const StatesHarness = lazy(() => import('./StatesHarness'));
+const OnboardingWelcomeRoute = named(() => import('./screens/OnboardingFlow'), 'OnboardingWelcomeRoute');
+const MySchedule = lazy(() => import('./screens/MySchedule'));
+const BookSession = lazy(() => import('./screens/BookSession'));
+const SpecialistBooking = lazy(() => import('./screens/SpecialistBooking'));
+const CoachDashboard = lazy(() => import('./screens/CoachDashboard'));
+const Roster = lazy(() => import('./screens/Roster'));
+const SessionAttendance = named(() => import('./screens/Roster'), 'SessionAttendance');
+const CaptureFlow = named(() => import('./screens/DiagnosticCapture'), 'CaptureFlow');
+const SeasonSchedule = lazy(() => import('./screens/SeasonSchedule'));
+const CommitmentContract = lazy(() => import('./screens/CommitmentContract'));
+const AthleteDetail = lazy(() => import('./screens/AthleteDetail'));
+const Membership = lazy(() => import('./screens/Membership'));
+const Billing = lazy(() => import('./screens/Billing'));
+const NotificationPreferences = lazy(() => import('./screens/NotificationPreferences'));
+const Reservations = lazy(() => import('./screens/Reservations'));
+const AdminDashboard = lazy(() => import('./screens/AdminDashboard'));
+const AdminSignups = lazy(() => import('./screens/AdminSignups'));
+const StaffRoles = lazy(() => import('./screens/StaffRoles'));
+const TourStandings = lazy(() => import('./screens/TourStandings'));
+const SpecialistDay = lazy(() => import('./screens/SpecialistDay'));
+
 
 /**
  * Portal route tree, mounted under /portal.
@@ -508,6 +522,7 @@ export default function PortalRoutes() {
   const openAthlete = (athleteId) => navigate(`/portal/athlete/${athleteId}`);
 
   return (
+    <Suspense fallback={null}>
     <Routes>
       <Route index element={<PortalIndex />} />
 
@@ -782,5 +797,6 @@ export default function PortalRoutes() {
           account home and everyone else to sign-in. */}
       <Route path="*" element={<Navigate to="/portal" replace />} />
     </Routes>
+    </Suspense>
   );
 }

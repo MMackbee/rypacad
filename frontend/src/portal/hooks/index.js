@@ -1622,10 +1622,18 @@ function shortWeekday(iso) {
  * rather than re-fetched per child.
  */
 async function liveChildCard(a, today, anchorDay) {
-  const pkg = a.packageId ? await fetchPackage(a.packageId) : null;
-  // Parent context: the compound filter is what makes the list read
+  // Sprint 20 (load time): the four reads that depend only on the athlete doc
+  // go out together - one round trip instead of four in a row per child.
+  // Parent context: the compound filter is what makes the bookings read
   // provable under the rules (see fetchBookings).
-  const bookings = await fetchBookings(a.id, { householdId: a.householdId });
+  const contractMinutes = a.contractMinutes ?? null;
+  const loginEmail = a.loginEmail ?? null;
+  const [pkg, bookings, logs, invite] = await Promise.all([
+    a.packageId ? fetchPackage(a.packageId) : Promise.resolve(null),
+    fetchBookings(a.id, { householdId: a.householdId }),
+    contractMinutes != null ? fetchContractLogs(a.id) : Promise.resolve(null),
+    loginEmail ? fetchLoginInvite(loginEmail) : Promise.resolve(null),
+  ]);
   const active = bookings.filter((b) => b.status !== 'cancelled');
   const upcoming = active.filter((b) => b.date >= today).sort(byDateThenId);
 
@@ -1641,11 +1649,9 @@ async function liveChildCard(a, today, anchorDay) {
     }
   }
 
-  const contractMinutes = a.contractMinutes ?? null;
   let standing = null;
   let contract = null;
   if (contractMinutes != null) {
-    const logs = await fetchContractLogs(a.id);
     const minutesByDate = new Map(logs.map((l) => [l.date, l.minutes || 0]));
     const m = buildContractMonthFromLogs({ today, minutesByDate, contractMinutes });
     contract = m.dueSoFar ? Math.round((m.logged / m.dueSoFar) * 100) : 0;
@@ -1656,8 +1662,7 @@ async function liveChildCard(a, today, anchorDay) {
   // Sprint 20 (spec 3.2): the child's own login for the parent home's
   // ChildCard line. A parent may read their own household's invites (rules,
   // Task 5); no loginEmail == the parent's account runs the child.
-  const loginEmail = a.loginEmail ?? null;
-  const login = loginStateFor(loginEmail, loginEmail ? await fetchLoginInvite(loginEmail) : null);
+  const login = loginStateFor(loginEmail, invite);
   const ageLine =
     [age != null ? `Age ${age}` : null, contractMinutes != null ? `${contractMinutes} min tier` : null]
       .filter(Boolean)
@@ -2785,20 +2790,25 @@ async function liveAthleteDashboard(today) {
   const ctx = await liveAthleteContext();
   const active = ctx.bookings.filter((b) => b.status !== 'cancelled');
   const upcoming = active.filter((b) => b.date >= today).sort(byDateThenId);
+  const contractMinutes = ctx.athlete.contractMinutes ?? null;
+
+  // Sprint 20 (load time): the three reads that follow the context are
+  // independent of each other - one round trip, not three.
+  const [nextSessions, logs, published] = await Promise.all([
+    upcoming.length ? fetchSessionsByIds([upcoming[0].sessionId]) : Promise.resolve([]),
+    contractMinutes != null ? fetchContractLogs(ctx.athlete.id) : Promise.resolve(null),
+    fetchAthleteDiagnostics(ctx.athlete.id, { publishedOnly: true }),
+  ]);
 
   let nextSession = null;
   if (upcoming.length) {
-    const sessionsById = new Map(
-      (await fetchSessionsByIds([upcoming[0].sessionId])).map((s) => [s.id, s])
-    );
+    const sessionsById = new Map(nextSessions.map((s) => [s.id, s]));
     const s = sessionsById.get(upcoming[0].sessionId);
     nextSession = s ? displaySession(s, today) : null;
   }
 
-  const contractMinutes = ctx.athlete.contractMinutes ?? null;
   let contract = null;
   if (contractMinutes != null) {
-    const logs = await fetchContractLogs(ctx.athlete.id);
     const minutesByDate = new Map(logs.map((l) => [l.date, l.minutes || 0]));
     const m = buildContractMonthFromLogs({ today, minutesByDate, contractMinutes });
     contract = {
@@ -2810,11 +2820,9 @@ async function liveAthleteDashboard(today) {
     };
   }
 
-  // Whether a published diagnostic exists yet (contract v1.8 C): the home
-  // screen's "Start here" card keys off this in live mode instead of the
-  // demo-only `variant === 'new'` flag (PM integration reconciliation).
-  const published = await fetchAthleteDiagnostics(ctx.athlete.id, { publishedOnly: true });
-
+  // `published` (contract v1.8 C): whether a published diagnostic exists
+  // yet - the home screen's "Start here" card keys off it in live mode
+  // instead of the demo-only `variant === 'new'` flag.
   return {
     athlete: {
       // Firestore stores one `name` field (no first/full split) - both keys
