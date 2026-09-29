@@ -13,10 +13,14 @@
 
 import { useCallback, useEffect, useState } from 'react';
 import { arrayRemove, arrayUnion, doc, updateDoc } from 'firebase/firestore';
-import { deleteToken, getMessaging, getToken, isSupported, onMessage } from 'firebase/messaging';
 import app, { db } from '../../firebase';
 import { bump } from './invalidate';
 import { isLive, requireUser } from './live';
+
+// firebase/messaging (and the installations SDK it drags in) is loaded on
+// demand: every visitor paid for it at boot, but only a member turning push
+// on ever uses it. Jest's dynamic import resolves to the same mocked module.
+const messaging = () => import('firebase/messaging');
 
 const VAPID_KEY = process.env.REACT_APP_FIREBASE_VAPID_KEY || '';
 const SW_PATH = '/firebase-messaging-sw.js';
@@ -45,6 +49,7 @@ export async function pushSupport() {
   let supported = hasApis;
   if (supported) {
     try {
+      const { isSupported } = await messaging();
       supported = await isSupported();
     } catch (err) {
       supported = false;
@@ -98,6 +103,7 @@ export async function enablePush() {
   const permission = await window.Notification.requestPermission();
   if (permission !== 'granted') return { status: permission === 'denied' ? 'blocked' : 'dismissed' };
   const registration = await registerWorker();
+  const { getMessaging, getToken } = await messaging();
   const token = await getToken(getMessaging(app), { vapidKey: VAPID_KEY, serviceWorkerRegistration: registration });
   if (!token) throw new Error('This browser did not issue a push token.');
   await rememberOnServer(token, true);
@@ -110,6 +116,7 @@ export async function disablePush() {
   const token = storedToken();
   if (token) {
     try {
+      const { deleteToken, getMessaging } = await messaging();
       await deleteToken(getMessaging(app));
     } catch (err) {
       /* already gone at FCM - the list is what matters */
@@ -122,11 +129,20 @@ export async function disablePush() {
 
 /** A foreground message refreshes Recent notices; returns the unsubscribe. */
 export function listenForeground() {
-  try {
-    return onMessage(getMessaging(app), () => bump('notifications'));
-  } catch (err) {
-    return () => {};
-  }
+  let unsubscribe = null;
+  let cancelled = false;
+  messaging()
+    .then(({ getMessaging, onMessage }) => {
+      if (cancelled) return;
+      unsubscribe = onMessage(getMessaging(app), () => bump('notifications'));
+    })
+    .catch(() => {
+      /* messaging unavailable here - nothing to listen to */
+    });
+  return () => {
+    cancelled = true;
+    if (unsubscribe) unsubscribe();
+  };
 }
 
 /**

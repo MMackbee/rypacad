@@ -145,14 +145,25 @@ subscription.
 
 ## 5. Calendar sync (12.7)
 
-Phil's blocks titled `Phil ...` with real end times. Then:
+Phil's blocks titled `Phil ...`, `Fitness ...` or anything containing the
+word `Phil`, with real end times (the end time is the session length). Then,
+from the repo root on a machine with `frontend/.env` (the calendar id + API
+key) and a `firebase login`:
 
 ```bash
 node scripts/sync-calendar-sessions.mjs --prod --dry-run   # review: every mental session is deleted or cancelled
 node scripts/sync-calendar-sessions.mjs --prod --yes
 ```
 
-Re-run after every calendar edit. This runs BEFORE any smoke booking.
+`--from` defaults to today and `--to` to 90 days out; pass both for another
+range. The dry run prints every timed event it will NOT make bookable as
+`display-only "<title>" xN (<dates>)` - if a Phil session is in that list,
+its title is the reason: rename it on the calendar and re-run.
+
+Re-run after every calendar edit (nothing reaches the app until this runs).
+This runs BEFORE any smoke booking. Families see a session only once its date
+is inside their package's 30-day booking window (45 for Elite), and before
+Oct 10 a non-Elite family sees it with Reserve disabled.
 
 ## 6. Packages + production smoke, TEST Stripe (12.8)
 

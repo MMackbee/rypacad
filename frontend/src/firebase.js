@@ -8,7 +8,6 @@ import {
 } from 'firebase/auth';
 import { connectFirestoreEmulator, getFirestore } from 'firebase/firestore';
 import { connectFunctionsEmulator, getFunctions } from 'firebase/functions';
-import { getStorage } from 'firebase/storage';
 
 // RYP Golf Firebase configuration
 const firebaseConfig = {
@@ -66,8 +65,8 @@ export const db = getFirestore(app);
 // claimInvite, createCheckoutSession - all deployed to us-central1.
 export const functions = getFunctions(app, 'us-central1');
 
-// Initialize Firebase Storage and get a reference to the service
-export const storage = getStorage(app);
+// Firebase Storage is not used by the portal; the SDK is left out of the
+// bundle. Import getStorage in the screen that first needs it.
 
 /**
  * Emulator mode — the QA sandbox (docs/portal/TEAM.md, "QA testing").
