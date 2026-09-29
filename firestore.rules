@@ -703,7 +703,11 @@ service cloud.firestore {
           (before.status == 'confirmed' && after.status == 'cancelled'
             && diffKeys.hasOnly(['status', 'cancelledBy', 'cancelReason'])
             && after.cancelledBy == request.auth.uid
-            && after.cancelReason == 'member')
+            && after.cancelReason == 'member'
+            // Sprint 20 (spec 6.1): a Calendly-sourced booking is cancelled
+            // from Calendly's email, never in-app (the webhook writes the
+            // cancel). Absent source == 'portal'.
+            && resource.data.get('source', null) != 'calendly')
           || (before.status == 'cancelled' && after.status == 'confirmed'
               && diffKeys.hasOnly(['status']))
         );
@@ -890,14 +894,15 @@ service cloud.firestore {
       // three settings-branch fields - forcing periodAnchorDay AND the two
       // Stripe ids through the shaped branch above exclusively, never
       // through this wider, unchecked one.
+      // Sprint 20: membership (K10 - a parent could un-freeze themselves), stripeCustomerIds, signup and createdBy are server-written; the parent branch excludes all of them.
       allow update: if signedIn() && (
         (me().role in ['ops', 'owner']
           && !request.resource.data.diff(resource.data).affectedKeys()
-               .hasAny(['periodAnchorDay', 'stripeCustomerId', 'stripeSubscriptionId']))
+               .hasAny(['periodAnchorDay', 'stripeCustomerId', 'stripeSubscriptionId', 'stripeCustomerIds', 'signup', 'createdBy']))
         || (me().role == 'parent'
             && me().householdId == householdId
             && !request.resource.data.diff(resource.data).affectedKeys()
-                 .hasAny(['stripeCustomerId', 'stripeSubscriptionId', 'periodAnchorDay']))
+                 .hasAny(['stripeCustomerId', 'stripeSubscriptionId', 'periodAnchorDay', 'membership', 'stripeCustomerIds', 'signup', 'createdBy']))
       );
     }
 
@@ -1348,6 +1353,29 @@ service cloud.firestore {
         || (me().role == 'athlete' && resource.data.athleteId == me().athleteId)
         || me().role in ['ops', 'owner']
       );
+    }
+
+    // ---- loginInvites -----------------------------------------------------
+    // Sprint 20 (spec 2.2, 3.2). Doc id == the child's login email, lower-
+    // cased; written ONLY by createFamily/addAthletes/claimInvite (Admin
+    // SDK). Read by the email's owner once VERIFIED (no enumeration by an
+    // unverified account), by the household's parent, or ops/owner. The
+    // token map is read null-safe: an emulator custom-token user has no
+    // email claim at all. No client write clause: deny-by-default.
+    match /loginInvites/{email} {
+      allow read: if signedIn() && (
+        (request.auth.token.get('email_verified', false) == true
+          && request.auth.token.get('email', '').lower() == email)
+        || (me().role == 'parent' && resource.data.householdId == me().householdId)
+        || me().role in ['ops', 'owner']
+      );
+    }
+
+    // ---- calendlyEvents --------------------------------------------------
+    // Sprint 20 (spec 6.2, 7): the Calendly webhook's idempotency ledger,
+    // Admin-SDK-written; ops/owner read it for the sign-ups report's flags.
+    match /calendlyEvents/{eventId} {
+      allow read: if signedIn() && me().role in ['ops', 'owner'];
     }
 
     // ---- stripeEvents -----------------------------------------------------

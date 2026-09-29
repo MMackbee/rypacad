@@ -109,10 +109,41 @@ async function teardown() {
     waitlist: ['s-full_ath-pending', 's-full_ath-elite', 's-full_ath-active'] })) for (const id of ids) await del(c, id);
 }
 
+export async function task5() {
+  console.log('Task 5: calendly cancel guard, loginInvites/calendlyEvents reads, household exclusions');
+  await seed('bookings', 'ath-active_cal-1', { athleteId: 'ath-active', sessionId: 'cal-1', date: '2026-11-10', type: 'mental', periodKey: '2026-11-01',
+    status: 'confirmed', householdId: 'hh', createdBy: 'system', createdAt: new Date(), chargedFrom: 'period', source: 'calendly', calendlyInviteeUri: 'https://api.calendly.com/x' });
+  await seed('bookings', 'ath-active_s-portal', { athleteId: 'ath-active', sessionId: 's1', date: '2026-11-04', type: 'training', periodKey: '2026-11-01',
+    status: 'confirmed', householdId: 'hh', createdBy: uid.parent, createdAt: new Date(), chargedFrom: 'period' });
+  const cancel = (id, auth) => call('PATCH', `/bookings/${id}?updateMask.fieldPaths=status&updateMask.fieldPaths=cancelledBy&updateMask.fieldPaths=cancelReason`,
+    { fields: fsFields({ status: 'cancelled', cancelledBy: uid.parent, cancelReason: 'member' }) }, auth).then((r) => r.status);
+  expect('member cancel of a portal booking', await cancel('ath-active_s-portal', t.parent), 200);
+  expect('member cancel of a calendly booking refused', await cancel('ath-active_cal-1', t.parent), 403);
+  await seed('loginInvites', 'kid@example.com', { email: 'kid@example.com', householdId: 'hh', athleteId: 'ath-active', athleteName: 'Kid', requestedBy: 'guardian',
+    createdBy: uid.parent, createdAt: new Date(), status: 'open', claimedBy: null, claimedAt: null });
+  const read = (auth) => call('GET', '/loginInvites/kid@example.com', null, auth).then((r) => r.status);
+  expect('invite read by the verified owner (mixed-case token email, .lower())', await read(t.kidVerified), 200);
+  expect('invite read refused while unverified', await read(t.kidUnverified), 403);
+  expect('invite read by the household parent', await read(t.parent), 200);
+  expect('invite read by ops', await read(t.ops), 200);
+  expect('invite read refused for a stranger', await read(t.stranger), 403);
+  expect('client cannot create an invite', await createAs(t.parent, 'loginInvites', 'new@example.com', { email: 'new@example.com', householdId: 'hh', athleteId: 'ath-active', athleteName: 'N', requestedBy: 'guardian', createdBy: uid.parent, status: 'open', claimedBy: null, claimedAt: null }), 403);
+  expect('client cannot create a household', await createAs(t.parent, 'households', 'hh-new', { name: 'X' }, []), 403);
+  expect('client cannot create a users doc', await createAs(t.stranger, 'users', uid.stranger, { role: 'parent', householdId: 'hh' }, []), 403);
+  await seed('calendlyEvents', 'ev-1', { event: 'invitee.created', outcome: 'unresolved', receivedAt: new Date() });
+  expect('calendlyEvents read by ops', (await call('GET', '/calendlyEvents/ev-1', null, t.ops)).status, 200);
+  expect('calendlyEvents read refused for a parent', (await call('GET', '/calendlyEvents/ev-1', null, t.parent)).status, 403);
+  const patchHh = (fields) => call('PATCH', `/households/hh?${Object.keys(fields).map((k) => `updateMask.fieldPaths=${k}`).join('&')}`, { fields: fsFields(fields) }, t.parent).then((r) => r.status);
+  expect('parent edits their own contact', await patchHh({ emergencyContact: '555' }), 200);
+  expect('parent cannot write membership', await patchHh({ membership: { status: 'active' } }), 403);
+  expect('parent cannot write stripeCustomerIds', await patchHh({ stripeCustomerIds: ['cus_x'] }), 403);
+  for (const [c, id] of [['bookings', 'ath-active_cal-1'], ['bookings', 'ath-active_s-portal'], ['loginInvites', 'kid@example.com'], ['calendlyEvents', 'ev-1']]) await del(c, id);
+}
+
 export { setup, teardown, seed, del, call, createAs, expect, token, t, uid, BASE };
 if (process.argv[1] && process.argv[1].endsWith('verify-rules.mjs')) {
   await setup();
-  try { await task4(); } finally { await teardown(); }
+  try { await task4(); await task5(); } finally { await teardown(); }
   console.log(failures ? `${failures} FAILED` : 'ALL PASS');
   process.exit(failures ? 1 : 0);
 }
