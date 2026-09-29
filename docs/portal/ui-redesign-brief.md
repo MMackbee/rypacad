@@ -64,7 +64,7 @@ academy's old booking tools for the 26/27 season.
   "provisional" bookings, for a session in a period Stripe has not billed yet.
   The concept appears nowhere in the code. If you meet it in the contract,
   ignore it.
-- **Booking window** rolls daily at 7:00 AM Central: 32 days for token
+- **Booking window** rolls daily at 7:00 AM Central: 30 days for token
   packages, 45 for Elite.
 - **Cancelling** is allowed **until the day before** the session, and the token
   returns to its own period. On the day, self-service cancelling is closed and
@@ -498,7 +498,7 @@ contract contradicts or does not contain. None of it goes into a portal design.
 | Two programmes — "Winter Program" (three months, Nov–Feb) and "Year-Round Coaching" (twelve months); tuition "prorated to the day"; a membership that can be "paused" for winter | The portal has no programmes, no fixed term, no proration and no pause. A membership is a monthly package on the household's own Stripe cycle, and tokens expire hard at period end | No programme switcher, no "pause membership" row, no "prorated" copy |
 | "Ages 7 to 18"; the prototype rejects a date of birth outside that range | The portal has no age eligibility rule and no age gate. Date of birth is collected only to derive a Tour bracket | No age range in registration copy, no age-validation error state on the date-of-birth field |
 | 24-hour cancellation, and "inside 24 hours you may be charged" (simulator context) | Cancel **until the day before** and keep the token; day-of is not self-service. Simulator booking is not in the portal at all | Use the day-before rule |
-| Booking opens 3 days ahead; monthly members "hold permanent scheduling rights" | Rolling window: 32 days, Elite 45, rolling at 7:00 AM Central. No recurring or permanent slots | Use the window |
+| Booking opens 3 days ahead; monthly members "hold permanent scheduling rights" | Rolling window: 30 days, Elite 45, rolling at 7:00 AM Central. No recurring or permanent slots | Use the window |
 | Fixed blocks 3 / 4 / 5 / 6 PM labelled Traditional / Elite U18 / Elite U13 / Adult; prototype gates hours by age group (13+ at 3 and 5, 12U at 4 and 6) | Sessions come from the owner's calendar and vary by day. Types are training, tournament, Phil group PT, Yannick 1-on-1. Booking is not gated by age group. Tour brackets are 10 & under / 11–13 / 14 & up, plus **Open** for an athlete with no date of birth — display only, and fixed at season start so nobody changes bracket mid-season | No fixed timetable, no age-gated cells |
 | Capacities: golf 10, fitness 6, multisport 8, tournament 16 "placeholder", dodgeball 24 | Training 14, tournament 25, Phil 6, Yannick 1 | Use the product numbers |
 | Waitlist capped at 5, then "waitlist closed"; availability written as "4 of 10 open" | No waitlist size limit; joining reserves a token, and promotion is automatic with no acceptance window. Availability reads **"N left"** or **"Full"** | No "x/5", no "waitlist closed", no "N of CAP open" |
@@ -539,7 +539,7 @@ website's word; only the right column may appear in a design.
 | Saturday tournaments, points standings | **RYP Tour** — brackets 10 & under / 11–13 / 14 & up / Open |
 | 12U, 13+, U13, U18 | Only the Tour brackets above, and they never gate a booking |
 | "4 of 10 open", "waitlist 3/5", "waitlist closed" | **"N left"** / **"Full"** / **Join waitlist** with a position; no cap |
-| Books 3 days ahead | **32 days** (Elite 45); a locked day reads "opens 7 AM on <date>" |
+| Books 3 days ahead | **30 days** (Elite 45); a locked day reads "opens 7 AM on <date>" |
 | 24-hour cancellation | "Cancel until the day before the session to keep your token." |
 | 20 / 45 / 90 min | **20 / 45 / 95 min** |
 | "Booking access paused after the retries" | Past due: "New bookings are paused until it clears; everything already booked is kept." Lapsed: "Upcoming bookings were released." Badges: **Active · Retry N of 3 · Past due · Restricted** |

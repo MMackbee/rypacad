@@ -1,0 +1,5 @@
+{
+  "test": { "t-6": "price_1Sample0000t6", "t-12": "price_1Sample000t12", "t-16": "price_1Sample000t16",
+            "elite": "price_1Sample0elite", "single": "price_1Sample0singl", "facility-access": "price_1Sample0facil" },
+  "live": { "t-6": null, "t-12": null, "t-16": null, "elite": null, "single": null, "facility-access": null }
+}

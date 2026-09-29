@@ -238,3 +238,78 @@ turn into bonus tokens, and the two now mint the same document id.
 3. **The choice is per booking and is not remembered.** A family that always
    sends the parent picks it every time. Say so if it should default to the
    last choice made for that athlete.
+
+## Sprint 20 - launch (contract v3.0.1, 2026-09-28)
+
+Owner rulings, on the record (SPRINT-20-LAUNCH.md 0.11-0.13):
+
+1. **The checkout payment prepays November.** Before Nov 1 every tier pays
+   November at full price at checkout; recurring billing starts Dec 1 and
+   every subscription anchors on the 1st (`subscription_data.trial_end`,
+   one-time prepaid line). Nobody pays twice before the first session.
+2. **Season starts Nov 3** (Nov 2 is set-up day): `SEASON_BOUNDS.start`
+   2026-11-02 -> 2026-11-03. Oct 10 + 30 = Nov 9, so the first week is
+   bookable from Oct 10 either way.
+3. **Mid-month joiners prorate both** price (days remaining / days in
+   month) and tokens (same fraction, rounded up, never 0), then bill in full
+   on the next 1st. `PRORATE_JOINERS = true` is the ruling, not a default.
+4. **The 48-hour rule (PM ruling D11, 2026-09-28).** Stripe refuses a
+   Checkout Session whose `subscription_data.trial_end` is under 48 hours
+   away. So a checkout started when the next 1st is under 48 h off (the
+   29th-31st, or the 30th/31st of a 31-day month - possible only from Nov 1,
+   when the prepaid month is the current one) prepays the NEXT month in full
+   and `trial_end` is the 1st after that; the remaining day or two of the
+   current month are free, not prorated and not blocked.
+   `createCheckoutSession`'s `prepaidFor` rolls the period forward with a
+   49-hour lead (`MIN_TRIAL_LEAD_MS`); unit-tested in
+   `functions/portal/checkout.test.js` ("under 48 h to the 1st: prepay next
+   month in full"). Ruled, not a default: the alternative (refusing checkout
+   on those days with a new reason) was rejected.
+5. **A facility add-on lapse never freezes the family (PM ruling D10,
+   2026-09-28).** Every event for `product: 'facility'` (`invoice.paid`,
+   `invoice.payment_failed`, `customer.subscription.updated`,
+   `customer.subscription.deleted`) writes `athletes.facilityBilling` (+
+   `facilityAccess`) and nothing else - `households.membership` is
+   untouched, no booking is revoked, the tier `billing` keeps gating. Spec
+   4.3's "AND to household membership exactly as today" is the TIER
+   subscription's rule only (and, since D17, a tier
+   `customer.subscription.deleted` is per athlete - the household lapses only
+   when no sibling is live). The webhook's facility branches skip
+   `householdActive` / `membershipPatch` / `applyLapsed` / `applyPastDue`
+   when the resolved product is `facility`; `verify-stripe-launch.js` STEP G
+   (functions Task 13, rewritten under D10) asserts `membership` unchanged
+   after the add-on's `subscription.deleted`.
+
+Accepted gaps (spec 14 - say so if any is wrong):
+
+- A stranger with an unverified password account can create a household;
+  they cannot pay, claim or read invites unverified; ops deletes them from
+  the report's *unpaid* view.
+- One failing card on the TIER subscription freezes the whole household
+  (`membership` stays household-level); per-athlete `billing` only gates
+  who may book. A failing card on the facility add-on freezes nothing
+  (ruling 5 above).
+- Multi-child families share one Stripe customer when the second checkout
+  reuses `stripeCustomerId`; otherwise `stripeCustomerIds` holds both.
+- Before Nov 1 every tier prepays November at full price whatever the
+  sign-up date; Elite's October access is included, not charged. The
+  `pkg.tokens` fallback for a period with no `tokenPeriods` doc never
+  short-grants a joiner's first partial month, and never over-grants it
+  because the prepaid doc is written before booking opens for them.
+- The Calendly link leaks via Calendly's own emails; early/over-cap
+  bookings are flagged (`bookings.flag`), not refused.
+- The Oct 10 gate is a constant (`BOOKING_OPENS_AT = 1791633600000`);
+  changing the date is a rules + client deploy (retire after launch, #26).
+- Elite's Calendly range is 30 days unless Yannick makes the second type.
+- An invite for an email that already holds a login cannot be claimed; the
+  report shows it after 7 days (`invited-stale`).
+- No welcome email; the Success screen is the receipt.
+- The calendar sync is manual; Phil's edits reach the portal when the owner
+  re-runs it. The first run after Sprint 20 deletes/cancels every synced
+  `mental` session (Yannick moved to Calendly) - run it before any smoke
+  booking (spec 12.7).
+- DB lane: the committed `functions/config/stripe-catalogue.json` carries
+  the TEST price ids (`995e677`); its `live` block is null until the owner
+  pastes the LIVE ids, and until then `write-packages.mjs --mode live`
+  refuses to write (and `createCheckoutSession` under `STRIPE_MODE=live`
+  answers `price-missing`).

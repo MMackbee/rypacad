@@ -1,0 +1,58 @@
+/**
+ * The sign-ups report's row COPY (Sprint 20, spec 7) - PURE, over the rows
+ * useSignups() returns. Routing's data/signups.js BUILDS the rows
+ * (buildSignupRows); this file only turns them into strings and filters,
+ * which is why it is a different module (D1).
+ */
+import { longDayLabel } from './calendar';
+
+export const SIGNUP_FILTERS = [['all', 'All'], ['unpaid', 'Unpaid'], ['flagged', 'Flagged']];
+
+export function filterSignupRows(rows, filter) {
+  if (filter === 'unpaid') return (rows || []).filter((r) => r.unpaid);
+  if (filter === 'flagged') return (rows || []).filter((r) => r.flagged);
+  return rows || [];
+}
+
+/** The Flagged pill's number: flagged households PLUS unmatched Calendly bookings, which have no household row (D16). */
+export function flaggedCount(counts) {
+  if (!counts) return 0;
+  return (counts.flagged ?? 0) + (counts.unresolved ?? 0);
+}
+
+export function athleteLine(a) {
+  return [a.name, a.age != null ? String(a.age) : null, a.packageName || 'no package', a.handicap != null ? `hcp ${a.handicap}` : 'no handicap'].filter(Boolean).join(' · ');
+}
+
+const BILLING = { pending: 'Payment pending', active: 'Paid', past_due: 'Past due', lapsed: 'Lapsed' };
+export function paymentLabel(a) {
+  const base = BILLING[a.billing] || 'Paid';
+  return a.facility ? `${base} · facility ${a.facility}` : base;
+}
+
+export function loginLabel(a) {
+  if (a.login === 'claimed') {
+    const day = a.loginClaimedAt ? String(a.loginClaimedAt).slice(0, 10) : null;
+    return day ? `Login: claimed ${longDayLabel(day)}` : 'Login: claimed';
+  }
+  if (a.login === 'invited-stale') return `Login: invited 7+ days ago (${a.loginEmail})`;
+  if (a.login === 'invited') return `Login: invited (${a.loginEmail})`;
+  return 'Login: none';
+}
+
+export function flagLabel(f) {
+  if (f.kind === 'calendly') return `Calendly ${f.outcome} · ${String(f.receivedAt || '').slice(0, 10)}`;
+  return `Booking ${f.flag} · ${f.date}`;
+}
+
+/** One line per unmatched Calendly event (useSignups().data.unresolved) - the same shape flagLabel renders inside a row. */
+export function unresolvedLabel(e) {
+  return flagLabel({ kind: 'calendly', id: e.id, outcome: e.outcome, receivedAt: e.receivedAt });
+}
+
+export function signedUpLabel(iso) {
+  if (!iso) return '—';
+  const day = String(iso).slice(0, 10);
+  const time = String(iso).slice(11, 16);
+  return time ? `${longDayLabel(day)} ${time}` : longDayLabel(day);
+}

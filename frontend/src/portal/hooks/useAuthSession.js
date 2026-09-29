@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import {
+  createUserWithEmailAndPassword,
   onAuthStateChanged,
+  sendEmailVerification,
   sendPasswordResetEmail,
   signInWithEmailAndPassword,
   signInWithPopup,
@@ -8,6 +10,7 @@ import {
 } from 'firebase/auth';
 import { auth, provider } from '../../firebase';
 import { ERR, LiveDataError, fetchCurrentUser } from './live';
+import { callClaimInvite } from './callables';
 
 /**
  * The portal's auth session — the seam between Firebase auth and every screen.
@@ -15,8 +18,11 @@ import { ERR, LiveDataError, fetchCurrentUser } from './live';
  * Real mode (no `variant` passed) returns the shape pinned in
  * docs/portal/TEAM.md, "Sprint 4 pins":
  *
- *   { user: { uid, email, role, athleteId, householdId } | null,
- *     provisioned: boolean, loading, error, signIn(), signOut() }
+ *   { user: { uid, email, role, athleteId, householdId, specialistId, emailVerified } | null,
+ *     provisioned: boolean, loading, error, signIn(), signInWithEmail(), signOut(),
+ *     requestPasswordReset(),
+ *     // Sprint 20 (spec 2.1, 3.2; contract 4.1):
+ *     createLogin(email, password), refresh(), claimState, checkInvite(), resendVerification() }
  *
  * - Auth is the existing app instance from src/firebase.js (project `rypacad`)
  *   — never a second init. signIn() runs the existing Google popup; a popup the
@@ -51,7 +57,7 @@ const SIGNED_OUT = { user: null, provisioned: false, loading: false, error: null
  * what routes Yannick and Phil to their My Sessions view; without it here
  * the landing override read undefined and specialists landed on the admin
  * dashboard (caught in the integration browser pass). */
-function toUser(profile) {
+function toUser(profile, fbUser) {
   return {
     uid: profile.uid,
     email: profile.email != null ? profile.email : null,
@@ -59,7 +65,59 @@ function toUser(profile) {
     athleteId: profile.athleteId != null ? profile.athleteId : null,
     householdId: profile.householdId != null ? profile.householdId : null,
     specialistId: profile.specialistId != null ? profile.specialistId : null,
+    // Sprint 20 (spec 4.2): paying and claiming need a verified email.
+    emailVerified: Boolean(fbUser && fbUser.emailVerified),
   };
+}
+
+/** The signed-in-but-unprovisioned user (no users/{uid} doc yet). */
+function unprovisionedUser(fbUser) {
+  return { uid: fbUser.uid, email: fbUser.email != null ? fbUser.email : null, role: null, athleteId: null, householdId: null, emailVerified: Boolean(fbUser.emailVerified) };
+}
+
+/** claimInvite's `state` (contract 1.4), or 'error' for anything else. */
+export function claimStateOf(result) {
+  const s = result && result.state;
+  return s === 'claimed' || s === 'needs-verification' || s === 'already-claimed' || s === 'none' ? s : 'error';
+}
+
+/**
+ * Where the verification email's link returns to (spec 12.1): this build's
+ * own origin - rypacad.ryptest.com in production, localhost on the emulator
+ * (both authorized domains). Firebase's own action handler completes the
+ * verification first, then continues here.
+ */
+export function verifyContinueUrl() {
+  return `${window.location.origin}/portal/signin`;
+}
+
+/**
+ * Who the verification email comes FROM (D5, spec 12.1: templates stay
+ * DEFAULT, so Firebase Auth sends it) - noreply@<auth domain>, never the
+ * functions' SMTP_FROM. NotProvisioned's "We sent a link to {email} from
+ * {sender}" names this.
+ */
+export function verificationSender() {
+  return `noreply@${process.env.REACT_APP_FIREBASE_AUTH_DOMAIN || 'rypacad.firebaseapp.com'}`;
+}
+
+export function createLoginError(err) {
+  const code = err && err.code;
+  if (code === 'auth/email-already-in-use') return new LiveDataError(ERR.INVALID, 'This email already has a login - sign in instead', err, 'email-in-use');
+  if (code === 'auth/weak-password') return new LiveDataError(ERR.INVALID, 'Choose a longer password - at least 6 characters.', err, 'weak-password');
+  if (code === 'auth/invalid-email') return new LiveDataError(ERR.INVALID, 'Enter a valid email address.', err, 'invalid-email');
+  if (code === 'auth/too-many-requests') return new LiveDataError(ERR.UNAVAILABLE, 'Too many attempts — wait a few minutes, then try again.', err);
+  if (code === 'auth/operation-not-allowed') return new LiveDataError(ERR.UNAVAILABLE, 'Email sign-in is not enabled yet — use Continue with Google.', err);
+  return new LiveDataError(ERR.UNAVAILABLE, 'Could not create the login. Please try again.', err);
+}
+
+export function resendError(err) {
+  const throttled = err && err.code === 'auth/too-many-requests';
+  return new LiveDataError(
+    throttled ? ERR.UNAVAILABLE : ERR.UNKNOWN,
+    throttled ? 'Too many attempts — wait a few minutes, then try again.' : 'Could not send the verification email. Please try again.',
+    err
+  );
 }
 
 export default function useAuthSession({ variant } = {}) {
@@ -97,62 +155,121 @@ export default function useAuthSession({ variant } = {}) {
   // emission (or unmount) superseded it — sign-out during a slow users read
   // must not resurrect the signed-in state.
   const seqRef = useRef(0);
+  const [claimState, setClaimState] = useState('idle');
+  const claimRef = useRef(null); // latest runClaim; the auth effect never re-subscribes
+
+  // Resolve users/{uid} for one emission or refresh; only the latest `seq`
+  // may land. Returns 'provisioned' | 'not-found' | 'error' | 'stale'.
+  const resolveProfile = useCallback(async (seq, fbUser) => {
+    try {
+      const profile = await fetchCurrentUser();
+      if (seq !== seqRef.current) return 'stale';
+      setSession({ user: toUser(profile, fbUser), provisioned: true, loading: false, error: null });
+      return 'provisioned';
+    } catch (err) {
+      if (seq !== seqRef.current) return 'stale';
+      if (err instanceof LiveDataError && err.code === ERR.NOT_FOUND) {
+        // Exactly the unprovisioned case: a real account with no users/{uid}
+        // doc yet. Defined state, not an error.
+        setSession({ user: unprovisionedUser(fbUser), provisioned: false, loading: false, error: null });
+        return 'not-found';
+      }
+      setSession({
+        user: null, provisioned: false, loading: false,
+        error: err instanceof LiveDataError ? err : new LiveDataError(ERR.UNKNOWN, 'Could not load your account. Please try again.', err),
+      });
+      return 'error';
+    }
+  }, []);
 
   useEffect(() => {
     if (demo) return undefined; // demo bypasses real auth entirely
-
     const unsubscribe = onAuthStateChanged(auth, (fbUser) => {
       const seq = ++seqRef.current;
-
       if (!fbUser) {
         setSession(SIGNED_OUT);
+        setClaimState('idle');
         return;
       }
-
-      // Signed in: stay loading until the users/{uid} read settles.
       setSession((s) => ({ ...s, loading: true }));
-      fetchCurrentUser().then(
-        (profile) => {
-          if (seq !== seqRef.current) return;
-          setSession({ user: toUser(profile), provisioned: true, loading: false, error: null });
-        },
-        (err) => {
-          if (seq !== seqRef.current) return;
-          if (err instanceof LiveDataError && err.code === ERR.NOT_FOUND) {
-            // Exactly the unprovisioned case: a real Google account with no
-            // users/{uid} doc yet. Defined state, not an error.
-            setSession({
-              user: {
-                uid: fbUser.uid,
-                email: fbUser.email != null ? fbUser.email : null,
-                role: null,
-                athleteId: null,
-                householdId: null,
-              },
-              provisioned: false,
-              loading: false,
-              error: null,
-            });
-            return;
-          }
-          setSession({
-            user: null,
-            provisioned: false,
-            loading: false,
-            error:
-              err instanceof LiveDataError
-                ? err
-                : new LiveDataError(ERR.UNKNOWN, 'Could not load your account. Please try again.', err),
-          });
-        }
-      );
+      resolveProfile(seq, fbUser).then((outcome) => {
+        // Sprint 20 (spec 3.2): every NOT_FOUND emission with an email asks
+        // claimInvite; an emulator custom-token user has no email -> 'none'.
+        if (outcome !== 'not-found') return;
+        if (!fbUser.email) { setClaimState('none'); return; }
+        claimRef.current(seq, fbUser);
+      });
     });
-
     return () => {
       seqRef.current += 1; // invalidate any in-flight resolution
       unsubscribe();
     };
-  }, [demo]);
+  }, [demo, resolveProfile]);
+
+  /** Re-run the users/{uid} read under the current sequence (spec 2.2: `provisioned` flips without a reload). */
+  const refresh = useCallback(async () => {
+    const fbUser = auth.currentUser;
+    if (!fbUser) { setSession(SIGNED_OUT); return; }
+    try { await fbUser.reload(); } catch (err) { /* offline reload: the cached user still resolves */ }
+    setSession((s) => ({ ...s, loading: true }));
+    await resolveProfile(seqRef.current, fbUser);
+  }, [resolveProfile]);
+
+  const runClaim = useCallback(async (seq, fbUser) => {
+    setClaimState('checking');
+    try {
+      const result = await callClaimInvite();
+      if (seq !== seqRef.current) return 'error';
+      const state = claimStateOf(result);
+      setClaimState(state);
+      if (state === 'claimed') await refresh();
+      return state;
+    } catch (err) {
+      if (seq === seqRef.current) setClaimState('error');
+      return 'error';
+    }
+  }, [refresh]);
+  claimRef.current = runClaim;
+
+  /** "I've verified" / "Check again": a fresh token first (spec 3.2), then the lookup, no sign-out. */
+  const checkInvite = useCallback(async () => {
+    const fbUser = auth.currentUser;
+    if (!fbUser || !fbUser.email) { setClaimState('none'); return 'none'; }
+    await fbUser.reload();
+    await fbUser.getIdToken(true);
+    setSession((s) => (s.user ? { ...s, user: { ...s.user, emailVerified: Boolean(fbUser.emailVerified) } } : s));
+    return runClaim(seqRef.current, fbUser);
+  }, [runClaim]);
+
+  /** Step 0 of sign-up and the sign-in page's "Create a login" (spec 2.1, 3.1). */
+  const createLogin = useCallback(async (email, password) => {
+    setSession((s) => (s.error ? { ...s, error: null } : s));
+    let cred;
+    try {
+      cred = await createUserWithEmailAndPassword(auth, email, password);
+    } catch (err) {
+      throw createLoginError(err);
+    }
+    // Verification is not required to finish sign-up (it is to pay/claim);
+    // a failed send is reported, never fatal. Success lands via onAuthStateChanged.
+    try {
+      await sendEmailVerification(cred.user, { url: verifyContinueUrl() });
+      return { sent: true };
+    } catch (err) {
+      return { sent: false };
+    }
+  }, []);
+
+  const resendVerification = useCallback(async () => {
+    const fbUser = auth.currentUser;
+    if (!fbUser) throw new LiveDataError(ERR.UNAUTHENTICATED, 'Sign in first, then resend.');
+    try {
+      await sendEmailVerification(fbUser, { url: verifyContinueUrl() });
+      return { sent: true };
+    } catch (err) {
+      throw resendError(err);
+    }
+  }, []);
 
   const signIn = useCallback(async () => {
     // Clear a stale error so a retry starts clean.
@@ -276,5 +393,10 @@ export default function useAuthSession({ variant } = {}) {
     signInWithEmail,
     signOut,
     requestPasswordReset,
+    createLogin,
+    refresh,
+    claimState,
+    checkInvite,
+    resendVerification,
   };
 }

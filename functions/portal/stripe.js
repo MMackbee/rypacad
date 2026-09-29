@@ -19,6 +19,14 @@
  * Freeze before revoke is deliberate (policy section 10): an expired card
  * blocks NEW bookings immediately and costs nothing already booked until
  * Stripe's final retry.
+ *
+ * Sprint 20 (spec 4.3): billing is per ATHLETE. `checkout.session.completed`
+ * joins the handled set; every event resolves to an athlete first
+ * (stripe-resolve.js), the athlete writers live in stripe-billing.js and
+ * stripe-checkout.js, and the pre-Sprint-20 household-wide path
+ * (stripe-legacy.js) serves families that still resolve by customer only.
+ * Stripe reads (line items, the checkout-session lookup) happen BEFORE the
+ * transaction; every Firestore effect and its ledger row commit in ONE.
  */
 
 'use strict';
@@ -30,11 +38,20 @@ const admin = require('firebase-admin');
 // the sentinel is undefined there and every write throws at runtime.
 const {FieldValue} = require('firebase-admin/firestore');
 const Stripe = require('stripe');
-const lib = require('./lib');
 const revoke = require('./revoke');
+const catalogue = require('./catalogue');
+const resolve = require('./stripe-resolve');
+const billing = require('./stripe-billing');
+const checkout = require('./stripe-checkout');
+const legacy = require('./stripe-legacy');
+const {STRIPE_WEBHOOK_SECRETS} = require('./secrets');
+
+const {applyLapsed, applyLegacy, applyPastDue, invoicePeriod,
+  membershipPatch} = legacy;
 
 /** Event types this handler acts on; anything else is recorded as ignored. */
 const HANDLED = new Set([
+  'checkout.session.completed',
   'invoice.paid',
   'invoice.payment_failed',
   'customer.subscription.deleted',
@@ -44,9 +61,10 @@ const HANDLED = new Set([
 let stripeClient;
 
 /**
- * A Stripe client. Only `webhooks.constructEvent` is used, which needs no
- * API key, but the constructor wants a string — the placeholder keeps
- * signature verification working on an instance with no secret key set.
+ * A Stripe client. `webhooks.constructEvent` needs no API key; the
+ * checkout-session lookup and `listLineItems` (Sprint 20) use
+ * STRIPE_SECRET_KEY when it is set — the placeholder keeps signature
+ * verification working on an instance with no secret key set.
  * @return {!Object} The Stripe SDK client.
  */
 function stripe() {
@@ -80,287 +98,232 @@ function customerIdOf(object) {
 }
 
 /**
- * The billing period an invoice covers, as America/Chicago calendar dates.
- * The invoice LINE's period is authoritative (pin H); `period_start` /
- * `period_end` on the invoice itself are the documented fallback.
- * @param {!Object} invoice `event.data.object` for an invoice event.
- * @return {{start: ?string, end: ?string}} `'YYYY-MM-DD'` or nulls.
+ * Subscription status -> the athlete billing status it means.
+ * @param {?string} s Stripe's `subscription.status`.
+ * @return {?string} `'active' | 'past_due' | 'lapsed'`, or null to leave.
  */
-function invoicePeriod(invoice) {
-  const lines = (invoice.lines && invoice.lines.data) || [];
-  const line = lines.find((l) => l && l.period && l.period.start) || null;
-  const startUnix = line ? line.period.start : invoice.period_start;
-  const endUnix = line ? line.period.end : invoice.period_end;
-  return {
-    start: lib.chicagoDateFromUnix(startUnix),
-    end: lib.chicagoDateFromUnix(endUnix),
-  };
+function athleteStatusFor(s) {
+  if (s === 'active' || s === 'trialing') return 'active';
+  if (s === 'past_due') return 'past_due';
+  if (s === 'canceled' || s === 'unpaid' ||
+      s === 'incomplete_expired') return 'lapsed';
+  return null;
 }
 
 /**
- * Flatten a membership patch into dot paths, so an update only touches the
- * fields it names and leaves the rest of `households.membership` alone
- * (absent == active, so a partial map is always a legal state).
- * @param {!Object} fields The membership fields to set.
- * @return {!Object} A Firestore update payload.
- */
-function membershipPatch(fields) {
-  const patch = {};
-  for (const [k, v] of Object.entries(fields)) {
-    if (v !== undefined) patch[`membership.${k}`] = v;
-  }
-  patch['membership.updatedAt'] = now();
-  return patch;
-}
-
-/**
- * `invoice.paid` — issue the period's tokens and set the household active.
- * Reinstatement after a lapse is this same path; revoked bookings stay
- * cancelled. Elite athletes get no `tokenPeriods` document.
+ * `customer.subscription.updated` for ONE athlete: status, price, and a
+ * package remap (with the downgrade follow-up) for that athlete alone.
+ * Signature `(tx, event, hh, athlete, athleteRef, product)` - exactly what
+ * `handleEvent` passes; the athlete's CURRENT package is not needed here.
  * @param {!Object} tx The transaction.
- * @param {!Object} event The Stripe event.
- * @param {!Object} hh The resolved household.
- * @return {!Promise<{outcome: string, detail: !Object}>} What was applied.
+ * @param {!Object} event The event.
+ * @param {!Object} hh The household.
+ * @param {!Object} athlete The athlete body.
+ * @param {!Object} athleteRef Its ref.
+ * @param {string} product `'tier' | 'facility'`.
+ * @return {!Promise<!Object>} What was applied.
  */
-async function applyInvoicePaid(tx, event, hh) {
-  const invoice = event.data.object || {};
-  const period = invoicePeriod(invoice);
-  if (!period.start) return {outcome: 'no-period', detail: {}};
-
-  // The anchor the app derives every period from. Clamped 1..28 (pin H), so
-  // a cycle starting on the 29th-31st anchors on the 28th.
-  const anchorDay = lib.anchorDayFromISO(period.start);
-  // periodKey is the Stripe period start as a Chicago date. It is passed
-  // through periodFor so the id is always one the hooks can look up by id
-  // for "this period" — identical to period.start for every start on days
-  // 1..28, i.e. every start the anchor clamp can represent.
-  const derived = lib.periodFor(period.start, anchorDay);
-  const periodKey = derived.periodKey;
-  const periodEnd = derived.periodEnd;
-
-  const athletesSnap = await tx.get(db().collection('athletes')
-      .where('householdId', '==', hh.id));
-  const issued = [];
-  const skipped = [];
-  for (const doc of athletesSnap.docs) {
-    const athlete = doc.data() || {};
-    if (!athlete.packageId) {
-      skipped.push({athleteId: doc.id, reason: 'no-package'});
-      continue;
-    }
-    const pkgSnap = await tx.get(
-        db().collection('packages').doc(athlete.packageId));
-    const pkg = pkgSnap.exists ? pkgSnap.data() : null;
-    if (!pkg || pkg.tokens === null || pkg.tokens === undefined) {
-      // Elite (tokens: null) never reads a tokenPeriods doc, so never gets
-      // one. An unknown package id is recorded rather than guessed at.
-      skipped.push({
-        athleteId: doc.id,
-        reason: pkg ? 'unlimited' : 'unknown-package',
-      });
-      continue;
-    }
-    issued.push({athleteId: doc.id, granted: pkg.tokens});
-  }
-
-  // ---- reads done ----
-  for (const row of issued) {
-    tx.set(db().collection('tokenPeriods')
-        .doc(lib.tokenPeriodId(row.athleteId, periodKey)), {
-      athleteId: row.athleteId,
-      householdId: hh.id,
-      periodKey,
-      periodEnd,
-      granted: row.granted,
-      source: 'stripe',
-      eventId: event.id,
-      createdAt: now(),
-    });
-  }
-  tx.update(hh.ref, Object.assign({periodAnchorDay: anchorDay},
-      membershipPatch({
-        status: 'active',
-        stripeSubscriptionStatus: 'active',
-        currentPeriodStart: period.start,
-        currentPeriodEnd: period.end,
-        lastEventId: event.id,
-        // Contract v2.4: a paid invoice ends the retry sequence.
-        attemptCount: null,
-        nextPaymentAttempt: null,
-        lastFailedAt: null,
-      })));
-
-  return {
-    outcome: 'issued',
-    detail: {periodKey, periodEnd, anchorDay, issued, skipped},
-  };
-}
-
-/**
- * `invoice.payment_failed` on a retry that Stripe will attempt again —
- * freeze only. Idempotent: writing 'past_due' twice is the same state.
- * @param {!Object} tx The transaction.
- * @param {!Object} event The Stripe event.
- * @param {!Object} hh The resolved household.
- * @return {{outcome: string, detail: !Object}} What was applied.
- */
-function applyPastDue(tx, event, hh) {
-  // Contract v2.4 (Sprint 16): the retry position the Billing hub draws -
-  // Stripe's own attempt count and next attempt, plus when this one failed.
-  const inv = event.data.object || {};
-  tx.update(hh.ref, membershipPatch({
-    status: 'past_due',
-    stripeSubscriptionStatus: 'past_due',
-    lastEventId: event.id,
-    attemptCount: Number.isInteger(inv.attempt_count) ?
-      inv.attempt_count : null,
-    nextPaymentAttempt: lib.chicagoDateFromUnix(inv.next_payment_attempt),
-    lastFailedAt: lib.chicagoDateFromUnix(event.created),
-  }));
-  return {outcome: 'past_due', detail: {}};
-}
-
-/**
- * The final failure, or a deleted subscription — lapse now, revoke in the
- * follow-up phase.
- * @param {!Object} tx The transaction.
- * @param {!Object} event The Stripe event.
- * @param {!Object} hh The resolved household.
- * @param {string} subStatus The Stripe subscription status to record.
- * @return {{outcome: string, followUp: string, detail: !Object}} Applied.
- */
-function applyLapsed(tx, event, hh, subStatus) {
-  tx.update(hh.ref, membershipPatch({
-    status: 'lapsed',
-    stripeSubscriptionStatus: subStatus,
-    lastEventId: event.id,
-  }));
-  return {outcome: 'processing', followUp: 'revoke', detail: {}};
-}
-
-/**
- * `customer.subscription.updated` — remap the household's athletes when the
- * subscription's price maps to a different package.
- *
- * The decision is made by COMPARING STATE (does the mapped package differ
- * from what the athletes hold?) rather than by reading
- * `event.data.previous_attributes`, so a redelivered or out-of-order event
- * converges instead of double-applying.
- * @param {!Object} tx The transaction.
- * @param {!Object} event The Stripe event.
- * @param {!Object} hh The resolved household.
- * @return {!Promise<{outcome: string, followUp: (string|undefined),
- *     detail: !Object}>} What was applied.
- */
-async function applySubscriptionUpdated(tx, event, hh) {
+async function applyAthleteSubscriptionUpdated(tx, event, hh, athlete,
+    athleteRef, product) {
   const sub = event.data.object || {};
-  const items = (sub.items && sub.items.data) || [];
-  const priceId = (items[0] && items[0].price && items[0].price.id) ||
-      (sub.plan && sub.plan.id) || null;
-  const membership = membershipPatch({
-    stripeSubscriptionStatus: sub.status || null,
-    currentPeriodStart: lib.chicagoDateFromUnix(sub.current_period_start),
-    currentPeriodEnd: lib.chicagoDateFromUnix(sub.current_period_end),
-    lastEventId: event.id,
-  });
-  if (!priceId) {
-    tx.update(hh.ref, membership);
-    return {outcome: 'no-price', detail: {}};
+  const priceId = resolve.priceIdOf(sub);
+  const period = resolve.periodOf(sub);
+  const packageId = product === 'tier' ?
+      catalogue.packageIdForPrice(priceId) : null;
+  // The ONE read this helper makes, before any write: the NEW package's
+  // token count is what revoke.trimDowngrade (`revoke.js:84`) falls back to
+  // when a period has no tokenPeriods doc yet.
+  let newPkg = null;
+  if (packageId && packageId !== athlete.packageId) {
+    const snap = await tx.get(db().collection('packages').doc(packageId));
+    newPkg = snap.exists ? snap.data() : null;
   }
-
-  const pkgSnap = await tx.get(db().collection('packages')
-      .where('stripePriceId', '==', priceId).limit(1));
-  if (pkgSnap.empty) {
-    tx.update(hh.ref, membership);
-    return {outcome: 'unmapped-price', detail: {priceId}};
+  if (product === 'tier') {
+    // D10: only the tier subscription speaks for households.membership;
+    // the add-on's status and period stay on athletes.facilityBilling.
+    tx.update(hh.ref, membershipPatch({
+      stripeSubscriptionStatus: sub.status || null,
+      currentPeriodStart: period.start, currentPeriodEnd: period.end,
+      lastEventId: event.id,
+    }));
   }
-  const packageId = pkgSnap.docs[0].id;
-  const pkg = pkgSnap.docs[0].data() || {};
-
-  const athletesSnap = await tx.get(db().collection('athletes')
-      .where('householdId', '==', hh.id));
-  const changed = athletesSnap.docs.filter(
-      (d) => (d.data() || {}).packageId !== packageId);
-
-  // ---- reads done ----
-  tx.update(hh.ref, membership);
-  for (const doc of changed) {
-    tx.update(doc.ref, {packageId, updatedAt: now()});
+  const status = athleteStatusFor(sub.status);
+  if (status) {
+    billing.applyAthleteStatus(tx, {athleteRef, athlete, product, status,
+      priceId});
   }
-  if (changed.length === 0) {
+  if (!packageId || packageId === athlete.packageId) {
     return {outcome: 'no-change', detail: {priceId, packageId}};
   }
-  return {
-    outcome: 'processing',
-    followUp: 'downgrade',
-    detail: {
-      priceId,
-      packageId,
-      tokens: pkg.tokens === undefined ? null : pkg.tokens,
-      athleteIds: changed.map((d) => d.id),
-    },
-  };
+  tx.update(athleteRef, {packageId, updatedAt: now()});
+  return {outcome: 'processing', followUp: 'downgrade', detail: {
+    priceId, packageId, athleteIds: [athleteRef.id],
+    tokens: newPkg && newPkg.tokens !== undefined ? newPkg.tokens : null}};
 }
 
 /**
- * Verify, dedupe and apply one Stripe event.
+ * Verify, dedupe and apply one Stripe event. Stripe reads (line items, the
+ * checkout-session lookup) happen BEFORE the transaction.
  * @param {!Object} event A signature-verified Stripe event.
- * @return {!Promise<!Object>} The response body: always 200-shaped, because
- *     a handled-and-recorded event must never be retried by Stripe.
+ * @return {!Promise<!Object>} Always 200-shaped.
  */
 async function handleEvent(event) {
   const eventRef = db().collection('stripeEvents').doc(event.id);
   const object = (event.data && event.data.object) || {};
   const customer = customerIdOf(object);
+  const handled = HANDLED.has(event.type);
+  const isCheckout = event.type === 'checkout.session.completed';
+
+  let subject = null;
+  let pre = {outcome: null};
+  if (handled && !(await eventRef.get()).exists) {
+    try {
+      if (isCheckout) {
+        subject = resolve.parseClientReference(object.client_reference_id);
+        if (object.mode !== 'subscription' || !subject) {
+          pre.outcome = 'ignored';
+        } else {
+          pre = await checkout.readLineItems(stripe(), object.id);
+          if (!pre.ok) pre.outcome = pre.reason;
+        }
+      } else {
+        subject = await resolve.resolveSubject(event,
+            {db: db(), stripe: stripe()});
+      }
+    } catch (err) {
+      if (err instanceof resolve.StripeLookupError) {
+        pre.outcome = 'stripe-lookup-failed';
+      } else {
+        throw err;
+      }
+    }
+  }
 
   const planned = await db().runTransaction(async (tx) => {
     const existing = await tx.get(eventRef);
     if (existing.exists) {
-      return {
-        duplicate: true,
-        outcome: (existing.data() || {}).outcome || 'duplicate',
-      };
+      return {duplicate: true,
+        outcome: (existing.data() || {}).outcome || 'duplicate'};
     }
-
     let hh = null;
-    if (HANDLED.has(event.type)) {
-      hh = lib.householdFromSnap(
-          await tx.get(lib.householdByCustomerQuery(db(), customer)));
+    let athlete = null;
+    let athleteRef = null;
+    if (handled && !pre.outcome && subject && subject.householdId) {
+      const hhSnap = await tx.get(
+          db().collection('households').doc(subject.householdId));
+      hh = hhSnap.exists ?
+          {id: hhSnap.id, data: hhSnap.data() || {}, ref: hhSnap.ref} : null;
+      if (hh && subject.athleteId) {
+        athleteRef = db().collection('athletes').doc(subject.athleteId);
+        const aSnap = await tx.get(athleteRef);
+        athlete = aSnap.exists ? aSnap.data() || {} : null;
+        if (!athlete || athlete.householdId !== hh.id) {
+          athlete = null;
+          hh = null;
+        }
+      }
+    }
+    let pkg = null;
+    if (athlete && athlete.packageId) {
+      const pkgSnap = await tx.get(
+          db().collection('packages').doc(athlete.packageId));
+      pkg = pkgSnap.exists ? pkgSnap.data() : null;
+    }
+    // The payment-received notice speaks for the PAID package (spec 4.3
+    // remaps packageId to the paid price; the family may have changed its
+    // choice after opening checkout): the checkout's line item, or the
+    // subscription metadata's packageId. Read here, before any write.
+    let paidPkg = pkg;
+    const paidPackageId = isCheckout && pre.priceId ?
+        catalogue.packageIdForPrice(pre.priceId) :
+        (subject && subject.packageId) || null;
+    if (athlete && paidPackageId && paidPackageId !== athlete.packageId) {
+      const paidSnap = await tx.get(
+          db().collection('packages').doc(paidPackageId));
+      paidPkg = paidSnap.exists ? paidSnap.data() : pkg;
     }
 
     let applied = {outcome: 'ignored', detail: {}};
-    if (!HANDLED.has(event.type)) {
+    const product = (subject && subject.product) || 'tier';
+    if (!handled) {
       applied = {outcome: 'ignored', detail: {}};
+    } else if (pre.outcome) {
+      applied = {outcome: pre.outcome, detail: {}};
     } else if (!hh) {
       applied = {outcome: 'unmatched', detail: {}};
+    } else if (isCheckout) {
+      applied = checkout.applyCheckoutCompleted(tx, {
+        event, session: object, ref: subject, priceId: pre.priceId,
+        athlete, athleteRef, hh,
+        packageId: catalogue.packageIdForPrice(pre.priceId)});
+    } else if (!athlete) {
+      // Legacy resolution by customer only: the household-wide path.
+      applied = await applyLegacy(tx, event, hh, object);
     } else if (event.type === 'invoice.paid') {
-      applied = await applyInvoicePaid(tx, event, hh);
+      applied = billing.applyAthleteInvoicePaid(tx, {db: db(), event, hh,
+        athleteRef, athlete, pkg: paidPkg, product,
+        period: invoicePeriod(object)});
     } else if (event.type === 'invoice.payment_failed') {
-      const final = (object.next_payment_attempt === null ||
-          object.next_payment_attempt === undefined);
-      applied = final ?
-          applyLapsed(tx, event, hh, 'unpaid') :
-          applyPastDue(tx, event, hh);
+      const final = object.next_payment_attempt === null ||
+          object.next_payment_attempt === undefined;
+      const status = final ? 'lapsed' : 'past_due';
+      if (product === 'facility') {
+        // D10: the add-on fails alone - membership and bookings untouched.
+        applied = billing.applyAthleteStatus(tx, {athleteRef, athlete,
+          product, status, priceId: null});
+      } else if (final) {
+        // D17: a FINAL failure ends this athlete's subscription (Stripe's
+        // dunning cancels it next) - the same per-athlete rule as deleted.
+        const siblingLive = await billing.otherTierLive(tx, db(), hh.id,
+            athleteRef.id);
+        billing.applyAthleteStatus(tx, {athleteRef, athlete, product,
+          status, priceId: null});
+        applied = siblingLive ?
+            {outcome: 'processing', followUp: 'revoke-athlete', detail: {}} :
+            applyLapsed(tx, event, hh, 'unpaid');
+      } else {
+        // A retrying card freezes the household (spec 14, accepted).
+        applied = applyPastDue(tx, event, hh);
+        billing.applyAthleteStatus(tx, {athleteRef, athlete, product,
+          status, priceId: null});
+      }
     } else if (event.type === 'customer.subscription.deleted') {
-      applied = applyLapsed(tx, event, hh, object.status || 'canceled');
+      if (product === 'facility') {
+        // D10: facilityBilling.status 'lapsed' + facilityAccess false ONLY;
+        // no applyLapsed, no followUp 'revoke'.
+        applied = billing.applyAthleteStatus(tx, {athleteRef, athlete,
+          product, status: 'lapsed', priceId: resolve.priceIdOf(object)});
+      } else {
+        // D17: THIS athlete lapses and loses their future bookings; the
+        // household (and every sibling's bookings) only when no sibling
+        // still holds a live tier. The read precedes every write here.
+        const siblingLive = await billing.otherTierLive(tx, db(), hh.id,
+            athleteRef.id);
+        billing.applyAthleteStatus(tx, {athleteRef, athlete, product,
+          status: 'lapsed', priceId: resolve.priceIdOf(object)});
+        applied = siblingLive ?
+            {outcome: 'processing', followUp: 'revoke-athlete', detail: {}} :
+            applyLapsed(tx, event, hh, object.status || 'canceled');
+      }
     } else if (event.type === 'customer.subscription.updated') {
-      applied = await applySubscriptionUpdated(tx, event, hh);
+      applied = await applyAthleteSubscriptionUpdated(tx, event, hh, athlete,
+          athleteRef, product);
     }
 
     tx.set(eventRef, {
       type: event.type,
       customer: customer || null,
       householdId: hh ? hh.id : null,
+      athleteId: athlete ? athleteRef.id : null,
+      via: subject ? subject.via || 'client-reference' : null,
       receivedAt: now(),
       outcome: applied.outcome,
     });
-    return {
-      duplicate: false,
-      outcome: applied.outcome,
-      followUp: applied.followUp || null,
-      detail: applied.detail || {},
-      household: hh,
-    };
+    return {duplicate: false, outcome: applied.outcome,
+      followUp: applied.followUp || null, detail: applied.detail || {},
+      household: hh, firstActive: applied.firstActive === true,
+      athlete: athlete ? {id: athleteRef.id, name: athlete.name || null,
+        pkg: paidPkg} : null};
   });
 
   if (planned.duplicate) {
@@ -368,21 +331,26 @@ async function handleEvent(event) {
         `(${planned.outcome}) - no effect`);
     return {received: true, outcome: 'duplicate', eventId: event.id};
   }
-
   let outcome = planned.outcome;
   let summary = null;
   if (planned.followUp === 'revoke') {
     summary = await revoke.revokeHousehold(planned.household, event.id);
     outcome = 'lapsed';
+  } else if (planned.followUp === 'revoke-athlete') {
+    summary = await revoke.revokeAthlete(planned.household,
+        planned.athlete.id, event.id);
+    outcome = 'athlete-lapsed';
   } else if (planned.followUp === 'downgrade') {
     summary = await revoke.trimDowngrade(
         planned.household, planned.detail, event.id);
     outcome = 'downgraded';
   }
-  if (outcome !== planned.outcome) {
-    await eventRef.update({outcome});
+  if (outcome !== planned.outcome) await eventRef.update({outcome});
+  if (planned.firstActive && planned.athlete) {
+    await billing.sendPaymentReceived({householdId: planned.household.id,
+      athleteId: planned.athlete.id, athleteName: planned.athlete.name,
+      pkg: planned.athlete.pkg});
   }
-
   console.log(`stripe event ${event.id} (${event.type}) -> ${outcome}` +
       `${summary ? ' ' + JSON.stringify(summary) : ''}`);
   return {received: true, outcome, eventId: event.id, summary};
@@ -392,34 +360,39 @@ async function handleEvent(event) {
  * The HTTPS endpoint. Stripe posts server-to-server, so there is no CORS
  * wrapper and no caller but Stripe can produce a valid signature.
  */
-const stripeWebhook = functions.https.onRequest(async (req, res) => {
-  const secret = process.env.STRIPE_WEBHOOK_SECRET;
-  if (!secret) {
-    console.error('STRIPE_WEBHOOK_SECRET is not configured');
-    res.status(500).send('Webhook secret not configured');
-    return;
-  }
-  let event;
-  try {
-    event = stripe().webhooks.constructEvent(
-        req.rawBody, req.header('stripe-signature') || '', secret);
-  } catch (err) {
-    console.error('Stripe signature verification failed:', err.message);
-    res.status(400).send(`Webhook Error: ${err.message}`);
-    return;
-  }
-  try {
-    res.status(200).json(await handleEvent(event));
-  } catch (err) {
-    // 500 asks Stripe to retry; the event doc is the dedupe guard.
-    console.error(`stripe event ${event.id} failed:`, err);
-    res.status(500).json({error: err.message, eventId: event.id});
-  }
-});
+const stripeWebhook = functions.runWith({secrets: STRIPE_WEBHOOK_SECRETS})
+    .https.onRequest(async (req, res) => {
+      const secret = process.env.STRIPE_WEBHOOK_SECRET;
+      if (!secret) {
+        console.error('STRIPE_WEBHOOK_SECRET is not configured');
+        res.status(500).send('Webhook secret not configured');
+        return;
+      }
+      let event;
+      try {
+        event = stripe().webhooks.constructEvent(
+            req.rawBody, req.header('stripe-signature') || '', secret);
+      } catch (err) {
+        console.error('Stripe signature verification failed:', err.message);
+        res.status(400).send(`Webhook Error: ${err.message}`);
+        return;
+      }
+      try {
+        res.status(200).json(await handleEvent(event));
+      } catch (err) {
+        // 500 asks Stripe to retry; the event doc is the dedupe guard.
+        console.error(`stripe event ${event.id} failed:`, err);
+        res.status(500).json({error: err.message, eventId: event.id});
+      }
+    });
 
 module.exports = {
   customerIdOf,
   handleEvent,
   invoicePeriod,
+  periodOf: resolve.periodOf,
+  priceIdOf: resolve.priceIdOf,
+  resolveSubject: resolve.resolveSubject,
   stripeWebhook,
+  subscriptionIdOf: resolve.subscriptionIdOf,
 };

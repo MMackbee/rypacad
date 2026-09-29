@@ -1,0 +1,106 @@
+/**
+ * Sign-up form rules (Sprint 20, spec 2.1/2.2) - PURE. The function
+ * re-checks everything; this is the client's first pass so the form can say
+ * what is wrong before the round trip. Payload shapes are contract 1.2/1.3.
+ */
+import { ALL_PACKAGES } from './packages';
+
+export const EMAIL_RE = /^\S+@\S+\.\S+$/;
+export const TIER_MINUTES = [20, 45, 90];
+export const ADULT_AGE = 18;
+export const HANDICAP_MIN = 0;
+export const HANDICAP_MAX = 54;
+/** Spec 13 cut line: flip to false to hide the own-login toggle if claimInvite slips. */
+export const CHILD_LOGIN_ENABLED = true;
+export const U13_HELPER =
+  'Under 13? A Google account needs Family Link permission for third-party sign-in; a new password login works either way.';
+export const ADULT_REQUIRED = 'Student sign-up is 18+. A parent or guardian needs to complete this for you.';
+const DOB_REQUIRED = 'Date of birth is required — it determines U13 vs U18 eligibility.';
+
+let seq = 0;
+export function newAthleteEntry() {
+  seq += 1;
+  return { key: `new-${seq}`, name: '', dob: '', packageId: null, contractMinutes: null, handicap: '', ownLogin: false, loginEmail: '' };
+}
+
+/** Whole years old on `todayISO`; null for anything but 'yyyy-MM-dd'. No Date.now(). */
+export function ageOnDate(dob, todayISO) {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(dob || '') || !/^\d{4}-\d{2}-\d{2}$/.test(todayISO || '')) return null;
+  const [y, m, d] = dob.split('-').map(Number);
+  const [ty, tm, td] = todayISO.split('-').map(Number);
+  let age = ty - y;
+  if (tm < m || (tm === m && td < d)) age -= 1;
+  return age;
+}
+
+export function isAdultOnDate(dob, todayISO) {
+  const age = ageOnDate(dob, todayISO);
+  return age != null && age >= ADULT_AGE;
+}
+
+/** '' -> null; an integer 0..54 -> itself; anything else -> undefined (invalid). */
+export function normalizeHandicap(raw) {
+  if (raw === '' || raw == null) return null;
+  const n = Number(raw);
+  return Number.isInteger(n) && n >= HANDICAP_MIN && n <= HANDICAP_MAX && String(raw).trim() !== '' ? n : undefined;
+}
+
+const lower = (s) => (s || '').trim().toLowerCase();
+
+export function validateAthleteEntry(a, { todayISO, guardianEmail = '', siblings = [], mode = 'parent' } = {}) {
+  const errors = {};
+  if (!a.name || a.name.trim() === '') errors.name = 'Athlete name is required.';
+  const age = ageOnDate(a.dob, todayISO);
+  if (age == null || a.dob > todayISO) errors.dob = DOB_REQUIRED;
+  else if (mode === 'athlete' && age < ADULT_AGE) errors.dob = ADULT_REQUIRED;
+  if (a.packageId != null && !ALL_PACKAGES.some((p) => p.id === a.packageId)) errors.packageId = 'Pick a package from the list.';
+  if (a.contractMinutes != null && !TIER_MINUTES.includes(a.contractMinutes)) errors.contractMinutes = 'Pick 20, 45 or 90 minutes.';
+  if (normalizeHandicap(a.handicap) === undefined) errors.handicap = 'Handicap is a whole number from 0 to 54, or leave it blank.';
+  if (a.ownLogin) {
+    const email = lower(a.loginEmail);
+    if (!EMAIL_RE.test(email)) errors.loginEmail = 'Enter the email the athlete will sign in with.';
+    else if (email === lower(guardianEmail)) errors.loginEmail = "Use a different email from the guardian's.";
+    else if (siblings.some((s) => s !== a && s.ownLogin && lower(s.loginEmail) === email)) errors.loginEmail = 'Each athlete needs their own email.';
+  }
+  return errors;
+}
+
+function athleteBody(a) {
+  return {
+    name: a.name.trim(),
+    dob: a.dob,
+    packageId: a.packageId,
+    contractMinutes: a.contractMinutes ?? null,
+    handicap: normalizeHandicap(a.handicap) ?? null,
+    loginEmail: a.ownLogin && a.loginEmail ? lower(a.loginEmail) : null,
+  };
+}
+
+/** Contract 1.2 request body. Athlete mode: no relationship, no child login (the caller IS the login). */
+export function buildCreateFamilyPayload(form) {
+  const parent = form.mode === 'parent';
+  return {
+    mode: form.mode,
+    contact: {
+      name: form.contact.name.trim(),
+      email: form.contact.email.trim(),
+      phone: form.contact.phone.trim(),
+      relationship: parent ? form.contact.relationship || null : null,
+    },
+    athletes: form.athletes.map(athleteBody).map((a) => (parent ? a : { ...a, loginEmail: null })),
+    emergencyContact: form.emergencyContact.trim() || null,
+    medical: form.medical.trim() || null,
+    consents: {
+      dataCollection: Boolean(form.consents.dataCollection),
+      videoCapture: Boolean(form.consents.videoCapture),
+      mediaRelease: Boolean(form.consents.mediaRelease),
+      facilityAccess: Boolean(form.consents.facilityAccess),
+    },
+    signatureName: form.signatureName.trim(),
+  };
+}
+
+/** Contract 1.3 request body (Settings' "Link another athlete"). */
+export function buildAddAthletesPayload(form) {
+  return { athletes: form.athletes.map(athleteBody), medical: form.medical.trim() || null };
+}

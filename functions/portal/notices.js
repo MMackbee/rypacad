@@ -288,6 +288,23 @@ function waitlistExpired(args) {
   };
 }
 
+/**
+ * kind `membership`, subject `${athleteId}_paid` - an athlete's first
+ * `billing.status: 'active'` (spec 4.3). Copy 9.5.
+ * @param {{bookingOpen: boolean}} args Whether `lib.bookingOpen` is true
+ *     for this athlete's package right now.
+ * @return {{title: string, body: string}} The notice.
+ */
+function paymentReceived(args) {
+  const open = Boolean(args && args.bookingOpen);
+  return {
+    title: 'Payment received',
+    body: open ?
+      'Payment received — you\'re all set to book.' :
+      'Payment received — booking opens Fri, Oct 10 at 7 AM.',
+  };
+}
+
 module.exports = {
   TYPE_LABELS,
   attendeeNote,
@@ -298,6 +315,7 @@ module.exports = {
   firstNameOf,
   graceExpiring,
   membership,
+  paymentReceived,
   promoted,
   reminder24h,
   sessionCancelled,

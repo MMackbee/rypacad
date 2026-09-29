@@ -1,0 +1,45 @@
+{
+  "created_at": "2026-10-13T09:00:00.000000Z",
+  "created_by": "https://api.calendly.com/users/9c5f2b1e-3d4a-4f6b-8e7c-1a2b3c4d5e6f",
+  "event": "invitee.created",
+  "payload": {
+    "cancel_url": "https://calendly.com/cancellations/1a2b3c4d-5e6f-4a7b-8c9d-000000000002",
+    "created_at": "2026-10-13T09:00:00.000000Z",
+    "email": "nina@example.test",
+    "event": "https://api.calendly.com/scheduled_events/e0a1c3d5-7b9f-4a2c-8e6d-000000000002",
+    "first_name": "Lena",
+    "last_name": "Novak",
+    "name": "Lena Novak",
+    "new_invitee": null,
+    "old_invitee": "https://api.calendly.com/scheduled_events/e0a1c3d5-7b9f-4a2c-8e6d-000000000001/invitees/1a2b3c4d-5e6f-4a7b-8c9d-000000000001",
+    "questions_and_answers": [
+      {"answer": "Lena Novak", "position": 0, "question": "Athlete name"},
+      {"answer": "Athlete", "position": 1, "question": "Who is attending?"},
+      {"answer": "nina@example.test", "position": 2, "question": "Parent email"}
+    ],
+    "reschedule_url": "https://calendly.com/reschedulings/1a2b3c4d-5e6f-4a7b-8c9d-000000000002",
+    "rescheduled": false,
+    "routing_form_submission": null,
+    "scheduled_event": {
+      "created_at": "2026-10-13T09:00:00.000000Z",
+      "end_time": "2026-10-16T22:00:00.000000Z",
+      "event_guests": [],
+      "event_memberships": [{"user": "https://api.calendly.com/users/9c5f2b1e-3d4a-4f6b-8e7c-1a2b3c4d5e6f", "user_email": "yannick@example.test", "user_name": "Yannick"}],
+      "event_type": "https://api.calendly.com/event_types/7d8e9f0a-1b2c-4d3e-9f4a-5b6c7d8e9f0a",
+      "invitees_counter": {"active": 1, "limit": 1, "total": 1},
+      "location": {"type": "physical", "location": "RYP Academy"},
+      "name": "RYP Academy - Mental Game 1:1",
+      "start_time": "2026-10-16T21:30:00.000000Z",
+      "status": "active",
+      "updated_at": "2026-10-13T09:00:00.000000Z",
+      "uri": "https://api.calendly.com/scheduled_events/e0a1c3d5-7b9f-4a2c-8e6d-000000000002"
+    },
+    "scheduling_method": null,
+    "status": "active",
+    "text_reminder_number": null,
+    "timezone": "America/Chicago",
+    "tracking": {"utm_campaign": "novak", "utm_source": "ryp-portal", "utm_medium": "portal", "utm_content": "lena", "utm_term": null, "salesforce_uuid": null},
+    "updated_at": "2026-10-13T09:00:00.000000Z",
+    "uri": "https://api.calendly.com/scheduled_events/e0a1c3d5-7b9f-4a2c-8e6d-000000000002/invitees/1a2b3c4d-5e6f-4a7b-8c9d-000000000002"
+  }
+}

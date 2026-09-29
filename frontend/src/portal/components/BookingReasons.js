@@ -1,7 +1,7 @@
 import React from 'react';
 import { color, font } from '../tokens';
 import { Banner } from './Primitives';
-import { longDayLabel, nextMonthFirstShort, todayISO, windowOpensOn } from '../data/calendar';
+import { BOOKING_OPENS_LABEL, longDayLabel, nextMonthFirstShort, todayISO, windowOpensOn } from '../data/calendar';
 
 /**
  * Shared booking-rejection/lock/cancellation copy (Sprint 12 pin, contract
@@ -28,10 +28,18 @@ export function reasonCopy(reason) {
   if (reason === 'cap-reached') return capReachedCopy();
   // v2.0.1 (Sprint 18): Elite's per-day frequency caps.
   if (reason === 'one-per-day') return "Elite includes one golf session and one Phil session a day — there's already one booked that day.";
+  // Sprint 20 (contract 3.6): the per-athlete paid gate, the Oct 10 gate and
+  // Calendly-managed rows. Copy is section 9's, verbatim.
+  if (reason === 'billing-pending') return 'Payment pending - finish checkout to start booking';
+  if (reason === 'booking-not-open') return `Booking opens ${BOOKING_OPENS_LABEL}`;
+  if (reason === 'calendly-managed') return "Cancel or reschedule from Calendly's email";
   if (reason === 'full') return 'That block filled before the reservation completed.';
   if (reason === 'membership-inactive') return "This membership isn't active right now.";
   return null;
 }
+
+/** The non-cancellable Calendly row's action copy (MySchedule, Reservations). */
+export const CALENDLY_MANAGED_COPY = reasonCopy('calendly-managed');
 
 /**
  * "See membership ›" — the pointer BookSession/SpecialistBooking's

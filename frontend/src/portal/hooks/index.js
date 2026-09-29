@@ -38,6 +38,8 @@ import {
   ERR,
   LiveDataError,
   approveEnrollmentRequest,
+  assertAthleteBillingActive,
+  assertBookingOpen,
   cancelBooking,
   createBooking,
   createContractLog,
@@ -94,6 +96,7 @@ import useIssueTokens, { cancelSession, fetchTokenPeriod, setHouseholdStripeIds 
 import useWaitlist, { fetchWaitlistByAthlete, fetchWaitlistByHousehold, fetchWaitlistBySession } from './waitlist';
 import useRecentNotices from './notices';
 import usePush from './push';
+import useSignups, { fetchLoginInvite } from './signups';
 import {
   COACH,
   COACH_BLOCKS,
@@ -157,6 +160,7 @@ import {
 import {
   addDaysISO,
   ageFromDob,
+  bookingOpen,
   buildContractMonth,
   buildContractMonthFromLogs,
   longDayLabel,
@@ -186,6 +190,8 @@ import {
 } from '../data/admin';
 import { TOUR_SEED, bracketFor, deriveTourStandings } from '../data/tour';
 import { SPECIALISTS, isSpecialistType, mentalCapFor } from '../data/specialists';
+import { calendlyUrlFor } from '../data/calendly';
+import { loginStateFor } from '../data/signups';
 
 export { default as useSeedResource } from './useSeedResource';
 export { default as useAuthSession } from './useAuthSession';
@@ -197,7 +203,7 @@ export { default as useOnboardingStatus } from './onboarding';
 // every portal hook from this one seam, same as every hook above.
 // Sprint 16: hooks/billing.js derives the hub's coaching line with the same
 // helper useMembership uses, so the two can never disagree.
-export { coachingFor, useIssueTokens, usePush, useRecentNotices, useWaitlist };
+export { coachingFor, useIssueTokens, usePush, useRecentNotices, useSignups, useWaitlist };
 
 /**
  * Harness demo states (contract v1.1): every data-bearing hook accepts
@@ -387,11 +393,12 @@ function tokensWithNextPeriod(pkg, bookings, anchorDay, today, opts = {}) {
 /** Sort key: chronological, then block order (session ids end in the block index). */
 /**
  * Yannick's frequency line (pin K): non-cancelled 'mental' bookings in
- * today's calendar month against the owner-tunable knob. A frequency rule,
- * never an allowance - `limit` null means tokens are the only limit.
+ * the given month (K04: the slot's, default today's) against the
+ * owner-tunable knob. A frequency rule, never an allowance - `limit` null
+ * means tokens are the only limit.
  */
-function coachingFor(bookings, today, pkg = null) {
-  const month = today.slice(0, 7);
+function coachingFor(bookings, today, pkg = null, monthISO = today.slice(0, 7)) {
+  const month = monthISO;
   const used = (bookings || []).filter(
     (b) => b && b.type === 'mental' && b.status !== 'cancelled' && (b.date || '').slice(0, 7) === month
   ).length;
@@ -463,8 +470,9 @@ async function resolveWaitlistRows(entries, sessionsById, today, anchorDay, curr
         // Shape parity with reservationRow's own confirmed-booking rows -
         // durationMinutes/instructor read the same way regardless of status.
         instructor: specialist ? specialist.name : null,
-        durationMinutes: specialist ? 45 : (s.durationMinutes ?? DEFAULT_DURATION_MINUTES),
+        durationMinutes: s.durationMinutes ?? (specialist ? specialist.durationMinutes : DEFAULT_DURATION_MINUTES),
         cancellable: false,
+        source: 'portal',
         periodKey,
         nextPeriod: periodKey > currentPeriodKey,
       };
@@ -507,6 +515,8 @@ async function liveSchedule(today) {
     // trusted off the stored booking field, so display can never disagree
     // with what createBooking itself derived at write time.
     const periodKey = periodFor(s.date, anchorDay).periodKey;
+    // Sprint 20 (spec 6.1): a Calendly-sourced booking is cancelled from Calendly's email, never here (My Schedule shows the note instead of Cancel).
+    const source = b.source ?? 'portal';
     return {
       ...displaySession(s, today),
       badge:
@@ -526,7 +536,8 @@ async function liveSchedule(today) {
       // here for free (their date is always < today).
       bookingId: b.id,
       status: b.status,
-      cancellable: b.status === 'confirmed' && b.date > today,
+      source,
+      cancellable: b.status === 'confirmed' && b.date > today && source !== 'calendly',
       // Contract v2.1, pin G: present on a cancelled row only - absent
       // (null) on every other status, never invented.
       cancelReason: b.cancelReason ?? null,
@@ -603,7 +614,7 @@ const MAX_WINDOW_DAYS = Math.max(...TOKEN_PACKAGES.map(windowDaysFor), windowDay
  *
  * Contract v2.0 pin D: the fetch window is no longer a fixed 7 days - it is
  * openThrough(now, windowDaysFor(pkg)), the athlete's own package window
- * (32 days, 45 for Elite). A parent caller has no specific child's package
+ * (30 days, 45 for Elite). A parent caller has no specific child's package
  * yet, so the fetch uses the WIDEST window any package offers (MAX_WINDOW_
  * DAYS, currently Elite's 45) - a superset that never under-fetches what a
  * child chosen afterward might need; per-day locking past THAT child's own,
@@ -675,6 +686,7 @@ async function liveBooking(today) {
  * local no-op (see useSchedule below).
  */
 const SEED_ATHLETE_ID = 'jordan';
+const SEED_HOUSEHOLD_ID = 'whitfield'; // the seed household's id (hooks/billing.js seedBillingHub, :1966)
 function seedBookingId(sessionId) {
   return `${SEED_ATHLETE_ID}_${sessionId}`;
 }
@@ -966,6 +978,14 @@ export function useBooking({ variant = 'open', today = todayISO(), practice = fa
     const pkg = athlete.packageId ? await fetchPackage(athlete.packageId) : null;
     const household = athlete.householdId ? await fetchHousehold(athlete.householdId) : null;
     const anchorDay = normalizeAnchorDay(household?.periodAnchorDay);
+    // Sprint 20 (K03 + spec 4.4/5): the gates a single booking runs, ONCE
+    // before the loop - paid status, the Oct 10 gate, and the package's
+    // booking window as the loop's outer bound (weeks past it are reported
+    // 'not open yet' and never attempted; today this loop skipped the
+    // window check entirely).
+    assertAthleteBillingActive(athlete);
+    assertBookingOpen(pkg);
+    const windowEnd = openThrough(new Date(), windowDaysFor(pkg));
     // Elite (pkg.tokens === null) has no pool to exhaust - Infinity skips
     // the "period limit" branch below entirely, same as the cap check in
     // live.js skipping outright when pkg.tokens === null. No package at all
@@ -1018,6 +1038,10 @@ export function useBooking({ variant = 'open', today = todayISO(), practice = fa
     const booked = [];
     const skipped = [];
     for (let date = firstDate; date <= endDate; date = addDaysISO(date, 7)) {
+      if (date > windowEnd) {
+        skipped.push({ date, reason: 'not open yet' });
+        continue;
+      }
       const periodKey = periodFor(date, anchorDay).periodKey;
       if ((tally.get(periodKey) || 0) >= limit) {
         skipped.push({ date, reason: 'period limit' });
@@ -1198,7 +1222,7 @@ export function useMonthSessions(monthISO, { practice = false } = {}) {
  * the db lane's emulator seed hand-adds slots following this SAME weekday/
  * time pattern so the demo and the emulator tell the same story). Yannick
  * (mental) sits Tue/Thu late afternoon; Phil (phil) sits Mon/Wed/Fri,
- * earlier in the afternoon; both 45-minute sessions — the times are
+ * earlier in the afternoon; Phil 45-minute, Yannick 30-minute sessions — the times are
  * invented (there is no real production schedule to read yet), the PEOPLE
  * are not (SPECIALISTS, data/specialists.js). Session ids follow the real
  * seed convention (`YYYY-MM-DD-s<n>`, docs/portal/TEAM.md's "-x0 extras"
@@ -1214,9 +1238,11 @@ export function useMonthSessions(monthISO, { practice = false } = {}) {
 const PHIL_WEEKDAYS = new Set([1, 3, 5]); // Mon, Wed, Fri (Date#getUTCDay)
 const MENTAL_WEEKDAYS = new Set([2, 4]); // Tue, Thu
 const PHIL_TIMES = ['3:00 PM', '3:45 PM'];
-const MENTAL_TIMES = ['4:30 PM', '5:15 PM'];
+// Sprint 20 (spec 6.1): Yannick's sessions are 30 minutes at 4:00 / 4:30 /
+// 5:00 PM - the same three times seed-firestore.mjs writes.
+const MENTAL_TIMES = ['4:00 PM', '4:30 PM', '5:00 PM'];
 
-export function seedSpecialistDays(specialistId, today, windowDays = 32) {
+export function seedSpecialistDays(specialistId, today, windowDays = 30) {
   const onMental = specialistId === 'mental';
   const weekdays = onMental ? MENTAL_WEEKDAYS : PHIL_WEEKDAYS;
   const times = onMental ? MENTAL_TIMES : PHIL_TIMES;
@@ -1224,6 +1250,7 @@ export function seedSpecialistDays(specialistId, today, windowDays = 32) {
   // session of 6, mental a true 1:1. A phil demo slot carries a believable
   // partial fill so the "spots left" treatment is reviewable in seed mode.
   const capacity = SPECIALISTS.find((s) => s.id === specialistId)?.capacity ?? 1;
+  const durationMinutes = SPECIALISTS.find((s) => s.id === specialistId)?.durationMinutes ?? DEFAULT_DURATION_MINUTES;
   const toDate = openThrough(new Date(), windowDays);
 
   const days = [];
@@ -1242,6 +1269,7 @@ export function seedSpecialistDays(specialistId, today, windowDays = 32) {
             booked,
             capacity,
             open: booked < capacity,
+            durationMinutes,
           };
         })
       : [];
@@ -1288,7 +1316,7 @@ async function liveSpecialistDays(specialistId, today, windowDays) {
       slots: onDate.map((s) => {
         const capacity = s.capacity ?? 1;
         const booked = s.booked ?? 0;
-        return { sessionId: s.id, time: s.time, booked, capacity, open: booked < capacity };
+        return { sessionId: s.id, time: s.time, booked, capacity, open: booked < capacity, durationMinutes: s.durationMinutes ?? (SPECIALIST_BY_ID.get(specialistId)?.durationMinutes ?? DEFAULT_DURATION_MINUTES) };
       }),
     });
   }
@@ -1325,9 +1353,15 @@ async function resolveSpecialistAthleteId(athleteIdOverride) {
  * already has).
  */
 async function liveSpecialistSlots(specialistId, athleteIdOverride, today) {
+  const specialist = SPECIALIST_BY_ID.get(specialistId);
   const athleteId = await resolveSpecialistAthleteId(athleteIdOverride);
   if (!athleteId) {
-    return { days: await liveSpecialistDays(specialistId, today, MAX_WINDOW_DAYS), tokens: null, capReached: false };
+    return {
+      days: await liveSpecialistDays(specialistId, today, MAX_WINDOW_DAYS),
+      tokens: null, capReached: false,
+      bookingMode: 'in-app', calendlyUrl: null, billingStatus: 'active',
+      bookingOpen: bookingOpen(Date.now(), null), athlete: null, guardian: null, householdId: null,
+    };
   }
   const athlete = await fetchAthlete(athleteId);
   const pkg = athlete.packageId ? await fetchPackage(athlete.packageId) : null;
@@ -1337,12 +1371,29 @@ async function liveSpecialistSlots(specialistId, athleteIdOverride, today) {
   ]);
   const anchorDay = normalizeAnchorDay(household?.periodAnchorDay);
   const windowDays = windowDaysFor(pkg);
-  const [days, tokens] = await Promise.all([
-    liveSpecialistDays(specialistId, today, windowDays),
-    Promise.resolve(tokensWithNextPeriod(pkg, bookings, anchorDay, today)),
-  ]);
+  const rawDays = await liveSpecialistDays(specialistId, today, windowDays);
+  // K04: the cadence is judged for each SLOT's month; the top-level
+  // capReached keeps today's month for the summary line.
+  const days = rawDays.map((d) => ({
+    ...d,
+    capReached: specialistId === 'mental' && coachingFor(bookings, today, pkg, d.date.slice(0, 7)).capReached,
+  }));
+  const tokens = tokensWithNextPeriod(pkg, bookings, anchorDay, today);
   const capReached = specialistId === 'mental' && coachingFor(bookings, today, pkg).capReached;
-  return { days, tokens, capReached };
+  // Sprint 20 (spec 6.1): Calendly only when the registry says so AND a URL
+  // is configured; otherwise the in-app list, so seed/emulator keep working.
+  const calendlyUrl = specialist?.bookingMode === 'calendly' ? calendlyUrlFor(pkg) : null;
+  return {
+    days, tokens, capReached,
+    bookingMode: calendlyUrl ? 'calendly' : 'in-app',
+    calendlyUrl,
+    billingStatus: athlete.billing?.status ?? 'active',
+    bookingOpen: bookingOpen(Date.now(), pkg),
+    athlete: { id: athlete.id, name: athlete.name ?? null, loginEmail: athlete.loginEmail ?? null },
+    guardian: { name: household?.guardian?.name ?? null, email: household?.guardian?.email ?? null },
+    // D9: the link builder's utm_campaign (calendlyLinkFor, data/calendly.js).
+    householdId: athlete?.householdId ?? null,
+  };
 }
 
 /** Seed tokens for useSpecialistSlots - the same seed token derivation
@@ -1354,9 +1405,20 @@ function seedSpecialistTokens(specialistId, athleteId, today) {
   return seedMemberTokens(child, today);
 }
 
-function seedSpecialistCapReached(specialistId, athleteId, today) {
+/** K04 in seed too: judged for `monthISO` (a slot's month), default today's. */
+function seedSpecialistCapReached(specialistId, athleteId, today, monthISO = today.slice(0, 7)) {
   const child = seedChildById(athleteId || SEED_ATHLETE_ID);
-  return specialistId === 'mental' && Boolean(child) && coachingFor(seedMemberBookingRows(child, today), today, packageById(child.packageId)).capReached;
+  return (
+    specialistId === 'mental' &&
+    Boolean(child) &&
+    coachingFor(seedMemberBookingRows(child, today), today, packageById(child.packageId), monthISO).capReached
+  );
+}
+
+/** Sprint 20: the seed child as the slot payload's `athlete` (no child logins in seed). */
+function seedSpecialistAthlete(athleteId) {
+  const c = seedChildById(athleteId || SEED_ATHLETE_ID);
+  return c ? { id: c.id, name: c.name, loginEmail: null } : null;
 }
 
 /**
@@ -1401,9 +1463,24 @@ export function useSpecialistSlots(specialistId, { athleteId } = {}) {
     live && specialistId
       ? null
       : {
-          days: specialistId ? seedSpecialistDays(specialistId, today, windowDaysFor(ATHLETE_PACKAGE)) : [],
+          days: specialistId
+            ? seedSpecialistDays(specialistId, today, windowDaysFor(ATHLETE_PACKAGE)).map((d) => ({
+                ...d,
+                capReached: seedSpecialistCapReached(specialistId, athleteId, today, d.date.slice(0, 7)),
+              }))
+            : [],
           tokens: specialistId ? seedSpecialistTokens(specialistId, athleteId, today) : null,
           capReached: specialistId ? seedSpecialistCapReached(specialistId, athleteId, today) : false,
+          // Sprint 20 (contract 4.3, D9): seed is always the in-app list (no
+          // Calendly URL in a jest/harness env), paid, open, one seed child of
+          // the one seed household; the same keys the live branch returns.
+          bookingMode: 'in-app',
+          calendlyUrl: null,
+          billingStatus: 'active',
+          bookingOpen: true,
+          athlete: specialistId ? seedSpecialistAthlete(athleteId) : null,
+          guardian: null,
+          householdId: SEED_HOUSEHOLD_ID,
         },
     live && specialistId
       ? {
@@ -1435,6 +1512,10 @@ function seedSpecialistDaySessions(specialistId, today) {
         time: s.time,
         booked: s.booked,
         capacity: s.capacity,
+        // Sprint 20 (spec 6.1): the attendance `block` carries the length;
+        // `type` is the specialist id, which doubles as sessions.type.
+        type: specialistId,
+        durationMinutes: s.durationMinutes,
         athletes: [],
       }))
     );
@@ -1468,6 +1549,8 @@ async function liveSpecialistSessions(specialistId, today) {
         time: s.time,
         booked: active.length,
         capacity: s.capacity ?? 1,
+        type: s.type,
+        durationMinutes: s.durationMinutes ?? (SPECIALIST_BY_ID.get(s.type)?.durationMinutes ?? DEFAULT_DURATION_MINUTES),
         athletes: active.map((b) => ({
           athleteId: b.athleteId,
           name: nameById.get(b.athleteId) ?? null,
@@ -1570,6 +1653,11 @@ async function liveChildCard(a, today, anchorDay) {
   }
 
   const age = ageFromDob(a.dob ?? null);
+  // Sprint 20 (spec 3.2): the child's own login for the parent home's
+  // ChildCard line. A parent may read their own household's invites (rules,
+  // Task 5); no loginEmail == the parent's account runs the child.
+  const loginEmail = a.loginEmail ?? null;
+  const login = loginStateFor(loginEmail, loginEmail ? await fetchLoginInvite(loginEmail) : null);
   const ageLine =
     [age != null ? `Age ${age}` : null, contractMinutes != null ? `${contractMinutes} min tier` : null]
       .filter(Boolean)
@@ -1584,6 +1672,10 @@ async function liveChildCard(a, today, anchorDay) {
     next,
     contract,
     packageId: a.packageId ?? null,
+    // Sprint 20 (spec 4.4): the parent home banner and Pay button key off this; absent == active.
+    billingStatus: a.billing?.status ?? 'active',
+    loginEmail,
+    login,
     tokens: deriveTokens(pkg, bookings, anchorDay, today),
   };
 }
@@ -1632,8 +1724,13 @@ export function useHousehold({ variant = 'three' } = {}) {
   const athletesGen = useInvalidation('athletes');
 
   const demo = demoOpts(variant, "Your family's data didn't load.");
-  const children =
-    variant === 'one' ? HOUSEHOLD.children.slice(0, 1) : HOUSEHOLD.children;
+  const children = (variant === 'one' ? HOUSEHOLD.children.slice(0, 1) : HOUSEHOLD.children).map((c) => ({
+    ...c,
+    billingStatus: c.billingStatus ?? 'active',
+    // Sprint 20 (spec 3.2): the seed family has no child logins - state 'none'.
+    loginEmail: null,
+    login: { state: 'none', claimedAt: null },
+  }));
   const billing = variant === 'payment' ? BILLING_ISSUE : HOUSEHOLD.billing;
 
   return useSeedResource(
@@ -1678,6 +1775,7 @@ async function liveHouseholdAthletes(today) {
         name: a.name,
         packageId: a.packageId ?? null,
         packageName: pkg ? pkg.name : null,
+        billingStatus: a.billing?.status ?? 'active',
         tokens: deriveTokens(pkg, bookings, anchorDay, today),
       };
     })
@@ -1706,6 +1804,7 @@ export function useHouseholdAthletes() {
     name: c.name,
     packageId: c.packageId,
     packageName: packageById(c.packageId)?.name ?? null,
+    billingStatus: c.billingStatus ?? 'active',
     tokens: c.tokens,
   }));
   return useSeedResource(
@@ -1831,6 +1930,7 @@ function seedMemberEntry(child, today) {
   return {
     athleteId: child.id,
     name: child.name,
+    billingStatus: child.billingStatus ?? 'active',
     package: pkg
       ? { id: pkg.id, name: pkg.name, price: pkg.price ?? null, pending: pkg.pending ?? false, tokens: pkg.tokens ?? null, windowDays: pkg.windowDays ?? null, kind: pkg.kind ?? null }
       : null,
@@ -1867,6 +1967,7 @@ async function liveMemberEntry(a, today, anchorDay) {
   return {
     athleteId: a.id,
     name: a.name,
+    billingStatus: a.billing?.status ?? 'active',
     package: pkg
       ? {
           id: pkg.id,
@@ -2104,6 +2205,7 @@ export function useHouseholdSettings(householdId) {
 function reservationRow(s, b, today, instructor, anchorDay, currentPeriodKey) {
   const specialist = SPECIALIST_BY_ID.get(s.type);
   const periodKey = periodFor(s.date, anchorDay).periodKey;
+  const source = b.source ?? 'portal';
   return {
     ...displaySession(s, today),
     badge:
@@ -2118,16 +2220,17 @@ function reservationRow(s, b, today, instructor, anchorDay, currentPeriodKey) {
         : null,
     bookingId: b.bookingId,
     status: b.status,
-    cancellable: b.status === 'confirmed' && s.date > today,
+    cancellable: b.status === 'confirmed' && s.date > today && source !== 'calendly',
     // Contract v2.1, pin G: present on a cancelled row only.
     cancelReason: b.cancelReason ?? null,
     cancelledBy: b.cancelledBy ?? null,
     athleteId: b.athleteId,
+    source,
     // Contract v2.1 (Sprint 12 pin): who the family said would walk in.
     // Only a Yannick 1:1 can carry 'parent'; everything else is the athlete.
     attendee: b.attendee ?? 'athlete',
     instructor: instructor ?? (specialist ? specialist.name : null),
-    durationMinutes: specialist ? 45 : (s.durationMinutes ?? DEFAULT_DURATION_MINUTES),
+    durationMinutes: s.durationMinutes ?? (specialist ? specialist.durationMinutes : DEFAULT_DURATION_MINUTES),
     periodKey,
     nextPeriod: periodKey > currentPeriodKey,
   };
@@ -2172,7 +2275,7 @@ async function liveHouseholdReservations(today) {
     if (!s || !bucket) continue; // dropped, same null-resolve rule as useSchedule/liveSchedule above
     const row = reservationRow(
       s,
-      { bookingId: b.id, status: b.status, athleteId: b.athleteId, cancelReason: b.cancelReason, cancelledBy: b.cancelledBy },
+      { bookingId: b.id, status: b.status, athleteId: b.athleteId, cancelReason: b.cancelReason, cancelledBy: b.cancelledBy, source: b.source },
       today,
       null,
       anchorDay,
@@ -2215,7 +2318,7 @@ function seedReservationMember(child, today) {
             cancellable: false,
             athleteId: child.id,
             instructor: isSpecialistType(s.type) ? SPECIALIST_BY_ID.get(s.type)?.name ?? null : null,
-            durationMinutes: isSpecialistType(s.type) ? 45 : (s.durationMinutes ?? DEFAULT_DURATION_MINUTES),
+            durationMinutes: s.durationMinutes ?? (SPECIALIST_BY_ID.get(s.type)?.durationMinutes ?? DEFAULT_DURATION_MINUTES),
             periodKey: periodFor(s.date, PERIOD_ANCHOR_DAY).periodKey,
             nextPeriod: periodFor(s.date, PERIOD_ANCHOR_DAY).periodKey > currentPeriodKey,
           },
@@ -2719,6 +2822,7 @@ async function liveAthleteDashboard(today) {
       name: ctx.athlete.name,
       fullName: ctx.athlete.name,
       date: longDayLabel(today),
+      billingStatus: ctx.athlete.billing?.status ?? 'active',
       // `allowance` -> `tokens` (contract v2.0): the AthleteDashboard
       // allowance card becomes the tokens card (UI pin).
       tokens: deriveTokens(ctx.pkg, ctx.bookings, normalizeAnchorDay(ctx.household?.periodAnchorDay), today),
@@ -2760,7 +2864,7 @@ export function useAthleteDashboard({ variant = 'populated', today = todayISO(),
     demo || live
       ? null
       : {
-          athlete: ATHLETE,
+          athlete: { ...ATHLETE, billingStatus: 'active' },
           nextSession,
           contract: summary
             ? {
@@ -3137,6 +3241,12 @@ async function liveAthleteDetail(athleteId) {
     };
   });
 
+  // Sprint 20 (spec 3.2): the athlete card's "Login: none / not claimed /
+  // claimed <date>" line. The household parent and ops/owner can read the
+  // invite; a coach cannot (fetchLoginInvite returns null -> 'invited').
+  const loginEmail = athlete.loginEmail ?? null;
+  const login = loginStateFor(loginEmail, loginEmail ? await fetchLoginInvite(loginEmail) : null);
+
   return {
     athlete: {
       name: athlete.name,
@@ -3158,6 +3268,9 @@ async function liveAthleteDetail(athleteId) {
       // the membership editor's toggle (locked without the waiver).
       facilityAccess: Boolean(athlete.facilityAccess),
       facilityAccessConsent: athlete.facilityAccessConsent ?? null,
+      // Sprint 20 (spec 3.2, D9): the child's own login state.
+      loginEmail,
+      login,
       householdId: athlete.householdId ?? null,
       householdName: household?.name ?? null,
       periodAnchorDay: normalizeAnchorDay(household?.periodAnchorDay),
@@ -3194,7 +3307,7 @@ export function useAthleteDetail({ athleteId, variant = 'populated' } = {}) {
   // successful pick until an unrelated write happened to bump something.
   const athletesGen = useInvalidation('athletes');
   const seedValue = {
-    athlete: ATHLETE_DETAIL,
+    athlete: { ...ATHLETE_DETAIL, loginEmail: null, login: { state: 'none', claimedAt: null } },
     history: full ? CONTRACT_HISTORY : [],
     checklist: full ? [] : LIMITED_DATA_CHECKLIST,
     hasEnoughData: full,
@@ -3399,7 +3512,7 @@ async function liveAdminDashboard(today) {
   // uses. `lapsedHouseholds` links straight to nothing invented — just the
   // household's own id/name, matching what the admin screen already knows
   // how to show elsewhere.
-  const membership = { active: 0, pastDue: 0, lapsed: 0, lapsedHouseholds: [] };
+  const membership = { active: 0, pastDue: 0, lapsed: 0, pending: 0, lapsedHouseholds: [] };
   for (const h of households) {
     const status = h.membership?.status ?? 'active';
     if (status === 'past_due') membership.pastDue += 1;
@@ -3408,6 +3521,8 @@ async function liveAdminDashboard(today) {
       membership.lapsedHouseholds.push({ id: h.id, name: h.name ?? null });
     } else membership.active += 1;
   }
+  // Sprint 20 (spec 4.4/7): athletes still on checkout - an ATHLETE count beside the household counts, so the dashboard agrees with the sign-ups report.
+  membership.pending = athletes.filter((a) => a.billing?.status === 'pending').length;
 
   const publishedDiagnosticAthleteIds = diagnostics
     .filter((d) => d.status === 'published')
@@ -3564,7 +3679,7 @@ export function useAdminDashboard({ variant = 'populated' } = {}) {
           // Contract v2.1, pin H: the harness's one named seed household
           // (HOUSEHOLD/Whitfield) is active — no invented lapsed/past_due
           // household ships in the default demo state.
-          membership: { active: 1, pastDue: 0, lapsed: 0, lapsedHouseholds: [] },
+          membership: { active: 1, pastDue: 0, lapsed: 0, pending: 0, lapsedHouseholds: [] },
         },
     live
       ? {

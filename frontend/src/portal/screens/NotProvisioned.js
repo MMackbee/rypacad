@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { color, font } from '../tokens';
 import * as hooks from '../hooks';
@@ -6,7 +6,8 @@ import Button from '../components/Button';
 import PhoneFrame from '../components/PhoneFrame';
 import { Banner, Body, Card, ScreenTitle, SectionLabel } from '../components/Primitives';
 import useAuthSession from '../hooks/useAuthSession';
-import { BrandHeader } from './SignIn';
+import { BrandHeader, LANDING_BY_ROLE } from './SignIn';
+import { ALREADY_CLAIMED, CHECK_AGAIN, LEGACY_CTA, RESEND, STRANGER_CHILD_CTA, STRANGER_CHILD_HINT, STRANGER_PARENT_CTA, VERIFIED, VERIFY_TITLE, notProvisionedView, verifyBody } from '../data/authCopy';
 
 /**
  * Sprint 10 pin A (TEAM.md, contract v1.8 §A): see Registration.js's own
@@ -26,32 +27,24 @@ function useEnrollmentFallback() {
 const useEnrollment = hooks.useEnrollment || useEnrollmentFallback;
 
 /**
- * Not provisioned - signed in, no portal role.
+ * Not provisioned - signed in, no portal role (Sprint 20, spec 3.2 + 2.4).
  *
- * The honest state for a Google account that authenticated but has no users/
- * doc (TEAM.md, Sprint 4 pins: `provisioned: false`). The routing lane's guard
- * redirects here.
+ * Four live states, chosen by notProvisionedView() from useAuthSession's
+ * claimState and the legacy enrollment status: `verify` (an invited child
+ * whose password account is not verified yet - Resend / I've verified),
+ * `already-claimed` (the invite was used by another login), `legacy` (one of
+ * the two historical pending/declined enrollmentRequests - sign-up is
+ * instant now, so the only action is to start it), and `stranger` (no
+ * invite: a parent starts sign-up, a child re-checks with the email the
+ * parent entered). A provisioned account landing here is sent home.
  *
- * Sprint 10 pin A: this screen is now the real dead-end fix, not just a
- * polite wall. It reads useEnrollment() and shows the request's real state -
- * `none` gets a "start enrollment" CTA into Registration; `pending` shows
- * exactly what was submitted under "under review"; `declined` shows the
- * reason plus a real resubmit action (sets status back to pending - the
- * pinned rules only allow a submitter to edit their OWN pending request, so
- * a true field-level edit-before-resubmit needs Registration pre-filled from
- * the declined request, which is flagged as an open question in the sprint
- * report; the resubmit action itself is real and always available here).
- * Sign-out remains available in every state.
+ * Same real/demo split as SignIn: `variant` renders a fixed demo state.
  *
- * Same real/demo split as SignIn: a `variant` prop (review harness) renders
- * a fixed demo state and never reads the live auth/enrollment seam; without
- * it the screen runs on useAuthSession() + useEnrollment().
- *
- * @param {'none'|'pending'|'declined'} [variant] Demo state; omit to run on
- *   the real seam. (Legacy 'default' still maps to 'none'.)
- * @param {() => void} [onStartEnrollment]  'none' state only - navigates to
- *   /portal/register. Hidden (falls back to a disabled-looking note) without
- *   it, per the optional-affordance convention.
+ * @param {'verify'|'stranger'|'already-claimed'|'pending'|'declined'} [variant]
+ *   Demo state; omit to run on the real seam. ('none'/'default' -> stranger.)
+ * @param {() => void} [onStartEnrollment]  The parent CTA and the legacy CTA
+ *   both navigate to /portal/register (RegistrationRoute redirects a
+ *   provisioned account). Hidden without it.
  */
 export default function NotProvisioned({ variant, ...rest }) {
   if (variant != null) return <DemoNotProvisioned variant={variant} {...rest} />;
@@ -59,70 +52,69 @@ export default function NotProvisioned({ variant, ...rest }) {
 }
 
 function LiveNotProvisioned({ bare = false, onStartEnrollment }) {
-  const { user, signOut } = useAuthSession();
+  const { user, provisioned, signOut, claimState, checkInvite, resendVerification } = useAuthSession();
   const enrollment = useEnrollment();
   const navigate = useNavigate();
   const [signingOut, setSigningOut] = useState(false);
 
+  // A claim that succeeded (or any provisioned account landing here) goes home.
+  useEffect(() => {
+    if (provisioned && user) navigate(user.specialistId ? '/portal/my-sessions' : LANDING_BY_ROLE[user.role] ?? '/portal/not-provisioned', { replace: true });
+  }, [provisioned, user, navigate]);
+
   const handleSignOut = async () => {
     setSigningOut(true);
-    try {
-      await signOut();
-      navigate('/portal/signin', { replace: true });
-    } catch (e) {
-      // Still signed in - re-enable the button rather than stranding it.
-      setSigningOut(false);
-    }
+    try { await signOut(); navigate('/portal/signin', { replace: true }); } catch (e) { setSigningOut(false); }
   };
-
   return (
     <NotProvisionedBody
       bare={bare}
       email={user?.email ?? null}
-      status={enrollment.loading ? null : enrollment.data?.status ?? 'none'}
-      request={enrollment.data?.request ?? null}
-      submit={enrollment.submit}
+      view={notProvisionedView({ claimState, legacyStatus: enrollment.loading ? null : enrollment.data?.status ?? 'none' })}
       onStartEnrollment={onStartEnrollment}
+      onCheckAgain={checkInvite}
+      onResend={resendVerification}
       onSignOut={handleSignOut}
       signingOut={signingOut}
     />
   );
 }
 
-/** Harness states: the demo guardian persona (same address SignIn seeds). */
-const DEMO_REQUEST = {
-  guardian: { name: 'Dana Whitfield', email: 'dana@email.com', phone: '(612) 555-0148' },
-  athletes: [{ name: 'Jordan Whitfield', dob: '2013-06-02' }],
-  declineReason: 'The athlete ID on the guardian contact card did not match our roster — front desk is following up.',
-  createdAt: null,
-};
-
-function DemoNotProvisioned({ bare = false, variant = 'none' }) {
-  const status = variant === 'default' ? 'none' : variant;
+function DemoNotProvisioned({ bare = false, variant = 'stranger' }) {
+  const view = variant === 'pending' || variant === 'declined'
+    ? 'legacy'
+    : ['verify', 'already-claimed', 'stranger'].includes(variant) ? variant : 'stranger';
   return (
     <NotProvisionedBody
       bare={bare}
       email="dana@email.com"
-      status={status}
-      request={status === 'none' ? null : DEMO_REQUEST}
-      submit={async () => {}}
+      view={view}
       onStartEnrollment={() => {}}
+      onCheckAgain={async () => view === 'verify' ? 'needs-verification' : 'none'}
+      onResend={async () => ({ sent: true })}
       onSignOut={() => {}}
       signingOut={false}
     />
   );
 }
 
-function NotProvisionedBody({
-  bare,
-  email,
-  status,
-  request,
-  submit,
-  onStartEnrollment,
-  onSignOut,
-  signingOut,
-}) {
+/** Title + body per view (contract 9.4). `checking` shares the stranger copy while the claim runs. */
+const VIEW_COPY = {
+  verify: { title: VERIFY_TITLE, body: (email) => verifyBody(email || 'your email') },
+  'already-claimed': { title: 'Already set up', body: () => ALREADY_CLAIMED },
+  legacy: { title: 'Sign-up changed', body: () => 'Approval is no longer needed - sign-up creates the account instantly.' },
+  stranger: {
+    title: 'Account not linked yet',
+    body: () => "You're signed in, but this login isn't linked to an academy family or staff role yet.",
+  },
+  checking: {
+    title: 'Account not linked yet',
+    body: () => "You're signed in, but this login isn't linked to an academy family or staff role yet.",
+  },
+};
+
+function NotProvisionedBody({ bare, email, view, onStartEnrollment, onCheckAgain, onResend, onSignOut, signingOut }) {
+  const copy = VIEW_COPY[view] || VIEW_COPY.stranger;
   return (
     <PhoneFrame bare={bare}>
       <div style={{ padding: '0 24px 24px', display: 'flex', flexDirection: 'column', flex: 1 }}>
@@ -130,19 +122,9 @@ function NotProvisionedBody({
 
         <div style={{ textAlign: 'center', marginBottom: 22 }}>
           <ScreenTitle size={22} style={{ marginBottom: 10 }}>
-            {status === 'pending'
-              ? 'Enrollment under review'
-              : status === 'declined'
-              ? 'Enrollment not approved'
-              : 'Account not linked yet'}
+            {copy.title}
           </ScreenTitle>
-          <Body size={13}>
-            {status === 'pending'
-              ? "Your Google account is signed in. Phil reviews new enrollments within one business day - you'll get an email when the account is active."
-              : status === 'declined'
-              ? "Your Google account is signed in, but the enrollment below wasn't approved as submitted."
-              : "Your Google account is signed in, but it isn't linked to an academy family or staff role yet."}
-          </Body>
+          <Body size={13}>{copy.body(email)}</Body>
         </div>
 
         <Card style={{ marginBottom: 14 }}>
@@ -153,20 +135,18 @@ function NotProvisionedBody({
           </div>
         </Card>
 
-        {status == null ? (
+        {view === 'checking' ? (
           <Card>
-            <Body size={12}>Checking your enrollment status…</Body>
+            <Body size={12}>Checking your account…</Body>
           </Card>
-        ) : status === 'none' ? (
-          <NoneState onStartEnrollment={onStartEnrollment} />
-        ) : status === 'pending' ? (
-          <PendingState request={request} />
-        ) : status === 'declined' ? (
-          <DeclinedState request={request} submit={submit} />
+        ) : view === 'verify' ? (
+          <VerifyState onResend={onResend} onVerified={onCheckAgain} />
+        ) : view === 'already-claimed' ? (
+          <Banner tone="yellow" title="Already set up">{ALREADY_CLAIMED}</Banner>
+        ) : view === 'legacy' ? (
+          onStartEnrollment ? <Button onClick={onStartEnrollment}>{LEGACY_CTA}</Button> : null
         ) : (
-          <Banner tone="green" title="Approved">
-            Your enrollment was approved. Sign out and sign back in to pick it up.
-          </Banner>
+          <StrangerState onStartEnrollment={onStartEnrollment} onCheckAgain={onCheckAgain} />
         )}
 
         <div style={{ flex: 1, minHeight: 24 }} />
@@ -179,106 +159,70 @@ function NotProvisionedBody({
   );
 }
 
-function NoneState({ onStartEnrollment }) {
-  return (
-    <>
-      <Banner tone="neutral" title="No enrollment on file">
-        New family? Start enrollment below. Already part of the academy? The front desk can link
-        your account instead.
-      </Banner>
-      {onStartEnrollment ? (
-        <Button onClick={onStartEnrollment} style={{ marginTop: 14 }}>
-          Start enrollment
-        </Button>
-      ) : null}
-    </>
-  );
-}
-
-/** What was submitted, read back plainly - the pending state's whole job. */
-function PendingState({ request }) {
-  const athletes = request?.athletes ?? [];
-  return (
-    <Card large>
-      <SectionLabel style={{ marginBottom: 10 }}>What you submitted</SectionLabel>
-      <div style={{ font: `600 14px ${font.body}`, color: color.text }}>
-        {request?.guardian?.name ?? '—'}
-      </div>
-      <div style={{ font: `400 11px ${font.body}`, color: color.textTertiary, marginTop: 3 }}>
-        {request?.guardian?.email ?? '—'}
-      </div>
-      <div style={{ borderTop: `1px solid ${color.rule}`, marginTop: 12, paddingTop: 12 }}>
-        {athletes.length === 0 ? (
-          <Body size={12}>No athletes listed.</Body>
-        ) : (
-          athletes.map((a) => (
-            <div key={a.name} style={{ font: `400 13px ${font.body}`, color: color.textSecondary }}>
-              {a.name}
-              {a.dob ? ` · born ${a.dob}` : ''}
-            </div>
-          ))
-        )}
-      </div>
-    </Card>
-  );
-}
-
-/**
- * Declined: the reason, then a real resubmit (contract v1.8 §A: "sets status
- * back to pending"). Resubmits the SAME request content unchanged - a true
- * edit-then-resubmit needs Registration pre-filled from the declined
- * request, flagged as an open question in the sprint report.
- */
-function DeclinedState({ request, submit }) {
-  const [resubmitting, setResubmitting] = useState(false);
-  const [resubmitted, setResubmitted] = useState(false);
-  const [error, setError] = useState(null);
-
-  const handleResubmit = async () => {
-    setResubmitting(true);
-    setError(null);
+/** Spec 3.2: Resend, and I've verified (the caller reloads the user + token before re-checking). */
+function VerifyState({ onResend, onVerified }) {
+  const [busy, setBusy] = useState(null); // 'resend' | 'verify'
+  const [note, setNote] = useState(null);
+  const run = async (kind, fn) => {
+    setBusy(kind);
+    setNote(null);
     try {
-      await submit(request);
-      setResubmitted(true);
+      const out = fn ? await fn() : null;
+      if (kind === 'resend') setNote('Sent again.');
+      else if (out === 'needs-verification') setNote("Not verified yet - open the link in the email, then tap I've verified.");
     } catch (err) {
-      setError(
-        err && typeof err.message === 'string' && err.message
-          ? err.message
-          : 'The request could not be resubmitted. Try again.'
-      );
+      setNote((err && err.message) || 'That did not work. Try again in a minute.');
     } finally {
-      setResubmitting(false);
+      setBusy(null);
     }
   };
-
-  if (resubmitted) {
-    return (
-      <Banner tone="green" title="Back under review">
-        Your enrollment was resubmitted and is back under review.
-      </Banner>
-    );
-  }
-
   return (
-    <Card tone="red" large>
-      <SectionLabel tone={color.error} style={{ marginBottom: 8 }}>
-        Reason
-      </SectionLabel>
-      <Body size={12}>{request?.declineReason || 'No reason was recorded.'}</Body>
-      {error ? (
-        <Body size={12} tone={color.error} style={{ marginTop: 10 }}>
-          {error}
-        </Body>
-      ) : null}
-      <Button
-        variant="outline"
-        height={46}
-        loading={resubmitting}
-        onClick={handleResubmit}
-        style={{ marginTop: 14, boxShadow: 'none' }}
-      >
-        {resubmitting ? 'Resubmitting' : 'Resubmit for review'}
-      </Button>
+    <Card large>
+      {note ? <Body size={12} style={{ marginBottom: 10 }}>{note}</Body> : null}
+      <div style={{ display: 'flex', gap: 8 }}>
+        <Button variant="outline" height={46} loading={busy === 'resend'} onClick={() => run('resend', onResend)} style={{ flex: 1, boxShadow: 'none' }}>
+          {RESEND}
+        </Button>
+        <Button height={46} loading={busy === 'verify'} onClick={() => run('verify', onVerified)} style={{ flex: 1 }}>
+          {VERIFIED}
+        </Button>
+      </div>
     </Card>
+  );
+}
+
+/** Spec 3.2: two CTAs - a parent starts sign-up; a child re-runs the claim without signing out. */
+function StrangerState({ onStartEnrollment, onCheckAgain }) {
+  const [child, setChild] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [note, setNote] = useState(null);
+  const check = async () => {
+    setBusy(true);
+    setNote(null);
+    try {
+      const out = onCheckAgain ? await onCheckAgain() : 'none';
+      if (out === 'none') setNote('No invite for this email yet. Check the email your parent entered, or ask them to add your login.');
+    } catch (err) {
+      setNote((err && err.message) || 'Could not check. Try again in a minute.');
+    } finally {
+      setBusy(false);
+    }
+  };
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+      {onStartEnrollment ? <Button onClick={onStartEnrollment}>{STRANGER_PARENT_CTA}</Button> : null}
+      <Button variant="outline" onClick={() => setChild(true)} style={{ boxShadow: 'none' }}>
+        {STRANGER_CHILD_CTA}
+      </Button>
+      {child ? (
+        <Card large>
+          <Body size={12}>{STRANGER_CHILD_HINT}</Body>
+          {note ? <Body size={12} tone={color.secondary} style={{ marginTop: 8 }}>{note}</Body> : null}
+          <Button height={46} loading={busy} onClick={check} style={{ marginTop: 12 }}>
+            {CHECK_AGAIN}
+          </Button>
+        </Card>
+      ) : null}
+    </div>
   );
 }

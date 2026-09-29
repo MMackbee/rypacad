@@ -690,7 +690,12 @@ Indexes: none new (single-field or existing composites).
    restricted key per mode (Checkout Sessions write, Customers read, Prices
    read - D12) -> `STRIPE_SECRET_KEY`. Paste the LIVE price ids into the
    `live` block of `functions/config/stripe-catalogue.json` (public ids; the
-   `test` block is committed, `1b3dc3d`; D3/D19).
+   `test` block is committed, `1b3dc3d`; D3/D19). Dashboard products map
+   Tier 1 -> t-6, Tier 2 -> t-12, Tier 3 -> t-16, Elite -> elite, Casual
+   Coaching Session -> single, Facility Access Add-on -> facility-access.
+   Their no-code Payment Links (payments.rypacademy.com/b/...) are ops
+   reference only: the portal creates Checkout Sessions (4.2) and never sends
+   a family to them.
 3. `firebase deploy --only firestore:rules,firestore:indexes --project
    rypacad` (one deploy: per-athlete billing gate, Oct 10 gate, Calendly
    cancel guard, loginInvites/calendlyEvents reads, attendee field).

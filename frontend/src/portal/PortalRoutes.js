@@ -5,6 +5,7 @@ import useAuthSession from './hooks/useAuthSession';
 import { isLive } from './hooks/live';
 import StatesHarness from './StatesHarness';
 import SignIn, { LANDING_BY_ROLE } from './screens/SignIn';
+import SignUp from './screens/SignUp';
 import NotProvisioned from './screens/NotProvisioned';
 import Registration from './screens/Registration';
 import { OnboardingWelcomeRoute } from './screens/OnboardingFlow';
@@ -29,6 +30,7 @@ import { bump } from './hooks/invalidate';
 import NotificationPreferences from './screens/NotificationPreferences';
 import Reservations from './screens/Reservations';
 import AdminDashboard from './screens/AdminDashboard';
+import AdminSignups from './screens/AdminSignups';
 import StaffRoles from './screens/StaffRoles';
 import TourStandings from './screens/TourStandings';
 import SpecialistDay from './screens/SpecialistDay';
@@ -85,29 +87,30 @@ export function RequireRole({ roles, children }) {
 }
 
 /**
- * Signed-in-only guard, for routes that must NOT be reachable signed out but
- * that every signed-in account may reach regardless of role or provisioned
- * status (Sprint 10, contract v1.8 A): /portal/register. Unlike RequireRole
- * this never checks `provisioned` or a role list — an unprovisioned account
- * is exactly who this route exists for (the whole point of the enrollment
- * self-serve path), and a provisioned parent reaches it too, deliberately
- * (NotificationPreferences' existing "Link another athlete" row already
- * navigates here for that account).
- *
- * DEVIATION FLAGGED: /portal/register was previously reachable signed OUT
- * (no guard at all) - submit() would have failed anyway (it requires
- * requireUser()), but the page itself rendered for anyone. This tightens it
- * to match the pin's "A new family signs in..., is unprovisioned, and is
- * routed to /portal/register" framing (sign-in comes first), consistent
- * with useEnrollment()'s own identity requirement.
+ * Sprint 20 (spec 2.1): /portal/register is instant and signed-in. A
+ * provisioned account is redirected to its landing - except a parent who
+ * arrived from Settings' "Link another athlete" (navigation state `link`),
+ * who gets the athletes-only flow that calls addAthletes.
  */
-function RequireSignedIn({ children }) {
+function RegistrationRoute() {
   const live = isLive();
-  const { user, loading } = useAuthSession(live ? undefined : { variant: 'idle' });
-  if (!live) return children;
-  if (loading) return null;
-  if (!user) return <Navigate to="/portal/signin" replace />;
-  return children;
+  const { user, provisioned, loading, refresh } = useAuthSession(live ? undefined : { variant: 'idle' });
+  const { state } = useLocation();
+  const navigate = useNavigate();
+  const linkMode = Boolean(state?.link);
+  if (live && loading) return null;
+  if (live && !user) return <Navigate to="/portal/signin" replace />;
+  if (live && provisioned && !(linkMode && user.role === 'parent')) return <Navigate to={landingFor(user)} replace />;
+  return (
+    <Registration
+      bare
+      mode={linkMode ? 'link' : 'signup'}
+      account={live ? user : null}
+      onRefresh={live ? refresh : undefined}
+      onBack={() => navigate(linkMode ? '/portal/settings' : '/portal/signin')}
+      onFinish={(path) => navigate(path, { replace: true })}
+    />
+  );
 }
 
 /**
@@ -309,8 +312,20 @@ function AdminRoute({ onOpenAthlete, onSignOut }) {
       role={role}
       onOpenAthlete={onOpenAthlete}
       onOpenHousehold={(id) => navigate(`/portal/admin/households/${id}`)}
+      onOpenSignups={() => navigate('/portal/admin/signups')}
       onSignOut={onSignOut}
     />
+  );
+}
+
+/** Sprint 20 (spec 7): the sign-ups report; a row opens that household's staff billing view. */
+function SignupsRoute() {
+  const live = isLive();
+  const { user } = useAuthSession(live ? undefined : { variant: 'idle' });
+  const navigate = useNavigate();
+  return (
+    <AdminSignups bare role={(live && user?.role) || 'owner'} onBack={() => navigate('/portal/admin')}
+      onOpenHousehold={(id) => navigate(`/portal/admin/households/${id}`)} />
   );
 }
 
@@ -325,7 +340,7 @@ function SpecialistDayRoute({ onSignOut }) {
   // user looped Navigate against RequireRole's own redirect (integration
   // browser pass: "maximum update depth exceeded"). Wait like RequireRole.
   if (live && loading) return null;
-  if (live && !specialistId && !canSwitch) return <Navigate to="/portal/coach" replace />;
+  if (live && !specialistId && !canSwitch) return <Navigate to="/portal/tour" replace />;
   return (
     <SpecialistDay
       bare
@@ -344,6 +359,7 @@ function SpecialistDayRoute({ onSignOut }) {
               type: s.type ?? null,
               name: null,
               meta: null,
+              durationMinutes: s.durationMinutes ?? null,
             },
           },
         })
@@ -399,6 +415,7 @@ function CoachDashboardRoute({ onSignOut, onOpenAthlete }) {
                   type: block.type ?? null,
                   name: block.name ?? null,
                   meta: block.meta ?? null,
+                  durationMinutes: block.durationMinutes ?? null,
                 }
               : null,
           },
@@ -496,23 +513,10 @@ export default function PortalRoutes() {
 
       <Route
         path="signin"
-        element={<SignIn bare onStartEnrollment={go('/portal/register')} />}
+        element={<SignIn bare onStartEnrollment={go('/portal/signup')} />}
       />
-      <Route
-        path="register"
-        element={
-          // Sprint 10 (contract v1.8, A): signed-in-only now (RequireSignedIn
-          // above) — an unprovisioned account reaches this from
-          // NotProvisioned's "start enrollment" CTA (below), and a
-          // provisioned parent reaches it from Settings' existing "Link
-          // another athlete" row. The person finishing enrollment is a
-          // guardian by definition, so the walkthrough opens on the parent
-          // track rather than the chooser.
-          <RequireSignedIn>
-            <Registration bare onBack={go('/portal/signin')} onFinish={go('/portal/welcome?track=parent')} />
-          </RequireSignedIn>
-        }
-      />
+      <Route path="signup" element={<SignUp bare onSignIn={go('/portal/signin')} />} />
+      <Route path="register" element={<RegistrationRoute />} />
       {/* Onboarding walkthrough (Sprint 3) — frontend lane's one route line, per the PM exception in TEAM.md. */}
       <Route path="welcome" element={<OnboardingWelcomeRoute />} />
       {/* Signed in with a real Google account but no users/{uid} doc yet — the
@@ -689,9 +693,9 @@ export default function PortalRoutes() {
         path="settings"
         element={
           <RequireRole roles={['parent', 'athlete']}>
-            {/* Link-another-athlete opens enrollment until screen 08·L (the
-                add-a-child-to-this-household flow) is built — swap then. */}
-            <SettingsRoute onSignOut={onSignOut} onLinkAthlete={go('/portal/register')} />
+            {/* Sprint 20 (spec 2.3): Link another athlete opens Registration's
+                link mode (athletes -> package -> addAthletes). */}
+            <SettingsRoute onSignOut={onSignOut} onLinkAthlete={() => navigate('/portal/register', { state: { link: true } })} />
           </RequireRole>
         }
       />
@@ -740,7 +744,7 @@ export default function PortalRoutes() {
       <Route
         path="admin"
         element={
-          <RequireRole roles={['ops', 'owner', 'mental']}>
+          <RequireRole roles={['ops', 'owner']}>
             <AdminRoute onOpenAthlete={openAthlete} onSignOut={onSignOut} />
           </RequireRole>
         }
@@ -756,6 +760,14 @@ export default function PortalRoutes() {
         }
       />
       <Route
+        path="admin/signups"
+        element={
+          <RequireRole roles={['ops', 'owner']}>
+            <SignupsRoute />
+          </RequireRole>
+        }
+      />
+      <Route
         path="staff"
         element={
           <RequireRole roles={['owner']}>
@@ -766,6 +778,9 @@ export default function PortalRoutes() {
           </RequireRole>
         }
       />
+      {/* K18: an unknown path lands on the index, which sends a signed-in
+          account home and everyone else to sign-in. */}
+      <Route path="*" element={<Navigate to="/portal" replace />} />
     </Routes>
   );
 }

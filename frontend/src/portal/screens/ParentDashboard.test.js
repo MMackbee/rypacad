@@ -1,0 +1,57 @@
+import React from 'react';
+import { renderScreen } from './testRender';
+import ParentDashboard from './ParentDashboard';
+
+let mockHub; let mockConfirm;
+jest.mock('../components/PayButton', () => ({ __esModule: true, default: ({ athleteId, label }) => <button type="button">{label}|{athleteId}</button> }));
+jest.mock('../hooks/billing', () => ({
+  __esModule: true,
+  default: () => mockHub,
+  useBillingHub: () => mockHub,
+  usePaymentConfirmation: (id) => (id ? mockConfirm : { state: 'idle', billingStatus: null }),
+  STRIPE_PORTAL_URL: null,
+}));
+jest.mock('../hooks', () => ({
+  useHousehold: () => ({ loading: false, error: null, data: { name: 'Whitfield family', date: 'Thu, Oct 1', children: [
+    { id: 'a1', name: 'Jordan', ageLine: 'Age 14', standing: { tone: 'green', label: 'On track' }, next: null, contract: null, packageId: 't-12', tokens: null, loginEmail: 'jordan@email.com', login: { state: 'invited', claimedAt: null } },
+    { id: 'a2', name: 'Reese', ageLine: 'Age 12', standing: { tone: 'neutral', label: 'New', dashed: true }, next: null, contract: null, packageId: 't-6', tokens: null },
+  ], billing: { status: 'ok' } } }),
+  useMembership: () => ({ data: { household: { membership: null } } }),
+}));
+
+beforeEach(() => {
+  mockConfirm = { state: 'confirming', billingStatus: 'pending' };
+  mockHub = { loading: false, error: null, data: {
+    household: { id: 'h1' }, portalUrl: null,
+    members: [
+      { athleteId: 'a1', name: 'Jordan', package: { kind: 'tokens' }, billing: { status: 'active', facility: null } },
+      { athleteId: 'a2', name: 'Reese', package: { kind: 'tokens' }, billing: { status: 'pending', facility: null } },
+    ],
+    status: { status: 'pending', tone: 'yellow', badge: { tone: 'yellow', label: 'Payment pending' }, title: 'Payment pending - finish checkout to start booking',
+      body: "Reese can book as soon as checkout is complete. Billed monthly from the 1st once you've paid.", cta: 'Pay now', paused: false, pendingAthletes: [{ athleteId: 'a2', name: 'Reese' }] },
+  } };
+});
+
+test('pending banner with one Pay now per unpaid athlete; the unpaid card is badged', async () => {
+  const r = await renderScreen(<ParentDashboard bare />, { path: '/portal/family' });
+  expect(r.text()).toContain('Payment pending - finish checkout to start booking');
+  expect(r.button('Pay now|a2')).not.toBeNull();
+  expect(r.button('Pay now|a1')).toBeNull();
+  expect(r.text()).toContain('Payment pending');
+  expect(r.text()).toContain('On track');
+  // D9: liveChildCard's login field -> the card's login line; Reese has no
+  // loginEmail key (legacy shape), so no line at all - not even "Login: none".
+  expect(r.text()).toContain('Login: not claimed (jordan@email.com)');
+  expect(r.text()).not.toContain('Login: none');
+  await r.unmount();
+});
+
+test('?paid= shows the confirming state, then payment received', async () => {
+  const r = await renderScreen(<ParentDashboard bare />, { path: '/portal/family?paid=a2&cs=cs_1' });
+  expect(r.text()).toContain('Confirming your payment...');
+  await r.unmount();
+  mockConfirm = { state: 'confirmed', billingStatus: 'active' };
+  const c = await renderScreen(<ParentDashboard bare />, { path: '/portal/family?paid=a2' });
+  expect(c.text()).toMatch(/Payment received - /);
+  await c.unmount();
+});

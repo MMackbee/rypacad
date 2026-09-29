@@ -183,7 +183,26 @@ export function hubMemberFor(args) {
     contractMinutes: athlete.contractMinutes ?? null,
     // v2.0.1 (Sprint 18): the $300 add-on, a line item on the Plan card.
     facilityAccess: Boolean(athlete.facilityAccess),
+    // Sprint 20 (spec 4.5): the signed waiver (`{ signedAt, byUid } | null`
+    // on the doc, DATA-MODEL:79, ops-verified) as a boolean, so the hub card
+    // can read "Facility access: paid - waiver pending" (facility billing
+    // active, consent absent) versus "active" (both).
+    facilityAccessConsent: Boolean(athlete.facilityAccessConsent),
+    // Sprint 20 (spec 4.4): the per-athlete paid state that gates booking.
+    // Absent == active for every athlete provisioned before this sprint;
+    // `facility` is the add-on subscription's own state (null == no add-on).
+    billing: {
+      status: athlete.billing?.status ?? 'active',
+      facility: athlete.facilityBilling?.status ?? null,
+    },
   };
+}
+
+/** "Ava", "Ava and Ben", "Ava, Ben and Cy". */
+function listNames(names) {
+  const list = names.filter(Boolean);
+  if (list.length <= 1) return list[0] ?? '';
+  return `${list.slice(0, -1).join(', ')} and ${list[list.length - 1]}`;
 }
 
 /** The retry position Stripe reported, clamped to the three-attempt ladder. */
@@ -202,6 +221,7 @@ function attemptOf(membership) {
 export function statusFor(membership, opts = {}) {
   const status = (membership && membership.status) || 'active';
   const resetsOn = opts.resetsOn || null;
+  const pendingAthletes = Array.isArray(opts.pendingAthletes) ? opts.pendingAthletes : [];
   const billingDay = opts.anchorDay ? ordinal(normalizeAnchorDay(opts.anchorDay)) : null;
   const attempt = attemptOf(membership);
   const next = membership && membership.nextPaymentAttempt ? longDayLabel(membership.nextPaymentAttempt) : null;
@@ -224,6 +244,30 @@ export function statusFor(membership, opts = {}) {
       ladderAt: 1,
       cta: 'Update payment method',
       paused: true,
+    };
+  }
+  // Sprint 20 (spec 4.4): an athlete who needs a checkout - never paid, or
+  // whose tier subscription ENDED (billing.status 'lapsed'). Ranked after
+  // past_due (a failing card is fixed in the portal; a second checkout would
+  // double-subscribe) but BEFORE the household lapsed block: when the last
+  // tier subscription ends the household lapses too, and the only way back
+  // is a new checkout per lapsed athlete - the customer portal cannot resume
+  // a cancelled subscription (review 2026-09-28). Copy is the contract's,
+  // shared with the home banners.
+  if (pendingAthletes.length > 0) {
+    const names = listNames(pendingAthletes.map((a) => a.name));
+    const ended = pendingAthletes.some((a) => a.status === 'lapsed');
+    return {
+      status: 'pending',
+      tone: 'yellow',
+      badge: { tone: 'yellow', label: ended ? 'Payment needed' : 'Payment pending' },
+      title: ended ? 'Membership ended - pay to book again' : 'Payment pending - finish checkout to start booking',
+      body: `${names} can book as soon as checkout is complete. Billed monthly from the 1st once you've paid.`,
+      ladder: null,
+      ladderAt: null,
+      cta: 'Pay now',
+      paused: false,
+      pendingAthletes,
     };
   }
   if (status === 'lapsed') {

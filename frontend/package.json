@@ -29,6 +29,19 @@
         "extends": [
             "react-app",
             "react-app/jest"
+        ],
+        "overrides": [
+            {
+                "files": [
+                    "src/**/*.test.js"
+                ],
+                "rules": {
+                    "import/first": "off",
+                    "testing-library/no-container": "off",
+                    "testing-library/no-unnecessary-act": "off",
+                    "testing-library/render-result-naming-convention": "off"
+                }
+            }
         ]
     },
     "browserslist": {

@@ -3,7 +3,9 @@ import { useNavigate } from 'react-router-dom';
 import { color, font, radius } from '../tokens';
 import BottomTabBar from '../components/BottomTabBar';
 import Button from '../components/Button';
+import FacilityCard from '../components/FacilityCard';
 import MemberSection from '../components/MemberSection';
+import PayButton from '../components/PayButton';
 import PhoneFrame from '../components/PhoneFrame';
 import SequenceLadder from '../components/SequenceLadder';
 import SkeletonCard, { SkeletonBar } from '../components/Skeleton';
@@ -12,6 +14,7 @@ import TokenMeter from '../components/TokenMeter';
 import { BackLink, Body, Card, ErrorNotice, ScreenTitle, SectionLabel } from '../components/Primitives';
 import { ordinal, statusFor } from '../data/billingHub';
 import { FACILITY_ACCESS } from '../data/packages';
+import { CONNECTED_LINE, PAY_NOW, PENDING_PLAN_LINE } from '../data/billingCopy';
 import useBillingHub from '../hooks/billing';
 
 /**
@@ -112,6 +115,7 @@ export default function Billing({
                     contractMinutes={member.contractMinutes}
                     onOpen={() => navigate(`/portal/athlete/${member.athleteId}`)}
                   />
+                  <FacilityCard member={member} readOnly={staff} />
                 </MemberSection>
               ))
             )}
@@ -131,12 +135,18 @@ const SURFACES = {
   red: { background: 'rgba(255,68,68,.07)', border: color.error },
 };
 
-/** The membership's standing — Stripe's status, the contract's copy, dates only when recorded. */
+/**
+ * The membership's standing — Stripe's status, the contract's copy, dates
+ * only when recorded. Sprint 20 (spec 4.4): the `pending` branch lists one
+ * Pay now per unpaid athlete (createCheckoutSession) instead of the card
+ * portal CTA - there is no card to update before the first checkout.
+ */
 function StatusHero({ status, portalUrl, staff = false }) {
   if (!status) return null;
   const s = SURFACES[status.tone] || SURFACES.default;
-  // Staff read the standing; only the payer updates the card.
+  // Staff read the standing; only the payer updates the card or pays.
   const cta = staff ? null : status.cta;
+  const pendingAthletes = status.status === 'pending' ? status.pendingAthletes ?? [] : [];
   return (
     <div style={{ background: s.background, border: `1px solid ${s.border}`, borderRadius: radius.cardLarge, padding: 17 }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
@@ -149,7 +159,14 @@ function StatusHero({ status, portalUrl, staff = false }) {
       <Body size={13} style={{ marginTop: 10 }}>
         {status.body}
       </Body>
-      {cta ? (
+      {cta && status.status === 'pending' ? (
+        pendingAthletes.map((a) => (
+          <div key={a.athleteId} style={{ display: 'flex', alignItems: 'center', gap: 12, marginTop: 12 }}>
+            <div style={{ flex: 1, minWidth: 0, font: `600 13px ${font.body}`, color: color.text }}>{a.name}</div>
+            <PayButton athleteId={a.athleteId} product="tier" label={PAY_NOW} height={44} style={{ width: 132, flex: 'none' }} />
+          </div>
+        ))
+      ) : cta ? (
         portalUrl ? (
           <Button
             variant={status.tone === 'red' ? 'danger' : 'caution'}
@@ -233,6 +250,7 @@ function PlanCard({ household, members, showPrices = false }) {
                   : `${m.package.name} a period`}
               {m.package?.windowDays ? ` · books ${m.package.windowDays} days out` : ''}
               {m.facilityAccess ? ' · + facility access' : m.package?.kind === 'elite' ? ' · facility access included' : ''}
+              {m.billing?.status === 'pending' || m.billing?.status === 'lapsed' ? ` · ${PENDING_PLAN_LINE}` : ''}
             </div>
           </div>
           {showPrices ? (
@@ -259,9 +277,7 @@ function ConnectionCard({ household, portalUrl }) {
     <Card large>
       <SectionLabel style={{ marginBottom: 8 }}>Card &amp; invoices</SectionLabel>
       <Body size={12}>
-        {connected
-          ? 'Your card and invoices are managed in Stripe. Invoice history will appear here once online billing is connected.'
-          : 'Card and invoice history appear here once online billing is connected.'}
+        {connected ? CONNECTED_LINE : 'Card and invoices are managed in Stripe once you have paid.'}
       </Body>
       {portalUrl ? (
         <Button variant="outline" height={42} style={{ marginTop: 12, boxShadow: 'none' }} onClick={() => window.open(portalUrl, '_blank', 'noopener')}>

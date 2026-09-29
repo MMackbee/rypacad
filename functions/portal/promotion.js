@@ -27,6 +27,7 @@ const admin = require('firebase-admin');
 const {FieldValue} = require('firebase-admin/firestore');
 const lib = require('./lib');
 const notify = require('./notify');
+const {MAIL_SECRETS} = require('./secrets');
 
 /** A safety stop; a session's capacity is 15, so this can never bind. */
 const MAX_PROMOTIONS_PER_EVENT = 25;
@@ -95,7 +96,7 @@ async function loadCandidate(tx, entry, session, sessionId, today) {
         db().collection('households').doc(householdId));
     household = hhSnap.exists ? hhSnap.data() : null;
   }
-  if (!lib.membershipAllowsBooking(household)) {
+  if (!lib.membershipAllowsBooking(household, athlete)) {
     return Object.assign(base, {reason: 'membership-inactive'});
   }
 
@@ -361,7 +362,9 @@ async function fillOpenSeats(sessionId) {
  *
  * Promotion INCREASES `booked`, so this can never re-enter itself.
  */
-const onSessionBookedDecrease = functions.firestore
+const onSessionBookedDecrease = functions
+    .runWith({secrets: MAIL_SECRETS})
+    .firestore
     .document('sessions/{sessionId}')
     .onUpdate(async (change, context) => {
       const before = change.before.data() || {};

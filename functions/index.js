@@ -71,6 +71,10 @@ const jobs = require('./portal/jobs');
 const sweep = require('./portal/sweep');
 const {stripeWebhook} = require('./portal/stripe');
 const {onSessionBookedDecrease} = require('./portal/promotion');
+const {MAIL_SECRETS} = require('./portal/secrets');
+const family = require('./portal/family');
+const {createCheckoutSession} = require('./portal/checkout');
+const {calendlyWebhook} = require('./portal/calendly');
 
 // ==========================================================================
 // PORTAL SERVER-SIDE WRITERS (Sprint 13, contract v2.1)
@@ -78,6 +82,20 @@ const {onSessionBookedDecrease} = require('./portal/promotion');
 
 exports.stripeWebhook = stripeWebhook;
 exports.onSessionBookedDecrease = onSessionBookedDecrease;
+
+// ==========================================================================
+// SPRINT 20 LAUNCH (contract v3.0.1): instant sign-up, child-login claim,
+// Checkout Sessions, Calendly. Handlers live in ./portal; this file exports
+// the 13 functions and nothing else (the secret lists stay in
+// ./portal/secrets). Secret binding (spec 8): every function declares its
+// secrets with runWith - a 1st-gen function sees only what it declares.
+// ==========================================================================
+
+exports.createFamily = family.createFamily;
+exports.addAthletes = family.addAthletes;
+exports.claimInvite = family.claimInvite;
+exports.createCheckoutSession = createCheckoutSession;
+exports.calendlyWebhook = calendlyWebhook;
 
 // ==========================================================================
 // NOTIFICATION TRIGGERS (Sprint 14, contract v2.2)
@@ -136,7 +154,9 @@ function membershipStatus(household) {
  * 'promoted' itself, so this trigger steps over it - otherwise a promoted
  * family would get two messages about one seat.
  */
-exports.onBookingCreated = functions.firestore
+exports.onBookingCreated = functions
+    .runWith({secrets: MAIL_SECRETS})
+    .firestore
     .document('bookings/{bookingId}')
     .onCreate(async (snap, context) => {
       const booking = snap.data() || {};
@@ -176,7 +196,9 @@ exports.onBookingCreated = functions.firestore
  * their own action (not notified in v1, TEAM.md "Open" 3) and a billing
  * revoke is one household notice from portal/revoke.js, not one per booking.
  */
-exports.onBookingCancelled = functions.firestore
+exports.onBookingCancelled = functions
+    .runWith({secrets: MAIL_SECRETS})
+    .firestore
     .document('bookings/{bookingId}')
     .onUpdate(async (change, context) => {
       const before = change.before.data() || {};
@@ -184,6 +206,8 @@ exports.onBookingCancelled = functions.firestore
       if (before.status !== 'confirmed' || after.status !== 'cancelled') {
         return null;
       }
+      // A Calendly cancellation is Calendly's own email (spec 6.2).
+      if (after.cancelledBy === 'calendly') return null;
       // Two different cancellations reach this trigger. The academy
       // cancelling a block mints a bonus token and says so; a family
       // cancelling their own booking gets a plain receipt (owner ruling,
@@ -248,7 +272,9 @@ exports.onBookingCancelled = functions.firestore
  * while a genuine second flip (past_due -> lapsed) is its own notice.
  * 'active' only speaks after a freeze or a lapse; nothing else to say.
  */
-exports.onHouseholdMembership = functions.firestore
+exports.onHouseholdMembership = functions
+    .runWith({secrets: MAIL_SECRETS})
+    .firestore
     .document('households/{householdId}')
     .onUpdate(async (change, context) => {
       const before = membershipStatus(change.before.data());
@@ -286,7 +312,9 @@ exports.onHouseholdMembership = functions.firestore
  * portal/jobs.js's plain function so the emulator harness can run it with a
  * fixed clock; scheduled functions never fire in the emulator.
  */
-exports.sessionReminders = functions.pubsub
+exports.sessionReminders = functions
+    .runWith({secrets: MAIL_SECRETS})
+    .pubsub
     .schedule('0 17 * * *')
     .timeZone('America/Chicago')
     .onRun(async () => {
@@ -302,7 +330,9 @@ exports.sessionReminders = functions.pubsub
  * Daily 09:00 America/Chicago - period tokens and bonus tokens expiring in
  * exactly three days.
  */
-exports.tokenExpiryReminders = functions.pubsub
+exports.tokenExpiryReminders = functions
+    .runWith({secrets: MAIL_SECRETS})
+    .pubsub
     .schedule('0 9 * * *')
     .timeZone('America/Chicago')
     .onRun(async () => {
@@ -320,7 +350,9 @@ exports.tokenExpiryReminders = functions.pubsub
  * entry, notify (portal/sweep.js; contract v2.5). The manual
  * scripts/sweep-waitlist.mjs does the same by hand.
  */
-exports.sweepWaitlist = functions.pubsub
+exports.sweepWaitlist = functions
+    .runWith({secrets: MAIL_SECRETS})
+    .pubsub
     .schedule('0 6 * * *')
     .timeZone('America/Chicago')
     .onRun(async () => {

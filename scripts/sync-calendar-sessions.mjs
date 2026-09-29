@@ -14,7 +14,7 @@
  *   summary's first word is "training"          -> bookable, type 'training'
  *   summary's first word is "tournament"        -> bookable, type 'tournament'
  *   summary's first word is "phil"               -> bookable, type 'phil'
- *   summary's first word is "mental" or "yannick" -> bookable, type 'mental'
+ *   summary's first word is "mental" or "yannick" -> display-only since Sprint 20 (Calendly)
  *   anything else, and every all-day event -> skipped (display-only)
  *
  * 'phil' and 'mental' are the specialist 1-on-1 types (contract v1.7, Sprint
@@ -87,8 +87,9 @@ const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..'
 // v1.7.1 (owner, 2026-09-11): Phil's sessions "operate just like academy
 // training session just at a cap of 6-7 kids" — 6, mirrored in
 // data/specialists.js's SPECIALISTS capacity (change one, change both).
-// Yannick stays a true 1:1 at capacity 1.
-const CAPACITY = { training: 14, tournament: 25, phil: 6, mental: 1 };
+// Yannick's capacity-1 sessions are written by calendlyWebhook, not this
+// script (Sprint 20).
+const CAPACITY = { training: 14, tournament: 25, phil: 6 };
 
 // A session runs an hour unless its calendar event says otherwise. Mirrors
 // DEFAULT_DURATION_MINUTES in frontend/src/portal/data/schedule.js: Saturday's
@@ -103,11 +104,14 @@ const DEFAULT_DURATION_MINUTES = 60;
 function classifyTitle(summary) {
   if (/^training\b/i.test(summary)) return 'training';
   if (/^tournament\b/i.test(summary)) return 'tournament';
-  // Specialist 1-on-1s (contract v1.7, Sprint 9 pin): 'phil' -> performance
-  // coaching, 'mental'/'yannick' -> mental game — same case-insensitive
-  // first-word convention as training/tournament above.
+  // Specialist blocks: 'phil' -> performance coaching, booked in-app (contract
+  // v1.7). Sprint 20 (SPRINT-20-LAUNCH.md 6.1): Yannick books via Calendly and
+  // his sessions arrive through calendlyWebhook as `sessions/cal-<uuid>`, so
+  // a "Mental"/"Yannick" calendar event is display-only here - deliberately no
+  // branch for it. The first sync after this change deletes (booked 0) or
+  // cancels every previously synced mental session; run it BEFORE any
+  // smoke-test booking (spec 12.7).
   if (/^phil\b/i.test(summary)) return 'phil';
-  if (/^(?:mental|yannick)\b/i.test(summary)) return 'mental';
   // v2.0.2 (2026-09-17): the reserved Tue/Thu 3 PM invite-only group must
   // NOT be titled "Training…"/"Tournament…" - any other title lands here
   // and stays display-only, which is the intended behaviour until its
@@ -314,7 +318,7 @@ function mapEvents(items, from, to) {
     // Duration from the event's own end time. Google always returns end for a
     // timed event, but an unparseable or backwards end falls back to the
     // 60-minute default rather than writing a nonsense length.
-    const endMatch = String((ev.end && ev.end.dateTime) || '').match(/^(d{4}-d{2}-d{2})T(d{2}):(d{2})/);
+    const endMatch = String((ev.end && ev.end.dateTime) || '').match(/^(\d{4}-\d{2}-\d{2})T(\d{2}):(\d{2})/);
     const startAbs = Number(hh) * 60 + Number(mm);
     let durationMinutes = DEFAULT_DURATION_MINUTES;
     if (endMatch) {

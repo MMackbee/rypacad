@@ -1363,7 +1363,7 @@ with the first server-side writers:
 
 **A. PACKAGES — one catalogue.** `packages/{id}` becomes
 `{ id, name, kind: 'tokens' | 'elite' | 'single', tokens: number | null,
-price, windowDays: 32 | 45 }`. `tokens: null` means unlimited (Elite only).
+price, windowDays: 30 | 45 }`. `tokens: null` means unlimited (Elite only).
 Ids `t-6`, `t-12`, `t-16`, `t-20`, `elite`, `single`. **Deleted:** `g-*`,
 `f-*`, `drop-in`, `elite-247` (24/7 is an Elite attribute, `access247:
 true` on `packages/elite`, not a tier), `philSessions`, `yannickSessions`,
@@ -1373,7 +1373,7 @@ true` on `packages/elite`, not a tier), `philSessions`, `yannickSessions`,
 `entitlementsFor`, `ratePerSession`, `monthlyTotal` are deleted. Prices
 stay out of seeds and reach prod only via the user-gated provisioner
 import (v1.1 rule unchanged); catalogue prices carry `pending: true` until
-the owner's OK and the UI may render "pending" beside them.
+the owner's OK and the UI may render "pending" beside them. (*Sprint 20, 2026-09-28: 32 -> 30 for every token package and single; Elite 45 unchanged.*)
 
 `athletes.fitnessPackageId` → **removed.** The v1.9 package-assignment
 rules branch narrows to `hasOnly(['packageId', 'updatedAt'])`.
@@ -1432,7 +1432,7 @@ must equal `{athleteId}_{periodKey}`). **Members read own; no member
 write.** Absent == `pkg.tokens` (B), so nothing breaks before Stripe lands.
 
 **D. BOOKING WINDOWS.** `SPECIALIST_BOOKING_WINDOW_DAYS` is deleted. Every
-session type uses the athlete's package window: `windowDaysFor(pkg)` → 32,
+session type uses the athlete's package window: `windowDaysFor(pkg)` → 30 (Sprint 20; was 32),
 Elite 45. The window **rolls at 07:00 America/Chicago**:
 `anchor = localNow.hour >= 7 ? localToday : localToday - 1; openThrough =
 anchor + windowDays; bookable iff session.date <= openThrough`. Pure
@@ -1587,7 +1587,7 @@ Admin's "No-shows this month" query are the tracker — no new mechanism.
 Luke's, outside the app.
 
 **M. SINGLE TOKEN.** `packages/single`: `tokens: 1, price: 65 (pending),
-kind: 'single', windowDays: 32`. Assignable by ops like any package; an
+kind: 'single', windowDays: 30`. Assignable by ops like any package; an
 athlete on `single` has one token per period. (Whether singles are sold
 per-visit rather than as a period package is a Stripe-sprint question; the
 catalogue entry costs nothing now.)
@@ -3172,3 +3172,53 @@ pass. BLOCKING for ship: the rules must deploy first - `bookingShapeOk` and
 booking carrying `attendee` until `firebase deploy --only firestore:rules`
 runs (the same deploy the 90-minute contract tier needs). The notice clause
 waits on Blaze like every other notice.
+
+## Sprint 20 pins - launch (contract v3.0.1, 2026-09-28)
+
+Origin: `docs/portal/SPRINT-20-LAUNCH.md` (the owner's rulings of
+2026-09-28, four-lens review folded in as v3.0.1) and the cross-lane
+contract `docs/portal/plans/2026-09-28-sprint-20-launch/01-interfaces.md`.
+Lanes and plans: routing (`20-routing.md`), frontend (`40-frontend.md`),
+db (`30-db.md`), functions (`10-functions.md`); GitHub #1-#27.
+
+Keystones (build facts):
+- Sign-up is instant via `createFamily` (Admin-SDK transaction; the
+  browser cannot pass the rules' read cap); Stripe via Checkout Sessions;
+  per-athlete `athletes.billing` (absent == active) is the booking gate.
+- Window 30 (Elite 45); `BOOKING_OPENS_AT = 1791633600000` (Oct 10 07:00
+  Chicago); season starts Nov 3; the checkout payment prepays November,
+  recurring from Dec 1 anchored on the 1st; mid-month joiners prorate both.
+- Yannick books via Calendly (`calendlyWebhook` writes `sessions/cal-<uuid>`,
+  `bookings.source: 'calendly'`, flagged never refused); Phil stays on the
+  calendar with real `durationMinutes` (sync regex fix).
+- Stripe's 48-hour Checkout `trial_end` minimum rolls a checkout on the
+  29th-31st forward to prepay the NEXT month (DECISION-GAPS Sprint 20
+  ruling 4); a facility add-on lapse writes `facilityBilling` +
+  `facilityAccess: false` only, never the household freeze (ruling 5).
+
+Pins (change one, change both):
+- **`MENTAL_MONTHLY_CAP = { elite: 2, default: 1 }`** is duplicated in
+  `functions/portal/calendly.js` from
+  `frontend/src/portal/data/specialists.js:112` (the webhook judges
+  over-cadence server-side; the functions bundle cannot import the seam,
+  the same reason `lib.js` duplicates the period math). A change to
+  Yannick's monthly cadence edits BOTH and both tests
+  (`data/amendments.test.js`, `functions/test/verify-calendly.js` STEP G over-cadence).
+- `SPECIALIST_DURATION_MINUTES = { phil: 45, mental: 30 }` in
+  `scripts/seed-firestore.mjs` mirrors `data/specialists.js`
+  `durationMinutes` (routing lane) - the seed names the number rather than
+  importing it (BRACKETS precedent).
+
+DB lane (this sprint): `functions/config/stripe-catalogue.json` (one
+source, both modes) + `scripts/write-packages.mjs` (the only writer of
+`packages.stripePriceId`, `windowDays` 30/45, masked update, refuses
+households and nulls); sync drops `mental|yannick` and measures end times
+(`scripts/test/`); seeds gain `signup`, `billing: pending` (nico),
+`handicap`, `loginEmail`, `loginInvites`, the Calendly trio, specialist
+durations; `functions/env.template` splits secrets into `.env.local`;
+DATA-MODEL / DECISION-GAPS / contract docs restate the model. Handoffs:
+`packages.js` + `hooks/index.js` seed tables (routing), `lib.test.js`
+fixtures (functions). `firestore.indexes.json` unchanged (DATA-MODEL
+"v3.0 query additions").
+
+Integration notes: (PM appends at merge.)

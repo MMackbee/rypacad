@@ -139,6 +139,7 @@
  *                  'coach-luke'`. Field ids are read straight off
  *                  DIAGNOSTIC_SECTIONS in seed.js and enumerated in
  *                  DATA-MODEL.md, never retyped independently.
+ *   loginInvites / calendlyEvents — Sprint 20: one open child-login invite (reese) and one Calendly-sourced Yannick session + booking + ledger row (see the cal- block below).
  *   staffInvites — ONE pending invite (contract v1.8, Sprint 10 pin E) at a
  *                  clearly-fake address (`invite-test@example.com`), role
  *                  coach, specialistId null — provision-family.mjs is what
@@ -313,14 +314,18 @@ function isoDate(d) {
 // (TEAM.md hook-seam pin).
 //
 // Pattern: Yannick works Tue/Thu, late afternoon; Phil works Mon/Wed/Fri.
-// Both run three 45-minute slots per working day — invented times only, no
+// Phil runs three 45-minute slots, Yannick three 30-minute slots per working day — invented times only, no
 // invented people, same call TEAM.md's hook-seam note makes for the live
 // hook's own seed fallback.
 const SPECIALIST_BOOKING_WINDOW_DAYS = 14;
 const SPECIALIST_SLOT_TIMES = {
-  phil: ['3:00 PM', '3:45 PM', '4:30 PM'], // Mon/Wed/Fri
-  mental: ['4:00 PM', '4:45 PM', '5:30 PM'], // Tue/Thu, late afternoon
+  phil: ['3:00 PM', '3:45 PM', '4:30 PM'], // Mon/Wed/Fri, 45-minute blocks
+  mental: ['4:00 PM', '4:30 PM', '5:00 PM'], // Tue/Thu - Sprint 20: Yannick's sessions are 30 minutes
 };
+// Sprint 20 (SPRINT-20-LAUNCH.md 6.1): phil 45, mental 30 - mirrors
+// data/specialists.js durationMinutes (routing lane) and hooks/index.js's
+// seedSpecialistDays; the number is named here, not imported (BRACKETS precedent).
+const SPECIALIST_DURATION_MINUTES = { phil: 45, mental: 30 };
 // JS Date#getDay(): Sun=0, Mon=1, ... Sat=6.
 const SPECIALIST_WEEKDAY_TYPE = { 1: 'phil', 3: 'phil', 5: 'phil', 2: 'mental', 4: 'mental' };
 
@@ -344,6 +349,7 @@ function addSpecialistSessions(sessions, runDate = new Date()) {
       sessions.set(id, {
         date: dateStr,
         time,
+        durationMinutes: SPECIALIST_DURATION_MINUTES[type],
         type,
         // v1.7.1 (owner, 2026-09-11): phil sessions are GROUP sessions at a
         // cap of 6 — only mental is the true capacity-1 1:1. Mirrors the
@@ -396,6 +402,7 @@ function addPastPhilSessions(sessions, runDate = new Date()) {
     sessions.set(id, {
       date: dateStr,
       time: SPECIALIST_SLOT_TIMES.phil[0],
+      durationMinutes: SPECIALIST_DURATION_MINUTES.phil,
       type: 'phil',
       capacity: 6, // v1.7.1: Phil sessions are group sessions, cap 6
       booked: 0,
@@ -435,7 +442,10 @@ function buildDocs(portal) {
   // duplicated field. `kind`/`tokens`/`windowDays`/`access247` (elite only)
   // flow straight through from the seam, never hand-copied.
   const packages = new Map();
-  const fields = ({ id, price, pending, ...rest }) => rest;
+  // Sprint 20 (spec 4.1): price ids never come from the seam - even if one
+  // ever appears there it is stripped, and the doc states null explicitly.
+  // write-packages.mjs is the ONLY writer of stripePriceId.
+  const fields = ({ id, price, pending, stripePriceId, ...rest }) => ({ ...rest, stripePriceId: null });
   for (const p of ALL_PACKAGES) packages.set(p.id, fields(p));
 
   // sessions — straight from the generator; ids stay the generator's
@@ -499,10 +509,17 @@ function buildDocs(portal) {
       householdId,
       {
         name: HOUSEHOLD.name,
-        guardian: { name: 'Dana', email: 'dana@email.com', phone: null },
+        guardian: { name: 'Dana', email: 'dana@email.com', phone: null, relationship: 'parent' },
         stripeCustomerId: null,
         stripeSubscriptionId: null,
+        stripeCustomerIds: [], // Sprint 20: arrayUnion target for the webhook
         periodAnchorDay: 1,
+        // Sprint 20 (createFamily shape, interfaces 2): whitfield plays the
+        // self-signed-up family so the admin sign-ups report has one row;
+        // parker stays legacy (no `signup`) and is excluded from it.
+        signup: { at: new Date(), by: 'parent-dana', source: 'self', mode: 'parent' },
+        createdBy: 'parent-dana',
+        emergencyContact: null,
       },
     ],
   ]);
@@ -541,6 +558,13 @@ function buildDocs(portal) {
     reese: 't-6',
     nico: 't-6',
   };
+  // Sprint 20 (interfaces 2): handicap int 0..54 | null ("none yet");
+  // loginEmail lower-cased | null (null == the parent's account runs the
+  // child). jordan already has her own legacy users doc (athlete-jordan,
+  // email null) so she stays null; reese is the invited-not-claimed case
+  // (loginInvites below); nico has no login and is the PAYMENT-PENDING case.
+  const WHITFIELD_HANDICAPS = { jordan: 14, reese: 27, nico: null };
+  const WHITFIELD_LOGIN_EMAILS = { jordan: null, reese: 'reese.whitfield@example.com', nico: null };
   const coachUid = 'coach-luke';
   const athletes = new Map();
   for (const child of HOUSEHOLD.children) {
@@ -552,6 +576,8 @@ function buildDocs(portal) {
       packageId: WHITFIELD_PACKAGE_IDS[child.id],
       contractMinutes: minutes ? Number(minutes[1]) : null,
       coachId: coachUid,
+      handicap: WHITFIELD_HANDICAPS[child.id] ?? null,
+      loginEmail: WHITFIELD_LOGIN_EMAILS[child.id] ?? null,
     });
   }
   // v2.0.1 (Sprint 18): the demo family's one facility-access add-on, with
@@ -560,6 +586,15 @@ function buildDocs(portal) {
     facilityAccess: true,
     facilityAccessConsent: { signedAt: new Date(), byUid: 'parent-dana' },
   });
+  // Sprint 20 (spec 4.4): nico is the athlete whose checkout has not completed.
+  // billing ABSENT == active (jordan, reese, every legacy athlete); `pending`
+  // is refused to book by the rules and the client. His seeded past bookings
+  // and waitlist entry predate the state (a real family could look like this
+  // after ops re-assigns a package) - the seed writes through the REST owner
+  // channel, so no rule runs.
+  athletes.get('nico').billing = {
+    status: 'pending', customerId: null, subscriptionId: null, priceId: null, checkoutSessionId: null, updatedAt: new Date(),
+  };
   // athletes/{id}/private/medical is deliberately NOT seeded — see header.
 
   // ---------------------------------------------------------------------
@@ -772,6 +807,68 @@ function buildDocs(portal) {
     });
     session.booked += 1; // same invariant as every other booking above
   }
+
+  // Sprint 20 (spec 6.2, interfaces 2): ONE Calendly-sourced Yannick session
+  // for reese, exactly as calendlyWebhook would leave it - a `cal-<uuid>`
+  // session (never date-prefixed, bookable: false so the in-app slot list
+  // never offers it, capacity 1 booked 1), the confirmed booking that spent
+  // her token (createdBy 'system', source 'calendly', not cancellable
+  // in-app), and the idempotency ledger row. Same day as jordan's first
+  // Yannick slot, at 6:00 PM so it never collides with the -s<n> slots.
+  const CAL_EVENT_UUID = 'seedevt0001';
+  const CAL_INVITEE_UUID = 'seedinv0001';
+  const calEventUri = `https://api.calendly.com/scheduled_events/${CAL_EVENT_UUID}`;
+  const calInviteeUri = `${calEventUri}/invitees/${CAL_INVITEE_UUID}`;
+  const calSessionId = `cal-${CAL_EVENT_UUID}`;
+  const calDate = sessions.get(jordanMentalSlot.id).date;
+  sessions.set(calSessionId, {
+    date: calDate,
+    time: '6:00 PM',
+    type: 'mental',
+    label: 'Mental game session',
+    capacity: 1,
+    booked: 1,
+    status: 'scheduled',
+    durationMinutes: 30,
+    bookable: false,
+    coachId: null,
+    special: false,
+    source: 'calendly',
+    calendlyEventUri: calEventUri,
+    gcalEventId: null,
+    coachNote: null,
+  });
+  bookings.set(`reese_${calSessionId}`, {
+    athleteId: 'reese',
+    sessionId: calSessionId,
+    householdId,
+    date: calDate,
+    type: 'mental',
+    status: 'confirmed',
+    periodKey: periodFor(calDate, WHITFIELD_ANCHOR_DAY).periodKey,
+    chargedFrom: 'period',
+    graceTokenId: null,
+    attendee: 'athlete',
+    createdBy: 'system',
+    source: 'calendly',
+    calendlyInviteeUri: calInviteeUri,
+    flag: null, // clean; 'over-cap' | 'over-cadence' | 'membership-inactive' | 'before-open' when the webhook flags
+    createdAt: bookingCreatedAt,
+  });
+  const calendlyEvents = new Map([
+    [
+      `${CAL_INVITEE_UUID}_invitee.created`,
+      {
+        event: 'invitee.created',
+        inviteeUri: calInviteeUri,
+        eventUri: calEventUri,
+        athleteId: 'reese',
+        householdId,
+        receivedAt: bookingCreatedAt,
+        outcome: 'applied',
+      },
+    ],
+  ]);
 
   // sessions.coachId on jordan's upcoming '2026-11-02-1' training booking
   // (contract v1.9, Sprint 11 DB lane bullet) — buildSeason() always leaves
@@ -1076,6 +1173,29 @@ function buildDocs(portal) {
     ],
   ]);
 
+  // loginInvites/{emailLower} (Sprint 20, spec 2.2 / 3.2) - a CHILD login the
+  // parent requested, claimed by the child on first sign-in with that email
+  // (claimInvite). Keyed by the lower-cased email (one open invite per
+  // address), unlike staffInvites (auto id, script-consumed). Open here:
+  // the emulator has no auth account behind the address to claim it.
+  const loginInvites = new Map([
+    [
+      'reese.whitfield@example.com',
+      {
+        email: 'reese.whitfield@example.com',
+        householdId,
+        athleteId: 'reese',
+        athleteName: athletes.get('reese').name,
+        requestedBy: 'guardian',
+        createdBy: 'parent-dana',
+        createdAt: new Date(),
+        status: 'open',
+        claimedBy: null,
+        claimedAt: null,
+      },
+    ],
+  ]);
+
   // =========================================================================
   // Contract v2.1 (Sprint 13 pin, TEAM.md "token model Part 2: issuance,
   // grace, waitlist, Stripe") — the four Part 2 collections, BUILT and seeded
@@ -1371,10 +1491,12 @@ function buildDocs(portal) {
     enrollmentRequests,
     'athletes/jordan/diagnostics': jordanDiagnostics,
     staffInvites,
+    loginInvites,
     tokenPeriods,
     graceTokens,
     waitlist,
     stripeEvents,
+    calendlyEvents,
     notifications,
   };
 }
@@ -1457,6 +1579,12 @@ async function main() {
       `${sessionDocs.length} sessions (${trainingCount} training, ${tournamentCount} tournament, ` +
       `${philCount} phil, ${mentalCount} mental, ${adultCount} adult display-only)\n`
   );
+  const specialistSample = sessionDocs.find((s) => s.type === 'mental');
+  const philSample = sessionDocs.find((s) => s.type === 'phil');
+  console.log(
+    `specialist durations (Sprint 20): phil ${philSample?.durationMinutes} min at ${philSample?.time}, ` +
+      `mental ${specialistSample?.durationMinutes} min at ${specialistSample?.time}\n`
+  );
 
   let total = 0;
   for (const [name, docs] of Object.entries(collections)) {
@@ -1529,6 +1657,12 @@ async function main() {
   console.log('\nstaffInvites (contract v1.8):');
   for (const [id, doc] of collections.staffInvites) {
     console.log(`  staffInvites/${id}: email=${doc.email} role=${doc.role} specialistId=${doc.specialistId} status=${doc.status}`);
+  }
+
+  console.log('\nloginInvites (Sprint 20) + per-athlete billing:');
+  for (const [id, doc] of collections.loginInvites) console.log(`  loginInvites/${id}: athleteId=${doc.athleteId} status=${doc.status}`);
+  for (const [id, doc] of collections.athletes) {
+    console.log(`  athletes/${id}: billing=${doc.billing ? doc.billing.status : 'absent (== active)'} handicap=${doc.handicap ?? 'null'} loginEmail=${doc.loginEmail ?? 'null'}`);
   }
 
   console.log('\nnotificationPrefs (contract v1.8):');
@@ -1631,6 +1765,15 @@ async function main() {
   console.log('\nstripeEvents (contract v2.1, pin H):');
   for (const [id, doc] of collections.stripeEvents) {
     console.log(`  stripeEvents/${id}: type=${doc.type} customer=${doc.customer} householdId=${doc.householdId} outcome=${doc.outcome}`);
+  }
+
+  console.log('\ncalendlyEvents + the cal- session (Sprint 20):');
+  for (const [id, doc] of collections.calendlyEvents) console.log(`  calendlyEvents/${id}: athleteId=${doc.athleteId} outcome=${doc.outcome}`);
+  {
+    const s = collections.sessions.get('cal-seedevt0001');
+    const b = collections.bookings.get('reese_cal-seedevt0001');
+    console.log(`  sessions/cal-seedevt0001: date=${s.date} time=${s.time} bookable=${s.bookable} source=${s.source} booked=${s.booked}/${s.capacity}`);
+    console.log(`  bookings/reese_cal-seedevt0001: status=${b.status} source=${b.source} flag=${b.flag} periodKey=${b.periodKey}`);
   }
 
   if (DRY_RUN) {
