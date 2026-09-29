@@ -44,6 +44,7 @@ const resolve = require('./stripe-resolve');
 const billing = require('./stripe-billing');
 const checkout = require('./stripe-checkout');
 const legacy = require('./stripe-legacy');
+const {STRIPE_WEBHOOK_SECRETS} = require('./secrets');
 
 const {applyLapsed, applyLegacy, applyPastDue, invoicePeriod,
   membershipPatch} = legacy;
@@ -359,9 +360,8 @@ async function handleEvent(event) {
  * The HTTPS endpoint. Stripe posts server-to-server, so there is no CORS
  * wrapper and no caller but Stripe can produce a valid signature.
  */
-const stripeWebhook = functions.runWith({secrets: ['STRIPE_WEBHOOK_SECRET',
-  'STRIPE_SECRET_KEY', 'SMTP_USER', 'SMTP_PASS']}).https.onRequest(
-    async (req, res) => {
+const stripeWebhook = functions.runWith({secrets: STRIPE_WEBHOOK_SECRETS})
+    .https.onRequest(async (req, res) => {
       const secret = process.env.STRIPE_WEBHOOK_SECRET;
       if (!secret) {
         console.error('STRIPE_WEBHOOK_SECRET is not configured');
