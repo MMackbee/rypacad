@@ -86,29 +86,30 @@ export function RequireRole({ roles, children }) {
 }
 
 /**
- * Signed-in-only guard, for routes that must NOT be reachable signed out but
- * that every signed-in account may reach regardless of role or provisioned
- * status (Sprint 10, contract v1.8 A): /portal/register. Unlike RequireRole
- * this never checks `provisioned` or a role list — an unprovisioned account
- * is exactly who this route exists for (the whole point of the enrollment
- * self-serve path), and a provisioned parent reaches it too, deliberately
- * (NotificationPreferences' existing "Link another athlete" row already
- * navigates here for that account).
- *
- * DEVIATION FLAGGED: /portal/register was previously reachable signed OUT
- * (no guard at all) - submit() would have failed anyway (it requires
- * requireUser()), but the page itself rendered for anyone. This tightens it
- * to match the pin's "A new family signs in..., is unprovisioned, and is
- * routed to /portal/register" framing (sign-in comes first), consistent
- * with useEnrollment()'s own identity requirement.
+ * Sprint 20 (spec 2.1): /portal/register is instant and signed-in. A
+ * provisioned account is redirected to its landing - except a parent who
+ * arrived from Settings' "Link another athlete" (navigation state `link`),
+ * who gets the athletes-only flow that calls addAthletes.
  */
-function RequireSignedIn({ children }) {
+function RegistrationRoute() {
   const live = isLive();
-  const { user, loading } = useAuthSession(live ? undefined : { variant: 'idle' });
-  if (!live) return children;
-  if (loading) return null;
-  if (!user) return <Navigate to="/portal/signin" replace />;
-  return children;
+  const { user, provisioned, loading, refresh } = useAuthSession(live ? undefined : { variant: 'idle' });
+  const { state } = useLocation();
+  const navigate = useNavigate();
+  const linkMode = Boolean(state?.link);
+  if (live && loading) return null;
+  if (live && !user) return <Navigate to="/portal/signin" replace />;
+  if (live && provisioned && !(linkMode && user.role === 'parent')) return <Navigate to={landingFor(user)} replace />;
+  return (
+    <Registration
+      bare
+      mode={linkMode ? 'link' : 'signup'}
+      account={live ? user : null}
+      onRefresh={live ? refresh : undefined}
+      onBack={() => navigate(linkMode ? '/portal/settings' : '/portal/signin')}
+      onFinish={(path) => navigate(path, { replace: true })}
+    />
+  );
 }
 
 /**
@@ -502,21 +503,7 @@ export default function PortalRoutes() {
         element={<SignIn bare onStartEnrollment={go('/portal/signup')} />}
       />
       <Route path="signup" element={<SignUp bare onSignIn={go('/portal/signin')} />} />
-      <Route
-        path="register"
-        element={
-          // Sprint 10 (contract v1.8, A): signed-in-only now (RequireSignedIn
-          // above) — an unprovisioned account reaches this from
-          // NotProvisioned's "start enrollment" CTA (below), and a
-          // provisioned parent reaches it from Settings' existing "Link
-          // another athlete" row. The person finishing enrollment is a
-          // guardian by definition, so the walkthrough opens on the parent
-          // track rather than the chooser.
-          <RequireSignedIn>
-            <Registration bare onBack={go('/portal/signin')} onFinish={go('/portal/welcome?track=parent')} />
-          </RequireSignedIn>
-        }
-      />
+      <Route path="register" element={<RegistrationRoute />} />
       {/* Onboarding walkthrough (Sprint 3) — frontend lane's one route line, per the PM exception in TEAM.md. */}
       <Route path="welcome" element={<OnboardingWelcomeRoute />} />
       {/* Signed in with a real Google account but no users/{uid} doc yet — the
@@ -693,9 +680,9 @@ export default function PortalRoutes() {
         path="settings"
         element={
           <RequireRole roles={['parent', 'athlete']}>
-            {/* Link-another-athlete opens enrollment until screen 08·L (the
-                add-a-child-to-this-household flow) is built — swap then. */}
-            <SettingsRoute onSignOut={onSignOut} onLinkAthlete={go('/portal/register')} />
+            {/* Sprint 20 (spec 2.3): Link another athlete opens Registration's
+                link mode (athletes -> package -> addAthletes). */}
+            <SettingsRoute onSignOut={onSignOut} onLinkAthlete={() => navigate('/portal/register', { state: { link: true } })} />
           </RequireRole>
         }
       />

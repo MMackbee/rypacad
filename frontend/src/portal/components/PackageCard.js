@@ -36,6 +36,7 @@ export default function PackageCard({
       role="button"
       tabIndex={0}
       aria-pressed={selected}
+      aria-label={pkg.name}
       onClick={onSelect}
       onKeyDown={(e) => {
         if (onSelect && (e.key === 'Enter' || e.key === ' ')) {
