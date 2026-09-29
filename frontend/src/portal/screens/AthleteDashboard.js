@@ -1,6 +1,9 @@
 import React from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import { color, font, glow, radius } from '../tokens';
+import PendingBanner from '../components/PendingBanner';
+import PaymentConfirming from '../components/PaymentConfirming';
+import { useMyTokens } from '../hooks/billing';
 import AllowancePools, { GraceLine } from '../components/AllowancePools';
 import BookChooser, { bookNavigation } from '../components/BookChooser';
 import BottomTabBar from '../components/BottomTabBar';
@@ -51,6 +54,10 @@ export default function AthleteDashboard({
   // BottomTabBar already navigates internally rather than every screen
   // threading an onNavigate prop through.
   const navigate = useNavigate();
+  // Sprint 20 (spec 4.4): the athlete's own paid state and the ?paid= return.
+  const mine = useMyTokens();
+  const mineStatus = mine.data?.status ?? null;
+  const [params] = useSearchParams();
 
   return (
     <PhoneFrame
@@ -91,6 +98,8 @@ export default function AthleteDashboard({
         </div>
       ) : (
       <div style={{ padding: '0 22px 24px', display: 'flex', flexDirection: 'column', gap: 12 }}>
+        <PaymentConfirming athleteId={params.get('paid')} />
+        <PendingBanner pendingAthletes={mineStatus?.status === 'pending' ? mineStatus.pendingAthletes : []} body={mineStatus?.body} title={mineStatus?.title} />
         {/* Live: shown until a published diagnostic exists (contract v1.8 C);
             seed: the demo 'new' variant. */}
         {variant === 'new' || data?.diagnosticCaptured === false ? <StartHere onBook={onBook} /> : null}

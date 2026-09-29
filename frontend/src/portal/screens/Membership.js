@@ -2,7 +2,9 @@ import React from 'react';
 import { useNavigate } from 'react-router-dom';
 import { color, font } from '../tokens';
 import BottomTabBar from '../components/BottomTabBar';
+import FacilityCard from '../components/FacilityCard';
 import MemberSection from '../components/MemberSection';
+import PendingBanner from '../components/PendingBanner';
 import PhoneFrame from '../components/PhoneFrame';
 import SkeletonCard, { SkeletonBar } from '../components/Skeleton';
 import TokenMeter from '../components/TokenMeter';
@@ -68,10 +70,12 @@ export default function Membership({ variant = 'populated', bare = false, role =
         ) : (
           <>
             <StatusBanner status={status} />
+            <PendingBanner pendingAthletes={status?.status === 'pending' ? status.pendingAthletes : []} body={status?.body} title={status?.title} />
             <MemberSection name={member.name}>
               <TokenMeter member={member} defaultOpen />
               <CoachingLine coaching={member.coaching} />
               <ContractLine contractMinutes={member.contractMinutes} onOpen={() => navigate('/portal/contract')} />
+              <FacilityCard member={member} />
             </MemberSection>
           </>
         )}
