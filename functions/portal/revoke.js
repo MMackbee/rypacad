@@ -86,20 +86,26 @@ async function cancelBookings(docs, reason) {
 }
 
 /**
+ * Delete documents in chunked batches.
+ * @param {!Array<!Object>} docs `QueryDocumentSnapshot`s.
+ * @return {!Promise<number>} How many documents were deleted.
+ */
+async function deleteDocs(docs) {
+  for (let i = 0; i < docs.length; i += BATCH_LIMIT) {
+    const batch = db().batch();
+    for (const doc of docs.slice(i, i + BATCH_LIMIT)) batch.delete(doc.ref);
+    await batch.commit();
+  }
+  return docs.length;
+}
+
+/**
  * Delete every document a query returns, in chunked batches.
  * @param {!Object} query A Firestore `Query`.
  * @return {!Promise<number>} How many documents were deleted.
  */
 async function deleteAll(query) {
-  const snap = await query.get();
-  for (let i = 0; i < snap.docs.length; i += BATCH_LIMIT) {
-    const batch = db().batch();
-    for (const doc of snap.docs.slice(i, i + BATCH_LIMIT)) {
-      batch.delete(doc.ref);
-    }
-    await batch.commit();
-  }
-  return snap.docs.length;
+  return deleteDocs((await query.get()).docs);
 }
 
 /**
@@ -157,6 +163,35 @@ async function revokeHousehold(hh, eventId) {
       .where('householdId', '==', hh.id));
   await notifyRevoked(hh, eventId, cancelled.cancelled, 'lapsed');
   return Object.assign({today, waitlistDeleted}, cancelled);
+}
+
+/**
+ * The per-athlete lapse follow-up (Sprint 20, D17): ONE athlete's future
+ * confirmed bookings are cancelled with reason 'lapsed', their seats
+ * released, and that athlete's waitlist entries deleted; siblings keep
+ * theirs. Rides the same `bookings (householdId, date)` composite as
+ * `revokeHousehold`; `athleteId` and `status` are filtered in memory.
+ * @param {!Object} hh The resolved household `{id, data, ref}`.
+ * @param {string} athleteId The athlete whose tier subscription ended.
+ * @param {?string=} eventId The Stripe `event.id`, for the notice's ledger
+ *     id.
+ * @return {!Promise<!Object>} A summary for the event ledger.
+ */
+async function revokeAthlete(hh, athleteId, eventId) {
+  const today = lib.todayISO();
+  const snap = await db().collection('bookings')
+      .where('householdId', '==', hh.id)
+      .where('date', '>', today)
+      .get();
+  const mine = (d) => (d.data() || {}).athleteId === athleteId;
+  const confirmed = snap.docs.filter(
+      (d) => mine(d) && (d.data() || {}).status === 'confirmed');
+  const cancelled = await cancelBookings(confirmed, 'lapsed');
+  const wl = await db().collection('waitlist')
+      .where('householdId', '==', hh.id).get();
+  const waitlistDeleted = await deleteDocs(wl.docs.filter(mine));
+  await notifyRevoked(hh, eventId, cancelled.cancelled, 'lapsed');
+  return Object.assign({today, athleteId, waitlistDeleted}, cancelled);
 }
 
 /**
@@ -237,6 +272,7 @@ module.exports = {
   cancelBookings,
   deleteAll,
   notifyRevoked,
+  revokeAthlete,
   revokeHousehold,
   trimDowngrade,
 };
