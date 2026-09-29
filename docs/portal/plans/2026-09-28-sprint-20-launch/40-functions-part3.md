@@ -10,13 +10,13 @@ Read `40-functions.md` first: its Goal, Architecture, Global Constraints, Execut
 
 **Files:**
 - Create: `functions/portal/stripe-checkout.js`, `functions/test/verify-stripe-launch.js`
-- Modify: `functions/portal/stripe.js:26-42` (requires, `HANDLED`), `:255-303` (`applySubscriptionUpdated` keeps the legacy household path), `:305-389` (`handleEvent`), `:395` (`runWith`), `:420-425` (exports)
+- Modify: `functions/portal/stripe.js:26-42` (requires, `HANDLED`), `:89-98` (`invoicePeriod` prefers the subscription line - Step 2b), `:255-303` (`applySubscriptionUpdated` keeps the legacy household path), `:305-389` (`handleEvent`), `:395` (`runWith`), `:420-425` (exports); `functions/portal/revoke.js:88-103,147-160` (`deleteDocs`, `revokeAthlete` - Step 2b, D17)
 
 **Interfaces:**
-- Consumes: Tasks 3, 5, 6; `revoke.revokeHousehold`, `revoke.trimDowngrade` (`stripe.js:375-379`); `stripe.customerIdOf`, `invoicePeriod`, `applyInvoicePaid`, `applyPastDue`, `applyLapsed` (unchanged, the legacy household-wide path when no athlete resolves).
+- Consumes: Tasks 3, 5, 6 (`billing.otherTierLive`); `revoke.revokeHousehold`, `revoke.trimDowngrade` (`stripe.js:375-379`), `revoke.revokeAthlete` (new, Step 2b); `stripe.customerIdOf`, `invoicePeriod` (Step 2b: prefers the subscription line), `applyInvoicePaid`, `applyPastDue`, `applyLapsed` (unchanged, the legacy household-wide path when no athlete resolves).
 - Produces: `stripe-checkout.shapeOf(items) -> {ok: boolean, priceId: ?string, reason: ?string}` (new, pure: decision D13 - exactly one recurring line plus at most one one-time line, every quantity 1, else `'unexpected-quantity'`); `stripe-checkout.readLineItems(stripe, sessionId) -> Promise<{ok, priceId, reason}>` (new; `shapeOf` over `listLineItems`, or over the `STRIPE_LINE_ITEMS_STUB` entry under the emulator); `stripe-checkout.applyCheckoutCompleted(tx, {event, session, ref, priceId, athlete, athleteRef, hh, packageId}) -> {outcome, firstActive, detail}` (new); `stripe.js` exports `resolveSubject`, `subscriptionIdOf`, `periodOf`, `priceIdOf` from `stripe-resolve.js` beside its own names; `stripeWebhook` declares `runWith({secrets: ['STRIPE_WEBHOOK_SECRET', 'STRIPE_SECRET_KEY', 'SMTP_USER', 'SMTP_PASS']})` (Task 11 replaces the literal with `secrets.STRIPE_WEBHOOK_SECRETS`, the same list).
-- Facility add-on rule (decision D10): `customer.subscription.deleted` and `invoice.payment_failed` for `product === 'facility'` write `athletes.facilityBilling.status` (`'lapsed'` / `'past_due'`) and `facilityAccess: false` ONLY - they never touch household membership and never revoke bookings. The tier product keeps the household-wide path (`applyLapsed` / `applyPastDue` + the athlete's `billing.status`).
-- Ledger (contract 2, decision D8): `stripeEvents` rows carry `athleteId` and `via`; outcomes gain `facility-active` and `no-period` beside `applied-checkout`, `issued-prepaid`, `unexpected-quantity`, `stripe-lookup-failed`.
+- Facility add-on rule (decision D10): EVERY facility event - `invoice.paid`, `invoice.payment_failed`, `customer.subscription.updated`, `customer.subscription.deleted` - writes `athletes.facilityBilling` (+ `facilityAccess`) ONLY; none of them touches `households.membership` (no `householdActive`, no `membershipPatch`) and none revokes bookings. The tier product keeps the household-wide path for `invoice.paid` (`householdActive`) and a RETRYING `invoice.payment_failed` (`applyPastDue` - the accepted household freeze of spec 14, one card serves the family), but `customer.subscription.deleted` - and a FINAL `invoice.payment_failed` (`next_payment_attempt` null; Stripe cancels the subscription next) - is PER ATHLETE (decision D17, review 2026-09-28): that athlete's `billing.status` -> `'lapsed'` and only that athlete's future bookings and waitlist entries go (`revoke.revokeAthlete`, follow-up `'revoke-athlete'`, ledger outcome `athlete-lapsed`); the household lapses (`applyLapsed` + `revokeHousehold`) only when `billing.otherTierLive` finds no sibling with an active/past_due tier. Before D17 one child's cancellation cancelled the paid sibling's bookings.
+- Ledger (contract 2, decision D8): `stripeEvents` rows carry `athleteId` and `via`; outcomes gain `facility-active`, `no-period` and `athlete-lapsed` beside `applied-checkout`, `issued-prepaid`, `unexpected-quantity`, `stripe-lookup-failed`.
 
 - [ ] **Step 1: Write `stripe-checkout.js`**
 
@@ -201,6 +201,19 @@ async function handleEvent(event) {
           db().collection('packages').doc(athlete.packageId));
       pkg = pkgSnap.exists ? pkgSnap.data() : null;
     }
+    // The payment-received notice speaks for the PAID package (spec 4.3
+    // remaps packageId to the paid price; the family may have changed its
+    // choice after opening checkout): the checkout's line item, or the
+    // subscription metadata's packageId. Read here, before any write.
+    let paidPkg = pkg;
+    const paidPackageId = isCheckout && pre.priceId ?
+        catalogue.packageIdForPrice(pre.priceId) :
+        (subject && subject.packageId) || null;
+    if (athlete && paidPackageId && paidPackageId !== athlete.packageId) {
+      const paidSnap = await tx.get(
+          db().collection('packages').doc(paidPackageId));
+      paidPkg = paidSnap.exists ? paidSnap.data() : pkg;
+    }
 
     let applied = {outcome: 'ignored', detail: {}};
     const product = (subject && subject.product) || 'tier';
@@ -220,7 +233,8 @@ async function handleEvent(event) {
       applied = await applyLegacy(tx, event, hh, object);
     } else if (event.type === 'invoice.paid') {
       applied = billing.applyAthleteInvoicePaid(tx, {db: db(), event, hh,
-        athleteRef, athlete, pkg, product, period: invoicePeriod(object)});
+        athleteRef, athlete, pkg: paidPkg, product,
+        period: invoicePeriod(object)});
     } else if (event.type === 'invoice.payment_failed') {
       const final = object.next_payment_attempt === null ||
           object.next_payment_attempt === undefined;
@@ -229,9 +243,19 @@ async function handleEvent(event) {
         // D10: the add-on fails alone - membership and bookings untouched.
         applied = billing.applyAthleteStatus(tx, {athleteRef, athlete,
           product, status, priceId: null});
+      } else if (final) {
+        // D17: a FINAL failure ends this athlete's subscription (Stripe's
+        // dunning cancels it next) - the same per-athlete rule as deleted.
+        const siblingLive = await billing.otherTierLive(tx, db(), hh.id,
+            athleteRef.id);
+        billing.applyAthleteStatus(tx, {athleteRef, athlete, product,
+          status, priceId: null});
+        applied = siblingLive ?
+            {outcome: 'processing', followUp: 'revoke-athlete', detail: {}} :
+            applyLapsed(tx, event, hh, 'unpaid');
       } else {
-        applied = final ? applyLapsed(tx, event, hh, 'unpaid') :
-            applyPastDue(tx, event, hh);
+        // A retrying card freezes the household (spec 14, accepted).
+        applied = applyPastDue(tx, event, hh);
         billing.applyAthleteStatus(tx, {athleteRef, athlete, product,
           status, priceId: null});
       }
@@ -242,9 +266,16 @@ async function handleEvent(event) {
         applied = billing.applyAthleteStatus(tx, {athleteRef, athlete,
           product, status: 'lapsed', priceId: resolve.priceIdOf(object)});
       } else {
-        applied = applyLapsed(tx, event, hh, object.status || 'canceled');
+        // D17: THIS athlete lapses and loses their future bookings; the
+        // household (and every sibling's bookings) only when no sibling
+        // still holds a live tier. The read precedes every write here.
+        const siblingLive = await billing.otherTierLive(tx, db(), hh.id,
+            athleteRef.id);
         billing.applyAthleteStatus(tx, {athleteRef, athlete, product,
           status: 'lapsed', priceId: resolve.priceIdOf(object)});
+        applied = siblingLive ?
+            {outcome: 'processing', followUp: 'revoke-athlete', detail: {}} :
+            applyLapsed(tx, event, hh, object.status || 'canceled');
       }
     } else if (event.type === 'customer.subscription.updated') {
       applied = await applyAthleteSubscriptionUpdated(tx, event, hh, athlete,
@@ -264,7 +295,7 @@ async function handleEvent(event) {
       followUp: applied.followUp || null, detail: applied.detail || {},
       household: hh, firstActive: applied.firstActive === true,
       athlete: athlete ? {id: athleteRef.id, name: athlete.name || null,
-        pkg} : null};
+        pkg: paidPkg} : null};
   });
 
   if (planned.duplicate) {
@@ -277,6 +308,10 @@ async function handleEvent(event) {
   if (planned.followUp === 'revoke') {
     summary = await revoke.revokeHousehold(planned.household, event.id);
     outcome = 'lapsed';
+  } else if (planned.followUp === 'revoke-athlete') {
+    summary = await revoke.revokeAthlete(planned.household,
+        planned.athlete.id, event.id);
+    outcome = 'athlete-lapsed';
   } else if (planned.followUp === 'downgrade') {
     summary = await revoke.trimDowngrade(
         planned.household, planned.detail, event.id);
@@ -352,11 +387,15 @@ async function applyAthleteSubscriptionUpdated(tx, event, hh, athlete,
     const snap = await tx.get(db().collection('packages').doc(packageId));
     newPkg = snap.exists ? snap.data() : null;
   }
-  tx.update(hh.ref, membershipPatch({
-    stripeSubscriptionStatus: sub.status || null,
-    currentPeriodStart: period.start, currentPeriodEnd: period.end,
-    lastEventId: event.id,
-  }));
+  if (product === 'tier') {
+    // D10: only the tier subscription speaks for households.membership;
+    // the add-on's status and period stay on athletes.facilityBilling.
+    tx.update(hh.ref, membershipPatch({
+      stripeSubscriptionStatus: sub.status || null,
+      currentPeriodStart: period.start, currentPeriodEnd: period.end,
+      lastEventId: event.id,
+    }));
+  }
   const status = athleteStatusFor(sub.status);
   if (status) {
     billing.applyAthleteStatus(tx, {athleteRef, athlete, product, status,
@@ -385,6 +424,100 @@ If `stripe.js` crosses 500 lines after this edit, move `applyLegacy`,
 `applyInvoicePaid`, `applyPastDue`, `applyLapsed` and
 `applySubscriptionUpdated` into `functions/portal/stripe-legacy.js` (new) and
 require them back.
+
+- [ ] **Step 2b: `invoicePeriod` prefers the subscription line; `revoke.revokeAthlete`**
+
+Replace `invoicePeriod` (`stripe.js:89-98`). The checkout invoice carries
+TWO lines (spec 4.2): the one-time prepaid line, whose `period` is a single
+instant (`start == end == now`), and the $0 trialing subscription line whose
+period runs to `trial_end`. `lines.find(first with a period)` takes whichever
+Stripe lists first, and the one-time line would write
+`membership.currentPeriodStart/End = today` (the hub then reads "Tokens reset
+<today>"). Tokens are unaffected either way - the prepaid period comes from
+metadata - only `households.membership` was wrong.
+
+```js
+function invoicePeriod(invoice) {
+  const lines = ((invoice.lines && invoice.lines.data) || [])
+      .filter((l) => l && l.period && l.period.start);
+  // The checkout invoice also carries the one-time prepaid line (spec 4.2),
+  // whose period is one instant; the subscription line owns the billing
+  // period: Basil `parent.type` 'subscription_item_details' (pre-Basil
+  // `type` 'subscription'), else any line with a real span, else the first.
+  const isSub = (l) => (l.parent && l.parent.type ===
+      'subscription_item_details') || l.type === 'subscription';
+  const line = lines.find(isSub) ||
+      lines.find((l) => l.period.end > l.period.start) || lines[0] || null;
+  const startUnix = line ? line.period.start : invoice.period_start;
+  const endUnix = line ? line.period.end : invoice.period_end;
+  return {
+    start: lib.chicagoDateFromUnix(startUnix),
+    end: lib.chicagoDateFromUnix(endUnix),
+  };
+}
+```
+
+In `functions/portal/revoke.js`, split `deleteAll` (`:93-103`) so the
+per-athlete variant can filter in memory, and add `revokeAthlete` after
+`revokeHousehold` (`:160`); export it beside `revokeHousehold`:
+
+```js
+/**
+ * Delete documents in chunked batches.
+ * @param {!Array<!Object>} docs `QueryDocumentSnapshot`s.
+ * @return {!Promise<number>} How many documents were deleted.
+ */
+async function deleteDocs(docs) {
+  for (let i = 0; i < docs.length; i += BATCH_LIMIT) {
+    const batch = db().batch();
+    for (const doc of docs.slice(i, i + BATCH_LIMIT)) batch.delete(doc.ref);
+    await batch.commit();
+  }
+  return docs.length;
+}
+
+/**
+ * Delete every document a query returns, in chunked batches.
+ * @param {!Object} query A Firestore `Query`.
+ * @return {!Promise<number>} How many documents were deleted.
+ */
+async function deleteAll(query) {
+  return deleteDocs((await query.get()).docs);
+}
+
+/**
+ * The per-athlete lapse follow-up (Sprint 20, D17): ONE athlete's future
+ * confirmed bookings are cancelled with reason 'lapsed', their seats
+ * released, and that athlete's waitlist entries deleted; siblings keep
+ * theirs. Rides the same `bookings (householdId, date)` composite as
+ * `revokeHousehold`; `athleteId` and `status` are filtered in memory.
+ * @param {!Object} hh The resolved household `{id, data, ref}`.
+ * @param {string} athleteId The athlete whose tier subscription ended.
+ * @param {?string=} eventId The Stripe `event.id`, for the notice's ledger
+ *     id.
+ * @return {!Promise<!Object>} A summary for the event ledger.
+ */
+async function revokeAthlete(hh, athleteId, eventId) {
+  const today = lib.todayISO();
+  const snap = await db().collection('bookings')
+      .where('householdId', '==', hh.id)
+      .where('date', '>', today)
+      .get();
+  const mine = (d) => (d.data() || {}).athleteId === athleteId;
+  const confirmed = snap.docs.filter(
+      (d) => mine(d) && (d.data() || {}).status === 'confirmed');
+  const cancelled = await cancelBookings(confirmed, 'lapsed');
+  const wl = await db().collection('waitlist')
+      .where('householdId', '==', hh.id).get();
+  const waitlistDeleted = await deleteDocs(wl.docs.filter(mine));
+  await notifyRevoked(hh, eventId, cancelled.cancelled, 'lapsed');
+  return Object.assign({today, athleteId, waitlistDeleted}, cancelled);
+}
+```
+
+`notifyRevoked` (`revoke.js:118`) keys the notice on `${hh.id}_${eventId}`,
+so each lapse event tells the family once - as today. `verify-lane.js` still
+passes: `revokeHousehold` itself is untouched.
 
 - [ ] **Step 3: Run the existing harness** (regression - every legacy family resolves by customer, so STEP 1-8 must still pass)
 
@@ -481,17 +614,58 @@ async function seed() {
     windowDays: 45, access247: true, stripePriceId: 'price_elite'});
   set('users', 'u-nina', {role: 'parent', householdId: 'novak',
     email: 'nina@example.test'});
+  // STEP D2 (D17): two paid siblings, each with a future booking and a
+  // waitlist entry, so a per-athlete lapse can be told from a household one.
+  set('households', 'reyes', {name: 'Reyes family',
+    stripeCustomerId: 'cus_reyes', stripeSubscriptionId: null,
+    stripeCustomerIds: ['cus_reyes'], periodAnchorDay: 1,
+    membership: {status: 'active'},
+    guardian: {name: 'Ana Reyes', email: 'ana@example.test',
+      phone: '+15550188'}});
+  set('sessions', 'reyes-s1', {date: '2026-11-10', time: '4:00 PM',
+    type: 'training', capacity: 8, booked: 2, bookable: true,
+    status: 'scheduled'});
+  set('sessions', 'reyes-s2', {date: '2026-11-12', time: '4:00 PM',
+    type: 'training', capacity: 1, booked: 1, bookable: true,
+    status: 'scheduled'});
+  for (const a of ['ivy', 'kai']) {
+    set('athletes', a, {name: a, householdId: 'reyes', packageId: 't-6',
+      contractMinutes: null, coachId: null, facilityAccess: false,
+      billing: {status: 'active', customerId: 'cus_reyes',
+        subscriptionId: 'sub_' + a}});
+    set('bookings', `${a}_reyes-s1`, {athleteId: a, householdId: 'reyes',
+      sessionId: 'reyes-s1', date: '2026-11-10', type: 'training',
+      status: 'confirmed', periodKey: '2026-11-01', chargedFrom: 'period',
+      graceTokenId: null, createdBy: 'u-ana', createdAt: TS(Date.now())});
+    set('waitlist', `${a}_reyes-s2`, {athleteId: a, householdId: 'reyes',
+      sessionId: 'reyes-s2', date: '2026-11-12', periodKey: '2026-11-01',
+      joinedAt: TS(Date.now()), createdBy: 'u-ana'});
+  }
   await B.commit();
 }
 const META = (ath, pk) => ({householdId: 'novak', athleteId: ath,
   product: 'tier', packageId: pk, prepaidPeriodKey: '2026-11-01',
   prepaidTokens: pk === 'elite' ? '' : '6'});
+// Lines in the order Stripe may list them on the checkout invoice: the
+// one-time prepaid line (a single instant) FIRST, then the subscription line
+// (review finding 7 - invoicePeriod must pick the subscription line).
 const basilInvoice = (id, sub, ath, pk, reason) => ({id, object: 'event',
   type: 'invoice.paid', data: {object: {id: 'in_' + id, object: 'invoice',
     customer: 'cus_novak', status: 'paid', billing_reason: reason,
     parent: {subscription_details: {subscription: sub, metadata: META(ath, pk)}},
-    lines: {data: [{period: {start: secs(2026, 10, 6), end: secs(2026, 12, 1)},
-      price: {id: 'price_' + pk.replace('-', '')}}]}}}});
+    lines: {data: [
+      {period: {start: secs(2026, 10, 6), end: secs(2026, 10, 6)},
+        parent: {type: 'invoice_item_details'},
+        pricing: {price_details: {price: 'price_prepaid_' + ath}}},
+      {period: {start: secs(2026, 10, 6), end: secs(2026, 12, 1)},
+        parent: {type: 'subscription_item_details'},
+        price: {id: 'price_' + pk.replace('-', '')}}]}}}});
+const deleted = (id, sub, ath) => ({id, object: 'event',
+  type: 'customer.subscription.deleted', data: {object: {id: sub,
+    object: 'subscription', customer: 'cus_reyes', status: 'canceled',
+    metadata: {householdId: 'reyes', athleteId: ath, product: 'tier',
+      packageId: 't-6'},
+    items: {data: [{price: {id: 'price_t6'}}]}}}});
 const completed = (id, sub, ath) => ({id, object: 'event',
   type: 'checkout.session.completed', data: {object: {id: 'cs_' + id,
     object: 'checkout.session', mode: 'subscription', payment_status: 'paid',
@@ -513,8 +687,12 @@ async function main() {
       [6, true, '2026-11-30']);
   check('lena.billing.status', (await get('athletes', 'lena')).billing.status,
       'active');
-  check('novak.periodAnchorDay', (await get('households', 'novak'))
-      .periodAnchorDay, 1);
+  const hhA = await get('households', 'novak');
+  check('novak.periodAnchorDay', hhA.periodAnchorDay, 1);
+  check('membership period from the SUBSCRIPTION line, not the one-time ' +
+      'prepaid line (review finding 7)',
+  [hhA.membership.currentPeriodStart, hhA.membership.currentPeriodEnd],
+  ['2026-10-06', '2026-12-01']);
   check('notice membership_lena_paid', await exists('notifications',
       'membership_lena_paid'), true);
   check('ledger via', (await get('stripeEvents', 'evt_a')).via, 'metadata');
@@ -557,6 +735,33 @@ async function main() {
   check('ledger via billing.subscriptionId',
       (await get('stripeEvents', 'evt_e')).via, 'billing');
 
+  log('\nSTEP D2  customer.subscription.deleted (tier) is per athlete (D17)');
+  r = await post(deleted('evt_d2a', 'sub_ivy', 'ivy'));
+  check('HTTP', [r.status, r.body.outcome], [200, 'athlete-lapsed']);
+  check('ivy lapsed, kai active',
+      [(await get('athletes', 'ivy')).billing.status,
+        (await get('athletes', 'kai')).billing.status], ['lapsed', 'active']);
+  check('ivy booking cancelled (lapsed), kai booking kept',
+      [(await get('bookings', 'ivy_reyes-s1')).status,
+        (await get('bookings', 'ivy_reyes-s1')).cancelReason,
+        (await get('bookings', 'kai_reyes-s1')).status],
+      ['cancelled', 'lapsed', 'confirmed']);
+  check('ivy waitlist gone, kai waitlist kept',
+      [await exists('waitlist', 'ivy_reyes-s2'),
+        await exists('waitlist', 'kai_reyes-s2')], [false, true]);
+  check('household reyes stays active (a sibling is live)',
+      (await get('households', 'reyes')).membership.status, 'active');
+  check('ledger outcome', (await get('stripeEvents', 'evt_d2a')).outcome,
+      'athlete-lapsed');
+  r = await post(deleted('evt_d2b', 'sub_kai', 'kai'));
+  check('HTTP (last live tier -> the household lapses)',
+      [r.status, r.body.outcome], [200, 'lapsed']);
+  check('kai lapsed, household lapsed, kai booking cancelled',
+      [(await get('athletes', 'kai')).billing.status,
+        (await get('households', 'reyes')).membership.status,
+        (await get('bookings', 'kai_reyes-s1')).status],
+      ['lapsed', 'lapsed', 'cancelled']);
+
   log('\nSTEP E  unexpected-quantity and duplicate');
   r = await post(completed('evt_f', 'sub_bad', 'lena'));
   check('HTTP (stub returns qty 2 for cs_evt_f)', [r.status, r.body.outcome],
@@ -590,7 +795,7 @@ reseeds) - still `ALL CHECKS PASSED`.
 - [ ] **Step 6: Commit**
 
 ```bash
-git add functions/portal/stripe.js functions/portal/stripe-checkout.js functions/test/verify-stripe-launch.js
+git add functions/portal/stripe.js functions/portal/stripe-checkout.js functions/portal/revoke.js functions/test/verify-stripe-launch.js
 git commit -m "feat(functions): checkout.session.completed, per-athlete resolution, Basil shapes" -m "Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>"
 ```
 

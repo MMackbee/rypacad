@@ -89,7 +89,8 @@ const stripeNever = {checkout: {sessions: {list: async () => {
   throw new Error('should not be called');
 }}}};
 const inv = (extra) => ({type: 'invoice.paid', data: {object: Object.assign(
-    {customer: 'cus_1', parent: {subscription_details: {subscription: 'sub_1'}}},
+    {customer: 'cus_1',
+      parent: {subscription_details: {subscription: 'sub_1'}}},
     extra)}});
 
 test('resolveSubject: metadata first', async () => {
@@ -328,7 +329,7 @@ git commit -m "feat(functions): Basil-safe Stripe accessors and resolveSubject o
 
 **Interfaces:**
 - Consumes: `lib.tokenPeriodId`, `lib.periodFor`, `lib.bookingOpen`, `notices.paymentReceived` (Task 4), `notify.sendNotice` (`notify.js:298`), `stripe-resolve.metadataOf`, `stripe.invoicePeriod` (duplicated logic passed in as `period` by the caller to avoid a cycle).
-- Produces: `billingPatch(product, fields) -> Object` (new); `applyAthleteInvoicePaid(tx, {db, event, hh, athleteRef, athlete, subject, pkg, period}) -> {outcome, firstActive, detail}`; `applyAthleteStatus(tx, {athleteRef, athlete, product, status, priceId}) -> {outcome}`; `sendPaymentReceived({householdId, athleteId, athleteName, pkg}) -> Promise`.
+- Produces: `billingPatch(product, fields) -> Object` (new); `applyAthleteInvoicePaid(tx, {db, event, hh, athleteRef, athlete, subject, pkg, period}) -> {outcome, firstActive, detail}`; `applyAthleteStatus(tx, {athleteRef, athlete, product, status, priceId}) -> {outcome}`; `sendPaymentReceived({householdId, athleteId, athleteName, pkg}) -> Promise`; `otherTierLive(tx, db, householdId, athleteId) -> Promise<boolean>` (new, D17: does a sibling still hold an active/past_due tier - Task 7's `customer.subscription.deleted` decides per athlete vs household with it).
 
 - [ ] **Step 1: Write the failing test** `stripe-billing.test.js`
 
@@ -376,7 +377,8 @@ test('invoice.paid subscription_cycle: the invoice line period', () => {
   const out = b.applyAthleteInvoicePaid(tx, {db, hh, athleteRef: aRef,
     athlete: {billing: {status: 'active'}}, pkg: T6, product: 'tier',
     period: {start: '2026-12-01', end: '2026-12-31'},
-    event: {id: 'evt_2', data: {object: {billing_reason: 'subscription_cycle'}}},
+    event: {id: 'evt_2', data: {object: {
+      billing_reason: 'subscription_cycle'}}},
   });
   assert.equal(out.outcome, 'issued');
   assert.equal(out.firstActive, false);
@@ -398,6 +400,8 @@ test('invoice.paid facility: no tokens, facilityBilling + facilityAccess',
         a.data.facilityAccess], ['active', true]);
       assert.equal(writes.some((w) => w.path.startsWith('tokenPeriods/')),
           false);
+      assert.equal(writes.some((w) => w.path === 'households/h1'), false,
+          'D10: a facility invoice never writes households.membership');
     });
 
 test('applyAthleteStatus: lapsed facility clears facilityAccess', () => {
@@ -413,6 +417,22 @@ test('applyAthleteStatus: lapsed facility clears facilityAccess', () => {
   assert.equal(r2.writes[0].data['billing.status'], 'past_due');
   assert.equal('facilityAccess' in r2.writes[0].data, false);
 });
+
+test('otherTierLive: a live sibling keeps the household; pending/lapsed do not',
+    async () => {
+      const doc = (id, status) => ({id, data: () => ({billing: {status}})});
+      const dbWith = (docs) => ({collection: () => ({where: () => docs})});
+      const tx = {get: async (docs) => ({docs})};
+      const live = (docs) =>
+        b.otherTierLive(tx, dbWith(docs), 'h1', 'a1');
+      assert.equal(await live([doc('a1', 'lapsed'), doc('a2', 'active')]),
+          true);
+      assert.equal(await live([doc('a1', 'lapsed'), doc('a2', 'past_due')]),
+          true);
+      assert.equal(await live([doc('a1', 'lapsed'), doc('a2', 'pending')]),
+          false);
+      assert.equal(await live([doc('a1', 'active')]), false);
+    });
 
 run();
 ```
@@ -501,12 +521,14 @@ function applyAthleteInvoicePaid(tx, args) {
   const {db, event, hh, athleteRef, athlete, pkg, product, period} = args;
   const invoice = (event.data && event.data.object) || {};
   const wasActive = !athlete.billing || athlete.billing.status === 'active';
-  householdActive(tx, hh, event.id, period);
   if (product === 'facility') {
+    // D10: the add-on never touches households.membership - a paid facility
+    // invoice must not lift a tier freeze (past_due) or reset its dunning.
     tx.update(athleteRef, billingPatch('facility',
         {status: 'active', lastEventId: event.id}));
     return {outcome: 'facility-active', firstActive: false, detail: {}};
   }
+  householdActive(tx, hh, event.id, period);
   tx.update(athleteRef, billingPatch('tier',
       {status: 'active', lastEventId: event.id}));
   const meta = metadataOf(invoice);
@@ -554,6 +576,25 @@ function applyAthleteStatus(tx, args) {
 }
 
 /**
+ * Does any OTHER athlete in the household still hold a live tier
+ * subscription (`billing.status` active or past_due)? Decides whether one
+ * athlete's `customer.subscription.deleted` lapses the household (D17). A
+ * pending or lapsed sibling keeps nothing alive. Legacy athletes (no
+ * `billing`) never reach here: they resolve by customer -> applyLegacy.
+ * @param {!Object} tx The transaction (the read precedes every write).
+ * @param {!Object} db Firestore.
+ * @param {string} householdId The household.
+ * @param {string} athleteId The athlete whose subscription ended.
+ * @return {!Promise<boolean>} True when a sibling keeps the household live.
+ */
+async function otherTierLive(tx, db, householdId, athleteId) {
+  const snap = await tx.get(db.collection('athletes')
+      .where('householdId', '==', householdId));
+  return snap.docs.some((d) => d.id !== athleteId &&
+      ['active', 'past_due'].includes(((d.data() || {}).billing || {}).status));
+}
+
+/**
  * The payment-received notice on an athlete's FIRST active (spec 4.3).
  * Idempotent on `membership_${athleteId}_paid`. Never throws.
  * @param {{householdId: string, athleteId: string, athleteName: ?string,
@@ -577,14 +618,14 @@ async function sendPaymentReceived(args) {
 
 module.exports = {
   applyAthleteInvoicePaid, applyAthleteStatus, billingPatch, householdActive,
-  sendPaymentReceived,
+  otherTierLive, sendPaymentReceived,
 };
 ```
 
 - [ ] **Step 3: Run**
 
 Run: `cd functions && node portal/stripe-billing.test.js && npm run lint`
-Expected: `4 passing`, lint clean. (`firebase-admin/firestore` resolves
+Expected: `5 passing`, lint clean. (`firebase-admin/firestore` resolves
 without an app; `FieldValue.serverTimestamp()` is a sentinel.)
 
 - [ ] **Step 4: Commit**

@@ -2,7 +2,7 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**This is the second half of `30-db.md`** (Tasks 7-11). Goal, Architecture, Tech Stack, Spec, Interfaces, GitHub issues, Global Constraints and Handoffs are stated once, in part 1, and apply here unchanged. Tasks 7-11 depend on nothing in Tasks 1-6 except Task 1's `functions/config/stripe-catalogue.json` (referenced by the docs) and Task 3's DATA-MODEL sync-table edit (Task 8 edits the same file; do them in order).
+**This is the second half of `30-db.md`** (Tasks 7-11). Goal, Architecture, Tech Stack, Spec, Interfaces, GitHub issues, Global Constraints and Handoffs are stated once, in part 1, and apply here unchanged. Tasks 7-11 depend on nothing in Tasks 1-6 except the committed `functions/config/stripe-catalogue.json` (`1b3dc3d`; Task 1 only confirms it - referenced by the docs) and Task 3's DATA-MODEL sync-table edit (Task 8 edits the same file; do them in order).
 
 ---
 
@@ -200,7 +200,7 @@ Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>"
 - Modify: `docs/portal/DATA-MODEL.md:17-34 (id table),41 (users),59-66 (households),74-84 (athletes),124-126 (packages),138,142,150 (sessions),325-360 (bookings),760 (after staffInvites),1421-1445 (stripeEvents)`
 
 **Interfaces:**
-- Consumes: interfaces 2 (every shape and its "absent ==") plus the PM rulings that extend it: D8 (`athletes.billing.lastEventId`; `athletes.facilityBilling.customerId` / `checkoutSessionId` / `lastEventId`; `calendlyEvents` outcome `malformed` and field `flag`; `stripeEvents.athleteId` / `via` and outcomes `facility-active` / `no-period`), D10 (a facility lapse never touches household membership or bookings), and the contract's `loginInvites.status: 'orphaned'` (1.4).
+- Consumes: interfaces 2 (every shape and its "absent ==") plus the PM rulings that extend it: D8 (`athletes.billing.lastEventId`; `athletes.facilityBilling.customerId` / `checkoutSessionId` / `lastEventId`; `calendlyEvents` outcome `malformed` and field `flag`; `stripeEvents.athleteId` / `via` and outcomes `facility-active` / `no-period` / `athlete-lapsed`), D10 (no facility event touches household membership or bookings), D17 (a tier `customer.subscription.deleted` is per athlete), and the contract's `loginInvites.status: 'orphaned'` (1.4).
 - Produces: anchors `#logininvitesemaillower-contract-v301-sprint-20` and `#calendlyeventsid-contract-v301-sprint-20` that Task 9 links.
 
 - [ ] **Step 1: Id conventions - three rows**
@@ -261,7 +261,7 @@ and in `cancelledBy` (`:330`) change `` `uid \| 'system'` `` to `` `uid \| 'syst
 ```
 ### `loginInvites/{emailLower}` (contract v3.0.1, Sprint 20)
 
-Backs "own login?" at sign-up and the claim on first sign-in (SPRINT-20-LAUNCH.md 2.2, 3.2). Writers: `createFamily` / `addAthletes` (open), `claimInvite` (claimed, or `orphaned` when the athlete no longer exists). **No client create or update**; read by the email owner only when `request.auth.token.email_verified == true`, by the household's parent, or ops/owner. `claimInvite` returns `householdId` / `athleteId` only on `state: 'claimed'` (null for `needs-verification`, `already-claimed`, `none`); `addAthletes` refuses `child-email-duplicate` against an existing `open` invite for the same address as well as against a sibling in the same call.
+Backs "own login?" at sign-up and the claim on first sign-in (SPRINT-20-LAUNCH.md 2.2, 3.2). Writers: `createFamily` / `addAthletes` (open), `claimInvite` (claimed, or `orphaned` when the athlete no longer exists). **No client create or update**; read by the email owner only when `request.auth.token.email_verified == true`, by the household's parent, or ops/owner. `claimInvite` returns `householdId` / `athleteId` only on `state: 'claimed'` (null for `needs-verification`, `already-claimed`, `none`); `createFamily` / `addAthletes` refuse `child-email-duplicate` against an existing `open` OR `claimed` invite for the same address (a claimed invite is a login; only `orphaned` is reusable) as well as against a sibling in the same call.
 
 | Field | Type | Notes |
 |---|---|---|
@@ -292,15 +292,15 @@ Backs "own login?" at sign-up and the claim on first sign-in (SPRINT-20-LAUNCH.m
 ```
 **Sprint 20 (contract v3.0.1, PM ruling D8):** the shape gains two fields — `{ type, customer, householdId: string | null, athleteId: string | null, via: string | null, receivedAt, outcome }`. `athleteId` is the athlete the event resolved to (null on the legacy household-wide path and on every unresolved row); `via` names WHICH step of the resolution order (interfaces 6.2) matched: `'metadata'` (subscription metadata), `'billing'` (`athletes.billing.subscriptionId`), `'facility'` (`athletes.facilityBilling.subscriptionId`), `'customer'` (`households.stripeCustomerId`), `'customer-ids'` (`stripeCustomerIds array-contains`), `'checkout-session'` (`checkout.sessions.list`), `'client-reference'` (`checkout.session.completed`'s own `client_reference_id`), or null. Both are audit fields: `export-memberships.mjs` and the sign-ups report never branch on them.
 
-Outcomes gain: `applied-checkout` (`checkout.session.completed` applied to the athlete's `billing` or `facilityBilling`); `issued-prepaid` (the `subscription_create` invoice's tokens landed in the prepaid period from `subscription_data.metadata`); `facility-active` (an `invoice.paid` for the facility add-on: `facilityBilling.status: 'active'`, no tokens issued, no payment-received notice); `no-period` (an `invoice.paid` for a token package whose invoice line carries no period and whose metadata names no prepaid period: billing flipped to active, NO `tokenPeriods` doc written — the daily export surfaces it); `unexpected-quantity` (the checkout's line items are not exactly one recurring line plus at most one one-time line, every quantity 1 — PM ruling D13: recorded, nothing written); `stripe-lookup-failed` (the last-resort `checkout.sessions.list` threw: recorded with `householdId: null`, HTTP 200, surfaced by `export-memberships.mjs`; a redelivery is then `duplicate`). `HANDLED` gains `checkout.session.completed`; `client_reference_id` is `${householdId}__${athleteId}__${product}` (double underscore; athlete ids never contain `_`).
+Outcomes gain: `applied-checkout` (`checkout.session.completed` applied to the athlete's `billing` or `facilityBilling`); `issued-prepaid` (the `subscription_create` invoice's tokens landed in the prepaid period from `subscription_data.metadata`); `facility-active` (an `invoice.paid` for the facility add-on: `facilityBilling.status: 'active'`, no tokens issued, no payment-received notice); `no-period` (an `invoice.paid` for a token package whose invoice line carries no period and whose metadata names no prepaid period: billing flipped to active, NO `tokenPeriods` doc written — the daily export surfaces it); `unexpected-quantity` (the checkout's line items are not exactly one recurring line plus at most one one-time line, every quantity 1 — PM ruling D13: recorded, nothing written); `stripe-lookup-failed` (the last-resort `checkout.sessions.list` threw: recorded with `householdId: null`, HTTP 200, surfaced by `export-memberships.mjs`; a redelivery is then `duplicate`); `athlete-lapsed` (a TIER `customer.subscription.deleted` - or a final `invoice.payment_failed` - for one athlete while a sibling still holds an active/past_due tier, PM ruling D17: that athlete's `billing.status` -> `lapsed`, only their future bookings and waitlist entries are revoked via `revoke.revokeAthlete`, household `membership` untouched). `HANDLED` gains `checkout.session.completed`; `client_reference_id` is `${householdId}__${athleteId}__${product}` (double underscore; athlete ids never contain `_`).
 
-**Facility add-on events (PM ruling D10):** `customer.subscription.deleted` and `invoice.payment_failed` that resolve to `product: 'facility'` record their usual outcome (`lapsed` / `past_due`) but their ONLY writes are `athletes.facilityBilling.status` and `facilityAccess: false` — household `membership` is untouched and no booking is revoked. The household freeze and `revokeHousehold` belong to the tier subscription alone.
+**Facility add-on events (PM ruling D10):** every event that resolves to `product: 'facility'` (`invoice.paid`, `invoice.payment_failed`, `customer.subscription.updated`, `customer.subscription.deleted`) records its usual outcome but its ONLY writes are `athletes.facilityBilling` (+ `facilityAccess`) — household `membership` is untouched and no booking is revoked. The household freeze (`applyPastDue`) belongs to the tier subscription; the household lapse and `revokeHousehold` apply only when a tier subscription ends and no sibling still holds an active/past_due tier (D17) — otherwise only that athlete lapses (`athlete-lapsed`).
 ```
 
 - [ ] **Step 10: Verify and commit**
 
 Run: `grep -c "Sprint 20" docs/portal/DATA-MODEL.md`
-Expected: >= 20. Run: `grep -c "lastEventId" docs/portal/DATA-MODEL.md` - Expected: >= 5 (the two `membership` mentions plus `billing`, `facilityBilling`, and the seed line). Run: `grep -cE "facility-active|no-period|malformed|'via'|\bvia\b" docs/portal/DATA-MODEL.md` - Expected: >= 4. Run: `grep -n "windowDays.*32" docs/portal/DATA-MODEL.md` - Expected: only line 1267 remains (Task 9 fixes it).
+Expected: >= 20. Run: `grep -c "lastEventId" docs/portal/DATA-MODEL.md` - Expected: >= 5 (the two `membership` mentions plus `billing`, `facilityBilling`, and the seed line). Run: `grep -cE "facility-active|no-period|athlete-lapsed|malformed|'via'|\bvia\b" docs/portal/DATA-MODEL.md` - Expected: >= 5. Run: `grep -n "windowDays.*32" docs/portal/DATA-MODEL.md` - Expected: only line 1267 remains (Task 9 fixes it).
 
 ```bash
 git add docs/portal/DATA-MODEL.md
@@ -342,7 +342,7 @@ The `bookings (status, date)` composite (index 7) still serves reminders; nothin
 - [ ] **Step 3: Seeding workflow** - append to the seed bullet list (`:1620` region, after the `periodAnchorDay` bullet):
 
 ```
-- **contract v3.0.1 (Sprint 20):** `whitfield` carries `signup`/`createdBy`/`stripeCustomerIds: []`/`emergencyContact: null`/`guardian.relationship` (the self-signed-up family; `parker` stays legacy); athletes carry `handicap` and `loginEmail`; `athletes/nico.billing.status: 'pending'` (jordan/reese absent == active); one open `loginInvites/reese.whitfield@example.com`; packages write `stripePriceId: null` explicitly (never an id - `write-packages.mjs` is the only writer); specialist slots carry `durationMinutes` (phil 45, mental 30) with Yannick at 4:00 / 4:30 / 5:00 PM; and one Calendly trio - `sessions/cal-seedevt0001` (`bookable: false`, `source: 'calendly'`), `bookings/reese_cal-seedevt0001` (`source: 'calendly'`, `flag: null`, `createdBy: 'system'`) and `calendlyEvents/seedinv0001_invitee.created` (`applied`). `npm run packages:emulator -- --mode test --yes` then stamps the sample ids from the catalogue once the owner pastes them (the committed catalogue is all null and the script refuses to write until it is not).
+- **contract v3.0.1 (Sprint 20):** `whitfield` carries `signup`/`createdBy`/`stripeCustomerIds: []`/`emergencyContact: null`/`guardian.relationship` (the self-signed-up family; `parker` stays legacy); athletes carry `handicap` and `loginEmail`; `athletes/nico.billing.status: 'pending'` (jordan/reese absent == active); one open `loginInvites/reese.whitfield@example.com`; packages write `stripePriceId: null` explicitly (never an id - `write-packages.mjs` is the only writer); specialist slots carry `durationMinutes` (phil 45, mental 30) with Yannick at 4:00 / 4:30 / 5:00 PM; and one Calendly trio - `sessions/cal-seedevt0001` (`bookable: false`, `source: 'calendly'`), `bookings/reese_cal-seedevt0001` (`source: 'calendly'`, `flag: null`, `createdBy: 'system'`) and `calendlyEvents/seedinv0001_invitee.created` (`applied`). `npm run packages:emulator -- --mode test --yes` then stamps the committed TEST ids (`functions/config/stripe-catalogue.json`, `1b3dc3d`) onto the emulator's packages docs; `--mode live` refuses until the owner pastes the LIVE ids.
 ```
 
 - [ ] **Step 4: Verify and commit**
@@ -442,14 +442,17 @@ Owner rulings, on the record (SPRINT-20-LAUNCH.md 0.11-0.13):
    month in full"). Ruled, not a default: the alternative (refusing checkout
    on those days with a new reason) was rejected.
 5. **A facility add-on lapse never freezes the family (PM ruling D10,
-   2026-09-28).** `customer.subscription.deleted` and
-   `invoice.payment_failed` for `product: 'facility'` write
-   `athletes.facilityBilling.status` and `facilityAccess: false` and nothing
-   else - `households.membership` is untouched, no booking is revoked, the
-   tier `billing` keeps gating. Spec 4.3's "AND to household membership
-   exactly as today" is the TIER subscription's rule only. The webhook's
-   deleted/failed branches skip `applyLapsed` / `applyPastDue` when the
-   resolved product is `facility`; `verify-stripe-launch.js` STEP G
+   2026-09-28).** Every event for `product: 'facility'` (`invoice.paid`,
+   `invoice.payment_failed`, `customer.subscription.updated`,
+   `customer.subscription.deleted`) writes `athletes.facilityBilling` (+
+   `facilityAccess`) and nothing else - `households.membership` is
+   untouched, no booking is revoked, the tier `billing` keeps gating. Spec
+   4.3's "AND to household membership exactly as today" is the TIER
+   subscription's rule only (and, since D17, a tier
+   `customer.subscription.deleted` is per athlete - the household lapses only
+   when no sibling is live). The webhook's facility branches skip
+   `householdActive` / `membershipPatch` / `applyLapsed` / `applyPastDue`
+   when the resolved product is `facility`; `verify-stripe-launch.js` STEP G
    (functions Task 13, rewritten under D10) asserts `membership` unchanged
    after the add-on's `subscription.deleted`.
 
@@ -481,9 +484,11 @@ Accepted gaps (spec 14 - say so if any is wrong):
   re-runs it. The first run after Sprint 20 deletes/cancels every synced
   `mental` session (Yannick moved to Calendly) - run it before any smoke
   booking (spec 12.7).
-- DB lane: the committed `functions/config/stripe-catalogue.json` is all
-  null until the owner pastes price ids; `write-packages.mjs` refuses to
-  write (and `createCheckoutSession` answers `price-missing`) until then.
+- DB lane: the committed `functions/config/stripe-catalogue.json` carries
+  the TEST price ids (`1b3dc3d`); its `live` block is null until the owner
+  pastes the LIVE ids, and until then `write-packages.mjs --mode live`
+  refuses to write (and `createCheckoutSession` under `STRIPE_MODE=live`
+  answers `price-missing`).
 ```
 
 - [ ] **Step 2: Append to TEAM.md**
@@ -519,7 +524,7 @@ Pins (change one, change both):
   over-cadence server-side; the functions bundle cannot import the seam,
   the same reason `lib.js` duplicates the period math). A change to
   Yannick's monthly cadence edits BOTH and both tests
-  (`data/amendments.test.js`, `functions/portal/calendly.test.js`).
+  (`data/amendments.test.js`, `functions/test/verify-calendly.js` STEP G over-cadence).
 - `SPECIALIST_DURATION_MINUTES = { phil: 45, mental: 30 }` in
   `scripts/seed-firestore.mjs` mirrors `data/specialists.js`
   `durationMinutes` (routing lane) - the seed names the number rather than

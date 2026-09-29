@@ -328,7 +328,10 @@ describe('per-athlete billing (Sprint 20, spec 4.4)', () => {
     expect(signed.facilityAccessConsent).toBe(true);
   });
 
-  test('statusFor pending: after past_due/lapsed, before active', () => {
+  test('statusFor pending: after past_due, before lapsed and active; lapsed athletes pay again', () => {
+    const back = statusFor({ status: 'lapsed' }, { pendingAthletes: [{ athleteId: 'a', name: 'Ava', status: 'lapsed' }] });
+    expect(back).toMatchObject({ status: 'pending', cta: 'Pay now', badge: { tone: 'yellow', label: 'Payment needed' }, title: 'Membership ended - pay to book again' });
+    expect(statusFor({ status: 'lapsed' }, { pendingAthletes: [] }).status).toBe('lapsed');
     const s = statusFor(null, { resetsOn: '2026-10-01', anchorDay: 1, pendingAthletes: [{ athleteId: 'a', name: 'Ava' }] });
     expect(s).toMatchObject({ status: 'pending', tone: 'yellow', badge: { tone: 'yellow', label: 'Payment pending' }, ladder: null, ladderAt: null, cta: 'Pay now', paused: false });
     expect(s.title).toBe('Payment pending - finish checkout to start booking');
@@ -345,7 +348,7 @@ describe('per-athlete billing (Sprint 20, spec 4.4)', () => {
 });
 ```
 
-- [ ] Run `... src/portal/data/billingHub.test.js` - expect FAIL: `billing` undefined; `facilityAccessConsent` undefined; status `'active'`.
+- [ ] Run `... src/portal/data/billingHub.test.js` - expect FAIL: `billing` undefined; `facilityAccessConsent` undefined; status `'lapsed'` (the lapsed case runs first) / `'active'`.
 - [ ] In `hubMemberFor`'s return (after `facilityAccess: Boolean(athlete.facilityAccess),` :185) add:
 
 ```js
@@ -363,19 +366,25 @@ describe('per-athlete billing (Sprint 20, spec 4.4)', () => {
     },
 ```
 
-- [ ] In `statusFor` (:202): read `const pendingAthletes = Array.isArray(opts.pendingAthletes) ? opts.pendingAthletes : [];` beside `resetsOn`; insert between the `lapsed` block (ends :245) and the active return (:246):
+- [ ] In `statusFor` (:202): read `const pendingAthletes = Array.isArray(opts.pendingAthletes) ? opts.pendingAthletes : [];` beside `resetsOn`; insert between the `past_due` block and the `lapsed` block, i.e. directly above `if (status === 'lapsed') {` (:229):
 
 ```js
-  // Sprint 20 (spec 4.4): an athlete who has not finished checkout. Ranked
-  // after past_due/lapsed (a household freeze outranks a pending child) and
-  // before active. Copy is the contract's, shared with the home banners.
+  // Sprint 20 (spec 4.4): an athlete who needs a checkout - never paid, or
+  // whose tier subscription ENDED (billing.status 'lapsed'). Ranked after
+  // past_due (a failing card is fixed in the portal; a second checkout would
+  // double-subscribe) but BEFORE the household lapsed block: when the last
+  // tier subscription ends the household lapses too, and the only way back
+  // is a new checkout per lapsed athlete - the customer portal cannot resume
+  // a cancelled subscription (review 2026-09-28). Copy is the contract's,
+  // shared with the home banners.
   if (pendingAthletes.length > 0) {
     const names = listNames(pendingAthletes.map((a) => a.name));
+    const ended = pendingAthletes.some((a) => a.status === 'lapsed');
     return {
       status: 'pending',
       tone: 'yellow',
-      badge: { tone: 'yellow', label: 'Payment pending' },
-      title: 'Payment pending - finish checkout to start booking',
+      badge: { tone: 'yellow', label: ended ? 'Payment needed' : 'Payment pending' },
+      title: ended ? 'Membership ended - pay to book again' : 'Payment pending - finish checkout to start booking',
       body: `${names} can book as soon as checkout is complete. Billed monthly from the 1st once you've paid.`,
       ladder: null,
       ladderAt: null,
@@ -457,11 +466,14 @@ export function warnMissingPortalUrl({ live = isLive(), url = STRIPE_PORTAL_URL 
   In `liveMyTokens` (:134-150) add `warnMissingPortalUrl();` as the first statement and replace the `status:` line with `status: statusFor(membership, { resetsOn, anchorDay, pendingAthletes: pendingOf([member]) }),`. Add above `liveHub`:
 
 ```js
-/** The members still waiting on checkout (Sprint 20, spec 4.4) - drives statusFor's pending branch. */
+/** The members who need a checkout (Sprint 20, spec 4.4): never paid, or whose tier subscription ended - drives statusFor's pending branch. A lapsed athlete re-subscribes through the same createCheckoutSession; the customer portal cannot resume a cancelled subscription. */
 function pendingOf(members) {
-  return members.filter((m) => m.billing?.status === 'pending').map((m) => ({ athleteId: m.athleteId, name: m.name }));
+  return members
+    .filter((m) => m.billing?.status === 'pending' || m.billing?.status === 'lapsed')
+    .map((m) => ({ athleteId: m.athleteId, name: m.name, status: m.billing.status }));
 }
 ```
+  Seed mode too (`seedBillingHub` :199-209, `seedMyTokens` :211-220): hoist `const members = HOUSEHOLD.children.map((child) => seedMember(child, today, anchorDay));` / `const member = seedMember(HOUSEHOLD.children[0], today, anchorDay);` above the `return` and pass `pendingAthletes: pendingOf(members)` / `pendingOf([member])` to their `statusFor` calls, so the seed's pending athlete (`athletes/nico`, db Task 4) drives the banner in seed mode as well.
   Append at the end of the file:
 
 ```js

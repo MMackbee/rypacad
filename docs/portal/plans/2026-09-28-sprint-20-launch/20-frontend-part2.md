@@ -20,8 +20,8 @@
 - Test: `frontend/src/portal/data/billingCopy.test.js`, `frontend/src/portal/screens/ParentDashboard.test.js`
 
 **Interfaces:**
-- Consumes: `useBillingHub().data -> { household, members: [{ athleteId, name, package, billing: { status, facility }, facilityAccess, ... }], status: { status: 'pending' | ..., pendingAthletes: [{ athleteId, name }], body, cta }, portalUrl }` (contract 3.5, `hooks/billing.js:240`); `usePaymentConfirmation(athleteId) -> { state: 'idle'|'confirming'|'confirmed'|'timeout', billingStatus }` from `hooks/billing.js` (contract 4.5); `bookingOpen`, `BOOKING_OPENS_LABEL` (contract 3.1); `longDayLabel` (`calendar.js:86`); `PayButton` (Task 6); `useSearchParams` (react-router 6.30); `useHousehold().data.children[].loginEmail: string | null` + `login: { state: 'none'|'invited'|'invited-stale'|'claimed', claimedAt } | null` (D9 - routing Task 12's `liveChildCard`; absent on legacy and seed cards, so `ChildCard` renders the line only when the key exists).
-- Produces (new, not in contract): `data/billingCopy.js` exports `PENDING_TITLE`, `PAY_NOW`, `PENDING_PLAN_LINE`, `CONNECTED_LINE`, `CONFIRMING`, `CONFIRM_TIMEOUT`, `confirmedLine(open) -> string`, `billingBadge(status) -> { tone, label } | null`, `facilityCardState(member) -> null | 'offer' | 'paid-waiver-pending' | 'active' | 'past_due' | 'lapsed'`, `facilityLine(state) -> string | null`, `loginStatusLine({ loginEmail, login }) -> string`; `PendingBanner({ pendingAthletes, body, email, style })`; `PaymentConfirming({ athleteId, style })`.
+- Consumes: `useBillingHub().data -> { household, members: [{ athleteId, name, package, billing: { status, facility }, facilityAccess, ... }], status: { status: 'pending' | ..., pendingAthletes: [{ athleteId, name, status: 'pending' | 'lapsed' }], title, body, cta }, portalUrl }` (contract 3.5, `hooks/billing.js:240`); `usePaymentConfirmation(athleteId) -> { state: 'idle'|'confirming'|'confirmed'|'timeout', billingStatus }` from `hooks/billing.js` (contract 4.5); `bookingOpen`, `BOOKING_OPENS_LABEL` (contract 3.1); `longDayLabel` (`calendar.js:86`); `PayButton` (Task 6); `useSearchParams` (react-router 6.30); `useHousehold().data.children[].loginEmail: string | null` + `login: { state: 'none'|'invited'|'invited-stale'|'claimed', claimedAt } | null` (D9 - routing Task 12's `liveChildCard`; absent on legacy and seed cards, so `ChildCard` renders the line only when the key exists).
+- Produces (new, not in contract): `data/billingCopy.js` exports `PENDING_TITLE`, `PAY_NOW`, `PENDING_PLAN_LINE`, `CONNECTED_LINE`, `CONFIRMING`, `CONFIRM_TIMEOUT`, `confirmedLine(open) -> string`, `billingBadge(status) -> { tone, label } | null`, `facilityCardState(member) -> null | 'offer' | 'paid-waiver-pending' | 'active' | 'past_due' | 'lapsed'`, `facilityLine(state) -> string | null`, `loginStatusLine({ loginEmail, login }) -> string`; `PendingBanner({ pendingAthletes, body, title, email, style })`; `PaymentConfirming({ athleteId, style })`.
 
 - [ ] **Step 1: Write the failing helper test**
 
@@ -140,17 +140,17 @@ import PayButton from './PayButton';
 import { Body, Card, SectionLabel } from './Primitives';
 import { PAY_NOW, PENDING_TITLE } from '../data/billingCopy';
 
-/** One banner, one Pay now per unpaid athlete (spec 4.4). Renders nothing when nobody is pending. */
-export default function PendingBanner({ pendingAthletes, body, email = null, style }) {
+/** One banner, one Pay now per athlete who needs a checkout - pending, or lapsed and re-subscribing (spec 4.4). `title` is the hub status title (the lapsed wording differs); renders nothing when nobody is listed. */
+export default function PendingBanner({ pendingAthletes, body, title = null, email = null, style }) {
   if (!pendingAthletes || pendingAthletes.length === 0) return null;
   return (
     <Card tone="yellow" large style={style}>
-      <SectionLabel tone={color.secondary}>{PENDING_TITLE}</SectionLabel>
+      <SectionLabel tone={color.secondary}>{title || PENDING_TITLE}</SectionLabel>
       {body ? <Body size={12} style={{ marginTop: 8 }}>{body}</Body> : null}
       {pendingAthletes.map((a) => (
         <div key={a.athleteId} style={{ display: 'flex', alignItems: 'center', gap: 12, marginTop: 12 }}>
           <div style={{ flex: 1, minWidth: 0, font: `600 13px ${font.body}`, color: color.text }}>{a.name}</div>
-          <PayButton athleteId={a.athleteId} label={PAY_NOW} height={44} email={email} style={{ width: 132, flex: 'none' }} />
+          <PayButton athleteId={a.athleteId} product="tier" label={PAY_NOW} height={44} email={email} style={{ width: 132, flex: 'none' }} />
         </div>
       ))}
     </Card>
@@ -274,7 +274,7 @@ In the component body after line 81 (`const onHold = ...`):
 In the loaded branch, before the `{onHold ? ...}` banner:
 ```js
         <PaymentConfirming athleteId={paidAthleteId} />
-        <PendingBanner pendingAthletes={pendingAthletes} body={hubStatus?.body} />
+        <PendingBanner pendingAthletes={pendingAthletes} body={hubStatus?.body} title={hubStatus?.title} />
 ```
 `ChildCard` gains `billingStatus` (pass `billingStatus={billingById.get(child.id) ?? 'active'}` from the map at line 148-157) and computes
 ```js
@@ -420,7 +420,7 @@ test('pending athlete sees the banner and Pay now; paid athlete sees the facilit
 
 `Membership.js`: import `PendingBanner`, `FacilityCard`; after `<StatusBanner status={status} />` (line 70) add
 ```js
-            <PendingBanner pendingAthletes={status?.status === 'pending' ? status.pendingAthletes : []} body={status?.body} />
+            <PendingBanner pendingAthletes={status?.status === 'pending' ? status.pendingAthletes : []} body={status?.body} title={status?.title} />
 ```
 and inside `<MemberSection>` after `<ContractLine .../>` add `<FacilityCard member={member} />`. In `StatusBanner`, keep the two paused branches (pending is not `paused`, so it already returns null there).
 
@@ -434,7 +434,7 @@ and inside `<MemberSection>` after `<ContractLine .../>` add `<FacilityCard memb
 At the top of the loaded column (before the `StartHere` line, 96) add
 ```js
         <PaymentConfirming athleteId={params.get('paid')} />
-        <PendingBanner pendingAthletes={mineStatus?.status === 'pending' ? mineStatus.pendingAthletes : []} body={mineStatus?.body} />
+        <PendingBanner pendingAthletes={mineStatus?.status === 'pending' ? mineStatus.pendingAthletes : []} body={mineStatus?.body} title={mineStatus?.title} />
 ```
 
 - [ ] **Step 8: Run it** - `cd frontend && CI=true npx react-scripts test --watchAll=false src/portal/screens/Membership.test.js src/portal/components/FacilityCard.test.js` - Expected: PASS. Then `cd frontend && CI=true npx react-scripts test --watchAll=false src/portal` - Expected: all PASS.
@@ -535,7 +535,7 @@ function StatusHero({ status, portalUrl, staff = false }) {
         pendingAthletes.map((a) => (
           <div key={a.athleteId} style={{ display: 'flex', alignItems: 'center', gap: 12, marginTop: 12 }}>
             <div style={{ flex: 1, minWidth: 0, font: `600 13px ${font.body}`, color: color.text }}>{a.name}</div>
-            <PayButton athleteId={a.athleteId} label={PAY_NOW} height={44} style={{ width: 132, flex: 'none' }} />
+            <PayButton athleteId={a.athleteId} product="tier" label={PAY_NOW} height={44} style={{ width: 132, flex: 'none' }} />
           </div>
         ))
       ) : cta ? (
@@ -573,7 +573,7 @@ Members loop (`:107-117`): after `<ContractLine ... />` add `<FacilityCard membe
 `PlanCard` row meta line (`:229-236`): the facility fragment at line 235 gains the pending line after it:
 ```js
               {m.facilityAccess ? ' · + facility access' : m.package?.kind === 'elite' ? ' · facility access included' : ''}
-              {m.billing?.status === 'pending' ? ` · ${PENDING_PLAN_LINE}` : ''}
+              {m.billing?.status === 'pending' || m.billing?.status === 'lapsed' ? ` · ${PENDING_PLAN_LINE}` : ''}
 ```
 `ConnectionCard` body (`:261-265`) becomes:
 ```js

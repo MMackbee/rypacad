@@ -32,7 +32,7 @@ jest.mock('../hooks/callables', () => ({
   callAddAthletes: async (payload) => { mockCalls.push(['addAthletes', payload]); return { householdId: 'h1', athleteIds: ['a2'] }; },
   callCreateCheckoutSession: async () => ({ url: 'https://checkout.stripe.test/x' }),
 }), { virtual: true });
-jest.mock('./RegistrationSuccess', () => ({ __esModule: true, default: ({ result }) => `SUCCESS ${result.athleteIds.join(',')}` }));
+jest.mock('./RegistrationSuccess', () => ({ __esModule: true, default: ({ result, onFinish }) => <button type="button" onClick={() => onFinish('/portal/family')}>SUCCESS {result.athleteIds.join(',')}</button> }));
 
 beforeEach(() => { mockCalls.length = 0; });
 
@@ -53,10 +53,11 @@ async function fillParentToConsent(r) {
   await r.fill('Type your full legal name', 'Dana Whitfield');
 }
 
-test('parent sign-up calls createFamily with the contract payload, refreshes, shows success', async () => {
+test('parent sign-up calls createFamily with the contract payload, shows success, refreshes only on leaving it', async () => {
   const refreshed = [];
+  const finished = [];
   const r = await renderScreen(
-    <Registration bare mode="signup" account={{ email: 'dana@email.com', emailVerified: false }} onRefresh={async () => refreshed.push(1)} />
+    <Registration bare mode="signup" account={{ email: 'dana@email.com', emailVerified: false }} onRefresh={async () => refreshed.push(1)} onFinish={(p) => finished.push(p)} />
   );
   expect(r.text()).toContain('Step 1 of 5');
   await fillParentToConsent(r);
@@ -68,8 +69,13 @@ test('parent sign-up calls createFamily with the contract payload, refreshes, sh
     athletes: [{ name: 'Jordan', dob: '2012-06-17', packageId: 't-12', handicap: 12, loginEmail: null, contractMinutes: null }],
     signatureName: 'Dana Whitfield',
   });
-  expect(refreshed).toHaveLength(1);
+  // The receipt renders BEFORE provisioned flips: RegistrationRoute would
+  // otherwise redirect and unmount it (review 2026-09-28).
   expect(r.text()).toContain('SUCCESS a1');
+  expect(refreshed).toHaveLength(0);
+  await r.click('SUCCESS a1');
+  expect(refreshed).toHaveLength(1);
+  expect(finished).toEqual(['/portal/family']);
   await r.unmount();
 });
 
@@ -126,7 +132,11 @@ const callAddAthletes = callables.callAddAthletes || notWired('addAthletes');
  * createFamily) and 'link' (a provisioned parent adding athletes: athletes
  * -> package -> addAthletes). No approval queue: the callable writes the
  * family in one transaction and `onRefresh` (useAuthSession().refresh) flips
- * `provisioned` without a reload. `variant` remains the harness deep-link.
+ * `provisioned` without a reload - but only when the family LEAVES the
+ * Success receipt (`finish`), never on submit: RegistrationRoute redirects
+ * a provisioned account to its landing, so refreshing on submit would
+ * unmount the receipt (pay buttons, child-login steps) before it rendered.
+ * `variant` remains the harness deep-link.
  */
 const STEPS = {
   signup: [['who', 'Who are you'], ['contact', 'Contact'], ['athletes', 'Athletes'], ['package', 'Choose a package'], ['consent', 'Consent and waiver']],
@@ -199,7 +209,6 @@ export default function Registration({ variant, bare = false, mode = 'signup', a
       const res = mode === 'link'
         ? await callAddAthletes(buildAddAthletesPayload(form))
         : await callCreateFamily(buildCreateFamilyPayload(form));
-      if (onRefresh) await onRefresh();
       setResult(res);
       setPhase('success');
     } catch (err) {
@@ -207,9 +216,15 @@ export default function Registration({ variant, bare = false, mode = 'signup', a
       setSubmitError(err && typeof err.message === 'string' && err.message ? err.message : 'Sign-up could not be saved. Try again.');
     }
   };
+  // Leaving the receipt: flip `provisioned` now (the route lands the role's
+  // home either way) - never earlier, see the component comment.
+  const finish = async (path) => {
+    if (onRefresh) await onRefresh();
+    if (onFinish) onFinish(path);
+  };
 
   if (phase === 'success') {
-    return <RegistrationSuccess bare={bare} mode={mode} form={form} result={result} account={account} onFinish={onFinish} />;
+    return <RegistrationSuccess bare={bare} mode={mode} form={form} result={result} account={account} onFinish={finish} />;
   }
 
   const label = phase === 'submitting' ? (mode === 'link' ? 'Adding athlete' : 'Creating your account')
@@ -297,7 +312,7 @@ function RegistrationRoute() {
   );
 }
 ```
-Delete `RequireSignedIn` (`:104-111`, its only caller is gone). Settings route (`:694`): `onLinkAthlete={() => navigate('/portal/register', { state: { link: true } })}`. The harness (`StatesHarness.js:102`) keeps mounting `Registration` with `variant` - unchanged.
+`provisioned` flips inside Registration's `finish` (the Success button) right before `onFinish` navigates, so the redirect above only ever fires for an account that ARRIVES provisioned - a refresh on submit would unmount the receipt before it rendered (review 2026-09-28). Delete `RequireSignedIn` (`:104-111`, its only caller is gone). Settings route (`:694`): `onLinkAthlete={() => navigate('/portal/register', { state: { link: true } })}`. The harness (`StatesHarness.js:102`) keeps mounting `Registration` with `variant` - unchanged.
 
 - [ ] **Step 6: Verify** - `cd frontend && CI=true npx react-scripts test --watchAll=false src/portal` (PASS) and `cd frontend && npx eslint src/portal/screens/Registration.js src/portal/screens/RegistrationSteps.js src/portal/PortalRoutes.js` (clean). `wc -l frontend/src/portal/screens/Registration.js` under 300.
 
@@ -317,8 +332,8 @@ git commit -m "feat(registration): who-are-you, contact prefill, handicap + own 
 - Test: `frontend/src/portal/components/PayButton.test.js`, `frontend/src/portal/screens/RegistrationSuccess.test.js`
 
 **Interfaces:**
-- Consumes: `callCreateCheckoutSession({ athleteId, product }) -> Promise<{ url }>` (contract 1.5; `reason` `'email-unverified'` | `'already-active'` | `'price-missing'` | `'stripe-error'` ...); `useAuthSession().resendVerification()`, `refresh()` (contract 4.1); `bookingOpen`, `BOOKING_OPENS_LABEL` (contract 3.1); `packageById` (`packages.js:101`); `VERIFY_TITLE`, `verifyBody`, `RESEND`, `VERIFIED` (Task 3).
-- Produces (new, not in contract): `startCheckout({ athleteId, product, go }) -> Promise<void>` (calls the callable then `go(url)`; default `go` is `window.location.assign`); `PayButton({ athleteId, product = 'tier', label, height, variant, email, style })` - renders the button; on `email-unverified` swaps to the verify state (title, body naming the sender, Resend, I've verified -> `refresh()` then retries); any other rejection shows `err.message`. `RegistrationSuccess({ bare, mode, form, result, account, onFinish })`.
+- Consumes: `callCreateCheckoutSession({ athleteId, product }) -> Promise<{ url }>` (contract 1.5; `reason` `'email-unverified'` | `'already-active'` | `'price-missing'` | `'stripe-error'` ...); `useAuthSession().resendVerification()` (contract 4.1); `auth` (`frontend/src/firebase.js`, the instance `useAuthSession` itself uses) for the ID-token refresh; `bookingOpen`, `BOOKING_OPENS_LABEL` (contract 3.1); `packageById` (`packages.js:101`); `VERIFY_TITLE`, `verifyBody`, `RESEND`, `VERIFIED` (Task 3).
+- Produces (new, not in contract): `startCheckout({ athleteId, product, go }) -> Promise<void>` (calls the callable then `go(url)`; default `go` is `window.location.assign`); `PayButton({ athleteId, product = 'tier', label, height, variant, email, style })` - renders the button; on `email-unverified` swaps to the verify state (title, body naming the sender, Resend, I've verified -> `auth.currentUser.reload()` + `getIdToken(true)` then retries, never the session `refresh()`); any other rejection shows `err.message`. `RegistrationSuccess({ bare, mode, form, result, account, onFinish })`.
 
 - [ ] **Step 1: Write the failing PayButton test**
 
@@ -337,9 +352,15 @@ jest.mock('../hooks/callables', () => ({
 }), { virtual: true });
 let mockSession;
 jest.mock('../hooks/useAuthSession', () => ({ __esModule: true, default: () => mockSession }));
+// The mocked module is a plain object; the test fills auth.currentUser per run (no TDZ: nothing is read at factory time).
+jest.mock('../../firebase', () => ({ auth: {} }));
+import { auth } from '../../firebase';
+let tokenRefreshes = 0;
 beforeEach(() => {
   mockReject = null;
-  mockSession = { resendVerification: async () => ({ sent: true }), refresh: async () => {} };
+  mockSession = { resendVerification: async () => ({ sent: true }) };
+  tokenRefreshes = 0;
+  auth.currentUser = { reload: async () => {}, getIdToken: async (force) => { if (force) tokenRefreshes += 1; return 'token'; } };
 });
 
 test('startCheckout hands the Stripe url to go()', async () => {
@@ -359,6 +380,7 @@ test('the button navigates; an unverified password account gets the verify state
   expect(r.text()).toContain('We sent a link to dana@email.com from noreply@');
   mockReject = null;
   await r.click("I've verified");
+  expect(tokenRefreshes).toBe(1); // a fresh ID token before the retry (review 2026-09-28)
   expect(gone).toHaveLength(2);
   await r.unmount();
 });
@@ -383,6 +405,7 @@ import Button from './Button';
 import { Body, Card, SectionLabel } from './Primitives';
 import * as callables from '../hooks/callables';
 import useAuthSession from '../hooks/useAuthSession';
+import { auth } from '../../firebase';
 import { RESEND, VERIFIED, VERIFY_TITLE, verifyBody } from '../data/authCopy';
 
 /** D14 guard (20-frontend.md "Day-2 sequencing"): a partial callables export rejects plainly instead of throwing TypeError. */
@@ -409,7 +432,7 @@ export async function startCheckout({ athleteId, product = 'tier', go = (url) =>
 }
 
 export default function PayButton({ athleteId, product = 'tier', label = 'Pay now', height = 50, variant = 'primary', email = null, go, style }) {
-  const { resendVerification, refresh } = useAuthSession();
+  const { resendVerification } = useAuthSession();
   const [busy, setBusy] = useState(false);
   const [state, setState] = useState(null); // null | { verify: true } | { error }
   const [resent, setResent] = useState(false);
@@ -426,8 +449,16 @@ export default function PayButton({ athleteId, product = 'tier', label = 'Pay no
       setBusy(false);
     }
   };
+  // "I've verified": the function reads email_verified off the ID TOKEN, so
+  // reload the user and force a fresh token (what checkInvite does) - the
+  // session's refresh() alone keeps the stale claim and the card would loop.
+  // Deliberately NOT the session refresh: on the Success receipt that flips
+  // `provisioned` and RegistrationRoute would redirect mid-checkout.
   const verified = async () => {
-    if (refresh) await refresh();
+    const fbUser = auth.currentUser;
+    if (fbUser) {
+      try { await fbUser.reload(); await fbUser.getIdToken(true); } catch (err) { /* offline: the retry below reports it */ }
+    }
     await run();
   };
   const resend = async () => {

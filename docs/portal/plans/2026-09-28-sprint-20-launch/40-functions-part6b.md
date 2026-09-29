@@ -185,15 +185,17 @@ async function main() {
   check('ledger carries the flag', (await get('calendlyEvents', `${INV(6)}_invitee.created`)).flag, 'over-cap');
 
   log('\nSTEP G  the other flags');
-  r = await run(variant('invitee-created', 7, {utm: 'sol', start: '2026-10-22T21:00:00Z'}));
+  r = await run(variant('invitee-created', 7, {utm: 'sol', email: 'sol@example.test', start: '2026-10-22T21:00:00Z'}));
   check('second mental this month -> over-cadence (before over-cap)', r, {outcome: 'applied', flag: 'over-cadence'});
   r = await run(variant('invitee-created', 8, {utm: 'max', start: '2026-10-23T21:00:00Z'}));
   check('billing pending -> membership-inactive, even for Elite', r, {outcome: 'applied', flag: 'membership-inactive'});
   check('max chargedFrom period, not elite', (await get('bookings', `max_${EVT(8)}`)).chargedFrom, 'period');
   r = await run(variant('invitee-created', 9, {utm: 'lena', start: '2026-10-12T21:00:00Z'}), new Date('2026-10-09T12:00:00Z'));
   check('received before Oct 10 07:00 for t-6 -> before-open', r, {outcome: 'applied', flag: 'before-open'});
-  r = await run(variant('invitee-created', 10, {utm: 'femi', start: '2026-11-03T22:00:00Z'}), new Date('2026-10-09T12:00:00Z'));
+  r = await run(variant('invitee-created', 10, {utm: 'femi', email: 'kemi@example.test', start: '2026-11-03T22:00:00Z'}), new Date('2026-10-09T12:00:00Z'));
   check('November slot: periodKey 2026-11-01 (CST, 4:00 PM)', [r.flag, (await get('bookings', `femi_${EVT(10)}`)).periodKey, (await get('sessions', EVT(10))).time], ['before-open', '2026-11-01', '4:00 PM']);
+  r = await run(variant('invitee-created', 12, {utm: 'femi', email: 'stranger@example.test', start: '2026-10-24T21:00:00Z'}));
+  check('utm_content the invitee does not own -> unresolved, nothing booked on femi (review 2026-09-28)', [r.outcome, await exists('bookings', `femi_${EVT(12)}`)], ['unresolved', false]);
   check('ignored event type', await run({event: 'routing_form_submission.created', payload: {uri: 'x'}}), {outcome: 'ignored', flag: null});
   check('malformed (no invitee uri)', await run({event: 'invitee.created', payload: {}}), {outcome: 'malformed', flag: null});
 
@@ -209,8 +211,8 @@ async function main() {
     check('signed duplicate -> 200 duplicate', [dup.status, dup.body.outcome], [200, 'duplicate']);
     const fresh = await postSigned(variant('invitee-created', 11, {utm: 'lena', start: '2026-10-28T21:00:00Z'}));
     check('signed fresh -> 200 applied (flag depends on the real clock)', [fresh.status, fresh.body.outcome], [200, 'applied']);
-    // 14 rows: A(1) + C(2) + D(2) + E(2) + F(2) + G(4) + H(1); ignored/malformed/duplicate write none.
-    check('no ledger row from the unsigned or stale posts', (await db.collection('calendlyEvents').get()).size, 14);
+    // 15 rows: A(1) + C(2) + D(2) + E(2) + F(2) + G(5) + H(1); ignored/malformed/duplicate write none.
+    check('no ledger row from the unsigned or stale posts', (await db.collection('calendlyEvents').get()).size, 15);
   }
 
   log(`\n=== ${failures === 0 ? 'ALL CHECKS PASSED' : failures + ' CHECK(S) FAILED'} ===`);
@@ -225,7 +227,7 @@ main().catch((e) => { console.error(e); process.exitCode = 1; });
 Before the first run, this worktree's `functions/.env.local` and `functions/.secret.local` (both gitignored by `functions/.gitignore:2` `*.local`; created by **Task 11 Step 4**, decision D15 - do that step now if Task 11 has not run yet, it only needs db lane Task 7 merged) must carry `CALENDLY_WEBHOOK_SIGNING_KEY=<a 64-hex string, emulator only>` - generate it with `node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"`; never a production value. Why both files: with `runWith({secrets})` declared, the emulator reads a declared secret from `.secret.local` first and only then tries Secret Manager (`firebase-tools/lib/emulator/functionsEmulator.js` `resolveSecretEnvs`); `.env.local` still flows into the runtime env, so the harness works either way, but the `.secret.local` copy silences the "Unable to access secret" error at startup. Restart the emulator after editing either file.
 
 Run: `cd functions && node --env-file=.env.local test/verify-calendly.js`
-Expected: `ALL CHECKS PASSED` (43 checks; the last one counts the 14 ledger rows the steps write: A 1, C 2, D 2, E 2, F 2, G 4, H 1 - `duplicate`, `ignored` and `malformed` write none). Then `node test/verify-lane.js` still ends `ALL CHECKS PASSED`.
+Expected: `ALL CHECKS PASSED` (44 checks; the last one counts the 15 ledger rows the steps write: A 1, C 2, D 2, E 2, F 2, G 5, H 1 - `duplicate`, `ignored` and `malformed` write none). Then `node test/verify-lane.js` still ends `ALL CHECKS PASSED`.
 
 - [ ] **Step 7: Commit**
 

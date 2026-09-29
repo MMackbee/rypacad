@@ -1,4 +1,4 @@
-# Sprint 20 - Launch (contract v3.0.2)
+# Sprint 20 - Launch (contract v3.0.3)
 
 Owner rulings of 2026-09-28. The sign-up email goes out **2026-10-01**;
 booking opens for token members **2026-10-10 07:00 America/Chicago**; the
@@ -204,7 +204,9 @@ update on `loginInvites` or `users`.
 Stripe **Products + monthly Prices** per tier (t-6, t-12, t-16, Elite,
 single) and one for **facility-access** ($300/month), in BOTH test and live
 mode. `functions/config/stripe-catalogue.json` (`{test: {...}, live: {...}}`,
-committed - price ids are public) is the ONLY source (D3: it sits under
+committed - price ids are public; the `test` block was filled and committed
+on 2026-09-28 as `1b3dc3d`, the `live` block is null until the owner pastes
+the live ids, and no lane rewrites the file - D19) is the ONLY source (D3: it sits under
 `functions/` because `firebase deploy` packages only `functions/` and cannot
 `require('../scripts/...')`; `write-packages.mjs` reads
 `../functions/config/stripe-catalogue.json`); a new
@@ -319,13 +321,36 @@ active copy. The Success screen says this will happen.
   `tokenPeriods` doc records `source: 'stripe'` and `prepaid: true` on the
   first one.
 - `invoice.payment_failed`, `customer.subscription.updated/deleted` resolve
-  the same way; the failed/deleted state is written to the owning athlete's
-  `billing.status` AND to household membership exactly as today (one
-  failing card freezes the family - accepted, 14). **Facility add-on (D10):**
-  when the resolved product is `facility`, the event writes
-  `facilityBilling.status` and `facilityAccess: false` ONLY - it never touches
-  household membership and never revokes bookings; the family keeps booking
-  on its tier.
+  the same way. A retrying `invoice.payment_failed` (`next_payment_attempt`
+  set) writes the owning athlete's `billing.status: past_due` AND freezes
+  household membership exactly as today (one failing card freezes the
+  family - accepted, 14); a FINAL one (`next_payment_attempt` null - Stripe
+  cancels the subscription next) follows the per-athlete rule of D17 below;
+  `customer.subscription.updated`
+  writes the athlete's status/price and, for the tier only, the household's
+  `stripeSubscriptionStatus` / period. **`customer.subscription.deleted` is
+  per athlete (D17):** that athlete's `billing.status` -> `lapsed` and only
+  that athlete's future bookings and waitlist entries are revoked
+  (`revoke.revokeAthlete`, ledger outcome `athlete-lapsed`); the household
+  lapses (and every booking goes, as today) only when no sibling still holds
+  an active/past_due tier (`otherTierLive`). One child quitting never
+  cancels the paid sibling. **Facility add-on (D10):** when the resolved
+  product is `facility`, EVERY event (`invoice.paid`, `invoice.payment_failed`,
+  `customer.subscription.updated`, `customer.subscription.deleted`) writes
+  `facilityBilling` / `facilityAccess` ONLY - it never touches household
+  membership (a paid facility invoice cannot lift a tier freeze) and never
+  revokes bookings; the family keeps booking on its tier.
+- `invoicePeriod` prefers the SUBSCRIPTION line of an invoice (Basil
+  `parent.type == 'subscription_item_details'`) over the one-time prepaid
+  line, whose period is a single instant; otherwise the checkout invoice
+  could stamp `membership.currentPeriodEnd = today` (16.1 plan review, finding 7).
+- **Coming back after a lapse (D18):** a `lapsed` athlete is listed by the
+  billing hub exactly like a `pending` one (Pay now per athlete ->
+  `createCheckoutSession`, which permits `pending` and `lapsed`); the pending
+  branch outranks the household's lapsed block because the customer portal
+  cannot resume a cancelled subscription. `past_due` is refused with
+  `already-active` (the subscription still exists; the card is updated in the
+  portal) so nobody double-subscribes.
 - Notice: the webhook sends the **payment-received** notice itself on an
   athlete's first `active` (kind `membership`, copy branched on
   `bookingOpen`: "Payment received - booking opens Fri, Oct 10 at 7 AM" for
@@ -663,8 +688,9 @@ Indexes: none new (single-field or existing composites).
    facility access, in BOTH test and live mode; the no-code **customer
    portal** activated (its link -> `REACT_APP_STRIPE_PORTAL_URL`); a
    restricted key per mode (Checkout Sessions write, Customers read, Prices
-   read - D12) -> `STRIPE_SECRET_KEY`. Paste the price ids into
-   `functions/config/stripe-catalogue.json` (public ids, both blocks; D3).
+   read - D12) -> `STRIPE_SECRET_KEY`. Paste the LIVE price ids into the
+   `live` block of `functions/config/stripe-catalogue.json` (public ids; the
+   `test` block is committed, `1b3dc3d`; D3/D19).
 3. `firebase deploy --only firestore:rules,firestore:indexes --project
    rypacad` (one deploy: per-athlete billing gate, Oct 10 gate, Calendly
    cancel guard, loginInvites/calendlyEvents reads, attendee field).
@@ -706,7 +732,7 @@ Indexes: none new (single-field or existing composites).
 |---|---|
 | routing (`data-routing`) | rules (4.4 gate, 5, 6.1 cancel guard, `loginInvites`/`calendlyEvents` reads, athletes shape), `useAuthSession` create-login / `refresh()` / claim call / token refresh, `live.js` gates (billing status, opens-at, recurring window) and the callable clients, `packages.js`/`calendar.js`/`season.js` constants (SEASON_BOUNDS.start 2026-11-03), `billingHub.statusFor('pending')` + `hooks/billing.js`, `useSignups`, Calendly link builder + gate, duration plumbing in hooks, admin `pending` bucket |
 | frontend (`frontend-dev`) | `SignUp` screen, `Registration` (Step 1, link mode, handicap, own-login, adult copy, Success), family-home + athlete-home + Membership pending banners and pay buttons, `?paid=` confirming state, facility add-on card (4.5), `SignIn` create-login, NotProvisioned states (verify / check again / legacy), `SpecialistBooking` Calendly branch + durations + non-cancellable rows, `AdminSignups` screen, section 9 fixes |
-| db (`db-engineer`) | DATA-MODEL, `write-packages.mjs`, `stripe-catalogue.json`, sync classifier + regex fix, seeds (invites, billing pending, handicap, durations), docs (DECISION-GAPS, TEAM, contract), `functions/.env.local` split |
+| db (`db-engineer`) | DATA-MODEL, `write-packages.mjs`, `stripe-catalogue.json` (read-only, committed), sync classifier + regex fix, seeds (invites, billing pending, handicap, durations), docs (DECISION-GAPS, TEAM, contract), `functions/.env.local` split |
 | functions (`backend-dev`) | `createFamily`, `addAthletes`, `claimInvite`, `createCheckoutSession`, `calendlyWebhook`, `stripe.js` 4.3 (Basil shapes, resolution, per-athlete issuance, facility, payment-received notice), `lib.membershipAllowsBooking(athlete)`, `chicagoTime`, reminder/cancel skips, `runWith` secrets on every function, harnesses (11), deploy runbook |
 | PM (`pm-senior`) | worktrees, this contract, integration, `/code-review`, qa-tester pass, GitHub issues, the owner runbook |
 
@@ -753,7 +779,9 @@ packages, email.
 - Elite's Calendly range is 30 days unless Yannick makes the second event
   type.
 - An invite for an email that already holds a login cannot be claimed;
-  the report shows it after 7 days.
+  `createFamily` / `addAthletes` refuse an email whose invite is `open` or
+  `claimed` (`child-email-duplicate`), so this only arises for a login
+  created outside the invite flow; the report shows it after 7 days.
 - No welcome email; the Success screen is the receipt.
 - The calendar sync is manual; Phil's edits reach the portal when the owner
   re-runs it.
@@ -797,8 +825,8 @@ v3.0.1 forced sixteen decisions. Each is now a fact in the contract (marked
 - **D2** The attendance block's `durationMinutes` edit in `PortalRoutes.js`
   belongs to routing Task 11 only; frontend Task 14 drops it.
 - **D3** The catalogue JSON lives at `functions/config/stripe-catalogue.json`
-  (4.1, 12.2). db Task 1 and functions Task 3 both create it with identical
-  content - add/add at integration, keep either.
+  (4.1, 12.2). Superseded in part by D19: the file is committed with the
+  TEST ids and no lane creates or rewrites it.
 - **D4** The secret lists (`MAIL_SECRETS`, `STRIPE_WEBHOOK_SECRETS`,
   `CHECKOUT_SECRETS`, `CALENDLY_SECRETS`) live in
   `functions/portal/secrets.js`; `functions/index.js` requires them and
@@ -812,22 +840,23 @@ v3.0.1 forced sixteen decisions. Each is now a fact in the contract (marked
 - **D7** Error reasons added: `athlete-name-required` (createFamily /
   addAthletes), `invalid-product` (createCheckoutSession, checked right
   after signed-out), `already-active` also for the facility product,
-  `child-email-duplicate` also against an existing open invite; `claimInvite`
+  `child-email-duplicate` also against an existing open OR claimed invite
+  (a claimed invite is a login; only `orphaned` is reusable); `claimInvite`
   returns `householdId` / `athleteId` only on `claimed`.
 - **D8** Fields added: `athletes.billing.lastEventId`;
   `athletes.facilityBilling.customerId` / `checkoutSessionId` /
   `lastEventId`; `calendlyEvents` outcome `malformed` and a `flag` field;
   `stripeEvents.athleteId` / `via` and outcomes `facility-active`,
-  `no-period`.
+  `no-period`, `athlete-lapsed` (D17).
 - **D9** `useSignups().data = { rows, counts: { all, unpaid, flagged,
   unresolved }, unresolved: [...] }`; `useSpecialistSlots().data` gains
   `householdId`; `liveAthleteDetail` and `liveChildCard` gain `loginEmail` +
   `login { state: 'none'|'invited'|'invited-stale'|'claimed', claimedAt }`;
   `hubMemberFor` gains `facilityAccessConsent`.
-- **D10** A facility-add-on `customer.subscription.deleted` /
-  `invoice.payment_failed` writes `facilityBilling.status` and
-  `facilityAccess: false` only - never household membership, never bookings
-  (4.3).
+- **D10** Every facility-add-on event (`invoice.paid`,
+  `invoice.payment_failed`, `customer.subscription.updated`,
+  `customer.subscription.deleted`) writes `facilityBilling` /
+  `facilityAccess` only - never household membership, never bookings (4.3).
 - **D11** The 48-hour rule (4.2): a checkout with the next 1st under 48 h
   away prepays the NEXT month in full and `trial_end` is the 1st after that;
   the remaining day or two is free. Ruled, documented, tested.
@@ -856,3 +885,41 @@ v3.0.1 forced sixteen decisions. Each is now a fact in the contract (marked
   AdminSignups renders `data.unresolved` as "Unmatched Calendly bookings"
   and counts `counts.unresolved` inside the Flagged filter; ChildCard on the
   parent home renders the login line.
+
+### 16.1 What the plan review found (v3.0.2 -> v3.0.3, 2026-09-28)
+
+A ten-angle review of the four lane plans against this spec, the contract
+and the source found fifteen defects; fourteen were applied to the plans
+(the fifteenth - BookSession's gate reading the wrong member - was a false
+alarm: `selfMember` is already the selected athlete's row). Three are
+decisions:
+
+- **D17** `customer.subscription.deleted` (and a final
+  `invoice.payment_failed`) for a TIER is per athlete (4.3):
+  `billing.otherTierLive` decides, `revoke.revokeAthlete` revokes one
+  athlete's bookings/waitlist, ledger outcome `athlete-lapsed`. Before this,
+  one child's cancellation lapsed the household and cancelled the paid
+  sibling's bookings.
+- **D18** A `lapsed` athlete pays again through `createCheckoutSession`
+  (4.3): `pendingOf` lists `pending` and `lapsed` athletes, `statusFor`'s
+  pending branch ranks above the household lapsed block ("Membership ended -
+  pay to book again", badge "Payment needed"), `PendingBanner` takes the
+  status title; `past_due` is refused with `already-active` because its
+  subscription still exists.
+- **D19** `functions/config/stripe-catalogue.json` is committed (`1b3dc3d`,
+  TEST ids filled, LIVE null); db Task 1 and functions Task 3 confirm it and
+  never write it (supersedes D3's add/add).
+
+The rest, folded into the plans and the contract: a facility `invoice.paid`
+/ `subscription.updated` no longer writes household membership (D10 widened);
+`invoicePeriod` prefers the subscription line (4.3); `refuseOpenInvites`
+refuses `claimed` invites too (D7 widened); `validateFamilyPayload` runs
+`EMAIL_RE` on the guardian email; Calendly `resolveAthlete` accepts
+`utm_content` only when the invitee email owns the athlete (login email or
+same household); the payment-received notice speaks for the PAID package;
+Registration refreshes the session only when the family leaves the Success
+receipt (RegistrationRoute would otherwise redirect before it rendered);
+PayButton's "I've verified" forces a fresh ID token instead of the session
+refresh; SignUp waits on claimState `idle`; the claim end-to-end runs at the
+PM gate on ONE emulator (`--only firestore,auth,functions`) since the routing
+worktree cannot reach `claimInvite`.

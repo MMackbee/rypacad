@@ -661,7 +661,7 @@ function UnmatchedCard({ events }) {
     <Card tone="red" large>
       <SectionLabel tone={color.error} style={{ marginBottom: 6 }}>Unmatched Calendly bookings · {events.length}</SectionLabel>
       <Body size={12} style={{ marginBottom: 8 }}>
-        The webhook could not tie these to an athlete (no utm_content on the link and no login with the invitee's email).
+        The webhook could not tie these to an athlete (no login with the invitee's email, and no portal link - or one for an athlete that email does not own).
         Find the family from Calendly's email and book it for them, or ask Yannick to cancel it.
       </Body>
       {events.map((e) => <Body key={e.id} size={12} tone={color.error}>{unresolvedLabel(e)}</Body>)}

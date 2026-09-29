@@ -438,16 +438,17 @@ git commit -m "feat(functions): prepaidPeriodFor - November prepaid, prorated jo
 ### Task 3: catalogue.js and the price-id JSON (closes part of #17)
 
 **Files:**
-- Create: `functions/config/stripe-catalogue.json`, `functions/portal/catalogue.js`, `functions/portal/catalogue.test.js`
+- Read (exists, committed `1b3dc3d` - never rewrite): `functions/config/stripe-catalogue.json`
+- Create: `functions/portal/catalogue.js`, `functions/portal/catalogue.test.js`
 
 **Interfaces:**
 - Produces: `stripeMode() -> 'test'|'live'`; `priceIdFor(key, cat?) -> ?string`; `packageIdForPrice(priceId, cat?) -> ?string`; `FACILITY_KEY = 'facility-access'`; `loadCatalogue() -> object` (new, not in contract).
 
-- [ ] **Step 1: Write the JSON** at `functions/config/stripe-catalogue.json` (decision D3: this path, not `scripts/config/`; spec 4.1 / 12.2 are updated to match). Exactly twelve keys. db lane Task 1 creates the same file with IDENTICAL content - **add/add at integration, keep either.**
+- [ ] **Step 1: Confirm the JSON - do NOT write it.** `functions/config/stripe-catalogue.json` (decision D3: this path, not `scripts/config/`; spec 4.1 / 12.2 match) is already committed on the base branch (`1b3dc3d`, 2026-09-28): the `test` block holds the owner's six `price_...` ids, `live` is all `null`. Neither this lane nor db Task 1 creates or rewrites it - there is no add/add to resolve (review finding 11). Check: `git log --oneline -1 -- functions/config/stripe-catalogue.json` prints `1b3dc3d` (or a later OWNER commit pasting the LIVE ids - never a lane commit). Shape:
 
 ```json
 {
-  "test": { "t-6": null, "t-12": null, "t-16": null, "elite": null, "single": null, "facility-access": null },
+  "test": { "t-6": "price_...", "t-12": "price_...", "t-16": "price_...", "elite": "price_...", "single": "price_...", "facility-access": "price_..." },
   "live": { "t-6": null, "t-12": null, "t-16": null, "elite": null, "single": null, "facility-access": null }
 }
 ```
@@ -486,12 +487,16 @@ test('priceIdFor / packageIdForPrice over the current mode', () => {
   process.env.STRIPE_MODE = 'test';
 });
 
-test('the committed JSON has exactly the twelve keys', () => {
+test('the committed JSON has exactly the twelve keys; test ids present', () => {
   const json = cat.loadCatalogue();
   const keys = ['t-6', 't-12', 't-16', 'elite', 'single', 'facility-access'];
   assert.deepEqual(Object.keys(json).sort(), ['live', 'test']);
   assert.deepEqual(Object.keys(json.test).sort(), keys.slice().sort());
   assert.deepEqual(Object.keys(json.live).sort(), keys.slice().sort());
+  for (const k of keys) {
+    // Committed in 1b3dc3d - a null here means someone overwrote the file.
+    assert.match(json.test[k], /^price_[A-Za-z0-9]{8,}$/, `test.${k}`);
+  }
 });
 
 run();
@@ -562,7 +567,7 @@ Expected: `3 passing`, lint clean.
 - [ ] **Step 5: Commit**
 
 ```bash
-git add functions/config/stripe-catalogue.json functions/portal/catalogue.js functions/portal/catalogue.test.js
+git add functions/portal/catalogue.js functions/portal/catalogue.test.js
 git commit -m "feat(functions): stripe catalogue reader keyed by STRIPE_MODE" -m "Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>"
 ```
 

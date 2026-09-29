@@ -17,7 +17,7 @@ Every task below assumes Tasks 1-7 have landed: `lib.ageAt`, `lib.chicagoTime`, 
 **Interfaces:**
 - Consumes: `lib.ageAt`, `lib.todayISO` (`lib.js:66`); `functions.https.HttpsError(code, message, {reason})` (`node_modules/firebase-functions/lib/common/providers/https.js:72-82` - `details` is the third argument); `FieldValue.serverTimestamp` from `firebase-admin/firestore` (the modular import, `stripe.js:28-31` explains why).
 - Produces: `secrets.MAIL_SECRETS = ['SMTP_USER', 'SMTP_PASS']`, `secrets.STRIPE_WEBHOOK_SECRETS`, `secrets.CHECKOUT_SECRETS`, `secrets.CALENDLY_SECRETS` (decision D4: the four secret-list constants live in `functions/portal/secrets.js`, not `index.js`, so `promotion.js`, `stripe.js`, `checkout.js`, `calendly.js` and `index.js` bind the SAME lists; `index.js` requires `MAIL_SECRETS` in Task 11 and never re-exports anything but the 13 functions); `validate.validateFamilyPayload(data, {todayISO}) -> normalized payload`; `validate.validateAddAthletesPayload(data, {todayISO, guardianEmail})`; `validate.normalizeAthletes(list, {todayISO, guardianEmail, mode})`; `class ValidationError {code, reason}`; `validate.lower(s)`; handlers `createFamilyHandler(data, context, deps) -> {householdId, athleteIds}`, `addAthletesHandler(data, context, deps) -> {householdId, athleteIds}`, `claimInviteHandler(data, context, deps) -> {state, householdId, athleteId}` with `deps = {db?, now?}`; callables `createFamily`, `addAthletes`, `claimInvite` (`https.onCall`, no secrets).
-- Reason strings, all in contract 1.2-1.4 (decision D7): `invalid-argument` / `athlete-name-required` (an athlete with a blank name; `createFamily` and `addAthletes`); `invalid-argument` / `child-email-duplicate` fires for two athletes sharing one email AND, in BOTH `createFamily` and `addAthletes`, against an existing OPEN `loginInvites/{email}` (keyed by email, so a second family could otherwise overwrite another family's open invite). `claimInvite` returns `householdId` / `athleteId` only on `state: 'claimed'` (nulls otherwise).
+- Reason strings, all in contract 1.2-1.4 (decision D7): `invalid-argument` / `athlete-name-required` (an athlete with a blank name; `createFamily` and `addAthletes`); `invalid-argument` / `child-email-duplicate` fires for two athletes sharing one email AND, in BOTH `createFamily` and `addAthletes`, against an existing `loginInvites/{email}` with status `open` OR `claimed` (keyed by email, so a second family could otherwise overwrite another family's open invite - or a claimed one, destroying that login's claim; only `orphaned` is reusable). `claimInvite` returns `householdId` / `athleteId` only on `state: 'claimed'` (nulls otherwise).
 
 - [ ] **Step 1: Write `functions/portal/secrets.js`**
 
@@ -115,6 +115,8 @@ test('athlete mode: exactly one adult, loginEmail forced null', () => {
 test('every refusal, in the contract order', () => {
   refuses(Object.assign(base(), {mode: 'staff'}), 'invalid-mode');
   refuses(Object.assign(base(), {contact: {name: 'x', email: '', phone: 'y'}}),
+      'contact-required');
+  refuses(Object.assign(base(), {contact: {name: 'x', email: 'dana@', phone: 'y'}}),
       'contact-required');
   refuses(Object.assign(base(), {athletes: []}), 'athlete-count');
   refuses(Object.assign(base(), {athletes: [kid({name: ' '})]}),
@@ -327,9 +329,12 @@ function validateFamilyPayload(data, opts) {
     name: str(c.name), email: str(c.email), phone: str(c.phone),
     relationship: d.mode === 'parent' ? (str(c.relationship) || null) : null,
   };
-  if (!contact.name || !contact.email || !contact.phone) {
+  // The form runs the same regex; this is the boundary check - a malformed
+  // guardian email would otherwise reach Stripe as customer_email and fail
+  // at pay time, far from the field.
+  if (!contact.name || !EMAIL_RE.test(contact.email) || !contact.phone) {
     throw new ValidationError('contact-required',
-        'Name, email and phone are all required.');
+        'Name, a valid email and phone are all required.');
   }
   const athletes = normalizeAthletes(d.athletes, {todayISO: opts.todayISO,
     guardianEmail: lower(contact.email), mode: d.mode});
@@ -475,8 +480,8 @@ function medicalDoc(emergencyContact, medical) {
 }
 
 /**
- * Refuse a child email that already has an OPEN invite (another family's,
- * or a retry). A transaction read; the caller has not written yet.
+ * Refuse a child email whose invite is open (another family's, or a retry)
+ * or claimed (already a login). A transaction read; nothing written yet.
  * @param {!Object} tx The transaction.
  * @param {!Object} store Firestore.
  * @param {!Array<!Object>} athletes Normalized entries.
@@ -487,9 +492,14 @@ async function refuseOpenInvites(tx, store, athletes) {
     if (!a.loginEmail) continue;
     const snap = await tx.get(
         store.collection('loginInvites').doc(a.loginEmail));
-    if (snap.exists && (snap.data() || {}).status === 'open') {
-      throw new HttpsError('invalid-argument',
-          'That email already has a pending athlete login.',
+    const status = snap.exists ? (snap.data() || {}).status : null;
+    // 'open': another athlete is waiting on it. 'claimed': the email IS an
+    // athlete login already - writeAthletes would overwrite the claim and
+    // the new invite could never be claimed. Only 'orphaned' is reusable.
+    if (status === 'open' || status === 'claimed') {
+      throw new HttpsError('invalid-argument', status === 'open' ?
+          'That email already has a pending athlete login.' :
+          'That email already belongs to an athlete login.',
           {reason: 'child-email-duplicate'});
     }
   }
@@ -824,6 +834,7 @@ async function main() {
   await refused('invite-open (caller email has an open invite, any case)', family.createFamilyHandler(payload(), ctx('u-reese', 'Reese@Example.test'), deps), 'failed-precondition', 'invite-open');
   await refused('invalid-mode', family.createFamilyHandler(payload({mode: 'coach'}), ctx('u-x1', 'x1@example.test'), deps), 'invalid-argument', 'invalid-mode');
   await refused('contact-required', family.createFamilyHandler(payload({contact: {name: 'X', email: 'x@x.test', phone: ''}}), ctx('u-x1', 'x1@example.test'), deps), 'invalid-argument', 'contact-required');
+  await refused('contact-required (malformed guardian email)', family.createFamilyHandler(payload({contact: {name: 'X', email: 'dana@', phone: '+15550100'}}), ctx('u-x1', 'x1@example.test'), deps), 'invalid-argument', 'contact-required');
   await refused('athlete-count', family.createFamilyHandler(payload({athletes: []}), ctx('u-x1', 'x1@example.test'), deps), 'invalid-argument', 'athlete-count');
   await refused('athlete-under-18', family.createFamilyHandler(payload({mode: 'athlete', athletes: [kid({dob: '2008-10-02'})]}), ctx('u-x1', 'x1@example.test'), deps), 'invalid-argument', 'athlete-under-18');
   await refused('dob-invalid', family.createFamilyHandler(payload({athletes: [kid({dob: '2026-12-25'})]}), ctx('u-x1', 'x1@example.test'), deps), 'invalid-argument', 'dob-invalid');
@@ -834,6 +845,7 @@ async function main() {
   await refused('child-email-is-guardian', family.createFamilyHandler(payload({athletes: [kid({loginEmail: 'NINA@example.test'})]}), ctx('u-x1', 'x1@example.test'), deps), 'invalid-argument', 'child-email-is-guardian');
   await refused('child-email-duplicate (within the payload)', family.createFamilyHandler(payload({athletes: [kid({loginEmail: 'a@b.test'}), kid({name: 'B', loginEmail: 'A@b.test'})]}), ctx('u-x1', 'x1@example.test'), deps), 'invalid-argument', 'child-email-duplicate');
   await refused('child-email-duplicate (existing open invite)', family.createFamilyHandler(payload({athletes: [kid({loginEmail: 'kid@example.test'})]}), ctx('u-x1', 'x1@example.test'), deps), 'invalid-argument', 'child-email-duplicate');
+  await refused('child-email-duplicate (existing CLAIMED invite - the email is a login already)', family.createFamilyHandler(payload({athletes: [kid({loginEmail: 'done@example.test'})]}), ctx('u-x1', 'x1@example.test'), deps), 'invalid-argument', 'child-email-duplicate');
   await refused('consents-required', family.createFamilyHandler(payload({consents: {dataCollection: true, videoCapture: false}}), ctx('u-x1', 'x1@example.test'), deps), 'invalid-argument', 'consents-required');
   check('no stray household from a refused call', (await db.collection('households').get()).size, 2);
   check('no users doc for u-x1', await exists('users', 'u-x1'), false);
@@ -881,7 +893,7 @@ main().catch((e) => { console.error(e); process.exitCode = 1; });
 - [ ] **Step 8: Run the harness**
 
 Run (emulator up per the command in `40-functions.md`): `cd functions && node test/verify-family.js`
-Expected: `ALL CHECKS PASSED` (49 checks). Then `node test/verify-lane.js` still ends `ALL CHECKS PASSED` (it reseeds; `verify-family.js` does not touch `bookings` / `sessions`, but run it anyway - the harnesses share one instance).
+Expected: `ALL CHECKS PASSED` (50 checks). Then `node test/verify-lane.js` still ends `ALL CHECKS PASSED` (it reseeds; `verify-family.js` does not touch `bookings` / `sessions`, but run it anyway - the harnesses share one instance).
 
 - [ ] **Step 9: Commit**
 

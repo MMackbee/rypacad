@@ -9,7 +9,7 @@ the 1st from Dec 1, mid-month joiners prorate by default (`PRORATE_JOINERS`),
 and the season starts Nov 3 (Nov 2 is set-up day).
 
 v3.0.2 (same day, plan check): the sixteen decisions the four lane plans forced
-(spec 16, D1-D16) are folded in below and marked `(D<n>)` where each lands. A
+(spec 16, D1-D16) and the three the plan review added (spec 16.1, D17-D19) are folded in below and marked `(D<n>)` where each lands. A
 lane plan that says "not in contract" for one of these names is now stale -
 the contract has it, and the contract wins.
 
@@ -89,7 +89,7 @@ Errors (HttpsError code / `details.reason`), checked in this order:
 | `already-exists` | `already-provisioned` | `users/{uid}` exists |
 | `failed-precondition` | `invite-open` | `loginInvites/{token.email.lower()}` is `open` ("Your parent already enrolled you - sign in with this email and tap Check again.") |
 | `invalid-argument` | `invalid-mode` | mode not in the enum |
-| `invalid-argument` | `contact-required` | name/email/phone blank |
+| `invalid-argument` | `contact-required` | name/phone blank, or email blank or failing `EMAIL_RE` (the boundary check behind Stripe's `customer_email`) |
 | `invalid-argument` | `athlete-count` | 0 athletes, or athlete mode with != 1 |
 | `invalid-argument` | `athlete-name-required` | an athlete entry whose `name` is blank (D7; `family-validate.js` checks it first per entry, before `dob-invalid`) |
 | `invalid-argument` | `athlete-under-18` | athlete mode and DOB < 18 years before Chicago today |
@@ -99,7 +99,7 @@ Errors (HttpsError code / `details.reason`), checked in this order:
 | `invalid-argument` | `handicap-range` | not int 0..54 or null |
 | `invalid-argument` | `child-email-invalid` | not `EMAIL_RE` (`Registration.js:66`) |
 | `invalid-argument` | `child-email-is-guardian` | equals contact.email (lower-cased) |
-| `invalid-argument` | `child-email-duplicate` | two athletes share one, OR an existing OPEN `loginInvites/{email}` doc already holds it (D7; 1.3 the same) |
+| `invalid-argument` | `child-email-duplicate` | two athletes share one, OR an existing `loginInvites/{email}` doc with status `open` OR `claimed` already holds it - a claimed one IS a login, and re-opening it would destroy the claim; only `orphaned` is reusable (D7; 1.3 the same) |
 | `invalid-argument` | `consents-required` | dataCollection/videoCapture false or signatureName blank |
 | `internal` | `write-failed` | transaction threw (client copy: "Sign-up could not be saved. Try again.") |
 
@@ -108,8 +108,9 @@ Errors (HttpsError code / `details.reason`), checked in this order:
 Request `{ athletes: [<athlete entry as 1.2>], medical: string | null }`.
 Caller must be `users.role == 'parent'` (`permission-denied` / `not-parent`);
 household is `me().householdId`. Same athlete validation and reasons as 1.2,
-plus `child-email-duplicate` also fires against an existing open invite for
-the same email (D7) and `athlete-name-required` as in 1.2. Response
+plus `child-email-duplicate` also fires against an existing open OR claimed
+invite for the same email (D7; a claimed invite is a login) and
+`athlete-name-required` as in 1.2. Response
 `{ householdId, athleteIds }`.
 
 ### 1.4 `claimInvite`
@@ -144,8 +145,11 @@ checked right after signed-out, before any read); `not-found`/`athlete-not-found
 (password accounts: `token.firebase.sign_in_provider == 'password'` and
 `!token.email_verified`); `failed-precondition`/`no-package` (tier with null
 packageId); `failed-precondition`/`already-active` (tier when
-`billing.status == 'active'`; ALSO facility when `facilityBilling.status ==
-'active'` - D7); `failed-precondition`/`billing-not-active`
+`billing.status` is `'active'` OR `'past_due'` - a live subscription, a second
+checkout would double-subscribe; past_due is fixed in the customer portal;
+ALSO facility when `facilityBilling.status` is `'active'`/`'past_due'` - D7.
+Only `pending` and `lapsed` may start a checkout; `lapsed` is the way back
+after a cancelled subscription - D18); `failed-precondition`/`billing-not-active`
 (facility before the tier is active); `failed-precondition`/
 `elite-includes-facility`; `failed-precondition`/`price-missing` (catalogue has
 no id for this package in `STRIPE_MODE`); `unavailable`/`stripe-error` (Stripe
@@ -186,7 +190,7 @@ The prepaid period is `prepaidPeriodFor` under the 48-hour rule (6.1, D11).
 | `tokenPeriods.prepaid` | `true` | webhook, first `invoice.paid` of a subscription | false |
 | `packages.stripePriceId` | `string \| null` (DATA-MODEL:126) | `write-packages.mjs` only | null |
 | `packages.windowDays` | `30` tokens/single, `45` elite | `write-packages.mjs` | 30 (`windowDaysFor` fallback) |
-| `stripeEvents` | `outcome` gains `unexpected-quantity`, `stripe-lookup-failed`, `applied-checkout`, `issued-prepaid` (chosen), `facility-active` (an `invoice.paid` for the add-on - status written, no tokens issued), `no-period` (an `invoice.paid` whose line carries no period start - status written, nothing issued) beside `stripe.js` outcomes; new fields `athleteId: string\|null` and `via: 'metadata'\|'billing'\|'facility'\|'customer'\|'customer-ids'\|'checkout-session'\|'client-reference'\|null` (which 6.2 resolution step matched; D8, report-visible only) | webhook | - |
+| `stripeEvents` | `outcome` gains `unexpected-quantity`, `stripe-lookup-failed`, `applied-checkout`, `issued-prepaid` (chosen), `facility-active` (an `invoice.paid` for the add-on - status written, no tokens issued), `no-period` (an `invoice.paid` whose line carries no period start - status written, nothing issued), `athlete-lapsed` (a TIER `customer.subscription.deleted` or final `invoice.payment_failed` for one athlete while a sibling keeps an active/past_due tier - only that athlete's bookings go; D17) beside `stripe.js` outcomes; new fields `athleteId: string\|null` and `via: 'metadata'\|'billing'\|'facility'\|'customer'\|'customer-ids'\|'checkout-session'\|'client-reference'\|null` (which 6.2 resolution step matched; D8, report-visible only) | webhook | - |
 | `users` (role athlete) | `{ role:'athlete', athleteId, householdId, staff:false, specialistId:null, displayName, email }` | claimInvite | - |
 
 Client rules for creating `households`, `users`, `loginInvites`, `calendlyEvents`
@@ -247,19 +251,27 @@ spec 11).
   `billing: { status: athlete.billing?.status ?? 'active', facility: athlete.facilityBilling?.status ?? null }`
   and `facilityAccessConsent: athlete.facilityAccessConsent ?? null` (D9, 4.6).
 - `statusFor(membership, opts)` (`:202`) gains `opts.pendingAthletes:
-  [{ athleteId, name }]` (default `[]`). Branch order: past_due, lapsed (as
-  today), then **pending** when `pendingAthletes.length > 0`, else active:
+  [{ athleteId, name, status: 'pending' | 'lapsed' }]` (default `[]`). Branch
+  order (D18, review 2026-09-28): past_due (as today), then **pending** when
+  `pendingAthletes.length > 0`, then lapsed (as today), else active. A lapsed
+  athlete (tier subscription ended) is listed like a pending one because the
+  only way back is a new Checkout Session per athlete - the customer portal
+  cannot resume a cancelled subscription - so the pending branch must outrank
+  the household's lapsed block; `ended` = any entry with status `'lapsed'`:
 
 ```js
-{ status: 'pending', tone: 'yellow', badge: { tone: 'yellow', label: 'Payment pending' },
-  title: 'Payment pending - finish checkout to start booking',
+{ status: 'pending', tone: 'yellow',
+  badge: { tone: 'yellow', label: ended ? 'Payment needed' : 'Payment pending' },
+  title: ended ? 'Membership ended - pay to book again' : 'Payment pending - finish checkout to start booking',
   body: `${names} can book as soon as checkout is complete. Billed monthly from the 1st once you've paid.`,
   ladder: null, ladderAt: null, cta: 'Pay now', paused: false, pendingAthletes }
 ```
 
 `hooks/billing.js` `liveHub` (`billing.js:110-122`) derives `pendingAthletes`
-from `members[].billing.status === 'pending'` and passes it; `liveMyTokens`
-passes `[member]` when pending. `useAdminDashboard` membership counts
+from `members[].billing.status` in `pending | lapsed` (that status on each
+entry) and passes it; `liveMyTokens` passes `[member]` when it qualifies.
+`PendingBanner` takes the status `title` so the lapsed wording reaches the
+home banners. `useAdminDashboard` membership counts
 (`hooks/index.js:3402-3410`) gain `pending` = athletes with
 `billing.status == 'pending'` (an athlete count, beside the household counts).
 
@@ -484,14 +496,27 @@ function prepaidFor(nowMs, args) {
   one-time line is the prepaid month (spec 4.2) - every product carries it,
   Elite and the facility add-on included (full price before Nov 1, prorated
   after); the recurring line's `price.id` is what maps to the paid package.
-- **Facility lapse is narrow (D10):** `customer.subscription.deleted` and
-  `invoice.payment_failed` that resolve to `product === 'facility'` write
-  `athletes.facilityBilling.status` (`lapsed` / `past_due`), `lastEventId`,
-  `updatedAt` and `facilityAccess: false` ONLY. They never touch
-  `households.membership`, never call `applyLapsed` / `applyPastDue`, never
-  revoke bookings - spec 4.3's "AND to household membership exactly as today"
-  is the tier product only. `verify-stripe-launch.js` STEP G asserts
-  membership and bookings unchanged after a facility delete.
+- **Facility events are narrow (D10):** EVERY event that resolves to
+  `product === 'facility'` - `invoice.paid`, `invoice.payment_failed`,
+  `customer.subscription.updated`, `customer.subscription.deleted` - writes
+  `athletes.facilityBilling` (`status`, `priceId`, `lastEventId`,
+  `updatedAt`) and `facilityAccess` ONLY. None touches
+  `households.membership` (no `householdActive`, no `membershipPatch`), none
+  calls `applyLapsed` / `applyPastDue`, none revokes bookings - spec 4.3's
+  "AND to household membership exactly as today" is the tier product only.
+  `verify-stripe-launch.js` STEP G asserts membership and bookings unchanged
+  after a facility delete.
+- **A tier subscription ends per athlete (D17):** `customer.subscription
+  .deleted` - and a FINAL `invoice.payment_failed` (`next_payment_attempt`
+  null) - for a TIER writes that athlete's `billing.status: 'lapsed'` and,
+  when `billing.otherTierLive(tx, db, householdId, athleteId)` finds a
+  sibling with an active/past_due tier, returns follow-up `'revoke-athlete'`:
+  `revoke.revokeAthlete(hh, athleteId, eventId)` cancels only that athlete's
+  future confirmed bookings and deletes only their waitlist entries, ledger
+  outcome `athlete-lapsed`, household membership untouched. Only when no
+  sibling is live does the household lapse as today (`applyLapsed` ->
+  `revokeHousehold`). A retrying `invoice.payment_failed` still freezes the
+  household (`applyPastDue`, spec 14).
 - `sendPaymentReceived({householdId, athleteId, athleteName, pkg})` (chosen)
   after the transaction, on the first `pending -> active`: `notify.sendNotice`
   (`notify.js:298`, args `{kind, category, householdId, athleteId, sessionId?,
@@ -506,6 +531,12 @@ function prepaidFor(nowMs, args) {
 `t` older than 300 s -> `stale`; compare with `crypto.timingSafeEqual`.
 `handleCalendlyEvent(payload, deps)` returns `{ outcome }`; the HTTP wrapper
 maps bad signature -> 400, any outcome -> 200, Firestore throw -> 500.
+`invitee.created` resolves the athlete from `utm_content` only when the
+invitee email OWNS that athlete (`athletes.loginEmail`, or a `users` doc with
+that email in the same household); otherwise from the invitee email via
+`users` (an athlete account directly, a parent account -> the household's
+only athlete); otherwise outcome `unresolved`. An edited or forwarded link
+never spends another family's token (plan review 2026-09-28).
 
 ### 6.4 `runWith` secret lists (`functions/portal/secrets.js`, one constant each; D4)
 
@@ -554,9 +585,9 @@ the JSON lives at `functions/config/stripe-catalogue.json`, not
 `scripts/config/`, because `firebase deploy` packages only `functions/`
 (`firebase.json` functions.source) and cannot `require('../scripts/...')`;
 `scripts/write-packages.mjs` reads `../functions/config/stripe-catalogue.json`.
-Still ONE source. (D3: spec 4.1 / 12.2 now say the same path. db Task 1 and
-functions Task 3 BOTH create the file with the identical 7.2 content - an
-add/add at integration; keep either side.)
+Still ONE source. (D3: spec 4.1 / 12.2 now say the same path. The file is
+committed on the base branch with the TEST ids - `1b3dc3d` - and neither
+lane creates or rewrites it; see 7.2.)
 
 ### 6.6 Skips
 
@@ -587,11 +618,16 @@ any write. Prints one line per doc; never touches households.
 ### 7.2 `functions/config/stripe-catalogue.json`
 
 ```json
-{ "test": { "t-6": null, "t-12": null, "t-16": null, "elite": null, "single": null, "facility-access": null },
+{ "test": { "t-6": "price_...", "t-12": "price_...", "t-16": "price_...", "elite": "price_...", "single": "price_...", "facility-access": "price_..." },
   "live": { "t-6": null, "t-12": null, "t-16": null, "elite": null, "single": null, "facility-access": null } }
 ```
 
-Exactly these twelve keys; values `price_...` strings once pasted (public ids).
+Exactly these twelve keys; values `price_...` strings (public ids) once
+pasted, `null` until then. **The file already exists on `portal/r3`**
+(commit `1b3dc3d`, 2026-09-28): the `test` block carries the owner's six
+TEST price ids, the `live` block is null until the LIVE prices exist. No lane
+creates, rewrites or "keeps either side of" it - db Task 1 and functions
+Task 3 read it as committed (D19, review 2026-09-28).
 
 ### 7.3 `scripts/sync-calendar-sessions.mjs`
 
@@ -626,7 +662,9 @@ deterministically in the harnesses (Task 13 STEP H's precondition; D15).
 ## 9. Shared copy (exact)
 
 1. Pending banner (parent home, athlete home, Membership, hub hero title):
-   **"Payment pending - finish checkout to start booking"**; button **"Pay now"**;
+   **"Payment pending - finish checkout to start booking"**; when any listed
+   athlete is `lapsed` (D18): title **"Membership ended - pay to book again"**,
+   badge **"Payment needed"** (body and button unchanged); button **"Pay now"**;
    plan card **"Billed monthly from the 1st once you've paid"**; connected card
    **"Your card and invoices are managed in Stripe."**
 2. Booking-opens banner (BookSession, SpecialistBooking, `reasonCopy`):

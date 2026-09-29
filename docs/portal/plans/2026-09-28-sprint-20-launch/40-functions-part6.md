@@ -245,31 +245,49 @@ function docOf(snap) {
 }
 
 /**
- * Resolve the athlete (spec 6.2 step 1): `utm_content` -> athletes/{id};
- * else the invitee email through `users` (an athlete account directly, a
- * parent account -> the household's only athlete). Anything else -> null.
+ * The one `users` doc carrying this email (exact, then lower-cased), or
+ * null when none or more than one.
  * @param {!Object} tx The transaction.
  * @param {!Object} store Firestore.
- * @param {!Object} p `body.payload`.
- * @return {!Promise<?{id: string, data: !Object, ref: !Object}>} Athlete.
+ * @param {string} email The invitee email.
+ * @return {!Promise<?Object>} The users doc body.
  */
-async function resolveAthlete(tx, store, p) {
-  const utm = p.tracking && p.tracking.utm_content;
-  if (utm) {
-    const a = docOf(await tx.get(
-        store.collection('athletes').doc(String(utm))));
-    if (a) return a;
-  }
-  const email = String(p.email || '').trim();
-  if (!email) return null;
+async function userByEmail(tx, store, email) {
   const users = store.collection('users');
   let snap = await tx.get(users.where('email', '==', email).limit(2));
   if (snap.empty && email !== email.toLowerCase()) {
     snap = await tx.get(
         users.where('email', '==', email.toLowerCase()).limit(2));
   }
-  if (snap.size !== 1) return null;
-  const u = snap.docs[0].data() || {};
+  return snap.size === 1 ? snap.docs[0].data() || {} : null;
+}
+
+/**
+ * Resolve the athlete (spec 6.2 step 1): `utm_content` -> athletes/{id},
+ * accepted only when the invitee email OWNS that athlete (it is the
+ * athlete's login, or an account in the same household); else the invitee
+ * email through `users` (an athlete account directly, a parent account ->
+ * the household's only athlete). Anything else -> null. An edited or
+ * forwarded link therefore never spends another family's token.
+ * @param {!Object} tx The transaction.
+ * @param {!Object} store Firestore.
+ * @param {!Object} p `body.payload`.
+ * @return {!Promise<?{id: string, data: !Object, ref: !Object}>} Athlete.
+ */
+async function resolveAthlete(tx, store, p) {
+  const email = String(p.email || '').trim();
+  const lower = email.toLowerCase();
+  const u = email ? await userByEmail(tx, store, email) : null;
+  const utm = p.tracking && p.tracking.utm_content;
+  if (utm) {
+    const a = docOf(await tx.get(
+        store.collection('athletes').doc(String(utm))));
+    const owns = a && lower && (
+        String(a.data.loginEmail || '').toLowerCase() === lower ||
+        (u && u.householdId && u.householdId === a.data.householdId));
+    if (owns) return a;
+  }
+  if (!u) return null;
   if (u.athleteId) {
     return docOf(await tx.get(store.collection('athletes').doc(u.athleteId)));
   }

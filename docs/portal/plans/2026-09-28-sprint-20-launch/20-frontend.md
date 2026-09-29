@@ -54,7 +54,7 @@ Two rules for every screen in this plan that imports a routing seam:
 | 1 `BookingReasons` | `BOOKING_OPENS_LABEL` | 1 (first group) | none - merged before Task 1 integrates |
 | 3 `SignUp`, `SignIn` | `useAuthSession().createLogin`, `claimState` | 9 (first) | `SignIn` renders `CreateLoginSection` only when `typeof createLogin === 'function'` |
 | 5 `Registration` | `hooks/callables.js` | 6 (first) | namespace + `notWired` fallback (below) |
-| 6 `PayButton` | `callCreateCheckoutSession`, `resendVerification`, `refresh` | 6, 9 (first) | same `notWired` guard; `if (refresh)` / `if (resendVerification)` |
+| 6 `PayButton` | `callCreateCheckoutSession`, `resendVerification`, `auth.currentUser` (`firebase.js`) | 6, 9 (first) | same `notWired` guard; `if (fbUser)` / `if (resendVerification)` |
 | 7 `NotProvisioned` | `claimState`, `checkInvite`, `resendVerification` | 9 (first) | `notProvisionedView({ claimState: undefined })` is `'stranger'` |
 | 8 `ParentDashboard` | `useBillingHub().data.status.pendingAthletes`, `usePaymentConfirmation` | 3 (first) | `?.` reads |
 | 8 `ChildCard` | `children[].loginEmail`, `login` | 12 (later) | `'loginEmail' in child` - renders nothing until it lands |

@@ -15,7 +15,7 @@ Read `40-functions.md` first (Goal, Architecture, Global Constraints, Execution 
 **Interfaces:**
 - Consumes: `prepaid.prepaidPeriodFor(now, {priceCents, tokens})` (Task 2); `catalogue.priceIdFor(key, cat?)`, `catalogue.FACILITY_KEY` (Task 3); `secrets.CHECKOUT_SECRETS` (Task 8); `lib.membershipAllowsBooking(household, athlete)` (Task 1) for the facility gate; `process.env.PORTAL_URL` (`functions/.env`, contract 8); `process.env.STRIPE_SECRET_KEY` (secret).
 - Produces: `createCheckoutSessionHandler(data, context, deps) -> Promise<{url}>` with `deps = {db?, stripe?, now?, catalogue?}`; `sessionBody(args) -> Object` (new, the exact Stripe request body, pure); `prepaidFor(nowMs, {priceCents, tokens})` (new: `prepaidPeriodFor` plus the 48-hour rule below); callable `createCheckoutSession` = `functions.runWith({secrets: CHECKOUT_SECRETS}).https.onCall`.
-- Reason strings, all in contract 1.5 (decision D7): `invalid-argument` / `invalid-product` (product not `tier`|`facility`, or `athleteId` not a non-empty string - checked right after `signed-out`, before `athlete-not-found`); `failed-precondition` / `already-active` fires for the tier when `billing.status == 'active'` AND for `product: 'facility'` when `facilityBilling.status == 'active'`.
+- Reason strings, all in contract 1.5 (decision D7): `invalid-argument` / `invalid-product` (product not `tier`|`facility`, or `athleteId` not a non-empty string - checked right after `signed-out`, before `athlete-not-found`); `failed-precondition` / `already-active` fires for the tier when `billing.status` is `'active'` OR `'past_due'` (a live subscription - a second checkout would double-subscribe; past_due is fixed through the customer portal's card update) AND for `product: 'facility'` when `facilityBilling.status` is `'active'` / `'past_due'`. Only `pending` and `lapsed` (no live subscription) may start a checkout - `lapsed` is how a family comes back (review 2026-09-28).
 - **Ruled, D12 - key scopes:** the recurring price's amount comes from Stripe (`stripe.prices.retrieve(priceId).unit_amount`) because neither the `packages` docs nor the catalogue JSON carry a price (`seed-firestore.mjs:438` strips it; contract 7.2 holds ids only). The restricted `STRIPE_SECRET_KEY` therefore has exactly three scopes: **Checkout Sessions write, Customers read, Prices read** (runbook, Task 12 section 0).
 - **Ruled, D11 - the 48-hour rule:** Stripe refuses a Checkout `trial_end` under 48 hours away, so when the next 1st is under 48 h from checkout (the 29th-31st, possible from Nov 1 under ruling 0.13) `prepaidFor` rolls the prepaid month forward: the session prepays the NEXT month in full, `trial_end` is the 1st after that, and the remaining day or two of the current month are free. Documented in the runbook (Task 12 section 6) and asserted by the `under 48 h to the 1st` test below (Nov 30 -> `2026-12-01`, full price, `trialEnd` = Jan 1; Nov 28 -> `2026-11-01` untouched).
 
@@ -143,6 +143,12 @@ test('facility add-on: $300 line, elite sends empty tokens', async () => {
   const ok = call({athleteId: 'max', product: 'tier'}, ctx('u-nina'));
   await refused('max already active', ok.p, 'failed-precondition',
       'already-active');
+  const pd = call({athleteId: 'fac', product: 'tier'}, ctx('u-nina'), {
+    db: fakeDb(Object.assign({}, DOCS, {'athletes/fac': {householdId: 'novak',
+      packageId: 't-6', billing: {status: 'past_due'}}})),
+    stripe: fakeStripe([], 29900)});
+  await refused('past_due keeps its subscription (no second checkout)', pd.p,
+      'failed-precondition', 'already-active');
   const f = call({athleteId: 'lena', product: 'facility'}, ctx('u-nina'));
   await refused('facility before the tier', f.p, 'failed-precondition',
       'billing-not-active');
@@ -378,10 +384,14 @@ async function createCheckoutSessionHandler(data, context, deps) {
     throw refuse('failed-precondition', 'email-unverified',
         'Verify your email to pay.');
   }
-  const tierPaid = Boolean(athlete.billing) &&
-      athlete.billing.status === 'active';
-  const facilityPaid = Boolean(athlete.facilityBilling) &&
-      athlete.facilityBilling.status === 'active';
+  // A 'past_due' subscription still EXISTS (Stripe is retrying the card):
+  // a second checkout would create a second subscription. The customer
+  // portal's card update is the way back; only pending or lapsed (no live
+  // subscription) may start a checkout.
+  const live = (b) => Boolean(b) &&
+      (b.status === 'active' || b.status === 'past_due');
+  const tierPaid = live(athlete.billing);
+  const facilityPaid = live(athlete.facilityBilling);
   if (req.product === 'tier') {
     if (!athlete.packageId) {
       throw refuse('failed-precondition', 'no-package',
@@ -389,6 +399,8 @@ async function createCheckoutSessionHandler(data, context, deps) {
     }
     if (tierPaid) {
       throw refuse('failed-precondition', 'already-active',
+          athlete.billing.status === 'past_due' ?
+          'This membership has a subscription - update the card in Stripe.' :
           'This membership is already paid.');
     }
   }

@@ -138,6 +138,14 @@ test('a signed-in unprovisioned stranger goes to /portal/register', async () => 
   expect(r.location().pathname).toBe('/portal/register');
   await r.unmount();
 });
+
+test('before the claim check has run (idle) nobody is routed to /portal/register', async () => {
+  mockSession.user = { uid: 'u2', email: 'kid@email.com', role: null };
+  mockSession.claimState = 'idle';
+  const r = await renderScreen(<SignUp bare />, { path: '/portal/signup' });
+  expect(r.location().pathname).toBe('/portal/signup');
+  await r.unmount();
+});
 ```
 
 - [ ] **Step 6: Run it** - Expected: FAIL, cannot find `./SignUp`.
@@ -179,8 +187,12 @@ export default function SignUp({ bare = false, onSignIn }) {
       navigate(user.specialistId ? '/portal/my-sessions' : LANDING_BY_ROLE[user.role] ?? '/portal/not-provisioned', { replace: true });
       return;
     }
-    if (claimState === 'checking') return;
-    navigate(claimState === 'none' || claimState === 'idle' || claimState == null ? '/portal/register' : '/portal/not-provisioned', { replace: true });
+    // 'idle' = the claim check has not started yet (the auth emission is still
+    // resolving); wait for it like 'checking' - an invited child must never be
+    // routed into the household form. null/undefined = a hook without claim
+    // support (routing Task 9 not merged yet): behave as 'none'.
+    if (claimState === 'checking' || claimState === 'idle') return;
+    navigate(claimState === 'none' || claimState == null ? '/portal/register' : '/portal/not-provisioned', { replace: true });
   }, [user, provisioned, loading, sent, claimState, navigate]);
 
   const canSubmit = EMAIL_RE.test(email.trim()) && password.length >= 6 && !creating && !loading;
@@ -247,7 +259,7 @@ export default function SignUp({ bare = false, onSignIn }) {
 }
 ```
 
-- [ ] **Step 8: Run it** - `cd frontend && CI=true npx react-scripts test --watchAll=false src/portal/screens/SignUp.test.js` - Expected: PASS (3 tests).
+- [ ] **Step 8: Run it** - `cd frontend && CI=true npx react-scripts test --watchAll=false src/portal/screens/SignUp.test.js` - Expected: PASS (4 tests).
 
 - [ ] **Step 9: SignIn changes**
 
