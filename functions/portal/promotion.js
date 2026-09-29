@@ -95,7 +95,7 @@ async function loadCandidate(tx, entry, session, sessionId, today) {
         db().collection('households').doc(householdId));
     household = hhSnap.exists ? hhSnap.data() : null;
   }
-  if (!lib.membershipAllowsBooking(household)) {
+  if (!lib.membershipAllowsBooking(household, athlete)) {
     return Object.assign(base, {reason: 'membership-inactive'});
   }
 

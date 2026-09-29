@@ -46,6 +46,53 @@ function chicagoDate(date) {
   return `${parts.year}-${parts.month}-${parts.day}`;
 }
 
+/** Booking opens for token members (spec 5). 2026-10-10T12:00:00Z. */
+const BOOKING_OPENS_AT = 1791633600000;
+
+const chicagoClock = new Intl.DateTimeFormat('en-US', {
+  timeZone: TZ, hour: 'numeric', minute: '2-digit', hour12: true,
+});
+
+/**
+ * A `Date` as `'4:00 PM'` in America/Chicago, composed from parts with a
+ * plain space (Node's `format()` may emit U+202F before AM/PM).
+ * @param {Date} date Any instant.
+ * @return {string} `'h:mm AM'`.
+ */
+function chicagoTime(date) {
+  const p = {};
+  for (const x of chicagoClock.formatToParts(date)) p[x.type] = x.value;
+  return `${p.hour}:${p.minute} ${String(p.dayPeriod).toUpperCase()}`;
+}
+
+/**
+ * Whether booking is open (spec 5): Elite always, everyone else from
+ * BOOKING_OPENS_AT. Mirrors `data/calendar.js#bookingOpen`.
+ * @param {number|Date} now Epoch millis or a Date.
+ * @param {?Object} pkg A `packages/{id}` body (needs `kind`).
+ * @return {boolean} True when a booking may be made now.
+ */
+function bookingOpen(now, pkg) {
+  const t = now instanceof Date ? now.getTime() : Number(now);
+  return Boolean(pkg && pkg.kind === 'elite') || t >= BOOKING_OPENS_AT;
+}
+
+/**
+ * Whole years between a DOB and a date (the 18+ check, spec 2.1).
+ * @param {?string} dobISO `'YYYY-MM-DD'`.
+ * @param {string} todayISO `'YYYY-MM-DD'`.
+ * @return {?number} Age in years, or null when the DOB does not parse.
+ */
+function ageAt(dobISO, todayISO) {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(String(dobISO || ''))) return null;
+  const [y, m, d] = String(dobISO).split('-').map(Number);
+  const [ty, tm, td] = String(todayISO).split('-').map(Number);
+  if (Number.isNaN(toUTC(dobISO).getTime())) return null;
+  let age = ty - y;
+  if (tm < m || (tm === m && td < d)) age -= 1;
+  return age;
+}
+
 /**
  * A Stripe unix timestamp (seconds) as an America/Chicago calendar date.
  * This is how a Stripe period start becomes a `periodKey` (pin H).
@@ -227,15 +274,19 @@ function chargeFor(args) {
 }
 
 /**
- * Membership freeze (pin H). `households.membership` absent == active, so a
- * household provisioned before the webhook existed stays bookable.
- * @param {?Object} household A `households/{id}` document body.
- * @return {boolean} False when the household is past_due or lapsed.
+ * Membership freeze (pin H) plus the per-athlete paid gate (spec 4.4).
+ * `households.membership` and `athletes.billing` are both absent == active.
+ * @param {?Object} household A `households/{id}` body.
+ * @param {?Object=} athlete An `athletes/{id}` body.
+ * @return {boolean} False when the household is past_due/lapsed or the
+ *     athlete's `billing.status` is present and not 'active'.
  */
-function membershipAllowsBooking(household) {
+function membershipAllowsBooking(household, athlete) {
   const status = household && household.membership &&
       household.membership.status;
-  return status !== 'past_due' && status !== 'lapsed';
+  if (status === 'past_due' || status === 'lapsed') return false;
+  const billing = athlete && athlete.billing;
+  return !billing || billing.status === 'active';
 }
 
 /**
@@ -327,12 +378,16 @@ function rows(snap) {
 module.exports = {
   ANCHOR_MIN,
   ANCHOR_MAX,
+  BOOKING_OPENS_AT,
   TZ,
+  ageAt,
   anchorDayFromISO,
   bookingId,
+  bookingOpen,
   chargeFor,
   chicagoDate,
   chicagoDateFromUnix,
+  chicagoTime,
   householdByCustomer,
   householdByCustomerQuery,
   householdFromSnap,
