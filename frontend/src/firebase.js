@@ -7,6 +7,7 @@ import {
   signOut as fbSignOut,
 } from 'firebase/auth';
 import { connectFirestoreEmulator, getFirestore } from 'firebase/firestore';
+import { connectFunctionsEmulator, getFunctions } from 'firebase/functions';
 import { getStorage } from 'firebase/storage';
 
 // RYP Golf Firebase configuration
@@ -61,6 +62,10 @@ export const provider = new GoogleAuthProvider();
 // Initialize Cloud Firestore and get a reference to the service
 export const db = getFirestore(app);
 
+// Cloud Functions callables (Sprint 20): createFamily, addAthletes,
+// claimInvite, createCheckoutSession - all deployed to us-central1.
+export const functions = getFunctions(app, 'us-central1');
+
 // Initialize Firebase Storage and get a reference to the service
 export const storage = getStorage(app);
 
@@ -78,6 +83,7 @@ export const storage = getStorage(app);
 if (process.env.REACT_APP_USE_EMULATORS === 'true') {
   connectAuthEmulator(auth, 'http://127.0.0.1:9099', { disableWarnings: true });
   connectFirestoreEmulator(db, '127.0.0.1', 8080);
+  connectFunctionsEmulator(functions, '127.0.0.1', 5001); // firebase.json emulators.functions.port
 
   const b64url = (obj) =>
     btoa(JSON.stringify(obj)).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');

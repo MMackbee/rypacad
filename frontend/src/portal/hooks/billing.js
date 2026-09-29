@@ -16,11 +16,12 @@
  * document involved), an athlete (`useMyTokens`, their own row).
  */
 
+import { useEffect, useState } from 'react';
 import { hubMemberFor, statusFor } from '../data/billingHub';
 import { addDaysISO, todayISO } from '../data/calendar';
 import { normalizeAnchorDay, packageById, periodFor } from '../data/packages';
 import { GRACE_TOKEN, HOUSEHOLD, PAST_DUE_MEMBERSHIP, PERIOD_ANCHOR_DAY } from '../data/seed';
-import { useInvalidation } from './invalidate';
+import { bump, useInvalidation } from './invalidate';
 import useSeedResource from './useSeedResource';
 import { coachingFor } from './index';
 import {
@@ -41,8 +42,23 @@ import {
 import { fetchTokenPeriod } from './grace';
 import { fetchWaitlistByAthlete } from './waitlist';
 
-/** The Stripe no-code customer portal login link, when the academy set one up. */
+/**
+ * The Stripe no-code customer portal login link. Sprint 20 (spec 4.4): no
+ * longer optional - without it a failed card has no self-serve fix. The app
+ * still renders (the hub omits the link), but a LIVE build without it says
+ * so in the console once per page load; seed mode and jest never carry the
+ * var and never warn. `live`/`url` are injectable for the unit test.
+ */
 export const STRIPE_PORTAL_URL = process.env.REACT_APP_STRIPE_PORTAL_URL || null;
+let portalUrlWarned = false;
+export function warnMissingPortalUrl({ live = isLive(), url = STRIPE_PORTAL_URL } = {}) {
+  if (portalUrlWarned || !live || url) return false;
+  portalUrlWarned = true;
+  console.warn(
+    'REACT_APP_STRIPE_PORTAL_URL is not set: the billing hub cannot offer the Stripe customer portal, so a failed card has no self-serve fix (Sprint 20, spec 4.4 - required in production).'
+  );
+  return true;
+}
 
 /** Catalogue facts (price, pending) joined onto a Firestore package doc, which by policy carries no price. */
 function packageFacts(pkg) {
@@ -107,7 +123,15 @@ async function liveMember(athlete, anchorDay, today) {
   return { ...entry, coaching: coachingFor(bookings, today, pkg) };
 }
 
+/** The members who need a checkout (Sprint 20, spec 4.4): never paid, or whose tier subscription ended - drives statusFor's pending branch. A lapsed athlete re-subscribes through the same createCheckoutSession; the customer portal cannot resume a cancelled subscription. */
+function pendingOf(members) {
+  return members
+    .filter((m) => m.billing?.status === 'pending' || m.billing?.status === 'lapsed')
+    .map((m) => ({ athleteId: m.athleteId, name: m.name, status: m.billing.status }));
+}
+
 async function liveHub(householdId, today) {
+  warnMissingPortalUrl();
   const [household, athletes] = await Promise.all([fetchHousehold(householdId), fetchHouseholdAthletes(householdId)]);
   const anchorDay = normalizeAnchorDay(household.periodAnchorDay);
   const members = await Promise.all(athletes.map((a) => liveMember(a, anchorDay, today)));
@@ -116,7 +140,7 @@ async function liveHub(householdId, today) {
   return {
     household: householdView(household, anchorDay),
     members,
-    status: statusFor(membership, { resetsOn, anchorDay }),
+    status: statusFor(membership, { resetsOn, anchorDay, pendingAthletes: pendingOf(members) }),
     portalUrl: STRIPE_PORTAL_URL,
   };
 }
@@ -132,6 +156,7 @@ async function liveBillingHub(today, householdId) {
 
 /** One athlete's own row: their household's anchor, their documents. */
 async function liveMyTokens(today) {
+  warnMissingPortalUrl();
   const profile = await fetchCurrentUser();
   if (!profile.athleteId) {
     throw new LiveDataError(ERR.INVALID, `users/${profile.uid} has no athleteId - Membership is an athlete surface.`);
@@ -145,7 +170,7 @@ async function liveMyTokens(today) {
   return {
     household: household ? householdView(household, anchorDay) : null,
     member,
-    status: statusFor(membership, { resetsOn, anchorDay }),
+    status: statusFor(membership, { resetsOn, anchorDay, pendingAthletes: pendingOf([member]) }),
   };
 }
 
@@ -200,10 +225,11 @@ function seedBillingHub(today, variant) {
   const anchorDay = PERIOD_ANCHOR_DAY;
   const { periodEnd } = periodFor(today, anchorDay);
   const membership = seedMembership(variant);
+  const members = HOUSEHOLD.children.map((child) => seedMember(child, today, anchorDay));
   return {
     household: { id: 'whitfield', name: HOUSEHOLD.name, anchorDay, membership, stripeCustomerId: null },
-    members: HOUSEHOLD.children.map((child) => seedMember(child, today, anchorDay)),
-    status: statusFor(membership, { resetsOn: addDaysISO(periodEnd, 1), anchorDay }),
+    members,
+    status: statusFor(membership, { resetsOn: addDaysISO(periodEnd, 1), anchorDay, pendingAthletes: pendingOf(members) }),
     portalUrl: STRIPE_PORTAL_URL,
   };
 }
@@ -212,10 +238,11 @@ function seedMyTokens(today, variant) {
   const anchorDay = PERIOD_ANCHOR_DAY;
   const { periodEnd } = periodFor(today, anchorDay);
   const membership = seedMembership(variant);
+  const member = seedMember(HOUSEHOLD.children[0], today, anchorDay);
   return {
     household: { id: 'whitfield', name: HOUSEHOLD.name, anchorDay, membership, stripeCustomerId: null },
-    member: seedMember(HOUSEHOLD.children[0], today, anchorDay),
-    status: statusFor(membership, { resetsOn: addDaysISO(periodEnd, 1), anchorDay }),
+    member,
+    status: statusFor(membership, { resetsOn: addDaysISO(periodEnd, 1), anchorDay, pendingAthletes: pendingOf([member]) }),
   };
 }
 
@@ -281,4 +308,58 @@ export function useHouseholdsDirectory() {
     live ? null : seed,
     live ? { source: liveHouseholdsDirectory, deps: ['households-directory', ...gens] } : undefined
   );
+}
+
+/**
+ * The `?paid=<athleteId>` return from Stripe Checkout (Sprint 20, spec 4.2):
+ * `{ state: 'idle'|'confirming'|'confirmed'|'timeout', billingStatus }`. Polls
+ * the athlete every 5 s, 24 attempts (2 min); on `billing.status === 'active'`
+ * bumps athletes + billing (every hub/home hook re-reads) and strips the
+ * query from the address bar so a refresh does not poll again. The screen
+ * passes the id it read from useSearchParams; null means nothing to confirm.
+ */
+export function usePaymentConfirmation(athleteId) {
+  const [state, setState] = useState({ state: 'idle', billingStatus: null });
+  useEffect(() => {
+    if (!athleteId || !isLive()) return undefined;
+    let alive = true;
+    let attempts = 0;
+    let timer = null;
+    setState({ state: 'confirming', billingStatus: null });
+    const tick = async () => {
+      if (!alive) return;
+      attempts += 1;
+      let status = null;
+      try {
+        const a = await fetchAthlete(athleteId);
+        status = a.billing?.status ?? 'active';
+      } catch (err) {
+        status = null; // a transient read error is just another attempt
+      }
+      if (!alive) return;
+      if (status === 'active') {
+        bump('athletes');
+        bump('billing');
+        try {
+          window.history.replaceState(null, '', window.location.pathname);
+        } catch (err) {
+          /* a locked history is not a failure */
+        }
+        setState({ state: 'confirmed', billingStatus: status });
+        return;
+      }
+      if (attempts >= 24) {
+        setState({ state: 'timeout', billingStatus: status });
+        return;
+      }
+      setState({ state: 'confirming', billingStatus: status });
+      timer = setTimeout(tick, 5000);
+    };
+    timer = setTimeout(tick, 0);
+    return () => {
+      alive = false;
+      clearTimeout(timer);
+    };
+  }, [athleteId]);
+  return state;
 }

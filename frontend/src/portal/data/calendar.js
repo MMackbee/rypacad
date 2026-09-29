@@ -330,13 +330,28 @@ function academyLocalParts(date) {
 }
 
 /** The last session date bookable right now for a package with this window. */
-export function openThrough(now = new Date(), windowDays = 32) {
+export function openThrough(now = new Date(), windowDays = 30) {
   const { date, hour } = academyLocalParts(now);
   const anchor = hour >= WINDOW_ROLL_HOUR ? date : addDaysISO(date, -1);
   return addDaysISO(anchor, windowDays);
 }
 
 /** The local date on which a session date first enters the window (at 7 AM). */
-export function windowOpensOn(sessionDateISO, windowDays = 32) {
+export function windowOpensOn(sessionDateISO, windowDays = 30) {
   return addDaysISO(sessionDateISO, -windowDays);
+}
+
+/* ------------------------------------------------------------------------- *
+ * The Oct 10 gate (Sprint 20, spec 5): booking opens for token members at
+ * 07:00 America/Chicago on 2026-10-10; Elite books as soon as it is paid.
+ * ONE constant, read by createBooking/joinWaitlist/bookRecurring (live.js),
+ * the specialist screen's Calendly button and every banner; firestore.rules
+ * carries the same millisecond value in bookingOpenOk(). Retire after launch
+ * (GitHub #26).
+ * ------------------------------------------------------------------------- */
+export const BOOKING_OPENS_AT = 1791633600000; // 2026-10-10T12:00:00Z = 07:00 America/Chicago
+export const BOOKING_OPENS_LABEL = 'Fri, Oct 10 at 7 AM';
+export function bookingOpen(now = Date.now(), pkg = null) {
+  const t = now instanceof Date ? now.getTime() : Number(now);
+  return pkg?.kind === 'elite' || t >= BOOKING_OPENS_AT;
 }

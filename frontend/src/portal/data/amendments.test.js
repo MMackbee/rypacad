@@ -23,8 +23,8 @@ describe('the catalogue (v2.0.1)', () => {
     expect(FACILITY_ACCESS).toMatchObject({ price: 300 });
   });
 
-  test('prices are withheld from parents until released', () => {
-    expect(PRICES_RELEASED).toBe(false);
+  test('prices are released to parents (Sprint 20 flipped the Sprint 18 hold)', () => {
+    expect(PRICES_RELEASED).toBe(true);
   });
 });
 

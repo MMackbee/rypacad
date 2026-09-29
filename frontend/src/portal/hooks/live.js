@@ -34,7 +34,7 @@ import {
 import { auth, db } from '../../firebase';
 import { bump } from './invalidate';
 import { eliteDailyCapHit, normalizeAnchorDay, periodFor, windowDaysFor } from '../data/packages';
-import { openThrough, windowOpensOn } from '../data/calendar';
+import { BOOKING_OPENS_LABEL, bookingOpen, openThrough, todayISO, windowOpensOn } from '../data/calendar';
 import { SPECIALISTS, mentalCapFor } from '../data/specialists';
 
 /** id -> catalogue entry, for the specialist-cap error copy below. */
@@ -65,6 +65,9 @@ export const ERR = {
  * assertWithinPeriodCap through createBooking's catch, through
  * useBooking's book(), to the screen's own catch — no rethrow anywhere in
  * that chain replaces the error object.
+ * Sprint 20 adds 'billing-pending' (athlete not paid), 'booking-not-open'
+ * (before the Oct 10 gate) and 'calendly-managed' (a Calendly-sourced
+ * booking is cancelled from Calendly, not here).
  */
 export class LiveDataError extends Error {
   constructor(code, message, cause = null, reason = null) {
@@ -445,7 +448,7 @@ export async function fetchGraceTokensByAthlete(athleteId) {
  * inside createBooking's full-session fallback below — one write path, no
  * duplicated shape logic between the two callers.
  */
-export async function joinWaitlist({ sessionId, athleteId, householdId, date, periodKey, attendee }) {
+export async function joinWaitlist({ sessionId, athleteId, householdId, date, periodKey, attendee }, { athlete = null, pkg = null } = {}) {
   if (!sessionId || !athleteId || !householdId || !date || !periodKey) {
     throw new LiveDataError(
       ERR.INVALID,
@@ -453,6 +456,13 @@ export async function joinWaitlist({ sessionId, athleteId, householdId, date, pe
     );
   }
   const user = requireUser();
+  // Sprint 20 (spec 4.4, 5): the same two gates createBooking runs. Its
+  // full-session fallback passes the docs it already read; useWaitlist's
+  // own join() lands here cold and pays the two reads.
+  const a = athlete ?? (await fetchAthlete(athleteId));
+  assertAthleteBillingActive(a);
+  const p = pkg ?? (a.packageId ? await fetchPackage(a.packageId) : null);
+  assertBookingOpen(p);
   try {
     const id = `${sessionId}_${athleteId}`;
     await setDoc(doc(db, 'waitlist', id), {
@@ -498,6 +508,26 @@ function selectGraceToken(bookings, graceTokens, date) {
 }
 
 /**
+ * Per-athlete paid status (Sprint 20, spec 4.4): absent == active for every
+ * athlete provisioned before this sprint; anything else blocks booking with
+ * the pending copy. firestore.rules' athleteBillingOk() is the server half.
+ */
+export function assertAthleteBillingActive(athlete) {
+  const status = athlete?.billing?.status ?? 'active';
+  if (status === 'active') return;
+  throw new LiveDataError(ERR.INVALID, 'Payment pending - finish checkout to start booking', null, 'billing-pending');
+}
+
+/**
+ * The Oct 10 gate (Sprint 20, spec 5): token members book from
+ * BOOKING_OPENS_AT, Elite at once. `now` is injectable for tests.
+ */
+export function assertBookingOpen(pkg, now = Date.now()) {
+  if (bookingOpen(now, pkg)) return;
+  throw new LiveDataError(ERR.INVALID, `Booking opens ${BOOKING_OPENS_LABEL}`, null, 'booking-not-open');
+}
+
+/**
  * Create one booking in the contract shape, inside a Firestore transaction
  * (Sprint 6, QA #5) — reads the session, requires booked < capacity, requires
  * no existing booking at this id, then writes the booking AND increments
@@ -521,7 +551,7 @@ function selectGraceToken(bookings, graceTokens, date) {
  * unconditionally while the token-pool checks that follow it branch on
  * chargedFrom.
  */
-function assertWithinBookingWindow(pkg, date) {
+export function assertWithinBookingWindow(pkg, date) {
   const windowDays = windowDaysFor(pkg);
   if (date > openThrough(new Date(), windowDays)) {
     throw new LiveDataError(
@@ -597,7 +627,7 @@ function assertEliteDailyCap(pkg, type, date, bookings) {
  * them from `left`, so the gate does too; otherwise the hub could read
  * "0 left" while a booking still went through.
  */
-function assertPeriodTokensLeft(pkg, bookings, periodKey, issuedGrant, waitlist = []) {
+export function assertPeriodTokensLeft(pkg, bookings, periodKey, issuedGrant, waitlist = [], currentPeriodKey = null) {
   if (!pkg || pkg.tokens !== null) {
     // Contract v2.1 pin C: an issued tokenPeriods doc (Stripe or ops) is the
     // grant when it exists; the package's own tokens are the fallback.
@@ -611,7 +641,7 @@ function assertPeriodTokensLeft(pkg, bookings, periodKey, issuedGrant, waitlist 
         ERR.INVALID,
         granted === 0
           ? 'This package has no tokens to spend — ask the academy to assign one.'
-          : `This period's tokens are already fully booked (${used} of ${granted}${reserved ? `, ${reserved} held on a waitlist` : ''}).`,
+          : `${currentPeriodKey && periodKey > currentPeriodKey ? "Next period's" : "This period's"} tokens are already fully booked (${used} of ${granted}${reserved ? `, ${reserved} held on a waitlist` : ''}).`,
         null,
         'no-tokens-left'
       );
@@ -648,6 +678,13 @@ export async function createBooking(
   const pkg = athlete.packageId ? await fetchPackage(athlete.packageId) : null;
   const isElite = Boolean(pkg) && pkg.tokens === null;
 
+  // Sprint 20 (spec 4.4, then 5): paid status and the Oct 10 gate, before
+  // the window/cadence/cap checks - both are free (no extra read) and run
+  // for every caller, bookRecurring's skipCapCheck instances included.
+  assertAthleteBillingActive(athlete);
+  assertBookingOpen(pkg);
+  const currentPeriodKey = periodFor(todayISO(), anchorDay).periodKey;
+
   // Charge order (contract v2.1 pin E): Elite -> nothing charged; else the
   // soonest-expiring unconsumed grace token covering this date; else the
   // period, subject to its own cap. Grace selection and the window/mental
@@ -682,7 +719,7 @@ export async function createBooking(
       const issued = await getDoc(doc(db, 'tokenPeriods', `${athleteId}_${periodKey}`)).catch(() => null);
       const issuedGrant = issued && issued.exists() ? issued.data().granted : undefined;
       const waitlist = await fetchAthleteWaitlist(athleteId);
-      assertPeriodTokensLeft(pkg, bookings, periodKey, issuedGrant, waitlist);
+      assertPeriodTokensLeft(pkg, bookings, periodKey, issuedGrant, waitlist, currentPeriodKey);
     }
   }
 
@@ -805,7 +842,7 @@ export async function createBooking(
     if (err === SESSION_FULL) {
       // joinWaitlist bumps 'waitlist' itself on success - nothing more to
       // invalidate here (no bookings/sessions write happened on this path).
-      const entry = await joinWaitlist({ sessionId, athleteId, householdId, date, periodKey, attendee });
+      const entry = await joinWaitlist({ sessionId, athleteId, householdId, date, periodKey, attendee }, { athlete, pkg });
       const queue = await getDocs(query(collection(db, 'waitlist'), where('sessionId', '==', sessionId))).catch(() => null);
       return {
         id: entry.id,
@@ -861,6 +898,11 @@ export async function cancelBooking({ bookingId }) {
           ERR.INVALID,
           `Only a confirmed booking can be cancelled (this one is ${booking.status}).`
         );
+      }
+      // Sprint 20 (spec 6.1): a Calendly-sourced booking is cancelled from
+      // Calendly's email; the webhook writes the cancel. Rules refuse it too.
+      if (booking.source === 'calendly') {
+        throw new LiveDataError(ERR.INVALID, "Cancel or reschedule from Calendly's email", null, 'calendly-managed');
       }
       const sessionRef = doc(db, 'sessions', booking.sessionId);
       const sessionSnap = await tx.get(sessionRef);

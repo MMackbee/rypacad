@@ -49,6 +49,21 @@ service cloud.firestore {
       return get(/databases/$(database)/documents/athletes/$(athleteId)).data;
     }
 
+    // Sprint 20 (spec 4.4): per-athlete paid status gates booking. Absent
+    // `billing` == active (every athlete provisioned before this sprint).
+    function athleteBillingOk(a) {
+      return !('billing' in a) || a.billing.status == 'active';
+    }
+
+    // Sprint 20 (spec 5): booking opens 07:00 America/Chicago on 2026-10-10
+    // (1791633600000 - the SAME value as data/calendar.js BOOKING_OPENS_AT);
+    // a paid Elite books at once (the webhook corrects packageId to the paid
+    // price, so 'elite' here means paid Elite). Retire after launch (#26).
+    function bookingOpenOk(a) {
+      return request.time >= timestamp.value(1791633600000)
+        || a.get('packageId', null) == 'elite';
+    }
+
     // ---- users ---------------------------------------------------------
     // Matrix: "users self-read" (+ owner → all). Sprint 10 (contract v1.8,
     // "make it real"): ops now reads the full users collection too (E,
@@ -157,7 +172,13 @@ service cloud.firestore {
           && d.householdId is string
           && (d.dob is string || d.dob == null)
           && (d.contractMinutes in [20, 45, 90, 95] || d.contractMinutes == null)
-          && d.coachId == null;
+          && d.coachId == null
+          // Sprint 20 (spec 2.2): handicap int 0..54 or null; loginEmail string
+          // or null; billing/facilityBilling are server-written ONLY.
+          && (!d.keys().hasAny(['handicap']) || d.handicap == null
+              || (d.handicap is int && d.handicap >= 0 && d.handicap <= 54))
+          && (!d.keys().hasAny(['loginEmail']) || d.loginEmail == null || d.loginEmail is string)
+          && !d.keys().hasAny(['billing', 'facilityBilling']);
       }
       allow create: if signedIn() && me().role in ['ops', 'owner'] && athleteCreateShapeOk();
 
@@ -486,6 +507,17 @@ service cloud.firestore {
         return !(h.get('membership', null) != null && h.membership.status in ['past_due', 'lapsed']);
       }
 
+      // Sprint 20 (spec 4.4 + 5): the athlete doc this create already read
+      // for the household check, hoisted into ONE let so the billing and
+      // opens-at gates cost no extra document read (the parent + grace path
+      // sits at 5 unique docs of the 10-doc cap).
+      function bookingAthleteOk() {
+        let a = athleteData(request.resource.data.athleteId);
+        return request.resource.data.householdId == a.householdId
+          && athleteBillingOk(a)
+          && bookingOpenOk(a);
+      }
+
       // The booking must reference a real session and agree with it on date
       // and type — what a booking spends is anchored to the schedule, not to
       // what the client claims.
@@ -529,8 +561,7 @@ service cloud.firestore {
         && bookingHouseholdOk()
         && bookingId
              == request.resource.data.athleteId + '_' + request.resource.data.sessionId
-        && request.resource.data.householdId
-             == athleteData(request.resource.data.athleteId).householdId
+        && bookingAthleteOk()
         && (
           (me().role == 'athlete'
             && me().athleteId == request.resource.data.athleteId)
@@ -672,7 +703,11 @@ service cloud.firestore {
           (before.status == 'confirmed' && after.status == 'cancelled'
             && diffKeys.hasOnly(['status', 'cancelledBy', 'cancelReason'])
             && after.cancelledBy == request.auth.uid
-            && after.cancelReason == 'member')
+            && after.cancelReason == 'member'
+            // Sprint 20 (spec 6.1): a Calendly-sourced booking is cancelled
+            // from Calendly's email, never in-app (the webhook writes the
+            // cancel). Absent source == 'portal'.
+            && resource.data.get('source', null) != 'calendly')
           || (before.status == 'cancelled' && after.status == 'confirmed'
               && diffKeys.hasOnly(['status']))
         );
@@ -859,14 +894,15 @@ service cloud.firestore {
       // three settings-branch fields - forcing periodAnchorDay AND the two
       // Stripe ids through the shaped branch above exclusively, never
       // through this wider, unchecked one.
+      // Sprint 20: membership (K10 - a parent could un-freeze themselves), stripeCustomerIds, signup and createdBy are server-written; the parent branch excludes all of them.
       allow update: if signedIn() && (
         (me().role in ['ops', 'owner']
           && !request.resource.data.diff(resource.data).affectedKeys()
-               .hasAny(['periodAnchorDay', 'stripeCustomerId', 'stripeSubscriptionId']))
+               .hasAny(['periodAnchorDay', 'stripeCustomerId', 'stripeSubscriptionId', 'stripeCustomerIds', 'signup', 'createdBy']))
         || (me().role == 'parent'
             && me().householdId == householdId
             && !request.resource.data.diff(resource.data).affectedKeys()
-                 .hasAny(['stripeCustomerId', 'stripeSubscriptionId', 'periodAnchorDay']))
+                 .hasAny(['stripeCustomerId', 'stripeSubscriptionId', 'periodAnchorDay', 'membership', 'stripeCustomerIds', 'signup', 'createdBy']))
       );
     }
 
@@ -1241,13 +1277,20 @@ service cloud.firestore {
         return !(h.get('membership', null) != null && h.membership.status in ['past_due', 'lapsed']);
       }
 
+      // Sprint 20 (spec 4.4 + 5): identical to bookings' bookingAthleteOk.
+      function waitlistAthleteOk() {
+        let a = athleteData(request.resource.data.athleteId);
+        return request.resource.data.householdId == a.householdId
+          && athleteBillingOk(a)
+          && bookingOpenOk(a);
+      }
+
       allow create: if signedIn()
         && waitlistShapeOk()
         && waitlistSessionOk()
         && waitlistHouseholdOk()
         && entryId == request.resource.data.sessionId + '_' + request.resource.data.athleteId
-        && request.resource.data.householdId
-             == athleteData(request.resource.data.athleteId).householdId
+        && waitlistAthleteOk()
         && (
           (me().role == 'athlete' && me().athleteId == request.resource.data.athleteId)
           || (me().role == 'parent' && me().householdId == request.resource.data.householdId)
@@ -1310,6 +1353,29 @@ service cloud.firestore {
         || (me().role == 'athlete' && resource.data.athleteId == me().athleteId)
         || me().role in ['ops', 'owner']
       );
+    }
+
+    // ---- loginInvites -----------------------------------------------------
+    // Sprint 20 (spec 2.2, 3.2). Doc id == the child's login email, lower-
+    // cased; written ONLY by createFamily/addAthletes/claimInvite (Admin
+    // SDK). Read by the email's owner once VERIFIED (no enumeration by an
+    // unverified account), by the household's parent, or ops/owner. The
+    // token map is read null-safe: an emulator custom-token user has no
+    // email claim at all. No client write clause: deny-by-default.
+    match /loginInvites/{email} {
+      allow read: if signedIn() && (
+        (request.auth.token.get('email_verified', false) == true
+          && request.auth.token.get('email', '').lower() == email)
+        || (me().role == 'parent' && resource.data.householdId == me().householdId)
+        || me().role in ['ops', 'owner']
+      );
+    }
+
+    // ---- calendlyEvents --------------------------------------------------
+    // Sprint 20 (spec 6.2, 7): the Calendly webhook's idempotency ledger,
+    // Admin-SDK-written; ops/owner read it for the sign-ups report's flags.
+    match /calendlyEvents/{eventId} {
+      allow read: if signedIn() && me().role in ['ops', 'owner'];
     }
 
     // ---- stripeEvents -----------------------------------------------------
