@@ -6,6 +6,7 @@ import { capReachedCopy, LockedDayNotice, reasonCopy, SeeMembershipLink } from '
 import { JoinWaitlistButton, WaitlistedConfirmationBody } from '../components/WaitlistAction';
 import BottomTabBar from '../components/BottomTabBar';
 import Button from '../components/Button';
+import CalendlyPanel from '../components/CalendlyPanel';
 import EntitlementSummary from '../components/EntitlementSummary';
 import PhoneFrame from '../components/PhoneFrame';
 import SessionCard from '../components/SessionCard';
@@ -29,7 +30,7 @@ import { windowDaysFor } from '../data/packages';
 // BookSession.js/CommitmentContract.js/TourStandings.js - data still travels
 // through the hook seam below; these are formatting helpers, not response
 // data.
-import { longDayLabel, openThrough, todayISO } from '../data/calendar';
+import { formatDuration, longDayLabel, openThrough, todayISO } from '../data/calendar';
 import { datePill } from '../data/season';
 
 /**
@@ -231,6 +232,13 @@ export default function SpecialistBooking({
   const hasGrace = (tokens?.grace?.length ?? 0) > 0;
   const tokensSpent = tokens ? !tokens.unlimited && tokens.left === 0 && !hasGrace : false;
   const blocked = tokensSpent || capReached;
+  // Sprint 20 (spec 6.1): Yannick books through Calendly when the hook says so
+  // (SPECIALISTS.mental.bookingMode === 'calendly' AND a URL is configured);
+  // anything else - Phil, the seed, an emulator with no URL - keeps the slot
+  // list. `householdId` is the hook's own (contract 4.3 as amended by D9: the
+  // slots payload carries it for both the parent and the athlete caller).
+  const calendly = specialistId === 'mental' && slotsState.data?.bookingMode === 'calendly' && Boolean(slotsState.data?.calendlyUrl);
+  const householdId = slotsState.data?.householdId ?? null;
 
   const confirmReserve = (slot) => {
     if (reserving) return;
@@ -335,26 +343,41 @@ export default function SpecialistBooking({
                 onSeeMembership={() => navigate('/portal/membership')}
               />
             </div>
-            <div style={{ padding: '0 22px' }}>
-              <DayStrip days={days} selectedDate={selectedDate} onSelect={setSelectedDate} />
-            </div>
-            {selectedDateLocked ? (
+            {calendly ? (
               <div style={{ padding: '0 22px' }}>
-                <LockedDayNotice date={selectedDate} windowDays={windowDays} />
-              </div>
-            ) : (
-              <div style={{ padding: '0 22px', display: 'flex', flexDirection: 'column', gap: 9 }}>
-                <SlotList
-                  day={selectedDay}
-                  specialist={specialist}
-                  disabled={disabledForNoAthlete || blocked}
-                  reserving={reserving}
-                  onSelect={(slot, date) => {
-                    setFailure(null);
-                    setSheetSlot({ ...slot, date });
-                  }}
+                <CalendlyPanel
+                  data={slotsState.data}
+                  tokens={tokens}
+                  capReached={capReached}
+                  attendee={attendee}
+                  onAttendee={setAttendee}
+                  householdId={householdId}
                 />
               </div>
+            ) : (
+              <>
+                <div style={{ padding: '0 22px' }}>
+                  <DayStrip days={days} selectedDate={selectedDate} onSelect={setSelectedDate} />
+                </div>
+                {selectedDateLocked ? (
+                  <div style={{ padding: '0 22px' }}>
+                    <LockedDayNotice date={selectedDate} windowDays={windowDays} />
+                  </div>
+                ) : (
+                  <div style={{ padding: '0 22px', display: 'flex', flexDirection: 'column', gap: 9 }}>
+                    <SlotList
+                      day={selectedDay}
+                      specialist={specialist}
+                      disabled={disabledForNoAthlete || blocked}
+                      reserving={reserving}
+                      onSelect={(slot, date) => {
+                        setFailure(null);
+                        setSheetSlot({ ...slot, date });
+                      }}
+                    />
+                  </div>
+                )}
+              </>
             )}
           </>
         )}
@@ -500,7 +523,7 @@ function DayStrip({ days, selectedDate, onSelect }) {
 }
 
 /**
- * The picked day's slots - time, 45 min, and the spot state. v1.7.1: Phil's
+ * The picked day's slots - time, the slot's real duration, and the spot state. v1.7.1: Phil's
  * sessions are GROUP sessions (capacity 6), so a capacity-above-1 slot says
  * how many spots remain ("4 spots left") the way Life Time's own class rows
  * do; a capacity-1 slot (Yannick) stays the binary Open/Booked. An empty day
@@ -533,7 +556,7 @@ function SlotList({ day, specialist, disabled, reserving, onSelect }) {
               meridiem={meridiem}
               type={specialist.id}
               name={specialist.sessionNoun}
-              meta="45 min"
+              meta={formatDuration(slot.durationMinutes)}
               variant={slot.open ? 'default' : 'full'}
               // Pin F: a full slot's tap still opens the detail sheet - its
               // Reserve CTA becomes "Join waitlist" there (DetailSheet below).
@@ -604,7 +627,7 @@ function DetailSheet({
           {longDayLabel(slot.date)}
         </div>
         <div style={{ font: `400 13px ${font.body}`, color: color.textSecondary, marginTop: 3 }}>
-          {time} {meridiem} · 45 min
+          {time} {meridiem} · {formatDuration(slot.durationMinutes)}
         </div>
         <Body size={12} style={{ marginTop: 12 }}>
           {specialist.whatToExpect}
