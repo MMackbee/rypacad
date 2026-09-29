@@ -88,7 +88,7 @@ Rolling, per membership:
 
 | | Window |
 |---|---|
-| Token packages | 32 days |
+| Token packages | 30 days (**Sprint 20 ruling 0.5; was 32**) |
 | Elite | 45 days |
 
 **The window rolls at 07:00 America/Chicago**, not midnight.
@@ -100,7 +100,7 @@ openThrough   = anchorDate + membership.windowDays
 bookable iff  localDate(session.startsAt) <= openThrough
 ```
 
-So at 07:00 on Jan 10 a token holder sees through Feb 11; Elite sees through Feb 24. At 06:59 on Jan 10, one day less. Same rule for both; only `windowDays` differs.
+So at 07:00 on Jan 10 a token holder sees through Feb 9; Elite sees through Feb 24. At 06:59 on Jan 10, one day less. Same rule for both; only `windowDays` differs.
 
 ---
 
@@ -188,7 +188,7 @@ Elite no-shows have no token to forfeit; the existing no-show tracker is the con
 
 ```
 memberships/{athleteId}
-  packageId, elite: bool, windowDays: 32 | 45
+  packageId, elite: bool, windowDays: 30 | 45
   status: 'active' | 'past_due' | 'lapsed'
   stripeCustomerId, stripeSubscriptionId
   currentPeriodStart, currentPeriodEnd

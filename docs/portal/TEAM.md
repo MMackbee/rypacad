@@ -1363,7 +1363,7 @@ with the first server-side writers:
 
 **A. PACKAGES — one catalogue.** `packages/{id}` becomes
 `{ id, name, kind: 'tokens' | 'elite' | 'single', tokens: number | null,
-price, windowDays: 32 | 45 }`. `tokens: null` means unlimited (Elite only).
+price, windowDays: 30 | 45 }`. `tokens: null` means unlimited (Elite only).
 Ids `t-6`, `t-12`, `t-16`, `t-20`, `elite`, `single`. **Deleted:** `g-*`,
 `f-*`, `drop-in`, `elite-247` (24/7 is an Elite attribute, `access247:
 true` on `packages/elite`, not a tier), `philSessions`, `yannickSessions`,
@@ -1373,7 +1373,7 @@ true` on `packages/elite`, not a tier), `philSessions`, `yannickSessions`,
 `entitlementsFor`, `ratePerSession`, `monthlyTotal` are deleted. Prices
 stay out of seeds and reach prod only via the user-gated provisioner
 import (v1.1 rule unchanged); catalogue prices carry `pending: true` until
-the owner's OK and the UI may render "pending" beside them.
+the owner's OK and the UI may render "pending" beside them. (*Sprint 20, 2026-09-28: 32 -> 30 for every token package and single; Elite 45 unchanged.*)
 
 `athletes.fitnessPackageId` → **removed.** The v1.9 package-assignment
 rules branch narrows to `hasOnly(['packageId', 'updatedAt'])`.
@@ -1432,7 +1432,7 @@ must equal `{athleteId}_{periodKey}`). **Members read own; no member
 write.** Absent == `pkg.tokens` (B), so nothing breaks before Stripe lands.
 
 **D. BOOKING WINDOWS.** `SPECIALIST_BOOKING_WINDOW_DAYS` is deleted. Every
-session type uses the athlete's package window: `windowDaysFor(pkg)` → 32,
+session type uses the athlete's package window: `windowDaysFor(pkg)` → 30 (Sprint 20; was 32),
 Elite 45. The window **rolls at 07:00 America/Chicago**:
 `anchor = localNow.hour >= 7 ? localToday : localToday - 1; openThrough =
 anchor + windowDays; bookable iff session.date <= openThrough`. Pure
@@ -1587,7 +1587,7 @@ Admin's "No-shows this month" query are the tracker — no new mechanism.
 Luke's, outside the app.
 
 **M. SINGLE TOKEN.** `packages/single`: `tokens: 1, price: 65 (pending),
-kind: 'single', windowDays: 32`. Assignable by ops like any package; an
+kind: 'single', windowDays: 30`. Assignable by ops like any package; an
 athlete on `single` has one token per period. (Whether singles are sold
 per-visit rather than as a period package is a Stripe-sprint question; the
 catalogue entry costs nothing now.)
