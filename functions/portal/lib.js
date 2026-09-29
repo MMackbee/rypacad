@@ -397,6 +397,11 @@ module.exports = {
   normalizeAnchorDay,
   periodBookingsQuery,
   periodFor,
+  // Lazy: prepaid.js requires lib.js, so these resolve on first use.
+  get PRORATE_JOINERS() {
+    return require('./prepaid').PRORATE_JOINERS;
+  },
+  prepaidPeriodFor: (...a) => require('./prepaid').prepaidPeriodFor(...a),
   rows,
   todayISO,
   tokenPeriodId,
