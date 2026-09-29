@@ -773,7 +773,7 @@ function Confirmed({ bare, confirmation, onRepeat, onBack }) {
           */}
           {c.email ? (
             <Body size={13} style={{ marginTop: 8 }}>
-              Confirmation sent to {c.email}
+              A confirmation is on its way to {c.email} - it also appears under your notices.
             </Body>
           ) : null}
         </div>

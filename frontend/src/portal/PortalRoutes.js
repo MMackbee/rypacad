@@ -778,6 +778,9 @@ export default function PortalRoutes() {
           </RequireRole>
         }
       />
+      {/* K18: an unknown path lands on the index, which sends a signed-in
+          account home and everyone else to sign-in. */}
+      <Route path="*" element={<Navigate to="/portal" replace />} />
     </Routes>
   );
 }
