@@ -139,6 +139,7 @@
  *                  'coach-luke'`. Field ids are read straight off
  *                  DIAGNOSTIC_SECTIONS in seed.js and enumerated in
  *                  DATA-MODEL.md, never retyped independently.
+ *   loginInvites / calendlyEvents — Sprint 20: one open child-login invite (reese) and one Calendly-sourced Yannick session + booking + ledger row (see the cal- block below).
  *   staffInvites — ONE pending invite (contract v1.8, Sprint 10 pin E) at a
  *                  clearly-fake address (`invite-test@example.com`), role
  *                  coach, specialistId null — provision-family.mjs is what
@@ -807,6 +808,68 @@ function buildDocs(portal) {
     session.booked += 1; // same invariant as every other booking above
   }
 
+  // Sprint 20 (spec 6.2, interfaces 2): ONE Calendly-sourced Yannick session
+  // for reese, exactly as calendlyWebhook would leave it - a `cal-<uuid>`
+  // session (never date-prefixed, bookable: false so the in-app slot list
+  // never offers it, capacity 1 booked 1), the confirmed booking that spent
+  // her token (createdBy 'system', source 'calendly', not cancellable
+  // in-app), and the idempotency ledger row. Same day as jordan's first
+  // Yannick slot, at 6:00 PM so it never collides with the -s<n> slots.
+  const CAL_EVENT_UUID = 'seedevt0001';
+  const CAL_INVITEE_UUID = 'seedinv0001';
+  const calEventUri = `https://api.calendly.com/scheduled_events/${CAL_EVENT_UUID}`;
+  const calInviteeUri = `${calEventUri}/invitees/${CAL_INVITEE_UUID}`;
+  const calSessionId = `cal-${CAL_EVENT_UUID}`;
+  const calDate = sessions.get(jordanMentalSlot.id).date;
+  sessions.set(calSessionId, {
+    date: calDate,
+    time: '6:00 PM',
+    type: 'mental',
+    label: 'Mental game session',
+    capacity: 1,
+    booked: 1,
+    status: 'scheduled',
+    durationMinutes: 30,
+    bookable: false,
+    coachId: null,
+    special: false,
+    source: 'calendly',
+    calendlyEventUri: calEventUri,
+    gcalEventId: null,
+    coachNote: null,
+  });
+  bookings.set(`reese_${calSessionId}`, {
+    athleteId: 'reese',
+    sessionId: calSessionId,
+    householdId,
+    date: calDate,
+    type: 'mental',
+    status: 'confirmed',
+    periodKey: periodFor(calDate, WHITFIELD_ANCHOR_DAY).periodKey,
+    chargedFrom: 'period',
+    graceTokenId: null,
+    attendee: 'athlete',
+    createdBy: 'system',
+    source: 'calendly',
+    calendlyInviteeUri: calInviteeUri,
+    flag: null, // clean; 'over-cap' | 'over-cadence' | 'membership-inactive' | 'before-open' when the webhook flags
+    createdAt: bookingCreatedAt,
+  });
+  const calendlyEvents = new Map([
+    [
+      `${CAL_INVITEE_UUID}_invitee.created`,
+      {
+        event: 'invitee.created',
+        inviteeUri: calInviteeUri,
+        eventUri: calEventUri,
+        athleteId: 'reese',
+        householdId,
+        receivedAt: bookingCreatedAt,
+        outcome: 'applied',
+      },
+    ],
+  ]);
+
   // sessions.coachId on jordan's upcoming '2026-11-02-1' training booking
   // (contract v1.9, Sprint 11 DB lane bullet) — buildSeason() always leaves
   // coachId null (schedule.js never assigns one), so without this the
@@ -1433,6 +1496,7 @@ function buildDocs(portal) {
     graceTokens,
     waitlist,
     stripeEvents,
+    calendlyEvents,
     notifications,
   };
 }
@@ -1701,6 +1765,15 @@ async function main() {
   console.log('\nstripeEvents (contract v2.1, pin H):');
   for (const [id, doc] of collections.stripeEvents) {
     console.log(`  stripeEvents/${id}: type=${doc.type} customer=${doc.customer} householdId=${doc.householdId} outcome=${doc.outcome}`);
+  }
+
+  console.log('\ncalendlyEvents + the cal- session (Sprint 20):');
+  for (const [id, doc] of collections.calendlyEvents) console.log(`  calendlyEvents/${id}: athleteId=${doc.athleteId} outcome=${doc.outcome}`);
+  {
+    const s = collections.sessions.get('cal-seedevt0001');
+    const b = collections.bookings.get('reese_cal-seedevt0001');
+    console.log(`  sessions/cal-seedevt0001: date=${s.date} time=${s.time} bookable=${s.bookable} source=${s.source} booked=${s.booked}/${s.capacity}`);
+    console.log(`  bookings/reese_cal-seedevt0001: status=${b.status} source=${b.source} flag=${b.flag} periodKey=${b.periodKey}`);
   }
 
   if (DRY_RUN) {
