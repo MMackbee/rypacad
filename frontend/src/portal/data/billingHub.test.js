@@ -208,3 +208,39 @@ describe('the Elite attendance line (owner ruling, 2026-09-22)', () => {
     expect(hubMemberFor(fixture()).attendance).toBeNull();
   });
 });
+
+describe('per-athlete billing (Sprint 20, spec 4.4)', () => {
+  test('hubMemberFor carries billing status, absent == active, and the facility add-on state', () => {
+    expect(hubMemberFor(fixture()).billing).toEqual({ status: 'active', facility: null });
+    const pending = hubMemberFor({ ...fixture(), athlete: { ...athlete, billing: { status: 'pending' } } });
+    expect(pending.billing).toEqual({ status: 'pending', facility: null });
+    const add = hubMemberFor({ ...fixture(), athlete: { ...athlete, billing: { status: 'active' }, facilityBilling: { status: 'active' } } });
+    expect(add.billing).toEqual({ status: 'active', facility: 'active' });
+  });
+
+  test('hubMemberFor carries the facility waiver as a boolean (spec 4.5: "paid - waiver pending" vs "active")', () => {
+    expect(hubMemberFor(fixture()).facilityAccessConsent).toBe(false);
+    const nulled = hubMemberFor({ ...fixture(), athlete: { ...athlete, facilityAccessConsent: null } });
+    expect(nulled.facilityAccessConsent).toBe(false);
+    const signed = hubMemberFor({ ...fixture(), athlete: { ...athlete, facilityAccessConsent: { signedAt: '2026-09-01', byUid: 'p1' } } });
+    expect(signed.facilityAccessConsent).toBe(true);
+  });
+
+  test('statusFor pending: after past_due, before lapsed and active; lapsed athletes pay again', () => {
+    const back = statusFor({ status: 'lapsed' }, { pendingAthletes: [{ athleteId: 'a', name: 'Ava', status: 'lapsed' }] });
+    expect(back).toMatchObject({ status: 'pending', cta: 'Pay now', badge: { tone: 'yellow', label: 'Payment needed' }, title: 'Membership ended - pay to book again' });
+    expect(statusFor({ status: 'lapsed' }, { pendingAthletes: [] }).status).toBe('lapsed');
+    const s = statusFor(null, { resetsOn: '2026-10-01', anchorDay: 1, pendingAthletes: [{ athleteId: 'a', name: 'Ava' }] });
+    expect(s).toMatchObject({ status: 'pending', tone: 'yellow', badge: { tone: 'yellow', label: 'Payment pending' }, ladder: null, ladderAt: null, cta: 'Pay now', paused: false });
+    expect(s.title).toBe('Payment pending - finish checkout to start booking');
+    expect(s.body).toBe("Ava can book as soon as checkout is complete. Billed monthly from the 1st once you've paid.");
+    expect(s.pendingAthletes).toEqual([{ athleteId: 'a', name: 'Ava' }]);
+    const two = statusFor(null, { pendingAthletes: [{ athleteId: 'a', name: 'Ava' }, { athleteId: 'b', name: 'Ben' }] });
+    expect(two.body.startsWith('Ava and Ben can book')).toBe(true);
+    const three = statusFor(null, { pendingAthletes: [{ athleteId: 'a', name: 'Ava' }, { athleteId: 'b', name: 'Ben' }, { athleteId: 'c', name: 'Cy' }] });
+    expect(three.body.startsWith('Ava, Ben and Cy can book')).toBe(true);
+    expect(statusFor({ status: 'past_due' }, { pendingAthletes: [{ athleteId: 'a', name: 'Ava' }] }).status).toBe('past_due');
+    expect(statusFor(null, { pendingAthletes: [] }).status).toBe('active');
+    expect(statusFor(null, { resetsOn: '2026-10-01', anchorDay: 1 }).pendingAthletes).toBeUndefined();
+  });
+});
