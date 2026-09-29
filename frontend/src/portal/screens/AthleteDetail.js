@@ -34,7 +34,7 @@ function useLatestDiagnostic(athleteId) {
 }
 
 /** The pinned contract tier set (contract v1.8 §B) - not invented. */
-const TIER_MINUTES = [20, 45, 95];
+const TIER_MINUTES = [20, 45, 90];
 
 /**
  * 09 · Athlete Detail - parent view of one linked athlete.

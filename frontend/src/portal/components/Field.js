@@ -51,6 +51,7 @@ export default function Field({
         }}
       >
         <input
+          aria-label={label}
           type={type}
           value={value ?? ''}
           placeholder={placeholder}
@@ -130,6 +131,7 @@ export function SelectField({ label, value, options = [], onChange, style }) {
         }}
       >
         <select
+          aria-label={label}
           value={value ?? ''}
           onChange={(e) => onChange && onChange(e.target.value)}
           style={{

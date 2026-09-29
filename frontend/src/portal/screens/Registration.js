@@ -500,8 +500,8 @@ function PackageStep({ athletes, onUpdate, showErrors }) {
   );
 }
 
-/** The pinned contract tier set (contract v1.8 §B: int in [20, 45, 95] or null) - not invented. */
-const TIER_MINUTES = [20, 45, 95];
+/** The pinned contract tier set (contract v1.8 §B: int in [20, 45, 90] or null) - not invented. */
+const TIER_MINUTES = [20, 45, 90];
 
 function ContractTierChoice({ value, onSelect }) {
   return (
