@@ -8,6 +8,7 @@
     "sync:emulator": "node --env-file=scripts/emulator.env scripts/sync-calendar-sessions.mjs",
     "sweep:emulator": "node --env-file=scripts/emulator.env scripts/sweep-waitlist.mjs",
     "export:emulator": "node --env-file=scripts/emulator.env scripts/export-memberships.mjs",
+    "packages:emulator": "node --env-file=scripts/emulator.env scripts/write-packages.mjs",
     "test:scripts": "node --test scripts/test/*.test.mjs"
   }
 }

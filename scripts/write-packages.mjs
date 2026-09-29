@@ -79,3 +79,54 @@ export function planPackageWrites(catalogue, mode, packages) {
   for (const p of packages) if (!(p.id in map)) problems.push(`${mode} catalogue has no entry for package "${p.id}"`);
   return { plan: problems.length ? [] : plan, problems };
 }
+
+export function diffLine(id, current, next) {
+  // Strings print bare (a price id is `price_...`, not `"price_..."`), null and numbers as JSON.
+  const show = (v) => (v === undefined ? '(unread)' : typeof v === 'string' ? v : JSON.stringify(v));
+  const same = current && MASK.every((f) => (current[f] ?? null) === next[f]);
+  const parts = MASK.map((f) => `${f} ${show(current ? current[f] ?? null : undefined)} -> ${show(next[f])}`);
+  return `packages/${id}: ${parts.join(', ')}${same ? ' (unchanged)' : ''}`;
+}
+
+async function main() {
+  const args = parseArgs(process.argv.slice(2));
+  if (args.error) { console.error(args.error); process.exit(1); }
+  if (args.prod && process.env.FIRESTORE_EMULATOR_HOST) {
+    console.error('Refusing --prod while FIRESTORE_EMULATOR_HOST is set - the target is ambiguous.');
+    process.exit(1);
+  }
+  const catalogue = loadCatalogue(args.catalogue ? path.resolve(process.cwd(), args.catalogue) : CATALOGUE_PATH);
+  const { ALL_PACKAGES } = bundleFrontend(repoRoot, [
+    `export { ALL_PACKAGES } from '${fwdPath(path.join(dataDir, 'packages.js'))}';`,
+  ], { tmpPrefix: 'ryp-packages-' });
+  const { plan, problems } = planPackageWrites(catalogue, args.mode, ALL_PACKAGES);
+  if (problems.length) {
+    for (const p of problems) console.error(`  ABORT: ${p}`);
+    console.error('Nothing written.');
+    process.exit(1);
+  }
+
+  const target = await resolveTarget({ prod: args.prod, requireEmulatorHost: !args.dryRun });
+  console.log(`TARGET: ${target ? target.label : 'none (dry run, diffing against an unread target)'} - mode ${args.mode}`);
+  const writes = [];
+  for (const row of plan) {
+    const current = target ? await getDoc(target, 'packages', row.id) : undefined;
+    if (target && current === null) {
+      console.error(`  ABORT: packages/${row.id} does not exist on ${target.label} - run the catalogue provisioner first.`);
+      process.exit(1);
+    }
+    console.log('  ' + diffLine(row.id, current, row));
+    const { id, ...fields } = row;
+    writes.push({ update: { name: docName('packages', id), fields: fsFields(fields) }, updateMask: { fieldPaths: MASK } });
+  }
+  // Belt and braces for "refuses to touch households": every write path is packages/.
+  if (writes.some((w) => !w.update.name.includes('/documents/packages/'))) throw new Error('write outside packages/ - refusing');
+
+  if (args.dryRun) { console.log('\n[dry-run] nothing written.'); return; }
+  if (args.prod && !args.yes) { console.log('\nRe-run with --yes to write PRODUCTION.'); process.exit(1); }
+  await commit(target, writes);
+  console.log(`Done: ${writes.length} packages doc(s) updated on ${target.label}.`);
+}
+
+const invokedDirectly = process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url);
+if (invokedDirectly) main().catch((err) => { console.error(err.message || err); process.exit(1); });

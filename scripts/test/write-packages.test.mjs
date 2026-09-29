@@ -1,5 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import { spawnSync } from 'node:child_process';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
@@ -62,4 +63,26 @@ test('planPackageWrites: refuses a seam still on window 32 (routing lane not mer
   const { plan, problems } = planPackageWrites(filled('test'), 'test', stale);
   assert.equal(plan.length, 0);
   assert.match(problems.join('\n'), /t-6: packages\.js windowDays is 32, expected 30/);
+});
+
+test('dry run with no target prints the plan against an unread target and writes nothing', (t) => {
+  const env = { ...process.env };
+  delete env.FIRESTORE_EMULATOR_HOST;
+  const r = spawnSync(process.execPath,
+    [path.join(here, '..', 'write-packages.mjs'), '--mode', 'test', '--dry-run',
+      '--catalogue', path.join(here, '..', 'fixtures', 'stripe-catalogue-sample.json')],
+    { cwd: path.join(here, '..', '..'), encoding: 'utf8', env });
+  if (/windowDays is 32/.test(r.stderr)) return t.skip('routing lane packages.js (window 30) not merged yet');
+  assert.equal(r.status, 0, r.stderr);
+  assert.match(r.stdout, /packages\/t-6: stripePriceId \(unread\) -> price_1Sample0000t6, windowDays \(unread\) -> 30/);
+  assert.match(r.stdout, /packages\/elite: .*windowDays \(unread\) -> 45/);
+  assert.match(r.stdout, /\[dry-run\] nothing written/);
+});
+
+test('a null live block aborts before any target is touched (the sample fixture - the committed file passes this once the owner pastes LIVE ids)', () => {
+  const r = spawnSync(process.execPath, [path.join(here, '..', 'write-packages.mjs'), '--mode', 'live', '--dry-run',
+    '--catalogue', path.join(here, '..', 'fixtures', 'stripe-catalogue-sample.json')],
+    { cwd: path.join(here, '..', '..'), encoding: 'utf8' });
+  assert.equal(r.status, 1);
+  assert.match(r.stderr, /live\.t-6: price id missing/);
 });
