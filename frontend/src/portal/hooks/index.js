@@ -96,7 +96,7 @@ import useIssueTokens, { cancelSession, fetchTokenPeriod, setHouseholdStripeIds 
 import useWaitlist, { fetchWaitlistByAthlete, fetchWaitlistByHousehold, fetchWaitlistBySession } from './waitlist';
 import useRecentNotices from './notices';
 import usePush from './push';
-import { fetchLoginInvite } from './signups';
+import useSignups, { fetchLoginInvite } from './signups';
 import {
   COACH,
   COACH_BLOCKS,
@@ -203,7 +203,7 @@ export { default as useOnboardingStatus } from './onboarding';
 // every portal hook from this one seam, same as every hook above.
 // Sprint 16: hooks/billing.js derives the hub's coaching line with the same
 // helper useMembership uses, so the two can never disagree.
-export { coachingFor, useIssueTokens, usePush, useRecentNotices, useWaitlist };
+export { coachingFor, useIssueTokens, usePush, useRecentNotices, useSignups, useWaitlist };
 
 /**
  * Harness demo states (contract v1.1): every data-bearing hook accepts
@@ -3512,7 +3512,7 @@ async function liveAdminDashboard(today) {
   // uses. `lapsedHouseholds` links straight to nothing invented — just the
   // household's own id/name, matching what the admin screen already knows
   // how to show elsewhere.
-  const membership = { active: 0, pastDue: 0, lapsed: 0, lapsedHouseholds: [] };
+  const membership = { active: 0, pastDue: 0, lapsed: 0, pending: 0, lapsedHouseholds: [] };
   for (const h of households) {
     const status = h.membership?.status ?? 'active';
     if (status === 'past_due') membership.pastDue += 1;
@@ -3521,6 +3521,8 @@ async function liveAdminDashboard(today) {
       membership.lapsedHouseholds.push({ id: h.id, name: h.name ?? null });
     } else membership.active += 1;
   }
+  // Sprint 20 (spec 4.4/7): athletes still on checkout - an ATHLETE count beside the household counts, so the dashboard agrees with the sign-ups report.
+  membership.pending = athletes.filter((a) => a.billing?.status === 'pending').length;
 
   const publishedDiagnosticAthleteIds = diagnostics
     .filter((d) => d.status === 'published')
@@ -3677,7 +3679,7 @@ export function useAdminDashboard({ variant = 'populated' } = {}) {
           // Contract v2.1, pin H: the harness's one named seed household
           // (HOUSEHOLD/Whitfield) is active — no invented lapsed/past_due
           // household ships in the default demo state.
-          membership: { active: 1, pastDue: 0, lapsed: 0, lapsedHouseholds: [] },
+          membership: { active: 1, pastDue: 0, lapsed: 0, pending: 0, lapsedHouseholds: [] },
         },
     live
       ? {
