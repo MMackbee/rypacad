@@ -1313,7 +1313,7 @@ reserved`, floored at 0; `unlimited` when `pkg.tokens === null` (Elite).
 
 **Booking windows (pin D).** `SPECIALIST_BOOKING_WINDOW_DAYS` (the old flat
 specialist-only window) is gone from the booking-gate path — every session
-type now uses the athlete's own package window: `windowDaysFor(pkg)` → `32`
+type now uses the athlete's own package window: `windowDaysFor(pkg)` → `30` (**Sprint 20 ruling 0.5, was 32**)
 for every token package and `single`, `45` for `elite`. The window **rolls
 at 07:00 America/Chicago**, not midnight: `anchor = localNow.hour >= 7 ?
 localToday : localToday - 1; openThrough = anchor + windowDays; bookable iff
@@ -1549,6 +1549,19 @@ recipients' outcomes exactly as the emulator functions leave them with no
 provider configured (`email: 'skipped'`, `push: 'no-device'`), timestamps
 relative to the seed run.
 
+### v3.0 query additions (Sprint 20 — sign-up, Calendly, per-athlete billing) — no `firestore.indexes.json` changes
+
+Every new read is a single-field filter or a single-field sort, which rides Firestore's automatic single-field index; none combines an equality with a range/sort on a different field, so none needs a composite:
+
+- `households orderBy signup.at desc` (`useSignups`) — one sort field (a map sub-field is still one field).
+- `loginInvites where householdId == :id`; `loginInvites/{emailLower}` by id (`claimInvite`).
+- `bookings where flag != null` — a single-field `!=` is served by the automatic index (docs without the field are excluded, which is the intent: absent == clean).
+- `bookings where calendlyInviteeUri == :uri` (`invitee.canceled`, reschedule); `calendlyEvents where outcome == 'unresolved'`.
+- The webhook's resolution order (interfaces 6.2): `athletes where billing.subscriptionId == :id`, `athletes where facilityBilling.subscriptionId == :id`, `households where stripeCustomerId == :c` (existing), `households where stripeCustomerIds array-contains :c` — each one equality/array-contains on one field.
+- `write-packages.mjs` reads `packages/{id}` by id; `useSignups`'s athletes read is `athletes where householdId == :id` (existing single-field pattern).
+
+The `bookings (status, date)` composite (index 7) still serves reminders; nothing here filters `source`/`flag` together with a date.
+
 ### v2.2 index reasoning (Sprint 14 — notifications)
 
 - **`notifications (householdId ASC, createdAt DESC)` and `notifications
@@ -1689,6 +1702,7 @@ The seed script:
   `parker` (no QA sign-in story is pinned for it) — it is an
   athletes/households pair only, the same shape the MackBee siblings have in
   `provision-family.mjs`;
+- **contract v3.0.1 (Sprint 20):** `whitfield` carries `signup`/`createdBy`/`stripeCustomerIds: []`/`emergencyContact: null`/`guardian.relationship` (the self-signed-up family; `parker` stays legacy); athletes carry `handicap` and `loginEmail`; `athletes/nico.billing.status: 'pending'` (jordan/reese absent == active); one open `loginInvites/reese.whitfield@example.com`; packages write `stripePriceId: null` explicitly (never an id - `write-packages.mjs` is the only writer); specialist slots carry `durationMinutes` (phil 45, mental 30) with Yannick at 4:00 / 4:30 / 5:00 PM; and one Calendly trio - `sessions/cal-seedevt0001` (`bookable: false`, `source: 'calendly'`), `bookings/reese_cal-seedevt0001` (`source: 'calendly'`, `flag: null`, `createdBy: 'system'`) and `calendlyEvents/seedinv0001_invitee.created` (`applied`). `npm run packages:emulator -- --mode test --yes` then stamps the committed TEST ids (`functions/config/stripe-catalogue.json`, `995e677`) onto the emulator's packages docs; `--mode live` refuses until the owner pastes the LIVE ids.
 - **contract v2.0 (Sprint 12 pin A) — `athletes.packageId` moves onto the
   token catalogue and `fitnessPackageId` is deleted entirely** (not merely
   left unset): jordan (was `g-8-3`) → `t-12`; reese and nico (both were
