@@ -56,7 +56,10 @@ export function validateAthleteEntry(a, { todayISO, guardianEmail = '', siblings
   if (a.packageId != null && !ALL_PACKAGES.some((p) => p.id === a.packageId)) errors.packageId = 'Pick a package from the list.';
   if (a.contractMinutes != null && !TIER_MINUTES.includes(a.contractMinutes)) errors.contractMinutes = 'Pick 20, 45 or 90 minutes.';
   if (normalizeHandicap(a.handicap) === undefined) errors.handicap = 'Handicap is a whole number from 0 to 54, or leave it blank.';
-  if (a.ownLogin) {
+  // Own login is a parent-mode choice (the adult athlete IS the login); a
+  // toggle left on before switching to athlete mode is ignored, as the
+  // payload builder and createFamily ignore it.
+  if (mode === 'parent' && a.ownLogin) {
     const email = lower(a.loginEmail);
     if (!EMAIL_RE.test(email)) errors.loginEmail = 'Enter the email the athlete will sign in with.';
     else if (email === lower(guardianEmail)) errors.loginEmail = "Use a different email from the guardian's.";

@@ -184,7 +184,7 @@ export const TOKENS_EXHAUSTED = tokensFor(
 
 export const BOOKING_CONFIRMATION = {
   name: 'Training block',
-  when: 'Mon Nov 2 · 4:00 PM',
+  when: 'Tue Nov 3 · 4:00 PM',
   email: 'dana@email.com',
   note: 'Cancel until the day before the session to keep your token.',
 };

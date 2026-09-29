@@ -111,6 +111,12 @@ export default function Registration({ variant, bare = false, mode = 'signup', a
       setResult(res);
       setPhase('success');
     } catch (err) {
+      // A retry after a lost response: the family exists already. Refresh so
+      // the route lands the account on its home, whose banner has Pay now.
+      if (err && err.reason === 'already-provisioned' && onRefresh) {
+        await onRefresh();
+        return;
+      }
       setPhase('form');
       setSubmitError(err && typeof err.message === 'string' && err.message ? err.message : 'Sign-up could not be saved. Try again.');
     }

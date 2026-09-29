@@ -96,6 +96,8 @@ test('otherTierLive: a live sibling keeps the household; pending/lapsed do not',
       assert.equal(await live([doc('a1', 'lapsed'), doc('a2', 'pending')]),
           false);
       assert.equal(await live([doc('a1', 'active')]), false);
+      const legacy = {id: 'a3', data: () => ({})}; // absent billing == active
+      assert.equal(await live([doc('a1', 'lapsed'), legacy]), true);
     });
 
 run();

@@ -169,7 +169,13 @@ export default function BookSession({
   // and the banner until 07:00 America/Chicago on Oct 10. Read once per
   // render off the same package the window comes from. The rules and
   // createBooking refuse independently; this only stops the attempt.
-  const gateOpen = bookingOpen(Date.now(), selfMember?.package ?? null);
+  // Onboarding practice books seed data and writes nothing - the gate never
+  // applies there (the walkthrough's booking step must stay completable).
+  const gateOpen = practice || bookingOpen(Date.now(), selfMember?.package ?? null);
+  // The banner waits for the member row: an Elite family must not see
+  // "Not open yet" flash while useMembership loads. Cards stay inert until
+  // the package is known either way.
+  const showGateBanner = !gateOpen && !membershipState.loading && selfMember != null;
 
   const [selectedDate, setSelectedDate] = useState(() => demoSelectedDate ?? null);
   // The slot the athlete just booked. Persistence is the API's job later; the
@@ -358,7 +364,7 @@ export default function BookSession({
             ) : null}
 
             <div style={{ padding: '0 22px', display: 'flex', flexDirection: 'column', gap: 12 }}>
-              {!gateOpen ? <BookingOpensBanner /> : null}
+              {showGateBanner ? <BookingOpensBanner /> : null}
               <TokensBanner tokens={tokens} />
               {data?.seasonNote ? (
                 <Banner tone="green" title="Season">

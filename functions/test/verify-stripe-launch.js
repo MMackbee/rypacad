@@ -123,6 +123,9 @@ const META = (ath, pk) => ({householdId: 'novak', athleteId: ath,
 const basilInvoice = (id, sub, ath, pk, reason) => ({id, object: 'event',
   type: 'invoice.paid', data: {object: {id: 'in_' + id, object: 'invoice',
     customer: 'cus_novak', status: 'paid', billing_reason: reason,
+    // A real invoice carries its own (empty) metadata hash; the subscription
+    // snapshot below must still win (review 2026-09-29).
+    metadata: {},
     parent: {subscription_details: {subscription: sub, metadata: META(ath, pk)}},
     lines: {data: [
       {period: {start: secs(2026, 10, 6), end: secs(2026, 10, 6)},

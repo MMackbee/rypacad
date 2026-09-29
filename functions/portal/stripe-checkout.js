@@ -67,6 +67,21 @@ function applyCheckoutCompleted(tx, args) {
       session.subscription : (session.subscription &&
       session.subscription.id) || null;
   const status = session.payment_status === 'paid' ? 'active' : 'pending';
+  // A SECOND completed checkout for an athlete whose live subscription is a
+  // different one (two tabs, a double tap while confirming): never
+  // overwrite - the first subscription keeps billing. The ledger row names
+  // both so ops can cancel and refund the duplicate in Stripe.
+  const current = ref.product === 'facility' ?
+      athlete.facilityBilling : athlete.billing;
+  if (current && current.subscriptionId && subId &&
+      current.subscriptionId !== subId &&
+      (current.status === 'active' || current.status === 'past_due')) {
+    console.warn(`duplicate subscription ${subId} for athlete ` +
+        `${athleteRef.id} (${ref.product}); keeping ${current.subscriptionId}`);
+    return {outcome: 'duplicate-subscription', firstActive: false,
+      detail: {product: ref.product, existing: current.subscriptionId,
+        incoming: subId}};
+  }
   const wasActive = !athlete.billing || athlete.billing.status === 'active';
   const patch = billingPatch(ref.product, {
     status, customerId, subscriptionId: subId, priceId,

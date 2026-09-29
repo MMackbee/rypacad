@@ -12,6 +12,19 @@ import { auth, provider } from '../../firebase';
 import { ERR, LiveDataError, fetchCurrentUser } from './live';
 import { callClaimInvite } from './callables';
 
+// Every screen and guard mounts its own useAuthSession, and each one's
+// NOT_FOUND emission used to fire claimInvite: the first call claimed, the
+// rest read 'already-claimed'. One call per uid at a time; a later call
+// (Check again) goes out fresh (review 2026-09-29).
+const claimFlights = new Map();
+function claimOnce(uid) {
+  const key = uid || '';
+  if (!claimFlights.has(key)) {
+    claimFlights.set(key, callClaimInvite().finally(() => claimFlights.delete(key)));
+  }
+  return claimFlights.get(key);
+}
+
 /**
  * The portal's auth session — the seam between Firebase auth and every screen.
  *
@@ -218,11 +231,14 @@ export default function useAuthSession({ variant } = {}) {
   const runClaim = useCallback(async (seq, fbUser) => {
     setClaimState('checking');
     try {
-      const result = await callClaimInvite();
+      const result = await claimOnce(fbUser && fbUser.uid);
       if (seq !== seqRef.current) return 'error';
       const state = claimStateOf(result);
       setClaimState(state);
-      if (state === 'claimed') await refresh();
+      // 'already-claimed' may mean THIS uid won the claim in another mounted
+      // instance a moment ago - re-read users/{uid}; if it is ours,
+      // provisioned flips and the dead end never shows.
+      if (state === 'claimed' || state === 'already-claimed') await refresh();
       return state;
     } catch (err) {
       if (seq === seqRef.current) setClaimState('error');

@@ -150,13 +150,19 @@ async function applyAthleteSubscriptionUpdated(tx, event, hh, athlete,
   const status = athleteStatusFor(sub.status);
   if (status) {
     billing.applyAthleteStatus(tx, {athleteRef, athlete, product, status,
-      priceId});
+      priceId, eventId: event.id});
   }
+  // Stripe does not order a checkout's events: when this update lands
+  // first, IT is the pending -> active transition, and the later
+  // invoice.paid / checkout.session.completed see "already active" - so it
+  // owns the payment-received notice (idempotent on its ledger key).
+  const wasActive = !athlete.billing || athlete.billing.status === 'active';
+  const firstActive = product === 'tier' && status === 'active' && !wasActive;
   if (!packageId || packageId === athlete.packageId) {
-    return {outcome: 'no-change', detail: {priceId, packageId}};
+    return {outcome: 'no-change', firstActive, detail: {priceId, packageId}};
   }
   tx.update(athleteRef, {packageId, updatedAt: now()});
-  return {outcome: 'processing', followUp: 'downgrade', detail: {
+  return {outcome: 'processing', followUp: 'downgrade', firstActive, detail: {
     priceId, packageId, athleteIds: [athleteRef.id],
     tokens: newPkg && newPkg.tokens !== undefined ? newPkg.tokens : null}};
 }
@@ -270,14 +276,14 @@ async function handleEvent(event) {
       if (product === 'facility') {
         // D10: the add-on fails alone - membership and bookings untouched.
         applied = billing.applyAthleteStatus(tx, {athleteRef, athlete,
-          product, status, priceId: null});
+          product, status, priceId: null, eventId: event.id});
       } else if (final) {
         // D17: a FINAL failure ends this athlete's subscription (Stripe's
         // dunning cancels it next) - the same per-athlete rule as deleted.
         const siblingLive = await billing.otherTierLive(tx, db(), hh.id,
             athleteRef.id);
         billing.applyAthleteStatus(tx, {athleteRef, athlete, product,
-          status, priceId: null});
+          status, priceId: null, eventId: event.id});
         applied = siblingLive ?
             {outcome: 'processing', followUp: 'revoke-athlete', detail: {}} :
             applyLapsed(tx, event, hh, 'unpaid');
@@ -285,14 +291,15 @@ async function handleEvent(event) {
         // A retrying card freezes the household (spec 14, accepted).
         applied = applyPastDue(tx, event, hh);
         billing.applyAthleteStatus(tx, {athleteRef, athlete, product,
-          status, priceId: null});
+          status, priceId: null, eventId: event.id});
       }
     } else if (event.type === 'customer.subscription.deleted') {
       if (product === 'facility') {
         // D10: facilityBilling.status 'lapsed' + facilityAccess false ONLY;
         // no applyLapsed, no followUp 'revoke'.
         applied = billing.applyAthleteStatus(tx, {athleteRef, athlete,
-          product, status: 'lapsed', priceId: resolve.priceIdOf(object)});
+          product, status: 'lapsed', priceId: resolve.priceIdOf(object),
+          eventId: event.id});
       } else {
         // D17: THIS athlete lapses and loses their future bookings; the
         // household (and every sibling's bookings) only when no sibling
@@ -300,7 +307,8 @@ async function handleEvent(event) {
         const siblingLive = await billing.otherTierLive(tx, db(), hh.id,
             athleteRef.id);
         billing.applyAthleteStatus(tx, {athleteRef, athlete, product,
-          status: 'lapsed', priceId: resolve.priceIdOf(object)});
+          status: 'lapsed', priceId: resolve.priceIdOf(object),
+          eventId: event.id});
         applied = siblingLive ?
             {outcome: 'processing', followUp: 'revoke-athlete', detail: {}} :
             applyLapsed(tx, event, hh, object.status || 'canceled');

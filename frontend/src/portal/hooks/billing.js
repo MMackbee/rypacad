@@ -310,6 +310,9 @@ export function useHouseholdsDirectory() {
   );
 }
 
+/** athleteId -> { packageId } once its ?paid= return confirmed (this page load). */
+const confirmedPayments = new Map();
+
 /**
  * The `?paid=<athleteId>` return from Stripe Checkout (Sprint 20, spec 4.2):
  * `{ state: 'idle'|'confirming'|'confirmed'|'timeout', billingStatus }`. Polls
@@ -319,25 +322,37 @@ export function useHouseholdsDirectory() {
  * passes the id it read from useSearchParams; null means nothing to confirm.
  */
 export function usePaymentConfirmation(athleteId) {
-  const [state, setState] = useState({ state: 'idle', billingStatus: null });
+  const [state, setState] = useState({ state: 'idle', billingStatus: null, packageId: null });
   useEffect(() => {
     if (!athleteId || !isLive()) return undefined;
+    // Confirmed once already this page load: the bump below makes the home
+    // re-fetch, which unmounts and remounts the banner while the router still
+    // carries ?paid= (replaceState is invisible to it) - answer from memory
+    // instead of polling and bumping again, which looped (review 2026-09-29).
+    const done = confirmedPayments.get(athleteId);
+    if (done) {
+      setState({ state: 'confirmed', billingStatus: 'active', packageId: done.packageId });
+      return undefined;
+    }
     let alive = true;
     let attempts = 0;
     let timer = null;
-    setState({ state: 'confirming', billingStatus: null });
+    setState({ state: 'confirming', billingStatus: null, packageId: null });
     const tick = async () => {
       if (!alive) return;
       attempts += 1;
       let status = null;
+      let packageId = null;
       try {
         const a = await fetchAthlete(athleteId);
         status = a.billing?.status ?? 'active';
+        packageId = a.packageId ?? null;
       } catch (err) {
         status = null; // a transient read error is just another attempt
       }
       if (!alive) return;
       if (status === 'active') {
+        confirmedPayments.set(athleteId, { packageId });
         bump('athletes');
         bump('billing');
         try {
@@ -345,14 +360,14 @@ export function usePaymentConfirmation(athleteId) {
         } catch (err) {
           /* a locked history is not a failure */
         }
-        setState({ state: 'confirmed', billingStatus: status });
+        setState({ state: 'confirmed', billingStatus: status, packageId });
         return;
       }
       if (attempts >= 24) {
-        setState({ state: 'timeout', billingStatus: status });
+        setState({ state: 'timeout', billingStatus: status, packageId });
         return;
       }
-      setState({ state: 'confirming', billingStatus: status });
+      setState({ state: 'confirming', billingStatus: status, packageId });
       timer = setTimeout(tick, 5000);
     };
     timer = setTimeout(tick, 0);

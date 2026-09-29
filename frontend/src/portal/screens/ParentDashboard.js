@@ -87,10 +87,13 @@ export default function ParentDashboard({
   // renders; the household-level `membership` above keeps its meaning.
   const hub = useBillingHub();
   const hubStatus = hub.data?.status ?? null;
-  const pendingAthletes = hubStatus?.status === 'pending' ? hubStatus.pendingAthletes : [];
   const billingById = new Map((hub.data?.members ?? []).map((m) => [m.athleteId, m.billing?.status ?? 'active']));
   const [params] = useSearchParams();
   const paidAthleteId = params.get('paid');
+  // The athlete just back from Stripe is confirming, not unpaid: no second
+  // Pay now while the webhook lands - a second checkout double-subscribes.
+  const pendingAthletes = (hubStatus?.status === 'pending' ? hubStatus.pendingAthletes : [])
+    .filter((a) => a.athleteId !== paidAthleteId);
   // Sprint 11 pin D entry point: same direct-navigate() precedent
   // AthleteDashboard's own coaching/membership links already use (this lane
   // never edits PortalRoutes.js) rather than a new onOpenMembership prop —

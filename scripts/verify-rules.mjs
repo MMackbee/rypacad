@@ -119,6 +119,13 @@ export async function task5() {
     { fields: fsFields({ status: 'cancelled', cancelledBy: uid.parent, cancelReason: 'member' }) }, auth).then((r) => r.status);
   expect('member cancel of a portal booking', await cancel('ath-active_s-portal', t.parent), 200);
   expect('member cancel of a calendly booking refused', await cancel('ath-active_cal-1', t.parent), 403);
+  // Re-confirming a cancelled row is booking: the same gates as a create
+  // (review 2026-09-29). An unpaid athlete's revoked row stays cancelled.
+  await seed('bookings', 'ath-pending_s-old', { athleteId: 'ath-pending', sessionId: 's1', date: '2026-11-04', type: 'training', periodKey: '2026-11-01',
+    status: 'cancelled', householdId: 'hh', createdBy: uid.parent, createdAt: new Date(), chargedFrom: 'period', cancelledBy: 'system', cancelReason: 'lapsed' });
+  const rebook = (id, auth) => call('PATCH', `/bookings/${id}?updateMask.fieldPaths=status`, { fields: fsFields({ status: 'confirmed' }) }, auth).then((r) => r.status);
+  expect('re-book refused for a pending athlete', await rebook('ath-pending_s-old', t.parent), 403);
+  expect('re-book of a portal row by a paid athlete', await rebook('ath-active_s-portal', t.parent), beforeGate ? 403 : 200);
   await seed('loginInvites', 'kid@example.com', { email: 'kid@example.com', householdId: 'hh', athleteId: 'ath-active', athleteName: 'Kid', requestedBy: 'guardian',
     createdBy: uid.parent, createdAt: new Date(), status: 'open', claimedBy: null, claimedAt: null });
   const read = (auth) => call('GET', '/loginInvites/kid@example.com', null, auth).then((r) => r.status);

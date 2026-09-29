@@ -99,7 +99,12 @@ export default function AthleteDashboard({
       ) : (
       <div style={{ padding: '0 22px 24px', display: 'flex', flexDirection: 'column', gap: 12 }}>
         <PaymentConfirming athleteId={params.get('paid')} />
-        <PendingBanner pendingAthletes={mineStatus?.status === 'pending' ? mineStatus.pendingAthletes : []} body={mineStatus?.body} title={mineStatus?.title} />
+        {/* No second Pay now while the ?paid= return confirms (double subscription). */}
+        <PendingBanner
+          pendingAthletes={(mineStatus?.status === 'pending' ? mineStatus.pendingAthletes : []).filter((a) => a.athleteId !== params.get('paid'))}
+          body={mineStatus?.body}
+          title={mineStatus?.title}
+        />
         {/* Live: shown until a published diagnostic exists (contract v1.8 C);
             seed: the demo 'new' variant. */}
         {variant === 'new' || data?.diagnosticCaptured === false ? <StartHere onBook={onBook} /> : null}

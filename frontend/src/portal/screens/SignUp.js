@@ -46,8 +46,10 @@ export default function SignUp({ bare = false, onSignIn }) {
     setCreating(true);
     setFailure(null);
     try {
-      await createLogin(email.trim(), password);
-      setSent(email.trim());
+      const res = await createLogin(email.trim(), password);
+      // sent false: the login exists but the mail did not go (throttled or
+      // offline) - say so; Resend sits on the verify card at pay time.
+      setSent({ email: email.trim(), mailed: !res || res.sent !== false });
     } catch (err) {
       const inUse = err && err.reason === 'email-in-use';
       setFailure({ inUse, message: inUse ? EMAIL_IN_USE : (err && err.message) || 'The login could not be created. Try again.' });
@@ -63,9 +65,15 @@ export default function SignUp({ bare = false, onSignIn }) {
         <BrandHeader />
         {sent ? (
           <>
-            <Banner tone="green" title="Verification sent">
-              We sent a link to {sent} from {VERIFY_EMAIL_SENDER}. You can finish sign-up now; verify before you pay.
-            </Banner>
+            {sent.mailed ? (
+              <Banner tone="green" title="Verification sent">
+                We sent a link to {sent.email} from {VERIFY_EMAIL_SENDER}. You can finish sign-up now; verify before you pay.
+              </Banner>
+            ) : (
+              <Banner tone="yellow" title="Login created">
+                We could not send the verification email to {sent.email} yet. Finish sign-up now; when you pay, tap Resend on the verify card.
+              </Banner>
+            )}
             <Button style={{ marginTop: 14 }} onClick={() => navigate('/portal/register', { replace: true })}>
               Continue to sign-up
             </Button>

@@ -65,16 +65,20 @@ function priceIdOf(subscription) {
 
 /**
  * Subscription metadata from a subscription OR an invoice (Basil carries it
- * under `parent.subscription_details.metadata`).
+ * under `parent.subscription_details.metadata`). A real Invoice always has
+ * its OWN top-level `metadata` - `{}`, never filled from
+ * `subscription_data.metadata` - so an invoice reads only the subscription
+ * snapshot, and an empty map counts as absent.
  * @param {!Object} object `event.data.object`.
  * @return {!Object} The metadata map, possibly empty.
  */
 function metadataOf(object) {
   const o = object || {};
+  const pick = (m) => (m && Object.keys(m).length ? m : null);
   const basil = o.parent && o.parent.subscription_details;
   const legacy = o.subscription_details;
-  return o.metadata || (basil && basil.metadata) ||
-      (legacy && legacy.metadata) || {};
+  return pick(basil && basil.metadata) || pick(legacy && legacy.metadata) ||
+      (o.object === 'invoice' ? null : pick(o.metadata)) || {};
 }
 
 /**

@@ -4,6 +4,7 @@ import { Spinner } from './Button';
 import { Banner } from './Primitives';
 import { usePaymentConfirmation } from '../hooks/billing';
 import { bookingOpen } from '../data/calendar';
+import { packageById } from '../data/packages';
 import { CONFIRMING, CONFIRM_TIMEOUT, confirmedLine } from '../data/billingCopy';
 
 /**
@@ -12,12 +13,15 @@ import { CONFIRMING, CONFIRM_TIMEOUT, confirmedLine } from '../data/billingCopy'
  * after the hook strips the query, so "Payment received" does not vanish.
  */
 export default function PaymentConfirming({ athleteId, style }) {
-  const { state } = usePaymentConfirmation(athleteId ?? null);
+  const { state, packageId } = usePaymentConfirmation(athleteId ?? null);
   const [shown, setShown] = useState(null);
   useEffect(() => { if (state !== 'idle') setShown(state); }, [state]);
   const s = shown ?? (athleteId ? 'confirming' : null);
   if (!s) return null;
-  if (s === 'confirmed') return <Banner tone="green" title="Payment received" style={style}>{confirmedLine(bookingOpen(Date.now()))}</Banner>;
+  // The PAID package decides the line: Elite books at once, before Oct 10 too
+  // (ruling 0.6) - the emailed notice says the same.
+  const open = bookingOpen(Date.now(), packageId ? packageById(packageId) : null);
+  if (s === 'confirmed') return <Banner tone="green" title="Payment received" style={style}>{confirmedLine(open)}</Banner>;
   if (s === 'timeout') return <Banner tone="yellow" title="Still confirming" style={style}>{CONFIRM_TIMEOUT}</Banner>;
   return (
     <Banner tone="neutral" title="Payment" style={style}>

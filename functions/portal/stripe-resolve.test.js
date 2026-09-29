@@ -32,6 +32,14 @@ test('priceIdOf and metadataOf read both shapes', () => {
   assert.deepEqual(r.metadataOf({parent: {subscription_details:
     {metadata: {athleteId: 'b'}}}}), {athleteId: 'b'});
   assert.deepEqual(r.metadataOf({}), {});
+  // A real invoice carries its own empty `metadata`; the subscription
+  // snapshot must win (review 2026-09-29, the prepaid-month blocker).
+  assert.deepEqual(r.metadataOf({object: 'invoice', metadata: {},
+    parent: {subscription_details: {metadata: {athleteId: 'c'}}}}),
+  {athleteId: 'c'});
+  assert.deepEqual(r.metadataOf({object: 'invoice',
+    metadata: {note: 'invoice-own'}}), {});
+  assert.deepEqual(r.metadataOf({object: 'subscription', metadata: {}}), {});
 });
 
 test('parseClientReference: household__athlete__product', () => {

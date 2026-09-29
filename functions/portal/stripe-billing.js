@@ -126,7 +126,8 @@ function applyAthleteInvoicePaid(tx, args) {
  */
 function applyAthleteStatus(tx, args) {
   tx.update(args.athleteRef, billingPatch(args.product,
-      {status: args.status, priceId: args.priceId || undefined}));
+      {status: args.status, priceId: args.priceId || undefined,
+        lastEventId: args.eventId || undefined}));
   return {outcome: args.status};
 }
 
@@ -145,8 +146,13 @@ function applyAthleteStatus(tx, args) {
 async function otherTierLive(tx, db, householdId, athleteId) {
   const snap = await tx.get(db.collection('athletes')
       .where('householdId', '==', householdId));
-  return snap.docs.some((d) => d.id !== athleteId &&
-      ['active', 'past_due'].includes(((d.data() || {}).billing || {}).status));
+  // Absent `billing` == active (spec 4.4): a legacy sibling keeps the
+  // household live too.
+  return snap.docs.some((d) => {
+    const b = (d.data() || {}).billing;
+    return d.id !== athleteId &&
+        (!b || ['active', 'past_due'].includes(b.status));
+  });
 }
 
 /**

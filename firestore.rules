@@ -709,7 +709,14 @@ service cloud.firestore {
             // cancel). Absent source == 'portal'.
             && resource.data.get('source', null) != 'calendly')
           || (before.status == 'cancelled' && after.status == 'confirmed'
-              && diffKeys.hasOnly(['status']))
+              && diffKeys.hasOnly(['status'])
+              // Sprint 20 (review 2026-09-29): re-confirming is booking - the
+              // same per-athlete billing and Oct 10 gates as a create, and
+              // never a Calendly-sourced row. The get() runs only on this
+              // arm (&& short-circuits) and is one cached document read.
+              && resource.data.get('source', null) != 'calendly'
+              && athleteBillingOk(athleteData(before.athleteId))
+              && bookingOpenOk(athleteData(before.athleteId)))
         );
       }
 
