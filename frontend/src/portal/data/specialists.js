@@ -37,6 +37,7 @@
  * convention as the rest of the season — the generator never invents them,
  * and neither does this file.
  */
+// Sprint 20 (spec 6.1): durationMinutes is the slot length when a session doc carries none; bookingMode 'calendly' hands Yannick's booking to Calendly when REACT_APP_CALENDLY_MENTAL_URL is set (data/calendly.js), else the in-app list.
 export const SPECIALISTS = [
   {
     id: 'phil',
@@ -44,6 +45,7 @@ export const SPECIALISTS = [
     discipline: 'Performance coaching',
     sessionNoun: 'Performance session',
     capacity: 6,
+    durationMinutes: 45,
     whatToExpect:
       'Small-group performance training — strength, speed and athleticism for golf, capped at six athletes.',
   },
@@ -53,6 +55,8 @@ export const SPECIALISTS = [
     discipline: 'Mental game',
     sessionNoun: 'Mental game session',
     capacity: 1,
+    durationMinutes: 30,
+    bookingMode: 'calendly',
     whatToExpect: 'One-on-one mental game work — focus, routine and course management.',
   },
 ];
