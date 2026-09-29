@@ -16,9 +16,9 @@
 const assert = require('node:assert/strict');
 const lib = require('./lib');
 
-const T12 = {id: 't-12', kind: 'tokens', tokens: 12, windowDays: 32};
+const T12 = {id: 't-12', kind: 'tokens', tokens: 12, windowDays: 30};
 const ELITE = {id: 'elite', kind: 'elite', tokens: null, windowDays: 45};
-const SINGLE = {id: 'single', kind: 'single', tokens: 1, windowDays: 32};
+const SINGLE = {id: 'single', kind: 'single', tokens: 1, windowDays: 30};
 
 const cases = [];
 /**
@@ -305,6 +305,43 @@ test('householdByCustomer: resolves, or null when unmatched', async () => {
   assert.equal(await lib.householdByCustomer(fakeDb([]), 'cus_nope'), null);
   assert.equal(await lib.householdByCustomer(fakeDb([]), null), null);
 });
+
+// --- Sprint 20 launch helpers ----------------------------------------------
+
+test('chicagoTime: h:mm AM/PM with a plain U+0020 (sync parity)', () => {
+  assert.equal(lib.chicagoTime(new Date('2026-10-14T21:00:00Z')), '4:00 PM');
+  assert.equal(lib.chicagoTime(new Date('2026-12-02T15:30:00Z')), '9:30 AM');
+  assert.equal(lib.chicagoTime(new Date('2026-10-14T21:00:00Z')).charCodeAt(4),
+      32);
+});
+
+test('bookingOpen: gate at BOOKING_OPENS_AT, Elite exempt', () => {
+  assert.equal(lib.BOOKING_OPENS_AT, 1791633600000);
+  assert.equal(lib.bookingOpen(1791633600000 - 1, T12), false);
+  assert.equal(lib.bookingOpen(1791633600000, T12), true);
+  assert.equal(lib.bookingOpen(new Date(1791633600000 - 1), ELITE), true);
+  assert.equal(lib.bookingOpen(1791633600000 - 1, null), false);
+});
+
+test('ageAt: whole years, birthday-aware, null when unparseable', () => {
+  assert.equal(lib.ageAt('2008-09-28', '2026-09-28'), 18);
+  assert.equal(lib.ageAt('2008-09-29', '2026-09-28'), 17);
+  assert.equal(lib.ageAt('2013-02-01', '2026-09-28'), 13);
+  assert.equal(lib.ageAt('nope', '2026-09-28'), null);
+  assert.equal(lib.ageAt(null, '2026-09-28'), null);
+});
+
+test('membershipAllowsBooking: athlete billing gates too (absent == active)',
+    () => {
+      assert.equal(lib.membershipAllowsBooking({}, {}), true);
+      assert.equal(lib.membershipAllowsBooking({}, null), true);
+      assert.equal(lib.membershipAllowsBooking({},
+          {billing: {status: 'active'}}), true);
+      assert.equal(lib.membershipAllowsBooking({},
+          {billing: {status: 'pending'}}), false);
+      assert.equal(lib.membershipAllowsBooking({membership: {status: 'lapsed'}},
+          {billing: {status: 'active'}}), false);
+    });
 
 /**
  * Run every registered case in order and exit non-zero on the first failure.

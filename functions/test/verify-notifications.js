@@ -256,7 +256,7 @@ async function main() {
 
   log('STEP 0  the clock the time-based steps depend on');
   check(`hart period ends exactly ${LEAD} days out`, HART_PERIOD.periodEnd, EXP_TARGET);
-  check('lopez period ends exactly 4 days out (the negative case)', LOPEZ_PERIOD.periodEnd, addDays(EXP_TODAY, 4));
+  check(`lopez period ends exactly ${LEAD + 1} days out (the negative case)`, LOPEZ_PERIOD.periodEnd, addDays(EXP_TODAY, LEAD + 1));
   check('push: no device -> no-device; unreachable from the emulator -> skipped',
       [(await push.sendPush({uid: 'x', tokens: [], title: 't', body: 'b'})).status, (await push.sendPush({uid: 'x', tokens: ['tok'], title: 't', body: 'b'})).status], ['no-device', 'skipped']);
   await waitFor(async () => (await countKind('booking-confirmed')) === seededConfirmed, 'the seed\'s booking-confirmed notices');
