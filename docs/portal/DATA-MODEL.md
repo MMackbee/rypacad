@@ -249,9 +249,11 @@ node scripts/sync-calendar-sessions.mjs --from ... --to ... --dry-run \
 | summary starts with `Training block`, timed (`start.dateTime`) | bookable session, `type: 'training'` |
 | summary starts with `Tournament`, timed | bookable session, `type: 'tournament'` |
 | summary starts with `Phil`, timed | bookable session, `type: 'phil'` — **contract v1.7 (Sprint 9)** |
-| summary starts with `Mental` or `Yannick`, timed | bookable session, `type: 'mental'` — **contract v1.7 (Sprint 9)** |
+| summary starts with `Mental` or `Yannick`, timed | skipped — display-only since **contract v3.0.1 (Sprint 20)**: Yannick books through Calendly; `calendlyWebhook` writes `sessions/cal-<uuid>` (see [sessions](#sessionssessionid)). The first sync after the change deletes (booked 0) or cancels every previously synced `mental` session. |
 | all-day event (`start.date` only) | skipped — display-only, whatever the title |
 | any other summary | skipped — display-only (counted, e.g. legacy `Academy Training`) |
+
+**`durationMinutes` (Sprint 20):** the end-time regex (`sync:317`) was `d{4}` without backslashes and never matched, so every synced session read 60 minutes; fixed - Phil's blocks now carry their real length (`scripts/test/sync-calendar-sessions.test.mjs`).
 
 Mapped fields: id `YYYY-MM-DD-<n>` where n is the 0-based start-time order of
 that day's **bookable** events; `time` formatted like the generator
