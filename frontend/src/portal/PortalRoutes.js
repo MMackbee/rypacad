@@ -30,6 +30,7 @@ import { bump } from './hooks/invalidate';
 import NotificationPreferences from './screens/NotificationPreferences';
 import Reservations from './screens/Reservations';
 import AdminDashboard from './screens/AdminDashboard';
+import AdminSignups from './screens/AdminSignups';
 import StaffRoles from './screens/StaffRoles';
 import TourStandings from './screens/TourStandings';
 import SpecialistDay from './screens/SpecialistDay';
@@ -311,8 +312,20 @@ function AdminRoute({ onOpenAthlete, onSignOut }) {
       role={role}
       onOpenAthlete={onOpenAthlete}
       onOpenHousehold={(id) => navigate(`/portal/admin/households/${id}`)}
+      onOpenSignups={() => navigate('/portal/admin/signups')}
       onSignOut={onSignOut}
     />
+  );
+}
+
+/** Sprint 20 (spec 7): the sign-ups report; a row opens that household's staff billing view. */
+function SignupsRoute() {
+  const live = isLive();
+  const { user } = useAuthSession(live ? undefined : { variant: 'idle' });
+  const navigate = useNavigate();
+  return (
+    <AdminSignups bare role={(live && user?.role) || 'owner'} onBack={() => navigate('/portal/admin')}
+      onOpenHousehold={(id) => navigate(`/portal/admin/households/${id}`)} />
   );
 }
 
@@ -327,7 +340,7 @@ function SpecialistDayRoute({ onSignOut }) {
   // user looped Navigate against RequireRole's own redirect (integration
   // browser pass: "maximum update depth exceeded"). Wait like RequireRole.
   if (live && loading) return null;
-  if (live && !specialistId && !canSwitch) return <Navigate to="/portal/coach" replace />;
+  if (live && !specialistId && !canSwitch) return <Navigate to="/portal/tour" replace />;
   return (
     <SpecialistDay
       bare
@@ -731,7 +744,7 @@ export default function PortalRoutes() {
       <Route
         path="admin"
         element={
-          <RequireRole roles={['ops', 'owner', 'mental']}>
+          <RequireRole roles={['ops', 'owner']}>
             <AdminRoute onOpenAthlete={openAthlete} onSignOut={onSignOut} />
           </RequireRole>
         }
@@ -743,6 +756,14 @@ export default function PortalRoutes() {
         element={
           <RequireRole roles={['ops', 'owner']}>
             <StaffBillingRoute />
+          </RequireRole>
+        }
+      />
+      <Route
+        path="admin/signups"
+        element={
+          <RequireRole roles={['ops', 'owner']}>
+            <SignupsRoute />
           </RequireRole>
         }
       />

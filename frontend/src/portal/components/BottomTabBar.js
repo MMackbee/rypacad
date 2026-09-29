@@ -84,7 +84,6 @@ export const TABS = {
   ],
   mental: [
     { key: 'sessions', label: 'Sessions', icon: 'today', route: '/portal/my-sessions' },
-    { key: 'admin', label: 'Admin', icon: 'admin', route: '/portal/admin' },
     { key: 'tour', label: 'Tour', icon: 'trophy', route: '/portal/tour' },
   ],
 };
