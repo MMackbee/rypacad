@@ -109,7 +109,7 @@
  *                  the first hand-seeded upcoming Phil slot, so the Family
  *                  Reservations view (pin F) has a specialist row for a
  *                  second household member too. jordan's upcoming
- *                  '2026-11-02-1' training booking also gets a real
+ *                  '2026-11-03-1' training booking also gets a real
  *                  `sessions.coachId` (the generator always leaves it null)
  *                  so Reservations' `instructor` field has a real value for
  *                  at least one training row.
@@ -534,7 +534,7 @@ function buildDocs(portal) {
   //
   // dob (contract v1.6 + v1.6.1 amendment, TEAM.md): the OWNER-SUPPLIED
   // birthdays (2026-09-10), not invented — they land the three kids in
-  // three different brackets as of SEASON_BOUNDS.start (2026-11-02), the
+  // three different brackets as of SEASON_BOUNDS.start (2026-11-03), the
   // date bracket assignment always uses. seed.js's ageLine copy was trued
   // up to match at the same integration pass.
   const WHITFIELD_DOBS = {
@@ -638,8 +638,9 @@ function buildDocs(portal) {
   // double as the scaffold's practice-mode references (seed.js
   // BOOKED_UPCOMING) where they line up, so the two demo datasets tell one
   // consistent story instead of two unrelated ones:
-  //   jordan 2026-11-02-1 (Mon 4:00 PM training) — the scaffold's
+  //   jordan 2026-11-03-1 (Tue 4:00 PM training) — the scaffold's
   //     season-opener "Confirmed" booking; self-booked by the athlete.
+  //     (Sprint 20: the season starts Tue Nov 3; Nov 2 is set-up day.)
   //   jordan 2026-11-07-1 (Sat 10:00 AM tournament) — `attended` (contract
   //     v1.5: flipped from the earlier `confirmed` now that a tournament
   //     result exists for this session below — a result implies the athlete
@@ -668,7 +669,7 @@ function buildDocs(portal) {
   // at all (pin A: retired) — every entry below drops it in favor of
   // `periodKey`.
   const WHITFIELD_BOOKINGS = [
-    ['jordan', '2026-11-02-1', 'confirmed', 'athlete-jordan'],
+    ['jordan', '2026-11-03-1', 'confirmed', 'athlete-jordan'],
     ['jordan', '2026-11-07-1', 'attended', 'parent-dana'],
     ['jordan', '2026-11-09-2', 'attended', 'athlete-jordan'],
     ['jordan', '2026-11-14-1', 'attended', 'parent-dana'],
@@ -870,16 +871,16 @@ function buildDocs(portal) {
     ],
   ]);
 
-  // sessions.coachId on jordan's upcoming '2026-11-02-1' training booking
+  // sessions.coachId on jordan's upcoming '2026-11-03-1' training booking
   // (contract v1.9, Sprint 11 DB lane bullet) — buildSeason() always leaves
   // coachId null (schedule.js never assigns one), so without this the
   // Family Reservations view's derived `instructor` field would have no
   // real training-block example anywhere in this seed.
   {
-    const upcomingTrainingSession = sessions.get('2026-11-02-1');
+    const upcomingTrainingSession = sessions.get('2026-11-03-1');
     if (!upcomingTrainingSession) {
       throw new Error(
-        "Seed coachId references sessions/2026-11-02-1, which buildSeason() did not generate " +
+        "Seed coachId references sessions/2026-11-03-1, which buildSeason() did not generate " +
           '(the season config in season.js changed under this seed). Update the target in ' +
           'scripts/seed-firestore.mjs to reference a real generated UPCOMING training session id.'
       );
@@ -1690,8 +1691,8 @@ async function main() {
 
   console.log('\nsessions.coachId on an upcoming booked training session (contract v1.9):');
   {
-    const coachedSession = collections.sessions.get('2026-11-02-1');
-    console.log(`  sessions/2026-11-02-1: coachId=${JSON.stringify(coachedSession.coachId)}`);
+    const coachedSession = collections.sessions.get('2026-11-03-1');
+    console.log(`  sessions/2026-11-03-1: coachId=${JSON.stringify(coachedSession.coachId)}`);
   }
 
   console.log('\nFirst generated Saturday (contract v2.0, pin J — 9/10/11/12/1 + the adult entry):');

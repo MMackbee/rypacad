@@ -104,7 +104,7 @@ export const RELATIONSHIPS = ['Mother', 'Father', 'Guardian', 'Grandparent', 'Ot
  * session.
  */
 export const BOOKED_UPCOMING = [
-  { date: '2026-11-02', block: 1, badge: { tone: 'green', label: 'Confirmed' } }, // Mon 4:00 PM, season opener
+  { date: '2026-11-03', block: 1, badge: { tone: 'green', label: 'Confirmed' } }, // Tue 4:00 PM, season opener (Nov 2 is set-up day - Sprint 20)
   { date: '2026-11-07', block: 1 }, // Sat 10:30 AM tournament
   { date: '2026-11-07', block: 2 }, // Sat 12:30 PM training
   { date: '2026-11-09', block: 2 }, // Mon 5:00 PM
