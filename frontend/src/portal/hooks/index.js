@@ -96,6 +96,7 @@ import useIssueTokens, { cancelSession, fetchTokenPeriod, setHouseholdStripeIds 
 import useWaitlist, { fetchWaitlistByAthlete, fetchWaitlistByHousehold, fetchWaitlistBySession } from './waitlist';
 import useRecentNotices from './notices';
 import usePush from './push';
+import { fetchLoginInvite } from './signups';
 import {
   COACH,
   COACH_BLOCKS,
@@ -190,6 +191,7 @@ import {
 import { TOUR_SEED, bracketFor, deriveTourStandings } from '../data/tour';
 import { SPECIALISTS, isSpecialistType, mentalCapFor } from '../data/specialists';
 import { calendlyUrlFor } from '../data/calendly';
+import { loginStateFor } from '../data/signups';
 
 export { default as useSeedResource } from './useSeedResource';
 export { default as useAuthSession } from './useAuthSession';
@@ -1651,6 +1653,11 @@ async function liveChildCard(a, today, anchorDay) {
   }
 
   const age = ageFromDob(a.dob ?? null);
+  // Sprint 20 (spec 3.2): the child's own login for the parent home's
+  // ChildCard line. A parent may read their own household's invites (rules,
+  // Task 5); no loginEmail == the parent's account runs the child.
+  const loginEmail = a.loginEmail ?? null;
+  const login = loginStateFor(loginEmail, loginEmail ? await fetchLoginInvite(loginEmail) : null);
   const ageLine =
     [age != null ? `Age ${age}` : null, contractMinutes != null ? `${contractMinutes} min tier` : null]
       .filter(Boolean)
@@ -1667,6 +1674,8 @@ async function liveChildCard(a, today, anchorDay) {
     packageId: a.packageId ?? null,
     // Sprint 20 (spec 4.4): the parent home banner and Pay button key off this; absent == active.
     billingStatus: a.billing?.status ?? 'active',
+    loginEmail,
+    login,
     tokens: deriveTokens(pkg, bookings, anchorDay, today),
   };
 }
@@ -1718,6 +1727,9 @@ export function useHousehold({ variant = 'three' } = {}) {
   const children = (variant === 'one' ? HOUSEHOLD.children.slice(0, 1) : HOUSEHOLD.children).map((c) => ({
     ...c,
     billingStatus: c.billingStatus ?? 'active',
+    // Sprint 20 (spec 3.2): the seed family has no child logins - state 'none'.
+    loginEmail: null,
+    login: { state: 'none', claimedAt: null },
   }));
   const billing = variant === 'payment' ? BILLING_ISSUE : HOUSEHOLD.billing;
 
@@ -3229,6 +3241,12 @@ async function liveAthleteDetail(athleteId) {
     };
   });
 
+  // Sprint 20 (spec 3.2): the athlete card's "Login: none / not claimed /
+  // claimed <date>" line. The household parent and ops/owner can read the
+  // invite; a coach cannot (fetchLoginInvite returns null -> 'invited').
+  const loginEmail = athlete.loginEmail ?? null;
+  const login = loginStateFor(loginEmail, loginEmail ? await fetchLoginInvite(loginEmail) : null);
+
   return {
     athlete: {
       name: athlete.name,
@@ -3250,6 +3268,9 @@ async function liveAthleteDetail(athleteId) {
       // the membership editor's toggle (locked without the waiver).
       facilityAccess: Boolean(athlete.facilityAccess),
       facilityAccessConsent: athlete.facilityAccessConsent ?? null,
+      // Sprint 20 (spec 3.2, D9): the child's own login state.
+      loginEmail,
+      login,
       householdId: athlete.householdId ?? null,
       householdName: household?.name ?? null,
       periodAnchorDay: normalizeAnchorDay(household?.periodAnchorDay),
@@ -3286,7 +3307,7 @@ export function useAthleteDetail({ athleteId, variant = 'populated' } = {}) {
   // successful pick until an unrelated write happened to bump something.
   const athletesGen = useInvalidation('athletes');
   const seedValue = {
-    athlete: ATHLETE_DETAIL,
+    athlete: { ...ATHLETE_DETAIL, loginEmail: null, login: { state: 'none', claimedAt: null } },
     history: full ? CONTRACT_HISTORY : [],
     checklist: full ? [] : LIMITED_DATA_CHECKLIST,
     hasEnoughData: full,
