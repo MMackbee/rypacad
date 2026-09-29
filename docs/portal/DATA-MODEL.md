@@ -265,8 +265,9 @@ node scripts/sync-calendar-sessions.mjs --from ... --to ... --dry-run \
 |---|---|
 | summary starts with `Training block`, timed (`start.dateTime`) | bookable session, `type: 'training'` |
 | summary starts with `Tournament`, timed | bookable session, `type: 'tournament'` |
-| summary starts with `Phil`, timed | bookable session, `type: 'phil'` — **contract v1.7 (Sprint 9)** |
+| summary starts with `Phil` or `Fitness`, or contains the word `Phil`, timed | bookable session, `type: 'phil'` — **contract v1.7 (Sprint 9)**; the `Fitness…` / `… w/ Phil` spellings are Phil's too (owner, 2026-09-29: the fitness sessions are Phil's) |
 | summary starts with `Mental` or `Yannick`, timed | skipped — display-only since **contract v3.0.1 (Sprint 20)**: Yannick books through Calendly; `calendlyWebhook` writes `sessions/cal-<uuid>` (see [sessions](#sessionssessionid)). The first sync after the change deletes (booked 0) or cancels every previously synced `mental` session. |
+| any other timed title | skipped — display-only; the dry run lists each such title with its dates (`display-only "<title>" xN (dates)`) so a missing session is traceable to its spelling |
 | all-day event (`start.date` only) | skipped — display-only, whatever the title |
 | any other summary | skipped — display-only (counted, e.g. legacy `Academy Training`) |
 

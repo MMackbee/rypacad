@@ -13,9 +13,14 @@
  *
  *   summary's first word is "training"          -> bookable, type 'training'
  *   summary's first word is "tournament"        -> bookable, type 'tournament'
- *   summary's first word is "phil"               -> bookable, type 'phil'
+ *   summary's first word is "phil" or "fitness",
+ *     or "phil" appears anywhere in it           -> bookable, type 'phil'
  *   summary's first word is "mental" or "yannick" -> display-only since Sprint 20 (Calendly)
  *   anything else, and every all-day event -> skipped (display-only)
+ *
+ * Every display-only timed title is listed by the dry run (with its dates),
+ * so a session that "does not show up in the app" can be traced to its
+ * title without opening the calendar.
  *
  * 'phil' and 'mental' are the specialist 1-on-1 types (contract v1.7, Sprint
  * 9: Phil/performance and Yannick/mental game) — each session of either type
@@ -111,7 +116,11 @@ function classifyTitle(summary) {
   // branch for it. The first sync after this change deletes (booked 0) or
   // cancels every previously synced mental session; run it BEFORE any
   // smoke-test booking (spec 12.7).
-  if (/^phil\b/i.test(summary)) return 'phil';
+  // Phil's calendar titles are hand-entered too ("Phil - performance block",
+  // "Fitness with Phil", "Speed & strength w/ Phil"): the first word "phil"
+  // or "fitness", or "phil" anywhere in the title, is his session (owner,
+  // 2026-09-29: the fitness sessions are Phil's).
+  if (/^(?:phil|fitness)\b/i.test(summary) || /\bphil\b/i.test(summary)) return 'phil';
   // v2.0.2 (2026-09-17): the reserved Tue/Thu 3 PM invite-only group must
   // NOT be titled "Training…"/"Tournament…" - any other title lands here
   // and stays display-only, which is the intended behaviour until its
@@ -135,14 +144,22 @@ function arg(name) {
 const DRY_RUN = process.argv.includes('--dry-run');
 const PROD = process.argv.includes('--prod');
 const YES = process.argv.includes('--yes');
-const FROM = arg('from');
-const TO = arg('to');
 const FIXTURE = arg('fixture');
 
+// Window defaults (2026-09-29): --from is today and --to is 90 days out, so
+// the runbook's "re-run after every calendar edit" command needs no dates;
+// pass both to sync a specific range (the fixture tests do).
+const DEFAULT_WINDOW_DAYS = 90;
+function localISO(d) {
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+}
 const ISO_DATE = /^\d{4}-\d{2}-\d{2}$/;
-if (!ISO_DATE.test(FROM || '') || !ISO_DATE.test(TO || '') || FROM > TO) {
+const FROM = arg('from') ?? localISO(new Date());
+const TO = arg('to') ?? localISO(new Date(Date.now() + DEFAULT_WINDOW_DAYS * 24 * 60 * 60 * 1000));
+if (!ISO_DATE.test(FROM) || !ISO_DATE.test(TO) || FROM > TO) {
   console.error(
-    'Usage: node scripts/sync-calendar-sessions.mjs --from YYYY-MM-DD --to YYYY-MM-DD [--dry-run] [--fixture <path>] [--prod [--yes]]'
+    'Usage: node scripts/sync-calendar-sessions.mjs [--from YYYY-MM-DD] [--to YYYY-MM-DD] [--dry-run] [--fixture <path>] [--prod [--yes]]\n' +
+      `(--from defaults to today, --to to ${DEFAULT_WINDOW_DAYS} days later)`
   );
   process.exit(1);
 }
@@ -294,7 +311,7 @@ function formatTime(h, m) {
  *   sessions keyed by `YYYY-MM-DD-<n>`; counts of skipped categories.
  */
 function mapEvents(items, from, to) {
-  const counts = { bookable: 0, allDay: 0, displayOnly: 0, cancelled: 0, outOfWindow: 0 };
+  const counts = { bookable: 0, allDay: 0, displayOnly: 0, cancelled: 0, outOfWindow: 0, displayOnlyTitles: new Map() };
   const byDate = new Map(); // date -> [{ minutes, event fields }]
 
   for (const ev of items) {
@@ -312,6 +329,9 @@ function mapEvents(items, from, to) {
     const m = dt.match(/^(\d{4}-\d{2}-\d{2})T(\d{2}):(\d{2})/);
     if (!type || !m) {
       counts.displayOnly += 1; // not the convention (or unparseable start)
+      const dates = counts.displayOnlyTitles.get(summary) || [];
+      dates.push(m ? m[1] : dt);
+      counts.displayOnlyTitles.set(summary, dates);
       continue;
     }
     const [, date, hh, mm] = m;
@@ -591,6 +611,12 @@ async function main() {
       (counts.outOfWindow ? `, ${counts.outOfWindow} outside window` : '')
   );
   for (const [id, doc] of desired) console.log(`  session ${id}: ${JSON.stringify(doc)}`);
+  if (counts.displayOnlyTitles.size) {
+    console.log('Display-only timed titles (not a booking title - rename to "Training…", "Tournament…", "Phil…"/"Fitness…" to make one bookable):');
+    for (const [title, dates] of counts.displayOnlyTitles) {
+      console.log(`  display-only "${title}" x${dates.length} (${[...new Set(dates)].sort().join(', ')})`);
+    }
+  }
 
   const existing = target ? await fetchExistingSessions(target, FROM, TO) : new Map();
   const resultSessionIds = target ? await fetchResultSessionIds(target) : new Set();
