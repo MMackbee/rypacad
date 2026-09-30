@@ -21,6 +21,8 @@ const ADULT_AGE = 18;
 const HANDICAP_MIN = 0;
 const HANDICAP_MAX = 54;
 const MODES = ['parent', 'athlete'];
+/** The users.phone rule's cap (`firestore.rules`, `live.js#saveMyPhone`). */
+const PHONE_MAX = 32;
 
 /** A refused payload. */
 class ValidationError extends Error {
@@ -152,11 +154,63 @@ function normalizeAthletes(athletes, opts) {
 }
 
 /**
+ * The emergency contact (owner, 2026-09-30: its own mobile and relationship
+ * fields). Optional as a block; once any field is filled, name and mobile
+ * are both required. The pre-split string form (a tab still open on the old
+ * bundle) is never refused: it becomes the name, as the medical doc always
+ * stored it.
+ * @param {*} raw `{name, phone, relationship}`, a string, or nothing.
+ * @return {?{name: string, phone: ?string, relationship: ?string}} Trimmed,
+ *     or null when blank.
+ */
+function normalizeEmergencyContact(raw) {
+  const incomplete = () => new ValidationError('emergency-contact-incomplete',
+      'Give the emergency contact a name and a mobile, or leave all three ' +
+      'blank.');
+  if (raw === null || raw === undefined) return null;
+  if (typeof raw === 'string') {
+    const name = raw.trim();
+    return name ? {name, phone: null, relationship: null} : null;
+  }
+  if (typeof raw !== 'object' || Array.isArray(raw)) throw incomplete();
+  const text = (v) => {
+    if (v === null || v === undefined) return '';
+    if (typeof v !== 'string') throw incomplete();
+    return v.trim();
+  };
+  const name = text(raw.name);
+  const phone = text(raw.phone).slice(0, PHONE_MAX);
+  const relationship = text(raw.relationship);
+  if (!name && !phone && !relationship) return null;
+  if (!name || !phone) throw incomplete();
+  return {name, phone, relationship: relationship || null};
+}
+
+/**
+ * A household's stored emergency contact, read tolerantly: the rules let a
+ * parent write anything to the field, and pre-split households hold a
+ * string. Never throws.
+ * @param {*} v `households.emergencyContact`.
+ * @return {?{name: ?string, phone: ?string, relationship: ?string}} The
+ *     contact, or null when there is nothing usable.
+ */
+function storedEmergencyContact(v) {
+  if (typeof v === 'string') {
+    return v.trim() ? {name: v.trim(), phone: null, relationship: null} : null;
+  }
+  if (!v || typeof v !== 'object' || Array.isArray(v)) return null;
+  const pick = (x) => (typeof x === 'string' && x.trim() ? x.trim() : null);
+  const out = {name: pick(v.name), phone: pick(v.phone),
+    relationship: pick(v.relationship)};
+  return out.name || out.phone ? out : null;
+}
+
+/**
  * The createFamily payload (contract 1.2), normalized.
  * @param {*} data The request body.
  * @param {{todayISO: string}} opts Chicago today.
  * @return {{mode: string, contact: !Object, athletes: !Array<!Object>,
- *     emergencyContact: ?string, medical: ?string, consents: !Object,
+ *     emergencyContact: ?Object, medical: ?string, consents: !Object,
  *     signatureName: string}} Strings trimmed, child emails lower-cased.
  */
 function validateFamilyPayload(data, opts) {
@@ -178,6 +232,7 @@ function validateFamilyPayload(data, opts) {
   }
   const athletes = normalizeAthletes(d.athletes, {todayISO: opts.todayISO,
     guardianEmail: lower(contact.email), mode: d.mode});
+  const emergencyContact = normalizeEmergencyContact(d.emergencyContact);
   const consents = d.consents || {};
   const signatureName = str(d.signatureName);
   if (consents.dataCollection !== true || consents.videoCapture !== true ||
@@ -186,8 +241,7 @@ function validateFamilyPayload(data, opts) {
         'The required consents and your signature are needed to finish.');
   }
   return {
-    mode: d.mode, contact, athletes,
-    emergencyContact: str(d.emergencyContact) || null,
+    mode: d.mode, contact, athletes, emergencyContact,
     medical: str(d.medical) || null,
     consents: {dataCollection: true, videoCapture: true,
       mediaRelease: consents.mediaRelease === true,
@@ -201,19 +255,23 @@ function validateFamilyPayload(data, opts) {
  * @param {*} data The request body.
  * @param {{todayISO: string, guardianEmail: string}} opts Chicago today and
  *     the household guardian's email (any case).
- * @return {{athletes: !Array<!Object>, medical: ?string}} Normalized.
+ * @return {{athletes: !Array<!Object>, emergencyContact: ?Object,
+ *     medical: ?string}} Normalized; `emergencyContact` is optional (the
+ *     handler falls back to the household's).
  */
 function validateAddAthletesPayload(data, opts) {
   const d = data || {};
+  const athletes = normalizeAthletes(d.athletes, {todayISO: opts.todayISO,
+    guardianEmail: lower(opts.guardianEmail), mode: 'parent'});
   return {
-    athletes: normalizeAthletes(d.athletes, {todayISO: opts.todayISO,
-      guardianEmail: lower(opts.guardianEmail), mode: 'parent'}),
+    athletes,
+    emergencyContact: normalizeEmergencyContact(d.emergencyContact),
     medical: str(d.medical) || null,
   };
 }
 
 module.exports = {
-  ADULT_AGE, EMAIL_RE, PACKAGE_IDS, TIER_MINUTES, ValidationError, lower,
-  normalizeAthlete, normalizeAthletes, validateAddAthletesPayload,
-  validateFamilyPayload,
+  ADULT_AGE, EMAIL_RE, PACKAGE_IDS, PHONE_MAX, TIER_MINUTES, ValidationError,
+  lower, normalizeAthlete, normalizeAthletes, normalizeEmergencyContact,
+  storedEmergencyContact, validateAddAthletesPayload, validateFamilyPayload,
 };

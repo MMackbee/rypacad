@@ -55,8 +55,8 @@ const kid = (over) => Object.assign({name: 'Lena Novak', dob: '2012-06-17', pack
 const payload = (over) => Object.assign({
   mode: 'parent',
   contact: {name: 'Nina Novak', email: 'nina@example.test', phone: '+15550199', relationship: 'Mother'},
-  athletes: [kid({loginEmail: 'Kid@Example.test'}), kid({name: 'Max Novak', dob: '2010-02-02', packageId: 'elite', handicap: null})],
-  emergencyContact: 'Uncle Bo +15550100',
+  athletes: [kid({loginEmail: 'Kid@Example.test'}), kid({name: 'Max Novak', dob: '2010-02-02', packageId: 'elite', contractMinutes: 45, handicap: null})],
+  emergencyContact: {name: ' Uncle Bo ', phone: '+15550100', relationship: 'Uncle'},
   medical: 'Peanut allergy',
   consents: {dataCollection: true, videoCapture: true, mediaRelease: true, facilityAccess: true},
   signatureName: 'Nina Novak',
@@ -67,6 +67,9 @@ async function seed() {
   const B = db.batch();
   const set = (c, id, d) => B.set(db.collection(c).doc(id), d);
   set('households', 'whitfield', {name: 'Whitfield family', guardian: {name: 'Dana', email: 'dana@example.test', phone: null}, emergencyContact: null});
+  // A pre-split household: its emergency contact is still one string.
+  set('households', 'okafor', {name: 'Okafor family', guardian: {name: 'Ada', email: 'ada@example.test', phone: null}, emergencyContact: 'Uncle Bo +15550100'});
+  set('users', 'u-ada', {role: 'parent', householdId: 'okafor', email: 'ada@example.test'});
   set('athletes', 'reese', {name: 'Reese', householdId: 'whitfield', packageId: 't-6', loginEmail: 'reese@example.test'});
   set('users', 'u-dana', {role: 'parent', householdId: 'whitfield', email: 'dana@example.test'});
   set('users', 'u-jordan', {role: 'athlete', athleteId: 'jordan', householdId: 'whitfield', email: 'jordan@example.test'});
@@ -85,16 +88,18 @@ async function main() {
   check('athleteIds count', r1.athleteIds.length, 2);
   const hh = await get('households', r1.householdId);
   check('household', [hh.name, hh.guardian, hh.stripeCustomerId, hh.stripeSubscriptionId, hh.stripeCustomerIds, hh.createdBy, hh.emergencyContact, hh.signup.by, hh.signup.source, hh.signup.mode, !!hh.signup.at],
-      ['Novak family', {name: 'Nina Novak', email: 'nina@example.test', phone: '+15550199', relationship: 'Mother'}, null, null, [], 'u-nina', 'Uncle Bo +15550100', 'u-nina', 'self', 'parent', true]);
+      ['Novak family', {name: 'Nina Novak', email: 'nina@example.test', phone: '+15550199', relationship: 'Mother'}, null, null, [], 'u-nina', {name: 'Uncle Bo', phone: '+15550100', relationship: 'Uncle'}, 'u-nina', 'self', 'parent', true]);
   const [lenaId, maxId] = r1.athleteIds;
   const lena = await get('athletes', lenaId);
   check('lena athlete doc', [lena.name, lena.dob, lena.householdId, lena.packageId, lena.contractMinutes, lena.coachId, lena.facilityAccess, lena.handicap, lena.loginEmail, lena.billing.status, lena.billing.subscriptionId, !!lena.billing.updatedAt, !!lena.updatedAt, lena.facilityAccessConsent.byUid],
       ['Lena Novak', '2012-06-17', r1.householdId, 't-6', null, null, false, 20, 'kid@example.test', 'pending', null, true, true, 'u-nina']);
   check('lena billing shape', Object.keys(lena.billing).sort(), ['checkoutSessionId', 'customerId', 'priceId', 'status', 'subscriptionId', 'updatedAt']);
-  check('max handicap null, no loginEmail', [(await get('athletes', maxId)).handicap, (await get('athletes', maxId)).loginEmail], [null, null]);
+  const max = await get('athletes', maxId);
+  check('max handicap null, no loginEmail', [max.handicap, max.loginEmail], [null, null]);
+  check('contractStart: Chicago today with a contract, absent without', [max.contractMinutes, max.contractStart, 'contractStart' in lena], [45, '2026-10-01', false]);
   const med = (await db.collection('athletes').doc(lenaId).collection('private').doc('medical').get()).data();
-  check('private/medical on every athlete', [med.emergencyContact.name, med.medicalNotes, await (async () => (await db.collection('athletes').doc(maxId).collection('private').doc('medical').get()).exists)()], ['Uncle Bo +15550100', 'Peanut allergy', true]);
-  check('users/u-nina', await get('users', 'u-nina'), {role: 'parent', householdId: r1.householdId, athleteId: null, staff: false, specialistId: null, displayName: 'Nina Novak', email: 'nina@example.test'});
+  check('private/medical on every athlete', [med.emergencyContact, med.medicalNotes, await (async () => (await db.collection('athletes').doc(maxId).collection('private').doc('medical').get()).exists)()], [{name: 'Uncle Bo', phone: '+15550100', relationship: 'Uncle'}, 'Peanut allergy', true]);
+  check('users/u-nina', await get('users', 'u-nina'), {role: 'parent', householdId: r1.householdId, athleteId: null, staff: false, specialistId: null, displayName: 'Nina Novak', email: 'nina@example.test', phone: '+15550199'});
   const inv = await get('loginInvites', 'kid@example.test');
   check('loginInvites/kid@example.test', [inv.email, inv.householdId, inv.athleteId, inv.athleteName, inv.requestedBy, inv.createdBy, inv.status, inv.claimedBy, inv.claimedAt, !!inv.createdAt],
       ['kid@example.test', r1.householdId, lenaId, 'Lena Novak', 'guardian', 'u-nina', 'open', null, null, true]);
@@ -117,24 +122,36 @@ async function main() {
   await refused('child-email-duplicate (within the payload)', family.createFamilyHandler(payload({athletes: [kid({loginEmail: 'a@b.test'}), kid({name: 'B', loginEmail: 'A@b.test'})]}), ctx('u-x1', 'x1@example.test'), deps), 'invalid-argument', 'child-email-duplicate');
   await refused('child-email-duplicate (existing open invite)', family.createFamilyHandler(payload({athletes: [kid({loginEmail: 'kid@example.test'})]}), ctx('u-x1', 'x1@example.test'), deps), 'invalid-argument', 'child-email-duplicate');
   await refused('child-email-duplicate (existing CLAIMED invite - the email is a login already)', family.createFamilyHandler(payload({athletes: [kid({loginEmail: 'done@example.test'})]}), ctx('u-x1', 'x1@example.test'), deps), 'invalid-argument', 'child-email-duplicate');
+  await refused('emergency-contact-incomplete (a name, no mobile)', family.createFamilyHandler(payload({emergencyContact: {name: 'Uncle Bo', phone: ' ', relationship: null}}), ctx('u-x1', 'x1@example.test'), deps), 'invalid-argument', 'emergency-contact-incomplete');
   await refused('consents-required', family.createFamilyHandler(payload({consents: {dataCollection: true, videoCapture: false}}), ctx('u-x1', 'x1@example.test'), deps), 'invalid-argument', 'consents-required');
-  check('no stray household from a refused call', (await db.collection('households').get()).size, 2);
+  check('no stray household from a refused call', (await db.collection('households').get()).size, 3);
   check('no users doc for u-x1', await exists('users', 'u-x1'), false);
 
-  log('\nSTEP 3  createFamily athlete mode (18+, self)');
+  log('\nSTEP 3  createFamily athlete mode (18+, self), from a pre-split bundle (string emergency contact)');
   const r3 = await family.createFamilyHandler(payload({mode: 'athlete', contact: {name: 'Sam Reyes', email: 'sam@example.test', phone: '+15550111', relationship: null},
-    athletes: [kid({name: 'Sam Reyes', dob: '2000-01-01', packageId: 't-12', loginEmail: 'ignored@example.test'})]}), ctx('u-sam', 'sam@example.test', true, 'google.com'), deps);
-  check('users/u-sam is the athlete', await get('users', 'u-sam'), {role: 'athlete', householdId: r3.householdId, athleteId: r3.athleteIds[0], staff: false, specialistId: null, displayName: 'Sam Reyes', email: 'sam@example.test'});
+    athletes: [kid({name: 'Sam Reyes', dob: '2000-01-01', packageId: 't-12', loginEmail: 'ignored@example.test'})], emergencyContact: ' Aunt May 555 '}), ctx('u-sam', 'sam@example.test', true, 'google.com'), deps);
+  check('users/u-sam is the athlete', await get('users', 'u-sam'), {role: 'athlete', householdId: r3.householdId, athleteId: r3.athleteIds[0], staff: false, specialistId: null, displayName: 'Sam Reyes', email: 'sam@example.test', phone: '+15550111'});
   check('athlete mode: loginEmail null, relationship null, signup.mode', [(await get('athletes', r3.athleteIds[0])).loginEmail, (await get('households', r3.householdId)).guardian.relationship, (await get('households', r3.householdId)).signup.mode], [null, null, 'athlete']);
   check('no invite written in athlete mode', await exists('loginInvites', 'ignored@example.test'), false);
+  const oldForm = {name: 'Aunt May 555', phone: null, relationship: null};
+  check('old string contact: household + medical doc hold it as the name', [(await get('households', r3.householdId)).emergencyContact, (await db.collection('athletes').doc(r3.athleteIds[0]).collection('private').doc('medical').get()).data().emergencyContact], [oldForm, oldForm]);
+
+  log('\nSTEP 3b  createFamily: a mobile over 32 characters');
+  const longPhone = '+1 (612) 555-0148 ext. 1234567890 x';
+  const r3b = await family.createFamilyHandler(payload({contact: {name: 'Lou Long', email: 'lou@example.test', phone: longPhone, relationship: 'Father'}, athletes: [kid({name: 'Kit Long'})]}), ctx('u-lou', 'lou@example.test'), deps);
+  check('users.phone cut to 32, household keeps the full string', [(await get('users', 'u-lou')).phone, (await get('households', r3b.householdId)).guardian.phone], [longPhone.slice(0, 32), longPhone]);
 
   log('\nSTEP 4  addAthletes');
-  const r4 = await family.addAthletesHandler({athletes: [kid({name: 'Nico', dob: '2015-05-05', loginEmail: 'nico@example.test'})], medical: null}, ctx('u-dana', 'dana@example.test'), deps);
+  const r4 = await family.addAthletesHandler({athletes: [kid({name: 'Nico', dob: '2015-05-05', contractMinutes: 20, loginEmail: 'nico@example.test'})], medical: null}, ctx('u-dana', 'dana@example.test'), deps);
   check('lands in me().householdId', r4.householdId, 'whitfield');
   const nico = await get('athletes', r4.athleteIds[0]);
-  check('nico doc', [nico.householdId, nico.billing.status, nico.loginEmail, nico.facilityAccessConsent], ['whitfield', 'pending', 'nico@example.test', null]);
+  check('nico doc', [nico.householdId, nico.billing.status, nico.loginEmail, nico.facilityAccessConsent, nico.contractMinutes, nico.contractStart], ['whitfield', 'pending', 'nico@example.test', null, 20, '2026-10-01']);
   check('nico invite open', (await get('loginInvites', 'nico@example.test')).status, 'open');
   check('no medical doc when nothing to record', (await db.collection('athletes').doc(r4.athleteIds[0]).collection('private').doc('medical').get()).exists, false);
+  const r4b = await family.addAthletesHandler({athletes: [kid({name: 'Pia', dob: '2016-06-06'})], emergencyContact: {name: 'Gran', phone: '+15550122', relationship: 'Grandparent'}, medical: null}, ctx('u-dana', 'dana@example.test'), deps);
+  check('typed contact: on the new medical doc, household untouched', [(await db.collection('athletes').doc(r4b.athleteIds[0]).collection('private').doc('medical').get()).data().emergencyContact, (await get('households', 'whitfield')).emergencyContact, 'contractStart' in (await get('athletes', r4b.athleteIds[0]))], [{name: 'Gran', phone: '+15550122', relationship: 'Grandparent'}, null, false]);
+  const r4c = await family.addAthletesHandler({athletes: [kid({name: 'Obi Okafor', dob: '2013-03-03'})], medical: null}, ctx('u-ada', 'ada@example.test'), deps);
+  check('no contact typed: falls back to the household\'s old string', (await db.collection('athletes').doc(r4c.athleteIds[0]).collection('private').doc('medical').get()).data().emergencyContact, {name: 'Uncle Bo +15550100', phone: null, relationship: null});
   await refused('not-parent (athlete account)', family.addAthletesHandler({athletes: [kid()]}, ctx('u-jordan', 'jordan@example.test'), deps), 'permission-denied', 'not-parent');
   await refused('not-parent (no users doc)', family.addAthletesHandler({athletes: [kid()]}, ctx('u-x2', 'x2@example.test'), deps), 'permission-denied', 'not-parent');
   await refused('child-email-is-guardian (household guardian)', family.addAthletesHandler({athletes: [kid({loginEmail: 'dana@example.test'})]}, ctx('u-dana', 'dana@example.test'), deps), 'invalid-argument', 'child-email-is-guardian');

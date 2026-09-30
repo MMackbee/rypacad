@@ -53,15 +53,18 @@ function householdNameFor(guardianName) {
 }
 
 /**
- * The `athletes/{id}` body of the spec 2.2 table.
+ * The `athletes/{id}` body of the spec 2.2 table. A contract picked at
+ * sign-up also records `contractStart`, the Chicago date it was picked: the
+ * contract counts from the later of that and the season start.
  * @param {!Object} a A normalized athlete entry.
  * @param {string} householdId The household.
  * @param {string} uid The caller (signs the facility waiver).
  * @param {boolean} facilityConsent `consents.facilityAccess`.
+ * @param {string} todayISO Chicago today, `'YYYY-MM-DD'`.
  * @return {!Object} The document body.
  */
-function athleteDoc(a, householdId, uid, facilityConsent) {
-  return {
+function athleteDoc(a, householdId, uid, facilityConsent, todayISO) {
+  const doc = {
     name: a.name, dob: a.dob, householdId, packageId: a.packageId,
     contractMinutes: a.contractMinutes, coachId: null, facilityAccess: false,
     facilityAccessConsent: facilityConsent ?
@@ -71,22 +74,46 @@ function athleteDoc(a, householdId, uid, facilityConsent) {
       priceId: null, checkoutSessionId: null, updatedAt: now()},
     updatedAt: now(),
   };
+  if (a.contractMinutes !== null) doc.contractStart = todayISO;
+  return doc;
 }
 
 /**
- * `athletes/{id}/private/medical` as the approval batch wrote it
- * (`live.js:1362-1368`), or null when there is nothing to record.
- * @param {?string} emergencyContact The household emergency contact.
+ * `athletes/{id}/private/medical` in the approval batch's shape
+ * (`live.js:1362-1368`), now with the contact's mobile and relationship
+ * filled in, or null when there is nothing to record.
+ * @param {?{name: ?string, phone: ?string, relationship: ?string}} ec The
+ *     emergency contact.
  * @param {?string} medical The household medical note.
  * @return {?Object} The body or null.
  */
-function medicalDoc(emergencyContact, medical) {
-  if (!emergencyContact && !medical) return null;
+function medicalDoc(ec, medical) {
+  if (!ec && !medical) return null;
   return {
-    emergencyContact: {name: emergencyContact || null, phone: null,
-      relationship: null},
+    emergencyContact: {name: ec?.name ?? null, phone: ec?.phone ?? null,
+      relationship: ec?.relationship ?? null},
     medicalNotes: medical || null,
     updatedAt: now(),
+  };
+}
+
+/**
+ * The caller's `users/{uid}` body. The sign-up mobile is copied here too so
+ * Settings shows it; cut to the 32 characters the member-edit rule allows,
+ * or every later self-edit of the doc would be refused.
+ * @param {!Object} p The normalized createFamily payload.
+ * @param {string} householdId The new household.
+ * @param {!Array<string>} athleteIds The new athletes, in payload order.
+ * @return {!Object} The document body.
+ */
+function userDocFor(p, householdId, athleteIds) {
+  return {
+    role: p.mode === 'athlete' ? 'athlete' : 'parent',
+    householdId,
+    athleteId: p.mode === 'athlete' ? athleteIds[0] : null,
+    staff: false, specialistId: null,
+    displayName: p.contact.name, email: p.contact.email,
+    phone: p.contact.phone.slice(0, validate.PHONE_MAX),
   };
 }
 
@@ -121,8 +148,9 @@ async function refuseOpenInvites(tx, store, athletes) {
  * Athletes (+ medical, + invites) into a household. Reads are done.
  * @param {!Object} tx The transaction.
  * @param {{store: !Object, householdId: string, uid: string,
- *     athletes: !Array<!Object>, emergencyContact: ?string,
- *     medical: ?string, facilityConsent: boolean}} args The writes.
+ *     athletes: !Array<!Object>, emergencyContact: ?Object,
+ *     medical: ?string, facilityConsent: boolean,
+ *     todayISO: string}} args The writes.
  * @return {!Array<string>} The new athlete ids, in payload order.
  */
 function writeAthletes(tx, args) {
@@ -131,7 +159,7 @@ function writeAthletes(tx, args) {
   for (const a of args.athletes) {
     const ref = args.store.collection('athletes').doc();
     tx.set(ref, athleteDoc(a, args.householdId, args.uid,
-        args.facilityConsent));
+        args.facilityConsent, args.todayISO));
     if (med) tx.set(ref.collection('private').doc('medical'), med);
     if (a.loginEmail) {
       tx.set(args.store.collection('loginInvites').doc(a.loginEmail), {
@@ -208,14 +236,9 @@ async function createFamilyHandler(data, context, deps) {
       });
       const athleteIds = writeAthletes(tx, {store, householdId: hhRef.id,
         uid, athletes: p.athletes, emergencyContact: p.emergencyContact,
-        medical: p.medical, facilityConsent: p.consents.facilityAccess});
-      tx.set(userRef, {
-        role: p.mode === 'athlete' ? 'athlete' : 'parent',
-        householdId: hhRef.id,
-        athleteId: p.mode === 'athlete' ? athleteIds[0] : null,
-        staff: false, specialistId: null,
-        displayName: p.contact.name, email: p.contact.email,
-      });
+        medical: p.medical, facilityConsent: p.consents.facilityAccess,
+        todayISO});
+      tx.set(userRef, userDocFor(p, hhRef.id, athleteIds));
       return {householdId: hhRef.id, athleteIds};
     });
   } catch (err) {
@@ -226,7 +249,9 @@ async function createFamilyHandler(data, context, deps) {
 /**
  * addAthletes (contract 1.3, spec 2.3): a parent adds athletes to
  * `me().householdId`. The facility waiver is ops-verified later, so
- * `facilityAccessConsent` is null here.
+ * `facilityAccessConsent` is null here. An emergency contact typed in the
+ * form goes on the new athletes' medical docs only; without one they get
+ * the household's (never overwritten here).
  * @param {*} data The request body.
  * @param {!Object} context The callable context.
  * @param {{db: (!Object|undefined), now: (Date|undefined)}=} deps Injectable.
@@ -251,8 +276,9 @@ async function addAthletesHandler(data, context, deps) {
     return await store.runTransaction(async (tx) => {
       await refuseOpenInvites(tx, store, p.athletes);
       const athleteIds = writeAthletes(tx, {store, householdId: hhRef.id,
-        uid, athletes: p.athletes, emergencyContact: hh.emergencyContact ||
-        null, medical: p.medical, facilityConsent: false});
+        uid, athletes: p.athletes, emergencyContact: p.emergencyContact ||
+        validate.storedEmergencyContact(hh.emergencyContact),
+        medical: p.medical, facilityConsent: false, todayISO});
       return {householdId: hhRef.id, athleteIds};
     });
   } catch (err) {
@@ -326,6 +352,7 @@ const claimInvite = functions.runWith({secrets: []}).https.onCall(
     (data, context) => claimInviteHandler(data, context));
 
 module.exports = {
-  addAthletes, addAthletesHandler, claimInvite, claimInviteHandler,
-  createFamily, createFamilyHandler, householdNameFor,
+  addAthletes, addAthletesHandler, athleteDoc, claimInvite,
+  claimInviteHandler, createFamily, createFamilyHandler, householdNameFor,
+  medicalDoc, userDocFor,
 };
