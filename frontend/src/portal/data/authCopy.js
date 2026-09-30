@@ -32,6 +32,11 @@ export const LEGACY_CTA = 'Sign-up is now instant - start here';
 export const ALREADY_CLAIMED = 'This login is already set up - sign in with it';
 export const EMAIL_IN_USE = 'This email already has a login - sign in instead';
 export const USE_PARENT_EMAIL = 'Use the email your parent entered.';
+/** The sign-in page's create-login button is for a student claiming the login a
+ * parent entered, not a family sign-up (owner, 2026-09-30) - so it says so, and
+ * the receipt names it the same way. */
+export const STUDENT_LOGIN_CTA = 'Create a student login';
+export const PARENT_USE_SIGNUP = 'Parent? Use Start sign-up below instead.';
 export const FAMILY_LINK_FAIL =
   'Ask your parent to allow sign-in for this app in Family Link, or create a password login below.';
 

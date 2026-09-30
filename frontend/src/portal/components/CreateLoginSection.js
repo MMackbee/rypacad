@@ -4,7 +4,7 @@ import Button from './Button';
 import Field from './Field';
 import { Body, Card, SectionLabel } from './Primitives';
 import { U13_HELPER } from '../data/signup';
-import { EMAIL_IN_USE, USE_PARENT_EMAIL, verifyBody } from '../data/authCopy';
+import { EMAIL_IN_USE, PARENT_USE_SIGNUP, STUDENT_LOGIN_CTA, USE_PARENT_EMAIL, verifyBody } from '../data/authCopy';
 
 /**
  * Sprint 20 (spec 3.1): a child claiming the login their parent entered, or
@@ -37,14 +37,14 @@ export default function CreateLoginSection({ createLogin, disabled }) {
   if (!open) {
     return (
       <Button variant="outline" disabled={disabled} onClick={() => setOpen(true)} style={{ boxShadow: 'none' }}>
-        Create a login
+        {STUDENT_LOGIN_CTA}
       </Button>
     );
   }
   return (
     <Card large>
-      <SectionLabel style={{ marginBottom: 10 }}>Create a login</SectionLabel>
-      <Body size={12} style={{ marginBottom: 12 }}>{USE_PARENT_EMAIL} {U13_HELPER}</Body>
+      <SectionLabel style={{ marginBottom: 10 }}>{STUDENT_LOGIN_CTA}</SectionLabel>
+      <Body size={12} style={{ marginBottom: 12 }}>{USE_PARENT_EMAIL} {PARENT_USE_SIGNUP} {U13_HELPER}</Body>
       <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
         <Field label="New login email" type="email" value={email} onChange={setEmail} />
         <Field label="New password" type="password" value={password} onChange={setPassword} />
