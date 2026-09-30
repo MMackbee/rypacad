@@ -2,7 +2,7 @@ import React from 'react';
 import { renderScreen } from './testRender';
 import ParentDashboard from './ParentDashboard';
 
-let mockHub; let mockConfirm;
+let mockHub; let mockConfirm; let mockTokens = {};
 jest.mock('../components/PayButton', () => ({ __esModule: true, default: ({ athleteId, label }) => <button type="button">{label}|{athleteId}</button> }));
 jest.mock('../hooks/billing', () => ({
   __esModule: true,
@@ -13,14 +13,15 @@ jest.mock('../hooks/billing', () => ({
 }));
 jest.mock('../hooks', () => ({
   useHousehold: () => ({ loading: false, error: null, data: { name: 'Whitfield family', date: 'Thu, Oct 1', children: [
-    { id: 'a1', name: 'Jordan', ageLine: 'Age 14', standing: { tone: 'green', label: 'On track' }, next: null, contract: null, packageId: 't-12', tokens: null, loginEmail: 'jordan@email.com', login: { state: 'invited', claimedAt: null } },
-    { id: 'a2', name: 'Reese', ageLine: 'Age 12', standing: { tone: 'neutral', label: 'New', dashed: true }, next: null, contract: null, packageId: 't-6', tokens: null },
+    { id: 'a1', name: 'Jordan', ageLine: 'Age 14', standing: { tone: 'green', label: 'On track' }, next: null, contract: null, packageId: 't-12', tokens: mockTokens.a1 ?? null, loginEmail: 'jordan@email.com', login: { state: 'invited', claimedAt: null } },
+    { id: 'a2', name: 'Reese', ageLine: 'Age 12', standing: { tone: 'neutral', label: 'New', dashed: true }, next: null, contract: null, packageId: 't-6', tokens: mockTokens.a2 ?? null },
   ], billing: { status: 'ok' } } }),
   // No useMembership mock on purpose (perf wave B): the household's Stripe
   // standing now comes off the hub, and a stray second fetch would crash here.
 }));
 
 beforeEach(() => {
+  mockTokens = {};
   mockConfirm = { state: 'confirming', billingStatus: 'pending' };
   mockHub = { loading: false, error: null, data: {
     household: { id: 'h1' }, portalUrl: null,
@@ -45,6 +46,23 @@ test('pending banner with one Pay now per unpaid athlete; the unpaid card is bad
   expect(r.text()).toContain('Login: not claimed (jordan@email.com)');
   expect(r.text()).not.toContain('Login: none');
   await r.unmount();
+});
+
+test('card tokens: "Tokens start Nov 1" before the season, "Pay to start" unpaid - never a balance (tester report 2026-09-30)', async () => {
+  const t = (over) => ({ granted: 16, used: 0, reserved: 0, left: 16, unlimited: false, grace: [], startsOn: '2026-11-01', unpaid: false, ...over });
+  mockTokens = { a1: t(), a2: t({ unpaid: true }) };
+  const r = await renderScreen(<ParentDashboard bare />, { path: '/portal/family' });
+  expect(r.text()).toContain('Tokens start Nov 1');
+  expect(r.text()).toContain('Pay to start');
+  expect(r.text()).not.toMatch(/\d+ tokens? left/);
+  await r.unmount();
+  // From Nov 1, paid: the balance is back; Elite is unaffected.
+  mockTokens = { a1: t({ startsOn: null, left: 13 }), a2: { unlimited: true, granted: null, left: null, grace: [] } };
+  const n = await renderScreen(<ParentDashboard bare />, { path: '/portal/family' });
+  expect(n.text()).toContain('13 tokens left');
+  expect(n.text()).toContain('Elite · unlimited');
+  expect(n.text()).not.toContain('Tokens start');
+  await n.unmount();
 });
 
 test('a past_due household membership on the hub shows the payment banner and ON HOLD cards', async () => {

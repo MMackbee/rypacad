@@ -3,16 +3,27 @@
  * screen shows about tokens is derived here from documents; these tests pin
  * the evidence lists, the period dates, the nudge and the status hero.
  */
-import { daysBetween, hubMemberFor, ordinal, periodRows, sessionLabel, statusFor } from './billingHub';
+import {
+  SEASON_FIRST_PERIOD,
+  daysBetween,
+  hubMemberFor,
+  ordinal,
+  periodRows,
+  positionPeriodFor,
+  sessionLabel,
+  statusFor,
+  withTokenStart,
+} from './billingHub';
 import { ELITE, TOKEN_PACKAGES } from './packages';
 import { longDayLabel } from './calendar';
 
 const T12 = TOKEN_PACKAGES.find((p) => p.id === 't-12');
-const today = '2026-09-16';
+// In season (December): the pre-season first period has its own block below.
+const today = '2026-12-16';
 const BEFORE_GATE = Date.parse('2026-10-01T17:00:00Z'); // the Oct 1 email
 const AFTER_GATE = Date.parse('2026-10-10T12:00:00Z'); // 07:00 Chicago, the gate itself
 const athlete = { id: 'jordan', name: 'Jordan', contractMinutes: 45 };
-const b = (id, over) => ({ id, athleteId: 'jordan', status: 'confirmed', periodKey: '2026-09-01', date: '2026-09-20', sessionId: `s-${id}`, type: 'training', ...over });
+const b = (id, over) => ({ id, athleteId: 'jordan', status: 'confirmed', periodKey: '2026-12-01', date: '2026-12-20', sessionId: `s-${id}`, type: 'training', ...over });
 
 const fixture = () => ({
   athlete,
@@ -20,28 +31,28 @@ const fixture = () => ({
   anchorDay: 1,
   today,
   bookings: [
-    b('a', { date: '2026-09-03', status: 'attended' }),
-    b('c', { date: '2026-09-22' }),
-    b('b', { date: '2026-09-10' }),
-    b('x', { date: '2026-09-12', status: 'cancelled' }),
-    b('g', { date: '2026-09-25', graceTokenId: 'grace-spent', type: 'tournament' }),
-    b('n', { date: '2026-10-05', periodKey: '2026-10-01' }),
-    b('l1', { date: '2026-08-05', periodKey: '2026-08-01' }),
-    b('l2', { date: '2026-08-15', periodKey: '2026-08-01' }),
+    b('a', { date: '2026-12-03', status: 'attended' }),
+    b('c', { date: '2026-12-22' }),
+    b('b', { date: '2026-12-10' }),
+    b('x', { date: '2026-12-12', status: 'cancelled' }),
+    b('g', { date: '2026-12-25', graceTokenId: 'grace-spent', type: 'tournament' }),
+    b('n', { date: '2027-01-05', periodKey: '2027-01-01' }),
+    b('l1', { date: '2026-11-05', periodKey: '2026-11-01' }),
+    b('l2', { date: '2026-11-15', periodKey: '2026-11-01' }),
   ],
   waitlist: [
-    { id: '2026-09-28-0_jordan', sessionId: '2026-09-28-0', athleteId: 'jordan', periodKey: '2026-09-01', date: '2026-09-28' },
-    { id: '2026-10-12-0_jordan', sessionId: '2026-10-12-0', athleteId: 'jordan', periodKey: '2026-10-01', date: '2026-10-12' },
+    { id: '2026-12-28-0_jordan', sessionId: '2026-12-28-0', athleteId: 'jordan', periodKey: '2026-12-01', date: '2026-12-28' },
+    { id: '2027-01-12-0_jordan', sessionId: '2027-01-12-0', athleteId: 'jordan', periodKey: '2027-01-01', date: '2027-01-12' },
   ],
   graceTokens: [
-    { id: 'grace-open', expiresAt: '2026-09-26', reason: 'session-cancelled', sourceSessionId: '2026-09-11-0' },
-    { id: 'grace-spent', expiresAt: '2026-10-10', reason: 'session-cancelled', sourceSessionId: '2026-09-09-0' },
-    { id: 'grace-old', expiresAt: '2026-09-01', reason: 'waitlist-expired', sourceSessionId: '2026-08-20-0' },
+    { id: 'grace-open', expiresAt: '2026-12-26', reason: 'session-cancelled', sourceSessionId: '2026-12-11-0' },
+    { id: 'grace-spent', expiresAt: '2027-01-10', reason: 'session-cancelled', sourceSessionId: '2026-12-09-0' },
+    { id: 'grace-old', expiresAt: '2026-12-01', reason: 'waitlist-expired', sourceSessionId: '2026-11-20-0' },
   ],
   sessionsById: {
-    's-a': { id: 's-a', label: null, type: 'training', time: '3:00 PM', date: '2026-09-03' },
-    's-g': { id: 's-g', label: 'Fall Scramble', type: 'tournament', time: '10:00 AM', date: '2026-09-25' },
-    '2026-09-28-0': { id: '2026-09-28-0', label: null, type: 'training', time: '3:00 PM', date: '2026-09-28' },
+    's-a': { id: 's-a', label: null, type: 'training', time: '3:00 PM', date: '2026-12-03' },
+    's-g': { id: 's-g', label: 'Fall Scramble', type: 'tournament', time: '10:00 AM', date: '2026-12-25' },
+    '2026-12-28-0': { id: '2026-12-28-0', label: null, type: 'training', time: '3:00 PM', date: '2026-12-28' },
   },
 });
 
@@ -50,28 +61,29 @@ describe('hubMemberFor', () => {
     const m = hubMemberFor(fixture());
     expect(m.tokens).toMatchObject({ granted: 12, used: 3, reserved: 1, left: 8, unlimited: false });
     expect(m.tokens.grace).toEqual([
-      { id: 'grace-open', expiresAt: '2026-09-26', reason: 'session-cancelled', sourceSessionId: '2026-09-11-0' },
+      { id: 'grace-open', expiresAt: '2026-12-26', reason: 'session-cancelled', sourceSessionId: '2026-12-11-0' },
     ]);
   });
 
   test('the period and its dates', () => {
     const m = hubMemberFor(fixture());
-    expect(m.period).toMatchObject({ periodKey: '2026-09-01', start: '2026-09-01', end: '2026-09-30', resetsOn: '2026-10-01', daysLeft: 14 });
-    expect(m.nextPeriod).toMatchObject({ periodKey: '2026-10-01', start: '2026-10-01', end: '2026-10-31', granted: 12, booked: 1, reserved: 1 });
-    expect(m.lastPeriod).toMatchObject({ periodKey: '2026-08-01', end: '2026-08-31', granted: 12, used: 2 });
+    expect(m.period).toMatchObject({ periodKey: '2026-12-01', start: '2026-12-01', end: '2026-12-31', resetsOn: '2027-01-01', daysLeft: 15, preSeason: false });
+    expect(m.nextPeriod).toMatchObject({ periodKey: '2027-01-01', start: '2027-01-01', end: '2027-01-31', granted: 12, booked: 1, reserved: 1 });
+    expect(m.lastPeriod).toMatchObject({ periodKey: '2026-11-01', end: '2026-11-30', granted: 12, used: 2 });
+    expect(m.tokens).toMatchObject({ startsOn: null, unpaid: false });
   });
 
   test('the evidence: spent rows equal used + grace-charged, reserved rows equal reserved', () => {
     const m = hubMemberFor(fixture());
     expect(m.spent.map((r) => [r.id, r.date, r.label, r.status, r.viaGrace])).toEqual([
-      ['a', '2026-09-03', 'Training block', 'attended', false],
-      ['b', '2026-09-10', 'Training block', 'confirmed', false],
-      ['c', '2026-09-22', 'Training block', 'confirmed', false],
-      ['g', '2026-09-25', 'Fall Scramble', 'confirmed', true],
+      ['a', '2026-12-03', 'Training block', 'attended', false],
+      ['b', '2026-12-10', 'Training block', 'confirmed', false],
+      ['c', '2026-12-22', 'Training block', 'confirmed', false],
+      ['g', '2026-12-25', 'Fall Scramble', 'confirmed', true],
     ]);
     expect(m.spent.filter((r) => !r.viaGrace)).toHaveLength(m.tokens.used);
     expect(m.reserved.map((r) => [r.id, r.date, r.time, r.status])).toEqual([
-      ['2026-09-28-0_jordan', '2026-09-28', '3:00 PM', 'waitlisted'],
+      ['2026-12-28-0_jordan', '2026-12-28', '3:00 PM', 'waitlisted'],
     ]);
     expect(m.reserved).toHaveLength(m.tokens.reserved);
   });
@@ -84,15 +96,15 @@ describe('hubMemberFor', () => {
 
   test('the expiry nudge appears inside the last week of a period with tokens left', () => {
     expect(hubMemberFor(fixture()).expiryNudge).toBeNull();
-    const late = hubMemberFor({ ...fixture(), today: '2026-09-24' });
-    expect(late.expiryNudge).toEqual({ left: 8, on: '2026-09-30', days: 6 });
-    const spent = hubMemberFor({ ...fixture(), today: '2026-09-24', bookings: Array.from({ length: 12 }, (_, i) => b(`s${i}`)) });
+    const late = hubMemberFor({ ...fixture(), today: '2026-12-25' });
+    expect(late.expiryNudge).toEqual({ left: 8, on: '2026-12-31', days: 6 });
+    const spent = hubMemberFor({ ...fixture(), today: '2026-12-25', bookings: Array.from({ length: 12 }, (_, i) => b(`s${i}`)) });
     expect(spent.tokens.left).toBe(0);
     expect(spent.expiryNudge).toBeNull();
   });
 
   test('Elite is unlimited and never nudged; no package is zero', () => {
-    const elite = hubMemberFor({ ...fixture(), pkg: ELITE, today: '2026-09-28' });
+    const elite = hubMemberFor({ ...fixture(), pkg: ELITE, today: '2026-12-28' });
     expect(elite.tokens).toMatchObject({ unlimited: true, left: null, granted: null });
     expect(elite.nextPeriod.granted).toBeNull();
     expect(elite.lastPeriod.granted).toBeNull();
@@ -106,9 +118,9 @@ describe('hubMemberFor', () => {
 
   test('anchor 15 households get anchor-15 periods', () => {
     const m = hubMemberFor({ ...fixture(), anchorDay: 15, bookings: [], waitlist: [], graceTokens: [] });
-    expect(m.period).toMatchObject({ start: '2026-09-15', end: '2026-10-14', resetsOn: '2026-10-15' });
-    const early = hubMemberFor({ ...fixture(), anchorDay: 15, today: '2026-09-10', bookings: [], waitlist: [], graceTokens: [] });
-    expect(early.period).toMatchObject({ start: '2026-08-15', end: '2026-09-14', resetsOn: '2026-09-15', daysLeft: 4 });
+    expect(m.period).toMatchObject({ start: '2026-12-15', end: '2027-01-14', resetsOn: '2027-01-15' });
+    const early = hubMemberFor({ ...fixture(), anchorDay: 15, today: '2026-12-10', bookings: [], waitlist: [], graceTokens: [] });
+    expect(early.period).toMatchObject({ start: '2026-11-15', end: '2026-12-14', resetsOn: '2026-12-15', daysLeft: 4 });
   });
 });
 
@@ -122,9 +134,9 @@ describe('periodRows / sessionLabel', () => {
 
   test('rows are sorted by date and carry the session time when known', () => {
     const { spent } = periodRows({
-      bookings: [b('z', { date: '2026-09-30' }), b('y', { date: '2026-09-02' })],
+      bookings: [b('z', { date: '2026-12-30' }), b('y', { date: '2026-12-02' })],
       waitlist: [],
-      periodKey: '2026-09-01',
+      periodKey: '2026-12-01',
       sessionsById: { 's-y': { time: '4:00 PM', type: 'training' } },
     });
     expect(spent.map((r) => [r.id, r.time])).toEqual([['y', '4:00 PM'], ['z', null]]);
@@ -178,19 +190,19 @@ describe('small helpers', () => {
   });
 });
 
-describe('the Elite attendance line (owner ruling, 2026-09-22)', () => {
+describe('the Elite attendance line (owner ruling, 2026-12-22)', () => {
   // Elite has no token countdown, so the hub answers a different question:
   // how much of the period did they actually use?
   const elite = () => ({
     ...fixture(),
     pkg: ELITE,
     bookings: [
-      b('e1', { date: '2026-09-03', status: 'attended' }),
-      b('e2', { date: '2026-09-05', status: 'attended' }),
-      b('e3', { date: '2026-09-08', status: 'noshow' }),
-      b('e4', { date: '2026-09-22' }),
-      b('e5', { date: '2026-09-12', status: 'cancelled' }),
-      b('e6', { date: '2026-10-05', periodKey: '2026-10-01', status: 'attended' }),
+      b('e1', { date: '2026-12-03', status: 'attended' }),
+      b('e2', { date: '2026-12-05', status: 'attended' }),
+      b('e3', { date: '2026-12-08', status: 'noshow' }),
+      b('e4', { date: '2026-12-22' }),
+      b('e5', { date: '2026-12-12', status: 'cancelled' }),
+      b('e6', { date: '2027-01-05', periodKey: '2027-01-01', status: 'attended' }),
     ],
   });
 
@@ -268,5 +280,74 @@ describe('per-athlete billing (Sprint 20, spec 4.4)', () => {
     // The monthly pins are unchanged.
     expect(statusFor(null, { resetsOn: '2026-10-01', anchorDay: 1, allPerPurchase: false }).body).toBe('Billed monthly on the 1st. Nothing needs attention.');
     expect(statusFor({ status: 'active' }, { anchorDay: 15 }).body).toBe('Billed monthly on the 15th. Nothing needs attention.');
+  });
+});
+
+describe('before the season: the first (prepaid) period (tester report 2026-09-30)', () => {
+  // Sep 30: a paid 16-token member with one November session booked (the
+  // Oct 10 gate opens November bookings) and one December one.
+  const T16 = TOKEN_PACKAGES.find((p) => p.id === 't-16');
+  const pre = (over = {}) => ({
+    athlete,
+    pkg: T16,
+    anchorDay: 1,
+    today: '2026-09-30',
+    bookings: [b('nov', { date: '2026-11-03', periodKey: '2026-11-01' }), b('dec', { date: '2026-12-01', periodKey: '2026-12-01' })],
+    waitlist: [],
+    graceTokens: [],
+    ...over,
+  });
+
+  test('positionPeriodFor: November until Nov 1, then the current period; Elite keeps the current one', () => {
+    expect(SEASON_FIRST_PERIOD).toBe('2026-11-01');
+    expect(positionPeriodFor('2026-09-30', 1)).toEqual({ periodKey: '2026-11-01', periodEnd: '2026-11-30', preSeason: true });
+    expect(positionPeriodFor('2026-10-31', 1)).toMatchObject({ periodKey: '2026-11-01', preSeason: true });
+    expect(positionPeriodFor('2026-11-01', 1)).toEqual({ periodKey: '2026-11-01', periodEnd: '2026-11-30', preSeason: false });
+    expect(positionPeriodFor('2026-12-16', 1)).toMatchObject({ periodKey: '2026-12-01', preSeason: false });
+    expect(positionPeriodFor('2026-09-30', 1, ELITE)).toEqual({ periodKey: '2026-09-01', periodEnd: '2026-09-30', preSeason: false });
+  });
+
+  test('the meter reads November - its grant, its bookings - with no expiry nudge and no Last period', () => {
+    const m = hubMemberFor(pre());
+    expect(m.period).toMatchObject({ periodKey: '2026-11-01', start: '2026-11-01', end: '2026-11-30', resetsOn: '2026-12-01', preSeason: true });
+    expect(m.tokens).toMatchObject({ granted: 16, used: 1, left: 15, startsOn: '2026-11-01', unpaid: false });
+    expect(m.spent.map((r) => r.id)).toEqual(['nov']);
+    expect(m.nextPeriod).toMatchObject({ periodKey: '2026-12-01', granted: 16, booked: 1 });
+    // Was: "16 tokens expire Wednesday, Sep 30" and "Last period (Aug 1 - Aug 31)".
+    expect(m.expiryNudge).toBeNull();
+    expect(m.lastPeriod).toBeNull();
+  });
+
+  test('the issued November doc (the prepaid grant) wins over the package allotment', () => {
+    expect(hubMemberFor(pre({ tokenPeriod: { granted: 12 } })).tokens).toMatchObject({ granted: 12, left: 11 });
+  });
+
+  test('unpaid is marked and never nudged, before the season or in it', () => {
+    const pending = hubMemberFor(pre({ athlete: { ...athlete, billing: { status: 'pending' } } }));
+    expect(pending.tokens).toMatchObject({ unpaid: true, startsOn: '2026-11-01' });
+    const lapsed = hubMemberFor({ ...fixture(), today: '2026-12-25', athlete: { ...athlete, billing: { status: 'lapsed' } } });
+    expect(lapsed.tokens).toMatchObject({ unpaid: true, startsOn: null });
+    expect(lapsed.expiryNudge).toBeNull();
+  });
+
+  test('from Nov 1 the behaviour is unchanged; November itself has no Last period', () => {
+    const nov = hubMemberFor(pre({ today: '2026-11-25' }));
+    expect(nov.period).toMatchObject({ periodKey: '2026-11-01', daysLeft: 5, preSeason: false });
+    expect(nov.tokens).toMatchObject({ left: 15, startsOn: null });
+    expect(nov.expiryNudge).toEqual({ left: 15, on: '2026-11-30', days: 5 });
+    expect(nov.lastPeriod).toBeNull();
+  });
+
+  test('Elite is unaffected', () => {
+    const e = hubMemberFor(pre({ pkg: ELITE }));
+    expect(e.tokens).toMatchObject({ unlimited: true, left: null });
+    expect(e.tokens).not.toHaveProperty('startsOn');
+    expect(e.period).toMatchObject({ periodKey: '2026-09-01', preSeason: false });
+    expect(withTokenStart(null, { preSeason: true, periodKey: '2026-11-01' }, 'pending')).toBeNull();
+  });
+
+  test('statusFor: the active title names the start, never a reset of a month that granted nothing', () => {
+    expect(statusFor(null, { resetsOn: '2026-10-01', tokensStartOn: '2026-11-01', anchorDay: 1 }).title).toBe(`Tokens start ${longDayLabel('2026-11-01')}`);
+    expect(statusFor(null, { resetsOn: '2026-10-01', tokensStartOn: null, anchorDay: 1 }).title).toBe(`Tokens reset ${longDayLabel('2026-10-01')}`);
   });
 });

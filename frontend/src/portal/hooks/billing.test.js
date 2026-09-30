@@ -9,7 +9,16 @@ jest.mock('firebase/auth', () => ({}));
 jest.mock('firebase/functions', () => ({ httpsCallable: jest.fn(() => jest.fn()) }));
 jest.mock('firebase/messaging', () => ({ isSupported: jest.fn(async () => false) }));
 
-import { allPerPurchaseOf, pendingOf, warnMissingPortalUrl } from './billing';
+import { allPerPurchaseOf, pendingOf, tokensStartOf, warnMissingPortalUrl } from './billing';
+
+test('tokensStartOf: the first period start while any member is pre-season (tester report 2026-09-30)', () => {
+  const m = (preSeason, start) => ({ period: { preSeason, start } });
+  expect(tokensStartOf([m(false, '2026-09-01'), m(true, '2026-11-01')])).toBe('2026-11-01');
+  // All Elite (their period stays current) and every period from Nov 1 on: the reset title stands.
+  expect(tokensStartOf([m(false, '2026-09-01')])).toBeNull();
+  expect(tokensStartOf([m(false, '2026-12-01'), { period: null }])).toBeNull();
+  expect(tokensStartOf([])).toBeNull();
+});
 
 test('pendingOf marks single-token athletes perPurchase; allPerPurchaseOf is true only for an all-single household', () => {
   const m = (id, kind, status) => ({ athleteId: id, name: id, package: kind ? { kind } : null, billing: { status } });
