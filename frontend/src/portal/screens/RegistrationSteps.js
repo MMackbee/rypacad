@@ -243,7 +243,7 @@ export function AthleteStep({
             border: `1px solid ${color.rule}`,
             borderRadius: radius.input,
             padding: 11,
-            font: `400 14px ${font.body}`,
+            font: `400 16px ${font.body}`, // 16px: no iOS zoom on focus
             color: color.text,
             outline: 'none',
             resize: 'none',

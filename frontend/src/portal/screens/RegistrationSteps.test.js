@@ -37,6 +37,12 @@ test('own login asks for a child email, shows the U13 helper, rejects the guardi
   await r.unmount();
 });
 
+test('the medical box is 16px so iPhones do not zoom in on focus', async () => {
+  const r = await renderScreen(<Harness athlete={{ name: 'Nico', dob: '2017-05-05' }} />);
+  expect(r.container.querySelector('textarea').style.fontSize).toBe('16px');
+  await r.unmount();
+});
+
 test('athlete mode: a minor is told a guardian must complete it', async () => {
   const r = await renderScreen(<Harness mode="athlete" athlete={{ name: 'Sam', dob: '2010-01-01' }} />);
   expect(r.text()).toContain('Student sign-up is 18+.');

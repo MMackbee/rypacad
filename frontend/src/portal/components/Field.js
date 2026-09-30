@@ -64,7 +64,8 @@ export default function Field({
             background: 'transparent',
             border: 'none',
             outline: 'none',
-            font: `400 15px ${font.body}`,
+            // 16px: iOS Safari zooms the page into any input under 16px and leaves it zoomed.
+            font: `400 16px ${font.body}`,
             color: dimmed ? color.mutedText : color.text,
           }}
         />
@@ -141,7 +142,7 @@ export function SelectField({ label, value, options = [], onChange, style }) {
             border: 'none',
             outline: 'none',
             appearance: 'none',
-            font: `400 15px ${font.body}`,
+            font: `400 16px ${font.body}`, // 16px: no iOS zoom on focus
             color: value ? color.text : color.mutedText,
           }}
         >
