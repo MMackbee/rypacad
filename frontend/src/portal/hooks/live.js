@@ -549,11 +549,12 @@ export function assertBookingOpen(pkg, now = Date.now()) {
  * not bookable regardless of how it would be charged. Split out of the old
  * assertWithinPeriodCap (Sprint 12) so createBooking (below) can run it
  * unconditionally while the token-pool checks that follow it branch on
- * chargedFrom.
+ * chargedFrom. `now` is injectable for tests, like assertBookingOpen's;
+ * openThrough carries the Nov 1 launch anchor.
  */
-export function assertWithinBookingWindow(pkg, date) {
+export function assertWithinBookingWindow(pkg, date, now = new Date()) {
   const windowDays = windowDaysFor(pkg);
-  if (date > openThrough(new Date(), windowDays)) {
+  if (date > openThrough(now, windowDays)) {
     throw new LiveDataError(
       ERR.INVALID,
       `That date opens for booking at 7 AM on ${windowOpensOn(date, windowDays)}.`,

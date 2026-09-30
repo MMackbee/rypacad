@@ -9,6 +9,9 @@ let mockPackage;
 let mockBooked;
 let mockFirstSlot;
 let mockMonths;
+// Live mode's repeat offer renders only when bookingFor is set.
+let mockBookingFor;
+let mockBookRecurring;
 // Month-aware: each monthISO gets its own days; October is the default.
 const mockMonth = (m) => ({ data: { days: mockMonths[m] ?? [] }, loading: false, error: null });
 jest.mock('../hooks', () => ({
@@ -16,8 +19,8 @@ jest.mock('../hooks', () => ({
     data: { slots: [{ date: mockFirstSlot }], tokens: { left: 6, unlimited: false, grace: [] }, confirmation: { email: null, note: 'See you there.' }, seasonNote: null },
     loading: false, error: null,
     book: async (s) => { mockBooked.push(s.id); return {}; },
-    bookRecurring: async () => ({}),
-    bookingFor: null,
+    bookRecurring: (...args) => mockBookRecurring(...args),
+    bookingFor: mockBookingFor,
   }),
   useHouseholdAthletes: () => ({ data: [], loading: false }),
   useMembership: () => ({ data: { members: [{ athleteId: 'a1', package: mockPackage }] } }),
@@ -36,6 +39,8 @@ beforeEach(() => {
   mockPackage = { id: 't-12', kind: 'tokens', windowDays: 30 };
   mockFirstSlot = '2026-10-12';
   mockMonths = { '2026-10-01': [{ date: '2026-10-12', sessions: [session] }] };
+  mockBookingFor = null;
+  mockBookRecurring = jest.fn(async () => ({ booked: [], skipped: [], windowEnd: null, next: null }));
   jest.useFakeTimers('modern');
 });
 afterEach(() => {
@@ -77,25 +82,54 @@ test('Elite books before the gate (the paid package, spec 4.3)', async () => {
   await r.unmount();
 });
 
-describe('a locked day before the gate (UX review #8)', () => {
+describe('the window counts from Nov 1 until then (owner ruling 2026-09-30; UX review #8)', () => {
   const EMAIL_DAY = new Date('2026-10-01T17:00:00Z');
+  const on = (id, date) => ({ date, sessions: [{ ...session, id, date }] });
   beforeEach(() => {
-    mockMonths = { '2026-11-01': [{ date: '2026-11-03', sessions: [{ ...session, date: '2026-11-03' }] }, { date: '2026-11-20', sessions: [{ ...session, id: 's2', date: '2026-11-20' }] }] };
+    mockMonths = {
+      '2026-11-01': [on('s-nov3', '2026-11-03')],
+      '2026-12-01': [on('s-dec2', '2026-12-02'), on('s-dec16', '2026-12-16'), on('s-dec17', '2026-12-17')],
+    };
     mockFirstSlot = '2026-11-03';
   });
-  test('a token package sees Oct 10 for Nov 3, not "session date minus 30 days"', async () => {
+  test('a token package before Oct 10: Nov 3 is inside the window, inert behind the gate banner', async () => {
     jest.setSystemTime(EMAIL_DAY);
     const r = await renderScreen(<BookSession bare demoSelectedDate="2026-11-03" />);
-    expect(r.text()).toContain('Not open for this day yet');
-    expect(r.text()).toContain('Booking for Tuesday, Nov 3 opens Sat, Oct 10 at 7 AM.');
-    expect(r.text()).not.toContain('Sunday, Oct 4');
+    expect(r.text()).toContain('Booking opens Sat, Oct 10 at 7 AM');
+    expect(r.text()).not.toContain('Not open for this day yet');
+    const card = sessionCard(r);
+    expect(card.style.cursor).toBe('default');
+    await act(async () => { card.click(); });
+    expect(mockBooked).toEqual([]);
     await r.unmount();
   });
-  test('Elite keeps its own window date', async () => {
+  test('a token package: Dec 2 is past Nov 1 + 30 and names the day it opens, not Oct 10', async () => {
+    jest.setSystemTime(EMAIL_DAY);
+    const r = await renderScreen(<BookSession bare demoSelectedDate="2026-12-02" />);
+    expect(r.text()).toContain('Not open for this day yet');
+    expect(r.text()).toContain('Booking for Wednesday, Dec 2 opens 7 AM on Monday, Nov 2.');
+    await r.unmount();
+  });
+  test('Elite on Oct 1 reserves Dec 16 (Nov 1 + 45)', async () => {
     jest.setSystemTime(EMAIL_DAY);
     mockPackage = { id: 'elite', kind: 'elite', windowDays: 45 };
-    const r = await renderScreen(<BookSession bare demoSelectedDate="2026-11-20" />);
-    expect(r.text()).toContain('Booking for Friday, Nov 20 opens 7 AM on Tuesday, Oct 6.');
+    mockFirstSlot = '2026-12-16';
+    const r = await renderScreen(<BookSession bare demoSelectedDate="2026-12-16" />);
+    expect(r.text()).not.toContain('Not open for this day yet');
+    const card = sessionCard(r);
+    expect(card.style.cursor).toBe('pointer');
+    await act(async () => { card.click(); });
+    expect(mockBooked).toEqual(['s-dec16']);
+    expect(r.text()).toContain('Slot reserved');
+    await r.unmount();
+  });
+  test('Elite on Oct 1: Dec 17 is locked until 7 AM on Monday, Nov 2', async () => {
+    jest.setSystemTime(EMAIL_DAY);
+    mockPackage = { id: 'elite', kind: 'elite', windowDays: 45 };
+    mockFirstSlot = '2026-12-16';
+    const r = await renderScreen(<BookSession bare demoSelectedDate="2026-12-17" />);
+    expect(r.text()).toContain('Booking for Thursday, Dec 17 opens 7 AM on Monday, Nov 2.');
+    expect(sessionCard(r)).toBeNull();
     await r.unmount();
   });
 });

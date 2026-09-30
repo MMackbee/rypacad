@@ -8,6 +8,8 @@ jest.mock('firebase/firestore', () => ({}));
 
 import { ERR, assertAthleteBillingActive, assertBookingOpen, assertPeriodTokensLeft } from './live';
 import { BOOKING_OPENS_AT } from '../data/calendar';
+import { assertWithinBookingWindow } from './live';
+import { ELITE, TOKEN_PACKAGES } from '../data/packages';
 
 const reasonOf = (fn) => {
   try { fn(); } catch (e) { return [e.code, e.reason, e.message]; }
@@ -49,5 +51,19 @@ describe('assertPeriodTokensLeft names the period it means', () => {
     expect(reasonOf(() => assertPeriodTokensLeft(t6, spent('2026-11-01').slice(0, 5), '2026-11-01', undefined, [{ periodKey: '2026-11-01' }], '2026-11-01'))[2])
       .toBe("This period's tokens are already fully booked (5 of 6, 1 held on a waitlist).");
     expect(reasonOf(() => assertPeriodTokensLeft({ id: 'elite', tokens: null }, spent('2026-11-01'), '2026-11-01', undefined, [], '2026-11-01'))).toBeNull();
+  });
+});
+
+describe('assertWithinBookingWindow counts from Nov 1 until then (owner ruling 2026-09-30)', () => {
+  const OCT_1 = new Date('2026-10-01T17:00:00Z');
+  test('Elite on Oct 1 books through Dec 16; Dec 17 is outside-window and names Nov 2', () => {
+    expect(reasonOf(() => assertWithinBookingWindow(ELITE, '2026-12-16', OCT_1))).toBeNull();
+    expect(reasonOf(() => assertWithinBookingWindow(ELITE, '2026-12-17', OCT_1)))
+      .toEqual([ERR.INVALID, 'outside-window', 'That date opens for booking at 7 AM on 2026-11-02.']);
+  });
+  test('a token package reaches Dec 1', () => {
+    const t12 = TOKEN_PACKAGES.find((p) => p.id === 't-12');
+    expect(reasonOf(() => assertWithinBookingWindow(t12, '2026-12-01', OCT_1))).toBeNull();
+    expect(reasonOf(() => assertWithinBookingWindow(t12, '2026-12-02', OCT_1))[1]).toBe('outside-window');
   });
 });

@@ -147,10 +147,25 @@ export async function task5() {
   for (const [c, id] of [['bookings', 'ath-active_cal-1'], ['bookings', 'ath-active_s-portal'], ['loginInvites', 'kid@example.com'], ['calendlyEvents', 'ev-1']]) await del(c, id);
 }
 
+// Owner ruling 2026-09-30: every window counts from Nov 1 until then, so the
+// outer bound reaches Nov 1 + 46 days (Dec 17) whatever today is. Dec 18 stays
+// refused until the clock-based ceiling (today + 46 days) passes it on Nov 2.
+export async function taskWindow() {
+  const dec18Open = Date.now() + 46 * 86400000 >= Date.UTC(2026, 11, 18);
+  console.log('Window: the Nov 1 anchor on the outer booking bound' + (dec18Open ? ' (Nov 2 or later)' : ' (before Nov 2)'));
+  for (const [id, date] of [['s-dec16', '2026-12-16'], ['s-dec18', '2026-12-18']]) {
+    await seed('sessions', id, { date, time: '4:00 PM', type: 'training', capacity: 15, booked: 0, status: 'scheduled' });
+  }
+  const elite = (sessionId, date) => ({ ...booking('ath-elite'), sessionId, date, periodKey: '2026-12-01', chargedFrom: 'elite' });
+  expect('booking: Elite books Dec 16 (Nov 1 + 45)', await createAs(t.parent, 'bookings', 'ath-elite_s-dec16', elite('s-dec16', '2026-12-16')), 200);
+  expect('booking: Dec 18 past the anchored bound', await createAs(t.parent, 'bookings', 'ath-elite_s-dec18', elite('s-dec18', '2026-12-18')), dec18Open ? 200 : 403);
+  for (const [c, id] of [['bookings', 'ath-elite_s-dec16'], ['bookings', 'ath-elite_s-dec18'], ['sessions', 's-dec16'], ['sessions', 's-dec18']]) await del(c, id);
+}
+
 export { setup, teardown, seed, del, call, createAs, expect, token, t, uid, BASE };
 if (process.argv[1] && process.argv[1].endsWith('verify-rules.mjs')) {
   await setup();
-  try { await task4(); await task5(); } finally { await teardown(); }
+  try { await task4(); await task5(); await taskWindow(); } finally { await teardown(); }
   console.log(failures ? `${failures} FAILED` : 'ALL PASS');
   process.exit(failures ? 1 : 0);
 }

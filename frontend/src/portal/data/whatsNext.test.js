@@ -26,16 +26,22 @@ test('token package before Oct 10: opens, season start, unclaimed login - three 
   }
 });
 
-test('elite: book now, 45 days ahead, a primary book button - before Oct 10 too', () => {
+test('elite: book now through Dec 16 (Nov 1 + 45), a primary book button - before Oct 10 too', () => {
   expect(whatsNextFor({ packageId: 'elite', athlete: REESE, host: HOST, now: BEFORE_OPEN })).toEqual({
     title: "What's next",
-    lines: ['Reese can book now - training, tournaments and Phil, up to 45 days ahead.'],
+    lines: ['Reese can book now - training, tournaments and Phil, through Wed, Dec 16.'],
     book: "Book Reese's first session",
     season: false,
   });
   expect(whatsNextFor({ packageId: 'elite', athlete: JORDAN, host: HOST, now: BEFORE_OPEN }).lines).toEqual([
-    'Jordan can book now - training, tournaments and Phil, up to 45 days ahead.',
+    'Jordan can book now - training, tournaments and Phil, through Wed, Dec 16.',
     'Jordan can sign in at rypacad.ryptest.com/portal/signin with jordan@email.com.',
+  ]);
+});
+
+test('elite in season: the window rolls, so the copy goes back to 45 days ahead', () => {
+  expect(whatsNextFor({ packageId: 'elite', athlete: REESE, now: IN_SEASON }).lines).toEqual([
+    'Reese can book now - training, tournaments and Phil, up to 45 days ahead.',
   ]);
 });
 
@@ -67,17 +73,17 @@ test('the sign-in line only for an own login that is sent and unclaimed', () => 
 test("the athlete's own home says you, and never shows the login line", () => {
   expect(whatsNextFor({ packageId: 'elite', athlete: JORDAN, self: true, host: HOST, now: BEFORE_OPEN })).toEqual({
     title: "What's next",
-    lines: ['You can book now - training, tournaments and Phil, up to 45 days ahead.'],
+    lines: ['You can book now - training, tournaments and Phil, through Wed, Dec 16.'],
     book: 'Book your first session',
     season: false,
   });
   expect(whatsNextFor({ packageId: 't-12', athlete: JORDAN, self: true, host: HOST, now: BEFORE_OPEN }).lines).toHaveLength(2);
 });
 
-test('the clock: tokens can book once Oct 10 passes; the season line goes once sessions start', () => {
+test('the clock: tokens can book once Oct 10 passes (through Dec 1 until Nov 1); the season line goes once sessions start', () => {
   expect(whatsNextFor({ packageId: 't-12', athlete: REESE, now: AFTER_OPEN })).toEqual({
     title: "What's next",
-    lines: ['Reese can book now - training, tournaments and Phil, up to 30 days ahead.', 'Sessions start Tue, Nov 3.'],
+    lines: ['Reese can book now - training, tournaments and Phil, through Tue, Dec 1.', 'Sessions start Tue, Nov 3.'],
     book: "Book Reese's first session",
     season: true,
   });

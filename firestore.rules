@@ -538,10 +538,17 @@ service cloud.firestore {
       // nullReadOk's bookingId.split('_')) plus the rules language's
       // `int()` conversion and `timestamp.date()`/`duration.value()`
       // constructors, verified against the emulator (routing report).
+      // Owner ruling 2026-09-30: until Nov 1 every window counts from Nov 1
+      // (Elite through Dec 16), so the ceiling is the later of today and
+      // 2026-11-01 plus the same 46 days - the SAME date as data/calendar.js
+      // BOOKING_WINDOW_ANCHOR, one day of slack kept (Dec 17). Package-
+      // agnostic, no extra read; a no-op once request.time passes Nov 1.
+      // Retire with the Oct 10 gate (#26).
       function withinOuterBookingBound() {
         let parts = request.resource.data.date.split('-');
         let sessionDate = timestamp.date(int(parts[0]), int(parts[1]), int(parts[2]));
-        return sessionDate <= request.time + duration.value(46, 'd');
+        return sessionDate <= request.time + duration.value(46, 'd')
+          || sessionDate <= timestamp.date(2026, 11, 1) + duration.value(46, 'd');
       }
 
       // createdBy == request.auth.uid (in shape), caller is the athlete's own
