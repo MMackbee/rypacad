@@ -28,12 +28,14 @@ firebase deploy --only firestore:rules,firestore:indexes --project rypacad
 
 Set `REACT_APP_CALENDLY_MENTAL_URL` (+ optional `_ELITE_URL`),
 `REACT_APP_STRIPE_PORTAL_URL`, `REACT_APP_PORTAL_LIVE_DATA=true`,
-`REACT_APP_FIREBASE_VAPID_KEY`; then push. `portal/r3` has no upstream and
-the remote has only `main` (Railway builds `main`), so the push is always:
+`REACT_APP_FIREBASE_VAPID_KEY`; then promote. `main` is production (Railway
+builds it) and all work lives on `develop`, so a release is always:
 
 ```bash
-git push origin portal/r3:main
+git push origin develop:main
 ```
+
+Pushing `develop` alone (`git push origin develop`) deploys nothing.
 
 The build with `/portal/signup` and released prices must be live before any
 production smoke.

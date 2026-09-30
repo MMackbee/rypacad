@@ -9,8 +9,14 @@ Read `docs/portal/RUNBOOK-SPRINT-20.md` (the owner runbook) and
 
 - **The assistant never pushes, deploys, or writes to production.** Hand the
   owner (Makel) one command at a time, prefixed with
-  `cd C:\Users\Mac\Desktop\rypacadapp\rypacad &&`. The push is always
-  `git push origin portal/r3:main` (Railway builds `main`).
+  `cd C:\Users\Mac\Desktop\rypacadapp\rypacad &&`.
+- **Branches (owner, 2026-09-30):** `main` is PRODUCTION. Every push to it
+  deploys the site (Railway builds `main`), and functions and rules deploys
+  are run from its code. All new work goes to `develop` (or a short-lived
+  branch cut from `develop` and merged back). Promote only tested work:
+  `git push origin develop:main` (a fast-forward; if refused, merge
+  `origin/main` into `develop` first). Pushing `develop` itself
+  (`git push origin develop`) deploys nothing. `portal/r3` is retired.
 - Production scripts (`scripts/*.mjs --prod`): the assistant runs `--dry-run`
   only; the owner runs `--yes`. Read-only production reads are fine.
 - Never print or paste secrets (`rk_*`, `sk_*`, `whsec_*`, Calendly tokens,
