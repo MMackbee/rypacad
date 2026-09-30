@@ -19,11 +19,19 @@ jest.mock('./live', () => ({
   fetchAthlete: jest.fn(),
   fetchBookings: jest.fn(),
   fetchCurrentUser: jest.fn(),
+  fetchGraceTokensByAthlete: jest.fn(),
   fetchHousehold: jest.fn(),
   fetchHouseholdAthletes: jest.fn(),
+  fetchHouseholdBookings: jest.fn(),
   fetchPackage: jest.fn(),
   fetchSessionsByIds: jest.fn(),
   fetchSessionsInRange: jest.fn(),
+}));
+jest.mock('./waitlist', () => ({
+  ...jest.requireActual('./waitlist'),
+  __esModule: true,
+  fetchWaitlistByAthlete: jest.fn(),
+  fetchWaitlistByHousehold: jest.fn(),
 }));
 // "Today" is pinned per test. The seed modules call todayISO() at import, so
 // the real one answers until resetMocks clears it before the first test.
@@ -34,8 +42,9 @@ jest.mock('../data/calendar', () => {
 
 import { act } from 'react';
 import { createRoot } from 'react-dom/client';
-import { useBooking, useHousehold } from './index';
+import { useBooking, useHousehold, useHouseholdReservations, useSchedule } from './index';
 import * as live from './live';
+import * as waitlist from './waitlist';
 import * as calendar from '../data/calendar';
 
 const settle = () => act(async () => { await new Promise((r) => setTimeout(r, 0)); });
@@ -113,4 +122,56 @@ test('an unpaid athlete booking before the season: marked unpaid on the booking 
   const h = await mountHook(() => useBooking({ today: '2026-09-30' }));
   expect(h.result.current.data.tokens).toMatchObject({ left: 16, startsOn: '2026-11-01', unpaid: true });
   await h.unmount();
+});
+
+// Review 2026-09-30: an October slot is charged to October by createBooking,
+// and the "Next period" badge compared against the calendar month - both
+// disagreed with a meter that reads November before the season.
+const oct = { id: 'a1_phil', sessionId: 'phil', date: '2026-10-24', periodKey: '2026-10-01', status: 'confirmed', type: 'phil' };
+const nov5 = { id: 'a1_nov5', sessionId: 'nov5', date: '2026-11-05', periodKey: '2026-11-01', status: 'confirmed', type: 'training' };
+const dec = { id: 'a1_dec', sessionId: 'dec', date: '2026-12-02', periodKey: '2026-12-01', status: 'confirmed', type: 'training' };
+const session = (b) => ({ id: b.sessionId, date: b.date, type: b.type, time: '4:00 PM' });
+
+test('the family card counts an October booking against November', async () => {
+  calendar.todayISO.mockReturnValue('2026-10-20');
+  live.fetchCurrentUser.mockResolvedValue({ uid: 'p1', householdId: 'h1' });
+  live.fetchHousehold.mockResolvedValue({ id: 'h1', name: 'Whitfield family', periodAnchorDay: 1 });
+  live.fetchHouseholdAthletes.mockResolvedValue([{ id: 'a1', name: 'Jordan', householdId: 'h1', packageId: 't-16', billing: { status: 'active' } }]);
+  live.fetchPackage.mockResolvedValue(T16);
+  live.fetchBookings.mockResolvedValue([oct, nov5]);
+  live.fetchSessionsByIds.mockResolvedValue([]);
+
+  const h = await mountHook(() => useHousehold());
+  expect(h.result.current.data.children[0].tokens).toMatchObject({ granted: 16, used: 2, left: 14, startsOn: '2026-11-01' });
+  await h.unmount();
+});
+
+test('October: a November booking is this period on My Schedule and Reservations, a December one is next', async () => {
+  calendar.todayISO.mockReturnValue('2026-10-15');
+  live.fetchHousehold.mockResolvedValue({ id: 'h1', periodAnchorDay: 1 });
+  live.fetchPackage.mockResolvedValue(T16);
+  live.fetchSessionsByIds.mockResolvedValue([session(oct), session(nov5), session(dec)]);
+  live.fetchGraceTokensByAthlete.mockResolvedValue([]);
+  waitlist.fetchWaitlistByAthlete.mockResolvedValue([]);
+  waitlist.fetchWaitlistByHousehold.mockResolvedValue([]);
+  const nextBy = (rows) => Object.fromEntries(rows.map((r) => [r.date, r.nextPeriod]));
+  const expected = { '2026-10-24': false, '2026-11-05': false, '2026-12-02': true };
+
+  live.fetchCurrentUser.mockResolvedValue({ uid: 'u1', athleteId: 'a1', email: 'jordan@email.com' });
+  live.fetchAthlete.mockResolvedValue({ id: 'a1', householdId: 'h1', packageId: 't-16', billing: { status: 'active' } });
+  live.fetchBookings.mockResolvedValue([oct, nov5, dec]);
+  const mine = await mountHook(() => useSchedule({ today: '2026-10-15' }));
+  expect(mine.result.current.error).toBeNull();
+  expect(nextBy(mine.result.current.data.sessions)).toEqual(expected);
+  // The meter beside it spends the same two November tokens.
+  expect(mine.result.current.data.tokens).toMatchObject({ used: 2, left: 14 });
+  await mine.unmount();
+
+  live.fetchCurrentUser.mockResolvedValue({ uid: 'p1', householdId: 'h1' });
+  live.fetchHouseholdAthletes.mockResolvedValue([{ id: 'a1', name: 'Jordan', householdId: 'h1', packageId: 't-16' }]);
+  live.fetchHouseholdBookings.mockResolvedValue([oct, nov5, dec].map((b) => ({ ...b, athleteId: 'a1' })));
+  const family = await mountHook(() => useHouseholdReservations());
+  expect(family.result.current.error).toBeNull();
+  expect(nextBy(family.result.current.data.members[0].upcoming)).toEqual(expected);
+  await family.unmount();
 });

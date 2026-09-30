@@ -38,6 +38,20 @@ export function positionPeriodFor(today, anchorDay, pkg = null) {
 }
 
 /**
+ * Bookings or waitlist entries as a token position reads them: a row
+ * charged to a period before the first one (an October slot booked after
+ * the Oct 10 gate - createBooking charges the session date's own period)
+ * spends the first period's grant, the only one there is, so the meter and
+ * its evidence list never lose a spent token. Elite and a package-less read
+ * pass through.
+ */
+export function foldBeforeFirstPeriod(rows, anchorDay, pkg) {
+  if (!pkg || pkg.tokens === null || !Array.isArray(rows)) return rows;
+  const firstKey = periodFor(SEASON_FIRST_PERIOD, anchorDay).periodKey;
+  return rows.map((r) => (r && r.periodKey && r.periodKey < firstKey ? { ...r, periodKey: firstKey } : r));
+}
+
+/**
  * A tokensFor position marked with why it cannot be spent yet: `unpaid`
  * (billing pending or lapsed - "Pay to start") and `startsOn` (the first
  * period's start while it is still ahead - "Tokens start Nov 1"). The
@@ -134,10 +148,13 @@ export function periodRows({ bookings, waitlist, periodKey, sessionsById = {} })
  *   prevTokenPeriod, sessionsById, anchorDay, today}} args
  */
 export function hubMemberFor(args) {
-  const { athlete, pkg, bookings = [], waitlist = [], graceTokens = [], tokenPeriod = null, prevTokenPeriod = null } = args;
+  const { athlete, pkg, graceTokens = [], tokenPeriod = null, prevTokenPeriod = null } = args;
   const sessionsById = args.sessionsById || {};
   const anchorDay = normalizeAnchorDay(args.anchorDay);
   const today = args.today;
+  // A row dated before the first period is read as the first period's.
+  const bookings = foldBeforeFirstPeriod(args.bookings || [], anchorDay, pkg);
+  const waitlist = foldBeforeFirstPeriod(args.waitlist || [], anchorDay, pkg);
   // Before the season a token package reads the first (prepaid) period;
   // the caller's `tokenPeriod` is that period's issued doc.
   const period = positionPeriodFor(today, anchorDay, pkg);

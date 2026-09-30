@@ -6,6 +6,7 @@
 import {
   SEASON_FIRST_PERIOD,
   daysBetween,
+  foldBeforeFirstPeriod,
   hubMemberFor,
   ordinal,
   periodRows,
@@ -349,5 +350,37 @@ describe('before the season: the first (prepaid) period (tester report 2026-09-3
   test('statusFor: the active title names the start, never a reset of a month that granted nothing', () => {
     expect(statusFor(null, { resetsOn: '2026-10-01', tokensStartOn: '2026-11-01', anchorDay: 1 }).title).toBe(`Tokens start ${longDayLabel('2026-11-01')}`);
     expect(statusFor(null, { resetsOn: '2026-10-01', tokensStartOn: null, anchorDay: 1 }).title).toBe(`Tokens reset ${longDayLabel('2026-10-01')}`);
+  });
+
+  // Review 2026-09-30: createBooking charges an October slot to October, a
+  // period the meter never shows - the spent token went invisible.
+  const oct = b('oct', { date: '2026-10-24', periodKey: '2026-10-01' });
+  const octWait = { id: 'w-oct', sessionId: 's-w-oct', athleteId: 'jordan', date: '2026-10-28', periodKey: '2026-10-01' };
+
+  test('foldBeforeFirstPeriod: a row before the first period is read as the first period\'s; Elite and the rest untouched', () => {
+    const rows = [oct, b('nov', { periodKey: '2026-11-01' }), { id: 'legacy' }, null];
+    expect(foldBeforeFirstPeriod(rows, 1, T16).map((r) => r && r.periodKey)).toEqual(['2026-11-01', '2026-11-01', undefined, null]);
+    expect(foldBeforeFirstPeriod(rows, 1, ELITE)).toBe(rows);
+    expect(foldBeforeFirstPeriod(rows, 1, null)).toBe(rows);
+    // Anchor 15: the first period is Oct 15 - Nov 14, which an Oct 24 row is already in.
+    const rows15 = [b('oct15', { date: '2026-10-24', periodKey: '2026-10-15' }), b('early', { date: '2026-10-12', periodKey: '2026-09-15' })];
+    expect(foldBeforeFirstPeriod(rows15, 15, T16).map((r) => r.periodKey)).toEqual(['2026-10-15', '2026-10-15']);
+  });
+
+  test('an October booking and waitlist entry spend November: counted, listed, and still there once November starts', () => {
+    const m = hubMemberFor(pre({ today: '2026-10-20', bookings: [...pre().bookings, oct], waitlist: [octWait] }));
+    expect(m.tokens).toMatchObject({ granted: 16, used: 2, reserved: 1, left: 13, startsOn: '2026-11-01' });
+    expect(m.spent.map((r) => [r.id, r.date])).toEqual([['oct', '2026-10-24'], ['nov', '2026-11-03']]);
+    expect(m.reserved.map((r) => r.id)).toEqual(['w-oct']);
+    const nov = hubMemberFor(pre({ today: '2026-11-10', bookings: [...pre().bookings, oct] }));
+    expect(nov.tokens).toMatchObject({ used: 2, left: 14, startsOn: null });
+    const dec = hubMemberFor(pre({ today: '2026-12-10', bookings: [...pre().bookings, oct] }));
+    expect(dec.lastPeriod).toMatchObject({ periodKey: '2026-11-01', used: 2 });
+  });
+
+  test('an Elite October booking stays October\'s', () => {
+    const e = hubMemberFor(pre({ pkg: ELITE, today: '2026-10-20', bookings: [oct] }));
+    expect(e.spent.map((r) => r.id)).toEqual(['oct']);
+    expect(e.period.periodKey).toBe('2026-10-01');
   });
 });

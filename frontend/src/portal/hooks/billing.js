@@ -17,7 +17,7 @@
  */
 
 import { useEffect, useState } from 'react';
-import { hubMemberFor, positionPeriodFor, statusFor } from '../data/billingHub';
+import { foldBeforeFirstPeriod, hubMemberFor, positionPeriodFor, statusFor } from '../data/billingHub';
 import { addDaysISO, todayISO } from '../data/calendar';
 import { normalizeAnchorDay, packageById, periodFor } from '../data/packages';
 import { GRACE_TOKEN, HOUSEHOLD, PAST_DUE_MEMBERSHIP, PERIOD_ANCHOR_DAY } from '../data/seed';
@@ -106,9 +106,12 @@ async function liveMember(athlete, anchorDay, today) {
   const nextKey = periodFor(addDaysISO(period.periodEnd, 1), anchorDay).periodKey;
   // Only the rows the hub lists need their session (label, time): this
   // period's and next period's live bookings and waitlist entries.
+  // Folded as the hub reads them, so an October row listed under the first
+  // period gets its session too.
   const inScope = (x) =>
     x && x.status !== 'cancelled' && (x.periodKey === period.periodKey || x.periodKey === nextKey) && x.sessionId;
-  const sessionIds = [...bookings, ...waitlist].filter(inScope).map((x) => x.sessionId);
+  const read = (rows) => foldBeforeFirstPeriod(rows, anchorDay, pkg);
+  const sessionIds = [...read(bookings), ...read(waitlist)].filter(inScope).map((x) => x.sessionId);
   const sessions = sessionIds.length ? await fetchSessionsByIds(sessionIds) : [];
   const sessionsById = Object.fromEntries(sessions.map((s) => [s.id, s]));
   const entry = hubMemberFor({
