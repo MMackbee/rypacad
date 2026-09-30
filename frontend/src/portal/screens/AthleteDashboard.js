@@ -85,7 +85,7 @@ export default function AthleteDashboard({
             )}
           </div>
           <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 6 }}>
-            <Avatar size={40} />
+            <Avatar size={40} name={athlete?.name} />
             <SignOutButton onSignOut={onSignOut} />
           </div>
         </div>
@@ -458,7 +458,6 @@ function NoSessions({ onBook }) {
         textAlign: 'center',
       }}
     >
-      <MediaPlaceholder height={44} style={{ width: 44 }} />
       <ScreenTitle size={17}>No upcoming sessions</ScreenTitle>
       <Body size={12}>
         Nothing is on your schedule right now — book any open block. Cancelling with notice keeps
