@@ -3,6 +3,7 @@ import { useNavigate, useSearchParams } from 'react-router-dom';
 import { color, font } from '../tokens';
 import PendingBanner from '../components/PendingBanner';
 import PaymentConfirming from '../components/PaymentConfirming';
+import WalkthroughOffer from '../components/WalkthroughOffer';
 import useBillingHub from '../hooks/billing';
 import { billingBadge, loginStatusLine } from '../data/billingCopy';
 import BookChooser, { BookChooserSheet, bookNavigation } from '../components/BookChooser';
@@ -182,6 +183,9 @@ export default function ParentDashboard({
             onOpenMembership={() => navigate('/portal/billing')}
           />
         ))}
+
+        {/* First-visit walkthrough offer, below Pay and the cards; never inside the walkthrough itself. */}
+        {practice ? null : <WalkthroughOffer track="parent" />}
 
         {/*
           Sprint 9 pin (TEAM.md): ONE full-width coaching entry point under
