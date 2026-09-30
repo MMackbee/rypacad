@@ -104,7 +104,7 @@ test('prices read per month, Elite reads how far ahead it books, and tokens are 
   const r = await renderScreen(<PackageStep athletes={[{ ...newAthleteEntry(), name: 'Nico' }]} onUpdate={() => {}} showErrors={false} />);
   expect(r.button('Elite').textContent).toContain('Unlimited · 24/7 access · book up to 45 days ahead');
   expect(r.button('Elite').textContent).toContain('$999/ month');
-  expect(r.text()).toContain("Package — Nico1 token = 1 session: a training block, a tournament, or a 1-on-1 with Phil or Yannick. Tokens refresh on the 1st of each month; unused tokens don't carry over. Elite is unlimited.");
+  expect(r.text()).toContain("Package — Nico1 token = 1 session: a training block, a tournament, or a session with Phil or Yannick. Tokens refresh on the 1st of each month; unused tokens don't carry over. Elite is unlimited.");
   await r.unmount();
 });
 
@@ -148,7 +148,7 @@ test('until one-time checkout ships, the single token is greyed out and cannot b
   const r = await renderScreen(<PackageStep athletes={[{ ...newAthleteEntry(), name: 'Nico' }]} onUpdate={(key, p) => picks.push(p)} showErrors={false} />);
   const single = r.button('Single token');
   expect(single.getAttribute('aria-disabled')).toBe('true');
-  expect(single.style.opacity).toBe('0.55');
+  expect(single.style.opacity).toBe(''); // the footnote explaining why must stay readable
   expect(single.textContent).toContain('On sale before booking opens Sat, Oct 10. Pick a monthly package now, or come back then.');
   await r.click('Single token');
   expect(picks).toEqual([]);

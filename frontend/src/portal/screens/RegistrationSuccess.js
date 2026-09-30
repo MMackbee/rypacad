@@ -51,10 +51,10 @@ export default function RegistrationSuccess({ bare = false, mode = 'signup', for
     ...(anyElite ? ['Elite books right away once paid.'] : []),
     // UX review P-09: Stripe returns to the family page (home for an
     // athlete), not here, and this screen is gone after the next tap.
-    `After you pay, Stripe sends you to your ${page}. It shows "${CONFIRMING}" for up to a minute.` +
-      (!athleteMode && rows.length > 1 ? ` Paying for more than one athlete? The others wait there under ${PAY_NOW}.` : ''),
+    `After you pay, Stripe sends you to your ${page}. It shows "${CONFIRMING}" for up to two minutes.` +
+      (!athleteMode && rows.length > 1 ? ` Paying for more than one athlete? The others wait there, each with its own ${PAY_NOW} button.` : ''),
     ...logins.map((r) => `${r.name.trim()} signs in at ${window.location.host}/portal/signin with ${r.loginEmail.trim().toLowerCase()}. ` +
-      `Continue with Google is quickest. With a password: tap Create a login, open the email from ${VERIFY_EMAIL_SENDER}, then tap ${VERIFIED}.`),
+      `If that email is a Google account, Continue with Google is quickest. Otherwise: tap Create a login, open the email from ${VERIFY_EMAIL_SENDER}, then tap ${VERIFIED}.`),
     `There's no welcome email. Your ${page} always shows what's paid and what's left to do.`,
   ];
   return (
