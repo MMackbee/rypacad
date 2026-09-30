@@ -34,7 +34,7 @@ export default function AthleteRow({
         ...style,
       }}
     >
-      <Avatar size={avatarSize} />
+      <Avatar size={avatarSize} name={name} />
       <div style={{ flex: 1, minWidth: 0 }}>
         <div
           style={{

@@ -51,23 +51,37 @@ export default function MediaPlaceholder({
 }
 
 /** Athlete avatar. Sizes used across the artboards: 32-48px. */
-export function Avatar({ size = 44, label, style }) {
+/**
+ * The avatar slot. There are no profile photos yet, so this is a plain
+ * circle with the initials when a name is given (2026-09-30: the striped
+ * placeholder was showing on the live home screens), never the stripes.
+ */
+export function Avatar({ size = 44, label, name, style }) {
+  const initials = String(name || '')
+    .trim()
+    .split(/\s+/)
+    .filter(Boolean)
+    .slice(0, 2)
+    .map((w) => w[0].toUpperCase())
+    .join('');
   return (
     <div
+      aria-hidden="true"
       style={{
         width: size,
         height: size,
         flex: 'none',
         borderRadius: '50%',
-        ...placeholder,
+        background: color.surface,
+        border: `1px solid ${color.border}`,
         display: 'grid',
         placeItems: 'center',
-        font: `400 ${Math.max(8, Math.round(size / 4))}px ${font.mono}`,
-        color: color.captionText,
+        font: `600 ${Math.max(10, Math.round(size / 2.6))}px ${font.body}`,
+        color: color.textTertiary,
         ...style,
       }}
     >
-      {label}
+      {label ?? initials}
     </div>
   );
 }

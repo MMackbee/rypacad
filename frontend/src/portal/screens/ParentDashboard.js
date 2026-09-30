@@ -146,7 +146,7 @@ export default function ParentDashboard({
               </>
             )}
           </div>
-          <Avatar size={40} />
+          <Avatar size={40} name={data?.name} />
         </div>
       }
       footer={<BottomTabBar role="parent" active="home" />}
@@ -315,7 +315,7 @@ function ChildCard({ child, onHold, billingStatus, onOpen, onBookFor, onOpenMemb
     // separate affordance.
     <Card large onClick={onOpen} style={{ minHeight: 198 }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-        <Avatar size={44} />
+        <Avatar size={44} name={child.name} />
         <div style={{ flex: 1, minWidth: 0 }}>
           <div style={{ font: `600 16px ${font.body}`, color: color.text }}>{child.name}</div>
           <div style={{ font: `400 11px ${font.body}`, color: color.textTertiary, marginTop: 2 }}>

@@ -20,7 +20,7 @@ import { useBooking, useHouseholdAthletes, useMembership, useMonthSessions } fro
 // comment: "both data modes call it").
 import BookingOpensBanner from '../components/BookingOpensBanner';
 import { windowDaysFor } from '../data/packages';
-import { capacityFor, dayLabel } from '../data/season';
+import { SEASON_BOUNDS, capacityFor, dayLabel } from '../data/season';
 import { DEFAULT_DURATION_MINUTES } from '../data/schedule';
 import { bookingOpen, openThrough, parseTimeToMinutes, todayISO } from '../data/calendar';
 import { buildMonthDayMaps, useMonthNavState } from '../components/MonthCalendar';
@@ -163,7 +163,9 @@ export default function BookSession({
     ? membershipMembers.find((m) => m.athleteId === selectedAthleteId) ?? null
     : membershipMembers[0] ?? null;
   const windowDays = windowDaysFor(selfMember?.package ?? null);
-  const openThroughDate = openThrough(new Date(), windowDays);
+  // Onboarding practice books seed data: no day is ever locked there, or the
+  // walkthrough's booking step cannot be finished (Mike, 2026-09-30).
+  const openThroughDate = practice ? SEASON_BOUNDS.end : openThrough(new Date(), windowDays);
   // Sprint 20 (spec 5, D16): the Oct 10 gate, proactively. Elite - the PAID
   // package, since the webhook corrects packageId to the paid price (spec
   // 4.3) - books at once; everyone else sees the schedule with Reserve inert
