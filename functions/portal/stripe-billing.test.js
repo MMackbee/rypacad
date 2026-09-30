@@ -31,6 +31,8 @@ test('invoice.paid subscription_create: prepaid period from metadata', () => {
       [6, true, '2026-11-30']);
   const a = writes.find((w) => w.path === 'athletes/a1');
   assert.equal(a.data['billing.status'], 'active');
+  assert.equal(a.data['billing.oneTime'], false,
+      'a paid subscription clears the single token\'s oneTime');
   const h = writes.find((w) => w.path === 'households/h1');
   assert.deepEqual([h.data['membership.status'], h.data.periodAnchorDay],
       ['active', 1]);
@@ -62,10 +64,30 @@ test('invoice.paid facility: no tokens, facilityBilling + facilityAccess',
       const a = writes.find((w) => w.path === 'athletes/a1');
       assert.deepEqual([a.data['facilityBilling.status'],
         a.data.facilityAccess], ['active', true]);
+      assert.equal(Object.keys(a.data).some((k) => k.endsWith('.oneTime')),
+          false, 'the add-on never touches oneTime');
       assert.equal(writes.some((w) => w.path.startsWith('tokenPeriods/')),
           false);
       assert.equal(writes.some((w) => w.path === 'households/h1'), false,
           'D10: a facility invoice never writes households.membership');
+    });
+
+test('invoice.paid before checkout on an upgrade from the single token',
+    () => {
+      // The single athlete ({active, oneTime}) subscribes to t-6; Stripe
+      // delivers invoice.paid first. It must leave billing.oneTime false.
+      const {tx, writes} = recorder();
+      const out = b.applyAthleteInvoicePaid(tx, {db, hh, athleteRef: aRef,
+        athlete: {packageId: 't-6', billing: {status: 'active',
+          oneTime: true, subscriptionId: null}},
+        pkg: T6, product: 'tier',
+        period: {start: '2026-10-05', end: '2026-11-05'},
+        event: {id: 'evt_4', data: {object: {
+          billing_reason: 'subscription_create'}}}});
+      assert.equal(out.firstActive, false);
+      const a = writes.find((w) => w.path === 'athletes/a1');
+      assert.deepEqual([a.data['billing.status'], a.data['billing.oneTime']],
+          ['active', false]);
     });
 
 test('applyAthleteStatus: lapsed facility clears facilityAccess', () => {
