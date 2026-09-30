@@ -18,7 +18,7 @@ jest.mock('../data/calendly', () => ({
   calendlyLinkFor: ({ url, athleteId, athleteName, householdId, name, email }) =>
     `${url}?${new URLSearchParams({ name, email, a1: athleteName, utm_content: athleteId, utm_campaign: householdId })}`,
   CALENDLY_NOTE: "Yannick's confirmation, reminders and cancellations come from Calendly. The session appears on My Schedule within a minute and spends one token.",
-}), { virtual: true });
+})); // not `virtual` (the file exists): see Registration.test.js
 
 beforeEach(() => {
   try { window.localStorage.clear(); } catch (e) { /* storage unavailable */ }

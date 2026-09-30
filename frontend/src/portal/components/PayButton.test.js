@@ -12,7 +12,7 @@ jest.mock('../hooks/callables', () => ({
     if (mockReject && mockCalls <= mockRejectTimes) { const e = new Error(mockReject.message); e.reason = mockReject.reason; throw e; }
     return { url: `https://checkout.stripe.test/${payload.athleteId}/${payload.product}` };
   },
-}), { virtual: true });
+})); // not `virtual` (the file exists): see Registration.test.js
 let mockSession;
 jest.mock('../hooks/useAuthSession', () => ({ __esModule: true, default: () => mockSession }));
 // The mocked module is a plain object; the test fills auth.currentUser per run (no TDZ: nothing is read at factory time).
