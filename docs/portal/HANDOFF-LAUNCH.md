@@ -51,7 +51,7 @@ write, Prices read - verified by a live rehearsal), `STRIPE_WEBHOOK_SECRET`
 `CALENDLY_WEBHOOK_SIGNING_KEY` (v2; it will be replaced by the Calendly
 script, see 4.3).
 
-**BLOCKER - public access:** the rypgolf.com Google Cloud organization
+**RESOLVED 2026-09-30 - public access:** Mike set the rypacad override (Replace, Allow All) and the owner added allUsers invoker to the six; probes now return 400 (webhooks, unsigned) and 401 "Sign in to continue." (callables). History: the rypgolf.com Google Cloud organization
 (org 958821783034) enforces domain restricted sharing
 (`iam.allowedPolicyMemberDomains`), so `allUsers` cannot invoke functions.
 The six public functions (`stripeWebhook`, `calendlyWebhook`, `createFamily`,
@@ -84,7 +84,7 @@ receipts).
 
 ## 3. What to do next, in order
 
-### 3.1 After Mike's change: open the six functions
+### 3.1 DONE - the six functions are open (kept for reference)
 
 The owner pastes this in Google Cloud Shell (project rypacad):
 
