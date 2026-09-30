@@ -10,7 +10,6 @@ import ProgressMeter from '../components/ProgressMeter';
 import SavedToast from '../components/SavedToast';
 import { BackLink, Body, Card, ScreenTitle, SectionLabel } from '../components/Primitives';
 import { useCoachRoster } from '../hooks';
-import { hideContractParts } from '../data/contractFlag';
 
 /**
  * Sprint 10 pin C (TEAM.md, contract v1.8 §C): useDiagnostic(athleteId) ->
@@ -204,7 +203,7 @@ export default function DiagnosticCapture({ variant, bare = false, athlete, athl
                   marginTop: 3,
                 }}
               >
-                {hideContractParts(subject?.meta)}
+                {subject?.meta}
               </div>
             </div>
           </div>
@@ -378,7 +377,7 @@ export function CaptureFlow({ bare = false, onCancel }) {
                 <AthleteRow
                   key={a.id}
                   name={a.name}
-                  meta={hideContractParts(a.meta)}
+                  meta={a.meta}
                   avatarSize={40}
                   nameSize={15}
                   divider={i < athletes.length - 1}

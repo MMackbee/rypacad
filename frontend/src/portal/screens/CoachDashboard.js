@@ -17,7 +17,7 @@ import { DEFAULT_DURATION_MINUTES } from '../data/schedule';
 import { buildMonthDayMaps, useMonthNavState } from '../components/MonthCalendar';
 import { longDayLabel, parseTimeToMinutes, todayISO } from '../data/calendar';
 import { SEASON_BOUNDS } from '../data/season';
-import { contractEnabled, hideContractParts } from '../data/contractFlag';
+import { contractEnabled } from '../data/contractFlag';
 
 /**
  * 12 · Coach Dashboard - coach.
@@ -179,7 +179,7 @@ function StudentsTab({ athletes, loading, onOpenAthlete }) {
           <AthleteRow
             key={a.id}
             name={a.name}
-            meta={hideContractParts(a.meta)}
+            meta={a.meta}
             avatarSize={40}
             nameSize={15}
             divider={i < athletes.length - 1}

@@ -51,8 +51,9 @@ test('rules without contractStart (frontend ahead of the rules deploy): a start 
   jest.useFakeTimers('modern');
   jest.setSystemTime(new Date('2026-12-15T18:00:00Z'));
   updateDoc.mockRejectedValueOnce(denied()).mockResolvedValueOnce(undefined);
+  // The drop is never silent (review 2026-09-30): the result says so.
   await expect(setContractTier({ athleteId: 'a1', minutes: 45, start: true }))
-    .resolves.toEqual({ athleteId: 'a1', contractMinutes: 45 });
+    .resolves.toEqual({ athleteId: 'a1', contractMinutes: 45, contractStartDropped: true });
   expect(updateDoc.mock.calls).toEqual([
     ['athletes/a1', { contractMinutes: 45, contractStart: '2026-12-15' }],
     ['athletes/a1', { contractMinutes: 45 }],

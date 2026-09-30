@@ -33,13 +33,11 @@
 
 import { useState } from 'react';
 import useSeedResource from './useSeedResource';
-import { bump, useInvalidation } from './invalidate';
+import { useInvalidation } from './invalidate';
 import {
   ERR,
   LiveDataError,
   approveEnrollmentRequest,
-  assertAthleteBillingActive,
-  assertBookingOpen,
   cancelBooking,
   createBooking,
   createContractLog,
@@ -144,7 +142,6 @@ import {
   capacityFor,
   datePill,
   dayLabel,
-  firstRunningWeek,
   resolveBooking,
   upcomingDates,
 } from '../data/season';
@@ -170,7 +167,6 @@ import {
   parseTimeToMinutes,
   pickDueDates,
   todayISO,
-  windowOpensOn,
 } from '../data/calendar';
 import {
   ATHLETE_DETAIL,
@@ -195,6 +191,8 @@ import { TOUR_SEED, bracketFor, deriveTourStandings } from '../data/tour';
 import { SPECIALISTS, isSpecialistType, mentalCapFor } from '../data/specialists';
 import { calendlyUrlFor } from '../data/calendly';
 import { loginStateFor } from '../data/signups';
+import { hideContractParts } from '../data/contractFlag';
+import repeatWeekly, { isGroupBookable } from './repeat';
 import { MARKS_LOOKAHEAD_DAYS, dayMarksFor, monthGridBounds } from '../data/calendarViews';
 import { foldBeforeFirstPeriod, positionPeriodFor, withTokenStart } from '../data/billingHub';
 
@@ -246,15 +244,6 @@ export function genericSessionName(type) {
 }
 
 /** How a season session renders on a schedule or booking list. */
-/**
- * Group-flow membership (Sprint 12 integration): a session the booking,
- * recurrence, coach-day and admin-fill paths may count. Specialist slots
- * live on their own surfaces, and the seed-only adult block (pin J) is
- * display-only - it appears on the month calendar and nowhere else.
- */
-function isGroupBookable(s) {
-  return !isSpecialistType(s.type) && s.bookable !== false;
-}
 
 function displaySession(s, today) {
   const [time, meridiem] = s.time.split(' ');
@@ -835,19 +824,6 @@ export function useSchedule({ variant = 'upcoming', today = todayISO(), practice
 }
 
 /**
- * bookRecurring's per-week outcomes: createBooking's typed refusal of ONE
- * week -> the skip reason the Repeat summary names (anything untyped that
- * is not "already booked" is 'error', with its message - never 'full').
- * The STOP reasons concern the whole family, so the loop rethrows them.
- */
-const REPEAT_SKIP_REASON = new Map([
-  ['outside-window', 'not open yet'],
-  ['no-tokens-left', 'period limit'],
-  ['one-per-day', 'one per day'],
-]);
-const REPEAT_STOP_REASONS = new Set(['membership-inactive', 'billing-pending', 'booking-not-open']);
-
-/**
  * GET /schedule/availability + GET /athletes/:id/tokens (05).
  *
  * Availability comes from the generated season, so what the screen shows is the
@@ -1004,147 +980,9 @@ export function useBooking({ variant = 'open', today = todayISO(), practice = fa
     });
   };
 
-  /**
-   * Recurring booking (owner's ruling, TEAM.md "Recurring booking pins";
-   * rewritten 2026-09-30 after "Repeat weekly does nothing"): book the same
-   * weekday+time weekly, from the week AFTER `slot` through `untilISO`,
-   * never past the athlete's booking window (openThrough - the screen asks
-   * for exactly that). Nothing is held beyond it: no standing reservations.
-   * Each week is a plain createBooking with the SAME checks a single tap
-   * runs - window, Elite's one-a-day, period tokens with waitlist holds and
-   * issued grants, grace tokens - so no running tally here can disagree
-   * with them. A refusal of one week is a skip with its own reason
-   * (REPEAT_SKIP_REASON); one that concerns the whole family (membership
-   * paused, payment pending, not open yet) is rethrown. Recurrence is a
-   * group-flow-only feature (specialist slots are filtered out of the range
-   * query below), so the mental frequency knob never applies here.
-   *
-   * Returns { booked: [{date,id}], skipped: [{date,reason,message?,opensOn?}],
-   * windowEnd, next: {date,opensOn} | null } - `next` is the first week past
-   * the window that the season runs (closures stepped over) and the day it
-   * opens at 7 AM.
-   */
-  const bookRecurring = async (slot, { athleteId, untilISO } = {}) => {
-    if (!live) return { booked: [], skipped: [], windowEnd: null, next: null, simulated: true };
-    if (!identity) {
-      throw new LiveDataError(ERR.INVALID, 'bookRecurring() called before booking data loaded.');
-    }
-    if (!untilISO) {
-      throw new LiveDataError(ERR.INVALID, 'bookRecurring() needs { untilISO }.');
-    }
-    const forAthleteId = identity.role === 'parent' ? athleteId : identity.athleteId;
-    if (!forAthleteId) {
-      throw new LiveDataError(ERR.INVALID, 'bookRecurring() needs the child - pass { athleteId }.');
-    }
-
-    const athlete = await fetchAthlete(forAthleteId);
-    const pkg = athlete.packageId ? await fetchPackage(athlete.packageId) : null;
-    // Sprint 20 (K03 + spec 4.4/5): the family-wide gates ONCE before any
-    // per-week read - paid status and the Oct 10 gate - and the package's
-    // booking window as the loop's outer bound.
-    assertAthleteBillingActive(athlete);
-    assertBookingOpen(pkg);
-    const windowDays = windowDaysFor(pkg);
-    const windowEnd = openThrough(new Date(), windowDays);
-    // Sessions already held are named 'already booked' up front, rather than
-    // tripping Elite's one-a-day or a token count inside createBooking first.
-    const have = new Set(
-      (await fetchBookings(forAthleteId, identity.role === 'parent' ? { householdId: identity.householdId } : {}))
-        .filter((b) => b.status !== 'cancelled')
-        .map((b) => b.sessionId)
-    );
-
-    // Every candidate week's sessions in ONE range query, matched locally —
-    // one query per week was ~25 serial round-trips (finding 8a).
-    const firstDate = addDaysISO(slot.date, 7);
-    const lastDate = untilISO < windowEnd ? untilISO : windowEnd;
-    const sessionsByDate = new Map();
-    let lastSessionDate = null;
-    if (firstDate <= lastDate) {
-      for (const s of await fetchSessionsInRange(firstDate, lastDate)) {
-        if (!isGroupBookable(s)) continue; // recurrence is a group-flow feature
-
-        const list = sessionsByDate.get(s.date) ?? [];
-        list.push(s);
-        sessionsByDate.set(s.date, list);
-        if (!lastSessionDate || s.date > lastSessionDate) lastSessionDate = s.date;
-      }
-    }
-    // Stop at the last scheduled session rather than the requested end date:
-    // weeks past the end of the schedule are not real skips worth reporting.
-    const endDate = lastSessionDate && lastSessionDate < lastDate ? lastSessionDate : lastDate;
-    // The first week past the window that the season runs (never a closure:
-    // the Christmas break sits right past the Dec 16 window): nothing holds
-    // it, so the screen says when it opens instead. null past the season.
-    let pastWindow = firstDate;
-    while (pastWindow <= windowEnd) pastWindow = addDaysISO(pastWindow, 7);
-    const nextDate = firstRunningWeek(pastWindow, slot.time, slot.type);
-    const next = nextDate ? { date: nextDate, opensOn: windowOpensOn(nextDate, windowDays) } : null;
-
-    const booked = [];
-    const skipped = [];
-    try {
-      for (let date = firstDate; date <= endDate; date = addDaysISO(date, 7)) {
-        const match = (sessionsByDate.get(date) ?? []).find(
-          (s) => s.time === slot.time && s.type === slot.type && s.status !== 'cancelled'
-        );
-        if (!match) {
-          skipped.push({ date, reason: 'no session' });
-          continue;
-        }
-        if (have.has(match.id)) {
-          skipped.push({ date, reason: 'already booked' });
-          continue;
-        }
-        if ((match.booked ?? 0) >= (match.capacity ?? 0)) {
-          skipped.push({ date, reason: 'full' });
-          continue;
-        }
-        try {
-          // Every check a single booking runs (no skipCapCheck, K03); silent:
-          // one invalidation bump in the finally below instead of a refetch
-          // storm per iteration (finding 8b). The window caps this at ~7 weeks.
-          // createdVia 'repeat': no per-week notice (functions/index.js).
-          const result = await createBooking(
-            {
-              athleteId: forAthleteId,
-              sessionId: match.id,
-              date: match.date,
-              type: match.type,
-              householdId: identity.householdId,
-            },
-            { silent: true, createdVia: 'repeat' }
-          );
-          // A race that fills the session between the pre-check above and the
-          // transaction resolves as 'waitlisted' instead of 'confirmed' -
-          // reported as skipped, not counted as booked (contract v2.1, pin F).
-          if (result.status === 'waitlisted') {
-            skipped.push({ date, reason: 'full' });
-            continue;
-          }
-          booked.push({ date: match.date, id: match.id });
-          have.add(match.id);
-        } catch (err) {
-          if (REPEAT_STOP_REASONS.has(err?.reason)) throw err;
-          const reason =
-            REPEAT_SKIP_REASON.get(err?.reason) ?? (/already/i.test(err?.message || '') ? 'already booked' : 'error');
-          skipped.push({
-            date,
-            reason,
-            ...(reason === 'not open yet' ? { opensOn: windowOpensOn(date, windowDays) } : {}),
-            ...(reason === 'error' ? { message: err?.message || null } : {}),
-          });
-        }
-      }
-    } finally {
-      // Weeks booked before a family-wide refusal are real bookings too.
-      if (booked.length) {
-        bump('bookings');
-        bump('sessions');
-      }
-    }
-    return { booked, skipped, windowEnd, next };
-  };
+  // Repeat weekly lives in hooks/repeat.js (review 2026-09-30, the 500-line rule).
+  const bookRecurring = (slot, opts) =>
+    live ? repeatWeekly(identity, slot, opts) : Promise.resolve({ booked: [], skipped: [], windowEnd: null, next: null, simulated: true });
 
   return { ...state, book, bookRecurring, bookingFor: identity ? identity.role : null };
 }
@@ -1757,10 +1595,13 @@ async function liveChildCard(a, today, anchorDay) {
   // ChildCard line. A parent may read their own household's invites (rules,
   // Task 5); no loginEmail == the parent's account runs the child.
   const login = loginStateFor(loginEmail, invite);
-  const ageLine =
+  // Composed once here (review 2026-09-30): the contract part is dropped at
+  // the source while the contract is hidden, so no screen scrubs it.
+  const ageLine = hideContractParts(
     [age != null ? `Age ${age}` : null, contractMinutes != null ? `${contractMinutes} min tier` : null]
       .filter(Boolean)
-      .join(' · ') || null;
+      .join(' · ') || null
+  );
 
   return {
     id: a.id,
@@ -1826,6 +1667,7 @@ export function useHousehold({ variant = 'three', practice = false } = {}) {
   const demo = demoOpts(variant, "Your family's data didn't load.");
   const children = (variant === 'one' ? HOUSEHOLD.children.slice(0, 1) : HOUSEHOLD.children).map((c) => ({
     ...c,
+    ageLine: hideContractParts(c.ageLine),
     billingStatus: c.billingStatus ?? 'active',
     // Sprint 20 (spec 3.2): the seed family has no child logins - state 'none'.
     loginEmail: null,
@@ -2706,12 +2548,12 @@ export function useCoachRoster() {
       .map((a) => ({
         id: a.id,
         name: a.name,
-        meta: a.contractMinutes != null ? `${a.contractMinutes} min tier` : null,
+        meta: hideContractParts(a.contractMinutes != null ? `${a.contractMinutes} min tier` : null),
       }));
   };
 
   return useSeedResource(
-    live ? null : ROSTER,
+    live ? null : ROSTER.map((r) => ({ ...r, meta: hideContractParts(r.meta) })),
     live ? { source: liveCoachRoster, deps: ['coach-roster'] } : undefined
   );
 }
@@ -3391,13 +3233,14 @@ async function liveAthleteDetail(athleteId) {
     fetchBookings(athleteId, viewer.role === 'parent' ? { householdId: viewer.householdId } : {}),
     loginEmail ? fetchLoginInvite(loginEmail) : null,
   ]);
-  const subline =
+  const subline = hideContractParts(
     [
       athlete.contractMinutes != null ? `${athlete.contractMinutes} min tier` : null,
       pkg ? `${pkg.name} package` : null,
     ]
       .filter(Boolean)
-      .join(' · ') || null;
+      .join(' · ') || null
+  );
 
   const today = todayISO();
   const active = bookings.filter((b) => b.status !== 'cancelled' && b.date >= today);
@@ -3481,7 +3324,7 @@ export function useAthleteDetail({ athleteId, variant = 'populated' } = {}) {
   const seedValue = {
     // householdName: the back link's label (AthleteDetail reads it here now,
     // not from a second useHousehold) - the same name useHousehold's seed shows.
-    athlete: { ...ATHLETE_DETAIL, householdName: HOUSEHOLD.name, loginEmail: null, login: { state: 'none', claimedAt: null } },
+    athlete: { ...ATHLETE_DETAIL, subline: hideContractParts(ATHLETE_DETAIL.subline), householdName: HOUSEHOLD.name, loginEmail: null, login: { state: 'none', claimedAt: null } },
     history: full ? CONTRACT_HISTORY : [],
     checklist: full ? [] : LIMITED_DATA_CHECKLIST,
     hasEnoughData: full,

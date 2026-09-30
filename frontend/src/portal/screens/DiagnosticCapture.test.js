@@ -10,7 +10,8 @@ const mockRoster = [
   { id: 'a', name: 'A. Nguyen', meta: 'Age 12 · 4th month' },
 ];
 jest.mock('../hooks', () => ({
-  useCoachRoster: () => ({ data: mockRoster, loading: false }),
+  // The real roster hook drops the contract part of meta while the contract is hidden; the mock does the same.
+  useCoachRoster: () => ({ data: mockRoster.map((s) => ({ ...s, meta: jest.requireActual('../data/contractFlag').hideContractParts(s.meta) })), loading: false }),
   useDiagnostic: () => ({ data: { sections: [] }, loading: false, error: null }),
 }));
 

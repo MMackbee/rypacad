@@ -20,7 +20,7 @@ import SkeletonCard, { SkeletonBar } from '../components/Skeleton';
 import { AlertGlyph, Body, Card, ErrorNotice, ScreenTitle } from '../components/Primitives';
 import { useHousehold } from '../hooks';
 import { ALL_PACKAGES, siblingDiscountApplies } from '../data/packages';
-import { contractEnabled, hideContractParts } from '../data/contractFlag';
+import { contractEnabled } from '../data/contractFlag';
 
 /**
  * Sprint 11 pin D entry point (TEAM.md, contract v1.9): "the ParentDashboard
@@ -325,7 +325,7 @@ function ChildCard({ child, onHold, billingStatus, onOpen, onBookFor, onOpenMemb
         <div style={{ flex: 1, minWidth: 0 }}>
           <div style={{ font: `600 16px ${font.body}`, color: color.text }}>{child.name}</div>
           <div style={{ font: `400 11px ${font.body}`, color: color.textTertiary, marginTop: 2 }}>
-            {hideContractParts(child.ageLine)}
+            {child.ageLine}
           </div>
           {/* Sprint 20 (spec 3.2, D9): the child-login state, from liveChildCard's
               loginEmail + login. Legacy payloads and the seed carry neither key,

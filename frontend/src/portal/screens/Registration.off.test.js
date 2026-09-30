@@ -60,7 +60,7 @@ test('sign-up is 5 steps with no contract anywhere, and sends contractMinutes nu
   await r.click('Sign and submit');
   expect(mockCalls).toHaveLength(1);
   expect(mockCalls[0][1].athletes).toEqual([
-    { name: 'Jordan', dob: '2012-06-17', packageId: 't-12', contractMinutes: null, handicap: null, loginEmail: null },
+    { name: 'Jordan', dob: '2012-06-17', packageId: 't-12', contractMinutes: null, facilityRequested: false, handicap: null, loginEmail: null },
   ]);
   // The receipt and its "What happens next" say nothing about a contract.
   expect(r.text()).toContain("You're in");
@@ -78,7 +78,7 @@ test('link mode is 2 steps: the package step submits, contractMinutes null', asy
   await r.click('6 tokens');
   await r.click('Add athlete');
   expect(mockCalls[0]).toEqual(['addAthletes', {
-    athletes: [{ name: 'Reese', dob: '2014-03-02', packageId: 't-6', contractMinutes: null, handicap: null, loginEmail: null }],
+    athletes: [{ name: 'Reese', dob: '2014-03-02', packageId: 't-6', contractMinutes: null, facilityRequested: false, handicap: null, loginEmail: null }],
     emergencyContact: null, medical: null,
   }]);
   await r.unmount();

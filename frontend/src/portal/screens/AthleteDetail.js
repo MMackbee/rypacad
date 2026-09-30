@@ -11,7 +11,7 @@ import SavedToast from '../components/SavedToast';
 import { BackLink, Body, Card, ScreenTitle, SectionLabel, Tick } from '../components/Primitives';
 import { useAthleteDetail } from '../hooks';
 import { loginStatusLine } from '../data/billingCopy';
-import { contractEnabled, hideContractParts } from '../data/contractFlag';
+import { contractEnabled } from '../data/contractFlag';
 
 /**
  * Sprint 10 pin C: same fallback rationale as DiagnosticCapture.js's own
@@ -122,7 +122,7 @@ export default function AthleteDetail({ variant = 'populated', bare = false, ath
               <div
                 style={{ font: `400 11px ${font.body}`, color: color.textTertiary, marginTop: 3 }}
               >
-                {hideContractParts(athlete?.subline)}
+                {athlete?.subline}
               </div>
             </div>
           </div>
@@ -369,8 +369,10 @@ function StartContractCard({ athleteId, athleteName }) {
     setSaving(true);
     setError(null);
     try {
-      await setTier(selected);
-      setSaved(true);
+      const result = await setTier(selected);
+      // Review 2026-09-30: a start whose date the rules refused (deploy lag)
+      // counts from the season start; say so rather than claim today.
+      setSaved(result?.contractStartDropped ? 'season' : true);
     } catch (err) {
       setError(
         err && typeof err.message === 'string' && err.message
@@ -383,7 +385,7 @@ function StartContractCard({ athleteId, athleteName }) {
   };
 
   if (saved) {
-    return <SavedToast message={`Contract started — ${selected} min / day`} />;
+    return <SavedToast message={saved === 'season' ? `Contract started — ${selected} min / day, counted from the season start` : `Contract started — ${selected} min / day`} />;
   }
 
   return (

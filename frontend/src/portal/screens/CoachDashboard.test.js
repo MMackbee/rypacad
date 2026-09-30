@@ -14,7 +14,8 @@ let mockAttention = [];
 let mockStudents = [];
 jest.mock('../hooks', () => ({
   useCoachDay: () => ({ data: { coach: { name: 'Coach', date: '2026-11-04' }, blocks: [], attention: mockAttention } }),
-  useCoachRoster: () => ({ data: mockStudents, loading: false }),
+  // The real roster hook drops the contract part of meta while the contract is hidden; the mock does the same.
+  useCoachRoster: () => ({ data: mockStudents.map((s) => ({ ...s, meta: jest.requireActual('../data/contractFlag').hideContractParts(s.meta) })), loading: false }),
   useMonthSessions: (m) => mockMonth(m),
 }));
 

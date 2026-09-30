@@ -355,6 +355,15 @@ function academyLocalParts(date) {
   return { date: get('year') + '-' + get('month') + '-' + get('day'), hour: Number(get('hour')) % 24 };
 }
 
+/**
+ * 'yyyy-MM-dd' in America/Chicago - the academy's calendar day, not the
+ * phone's. The one derivation (review 2026-09-30): contractStart stamps,
+ * the Oct 10 gate's date and the booking window all read it from here.
+ */
+export function academyDateISO(now = new Date()) {
+  return academyLocalParts(now).date;
+}
+
 /** The academy date the window counts from: today from 7 AM Chicago, else yesterday. */
 function rolledWindowDate(now) {
   const { date, hour } = academyLocalParts(now);

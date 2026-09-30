@@ -14,9 +14,10 @@ jest.mock('../hooks/billing', () => ({
   usePaymentConfirmation: (id) => (id ? mockConfirm : { state: 'idle', billingStatus: null }),
   STRIPE_PORTAL_URL: null,
 }));
+// The real useHousehold composes ageLine without the contract part while the contract is hidden; the mock does the same.
 jest.mock('../hooks', () => ({
   useHousehold: () => ({ loading: false, error: null, data: { name: 'Whitfield family', date: 'Thu, Oct 1', children: [
-    { id: 'a1', name: 'Jordan', ageLine: 'Age 14 · 45 min tier', standing: { tone: 'green', label: 'On track' }, next: null, contract: 92, packageId: 't-12', tokens: mockTokens.a1 ?? null, loginEmail: 'jordan@email.com', login: { state: 'invited', claimedAt: null } },
+    { id: 'a1', name: 'Jordan', ageLine: jest.requireActual('../data/contractFlag').hideContractParts('Age 14 · 45 min tier'), standing: { tone: 'green', label: 'On track' }, next: null, contract: 92, packageId: 't-12', tokens: mockTokens.a1 ?? null, loginEmail: 'jordan@email.com', login: { state: 'invited', claimedAt: null } },
     { id: 'a2', name: 'Reese', ageLine: 'Age 12', standing: { tone: 'neutral', label: 'New', dashed: true }, next: null, contract: null, packageId: 't-6', tokens: mockTokens.a2 ?? null },
   ], billing: { status: 'ok' } } }),
   // No useMembership mock on purpose (perf wave B): the household's Stripe

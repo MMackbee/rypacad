@@ -35,7 +35,7 @@ import { auth, db } from '../../firebase';
 import { bump } from './invalidate';
 import { eliteDailyCapHit, normalizeAnchorDay, periodFor, windowDaysFor } from '../data/packages';
 import { CHANGEABLE_PACKAGE_IDS } from '../data/packageChange';
-import { BOOKING_OPENS_LABEL, bookingOpen, openThrough, todayISO, windowOpensOn } from '../data/calendar';
+import { BOOKING_OPENS_LABEL, academyDateISO, bookingOpen, openThrough, todayISO, windowOpensOn } from '../data/calendar';
 import { SPECIALISTS, mentalCapFor } from '../data/specialists';
 
 /** id -> catalogue entry, for the specialist-cap error copy below. */
@@ -1495,13 +1495,9 @@ export async function declineEnrollmentRequest(uid, reason) {
   }
 }
 
-/** 'yyyy-MM-dd' in America/Chicago - the academy's calendar day, not the phone's. */
+/** 'yyyy-MM-dd' in America/Chicago: data/calendar.js's one derivation, kept under this name for its callers. */
 export function chicagoDateISO(now = new Date()) {
-  const parts = {};
-  for (const p of new Intl.DateTimeFormat('en-US', {
-    timeZone: 'America/Chicago', year: 'numeric', month: '2-digit', day: '2-digit',
-  }).formatToParts(now)) parts[p.type] = p.value;
-  return `${parts.year}-${parts.month}-${parts.day}`;
+  return academyDateISO(now);
 }
 
 /**
@@ -1532,15 +1528,20 @@ export async function setContractTier({ athleteId, minutes, start = false }) {
   let patch = { contractMinutes: minutes };
   if (start && minutes != null) patch.contractStart = chicagoDateISO();
   try {
+    let contractStartDropped = false;
     try {
       await updateDoc(ref, patch);
     } catch (err) {
       if (!patch.contractStart || err?.code !== 'permission-denied') throw err;
+      // Review 2026-09-30: never silent - the contract now counts from the
+      // season start (Nov 3) instead of today, and the caller can say so.
+      console.warn(`setContractTier: contractStart refused by the rules (deploy them); ${athleteId} counts from the season start`);
+      contractStartDropped = true;
       patch = { contractMinutes: minutes };
       await updateDoc(ref, patch);
     }
     bump('athletes');
-    return { athleteId, ...patch };
+    return { athleteId, ...patch, ...(contractStartDropped ? { contractStartDropped: true } : {}) };
   } catch (err) {
     throw wrap(err, 'setContractTier');
   }

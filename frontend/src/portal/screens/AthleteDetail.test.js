@@ -3,8 +3,11 @@ import { renderScreen } from './testRender';
 import AthleteDetail from './AthleteDetail';
 
 let mockDetail;
+// The real useAthleteDetail composes the subline without the contract part while the contract is hidden; the mock does the same.
 jest.mock('../hooks', () => ({
-  useAthleteDetail: () => mockDetail,
+  useAthleteDetail: () => (mockDetail?.data?.athlete
+    ? { ...mockDetail, data: { ...mockDetail.data, athlete: { ...mockDetail.data.athlete, subline: jest.requireActual('../data/contractFlag').hideContractParts(mockDetail.data.athlete.subline) } } }
+    : mockDetail),
   // No useHousehold mock on purpose (perf wave B): the back label comes off
   // useAthleteDetail's householdName, and a stray second load would crash here.
   useDiagnostic: () => ({ data: null, loading: false, error: null }),

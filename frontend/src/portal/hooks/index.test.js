@@ -130,7 +130,8 @@ describe('live loaders (perf wave B)', () => {
     expect(error).toBeNull();
     expect(data.athlete).toEqual({
       name: 'Jordan Whitfield',
-      subline: '45 min tier · 12 tokens package',
+      // The contract is hidden in tests (no REACT_APP_CONTRACT_ENABLED): the tier part is dropped at the source.
+      subline: '12 tokens package',
       attendance: '—',
       attendanceLabel: 'attendance — not tracked live yet',
       board: '—',

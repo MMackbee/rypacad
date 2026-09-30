@@ -1,7 +1,7 @@
 import React from 'react';
 import { color, font } from '../tokens';
 import { Banner } from './Primitives';
-import { BOOKING_OPENS_AT, BOOKING_OPENS_LABEL, longDayLabel, nextMonthFirstShort, todayISO, windowOpensOn } from '../data/calendar';
+import { BOOKING_OPENS_AT, BOOKING_OPENS_LABEL, academyDateISO, longDayLabel, nextMonthFirstShort, todayISO, windowOpensOn } from '../data/calendar';
 
 /**
  * Shared booking-rejection/lock/cancellation copy (Sprint 12 pin, contract
@@ -84,12 +84,7 @@ export function cancelReasonCopy(reason) {
 }
 
 /** The Oct 10 gate's calendar date in America/Chicago ('2026-10-10'), derived from the one constant. */
-const GATE_ISO = (() => {
-  const parts = new Intl.DateTimeFormat('en-US', { timeZone: 'America/Chicago', year: 'numeric', month: '2-digit', day: '2-digit' })
-    .formatToParts(new Date(BOOKING_OPENS_AT));
-  const get = (type) => parts.find((p) => p.type === type)?.value;
-  return `${get('year')}-${get('month')}-${get('day')}`;
-})();
+const GATE_ISO = academyDateISO(new Date(BOOKING_OPENS_AT));
 
 /**
  * Pin D: a day past the booking window renders locked, not just empty.
