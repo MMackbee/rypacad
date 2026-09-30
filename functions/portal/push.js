@@ -28,7 +28,7 @@ const DEAD_TOKEN_CODES = new Set([
 ]);
 
 /** Where a tapped notification opens when no per-kind link is given. */
-const PORTAL_URL = process.env.PORTAL_URL || 'https://rypacad.ryptest.com';
+const PORTAL_URL = process.env.PORTAL_URL || 'https://portal.rypacademy.com';
 
 /** The icon a push shows (frontend/public/logo192.png). @const {string} */
 const ICON_URL = `${PORTAL_URL}/logo192.png`;

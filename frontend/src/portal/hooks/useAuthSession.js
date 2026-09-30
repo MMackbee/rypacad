@@ -96,8 +96,9 @@ export function claimStateOf(result) {
 
 /**
  * Where the verification email's link returns to (spec 12.1): this build's
- * own origin - rypacad.ryptest.com in production, localhost on the emulator
- * (both authorized domains). Firebase's own action handler completes the
+ * own origin - portal.rypacademy.com in production (rypacad.ryptest.com
+ * before the move), localhost on the emulator. Every one of them must be a
+ * Firebase Auth authorized domain, or the send fails and SignUp says so. Firebase's own action handler completes the
  * verification first, then continues here.
  */
 export function verifyContinueUrl() {

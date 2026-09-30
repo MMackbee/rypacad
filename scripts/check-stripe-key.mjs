@@ -12,7 +12,7 @@ import {fileURLToPath} from 'node:url';
 const require = createRequire(import.meta.url);
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const checkout = require(path.join(repoRoot, 'functions', 'portal', 'checkout.js'));
-const PORTAL_URL = 'https://rypacad.ryptest.com';
+const PORTAL_URL = 'https://portal.rypacademy.com';
 const PRICES = [
   ['t-6', 'price_1UKkzSD16IMJzfAPSoZioKKA', 299, 6],
   ['t-12', 'price_1UKl1qD16IMJzfAPERVeoeaN', 569, 12],
