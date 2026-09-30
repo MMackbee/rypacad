@@ -38,6 +38,30 @@ Read `docs/portal/RUNBOOK-SPRINT-20.md` (the owner runbook) and
 
 ## 2. Production state right now
 
+**Launch-eve release (2026-09-30 evening, develop -> main):** tester feedback
+from Yannick, Teddy, Mike and Phil, built in reviewed lanes and merged:
+structured emergency contact (name, mobile, relationship); Commitment
+Contract as its own sign-up step BUT hidden at launch behind
+`REACT_APP_CONTRACT_ENABLED` (Mike's ruling; off = 5-step sign-up, no
+contract anywhere in the app); users.phone written at sign-up; contractStart
+stamped; verify-email copy says check Spam; booking windows anchored at Nov 1
+(Elite Dec 16, tokens Dec 1, rolling after; firestore.rules bound matches);
+Repeat weekly rebuilt (one button through the window end, honest summary);
+week view spans months; tournament (yellow) / closed (red) day marks; contract
+"Behind" only after >5 missed weekdays inside the season window; push
+controls per channel; sibling discount automatic (coupon SIBLING, 2+
+memberships, functions/.env STRIPE_SIBLING_COUPON); a second Pay now reuses
+the open Checkout Session (no double charge); payment notices name the
+child; "Change package" for a pending athlete (rules clause
+pendingPackageUpdateOk); pre-season token copy ("Tokens start Nov 1" / "Pay
+to start"); sibling-discount note on receipt and pending card; walkthrough
+fixes (sample family pinned, no sticky headers, first-visit offer, Month
+default, practice never locked); fuller consent terms (data/consentTerms.js,
+for Luke/Mike to approve); initials avatars; welcome video only when
+`REACT_APP_WELCOME_VIDEO_URL` is set. Deploy order: rules -> functions ->
+site. Next: the facility add-on at sign-up (fb/facility), then Stripe LIVE
+mode (runbook section 7) before the Oct 1 email.
+
 **Domain (owner, 2026-09-30):** the permanent address is
 `https://portal.rypacademy.com` - the same Railway service, DNS at Squarespace
 (`portal` CNAME to Railway plus a `_railway-verify.portal` TXT that must stay).
