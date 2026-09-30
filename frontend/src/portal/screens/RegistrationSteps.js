@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { color, font, radius, tint } from '../tokens';
 import Button, { Spinner } from '../components/Button';
 import Field, { SelectField } from '../components/Field';
@@ -280,10 +280,32 @@ function needsPackage(athlete) {
   return !pkg || (pkg.kind === 'single' && !SINGLE_ON_SALE);
 }
 
+/** 'Nico', 'Nico and Reese', 'Nico, Reese and Sam'. */
+function joinNames(names) {
+  return names.length > 1 ? `${names.slice(0, -1).join(', ')} and ${names[names.length - 1]}` : names[0] || '';
+}
+
 export function PackageStep({ athletes, onUpdate, showErrors }) {
   const [activeKey, setActiveKey] = useState(athletes[0]?.key);
   const active = athletes.find((a) => a.key === activeKey) ?? athletes[0];
+  const missing = athletes.filter(needsPackage);
+  const firstMissing = missing[0]?.key;
+  // An invalid Continue opens the first athlete still without a package, so
+  // the cards on screen are the ones that need the tap (UX review 2026-09-30:
+  // Continue looked dead while child 2 had nothing picked).
+  useEffect(() => {
+    if (showErrors && firstMissing != null) setActiveKey(firstMissing);
+    // Only when showErrors turns on; after that, each pick moves the tab itself.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [showErrors]);
   if (!active) return null;
+
+  const label = (a) => a.name.trim() || `Athlete ${athletes.indexOf(a) + 1}`;
+  const pick = (id) => {
+    onUpdate(active.key, { packageId: id });
+    const next = athletes.find((a) => a.key !== active.key && needsPackage(a));
+    if (next) setActiveKey(next.key);
+  };
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
@@ -326,7 +348,7 @@ export function PackageStep({ athletes, onUpdate, showErrors }) {
               pkg={p}
               emphasised={p.kind === 'elite'}
               selected={!offSale && active.packageId === p.id}
-              onSelect={offSale ? undefined : () => onUpdate(active.key, { packageId: p.id })}
+              onSelect={offSale ? undefined : () => pick(p.id)}
               style={offSale ? { opacity: 0.55 } : undefined}
               footnote={offSale ? SINGLE_OFF_SALE_NOTE : undefined}
             />
@@ -334,10 +356,14 @@ export function PackageStep({ athletes, onUpdate, showErrors }) {
         })}
       </div>
 
-      {showErrors && needsPackage(active) ? (
-        <Body size={12} tone={color.error}>
-          Pick a package for {active.name.trim() || 'this athlete'} to continue.
-        </Body>
+      {showErrors && missing.length ? (
+        <div data-field-error>
+          <Body size={12} tone={color.error}>
+            {athletes.length > 1
+              ? `Pick a package for ${joinNames(missing.map(label))}${missing.length < athletes.length ? ' too' : ''} - tap their name above.`
+              : `Pick a package for ${active.name.trim() || 'this athlete'} to continue.`}
+          </Body>
+        </div>
       ) : null}
 
       <SectionLabel style={{ marginTop: 4 }}>Commitment Contract tier (optional)</SectionLabel>

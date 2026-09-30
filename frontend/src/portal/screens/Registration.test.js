@@ -108,6 +108,36 @@ test('Continue on an unfinished step names the missing fields instead of sitting
   await r.unmount();
 });
 
+test('each step opens at its top, and an invalid Continue says so and scrolls to the first error', async () => {
+  const scrolled = [];
+  const original = Element.prototype.scrollIntoView;
+  Element.prototype.scrollIntoView = function scrollIntoView(opts) { scrolled.push([this, opts]); };
+  try {
+    const r = await renderScreen(<Registration bare mode="signup" account={{ email: 'dana@email.com' }} />);
+    const scroller = [...r.container.querySelectorAll('div')].find((d) => d.style.overflowY === 'auto');
+    Object.defineProperty(scroller, 'scrollTop', { value: 480, writable: true, configurable: true });
+    await r.click('Continue'); // nothing picked on the who step
+    expect(r.text()).toContain('Choose one above to continue.');
+    await r.click('Parent or guardian');
+    expect(r.text()).not.toContain('Choose one above to continue.');
+    await r.click('Continue');
+    expect(r.text()).toContain('Step 2 of 5');
+    expect(scroller.scrollTop).toBe(0);
+    await r.fill('Your name', 'Dana Whitfield');
+    await r.click('Continue'); // no phone yet
+    expect(r.text()).toContain("Something above needs fixing - it's marked in red.");
+    const [el, opts] = scrolled[scrolled.length - 1];
+    expect(el.hasAttribute('data-field-error')).toBe(true);
+    expect(el.textContent).toContain('A mobile number is required.');
+    expect(opts).toEqual({ block: 'center' });
+    await r.fill('Mobile', '(612) 555-0148');
+    expect(r.text()).not.toContain('Something above needs fixing');
+    await r.unmount();
+  } finally {
+    Element.prototype.scrollIntoView = original;
+  }
+});
+
 test('a double tap on Sign and submit sends one createFamily and still shows the receipt', async () => {
   const r = await renderScreen(<Registration bare mode="signup" account={{ email: 'dana@email.com' }} onRefresh={async () => {}} />);
   await fillParentToConsent(r);

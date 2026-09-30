@@ -55,6 +55,16 @@ test('consent copy switches to the adult variant', async () => {
   await a.unmount();
 });
 
+test('consent errors are marked for the scroll-to-first-error', async () => {
+  const r = await renderScreen(<ConsentStep mode="parent" consents={{ dataCollection: false, videoCapture: true }} onChange={() => {}}
+    signatureName="" onSignatureChange={() => {}} onOpenInfo={() => {}} showErrors />);
+  const marked = [...r.container.querySelectorAll('[data-field-error]')].map((el) => el.textContent);
+  expect(marked).toHaveLength(2);
+  expect(marked[0]).toBe('Data collection and video capture consent are required to enroll.');
+  expect(marked[1]).toContain('A signature is required.');
+  await r.unmount();
+});
+
 test('the single token card reads one-time, good through the season end; monthly cards are unchanged', async () => {
   // The card's date is the season's last day - fail here if the season moves.
   expect(format(parseISO(SEASON_BOUNDS.end), 'EEE, MMM d')).toBe('Sat, Feb 27');
@@ -69,6 +79,40 @@ test('the single token card reads one-time, good through the season end; monthly
   expect(six.textContent).toContain('/ period');
   expect(six.textContent).not.toContain('one-time');
   await r.unmount();
+});
+
+function PackageHarness({ athletes: initial, showErrors = false }) {
+  const [athletes, setAthletes] = React.useState(initial);
+  const onUpdate = (key, patch) => setAthletes((prev) => prev.map((a) => (a.key === key ? { ...a, ...patch } : a)));
+  return <PackageStep athletes={athletes} onUpdate={onUpdate} showErrors={showErrors} />;
+}
+
+test('two athletes: a pick moves on to the one still without a package', async () => {
+  const nico = { ...newAthleteEntry(), name: 'Nico' };
+  const reese = { ...newAthleteEntry(), name: 'Reese' };
+  const r = await renderScreen(<PackageHarness athletes={[nico, reese]} />);
+  expect(r.text()).toContain('Package — Nico');
+  await r.click('12 tokens');
+  expect(r.text()).toContain('Package — Reese');
+  expect(r.button('Nico ✓')).not.toBeNull();
+  await r.click('6 tokens');
+  expect(r.text()).toContain('Package — Reese'); // nobody left to move to
+  expect(r.button('Reese ✓')).not.toBeNull();
+  await r.unmount();
+});
+
+test('two athletes: an invalid Continue names every athlete still missing and opens the first', async () => {
+  const nico = { ...newAthleteEntry(), name: 'Nico', packageId: 't-12' };
+  const reese = { ...newAthleteEntry(), name: 'Reese' };
+  const r = await renderScreen(<PackageHarness athletes={[nico, reese]} showErrors />);
+  expect(r.text()).toContain('Package — Reese');
+  const error = r.container.querySelector('[data-field-error]');
+  expect(error.textContent).toBe('Pick a package for Reese too - tap their name above.');
+  await r.unmount();
+
+  const none = await renderScreen(<PackageHarness athletes={[{ ...newAthleteEntry(), name: 'Nico' }, { ...newAthleteEntry(), name: '' }]} showErrors />);
+  expect(none.container.querySelector('[data-field-error]').textContent).toBe('Pick a package for Nico and Athlete 2 - tap their name above.');
+  await none.unmount();
 });
 
 test('until one-time checkout ships, the single token is greyed out and cannot be picked', async () => {

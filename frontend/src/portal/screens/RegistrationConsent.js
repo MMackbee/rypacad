@@ -79,9 +79,11 @@ export function ConsentStep({ mode, consents, onChange, signatureName, onSignatu
       ))}
 
       {showErrors && !(consents.dataCollection && consents.videoCapture) ? (
-        <Body size={12} tone={color.error}>
-          Data collection and video capture consent are required to enroll.
-        </Body>
+        <div data-field-error>
+          <Body size={12} tone={color.error}>
+            Data collection and video capture consent are required to enroll.
+          </Body>
+        </div>
       ) : null}
 
       <Card large>

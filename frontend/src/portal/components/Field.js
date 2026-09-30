@@ -71,8 +71,9 @@ export default function Field({
         {trailing}
       </div>
 
+      {/* data-field-error: Registration scrolls the first one into view on an invalid Continue. */}
       {error ? (
-        <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 7 }}>
+        <div data-field-error style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 7 }}>
           <AlertGlyph />
           <span style={{ font: `400 12px ${font.body}`, color: color.error }}>{error}</span>
         </div>
