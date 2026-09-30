@@ -47,6 +47,7 @@ const LINKS = {
   'booking-confirmed': '/portal/schedule',
   'promoted': '/portal/schedule',
   'session-cancelled': '/portal/schedule',
+  'booking-released': '/portal/schedule',
   'reminder-24h': '/portal/schedule',
   'booking-revoked': '/portal/billing',
   'tokens-expiring': '/portal/billing',
