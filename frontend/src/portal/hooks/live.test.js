@@ -6,7 +6,7 @@
 jest.mock('../../firebase', () => ({ auth: { currentUser: null }, db: {} }));
 jest.mock('firebase/firestore', () => ({}));
 
-import { ERR, assertAthleteBillingActive, assertBookingOpen, assertPeriodTokensLeft } from './live';
+import { ERR, assertAthleteBillingActive, assertBookingOpen, assertPeriodTokensLeft, rebookPatch } from './live';
 import { BOOKING_OPENS_AT } from '../data/calendar';
 
 const reasonOf = (fn) => {
@@ -22,6 +22,22 @@ describe('assertAthleteBillingActive', () => {
       expect(reasonOf(() => assertAthleteBillingActive({ billing: { status } })))
         .toEqual([ERR.INVALID, 'billing-pending', 'Payment pending - finish checkout to start booking']);
     }
+  });
+  test('a single-token buyer moved to another package is pending until it is paid (ruling 2026-09-29/30)', () => {
+    expect(reasonOf(() => assertAthleteBillingActive({ packageId: 't-6', billing: { status: 'active', oneTime: true } })))
+      .toEqual([ERR.INVALID, 'billing-pending', 'Payment pending - finish checkout to start booking']);
+    expect(reasonOf(() => assertAthleteBillingActive({ packageId: 'single', billing: { status: 'active', oneTime: true } }))).toBeNull();
+    expect(reasonOf(() => assertAthleteBillingActive({ packageId: 't-6', billing: { status: 'active', oneTime: false } }))).toBeNull();
+  });
+});
+
+describe('rebookPatch', () => {
+  test('writes the fresh charge and the rebookedAt stamp; graceTokenId is null when none', () => {
+    const stamp = { sentinel: 'serverTimestamp' };
+    expect(rebookPatch('grace', 'single_cs_1', stamp)).toEqual({ status: 'confirmed', chargedFrom: 'grace', graceTokenId: 'single_cs_1', rebookedAt: stamp });
+    expect(rebookPatch('period', null, stamp)).toEqual({ status: 'confirmed', chargedFrom: 'period', graceTokenId: null, rebookedAt: stamp });
+    expect(rebookPatch('elite', undefined, stamp)).toEqual({ status: 'confirmed', chargedFrom: 'elite', graceTokenId: null, rebookedAt: stamp });
+    expect(Object.keys(rebookPatch('period', null, stamp)).sort()).toEqual(['chargedFrom', 'graceTokenId', 'rebookedAt', 'status']);
   });
 });
 
