@@ -33,7 +33,7 @@ import {
 } from 'firebase/firestore';
 import { auth, db } from '../../firebase';
 import { bump } from './invalidate';
-import { eliteDailyCapHit, normalizeAnchorDay, periodFor, windowDaysFor } from '../data/packages';
+import { eliteDailyCapHit, normalizeAnchorDay, periodFallback, periodFor, windowDaysFor } from '../data/packages';
 import { BOOKING_OPENS_LABEL, bookingOpen, openThrough, todayISO, windowOpensOn } from '../data/calendar';
 import { SPECIALISTS, mentalCapFor } from '../data/specialists';
 
@@ -498,13 +498,17 @@ export async function joinWaitlist({ sessionId, athleteId, householdId, date, pe
  * expires but scheduled for a date the token itself would have already
  * lapsed by.
  */
-function selectGraceToken(bookings, graceTokens, date) {
+function selectGraceToken(bookings, graceTokens, date, held = 0) {
   const live = (bookings || []).filter((b) => b && b.status !== 'cancelled');
   const consumed = new Set(live.map((b) => b.graceTokenId).filter(Boolean));
   const candidates = (graceTokens || [])
     .filter((g) => g && !consumed.has(g.id) && g.expiresAt >= date)
     .sort((a, b) => String(a.expiresAt).localeCompare(String(b.expiresAt)));
-  return candidates[0] ?? null;
+  // Single token (ruling 2026-09-29/30): each of a single athlete's other
+  // waitlist entries HOLDS one token, latest-expiring first (lib.js
+  // tokensPosition's `held`), so the soonest candidate pays only while one is
+  // left over.
+  return candidates.length > held ? candidates[0] : null;
 }
 
 /**
@@ -630,12 +634,24 @@ function assertEliteDailyCap(pkg, type, date, bookings) {
 export function assertPeriodTokensLeft(pkg, bookings, periodKey, issuedGrant, waitlist = [], currentPeriodKey = null) {
   if (!pkg || pkg.tokens !== null) {
     // Contract v2.1 pin C: an issued tokenPeriods doc (Stripe or ops) is the
-    // grant when it exists; the package's own tokens are the fallback.
-    const granted = pkg ? issuedGrant ?? pkg.tokens ?? 0 : 0;
+    // grant when it exists; periodFallback (the package's own tokens, 0 for
+    // the single token - ruling 2026-09-29/30) is the fallback.
+    const granted = pkg ? issuedGrant ?? periodFallback(pkg) : 0;
     const used = (bookings || []).filter(
       (b) => b.status !== 'cancelled' && b.periodKey === periodKey && !b.graceTokenId
     ).length;
     const reserved = (waitlist || []).filter((w) => w && w.periodKey === periodKey).length;
+    if (used + reserved >= granted && pkg?.kind === 'single') {
+      // Reached only with no usable purchased token: buy one, or free one.
+      throw new LiveDataError(
+        ERR.INVALID,
+        (waitlist || []).length > 0
+          ? 'Your session token is held by a waitlist spot - leave the waitlist or buy another token.'
+          : 'No session token left - buy one to book.',
+        null,
+        'no-session-token'
+      );
+    }
     if (used + reserved >= granted) {
       throw new LiveDataError(
         ERR.INVALID,
@@ -711,14 +727,20 @@ export async function createBooking(
     chargedFrom = 'elite';
   } else {
     const graceTokens = await fetchGraceTokensByAthlete(athleteId);
-    const grace = selectGraceToken(bookings, graceTokens, date);
+    // Single token (ruling 2026-09-29/30): the athlete's waitlist entries for
+    // OTHER sessions each hold a purchased token; this session's own entry
+    // does not (booking it releases the hold).
+    const heldBy = pkg?.kind === 'single'
+      ? (await fetchAthleteWaitlist(athleteId)).filter((w) => w.sessionId !== sessionId)
+      : null;
+    const grace = selectGraceToken(bookings, graceTokens, date, heldBy ? heldBy.length : 0);
     if (grace) {
       chargedFrom = 'grace';
       graceTokenId = grace.id;
     } else if (!skipCapCheck) {
       const issued = await getDoc(doc(db, 'tokenPeriods', `${athleteId}_${periodKey}`)).catch(() => null);
       const issuedGrant = issued && issued.exists() ? issued.data().granted : undefined;
-      const waitlist = await fetchAthleteWaitlist(athleteId);
+      const waitlist = heldBy ?? (await fetchAthleteWaitlist(athleteId));
       assertPeriodTokensLeft(pkg, bookings, periodKey, issuedGrant, waitlist, currentPeriodKey);
     }
   }
