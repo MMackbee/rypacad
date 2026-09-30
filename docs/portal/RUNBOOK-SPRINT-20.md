@@ -7,7 +7,8 @@ are named, never written down. Order matters: each step blocks the next.
 ## 0. Before anything (12.1-12.2)
 
 - Firebase console -> Authentication: Email/Password ON; Authorized domains
-  include `rypacad.ryptest.com`; email templates DEFAULT (12.1).
+  include `portal.rypacademy.com` (the permanent domain) and
+  `rypacad.ryptest.com` (redirects to it); email templates DEFAULT (12.1).
 - Stripe dashboard, in BOTH test and live mode: one Product + monthly Price
   per tier (t-6, t-12, t-16, Elite, single) and one for facility access
   ($300/month); the no-code customer portal activated (its link is
@@ -44,7 +45,7 @@ production smoke.
 
 ### 3.1 Non-secret config - `functions/.env` (gitignored, deploy reads it)
 
-Keys, values yours: `STRIPE_MODE=test`, `PORTAL_URL=https://rypacad.ryptest.com`,
+Keys, values yours: `STRIPE_MODE=test`, `PORTAL_URL=https://portal.rypacademy.com`,
 `SMTP_HOST`, `SMTP_PORT`, `SMTP_SECURE`, `SMTP_FROM`, `PUSH_IN_EMULATOR=false`.
 **No secret name may appear in `.env`** - a name that is also declared with
 `runWith({secrets})` fails the deploy with a conflict. Check (prints counts
@@ -181,7 +182,7 @@ node scripts/write-packages.mjs --prod --mode test --dry-run
 node scripts/write-packages.mjs --prod --mode test --yes
 ```
 
-Smoke on rypacad.ryptest.com, in this order, all with test-mode Stripe:
+Smoke on portal.rypacademy.com, in this order, all with test-mode Stripe:
 
 1. Password sign-up -> the verification mail lands in a Gmail inbox -> the
    link returns to `/portal/signin` -> the family is created instantly.

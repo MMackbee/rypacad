@@ -38,6 +38,16 @@ Read `docs/portal/RUNBOOK-SPRINT-20.md` (the owner runbook) and
 
 ## 2. Production state right now
 
+**Domain (owner, 2026-09-30):** the permanent address is
+`https://portal.rypacademy.com` - the same Railway service, DNS at Squarespace
+(`portal` CNAME to Railway plus a `_railway-verify.portal` TXT that must stay).
+It is in Firebase Auth authorized domains and on the Google Calendar key's
+website list (that key lives in GCP project 962055310703, not rypacad).
+`rypacad.ryptest.com` stays attached and is redirected to it by a Cloudflare
+rule; keep it in both allowlists. Never send mail From @rypacademy.com (its
+DNS rejects all mail). Stripe Payment Links and the customer-portal redirect
+point at `https://portal.rypacademy.com/portal/signin`.
+
 **Site (Railway, rypacad.ryptest.com):** `main` = `portal/r3` = `cb10a40`
 (single-token copy fix 46654ad, runbook fix cb10a40, checkout single refusal
 840ed77, sign-up hardening 0497713). Railway variables set:
@@ -49,7 +59,8 @@ portal link; the owner adds it in Railway, which triggers a rebuild).
 
 **Cloud Functions (project rypacad, 1st gen, us-central1):** all 13 deployed
 from `840ed77` with `functions/.env` `STRIPE_MODE=test`,
-`PORTAL_URL=https://rypacad.ryptest.com`. Secrets in Secret Manager:
+`PORTAL_URL=https://portal.rypacademy.com` (switched 2026-09-30; a full
+functions deploy applies it). Secrets in Secret Manager:
 `STRIPE_SECRET_KEY` (TEST restricted key: Checkout Sessions write, Customers
 write, Prices read - verified by a live rehearsal), `STRIPE_WEBHOOK_SECRET`
 (real TEST `whsec_` of the test endpoint), `SMTP_USER`/`SMTP_PASS`
