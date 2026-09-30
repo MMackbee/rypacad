@@ -11,6 +11,12 @@
  * who already holds a 'waitlist-expired' token for that session — under
  * this id or the manual script's older `sweep-…` ids — is not minted again.
  *
+ * SINGLE-ONLY athletes (packageId 'single' or billing.oneTime, owner
+ * rulings 2026-09-29/30) get NO bonus: their entry held one of their own
+ * purchased season tokens, and expiring it simply frees that token. The
+ * entry is still deleted and the family still gets one 'waitlist-expired'
+ * notice ("your session token is free again"), under the same subject key.
+ *
  * The body is a plain exported function on a fixed clock so the emulator
  * harness can drive it; index.js schedules it daily at 06:00 Chicago.
  */
@@ -22,6 +28,7 @@ const {FieldValue} = require('firebase-admin/firestore');
 const lib = require('./lib');
 const notices = require('./notices');
 const notify = require('./notify');
+const single = require('./single');
 
 /** Bonus-token life, in days (contract §4). */
 const GRACE_DAYS = 30;
@@ -64,7 +71,30 @@ async function alreadyMinted(store, athleteId, sessionId) {
 }
 
 /**
- * Expire one entry: mint (unless already minted), delete, notify.
+ * Send the one 'waitlist-expired' notice for an expired entry.
+ * @param {!Object} entry `{id, ...waitlist doc}`.
+ * @param {?Object} athlete The athlete body.
+ * @param {!Object} copy `notices.waitlistExpired`'s result.
+ * @return {!Promise<boolean>} True when the notice was sent.
+ */
+async function sendExpiredNotice(entry, athlete, copy) {
+  const res = await notify.sendNotice({
+    kind: 'waitlist-expired',
+    category: 'schedule',
+    householdId: entry.householdId ||
+        (athlete && athlete.householdId) || null,
+    athleteId: entry.athleteId,
+    sessionId: entry.sessionId,
+    subjectKey: graceIdFor(entry.sessionId, entry.athleteId),
+    title: copy.title,
+    body: copy.body,
+  });
+  return Boolean(res && res.sent);
+}
+
+/**
+ * Expire one entry: mint (unless already minted, or the athlete is
+ * single-only), delete, notify.
  * @param {!Object} store An admin Firestore.
  * @param {!Object} entry `{id, ...waitlist doc}`.
  * @param {{today: string, expiresAt: string, athletes: !Function,
@@ -75,6 +105,17 @@ async function expireEntry(store, entry, ctx) {
   const graceId = graceIdFor(entry.sessionId, entry.athleteId);
   const graceRef = store.collection('graceTokens').doc(graceId);
   const entryRef = store.collection('waitlist').doc(entry.id);
+  // The athlete FIRST: a single-only athlete is never minted a bonus.
+  const athlete = await ctx.athletes(entry.athleteId);
+  if (single.isSingleOnly(athlete)) {
+    const batch = store.batch();
+    batch.delete(entryRef);
+    await batch.commit();
+    const session = await ctx.sessions(entry.sessionId);
+    const notified = await sendExpiredNotice(entry, athlete,
+        notices.waitlistExpired({athlete, session, tokenFree: true}));
+    return {minted: false, notified};
+  }
   const minted =
       !(await alreadyMinted(store, entry.athleteId, entry.sessionId));
   const batch = store.batch();
@@ -94,25 +135,10 @@ async function expireEntry(store, entry, ctx) {
 
   let notified = false;
   if (minted) {
-    const [athlete, session] = await Promise.all([
-      ctx.athletes(entry.athleteId),
-      ctx.sessions(entry.sessionId),
-    ]);
-    const copy = notices.waitlistExpired({
-      athlete, session, expiresAt: ctx.expiresAt,
-    });
-    const res = await notify.sendNotice({
-      kind: 'waitlist-expired',
-      category: 'schedule',
-      householdId: entry.householdId ||
-          (athlete && athlete.householdId) || null,
-      athleteId: entry.athleteId,
-      sessionId: entry.sessionId,
-      subjectKey: graceId,
-      title: copy.title,
-      body: copy.body,
-    });
-    notified = Boolean(res && res.sent);
+    const session = await ctx.sessions(entry.sessionId);
+    notified = await sendExpiredNotice(entry, athlete,
+        notices.waitlistExpired({athlete, session,
+          expiresAt: ctx.expiresAt}));
   }
   return {minted, notified};
 }
