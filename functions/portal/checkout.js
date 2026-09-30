@@ -67,6 +67,24 @@ async function read(store, collection, id) {
 }
 
 /**
+ * Sibling discount (owner, 2026-09-30): a family with more than one athlete
+ * on a monthly package gets it on every membership checkout. The single
+ * token is a one-time purchase, not a membership, so it does not count.
+ * @param {!Object} store Firestore.
+ * @param {string} householdId The family.
+ * @return {!Promise<boolean>} Whether the family qualifies.
+ */
+async function siblingEligible(store, householdId) {
+  const snap = await store.collection('athletes')
+      .where('householdId', '==', householdId).get();
+  const monthly = snap.docs.filter((doc) => {
+    const a = doc.data() || {};
+    return Boolean(a.packageId) && a.packageId !== 'single';
+  });
+  return monthly.length >= 2;
+}
+
+/**
  * The prepaid period for this checkout, rolled one month forward when the
  * trial would end under 48 h from now (Stripe's Checkout minimum; ruled,
  * D11): the remaining day or two of the current month are free.
@@ -85,7 +103,8 @@ function prepaidFor(nowMs, args) {
  * @param {{householdId: string, athleteId: string, product: string,
  *     packageId: ?string, priceId: string, currency: string,
  *     productName: string, prepaid: !Object, role: string,
- *     portalUrl: string, customerId: ?string, email: ?string}} a Inputs.
+ *     portalUrl: string, customerId: ?string, email: ?string,
+ *     sibling: ({eligible: boolean, coupon: ?string}|undefined)}} a Inputs.
  * @return {!Object} What `stripe.checkout.sessions.create` receives.
  */
 function sessionBody(a) {
@@ -93,11 +112,6 @@ function sessionBody(a) {
   const base = `${a.portalUrl}/portal/${screen}`;
   const body = {
     mode: 'subscription',
-    // Owner 2026-09-30: sibling discount by promotion code at launch. Phil
-    // creates the coupon and code in Stripe (test and live); the family
-    // types it on Stripe's page. Stripe validates it, so the restricted key
-    // needs no extra scope, and tokens come from metadata, not the amount.
-    allow_promotion_codes: true,
     client_reference_id: `${a.householdId}__${a.athleteId}__${a.product}`,
     line_items: [
       {price: a.priceId, quantity: 1},
@@ -130,6 +144,17 @@ function sessionBody(a) {
   };
   if (a.customerId) body.customer = a.customerId;
   else body.customer_email = a.email;
+  // Sibling discount (owner, 2026-09-30): only a family with more than one
+  // membership sees it. With STRIPE_SIBLING_COUPON set (Phil's coupon id,
+  // the same in test and live) Stripe applies it and there is nothing to
+  // type; without it the family gets Stripe's "Add promotion code" field
+  // and types the code. Stripe accepts one of the two, never both. Tokens
+  // come from metadata, never from the amount, so the discount changes no
+  // balance.
+  if (a.sibling && a.sibling.eligible) {
+    if (a.sibling.coupon) body.discounts = [{coupon: a.sibling.coupon}];
+    else body.allow_promotion_codes = true;
+  }
   return body;
 }
 
@@ -234,6 +259,12 @@ async function createCheckoutSessionHandler(data, context, deps) {
   const hh = (await read(store, 'households', athlete.householdId)) || {};
   const tokens = req.product === 'tier' && pkg && pkg.tokens !== undefined ?
       pkg.tokens : null;
+  // The add-on is not a membership: no sibling discount on it.
+  const sibling = {
+    eligible: req.product === 'tier' &&
+        await siblingEligible(store, athlete.householdId),
+    coupon: String(process.env.STRIPE_SIBLING_COUPON || '').trim() || null,
+  };
   try {
     const client = d.stripe || stripe();
     const price = await client.prices.retrieve(priceId);
@@ -251,6 +282,7 @@ async function createCheckoutSessionHandler(data, context, deps) {
       portalUrl: String(process.env.PORTAL_URL || '').replace(/\/$/, ''),
       customerId: hh.stripeCustomerId || null,
       email: token.email || (hh.guardian && hh.guardian.email) || null,
+      sibling,
     }));
     return {url: session.url};
   } catch (err) {
@@ -266,5 +298,5 @@ const createCheckoutSession = functions.runWith({secrets: CHECKOUT_SECRETS})
 
 module.exports = {
   createCheckoutSession, createCheckoutSessionHandler, prepaidFor,
-  sessionBody,
+  sessionBody, siblingEligible,
 };

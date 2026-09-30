@@ -1,9 +1,11 @@
-// Usage: node scripts/check-stripe-key.mjs   (asks for an rk_test_ key, hidden)
+// Usage: node scripts/check-stripe-key.mjs [--coupon SIBLING10]   (asks for an rk_test_ key, hidden)
 // Stripe TEST key check for the portal functions. Asks for the key (hidden),
 // never prints it, refuses live keys. Part 1 reads the six catalogue prices.
 // Part 2 rehearses every call the portal makes with this key, using the
 // portal's own checkout builder: one test-mode Checkout Session is created,
-// read back, then expired. Nothing is charged; no card is involved.
+// read back, then expired. Nothing is charged; no card is involved. With
+// --coupon <id> it also rehearses the sibling discount (a session created
+// with that coupon applied, then expired) and reports the coupon's terms.
 import readline from 'node:readline';
 import {createRequire} from 'node:module';
 import path from 'node:path';
@@ -13,6 +15,8 @@ const require = createRequire(import.meta.url);
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const checkout = require(path.join(repoRoot, 'functions', 'portal', 'checkout.js'));
 const PORTAL_URL = 'https://portal.rypacademy.com';
+const couponArg = process.argv.indexOf('--coupon');
+const COUPON = couponArg > -1 ? String(process.argv[couponArg + 1] || '').trim() : '';
 const PRICES = [
   ['t-6', 'price_1UKkzSD16IMJzfAPSoZioKKA', 299, 6],
   ['t-12', 'price_1UKl1qD16IMJzfAPERVeoeaN', 569, 12],
@@ -122,5 +126,26 @@ if (!t6 || t6.type !== 'recurring') {
   // 5. Webhook fallback: find the checkout that started a subscription.
   const l = await api('GET', 'checkout/sessions?subscription=sub_keycheckmissing&limit=1');
   row('find checkout by subscription', l.ok || !denied(l), l.ok || !denied(l) ? 'permission OK' : l.msg);
+  // 6. Sibling discount (owner 2026-09-30): a 2+ membership family's checkout
+  //    with the coupon applied (STRIPE_SIBLING_COUPON), and the code field
+  //    for the same family when no coupon is configured.
+  if (COUPON) {
+    const cp = await api('GET', `coupons/${encodeURIComponent(COUPON)}`);
+    if (cp.ok) {
+      const c = cp.json;
+      const terms = `${c.percent_off != null ? c.percent_off + '% off' : '$' + (c.amount_off || 0) / 100 + ' off'}, ${c.duration}${c.duration === 'repeating' ? ' ' + c.duration_in_months + ' months' : ''}${c.valid ? '' : ', NOT VALID'}`;
+      row('read the sibling coupon', c.valid && c.percent_off === 10 && c.duration === 'forever', terms + (c.duration !== 'forever' ? ' - expected forever (every month of the season)' : '') + (c.percent_off !== 10 ? ' - expected 10%' : ''));
+    } else {
+      row('read the sibling coupon', !denied(cp) && cp.status !== 404, cp.status === 404 ? 'NOT FOUND in test mode: create it with this exact id in test AND live' : denied(cp) ? 'key cannot read coupons (add Coupons: Read, or ignore if the next line is OK)' : cp.msg);
+    }
+    const ds = await api('POST', 'checkout/sessions', checkout.sessionBody({...base, customerId: null, email: 'key-check@example.com', sibling: {eligible: true, coupon: COUPON}}));
+    row('create checkout with the sibling coupon', ds.ok, ds.ok ? `session made, first charge $${(ds.json.amount_total || 0) / 100} (10% off both lines expected)` : ds.msg);
+    if (ds.ok) await api('POST', `checkout/sessions/${ds.json.id}/expire`);
+  } else {
+    const pc = await api('POST', 'checkout/sessions', checkout.sessionBody({...base, customerId: null, email: 'key-check@example.com', sibling: {eligible: true, coupon: null}}));
+    row('create checkout with the promo-code field', pc.ok, pc.ok ? 'session made (families type the code on the Stripe page)' : pc.msg);
+    if (pc.ok) await api('POST', `checkout/sessions/${pc.json.id}/expire`);
+    console.log('         (pass --coupon <id> to rehearse the automatic sibling discount)');
+  }
 }
 console.log(problems ? `\n${problems} need attention. Paste this output to Claude.` : '\nAll clear: the prices are right and this key can do everything the portal needs.');

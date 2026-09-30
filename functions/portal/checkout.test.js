@@ -15,10 +15,20 @@ const OCT = Date.parse('2026-10-05T18:00:00Z');
  * @return {!Object} A Firestore stand-in for `collection().doc().get()`.
  */
 function fakeDb(docs) {
-  return {collection: (c) => ({doc: (id) => ({async get() {
-    const data = docs[`${c}/${id}`];
-    return {exists: !!data, data: () => data};
-  }})})};
+  return {collection: (c) => ({
+    doc: (id) => ({async get() {
+      const data = docs[`${c}/${id}`];
+      return {exists: !!data, data: () => data};
+    }}),
+    // Equality queries only: `where(field, '==', value).get()`.
+    where: (field, op, value) => ({async get() {
+      const hits = Object.entries(docs)
+          .filter(([path, d]) => path.startsWith(`${c}/`) &&
+              d[field] === value)
+          .map(([, d]) => ({data: () => d}));
+      return {docs: hits};
+    }}),
+  })};
 }
 /**
  * @param {!Array} calls Receives every `sessions.create` body.
@@ -215,6 +225,51 @@ test('single token (one-time, 2026-09-29): refused before any Stripe call',
       const ok = call({athleteId: 'lena', product: 'tier'}, ctx('u-nina'));
       assert.equal((await ok.p).url, 'https://checkout.stripe.com/c/cs_1');
       assert.equal(ok.calls.length, 1);
+    });
+
+test('sibling discount (2026-09-30): 2+ membership families, coupon or code',
+    async () => {
+      // novak has lena, max and fac on monthly packages (nopkg and the single
+      // token sol do not count); oye has femi alone.
+      const two = fakeDb(DOCS);
+      assert.equal(await checkout.siblingEligible(two, 'novak'), true);
+      assert.equal(await checkout.siblingEligible(two, 'oye'), false);
+      const only = fakeDb(Object.assign({}, DOCS, {'athletes/max':
+        {householdId: 'novak', packageId: 'single'}, 'athletes/fac':
+        {householdId: 'novak', packageId: null}}));
+      assert.equal(await checkout.siblingEligible(only, 'novak'), false);
+      // No coupon configured: the eligible family gets the code field only.
+      const saved = process.env.STRIPE_SIBLING_COUPON;
+      delete process.env.STRIPE_SIBLING_COUPON;
+      try {
+        const code = call({athleteId: 'lena', product: 'tier'}, ctx('u-nina'));
+        await code.p;
+        assert.equal(code.calls[0].allow_promotion_codes, true);
+        assert.equal(code.calls[0].discounts, undefined);
+        const solo = call({athleteId: 'femi', product: 'tier'},
+            ctx('u-kemi'));
+        await solo.p;
+        assert.equal(solo.calls[0].allow_promotion_codes, undefined);
+        assert.equal(solo.calls[0].discounts, undefined);
+        // Coupon configured: applied for them, nothing to type.
+        process.env.STRIPE_SIBLING_COUPON = ' SIBLING10 ';
+        const auto = call({athleteId: 'lena', product: 'tier'}, ctx('u-nina'));
+        await auto.p;
+        assert.deepStrictEqual(auto.calls[0].discounts,
+            [{coupon: 'SIBLING10'}]);
+        assert.equal(auto.calls[0].allow_promotion_codes, undefined);
+        // The facility add-on is not a membership: neither, even for them.
+        const fac = call({athleteId: 'lena', product: 'facility'},
+            ctx('u-nina'), {db: fakeDb(Object.assign({}, DOCS,
+                {'athletes/lena': {householdId: 'novak', packageId: 't-6',
+                  billing: {status: 'active'}}}))});
+        await fac.p;
+        assert.equal(fac.calls[0].discounts, undefined);
+        assert.equal(fac.calls[0].allow_promotion_codes, undefined);
+      } finally {
+        if (saved === undefined) delete process.env.STRIPE_SIBLING_COUPON;
+        else process.env.STRIPE_SIBLING_COUPON = saved;
+      }
     });
 
 run();
