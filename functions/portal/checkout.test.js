@@ -6,6 +6,7 @@ const checkout = require('./checkout');
 
 process.env.PORTAL_URL = 'https://portal.test';
 process.env.STRIPE_MODE = 'test';
+delete process.env.STRIPE_SIBLING_COUPON; // the sibling test sets it itself
 const CAT = {test: {'t-6': 'price_t6', 'elite': 'price_elite', 'single': null,
   'facility-access': 'price_fac'}, live: {}};
 const OCT = Date.parse('2026-10-05T18:00:00Z');
@@ -92,6 +93,7 @@ test('tier before Nov 1: the exact session body', async () => {
   assert.deepEqual(await p, {url: 'https://checkout.stripe.com/c/cs_1'});
   assert.deepEqual(calls[0], {
     mode: 'subscription',
+    // novak is a 2+ membership family and no coupon is configured here.
     allow_promotion_codes: true,
     client_reference_id: 'novak__lena__tier',
     line_items: [
@@ -269,6 +271,62 @@ test('sibling discount (2026-09-30): 2+ membership families, coupon or code',
       } finally {
         if (saved === undefined) delete process.env.STRIPE_SIBLING_COUPON;
         else process.env.STRIPE_SIBLING_COUPON = saved;
+      }
+    });
+
+test('sibling: lapsed siblings do not count; a missing coupon falls back',
+    async () => {
+      const lapsed = fakeDb(Object.assign({}, DOCS, {
+        'athletes/max': {householdId: 'novak', packageId: 'elite',
+          billing: {status: 'lapsed'}},
+        'athletes/fac': {householdId: 'novak', packageId: 't-6',
+          billing: {status: 'lapsed'}}}));
+      assert.equal(await checkout.siblingEligible(lapsed, 'novak'), false);
+      // A read failure costs the discount, not the checkout.
+      const broken = Object.assign(fakeDb(DOCS), {collection: (c) =>
+        Object.assign(fakeDb(DOCS).collection(c), {where: () => ({
+          get: async () => {
+            throw new Error('firestore down');
+          }})})});
+      const noDisc = call({athleteId: 'lena', product: 'tier'},
+          ctx('u-nina'), {db: broken});
+      await noDisc.p;
+      assert.equal(noDisc.calls[0].allow_promotion_codes, undefined);
+      assert.equal(noDisc.calls[0].discounts, undefined);
+      // The coupon id is set but Stripe has no such coupon in this mode:
+      // one retry with the code field, never a refusal.
+      process.env.STRIPE_SIBLING_COUPON = 'SIBLING';
+      try {
+        const calls = [];
+        const missing = fakeStripe(calls);
+        const create = missing.checkout.sessions.create;
+        missing.checkout.sessions.create = async (body) => {
+          if (body.discounts) {
+            const err = new Error('No such coupon: SIBLING');
+            err.code = 'resource_missing';
+            err.param = 'discounts[0][coupon]';
+            throw err;
+          }
+          return create(body);
+        };
+        const r = call({athleteId: 'lena', product: 'tier'}, ctx('u-nina'),
+            {stripe: missing});
+        assert.deepEqual(await r.p, {url: 'https://checkout.stripe.com/c/cs_1'});
+        assert.equal(calls.length, 1);
+        assert.equal(calls[0].allow_promotion_codes, true);
+        assert.equal(calls[0].discounts, undefined);
+        // Any other Stripe error is still the plain refusal.
+        const other = fakeStripe([]);
+        other.checkout.sessions.create = async () => {
+          const err = new Error('rate limited');
+          err.code = 'rate_limit';
+          throw err;
+        };
+        await refused('other stripe error', call({athleteId: 'lena',
+          product: 'tier'}, ctx('u-nina'), {stripe: other}).p,
+        'unavailable', 'stripe-error');
+      } finally {
+        delete process.env.STRIPE_SIBLING_COUPON;
       }
     });
 

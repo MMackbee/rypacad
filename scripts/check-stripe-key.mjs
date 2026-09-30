@@ -169,7 +169,11 @@ if (!t6 || t6.type !== 'recurring') {
       row('read the sibling coupon', !denied(cp) && cp.status !== 404, cp.status === 404 ? 'NOT FOUND in test mode: create it with this exact id in test AND live' : denied(cp) ? 'key cannot read coupons (add Coupons: Read, or ignore if the next line is OK)' : cp.msg);
     }
     const ds = await api('POST', 'checkout/sessions', checkout.sessionBody({...base, customerId: null, email: 'key-check@example.com', sibling: {eligible: true, coupon: COUPON}}));
-    row('create checkout with the sibling coupon', ds.ok, ds.ok ? `session made, first charge $${(ds.json.amount_total || 0) / 100} (10% off both lines expected)` : ds.msg);
+    // Only the prepaid line is charged at checkout (the monthly price is in
+    // its trial), so the first charge is 90% of it; December onwards gets
+    // its 10% from the coupon's "forever" duration.
+    const want = Math.round(base.prepaid.amountCents * 0.9);
+    row('create checkout with the sibling coupon', ds.ok && ds.json.amount_total === want, ds.ok ? `first charge $${(ds.json.amount_total || 0) / 100}, expected $${want / 100} (10% off the prepaid month; monthly from December)` : ds.msg);
     if (ds.ok) await api('POST', `checkout/sessions/${ds.json.id}/expire`);
   } else {
     const pc = await api('POST', 'checkout/sessions', checkout.sessionBody({...base, customerId: null, email: 'key-check@example.com', sibling: {eligible: true, coupon: null}}));

@@ -69,7 +69,10 @@ async function read(store, collection, id) {
 /**
  * Sibling discount (owner, 2026-09-30): a family with more than one athlete
  * on a monthly package gets it on every membership checkout. The single
- * token is a one-time purchase, not a membership, so it does not count.
+ * token is a one-time purchase, not a membership, so it does not count,
+ * and neither does a lapsed membership (packageId survives a lapse).
+ * Checked at checkout only: a 'forever' coupon then stays on that
+ * subscription for the season.
  * @param {!Object} store Firestore.
  * @param {string} householdId The family.
  * @return {!Promise<boolean>} Whether the family qualifies.
@@ -79,9 +82,22 @@ async function siblingEligible(store, householdId) {
       .where('householdId', '==', householdId).get();
   const monthly = snap.docs.filter((doc) => {
     const a = doc.data() || {};
-    return Boolean(a.packageId) && a.packageId !== 'single';
+    return Boolean(a.packageId) && a.packageId !== 'single' &&
+        !(a.billing && a.billing.status === 'lapsed');
   });
   return monthly.length >= 2;
+}
+
+/**
+ * The coupon id is configured but Stripe has no such coupon in this mode
+ * (coupons are made by hand, once per mode): the family gets the code
+ * field instead of a refusal.
+ * @param {*} err What `sessions.create` threw.
+ * @return {boolean} Whether to retry without the coupon.
+ */
+function couponMissing(err) {
+  return Boolean(err) && err.code === 'resource_missing' &&
+      String(err.param || '').startsWith('discounts');
 }
 
 /**
@@ -259,16 +275,24 @@ async function createCheckoutSessionHandler(data, context, deps) {
   const hh = (await read(store, 'households', athlete.householdId)) || {};
   const tokens = req.product === 'tier' && pkg && pkg.tokens !== undefined ?
       pkg.tokens : null;
-  // The add-on is not a membership: no sibling discount on it.
+  // The add-on is not a membership: no sibling discount on it. The lookup
+  // is optional, so a failed read costs the family the discount, never
+  // the checkout.
   const sibling = {
-    eligible: req.product === 'tier' &&
-        await siblingEligible(store, athlete.householdId),
+    eligible: false,
     coupon: String(process.env.STRIPE_SIBLING_COUPON || '').trim() || null,
   };
+  if (req.product === 'tier') {
+    try {
+      sibling.eligible = await siblingEligible(store, athlete.householdId);
+    } catch (err) {
+      console.error('siblingEligible failed, no discount:', err);
+    }
+  }
   try {
     const client = d.stripe || stripe();
     const price = await client.prices.retrieve(priceId);
-    const session = await client.checkout.sessions.create(sessionBody({
+    const args = {
       householdId: athlete.householdId,
       athleteId: req.athleteId,
       product: req.product,
@@ -283,7 +307,19 @@ async function createCheckoutSessionHandler(data, context, deps) {
       customerId: hh.stripeCustomerId || null,
       email: token.email || (hh.guardian && hh.guardian.email) || null,
       sibling,
-    }));
+    };
+    let session;
+    try {
+      session = await client.checkout.sessions.create(sessionBody(args));
+    } catch (err) {
+      if (!(sibling.eligible && sibling.coupon && couponMissing(err))) {
+        throw err;
+      }
+      console.error(`sibling coupon ${sibling.coupon} is missing in Stripe ` +
+          `${process.env.STRIPE_MODE || 'test'} mode: code field used instead`);
+      session = await client.checkout.sessions.create(sessionBody(
+          Object.assign({}, args, {sibling: {eligible: true, coupon: null}})));
+    }
     return {url: session.url};
   } catch (err) {
     console.error('createCheckoutSession stripe error:', err);
