@@ -10,6 +10,7 @@ import SavedToast from '../components/SavedToast';
 import { Toggle } from '../components/Toggle';
 import { SectionLabel, Body, Card, ScreenTitle } from '../components/Primitives';
 import { useNotificationPrefs } from '../hooks';
+import { channelLocked } from '../data/parent';
 
 /**
  * 11 · Notification Preferences - parent.
@@ -20,7 +21,8 @@ import { useNotificationPrefs } from '../hooks';
  * never does, and collapsing them into one switch forces a parent to choose
  * between being spammed and missing the thing that mattered.
  *
- * Billing is locked on. Failed-payment notices are transactional rather than
+ * Billing email is locked on; billing push is the parent's choice (K31, the
+ * lock is per channel). Failed-payment notices are transactional rather than
  * marketing, and a parent who silenced them would stop hearing that their
  * child's booking is about to be restricted.
  *
@@ -81,15 +83,15 @@ export default function NotificationPreferences({
 
   // A real save, not just local state: every toggle persists the FULL prefs
   // map immediately (the rules-gated field is a whole-map replace, not a
-  // per-toggle patch), then the shared SavedToast confirms it landed.
+  // per-toggle patch), then the shared SavedToast confirms it landed. A
+  // locked channel (billing email) is always written true.
   const persist = async (nextOverrides) => {
     const categories = data?.categories ?? [];
     const prefs = {};
+    const pick = (cat, channel) =>
+      channelLocked(cat, channel) ? true : nextOverrides[`${cat.id}.${channel}`] ?? cat[channel];
     categories.forEach((cat) => {
-      prefs[cat.id] = {
-        email: nextOverrides[`${cat.id}.email`] ?? cat.email,
-        push: nextOverrides[`${cat.id}.push`] ?? cat.push,
-      };
+      prefs[cat.id] = { email: pick(cat, 'email'), push: pick(cat, 'push') };
     });
     setSaving(true);
     setSaveError(null);
@@ -336,8 +338,6 @@ function ChannelHeader() {
 }
 
 function CategoryCard({ category, value, onChange }) {
-  const locked = category.locked;
-
   return (
     <Card>
       <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
@@ -352,7 +352,7 @@ function CategoryCard({ category, value, onChange }) {
 
         {['email', 'push'].map((channel) => (
           <div key={channel} style={{ width: 52, flex: 'none', display: 'grid', placeItems: 'center' }}>
-            {locked ? (
+            {channelLocked(category, channel) ? (
               <LockedToggle label={`${category.name} ${channel}`} />
             ) : (
               <Toggle
@@ -381,8 +381,9 @@ function CategoryCard({ category, value, onChange }) {
 }
 
 /**
- * Visibly on and visibly not interactive. Hiding the control entirely would
- * leave a parent wondering whether billing notices are configured at all.
+ * Visibly on and visibly not interactive, for a locked channel (billing
+ * email only). Hiding the control entirely would leave a parent wondering
+ * whether billing emails are configured at all.
  */
 function LockedToggle({ label }) {
   return (

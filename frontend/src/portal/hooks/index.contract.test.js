@@ -1,8 +1,8 @@
 /**
  * Contract lane (2026-09-30): the Behind buffer and the contract window as
- * the live loaders apply them (contract-buffer.md), and the contractStart
- * stamp on a no-tier -> tier start. Kept beside index.test.js with its own
- * mock list so the lanes merge cleanly.
+ * the live loaders apply them (contract-buffer.md), the contractStart stamp
+ * on a no-tier -> tier start, and K31's per-channel notification lock. Kept
+ * beside index.test.js with its own mock list so the lanes merge cleanly.
  */
 jest.mock('../../firebase', () => ({ __esModule: true, default: {}, auth: { currentUser: null }, db: {}, functions: {}, storage: {} }));
 jest.mock('firebase/firestore', () => ({}));
@@ -41,6 +41,7 @@ import {
   useAthleteTier,
   useContract,
   useHousehold,
+  useNotificationPrefs,
 } from './index';
 import * as live from './live';
 import * as calendar from '../data/calendar';
@@ -222,5 +223,14 @@ describe('live loaders', () => {
     await own.result.current.setTier(20, { start: true });
     expect(live.setContractTier).toHaveBeenLastCalledWith({ athleteId: 'a2', minutes: 20, start: true });
     await own.unmount();
+  });
+
+  test('useNotificationPrefs: billing email reads locked on, billing push reads what was saved (K31)', async () => {
+    live.fetchCurrentUser.mockResolvedValue({ uid: 'p1', notificationPrefs: { billing: { email: false, push: false } } });
+    const h = await mountHook(() => useNotificationPrefs());
+    const byId = Object.fromEntries(h.result.current.data.categories.map((c) => [c.id, c]));
+    expect(byId.billing).toMatchObject({ email: true, push: false, lockedChannels: ['email'] });
+    expect(byId.schedule).toMatchObject({ email: true, push: true });
+    await h.unmount();
   });
 });

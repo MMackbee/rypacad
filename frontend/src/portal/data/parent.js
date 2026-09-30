@@ -45,9 +45,12 @@ export const LIMITED_DATA_CHECKLIST = [
  * Two channels per category, never one master toggle: a schedule change 40
  * minutes before a block needs a push, a progress summary never does.
  *
- * Billing is locked on. Failed-payment notices are transactional, not
- * marketing — a parent who switched everything off would otherwise silently
- * stop hearing that their child's booking is about to be restricted.
+ * Billing email is locked on; billing push is the parent's choice (K31).
+ * Failed-payment notices are transactional, not marketing — a parent who
+ * switched everything off would otherwise silently stop hearing that their
+ * child's booking is about to be restricted. The lock is per channel
+ * (`lockedChannels`), not a category-wide flag: one flag locked push too,
+ * against the spec and against notify.js, which only forces billing email.
  */
 export const NOTIFICATION_CATEGORIES = [
   {
@@ -56,7 +59,7 @@ export const NOTIFICATION_CATEGORIES = [
     description: 'Payment problems, token expiry, membership changes',
     email: true,
     push: true,
-    locked: true,
+    lockedChannels: ['email'],
     footnote: 'Always sent by email; push is your choice.',
   },
   {
@@ -74,6 +77,11 @@ export const NOTIFICATION_CATEGORIES = [
     push: false,
   },
 ];
+
+/** Whether one channel of a category is locked on (billing email). */
+export function channelLocked(category, channel) {
+  return (category?.lockedChannels || []).includes(channel);
+}
 
 export const NOTIFICATION_NOTE =
   'Membership and token notices are transactional, not marketing, and always go out by email. A parent who has switched push off still sees the banner on Billing.';

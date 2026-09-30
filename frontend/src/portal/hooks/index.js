@@ -176,6 +176,7 @@ import {
   LIMITED_DATA_CHECKLIST,
   NOTIFICATION_CATEGORIES,
   NOTIFICATION_NOTE,
+  channelLocked,
 } from '../data/parent';
 import {
   OUTSTANDING,
@@ -3442,20 +3443,21 @@ export function useAthleteDetail({ athleteId, variant = 'populated' } = {}) {
 
 /**
  * Live payload for useNotificationPrefs — NOTIFICATION_CATEGORIES' static
- * metadata (name/description/locked/footnote) overlaid with the signed-in
- * user's saved per-category channel choices (users.notificationPrefs). A
- * locked category (billing) always reads true/true regardless of what is
- * saved — mirroring the seed data's own locked-category convention — so a
- * stray saved override can never silently turn off a transactional notice.
+ * metadata (name/description/lockedChannels/footnote) overlaid with the
+ * signed-in user's saved per-category channel choices
+ * (users.notificationPrefs). A locked CHANNEL (billing email, K31) always
+ * reads true regardless of what is saved, so a stray saved override can never
+ * silently turn off a transactional email; billing push is the parent's
+ * choice and reads back what they saved, as notify.js's channelAllowed does.
  */
 async function liveNotificationPrefs() {
   const profile = await fetchCurrentUser();
   const saved = profile.notificationPrefs || {};
   const categories = NOTIFICATION_CATEGORIES.map((c) => ({
     ...c,
-    email: c.locked ? true : saved[c.id]?.email ?? c.email,
+    email: channelLocked(c, 'email') ? true : saved[c.id]?.email ?? c.email,
     // A map saved before Sprint 15 carries sms, not push: the default applies.
-    push: c.locked ? true : saved[c.id]?.push ?? c.push,
+    push: channelLocked(c, 'push') ? true : saved[c.id]?.push ?? c.push,
   }));
   return { categories, note: NOTIFICATION_NOTE, saved: false };
 }
