@@ -11,7 +11,7 @@ jest.mock('firebase/firestore', () => ({}));
 jest.mock('firebase/functions', () => ({ httpsCallable: jest.fn(() => jest.fn()) }));
 
 import { ERR } from './live';
-import { claimStateOf, createLoginError, resendError, verificationSender, verifyContinueUrl } from './useAuthSession';
+import { claimStateOf, createLoginError, resendError, verifyContinueUrl } from './useAuthSession';
 
 describe('claimStateOf', () => {
   test('the four contract states pass through; anything else is error', () => {
@@ -42,9 +42,4 @@ test('resendError: throttled is UNAVAILABLE, anything else UNKNOWN', () => {
 
 test('the verification link returns to this origin\'s sign-in page', () => {
   expect(verifyContinueUrl()).toBe(`${window.location.origin}/portal/signin`);
-});
-
-test('the verification sender is Firebase\'s own noreply@<auth domain> (D5), never SMTP_FROM', () => {
-  // jest carries no REACT_APP_FIREBASE_AUTH_DOMAIN -> the project default.
-  expect(verificationSender()).toBe('noreply@rypacad.firebaseapp.com');
 });

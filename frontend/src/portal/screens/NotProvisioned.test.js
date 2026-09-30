@@ -1,6 +1,7 @@
 import React from 'react';
 import { renderScreen } from './testRender';
 import NotProvisioned from './NotProvisioned';
+import { VERIFY_EMAIL_SENDER } from '../data/authCopy';
 
 let mockSession;
 let mockLegacy;
@@ -36,7 +37,7 @@ test('needs-verification names the sender and offers Resend / I\'ve verified', a
   mockSession.checkInvite = async () => { checks.push(1); return 'needs-verification'; };
   const r = await renderScreen(<NotProvisioned bare />);
   expect(r.text()).toContain('Verify your email to finish');
-  expect(r.text()).toContain('We sent a link to kid@email.com from noreply@');
+  expect(r.text()).toContain(`We sent a link to kid@email.com from ${VERIFY_EMAIL_SENDER}.`);
   await r.click('Resend');
   await r.click("I've verified");
   expect(resent).toEqual([1]);

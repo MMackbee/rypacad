@@ -1,6 +1,7 @@
 import React from 'react';
 import { renderScreen } from '../screens/testRender';
 import PayButton, { startCheckout } from './PayButton';
+import { VERIFY_EMAIL_SENDER } from '../data/authCopy';
 
 let mockReject = null;
 let mockRejectTimes = Infinity; // how many calls mockReject refuses before checkout succeeds
@@ -41,7 +42,7 @@ test('the button navigates; an unverified password account gets the verify state
   mockReject = { reason: 'email-unverified', message: 'Verify your email first.' };
   await r.click('Pay now');
   expect(r.text()).toContain('Verify your email to finish');
-  expect(r.text()).toContain('We sent a link to dana@email.com from noreply@');
+  expect(r.text()).toContain(`We sent a link to dana@email.com from ${VERIFY_EMAIL_SENDER}. Open it, then tap I've verified. Not in your inbox? Check Spam or Junk.`);
   mockReject = null;
   await r.click("I've verified");
   expect(tokenRefreshes).toBe(1); // a fresh ID token before the retry (review 2026-09-28)
@@ -101,7 +102,7 @@ test('the verify card is full width even in a 132px button slot, and names the s
   const card = title.parentElement;
   expect(card.style.width).toBe('100%');
   expect(card.style.flex).toBe('1 1 100%');
-  expect(r.text()).toContain('We sent a link to pat@email.com from noreply@');
+  expect(r.text()).toContain(`We sent a link to pat@email.com from ${VERIFY_EMAIL_SENDER}.`);
   await r.unmount();
 });
 
