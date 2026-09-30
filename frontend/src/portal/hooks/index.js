@@ -2814,8 +2814,8 @@ async function liveAthleteDashboard(today) {
   const upcoming = active.filter((b) => b.date >= today).sort(byDateThenId);
   const contractMinutes = ctx.athlete.contractMinutes ?? null;
 
-  // Sprint 20 (load time): the three reads that follow the context are
-  // independent of each other - one round trip, not three.
+  // Sprint 20 (load time): the reads that follow the context are
+  // independent of each other - one round trip, not four.
   const [nextSessions, logs, published, tokens] = await Promise.all([
     upcoming.length ? fetchSessionsByIds([upcoming[0].sessionId]) : Promise.resolve([]),
     contractMinutes != null ? fetchContractLogs(ctx.athlete.id) : Promise.resolve(null),
