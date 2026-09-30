@@ -112,16 +112,20 @@ test('isTappableDay follows the two variants', () => {
   expect(isTappableDay('contract', 'logged')).toBe(true);
   expect(isTappableDay('contract', 'missed')).toBe(true);
   for (const s of ['open', 'weekend', 'future', 'available']) expect(isTappableDay('contract', s)).toBe(false);
+  // 'full' (slots, none open): tappable in booking so the waitlist is reachable; never in the contract calendar.
+  expect(isTappableDay('booking', 'full')).toBe(true);
+  expect(isTappableDay('contract', 'full')).toBe(false);
 });
 
-test('slotDayStates: any slot (even a full one) makes a day available', () => {
+test('slotDayStates: an open slot makes a day available; all-full is its own tappable state (toggle review)', () => {
   expect(
     slotDayStates([
       { date: '2026-10-02', slots: [{ id: 'a', open: true }] },
       { date: '2026-10-03', slots: [{ id: 'b', open: false }] },
       { date: '2026-10-04', slots: [] },
       { date: '2026-10-05' },
+      { date: '2026-10-06', slots: [{ id: 'c', open: false }, { id: 'd', open: true }] },
     ])
-  ).toEqual({ '2026-10-02': 'available', '2026-10-03': 'available', '2026-10-04': 'open', '2026-10-05': 'open' });
+  ).toEqual({ '2026-10-02': 'available', '2026-10-03': 'full', '2026-10-04': 'open', '2026-10-05': 'open', '2026-10-06': 'available' });
   expect(slotDayStates(undefined)).toEqual({});
 });

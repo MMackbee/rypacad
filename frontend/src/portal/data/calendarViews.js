@@ -115,18 +115,26 @@ export function firstAvailableISO(dayStates, fromISO, toISO) {
 
 /**
  * Which painted states open something on tap - a copy of ContractCalendar's
- * `tappable` rule (a parity test pins the two together).
+ * `tappable` rule (a parity test pins the two together), plus 'full' in
+ * booking: ContractCalendar never sees 'full' (CalendarCard's month grid
+ * hands it over as 'available'), so both views tap the same days.
  */
 export function isTappableDay(variant, state) {
-  return variant === 'booking' ? state === 'available' : state === 'logged' || state === 'missed';
+  return variant === 'booking' ? state === 'available' || state === 'full' : state === 'logged' || state === 'missed';
 }
 
 /**
- * useSpecialistSlots' days -> dayStates. A day whose slots are all full still
- * counts as 'available' so its waitlist stays reachable.
+ * useSpecialistSlots' days -> dayStates. A day with an open slot is
+ * 'available'; a day whose slots are ALL full is 'full' - painted apart from
+ * the open days (toggle review: a full day looked the same as one with
+ * openings, which the old strip's dot told apart) but still tappable, so its
+ * waitlist stays reachable. A day with no slots is 'open' (not tappable).
  */
 export function slotDayStates(days) {
   const out = {};
-  for (const d of days || []) out[d.date] = (d.slots || []).length ? 'available' : 'open';
+  for (const d of days || []) {
+    const slots = d.slots || [];
+    out[d.date] = !slots.length ? 'open' : slots.some((s) => s && s.open) ? 'available' : 'full';
+  }
   return out;
 }

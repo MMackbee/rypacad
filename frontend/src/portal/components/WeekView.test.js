@@ -85,6 +85,67 @@ test('aria-pressed and the ring follow `selected` in booking', async () => {
   await r.unmount();
 });
 
+// WCAG relative luminance / contrast, for 'rgb(r, g, b)' or '#rrggbb'.
+const channels = (c) => (c.startsWith('#') ? [1, 3, 5].map((i) => parseInt(c.slice(i, i + 2), 16)) : c.match(/\d+/g).slice(0, 3).map(Number));
+const luminance = (c) => {
+  const [r, g, b] = channels(c).map((v) => { const s = v / 255; return s <= 0.03928 ? s / 12.92 : ((s + 0.055) / 1.055) ** 2.4; });
+  return 0.2126 * r + 0.7152 * g + 0.0722 * b;
+};
+const contrast = (a, b) => { const [hi, lo] = [luminance(a), luminance(b)].sort((x, y) => y - x); return (hi + 0.05) / (lo + 0.05); };
+const CARD = '#1A1A1A'; // Card large's surface, what a transparent pill sits on
+
+test('days without sessions are readable: weekday and date >= 4.5:1 on the card (toggle review)', async () => {
+  const r = await renderScreen(<WeekView weekStart={WEEK} dayStates={{ '2026-10-07': 'open', '2026-10-08': 'future' }} variant="booking" onSelectDay={() => {}} />);
+  // Mon, Tue and Fri-Sun have no key -> 'weekend'; Wed/Thu are 'open'/'future' on the dimmed fill.
+  for (const iso of ['2026-10-05', '2026-10-06', '2026-10-09', '2026-10-10', '2026-10-11']) {
+    const c = cell(r, iso);
+    expect(c.getAttribute('data-state')).toBe('weekend');
+    expect(contrast(c.style.color, CARD)).toBeGreaterThanOrEqual(4.5);
+    expect(c.style.borderColor).not.toBe('rgb(28, 28, 28)'); // the invisible #1c1c1c outline is gone
+  }
+  for (const iso of ['2026-10-07', '2026-10-08']) {
+    expect(contrast(cell(r, iso).style.color, '#141414')).toBeGreaterThanOrEqual(4.5);
+  }
+  await r.unmount();
+});
+
+test('the selected bookable day is filled solid green with black text, not just ringed (toggle review)', async () => {
+  const states = { '2026-10-06': 'available', '2026-10-09': 'available' };
+  const r = await renderScreen(
+    <WeekView weekStart={WEEK} dayStates={states} variant="booking" selected="2026-10-09" onSelectDay={() => {}} />
+  );
+  const on = cell(r, '2026-10-09');
+  const off = cell(r, '2026-10-06');
+  expect(on.style.background).toBe('rgb(0, 175, 81)');
+  expect(on.style.color).toBe('rgb(0, 0, 0)');
+  expect(contrast(on.style.color, '#00AF51')).toBeGreaterThanOrEqual(4.5);
+  expect(off.style.background).not.toBe('rgb(0, 175, 81)');
+  await r.unmount();
+  // The contract calendar keeps its ring-only selection (a missed day stays red).
+  const c = await renderScreen(<WeekView weekStart={WEEK} dayStates={STATES} selected="2026-10-06" onSelectDay={() => {}} />);
+  expect(cell(c, '2026-10-06').style.background).not.toBe('rgb(0, 175, 81)');
+  expect(cell(c, '2026-10-06').style.boxShadow).toContain('0 0 0 2px');
+  await c.unmount();
+});
+
+test("a 'full' day is tappable (its waitlist) but not painted like a day with open spots", async () => {
+  const onSelectDay = jest.fn();
+  const states = { '2026-10-06': 'available', '2026-10-09': 'full' };
+  const r = await renderScreen(<WeekView weekStart={WEEK} dayStates={states} variant="booking" onSelectDay={onSelectDay} />);
+  const full = cell(r, '2026-10-09');
+  const open = cell(r, '2026-10-06');
+  expect(full.tagName).toBe('BUTTON');
+  expect(full.getAttribute('aria-label')).toBe('Friday, Oct 9, full - waitlist only');
+  expect(full.style.borderStyle).toBe('dashed');
+  expect(open.style.borderStyle).toBe('solid');
+  expect(full.style.background).not.toBe(open.style.background);
+  expect(full.style.color).not.toBe(open.style.color);
+  expect(contrast(full.style.color, CARD)).toBeGreaterThanOrEqual(4.5);
+  await act(async () => { full.click(); });
+  expect(onSelectDay).toHaveBeenCalledWith({ iso: '2026-10-09', day: 9, state: 'full' });
+  await r.unmount();
+});
+
 test("'closed' paints as 'open'; a missing day as 'weekend'", async () => {
   const r = await renderScreen(<WeekView weekStart={WEEK} dayStates={STATES} />);
   expect(cell(r, '2026-10-10').getAttribute('data-state')).toBe('open');

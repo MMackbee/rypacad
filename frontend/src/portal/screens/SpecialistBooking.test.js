@@ -202,6 +202,35 @@ describe('Month/Week calendar card (owner request 2026-09-30)', () => {
     await g.unmount();
   });
 
+  test('the card carries the Book-style hint; a fully booked day is dashed, still tappable, and shows its waitlist slot (toggle review)', async () => {
+    inApp({ days: [
+      { date: TODAY, dayLabel: 'Today', slots: [] },
+      { date: DAY_A, dayLabel: 'Fri, Oct 16', slots: [slot('s1', '4:00 PM')] },
+      { date: DAY_B, dayLabel: 'Fri, Oct 23', slots: [{ ...slot('s2', '5:30 PM'), open: false, booked: 1 }] },
+    ] });
+    const r = await renderScreen(<SpecialistBooking bare initialSpecialist="mental" />);
+    expect(r.text()).toContain('Days marked green have open times — tap one to see them. Dashed days are full — tap one for the waitlist.');
+    await r.click('Next week');
+    const full = pill(r, DAY_B);
+    expect(full.tagName).toBe('BUTTON');
+    expect(full.getAttribute('data-state')).toBe('full');
+    expect(full.style.borderStyle).toBe('dashed');
+    await r.click('Friday, Oct 23, full - waitlist only');
+    expect(pill(r, DAY_B).getAttribute('aria-pressed')).toBe('true');
+    expect(slotCard(r, '5:30')).not.toBeNull();
+    await r.unmount();
+  });
+
+  test('an empty day no longer points at a dot that is gone; no full day, no dashed sentence', async () => {
+    inApp({ days: [{ date: TODAY, dayLabel: 'Today', slots: [] }] });
+    const r = await renderScreen(<SpecialistBooking bare initialSpecialist="mental" />);
+    expect(r.text()).toContain('No open times this day — pick another day.');
+    expect(r.text()).not.toContain('next dot');
+    expect(r.text()).toContain('Days marked green have open times — tap one to see them.');
+    expect(r.text()).not.toContain('Dashed days');
+    await r.unmount();
+  });
+
   test('no toggle in the Calendly branch or at the specialist picker', async () => {
     mockSlots.data = { ...mockSlots.data, bookingMode: 'calendly', calendlyUrl: 'https://calendly.com/ryp/mental' };
     const c = await renderScreen(<SpecialistBooking bare initialSpecialist="mental" />);

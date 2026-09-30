@@ -36,6 +36,35 @@ import {
  *    bounded to the months/weeks the range touches.
  */
 
+const ISO_DAY = /^\d{4}-\d{2}-\d{2}$/;
+
+/**
+ * The month grid: the unmodified ContractCalendar plus the two Week-view cues
+ * it cannot draw itself (toggle review 2026-09-30), so Month and Week match.
+ * A 'full' day is handed to the grid as 'available' - it stays a tappable
+ * button and its waitlist stays reachable - and is repainted dashed/muted by
+ * date. The selected bookable day gets WeekView's solid green fill.
+ */
+function MonthGrid({ gridKey, start, dayStates, variant, selected, onSelectDay }) {
+  const full = Object.keys(dayStates).filter((iso) => dayStates[iso] === 'full' && ISO_DAY.test(iso));
+  const states = full.length ? { ...dayStates, ...Object.fromEntries(full.map((iso) => [iso, 'available'])) } : dayStates;
+  const css = [
+    `.ryp-cal-month .ryp-day-selected.ryp-day-available .fc-daygrid-day-frame { background: ${color.primary}; color: #000; }`,
+    ...full.map((iso) =>
+      `.ryp-cal-month td[data-date="${iso}"]:not(.ryp-day-selected) .fc-daygrid-day-frame { background: transparent; border-style: dashed; color: ${color.textSecondary}; }`),
+  ].join('\n');
+  // A tapped full day reports 'full', exactly as WeekView does.
+  const onSelect = onSelectDay && full.length
+    ? (day) => onSelectDay(full.includes(day.iso) ? { ...day, state: 'full' } : day)
+    : onSelectDay;
+  return (
+    <div className="ryp-cal-month">
+      <style>{css}</style>
+      <ContractCalendar key={gridKey} start={start} dayStates={states} variant={variant} selected={selected} onSelectDay={onSelect} />
+    </div>
+  );
+}
+
 /** Toggle row, then (when given) the prev/label/next row. */
 export function CalendarCardHeader({ view, onViewChange, nav }) {
   return (
@@ -133,8 +162,8 @@ export function SessionsCalendarCard({
       {loading ? (
         <SkeletonBar height={view === 'month' ? 220 : 56} style={{ marginTop: 4 }} />
       ) : view === 'month' ? (
-        <ContractCalendar
-          key={monthISO}
+        <MonthGrid
+          gridKey={monthISO}
           start={monthISO}
           dayStates={dayStates}
           variant="booking"
@@ -181,6 +210,7 @@ export function SessionsCalendarCard({
  * @param {'month'|'week'} [defaultView]
  * @param {boolean} [blankOutsideRange]  Week view blanks days outside the range.
  * @param {string|number} [gridKey]      Appended to the month grid's key to force a repaint.
+ * @param {React.ReactNode} [hint]       One-line caption under the grid, styled as SessionsCalendarCard's.
  * @param {React.ReactNode} [children]   Rendered after the grid (captions, legend).
  */
 export function RangeCalendarCard({
@@ -194,6 +224,7 @@ export function RangeCalendarCard({
   defaultView = 'month',
   blankOutsideRange = false,
   gridKey = '',
+  hint = null,
   children,
 }) {
   const [view, setView] = useCalendarView(defaultView);
@@ -238,8 +269,8 @@ export function RangeCalendarCard({
     <Card large>
       <CalendarCardHeader view={view} onViewChange={onViewChange} nav={nav} />
       {isMonth ? (
-        <ContractCalendar
-          key={`${monthISO}-${gridKey}`}
+        <MonthGrid
+          gridKey={`${monthISO}-${gridKey}`}
           start={monthISO}
           dayStates={dayStates}
           variant={variant}
@@ -257,6 +288,11 @@ export function RangeCalendarCard({
           visibleTo={blankOutsideRange ? to : undefined}
         />
       )}
+      {hint ? (
+        <Body size={11} tone={color.textTertiary} style={{ marginTop: 13 }}>
+          {hint}
+        </Body>
+      ) : null}
       {children}
     </Card>
   );

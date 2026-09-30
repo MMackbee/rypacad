@@ -415,6 +415,59 @@ describe('RangeCalendarCard', () => {
     await c.unmount();
   });
 
+  test("a 'full' day stays tappable in Month and Week, reports 'full' in both, and is repainted apart from open days", async () => {
+    jest.setSystemTime(new Date('2026-10-14T15:00:00'));
+    const states = { '2026-10-16': 'available', '2026-10-23': 'full', '2026-10-14': 'open' };
+    const calls = [];
+    const r = await renderScreen(
+      <RangeCalendarCard rangeStart="2026-10-14" rangeEnd="2026-10-27" dayStates={states} variant="booking" onSelectDay={(d) => calls.push(d)} />
+    );
+    // Month: the grid gets it as a bookable day (a real button) ...
+    expect(td(r, '2026-10-23').getAttribute('role')).toBe('button');
+    expect(td(r, '2026-10-14').getAttribute('role')).toBeNull();
+    // ... and a date-scoped dashed/muted rule overrides the green paint.
+    const css = [...r.container.querySelectorAll('style')].map((s) => s.textContent).join('\n');
+    expect(css).toContain('td[data-date="2026-10-23"]:not(.ryp-day-selected) .fc-daygrid-day-frame { background: transparent; border-style: dashed;');
+    expect(css).not.toContain('td[data-date="2026-10-16"]');
+    await tap(td(r, '2026-10-23'));
+    await tap(td(r, '2026-10-16'));
+    await r.click('Week');
+    await r.click('Next week');
+    await tap(pill(r, '2026-10-23'));
+    expect(calls).toEqual([
+      { iso: '2026-10-23', day: 23, state: 'full' },
+      { iso: '2026-10-16', day: 16, state: 'available' },
+      { iso: '2026-10-23', day: 23, state: 'full' },
+    ]);
+    expect(pill(r, '2026-10-23').style.borderStyle).toBe('dashed');
+    await r.unmount();
+  });
+
+  test('the month grid fills the selected bookable day like the Week view', async () => {
+    jest.setSystemTime(new Date('2026-10-14T15:00:00'));
+    const r = await renderScreen(
+      <RangeCalendarCard rangeStart="2026-10-14" rangeEnd="2026-10-27" dayStates={{ '2026-10-16': 'available' }} variant="booking" selected="2026-10-16" onSelectDay={() => {}} />
+    );
+    expect(td(r, '2026-10-16').classList.contains('ryp-day-selected')).toBe(true);
+    const css = [...r.container.querySelectorAll('style')].map((s) => s.textContent).join('\n');
+    expect(css).toContain('.ryp-cal-month .ryp-day-selected.ryp-day-available .fc-daygrid-day-frame { background: #00AF51; color: #000; }');
+    await r.unmount();
+  });
+
+  test('hint renders as the one-line caption under the grid, in both views', async () => {
+    jest.setSystemTime(new Date('2026-10-14T15:00:00'));
+    const r = await renderScreen(
+      <RangeCalendarCard rangeStart="2026-10-14" rangeEnd="2026-10-27" dayStates={{}} variant="booking" hint="HINT LINE" />
+    );
+    expect(r.text()).toContain('HINT LINE');
+    await r.click('Week');
+    expect(r.text()).toContain('HINT LINE');
+    await r.unmount();
+    const none = await renderScreen(<RangeCalendarCard rangeStart="2026-10-14" rangeEnd="2026-10-27" dayStates={{}} variant="booking" />);
+    expect(none.text()).not.toContain('HINT LINE');
+    await none.unmount();
+  });
+
   test('no range yet (empty data) falls back to today without crashing', async () => {
     jest.setSystemTime(new Date('2026-10-14T15:00:00'));
     const r = await renderScreen(<RangeCalendarCard dayStates={{}} variant="booking" defaultView="week" />);
