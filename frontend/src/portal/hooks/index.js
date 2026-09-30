@@ -144,6 +144,7 @@ import {
   capacityFor,
   datePill,
   dayLabel,
+  firstRunningWeek,
   resolveBooking,
   upcomingDates,
 } from '../data/season';
@@ -1011,7 +1012,8 @@ export function useBooking({ variant = 'open', today = todayISO(), practice = fa
    *
    * Returns { booked: [{date,id}], skipped: [{date,reason,message?,opensOn?}],
    * windowEnd, next: {date,opensOn} | null } - `next` is the first week past
-   * the window (inside the season) and the day it opens at 7 AM.
+   * the window that the season runs (closures stepped over) and the day it
+   * opens at 7 AM.
    */
   const bookRecurring = async (slot, { athleteId, untilISO } = {}) => {
     if (!live) return { booked: [], skipped: [], windowEnd: null, next: null, simulated: true };
@@ -1062,11 +1064,13 @@ export function useBooking({ variant = 'open', today = todayISO(), practice = fa
     // Stop at the last scheduled session rather than the requested end date:
     // weeks past the end of the schedule are not real skips worth reporting.
     const endDate = lastSessionDate && lastSessionDate < lastDate ? lastSessionDate : lastDate;
-    // The first week past the window: nothing holds it, so the screen says
-    // when it opens instead.
-    let nextDate = firstDate;
-    while (nextDate <= windowEnd) nextDate = addDaysISO(nextDate, 7);
-    const next = nextDate <= SEASON_BOUNDS.end ? { date: nextDate, opensOn: windowOpensOn(nextDate, windowDays) } : null;
+    // The first week past the window that the season runs (never a closure:
+    // the Christmas break sits right past the Dec 16 window): nothing holds
+    // it, so the screen says when it opens instead. null past the season.
+    let pastWindow = firstDate;
+    while (pastWindow <= windowEnd) pastWindow = addDaysISO(pastWindow, 7);
+    const nextDate = firstRunningWeek(pastWindow, slot.time, slot.type);
+    const next = nextDate ? { date: nextDate, opensOn: windowOpensOn(nextDate, windowDays) } : null;
 
     const booked = [];
     const skipped = [];

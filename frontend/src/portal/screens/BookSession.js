@@ -312,6 +312,8 @@ export default function BookSession({
           date: booked.date,
           time: booked.time,
           meridiem: booked.meridiem,
+          // Repeat weekly tells a closed week from a holiday extra by type.
+          type: booked.type,
           // So the event a family keeps ends when the session does.
           durationMinutes: booked.durationMinutes,
           waitlisted: booked.waitlisted,
@@ -787,6 +789,7 @@ function Confirmed({ bare, confirmation, onRepeat, repeatWindow, onBack }) {
           <RepeatWeekly
             date={c.date}
             time={`${c.time} ${c.meridiem}`}
+            type={c.type}
             windowEnd={repeatWindow.end}
             windowDays={repeatWindow.days}
             elite={repeatWindow.elite}

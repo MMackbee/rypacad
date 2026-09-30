@@ -4,7 +4,7 @@ import { color, font } from '../tokens';
 import Button from './Button';
 import { Body, Card, SectionLabel } from './Primitives';
 import { addDaysISO, windowOpensOn } from '../data/calendar';
-import { SEASON_BOUNDS } from '../data/season';
+import { SEASON_BOUNDS, firstRunningWeek } from '../data/season';
 
 /**
  * "Repeat weekly" on Book a Session's Slot reserved screen (rewritten
@@ -18,17 +18,20 @@ import { SEASON_BOUNDS } from '../data/season';
  *
  * @param {string} date        The booked session's date ('yyyy-MM-dd').
  * @param {string} time        Its start, '4:00 PM'.
+ * @param {string} type        Its session type ('training'), to tell a holiday extra from a closure.
  * @param {string} windowEnd   The last bookable date for THIS athlete's package (openThrough).
  * @param {number} windowDays  That package's window, for the "N days ahead" line.
  * @param {boolean} elite      Elite spends no token, so no token line.
  * @param {(untilISO) => Promise} onRepeat  useBooking().bookRecurring for the booked slot.
  */
-export default function RepeatWeekly({ date, time, windowEnd, windowDays, elite, onRepeat }) {
+export default function RepeatWeekly({ date, time, type, windowEnd, windowDays, elite, onRepeat }) {
   // null (offer), 'working', or bookRecurring's result.
   const [repeat, setRepeat] = useState(null);
-  const nextWeek = addDaysISO(date, 7);
-  // The season's last week has nothing to repeat into.
-  if (nextWeek > SEASON_BOUNDS.end) return null;
+  // The next week this slot actually runs: a closure (the Dec 23 - Jan 3
+  // break) is neither offered nor named as the week to come back for.
+  const nextWeek = firstRunningWeek(addDaysISO(date, 7), time, type);
+  // The season's last running week has nothing to repeat into.
+  if (!nextWeek) return null;
   const weekday = format(parseISO(date), 'EEEE');
   const until = windowEnd < SEASON_BOUNDS.end ? windowEnd : SEASON_BOUNDS.end;
 

@@ -226,6 +226,17 @@ describe('Repeat weekly in live mode (repeat report 2026-09-30)', () => {
     await r.unmount();
   });
 
+  test('Elite on Oct 1 booking Wed Dec 16: the opens line skips the Dec 23 and Dec 30 closures', async () => {
+    jest.setSystemTime(OCT_1);
+    mockMonths['2026-12-01'] = [on('s-dec16', '2026-12-16')];
+    mockFirstSlot = '2026-12-16';
+    const r = await reserve('2026-12-16');
+    expect(r.text()).toContain('Next Wednesday (Wed, Jan 6) opens for booking at 7 AM on Sun, Nov 22.');
+    expect(r.text()).not.toContain('Dec 23');
+    expect(mockBookRecurring).not.toHaveBeenCalled();
+    await r.unmount();
+  });
+
   test('a rejected repeat shows its error text', async () => {
     jest.setSystemTime(OCT_1);
     mockBookRecurring = jest.fn(async () => {

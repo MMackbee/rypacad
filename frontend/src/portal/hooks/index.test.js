@@ -311,9 +311,25 @@ describe('live loaders (perf wave B)', () => {
       const early = await repeat(h, '2026-12-15', '2026-12-31');
       expect(early.windowEnd).toBe('2026-12-24');
       expect(early.booked.map((b) => b.date)).toEqual(['2026-12-22']);
-      expect(early.next).toEqual({ date: '2026-12-29', opensOn: '2026-11-14' });
+      // Dec 29 is the Christmas break (a 10:30 tournament, no 4 PM block): the next week is Jan 5.
+      expect(early.next).toEqual({ date: '2027-01-05', opensOn: '2026-11-21' });
       jest.setSystemTime(new Date('2026-11-10T13:00:00Z'));
       expect((await repeat(h, '2026-12-15', '2026-12-31')).windowEnd).toBe('2026-12-25');
+      await h.unmount();
+    });
+
+    test('a Wednesday on Oct 1: next steps over the Dec 23 and Dec 30 closures to Jan 6', async () => {
+      const h = await mountAthlete();
+      // Every Wednesday 4 PM block but Thanksgiving's (Nov 25 is closed).
+      live.fetchSessionsInRange.mockImplementation(async (from, to) => {
+        const out = [];
+        for (let d = from; d <= to; d = addDaysISO(d, 1)) if (parseISO(d).getDay() === 3 && d !== '2026-11-25') out.push(tuesday(d));
+        return out;
+      });
+      const out = await repeat(h, '2026-11-04', '2026-12-16');
+      expect(out.booked.map((b) => b.date)).toEqual(['2026-11-11', '2026-11-18', '2026-12-02', '2026-12-09', '2026-12-16']);
+      expect(out.skipped).toEqual([{ date: '2026-11-25', reason: 'no session' }]);
+      expect(out.next).toEqual({ date: '2027-01-06', opensOn: '2026-11-22' });
       await h.unmount();
     });
 
