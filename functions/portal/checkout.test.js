@@ -82,6 +82,7 @@ test('tier before Nov 1: the exact session body', async () => {
   assert.deepEqual(await p, {url: 'https://checkout.stripe.com/c/cs_1'});
   assert.deepEqual(calls[0], {
     mode: 'subscription',
+    allow_promotion_codes: true,
     client_reference_id: 'novak__lena__tier',
     line_items: [
       {price: 'price_t6', quantity: 1},

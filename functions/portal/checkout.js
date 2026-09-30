@@ -93,6 +93,11 @@ function sessionBody(a) {
   const base = `${a.portalUrl}/portal/${screen}`;
   const body = {
     mode: 'subscription',
+    // Owner 2026-09-30: sibling discount by promotion code at launch. Phil
+    // creates the coupon and code in Stripe (test and live); the family
+    // types it on Stripe's page. Stripe validates it, so the restricted key
+    // needs no extra scope, and tokens come from metadata, not the amount.
+    allow_promotion_codes: true,
     client_reference_id: `${a.householdId}__${a.athleteId}__${a.product}`,
     line_items: [
       {price: a.priceId, quantity: 1},
