@@ -390,7 +390,7 @@ export default function BookSession({
 
             {selectedDate && selectedDateLocked ? (
               <div style={{ padding: '0 22px' }}>
-                <LockedDayNotice date={selectedDate} windowDays={windowDays} />
+                <LockedDayNotice date={selectedDate} windowDays={windowDays} gateOpen={gateOpen} />
               </div>
             ) : selectedDate ? (
               <div style={{ padding: '0 22px', display: 'flex', flexDirection: 'column', gap: 10 }}>

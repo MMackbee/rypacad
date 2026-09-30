@@ -77,6 +77,29 @@ test('Elite books before the gate (the paid package, spec 4.3)', async () => {
   await r.unmount();
 });
 
+describe('a locked day before the gate (UX review #8)', () => {
+  const EMAIL_DAY = new Date('2026-10-01T17:00:00Z');
+  beforeEach(() => {
+    mockMonths = { '2026-11-01': [{ date: '2026-11-03', sessions: [{ ...session, date: '2026-11-03' }] }, { date: '2026-11-20', sessions: [{ ...session, id: 's2', date: '2026-11-20' }] }] };
+    mockFirstSlot = '2026-11-03';
+  });
+  test('a token package sees Oct 10 for Nov 3, not "session date minus 30 days"', async () => {
+    jest.setSystemTime(EMAIL_DAY);
+    const r = await renderScreen(<BookSession bare demoSelectedDate="2026-11-03" />);
+    expect(r.text()).toContain('Not open for this day yet');
+    expect(r.text()).toContain('Booking for Tuesday, Nov 3 opens Sat, Oct 10 at 7 AM.');
+    expect(r.text()).not.toContain('Sunday, Oct 4');
+    await r.unmount();
+  });
+  test('Elite keeps its own window date', async () => {
+    jest.setSystemTime(EMAIL_DAY);
+    mockPackage = { id: 'elite', kind: 'elite', windowDays: 45 };
+    const r = await renderScreen(<BookSession bare demoSelectedDate="2026-11-20" />);
+    expect(r.text()).toContain('Booking for Friday, Nov 20 opens 7 AM on Tuesday, Oct 6.');
+    await r.unmount();
+  });
+});
+
 describe('Month/Week toggle (owner request 2026-09-30)', () => {
   const KEY = 'ryp.calendarView';
   const pressed = (r, name) => r.button(name)?.getAttribute('aria-pressed');

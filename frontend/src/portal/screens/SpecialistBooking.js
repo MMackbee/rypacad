@@ -384,7 +384,7 @@ export default function SpecialistBooking({
                 </div>
                 {selectedDateLocked ? (
                   <div style={{ padding: '0 22px' }}>
-                    <LockedDayNotice date={selectedDate} windowDays={windowDays} />
+                    <LockedDayNotice date={selectedDate} windowDays={windowDays} gateOpen={gateOpen} />
                   </div>
                 ) : (
                   <div style={{ padding: '0 22px', display: 'flex', flexDirection: 'column', gap: 9 }}>

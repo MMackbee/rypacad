@@ -93,6 +93,22 @@ test('in-app branch after the gate: no banner, a tap opens the sheet with Reserv
   await r.unmount();
 });
 
+test('a locked day before the gate names Oct 10, not "session date minus 30 days" (UX review #8)', async () => {
+  jest.useFakeTimers('modern');
+  jest.setSystemTime(new Date('2026-10-01T17:00:00Z'));
+  try {
+    mockSlots.data = { ...mockSlots.data, bookingMode: 'in-app', calendlyUrl: null, bookingOpen: false,
+      days: [{ date: '2026-11-03', dayLabel: 'Tue, Nov 3', slots: [{ sessionId: 's1', time: '4:00 PM', open: true, capacity: 1, booked: 0, durationMinutes: 30 }] }] };
+    const r = await renderScreen(<SpecialistBooking bare initialSpecialist="mental" />);
+    expect(r.text()).toContain('Not open for this day yet');
+    expect(r.text()).toContain('Booking for Tuesday, Nov 3 opens Sat, Oct 10 at 7 AM.');
+    expect(r.text()).not.toContain('Sunday, Oct 4');
+    await r.unmount();
+  } finally {
+    jest.useRealTimers();
+  }
+});
+
 describe('Month/Week calendar card (owner request 2026-09-30)', () => {
   // Wed Oct 14 2026. The window holds today (no slots), Fri Oct 16 (+2) and
   // Fri Oct 23 (+9) - one Mon-Sun week apart.
