@@ -11,7 +11,7 @@
  * session on their own schedule.
  */
 
-import { addDaysISO, longDayLabel } from './calendar';
+import { addDaysISO, BOOKING_OPENS_LABEL, bookingOpen, longDayLabel } from './calendar';
 import { normalizeAnchorDay, periodFor, SINGLE_TOKEN, tokensFor } from './packages';
 
 /** Days from `fromISO` to `toISO` (calendar days, UTC-noon arithmetic). */
@@ -222,6 +222,10 @@ function attemptOf(membership) {
  * pending list of only single-token athletes (`perPurchase`, hooks/billing.js
  * pendingOf) and an all-single household (`opts.allPerPurchase`) never read
  * "billed monthly".
+ *
+ * The monthly pending body names the Oct 10 gate until it opens (UX review
+ * P-07: "can book as soon as checkout is complete" was untrue for token
+ * packages before then). `opts.now` (ms) pins the clock in tests.
  */
 export function statusFor(membership, opts = {}) {
   const status = (membership && membership.status) || 'active';
@@ -270,7 +274,7 @@ export function statusFor(membership, opts = {}) {
       title: ended ? 'Membership ended - pay to book again' : 'Payment pending - finish checkout to start booking',
       body: perPurchase
         ? `${names} can book once their session token is paid for. A session token is a one-time $${SINGLE_TOKEN.price} payment.`
-        : `${names} can book as soon as checkout is complete. Billed monthly from the 1st once you've paid.`,
+        : `${names} can book once checkout is complete${bookingOpen(opts.now ?? Date.now()) ? '' : ` (token packages from ${BOOKING_OPENS_LABEL})`}. Billed monthly on the 1st once you've paid.`,
       ladder: null,
       ladderAt: null,
       cta: 'Pay now',

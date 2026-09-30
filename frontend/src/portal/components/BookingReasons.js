@@ -1,7 +1,7 @@
 import React from 'react';
 import { color, font } from '../tokens';
 import { Banner } from './Primitives';
-import { BOOKING_OPENS_LABEL, longDayLabel, nextMonthFirstShort, todayISO, windowOpensOn } from '../data/calendar';
+import { BOOKING_OPENS_AT, BOOKING_OPENS_LABEL, longDayLabel, nextMonthFirstShort, todayISO, windowOpensOn } from '../data/calendar';
 
 /**
  * Shared booking-rejection/lock/cancellation copy (Sprint 12 pin, contract
@@ -83,11 +83,29 @@ export function cancelReasonCopy(reason) {
   return null;
 }
 
-/** Pin D: a day past the booking window renders locked, not just empty. */
-export function LockedDayNotice({ date, windowDays }) {
+/** The Oct 10 gate's calendar date in America/Chicago ('2026-10-10'), derived from the one constant. */
+const GATE_ISO = (() => {
+  const parts = new Intl.DateTimeFormat('en-US', { timeZone: 'America/Chicago', year: 'numeric', month: '2-digit', day: '2-digit' })
+    .formatToParts(new Date(BOOKING_OPENS_AT));
+  const get = (type) => parts.find((p) => p.type === type)?.value;
+  return `${get('year')}-${get('month')}-${get('day')}`;
+})();
+
+/**
+ * Pin D: a day past the booking window renders locked, not just empty.
+ * UX review #8: while the Oct 10 gate is shut (`gateOpen` false: a token
+ * package before 07:00 Oct 10), a day whose window would open BEFORE the gate
+ * says the gate's date - "session date minus the window" told families
+ * Nov 3 opens Sunday, Oct 4. Display only; the server gate is unchanged.
+ * Titled per day so it doesn't repeat the screen's own "Not open yet".
+ */
+export function LockedDayNotice({ date, windowDays, gateOpen = true }) {
+  const opens = windowOpensOn(date, windowDays);
   return (
-    <Banner tone="neutral" title="Not open yet">
-      Booking for {longDayLabel(date)} opens 7 AM on {longDayLabel(windowOpensOn(date, windowDays))}.
+    <Banner tone="neutral" title="Not open for this day yet">
+      {!gateOpen && opens < GATE_ISO
+        ? `Booking for ${longDayLabel(date)} opens ${BOOKING_OPENS_LABEL}.`
+        : `Booking for ${longDayLabel(date)} opens 7 AM on ${longDayLabel(opens)}.`}
     </Banner>
   );
 }

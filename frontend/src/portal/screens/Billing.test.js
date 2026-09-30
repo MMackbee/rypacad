@@ -13,7 +13,7 @@ beforeEach(() => {
     household: { id: 'h1', name: 'Whitfield family', anchorDay: 1, membership: null, stripeCustomerId: 'cus_1' }, portalUrl: 'https://billing.stripe.test/p/x',
     members: [m('a1', 'Jordan', { status: 'active', facility: null }), m('a2', 'Reese', { status: 'pending', facility: null })],
     status: { status: 'pending', tone: 'yellow', badge: { tone: 'yellow', label: 'Payment pending' }, title: 'Payment pending - finish checkout to start booking',
-      body: "Reese can book as soon as checkout is complete. Billed monthly from the 1st once you've paid.", ladder: null, ladderAt: null, cta: 'Pay now', paused: false, pendingAthletes: [{ athleteId: 'a2', name: 'Reese' }] },
+      body: "Reese can book once checkout is complete (token packages from Sat, Oct 10 at 7 AM). Billed monthly on the 1st once you've paid.", ladder: null, ladderAt: null, cta: 'Pay now', paused: false, pendingAthletes: [{ athleteId: 'a2', name: 'Reese' }] },
   } };
 });
 
@@ -21,6 +21,7 @@ test('pending hero pays, plan and connection copy, facility offer for the paid a
   const r = await renderScreen(<Billing bare />);
   expect(r.button('Pay now|a2|tier')).not.toBeNull();
   expect(r.text()).toContain("Billed monthly from the 1st once you've paid");
+  expect(r.text()).toContain('Reese can book once checkout is complete (token packages from Sat, Oct 10 at 7 AM).');
   expect(r.text()).toContain('Your card and invoices are managed in Stripe.');
   expect(r.button('Manage billing in Stripe')).not.toBeNull();
   expect(r.button('Add facility access|a1|facility')).not.toBeNull();

@@ -287,6 +287,10 @@ export default function SpecialistBooking({
 
   const selectedDay = days.find((d) => d.date === selectedDate) || null;
   const selectedDateLocked = Boolean(selectedDate) && selectedDate > openThroughDate;
+  const dayStates = slotDayStates(days);
+  // The same one-line caption Book a Session's card carries (toggle review).
+  const calendarHint = `Days marked green have open times — tap one to see them.${
+    Object.values(dayStates).includes('full') ? ' Dashed days are full — tap one for the waitlist.' : ''}`;
 
   return (
     <PhoneFrame
@@ -375,16 +379,17 @@ export default function SpecialistBooking({
                     rangeStart={days[0]?.date}
                     rangeEnd={days[days.length - 1]?.date}
                     anchor={selectedDate}
-                    dayStates={slotDayStates(days)}
+                    dayStates={dayStates}
                     variant="booking"
                     selected={selectedDate}
                     onSelectDay={(day) => setSelectedDate(day.iso)}
                     defaultView="week"
+                    hint={calendarHint}
                   />
                 </div>
                 {selectedDateLocked ? (
                   <div style={{ padding: '0 22px' }}>
-                    <LockedDayNotice date={selectedDate} windowDays={windowDays} />
+                    <LockedDayNotice date={selectedDate} windowDays={windowDays} gateOpen={gateOpen} />
                   </div>
                 ) : (
                   <div style={{ padding: '0 22px', display: 'flex', flexDirection: 'column', gap: 9 }}>
@@ -497,7 +502,7 @@ function SlotList({ day, specialist, disabled, reserving, onSelect }) {
     <>
       <div style={{ font: `600 13px ${font.body}`, color: color.text }}>{day.dayLabel}</div>
       {slots.length === 0 ? (
-        <Body size={12}>No open times this day — try the next dot.</Body>
+        <Body size={12}>No open times this day — pick another day.</Body>
       ) : (
         slots.map((slot) => {
           const [time, meridiem] = (slot.time || '').split(' ');

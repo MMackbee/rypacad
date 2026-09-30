@@ -29,7 +29,7 @@ beforeEach(() => {
       { athleteId: 'a2', name: 'Reese', package: { kind: 'tokens' }, billing: { status: 'pending', facility: null } },
     ],
     status: { status: 'pending', tone: 'yellow', badge: { tone: 'yellow', label: 'Payment pending' }, title: 'Payment pending - finish checkout to start booking',
-      body: "Reese can book as soon as checkout is complete. Billed monthly from the 1st once you've paid.", cta: 'Pay now', paused: false, pendingAthletes: [{ athleteId: 'a2', name: 'Reese' }] },
+      body: "Reese can book once checkout is complete (token packages from Sat, Oct 10 at 7 AM). Billed monthly on the 1st once you've paid.", cta: 'Pay now', paused: false, pendingAthletes: [{ athleteId: 'a2', name: 'Reese' }] },
   } };
 });
 

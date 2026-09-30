@@ -93,6 +93,22 @@ test('in-app branch after the gate: no banner, a tap opens the sheet with Reserv
   await r.unmount();
 });
 
+test('a locked day before the gate names Oct 10, not "session date minus 30 days" (UX review #8)', async () => {
+  jest.useFakeTimers('modern');
+  jest.setSystemTime(new Date('2026-10-01T17:00:00Z'));
+  try {
+    mockSlots.data = { ...mockSlots.data, bookingMode: 'in-app', calendlyUrl: null, bookingOpen: false,
+      days: [{ date: '2026-11-03', dayLabel: 'Tue, Nov 3', slots: [{ sessionId: 's1', time: '4:00 PM', open: true, capacity: 1, booked: 0, durationMinutes: 30 }] }] };
+    const r = await renderScreen(<SpecialistBooking bare initialSpecialist="mental" />);
+    expect(r.text()).toContain('Not open for this day yet');
+    expect(r.text()).toContain('Booking for Tuesday, Nov 3 opens Sat, Oct 10 at 7 AM.');
+    expect(r.text()).not.toContain('Sunday, Oct 4');
+    await r.unmount();
+  } finally {
+    jest.useRealTimers();
+  }
+});
+
 describe('Month/Week calendar card (owner request 2026-09-30)', () => {
   // Wed Oct 14 2026. The window holds today (no slots), Fri Oct 16 (+2) and
   // Fri Oct 23 (+9) - one Mon-Sun week apart.
@@ -184,6 +200,35 @@ describe('Month/Week calendar card (owner request 2026-09-30)', () => {
     expect(g.button('Reserve')).toBeNull();
     expect(mockBooked).toEqual([]);
     await g.unmount();
+  });
+
+  test('the card carries the Book-style hint; a fully booked day is dashed, still tappable, and shows its waitlist slot (toggle review)', async () => {
+    inApp({ days: [
+      { date: TODAY, dayLabel: 'Today', slots: [] },
+      { date: DAY_A, dayLabel: 'Fri, Oct 16', slots: [slot('s1', '4:00 PM')] },
+      { date: DAY_B, dayLabel: 'Fri, Oct 23', slots: [{ ...slot('s2', '5:30 PM'), open: false, booked: 1 }] },
+    ] });
+    const r = await renderScreen(<SpecialistBooking bare initialSpecialist="mental" />);
+    expect(r.text()).toContain('Days marked green have open times — tap one to see them. Dashed days are full — tap one for the waitlist.');
+    await r.click('Next week');
+    const full = pill(r, DAY_B);
+    expect(full.tagName).toBe('BUTTON');
+    expect(full.getAttribute('data-state')).toBe('full');
+    expect(full.style.borderStyle).toBe('dashed');
+    await r.click('Friday, Oct 23, full - waitlist only');
+    expect(pill(r, DAY_B).getAttribute('aria-pressed')).toBe('true');
+    expect(slotCard(r, '5:30')).not.toBeNull();
+    await r.unmount();
+  });
+
+  test('an empty day no longer points at a dot that is gone; no full day, no dashed sentence', async () => {
+    inApp({ days: [{ date: TODAY, dayLabel: 'Today', slots: [] }] });
+    const r = await renderScreen(<SpecialistBooking bare initialSpecialist="mental" />);
+    expect(r.text()).toContain('No open times this day — pick another day.');
+    expect(r.text()).not.toContain('next dot');
+    expect(r.text()).toContain('Days marked green have open times — tap one to see them.');
+    expect(r.text()).not.toContain('Dashed days');
+    await r.unmount();
   });
 
   test('no toggle in the Calendly branch or at the specialist picker', async () => {

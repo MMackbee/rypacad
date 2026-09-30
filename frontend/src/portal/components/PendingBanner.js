@@ -12,7 +12,7 @@ export default function PendingBanner({ pendingAthletes, body, title = null, ema
       <SectionLabel tone={color.secondary}>{title || PENDING_TITLE}</SectionLabel>
       {body ? <Body size={12} style={{ marginTop: 8 }}>{body}</Body> : null}
       {pendingAthletes.map((a) => (
-        <div key={a.athleteId} style={{ display: 'flex', alignItems: 'center', gap: 12, marginTop: 12 }}>
+        <div key={a.athleteId} style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 12, marginTop: 12 }}>
           <div style={{ flex: 1, minWidth: 0, font: `600 13px ${font.body}`, color: color.text }}>{a.name}</div>
           <PayButton athleteId={a.athleteId} product="tier" label={PAY_NOW} height={44} email={email} style={{ width: 132, flex: 'none' }} />
         </div>
