@@ -11,8 +11,8 @@ import ParentDashboard from './ParentDashboard';
 import TourStandings from './TourStandings';
 import NotificationPreferences from './NotificationPreferences';
 import { useSchedule } from '../hooks';
-// Pure calendar helper, not response data — the seam rule from BookSession.
-import { longDayLabel } from '../data/calendar';
+// Pure calendar helpers, not response data — the seam rule from BookSession.
+import { BEHIND_BUFFER_DAYS, longDayLabel } from '../data/calendar';
 
 /**
  * The onboarding walkthrough's step definitions and step content — split from
@@ -24,9 +24,10 @@ import { longDayLabel } from '../data/calendar';
  *   pinned `{ practice: true }` hook option; practice entries live in the
  *   wrapped screens' component state and evaporate when a step unmounts.
  * - Action steps complete only on the real action (confirmation rendered,
- *   day logged). Copy is plain language and keeps the two-pool wording:
- *   training and tournaments never substitute.
- * - Practice data is the existing Whitfield seed. Nothing here invents data.
+ *   day logged). Copy is plain language and keeps the one-token wording
+ *   (Sprint 12): every session, of any kind, spends one token.
+ * - Practice data is the existing Whitfield seed. Nothing here invents data,
+ *   and copy that names a sample athlete names one the step renders.
  *
  * A step: `{ id, title, instruction, [instructionDone], [gate], [gateLabel],
  * render(ctx) }` where ctx carries `{ track, booking, loggedDay, onBooked,
@@ -133,9 +134,7 @@ function DoneStep({ track, booking, loggedDay }) {
             done={Boolean(booking)}
             label={
               booking
-                ? `Practice booking — ${booking.name} · ${booking.when} · would have spent 1 ${
-                    booking.pool === 'tournaments' ? 'tournament entry' : 'training session'
-                  }`
+                ? `Practice booking — ${booking.name} · ${booking.when} · would have spent 1 token`
                 : 'No practice booking was made'
             }
           />
@@ -196,7 +195,7 @@ const bookStep = (instructionBody) => ({
   instructionDone: {
     title: 'Booked',
     body:
-      'That confirmation is exactly what a real booking shows — including which pool it spends. This one is practice: nothing was reserved and nothing was spent.',
+      'That confirmation is exactly what a real booking shows — including the token it spends. This one is practice: nothing was reserved and nothing was spent.',
   },
   render: ({ onBooked }) => (
     <Fill>
@@ -244,7 +243,7 @@ export const ATHLETE_STEPS = [
     ),
   },
   bookStep(
-    'Book a block for real: pick a day, tap an open block, and land on the confirmation. Each block says which pool it spends before you commit.'
+    'Book a block for real: pick a day, tap an open block, and land on the confirmation. Each block says what it spends — one token — before you commit.'
   ),
   {
     id: 'log',
@@ -290,17 +289,18 @@ export const PARENT_STEPS = [
     title: 'Your family',
     instruction: {
       title: 'Look at the balances',
-      body:
-        'One card per athlete. Notice Reese: training sessions left, tournament entries at zero — and her next session is a tournament. The two pools never substitute, which is why every balance is two numbers.',
+      body: `One card per athlete. Notice Reese: her Tokens row is what she has left this period — every session spends one, and her next one is a tournament. Her yellow Behind badge means she has missed more than ${BEHIND_BUFFER_DAYS} weekdays of her Commitment Contract this month.`,
     },
+    // `practice` pins the Whitfield seed (tester report 2026-09-30): without
+    // it a signed-in parent saw their own family here, and no Reese.
     render: () => (
       <Fill>
-        <ParentDashboard bare variant="three" />
+        <ParentDashboard bare variant="three" practice />
       </Fill>
     ),
   },
   bookStep(
-    'Book a block the way you would for your athlete: pick a day, tap an open block, reach the confirmation. Each block says which pool it spends before you commit.'
+    'Book a block the way you would for your athlete: pick a day, tap an open block, reach the confirmation. Each block says what it spends — one token — before you commit.'
   ),
   {
     // Billing's old walkthrough slot (Sprint 7: billing is parked, its tab

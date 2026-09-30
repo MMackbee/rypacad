@@ -55,7 +55,7 @@ export default function AthleteDashboard({
   // threading an onNavigate prop through.
   const navigate = useNavigate();
   // Sprint 20 (spec 4.4): the athlete's own paid state and the ?paid= return.
-  const mine = useMyTokens();
+  const mine = useMyTokens({ practice });
   const mineStatus = mine.data?.status ?? null;
   const [params] = useSearchParams();
 

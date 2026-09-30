@@ -1801,9 +1801,10 @@ async function liveHousehold(today) {
   };
 }
 
-/** GET /athletes?guardian=:id + GET /billing/:householdId (08). */
-export function useHousehold({ variant = 'three' } = {}) {
-  const live = isLive();
+/** GET /athletes?guardian=:id + GET /billing/:householdId (08). `practice`
+ * pins the seed (the walkthrough's family step shows the Whitfields). */
+export function useHousehold({ variant = 'three', practice = false } = {}) {
+  const live = !practice && isLive();
   const today = todayISO();
   // Post-write invalidation seam (Sprint 6 pin): a booking or a contract log
   // can change a child's card - re-run after either bumps. Sprint 10:
