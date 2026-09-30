@@ -3,14 +3,19 @@ import { renderScreen } from './testRender';
 import Registration from './Registration';
 
 const mockCalls = [];
+let mockCreateError = null;
 jest.mock('../hooks/callables', () => ({
-  callCreateFamily: async (payload) => { mockCalls.push(['createFamily', payload]); return { householdId: 'h1', athleteIds: ['a1'] }; },
+  callCreateFamily: async (payload) => {
+    mockCalls.push(['createFamily', payload]);
+    if (mockCreateError) throw mockCreateError;
+    return { householdId: 'h1', athleteIds: ['a1'] };
+  },
   callAddAthletes: async (payload) => { mockCalls.push(['addAthletes', payload]); return { householdId: 'h1', athleteIds: ['a2'] }; },
   callCreateCheckoutSession: async () => ({ url: 'https://checkout.stripe.test/x' }),
 }), { virtual: true });
 jest.mock('./RegistrationSuccess', () => ({ __esModule: true, default: ({ result, onFinish }) => <button type="button" onClick={() => onFinish('/portal/family')}>SUCCESS {result.athleteIds.join(',')}</button> }));
 
-beforeEach(() => { mockCalls.length = 0; });
+beforeEach(() => { mockCalls.length = 0; mockCreateError = null; });
 
 async function fillParentToConsent(r) {
   await r.click('Parent or guardian');
@@ -172,6 +177,31 @@ test('a restored draft holding the off-sale single token cannot be submitted', a
   expect(r.text()).toContain('Step 5 of 5');
   await r.unmount();
   window.sessionStorage.clear();
+});
+
+test('an invited child refused at submit (invite-open) goes to the verify screen, draft dropped', async () => {
+  window.sessionStorage.clear();
+  const finished = [];
+  const account = { uid: 'u-kid', email: 'dana@email.com' };
+  const r = await renderScreen(<Registration bare mode="signup" account={account} onRefresh={async () => {}} onFinish={(p) => finished.push(p)} />);
+  await fillParentToConsent(r);
+  mockCreateError = Object.assign(new Error('Your parent already enrolled you - sign in with this email and tap Check again.'), { reason: 'invite-open' });
+  await r.click('Sign and submit');
+  expect(finished).toEqual(['/portal/not-provisioned']);
+  expect(window.sessionStorage.getItem('ryp.signupDraft.signup.u-kid')).toBeNull();
+  await r.unmount();
+});
+
+test('any other refusal at submit still shows its message on the form', async () => {
+  const finished = [];
+  const r = await renderScreen(<Registration bare mode="signup" account={{ email: 'dana@email.com' }} onFinish={(p) => finished.push(p)} />);
+  await fillParentToConsent(r);
+  mockCreateError = Object.assign(new Error('That email is already on another athlete.'), { reason: 'child-email-duplicate' });
+  await r.click('Sign and submit');
+  expect(finished).toEqual([]);
+  expect(r.text()).toContain('That email is already on another athlete.');
+  expect(r.button('Sign and submit')).not.toBeNull();
+  await r.unmount();
 });
 
 test('link mode skips to athletes and calls addAthletes', async () => {

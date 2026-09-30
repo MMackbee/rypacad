@@ -27,8 +27,33 @@ test('creates a login and shows the verification-sent note', async () => {
   await r.fill('Password', 'correct-horse-9');
   await r.click('Create login');
   expect(r.text()).toContain('We sent a link to dana@email.com from noreply@');
-  expect(r.button('Continue to sign-up')).not.toBeNull();
+  // The invite check has not answered yet (idle): Continue waits for it.
+  expect(r.button('Continue to sign-up')).toBeNull();
+  expect(r.button('Checking your email...').disabled).toBe(true);
   await r.unmount();
+});
+
+async function createLoginThenContinue(claimState) {
+  mockSession.claimState = claimState;
+  const r = await renderScreen(<SignUp bare />, { path: '/portal/signup' });
+  await r.fill('Email', 'kid@email.com');
+  await r.fill('Password', 'correct-horse-9');
+  await r.click('Create login');
+  expect(r.button('Continue to sign-up').disabled).toBe(false);
+  await r.click('Continue to sign-up');
+  const path = r.location().pathname;
+  await r.unmount();
+  return path;
+}
+
+test('after Create login, an invited child continues to the verify screen, not the parent form', async () => {
+  expect(await createLoginThenContinue('needs-verification')).toBe('/portal/not-provisioned');
+  expect(await createLoginThenContinue('already-claimed')).toBe('/portal/not-provisioned');
+});
+
+test('after Create login, a parent (no invite) or a failed check still continues to the form', async () => {
+  expect(await createLoginThenContinue('none')).toBe('/portal/register');
+  expect(await createLoginThenContinue('error')).toBe('/portal/register');
 });
 
 test('email already in use points at sign in', async () => {

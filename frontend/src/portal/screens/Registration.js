@@ -183,6 +183,15 @@ export default function Registration({ variant, bare = false, mode = 'signup', a
         await onRefresh();
         return;
       }
+      // An invited child who still reached the form: the parent already
+      // enrolled them, and createFamily's "tap Check again" names a button
+      // that is not here. The verify screen claims the invite instead.
+      if (err && err.reason === 'invite-open' && onFinish) {
+        submitting.current = false;
+        writeDraft(key, null);
+        onFinish('/portal/not-provisioned');
+        return;
+      }
       submitting.current = false;
       setPhase('form');
       setSubmitError(err && typeof err.message === 'string' && err.message ? err.message : 'Sign-up could not be saved. Try again.');
