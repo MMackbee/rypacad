@@ -2,12 +2,14 @@ import {
   availableCount,
   BUY_SINGLE_LABEL,
   graceSpendLabel,
+  heldLine,
   isSingleTokenId,
   packageSwitchWarning,
   SINGLE_EXPIRES,
   SINGLE_EXPIRES_LABEL,
   singleConfirmedLine,
   singleTokenLine,
+  tokenDayLabel,
 } from './singleToken';
 import { SEASON_BOUNDS } from './season';
 
@@ -18,6 +20,7 @@ test('the token is good through the season end, Sat, Feb 27', () => {
   expect(SINGLE_EXPIRES).toBe(SEASON_BOUNDS.end);
   expect(SINGLE_EXPIRES).toBe('2027-02-27');
   expect(SINGLE_EXPIRES_LABEL).toBe('Sat, Feb 27');
+  expect(tokenDayLabel('2026-11-20')).toBe('Fri, Nov 20');
 });
 
 test('isSingleTokenId matches functions/portal/single.js', () => {
@@ -48,6 +51,9 @@ test('singleTokenLine: count, expiry and the waitlist hold', () => {
   expect(singleTokenLine({ grace: [], left: 0, held: 1 })).toBe('No session token · 1 held by a waitlist spot');
   expect(singleTokenLine({ grace: [bought('single_a')], left: 0, held: 1 })).toBe('1 session token - good through Sat, Feb 27 · 1 held by a waitlist spot');
   expect(singleTokenLine({ grace: [], left: 0, held: 2 })).toBe('No session token · 2 held by waitlist spots');
+  expect(heldLine({ held: 0 })).toBeNull();
+  expect(heldLine(null)).toBeNull();
+  expect(heldLine({ held: 1 })).toBe('1 held by a waitlist spot');
 });
 
 test('graceSpendLabel names the token the booking spends', () => {

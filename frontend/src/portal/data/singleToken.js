@@ -17,8 +17,13 @@ import { SEASON_BOUNDS } from './season';
 
 /** The last day a single token is good for (functions/portal/single.js SEASON_END). */
 export const SINGLE_EXPIRES = SEASON_BOUNDS.end;
+/** '2027-02-27' -> 'Sat, Feb 27': how the token surfaces name a token's last day. */
+export function tokenDayLabel(iso) {
+  return format(parseISO(iso), 'EEE, MMM d');
+}
+
 /** 'Sat, Feb 27' - how every surface names SINGLE_EXPIRES. */
-export const SINGLE_EXPIRES_LABEL = format(parseISO(SINGLE_EXPIRES), 'EEE, MMM d');
+export const SINGLE_EXPIRES_LABEL = tokenDayLabel(SINGLE_EXPIRES);
 
 const TOKEN_PREFIX = 'single_';
 
@@ -39,6 +44,13 @@ export function availableCount(tokens) {
   return (tokens?.grace?.length ?? 0) + (tokens?.left || 0);
 }
 
+/** '1 held by a waitlist spot' when waitlist entries hold tokens (tokensFor's `held`), else null. */
+export function heldLine(tokens) {
+  const held = tokens?.held || 0;
+  if (held <= 0) return null;
+  return `${held} held by ${held === 1 ? 'a waitlist spot' : 'waitlist spots'}`;
+}
+
 /**
  * '1 session token - good through Sat, Feb 27', 'No session token', plus
  * ' · 1 held by a waitlist spot' when a waitlist entry holds a token.
@@ -46,9 +58,8 @@ export function availableCount(tokens) {
 export function singleTokenLine(tokens) {
   const n = availableCount(tokens);
   const base = n === 0 ? 'No session token' : `${n} session token${n === 1 ? '' : 's'} - good through ${SINGLE_EXPIRES_LABEL}`;
-  const held = tokens?.held || 0;
-  if (held <= 0) return base;
-  return `${base} · ${held} held by ${held === 1 ? 'a waitlist spot' : 'waitlist spots'}`;
+  const held = heldLine(tokens);
+  return held ? `${base} · ${held}` : base;
 }
 
 /**
