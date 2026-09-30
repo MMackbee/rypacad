@@ -193,7 +193,7 @@ Smoke on rypacad.ryptest.com, in this order, all with test-mode Stripe:
    `tokenPeriods/{id}_2026-11-01` with `prepaid: true`,
    `notifications/membership_{id}_paid`.
 4. Claim a child login (password + verification, then Google).
-5. An Elite athlete books at once; a t-6 athlete sees "Booking opens Fri,
+5. An Elite athlete books at once; a t-6 athlete sees "Booking opens Sat,
    Oct 10 at 7 AM".
 6. Book Yannick through the Calendly link: the session appears on My
    Schedule within a minute at the right Chicago time; cancel from Calendly's
