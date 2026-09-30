@@ -13,14 +13,17 @@ jest.mock('../hooks/billing', () => ({
 }));
 jest.mock('../hooks', () => ({
   useHousehold: () => ({ loading: false, error: null, data: { name: 'Whitfield family', date: 'Thu, Oct 1', children: [
-    { id: 'a1', name: 'Jordan', ageLine: 'Age 14', standing: { tone: 'green', label: 'On track' }, next: null, contract: null, packageId: 't-12', tokens: null, loginEmail: 'jordan@email.com', login: { state: 'invited', claimedAt: null } },
+    { id: 'a1', name: 'Jordan', ageLine: 'Age 14 · 45 min tier', standing: { tone: 'green', label: 'On track' }, next: null, contract: 92, packageId: 't-12', tokens: null, loginEmail: 'jordan@email.com', login: { state: 'invited', claimedAt: null } },
     { id: 'a2', name: 'Reese', ageLine: 'Age 12', standing: { tone: 'neutral', label: 'New', dashed: true }, next: null, contract: null, packageId: 't-6', tokens: null },
   ], billing: { status: 'ok' } } }),
   // No useMembership mock on purpose (perf wave B): the household's Stripe
   // standing now comes off the hub, and a stray second fetch would crash here.
 }));
 
+// The contract standing ("On track") shows with the contract ON; the last describe covers it hidden.
+afterEach(() => { delete process.env.REACT_APP_CONTRACT_ENABLED; });
 beforeEach(() => {
+  process.env.REACT_APP_CONTRACT_ENABLED = 'true';
   mockConfirm = { state: 'confirming', billingStatus: 'pending' };
   mockHub = { loading: false, error: null, data: {
     household: { id: 'h1' }, portalUrl: null,
@@ -114,5 +117,30 @@ describe("What's next under Payment received (owner decision 2026-09-30)", () =>
     expect(f.text()).toMatch(/Payment received - /);
     expect(f.text()).not.toContain("What's next");
     await f.unmount();
+  });
+});
+
+describe('Commitment Contract hidden (owner ruling 2026-09-30)', () => {
+  const contractRow = (r) => [...r.container.querySelectorAll('div')].find((d) => d.textContent === 'Contract');
+
+  test('on: the Contract row, its percentage, the standing and the tier', async () => {
+    const r = await renderScreen(<ParentDashboard bare />, { path: '/portal/family' });
+    expect(contractRow(r)).toBeTruthy();
+    expect(r.text()).toContain('92%');
+    expect(r.text()).toContain('On track');
+    expect(r.text()).toContain('Age 14 · 45 min tier');
+    await r.unmount();
+  });
+
+  test('off: no Contract row, no percentage, no contract standing, no tier; billing badges stay', async () => {
+    delete process.env.REACT_APP_CONTRACT_ENABLED;
+    const r = await renderScreen(<ParentDashboard bare />, { path: '/portal/family' });
+    expect(contractRow(r)).toBeUndefined();
+    expect(r.text()).not.toContain('92%');
+    expect(r.text()).not.toContain('On track');
+    expect(r.text()).not.toContain('min tier');
+    expect(r.text()).toContain('Age 14');
+    expect(r.text()).toContain('Payment pending');
+    await r.unmount();
   });
 });

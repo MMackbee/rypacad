@@ -16,6 +16,7 @@ import AgeGroupChip from '../components/AgeGroupChip';
 import SkeletonCard, { SkeletonBar } from '../components/Skeleton';
 import { Body, Card, ErrorNotice, ScreenTitle, SectionLabel, SignOutButton, Tick } from '../components/Primitives';
 import { useAthleteDashboard } from '../hooks';
+import { contractEnabled } from '../data/contractFlag';
 
 /**
  * 03 · Athlete Dashboard - athlete.
@@ -47,7 +48,10 @@ export default function AthleteDashboard({
   const { data, loading, error } = useAthleteDashboard({ variant, practice });
   const athlete = data?.athlete;
   const next = data?.nextSession;
-  const contract = data?.contract;
+  // Hidden contract (owner, 2026-09-30): no card, no Log today, no checklist row.
+  const showContract = contractEnabled();
+  const contract = showContract ? data?.contract : null;
+  const onboarding = (data?.onboarding ?? []).filter((item) => showContract || item.id !== 'contract');
   // Sprint 9 pin (TEAM.md, "specialist 1-on-1s"): the coaching entry point
   // navigates by path string - /portal/coaching is routing-lane work landing
   // in parallel (this lane never edits PortalRoutes.js). Consistent with how
@@ -89,7 +93,7 @@ export default function AthleteDashboard({
       footer={<BottomTabBar role="athlete" active="home" />}
     >
       {loading ? (
-        <DashboardSkeleton />
+        <DashboardSkeleton contract={showContract} />
       ) : error ? (
         <div style={{ padding: '0 22px 24px' }}>
           <ErrorNotice title="Dashboard didn't load" onRetry={onRetry}>
@@ -111,7 +115,7 @@ export default function AthleteDashboard({
         {/* Live: shown until a published diagnostic exists (contract v1.8 C);
             seed: the demo 'new' variant. */}
         {variant === 'new' || data?.diagnosticCaptured === false ? <StartHere onBook={onBook} /> : null}
-        {variant === 'new' ? <OnboardingChecklist items={data?.onboarding ?? []} /> : null}
+        {variant === 'new' ? <OnboardingChecklist items={onboarding} /> : null}
         {variant === 'new' ? (
           <MediaPlaceholder height={126} caption="WELCOME VIDEO — Luke, 60 sec — what the first week looks like" />
         ) : null}
@@ -167,7 +171,7 @@ export default function AthleteDashboard({
           </Card>
         ) : null}
 
-        {variant === 'populated' ? <QuickActions onLog={onLog} /> : null}
+        {variant === 'populated' && showContract ? <QuickActions onLog={onLog} /> : null}
         {/* Sprint 9 pin (TEAM.md): one entry point to the specialist 1-on-1
             flow, same gating as QuickActions above it (populated only) so
             the empty/new states stay exactly as designed - not a restructure,
@@ -191,7 +195,7 @@ export default function AthleteDashboard({
  * the contract card, the allowance card, then the quick-action pair. No
  * spinner — see components/Skeleton.js.
  */
-function DashboardSkeleton() {
+function DashboardSkeleton({ contract }) {
   return (
     <div
       role="status"
@@ -217,18 +221,20 @@ function DashboardSkeleton() {
       </SkeletonCard>
 
       {/* Contract: label row, the 40px number, meter, a line of copy. */}
-      <SkeletonCard large>
-        <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-          <SkeletonBar tone="raised" width={140} height={10} />
-          <SkeletonBar tone="raised" width={48} height={10} />
-        </div>
-        <div style={{ display: 'flex', alignItems: 'flex-end', gap: 10, marginTop: 12 }}>
-          <SkeletonBar tone="raised" width={46} height={34} />
-          <SkeletonBar tone="raised" width={130} height={12} style={{ marginBottom: 4 }} />
-        </div>
-        <SkeletonBar tone="raised" height={5} r={3} style={{ marginTop: 14 }} />
-        <SkeletonBar tone="raised" width="86%" height={9} style={{ marginTop: 14 }} />
-      </SkeletonCard>
+      {contract ? (
+        <SkeletonCard large>
+          <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+            <SkeletonBar tone="raised" width={140} height={10} />
+            <SkeletonBar tone="raised" width={48} height={10} />
+          </div>
+          <div style={{ display: 'flex', alignItems: 'flex-end', gap: 10, marginTop: 12 }}>
+            <SkeletonBar tone="raised" width={46} height={34} />
+            <SkeletonBar tone="raised" width={130} height={12} style={{ marginBottom: 4 }} />
+          </div>
+          <SkeletonBar tone="raised" height={5} r={3} style={{ marginTop: 14 }} />
+          <SkeletonBar tone="raised" width="86%" height={9} style={{ marginTop: 14 }} />
+        </SkeletonCard>
+      ) : null}
 
       {/* Tokens: label + the one meter (Sprint 12: one pool, not two). */}
       <SkeletonCard>

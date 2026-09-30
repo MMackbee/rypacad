@@ -13,6 +13,7 @@
 
 import { addDaysISO, BOOKING_OPENS_LABEL, bookingOpen, longDayLabel } from './calendar';
 import { normalizeAnchorDay, periodFor, SINGLE_TOKEN, tokensFor } from './packages';
+import { contractEnabled } from './contractFlag';
 
 /** Days from `fromISO` to `toISO` (calendar days, UTC-noon arithmetic). */
 export function daysBetween(fromISO, toISO) {
@@ -288,7 +289,8 @@ export function statusFor(membership, opts = {}) {
       tone: 'red',
       badge: { tone: 'red', label: 'Restricted' },
       title: 'Membership lapsed',
-      body: "Upcoming bookings were released. Once payment resumes, book again from what's open. Contract logging is unaffected.",
+      // The contract sentence goes while the contract is hidden (owner, 2026-09-30).
+      body: `Upcoming bookings were released. Once payment resumes, book again from what's open.${contractEnabled() ? ' Contract logging is unaffected.' : ''}`,
       ladder: [
         { label: 'Card declined', detail: failed || 'Invoice unpaid', step: 0 },
         { label: 'Automatic retries', detail: 'All attempts failed', step: 1 },

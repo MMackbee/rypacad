@@ -10,6 +10,7 @@ import SkeletonCard, { SkeletonBar } from '../components/Skeleton';
 import TokenMeter from '../components/TokenMeter';
 import { BackLink, Banner, Body, Card, ErrorNotice, ScreenTitle, SectionLabel } from '../components/Primitives';
 import { useMyTokens } from '../hooks/billing';
+import { contractEnabled } from '../data/contractFlag';
 
 /**
  * 19 · Membership — the athlete's own tokens (Sprint 12 pin, contract v2.0;
@@ -74,7 +75,9 @@ export default function Membership({ variant = 'populated', bare = false, role =
             <MemberSection name={member.name}>
               <TokenMeter member={member} defaultOpen />
               <CoachingLine coaching={member.coaching} />
-              <ContractLine contractMinutes={member.contractMinutes} onOpen={() => navigate('/portal/contract')} />
+              {contractEnabled() ? (
+                <ContractLine contractMinutes={member.contractMinutes} onOpen={() => navigate('/portal/contract')} />
+              ) : null}
               <FacilityCard member={member} />
             </MemberSection>
           </>

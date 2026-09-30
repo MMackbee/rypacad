@@ -11,6 +11,7 @@ import SavedToast from '../components/SavedToast';
 import { BackLink, Body, Card, ScreenTitle, SectionLabel, Tick } from '../components/Primitives';
 import { useAthleteDetail } from '../hooks';
 import { loginStatusLine } from '../data/billingCopy';
+import { contractEnabled, hideContractParts } from '../data/contractFlag';
 
 /**
  * Sprint 10 pin C: same fallback rationale as DiagnosticCapture.js's own
@@ -103,6 +104,10 @@ export default function AthleteDetail({ variant = 'populated', bare = false, ath
     (athlete && 'contractMinutes' in athlete
       ? athlete.contractMinutes == null
       : Boolean(athlete) && !/min tier/i.test(athlete?.subline || ''));
+  // Hidden contract (owner, 2026-09-30), for parents and staff alike: no
+  // Start card (the harness's `noTier` still forces it), no tier in the
+  // subline, no Board stat, no contract history or checklist row.
+  const showContract = contractEnabled();
 
   return (
     <PhoneFrame
@@ -117,7 +122,7 @@ export default function AthleteDetail({ variant = 'populated', bare = false, ath
               <div
                 style={{ font: `400 11px ${font.body}`, color: color.textTertiary, marginTop: 3 }}
               >
-                {athlete?.subline}
+                {hideContractParts(athlete?.subline)}
               </div>
             </div>
           </div>
@@ -138,17 +143,17 @@ export default function AthleteDetail({ variant = 'populated', bare = false, ath
           </Card>
         ) : null}
 
-        {hasNoTier ? <StartContractCard athleteId={athleteId} athleteName={athlete?.name} /> : null}
+        {hasNoTier && (showContract || noTier) ? <StartContractCard athleteId={athleteId} athleteName={athlete?.name} /> : null}
 
         {data?.hasEnoughData ? (
           <>
-            <StatGrid athlete={athlete} />
+            <StatGrid athlete={athlete} board={showContract} />
             {data.upcoming ? <UpcomingSessions upcoming={data.upcoming} /> : null}
-            <ContractHistory history={data.history} />
+            {showContract ? <ContractHistory history={data.history} /> : null}
             <ProgressSummary latest={diagnostic.latest} sections={diagnostic.sections} />
           </>
         ) : (
-          <LimitedData checklist={data?.checklist ?? []} />
+          <LimitedData checklist={(data?.checklist ?? []).filter((item) => showContract || item.id !== 'contract')} contract={showContract} />
         )}
 
         <ReflectionCard />
@@ -157,14 +162,15 @@ export default function AthleteDetail({ variant = 'populated', bare = false, ath
   );
 }
 
-function StatGrid({ athlete }) {
+/** `board`: the Commitment Board count, off while the contract is hidden. */
+function StatGrid({ athlete, board }) {
   const stats = [
     [athlete.attendance, athlete.attendanceLabel],
-    [athlete.board, athlete.boardLabel],
+    ...(board ? [[athlete.board, athlete.boardLabel]] : []),
   ];
 
   return (
-    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
+    <div style={{ display: 'grid', gridTemplateColumns: `repeat(${stats.length}, 1fr)`, gap: 10 }}>
       {stats.map(([value, label]) => (
         <Card key={label}>
           <div style={{ font: `700 26px ${font.head}`, color: color.text }}>{value}</div>
@@ -435,7 +441,7 @@ function StartContractCard({ athleteId, athleteName }) {
   );
 }
 
-function LimitedData({ checklist }) {
+function LimitedData({ checklist, contract }) {
   const tones = {
     done: { border: color.primary, fill: color.primary },
     next: { border: color.secondary, fill: 'transparent' },
@@ -447,7 +453,7 @@ function LimitedData({ checklist }) {
       <Card tone="yellow" large>
         <SectionLabel tone={color.secondary}>New enrollment</SectionLabel>
         <Body size={12} style={{ marginTop: 10 }}>
-          Jordan enrolled Feb 8. Attendance, contract history, and progress summaries need about a
+          Jordan enrolled Feb 8. Attendance{contract ? ', contract history,' : ''} and progress summaries need about a
           month of data before they say anything useful. This screen fills in as the season runs.
         </Body>
       </Card>

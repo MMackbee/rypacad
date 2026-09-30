@@ -1,6 +1,7 @@
 import React from 'react';
 import { useNavigate } from 'react-router-dom';
 import { color, font, tint } from '../tokens';
+import { contractEnabled } from '../data/contractFlag';
 
 /**
  * Bottom tab bar. Four items per role, carried forward from the 2025 build's
@@ -95,7 +96,9 @@ export const TABS = {
  *   Ignored for every other role.
  */
 export default function BottomTabBar({ role = 'athlete', active, onChange, specialistId }) {
-  const items = role === 'coach' && specialistId ? TABS.coachSpecialist : TABS[role] || TABS.athlete;
+  const set = role === 'coach' && specialistId ? TABS.coachSpecialist : TABS[role] || TABS.athlete;
+  // The Contract tab goes while the contract is hidden (owner, 2026-09-30).
+  const items = contractEnabled() ? set : set.filter((tab) => tab.key !== 'contract');
   const navigate = useNavigate();
 
   const select = (tab) => {

@@ -2,8 +2,12 @@
  * Sign-up form rules (Sprint 20, spec 2.1/2.2) - PURE. The function
  * re-checks everything; this is the client's first pass so the form can say
  * what is wrong before the round trip. Payload shapes are contract 1.2/1.3.
+ * While the Commitment Contract is hidden (contractFlag.js) the contract
+ * fields are ignored: not validated, and sent as null. `contract` overrides
+ * the flag (the harness's contract step); it defaults to it at call time.
  */
 import { ALL_PACKAGES } from './packages';
+import { contractEnabled } from './contractFlag';
 
 export const EMAIL_RE = /^\S+@\S+\.\S+$/;
 export const TIER_MINUTES = [20, 45, 90];
@@ -89,7 +93,7 @@ export function normalizeHandicap(raw) {
 
 const lower = (s) => (s || '').trim().toLowerCase();
 
-export function validateAthleteEntry(a, { todayISO, guardianEmail = '', siblings = [], mode = 'parent' } = {}) {
+export function validateAthleteEntry(a, { todayISO, guardianEmail = '', siblings = [], mode = 'parent', contract = contractEnabled() } = {}) {
   const errors = {};
   if (!a.name || a.name.trim() === '') errors.name = 'Athlete name is required.';
   const age = ageOnDate(a.dob, todayISO);
@@ -97,7 +101,7 @@ export function validateAthleteEntry(a, { todayISO, guardianEmail = '', siblings
   else if (a.dob > todayISO) errors.dob = 'That date is in the future - check the year.';
   else if (mode === 'athlete' && age < ADULT_AGE) errors.dob = ADULT_REQUIRED;
   if (a.packageId != null && !ALL_PACKAGES.some((p) => p.id === a.packageId)) errors.packageId = 'Pick a package from the list.';
-  if (a.contractMinutes != null && !TIER_MINUTES.includes(a.contractMinutes)) errors.contractMinutes = 'Pick 20, 45 or 90 minutes.';
+  if (contract && a.contractMinutes != null && !TIER_MINUTES.includes(a.contractMinutes)) errors.contractMinutes = 'Pick 20, 45 or 90 minutes.';
   if (normalizeHandicap(a.handicap) === undefined) errors.handicap = 'Handicap is a whole number from 0 to 54, or leave it blank.';
   // Own login is a parent-mode choice (the adult athlete IS the login); a
   // toggle left on before switching to athlete mode is ignored, as the
@@ -111,19 +115,20 @@ export function validateAthleteEntry(a, { todayISO, guardianEmail = '', siblings
   return errors;
 }
 
-function athleteBody(a) {
+function athleteBody(a, contract) {
   return {
     name: a.name.trim(),
     dob: a.dob,
     packageId: a.packageId,
-    contractMinutes: a.contractMinutes ?? null,
+    // Hidden: null for everyone, even a goal a restored draft still holds.
+    contractMinutes: contract ? a.contractMinutes ?? null : null,
     handicap: normalizeHandicap(a.handicap) ?? null,
     loginEmail: a.ownLogin && a.loginEmail ? lower(a.loginEmail) : null,
   };
 }
 
 /** Contract 1.2 request body. Athlete mode: no relationship, no child login (the caller IS the login). */
-export function buildCreateFamilyPayload(form) {
+export function buildCreateFamilyPayload(form, { contract = contractEnabled() } = {}) {
   const parent = form.mode === 'parent';
   return {
     mode: form.mode,
@@ -133,7 +138,7 @@ export function buildCreateFamilyPayload(form) {
       phone: form.contact.phone.trim(),
       relationship: parent ? form.contact.relationship || null : null,
     },
-    athletes: form.athletes.map(athleteBody).map((a) => (parent ? a : { ...a, loginEmail: null })),
+    athletes: form.athletes.map((a) => athleteBody(a, contract)).map((a) => (parent ? a : { ...a, loginEmail: null })),
     emergencyContact: emergencyBody(form.emergencyContact),
     medical: form.medical.trim() || null,
     consents: {
@@ -147,6 +152,10 @@ export function buildCreateFamilyPayload(form) {
 }
 
 /** Contract 1.3 request body (Settings' "Link another athlete"). A null contact means "use the household's". */
-export function buildAddAthletesPayload(form) {
-  return { athletes: form.athletes.map(athleteBody), emergencyContact: emergencyBody(form.emergencyContact), medical: form.medical.trim() || null };
+export function buildAddAthletesPayload(form, { contract = contractEnabled() } = {}) {
+  return {
+    athletes: form.athletes.map((a) => athleteBody(a, contract)),
+    emergencyContact: emergencyBody(form.emergencyContact),
+    medical: form.medical.trim() || null,
+  };
 }

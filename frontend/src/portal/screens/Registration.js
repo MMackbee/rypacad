@@ -6,6 +6,7 @@ import { BackLink, Banner, Body, ScreenTitle } from '../components/Primitives';
 import * as callables from '../hooks/callables';
 import { verifySentNote } from '../data/authCopy';
 import { todayISO } from '../data/calendar';
+import { contractEnabled } from '../data/contractFlag';
 import { SINGLE_ON_SALE, SINGLE_TOKEN } from '../data/packages';
 import {
   EMAIL_RE, buildAddAthletesPayload, buildCreateFamilyPayload, contractAnswered, emptyEmergencyContact, newAthleteEntry,
@@ -46,13 +47,24 @@ const callAddAthletes = callables.callAddAthletes || notWired('addAthletes');
  * `variant` remains the harness deep-link. `verifySent` ({ email, mailed },
  * from SignUp's navigation state) shows the verification note on step 1, since
  * a new login now lands here without stopping on SignUp's card.
+ *
+ * Hidden contract (owner ruling 2026-09-30, data/contractFlag.js): with the
+ * flag off the contract step does not exist - sign-up is 5 steps, link mode
+ * 2 - and every athlete is sent with contractMinutes null. A draft saved on
+ * the 6-step layout reopens clamped to the last step; its contract answers
+ * are ignored. The harness's `contract` variant forces the step on.
  */
 const STEPS = {
   signup: [['who', 'Who are you'], ['contact', 'Contact'], ['athletes', 'Athletes'], ['package', 'Choose a package'],
     ['contract', 'Commitment Contract'], ['consent', 'Consent and waiver']],
   link: [['athletes', 'Athletes'], ['package', 'Choose a package'], ['contract', 'Commitment Contract']],
 };
-const VARIANT_STEP = { guardian: 1, athlete: 2, tier: 3, contract: 4, consent: 5, submitting: 5, success: 5 };
+const stepsFor = (mode, contract) =>
+  (STEPS[mode] || STEPS.signup).filter(([id]) => contract || id !== 'contract');
+/** Harness deep links, by step id so they survive the contract step coming and going. */
+const VARIANT_STEP = {
+  guardian: 'contact', athlete: 'athletes', tier: 'package', contract: 'contract', consent: 'consent', submitting: 'consent', success: 'consent',
+};
 
 /**
  * The half-filled form survives a reload (launch 2026-09-29: on a phone,
@@ -86,11 +98,14 @@ function writeDraft(key, value) {
 
 export default function Registration({ variant, bare = false, mode = 'signup', account = null, verifySent = null, onRefresh, onBack, onFinish }) {
   const demo = variant != null;
-  const steps = STEPS[mode] || STEPS.signup;
+  const withContract = contractEnabled() || variant === 'contract';
+  const steps = stepsFor(mode, withContract);
   const today = todayISO();
   const key = demo ? null : draftKey(mode, account);
   const [draft] = useState(() => readDraft(key));
-  const [step, setStep] = useState(demo ? VARIANT_STEP[variant] ?? 0 : Math.min(draft?.step ?? 0, steps.length - 1));
+  const [step, setStep] = useState(demo
+    ? Math.max(0, steps.findIndex(([id]) => id === VARIANT_STEP[variant]))
+    : Math.min(Math.max(draft?.step ?? 0, 0), steps.length - 1));
   const [phase, setPhase] = useState(demo && (variant === 'submitting' || variant === 'success') ? variant : 'form');
   // A draft from before the split emergency fields holds one string: it
   // restores into the name field (still draft v1).
@@ -156,7 +171,7 @@ export default function Registration({ variant, bare = false, mode = 'signup', a
     && verifySent.email.toLowerCase() === account.email.toLowerCase();
   const note = ownNote ? verifySentNote(verifySent) : null;
   const athleteErrors = form.athletes.map((a) =>
-    validateAthleteEntry(a, { todayISO: today, guardianEmail: form.contact.email, siblings: form.athletes, mode: form.mode || 'parent' })
+    validateAthleteEntry(a, { todayISO: today, guardianEmail: form.contact.email, siblings: form.athletes, mode: form.mode || 'parent', contract: withContract })
   );
   const emergencyOk = Object.keys(validateEmergencyContact(form.emergencyContact)).length === 0;
   const valid = {
@@ -200,8 +215,8 @@ export default function Registration({ variant, bare = false, mode = 'signup', a
     setPhase('submitting');
     try {
       const res = mode === 'link'
-        ? await callAddAthletes(buildAddAthletesPayload(form))
-        : await callCreateFamily(buildCreateFamilyPayload(form));
+        ? await callAddAthletes(buildAddAthletesPayload(form, { contract: withContract }))
+        : await callCreateFamily(buildCreateFamilyPayload(form, { contract: withContract }));
       setResult(res);
       setPhase('success');
     } catch (err) {

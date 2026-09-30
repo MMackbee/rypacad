@@ -16,7 +16,9 @@ jest.mock('../hooks/callables', () => ({
 }), { virtual: true });
 jest.mock('./RegistrationSuccess', () => ({ __esModule: true, default: ({ result, onFinish }) => <button type="button" onClick={() => onFinish('/portal/family')}>SUCCESS {result.athleteIds.join(',')}</button> }));
 
-beforeEach(() => { mockCalls.length = 0; mockCreateError = null; });
+// These cover the 6-step layout, contract ON; Registration.off.test.js covers it hidden.
+beforeEach(() => { mockCalls.length = 0; mockCreateError = null; process.env.REACT_APP_CONTRACT_ENABLED = 'true'; });
+afterEach(() => { delete process.env.REACT_APP_CONTRACT_ENABLED; });
 
 async function fillParentToConsent(r) {
   await r.click('Parent or guardian');

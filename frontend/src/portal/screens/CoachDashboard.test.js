@@ -10,9 +10,11 @@ const mockMonth = (m) => {
   const days = m === '2026-11-01' ? [{ date: '2026-11-05', sessions: [session] }] : [];
   return { data: { days }, loading: false, error: null };
 };
+let mockAttention = [];
+let mockStudents = [];
 jest.mock('../hooks', () => ({
-  useCoachDay: () => ({ data: { coach: { name: 'Coach', date: '2026-11-04' }, blocks: [] } }),
-  useCoachRoster: () => ({ data: [], loading: false }),
+  useCoachDay: () => ({ data: { coach: { name: 'Coach', date: '2026-11-04' }, blocks: [], attention: mockAttention } }),
+  useCoachRoster: () => ({ data: mockStudents, loading: false }),
   useMonthSessions: (m) => mockMonth(m),
 }));
 
@@ -121,4 +123,44 @@ test('a stored Week preference opens the Sessions tab in Week', async () => {
   expect(r.container.querySelector('.ryp-week-view')).not.toBeNull();
   expect(navLabel(r)).toBe('Nov 2 – 8');
   await r.unmount();
+});
+
+test('Needs a conversation drops "Contract behind" while the contract is hidden (owner, 2026-09-30)', async () => {
+  mockAttention = [
+    { id: 'a1', name: 'M. Okonkwo', meta: '3 no-shows this month', tone: 'red' },
+    { id: 'a2', kind: 'contract', name: 'R. Sandoval', meta: 'Contract behind - 7 of 13 days', tone: 'yellow' },
+  ];
+  try {
+    const off = await renderScreen(<CoachDashboard bare />);
+    expect(off.text()).toContain('3 no-shows this month');
+    expect(off.text()).not.toContain('Contract behind');
+    await off.unmount();
+    process.env.REACT_APP_CONTRACT_ENABLED = 'true';
+    const on = await renderScreen(<CoachDashboard bare />);
+    expect(on.text()).toContain('Contract behind - 7 of 13 days');
+    await on.unmount();
+  } finally {
+    mockAttention = [];
+    delete process.env.REACT_APP_CONTRACT_ENABLED;
+  }
+});
+
+test('Students rows drop the contract tier while the contract is hidden', async () => {
+  mockStudents = [{ id: 'j', name: 'J. Whitfield', meta: '45 min tier' }, { id: 'a', name: 'A. Nguyen', meta: 'Age 12 · 4th month' }];
+  try {
+    const off = await renderScreen(<CoachDashboard bare />);
+    await off.click('Students');
+    expect(off.text()).toContain('J. Whitfield');
+    expect(off.text()).toContain('Age 12 · 4th month');
+    expect(off.text()).not.toContain('min tier');
+    await off.unmount();
+    process.env.REACT_APP_CONTRACT_ENABLED = 'true';
+    const on = await renderScreen(<CoachDashboard bare />);
+    await on.click('Students');
+    expect(on.text()).toContain('45 min tier');
+    await on.unmount();
+  } finally {
+    mockStudents = [];
+    delete process.env.REACT_APP_CONTRACT_ENABLED;
+  }
 });

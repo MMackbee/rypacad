@@ -3,6 +3,7 @@ import { Navigate, Route, Routes, useLocation, useNavigate, useParams } from 're
 
 import useAuthSession from './hooks/useAuthSession';
 import { isLive } from './hooks/live';
+import { contractEnabled } from './data/contractFlag';
 import SignIn, { LANDING_BY_ROLE } from './screens/SignIn';
 import SignUp from './screens/SignUp';
 import NotProvisioned from './screens/NotProvisioned';
@@ -109,7 +110,10 @@ const NEXT_ROUTE_CHUNKS = {
 };
 const NEXT_WARM_DELAY_MS = 2500;
 // Own keys only: a junk URL like /portal/constructor must not reach Object.prototype.
-const routeChunks = (map, segment) => (Object.prototype.hasOwnProperty.call(map, segment) ? map[segment] : []);
+// The Contract chunk stays cold while the contract is hidden (data/contractFlag.js).
+const routeChunks = (map, segment) =>
+  (Object.prototype.hasOwnProperty.call(map, segment) ? map[segment] : [])
+    .filter((load) => load !== loadContract || contractEnabled());
 const warm = (loads) => loads.forEach((load) => load().catch(() => {}));
 
 
@@ -682,12 +686,18 @@ export default function PortalRoutes() {
           </RequireRole>
         }
       />
+      {/* Hidden until closer to launch (owner, 2026-09-30): a stale link
+          goes through the index, which lands the account on its own home. */}
       <Route
         path="contract"
         element={
-          <RequireRole roles={['athlete']}>
-            <CommitmentContract bare />
-          </RequireRole>
+          contractEnabled() ? (
+            <RequireRole roles={['athlete']}>
+              <CommitmentContract bare />
+            </RequireRole>
+          ) : (
+            <Navigate to="/portal" replace />
+          )
         }
       />
       {/* Practice DNA is turned off for players (owner's call, 2026-09-01);

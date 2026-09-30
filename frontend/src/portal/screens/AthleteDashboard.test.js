@@ -9,6 +9,7 @@ import AthleteDashboard from './AthleteDashboard';
  */
 
 let mockContract;
+let mockOnboarding = null;
 jest.mock('../components/PayButton', () => ({ __esModule: true, default: () => null }));
 jest.mock('../hooks/billing', () => ({
   __esModule: true,
@@ -23,7 +24,7 @@ jest.mock('../hooks', () => ({
       athlete: { name: 'Jordan', fullName: 'Jordan', date: 'Wednesday, Nov 11', billingStatus: 'active', tokens: null },
       nextSession: null,
       contract: mockContract,
-      onboarding: null,
+      onboarding: mockOnboarding,
       diagnosticCaptured: true,
     },
   }),
@@ -31,6 +32,10 @@ jest.mock('../hooks', () => ({
 
 const card = (r) =>
   [...r.container.querySelectorAll('div')].find((d) => d.firstChild?.textContent?.startsWith('Commitment Contract'))?.parentElement;
+
+// Contract ON here; AthleteDashboard.off.test.js covers it hidden.
+beforeEach(() => { process.env.REACT_APP_CONTRACT_ENABLED = 'true'; });
+afterEach(() => { delete process.env.REACT_APP_CONTRACT_ENABLED; });
 
 test('a Behind contract shows the red Behind badge, not "On track"', async () => {
   mockContract = {
@@ -59,4 +64,47 @@ test('before the contract starts: no badge and no count, just the line', async (
   expect(c.textContent).not.toContain('On track');
   expect(c.textContent).not.toContain('days due');
   await r.unmount();
+});
+
+describe('Commitment Contract hidden (owner ruling 2026-09-30)', () => {
+  const behind = {
+    logged: 0, total: 6, month: 'November', pct: 0, kind: 'behind',
+    line: '6 days behind with 14 contract days left.', badge: { tone: 'red', label: 'Behind' },
+  };
+  const checklist = [
+    { id: 'enroll', label: 'Enrollment complete', state: 'done' },
+    { id: 'contract', label: 'Commitment Contract tier', state: 'todo' },
+  ];
+  afterEach(() => { mockOnboarding = null; });
+
+  test('on: the card, Log today, the Contract tab and the checklist row, as before', async () => {
+    mockContract = behind;
+    const r = await renderScreen(<AthleteDashboard bare />);
+    expect(card(r)).toBeTruthy();
+    expect(r.button('Log today')).not.toBeNull();
+    expect(r.button('Contract')).not.toBeNull();
+    await r.unmount();
+    mockOnboarding = checklist;
+    const n = await renderScreen(<AthleteDashboard bare variant="new" />);
+    expect(n.text()).toContain('Commitment Contract tier');
+    await n.unmount();
+  });
+
+  test('off: no card, no badge, no Log today, no Contract tab, no checklist row', async () => {
+    delete process.env.REACT_APP_CONTRACT_ENABLED;
+    mockContract = behind;
+    const r = await renderScreen(<AthleteDashboard bare />);
+    expect(card(r)).toBeUndefined();
+    expect(r.text()).not.toContain('Commitment Contract');
+    expect(r.text()).not.toContain('Behind');
+    expect(r.button('Log today')).toBeNull();
+    expect(r.button('Contract')).toBeNull();
+    expect(r.button('Tour')).not.toBeNull();
+    await r.unmount();
+    mockOnboarding = checklist;
+    const n = await renderScreen(<AthleteDashboard bare variant="new" />);
+    expect(n.text()).toContain('Enrollment complete');
+    expect(n.text()).not.toContain('Commitment Contract');
+    await n.unmount();
+  });
 });

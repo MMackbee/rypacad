@@ -18,6 +18,7 @@ import SkeletonCard, { SkeletonBar } from '../components/Skeleton';
 import { AlertGlyph, Body, Card, ErrorNotice, ScreenTitle } from '../components/Primitives';
 import { useHousehold } from '../hooks';
 import { ALL_PACKAGES } from '../data/packages';
+import { contractEnabled, hideContractParts } from '../data/contractFlag';
 
 /**
  * Sprint 11 pin D entry point (TEAM.md, contract v1.9): "the ParentDashboard
@@ -144,7 +145,7 @@ export default function ParentDashboard({
       footer={<BottomTabBar role="parent" active="home" />}
     >
       {loading ? (
-        <HouseholdSkeleton />
+        <HouseholdSkeleton rows={contractEnabled() ? 3 : 2} />
       ) : error ? (
         <div style={{ padding: '0 22px 24px' }}>
           <ErrorNotice title="Family overview didn't load" onRetry={onRetry}>
@@ -212,7 +213,7 @@ export default function ParentDashboard({
  * real card's 198px minimum — avatar row, rule, then the Next / Contract /
  * Left meta rows. No spinner — see components/Skeleton.js.
  */
-function HouseholdSkeleton() {
+function HouseholdSkeleton({ rows }) {
   return (
     <div
       role="status"
@@ -230,7 +231,7 @@ function HouseholdSkeleton() {
             <SkeletonBar tone="raised" width={64} height={20} r={5} />
           </div>
           <div style={{ height: 1, background: color.rule, margin: '14px 0 13px' }} />
-          {[0, 1, 2].map((row) => (
+          {Array.from({ length: rows }, (_, row) => (
             <div key={row} style={{ display: 'flex', gap: 10, marginTop: row ? 12 : 0 }}>
               <SkeletonBar tone="raised" width={66} height={9} style={{ marginTop: 3 }} />
               <SkeletonBar tone="raised" width="55%" height={13} />
@@ -281,9 +282,17 @@ function PaymentBanner({ billing, onOpen }) {
  * consistent rhythm - next session, contract, standing - rather than three
  * differently shaped blocks. Nico has no contract data and the card still holds
  * its shape.
+ *
+ * While the contract is hidden (owner, 2026-09-30) the card drops the
+ * Contract row, the On track / Behind badge (a contract standing - billing
+ * badges stay) and the "45 min tier" in the age line.
  */
+const CONTRACT_STANDINGS = ['On track', 'Behind'];
+
 function ChildCard({ child, onHold, billingStatus, onOpen, onBookFor, onOpenMembership }) {
-  const standing = onHold ? { tone: 'red', label: 'On hold' } : billingBadge(billingStatus) ?? child.standing;
+  const showContract = contractEnabled();
+  const childStanding = showContract || !CONTRACT_STANDINGS.includes(child.standing?.label) ? child.standing : null;
+  const standing = onHold ? { tone: 'red', label: 'On hold' } : billingBadge(billingStatus) ?? childStanding;
   const childPackageName = packageName(child.packageId);
 
   return (
@@ -296,7 +305,7 @@ function ChildCard({ child, onHold, billingStatus, onOpen, onBookFor, onOpenMemb
         <div style={{ flex: 1, minWidth: 0 }}>
           <div style={{ font: `600 16px ${font.body}`, color: color.text }}>{child.name}</div>
           <div style={{ font: `400 11px ${font.body}`, color: color.textTertiary, marginTop: 2 }}>
-            {child.ageLine}
+            {hideContractParts(child.ageLine)}
           </div>
           {/* Sprint 20 (spec 3.2, D9): the child-login state, from liveChildCard's
               loginEmail + login. Legacy payloads and the seed carry neither key,
@@ -368,22 +377,24 @@ function ChildCard({ child, onHold, billingStatus, onOpen, onBookFor, onOpenMemb
         )}
       </MetaRow>
 
-      <MetaRow label="Contract" style={{ marginTop: 12 }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-          <ProgressMeter value={child.contract} size="inline" />
-          <span
-            style={{
-              width: 38,
-              flex: 'none',
-              textAlign: 'right',
-              font: `600 12px ${font.body}`,
-              color: meterColor(child.contract),
-            }}
-          >
-            {child.contract == null ? '—' : `${child.contract}%`}
-          </span>
-        </div>
-      </MetaRow>
+      {showContract ? (
+        <MetaRow label="Contract" style={{ marginTop: 12 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+            <ProgressMeter value={child.contract} size="inline" />
+            <span
+              style={{
+                width: 38,
+                flex: 'none',
+                textAlign: 'right',
+                font: `600 12px ${font.body}`,
+                color: meterColor(child.contract),
+              }}
+            >
+              {child.contract == null ? '—' : `${child.contract}%`}
+            </span>
+          </div>
+        </MetaRow>
+      ) : null}
 
       {/*
         Sprint 12 (contract v2.0): one token pool, not two - a single number

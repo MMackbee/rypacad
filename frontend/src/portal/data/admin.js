@@ -17,7 +17,8 @@
 export const OUTSTANDING = [
   { id: 'o1', who: 'Whitfield household', why: 'Payment failed — retry 2 of 3', tag: 'Billing', tone: 'red', packageIds: ['t-12', 't-6'] },
   { id: 'o2', who: 'M. Okonkwo', why: '3 no-shows this month', tag: 'Attendance', tone: 'red', packageIds: ['t-12'] },
-  { id: 'o3', who: 'R. Sandoval', why: 'Contract at 54% with 6 days left', tag: 'Contract', tone: 'yellow', packageIds: ['t-6'] },
+  // `kind` as the live rows carry it: the screen drops 'contract' rows while the contract is hidden.
+  { id: 'o3', kind: 'contract', who: 'R. Sandoval', why: 'Contract at 54% with 6 days left', tag: 'Contract', tone: 'yellow', packageIds: ['t-6'] },
   { id: 'o4', who: '2 athletes', why: 'Diagnostic not entered since enrollment', tag: 'Onboarding', tone: 'yellow', packageIds: ['t-6'] },
 ];
 

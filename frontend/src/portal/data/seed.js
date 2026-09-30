@@ -308,7 +308,8 @@ export const COACH_BLOCKS_CONCURRENT = [
 
 export const ATTENTION_LIST = [
   { id: 'a1', name: 'M. Okonkwo', meta: '3 no-shows this month', tone: 'red' },
-  { id: 'a2', name: 'R. Sandoval', meta: 'Contract behind - 7 of 13 days', tone: 'yellow' },
+  // `kind`: CoachDashboard drops 'contract' rows while the contract is hidden.
+  { id: 'a2', kind: 'contract', name: 'R. Sandoval', meta: 'Contract behind - 7 of 13 days', tone: 'yellow' },
 ];
 
 export const COACH_OUTSTANDING = [

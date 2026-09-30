@@ -134,3 +134,27 @@ test('a parent landing on family warms the likely next screens after 2.5 s', asy
   expect(mockLoaded.has('SeasonSchedule')).toBe(false);
   expect(mockLoaded.has('OnboardingFlow')).toBe(false);
 });
+
+// Commitment Contract hidden (owner ruling 2026-09-30): its chunk is never
+// fetched - not as a deep link, not as home's likely next screen. These two
+// run last and in this order: the ON test is the first to load the chunk.
+test('contract hidden: neither its deep link nor the athlete home warms the Contract chunk', async () => {
+  await mount('/portal/contract');
+  await advance(5000);
+  await unmount();
+  await mount('/portal/home');
+  await advance(2500);
+  expect(mockLoaded.has('SeasonSchedule')).toBe(true);
+  expect(mockLoaded.has('CommitmentContract')).toBe(false);
+});
+
+test('contract on: the athlete home warms it again', async () => {
+  process.env.REACT_APP_CONTRACT_ENABLED = 'true';
+  try {
+    await mount('/portal/home');
+    await advance(2500);
+    expect(mockLoaded.has('CommitmentContract')).toBe(true);
+  } finally {
+    delete process.env.REACT_APP_CONTRACT_ENABLED;
+  }
+});

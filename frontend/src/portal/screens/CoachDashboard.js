@@ -17,6 +17,7 @@ import { DEFAULT_DURATION_MINUTES } from '../data/schedule';
 import { buildMonthDayMaps, useMonthNavState } from '../components/MonthCalendar';
 import { longDayLabel, parseTimeToMinutes, todayISO } from '../data/calendar';
 import { SEASON_BOUNDS } from '../data/season';
+import { contractEnabled, hideContractParts } from '../data/contractFlag';
 
 /**
  * 12 · Coach Dashboard - coach.
@@ -107,7 +108,8 @@ export default function CoachDashboard({ variant = 'today', bare = false, onOpen
 
 /** Today at a glance: quick counts, then today's blocks and who needs a call. */
 function OverviewTab({ data, blocks, none, onOpenRoster }) {
-  const attention = data?.attention ?? [];
+  // No "Contract behind" rows while the contract is hidden (owner, 2026-09-30).
+  const attention = (data?.attention ?? []).filter((a) => contractEnabled() || a.kind !== 'contract');
   return (
     <>
       {!none ? <QuickCounts blocks={blocks} attention={attention} /> : null}
@@ -177,7 +179,7 @@ function StudentsTab({ athletes, loading, onOpenAthlete }) {
           <AthleteRow
             key={a.id}
             name={a.name}
-            meta={a.meta}
+            meta={hideContractParts(a.meta)}
             avatarSize={40}
             nameSize={15}
             divider={i < athletes.length - 1}

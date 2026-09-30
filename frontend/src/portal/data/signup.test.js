@@ -6,6 +6,10 @@ import {
 const today = '2026-10-01';
 const entry = (over) => ({ ...newAthleteEntry(), name: 'Jordan', dob: '2012-06-17', packageId: 't-12', ...over });
 
+// Contract ON unless a test says otherwise; the last describe covers it hidden.
+beforeEach(() => { process.env.REACT_APP_CONTRACT_ENABLED = 'true'; });
+afterEach(() => { delete process.env.REACT_APP_CONTRACT_ENABLED; });
+
 describe('age', () => {
   test('whole years as of a date, birthday not yet reached', () => {
     expect(ageOnDate('2008-10-02', today)).toBe(17);
@@ -152,5 +156,34 @@ describe('contract step', () => {
     expect(joinNames(['Nico'])).toBe('Nico');
     expect(joinNames(['Nico', 'Reese'])).toBe('Nico and Reese');
     expect(joinNames(['Nico', 'Reese', 'Sam'])).toBe('Nico, Reese and Sam');
+  });
+});
+
+describe('Commitment Contract hidden (owner ruling 2026-09-30)', () => {
+  beforeEach(() => { delete process.env.REACT_APP_CONTRACT_ENABLED; });
+  const form = {
+    mode: 'parent',
+    contact: { name: 'Dana', email: 'dana@email.com', phone: '(612) 555-0148', relationship: '' },
+    athletes: [entry({ contractMinutes: 45, contractPicked: true }), entry({ name: 'Reese', contractMinutes: 95 })],
+    emergencyContact: '', medical: '',
+    consents: { dataCollection: true, videoCapture: true, mediaRelease: false, facilityAccess: false },
+    signatureName: 'Dana',
+  };
+  test('off: every athlete is sent with contractMinutes null, whatever the form holds', () => {
+    expect(buildCreateFamilyPayload(form).athletes.map((a) => a.contractMinutes)).toEqual([null, null]);
+    expect(buildAddAthletesPayload(form).athletes.map((a) => a.contractMinutes)).toEqual([null, null]);
+  });
+  test('off: a stale contract value is not a validation error', () => {
+    expect(validateAthleteEntry(entry({ contractMinutes: 95 }), { todayISO: today })).toEqual({});
+  });
+  test('the explicit override wins over the flag (the harness contract step)', () => {
+    expect(buildCreateFamilyPayload(form, { contract: true }).athletes[0].contractMinutes).toBe(45);
+    expect(validateAthleteEntry(entry({ contractMinutes: 95 }), { todayISO: today, contract: true }).contractMinutes)
+      .toBe('Pick 20, 45 or 90 minutes.');
+  });
+  test('on: the goal is sent and a stale 95 is refused, as before', () => {
+    process.env.REACT_APP_CONTRACT_ENABLED = 'true';
+    expect(buildAddAthletesPayload(form).athletes.map((a) => a.contractMinutes)).toEqual([45, 95]);
+    expect(validateAthleteEntry(entry({ contractMinutes: 95 }), { todayISO: today }).contractMinutes).toBe('Pick 20, 45 or 90 minutes.');
   });
 });
