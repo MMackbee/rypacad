@@ -3206,14 +3206,27 @@ export function usePracticeLog({ today = todayISO(), practice = false } = {}) {
  * so a long-enrolled real athlete does not get told they are new.
  */
 async function liveAthleteDetail(athleteId) {
-  const athlete = await fetchAthlete(athleteId);
-  const pkg = athlete.packageId ? await fetchPackage(athlete.packageId) : null;
-  // Sprint 12 integration: the membership editor sets the household's
-  // period anchor, so the payload names the household and its anchor (a
-  // coach may not be allowed to read households - tolerate a denial).
-  const household = athlete.householdId
-    ? await fetchHousehold(athlete.householdId).catch(() => null)
-    : null;
+  // Three rounds, not seven sequential reads (perf wave B): the athlete and
+  // the viewer are independent; everything in round two needs only those
+  // two; the sessions join needs the bookings.
+  const [athlete, viewer] = await Promise.all([fetchAthlete(athleteId), fetchCurrentUser()]);
+  // Sprint 20 (spec 3.2): the athlete card's "Login: none / not claimed /
+  // claimed <date>" line. The household parent and ops/owner can read the
+  // invite; a coach cannot (fetchLoginInvite returns null -> 'invited').
+  const loginEmail = athlete.loginEmail ?? null;
+  const [pkg, household, bookings, invite] = await Promise.all([
+    athlete.packageId ? fetchPackage(athlete.packageId) : null,
+    // Sprint 12 integration: the membership editor sets the household's
+    // period anchor, so the payload names the household and its anchor (a
+    // coach may not be allowed to read households - tolerate a denial).
+    athlete.householdId ? fetchHousehold(athlete.householdId).catch(() => null) : null,
+    // Everything the kid has scheduled (owner's ask, 2026-09-01): the
+    // athlete's upcoming bookings joined to their sessions. The viewer
+    // decides the query shape - a parent's list read is only rules-provable
+    // with the household compound filter; staff query by athleteId alone.
+    fetchBookings(athleteId, viewer.role === 'parent' ? { householdId: viewer.householdId } : {}),
+    loginEmail ? fetchLoginInvite(loginEmail) : null,
+  ]);
   const subline =
     [
       athlete.contractMinutes != null ? `${athlete.contractMinutes} min tier` : null,
@@ -3222,15 +3235,6 @@ async function liveAthleteDetail(athleteId) {
       .filter(Boolean)
       .join(' · ') || null;
 
-  // Everything the kid has scheduled (owner's ask, 2026-09-01): the athlete's
-  // upcoming bookings joined to their sessions. The viewer decides the query
-  // shape - a parent's list read is only rules-provable with the household
-  // compound filter; staff query by athleteId alone.
-  const viewer = await fetchCurrentUser();
-  const bookings = await fetchBookings(
-    athleteId,
-    viewer.role === 'parent' ? { householdId: viewer.householdId } : {}
-  );
   const today = todayISO();
   const active = bookings.filter((b) => b.status !== 'cancelled' && b.date >= today);
   active.sort(byDateThenId);
@@ -3249,11 +3253,7 @@ async function liveAthleteDetail(athleteId) {
     };
   });
 
-  // Sprint 20 (spec 3.2): the athlete card's "Login: none / not claimed /
-  // claimed <date>" line. The household parent and ops/owner can read the
-  // invite; a coach cannot (fetchLoginInvite returns null -> 'invited').
-  const loginEmail = athlete.loginEmail ?? null;
-  const login = loginStateFor(loginEmail, loginEmail ? await fetchLoginInvite(loginEmail) : null);
+  const login = loginStateFor(loginEmail, invite);
 
   return {
     athlete: {
@@ -3315,7 +3315,9 @@ export function useAthleteDetail({ athleteId, variant = 'populated' } = {}) {
   // successful pick until an unrelated write happened to bump something.
   const athletesGen = useInvalidation('athletes');
   const seedValue = {
-    athlete: { ...ATHLETE_DETAIL, loginEmail: null, login: { state: 'none', claimedAt: null } },
+    // householdName: the back link's label (AthleteDetail reads it here now,
+    // not from a second useHousehold) - the same name useHousehold's seed shows.
+    athlete: { ...ATHLETE_DETAIL, householdName: HOUSEHOLD.name, loginEmail: null, login: { state: 'none', claimedAt: null } },
     history: full ? CONTRACT_HISTORY : [],
     checklist: full ? [] : LIMITED_DATA_CHECKLIST,
     hasEnoughData: full,

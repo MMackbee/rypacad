@@ -9,7 +9,7 @@ import PhoneFrame from '../components/PhoneFrame';
 import ProgressMeter, { meterColor } from '../components/ProgressMeter';
 import SavedToast from '../components/SavedToast';
 import { BackLink, Body, Card, ScreenTitle, SectionLabel, Tick } from '../components/Primitives';
-import { useAthleteDetail, useHousehold } from '../hooks';
+import { useAthleteDetail } from '../hooks';
 import { loginStatusLine } from '../data/billingCopy';
 
 /**
@@ -72,18 +72,17 @@ export default function AthleteDetail({ variant = 'populated', bare = false, ath
   /**
    * Sprint 11 pin H (quick win): the back link used to read the hardcoded
    * seed string "Whitfield family" regardless of whose record this actually
-   * is. useHousehold() already exposes the real household name (live: the
-   * households/{id}.name doc field; seed: the same cast every other screen
-   * reads) — a staff viewer has no household of their own, so the live
-   * source throws inside the hook and `data` simply stays null, which this
-   * falls back to a generic, non-invented label for rather than a name that
-   * cannot be true for that viewer.
+   * is. useAthleteDetail already carries the athlete's real household name
+   * (live: the households/{id}.name doc field, null when the viewer may not
+   * read it; seed: the same cast every other screen reads), so no second
+   * useHousehold() load is needed just for this label (perf wave B). A
+   * missing name falls back to a generic, non-invented label rather than a
+   * name that cannot be true for that viewer.
    */
-  const household = useHousehold();
   // A parent's back link names their own household (derived, never a
   // hardcoded family - Sprint 11 H); staff callers pass the surface they
   // came from instead, since they have no household to name.
-  const householdName = backLabel ?? (household.data?.name || 'Family');
+  const householdName = backLabel ?? (athlete?.householdName || 'Family');
 
   /**
    * Sprint 10 pin B: whether this kid has no contract tier yet. useAthleteDetail's
