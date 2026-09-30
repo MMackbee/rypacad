@@ -31,9 +31,12 @@ describe('the catalogue (v2.0.1)', () => {
 describe('Elite frequency caps (v2.0.1)', () => {
   const b = (type, date, status = 'confirmed') => ({ type, date, status });
 
-  test('one golf (training or tournament) booking per date', () => {
+  test('one training block and, separately, one tournament per date (owner 2026-09-30)', () => {
     expect(eliteDailyCapHit(ELITE, 'training', '2026-09-20', [b('training', '2026-09-20')])).toBe(true);
-    expect(eliteDailyCapHit(ELITE, 'tournament', '2026-09-20', [b('training', '2026-09-20')])).toBe(true);
+    // Saturday: the 9 AM training block does not block that day's tournament, and vice versa.
+    expect(eliteDailyCapHit(ELITE, 'tournament', '2026-09-20', [b('training', '2026-09-20')])).toBe(false);
+    expect(eliteDailyCapHit(ELITE, 'training', '2026-09-20', [b('tournament', '2026-09-20')])).toBe(false);
+    expect(eliteDailyCapHit(ELITE, 'tournament', '2026-09-20', [b('tournament', '2026-09-20')])).toBe(true);
     expect(eliteDailyCapHit(ELITE, 'training', '2026-09-20', [b('training', '2026-09-21')])).toBe(false);
     expect(eliteDailyCapHit(ELITE, 'training', '2026-09-20', [b('training', '2026-09-20', 'cancelled')])).toBe(false);
   });

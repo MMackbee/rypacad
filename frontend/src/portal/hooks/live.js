@@ -597,7 +597,7 @@ function assertMentalCadence(type, date, bookings, pkg) {
 
 /**
  * Elite's frequency caps (contract v2.0.1, Sprint 18): at most one training-
- * or-tournament booking per date and one Phil booking per date. Not a pool,
+ * block, one tournament and one Phil booking per date (owner 2026-09-30). Not a pool,
  * never a charge - the same class of rule as the mental cadence above, and
  * the other named exception to "charging never branches on type". Typed
  * reason 'one-per-day' so the booking screens can say so.
@@ -608,7 +608,9 @@ function assertEliteDailyCap(pkg, type, date, bookings) {
     ERR.INVALID,
     type === 'phil'
       ? "Elite includes one session with Phil a day, and there's already one booked that day."
-      : "Elite includes one golf session a day, and there's already one booked that day.",
+      : type === 'tournament'
+        ? "Elite includes one tournament a day, and there's already one booked that day."
+        : "Elite includes one training block a day, and there's already one booked that day.",
     null,
     'one-per-day'
   );

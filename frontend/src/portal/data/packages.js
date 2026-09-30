@@ -88,8 +88,9 @@ export const PRICES_RELEASED = true;
 export const FACILITY_ACCESS = { id: 'facility-access', name: 'Facility access', price: 300, pending: false };
 
 /**
- * Elite's frequency caps (v2.0.1, Sprint 18): at most ONE training-or-
- * tournament booking per date and ONE Phil booking per date. Not a pool,
+ * Elite's frequency caps (v2.0.1, Sprint 18; owner 2026-09-30): at most ONE
+ * training block, ONE tournament and ONE Phil booking per date, so a family
+ * can book the Saturday morning training AND that day's tournament. Not a pool,
  * never a charge - the same class of rule as Yannick's monthly cadence, and
  * the other named exception to "charging never branches on type".
  * @return {boolean} true when the athlete already holds a non-cancelled
@@ -97,14 +98,14 @@ export const FACILITY_ACCESS = { id: 'facility-access', name: 'Facility access',
  */
 export function eliteDailyCapHit(pkg, type, date, bookings) {
   if (!pkg || pkg.kind !== 'elite' || !date) return false;
-  const cls = type === 'training' || type === 'tournament' ? 'golf' : type === 'phil' ? 'phil' : null;
+  const cls = type === 'training' || type === 'tournament' || type === 'phil' ? type : null;
   if (!cls) return false;
   return (bookings || []).some(
     (b) =>
       b &&
       b.status !== 'cancelled' &&
       b.date === date &&
-      (cls === 'golf' ? b.type === 'training' || b.type === 'tournament' : b.type === 'phil')
+      b.type === cls
   );
 }
 
