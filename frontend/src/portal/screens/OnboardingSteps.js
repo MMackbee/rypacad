@@ -12,6 +12,7 @@ import NotificationPreferences from './NotificationPreferences';
 import { useSchedule } from '../hooks';
 // Pure calendar helpers, not response data — the seam rule from BookSession.
 import { BEHIND_BUFFER_DAYS, longDayLabel } from '../data/calendar';
+import { contractEnabled } from '../data/contractFlag';
 
 /**
  * The onboarding walkthrough's step definitions and step content — split from
@@ -31,6 +32,11 @@ import { BEHIND_BUFFER_DAYS, longDayLabel } from '../data/calendar';
  * A step: `{ id, title, instruction, [instructionDone], [gate], [gateLabel],
  * render(ctx) }` where ctx carries `{ track, booking, loggedDay, onBooked,
  * onLogged }` from the flow.
+ *
+ * While the Commitment Contract is hidden (data/contractFlag.js, owner
+ * 2026-09-30) the athlete track skips its log step and no step's copy
+ * mentions the contract. The lists are built per call, so the flag is read
+ * when the walkthrough renders.
  */
 
 /* ----------------------------------------------------------- step content -- */
@@ -136,6 +142,7 @@ function PoolsStep() {
  * could be mistaken for a real record.
  */
 function DoneStep({ track, booking, loggedDay }) {
+  const contract = contractEnabled();
   return (
     <OwnStep>
       <Card tone="green" large>
@@ -151,7 +158,7 @@ function DoneStep({ track, booking, loggedDay }) {
                 : 'No practice booking was made'
             }
           />
-          {track === 'athlete' ? (
+          {track === 'athlete' && contract ? (
             <RecapRow
               done={Boolean(loggedDay)}
               label={
@@ -163,8 +170,9 @@ function DoneStep({ track, booking, loggedDay }) {
           ) : null}
         </div>
         <Body size={13} style={{ marginTop: 14 }}>
-          Those entries were practice, and they are already gone. Your real schedule, the
-          Commitment Contract, and your token balance are exactly as they were.
+          {contract
+            ? 'Those entries were practice, and they are already gone. Your real schedule, the Commitment Contract, and your token balance are exactly as they were.'
+            : 'Those entries were practice, and they are already gone. Your real schedule and your token balance are exactly as they were.'}
         </Body>
       </Card>
     </OwnStep>
@@ -236,107 +244,121 @@ const doneStep = {
   render: (ctx) => <DoneStep {...ctx} />,
 };
 
-export const ATHLETE_STEPS = [
-  welcomeStep([
-    'Book training and tournament blocks — every session spends one token from your period.',
-    'Log your Commitment Contract day in one tap.',
-    'Log your practice minutes and watch your commitment streak build.',
-  ]),
-  {
-    id: 'dashboard',
-    title: 'Your dashboard',
-    instruction: {
-      title: 'Look around',
-      body:
-        'This is your home screen: your next session, your Commitment Contract, and the tokens you have left this period. Scroll it, then continue.',
-    },
-    render: () => (
-      <Fill>
-        <AthleteDashboard bare variant="populated" practice />
-      </Fill>
-    ),
+/** The logging step: the REAL Contract screen in practice mode. Contract on only. */
+const logStep = {
+  id: 'log',
+  title: 'Log a practice day',
+  gate: 'log',
+  gateLabel: 'Log today to continue',
+  instruction: {
+    title: 'Try it',
+    body:
+      'Tap “Log today” at the bottom. Watch today’s cell in the grid and the count at the top — that one tap is the whole daily habit.',
   },
-  bookStep(
-    'Book a block for real: pick a day, tap an open block, and land on the confirmation. Each block says what it spends — one token — before you commit.'
+  instructionDone: {
+    title: 'Logged',
+    body:
+      'The grid and the count moved the moment you tapped. This day is practice and won’t be saved — your real contract month is untouched.',
+  },
+  render: ({ onLogged }) => (
+    <Fill>
+      <CommitmentContract bare practice onLogged={onLogged} />
+    </Fill>
   ),
-  {
-    id: 'log',
-    title: 'Log a practice day',
-    gate: 'log',
-    gateLabel: 'Log today to continue',
-    instruction: {
-      title: 'Try it',
-      body:
-        'Tap “Log today” at the bottom. Watch today’s cell in the grid and the count at the top — that one tap is the whole daily habit.',
-    },
-    instructionDone: {
-      title: 'Logged',
-      body:
-        'The grid and the count moved the moment you tapped. This day is practice and won’t be saved — your real contract month is untouched.',
-    },
-    render: ({ onLogged }) => (
-      <Fill>
-        <CommitmentContract bare practice onLogged={onLogged} />
-      </Fill>
-    ),
-  },
-  {
-    id: 'pools',
-    title: 'Your tokens',
-    instruction: {
-      title: 'One rule to keep',
-      body: 'The single most useful thing to know before you book on your own.',
-    },
-    render: () => <PoolsStep />,
-  },
-  doneStep,
-];
+};
 
-export const PARENT_STEPS = [
-  welcomeStep([
-    'Book training and tournament blocks for your athletes — every session spends one token from that athlete\'s period.',
-    'See each athlete’s Commitment Contract standing at a glance.',
-    'Follow the RYP Tour — the season leaderboard for Saturday tournaments — and choose exactly how the academy reaches you.',
-  ]),
-  {
-    id: 'family',
-    title: 'Your family',
-    instruction: {
-      title: 'Look at the balances',
-      body: `One card per athlete. Notice Reese: her Tokens row is what she has left this period — every session spends one, and her next one is a tournament. Her yellow Behind badge means she has missed more than ${BEHIND_BUFFER_DAYS} weekdays of her Commitment Contract this month.`,
+export function athleteSteps() {
+  const contract = contractEnabled();
+  return [
+    welcomeStep([
+      'Book training and tournament blocks — every session spends one token from your period.',
+      ...(contract
+        ? ['Log your Commitment Contract day in one tap.', 'Log your practice minutes and watch your commitment streak build.']
+        : []),
+    ]),
+    {
+      id: 'dashboard',
+      title: 'Your dashboard',
+      instruction: {
+        title: 'Look around',
+        body: contract
+          ? 'This is your home screen: your next session, your Commitment Contract, and the tokens you have left this period. Scroll it, then continue.'
+          : 'This is your home screen: your next session and the tokens you have left this period. Scroll it, then continue.',
+      },
+      render: () => (
+        <Fill>
+          <AthleteDashboard bare variant="populated" practice />
+        </Fill>
+      ),
     },
-    // `practice` pins the Whitfield seed (tester report 2026-09-30): without
-    // it a signed-in parent saw their own family here, and no Reese.
-    render: () => (
-      <Fill>
-        <ParentDashboard bare variant="three" practice />
-      </Fill>
+    bookStep(
+      'Book a block for real: pick a day, tap an open block, and land on the confirmation. Each block says what it spends — one token — before you commit.'
     ),
-  },
-  bookStep(
-    'Book a block the way you would for your athlete: pick a day, tap an open block, reach the confirmation. Each block says what it spends — one token — before you commit.'
-  ),
-  {
-    // Billing's old walkthrough slot (Sprint 7: billing is parked, its tab
-    // replaced by the Tour) — the step teaches the two remaining tabs the
-    // family step and book step haven't already covered.
-    id: 'tour',
-    title: 'The RYP Tour & notifications',
-    instruction: {
-      title: 'Two quick stops',
-      body:
-        'The Tour tab is the season leaderboard: every Saturday tournament banks points toward the standings, and the whole academy is on the board. Below it, Notifications is where you choose email or push per category. Scroll through, then continue.',
+    ...(contract ? [logStep] : []),
+    {
+      id: 'pools',
+      title: 'Your tokens',
+      instruction: {
+        title: 'One rule to keep',
+        body: 'The single most useful thing to know before you book on your own.',
+      },
+      render: () => <PoolsStep />,
     },
-    // The standings are academy-public, the same board for every family.
-    // Notifications is the parent's own, so `practice` pins the seed and keeps
-    // the toggles local: no save, and none of the account cards and rows
-    // (review 2026-09-30 - it read and wrote the signed-in parent's settings).
-    render: () => (
-      <Flow>
-        <TourStandings bare role="parent" />
-        <NotificationPreferences bare variant="default" practice />
-      </Flow>
+    doneStep,
+  ];
+}
+
+export function parentSteps() {
+  const contract = contractEnabled();
+  return [
+    welcomeStep([
+      'Book training and tournament blocks for your athletes — every session spends one token from that athlete\'s period.',
+      ...(contract ? ['See each athlete’s Commitment Contract standing at a glance.'] : []),
+      'Follow the RYP Tour — the season leaderboard for Saturday tournaments — and choose exactly how the academy reaches you.',
+    ]),
+    {
+      id: 'family',
+      title: 'Your family',
+      instruction: {
+        title: 'Look at the balances',
+        // The Behind badge is contract copy: it and its sentence go while hidden.
+        body: `One card per athlete. Notice Reese: her Tokens row is what she has left this period — every session spends one, and her next one is a tournament.${
+          contract ? ` Her yellow Behind badge means she has missed more than ${BEHIND_BUFFER_DAYS} weekdays of her Commitment Contract this month.` : ''
+        }`,
+      },
+      // `practice` pins the Whitfield seed (tester report 2026-09-30): without
+      // it a signed-in parent saw their own family here, and no Reese.
+      render: () => (
+        <Fill>
+          <ParentDashboard bare variant="three" practice />
+        </Fill>
+      ),
+    },
+    bookStep(
+      'Book a block the way you would for your athlete: pick a day, tap an open block, reach the confirmation. Each block says what it spends — one token — before you commit.'
     ),
-  },
-  doneStep,
-];
+    {
+      // Billing's old walkthrough slot (Sprint 7: billing is parked, its tab
+      // replaced by the Tour) — the step teaches the two remaining tabs the
+      // family step and book step haven't already covered.
+      id: 'tour',
+      title: 'The RYP Tour & notifications',
+      instruction: {
+        title: 'Two quick stops',
+        body:
+          'The Tour tab is the season leaderboard: every Saturday tournament banks points toward the standings, and the whole academy is on the board. Below it, Notifications is where you choose email or push per category. Scroll through, then continue.',
+      },
+      // The standings are academy-public, the same board for every family.
+      // Notifications is the parent's own, so `practice` pins the seed and keeps
+      // the toggles local: no save, and none of the account cards and rows
+      // (review 2026-09-30 - it read and wrote the signed-in parent's settings).
+      render: () => (
+        <Flow>
+          <TourStandings bare role="parent" />
+          <NotificationPreferences bare variant="default" practice />
+        </Flow>
+      ),
+    },
+    doneStep,
+  ];
+}

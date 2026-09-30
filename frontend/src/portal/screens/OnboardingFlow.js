@@ -6,7 +6,8 @@ import PhoneFrame from '../components/PhoneFrame';
 import StatusBadge from '../components/StatusBadge';
 import { BackLink, Banner, Body, ScreenTitle } from '../components/Primitives';
 import useOnboardingStatus from '../hooks/onboarding';
-import { ATHLETE_STEPS, PARENT_STEPS } from './OnboardingSteps';
+import { athleteSteps, parentSteps } from './OnboardingSteps';
+import { contractEnabled } from '../data/contractFlag';
 
 /**
  * Onboarding walkthrough — the guided first run (docs/portal/TEAM.md,
@@ -68,7 +69,7 @@ export default function OnboardingFlow({ track = null, bare = false, initialStep
     );
   }
 
-  const steps = activeTrack === 'parent' ? PARENT_STEPS : ATHLETE_STEPS;
+  const steps = activeTrack === 'parent' ? parentSteps() : athleteSteps();
   // Clamped once and used everywhere — an out-of-range initialStep lands on
   // the last step rather than mislabeling the counter.
   const index = Math.min(Math.max(stepIndex, 0), steps.length - 1);
@@ -230,7 +231,10 @@ function TrackChooser({ onPick }) {
     {
       id: 'athlete',
       title: 'I’m an athlete',
-      body: 'Your view: the dashboard, booking a block, and logging your Commitment Contract day.',
+      // No contract mention while it is hidden (owner, 2026-09-30).
+      body: contractEnabled()
+        ? 'Your view: the dashboard, booking a block, and logging your Commitment Contract day.'
+        : 'Your view: the dashboard, booking a block, and how your tokens work.',
     },
   ];
 

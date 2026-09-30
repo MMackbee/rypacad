@@ -48,6 +48,17 @@ rule; keep it in both allowlists. Never send mail From @rypacademy.com (its
 DNS rejects all mail). Stripe Payment Links and the customer-portal redirect
 point at `https://portal.rypacademy.com/portal/signin`.
 
+**Commitment Contract hidden (Mike, 2026-09-30):** off until closer to
+launch, behind `REACT_APP_CONTRACT_ENABLED` (Railway variable; only the exact
+value `true` shows it, and changing it rebuilds the site). Off: no contract
+step in sign-up (5 steps, link mode 2; every athlete is saved with
+`contractMinutes` null), no Contract tab, `/portal/contract` redirects to the
+role's home, and no contract card, standing, tier, Board stat, admin/coach
+"Contract behind" row or walkthrough step. The code, data fields and rules
+all stay. Functions need no switch: no notice or job sends contract messages,
+so there is no `CONTRACT_ENABLED` in `functions/.env`. Families who sign up
+while it is off can start a contract later from the app once it is on.
+
 **Site (Railway, rypacad.ryptest.com):** `main` = `portal/r3` = `cb10a40`
 (single-token copy fix 46654ad, runbook fix cb10a40, checkout single refusal
 840ed77, sign-up hardening 0497713). Railway variables set:

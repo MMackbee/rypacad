@@ -9,6 +9,7 @@ import StatusBadge from '../components/StatusBadge';
 import { Body, Card, ScreenTitle, SectionLabel, SignOutButton } from '../components/Primitives';
 import HouseholdsCard from '../components/HouseholdsCard';
 import { useAdminDashboard } from '../hooks';
+import { contractEnabled } from '../data/contractFlag';
 
 /**
  * Sprint 20 (spec 7, D14): useSignups() lands with routing Task 13, the LAST
@@ -100,9 +101,11 @@ export default function AdminDashboard({
   const active = cycle[Math.min(filterIndex, cycle.length - 1)];
   const filtered = active.id !== 'all';
 
+  // Hidden contract (owner, 2026-09-30): no "Contract behind" rows or chips.
+  const rows = (data?.outstanding ?? []).filter((o) => contractEnabled() || o.kind !== 'contract');
   const outstanding = filtered
-    ? (data?.outstanding ?? []).filter((o) => o.packageIds == null || o.packageIds.includes(active.id))
-    : data?.outstanding ?? [];
+    ? rows.filter((o) => o.packageIds == null || o.packageIds.includes(active.id))
+    : rows;
 
   const metrics = data?.metrics
     ? filtered

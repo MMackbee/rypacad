@@ -6,13 +6,16 @@ import { VERIFY_EMAIL_SENDER } from '../data/authCopy';
 let mockReject = null;
 let mockRejectTimes = Infinity; // how many calls mockReject refuses before checkout succeeds
 let mockCalls = 0;
+// Not `virtual`: the module exists, and a virtual mock missed whenever an
+// earlier file in the same worker had resolved the real module (the
+// resolver's module-id cache is per worker, keyed without the virtual map).
 jest.mock('../hooks/callables', () => ({
   callCreateCheckoutSession: async (payload) => {
     mockCalls += 1;
     if (mockReject && mockCalls <= mockRejectTimes) { const e = new Error(mockReject.message); e.reason = mockReject.reason; throw e; }
     return { url: `https://checkout.stripe.test/${payload.athleteId}/${payload.product}` };
   },
-}), { virtual: true });
+}));
 let mockSession;
 jest.mock('../hooks/useAuthSession', () => ({ __esModule: true, default: () => mockSession }));
 // The mocked module is a plain object; the test fills auth.currentUser per run (no TDZ: nothing is read at factory time).

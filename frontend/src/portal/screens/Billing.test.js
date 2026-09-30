@@ -60,3 +60,17 @@ test('staff view never pays', async () => {
   expect(r.button('Add facility access|a1|facility')).toBeNull();
   await r.unmount();
 });
+
+test('the contract tier line shows only with the Commitment Contract on (owner ruling 2026-09-30)', async () => {
+  const off = await renderScreen(<Billing bare />);
+  expect(off.text()).not.toMatch(/contract/i);
+  await off.unmount();
+  process.env.REACT_APP_CONTRACT_ENABLED = 'true';
+  try {
+    const on = await renderScreen(<Billing bare />);
+    expect(on.button('No contract tier yet · View athlete›')).not.toBeNull();
+    await on.unmount();
+  } finally {
+    delete process.env.REACT_APP_CONTRACT_ENABLED;
+  }
+});

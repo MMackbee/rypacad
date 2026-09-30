@@ -20,6 +20,8 @@ import { DEFAULT_DURATION_MINUTES } from '../data/schedule';
 // through the hooks above.
 import { parseTimeToMinutes, todayISO } from '../data/calendar';
 import { dayLabel } from '../data/season';
+// Row metas lose "45 min tier" / "contract behind" while the contract is hidden (owner, 2026-09-30).
+import { hideContractParts } from '../data/contractFlag';
 
 /**
  * An honest status label for a real block: a countdown only when the block
@@ -135,7 +137,7 @@ export default function Roster({ bare = false, onSignOut, onOpenAthlete }) {
                 <AthleteRow
                   key={a.id}
                   name={a.name}
-                  meta={a.meta}
+                  meta={hideContractParts(a.meta)}
                   avatarSize={44}
                   nameSize={16}
                   divider={i < athletes.length - 1}
@@ -580,7 +582,7 @@ export function SessionAttendance({ variant = 'pre', bare = false, onBack, sessi
             <div key={athlete.id}>
               <AthleteRow
                 name={athlete.name}
-                meta={athlete.meta}
+                meta={hideContractParts(athlete.meta)}
                 avatarSize={42}
                 nameSize={16}
                 divider={i < roster.length - 1 && !noShow}
@@ -797,7 +799,7 @@ function ResultsEntry({ bare, session, roster, resultsState, onBack }) {
           <AthleteRow
             key={athlete.id}
             name={athlete.name}
-            meta={athlete.meta}
+            meta={hideContractParts(athlete.meta)}
             avatarSize={42}
             nameSize={16}
             divider={i < roster.length - 1}

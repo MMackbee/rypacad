@@ -15,6 +15,7 @@ import { BackLink, Body, Card, ErrorNotice, ScreenTitle, SectionLabel } from '..
 import { ordinal, statusFor } from '../data/billingHub';
 import { FACILITY_ACCESS } from '../data/packages';
 import { CONNECTED_LINE, PAY_NOW, PENDING_PLAN_LINE, SINGLE_PLAN_LINE } from '../data/billingCopy';
+import { contractEnabled } from '../data/contractFlag';
 import useBillingHub from '../hooks/billing';
 
 /**
@@ -111,10 +112,12 @@ export default function Billing({
                 <MemberSection key={member.athleteId} name={member.name}>
                   <TokenMeter member={member} defaultOpen={members.length === 1} showPrices={staff} />
                   <CoachingLine coaching={member.coaching} />
-                  <ContractLine
-                    contractMinutes={member.contractMinutes}
-                    onOpen={() => navigate(`/portal/athlete/${member.athleteId}`)}
-                  />
+                  {contractEnabled() ? (
+                    <ContractLine
+                      contractMinutes={member.contractMinutes}
+                      onOpen={() => navigate(`/portal/athlete/${member.athleteId}`)}
+                    />
+                  ) : null}
                   <FacilityCard member={member} readOnly={staff} />
                 </MemberSection>
               ))

@@ -36,3 +36,65 @@ test("a parent's back link names the athlete's household; staff keep their own l
   expect(unnamed.button('‹ Family')).not.toBeNull();
   await unnamed.unmount();
 });
+
+describe('Commitment Contract hidden (owner ruling 2026-09-30)', () => {
+  const athlete = {
+    name: 'Jordan', subline: 'Enrolled Nov 3 · 45 min tier · 12 tokens package', contractMinutes: null, packageId: 't-12',
+    householdName: 'Whitfield family', attendance: '94%', attendanceLabel: 'attendance since Nov', board: '3 of 4', boardLabel: 'months on the Board',
+  };
+  const full = { data: { athlete, history: [{ month: 'Nov', pct: 96 }], checklist: [], hasEnoughData: true }, loading: false, error: null };
+  const limited = {
+    data: {
+      athlete, history: [], hasEnoughData: false,
+      checklist: [{ id: 'sessions', label: '2 sessions attended', state: 'done' }, { id: 'contract', label: 'Contract starts Mar 1', state: 'todo' }],
+    },
+    loading: false,
+    error: null,
+  };
+  afterEach(() => { delete process.env.REACT_APP_CONTRACT_ENABLED; });
+
+  test('off, parent and staff: no Start card, no tier, no Board stat, no contract history or checklist row', async () => {
+    for (const role of ['parent', 'ops']) {
+      mockDetail = full;
+      const r = await renderScreen(<AthleteDetail bare athleteId="a1" role={role} onBack={() => {}} />);
+      expect(r.text()).not.toContain('Start a contract');
+      expect(r.text()).not.toContain('Commitment Contract');
+      expect(r.text()).toContain('Enrolled Nov 3 · 12 tokens package');
+      expect(r.text()).not.toContain('min tier');
+      expect(r.text()).toContain('attendance since Nov');
+      expect(r.text()).not.toContain('months on the Board');
+      expect(r.text()).not.toContain('Contract history');
+      await r.unmount();
+      mockDetail = limited;
+      const l = await renderScreen(<AthleteDetail bare athleteId="a1" role={role} onBack={() => {}} />);
+      expect(l.text()).toContain('2 sessions attended');
+      expect(l.text()).not.toContain('Contract starts Mar 1');
+      expect(l.text()).toContain('Attendance and progress summaries need about a');
+      expect(l.text()).not.toMatch(/contract/i);
+      await l.unmount();
+    }
+  });
+
+  test("off: the harness's noTier still forces the Start card", async () => {
+    mockDetail = full;
+    const r = await renderScreen(<AthleteDetail bare athleteId="a1" role="parent" noTier />);
+    expect(r.text()).toContain('Start a contract');
+    await r.unmount();
+  });
+
+  test('on: everything is back, unchanged', async () => {
+    process.env.REACT_APP_CONTRACT_ENABLED = 'true';
+    mockDetail = full;
+    const r = await renderScreen(<AthleteDetail bare athleteId="a1" role="parent" onBack={() => {}} />);
+    expect(r.text()).toContain('Start a contract');
+    expect(r.text()).toContain('Enrolled Nov 3 · 45 min tier · 12 tokens package');
+    expect(r.text()).toContain('months on the Board');
+    expect(r.text()).toContain('Contract history');
+    await r.unmount();
+    mockDetail = limited;
+    const l = await renderScreen(<AthleteDetail bare athleteId="a1" role="parent" onBack={() => {}} />);
+    expect(l.text()).toContain('Contract starts Mar 1');
+    expect(l.text()).toContain('Attendance, contract history, and progress summaries');
+    await l.unmount();
+  });
+});

@@ -17,7 +17,7 @@ import OnboardingFlow, { OnboardingWelcomeRoute } from './OnboardingFlow';
 import ParentDashboard from './ParentDashboard';
 import AthleteDashboard from './AthleteDashboard';
 import NotificationPreferences from './NotificationPreferences';
-import { PARENT_STEPS } from './OnboardingSteps';
+import { parentSteps } from './OnboardingSteps';
 import * as live from '../hooks/live';
 
 jest.mock('../hooks/live', () => ({
@@ -51,11 +51,13 @@ beforeEach(() => {
 });
 afterEach(() => {
   process.env.REACT_APP_PORTAL_LIVE_DATA = 'false';
+  delete process.env.REACT_APP_CONTRACT_ENABLED;
 });
 
 describe('the family step shows the sample family its copy names', () => {
   test('Reese is on screen, Behind, with her tokens - on live data too, with no live read and no real Pay', async () => {
     process.env.REACT_APP_PORTAL_LIVE_DATA = 'true';
+    process.env.REACT_APP_CONTRACT_ENABLED = 'true'; // Behind is the contract's standing
     const r = await renderScreen(<OnboardingFlow track="parent" initialStep={1} />, { path: '/portal/welcome' });
     expect(r.text()).toContain('Look at the balances');
     expect(r.text()).toContain('Notice Reese');
@@ -72,11 +74,21 @@ describe('the family step shows the sample family its copy names', () => {
   });
 
   test('every athlete the family instruction names has a card on that step', async () => {
-    const step = PARENT_STEPS.find((s) => s.id === 'family');
+    const step = parentSteps().find((s) => s.id === 'family');
     const named = [...step.instruction.body.matchAll(/Notice (\w+)/g)].map((m) => m[1]);
     expect(named.length).toBeGreaterThan(0);
     const r = await renderScreen(<OnboardingFlow track="parent" initialStep={1} />);
     for (const name of named) expect(cardNamed(r, name)).not.toBeNull();
+    await r.unmount();
+  });
+
+  test('Commitment Contract hidden (owner ruling 2026-09-30): Reese and her tokens, no Behind and no contract sentence', async () => {
+    const r = await renderScreen(<OnboardingFlow track="parent" initialStep={1} />, { path: '/portal/welcome' });
+    expect(r.text()).toContain('Notice Reese');
+    expect(cardNamed(r, 'Reese')).not.toBeNull();
+    expect(r.text()).toContain('2 tokens left');
+    expect(r.text()).not.toContain('Behind');
+    expect(r.text()).not.toMatch(/contract/i);
     await r.unmount();
   });
 
@@ -91,7 +103,7 @@ describe('the family step shows the sample family its copy names', () => {
 describe('the Tour & notifications step never touches the parent\'s own settings', () => {
   test('on live data: seed categories, toggles that stay local, no account cards or rows', async () => {
     process.env.REACT_APP_PORTAL_LIVE_DATA = 'true';
-    const tour = PARENT_STEPS.findIndex((s) => s.id === 'tour');
+    const tour = parentSteps().findIndex((s) => s.id === 'tour');
     const r = await renderScreen(<OnboardingFlow track="parent" initialStep={tour} />, { path: '/portal/welcome' });
     expect(r.text()).toContain('The RYP Tour & notifications');
     // The copy names the two channels the cards show.
@@ -161,6 +173,17 @@ describe('the first-visit offer on the homes', () => {
     await r.unmount();
   });
 
+  test("athlete: the offer's copy names the contract only while it is on (owner ruling 2026-09-30)", async () => {
+    const off = await renderScreen(<AthleteDashboard bare />, { path: '/portal/home' });
+    expect(off.text()).toContain('look around your home, book a block, see how tokens work');
+    expect(off.text()).not.toMatch(/contract/i);
+    await off.unmount();
+    process.env.REACT_APP_CONTRACT_ENABLED = 'true';
+    const on = await renderScreen(<AthleteDashboard bare />, { path: '/portal/home' });
+    expect(on.text()).toContain('book a block and log a Commitment Contract day');
+    await on.unmount();
+  });
+
   test('athlete: offered on the athlete home, opening the athlete track', async () => {
     const r = await renderScreen(<AthleteDashboard bare />, { path: '/portal/home' });
     await r.click(OFFER);
@@ -176,7 +199,7 @@ describe('the first-visit offer on the homes', () => {
     expect(r.text()).toContain('Welcome to the portal');
     const parentTrack = [...r.container.querySelectorAll('[role="button"]')].find((el) => el.textContent.startsWith('I’m a parent'));
     await act(async () => { parentTrack.click(); });
-    expect(r.text()).toContain(`Step 1 of ${PARENT_STEPS.length}`);
+    expect(r.text()).toContain(`Step 1 of ${parentSteps().length}`);
     await r.click('Continue');
     expect(r.text()).toContain('Notice Reese');
     expect(cardNamed(r, 'Reese')).not.toBeNull();
