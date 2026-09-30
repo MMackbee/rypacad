@@ -147,10 +147,31 @@ export async function task5() {
   for (const [c, id] of [['bookings', 'ath-active_cal-1'], ['bookings', 'ath-active_s-portal'], ['loginInvites', 'kid@example.com'], ['calendlyEvents', 'ev-1']]) await del(c, id);
 }
 
+export async function taskContract() {
+  console.log('Contract Phase 2: contractMinutesUpdateOk takes contractStart (a yyyy-MM-dd string) beside the tier');
+  await seed('athletes', 'ath-contract', { name: 'ath-contract', householdId: 'hh', contractMinutes: null, coachId: null, packageId: 't-6' });
+  const patchAth = (id, fields, auth) => call('PATCH', `/athletes/${id}?${Object.keys(fields).map((k) => `updateMask.fieldPaths=${k}`).join('&')}`,
+    { fields: fsFields(fields) }, auth).then((r) => r.status);
+  expect('parent starts a tier with contractStart', await patchAth('ath-contract', { contractMinutes: 45, contractStart: '2026-11-03' }, t.parent), 200);
+  expect('parent changes the tier alone (contractStart untouched)', await patchAth('ath-contract', { contractMinutes: 90 }, t.parent), 200);
+  expect('parent clears the tier', await patchAth('ath-contract', { contractMinutes: null }, t.parent), 200);
+  expect('athlete starts their own tier with contractStart', await patchAth('ath-active', { contractMinutes: 20, contractStart: '2026-12-15' }, t.athlete), 200);
+  expect('contractStart not a date refused', await patchAth('ath-contract', { contractMinutes: 45, contractStart: 'Nov 3' }, t.parent), 403);
+  expect('contractStart as a number refused', await patchAth('ath-contract', { contractMinutes: 45, contractStart: 20261103 }, t.parent), 403);
+  expect('any other field beside the tier refused', await patchAth('ath-contract', { contractMinutes: 45, packageId: 'elite' }, t.parent), 403);
+  expect('contractStart beside another field refused', await patchAth('ath-contract', { contractStart: '2026-11-03', coachId: 'c1' }, t.parent), 403);
+  expect('a stranger cannot start a tier', await patchAth('ath-contract', { contractMinutes: 45, contractStart: '2026-11-03' }, t.stranger), 403);
+  // approveEnrollmentRequest stamps contractStart on a tiered kid it creates; the create rule is hasAll.
+  expect('ops approval creates a tiered athlete with contractStart', await createAs(t.ops, 'athletes', 'ath-contract-new',
+    { name: 'N', householdId: 'hh', dob: null, contractMinutes: 45, coachId: null, contractStart: '2026-12-15' }, []), 200);
+  await del('athletes', 'ath-contract');
+  await del('athletes', 'ath-contract-new');
+}
+
 export { setup, teardown, seed, del, call, createAs, expect, token, t, uid, BASE };
 if (process.argv[1] && process.argv[1].endsWith('verify-rules.mjs')) {
   await setup();
-  try { await task4(); await task5(); } finally { await teardown(); }
+  try { await task4(); await task5(); await taskContract(); } finally { await teardown(); }
   console.log(failures ? `${failures} FAILED` : 'ALL PASS');
   process.exit(failures ? 1 : 0);
 }

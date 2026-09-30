@@ -202,6 +202,13 @@ export function buildContractMonth({
 }
 
 /**
+ * Missed contract days a month absorbs before the athlete reads as Behind
+ * (contract-buffer ruling, 2026-09-30): Behind is the 6th missed weekday, not
+ * the 1st. Late entries shrink `missed`, so backfilling flips it back.
+ */
+export const BEHIND_BUFFER_DAYS = 5;
+
+/**
  * Live counterpart to buildContractMonth (Sprint 6, QA #4): the same
  * date -> state map and stats, but 'logged'/'missed' come from real
  * contractLogs minutes instead of a demo missedDates set — a due day (before
@@ -211,24 +218,34 @@ export function buildContractMonth({
  * exactly, so useContract's live branch and the seed branch above produce
  * the same payload for ContractCalendar/the stats row.
  *
+ * The contract window (contract-buffer ruling, 2026-09-30): only weekdays in
+ * [startISO, endISO] are contract days. A weekday outside it paints
+ * 'inactive' ('logged' when it carries a full log) and never counts toward
+ * due, missed, logged, days left, contract days or the streak - so nobody is
+ * Behind before their contract starts or after the season ends.
+ *
  * @param {object} opts
  * @param {string} opts.today
  * @param {Map<string, number>} opts.minutesByDate  date -> minutes logged.
  * @param {number} opts.contractMinutes  the athlete's tier; callers must not
  *   call this with a null tier — there is no contract to grid.
+ * @param {string|null} [opts.startISO]  first contract day, 'yyyy-MM-dd'.
+ * @param {string|null} [opts.endISO]    last contract day, 'yyyy-MM-dd'.
  */
-export function buildContractMonthFromLogs({ today, minutesByDate, contractMinutes }) {
+export function buildContractMonthFromLogs({ today, minutesByDate, contractMinutes, startISO = null, endISO = null }) {
   const anchor = parseISO(today);
   const days = eachDayOfInterval({ start: startOfMonth(anchor), end: endOfMonth(anchor) });
 
   const dayStates = {};
   const tally = { contractDays: 0, dueSoFar: 0, logged: 0, missed: 0, daysLeft: 0 };
   const fulfilled = (iso) => (minutesByDate.get(iso) || 0) >= contractMinutes;
+  const outside = (iso) => Boolean((startISO && iso < startISO) || (endISO && iso > endISO));
 
   for (const d of days) {
     const iso = format(d, 'yyyy-MM-dd');
     let state;
     if (isSaturday(d) || isSunday(d)) state = 'weekend';
+    else if (outside(iso)) state = fulfilled(iso) ? 'logged' : 'inactive';
     else {
       tally.contractDays++;
       if (iso > today) {
@@ -258,11 +275,14 @@ export function buildContractMonthFromLogs({ today, minutesByDate, contractMinut
     dayStates[iso] = state;
   }
 
-  // Consecutive logged contract days, walking back from the most recent due day.
+  // Consecutive logged contract days, walking back from the most recent due
+  // day. Days outside the window (inactive, or logged before the start) are
+  // not contract days, so they neither extend nor break the streak.
   let streak = 0;
   for (let i = days.length - 1; i >= 0; i--) {
-    const state = dayStates[format(days[i], 'yyyy-MM-dd')];
-    if (state === 'weekend' || state === 'future' || state === 'open') continue;
+    const iso = format(days[i], 'yyyy-MM-dd');
+    const state = dayStates[iso];
+    if (state === 'weekend' || state === 'future' || state === 'open' || outside(iso)) continue;
     if (state === 'logged') streak++;
     else break;
   }
@@ -282,6 +302,11 @@ export function buildContractMonthFromLogs({ today, minutesByDate, contractMinut
     ...tally,
     streak,
     minutes,
+    startISO,
+    endISO,
+    notStarted: Boolean(startISO) && today < startISO,
+    ended: Boolean(endISO) && today > endISO,
+    behind: tally.missed > BEHIND_BUFFER_DAYS,
   };
 }
 

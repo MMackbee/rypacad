@@ -354,7 +354,9 @@ function StartContractCard({ athleteId, athleteName }) {
   // The athleteId-aware tier write the routing seam now provides
   // (useAthleteTier, PM integration) — the household parent's own path.
   const tier = hooks.useAthleteTier();
-  const setTier = (minutes) => tier.setTier(athleteId, minutes);
+  // Only shown for a no-tier athlete, so this is always a start: the write
+  // stamps athletes.contractStart (contract-buffer Phase 2).
+  const setTier = (minutes) => tier.setTier(athleteId, minutes, { start: true });
 
   const handleStart = async () => {
     if (!selected) return;

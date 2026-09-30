@@ -303,25 +303,43 @@ function NextSessionCard({ next }) {
   );
 }
 
+const BADGE_TONES = { green: color.primary, red: color.error, yellow: color.secondary };
+
+/**
+ * K33: the badge is the Contract screen's own pill from the hook (On track,
+ * Behind, Complete), or none before the contract starts / after the season -
+ * a hard-coded "On track" here contradicted a Behind contract. Outside the
+ * contract window there are no days to count, so the card is the line alone.
+ */
 function ContractCard({ contract }) {
+  const badge = contract.badge;
+  const quiet = contract.kind === 'notStarted' || contract.kind === 'ended';
   return (
     <Card large>
       <div style={{ display: 'flex', alignItems: 'baseline', gap: 10 }}>
         <SectionLabel style={{ flex: 1 }}>Commitment Contract</SectionLabel>
-        <span style={{ font: `500 11px ${font.body}`, color: color.primary }}>On track</span>
+        {badge ? (
+          <span style={{ font: `500 11px ${font.body}`, color: BADGE_TONES[badge.tone] ?? color.primary }}>
+            {badge.label}
+          </span>
+        ) : null}
       </div>
 
-      <div style={{ display: 'flex', alignItems: 'baseline', gap: 10, marginTop: 12 }}>
-        <span style={{ font: `700 40px ${font.head}`, color: color.text }}>{contract.logged}</span>
-        <span style={{ font: `400 14px ${font.body}`, color: color.textSecondary }}>
-          {/* "due" is load-bearing: this denominator is days due SO FAR,
-              while the Contract screen counts the whole month - unlabeled,
-              the two numbers read as a contradiction (QA 2026-09-08 #6). */}
-          of {contract.total} days due · {contract.month}
-        </span>
-      </div>
+      {quiet ? null : (
+        <>
+          <div style={{ display: 'flex', alignItems: 'baseline', gap: 10, marginTop: 12 }}>
+            <span style={{ font: `700 40px ${font.head}`, color: color.text }}>{contract.logged}</span>
+            <span style={{ font: `400 14px ${font.body}`, color: color.textSecondary }}>
+              {/* "due" is load-bearing: this denominator is days due SO FAR,
+                  while the Contract screen counts the whole month - unlabeled,
+                  the two numbers read as a contradiction (QA 2026-09-08 #6). */}
+              of {contract.total} days due · {contract.month}
+            </span>
+          </div>
 
-      <ProgressMeter value={contract.pct} size="card" style={{ marginTop: 12 }} />
+          <ProgressMeter value={contract.pct} size="card" style={{ marginTop: 12 }} />
+        </>
+      )}
 
       <Body size={12} style={{ marginTop: 12 }}>
         {contract.line}
