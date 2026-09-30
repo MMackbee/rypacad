@@ -89,6 +89,37 @@ async function siblingEligible(store, householdId) {
 }
 
 /**
+ * Two taps on Pay now (two tabs, a stalled return) used to open two
+ * Checkout Sessions, and a family that paid both got two subscriptions
+ * (the webhook keeps the first and flags the second for a refund; QA S9,
+ * 2026-09-30). The open session is reused while it is for the same price;
+ * one for a different price (the family changed package) is expired first.
+ * @param {!Object} client Stripe.
+ * @param {!Object} athlete The athlete doc.
+ * @param {string} product 'tier' | 'facility'.
+ * @param {string} priceId What this checkout would charge.
+ * @return {!Promise<?string>} The open session's url, or null.
+ */
+async function reuseOpenSession(client, athlete, product, priceId) {
+  const pending = athlete.pendingCheckout && athlete.pendingCheckout[product];
+  if (!pending || !pending.sessionId) return null;
+  let s;
+  try {
+    s = await client.checkout.sessions.retrieve(pending.sessionId);
+  } catch (err) {
+    return null;
+  }
+  if (s.status !== 'open' || !s.url) return null;
+  if (pending.priceId === priceId) return s.url;
+  try {
+    await client.checkout.sessions.expire(s.id);
+  } catch (err) {
+    // It expires on its own within 24 h; the new one is the live offer.
+  }
+  return null;
+}
+
+/**
  * The coupon id is configured but Stripe has no such coupon in this mode
  * (coupons are made by hand, once per mode): the family gets the code
  * field instead of a refusal.
@@ -291,6 +322,8 @@ async function createCheckoutSessionHandler(data, context, deps) {
   }
   try {
     const client = d.stripe || stripe();
+    const open = await reuseOpenSession(client, athlete, req.product, priceId);
+    if (open) return {url: open};
     const price = await client.prices.retrieve(priceId);
     const args = {
       householdId: athlete.householdId,
@@ -319,6 +352,16 @@ async function createCheckoutSessionHandler(data, context, deps) {
           `${process.env.STRIPE_MODE || 'test'} mode: code field used instead`);
       session = await client.checkout.sessions.create(sessionBody(
           Object.assign({}, args, {sibling: {eligible: true, coupon: null}})));
+    }
+    // Remembered so a second Pay now reuses it (reuseOpenSession). A failed
+    // write only loses that protection, never the checkout.
+    try {
+      await store.collection('athletes').doc(req.athleteId).set({
+        pendingCheckout: {[req.product]: {sessionId: session.id, priceId,
+          createdAt: new Date(nowMs).toISOString()}},
+      }, {merge: true});
+    } catch (err) {
+      console.error('pendingCheckout write failed:', err);
     }
     return {url: session.url};
   } catch (err) {

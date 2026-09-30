@@ -17,10 +17,19 @@ const OCT = Date.parse('2026-10-05T18:00:00Z');
  */
 function fakeDb(docs) {
   return {collection: (c) => ({
-    doc: (id) => ({async get() {
-      const data = docs[`${c}/${id}`];
-      return {exists: !!data, data: () => data};
-    }}),
+    doc: (id) => ({
+      async get() {
+        const data = docs[`${c}/${id}`];
+        return {exists: !!data, data: () => data};
+      },
+      // One level of merge is all pendingCheckout needs.
+      async set(data, opts) {
+        const cur = docs[`${c}/${id}`] || {};
+        docs[`${c}/${id}`] = opts && opts.merge ?
+            Object.assign({}, cur, data, {pendingCheckout: Object.assign({},
+                cur.pendingCheckout, data.pendingCheckout)}) : data;
+      },
+    }),
     // Equality queries only: `where(field, '==', value).get()`.
     where: (field, op, value) => ({async get() {
       const hits = Object.entries(docs)
@@ -37,13 +46,28 @@ function fakeDb(docs) {
  * @return {!Object} A Stripe stand-in.
  */
 function fakeStripe(calls, cents) {
+  const sessions = {};
   return {
     prices: {retrieve: async (id) => ({id, unit_amount: cents || 29900,
       currency: 'usd'})},
-    checkout: {sessions: {create: async (body) => {
-      calls.push(body);
-      return {id: 'cs_test_1', url: 'https://checkout.stripe.com/c/cs_1'};
-    }}},
+    checkout: {sessions: {
+      create: async (body) => {
+        calls.push(body);
+        const id = `cs_test_${calls.length}`;
+        sessions[id] = {id, status: 'open',
+          url: `https://checkout.stripe.com/c/${id}`};
+        return sessions[id];
+      },
+      retrieve: async (id) => {
+        if (!sessions[id]) throw new Error(`No such checkout.session: ${id}`);
+        return sessions[id];
+      },
+      expire: async (id) => {
+        sessions[id].status = 'expired';
+        return sessions[id];
+      },
+    }},
+    sessions,
   };
 }
 const DOCS = {
@@ -90,7 +114,7 @@ async function refused(label, p, code, reason) {
 
 test('tier before Nov 1: the exact session body', async () => {
   const {calls, p} = call({athleteId: 'lena', product: 'tier'}, ctx('u-nina'));
-  assert.deepEqual(await p, {url: 'https://checkout.stripe.com/c/cs_1'});
+  assert.deepEqual(await p, {url: 'https://checkout.stripe.com/c/cs_test_1'});
   assert.deepEqual(calls[0], {
     mode: 'subscription',
     // novak is a 2+ membership family and no coupon is configured here.
@@ -225,7 +249,7 @@ test('single token (one-time, 2026-09-29): refused before any Stripe call',
       assert.deepEqual(touched, [], 'Stripe was never called');
       // The monthly packages are untouched by the guard.
       const ok = call({athleteId: 'lena', product: 'tier'}, ctx('u-nina'));
-      assert.equal((await ok.p).url, 'https://checkout.stripe.com/c/cs_1');
+      assert.equal((await ok.p).url, 'https://checkout.stripe.com/c/cs_test_1');
       assert.equal(ok.calls.length, 1);
     });
 
@@ -311,7 +335,8 @@ test('sibling: lapsed siblings do not count; a missing coupon falls back',
         };
         const r = call({athleteId: 'lena', product: 'tier'}, ctx('u-nina'),
             {stripe: missing});
-        assert.deepEqual(await r.p, {url: 'https://checkout.stripe.com/c/cs_1'});
+        assert.deepEqual(await r.p,
+            {url: 'https://checkout.stripe.com/c/cs_test_1'});
         assert.equal(calls.length, 1);
         assert.equal(calls[0].allow_promotion_codes, true);
         assert.equal(calls[0].discounts, undefined);
@@ -328,6 +353,60 @@ test('sibling: lapsed siblings do not count; a missing coupon falls back',
       } finally {
         delete process.env.STRIPE_SIBLING_COUPON;
       }
+    });
+
+test('a second Pay now reuses the open session (QA S9: no double charge)',
+    async () => {
+      const docs = Object.assign({}, DOCS, {'athletes/lena': {
+        householdId: 'novak', packageId: 't-6',
+        billing: {status: 'pending'}}});
+      const db = fakeDb(docs);
+      const calls = [];
+      const st = fakeStripe(calls);
+      const first = await checkout.createCheckoutSessionHandler(
+          {athleteId: 'lena', product: 'tier'}, ctx('u-nina'),
+          {db, stripe: st, now: OCT, catalogue: CAT});
+      assert.equal(first.url, 'https://checkout.stripe.com/c/cs_test_1');
+      assert.deepEqual(docs['athletes/lena'].pendingCheckout.tier,
+          {sessionId: 'cs_test_1', priceId: 'price_t6',
+            createdAt: new Date(OCT).toISOString()});
+      // Same price, still open: the same Stripe page, no new session.
+      const again = await checkout.createCheckoutSessionHandler(
+          {athleteId: 'lena', product: 'tier'}, ctx('u-nina'),
+          {db, stripe: st, now: OCT, catalogue: CAT});
+      assert.equal(again.url, first.url);
+      assert.equal(calls.length, 1);
+      // Paid or timed out: a fresh session.
+      st.sessions.cs_test_1.status = 'expired';
+      const fresh = await checkout.createCheckoutSessionHandler(
+          {athleteId: 'lena', product: 'tier'}, ctx('u-nina'),
+          {db, stripe: st, now: OCT, catalogue: CAT});
+      assert.equal(fresh.url, 'https://checkout.stripe.com/c/cs_test_2');
+      assert.equal(calls.length, 2);
+      // The family changed package: the old offer is expired, not reused.
+      docs['athletes/lena'].packageId = 'elite';
+      const changed = await checkout.createCheckoutSessionHandler(
+          {athleteId: 'lena', product: 'tier'}, ctx('u-nina'),
+          {db, stripe: st, now: OCT, catalogue: CAT});
+      assert.equal(changed.url, 'https://checkout.stripe.com/c/cs_test_3');
+      assert.equal(st.sessions.cs_test_2.status, 'expired');
+      assert.equal(calls[2].line_items[0].price, 'price_elite');
+      // Stripe cannot find the remembered session: a fresh one, no error.
+      docs['athletes/lena'].pendingCheckout.tier.sessionId = 'cs_gone';
+      const gone = await checkout.createCheckoutSessionHandler(
+          {athleteId: 'lena', product: 'tier'}, ctx('u-nina'),
+          {db, stripe: st, now: OCT, catalogue: CAT});
+      assert.equal(gone.url, 'https://checkout.stripe.com/c/cs_test_4');
+      // The add-on keeps its own slot.
+      docs['athletes/lena'].billing = {status: 'active'};
+      docs['athletes/lena'].packageId = 't-6';
+      await checkout.createCheckoutSessionHandler(
+          {athleteId: 'lena', product: 'facility'}, ctx('u-nina'),
+          {db, stripe: st, now: OCT, catalogue: CAT});
+      assert.equal(docs['athletes/lena'].pendingCheckout.facility.sessionId,
+          'cs_test_5');
+      assert.equal(docs['athletes/lena'].pendingCheckout.tier.sessionId,
+          'cs_test_4');
     });
 
 run();
