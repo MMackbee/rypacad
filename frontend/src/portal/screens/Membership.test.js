@@ -10,9 +10,10 @@ jest.mock('../hooks/billing', () => ({ __esModule: true, default: () => ({}), us
 test('pending athlete sees the banner and Pay now; paid athlete sees the facility offer', async () => {
   const base = { athleteId: 'a1', name: 'Jordan', package: { kind: 'tokens', name: '12 tokens' }, tokens: { left: 12 }, coaching: null, contractMinutes: null, facilityAccess: false };
   mockMine = { loading: false, error: null, data: { member: { ...base, billing: { status: 'pending', facility: null } },
-    status: { status: 'pending', paused: false, body: 'Jordan can book as soon as checkout is complete.', pendingAthletes: [{ athleteId: 'a1', name: 'Jordan' }] } } };
+    status: { status: 'pending', paused: false, body: "Jordan can book once checkout is complete (token packages from Sat, Oct 10 at 7 AM). Billed monthly on the 1st once you've paid.", pendingAthletes: [{ athleteId: 'a1', name: 'Jordan' }] } } };
   const p = await renderScreen(<Membership bare />);
   expect(p.text()).toContain('Payment pending - finish checkout to start booking');
+  expect(p.text()).toContain('Jordan can book once checkout is complete (token packages from Sat, Oct 10 at 7 AM).');
   expect(p.button('Pay now|a1|tier')).not.toBeNull();
   expect(p.button('Add facility access|a1|facility')).toBeNull();
   await p.unmount();
