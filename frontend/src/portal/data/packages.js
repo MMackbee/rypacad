@@ -59,6 +59,16 @@ export const ELITE = {
 // a period package is a Stripe-sprint question and changes nothing here.
 export const SINGLE_TOKEN = { id: 'single', name: 'Single token', kind: 'single', tokens: 1, price: 65, pending: false, windowDays: 30 };
 
+/**
+ * Whether sign-up may sell the single token (UX review 2026-09-30). The
+ * one-time checkout is not built yet - createCheckoutSession refuses 'single'
+ * (functions/portal/checkout.js) and parents cannot change package later - so
+ * until then Registration shows the card greyed out and unselectable, and
+ * refuses a restored draft that holds it. Flip to true in the same push that
+ * ships one-time checkout.
+ */
+export const SINGLE_ON_SALE = false;
+
 export const ALL_PACKAGES = [...TOKEN_PACKAGES, ELITE, SINGLE_TOKEN];
 
 /**

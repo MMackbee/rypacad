@@ -37,6 +37,7 @@ export default function PackageCard({
       role="button"
       tabIndex={0}
       aria-pressed={selected}
+      aria-disabled={onSelect ? undefined : true}
       aria-label={pkg.name}
       onClick={onSelect}
       onKeyDown={(e) => {

@@ -5,6 +5,7 @@ import PhoneFrame from '../components/PhoneFrame';
 import { BackLink, Body, ScreenTitle } from '../components/Primitives';
 import * as callables from '../hooks/callables';
 import { todayISO } from '../data/calendar';
+import { SINGLE_ON_SALE, SINGLE_TOKEN } from '../data/packages';
 import { EMAIL_RE, buildAddAthletesPayload, buildCreateFamilyPayload, newAthleteEntry, validateAthleteEntry } from '../data/signup';
 import { AthleteStep, ConsentStep, ConsentInfoSheet, ContactStep, PackageStep, SubmittingOverlay, WhoStep } from './RegistrationSteps';
 import RegistrationSuccess from './RegistrationSuccess';
@@ -125,7 +126,9 @@ export default function Registration({ variant, bare = false, mode = 'signup', a
     who: form.mode != null,
     contact: form.contact.name.trim() !== '' && EMAIL_RE.test(form.contact.email.trim()) && form.contact.phone.trim() !== '',
     athletes: athleteErrors.every((e) => !e.name && !e.dob && !e.handicap && !e.loginEmail),
-    package: form.athletes.every((a) => a.packageId != null) && athleteErrors.every((e) => !e.packageId && !e.contractMinutes),
+    // A restored draft may hold the single token from before it went off sale.
+    package: form.athletes.every((a) => a.packageId != null) && athleteErrors.every((e) => !e.packageId && !e.contractMinutes)
+      && form.athletes.every((a) => a.packageId !== SINGLE_TOKEN.id || SINGLE_ON_SALE),
     consent: form.consents.dataCollection && form.consents.videoCapture && form.signatureName.trim() !== '',
   }[stepId];
 

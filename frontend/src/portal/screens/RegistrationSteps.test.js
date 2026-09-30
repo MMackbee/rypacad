@@ -4,6 +4,7 @@ import { renderScreen } from './testRender';
 import { AthleteStep, ConsentStep, PackageStep, WhoStep } from './RegistrationSteps';
 import { newAthleteEntry } from '../data/signup';
 import { SEASON_BOUNDS } from '../data/season';
+import { SINGLE_ON_SALE } from '../data/packages';
 
 function Harness({ mode = 'parent', athlete = {} }) {
   const [athletes, setAthletes] = React.useState([{ ...newAthleteEntry(), ...athlete }]);
@@ -67,5 +68,21 @@ test('the single token card reads one-time, good through the season end; monthly
   expect(six.textContent).toContain('6 tokens a period · $49.83 a token');
   expect(six.textContent).toContain('/ period');
   expect(six.textContent).not.toContain('one-time');
+  await r.unmount();
+});
+
+test('until one-time checkout ships, the single token is greyed out and cannot be picked', async () => {
+  expect(SINGLE_ON_SALE).toBe(false);
+  const picks = [];
+  const r = await renderScreen(<PackageStep athletes={[{ ...newAthleteEntry(), name: 'Nico' }]} onUpdate={(key, p) => picks.push(p)} showErrors={false} />);
+  const single = r.button('Single token');
+  expect(single.getAttribute('aria-disabled')).toBe('true');
+  expect(single.style.opacity).toBe('0.55');
+  expect(single.textContent).toContain('On sale before booking opens Sat, Oct 10. Pick a monthly package now, or come back then.');
+  await r.click('Single token');
+  expect(picks).toEqual([]);
+  await r.click('6 tokens');
+  expect(picks).toEqual([{ packageId: 't-6' }]);
+  expect(r.button('6 tokens').getAttribute('aria-disabled')).toBeNull();
   await r.unmount();
 });

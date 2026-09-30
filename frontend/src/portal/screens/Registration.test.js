@@ -119,6 +119,31 @@ test('a double tap on Sign and submit sends one createFamily and still shows the
   await r.unmount();
 });
 
+test('a restored draft holding the off-sale single token cannot be submitted', async () => {
+  window.sessionStorage.clear();
+  const account = { uid: 'u-single', email: 'dana@email.com' };
+  const form = {
+    mode: 'parent',
+    contact: { name: 'Dana Whitfield', email: 'dana@email.com', phone: '(612) 555-0148', relationship: 'Mother' },
+    athletes: [{ key: 'k1', name: 'Jordan', dob: '2012-06-17', handicap: '', ownLogin: false, loginEmail: '', packageId: 'single', contractMinutes: null }],
+    emergencyContact: '', medical: '',
+    consents: { dataCollection: true, videoCapture: true, mediaRelease: false, facilityAccess: false },
+    signatureName: '',
+  };
+  window.sessionStorage.setItem('ryp.signupDraft.signup.u-single', JSON.stringify({ v: 1, step: 3, form }));
+  const r = await renderScreen(<Registration bare mode="signup" account={account} />);
+  expect(r.text()).toContain('Step 4 of 5');
+  expect(r.button('Single token').getAttribute('aria-pressed')).toBe('false');
+  await r.click('Continue');
+  expect(r.text()).toContain('Step 4 of 5');
+  expect(r.text()).toContain('Pick a package for Jordan to continue.');
+  await r.click('6 tokens');
+  await r.click('Continue');
+  expect(r.text()).toContain('Step 5 of 5');
+  await r.unmount();
+  window.sessionStorage.clear();
+});
+
 test('link mode skips to athletes and calls addAthletes', async () => {
   const r = await renderScreen(<Registration bare mode="link" account={{ email: 'dana@email.com' }} />);
   expect(r.text()).toContain('Step 1 of 2');
