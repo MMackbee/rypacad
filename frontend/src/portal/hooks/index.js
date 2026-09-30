@@ -626,9 +626,32 @@ const MAX_WINDOW_DAYS = Math.max(...TOKEN_PACKAGES.map(windowDaysFor), windowDay
  * child chosen afterward might need; per-day locking past THAT child's own,
  * narrower window is the screen's job once a child is picked (it already
  * has each child's packageId via useHouseholdAthletes).
+ *
+ * `withSlots: false` (perf wave B) is the identity-only path for a caller
+ * that needs book() and nothing else (SpecialistBooking): no sessions range
+ * read, no package/bookings/household chain - the same `identity` book()
+ * reads, and an empty payload in the same shape.
  */
-async function liveBooking(today) {
+async function liveBooking(today, { withSlots = true } = {}) {
   const who = await liveBookingIdentity();
+  if (!withSlots) {
+    const identity =
+      who.role === 'athlete'
+        ? {
+            role: 'athlete',
+            athleteId: who.profile.athleteId,
+            householdId: (await fetchAthlete(who.profile.athleteId)).householdId,
+          }
+        : { role: 'parent', householdId: who.profile.householdId };
+    return {
+      dates: [],
+      slots: [],
+      tokens: null,
+      seasonNote: null,
+      confirmation: { ...BOOKING_CONFIRMATION, email: who.profile.email },
+      identity,
+    };
+  }
 
   let windowDays = MAX_WINDOW_DAYS;
   let tokens = null;
@@ -830,7 +853,7 @@ export function useSchedule({ variant = 'upcoming', today = todayISO(), practice
  * picker — the picker's own choices come from the existing
  * useHouseholdAthletes(), not duplicated here.
  */
-export function useBooking({ variant = 'open', today = todayISO(), practice = false } = {}) {
+export function useBooking({ variant = 'open', today = todayISO(), practice = false, withSlots = true } = {}) {
   // Practice short-circuits before isLive(): with practice set, the live
   // source below is unreachable, ./live.js never runs, and book() takes the
   // local (seed) branch — a practice booking cannot become a real one.
@@ -893,11 +916,11 @@ export function useBooking({ variant = 'open', today = todayISO(), practice = fa
       (live
         ? {
             source: async () => {
-              const { identity: id, ...payload } = await liveBooking(today);
+              const { identity: id, ...payload } = await liveBooking(today, { withSlots });
               setIdentity(id);
               return payload;
             },
-            deps: ['booking', today, bookingsGen, sessionsGen],
+            deps: ['booking', today, bookingsGen, sessionsGen, withSlots],
           }
         : undefined)
   );

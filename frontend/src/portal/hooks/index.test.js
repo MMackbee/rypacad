@@ -4,9 +4,9 @@
  * emulator; Firebase is mocked out here.
  *
  * Perf wave B: the live loaders that now read in parallel (liveAthleteDetail,
- * liveBooking, liveMonthSessions' waitlist join) are driven through their
- * hooks against mocked adapters - the reads each one issues, which round
- * they land in, and the payload they return.
+ * liveBooking and its identity-only path, liveMonthSessions' waitlist join)
+ * are driven through their hooks against mocked adapters - the reads each
+ * one issues, which round they land in, and the payload they return.
  */
 jest.mock('../../firebase', () => ({ __esModule: true, default: {}, auth: { currentUser: null }, db: {}, functions: {}, storage: {} }));
 jest.mock('firebase/firestore', () => ({}));
@@ -43,6 +43,7 @@ import { coachingFor, seedSpecialistDays, useAthleteDetail, useBooking, useMonth
 import * as live from './live';
 import * as signups from './signups';
 import * as waitlist from './waitlist';
+import { BOOKING_CONFIRMATION } from '../data/seed';
 import { loginStateFor } from '../data/signups';
 
 const mental = (date) => ({ id: date, type: 'mental', status: 'confirmed', date });
@@ -166,7 +167,55 @@ describe('live loaders (perf wave B)', () => {
     await h.unmount();
   });
 
+  test('useBooking({ withSlots: false }) as an athlete: identity only, no sessions or package chain', async () => {
+    live.fetchCurrentUser.mockResolvedValue({ uid: 'u1', athleteId: 'a1', email: 'jordan@email.com' });
+    live.fetchAthlete.mockResolvedValue({ id: 'a1', householdId: 'h1', packageId: 't-12' });
+    live.createBooking.mockResolvedValue({ status: 'confirmed' });
 
+    const h = await mountHook(() => useBooking({ withSlots: false }));
+    await settle();
+    expect(h.result.current.error).toBeNull();
+    expect(h.result.current.data).toEqual({
+      dates: [],
+      slots: [],
+      tokens: null,
+      seasonNote: null,
+      confirmation: { ...BOOKING_CONFIRMATION, email: 'jordan@email.com' },
+    });
+    expect(h.result.current.bookingFor).toBe('athlete');
+    expect(live.fetchAthlete).toHaveBeenCalledTimes(1);
+    expect(live.fetchSessionsInRange).not.toHaveBeenCalled();
+    expect(live.fetchPackage).not.toHaveBeenCalled();
+    expect(live.fetchBookings).not.toHaveBeenCalled();
+    expect(live.fetchHousehold).not.toHaveBeenCalled();
+
+    await act(async () => {
+      await h.result.current.book({ id: 'phil_1', date: '2099-01-06', type: 'phil' });
+    });
+    expect(live.createBooking).toHaveBeenCalledWith({
+      athleteId: 'a1', sessionId: 'phil_1', date: '2099-01-06', type: 'phil', householdId: 'h1', attendee: undefined,
+    });
+    await h.unmount();
+  });
+
+  test('useBooking({ withSlots: false }) as a parent: one users read, book() takes the chosen child', async () => {
+    live.fetchCurrentUser.mockResolvedValue({ uid: 'p1', householdId: 'h1', email: 'dana@email.com' });
+    live.createBooking.mockResolvedValue({ status: 'confirmed' });
+
+    const h = await mountHook(() => useBooking({ withSlots: false }));
+    await settle();
+    expect(h.result.current.bookingFor).toBe('parent');
+    expect(live.fetchAthlete).not.toHaveBeenCalled();
+    expect(live.fetchSessionsInRange).not.toHaveBeenCalled();
+
+    await act(async () => {
+      await h.result.current.book({ id: 'mental_1', date: '2099-01-06', type: 'mental' }, { athleteId: 'a2' });
+    });
+    expect(live.createBooking).toHaveBeenCalledWith({
+      athleteId: 'a2', sessionId: 'mental_1', date: '2099-01-06', type: 'mental', householdId: 'h1', attendee: undefined,
+    });
+    await h.unmount();
+  });
 
   test('useBooking() as an athlete: athlete + bookings together, then package + household, then the sessions window', async () => {
     const athleteGate = deferred();
