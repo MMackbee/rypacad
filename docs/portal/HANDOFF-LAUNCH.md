@@ -98,7 +98,13 @@ Then verify from outside: both webhooks answer **400** to an unsigned POST;
 the four callables answer a JSON `UNAUTHENTICATED`/`invalid-argument` error,
 never 403/404/500.
 
-### 3.2 Calendly (Yannick)
+### 3.2 DONE 2026-09-30 - Calendly (Yannick)
+
+Connected: signing key v3 in Secret Manager, calendlyWebhook redeployed and
+verified with a signed test message, one ACTIVE user-scope subscription
+(invitee.created + invitee.canceled) to the portal URL. Check any time with
+`node scripts/register-calendly-webhook.mjs --status` (changes nothing).
+Original instructions:
 
 `node scripts/register-calendly-webhook.mjs` (owner runs it). It asks for
 Yannick's Calendly personal access token (hidden), confirms the account,
