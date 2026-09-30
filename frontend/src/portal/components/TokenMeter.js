@@ -3,6 +3,7 @@ import { format, parseISO } from 'date-fns';
 import { color, font, radius } from '../tokens';
 import StatusBadge from './StatusBadge';
 import { GraceLine } from './AllowancePools';
+import { SessionTokenHero } from './SessionTokens';
 import { Body, Card, SectionLabel } from './Primitives';
 import { longDayLabel } from '../data/calendar';
 
@@ -13,7 +14,10 @@ import { longDayLabel } from '../data/calendar';
  * spot holding one, the bonus tokens on file, when the period resets and
  * what the next one grants. Every value comes from `hubMemberFor`
  * (data/billingHub.js), which runs the same `tokensFor` the booking gate
- * runs; this component never counts anything itself.
+ * runs; this component never counts anything itself. A single athlete
+ * (`tokens.perPurchase`, ruling 2026-09-29/30) has no period grant or reset:
+ * their hero is SessionTokenHero, and a row paid with a bought token reads
+ * 'Session token'.
  */
 
 function toneFor(left) {
@@ -41,7 +45,11 @@ const STATUS_BADGE = {
 };
 
 function Row({ row, last }) {
-  const badge = row.viaGrace ? { tone: 'yellow', label: 'Bonus token' } : STATUS_BADGE[row.status] || STATUS_BADGE.confirmed;
+  const badge = row.viaSingle
+    ? { tone: 'green', label: 'Session token' }
+    : row.viaGrace
+    ? { tone: 'yellow', label: 'Bonus token' }
+    : STATUS_BADGE[row.status] || STATUS_BADGE.confirmed;
   return (
     <div
       style={{
@@ -94,13 +102,16 @@ function Evidence({ member }) {
           Nothing booked in this period yet.
         </Body>
       )}
-      <Body size={11} tone={color.textTertiary} style={{ marginTop: 10 }}>
-        Next period from {longDayLabel(nextPeriod.start)}:{' '}
-        {tokens.unlimited ? 'unlimited' : `${nextPeriod.granted} token${nextPeriod.granted === 1 ? '' : 's'}`}
-        {nextPeriod.booked ? ` · ${nextPeriod.booked} already booked` : ''}
-        {nextPeriod.reserved ? ` · ${nextPeriod.reserved} on a waitlist` : ''}
-      </Body>
-      {lastPeriod && !tokens.unlimited ? (
+      {/* A single athlete's tokens are bought, never granted per period. */}
+      {tokens.perPurchase ? null : (
+        <Body size={11} tone={color.textTertiary} style={{ marginTop: 10 }}>
+          Next period from {longDayLabel(nextPeriod.start)}:{' '}
+          {tokens.unlimited ? 'unlimited' : `${nextPeriod.granted} token${nextPeriod.granted === 1 ? '' : 's'}`}
+          {nextPeriod.booked ? ` · ${nextPeriod.booked} already booked` : ''}
+          {nextPeriod.reserved ? ` · ${nextPeriod.reserved} on a waitlist` : ''}
+        </Body>
+      )}
+      {lastPeriod && !tokens.unlimited && !tokens.perPurchase ? (
         <Body size={11} tone={color.textTertiary} style={{ marginTop: 4 }}>
           Last period ({shortDay(lastPeriod.start)} – {shortDay(lastPeriod.end)}): used {lastPeriod.used} of {lastPeriod.granted}
         </Body>
@@ -176,6 +187,15 @@ export default function TokenMeter({ member, defaultOpen = false, showPrices = f
         <Toggle open={open} onToggle={() => setOpen((v) => !v)} count={count} />
         {open ? <Evidence member={member} /> : null}
       </Card>
+    );
+  }
+
+  if (tokens.perPurchase) {
+    return (
+      <SessionTokenHero member={member} price={price}>
+        <Toggle open={open} onToggle={() => setOpen((v) => !v)} count={count} />
+        {open ? <Evidence member={member} /> : null}
+      </SessionTokenHero>
     );
   }
 

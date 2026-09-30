@@ -10,6 +10,9 @@ import { AgeGroupLegend } from '../components/AgeGroupChip';
 import SkeletonCard, { SkeletonBar } from '../components/Skeleton';
 import { CapacityPill } from '../components/StatusBadge';
 import AllowancePools, { GraceLine, SpendNote } from '../components/AllowancePools';
+import PayButton from '../components/PayButton';
+import { SessionTokenPools } from '../components/SessionTokens';
+import { availableCount, BUY_SINGLE_LABEL, graceSpendLabel } from '../data/singleToken';
 import { LockedDayNotice, reasonCopy, SeeMembershipLink } from '../components/BookingReasons';
 import { JoinWaitlistButton, WaitlistedConfirmationBody } from '../components/WaitlistAction';
 import { BackLink, Banner, Body, Card, ErrorNotice, ScreenTitle, SectionLabel, Tick } from '../components/Primitives';
@@ -319,7 +322,7 @@ export default function BookSession({
           // line degrades to generic copy while it is null.
           position: booked.position ?? null,
         }}
-        onRepeat={booked.waitlisted ? undefined : handleRepeat}
+        onRepeat={booked.waitlisted || tokens?.perPurchase ? undefined : handleRepeat}
         onBack={() => setBooked(null)}
       />
     );
@@ -365,7 +368,11 @@ export default function BookSession({
 
             <div style={{ padding: '0 22px', display: 'flex', flexDirection: 'column', gap: 12 }}>
               {showGateBanner ? <BookingOpensBanner /> : null}
-              <TokensBanner tokens={tokens} />
+              <TokensBanner
+                tokens={tokens}
+                athleteId={isParent ? selectedAthleteId : selfMember?.athleteId}
+                billingStatus={isParent ? selectedAthlete?.billingStatus : selfMember?.billingStatus}
+              />
               {data?.seasonNote ? (
                 <Banner tone="green" title="Season">
                   {data.seasonNote}
@@ -543,7 +550,7 @@ function chargeKindFor(tokens) {
 function spendLabelFor(tokens) {
   const kind = chargeKindFor(tokens);
   if (kind === 'elite') return 'Included with Elite';
-  if (kind === 'grace') return 'a bonus token';
+  if (kind === 'grace') return graceSpendLabel(tokens);
   return '1 token';
 }
 
@@ -607,12 +614,25 @@ function AthleteSelector({ athletes, loading, selectedId, onSelect }) {
  * at submit turns a known constraint into a failed action, which is why this
  * is a banner and not an error. Elite shows no number (pin L).
  */
-function TokensBanner({ tokens }) {
+function TokensBanner({ tokens, athleteId, billingStatus }) {
   if (!tokens) return null;
   if (tokens.unlimited) {
     return (
       <Banner tone="green" title="Elite">
         Unlimited · every session type · no countdown.
+      </Banner>
+    );
+  }
+  // The single token (ruling 2026-09-29/30): bought, never reset - the
+  // count plus a Buy button while the athlete's billing is active.
+  if (tokens.perPurchase) {
+    const none = availableCount(tokens) === 0;
+    return (
+      <Banner tone={none ? 'red' : 'neutral'} title={none ? 'No session token' : 'Your session tokens'}>
+        <SessionTokenPools tokens={tokens} style={{ margin: '4px 0 6px' }} />
+        {athleteId && (billingStatus ?? 'active') === 'active' ? (
+          <PayButton athleteId={athleteId} product="tier" label={BUY_SINGLE_LABEL} variant={none ? 'primary' : 'outline'} height={44} style={{ marginTop: 8 }} />
+        ) : null}
       </Banner>
     );
   }

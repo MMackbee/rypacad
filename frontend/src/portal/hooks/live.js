@@ -36,6 +36,7 @@ import { bump } from './invalidate';
 import { eliteDailyCapHit, normalizeAnchorDay, periodFallback, periodFor, windowDaysFor } from '../data/packages';
 import { BOOKING_OPENS_LABEL, bookingOpen, openThrough, todayISO, windowOpensOn } from '../data/calendar';
 import { SPECIALISTS, mentalCapFor } from '../data/specialists';
+import { billingStatusOf } from '../data/billingCopy';
 
 /** id -> catalogue entry, for the specialist-cap error copy below. */
 const SPECIALIST_BY_ID = new Map(SPECIALISTS.map((s) => [s.id, s]));
@@ -514,10 +515,12 @@ function selectGraceToken(bookings, graceTokens, date, held = 0) {
 /**
  * Per-athlete paid status (Sprint 20, spec 4.4): absent == active for every
  * athlete provisioned before this sprint; anything else blocks booking with
- * the pending copy. firestore.rules' athleteBillingOk() is the server half.
+ * the pending copy. billingStatusOf also reads a single-token buyer moved to
+ * another package as pending until it is paid (ruling 2026-09-29/30).
+ * firestore.rules' athleteBillingOk() is the server half.
  */
 export function assertAthleteBillingActive(athlete) {
-  const status = athlete?.billing?.status ?? 'active';
+  const status = billingStatusOf(athlete);
   if (status === 'active') return;
   throw new LiveDataError(ERR.INVALID, 'Payment pending - finish checkout to start booking', null, 'billing-pending');
 }
@@ -672,6 +675,20 @@ export function assertPeriodTokensLeft(pkg, bookings, periodKey, issuedGrant, wa
 // it is the pinned "book() resolves { status: 'waitlisted' }" path.
 const SESSION_FULL = Symbol('session-full');
 
+/**
+ * The re-book write (cancelled -> confirmed on the SAME doc): the charge is
+ * decided again, exactly as for a new booking, and stamped with
+ * `rebookedAt` (ruling 2026-09-29/30). firestore.rules' rebookChargeOk
+ * re-checks the charge, and a single athlete's re-book must carry
+ * rebookedAt == request.time, so a stale client can never re-attach a spent
+ * single token. `graceTokenId` is always written (null when none) so a
+ * token the booking held before its cancel is released. Pure; `stamp` is
+ * serverTimestamp() in the transaction below.
+ */
+export function rebookPatch(chargedFrom, graceTokenId, stamp) {
+  return { status: 'confirmed', chargedFrom, graceTokenId: graceTokenId ?? null, rebookedAt: stamp };
+}
+
 export async function createBooking(
   { athleteId, sessionId, date, type, householdId, attendee },
   { skipCapCheck = false, silent = false } = {}
@@ -758,12 +775,12 @@ export async function createBooking(
     sessionId,
     date,
     type,
-    // periodKey (contract v2.0, pin B) and chargedFrom/graceTokenId
-    // (contract v2.1, pin E) are ALL write-once at create - a re-book (the
-    // isRebook branch below) only ever updates `status`
-    // (memberBookingUpdateOk's own hasOnly), so a booking keeps whatever it
-    // was FIRST charged even across a cancel/re-book cycle - the same
-    // "history, not a live join" discipline periodKey already established.
+    // periodKey (contract v2.0, pin B) is write-once at create. chargedFrom/
+    // graceTokenId (contract v2.1, pin E) are set here and RE-DECIDED on a
+    // re-book (the isRebook branch below writes rebookPatch: status, the
+    // fresh charge and rebookedAt - memberBookingUpdateOk's own hasOnly), so
+    // a re-booked session spends a token that is really free today, never
+    // the one it held before its cancel (ruling 2026-09-29/30).
     periodKey,
     status: 'confirmed',
     householdId,
@@ -842,10 +859,12 @@ export async function createBooking(
       if (isRebook) {
         // updateDoc-style partial write, NOT tx.set(bookingRef, booking) —
         // firestore.rules' memberBookingUpdateOk() only admits a diff
-        // hasOnly(['status']); rewriting the whole doc (even with identical
-        // values) would re-stamp createdAt via serverTimestamp() and widen
-        // the diff, and the rule would reject it.
-        tx.update(bookingRef, { status: 'confirmed' });
+        // hasOnly(['status', 'chargedFrom', 'graceTokenId', 'rebookedAt']);
+        // rewriting the whole doc would re-stamp createdAt and widen the
+        // diff, and the rule would reject it. The charge decided above is
+        // written, and rebookedAt stamps it (the double-spend guard orders
+        // a token's bookings by it).
+        tx.update(bookingRef, rebookPatch(chargedFrom, graceTokenId, serverTimestamp()));
       } else {
         tx.set(bookingRef, booking);
       }

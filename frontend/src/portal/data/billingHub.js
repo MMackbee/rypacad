@@ -12,7 +12,9 @@
  */
 
 import { addDaysISO, longDayLabel } from './calendar';
-import { normalizeAnchorDay, periodFor, SINGLE_TOKEN, tokensFor } from './packages';
+import { normalizeAnchorDay, periodFallback, periodFor, SINGLE_TOKEN, tokensFor } from './packages';
+import { billingStatusOf } from './billingCopy';
+import { isSingleTokenId } from './singleToken';
 
 /** Days from `fromISO` to `toISO` (calendar days, UTC-noon arithmetic). */
 export function daysBetween(fromISO, toISO) {
@@ -49,7 +51,8 @@ export function sessionLabel(session, fallbackType) {
  * Bookings and waitlist entries of one period as list rows, oldest first.
  * A booking row says how it was paid (`viaGrace`), so the list's count of
  * period-charged rows is exactly `tokens.used` and the grace-charged rows
- * are exactly the consumed bonus tokens.
+ * are exactly the consumed bonus tokens. `viaSingle` marks the grace rows
+ * paid with a purchased single token (`single_{cs}`, ruling 2026-09-29/30).
  */
 export function periodRows({ bookings, waitlist, periodKey, sessionsById = {} }) {
   const byDate = (a, b) => (a.date === b.date ? String(a.id).localeCompare(String(b.id)) : a.date < b.date ? -1 : 1);
@@ -66,6 +69,7 @@ export function periodRows({ bookings, waitlist, periodKey, sessionsById = {} })
         time: (session && session.time) || null,
         status: b.status || 'confirmed',
         viaGrace: Boolean(b.graceTokenId),
+        viaSingle: isSingleTokenId(b.graceTokenId),
       };
     })
     .sort(byDate);
@@ -82,6 +86,7 @@ export function periodRows({ bookings, waitlist, periodKey, sessionsById = {} })
         time: (session && session.time) || null,
         status: 'waitlisted',
         viaGrace: false,
+        viaSingle: false,
       };
     })
     .sort(byDate);
@@ -118,7 +123,9 @@ export function hubMemberFor(args) {
   const { spent, reserved } = periodRows({ bookings, waitlist, periodKey: period.periodKey, sessionsById });
   const nextRows = periodRows({ bookings, waitlist, periodKey: nextPeriod.periodKey, sessionsById });
   const unlimited = tokens.unlimited;
-  const nextGranted = unlimited ? null : pkg ? pkg.tokens ?? 0 : 0;
+  // periodFallback: the single token grants no period token (ruling
+  // 2026-09-29/30), so its next period reads 0, never pkg.tokens.
+  const nextGranted = unlimited ? null : pkg ? periodFallback(pkg) : 0;
 
   const lastUsed = (bookings || []).filter(
     (b) => b && b.status !== 'cancelled' && b.periodKey === prevPeriod.periodKey && !b.graceTokenId
@@ -128,7 +135,7 @@ export function hubMemberFor(args) {
         periodKey: prevPeriod.periodKey,
         start: prevPeriod.periodKey,
         end: prevPeriod.periodEnd,
-        granted: unlimited ? null : prevTokenPeriod?.granted ?? pkg.tokens ?? 0,
+        granted: unlimited ? null : prevTokenPeriod?.granted ?? periodFallback(pkg),
         used: lastUsed,
       }
     : null;
@@ -191,9 +198,12 @@ export function hubMemberFor(args) {
     // Sprint 20 (spec 4.4): the per-athlete paid state that gates booking.
     // Absent == active for every athlete provisioned before this sprint;
     // `facility` is the add-on subscription's own state (null == no add-on).
+    // billingStatusOf: a single-token buyer moved to another package is
+    // 'pending' until it is paid; `oneTime` rides along only when set.
     billing: {
-      status: athlete.billing?.status ?? 'active',
+      status: billingStatusOf(athlete),
       facility: athlete.facilityBilling?.status ?? null,
+      ...(athlete.billing?.oneTime === true ? { oneTime: true } : {}),
     },
   };
 }

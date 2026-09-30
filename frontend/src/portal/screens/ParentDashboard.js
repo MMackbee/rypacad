@@ -156,7 +156,7 @@ export default function ParentDashboard({
           standing badge does flip to ON HOLD, because booking is what actually
           gets restricted.
         */}
-        <PaymentConfirming athleteId={paidAthleteId} />
+        <PaymentConfirming athleteId={paidAthleteId} cs={params.get('cs')} single={params.get('single') === '1'} />
         <PendingBanner pendingAthletes={pendingAthletes} body={hubStatus?.body} title={hubStatus?.title} />
         {onHold ? (
           <PaymentBanner billing={flagged ? billing : bannerFor(membershipStatus)} onOpen={() => navigate('/portal/billing')} />

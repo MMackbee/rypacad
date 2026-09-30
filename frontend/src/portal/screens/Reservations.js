@@ -176,7 +176,7 @@ function MemberList({ items, past, onBook, onCancelRequest, onLeaveWaitlist, lea
             name={item.name}
             meta={metaParts.join(' · ')}
             variant={rowCancelled ? 'cancelled' : item.isToday ? 'live' : 'default'}
-            footnote={rowCancelled ? cancelReasonCopy(item.cancelReason) : null}
+            footnote={rowCancelled ? cancelReasonCopy(item.cancelReason, { singleToken: item.singleToken }) : null}
             trailing={
               waitlisted ? (
                 <StatusBadge tone="yellow">Waitlisted</StatusBadge>

@@ -12,6 +12,13 @@ test('gate order: billing, open, cadence, tokens (spec 6.1)', () => {
   expect(calendlyBlockReason({ ...ok, tokens: { left: 0, unlimited: false, grace: [{ id: 'g' }] } })).toBeNull();
   expect(calendlyBlockReason({ ...ok, tokens: { left: null, unlimited: true, grace: [] } })).toBeNull();
 });
+test('a single-token athlete with none left is told to buy one (ruling 2026-09-29/30)', () => {
+  const none = { left: 0, unlimited: false, grace: [], perPurchase: true };
+  expect(calendlyBlockReason({ ...ok, tokens: none })).toBe('no-session-token');
+  expect(calendlyBlockReason({ ...ok, tokens: { ...none, grace: [{ id: 'single_cs_1', reason: 'single-purchase' }] } })).toBeNull();
+  expect(calendlyBlockReason({ ...ok, tokens: { ...none, left: 1 } })).toBeNull(); // an ops comp
+  expect(calendlyBlockReason({ ...ok, billingStatus: 'pending', tokens: none })).toBe('billing-pending');
+});
 test("the attendee's own name and email go to Calendly", () => {
   const athlete = { id: 'a1', name: 'Jordan', loginEmail: null };
   const guardian = { name: 'Dana', email: 'dana@email.com' };

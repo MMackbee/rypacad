@@ -15,6 +15,7 @@ import { BackLink, Body, Card, ErrorNotice, ScreenTitle, SectionLabel } from '..
 import { ordinal, statusFor } from '../data/billingHub';
 import { FACILITY_ACCESS } from '../data/packages';
 import { CONNECTED_LINE, PAY_NOW, PENDING_PLAN_LINE, SINGLE_PLAN_LINE } from '../data/billingCopy';
+import { BUY_SINGLE_LABEL } from '../data/singleToken';
 import useBillingHub from '../hooks/billing';
 
 /**
@@ -110,6 +111,10 @@ export default function Billing({
               members.map((member) => (
                 <MemberSection key={member.athleteId} name={member.name}>
                   <TokenMeter member={member} defaultOpen={members.length === 1} showPrices={staff} />
+                  {/* The single token is bought one at a time (ruling 2026-09-29/30); staff never pay. */}
+                  {!staff && member.package?.kind === 'single' && member.billing?.status === 'active' ? (
+                    <PayButton athleteId={member.athleteId} product="tier" label={BUY_SINGLE_LABEL} variant="outline" height={44} />
+                  ) : null}
                   <CoachingLine coaching={member.coaching} />
                   <ContractLine
                     contractMinutes={member.contractMinutes}

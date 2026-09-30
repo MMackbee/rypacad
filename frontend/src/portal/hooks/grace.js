@@ -13,6 +13,12 @@
  * reads too, so those two fetch/write functions live in live.js itself
  * (fetchGraceTokensByAthlete, joinWaitlist) to avoid a circular import; this
  * file re-uses them rather than duplicating.
+ *
+ * Single token (owner ruling 2026-09-29/30): staff 'Cancel session' gives a
+ * booking paid with a purchased `single_` token its token back (the cancel
+ * frees it) and mints NO bonus for it, and it can finish a session the
+ * calendar sync already cancelled without rewriting the session doc - the
+ * pure planCancelSession() decides every write.
  */
 
 import { useState } from 'react';
@@ -42,6 +48,7 @@ import {
 } from './live';
 import { normalizeAnchorDay, periodFor } from '../data/packages';
 import { addDaysISO, todayISO } from '../data/calendar';
+import { isSingleTokenId } from '../data/singleToken';
 
 /**
  * One tokenPeriods/{athleteId}_{periodKey} doc, or null when none has been
@@ -152,10 +159,40 @@ export async function setHouseholdStripeIds(householdId, { stripeCustomerId = nu
 }
 
 /**
+ * The write plan for cancelSession below - PURE, so the token rules are
+ * unit-tested. One 'booking' op per confirmed booking; one 'grace' op (a
+ * bonus token) per athlete not already graced for this session; one
+ * 'session' op unless the session is already cancelled (a calendar sync
+ * cancels the session doc but not its bookings - Roster's 'Cancel remaining
+ * bookings' finishes the job without rewriting the session). A booking paid
+ * with a purchased single token (`single_{cs}`) mints NO bonus: cancelling
+ * it frees that token again, so a bonus would pay twice (ruling
+ * 2026-09-29/30).
+ */
+export function planCancelSession(confirmed, existingGrace, { sessionAlreadyCancelled = false } = {}) {
+  const alreadyGraced = new Set((existingGrace || []).map((g) => g.athleteId));
+  const ops = sessionAlreadyCancelled ? [] : [{ kind: 'session' }];
+  for (const b of confirmed || []) {
+    ops.push({ kind: 'booking', booking: b });
+    if (isSingleTokenId(b.graceTokenId)) continue;
+    if (!alreadyGraced.has(b.athleteId)) {
+      ops.push({ kind: 'grace', booking: b });
+      alreadyGraced.add(b.athleteId);
+    }
+  }
+  return ops;
+}
+
+/**
  * Staff "Cancel session" (contract v2.1, pin E) — every CONFIRMED booking on
  * a session flips to cancelled (cancelledBy the caller, cancelReason
  * 'session-cancelled') and mints one grace token per cancelled booking's
- * athlete, then the session itself flips to cancelled. Idempotent: bookings
+ * athlete, then the session itself flips to cancelled. Single token
+ * (ruling 2026-09-29/30): a booking paid with a purchased `single_` token
+ * gets that token back (the cancel frees it) and no bonus; a session the
+ * calendar sync already cancelled is read first and not written again, so
+ * the same action cancels its remaining bookings (planCancelSession above).
+ * Idempotent: bookings
  * already cancelled are excluded by the query itself (fetchBookingsBySession
  * only ever returns confirmed/attended/noshow — filtered here to confirmed),
  * and an athlete who already holds a grace token for THIS session
@@ -167,7 +204,7 @@ export async function setHouseholdStripeIds(householdId, { stripeCustomerId = nu
  * E — "the rules' ~20-document-access cap per batch, Sprint 10"): each
  * cancelled booking is one write, each minted grace token a second, so a
  * chunk holds at most 4 athletes' worth. The session's own status write
- * rides the FIRST chunk. A mid-run failure leaves some athletes cancelled/
+ * (when there is one) rides the FIRST chunk. A mid-run failure leaves some athletes cancelled/
  * graced and others not — safe to re-run (idempotent) rather than needing a
  * rollback.
  */
@@ -177,22 +214,15 @@ export async function cancelSession(sessionId) {
   }
   const user = requireUser();
   try {
-    const [bookings, existingGrace] = await Promise.all([
+    const [sessionSnap, bookings, existingGrace] = await Promise.all([
+      getDoc(doc(db, 'sessions', sessionId)),
       fetchBookingsBySession(sessionId),
       fetchGraceTokensBySourceSession(sessionId),
     ]);
+    const sessionAlreadyCancelled = sessionSnap.exists() && sessionSnap.data().status === 'cancelled';
     const confirmed = bookings.filter((b) => b.status === 'confirmed');
-    const alreadyGraced = new Set(existingGrace.map((g) => g.athleteId));
     const expiresAt = addDaysISO(todayISO(), 30);
-
-    const ops = [{ kind: 'session' }];
-    for (const b of confirmed) {
-      ops.push({ kind: 'booking', booking: b });
-      if (!alreadyGraced.has(b.athleteId)) {
-        ops.push({ kind: 'grace', booking: b });
-        alreadyGraced.add(b.athleteId);
-      }
-    }
+    const ops = planCancelSession(confirmed, existingGrace, { sessionAlreadyCancelled });
 
     const CHUNK_SIZE = 8;
     let cancelledCount = 0;

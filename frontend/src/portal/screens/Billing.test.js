@@ -57,3 +57,21 @@ test('staff view never pays', async () => {
   expect(r.button('Add facility access|a1|facility')).toBeNull();
   await r.unmount();
 });
+
+test('an active single athlete gets an outline Buy button; staff and a pending single never do (ruling 2026-09-29/30)', async () => {
+  const single = { id: 'single', name: 'Single token', kind: 'single', windowDays: 30, price: 65 };
+  mockHub.data.members = mockHub.data.members.map((m) => ({ ...m, package: single }));
+  const r = await renderScreen(<Billing bare />);
+  expect(r.button('Buy a session token - $65|a1|tier')).not.toBeNull(); // Jordan, active
+  expect(r.button('Buy a session token - $65|a2|tier')).toBeNull(); // Reese, pending: the hero's Pay now instead
+  expect(r.button('Add facility access|a1|facility')).toBeNull(); // no add-on on a single token
+  await r.unmount();
+  const staff = await renderScreen(<Billing bare staff role="owner" householdId="h1" />);
+  expect(staff.button('Buy a session token - $65|a1|tier')).toBeNull();
+  await staff.unmount();
+  // A monthly household never sees it.
+  mockHub.data.members = mockHub.data.members.map((m) => ({ ...m, package: { id: 't-6', name: '6 tokens', kind: 'tokens', windowDays: 30, price: 299 } }));
+  const monthly = await renderScreen(<Billing bare />);
+  expect(monthly.text()).not.toContain('Buy a session token');
+  await monthly.unmount();
+});

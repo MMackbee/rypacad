@@ -28,9 +28,24 @@ export function billingBadge(status) {
   return BADGES[status] || null;
 }
 
-/** null == no card (Elite includes it; a tier not yet active cannot add it). */
+/**
+ * An athlete's paid status as every gate and screen reads it (`billing`
+ * absent == active). One exception to the stored status: an athlete who
+ * bought single tokens (billing.oneTime) and was then moved to another
+ * package has paid for nothing on that package yet - 'pending' until its
+ * checkout completes (owner ruling 2026-09-29/30). The same rule as
+ * firestore.rules' athleteBillingOk and functions lib.membershipAllowsBooking.
+ */
+export function billingStatusOf(athlete) {
+  const billing = athlete?.billing;
+  if (billing?.status === 'active' && billing.oneTime === true && athlete.packageId !== 'single') return 'pending';
+  return billing?.status ?? 'active';
+}
+
+/** null == no card (Elite includes it; a tier not yet active cannot add it; the single token is one-time, never an add-on base). */
 export function facilityCardState(member) {
   if (!member || !member.package || member.package.kind === 'elite') return null;
+  if (member.package.kind === 'single' || member.billing?.oneTime === true) return null;
   if ((member.billing?.status ?? 'active') !== 'active') return null;
   const facility = member.billing?.facility ?? null;
   if (facility == null) return member.facilityAccess ? 'active' : 'offer';

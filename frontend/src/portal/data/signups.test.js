@@ -84,3 +84,12 @@ test('the same child (name + date of birth) in two families flags both rows as a
   expect(dad.flags).toEqual([{ kind: 'duplicate', id: 'k2~mom', athleteName: ' riley  lee ', otherHouseholdId: 'mom' }]);
   expect(counts.flagged).toBe(2);
 });
+
+test('a single-token buyer moved to t-6 reads pending and makes the row unpaid (ruling 2026-09-29/30)', () => {
+  const moved = athletes.map((a) => (a.id === 'a3' ? { ...a, packageId: 't-6', billing: { status: 'active', oneTime: true } } : a));
+  const h2 = buildSignupRows({ households, athletes: moved, invites, now }).rows.find((r) => r.householdId === 'h2');
+  expect(h2.athletes[0]).toMatchObject({ packageId: 't-6', billing: 'pending' });
+  expect(h2.unpaid).toBe(true);
+  const onSingle = athletes.map((a) => (a.id === 'a3' ? { ...a, billing: { status: 'active', oneTime: true } } : a));
+  expect(buildSignupRows({ households, athletes: onSingle, invites, now }).rows.find((r) => r.householdId === 'h2').athletes[0].billing).toBe('active');
+});

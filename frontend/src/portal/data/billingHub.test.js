@@ -266,3 +266,44 @@ describe('per-athlete billing (Sprint 20, spec 4.4)', () => {
     expect(statusFor({ status: 'active' }, { anchorDay: 15 }).body).toBe('Billed monthly on the 15th. Nothing needs attention.');
   });
 });
+
+describe('the single token (owner rulings 2026-09-29/30)', () => {
+  const single = { id: 'single', name: 'Single token', kind: 'single', tokens: 1, price: 65, windowDays: 30 };
+  const T6 = TOKEN_PACKAGES.find((p) => p.id === 't-6');
+
+  test('a one-time buyer moved to t-6 is pending, carries oneTime, and so reaches pendingOf', () => {
+    const moved = hubMemberFor({ ...fixture(), pkg: T6, athlete: { ...athlete, packageId: 't-6', billing: { status: 'active', oneTime: true } } });
+    expect(moved.billing).toEqual({ status: 'pending', facility: null, oneTime: true });
+    const onSingle = hubMemberFor({ ...fixture(), pkg: single, athlete: { ...athlete, packageId: 'single', billing: { status: 'active', oneTime: true } } });
+    expect(onSingle.billing).toEqual({ status: 'active', facility: null, oneTime: true });
+  });
+
+  test("a single member's next period grants 0 - tokens are bought, never granted", () => {
+    const m = hubMemberFor({ ...fixture(), pkg: single, bookings: [], waitlist: [], graceTokens: [] });
+    expect(m.nextPeriod.granted).toBe(0);
+    expect(m.lastPeriod.granted).toBe(0);
+    expect(m.tokens).toMatchObject({ granted: 0, left: 0, perPurchase: true });
+    // An ops comp for the last period still shows as granted.
+    expect(hubMemberFor({ ...fixture(), pkg: single, prevTokenPeriod: { granted: 1 } }).lastPeriod.granted).toBe(1);
+    // Monthly packages are unchanged.
+    expect(hubMemberFor(fixture()).nextPeriod.granted).toBe(12);
+  });
+
+  test('viaSingle marks the rows paid with a purchased single token', () => {
+    const { spent, reserved } = periodRows({
+      bookings: [
+        b('s', { graceTokenId: 'single_cs_1' }),
+        b('g', { date: '2026-09-21', graceTokenId: 'grace-1' }),
+        b('p', { date: '2026-09-22' }),
+      ],
+      waitlist: [{ id: 'w_jordan', sessionId: 'w', athleteId: 'jordan', periodKey: '2026-09-01', date: '2026-09-23' }],
+      periodKey: '2026-09-01',
+    });
+    expect(spent.map((r) => [r.id, r.viaGrace, r.viaSingle])).toEqual([
+      ['s', true, true],
+      ['g', true, false],
+      ['p', false, false],
+    ]);
+    expect(reserved.map((r) => r.viaSingle)).toEqual([false]);
+  });
+});

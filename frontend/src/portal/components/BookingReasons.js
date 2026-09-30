@@ -24,6 +24,8 @@ export function capReachedCopy() {
 /** The typed booking-rejection reasons (routing lane, contract v2.1 §12/pin D/H). */
 export function reasonCopy(reason) {
   if (reason === 'no-tokens-left') return 'No tokens left this period.';
+  // The single token (ruling 2026-09-29/30): tokens are bought, never reset.
+  if (reason === 'no-session-token') return 'No session token left - buy one to book.';
   if (reason === 'outside-window') return "That date isn't open for booking yet.";
   if (reason === 'cap-reached') return capReachedCopy();
   // v2.0.1 (Sprint 18): Elite's per-day frequency caps.
@@ -75,9 +77,15 @@ export function SeeMembershipLink({ onClick, style }) {
  * bookings.cancelReason (pin G, contract v2.1): the system reasons a
  * cancelled row states plainly rather than leaving blank — a member's own
  * cancellation ('member') needs no explanation and renders nothing.
+ * `singleToken` (the row was paid with a bought single token, ruling
+ * 2026-09-29/30): an academy cancel returns that token instead of adding a
+ * bonus; 'double-spend' is the server guard releasing a second booking made
+ * with a token another booking already used.
  */
-export function cancelReasonCopy(reason) {
+export function cancelReasonCopy(reason, { singleToken = false } = {}) {
+  if (reason === 'session-cancelled' && singleToken) return 'Cancelled by the academy - your session token was returned.';
   if (reason === 'session-cancelled') return 'Cancelled by the academy — a bonus token was added.';
+  if (reason === 'double-spend') return 'Released - this session token was already used for another booking.';
   if (reason === 'lapsed') return 'Cancelled — membership lapsed.';
   if (reason === 'downgrade') return 'Cancelled — package changed.';
   return null;

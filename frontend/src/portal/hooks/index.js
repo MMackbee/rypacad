@@ -133,10 +133,13 @@ import {
   TOKEN_PACKAGES,
   normalizeAnchorDay,
   packageById,
+  periodFallback,
   periodFor,
   tokensFor,
   windowDaysFor,
 } from '../data/packages';
+import { billingStatusOf } from '../data/billingCopy';
+import { isSingleTokenId } from '../data/singleToken';
 import {
   SEASON,
   SEASON_BOUNDS,
@@ -390,6 +393,22 @@ function tokensWithNextPeriod(pkg, bookings, anchorDay, today, opts = {}) {
   return { ...position, nextPeriod: { periodKey: nextPeriodKey, booked } };
 }
 
+/**
+ * The position read live with everything that moves it (single token, ruling
+ * 2026-09-29/30: purchased tokens ARE grace tokens, waitlist spots hold them,
+ * a comp is a tokenPeriods doc). Read errors propagate - never a false 0.
+ */
+export async function liveTokens(athleteId, pkg, bookings, anchorDay, today, withNext = false) {
+  if (!pkg) return null;
+  const [graceTokens, waitlist, tokenPeriod] = await Promise.all([
+    fetchGraceTokensByAthlete(athleteId),
+    fetchWaitlistByAthlete(athleteId),
+    fetchTokenPeriod(athleteId, periodFor(today, anchorDay).periodKey),
+  ]);
+  const derive = withNext ? tokensWithNextPeriod : deriveTokens;
+  return withGraceReasons(derive(pkg, bookings, anchorDay, today, { graceTokens, waitlist, tokenPeriod }), graceTokens);
+}
+
 /** Sort key: chronological, then block order (session ids end in the block index). */
 /**
  * Yannick's frequency line (pin K): non-cancelled 'mental' bookings in
@@ -490,9 +509,10 @@ async function liveSchedule(today) {
   const anchorDay = normalizeAnchorDay(ctx.household?.periodAnchorDay);
   const currentPeriodKey = periodFor(today, anchorDay).periodKey;
 
-  const [waitlistEntries, graceTokens] = await Promise.all([
+  const [waitlistEntries, graceTokens, tokenPeriod] = await Promise.all([
     fetchWaitlistByAthlete(ctx.athlete.id),
     fetchGraceTokensByAthlete(ctx.athlete.id),
+    fetchTokenPeriod(ctx.athlete.id, currentPeriodKey),
   ]);
 
   // Join bookings AND waitlist entries to their session docs in ONE fetch -
@@ -538,6 +558,7 @@ async function liveSchedule(today) {
       status: b.status,
       source,
       cancellable: b.status === 'confirmed' && b.date > today && source !== 'calendly',
+      singleToken: isSingleTokenId(b.graceTokenId),
       // Contract v2.1, pin G: present on a cancelled row only - absent
       // (null) on every other status, never invented.
       cancelReason: b.cancelReason ?? null,
@@ -567,7 +588,7 @@ async function liveSchedule(today) {
     // Contract v2.1: now derived with the athlete's real grace tokens and
     // waitlist entries (pin B's `reserved`), not the Part 1 empty arrays.
     tokens: withGraceReasons(
-      deriveTokens(ctx.pkg, ctx.bookings, anchorDay, today, { graceTokens, waitlist: waitlistEntries }),
+      deriveTokens(ctx.pkg, ctx.bookings, anchorDay, today, { graceTokens, waitlist: waitlistEntries, tokenPeriod }),
       graceTokens
     ),
   };
@@ -634,7 +655,7 @@ async function liveBooking(today) {
     const household = athlete.householdId ? await fetchHousehold(athlete.householdId) : null;
     const anchorDay = normalizeAnchorDay(household?.periodAnchorDay);
     windowDays = windowDaysFor(pkg);
-    tokens = deriveTokens(pkg, bookings, anchorDay, today);
+    tokens = await liveTokens(athlete.id, pkg, bookings, anchorDay, today);
     identity = { role: 'athlete', athleteId: athlete.id, householdId: athlete.householdId };
   } else {
     identity = { role: 'parent', householdId: who.profile.householdId };
@@ -992,7 +1013,7 @@ export function useBooking({ variant = 'open', today = todayISO(), practice = fa
     // means 0 tokens: every week skips at 'period limit' (code review
     // 2026-09-04, finding 1's "limit > 0" lesson still applies - a real
     // zero is not unlimited).
-    const limit = pkg ? (pkg.tokens === null ? Infinity : pkg.tokens ?? 0) : 0;
+    const limit = pkg ? (pkg.tokens === null ? Infinity : periodFallback(pkg)) : 0; // single: 0 (bought, never granted)
     const bookings = await fetchBookings(
       forAthleteId,
       identity.role === 'parent' ? { householdId: identity.householdId } : {}
@@ -1378,7 +1399,7 @@ async function liveSpecialistSlots(specialistId, athleteIdOverride, today) {
     ...d,
     capReached: specialistId === 'mental' && coachingFor(bookings, today, pkg, d.date.slice(0, 7)).capReached,
   }));
-  const tokens = tokensWithNextPeriod(pkg, bookings, anchorDay, today);
+  const tokens = await liveTokens(athleteId, pkg, bookings, anchorDay, today, true);
   const capReached = specialistId === 'mental' && coachingFor(bookings, today, pkg).capReached;
   // Sprint 20 (spec 6.1): Calendly only when the registry says so AND a URL
   // is configured; otherwise the in-app list, so seed/emulator keep working.
@@ -1387,7 +1408,7 @@ async function liveSpecialistSlots(specialistId, athleteIdOverride, today) {
     days, tokens, capReached,
     bookingMode: calendlyUrl ? 'calendly' : 'in-app',
     calendlyUrl,
-    billingStatus: athlete.billing?.status ?? 'active',
+    billingStatus: billingStatusOf(athlete),
     bookingOpen: bookingOpen(Date.now(), pkg),
     athlete: { id: athlete.id, name: athlete.name ?? null, loginEmail: athlete.loginEmail ?? null },
     guardian: { name: household?.guardian?.name ?? null, email: household?.guardian?.email ?? null },
@@ -1678,10 +1699,10 @@ async function liveChildCard(a, today, anchorDay) {
     contract,
     packageId: a.packageId ?? null,
     // Sprint 20 (spec 4.4): the parent home banner and Pay button key off this; absent == active.
-    billingStatus: a.billing?.status ?? 'active',
+    billingStatus: billingStatusOf(a),
     loginEmail,
     login,
-    tokens: deriveTokens(pkg, bookings, anchorDay, today),
+    tokens: await liveTokens(a.id, pkg, bookings, anchorDay, today),
   };
 }
 
@@ -1780,8 +1801,8 @@ async function liveHouseholdAthletes(today) {
         name: a.name,
         packageId: a.packageId ?? null,
         packageName: pkg ? pkg.name : null,
-        billingStatus: a.billing?.status ?? 'active',
-        tokens: deriveTokens(pkg, bookings, anchorDay, today),
+        billingStatus: billingStatusOf(a),
+        tokens: await liveTokens(a.id, pkg, bookings, anchorDay, today),
       };
     })
   );
@@ -1972,7 +1993,7 @@ async function liveMemberEntry(a, today, anchorDay) {
   return {
     athleteId: a.id,
     name: a.name,
-    billingStatus: a.billing?.status ?? 'active',
+    billingStatus: billingStatusOf(a),
     package: pkg
       ? {
           id: pkg.id,
@@ -2226,6 +2247,7 @@ function reservationRow(s, b, today, instructor, anchorDay, currentPeriodKey) {
     bookingId: b.bookingId,
     status: b.status,
     cancellable: b.status === 'confirmed' && s.date > today && source !== 'calendly',
+    singleToken: isSingleTokenId(b.graceTokenId),
     // Contract v2.1, pin G: present on a cancelled row only.
     cancelReason: b.cancelReason ?? null,
     cancelledBy: b.cancelledBy ?? null,
@@ -2280,7 +2302,7 @@ async function liveHouseholdReservations(today) {
     if (!s || !bucket) continue; // dropped, same null-resolve rule as useSchedule/liveSchedule above
     const row = reservationRow(
       s,
-      { bookingId: b.id, status: b.status, athleteId: b.athleteId, cancelReason: b.cancelReason, cancelledBy: b.cancelledBy, source: b.source },
+      { bookingId: b.id, status: b.status, athleteId: b.athleteId, cancelReason: b.cancelReason, cancelledBy: b.cancelledBy, source: b.source, graceTokenId: b.graceTokenId },
       today,
       null,
       anchorDay,
@@ -2792,12 +2814,13 @@ async function liveAthleteDashboard(today) {
   const upcoming = active.filter((b) => b.date >= today).sort(byDateThenId);
   const contractMinutes = ctx.athlete.contractMinutes ?? null;
 
-  // Sprint 20 (load time): the three reads that follow the context are
-  // independent of each other - one round trip, not three.
-  const [nextSessions, logs, published] = await Promise.all([
+  // Sprint 20 (load time): the reads that follow the context are
+  // independent of each other - one round trip, not four.
+  const [nextSessions, logs, published, tokens] = await Promise.all([
     upcoming.length ? fetchSessionsByIds([upcoming[0].sessionId]) : Promise.resolve([]),
     contractMinutes != null ? fetchContractLogs(ctx.athlete.id) : Promise.resolve(null),
     fetchAthleteDiagnostics(ctx.athlete.id, { publishedOnly: true }),
+    liveTokens(ctx.athlete.id, ctx.pkg, ctx.bookings, normalizeAnchorDay(ctx.household?.periodAnchorDay), today),
   ]);
 
   let nextSession = null;
@@ -2830,10 +2853,10 @@ async function liveAthleteDashboard(today) {
       name: ctx.athlete.name,
       fullName: ctx.athlete.name,
       date: longDayLabel(today),
-      billingStatus: ctx.athlete.billing?.status ?? 'active',
+      billingStatus: billingStatusOf(ctx.athlete),
       // `allowance` -> `tokens` (contract v2.0): the AthleteDashboard
       // allowance card becomes the tokens card (UI pin).
-      tokens: deriveTokens(ctx.pkg, ctx.bookings, normalizeAnchorDay(ctx.household?.periodAnchorDay), today),
+      tokens,
     },
     nextSession,
     contract,
@@ -3530,7 +3553,7 @@ async function liveAdminDashboard(today) {
     } else membership.active += 1;
   }
   // Sprint 20 (spec 4.4/7): athletes still on checkout - an ATHLETE count beside the household counts, so the dashboard agrees with the sign-ups report.
-  membership.pending = athletes.filter((a) => a.billing?.status === 'pending').length;
+  membership.pending = athletes.filter((a) => billingStatusOf(a) === 'pending').length;
 
   const publishedDiagnosticAthleteIds = diagnostics
     .filter((d) => d.status === 'published')
