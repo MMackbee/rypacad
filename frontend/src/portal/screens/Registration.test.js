@@ -5,6 +5,10 @@ import { VERIFY_EMAIL_SENDER } from '../data/authCopy';
 
 const mockCalls = [];
 let mockCreateError = null;
+// Not `virtual`: callables.js is on disk, and a virtual mock is keyed by the
+// extension-less path - a suite that loaded the real Registration.js earlier
+// in the same jest worker (PortalRoutes) left `callables.js` in the shared
+// resolver cache, so the mock was skipped and createFamily ran for real.
 jest.mock('../hooks/callables', () => ({
   callCreateFamily: async (payload) => {
     mockCalls.push(['createFamily', payload]);
@@ -13,7 +17,7 @@ jest.mock('../hooks/callables', () => ({
   },
   callAddAthletes: async (payload) => { mockCalls.push(['addAthletes', payload]); return { householdId: 'h1', athleteIds: ['a2'] }; },
   callCreateCheckoutSession: async () => ({ url: 'https://checkout.stripe.test/x' }),
-}), { virtual: true });
+}));
 jest.mock('./RegistrationSuccess', () => ({ __esModule: true, default: ({ result, onFinish }) => <button type="button" onClick={() => onFinish('/portal/family')}>SUCCESS {result.athleteIds.join(',')}</button> }));
 
 beforeEach(() => { mockCalls.length = 0; mockCreateError = null; });
@@ -246,7 +250,8 @@ test('the contract is its own step: explained, per athlete, and it needs an answ
   await r.click('Continue');
   expect(r.text()).toContain('Step 6 of 6');
   await r.click('Sign and submit');
-  expect(mockCalls[0][1].athletes[0]).toEqual({ name: 'Jordan', dob: '2012-06-17', packageId: 't-12', contractMinutes: 45, handicap: null, loginEmail: null });
+  // The draft predates the facility add-on: it restores unticked and sends false.
+  expect(mockCalls[0][1].athletes[0]).toEqual({ name: 'Jordan', dob: '2012-06-17', packageId: 't-12', contractMinutes: 45, handicap: null, loginEmail: null, facilityRequested: false });
   await r.unmount();
   window.sessionStorage.clear();
 });
@@ -342,10 +347,125 @@ test('link mode skips to athletes and calls addAthletes', async () => {
   await r.click('Add athlete');
   expect(mockCalls[0][0]).toBe('addAthletes');
   expect(mockCalls[0][1]).toEqual({
-    athletes: [{ name: 'Reese', dob: '2014-03-02', packageId: 't-6', contractMinutes: null, handicap: null, loginEmail: null }],
+    athletes: [{ name: 'Reese', dob: '2014-03-02', packageId: 't-6', contractMinutes: null, handicap: null, loginEmail: null, facilityRequested: false }],
     emergencyContact: null, medical: null,
   });
   await r.unmount();
+});
+
+test('link mode: the facility add-on ticked under the packages is sent; there is no consent step to ask for the waiver', async () => {
+  const r = await renderScreen(<Registration bare mode="link" account={{ email: 'dana@email.com' }} />);
+  await r.fill('Athlete name', 'Reese');
+  await r.fill('Date of birth', '2014-03-02');
+  await r.click('Continue');
+  await r.click('6 tokens');
+  await r.click('Add 24/7 facility access for Reese');
+  await r.click('Continue');
+  await r.click('Not yet for Reese');
+  await r.click('Add athlete');
+  expect(mockCalls[0][0]).toBe('addAthletes');
+  expect(mockCalls[0][1].athletes[0]).toMatchObject({ name: 'Reese', packageId: 't-6', facilityRequested: true });
+  await r.unmount();
+});
+
+describe('facility add-on at sign-up (owner request, Mike 2026-09-30)', () => {
+  const WAIVER_ERROR = 'Tick the facility access waiver to keep the add-on, or untick facility access on the package step.';
+
+  async function toPackageStep(r) {
+    await r.click('Parent or guardian');
+    await r.click('Continue');
+    await r.fill('Your name', 'Dana Whitfield');
+    await r.fill('Mobile', '(612) 555-0148');
+    await r.click('Continue');
+    await r.fill('Athlete name', 'Jordan');
+    await r.fill('Date of birth', '2012-06-17');
+    await r.click('Continue');
+  }
+
+  test('ticked: the waiver turns required and blocks submit until ticked; the payload carries both', async () => {
+    window.sessionStorage.clear();
+    const r = await renderScreen(<Registration bare mode="signup" account={{ email: 'dana@email.com' }} onRefresh={async () => {}} />);
+    await toPackageStep(r);
+    await r.click('12 tokens');
+    await r.click('Add 24/7 facility access for Jordan');
+    await r.click('Continue');
+    await r.click('Not yet for Jordan');
+    await r.click('Continue');
+    expect(r.text()).toContain('Needed for the facility access you picked');
+    await r.fill('Type your full legal name', 'Dana Whitfield');
+    await r.click('Sign and submit');
+    expect(mockCalls).toHaveLength(0);
+    expect(r.text()).toContain('Step 6 of 6');
+    expect(r.container.querySelector('[data-field-error]').textContent).toBe(WAIVER_ERROR);
+    expect(r.text()).toContain("Something above needs fixing - it's marked in red.");
+    await r.click('Facility access waiver');
+    expect(r.text()).not.toContain(WAIVER_ERROR);
+    await r.click('Sign and submit');
+    expect(mockCalls[0][0]).toBe('createFamily');
+    expect(mockCalls[0][1].athletes[0]).toMatchObject({ packageId: 't-12', facilityRequested: true });
+    expect(mockCalls[0][1].consents).toEqual({ dataCollection: true, videoCapture: true, mediaRelease: false, facilityAccess: true });
+    await r.unmount();
+    window.sessionStorage.clear();
+  });
+
+  test('unticking on the package step makes the waiver optional again', async () => {
+    window.sessionStorage.clear();
+    const r = await renderScreen(<Registration bare mode="signup" account={{ email: 'dana@email.com' }} onRefresh={async () => {}} />);
+    await toPackageStep(r);
+    await r.click('12 tokens');
+    await r.click('Add 24/7 facility access for Jordan');
+    await r.click('Continue');
+    await r.click('Not yet for Jordan');
+    await r.click('Continue');
+    await r.fill('Type your full legal name', 'Dana Whitfield');
+    await r.click('Sign and submit');
+    expect(r.text()).toContain(WAIVER_ERROR);
+    await r.click('‹ Back');
+    await r.click('‹ Back');
+    await r.click('Add 24/7 facility access for Jordan');
+    await r.click('Continue');
+    await r.click('Continue');
+    expect(r.text()).toContain('Optional - needed only for the facility access add-on');
+    await r.click('Sign and submit');
+    expect(mockCalls[0][1].athletes[0].facilityRequested).toBe(false);
+    expect(mockCalls[0][1].consents.facilityAccess).toBe(false);
+    await r.unmount();
+    window.sessionStorage.clear();
+  });
+
+  test('a tick left behind on a switch to Elite neither blocks the consent step nor reaches the payload', async () => {
+    window.sessionStorage.clear();
+    const r = await renderScreen(<Registration bare mode="signup" account={{ email: 'dana@email.com' }} onRefresh={async () => {}} />);
+    await toPackageStep(r);
+    await r.click('12 tokens');
+    await r.click('Add 24/7 facility access for Jordan');
+    await r.click('Elite');
+    expect(r.text()).toContain('24/7 facility access · Included with Elite');
+    await r.click('Continue');
+    await r.click('Not yet for Jordan');
+    await r.click('Continue');
+    expect(r.text()).not.toContain('Needed for the facility access you picked');
+    await r.fill('Type your full legal name', 'Dana Whitfield');
+    await r.click('Sign and submit');
+    expect(mockCalls[0][1].athletes[0]).toMatchObject({ packageId: 'elite', facilityRequested: false });
+    await r.unmount();
+    window.sessionStorage.clear();
+  });
+
+  test('a reload keeps the tick (the draft carries it)', async () => {
+    window.sessionStorage.clear();
+    const account = { uid: 'u-fac', email: 'dana@email.com' };
+    const first = await renderScreen(<Registration bare mode="signup" account={account} />);
+    await toPackageStep(first);
+    await first.click('16 tokens');
+    await first.click('Add 24/7 facility access for Jordan');
+    await first.unmount();
+    const second = await renderScreen(<Registration bare mode="signup" account={account} />);
+    expect(second.text()).toContain('Step 4 of 6');
+    expect(second.button('Add 24/7 facility access for Jordan').getAttribute('aria-checked')).toBe('true');
+    await second.unmount();
+    window.sessionStorage.clear();
+  });
 });
 
 test('link mode sends the contact the parent typed', async () => {

@@ -253,6 +253,10 @@ export function hubMemberFor(args) {
     // can read "Facility access: paid - waiver pending" (facility billing
     // active, consent absent) versus "active" (both).
     facilityAccessConsent: Boolean(athlete.facilityAccessConsent),
+    // The add-on ticked at sign-up (owner 2026-09-30; createFamily /
+    // addAthletes write it, absent == false): the home pending card offers
+    // its checkout once the membership is paid (billingCopy facilityRequestState).
+    facilityRequested: athlete.facilityRequested === true,
     // Sprint 20 (spec 4.4): the per-athlete paid state that gates booking.
     // Absent == active for every athlete provisioned before this sprint;
     // `facility` is the add-on subscription's own state (null == no add-on).

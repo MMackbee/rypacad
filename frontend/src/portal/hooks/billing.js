@@ -17,6 +17,7 @@
  */
 
 import { useEffect, useState } from 'react';
+import { facilityRequestState } from '../data/billingCopy';
 import { foldBeforeFirstPeriod, hubMemberFor, positionPeriodFor, statusFor } from '../data/billingHub';
 import { addDaysISO, todayISO } from '../data/calendar';
 import { normalizeAnchorDay, packageById, periodFor } from '../data/packages';
@@ -138,6 +139,20 @@ export function pendingOf(members) {
     }));
 }
 
+/**
+ * The facility add-ons ticked at sign-up that are still to pay (owner
+ * request, Mike 2026-09-30): `{ athleteId, name, state }`, state 'pay' (the
+ * membership is active - PendingBanner shows the add-on's own Pay button)
+ * or 'waiting' (the membership is still pending - a line, no button).
+ * Separate from pendingOf on purpose: an unpaid add-on never blocks
+ * booking, so it must not turn the household status to 'pending'.
+ */
+export function facilityPendingOf(members) {
+  return (members || [])
+    .map((m) => ({ athleteId: m.athleteId, name: m.name, state: facilityRequestState(m) }))
+    .filter((r) => r.state !== null);
+}
+
 /** The first period's start while any member's position is still before it - the hero's "Tokens start" date (tester report 2026-09-30). null from Nov 1, and for an all-Elite household. */
 export function tokensStartOf(members) {
   return members.find((m) => m.period?.preSeason)?.period.start ?? null;
@@ -159,6 +174,7 @@ async function liveHub(householdId, today) {
     household: householdView(household, anchorDay),
     members,
     status: statusFor(membership, { resetsOn, tokensStartOn: tokensStartOf(members), anchorDay, pendingAthletes: pendingOf(members), allPerPurchase: allPerPurchaseOf(members) }),
+    facilityPending: facilityPendingOf(members),
     portalUrl: STRIPE_PORTAL_URL,
   };
 }
@@ -189,6 +205,7 @@ async function liveMyTokens(today) {
     household: household ? householdView(household, anchorDay) : null,
     member,
     status: statusFor(membership, { resetsOn, tokensStartOn: tokensStartOf([member]), anchorDay, pendingAthletes: pendingOf([member]) }),
+    facilityPending: facilityPendingOf([member]),
   };
 }
 
@@ -249,6 +266,7 @@ function seedBillingHub(today, variant) {
     household: { id: 'whitfield', name: HOUSEHOLD.name, anchorDay, membership, stripeCustomerId: null },
     members,
     status: statusFor(membership, { resetsOn: addDaysISO(periodEnd, 1), tokensStartOn: tokensStartOf(members), anchorDay, pendingAthletes: pendingOf(members) }),
+    facilityPending: facilityPendingOf(members),
     portalUrl: STRIPE_PORTAL_URL,
   };
 }
@@ -262,6 +280,7 @@ function seedMyTokens(today, variant) {
     household: { id: 'whitfield', name: HOUSEHOLD.name, anchorDay, membership, stripeCustomerId: null },
     member,
     status: statusFor(membership, { resetsOn: addDaysISO(periodEnd, 1), tokensStartOn: tokensStartOf([member]), anchorDay, pendingAthletes: pendingOf([member]) }),
+    facilityPending: facilityPendingOf([member]),
   };
 }
 
@@ -278,8 +297,8 @@ function useTokenGens() {
 }
 
 /**
- * `{ data: { household, members, status, portalUrl } | null, loading,
- * error }` — the Billing hub. A parent gets their own household; staff pass
+ * `{ data: { household, members, status, facilityPending, portalUrl } |
+ * null, loading, error }` — the Billing hub. A parent gets their own household; staff pass
  * `householdId` for any household. `variant` is harness-only ('populated'
  * | 'past_due' | 'lapsed'); live routes pass nothing. `practice` (the
  * onboarding walkthrough) pins the seed: no live read, no real Pay button.
@@ -295,8 +314,9 @@ export default function useBillingHub({ variant = 'populated', householdId = nul
 }
 
 /**
- * `{ data: { household, member, status } | null, loading, error }` — the
- * signed-in athlete's own token row, the same view model the hub renders.
+ * `{ data: { household, member, status, facilityPending } | null, loading,
+ * error }` — the signed-in athlete's own token row, the same view model the
+ * hub renders.
  * `practice` pins the seed, as for useBillingHub.
  */
 export function useMyTokens({ variant = 'populated', practice = false } = {}) {

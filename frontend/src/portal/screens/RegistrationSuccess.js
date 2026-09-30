@@ -7,8 +7,16 @@ import { Body, Card, ScreenTitle, SectionLabel, Tick } from '../components/Primi
 import { STUDENT_LOGIN_CTA, VERIFIED, VERIFY_EMAIL_SENDER } from '../data/authCopy';
 import { CONFIRMING, PAY_NOW } from '../data/billingCopy';
 import { BOOKING_OPENS_LABEL, bookingOpen } from '../data/calendar';
-import { packageById, PRICES_RELEASED, SIBLING_DISCOUNT_NOTE, siblingDiscountApplies } from '../data/packages';
+import { FACILITY_ACCESS, packageById, PRICES_RELEASED, SIBLING_DISCOUNT_NOTE, siblingDiscountApplies } from '../data/packages';
+import { wantsFacility } from '../data/signup';
 import { fetchHouseholdAthletes, isLive } from '../hooks/live';
+
+/**
+ * Under the Pay button of an athlete who kept the facility add-on (owner
+ * 2026-09-30). No button: createCheckoutSession refuses the add-on until
+ * the membership is paid, so the family page offers it then.
+ */
+export const FACILITY_RECEIPT_LINE = `Facility access · $${FACILITY_ACCESS.price}/month - pay after the membership`;
 
 /**
  * Until 00:00 Nov 1 America/Chicago every checkout prepays November in full
@@ -53,7 +61,7 @@ function useFamilyAthletes(householdId, enabled) {
  */
 export default function RegistrationSuccess({ bare = false, mode = 'signup', form, result, account, onFinish }) {
   const athleteMode = form.mode === 'athlete';
-  const rows = form.athletes.map((a, i) => ({ ...a, athleteId: result?.athleteIds?.[i] ?? null, pkg: packageById(a.packageId) }));
+  const rows = form.athletes.map((a, i) => ({ ...a, athleteId: result?.athleteIds?.[i] ?? null, pkg: packageById(a.packageId), facility: wantsFacility(a) }));
   const family = useFamilyAthletes(result?.householdId, mode === 'link');
   const siblingDiscount = rows.some((r) => r.pkg && r.pkg.kind !== 'single') && siblingDiscountApplies(family?.length ? family : rows);
   const prepaysNovember = Date.now() < PREPAYS_NOVEMBER_UNTIL;
@@ -106,7 +114,10 @@ export default function RegistrationSuccess({ bare = false, mode = 'signup', for
           ) : null}
           <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
             {rows.map((r) => (
-              <PayButton key={r.key} athleteId={r.athleteId} email={account?.email ?? null} label={payLabel(r)} />
+              <React.Fragment key={r.key}>
+                <PayButton athleteId={r.athleteId} email={account?.email ?? null} label={payLabel(r)} />
+                {r.facility ? <Body size={12}>{FACILITY_RECEIPT_LINE}</Body> : null}
+              </React.Fragment>
             ))}
           </div>
         </Card>

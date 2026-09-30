@@ -35,10 +35,12 @@ export function hasUnclaimedLogin(athlete) {
  * @param {?object} [a.athlete]  `{ name, loginEmail, login }` off the home's data.
  * @param {boolean} [a.self]     The athlete reading their own home: "you", no login line.
  * @param {string} [a.host]      Where the portal lives, for the sign-in line.
+ * @param {boolean} [a.facilityDue]  The facility add-on was ticked at sign-up and is
+ *   not paid yet (hooks/billing.js facilityPendingOf; owner 2026-09-30).
  * @param {number} [a.now]
  * @return {?{ title: string, lines: string[], book: ?string, season: boolean }}
  */
-export function whatsNextFor({ packageId, product = null, athlete = null, self = false, host = '', now = Date.now() }) {
+export function whatsNextFor({ packageId, product = null, athlete = null, self = false, host = '', facilityDue = false, now = Date.now() }) {
   if (product === 'facility') return null;
   const pkg = packageById(packageId);
   if (!pkg || (pkg.kind !== 'tokens' && pkg.kind !== 'elite')) return null;
@@ -63,6 +65,10 @@ export function whatsNextFor({ packageId, product = null, athlete = null, self =
   if (pkg.kind === 'tokens' && today < SEASON_BOUNDS.start) lines.push(`Sessions start ${SEASON_START_LABEL}.`);
   if (!self && hasUnclaimedLogin(athlete)) {
     lines.push(`${name} can sign in at ${host}/portal/signin with ${athlete.loginEmail}.`);
+  }
+  // Its Pay button sits on the same page, on the pending card below.
+  if (facilityDue && pkg.kind === 'tokens') {
+    lines.push(`Facility access: pay from your ${self ? 'home' : 'family'} page whenever you're ready.`);
   }
   return { title: WHATS_NEXT_TITLE, lines, book, season: pkg.kind === 'tokens' };
 }

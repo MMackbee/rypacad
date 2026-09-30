@@ -3,7 +3,7 @@
  * re-checks everything; this is the client's first pass so the form can say
  * what is wrong before the round trip. Payload shapes are contract 1.2/1.3.
  */
-import { ALL_PACKAGES } from './packages';
+import { ALL_PACKAGES, packageById } from './packages';
 
 export const EMAIL_RE = /^\S+@\S+\.\S+$/;
 export const TIER_MINUTES = [20, 45, 90];
@@ -21,8 +21,43 @@ let seq = 0;
 /** `contractPicked` is form-only (never sent): it tells "Not yet" apart from no answer. */
 export function newAthleteEntry() {
   seq += 1;
-  return { key: `new-${seq}`, name: '', dob: '', packageId: null, contractMinutes: null, contractPicked: false, handicap: '', ownLogin: false, loginEmail: '' };
+  return {
+    key: `new-${seq}`, name: '', dob: '', packageId: null, contractMinutes: null, contractPicked: false, handicap: '', ownLogin: false, loginEmail: '',
+    facilityRequested: false,
+  };
 }
+
+/** A draft saved before the facility add-on existed restores unticked (still draft v1). */
+export function toAthleteEntry(a) {
+  return { ...a, facilityRequested: a?.facilityRequested === true };
+}
+
+/**
+ * The $300/month facility add-on, ticked under the package cards (owner
+ * request, Mike 2026-09-30). 'offer' on the monthly token packages;
+ * 'included' for Elite (24/7 access is part of it); null for the one-time
+ * single token, which never has it, and for no pick yet. A tick is a request,
+ * never a charge: the add-on's checkout opens once the membership is paid
+ * (checkout.js refuses 'billing-not-active').
+ */
+export function facilityOptionFor(packageId) {
+  const kind = packageId == null ? null : packageById(packageId)?.kind;
+  if (kind === 'tokens') return 'offer';
+  return kind === 'elite' ? 'included' : null;
+}
+
+/** A tick that still counts: one left on before switching to Elite or the single token means nothing (createFamily stores false too). */
+export function wantsFacility(a) {
+  return Boolean(a) && a.facilityRequested === true && facilityOptionFor(a.packageId) === 'offer';
+}
+
+/** The consent step's facility waiver turns required once any athlete keeps the add-on. */
+export function facilityWaiverRequired(athletes) {
+  return (athletes || []).some(wantsFacility);
+}
+export const FACILITY_WAIVER_FOOTNOTE = 'Needed for the facility access you picked';
+export const FACILITY_WAIVER_REQUIRED =
+  'Tick the facility access waiver to keep the add-on, or untick facility access on the package step.';
 
 /** The contract step is answered by a goal (20/45/90) or by "Not yet"; a stale 95 is not an answer. */
 export function contractAnswered(a) {
@@ -119,6 +154,7 @@ function athleteBody(a) {
     contractMinutes: a.contractMinutes ?? null,
     handicap: normalizeHandicap(a.handicap) ?? null,
     loginEmail: a.ownLogin && a.loginEmail ? lower(a.loginEmail) : null,
+    facilityRequested: wantsFacility(a),
   };
 }
 

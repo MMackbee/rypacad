@@ -68,12 +68,13 @@ function realDate(iso) {
 /**
  * One athlete entry, normalized. Order: athlete-name-required, dob-invalid,
  * unknown-package, contract-tier, handicap-range, child-email-invalid,
- * child-email-is-guardian.
+ * child-email-is-guardian, facility-requested-invalid.
  * @param {*} a The raw entry.
  * @param {{todayISO: string, guardianEmail: string, mode: string}} opts
  *     Chicago today, the guardian's email (lower-cased) and the mode.
  * @return {{name: string, dob: string, packageId: string,
- *     contractMinutes: ?number, handicap: ?number, loginEmail: ?string}}
+ *     contractMinutes: ?number, handicap: ?number, loginEmail: ?string,
+ *     facilityRequested: boolean}}
  */
 function normalizeAthlete(a, opts) {
   const e = a || {};
@@ -113,8 +114,17 @@ function normalizeAthlete(a, opts) {
           'Use a different email from the guardian\'s.');
     }
   }
+  // The facility add-on ticked under the package cards (owner request, Mike
+  // 2026-09-30). Optional: a tab still on the bundle from before it omits
+  // the field, which means not asked. Only a real boolean is taken.
+  const facilityRequested = e.facilityRequested === undefined ? false :
+      e.facilityRequested;
+  if (typeof facilityRequested !== 'boolean') {
+    throw new ValidationError('facility-requested-invalid',
+        'Tick facility access or leave it unticked.');
+  }
   return {name, dob, packageId: e.packageId, contractMinutes: minutes,
-    handicap, loginEmail};
+    handicap, loginEmail, facilityRequested};
 }
 
 /**

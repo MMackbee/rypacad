@@ -35,9 +35,10 @@ test('happy path normalizes: trims, lower-cases child email, nulls', () => {
   const p = v.validateFamilyPayload(base(), {todayISO: TODAY});
   assert.deepEqual(p.contact, {name: 'Dana Whitfield', email: 'dana@email.com',
     phone: '(612) 555-0148', relationship: 'Mother'});
+  // The current live payload has no facilityRequested: not asked.
   assert.deepEqual(p.athletes[0], {name: 'Jordan', dob: '2012-06-17',
     packageId: 't-12', contractMinutes: 45, handicap: 12,
-    loginEmail: 'jordan@email.com'});
+    loginEmail: 'jordan@email.com', facilityRequested: false});
   assert.deepEqual(p.athletes[1].loginEmail, null);
   assert.deepEqual([p.emergencyContact, p.medical, p.signatureName],
       [null, 'Peanut allergy', 'Dana Whitfield']);
@@ -98,6 +99,38 @@ test('every refusal, in the contract order', () => {
     videoCapture: false}}), 'consents-required');
   refuses(Object.assign(base(), {signatureName: ''}), 'consents-required');
 });
+
+test('facilityRequested: a boolean or absent; anything else refused', () => {
+  const athletesOf = (...flags) => v.validateFamilyPayload(Object.assign(base(),
+      {athletes: flags.map((f, i) => kid({name: `K${i}`, loginEmail: null,
+        facilityRequested: f}))}), {todayISO: TODAY}).athletes
+      .map((a) => a.facilityRequested);
+  assert.deepEqual(athletesOf(true, false, undefined), [true, false, false]);
+  for (const junk of [null, 'true', 1, 0, {}, []]) {
+    refuses(Object.assign(base(), {athletes: [kid({facilityRequested: junk})]}),
+        'facility-requested-invalid');
+  }
+  // Last in the entry's order: an earlier refusal still wins.
+  refuses(Object.assign(base(), {athletes: [kid({handicap: 55,
+    facilityRequested: 'yes'})]}), 'handicap-range');
+  // The validator keeps the tick on Elite; createFamily's athleteDoc drops it.
+  assert.equal(v.validateFamilyPayload(Object.assign(base(), {athletes:
+    [kid({packageId: 'elite', facilityRequested: true})]}), {todayISO: TODAY})
+      .athletes[0].facilityRequested, true);
+});
+
+test('addAthletes payload: facilityRequested passes through, absent == false',
+    () => {
+      const opts = {todayISO: TODAY, guardianEmail: 'dana@email.com'};
+      const p = v.validateAddAthletesPayload({athletes: [
+        kid({facilityRequested: true}),
+        kid({name: 'Reese', loginEmail: null})]}, opts);
+      assert.deepEqual(p.athletes.map((a) => a.facilityRequested),
+          [true, false]);
+      assert.throws(() => v.validateAddAthletesPayload(
+          {athletes: [kid({facilityRequested: 'on'})]}, opts),
+      (e) => e.reason === 'facility-requested-invalid');
+    });
 
 test('addAthletes payload: guardian email from the household', () => {
   const p = v.validateAddAthletesPayload({athletes: [kid()], medical: ' x '},

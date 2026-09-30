@@ -78,6 +78,25 @@ test("an unpaid athlete's own pending card can change their package before Pay n
   mockMine = { data: null, loading: false, error: null };
 });
 
+test("the facility add-on ticked at sign-up shows on the athlete's own home too (owner 2026-09-30)", async () => {
+  mockContract = null;
+  const pending = { status: 'pending', title: 'Payment pending', body: null, pendingAthletes: [{ athleteId: 'a1', name: 'Jordan', status: 'pending', packageId: 't-6', perPurchase: false }] };
+  mockMine = { loading: false, error: null, data: { status: pending, facilityPending: [{ athleteId: 'a1', name: 'Jordan', state: 'waiting' }] } };
+  const w = await renderScreen(<AthleteDashboard bare />);
+  expect(w.text()).toContain('Facility access · after the membership is paid');
+  await w.unmount();
+  mockMine = { loading: false, error: null, data: { status: { status: 'active' }, facilityPending: [{ athleteId: 'a1', name: 'Jordan', state: 'pay' }] } };
+  const r = await renderScreen(<AthleteDashboard bare />);
+  expect(r.text()).toContain("Facility access - pay when you're ready");
+  expect(r.text()).toContain('Facility access for Jordan');
+  await r.unmount();
+  // Back from the add-on's own checkout: nothing to pay twice while it confirms.
+  const back = await renderScreen(<AthleteDashboard bare />, { path: '/portal/home?paid=a1&product=facility' });
+  expect(back.text()).not.toContain('Facility access for Jordan');
+  await back.unmount();
+  mockMine = { data: null, loading: false, error: null };
+});
+
 test('the tokens card: "Tokens start Nov 1" before the season, "Pay to start" unpaid (tester report 2026-09-30)', async () => {
   mockContract = null;
   const t = (over) => ({ granted: 16, used: 0, reserved: 0, left: 16, unlimited: false, grace: [], startsOn: '2026-11-01', unpaid: false, ...over });

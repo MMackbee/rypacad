@@ -8,8 +8,8 @@ import { verifySentNote } from '../data/authCopy';
 import { todayISO } from '../data/calendar';
 import { SINGLE_ON_SALE, SINGLE_TOKEN } from '../data/packages';
 import {
-  EMAIL_RE, buildAddAthletesPayload, buildCreateFamilyPayload, contractAnswered, emptyEmergencyContact, newAthleteEntry,
-  toEmergencyForm, validateAthleteEntry, validateEmergencyContact,
+  EMAIL_RE, buildAddAthletesPayload, buildCreateFamilyPayload, contractAnswered, emptyEmergencyContact, facilityWaiverRequired,
+  newAthleteEntry, toAthleteEntry, toEmergencyForm, validateAthleteEntry, validateEmergencyContact,
 } from '../data/signup';
 import { AthleteStep, ConsentStep, ConsentInfoSheet, ContactStep, ContractStep, PackageStep, SubmittingOverlay, WhoStep } from './RegistrationSteps';
 import RegistrationSuccess from './RegistrationSuccess';
@@ -74,6 +74,14 @@ function readDraft(key) {
     return null;
   }
 }
+/**
+ * Still draft v1: one from before the split emergency fields holds one
+ * string (it restores into the name field), and one from before the
+ * facility add-on (owner 2026-09-30) restores its athletes unticked.
+ */
+function restoreForm(f) {
+  return { ...f, emergencyContact: toEmergencyForm(f.emergencyContact), athletes: Array.isArray(f.athletes) ? f.athletes.map(toAthleteEntry) : f.athletes };
+}
 function writeDraft(key, value) {
   if (!key) return;
   try {
@@ -92,9 +100,7 @@ export default function Registration({ variant, bare = false, mode = 'signup', a
   const [draft] = useState(() => readDraft(key));
   const [step, setStep] = useState(demo ? VARIANT_STEP[variant] ?? 0 : Math.min(draft?.step ?? 0, steps.length - 1));
   const [phase, setPhase] = useState(demo && (variant === 'submitting' || variant === 'success') ? variant : 'form');
-  // A draft from before the split emergency fields holds one string: it
-  // restores into the name field (still draft v1).
-  const [form, setForm] = useState(() => (draft?.form ? { ...draft.form, emergencyContact: toEmergencyForm(draft.form.emergencyContact) } : {
+  const [form, setForm] = useState(() => (draft?.form ? restoreForm(draft.form) : {
     mode: demo ? 'parent' : mode === 'link' ? 'parent' : null,
     contact: { name: demo ? 'Dana Whitfield' : '', email: demo ? 'dana@email.com' : account?.email ?? '', phone: demo ? '(612) 555-0148' : '', relationship: '' },
     athletes: [demo ? { ...newAthleteEntry(), key: 'demo-1', name: 'Jordan Whitfield' } : newAthleteEntry()],
@@ -159,6 +165,8 @@ export default function Registration({ variant, bare = false, mode = 'signup', a
     validateAthleteEntry(a, { todayISO: today, guardianEmail: form.contact.email, siblings: form.athletes, mode: form.mode || 'parent' })
   );
   const emergencyOk = Object.keys(validateEmergencyContact(form.emergencyContact)).length === 0;
+  // An athlete who kept the facility add-on makes its waiver required.
+  const facilityRequired = facilityWaiverRequired(form.athletes);
   const valid = {
     who: form.mode != null,
     contact: form.contact.name.trim() !== '' && EMAIL_RE.test(form.contact.email.trim()) && form.contact.phone.trim() !== '',
@@ -167,7 +175,8 @@ export default function Registration({ variant, bare = false, mode = 'signup', a
     package: form.athletes.every((a) => a.packageId != null) && athleteErrors.every((e) => !e.packageId)
       && form.athletes.every((a) => a.packageId !== SINGLE_TOKEN.id || SINGLE_ON_SALE),
     contract: form.athletes.every(contractAnswered),
-    consent: form.consents.dataCollection && form.consents.videoCapture && form.signatureName.trim() !== '',
+    consent: form.consents.dataCollection && form.consents.videoCapture && form.signatureName.trim() !== ''
+      && (!facilityRequired || form.consents.facilityAccess === true),
   }[stepId];
 
   const goBack = () => {
@@ -274,7 +283,8 @@ export default function Registration({ variant, bare = false, mode = 'signup', a
         ) : null}
         {stepId === 'consent' ? (
           <ConsentStep mode={form.mode} consents={form.consents} onChange={setConsents} signatureName={form.signatureName}
-            onSignatureChange={(v) => patch({ signatureName: v })} onOpenInfo={setInfoSheet} showErrors={showErrors} />
+            onSignatureChange={(v) => patch({ signatureName: v })} onOpenInfo={setInfoSheet} showErrors={showErrors}
+            facilityRequired={facilityRequired} />
         ) : null}
       </div>
       {phase === 'submitting' ? <SubmittingOverlay mode={mode} /> : null}

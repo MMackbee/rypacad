@@ -12,7 +12,7 @@ import { CONFIRMING, CONFIRM_TIMEOUT, confirmedLine } from '../data/billingCopy'
  * The `?paid=<athleteId>` return from Stripe (spec 4.2): the hook re-reads the
  * athlete every 5 s for 2 min; this keeps the last non-idle state on screen
  * after the hook strips the query, so "Payment received" does not vanish.
- * `whatsNext` ({ athlete, product, self, onBook, onSeason }) adds the
+ * `whatsNext` ({ athlete, product, self, facilityDue, onBook, onSeason }) adds the
  * "What's next" card under it once confirmed (owner decision 2026-09-30).
  */
 export default function PaymentConfirming({ athleteId, style, whatsNext }) {

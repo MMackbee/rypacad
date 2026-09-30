@@ -60,6 +60,10 @@ export default function AthleteDashboard({
   const mine = useMyTokens({ practice });
   const mineStatus = mine.data?.status ?? null;
   const [params] = useSearchParams();
+  // The facility add-on ticked at sign-up (owner 2026-09-30), as on the
+  // family page: hidden only while its own ?paid= return confirms.
+  const facilityPending = mine.data?.facilityPending ?? [];
+  const facilityRows = facilityPending.filter((r) => !(params.get('product') === 'facility' && r.athleteId === params.get('paid')));
   // Their own package can still change before Pay now (tester S4, 2026-09-30).
   const [changeFor, setChangeFor] = useState(null);
 
@@ -104,11 +108,13 @@ export default function AthleteDashboard({
       <div style={{ padding: '0 22px 24px', display: 'flex', flexDirection: 'column', gap: 12 }}>
         <PaymentConfirming
           athleteId={params.get('paid')}
-          whatsNext={{ athlete, product: params.get('product'), self: true, onBook, onSeason: () => navigate('/portal/season') }}
+          whatsNext={{ athlete, product: params.get('product'), self: true, onBook, onSeason: () => navigate('/portal/season'),
+            facilityDue: facilityPending.length > 0 }}
         />
         {/* No second Pay now while the ?paid= return confirms (double subscription). */}
         <PendingBanner
           pendingAthletes={(mineStatus?.status === 'pending' ? mineStatus.pendingAthletes : []).filter((a) => a.athleteId !== params.get('paid'))}
+          facilityRows={facilityRows}
           body={mineStatus?.body}
           title={mineStatus?.title}
           renderRowExtra={(a) => <ChangePackageLink athlete={a} onOpen={setChangeFor} />}
