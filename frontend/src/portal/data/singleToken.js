@@ -1,0 +1,84 @@
+/**
+ * The single session token (owner rulings 2026-09-29/30) - PURE copy and
+ * counts. A single token is a ONE-TIME $65 purchase: one paid Checkout
+ * Session is one graceTokens doc `single_{checkoutSessionId}` (reason
+ * 'single-purchase'), good for any bookable session through the season's
+ * last day. A single athlete gets no monthly token; they book with tokens
+ * they bought (or an ops comp). The server half, and the id format, live in
+ * functions/portal/single.js - CHANGE ONE, CHANGE BOTH.
+ *
+ * Shared by the booking screens, the token meters, the Billing hub and the
+ * staff editor so the words cannot drift between them.
+ */
+import { format, parseISO } from 'date-fns';
+import { BOOKING_OPENS_LABEL } from './calendar';
+import { SINGLE_TOKEN } from './packages';
+import { SEASON_BOUNDS } from './season';
+
+/** The last day a single token is good for (functions/portal/single.js SEASON_END). */
+export const SINGLE_EXPIRES = SEASON_BOUNDS.end;
+/** 'Sat, Feb 27' - how every surface names SINGLE_EXPIRES. */
+export const SINGLE_EXPIRES_LABEL = format(parseISO(SINGLE_EXPIRES), 'EEE, MMM d');
+
+const TOKEN_PREFIX = 'single_';
+
+/** True for a purchased single token's id (or a booking's graceTokenId). */
+export function isSingleTokenId(id) {
+  return typeof id === 'string' && id.length > TOKEN_PREFIX.length && id.startsWith(TOKEN_PREFIX);
+}
+
+/** The Buy button's label: 'Buy a session token - $65'. */
+export const BUY_SINGLE_LABEL = `Buy a session token - $${SINGLE_TOKEN.price}`;
+
+/**
+ * Tokens a single athlete can book with right now: every usable grace token
+ * (purchased, or a bonus) plus any ops-comp period tokens left. `grace` is
+ * already less the tokens a waitlist spot holds (tokensFor's `held`).
+ */
+export function availableCount(tokens) {
+  return (tokens?.grace?.length ?? 0) + (tokens?.left || 0);
+}
+
+/**
+ * '1 session token - good through Sat, Feb 27', 'No session token', plus
+ * ' · 1 held by a waitlist spot' when a waitlist entry holds a token.
+ */
+export function singleTokenLine(tokens) {
+  const n = availableCount(tokens);
+  const base = n === 0 ? 'No session token' : `${n} session token${n === 1 ? '' : 's'} - good through ${SINGLE_EXPIRES_LABEL}`;
+  const held = tokens?.held || 0;
+  if (held <= 0) return base;
+  return `${base} · ${held} held by ${held === 1 ? 'a waitlist spot' : 'waitlist spots'}`;
+}
+
+/**
+ * What a grace-charged booking spends: the soonest-expiring grace token is
+ * the one charged, so it names that one.
+ */
+export function graceSpendLabel(tokens) {
+  return tokens?.grace?.[0]?.reason === 'single-purchase' ? 'a session token' : 'a bonus token';
+}
+
+/** The ?paid=...&single=1 return once graceTokens/single_{cs} exists. */
+export function singleConfirmedLine(open) {
+  return open
+    ? 'Payment received - your session token is ready to book.'
+    : `Payment received - your session token is ready. Booking opens ${BOOKING_OPENS_LABEL}.`;
+}
+
+/**
+ * The staff package editor's static warning when a change moves an athlete
+ * to or from the single token (null otherwise). Moving a monthly subscriber
+ * to Single without cancelling in Stripe keeps billing them; moving a token
+ * buyer off Single leaves them payment-pending until the new package is paid.
+ */
+export function packageSwitchWarning(fromId, toId) {
+  if (!toId || fromId === toId) return null;
+  if (toId === SINGLE_TOKEN.id) {
+    return 'Switching to Single token: cancel any monthly subscription in Stripe first. The family then buys session tokens one at a time - there is no monthly token.';
+  }
+  if (fromId === SINGLE_TOKEN.id) {
+    return 'Switching off Single token: if this family bought session tokens, the athlete cannot book until the new package is paid, and unspent session tokens wait until then.';
+  }
+  return null;
+}

@@ -7,6 +7,7 @@
  */
 import { differenceInYears, format, parseISO } from 'date-fns';
 import { packageById } from './packages';
+import { billingStatusOf } from './billingCopy';
 
 /** An open invite older than this is 'invited-stale' - ops fixes the email (spec 3.2, 7). */
 export const STALE_INVITE_DAYS = 7;
@@ -94,7 +95,7 @@ export function buildSignupRows({ households = [], athletes = [], invites = [], 
         packageId: a.packageId ?? null,
         packageName: packageById(a.packageId)?.name ?? null,
         handicap: Number.isInteger(a.handicap) ? a.handicap : null,
-        billing: a.billing?.status ?? 'active',
+        billing: billingStatusOf(a), // a one-time buyer moved off Single reads 'pending'
         facility: a.facilityBilling?.status ?? null,
         ...loginFor(a, inviteByAthlete.get(a.id), now),
       }));
