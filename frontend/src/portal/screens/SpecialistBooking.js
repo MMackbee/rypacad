@@ -33,7 +33,7 @@ import { windowDaysFor } from '../data/packages';
 // through the hook seam below; these are formatting helpers, not response
 // data.
 import { formatDuration, longDayLabel, openThrough, todayISO } from '../data/calendar';
-import { slotDayStates } from '../data/calendarViews';
+import { slotDayMarks, slotDayStates } from '../data/calendarViews';
 
 /**
  * Sprint 12 pin K (TEAM.md "Sprint 12 pins — the token model", contract
@@ -288,8 +288,15 @@ export default function SpecialistBooking({
   const selectedDay = days.find((d) => d.date === selectedDate) || null;
   const selectedDateLocked = Boolean(selectedDate) && selectedDate > openThroughDate;
   const dayStates = slotDayStates(days);
+  // Tournament (yellow) / closed (red) days, derived in the hook from every
+  // session on the date (calendar lane 2026-09-30).
+  const dayMarks = slotDayMarks(days);
   // The same one-line caption Book a Session's card carries (toggle review).
-  const calendarHint = `Days marked green have open times — tap one to see them.${
+  // A yellow day here is any tournament day, which may have no times with
+  // this specialist - so "or yellow" only while every yellow day has some.
+  const tournamentDays = Object.keys(dayMarks).filter((iso) => dayMarks[iso] === 'tournament');
+  const yellowBookable = tournamentDays.length > 0 && tournamentDays.every((iso) => dayStates[iso] !== 'open');
+  const calendarHint = `Days marked green${yellowBookable ? ' or yellow' : ''} have open times — tap one to see them.${
     Object.values(dayStates).includes('full') ? ' Dashed days are full — tap one for the waitlist.' : ''}`;
 
   return (
@@ -380,6 +387,7 @@ export default function SpecialistBooking({
                     rangeEnd={days[days.length - 1]?.date}
                     anchor={selectedDate}
                     dayStates={dayStates}
+                    dayMarks={dayMarks}
                     variant="booking"
                     selected={selectedDate}
                     onSelectDay={(day) => setSelectedDate(day.iso)}

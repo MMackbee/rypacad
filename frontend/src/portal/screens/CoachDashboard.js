@@ -224,16 +224,18 @@ function SessionsTab({ firstSessionDate, onOpenRoster }) {
   return (
     <>
       {/* Month/Week toggle (owner request 2026-09-30): both views are this
-          loaded month, and a day tap opens the same session list below. */}
+          loaded month's grid, and a day tap opens the same session list
+          below. Tournament (yellow) / closed (red) marks as Book a Session. */}
       <SessionsCalendarCard
         monthISO={monthISO}
         changeMonth={changeMonth}
         loading={monthState.loading}
         dayStates={dayStates}
+        dayMarks={monthState.data?.dayMarks ?? {}}
         selected={selectedDate}
         onSelectDay={(day) => setSelectedDate(day.iso)}
         onNavigate={() => setSelectedDate(null)}
-        hint="Days marked green have sessions — tap one, then tap a session for its roster."
+        hint="Green and yellow days have sessions — tap one, then tap a session for its roster."
         emptyCopy={{ month: 'No sessions are scheduled this month.', week: 'No sessions are scheduled this week.' }}
       />
 

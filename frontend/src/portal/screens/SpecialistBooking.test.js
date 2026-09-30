@@ -258,6 +258,45 @@ describe('Month/Week calendar card (owner request 2026-09-30)', () => {
     await r.unmount();
   });
 
+  test('tournament and closed days (marked by the hook) paint in both views, with the legend', async () => {
+    inApp({ days: [
+      { date: TODAY, dayLabel: 'Today', slots: [], mark: 'closed' },
+      { date: DAY_A, dayLabel: 'Fri, Oct 16', slots: [slot('s1', '4:00 PM')], mark: 'tournament' },
+      { date: DAY_B, dayLabel: 'Fri, Oct 23', slots: [slot('s2', '5:30 PM')], mark: null },
+    ] });
+    const r = await renderScreen(<SpecialistBooking bare initialSpecialist="mental" />);
+    // Every yellow day has times here, so the caption says so.
+    expect(r.text()).toContain('Days marked green or yellow have open times — tap one to see them.');
+    expect(r.container.querySelector('.ryp-day-mark-legend')).not.toBeNull();
+    const t = pill(r, DAY_A);
+    expect(t.getAttribute('aria-label')).toBe('Friday, Oct 16, tournament day');
+    expect(t.getAttribute('aria-pressed')).toBe('true');
+    const closed = pill(r, TODAY);
+    expect(closed.tagName).toBe('DIV');
+    expect(closed.getAttribute('title')).toBe('Academy closed');
+    expect(closed.textContent).toContain(', academy closed');
+    await r.click('Month');
+    expect(td(r, DAY_A).classList.contains('ryp-mark-tournament')).toBe(true);
+    expect(td(r, DAY_A).getAttribute('role')).toBe('button');
+    expect(td(r, TODAY).classList.contains('ryp-mark-closed')).toBe(true);
+    expect(td(r, TODAY).getAttribute('role')).toBeNull();
+    expect(r.container.querySelector('.ryp-day-mark-legend')).not.toBeNull();
+    await r.unmount();
+
+    // A tournament day with no times with this specialist: yellow, but the caption keeps to green.
+    inApp({ days: [
+      { date: TODAY, dayLabel: 'Today', slots: [], mark: 'tournament' },
+      { date: DAY_A, dayLabel: 'Fri, Oct 16', slots: [slot('s1', '4:00 PM')], mark: null },
+    ] });
+    window.localStorage.setItem('ryp.calendarView', 'week');
+    const g = await renderScreen(<SpecialistBooking bare initialSpecialist="mental" />);
+    expect(g.text()).toContain('Days marked green have open times — tap one to see them.');
+    expect(pill(g, TODAY).tagName).toBe('DIV');
+    expect(pill(g, TODAY).getAttribute('data-mark')).toBe('tournament');
+    expect(pill(g, TODAY).textContent).toContain(', tournament day');
+    await g.unmount();
+  });
+
   test('no toggle in the Calendly branch or at the specialist picker', async () => {
     mockSlots.data = { ...mockSlots.data, bookingMode: 'calendly', calendlyUrl: 'https://calendly.com/ryp/mental' };
     const c = await renderScreen(<SpecialistBooking bare initialSpecialist="mental" />);

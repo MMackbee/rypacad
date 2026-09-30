@@ -53,6 +53,8 @@ const STATES = {
     fontWeight: 500,
   },
 };
+/** A day outside the contract window: recedes exactly like a weekend. */
+STATES.inactive = STATES.weekend;
 
 export default function DayGridCell({ state = 'open', day, size, onClick }) {
   const s = STATES[state] || STATES.open;

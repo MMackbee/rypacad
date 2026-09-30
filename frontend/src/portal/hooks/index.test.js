@@ -39,11 +39,12 @@ jest.mock('./waitlist', () => ({
 
 import { act } from 'react';
 import { createRoot } from 'react-dom/client';
-import { coachingFor, seedSpecialistDays, useAthleteDetail, useBooking, useMonthSessions } from './index';
+import { coachingFor, seedSpecialistDays, useAthleteDetail, useBooking, useMonthSessions, useSpecialistSlots } from './index';
 import * as live from './live';
 import * as signups from './signups';
 import * as waitlist from './waitlist';
 import { BOOKING_CONFIRMATION } from '../data/seed';
+import { addDaysISO } from '../data/calendar';
 import { loginStateFor } from '../data/signups';
 import { parseISO } from 'date-fns';
 import { addDaysISO } from '../data/calendar';
@@ -421,4 +422,113 @@ describe('live loaders (perf wave B)', () => {
     expect(byId.s3).toMatchObject({ waitlisted: true, waitlistPosition: null });
     await h.unmount();
   });
+
+  test('liveMonthSessions: ONE read over the whole grid (+ the marks lookahead); dayMarks judge every session type', async () => {
+    live.fetchCurrentUser.mockResolvedValue({ uid: 'c1', role: 'coach' }); // staff: no waitlist join
+    const s = (id, date, type, status = 'scheduled') => ({ id, date, time: '4:00 PM', type, status, capacity: 8, booked: 0 });
+    live.fetchSessionsInRange.mockResolvedValue([
+      s('t1', '2026-11-07', 'tournament'),
+      s('p1', '2026-11-09', 'phil'),
+      s('m1', '2026-11-10', 'mental'),
+      s('x1', '2026-11-11', 'training', 'cancelled'),
+      s('a1', '2026-11-12', 'training'),
+      s('d1', '2026-12-02', 'training'),
+      s('l1', '2026-12-07', 'training'), // the lookahead week
+    ]);
+    const h = await mountHook(() => useMonthSessions('2026-11'));
+    await settle();
+    expect(live.fetchSessionsInRange).toHaveBeenCalledTimes(1);
+    expect(live.fetchSessionsInRange).toHaveBeenCalledWith('2026-10-26', '2026-12-13');
+    const { days, dayMarks } = h.result.current.data;
+    // The boundary week's Dec 2 rides the same read; specialist rows still never reach the group calendar,
+    // and neither do the lookahead's rows.
+    expect(days.map((d) => d.date)).toEqual(['2026-11-07', '2026-11-12', '2026-12-02']);
+    expect(dayMarks['2026-11-07']).toBe('tournament');
+    expect(dayMarks['2026-11-09']).toBeUndefined(); // Phil only: not closed
+    expect(dayMarks['2026-11-10']).toBeUndefined(); // Yannick only: not closed
+    expect(dayMarks['2026-11-11']).toBe('closed'); // its one session was cancelled
+    expect(dayMarks['2026-11-12']).toBeUndefined();
+    expect(dayMarks['2026-11-08']).toBe('closed');
+    expect(dayMarks['2026-12-06']).toBe('closed'); // the grid's last day: the lookahead's Dec 7 proves it synced
+    expect(dayMarks['2026-12-07']).toBeUndefined(); // past the grid
+    expect(dayMarks['2026-11-02']).toBeUndefined(); // set-up day, before the season
+    expect(dayMarks['2026-10-30']).toBeUndefined();
+    await h.unmount();
+  });
+
+  test('liveMonthSessions: nothing is "Academy closed" past the sync horizon, or before the first sync', async () => {
+    live.fetchCurrentUser.mockResolvedValue({ uid: 'c1', role: 'coach' });
+    const s = (id, date) => ({ id, date, time: '4:00 PM', type: 'training', status: 'scheduled', capacity: 8, booked: 0 });
+    // January, with the 90-day sync run on Oct 14: sessions only through Jan 12.
+    live.fetchSessionsInRange.mockResolvedValue([s('a', '2027-01-04'), s('b', '2027-01-12')]);
+    const jan = await mountHook(() => useMonthSessions('2027-01'));
+    await settle();
+    expect(live.fetchSessionsInRange).toHaveBeenLastCalledWith('2026-12-28', '2027-02-07');
+    const marks = jan.result.current.data.dayMarks;
+    expect(marks['2027-01-03']).toBe('closed'); // the Christmas break, inside the horizon
+    expect(marks['2027-01-10']).toBe('closed');
+    expect(Object.keys(marks).filter((iso) => iso > '2027-01-12')).toEqual([]);
+    await jan.unmount();
+
+    live.fetchSessionsInRange.mockResolvedValue([]);
+    const nov = await mountHook(() => useMonthSessions('2026-11'));
+    await settle();
+    expect(nov.result.current.data.dayMarks).toEqual({});
+    expect(nov.result.current.data.days).toEqual([]);
+    await nov.unmount();
+  });
+
+  test('liveSpecialistDays: each day carries a mark judged on every type the one read returned', async () => {
+    jest.useFakeTimers('modern');
+    jest.setSystemTime(new Date('2026-11-04T15:00:00Z'));
+    const flush = async () => { for (let i = 0; i < 6; i++) await act(async () => {}); };
+    try {
+      live.fetchCurrentUser.mockResolvedValue({ uid: 'p1' }); // a parent with no child picked
+      const s = (id, date, type) => ({ id, date, time: '3:00 PM', type, status: 'scheduled', capacity: 6, booked: 0 });
+      live.fetchSessionsInRange.mockResolvedValue([
+        s('a', '2026-11-04', 'training'),
+        s('b', '2026-11-05', 'training'),
+        s('c', '2026-11-06', 'phil'),
+        s('d', '2026-11-07', 'tournament'),
+        s('e', '2026-11-09', 'phil'),
+        s('f', '2026-11-12', 'training'), // the latest date the read holds
+      ]);
+      const h = await mountHook(() => useSpecialistSlots('phil'));
+      await flush();
+      expect(h.result.current.error).toBeNull();
+      expect(live.fetchSessionsInRange).toHaveBeenCalledTimes(1);
+      const { days } = h.result.current.data;
+      // One read: the window plus the marks lookahead; the days themselves stop at the window.
+      expect(live.fetchSessionsInRange).toHaveBeenCalledWith('2026-11-04', addDaysISO(days[days.length - 1].date, 7));
+      const byDate = Object.fromEntries(days.map((d) => [d.date, d]));
+      expect(byDate['2026-11-04'].mark).toBeNull();
+      expect(byDate['2026-11-07'].mark).toBe('tournament');
+      expect(byDate['2026-11-07'].slots).toEqual([]); // the tournament is not Phil's slot
+      expect(byDate['2026-11-08'].mark).toBe('closed');
+      expect(byDate['2026-11-09'].mark).toBeNull();
+      expect(byDate['2026-11-09'].slots.map((x) => x.sessionId)).toEqual(['e']);
+      expect(byDate['2026-11-10'].mark).toBe('closed');
+      // Past Nov 12 the read holds nothing: not synced yet, so never "Academy closed".
+      expect(byDate['2026-11-13'].mark).toBeNull();
+      expect(byDate['2026-11-15'].mark).toBeNull();
+      await h.unmount();
+    } finally {
+      jest.useRealTimers();
+    }
+  });
+});
+
+test('seed useMonthSessions: the whole grid, marked from the generated season', async () => {
+  const h = await mountHook(() => useMonthSessions('2026-11'));
+  const { days, dayMarks } = h.result.current.data;
+  expect(days[0].date).toBe('2026-11-03'); // the season's first day
+  expect(days[days.length - 1].date).toBe('2026-12-05'); // December's first Saturday, in the grid
+  expect(dayMarks['2026-11-07']).toBe('tournament'); // every Saturday runs the 10-12 tournament
+  expect(dayMarks['2026-11-08']).toBe('closed'); // no Sunday blocks
+  expect(dayMarks['2026-11-26']).toBe('closed'); // Thanksgiving
+  expect(dayMarks['2026-11-27']).toBe('tournament'); // the Post-Thanksgiving tournament wins
+  expect(dayMarks['2026-11-03']).toBeUndefined();
+  expect(dayMarks['2026-11-02']).toBeUndefined();
+  expect(dayMarks['2026-12-06']).toBe('closed');
+  await h.unmount();
 });
