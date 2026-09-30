@@ -34,6 +34,7 @@ import {
 import { auth, db } from '../../firebase';
 import { bump } from './invalidate';
 import { eliteDailyCapHit, normalizeAnchorDay, periodFor, windowDaysFor } from '../data/packages';
+import { CHANGEABLE_PACKAGE_IDS } from '../data/packageChange';
 import { BOOKING_OPENS_LABEL, bookingOpen, openThrough, todayISO, windowOpensOn } from '../data/calendar';
 import { SPECIALISTS, mentalCapFor } from '../data/specialists';
 
@@ -1571,6 +1572,29 @@ export async function setAthletePackages(athleteId, { packageId, facilityAccess 
     return { athleteId, packageId, facilityAccess: patch.facilityAccess ?? null };
   } catch (err) {
     throw wrap(err, 'setAthletePackages');
+  }
+}
+
+/**
+ * A family's own package change BEFORE the first payment (tester S4,
+ * 2026-09-30) - the household parent or the athlete's own login, only while
+ * billing.status is 'pending' and only to a monthly package, enforced by
+ * firestore.rules' pendingPackageUpdateOk(), not here. Nothing else moves:
+ * the next Pay now checks out the new package (createCheckoutSession reads
+ * packageId fresh and expires an open session for another price).
+ */
+export async function changePendingPackage(athleteId, packageId) {
+  if (!athleteId) throw new LiveDataError(ERR.INVALID, 'changePendingPackage: athleteId is required.');
+  if (!CHANGEABLE_PACKAGE_IDS.includes(packageId)) {
+    throw new LiveDataError(ERR.INVALID, `changePendingPackage: ${packageId} is not a monthly package.`);
+  }
+  requireUser();
+  try {
+    await updateDoc(doc(db, 'athletes', athleteId), { packageId, updatedAt: serverTimestamp() });
+    bump('athletes');
+    return { athleteId, packageId };
+  } catch (err) {
+    throw wrap(err, 'changePendingPackage');
   }
 }
 

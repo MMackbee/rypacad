@@ -3,6 +3,8 @@ import { renderScreen } from './testRender';
 import ParentDashboard from './ParentDashboard';
 
 let mockHub; let mockConfirm;
+const mockChange = jest.fn(async (athleteId, packageId) => ({ athleteId, packageId }));
+jest.mock('../hooks/packageChange', () => ({ useChangePackage: () => ({ change: mockChange }) }));
 jest.mock('../components/PayButton', () => ({ __esModule: true, default: ({ athleteId, label }) => <button type="button">{label}|{athleteId}</button> }));
 jest.mock('../hooks/billing', () => ({
   __esModule: true,
@@ -140,4 +142,28 @@ describe("What's next under Payment received (owner decision 2026-09-30)", () =>
     expect(f.text()).not.toContain("What's next");
     await f.unmount();
   });
+});
+
+test('a never-paid athlete can change package from the pending card before Pay now (tester S4); a lapsed one cannot', async () => {
+  mockHub.data.status.pendingAthletes = [
+    { athleteId: 'a2', name: 'Reese', status: 'pending', packageId: 'elite', perPurchase: false },
+    { athleteId: 'a3', name: 'Nico', status: 'pending', packageId: 't-6', perPurchase: false },
+    { athleteId: 'a1', name: 'Jordan', status: 'lapsed', packageId: 't-12', perPurchase: false },
+  ];
+  const r = await renderScreen(<ParentDashboard bare />, { path: '/portal/family' });
+  expect(r.text()).toContain('ReeseElite · Change package');
+  expect(r.text()).toContain('Nico6 tokens · Change package');
+  expect(r.text()).not.toContain('12 tokens · Change package');
+  expect(r.text()).not.toContain("Change Reese's package");
+  // Two unpaid children: two links a screen reader tells apart by name.
+  expect(r.button('Change package for Reese')).not.toBeNull();
+  expect(r.button('Change package for Jordan')).toBeNull();
+  await r.click('Change package for Nico');
+  expect(r.text()).toContain("Change Nico's package");
+  expect(r.text()).not.toContain("Change Reese's package");
+  await r.click('16 tokens');
+  await r.click('Save package');
+  expect(mockChange).toHaveBeenCalledWith('a3', 't-16');
+  expect(r.text()).not.toContain("Change Nico's package");
+  await r.unmount();
 });

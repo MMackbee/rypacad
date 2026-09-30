@@ -11,13 +11,14 @@ jest.mock('firebase/messaging', () => ({ isSupported: jest.fn(async () => false)
 
 import { allPerPurchaseOf, pendingOf, warnMissingPortalUrl } from './billing';
 
-test('pendingOf marks single-token athletes perPurchase; allPerPurchaseOf is true only for an all-single household', () => {
-  const m = (id, kind, status) => ({ athleteId: id, name: id, package: kind ? { kind } : null, billing: { status } });
+test('pendingOf marks single-token athletes perPurchase and carries the package; allPerPurchaseOf is true only for an all-single household', () => {
+  const ids = { single: 'single', tokens: 't-12' };
+  const m = (id, kind, status) => ({ athleteId: id, name: id, package: kind ? { id: ids[kind] ?? kind, kind } : null, billing: { status } });
   const members = [m('ava', 'single', 'pending'), m('ben', 'tokens', 'lapsed'), m('cy', 'single', 'active'), m('dee', null, 'pending')];
   expect(pendingOf(members)).toEqual([
-    { athleteId: 'ava', name: 'ava', status: 'pending', perPurchase: true },
-    { athleteId: 'ben', name: 'ben', status: 'lapsed', perPurchase: false },
-    { athleteId: 'dee', name: 'dee', status: 'pending', perPurchase: false },
+    { athleteId: 'ava', name: 'ava', status: 'pending', perPurchase: true, packageId: 'single' },
+    { athleteId: 'ben', name: 'ben', status: 'lapsed', perPurchase: false, packageId: 't-12' },
+    { athleteId: 'dee', name: 'dee', status: 'pending', perPurchase: false, packageId: null },
   ]);
   expect(allPerPurchaseOf([m('ava', 'single', 'active'), m('cy', 'single', 'pending')])).toBe(true);
   expect(allPerPurchaseOf(members)).toBe(false);

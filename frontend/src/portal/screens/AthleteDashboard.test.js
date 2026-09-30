@@ -9,10 +9,12 @@ import AthleteDashboard from './AthleteDashboard';
  */
 
 let mockContract;
+let mockMine = { data: null, loading: false, error: null };
+jest.mock('../hooks/packageChange', () => ({ useChangePackage: () => ({ change: async () => ({}) }) }));
 jest.mock('../components/PayButton', () => ({ __esModule: true, default: () => null }));
 jest.mock('../hooks/billing', () => ({
   __esModule: true,
-  useMyTokens: () => ({ data: null, loading: false, error: null }),
+  useMyTokens: () => mockMine,
   usePaymentConfirmation: () => ({ state: 'idle', packageId: null }),
 }));
 jest.mock('../hooks', () => ({
@@ -59,4 +61,18 @@ test('before the contract starts: no badge and no count, just the line', async (
   expect(c.textContent).not.toContain('On track');
   expect(c.textContent).not.toContain('days due');
   await r.unmount();
+});
+
+test("an unpaid athlete's own pending card can change their package before Pay now (tester S4)", async () => {
+  mockContract = null;
+  mockMine = { loading: false, error: null, data: { status: { status: 'pending', title: 'Payment pending', body: null,
+    pendingAthletes: [{ athleteId: 'a1', name: 'Jordan', status: 'pending', packageId: 't-6', perPurchase: false }] } } };
+  const r = await renderScreen(<AthleteDashboard bare />);
+  expect(r.text()).toContain('6 tokens · Change package');
+  await r.click('Change package for Jordan');
+  expect(r.text()).toContain('Change your package');
+  await r.click('Keep 6 tokens');
+  expect(r.text()).not.toContain('Change your package');
+  await r.unmount();
+  mockMine = { data: null, loading: false, error: null };
 });
