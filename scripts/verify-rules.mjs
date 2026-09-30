@@ -183,6 +183,24 @@ export async function taskWindow() {
   for (const [c, id] of [['bookings', 'ath-elite_s-dec16'], ['bookings', 'ath-elite_s-dec18'], ['sessions', 's-dec16'], ['sessions', 's-dec18']]) await del(c, id);
 }
 
+// Owner report 2026-09-30: Repeat weekly's copies carry createdVia 'repeat'
+// so onBookingCreated sends no notice per week - the shape admits that one
+// value and nothing else. Paid Elite, so both answers hold before the gate too.
+export async function taskRepeat() {
+  console.log("Repeat: bookingShapeOk admits createdVia 'repeat', nothing else");
+  for (const [id, date] of [['s-rep1', '2026-11-11'], ['s-rep2', '2026-11-12'], ['s-rep3', '2026-11-13']]) {
+    await seed('sessions', id, { date, time: '4:00 PM', type: 'training', capacity: 15, booked: 0, status: 'scheduled' });
+  }
+  const elite = (sessionId, date, extra) => ({ ...booking('ath-elite'), sessionId, date, chargedFrom: 'elite', ...extra });
+  expect("booking: createdVia 'repeat' accepted", await createAs(t.parent, 'bookings', 'ath-elite_s-rep1', elite('s-rep1', '2026-11-11', { createdVia: 'repeat' })), 200);
+  expect('booking: any other createdVia refused', await createAs(t.parent, 'bookings', 'ath-elite_s-rep2', elite('s-rep2', '2026-11-12', { createdVia: 'auto' })), 403);
+  expect('booking: no createdVia (a single tap) still accepted', await createAs(t.parent, 'bookings', 'ath-elite_s-rep3', elite('s-rep3', '2026-11-13')), 200);
+  for (const id of ['s-rep1', 's-rep2', 's-rep3']) {
+    await del('bookings', `ath-elite_${id}`);
+    await del('sessions', id);
+  }
+}
+
 // Tester S4 (2026-09-30): before the first payment the family may switch the
 // package picked at sign-up - pendingPackageUpdateOk.
 export async function taskPackageChange() {
@@ -230,7 +248,7 @@ export async function taskPackageChange() {
 export { setup, teardown, seed, del, call, createAs, expect, token, t, uid, BASE };
 if (process.argv[1] && process.argv[1].endsWith('verify-rules.mjs')) {
   await setup();
-  try { await task4(); await task5(); await taskContract(); await taskWindow(); await taskPackageChange(); } finally { await teardown(); }
+  try { await task4(); await task5(); await taskContract(); await taskWindow(); await taskRepeat(); await taskPackageChange(); } finally { await teardown(); }
   console.log(failures ? `${failures} FAILED` : 'ALL PASS');
   process.exit(failures ? 1 : 0);
 }

@@ -1104,6 +1104,7 @@ export function useBooking({ variant = 'open', today = todayISO(), practice = fa
           // Every check a single booking runs (no skipCapCheck, K03); silent:
           // one invalidation bump in the finally below instead of a refetch
           // storm per iteration (finding 8b). The window caps this at ~7 weeks.
+          // createdVia 'repeat': no per-week notice (functions/index.js).
           const result = await createBooking(
             {
               athleteId: forAthleteId,
@@ -1112,7 +1113,7 @@ export function useBooking({ variant = 'open', today = todayISO(), practice = fa
               type: match.type,
               householdId: identity.householdId,
             },
-            { silent: true }
+            { silent: true, createdVia: 'repeat' }
           );
           // A race that fills the session between the pre-check above and the
           // transaction resolves as 'waitlisted' instead of 'confirmed' -

@@ -662,7 +662,7 @@ const SESSION_FULL = Symbol('session-full');
 
 export async function createBooking(
   { athleteId, sessionId, date, type, householdId, attendee },
-  { skipCapCheck = false, silent = false } = {}
+  { skipCapCheck = false, silent = false, createdVia = null } = {}
 ) {
   if (!athleteId || !sessionId || !date || !type || !householdId) {
     throw new LiveDataError(
@@ -758,6 +758,11 @@ export async function createBooking(
     // athlete's token is spent either way, which is why it sits beside
     // chargedFrom without being part of it. Write-once like its neighbours.
     ...(type === 'mental' && attendee === 'parent' ? { attendee } : {}),
+    // HOW it was made, when not a single tap: 'repeat' marks bookRecurring's
+    // weekly copies, which onBookingCreated (functions/index.js) sends no
+    // notice for (owner report 2026-09-30). Absent == a single booking;
+    // the rules admit only 'repeat'. Write-once like its neighbours.
+    ...(createdVia ? { createdVia } : {}),
   };
   try {
     await runTransaction(db, async (tx) => {

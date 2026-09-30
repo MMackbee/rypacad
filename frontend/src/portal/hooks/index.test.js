@@ -197,6 +197,8 @@ describe('live loaders (perf wave B)', () => {
     expect(live.createBooking).toHaveBeenCalledWith({
       athleteId: 'a1', sessionId: 'phil_1', date: '2099-01-06', type: 'phil', householdId: 'h1', attendee: undefined,
     });
+    // A single tap stamps no createdVia: its booking-confirmed notice still goes.
+    expect(live.createBooking.mock.calls[0]).toHaveLength(1);
     await h.unmount();
   });
 
@@ -216,6 +218,7 @@ describe('live loaders (perf wave B)', () => {
     expect(live.createBooking).toHaveBeenCalledWith({
       athleteId: 'a2', sessionId: 'mental_1', date: '2099-01-06', type: 'mental', householdId: 'h1', attendee: undefined,
     });
+    expect(live.createBooking.mock.calls[0]).toHaveLength(1);
     await h.unmount();
   });
 
@@ -291,7 +294,8 @@ describe('live loaders (perf wave B)', () => {
       // The repeat's own range read (the one bump after the loop re-runs the window fetch too).
       expect(live.fetchSessionsInRange).toHaveBeenCalledWith('2026-11-10', '2026-12-16');
       expect(live.createBooking).toHaveBeenCalledTimes(6);
-      for (const [, opts] of live.createBooking.mock.calls) expect(opts).toEqual({ silent: true });
+      // Repeat copies are stamped so the server sends no notice per week (owner report 2026-09-30).
+      for (const [, opts] of live.createBooking.mock.calls) expect(opts).toEqual({ silent: true, createdVia: 'repeat' });
       await h.unmount();
     });
 

@@ -67,6 +67,7 @@ const db = admin.firestore();
 
 const notify = require('./portal/notify');
 const notices = require('./portal/notices');
+const {shouldNoticeBookingCreated} = require('./portal/notify-gates');
 const jobs = require('./portal/jobs');
 const sweep = require('./portal/sweep');
 const {stripeWebhook} = require('./portal/stripe');
@@ -153,6 +154,12 @@ function membershipStatus(household) {
  * with `promotedFromWaitlist: true` and `createdBy: 'system'` and sends
  * 'promoted' itself, so this trigger steps over it - otherwise a promoted
  * family would get two messages about one seat.
+ *
+ * NOR IS A REPEAT WEEKLY COPY. The portal's bookRecurring writes each week
+ * with `createdVia: 'repeat'`: the family just saw the on-screen summary,
+ * so a six-week repeat no longer sends six notices at once (owner report
+ * 2026-09-30); the auto-booking feature will send a weekly digest instead.
+ * Every gate lives in portal/notify-gates.js, unit-tested.
  */
 exports.onBookingCreated = functions
     .runWith({secrets: MAIL_SECRETS})
@@ -160,11 +167,7 @@ exports.onBookingCreated = functions
     .document('bookings/{bookingId}')
     .onCreate(async (snap, context) => {
       const booking = snap.data() || {};
-      if (booking.status !== 'confirmed') return null;
-      if (booking.promotedFromWaitlist === true ||
-          booking.createdBy === 'system') {
-        return null;
-      }
+      if (!shouldNoticeBookingCreated(booking)) return null;
       try {
         const [session, athlete] = await Promise.all([
           docBody('sessions', booking.sessionId),
