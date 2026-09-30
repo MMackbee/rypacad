@@ -3,10 +3,9 @@ import { color, font, glow, radius } from '../tokens';
 import AthleteRow from '../components/AthleteRow';
 import BottomTabBar from '../components/BottomTabBar';
 import Button from '../components/Button';
-import ContractCalendar from '../components/ContractCalendar';
+import { SessionsCalendarCard } from '../components/CalendarCard';
 import PhoneFrame from '../components/PhoneFrame';
 import SessionCard from '../components/SessionCard';
-import { SkeletonBar } from '../components/Skeleton';
 import StatusBadge from '../components/StatusBadge';
 import { Body, Card, ScreenTitle, SectionLabel, SignOutButton } from '../components/Primitives';
 import { useCoachDay, useCoachRoster, useMonthSessions } from '../hooks';
@@ -15,8 +14,8 @@ import { DEFAULT_DURATION_MINUTES } from '../data/schedule';
 // Sessions tab is the booking view pointed at rosters (owner's call,
 // 2026-09-01), and both screens paint from the same module so they cannot
 // drift. Pure calendar label helpers ride along per the seam rule.
-import { buildMonthDayMaps, MonthNav, useMonthNavState } from '../components/MonthCalendar';
-import { longDayLabel, monthLabel, parseTimeToMinutes, todayISO } from '../data/calendar';
+import { buildMonthDayMaps, useMonthNavState } from '../components/MonthCalendar';
+import { longDayLabel, parseTimeToMinutes, todayISO } from '../data/calendar';
 import { SEASON_BOUNDS } from '../data/season';
 
 /**
@@ -205,10 +204,6 @@ function SessionsTab({ firstSessionDate, onOpenRoster }) {
   const { monthISO, changeMonth } = useMonthNavState(firstSessionDate, today);
   const [selectedDate, setSelectedDate] = useState(null);
   const monthState = useMonthSessions(monthISO);
-  const navMonth = (delta) => {
-    setSelectedDate(null);
-    changeMonth(delta);
-  };
 
   // A block that has already run reads 'closed', as the old list did — a
   // coach browsing today must be able to tell a finished 3 PM block from the
@@ -224,41 +219,23 @@ function SessionsTab({ firstSessionDate, onOpenRoster }) {
 
   const days = monthState.data?.days ?? [];
   const { dayStates, sessionsByDate } = buildMonthDayMaps(days);
-  const monthHasSessions = days.some((d) => d.sessions.length > 0);
   const selectedSessions = selectedDate ? sessionsByDate[selectedDate] ?? [] : [];
 
   return (
     <>
-      <Card large>
-        <MonthNav
-          label={monthLabel(monthISO)}
-          onPrev={() => navMonth(-1)}
-          onNext={() => navMonth(1)}
-        />
-        {monthState.loading ? (
-          <SkeletonBar height={220} style={{ marginTop: 14 }} />
-        ) : (
-          <div style={{ marginTop: 10 }}>
-            <ContractCalendar
-              key={monthISO}
-              start={monthISO}
-              dayStates={dayStates}
-              variant="booking"
-              selected={selectedDate}
-              onSelectDay={(day) => setSelectedDate(day.iso)}
-            />
-          </div>
-        )}
-        {!monthState.loading && !monthHasSessions ? (
-          <Body size={12} style={{ marginTop: 14, textAlign: 'center' }}>
-            No sessions are scheduled this month.
-          </Body>
-        ) : (
-          <Body size={11} tone={color.textTertiary} style={{ marginTop: 13 }}>
-            Days marked green have sessions — tap one, then tap a session for its roster.
-          </Body>
-        )}
-      </Card>
+      {/* Month/Week toggle (owner request 2026-09-30): both views are this
+          loaded month, and a day tap opens the same session list below. */}
+      <SessionsCalendarCard
+        monthISO={monthISO}
+        changeMonth={changeMonth}
+        loading={monthState.loading}
+        dayStates={dayStates}
+        selected={selectedDate}
+        onSelectDay={(day) => setSelectedDate(day.iso)}
+        onNavigate={() => setSelectedDate(null)}
+        hint="Days marked green have sessions — tap one, then tap a session for its roster."
+        emptyCopy={{ month: 'No sessions are scheduled this month.', week: 'No sessions are scheduled this week.' }}
+      />
 
       {selectedDate ? (
         selectedSessions.length === 0 ? (
