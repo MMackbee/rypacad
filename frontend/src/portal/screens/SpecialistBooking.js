@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { color, font, glow, radius, tint } from '../tokens';
+import { color, font, radius, tint } from '../tokens';
 import { SpendNote } from '../components/AllowancePools';
 import { capReachedCopy, LockedDayNotice, reasonCopy, SeeMembershipLink } from '../components/BookingReasons';
 import { JoinWaitlistButton, WaitlistedConfirmationBody } from '../components/WaitlistAction';
@@ -8,6 +8,7 @@ import BookingOpensBanner from '../components/BookingOpensBanner';
 import BottomTabBar from '../components/BottomTabBar';
 import Button from '../components/Button';
 import CalendlyPanel from '../components/CalendlyPanel';
+import { RangeCalendarCard } from '../components/CalendarCard';
 import EntitlementSummary from '../components/EntitlementSummary';
 import PhoneFrame from '../components/PhoneFrame';
 import SessionCard from '../components/SessionCard';
@@ -32,7 +33,7 @@ import { windowDaysFor } from '../data/packages';
 // through the hook seam below; these are formatting helpers, not response
 // data.
 import { formatDuration, longDayLabel, openThrough, todayISO } from '../data/calendar';
-import { datePill } from '../data/season';
+import { slotDayStates } from '../data/calendarViews';
 
 /**
  * Sprint 12 pin K (TEAM.md "Sprint 12 pins — the token model", contract
@@ -49,7 +50,7 @@ import { datePill } from '../data/season';
  *
  * 05·S · Specialist Booking - athlete + parent (Sprint 9 pin, docs/portal/
  * TEAM.md, "specialist 1-on-1s"). Life Time's own class-scheduling flow,
- * translated: (1) a specialist picker, (2) a horizontal 14-day strip,
+ * translated: (1) a specialist picker, (2) the shared Month/Week calendar card,
  * (3) the picked day's slot list, (4) a bottom detail sheet with one Reserve
  * CTA -> saving -> the confirmed state, following BookSession's confirmation
  * idiom (practice/live split aside - this flow has no practice mode; the
@@ -366,8 +367,20 @@ export default function SpecialistBooking({
                     <BookingOpensBanner />
                   </div>
                 ) : null}
+                {/* The shared Month/Week card (owner request 2026-09-30); Week is
+                    this screen's default. Both views paint the rolling window
+                    already in hand and set the same selectedDate. */}
                 <div style={{ padding: '0 22px' }}>
-                  <DayStrip days={days} selectedDate={selectedDate} onSelect={setSelectedDate} />
+                  <RangeCalendarCard
+                    rangeStart={days[0]?.date}
+                    rangeEnd={days[days.length - 1]?.date}
+                    anchor={selectedDate}
+                    dayStates={slotDayStates(days)}
+                    variant="booking"
+                    selected={selectedDate}
+                    onSelectDay={(day) => setSelectedDate(day.iso)}
+                    defaultView="week"
+                  />
                 </div>
                 {selectedDateLocked ? (
                   <div style={{ padding: '0 22px' }}>
@@ -458,76 +471,6 @@ function SpecialistHeader({ specialist }) {
           {specialist.discipline}
         </div>
       </div>
-    </div>
-  );
-}
-
-/**
- * The 14-day window, today first, tappable pills - weekday + date, a dot
- * when the day has open slots. Same selected/unselected idiom as
- * MySchedule's Segmented control and BookSession's date pills (glow.datePill).
- */
-function DayStrip({ days, selectedDate, onSelect }) {
-  return (
-    <div
-      style={{
-        display: 'flex',
-        gap: 7,
-        overflowX: 'auto',
-        paddingBottom: 2,
-        scrollbarWidth: 'none',
-      }}
-    >
-      {days.map((d) => {
-        const pill = datePill(d.date);
-        const on = d.date === selectedDate;
-        const hasOpen = (d.slots || []).some((s) => s.open);
-        return (
-          <button
-            key={d.date}
-            type="button"
-            onClick={() => onSelect(d.date)}
-            style={{
-              width: 50,
-              flex: 'none',
-              padding: '9px 0',
-              borderRadius: radius.control,
-              border: on ? 'none' : `1px solid ${color.border}`,
-              background: on ? color.primary : 'transparent',
-              boxShadow: on ? glow.datePill : 'none',
-              textAlign: 'center',
-              cursor: 'pointer',
-            }}
-          >
-            <div
-              style={{
-                font: `400 10px ${font.body}`,
-                textTransform: 'uppercase',
-                opacity: on ? 1 : 0.7,
-                color: on ? '#000' : color.textTertiary,
-              }}
-            >
-              {pill.dow}
-            </div>
-            <div style={{ font: `700 17px ${font.head}`, color: on ? '#000' : color.text, marginTop: 2 }}>
-              {pill.date}
-            </div>
-            <div style={{ height: 8, display: 'flex', justifyContent: 'center', alignItems: 'center', marginTop: 3 }}>
-              {hasOpen ? (
-                <span
-                  aria-hidden="true"
-                  style={{
-                    width: 4,
-                    height: 4,
-                    borderRadius: '50%',
-                    background: on ? '#000' : color.primary,
-                  }}
-                />
-              ) : null}
-            </div>
-          </button>
-        );
-      })}
     </div>
   );
 }
