@@ -1,4 +1,4 @@
-// Usage: node scripts/register-calendly-webhook.mjs   (run AFTER the six functions are public)
+// Usage: node scripts/register-calendly-webhook.mjs [--status]   (run AFTER the six functions are public; --status only lists subscriptions)
 // Calendly webhook for Yannick, end to end, never displaying a secret:
 // 1. asks for Yannick's Calendly personal access token (hidden);
 // 2. checks the portal's calendlyWebhook is public (needs Mike's org fix);
@@ -70,6 +70,18 @@ const me = await cal(token, 'GET', '/users/me');
 if (!me.ok) die(`Calendly rejected the token (HTTP ${me.status}). Check it was copied in full and is Yannick's.`);
 const user = me.json.resource;
 console.log(`Calendly account: ${user.name} <${user.email}>`);
+if (process.argv.includes('--status')) {
+  const org = user.current_organization;
+  for (const [label, q] of [['user scope', `scope=user&user=${encodeURIComponent(user.uri)}`], ['organization scope', 'scope=organization']]) {
+    const r = await cal(token, 'GET', `/webhook_subscriptions?organization=${encodeURIComponent(org)}&${q}&count=100`);
+    if (!r.ok) { console.log(`${label}: HTTP ${r.status} ${JSON.stringify(r.json).slice(0, 200)}`); continue; }
+    const rows = r.json.collection || [];
+    console.log(`${label}: ${rows.length} subscription(s)`);
+    for (const s of rows) console.log(`  ${s.state}  ${s.callback_url}  events=${(s.events || []).join(',')}  created=${s.created_at}`);
+  }
+  console.log('Status only: nothing was changed.');
+  process.exit(0);
+}
 const ok = process.env.REGISTER_CALENDLY_YES === '1' ? 'y' : await ask('Is this Yannick\'s account, the one that owns "RYP Academy - Mental Game 1:1"? (y/N) ', false);
 if (!/^y/i.test(ok)) die('not confirmed. Nothing was changed.');
 
@@ -109,8 +121,14 @@ const created = await cal(token, 'POST', '/webhook_subscriptions', {
   organization: org, user: user.uri, scope: 'user', signing_key: key,
 });
 if (!created.ok) die(`Calendly refused the subscription (HTTP ${created.status}): ${JSON.stringify(created.json).slice(0, 300)}`);
-const after = await cal(token, 'GET', `/webhook_subscriptions?organization=${encodeURIComponent(org)}&scope=user&user=${encodeURIComponent(user.uri)}`);
-const mine = (after.json.collection || []).filter((s) => s.callback_url === URL_HOOK);
+let mine = [];
+for (let i = 1; i <= 5 && !mine.length; i++) {
+  await sleep(i === 1 ? 2000 : 6000);
+  const after = await cal(token, 'GET', `/webhook_subscriptions?organization=${encodeURIComponent(org)}&scope=user&user=${encodeURIComponent(user.uri)}&count=100`);
+  if (!after.ok) { console.log(`  list attempt ${i}: HTTP ${after.status} ${JSON.stringify(after.json).slice(0, 200)}`); continue; }
+  mine = (after.json.collection || []).filter((s) => s.callback_url === URL_HOOK);
+  if (!mine.length) console.log(`  list attempt ${i}: ${(after.json.collection || []).length} subscription(s) on the account, none for the portal yet`);
+}
 console.log(`\nCalendly subscriptions for the portal: ${mine.length}`);
 for (const s of mine) console.log(`  state=${s.state}  events=${(s.events || []).join(',')}  scope=${s.scope}`);
 console.log(mine.length === 1 && mine[0].state === 'active' ?
