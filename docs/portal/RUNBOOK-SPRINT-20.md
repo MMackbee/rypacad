@@ -12,9 +12,9 @@ are named, never written down. Order matters: each step blocks the next.
   per tier (t-6, t-12, t-16, Elite, single) and one for facility access
   ($300/month); the no-code customer portal activated (its link is
   `REACT_APP_STRIPE_PORTAL_URL`); a **restricted key** per mode with exactly
-  three scopes - Checkout Sessions **write**, Customers **read**, Prices
+  three scopes - Checkout Sessions **write**, Customers **write**, Prices
   **read** (`createCheckoutSession` reads the price's `unit_amount` to build
-  the prepaid line; ruled, D12). Paste the LIVE price ids into the `live`
+  the prepaid line; Checkout creates the new parent's customer; ruled, D12). Paste the LIVE price ids into the `live`
   block of `functions/config/stripe-catalogue.json` (public ids; the `test`
   block is committed, `1b3dc3d`; the file ships inside `functions/`, D3/D19).
 
@@ -244,7 +244,7 @@ never applies.
 | deploy fails "secret ... does not exist" | a declared name has no Secret Manager entry | create it (3.2) |
 | deploy fails with an env/secret conflict | a secret NAME is in `functions/.env` | remove the line, keep it only in Secret Manager (and `.env.local` locally) |
 | Pay button -> "Pricing is not set up yet" | `price-missing`: catalogue null for `STRIPE_MODE` | paste the ids, redeploy (the JSON ships inside `functions/`) |
-| Pay button -> "Checkout is unavailable" | `stripe-error`: key scope or mode mismatch | the restricted key needs Checkout Sessions write, Customers read, Prices read, in the SAME mode as `STRIPE_MODE` |
+| Pay button -> "Checkout is unavailable" | `stripe-error`: key scope or mode mismatch | the restricted key needs Checkout Sessions write, Customers write, Prices read, in the SAME mode as `STRIPE_MODE` |
 | `?paid=` never confirms | endpoint not receiving / wrong secret | Stripe -> Webhooks -> endpoint -> recent deliveries; 3.4-3.5 |
 | Calendly booking never appears | subscription `disabled` or key mismatch | 4 |
 | `stripeEvents` outcome `unmatched` | legacy household without customer link | the daily export; link `stripeCustomerId` in the console |

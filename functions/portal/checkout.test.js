@@ -53,6 +53,9 @@ const DOCS = {
   'users/u-femi': {role: 'athlete', athleteId: 'femi', householdId: 'oye'},
   'packages/t-6': {kind: 'tokens', tokens: 6, name: '6 tokens'},
   'packages/elite': {kind: 'elite', tokens: null, name: 'Elite'},
+  'athletes/sol': {householdId: 'novak', packageId: 'single',
+    billing: {status: 'pending'}},
+  'packages/single': {kind: 'single', tokens: 1, name: 'Single token'},
 };
 const ctx = (uid, over) => ({auth: {uid, token: Object.assign({
   email: 'nina@example.test', email_verified: true,
@@ -181,5 +184,34 @@ test('refusals in the contract order', async () => {
   await refused('stripe-error', call({athleteId: 'lena', product: 'tier'},
       ctx('u-nina'), {stripe: boom}).p, 'unavailable', 'stripe-error');
 });
+
+test('single token (one-time, 2026-09-29): refused before any Stripe call',
+    async () => {
+      const touched = [];
+      const spy = {prices: {retrieve: async (id) => {
+        touched.push(id);
+        return {id, unit_amount: 6500, currency: 'usd'};
+      }}, checkout: {sessions: {create: async (b) => {
+        touched.push(b);
+        return {url: 'x'};
+      }}}};
+      const cat = {test: Object.assign({}, CAT.test,
+          {single: 'price_single'}), live: {}};
+      await refused('single', call({athleteId: 'sol', product: 'tier'},
+          ctx('u-nina'), {stripe: spy, catalogue: cat}).p,
+      'failed-precondition', 'single-one-time');
+      // Same refusal when the packages/single doc is missing in Firestore.
+      const noPkg = Object.assign({}, DOCS);
+      delete noPkg['packages/single'];
+      await refused('single, no package doc', call(
+          {athleteId: 'sol', product: 'tier'}, ctx('u-nina'),
+          {stripe: spy, catalogue: cat, db: fakeDb(noPkg)}).p,
+      'failed-precondition', 'single-one-time');
+      assert.deepEqual(touched, [], 'Stripe was never called');
+      // The monthly packages are untouched by the guard.
+      const ok = call({athleteId: 'lena', product: 'tier'}, ctx('u-nina'));
+      assert.equal((await ok.p).url, 'https://checkout.stripe.com/c/cs_1');
+      assert.equal(ok.calls.length, 1);
+    });
 
 run();

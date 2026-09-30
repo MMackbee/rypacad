@@ -358,7 +358,7 @@ active copy. The Success screen says this will happen.
   book" otherwise). `onHouseholdMembership`'s guard is unchanged (it only
   reports past_due/lapsed reinstatements).
 - Secrets: `STRIPE_WEBHOOK_SECRET`, `STRIPE_SECRET_KEY` (a **restricted**
-  key: Checkout Sessions write + read, Customers read, **Prices read** -
+  key: Checkout Sessions write + read, Customers write, **Prices read** -
   `createCheckoutSession` reads the price's `unit_amount` to build the
   prepaid line, nothing in Firestore or the catalogue carries an amount (D12);
   the same key serves `createCheckoutSession`). Endpoint events: the four today +
@@ -687,7 +687,7 @@ Indexes: none new (single-field or existing composites).
 2. **Stripe dashboard**: one Product + monthly Price per tier and for
    facility access, in BOTH test and live mode; the no-code **customer
    portal** activated (its link -> `REACT_APP_STRIPE_PORTAL_URL`); a
-   restricted key per mode (Checkout Sessions write, Customers read, Prices
+   restricted key per mode (Checkout Sessions write, Customers write, Prices
    read - D12) -> `STRIPE_SECRET_KEY`. Paste the LIVE price ids into the
    `live` block of `functions/config/stripe-catalogue.json` (public ids; the
    `test` block is committed, `1b3dc3d`; D3/D19). Dashboard products map
@@ -866,8 +866,9 @@ v3.0.1 forced sixteen decisions. Each is now a fact in the contract (marked
   away prepays the NEXT month in full and `trial_end` is the 1st after that;
   the remaining day or two is free. Ruled, documented, tested.
 - **D12** The restricted Stripe key scopes: Checkout Sessions write,
-  Customers read, Prices read - `createCheckoutSession` reads `unit_amount`
-  from Stripe (4.3, 12.2).
+  Customers write, Prices read - `createCheckoutSession` reads `unit_amount`
+  from Stripe (4.3, 12.2); Checkout creates a new parent's customer, which
+  needs Customers write (confirmed 2026-09-29 with a live test-mode rehearsal).
 - **D13** `checkout.session.completed` accepts exactly one recurring line
   plus at most one one-time line, every quantity 1; anything else is
   `unexpected-quantity` (4.3).

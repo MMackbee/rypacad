@@ -188,6 +188,18 @@ async function createCheckoutSessionHandler(data, context, deps) {
     }
   }
   const pkg = await read(store, 'packages', athlete.packageId);
+  // Owner ruling 2026-09-29: the single token is a ONE-TIME $65 payment, not
+  // a monthly package. This file only builds subscription checkouts, and the
+  // one-time path (payment-mode checkout + webhook + token model) is not
+  // built yet, so refuse before any Stripe call with a message that says so,
+  // instead of Stripe's rejection surfacing as 'Try again in a minute'.
+  if (req.product === 'tier' &&
+      (athlete.packageId === 'single' || (pkg && pkg.kind === 'single'))) {
+    throw refuse('failed-precondition', 'single-one-time',
+        'Single tokens are a one-time payment. Online payment for them ' +
+        'opens before booking starts on Sat, Oct 10. Nothing has been ' +
+        'charged.');
+  }
   if (req.product === 'facility') {
     // Absent `billing` == active (spec 4.4): legacy athletes may add on.
     if (!lib.membershipAllowsBooking(null, athlete)) {
