@@ -129,7 +129,8 @@ describe('the window counts from Nov 1 until then (owner ruling 2026-09-30; UX r
     await r.unmount();
 
     const l = await renderScreen(<SpecialistBooking bare initialSpecialist="mental" />);
-    await l.click('Thursday, Dec 17');
+    // Month is the default: tap the day's cell in the grid.
+    await act(async () => { l.container.querySelector('td[data-date="2026-12-17"]').click(); });
     expect(l.text()).toContain('Booking for Thursday, Dec 17 opens 7 AM on Monday, Nov 2.');
     expect(slotCard(l)).toBeNull();
     await l.unmount();
@@ -157,6 +158,8 @@ describe('Month/Week calendar card (owner request 2026-09-30)', () => {
   const slotCard = (r, start) =>
     [...r.container.querySelectorAll('div')].find((el) => el.textContent.startsWith(start) && el.textContent.includes('Mental')) || null;
   const tap = async (el) => { await act(async () => { el.click(); }); };
+  // The family's own stored Week choice (Month is the default).
+  const chooseWeek = () => window.localStorage.setItem('ryp.calendarView', 'week');
 
   beforeEach(() => {
     jest.useFakeTimers('modern');
@@ -165,7 +168,50 @@ describe('Month/Week calendar card (owner request 2026-09-30)', () => {
   });
   afterEach(() => { jest.useRealTimers(); });
 
-  test('Week is the default, on the first slot day, which is selected; a zero-slot day is not a button', async () => {
+  // Tester report 2026-09-30: Phil's calendar opened on a week strip while
+  // golf opened on a month grid. Month is the default for both now.
+  test('Month is the default, on the first slot day, which is selected; nothing is stored until the family picks', async () => {
+    const r = await renderScreen(<SpecialistBooking bare initialSpecialist="phil" />);
+    expect(r.button('Month').getAttribute('aria-pressed')).toBe('true');
+    expect(r.button('Week').getAttribute('aria-pressed')).toBe('false');
+    expect(r.container.querySelector('.fc')).not.toBeNull();
+    expect(r.container.querySelector('.ryp-week-view')).toBeNull();
+    expect(td(r, DAY_A).classList.contains('ryp-day-selected')).toBe(true);
+    expect(td(r, DAY_A).getAttribute('role')).toBe('button');
+    expect(td(r, TODAY).getAttribute('role')).toBeNull();
+    expect(window.localStorage.getItem('ryp.calendarView')).toBeNull();
+    await r.unmount();
+  });
+
+  test('a window across two months: month arrows and labels; Week from there steps and labels by week', async () => {
+    const oct30 = '2026-10-30';
+    const nov4 = '2026-11-04';
+    inApp({ days: [
+      { date: TODAY, dayLabel: 'Today', slots: [] },
+      { date: oct30, dayLabel: 'Fri, Oct 30', slots: [slot('s1', '4:00 PM')] },
+      { date: nov4, dayLabel: 'Wed, Nov 4', slots: [slot('s2', '5:30 PM')] },
+    ] });
+    const r = await renderScreen(<SpecialistBooking bare initialSpecialist="phil" />);
+    expect(r.text()).toContain('October 2026');
+    expect(r.button('Previous month').disabled).toBe(true);
+    await r.click('Next month');
+    expect(r.text()).toContain('November 2026');
+    expect(r.button('Next month').disabled).toBe(true);
+    expect(td(r, nov4).getAttribute('role')).toBe('button');
+    await r.click('Week');
+    expect(window.localStorage.getItem('ryp.calendarView')).toBe('week');
+    // Week opens on the selected day's week, drawn whole across the month end.
+    expect(r.text()).toContain('Oct 26 – Nov 1');
+    await r.click('Next week');
+    expect(r.text()).toContain('Nov 2 – 8');
+    await r.click('Wednesday, Nov 4');
+    expect(pill(r, nov4).getAttribute('aria-pressed')).toBe('true');
+    expect(r.text()).toContain('5:30');
+    await r.unmount();
+  });
+
+  test('a stored Week choice opens Week, on the first slot day, which is selected; a zero-slot day is not a button', async () => {
+    chooseWeek();
     const r = await renderScreen(<SpecialistBooking bare initialSpecialist="mental" />);
     expect(r.button('Week').getAttribute('aria-pressed')).toBe('true');
     expect(r.button('Month').getAttribute('aria-pressed')).toBe('false');
@@ -181,6 +227,7 @@ describe('Month/Week calendar card (owner request 2026-09-30)', () => {
   });
 
   test("Next week, then the +9 day's pill: its slots show and a slot tap reserves through book()", async () => {
+    chooseWeek();
     const r = await renderScreen(<SpecialistBooking bare initialSpecialist="mental" />);
     await r.click('Next week');
     expect(r.text()).toContain('Oct 19 – 25');
@@ -201,6 +248,7 @@ describe('Month/Week calendar card (owner request 2026-09-30)', () => {
   });
 
   test('Month: the stored choice, and a tapped day selects the same slots; before the gate Reserve stays unreachable', async () => {
+    chooseWeek();
     const r = await renderScreen(<SpecialistBooking bare initialSpecialist="mental" />);
     await r.click('Month');
     expect(window.localStorage.getItem('ryp.calendarView')).toBe('month');
@@ -235,6 +283,7 @@ describe('Month/Week calendar card (owner request 2026-09-30)', () => {
       { date: DAY_A, dayLabel: 'Fri, Oct 16', slots: [slot('s1', '4:00 PM')] },
       { date: DAY_B, dayLabel: 'Fri, Oct 23', slots: [{ ...slot('s2', '5:30 PM'), open: false, booked: 1 }] },
     ] });
+    chooseWeek();
     const r = await renderScreen(<SpecialistBooking bare initialSpecialist="mental" />);
     expect(r.text()).toContain('Days marked green have open times — tap one to see them. Dashed days are full — tap one for the waitlist.');
     await r.click('Next week');
@@ -264,6 +313,7 @@ describe('Month/Week calendar card (owner request 2026-09-30)', () => {
       { date: DAY_A, dayLabel: 'Fri, Oct 16', slots: [slot('s1', '4:00 PM')], mark: 'tournament' },
       { date: DAY_B, dayLabel: 'Fri, Oct 23', slots: [slot('s2', '5:30 PM')], mark: null },
     ] });
+    chooseWeek();
     const r = await renderScreen(<SpecialistBooking bare initialSpecialist="mental" />);
     // Every yellow day has times here, so the caption says so.
     expect(r.text()).toContain('Days marked green or yellow have open times — tap one to see them.');
@@ -311,6 +361,7 @@ describe('Month/Week calendar card (owner request 2026-09-30)', () => {
   });
 
   test('week arrows stop at the ends of the window', async () => {
+    chooseWeek();
     const r = await renderScreen(<SpecialistBooking bare initialSpecialist="mental" />);
     expect(r.button('Previous week').disabled).toBe(true);
     expect(r.button('Next week').disabled).toBe(false);
@@ -331,6 +382,7 @@ describe('Month/Week calendar card (owner request 2026-09-30)', () => {
       return { date, dayLabel: date, slots: [slot(`w${i}`, i === 13 ? '6:15 PM' : '4:00 PM')] };
     });
     inApp({ days });
+    chooseWeek();
     const r = await renderScreen(<SpecialistBooking bare initialSpecialist="mental" />);
     const sideScrollers = [...r.container.querySelectorAll('*')].filter(
       (el) =>
