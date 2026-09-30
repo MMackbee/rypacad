@@ -4,7 +4,10 @@
  * the booking gate, the Billing hub, Membership and the booking screens
  * share — these tests are the contract's edge cases written down.
  */
-import { ALL_PACKAGES, ELITE, PRICES_RELEASED, SINGLE_TOKEN, TOKEN_PACKAGES, normalizeAnchorDay, periodFor, tokensFor, windowDaysFor } from './packages';
+import {
+  ALL_PACKAGES, ELITE, PRICES_RELEASED, SIBLING_DISCOUNT_NOTE, SIBLING_DISCOUNT_PCT, SINGLE_TOKEN, TOKEN_PACKAGES,
+  normalizeAnchorDay, periodFor, siblingDiscountApplies, tokensFor, windowDaysFor,
+} from './packages';
 import { SEASON_BOUNDS } from './season';
 
 const T12 = TOKEN_PACKAGES.find((p) => p.id === 't-12');
@@ -124,5 +127,31 @@ describe('the catalogue after Sprint 20', () => {
   });
   test('the season starts Nov 3', () => {
     expect(SEASON_BOUNDS.start).toBe('2026-11-03');
+  });
+});
+
+// The same rule as functions/portal/checkout.js siblingEligible (owner,
+// 2026-09-30): two or more monthly athletes, the single token and a lapsed
+// membership not counted.
+describe('siblingDiscountApplies', () => {
+  test('two monthly athletes qualify, pending ones included; one does not', () => {
+    expect(SIBLING_DISCOUNT_PCT).toBe(10);
+    expect(SIBLING_DISCOUNT_NOTE).toBe('10% sibling discount comes off at checkout.');
+    expect(siblingDiscountApplies([{ packageId: 't-16' }, { packageId: 'elite', billing: { status: 'pending' } }])).toBe(true);
+    expect(siblingDiscountApplies([{ packageId: 't-6', billing: { status: 'active' } }])).toBe(false);
+    expect(siblingDiscountApplies([])).toBe(false);
+    expect(siblingDiscountApplies(null)).toBe(false);
+  });
+  test('the single token, a lapsed membership and no package do not count', () => {
+    expect(siblingDiscountApplies([{ packageId: 't-12' }, { packageId: 'single' }])).toBe(false);
+    expect(siblingDiscountApplies([{ packageId: 't-12' }, { packageId: 't-6', billing: { status: 'lapsed' } }])).toBe(false);
+    expect(siblingDiscountApplies([{ packageId: 't-12' }, { packageId: null }, { packageId: '' }, null])).toBe(false);
+    expect(siblingDiscountApplies([{ packageId: 't-12' }, { packageId: 't-6', billing: { status: 'past_due' } }])).toBe(true);
+  });
+  test('billing-hub members are read by package.id', () => {
+    const member = (id, status = 'active') => ({ athleteId: id, package: id ? { id, kind: 'tokens' } : null, billing: { status, facility: null } });
+    expect(siblingDiscountApplies([member('t-6'), member('t-12', 'pending')])).toBe(true);
+    expect(siblingDiscountApplies([member('t-6'), member(null)])).toBe(false);
+    expect(siblingDiscountApplies([member('t-6'), member('t-12', 'lapsed')])).toBe(false);
   });
 });

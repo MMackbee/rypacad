@@ -5,6 +5,12 @@ import { newAthleteEntry } from '../data/signup';
 import { VERIFY_EMAIL_SENDER } from '../data/authCopy';
 
 jest.mock('../components/PayButton', () => ({ __esModule: true, default: ({ athleteId, label }) => <button type="button">{label}|{athleteId}</button>, startCheckout: async () => {} }));
+// Link mode reads the family for the sibling rule; seed mode (no read) unless a test turns it on.
+let mockLive = false; let mockFamily = null; let mockReads = [];
+jest.mock('../hooks/live', () => ({
+  isLive: () => mockLive,
+  fetchHouseholdAthletes: async (id) => { mockReads.push(id); if (mockFamily instanceof Error) throw mockFamily; return mockFamily; },
+}));
 
 const form = (over) => ({
   mode: 'parent', contact: { name: 'Dana', email: 'dana@email.com', phone: '1', relationship: 'Mother' },
@@ -15,7 +21,7 @@ const form = (over) => ({
 // The clock is pinned: the receipt's gate and pay-terms lines depend on it.
 const EMAIL_DAY = Date.parse('2026-10-01T17:00:00Z');
 const NOV_1_CHICAGO = Date.parse('2026-11-01T05:00:00Z');
-beforeEach(() => { jest.spyOn(Date, 'now').mockReturnValue(EMAIL_DAY); });
+beforeEach(() => { jest.spyOn(Date, 'now').mockReturnValue(EMAIL_DAY); mockLive = false; mockFamily = null; mockReads = []; });
 afterEach(() => { jest.restoreAllMocks(); });
 
 test('one pay button per athlete, the next steps, child-login instructions, no walkthrough', async () => {
@@ -91,4 +97,61 @@ test('athlete mode goes home', async () => {
   await r.click('Go to your home');
   expect(finished).toEqual(['/portal/home']);
   await r.unmount();
+});
+
+describe('sibling discount (checkout.js siblingEligible, owner 2026-09-30)', () => {
+  const NOTE = '10% sibling discount comes off at checkout.';
+  const avery = { ...newAthleteEntry(), name: 'Avery', dob: '2013-05-01', packageId: 't-16' };
+
+  test('two monthly athletes at sign-up: one line, and the buttons keep the catalogue price', async () => {
+    const r = await renderScreen(<RegistrationSuccess bare mode="signup" form={form()} result={{ householdId: 'h1', athleteIds: ['a1', 'a2'] }} account={{ email: 'dana@email.com' }} onFinish={() => {}} />);
+    expect(r.text().split(NOTE)).toHaveLength(2);
+    expect(r.button("Pay $569 for Jordan's 12 tokens|a1")).not.toBeNull();
+    expect(r.button("Pay $999 for Reese's Elite|a2")).not.toBeNull();
+    expect(r.text()).not.toMatch(/\$512|\$899|\$647/);
+    expect(mockReads).toEqual([]);
+    await r.unmount();
+  });
+
+  test('one athlete, or a second one on the one-time single token, gets no line', async () => {
+    const one = await renderScreen(<RegistrationSuccess bare mode="signup" form={form({ athletes: [avery] })} result={{ householdId: 'h1', athleteIds: ['a1'] }} account={{ email: 'dana@email.com' }} onFinish={() => {}} />);
+    expect(one.button("Pay $719 for Avery's 16 tokens|a1")).not.toBeNull();
+    expect(one.text()).not.toContain('sibling');
+    await one.unmount();
+    const single = form({ athletes: [avery, { ...newAthleteEntry(), name: 'Sam', dob: '2014-01-01', packageId: 'single' }] });
+    const s = await renderScreen(<RegistrationSuccess bare mode="signup" form={single} result={{ householdId: 'h1', athleteIds: ['a1', 'a2'] }} account={{ email: 'dana@email.com' }} onFinish={() => {}} />);
+    expect(s.text()).not.toContain('sibling');
+    await s.unmount();
+  });
+
+  test('link mode counts the family already there: a paid sibling qualifies, a lapsed one does not', async () => {
+    mockLive = true;
+    mockFamily = [{ id: 'old', householdId: 'h1', packageId: 't-6', billing: { status: 'active' } }, { id: 'a9', householdId: 'h1', packageId: 't-16', billing: { status: 'pending' } }];
+    const r = await renderScreen(<RegistrationSuccess bare mode="link" form={form({ athletes: [avery] })} result={{ householdId: 'h1', athleteIds: ['a9'] }} account={{ email: 'dana@email.com' }} onFinish={() => {}} />);
+    await r.flush();
+    expect(mockReads).toEqual(['h1']);
+    expect(r.text()).toContain(NOTE);
+    expect(r.button("Pay $719 for Avery's 16 tokens|a9")).not.toBeNull();
+    expect(r.text()).toContain('Today you pay $719 for November');
+    await r.unmount();
+    mockFamily = [{ ...mockFamily[0], billing: { status: 'lapsed' } }, mockFamily[1]];
+    const lapsed = await renderScreen(<RegistrationSuccess bare mode="link" form={form({ athletes: [avery] })} result={{ householdId: 'h1', athleteIds: ['a9'] }} account={{ email: 'dana@email.com' }} onFinish={() => {}} />);
+    await lapsed.flush();
+    expect(lapsed.text()).not.toContain('sibling');
+    await lapsed.unmount();
+  });
+
+  test('link mode with a failed family read falls back to the athletes on the receipt', async () => {
+    mockLive = true;
+    mockFamily = new Error('offline');
+    const r = await renderScreen(<RegistrationSuccess bare mode="link" form={form({ athletes: [avery] })} result={{ householdId: 'h1', athleteIds: ['a9'] }} account={{ email: 'dana@email.com' }} onFinish={() => {}} />);
+    await r.flush();
+    expect(mockReads).toEqual(['h1']);
+    expect(r.text()).not.toContain('sibling');
+    await r.unmount();
+    const two = await renderScreen(<RegistrationSuccess bare mode="link" form={form()} result={{ householdId: 'h1', athleteIds: ['a1', 'a2'] }} account={{ email: 'dana@email.com' }} onFinish={() => {}} />);
+    await two.flush();
+    expect(two.text()).toContain(NOTE);
+    await two.unmount();
+  });
 });

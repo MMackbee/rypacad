@@ -88,6 +88,33 @@ export const PRICES_RELEASED = true;
 export const FACILITY_ACCESS = { id: 'facility-access', name: 'Facility access', price: 300, pending: false };
 
 /**
+ * Sibling discount (owner, 2026-09-30): Stripe takes this percentage off
+ * every membership checkout of a family with two or more monthly athletes
+ * (functions/portal/checkout.js). Stripe's coupon is the source of truth for
+ * the amount, so the portal only says it applies - it never shows a
+ * discounted price, and the Pay buttons keep the catalogue figure.
+ */
+export const SIBLING_DISCOUNT_PCT = 10;
+export const SIBLING_DISCOUNT_NOTE = `${SIBLING_DISCOUNT_PCT}% sibling discount comes off at checkout.`;
+
+/**
+ * Whether the family's membership checkouts get the sibling discount - the
+ * same rule as checkout.js siblingEligible, kept in step by hand: at least
+ * two athletes with a package that is not the one-time single token and
+ * whose billing has not lapsed (packageId survives a lapse). Pending athletes
+ * count. Takes athlete docs (`packageId`) or billing-hub members
+ * (`package.id`); absent `billing` is not lapsed. The facility add-on never
+ * gets it, so callers ask only about membership checkouts.
+ */
+export function siblingDiscountApplies(athletes) {
+  const monthly = (athletes || []).filter((a) => {
+    const id = a ? (a.packageId ?? a.package?.id) : null;
+    return Boolean(id) && id !== SINGLE_TOKEN.id && a.billing?.status !== 'lapsed';
+  });
+  return monthly.length >= 2;
+}
+
+/**
  * Elite's frequency caps (v2.0.1, Sprint 18; owner 2026-09-30): at most ONE
  * training block, ONE tournament and ONE Phil booking per date, so a family
  * can book the Saturday morning training AND that day's tournament. Not a pool,

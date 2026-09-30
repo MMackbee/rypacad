@@ -3,14 +3,21 @@ import { color, font } from '../tokens';
 import PayButton from './PayButton';
 import { Body, Card, SectionLabel } from './Primitives';
 import { PAY_NOW, PENDING_TITLE } from '../data/billingCopy';
+import { SIBLING_DISCOUNT_NOTE } from '../data/packages';
 
-/** One banner, one Pay now per athlete who needs a checkout - pending, or lapsed and re-subscribing (spec 4.4). `title` is the hub status title (the lapsed wording differs); renders nothing when nobody is listed. */
-export default function PendingBanner({ pendingAthletes, body, title = null, email = null, style }) {
+/**
+ * One banner, one Pay now per athlete who needs a checkout - pending, or lapsed and re-subscribing (spec 4.4). `title` is the hub status title (the lapsed wording differs); renders nothing when nobody is listed.
+ * `siblingDiscount` (the caller's siblingDiscountApplies over the whole family) adds the one-line note Stripe's price would otherwise contradict; a one-time single token is not a membership, so an all-single list never shows it.
+ */
+export default function PendingBanner({ pendingAthletes, body, title = null, email = null, siblingDiscount = false, style }) {
   if (!pendingAthletes || pendingAthletes.length === 0) return null;
   return (
     <Card tone="yellow" large style={style}>
       <SectionLabel tone={color.secondary}>{title || PENDING_TITLE}</SectionLabel>
       {body ? <Body size={12} style={{ marginTop: 8 }}>{body}</Body> : null}
+      {siblingDiscount && pendingAthletes.some((a) => !a.perPurchase) ? (
+        <Body size={12} style={{ marginTop: 8 }}>{SIBLING_DISCOUNT_NOTE}</Body>
+      ) : null}
       {pendingAthletes.map((a) => (
         <div key={a.athleteId} style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 12, marginTop: 12 }}>
           <div style={{ flex: 1, minWidth: 0, font: `600 13px ${font.body}`, color: color.text }}>{a.name}</div>
