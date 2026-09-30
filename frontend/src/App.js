@@ -15,7 +15,10 @@ import PortalRoutes from './portal/PortalRoutes';
 function App() {
   return (
     <ErrorBoundary>
-      <Router>
+      {/* Navigations run as React transitions: the current screen stays up
+          while a lazy route's chunk loads, instead of the blank Suspense
+          fallback in PortalRoutes. */}
+      <Router future={{ v7_startTransition: true }}>
         <div className="App">
           <Routes>
             {/* Member portal — Phase 1. See docs/portal/design-handoff.md. */}
