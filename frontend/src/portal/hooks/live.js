@@ -1396,6 +1396,10 @@ export async function approveEnrollmentRequest(uid) {
         householdId: householdRef.id,
         packageId: a.packageId ?? null,
         contractMinutes: a.contractMinutes ?? null,
+        // Contract-buffer Phase 2: a kid approved onto a tier starts the
+        // contract today (Chicago), so a mid-month approval is not Behind on
+        // day one. The create rule is hasAll, so the extra field is allowed.
+        ...(a.contractMinutes != null ? { contractStart: chicagoDateISO() } : {}),
         coachId: null,
         // v2.0.1 (Sprint 18): the add-on is never on by default; the signed
         // waiver (enrollment consent) is what later lets ops switch it on.
@@ -1504,6 +1508,12 @@ export function chicagoDateISO(now = new Date()) {
  * athletes.contractStart with today's Chicago date - the contract window
  * opens there and earlier weekdays of the month never count as missed.
  * Changing an existing tier passes no `start` and leaves contractStart alone.
+ *
+ * Rules still at hasOnly(['contractMinutes']) (the frontend shipped from
+ * main before the firestore.rules deploy) refuse the stamped write, so a
+ * permission-denied start retries with the tier alone: the contract starts
+ * with the Nov 3 window (Phase 1) instead of failing. A write refused for
+ * any other reason is refused again and throws as before.
  */
 export async function setContractTier({ athleteId, minutes, start = false }) {
   if (!athleteId) throw new LiveDataError(ERR.INVALID, 'setContractTier: athleteId is required.');
@@ -1511,10 +1521,17 @@ export async function setContractTier({ athleteId, minutes, start = false }) {
     throw new LiveDataError(ERR.INVALID, 'setContractTier: minutes must be 20, 45, 90 or null.');
   }
   requireUser();
-  const patch = { contractMinutes: minutes };
+  const ref = doc(db, 'athletes', athleteId);
+  let patch = { contractMinutes: minutes };
   if (start && minutes != null) patch.contractStart = chicagoDateISO();
   try {
-    await updateDoc(doc(db, 'athletes', athleteId), patch);
+    try {
+      await updateDoc(ref, patch);
+    } catch (err) {
+      if (!patch.contractStart || err?.code !== 'permission-denied') throw err;
+      patch = { contractMinutes: minutes };
+      await updateDoc(ref, patch);
+    }
     bump('athletes');
     return { athleteId, ...patch };
   } catch (err) {
