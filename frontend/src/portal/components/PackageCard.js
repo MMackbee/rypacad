@@ -1,5 +1,5 @@
 import React from 'react';
-import { color, font, glow, radius } from '../tokens';
+import { color, font, glow, radius, tint } from '../tokens';
 import { PRICES_RELEASED } from '../data/packages';
 
 /**
@@ -17,6 +17,12 @@ import { PRICES_RELEASED } from '../data/packages';
  * defaults to the catalogue's PRICES_RELEASED flag, so Registration's package
  * step (the one live, parent-facing caller) shows what a package includes and
  * no dollar figure or per-token rate until the owner releases pricing.
+ *
+ * Selection owns the green (tester report S4, 2026-09-30): on a pickable card
+ * the outline, the tint and the dot all follow `selected` and nothing else.
+ * `emphasised` (Elite) only outlines and glows a display-only card; on a
+ * pickable list the always-green Elite box read as a second selection with
+ * its dot unlit.
  */
 export default function PackageCard({
   pkg,
@@ -30,7 +36,8 @@ export default function PackageCard({
   showPrices = PRICES_RELEASED,
   style,
 }) {
-  const outlined = selected || emphasised;
+  const highlighted = emphasised && !onSelect;
+  const outlined = selected || highlighted;
 
   return (
     <div
@@ -47,9 +54,9 @@ export default function PackageCard({
         }
       }}
       style={{
-        background: color.surface,
+        background: selected ? tint.green : color.surface,
         border: `1px solid ${outlined ? color.primary : color.border}`,
-        boxShadow: emphasised ? glow.tierCard : 'none',
+        boxShadow: highlighted ? glow.tierCard : 'none',
         borderRadius: radius.cardLarge,
         padding: 17,
         cursor: onSelect ? 'pointer' : 'default',

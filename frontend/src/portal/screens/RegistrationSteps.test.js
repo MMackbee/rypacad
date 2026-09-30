@@ -146,17 +146,56 @@ function PackageHarness({ athletes: initial, showErrors = false }) {
   return <PackageStep athletes={athletes} onUpdate={onUpdate} showErrors={showErrors} />;
 }
 
-test('two athletes: a pick moves on to the one still without a package', async () => {
+/** Which cards look picked: the green outline and the filled dot, read separately (tester S4, 2026-09-30). */
+const PICKABLE = ['6 tokens', '12 tokens', '16 tokens', 'Elite'];
+function litCards(r) {
+  // jsdom keeps a border colour as written (lowercased) but turns a background into rgb().
+  const green = (value) => value === '#00af51' || value === 'rgb(0, 175, 81)';
+  const lit = (name) => {
+    const card = r.button(name);
+    const dot = card.querySelector('[aria-hidden="true"]');
+    return { box: green(card.style.borderColor), dot: green(dot.style.backgroundColor), pressed: card.getAttribute('aria-pressed') === 'true' };
+  };
+  const on = (key) => PICKABLE.filter((name) => lit(name)[key]);
+  return { box: on('box'), dot: on('dot'), pressed: on('pressed') };
+}
+
+test('two athletes: a pick stays on screen with box and dot lit together; Next moves on', async () => {
   const nico = { ...newAthleteEntry(), name: 'Nico' };
   const reese = { ...newAthleteEntry(), name: 'Reese' };
   const r = await renderScreen(<PackageHarness athletes={[nico, reese]} />);
   expect(r.text()).toContain('Package — Nico');
+  // Nothing picked: no box lit, Elite included (it used to be green always).
+  expect(litCards(r)).toEqual({ box: [], dot: [], pressed: [] });
+  expect(r.button('Next: Reese')).toBeNull();
   await r.click('12 tokens');
-  expect(r.text()).toContain('Package — Reese');
+  expect(r.text()).toContain('Package — Nico');
+  expect(litCards(r)).toEqual({ box: ['12 tokens'], dot: ['12 tokens'], pressed: ['12 tokens'] });
   expect(r.button('Nico ✓')).not.toBeNull();
+  await r.click('Elite'); // changing the pick moves both marks
+  expect(litCards(r)).toEqual({ box: ['Elite'], dot: ['Elite'], pressed: ['Elite'] });
+  await r.click('Next: Reese');
+  expect(r.text()).toContain('Package — Reese');
+  expect(litCards(r)).toEqual({ box: [], dot: [], pressed: [] });
   await r.click('6 tokens');
-  expect(r.text()).toContain('Package — Reese'); // nobody left to move to
+  expect(litCards(r)).toEqual({ box: ['6 tokens'], dot: ['6 tokens'], pressed: ['6 tokens'] });
   expect(r.button('Reese ✓')).not.toBeNull();
+  expect(r.button('Next: Nico')).toBeNull(); // nobody left without a package
+  // Switching chips repaints to that athlete's own pick, and only that.
+  await r.click('Nico ✓');
+  expect(litCards(r)).toEqual({ box: ['Elite'], dot: ['Elite'], pressed: ['Elite'] });
+  await r.unmount();
+});
+
+test('three athletes: Next goes to the next one still without a package, wrapping round', async () => {
+  const [a, b, c] = ['Ava', 'Ben', 'Cy'].map((name) => ({ ...newAthleteEntry(), name }));
+  const r = await renderScreen(<PackageHarness athletes={[a, { ...b, packageId: 't-6' }, c]} />);
+  await r.click('Cy');
+  await r.click('16 tokens');
+  expect(r.button('Next: Ava')).not.toBeNull();
+  await r.click('Next: Ava');
+  expect(r.text()).toContain('Package — Ava');
+  expect(litCards(r).dot).toEqual([]);
   await r.unmount();
 });
 
