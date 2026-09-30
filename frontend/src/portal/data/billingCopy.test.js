@@ -1,8 +1,9 @@
-import { billingBadge, confirmedLine, facilityCardState, facilityLine, loginStatusLine, PENDING_PLAN_LINE, PENDING_TITLE } from './billingCopy';
+import { billingBadge, confirmedLine, facilityCardState, facilityLine, loginStatusLine, PENDING_PLAN_LINE, PENDING_TITLE, SINGLE_PLAN_LINE } from './billingCopy';
 
 test('section 9 strings', () => {
   expect(PENDING_TITLE).toBe('Payment pending - finish checkout to start booking');
   expect(PENDING_PLAN_LINE).toBe("Billed monthly from the 1st once you've paid");
+  expect(SINGLE_PLAN_LINE).toBe('One-time $65 per session token');
   expect(confirmedLine(false)).toBe('Payment received - booking opens Sat, Oct 10 at 7 AM.');
   expect(confirmedLine(true)).toBe("Payment received - you're all set to book.");
 });

@@ -243,4 +243,26 @@ describe('per-athlete billing (Sprint 20, spec 4.4)', () => {
     expect(statusFor(null, { pendingAthletes: [] }).status).toBe('active');
     expect(statusFor(null, { resetsOn: '2026-10-01', anchorDay: 1 }).pendingAthletes).toBeUndefined();
   });
+
+  test('statusFor: the single token is a one-time payment, never billed monthly (owner ruling, 2026-09-30)', () => {
+    const monthly = "Ava can book as soon as checkout is complete. Billed monthly from the 1st once you've paid.";
+    // An all-single pending list gets the one-time body; title, badge and CTA are unchanged.
+    const one = statusFor(null, { resetsOn: '2026-10-01', anchorDay: 1, pendingAthletes: [{ athleteId: 'a', name: 'Ava', status: 'pending', perPurchase: true }] });
+    expect(one).toMatchObject({ status: 'pending', badge: { tone: 'yellow', label: 'Payment pending' }, title: 'Payment pending - finish checkout to start booking', cta: 'Pay now' });
+    expect(one.body).toBe('Ava can book once their session token is paid for. A session token is a one-time $65 payment.');
+    const two = statusFor(null, { pendingAthletes: [{ athleteId: 'a', name: 'Ava', perPurchase: true }, { athleteId: 'b', name: 'Ben', perPurchase: true }] });
+    expect(two.body).toBe('Ava and Ben can book once their session token is paid for. A session token is a one-time $65 payment.');
+    // A mixed list, or a monthly one, keeps the monthly body byte-for-byte.
+    const mixed = statusFor(null, { pendingAthletes: [{ athleteId: 'a', name: 'Ava', perPurchase: false }, { athleteId: 'b', name: 'Ben', perPurchase: true }] });
+    expect(mixed.body).toBe("Ava and Ben can book as soon as checkout is complete. Billed monthly from the 1st once you've paid.");
+    expect(statusFor(null, { pendingAthletes: [{ athleteId: 'a', name: 'Ava', perPurchase: false }] }).body).toBe(monthly);
+    expect(statusFor(null, { pendingAthletes: [{ athleteId: 'a', name: 'Ava' }] }).body).toBe(monthly);
+    // An all-single household that is active: nothing bills monthly.
+    const active = statusFor(null, { resetsOn: '2026-10-01', anchorDay: 1, allPerPurchase: true });
+    expect(active).toMatchObject({ status: 'active', badge: { tone: 'green', label: 'Active' }, cta: null, paused: false });
+    expect(active.body).toBe('Session tokens are one-time payments - nothing bills monthly.');
+    // The monthly pins are unchanged.
+    expect(statusFor(null, { resetsOn: '2026-10-01', anchorDay: 1, allPerPurchase: false }).body).toBe('Billed monthly on the 1st. Nothing needs attention.');
+    expect(statusFor({ status: 'active' }, { anchorDay: 15 }).body).toBe('Billed monthly on the 15th. Nothing needs attention.');
+  });
 });

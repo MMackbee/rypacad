@@ -123,11 +123,16 @@ async function liveMember(athlete, anchorDay, today) {
   return { ...entry, coaching: coachingFor(bookings, today, pkg) };
 }
 
-/** The members who need a checkout (Sprint 20, spec 4.4): never paid, or whose tier subscription ended - drives statusFor's pending branch. A lapsed athlete re-subscribes through the same createCheckoutSession; the customer portal cannot resume a cancelled subscription. */
-function pendingOf(members) {
+/** The members who need a checkout (Sprint 20, spec 4.4): never paid, or whose tier subscription ended - drives statusFor's pending branch. A lapsed athlete re-subscribes through the same createCheckoutSession; the customer portal cannot resume a cancelled subscription. `perPurchase` marks a single-token athlete, whose checkout is a one-time token, never a monthly bill. */
+export function pendingOf(members) {
   return members
     .filter((m) => m.billing?.status === 'pending' || m.billing?.status === 'lapsed')
-    .map((m) => ({ athleteId: m.athleteId, name: m.name, status: m.billing.status }));
+    .map((m) => ({ athleteId: m.athleteId, name: m.name, status: m.billing.status, perPurchase: m.package?.kind === 'single' }));
+}
+
+/** True when every member is on the single token - nothing in the household bills monthly. */
+export function allPerPurchaseOf(members) {
+  return members.length > 0 && members.every((m) => m.package?.kind === 'single');
 }
 
 async function liveHub(householdId, today) {
@@ -140,7 +145,7 @@ async function liveHub(householdId, today) {
   return {
     household: householdView(household, anchorDay),
     members,
-    status: statusFor(membership, { resetsOn, anchorDay, pendingAthletes: pendingOf(members) }),
+    status: statusFor(membership, { resetsOn, anchorDay, pendingAthletes: pendingOf(members), allPerPurchase: allPerPurchaseOf(members) }),
     portalUrl: STRIPE_PORTAL_URL,
   };
 }

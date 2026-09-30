@@ -14,7 +14,7 @@ import TokenMeter from '../components/TokenMeter';
 import { BackLink, Body, Card, ErrorNotice, ScreenTitle, SectionLabel } from '../components/Primitives';
 import { ordinal, statusFor } from '../data/billingHub';
 import { FACILITY_ACCESS } from '../data/packages';
-import { CONNECTED_LINE, PAY_NOW, PENDING_PLAN_LINE } from '../data/billingCopy';
+import { CONNECTED_LINE, PAY_NOW, PENDING_PLAN_LINE, SINGLE_PLAN_LINE } from '../data/billingCopy';
 import useBillingHub from '../hooks/billing';
 
 /**
@@ -223,9 +223,14 @@ function ContractLine({ contractMinutes, onOpen }) {
   );
 }
 
-/** The plan: one row per athlete, catalogue prices as facts, the billing day. */
+/**
+ * The plan: one row per athlete, catalogue prices as facts, the billing day.
+ * The single token is a one-time purchase: its row reads "one-time", and the
+ * monthly billing footer only shows when someone is on a monthly package.
+ */
 function PlanCard({ household, members, showPrices = false }) {
   const anyPending = showPrices && members.some((m) => m.package?.pending);
+  const anyMonthly = members.some((m) => m.package?.kind !== 'single');
   return (
     <Card large>
       <SectionLabel style={{ marginBottom: 6 }}>Plan</SectionLabel>
@@ -247,10 +252,14 @@ function PlanCard({ household, members, showPrices = false }) {
                 ? 'No package'
                 : m.package.kind === 'elite'
                   ? `${m.package.name} · unlimited`
-                  : `${m.package.name} a period`}
+                  : m.package.kind === 'single'
+                    ? `${m.package.name} · one-time`
+                    : `${m.package.name} a period`}
               {m.package?.windowDays ? ` · books ${m.package.windowDays} days out` : ''}
               {m.facilityAccess ? ' · + facility access' : m.package?.kind === 'elite' ? ' · facility access included' : ''}
-              {m.billing?.status === 'pending' || m.billing?.status === 'lapsed' ? ` · ${PENDING_PLAN_LINE}` : ''}
+              {m.billing?.status === 'pending' || m.billing?.status === 'lapsed'
+                ? ` · ${m.package?.kind === 'single' ? SINGLE_PLAN_LINE : PENDING_PLAN_LINE}`
+                : ''}
             </div>
           </div>
           {showPrices ? (
@@ -262,10 +271,12 @@ function PlanCard({ household, members, showPrices = false }) {
           ) : null}
         </div>
       ))}
-      <Body size={11} tone={color.textTertiary} style={{ marginTop: 10 }}>
-        Billed monthly on the {ordinal(household?.anchorDay ?? 1)}. Tokens reset the same day.
-        {anyPending ? " Prices marked pending are awaiting the academy's confirmation." : ''}
-      </Body>
+      {anyMonthly ? (
+        <Body size={11} tone={color.textTertiary} style={{ marginTop: 10 }}>
+          Billed monthly on the {ordinal(household?.anchorDay ?? 1)}. Tokens reset the same day.
+          {anyPending ? " Prices marked pending are awaiting the academy's confirmation." : ''}
+        </Body>
+      ) : null}
     </Card>
   );
 }

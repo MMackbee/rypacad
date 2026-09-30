@@ -1,7 +1,9 @@
 import React from 'react';
+import { format, parseISO } from 'date-fns';
 import { renderScreen } from './testRender';
-import { AthleteStep, ConsentStep, WhoStep } from './RegistrationSteps';
+import { AthleteStep, ConsentStep, PackageStep, WhoStep } from './RegistrationSteps';
 import { newAthleteEntry } from '../data/signup';
+import { SEASON_BOUNDS } from '../data/season';
 
 function Harness({ mode = 'parent', athlete = {} }) {
   const [athletes, setAthletes] = React.useState([{ ...newAthleteEntry(), ...athlete }]);
@@ -50,4 +52,20 @@ test('consent copy switches to the adult variant', async () => {
   const a = await renderScreen(<ConsentStep mode="athlete" {...props} />);
   expect(a.text()).toContain('You are signing for yourself.');
   await a.unmount();
+});
+
+test('the single token card reads one-time, good through the season end; monthly cards are unchanged', async () => {
+  // The card's date is the season's last day - fail here if the season moves.
+  expect(format(parseISO(SEASON_BOUNDS.end), 'EEE, MMM d')).toBe('Sat, Feb 27');
+  const r = await renderScreen(<PackageStep athletes={[{ ...newAthleteEntry(), name: 'Nico' }]} onUpdate={() => {}} showErrors={false} />);
+  const single = r.button('Single token');
+  expect(single).not.toBeNull();
+  expect(single.textContent).toContain('1 session · good through Sat, Feb 27');
+  expect(single.textContent).toContain('one-time');
+  expect(single.textContent).not.toContain('/ period');
+  const six = r.button('6 tokens');
+  expect(six.textContent).toContain('6 tokens a period · $49.83 a token');
+  expect(six.textContent).toContain('/ period');
+  expect(six.textContent).not.toContain('one-time');
+  await r.unmount();
 });

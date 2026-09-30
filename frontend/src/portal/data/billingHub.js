@@ -12,7 +12,7 @@
  */
 
 import { addDaysISO, longDayLabel } from './calendar';
-import { normalizeAnchorDay, periodFor, tokensFor } from './packages';
+import { normalizeAnchorDay, periodFor, SINGLE_TOKEN, tokensFor } from './packages';
 
 /** Days from `fromISO` to `toISO` (calendar days, UTC-noon arithmetic). */
 export function daysBetween(fromISO, toISO) {
@@ -217,6 +217,11 @@ function attemptOf(membership) {
  * Copy is the contract's: past due PAUSES new bookings (Sprint 13 pin H),
  * lapsed released them. Dates appear only when the Stripe handler recorded
  * them; nothing here invents a retry schedule.
+ *
+ * The single token is a one-time purchase (owner ruling, 2026-09-30): a
+ * pending list of only single-token athletes (`perPurchase`, hooks/billing.js
+ * pendingOf) and an all-single household (`opts.allPerPurchase`) never read
+ * "billed monthly".
  */
 export function statusFor(membership, opts = {}) {
   const status = (membership && membership.status) || 'active';
@@ -257,12 +262,15 @@ export function statusFor(membership, opts = {}) {
   if (pendingAthletes.length > 0) {
     const names = listNames(pendingAthletes.map((a) => a.name));
     const ended = pendingAthletes.some((a) => a.status === 'lapsed');
+    const perPurchase = pendingAthletes.every((a) => a.perPurchase === true);
     return {
       status: 'pending',
       tone: 'yellow',
       badge: { tone: 'yellow', label: ended ? 'Payment needed' : 'Payment pending' },
       title: ended ? 'Membership ended - pay to book again' : 'Payment pending - finish checkout to start booking',
-      body: `${names} can book as soon as checkout is complete. Billed monthly from the 1st once you've paid.`,
+      body: perPurchase
+        ? `${names} can book once their session token is paid for. A session token is a one-time $${SINGLE_TOKEN.price} payment.`
+        : `${names} can book as soon as checkout is complete. Billed monthly from the 1st once you've paid.`,
       ladder: null,
       ladderAt: null,
       cta: 'Pay now',
@@ -292,7 +300,9 @@ export function statusFor(membership, opts = {}) {
     tone: 'default',
     badge: { tone: 'green', label: 'Active' },
     title: resetsOn ? `Tokens reset ${longDayLabel(resetsOn)}` : 'Membership active',
-    body: `${billingDay ? `Billed monthly on the ${billingDay}. ` : ''}Nothing needs attention.`,
+    body: opts.allPerPurchase === true
+      ? 'Session tokens are one-time payments - nothing bills monthly.'
+      : `${billingDay ? `Billed monthly on the ${billingDay}. ` : ''}Nothing needs attention.`,
     ladder: null,
     ladderAt: null,
     cta: null,

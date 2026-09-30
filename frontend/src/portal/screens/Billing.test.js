@@ -28,6 +28,29 @@ test('pending hero pays, plan and connection copy, facility offer for the paid a
   await r.unmount();
 });
 
+test('a mixed household keeps the monthly plan copy and footer', async () => {
+  mockHub.data.members[1] = { ...mockHub.data.members[1], package: { id: 'single', name: 'Single token', kind: 'single', windowDays: 30, price: 65 } };
+  const r = await renderScreen(<Billing bare />);
+  expect(r.text()).toContain('6 tokens a period · books 30 days out');
+  expect(r.text()).toContain('Single token · one-time · books 30 days out · One-time $65 per session token');
+  expect(r.text()).toContain('Billed monthly on the 1st. Tokens reset the same day.');
+  await r.unmount();
+});
+
+test('an all-single household reads one-time and has no monthly footer', async () => {
+  const single = { id: 'single', name: 'Single token', kind: 'single', windowDays: 30, price: 65 };
+  mockHub.data.members = mockHub.data.members.map((m) => ({ ...m, package: single }));
+  mockHub.data.status = { status: 'active', tone: 'default', badge: { tone: 'green', label: 'Active' }, title: 'Membership active',
+    body: 'Session tokens are one-time payments - nothing bills monthly.', ladder: null, ladderAt: null, cta: null, paused: false };
+  const r = await renderScreen(<Billing bare />);
+  expect(r.text()).toContain('Single token · one-time');
+  expect(r.text()).toContain('One-time $65 per session token'); // Reese's pending row
+  expect(r.text()).not.toContain('a period');
+  expect(r.text()).not.toContain('Billed monthly');
+  expect(r.text()).not.toContain('Tokens reset the same day');
+  await r.unmount();
+});
+
 test('staff view never pays', async () => {
   const r = await renderScreen(<Billing bare staff role="owner" householdId="h1" />);
   expect(r.button('Pay now|a2|tier')).toBeNull();

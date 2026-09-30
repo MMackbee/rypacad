@@ -4,10 +4,13 @@
  * and AthleteDetail so the words cannot drift. `billing` absent == active.
  */
 import { BOOKING_OPENS_LABEL, longDayLabel } from './calendar';
+import { SINGLE_TOKEN } from './packages';
 
 export const PENDING_TITLE = 'Payment pending - finish checkout to start booking';
 export const PAY_NOW = 'Pay now';
 export const PENDING_PLAN_LINE = "Billed monthly from the 1st once you've paid";
+/** The single token is a one-time purchase, never a monthly bill (owner ruling, 2026-09-30). */
+export const SINGLE_PLAN_LINE = `One-time $${SINGLE_TOKEN.price} per session token`;
 export const CONNECTED_LINE = 'Your card and invoices are managed in Stripe.';
 export const CONFIRMING = 'Confirming your payment...';
 export const CONFIRM_TIMEOUT = 'Still confirming - refresh in a minute, or check your email from Stripe.';

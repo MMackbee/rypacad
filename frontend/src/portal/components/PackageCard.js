@@ -25,7 +25,8 @@ export default function PackageCard({
   onSelect,
   rows = [],
   footnote,
-  cadence = '/ period',
+  // The single token is a one-time $65 purchase, not a period package.
+  cadence = pkg.kind === 'single' ? 'one-time' : '/ period',
   showPrices = PRICES_RELEASED,
   style,
 }) {
@@ -124,9 +125,12 @@ export default function PackageCard({
  * Elite: unlimited + the differentiators, no token count (pin L). A token
  * package: count + the per-token rate, derived here (price / tokens) rather
  * than stored — the contract's own §1 table is exactly this division.
+ * The single token: one session, good through the season's last day
+ * (SEASON_BOUNDS.end, Sat 2027-02-27) - bought once, never per period.
  */
 function entitlementLine(pkg, showPrices) {
   if (pkg.kind === 'elite') return `Unlimited · 24/7 access · books ${pkg.windowDays} days out`;
+  if (pkg.kind === 'single') return '1 session · good through Sat, Feb 27';
   if (pkg.tokens == null) return null;
   if (pkg.tokens === 1) return `1 token · books ${pkg.windowDays} days out`;
   // The per-token rate is a price: withheld with the rest (v2.0.1).
