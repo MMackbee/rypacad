@@ -261,6 +261,9 @@ describe('per-athlete billing (Sprint 20, spec 4.4)', () => {
     const active = statusFor(null, { resetsOn: '2026-10-01', anchorDay: 1, allPerPurchase: true });
     expect(active).toMatchObject({ status: 'active', badge: { tone: 'green', label: 'Active' }, cta: null, paused: false });
     expect(active.body).toBe('Session tokens are one-time payments - nothing bills monthly.');
+    // Session tokens never reset, so the hero does not promise a reset date.
+    expect(active.title).toBe('Membership active');
+    expect(statusFor(null, { resetsOn: '2026-10-01', anchorDay: 1, allPerPurchase: false }).title).toBe(`Tokens reset ${longDayLabel('2026-10-01')}`);
     // The monthly pins are unchanged.
     expect(statusFor(null, { resetsOn: '2026-10-01', anchorDay: 1, allPerPurchase: false }).body).toBe('Billed monthly on the 1st. Nothing needs attention.');
     expect(statusFor({ status: 'active' }, { anchorDay: 15 }).body).toBe('Billed monthly on the 15th. Nothing needs attention.');

@@ -309,7 +309,8 @@ export function statusFor(membership, opts = {}) {
     status: 'active',
     tone: 'default',
     badge: { tone: 'green', label: 'Active' },
-    title: resetsOn ? `Tokens reset ${longDayLabel(resetsOn)}` : 'Membership active',
+    // Session tokens never reset: an all-single household reads 'Membership active'.
+    title: resetsOn && opts.allPerPurchase !== true ? `Tokens reset ${longDayLabel(resetsOn)}` : 'Membership active',
     body: opts.allPerPurchase === true
       ? 'Session tokens are one-time payments - nothing bills monthly.'
       : `${billingDay ? `Billed monthly on the ${billingDay}. ` : ''}Nothing needs attention.`,
