@@ -1,29 +1,75 @@
 import React from 'react';
 import { theme } from '../styles/theme';
 
+/*
+ * After a deploy, an open tab still asks for the old build's chunk names.
+ * `serve -s` answers a deleted chunk with index.html, so webpack throws a
+ * ChunkLoadError on the next lazy screen. Reload once to pick up the new
+ * build. The timestamp stops a loop: a second chunk error within 10 s of the
+ * last reload shows the error card instead. Never clear it on mount - a deep
+ * link to a chunk that is genuinely broken would then reload forever.
+ */
+export const CHUNK_RELOAD_KEY = 'ryp.chunkReloadAt';
+const CHUNK_RELOAD_WINDOW_MS = 10000;
+
+export function isChunkError(e) {
+  return e?.name === 'ChunkLoadError' || /Loading (CSS )?chunk [\w-]+ failed/.test(e?.message || '');
+}
+
+function mayReload() {
+  try {
+    const last = Number(window.sessionStorage.getItem(CHUNK_RELOAD_KEY) || 0);
+    return Date.now() - last > CHUNK_RELOAD_WINDOW_MS;
+  } catch (err) {
+    return false;
+  }
+}
+
+function shouldReload(error) {
+  return isChunkError(error) && navigator.onLine !== false && mayReload();
+}
+
+/** Records the reload; false when storage refuses the write, so we never reload unguarded. */
+function markReload() {
+  try {
+    window.sessionStorage.setItem(CHUNK_RELOAD_KEY, String(Date.now()));
+    return true;
+  } catch (err) {
+    return false;
+  }
+}
+
 class ErrorBoundary extends React.Component {
   constructor(props) {
     super(props);
-    this.state = { hasError: false, error: null, errorInfo: null };
+    this.state = { hasError: false, reloading: false, error: null, errorInfo: null };
   }
 
   static getDerivedStateFromError(error) {
-    // Update state so the next render will show the fallback UI
-    return { hasError: true };
+    // Update state so the next render will show the fallback UI (or nothing,
+    // while a stale-chunk reload is on its way).
+    return { hasError: true, reloading: shouldReload(error) };
   }
 
   componentDidCatch(error, errorInfo) {
     // Log the error to console
     console.error('Error caught by boundary:', error, errorInfo);
-    
+
+    if (shouldReload(error) && markReload()) {
+      window.location.reload();
+      return;
+    }
+
     // Update state with error details
     this.setState({
+      reloading: false,
       error: error,
       errorInfo: errorInfo
     });
   }
 
   render() {
+    if (this.state.reloading) return null;
     if (this.state.hasError) {
       return (
         <div style={{
