@@ -18,6 +18,7 @@
 
 import { useEffect, useState } from 'react';
 import { hubMemberFor, statusFor } from '../data/billingHub';
+import { billingStatusOf } from '../data/billingCopy';
 import { addDaysISO, todayISO } from '../data/calendar';
 import { normalizeAnchorDay, packageById, periodFor } from '../data/packages';
 import { GRACE_TOKEN, HOUSEHOLD, PAST_DUE_MEMBERSHIP, PERIOD_ANCHOR_DAY } from '../data/seed';
@@ -123,7 +124,7 @@ async function liveMember(athlete, anchorDay, today) {
   return { ...entry, coaching: coachingFor(bookings, today, pkg) };
 }
 
-/** The members who need a checkout (Sprint 20, spec 4.4): never paid, or whose tier subscription ended - drives statusFor's pending branch. A lapsed athlete re-subscribes through the same createCheckoutSession; the customer portal cannot resume a cancelled subscription. `perPurchase` marks a single-token athlete, whose checkout is a one-time token, never a monthly bill. */
+/** The members who need a checkout (Sprint 20, spec 4.4): never paid, or whose tier subscription ended - drives statusFor's pending branch. Reads the hub's `billing.status`, which is billingStatusOf(athlete): a single-token buyer moved to another package is 'pending' too (ruling 2026-09-29/30). A lapsed athlete re-subscribes through the same createCheckoutSession; the customer portal cannot resume a cancelled subscription. `perPurchase` marks a single-token athlete, whose checkout is a one-time token, never a monthly bill. */
 export function pendingOf(members) {
   return members
     .filter((m) => m.billing?.status === 'pending' || m.billing?.status === 'lapsed')
@@ -315,18 +316,24 @@ export function useHouseholdsDirectory() {
   );
 }
 
-/** athleteId -> { packageId } once its ?paid= return confirmed (this page load). */
+/** `${athleteId}|${cs}` -> { packageId } once its ?paid= return confirmed (this page load). Keyed by the Checkout Session too: a second single-token purchase is a new confirmation. */
 const confirmedPayments = new Map();
 
 /**
  * The `?paid=<athleteId>` return from Stripe Checkout (Sprint 20, spec 4.2):
  * `{ state: 'idle'|'confirming'|'confirmed'|'timeout', billingStatus }`. Polls
- * the athlete every 5 s, 24 attempts (2 min); on `billing.status === 'active'`
- * bumps athletes + billing (every hub/home hook re-reads) and strips the
- * query from the address bar so a refresh does not poll again. The screen
- * passes the id it read from useSearchParams; null means nothing to confirm.
+ * every 5 s, 24 attempts (2 min); on confirmation bumps athletes + billing +
+ * graceTokens (every hub/home hook re-reads) and strips the query from the
+ * address bar so a refresh does not poll again. The screen passes what it
+ * read from useSearchParams; a null athleteId means nothing to confirm.
+ *
+ * A single-token return (`&cs=<id>&single=1`, ruling 2026-09-29/30) confirms
+ * when graceTokens/single_{cs} exists - the athlete is often ALREADY active
+ * from an earlier token, so their billing status proves nothing. Every other
+ * return confirms on billingStatusOf(athlete) === 'active' (a one-time buyer
+ * moved to a monthly package stays pending until that checkout lands).
  */
-export function usePaymentConfirmation(athleteId) {
+export function usePaymentConfirmation(athleteId, { cs = null, single = false } = {}) {
   const [state, setState] = useState({ state: 'idle', billingStatus: null, packageId: null });
   useEffect(() => {
     if (!athleteId || !isLive()) return undefined;
@@ -334,7 +341,8 @@ export function usePaymentConfirmation(athleteId) {
     // re-fetch, which unmounts and remounts the banner while the router still
     // carries ?paid= (replaceState is invisible to it) - answer from memory
     // instead of polling and bumping again, which looped (review 2026-09-29).
-    const done = confirmedPayments.get(athleteId);
+    const key = `${athleteId}|${cs || ''}`;
+    const done = confirmedPayments.get(key);
     if (done) {
       setState({ state: 'confirmed', billingStatus: 'active', packageId: done.packageId });
       return undefined;
@@ -349,17 +357,25 @@ export function usePaymentConfirmation(athleteId) {
       let status = null;
       let packageId = null;
       try {
-        const a = await fetchAthlete(athleteId);
-        status = a.billing?.status ?? 'active';
-        packageId = a.packageId ?? null;
+        if (single && cs) {
+          const tokens = await fetchGraceTokensByAthlete(athleteId);
+          const paid = tokens.some((g) => g.id === `single_${cs}`);
+          status = paid ? 'active' : null;
+          packageId = paid ? 'single' : null;
+        } else {
+          const a = await fetchAthlete(athleteId);
+          status = billingStatusOf(a);
+          packageId = a.packageId ?? null;
+        }
       } catch (err) {
         status = null; // a transient read error is just another attempt
       }
       if (!alive) return;
       if (status === 'active') {
-        confirmedPayments.set(athleteId, { packageId });
+        confirmedPayments.set(key, { packageId });
         bump('athletes');
         bump('billing');
+        bump('graceTokens');
         try {
           window.history.replaceState(null, '', window.location.pathname);
         } catch (err) {
@@ -380,6 +396,6 @@ export function usePaymentConfirmation(athleteId) {
       alive = false;
       clearTimeout(timer);
     };
-  }, [athleteId]);
+  }, [athleteId, cs, single]);
   return state;
 }
