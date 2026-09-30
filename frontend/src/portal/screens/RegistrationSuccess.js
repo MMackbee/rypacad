@@ -55,7 +55,12 @@ export default function RegistrationSuccess({ bare = false, mode = 'signup', for
   const athleteMode = form.mode === 'athlete';
   const rows = form.athletes.map((a, i) => ({ ...a, athleteId: result?.athleteIds?.[i] ?? null, pkg: packageById(a.packageId) }));
   const family = useFamilyAthletes(result?.householdId, mode === 'link');
-  const siblingDiscount = rows.some((r) => r.pkg && r.pkg.kind !== 'single') && siblingDiscountApplies(family?.length ? family : rows);
+  // The receipt's own athletes are never paid yet, so on their own they can
+  // only be the unpaid side of the rule; a paid sibling comes from the family
+  // read (link mode). Sign-up therefore shows no note: the first membership
+  // is full price, the note appears on the family page for the next one.
+  const unpaidRows = rows.map((r) => ({ packageId: r.packageId, billing: { status: 'pending' } }));
+  const siblingDiscount = rows.some((r) => r.pkg && r.pkg.kind !== 'single') && siblingDiscountApplies(family?.length ? family : unpaidRows);
   const prepaysNovember = Date.now() < PREPAYS_NOVEMBER_UNTIL;
   const priced = prepaysNovember ? rows.filter((r) => pricedMonthly(r.pkg)) : [];
   const payLabel = (r) => (pricedMonthly(r.pkg) && prepaysNovember

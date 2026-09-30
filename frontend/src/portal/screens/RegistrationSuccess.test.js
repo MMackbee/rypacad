@@ -103,9 +103,9 @@ describe('sibling discount (checkout.js siblingEligible, owner 2026-09-30)', () 
   const NOTE = '10% sibling discount comes off at checkout.';
   const avery = { ...newAthleteEntry(), name: 'Avery', dob: '2013-05-01', packageId: 't-16' };
 
-  test('two monthly athletes at sign-up: one line, and the buttons keep the catalogue price', async () => {
+  test('two monthly athletes at sign-up: no line yet (nobody is paid), and the buttons keep the catalogue price', async () => {
     const r = await renderScreen(<RegistrationSuccess bare mode="signup" form={form()} result={{ householdId: 'h1', athleteIds: ['a1', 'a2'] }} account={{ email: 'dana@email.com' }} onFinish={() => {}} />);
-    expect(r.text().split(NOTE)).toHaveLength(2);
+    expect(r.text()).not.toContain('sibling');
     expect(r.button("Pay $569 for Jordan's 12 tokens|a1")).not.toBeNull();
     expect(r.button("Pay $999 for Reese's Elite|a2")).not.toBeNull();
     expect(r.text()).not.toMatch(/\$512|\$899|\$647/);
@@ -149,9 +149,10 @@ describe('sibling discount (checkout.js siblingEligible, owner 2026-09-30)', () 
     expect(mockReads).toEqual(['h1']);
     expect(r.text()).not.toContain('sibling');
     await r.unmount();
+    // Two new athletes with no readable family: neither is paid, so no note.
     const two = await renderScreen(<RegistrationSuccess bare mode="link" form={form()} result={{ householdId: 'h1', athleteIds: ['a1', 'a2'] }} account={{ email: 'dana@email.com' }} onFinish={() => {}} />);
     await two.flush();
-    expect(two.text()).toContain(NOTE);
+    expect(two.text()).not.toContain('sibling');
     await two.unmount();
   });
 });

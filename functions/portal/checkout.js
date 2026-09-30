@@ -67,25 +67,28 @@ async function read(store, collection, id) {
 }
 
 /**
- * Sibling discount (owner, 2026-09-30): a family with more than one athlete
- * on a monthly package gets it on every membership checkout. The single
- * token is a one-time purchase, not a membership, so it does not count,
- * and neither does a lapsed membership (packageId survives a lapse).
- * Checked at checkout only: a 'forever' coupon then stays on that
- * subscription for the season.
+ * Sibling discount (owner, 2026-09-30): the second and later memberships in
+ * a family get it - this checkout qualifies when ANOTHER athlete in the
+ * household already holds a PAID monthly membership (active or past_due;
+ * no billing map = a legacy active member). Review 2026-09-30: a never-paid
+ * sibling does not count, or one paying child plus an unpaid sibling would
+ * keep the 'forever' coupon all season. The single token is a one-time
+ * purchase, not a membership. Checked at checkout only.
  * @param {!Object} store Firestore.
  * @param {string} householdId The family.
- * @return {!Promise<boolean>} Whether the family qualifies.
+ * @param {string} athleteId The athlete being paid for (never counts).
+ * @return {!Promise<boolean>} Whether this checkout qualifies.
  */
-async function siblingEligible(store, householdId) {
+async function siblingEligible(store, householdId, athleteId) {
   const snap = await store.collection('athletes')
       .where('householdId', '==', householdId).get();
-  const monthly = snap.docs.filter((doc) => {
+  return snap.docs.some((doc) => {
     const a = doc.data() || {};
-    return Boolean(a.packageId) && a.packageId !== 'single' &&
-        !(a.billing && a.billing.status === 'lapsed');
+    const paid = !a.billing || a.billing.status === 'active' ||
+        a.billing.status === 'past_due';
+    return doc.id !== athleteId && Boolean(a.packageId) &&
+        a.packageId !== 'single' && paid;
   });
-  return monthly.length >= 2;
 }
 
 /**
@@ -330,7 +333,8 @@ async function createCheckoutSessionHandler(data, context, deps) {
   };
   if (req.product === 'tier') {
     try {
-      sibling.eligible = await siblingEligible(store, athlete.householdId);
+      sibling.eligible = await siblingEligible(store, athlete.householdId,
+          req.athleteId);
     } catch (err) {
       console.error('siblingEligible failed, no discount:', err);
     }

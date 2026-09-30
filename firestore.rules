@@ -257,9 +257,15 @@ service cloud.firestore {
           && resource.data.get('billing', {}).get('status', null) == 'pending'
           && (!changed.hasAny(['updatedAt']) || after.updatedAt == request.time);
       }
+      // The athlete branch is the 18+ member who created their own household
+      // (createFamily mode 'athlete' sets households.createdBy to them), never
+      // a child's claimed login: a child must not change what the parent is
+      // about to be charged (review 2026-09-30). One extra get, on this
+      // write only.
       allow update: if signedIn() && pendingPackageUpdateOk() && (
         (me().role == 'parent' && resource.data.householdId == me().householdId)
-        || (me().role == 'athlete' && me().athleteId == athleteId)
+        || (me().role == 'athlete' && me().athleteId == athleteId
+            && get(/databases/$(database)/documents/households/$(resource.data.householdId)).data.createdBy == request.auth.uid)
       );
 
       // ---- athletes/{id}/diagnostics/{captureId} -----------------------
@@ -580,11 +586,16 @@ service cloud.firestore {
       // BOOKING_WINDOW_ANCHOR, one day of slack kept (Dec 17). Package-
       // agnostic, no extra read; a no-op once request.time passes Nov 1.
       // Retire with the Oct 10 gate (#26).
+      // Review 2026-09-30: the anchored ceiling follows the package - Elite
+      // 45 days (Dec 16), everyone else 30 (Dec 1) - each with the same one
+      // day of slack, so a token family cannot book December on the server
+      // before the client would let them. athleteData() is a cached get.
       function withinOuterBookingBound() {
         let parts = request.resource.data.date.split('-');
         let sessionDate = timestamp.date(int(parts[0]), int(parts[1]), int(parts[2]));
+        let anchoredDays = athleteData(request.resource.data.athleteId).get('packageId', null) == 'elite' ? 46 : 31;
         return sessionDate <= request.time + duration.value(46, 'd')
-          || sessionDate <= timestamp.date(2026, 11, 1) + duration.value(46, 'd');
+          || sessionDate <= timestamp.date(2026, 11, 1) + duration.value(anchoredDays, 'd');
       }
 
       // createdBy == request.auth.uid (in shape), caller is the athlete's own

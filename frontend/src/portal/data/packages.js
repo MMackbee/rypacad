@@ -98,20 +98,22 @@ export const SIBLING_DISCOUNT_PCT = 10;
 export const SIBLING_DISCOUNT_NOTE = `${SIBLING_DISCOUNT_PCT}% sibling discount comes off at checkout.`;
 
 /**
- * Whether the family's membership checkouts get the sibling discount - the
- * same rule as checkout.js siblingEligible, kept in step by hand: at least
- * two athletes with a package that is not the one-time single token and
- * whose billing has not lapsed (packageId survives a lapse). Pending athletes
- * count. Takes athlete docs (`packageId`) or billing-hub members
- * (`package.id`); absent `billing` is not lapsed. The facility add-on never
- * gets it, so callers ask only about membership checkouts.
+ * Whether the family's next membership checkout gets the sibling discount -
+ * the same rule as checkout.js siblingEligible, kept in step by hand: the
+ * second and later memberships qualify, so one athlete must already hold a
+ * PAID monthly membership (active or past_due; absent `billing` = legacy
+ * active) and another monthly athlete must still be unpaid. A never-paid
+ * sibling never qualifies a checkout (review 2026-09-30), and the one-time
+ * single token is not a membership. Takes athlete docs (`packageId`) or
+ * billing-hub members (`package.id`). The facility add-on never gets it.
  */
 export function siblingDiscountApplies(athletes) {
   const monthly = (athletes || []).filter((a) => {
     const id = a ? (a.packageId ?? a.package?.id) : null;
-    return Boolean(id) && id !== SINGLE_TOKEN.id && a.billing?.status !== 'lapsed';
+    return Boolean(id) && id !== SINGLE_TOKEN.id;
   });
-  return monthly.length >= 2;
+  const paid = (a) => !a.billing || a.billing.status === 'active' || a.billing.status === 'past_due';
+  return monthly.some(paid) && monthly.some((a) => !paid(a) && a.billing?.status !== 'lapsed');
 }
 
 /**

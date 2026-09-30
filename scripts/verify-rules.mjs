@@ -186,7 +186,17 @@ export async function taskWindow() {
   const elite = (sessionId, date) => ({ ...booking('ath-elite'), sessionId, date, periodKey: '2026-12-01', chargedFrom: 'elite' });
   expect('booking: Elite books Dec 16 (Nov 1 + 45)', await createAs(t.parent, 'bookings', 'ath-elite_s-dec16', elite('s-dec16', '2026-12-16')), 200);
   expect('booking: Dec 18 past the anchored bound', await createAs(t.parent, 'bookings', 'ath-elite_s-dec18', elite('s-dec18', '2026-12-18')), dec18Open ? 200 : 403);
-  for (const [c, id] of [['bookings', 'ath-elite_s-dec16'], ['bookings', 'ath-elite_s-dec18'], ['sessions', 's-dec16'], ['sessions', 's-dec18']]) await del(c, id);
+  // Review 2026-09-30: the anchored ceiling follows the package. A token
+  // athlete reaches Dec 1 (Nov 1 + 30, one day of slack) - once the Oct 10
+  // gate is open - and Dec 3 stays refused until today + 46 days passes it.
+  await seed('sessions', 's-dec1', { date: '2026-12-01', time: '4:00 PM', type: 'training', capacity: 15, booked: 0, status: 'scheduled' });
+  await seed('sessions', 's-dec3', { date: '2026-12-03', time: '4:00 PM', type: 'training', capacity: 15, booked: 0, status: 'scheduled' });
+  const tokens = (sessionId, date) => ({ ...booking('ath-active'), sessionId, date, periodKey: '2026-12-01' });
+  const dec3Open = Date.now() + 46 * 86400000 >= Date.UTC(2026, 11, 3);
+  expect('booking: token athlete books Dec 1 (Nov 1 + 30)', await createAs(t.parent, 'bookings', 'ath-active_s-dec1', tokens('s-dec1', '2026-12-01')), beforeGate ? 403 : 200);
+  expect('booking: token athlete Dec 3 past the anchored token bound', await createAs(t.parent, 'bookings', 'ath-active_s-dec3', tokens('s-dec3', '2026-12-03')), dec3Open && !beforeGate ? 200 : 403);
+  for (const [c, id] of [['bookings', 'ath-elite_s-dec16'], ['bookings', 'ath-elite_s-dec18'], ['bookings', 'ath-active_s-dec1'], ['bookings', 'ath-active_s-dec3'],
+    ['sessions', 's-dec16'], ['sessions', 's-dec18'], ['sessions', 's-dec1'], ['sessions', 's-dec3']]) await del(c, id);
 }
 
 // Tester S4 (2026-09-30): before the first payment the family may switch the
@@ -196,8 +206,14 @@ export async function taskPackageChange() {
   const selfUid = 'self-probe';
   const self = token(selfUid, { email: 'sam@example.com', email_verified: true });
   await seed('users', selfUid, { role: 'athlete', athleteId: 'ath-pkg-self', householdId: 'hh-self' });
+  await seed('households', 'hh-self', { name: 'Self', periodAnchorDay: 1, createdBy: selfUid });
+  // A child's claimed login in the parent's household (review 2026-09-30: never the payer).
+  const kidUid = 'kid-pkg-probe';
+  const kidLogin = token(kidUid, { email: 'kid-pkg@example.com', email_verified: true });
+  await seed('users', kidUid, { role: 'athlete', athleteId: 'ath-pkg-kid', householdId: 'hh' });
   const athletes = [['ath-pkg-pending', 'hh', 'pending'], ['ath-pkg-active', 'hh', 'active'], ['ath-pkg-pastdue', 'hh', 'past_due'],
-    ['ath-pkg-lapsed', 'hh', 'lapsed'], ['ath-pkg-absent', 'hh', null], ['ath-pkg-self', 'hh-self', 'pending']];
+    ['ath-pkg-lapsed', 'hh', 'lapsed'], ['ath-pkg-absent', 'hh', null], ['ath-pkg-self', 'hh-self', 'pending'],
+    ['ath-pkg-kid', 'hh', 'pending']];
   for (const [id, householdId, status] of athletes) {
     await seed('athletes', id, { name: id, householdId, contractMinutes: null, coachId: null, packageId: 'elite', ...(status ? { billing: { status } } : {}) });
   }
@@ -226,10 +242,13 @@ export async function taskPackageChange() {
   }
   expect('the 18+ athlete switches their own pending package', await stamped('ath-pkg-self', { packageId: 't-16' }, self), 200);
   expect('an athlete cannot switch another athlete in the household', await patchAth('ath-pkg-pending', { packageId: 't-6' }, t.athlete), 403);
+  expect("a child's own login cannot switch the package the parent pays for", await stamped('ath-pkg-kid', { packageId: 't-6' }, kidLogin), 403);
   expect("a parent cannot switch another family's athlete", await patchAth('ath-pkg-self', { packageId: 't-6' }, t.parent), 403);
   expect('a stranger cannot switch', await patchAth('ath-pkg-pending', { packageId: 't-6' }, t.stranger), 403);
   expect('ops still assigns any package (the staff branch)', await patchAth('ath-pkg-active', { packageId: 'single' }, t.ops), 200);
   for (const [id] of athletes) await del('athletes', id);
+  await del('households', 'hh-self');
+  await del('users', kidUid);
   await del('users', selfUid);
 }
 

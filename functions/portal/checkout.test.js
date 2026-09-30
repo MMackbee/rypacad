@@ -35,7 +35,7 @@ function fakeDb(docs) {
       const hits = Object.entries(docs)
           .filter(([path, d]) => path.startsWith(`${c}/`) &&
               d[field] === value)
-          .map(([, d]) => ({data: () => d}));
+          .map(([path, d]) => ({id: path.slice(c.length + 1), data: () => d}));
       return {docs: hits};
     }}),
   })};
@@ -117,7 +117,7 @@ test('tier before Nov 1: the exact session body', async () => {
   assert.deepEqual(await p, {url: 'https://checkout.stripe.com/c/cs_test_1'});
   assert.deepEqual(calls[0], {
     mode: 'subscription',
-    // novak is a 2+ membership family and no coupon is configured here.
+    // novak: max is a paid Elite sibling, and no coupon is configured here.
     allow_promotion_codes: true,
     client_reference_id: 'novak__lena__tier',
     line_items: [
@@ -258,12 +258,32 @@ test('sibling discount (2026-09-30): 2+ membership families, coupon or code',
       // novak has lena, max and fac on monthly packages (nopkg and the single
       // token sol do not count); oye has femi alone.
       const two = fakeDb(DOCS);
-      assert.equal(await checkout.siblingEligible(two, 'novak'), true);
-      assert.equal(await checkout.siblingEligible(two, 'oye'), false);
+      // lena has paid siblings (max active, fac active); max's own checkout
+      // also sees fac; femi is alone in oye.
+      assert.equal(await checkout.siblingEligible(two, 'novak', 'lena'), true);
+      assert.equal(await checkout.siblingEligible(two, 'novak', 'max'), true);
+      assert.equal(await checkout.siblingEligible(two, 'oye', 'femi'), false);
       const only = fakeDb(Object.assign({}, DOCS, {'athletes/max':
         {householdId: 'novak', packageId: 'single'}, 'athletes/fac':
         {householdId: 'novak', packageId: null}}));
-      assert.equal(await checkout.siblingEligible(only, 'novak'), false);
+      assert.equal(await checkout.siblingEligible(only, 'novak', 'lena'),
+          false);
+      // A never-paid (pending) sibling does not count (review 2026-09-30).
+      const unpaid = fakeDb(Object.assign({}, DOCS, {'athletes/max':
+        {householdId: 'novak', packageId: 'elite',
+          billing: {status: 'pending'}},
+      'athletes/fac': {householdId: 'novak', packageId: 't-6',
+        billing: {status: 'pending'}}}));
+      assert.equal(await checkout.siblingEligible(unpaid, 'novak', 'lena'),
+          false);
+      // The athlete being paid for never counts as their own sibling.
+      const self = fakeDb(Object.assign({}, DOCS, {'athletes/max':
+        {householdId: 'novak', packageId: 'single'}, 'athletes/fac':
+        {householdId: 'novak', packageId: null}, 'athletes/lena':
+        {householdId: 'novak', packageId: 't-6',
+          billing: {status: 'active'}}}));
+      assert.equal(await checkout.siblingEligible(self, 'novak', 'lena'),
+          false);
       // No coupon configured: the eligible family gets the code field only.
       const saved = process.env.STRIPE_SIBLING_COUPON;
       delete process.env.STRIPE_SIBLING_COUPON;
@@ -305,7 +325,8 @@ test('sibling: lapsed siblings do not count; a missing coupon falls back',
           billing: {status: 'lapsed'}},
         'athletes/fac': {householdId: 'novak', packageId: 't-6',
           billing: {status: 'lapsed'}}}));
-      assert.equal(await checkout.siblingEligible(lapsed, 'novak'), false);
+      assert.equal(await checkout.siblingEligible(lapsed, 'novak', 'lena'),
+          false);
       // A read failure costs the discount, not the checkout.
       const broken = Object.assign(fakeDb(DOCS), {collection: (c) =>
         Object.assign(fakeDb(DOCS).collection(c), {where: () => ({
@@ -425,7 +446,7 @@ test('an open session is not reused once the sibling decision changed',
       assert.equal(alone.url, 'https://checkout.stripe.com/c/cs_test_1');
       assert.equal(docs['athletes/femi'].pendingCheckout.tier.discount, 'none');
       docs['athletes/oye-kid2'] = {householdId: 'oye', packageId: 't-12',
-        billing: {status: 'pending'}};
+        billing: {status: 'active'}};
       const withSib = await checkout.createCheckoutSessionHandler(
           {athleteId: 'femi', product: 'tier'}, ctx('u-femi'), deps);
       assert.equal(withSib.url, 'https://checkout.stripe.com/c/cs_test_2');
