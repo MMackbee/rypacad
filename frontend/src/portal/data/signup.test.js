@@ -41,7 +41,8 @@ describe('validateAthleteEntry', () => {
   });
   test('future dob and bad handicap', () => {
     const e = validateAthleteEntry(entry({ dob: '2027-01-01', handicap: '99' }), { todayISO: today });
-    expect(e.dob).toMatch(/Date of birth is required/);
+    expect(e.dob).toBe('That date is in the future - check the year.');
+    expect(validateAthleteEntry(entry({ dob: '' }), { todayISO: today }).dob).toMatch(/Date of birth is required/);
     expect(e.handicap).toBe('Handicap is a whole number from 0 to 54, or leave it blank.');
   });
   test('own login: required, not the guardian, not a sibling', () => {

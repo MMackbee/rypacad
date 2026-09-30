@@ -51,7 +51,8 @@ export function validateAthleteEntry(a, { todayISO, guardianEmail = '', siblings
   const errors = {};
   if (!a.name || a.name.trim() === '') errors.name = 'Athlete name is required.';
   const age = ageOnDate(a.dob, todayISO);
-  if (age == null || a.dob > todayISO) errors.dob = DOB_REQUIRED;
+  if (age == null) errors.dob = DOB_REQUIRED;
+  else if (a.dob > todayISO) errors.dob = 'That date is in the future - check the year.';
   else if (mode === 'athlete' && age < ADULT_AGE) errors.dob = ADULT_REQUIRED;
   if (a.packageId != null && !ALL_PACKAGES.some((p) => p.id === a.packageId)) errors.packageId = 'Pick a package from the list.';
   if (a.contractMinutes != null && !TIER_MINUTES.includes(a.contractMinutes)) errors.contractMinutes = 'Pick 20, 45 or 90 minutes.';

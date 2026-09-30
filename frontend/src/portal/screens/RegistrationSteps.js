@@ -156,7 +156,7 @@ export function AthleteStep({
                 value={athlete.dob}
                 onChange={(v) => onUpdate(athlete.key, { dob: v })}
                 error={errors.dob === ADULT_REQUIRED || showErrors ? errors.dob : undefined}
-                hint={age != null ? `Age ${age} · ${age < 13 ? 'U13' : '13+'}` : undefined}
+                hint={age != null && age >= 0 ? `Age ${age} · ${age < 13 ? 'U13' : '13+'}` : undefined}
               />
               {errors.dob === ADULT_REQUIRED ? (
                 <Button variant="outline" height={44} onClick={onSwitchToParent} style={{ boxShadow: 'none' }}>

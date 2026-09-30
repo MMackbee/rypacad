@@ -70,6 +70,18 @@ export function buildSignupRows({ households = [], athletes = [], invites = [], 
     if (!byHousehold.has(a.householdId)) byHousehold.set(a.householdId, []);
     byHousehold.get(a.householdId).push(a);
   }
+  // Two parents of the same children each signing up is the likeliest bad
+  // outcome of a mass email: two families, two subscriptions per child. The
+  // same athlete name + date of birth in two households flags both rows so
+  // ops can merge and refund before the second card is charged again.
+  const sameKid = (a) => `${String(a.name ?? '').trim().toLowerCase().replace(/\s+/g, ' ')}|${a.dob ?? ''}`;
+  const householdsByKid = new Map();
+  for (const a of athletes) {
+    if (!a.householdId || !a.dob || !a.name) continue;
+    const k = sameKid(a);
+    if (!householdsByKid.has(k)) householdsByKid.set(k, new Set());
+    householdsByKid.get(k).add(a.householdId);
+  }
   const rows = households
     .filter((h) => h && h.signup)
     .map((h) => {
@@ -89,6 +101,10 @@ export function buildSignupRows({ households = [], athletes = [], invites = [], 
       const flags = [
         ...flaggedBookings.filter((b) => b.flag && kidIds.has(b.athleteId)).map((b) => ({ kind: 'booking', id: b.id, flag: b.flag, date: b.date ?? null })),
         ...calendlyEvents.filter((e) => e.householdId && e.householdId === h.id).map((e) => ({ kind: 'calendly', id: e.id, outcome: e.outcome, receivedAt: stamp(e.receivedAt) })),
+        ...kids.flatMap((a) => {
+          const others = [...(householdsByKid.get(sameKid(a)) ?? [])].filter((id) => id !== h.id);
+          return others.map((other) => ({ kind: 'duplicate', id: `${a.id}~${other}`, athleteName: a.name ?? a.id, otherHouseholdId: other }));
+        }),
       ];
       return {
         householdId: h.id,

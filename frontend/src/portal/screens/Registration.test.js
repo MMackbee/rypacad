@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { act } from 'react';
 import { renderScreen } from './testRender';
 import Registration from './Registration';
 
@@ -52,6 +52,70 @@ test('parent sign-up calls createFamily with the contract payload, shows success
   await r.click('SUCCESS a1');
   expect(refreshed).toHaveLength(1);
   expect(finished).toEqual(['/portal/family']);
+  await r.unmount();
+});
+
+test('a reload keeps the half-filled form (per signed-in account), and success clears it', async () => {
+  window.sessionStorage.clear();
+  const account = { uid: 'u-draft', email: 'dana@email.com', emailVerified: false };
+  const first = await renderScreen(<Registration bare mode="signup" account={account} />);
+  await first.click('Parent or guardian');
+  await first.click('Continue');
+  await first.fill('Your name', 'Dana Whitfield');
+  await first.unmount(); // the tab reloads
+  const second = await renderScreen(<Registration bare mode="signup" account={account} />);
+  expect(second.text()).toContain('Step 2 of 5');
+  expect(second.container.querySelector('[aria-label="Your name"]').value).toBe('Dana Whitfield');
+  await second.unmount();
+  // Another login on the same browser never sees it.
+  const other = await renderScreen(<Registration bare mode="signup" account={{ uid: 'u-other', email: 'x@email.com' }} />);
+  expect(other.text()).toContain('Step 1 of 5');
+  await other.unmount();
+  // Submitting successfully drops the draft.
+  const third = await renderScreen(<Registration bare mode="signup" account={account} onFinish={() => {}} />);
+  await third.fill('Mobile', '(612) 555-0148');
+  await third.fill('Relationship to athlete', 'Mother');
+  await third.click('Continue');
+  await third.fill('Athlete name', 'Jordan');
+  await third.fill('Date of birth', '2012-06-17');
+  await third.click('Continue');
+  await third.click('12 tokens');
+  await third.click('Continue');
+  await third.fill('Type your full legal name', 'Dana Whitfield');
+  await third.click('Sign and submit');
+  expect(third.text()).toContain('SUCCESS a1');
+  expect(window.sessionStorage.getItem('ryp.signupDraft.signup.u-draft')).toBeNull();
+  await third.unmount();
+});
+
+test('Continue on an unfinished step names the missing fields instead of sitting greyed out', async () => {
+  const r = await renderScreen(<Registration bare mode="signup" account={{ email: 'dana@email.com' }} />);
+  await r.click('Parent or guardian');
+  await r.click('Continue');
+  await r.fill('Your name', 'Dana Whitfield');
+  expect(r.button('Continue').disabled).toBe(false);
+  await r.click('Continue'); // no phone yet
+  expect(r.text()).toContain('Step 2 of 5');
+  expect(r.text()).toContain('A mobile number is required.');
+  await r.fill('Mobile', '(612) 555-0148');
+  await r.click('Continue');
+  await r.fill('Athlete name', 'Jordan');
+  await r.fill('Date of birth', '2031-01-01');
+  await r.click('Continue');
+  expect(r.text()).toContain('Step 3 of 5');
+  expect(r.text()).toContain('That date is in the future - check the year.');
+  expect(r.text()).not.toContain('Age -');
+  await r.unmount();
+});
+
+test('a double tap on Sign and submit sends one createFamily and still shows the receipt', async () => {
+  const r = await renderScreen(<Registration bare mode="signup" account={{ email: 'dana@email.com' }} onRefresh={async () => {}} />);
+  await fillParentToConsent(r);
+  const before = mockCalls.length;
+  const submit = r.button('Sign and submit');
+  await act(async () => { submit.click(); submit.click(); });
+  expect(mockCalls.length - before).toBe(1);
+  expect(r.text()).toContain('SUCCESS a1');
   await r.unmount();
 });
 

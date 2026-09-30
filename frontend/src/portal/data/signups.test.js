@@ -65,3 +65,22 @@ test('an open invite younger than 7 days is invited; orphaned reads none; a logi
   expect(buildSignupRows({ households, athletes, invites: orphan, now }).rows[0].athletes[0].login).toBe('none');
   expect(buildSignupRows({ households, athletes, invites: [], now }).rows[0].athletes[0].login).toBe('invited');
 });
+
+test('the same child (name + date of birth) in two families flags both rows as a possible duplicate', () => {
+  const twoParents = [
+    { id: 'mom', name: 'Lee family', signup: { at: new Date('2026-10-01T09:00:00'), mode: 'parent' }, guardian: { name: 'Pat Lee', email: 'pat@x.com', phone: '1' } },
+    { id: 'dad', name: 'Lee family', signup: { at: new Date('2026-10-01T09:05:00'), mode: 'parent' }, guardian: { name: 'Sam Lee', email: 'sam@x.com', phone: '2' } },
+  ];
+  const kids = [
+    { id: 'k1', householdId: 'mom', name: 'Riley Lee', dob: '2012-03-04', packageId: 't-6', billing: { status: 'pending' } },
+    { id: 'k2', householdId: 'dad', name: ' riley  lee ', dob: '2012-03-04', packageId: 't-6', billing: { status: 'pending' } },
+    { id: 'k3', householdId: 'dad', name: 'Riley Lee', dob: '2014-03-04', packageId: 't-6', billing: { status: 'pending' } }, // same name, other birthday: not a duplicate
+  ];
+  const { rows, counts } = buildSignupRows({ households: twoParents, athletes: kids, now });
+  const mom = rows.find((r) => r.householdId === 'mom');
+  const dad = rows.find((r) => r.householdId === 'dad');
+  expect(mom.flagged).toBe(true);
+  expect(mom.flags).toEqual([{ kind: 'duplicate', id: 'k1~dad', athleteName: 'Riley Lee', otherHouseholdId: 'dad' }]);
+  expect(dad.flags).toEqual([{ kind: 'duplicate', id: 'k2~mom', athleteName: ' riley  lee ', otherHouseholdId: 'mom' }]);
+  expect(counts.flagged).toBe(2);
+});

@@ -103,13 +103,15 @@ const VIEW_COPY = {
   verify: { title: VERIFY_TITLE, body: (email) => verifyBody(email || 'your email') },
   'already-claimed': { title: 'Already set up', body: () => ALREADY_CLAIMED },
   legacy: { title: 'Sign-up changed', body: () => 'Approval is no longer needed - sign-up creates the account instantly.' },
+  // After the launch email most people here created a login and stopped
+  // before adding their family - say so instead of sounding like an error.
   stranger: {
-    title: 'Account not linked yet',
-    body: () => "You're signed in, but this login isn't linked to an academy family or staff role yet.",
+    title: 'Finish signing up',
+    body: () => 'Your login is ready but no family is linked to it yet. A parent finishes sign-up below; an athlete whose parent enrolled them taps "My parent enrolled me".',
   },
   checking: {
-    title: 'Account not linked yet',
-    body: () => "You're signed in, but this login isn't linked to an academy family or staff role yet.",
+    title: 'Finish signing up',
+    body: () => 'Your login is ready but no family is linked to it yet. A parent finishes sign-up below; an athlete whose parent enrolled them taps "My parent enrolled me".',
   },
 };
 

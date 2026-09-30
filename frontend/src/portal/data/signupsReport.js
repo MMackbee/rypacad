@@ -42,6 +42,7 @@ export function loginLabel(a) {
 
 export function flagLabel(f) {
   if (f.kind === 'calendly') return `Calendly ${f.outcome} · ${String(f.receivedAt || '').slice(0, 10)}`;
+  if (f.kind === 'duplicate') return `Possible duplicate: ${f.athleteName} is also in another family (${f.otherHouseholdId})`;
   return `Booking ${f.flag} · ${f.date}`;
 }
 

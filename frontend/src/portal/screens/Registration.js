@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { color, font } from '../tokens';
 import Button from '../components/Button';
 import PhoneFrame from '../components/PhoneFrame';
@@ -43,13 +43,45 @@ const STEPS = {
 };
 const VARIANT_STEP = { guardian: 1, athlete: 2, tier: 3, consent: 4, submitting: 4, success: 4 };
 
+/**
+ * The half-filled form survives a reload (launch 2026-09-29: on a phone,
+ * switching apps to look up a handicap can reload the tab and every field was
+ * lost). sessionStorage, keyed by the signed-in uid and mode: it dies with the
+ * tab, so a shared computer never keeps a child's details, and it is cleared
+ * on success. Storage can be missing or full - every access is guarded.
+ */
+function draftKey(mode, account) {
+  return account?.uid ? `ryp.signupDraft.${mode}.${account.uid}` : null;
+}
+function readDraft(key) {
+  if (!key) return null;
+  try {
+    const raw = window.sessionStorage.getItem(key);
+    const draft = raw ? JSON.parse(raw) : null;
+    return draft && draft.v === 1 && draft.form && Number.isInteger(draft.step) ? draft : null;
+  } catch (err) {
+    return null;
+  }
+}
+function writeDraft(key, value) {
+  if (!key) return;
+  try {
+    if (value) window.sessionStorage.setItem(key, JSON.stringify(value));
+    else window.sessionStorage.removeItem(key);
+  } catch (err) {
+    /* private mode / quota: the form still works, it just won't survive a reload */
+  }
+}
+
 export default function Registration({ variant, bare = false, mode = 'signup', account = null, onRefresh, onBack, onFinish }) {
   const demo = variant != null;
   const steps = STEPS[mode] || STEPS.signup;
   const today = todayISO();
-  const [step, setStep] = useState(demo ? VARIANT_STEP[variant] ?? 0 : 0);
+  const key = demo ? null : draftKey(mode, account);
+  const [draft] = useState(() => readDraft(key));
+  const [step, setStep] = useState(demo ? VARIANT_STEP[variant] ?? 0 : Math.min(draft?.step ?? 0, steps.length - 1));
   const [phase, setPhase] = useState(demo && (variant === 'submitting' || variant === 'success') ? variant : 'form');
-  const [form, setForm] = useState(() => ({
+  const [form, setForm] = useState(() => draft?.form ?? ({
     mode: demo ? 'parent' : mode === 'link' ? 'parent' : null,
     contact: { name: demo ? 'Dana Whitfield' : '', email: demo ? 'dana@email.com' : account?.email ?? '', phone: demo ? '(612) 555-0148' : '', relationship: '' },
     athletes: [demo ? { ...newAthleteEntry(), key: 'demo-1', name: 'Jordan Whitfield' } : newAthleteEntry()],
@@ -68,6 +100,13 @@ export default function Registration({ variant, bare = false, mode = 'signup', a
     if (account?.email && form.contact.email === '') setForm((f) => ({ ...f, contact: { ...f.contact, email: account.email } }));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [account?.email]);
+
+  // Keep the draft current while the form is being filled; drop it once the
+  // family exists (the receipt and the home banner take over from there).
+  useEffect(() => {
+    if (phase === 'form') writeDraft(key, { v: 1, step, form });
+    else if (phase === 'success') writeDraft(key, null);
+  }, [key, phase, step, form]);
 
   const patch = (p) => setForm((f) => ({ ...f, ...p }));
   const setContact = (fn) => setForm((f) => ({ ...f, contact: typeof fn === 'function' ? fn(f.contact) : fn }));
@@ -101,7 +140,13 @@ export default function Registration({ variant, bare = false, mode = 'signup', a
     if (step < steps.length - 1) { setStep((s) => s + 1); return; }
     handleSubmit();
   };
+  // A double tap fires twice before React re-renders the disabled button; the
+  // second call used to reach createFamily, come back already-provisioned and
+  // redirect home over the receipt. One submit in flight at a time.
+  const submitting = useRef(false);
   const handleSubmit = async () => {
+    if (submitting.current) return;
+    submitting.current = true;
     setSubmitError(null);
     setPhase('submitting');
     try {
@@ -114,9 +159,11 @@ export default function Registration({ variant, bare = false, mode = 'signup', a
       // A retry after a lost response: the family exists already. Refresh so
       // the route lands the account on its home, whose banner has Pay now.
       if (err && err.reason === 'already-provisioned' && onRefresh) {
+        writeDraft(key, null);
         await onRefresh();
         return;
       }
+      submitting.current = false;
       setPhase('form');
       setSubmitError(err && typeof err.message === 'string' && err.message ? err.message : 'Sign-up could not be saved. Try again.');
     }
@@ -141,7 +188,10 @@ export default function Registration({ variant, bare = false, mode = 'signup', a
       footer={
         <div style={{ borderTop: `1px solid ${color.frameRule}`, padding: '14px 22px 22px' }}>
           {submitError ? <Body size={12} tone={color.error} style={{ marginBottom: 10, textAlign: 'center' }}>{submitError}</Body> : null}
-          <Button loading={phase === 'submitting'} disabled={phase === 'submitting' || !valid} onClick={handleContinue}>{label}</Button>
+          {/* Never disabled for an invalid step: the tap is what reveals which
+              field needs fixing (handleContinue sets showErrors). A greyed-out
+              button with no message stranded parents (launch test 2026-09-29). */}
+          <Button loading={phase === 'submitting'} disabled={phase === 'submitting'} onClick={handleContinue}>{label}</Button>
         </div>
       }
     >
