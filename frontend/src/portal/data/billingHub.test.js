@@ -9,6 +9,8 @@ import { longDayLabel } from './calendar';
 
 const T12 = TOKEN_PACKAGES.find((p) => p.id === 't-12');
 const today = '2026-09-16';
+const BEFORE_GATE = Date.parse('2026-10-01T17:00:00Z'); // the Oct 1 email
+const AFTER_GATE = Date.parse('2026-10-10T12:00:00Z'); // 07:00 Chicago, the gate itself
 const athlete = { id: 'jordan', name: 'Jordan', contractMinutes: 45 };
 const b = (id, over) => ({ id, athleteId: 'jordan', status: 'confirmed', periodKey: '2026-09-01', date: '2026-09-20', sessionId: `s-${id}`, type: 'training', ...over });
 
@@ -230,10 +232,12 @@ describe('per-athlete billing (Sprint 20, spec 4.4)', () => {
     const back = statusFor({ status: 'lapsed' }, { pendingAthletes: [{ athleteId: 'a', name: 'Ava', status: 'lapsed' }] });
     expect(back).toMatchObject({ status: 'pending', cta: 'Pay now', badge: { tone: 'yellow', label: 'Payment needed' }, title: 'Membership ended - pay to book again' });
     expect(statusFor({ status: 'lapsed' }, { pendingAthletes: [] }).status).toBe('lapsed');
-    const s = statusFor(null, { resetsOn: '2026-10-01', anchorDay: 1, pendingAthletes: [{ athleteId: 'a', name: 'Ava' }] });
+    const s = statusFor(null, { resetsOn: '2026-10-01', anchorDay: 1, now: BEFORE_GATE, pendingAthletes: [{ athleteId: 'a', name: 'Ava' }] });
     expect(s).toMatchObject({ status: 'pending', tone: 'yellow', badge: { tone: 'yellow', label: 'Payment pending' }, ladder: null, ladderAt: null, cta: 'Pay now', paused: false });
     expect(s.title).toBe('Payment pending - finish checkout to start booking');
-    expect(s.body).toBe("Ava can book as soon as checkout is complete. Billed monthly from the 1st once you've paid.");
+    expect(s.body).toBe("Ava can book once checkout is complete (token packages from Sat, Oct 10 at 7 AM). Billed monthly on the 1st once you've paid.");
+    // From the gate on, the parenthetical goes (UX review P-07).
+    expect(statusFor(null, { now: AFTER_GATE, pendingAthletes: [{ athleteId: 'a', name: 'Ava' }] }).body).toBe("Ava can book once checkout is complete. Billed monthly on the 1st once you've paid.");
     expect(s.pendingAthletes).toEqual([{ athleteId: 'a', name: 'Ava' }]);
     const two = statusFor(null, { pendingAthletes: [{ athleteId: 'a', name: 'Ava' }, { athleteId: 'b', name: 'Ben' }] });
     expect(two.body.startsWith('Ava and Ben can book')).toBe(true);
@@ -245,7 +249,7 @@ describe('per-athlete billing (Sprint 20, spec 4.4)', () => {
   });
 
   test('statusFor: the single token is a one-time payment, never billed monthly (owner ruling, 2026-09-30)', () => {
-    const monthly = "Ava can book as soon as checkout is complete. Billed monthly from the 1st once you've paid.";
+    const monthly = "Ava can book once checkout is complete (token packages from Sat, Oct 10 at 7 AM). Billed monthly on the 1st once you've paid.";
     // An all-single pending list gets the one-time body; title, badge and CTA are unchanged.
     const one = statusFor(null, { resetsOn: '2026-10-01', anchorDay: 1, pendingAthletes: [{ athleteId: 'a', name: 'Ava', status: 'pending', perPurchase: true }] });
     expect(one).toMatchObject({ status: 'pending', badge: { tone: 'yellow', label: 'Payment pending' }, title: 'Payment pending - finish checkout to start booking', cta: 'Pay now' });
@@ -253,10 +257,10 @@ describe('per-athlete billing (Sprint 20, spec 4.4)', () => {
     const two = statusFor(null, { pendingAthletes: [{ athleteId: 'a', name: 'Ava', perPurchase: true }, { athleteId: 'b', name: 'Ben', perPurchase: true }] });
     expect(two.body).toBe('Ava and Ben can book once their session token is paid for. A session token is a one-time $65 payment.');
     // A mixed list, or a monthly one, keeps the monthly body byte-for-byte.
-    const mixed = statusFor(null, { pendingAthletes: [{ athleteId: 'a', name: 'Ava', perPurchase: false }, { athleteId: 'b', name: 'Ben', perPurchase: true }] });
-    expect(mixed.body).toBe("Ava and Ben can book as soon as checkout is complete. Billed monthly from the 1st once you've paid.");
-    expect(statusFor(null, { pendingAthletes: [{ athleteId: 'a', name: 'Ava', perPurchase: false }] }).body).toBe(monthly);
-    expect(statusFor(null, { pendingAthletes: [{ athleteId: 'a', name: 'Ava' }] }).body).toBe(monthly);
+    const mixed = statusFor(null, { now: BEFORE_GATE, pendingAthletes: [{ athleteId: 'a', name: 'Ava', perPurchase: false }, { athleteId: 'b', name: 'Ben', perPurchase: true }] });
+    expect(mixed.body).toBe("Ava and Ben can book once checkout is complete (token packages from Sat, Oct 10 at 7 AM). Billed monthly on the 1st once you've paid.");
+    expect(statusFor(null, { now: BEFORE_GATE, pendingAthletes: [{ athleteId: 'a', name: 'Ava', perPurchase: false }] }).body).toBe(monthly);
+    expect(statusFor(null, { now: BEFORE_GATE, pendingAthletes: [{ athleteId: 'a', name: 'Ava' }] }).body).toBe(monthly);
     // An all-single household that is active: nothing bills monthly.
     const active = statusFor(null, { resetsOn: '2026-10-01', anchorDay: 1, allPerPurchase: true });
     expect(active).toMatchObject({ status: 'active', badge: { tone: 'green', label: 'Active' }, cta: null, paused: false });

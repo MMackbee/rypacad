@@ -6,16 +6,40 @@ import PhoneFrame from '../components/PhoneFrame';
 import { Body, Card, ScreenTitle, SectionLabel, Tick } from '../components/Primitives';
 import { VERIFY_EMAIL_SENDER } from '../data/authCopy';
 import { BOOKING_OPENS_LABEL, bookingOpen } from '../data/calendar';
-import { packageById } from '../data/packages';
+import { packageById, PRICES_RELEASED } from '../data/packages';
+
+/**
+ * Until 00:00 Nov 1 America/Chicago every checkout prepays November in full
+ * as its own line and the subscription's trial runs to Dec 1, when monthly
+ * billing starts (functions/portal/prepaid.js). From Nov 1 checkout
+ * prorates, so the receipt stops naming an amount.
+ */
+const PREPAYS_NOVEMBER_UNTIL = Date.parse('2026-11-01T05:00:00Z');
+
+/** A monthly package (not the one-time single token) with a price to show. */
+function pricedMonthly(pkg) {
+  return Boolean(pkg) && pkg.kind !== 'single' && Number.isFinite(pkg.price) && PRICES_RELEASED;
+}
 
 /**
  * "You're in" (Sprint 20, spec 2.1 Success): the receipt, one Pay button per
  * athlete (createCheckoutSession), what happens next, and the role's home.
  * No walkthrough hop (spec 9: Success -> walkthrough -> NotProvisioned loop).
+ * Before Nov 1 the receipt says what is paid today and that billing is then
+ * monthly from Dec 1 (UX review P-07), because Stripe's page shows the plan
+ * as a trial next to a charge due today. It never says when billing ends.
  */
 export default function RegistrationSuccess({ bare = false, mode = 'signup', form, result, account, onFinish }) {
   const athleteMode = form.mode === 'athlete';
   const rows = form.athletes.map((a, i) => ({ ...a, athleteId: result?.athleteIds?.[i] ?? null, pkg: packageById(a.packageId) }));
+  const prepaysNovember = Date.now() < PREPAYS_NOVEMBER_UNTIL;
+  const priced = prepaysNovember ? rows.filter((r) => pricedMonthly(r.pkg)) : [];
+  const payLabel = (r) => (pricedMonthly(r.pkg) && prepaysNovember
+    ? `Pay $${r.pkg.price} for ${r.name.trim().split(/\s+/)[0]}'s ${r.pkg.name}`
+    : `Pay for ${r.name.trim()}'s ${r.pkg ? r.pkg.name : 'package'}`);
+  const payTerms = priced.length === 0 ? null
+    : `Today you pay ${priced.length === 1 ? `$${priced[0].pkg.price}` : 'the amount on each button'} for November, then monthly from Dec 1. ` +
+      "Stripe's page calls the plan a free trial until Dec 1 because November is paid today as a separate line.";
   const anyToken = rows.some((r) => r.pkg && r.pkg.kind !== 'elite');
   const anyElite = rows.some((r) => r.pkg && r.pkg.kind === 'elite');
   const logins = rows.filter((r) => r.loginEmail && r.ownLogin);
@@ -46,13 +70,13 @@ export default function RegistrationSuccess({ bare = false, mode = 'signup', for
         </div>
         <Card large style={{ width: '100%' }}>
           <SectionLabel style={{ marginBottom: 12 }}>Pay</SectionLabel>
+          {payTerms ? <Body size={12} style={{ marginBottom: 12 }}>{payTerms}</Body> : null}
           {account?.emailVerified === false && account.email ? (
             <Body size={12} style={{ marginBottom: 12 }}>{`First open the link we emailed to ${account.email} (from ${VERIFY_EMAIL_SENDER} - check spam), then tap Pay.`}</Body>
           ) : null}
           <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
             {rows.map((r) => (
-              <PayButton key={r.key} athleteId={r.athleteId} email={account?.email ?? null}
-                label={`Pay for ${r.name.trim()}'s ${r.pkg ? r.pkg.name : 'package'}`} />
+              <PayButton key={r.key} athleteId={r.athleteId} email={account?.email ?? null} label={payLabel(r)} />
             ))}
           </div>
         </Card>
