@@ -6,9 +6,9 @@ import { PAY_NOW, PENDING_TITLE } from '../data/billingCopy';
 import { SIBLING_DISCOUNT_NOTE } from '../data/packages';
 
 /**
- * One banner, one Pay now per athlete who needs a checkout - pending, or lapsed and re-subscribing (spec 4.4).  is the hub status title (the lapsed wording differs); renders nothing when nobody is listed.
- *  (the caller's siblingDiscountApplies over the whole family) adds the one-line note Stripe's price would otherwise contradict; a one-time single token is not a membership, so an all-single list never shows it.
- *  adds a line under a row's name (the family page's Change package link).
+ * One banner, one Pay now per athlete who needs a checkout - pending, or lapsed and re-subscribing (spec 4.4). `title` is the hub status title (the lapsed wording differs); renders nothing when nobody is listed.
+ * `siblingDiscount` (the caller's siblingDiscountApplies over the whole family) adds the one-line note Stripe's price would otherwise contradict; a one-time single token is not a membership, so an all-single list never shows it.
+ * `renderRowExtra(athlete)` adds a line under a row's name (the family page's Change package link).
  */
 export default function PendingBanner({ pendingAthletes, body, title = null, email = null, siblingDiscount = false, renderRowExtra = null, style }) {
   if (!pendingAthletes || pendingAthletes.length === 0) return null;

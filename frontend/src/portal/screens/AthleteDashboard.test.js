@@ -11,6 +11,7 @@ import AthleteDashboard from './AthleteDashboard';
 let mockContract;
 let mockMine = { data: null, loading: false, error: null };
 jest.mock('../hooks/packageChange', () => ({ useChangePackage: () => ({ change: async () => ({}) }) }));
+let mockTokens = null;
 jest.mock('../components/PayButton', () => ({ __esModule: true, default: () => null }));
 jest.mock('../hooks/billing', () => ({
   __esModule: true,
@@ -22,7 +23,7 @@ jest.mock('../hooks', () => ({
     loading: false,
     error: null,
     data: {
-      athlete: { name: 'Jordan', fullName: 'Jordan', date: 'Wednesday, Nov 11', billingStatus: 'active', tokens: null },
+      athlete: { name: 'Jordan', fullName: 'Jordan', date: 'Wednesday, Nov 11', billingStatus: 'active', tokens: mockTokens },
       nextSession: null,
       contract: mockContract,
       onboarding: null,
@@ -75,4 +76,20 @@ test("an unpaid athlete's own pending card can change their package before Pay n
   expect(r.text()).not.toContain('Change your package');
   await r.unmount();
   mockMine = { data: null, loading: false, error: null };
+});
+
+test('the tokens card: "Tokens start Nov 1" before the season, "Pay to start" unpaid (tester report 2026-09-30)', async () => {
+  mockContract = null;
+  const t = (over) => ({ granted: 16, used: 0, reserved: 0, left: 16, unlimited: false, grace: [], startsOn: '2026-11-01', unpaid: false, ...over });
+  mockTokens = t();
+  const r = await renderScreen(<AthleteDashboard bare />);
+  expect(r.text()).toContain('Tokens start Nov 1');
+  expect(r.text()).not.toContain('16 left');
+  await r.unmount();
+  mockTokens = t({ unpaid: true });
+  const u = await renderScreen(<AthleteDashboard bare />);
+  expect(u.text()).toContain('Pay to start');
+  expect(u.text()).not.toContain('of 16 used');
+  await u.unmount();
+  mockTokens = null;
 });

@@ -196,6 +196,7 @@ import { SPECIALISTS, isSpecialistType, mentalCapFor } from '../data/specialists
 import { calendlyUrlFor } from '../data/calendly';
 import { loginStateFor } from '../data/signups';
 import { MARKS_LOOKAHEAD_DAYS, dayMarksFor, monthGridBounds } from '../data/calendarViews';
+import { foldBeforeFirstPeriod, positionPeriodFor, withTokenStart } from '../data/billingHub';
 
 export { default as useSeedResource } from './useSeedResource';
 export { default as useAuthSession } from './useAuthSession';
@@ -370,13 +371,17 @@ async function liveAthleteIdentity() {
  * `waitlist` are now real collections (pins E/F), and `tokenPeriod` is the
  * athlete's tokenPeriods doc for THIS period when one has been issued
  * (pin C - "absent == the package's grant", still tokensFor's own default
- * when `tokenPeriod` is omitted or null).
+ * when `tokenPeriod` is omitted or null). Tester report 2026-09-30: before
+ * the season the period is the first (prepaid) one, and the position carries
+ * withTokenStart's marks - `opts.billingStatus` is the athlete's.
  */
 function deriveTokens(pkg, bookings, anchorDay, today, opts = {}) {
   if (!pkg) return null;
-  const { graceTokens = [], waitlist = [], tokenPeriod = null } = opts;
-  const { periodKey } = periodFor(today, anchorDay);
-  return tokensFor(null, pkg, bookings, waitlist, graceTokens, periodKey, { today, tokenPeriod });
+  const { graceTokens = [], waitlist = [], tokenPeriod = null, billingStatus } = opts;
+  const period = positionPeriodFor(today, anchorDay, pkg);
+  const read = (rows) => foldBeforeFirstPeriod(rows, anchorDay, pkg); // an October row spends November
+  const position = tokensFor(null, pkg, read(bookings), read(waitlist), graceTokens, period.periodKey, { today, tokenPeriod });
+  return withTokenStart(position, period, billingStatus);
 }
 
 /**
@@ -392,7 +397,7 @@ function deriveTokens(pkg, bookings, anchorDay, today, opts = {}) {
 function tokensWithNextPeriod(pkg, bookings, anchorDay, today, opts = {}) {
   const position = deriveTokens(pkg, bookings, anchorDay, today, opts);
   if (!position) return null;
-  const { periodEnd } = periodFor(today, anchorDay);
+  const { periodEnd } = positionPeriodFor(today, anchorDay, pkg);
   const nextPeriodKey = periodFor(addDaysISO(periodEnd, 1), anchorDay).periodKey;
   const booked = (bookings || []).filter(
     (b) => b && b.status !== 'cancelled' && b.periodKey === nextPeriodKey
@@ -498,7 +503,9 @@ async function liveSchedule(today) {
   // state and its "why" line need something real to read) rather than
   // vanishing the moment a booking is cancelled.
   const anchorDay = normalizeAnchorDay(ctx.household?.periodAnchorDay);
-  const currentPeriodKey = periodFor(today, anchorDay).periodKey;
+  // The period the token meter reads (November before the season), so a
+  // November booking is never "Next period" while the meter spends it.
+  const currentPeriodKey = positionPeriodFor(today, anchorDay).periodKey;
 
   const [waitlistEntries, graceTokens] = await Promise.all([
     fetchWaitlistByAthlete(ctx.athlete.id),
@@ -577,7 +584,7 @@ async function liveSchedule(today) {
     // Contract v2.1: now derived with the athlete's real grace tokens and
     // waitlist entries (pin B's `reserved`), not the Part 1 empty arrays.
     tokens: withGraceReasons(
-      deriveTokens(ctx.pkg, ctx.bookings, anchorDay, today, { graceTokens, waitlist: waitlistEntries }),
+      deriveTokens(ctx.pkg, ctx.bookings, anchorDay, today, { graceTokens, waitlist: waitlistEntries, billingStatus: ctx.athlete.billing?.status }),
       graceTokens
     ),
   };
@@ -673,7 +680,7 @@ async function liveBooking(today, { withSlots = true } = {}) {
     ]);
     const anchorDay = normalizeAnchorDay(household?.periodAnchorDay);
     windowDays = windowDaysFor(pkg);
-    tokens = deriveTokens(pkg, bookings, anchorDay, today);
+    tokens = deriveTokens(pkg, bookings, anchorDay, today, { billingStatus: athlete.billing?.status });
     identity = { role: 'athlete', athleteId: athlete.id, householdId: athlete.householdId };
   } else {
     identity = { role: 'parent', householdId: who.profile.householdId };
@@ -756,7 +763,7 @@ export function useSchedule({ variant = 'upcoming', today = todayISO(), practice
   // Contract v2.0 pin N: items gain periodKey + nextPeriod, same as the live
   // branch - the seed athlete's own package/anchor stand in for the real
   // household's.
-  const currentPeriodKey = periodFor(today, PERIOD_ANCHOR_DAY).periodKey;
+  const currentPeriodKey = positionPeriodFor(today, PERIOD_ANCHOR_DAY).periodKey;
 
   const resolve = (refs) =>
     refs
@@ -1767,7 +1774,7 @@ async function liveChildCard(a, today, anchorDay) {
     billingStatus: a.billing?.status ?? 'active',
     loginEmail,
     login,
-    tokens: deriveTokens(pkg, bookings, anchorDay, today),
+    tokens: deriveTokens(pkg, bookings, anchorDay, today, { billingStatus: a.billing?.status }),
   };
 }
 
@@ -1869,7 +1876,7 @@ async function liveHouseholdAthletes(today) {
         packageId: a.packageId ?? null,
         packageName: pkg ? pkg.name : null,
         billingStatus: a.billing?.status ?? 'active',
-        tokens: deriveTokens(pkg, bookings, anchorDay, today),
+        tokens: deriveTokens(pkg, bookings, anchorDay, today, { billingStatus: a.billing?.status }),
       };
     })
   );
@@ -1990,7 +1997,7 @@ const SEED_TOKENS_USED = { jordan: 4, reese: 4, nico: 0 };
  */
 function seedMemberBookingRows(child, today) {
   const used = SEED_TOKENS_USED[child.id] ?? 0;
-  const periodKey = periodFor(today, PERIOD_ANCHOR_DAY).periodKey;
+  const periodKey = positionPeriodFor(today, PERIOD_ANCHOR_DAY).periodKey;
   const rows = [];
   for (let i = 0; i < used; i++) rows.push({ periodKey, status: 'confirmed', date: today });
   return rows;
@@ -2041,7 +2048,8 @@ function seedMemberEntry(child, today) {
  * athlete's real bookings this period.
  */
 async function liveMemberEntry(a, today, anchorDay) {
-  const { periodKey } = periodFor(today, anchorDay);
+  // The grant read is the first (prepaid) period's before the season.
+  const { periodKey } = positionPeriodFor(today, anchorDay);
   const [pkg, bookings, graceTokens, waitlistEntries, tokenPeriod] = await Promise.all([
     a.packageId ? fetchPackage(a.packageId) : null,
     fetchBookings(a.id, { householdId: a.householdId }),
@@ -2349,7 +2357,7 @@ async function liveHouseholdReservations(today) {
     fetchWaitlistByHousehold(profile.householdId),
   ]);
   const anchorDay = normalizeAnchorDay(household.periodAnchorDay);
-  const currentPeriodKey = periodFor(today, anchorDay).periodKey;
+  const currentPeriodKey = positionPeriodFor(today, anchorDay).periodKey; // the meter's period, as liveSchedule
   // Contract v2.1, pin G: cancelled bookings are no longer dropped - every
   // status renders, with cancelReason/cancelledBy on the cancelled ones.
   const sessionsById = new Map(
@@ -2397,7 +2405,7 @@ async function liveHouseholdReservations(today) {
  * nico gets WAITLIST_ENTRY's row (contract v2.1, pin F); reese gets the
  * honest empty state the pin's UI section calls for. */
 function seedReservationMember(child, today) {
-  const currentPeriodKey = periodFor(today, PERIOD_ANCHOR_DAY).periodKey;
+  const currentPeriodKey = positionPeriodFor(today, PERIOD_ANCHOR_DAY).periodKey;
   if (child.id === WAITLIST_ENTRY.athleteId) {
     const s = resolveBooking(WAITLIST_ENTRY.sessionRef);
     const upcoming = s
@@ -2976,7 +2984,9 @@ async function liveAthleteDashboard(today) {
       billingStatus: ctx.athlete.billing?.status ?? 'active',
       // `allowance` -> `tokens` (contract v2.0): the AthleteDashboard
       // allowance card becomes the tokens card (UI pin).
-      tokens: deriveTokens(ctx.pkg, ctx.bookings, normalizeAnchorDay(ctx.household?.periodAnchorDay), today),
+      tokens: deriveTokens(ctx.pkg, ctx.bookings, normalizeAnchorDay(ctx.household?.periodAnchorDay), today, {
+        billingStatus: ctx.athlete.billing?.status,
+      }),
     },
     nextSession,
     contract,

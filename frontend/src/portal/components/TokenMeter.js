@@ -5,6 +5,7 @@ import StatusBadge from './StatusBadge';
 import { GraceLine } from './AllowancePools';
 import { Body, Card, SectionLabel } from './Primitives';
 import { longDayLabel } from '../data/calendar';
+import { firstPeriodLine, PAY_TO_START } from '../data/billingCopy';
 
 /**
  * One athlete's tokens on the Billing hub (contract v2.4, Sprint 16): the
@@ -195,28 +196,42 @@ export default function TokenMeter({ member, defaultOpen = false, showPrices = f
         </span>
       </div>
 
-      <div style={{ display: 'flex', alignItems: 'baseline', gap: 10, marginTop: 8 }}>
-        <span style={{ font: `700 44px/1 ${font.head}`, color: tone }}>{tokens.left}</span>
-        <span style={{ font: `500 13px ${font.body}`, color: color.textSecondary }}>
-          of {granted} left
-        </span>
-      </div>
+      {/* Unpaid (tester report 2026-09-30): no balance until checkout. */}
+      {tokens.unpaid ? (
+        <div style={{ font: `700 28px ${font.head}`, color: color.secondary, marginTop: 8 }}>{PAY_TO_START}</div>
+      ) : (
+        <>
+          <div style={{ display: 'flex', alignItems: 'baseline', gap: 10, marginTop: 8 }}>
+            <span style={{ font: `700 44px/1 ${font.head}`, color: tone }}>{tokens.left}</span>
+            <span style={{ font: `500 13px ${font.body}`, color: color.textSecondary }}>
+              of {granted} left
+            </span>
+          </div>
 
-      <div style={{ height: 8, background: color.track, borderRadius: 4, overflow: 'hidden', display: 'flex', marginTop: 10 }}>
-        <div style={{ width: `${usedPct}%`, background: tone }} />
-        <div style={{ width: `${reservedPct}%`, background: color.secondary, opacity: 0.7 }} />
-      </div>
+          <div style={{ height: 8, background: color.track, borderRadius: 4, overflow: 'hidden', display: 'flex', marginTop: 10 }}>
+            <div style={{ width: `${usedPct}%`, background: tone }} />
+            <div style={{ width: `${reservedPct}%`, background: color.secondary, opacity: 0.7 }} />
+          </div>
 
-      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginTop: 10 }}>
-        <Chip tone={color.textSecondary}>Used {tokens.used}</Chip>
-        {tokens.reserved ? <Chip tone={color.secondary}>Waitlist {tokens.reserved}</Chip> : null}
-        {bonus ? <Chip tone={color.secondary}>Bonus {bonus}</Chip> : null}
-      </div>
-      <GraceLine tokens={tokens} />
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginTop: 10 }}>
+            <Chip tone={color.textSecondary}>Used {tokens.used}</Chip>
+            {tokens.reserved ? <Chip tone={color.secondary}>Waitlist {tokens.reserved}</Chip> : null}
+            {bonus ? <Chip tone={color.secondary}>Bonus {bonus}</Chip> : null}
+          </div>
+          <GraceLine tokens={tokens} />
+        </>
+      )}
 
-      <Body size={11} tone={color.textTertiary} style={{ marginTop: 8 }}>
-        Resets {longDayLabel(period.resetsOn)} · {period.daysLeft} {period.daysLeft === 1 ? 'day' : 'days'} left in this period
-      </Body>
+      {/* Before the season the period is the first (prepaid) one: no reset countdown. */}
+      {period.preSeason ? (
+        <Body size={11} tone={color.textTertiary} style={{ marginTop: 8 }}>
+          {firstPeriodLine(period, granted)}
+        </Body>
+      ) : tokens.unpaid ? null : (
+        <Body size={11} tone={color.textTertiary} style={{ marginTop: 8 }}>
+          Resets {longDayLabel(period.resetsOn)} · {period.daysLeft} {period.daysLeft === 1 ? 'day' : 'days'} left in this period
+        </Body>
+      )}
       {expiryNudge ? (
         <Body size={12} tone={color.secondary} style={{ marginTop: 6 }}>
           {expiryNudge.left} {expiryNudge.left === 1 ? 'token expires' : 'tokens expire'} {longDayLabel(expiryNudge.on)} — book before then.

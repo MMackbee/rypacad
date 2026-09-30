@@ -17,7 +17,7 @@
  */
 
 import { useEffect, useState } from 'react';
-import { hubMemberFor, statusFor } from '../data/billingHub';
+import { foldBeforeFirstPeriod, hubMemberFor, positionPeriodFor, statusFor } from '../data/billingHub';
 import { addDaysISO, todayISO } from '../data/calendar';
 import { normalizeAnchorDay, packageById, periodFor } from '../data/packages';
 import { GRACE_TOKEN, HOUSEHOLD, PAST_DUE_MEMBERSHIP, PERIOD_ANCHOR_DAY } from '../data/seed';
@@ -90,22 +90,28 @@ function householdView(household, anchorDay) {
 }
 
 async function liveMember(athlete, anchorDay, today) {
-  const period = periodFor(today, anchorDay);
-  const prevKey = periodFor(addDaysISO(period.periodKey, -1), anchorDay).periodKey;
-  const nextKey = periodFor(addDaysISO(period.periodEnd, 1), anchorDay).periodKey;
+  // Before the season the grant read is the first period's - the prepaid
+  // November doc. Elite never reads a grant, so the key needs no package.
+  const grantPeriod = positionPeriodFor(today, anchorDay);
+  const prevKey = periodFor(addDaysISO(grantPeriod.periodKey, -1), anchorDay).periodKey;
   const [pkg, bookings, graceTokens, waitlist, tokenPeriod, prevTokenPeriod] = await Promise.all([
     athlete.packageId ? fetchPackage(athlete.packageId) : null,
     fetchBookings(athlete.id, { householdId: athlete.householdId }),
     fetchGraceTokensByAthlete(athlete.id),
     fetchWaitlistByAthlete(athlete.id),
-    fetchTokenPeriod(athlete.id, period.periodKey),
+    fetchTokenPeriod(athlete.id, grantPeriod.periodKey),
     fetchTokenPeriod(athlete.id, prevKey),
   ]);
+  const period = positionPeriodFor(today, anchorDay, pkg);
+  const nextKey = periodFor(addDaysISO(period.periodEnd, 1), anchorDay).periodKey;
   // Only the rows the hub lists need their session (label, time): this
   // period's and next period's live bookings and waitlist entries.
+  // Folded as the hub reads them, so an October row listed under the first
+  // period gets its session too.
   const inScope = (x) =>
     x && x.status !== 'cancelled' && (x.periodKey === period.periodKey || x.periodKey === nextKey) && x.sessionId;
-  const sessionIds = [...bookings, ...waitlist].filter(inScope).map((x) => x.sessionId);
+  const read = (rows) => foldBeforeFirstPeriod(rows, anchorDay, pkg);
+  const sessionIds = [...read(bookings), ...read(waitlist)].filter(inScope).map((x) => x.sessionId);
   const sessions = sessionIds.length ? await fetchSessionsByIds(sessionIds) : [];
   const sessionsById = Object.fromEntries(sessions.map((s) => [s.id, s]));
   const entry = hubMemberFor({
@@ -132,6 +138,11 @@ export function pendingOf(members) {
     }));
 }
 
+/** The first period's start while any member's position is still before it - the hero's "Tokens start" date (tester report 2026-09-30). null from Nov 1, and for an all-Elite household. */
+export function tokensStartOf(members) {
+  return members.find((m) => m.period?.preSeason)?.period.start ?? null;
+}
+
 /** True when every member is on the single token - nothing in the household bills monthly. */
 export function allPerPurchaseOf(members) {
   return members.length > 0 && members.every((m) => m.package?.kind === 'single');
@@ -147,7 +158,7 @@ async function liveHub(householdId, today) {
   return {
     household: householdView(household, anchorDay),
     members,
-    status: statusFor(membership, { resetsOn, anchorDay, pendingAthletes: pendingOf(members), allPerPurchase: allPerPurchaseOf(members) }),
+    status: statusFor(membership, { resetsOn, tokensStartOn: tokensStartOf(members), anchorDay, pendingAthletes: pendingOf(members), allPerPurchase: allPerPurchaseOf(members) }),
     portalUrl: STRIPE_PORTAL_URL,
   };
 }
@@ -177,7 +188,7 @@ async function liveMyTokens(today) {
   return {
     household: household ? householdView(household, anchorDay) : null,
     member,
-    status: statusFor(membership, { resetsOn, anchorDay, pendingAthletes: pendingOf([member]) }),
+    status: statusFor(membership, { resetsOn, tokensStartOn: tokensStartOf([member]), anchorDay, pendingAthletes: pendingOf([member]) }),
   };
 }
 
@@ -206,7 +217,8 @@ async function liveHouseholdsDirectory() {
  */
 function seedMember(child, today, anchorDay) {
   const pkg = packageById(child.packageId);
-  const { periodKey } = periodFor(today, anchorDay);
+  // The period the meter reads (the first one, before the season).
+  const { periodKey } = positionPeriodFor(today, anchorDay, pkg);
   const used = child.tokens?.used ?? 0;
   const bookings = Array.from({ length: used }, (_, i) => ({
     id: `${child.id}_sample_${i}`,
@@ -236,7 +248,7 @@ function seedBillingHub(today, variant) {
   return {
     household: { id: 'whitfield', name: HOUSEHOLD.name, anchorDay, membership, stripeCustomerId: null },
     members,
-    status: statusFor(membership, { resetsOn: addDaysISO(periodEnd, 1), anchorDay, pendingAthletes: pendingOf(members) }),
+    status: statusFor(membership, { resetsOn: addDaysISO(periodEnd, 1), tokensStartOn: tokensStartOf(members), anchorDay, pendingAthletes: pendingOf(members) }),
     portalUrl: STRIPE_PORTAL_URL,
   };
 }
@@ -249,7 +261,7 @@ function seedMyTokens(today, variant) {
   return {
     household: { id: 'whitfield', name: HOUSEHOLD.name, anchorDay, membership, stripeCustomerId: null },
     member,
-    status: statusFor(membership, { resetsOn: addDaysISO(periodEnd, 1), anchorDay, pendingAthletes: pendingOf([member]) }),
+    status: statusFor(membership, { resetsOn: addDaysISO(periodEnd, 1), tokensStartOn: tokensStartOf([member]), anchorDay, pendingAthletes: pendingOf([member]) }),
   };
 }
 
