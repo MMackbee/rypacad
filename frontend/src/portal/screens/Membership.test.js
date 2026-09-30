@@ -39,3 +39,19 @@ test('the contract tier line shows only with the Commitment Contract on (owner r
     delete process.env.REACT_APP_CONTRACT_ENABLED;
   }
 });
+
+// Owner report (Mike S6 2026-09-30): Home -> Membership is the path the 18+
+// athlete took looking for billing; a child's login gets no Billing link.
+test('the self-managed athlete has a Billing link beside the tokens card and a Billing tab; a child has neither', async () => {
+  const member = { athleteId: 'a1', name: 'Sam', package: { kind: 'tokens', name: '12 tokens' }, tokens: { left: 12 }, coaching: null, contractMinutes: null, facilityAccess: false, billing: { status: 'active', facility: null } };
+  mockMine = { loading: false, error: null, data: { member, status: { status: 'active', paused: false, pendingAthletes: [] } } };
+  const self = await renderScreen(<Membership bare selfManaged />);
+  expect(self.button('Billing')).not.toBeNull(); // the tab
+  await self.click('Billing ›');
+  expect(self.location().pathname).toBe('/portal/billing');
+  await self.unmount();
+  const child = await renderScreen(<Membership bare />);
+  expect(child.button('Billing ›')).toBeNull();
+  expect(child.button('Billing')).toBeNull();
+  await child.unmount();
+});

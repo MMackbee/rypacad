@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from 'react';
 import {
   createUserWithEmailAndPassword,
   onAuthStateChanged,
@@ -9,7 +9,7 @@ import {
   signOut as firebaseSignOut,
 } from 'firebase/auth';
 import { auth, provider } from '../../firebase';
-import { ERR, LiveDataError, fetchCurrentUser } from './live';
+import { ERR, LiveDataError, fetchCurrentUser, fetchHousehold } from './live';
 import { callClaimInvite } from './callables';
 
 // Every screen and guard mounts its own useAuthSession, and each one's
@@ -25,13 +25,55 @@ function claimOnce(uid) {
   return claimFlights.get(key);
 }
 
+/*
+ * Self-managed athlete (owner report, Mike S6 2026-09-30): the 18+ athlete who
+ * signed up for themselves (createFamily mode 'athlete') is their household's
+ * createdBy and its only member - the payer, so they get the parent's Billing
+ * and Settings. A child's claimed login sits in the parent's household
+ * (createdBy is the parent) and stays a plain athlete. Same test as
+ * firestore.rules' athlete package-change branch. One households read per
+ * uid per page load, shared by every mounted session (createdBy is
+ * server-written); a failed read is false, and the next resolution retries.
+ */
+const selfManagedFlights = new Map();
+export function resolveSelfManaged(profile) {
+  if (!profile || profile.role !== 'athlete' || !profile.uid || !profile.householdId) return Promise.resolve(false);
+  const key = `${profile.uid}/${profile.householdId}`;
+  if (!selfManagedFlights.has(key)) {
+    selfManagedFlights.set(key, fetchHousehold(profile.householdId).then(
+      (household) => Boolean(household) && household.createdBy === profile.uid,
+      () => { selfManagedFlights.delete(key); return false; }
+    ));
+  }
+  return selfManagedFlights.get(key);
+}
+
+// The signed-in session's selfManaged for BottomTabBar, which renders on
+// every athlete screen with no session of its own: every resolution
+// publishes it (the same value from each mounted instance), sign-out clears it.
+let selfManagedNow = false;
+const selfManagedListeners = new Set();
+function publishSelfManaged(value) {
+  if (selfManagedNow === value) return;
+  selfManagedNow = value;
+  selfManagedListeners.forEach((listener) => listener());
+}
+function subscribeSelfManaged(listener) {
+  selfManagedListeners.add(listener);
+  return () => selfManagedListeners.delete(listener);
+}
+/** True while the signed-in account is a self-managed athlete; false in seed mode. */
+export function useSelfManaged() {
+  return useSyncExternalStore(subscribeSelfManaged, () => selfManagedNow, () => false);
+}
+
 /**
  * The portal's auth session — the seam between Firebase auth and every screen.
  *
  * Real mode (no `variant` passed) returns the shape pinned in
  * docs/portal/TEAM.md, "Sprint 4 pins":
  *
- *   { user: { uid, email, role, athleteId, householdId, specialistId, emailVerified } | null,
+ *   { user: { uid, email, role, athleteId, householdId, specialistId, emailVerified, selfManaged } | null,
  *     provisioned: boolean, loading, error, signIn(), signInWithEmail(), signOut(),
  *     requestPasswordReset(),
  *     // Sprint 20 (spec 2.1, 3.2; contract 4.1):
@@ -69,8 +111,9 @@ const SIGNED_OUT = { user: null, provisioned: false, loading: false, error: null
  * `specialistId` joined the set with v1.7.1 (Sprint 9 integration): it is
  * what routes Yannick and Phil to their My Sessions view; without it here
  * the landing override read undefined and specialists landed on the admin
- * dashboard (caught in the integration browser pass). */
-function toUser(profile, fbUser) {
+ * dashboard (caught in the integration browser pass). `selfManaged` comes
+ * from resolveSelfManaged above, not the users doc. */
+function toUser(profile, fbUser, selfManaged = false) {
   return {
     uid: profile.uid,
     email: profile.email != null ? profile.email : null,
@@ -80,12 +123,13 @@ function toUser(profile, fbUser) {
     specialistId: profile.specialistId != null ? profile.specialistId : null,
     // Sprint 20 (spec 4.2): paying and claiming need a verified email.
     emailVerified: Boolean(fbUser && fbUser.emailVerified),
+    selfManaged: selfManaged === true,
   };
 }
 
 /** The signed-in-but-unprovisioned user (no users/{uid} doc yet). */
 function unprovisionedUser(fbUser) {
-  return { uid: fbUser.uid, email: fbUser.email != null ? fbUser.email : null, role: null, athleteId: null, householdId: null, emailVerified: Boolean(fbUser.emailVerified) };
+  return { uid: fbUser.uid, email: fbUser.email != null ? fbUser.email : null, role: null, athleteId: null, householdId: null, emailVerified: Boolean(fbUser.emailVerified), selfManaged: false };
 }
 
 /** claimInvite's `state` (contract 1.4), or 'error' for anything else. */
@@ -167,11 +211,16 @@ export default function useAuthSession({ variant } = {}) {
   const resolveProfile = useCallback(async (seq, fbUser) => {
     try {
       const profile = await fetchCurrentUser();
+      // Before `loading` clears, so a guard never redirects a self-managed
+      // athlete off Billing on a half-resolved session. Never rejects.
+      const selfManaged = await resolveSelfManaged(profile);
       if (seq !== seqRef.current) return 'stale';
-      setSession({ user: toUser(profile, fbUser), provisioned: true, loading: false, error: null });
+      publishSelfManaged(selfManaged);
+      setSession({ user: toUser(profile, fbUser, selfManaged), provisioned: true, loading: false, error: null });
       return 'provisioned';
     } catch (err) {
       if (seq !== seqRef.current) return 'stale';
+      publishSelfManaged(false);
       if (err instanceof LiveDataError && err.code === ERR.NOT_FOUND) {
         // Exactly the unprovisioned case: a real account with no users/{uid}
         // doc yet. Defined state, not an error.
@@ -191,6 +240,7 @@ export default function useAuthSession({ variant } = {}) {
     const unsubscribe = onAuthStateChanged(auth, (fbUser) => {
       const seq = ++seqRef.current;
       if (!fbUser) {
+        publishSelfManaged(false);
         setSession(SIGNED_OUT);
         setClaimState('idle');
         return;
@@ -213,7 +263,7 @@ export default function useAuthSession({ variant } = {}) {
   /** Re-run the users/{uid} read under the current sequence (spec 2.2: `provisioned` flips without a reload). */
   const refresh = useCallback(async () => {
     const fbUser = auth.currentUser;
-    if (!fbUser) { setSession(SIGNED_OUT); return; }
+    if (!fbUser) { publishSelfManaged(false); setSession(SIGNED_OUT); return; }
     try { await fbUser.reload(); } catch (err) { /* offline reload: the cached user still resolves */ }
     setSession((s) => ({ ...s, loading: true }));
     await resolveProfile(seqRef.current, fbUser);

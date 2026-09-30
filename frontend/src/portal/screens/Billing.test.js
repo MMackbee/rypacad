@@ -74,3 +74,47 @@ test('the contract tier line shows only with the Commitment Contract on (owner r
     delete process.env.REACT_APP_CONTRACT_ENABLED;
   }
 });
+
+// Owner report (Mike S6 2026-09-30): the 18+ athlete who signed up for
+// themselves is a one-member household and their own payer.
+describe('the self-managed athlete (role athlete, one-member household)', () => {
+  const tabs = (r) => [...r.container.querySelectorAll('nav button')].map((b) => b.textContent);
+  beforeEach(() => {
+    mockHub.data.household = { id: 'hh-self', name: 'Sam Rivera', anchorDay: 1, membership: null, stripeCustomerId: 'cus_self' };
+    mockHub.data.members = [{ ...mockHub.data.members[0], athleteId: 'a-self', name: 'Sam' }];
+    mockHub.data.status = { status: 'active', tone: 'default', badge: { tone: 'green', label: 'Active' }, title: 'Membership active',
+      body: 'Billed monthly on the 1st. Nothing needs attention.', ladder: null, ladderAt: null, cta: null, paused: false, pendingAthletes: [] };
+  });
+
+  test('facility add-on, the Stripe portal and the plan, under the athlete tab bar with Billing lit', async () => {
+    const r = await renderScreen(<Billing bare role="athlete" />);
+    expect(r.text()).toContain('Sam');
+    expect(r.button('Add facility access|a-self|facility')).not.toBeNull();
+    expect(r.text()).toContain('Your card and invoices are managed in Stripe.');
+    expect(r.button('Manage billing in Stripe')).not.toBeNull();
+    expect(r.text()).toContain('6 tokens a month · books 30 days out');
+    expect(r.text()).not.toContain('No linked athletes');
+    expect(tabs(r)).toEqual(['Home', 'Schedule', 'Billing', 'Tour', 'Settings']);
+    expect(r.button('Billing').getAttribute('aria-current')).toBe('page');
+    expect(r.button('Reservations')).toBeNull();
+    await r.unmount();
+  });
+
+  test("a parent's Billing keeps the parent tab bar", async () => {
+    const r = await renderScreen(<Billing bare />);
+    expect(tabs(r)).toEqual(['Home', 'Reservations', 'Billing', 'Tour', 'Settings']);
+    await r.unmount();
+  });
+
+  test('with the contract on, their contract line opens their own Contract, not the parent-only athlete page', async () => {
+    process.env.REACT_APP_CONTRACT_ENABLED = 'true';
+    try {
+      const r = await renderScreen(<Billing bare role="athlete" />);
+      await r.click('No contract tier yet · View contract›');
+      expect(r.location().pathname).toBe('/portal/contract');
+      await r.unmount();
+    } finally {
+      delete process.env.REACT_APP_CONTRACT_ENABLED;
+    }
+  });
+});

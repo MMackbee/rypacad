@@ -131,10 +131,10 @@ export default function NotificationPreferences({
           <ScreenTitle size={22}>Settings</ScreenTitle>
         </div>
       }
-      // athlete's tab set has no Settings slot (BottomTabBar.js's
-      // TABS.athlete) — active stays unset for that role, same convention
-      // every other tab-less destination in this codebase already uses.
-      footer={<BottomTabBar role={role} active={role === 'parent' ? 'settings' : undefined} />}
+      // A child athlete's tab set has no Settings slot (TABS.athlete), so
+      // nothing lights; the self-managed 18+ athlete's has one (Mike S6
+      // 2026-09-30, TABS.athleteSelfManaged) and it lights like a parent's.
+      footer={<BottomTabBar role={role} active="settings" />}
     >
       <div style={{ padding: '0 22px 24px', display: 'flex', flexDirection: 'column', gap: 12 }}>
         {saveError ? (
@@ -172,7 +172,8 @@ export default function NotificationPreferences({
           <>
             <RecentNotices style={{ marginTop: 6 }} />
 
-            {onLinkAthlete ? <LinkAthleteRow onLinkAthlete={onLinkAthlete} /> : null}
+            {/* Parent-only: /portal/register's link mode refuses an athlete. */}
+            {onLinkAthlete && role === 'parent' ? <LinkAthleteRow onLinkAthlete={onLinkAthlete} /> : null}
             <MembershipRow role={role} />
             <ReplayWalkthroughRow />
             <SignOutRow onSignOut={onSignOut} />

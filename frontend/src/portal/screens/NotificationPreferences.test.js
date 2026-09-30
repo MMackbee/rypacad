@@ -73,3 +73,16 @@ test('practice (the walkthrough): the toggle flips locally and nothing saves', a
   expect(r.text()).not.toContain('Replay the walkthrough');
   await r.unmount();
 });
+
+// Mike S6 2026-09-30: the self-managed athlete now has a Settings tab; linking
+// a sibling stays a parent's (Registration's link mode refuses an athlete).
+test('Link another athlete is a parent row, hidden for an athlete even when wired', async () => {
+  const onLinkAthlete = jest.fn();
+  const parent = await renderScreen(<NotificationPreferences bare role="parent" onLinkAthlete={onLinkAthlete} />);
+  expect(parent.text()).toContain('+ Link another athlete');
+  await parent.unmount();
+  const athlete = await renderScreen(<NotificationPreferences bare role="athlete" onLinkAthlete={onLinkAthlete} />);
+  expect(athlete.text()).not.toContain('Link another athlete');
+  expect(athlete.text()).toContain('Notifications');
+  await athlete.unmount();
+});

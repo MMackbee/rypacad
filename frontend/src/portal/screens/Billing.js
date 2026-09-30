@@ -22,7 +22,9 @@ import useBillingHub from '../hooks/billing';
  * 10 · Billing — the parents' hub (contract v2.4, Sprint 16: "the hub for
  * parents to see how many tokens are left"). Route /portal/billing, the
  * parent tab bar's Billing tab; a parent hitting /portal/membership lands
- * here, an athlete keeps their own Membership view.
+ * here, an athlete keeps their own Membership view. The self-managed 18+
+ * athlete (Mike S6 2026-09-30) is their own payer: `role="athlete"` is their
+ * one-member household under the athlete tab bar, with its Billing tab.
  *
  * Three questions, in order: is the membership in good standing (the hero,
  * from households.membership — Stripe's status, never guessed); how many
@@ -65,6 +67,7 @@ export default function Billing({
   const members = data?.members ?? [];
   const status = data?.status ?? null;
   const isEmpty = !loading && !error && members.length === 0;
+  const self = !staff && role === 'athlete';
 
   return (
     <PhoneFrame
@@ -81,7 +84,8 @@ export default function Billing({
           </div>
         </div>
       }
-      footer={<BottomTabBar role={staff ? role : 'parent'} active={staff ? 'admin' : 'billing'} />}
+      // Only a self-managed athlete reaches Billing as an athlete (PortalRoutes).
+      footer={<BottomTabBar role={staff || self ? role : 'parent'} active={staff ? 'admin' : 'billing'} selfManaged={self || undefined} />}
     >
       <div style={{ padding: '0 22px 24px', display: 'flex', flexDirection: 'column', gap: 18 }}>
         {loading ? (
@@ -113,9 +117,11 @@ export default function Billing({
                   <TokenMeter member={member} defaultOpen={members.length === 1} showPrices={staff} />
                   <CoachingLine coaching={member.coaching} />
                   {contractEnabled() ? (
+                    // Athlete detail is a parent/staff route; the athlete's own is the Contract.
                     <ContractLine
                       contractMinutes={member.contractMinutes}
-                      onOpen={() => navigate(`/portal/athlete/${member.athleteId}`)}
+                      target={self ? 'contract' : 'athlete'}
+                      onOpen={() => navigate(self ? '/portal/contract' : `/portal/athlete/${member.athleteId}`)}
                     />
                   ) : null}
                   <FacilityCard member={member} readOnly={staff} />
@@ -199,7 +205,7 @@ function CoachingLine({ coaching }) {
   );
 }
 
-function ContractLine({ contractMinutes, onOpen }) {
+function ContractLine({ contractMinutes, target = 'athlete', onOpen }) {
   return (
     <button
       type="button"
@@ -218,7 +224,7 @@ function ContractLine({ contractMinutes, onOpen }) {
         cursor: 'pointer',
       }}
     >
-      <span>{contractMinutes != null ? `${contractMinutes} min contract tier` : 'No contract tier yet'} · View athlete</span>
+      <span>{contractMinutes != null ? `${contractMinutes} min contract tier` : 'No contract tier yet'} · View {target}</span>
       <span aria-hidden="true" style={{ color: color.textTertiary }}>
         ›
       </span>

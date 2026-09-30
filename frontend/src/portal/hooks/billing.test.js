@@ -184,3 +184,36 @@ test('Membership, Elite, before the season: November with its bookings, December
   expect(status.title).toBe(`Tokens start ${calendar.longDayLabel('2026-11-01')}`);
   await act(async () => root.unmount());
 });
+
+// Owner report (Mike S6 2026-09-30): the self-managed 18+ athlete's Billing
+// hub. The athletes rule admits their own doc by id, never the householdId
+// list query a parent's hub runs - so the hub must not run it for them.
+test("the athlete's hub is their own one-member household, read by id", async () => {
+  calendar.todayISO.mockReturnValue('2026-10-20');
+  live.isLive.mockReturnValue(true);
+  live.fetchCurrentUser.mockResolvedValue({ uid: 'u-self', role: 'athlete', athleteId: 'a-self', householdId: 'hh-self' });
+  live.fetchAthlete.mockResolvedValue({ id: 'a-self', name: 'Sam', householdId: 'hh-self', packageId: 't-12' });
+  live.fetchHousehold.mockResolvedValue({ id: 'hh-self', name: 'Sam Rivera', periodAnchorDay: 1, createdBy: 'u-self', stripeCustomerId: 'cus_self' });
+  live.fetchPackage.mockResolvedValue({ id: 't-12', name: '12 tokens', kind: 'tokens', tokens: 12 });
+  live.fetchBookings.mockResolvedValue([]);
+  live.fetchGraceTokensByAthlete.mockResolvedValue([]);
+  grace.fetchTokenPeriod.mockResolvedValue(null);
+  waitlist.fetchWaitlistByAthlete.mockResolvedValue([]);
+
+  const result = { current: null };
+  function Probe() {
+    result.current = useBillingHub();
+    return null;
+  }
+  const root = createRoot(document.createElement('div'));
+  await act(async () => { root.render(<Probe />); });
+  await act(async () => { await new Promise((r) => setTimeout(r, 0)); });
+  expect(result.current.error).toBeNull();
+  expect(live.fetchHouseholdAthletes).not.toHaveBeenCalled();
+  expect(live.fetchAthlete).toHaveBeenCalledWith('a-self');
+  expect(live.fetchHousehold).toHaveBeenCalledWith('hh-self');
+  expect(result.current.data.members.map((m) => [m.athleteId, m.name])).toEqual([['a-self', 'Sam']]);
+  expect(result.current.data.household).toMatchObject({ id: 'hh-self', stripeCustomerId: 'cus_self' });
+  expect(live.fetchBookings).toHaveBeenCalledWith('a-self', { householdId: 'hh-self' });
+  await act(async () => root.unmount());
+});

@@ -15,8 +15,7 @@ import { color, font } from '../tokens';
  *
  * @param {string} name
  * @param {React.ReactNode} [trailing]  Right-aligned slot (Reservations has
- *   none today; Membership has none either — kept for the next caller rather
- *   than speculatively wired).
+ *   none today; Membership's self-managed athlete gets "Billing ›" here).
  */
 export default function MemberSection({ name, trailing, children, style }) {
   return (
