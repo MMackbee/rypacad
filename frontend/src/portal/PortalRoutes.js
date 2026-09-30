@@ -184,6 +184,7 @@ function RegistrationRoute() {
       bare
       mode={linkMode ? 'link' : 'signup'}
       account={live ? user : null}
+      verifySent={linkMode ? null : state?.verifySent ?? null}
       onRefresh={live ? refresh : undefined}
       onBack={() => navigate(linkMode ? '/portal/settings' : '/portal/signin')}
       onFinish={(path) => navigate(path, { replace: true })}

@@ -2,8 +2,9 @@ import React, { useEffect, useRef, useState } from 'react';
 import { color, font } from '../tokens';
 import Button from '../components/Button';
 import PhoneFrame from '../components/PhoneFrame';
-import { BackLink, Body, ScreenTitle } from '../components/Primitives';
+import { BackLink, Banner, Body, ScreenTitle } from '../components/Primitives';
 import * as callables from '../hooks/callables';
+import { verifySentNote } from '../data/authCopy';
 import { todayISO } from '../data/calendar';
 import { SINGLE_ON_SALE, SINGLE_TOKEN } from '../data/packages';
 import { EMAIL_RE, buildAddAthletesPayload, buildCreateFamilyPayload, newAthleteEntry, validateAthleteEntry } from '../data/signup';
@@ -36,7 +37,9 @@ const callAddAthletes = callables.callAddAthletes || notWired('addAthletes');
  * Success receipt (`finish`), never on submit: RegistrationRoute redirects
  * a provisioned account to its landing, so refreshing on submit would
  * unmount the receipt (pay buttons, child-login steps) before it rendered.
- * `variant` remains the harness deep-link.
+ * `variant` remains the harness deep-link. `verifySent` ({ email, mailed },
+ * from SignUp's navigation state) shows the verification note on step 1, since
+ * a new login now lands here without stopping on SignUp's card.
  */
 const STEPS = {
   signup: [['who', 'Who are you'], ['contact', 'Contact'], ['athletes', 'Athletes'], ['package', 'Choose a package'], ['consent', 'Consent and waiver']],
@@ -74,7 +77,7 @@ function writeDraft(key, value) {
   }
 }
 
-export default function Registration({ variant, bare = false, mode = 'signup', account = null, onRefresh, onBack, onFinish }) {
+export default function Registration({ variant, bare = false, mode = 'signup', account = null, verifySent = null, onRefresh, onBack, onFinish }) {
   const demo = variant != null;
   const steps = STEPS[mode] || STEPS.signup;
   const today = todayISO();
@@ -136,6 +139,12 @@ export default function Registration({ variant, bare = false, mode = 'signup', a
   const setMode = (m) => setForm((f) => ({ ...f, mode: m, athletes: m === 'athlete' ? f.athletes.slice(0, 1) : f.athletes }));
 
   const stepId = steps[step][0];
+  // History state outlives a sign-out, so the note shows only to the account
+  // it was written for. Green would read as a selected choice card on this
+  // step, so a sent note is neutral here (review 2026-09-30).
+  const ownNote = step === 0 && verifySent?.email && account?.email
+    && verifySent.email.toLowerCase() === account.email.toLowerCase();
+  const note = ownNote ? verifySentNote(verifySent) : null;
   const athleteErrors = form.athletes.map((a) =>
     validateAthleteEntry(a, { todayISO: today, guardianEmail: form.contact.email, siblings: form.athletes, mode: form.mode || 'parent' })
   );
@@ -230,6 +239,7 @@ export default function Registration({ variant, bare = false, mode = 'signup', a
       }
     >
       <div ref={contentRef} style={{ padding: '20px 22px 24px', position: 'relative' }}>
+        {note ? <Banner tone={note.tone === 'green' ? 'neutral' : note.tone} title={note.title} style={{ marginBottom: 18 }}>{note.body}</Banner> : null}
         {stepId === 'who' ? <WhoStep mode={form.mode} onChange={setMode} /> : null}
         {stepId === 'contact' ? <ContactStep mode={form.mode} contact={form.contact} onChange={setContact} showErrors={showErrors} /> : null}
         {stepId === 'athletes' ? (

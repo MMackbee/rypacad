@@ -60,6 +60,33 @@ test('parent sign-up calls createFamily with the contract payload, shows success
   await r.unmount();
 });
 
+test('a new login shows the verification note on step 1 only', async () => {
+  const r = await renderScreen(
+    <Registration bare mode="signup" account={{ uid: 'u-note', email: 'dana@email.com', emailVerified: false }} verifySent={{ email: 'dana@email.com', mailed: true }} />
+  );
+  expect(r.text()).toContain('Verification sent');
+  expect(r.text()).toContain('We sent a link to dana@email.com from noreply@');
+  await r.click('Parent or guardian');
+  await r.click('Continue');
+  expect(r.text()).not.toContain('Verification sent');
+  await r.unmount();
+  window.sessionStorage.clear();
+});
+
+test("another account never sees a note left in history by the last sign-up", async () => {
+  const r = await renderScreen(<Registration bare mode="signup" account={{ email: 'other@email.com' }} verifySent={{ email: 'dana@email.com', mailed: true }} />);
+  expect(r.text()).not.toContain('Verification sent');
+  expect(r.text()).not.toContain('dana@email.com');
+  await r.unmount();
+});
+
+test('an unsent verification says so on the form', async () => {
+  const r = await renderScreen(<Registration bare mode="signup" account={{ email: 'dana@email.com' }} verifySent={{ email: 'dana@email.com', mailed: false }} />);
+  expect(r.text()).toContain('Login created');
+  expect(r.text()).toContain('tap Resend on the verify card');
+  await r.unmount();
+});
+
 test('a reload keeps the half-filled form (per signed-in account), and success clears it', async () => {
   window.sessionStorage.clear();
   const account = { uid: 'u-draft', email: 'dana@email.com', emailVerified: false };
