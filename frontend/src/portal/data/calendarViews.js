@@ -164,6 +164,14 @@ export function slotDayStates(days) {
 }
 
 /**
+ * How far past its own range a marks read looks (review 2026-09-30). Every
+ * grid ends on a Sunday (no blocks) and December's ends inside the Christmas
+ * break, so without the next week's sessions in hand the read's last days
+ * would sit past the horizon below and never be judged.
+ */
+export const MARKS_LOOKAHEAD_DAYS = 7;
+
+/**
  * The booking calendars' day marks (owner ruling 2026-09-30), from the
  * sessions a hook already read for [from, to] - EVERY type, not only the
  * calendar's own. No closures collection and no sync change: the owner puts
@@ -175,19 +183,30 @@ export function slotDayStates(days) {
  *    after Feb 27.
  * A tournament wins over closed, and a day with any session is never closed.
  *
+ * Closed also stops at the read's HORIZON - the latest date `sessions` holds
+ * any doc for (review 2026-09-30). An empty day past it may simply not be
+ * synced yet (the sync's default window is 90 days), so it is left unmarked
+ * rather than painted "Academy closed"; an empty read marks nothing closed.
+ * A cancelled doc counts toward the horizon: the sync only cancels a session
+ * inside a window it just read. Callers read MARKS_LOOKAHEAD_DAYS past `to`
+ * so the range's own last days sit inside it.
+ *
  * @returns {Object<string, 'tournament'|'closed'>}
  */
 export function dayMarksFor(sessions, fromISO, toISO, season = SEASON_BOUNDS) {
   const out = {};
   if (!fromISO || !toISO) return out;
   const busy = new Set();
+  let horizon = '';
   for (const s of sessions || []) {
-    if (!s || !s.date || s.status === 'cancelled') continue;
+    if (!s || !s.date) continue;
+    if (s.date > horizon) horizon = s.date;
+    if (s.status === 'cancelled') continue;
     busy.add(s.date);
     if (s.type === 'tournament' && s.date >= fromISO && s.date <= toISO) out[s.date] = 'tournament';
   }
   const from = fromISO > season.start ? fromISO : season.start;
-  const to = toISO < season.end ? toISO : season.end;
+  const to = [toISO, season.end, horizon].sort()[0]; // the earliest; '' for an empty read
   for (let iso = from; iso <= to; iso = addDaysISO(iso, 1)) {
     if (!busy.has(iso)) out[iso] = 'closed';
   }

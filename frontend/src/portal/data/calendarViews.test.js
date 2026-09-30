@@ -1,5 +1,6 @@
 import {
   CALENDAR_VIEW_KEY,
+  MARKS_LOOKAHEAD_DAYS,
   anchorIn,
   dayMarksFor,
   firstAvailableISO,
@@ -138,9 +139,12 @@ describe('dayMarksFor (owner data rule 2026-09-30)', () => {
     expect(marks['2026-11-14']).toBeUndefined();
   });
 
+  // A session just past the range: the horizon (see below) then covers the whole range.
+  const lookahead = (date) => s(date, 'training');
+
   test('an in-season day with no scheduled session of ANY type is closed; any type keeps it open', () => {
     const marks = dayMarksFor(
-      [s('2026-11-03', 'training'), s('2026-11-04', 'phil'), s('2026-11-05', 'mental'), s('2026-11-06', 'training', 'cancelled')],
+      [s('2026-11-03', 'training'), s('2026-11-04', 'phil'), s('2026-11-05', 'mental'), s('2026-11-06', 'training', 'cancelled'), lookahead('2026-11-09')],
       '2026-11-03',
       '2026-11-08'
     );
@@ -148,21 +152,59 @@ describe('dayMarksFor (owner data rule 2026-09-30)', () => {
   });
 
   test('a tournament wins over closed (a holiday tournament on a closed day)', () => {
-    const marks = dayMarksFor([s('2026-11-27', 'tournament')], '2026-11-26', '2026-11-28');
+    const marks = dayMarksFor([s('2026-11-27', 'tournament'), lookahead('2026-11-30')], '2026-11-26', '2026-11-28');
     expect(marks).toEqual({ '2026-11-26': 'closed', '2026-11-27': 'tournament', '2026-11-28': 'closed' });
   });
 
   test('never closed before Nov 3 or after Feb 27, or outside the range read', () => {
-    const pre = dayMarksFor([], '2026-10-26', '2026-11-04');
+    const pre = dayMarksFor([lookahead('2026-11-05')], '2026-10-26', '2026-11-04');
     expect(Object.keys(pre)).toEqual(['2026-11-03', '2026-11-04']);
-    const post = dayMarksFor([], '2027-02-22', '2027-03-07');
+    const post = dayMarksFor([lookahead('2027-03-08')], '2027-02-22', '2027-03-07');
     expect(Object.keys(post).sort()).toEqual(['2027-02-22', '2027-02-23', '2027-02-24', '2027-02-25', '2027-02-26', '2027-02-27']);
-    expect(dayMarksFor([], '2026-10-01', '2026-10-31')).toEqual({});
+    expect(dayMarksFor([lookahead('2026-11-02')], '2026-10-01', '2026-10-31')).toEqual({});
     // Tournaments count anywhere in the range, season or not.
     expect(dayMarksFor([s('2026-10-24', 'tournament')], '2026-10-19', '2026-10-25')).toEqual({ '2026-10-24': 'tournament' });
     // A session outside [from, to] marks nothing.
     expect(dayMarksFor([s('2026-11-21', 'tournament')], '2026-11-04', '2026-11-04')).toEqual({ '2026-11-04': 'closed' });
     expect(dayMarksFor([s('2026-11-21', 'tournament')], null, null)).toEqual({});
+  });
+
+  describe('the sync horizon (review 2026-09-30)', () => {
+    test('an empty read marks nothing closed - the season before the first sync', () => {
+      expect(dayMarksFor([], '2026-10-26', '2026-12-06')).toEqual({});
+      expect(dayMarksFor(undefined, '2026-11-03', '2026-11-30')).toEqual({});
+    });
+
+    test('closed stops at the latest date the read holds: a January read synced only to Jan 12', () => {
+      // January's grid is Dec 28 .. Jan 31 (plus the lookahead); the 90-day sync reached Jan 12.
+      const marks = dayMarksFor([s('2027-01-04', 'training'), s('2027-01-09', 'tournament'), s('2027-01-12', 'training')], '2026-12-28', '2027-01-31');
+      expect(marks['2027-01-10']).toBe('closed'); // a Sunday inside the horizon
+      expect(marks['2027-01-11']).toBe('closed');
+      expect(marks['2027-01-09']).toBe('tournament');
+      expect(marks['2027-01-12']).toBeUndefined();
+      expect(Object.keys(marks).filter((iso) => iso > '2027-01-12')).toEqual([]); // not synced: never "Academy closed"
+      expect(marks['2027-01-01']).toBe('closed'); // a real closure still has sessions after it
+    });
+
+    test('a cancelled doc extends the horizon (the sync only cancels inside a window it read)', () => {
+      const marks = dayMarksFor([s('2026-11-12', 'training'), s('2026-11-14', 'training', 'cancelled')], '2026-11-12', '2026-11-15');
+      expect(marks).toEqual({ '2026-11-13': 'closed', '2026-11-14': 'closed' });
+    });
+
+    test("December's grid ends inside the Christmas break: the lookahead's Jan 4 session lets the break be judged", () => {
+      const grid = monthGridBounds('2026-12-01'); // Nov 30 .. Jan 3
+      const read = [s('2026-12-22', 'training'), s('2026-12-28', 'tournament'), s('2026-12-29', 'tournament')];
+      const without = dayMarksFor(read, grid.start, grid.end);
+      expect(without['2026-12-23']).toBe('closed'); // the holiday tournaments come after it
+      expect(without['2026-12-30']).toBeUndefined();
+      expect(without['2027-01-03']).toBeUndefined();
+      const withLookahead = dayMarksFor([...read, s('2027-01-04', 'training')], grid.start, grid.end);
+      expect(withLookahead['2026-12-28']).toBe('tournament');
+      expect(withLookahead['2026-12-30']).toBe('closed');
+      expect(withLookahead['2027-01-03']).toBe('closed');
+      expect(withLookahead['2027-01-04']).toBeUndefined(); // past the range itself
+      expect(MARKS_LOOKAHEAD_DAYS).toBe(7);
+    });
   });
 
   test('slotDayMarks reads the hook-derived mark off each day', () => {
