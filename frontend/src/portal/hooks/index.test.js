@@ -3,9 +3,10 @@
  * SLOT's month, not today's. The rest of hooks/index.js is exercised in the
  * emulator; Firebase is mocked out here.
  *
- * Perf wave B: the live loaders that now read in parallel (liveAthleteDetail)
- * are driven through their hooks against mocked adapters - the reads each
- * one issues, which round they land in, and the payload they return.
+ * Perf wave B: the live loaders that now read in parallel (liveAthleteDetail,
+ * liveBooking, liveMonthSessions' waitlist join) are driven through their
+ * hooks against mocked adapters - the reads each one issues, which round
+ * they land in, and the payload they return.
  */
 jest.mock('../../firebase', () => ({ __esModule: true, default: {}, auth: { currentUser: null }, db: {}, functions: {}, storage: {} }));
 jest.mock('firebase/firestore', () => ({}));
@@ -38,9 +39,10 @@ jest.mock('./waitlist', () => ({
 
 import { act } from 'react';
 import { createRoot } from 'react-dom/client';
-import { coachingFor, seedSpecialistDays, useAthleteDetail } from './index';
+import { coachingFor, seedSpecialistDays, useAthleteDetail, useBooking, useMonthSessions } from './index';
 import * as live from './live';
 import * as signups from './signups';
+import * as waitlist from './waitlist';
 import { loginStateFor } from '../data/signups';
 
 const mental = (date) => ({ id: date, type: 'mental', status: 'confirmed', date });
@@ -166,5 +168,62 @@ describe('live loaders (perf wave B)', () => {
 
 
 
+  test('useBooking() as an athlete: athlete + bookings together, then package + household, then the sessions window', async () => {
+    const athleteGate = deferred();
+    live.fetchCurrentUser.mockResolvedValue({ uid: 'u1', athleteId: 'a1', email: 'jordan@email.com' });
+    live.fetchAthlete.mockReturnValue(athleteGate.promise);
+    live.fetchBookings.mockResolvedValue([]);
+    live.fetchPackage.mockResolvedValue({ id: 't-12', name: '12 tokens', kind: 'tokens', tokens: 12 });
+    live.fetchHousehold.mockResolvedValue({ id: 'h1', periodAnchorDay: 1 });
+    live.fetchSessionsInRange.mockResolvedValue([]);
 
+    const h = await mountHook(() => useBooking());
+    await settle();
+    expect(live.fetchBookings).toHaveBeenCalledWith('a1');
+    expect(live.fetchPackage).not.toHaveBeenCalled();
+
+    await act(async () => {
+      athleteGate.resolve({ id: 'a1', householdId: 'h1', packageId: 't-12' });
+    });
+    await settle();
+    expect(live.fetchPackage).toHaveBeenCalledWith('t-12');
+    expect(live.fetchHousehold).toHaveBeenCalledWith('h1');
+    expect(live.fetchSessionsInRange).toHaveBeenCalledTimes(1);
+    expect(h.result.current.error).toBeNull();
+    expect(h.result.current.bookingFor).toBe('athlete');
+    expect(h.result.current.data).toMatchObject({ dates: [], slots: [], seasonNote: null });
+    await h.unmount();
+  });
+
+  test("liveMonthSessions: sessions and identity together; every waitlisted row's queue fetched and annotated", async () => {
+    const sessionsGate = deferred();
+    live.fetchSessionsInRange.mockReturnValue(sessionsGate.promise);
+    live.fetchCurrentUser.mockResolvedValue({ uid: 'u1', athleteId: 'a1' });
+    waitlist.fetchWaitlistByAthlete.mockResolvedValue([
+      { sessionId: 's1', athleteId: 'a1' },
+      { sessionId: 's3', athleteId: 'a1' },
+    ]);
+    waitlist.fetchWaitlistBySession.mockImplementation(async (id) =>
+      id === 's1' ? [{ athleteId: 'x' }, { athleteId: 'a1' }] : [{ athleteId: 'y' }]
+    );
+
+    const h = await mountHook(() => useMonthSessions('2099-01'));
+    await settle();
+    // The identity read went out while the range read is still in flight.
+    expect(live.fetchCurrentUser).toHaveBeenCalledTimes(1);
+
+    const session = (id, date) => ({ id, date, time: '4:00 PM', type: 'training', status: 'scheduled', capacity: 8, booked: 8 });
+    await act(async () => {
+      sessionsGate.resolve([session('s1', '2099-01-06'), session('s2', '2099-01-06'), session('s3', '2099-01-07')]);
+    });
+    await settle();
+    expect(waitlist.fetchWaitlistByAthlete).toHaveBeenCalledWith('a1');
+    expect(waitlist.fetchWaitlistBySession.mock.calls.map((c) => c[0]).sort()).toEqual(['s1', 's3']);
+    const rows = h.result.current.data.days.flatMap((d) => d.sessions);
+    const byId = Object.fromEntries(rows.map((r) => [r.id, r]));
+    expect(byId.s1).toMatchObject({ waitlisted: true, waitlistPosition: 2 });
+    expect(byId.s2.waitlisted).toBeUndefined();
+    expect(byId.s3).toMatchObject({ waitlisted: true, waitlistPosition: null });
+    await h.unmount();
+  });
 });
