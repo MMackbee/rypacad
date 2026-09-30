@@ -25,8 +25,8 @@ export default function PackageCard({
   onSelect,
   rows = [],
   footnote,
-  // The single token is a one-time $65 purchase, not a period package.
-  cadence = pkg.kind === 'single' ? 'one-time' : '/ period',
+  // The single token is a one-time $65 purchase; everything else bills monthly.
+  cadence = pkg.kind === 'single' ? 'one-time' : '/ month',
   showPrices = PRICES_RELEASED,
   style,
 }) {
@@ -130,14 +130,14 @@ export default function PackageCard({
  * (SEASON_BOUNDS.end, Sat 2027-02-27) - bought once, never per period.
  */
 function entitlementLine(pkg, showPrices) {
-  if (pkg.kind === 'elite') return `Unlimited · 24/7 access · books ${pkg.windowDays} days out`;
+  if (pkg.kind === 'elite') return `Unlimited · 24/7 access · book up to ${pkg.windowDays} days ahead`;
   if (pkg.kind === 'single') return '1 session · good through Sat, Feb 27';
   if (pkg.tokens == null) return null;
   if (pkg.tokens === 1) return `1 token · books ${pkg.windowDays} days out`;
   // The per-token rate is a price: withheld with the rest (v2.0.1).
-  if (!showPrices) return `${pkg.tokens} tokens a period · books ${pkg.windowDays} days out`;
+  if (!showPrices) return `${pkg.tokens} tokens a month · books ${pkg.windowDays} days out`;
   const rate = pkg.price / pkg.tokens;
-  return `${pkg.tokens} tokens a period · $${rate.toFixed(2)} a token`;
+  return `${pkg.tokens} tokens a month · $${rate.toFixed(2)} a token`;
 }
 
 function SelectDot({ selected }) {

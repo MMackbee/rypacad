@@ -73,11 +73,20 @@ test('the single token card reads one-time, good through the season end; monthly
   expect(single).not.toBeNull();
   expect(single.textContent).toContain('1 session · good through Sat, Feb 27');
   expect(single.textContent).toContain('one-time');
-  expect(single.textContent).not.toContain('/ period');
+  expect(single.textContent).not.toContain('/ month');
   const six = r.button('6 tokens');
-  expect(six.textContent).toContain('6 tokens a period · $49.83 a token');
-  expect(six.textContent).toContain('/ period');
+  expect(six.textContent).toContain('6 tokens a month · $49.83 a token');
+  expect(six.textContent).toContain('/ month');
   expect(six.textContent).not.toContain('one-time');
+  expect(r.text()).not.toContain('period');
+  await r.unmount();
+});
+
+test('prices read per month, Elite reads how far ahead it books, and tokens are explained under the label', async () => {
+  const r = await renderScreen(<PackageStep athletes={[{ ...newAthleteEntry(), name: 'Nico' }]} onUpdate={() => {}} showErrors={false} />);
+  expect(r.button('Elite').textContent).toContain('Unlimited · 24/7 access · book up to 45 days ahead');
+  expect(r.button('Elite').textContent).toContain('$999/ month');
+  expect(r.text()).toContain("Package — Nico1 token = 1 session: a training block, a tournament, or a 1-on-1 with Phil or Yannick. Tokens refresh on the 1st of each month; unused tokens don't carry over. Elite is unlimited.");
   await r.unmount();
 });
 

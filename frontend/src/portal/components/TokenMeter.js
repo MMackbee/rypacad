@@ -30,7 +30,7 @@ function priceLine(pkg) {
   if (!pkg || pkg.price == null) return null;
   // The single token is a one-time purchase, never a per-period price.
   if (pkg.kind === 'single') return `$${pkg.price} per session token${pkg.pending ? ' · pending' : ''}`;
-  return `$${pkg.price} / period${pkg.pending ? ' · pending' : ''}`;
+  return `$${pkg.price} / month${pkg.pending ? ' · pending' : ''}`;
 }
 
 const STATUS_BADGE = {
