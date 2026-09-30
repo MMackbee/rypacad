@@ -63,3 +63,13 @@ test('a locked channel is written true even if the loaded value says off', async
   });
   await r.unmount();
 });
+
+test('practice (the walkthrough): the toggle flips locally and nothing saves', async () => {
+  const r = await renderScreen(<NotificationPreferences bare practice />);
+  await r.click('Sessions push');
+  expect(r.button('Sessions push').getAttribute('aria-checked')).toBe('false');
+  expect(mockSave).not.toHaveBeenCalled();
+  expect(r.text()).not.toContain('Preferences saved');
+  expect(r.text()).not.toContain('Replay the walkthrough');
+  await r.unmount();
+});

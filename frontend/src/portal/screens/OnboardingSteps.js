@@ -311,12 +311,16 @@ export const PARENT_STEPS = [
     instruction: {
       title: 'Two quick stops',
       body:
-        'The Tour tab is the season leaderboard: every Saturday tournament banks points toward the standings, and the whole academy is on the board. Below it, Notifications is where you choose email or text per category. Scroll through, then continue.',
+        'The Tour tab is the season leaderboard: every Saturday tournament banks points toward the standings, and the whole academy is on the board. Below it, Notifications is where you choose email or push per category. Scroll through, then continue.',
     },
+    // The standings are academy-public, the same board for every family.
+    // Notifications is the parent's own, so `practice` pins the seed and keeps
+    // the toggles local: no save, and none of the account cards and rows
+    // (review 2026-09-30 - it read and wrote the signed-in parent's settings).
     render: () => (
       <Flow>
         <TourStandings bare role="parent" />
-        <NotificationPreferences bare variant="default" />
+        <NotificationPreferences bare variant="default" practice />
       </Flow>
     ),
   },
