@@ -92,6 +92,7 @@ export default function ParentDashboard({
   const billingById = new Map((hub.data?.members ?? []).map((m) => [m.athleteId, m.billing?.status ?? 'active']));
   const [params] = useSearchParams();
   const paidAthleteId = params.get('paid');
+  const paidChild = children.find((c) => c.id === paidAthleteId) ?? null;
   // The athlete just back from Stripe is confirming, not unpaid: no second
   // Pay now while the webhook lands - a second checkout double-subscribes.
   const pendingAthletes = (hubStatus?.status === 'pending' ? hubStatus.pendingAthletes : [])
@@ -158,7 +159,10 @@ export default function ParentDashboard({
           standing badge does flip to ON HOLD, because booking is what actually
           gets restricted.
         */}
-        <PaymentConfirming athleteId={paidAthleteId} />
+        <PaymentConfirming
+          athleteId={paidAthleteId}
+          whatsNext={{ athlete: paidChild, product: params.get('product'), onBook: paidChild ? () => setBookFor(paidChild) : undefined }}
+        />
         <PendingBanner pendingAthletes={pendingAthletes} body={hubStatus?.body} title={hubStatus?.title} />
         {onHold ? (
           <PaymentBanner billing={flagged ? billing : bannerFor(membershipStatus)} onOpen={() => navigate('/portal/billing')} />

@@ -98,7 +98,10 @@ export default function AthleteDashboard({
         </div>
       ) : (
       <div style={{ padding: '0 22px 24px', display: 'flex', flexDirection: 'column', gap: 12 }}>
-        <PaymentConfirming athleteId={params.get('paid')} />
+        <PaymentConfirming
+          athleteId={params.get('paid')}
+          whatsNext={{ athlete, product: params.get('product'), self: true, onBook, onSeason: () => navigate('/portal/season') }}
+        />
         {/* No second Pay now while the ?paid= return confirms (double subscription). */}
         <PendingBanner
           pendingAthletes={(mineStatus?.status === 'pending' ? mineStatus.pendingAthletes : []).filter((a) => a.athleteId !== params.get('paid'))}

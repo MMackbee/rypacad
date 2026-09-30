@@ -116,7 +116,11 @@ function sessionBody(a) {
             String(a.prepaid.tokens),
       },
     },
-    success_url: `${base}?paid=${a.athleteId}&cs={CHECKOUT_SESSION_ID}`,
+    // The add-on's return names itself so the portal's "What's next" card
+    // stays off it; the tier return is unchanged.
+    success_url: `${base}?paid=${a.athleteId}` +
+        `${a.product === 'facility' ? '&product=facility' : ''}` +
+        '&cs={CHECKOUT_SESSION_ID}',
     cancel_url: base,
   };
   if (a.customerId) body.customer = a.customerId;
