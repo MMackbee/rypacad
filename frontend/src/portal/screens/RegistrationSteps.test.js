@@ -1,7 +1,8 @@
 import React from 'react';
 import { format, parseISO } from 'date-fns';
 import { renderScreen } from './testRender';
-import { AthleteStep, ConsentStep, ContractStep, PackageStep, WhoStep } from './RegistrationSteps';
+import { AthleteStep, ConsentInfoSheet, ConsentStep, ContractStep, PackageStep, WhoStep } from './RegistrationSteps';
+import { CONSENT_TERMS } from '../data/consentTerms';
 import { emptyEmergencyContact, newAthleteEntry } from '../data/signup';
 import { SEASON_BOUNDS } from '../data/season';
 import { SINGLE_ON_SALE } from '../data/packages';
@@ -293,4 +294,23 @@ test('contract step, two athletes: each their own pick, Not yet is an answer, th
   expect(r.text()).not.toContain('Nico logs minutes');
   expect(r.text()).not.toContain('Reese logs minutes');
   await r.unmount();
+});
+
+// Owner request (Mike, 2026-09-30): the sheets behind the consent links
+// carry the full terms, section by section.
+test('the consent sheets show the full media terms and facility rules', async () => {
+  for (const [id, first] of [['mediaRelease', 'What you are allowing'], ['facilityAccess', 'Who may enter'], ['videoCapture', 'What we record']]) {
+    const r = await renderScreen(<ConsentInfoSheet id={id} onClose={() => {}} />);
+    for (const section of CONSENT_TERMS[id]) {
+      expect(r.text()).toContain(section.heading);
+      for (const line of section.lines) expect(r.text()).toContain(line);
+    }
+    expect(r.text().indexOf(first)).toBeGreaterThan(-1);
+    await r.unmount();
+  }
+  // The data sheet keeps its access matrix and gains nothing it should not.
+  const d = await renderScreen(<ConsentInfoSheet id="dataCollection" onClose={() => {}} />);
+  expect(d.text()).toContain('Owner/Director');
+  expect(d.text()).not.toContain('Who may enter');
+  await d.unmount();
 });
