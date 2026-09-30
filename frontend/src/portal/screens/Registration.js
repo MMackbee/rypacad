@@ -5,6 +5,7 @@ import PhoneFrame from '../components/PhoneFrame';
 import { BackLink, Body, ScreenTitle } from '../components/Primitives';
 import * as callables from '../hooks/callables';
 import { todayISO } from '../data/calendar';
+import { SINGLE_ON_SALE, SINGLE_TOKEN } from '../data/packages';
 import { EMAIL_RE, buildAddAthletesPayload, buildCreateFamilyPayload, newAthleteEntry, validateAthleteEntry } from '../data/signup';
 import { AthleteStep, ConsentStep, ConsentInfoSheet, ContactStep, PackageStep, SubmittingOverlay, WhoStep } from './RegistrationSteps';
 import RegistrationSuccess from './RegistrationSuccess';
@@ -91,6 +92,8 @@ export default function Registration({ variant, bare = false, mode = 'signup', a
     signatureName: '',
   }));
   const [showErrors, setShowErrors] = useState(false);
+  const [errorTick, setErrorTick] = useState(0); // bumps on every invalid Continue
+  const contentRef = useRef(null);
   const [submitError, setSubmitError] = useState(null);
   const [infoSheet, setInfoSheet] = useState(null);
   const [result, setResult] = useState(demo ? { householdId: 'demo', athleteIds: ['demo-1'] } : null);
@@ -107,6 +110,21 @@ export default function Registration({ variant, bare = false, mode = 'signup', a
     if (phase === 'form') writeDraft(key, { v: 1, step, form });
     else if (phase === 'success') writeDraft(key, null);
   }, [key, phase, step, form]);
+
+  // The steps share PhoneFrame's one scroller: without this, each step opened
+  // at the previous one's scroll position, with its tabs and heading off
+  // screen (UX review 2026-09-30). Scrolls the frame only, never the page.
+  useEffect(() => {
+    const scroller = contentRef.current?.parentElement;
+    if (scroller) scroller.scrollTop = 0;
+  }, [step]);
+
+  // An invalid Continue brings the first message into view: errors render
+  // inline, so one below the fold made Continue look dead.
+  useEffect(() => {
+    if (!errorTick) return;
+    contentRef.current?.querySelector('[data-field-error]')?.scrollIntoView?.({ block: 'center' });
+  }, [errorTick]);
 
   const patch = (p) => setForm((f) => ({ ...f, ...p }));
   const setContact = (fn) => setForm((f) => ({ ...f, contact: typeof fn === 'function' ? fn(f.contact) : fn }));
@@ -125,7 +143,9 @@ export default function Registration({ variant, bare = false, mode = 'signup', a
     who: form.mode != null,
     contact: form.contact.name.trim() !== '' && EMAIL_RE.test(form.contact.email.trim()) && form.contact.phone.trim() !== '',
     athletes: athleteErrors.every((e) => !e.name && !e.dob && !e.handicap && !e.loginEmail),
-    package: form.athletes.every((a) => a.packageId != null) && athleteErrors.every((e) => !e.packageId && !e.contractMinutes),
+    // A restored draft may hold the single token from before it went off sale.
+    package: form.athletes.every((a) => a.packageId != null) && athleteErrors.every((e) => !e.packageId && !e.contractMinutes)
+      && form.athletes.every((a) => a.packageId !== SINGLE_TOKEN.id || SINGLE_ON_SALE),
     consent: form.consents.dataCollection && form.consents.videoCapture && form.signatureName.trim() !== '',
   }[stepId];
 
@@ -135,7 +155,7 @@ export default function Registration({ variant, bare = false, mode = 'signup', a
     setStep((s) => s - 1);
   };
   const handleContinue = () => {
-    if (!valid) { setShowErrors(true); return; }
+    if (!valid) { setShowErrors(true); setErrorTick((n) => n + 1); return; }
     setShowErrors(false);
     if (step < steps.length - 1) { setStep((s) => s + 1); return; }
     handleSubmit();
@@ -163,6 +183,15 @@ export default function Registration({ variant, bare = false, mode = 'signup', a
         await onRefresh();
         return;
       }
+      // An invited child who still reached the form: the parent already
+      // enrolled them, and createFamily's "tap Check again" names a button
+      // that is not here. The verify screen claims the invite instead.
+      if (err && err.reason === 'invite-open' && onFinish) {
+        submitting.current = false;
+        writeDraft(key, null);
+        onFinish('/portal/not-provisioned');
+        return;
+      }
       submitting.current = false;
       setPhase('form');
       setSubmitError(err && typeof err.message === 'string' && err.message ? err.message : 'Sign-up could not be saved. Try again.');
@@ -181,13 +210,18 @@ export default function Registration({ variant, bare = false, mode = 'signup', a
 
   const label = phase === 'submitting' ? (mode === 'link' ? 'Adding athlete' : 'Creating your account')
     : step < steps.length - 1 ? 'Continue' : mode === 'link' ? 'Add athlete' : 'Sign and submit';
+  // Beside the button, so a tap never looks like it did nothing. The who step
+  // has no field to mark red.
+  const fixNote = showErrors && !valid
+    ? stepId === 'who' ? 'Choose one above to continue.' : "Something above needs fixing - it's marked in red."
+    : null;
   return (
     <PhoneFrame
       bare={bare}
       header={<StepHeader step={step} steps={steps} onBack={goBack} />}
       footer={
         <div style={{ borderTop: `1px solid ${color.frameRule}`, padding: '14px 22px 22px' }}>
-          {submitError ? <Body size={12} tone={color.error} style={{ marginBottom: 10, textAlign: 'center' }}>{submitError}</Body> : null}
+          {submitError || fixNote ? <Body size={12} tone={color.error} style={{ marginBottom: 10, textAlign: 'center' }}>{submitError || fixNote}</Body> : null}
           {/* Never disabled for an invalid step: the tap is what reveals which
               field needs fixing (handleContinue sets showErrors). A greyed-out
               button with no message stranded parents (launch test 2026-09-29). */}
@@ -195,7 +229,7 @@ export default function Registration({ variant, bare = false, mode = 'signup', a
         </div>
       }
     >
-      <div style={{ padding: '20px 22px 24px', position: 'relative' }}>
+      <div ref={contentRef} style={{ padding: '20px 22px 24px', position: 'relative' }}>
         {stepId === 'who' ? <WhoStep mode={form.mode} onChange={setMode} /> : null}
         {stepId === 'contact' ? <ContactStep mode={form.mode} contact={form.contact} onChange={setContact} showErrors={showErrors} /> : null}
         {stepId === 'athletes' ? (

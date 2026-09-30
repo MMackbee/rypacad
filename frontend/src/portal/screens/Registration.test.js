@@ -3,14 +3,19 @@ import { renderScreen } from './testRender';
 import Registration from './Registration';
 
 const mockCalls = [];
+let mockCreateError = null;
 jest.mock('../hooks/callables', () => ({
-  callCreateFamily: async (payload) => { mockCalls.push(['createFamily', payload]); return { householdId: 'h1', athleteIds: ['a1'] }; },
+  callCreateFamily: async (payload) => {
+    mockCalls.push(['createFamily', payload]);
+    if (mockCreateError) throw mockCreateError;
+    return { householdId: 'h1', athleteIds: ['a1'] };
+  },
   callAddAthletes: async (payload) => { mockCalls.push(['addAthletes', payload]); return { householdId: 'h1', athleteIds: ['a2'] }; },
   callCreateCheckoutSession: async () => ({ url: 'https://checkout.stripe.test/x' }),
 }), { virtual: true });
 jest.mock('./RegistrationSuccess', () => ({ __esModule: true, default: ({ result, onFinish }) => <button type="button" onClick={() => onFinish('/portal/family')}>SUCCESS {result.athleteIds.join(',')}</button> }));
 
-beforeEach(() => { mockCalls.length = 0; });
+beforeEach(() => { mockCalls.length = 0; mockCreateError = null; });
 
 async function fillParentToConsent(r) {
   await r.click('Parent or guardian');
@@ -108,6 +113,36 @@ test('Continue on an unfinished step names the missing fields instead of sitting
   await r.unmount();
 });
 
+test('each step opens at its top, and an invalid Continue says so and scrolls to the first error', async () => {
+  const scrolled = [];
+  const original = Element.prototype.scrollIntoView;
+  Element.prototype.scrollIntoView = function scrollIntoView(opts) { scrolled.push([this, opts]); };
+  try {
+    const r = await renderScreen(<Registration bare mode="signup" account={{ email: 'dana@email.com' }} />);
+    const scroller = [...r.container.querySelectorAll('div')].find((d) => d.style.overflowY === 'auto');
+    Object.defineProperty(scroller, 'scrollTop', { value: 480, writable: true, configurable: true });
+    await r.click('Continue'); // nothing picked on the who step
+    expect(r.text()).toContain('Choose one above to continue.');
+    await r.click('Parent or guardian');
+    expect(r.text()).not.toContain('Choose one above to continue.');
+    await r.click('Continue');
+    expect(r.text()).toContain('Step 2 of 5');
+    expect(scroller.scrollTop).toBe(0);
+    await r.fill('Your name', 'Dana Whitfield');
+    await r.click('Continue'); // no phone yet
+    expect(r.text()).toContain("Something above needs fixing - it's marked in red.");
+    const [el, opts] = scrolled[scrolled.length - 1];
+    expect(el.hasAttribute('data-field-error')).toBe(true);
+    expect(el.textContent).toContain('A mobile number is required.');
+    expect(opts).toEqual({ block: 'center' });
+    await r.fill('Mobile', '(612) 555-0148');
+    expect(r.text()).not.toContain('Something above needs fixing');
+    await r.unmount();
+  } finally {
+    Element.prototype.scrollIntoView = original;
+  }
+});
+
 test('a double tap on Sign and submit sends one createFamily and still shows the receipt', async () => {
   const r = await renderScreen(<Registration bare mode="signup" account={{ email: 'dana@email.com' }} onRefresh={async () => {}} />);
   await fillParentToConsent(r);
@@ -116,6 +151,56 @@ test('a double tap on Sign and submit sends one createFamily and still shows the
   await act(async () => { submit.click(); submit.click(); });
   expect(mockCalls.length - before).toBe(1);
   expect(r.text()).toContain('SUCCESS a1');
+  await r.unmount();
+});
+
+test('a restored draft holding the off-sale single token cannot be submitted', async () => {
+  window.sessionStorage.clear();
+  const account = { uid: 'u-single', email: 'dana@email.com' };
+  const form = {
+    mode: 'parent',
+    contact: { name: 'Dana Whitfield', email: 'dana@email.com', phone: '(612) 555-0148', relationship: 'Mother' },
+    athletes: [{ key: 'k1', name: 'Jordan', dob: '2012-06-17', handicap: '', ownLogin: false, loginEmail: '', packageId: 'single', contractMinutes: null }],
+    emergencyContact: '', medical: '',
+    consents: { dataCollection: true, videoCapture: true, mediaRelease: false, facilityAccess: false },
+    signatureName: '',
+  };
+  window.sessionStorage.setItem('ryp.signupDraft.signup.u-single', JSON.stringify({ v: 1, step: 3, form }));
+  const r = await renderScreen(<Registration bare mode="signup" account={account} />);
+  expect(r.text()).toContain('Step 4 of 5');
+  expect(r.button('Single token').getAttribute('aria-pressed')).toBe('false');
+  await r.click('Continue');
+  expect(r.text()).toContain('Step 4 of 5');
+  expect(r.text()).toContain('Pick a package for Jordan to continue.');
+  await r.click('6 tokens');
+  await r.click('Continue');
+  expect(r.text()).toContain('Step 5 of 5');
+  await r.unmount();
+  window.sessionStorage.clear();
+});
+
+test('an invited child refused at submit (invite-open) goes to the verify screen, draft dropped', async () => {
+  window.sessionStorage.clear();
+  const finished = [];
+  const account = { uid: 'u-kid', email: 'dana@email.com' };
+  const r = await renderScreen(<Registration bare mode="signup" account={account} onRefresh={async () => {}} onFinish={(p) => finished.push(p)} />);
+  await fillParentToConsent(r);
+  mockCreateError = Object.assign(new Error('Your parent already enrolled you - sign in with this email and tap Check again.'), { reason: 'invite-open' });
+  await r.click('Sign and submit');
+  expect(finished).toEqual(['/portal/not-provisioned']);
+  expect(window.sessionStorage.getItem('ryp.signupDraft.signup.u-kid')).toBeNull();
+  await r.unmount();
+});
+
+test('any other refusal at submit still shows its message on the form', async () => {
+  const finished = [];
+  const r = await renderScreen(<Registration bare mode="signup" account={{ email: 'dana@email.com' }} onFinish={(p) => finished.push(p)} />);
+  await fillParentToConsent(r);
+  mockCreateError = Object.assign(new Error('That email is already on another athlete.'), { reason: 'child-email-duplicate' });
+  await r.click('Sign and submit');
+  expect(finished).toEqual([]);
+  expect(r.text()).toContain('That email is already on another athlete.');
+  expect(r.button('Sign and submit')).not.toBeNull();
   await r.unmount();
 });
 

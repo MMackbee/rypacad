@@ -64,15 +64,17 @@ export default function Field({
             background: 'transparent',
             border: 'none',
             outline: 'none',
-            font: `400 15px ${font.body}`,
+            // 16px: iOS Safari zooms the page into any input under 16px and leaves it zoomed.
+            font: `400 16px ${font.body}`,
             color: dimmed ? color.mutedText : color.text,
           }}
         />
         {trailing}
       </div>
 
+      {/* data-field-error: Registration scrolls the first one into view on an invalid Continue. */}
       {error ? (
-        <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 7 }}>
+        <div data-field-error style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 7 }}>
           <AlertGlyph />
           <span style={{ font: `400 12px ${font.body}`, color: color.error }}>{error}</span>
         </div>
@@ -140,7 +142,7 @@ export function SelectField({ label, value, options = [], onChange, style }) {
             border: 'none',
             outline: 'none',
             appearance: 'none',
-            font: `400 15px ${font.body}`,
+            font: `400 16px ${font.body}`, // 16px: no iOS zoom on focus
             color: value ? color.text : color.mutedText,
           }}
         >

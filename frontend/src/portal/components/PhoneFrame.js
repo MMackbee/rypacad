@@ -26,6 +26,16 @@ import { color, font, glow, radius } from '../tokens';
  */
 export const FrameEmbedContext = createContext(null);
 
+/**
+ * min-height beats height, and on phones 100vh is the tall viewport with the
+ * browser toolbar hidden - so `minHeight: 100vh` stretched the bare frame past
+ * the visible screen and the pinned footer (Continue, Sign and submit, the tab
+ * bar) sat partly under the toolbar (UX review 2026-09-30). Where dvh works
+ * it alone sizes the frame; older browsers drop the dvh height and keep the
+ * 100vh floor as before.
+ */
+const SUPPORTS_DVH = typeof CSS !== 'undefined' && Boolean(CSS.supports) && CSS.supports('height', '100dvh');
+
 export default function PhoneFrame({
   width = 390,
   height = 812,
@@ -72,7 +82,7 @@ export default function PhoneFrame({
           maxWidth: 430,
           margin: '0 auto',
           height: '100dvh',
-          minHeight: '100vh',
+          minHeight: SUPPORTS_DVH ? undefined : '100vh',
           background: color.bg,
         }
     : {

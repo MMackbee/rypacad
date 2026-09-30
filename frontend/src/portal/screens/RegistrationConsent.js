@@ -79,9 +79,11 @@ export function ConsentStep({ mode, consents, onChange, signatureName, onSignatu
       ))}
 
       {showErrors && !(consents.dataCollection && consents.videoCapture) ? (
-        <Body size={12} tone={color.error}>
-          Data collection and video capture consent are required to enroll.
-        </Body>
+        <div data-field-error>
+          <Body size={12} tone={color.error}>
+            Data collection and video capture consent are required to enroll.
+          </Body>
+        </div>
       ) : null}
 
       <Card large>
@@ -91,8 +93,12 @@ export function ConsentStep({ mode, consents, onChange, signatureName, onSignatu
           onChange={onSignatureChange}
           error={showErrors && signatureName.trim() === '' ? 'A signature is required.' : undefined}
         />
+        {/* Says only what was shown and ticked: no injury waiver is in this
+            flow, and media release may have been declined just above. */}
         <Body size={11} tone={color.textTertiary} style={{ marginTop: 9 }}>
-          Re-confirmed annually. Covers athletic injury risk and media release.
+          {mode === 'athlete'
+            ? 'Typing your name signs the consents you ticked above. Re-confirmed each year.'
+            : 'Typing your name signs the consents you ticked above, for every athlete listed. Re-confirmed each year.'}
         </Body>
       </Card>
     </div>

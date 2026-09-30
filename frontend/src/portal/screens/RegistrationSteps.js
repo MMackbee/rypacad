@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { color, font, radius, tint } from '../tokens';
 import Button, { Spinner } from '../components/Button';
 import Field, { SelectField } from '../components/Field';
@@ -6,7 +6,7 @@ import PackageCard from '../components/PackageCard';
 import { Body, Card, SectionLabel } from '../components/Primitives';
 import { Toggle } from '../components/Toggle';
 import { useEnrollmentForm } from '../hooks';
-import { ALL_PACKAGES } from '../data/packages';
+import { ALL_PACKAGES, SINGLE_ON_SALE, packageById } from '../data/packages';
 import { ADULT_REQUIRED, CHILD_LOGIN_ENABLED, TIER_MINUTES, U13_HELPER, ageOnDate, validateAthleteEntry } from '../data/signup';
 
 /**
@@ -243,7 +243,7 @@ export function AthleteStep({
             border: `1px solid ${color.rule}`,
             borderRadius: radius.input,
             padding: 11,
-            font: `400 14px ${font.body}`,
+            font: `400 16px ${font.body}`, // 16px: no iOS zoom on focus
             color: color.text,
             outline: 'none',
             resize: 'none',
@@ -268,11 +268,47 @@ export function AthleteStep({
  * (t-6…t-16) plus Elite, which REPLACES a token pick rather than stacking —
  * same one-of-N rule PackageStep (below) uses. The optional contract tier
  * (20/45/90, spec 9) sits directly below each athlete's choice.
+ *
+ * Until one-time checkout ships (SINGLE_ON_SALE), the single token card is
+ * shown greyed out and cannot be picked: a family on it could never pay.
  */
+const SINGLE_OFF_SALE_NOTE = 'On sale before booking opens Sat, Oct 10. Pick a monthly package now, or come back then.';
+
+/** What a token is and that it does not carry over (tokens-and-billing-contract.md), before the parent picks 6, 12 or 16. */
+const TOKEN_EXPLAINER = "1 token = 1 session: a training block, a tournament, or a 1-on-1 with Phil or Yannick. Tokens refresh on the 1st of each month; unused tokens don't carry over. Elite is unlimited.";
+
+/** Still needs a pick: none yet, one no longer in the catalogue, or the single token before it is on sale. */
+function needsPackage(athlete) {
+  const pkg = athlete.packageId == null ? null : packageById(athlete.packageId);
+  return !pkg || (pkg.kind === 'single' && !SINGLE_ON_SALE);
+}
+
+/** 'Nico', 'Nico and Reese', 'Nico, Reese and Sam'. */
+function joinNames(names) {
+  return names.length > 1 ? `${names.slice(0, -1).join(', ')} and ${names[names.length - 1]}` : names[0] || '';
+}
+
 export function PackageStep({ athletes, onUpdate, showErrors }) {
   const [activeKey, setActiveKey] = useState(athletes[0]?.key);
   const active = athletes.find((a) => a.key === activeKey) ?? athletes[0];
+  const missing = athletes.filter(needsPackage);
+  const firstMissing = missing[0]?.key;
+  // An invalid Continue opens the first athlete still without a package, so
+  // the cards on screen are the ones that need the tap (UX review 2026-09-30:
+  // Continue looked dead while child 2 had nothing picked).
+  useEffect(() => {
+    if (showErrors && firstMissing != null) setActiveKey(firstMissing);
+    // Only when showErrors turns on; after that, each pick moves the tab itself.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [showErrors]);
   if (!active) return null;
+
+  const label = (a) => a.name.trim() || `Athlete ${athletes.indexOf(a) + 1}`;
+  const pick = (id) => {
+    onUpdate(active.key, { packageId: id });
+    const next = athletes.find((a) => a.key !== active.key && needsPackage(a));
+    if (next) setActiveKey(next.key);
+  };
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
@@ -280,7 +316,7 @@ export function PackageStep({ athletes, onUpdate, showErrors }) {
         <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
           {athletes.map((a, i) => {
             const on = a.key === active.key;
-            const done = a.packageId != null;
+            const done = !needsPackage(a);
             return (
               <button
                 key={a.key}
@@ -306,22 +342,32 @@ export function PackageStep({ athletes, onUpdate, showErrors }) {
       ) : null}
 
       <SectionLabel>Package{active.name.trim() ? ` — ${active.name.trim()}` : ''}</SectionLabel>
+      <Body size={12} style={{ marginTop: -6 }}>{TOKEN_EXPLAINER}</Body>
       <div style={{ display: 'flex', flexDirection: 'column', gap: 11, marginTop: -6 }}>
-        {ALL_PACKAGES.map((p) => (
-          <PackageCard
-            key={p.id}
-            pkg={p}
-            emphasised={p.kind === 'elite'}
-            selected={active.packageId === p.id}
-            onSelect={() => onUpdate(active.key, { packageId: p.id })}
-          />
-        ))}
+        {ALL_PACKAGES.map((p) => {
+          const offSale = p.kind === 'single' && !SINGLE_ON_SALE;
+          return (
+            <PackageCard
+              key={p.id}
+              pkg={p}
+              emphasised={p.kind === 'elite'}
+              selected={!offSale && active.packageId === p.id}
+              onSelect={offSale ? undefined : () => pick(p.id)}
+              style={offSale ? { opacity: 0.55 } : undefined}
+              footnote={offSale ? SINGLE_OFF_SALE_NOTE : undefined}
+            />
+          );
+        })}
       </div>
 
-      {showErrors && active.packageId == null ? (
-        <Body size={12} tone={color.error}>
-          Pick a package for {active.name.trim() || 'this athlete'} to continue.
-        </Body>
+      {showErrors && missing.length ? (
+        <div data-field-error>
+          <Body size={12} tone={color.error}>
+            {athletes.length > 1
+              ? `Pick a package for ${joinNames(missing.map(label))}${missing.length < athletes.length ? ' too' : ''} - tap their name above.`
+              : `Pick a package for ${active.name.trim() || 'this athlete'} to continue.`}
+          </Body>
+        </div>
       ) : null}
 
       <SectionLabel style={{ marginTop: 4 }}>Commitment Contract tier (optional)</SectionLabel>

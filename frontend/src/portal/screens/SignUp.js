@@ -58,6 +58,13 @@ export default function SignUp({ bare = false, onSignIn }) {
     }
   };
   const goSignIn = () => (onSignIn ? onSignIn() : navigate('/portal/signin'));
+  // After "Create login" the effect above stands down (sent), so Continue
+  // routes the same way it would: an invited child to the verify screen,
+  // which claims the invite; a parent ('none'), a failed check or a hook
+  // without claim support to the form. It waits while the check runs, unless
+  // the account itself failed to load (then it behaves as before).
+  const checkingInvite = !error && (claimState === 'idle' || claimState === 'checking');
+  const continuePath = ['needs-verification', 'claimed', 'already-claimed'].includes(claimState) ? '/portal/not-provisioned' : '/portal/register';
 
   return (
     <PhoneFrame bare={bare}>
@@ -74,8 +81,8 @@ export default function SignUp({ bare = false, onSignIn }) {
                 We could not send the verification email to {sent.email} yet. Finish sign-up now; when you pay, tap Resend on the verify card.
               </Banner>
             )}
-            <Button style={{ marginTop: 14 }} onClick={() => navigate('/portal/register', { replace: true })}>
-              Continue to sign-up
+            <Button style={{ marginTop: 14 }} disabled={checkingInvite} onClick={() => navigate(continuePath, { replace: true })}>
+              {checkingInvite ? 'Checking your email...' : 'Continue to sign-up'}
             </Button>
           </>
         ) : (

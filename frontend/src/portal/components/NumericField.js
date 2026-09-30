@@ -26,7 +26,7 @@ export default function NumericField({ label, value, unit, onChange, style }) {
           background: color.track,
           border: `1px solid ${color.border}`,
           borderRadius: radius.input,
-          font: `600 15px ${font.body}`,
+          font: `600 16px ${font.body}`, // 16px: no iOS zoom on focus
           color: color.text,
           textAlign: 'right',
           padding: '0 10px',
