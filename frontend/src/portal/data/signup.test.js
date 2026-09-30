@@ -1,6 +1,6 @@
 import {
-  ageOnDate, buildAddAthletesPayload, buildCreateFamilyPayload, isAdultOnDate,
-  newAthleteEntry, normalizeHandicap, validateAthleteEntry,
+  ageOnDate, buildAddAthletesPayload, buildCreateFamilyPayload, contractAnswered, emptyEmergencyContact, isAdultOnDate,
+  joinNames, newAthleteEntry, normalizeHandicap, toEmergencyForm, validateAthleteEntry, validateEmergencyContact,
 } from './signup';
 
 const today = '2026-10-01';
@@ -93,7 +93,64 @@ describe('payloads (contract 1.2 / 1.3)', () => {
   test('addAthletes body', () => {
     expect(buildAddAthletesPayload({ ...form, athletes: [form.athletes[1]] })).toEqual({
       athletes: [{ name: 'Reese', dob: '2014-03-02', packageId: 't-6', contractMinutes: null, handicap: null, loginEmail: null }],
+      emergencyContact: null,
       medical: 'Peanut allergy',
     });
+  });
+  test('the emergency contact is sent trimmed, relationship optional; all blank is null', () => {
+    const ec = { name: ' Uncle Bo ', phone: ' (612) 555-0100 ', relationship: ' Uncle ' };
+    expect(buildCreateFamilyPayload({ ...form, emergencyContact: ec }).emergencyContact)
+      .toEqual({ name: 'Uncle Bo', phone: '(612) 555-0100', relationship: 'Uncle' });
+    expect(buildAddAthletesPayload({ ...form, emergencyContact: { ...ec, relationship: '  ' } }).emergencyContact)
+      .toEqual({ name: 'Uncle Bo', phone: '(612) 555-0100', relationship: null });
+    expect(buildCreateFamilyPayload({ ...form, emergencyContact: emptyEmergencyContact() }).emergencyContact).toBeNull();
+    expect(buildAddAthletesPayload({ ...form, emergencyContact: { name: ' ', phone: '', relationship: ' ' } }).emergencyContact).toBeNull();
+  });
+  test('contractPicked stays in the form; the payload never carries it', () => {
+    const picked = entry({ contractMinutes: null, contractPicked: true });
+    const body = buildCreateFamilyPayload({ ...form, athletes: [picked] });
+    expect(body.athletes[0]).not.toHaveProperty('contractPicked');
+    expect(body.athletes[0].contractMinutes).toBeNull();
+  });
+});
+
+describe('emergency contact', () => {
+  test('toEmergencyForm: an old string becomes the name; anything else is blank', () => {
+    expect(toEmergencyForm('Uncle Bo 555')).toEqual({ name: 'Uncle Bo 555', phone: '', relationship: '' });
+    expect(toEmergencyForm({ name: 'Bo', phone: '555', relationship: 'Uncle', extra: 1 })).toEqual({ name: 'Bo', phone: '555', relationship: 'Uncle' });
+    expect(toEmergencyForm({ name: 'Bo', phone: 555 })).toEqual({ name: 'Bo', phone: '', relationship: '' });
+    expect(toEmergencyForm(null)).toEqual(emptyEmergencyContact());
+    expect(toEmergencyForm(undefined)).toEqual(emptyEmergencyContact());
+  });
+  test('validateEmergencyContact: all blank passes; once started, name and mobile are needed', () => {
+    const name = 'Add their name, or clear the other emergency fields.';
+    const phone = 'Add a mobile number we can call.';
+    expect(validateEmergencyContact(emptyEmergencyContact())).toEqual({});
+    expect(validateEmergencyContact({ name: ' ', phone: ' ', relationship: ' ' })).toEqual({});
+    expect(validateEmergencyContact({ name: 'Bo', phone: '', relationship: '' })).toEqual({ phone });
+    expect(validateEmergencyContact({ name: '', phone: '555', relationship: '' })).toEqual({ name });
+    expect(validateEmergencyContact({ name: '', phone: '', relationship: 'Uncle' })).toEqual({ name, phone });
+    expect(validateEmergencyContact({ name: 'Bo', phone: '555', relationship: '' })).toEqual({});
+    expect(validateEmergencyContact('Uncle Bo 555')).toEqual({ phone });
+  });
+});
+
+describe('contract step', () => {
+  test('a new entry has not answered yet', () => {
+    expect(newAthleteEntry().contractPicked).toBe(false);
+    expect(contractAnswered(newAthleteEntry())).toBe(false);
+  });
+  test('a goal or "Not yet" answers it; a stale 95 does not', () => {
+    expect(contractAnswered(entry({ contractMinutes: 45 }))).toBe(true);
+    expect(contractAnswered(entry({ contractMinutes: 45, contractPicked: undefined }))).toBe(true); // an old draft's pick
+    expect(contractAnswered(entry({ contractMinutes: null, contractPicked: true }))).toBe(true);
+    expect(contractAnswered(entry({ contractMinutes: 95 }))).toBe(false);
+    expect(contractAnswered(entry({ contractMinutes: 95, contractPicked: true }))).toBe(false);
+  });
+  test('joinNames', () => {
+    expect(joinNames([])).toBe('');
+    expect(joinNames(['Nico'])).toBe('Nico');
+    expect(joinNames(['Nico', 'Reese'])).toBe('Nico and Reese');
+    expect(joinNames(['Nico', 'Reese', 'Sam'])).toBe('Nico, Reese and Sam');
   });
 });

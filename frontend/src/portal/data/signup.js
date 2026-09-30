@@ -18,9 +18,51 @@ export const ADULT_REQUIRED = 'Student sign-up is 18+. A parent or guardian need
 const DOB_REQUIRED = 'Date of birth is required — it determines U13 vs U18 eligibility.';
 
 let seq = 0;
+/** `contractPicked` is form-only (never sent): it tells "Not yet" apart from no answer. */
 export function newAthleteEntry() {
   seq += 1;
-  return { key: `new-${seq}`, name: '', dob: '', packageId: null, contractMinutes: null, handicap: '', ownLogin: false, loginEmail: '' };
+  return { key: `new-${seq}`, name: '', dob: '', packageId: null, contractMinutes: null, contractPicked: false, handicap: '', ownLogin: false, loginEmail: '' };
+}
+
+/** The contract step is answered by a goal (20/45/90) or by "Not yet"; a stale 95 is not an answer. */
+export function contractAnswered(a) {
+  return TIER_MINUTES.includes(a.contractMinutes) || (a.contractPicked === true && a.contractMinutes == null);
+}
+
+/** 'Nico', 'Nico and Reese', 'Nico, Reese and Sam'. */
+export function joinNames(names) {
+  return names.length > 1 ? `${names.slice(0, -1).join(', ')} and ${names[names.length - 1]}` : names[0] || '';
+}
+
+/**
+ * Emergency contact (owner, 2026-09-30: its own mobile and relationship
+ * fields). Optional as a block; once any field is filled, name and mobile are
+ * both required. Drafts saved before the split hold one string, which becomes
+ * the name.
+ */
+export function emptyEmergencyContact() {
+  return { name: '', phone: '', relationship: '' };
+}
+export function toEmergencyForm(v) {
+  if (typeof v === 'string') return { ...emptyEmergencyContact(), name: v };
+  if (!v || typeof v !== 'object') return emptyEmergencyContact();
+  const text = (x) => (typeof x === 'string' ? x : '');
+  return { name: text(v.name), phone: text(v.phone), relationship: text(v.relationship) };
+}
+export function validateEmergencyContact(ec) {
+  const e = toEmergencyForm(ec);
+  const blank = (s) => s.trim() === '';
+  if (blank(e.name) && blank(e.phone) && blank(e.relationship)) return {};
+  const errors = {};
+  if (blank(e.name)) errors.name = 'Add their name, or clear the other emergency fields.';
+  if (blank(e.phone)) errors.phone = 'Add a mobile number we can call.';
+  return errors;
+}
+/** Contract 1.2/1.3 `emergencyContact`: trimmed, or null when all three are blank. */
+export function emergencyBody(ec) {
+  const e = toEmergencyForm(ec);
+  const [name, phone, relationship] = [e.name.trim(), e.phone.trim(), e.relationship.trim()];
+  return name || phone || relationship ? { name, phone, relationship: relationship || null } : null;
 }
 
 /** Whole years old on `todayISO`; null for anything but 'yyyy-MM-dd'. No Date.now(). */
@@ -92,7 +134,7 @@ export function buildCreateFamilyPayload(form) {
       relationship: parent ? form.contact.relationship || null : null,
     },
     athletes: form.athletes.map(athleteBody).map((a) => (parent ? a : { ...a, loginEmail: null })),
-    emergencyContact: form.emergencyContact.trim() || null,
+    emergencyContact: emergencyBody(form.emergencyContact),
     medical: form.medical.trim() || null,
     consents: {
       dataCollection: Boolean(form.consents.dataCollection),
@@ -104,7 +146,7 @@ export function buildCreateFamilyPayload(form) {
   };
 }
 
-/** Contract 1.3 request body (Settings' "Link another athlete"). */
+/** Contract 1.3 request body (Settings' "Link another athlete"). A null contact means "use the household's". */
 export function buildAddAthletesPayload(form) {
-  return { athletes: form.athletes.map(athleteBody), medical: form.medical.trim() || null };
+  return { athletes: form.athletes.map(athleteBody), emergencyContact: emergencyBody(form.emergencyContact), medical: form.medical.trim() || null };
 }

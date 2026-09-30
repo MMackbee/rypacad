@@ -7,8 +7,11 @@ import * as callables from '../hooks/callables';
 import { verifySentNote } from '../data/authCopy';
 import { todayISO } from '../data/calendar';
 import { SINGLE_ON_SALE, SINGLE_TOKEN } from '../data/packages';
-import { EMAIL_RE, buildAddAthletesPayload, buildCreateFamilyPayload, newAthleteEntry, validateAthleteEntry } from '../data/signup';
-import { AthleteStep, ConsentStep, ConsentInfoSheet, ContactStep, PackageStep, SubmittingOverlay, WhoStep } from './RegistrationSteps';
+import {
+  EMAIL_RE, buildAddAthletesPayload, buildCreateFamilyPayload, contractAnswered, emptyEmergencyContact, newAthleteEntry,
+  toEmergencyForm, validateAthleteEntry, validateEmergencyContact,
+} from '../data/signup';
+import { AthleteStep, ConsentStep, ConsentInfoSheet, ContactStep, ContractStep, PackageStep, SubmittingOverlay, WhoStep } from './RegistrationSteps';
 import RegistrationSuccess from './RegistrationSuccess';
 
 /**
@@ -29,10 +32,13 @@ const callAddAthletes = callables.callAddAthletes || notWired('addAthletes');
 
 /**
  * 02 · Registration (Sprint 20, spec 2.1) - signed-in, instant. Two modes:
- * 'signup' (who-are-you -> contact -> athletes -> package -> consent ->
- * createFamily) and 'link' (a provisioned parent adding athletes: athletes
- * -> package -> addAthletes). No approval queue: the callable writes the
- * family in one transaction and `onRefresh` (useAuthSession().refresh) flips
+ * 'signup' (who-are-you -> contact -> athletes -> package -> contract ->
+ * consent -> createFamily) and 'link' (a provisioned parent adding athletes:
+ * athletes -> package -> contract -> addAthletes). The Commitment Contract
+ * is its own step since owner feedback 2026-09-30; drafts saved before it
+ * keep their step numbers, so an old consent-step draft reopens on the
+ * contract step with its consents kept. No approval queue: the callable
+ * writes the family in one transaction and `onRefresh` (useAuthSession().refresh) flips
  * `provisioned` without a reload - but only when the family LEAVES the
  * Success receipt (`finish`), never on submit: RegistrationRoute redirects
  * a provisioned account to its landing, so refreshing on submit would
@@ -42,10 +48,11 @@ const callAddAthletes = callables.callAddAthletes || notWired('addAthletes');
  * a new login now lands here without stopping on SignUp's card.
  */
 const STEPS = {
-  signup: [['who', 'Who are you'], ['contact', 'Contact'], ['athletes', 'Athletes'], ['package', 'Choose a package'], ['consent', 'Consent and waiver']],
-  link: [['athletes', 'Athletes'], ['package', 'Choose a package']],
+  signup: [['who', 'Who are you'], ['contact', 'Contact'], ['athletes', 'Athletes'], ['package', 'Choose a package'],
+    ['contract', 'Commitment Contract'], ['consent', 'Consent and waiver']],
+  link: [['athletes', 'Athletes'], ['package', 'Choose a package'], ['contract', 'Commitment Contract']],
 };
-const VARIANT_STEP = { guardian: 1, athlete: 2, tier: 3, consent: 4, submitting: 4, success: 4 };
+const VARIANT_STEP = { guardian: 1, athlete: 2, tier: 3, contract: 4, consent: 5, submitting: 5, success: 5 };
 
 /**
  * The half-filled form survives a reload (launch 2026-09-29: on a phone,
@@ -85,11 +92,13 @@ export default function Registration({ variant, bare = false, mode = 'signup', a
   const [draft] = useState(() => readDraft(key));
   const [step, setStep] = useState(demo ? VARIANT_STEP[variant] ?? 0 : Math.min(draft?.step ?? 0, steps.length - 1));
   const [phase, setPhase] = useState(demo && (variant === 'submitting' || variant === 'success') ? variant : 'form');
-  const [form, setForm] = useState(() => draft?.form ?? ({
+  // A draft from before the split emergency fields holds one string: it
+  // restores into the name field (still draft v1).
+  const [form, setForm] = useState(() => (draft?.form ? { ...draft.form, emergencyContact: toEmergencyForm(draft.form.emergencyContact) } : {
     mode: demo ? 'parent' : mode === 'link' ? 'parent' : null,
     contact: { name: demo ? 'Dana Whitfield' : '', email: demo ? 'dana@email.com' : account?.email ?? '', phone: demo ? '(612) 555-0148' : '', relationship: '' },
     athletes: [demo ? { ...newAthleteEntry(), key: 'demo-1', name: 'Jordan Whitfield' } : newAthleteEntry()],
-    emergencyContact: '',
+    emergencyContact: emptyEmergencyContact(),
     medical: '',
     consents: { dataCollection: true, videoCapture: true, mediaRelease: false, facilityAccess: false },
     signatureName: '',
@@ -132,6 +141,7 @@ export default function Registration({ variant, bare = false, mode = 'signup', a
   const patch = (p) => setForm((f) => ({ ...f, ...p }));
   const setContact = (fn) => setForm((f) => ({ ...f, contact: typeof fn === 'function' ? fn(f.contact) : fn }));
   const setConsents = (fn) => setForm((f) => ({ ...f, consents: typeof fn === 'function' ? fn(f.consents) : fn }));
+  const setEmergency = (p) => setForm((f) => ({ ...f, emergencyContact: { ...toEmergencyForm(f.emergencyContact), ...p } }));
   const updateAthlete = (key, p) => setForm((f) => ({ ...f, athletes: f.athletes.map((a) => (a.key === key ? { ...a, ...p } : a)) }));
   const addAthlete = () => setForm((f) => ({ ...f, athletes: [...f.athletes, newAthleteEntry()] }));
   const removeAthlete = (key) => setForm((f) => ({ ...f, athletes: f.athletes.length > 1 ? f.athletes.filter((a) => a.key !== key) : f.athletes }));
@@ -148,13 +158,15 @@ export default function Registration({ variant, bare = false, mode = 'signup', a
   const athleteErrors = form.athletes.map((a) =>
     validateAthleteEntry(a, { todayISO: today, guardianEmail: form.contact.email, siblings: form.athletes, mode: form.mode || 'parent' })
   );
+  const emergencyOk = Object.keys(validateEmergencyContact(form.emergencyContact)).length === 0;
   const valid = {
     who: form.mode != null,
     contact: form.contact.name.trim() !== '' && EMAIL_RE.test(form.contact.email.trim()) && form.contact.phone.trim() !== '',
-    athletes: athleteErrors.every((e) => !e.name && !e.dob && !e.handicap && !e.loginEmail),
+    athletes: athleteErrors.every((e) => !e.name && !e.dob && !e.handicap && !e.loginEmail) && emergencyOk,
     // A restored draft may hold the single token from before it went off sale.
-    package: form.athletes.every((a) => a.packageId != null) && athleteErrors.every((e) => !e.packageId && !e.contractMinutes)
+    package: form.athletes.every((a) => a.packageId != null) && athleteErrors.every((e) => !e.packageId)
       && form.athletes.every((a) => a.packageId !== SINGLE_TOKEN.id || SINGLE_ON_SALE),
+    contract: form.athletes.every(contractAnswered),
     consent: form.consents.dataCollection && form.consents.videoCapture && form.signatureName.trim() !== '',
   }[stepId];
 
@@ -165,6 +177,14 @@ export default function Registration({ variant, bare = false, mode = 'signup', a
   };
   const handleContinue = () => {
     if (!valid) { setShowErrors(true); setErrorTick((n) => n + 1); return; }
+    // A pre-split draft restored past the athletes step can carry a contact
+    // with no mobile: send the family back to it, not into the refusal.
+    if (step === steps.length - 1 && !emergencyOk) {
+      setStep(steps.findIndex(([id]) => id === 'athletes'));
+      setShowErrors(true);
+      setErrorTick((n) => n + 1);
+      return;
+    }
     setShowErrors(false);
     if (step < steps.length - 1) { setStep((s) => s + 1); return; }
     handleSubmit();
@@ -243,12 +263,15 @@ export default function Registration({ variant, bare = false, mode = 'signup', a
         {stepId === 'who' ? <WhoStep mode={form.mode} onChange={setMode} /> : null}
         {stepId === 'contact' ? <ContactStep mode={form.mode} contact={form.contact} onChange={setContact} showErrors={showErrors} /> : null}
         {stepId === 'athletes' ? (
-          <AthleteStep mode={form.mode || 'parent'} athletes={form.athletes} onUpdate={updateAthlete} onAdd={addAthlete} onRemove={removeAthlete}
-            emergencyContact={form.emergencyContact} onEmergencyContact={(v) => patch({ emergencyContact: v })}
+          <AthleteStep mode={form.mode || 'parent'} linkMode={mode === 'link'} athletes={form.athletes} onUpdate={updateAthlete} onAdd={addAthlete}
+            onRemove={removeAthlete} emergencyContact={form.emergencyContact} onEmergencyContact={setEmergency}
             medical={form.medical} onMedical={(v) => patch({ medical: v })} showErrors={showErrors}
             todayISO={today} guardianEmail={form.contact.email} onSwitchToParent={switchToParent} />
         ) : null}
         {stepId === 'package' ? <PackageStep athletes={form.athletes} onUpdate={updateAthlete} showErrors={showErrors} /> : null}
+        {stepId === 'contract' ? (
+          <ContractStep mode={form.mode || 'parent'} athletes={form.athletes} onUpdate={updateAthlete} showErrors={showErrors} todayISO={today} />
+        ) : null}
         {stepId === 'consent' ? (
           <ConsentStep mode={form.mode} consents={form.consents} onChange={setConsents} signatureName={form.signatureName}
             onSignatureChange={(v) => patch({ signatureName: v })} onOpenInfo={setInfoSheet} showErrors={showErrors} />
