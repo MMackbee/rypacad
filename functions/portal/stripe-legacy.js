@@ -100,6 +100,12 @@ async function applyInvoicePaid(tx, event, hh) {
   const skipped = [];
   for (const doc of athletesSnap.docs) {
     const athlete = doc.data() || {};
+    if (athlete.billing) {
+      // A per-athlete billing block (a subscription of its own, or a paid
+      // single token) is never granted tokens by the household-wide path.
+      skipped.push({athleteId: doc.id, reason: 'per-athlete-billing'});
+      continue;
+    }
     if (!athlete.packageId) {
       skipped.push({athleteId: doc.id, reason: 'no-package'});
       continue;
@@ -236,8 +242,12 @@ async function applySubscriptionUpdated(tx, event, hh) {
 
   const athletesSnap = await tx.get(db().collection('athletes')
       .where('householdId', '==', hh.id));
-  const changed = athletesSnap.docs.filter(
-      (d) => (d.data() || {}).packageId !== packageId);
+  // Athletes with a per-athlete billing block own their package; the
+  // household's legacy subscription never remaps them.
+  const changed = athletesSnap.docs.filter((d) => {
+    const a = d.data() || {};
+    return !a.billing && a.packageId !== packageId;
+  });
 
   // ---- reads done ----
   tx.update(hh.ref, membership);
