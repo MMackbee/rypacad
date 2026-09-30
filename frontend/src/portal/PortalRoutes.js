@@ -574,10 +574,14 @@ function BillingRoute() {
 /**
  * Settings is reachable by parent and athlete (Sprint 11 pin D: the
  * Membership row serves both) - same role resolution as MembershipRoute.
+ * Waits for the session too: it is the self-managed athlete's Settings tab,
+ * and a null user read as 'parent' flashed the parent tab bar and its
+ * Link another athlete row on every tap.
  */
 function SettingsRoute({ onSignOut, onLinkAthlete }) {
   const live = isLive();
-  const { user } = useAuthSession(live ? undefined : { variant: 'idle' });
+  const { user, loading } = useAuthSession(live ? undefined : { variant: 'idle' });
+  if (live && loading) return null;
   const role = live && user?.role === 'athlete' ? 'athlete' : 'parent';
   return <NotificationPreferences bare role={role} onSignOut={onSignOut} onLinkAthlete={onLinkAthlete} />;
 }
