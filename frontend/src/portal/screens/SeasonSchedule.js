@@ -1,12 +1,14 @@
-import React from 'react';
+import React, { useEffect, useRef } from 'react';
 import FullCalendar from '@fullcalendar/react';
 import dayGridPlugin from '@fullcalendar/daygrid';
 import googleCalendarPlugin from '@fullcalendar/google-calendar';
 import { color } from '../tokens';
 import BottomTabBar from '../components/BottomTabBar';
+import { CalendarCardHeader } from '../components/CalendarCard';
 import PhoneFrame from '../components/PhoneFrame';
 import { Banner, Body, ScreenTitle } from '../components/Primitives';
 import { GCAL, isGcalConfigured } from '../data/gcal';
+import useCalendarView from '../hooks/calendarView';
 
 /**
  * Season calendar — the academy's Google Calendar, rendered live.
@@ -48,19 +50,47 @@ export default function SeasonSchedule({ bare = false }) {
   );
 }
 
+/**
+ * Stable references: LiveCalendar now re-renders when the view toggles, and
+ * FullCalendar treats a new `events` object as a new source (it would drop
+ * and refetch the feed). `views` gives the one-row week its own header
+ * format: FullCalendar hides day numbers in a one-row grid, so the week's
+ * column headers carry the date instead.
+ */
+const GCAL_EVENTS = { googleCalendarId: GCAL.calendarId };
+const VIEW_OPTIONS = {
+  dayGridWeek: { dayHeaderFormat: { weekday: 'narrow', month: 'numeric', day: 'numeric', omitCommas: true } },
+};
+
 function LiveCalendar({ initialDate }) {
+  // The shared Month/Week toggle (owner request 2026-09-30); Month is this
+  // screen's default. FullCalendar keeps its own prev/next/today toolbar -
+  // the toggle only switches the view through the API, which keeps the
+  // visible date, and the google-calendar source fetches any range it does
+  // not already hold.
+  const [view, setView] = useCalendarView('month');
+  const calRef = useRef(null);
+  const fcView = view === 'week' ? 'dayGridWeek' : 'dayGridMonth';
+  useEffect(() => {
+    const api = calRef.current && calRef.current.getApi();
+    if (api && api.view.type !== fcView) api.changeView(fcView);
+  }, [fcView]);
+
   return (
     <div className="ryp-season-cal">
       <style>{SEASON_CSS}</style>
+      <CalendarCardHeader view={view} onViewChange={setView} />
       <FullCalendar
+        ref={calRef}
         plugins={[dayGridPlugin, googleCalendarPlugin]}
-        initialView="dayGridMonth"
+        initialView={fcView}
         initialDate={initialDate}
         googleCalendarApiKey={GCAL.apiKey}
-        events={{ googleCalendarId: GCAL.calendarId }}
+        events={GCAL_EVENTS}
         headerToolbar={{ left: 'prev,next', center: 'title', right: 'today' }}
         firstDay={1}
         dayHeaderFormat={{ weekday: 'narrow' }}
+        views={VIEW_OPTIONS}
         fixedWeekCount={false}
         height="auto"
         dayMaxEventRows={3}
