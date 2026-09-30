@@ -1,4 +1,4 @@
-# Sprint 20 - Launch (contract v3.0.3)
+# Sprint 20 - Launch (contract v3.0.4)
 
 Owner rulings of 2026-09-28. The sign-up email goes out **2026-10-01**;
 booking opens for token members **2026-10-10 07:00 America/Chicago**; the
@@ -12,6 +12,10 @@ v3.0.1 (same day): rewritten after a four-lens adversarial review (section
 the browser cannot pass the rules' document-read cap for a normal family -
 and **Stripe moves from Payment Links to Checkout Sessions** created by a
 function, which fixes five independent Payment-Link defects at once.
+
+v3.0.4 (2026-09-30): the single session token is a **one-time $65
+purchase**, not a monthly package (ruling 0.14, section 16.2, D20). Where
+this spec still says `single` works like a tier, 0.14 and 16.2 win.
 
 ## 0. Rulings (verbatim intent, 2026-09-28)
 
@@ -50,6 +54,17 @@ function, which fixes five independent Payment-Link defects at once.
     remaining** and gets that month's tokens **prorated the same way
     (rounded up, never 0)**, then bills in full on the next 1st.
     `PRORATE_JOINERS = true` is the ruling, not a default (4.2).
+14. **The single session token is a one-time $65 purchase** (ruled
+    2026-09-29, details 2026-09-30). Its Stripe price is one-time. Each
+    paid Checkout Session is exactly ONE token, `graceTokens/single_{cs}`,
+    good for any bookable session through **Sat, Feb 27, 2027** (the season
+    end, `SEASON_BOUNDS.end`), still behind the Oct 10 07:00 gate. A family
+    may buy as many as they like, one checkout per token. Single-token
+    athletes get no automatic monthly token; an ops comp is the only other
+    source. Refunds are manual: refund in Stripe, then VOID the token
+    (never delete it). Built before Oct 10 07:00 Chicago; until it deploys,
+    840ed77's refusal stays live and no single is sold. Mechanics: 4.2,
+    4.3, 4.4 and D20 (16.2).
 
 ## 1. Non-goals (explicitly out)
 
@@ -201,8 +216,9 @@ update on `loginInvites` or `users`.
 
 ### 4.1 Catalogue
 
-Stripe **Products + monthly Prices** per tier (t-6, t-12, t-16, Elite,
-single) and one for **facility-access** ($300/month), in BOTH test and live
+Stripe **Products + monthly Prices** per tier (t-6, t-12, t-16, Elite), a
+**one-time** $65 price for the single token (ruling 0.14, D20), and a
+monthly one for **facility-access** ($300/month), in BOTH test and live
 mode. `functions/config/stripe-catalogue.json` (`{test: {...}, live: {...}}`,
 committed - price ids are public; the `test` block was filled and committed
 on 2026-09-28 as `1b3dc3d`, the `live` block is null until the owner pastes
@@ -261,7 +277,8 @@ free. Ruled 2026-09-28, documented in the owner runbook, tested in
 enough out). Contract 6.1 has the code (`prepaidFor` in `checkout.js`).
 
 Every household therefore anchors on the 1st, periods are calendar months,
-and the 29th-31st clamp never bites. `single` (1 token) works the same.
+and the 29th-31st clamp never bites. `single` no longer works the same: it
+is a one-time payment-mode session (ruling 0.14, below).
 The functions lane verifies in Stripe test mode that the one-time line is
 collected at checkout with a trialing subscription before anything ships.
 
@@ -269,6 +286,45 @@ collected at checkout with a trialing subscription before anything ships.
 the screen shows "Confirming your payment..." and re-reads the athlete
 every 5 s for up to 2 min until `billing.status == 'active'`, then the
 active copy. The Success screen says this will happen.
+
+**The single session token (ruling 0.14, D20).** For `product: 'tier'` and
+an athlete whose `packageId` (or package `kind`) is `single`, the session is
+`singleSessionBody` (`checkout.js`), not the subscription body:
+
+- `mode: 'payment'`; `client_reference_id "${householdId}__${athleteId}__tier"`;
+  one line, the catalogue's `single` price, quantity 1;
+  `payment_method_types: ['card']`;
+- `metadata` and `payment_intent_data.metadata` `{householdId, athleteId,
+  product: 'tier', packageId: 'single'}`; `payment_intent_data.description`
+  "Single session token - <name>"; `custom_text.submit.message` "One-time
+  payment: one session token for <name>, good through Sat, Feb 27, 2027.";
+- `expires_at` = min(now + 24 h - 5 min, 00:00 Chicago Feb 28, 2027)
+  (`single.checkoutExpiresAt`);
+- `success_url` `...?paid=<athleteId>&cs={CHECKOUT_SESSION_ID}&single=1`,
+  `cancel_url` the same screen;
+- `customer` when the household is linked, otherwise `customer_email` +
+  `customer_creation: 'always'`. Never `invoice_creation`, never
+  `subscription_data`, never `prepaidFor`.
+
+A single athlete whose billing is `{status: 'active', oneTime: true}` with no
+`subscriptionId` may buy again (repeat purchases). `already-active` still
+refuses a live subscription; for a `single` athlete its copy reads "This
+athlete still has a monthly plan - contact the academy to switch to session
+tokens." (the parent is never told to cancel in Stripe). New refusals, all
+`failed-precondition`, all before `sessions.create`, each ending "Nothing
+has been charged.":
+
+| reason | when |
+|---|---|
+| `season-over` | fewer than 30 minutes remain before 00:00 Chicago Feb 28, 2027 |
+| `single-no-facility` | `product: 'facility'` for a single athlete |
+| `household-past-due` | household `membership.status` is `past_due` |
+| `household-lapsed-legacy` | household lapsed and another athlete has no `billing` block |
+| `price-mismatch` | the single price is not `one_time`, 6500, `usd`, with no `recurring` and no `custom_unit_amount` (and, for a tier, a `one_time` price) |
+
+840ed77's `single-one-time` refusal is retired. The return confirms by
+polling for `graceTokens/single_<cs>`, not `billing.status`, because a
+repeat buyer is already active (interfaces 4.5).
 
 ### 4.3 Webhook changes (`functions/portal/stripe.js`)
 
@@ -294,7 +350,42 @@ active copy. The Success screen says this will happen.
   `checkout.sessions.listLineItems` **before** `runTransaction`; the only
   accepted shape is exactly one recurring line plus at most one one-time line
   (the prepaid month), every quantity 1 (D13); anything else -> outcome
-  `unexpected-quantity`, a flag row, nothing written.
+  `unexpected-quantity`, a flag row, nothing written. D13 is the
+  SUBSCRIPTION-mode shape only.
+- **`checkout.session.completed`, `mode == 'payment'`: the single token
+  (ruling 0.14, D20).** A client reference whose product is not `tier` ->
+  `unexpected-one-time`. Otherwise the line items must be exactly one line,
+  quantity 1, no `recurring`, whose price is the catalogue's `single` id or
+  is listed in the optional top-level `retired.<mode>.single`; anything else
+  -> `unexpected-one-time`, nothing written. Any other non-subscription mode
+  -> `ignored`. A valid session runs `stripe-single.applySinglePurchase` in
+  the ledger transaction, reads first:
+  - an existing `graceTokens/single_{cs}` -> `duplicate-purchase`, no
+    writes; `payment_status != 'paid'` -> `single-unpaid`, no writes;
+  - it writes the token (DATA-MODEL `graceTokens`) and sets
+    `athletes.billing` to `{status: 'active', oneTime: true, subscriptionId:
+    null, customerId, priceId, checkoutSessionId, lastEventId}`, appending a
+    former subscription id to `billing.retiredSubscriptionIds`, and sets
+    `packageId: 'single'` when it differs;
+  - an athlete whose monthly subscription is still live gets the token as a
+    top-up and keeps its billing (`issued-single-topup`);
+  - it links the household customer, and lifts a LAPSED household only when
+    every other athlete has a `billing` block; `past_due` is never touched;
+  - outcome priority: `issued-single-late` (bought after Feb 27, 2027),
+    `issued-single-topup`, `issued-single-household-lapsed`,
+    `issued-single-amount-check` (`amount_total != 6500`), `issued-single`.
+    The late, amount-check and household-lapsed rows are logged with
+    `console.error` for ops. It never writes `tokenPeriods` or
+    `periodAnchorDay`; the payment-received notice goes out only on the
+    athlete's first activation, as for tiers.
+- Late events for an athlete's former subscription (its id is in
+  `billing.retiredSubscriptionIds`) are recorded
+  `ignored-retired-subscription` with no writes. Checkout ledger rows carry
+  `checkoutMode` and `clientReference`. A paid subscription checkout and a
+  tier `invoice.paid` write `billing.oneTime: false`. The legacy
+  household-wide paths (`stripe-legacy` `applyInvoicePaid`,
+  `applySubscriptionUpdated`) skip every athlete that carries a per-athlete
+  `billing` block (`per-athlete-billing`).
 - **Resolution order** for every other event: `subscription_data.metadata`
   on the subscription object when present; `athletes where
   billing.subscriptionId == subId` (then `facilityBilling.subscriptionId`);
@@ -378,6 +469,14 @@ the test families and any ops-created athlete are unaffected). Enforced:
   specialist screen's Calendly button (6.1);
 - `lib.membershipAllowsBooking` gains an athlete argument; promotion passes
   it.
+- **The oneTime pending gate (ruling 0.14):** an athlete with
+  `billing.oneTime: true` whose `packageId` is no longer `single` (staff
+  moved them to a tier) is payment-PENDING until the new package is paid.
+  Enforced in the rules (`athleteBillingOk`: booking create, re-book,
+  waitlist create), `live.js`, `lib.membershipAllowsBooking`, and every
+  displayed status (`data/billingCopy.js` `billingStatusOf`). The
+  subscription checkout and the tier `invoice.paid` writer set
+  `oneTime: false`.
 
 Household `membership` keeps its existing meaning (Stripe health for the
 family; ops can freeze). Copy for a pending athlete: **"Payment pending -
@@ -640,6 +739,7 @@ K04 (6.1); `no-tokens-left` period copy (5); Success/`?paid=` polling (4.2).
 | bookings | `source`, `calendlyInviteeUri`, `flag`, `cancelledBy: 'calendly'` | server-written only |
 | calendlyEvents/{id} | whole collection | idempotency ledger, admin read |
 | stripeEvents | outcomes gain `unexpected-quantity`, `stripe-lookup-failed` | - |
+| graceTokens, athletes, bookings, stripeEvents | single token (0.14, D20): `graceTokens/single_{cs}` (reason `single-purchase`, void fields); `billing.oneTime`, `billing.retiredSubscriptionIds`; `bookings.rebookedAt`, `cancelReason: 'double-spend'`; the single outcomes, `checkoutMode`, `clientReference` | server-written only; DATA-MODEL.md |
 
 Indexes: none new (single-field or existing composites).
 
@@ -663,6 +763,24 @@ Indexes: none new (single-field or existing composites).
   allowed for Elite, allowed after; parent+grace booking before Oct 10
   stays under the read cap; member cancel of a `source: 'calendly'` booking
   refused; `.lower()` comparisons on `loginInvites` read.
+- **Single token (0.14, D20).** Unit: `single.test.js`, `lib.test.js`
+  (`periodFallback`, `perPurchase`, `held`, `graceSpends`),
+  `stripe-single.test.js`, `stripe-checkout.test.js`,
+  `stripe-legacy.test.js`, `checkout.test.js` (`singleSessionBody` and every
+  refusal), `promotion.test.js`, `single-guard.test.js`, `jobs.test.js`,
+  `notices.test.js`, plus the frontend suites (`singleToken`,
+  `SessionTokens`, `TokenMeter`, `AllowancePools`, `hooks/billing`,
+  `hooks/index` `liveTokens`, `grace` `planCancelSession`, `BookSession`,
+  `Billing`). Emulator, one harness at a time on the lane emulator:
+  `verify-stripe-launch.js` STEP S (S1-S8; needs `STRIPE_MODE=test` and the
+  STEP S stubs in `functions/.env.local`), `verify-single.js` P1-P5
+  (cross-period promotion, waitlist holds, Calendly, the sweep, the
+  double-spend guard; firestore-only emulator), then verify-lane,
+  verify-calendly, verify-sweep, verify-notifications and verify-family,
+  all unchanged. Rules: `scripts/verify-rules.mjs` runs TWO passes - A on
+  the real rules and clock, B on a copy whose Oct 10 gate literal is 0,
+  loaded into `demo-rules-probe` through the emulator's rules endpoint - so
+  the post-gate outcomes are asserted before Oct 10.
 - QA: the `qa-tester` agent drives every role on :3001 (functions emulator
   running): sign-up -> pay (Stripe test mode) -> return + confirm -> claim
   (password + verification, Google) -> book / blocked before Oct 10 / Elite
@@ -692,7 +810,8 @@ Indexes: none new (single-field or existing composites).
    `live` block of `functions/config/stripe-catalogue.json` (public ids; the
    `test` block is committed, `1b3dc3d`; D3/D19). Dashboard products map
    Tier 1 -> t-6, Tier 2 -> t-12, Tier 3 -> t-16, Elite -> elite, Casual
-   Coaching Session -> single, Facility Access Add-on -> facility-access.
+   Coaching Session -> single (a ONE-TIME $65 price, ruling 0.14), Facility
+   Access Add-on -> facility-access.
    Their no-code Payment Links (payments.rypacademy.com/b/...) are ops
    reference only: the portal creates Checkout Sessions (4.2) and never sends
    a family to them.
@@ -730,6 +849,16 @@ Indexes: none new (single-field or existing composites).
     `provision-owner.mjs`; confirm Yannick's and Phil's staff docs exist.
 11. Send the Oct 1 email. Ops day-2 routine: the report's *unpaid* and
     *flagged* views; `export-memberships.mjs --prod` for Stripe drift.
+12. **Single session tokens (ruling 0.14; RUNBOOK section 10).** Run the
+    emulator TEST-mode rehearsal with the restricted `rk_test` key and
+    `stripe listen` (production stays LIVE and is never switched back to
+    test). Create the LIVE one-time $65 price on the Casual Coaching Session
+    product and paste it into `live.single` of
+    `functions/config/stripe-catalogue.json` BEFORE the `stripeWebhook`
+    deploy. Then deploy `stripeWebhook`, then the rules, then push, then all
+    functions; then one LIVE $65 smoke on a throwaway household, refunded in
+    Stripe and its token voided. Hard stop Sat Oct 10 07:00 Chicago: if
+    this is not deployed by Oct 9, keep 840ed77 live and sell no singles.
 
 ## 13. Lanes, sequence and the cut line
 
@@ -790,6 +919,23 @@ packages, email.
 - No welcome email; the Success screen is the receipt.
 - The calendar sync is manual; Phil's edits reach the portal when the owner
   re-runs it.
+- **Single token (0.14, D20):**
+  - a single athlete's comp (`period`) bookings are bounded by the rules to
+    the comp's period and `granted > 0`, but not counted - the same class as
+    the monthly cap;
+  - the client's grace reads are household-scoped; a token spent under
+    another household, from two phones at 07:00 Oct 10, a stale tab or a
+    tampered client is caught after the fact by `onSingleTokenSpent`, which
+    keeps one live booking per token and releases the others within seconds
+    (`double-spend`, a `booking-released` notice). Two ATTENDED bookings on
+    one token cannot be undone; the guard only logs them;
+  - over-joined waitlist entries (two joins at the same instant with one
+    token): the first promotion drops one entry silently, as it does for
+    monthly members today;
+  - `issued-single-household-lapsed` (a lapsed household with a legacy
+    sibling; checkout refuses it, so only a race reaches it) leaves a paid
+    token the family cannot use until a developer lifts the membership by
+    hand.
 
 ## 15. What the scope map found (for the record)
 
@@ -869,9 +1015,10 @@ v3.0.1 forced sixteen decisions. Each is now a fact in the contract (marked
   Customers write, Prices read - `createCheckoutSession` reads `unit_amount`
   from Stripe (4.3, 12.2); Checkout creates a new parent's customer, which
   needs Customers write (confirmed 2026-09-29 with a live test-mode rehearsal).
-- **D13** `checkout.session.completed` accepts exactly one recurring line
-  plus at most one one-time line, every quantity 1; anything else is
-  `unexpected-quantity` (4.3).
+- **D13** `checkout.session.completed` in `mode: 'subscription'` accepts
+  exactly one recurring line plus at most one one-time line, every quantity
+  1; anything else is `unexpected-quantity` (4.3). A `mode: 'payment'`
+  session is the single token's own shape instead (D20, 16.2).
 - **D14** Routing runs Tasks 1, 2, 3, 6, 9 first (the seams every frontend
   screen imports), then 4/5 (rules), then 7, 8, 10, 11, 12, 13. Frontend
   Day-2 rule: every screen that imports a routing seam keeps its jest virtual
@@ -929,3 +1076,60 @@ PayButton's "I've verified" forces a fresh ID token instead of the session
 refresh; SignUp waits on claimState `idle`; the claim end-to-end runs at the
 PM gate on ONE emulator (`--only firestore,auth,functions`) since the routing
 worktree cannot reach `claimInvite`.
+
+### 16.2 The single session token (v3.0.3 -> v3.0.4, 2026-09-30)
+
+Owner rulings of 2026-09-29/30 (0.14): one-time $65; one paid Checkout
+Session = one token, `graceTokens/single_{cs}`; valid through Sat, Feb 27,
+2027; repeat purchases allowed; refunds manual (void, never delete); built
+before Oct 10 07:00 Chicago. Built in three lanes after a shared contract
+commit (C0) and merged at the PM gate (TEAM.md "Single session token").
+
+- **D20** Payment mode is the single token's own shape, beside D13:
+  - `checkout.session.completed` with `mode: 'payment'` must carry a `tier`
+    client reference and exactly one line, quantity 1, no `recurring`, whose
+    price is `catalogue.priceIdFor('single')` or is listed in the optional
+    top-level `retired` block of `functions/config/stripe-catalogue.json`
+    (`{retired: {test: {single: []}, live: {single: []}}}`, read by
+    `catalogue.retiredPriceIdsFor`; kept out of the mode blocks because
+    `scripts/write-packages.mjs` rejects any mode key that is not a
+    package). Any other payment-mode session is `unexpected-one-time`,
+    nothing written; any other non-subscription mode is `ignored`.
+  - Outcomes: `issued-single`, `issued-single-topup`, `issued-single-late`,
+    `issued-single-amount-check`, `issued-single-household-lapsed`,
+    `duplicate-purchase`, `single-unpaid`, `unexpected-one-time`,
+    `ignored-retired-subscription`. Ledger rows gain `checkoutMode` and
+    `clientReference`.
+  - `athletes.billing.oneTime: true` marks a paid single. A former
+    subscription id moves to `billing.retiredSubscriptionIds`, and late
+    events for it are `ignored-retired-subscription`. The subscription
+    checkout and tier invoice writers set `oneTime: false`.
+  - Token math, in lockstep in `functions/portal/lib.js`,
+    `frontend/src/portal/data/packages.js` and `hooks/live.js`: a period
+    with no `tokenPeriods` doc grants `pkg.tokens`, EXCEPT kind `single`,
+    which grants 0 (`periodFallback`). Spent-ness stays derived (a
+    non-cancelled booking with `graceTokenId == id`); promotion and
+    Calendly read spends across every period (`graceSpendQueries`); each
+    live waitlist entry of a single athlete HOLDS one token, latest-expiring
+    first (`held`). The charge order is unchanged: Elite, then the
+    soonest-expiring usable grace token, then the period (a comp only, for
+    singles).
+  - The 14th function, `onSingleTokenSpent` (bookings onWrite,
+    `functions/portal/single-guard.js`), keeps one live booking per
+    `single_` token: attended/no-show first, then Calendly-sourced, then the
+    earliest `rebookedAt ?? createdAt`, then id. The others are cancelled
+    (`cancelledBy: 'system'`, `cancelReason: 'double-spend'`), their seat is
+    released and a `booking-released` notice is sent. A Calendly-sourced
+    duplicate is never cancelled, only logged.
+  - Rules (one deploy, backward compatible): `athleteBillingOk` adds the
+    oneTime pending gate; `perPurchaseChargeOk` / `compPeriodOk` require a
+    single athlete to pay with an own unexpired token or an issued comp
+    covering the date; the re-book arm re-decides its charge (`status`,
+    `chargedFrom`, `graceTokenId`, `rebookedAt`), checks the household
+    freeze, and a single athlete's re-book must write
+    `rebookedAt == request.time`; a member cancel is refused once the
+    session day is over (session date + 30 h UTC), for every member.
+  - Staff "Cancel session" returns a `single_` token and mints no bonus for
+    it, and can finish a session the calendar sync already cancelled
+    (Roster "Cancel remaining bookings"). The waitlist sweep mints no bonus
+    for a single-only athlete and says the token is free again.

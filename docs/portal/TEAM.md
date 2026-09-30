@@ -3222,3 +3222,111 @@ fixtures (functions). `firestore.indexes.json` unchanged (DATA-MODEL
 "v3.0 query additions").
 
 Integration notes: (PM appends at merge.)
+
+## Single session token - PM gate (owner rulings 2026-09-29/30; gate 2026-09-30)
+
+Rulings (settled, do not re-ask): the single token is a ONE-TIME $65
+purchase; one paid Checkout Session = one token `graceTokens/single_{cs}`;
+valid through Sat 2027-02-27; repeat purchases allowed; refunds manual
+(refund in Stripe, then void the token, never delete it); built before Oct 10
+07:00 Chicago. Spec: `SPRINT-20-LAUNCH.md` ruling 0.14 and 16.2 (D20);
+owner steps: `RUNBOOK-SPRINT-20.md` section 10.
+
+How it was built: a copy-only commit (T0, `46654ad` + the runbook's
+"Sat, Oct 10" fix `cb10a40`) on `portal/r3` for the Oct 1 push; a shared
+contract commit C0 (`c233374`, `66e7b9f`; pointer `single/c0`) with
+`functions/portal/single.js` and the lockstep token math in `lib.js`,
+`packages.js` and `live.js`; then three lanes in worktrees:
+
+- **L2 integrity** (`single/l2`): promotion and Calendly read spends from
+  every period; the session-token notice copy and one expiry notice per
+  athlete; the sweep mints no bonus for single-only athletes (and
+  `scripts/sweep-waitlist.mjs` mirrors it); `onSingleTokenSpent`
+  (`single-guard.js`, the 14th function); the rules (`athleteBillingOk`,
+  `perPurchaseChargeOk` / `compPeriodOk`, the rewritten re-book arm,
+  `sessionDayNotOver`); `verify-rules.mjs` two passes; `verify-single.js`
+  P1-P5.
+- **L1 money** (`single/l1`): `env.template` (Customers write,
+  `STRIPE_MODE=test` in the `.env.local` block, STEP S stubs);
+  `catalogue.retiredPriceIdsFor`; the payment-mode shape in
+  `stripe-checkout.shapeOf`; `oneTime: false` on the tier writers; the legacy
+  paths skip billing-block athletes; `stripe-single.js`; webhook dispatch
+  and `ignored-retired-subscription`; `checkout.js` `singleSessionBody` and
+  the refusals; `verify-stripe-launch.js` STEP S.
+- **L3 frontend** (`single/l3`): `data/singleToken.js`, `billingStatusOf`
+  and the pending gate, `rebookPatch`, `liveTokens` at every hook call site,
+  `planCancelSession`, `usePaymentConfirmation({cs, single})`, the
+  session-token meters (`SessionTokens.js`), reasons, the staff editor
+  warning, and Buy / book / cancel on the screens (Roster "Cancel remaining
+  bookings").
+
+**PM gate, `single/integration` (worktree `wt-single-int`, from `portal/r3`
+`cb10a40`).** Merged with `--no-ff` in the planned order: L2 (`cf89c2e`),
+L1 (`30f07fa`), L3 (`6f62f77`). No conflicts: C0 reached L1 and L3 as the
+same two commits, and the lanes' files did not overlap. PM fixes on top:
+
+- `functions/portal/notify.js` LINKS gains `'booking-released':
+  '/portal/schedule'` (L2 open item; the guard's push opened `/portal`).
+- `data/billingHub.js` `statusFor`: an all-single ACTIVE household's hero
+  title reads "Membership active" instead of "Tokens reset <date>" - session
+  tokens never reset (T0 and L3 open item); test added.
+- Docs: SPRINT-20-LAUNCH (0.14, 4.1-4.4, 10, 11, 12, 14, D13 scope, 16.2 /
+  D20; contract v3.0.4), RUNBOOK section 10 (rehearsal, live price, deploy
+  order, live smoke, refunds, standing rules) plus the section 0 / 3.3 / 8
+  notes, DATA-MODEL, tokens-and-billing-contract, DECISION-GAPS (single gap
+  closed), interfaces 1.5 / 4.5 / 6.4 / 6.7 / 8 (8 also corrects a stale
+  "Customers read" to write, D12), this entry.
+
+Gates run here (all green): every `functions/portal/*.test.js` (16 files),
+`node test/check-exports.js` (14 functions, MAIL bound on
+`onSingleTokenSpent`), functions lint; frontend full jest, `npx eslint
+src/portal`, `CI=true npm run build`; `node --check` on
+`functions/test/verify-single.js`, `functions/test/verify-stripe-launch.js`,
+`scripts/verify-rules.mjs`, `scripts/sweep-waitlist.mjs`. Every changed file
+is CRLF.
+
+NOT run yet (PM, serialized, one harness at a time): on the lane emulator
+`verify-stripe-launch.js` (STEP S), `verify-single.js` (firestore-only
+emulator: with the functions emulator up, the guard would act on P5's seeds
+first), `verify-lane`, `verify-calendly`, `verify-sweep`,
+`verify-notifications`, `verify-family`; on the main emulator started with
+`--only firestore`, `node --env-file=scripts/emulator.env
+scripts/verify-rules.mjs` - read its self-check line first ("firestore.rules
+loads" -> 200) before trusting pass A or B; the new rules were never
+compiled by a builder. `wt-single-int/functions/.env.local` (gitignored)
+already carries `STRIPE_MODE=test` and the full STEP S stub line.
+
+Order that matters: do NOT push a `portal/r3` that contains this merge to
+`main` before the rules deploy - the new re-book writes `chargedFrom`,
+`graceTokenId` and `rebookedAt`, which today's rules refuse. The Oct 7 order
+is `stripeWebhook` -> rules -> push -> all functions (RUNBOOK 10.3).
+
+Pins (change one, change both):
+- `SEASON_END '2027-02-27'` and the Feb 28 cutoff in
+  `functions/portal/single.js` mirror `frontend/src/portal/data/season.js`
+  `SEASON_BOUNDS.end` (`single.test.js` reads the frontend literal);
+  `checkout.js` `SEASON_END_LABEL` is asserted against it. Next season needs
+  new values in both.
+- `isSingleTokenId` (`single_` prefix) in `functions/portal/single.js` and
+  `frontend/src/portal/data/singleToken.js`.
+- The token math in `functions/portal/lib.js` (`tokensPosition`,
+  `periodFallback`), `frontend/src/portal/data/packages.js` (`tokensFor`)
+  and `hooks/live.js` (`selectGraceToken`, `assertPeriodTokensLeft`) moves
+  together. `lib.js` is at 496 lines.
+
+Open items (none blocks the harness run):
+- With an ops comp, a single athlete's waitlist entry counts as both
+  `reserved` (against the comp) and `held` (against bought tokens); `held`
+  counts entries, not tokens trimmed. Rare; PM/owner may rule.
+- A legacy household-wide subscription (no per-athlete billing) is never
+  retired when one of its athletes buys a single; if it is later deleted it
+  resolves to the legacy path and revokes the whole household, the single
+  athlete's bookings included.
+- `CalendlyPanel` shows the `no-session-token` copy with no Buy button, and
+  BookSession's failure banner always shows the fixed `no-session-token`
+  copy (the TokensBanner above it shows the hold).
+- `verify-notifications.js` comment at 234-237 predates cross-period spends
+  (teddy's promotion now charges `period`, since `grace-teddy-old` is already
+  spent in another period); no check reads it.
+- `liveTokens` adds three reads per athlete on the home, booking,
+  household, specialist and athlete-dashboard hooks.

@@ -93,7 +93,7 @@ needs — and nothing medical (see the subcollection below).
 | `coachId` | string \| null | uid of a `users` doc with `role == 'coach'`. Coach access filters on this assignment, never on role alone. |
 | `handicap` | int 0..54 \| null | **Contract v3.0.1 (Sprint 20).** Current handicap from sign-up ("none yet" == null). Rules admit it on create only in range; ops edits later. Absent == null. Seed: jordan 14, reese 27, nico null. |
 | `loginEmail` | string \| null | Sprint 20. The child's own login address, lower-cased by client AND function; null == the parent's account runs the child. Pairs with `loginInvites/{loginEmail}`. Absent == null. |
-| `billing` | map \| absent | **Sprint 20 - server-written only (`createFamily`, `stripeWebhook`), never in a client `hasOnly`.** `{ status: 'pending' \| 'active' \| 'past_due' \| 'lapsed', customerId, subscriptionId, priceId, checkoutSessionId, lastEventId, updatedAt }` (ids null until `checkout.session.completed`; `lastEventId` is the Stripe `event.id` of the last webhook write, the same cross-reference `households.membership.lastEventId` keeps - PM ruling D8; `createFamily`'s `pending` map does not carry it, the webhook adds it on the first write, so absent == no webhook write yet). **ABSENT == `active`** - every athlete provisioned before Sprint 20 books unchanged. `pending` is the booking gate (rules `athleteBillingOk`, client `billing-pending`). Seed: `pending` on nico only, exactly as `createFamily` writes it (no `lastEventId`). |
+| `billing` | map \| absent | **Sprint 20 - server-written only (`createFamily`, `stripeWebhook`), never in a client `hasOnly`.** `{ status: 'pending' \| 'active' \| 'past_due' \| 'lapsed', customerId, subscriptionId, priceId, checkoutSessionId, lastEventId, updatedAt }` (ids null until `checkout.session.completed`; `lastEventId` is the Stripe `event.id` of the last webhook write, the same cross-reference `households.membership.lastEventId` keeps - PM ruling D8; `createFamily`'s `pending` map does not carry it, the webhook adds it on the first write, so absent == no webhook write yet). **ABSENT == `active`** - every athlete provisioned before Sprint 20 books unchanged. `pending` is the booking gate (rules `athleteBillingOk`, client `billing-pending`). Seed: `pending` on nico only, exactly as `createFamily` writes it (no `lastEventId`). **Single token (owner rulings 2026-09-29/30, spec D20):** a paid one-time single purchase writes `{ status: 'active', oneTime: true, subscriptionId: null, customerId, priceId, checkoutSessionId (the latest purchase), lastEventId }`. `oneTime` absent == false; the subscription checkout and the tier `invoice.paid` writers set `oneTime: false`. A `oneTime` athlete whose `packageId` is no longer `'single'` is payment-PENDING until the new package is paid (rules `athleteBillingOk`, `live.js`, `lib.membershipAllowsBooking`, `data/billingCopy.js` `billingStatusOf`). `retiredSubscriptionIds: string[]` (absent == []) holds a former tier subscription the single purchase replaced; the webhook records later events for one as `ignored-retired-subscription` and writes nothing. `stripe-billing.otherTierLive` counts an active single athlete as a live tier, so a single sibling's paid tokens keep the household from lapsing when a monthly sibling's subscription ends (documented, no code change). |
 | `facilityBilling` | map \| absent | Sprint 20, webhook only. `{ status: 'active' \| 'past_due' \| 'lapsed', customerId, subscriptionId, priceId, checkoutSessionId, lastEventId, updatedAt }` - the same shape as `billing` minus `pending` (PM ruling D8; the webhook's `billingPatch` writes both maps through one helper) - the $300 add-on subscription; absent == no add-on. Paid -> `facilityAccess: true`; lapse/delete -> `facilityAccess: false`. **Scope of a facility lapse (PM ruling D10):** `customer.subscription.deleted` / `invoice.payment_failed` resolved to `product: 'facility'` write `facilityBilling.status` and `facilityAccess: false` ONLY - never `households.membership`, never `billing`, never a booking revocation. The household-freeze in spec 4.3 ("AND to household membership exactly as today") applies to the TIER subscription only. `facilityAccessConsent` stays ops-verified. |
 
 ### `athletes/{athleteId}/private/medical`
@@ -347,14 +347,15 @@ One doc per athlete-session reservation. Doc id `{athleteId}_{sessionId}`.
 | ~~`pool`~~ | — | **RETIRED, contract v2.0 (Sprint 12 pin A).** Writers stop setting it; readers stop filtering on it. **Existing docs keep the field harmlessly** — this is a retirement, not a migration; nothing deletes it off old documents, and the rules' create-shape check drops `pool` from the required keys rather than forbidding it. `poolFor()` in `packages.js` (the function this field used to come from) is deleted below the seam's DEPRECATED banner. |
 | `periodKey` | string | **New, contract v2.0 (Sprint 12 pin B).** `'YYYY-MM-DD'`, write-once at create — the period **start** the booking's **session date** falls in, per `periodFor(sessions.date, household.periodAnchorDay)`. **Charging rule: a booking is charged against the period its session date falls in, never the period it is made in** — a January-anchored family booking a February session in January still gets `periodKey` = February's start; there is no "provisional" status in Part 1 (Part 2's `tokenPeriods` doc is what would make that distinction real). Rules shape-check it is a `YYYY-MM-DD` string; correctness (that it actually matches `periodFor()`'s output) is client-derived, the same accepted-gap class the cap check itself already is. |
 | `status` | string | `confirmed \| cancelled \| attended \| noshow`. **Contract v1.4** (Sprint 6): the `confirmed -> attended \| noshow` transitions are attendance, pinned below. **Contract v1.7** (Sprint 9) adds a **member-initiated** transition, `confirmed <-> cancelled` — see [Cancellation and re-booking](#cancellation-and-re-booking-contract-v17-sprint-9) below. **Contract v2.0:** cancellation is unchanged (pin G — the Aug 27 12-hour rule was never built and is formally withdrawn; "until the day before" stands). |
-| `cancelledBy` | string \| null | **New, contract v2.1 (Sprint 13 pin G).** `uid \| 'system' \| 'calendly'`. **Sprint 20:** `'calendly'` from `invitee.canceled` (`cancelReason: 'member'`); `onBookingCancelled` skips it. A member's own cancel (the existing `confirmed -> cancelled` rules branch) writes the caller's own uid; the two admin-SDK-only system paths — staff "Cancel session" (pin E) and the Stripe handler's lapse/downgrade revoke (pin H) — write `'system'`. Absent on every pre-v2.1 cancelled booking (nothing backfills history). |
-| `cancelReason` | string \| null | **New, contract v2.1 (Sprint 13 pin G).** `'member' \| 'session-cancelled' \| 'lapsed' \| 'downgrade'`. A member's own cancel writes `'member'` — the existing member-booking update branch's `hasOnly(['status'])` grows to `hasOnly(['status', 'cancelledBy', 'cancelReason'])` exactly for this pair, still no other field movable. `'session-cancelled'` (staff cancels the whole session, pin E), `'lapsed'`/`'downgrade'` (the Stripe handler, pin H) are values only an admin-SDK writer ever produces — reaching them requires the staff "Cancel session" action or the Stripe handler, neither of which is the member-booking update branch. **Not specified by the pin:** whether the member branch's rules additionally pin `cancelReason == 'member'` as a value constraint (vs. merely widening the field mask) is routing's implementation call, not asserted here. Cancelled rows with a system reason render a reason line (frontend lane); "until the day before" governs only the *member* cancel path, unchanged. |
+| `cancelledBy` | string \| null | **New, contract v2.1 (Sprint 13 pin G).** `uid \| 'system' \| 'calendly'`. **Sprint 20:** `'calendly'` from `invitee.canceled` (`cancelReason: 'member'`); `onBookingCancelled` skips it. A member's own cancel (the existing `confirmed -> cancelled` rules branch) writes the caller's own uid; the two admin-SDK-only system paths — staff "Cancel session" (pin E) and the Stripe handler's lapse/downgrade revoke (pin H) — write `'system'`. Absent on every pre-v2.1 cancelled booking (nothing backfills history). **Single token:** the double-spend guard `onSingleTokenSpent` (Admin SDK) also writes `'system'`, with `cancelReason: 'double-spend'`. |
+| `cancelReason` | string \| null | **New, contract v2.1 (Sprint 13 pin G).** `'member' \| 'session-cancelled' \| 'lapsed' \| 'downgrade'`. A member's own cancel writes `'member'` — the existing member-booking update branch's `hasOnly(['status'])` grows to `hasOnly(['status', 'cancelledBy', 'cancelReason'])` exactly for this pair, still no other field movable. `'session-cancelled'` (staff cancels the whole session, pin E), `'lapsed'`/`'downgrade'` (the Stripe handler, pin H) are values only an admin-SDK writer ever produces — reaching them requires the staff "Cancel session" action or the Stripe handler, neither of which is the member-booking update branch. **Not specified by the pin:** whether the member branch's rules additionally pin `cancelReason == 'member'` as a value constraint (vs. merely widening the field mask) is routing's implementation call, not asserted here. Cancelled rows with a system reason render a reason line (frontend lane); "until the day before" governs only the *member* cancel path, unchanged. **Single token (owner rulings 2026-09-29/30):** `'double-spend'` - written only by `onSingleTokenSpent` on a booking whose `single_` token already backs another live booking; it mints nothing, `onBookingCancelled` sends no receipt for it, and the guard sends `booking-released` instead. The rules now also refuse a member cancel once the session DAY is over (session date + 30 h UTC, `sessionDayNotOver`), for every member. |
 | `householdId` | string | Denormalized from the athlete for the parent's cross-children view and household-scoped rules. |
 | `createdBy` | string | uid of the account that made the booking (parent or athlete). **Contract v1.4:** for a parent-created booking this is the *parent's* uid, not the athlete's — see the linkage note below. |
 | `createdAt` | timestamp | |
 | `graceTokenId` | string \| null | **New, contract v2.1 (Sprint 13 pin E).** Set when this booking was charged from a grace token instead of the period (`createBooking`'s charge order: Elite -> nothing; else the soonest-expiring unconsumed grace token with `expiresAt >= session.date` -> this field + `chargedFrom: 'grace'`; else the period). A grace-charged booking is EXCLUDED from `tokensFor()`'s `used` count (the Sprint 13 seam amendment landed in `packages.js` — a grace token is a second life for a token the Academy could not honor, never a period spend). Consumption is derived, never stored elsewhere: "is grace token X consumed" == "does some non-cancelled booking carry `graceTokenId == X`". Not yet exercised by any seeded booking (no seeded booking references `graceTokens/grace-1` — the seed demonstrates the grace token existing and unconsumed, not the charge-order client code that would set this field, which lands with the routing lane's Part 2 work). |
 | `attendee` | string \| null | **New (owner ruling 2026-09-22, contract v2.1).** `'athlete' \| 'parent'` — who actually walks into a **Yannick 1:1**. The mental-performance work is often the parent's, so the family chooses at booking. Absent on every other booking and on every booking written before the ruling, and **absent always reads as `'athlete'`**, so nothing needs backfilling. The rules admit the field only when `type == 'mental'` (`bookingShapeOk`), so it can never appear on a training, tournament or Phil booking. **Display only**: charging never branches on it, exactly as charging never branches on `type`. Written by `createBooking`, carried through promotion (`functions/portal/promotion.js`), and read by the family's own schedule rows, the coach roster, Yannick's day view and the booked/reminder/promoted notices. |
 | `chargedFrom` | string \| null | **New, contract v2.1 (Sprint 13 pin C/E).** `'elite' \| 'grace' \| 'period' \| null` — which source paid for this booking, per the charge order above. Not yet written by this seed for the same reason as `graceTokenId` (the client charge-order code is routing's Part 2 work); documented here so the field name is agreed before that code lands. |
+| `rebookedAt` | timestamp \| absent | **Single token (owner rulings 2026-09-29/30).** A member re-book (`cancelled -> confirmed`) re-decides its charge and writes `status`, `chargedFrom`, `graceTokenId` (null when none) and `rebookedAt: serverTimestamp()` (`hooks/live.js` `rebookPatch`), nothing else. The rules require `rebookedAt == request.time` whenever it moves, and ALWAYS on a single athlete's re-book, so a stale client's status-only re-book cannot re-attach a spent token; they also check the household freeze on a re-book. The double-spend guard orders bookings by `rebookedAt ?? createdAt`. Absent == never re-booked. |
 | `source` | string \| absent | **Sprint 20, server-written.** `'calendly'` when `calendlyWebhook` wrote it; absent == `'portal'`. A calendly row is NOT cancellable in-app (rules `memberBookingUpdateOk` `resource.data.get('source', null) != 'calendly'`; copy "Cancel or reschedule from Calendly's email"). |
 | `calendlyInviteeUri` | string \| absent | Sprint 20. The lookup key for `invitee.canceled` and for the `old_invitee` reschedule step (single-field index). |
 | `flag` | string \| null | Sprint 20, webhook only. `'over-cap' \| 'over-cadence' \| 'membership-inactive' \| 'before-open' \| null` - a Calendly booking is recorded and flagged, never refused (ruling 0.7); tokens are derived so an over-cap booking floors `left` at 0. Absent == null (clean). `useSignups` reads `bookings where flag != null`. |
@@ -1312,6 +1313,19 @@ entries carrying this `periodKey` (Part 2; always 0 in Part 1, no
 reserved`, floored at 0; `unlimited` when `pkg.tokens === null` (Elite).
 **No package at all means zero tokens, not unlimited.**
 
+**Single token (owner rulings 2026-09-29/30, spec D20).** The output gains
+`perPurchase` (true for package kind `single`) and `held`. A period with no
+`tokenPeriods` doc grants `pkg.tokens`, EXCEPT kind `single`, which grants
+0 (`periodFallback`, in lockstep in `functions/portal/lib.js`
+`tokensPosition`, `packages.js` `tokensFor` and `hooks/live.js`): a single
+athlete books with purchased tokens (`graceTokens/single_{cs}`, below) or
+an ops comp. Spent-ness stays derived; the server's promotion and Calendly
+paths also count spends of those tokens from ANY period (`graceSpends`).
+For a per-purchase athlete each live waitlist entry (except the one being
+promoted) HOLDS one purchased token, latest-expiring first; `held` counts
+those entries (so it can exceed the tokens actually trimmed after an
+over-join). Monthly `reserved` is unchanged.
+
 **Booking windows (pin D).** `SPECIALIST_BOOKING_WINDOW_DAYS` (the old flat
 specialist-only window) is gone from the booking-gate path — every session
 type now uses the athlete's own package window: `windowDaysFor(pkg)` → `30` (**Sprint 20 ruling 0.5, was 32**)
@@ -1346,6 +1360,11 @@ client. `tokensFor()`'s `opts.tokenPeriod` reads this doc **by id**, for the
 current period and (separately) the next — no query, no index, a plain
 document get exactly like the booking-transaction reads elsewhere in this
 schema. **Absent == `pkg.tokens`** — nothing provisioned in Part 1 breaks.
+**Except kind `single`: absent == 0** (owner rulings 2026-09-29/30,
+`periodFallback`). An ops comp for a single athlete must carry `granted > 0`
+and cover the booking's date (`periodKey <= date <= periodEnd`, rules
+`compPeriodOk`); the Issue tokens editor defaults to 0 for a single. The
+single-token webhook path never writes this collection.
 
 Seed: **one real doc**, `tokenPeriods/jordan_<currentPeriodKey>` —
 `granted: 12` (read off jordan's live `t-12` package at seed-run time, not
@@ -1396,6 +1415,30 @@ writes per the Sprint 10 ~20-doc rules cap); (2) `scripts/sweep-waitlist.mjs`
 own cancellation, leaving a waitlist voluntarily, or revocation (lapse)
 mints nothing.
 
+**Purchased single tokens (owner rulings 2026-09-29/30, spec D20).**
+`graceTokens/single_{checkoutSessionId}` - one per PAID one-time single
+Checkout Session, written ONLY by `stripeWebhook` (Admin SDK, inside the
+`stripeEvents` ledger transaction, `functions/portal/stripe-single.js`):
+`{ athleteId, householdId, expiresAt: '2027-02-27' (single.SEASON_END,
+mirrors data/season.js SEASON_BOUNDS.end), reason: 'single-purchase',
+sourceSessionId: null, createdBy: 'stripe', createdAt, checkoutSessionId,
+paymentIntentId (string), amountTotal, currency, priceId, purchasedOn (the
+Chicago date of event.created), eventId }`. The id makes a redelivery or a
+manual Resend a no-op (`duplicate-purchase`), and every new paid session a
+new token. Consumed exactly like any grace token (derived), but promotion
+and Calendly read spends from EVERY period (`bookings where graceTokenId in
+[...]`, chunks of 30), and `onSingleTokenSpent` keeps one live booking per
+`single_` token. The charge order is unchanged, so a 30-day bonus token is
+spent before a purchased one. **A refund VOIDS the token, never deletes
+it:** an Admin/console update sets `expiresAt: '2000-01-01'` plus
+`refundedAt`, `refundedBy`, `refundNote`; every reader drops it as expired,
+the rules refuse it, and the kept id still blocks re-issue. Staff "Cancel
+session" returns a `single_` token (its booking is cancelled, nothing is
+minted for it) and the waitlist sweep mints nothing for a single-only
+athlete (`packageId 'single'`, package kind `single`, or `billing.oneTime`).
+The expiry reminder sends one notice per athlete per expiry date for
+purchased tokens (subject `{athleteId}_single_{expiresAt}`).
+
 Seed: **one real doc**, `graceTokens/grace-1` — `athleteId: 'reese'`,
 `reason: 'session-cancelled'`, `sourceSessionId: '2026-11-11-0'` (a real
 generated Wednesday training block, not otherwise referenced by any other
@@ -1438,7 +1481,13 @@ capacity` and `status == 'scheduled'`, **plus** (pin H) one `get()` of the
 household denying `past_due`/`lapsed` membership — the same freeze booking
 create enforces); member delete (leave); admin delete (promote / expire).
 `tokensFor()`'s `reserved` counts entries carrying the current `periodKey`.
-Elite entries count `0` reserved. **Promotion is server-side** (functions
+Elite entries count `0` reserved. **Single token (owner rulings
+2026-09-29/30):** each live entry of a per-purchase (single) athlete also
+HOLDS one purchased token (latest-expiring first, `held`), so "Join
+waitlist - reserves one token" is true for singles; promotion excludes the
+entry being promoted, and Calendly ignores a single athlete's holds. The
+sweep deletes an expired single-only entry without minting and sends
+"your session token is free again". **Promotion is server-side** (functions
 lane: a Firestore trigger on `sessions/{id}` where `booked` decreased,
 picking the head of the waitlist — grace-token holders first, soonest
 expiry, then `joinedAt` ascending — auto-confirm, no acceptance window) —
@@ -1491,6 +1540,8 @@ Outcomes gain: `applied-checkout` (`checkout.session.completed` applied to the a
 
 **Facility add-on events (PM ruling D10):** every event that resolves to `product: 'facility'` (`invoice.paid`, `invoice.payment_failed`, `customer.subscription.updated`, `customer.subscription.deleted`) records its usual outcome but its ONLY writes are `athletes.facilityBilling` (+ `facilityAccess`) — household `membership` is untouched and no booking is revoked. The household freeze (`applyPastDue`) belongs to the tier subscription; the household lapse and `revokeHousehold` apply only when a tier subscription ends and no sibling still holds an active/past_due tier (D17) — otherwise only that athlete lapses (`athlete-lapsed`).
 
+**Single token (owner rulings 2026-09-29/30, spec D20):** outcomes gain `issued-single` (a paid payment-mode single checkout minted `graceTokens/single_{cs}`), `issued-single-topup` (the athlete still holds a live monthly subscription: token minted, billing untouched), `issued-single-late` (bought after 2027-02-27), `issued-single-amount-check` (`amount_total != 6500`), `issued-single-household-lapsed` (the household stays lapsed because another athlete has no `billing` block), `duplicate-purchase` (the token doc already exists), `single-unpaid` (`payment_status != 'paid'`), `unexpected-one-time` (a payment-mode session that is not exactly one single-price line on a `tier` client reference; nothing written) and `ignored-retired-subscription` (a late event for an id in `athletes.billing.retiredSubscriptionIds`; nothing written). The late, amount-check and household-lapsed rows are logged for ops review. Checkout rows gain `checkoutMode` (`object.mode`; null off checkout) and `clientReference` (`client_reference_id`; null off checkout). The legacy household-wide `invoice.paid` / `customer.subscription.updated` paths skip any athlete that carries a `billing` block (recorded as `{athleteId, reason: 'per-athlete-billing'}`).
+
 Seed: **one fake doc**, `stripeEvents/evt_seed_2` — `{ type:
 'invoice.payment_failed', customer: 'cus_seed_parker', householdId:
 'parker', receivedAt, outcome: 'past_due' }`, paired with
@@ -1527,9 +1578,17 @@ map or category == the defaults in `data/parent.js`; `billing` email is
 always on), `skipped` = no email transport configured (SMTP or Courier)
 or, for push, the Functions emulator, `no-device` = no `users.pushTokens`.
 Kinds by category — schedule:
-`booking-confirmed`, `promoted`, `session-cancelled`, `reminder-24h`;
+`booking-confirmed`, `promoted`, `session-cancelled`, `reminder-24h`,
+`booking-released`;
 billing: `booking-revoked`, `tokens-expiring`, `grace-expiring`,
 `membership` (TEAM.md "Sprint 14 pins" has the trigger and copy per kind).
+**Single token (owner rulings 2026-09-29/30):** `booking-released` is sent
+by `onSingleTokenSpent` when it releases a booking whose purchased token
+already backs another live booking (id
+`booking-released_{bookingId}_released`, push opens `/portal/schedule`);
+`grace-expiring` for purchased tokens is keyed per athlete and expiry date
+(`grace-expiring_{athleteId}_single_{expiresAt}`), one notice however many
+tokens expire together.
 Titles and bodies are stored as sent, so the in-app list re-renders nothing
 from the underlying booking or session. Copy (`functions/portal/notices.js`)
 names the athlete by the first word of `athletes.name` — there is no
@@ -1560,6 +1619,7 @@ Every new read is a single-field filter or a single-field sort, which rides Fire
 - `bookings where calendlyInviteeUri == :uri` (`invitee.canceled`, reschedule); `calendlyEvents where outcome == 'unresolved'`.
 - The webhook's resolution order (interfaces 6.2): `athletes where billing.subscriptionId == :id`, `athletes where facilityBilling.subscriptionId == :id`, `households where stripeCustomerId == :c` (existing), `households where stripeCustomerIds array-contains :c` — each one equality/array-contains on one field.
 - `write-packages.mjs` reads `packages/{id}` by id; `useSignups`'s athletes read is `athletes where householdId == :id` (existing single-field pattern).
+- Single token (owner rulings 2026-09-29/30): `bookings where graceTokenId in [<= 30 ids]` (promotion and Calendly, `lib.graceSpendQueries`), `bookings where graceTokenId == :id` (`onSingleTokenSpent`), and `athletes where householdId == :id` (single checkout's `household-lapsed-legacy` check and the webhook's lapsed-household lift) - one field each, the automatic single-field index (`firestore.indexes.json` `fieldOverrides` stays `[]`).
 
 The `bookings (status, date)` composite (index 7) still serves reminders; nothing here filters `source`/`flag` together with a date.
 
