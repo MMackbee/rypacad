@@ -1,0 +1,132 @@
+/**
+ * Month/Week view helpers (owner request 2026-09-30: every calendar gets one
+ * Month/Week toggle, and the two views must read the same on every screen).
+ *
+ * Pure date math over date-fns plus the facade in ./calendar - no storage, no
+ * data reads. Weeks are Monday-first to match ContractCalendar's firstDay=1,
+ * so a week row here is exactly a row of the month grid.
+ */
+
+import { addMonths, format, parseISO, startOfWeek } from 'date-fns';
+import { addDaysISO, monthBounds } from './calendar';
+
+/** The one localStorage key holding the viewer's Month/Week choice. */
+export const CALENDAR_VIEW_KEY = 'ryp.calendarView';
+
+export function isCalendarView(v) {
+  return v === 'month' || v === 'week';
+}
+
+/** 'yyyy-MM-dd' -> the Monday on or before it. */
+export function weekStartISO(iso) {
+  return format(startOfWeek(parseISO(iso), { weekStartsOn: 1 }), 'yyyy-MM-dd');
+}
+
+/** Monday ISO -> its 7 days, Mon..Sun. */
+export function weekDaysISO(weekStart) {
+  return Array.from({ length: 7 }, (_, i) => addDaysISO(weekStart, i));
+}
+
+/** 'yyyy-MM-dd' -> 'yyyy-MM-01'. */
+export function monthStartISO(iso) {
+  return `${format(parseISO(iso), 'yyyy-MM')}-01`;
+}
+
+function nextMonthISO(monthISO, delta) {
+  return format(addMonths(parseISO(monthStartISO(monthISO)), delta), 'yyyy-MM-dd');
+}
+
+/** Ascending Mondays of every week touching [from, to]; [] when from > to. */
+export function weeksBetween(fromISO, toISO) {
+  if (!fromISO || !toISO || fromISO > toISO) return [];
+  const out = [];
+  for (let cur = weekStartISO(fromISO); cur <= toISO; cur = addDaysISO(cur, 7)) out.push(cur);
+  return out;
+}
+
+/** Ascending 'yyyy-MM-01' of every month touching [from, to]; [] when from > to. */
+export function monthsBetween(fromISO, toISO) {
+  if (!fromISO || !toISO || fromISO > toISO) return [];
+  const last = monthStartISO(toISO);
+  const out = [];
+  for (let cur = monthStartISO(fromISO); cur <= last; cur = nextMonthISO(cur, 1)) out.push(cur);
+  return out;
+}
+
+/** The Mondays of the rows the month grid draws for `monthISO`. */
+export function monthWeekStarts(monthISO) {
+  const { start, end } = monthBounds(monthISO);
+  return weeksBetween(start, end);
+}
+
+/** The first non-null candidate inside [from, to], else `from`. */
+export function anchorIn(fromISO, toISO, candidates = []) {
+  const hit = candidates.find((c) => c && c >= fromISO && c <= toISO);
+  return hit || fromISO;
+}
+
+/**
+ * The label for the VISIBLE part of a week, clamped to [from, to] when given:
+ * 'Sep 28 – Oct 4', 'Nov 2 – 8', 'Nov 30' (one visible day), 'Dec 1 – 6'.
+ */
+export function weekLabel(weekStart, { from, to } = {}) {
+  const weekEnd = addDaysISO(weekStart, 6);
+  let s = from && from > weekStart ? from : weekStart;
+  let e = to && to < weekEnd ? to : weekEnd;
+  if (s > e) {
+    s = weekStart;
+    e = weekEnd;
+  }
+  const sd = parseISO(s);
+  const ed = parseISO(e);
+  if (s === e) return format(sd, 'MMM d');
+  if (s.slice(0, 7) === e.slice(0, 7)) return `${format(sd, 'MMM d')} – ${format(ed, 'd')}`;
+  return `${format(sd, 'MMM d')} – ${format(ed, 'MMM d')}`;
+}
+
+/**
+ * One week step inside a month's grid rows. Past the last row the month
+ * advances and the view lands on the next month's first row; before the
+ * first row it lands on the previous month's last row - so a week straddling
+ * two months shows as two partial rows, exactly as the month grid does.
+ *
+ * @returns {{ monthDelta: -1|0|1, weekStart: string }}
+ */
+export function stepMonthWeek(monthISO, weekStart, delta) {
+  const rows = monthWeekStarts(monthISO);
+  const i = rows.indexOf(weekStart);
+  if (i === -1) return { monthDelta: 0, weekStart: delta > 0 ? rows[0] : rows[rows.length - 1] };
+  const j = i + delta;
+  if (j >= rows.length) return { monthDelta: 1, weekStart: monthWeekStarts(nextMonthISO(monthISO, 1))[0] };
+  if (j < 0) {
+    const prev = monthWeekStarts(nextMonthISO(monthISO, -1));
+    return { monthDelta: -1, weekStart: prev[prev.length - 1] };
+  }
+  return { monthDelta: 0, weekStart: rows[j] };
+}
+
+/** The earliest ISO in [from, to] whose state is 'available', or null. */
+export function firstAvailableISO(dayStates, fromISO, toISO) {
+  const hits = Object.keys(dayStates || {})
+    .filter((iso) => iso >= fromISO && iso <= toISO && dayStates[iso] === 'available')
+    .sort();
+  return hits[0] || null;
+}
+
+/**
+ * Which painted states open something on tap - a copy of ContractCalendar's
+ * `tappable` rule (a parity test pins the two together).
+ */
+export function isTappableDay(variant, state) {
+  return variant === 'booking' ? state === 'available' : state === 'logged' || state === 'missed';
+}
+
+/**
+ * useSpecialistSlots' days -> dayStates. A day whose slots are all full still
+ * counts as 'available' so its waitlist stays reachable.
+ */
+export function slotDayStates(days) {
+  const out = {};
+  for (const d of days || []) out[d.date] = (d.slots || []).length ? 'available' : 'open';
+  return out;
+}

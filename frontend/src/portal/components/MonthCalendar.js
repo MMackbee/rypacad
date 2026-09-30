@@ -52,22 +52,36 @@ export function buildMonthDayMaps(days) {
   return { dayStates, sessionsByDate };
 }
 
-export function MonthNav({ label, onPrev, onNext }) {
+/**
+ * Prev / label / next. Doubles as the week nav (Month/Week toggle,
+ * 2026-09-30): the arrow labels are overridable, and a bounded range can
+ * disable an arrow. The defaults keep every month caller unchanged.
+ */
+export function MonthNav({
+  label,
+  onPrev,
+  onNext,
+  prevLabel = 'Previous month',
+  nextLabel = 'Next month',
+  prevDisabled = false,
+  nextDisabled = false,
+}) {
   return (
     <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-      <NavArrow direction="prev" onClick={onPrev} />
+      <NavArrow direction="prev" onClick={onPrev} label={prevLabel} disabled={prevDisabled} />
       <ScreenTitle size={17}>{label}</ScreenTitle>
-      <NavArrow direction="next" onClick={onNext} />
+      <NavArrow direction="next" onClick={onNext} label={nextLabel} disabled={nextDisabled} />
     </div>
   );
 }
 
-function NavArrow({ direction, onClick }) {
+function NavArrow({ direction, onClick, label, disabled = false }) {
   return (
     <button
       type="button"
-      onClick={onClick}
-      aria-label={direction === 'prev' ? 'Previous month' : 'Next month'}
+      onClick={disabled ? undefined : onClick}
+      disabled={disabled}
+      aria-label={label ?? (direction === 'prev' ? 'Previous month' : 'Next month')}
       style={{
         width: 32,
         height: 32,
@@ -78,6 +92,7 @@ function NavArrow({ direction, onClick }) {
         display: 'grid',
         placeItems: 'center',
         cursor: 'pointer',
+        ...(disabled ? { opacity: 0.35, cursor: 'default' } : null),
       }}
     >
       <span
