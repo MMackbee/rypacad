@@ -175,3 +175,25 @@ test('October: a November booking is this period on My Schedule and Reservations
   expect(nextBy(family.result.current.data.members[0].upcoming)).toEqual(expected);
   await family.unmount();
 });
+
+// Owner report 2026-09-30 (Mike): Elite reads the first period too, so its
+// "Next period" badge and its meter agree the same way a token package's do.
+test('Elite before the season: November is this period on My Schedule, December next; the meter stays unlimited', async () => {
+  calendar.todayISO.mockReturnValue('2026-09-30');
+  live.fetchHousehold.mockResolvedValue({ id: 'h1', periodAnchorDay: 1 });
+  live.fetchPackage.mockResolvedValue(ELITE_PKG);
+  live.fetchSessionsByIds.mockResolvedValue([session(nov), session(nov5), session(dec)]);
+  live.fetchGraceTokensByAthlete.mockResolvedValue([]);
+  waitlist.fetchWaitlistByAthlete.mockResolvedValue([]);
+  live.fetchCurrentUser.mockResolvedValue({ uid: 'u1', athleteId: 'a1', email: 'jordan@email.com' });
+  live.fetchAthlete.mockResolvedValue({ id: 'a1', householdId: 'h1', packageId: 'elite', billing: { status: 'active' } });
+  live.fetchBookings.mockResolvedValue([nov, nov5, dec]);
+
+  const mine = await mountHook(() => useSchedule({ today: '2026-09-30' }));
+  expect(mine.result.current.error).toBeNull();
+  expect(Object.fromEntries(mine.result.current.data.sessions.map((r) => [r.date, r.nextPeriod])))
+    .toEqual({ '2026-11-03': false, '2026-11-05': false, '2026-12-02': true });
+  expect(mine.result.current.data.tokens).toMatchObject({ unlimited: true, left: null });
+  expect(mine.result.current.data.tokens).not.toHaveProperty('startsOn');
+  await mine.unmount();
+});

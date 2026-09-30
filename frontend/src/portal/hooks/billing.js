@@ -90,19 +90,18 @@ function householdView(household, anchorDay) {
 }
 
 async function liveMember(athlete, anchorDay, today) {
-  // Before the season the grant read is the first period's - the prepaid
-  // November doc. Elite never reads a grant, so the key needs no package.
-  const grantPeriod = positionPeriodFor(today, anchorDay);
-  const prevKey = periodFor(addDaysISO(grantPeriod.periodKey, -1), anchorDay).periodKey;
+  // Before the season every package reads the first period, so the grant
+  // read is the prepaid November doc (Elite never has one).
+  const period = positionPeriodFor(today, anchorDay);
+  const prevKey = periodFor(addDaysISO(period.periodKey, -1), anchorDay).periodKey;
   const [pkg, bookings, graceTokens, waitlist, tokenPeriod, prevTokenPeriod] = await Promise.all([
     athlete.packageId ? fetchPackage(athlete.packageId) : null,
     fetchBookings(athlete.id, { householdId: athlete.householdId }),
     fetchGraceTokensByAthlete(athlete.id),
     fetchWaitlistByAthlete(athlete.id),
-    fetchTokenPeriod(athlete.id, grantPeriod.periodKey),
+    fetchTokenPeriod(athlete.id, period.periodKey),
     fetchTokenPeriod(athlete.id, prevKey),
   ]);
-  const period = positionPeriodFor(today, anchorDay, pkg);
   const nextKey = periodFor(addDaysISO(period.periodEnd, 1), anchorDay).periodKey;
   // Only the rows the hub lists need their session (label, time): this
   // period's and next period's live bookings and waitlist entries.
@@ -110,7 +109,7 @@ async function liveMember(athlete, anchorDay, today) {
   // period gets its session too.
   const inScope = (x) =>
     x && x.status !== 'cancelled' && (x.periodKey === period.periodKey || x.periodKey === nextKey) && x.sessionId;
-  const read = (rows) => foldBeforeFirstPeriod(rows, anchorDay, pkg);
+  const read = (rows) => foldBeforeFirstPeriod(rows, anchorDay);
   const sessionIds = [...read(bookings), ...read(waitlist)].filter(inScope).map((x) => x.sessionId);
   const sessions = sessionIds.length ? await fetchSessionsByIds(sessionIds) : [];
   const sessionsById = Object.fromEntries(sessions.map((s) => [s.id, s]));
@@ -138,7 +137,7 @@ export function pendingOf(members) {
     }));
 }
 
-/** The first period's start while any member's position is still before it - the hero's "Tokens start" date (tester report 2026-09-30). null from Nov 1, and for an all-Elite household. */
+/** The first period's start while any member's position is still before it - the hero's "Tokens start" date (tester report 2026-09-30), Elite members included (owner report 2026-09-30: nothing resets Oct 1). null from Nov 1. */
 export function tokensStartOf(members) {
   return members.find((m) => m.period?.preSeason)?.period.start ?? null;
 }
@@ -218,7 +217,7 @@ async function liveHouseholdsDirectory() {
 function seedMember(child, today, anchorDay) {
   const pkg = packageById(child.packageId);
   // The period the meter reads (the first one, before the season).
-  const { periodKey } = positionPeriodFor(today, anchorDay, pkg);
+  const { periodKey } = positionPeriodFor(today, anchorDay);
   const used = child.tokens?.used ?? 0;
   const bookings = Array.from({ length: used }, (_, i) => ({
     id: `${child.id}_sample_${i}`,

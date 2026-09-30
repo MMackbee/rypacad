@@ -296,6 +296,17 @@ async function main() {
   check('NO booking-confirmed for the promoted booking', await exists('notifications', `booking-confirmed_teddy_${S_PROMO}`), false);
   check('booking-confirmed count unchanged by the promotion', await countKind('booking-confirmed'), seededConfirmed + 1);
 
+  // --------------------------------------------------------------- STEP 2b
+  // Owner report 2026-09-30: a six-week Repeat weekly sent six notices at once.
+  log('\nSTEP 2b  Repeat weekly copy (createdVia repeat) -> NO booking-confirmed');
+  await db.collection('bookings').doc(`zia_${S_BOOK}`).set({
+    athleteId: 'zia', sessionId: S_BOOK, householdId: 'hart', date: plus2, type: 'training',
+    status: 'confirmed', periodKey: lib.periodFor(plus2, ANCHOR_3).periodKey, graceTokenId: null,
+    chargedFrom: 'elite', createdBy: 'u-pat', createdVia: 'repeat', createdAt: TS(Date.now())});
+  await settle(1500);
+  check('NO booking-confirmed for the repeat copy', await exists('notifications', `booking-confirmed_zia_${S_BOOK}`), false);
+  check('booking-confirmed count unchanged by the repeat copy', await countKind('booking-confirmed'), seededConfirmed + 1);
+
   // ---------------------------------------------------------------- STEP 3
   log('\nSTEP 3  staff cancels a session -> session-cancelled, naming the bonus token expiry');
   const b3 = db.batch();

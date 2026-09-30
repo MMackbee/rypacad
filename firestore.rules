@@ -505,7 +505,7 @@ service cloud.firestore {
                                 'status', 'householdId', 'createdBy', 'createdAt', 'chargedFrom'])
           && d.keys().hasOnly(['athleteId', 'sessionId', 'date', 'type', 'periodKey',
                                'status', 'householdId', 'createdBy', 'createdAt', 'chargedFrom',
-                               'graceTokenId', 'attendee'])
+                               'graceTokenId', 'attendee', 'createdVia'])
           && d.athleteId is string
           && d.sessionId is string
           && d.date is string
@@ -519,6 +519,10 @@ service cloud.firestore {
           // before the choice existed and every group booking after it.
           && (!d.keys().hasAny(['attendee'])
               || (d.attendee in ['athlete', 'parent'] && d.type == 'mental'))
+          // Owner report 2026-09-30: Repeat weekly's copies say so, and the
+          // booking-confirmed trigger stays quiet for them. Absent means a
+          // single booking; 'repeat' is the only other value.
+          && (!d.keys().hasAny(['createdVia']) || d.createdVia in ['repeat'])
           && d.createdBy == request.auth.uid
           && d.createdAt == request.time;
       }

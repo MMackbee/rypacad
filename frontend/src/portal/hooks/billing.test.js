@@ -14,7 +14,9 @@ jest.mock('./live', () => ({
   ...jest.requireActual('./live'),
   __esModule: true,
   isLive: jest.fn(),
+  fetchAthlete: jest.fn(),
   fetchBookings: jest.fn(),
+  fetchCurrentUser: jest.fn(),
   fetchGraceTokensByAthlete: jest.fn(),
   fetchHousehold: jest.fn(),
   fetchHouseholdAthletes: jest.fn(),
@@ -30,7 +32,7 @@ jest.mock('../data/calendar', () => {
 
 import { act } from 'react';
 import { createRoot } from 'react-dom/client';
-import useBillingHub, { allPerPurchaseOf, pendingOf, tokensStartOf, warnMissingPortalUrl } from './billing';
+import useBillingHub, { allPerPurchaseOf, pendingOf, tokensStartOf, useMyTokens, warnMissingPortalUrl } from './billing';
 import * as live from './live';
 import * as grace from './grace';
 import * as waitlist from './waitlist';
@@ -39,8 +41,8 @@ import * as calendar from '../data/calendar';
 test('tokensStartOf: the first period start while any member is pre-season (tester report 2026-09-30)', () => {
   const m = (preSeason, start) => ({ period: { preSeason, start } });
   expect(tokensStartOf([m(false, '2026-09-01'), m(true, '2026-11-01')])).toBe('2026-11-01');
-  // All Elite (their period stays current) and every period from Nov 1 on: the reset title stands.
-  expect(tokensStartOf([m(false, '2026-09-01')])).toBeNull();
+  // Every period from Nov 1 on (Elite reads the first period before then too): the reset title stands.
+  expect(tokensStartOf([m(false, '2026-11-01')])).toBeNull();
   expect(tokensStartOf([m(false, '2026-12-01'), { period: null }])).toBeNull();
   expect(tokensStartOf([])).toBeNull();
 });
@@ -101,5 +103,47 @@ test('the live hub counts and labels an October booking under November (review 2
   expect(jordan.tokens).toMatchObject({ granted: 16, used: 1, left: 15, startsOn: '2026-11-01' });
   expect(live.fetchSessionsByIds).toHaveBeenCalledWith(['phil-1024']);
   expect(jordan.spent).toEqual([expect.objectContaining({ id: 'a1_phil', label: 'Performance with Phil', time: '4:00' })]);
+  await act(async () => root.unmount());
+});
+
+// Owner report 2026-09-30 (Mike): Membership for an Elite athlete read "Nothing
+// booked in this period yet. Next period from Thursday, Oct 1: unlimited" over
+// two November bookings.
+test('Membership, Elite, before the season: November with its bookings, December next, no Oct 1', async () => {
+  calendar.todayISO.mockReturnValue('2026-09-30');
+  live.isLive.mockReturnValue(true);
+  live.fetchCurrentUser.mockResolvedValue({ uid: 'u1', athleteId: 'a1' });
+  live.fetchAthlete.mockResolvedValue({ id: 'a1', name: 'Jordan', householdId: 'h1', packageId: 'elite' });
+  live.fetchHousehold.mockResolvedValue({ id: 'h1', name: 'Whitfield family', periodAnchorDay: 1 });
+  live.fetchPackage.mockResolvedValue({ id: 'elite', name: 'Elite', kind: 'elite', tokens: null, windowDays: 45 });
+  live.fetchBookings.mockResolvedValue([
+    { id: 'a1_n1', sessionId: 'n1', date: '2026-11-03', periodKey: '2026-11-01', status: 'confirmed', type: 'training' },
+    { id: 'a1_n2', sessionId: 'n2', date: '2026-11-10', periodKey: '2026-11-01', status: 'confirmed', type: 'training' },
+  ]);
+  live.fetchGraceTokensByAthlete.mockResolvedValue([]);
+  live.fetchSessionsByIds.mockResolvedValue([
+    { id: 'n1', date: '2026-11-03', type: 'training', time: '4:00 PM' },
+    { id: 'n2', date: '2026-11-10', type: 'training', time: '4:00 PM' },
+  ]);
+  grace.fetchTokenPeriod.mockResolvedValue(null);
+  waitlist.fetchWaitlistByAthlete.mockResolvedValue([]);
+
+  const result = { current: null };
+  function Probe() {
+    result.current = useMyTokens();
+    return null;
+  }
+  const root = createRoot(document.createElement('div'));
+  await act(async () => { root.render(<Probe />); });
+  await act(async () => { await new Promise((r) => setTimeout(r, 0)); });
+  expect(result.current.error).toBeNull();
+  const { member, status } = result.current.data;
+  expect(member.tokens).toMatchObject({ unlimited: true });
+  expect(member.period).toMatchObject({ start: '2026-11-01', end: '2026-11-30', preSeason: true });
+  expect(member.spent.map((r) => [r.id, r.time])).toEqual([['a1_n1', '4:00 PM'], ['a1_n2', '4:00 PM']]);
+  expect(member.nextPeriod).toMatchObject({ start: '2026-12-01', granted: null, booked: 0 });
+  expect(grace.fetchTokenPeriod).toHaveBeenCalledWith('a1', '2026-11-01');
+  // Was "Tokens reset Thursday, Oct 1": nothing resets before the season.
+  expect(status.title).toBe(`Tokens start ${calendar.longDayLabel('2026-11-01')}`);
   await act(async () => root.unmount());
 });

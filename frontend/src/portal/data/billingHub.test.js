@@ -299,13 +299,14 @@ describe('before the season: the first (prepaid) period (tester report 2026-09-3
     ...over,
   });
 
-  test('positionPeriodFor: November until Nov 1, then the current period; Elite keeps the current one', () => {
+  test('positionPeriodFor: November until Nov 1, then the current period - one answer for every package', () => {
     expect(SEASON_FIRST_PERIOD).toBe('2026-11-01');
     expect(positionPeriodFor('2026-09-30', 1)).toEqual({ periodKey: '2026-11-01', periodEnd: '2026-11-30', preSeason: true });
     expect(positionPeriodFor('2026-10-31', 1)).toMatchObject({ periodKey: '2026-11-01', preSeason: true });
     expect(positionPeriodFor('2026-11-01', 1)).toEqual({ periodKey: '2026-11-01', periodEnd: '2026-11-30', preSeason: false });
     expect(positionPeriodFor('2026-12-16', 1)).toMatchObject({ periodKey: '2026-12-01', preSeason: false });
-    expect(positionPeriodFor('2026-09-30', 1, ELITE)).toEqual({ periodKey: '2026-09-01', periodEnd: '2026-09-30', preSeason: false });
+    // Anchor 15: the first period is Oct 15 - Nov 14.
+    expect(positionPeriodFor('2026-09-30', 15)).toEqual({ periodKey: '2026-10-15', periodEnd: '2026-11-14', preSeason: true });
   });
 
   test('the meter reads November - its grant, its bookings - with no expiry nudge and no Last period', () => {
@@ -339,12 +340,28 @@ describe('before the season: the first (prepaid) period (tester report 2026-09-3
     expect(nov.lastPeriod).toBeNull();
   });
 
-  test('Elite is unaffected', () => {
-    const e = hubMemberFor(pre({ pkg: ELITE }));
+  // Owner report 2026-09-30 (Mike): an Elite athlete with two November
+  // bookings read "Nothing booked in this period yet. Next period from
+  // Thursday, Oct 1: unlimited".
+  test('Elite reads November before the season: its bookings listed, December next, still unlimited', () => {
+    const e = hubMemberFor(pre({ pkg: ELITE, bookings: [...pre().bookings, b('nov2', { date: '2026-11-17', periodKey: '2026-11-01' })] }));
     expect(e.tokens).toMatchObject({ unlimited: true, left: null });
     expect(e.tokens).not.toHaveProperty('startsOn');
-    expect(e.period).toMatchObject({ periodKey: '2026-09-01', preSeason: false });
+    expect(e.period).toMatchObject({ periodKey: '2026-11-01', start: '2026-11-01', end: '2026-11-30', resetsOn: '2026-12-01', preSeason: true });
+    expect(e.spent.map((r) => [r.id, r.date])).toEqual([['nov', '2026-11-03'], ['nov2', '2026-11-17']]);
+    expect(e.attendance).toEqual({ booked: 2, attended: 0, noShows: 0 });
+    expect(e.nextPeriod).toMatchObject({ periodKey: '2026-12-01', start: '2026-12-01', end: '2026-12-31', granted: null, booked: 1 });
+    expect(e.lastPeriod).toBeNull();
+    expect(e.expiryNudge).toBeNull();
     expect(withTokenStart(null, { preSeason: true, periodKey: '2026-11-01' }, 'pending')).toBeNull();
+  });
+
+  test('Elite from Nov 1 on: the calendar period, as before', () => {
+    expect(hubMemberFor(pre({ pkg: ELITE, today: '2026-11-10' })).period).toMatchObject({ periodKey: '2026-11-01', daysLeft: 20, preSeason: false });
+    const dec = hubMemberFor(pre({ pkg: ELITE, today: '2026-12-16' }));
+    expect(dec.period).toMatchObject({ periodKey: '2026-12-01', preSeason: false });
+    expect(dec.spent.map((r) => r.id)).toEqual(['dec']);
+    expect(dec.nextPeriod.periodKey).toBe('2027-01-01');
   });
 
   test('statusFor: the active title names the start, never a reset of a month that granted nothing', () => {
@@ -357,14 +374,14 @@ describe('before the season: the first (prepaid) period (tester report 2026-09-3
   const oct = b('oct', { date: '2026-10-24', periodKey: '2026-10-01' });
   const octWait = { id: 'w-oct', sessionId: 's-w-oct', athleteId: 'jordan', date: '2026-10-28', periodKey: '2026-10-01' };
 
-  test('foldBeforeFirstPeriod: a row before the first period is read as the first period\'s; Elite and the rest untouched', () => {
+  test('foldBeforeFirstPeriod: a row before the first period is read as the first period\'s; the rest untouched', () => {
     const rows = [oct, b('nov', { periodKey: '2026-11-01' }), { id: 'legacy' }, null];
-    expect(foldBeforeFirstPeriod(rows, 1, T16).map((r) => r && r.periodKey)).toEqual(['2026-11-01', '2026-11-01', undefined, null]);
-    expect(foldBeforeFirstPeriod(rows, 1, ELITE)).toBe(rows);
-    expect(foldBeforeFirstPeriod(rows, 1, null)).toBe(rows);
+    expect(foldBeforeFirstPeriod(rows, 1).map((r) => r && r.periodKey)).toEqual(['2026-11-01', '2026-11-01', undefined, null]);
+    expect(foldBeforeFirstPeriod(null, 1)).toBeNull();
+    expect(foldBeforeFirstPeriod(undefined, 1)).toBeUndefined();
     // Anchor 15: the first period is Oct 15 - Nov 14, which an Oct 24 row is already in.
     const rows15 = [b('oct15', { date: '2026-10-24', periodKey: '2026-10-15' }), b('early', { date: '2026-10-12', periodKey: '2026-09-15' })];
-    expect(foldBeforeFirstPeriod(rows15, 15, T16).map((r) => r.periodKey)).toEqual(['2026-10-15', '2026-10-15']);
+    expect(foldBeforeFirstPeriod(rows15, 15).map((r) => r.periodKey)).toEqual(['2026-10-15', '2026-10-15']);
   });
 
   test('an October booking and waitlist entry spend November: counted, listed, and still there once November starts', () => {
@@ -378,9 +395,9 @@ describe('before the season: the first (prepaid) period (tester report 2026-09-3
     expect(dec.lastPeriod).toMatchObject({ periodKey: '2026-11-01', used: 2 });
   });
 
-  test('an Elite October booking stays October\'s', () => {
+  test('an Elite October booking is listed under November, as a token one is', () => {
     const e = hubMemberFor(pre({ pkg: ELITE, today: '2026-10-20', bookings: [oct] }));
-    expect(e.spent.map((r) => r.id)).toEqual(['oct']);
-    expect(e.period.periodKey).toBe('2026-10-01');
+    expect(e.spent.map((r) => [r.id, r.date])).toEqual([['oct', '2026-10-24']]);
+    expect(e.period).toMatchObject({ periodKey: '2026-11-01', preSeason: true });
   });
 });

@@ -25,6 +25,7 @@ test('a balance that cannot be spent yet (tester report 2026-09-30)', () => {
   expect(tokenStartLabel(null)).toBeNull();
   expect(firstPeriodLine({ start: '2026-11-01', end: '2026-11-30' }, 16)).toBe('First period: November (Nov 1 - Nov 30) - 16 tokens');
   expect(firstPeriodLine({ start: '2026-11-01', end: '2026-11-30' }, 1)).toBe('First period: November (Nov 1 - Nov 30) - 1 token');
+  expect(firstPeriodLine({ start: '2026-11-01', end: '2026-11-30' }, null)).toBe('First period: November (Nov 1 - Nov 30) - unlimited');
 });
 
 test('section 9 strings', () => {

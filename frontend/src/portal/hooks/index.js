@@ -378,8 +378,8 @@ async function liveAthleteIdentity() {
 function deriveTokens(pkg, bookings, anchorDay, today, opts = {}) {
   if (!pkg) return null;
   const { graceTokens = [], waitlist = [], tokenPeriod = null, billingStatus } = opts;
-  const period = positionPeriodFor(today, anchorDay, pkg);
-  const read = (rows) => foldBeforeFirstPeriod(rows, anchorDay, pkg); // an October row spends November
+  const period = positionPeriodFor(today, anchorDay);
+  const read = (rows) => foldBeforeFirstPeriod(rows, anchorDay); // an October row spends November
   const position = tokensFor(null, pkg, read(bookings), read(waitlist), graceTokens, period.periodKey, { today, tokenPeriod });
   return withTokenStart(position, period, billingStatus);
 }
@@ -397,7 +397,7 @@ function deriveTokens(pkg, bookings, anchorDay, today, opts = {}) {
 function tokensWithNextPeriod(pkg, bookings, anchorDay, today, opts = {}) {
   const position = deriveTokens(pkg, bookings, anchorDay, today, opts);
   if (!position) return null;
-  const { periodEnd } = positionPeriodFor(today, anchorDay, pkg);
+  const { periodEnd } = positionPeriodFor(today, anchorDay);
   const nextPeriodKey = periodFor(addDaysISO(periodEnd, 1), anchorDay).periodKey;
   const booked = (bookings || []).filter(
     (b) => b && b.status !== 'cancelled' && b.periodKey === nextPeriodKey
@@ -1104,6 +1104,7 @@ export function useBooking({ variant = 'open', today = todayISO(), practice = fa
           // Every check a single booking runs (no skipCapCheck, K03); silent:
           // one invalidation bump in the finally below instead of a refetch
           // storm per iteration (finding 8b). The window caps this at ~7 weeks.
+          // createdVia 'repeat': no per-week notice (functions/index.js).
           const result = await createBooking(
             {
               athleteId: forAthleteId,
@@ -1112,7 +1113,7 @@ export function useBooking({ variant = 'open', today = todayISO(), practice = fa
               type: match.type,
               householdId: identity.householdId,
             },
-            { silent: true }
+            { silent: true, createdVia: 'repeat' }
           );
           // A race that fills the session between the pre-check above and the
           // transaction resolves as 'waitlisted' instead of 'confirmed' -
