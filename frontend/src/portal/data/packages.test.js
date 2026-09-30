@@ -4,7 +4,7 @@
  * the booking gate, the Billing hub, Membership and the booking screens
  * share — these tests are the contract's edge cases written down.
  */
-import { ALL_PACKAGES, ELITE, PRICES_RELEASED, SINGLE_TOKEN, TOKEN_PACKAGES, normalizeAnchorDay, periodFor, tokensFor, windowDaysFor } from './packages';
+import { ALL_PACKAGES, ELITE, PRICES_RELEASED, SINGLE_TOKEN, TOKEN_PACKAGES, normalizeAnchorDay, periodFallback, periodFor, tokensFor, windowDaysFor } from './packages';
 import { SEASON_BOUNDS } from './season';
 
 const T12 = TOKEN_PACKAGES.find((p) => p.id === 't-12');
@@ -108,6 +108,56 @@ describe('tokensFor', () => {
     expect(elite).toMatchObject({ granted: null, left: null, unlimited: true, used: 1 });
     const none = tokensFor(null, null, [booking()], [], [], KEY, { today });
     expect(none).toMatchObject({ granted: 0, left: 0, unlimited: false, used: 1 });
+  });
+});
+
+// Owner rulings 2026-09-29/30: the single token is a one-time purchase, one
+// graceTokens doc `single_{cs}` per paid checkout. Mirrors the single-token
+// cases in functions/portal/lib.test.js (change one, change both).
+describe('tokensFor: the single token', () => {
+  const KEY = '2026-09-01';
+  const today = '2026-09-16';
+  const SEASON = { id: 'single_cs_a', expiresAt: '2027-02-27' };
+  const SEASON_2 = { id: 'single_cs_b', expiresAt: '2027-02-27' };
+  const BONUS = { id: 'jordan_sess-9', expiresAt: '2026-10-15' };
+
+  test('periodFallback: 0 for single, the package tokens otherwise', () => {
+    expect(periodFallback(SINGLE_TOKEN)).toBe(0);
+    expect(periodFallback(T12)).toBe(12);
+    expect(periodFallback(null)).toBe(0);
+  });
+
+  test('no issued doc grants nothing; an ops doc (granted 1) wins', () => {
+    const none = tokensFor(null, SINGLE_TOKEN, [], [], [], KEY, { today });
+    expect(none).toMatchObject({ granted: 0, left: 0, perPurchase: true, held: 0, unlimited: false });
+    const comp = tokensFor(null, SINGLE_TOKEN, [], [], [], KEY, { today, tokenPeriod: { granted: 1 } });
+    expect(comp).toMatchObject({ granted: 1, left: 1 });
+  });
+
+  test('a purchased token shows as grace until a booking in ANY period spends it', () => {
+    expect(tokensFor(null, SINGLE_TOKEN, [], [], [SEASON], KEY, { today }).grace).toEqual([SEASON]);
+    const other = { id: 'b', status: 'confirmed', periodKey: '2026-11-01', graceTokenId: 'single_cs_a' };
+    expect(tokensFor(null, SINGLE_TOKEN, [], [], [SEASON], KEY, { today, graceSpends: [other] }).grace).toEqual([]);
+    const freed = { ...other, status: 'cancelled' };
+    expect(tokensFor(null, SINGLE_TOKEN, [], [], [SEASON], KEY, { today, graceSpends: [freed] }).grace).toEqual([SEASON]);
+  });
+
+  test('each waitlist entry holds the latest-expiring token', () => {
+    const one = [{ id: 'w1', periodKey: '2026-10-01' }];
+    const t = tokensFor(null, SINGLE_TOKEN, [], one, [SEASON, BONUS], KEY, { today });
+    expect(t.held).toBe(1);
+    // The soonest-expiring bonus stays offered before a season token.
+    expect(t.grace.map((g) => g.id)).toEqual(['jordan_sess-9']);
+    expect(tokensFor(null, SINGLE_TOKEN, [], one, [SEASON, SEASON_2], KEY, { today }).grace).toHaveLength(1);
+    expect(tokensFor(null, SINGLE_TOKEN, [], one, [SEASON], KEY, { today }).grace).toEqual([]);
+  });
+
+  test('monthly: held is 0 and reserved is unchanged', () => {
+    const waitlist = [{ id: 'w1', periodKey: KEY }, { id: 'w2', periodKey: KEY }];
+    const t = tokensFor(null, T12, [], waitlist, [BONUS], KEY, { today });
+    expect(t).toMatchObject({ perPurchase: false, held: 0, reserved: 2, left: 10 });
+    expect(t.grace.map((g) => g.id)).toEqual(['jordan_sess-9']);
+    expect(tokensFor(null, ELITE, [], waitlist, [], KEY, { today })).toMatchObject({ perPurchase: false, held: 0 });
   });
 });
 

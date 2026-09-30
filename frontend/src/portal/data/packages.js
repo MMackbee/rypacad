@@ -52,11 +52,13 @@ export const ELITE = {
   id: 'elite', name: 'Elite', kind: 'elite', tokens: null, price: 999, pending: false, windowDays: 45, access247: true,
 };
 
-/** Single token (pin M): one token per period. Per-visit sale is a Stripe-sprint question. */
-// $65 confirmed by the owner 2026-09-22, so it is no longer pending: the
-// single token is a real one-token period package, priced like the others and
-// shown to staff the same way. Whether it is ever sold per visit instead of as
-// a period package is a Stripe-sprint question and changes nothing here.
+/**
+ * Single token: one-time $65; each paid checkout = one token, valid to season
+ * end (owner ruling 2026-09-29/30). The token is a graceTokens doc
+ * `single_{checkoutSessionId}`, not a period grant - periodFallback() below
+ * gives this package 0 period tokens whatever `tokens` says. `tokens: 1`
+ * stays because the Firestore packages/single doc carries it.
+ */
 export const SINGLE_TOKEN = { id: 'single', name: 'Single token', kind: 'single', tokens: 1, price: 65, pending: false, windowDays: 30 };
 
 export const ALL_PACKAGES = [...TOKEN_PACKAGES, ELITE, SINGLE_TOKEN];
@@ -142,33 +144,57 @@ export function periodFor(dateISO, anchorDay = 1) {
 }
 
 /**
+ * A period's grant when no tokenPeriods doc has been issued (pin C). The
+ * single token grants NO period token (owner ruling 2026-09-29/30): its
+ * tokens are bought one at a time, and a period token for a single athlete is
+ * only ever an ops comp (an issued doc). CHANGE ONE, CHANGE BOTH with
+ * functions/portal/lib.js#periodFallback.
+ */
+export function periodFallback(pkg) {
+  if (pkg && pkg.kind === 'single') return 0;
+  return (pkg && pkg.tokens) || 0;
+}
+
+/**
  * One athlete's token position in one period (pin B) - derived, never a
  * stored counter:
- *   granted    the package's tokens; Part 2 passes the period's tokenPeriods
+ *   granted    periodFallback(pkg); Part 2 passes the period's tokenPeriods
  *              doc as opts.tokenPeriod and its granted wins (absent == grant)
  *   used       non-cancelled bookings carrying this periodKey and no graceTokenId
  *   reserved   waitlist entries carrying this periodKey
  *   grace      unconsumed, unexpired grace tokens, soonest expiry first
- *              (consumed == some non-cancelled booking references the id)
+ *              (consumed == some non-cancelled booking, or opts.graceSpends
+ *              row, references the id), less the `held` latest-expiring ones
  *   left       granted - used - reserved, floored at 0; null when unlimited
  *   unlimited  the package has tokens: null (Elite)
- * No package at all means zero tokens, not unlimited.
+ *   perPurchase  the single token (ruling 2026-09-29/30): tokens are bought
+ *              one at a time as grace tokens, not granted per period
+ *   held       perPurchase only: every waitlist entry holds one purchased
+ *              token (the client has no ignore list; the promotion writer's
+ *              ignoreWaitlistIds is server-side only)
+ * No package at all means zero tokens, not unlimited. Mirrors
+ * functions/portal/lib.js#tokensPosition - CHANGE ONE, CHANGE BOTH.
  */
 export function tokensFor(athlete, pkg, bookings, waitlist, graceTokens, periodKey, opts = {}) {
   const today = opts.today ?? fromUTC(new Date());
-  const live = (bookings || []).filter((b) => b && b.status !== 'cancelled');
+  const notCancelled = (b) => b && b.status !== 'cancelled';
+  const live = (bookings || []).filter(notCancelled);
   // A grace-charged booking (graceTokenId set) is a second life for a token
   // the Academy could not honor - it never counts as a period spend.
   const used = live.filter((b) => b.periodKey === periodKey && !b.graceTokenId).length;
   const reserved = (waitlist || []).filter((w) => w && w.periodKey === periodKey).length;
-  const consumed = new Set(live.map((b) => b.graceTokenId).filter(Boolean));
-  const grace = (graceTokens || [])
+  const spends = live.concat((opts.graceSpends || []).filter(notCancelled));
+  const consumed = new Set(spends.map((b) => b.graceTokenId).filter(Boolean));
+  const unlimited = Boolean(pkg) && pkg.tokens === null;
+  const perPurchase = Boolean(pkg) && !unlimited && pkg.kind === 'single';
+  const held = perPurchase ? (waitlist || []).filter(Boolean).length : 0;
+  const sorted = (graceTokens || [])
     .filter((g) => g && !consumed.has(g.id) && (!g.expiresAt || g.expiresAt >= today))
     .map((g) => ({ id: g.id, expiresAt: g.expiresAt ?? null }))
     .sort((a, b) => String(a.expiresAt).localeCompare(String(b.expiresAt)));
-  const unlimited = Boolean(pkg) && pkg.tokens === null;
-  const granted = unlimited ? null : pkg ? (opts.tokenPeriod?.granted ?? pkg.tokens ?? 0) : 0;
+  const grace = sorted.slice(0, Math.max(0, sorted.length - held));
+  const granted = unlimited ? null : pkg ? (opts.tokenPeriod?.granted ?? periodFallback(pkg)) : 0;
   const left = unlimited ? null : Math.max(0, granted - used - reserved);
-  return { granted, used, reserved, grace, left, unlimited };
+  return { granted, used, reserved, grace, left, unlimited, perPurchase, held };
 }
 
