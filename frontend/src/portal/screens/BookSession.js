@@ -4,7 +4,7 @@ import { color, font, radius, tint } from '../tokens';
 import BottomTabBar from '../components/BottomTabBar';
 import Button from '../components/Button';
 import PhoneFrame from '../components/PhoneFrame';
-import ContractCalendar from '../components/ContractCalendar';
+import { SessionsCalendarCard } from '../components/CalendarCard';
 import SessionCard from '../components/SessionCard';
 import { AgeGroupLegend } from '../components/AgeGroupChip';
 import SkeletonCard, { SkeletonBar } from '../components/Skeleton';
@@ -22,8 +22,8 @@ import BookingOpensBanner from '../components/BookingOpensBanner';
 import { windowDaysFor } from '../data/packages';
 import { capacityFor, dayLabel } from '../data/season';
 import { DEFAULT_DURATION_MINUTES } from '../data/schedule';
-import { addDaysISO, bookingOpen, monthLabel, openThrough, parseTimeToMinutes, todayISO } from '../data/calendar';
-import { buildMonthDayMaps, MonthNav, useMonthNavState } from '../components/MonthCalendar';
+import { addDaysISO, bookingOpen, openThrough, parseTimeToMinutes, todayISO } from '../data/calendar';
+import { buildMonthDayMaps, useMonthNavState } from '../components/MonthCalendar';
 
 /** Sessions arrive raw (numeric capacity/booked) from useMonthSessions;
     useBooking's slots carry a pre-formatted capacity object. Accept both. */
@@ -288,7 +288,6 @@ export default function BookSession({
   const tokens = isParent ? selectedAthlete?.tokens : data?.tokens;
   const days = monthState.data?.days ?? [];
   const { dayStates, sessionsByDate } = buildMonthDayMaps(days);
-  const monthHasSessions = days.some((d) => d.sessions.length > 0);
   const selectedSessionsRaw = selectedDate ? sessionsByDate[selectedDate] ?? [] : [];
   const selectedSessions = demoForceFull
     ? selectedSessionsRaw.map((s) => ({ ...s, capacity: { state: 'full', label: 'Full' } }))
@@ -373,43 +372,20 @@ export default function BookSession({
               ) : null}
             </div>
 
+            {/* Month/Week toggle (owner request 2026-09-30): the shared card
+                renders the same grid, handlers and captions in both views. */}
             <div style={{ padding: '0 22px' }}>
-              <Card large>
-                <MonthNav
-                  label={monthLabel(monthISO)}
-                  onPrev={() => {
-                    setSelectedDate(null);
-                    changeMonth(-1);
-                  }}
-                  onNext={() => {
-                    setSelectedDate(null);
-                    changeMonth(1);
-                  }}
-                />
-                {monthState.loading ? (
-                  <SkeletonBar height={220} style={{ marginTop: 14 }} />
-                ) : (
-                  <div style={{ marginTop: 10 }}>
-                    <ContractCalendar
-                      key={monthISO}
-                      start={monthISO}
-                      dayStates={dayStates}
-                      variant="booking"
-                      selected={selectedDate}
-                      onSelectDay={(day) => setSelectedDate(day.iso)}
-                    />
-                  </div>
-                )}
-                {!monthState.loading && !monthHasSessions ? (
-                  <Body size={12} style={{ marginTop: 14, textAlign: 'center' }}>
-                    No sessions are scheduled yet.
-                  </Body>
-                ) : (
-                  <Body size={11} tone={color.textTertiary} style={{ marginTop: 13 }}>
-                    Days marked green have bookable sessions — tap one to see times.
-                  </Body>
-                )}
-              </Card>
+              <SessionsCalendarCard
+                monthISO={monthISO}
+                changeMonth={changeMonth}
+                loading={monthState.loading}
+                dayStates={dayStates}
+                selected={selectedDate}
+                onSelectDay={(day) => setSelectedDate(day.iso)}
+                onNavigate={() => setSelectedDate(null)}
+                hint="Days marked green have bookable sessions — tap one to see times."
+                emptyCopy={{ month: 'No sessions are scheduled yet.', week: 'No sessions are scheduled this week.' }}
+              />
             </div>
 
             {selectedDate && selectedDateLocked ? (
