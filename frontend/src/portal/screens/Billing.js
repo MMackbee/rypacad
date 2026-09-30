@@ -254,7 +254,7 @@ function PlanCard({ household, members, showPrices = false }) {
                   ? `${m.package.name} · unlimited`
                   : m.package.kind === 'single'
                     ? `${m.package.name} · one-time`
-                    : `${m.package.name} a period`}
+                    : `${m.package.name} a month`}
               {m.package?.windowDays ? ` · books ${m.package.windowDays} days out` : ''}
               {m.facilityAccess ? ' · + facility access' : m.package?.kind === 'elite' ? ' · facility access included' : ''}
               {m.billing?.status === 'pending' || m.billing?.status === 'lapsed'

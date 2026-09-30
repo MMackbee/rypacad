@@ -32,7 +32,9 @@ test('pending hero pays, plan and connection copy, facility offer for the paid a
 test('a mixed household keeps the monthly plan copy and footer', async () => {
   mockHub.data.members[1] = { ...mockHub.data.members[1], package: { id: 'single', name: 'Single token', kind: 'single', windowDays: 30, price: 65 } };
   const r = await renderScreen(<Billing bare />);
-  expect(r.text()).toContain('6 tokens a period · books 30 days out');
+  // Bills monthly, and says so the way the package cards do (UX #5: never 'a period').
+  expect(r.text()).toContain('6 tokens a month · books 30 days out');
+  expect(r.text()).not.toContain('a period');
   expect(r.text()).toContain('Single token · one-time · books 30 days out · One-time $65 per session token');
   expect(r.text()).toContain('Billed monthly on the 1st. Tokens reset the same day.');
   await r.unmount();
@@ -46,7 +48,7 @@ test('an all-single household reads one-time and has no monthly footer', async (
   const r = await renderScreen(<Billing bare />);
   expect(r.text()).toContain('Single token · one-time');
   expect(r.text()).toContain('One-time $65 per session token'); // Reese's pending row
-  expect(r.text()).not.toContain('a period');
+  expect(r.text()).not.toMatch(/a (period|month)\b/);
   expect(r.text()).not.toContain('Billed monthly');
   expect(r.text()).not.toContain('Tokens reset the same day');
   await r.unmount();
