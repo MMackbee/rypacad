@@ -155,6 +155,12 @@ export async function taskContract() {
   expect('parent starts a tier with contractStart', await patchAth('ath-contract', { contractMinutes: 45, contractStart: '2026-11-03' }, t.parent), 200);
   expect('parent changes the tier alone (contractStart untouched)', await patchAth('ath-contract', { contractMinutes: 90 }, t.parent), 200);
   expect('parent clears the tier', await patchAth('ath-contract', { contractMinutes: null }, t.parent), 200);
+  // Review 2026-09-30: contractStart moves only on a no-tier -> tier start, never on its own or with a tier change.
+  expect('parent starts again with contractStart', await patchAth('ath-contract', { contractMinutes: 45, contractStart: '2026-11-03' }, t.parent), 200);
+  expect('contractStart alone on a tiered athlete refused', await patchAth('ath-contract', { contractStart: '2026-12-01' }, t.parent), 403);
+  expect('a tier change with a new contractStart refused', await patchAth('ath-contract', { contractMinutes: 90, contractStart: '2026-12-01' }, t.parent), 403);
+  expect('athlete cannot move their own contractStart', await patchAth('ath-contract', { contractStart: '2026-12-01' }, t.athlete), 403);
+  expect('parent clears the tier again', await patchAth('ath-contract', { contractMinutes: null }, t.parent), 200);
   expect('athlete starts their own tier with contractStart', await patchAth('ath-active', { contractMinutes: 20, contractStart: '2026-12-15' }, t.athlete), 200);
   expect('contractStart not a date refused', await patchAth('ath-contract', { contractMinutes: 45, contractStart: 'Nov 3' }, t.parent), 403);
   expect('contractStart as a number refused', await patchAth('ath-contract', { contractMinutes: 45, contractStart: 20261103 }, t.parent), 403);
