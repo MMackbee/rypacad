@@ -28,9 +28,12 @@ test('one pay button per athlete, the next steps, child-login instructions, no w
   expect(r.text()).toContain('Today you pay the amount on each button for November, then monthly from Dec 1.');
   expect(r.text()).toContain('Booking opens Sat, Oct 10 at 7 AM');
   expect(r.text()).toContain('Elite books right away once paid');
-  expect(r.text()).toContain('you will be brought back here');
-  expect(r.text()).toContain('reese@email.com');
-  expect(r.text()).toContain("There's no welcome email");
+  // UX review P-09 / CHILD-3: where Stripe really returns, the child's real buttons, the full address.
+  expect(r.text()).toContain('After you pay, Stripe sends you to your family page. It shows "Confirming your payment..." for up to a minute. Paying for more than one athlete? The others wait there under Pay now.');
+  expect(r.text()).toContain(`Reese signs in at ${window.location.host}/portal/signin with reese@email.com. Continue with Google is quickest. With a password: tap Create a login, open the email from noreply@`);
+  expect(r.text()).toContain(", then tap I've verified.");
+  expect(r.text()).toContain("There's no welcome email. Your family page always shows what's paid and what's left to do.");
+  expect(r.text()).not.toMatch(/brought back here|Check again|this screen is your receipt/);
   expect(r.button('Start the walkthrough')).toBeNull();
   await r.click('Go to your family');
   expect(finished).toEqual(['/portal/family']);
@@ -81,6 +84,9 @@ test('athlete mode goes home', async () => {
   const r = await renderScreen(
     <RegistrationSuccess bare mode="signup" form={form({ mode: 'athlete', athletes: [form().athletes[0]] })} result={{ householdId: 'h1', athleteIds: ['a1'] }} account={{ email: 'j@email.com' }} onFinish={(p) => finished.push(p)} />
   );
+  expect(r.text()).toContain('After you pay, Stripe sends you to your home page.');
+  expect(r.text()).toContain('Your home page always shows');
+  expect(r.text()).not.toContain('more than one athlete');
   await r.click('Go to your home');
   expect(finished).toEqual(['/portal/home']);
   await r.unmount();

@@ -4,7 +4,8 @@ import Button from '../components/Button';
 import PayButton from '../components/PayButton';
 import PhoneFrame from '../components/PhoneFrame';
 import { Body, Card, ScreenTitle, SectionLabel, Tick } from '../components/Primitives';
-import { VERIFY_EMAIL_SENDER } from '../data/authCopy';
+import { VERIFIED, VERIFY_EMAIL_SENDER } from '../data/authCopy';
+import { CONFIRMING, PAY_NOW } from '../data/billingCopy';
 import { BOOKING_OPENS_LABEL, bookingOpen } from '../data/calendar';
 import { packageById, PRICES_RELEASED } from '../data/packages';
 
@@ -44,12 +45,17 @@ export default function RegistrationSuccess({ bare = false, mode = 'signup', for
   const anyElite = rows.some((r) => r.pkg && r.pkg.kind === 'elite');
   const logins = rows.filter((r) => r.loginEmail && r.ownLogin);
   const home = athleteMode ? '/portal/home' : '/portal/family';
+  const page = athleteMode ? 'home page' : 'family page';
   const next = [
     ...(anyToken && !bookingOpen(Date.now()) ? [`Booking opens ${BOOKING_OPENS_LABEL} for token packages.`] : []),
     ...(anyElite ? ['Elite books right away once paid.'] : []),
-    `After you pay, Stripe brings you back - you will be brought back here and see "Confirming your payment..." until it clears.`,
-    ...logins.map((r) => `${r.name.trim()} signs in at /portal/signin with ${r.loginEmail.trim().toLowerCase()} - Continue with Google, or Create a login with that email - then taps Check again.`),
-    "There's no welcome email - this screen is your receipt.",
+    // UX review P-09: Stripe returns to the family page (home for an
+    // athlete), not here, and this screen is gone after the next tap.
+    `After you pay, Stripe sends you to your ${page}. It shows "${CONFIRMING}" for up to a minute.` +
+      (!athleteMode && rows.length > 1 ? ` Paying for more than one athlete? The others wait there under ${PAY_NOW}.` : ''),
+    ...logins.map((r) => `${r.name.trim()} signs in at ${window.location.host}/portal/signin with ${r.loginEmail.trim().toLowerCase()}. ` +
+      `Continue with Google is quickest. With a password: tap Create a login, open the email from ${VERIFY_EMAIL_SENDER}, then tap ${VERIFIED}.`),
+    `There's no welcome email. Your ${page} always shows what's paid and what's left to do.`,
   ];
   return (
     <PhoneFrame
