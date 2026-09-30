@@ -144,6 +144,8 @@ test('facility add-on: $300 line, elite sends empty tokens', async () => {
       {db: fakeDb(docs), stripe: fakeStripe(calls, 30000)});
   await good.p;
   assert.equal(calls[0].client_reference_id, 'novak__fac__facility');
+  assert.equal(calls[0].success_url, 'https://portal.test/portal/family' +
+      '?paid=fac&product=facility&cs={CHECKOUT_SESSION_ID}');
   assert.equal(calls[0].line_items[0].price, 'price_fac');
   assert.equal(calls[0].line_items[1].price_data.product_data.name,
       'Facility access - November 2026, prepaid');

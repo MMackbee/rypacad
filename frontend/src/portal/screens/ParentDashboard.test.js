@@ -72,3 +72,46 @@ test('?paid= shows the confirming state, then payment received', async () => {
   expect(c.text()).toMatch(/Payment received - /);
   await c.unmount();
 });
+
+describe("What's next under Payment received (owner decision 2026-09-30)", () => {
+  let clock;
+  beforeEach(() => { clock = jest.spyOn(Date, 'now').mockReturnValue(Date.parse('2026-10-05T18:00:00Z')); });
+  afterEach(() => clock.mockRestore());
+
+  test('token package: opens Oct 10, sessions Nov 3, the unclaimed login - no season link for a parent', async () => {
+    mockConfirm = { state: 'confirmed', billingStatus: 'active', packageId: 't-12' };
+    const r = await renderScreen(<ParentDashboard bare />, { path: '/portal/family?paid=a1&cs=cs_1' });
+    const text = r.text();
+    expect(text).toContain("What's next");
+    expect(text.indexOf('Payment received')).toBeLessThan(text.indexOf("What's next"));
+    expect(text).toContain('Booking opens Sat, Oct 10 at 7 AM - book any training block, tournament or Phil session then.');
+    expect(text).toContain('Sessions start Tue, Nov 3.');
+    expect(text).toContain(`Jordan can sign in at ${window.location.host}/portal/signin with jordan@email.com.`);
+    expect(text).not.toContain('See the season calendar');
+    expect(text).not.toMatch(/we emailed|we'll email|check your email/i);
+    await r.unmount();
+  });
+
+  test('Elite: book now, and the button opens the book-for-kid chooser for that athlete', async () => {
+    mockConfirm = { state: 'confirmed', billingStatus: 'active', packageId: 'elite' };
+    const r = await renderScreen(<ParentDashboard bare />, { path: '/portal/family?paid=a2' });
+    expect(r.text()).toContain('Reese can book now - training, tournaments and Phil, up to 45 days ahead.');
+    expect(r.text()).not.toContain('sign in at');
+    expect(r.text()).not.toContain('Book for Reese');
+    await r.click("Book Reese's first session");
+    expect(r.text()).toContain('Book for Reese');
+    await r.unmount();
+  });
+
+  test('no card while confirming, and none for a facility add-on payment', async () => {
+    mockConfirm = { state: 'confirming', billingStatus: 'pending', packageId: null };
+    const r = await renderScreen(<ParentDashboard bare />, { path: '/portal/family?paid=a1' });
+    expect(r.text()).not.toContain("What's next");
+    await r.unmount();
+    mockConfirm = { state: 'confirmed', billingStatus: 'active', packageId: 't-12' };
+    const f = await renderScreen(<ParentDashboard bare />, { path: '/portal/family?paid=a1&product=facility&cs=cs_2' });
+    expect(f.text()).toMatch(/Payment received - /);
+    expect(f.text()).not.toContain("What's next");
+    await f.unmount();
+  });
+});
