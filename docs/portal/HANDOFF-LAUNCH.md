@@ -223,3 +223,48 @@ The combined emulator runs from `rypacad` (Firestore 8080, Auth 9099,
 Functions 5001) and a dev server on :3003 with emulators and a stand-in
 Calendly URL. Emulator rules changes need an emulator restart for the probe
 project.
+
+## 7. Self-test on the local emulator (2026-09-30, code = production)
+
+PASSED: all six functions harnesses (stripe-launch, family, calendly with
+`node --env-file=.env.local`, lane, sweep, notifications); the 40-family
+sign-up burst (double taps, email races, claim race, 79 simultaneous Stripe
+confirmations); UI sign-up with verification, 5-step registration, future-DOB
+and guardian-email refusals, double-tap submit = one family, receipt,
+simulated payment -> active + 6 prepaid November tokens, Elite parent booking,
+token athlete gated until Oct 10, Phil booking, cancel with confirm releases
+the spot, invited child claims on a fresh sign-in and books for themself,
+Calendly booking appears on My Schedule at the right Chicago time, no
+horizontal overflow at 375px.
+
+ISSUES FOUND (sent to a UX review for a verdict; see section 8):
+1. Token athlete sees "Booking opens Sat, Oct 10 at 7 AM" AND "Booking for
+   Tuesday, Nov 3 opens 7 AM on Sunday, Oct 4." (window date ignores the gate).
+2. Invited child: after creating a login, "Continue to sign-up" opens the
+   parent/18+ registration; no "My parent enrolled me" path; the invite is only
+   claimed after signing out and back in.
+3. No same-time double-booking guard (training 4 PM + Phil 4 PM, same athlete).
+4. Training books on one tap; Phil needs a Reserve confirm (inconsistent).
+5. Booking confirmation drops AM/PM ("Tuesday, Nov 3 · 4:00").
+6. "A confirmation is on its way to <email>" while SMTP is off.
+7. Phil/Yannick day strip opens on today (empty until Nov 3) and cannot be
+   scrolled on desktop.
+8. Yannick copy says "spends one token" to Elite families.
+9. Reservations tags Elite bookings "NEXT PERIOD".
+10. Package cards say "/ period" though billing is monthly.
+
+## 8. Background work started 2026-09-30 evening
+
+- UX review (workflow ux-launch-review): verdict + must-fix list before the email.
+- Performance fixes (workflow perf-launch-fixes): 8 items from the verified
+  plan (preconnect auth origins, router transitions, ChunkLoadError reload,
+  route prefetch; fewer/parallel Firestore reads) on branches perf/wave-a,
+  perf/wave-b merged to perf/launch (worktree ../wt-perf). Route code
+  splitting was ALREADY live (26 chunks); do not redo it.
+- Month/Week toggle (workflow calendar-week-toggle, resumed after the usage
+  limit): branch ui/view-toggle (../wt-toggle); its gate also fixes the desktop
+  week-strip scrolling.
+- Testing guide (workflow launch-testing-guide): scratchpad testing-guide.html.
+Merge order when all are green: perf/launch, ui/view-toggle, UX fixes, then
+full jest + build + a browser pass on a production build against the
+emulator, then the owner pushes.
