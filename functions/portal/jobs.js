@@ -217,6 +217,23 @@ async function remindTokenExpiry(store, clock, summary) {
 }
 
 /**
+ * The `grace-expiring` notice's subject. A bonus token is warned about on
+ * its own (the doc id). Purchased single tokens (reason 'single-purchase',
+ * rulings 2026-09-29/30) all expire on the season's last day, so an athlete
+ * holding several gets ONE notice: the key is the athlete and that day.
+ * @param {string} docId The graceTokens doc id.
+ * @param {?Object} grace The graceTokens doc body.
+ * @return {string} The `sendNotice` subjectKey.
+ */
+function graceNoticeKey(docId, grace) {
+  const g = grace || {};
+  if (g.reason === 'single-purchase') {
+    return `${g.athleteId}_single_${g.expiresAt}`;
+  }
+  return docId;
+}
+
+/**
  * The `grace-expiring` half of the expiry job. Consumption is derived, never
  * stored: a grace token is spent when some non-cancelled booking carries
  * `graceTokenId == id`.
@@ -239,7 +256,8 @@ async function remindGraceExpiry(store, clock, summary) {
         (d) => (d.data() || {}).status !== 'cancelled');
     if (consumed) continue;
     const athlete = await athletes(grace.athleteId);
-    const copy = notices.graceExpiring({athlete, expiresAt: grace.expiresAt});
+    const copy = notices.graceExpiring({athlete, expiresAt: grace.expiresAt,
+      reason: grace.reason});
     const res = await notify.sendNotice({
       kind: 'grace-expiring',
       category: 'billing',
@@ -247,7 +265,7 @@ async function remindGraceExpiry(store, clock, summary) {
           (athlete && athlete.householdId) || null,
       athleteId: grace.athleteId || null,
       sessionId: grace.sourceSessionId || null,
-      subjectKey: doc.id,
+      subjectKey: graceNoticeKey(doc.id, grace),
       title: copy.title,
       body: copy.body,
     });
@@ -281,6 +299,7 @@ async function runTokenExpiryReminders(args) {
 module.exports = {
   EXPIRY_LEAD_DAYS,
   addDays,
+  graceNoticeKey,
   runSessionReminders,
   runTokenExpiryReminders,
 };
