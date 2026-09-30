@@ -268,3 +268,29 @@ ISSUES FOUND (sent to a UX review for a verdict; see section 8):
 Merge order when all are green: perf/launch, ui/view-toggle, UX fixes, then
 full jest + build + a browser pass on a production build against the
 emulator, then the owner pushes.
+
+## 9. Shipped in the 2026-09-30 evening push (portal/r3 8000608)
+
+- Performance: auth preconnects, router transitions (no black screen),
+  one reload on a stale chunk after a deploy, route prefetch, fewer and
+  parallel Firestore reads (family home, child profile, booking, coaching).
+- Month/Week toggle on Book a Session, coach Sessions, Commitment Contract,
+  Coaching (Phil/Yannick, week default) and the season calendar; the
+  desktop-unscrollable day strip is gone.
+- The 9 UX must-fixes (single token greyed "On sale before Oct 10" via
+  SINGLE_ON_SALE=false in data/packages.js - flip it when one-time checkout
+  ships; package step auto-advance + error naming missing athletes; invited
+  child routed to the verify screen; verify-again retry at Pay; "/ month"
+  and token explainer; receipt directions and pay terms; consent line;
+  locked day says Sat Oct 10; phone footer + 16px inputs).
+- Elite daily cap is per type: one training, one tournament, one Phil a day
+  (Saturday 9 AM training + tournament now both bookable).
+- "What's next" card after a confirmed payment (token vs Elite; none for
+  the facility add-on, which now returns with &product=facility).
+- Checkout allows promotion codes: sibling code SIBLING, 10% off, forever,
+  all products (Phil creates it in Stripe test and live).
+- Needs: functions deploy of createCheckoutSession, then the push. No rules
+  change. Owner decisions still open: billing after Feb 27, injury waiver,
+  training one-tap vs Reserve, same-time bookings, cancellation rule.
+- Separate: the one-time single token build (single/integration) is not in
+  this push; it targets Oct 7.
