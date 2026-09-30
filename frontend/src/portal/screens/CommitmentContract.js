@@ -4,15 +4,15 @@ import BottomTabBar from '../components/BottomTabBar';
 import Button from '../components/Button';
 import NumericField from '../components/NumericField';
 import PhoneFrame from '../components/PhoneFrame';
-import ContractCalendar from '../components/ContractCalendar';
 import { DayGridLegend } from '../components/DayGridCell';
-import { Body, Card, ErrorNotice, ScreenTitle, Tick } from '../components/Primitives';
+import { RangeCalendarCard } from '../components/CalendarCard';
+import { Body, ErrorNotice, ScreenTitle, Tick } from '../components/Primitives';
 import SavedToast from '../components/SavedToast';
 import SkeletonCard from '../components/Skeleton';
 import { useContract, usePracticeLog } from '../hooks';
 // todayISO is a pure calendar helper, not response data — like poolFor in
 // BookSession, the helpers stay importable; data travels through the hook seam.
-import { todayISO } from '../data/calendar';
+import { monthBounds, todayISO } from '../data/calendar';
 
 /**
  * 07 · Commitment Contract - athlete. ⭐
@@ -166,24 +166,29 @@ export default function CommitmentContract({
       <div style={{ padding: '0 22px 20px', display: 'flex', flexDirection: 'column', gap: 14, position: 'relative' }}>
         <HeroCard state={state} stats={stats} behind={behind} complete={complete} />
 
-        <Card large>
-          {/* FullCalendar draws the real current month; we only paint states.
-              Keyed by the logged count so a fulfilled day repaints the moment
-              the hook re-derives - the grid otherwise held its mount-time
-              painting until a full reload (QA 2026-09-08 #5). */}
-          <ContractCalendar
-            key={`${data?.month?.start}-${stats?.logged ?? 0}`}
-            start={data?.month?.start}
-            dayStates={dayStates}
-            onSelectDay={setSheetDay}
-          />
+        {/* The shared Month/Week card (owner request 2026-09-30). Month is
+            this screen's default: FullCalendar draws the real current month;
+            we only paint states. Week shows one row of the same month (days
+            outside it blank), handed the same dayStates and onSelectDay.
+            gridKey carries the logged count into the month grid's key so a
+            fulfilled day repaints the moment the hook re-derives - the grid
+            otherwise held its mount-time painting until a full reload
+            (QA 2026-09-08 #5). */}
+        <RangeCalendarCard
+          rangeStart={data?.month?.start}
+          rangeEnd={data?.month?.start ? monthBounds(data.month.start).end : undefined}
+          dayStates={dayStates}
+          onSelectDay={setSheetDay}
+          blankOutsideRange
+          gridKey={stats?.logged ?? 0}
+        >
           <Body size={11} tone={color.textTertiary} style={{ marginTop: 13 }}>
             {data?.caption}
           </Body>
           <div style={{ marginTop: 12 }}>
             <DayGridLegend />
           </div>
-        </Card>
+        </RangeCalendarCard>
 
         <StatsRow stats={displayStats} />
       </div>
