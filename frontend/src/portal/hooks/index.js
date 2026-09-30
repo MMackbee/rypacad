@@ -169,6 +169,7 @@ import {
   parseTimeToMinutes,
   pickDueDates,
   todayISO,
+  windowOpensOn,
 } from '../data/calendar';
 import {
   ATHLETE_DETAIL,
@@ -824,6 +825,19 @@ export function useSchedule({ variant = 'upcoming', today = todayISO(), practice
 }
 
 /**
+ * bookRecurring's per-week outcomes: createBooking's typed refusal of ONE
+ * week -> the skip reason the Repeat summary names (anything untyped that
+ * is not "already booked" is 'error', with its message - never 'full').
+ * The STOP reasons concern the whole family, so the loop rethrows them.
+ */
+const REPEAT_SKIP_REASON = new Map([
+  ['outside-window', 'not open yet'],
+  ['no-tokens-left', 'period limit'],
+  ['one-per-day', 'one per day'],
+]);
+const REPEAT_STOP_REASONS = new Set(['membership-inactive', 'billing-pending', 'booking-not-open']);
+
+/**
  * GET /schedule/availability + GET /athletes/:id/tokens (05).
  *
  * Availability comes from the generated season, so what the screen shows is the
@@ -982,22 +996,25 @@ export function useBooking({ variant = 'open', today = todayISO(), practice = fa
 
   /**
    * Recurring booking (owner's ruling, TEAM.md "Recurring booking pins";
-   * cap math rewritten Sprint 12, contract v2.0): book the same weekday+
-   * time weekly, from the week AFTER `slot` through `untilISO`, capped at
-   * the athlete's token grant for whichever PERIOD each candidate date
-   * falls in — a period whose tokens are exhausted is skipped week by week
-   * until the next period's grant applies (periods are ~32/45-day cycles
-   * now, not calendar months, but the "skip forward until it resets" shape
-   * is unchanged). Full sessions, missing weeks and already-booked sessions
-   * skip with a reason. Recurrence is a group-flow-only feature (specialist
-   * slots are filtered out of the range query below), so the mental
-   * frequency knob never applies here. Every instance is the same
-   * individual booking transaction as book(); nothing new is stored.
+   * rewritten 2026-09-30 after "Repeat weekly does nothing"): book the same
+   * weekday+time weekly, from the week AFTER `slot` through `untilISO`,
+   * never past the athlete's booking window (openThrough - the screen asks
+   * for exactly that). Nothing is held beyond it: no standing reservations.
+   * Each week is a plain createBooking with the SAME checks a single tap
+   * runs - window, Elite's one-a-day, period tokens with waitlist holds and
+   * issued grants, grace tokens - so no running tally here can disagree
+   * with them. A refusal of one week is a skip with its own reason
+   * (REPEAT_SKIP_REASON); one that concerns the whole family (membership
+   * paused, payment pending, not open yet) is rethrown. Recurrence is a
+   * group-flow-only feature (specialist slots are filtered out of the range
+   * query below), so the mental frequency knob never applies here.
    *
-   * Returns { booked: [{date,id}], skipped: [{date,reason}] }.
+   * Returns { booked: [{date,id}], skipped: [{date,reason,message?,opensOn?}],
+   * windowEnd, next: {date,opensOn} | null } - `next` is the first week past
+   * the window (inside the season) and the day it opens at 7 AM.
    */
   const bookRecurring = async (slot, { athleteId, untilISO } = {}) => {
-    if (!live) return { booked: [], skipped: [], simulated: true };
+    if (!live) return { booked: [], skipped: [], windowEnd: null, next: null, simulated: true };
     if (!identity) {
       throw new LiveDataError(ERR.INVALID, 'bookRecurring() called before booking data loaded.');
     }
@@ -1011,52 +1028,29 @@ export function useBooking({ variant = 'open', today = todayISO(), practice = fa
 
     const athlete = await fetchAthlete(forAthleteId);
     const pkg = athlete.packageId ? await fetchPackage(athlete.packageId) : null;
-    const household = athlete.householdId ? await fetchHousehold(athlete.householdId) : null;
-    const anchorDay = normalizeAnchorDay(household?.periodAnchorDay);
-    // Sprint 20 (K03 + spec 4.4/5): the gates a single booking runs, ONCE
-    // before the loop - paid status, the Oct 10 gate, and the package's
-    // booking window as the loop's outer bound (weeks past it are reported
-    // 'not open yet' and never attempted; today this loop skipped the
-    // window check entirely).
+    // Sprint 20 (K03 + spec 4.4/5): the family-wide gates ONCE before any
+    // per-week read - paid status and the Oct 10 gate - and the package's
+    // booking window as the loop's outer bound.
     assertAthleteBillingActive(athlete);
     assertBookingOpen(pkg);
-    const windowEnd = openThrough(new Date(), windowDaysFor(pkg));
-    // Elite (pkg.tokens === null) has no pool to exhaust - Infinity skips
-    // the "period limit" branch below entirely, same as the cap check in
-    // live.js skipping outright when pkg.tokens === null. No package at all
-    // means 0 tokens: every week skips at 'period limit' (code review
-    // 2026-09-04, finding 1's "limit > 0" lesson still applies - a real
-    // zero is not unlimited).
-    const limit = pkg ? (pkg.tokens === null ? Infinity : pkg.tokens ?? 0) : 0;
-    const bookings = await fetchBookings(
-      forAthleteId,
-      identity.role === 'parent' ? { householdId: identity.householdId } : {}
+    const windowDays = windowDaysFor(pkg);
+    const windowEnd = openThrough(new Date(), windowDays);
+    // Sessions already held are named 'already booked' up front, rather than
+    // tripping Elite's one-a-day or a token count inside createBooking first.
+    const have = new Set(
+      (await fetchBookings(forAthleteId, identity.role === 'parent' ? { householdId: identity.householdId } : {}))
+        .filter((b) => b.status !== 'cancelled')
+        .map((b) => b.sessionId)
     );
-    // Per-PERIOD spend (a booking spends the period its SESSION DATE falls
-    // in, contract v2.0 §6), and which sessions are already held - both
-    // derived, same as the token position itself (no stored counters).
-    // Contract v2.1, pin E's seam amendment: a grace-charged booking
-    // (graceTokenId set) never counts as a period spend - the SAME
-    // exclusion assertPeriodTokensLeft/tokensFor both apply, kept in
-    // lockstep here so this tally can never diverge from what actually
-    // gates a real booking.
-    const tally = new Map();
-    const have = new Set();
-    for (const b of bookings) {
-      if (b.status === 'cancelled') continue;
-      have.add(b.sessionId);
-      if (b.graceTokenId) continue;
-      const key = b.periodKey ?? periodFor(b.date, anchorDay).periodKey;
-      tally.set(key, (tally.get(key) || 0) + 1);
-    }
 
     // Every candidate week's sessions in ONE range query, matched locally —
     // one query per week was ~25 serial round-trips (finding 8a).
     const firstDate = addDaysISO(slot.date, 7);
+    const lastDate = untilISO < windowEnd ? untilISO : windowEnd;
     const sessionsByDate = new Map();
     let lastSessionDate = null;
-    if (firstDate <= untilISO) {
-      for (const s of await fetchSessionsInRange(firstDate, untilISO)) {
+    if (firstDate <= lastDate) {
+      for (const s of await fetchSessionsInRange(firstDate, lastDate)) {
         if (!isGroupBookable(s)) continue; // recurrence is a group-flow feature
 
         const list = sessionsByDate.get(s.date) ?? [];
@@ -1066,80 +1060,76 @@ export function useBooking({ variant = 'open', today = todayISO(), practice = fa
       }
     }
     // Stop at the last scheduled session rather than the requested end date:
-    // "rest of the season" means as far as the schedule actually goes, and
-    // weeks past it are not real skips worth reporting.
-    const endDate = lastSessionDate && lastSessionDate < untilISO ? lastSessionDate : untilISO;
+    // weeks past the end of the schedule are not real skips worth reporting.
+    const endDate = lastSessionDate && lastSessionDate < lastDate ? lastSessionDate : lastDate;
+    // The first week past the window: nothing holds it, so the screen says
+    // when it opens instead.
+    let nextDate = firstDate;
+    while (nextDate <= windowEnd) nextDate = addDaysISO(nextDate, 7);
+    const next = nextDate <= SEASON_BOUNDS.end ? { date: nextDate, opensOn: windowOpensOn(nextDate, windowDays) } : null;
 
     const booked = [];
     const skipped = [];
-    for (let date = firstDate; date <= endDate; date = addDaysISO(date, 7)) {
-      if (date > windowEnd) {
-        skipped.push({ date, reason: 'not open yet' });
-        continue;
-      }
-      const periodKey = periodFor(date, anchorDay).periodKey;
-      if ((tally.get(periodKey) || 0) >= limit) {
-        skipped.push({ date, reason: 'period limit' });
-        continue;
-      }
-      const match = (sessionsByDate.get(date) ?? []).find(
-        (s) => s.time === slot.time && s.type === slot.type && s.status !== 'cancelled'
-      );
-      if (!match) {
-        skipped.push({ date, reason: 'no session' });
-        continue;
-      }
-      if (have.has(match.id)) {
-        skipped.push({ date, reason: 'already booked' });
-        continue;
-      }
-      if ((match.booked ?? 0) >= (match.capacity ?? 0)) {
-        skipped.push({ date, reason: 'full' });
-        continue;
-      }
-      try {
-        // skipCapCheck: this loop maintains the running tally itself (the
-        // writer's own cap query per instance would be redundant reads);
-        // silent: one invalidation bump AFTER the loop instead of a refetch
-        // storm per iteration (finding 8b).
-        const result = await createBooking(
-          {
-            athleteId: forAthleteId,
-            sessionId: match.id,
-            date: match.date,
-            type: match.type,
-            householdId: identity.householdId,
-          },
-          { skipCapCheck: true, silent: true }
+    try {
+      for (let date = firstDate; date <= endDate; date = addDaysISO(date, 7)) {
+        const match = (sessionsByDate.get(date) ?? []).find(
+          (s) => s.time === slot.time && s.type === slot.type && s.status !== 'cancelled'
         );
-        // Contract v2.1: createBooking still tries a grace token first even
-        // under skipCapCheck (a real one is honored if it covers the date) -
-        // a grace-charged instance must NOT inflate this loop's own tally,
-        // matching the seam amendment above. A race that fills the session
-        // between this loop's own pre-check and the transaction resolves as
-        // 'waitlisted' instead of 'confirmed' - reported as skipped, not
-        // counted as booked (contract v2.1, pin F).
-        if (result.status === 'waitlisted') {
+        if (!match) {
+          skipped.push({ date, reason: 'no session' });
+          continue;
+        }
+        if (have.has(match.id)) {
+          skipped.push({ date, reason: 'already booked' });
+          continue;
+        }
+        if ((match.booked ?? 0) >= (match.capacity ?? 0)) {
           skipped.push({ date, reason: 'full' });
           continue;
         }
-        booked.push({ date: match.date, id: match.id });
-        if (result.chargedFrom !== 'grace') {
-          tally.set(periodKey, (tally.get(periodKey) || 0) + 1);
+        try {
+          // Every check a single booking runs (no skipCapCheck, K03); silent:
+          // one invalidation bump in the finally below instead of a refetch
+          // storm per iteration (finding 8b). The window caps this at ~7 weeks.
+          const result = await createBooking(
+            {
+              athleteId: forAthleteId,
+              sessionId: match.id,
+              date: match.date,
+              type: match.type,
+              householdId: identity.householdId,
+            },
+            { silent: true }
+          );
+          // A race that fills the session between the pre-check above and the
+          // transaction resolves as 'waitlisted' instead of 'confirmed' -
+          // reported as skipped, not counted as booked (contract v2.1, pin F).
+          if (result.status === 'waitlisted') {
+            skipped.push({ date, reason: 'full' });
+            continue;
+          }
+          booked.push({ date: match.date, id: match.id });
+          have.add(match.id);
+        } catch (err) {
+          if (REPEAT_STOP_REASONS.has(err?.reason)) throw err;
+          const reason =
+            REPEAT_SKIP_REASON.get(err?.reason) ?? (/already/i.test(err?.message || '') ? 'already booked' : 'error');
+          skipped.push({
+            date,
+            reason,
+            ...(reason === 'not open yet' ? { opensOn: windowOpensOn(date, windowDays) } : {}),
+            ...(reason === 'error' ? { message: err?.message || null } : {}),
+          });
         }
-        have.add(match.id);
-      } catch (err) {
-        skipped.push({
-          date,
-          reason: /already/i.test(err?.message || '') ? 'already booked' : 'full',
-        });
+      }
+    } finally {
+      // Weeks booked before a family-wide refusal are real bookings too.
+      if (booked.length) {
+        bump('bookings');
+        bump('sessions');
       }
     }
-    if (booked.length) {
-      bump('bookings');
-      bump('sessions');
-    }
-    return { booked, skipped };
+    return { booked, skipped, windowEnd, next };
   };
 
   return { ...state, book, bookRecurring, bookingFor: identity ? identity.role : null };
