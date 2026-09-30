@@ -181,6 +181,8 @@ test('a lapsed household is lifted only when every sibling is billed',
           .find((w) => 'membership.status' in w.data);
       assert.deepEqual([lifted.data['membership.status'],
         lifted.data['membership.lastEventId']], ['active', 'evt_x']);
+      assert.equal(byPath(ok.writes, 'households/quist').length, 1,
+          'the lift and the customer link are one household write');
 
       DATA.athletes.legacy = {householdId: 'quist', packageId: 't-6'};
       const no = recorder();

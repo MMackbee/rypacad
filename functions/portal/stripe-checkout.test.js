@@ -142,6 +142,17 @@ test('linkCustomer: stripeCustomerId only when absent; null writes nothing',
       const none = recorder();
       c.linkCustomer(none.tx, {ref: {path: 'households/h1'}, data: {}}, null);
       assert.equal(none.writes.length, 0);
+      const both = recorder();
+      c.linkCustomer(both.tx, {ref: {path: 'households/h1'}, data: {}},
+          'cus_new', {'membership.status': 'active'});
+      assert.equal(both.writes.length, 1, 'one household write');
+      assert.deepEqual([both.writes[0].data['membership.status'],
+        both.writes[0].data.stripeCustomerId], ['active', 'cus_new']);
+      const extraOnly = recorder();
+      c.linkCustomer(extraOnly.tx, {ref: {path: 'households/h1'}, data: {}},
+          null, {'membership.status': 'active'});
+      assert.deepEqual(extraOnly.writes.map((w) => Object.keys(w.data)),
+          [['membership.status']]);
     });
 
 run();

@@ -121,13 +121,11 @@ async function applySinglePurchase(tx, args) {
     }
     tx.update(athleteRef, patch);
   }
-  linkCustomer(tx, hh, customerId);
   // past_due is never touched: the card on the family's subscription still
-  // needs updating, and a token purchase does not pay that invoice.
-  if (lift) {
-    tx.update(hh.ref, membershipPatch({status: 'active',
-      lastEventId: event.id}));
-  }
+  // needs updating, and a token purchase does not pay that invoice. The
+  // lift rides in the customer link's update (one household write).
+  linkCustomer(tx, hh, customerId, lift ?
+      membershipPatch({status: 'active', lastEventId: event.id}) : undefined);
 
   const purchasedOn = lib.chicagoDateFromUnix(event.created);
   let outcome = 'issued-single';

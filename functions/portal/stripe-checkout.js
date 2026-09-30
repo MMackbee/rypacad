@@ -86,15 +86,20 @@ async function readLineItems(stripe, sessionId, opts) {
 /**
  * Link a Stripe customer to the household: always added to
  * `stripeCustomerIds`, and `stripeCustomerId` set only when absent.
+ * `extra` (a household patch, e.g. a membership lift) rides in the SAME
+ * update, so the household doc is written once per transaction.
  * @param {!Object} tx The transaction.
  * @param {!Object} hh The household `{id, ref, data}`.
- * @param {?string} customerId The session's customer (null == no write).
+ * @param {?string} customerId The session's customer (null == no link).
+ * @param {!Object=} extra More household fields to write.
  */
-function linkCustomer(tx, hh, customerId) {
-  if (!customerId) return;
-  const hp = {stripeCustomerIds: FieldValue.arrayUnion(customerId)};
-  if (!hh.data.stripeCustomerId) hp.stripeCustomerId = customerId;
-  tx.update(hh.ref, hp);
+function linkCustomer(tx, hh, customerId, extra) {
+  const hp = Object.assign({}, extra);
+  if (customerId) {
+    hp.stripeCustomerIds = FieldValue.arrayUnion(customerId);
+    if (!hh.data.stripeCustomerId) hp.stripeCustomerId = customerId;
+  }
+  if (Object.keys(hp).length) tx.update(hh.ref, hp);
 }
 
 /**
