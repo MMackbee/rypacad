@@ -297,11 +297,17 @@ function waitlistExpired(args) {
  */
 function paymentReceived(args) {
   const open = Boolean(args && args.bookingOpen);
+  // QA 2026-09-30: a family paying for several children got identical
+  // notices, so the child is named when known.
+  const name = args && args.athleteName ?
+      firstNameOf({name: args.athleteName}) : null;
+  const who = name ? `Payment received for ${name}` : 'Payment received';
+  const ready = name ? `${name} is all set to book.` :
+      'you\'re all set to book.';
   return {
-    title: 'Payment received',
-    body: open ?
-      'Payment received — you\'re all set to book.' :
-      'Payment received — booking opens Sat, Oct 10 at 7 AM.',
+    title: who,
+    body: open ? `${who} — ${ready}` :
+      `${who} — booking opens Sat, Oct 10 at 7 AM.`,
   };
 }
 

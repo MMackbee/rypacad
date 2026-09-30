@@ -163,8 +163,10 @@ async function otherTierLive(tx, db, householdId, athleteId) {
  * @return {!Promise<void>} Resolves when recorded.
  */
 async function sendPaymentReceived(args) {
-  const copy = notices.paymentReceived(
-      {bookingOpen: lib.bookingOpen(Date.now(), args.pkg)});
+  const copy = notices.paymentReceived({
+    bookingOpen: lib.bookingOpen(Date.now(), args.pkg),
+    athleteName: args.athleteName || null,
+  });
   try {
     await notify.sendNotice({
       kind: 'membership', category: 'billing',
