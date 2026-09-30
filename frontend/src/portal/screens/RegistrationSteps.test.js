@@ -55,6 +55,18 @@ test('consent copy switches to the adult variant', async () => {
   await a.unmount();
 });
 
+test('the signature line claims only the consents ticked above, no injury waiver', async () => {
+  const props = { consents: { dataCollection: true, videoCapture: true }, onChange: () => {}, signatureName: '', onSignatureChange: () => {}, onOpenInfo: () => {}, showErrors: false };
+  const p = await renderScreen(<ConsentStep mode="parent" {...props} />);
+  expect(p.text()).toContain('Typing your name signs the consents you ticked above, for every athlete listed. Re-confirmed each year.');
+  expect(p.text()).not.toContain('injury');
+  await p.unmount();
+  const a = await renderScreen(<ConsentStep mode="athlete" {...props} />);
+  expect(a.text()).toContain('Typing your name signs the consents you ticked above. Re-confirmed each year.');
+  expect(a.text()).not.toContain('every athlete listed');
+  await a.unmount();
+});
+
 test('consent errors are marked for the scroll-to-first-error', async () => {
   const r = await renderScreen(<ConsentStep mode="parent" consents={{ dataCollection: false, videoCapture: true }} onChange={() => {}}
     signatureName="" onSignatureChange={() => {}} onOpenInfo={() => {}} showErrors />);
