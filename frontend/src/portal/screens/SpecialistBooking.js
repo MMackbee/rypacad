@@ -27,6 +27,7 @@ import {
 import { seedSpecialistDays, useBooking, useHouseholdAthletes, useMembership, useSpecialistSlots } from '../hooks';
 import { SPECIALISTS } from '../data/specialists';
 import { windowDaysFor } from '../data/packages';
+import { graceSpendLabel } from '../data/singleToken';
 // Pure calendar/season helpers per the seam rule already established in
 // BookSession.js/CommitmentContract.js/TourStandings.js - data still travels
 // through the hook seam below; these are formatting helpers, not response
@@ -856,7 +857,7 @@ function Confirmed({ bare, booked, onBack }) {
 function spendLabelFor(tokens) {
   if (!tokens) return '1 token';
   if (tokens.unlimited) return 'nothing — included with Elite';
-  if ((tokens.grace?.length ?? 0) > 0) return 'a bonus token';
+  if ((tokens.grace?.length ?? 0) > 0) return graceSpendLabel(tokens);
   return '1 token';
 }
 

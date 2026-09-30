@@ -423,7 +423,11 @@ export function SessionAttendance({ variant = 'pre', bare = false, onBack, sessi
   // itself needs neither (and is what the states gallery reviews); the WRITE
   // (cancelSession(sessionId)) is what still needs a real session, honestly
   // rejecting via the fallback above when there isn't one.
-  const canCancelSession = (role === 'ops' || role === 'owner') && !sessionCancelled;
+  // Single token (ruling 2026-09-29/30): a session the calendar sync cancelled
+  // can still hold confirmed bookings - 'Cancel remaining bookings' finishes it.
+  const remainingOnly = liveAttendance.sessionStatus === 'cancelled' && cancellableCount > 0 && !localCancelled;
+  const canCancelSession = (role === 'ops' || role === 'owner') && (!sessionCancelled || remainingOnly);
+  const cancelCopy = `This cancels ${cancellableCount} confirmed booking${cancellableCount === 1 ? '' : 's'}. Monthly members get a bonus token; session-token holders get their token back. This cannot be undone.`;
 
   const statusPill = sessionCancelled
     ? { tone: 'red', label: 'Cancelled' }
@@ -485,7 +489,7 @@ export function SessionAttendance({ variant = 'pre', bare = false, onBack, sessi
               style={{ boxShadow: 'none', marginTop: 12 }}
               onClick={() => setCancelSheetOpen(true)}
             >
-              Cancel session
+              {remainingOnly ? 'Cancel remaining bookings' : 'Cancel session'}
             </Button>
           ) : null}
         </div>
@@ -506,8 +510,9 @@ export function SessionAttendance({ variant = 'pre', bare = false, onBack, sessi
         {sessionCancelled ? (
           <Card tone="red" large style={{ marginBottom: 16 }}>
             <Body size={12}>
-              This session was cancelled. Every confirmed booking on it was cancelled and a bonus
-              token was added for each.
+              {remainingOnly
+                ? `This session was cancelled, but ${cancellableCount} confirmed booking${cancellableCount === 1 ? ' is' : 's are'} still on it. Cancel remaining bookings: monthly members get a bonus token; session-token holders get their token back.`
+                : 'This session was cancelled. Every confirmed booking on it was cancelled - monthly members got a bonus token; session-token holders got their token back.'}
             </Body>
           </Card>
         ) : null}
@@ -634,14 +639,10 @@ export function SessionAttendance({ variant = 'pre', bare = false, onBack, sessi
 
       {cancelSheetOpen ? (
         <CancelSheet
-          title="Cancel this session?"
-          confirmLabel="Cancel session"
-          keepLabel="Keep session"
-          summary={`This cancels ${cancellableCount} confirmed booking${
-            cancellableCount === 1 ? '' : 's'
-          } and mints ${cancellableCount} bonus token${
-            cancellableCount === 1 ? '' : 's'
-          } (one per cancelled booking). This cannot be undone.`}
+          title={remainingOnly ? 'Cancel the remaining bookings?' : 'Cancel this session?'}
+          confirmLabel={remainingOnly ? 'Cancel bookings' : 'Cancel session'}
+          keepLabel={remainingOnly ? 'Keep bookings' : 'Keep session'}
+          summary={cancelCopy}
           onClose={() => setCancelSheetOpen(false)}
           onConfirm={() => cancelSession(sessionId)}
           onCancelled={() => {
