@@ -1,18 +1,19 @@
 import React from 'react';
 import { format, parseISO } from 'date-fns';
 import { renderScreen } from './testRender';
-import { AthleteStep, ConsentStep, PackageStep, WhoStep } from './RegistrationSteps';
-import { newAthleteEntry } from '../data/signup';
+import { AthleteStep, ConsentStep, ContractStep, PackageStep, WhoStep } from './RegistrationSteps';
+import { emptyEmergencyContact, newAthleteEntry } from '../data/signup';
 import { SEASON_BOUNDS } from '../data/season';
 import { SINGLE_ON_SALE } from '../data/packages';
 
-function Harness({ mode = 'parent', athlete = {} }) {
+function Harness({ mode = 'parent', linkMode = false, athlete = {}, showErrors = true }) {
   const [athletes, setAthletes] = React.useState([{ ...newAthleteEntry(), ...athlete }]);
+  const [ec, setEc] = React.useState(emptyEmergencyContact());
   const onUpdate = (key, patch) => setAthletes((prev) => prev.map((a) => (a.key === key ? { ...a, ...patch } : a)));
   return (
-    <AthleteStep mode={mode} athletes={athletes} onUpdate={onUpdate} onAdd={() => {}} onRemove={() => {}}
-      emergencyContact="" onEmergencyContact={() => {}} medical="" onMedical={() => {}}
-      showErrors todayISO="2026-10-01" guardianEmail="dana@email.com" onSwitchToParent={() => {}} />
+    <AthleteStep mode={mode} linkMode={linkMode} athletes={athletes} onUpdate={onUpdate} onAdd={() => {}} onRemove={() => {}}
+      emergencyContact={ec} onEmergencyContact={(p) => setEc((prev) => ({ ...prev, ...p }))} medical="" onMedical={() => {}}
+      showErrors={showErrors} todayISO="2026-10-01" guardianEmail="dana@email.com" onSwitchToParent={() => {}} />
   );
 }
 
@@ -41,6 +42,37 @@ test('the medical box is 16px so iPhones do not zoom in on focus', async () => {
   const r = await renderScreen(<Harness athlete={{ name: 'Nico', dob: '2017-05-05' }} />);
   expect(r.container.querySelector('textarea').style.fontSize).toBe('16px');
   await r.unmount();
+});
+
+test('emergency contact: name, mobile and relationship fields; a name alone marks the mobile', async () => {
+  const r = await renderScreen(<Harness athlete={{ name: 'Nico', dob: '2017-05-05' }} />);
+  for (const label of ['Emergency contact name', 'Emergency contact mobile', 'Relationship to athlete']) {
+    expect(r.container.querySelector(`[aria-label="${label}"]`)).not.toBeNull();
+  }
+  expect(r.container.querySelector('[aria-label="Emergency contact mobile"]').type).toBe('tel');
+  expect(r.text()).toContain("A second adult we can call if we can't reach you.");
+  expect(r.text()).not.toContain('Add a mobile number we can call.'); // all blank is fine
+  await r.fill('Emergency contact name', 'Uncle Bo');
+  const marked = [...r.container.querySelectorAll('[data-field-error]')].map((el) => el.textContent);
+  expect(marked).toEqual(['!Add a mobile number we can call.']); // "!" is the field's alert glyph
+  await r.fill('Emergency contact name', '');
+  await r.fill('Relationship to athlete', 'Uncle');
+  expect(r.text()).toContain('Add their name, or clear the other emergency fields.');
+  await r.unmount();
+});
+
+test('emergency contact: no errors before Continue; athlete-mode and link-mode copy', async () => {
+  const quiet = await renderScreen(<Harness athlete={{ name: 'Nico', dob: '2017-05-05' }} showErrors={false} />);
+  await quiet.fill('Emergency contact name', 'Uncle Bo');
+  expect(quiet.text()).not.toContain('Add a mobile number we can call.');
+  await quiet.unmount();
+  const self = await renderScreen(<Harness mode="athlete" athlete={{ name: 'Sam', dob: '2000-01-01' }} />);
+  expect(self.container.querySelector('[aria-label="Relationship to you"]')).not.toBeNull();
+  expect(self.text()).toContain('Someone we can call in an emergency.');
+  await self.unmount();
+  const link = await renderScreen(<Harness linkMode athlete={{ name: 'Nico', dob: '2017-05-05' }} />);
+  expect(link.text()).toContain('Leave blank to use the contact from your sign-up.');
+  await link.unmount();
 });
 
 test('athlete mode: a minor is told a guardian must complete it', async () => {
@@ -155,5 +187,71 @@ test('until one-time checkout ships, the single token is greyed out and cannot b
   await r.click('6 tokens');
   expect(picks).toEqual([{ packageId: 't-6' }]);
   expect(r.button('6 tokens').getAttribute('aria-disabled')).toBeNull();
+  await r.unmount();
+});
+
+test('the package step no longer carries the contract tier', async () => {
+  const r = await renderScreen(<PackageStep athletes={[{ ...newAthleteEntry(), name: 'Nico' }]} onUpdate={() => {}} showErrors />);
+  expect(r.text()).not.toContain('Commitment Contract');
+  expect(r.text()).not.toContain('min / day');
+  await r.unmount();
+});
+
+function ContractHarness({ athletes: initial, mode = 'parent', showErrors = false, todayISO = '2026-10-01' }) {
+  const [athletes, setAthletes] = React.useState(initial);
+  const onUpdate = (key, patch) => setAthletes((prev) => prev.map((a) => (a.key === key ? { ...a, ...patch } : a)));
+  return <ContractStep mode={mode} athletes={athletes} onUpdate={onUpdate} showErrors={showErrors} todayISO={todayISO} />;
+}
+
+test('contract step, parent copy: how it works, counted from the season start, Behind after 5 missed weekdays', async () => {
+  expect(format(parseISO(SEASON_BOUNDS.start), 'EEE, MMM d')).toBe('Tue, Nov 3');
+  const r = await renderScreen(<ContractHarness athletes={[{ ...newAthleteEntry(), name: 'Nico' }]} />);
+  expect(r.text()).toContain("You shouldn't have to nag about practice. That's our job, and the Commitment Contract is how we do it.");
+  expect(r.text()).toContain('Each athlete picks a daily goal: 20, 45 or 90 minutes, Monday to Friday. Weekends are off.');
+  expect(r.text()).toContain("It counts from Tue, Nov 3, or from the day it's picked if that's later.");
+  expect(r.text()).toContain('Missed a day? They can log it late that month. They only show as Behind after more than 5 missed weekdays in a month.');
+  expect(r.text()).toContain("It's a promise, not a payment.");
+  expect(r.text()).toContain("Best chosen together. It's their promise to keep.");
+  expect(r.text()).toContain('The standard commitment. Most athletes pick this.');
+  expect(r.text()).not.toContain('flag 05');
+  await r.unmount();
+  const inSeason = await renderScreen(<ContractHarness athletes={[{ ...newAthleteEntry(), name: 'Nico' }]} todayISO="2026-12-15" />);
+  expect(inSeason.text()).toContain("It counts from the day it's picked.");
+  await inSeason.unmount();
+});
+
+test('contract step, athlete copy: their own promise, no login warning', async () => {
+  const r = await renderScreen(<ContractHarness mode="athlete" athletes={[{ ...newAthleteEntry(), name: 'Sam' }]} showErrors />);
+  expect(r.text()).toContain('The Commitment Contract is your promise to put the work in. We hold you to it.');
+  expect(r.text()).toContain('Pick your daily goal');
+  expect(r.text()).toContain("It counts from Tue, Nov 3, or from the day you pick it if that's later.");
+  expect(r.text()).not.toContain('Best chosen together');
+  expect(r.container.querySelector('[data-field-error]').textContent).toBe('Pick your daily goal, or tap Not yet.');
+  await r.click('45 min a day for Sam');
+  expect(r.text()).not.toContain('own login');
+  await r.click('Not yet for Sam');
+  expect(r.text()).toContain('No contract for now. Start one any time from your Contract tab.');
+  await r.unmount();
+});
+
+test('contract step, two athletes: each their own pick, Not yet is an answer, the missing are named', async () => {
+  const nico = { ...newAthleteEntry(), name: 'Nico', ownLogin: true, loginEmail: 'nico@email.com' };
+  const reese = { ...newAthleteEntry(), name: 'Reese' };
+  const r = await renderScreen(<ContractHarness athletes={[nico, reese, { ...newAthleteEntry(), name: '' }]} showErrors />);
+  expect(r.container.querySelector('[data-field-error]').textContent).toBe('Pick a daily goal for Nico, Reese and Athlete 3, or tap Not yet.');
+  await r.click('45 min a day for Nico');
+  expect(r.button('45 min a day for Nico').getAttribute('aria-checked')).toBe('true');
+  expect(r.button('45 min a day for Reese').getAttribute('aria-checked')).toBe('false');
+  await r.click('45 min a day for Nico'); // no tap-again-to-clear
+  expect(r.button('45 min a day for Nico').getAttribute('aria-checked')).toBe('true');
+  await r.click('Not yet for Reese');
+  expect(r.text()).toContain("No contract for now. Start one any time from Reese's card on your family page.");
+  expect(r.container.querySelector('[data-field-error]').textContent).toBe('Pick a daily goal for Athlete 3, or tap Not yet.');
+  await r.click('20 min a day for Athlete 3');
+  expect(r.container.querySelector('[data-field-error]')).toBeNull();
+  // Only the athlete's own login can log: warn for a child the parent's account runs.
+  expect(r.text()).toContain('Athlete 3 logs minutes from their own login. Go back to Athletes and turn on Own login.');
+  expect(r.text()).not.toContain('Nico logs minutes');
+  expect(r.text()).not.toContain('Reese logs minutes');
   await r.unmount();
 });

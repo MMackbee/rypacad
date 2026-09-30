@@ -105,16 +105,6 @@ export function verifyContinueUrl() {
   return `${window.location.origin}/portal/signin`;
 }
 
-/**
- * Who the verification email comes FROM (D5, spec 12.1: templates stay
- * DEFAULT, so Firebase Auth sends it) - noreply@<auth domain>, never the
- * functions' SMTP_FROM. NotProvisioned's "We sent a link to {email} from
- * {sender}" names this.
- */
-export function verificationSender() {
-  return `noreply@${process.env.REACT_APP_FIREBASE_AUTH_DOMAIN || 'rypacad.firebaseapp.com'}`;
-}
-
 export function createLoginError(err) {
   const code = err && err.code;
   if (code === 'auth/email-already-in-use') return new LiveDataError(ERR.INVALID, 'This email already has a login - sign in instead', err, 'email-in-use');

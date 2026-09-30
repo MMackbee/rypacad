@@ -1,6 +1,7 @@
 import React, { act } from 'react';
 import { renderScreen } from './testRender';
 import SignUp from './SignUp';
+import { VERIFY_EMAIL_SENDER } from '../data/authCopy';
 
 let mockSession;
 let mockRerender;
@@ -36,7 +37,7 @@ test('creates a login and shows the verification-sent note', async () => {
   await r.fill('Email', 'dana@email.com');
   await r.fill('Password', 'correct-horse-9');
   await r.click('Create login');
-  expect(r.text()).toContain('We sent a link to dana@email.com from noreply@');
+  expect(r.text()).toContain(`We sent a link to dana@email.com from ${VERIFY_EMAIL_SENDER} (check Spam`);
   // The invite check has not answered yet (idle): Continue waits for it.
   expect(r.button('Continue to sign-up')).toBeNull();
   expect(r.button('Checking your email...').disabled).toBe(true);

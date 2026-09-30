@@ -1,6 +1,7 @@
 import React, { act } from 'react';
 import { renderScreen } from './testRender';
 import Registration from './Registration';
+import { VERIFY_EMAIL_SENDER } from '../data/authCopy';
 
 const mockCalls = [];
 let mockCreateError = null;
@@ -28,8 +29,13 @@ async function fillParentToConsent(r) {
   await r.fill('Athlete name', 'Jordan');
   await r.fill('Date of birth', '2012-06-17');
   await r.fill('Handicap', '12');
+  await r.fill('Emergency contact name', ' Uncle Bo ');
+  await r.fill('Emergency contact mobile', '(612) 555-0100');
+  await r.fill('Relationship to athlete', 'Uncle');
   await r.click('Continue');
   await r.click('12 tokens');
+  await r.click('Continue');
+  await r.click('Not yet for Jordan');
   await r.click('Continue');
   await r.fill('Type your full legal name', 'Dana Whitfield');
 }
@@ -40,7 +46,7 @@ test('parent sign-up calls createFamily with the contract payload, shows success
   const r = await renderScreen(
     <Registration bare mode="signup" account={{ email: 'dana@email.com', emailVerified: false }} onRefresh={async () => refreshed.push(1)} onFinish={(p) => finished.push(p)} />
   );
-  expect(r.text()).toContain('Step 1 of 5');
+  expect(r.text()).toContain('Step 1 of 6');
   await fillParentToConsent(r);
   await r.click('Sign and submit');
   expect(mockCalls[0][0]).toBe('createFamily');
@@ -48,8 +54,10 @@ test('parent sign-up calls createFamily with the contract payload, shows success
     mode: 'parent',
     contact: { name: 'Dana Whitfield', email: 'dana@email.com', phone: '(612) 555-0148', relationship: 'Mother' },
     athletes: [{ name: 'Jordan', dob: '2012-06-17', packageId: 't-12', handicap: 12, loginEmail: null, contractMinutes: null }],
+    emergencyContact: { name: 'Uncle Bo', phone: '(612) 555-0100', relationship: 'Uncle' },
     signatureName: 'Dana Whitfield',
   });
+  expect(mockCalls[0][1].athletes[0]).not.toHaveProperty('contractPicked');
   // The receipt renders BEFORE provisioned flips: RegistrationRoute would
   // otherwise redirect and unmount it (review 2026-09-28).
   expect(r.text()).toContain('SUCCESS a1');
@@ -65,7 +73,7 @@ test('a new login shows the verification note on step 1 only', async () => {
     <Registration bare mode="signup" account={{ uid: 'u-note', email: 'dana@email.com', emailVerified: false }} verifySent={{ email: 'dana@email.com', mailed: true }} />
   );
   expect(r.text()).toContain('Verification sent');
-  expect(r.text()).toContain('We sent a link to dana@email.com from noreply@');
+  expect(r.text()).toContain(`We sent a link to dana@email.com from ${VERIFY_EMAIL_SENDER} (check Spam`);
   await r.click('Parent or guardian');
   await r.click('Continue');
   expect(r.text()).not.toContain('Verification sent');
@@ -96,12 +104,12 @@ test('a reload keeps the half-filled form (per signed-in account), and success c
   await first.fill('Your name', 'Dana Whitfield');
   await first.unmount(); // the tab reloads
   const second = await renderScreen(<Registration bare mode="signup" account={account} />);
-  expect(second.text()).toContain('Step 2 of 5');
+  expect(second.text()).toContain('Step 2 of 6');
   expect(second.container.querySelector('[aria-label="Your name"]').value).toBe('Dana Whitfield');
   await second.unmount();
   // Another login on the same browser never sees it.
   const other = await renderScreen(<Registration bare mode="signup" account={{ uid: 'u-other', email: 'x@email.com' }} />);
-  expect(other.text()).toContain('Step 1 of 5');
+  expect(other.text()).toContain('Step 1 of 6');
   await other.unmount();
   // Submitting successfully drops the draft.
   const third = await renderScreen(<Registration bare mode="signup" account={account} onFinish={() => {}} />);
@@ -112,6 +120,8 @@ test('a reload keeps the half-filled form (per signed-in account), and success c
   await third.fill('Date of birth', '2012-06-17');
   await third.click('Continue');
   await third.click('12 tokens');
+  await third.click('Continue');
+  await third.click('Not yet for Jordan');
   await third.click('Continue');
   await third.fill('Type your full legal name', 'Dana Whitfield');
   await third.click('Sign and submit');
@@ -127,14 +137,14 @@ test('Continue on an unfinished step names the missing fields instead of sitting
   await r.fill('Your name', 'Dana Whitfield');
   expect(r.button('Continue').disabled).toBe(false);
   await r.click('Continue'); // no phone yet
-  expect(r.text()).toContain('Step 2 of 5');
+  expect(r.text()).toContain('Step 2 of 6');
   expect(r.text()).toContain('A mobile number is required.');
   await r.fill('Mobile', '(612) 555-0148');
   await r.click('Continue');
   await r.fill('Athlete name', 'Jordan');
   await r.fill('Date of birth', '2031-01-01');
   await r.click('Continue');
-  expect(r.text()).toContain('Step 3 of 5');
+  expect(r.text()).toContain('Step 3 of 6');
   expect(r.text()).toContain('That date is in the future - check the year.');
   expect(r.text()).not.toContain('Age -');
   await r.unmount();
@@ -153,7 +163,7 @@ test('each step opens at its top, and an invalid Continue says so and scrolls to
     await r.click('Parent or guardian');
     expect(r.text()).not.toContain('Choose one above to continue.');
     await r.click('Continue');
-    expect(r.text()).toContain('Step 2 of 5');
+    expect(r.text()).toContain('Step 2 of 6');
     expect(scroller.scrollTop).toBe(0);
     await r.fill('Your name', 'Dana Whitfield');
     await r.click('Continue'); // no phone yet
@@ -194,14 +204,100 @@ test('a restored draft holding the off-sale single token cannot be submitted', a
   };
   window.sessionStorage.setItem('ryp.signupDraft.signup.u-single', JSON.stringify({ v: 1, step: 3, form }));
   const r = await renderScreen(<Registration bare mode="signup" account={account} />);
-  expect(r.text()).toContain('Step 4 of 5');
+  expect(r.text()).toContain('Step 4 of 6');
   expect(r.button('Single token').getAttribute('aria-pressed')).toBe('false');
   await r.click('Continue');
-  expect(r.text()).toContain('Step 4 of 5');
+  expect(r.text()).toContain('Step 4 of 6');
   expect(r.text()).toContain('Pick a package for Jordan to continue.');
   await r.click('6 tokens');
   await r.click('Continue');
-  expect(r.text()).toContain('Step 5 of 5');
+  expect(r.text()).toContain('Step 5 of 6');
+  await r.unmount();
+  window.sessionStorage.clear();
+});
+
+/** A v1 draft as the pre-contract-step form saved it (string emergency contact, no contractPicked). */
+function oldDraft(over = {}, athlete = {}) {
+  return {
+    mode: 'parent',
+    contact: { name: 'Dana Whitfield', email: 'dana@email.com', phone: '(612) 555-0148', relationship: 'Mother' },
+    athletes: [{ key: 'k1', name: 'Jordan', dob: '2012-06-17', handicap: '', ownLogin: false, loginEmail: '', packageId: 't-12', contractMinutes: null, ...athlete }],
+    emergencyContact: '', medical: '',
+    consents: { dataCollection: true, videoCapture: true, mediaRelease: false, facilityAccess: false },
+    signatureName: 'Dana Whitfield',
+    ...over,
+  };
+}
+
+test('the contract is its own step: explained, per athlete, and it needs an answer', async () => {
+  window.sessionStorage.clear();
+  const account = { uid: 'u-contract', email: 'dana@email.com' };
+  window.sessionStorage.setItem('ryp.signupDraft.signup.u-contract', JSON.stringify({ v: 1, step: 3, form: oldDraft() }));
+  const r = await renderScreen(<Registration bare mode="signup" account={account} onFinish={() => {}} />);
+  expect(r.text()).not.toContain('Commitment Contract');
+  await r.click('Continue');
+  expect(r.text()).toContain('Step 5 of 6');
+  expect(r.text()).toContain('Commitment Contract');
+  expect(r.text()).toContain("You shouldn't have to nag about practice.");
+  await r.click('Continue');
+  expect(r.text()).toContain('Step 5 of 6');
+  expect(r.container.querySelector('[data-field-error]').textContent).toBe('Pick a daily goal for Jordan, or tap Not yet.');
+  await r.click('45 min a day for Jordan');
+  await r.click('Continue');
+  expect(r.text()).toContain('Step 6 of 6');
+  await r.click('Sign and submit');
+  expect(mockCalls[0][1].athletes[0]).toEqual({ name: 'Jordan', dob: '2012-06-17', packageId: 't-12', contractMinutes: 45, handicap: null, loginEmail: null });
+  await r.unmount();
+  window.sessionStorage.clear();
+});
+
+test('a draft saved on the old consent step reopens on the contract step, signature kept; a 45 already chosen goes straight through', async () => {
+  window.sessionStorage.clear();
+  const account = { uid: 'u-old4', email: 'dana@email.com' };
+  window.sessionStorage.setItem('ryp.signupDraft.signup.u-old4', JSON.stringify({ v: 1, step: 4, form: oldDraft() }));
+  const r = await renderScreen(<Registration bare mode="signup" account={account} />);
+  expect(r.text()).toContain('Step 5 of 6');
+  await r.click('Not yet for Jordan');
+  await r.click('Continue');
+  expect(r.container.querySelector('[aria-label="Type your full legal name"]').value).toBe('Dana Whitfield');
+  await r.unmount();
+  window.sessionStorage.setItem('ryp.signupDraft.signup.u-old4', JSON.stringify({ v: 1, step: 4, form: oldDraft({}, { contractMinutes: 45 }) }));
+  const picked = await renderScreen(<Registration bare mode="signup" account={account} />);
+  expect(picked.button('45 min a day for Jordan').getAttribute('aria-checked')).toBe('true');
+  await picked.click('Continue');
+  expect(picked.text()).toContain('Step 6 of 6');
+  await picked.unmount();
+  window.sessionStorage.clear();
+});
+
+test('emergency contact: a name without a mobile blocks Continue; an old one-string draft restores into the name', async () => {
+  window.sessionStorage.clear();
+  const account = { uid: 'u-ec', email: 'dana@email.com' };
+  window.sessionStorage.setItem('ryp.signupDraft.signup.u-ec', JSON.stringify({ v: 1, step: 2, form: oldDraft({ emergencyContact: 'Uncle Bo 555' }) }));
+  const r = await renderScreen(<Registration bare mode="signup" account={account} />);
+  expect(r.text()).toContain('Step 3 of 6');
+  expect(r.container.querySelector('[aria-label="Emergency contact name"]').value).toBe('Uncle Bo 555');
+  await r.click('Continue');
+  expect(r.text()).toContain('Step 3 of 6');
+  expect(r.text()).toContain("Something above needs fixing - it's marked in red.");
+  expect(r.text()).toContain('Add a mobile number we can call.');
+  await r.fill('Emergency contact mobile', '(612) 555-0100');
+  await r.click('Continue');
+  expect(r.text()).toContain('Step 4 of 6');
+  await r.unmount();
+  window.sessionStorage.clear();
+});
+
+test('an old one-string contact restored past the athletes step sends the family back there, not into a refusal', async () => {
+  window.sessionStorage.clear();
+  const account = { uid: 'u-ec5', email: 'dana@email.com' };
+  const form = oldDraft({ emergencyContact: 'Uncle Bo 555' }, { contractMinutes: 20 });
+  window.sessionStorage.setItem('ryp.signupDraft.signup.u-ec5', JSON.stringify({ v: 1, step: 5, form }));
+  const r = await renderScreen(<Registration bare mode="signup" account={account} />);
+  await r.click('Sign and submit');
+  expect(mockCalls).toHaveLength(0);
+  expect(r.text()).toContain('Step 3 of 6');
+  expect(r.text()).toContain('Add a mobile number we can call.');
   await r.unmount();
   window.sessionStorage.clear();
 });
@@ -233,13 +329,39 @@ test('any other refusal at submit still shows its message on the form', async ()
 
 test('link mode skips to athletes and calls addAthletes', async () => {
   const r = await renderScreen(<Registration bare mode="link" account={{ email: 'dana@email.com' }} />);
-  expect(r.text()).toContain('Step 1 of 2');
+  expect(r.text()).toContain('Step 1 of 3');
+  expect(r.text()).toContain('Leave blank to use the contact from your sign-up.');
   await r.fill('Athlete name', 'Reese');
   await r.fill('Date of birth', '2014-03-02');
   await r.click('Continue');
   await r.click('6 tokens');
+  expect(r.button('Add athlete')).toBeNull();
+  await r.click('Continue');
+  expect(r.text()).toContain('Step 3 of 3');
+  await r.click('Not yet for Reese');
   await r.click('Add athlete');
   expect(mockCalls[0][0]).toBe('addAthletes');
-  expect(mockCalls[0][1]).toEqual({ athletes: [{ name: 'Reese', dob: '2014-03-02', packageId: 't-6', contractMinutes: null, handicap: null, loginEmail: null }], medical: null });
+  expect(mockCalls[0][1]).toEqual({
+    athletes: [{ name: 'Reese', dob: '2014-03-02', packageId: 't-6', contractMinutes: null, handicap: null, loginEmail: null }],
+    emergencyContact: null, medical: null,
+  });
+  await r.unmount();
+});
+
+test('link mode sends the contact the parent typed', async () => {
+  const r = await renderScreen(<Registration bare mode="link" account={{ email: 'dana@email.com' }} />);
+  await r.fill('Athlete name', 'Reese');
+  await r.fill('Date of birth', '2014-03-02');
+  await r.fill('Emergency contact name', 'Gran');
+  await r.fill('Emergency contact mobile', '(612) 555-0122');
+  await r.click('Continue');
+  await r.click('6 tokens');
+  await r.click('Continue');
+  await r.click('20 min a day for Reese');
+  await r.click('Add athlete');
+  expect(mockCalls[0][1]).toMatchObject({
+    athletes: [{ name: 'Reese', contractMinutes: 20 }],
+    emergencyContact: { name: 'Gran', phone: '(612) 555-0122', relationship: null },
+  });
   await r.unmount();
 });

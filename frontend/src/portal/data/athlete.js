@@ -149,9 +149,10 @@ export const DNA_SUMMARY = {
 
 /* ---------------------------------------------------------------- 07 ----- */
 
+/** Read by the athlete's Contract screen and the sign-up contract step, so the two describe a tier the same way. */
 export const CONTRACT_TIERS = [
-  { minutes: 20, description: 'A focused block. Enough to hold a habit through the season.' },
-  { minutes: 45, description: 'The standard commitment.', footnote: 'Most common tier' },
+  { minutes: 20, description: 'A focused daily habit. Enough to keep improving all season.' },
+  { minutes: 45, description: 'The standard commitment. Most athletes pick this.' },
   {
     // 90, not 95 (owner ruling, 2026-09-22): the academy's own commitment copy
     // offers 20 / 45 / 90, and the portal was the only place saying 95 - it
@@ -159,8 +160,7 @@ export const CONTRACT_TIERS = [
     // whose record already holds 95 keeps it (the rules still accept the old
     // value) and simply has no matching card until they pick again.
     minutes: 90,
-    description: 'Two sessions in a day for athletes chasing a college roster spot.',
-    footnote: 'Split entries supported — see flag 05',
+    description: 'For athletes chasing a college roster spot. Can be split across the day.',
   },
 ];
 

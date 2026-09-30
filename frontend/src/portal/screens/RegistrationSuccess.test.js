@@ -2,6 +2,7 @@ import React from 'react';
 import { renderScreen } from './testRender';
 import RegistrationSuccess from './RegistrationSuccess';
 import { newAthleteEntry } from '../data/signup';
+import { VERIFY_EMAIL_SENDER } from '../data/authCopy';
 
 jest.mock('../components/PayButton', () => ({ __esModule: true, default: ({ athleteId, label }) => <button type="button">{label}|{athleteId}</button>, startCheckout: async () => {} }));
 
@@ -30,7 +31,7 @@ test('one pay button per athlete, the next steps, child-login instructions, no w
   expect(r.text()).toContain('Elite books right away once paid');
   // UX review P-09 / CHILD-3: where Stripe really returns, the child's real buttons, the full address.
   expect(r.text()).toContain('After you pay, Stripe sends you to your family page. It shows "Confirming your payment..." for up to two minutes. Paying for more than one athlete? The others wait there, each with its own Pay now button.');
-  expect(r.text()).toContain(`Reese signs in at ${window.location.host}/portal/signin with reese@email.com. If that email is a Google account, Continue with Google is quickest. Otherwise: tap Create a student login, open the email from noreply@`);
+  expect(r.text()).toContain(`Reese signs in at ${window.location.host}/portal/signin with reese@email.com. If that email is a Google account, Continue with Google is quickest. Otherwise: tap Create a student login, open the email from ${VERIFY_EMAIL_SENDER}, then tap I've verified.`);
   expect(r.text()).toContain(", then tap I've verified.");
   expect(r.text()).toContain("There's no welcome email. Your family page always shows what's paid and what's left to do.");
   expect(r.text()).not.toMatch(/brought back here|Check again|this screen is your receipt/);
@@ -69,7 +70,7 @@ test('an unverified password account is told to open the verification link befor
   const unverified = await renderScreen(
     <RegistrationSuccess bare mode="signup" form={form()} result={{ householdId: 'h1', athleteIds: ['a1', 'a2'] }} account={{ email: 'dana@email.com', emailVerified: false }} onFinish={() => {}} />
   );
-  expect(unverified.text()).toContain('First open the link we emailed to dana@email.com (from noreply@');
+  expect(unverified.text()).toContain(`First open the link we emailed to dana@email.com (from ${VERIFY_EMAIL_SENDER}`);
   expect(unverified.text()).toContain(' - check spam), then tap Pay.');
   await unverified.unmount();
   const verified = await renderScreen(

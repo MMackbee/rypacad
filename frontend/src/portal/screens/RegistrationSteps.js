@@ -7,17 +7,22 @@ import { Body, Card, SectionLabel } from '../components/Primitives';
 import { Toggle } from '../components/Toggle';
 import { useEnrollmentForm } from '../hooks';
 import { ALL_PACKAGES, SINGLE_ON_SALE, packageById } from '../data/packages';
-import { ADULT_REQUIRED, CHILD_LOGIN_ENABLED, TIER_MINUTES, U13_HELPER, ageOnDate, validateAthleteEntry } from '../data/signup';
+import {
+  ADULT_REQUIRED, CHILD_LOGIN_ENABLED, U13_HELPER, ageOnDate, joinNames, toEmergencyForm, validateAthleteEntry,
+  validateEmergencyContact,
+} from '../data/signup';
 
 /**
  * Registration's step components (Sprint 20, spec 2.1), cut out of
  * Registration.js so each file stays under 500 lines. Pure presentation over
  * the form state Registration.js owns; every validation message comes from
  * data/signup.js so the function's re-check and the form agree. The consent
- * step and its sheet live in RegistrationConsent.js (same 500-line rule) and
- * are re-exported here so Registration.js imports every step from one place.
+ * step and its sheet live in RegistrationConsent.js, and the Commitment
+ * Contract step in RegistrationContract.js (same 500-line rule); both are
+ * re-exported here so Registration.js imports every step from one place.
  */
 export { ConsentInfoSheet, ConsentStep } from './RegistrationConsent';
+export { ContractStep } from './RegistrationContract';
 
 /** Step 1 (spec 2.1): parent or guardian, or the adult athlete signing up for themselves. */
 export function WhoStep({ mode, onChange }) {
@@ -72,7 +77,7 @@ export function ContactStep({ mode, contact, onChange, showErrors }) {
         value={contact.phone}
         onChange={set('phone')}
         error={showErrors && contact.phone.trim() === '' ? 'A mobile number is required.' : undefined}
-        hint="Used for schedule-change texts. You control this later in Notification Preferences."
+        hint="So the academy can reach you. You can change it anytime in Settings."
       />
       {mode === 'parent' ? (
         <SelectField
@@ -91,10 +96,13 @@ export function ContactStep({ mode, contact, onChange, showErrors }) {
  * Sprint 20 fields (spec 2.1 step 3): handicap, the own-login toggle with the
  * child's email, the derived age (U13 / 13+), and the 18+ check in athlete
  * mode (with the switch back to parent mode). Emergency contact and the
- * medical note stay single, household-level fields.
+ * medical note stay single, household-level fields; the contact is name,
+ * mobile and relationship (owner, 2026-09-30), and `onEmergencyContact`
+ * takes a partial update.
  */
 export function AthleteStep({
   mode,
+  linkMode = false,
   athletes,
   onUpdate,
   onAdd,
@@ -218,20 +226,10 @@ export function AthleteStep({
         </button>
       ) : null}
 
-      <Field label="Emergency contact" value={emergencyContact} placeholder="Name and mobile" onChange={onEmergencyContact} />
+      <EmergencyContactCard mode={mode} linkMode={linkMode} value={emergencyContact} onChange={onEmergencyContact} showErrors={showErrors} />
 
       <Card>
-        <div
-          style={{
-            font: `500 11px ${font.body}`,
-            letterSpacing: '.1em',
-            textTransform: 'uppercase',
-            color: color.textSecondary,
-            marginBottom: 9,
-          }}
-        >
-          Allergies or medical conditions
-        </div>
+        <div style={CARD_HEADING}>Allergies or medical conditions</div>
         <textarea
           rows={3}
           value={medical}
@@ -258,16 +256,50 @@ export function AthleteStep({
   );
 }
 
+const CARD_HEADING = {
+  font: `500 11px ${font.body}`,
+  letterSpacing: '.1em',
+  textTransform: 'uppercase',
+  color: color.textSecondary,
+  marginBottom: 9,
+};
+
+/** Optional as a block; name and mobile errors show only after an invalid Continue. */
+function EmergencyContactCard({ mode, linkMode, value, onChange, showErrors }) {
+  const ec = toEmergencyForm(value);
+  const errors = showErrors ? validateEmergencyContact(ec) : {};
+  const help = linkMode
+    ? 'Leave blank to use the contact from your sign-up.'
+    : mode === 'athlete' ? 'Someone we can call in an emergency.' : "A second adult we can call if we can't reach you.";
+  return (
+    <Card>
+      <div style={CARD_HEADING}>Emergency contact</div>
+      <Body size={11} tone={color.textTertiary}>{help}</Body>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 14, marginTop: 12 }}>
+        <Field label="Emergency contact name" value={ec.name} onChange={(v) => onChange({ name: v })} error={errors.name} />
+        <Field label="Emergency contact mobile" type="tel" value={ec.phone} onChange={(v) => onChange({ phone: v })} error={errors.phone} />
+        <Field
+          label={mode === 'athlete' ? 'Relationship to you' : 'Relationship to athlete'}
+          value={ec.relationship}
+          placeholder="e.g. Grandparent, aunt, neighbor"
+          onChange={(v) => onChange({ relationship: v })}
+        />
+      </div>
+    </Card>
+  );
+}
+
 /**
- * Package pick, per athlete (Sprint 10 pin A/B: athletes[].packageId,
- * athletes[].contractMinutes; Sprint 12 pin, contract v2.0: ONE token pool,
- * ONE package catalogue). `usePackages()` is dropped — `ALL_PACKAGES` (data/
- * packages.js) is already the static catalogue seam both data modes build
- * against (its own header comment: "both data modes call it"), so there is
- * nothing left for a seed/live hook to wrap. Renders the four token packages
- * (t-6…t-16) plus Elite, which REPLACES a token pick rather than stacking —
- * same one-of-N rule PackageStep (below) uses. The optional contract tier
- * (20/45/90, spec 9) sits directly below each athlete's choice.
+ * Package pick, per athlete (Sprint 10 pin A/B: athletes[].packageId;
+ * Sprint 12 pin, contract v2.0: ONE token pool, ONE package catalogue).
+ * `usePackages()` is dropped — `ALL_PACKAGES` (data/packages.js) is already
+ * the static catalogue seam both data modes build against (its own header
+ * comment: "both data modes call it"), so there is nothing left for a
+ * seed/live hook to wrap. Renders the four token packages (t-6…t-16) plus
+ * Elite, which REPLACES a token pick rather than stacking — same one-of-N
+ * rule PackageStep (below) uses. The contract tier (20/45/90, spec 9) moved
+ * to its own step, ContractStep (owner feedback 2026-09-30): under these
+ * tabs it often landed on the wrong child.
  *
  * Until one-time checkout ships (SINGLE_ON_SALE), the single token card is
  * shown greyed out and cannot be picked: a family on it could never pay.
@@ -281,11 +313,6 @@ const TOKEN_EXPLAINER = "1 token = 1 session: a training block, a tournament, or
 function needsPackage(athlete) {
   const pkg = athlete.packageId == null ? null : packageById(athlete.packageId);
   return !pkg || (pkg.kind === 'single' && !SINGLE_ON_SALE);
-}
-
-/** 'Nico', 'Nico and Reese', 'Nico, Reese and Sam'. */
-function joinNames(names) {
-  return names.length > 1 ? `${names.slice(0, -1).join(', ')} and ${names[names.length - 1]}` : names[0] || '';
 }
 
 export function PackageStep({ athletes, onUpdate, showErrors }) {
@@ -368,42 +395,6 @@ export function PackageStep({ athletes, onUpdate, showErrors }) {
           </Body>
         </div>
       ) : null}
-
-      <SectionLabel style={{ marginTop: 4 }}>Commitment Contract tier (optional)</SectionLabel>
-      <ContractTierChoice value={active.contractMinutes} onSelect={(m) => onUpdate(active.key, { contractMinutes: m })} />
-    </div>
-  );
-}
-
-function ContractTierChoice({ value, onSelect }) {
-  return (
-    <div style={{ display: 'flex', gap: 8 }}>
-      {TIER_MINUTES.map((m) => {
-        const on = value === m;
-        return (
-          <button
-            key={m}
-            type="button"
-            aria-pressed={on}
-            onClick={() => onSelect(on ? null : m)}
-            style={{
-              flex: 1,
-              height: 54,
-              borderRadius: radius.card,
-              border: `1px solid ${on ? color.primary : color.border}`,
-              background: on ? tint.green : color.surface,
-              display: 'flex',
-              flexDirection: 'column',
-              alignItems: 'center',
-              justifyContent: 'center',
-              cursor: 'pointer',
-            }}
-          >
-            <span style={{ font: `700 18px ${font.head}`, color: on ? color.primary : color.text }}>{m}</span>
-            <span style={{ font: `400 10px ${font.body}`, color: color.textTertiary }}>min / day</span>
-          </button>
-        );
-      })}
     </div>
   );
 }

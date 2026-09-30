@@ -87,6 +87,13 @@ test('every refusal, in the contract order', () => {
   'child-email-is-guardian');
   refuses(Object.assign(base(), {athletes: [kid(), kid({name: 'B',
     loginEmail: 'JORDAN@email.com'})]}), 'child-email-duplicate');
+  refuses(Object.assign(base(), {emergencyContact: {name: 'Bo'}}),
+      'emergency-contact-incomplete');
+  // After the athletes, before the consents.
+  refuses(Object.assign(base(), {athletes: [], emergencyContact: {phone: '5'}}),
+      'athlete-count');
+  refuses(Object.assign(base(), {emergencyContact: {phone: '5'},
+    signatureName: ''}), 'emergency-contact-incomplete');
   refuses(Object.assign(base(), {consents: {dataCollection: true,
     videoCapture: false}}), 'consents-required');
   refuses(Object.assign(base(), {signatureName: ''}), 'consents-required');
@@ -95,11 +102,73 @@ test('every refusal, in the contract order', () => {
 test('addAthletes payload: guardian email from the household', () => {
   const p = v.validateAddAthletesPayload({athletes: [kid()], medical: ' x '},
       {todayISO: TODAY, guardianEmail: 'Dana@Email.com'});
-  assert.deepEqual([p.athletes.length, p.medical], [1, 'x']);
+  assert.deepEqual([p.athletes.length, p.medical, p.emergencyContact],
+      [1, 'x', null]);
   assert.throws(() => v.validateAddAthletesPayload(
       {athletes: [kid({loginEmail: 'dana@email.com'})]},
       {todayISO: TODAY, guardianEmail: 'Dana@Email.com'}),
   (e) => e.reason === 'child-email-is-guardian');
+  const withContact = v.validateAddAthletesPayload({athletes: [kid()],
+    emergencyContact: {name: ' Gran ', phone: '555', relationship: ''}},
+  {todayISO: TODAY, guardianEmail: 'dana@email.com'});
+  assert.deepEqual(withContact.emergencyContact,
+      {name: 'Gran', phone: '555', relationship: null});
+  assert.throws(() => v.validateAddAthletesPayload({athletes: [kid()],
+    emergencyContact: {relationship: 'Aunt'}},
+  {todayISO: TODAY, guardianEmail: 'dana@email.com'}),
+  (e) => e.reason === 'emergency-contact-incomplete');
 });
+
+test('emergency contact: the structured form, trimmed and capped', () => {
+  const p = v.validateFamilyPayload(Object.assign(base(), {emergencyContact:
+    {name: ' Bo Novak ', phone: ' +1 555 0100 ', relationship: ' Uncle '}}),
+  {todayISO: TODAY});
+  assert.deepEqual(p.emergencyContact,
+      {name: 'Bo Novak', phone: '+1 555 0100', relationship: 'Uncle'});
+  const n = v.normalizeEmergencyContact;
+  assert.deepEqual(n({name: 'Bo', phone: '555', relationship: null}),
+      {name: 'Bo', phone: '555', relationship: null});
+  assert.equal(n({name: 'Bo', phone: '5'.repeat(40)}).phone.length, 32);
+  assert.equal(n({name: ' ', phone: '', relationship: ''}), null);
+  assert.equal(n(null), null);
+  assert.equal(n(undefined), null);
+});
+
+test('emergency contact: the old string form is never refused', () => {
+  const n = v.normalizeEmergencyContact;
+  assert.deepEqual(n(' Uncle Bo 555 '),
+      {name: 'Uncle Bo 555', phone: null, relationship: null});
+  assert.equal(n(''), null);
+  assert.equal(n('   '), null);
+});
+
+test('emergency contact: half-filled or the wrong type is refused', () => {
+  const refused = (raw) => assert.throws(() => v.normalizeEmergencyContact(raw),
+      (e) => e instanceof v.ValidationError &&
+        e.reason === 'emergency-contact-incomplete' &&
+        e.code === 'invalid-argument', JSON.stringify(raw));
+  refused({name: 'Bo'});
+  refused({phone: '555'});
+  refused({relationship: 'Uncle'});
+  refused({name: 'Bo', phone: 555});
+  refused(42);
+  refused(true);
+  refused(['Bo', '555']);
+});
+
+test('storedEmergencyContact reads any household value without throwing',
+    () => {
+      const s = v.storedEmergencyContact;
+      assert.deepEqual(s('Uncle Bo 555'),
+          {name: 'Uncle Bo 555', phone: null, relationship: null});
+      assert.deepEqual(s({name: 'Bo', phone: '555', relationship: 'Uncle'}),
+          {name: 'Bo', phone: '555', relationship: 'Uncle'});
+      assert.deepEqual(s({name: 'Bo', phone: 7}),
+          {name: 'Bo', phone: null, relationship: null});
+      for (const junk of [null, undefined, '', '  ', 42, true, [], ['Bo'],
+        {}, {name: ' ', phone: ''}, {relationship: 'Uncle'}]) {
+        assert.equal(s(junk), null, JSON.stringify(junk));
+      }
+    });
 
 run();

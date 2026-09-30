@@ -1,15 +1,19 @@
 /**
  * Auth-flow copy (Sprint 20, contract 9.4/9.6) in one place: SignUp, SignIn,
  * NotProvisioned and the pay gate all render these strings, so they cannot
- * drift. Firebase's default verification template is sent by Firebase itself
- * from noreply@<authDomain> (spec 12.1: templates stay default), which is
- * why the sender is derived from the existing REACT_APP_FIREBASE_AUTH_DOMAIN
- * and not from the SMTP sender the functions use for notices.
+ * drift. Firebase Auth sends the verification email itself, never the SMTP
+ * sender the functions use for notices. Its From address is set in the
+ * Firebase console (Authentication > Templates, including a custom sender
+ * domain); REACT_APP_VERIFY_EMAIL_SENDER mirrors it here so the copy names
+ * the address the email really comes from. Unset, it is Firebase's default,
+ * noreply@<authDomain>. The emails can land in Spam, so the copy says where
+ * to look.
  */
-export const VERIFY_EMAIL_SENDER = `noreply@${process.env.REACT_APP_FIREBASE_AUTH_DOMAIN || 'rypacad.firebaseapp.com'}`;
+export const VERIFY_EMAIL_SENDER = (process.env.REACT_APP_VERIFY_EMAIL_SENDER || '').trim()
+  || `noreply@${process.env.REACT_APP_FIREBASE_AUTH_DOMAIN || 'rypacad.firebaseapp.com'}`;
 export const VERIFY_TITLE = 'Verify your email to finish';
 export function verifyBody(email) {
-  return `We sent a link to ${email} from ${VERIFY_EMAIL_SENDER}. Open it, then tap I've verified.`;
+  return `We sent a link to ${email} from ${VERIFY_EMAIL_SENDER}. Open it, then tap I've verified. Not in your inbox? Check Spam or Junk.`;
 }
 /**
  * The note a brand-new login carries from Create login onto the sign-up
@@ -19,7 +23,7 @@ export function verifyBody(email) {
  */
 export function verifySentNote({ email, mailed }) {
   return mailed
-    ? { tone: 'green', title: 'Verification sent', body: `We sent a link to ${email} from ${VERIFY_EMAIL_SENDER}. You can finish sign-up now; verify before you pay.` }
+    ? { tone: 'green', title: 'Verification sent', body: `We sent a link to ${email} from ${VERIFY_EMAIL_SENDER} (check Spam if it's not in your inbox). You can finish sign-up now; verify before you pay.` }
     : { tone: 'yellow', title: 'Login created', body: `We could not send the verification email to ${email} yet. Finish sign-up now; when you pay, tap Resend on the verify card.` };
 }
 export const RESEND = 'Resend';
