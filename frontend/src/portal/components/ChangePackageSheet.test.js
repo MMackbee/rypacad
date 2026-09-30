@@ -37,6 +37,23 @@ test('the pending row names the package Pay now charges for; lapsed rows get no 
   await r.unmount();
 });
 
+test("each row's link is named for its athlete, so two unpaid children are two distinct buttons", async () => {
+  const opened = [];
+  const r = await renderScreen(
+    <div>
+      <ChangePackageLink athlete={reese} onOpen={(a) => opened.push(a.athleteId)} />
+      <ChangePackageLink athlete={{ ...reese, athleteId: 'a3', name: 'Nico', packageId: 't-6' }} onOpen={(a) => opened.push(a.athleteId)} />
+    </div>
+  );
+  const links = [...r.container.querySelectorAll('button')];
+  expect(links.map((b) => b.getAttribute('aria-label'))).toEqual(['Change package for Reese', 'Change package for Nico']);
+  expect(links.map((b) => b.textContent)).toEqual(['Change package', 'Change package']);
+  await r.click('Change package for Nico');
+  await r.click('Change package for Reese');
+  expect(opened).toEqual(['a3', 'a2']);
+  await r.unmount();
+});
+
 test('the sheet: monthly packages only, the current one picked, Save once another is picked', async () => {
   const closed = [];
   const r = await renderScreen(<ChangePackageSheet athlete={reese} onClose={() => closed.push(true)} />);

@@ -69,7 +69,7 @@ test("an unpaid athlete's own pending card can change their package before Pay n
     pendingAthletes: [{ athleteId: 'a1', name: 'Jordan', status: 'pending', packageId: 't-6', perPurchase: false }] } } };
   const r = await renderScreen(<AthleteDashboard bare />);
   expect(r.text()).toContain('6 tokens · Change package');
-  await r.click('Change package');
+  await r.click('Change package for Jordan');
   expect(r.text()).toContain('Change your package');
   await r.click('Keep 6 tokens');
   expect(r.text()).not.toContain('Change your package');

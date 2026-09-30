@@ -18,7 +18,12 @@ import { packageById } from '../data/packages';
  * sheet open with the reason.
  */
 
-/** The row's package line: what Pay now charges for, and the way to change it. Never-paid athletes only. */
+/**
+ * The row's package line: what Pay now charges for, and the way to change it.
+ * Never-paid athletes only. The accessible name carries the athlete's name, so
+ * a family with several unpaid children does not hear N identical "Change
+ * package" buttons; it starts with the visible text (WCAG 2.5.3 label in name).
+ */
 export function ChangePackageLink({ athlete, onOpen }) {
   if (!athlete || !canChangePackage(athlete.status)) return null;
   const name = packageById(athlete.packageId)?.name ?? null;
@@ -27,6 +32,7 @@ export function ChangePackageLink({ athlete, onOpen }) {
       {name ? `${name} · ` : null}
       <button
         type="button"
+        aria-label={athlete.name ? `Change package for ${athlete.name}` : undefined}
         onClick={() => onOpen(athlete)}
         style={{ background: 'none', border: 'none', padding: 0, font: `500 11px ${font.body}`, color: color.primary, cursor: 'pointer' }}
       >
