@@ -192,6 +192,7 @@ import { TOUR_SEED, bracketFor, deriveTourStandings } from '../data/tour';
 import { SPECIALISTS, isSpecialistType, mentalCapFor } from '../data/specialists';
 import { calendlyUrlFor } from '../data/calendly';
 import { loginStateFor } from '../data/signups';
+import { dayMarksFor, monthGridBounds } from '../data/calendarViews';
 
 export { default as useSeedResource } from './useSeedResource';
 export { default as useAuthSession } from './useAuthSession';
@@ -1175,10 +1176,13 @@ function groupSessionsByDate(sessions, today) {
 /**
  * Live payload for useMonthSessions - a single date-range query (>= start,
  * <= end, both on the 'date' field) plus orderBy('date'), so only the
- * automatic single-field index is needed, never a composite one.
+ * automatic single-field index is needed, never a composite one. The range
+ * is the month's whole GRID (Mon of its first row .. Sun of its last), so a
+ * week straddling two months has all seven days (2026-09-30).
  */
 async function liveMonthSessions(monthISO, today) {
-  const { start, end, label } = monthBounds(monthISO);
+  const { label } = monthBounds(monthISO);
+  const { start, end } = monthGridBounds(monthISO);
   // Same group-flow filter as liveBooking above: the month calendar feeds
   // Book a Session and the coach's own day — specialist slots live on
   // /portal/coaching and /portal/my-sessions instead.
@@ -1188,6 +1192,9 @@ async function liveMonthSessions(monthISO, today) {
     fetchSessionsInRange(start, end),
     liveBookingIdentity().catch(() => null),
   ]);
+  // Day marks judge EVERY type (a Phil-only day is not closed), so they come
+  // from the full read, before the group filter - no second query.
+  const dayMarks = dayMarksFor(all, start, end);
   const sessions = all.filter((s) => !isSpecialistType(s.type));
   sessions.sort(byDateThenId);
   const days = groupSessionsByDate(sessions, today);
@@ -1215,7 +1222,7 @@ async function liveMonthSessions(monthISO, today) {
       row.waitlistPosition = idx >= 0 ? idx + 1 : null;
     });
   }
-  return { month: label, days };
+  return { month: label, days, dayMarks };
 }
 
 /**
@@ -1224,6 +1231,11 @@ async function liveMonthSessions(monthISO, today) {
  * 'yyyy-MM' or any 'yyyy-MM-dd' within the month; defaults to the current
  * month. Seed: the generated season, filtered to the requested month - the
  * same SEASON useBooking reads, so the two surfaces cannot disagree.
+ *
+ * Both branches cover the month's whole grid (monthGridBounds) and return
+ * `dayMarks` (iso -> 'tournament'|'closed', data/calendarViews.js) beside
+ * `days`, derived from the same read. The seed season holds no specialist
+ * sessions, so a seed closure is simply a season day the generator skipped.
  */
 export function useMonthSessions(monthISO, { practice = false } = {}) {
   // Practice pins the seed source (onboarding invariant, TEAM.md): the
@@ -1237,9 +1249,10 @@ export function useMonthSessions(monthISO, { practice = false } = {}) {
   const sessionsGen = useInvalidation('sessions');
 
   const seedValue = () => {
-    const { start, end, label } = monthBounds(resolvedMonth);
-    const inMonth = SEASON.filter((s) => s.date >= start && s.date <= end);
-    return { month: label, days: groupSessionsByDate(inMonth, today) };
+    const { label } = monthBounds(resolvedMonth);
+    const { start, end } = monthGridBounds(resolvedMonth);
+    const inGrid = SEASON.filter((s) => s.date >= start && s.date <= end);
+    return { month: label, days: groupSessionsByDate(inGrid, today), dayMarks: dayMarksFor(inGrid, start, end) };
   };
 
   return useSeedResource(
@@ -1330,6 +1343,10 @@ export function seedSpecialistDays(specialistId, today, windowDays = 30) {
  * `windowDays` (contract v2.0 pin D): openThrough(now, windowDays) replaces
  * the fixed SPECIALIST_BOOKING_WINDOW_DAYS - the caller (liveSpecialistSlots
  * below) resolves it from the viewing athlete's own package.
+ *
+ * Each day also carries `mark` ('tournament' | 'closed' | null, the booking
+ * calendars' day marks) - judged on EVERY session the one read returned,
+ * before the specialist filter throws the other types away.
  */
 async function liveSpecialistDays(specialistId, today, windowDays) {
   const toDate = openThrough(new Date(), windowDays);
@@ -1358,7 +1375,30 @@ async function liveSpecialistDays(specialistId, today, windowDays) {
       }),
     });
   }
-  return days;
+  return markSpecialistDays(days, sessions);
+}
+
+/**
+ * Specialist days -> the same days with `mark` set from `sessions` (every
+ * type on those dates) over the days' own span - see dayMarksFor.
+ */
+function markSpecialistDays(days, sessions) {
+  if (!days.length) return days;
+  const marks = dayMarksFor(sessions, days[0].date, days[days.length - 1].date);
+  return days.map((d) => ({ ...d, mark: marks[d.date] ?? null }));
+}
+
+/**
+ * The seed branch's marks: the generated season (which holds no specialist
+ * sessions) plus this specialist's own seed slots, so a day with a slot is
+ * never closed - the same invariant the live read keeps.
+ */
+function seedMarkedSpecialistDays(specialistId, days) {
+  if (!days.length) return days;
+  const from = days[0].date;
+  const to = days[days.length - 1].date;
+  const own = days.flatMap((d) => d.slots.map(() => ({ date: d.date, type: specialistId })));
+  return markSpecialistDays(days, [...SEASON.filter((s) => s.date >= from && s.date <= to), ...own]);
 }
 
 /**
@@ -1502,7 +1542,7 @@ export function useSpecialistSlots(specialistId, { athleteId } = {}) {
       ? null
       : {
           days: specialistId
-            ? seedSpecialistDays(specialistId, today, windowDaysFor(ATHLETE_PACKAGE)).map((d) => ({
+            ? seedMarkedSpecialistDays(specialistId, seedSpecialistDays(specialistId, today, windowDaysFor(ATHLETE_PACKAGE))).map((d) => ({
                 ...d,
                 capReached: seedSpecialistCapReached(specialistId, athleteId, today, d.date.slice(0, 7)),
               }))

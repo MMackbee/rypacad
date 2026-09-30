@@ -2,6 +2,7 @@ import React from 'react';
 import FullCalendar from '@fullcalendar/react';
 import dayGridPlugin from '@fullcalendar/daygrid';
 import { color } from '../tokens';
+import { CLOSED_TITLE, MARK_PAINT, MARK_SR_TEXT, TOURNAMENT_GLYPH } from './DayMarks';
 
 /**
  * The month grid, drawn by FullCalendar. Shared by the Commitment Contract
@@ -35,8 +36,16 @@ import { color } from '../tokens';
  * @param {string} [selected]  Booking variant: the iso currently open below
  *   the grid, drawn with an extra ring so the tap target stays visible once
  *   its day sheet is showing.
+ * @param {object} [dayMarks]  Booking variant only: iso -> 'tournament' |
+ *   'closed' (DayMarks.js). Painted over the state, never changing it - a
+ *   tournament day stays tappable - except that a closed day is never
+ *   tappable. The contract variant ignores it (Sprint 5: no closed state).
+ *
+ * States also include 'inactive' (a day outside the contract window): painted
+ * like a weekend and never tappable.
  */
-export default function ContractCalendar({ start, dayStates = {}, onSelectDay, variant = 'contract', selected }) {
+export default function ContractCalendar({ start, dayStates = {}, onSelectDay, variant = 'contract', selected, dayMarks }) {
+  const markFor = (iso) => (variant === 'booking' && dayMarks ? dayMarks[iso] : undefined);
   const stateFor = (date) => {
     // FullCalendar hands back a local Date; format without UTC shifting.
     const iso = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(
@@ -49,8 +58,9 @@ export default function ContractCalendar({ start, dayStates = {}, onSelectDay, v
     return { iso, state: raw === 'closed' ? 'open' : raw };
   };
 
-  const tappable = (state) =>
-    variant === 'booking' ? state === 'available' : state === 'logged' || state === 'missed';
+  const tappable = (state, iso) =>
+    markFor(iso) !== 'closed' &&
+    (variant === 'booking' ? state === 'available' : state === 'logged' || state === 'missed');
 
   // Plain event delegation instead of the interaction plugin: every day cell
   // carries data-date, so one listener on the wrapper covers the whole grid
@@ -60,7 +70,7 @@ export default function ContractCalendar({ start, dayStates = {}, onSelectDay, v
     if (!cell || !onSelectDay) return null;
     const iso = cell.getAttribute('data-date');
     const { state } = stateFor(new Date(`${iso}T00:00:00`));
-    return tappable(state) ? { iso, day: Number(iso.slice(8)), state } : null;
+    return tappable(state, iso) ? { iso, day: Number(iso.slice(8)), state } : null;
   };
   const handleClick = (e) => {
     const day = resolveCell(e);
@@ -97,19 +107,37 @@ export default function ContractCalendar({ start, dayStates = {}, onSelectDay, v
         dayCellClassNames={(arg) => {
           const { iso, state } = stateFor(arg.date);
           const classes = [`ryp-day-${state}`];
-          if (tappable(state)) classes.push('ryp-day-tappable');
+          if (tappable(state, iso)) classes.push('ryp-day-tappable');
           if (selected && iso === selected) classes.push('ryp-day-selected');
+          if (markFor(iso)) classes.push(`ryp-mark-${markFor(iso)}`);
           return classes;
         }}
+        // Marked days only: the number, the star, and the words a screen
+        // reader appends (the cell's name comes from this anchor). A static
+        // html string - the day number is digits, the rest constants.
+        dayCellContent={
+          dayMarks && variant === 'booking'
+            ? (arg) => {
+                const mark = markFor(stateFor(arg.date).iso);
+                if (!mark) return arg.dayNumberText;
+                const star = mark === 'tournament' ? `<span class="ryp-mark-glyph" aria-hidden="true">${TOURNAMENT_GLYPH}</span>` : '';
+                return { html: `${arg.dayNumberText}${star}<span class="ryp-sr">${MARK_SR_TEXT[mark]}</span>` };
+              }
+            : undefined
+        }
         dayCellDidMount={(arg) => {
-          const { state } = stateFor(arg.date);
-          if (tappable(state)) {
+          const { iso, state } = stateFor(arg.date);
+          // A blank out-of-month cell (showNonCurrentDates=false) still
+          // mounts here: never make it a focus stop that does nothing.
+          if (!arg.isDisabled && tappable(state, iso)) {
             arg.el.setAttribute('role', 'button');
             arg.el.setAttribute('tabindex', '0');
           } else {
             arg.el.removeAttribute('role');
             arg.el.removeAttribute('tabindex');
           }
+          if (!arg.isDisabled && markFor(iso) === 'closed') arg.el.setAttribute('title', CLOSED_TITLE);
+          else arg.el.removeAttribute('title');
         }}
       />
     </div>
@@ -171,7 +199,8 @@ const CALENDAR_CSS = `
 .ryp-contract-cal .ryp-day-future .fc-daygrid-day-frame {
   background: ${color.dimmed}; border-color: ${color.ruleFaint}; color: ${color.textTertiary};
 }
-.ryp-contract-cal .ryp-day-weekend .fc-daygrid-day-frame {
+.ryp-contract-cal .ryp-day-weekend .fc-daygrid-day-frame,
+.ryp-contract-cal .ryp-day-inactive .fc-daygrid-day-frame {
   background: transparent; border-color: #1c1c1c; color: #3a3a3a;
 }
 /* Book a Session month calendar (Sprint 5): days with bookable sessions. */
@@ -182,5 +211,18 @@ const CALENDAR_CSS = `
 .ryp-contract-cal .ryp-day-tappable .fc-daygrid-day-frame { cursor: pointer; }
 .ryp-contract-cal .ryp-day-selected .fc-daygrid-day-frame {
   box-shadow: 0 0 0 2px ${color.primary};
+}
+/* Booking day marks (DayMarks.js), over the state; the selected fill wins. */
+.ryp-contract-cal .ryp-mark-tournament .fc-daygrid-day-frame {
+  background: ${MARK_PAINT.tournament.background}; border-color: ${MARK_PAINT.tournament.borderColor}; color: ${MARK_PAINT.tournament.color};
+}
+.ryp-contract-cal .ryp-mark-closed .fc-daygrid-day-frame {
+  background: ${MARK_PAINT.closed.background}; border-color: ${MARK_PAINT.closed.borderColor}; color: ${MARK_PAINT.closed.color};
+}
+.ryp-contract-cal .ryp-mark-closed .fc-daygrid-day-number { text-decoration: line-through; }
+.ryp-contract-cal .ryp-mark-glyph { margin-left: 2px; font-size: 8px; }
+.ryp-contract-cal .ryp-sr {
+  position: absolute; width: 1px; height: 1px; margin: -1px; padding: 0;
+  overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0;
 }
 `;

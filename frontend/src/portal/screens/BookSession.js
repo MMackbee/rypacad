@@ -373,17 +373,20 @@ export default function BookSession({
             </div>
 
             {/* Month/Week toggle (owner request 2026-09-30): the shared card
-                renders the same grid, handlers and captions in both views. */}
+                renders the same grid, handlers and captions in both views,
+                plus the tournament (yellow) / closed (red) day marks the
+                hook derives from the same read, and their legend. */}
             <div style={{ padding: '0 22px' }}>
               <SessionsCalendarCard
                 monthISO={monthISO}
                 changeMonth={changeMonth}
                 loading={monthState.loading}
                 dayStates={dayStates}
+                dayMarks={monthState.data?.dayMarks ?? {}}
                 selected={selectedDate}
                 onSelectDay={(day) => setSelectedDate(day.iso)}
                 onNavigate={() => setSelectedDate(null)}
-                hint="Days marked green have bookable sessions — tap one to see times."
+                hint="Green and yellow days have bookable sessions — tap one to see times."
                 emptyCopy={{ month: 'No sessions are scheduled yet.', week: 'No sessions are scheduled this week.' }}
               />
             </div>

@@ -112,11 +112,13 @@ function SessionsHarness({ initialMonth, statesByMonth = {}, loading = false, sp
 }
 
 const NOV = {
+  // November's load covers its whole grid (Oct 26 - Dec 6), so Dec 2 is here too.
   '2026-11-01': {
     '2026-11-03': 'available',
     '2026-11-05': 'available',
     '2026-11-18': 'available',
     '2026-11-19': 'open',
+    '2026-12-02': 'available',
   },
   '2026-12-01': { '2026-12-02': 'available' },
 };
@@ -163,8 +165,9 @@ describe('SessionsCalendarCard', () => {
     expect(navLabel(c)).toBe('Nov 2 – 8');
     expect(pill(c, '2026-11-03').tagName).toBe('BUTTON');
     await c.unmount();
+    // Nothing at all: the month's first day, drawn as its whole week.
     const d = await renderScreen(<SessionsHarness initialMonth="2026-11-01" statesByMonth={{}} />);
-    expect(navLabel(d)).toBe('Nov 1');
+    expect(navLabel(d)).toBe('Oct 26 – Nov 1');
     await d.unmount();
   });
 
@@ -186,24 +189,31 @@ describe('SessionsCalendarCard', () => {
     await r.unmount();
   });
 
-  test('stepping off the last row changes month and lands on its first row; back again', async () => {
+  test('a week across two months is drawn whole; the month changes only past it (week view across months)', async () => {
     window.localStorage.setItem(KEY, 'week');
     jest.setSystemTime(new Date('2026-11-30T15:00:00'));
     const spies = { changeMonth: jest.fn() };
     const r = await renderScreen(<SessionsHarness initialMonth="2026-11-01" statesByMonth={NOV} spies={spies} />);
-    expect(navLabel(r)).toBe('Nov 30');
-    // Out-of-month days are blank: only Nov 30 is drawn on this row.
-    expect(weekCells(r).filter((c) => c.hasAttribute('data-date')).map((c) => c.getAttribute('data-date'))).toEqual([
-      '2026-11-30',
+    expect(navLabel(r)).toBe('Nov 30 – Dec 6');
+    // Seven dated cells, no blanks: December's days come from November's grid-wide load.
+    expect(weekCells(r).map((c) => c.getAttribute('data-date'))).toEqual([
+      '2026-11-30', '2026-12-01', '2026-12-02', '2026-12-03', '2026-12-04', '2026-12-05', '2026-12-06',
     ]);
-    expect(weekCells(r).filter((c) => c.getAttribute('aria-hidden') === 'true')).toHaveLength(6);
-    await r.click('Next week');
-    expect(spies.changeMonth).toHaveBeenLastCalledWith(1);
-    expect(navLabel(r)).toBe('Dec 1 – 6');
+    expect(weekCells(r).filter((c) => c.getAttribute('aria-hidden') === 'true')).toHaveLength(0);
     expect(pill(r, '2026-12-02').tagName).toBe('BUTTON');
+    // The "anything this week" check reads all seven days (Dec 2 is the only session).
+    expect(r.text()).toContain('HINT');
+    await r.click('Next week');
+    expect(spies.changeMonth).toHaveBeenCalledTimes(1);
+    expect(spies.changeMonth).toHaveBeenLastCalledWith(1);
+    expect(navLabel(r)).toBe('Dec 7 – 13');
     await r.click('Previous week');
+    expect(spies.changeMonth).toHaveBeenCalledTimes(1); // Nov 30 is a row of December too
+    expect(navLabel(r)).toBe('Nov 30 – Dec 6');
+    await r.click('Previous week');
+    expect(spies.changeMonth).toHaveBeenCalledTimes(2);
     expect(spies.changeMonth).toHaveBeenLastCalledWith(-1);
-    expect(navLabel(r)).toBe('Nov 30');
+    expect(navLabel(r)).toBe('Nov 23 – 29');
     await r.unmount();
   });
 

@@ -9,8 +9,9 @@ let mockPackage;
 let mockBooked;
 let mockFirstSlot;
 let mockMonths;
-// Month-aware: each monthISO gets its own days; October is the default.
-const mockMonth = (m) => ({ data: { days: mockMonths[m] ?? [] }, loading: false, error: null });
+let mockMarks;
+// Month-aware: each monthISO gets its own days (and day marks); October is the default.
+const mockMonth = (m) => ({ data: { days: mockMonths[m] ?? [], dayMarks: mockMarks[m] ?? {} }, loading: false, error: null });
 jest.mock('../hooks', () => ({
   useBooking: () => ({
     data: { slots: [{ date: mockFirstSlot }], tokens: { left: 6, unlimited: false, grace: [] }, confirmation: { email: null, note: 'See you there.' }, seasonNote: null },
@@ -36,6 +37,7 @@ beforeEach(() => {
   mockPackage = { id: 't-12', kind: 'tokens', windowDays: 30 };
   mockFirstSlot = '2026-10-12';
   mockMonths = { '2026-10-01': [{ date: '2026-10-12', sessions: [session] }] };
+  mockMarks = {};
   jest.useFakeTimers('modern');
 });
 afterEach(() => {
@@ -209,6 +211,31 @@ describe('Month/Week toggle (owner request 2026-09-30)', () => {
     expect(navLabel(r)).toBe('Oct 12 – 18');
     expect(pill(r, '2026-10-12').getAttribute('aria-pressed')).toBe('false');
     expect(sessionCard(r)).toBeNull();
+    await r.unmount();
+  });
+
+  test('a tournament Saturday and a closed Sunday paint in both views, with the legend and the new caption', async () => {
+    jest.setSystemTime(new Date('2026-11-04T15:00:00Z'));
+    mockFirstSlot = '2026-11-05';
+    const tournament = { ...session, id: 't1', date: '2026-11-07', time: '10:30 AM', type: 'tournament', label: 'Tournament block' };
+    mockMonths = { '2026-11-01': [{ date: '2026-11-05', sessions: [{ ...session, date: '2026-11-05' }] }, { date: '2026-11-07', sessions: [tournament] }] };
+    mockMarks = { '2026-11-01': { '2026-11-07': 'tournament', '2026-11-08': 'closed' } };
+    const r = await renderScreen(<BookSession bare />);
+    expect(navLabel(r)).toBe('November 2026');
+    expect(r.text()).toContain('Green and yellow days have bookable sessions — tap one to see times.');
+    expect(r.container.querySelector('.ryp-day-mark-legend').textContent).toContain('Tournament day');
+    expect(r.container.querySelector('.ryp-day-mark-legend').textContent).toContain('Academy closed');
+    expect(td(r, '2026-11-07').classList.contains('ryp-mark-tournament')).toBe(true);
+    expect(td(r, '2026-11-07').getAttribute('role')).toBe('button');
+    expect(td(r, '2026-11-08').classList.contains('ryp-mark-closed')).toBe(true);
+    expect(td(r, '2026-11-08').getAttribute('role')).toBeNull();
+    await r.click('Week');
+    expect(navLabel(r)).toBe('Nov 2 – 8');
+    expect(pill(r, '2026-11-08').tagName).toBe('DIV');
+    expect(pill(r, '2026-11-08').getAttribute('title')).toBe('Academy closed');
+    expect(r.container.querySelector('.ryp-day-mark-legend')).not.toBeNull();
+    await r.click('Saturday, Nov 7, tournament day');
+    expect(r.text()).toContain('Tournament block');
     await r.unmount();
   });
 

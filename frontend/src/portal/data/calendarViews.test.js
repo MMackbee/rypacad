@@ -1,19 +1,25 @@
 import {
   CALENDAR_VIEW_KEY,
   anchorIn,
+  dayMarksFor,
   firstAvailableISO,
   isCalendarView,
   isTappableDay,
+  monthGridBounds,
   monthStartISO,
   monthWeekStarts,
+  monthsApart,
   monthsBetween,
+  pickRange,
+  slotDayMarks,
   slotDayStates,
-  stepMonthWeek,
+  stepGridWeek,
   weekDaysISO,
   weekLabel,
   weekStartISO,
   weeksBetween,
 } from './calendarViews';
+import * as views from './calendarViews';
 
 test('the storage key and view guard', () => {
   expect(CALENDAR_VIEW_KEY).toBe('ryp.calendarView');
@@ -80,21 +86,91 @@ test('weekLabel names the visible span with an en dash', () => {
   expect(weekLabel('2026-12-28')).toBe('Dec 28 – Jan 3');
 });
 
-describe('stepMonthWeek', () => {
-  test('moves between rows inside a month', () => {
-    expect(stepMonthWeek('2026-11-01', '2026-11-02', 1)).toEqual({ monthDelta: 0, weekStart: '2026-11-09' });
-    expect(stepMonthWeek('2026-11-01', '2026-11-02', -1)).toEqual({ monthDelta: 0, weekStart: '2026-10-26' });
+test('monthGridBounds: Monday of the first row .. Sunday of the last', () => {
+  expect(monthGridBounds('2026-11-01')).toEqual({ start: '2026-10-26', end: '2026-12-06' });
+  expect(monthGridBounds('2027-02-01')).toEqual({ start: '2027-02-01', end: '2027-02-28' }); // starts on a Monday
+  expect(monthGridBounds('2026-12-01')).toEqual({ start: '2026-11-30', end: '2027-01-03' });
+  expect(monthGridBounds('2026-11-17')).toEqual(monthGridBounds('2026-11-01'));
+});
+
+test('monthsApart and pickRange', () => {
+  expect(monthsApart('2026-11-01', '2026-12-02')).toBe(1);
+  expect(monthsApart('2026-11-01', '2026-10-30')).toBe(-1);
+  expect(monthsApart('2026-12-01', '2027-01-03')).toBe(1);
+  expect(monthsApart('2026-11-01', '2026-11-30')).toBe(0);
+  const map = { '2026-10-31': 'a', '2026-11-01': 'b', '2026-11-30': 'c', '2026-12-01': 'd' };
+  expect(pickRange(map, '2026-11-01', '2026-11-30')).toEqual({ '2026-11-01': 'b', '2026-11-30': 'c' });
+  expect(pickRange(undefined, '2026-11-01', '2026-11-30')).toEqual({});
+});
+
+describe('stepGridWeek (week view across months)', () => {
+  test('stepMonthWeek is gone', () => {
+    expect(views.stepMonthWeek).toBeUndefined();
   });
-  test('past the last row lands on the next month first row', () => {
-    expect(stepMonthWeek('2026-11-01', '2026-11-30', 1)).toEqual({ monthDelta: 1, weekStart: '2026-11-30' });
-    expect(stepMonthWeek('2026-10-01', '2026-10-26', 1)).toEqual({ monthDelta: 1, weekStart: '2026-10-26' });
-    expect(stepMonthWeek('2026-12-01', '2026-12-28', 1)).toEqual({ monthDelta: 1, weekStart: '2026-12-28' });
+  test('moves ±7 days; the month stays while the Monday is one of its rows', () => {
+    expect(stepGridWeek('2026-11-01', '2026-11-02', 1)).toEqual({ monthDelta: 0, weekStart: '2026-11-09' });
+    expect(stepGridWeek('2026-11-01', '2026-11-02', -1)).toEqual({ monthDelta: 0, weekStart: '2026-10-26' });
+    expect(stepGridWeek('2026-11-01', '2026-11-23', 1)).toEqual({ monthDelta: 0, weekStart: '2026-11-30' });
   });
-  test('before the first row lands on the previous month last row', () => {
-    expect(stepMonthWeek('2026-12-01', '2026-11-30', -1)).toEqual({ monthDelta: -1, weekStart: '2026-11-30' });
-    // November's first row is Oct 26, which is also October's last row.
-    expect(stepMonthWeek('2026-11-01', '2026-10-26', -1)).toEqual({ monthDelta: -1, weekStart: '2026-10-26' });
-    expect(stepMonthWeek('2026-10-01', '2026-09-28', -1)).toEqual({ monthDelta: -1, weekStart: '2026-09-28' });
+  test('Nov -> Dec: Nov 30 -> Dec 7 switches to December', () => {
+    expect(stepGridWeek('2026-11-01', '2026-11-30', 1)).toEqual({ monthDelta: 1, weekStart: '2026-12-07' });
+  });
+  test('Dec -> Nov: Dec 7 -> Nov 30 stays in December; Nov 30 -> Nov 23 switches to November', () => {
+    expect(stepGridWeek('2026-12-01', '2026-12-07', -1)).toEqual({ monthDelta: 0, weekStart: '2026-11-30' });
+    expect(stepGridWeek('2026-12-01', '2026-11-30', -1)).toEqual({ monthDelta: -1, weekStart: '2026-11-23' });
+    // November's first row is Oct 26, also October's last row.
+    expect(stepGridWeek('2026-11-01', '2026-10-26', -1)).toEqual({ monthDelta: -1, weekStart: '2026-10-19' });
+  });
+  test('the year end', () => {
+    expect(stepGridWeek('2026-12-01', '2026-12-21', 1)).toEqual({ monthDelta: 0, weekStart: '2026-12-28' });
+    expect(stepGridWeek('2026-12-01', '2026-12-28', 1)).toEqual({ monthDelta: 1, weekStart: '2027-01-04' });
+    expect(stepGridWeek('2027-01-01', '2027-01-04', -1)).toEqual({ monthDelta: 0, weekStart: '2026-12-28' });
+    expect(stepGridWeek('2027-01-01', '2026-12-28', -1)).toEqual({ monthDelta: -1, weekStart: '2026-12-21' });
+  });
+});
+
+describe('dayMarksFor (owner data rule 2026-09-30)', () => {
+  const s = (date, type, status = 'scheduled') => ({ id: `${date}-${type}`, date, type, status });
+
+  test('a scheduled tournament marks its day yellow; a cancelled one does not', () => {
+    const marks = dayMarksFor([s('2026-11-07', 'tournament'), s('2026-11-07', 'training'), s('2026-11-14', 'tournament', 'cancelled'), s('2026-11-14', 'training')], '2026-11-07', '2026-11-14');
+    expect(marks['2026-11-07']).toBe('tournament');
+    expect(marks['2026-11-14']).toBeUndefined();
+  });
+
+  test('an in-season day with no scheduled session of ANY type is closed; any type keeps it open', () => {
+    const marks = dayMarksFor(
+      [s('2026-11-03', 'training'), s('2026-11-04', 'phil'), s('2026-11-05', 'mental'), s('2026-11-06', 'training', 'cancelled')],
+      '2026-11-03',
+      '2026-11-08'
+    );
+    expect(marks).toEqual({ '2026-11-06': 'closed', '2026-11-07': 'closed', '2026-11-08': 'closed' });
+  });
+
+  test('a tournament wins over closed (a holiday tournament on a closed day)', () => {
+    const marks = dayMarksFor([s('2026-11-27', 'tournament')], '2026-11-26', '2026-11-28');
+    expect(marks).toEqual({ '2026-11-26': 'closed', '2026-11-27': 'tournament', '2026-11-28': 'closed' });
+  });
+
+  test('never closed before Nov 3 or after Feb 27, or outside the range read', () => {
+    const pre = dayMarksFor([], '2026-10-26', '2026-11-04');
+    expect(Object.keys(pre)).toEqual(['2026-11-03', '2026-11-04']);
+    const post = dayMarksFor([], '2027-02-22', '2027-03-07');
+    expect(Object.keys(post).sort()).toEqual(['2027-02-22', '2027-02-23', '2027-02-24', '2027-02-25', '2027-02-26', '2027-02-27']);
+    expect(dayMarksFor([], '2026-10-01', '2026-10-31')).toEqual({});
+    // Tournaments count anywhere in the range, season or not.
+    expect(dayMarksFor([s('2026-10-24', 'tournament')], '2026-10-19', '2026-10-25')).toEqual({ '2026-10-24': 'tournament' });
+    // A session outside [from, to] marks nothing.
+    expect(dayMarksFor([s('2026-11-21', 'tournament')], '2026-11-04', '2026-11-04')).toEqual({ '2026-11-04': 'closed' });
+    expect(dayMarksFor([s('2026-11-21', 'tournament')], null, null)).toEqual({});
+  });
+
+  test('slotDayMarks reads the hook-derived mark off each day', () => {
+    expect(slotDayMarks([{ date: '2026-11-07', mark: 'tournament' }, { date: '2026-11-08', mark: 'closed' }, { date: '2026-11-09', mark: null }, { date: '2026-11-10' }])).toEqual({
+      '2026-11-07': 'tournament',
+      '2026-11-08': 'closed',
+    });
+    expect(slotDayMarks(undefined)).toEqual({});
   });
 });
 
@@ -115,6 +191,9 @@ test('isTappableDay follows the two variants', () => {
   // 'full' (slots, none open): tappable in booking so the waitlist is reachable; never in the contract calendar.
   expect(isTappableDay('booking', 'full')).toBe(true);
   expect(isTappableDay('contract', 'full')).toBe(false);
+  // 'inactive' (a day outside the contract window) is never tappable.
+  expect(isTappableDay('contract', 'inactive')).toBe(false);
+  expect(isTappableDay('booking', 'inactive')).toBe(false);
 });
 
 test('slotDayStates: an open slot makes a day available; all-full is its own tappable state (toggle review)', () => {

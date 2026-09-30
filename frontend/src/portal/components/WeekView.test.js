@@ -169,6 +169,96 @@ test('visibleFrom / visibleTo blank the days outside, keeping 7 slots', async ()
   await r.unmount();
 });
 
+describe('booking day marks (owner ruling 2026-09-30)', () => {
+  // Sat Oct 10 a tournament day with sessions, Sun Oct 11 closed.
+  const states = { '2026-10-06': 'available', '2026-10-09': 'full', '2026-10-10': 'available' };
+  const marks = { '2026-10-09': 'tournament', '2026-10-10': 'tournament', '2026-10-11': 'closed' };
+  const blend = (rgba, base) => {
+    const [r, g, b, a] = rgba.match(/[\d.]+/g).map(Number);
+    const bb = channels(base);
+    return `rgb(${[r, g, b].map((v, i) => Math.round(v * a + bb[i] * (1 - a))).join(', ')})`;
+  };
+
+  test('a tournament day: yellow, a star, and "tournament day" in its name; still a button', async () => {
+    const onSelectDay = jest.fn();
+    const r = await renderScreen(<WeekView weekStart={WEEK} dayStates={states} dayMarks={marks} variant="booking" onSelectDay={onSelectDay} />);
+    const t = cell(r, '2026-10-10');
+    expect(t.tagName).toBe('BUTTON');
+    expect(t.getAttribute('aria-label')).toBe('Saturday, Oct 10, tournament day');
+    expect(t.getAttribute('data-mark')).toBe('tournament');
+    expect(t.style.background).toBe('rgba(244, 238, 25, 0.1)');
+    expect(t.style.borderColor.toLowerCase()).toBe('#f4ee19');
+    expect(t.textContent).toBe('Sat10★');
+    expect(t.querySelector('[aria-hidden="true"]').textContent).toBe('★');
+    await act(async () => { t.click(); });
+    expect(onSelectDay).toHaveBeenCalledWith({ iso: '2026-10-10', day: 10, state: 'available' });
+    // Full and a tournament day: both said, and still dashed.
+    expect(cell(r, '2026-10-09').getAttribute('aria-label')).toBe('Friday, Oct 9, tournament day, full - waitlist only');
+    expect(cell(r, '2026-10-09').style.borderStyle).toBe('dashed');
+    // An unmarked day is untouched.
+    expect(cell(r, '2026-10-06').getAttribute('aria-label')).toBe('Tuesday, Oct 6');
+    expect(cell(r, '2026-10-06').hasAttribute('data-mark')).toBe(false);
+    await r.unmount();
+  });
+
+  test('a closed day: struck through, "academy closed" for screen readers, never a button, and readable', async () => {
+    const onSelectDay = jest.fn();
+    // Even a stray 'available' state never makes a closed day tappable.
+    const r = await renderScreen(
+      <WeekView weekStart={WEEK} dayStates={{ ...states, '2026-10-11': 'available' }} dayMarks={marks} variant="booking" onSelectDay={onSelectDay} />
+    );
+    const c = cell(r, '2026-10-11');
+    expect(c.tagName).toBe('DIV');
+    expect(c.hasAttribute('tabindex')).toBe(false);
+    expect(c.getAttribute('title')).toBe('Academy closed');
+    expect(c.getAttribute('data-mark')).toBe('closed');
+    expect(c.textContent).toBe('Sun11, academy closed');
+    const sr = [...c.querySelectorAll('span')].find((s) => s.textContent === ', academy closed');
+    expect([sr.style.position, sr.style.width, sr.style.height, sr.style.overflow]).toEqual(['absolute', '1px', '1px', 'hidden']);
+    const date = [...c.querySelectorAll('span')].find((s) => s.textContent === '11');
+    expect(date.style.textDecoration).toBe('line-through');
+    expect(contrast(c.style.color, blend(c.style.background, CARD))).toBeGreaterThanOrEqual(4.5);
+    await act(async () => { c.click(); });
+    expect(onSelectDay).not.toHaveBeenCalled();
+    await r.unmount();
+  });
+
+  test('a selected tournament day keeps the green fill and its star', async () => {
+    const r = await renderScreen(
+      <WeekView weekStart={WEEK} dayStates={states} dayMarks={marks} variant="booking" selected="2026-10-10" onSelectDay={() => {}} />
+    );
+    const t = cell(r, '2026-10-10');
+    expect(t.style.background).toBe('rgb(0, 175, 81)');
+    expect(t.style.color).toBe('rgb(0, 0, 0)');
+    expect(t.textContent).toContain('★');
+    await r.unmount();
+  });
+
+  test('the contract variant ignores marks', async () => {
+    const r = await renderScreen(<WeekView weekStart={WEEK} dayStates={STATES} dayMarks={{ '2026-10-06': 'closed', '2026-10-05': 'tournament' }} onSelectDay={() => {}} />);
+    expect(cell(r, '2026-10-06').tagName).toBe('BUTTON');
+    expect(cell(r, '2026-10-06').getAttribute('aria-label')).toBe('Tuesday, Oct 6');
+    expect(r.container.querySelectorAll('[data-mark]')).toHaveLength(0);
+    expect(r.text()).not.toContain('★');
+    await r.unmount();
+  });
+});
+
+test("'inactive' (outside the contract window) paints as a weekend and is never tappable", async () => {
+  const onSelectDay = jest.fn();
+  const r = await renderScreen(<WeekView weekStart={WEEK} dayStates={{ '2026-10-05': 'inactive', '2026-10-06': 'logged' }} onSelectDay={onSelectDay} />);
+  const off = cell(r, '2026-10-05');
+  const weekend = cell(r, '2026-10-11');
+  expect(off.tagName).toBe('DIV');
+  expect(off.getAttribute('data-state')).toBe('inactive');
+  expect(off.style.background).toBe(weekend.style.background);
+  expect(off.style.borderColor).toBe(weekend.style.borderColor);
+  expect(off.style.color).toBe(weekend.style.color);
+  await act(async () => { off.click(); });
+  expect(onSelectDay).not.toHaveBeenCalled();
+  await r.unmount();
+});
+
 // Owner bug 2026-09-30 ("the week view cant be scrolled when using a
 // desktop"): the row fits its container at any width - 7 equal columns that
 // may shrink - so there is never a sideways scroll for a mouse to miss.

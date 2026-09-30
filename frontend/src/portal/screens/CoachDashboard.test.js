@@ -61,6 +61,8 @@ test('Month is the default, and a day then a session opens that roster', async (
   expect(r.container.querySelector('.fc')).not.toBeNull();
   expect(navLabel(r)).toBe('November 2026');
   expect(sessionCard(r)).toBeNull();
+  // The tournament / closed legend sits under the coach's grid too.
+  expect(r.container.querySelector('.ryp-day-mark-legend').textContent).toContain('Academy closed');
   await tap(td(r, '2026-11-05'));
   await tap(sessionCard(r));
   expect(onOpenRoster).toHaveBeenCalledTimes(1);
@@ -83,31 +85,32 @@ test('Week: the same day and session open the identical roster payload', async (
   await r.unmount();
 });
 
-test('Week steps through the month and into the next one', async () => {
+test('Week steps through the month and into the next one, the boundary week whole', async () => {
   const r = await openSessions(() => {});
   await r.click('Week');
   await r.click('Thursday, Nov 5');
   expect(sessionCard(r)).not.toBeNull();
   for (let i = 0; i < 4; i++) await r.click('Next week');
-  expect(navLabel(r)).toBe('Nov 30');
+  expect(navLabel(r)).toBe('Nov 30 – Dec 6');
   // Stepping clears the selected day, as the month arrows do.
   expect(sessionCard(r)).toBeNull();
+  // November's load already covers Nov 30 - Dec 6: no December read yet.
   expect(mockRequested).not.toContain('2026-12-01');
   await r.click('Next week');
   expect(mockRequested).toContain('2026-12-01');
-  expect(navLabel(r)).toBe('Dec 1 – 6');
+  expect(navLabel(r)).toBe('Dec 7 – 13');
   await r.unmount();
 });
 
 test('a week with no sessions shows the week empty copy', async () => {
   const r = await openSessions(() => {});
-  expect(r.text()).toContain('Days marked green have sessions');
+  expect(r.text()).toContain('Green and yellow days have sessions');
   await r.click('Week');
-  expect(r.text()).toContain('Days marked green have sessions');
+  expect(r.text()).toContain('Green and yellow days have sessions');
   await r.click('Next week');
   expect(navLabel(r)).toBe('Nov 9 – 15');
   expect(r.text()).toContain('No sessions are scheduled this week.');
-  expect(r.text()).not.toContain('Days marked green have sessions');
+  expect(r.text()).not.toContain('Green and yellow days have sessions');
   await r.unmount();
 });
 
