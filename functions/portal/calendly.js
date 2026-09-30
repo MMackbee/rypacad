@@ -8,6 +8,12 @@
  * 0.7). Response contract: 400 only for a bad signature, 200 for every
  * verified event whatever the outcome, 500 only for a Firestore throw. No
  * network call in the handler.
+ *
+ * Single token (owner rulings 2026-09-29/30): a purchased `single_{cs}`
+ * token may have been spent in any period, so its spends are read by id
+ * (`lib.graceSpendQueries`); a single athlete's waitlist holds never block
+ * a real Calendly session; and a flagged booking by a per-purchase athlete
+ * still spends the grace token `chargeFor` picked, keeping its flag.
  */
 'use strict';
 
@@ -221,15 +227,23 @@ async function applyCreated(tx, c) {
       .where('athleteId', '==', athlete.id));
   const graceSnap = await tx.get(store.collection('graceTokens')
       .where('athleteId', '==', athlete.id));
+  const graceRows = lib.rows(graceSnap);
+  const spendRows = await lib.readGraceSpends((q) => tx.get(q),
+      lib.graceSpendQueries(store, graceRows, lib.todayISO(nowDate)));
   // ---- reads done ----
   const live = (rows) => rows.filter(
       (b) => !cancelled.has(b.id) && b.status !== 'cancelled');
+  const waitRows = lib.rows(waitSnap);
   const position = lib.tokensPosition({
     pkg, tokenPeriod: tpSnap.exists ? tpSnap.data() : null,
     bookings: live(periodRows),
-    waitlist: lib.rows(waitSnap).map((w) => ({id: w.id,
+    waitlist: waitRows.map((w) => ({id: w.id,
       periodKey: lib.periodFor(w.date || slot.date, anchor).periodKey})),
-    graceTokens: lib.rows(graceSnap),
+    // A waitlist hold never blocks a real session (ruling 2026-09-30).
+    ignoreWaitlistIds: pkg && pkg.kind === 'single' ?
+        waitRows.map((w) => w.id) : [],
+    graceTokens: graceRows,
+    graceSpends: live(spendRows),
     periodKey: period.periodKey, today: lib.todayISO(nowDate),
   });
   const charge = lib.chargeFor({position, sessionDate: slot.date});
@@ -245,6 +259,10 @@ async function applyCreated(tx, c) {
   } else if (!charge.chargedFrom) {
     flag = 'over-cap';
   }
+  // A monthly flagged booking stays 'period'; a per-purchase athlete's
+  // flagged booking still spends its grace token (ruling 2026-09-30).
+  const paid = !flag || (position.perPurchase &&
+      charge.chargedFrom === 'grace');
   for (const b of old) cancelBooking(tx, store, {id: b.id, data: b});
   tx.set(store.collection('sessions').doc(slot.id), {
     date: slot.date, time: slot.time, type: TYPE, label: LABEL,
@@ -258,8 +276,8 @@ async function applyCreated(tx, c) {
         athleteId: athlete.id, sessionId: slot.id, householdId,
         date: slot.date, type: TYPE, status: 'confirmed',
         periodKey: period.periodKey,
-        chargedFrom: flag ? 'period' : charge.chargedFrom,
-        graceTokenId: flag ? null : charge.graceTokenId,
+        chargedFrom: paid ? charge.chargedFrom : 'period',
+        graceTokenId: paid ? charge.graceTokenId : null,
         attendee: attendeeOf(p.questions_and_answers),
         createdBy: 'system', source: 'calendly',
         calendlyInviteeUri: p.uri || null, flag, createdAt: now(),
