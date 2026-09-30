@@ -13,7 +13,7 @@ jest.mock('../hooks/callables', () => ({
   },
   callAddAthletes: async (payload) => { mockCalls.push(['addAthletes', payload]); return { householdId: 'h1', athleteIds: ['a2'] }; },
   callCreateCheckoutSession: async () => ({ url: 'https://checkout.stripe.test/x' }),
-}), { virtual: true });
+})); // not `virtual`: see PayButton.test.js
 jest.mock('./RegistrationSuccess', () => ({ __esModule: true, default: ({ result, onFinish }) => <button type="button" onClick={() => onFinish('/portal/family')}>SUCCESS {result.athleteIds.join(',')}</button> }));
 
 // These cover the 6-step layout, contract ON; Registration.off.test.js covers it hidden.

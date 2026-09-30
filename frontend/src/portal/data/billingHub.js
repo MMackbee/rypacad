@@ -15,6 +15,59 @@ import { addDaysISO, BOOKING_OPENS_LABEL, bookingOpen, longDayLabel } from './ca
 import { normalizeAnchorDay, periodFor, SINGLE_TOKEN, tokensFor } from './packages';
 import { contractEnabled } from './contractFlag';
 
+/**
+ * The season's first token period - functions/portal/prepaid.js carries the
+ * same date: every checkout before Nov 1 prepays November, so no period
+ * before it ever held a grant.
+ */
+export const SEASON_FIRST_PERIOD = '2026-11-01';
+
+/**
+ * The period a token POSITION is read against (tester report 2026-09-30:
+ * "16 tokens expire Wednesday, Sep 30" before anything was bookable). The
+ * current period - except before the one holding SEASON_FIRST_PERIOD, when
+ * it is that first period, flagged `preSeason`: the prepaid November grant
+ * is the only grant there is, and every session booked before then spends
+ * it. Elite (tokens null) has no grant and keeps the current period. From
+ * Nov 1 on this is periodFor(today) exactly.
+ */
+export function positionPeriodFor(today, anchorDay, pkg = null) {
+  const current = periodFor(today, anchorDay);
+  const first = periodFor(SEASON_FIRST_PERIOD, anchorDay);
+  const elite = Boolean(pkg) && pkg.tokens === null;
+  return !elite && current.periodKey < first.periodKey ? { ...first, preSeason: true } : { ...current, preSeason: false };
+}
+
+/**
+ * Bookings or waitlist entries as a token position reads them: a row
+ * charged to a period before the first one (an October slot booked after
+ * the Oct 10 gate - createBooking charges the session date's own period)
+ * spends the first period's grant, the only one there is, so the meter and
+ * its evidence list never lose a spent token. Elite and a package-less read
+ * pass through.
+ */
+export function foldBeforeFirstPeriod(rows, anchorDay, pkg) {
+  if (!pkg || pkg.tokens === null || !Array.isArray(rows)) return rows;
+  const firstKey = periodFor(SEASON_FIRST_PERIOD, anchorDay).periodKey;
+  return rows.map((r) => (r && r.periodKey && r.periodKey < firstKey ? { ...r, periodKey: firstKey } : r));
+}
+
+/**
+ * A tokensFor position marked with why it cannot be spent yet: `unpaid`
+ * (billing pending or lapsed - "Pay to start") and `startsOn` (the first
+ * period's start while it is still ahead - "Tokens start Nov 1"). The
+ * numbers are untouched; every "N tokens left" surface reads the marks
+ * first (billingCopy.js#tokenStartLabel). Elite passes through.
+ */
+export function withTokenStart(tokens, period, billingStatus) {
+  if (!tokens || tokens.unlimited) return tokens;
+  return {
+    ...tokens,
+    startsOn: period && period.preSeason ? period.periodKey : null,
+    unpaid: billingStatus === 'pending' || billingStatus === 'lapsed',
+  };
+}
+
 /** Days from `fromISO` to `toISO` (calendar days, UTC-noon arithmetic). */
 export function daysBetween(fromISO, toISO) {
   const a = Date.UTC(...fromISO.split('-').map(Number).map((n, i) => (i === 1 ? n - 1 : n)), 12);
@@ -96,25 +149,34 @@ export function periodRows({ bookings, waitlist, periodKey, sessionsById = {} })
  *   prevTokenPeriod, sessionsById, anchorDay, today}} args
  */
 export function hubMemberFor(args) {
-  const { athlete, pkg, bookings = [], waitlist = [], graceTokens = [], tokenPeriod = null, prevTokenPeriod = null } = args;
+  const { athlete, pkg, graceTokens = [], tokenPeriod = null, prevTokenPeriod = null } = args;
   const sessionsById = args.sessionsById || {};
   const anchorDay = normalizeAnchorDay(args.anchorDay);
   const today = args.today;
-  const period = periodFor(today, anchorDay);
+  // A row dated before the first period is read as the first period's.
+  const bookings = foldBeforeFirstPeriod(args.bookings || [], anchorDay, pkg);
+  const waitlist = foldBeforeFirstPeriod(args.waitlist || [], anchorDay, pkg);
+  // Before the season a token package reads the first (prepaid) period;
+  // the caller's `tokenPeriod` is that period's issued doc.
+  const period = positionPeriodFor(today, anchorDay, pkg);
   const resetsOn = addDaysISO(period.periodEnd, 1);
   const nextPeriod = periodFor(resetsOn, anchorDay);
   const prevPeriod = periodFor(addDaysISO(period.periodKey, -1), anchorDay);
 
   const raw = tokensFor(athlete, pkg, bookings, waitlist, graceTokens, period.periodKey, { today, tokenPeriod });
   const byId = new Map((graceTokens || []).map((g) => [g.id, g]));
-  const tokens = {
-    ...raw,
-    grace: raw.grace.map((g) => ({
-      ...g,
-      reason: byId.get(g.id)?.reason ?? null,
-      sourceSessionId: byId.get(g.id)?.sourceSessionId ?? null,
-    })),
-  };
+  const tokens = withTokenStart(
+    {
+      ...raw,
+      grace: raw.grace.map((g) => ({
+        ...g,
+        reason: byId.get(g.id)?.reason ?? null,
+        sourceSessionId: byId.get(g.id)?.sourceSessionId ?? null,
+      })),
+    },
+    period,
+    athlete.billing?.status
+  );
 
   const { spent, reserved } = periodRows({ bookings, waitlist, periodKey: period.periodKey, sessionsById });
   const nextRows = periodRows({ bookings, waitlist, periodKey: nextPeriod.periodKey, sessionsById });
@@ -124,7 +186,9 @@ export function hubMemberFor(args) {
   const lastUsed = (bookings || []).filter(
     (b) => b && b.status !== 'cancelled' && b.periodKey === prevPeriod.periodKey && !b.graceTokenId
   ).length;
-  const lastPeriod = pkg
+  // No "Last period" before the season's first one - nothing was granted
+  // then (tester report 2026-09-30: "Aug 1 - Aug 31" for a new member).
+  const lastPeriod = pkg && prevPeriod.periodKey >= periodFor(SEASON_FIRST_PERIOD, anchorDay).periodKey
     ? {
         periodKey: prevPeriod.periodKey,
         start: prevPeriod.periodKey,
@@ -135,8 +199,9 @@ export function hubMemberFor(args) {
     : null;
 
   const daysLeft = daysBetween(today, period.periodEnd);
+  // Nothing expires before the first period starts or while unpaid.
   const expiryNudge =
-    !unlimited && pkg && tokens.left > 0 && daysLeft <= 7
+    !unlimited && pkg && !period.preSeason && !tokens.unpaid && tokens.left > 0 && daysLeft <= 7
       ? { left: tokens.left, on: period.periodEnd, days: daysLeft }
       : null;
 
@@ -155,7 +220,7 @@ export function hubMemberFor(args) {
           access247: Boolean(pkg.access247),
         }
       : null,
-    period: { periodKey: period.periodKey, start: period.periodKey, end: period.periodEnd, resetsOn, daysLeft },
+    period: { periodKey: period.periodKey, start: period.periodKey, end: period.periodEnd, resetsOn, daysLeft, preSeason: period.preSeason },
     tokens,
     spent,
     reserved,
@@ -227,10 +292,15 @@ function attemptOf(membership) {
  * The monthly pending body names the Oct 10 gate until it opens (UX review
  * P-07: "can book as soon as checkout is complete" was untrue for token
  * packages before then). `opts.now` (ms) pins the clock in tests.
+ *
+ * Before the season (`opts.tokensStartOn`, the first period's start when a
+ * member's position is pre-season) the active title says when tokens start,
+ * never a "reset" of a month that granted nothing.
  */
 export function statusFor(membership, opts = {}) {
   const status = (membership && membership.status) || 'active';
   const resetsOn = opts.resetsOn || null;
+  const tokensStartOn = opts.tokensStartOn || null;
   const pendingAthletes = Array.isArray(opts.pendingAthletes) ? opts.pendingAthletes : [];
   const billingDay = opts.anchorDay ? ordinal(normalizeAnchorDay(opts.anchorDay)) : null;
   const attempt = attemptOf(membership);
@@ -305,7 +375,11 @@ export function statusFor(membership, opts = {}) {
     status: 'active',
     tone: 'default',
     badge: { tone: 'green', label: 'Active' },
-    title: resetsOn ? `Tokens reset ${longDayLabel(resetsOn)}` : 'Membership active',
+    title: tokensStartOn
+      ? `Tokens start ${longDayLabel(tokensStartOn)}`
+      : resetsOn
+        ? `Tokens reset ${longDayLabel(resetsOn)}`
+        : 'Membership active',
     body: opts.allPerPurchase === true
       ? 'Session tokens are one-time payments - nothing bills monthly.'
       : `${billingDay ? `Billed monthly on the ${billingDay}. ` : ''}Nothing needs attention.`,

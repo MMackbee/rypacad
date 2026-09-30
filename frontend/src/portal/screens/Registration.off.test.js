@@ -10,7 +10,7 @@ import Registration from './Registration';
  * checked too. Registration.test.js covers the flag ON, unchanged.
  */
 const mockCalls = [];
-// A plain (resolved) mock: the module exists, so no `virtual` path to mismatch.
+// Not `virtual`: see PayButton.test.js.
 jest.mock('../hooks/callables', () => ({
   callCreateFamily: async (payload) => { mockCalls.push(['createFamily', payload]); return { householdId: 'h1', athleteIds: ['a1'] }; },
   callAddAthletes: async (payload) => { mockCalls.push(['addAthletes', payload]); return { householdId: 'h1', athleteIds: ['a2'] }; },

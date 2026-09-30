@@ -4,6 +4,7 @@ import Button from '../components/Button';
 import Field from '../components/Field';
 import { Body, Card, ScreenTitle, Tick } from '../components/Primitives';
 import { useEnrollmentForm } from '../hooks';
+import { CONSENT_TERMS } from '../data/consentTerms';
 
 /**
  * Registration's consent step, its info sheet and the checkbox (Sprint 20,
@@ -176,6 +177,15 @@ export function ConsentInfoSheet({ id, onClose }) {
           {consent?.body}
         </Body>
         {info.extra}
+        {/* The full terms (data/consentTerms.js), section by section. */}
+        {(CONSENT_TERMS[id] || []).map((section) => (
+          <div key={section.heading} style={{ marginTop: 14 }}>
+            <div style={{ font: `600 12px ${font.body}`, color: color.text }}>{section.heading}</div>
+            {section.lines.map((line) => (
+              <Body key={line} size={12} style={{ marginTop: 6 }}>{line}</Body>
+            ))}
+          </div>
+        ))}
         <Button variant="outline" height={46} onClick={onClose} style={{ marginTop: 18, boxShadow: 'none' }}>
           Close
         </Button>

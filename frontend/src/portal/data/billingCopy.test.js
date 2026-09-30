@@ -1,4 +1,31 @@
-import { billingBadge, confirmedLine, facilityCardState, facilityLine, loginStatusLine, PENDING_PLAN_LINE, PENDING_TITLE, SINGLE_PLAN_LINE } from './billingCopy';
+import {
+  billingBadge,
+  confirmedLine,
+  facilityCardState,
+  facilityLine,
+  firstPeriodLine,
+  loginStatusLine,
+  PAY_TO_START,
+  PENDING_PLAN_LINE,
+  PENDING_TITLE,
+  SINGLE_PLAN_LINE,
+  tokenStartLabel,
+} from './billingCopy';
+
+test('a balance that cannot be spent yet (tester report 2026-09-30)', () => {
+  expect(PAY_TO_START).toBe('Pay to start');
+  expect(tokenStartLabel({ left: 16, startsOn: '2026-11-01', unpaid: false })).toBe('Tokens start Nov 1');
+  // Unpaid outranks the season start.
+  expect(tokenStartLabel({ left: 16, startsOn: '2026-11-01', unpaid: true })).toBe('Pay to start');
+  expect(tokenStartLabel({ left: 3, startsOn: null, unpaid: true })).toBe('Pay to start');
+  // In season and paid, or no marks at all (seed payloads): the number stands.
+  expect(tokenStartLabel({ left: 3, startsOn: null, unpaid: false })).toBeNull();
+  expect(tokenStartLabel({ left: 3 })).toBeNull();
+  expect(tokenStartLabel({ unlimited: true, startsOn: '2026-11-01', unpaid: true })).toBeNull();
+  expect(tokenStartLabel(null)).toBeNull();
+  expect(firstPeriodLine({ start: '2026-11-01', end: '2026-11-30' }, 16)).toBe('First period: November (Nov 1 - Nov 30) - 16 tokens');
+  expect(firstPeriodLine({ start: '2026-11-01', end: '2026-11-30' }, 1)).toBe('First period: November (Nov 1 - Nov 30) - 1 token');
+});
 
 test('section 9 strings', () => {
   expect(PENDING_TITLE).toBe('Payment pending - finish checkout to start booking');

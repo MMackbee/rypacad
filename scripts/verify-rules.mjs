@@ -183,10 +183,54 @@ export async function taskWindow() {
   for (const [c, id] of [['bookings', 'ath-elite_s-dec16'], ['bookings', 'ath-elite_s-dec18'], ['sessions', 's-dec16'], ['sessions', 's-dec18']]) await del(c, id);
 }
 
+// Tester S4 (2026-09-30): before the first payment the family may switch the
+// package picked at sign-up - pendingPackageUpdateOk.
+export async function taskPackageChange() {
+  console.log('Package change: the family switches a never-paid package - only packageId (+ server updatedAt), only monthly');
+  const selfUid = 'self-probe';
+  const self = token(selfUid, { email: 'sam@example.com', email_verified: true });
+  await seed('users', selfUid, { role: 'athlete', athleteId: 'ath-pkg-self', householdId: 'hh-self' });
+  const athletes = [['ath-pkg-pending', 'hh', 'pending'], ['ath-pkg-active', 'hh', 'active'], ['ath-pkg-pastdue', 'hh', 'past_due'],
+    ['ath-pkg-lapsed', 'hh', 'lapsed'], ['ath-pkg-absent', 'hh', null], ['ath-pkg-self', 'hh-self', 'pending']];
+  for (const [id, householdId, status] of athletes) {
+    await seed('athletes', id, { name: id, householdId, contractMinutes: null, coachId: null, packageId: 'elite', ...(status ? { billing: { status } } : {}) });
+  }
+  const patchAth = (id, fields, auth) => call('PATCH', `/athletes/${id}?${Object.keys(fields).map((k) => `updateMask.fieldPaths=${k}`).join('&')}`,
+    { fields: fsFields(fields) }, auth).then((r) => r.status);
+  // live.js changePendingPackage's write: packageId plus updatedAt = serverTimestamp() (REQUEST_TIME).
+  const stamped = async (id, fields, auth) => {
+    const name = `projects/${PROJECT}/databases/(default)/documents/athletes/${id}`;
+    const res = await fetch(`http://${HOST}/v1/projects/${PROJECT}/databases/(default)/documents:commit`, {
+      method: 'POST', headers: { 'content-type': 'application/json', authorization: `Bearer ${auth}` },
+      body: JSON.stringify({ writes: [{ update: { name, fields: fsFields(fields) }, updateMask: { fieldPaths: Object.keys(fields) },
+        currentDocument: { exists: true }, updateTransforms: [{ fieldPath: 'updatedAt', setToServerValue: 'REQUEST_TIME' }] }] }),
+    });
+    return res.status;
+  };
+  expect('parent switches a pending athlete, Elite -> 6 tokens', await patchAth('ath-pkg-pending', { packageId: 't-6' }, t.parent), 200);
+  expect('parent switches again with the server updatedAt (the client write)', await stamped('ath-pkg-pending', { packageId: 't-12' }, t.parent), 200);
+  expect('parent switches back to Elite', await stamped('ath-pkg-pending', { packageId: 'elite' }, t.parent), 200);
+  expect('the one-time single token refused', await patchAth('ath-pkg-pending', { packageId: 'single' }, t.parent), 403);
+  expect('a retired package refused', await patchAth('ath-pkg-pending', { packageId: 't-20' }, t.parent), 403);
+  expect('a client-chosen updatedAt refused', await patchAth('ath-pkg-pending', { packageId: 't-16', updatedAt: new Date('2026-01-01T00:00:00Z') }, t.parent), 403);
+  expect('packageId beside billing refused', await patchAth('ath-pkg-pending', { packageId: 't-16', billing: { status: 'active' } }, t.parent), 403);
+  expect('packageId beside facilityAccess refused', await patchAth('ath-pkg-pending', { packageId: 't-16', facilityAccess: true }, t.parent), 403);
+  for (const [id, label] of [['ath-pkg-active', 'active'], ['ath-pkg-pastdue', 'past_due'], ['ath-pkg-lapsed', 'lapsed'], ['ath-pkg-absent', 'absent (== active)']]) {
+    expect(`refused when billing is ${label}`, await patchAth(id, { packageId: 't-6' }, t.parent), 403);
+  }
+  expect('the 18+ athlete switches their own pending package', await stamped('ath-pkg-self', { packageId: 't-16' }, self), 200);
+  expect('an athlete cannot switch another athlete in the household', await patchAth('ath-pkg-pending', { packageId: 't-6' }, t.athlete), 403);
+  expect("a parent cannot switch another family's athlete", await patchAth('ath-pkg-self', { packageId: 't-6' }, t.parent), 403);
+  expect('a stranger cannot switch', await patchAth('ath-pkg-pending', { packageId: 't-6' }, t.stranger), 403);
+  expect('ops still assigns any package (the staff branch)', await patchAth('ath-pkg-active', { packageId: 'single' }, t.ops), 200);
+  for (const [id] of athletes) await del('athletes', id);
+  await del('users', selfUid);
+}
+
 export { setup, teardown, seed, del, call, createAs, expect, token, t, uid, BASE };
 if (process.argv[1] && process.argv[1].endsWith('verify-rules.mjs')) {
   await setup();
-  try { await task4(); await task5(); await taskContract(); await taskWindow(); } finally { await teardown(); }
+  try { await task4(); await task5(); await taskContract(); await taskWindow(); await taskPackageChange(); } finally { await teardown(); }
   console.log(failures ? `${failures} FAILED` : 'ALL PASS');
   process.exit(failures ? 1 : 0);
 }

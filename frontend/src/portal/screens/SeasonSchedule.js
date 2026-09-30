@@ -93,6 +93,10 @@ function LiveCalendar({ initialDate }) {
         views={VIEW_OPTIONS}
         fixedWeekCount={false}
         height="auto"
+        // Same fix as ContractCalendar (tester report 2026-09-30): with
+        // height="auto" the 'auto' default pins the weekday row to the
+        // screen's scroller, see-through on the transparent page colour.
+        stickyHeaderDates={false}
         dayMaxEventRows={3}
         // Stay in the app: the plugin's default click opens Google Calendar.
         eventClick={(info) => info.jsEvent.preventDefault()}

@@ -3,6 +3,9 @@ import { renderScreen } from './testRender';
 import ParentDashboard from './ParentDashboard';
 
 let mockHub; let mockConfirm;
+const mockChange = jest.fn(async (athleteId, packageId) => ({ athleteId, packageId }));
+jest.mock('../hooks/packageChange', () => ({ useChangePackage: () => ({ change: mockChange }) }));
+let mockTokens = {};
 jest.mock('../components/PayButton', () => ({ __esModule: true, default: ({ athleteId, label }) => <button type="button">{label}|{athleteId}</button> }));
 jest.mock('../hooks/billing', () => ({
   __esModule: true,
@@ -13,8 +16,8 @@ jest.mock('../hooks/billing', () => ({
 }));
 jest.mock('../hooks', () => ({
   useHousehold: () => ({ loading: false, error: null, data: { name: 'Whitfield family', date: 'Thu, Oct 1', children: [
-    { id: 'a1', name: 'Jordan', ageLine: 'Age 14 · 45 min tier', standing: { tone: 'green', label: 'On track' }, next: null, contract: 92, packageId: 't-12', tokens: null, loginEmail: 'jordan@email.com', login: { state: 'invited', claimedAt: null } },
-    { id: 'a2', name: 'Reese', ageLine: 'Age 12', standing: { tone: 'neutral', label: 'New', dashed: true }, next: null, contract: null, packageId: 't-6', tokens: null },
+    { id: 'a1', name: 'Jordan', ageLine: 'Age 14 · 45 min tier', standing: { tone: 'green', label: 'On track' }, next: null, contract: 92, packageId: 't-12', tokens: mockTokens.a1 ?? null, loginEmail: 'jordan@email.com', login: { state: 'invited', claimedAt: null } },
+    { id: 'a2', name: 'Reese', ageLine: 'Age 12', standing: { tone: 'neutral', label: 'New', dashed: true }, next: null, contract: null, packageId: 't-6', tokens: mockTokens.a2 ?? null },
   ], billing: { status: 'ok' } } }),
   // No useMembership mock on purpose (perf wave B): the household's Stripe
   // standing now comes off the hub, and a stray second fetch would crash here.
@@ -24,6 +27,7 @@ jest.mock('../hooks', () => ({
 afterEach(() => { delete process.env.REACT_APP_CONTRACT_ENABLED; });
 beforeEach(() => {
   process.env.REACT_APP_CONTRACT_ENABLED = 'true';
+  mockTokens = {};
   mockConfirm = { state: 'confirming', billingStatus: 'pending' };
   mockHub = { loading: false, error: null, data: {
     household: { id: 'h1' }, portalUrl: null,
@@ -48,6 +52,48 @@ test('pending banner with one Pay now per unpaid athlete; the unpaid card is bad
   expect(r.text()).toContain('Login: not claimed (jordan@email.com)');
   expect(r.text()).not.toContain('Login: none');
   await r.unmount();
+});
+
+test('sibling discount: one line on the pending card when two members are monthly, Pay now unchanged (owner 2026-09-30)', async () => {
+  const NOTE = '10% sibling discount comes off at checkout.';
+  const withPackages = (ids, pending = mockHub.data.status.pendingAthletes) => ({ ...mockHub, data: { ...mockHub.data,
+    members: mockHub.data.members.map((m, i) => ({ ...m, package: ids[i] ? { id: ids[i], kind: ids[i] === 'single' ? 'single' : 'tokens' } : null })),
+    status: { ...mockHub.data.status, pendingAthletes: pending } } });
+  mockHub = withPackages(['t-12', 't-6']);
+  const r = await renderScreen(<ParentDashboard bare />, { path: '/portal/family' });
+  expect(r.text()).toContain(NOTE);
+  expect(r.button('Pay now|a2')).not.toBeNull();
+  await r.unmount();
+  // Jordan (paid) on the single token: only one membership in the family.
+  mockHub = withPackages(['single', 't-6']);
+  const one = await renderScreen(<ParentDashboard bare />, { path: '/portal/family' });
+  expect(one.text()).not.toContain('sibling');
+  await one.unmount();
+  // Two paid memberships, and the only checkout left is Reese's one-time
+  // single token: not a membership, so no discount on it.
+  mockHub = withPackages(['t-12', 'single'], [{ athleteId: 'a2', name: 'Reese', perPurchase: true }]);
+  mockHub.data.members.push({ athleteId: 'a3', name: 'Sam', package: { id: 't-6', kind: 'tokens' }, billing: { status: 'active', facility: null } });
+  const single = await renderScreen(<ParentDashboard bare />, { path: '/portal/family' });
+  expect(single.button('Pay now|a2')).not.toBeNull();
+  expect(single.text()).not.toContain('sibling');
+  await single.unmount();
+});
+
+test('card tokens: "Tokens start Nov 1" before the season, "Pay to start" unpaid - never a balance (tester report 2026-09-30)', async () => {
+  const t = (over) => ({ granted: 16, used: 0, reserved: 0, left: 16, unlimited: false, grace: [], startsOn: '2026-11-01', unpaid: false, ...over });
+  mockTokens = { a1: t(), a2: t({ unpaid: true }) };
+  const r = await renderScreen(<ParentDashboard bare />, { path: '/portal/family' });
+  expect(r.text()).toContain('Tokens start Nov 1');
+  expect(r.text()).toContain('Pay to start');
+  expect(r.text()).not.toMatch(/\d+ tokens? left/);
+  await r.unmount();
+  // From Nov 1, paid: the balance is back; Elite is unaffected.
+  mockTokens = { a1: t({ startsOn: null, left: 13 }), a2: { unlimited: true, granted: null, left: null, grace: [] } };
+  const n = await renderScreen(<ParentDashboard bare />, { path: '/portal/family' });
+  expect(n.text()).toContain('13 tokens left');
+  expect(n.text()).toContain('Elite · unlimited');
+  expect(n.text()).not.toContain('Tokens start');
+  await n.unmount();
 });
 
 test('a past_due household membership on the hub shows the payment banner and ON HOLD cards', async () => {
@@ -118,6 +164,30 @@ describe("What's next under Payment received (owner decision 2026-09-30)", () =>
     expect(f.text()).not.toContain("What's next");
     await f.unmount();
   });
+});
+
+test('a never-paid athlete can change package from the pending card before Pay now (tester S4); a lapsed one cannot', async () => {
+  mockHub.data.status.pendingAthletes = [
+    { athleteId: 'a2', name: 'Reese', status: 'pending', packageId: 'elite', perPurchase: false },
+    { athleteId: 'a3', name: 'Nico', status: 'pending', packageId: 't-6', perPurchase: false },
+    { athleteId: 'a1', name: 'Jordan', status: 'lapsed', packageId: 't-12', perPurchase: false },
+  ];
+  const r = await renderScreen(<ParentDashboard bare />, { path: '/portal/family' });
+  expect(r.text()).toContain('ReeseElite · Change package');
+  expect(r.text()).toContain('Nico6 tokens · Change package');
+  expect(r.text()).not.toContain('12 tokens · Change package');
+  expect(r.text()).not.toContain("Change Reese's package");
+  // Two unpaid children: two links a screen reader tells apart by name.
+  expect(r.button('Change package for Reese')).not.toBeNull();
+  expect(r.button('Change package for Jordan')).toBeNull();
+  await r.click('Change package for Nico');
+  expect(r.text()).toContain("Change Nico's package");
+  expect(r.text()).not.toContain("Change Reese's package");
+  await r.click('16 tokens');
+  await r.click('Save package');
+  expect(mockChange).toHaveBeenCalledWith('a3', 't-16');
+  expect(r.text()).not.toContain("Change Nico's package");
+  await r.unmount();
 });
 
 describe('Commitment Contract hidden (owner ruling 2026-09-30)', () => {

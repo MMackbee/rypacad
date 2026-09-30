@@ -378,9 +378,9 @@ export default function SpecialistBooking({
                     <BookingOpensBanner />
                   </div>
                 ) : null}
-                {/* The shared Month/Week card (owner request 2026-09-30); Week is
-                    this screen's default. Both views paint the rolling window
-                    already in hand and set the same selectedDate. */}
+                {/* The shared Month/Week card; Month is the default, as on Book a
+                    Session (tester 2026-09-30: the week strip confused), and a stored
+                    choice still wins. Both views paint the window and share selectedDate. */}
                 <div style={{ padding: '0 22px' }}>
                   <RangeCalendarCard
                     rangeStart={days[0]?.date}
@@ -391,7 +391,7 @@ export default function SpecialistBooking({
                     variant="booking"
                     selected={selectedDate}
                     onSelectDay={(day) => setSelectedDate(day.iso)}
-                    defaultView="week"
+                    defaultView="month"
                     hint={calendarHint}
                   />
                 </div>

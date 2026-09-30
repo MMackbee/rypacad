@@ -1,6 +1,7 @@
 import React from 'react';
 import { color, font, radius } from '../tokens';
 import { longDayLabel } from '../data/calendar';
+import { tokenStartLabel } from '../data/billingCopy';
 
 /**
  * The token meter — screens 03, 04, 05, 08, 19 (Sprint 12, contract v2.0).
@@ -27,7 +28,8 @@ function toneFor(left) {
 
 /**
  * @param {object} tokens  `{ granted, used, left, unlimited, grace }` — see
- *   `tokensFor()` in ../data/packages. `null`/`undefined` renders nothing
+ *   `tokensFor()` in ../data/packages — plus the optional `startsOn`/`unpaid`
+ *   marks (billingHub.js#withTokenStart). `null`/`undefined` renders nothing
  *   (no package assigned yet).
  * @param {boolean} compact  One line, for a dense card (08).
  */
@@ -43,8 +45,15 @@ export default function AllowancePools({ tokens, compact = false, style }) {
   }
 
   const tone = toneFor(tokens.left);
+  // Unpaid or before the first period (tester report 2026-09-30): "Pay to
+  // start" / "Tokens start Nov 1" stand in for the count of left tokens.
+  const startLabel = tokenStartLabel(tokens);
+  const startTone = tokens.unpaid ? color.secondary : color.primary;
 
   if (compact) {
+    if (startLabel) {
+      return <span style={{ font: `600 12px ${font.body}`, color: startTone, ...style }}>{startLabel}</span>;
+    }
     return (
       <span style={{ font: `400 11px ${font.body}`, color: color.textTertiary, ...style }}>
         <span style={{ font: `600 12px ${font.body}`, color: tone }}>{tokens.left}</span> token
@@ -69,16 +78,20 @@ export default function AllowancePools({ tokens, compact = false, style }) {
         >
           Tokens
         </span>
-        <span style={{ font: `600 12px ${font.body}`, color: tone }}>
-          {tokens.left === 0 ? 'None left' : `${tokens.left} left`}
+        <span style={{ font: `600 12px ${font.body}`, color: startLabel ? startTone : tone }}>
+          {startLabel ?? (tokens.left === 0 ? 'None left' : `${tokens.left} left`)}
         </span>
-        <span style={{ font: `400 11px ${font.body}`, color: color.textTertiary }}>
-          {tokens.used} of {tokens.granted} used
-        </span>
+        {tokens.unpaid ? null : (
+          <span style={{ font: `400 11px ${font.body}`, color: color.textTertiary }}>
+            {tokens.used} of {tokens.granted} used
+          </span>
+        )}
       </div>
-      <div style={{ height: 6, background: color.track, borderRadius: 3, overflow: 'hidden' }}>
-        <div style={{ width: `${pct}%`, height: '100%', background: tone, borderRadius: 3 }} />
-      </div>
+      {tokens.unpaid ? null : (
+        <div style={{ height: 6, background: color.track, borderRadius: 3, overflow: 'hidden' }}>
+          <div style={{ width: `${pct}%`, height: '100%', background: tone, borderRadius: 3 }} />
+        </div>
+      )}
     </div>
   );
 }

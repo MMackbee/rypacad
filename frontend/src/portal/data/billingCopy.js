@@ -3,7 +3,8 @@
  * PURE - shared by ParentDashboard, AthleteDashboard, Membership, Billing
  * and AthleteDetail so the words cannot drift. `billing` absent == active.
  */
-import { BOOKING_OPENS_LABEL, longDayLabel } from './calendar';
+import { format, parseISO } from 'date-fns';
+import { BOOKING_OPENS_LABEL, longDayLabel, monthName } from './calendar';
 import { SINGLE_TOKEN } from './packages';
 
 export const PENDING_TITLE = 'Payment pending - finish checkout to start booking';
@@ -14,6 +15,27 @@ export const SINGLE_PLAN_LINE = `One-time $${SINGLE_TOKEN.price} per session tok
 export const CONNECTED_LINE = 'Your card and invoices are managed in Stripe.';
 export const CONFIRMING = 'Confirming your payment...';
 export const CONFIRM_TIMEOUT = 'Still confirming - refresh in a minute, or check your email from Stripe.';
+
+/*
+ * A balance that cannot be spent yet (tester report 2026-09-30: unpaid
+ * athletes read "16 tokens left" in September). The marks come from
+ * billingHub.js#withTokenStart; unpaid outranks the season start.
+ */
+export const PAY_TO_START = 'Pay to start';
+const shortDay = (iso) => format(parseISO(iso), 'MMM d');
+
+/** "Pay to start" / "Tokens start Nov 1" in place of "N tokens left"; null == the number stands. */
+export function tokenStartLabel(tokens) {
+  if (!tokens || tokens.unlimited) return null;
+  if (tokens.unpaid) return PAY_TO_START;
+  return tokens.startsOn ? `Tokens start ${shortDay(tokens.startsOn)}` : null;
+}
+
+/** "First period: November (Nov 1 - Nov 30) - 16 tokens" - the Billing period row before the season. */
+export function firstPeriodLine(period, granted) {
+  const n = Number(granted) || 0;
+  return `First period: ${monthName(period.start)} (${shortDay(period.start)} - ${shortDay(period.end)}) - ${n} token${n === 1 ? '' : 's'}`;
+}
 
 export function confirmedLine(open) {
   return open ? "Payment received - you're all set to book." : `Payment received - booking opens ${BOOKING_OPENS_LABEL}.`;

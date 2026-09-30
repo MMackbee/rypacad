@@ -325,17 +325,20 @@ export function PackageStep({ athletes, onUpdate, showErrors }) {
   // Continue looked dead while child 2 had nothing picked).
   useEffect(() => {
     if (showErrors && firstMissing != null) setActiveKey(firstMissing);
-    // Only when showErrors turns on; after that, each pick moves the tab itself.
+    // Only when showErrors turns on; after that, the chips and Next move the tab.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [showErrors]);
   if (!active) return null;
 
   const label = (a) => a.name.trim() || `Athlete ${athletes.indexOf(a) + 1}`;
-  const pick = (id) => {
-    onUpdate(active.key, { packageId: id });
-    const next = athletes.find((a) => a.key !== active.key && needsPackage(a));
-    if (next) setActiveKey(next.key);
-  };
+  // A pick stays on screen, box and dot lit together (tester S4, 2026-09-30):
+  // jumping to the next athlete on the tap showed their empty cards instead,
+  // so the pick looked like it never took. Next moves on when they are ready.
+  const pick = (id) => onUpdate(active.key, { packageId: id });
+  const at = athletes.indexOf(active);
+  const nextUp = needsPackage(active)
+    ? null
+    : [...athletes.slice(at + 1), ...athletes.slice(0, at)].find(needsPackage) ?? null;
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
@@ -377,7 +380,6 @@ export function PackageStep({ athletes, onUpdate, showErrors }) {
             <PackageCard
               key={p.id}
               pkg={p}
-              emphasised={p.kind === 'elite'}
               selected={!offSale && active.packageId === p.id}
               onSelect={offSale ? undefined : () => pick(p.id)}
               footnote={offSale ? SINGLE_OFF_SALE_NOTE : undefined}
@@ -385,6 +387,12 @@ export function PackageStep({ athletes, onUpdate, showErrors }) {
           );
         })}
       </div>
+
+      {nextUp ? (
+        <Button variant="outline" height={46} onClick={() => setActiveKey(nextUp.key)} style={{ boxShadow: 'none' }}>
+          {`Next: ${label(nextUp)}`}
+        </Button>
+      ) : null}
 
       {showErrors && missing.length ? (
         <div data-field-error>
