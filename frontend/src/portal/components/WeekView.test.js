@@ -108,6 +108,25 @@ test('visibleFrom / visibleTo blank the days outside, keeping 7 slots', async ()
   await r.unmount();
 });
 
+// Owner bug 2026-09-30 ("the week view cant be scrolled when using a
+// desktop"): the row fits its container at any width - 7 equal columns that
+// may shrink - so there is never a sideways scroll for a mouse to miss.
+test('fits any width: 7 equal, shrinkable columns and no horizontal scroller', async () => {
+  const r = await renderScreen(
+    <WeekView weekStart={WEEK} dayStates={STATES} variant="booking" onSelectDay={() => {}} />
+  );
+  const row = r.container.querySelector('.ryp-week-view');
+  expect(row.style.display).toBe('grid');
+  expect(row.style.gridTemplateColumns.replace(/\s/g, '')).toBe('repeat(7,minmax(0,1fr))');
+  expect(row.style.overflowX).toBe('');
+  expect(row.style.overflow).toBe('');
+  for (const c of cells(r)) {
+    expect(parseFloat(c.style.minWidth)).toBe(0);
+    expect(c.style.width).toBe('100%');
+  }
+  await r.unmount();
+});
+
 describe('parity with the unmodified ContractCalendar', () => {
   const normalized = (s) => (s === 'closed' ? 'open' : s ?? 'weekend');
 

@@ -208,4 +208,47 @@ describe('Month/Week calendar card (owner request 2026-09-30)', () => {
     expect(r.button('Previous week').disabled).toBe(false);
     await r.unmount();
   });
+
+  // Owner bug 2026-09-30: "the week view cant be scrolled when using a
+  // desktop, only on mobile". The old 14-day strip was an overflowX:auto row
+  // with its scrollbar hidden (scrollbarWidth:none): a finger could swipe it,
+  // a mouse could not. The week view now fits with no horizontal scroller and
+  // pages with buttons, so every day in the window is reachable by clicking.
+  test('desktop: no hidden horizontal scroller; every slot day of a 14-day window is reachable by clicking', async () => {
+    const days = Array.from({ length: 14 }, (_, i) => {
+      const date = addDaysISO(TODAY, i);
+      return { date, dayLabel: date, slots: [slot(`w${i}`, i === 13 ? '6:15 PM' : '4:00 PM')] };
+    });
+    inApp({ days });
+    const r = await renderScreen(<SpecialistBooking bare initialSpecialist="mental" />);
+    const sideScrollers = [...r.container.querySelectorAll('*')].filter(
+      (el) =>
+        ['auto', 'scroll'].includes(el.style.overflowX) ||
+        ['auto', 'scroll'].includes(el.style.overflow) ||
+        el.style.scrollbarWidth === 'none'
+    );
+    expect(sideScrollers).toEqual([]);
+    const row = r.container.querySelector('.ryp-week-view');
+    expect(row.style.display).toBe('grid');
+    expect(row.style.gridTemplateColumns.replace(/\s/g, '')).toBe('repeat(7,minmax(0,1fr))');
+
+    const reached = new Set();
+    const collect = () =>
+      r.container
+        .querySelectorAll('.ryp-week-view button[data-date]')
+        .forEach((b) => reached.add(b.getAttribute('data-date')));
+    collect();
+    for (let i = 0; i < 6 && !r.button('Next week').disabled; i += 1) {
+      await r.click('Next week');
+      collect();
+    }
+    expect(r.button('Next week').disabled).toBe(true);
+    expect([...reached].sort()).toEqual(days.map((d) => d.date));
+
+    const last = days[13].date;
+    await tap(pill(r, last));
+    expect(pill(r, last).getAttribute('aria-pressed')).toBe('true');
+    expect(slotCard(r, '6:15')).not.toBeNull();
+    await r.unmount();
+  });
 });
