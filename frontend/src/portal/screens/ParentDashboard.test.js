@@ -16,7 +16,8 @@ jest.mock('../hooks', () => ({
     { id: 'a1', name: 'Jordan', ageLine: 'Age 14', standing: { tone: 'green', label: 'On track' }, next: null, contract: null, packageId: 't-12', tokens: null, loginEmail: 'jordan@email.com', login: { state: 'invited', claimedAt: null } },
     { id: 'a2', name: 'Reese', ageLine: 'Age 12', standing: { tone: 'neutral', label: 'New', dashed: true }, next: null, contract: null, packageId: 't-6', tokens: null },
   ], billing: { status: 'ok' } } }),
-  useMembership: () => ({ data: { household: { membership: null } } }),
+  // No useMembership mock on purpose (perf wave B): the household's Stripe
+  // standing now comes off the hub, and a stray second fetch would crash here.
 }));
 
 beforeEach(() => {
@@ -43,6 +44,22 @@ test('pending banner with one Pay now per unpaid athlete; the unpaid card is bad
   // loginEmail key (legacy shape), so no line at all - not even "Login: none".
   expect(r.text()).toContain('Login: not claimed (jordan@email.com)');
   expect(r.text()).not.toContain('Login: none');
+  await r.unmount();
+});
+
+test('a past_due household membership on the hub shows the payment banner and ON HOLD cards', async () => {
+  mockHub = { loading: false, error: null, data: {
+    household: { id: 'h1', membership: { status: 'past_due' } }, portalUrl: null,
+    members: [
+      { athleteId: 'a1', name: 'Jordan', package: { kind: 'tokens' }, billing: { status: 'active', facility: null } },
+      { athleteId: 'a2', name: 'Reese', package: { kind: 'tokens' }, billing: { status: 'active', facility: null } },
+    ],
+    status: null,
+  } };
+  const r = await renderScreen(<ParentDashboard bare />, { path: '/portal/family' });
+  expect(r.text()).toContain("Payment didn't go through");
+  expect(r.text()).toContain('On hold');
+  expect(r.text()).not.toContain('On track');
   await r.unmount();
 });
 
