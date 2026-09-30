@@ -47,7 +47,6 @@ import { BOOKING_CONFIRMATION } from '../data/seed';
 import { addDaysISO } from '../data/calendar';
 import { loginStateFor } from '../data/signups';
 import { parseISO } from 'date-fns';
-import { addDaysISO } from '../data/calendar';
 
 const mental = (date) => ({ id: date, type: 'mental', status: 'confirmed', date });
 
