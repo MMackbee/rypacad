@@ -4,6 +4,7 @@ import Button from '../components/Button';
 import PayButton from '../components/PayButton';
 import PhoneFrame from '../components/PhoneFrame';
 import { Body, Card, ScreenTitle, SectionLabel, Tick } from '../components/Primitives';
+import { VERIFY_EMAIL_SENDER } from '../data/authCopy';
 import { BOOKING_OPENS_LABEL, bookingOpen } from '../data/calendar';
 import { packageById } from '../data/packages';
 
@@ -45,6 +46,9 @@ export default function RegistrationSuccess({ bare = false, mode = 'signup', for
         </div>
         <Card large style={{ width: '100%' }}>
           <SectionLabel style={{ marginBottom: 12 }}>Pay</SectionLabel>
+          {account?.emailVerified === false && account.email ? (
+            <Body size={12} style={{ marginBottom: 12 }}>{`First open the link we emailed to ${account.email} (from ${VERIFY_EMAIL_SENDER} - check spam), then tap Pay.`}</Body>
+          ) : null}
           <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
             {rows.map((r) => (
               <PayButton key={r.key} athleteId={r.athleteId} email={account?.email ?? null}

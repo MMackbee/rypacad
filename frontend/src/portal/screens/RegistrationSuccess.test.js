@@ -30,6 +30,20 @@ test('one pay button per athlete, the next steps, child-login instructions, no w
   await r.unmount();
 });
 
+test('an unverified password account is told to open the verification link before Pay (UX P-04)', async () => {
+  const unverified = await renderScreen(
+    <RegistrationSuccess bare mode="signup" form={form()} result={{ householdId: 'h1', athleteIds: ['a1', 'a2'] }} account={{ email: 'dana@email.com', emailVerified: false }} onFinish={() => {}} />
+  );
+  expect(unverified.text()).toContain('First open the link we emailed to dana@email.com (from noreply@');
+  expect(unverified.text()).toContain(' - check spam), then tap Pay.');
+  await unverified.unmount();
+  const verified = await renderScreen(
+    <RegistrationSuccess bare mode="signup" form={form()} result={{ householdId: 'h1', athleteIds: ['a1', 'a2'] }} account={{ email: 'dana@email.com', emailVerified: true }} onFinish={() => {}} />
+  );
+  expect(verified.text()).not.toContain('First open the link');
+  await verified.unmount();
+});
+
 test('athlete mode goes home', async () => {
   const finished = [];
   const r = await renderScreen(
