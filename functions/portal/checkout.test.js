@@ -367,10 +367,11 @@ test('a second Pay now reuses the open session (QA S9: no double charge)',
           {athleteId: 'lena', product: 'tier'}, ctx('u-nina'),
           {db, stripe: st, now: OCT, catalogue: CAT});
       assert.equal(first.url, 'https://checkout.stripe.com/c/cs_test_1');
+      // novak is a 2+ membership family with no coupon configured: 'code'.
       assert.deepEqual(docs['athletes/lena'].pendingCheckout.tier,
-          {sessionId: 'cs_test_1', priceId: 'price_t6',
+          {sessionId: 'cs_test_1', priceId: 'price_t6', discount: 'code',
             createdAt: new Date(OCT).toISOString()});
-      // Same price, still open: the same Stripe page, no new session.
+      // Same price and discount, still open: the same page, no new session.
       const again = await checkout.createCheckoutSessionHandler(
           {athleteId: 'lena', product: 'tier'}, ctx('u-nina'),
           {db, stripe: st, now: OCT, catalogue: CAT});
@@ -407,6 +408,56 @@ test('a second Pay now reuses the open session (QA S9: no double charge)',
           'cs_test_5');
       assert.equal(docs['athletes/lena'].pendingCheckout.tier.sessionId,
           'cs_test_4');
+    });
+
+test('an open session is not reused once the sibling decision changed',
+    async () => {
+      // femi is alone in oye: no discount. A sibling arrives while the
+      // session is open, so the next Pay now must be a discounted page.
+      const docs = Object.assign({}, DOCS, {'athletes/femi':
+        {householdId: 'oye', packageId: 't-6', billing: {status: 'pending'}}});
+      const db = fakeDb(docs);
+      const calls = [];
+      const st = fakeStripe(calls);
+      const deps = {db, stripe: st, now: OCT, catalogue: CAT};
+      const alone = await checkout.createCheckoutSessionHandler(
+          {athleteId: 'femi', product: 'tier'}, ctx('u-femi'), deps);
+      assert.equal(alone.url, 'https://checkout.stripe.com/c/cs_test_1');
+      assert.equal(docs['athletes/femi'].pendingCheckout.tier.discount, 'none');
+      docs['athletes/oye-kid2'] = {householdId: 'oye', packageId: 't-12',
+        billing: {status: 'pending'}};
+      const withSib = await checkout.createCheckoutSessionHandler(
+          {athleteId: 'femi', product: 'tier'}, ctx('u-femi'), deps);
+      assert.equal(withSib.url, 'https://checkout.stripe.com/c/cs_test_2');
+      assert.equal(st.sessions.cs_test_1.status, 'expired');
+      assert.equal(calls[1].allow_promotion_codes, true);
+      assert.equal(docs['athletes/femi'].pendingCheckout.tier.discount, 'code');
+    });
+
+test('a coupon refused for any reason falls back to the code field',
+    async () => {
+      process.env.STRIPE_SIBLING_COUPON = 'SIBLING';
+      try {
+        const calls = [];
+        const st = fakeStripe(calls);
+        const create = st.checkout.sessions.create;
+        st.checkout.sessions.create = async (body) => {
+          if (body.discounts) {
+            const err = new Error('This coupon has expired.');
+            err.code = 'coupon_expired';
+            err.param = 'discounts[0][coupon]';
+            throw err;
+          }
+          return create(body);
+        };
+        const r = call({athleteId: 'lena', product: 'tier'}, ctx('u-nina'),
+            {stripe: st});
+        assert.equal((await r.p).url, 'https://checkout.stripe.com/c/cs_test_1');
+        assert.equal(calls[0].allow_promotion_codes, true);
+        assert.equal(calls[0].discounts, undefined);
+      } finally {
+        delete process.env.STRIPE_SIBLING_COUPON;
+      }
     });
 
 run();

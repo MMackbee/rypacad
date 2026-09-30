@@ -92,15 +92,18 @@ async function siblingEligible(store, householdId) {
  * Two taps on Pay now (two tabs, a stalled return) used to open two
  * Checkout Sessions, and a family that paid both got two subscriptions
  * (the webhook keeps the first and flags the second for a refund; QA S9,
- * 2026-09-30). The open session is reused while it is for the same price;
- * one for a different price (the family changed package) is expired first.
+ * 2026-09-30). The open session is reused while it is for the same price
+ * AND the same discount decision; one for a different price (the family
+ * changed package) or discount (a sibling was added or lapsed since) is
+ * expired first.
  * @param {!Object} client Stripe.
  * @param {!Object} athlete The athlete doc.
  * @param {string} product 'tier' | 'facility'.
  * @param {string} priceId What this checkout would charge.
+ * @param {string} discount `discountKey`'s value for this checkout.
  * @return {!Promise<?string>} The open session's url, or null.
  */
-async function reuseOpenSession(client, athlete, product, priceId) {
+async function reuseOpenSession(client, athlete, product, priceId, discount) {
   const pending = athlete.pendingCheckout && athlete.pendingCheckout[product];
   if (!pending || !pending.sessionId) return null;
   let s;
@@ -110,7 +113,9 @@ async function reuseOpenSession(client, athlete, product, priceId) {
     return null;
   }
   if (s.status !== 'open' || !s.url) return null;
-  if (pending.priceId === priceId) return s.url;
+  const sameDeal = pending.priceId === priceId &&
+      (pending.discount || 'none') === discount;
+  if (sameDeal) return s.url;
   try {
     await client.checkout.sessions.expire(s.id);
   } catch (err) {
@@ -120,15 +125,25 @@ async function reuseOpenSession(client, athlete, product, priceId) {
 }
 
 /**
- * The coupon id is configured but Stripe has no such coupon in this mode
- * (coupons are made by hand, once per mode): the family gets the code
- * field instead of a refusal.
+ * What the sibling decision means for the Stripe page, for comparing a
+ * remembered session with what this checkout would build.
+ * @param {{eligible: boolean, coupon: ?string}} sibling The decision.
+ * @return {string} 'none' | 'code' | the coupon id.
+ */
+function discountKey(sibling) {
+  if (!sibling.eligible) return 'none';
+  return sibling.coupon || 'code';
+}
+
+/**
+ * Stripe refused the coupon: missing in this mode (coupons are made by
+ * hand, once per mode), expired, fully redeemed, or not applicable. The
+ * family gets the code field instead of a refusal, and the log says why.
  * @param {*} err What `sessions.create` threw.
  * @return {boolean} Whether to retry without the coupon.
  */
-function couponMissing(err) {
-  return Boolean(err) && err.code === 'resource_missing' &&
-      String(err.param || '').startsWith('discounts');
+function couponRefused(err) {
+  return Boolean(err) && String(err.param || '').startsWith('discounts');
 }
 
 /**
@@ -322,7 +337,9 @@ async function createCheckoutSessionHandler(data, context, deps) {
   }
   try {
     const client = d.stripe || stripe();
-    const open = await reuseOpenSession(client, athlete, req.product, priceId);
+    let discount = discountKey(sibling);
+    const open = await reuseOpenSession(client, athlete, req.product,
+        priceId, discount);
     if (open) return {url: open};
     const price = await client.prices.retrieve(priceId);
     const args = {
@@ -345,20 +362,23 @@ async function createCheckoutSessionHandler(data, context, deps) {
     try {
       session = await client.checkout.sessions.create(sessionBody(args));
     } catch (err) {
-      if (!(sibling.eligible && sibling.coupon && couponMissing(err))) {
+      if (!(sibling.eligible && sibling.coupon && couponRefused(err))) {
         throw err;
       }
-      console.error(`sibling coupon ${sibling.coupon} is missing in Stripe ` +
-          `${process.env.STRIPE_MODE || 'test'} mode: code field used instead`);
+      console.error(`sibling coupon ${sibling.coupon} refused by Stripe ` +
+          `(${process.env.STRIPE_MODE || 'test'} mode): ` +
+          `${err.message || err}; code field used instead`);
+      const fallback = {eligible: true, coupon: null};
+      discount = discountKey(fallback);
       session = await client.checkout.sessions.create(sessionBody(
-          Object.assign({}, args, {sibling: {eligible: true, coupon: null}})));
+          Object.assign({}, args, {sibling: fallback})));
     }
     // Remembered so a second Pay now reuses it (reuseOpenSession). A failed
     // write only loses that protection, never the checkout.
     try {
       await store.collection('athletes').doc(req.athleteId).set({
         pendingCheckout: {[req.product]: {sessionId: session.id, priceId,
-          createdAt: new Date(nowMs).toISOString()}},
+          discount, createdAt: new Date(nowMs).toISOString()}},
       }, {merge: true});
     } catch (err) {
       console.error('pendingCheckout write failed:', err);

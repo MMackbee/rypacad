@@ -1,6 +1,5 @@
 import React from 'react';
 import { color, font } from '../tokens';
-import MediaPlaceholder from '../components/MediaPlaceholder';
 import { FrameEmbedContext } from '../components/PhoneFrame';
 import AllowancePools from '../components/AllowancePools';
 import { Body, Card, SectionLabel, Tick } from '../components/Primitives';
@@ -77,14 +76,28 @@ function BulletList({ items }) {
   );
 }
 
-/** Welcome — the handoff's 03 new-athlete welcome-video placeholder, verbatim. */
+/**
+ * Luke's 60-second welcome, once it exists: REACT_APP_WELCOME_VIDEO_URL is a
+ * direct video file or a YouTube/Vimeo embed link. Unset, the step shows no
+ * video at all (a tester met the striped placeholder on the live site,
+ * 2026-09-30).
+ */
+export const WELCOME_VIDEO_URL = (process.env.REACT_APP_WELCOME_VIDEO_URL || '').trim();
+
+function WelcomeVideo({ url }) {
+  if (!url) return null;
+  const embed = /youtube\.com|youtu\.be|vimeo\.com/.test(url);
+  const style = { width: '100%', height: 190, border: 0, borderRadius: 10, background: '#000', display: 'block' };
+  return embed
+    ? <iframe title="Welcome from Luke" src={url} style={style} allow="autoplay; fullscreen" allowFullScreen />
+    : <video controls playsInline preload="metadata" src={url} style={style} aria-label="Welcome from Luke" />;
+}
+
+/** Welcome — the handoff's 03 new-athlete welcome step. */
 function WelcomeStep({ bullets }) {
   return (
     <OwnStep>
-      <MediaPlaceholder
-        height={126}
-        caption="WELCOME VIDEO — Luke, 60 sec — what the first week looks like"
-      />
+      <WelcomeVideo url={WELCOME_VIDEO_URL} />
       <Card large>
         <SectionLabel style={{ marginBottom: 12 }}>What the portal does</SectionLabel>
         <BulletList items={bullets} />
@@ -210,8 +223,9 @@ const welcomeStep = (bullets) => ({
   title: 'Welcome',
   instruction: {
     title: 'Start here',
-    body:
-      'Luke’s welcome is a minute long. Everything you try in this walkthrough is practice — nothing becomes real.',
+    body: WELCOME_VIDEO_URL
+      ? 'Luke’s welcome is a minute long. Everything you try in this walkthrough is practice — nothing becomes real.'
+      : 'Everything you try in this walkthrough is practice — nothing becomes real.',
   },
   render: () => <WelcomeStep bullets={bullets} />,
 });
