@@ -108,6 +108,7 @@ test('configured: Month is the default; Week switches FullCalendar through its A
   expect(mockLastProps.headerToolbar).toEqual({ left: 'prev,next', center: 'title', right: 'today' });
   expect(mockLastProps.events).toEqual({ googleCalendarId: 'c' });
   expect(mockLastProps.googleCalendarApiKey).toBe('k');
+  expect(mockLastProps.stickyHeaderDates).toBe(false);
   const jsEvent = { preventDefault: jest.fn() };
   mockLastProps.eventClick({ jsEvent });
   expect(jsEvent.preventDefault).toHaveBeenCalled();
@@ -180,6 +181,21 @@ describe('with the real FullCalendar', () => {
     expect(r.container.querySelector('.fc-dayGridWeek-view')).not.toBeNull();
     expect(title(r)).toBe('Oct 12 – 18, 2026');
     expect(mockFetches).toEqual(['2026-10-12']);
+    await r.unmount();
+  });
+
+  // Tester report 2026-09-30 (Teddy), the ContractCalendar bug on this grid
+  // too: with height="auto" FullCalendar's stickyHeaderDates 'auto' pinned the
+  // weekday row to the screen's scroller, see-through on our page colour.
+  test('the weekday header row is not sticky, in Month or Week', async () => {
+    // The header section's class (event titles carry an unrelated fc-sticky).
+    const sticky = (r) => r.container.querySelectorAll('.fc-scrollgrid-section-sticky');
+    const r = await renderScreen(<SeasonSchedule bare />);
+    expect(headers(r)).toEqual(['M', 'T', 'W', 'T', 'F', 'S', 'S']);
+    expect(sticky(r)).toHaveLength(0);
+    await r.click('Week');
+    expect(r.container.querySelector('.fc-dayGridWeek-view')).not.toBeNull();
+    expect(sticky(r)).toHaveLength(0);
     await r.unmount();
   });
 });

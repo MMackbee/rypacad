@@ -104,6 +104,11 @@ export default function ContractCalendar({ start, dayStates = {}, onSelectDay, v
         fixedWeekCount={false}
         showNonCurrentDates={false}
         height="auto"
+        // FullCalendar's 'auto' turns sticky headers ON with height="auto":
+        // the M T W row pinned to the screen's scroller while the days slid
+        // under it, see-through on our transparent page colour (tester
+        // report 2026-09-30, walkthrough and Book a Session alike).
+        stickyHeaderDates={false}
         dayCellClassNames={(arg) => {
           const { iso, state } = stateFor(arg.date);
           const classes = [`ryp-day-${state}`];

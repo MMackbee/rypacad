@@ -281,10 +281,11 @@ function useTokenGens() {
  * `{ data: { household, members, status, portalUrl } | null, loading,
  * error }` — the Billing hub. A parent gets their own household; staff pass
  * `householdId` for any household. `variant` is harness-only ('populated'
- * | 'past_due' | 'lapsed'); live routes pass nothing.
+ * | 'past_due' | 'lapsed'); live routes pass nothing. `practice` (the
+ * onboarding walkthrough) pins the seed: no live read, no real Pay button.
  */
-export default function useBillingHub({ variant = 'populated', householdId = null } = {}) {
-  const live = isLive();
+export default function useBillingHub({ variant = 'populated', householdId = null, practice = false } = {}) {
+  const live = !practice && isLive();
   const today = todayISO();
   const gens = useTokenGens();
   return useSeedResource(
@@ -296,9 +297,10 @@ export default function useBillingHub({ variant = 'populated', householdId = nul
 /**
  * `{ data: { household, member, status } | null, loading, error }` — the
  * signed-in athlete's own token row, the same view model the hub renders.
+ * `practice` pins the seed, as for useBillingHub.
  */
-export function useMyTokens({ variant = 'populated' } = {}) {
-  const live = isLive();
+export function useMyTokens({ variant = 'populated', practice = false } = {}) {
+  const live = !practice && isLive();
   const today = todayISO();
   const gens = useTokenGens();
   return useSeedResource(

@@ -4,6 +4,7 @@ import { color, font } from '../tokens';
 import PendingBanner from '../components/PendingBanner';
 import ChangePackageSheet, { ChangePackageLink } from '../components/ChangePackageSheet';
 import PaymentConfirming from '../components/PaymentConfirming';
+import WalkthroughOffer from '../components/WalkthroughOffer';
 import useBillingHub from '../hooks/billing';
 import { billingBadge, loginStatusLine } from '../data/billingCopy';
 import BookChooser, { BookChooserSheet, bookNavigation } from '../components/BookChooser';
@@ -47,6 +48,8 @@ function packageName(packageId) {
  * (NotificationPreferences.js) - it no longer renders here.
  *
  * @param {'one'|'three'|'payment'} variant
+ * @param {boolean} [practice]  The onboarding walkthrough's family step: the
+ *   Whitfield seed and its hub, never the signed-in family's own data.
  * @param {() => void} [onRetry]  Re-fetch after a load failure.
  * @param {(athleteId: string) => void} [onOpenAthlete]  Each child card calls
  *   this with its own id - routing wires it to /portal/athlete/:athleteId.
@@ -70,10 +73,11 @@ function packageName(packageId) {
 export default function ParentDashboard({
   variant = 'three',
   bare = false,
+  practice = false,
   onOpenAthlete,
   onRetry,
 }) {
-  const { data, loading, error } = useHousehold({ variant });
+  const { data, loading, error } = useHousehold({ variant, practice });
   const children = data?.children ?? [];
   const billing = data?.billing;
   const flagged = billing?.status === 'failed';
@@ -83,7 +87,7 @@ export default function ParentDashboard({
   // The seed 'payment' variant keeps driving the harness through `billing`.
   // Read off the hub, which already carries households.membership - a
   // separate useMembership() re-fetched the whole household for one field.
-  const hub = useBillingHub();
+  const hub = useBillingHub({ practice });
   const membershipStatus = hub.data?.household?.membership?.status ?? null;
   const paused = membershipStatus === 'past_due' || membershipStatus === 'lapsed';
   const onHold = flagged || paused;
@@ -185,6 +189,9 @@ export default function ParentDashboard({
             onOpenMembership={() => navigate('/portal/billing')}
           />
         ))}
+
+        {/* First-visit walkthrough offer, below Pay and the cards; never inside the walkthrough itself. */}
+        {practice ? null : <WalkthroughOffer track="parent" />}
 
         {/*
           Sprint 9 pin (TEAM.md): ONE full-width coaching entry point under

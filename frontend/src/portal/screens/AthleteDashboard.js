@@ -4,6 +4,7 @@ import { color, font, glow, radius } from '../tokens';
 import PendingBanner from '../components/PendingBanner';
 import ChangePackageSheet, { ChangePackageLink } from '../components/ChangePackageSheet';
 import PaymentConfirming from '../components/PaymentConfirming';
+import WalkthroughOffer from '../components/WalkthroughOffer';
 import { useMyTokens } from '../hooks/billing';
 import AllowancePools, { GraceLine } from '../components/AllowancePools';
 import BookChooser, { bookNavigation } from '../components/BookChooser';
@@ -56,7 +57,7 @@ export default function AthleteDashboard({
   // threading an onNavigate prop through.
   const navigate = useNavigate();
   // Sprint 20 (spec 4.4): the athlete's own paid state and the ?paid= return.
-  const mine = useMyTokens();
+  const mine = useMyTokens({ practice });
   const mineStatus = mine.data?.status ?? null;
   const [params] = useSearchParams();
   // Their own package can still change before Pay now (tester S4, 2026-09-30).
@@ -120,6 +121,8 @@ export default function AthleteDashboard({
         {variant === 'new' ? (
           <MediaPlaceholder height={126} caption="WELCOME VIDEO — Luke, 60 sec — what the first week looks like" />
         ) : null}
+        {/* First-visit walkthrough offer, below Pay; never inside the walkthrough itself. */}
+        {practice ? null : <WalkthroughOffer track="athlete" />}
 
         {next ? (
           <NextSessionCard next={next} />

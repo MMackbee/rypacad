@@ -45,6 +45,9 @@ import { channelLocked } from '../data/parent';
  * @param {() => void} [onLinkAthlete]  Opens 08·L. Row hides without it
  *   (also parent-only — an athlete has no household to link a sibling into).
  * @param {() => void} [onSignOut]  Hidden when not supplied (harness/demo).
+ * @param {boolean} [practice]  The walkthrough's Tour step (tester report
+ *   2026-09-30): the seed categories, toggles that stay local (no save, no
+ *   toast), and none of the signed-in member's own cards or rows.
  */
 export default function NotificationPreferences({
   variant = 'default',
@@ -52,8 +55,9 @@ export default function NotificationPreferences({
   role = 'parent',
   onLinkAthlete,
   onSignOut,
+  practice = false,
 }) {
-  const prefsState = useNotificationPrefs({ variant });
+  const prefsState = useNotificationPrefs({ variant, practice });
   const { data } = prefsState;
   /**
    * Sprint 10 pin G (TEAM.md, contract v1.8): useNotificationPrefs gains
@@ -114,7 +118,7 @@ export default function NotificationPreferences({
   const set = (cat, channel, value) => {
     setOverrides((prev) => {
       const next = { ...prev, [`${cat.id}.${channel}`]: value };
-      persist(next);
+      if (!practice) persist(next);
       return next;
     });
   };
@@ -141,8 +145,12 @@ export default function NotificationPreferences({
           <SavedToast message={saving ? 'Saving…' : 'Preferences saved'} />
         ) : null}
 
-        <ProfileCard />
-        <PushCard />
+        {practice ? null : (
+          <>
+            <ProfileCard />
+            <PushCard />
+          </>
+        )}
 
         <SectionLabel style={{ marginTop: 6 }}>Notifications</SectionLabel>
         <ChannelHeader />
@@ -160,12 +168,16 @@ export default function NotificationPreferences({
           {data?.note}
         </Body>
 
-        <RecentNotices style={{ marginTop: 6 }} />
+        {practice ? null : (
+          <>
+            <RecentNotices style={{ marginTop: 6 }} />
 
-        {onLinkAthlete ? <LinkAthleteRow onLinkAthlete={onLinkAthlete} /> : null}
-        <MembershipRow role={role} />
-        <ReplayWalkthroughRow />
-        <SignOutRow onSignOut={onSignOut} />
+            {onLinkAthlete ? <LinkAthleteRow onLinkAthlete={onLinkAthlete} /> : null}
+            <MembershipRow role={role} />
+            <ReplayWalkthroughRow />
+            <SignOutRow onSignOut={onSignOut} />
+          </>
+        )}
       </div>
     </PhoneFrame>
   );

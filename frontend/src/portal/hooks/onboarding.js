@@ -13,6 +13,14 @@
  * degrades to "not completed". The worst case is a family being offered the
  * walkthrough again; never a crash, and never a completion invented.
  *
+ * The first-visit offer (tester report 2026-09-30): Sprint 20's instant
+ * sign-up dropped the old Registration -> walkthrough hop (spec 2.1: "No
+ * walkthrough hop" on Success), and nothing else ever offered it, so a new
+ * family never saw it. The home screens now show components/WalkthroughOffer
+ * until the track is completed or the offer is answered (taken or "Not now")
+ * — `offered`, under `ryp.onboarding.offered.<track>`. Settings' "Replay the
+ * walkthrough" ignores both flags.
+ *
  * Consistent with the practice-mode invariant in ./index.js, nothing in this
  * file touches Firestore.
  */
@@ -24,56 +32,77 @@ const KEYS = {
   athlete: 'ryp.onboarding.athlete',
 };
 
+const OFFER_KEYS = {
+  parent: 'ryp.onboarding.offered.parent',
+  athlete: 'ryp.onboarding.offered.athlete',
+};
+
 const TRACKS = Object.keys(KEYS);
 
-function readTrack(track) {
+function readFlag(key) {
   try {
-    return window.localStorage.getItem(KEYS[track]) === 'true';
+    return window.localStorage.getItem(key) === 'true';
   } catch (err) {
-    // Storage unavailable — treat as not completed.
+    // Storage unavailable — treat as not set.
     return false;
   }
 }
 
-function readAll() {
-  const completed = {};
-  for (const track of TRACKS) completed[track] = readTrack(track);
-  return completed;
+function readAll(keys) {
+  const flags = {};
+  for (const track of TRACKS) flags[track] = readFlag(keys[track]);
+  return flags;
+}
+
+/** Sets one flag in storage; a rejected write (private mode/quota) is ignored. */
+function writeFlag(key) {
+  try {
+    window.localStorage.setItem(key, 'true');
+  } catch (err) {
+    // The caller's in-memory flip still happens, so this session behaves as
+    // set; it just will not survive a reload — the honest fallback.
+  }
 }
 
 /**
- * `{ completed: { parent, athlete }, markComplete(track), reset() }`.
+ * `{ completed: { parent, athlete }, offered: { parent, athlete },
+ * markComplete(track), markOffered(track), reset() }`.
  *
  * State lives in useState so marking or resetting re-renders the caller
  * immediately; localStorage is the persistence behind it, synced on every
  * mark/reset. Two components mounting the hook read the same keys but hold
- * independent state — fine for v1, where OnboardingFlow is the only writer.
+ * independent state — fine: OnboardingFlow writes completion, and
+ * WalkthroughOffer writes the offer, on different screens.
  */
 export default function useOnboardingStatus() {
-  const [completed, setCompleted] = useState(readAll);
+  const [completed, setCompleted] = useState(() => readAll(KEYS));
+  const [offered, setOffered] = useState(() => readAll(OFFER_KEYS));
 
   const markComplete = useCallback((track) => {
     if (!KEYS[track]) return; // unknown track: ignore rather than corrupt the shape
-    try {
-      window.localStorage.setItem(KEYS[track], 'true');
-    } catch (err) {
-      // Write rejected (private mode/quota). The in-memory flip below still
-      // happens, so this session behaves as completed; it just will not
-      // survive a reload — the honest fallback.
-    }
+    writeFlag(KEYS[track]);
     setCompleted((prev) => (prev[track] ? prev : { ...prev, [track]: true }));
+  }, []);
+
+  const markOffered = useCallback((track) => {
+    if (!OFFER_KEYS[track]) return;
+    writeFlag(OFFER_KEYS[track]);
+    setOffered((prev) => (prev[track] ? prev : { ...prev, [track]: true }));
   }, []);
 
   const reset = useCallback(() => {
     for (const track of TRACKS) {
-      try {
-        window.localStorage.removeItem(KEYS[track]);
-      } catch (err) {
-        // Nothing to remove if storage is unavailable.
+      for (const key of [KEYS[track], OFFER_KEYS[track]]) {
+        try {
+          window.localStorage.removeItem(key);
+        } catch (err) {
+          // Nothing to remove if storage is unavailable.
+        }
       }
     }
     setCompleted({ parent: false, athlete: false });
+    setOffered({ parent: false, athlete: false });
   }, []);
 
-  return { completed, markComplete, reset };
+  return { completed, offered, markComplete, markOffered, reset };
 }

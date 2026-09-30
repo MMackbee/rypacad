@@ -1808,9 +1808,10 @@ async function liveHousehold(today) {
   };
 }
 
-/** GET /athletes?guardian=:id + GET /billing/:householdId (08). */
-export function useHousehold({ variant = 'three' } = {}) {
-  const live = isLive();
+/** GET /athletes?guardian=:id + GET /billing/:householdId (08). `practice`
+ * pins the seed (the walkthrough's family step shows the Whitfields). */
+export function useHousehold({ variant = 'three', practice = false } = {}) {
+  const live = !practice && isLive();
   const today = todayISO();
   // Post-write invalidation seam (Sprint 6 pin): a booking or a contract log
   // can change a child's card - re-run after either bumps. Sprint 10:
@@ -3523,9 +3524,10 @@ async function liveNotificationPrefs() {
  * in one write). `data.saved` stays false in live mode — a real "just
  * saved" toast is the SCREEN's own local state after save() resolves
  * (frontend lane's Shared SavedToast, pin I), not a flag this hook fakes.
+ * `practice` (the walkthrough's Tour step) pins the seed and a local save.
  */
-export function useNotificationPrefs({ variant = 'default' } = {}) {
-  const live = isLive();
+export function useNotificationPrefs({ variant = 'default', practice = false } = {}) {
+  const live = !practice && isLive();
   const gen = useInvalidation('users');
 
   const state = useSeedResource(
