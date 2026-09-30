@@ -169,7 +169,7 @@ describe('Repeat weekly in live mode (repeat report 2026-09-30)', () => {
     const r = await reserve('2026-11-03');
     expect(r.text()).toContain('Repeat weekly');
     expect(r.text()).toContain(
-      'Hold Tuesday at 4:00 PM every week you can book right now. Later weeks open one day at a time at 7 AM, 45 days ahead.'
+      'Hold Tuesday at 4:00 PM every week through Wed, Dec 16, the furthest you can book today (45 days ahead). Weeks after that open from Nov 2, one day at a time at 7 AM; come back then to extend.'
     );
     expect(r.text()).not.toContain('spends a token');
     expect(r.button('Next 4 weeks')).toBeNull();

@@ -3,7 +3,7 @@ import { format, parseISO } from 'date-fns';
 import { color, font } from '../tokens';
 import Button from './Button';
 import { Body, Card, SectionLabel } from './Primitives';
-import { addDaysISO, windowOpensOn } from '../data/calendar';
+import { addDaysISO, windowAnchored, windowOpensOn } from '../data/calendar';
 import { SEASON_BOUNDS, firstRunningWeek } from '../data/season';
 
 /**
@@ -58,9 +58,16 @@ export default function RepeatWeekly({ date, time, type, windowEnd, windowDays, 
         </Body>
       ) : (
         <>
+          {/* Owner 2026-09-30: the window is the no-show control, so say
+              plainly what it holds and when the rest opens. While the Nov 1
+              anchor sets the window, nothing opens day by day until Nov 2. */}
           <Body size={12} style={{ marginBottom: 12 }}>
-            Hold {weekday} at {time} every week you can book right now. Later weeks open one day at a
-            time at 7 AM, {windowDays} days ahead.{elite ? '' : " Each week spends a token from that week's period."}
+            Hold {weekday} at {time} every week through {shortDay(until)}, the furthest you can book
+            today ({windowDays} days ahead).{' '}
+            {windowAnchored()
+              ? 'Weeks after that open from Nov 2, one day at a time at 7 AM; come back then to extend.'
+              : 'A new week opens every morning at 7 AM; come back to extend.'}
+            {elite ? '' : " Each week spends a token from that week's period."}
           </Body>
           <Button variant="outline" height={46} style={{ boxShadow: 'none' }} onClick={run}>
             Repeat every {weekday} through {shortDay(until)}
