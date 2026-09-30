@@ -45,6 +45,8 @@ import * as signups from './signups';
 import * as waitlist from './waitlist';
 import { BOOKING_CONFIRMATION } from '../data/seed';
 import { loginStateFor } from '../data/signups';
+import { parseISO } from 'date-fns';
+import { addDaysISO } from '../data/calendar';
 
 const mental = (date) => ({ id: date, type: 'mental', status: 'confirmed', date });
 
@@ -242,6 +244,150 @@ describe('live loaders (perf wave B)', () => {
     expect(h.result.current.bookingFor).toBe('athlete');
     expect(h.result.current.data).toMatchObject({ dates: [], slots: [], seasonNote: null });
     await h.unmount();
+  });
+
+  describe('bookRecurring: the window, every single-booking check, a reason per week (repeat report 2026-09-30)', () => {
+    const OCT_1 = new Date('2026-10-01T17:00:00Z'); // noon Chicago
+    const ELITE_PKG = { id: 'elite', kind: 'elite', tokens: null, windowDays: 45 };
+    const tuesday = (date) => ({ id: `t_${date}`, date, time: '4:00 PM', type: 'training', status: 'scheduled', capacity: 8, booked: 0 });
+    /** Every Tuesday 4 PM block in [from, to] - the range query's answer. */
+    const tuesdaysIn = async (from, to) => {
+      const out = [];
+      for (let d = from; d <= to; d = addDaysISO(d, 1)) if (parseISO(d).getDay() === 2) out.push(tuesday(d));
+      return out;
+    };
+    const refusal = (reason, message, code = live.ERR.INVALID) => new live.LiveDataError(code, message, null, reason);
+    // Fake timers freeze setTimeout, so settle() cannot run; act() drains the promises.
+    const flush = async () => { for (let i = 0; i < 5; i += 1) await act(async () => {}); };
+    async function mountAthlete(pkg = ELITE_PKG, now = OCT_1) {
+      jest.useFakeTimers('modern');
+      jest.setSystemTime(now);
+      live.fetchCurrentUser.mockResolvedValue({ uid: 'u1', athleteId: 'a1', email: 'jordan@email.com' });
+      live.fetchAthlete.mockResolvedValue({ id: 'a1', householdId: 'h1', packageId: pkg.id });
+      live.fetchBookings.mockResolvedValue([]);
+      live.fetchPackage.mockResolvedValue(pkg);
+      live.fetchHousehold.mockResolvedValue({ id: 'h1', periodAnchorDay: 1 });
+      live.fetchSessionsInRange.mockImplementation(tuesdaysIn);
+      live.createBooking.mockImplementation(async ({ sessionId }) => ({ id: `a1_${sessionId}`, status: 'confirmed', chargedFrom: 'elite' }));
+      const h = await mountHook(() => useBooking());
+      await flush();
+      return h;
+    }
+    async function repeat(h, date, untilISO) {
+      let out;
+      await act(async () => { out = await h.result.current.bookRecurring(tuesday(date), { untilISO }); });
+      return out;
+    }
+    afterEach(() => { jest.useRealTimers(); });
+
+    test('Elite on Oct 1: the fetch and the repeat reach Dec 16; every week goes through createBooking without skipCapCheck', async () => {
+      const h = await mountAthlete();
+      expect(live.fetchSessionsInRange).toHaveBeenCalledWith('2026-10-01', '2026-12-16');
+      const out = await repeat(h, '2026-11-03', '2026-12-16');
+      expect(out.windowEnd).toBe('2026-12-16');
+      expect(out.booked.map((b) => b.date)).toEqual(['2026-11-10', '2026-11-17', '2026-11-24', '2026-12-01', '2026-12-08', '2026-12-15']);
+      expect(out.skipped).toEqual([]);
+      expect(out.next).toEqual({ date: '2026-12-22', opensOn: '2026-11-07' });
+      // The repeat's own range read (the one bump after the loop re-runs the window fetch too).
+      expect(live.fetchSessionsInRange).toHaveBeenCalledWith('2026-11-10', '2026-12-16');
+      expect(live.createBooking).toHaveBeenCalledTimes(6);
+      for (const [, opts] of live.createBooking.mock.calls) expect(opts).toEqual({ silent: true });
+      await h.unmount();
+    });
+
+    test('a Dec 15 booking on Oct 1 attempts nothing, even asked for the season, and names the next week', async () => {
+      const h = await mountAthlete();
+      live.fetchSessionsInRange.mockClear();
+      expect(await repeat(h, '2026-12-15', '2027-02-27')).toEqual({
+        booked: [], skipped: [], windowEnd: '2026-12-16', next: { date: '2026-12-22', opensOn: '2026-11-07' },
+      });
+      expect(live.createBooking).not.toHaveBeenCalled();
+      expect(live.fetchSessionsInRange).not.toHaveBeenCalled();
+      await h.unmount();
+    });
+
+    test('after Nov 1 the window rolls at 7 AM Chicago (13:00Z in CST)', async () => {
+      const h = await mountAthlete(ELITE_PKG, new Date('2026-11-10T12:59:00Z'));
+      const early = await repeat(h, '2026-12-15', '2026-12-31');
+      expect(early.windowEnd).toBe('2026-12-24');
+      expect(early.booked.map((b) => b.date)).toEqual(['2026-12-22']);
+      // Dec 29 is the Christmas break (a 10:30 tournament, no 4 PM block): the next week is Jan 5.
+      expect(early.next).toEqual({ date: '2027-01-05', opensOn: '2026-11-21' });
+      jest.setSystemTime(new Date('2026-11-10T13:00:00Z'));
+      expect((await repeat(h, '2026-12-15', '2026-12-31')).windowEnd).toBe('2026-12-25');
+      await h.unmount();
+    });
+
+    test('a Wednesday on Oct 1: next steps over the Dec 23 and Dec 30 closures to Jan 6', async () => {
+      const h = await mountAthlete();
+      // Every Wednesday 4 PM block but Thanksgiving's (Nov 25 is closed).
+      live.fetchSessionsInRange.mockImplementation(async (from, to) => {
+        const out = [];
+        for (let d = from; d <= to; d = addDaysISO(d, 1)) if (parseISO(d).getDay() === 3 && d !== '2026-11-25') out.push(tuesday(d));
+        return out;
+      });
+      const out = await repeat(h, '2026-11-04', '2026-12-16');
+      expect(out.booked.map((b) => b.date)).toEqual(['2026-11-11', '2026-11-18', '2026-12-02', '2026-12-09', '2026-12-16']);
+      expect(out.skipped).toEqual([{ date: '2026-11-25', reason: 'no session' }]);
+      expect(out.next).toEqual({ date: '2027-01-06', opensOn: '2026-11-22' });
+      await h.unmount();
+    });
+
+    test("createBooking's refusals keep their own reasons - never lumped into 'full'", async () => {
+      const h = await mountAthlete();
+      live.createBooking
+        .mockRejectedValueOnce(refusal('one-per-day', "Elite includes one training block a day, and there's already one booked that day."))
+        .mockRejectedValueOnce(refusal('no-tokens-left', "This period's tokens are already fully booked (12 of 12)."))
+        .mockRejectedValueOnce(refusal(null, 'Missing or insufficient permissions.', live.ERR.PERMISSION))
+        .mockRejectedValueOnce(refusal('outside-window', 'That date opens for booking at 7 AM on 2026-10-17.'))
+        .mockRejectedValueOnce(refusal(null, 'This athlete already has this session booked.'))
+        .mockResolvedValueOnce({ status: 'waitlisted' });
+      const out = await repeat(h, '2026-11-03', '2026-12-16');
+      expect(out.booked).toEqual([]);
+      expect(out.skipped).toEqual([
+        { date: '2026-11-10', reason: 'one per day' },
+        { date: '2026-11-17', reason: 'period limit' },
+        { date: '2026-11-24', reason: 'error', message: 'Missing or insufficient permissions.' },
+        { date: '2026-12-01', reason: 'not open yet', opensOn: '2026-10-17' },
+        { date: '2026-12-08', reason: 'already booked' },
+        { date: '2026-12-15', reason: 'full' },
+      ]);
+      await h.unmount();
+    });
+
+    test('a family-wide refusal (membership paused) stops the loop and rethrows', async () => {
+      const h = await mountAthlete();
+      live.createBooking
+        .mockResolvedValueOnce({ status: 'confirmed', chargedFrom: 'elite' })
+        .mockRejectedValueOnce(refusal('membership-inactive', "This household's membership is not active right now."));
+      let caught = null;
+      await act(async () => {
+        await h.result.current.bookRecurring(tuesday('2026-11-03'), { untilISO: '2026-12-16' }).catch((e) => { caught = e; });
+      });
+      expect(caught?.reason).toBe('membership-inactive');
+      expect(live.createBooking).toHaveBeenCalledTimes(2);
+      await h.unmount();
+    });
+
+    test('held and full sessions and missing weeks skip without an attempt', async () => {
+      const h = await mountAthlete();
+      live.fetchBookings.mockResolvedValue([
+        { sessionId: 't_2026-11-10', status: 'confirmed' },
+        { sessionId: 't_2026-11-17', status: 'cancelled' }, // a cancelled row re-books
+      ]);
+      live.fetchSessionsInRange.mockImplementation(async (from, to) =>
+        (await tuesdaysIn(from, to)).filter((s) => s.date !== '2026-12-01').map((s) => (s.date === '2026-11-24' ? { ...s, booked: 8 } : s))
+      );
+      const out = await repeat(h, '2026-11-03', '2026-12-16');
+      expect(out.skipped).toEqual([
+        { date: '2026-11-10', reason: 'already booked' },
+        { date: '2026-11-24', reason: 'full' },
+        { date: '2026-12-01', reason: 'no session' },
+      ]);
+      expect(out.booked.map((b) => b.date)).toEqual(['2026-11-17', '2026-12-08', '2026-12-15']);
+      expect(live.createBooking.mock.calls.map(([b]) => b.date)).toEqual(['2026-11-17', '2026-12-08', '2026-12-15']);
+      await h.unmount();
+    });
   });
 
   test("liveMonthSessions: sessions and identity together; every waitlisted row's queue fetched and annotated", async () => {

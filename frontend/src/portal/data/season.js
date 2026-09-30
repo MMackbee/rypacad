@@ -9,6 +9,7 @@
  */
 
 import { CAPACITY, generateSeason } from './schedule';
+import { addDaysISO } from './calendar';
 import { ROTATIONS } from '../tokens';
 
 /**
@@ -132,6 +133,25 @@ export const SEASON_BY_DATE = SEASON.reduce((map, s) => {
 export function resolveBooking(ref) {
   const onDate = SEASON_BY_DATE.get(ref.date);
   return (onDate && onDate[ref.block]) || null;
+}
+
+const CLOSED = new Set(HOLIDAY_CLOSURES_2026_27);
+
+/**
+ * The first week of a weekly slot, from `iso` on, that the season actually
+ * runs - for "Next {weekday} opens ..." and "come back for {date}" copy, where
+ * a closure (the Dec 23 - Jan 3 break sits right past the Nov 1-anchored
+ * window) has nothing to come back for. A closed date still counts when a
+ * dated extra of the same time and type runs on it (the holiday tournaments).
+ * null once past the season's end. Live sessions are provisioned from
+ * buildSeason(), so the same closure list holds for them.
+ */
+export function firstRunningWeek(iso, time, type = 'training') {
+  for (let d = iso; d <= SEASON_BOUNDS.end; d = addDaysISO(d, 7)) {
+    if (!CLOSED.has(d)) return d;
+    if ((SEASON_BY_DATE.get(d) ?? []).some((s) => s.time === time && s.type === type)) return d;
+  }
+  return null;
 }
 
 /**

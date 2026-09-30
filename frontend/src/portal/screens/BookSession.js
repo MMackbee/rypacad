@@ -22,8 +22,9 @@ import BookingOpensBanner from '../components/BookingOpensBanner';
 import { windowDaysFor } from '../data/packages';
 import { capacityFor, dayLabel } from '../data/season';
 import { DEFAULT_DURATION_MINUTES } from '../data/schedule';
-import { addDaysISO, bookingOpen, openThrough, parseTimeToMinutes, todayISO } from '../data/calendar';
+import { bookingOpen, openThrough, parseTimeToMinutes, todayISO } from '../data/calendar';
 import { buildMonthDayMaps, useMonthNavState } from '../components/MonthCalendar';
+import RepeatWeekly from '../components/RepeatWeekly';
 
 /** Sessions arrive raw (numeric capacity/booked) from useMonthSessions;
     useBooking's slots carry a pre-formatted capacity object. Accept both. */
@@ -311,6 +312,8 @@ export default function BookSession({
           date: booked.date,
           time: booked.time,
           meridiem: booked.meridiem,
+          // Repeat weekly tells a closed week from a holiday extra by type.
+          type: booked.type,
           // So the event a family keeps ends when the session does.
           durationMinutes: booked.durationMinutes,
           waitlisted: booked.waitlisted,
@@ -319,6 +322,9 @@ export default function BookSession({
           position: booked.position ?? null,
         }}
         onRepeat={booked.waitlisted ? undefined : handleRepeat}
+        // The repeat reaches exactly as far as this athlete's window (the
+        // selected child's, for a parent) - the same date that locks days.
+        repeatWindow={{ end: openThroughDate, days: windowDays, elite: selfMember?.package?.kind === 'elite' }}
         onBack={() => setBooked(null)}
       />
     );
@@ -672,11 +678,9 @@ function calendarTemplateUrl(c) {
   return `https://calendar.google.com/calendar/render?${params}`;
 }
 
-function Confirmed({ bare, confirmation, onRepeat, onBack }) {
+function Confirmed({ bare, confirmation, onRepeat, repeatWindow, onBack }) {
   const c = confirmation;
   const calUrl = c ? calendarTemplateUrl(c) : null;
-  // Recurrence state: null (offer), 'working', or the engine's summary.
-  const [repeat, setRepeat] = useState(null);
   if (!c) return null;
 
   // Pin F: a waitlisted join renders the shared WaitlistedConfirmationBody
@@ -701,15 +705,6 @@ function Confirmed({ bare, confirmation, onRepeat, onBack }) {
       </PhoneFrame>
     );
   }
-
-  const runRepeat = async (untilISO) => {
-    setRepeat('working');
-    try {
-      setRepeat(await onRepeat(untilISO));
-    } catch (err) {
-      setRepeat({ booked: [], skipped: [], failed: err?.message || 'Repeats did not go through.' });
-    }
-  };
 
   return (
     <PhoneFrame
@@ -790,86 +785,19 @@ function Confirmed({ bare, confirmation, onRepeat, onBack }) {
           </div>
         </Card>
 
-        {onRepeat ? (
-          <Card large style={{ width: '100%', marginTop: 10 }}>
-            <SectionLabel style={{ marginBottom: 10 }}>Repeat weekly</SectionLabel>
-            {repeat === null ? (
-              <>
-                <Body size={12} style={{ marginBottom: 12 }}>
-                  Hold this same slot every week. Each week spends a token from that week's
-                  period — periods with no tokens left are skipped.
-                </Body>
-                <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-                  {repeatPresets(c.date).map((p) => (
-                    <Button
-                      key={p.label}
-                      variant="outline"
-                      height={46}
-                      style={{ boxShadow: 'none' }}
-                      onClick={() => runRepeat(p.untilISO)}
-                    >
-                      {p.label}
-                    </Button>
-                  ))}
-                </div>
-              </>
-            ) : repeat === 'working' ? (
-              <Body size={12}>Booking your repeats…</Body>
-            ) : (
-              <RepeatSummary result={repeat} />
-            )}
-          </Card>
+        {onRepeat && repeatWindow ? (
+          <RepeatWeekly
+            date={c.date}
+            time={`${c.time} ${c.meridiem}`}
+            type={c.type}
+            windowEnd={repeatWindow.end}
+            windowDays={repeatWindow.days}
+            elite={repeatWindow.elite}
+            onRepeat={onRepeat}
+          />
         ) : null}
       </div>
     </PhoneFrame>
-  );
-}
-
-/** End-date presets for the weekly repeat, anchored to the booked date. */
-/**
- * End-date choices for the weekly repeat, anchored to the booked date and
- * free of season literals: the engine stops at the last SCHEDULED session,
- * so "rest of the season" can ask for a year out and still end exactly
- * where the calendar does — no date to rot when the 27/28 season lands
- * (code review 2026-09-04).
- */
-function repeatPresets(fromISO) {
-  return [
-    { label: 'Next 4 weeks', untilISO: addDaysISO(fromISO, 28) },
-    { label: 'Next 3 months', untilISO: addDaysISO(fromISO, 91) },
-    { label: 'Rest of the season', untilISO: addDaysISO(fromISO, 400) },
-  ];
-}
-
-function RepeatSummary({ result }) {
-  if (result.failed) {
-    return (
-      <Body size={12} tone={color.error}>
-        {result.failed}
-      </Body>
-    );
-  }
-  const reasons = {};
-  for (const s of result.skipped) reasons[s.reason] = (reasons[s.reason] || 0) + 1;
-  const reasonText = Object.entries(reasons)
-    .map(([r, n]) => `${n} ${r}`)
-    .join(' · ');
-  return (
-    <>
-      <div style={{ font: `700 17px ${font.head}`, color: color.primary }}>
-        {result.booked.length} more week{result.booked.length === 1 ? '' : 's'} booked
-      </div>
-      {result.skipped.length ? (
-        <Body size={12} style={{ marginTop: 8 }}>
-          Skipped {result.skipped.length}: {reasonText}. Skipped weeks stay open to book
-          individually once that period's tokens reset.
-        </Body>
-      ) : (
-        <Body size={12} style={{ marginTop: 8 }}>
-          Every week through your end date is reserved.
-        </Body>
-      )}
-    </>
   );
 }
 

@@ -152,7 +152,7 @@ export const SCREEN_STATES = [
              // via demoSelectedDate (harness-only, BookSession.js's own doc
              // comment) since the default 32-day window makes this state
              // otherwise unreachable without a month-navigation sequence.
-             ['open', 'Window locked', { demoSelectedDate: addDaysISO(todayISO(), 60) }],
+             ['open', 'Window locked', { demoSelectedDate: addDaysISO(todayISO(), 90) }],
              // Sprint 13 pin F: a full session offers "Join waitlist" instead
              // of a dead Full pill - interactive, tap a marked date then any
              // session (demoForceFull makes every session in the tapped day

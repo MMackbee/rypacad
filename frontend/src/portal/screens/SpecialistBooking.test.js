@@ -5,12 +5,13 @@ import { addDaysISO, todayISO } from '../data/calendar';
 
 let mockSlots;
 let mockBooked = [];
+let mockMembers = [];
 jest.mock('../hooks', () => ({
   seedSpecialistDays: () => [],
   useSpecialistSlots: () => mockSlots,
   useBooking: () => ({ book: async (s) => { mockBooked.push(s); return {}; } }),
   useHouseholdAthletes: () => ({ data: [], loading: false }),
-  useMembership: () => ({ data: { household: { id: 'h1' }, members: [] } }),
+  useMembership: () => ({ data: { household: { id: 'h1' }, members: mockMembers } }),
 }));
 jest.mock('../data/calendly', () => ({
   calendlyUrlFor: () => 'https://calendly.com/ryp/mental',
@@ -22,6 +23,7 @@ jest.mock('../data/calendly', () => ({
 beforeEach(() => {
   try { window.localStorage.clear(); } catch (e) { /* storage unavailable */ }
   mockBooked = [];
+  mockMembers = [];
   mockSlots = { loading: false, error: null, data: {
     days: [], tokens: { left: 3, unlimited: false, grace: [] }, capReached: false,
     bookingMode: 'calendly', calendlyUrl: 'https://calendly.com/ryp/mental', billingStatus: 'active', bookingOpen: true,
@@ -93,20 +95,45 @@ test('in-app branch after the gate: no banner, a tap opens the sheet with Reserv
   await r.unmount();
 });
 
-test('a locked day before the gate names Oct 10, not "session date minus 30 days" (UX review #8)', async () => {
-  jest.useFakeTimers('modern');
-  jest.setSystemTime(new Date('2026-10-01T17:00:00Z'));
-  try {
+describe('the window counts from Nov 1 until then (owner ruling 2026-09-30; UX review #8)', () => {
+  const slotOn = (date, dayLabel) => ({ date, dayLabel, slots: [{ sessionId: `s-${date}`, time: '4:00 PM', open: true, capacity: 1, booked: 0, durationMinutes: 30 }] });
+  const slotCard = (r) => [...r.container.querySelectorAll('div')].find((el) => el.textContent.startsWith('4:00') && el.textContent.includes('Mental')) || null;
+  beforeEach(() => {
+    jest.useFakeTimers('modern');
+    jest.setSystemTime(new Date('2026-10-01T17:00:00Z'));
+  });
+  afterEach(() => { jest.useRealTimers(); });
+
+  test('a token package before the gate: Dec 2 is past Nov 1 + 30 and names Monday, Nov 2, not Oct 10', async () => {
     mockSlots.data = { ...mockSlots.data, bookingMode: 'in-app', calendlyUrl: null, bookingOpen: false,
-      days: [{ date: '2026-11-03', dayLabel: 'Tue, Nov 3', slots: [{ sessionId: 's1', time: '4:00 PM', open: true, capacity: 1, booked: 0, durationMinutes: 30 }] }] };
+      days: [slotOn('2026-12-02', 'Wed, Dec 2')] };
     const r = await renderScreen(<SpecialistBooking bare initialSpecialist="mental" />);
     expect(r.text()).toContain('Not open for this day yet');
-    expect(r.text()).toContain('Booking for Tuesday, Nov 3 opens Sat, Oct 10 at 7 AM.');
-    expect(r.text()).not.toContain('Sunday, Oct 4');
+    expect(r.text()).toContain('Booking for Wednesday, Dec 2 opens 7 AM on Monday, Nov 2.');
+    expect(r.text()).not.toContain('Booking for Wednesday, Dec 2 opens Sat, Oct 10');
     await r.unmount();
-  } finally {
-    jest.useRealTimers();
-  }
+  });
+
+  test('an Elite member books Dec 16 and sees Dec 17 locked', async () => {
+    mockMembers = [{ athleteId: 'a1', package: { id: 'elite', kind: 'elite', windowDays: 45 } }];
+    mockSlots.data = { ...mockSlots.data, bookingMode: 'in-app', calendlyUrl: null, bookingOpen: true,
+      days: [slotOn('2026-12-16', 'Wed, Dec 16'), slotOn('2026-12-17', 'Thu, Dec 17')] };
+    const r = await renderScreen(<SpecialistBooking bare initialSpecialist="mental" />);
+    expect(r.text()).not.toContain('Not open for this day yet');
+    const card = slotCard(r);
+    expect(card.style.cursor).toBe('pointer');
+    await act(async () => { card.click(); });
+    await r.click('Reserve');
+    await r.flush();
+    expect(mockBooked).toEqual([{ id: 's-2026-12-16', date: '2026-12-16', type: 'mental' }]);
+    await r.unmount();
+
+    const l = await renderScreen(<SpecialistBooking bare initialSpecialist="mental" />);
+    await l.click('Thursday, Dec 17');
+    expect(l.text()).toContain('Booking for Thursday, Dec 17 opens 7 AM on Monday, Nov 2.');
+    expect(slotCard(l)).toBeNull();
+    await l.unmount();
+  });
 });
 
 describe('Month/Week calendar card (owner request 2026-09-30)', () => {
