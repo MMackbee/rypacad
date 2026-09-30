@@ -48,6 +48,27 @@ test('athlete doc: contractStart only when a contract was picked', () => {
   assert.equal('contractStart' in none, false);
 });
 
+test('athlete doc: facilityRequested kept on a token package, false for ' +
+    'Elite and the single token, false when the payload never had it', () => {
+  const doc = (over) => family.athleteDoc(athlete(over), 'hh1', 'u1', false,
+      TODAY);
+  for (const packageId of ['t-6', 't-12', 't-16']) {
+    assert.equal(doc({packageId, facilityRequested: true}).facilityRequested,
+        true, packageId);
+  }
+  assert.equal(doc({packageId: 'elite', facilityRequested: true})
+      .facilityRequested, false);
+  assert.equal(doc({packageId: 'single', facilityRequested: true})
+      .facilityRequested, false);
+  assert.equal(doc({facilityRequested: false}).facilityRequested, false);
+  // The live payload's entry (no field) still writes an explicit false.
+  const legacy = doc();
+  assert.equal('facilityRequested' in legacy, true);
+  assert.equal(legacy.facilityRequested, false);
+  // A request is never access: the add-on still starts off.
+  assert.equal(doc({facilityRequested: true}).facilityAccess, false);
+});
+
 test('medical doc: all three contact fields, or null with nothing to say',
     () => {
       const med = family.medicalDoc({name: 'Bo', phone: '555',

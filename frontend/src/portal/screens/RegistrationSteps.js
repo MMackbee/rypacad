@@ -11,18 +11,21 @@ import {
   ADULT_REQUIRED, CHILD_LOGIN_ENABLED, U13_HELPER, ageOnDate, joinNames, toEmergencyForm, validateAthleteEntry,
   validateEmergencyContact,
 } from '../data/signup';
+import { FacilityAddOn } from './RegistrationFacility';
 
 /**
  * Registration's step components (Sprint 20, spec 2.1), cut out of
  * Registration.js so each file stays under 500 lines. Pure presentation over
  * the form state Registration.js owns; every validation message comes from
  * data/signup.js so the function's re-check and the form agree. The consent
- * step and its sheet live in RegistrationConsent.js, and the Commitment
- * Contract step in RegistrationContract.js (same 500-line rule); both are
+ * step and its sheet live in RegistrationConsent.js, the Commitment
+ * Contract step in RegistrationContract.js and the package step's facility
+ * add-on in RegistrationFacility.js (same 500-line rule); all are
  * re-exported here so Registration.js imports every step from one place.
  */
 export { ConsentInfoSheet, ConsentStep } from './RegistrationConsent';
 export { ContractStep } from './RegistrationContract';
+export { FacilityAddOn };
 
 /** Step 1 (spec 2.1): parent or guardian, or the adult athlete signing up for themselves. */
 export function WhoStep({ mode, onChange }) {
@@ -387,6 +390,8 @@ export function PackageStep({ athletes, onUpdate, showErrors }) {
           );
         })}
       </div>
+      {/* The facility add-on, under the cards (owner 2026-09-30). */}
+      <FacilityAddOn athlete={active} name={label(active)} onUpdate={onUpdate} />
 
       {nextUp ? (
         <Button variant="outline" height={46} onClick={() => setActiveKey(nextUp.key)} style={{ boxShadow: 'none' }}>

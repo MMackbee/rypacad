@@ -1,8 +1,13 @@
 import {
   billingBadge,
   confirmedLine,
+  FACILITY_PENDING_TITLE,
+  FACILITY_WAITING_LINE,
   facilityCardState,
   facilityLine,
+  facilityPayLabel,
+  facilityRequestState,
+  facilityRowTitle,
   firstPeriodLine,
   loginStatusLine,
   PAY_TO_START,
@@ -56,6 +61,36 @@ test('facility add-on card state (spec 4.5)', () => {
   expect(facilityLine('paid-waiver-pending')).toBe('Facility access: paid - waiver pending');
   expect(facilityLine('active')).toBe('Facility access: active');
   expect(facilityLine('offer')).toBeNull();
+});
+
+test('the facility add-on asked for at sign-up, on the home pending card (owner 2026-09-30)', () => {
+  const m = (over) => ({ facilityRequested: true, package: { kind: 'tokens' }, billing: { status: 'active', facility: null }, facilityAccess: false, ...over });
+  expect(facilityRequestState(m())).toBe('pay');
+  expect(facilityRequestState(m({ billing: undefined }))).toBe('pay'); // absent billing == active
+  expect(facilityRequestState(m({ billing: { status: 'pending', facility: null } }))).toBe('waiting');
+  // A checkout started but not completed, or a lapsed add-on, can pay again (checkout.js refuses only active/past_due).
+  expect(facilityRequestState(m({ billing: { status: 'active', facility: 'pending' } }))).toBe('pay');
+  expect(facilityRequestState(m({ billing: { status: 'active', facility: 'lapsed' } }))).toBe('pay');
+  for (const gone of [
+    m({ facilityRequested: false }),
+    m({ facilityRequested: undefined }),
+    m({ billing: { status: 'active', facility: 'active' } }),
+    m({ billing: { status: 'active', facility: 'past_due' } }),
+    m({ facilityAccess: true }), // ops switched it on
+    m({ package: { kind: 'elite' } }), // switched to Elite after sign-up: included
+    m({ package: { kind: 'single' } }),
+    m({ package: null }),
+    m({ billing: { status: 'past_due', facility: null } }),
+    m({ billing: { status: 'lapsed', facility: null } }),
+    null,
+  ]) {
+    expect(facilityRequestState(gone)).toBeNull();
+  }
+  expect(FACILITY_PENDING_TITLE).toBe("Facility access - pay when you're ready");
+  expect(FACILITY_WAITING_LINE).toBe('Facility access · after the membership is paid');
+  expect(facilityRowTitle('Jordan Whitfield')).toBe('Facility access for Jordan Whitfield');
+  expect(facilityPayLabel('Jordan Whitfield')).toBe("Pay $300 for Jordan's facility access");
+  expect(facilityPayLabel('')).toBe("Pay $300 for your athlete's facility access");
 });
 
 test('login status line (spec 3.2)', () => {

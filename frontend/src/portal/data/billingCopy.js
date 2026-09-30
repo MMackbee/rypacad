@@ -5,7 +5,7 @@
  */
 import { format, parseISO } from 'date-fns';
 import { BOOKING_OPENS_LABEL, longDayLabel, monthName } from './calendar';
-import { SINGLE_TOKEN } from './packages';
+import { FACILITY_ACCESS, SINGLE_TOKEN } from './packages';
 
 export const PENDING_TITLE = 'Payment pending - finish checkout to start booking';
 export const PAY_NOW = 'Pay now';
@@ -71,6 +71,28 @@ const FACILITY_LINES = {
 export function facilityLine(state) {
   return FACILITY_LINES[state] || null;
 }
+
+/*
+ * The add-on ticked at sign-up (owner request, Mike 2026-09-30), on the home
+ * pending card: 'pay' once the membership is active and the add-on is
+ * neither paid nor retrying (checkout.js takes it then), 'waiting' while the
+ * membership itself is unpaid (the add-on checkout is refused until then),
+ * null otherwise - not asked, access already on, or a package that never
+ * has it (Elite includes it; a switch to Elite after sign-up leaves the
+ * stored tick behind, so the package decides, not the tick).
+ */
+export function facilityRequestState(member) {
+  if (!member || member.facilityRequested !== true || member.package?.kind !== 'tokens' || member.facilityAccess) return null;
+  const facility = member.billing?.facility ?? null;
+  if (facility === 'active' || facility === 'past_due') return null;
+  const status = member.billing?.status ?? 'active';
+  if (status === 'active') return 'pay';
+  return status === 'pending' ? 'waiting' : null;
+}
+export const FACILITY_PENDING_TITLE = "Facility access - pay when you're ready";
+export const FACILITY_WAITING_LINE = 'Facility access · after the membership is paid';
+export const facilityRowTitle = (name) => `Facility access for ${name}`;
+export const facilityPayLabel = (name) => `Pay $${FACILITY_ACCESS.price} for ${String(name ?? '').trim().split(/\s+/)[0] || 'your athlete'}'s facility access`;
 
 /** "Login: none / not claimed / claimed <date>" for the athlete card. */
 export function loginStatusLine({ loginEmail, login } = {}) {

@@ -1,6 +1,7 @@
 import {
-  ageOnDate, buildAddAthletesPayload, buildCreateFamilyPayload, contractAnswered, emptyEmergencyContact, isAdultOnDate,
-  joinNames, newAthleteEntry, normalizeHandicap, toEmergencyForm, validateAthleteEntry, validateEmergencyContact,
+  ageOnDate, buildAddAthletesPayload, buildCreateFamilyPayload, contractAnswered, emptyEmergencyContact, facilityOptionFor,
+  facilityWaiverRequired, isAdultOnDate, joinNames, newAthleteEntry, normalizeHandicap, toAthleteEntry, toEmergencyForm,
+  validateAthleteEntry, validateEmergencyContact, wantsFacility,
 } from './signup';
 
 const today = '2026-10-01';
@@ -80,8 +81,8 @@ describe('payloads (contract 1.2 / 1.3)', () => {
       mode: 'parent',
       contact: { name: 'Dana Whitfield', email: 'dana@email.com', phone: '(612) 555-0148', relationship: 'Mother' },
       athletes: [
-        { name: 'Jordan', dob: '2012-06-17', packageId: 't-12', contractMinutes: 45, handicap: 12, loginEmail: 'jordan@email.com' },
-        { name: 'Reese', dob: '2014-03-02', packageId: 't-6', contractMinutes: null, handicap: null, loginEmail: null },
+        { name: 'Jordan', dob: '2012-06-17', packageId: 't-12', contractMinutes: 45, handicap: 12, loginEmail: 'jordan@email.com', facilityRequested: false },
+        { name: 'Reese', dob: '2014-03-02', packageId: 't-6', contractMinutes: null, handicap: null, loginEmail: null, facilityRequested: false },
       ],
       emergencyContact: null,
       medical: 'Peanut allergy',
@@ -96,10 +97,21 @@ describe('payloads (contract 1.2 / 1.3)', () => {
   });
   test('addAthletes body', () => {
     expect(buildAddAthletesPayload({ ...form, athletes: [form.athletes[1]] })).toEqual({
-      athletes: [{ name: 'Reese', dob: '2014-03-02', packageId: 't-6', contractMinutes: null, handicap: null, loginEmail: null }],
+      athletes: [{ name: 'Reese', dob: '2014-03-02', packageId: 't-6', contractMinutes: null, handicap: null, loginEmail: null, facilityRequested: false }],
       emergencyContact: null,
       medical: 'Peanut allergy',
     });
+  });
+  test('facilityRequested: sent true only for a ticked token package, in both bodies', () => {
+    const ticked = (over) => entry({ facilityRequested: true, ...over });
+    const athletes = [ticked(), ticked({ packageId: 'elite' }), ticked({ packageId: 'single' }), ticked({ packageId: null }), entry()];
+    const flags = (body) => body.athletes.map((a) => a.facilityRequested);
+    expect(flags(buildCreateFamilyPayload({ ...form, athletes }))).toEqual([true, false, false, false, false]);
+    expect(flags(buildAddAthletesPayload({ ...form, athletes }))).toEqual([true, false, false, false, false]);
+    // An old draft's entry (no field) sends false, never undefined.
+    const { facilityRequested, ...legacy } = entry();
+    expect(facilityRequested).toBe(false);
+    expect(buildCreateFamilyPayload({ ...form, athletes: [legacy] }).athletes[0].facilityRequested).toBe(false);
   });
   test('the emergency contact is sent trimmed, relationship optional; all blank is null', () => {
     const ec = { name: ' Uncle Bo ', phone: ' (612) 555-0100 ', relationship: ' Uncle ' };
@@ -136,6 +148,35 @@ describe('emergency contact', () => {
     expect(validateEmergencyContact({ name: '', phone: '', relationship: 'Uncle' })).toEqual({ name, phone });
     expect(validateEmergencyContact({ name: 'Bo', phone: '555', relationship: '' })).toEqual({});
     expect(validateEmergencyContact('Uncle Bo 555')).toEqual({ phone });
+  });
+});
+
+describe('facility add-on (owner request, Mike 2026-09-30)', () => {
+  test('a new entry is unticked; an old draft entry restores unticked, a ticked one stays ticked', () => {
+    expect(newAthleteEntry().facilityRequested).toBe(false);
+    const { facilityRequested, ...old } = entry();
+    expect(old).not.toHaveProperty('facilityRequested');
+    expect(toAthleteEntry(old)).toEqual({ ...old, facilityRequested });
+    expect(toAthleteEntry(entry({ facilityRequested: true })).facilityRequested).toBe(true);
+    expect(toAthleteEntry(entry({ facilityRequested: 'yes' })).facilityRequested).toBe(false);
+  });
+  test('offered on the token packages, included with Elite, never on the single token or no pick', () => {
+    for (const id of ['t-6', 't-12', 't-16']) expect(facilityOptionFor(id)).toBe('offer');
+    expect(facilityOptionFor('elite')).toBe('included');
+    expect(facilityOptionFor('single')).toBeNull();
+    expect(facilityOptionFor(null)).toBeNull();
+    expect(facilityOptionFor('t-20')).toBeNull();
+  });
+  test('a tick counts only where it is offered; the waiver is required once any athlete keeps one', () => {
+    expect(wantsFacility(entry({ facilityRequested: true }))).toBe(true);
+    expect(wantsFacility(entry({ facilityRequested: true, packageId: 'elite' }))).toBe(false);
+    expect(wantsFacility(entry({ facilityRequested: true, packageId: 'single' }))).toBe(false);
+    expect(wantsFacility(entry())).toBe(false);
+    expect(wantsFacility(null)).toBe(false);
+    expect(facilityWaiverRequired([entry(), entry({ facilityRequested: true, packageId: 't-6' })])).toBe(true);
+    expect(facilityWaiverRequired([entry(), entry({ facilityRequested: true, packageId: 'elite' })])).toBe(false);
+    expect(facilityWaiverRequired([])).toBe(false);
+    expect(facilityWaiverRequired(undefined)).toBe(false);
   });
 });
 

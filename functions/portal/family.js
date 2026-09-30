@@ -53,9 +53,20 @@ function householdNameFor(guardianName) {
 }
 
 /**
+ * Packages the facility add-on never goes with: Elite includes 24/7 access,
+ * and the single token is a one-time purchase (checkout.js refuses the
+ * add-on for Elite; the single token never reaches an active membership).
+ * @const {!Array<string>}
+ */
+const NO_FACILITY_ADD_ON = ['elite', 'single'];
+
+/**
  * The `athletes/{id}` body of the spec 2.2 table. A contract picked at
  * sign-up also records `contractStart`, the Chicago date it was picked: the
  * contract counts from the later of that and the season start.
+ * `facilityRequested` is the add-on ticked under the package cards (owner
+ * request, Mike 2026-09-30) - a request, never access: the home pending
+ * card offers its checkout once the membership is paid.
  * @param {!Object} a A normalized athlete entry.
  * @param {string} householdId The household.
  * @param {string} uid The caller (signs the facility waiver).
@@ -70,6 +81,12 @@ function athleteDoc(a, householdId, uid, facilityConsent, todayISO) {
     facilityAccessConsent: facilityConsent ?
         {signedAt: now(), byUid: uid} : null,
     handicap: a.handicap, loginEmail: a.loginEmail,
+    // Coerced to false for Elite / the single token whatever was sent: the
+    // form hides the tick there, but a stale tab or a hand-built call could
+    // still send true, and the home card must never offer a $300 add-on on
+    // a package that includes or cannot take it.
+    facilityRequested: a.facilityRequested === true &&
+        !NO_FACILITY_ADD_ON.includes(a.packageId),
     billing: {status: 'pending', customerId: null, subscriptionId: null,
       priceId: null, checkoutSessionId: null, updatedAt: now()},
     updatedAt: now(),

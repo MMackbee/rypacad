@@ -32,7 +32,7 @@ jest.mock('../data/calendar', () => {
 
 import { act } from 'react';
 import { createRoot } from 'react-dom/client';
-import useBillingHub, { allPerPurchaseOf, pendingOf, tokensStartOf, useMyTokens, warnMissingPortalUrl } from './billing';
+import useBillingHub, { allPerPurchaseOf, facilityPendingOf, pendingOf, tokensStartOf, useMyTokens, warnMissingPortalUrl } from './billing';
 import * as live from './live';
 import * as grace from './grace';
 import * as waitlist from './waitlist';
@@ -62,6 +62,41 @@ test('pendingOf marks single-token athletes perPurchase and carries the package;
   expect(allPerPurchaseOf([])).toBe(false);
 });
 
+test('facilityPendingOf: the sign-up add-on requests still to pay, apart from pendingOf (owner 2026-09-30)', () => {
+  const m = (id, over) => ({ athleteId: id, name: id, facilityRequested: true, package: { id: 't-12', kind: 'tokens' }, billing: { status: 'active', facility: null }, ...over });
+  const members = [
+    m('ava'),
+    m('ben', { billing: { status: 'pending', facility: null } }),
+    m('cy', { billing: { status: 'active', facility: 'active' } }),
+    m('dee', { package: { id: 'elite', kind: 'elite' } }),
+    m('eve', { facilityRequested: false }),
+  ];
+  expect(facilityPendingOf(members)).toEqual([
+    { athleteId: 'ava', name: 'ava', state: 'pay' },
+    { athleteId: 'ben', name: 'ben', state: 'waiting' },
+  ]);
+  // An unpaid add-on never makes an athlete pending (it does not block booking).
+  expect(pendingOf([m('ava')])).toEqual([]);
+  expect(facilityPendingOf([])).toEqual([]);
+  expect(facilityPendingOf(undefined)).toEqual([]);
+});
+
+test('the seed hub and the athlete\'s own row carry facilityPending (none in the sample family)', async () => {
+  calendar.todayISO.mockReturnValue('2026-10-20'); // CRA's resetMocks cleared the pass-through
+  live.isLive.mockReturnValue(false);
+  const result = { hub: null, mine: null };
+  function Probe() {
+    result.hub = useBillingHub();
+    result.mine = useMyTokens();
+    return null;
+  }
+  const root = createRoot(document.createElement('div'));
+  await act(async () => { root.render(<Probe />); });
+  expect(result.hub.data.facilityPending).toEqual([]);
+  expect(result.mine.data.facilityPending).toEqual([]);
+  await act(async () => root.unmount());
+});
+
 test('warnMissingPortalUrl fires once, only live, only when the URL is missing', () => {
   const warn = jest.spyOn(console, 'warn').mockImplementation(() => {});
   expect(warnMissingPortalUrl({ live: false, url: null })).toBe(false);
@@ -80,7 +115,7 @@ test('the live hub counts and labels an October booking under November (review 2
   calendar.todayISO.mockReturnValue('2026-10-20');
   live.isLive.mockReturnValue(true);
   live.fetchHousehold.mockResolvedValue({ id: 'h1', name: 'Whitfield family', periodAnchorDay: 1 });
-  live.fetchHouseholdAthletes.mockResolvedValue([{ id: 'a1', name: 'Jordan', householdId: 'h1', packageId: 't-16' }]);
+  live.fetchHouseholdAthletes.mockResolvedValue([{ id: 'a1', name: 'Jordan', householdId: 'h1', packageId: 't-16', facilityRequested: true }]);
   live.fetchPackage.mockResolvedValue({ id: 't-16', name: '16 tokens', kind: 'tokens', tokens: 16 });
   live.fetchBookings.mockResolvedValue([
     { id: 'a1_phil', sessionId: 'phil-1024', date: '2026-10-24', periodKey: '2026-10-01', status: 'confirmed', type: 'phil' },
@@ -103,6 +138,8 @@ test('the live hub counts and labels an October booking under November (review 2
   expect(jordan.tokens).toMatchObject({ granted: 16, used: 1, left: 15, startsOn: '2026-11-01' });
   expect(live.fetchSessionsByIds).toHaveBeenCalledWith(['phil-1024']);
   expect(jordan.spent).toEqual([expect.objectContaining({ id: 'a1_phil', label: 'Performance with Phil', time: '4:00' })]);
+  // The add-on ticked at sign-up (no billing doc == active membership): ready to pay.
+  expect(result.current.data.facilityPending).toEqual([{ athleteId: 'a1', name: 'Jordan', state: 'pay' }]);
   await act(async () => root.unmount());
 });
 

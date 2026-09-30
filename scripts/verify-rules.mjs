@@ -255,6 +255,10 @@ export async function taskPackageChange() {
   expect('a client-chosen updatedAt refused', await patchAth('ath-pkg-pending', { packageId: 't-16', updatedAt: new Date('2026-01-01T00:00:00Z') }, t.parent), 403);
   expect('packageId beside billing refused', await patchAth('ath-pkg-pending', { packageId: 't-16', billing: { status: 'active' } }, t.parent), 403);
   expect('packageId beside facilityAccess refused', await patchAth('ath-pkg-pending', { packageId: 't-16', facilityAccess: true }, t.parent), 403);
+  // The sign-up facility add-on request (owner 2026-09-30) is written by createFamily / addAthletes only - no rules change.
+  expect('facilityRequested alone refused (server-written)', await patchAth('ath-pkg-pending', { facilityRequested: true }, t.parent), 403);
+  expect('packageId beside facilityRequested refused', await patchAth('ath-pkg-pending', { packageId: 't-16', facilityRequested: false }, t.parent), 403);
+  expect('the athlete cannot request it on their own doc either', await patchAth('ath-pkg-self', { facilityRequested: true }, self), 403);
   for (const [id, label] of [['ath-pkg-active', 'active'], ['ath-pkg-pastdue', 'past_due'], ['ath-pkg-lapsed', 'lapsed'], ['ath-pkg-absent', 'absent (== active)']]) {
     expect(`refused when billing is ${label}`, await patchAth(id, { packageId: 't-6' }, t.parent), 403);
   }

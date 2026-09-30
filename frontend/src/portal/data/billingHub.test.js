@@ -241,6 +241,12 @@ describe('per-athlete billing (Sprint 20, spec 4.4)', () => {
     expect(signed.facilityAccessConsent).toBe(true);
   });
 
+  test('hubMemberFor carries the sign-up facility add-on request, absent == false (owner 2026-09-30)', () => {
+    expect(hubMemberFor(fixture()).facilityRequested).toBe(false);
+    expect(hubMemberFor({ ...fixture(), athlete: { ...athlete, facilityRequested: true } }).facilityRequested).toBe(true);
+    expect(hubMemberFor({ ...fixture(), athlete: { ...athlete, facilityRequested: 'yes' } }).facilityRequested).toBe(false);
+  });
+
   test('statusFor pending: after past_due, before lapsed and active; lapsed athletes pay again', () => {
     const back = statusFor({ status: 'lapsed' }, { pendingAthletes: [{ athleteId: 'a', name: 'Ava', status: 'lapsed' }] });
     expect(back).toMatchObject({ status: 'pending', cta: 'Pay now', badge: { tone: 'yellow', label: 'Payment needed' }, title: 'Membership ended - pay to book again' });

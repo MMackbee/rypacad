@@ -92,6 +92,28 @@ test('the clock: tokens can book once Oct 10 passes (through Dec 1 until Nov 1);
   ]);
 });
 
+test('a facility add-on ticked at sign-up and not yet paid adds one line, last (owner 2026-09-30)', () => {
+  const FAMILY = "Facility access: pay from your family page whenever you're ready.";
+  expect(whatsNextFor({ packageId: 't-12', athlete: JORDAN, host: HOST, facilityDue: true, now: BEFORE_OPEN }).lines).toEqual([
+    'Booking opens Sat, Oct 10 at 7 AM - book any training block, tournament or Phil session then.',
+    'Sessions start Tue, Nov 3.',
+    'Jordan can sign in at rypacad.ryptest.com/portal/signin with jordan@email.com.',
+    FAMILY,
+  ]);
+  expect(whatsNextFor({ packageId: 't-6', athlete: REESE, facilityDue: true, now: IN_SEASON }).lines).toEqual([
+    'Reese can book now - training, tournaments and Phil, up to 30 days ahead.',
+    FAMILY,
+  ]);
+  // The athlete's own home is their home page.
+  expect(whatsNextFor({ packageId: 't-12', athlete: JORDAN, self: true, facilityDue: true, now: BEFORE_OPEN }).lines)
+    .toContain("Facility access: pay from your home page whenever you're ready.");
+  // Not asked, or already paid (facilityDue false): no line. Elite includes it.
+  expect(whatsNextFor({ packageId: 't-12', athlete: REESE, now: BEFORE_OPEN }).lines.join(' ')).not.toMatch(/Facility/);
+  expect(whatsNextFor({ packageId: 'elite', athlete: REESE, facilityDue: true, now: BEFORE_OPEN }).lines.join(' ')).not.toMatch(/Facility/);
+  // The add-on's own payment return still shows no card.
+  expect(whatsNextFor({ packageId: 't-12', product: 'facility', athlete: REESE, facilityDue: true, now: BEFORE_OPEN })).toBeNull();
+});
+
 test('first names and the fallback', () => {
   expect(firstName('  Jordan  Whitfield ')).toBe('Jordan');
   expect(firstName('')).toBeNull();

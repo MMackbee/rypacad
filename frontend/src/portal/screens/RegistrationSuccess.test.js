@@ -86,6 +86,27 @@ test('an unverified password account is told to open the verification link befor
   await verified.unmount();
 });
 
+test('a kept facility add-on gets one line under that athlete\'s Pay button, and no button of its own (owner 2026-09-30)', async () => {
+  const LINE = 'Facility access · $300/month - pay after the membership';
+  const athletes = [
+    { ...newAthleteEntry(), name: 'Jordan', dob: '2012-06-17', packageId: 't-12', facilityRequested: true },
+    { ...newAthleteEntry(), name: 'Reese', dob: '2014-03-02', packageId: 't-6' },
+    // A tick left behind on a switch to Elite is not an add-on.
+    { ...newAthleteEntry(), name: 'Sam', dob: '2013-01-01', packageId: 'elite', facilityRequested: true },
+  ];
+  const r = await renderScreen(<RegistrationSuccess bare mode="signup" form={form({ athletes })} result={{ householdId: 'h1', athleteIds: ['a1', 'a2', 'a3'] }} account={{ email: 'dana@email.com' }} onFinish={() => {}} />);
+  expect(r.text().split(LINE)).toHaveLength(2);
+  const jordan = r.button("Pay $569 for Jordan's 12 tokens|a1");
+  expect(jordan.nextSibling.textContent).toBe(LINE);
+  expect(r.button("Pay $299 for Reese's 6 tokens|a2").nextSibling.textContent).not.toBe(LINE);
+  expect([...r.container.querySelectorAll('button')].map((b) => b.textContent).filter((t) => /facility/i.test(t))).toEqual([]);
+  await r.unmount();
+  // Link mode's receipt says the same.
+  const link = await renderScreen(<RegistrationSuccess bare mode="link" form={form({ athletes: [athletes[0]] })} result={{ householdId: 'h1', athleteIds: ['a9'] }} account={{ email: 'dana@email.com' }} onFinish={() => {}} />);
+  expect(link.text()).toContain(LINE);
+  await link.unmount();
+});
+
 test('athlete mode goes home', async () => {
   const finished = [];
   const r = await renderScreen(

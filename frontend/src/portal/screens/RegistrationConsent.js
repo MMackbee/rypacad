@@ -5,6 +5,7 @@ import Field from '../components/Field';
 import { Body, Card, ScreenTitle, Tick } from '../components/Primitives';
 import { useEnrollmentForm } from '../hooks';
 import { CONSENT_TERMS } from '../data/consentTerms';
+import { FACILITY_WAIVER_FOOTNOTE, FACILITY_WAIVER_REQUIRED } from '../data/signup';
 
 /**
  * Registration's consent step, its info sheet and the checkbox (Sprint 20,
@@ -13,12 +14,16 @@ import { CONSENT_TERMS } from '../data/consentTerms';
  * RegistrationSteps.js re-exports ConsentStep and ConsentInfoSheet, so
  * Registration.js imports every step from one module as before. The
  * components themselves are the Sprint 10 code, with the adult copy variant.
+ * `facilityRequired` (an athlete kept the facility add-on on the package
+ * step, owner 2026-09-30) makes the optional facility waiver required: its
+ * footnote says why, and the error says how to get past it either way.
  */
-export function ConsentStep({ mode, consents, onChange, signatureName, onSignatureChange, onOpenInfo, showErrors }) {
+export function ConsentStep({ mode, consents, onChange, signatureName, onSignatureChange, onOpenInfo, showErrors, facilityRequired = false }) {
   const { data } = useEnrollmentForm();
   const list = data?.consents ?? [];
 
   const set = (id, v) => onChange((prev) => ({ ...prev, [id]: v }));
+  const footnoteOf = (consent) => (facilityRequired && consent.id === 'facilityAccess' ? FACILITY_WAIVER_FOOTNOTE : consent.footnote);
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 13 }}>
@@ -61,7 +66,7 @@ export function ConsentStep({ mode, consents, onChange, signatureName, onSignatu
               >
                 {consent.link} →
               </button>
-              {consent.footnote ? (
+              {footnoteOf(consent) ? (
                 <div
                   style={{
                     font: `500 10px ${font.body}`,
@@ -71,7 +76,7 @@ export function ConsentStep({ mode, consents, onChange, signatureName, onSignatu
                     marginTop: 9,
                   }}
                 >
-                  {consent.footnote}
+                  {footnoteOf(consent)}
                 </div>
               ) : null}
             </div>
@@ -84,6 +89,11 @@ export function ConsentStep({ mode, consents, onChange, signatureName, onSignatu
           <Body size={12} tone={color.error}>
             Data collection and video capture consent are required to enroll.
           </Body>
+        </div>
+      ) : null}
+      {showErrors && facilityRequired && !consents.facilityAccess ? (
+        <div data-field-error>
+          <Body size={12} tone={color.error}>{FACILITY_WAIVER_REQUIRED}</Body>
         </div>
       ) : null}
 
@@ -194,7 +204,8 @@ export function ConsentInfoSheet({ id, onClose }) {
   );
 }
 
-function Checkbox({ checked, onChange, label }) {
+/** The round tick the consent cards use; the package step's facility add-on (RegistrationFacility.js) reuses it. */
+export function Checkbox({ checked, onChange, label }) {
   return (
     <button
       type="button"

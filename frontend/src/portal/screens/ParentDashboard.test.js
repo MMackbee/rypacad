@@ -214,3 +214,58 @@ describe('Commitment Contract hidden (owner ruling 2026-09-30)', () => {
     await r.unmount();
   });
 });
+
+describe('the facility add-on ticked at sign-up (owner request, Mike 2026-09-30)', () => {
+  const WAITING = 'Facility access · after the membership is paid';
+  const JORDAN_PAY = "Pay $300 for Jordan's facility access|a1";
+  beforeEach(() => {
+    mockHub.data.facilityPending = [{ athleteId: 'a1', name: 'Jordan', state: 'pay' }, { athleteId: 'a2', name: 'Reese', state: 'waiting' }];
+  });
+
+  test('a paid membership gets the add-on row and button; a pending one gets the line under its Pay now', async () => {
+    const r = await renderScreen(<ParentDashboard bare />, { path: '/portal/family' });
+    expect(r.text()).toContain('Facility access for Jordan');
+    expect(r.button(JORDAN_PAY)).not.toBeNull();
+    expect(r.button('Pay now|a2').parentElement.textContent).toContain(WAITING);
+    expect(r.button("Pay $300 for Reese's facility access|a2")).toBeNull();
+    await r.unmount();
+  });
+
+  test('with every membership paid, the card stays for the add-on alone, under its own title', async () => {
+    mockHub.data.status = { status: 'active', title: 'Tokens start Sun, Nov 1', body: 'Billed monthly on the 1st. Nothing needs attention.' };
+    mockHub.data.facilityPending = [{ athleteId: 'a1', name: 'Jordan', state: 'pay' }];
+    const r = await renderScreen(<ParentDashboard bare />, { path: '/portal/family' });
+    expect(r.text()).toContain("Facility access - pay when you're ready");
+    expect(r.button(JORDAN_PAY)).not.toBeNull();
+    expect(r.text()).not.toContain('Payment pending - finish checkout');
+    expect(r.button('Pay now|a2')).toBeNull();
+    await r.unmount();
+  });
+
+  test('back from the add-on checkout: no second add-on button while it confirms; the membership row stays', async () => {
+    mockConfirm = { state: 'confirming', billingStatus: 'active', packageId: null };
+    const r = await renderScreen(<ParentDashboard bare />, { path: '/portal/family?paid=a1&product=facility&cs=cs_3' });
+    expect(r.button(JORDAN_PAY)).toBeNull();
+    expect(r.button('Pay now|a2')).not.toBeNull();
+    await r.unmount();
+  });
+
+  test("back from a membership checkout: What's next points at the add-on, and its row is right there", async () => {
+    const clock = jest.spyOn(Date, 'now').mockReturnValue(Date.parse('2026-10-05T18:00:00Z'));
+    try {
+      mockConfirm = { state: 'confirmed', billingStatus: 'active', packageId: 't-12' };
+      const r = await renderScreen(<ParentDashboard bare />, { path: '/portal/family?paid=a1&cs=cs_4' });
+      expect(r.text()).toContain("What's next");
+      expect(r.text()).toContain("Facility access: pay from your family page whenever you're ready.");
+      expect(r.button(JORDAN_PAY)).not.toBeNull();
+      await r.unmount();
+      mockHub.data.facilityPending = [];
+      const none = await renderScreen(<ParentDashboard bare />, { path: '/portal/family?paid=a1&cs=cs_4' });
+      expect(none.text()).toContain("What's next");
+      expect(none.text()).not.toContain('Facility access');
+      await none.unmount();
+    } finally {
+      clock.mockRestore();
+    }
+  });
+});
