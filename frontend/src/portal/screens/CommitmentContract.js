@@ -99,8 +99,11 @@ export default function CommitmentContract({
   }
 
   const state = data?.state;
-  const behind = variant === 'behind';
-  const complete = variant === 'complete';
+  // Live mode renders with the default variant, so the hook's `kind` drives
+  // the styling too - keyed off `variant` alone, the red hero never showed
+  // under a live Behind pill.
+  const behind = variant === 'behind' || state?.kind === 'behind';
+  const complete = variant === 'complete' || state?.kind === 'complete';
 
   // Practice overlays, derived at render: the grid and the hero count move the
   // moment the tap lands, from the same single piece of state — they cannot
@@ -252,6 +255,22 @@ function StatusPill({ badge }) {
 }
 
 function HeroCard({ state, stats, behind, complete }) {
+  // Outside the contract window (before the start, after the season) there
+  // are no contract days to count: the line alone, not "0 of 0".
+  if (state?.kind === 'notStarted' || state?.kind === 'ended') {
+    return (
+      <div
+        style={{
+          borderRadius: radius.cardLarge,
+          padding: 19,
+          background: color.surface,
+          border: `1px solid ${color.border}`,
+        }}
+      >
+        <Body size={13}>{state.line}</Body>
+      </div>
+    );
+  }
   const border = behind ? color.error : complete ? color.secondary : color.primary;
   const total = stats?.contractDays ?? 0;
   const logged = stats?.logged ?? 0;
@@ -666,7 +685,8 @@ function NoContract({ bare, data, setTier }) {
     setSaving(true);
     setError(null);
     try {
-      await commit(selected);
+      // No tier -> a tier: the contract starts today (athletes.contractStart).
+      await commit(selected, { start: true });
       setSaved(true);
     } catch (err) {
       setError(

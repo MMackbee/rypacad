@@ -1691,9 +1691,15 @@ async function liveChildCard(a, today, anchorDay) {
   let contract = null;
   if (contractMinutes != null) {
     const minutesByDate = new Map(logs.map((l) => [l.date, l.minutes || 0]));
-    const m = buildContractMonthFromLogs({ today, minutesByDate, contractMinutes });
-    contract = m.dueSoFar ? Math.round((m.logged / m.dueSoFar) * 100) : 0;
-    standing = m.missed > 0 ? { tone: 'yellow', label: 'Behind' } : { tone: 'green', label: 'On track' };
+    const m = buildContractMonthFromLogs({ today, minutesByDate, contractMinutes, ...contractWindowFor(a) });
+    // Nothing due yet (before the start, or the month's first weekday) is
+    // "—", not a grey 0%; no badge at all outside the contract window.
+    contract = m.dueSoFar ? Math.round((m.logged / m.dueSoFar) * 100) : null;
+    standing = m.behind
+      ? { tone: 'yellow', label: 'Behind' }
+      : m.notStarted || m.ended
+      ? null
+      : { tone: 'green', label: 'On track' };
   }
 
   const age = ageFromDob(a.dob ?? null);
@@ -2792,10 +2798,33 @@ export function useDiagnostic(athleteId) {
  * screen so the two read the same state off the same
  * buildContractMonthFromLogs() result and can never disagree, mirroring the
  * seed code's own stated goal for its variant-keyed `state` object.
+ *
+ * `kind` (contract-buffer ruling, 2026-09-30), checked in this order:
+ * notStarted | ended (no badge, just the line) | behind (more than
+ * BEHIND_BUFFER_DAYS missed) | complete | catchup (1-5 missed, still on
+ * track) | ontrack. The screens key their styling off `kind`, never off the
+ * demo variant alone.
  */
-function liveContractState(m) {
-  if (m.missed > 0) {
+export function liveContractState(m) {
+  if (m.notStarted) {
     return {
+      kind: 'notStarted',
+      badge: null,
+      line: `Your contract starts ${longDayLabel(m.startISO)}. Days before then don't count for or against you.`,
+      hint: 'Weekends are not contract days.',
+    };
+  }
+  if (m.ended) {
+    return {
+      kind: 'ended',
+      badge: null,
+      line: `This season's contract ended ${longDayLabel(m.endISO)}.`,
+      hint: null,
+    };
+  }
+  if (m.behind) {
+    return {
+      kind: 'behind',
       badge: { tone: 'red', label: 'Behind' },
       line: `${m.missed} day${m.missed === 1 ? '' : 's'} behind with ${m.daysLeft} contract day${
         m.daysLeft === 1 ? '' : 's'
@@ -2805,17 +2834,44 @@ function liveContractState(m) {
   }
   if (m.contractDays > 0 && m.logged === m.contractDays) {
     return {
+      kind: 'complete',
       badge: { tone: 'yellow', label: 'Complete' },
       line: `All ${m.contractDays} contract days logged. You are on ${m.month}’s Commitment Board.`,
       hint: 'Weekends are not contract days.',
     };
   }
+  if (m.missed > 0) {
+    return {
+      kind: 'catchup',
+      badge: { tone: 'green', label: 'On track' },
+      line: `${m.logged} of ${m.dueSoFar} days due so far — ${m.missed} to catch up. Tap a missed day to add a late entry.`,
+      hint: 'Missed a day? Tap it in the grid to add a late entry.',
+    };
+  }
   return {
+    kind: 'ontrack',
     badge: { tone: 'green', label: 'On track' },
     line: `${m.logged} of ${m.dueSoFar} days due so far. ${m.daysLeft} contract day${
       m.daysLeft === 1 ? '' : 's'
     } left — one miss still keeps the month.`,
     hint: 'One tap. Nothing else on this screen needs typing.',
+  };
+}
+
+/**
+ * The athlete's contract window for buildContractMonthFromLogs
+ * (contract-buffer ruling, 2026-09-30): from the later of the season's first
+ * day and athletes.contractStart (the Chicago date the tier was first set;
+ * absent -> the season start, right for everyone enrolled pre-season) to the
+ * season's last day. A malformed contractStart is ignored rather than
+ * trusted - it would otherwise throw in longDayLabel.
+ */
+function contractWindowFor(a) {
+  const start = a?.contractStart;
+  const valid = typeof start === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(start);
+  return {
+    startISO: valid && start > SEASON_BOUNDS.start ? start : SEASON_BOUNDS.start,
+    endISO: SEASON_BOUNDS.end,
   };
 }
 
@@ -2850,13 +2906,18 @@ async function liveAthleteDashboard(today) {
   let contract = null;
   if (contractMinutes != null) {
     const minutesByDate = new Map(logs.map((l) => [l.date, l.minutes || 0]));
-    const m = buildContractMonthFromLogs({ today, minutesByDate, contractMinutes });
+    const m = buildContractMonthFromLogs({ today, minutesByDate, contractMinutes, ...contractWindowFor(ctx.athlete) });
+    const state = liveContractState(m);
     contract = {
       logged: m.logged,
       total: m.dueSoFar,
       month: m.month,
       pct: m.dueSoFar ? Math.round((m.logged / m.dueSoFar) * 100) : 0,
-      line: liveContractState(m).line,
+      line: state.line,
+      // The card's badge is the Contract screen's own pill (K33: it was a
+      // hard-coded "On track" that contradicted a Behind contract).
+      badge: state.badge,
+      kind: state.kind,
     };
   }
 
@@ -2923,6 +2984,8 @@ export function useAthleteDashboard({ variant = 'populated', today = todayISO(),
                   ? Math.round((summary.stats.logged / summary.stats.dueSoFar) * 100)
                   : 0,
                 line: summary.state.line,
+                badge: summary.state.badge,
+                kind: summary.state.kind,
               }
             : null,
           onboarding: variant === 'new' ? ONBOARDING : null,
@@ -2977,16 +3040,19 @@ function contractFor(variant, today) {
 
   const state = {
     ontrack: {
+      kind: 'ontrack',
       badge: { tone: 'green', label: 'On track' },
       line: `${m.logged} of ${m.dueSoFar} days due so far. ${m.daysLeft} contract days left — one miss still keeps the month.`,
       hint: 'One tap. Nothing else on this screen needs typing.',
     },
     behind: {
+      kind: 'behind',
       badge: { tone: 'red', label: 'Behind' },
       line: `${m.missed} days behind with ${m.daysLeft} contract days left. Every remaining day has to be logged to make the Commitment Board.`,
       hint: 'Missed a day? Tap it in the grid to add a late entry.',
     },
     complete: {
+      kind: 'complete',
       badge: { tone: 'yellow', label: 'Complete' },
       line: `All ${m.contractDays} contract days logged. You are on ${m.month}’s Commitment Board.`,
       hint: 'Weekends are not contract days.',
@@ -3033,7 +3099,7 @@ async function liveContract(today) {
   }
   const logs = await fetchContractLogs(athlete.id);
   const minutesByDate = new Map(logs.map((l) => [l.date, l.minutes || 0]));
-  const m = buildContractMonthFromLogs({ today, minutesByDate, contractMinutes });
+  const m = buildContractMonthFromLogs({ today, minutesByDate, contractMinutes, ...contractWindowFor(athlete) });
   return {
     month: { label: m.label, name: m.month, start: m.start },
     dayStates: m.dayStates,
@@ -3089,11 +3155,13 @@ export function useContract({ variant = 'ontrack', today = todayISO(), practice 
    * tier (contract v1.8, B) — wires the NoContract tier picker's "Start the
    * N min contract" CTA. Seed mode is a local no-op echo, matching every
    * other write action's seed posture in this file (createBooking et al.).
+   * `{ start: true }` (NoContract's no-tier -> tier flow only) also stamps
+   * athletes.contractStart; changing an existing tier never does.
    */
-  const setTier = async (minutes) => {
+  const setTier = async (minutes, { start = false } = {}) => {
     if (!live) return { contractMinutes: minutes, simulated: true };
     const { athlete } = await liveAthleteIdentity();
-    return setContractTier({ athleteId: athlete.id, minutes });
+    return setContractTier({ athleteId: athlete.id, minutes, start });
   };
 
   return { ...state, setTier };
@@ -3105,12 +3173,14 @@ export function useContract({ variant = 'ontrack', today = todayISO(), practice 
  * their own. useContract's setTier is self-only by construction (it resolves
  * the signed-in athlete); this is the household-parent path, and the rules'
  * contractMinutesUpdateOk() decides who may write it. Seed: local echo.
+ * `{ start: true }` (StartContractCard, a no-tier athlete) also stamps
+ * athletes.contractStart, exactly as useContract's setTier does.
  */
 export function useAthleteTier() {
   const live = isLive();
-  const setTier = async (athleteId, minutes) => {
+  const setTier = async (athleteId, minutes, { start = false } = {}) => {
     if (!live) return { athleteId, contractMinutes: minutes, simulated: true };
-    return setContractTier({ athleteId, minutes });
+    return setContractTier({ athleteId, minutes, start });
   };
   return { setTier };
 }
@@ -3499,8 +3569,10 @@ export function deriveWhoNeedsCall({
     if (a.contractMinutes == null) continue;
     const logs = logsByAthlete.get(a.id) ?? [];
     const minutesByDate = new Map(logs.map((l) => [l.date, l.minutes || 0]));
-    const m = buildContractMonthFromLogs({ today, minutesByDate, contractMinutes: a.contractMinutes });
-    if (m.missed > 0) {
+    const m = buildContractMonthFromLogs({ today, minutesByDate, contractMinutes: a.contractMinutes, ...contractWindowFor(a) });
+    // Staff get the families' definition (contract-buffer ruling): Behind
+    // is more than BEHIND_BUFFER_DAYS missed inside the contract window.
+    if (m.behind) {
       contractBehind.push({ athleteId: a.id, name: a.name ?? null, missed: m.missed, daysLeft: m.daysLeft });
     }
   }

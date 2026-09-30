@@ -1484,22 +1484,39 @@ export async function declineEnrollmentRequest(uid, reason) {
   }
 }
 
+/** 'yyyy-MM-dd' in America/Chicago - the academy's calendar day, not the phone's. */
+export function chicagoDateISO(now = new Date()) {
+  const parts = {};
+  for (const p of new Intl.DateTimeFormat('en-US', {
+    timeZone: 'America/Chicago', year: 'numeric', month: '2-digit', day: '2-digit',
+  }).formatToParts(now)) parts[p.type] = p.value;
+  return `${parts.year}-${parts.month}-${parts.day}`;
+}
+
 /**
  * Set (or clear) an athlete's Commitment Contract tier (contract v1.8, B) —
  * the athlete's own user or the household parent, enforced by
  * firestore.rules' contractMinutesUpdateOk(), not here. `minutes` must be
  * one of the three real tiers or null (no tier / "not started").
+ *
+ * `start` (contract-buffer Phase 2): the caller is moving a no-tier athlete
+ * onto a tier (NoContract, StartContractCard), so the write also stamps
+ * athletes.contractStart with today's Chicago date - the contract window
+ * opens there and earlier weekdays of the month never count as missed.
+ * Changing an existing tier passes no `start` and leaves contractStart alone.
  */
-export async function setContractTier({ athleteId, minutes }) {
+export async function setContractTier({ athleteId, minutes, start = false }) {
   if (!athleteId) throw new LiveDataError(ERR.INVALID, 'setContractTier: athleteId is required.');
   if (minutes != null && ![20, 45, 90].includes(minutes)) {
     throw new LiveDataError(ERR.INVALID, 'setContractTier: minutes must be 20, 45, 90 or null.');
   }
   requireUser();
+  const patch = { contractMinutes: minutes };
+  if (start && minutes != null) patch.contractStart = chicagoDateISO();
   try {
-    await updateDoc(doc(db, 'athletes', athleteId), { contractMinutes: minutes });
+    await updateDoc(doc(db, 'athletes', athleteId), patch);
     bump('athletes');
-    return { athleteId, contractMinutes: minutes };
+    return { athleteId, ...patch };
   } catch (err) {
     throw wrap(err, 'setContractTier');
   }
