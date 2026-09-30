@@ -47,6 +47,31 @@ test('pending banner with one Pay now per unpaid athlete; the unpaid card is bad
   await r.unmount();
 });
 
+test('sibling discount: one line on the pending card when two members are monthly, Pay now unchanged (owner 2026-09-30)', async () => {
+  const NOTE = '10% sibling discount comes off at checkout.';
+  const withPackages = (ids, pending = mockHub.data.status.pendingAthletes) => ({ ...mockHub, data: { ...mockHub.data,
+    members: mockHub.data.members.map((m, i) => ({ ...m, package: ids[i] ? { id: ids[i], kind: ids[i] === 'single' ? 'single' : 'tokens' } : null })),
+    status: { ...mockHub.data.status, pendingAthletes: pending } } });
+  mockHub = withPackages(['t-12', 't-6']);
+  const r = await renderScreen(<ParentDashboard bare />, { path: '/portal/family' });
+  expect(r.text()).toContain(NOTE);
+  expect(r.button('Pay now|a2')).not.toBeNull();
+  await r.unmount();
+  // Jordan (paid) on the single token: only one membership in the family.
+  mockHub = withPackages(['single', 't-6']);
+  const one = await renderScreen(<ParentDashboard bare />, { path: '/portal/family' });
+  expect(one.text()).not.toContain('sibling');
+  await one.unmount();
+  // Two paid memberships, and the only checkout left is Reese's one-time
+  // single token: not a membership, so no discount on it.
+  mockHub = withPackages(['t-12', 'single'], [{ athleteId: 'a2', name: 'Reese', perPurchase: true }]);
+  mockHub.data.members.push({ athleteId: 'a3', name: 'Sam', package: { id: 't-6', kind: 'tokens' }, billing: { status: 'active', facility: null } });
+  const single = await renderScreen(<ParentDashboard bare />, { path: '/portal/family' });
+  expect(single.button('Pay now|a2')).not.toBeNull();
+  expect(single.text()).not.toContain('sibling');
+  await single.unmount();
+});
+
 test('a past_due household membership on the hub shows the payment banner and ON HOLD cards', async () => {
   mockHub = { loading: false, error: null, data: {
     household: { id: 'h1', membership: { status: 'past_due' } }, portalUrl: null,

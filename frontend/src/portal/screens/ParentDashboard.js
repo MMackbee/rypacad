@@ -17,7 +17,7 @@ import AllowancePools from '../components/AllowancePools';
 import SkeletonCard, { SkeletonBar } from '../components/Skeleton';
 import { AlertGlyph, Body, Card, ErrorNotice, ScreenTitle } from '../components/Primitives';
 import { useHousehold } from '../hooks';
-import { ALL_PACKAGES } from '../data/packages';
+import { ALL_PACKAGES, siblingDiscountApplies } from '../data/packages';
 
 /**
  * Sprint 11 pin D entry point (TEAM.md, contract v1.9): "the ParentDashboard
@@ -163,7 +163,9 @@ export default function ParentDashboard({
           athleteId={paidAthleteId}
           whatsNext={{ athlete: paidChild, product: params.get('product'), onBook: paidChild ? () => setBookFor(paidChild) : undefined }}
         />
-        <PendingBanner pendingAthletes={pendingAthletes} body={hubStatus?.body} title={hubStatus?.title} />
+        {/* The sibling rule reads the whole family, paid members included. */}
+        <PendingBanner pendingAthletes={pendingAthletes} body={hubStatus?.body} title={hubStatus?.title}
+          siblingDiscount={siblingDiscountApplies(hub.data?.members)} />
         {onHold ? (
           <PaymentBanner billing={flagged ? billing : bannerFor(membershipStatus)} onOpen={() => navigate('/portal/billing')} />
         ) : null}

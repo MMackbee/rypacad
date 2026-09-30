@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useEffect, useState } from 'react';
 import { color, font, tint } from '../tokens';
 import Button from '../components/Button';
 import PayButton from '../components/PayButton';
@@ -7,7 +7,8 @@ import { Body, Card, ScreenTitle, SectionLabel, Tick } from '../components/Primi
 import { STUDENT_LOGIN_CTA, VERIFIED, VERIFY_EMAIL_SENDER } from '../data/authCopy';
 import { CONFIRMING, PAY_NOW } from '../data/billingCopy';
 import { BOOKING_OPENS_LABEL, bookingOpen } from '../data/calendar';
-import { packageById, PRICES_RELEASED } from '../data/packages';
+import { packageById, PRICES_RELEASED, SIBLING_DISCOUNT_NOTE, siblingDiscountApplies } from '../data/packages';
+import { fetchHouseholdAthletes, isLive } from '../hooks/live';
 
 /**
  * Until 00:00 Nov 1 America/Chicago every checkout prepays November in full
@@ -23,16 +24,38 @@ function pricedMonthly(pkg) {
 }
 
 /**
+ * The sibling discount counts the whole family (checkout.js siblingEligible),
+ * and a linked athlete joins a family that may already hold a membership:
+ * link mode reads the family once, the new athletes included (the callable
+ * committed them before it returned). A failed read leaves the receipt's
+ * own athletes to decide - the note may then be missing, never wrong.
+ */
+function useFamilyAthletes(householdId, enabled) {
+  const [athletes, setAthletes] = useState(null);
+  useEffect(() => {
+    if (!enabled || !householdId || !isLive()) return undefined;
+    let alive = true;
+    fetchHouseholdAthletes(householdId).then((list) => { if (alive) setAthletes(list); }, () => {});
+    return () => { alive = false; };
+  }, [householdId, enabled]);
+  return athletes;
+}
+
+/**
  * "You're in" (Sprint 20, spec 2.1 Success): the receipt, one Pay button per
  * athlete (createCheckoutSession), what happens next, and the role's home.
  * No walkthrough hop (spec 9: Success -> walkthrough -> NotProvisioned loop).
  * Before Nov 1 the receipt says what is paid today and that billing is then
  * monthly from Dec 1 (UX review P-07), because Stripe's page shows the plan
  * as a trial next to a charge due today. It never says when billing ends.
+ * A family the sibling discount applies to gets one line saying so; the
+ * buttons keep the catalogue price (Stripe computes the discount).
  */
 export default function RegistrationSuccess({ bare = false, mode = 'signup', form, result, account, onFinish }) {
   const athleteMode = form.mode === 'athlete';
   const rows = form.athletes.map((a, i) => ({ ...a, athleteId: result?.athleteIds?.[i] ?? null, pkg: packageById(a.packageId) }));
+  const family = useFamilyAthletes(result?.householdId, mode === 'link');
+  const siblingDiscount = rows.some((r) => r.pkg && r.pkg.kind !== 'single') && siblingDiscountApplies(family?.length ? family : rows);
   const prepaysNovember = Date.now() < PREPAYS_NOVEMBER_UNTIL;
   const priced = prepaysNovember ? rows.filter((r) => pricedMonthly(r.pkg)) : [];
   const payLabel = (r) => (pricedMonthly(r.pkg) && prepaysNovember
@@ -77,6 +100,7 @@ export default function RegistrationSuccess({ bare = false, mode = 'signup', for
         <Card large style={{ width: '100%' }}>
           <SectionLabel style={{ marginBottom: 12 }}>Pay</SectionLabel>
           {payTerms ? <Body size={12} style={{ marginBottom: 12 }}>{payTerms}</Body> : null}
+          {siblingDiscount ? <Body size={12} style={{ marginBottom: 12 }}>{SIBLING_DISCOUNT_NOTE}</Body> : null}
           {account?.emailVerified === false && account.email ? (
             <Body size={12} style={{ marginBottom: 12 }}>{`First open the link we emailed to ${account.email} (from ${VERIFY_EMAIL_SENDER} - check spam), then tap Pay.`}</Body>
           ) : null}
