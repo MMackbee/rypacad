@@ -9,6 +9,8 @@ jest.mock('./StatesHarness', () => ({ __esModule: true, default: () => 'HARNESS'
 jest.mock('./screens/CommitmentContract', () => ({ __esModule: true, default: () => 'CONTRACT' }));
 jest.mock('./screens/AthleteDashboard', () => ({ __esModule: true, default: () => 'ATHLETE HOME' }));
 jest.mock('./screens/ParentDashboard', () => ({ __esModule: true, default: () => 'FAMILY HOME' }));
+jest.mock('./screens/Billing', () => ({ __esModule: true, default: ({ role }) => `BILLING as ${role}` }));
+jest.mock('./screens/Membership', () => ({ __esModule: true, default: ({ selfManaged }) => `MEMBERSHIP selfManaged=${selfManaged}` }));
 jest.mock('./hooks/live', () => ({ ...jest.requireActual('./hooks/live'), isLive: () => mockLive.value }));
 jest.mock('./hooks/useAuthSession', () => ({
   ...jest.requireActual('./hooks/useAuthSession'),
@@ -87,5 +89,46 @@ describe('/portal/contract (Commitment Contract hidden, owner ruling 2026-09-30)
     expect(r.pathname()).toBe('/portal/contract');
     expect(r.container.textContent).toBe('CONTRACT');
     await r.unmount();
+  });
+});
+
+describe('/portal/billing for the self-managed 18+ athlete (Mike S6 2026-09-30)', () => {
+  test('a self-managed athlete reaches Billing, as an athlete', async () => {
+    mockLive.value = true;
+    mockUser.value = { uid: 'u-self', role: 'athlete', athleteId: 'a-self', householdId: 'hh-self', selfManaged: true };
+    const r = await mount('/portal/billing');
+    expect(r.pathname()).toBe('/portal/billing');
+    expect(r.container.textContent).toBe('BILLING as athlete');
+    await r.unmount();
+  });
+
+  test("a child's athlete login is still sent to its own home", async () => {
+    mockLive.value = true;
+    mockUser.value = { uid: 'u-kid', role: 'athlete', athleteId: 'a-kid', householdId: 'hh', selfManaged: false };
+    const r = await mount('/portal/billing');
+    expect(r.pathname()).toBe('/portal/home');
+    expect(r.container.textContent).toBe('ATHLETE HOME');
+    await r.unmount();
+  });
+
+  test('a parent keeps Billing as a parent', async () => {
+    mockLive.value = true;
+    mockUser.value = { uid: 'u-p', role: 'parent', householdId: 'hh', selfManaged: false };
+    const p = await mount('/portal/billing');
+    expect(p.pathname()).toBe('/portal/billing');
+    expect(p.container.textContent).toBe('BILLING as parent');
+    await p.unmount();
+  });
+
+  test("Membership gets the session's selfManaged (its Billing link)", async () => {
+    mockLive.value = true;
+    mockUser.value = { uid: 'u-self', role: 'athlete', athleteId: 'a-self', householdId: 'hh-self', selfManaged: true };
+    const self = await mount('/portal/membership');
+    expect(self.container.textContent).toBe('MEMBERSHIP selfManaged=true');
+    await self.unmount();
+    mockUser.value = { uid: 'u-kid', role: 'athlete', athleteId: 'a-kid', householdId: 'hh', selfManaged: false };
+    const kid = await mount('/portal/membership');
+    expect(kid.container.textContent).toBe('MEMBERSHIP selfManaged=false');
+    await kid.unmount();
   });
 });

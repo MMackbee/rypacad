@@ -2,6 +2,7 @@ import React from 'react';
 import { useNavigate } from 'react-router-dom';
 import { color, font, tint } from '../tokens';
 import { contractEnabled } from '../data/contractFlag';
+import { useSelfManaged } from '../hooks/useAuthSession';
 
 /**
  * Bottom tab bar. Four items per role, carried forward from the 2025 build's
@@ -25,6 +26,20 @@ export const TABS = {
     // DNA's old slot (off for players since 2026-09-01) is now Tour (Sprint 7
     // pin, TEAM.md): the RYP Tour leaderboard, /portal/tour.
     { key: 'tour', label: 'Tour', icon: 'trophy', route: '/portal/tour' },
+  ],
+  /**
+   * The self-managed athlete (Mike S6 2026-09-30): the 18+ member who signed
+   * up for themselves pays for themselves, so the parent's Billing and
+   * Settings join the athlete set, in the parent bar's order. Selected by
+   * `selfManaged` below, never for a child's login.
+   */
+  athleteSelfManaged: [
+    { key: 'home', label: 'Home', icon: 'home', route: '/portal/home' },
+    { key: 'schedule', label: 'Schedule', icon: 'calendar', route: '/portal/schedule' },
+    { key: 'contract', label: 'Contract', icon: 'target', route: '/portal/contract' },
+    { key: 'billing', label: 'Billing', icon: 'card', route: '/portal/billing' },
+    { key: 'tour', label: 'Tour', icon: 'trophy', route: '/portal/tour' },
+    { key: 'settings', label: 'Settings', icon: 'settings', route: '/portal/settings' },
   ],
   parent: [
     // No separate Children tab: Home IS the children overview, and the old
@@ -94,9 +109,14 @@ export const TABS = {
  *   and this is set (Phil's own account, users.specialistId), the Phil tab
  *   set (Sessions / Roster / Capture) renders instead of the plain coach one.
  *   Ignored for every other role.
+ * @param {boolean} [selfManaged]  With `role === 'athlete'`: the self-managed
+ *   set (Billing, Settings). Defaults to the signed-in session's
+ *   user.selfManaged (useSelfManaged), so no athlete screen threads it.
  */
-export default function BottomTabBar({ role = 'athlete', active, onChange, specialistId }) {
-  const set = role === 'coach' && specialistId ? TABS.coachSpecialist : TABS[role] || TABS.athlete;
+export default function BottomTabBar({ role = 'athlete', active, onChange, specialistId, selfManaged }) {
+  const sessionSelfManaged = useSelfManaged();
+  const payer = role === 'athlete' && (selfManaged ?? sessionSelfManaged) === true;
+  const set = role === 'coach' && specialistId ? TABS.coachSpecialist : payer ? TABS.athleteSelfManaged : TABS[role] || TABS.athlete;
   // The Contract tab goes while the contract is hidden (owner, 2026-09-30).
   const items = contractEnabled() ? set : set.filter((tab) => tab.key !== 'contract');
   const navigate = useNavigate();

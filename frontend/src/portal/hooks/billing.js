@@ -162,9 +162,9 @@ export function allPerPurchaseOf(members) {
   return members.length > 0 && members.every((m) => m.package?.kind === 'single');
 }
 
-async function liveHub(householdId, today) {
+async function liveHub(householdId, today, ownAthletes = null) {
   warnMissingPortalUrl();
-  const [household, athletes] = await Promise.all([fetchHousehold(householdId), fetchHouseholdAthletes(householdId)]);
+  const [household, athletes] = await Promise.all([fetchHousehold(householdId), ownAthletes || fetchHouseholdAthletes(householdId)]);
   const anchorDay = normalizeAnchorDay(household.periodAnchorDay);
   const members = await Promise.all(athletes.map((a) => liveMember(a, anchorDay, today)));
   const membership = membershipView(household.membership);
@@ -181,6 +181,19 @@ async function liveHub(householdId, today) {
 async function liveBillingHub(today, householdId) {
   if (householdId) return liveHub(householdId, today);
   const profile = await fetchCurrentUser();
+  // The self-managed 18+ athlete (Mike S6 2026-09-30) is their household's
+  // only member. The athletes rule admits an athlete's own doc by id, never
+  // the householdId list query a parent's hub runs - so read it by id.
+  if (profile.role === 'athlete') {
+    if (!profile.athleteId) {
+      throw new LiveDataError(ERR.INVALID, `users/${profile.uid} has no athleteId - Billing needs the athlete's own record.`);
+    }
+    const athlete = await fetchAthlete(profile.athleteId);
+    if (!athlete.householdId) {
+      throw new LiveDataError(ERR.INVALID, `athletes/${athlete.id} has no householdId - Billing needs a household.`);
+    }
+    return liveHub(athlete.householdId, today, [athlete]);
+  }
   if (!profile.householdId) {
     throw new LiveDataError(ERR.INVALID, `users/${profile.uid} has no householdId - Billing is a parent surface.`);
   }
@@ -297,7 +310,8 @@ function useTokenGens() {
 
 /**
  * `{ data: { household, members, status, facilityPending, portalUrl } |
- * null, loading, error }` — the Billing hub. A parent gets their own household; staff pass
+ * null, loading, error }` — the Billing hub. A parent gets their own household (a
+ * self-managed athlete, their one-member household); staff pass
  * `householdId` for any household. `variant` is harness-only ('populated'
  * | 'past_due' | 'lapsed'); live routes pass nothing. `practice` (the
  * onboarding walkthrough) pins the seed: no live read, no real Pay button.

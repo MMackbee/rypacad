@@ -24,14 +24,17 @@ import { contractEnabled } from '../data/contractFlag';
  *
  * "billing" still appears nowhere on the athlete surface: the household's
  * standing shows only as the paused-bookings banner when it bites (past
- * due / lapsed), never as amounts or cards.
+ * due / lapsed), never as amounts or cards - except for the self-managed
+ * 18+ athlete, who pays for themselves (Mike S6 2026-09-30): a "Billing ›"
+ * link beside their name, over the tokens card, opens their Billing hub.
  *
  * @param {'populated'|'past_due'|'lapsed'|'loading'|'error'|'empty'} variant
  *   Harness-only. Live routes pass nothing.
+ * @param {boolean} [selfManaged]  user.selfManaged (PortalRoutes).
  * @param {() => void} [onBack]  Hidden when not supplied.
  * @param {() => void} [onRetry]  Re-fetch after a load failure.
  */
-export default function Membership({ variant = 'populated', bare = false, role = 'athlete', onBack, onRetry }) {
+export default function Membership({ variant = 'populated', bare = false, role = 'athlete', selfManaged = false, onBack, onRetry }) {
   const hookVariant = variant === 'past_due' || variant === 'lapsed' ? variant : 'populated';
   const hook = useMyTokens({ variant: hookVariant });
   const navigate = useNavigate();
@@ -54,7 +57,7 @@ export default function Membership({ variant = 'populated', bare = false, role =
           </ScreenTitle>
         </div>
       }
-      footer={<BottomTabBar role={role} />}
+      footer={<BottomTabBar role={role} selfManaged={selfManaged || undefined} />}
     >
       <div style={{ padding: '0 22px 24px', display: 'flex', flexDirection: 'column', gap: 18 }}>
         {loading ? (
@@ -72,7 +75,7 @@ export default function Membership({ variant = 'populated', bare = false, role =
           <>
             <StatusBanner status={status} />
             <PendingBanner pendingAthletes={status?.status === 'pending' ? status.pendingAthletes : []} body={status?.body} title={status?.title} />
-            <MemberSection name={member.name}>
+            <MemberSection name={member.name} trailing={selfManaged ? <BillingLink onOpen={() => navigate('/portal/billing')} /> : null}>
               <TokenMeter member={member} defaultOpen />
               <CoachingLine coaching={member.coaching} />
               {contractEnabled() ? (
@@ -101,6 +104,26 @@ function StatusBanner({ status }) {
     <Banner tone="yellow" title="Payment didn't go through">
       New bookings are paused until it clears; everything already booked is kept.
     </Banner>
+  );
+}
+
+/** The self-managed athlete's way to their Billing hub - the Home tokens card's "Membership ›" link idiom. */
+function BillingLink({ onOpen }) {
+  return (
+    <button
+      type="button"
+      onClick={onOpen}
+      style={{
+        background: 'none',
+        border: 'none',
+        padding: 0,
+        font: `500 11px ${font.body}`,
+        color: color.primary,
+        cursor: 'pointer',
+      }}
+    >
+      Billing ›
+    </button>
   );
 }
 

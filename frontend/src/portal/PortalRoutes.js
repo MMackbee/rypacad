@@ -152,8 +152,12 @@ const warm = (loads) => loads.forEach((load) => load().catch(() => {}));
  * The variant passed below keeps useAuthSession in its demo mode in that
  * case (no auth subscription, no Firestore read); isLive() is a build-time
  * constant, so the hook's mode never flips across renders.
+ *
+ * `selfManaged` also admits a self-managed athlete (Mike S6 2026-09-30: the
+ * 18+ member who signed up for themselves, user.selfManaged) to a payer
+ * route; a child's athlete login still gets the role redirect.
  */
-export function RequireRole({ roles, children }) {
+export function RequireRole({ roles, selfManaged = false, children }) {
   const live = isLive();
   const { user, provisioned, loading } = useAuthSession(live ? undefined : { variant: 'idle' });
 
@@ -162,7 +166,8 @@ export function RequireRole({ roles, children }) {
   if (loading) return null;
   if (!user) return <Navigate to="/portal/signin" replace />;
   if (!provisioned) return <Navigate to="/portal/not-provisioned" replace />;
-  if (!roles.includes(user.role)) {
+  const payer = selfManaged && user.role === 'athlete' && user.selfManaged === true;
+  if (!roles.includes(user.role) && !payer) {
     return <Navigate to={landingFor(user)} replace />;
   }
   return children;
@@ -550,7 +555,20 @@ function MembershipRoute() {
   const role = live && user?.role === 'athlete' ? 'athlete' : 'parent';
   // Sprint 16: a parent's membership view IS the Billing hub.
   if (role === 'parent') return <Navigate to="/portal/billing" replace />;
-  return <Membership bare role={role} onBack={() => navigate('/portal/home')} />;
+  return <Membership bare role={role} selfManaged={live && user?.selfManaged === true} onBack={() => navigate('/portal/home')} />;
+}
+
+/**
+ * Billing's payer: a parent, or a self-managed athlete (Mike S6 2026-09-30),
+ * whose hub is their own one-member household under the athlete tab bar.
+ * Waits for the session like MembershipRoute, so no parent tab bar flashes.
+ */
+function BillingRoute() {
+  const live = isLive();
+  const { user, loading } = useAuthSession(live ? undefined : { variant: 'idle' });
+  if (live && loading) return null;
+  const role = live && user?.role === 'athlete' ? 'athlete' : 'parent';
+  return <Billing bare role={role} onRetry={() => bump('billing')} />;
 }
 
 /**
@@ -747,13 +765,14 @@ export default function PortalRoutes() {
           unrouted in the harness, untouched, per that same Sprint 7 ruling
           — this is a redirect-target change only, not a Billing revival. */}
       {/* Billing (Sprint 16, contract v2.4): the parents' hub - how many
-          tokens are left, per athlete, and the membership's standing. Parent
-          only; an athlete's own view stays Membership below. */}
+          tokens are left, per athlete, and the membership's standing. Parent,
+          plus the self-managed 18+ athlete who pays for themselves (Mike S6
+          2026-09-30); a child's login keeps Membership below. */}
       <Route
         path="billing"
         element={
-          <RequireRole roles={['parent']}>
-            <Billing bare onRetry={() => bump('billing')} />
+          <RequireRole roles={['parent']} selfManaged>
+            <BillingRoute />
           </RequireRole>
         }
       />
