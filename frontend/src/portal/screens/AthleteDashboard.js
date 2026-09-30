@@ -1,7 +1,8 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { color, font, glow, radius } from '../tokens';
 import PendingBanner from '../components/PendingBanner';
+import ChangePackageSheet, { ChangePackageLink } from '../components/ChangePackageSheet';
 import PaymentConfirming from '../components/PaymentConfirming';
 import { useMyTokens } from '../hooks/billing';
 import AllowancePools, { GraceLine } from '../components/AllowancePools';
@@ -58,6 +59,8 @@ export default function AthleteDashboard({
   const mine = useMyTokens();
   const mineStatus = mine.data?.status ?? null;
   const [params] = useSearchParams();
+  // Their own package can still change before Pay now (tester S4, 2026-09-30).
+  const [changeFor, setChangeFor] = useState(null);
 
   return (
     <PhoneFrame
@@ -107,7 +110,9 @@ export default function AthleteDashboard({
           pendingAthletes={(mineStatus?.status === 'pending' ? mineStatus.pendingAthletes : []).filter((a) => a.athleteId !== params.get('paid'))}
           body={mineStatus?.body}
           title={mineStatus?.title}
+          renderRowExtra={(a) => <ChangePackageLink athlete={a} onOpen={setChangeFor} />}
         />
+        <ChangePackageSheet athlete={changeFor} self onClose={() => setChangeFor(null)} />
         {/* Live: shown until a published diagnostic exists (contract v1.8 C);
             seed: the demo 'new' variant. */}
         {variant === 'new' || data?.diagnosticCaptured === false ? <StartHere onBook={onBook} /> : null}

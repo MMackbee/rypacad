@@ -234,6 +234,30 @@ service cloud.firestore {
       }
       allow update: if signedIn() && me().role in ['ops', 'owner'] && packageAssignmentUpdateOk();
 
+      // Tester S4 (2026-09-30): a family may switch the package picked at
+      // sign-up BEFORE the first payment - the household parent, or the
+      // athlete's own login (the 18+ member; also a child's own login, the
+      // same two callers createCheckoutSession lets pay). Only packageId
+      // (+ updatedAt, the server time), only while billing.status is
+      // 'pending' (never paid: active/past_due have a subscription, lapsed
+      // re-subscribes at its package, absent == active), and only to a
+      // monthly package - never the one-time single token
+      // (data/packageChange.js holds the same list). createCheckoutSession
+      // reads packageId fresh, and the webhook still corrects it to the
+      // paid price, so bookingOpenOk's "'elite' means paid Elite" holds.
+      function pendingPackageUpdateOk() {
+        let after = request.resource.data;
+        let changed = after.diff(resource.data).affectedKeys();
+        return changed.hasOnly(['packageId', 'updatedAt'])
+          && after.packageId in ['t-6', 't-12', 't-16', 'elite']
+          && resource.data.get('billing', {}).get('status', null) == 'pending'
+          && (!changed.hasAny(['updatedAt']) || after.updatedAt == request.time);
+      }
+      allow update: if signedIn() && pendingPackageUpdateOk() && (
+        (me().role == 'parent' && resource.data.householdId == me().householdId)
+        || (me().role == 'athlete' && me().athleteId == athleteId)
+      );
+
       // ---- athletes/{id}/diagnostics/{captureId} -----------------------
       // Sprint 10 (contract v1.8, C "Diagnostics persistence"). Shape:
       // { athleteId, capturedBy (uid), capturedAt, updatedAt,

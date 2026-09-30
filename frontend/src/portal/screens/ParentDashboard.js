@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { color, font } from '../tokens';
 import PendingBanner from '../components/PendingBanner';
+import ChangePackageSheet, { ChangePackageLink } from '../components/ChangePackageSheet';
 import PaymentConfirming from '../components/PaymentConfirming';
 import useBillingHub from '../hooks/billing';
 import { billingBadge, loginStatusLine } from '../data/billingCopy';
@@ -107,6 +108,8 @@ export default function ParentDashboard({
   // options sit inline under the cards for a parent who has not picked a kid
   // yet (the booking screens carry their own child selector).
   const [bookFor, setBookFor] = useState(null);
+  // A never-paid athlete's package can still change before Pay now (tester S4, 2026-09-30).
+  const [changeFor, setChangeFor] = useState(null);
   const pick = (option, athleteId) => {
     const [to, opts] = bookNavigation(option, athleteId);
     navigate(to, opts);
@@ -163,7 +166,8 @@ export default function ParentDashboard({
           athleteId={paidAthleteId}
           whatsNext={{ athlete: paidChild, product: params.get('product'), onBook: paidChild ? () => setBookFor(paidChild) : undefined }}
         />
-        <PendingBanner pendingAthletes={pendingAthletes} body={hubStatus?.body} title={hubStatus?.title} />
+        <PendingBanner pendingAthletes={pendingAthletes} body={hubStatus?.body} title={hubStatus?.title}
+          renderRowExtra={(a) => <ChangePackageLink athlete={a} onOpen={setChangeFor} />} />
         {onHold ? (
           <PaymentBanner billing={flagged ? billing : bannerFor(membershipStatus)} onOpen={() => navigate('/portal/billing')} />
         ) : null}
@@ -201,6 +205,7 @@ export default function ParentDashboard({
           }}
           onClose={() => setBookFor(null)}
         />
+        <ChangePackageSheet athlete={changeFor} onClose={() => setChangeFor(null)} />
       </div>
       )}
     </PhoneFrame>

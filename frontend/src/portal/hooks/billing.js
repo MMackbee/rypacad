@@ -123,11 +123,13 @@ async function liveMember(athlete, anchorDay, today) {
   return { ...entry, coaching: coachingFor(bookings, today, pkg) };
 }
 
-/** The members who need a checkout (Sprint 20, spec 4.4): never paid, or whose tier subscription ended - drives statusFor's pending branch. A lapsed athlete re-subscribes through the same createCheckoutSession; the customer portal cannot resume a cancelled subscription. `perPurchase` marks a single-token athlete, whose checkout is a one-time token, never a monthly bill. */
+/** The members who need a checkout (Sprint 20, spec 4.4): never paid, or whose tier subscription ended - drives statusFor's pending branch. A lapsed athlete re-subscribes through the same createCheckoutSession; the customer portal cannot resume a cancelled subscription. `perPurchase` marks a single-token athlete, whose checkout is a one-time token, never a monthly bill. `packageId` is what that checkout charges for (the pending card's Change package line). */
 export function pendingOf(members) {
   return members
     .filter((m) => m.billing?.status === 'pending' || m.billing?.status === 'lapsed')
-    .map((m) => ({ athleteId: m.athleteId, name: m.name, status: m.billing.status, perPurchase: m.package?.kind === 'single' }));
+    .map((m) => ({
+      athleteId: m.athleteId, name: m.name, status: m.billing.status, perPurchase: m.package?.kind === 'single', packageId: m.package?.id ?? null,
+    }));
 }
 
 /** True when every member is on the single token - nothing in the household bills monthly. */
