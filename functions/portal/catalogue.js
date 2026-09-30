@@ -44,6 +44,26 @@ function packageIdForPrice(priceId, cat) {
   return null;
 }
 
+/**
+ * Price ids a key USED to have in the current mode, still accepted by the
+ * webhook after a price rotation (a Checkout opened before the swap can
+ * complete after it). The optional top-level block is
+ * `{retired: {test: {single: [...]}, live: {single: [...]}}}` - kept out of
+ * the mode blocks because scripts/write-packages.mjs refuses any mode key
+ * that is not a package.
+ * @param {string} key A package id (today only 'single').
+ * @param {!Object=} cat The catalogue (injectable for tests).
+ * @return {!Array<string>} The retired ids, or [] when none are listed.
+ */
+function retiredPriceIdsFor(key, cat) {
+  const retired = (cat || loadCatalogue()).retired;
+  const list = retired && retired[stripeMode()] &&
+      retired[stripeMode()][key];
+  return Array.isArray(list) ?
+      list.filter((id) => typeof id === 'string' && id !== '') : [];
+}
+
 module.exports = {
-  FACILITY_KEY, loadCatalogue, packageIdForPrice, priceIdFor, stripeMode,
+  FACILITY_KEY, loadCatalogue, packageIdForPrice, priceIdFor,
+  retiredPriceIdsFor, stripeMode,
 };

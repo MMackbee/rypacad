@@ -4,8 +4,11 @@
  *   cd functions && npx firebase-tools emulators:start --only firestore,functions --project rypacad --config ../firebase.functions-lane.json
  *   node test/verify-stripe-launch.js   (from functions/)
  * Needs functions/.env.local (Task 11 Step 4): STRIPE_WEBHOOK_SECRET equal to
- * SECRET below, STRIPE_LINE_ITEMS_STUB for STEP B/C/E, and
- * STRIPE_SECRET_KEY=sk_test_harness so Task 13 STEP H fails deterministically. */
+ * SECRET below, STRIPE_LINE_ITEMS_STUB for STEP B/C/E and STEP S (the whole
+ * functions/env.template line, including cs_evt_s/s2/v/l1/l2/t - a missing
+ * id answers HTTP 500), STRIPE_MODE=test (the STEP S stubs name the
+ * catalogue's TEST single price), and STRIPE_SECRET_KEY=sk_test_harness so
+ * Task 13 STEP H fails deterministically. */
 'use strict';
 
 process.env.FIRESTORE_EMULATOR_HOST = '127.0.0.1:8082';
@@ -112,6 +115,40 @@ async function seed() {
       sessionId: 'reyes-s2', date: '2026-11-12', periodKey: '2026-11-01',
       joinedAt: TS(Date.now()), createdBy: 'u-ana'});
   }
+  // STEP S (single token, one-time $65): quist is a fresh family (no
+  // customer); lapsa is lapsed and every other athlete has a billing block
+  // (a paid single lifts it); legac is lapsed with a LEGACY sibling (no
+  // billing, so it stays lapsed); vic gave up a monthly subscription.
+  set('packages', 'single', {name: 'Single token', kind: 'single', tokens: 1,
+    windowDays: 30});
+  set('households', 'quist', {name: 'Quist family', stripeCustomerId: null,
+    stripeSubscriptionId: null, stripeCustomerIds: [], guardian: {
+      name: 'Quinn Quist', email: 'quinn@example.test', phone: '+15550177'}});
+  set('households', 'lapsa', {name: 'Lapsa family', stripeCustomerId: null,
+    stripeSubscriptionId: null, stripeCustomerIds: [], periodAnchorDay: 1,
+    membership: {status: 'lapsed'}, guardian: {name: 'Lia Lapsa',
+      email: 'lia@example.test', phone: '+15550166'}});
+  set('households', 'legac', {name: 'Legac family', stripeCustomerId: null,
+    stripeSubscriptionId: null, stripeCustomerIds: [], periodAnchorDay: 1,
+    membership: {status: 'lapsed'}, guardian: {name: 'Gus Legac',
+      email: 'gus@example.test', phone: '+15550155'}});
+  set('households', 'vicfam', {name: 'Vic family', stripeCustomerId: 'cus_vicfam',
+    stripeSubscriptionId: null, stripeCustomerIds: ['cus_vicfam'], guardian: {
+      name: 'Val Vic', email: 'val@example.test', phone: '+15550144'}});
+  for (const [a, hid] of [['sol', 'quist'], ['tia', 'lapsa'], ['leo', 'legac']]) {
+    set('athletes', a, {name: a, householdId: hid, packageId: 'single',
+      contractMinutes: null, coachId: null, facilityAccess: false,
+      billing: {status: 'pending'}});
+  }
+  set('athletes', 'tib', {name: 'tib', householdId: 'lapsa', packageId: 't-6',
+    contractMinutes: null, coachId: null, facilityAccess: false,
+    billing: {status: 'lapsed', subscriptionId: 'sub_tib'}});
+  set('athletes', 'lex', {name: 'lex', householdId: 'legac', packageId: 't-6',
+    contractMinutes: null, coachId: null, facilityAccess: false});
+  set('athletes', 'vic', {name: 'vic', householdId: 'vicfam', packageId: 'single',
+    contractMinutes: null, coachId: null, facilityAccess: false,
+    billing: {status: 'lapsed', subscriptionId: 'sub_vic',
+      customerId: 'cus_vicfam'}});
   await B.commit();
 }
 const META = (ath, pk) => ({householdId: 'novak', athleteId: ath,
@@ -145,6 +182,21 @@ const completed = (id, sub, ath) => ({id, object: 'event',
     object: 'checkout.session', mode: 'subscription', payment_status: 'paid',
     customer: 'cus_novak', subscription: sub,
     client_reference_id: `novak__${ath}__tier`}}});
+
+// STEP S: a paid PAYMENT-mode session (the one-time single token). The
+// session id is 'cs_' + the event id unless `cs` is given (a resend reuses
+// the session under a new event id).
+const SINGLE_PRICE = 'price_1UKlCPD16IMJzfAPYPEI29ED';
+const single = (id, hh, ath, extra) => ({id, object: 'event',
+  created: secs(2026, 10, 12), type: 'checkout.session.completed',
+  data: {object: Object.assign({id: 'cs_' + id, object: 'checkout.session',
+    mode: 'payment', payment_status: 'paid', payment_intent: 'pi_' + id,
+    amount_total: 6500, currency: 'usd', customer: 'cus_' + hh,
+    subscription: null, client_reference_id: `${hh}__${ath}__tier`},
+  extra || {})}});
+async function countWhere(col, field, value) {
+  return (await db.collection(col).where(field, '==', value).get()).size;
+}
 
 async function main() {
   log('\n=== Sprint 20 Stripe launch replay (isolated emulator) ===');
@@ -294,6 +346,127 @@ async function main() {
   check('no tokenPeriods from it', (await db.collection('tokenPeriods').where('eventId', '==', 'evt_h').get()).size, 0);
   r = await post({id: 'evt_h', object: 'event', type: 'invoice.paid', data: {object: {id: 'in_h', object: 'invoice', customer: 'cus_unknown'}}});
   check('a redelivery after stripe-lookup-failed is a duplicate (the row is the guard)', r.body.outcome, 'duplicate');
+
+  log('\nSTEP S  the one-time single token (payment-mode checkout -> graceTokens/single_{cs})');
+  log('  S1  a paid single session (quist/sol)');
+  r = await post(single('evt_s', 'quist', 'sol', {payment_intent: 'pi_s'}));
+  check('HTTP', [r.status, r.body.outcome], [200, 'issued-single']);
+  const tokS = await get('graceTokens', 'single_cs_evt_s');
+  check('token doc', tokS && [tokS.athleteId, tokS.householdId, tokS.expiresAt,
+    tokS.reason, tokS.sourceSessionId, tokS.createdBy, tokS.checkoutSessionId,
+    tokS.paymentIntentId, tokS.amountTotal, tokS.currency, tokS.priceId,
+    tokS.purchasedOn, tokS.eventId],
+  ['sol', 'quist', '2027-02-27', 'single-purchase', null, 'stripe', 'cs_evt_s',
+    'pi_s', 6500, 'usd', SINGLE_PRICE, '2026-10-12', 'evt_s']);
+  const solS = await get('athletes', 'sol');
+  check('sol.billing active + oneTime, no subscription', [solS.billing.status,
+    solS.billing.oneTime, solS.billing.subscriptionId, solS.billing.customerId,
+    solS.billing.checkoutSessionId, solS.billing.priceId, solS.packageId],
+  ['active', true, null, 'cus_quist', 'cs_evt_s', SINGLE_PRICE, 'single']);
+  const quist = await get('households', 'quist');
+  check('customer linked', [quist.stripeCustomerId, quist.stripeCustomerIds],
+      ['cus_quist', ['cus_quist']]);
+  checkTrue('no periodAnchorDay written', quist.periodAnchorDay === undefined,
+      quist.periodAnchorDay);
+  check('no tokenPeriods for sol', await countWhere('tokenPeriods', 'athleteId',
+      'sol'), 0);
+  check('exactly one payment-received notice', [await exists('notifications',
+      'membership_sol_paid'), await countWhere('notifications', 'athleteId',
+      'sol')], [true, 1]);
+  const ledS = await get('stripeEvents', 'evt_s');
+  check('ledger', [ledS.outcome, ledS.via, ledS.checkoutMode,
+    ledS.clientReference, ledS.householdId, ledS.athleteId],
+  ['issued-single', 'client-reference', 'payment', 'quist__sol__tier',
+    'quist', 'sol']);
+
+  log('  S2  the same event again');
+  r = await post(single('evt_s', 'quist', 'sol', {payment_intent: 'pi_s'}));
+  check('duplicate', [r.status, r.body.outcome], [200, 'duplicate']);
+
+  log('  S3  a NEW event id for the same session (manual Resend)');
+  r = await post(single('evt_s3', 'quist', 'sol', {id: 'cs_evt_s',
+    payment_intent: 'pi_s'}));
+  check('duplicate-purchase', [r.status, r.body.outcome],
+      [200, 'duplicate-purchase']);
+  check('still one token for sol', await countWhere('graceTokens', 'athleteId',
+      'sol'), 1);
+  check('ledger row', (await get('stripeEvents', 'evt_s3')).outcome,
+      'duplicate-purchase');
+
+  log('  S4  a second paid session: a second token, no second notice');
+  r = await post(single('evt_s2', 'quist', 'sol'));
+  check('HTTP', [r.status, r.body.outcome], [200, 'issued-single']);
+  check('two tokens for sol', [await exists('graceTokens', 'single_cs_evt_s2'),
+    await countWhere('graceTokens', 'athleteId', 'sol')], [true, 2]);
+  check('notice not repeated', await countWhere('notifications', 'athleteId',
+      'sol'), 1);
+  check('billing names the latest session', (await get('athletes', 'sol'))
+      .billing.checkoutSessionId, 'cs_evt_s2');
+
+  log('  S5  a payment session of another one-time price (stub price_1x)');
+  r = await post(single('evt_t', 'quist', 'sol'));
+  check('unexpected-one-time', [r.status, r.body.outcome],
+      [200, 'unexpected-one-time']);
+  check('nothing written', [await exists('graceTokens', 'single_cs_evt_t'),
+    (await get('athletes', 'sol')).billing.checkoutSessionId,
+    (await get('stripeEvents', 'evt_t')).householdId,
+    (await get('stripeEvents', 'evt_t')).checkoutMode],
+  [false, 'cs_evt_s2', null, 'payment']);
+
+  log('  S6  payment mode with a FACILITY client reference');
+  r = await post(single('evt_s6', 'quist', 'sol', {
+    client_reference_id: 'quist__sol__facility'}));
+  check('unexpected-one-time', [r.status, r.body.outcome],
+      [200, 'unexpected-one-time']);
+  check('no token, facility untouched', [await exists('graceTokens',
+      'single_cs_evt_s6'), (await get('athletes', 'sol')).facilityAccess],
+  [false, false]);
+
+  log('  S7  a lapsed household: lifted only when no sibling is legacy');
+  r = await post(single('evt_l1', 'lapsa', 'tia'));
+  check('lapsa HTTP', [r.status, r.body.outcome], [200, 'issued-single']);
+  const lapsa = await get('households', 'lapsa');
+  check('lapsa lifted to active', [lapsa.membership.status,
+    lapsa.membership.lastEventId], ['active', 'evt_l1']);
+  check('tia token, tib untouched', [await exists('graceTokens',
+      'single_cs_evt_l1'), (await get('athletes', 'tib')).billing.status],
+  [true, 'lapsed']);
+  r = await post(single('evt_l2', 'legac', 'leo'));
+  check('legac HTTP', [r.status, r.body.outcome],
+      [200, 'issued-single-household-lapsed']);
+  check('legac stays lapsed; the paid token is still issued',
+      [(await get('households', 'legac')).membership.status,
+        await exists('graceTokens', 'single_cs_evt_l2'),
+        (await get('athletes', 'leo')).billing.status],
+      ['lapsed', true, 'active']);
+
+  log('  S8  a former subscription is retired and its late events ignored');
+  r = await post(single('evt_v', 'vicfam', 'vic'));
+  check('HTTP', [r.status, r.body.outcome], [200, 'issued-single']);
+  const vicV = await get('athletes', 'vic');
+  check('vic: active single, sub_vic retired', [vicV.billing.status,
+    vicV.billing.oneTime, vicV.billing.subscriptionId,
+    vicV.billing.retiredSubscriptionIds], ['active', true, null, ['sub_vic']]);
+  check('vic payment-received on reactivation', await exists('notifications',
+      'membership_vic_paid'), true);
+  const hhVicBefore = await get('households', 'vicfam');
+  r = await post({id: 'evt_v_del', object: 'event',
+    type: 'customer.subscription.deleted', data: {object: {id: 'sub_vic',
+      object: 'subscription', customer: 'cus_vicfam', status: 'canceled',
+      metadata: {householdId: 'vicfam', athleteId: 'vic', product: 'tier',
+        packageId: 't-6'},
+      items: {data: [{price: {id: 'price_t6'}}]}}}});
+  check('HTTP', [r.status, r.body.outcome],
+      [200, 'ignored-retired-subscription']);
+  const vicD = await get('athletes', 'vic');
+  check('vic billing still active single', [vicD.billing.status,
+    vicD.billing.oneTime, vicD.billing.lastEventId], ['active', true, 'evt_v']);
+  check('household untouched, no revoke', [JSON.stringify((await get(
+      'households', 'vicfam')).membership) === JSON.stringify(
+      hhVicBefore.membership), r.body.summary], [true, null]);
+  check('ledger', [(await get('stripeEvents', 'evt_v_del')).outcome,
+    (await get('stripeEvents', 'evt_v_del')).checkoutMode],
+  ['ignored-retired-subscription', null]);
 
   log(`\n=== ${failures === 0 ? 'ALL CHECKS PASSED' :
       failures + ' CHECK(S) FAILED'} ===`);

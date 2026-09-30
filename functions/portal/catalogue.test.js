@@ -29,6 +29,28 @@ test('priceIdFor / packageIdForPrice over the current mode', () => {
   process.env.STRIPE_MODE = 'test';
 });
 
+test('retiredPriceIdsFor: the top-level retired block, per mode', () => {
+  const ROT = Object.assign({}, FIX, {retired: {
+    test: {single: ['price_single_old_test', null, '']},
+    live: {single: ['price_single_old_live'], elite: 'not-an-array'},
+  }});
+  assert.deepEqual(cat.retiredPriceIdsFor('single', ROT),
+      ['price_single_old_test']);
+  assert.deepEqual(cat.retiredPriceIdsFor('t-6', ROT), []);
+  assert.deepEqual(cat.retiredPriceIdsFor('single', FIX), [],
+      'no retired block at all');
+  assert.deepEqual(cat.retiredPriceIdsFor('single',
+      {test: {}, live: {}, retired: {live: {single: ['x']}}}), [],
+  'no block for the current mode');
+  process.env.STRIPE_MODE = 'live';
+  assert.deepEqual(cat.retiredPriceIdsFor('single', ROT),
+      ['price_single_old_live']);
+  assert.deepEqual(cat.retiredPriceIdsFor('elite', ROT), []);
+  process.env.STRIPE_MODE = 'test';
+  // The committed JSON has no retired block today.
+  assert.deepEqual(cat.retiredPriceIdsFor('single'), []);
+});
+
 test('the committed JSON has exactly the twelve keys; test ids present', () => {
   const json = cat.loadCatalogue();
   const keys = ['t-6', 't-12', 't-16', 'elite', 'single', 'facility-access'];

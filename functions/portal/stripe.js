@@ -27,6 +27,13 @@
  * (stripe-legacy.js) serves families that still resolve by customer only.
  * Stripe reads (line items, the checkout-session lookup) happen BEFORE the
  * transaction; every Firestore effect and its ledger row commit in ONE.
+ *
+ * The single session token (owner rulings 2026-09-29/30) is a PAYMENT-mode
+ * checkout of the catalogue's single price: stripe-single.js mints one
+ * `graceTokens/single_{cs}` per paid session. Late events for a
+ * subscription an athlete gave up for single tokens
+ * (`billing.retiredSubscriptionIds`) are recorded
+ * 'ignored-retired-subscription' and write nothing.
  */
 
 'use strict';
@@ -44,10 +51,16 @@ const resolve = require('./stripe-resolve');
 const billing = require('./stripe-billing');
 const checkout = require('./stripe-checkout');
 const legacy = require('./stripe-legacy');
+const single = require('./single');
+const stripeSingle = require('./stripe-single');
 const {STRIPE_WEBHOOK_SECRETS} = require('./secrets');
 
 const {applyLapsed, applyLegacy, applyPastDue, invoicePeriod,
   membershipPatch} = legacy;
+
+/** Single-token outcomes ops reviews by hand (RUNBOOK): logged as errors. */
+const SINGLE_REVIEW = new Set(['issued-single-late',
+  'issued-single-amount-check', 'issued-single-household-lapsed']);
 
 /** Event types this handler acts on; anything else is recorded as ignored. */
 const HANDLED = new Set([
@@ -179,6 +192,8 @@ async function handleEvent(event) {
   const customer = customerIdOf(object);
   const handled = HANDLED.has(event.type);
   const isCheckout = event.type === 'checkout.session.completed';
+  const subId = object.object === 'subscription' ? object.id :
+      resolve.subscriptionIdOf(object);
 
   let subject = null;
   let pre = {outcome: null};
@@ -186,7 +201,21 @@ async function handleEvent(event) {
     try {
       if (isCheckout) {
         subject = resolve.parseClientReference(object.client_reference_id);
-        if (object.mode !== 'subscription' || !subject) {
+        if (!subject) {
+          pre.outcome = 'ignored';
+        } else if (object.mode === 'payment') {
+          // The single token: only a tier reference, and only the
+          // catalogue's single price (or a retired one), is a purchase.
+          if (subject.product !== 'tier') {
+            pre.outcome = 'unexpected-one-time';
+          } else {
+            pre = await checkout.readLineItems(stripe(), object.id, {
+              mode: 'payment',
+              singlePriceId: catalogue.priceIdFor('single'),
+              retired: catalogue.retiredPriceIdsFor('single')});
+            if (!pre.ok) pre.outcome = pre.reason;
+          }
+        } else if (object.mode !== 'subscription') {
           pre.outcome = 'ignored';
         } else {
           pre = await checkout.readLineItems(stripe(), object.id);
@@ -257,6 +286,10 @@ async function handleEvent(event) {
       applied = {outcome: pre.outcome, detail: {}};
     } else if (!hh) {
       applied = {outcome: 'unmatched', detail: {}};
+    } else if (isCheckout && pre.oneTime) {
+      applied = await stripeSingle.applySinglePurchase(tx, {db: db(), event,
+        session: object, ref: subject, priceId: pre.priceId, athlete,
+        athleteRef, hh});
     } else if (isCheckout) {
       applied = checkout.applyCheckoutCompleted(tx, {
         event, session: object, ref: subject, priceId: pre.priceId,
@@ -265,6 +298,10 @@ async function handleEvent(event) {
     } else if (!athlete) {
       // Legacy resolution by customer only: the household-wide path.
       applied = await applyLegacy(tx, event, hh, object);
+    } else if (single.isRetiredSubscription(athlete, product, subId)) {
+      // A late event for the subscription this athlete gave up for single
+      // tokens must never overwrite the paid one-time billing block.
+      applied = {outcome: 'ignored-retired-subscription', detail: {}};
     } else if (event.type === 'invoice.paid') {
       applied = billing.applyAthleteInvoicePaid(tx, {db: db(), event, hh,
         athleteRef, athlete, pkg: paidPkg, product,
@@ -324,6 +361,8 @@ async function handleEvent(event) {
       householdId: hh ? hh.id : null,
       athleteId: athlete ? athleteRef.id : null,
       via: subject ? subject.via || 'client-reference' : null,
+      checkoutMode: isCheckout ? object.mode || null : null,
+      clientReference: isCheckout ? object.client_reference_id || null : null,
       receivedAt: now(),
       outcome: applied.outcome,
     });
@@ -354,6 +393,12 @@ async function handleEvent(event) {
     outcome = 'downgraded';
   }
   if (outcome !== planned.outcome) await eventRef.update({outcome});
+  if (SINGLE_REVIEW.has(outcome)) {
+    // The token is issued (the family paid); ops refunds or fixes by hand.
+    console.error(`stripe event ${event.id}: ${outcome} for athlete ` +
+        `${planned.athlete ? planned.athlete.id : null} ` +
+        `(${JSON.stringify(planned.detail)}) - needs ops review`);
+  }
   if (planned.firstActive && planned.athlete) {
     await billing.sendPaymentReceived({householdId: planned.household.id,
       athleteId: planned.athlete.id, athleteName: planned.athlete.name,
