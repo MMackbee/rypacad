@@ -315,12 +315,18 @@ async function liveAthleteContext() {
         'surfaces are wired for athlete-linked accounts only in this sprint.'
     );
   }
-  const athlete = await fetchAthlete(profile.athleteId);
-  const pkg = athlete.packageId ? await fetchPackage(athlete.packageId) : null;
-  const bookings = await fetchBookings(profile.athleteId);
+  // Independent reads in parallel (perf wave B): the bookings need only the
+  // profile's athleteId; the package and household need only the athlete.
+  const [athlete, bookings] = await Promise.all([
+    fetchAthlete(profile.athleteId),
+    fetchBookings(profile.athleteId),
+  ]);
   // The household's periodAnchorDay (contract v2.0, pin B) - every token
   // position and period badge this context feeds needs it; absent == 1.
-  const household = athlete.householdId ? await fetchHousehold(athlete.householdId) : null;
+  const [pkg, household] = await Promise.all([
+    athlete.packageId ? fetchPackage(athlete.packageId) : null,
+    athlete.householdId ? fetchHousehold(athlete.householdId) : null,
+  ]);
   return { profile, athlete, pkg, bookings, household };
 }
 
@@ -620,18 +626,47 @@ const MAX_WINDOW_DAYS = Math.max(...TOKEN_PACKAGES.map(windowDaysFor), windowDay
  * child chosen afterward might need; per-day locking past THAT child's own,
  * narrower window is the screen's job once a child is picked (it already
  * has each child's packageId via useHouseholdAthletes).
+ *
+ * `withSlots: false` (perf wave B) is the identity-only path for a caller
+ * that needs book() and nothing else (SpecialistBooking): no sessions range
+ * read, no package/bookings/household chain - the same `identity` book()
+ * reads, and an empty payload in the same shape.
  */
-async function liveBooking(today) {
+async function liveBooking(today, { withSlots = true } = {}) {
   const who = await liveBookingIdentity();
+  if (!withSlots) {
+    const identity =
+      who.role === 'athlete'
+        ? {
+            role: 'athlete',
+            athleteId: who.profile.athleteId,
+            householdId: (await fetchAthlete(who.profile.athleteId)).householdId,
+          }
+        : { role: 'parent', householdId: who.profile.householdId };
+    return {
+      dates: [],
+      slots: [],
+      tokens: null,
+      seasonNote: null,
+      confirmation: { ...BOOKING_CONFIRMATION, email: who.profile.email },
+      identity,
+    };
+  }
 
   let windowDays = MAX_WINDOW_DAYS;
   let tokens = null;
   let identity;
   if (who.role === 'athlete') {
-    const athlete = await fetchAthlete(who.profile.athleteId);
-    const pkg = athlete.packageId ? await fetchPackage(athlete.packageId) : null;
-    const bookings = await fetchBookings(athlete.id);
-    const household = athlete.householdId ? await fetchHousehold(athlete.householdId) : null;
+    // Independent reads in parallel (perf wave B), same pattern as
+    // liveAthleteContext: athlete + bookings, then package + household.
+    const [athlete, bookings] = await Promise.all([
+      fetchAthlete(who.profile.athleteId),
+      fetchBookings(who.profile.athleteId),
+    ]);
+    const [pkg, household] = await Promise.all([
+      athlete.packageId ? fetchPackage(athlete.packageId) : null,
+      athlete.householdId ? fetchHousehold(athlete.householdId) : null,
+    ]);
     const anchorDay = normalizeAnchorDay(household?.periodAnchorDay);
     windowDays = windowDaysFor(pkg);
     tokens = deriveTokens(pkg, bookings, anchorDay, today);
@@ -818,7 +853,7 @@ export function useSchedule({ variant = 'upcoming', today = todayISO(), practice
  * picker — the picker's own choices come from the existing
  * useHouseholdAthletes(), not duplicated here.
  */
-export function useBooking({ variant = 'open', today = todayISO(), practice = false } = {}) {
+export function useBooking({ variant = 'open', today = todayISO(), practice = false, withSlots = true } = {}) {
   // Practice short-circuits before isLive(): with practice set, the live
   // source below is unreachable, ./live.js never runs, and book() takes the
   // local (seed) branch — a practice booking cannot become a real one.
@@ -881,11 +916,11 @@ export function useBooking({ variant = 'open', today = todayISO(), practice = fa
       (live
         ? {
             source: async () => {
-              const { identity: id, ...payload } = await liveBooking(today);
+              const { identity: id, ...payload } = await liveBooking(today, { withSlots });
               setIdentity(id);
               return payload;
             },
-            deps: ['booking', today, bookingsGen, sessionsGen],
+            deps: ['booking', today, bookingsGen, sessionsGen, withSlots],
           }
         : undefined)
   );
@@ -1147,9 +1182,13 @@ async function liveMonthSessions(monthISO, today) {
   // Same group-flow filter as liveBooking above: the month calendar feeds
   // Book a Session and the coach's own day — specialist slots live on
   // /portal/coaching and /portal/my-sessions instead.
-  const sessions = (await fetchSessionsInRange(start, end)).filter(
-    (s) => !isSpecialistType(s.type)
-  );
+  // The range read and the caller's identity are independent (perf wave B);
+  // see the waitlist note below for why the identity errors closed to null.
+  const [all, who] = await Promise.all([
+    fetchSessionsInRange(start, end),
+    liveBookingIdentity().catch(() => null),
+  ]);
+  const sessions = all.filter((s) => !isSpecialistType(s.type));
   sessions.sort(byDateThenId);
   const days = groupSessionsByDate(sessions, today);
 
@@ -1160,22 +1199,21 @@ async function liveMonthSessions(monthISO, today) {
   // every other read in this file keeps. Staff/coach callers (this view
   // is readable by every role) simply get no annotation - the identity
   // resolution errors closed to null instead of failing the whole month.
-  const who = await liveBookingIdentity().catch(() => null);
   if (who) {
     const entries = await (who.role === 'athlete'
       ? fetchWaitlistByAthlete(who.profile.athleteId)
       : fetchWaitlistByHousehold(who.profile.householdId));
     const bySession = new Map(entries.map((e) => [e.sessionId, e]));
-    for (const day of days) {
-      for (const row of day.sessions) {
-        const entry = bySession.get(row.id);
-        if (!entry) continue;
-        const queue = await fetchWaitlistBySession(row.id);
-        const idx = queue.findIndex((q) => q.athleteId === entry.athleteId);
-        row.waitlisted = true;
-        row.waitlistPosition = idx >= 0 ? idx + 1 : null;
-      }
-    }
+    // Every waitlisted row's queue in parallel (perf wave B), then annotate
+    // the rows in place exactly as the sequential loop did.
+    const rows = days.flatMap((day) => day.sessions).filter((row) => bySession.has(row.id));
+    const queues = await Promise.all(rows.map((row) => fetchWaitlistBySession(row.id)));
+    rows.forEach((row, i) => {
+      const entry = bySession.get(row.id);
+      const idx = queues[i].findIndex((q) => q.athleteId === entry.athleteId);
+      row.waitlisted = true;
+      row.waitlistPosition = idx >= 0 ? idx + 1 : null;
+    });
   }
   return { month: label, days };
 }
@@ -1364,8 +1402,8 @@ async function liveSpecialistSlots(specialistId, athleteIdOverride, today) {
     };
   }
   const athlete = await fetchAthlete(athleteId);
-  const pkg = athlete.packageId ? await fetchPackage(athlete.packageId) : null;
-  const [bookings, household] = await Promise.all([
+  const [pkg, bookings, household] = await Promise.all([
+    athlete.packageId ? fetchPackage(athlete.packageId) : null,
     fetchBookings(athleteId, { householdId: athlete.householdId }),
     athlete.householdId ? fetchHousehold(athlete.householdId) : Promise.resolve(null),
   ]);
@@ -1772,9 +1810,11 @@ async function liveHouseholdAthletes(today) {
   const anchorDay = normalizeAnchorDay(household.periodAnchorDay);
   return Promise.all(
     athletes.map(async (a) => {
-      const pkg = a.packageId ? await fetchPackage(a.packageId) : null;
-      // Parent context — compound filter for rules provability (fetchBookings).
-      const bookings = await fetchBookings(a.id, { householdId: profile.householdId });
+      const [pkg, bookings] = await Promise.all([
+        a.packageId ? fetchPackage(a.packageId) : null,
+        // Parent context — compound filter for rules provability (fetchBookings).
+        fetchBookings(a.id, { householdId: profile.householdId }),
+      ]);
       return {
         id: a.id,
         name: a.name,
@@ -3206,14 +3246,27 @@ export function usePracticeLog({ today = todayISO(), practice = false } = {}) {
  * so a long-enrolled real athlete does not get told they are new.
  */
 async function liveAthleteDetail(athleteId) {
-  const athlete = await fetchAthlete(athleteId);
-  const pkg = athlete.packageId ? await fetchPackage(athlete.packageId) : null;
-  // Sprint 12 integration: the membership editor sets the household's
-  // period anchor, so the payload names the household and its anchor (a
-  // coach may not be allowed to read households - tolerate a denial).
-  const household = athlete.householdId
-    ? await fetchHousehold(athlete.householdId).catch(() => null)
-    : null;
+  // Three rounds, not seven sequential reads (perf wave B): the athlete and
+  // the viewer are independent; everything in round two needs only those
+  // two; the sessions join needs the bookings.
+  const [athlete, viewer] = await Promise.all([fetchAthlete(athleteId), fetchCurrentUser()]);
+  // Sprint 20 (spec 3.2): the athlete card's "Login: none / not claimed /
+  // claimed <date>" line. The household parent and ops/owner can read the
+  // invite; a coach cannot (fetchLoginInvite returns null -> 'invited').
+  const loginEmail = athlete.loginEmail ?? null;
+  const [pkg, household, bookings, invite] = await Promise.all([
+    athlete.packageId ? fetchPackage(athlete.packageId) : null,
+    // Sprint 12 integration: the membership editor sets the household's
+    // period anchor, so the payload names the household and its anchor (a
+    // coach may not be allowed to read households - tolerate a denial).
+    athlete.householdId ? fetchHousehold(athlete.householdId).catch(() => null) : null,
+    // Everything the kid has scheduled (owner's ask, 2026-09-01): the
+    // athlete's upcoming bookings joined to their sessions. The viewer
+    // decides the query shape - a parent's list read is only rules-provable
+    // with the household compound filter; staff query by athleteId alone.
+    fetchBookings(athleteId, viewer.role === 'parent' ? { householdId: viewer.householdId } : {}),
+    loginEmail ? fetchLoginInvite(loginEmail) : null,
+  ]);
   const subline =
     [
       athlete.contractMinutes != null ? `${athlete.contractMinutes} min tier` : null,
@@ -3222,15 +3275,6 @@ async function liveAthleteDetail(athleteId) {
       .filter(Boolean)
       .join(' · ') || null;
 
-  // Everything the kid has scheduled (owner's ask, 2026-09-01): the athlete's
-  // upcoming bookings joined to their sessions. The viewer decides the query
-  // shape - a parent's list read is only rules-provable with the household
-  // compound filter; staff query by athleteId alone.
-  const viewer = await fetchCurrentUser();
-  const bookings = await fetchBookings(
-    athleteId,
-    viewer.role === 'parent' ? { householdId: viewer.householdId } : {}
-  );
   const today = todayISO();
   const active = bookings.filter((b) => b.status !== 'cancelled' && b.date >= today);
   active.sort(byDateThenId);
@@ -3249,11 +3293,7 @@ async function liveAthleteDetail(athleteId) {
     };
   });
 
-  // Sprint 20 (spec 3.2): the athlete card's "Login: none / not claimed /
-  // claimed <date>" line. The household parent and ops/owner can read the
-  // invite; a coach cannot (fetchLoginInvite returns null -> 'invited').
-  const loginEmail = athlete.loginEmail ?? null;
-  const login = loginStateFor(loginEmail, loginEmail ? await fetchLoginInvite(loginEmail) : null);
+  const login = loginStateFor(loginEmail, invite);
 
   return {
     athlete: {
@@ -3315,7 +3355,9 @@ export function useAthleteDetail({ athleteId, variant = 'populated' } = {}) {
   // successful pick until an unrelated write happened to bump something.
   const athletesGen = useInvalidation('athletes');
   const seedValue = {
-    athlete: { ...ATHLETE_DETAIL, loginEmail: null, login: { state: 'none', claimedAt: null } },
+    // householdName: the back link's label (AthleteDetail reads it here now,
+    // not from a second useHousehold) - the same name useHousehold's seed shows.
+    athlete: { ...ATHLETE_DETAIL, householdName: HOUSEHOLD.name, loginEmail: null, login: { state: 'none', claimedAt: null } },
     history: full ? CONTRACT_HISTORY : [],
     checklist: full ? [] : LIMITED_DATA_CHECKLIST,
     hasEnoughData: full,

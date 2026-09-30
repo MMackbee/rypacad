@@ -220,7 +220,7 @@ export default function SpecialistBooking({
   // Reservation rides BookSession's own seam (routing's ruling: no booking
   // action lives on the slots hook): useBooking's book() with the tapped
   // slot translated to its shape - { id, date, type }.
-  const booking = useBooking();
+  const booking = useBooking({ withSlots: false });
   const reserve = (slot, opts) =>
     booking.book({ id: slot.sessionId, date: slot.date, type: specialistId }, opts);
   const disabledForNoAthlete = isParent && !selectedAthleteId;

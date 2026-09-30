@@ -16,7 +16,7 @@ import { Avatar } from '../components/MediaPlaceholder';
 import AllowancePools from '../components/AllowancePools';
 import SkeletonCard, { SkeletonBar } from '../components/Skeleton';
 import { AlertGlyph, Body, Card, ErrorNotice, ScreenTitle } from '../components/Primitives';
-import { useHousehold, useMembership } from '../hooks';
+import { useHousehold } from '../hooks';
 import { ALL_PACKAGES } from '../data/packages';
 
 /**
@@ -80,12 +80,14 @@ export default function ParentDashboard({
   // households.membership the Billing hub renders - past_due and lapsed
   // pause booking, so the banner and the ON HOLD badges follow it live.
   // The seed 'payment' variant keeps driving the harness through `billing`.
-  const membershipStatus = useMembership().data?.household?.membership?.status ?? null;
+  // Read off the hub, which already carries households.membership - a
+  // separate useMembership() re-fetched the whole household for one field.
+  const hub = useBillingHub();
+  const membershipStatus = hub.data?.household?.membership?.status ?? null;
   const paused = membershipStatus === 'past_due' || membershipStatus === 'lapsed';
   const onHold = flagged || paused;
   // Sprint 20 (spec 4.4): per-athlete paid state from the same hub Billing
   // renders; the household-level `membership` above keeps its meaning.
-  const hub = useBillingHub();
   const hubStatus = hub.data?.status ?? null;
   const billingById = new Map((hub.data?.members ?? []).map((m) => [m.athleteId, m.billing?.status ?? 'active']));
   const [params] = useSearchParams();

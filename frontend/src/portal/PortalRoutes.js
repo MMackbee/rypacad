@@ -1,4 +1,4 @@
-import React, { Suspense, lazy, useState } from 'react';
+import React, { Suspense, lazy, useEffect, useState } from 'react';
 import { Navigate, Route, Routes, useLocation, useNavigate, useParams } from 'react-router-dom';
 
 import useAuthSession from './hooks/useAuthSession';
@@ -27,26 +27,90 @@ const named = (load, name) => lazy(() => load().then((m) => ({ default: m[name] 
 // The review harness imports every screen, so it must be lazy too or it
 // drags the whole app back into the first bundle.
 const StatesHarness = lazy(() => import('./StatesHarness'));
-const OnboardingWelcomeRoute = named(() => import('./screens/OnboardingFlow'), 'OnboardingWelcomeRoute');
-const MySchedule = lazy(() => import('./screens/MySchedule'));
-const BookSession = lazy(() => import('./screens/BookSession'));
-const SpecialistBooking = lazy(() => import('./screens/SpecialistBooking'));
-const CoachDashboard = lazy(() => import('./screens/CoachDashboard'));
-const Roster = lazy(() => import('./screens/Roster'));
-const SessionAttendance = named(() => import('./screens/Roster'), 'SessionAttendance');
-const CaptureFlow = named(() => import('./screens/DiagnosticCapture'), 'CaptureFlow');
-const SeasonSchedule = lazy(() => import('./screens/SeasonSchedule'));
-const CommitmentContract = lazy(() => import('./screens/CommitmentContract'));
-const AthleteDetail = lazy(() => import('./screens/AthleteDetail'));
-const Membership = lazy(() => import('./screens/Membership'));
-const Billing = lazy(() => import('./screens/Billing'));
-const NotificationPreferences = lazy(() => import('./screens/NotificationPreferences'));
-const Reservations = lazy(() => import('./screens/Reservations'));
-const AdminDashboard = lazy(() => import('./screens/AdminDashboard'));
-const AdminSignups = lazy(() => import('./screens/AdminSignups'));
-const StaffRoles = lazy(() => import('./screens/StaffRoles'));
-const TourStandings = lazy(() => import('./screens/TourStandings'));
-const SpecialistDay = lazy(() => import('./screens/SpecialistDay'));
+// One loader per screen module, shared by lazy() and the warm-up below, so
+// both hit the same chunk (and webpack's cache) - no new chunk boundaries.
+const loadOnboarding = () => import('./screens/OnboardingFlow');
+const loadMySchedule = () => import('./screens/MySchedule');
+const loadBook = () => import('./screens/BookSession');
+const loadCoaching = () => import('./screens/SpecialistBooking');
+const loadCoachDashboard = () => import('./screens/CoachDashboard');
+const loadRoster = () => import('./screens/Roster');
+const loadCapture = () => import('./screens/DiagnosticCapture');
+const loadSeason = () => import('./screens/SeasonSchedule');
+const loadContract = () => import('./screens/CommitmentContract');
+const loadAthleteDetail = () => import('./screens/AthleteDetail');
+const loadMembership = () => import('./screens/Membership');
+const loadBilling = () => import('./screens/Billing');
+const loadSettings = () => import('./screens/NotificationPreferences');
+const loadReservations = () => import('./screens/Reservations');
+const loadAdmin = () => import('./screens/AdminDashboard');
+const loadAdminSignups = () => import('./screens/AdminSignups');
+const loadStaff = () => import('./screens/StaffRoles');
+const loadTour = () => import('./screens/TourStandings');
+const loadSpecialistDay = () => import('./screens/SpecialistDay');
+
+const OnboardingWelcomeRoute = named(loadOnboarding, 'OnboardingWelcomeRoute');
+const MySchedule = lazy(loadMySchedule);
+const BookSession = lazy(loadBook);
+const SpecialistBooking = lazy(loadCoaching);
+const CoachDashboard = lazy(loadCoachDashboard);
+const Roster = lazy(loadRoster);
+const SessionAttendance = named(loadRoster, 'SessionAttendance');
+const CaptureFlow = named(loadCapture, 'CaptureFlow');
+const SeasonSchedule = lazy(loadSeason);
+const CommitmentContract = lazy(loadContract);
+const AthleteDetail = lazy(loadAthleteDetail);
+const Membership = lazy(loadMembership);
+const Billing = lazy(loadBilling);
+const NotificationPreferences = lazy(loadSettings);
+const Reservations = lazy(loadReservations);
+const AdminDashboard = lazy(loadAdmin);
+const AdminSignups = lazy(loadAdminSignups);
+const StaffRoles = lazy(loadStaff);
+const TourStandings = lazy(loadTour);
+const SpecialistDay = lazy(loadSpecialistDay);
+
+/*
+ * Chunk warm-up (live mode only), keyed on the segment after /portal/.
+ * CURRENT: the screen a deep link opens, fetched at mount so its chunk
+ * downloads in parallel with auth instead of after RequireRole resolves.
+ * NEXT: where a member usually goes from here, fetched 2.5 s after landing
+ * (skipped under Save-Data) so the first tap renders without a chunk fetch.
+ * Never the review harness or /welcome. A failed fetch is dropped: webpack
+ * forgets a failed chunk, so lazy() fetches it again when actually routed.
+ */
+const CURRENT_ROUTE_CHUNKS = {
+  schedule: [loadMySchedule],
+  book: [loadBook],
+  coaching: [loadCoaching],
+  'my-sessions': [loadSpecialistDay],
+  contract: [loadContract],
+  season: [loadSeason],
+  athlete: [loadAthleteDetail],
+  billing: [loadBilling],
+  // A parent's /membership redirects to Billing; an athlete's stays.
+  membership: [loadMembership, loadBilling],
+  reservations: [loadReservations],
+  tour: [loadTour],
+  settings: [loadSettings],
+  coach: [loadCoachDashboard],
+  roster: [loadRoster],
+  attendance: [loadRoster],
+  capture: [loadCapture],
+  admin: [loadAdmin],
+  staff: [loadStaff],
+};
+const NEXT_ROUTE_CHUNKS = {
+  family: [loadBook, loadCoaching, loadBilling, loadAthleteDetail, loadReservations, loadSettings, loadTour],
+  home: [loadBook, loadMySchedule, loadContract, loadMembership, loadCoaching, loadSeason, loadSettings, loadTour],
+  coach: [loadRoster, loadCapture, loadAthleteDetail, loadTour],
+  'my-sessions': [loadRoster],
+  admin: [loadAdminSignups, loadBilling, loadAthleteDetail, loadStaff],
+};
+const NEXT_WARM_DELAY_MS = 2500;
+// Own keys only: a junk URL like /portal/constructor must not reach Object.prototype.
+const routeChunks = (map, segment) => (Object.prototype.hasOwnProperty.call(map, segment) ? map[segment] : []);
+const warm = (loads) => loads.forEach((load) => load().catch(() => {}));
 
 
 /**
@@ -520,6 +584,20 @@ export default function PortalRoutes() {
   const go = (path) => () => navigate(path);
   const onSignOut = useSignOutHandler();
   const openAthlete = (athleteId) => navigate(`/portal/athlete/${athleteId}`);
+  const segment = useLocation().pathname.split('/')[2] || '';
+
+  // Mount only: the chunk for the screen this page load opened on.
+  useEffect(() => {
+    if (isLive()) warm(routeChunks(CURRENT_ROUTE_CHUNKS, segment));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  useEffect(() => {
+    const next = routeChunks(NEXT_ROUTE_CHUNKS, segment);
+    if (!next.length || !isLive() || navigator.connection?.saveData) return undefined;
+    const timer = setTimeout(() => warm(next), NEXT_WARM_DELAY_MS);
+    return () => clearTimeout(timer);
+  }, [segment]);
 
   return (
     <Suspense fallback={null}>

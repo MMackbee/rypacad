@@ -19,6 +19,11 @@
     <link rel="preconnect" href="https://firestore.googleapis.com" />
     <link rel="preconnect" href="https://identitytoolkit.googleapis.com" />
     <link rel="preconnect" href="https://securetoken.googleapis.com" />
+    <!-- On phones and Safari, Firebase Auth loads gapi (api.js) and the
+         authDomain's /__/auth/iframe before it reports the first auth state.
+         No crossorigin: both are a plain script and an iframe navigation. -->
+    <link rel="preconnect" href="https://apis.google.com" />
+    <link rel="preconnect" href="https://%REACT_APP_FIREBASE_AUTH_DOMAIN%" />
     <link
       rel="stylesheet"
       href="https://fonts.googleapis.com/css2?family=Raleway:wght@400;500;600;700&family=Work+Sans:wght@400;500;600;700&display=swap"
