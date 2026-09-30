@@ -378,8 +378,8 @@ async function liveAthleteIdentity() {
 function deriveTokens(pkg, bookings, anchorDay, today, opts = {}) {
   if (!pkg) return null;
   const { graceTokens = [], waitlist = [], tokenPeriod = null, billingStatus } = opts;
-  const period = positionPeriodFor(today, anchorDay, pkg);
-  const read = (rows) => foldBeforeFirstPeriod(rows, anchorDay, pkg); // an October row spends November
+  const period = positionPeriodFor(today, anchorDay);
+  const read = (rows) => foldBeforeFirstPeriod(rows, anchorDay); // an October row spends November
   const position = tokensFor(null, pkg, read(bookings), read(waitlist), graceTokens, period.periodKey, { today, tokenPeriod });
   return withTokenStart(position, period, billingStatus);
 }
@@ -397,7 +397,7 @@ function deriveTokens(pkg, bookings, anchorDay, today, opts = {}) {
 function tokensWithNextPeriod(pkg, bookings, anchorDay, today, opts = {}) {
   const position = deriveTokens(pkg, bookings, anchorDay, today, opts);
   if (!position) return null;
-  const { periodEnd } = positionPeriodFor(today, anchorDay, pkg);
+  const { periodEnd } = positionPeriodFor(today, anchorDay);
   const nextPeriodKey = periodFor(addDaysISO(periodEnd, 1), anchorDay).periodKey;
   const booked = (bookings || []).filter(
     (b) => b && b.status !== 'cancelled' && b.periodKey === nextPeriodKey

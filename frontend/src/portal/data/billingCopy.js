@@ -31,10 +31,12 @@ export function tokenStartLabel(tokens) {
   return tokens.startsOn ? `Tokens start ${shortDay(tokens.startsOn)}` : null;
 }
 
-/** "First period: November (Nov 1 - Nov 30) - 16 tokens" - the Billing period row before the season. */
+/** "First period: November (Nov 1 - Nov 30) - 16 tokens" - the Billing period row before the season; `granted` null (Elite) reads "unlimited". */
 export function firstPeriodLine(period, granted) {
+  const head = `First period: ${monthName(period.start)} (${shortDay(period.start)} - ${shortDay(period.end)})`;
+  if (granted === null) return `${head} - unlimited`;
   const n = Number(granted) || 0;
-  return `First period: ${monthName(period.start)} (${shortDay(period.start)} - ${shortDay(period.end)}) - ${n} token${n === 1 ? '' : 's'}`;
+  return `${head} - ${n} token${n === 1 ? '' : 's'}`;
 }
 
 export function confirmedLine(open) {

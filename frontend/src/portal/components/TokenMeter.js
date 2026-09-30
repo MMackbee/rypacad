@@ -174,6 +174,12 @@ export default function TokenMeter({ member, defaultOpen = false, showPrices = f
             {member.attendance.noShows ? ` · ${member.attendance.noShows} no-show${member.attendance.noShows === 1 ? '' : 's'}` : ''}
           </Body>
         ) : null}
+        {/* Before the season Elite reads the first period too (owner report 2026-09-30). */}
+        {period && period.preSeason ? (
+          <Body size={11} tone={color.textTertiary} style={{ marginTop: 8 }}>
+            {firstPeriodLine(period, null)}
+          </Body>
+        ) : null}
         <Toggle open={open} onToggle={() => setOpen((v) => !v)} count={count} />
         {open ? <Evidence member={member} /> : null}
       </Card>

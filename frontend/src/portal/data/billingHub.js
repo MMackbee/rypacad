@@ -23,31 +23,32 @@ import { contractEnabled } from './contractFlag';
 export const SEASON_FIRST_PERIOD = '2026-11-01';
 
 /**
- * The period a token POSITION is read against (tester report 2026-09-30:
+ * The period a POSITION is read against (tester report 2026-09-30:
  * "16 tokens expire Wednesday, Sep 30" before anything was bookable). The
  * current period - except before the one holding SEASON_FIRST_PERIOD, when
  * it is that first period, flagged `preSeason`: the prepaid November grant
  * is the only grant there is, and every session booked before then spends
- * it. Elite (tokens null) has no grant and keeps the current period. From
- * Nov 1 on this is periodFor(today) exactly.
+ * it. Elite reads the same period (owner report 2026-09-30: "Nothing booked
+ * in this period yet. Next period from Thursday, Oct 1" over two November
+ * bookings) - its first month is November too. From Nov 1 on this is
+ * periodFor(today) exactly, for every package.
  */
-export function positionPeriodFor(today, anchorDay, pkg = null) {
+export function positionPeriodFor(today, anchorDay) {
   const current = periodFor(today, anchorDay);
   const first = periodFor(SEASON_FIRST_PERIOD, anchorDay);
-  const elite = Boolean(pkg) && pkg.tokens === null;
-  return !elite && current.periodKey < first.periodKey ? { ...first, preSeason: true } : { ...current, preSeason: false };
+  return current.periodKey < first.periodKey ? { ...first, preSeason: true } : { ...current, preSeason: false };
 }
 
 /**
- * Bookings or waitlist entries as a token position reads them: a row
- * charged to a period before the first one (an October slot booked after
- * the Oct 10 gate - createBooking charges the session date's own period)
- * spends the first period's grant, the only one there is, so the meter and
- * its evidence list never lose a spent token. Elite and a package-less read
- * pass through.
+ * Bookings or waitlist entries as a position reads them: a row charged to
+ * a period before the first one (an October slot booked after the Oct 10
+ * gate - createBooking charges the session date's own period) belongs to
+ * the first period, so a token meter never loses a spent token and an
+ * Elite list never loses a booked session. Anything but an array passes
+ * through.
  */
-export function foldBeforeFirstPeriod(rows, anchorDay, pkg) {
-  if (!pkg || pkg.tokens === null || !Array.isArray(rows)) return rows;
+export function foldBeforeFirstPeriod(rows, anchorDay) {
+  if (!Array.isArray(rows)) return rows;
   const firstKey = periodFor(SEASON_FIRST_PERIOD, anchorDay).periodKey;
   return rows.map((r) => (r && r.periodKey && r.periodKey < firstKey ? { ...r, periodKey: firstKey } : r));
 }
@@ -154,11 +155,12 @@ export function hubMemberFor(args) {
   const anchorDay = normalizeAnchorDay(args.anchorDay);
   const today = args.today;
   // A row dated before the first period is read as the first period's.
-  const bookings = foldBeforeFirstPeriod(args.bookings || [], anchorDay, pkg);
-  const waitlist = foldBeforeFirstPeriod(args.waitlist || [], anchorDay, pkg);
-  // Before the season a token package reads the first (prepaid) period;
-  // the caller's `tokenPeriod` is that period's issued doc.
-  const period = positionPeriodFor(today, anchorDay, pkg);
+  const bookings = foldBeforeFirstPeriod(args.bookings || [], anchorDay);
+  const waitlist = foldBeforeFirstPeriod(args.waitlist || [], anchorDay);
+  // Before the season every package reads the first period (a token
+  // package's prepaid grant, Elite's first month); the caller's
+  // `tokenPeriod` is that period's issued doc.
+  const period = positionPeriodFor(today, anchorDay);
   const resetsOn = addDaysISO(period.periodEnd, 1);
   const nextPeriod = periodFor(resetsOn, anchorDay);
   const prevPeriod = periodFor(addDaysISO(period.periodKey, -1), anchorDay);
