@@ -34,6 +34,12 @@
  * waitlist entry is still deleted either way; idempotency only guards the
  * mint, matching the "not minted twice" wording in the pin.
  *
+ * SINGLE-ONLY athletes (packageId 'single' or billing.oneTime, owner rulings
+ * 2026-09-29/30) are never minted a bonus: their entry held one of their own
+ * purchased season tokens, which is simply free again. Their entry is still
+ * deleted. Same rule as functions/portal/sweep.js (single.isSingleOnly); this
+ * script sends no notices, as before.
+ *
  * Dependency-free (Node >= 20 global fetch), Firestore REST like every other
  * script in this repo. Never writes anywhere but `waitlist` (delete) and
  * `graceTokens` (create).
@@ -46,6 +52,7 @@ import {
   commitInBatches,
   fsFields,
   docName,
+  getDoc,
 } from './lib/firestore-rest.mjs';
 
 const DRY_RUN = !process.argv.includes('--yes'); // dry-run is the DEFAULT; --yes is what unlocks writes
@@ -100,11 +107,26 @@ async function main() {
 
   console.log(`Today: ${today}. Expired waitlist entries: ${expired.length}.`);
 
+  // Single-only athletes mint nothing (mirrors functions/portal/single.js
+  // isSingleOnly). One read per unique athlete, not one per entry.
+  const singleOnly = new Set();
+  for (const athleteId of new Set(expired.map((e) => e.athleteId).filter(Boolean))) {
+    const athlete = await getDoc(target, 'athletes', athleteId);
+    if (athlete && (athlete.packageId === 'single' || athlete.billing?.oneTime === true)) {
+      singleOnly.add(athleteId);
+    }
+  }
+
   const deletes = [];
   const creates = [];
   const skippedMints = [];
+  const singleSkips = [];
   for (const entry of expired) {
     deletes.push({ delete: docName('waitlist', entry.id) });
+    if (singleOnly.has(entry.athleteId)) {
+      singleSkips.push(entry);
+      continue;
+    }
     const key = `${entry.athleteId}::${entry.sessionId}`;
     if (alreadyMinted.has(key)) {
       skippedMints.push(entry);
@@ -132,10 +154,14 @@ async function main() {
         `'waitlist-expired' grace token for sourceSessionId=${entry.sessionId}`
     );
   }
+  for (const entry of singleSkips) {
+    console.log(`  delete waitlist/${entry.id}  ->  SKIP mint: single-only athlete ${entry.athleteId}`);
+  }
 
   console.log(
     `\nPlan: ${deletes.length} waitlist delete(s), ${creates.length} graceTokens mint(s), ` +
-      `${skippedMints.length} mint(s) skipped (idempotent).`
+      `${skippedMints.length} mint(s) skipped (idempotent), ` +
+      `${singleSkips.length} mint(s) skipped (single-only athlete).`
   );
 
   if (deletes.length === 0) {

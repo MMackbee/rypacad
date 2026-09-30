@@ -51,3 +51,20 @@ describe('assertPeriodTokensLeft names the period it means', () => {
     expect(reasonOf(() => assertPeriodTokensLeft({ id: 'elite', tokens: null }, spent('2026-11-01'), '2026-11-01', undefined, [], '2026-11-01'))).toBeNull();
   });
 });
+
+// Owner rulings 2026-09-29/30: the single token grants no period token
+// (periodFallback 0), so reaching the period cap means "buy a token".
+describe('assertPeriodTokensLeft for the single token', () => {
+  const single = { id: 'single', kind: 'single', tokens: 1 };
+  test('no purchased token left: no-session-token with the buy copy', () => {
+    expect(reasonOf(() => assertPeriodTokensLeft(single, [], '2026-11-01', undefined, [], '2026-11-01')))
+      .toEqual([ERR.INVALID, 'no-session-token', 'No session token left - buy one to book.']);
+  });
+  test('a waitlist spot holds the token: the held copy', () => {
+    expect(reasonOf(() => assertPeriodTokensLeft(single, [], '2026-11-01', undefined, [{ sessionId: 's2', periodKey: '2026-12-01' }], '2026-11-01')))
+      .toEqual([ERR.INVALID, 'no-session-token', 'Your session token is held by a waitlist spot - leave the waitlist or buy another token.']);
+  });
+  test('an ops comp (issued tokenPeriods doc) still books as the period', () => {
+    expect(reasonOf(() => assertPeriodTokensLeft(single, [], '2026-11-01', 1, [], '2026-11-01'))).toBeNull();
+  });
+});

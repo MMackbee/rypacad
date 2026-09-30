@@ -16,6 +16,14 @@
  * order. It never branches on `sessions.type`: one pool (design keystone).
  *
  * AUTO-CONFIRM, no acceptance window (owner's ruling, pinned Sprint 12).
+ *
+ * Single token (owner rulings 2026-09-29/30, portal/single.js): a purchased
+ * `single_{cs}` token is good all season, so it may have been spent in ANY
+ * period. Each candidate therefore also reads the unscoped grace spends
+ * (`lib.graceSpendQueries`), and a single athlete's OTHER waitlist entries
+ * hold tokens (`tokensPosition` `held`). A purchased token is inventory,
+ * not a debt the Academy owes, so it earns no queue priority
+ * (`candidateGraceExpiry`).
  */
 
 'use strict';
@@ -129,6 +137,11 @@ async function loadCandidate(tx, entry, session, sessionId, today) {
       .where('athleteId', '==', athleteId));
   const graceSnap = await tx.get(db().collection('graceTokens')
       .where('athleteId', '==', athleteId));
+  // A season token spent in another period is invisible to the period
+  // read above; read its spends by id (still before any write).
+  const graceRows = lib.rows(graceSnap);
+  const spends = await lib.readGraceSpends((q) => tx.get(q),
+      lib.graceSpendQueries(db(), graceRows, today));
 
   const position = lib.tokensPosition({
     pkg,
@@ -141,7 +154,8 @@ async function loadCandidate(tx, entry, session, sessionId, today) {
       periodKey: lib.periodFor(w.date || session.date, anchorDay).periodKey,
     })),
     ignoreWaitlistIds: [entry.id],
-    graceTokens: lib.rows(graceSnap),
+    graceTokens: graceRows,
+    graceSpends: spends,
     periodKey: period.periodKey,
     today,
   });
@@ -159,10 +173,28 @@ async function loadCandidate(tx, entry, session, sessionId, today) {
     period,
     charge,
     // Ordering key: the grace token this candidate would actually spend.
-    graceExpiry: charge.chargedFrom === 'grace' ?
-        (position.grace[0] && position.grace[0].expiresAt) || '9999-12-31' :
-        null,
+    graceExpiry: candidateGraceExpiry(charge, graceRows),
   };
+}
+
+/**
+ * A passing candidate's promotion-order key (pin F): the expiry of the
+ * grace token its charge would actually spend. A purchased single token
+ * (reason 'single-purchase', rulings 2026-09-29/30) is bought inventory,
+ * not a token the Academy owes a family it already failed once, so it
+ * earns no priority: that entry queues by `joinedAt` like a period charge.
+ * @param {?Object} charge `lib.chargeFor`'s result.
+ * @param {!Array<!Object>} graceRows The athlete's graceTokens rows
+ *     (`{id, ...data}`).
+ * @return {?string} The charged token's `expiresAt` ('9999-12-31' when it
+ *     has none), or null when the charge earns no priority.
+ */
+function candidateGraceExpiry(charge, graceRows) {
+  if (!charge || charge.chargedFrom !== 'grace') return null;
+  const row = (graceRows || []).find(
+      (g) => g && g.id === charge.graceTokenId);
+  if (row && row.reason === 'single-purchase') return null;
+  return (row && row.expiresAt) || '9999-12-31';
 }
 
 /**
@@ -389,6 +421,7 @@ const onSessionBookedDecrease = functions
     });
 
 module.exports = {
+  candidateGraceExpiry,
   fillOpenSeats,
   joinedAtMillis,
   onSessionBookedDecrease,

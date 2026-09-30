@@ -1,4 +1,4 @@
-/* Static check: functions/index.js exports exactly the 13 launch functions
+/* Static check: functions/index.js exports exactly the 14 launch functions
  * and each declares the secrets contract 6.4 binds (spec 8). No emulator:
  * it requires index.js in-process and reads each function's __endpoint.
  *   cd functions && node test/check-exports.js */
@@ -23,10 +23,11 @@ const EXPECTED = {
   tokenExpiryReminders: MAIL,
   sweepWaitlist: MAIL,
   onSessionBookedDecrease: MAIL,
+  onSingleTokenSpent: MAIL,
 };
 
 assert.deepEqual(Object.keys(index).sort(), Object.keys(EXPECTED).sort(),
-    'the 13 launch functions, nothing else');
+    'the 14 launch functions, nothing else');
 for (const [name, secrets] of Object.entries(EXPECTED)) {
   const ep = index[name].__endpoint || {};
   const got = (ep.secretEnvironmentVariables || []).map((s) => s.key);

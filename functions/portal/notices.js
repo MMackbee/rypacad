@@ -16,9 +16,17 @@
  * `firstNameOf` therefore reads `firstName` when some future document does
  * carry it and otherwise takes the first word of `name`, so the copy is
  * right either way and nothing has to be backfilled.
+ *
+ * SINGLE TOKEN (owner rulings 2026-09-29/30): a purchased session token is
+ * good through the last day of the season, so the variants below that speak
+ * about one (`singleToken`, `tokenReturned`, `tokenFree`, reason
+ * 'single-purchase', `bookingReleased`) never say "this period" and never
+ * promise a bonus token. Every other body is byte-identical to before.
  */
 
 'use strict';
+
+const {SEASON_END} = require('./single');
 
 /** Display names for a session with no `label` of its own. @const */
 const TYPE_LABELS = {
@@ -138,24 +146,31 @@ function promoted(args) {
  * ruling, 2026-09-22: send a receipt, so the other parent sees it too).
  * Deliberately plain: the screen already confirmed it, so this is a record,
  * not news. Says the token came back, because that is the thing a family
- * wants confirmed in writing.
- * @param {{athlete: ?Object, session: ?Object}} args Copy inputs.
+ * wants confirmed in writing. A booking paid with a purchased single token
+ * (`singleToken`) gets that token back until season end, not "this period".
+ * @param {{athlete: ?Object, session: ?Object,
+ *     singleToken: (boolean|undefined)}} args Copy inputs.
  * @return {{title: string, body: string}} The notice.
  */
 function bookingCancelled(args) {
   const name = firstNameOf(args.athlete);
+  const back = args.singleToken ?
+      `The session token is back - good through ${dayLabel(SEASON_END)}.` :
+      'The token is back in this period.';
   return {
     title: 'Booking cancelled',
     body: `${name}'s booking for ${sessionPhrase(args.session)} was ` +
-        'cancelled. The token is back in this period.',
+        `cancelled. ${back}`,
   };
 }
 
 /**
  * kind `session-cancelled` - the academy cancelled the block. The grace
- * token sentence is omitted when no token was minted for this session.
- * @param {{athlete: ?Object, session: ?Object, graceExpiresAt: ?string}}
- *     args Copy inputs.
+ * token sentence is omitted when no token was minted for this session. A
+ * booking paid with a purchased single token mints no bonus: the token
+ * itself comes back (`tokenReturned`).
+ * @param {{athlete: ?Object, session: ?Object, graceExpiresAt: ?string,
+ *     tokenReturned: (boolean|undefined)}} args Copy inputs.
  * @return {{title: string, body: string}} The notice.
  */
 function sessionCancelled(args) {
@@ -168,7 +183,28 @@ function sessionCancelled(args) {
     body += ` A bonus token was added to ${name}'s account ` +
         `(expires ${dayLabel(args.graceExpiresAt)}).`;
   }
+  if (args.tokenReturned) {
+    body += ` ${name}'s session token was returned - use it on another ` +
+        'session.';
+  }
   return {title: 'Session cancelled', body};
+}
+
+/**
+ * kind `booking-released` - the double-spend guard (portal/single-guard.js)
+ * cancelled a booking whose purchased session token was already spent on
+ * another live booking.
+ * @param {{athlete: ?Object, session: ?Object}} args Copy inputs.
+ * @return {{title: string, body: string}} The notice.
+ */
+function bookingReleased(args) {
+  const name = firstNameOf(args.athlete);
+  return {
+    title: 'Booking released',
+    body: `${name}'s booking for ${sessionPhrase(args.session)} was ` +
+        'released because its session token was already used for another ' +
+        'booking. Buy another token to book it again.',
+  };
 }
 
 /**
@@ -228,12 +264,21 @@ function tokensExpiring(args) {
 
 /**
  * kind `grace-expiring` - an unconsumed bonus token expires in
- * EXPIRY_LEAD_DAYS days (7).
- * @param {{athlete: ?Object, expiresAt: string}} args Copy inputs.
+ * EXPIRY_LEAD_DAYS days (7). A purchased single token (reason
+ * 'single-purchase') expires on the last day of the season.
+ * @param {{athlete: ?Object, expiresAt: string,
+ *     reason: (?string|undefined)}} args Copy inputs.
  * @return {{title: string, body: string}} The notice.
  */
 function graceExpiring(args) {
   const name = firstNameOf(args.athlete);
+  if (args.reason === 'single-purchase') {
+    return {
+      title: 'Session token expiring',
+      body: `${name}'s unused session token expires ` +
+          `${dayLabel(args.expiresAt)}, the last day of the season.`,
+    };
+  }
   return {
     title: 'Bonus token expiring',
     body: `${name}'s bonus token expires ${dayLabel(args.expiresAt)}.`,
@@ -273,17 +318,26 @@ function membership(args) {
 
 /**
  * kind `waitlist-expired` - the session passed without a spot; a bonus
- * token was minted (Sprint 17, contract v2.5).
- * @param {{athlete: ?Object, session: ?Object, expiresAt: string}} args
- *     Copy inputs.
+ * token was minted (Sprint 17, contract v2.5). A single-only athlete gets
+ * no bonus: the purchased token the entry held is simply free again
+ * (`tokenFree`, rulings 2026-09-29/30).
+ * @param {{athlete: ?Object, session: ?Object, expiresAt: (?string|
+ *     undefined), tokenFree: (boolean|undefined)}} args Copy inputs.
  * @return {{title: string, body: string}} The notice.
  */
 function waitlistExpired(args) {
   const name = firstNameOf(args.athlete);
+  const closed = `The waitlist for ${sessionPhrase(args.session)} closed ` +
+      `without a spot for ${name}.`;
+  if (args.tokenFree) {
+    return {
+      title: 'Waitlist closed',
+      body: `${closed} ${name}'s session token is free again.`,
+    };
+  }
   return {
     title: 'Waitlist closed',
-    body: `The waitlist for ${sessionPhrase(args.session)} closed without ` +
-        `a spot for ${name}. A bonus token was added to ${name}'s account ` +
+    body: `${closed} A bonus token was added to ${name}'s account ` +
         `(expires ${dayLabel(args.expiresAt)}).`,
   };
 }
@@ -310,6 +364,7 @@ module.exports = {
   attendeeNote,
   bookingCancelled,
   bookingConfirmed,
+  bookingReleased,
   bookingRevoked,
   dayLabel,
   firstNameOf,
