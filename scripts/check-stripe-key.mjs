@@ -16,7 +16,7 @@ const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..'
 const checkout = require(path.join(repoRoot, 'functions', 'portal', 'checkout.js'));
 const PORTAL_URL = 'https://portal.rypacademy.com';
 const couponArg = process.argv.indexOf('--coupon');
-const COUPON = couponArg > -1 ? String(process.argv[couponArg + 1] || '').trim() : '';
+let COUPON = couponArg > -1 ? String(process.argv[couponArg + 1] || '').trim() : '';
 const PRICES = [
   ['t-6', 'price_1UKkzSD16IMJzfAPSoZioKKA', 299, 6],
   ['t-12', 'price_1UKl1qD16IMJzfAPERVeoeaN', 569, 12],
@@ -90,6 +90,36 @@ for (const [pkg, id, dollars] of PRICES) {
   const amt = p.unit_amount == null ? '?' : `$${p.unit_amount / 100}`;
   const every = p.type === 'recurring' ? `/${p.recurring.interval}` : ' one-time';
   console.log(`${issues.length ? 'PROBLEM' : 'OK     '}  ${pkg.padEnd(16)} ${amt}${every}  ${issues.join('; ')}`);
+}
+
+console.log('\nPart 1b: sibling discount objects in test mode (Phil creates these)');
+// Lists what exists so a code that "didn't work" can be traced: the checkout
+// page accepts PROMOTION CODES (customer-facing), never a coupon's id, and a
+// code has its own restrictions on top of the coupon's.
+const cps = await api('GET', 'coupons?limit=20');
+if (!cps.ok) {
+  console.log(`         cannot list coupons: ${denied(cps) ? 'the key needs Coupons: Read' : cps.msg}`);
+} else {
+  const list = cps.json.data || [];
+  if (!list.length) { problems++; console.log('PROBLEM  no coupons in test mode: create the 10% sibling coupon here too (Stripe keeps test and live apart)'); }
+  for (const c of list) {
+    const off = c.percent_off != null ? `${c.percent_off}% off` : `$${(c.amount_off || 0) / 100} off`;
+    const dur = c.duration + (c.duration === 'repeating' ? ` ${c.duration_in_months} months` : '');
+    const restr = [c.applies_to ? 'limited to specific products (the prepaid line is a new product each time: it would NOT be discounted)' : '', c.valid ? '' : 'NOT VALID (expired or fully redeemed)'].filter(Boolean).join('; ');
+    console.log(`         coupon ${c.id.padEnd(16)} "${c.name || ''}" ${off}, ${dur}${restr ? '  !! ' + restr : ''}`);
+  }
+  if (!COUPON && list.length === 1 && list[0].valid) COUPON = list[0].id;
+}
+const pcs = await api('GET', 'promotion_codes?limit=20');
+if (!pcs.ok) {
+  console.log(`         cannot list promotion codes: ${denied(pcs) ? 'the key needs Promotion Codes: Read (only for this listing)' : pcs.msg}`);
+} else {
+  for (const p of pcs.json.data || []) {
+    const r = p.restrictions || {};
+    const why = [p.active ? '' : 'INACTIVE', p.expires_at && p.expires_at * 1000 < Date.now() ? 'EXPIRED' : '', p.max_redemptions && p.times_redeemed >= p.max_redemptions ? 'ALL REDEMPTIONS USED' : '', r.first_time_transaction ? 'first-time customers only (a returning family is refused)' : '', r.minimum_amount ? `minimum $${r.minimum_amount / 100}` : '', p.customer ? 'tied to one customer' : ''].filter(Boolean).join('; ');
+    console.log(`         code   ${p.code.padEnd(16)} -> coupon ${(p.coupon && p.coupon.id) || '?'}${why ? '  !! ' + why : '  (usable)'}`);
+  }
+  if (!(pcs.json.data || []).length) console.log('         no promotion codes in test mode (fine once the coupon is applied automatically; a typed code needs one)');
 }
 
 console.log('\nPart 2: the calls the portal makes');
