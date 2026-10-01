@@ -277,9 +277,10 @@ fix them before token booking opens on Oct 10. Distinct issues, worst first:
    waitlist" says nothing; Repeat weekly reports a week as "full" when it
    actually joined that week's waitlist; the shown position ignores the
    bonus-token priority.
-10. **Owner ruling needed:** an unfilled waitlist place returns the held token
-    AND mints a bonus token (two for one). Contract 4.2 says so; confirm or
-    change to a replacement only when the period has ended.
+10. **RULED 2026-10-01 (owner): no bonus token from a waitlist.** When a
+    waitlist closes without a spot, close it and return the held token.
+    Nothing is minted. This supersedes contract 4.2 for waitlists; bonus
+    tokens remain only for a session the academy cancels.
 
 Full findings with file:line evidence and fixes: the audit output saved by the
 session (`waitlist-audit.json`); re-run the audit if it is gone.
