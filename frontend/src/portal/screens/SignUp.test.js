@@ -142,3 +142,17 @@ test('before the claim check has run (idle) nobody is routed to /portal/register
   expect(r.location().pathname).toBe('/portal/signup');
   await r.unmount();
 });
+
+// Owner 2026-10-01: the launch email links to /portal/signup?email=<address>.
+test('an email in the link fills the field; a malformed one is ignored', async () => {
+  const r = await renderScreen(<SignUp bare />, { path: '/portal/signup?email=dana%2Bkids%40email.com' });
+  await r.fill('Password', 'correct-horse-9');
+  expect(r.button('Create login').disabled).toBe(false);
+  await r.click('Create login');
+  expect(r.text()).toContain('We sent a link to dana+kids@email.com');
+  await r.unmount();
+  const bad = await renderScreen(<SignUp bare />, { path: '/portal/signup?email=not-an-address' });
+  await bad.fill('Password', 'correct-horse-9');
+  expect(bad.button('Create login').disabled).toBe(true);
+  await bad.unmount();
+});

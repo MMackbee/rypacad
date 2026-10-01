@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import { color, font } from '../tokens';
 import Button from '../components/Button';
 import Field from '../components/Field';
@@ -21,7 +21,15 @@ import { BrandHeader, LANDING_BY_ROLE } from './SignIn';
 export default function SignUp({ bare = false, onSignIn }) {
   const { user, provisioned, loading, error, signIn, createLogin, claimState } = useAuthSession();
   const navigate = useNavigate();
-  const [email, setEmail] = useState('');
+  // The launch email's link may carry the address (?email=..., owner
+  // 2026-10-01): a well-formed one fills the field, anything else is ignored.
+  // The parameter is then dropped from the address bar.
+  const [params, setParams] = useSearchParams();
+  const linked = (params.get('email') || '').trim();
+  const [email, setEmail] = useState(EMAIL_RE.test(linked) ? linked : '');
+  useEffect(() => {
+    if (params.has('email')) setParams({}, { replace: true });
+  }, [params, setParams]);
   const [password, setPassword] = useState('');
   const [creating, setCreating] = useState(false);
   const [failure, setFailure] = useState(null); // { message, inUse }
