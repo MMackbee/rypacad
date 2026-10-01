@@ -2,6 +2,7 @@ import React from 'react';
 import { renderScreen } from '../screens/testRender';
 import PayButton, { startCheckout } from './PayButton';
 import { VERIFY_EMAIL_SENDER } from '../data/authCopy';
+import { SINGLE_NOT_OPEN_MESSAGE } from '../data/singleToken';
 
 let mockReject = null;
 let mockRejectTimes = Infinity; // how many calls mockReject refuses before checkout succeeds
@@ -114,5 +115,26 @@ test('other failures show the message', async () => {
   const r = await renderScreen(<PayButton athleteId="a1" label="Pay now" go={() => {}} />);
   await r.click('Pay now');
   expect(r.text()).toContain('Checkout is unavailable right now. Try again in a minute.');
+  await r.unmount();
+});
+
+// Owner ruling 2026-10-01: single tokens go on sale when booking opens. Every
+// screen hides the button until then, but the server is the gate: a tab whose
+// clock runs ahead still reaches it, is refused before any Stripe call, and
+// the family reads the server's own words. Nothing navigates, nothing retries.
+test("the server's single-not-open refusal is shown word for word and the browser stays put", async () => {
+  expect(SINGLE_NOT_OPEN_MESSAGE).toBe('Single tokens are available from Sat, Oct 10 at 7 AM. Nothing has been charged.');
+  mockReject = { reason: 'single-not-open', message: SINGLE_NOT_OPEN_MESSAGE };
+  const gone = [];
+  const r = await renderScreen(<PayButton athleteId="sol" label="Buy a session token - $65" go={(u) => gone.push(u)} />);
+  await r.click('Buy a session token - $65');
+  expect(r.text()).toContain(SINGLE_NOT_OPEN_MESSAGE);
+  expect(r.text()).not.toContain('Verify your email to finish');
+  expect(gone).toEqual([]);
+  expect(mockCalls).toBe(1);
+  // From the gate on the same tap opens checkout.
+  mockReject = null;
+  await r.click('Buy a session token - $65');
+  expect(gone).toEqual(['https://checkout.stripe.test/sol/tier']);
   await r.unmount();
 });

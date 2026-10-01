@@ -22,9 +22,13 @@
 | 12 | 12 | $569 | $300 | $869 |
 | 16 | 16 | $719 | $300 | $1,019 |
 | Elite | unlimited, one per day | $999 all-in | included | $999 |
-| Single token | 1 | $65 *pending* | — | — |
+| Single token | 1 per purchase, one-time (not per period) | $65 one-time | — | — |
 
 A token is spent on any bookable session — training, tournament, Phil's group PT, a Yannick 1:1. Session `type` is display/roster/Tour only; it never affects charging.
+
+**The single token is a one-time purchase** (owner rulings 2026-09-29/30; `SPRINT-20-LAUNCH.md` ruling 0.14, D20). Each paid $65 checkout is ONE token (`graceTokens/single_{checkoutSessionId}`), good for any bookable session through the season end, Sat, Feb 27, 2027. Families may buy as many as they like. There is no period and no monthly issuance; a single athlete books with bought tokens or an ops comp. Refunds are manual: refund in Stripe, then void the token (never delete it).
+
+**Single tokens go on sale when booking opens** (owner ruling 2026-10-01): Sat, Oct 10, 2026 at 7:00 AM America/Chicago, the same clock-based gate token-package booking uses, and not before. Until then sign-up shows the single token as "Available Sat, Oct 10 at 7 AM", no Pay button is offered for one, and checkout refuses it before any Stripe call ("Single tokens are available from Sat, Oct 10 at 7 AM. Nothing has been charged."). The single token is not a membership: it never earns or counts toward the sibling discount, and the family facility add-on is not offered with it.
 
 **Facility access** (24/7) is a $300/month add-on on any package, requiring a waiver and parent permission if under 18. It is a line item, not a session entitlement.
 
@@ -37,6 +41,8 @@ Capacity: **training 14, tournament (RYP Tour) 25**, Phil's group PT 6, Yannick 
 ## 2. Periods and issuance
 
 A **period** is one Stripe billing cycle for that membership — 1st-to-31st for someone who signed up on the 1st, 15th-to-14th for someone who signed up on the 15th. Nothing is aligned to the calendar month.
+
+**Singles are excluded.** The single token has no billing cycle: nothing is issued per period, and a single athlete's period grants 0 unless ops issues a comp (`periodFallback`; owner rulings 2026-09-29/30, §1).
 
 Tokens are **issued on `invoice.paid`**, for the period that invoice covers, as a new document:
 

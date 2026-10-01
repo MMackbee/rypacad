@@ -2,6 +2,7 @@ import React, { act } from 'react';
 import { renderScreen } from './testRender';
 import Registration from './Registration';
 import { VERIFY_EMAIL_SENDER } from '../data/authCopy';
+import { BOOKING_OPENS_AT } from '../data/calendar';
 
 const mockCalls = [];
 let mockCreateError = null;
@@ -197,29 +198,51 @@ test('a double tap on Sign and submit sends one createFamily and still shows the
   await r.unmount();
 });
 
-test('a restored draft holding the off-sale single token cannot be submitted', async () => {
-  window.sessionStorage.clear();
+// Owner ruling 2026-10-01: single tokens go on sale when booking opens (Sat,
+// Oct 10 at 7 AM Chicago) - the booking-open gate, read off the clock.
+describe('the single token and the booking-open gate', () => {
   const account = { uid: 'u-single', email: 'dana@email.com' };
-  const form = {
-    mode: 'parent',
-    contact: { name: 'Dana Whitfield', email: 'dana@email.com', phone: '(612) 555-0148', relationship: 'Mother' },
-    athletes: [{ key: 'k1', name: 'Jordan', dob: '2012-06-17', handicap: '', ownLogin: false, loginEmail: '', packageId: 'single', contractMinutes: null }],
-    emergencyContact: '', medical: '',
-    consents: { dataCollection: true, videoCapture: true, mediaRelease: false, facilityAccess: false },
-    signatureName: '',
+  const singleDraft = () => {
+    const form = {
+      mode: 'parent',
+      contact: { name: 'Dana Whitfield', email: 'dana@email.com', phone: '(612) 555-0148', relationship: 'Mother' },
+      athletes: [{ key: 'k1', name: 'Jordan', dob: '2012-06-17', handicap: '', ownLogin: false, loginEmail: '', packageId: 'single', contractMinutes: null }],
+      emergencyContact: '', medical: '',
+      consents: { dataCollection: true, videoCapture: true, mediaRelease: false, facilityAccess: false },
+      signatureName: '',
+    };
+    window.sessionStorage.setItem('ryp.signupDraft.signup.u-single', JSON.stringify({ v: 1, step: 3, form }));
   };
-  window.sessionStorage.setItem('ryp.signupDraft.signup.u-single', JSON.stringify({ v: 1, step: 3, form }));
-  const r = await renderScreen(<Registration bare mode="signup" account={account} />);
-  expect(r.text()).toContain('Step 4 of 6');
-  expect(r.button('Single token').getAttribute('aria-pressed')).toBe('false');
-  await r.click('Continue');
-  expect(r.text()).toContain('Step 4 of 6');
-  expect(r.text()).toContain('Pick a package for Jordan to continue.');
-  await r.click('6 tokens');
-  await r.click('Continue');
-  expect(r.text()).toContain('Step 5 of 6');
-  await r.unmount();
-  window.sessionStorage.clear();
+  beforeEach(() => { window.sessionStorage.clear(); });
+  afterEach(() => { jest.restoreAllMocks(); window.sessionStorage.clear(); });
+
+  test('before the gate a restored draft holding the single token cannot go on', async () => {
+    jest.spyOn(Date, 'now').mockReturnValue(BOOKING_OPENS_AT - 1);
+    singleDraft();
+    const r = await renderScreen(<Registration bare mode="signup" account={account} />);
+    expect(r.text()).toContain('Step 4 of 6');
+    expect(r.button('Single token').getAttribute('aria-pressed')).toBe('false');
+    expect(r.text()).toContain('Available Sat, Oct 10 at 7 AM. Pick a monthly package now, or come back then.');
+    await r.click('Continue');
+    expect(r.text()).toContain('Step 4 of 6');
+    expect(r.text()).toContain('Pick a package for Jordan to continue.');
+    await r.click('6 tokens');
+    await r.click('Continue');
+    expect(r.text()).toContain('Step 5 of 6');
+    await r.unmount();
+  });
+
+  test('from the gate on the single token is selectable and the form goes on with it', async () => {
+    jest.spyOn(Date, 'now').mockReturnValue(BOOKING_OPENS_AT);
+    singleDraft();
+    const r = await renderScreen(<Registration bare mode="signup" account={account} />);
+    expect(r.text()).toContain('Step 4 of 6');
+    expect(r.button('Single token').getAttribute('aria-pressed')).toBe('true');
+    expect(r.text()).not.toContain('Available Sat, Oct 10');
+    await r.click('Continue');
+    expect(r.text()).toContain('Step 5 of 6');
+    await r.unmount();
+  });
 });
 
 /** A v1 draft as the pre-contract-step form saved it (string emergency contact, no contractPicked). */

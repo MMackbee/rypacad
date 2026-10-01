@@ -4,6 +4,7 @@ import PayButton from './PayButton';
 import { Body, Card, SectionLabel } from './Primitives';
 import { PAY_NOW, PENDING_TITLE, facilityName, facilityPayLabel, facilityPendingTitle, facilityWaitingLine } from '../data/billingCopy';
 import { SIBLING_DISCOUNT_NOTE, SIBLING_ORDER_NOTE, siblingPartialNote } from '../data/packages';
+import { saleOpen, SINGLE_NOT_OPEN_LINE } from '../data/singleToken';
 
 /**
  * One banner, one Pay now per athlete who needs a checkout - pending, or lapsed and re-subscribing (spec 4.4). `title` is the hub status title (the lapsed wording differs); renders nothing when nobody is listed.
@@ -14,10 +15,14 @@ import { SIBLING_DISCOUNT_NOTE, SIBLING_ORDER_NOTE, siblingPartialNote } from '.
  * a 'waiting' one (membership unpaid) is a line under that athlete's membership row, no button - the add-on checkout is refused until the membership is paid.
  * With only the 'pay' row left the card carries its own title, and never the hub's `title`/`body`, which then describe the membership, not an unpaid add-on.
  * `self` (the adult who is their own household) drops the word "family".
+ * A single-token row (`perPurchase`) has no Pay button until single tokens go on sale (owner ruling 2026-10-01; data/singleToken.js saleOpen, the booking-open gate): the row says when instead.
  */
 export default function PendingBanner({ pendingAthletes, facilityRows = null, body, title = null, email = null, siblingDiscount = false, plan = null, renderRowExtra = null, self = false, style }) {
   const tier = pendingAthletes || [];
   const planOf = (a) => (plan && !a.perPurchase ? plan[a.athleteId] : null) || null;
+  const notYet = (a) => a.perPurchase === true && !saleOpen();
+  // An all-single list's body already says when (billingHub.js statusFor): never twice.
+  const bodySaysWhen = Boolean(body) && body.includes(SINGLE_NOT_OPEN_LINE);
   const waiting = new Set((facilityRows || []).filter((r) => r.state === 'waiting').map((r) => r.athleteId));
   const pay = (facilityRows || []).filter((r) => r.state === 'pay');
   if (tier.length === 0 && pay.length === 0) return null;
@@ -39,8 +44,11 @@ export default function PendingBanner({ pendingAthletes, facilityRows = null, bo
             {waiting.has(a.athleteId) ? <Body size={11} tone={color.textTertiary} style={{ marginTop: 3 }}>{facilityWaitingLine(self)}</Body> : null}
             {planOf(a)?.state === 'discount' ? <Body size={11} style={{ marginTop: 3 }}>{SIBLING_DISCOUNT_NOTE}</Body> : null}
             {planOf(a)?.state === 'partial' ? <Body size={11} style={{ marginTop: 3 }}>{siblingPartialNote(planOf(a).amount)}</Body> : null}
+            {notYet(a) && !bodySaysWhen ? <Body size={11} tone={color.textTertiary} style={{ marginTop: 3 }}>{SINGLE_NOT_OPEN_LINE}</Body> : null}
           </div>
-          <PayButton athleteId={a.athleteId} product="tier" label={PAY_NOW} height={44} email={email} style={{ width: 132, flex: 'none' }} />
+          {notYet(a) ? null : (
+            <PayButton athleteId={a.athleteId} product="tier" label={PAY_NOW} height={44} email={email} style={{ width: 132, flex: 'none' }} />
+          )}
         </div>
       ))}
       {pay.map((r) => (

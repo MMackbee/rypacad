@@ -46,6 +46,11 @@
  * Messaging (portal/push.js, no vendor, no key); email goes through
  * portal/email.js (SMTP or Courier).
  *
+ * Single token (owner rulings 2026-09-29/30) adds the 15th function, a
+ * guard rules cannot express - one live booking per purchased token:
+ *
+ *   onSingleTokenSpent     bookings onWrite, portal/single-guard.js
+ *
  * `onSessionUpdateNotifyWaitlist` and `notifyWaitlistForSession` are DELETED
  * here: they read `sessions.participants` / `sessions.waitlist` arrays that
  * no v1+ session has ever carried, so the trigger could never fire.
@@ -84,6 +89,8 @@ const family = require('./portal/family');
 const {createCheckoutSession} = require('./portal/checkout');
 const {calendlyWebhook} = require('./portal/calendly');
 const {waitlistPositions} = require('./portal/waitlist-positions');
+const single = require('./portal/single');
+const {onSingleTokenSpent} = require('./portal/single-guard');
 
 // ==========================================================================
 // PORTAL SERVER-SIDE WRITERS (Sprint 13, contract v2.1)
@@ -96,11 +103,13 @@ exports.stripeWebhook = stripeWebhook;
 exports.onSessionBookedDecrease = onSessionBookedDecrease;
 // A family's place on a waitlist, in the order promotion uses (callable).
 exports.waitlistPositions = waitlistPositions;
+// Single token (rulings 2026-09-29/30): one live booking per purchased token.
+exports.onSingleTokenSpent = onSingleTokenSpent;
 
 // ==========================================================================
 // SPRINT 20 LAUNCH (contract v3.0.1): instant sign-up, child-login claim,
 // Checkout Sessions, Calendly. Handlers live in ./portal; this file exports
-// the 14 functions and nothing else (the secret lists stay in
+// the 15 functions and nothing else (the secret lists stay in
 // ./portal/secrets). Secret binding (spec 8): every function declares its
 // secrets with runWith - a 1st-gen function sees only what it declares.
 // ==========================================================================
@@ -242,7 +251,8 @@ exports.onBookingCancelled = functions
             docBody('sessions', after.sessionId),
             docBody('athletes', after.athleteId),
           ]);
-          const copy = notices.bookingCancelled({athlete, session});
+          const copy = notices.bookingCancelled({athlete, session,
+            singleToken: single.isSingleTokenId(after.graceTokenId)});
           await notify.sendNotice({
             kind: 'booking-cancelled',
             category: 'schedule',
@@ -267,6 +277,7 @@ exports.onBookingCancelled = functions
         ]);
         const copy = notices.sessionCancelled({
           athlete, session, graceExpiresAt,
+          tokenReturned: single.isSingleTokenId(after.graceTokenId),
         });
         await notify.sendNotice({
           kind: 'session-cancelled',

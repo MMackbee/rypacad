@@ -6,7 +6,7 @@ import { CONSENT_TERMS, SELF_WORDING } from '../data/consentTerms';
 import { CONSENTS } from '../data/seed';
 import { emptyEmergencyContact, newAthleteEntry } from '../data/signup';
 import { SEASON_BOUNDS } from '../data/season';
-import { SINGLE_ON_SALE } from '../data/packages';
+import { BOOKING_OPENS_AT } from '../data/calendar';
 
 function Harness({ mode = 'parent', linkMode = false, athlete = {}, showErrors = true }) {
   const [athletes, setAthletes] = React.useState([{ ...newAthleteEntry(), ...athlete }]);
@@ -215,20 +215,51 @@ test('two athletes: an invalid Continue names every athlete still missing and op
   await none.unmount();
 });
 
-test('until one-time checkout ships, the single token is greyed out and cannot be picked', async () => {
-  expect(SINGLE_ON_SALE).toBe(false);
-  const picks = [];
-  const r = await renderScreen(<PackageStep athletes={[{ ...newAthleteEntry(), name: 'Nico' }]} onUpdate={(key, p) => picks.push(p)} showErrors={false} />);
-  const single = r.button('Single token');
-  expect(single.getAttribute('aria-disabled')).toBe('true');
-  expect(single.style.opacity).toBe(''); // the footnote explaining why must stay readable
-  expect(single.textContent).toContain('On sale before booking opens Sat, Oct 10. Pick a monthly package now, or come back then.');
-  await r.click('Single token');
-  expect(picks).toEqual([]);
-  await r.click('6 tokens');
-  expect(picks).toEqual([{ packageId: 't-6' }]);
-  expect(r.button('6 tokens').getAttribute('aria-disabled')).toBeNull();
-  await r.unmount();
+// Owner ruling 2026-10-01: single tokens go on sale when booking opens (Sat,
+// Oct 10 at 7 AM Chicago) - the booking-open gate, read off the clock.
+describe('the single token and the booking-open gate', () => {
+  afterEach(() => { jest.restoreAllMocks(); });
+
+  test('before the gate the card says when it is available and cannot be picked', async () => {
+    jest.spyOn(Date, 'now').mockReturnValue(BOOKING_OPENS_AT - 1);
+    const picks = [];
+    const r = await renderScreen(<PackageStep athletes={[{ ...newAthleteEntry(), name: 'Nico' }]} onUpdate={(key, p) => picks.push(p)} showErrors={false} />);
+    const single = r.button('Single token');
+    expect(single.getAttribute('aria-disabled')).toBe('true');
+    expect(single.style.opacity).toBe(''); // the footnote explaining why must stay readable
+    expect(single.textContent).toContain('Available Sat, Oct 10 at 7 AM. Pick a monthly package now, or come back then.');
+    await r.click('Single token');
+    expect(picks).toEqual([]);
+    await r.click('6 tokens');
+    expect(picks).toEqual([{ packageId: 't-6' }]);
+    expect(r.button('6 tokens').getAttribute('aria-disabled')).toBeNull();
+    await r.unmount();
+  });
+
+  test('a single token held before the gate still needs a pick', async () => {
+    jest.spyOn(Date, 'now').mockReturnValue(BOOKING_OPENS_AT - 1);
+    const r = await renderScreen(<PackageStep athletes={[{ ...newAthleteEntry(), name: 'Nico', packageId: 'single' }]} onUpdate={() => {}} showErrors />);
+    expect(r.button('Single token').getAttribute('aria-pressed')).toBe('false');
+    expect(r.container.querySelector('[data-field-error]').textContent).toBe('Pick a package for Nico to continue.');
+    await r.unmount();
+  });
+
+  test('from the gate on it is a pick like any other', async () => {
+    jest.spyOn(Date, 'now').mockReturnValue(BOOKING_OPENS_AT);
+    const picks = [];
+    const r = await renderScreen(<PackageStep athletes={[{ ...newAthleteEntry(), name: 'Nico' }]} onUpdate={(key, p) => picks.push(p)} showErrors={false} />);
+    const single = r.button('Single token');
+    expect(single.getAttribute('aria-disabled')).toBeNull();
+    expect(single.textContent).not.toContain('Available Sat, Oct 10');
+    await r.click('Single token');
+    expect(picks).toEqual([{ packageId: 'single' }]);
+    await r.unmount();
+    // Picked: lit like any other card, and nothing left to pick.
+    const held = await renderScreen(<PackageStep athletes={[{ ...newAthleteEntry(), name: 'Nico', packageId: 'single' }]} onUpdate={() => {}} showErrors />);
+    expect(held.button('Single token').getAttribute('aria-pressed')).toBe('true');
+    expect(held.container.querySelector('[data-field-error]')).toBeNull();
+    await held.unmount();
+  });
 });
 
 test('the package step no longer carries the contract tier', async () => {

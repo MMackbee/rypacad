@@ -9,6 +9,7 @@ import { CONFIRMING, PAY_NOW, facilityName } from '../data/billingCopy';
 import { BOOKING_OPENS_LABEL, bookingOpen } from '../data/calendar';
 import { FACILITY_ACCESS, packageById, PRICES_RELEASED, SIBLING_DISCOUNT_NOTE, SIBLING_ORDER_NOTE, siblingPartialNote, siblingPlan } from '../data/packages';
 import { facilityHolderIndex } from '../data/signup';
+import { saleOpen, SINGLE_NOT_OPEN_LINE } from '../data/singleToken';
 import useFamilyAthletes from '../hooks/familyAthletes';
 
 /**
@@ -126,9 +127,13 @@ export default function RegistrationSuccess({ bare = false, mode = 'signup', for
             <Body size={12} style={{ marginBottom: 12 }}>{`First open the link we emailed to ${account.email} (from ${VERIFY_EMAIL_SENDER} - check spam), then tap Pay.`}</Body>
           ) : null}
           <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-            {payRows.map((r) => (
+            {/* No Pay button for a single token before it is on sale (owner ruling
+                2026-10-01): an older draft could still carry one this far. */}
+            {payRows.map((r) => (r.pkg?.kind === 'single' && !saleOpen() ? (
+              <Body key={r.key} size={12}>{`${r.name.trim()}: ${SINGLE_NOT_OPEN_LINE}`}</Body>
+            ) : (
               <PayButton key={r.key} athleteId={r.athleteId} email={account?.email ?? null} label={payLabel(r)} />
-            ))}
+            )))}
             {facilityLine ? <Body size={12}>{facilityLine}</Body> : null}
           </div>
         </Card>

@@ -7,6 +7,7 @@ import { usePaymentConfirmation } from '../hooks/billing';
 import { bookingOpen } from '../data/calendar';
 import { packageById } from '../data/packages';
 import { CONFIRMING, CONFIRM_TIMEOUT, confirmedLine } from '../data/billingCopy';
+import { singleConfirmedLine } from '../data/singleToken';
 
 /**
  * The `?paid=<athleteId>` return from Stripe (spec 4.2): the hook re-reads the
@@ -14,9 +15,11 @@ import { CONFIRMING, CONFIRM_TIMEOUT, confirmedLine } from '../data/billingCopy'
  * after the hook strips the query, so "Payment received" does not vanish.
  * `whatsNext` ({ athlete, product, self, selfManaged, facilityDue, onBook, onSeason }) adds the
  * "What's next" card under it once confirmed (owner decision 2026-09-30).
+ * A single-token return also carries `cs` and `single` (`&cs=...&single=1`):
+ * it confirms on graceTokens/single_{cs} and says the token is ready.
  */
-export default function PaymentConfirming({ athleteId, style, whatsNext }) {
-  const { state, packageId } = usePaymentConfirmation(athleteId ?? null);
+export default function PaymentConfirming({ athleteId, cs = null, single = false, style, whatsNext }) {
+  const { state, packageId } = usePaymentConfirmation(athleteId ?? null, { cs: cs ?? null, single: Boolean(single) });
   const [shown, setShown] = useState(null);
   useEffect(() => { if (state !== 'idle') setShown(state); }, [state]);
   const s = shown ?? (athleteId ? 'confirming' : null);
@@ -27,7 +30,7 @@ export default function PaymentConfirming({ athleteId, style, whatsNext }) {
   if (s === 'confirmed') {
     return (
       <>
-        <Banner tone="green" title="Payment received" style={style}>{confirmedLine(open)}</Banner>
+        <Banner tone="green" title="Payment received" style={style}>{single ? singleConfirmedLine(open) : confirmedLine(open)}</Banner>
         {whatsNext ? <WhatsNextCard {...whatsNext} packageId={packageId ?? whatsNext.athlete?.packageId ?? null} /> : null}
       </>
     );

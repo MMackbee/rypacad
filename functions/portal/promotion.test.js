@@ -406,4 +406,152 @@ test('a second promotion into the same session sends its own notice',
       assert.deepEqual(sent.map((n) => n.bookingId), ['sam_s1', 'sam_s1']);
     });
 
+// --- single token (owner rulings 2026-09-29/30) ----------------------------
+// The promotion order (pin F) under the single token: a purchased token
+// earns no priority.
+
+const TOKENS = [
+  {id: 'single_cs_1', reason: 'single-purchase', expiresAt: '2027-02-27'},
+  {id: 's9_ada_cancelled', reason: 'session-cancelled',
+    expiresAt: '2026-12-01'},
+  {id: 'no-expiry', reason: 'session-cancelled'},
+];
+const grace = (id) => ({chargedFrom: 'grace', graceTokenId: id,
+  reason: null});
+
+test('candidateGraceExpiry: a purchased single token earns no priority',
+    () => {
+      assert.equal(promotion.candidateGraceExpiry(grace('single_cs_1'),
+          TOKENS), null);
+    });
+
+test('candidateGraceExpiry: a bonus token keys on ITS expiry', () => {
+  assert.equal(promotion.candidateGraceExpiry(grace('s9_ada_cancelled'),
+      TOKENS), '2026-12-01');
+  assert.equal(promotion.candidateGraceExpiry(grace('no-expiry'), TOKENS),
+      '9999-12-31');
+});
+
+test('candidateGraceExpiry: period, elite and no charge are null', () => {
+  const none = {graceTokenId: null, reason: null};
+  assert.equal(promotion.candidateGraceExpiry(
+      Object.assign({chargedFrom: 'period'}, none), TOKENS), null);
+  assert.equal(promotion.candidateGraceExpiry(
+      Object.assign({chargedFrom: 'elite'}, none), TOKENS), null);
+  assert.equal(promotion.candidateGraceExpiry(null, TOKENS), null);
+});
+
+test('orderCandidates: bonus holder first, single-purchase by joinedAt',
+    () => {
+      const cand = (id, joinedAt, charge) => ({
+        entry: {id, joinedAt: new Date(joinedAt)}, ok: true,
+        graceExpiry: promotion.candidateGraceExpiry(charge, TOKENS),
+      });
+      const period = {chargedFrom: 'period', graceTokenId: null};
+      const plain = cand('plain', '2026-11-01T10:00:00Z', period);
+      const single = cand('single', '2026-11-01T11:00:00Z',
+          grace('single_cs_1'));
+      const bonus = cand('bonus', '2026-11-01T12:00:00Z',
+          grace('s9_ada_cancelled'));
+      const order = promotion.orderCandidates([single, plain, bonus])
+          .map((c) => c.entry.id);
+      assert.deepEqual(order, ['bonus', 'plain', 'single']);
+      const early = cand('early-single', '2026-11-01T09:00:00Z',
+          grace('single_cs_1'));
+      assert.deepEqual(promotion.orderCandidates([plain, early, bonus])
+          .map((c) => c.entry.id), ['bonus', 'early-single', 'plain']);
+    });
+
+// A single-token family in the same world: Sol books only with purchased
+// tokens (`graceTokens/single_{cs}`, good through the season's last day).
+const SOL = {
+  'packages/single': {kind: 'single', tokens: 1, windowDays: 30},
+  'households/novak': {periodAnchorDay: 1},
+  'athletes/sol': {name: 'Sol Novak', householdId: 'novak',
+    packageId: 'single', billing: {status: 'active', oneTime: true}},
+};
+const token = (cs) => ({[`graceTokens/single_${cs}`]: {athleteId: 'sol',
+  householdId: 'novak', expiresAt: '2027-02-27', reason: 'single-purchase',
+  sourceSessionId: null}});
+
+test('single token: promoted in joining order, the purchased token pays',
+    async () => {
+      const docs = world(SOL, token('cs_1'), entry('s1', 'sol', 'novak', 0),
+          entry('s1', 'sam', 'hart', 5));
+      await cancelSeat(docs, 'x1');
+      const b = docs['bookings/sol_s1'];
+      assert.deepEqual([b.status, b.chargedFrom, b.graceTokenId,
+        b.promotedFromWaitlist, b.householdId],
+      ['confirmed', 'grace', 'single_cs_1', true, 'novak']);
+      assert.equal(docs['sessions/s1'].booked, 2);
+      assert.equal('waitlist/s1_sol' in docs, false);
+      assert.equal('bookings/sam_s1' in docs, false);
+      assert.deepEqual(bodies('promoted'), [`A spot opened - Sol is now ` +
+          `booked for ${BLOCK}. One token was used. You can cancel in the ` +
+          'app until the day before.']);
+      // No priority for a bought token: Kai joined first and goes first,
+      // where a bonus token would have jumped the line.
+      const later = world(SOL, token('cs_1'), entry('s1', 'kai', 'reyes', 0),
+          entry('s1', 'sol', 'novak', 5));
+      await cancelSeat(later, 'x1');
+      assert.equal(later['bookings/kai_s1'].status, 'confirmed');
+      assert.equal('bookings/sol_s1' in later, false);
+      await cancelSeat(later, 'x2');
+      assert.equal(later['bookings/sol_s1'].graceTokenId, 'single_cs_1');
+    });
+
+test('single token: no token to spend means removed, like a normal booking',
+    async () => {
+      const gone = async (...extra) => {
+        const docs = world(SOL, entry('s1', 'sol', 'novak', 0),
+            entry('s1', 'sam', 'hart', 5), ...extra);
+        await cancelSeat(docs, 'x1');
+        assert.equal('bookings/sol_s1' in docs, false);
+        assert.equal('waitlist/s1_sol' in docs, false);
+        assert.equal(docs['bookings/sam_s1'].status, 'confirmed');
+        return sent.filter((n) => n.kind === 'waitlist-removed')
+            .map((n) => [n.athleteId, n.category, n.body]);
+      };
+      const NO_TOKEN = ['sol', 'schedule', 'Sol was next on the waitlist ' +
+          `for ${BLOCK} but could not be booked: no tokens are left for ` +
+          'that period.'];
+      // The package grants no period token: nothing bought, nothing to pay.
+      assert.deepEqual(await gone(), [NO_TOKEN]);
+      // The one token already paid for a booking in ANOTHER period.
+      assert.deepEqual(await gone(token('cs_1'), {'bookings/sol_dec': {
+        athleteId: 'sol', sessionId: 'dec', date: '2026-12-02',
+        type: 'training', status: 'confirmed', periodKey: '2026-12-01',
+        graceTokenId: 'single_cs_1', chargedFrom: 'grace'}}), [NO_TOKEN]);
+      // A refunded token is voided, never deleted.
+      assert.deepEqual(await gone({'graceTokens/single_cs_1': {
+        athleteId: 'sol', householdId: 'novak', expiresAt: '2000-01-01',
+        reason: 'single-purchase'}}), [NO_TOKEN]);
+      // The one token is HELD by Sol's other waitlist entry.
+      assert.deepEqual(await gone(token('cs_1'),
+          entry('s9', 'sol', 'novak', -10, {date: '2026-11-19'})),
+      [NO_TOKEN]);
+      // A second token covers both entries.
+      const two = world(SOL, token('cs_1'), token('cs_2'),
+          entry('s1', 'sol', 'novak', 0),
+          entry('s9', 'sol', 'novak', -10, {date: '2026-11-19'}));
+      await cancelSeat(two, 'x1');
+      assert.equal(two['bookings/sol_s1'].chargedFrom, 'grace');
+      assert.equal('waitlist/s9_sol' in two, true);
+    });
+
+test('single token: a buyer moved to a monthly package and yet to pay',
+    async () => {
+      // billing.oneTime with a monthly packageId is payment-pending
+      // (lib.membershipAllowsBooking): never promoted on the old token.
+      const docs = world(SOL, token('cs_1'), entry('s1', 'sol', 'novak', 0),
+          entry('s1', 'sam', 'hart', 5), {'athletes/sol': {
+            name: 'Sol Novak', householdId: 'novak', packageId: 't-12',
+            billing: {status: 'active', oneTime: true}}});
+      await cancelSeat(docs, 'x1');
+      assert.equal('bookings/sol_s1' in docs, false);
+      assert.equal(docs['bookings/sam_s1'].status, 'confirmed');
+      assert.deepEqual(sent.filter((n) => n.kind === 'waitlist-removed')
+          .map((n) => [n.athleteId, n.category]), [['sol', 'billing']]);
+    });
+
 run();

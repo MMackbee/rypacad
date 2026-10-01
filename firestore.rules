@@ -51,8 +51,16 @@ service cloud.firestore {
 
     // Sprint 20 (spec 4.4): per-athlete paid status gates booking. Absent
     // `billing` == active (every athlete provisioned before this sprint).
+    // Single token (owner rulings 2026-09-29/30): a one-time purchase sets
+    // billing.oneTime; once the package moves off 'single' the athlete is
+    // payment-pending until the new package is paid (lib.js
+    // membershipAllowsBooking is the server half). Covers booking create,
+    // re-book and waitlist create.
     function athleteBillingOk(a) {
-      return !('billing' in a) || a.billing.status == 'active';
+      return !('billing' in a)
+        || (a.billing.status == 'active'
+            && !(a.billing.get('oneTime', false) == true
+                 && a.get('packageId', null) != 'single'));
     }
 
     // Sprint 20 (spec 5): booking opens 07:00 America/Chicago on 2026-10-10
@@ -586,6 +594,11 @@ service cloud.firestore {
       // never carry it). hasAll still pins the nine original keys plus
       // chargedFrom as always-required; hasOnly widens by exactly one more
       // (graceTokenId) to admit it WHEN present, never anything else.
+      // Single token (rulings 2026-09-29/30): a purchased token is a
+      // graceTokens doc `single_{cs}`, so a single athlete books with
+      // chargedFrom 'grace' + graceTokenId; 'period' only against an ops/
+      // Stripe comp (perPurchaseChargeOk below). `rebookedAt` is written only
+      // by a re-book (memberBookingUpdateOk), never on create.
       function bookingShapeOk() {
         let d = request.resource.data;
         return d.keys().hasAll(['athleteId', 'sessionId', 'date', 'type', 'periodKey',
@@ -631,6 +644,29 @@ service cloud.firestore {
           );
       }
 
+      // Single token (rulings 2026-09-29/30): the package grants no period
+      // token, so a single athlete's 'period' charge needs an issued comp -
+      // a tokenPeriods doc with granted > 0 whose period covers the date.
+      // The count within that period stays unenforced, the same class as
+      // the monthly cap. One get(), only on this path.
+      function compPeriodOk(d) {
+        let tpId = d.athleteId + '_' + d.periodKey;
+        let tp = get(/databases/$(database)/documents/tokenPeriods/$(tpId)).data;
+        return tp.granted is int && tp.granted > 0
+          && d.periodKey <= d.date && d.date <= tp.periodEnd;
+      }
+
+      // A single athlete pays with a purchased token ('grace' + an id that
+      // bookingGraceOk / rebookGraceOk anchor to an own, unexpired token -
+      // a voided token, expiresAt '2000-01-01', is refused there) or a comp
+      // ('period' + compPeriodOk). Never 'elite'. Everyone else: unchanged.
+      function perPurchaseChargeOk(a, d) {
+        let cf = d.get('chargedFrom', 'period');
+        return a.get('packageId', null) != 'single'
+          || (cf == 'grace' && d.get('graceTokenId', null) is string)
+          || (cf == 'period' && compPeriodOk(d));
+      }
+
       // Sprint 13, pin H: the freeze, enforced server-side - one get() of
       // the household, null-safe (membership absent == active, same
       // absent-as-default pattern athletes.packageId/households.
@@ -648,7 +684,8 @@ service cloud.firestore {
         let a = athleteData(request.resource.data.athleteId);
         return request.resource.data.householdId == a.householdId
           && athleteBillingOk(a)
-          && bookingOpenOk(a);
+          && bookingOpenOk(a)
+          && perPurchaseChargeOk(a, request.resource.data);
       }
 
       // The booking must reference a real session and agree with it on date
@@ -836,20 +873,27 @@ service cloud.firestore {
       // not this rule's.
       //
       // The 12-hour-before cancel window (My Schedule copy: "day-of = contact
-      // the academy") is a CLIENT-side gate only — an accepted server-side
-      // gap, flagged in TEAM.md's Sprint 9 pins and carried into the routing
-      // report. This rule allows the transition with no date check in v1.
+      // the academy") is a CLIENT-side gate only. Single token (rulings
+      // 2026-09-29/30): the rule now refuses a member cancel once the
+      // session DAY is over (session date + 30 h UTC, sessionDayNotOver),
+      // for ALL members - a past booking can no longer be cancelled to free
+      // its token. Every client path already cancels only when date > today.
       // Sprint 13 (contract v2.1, pin G "Cancellation reasons"): the
-      // confirmed->cancelled direction now REQUIRES cancelledBy (the
-      // caller's own uid) and cancelReason ('member' - the ONE value a
-      // member may ever write here; 'session-cancelled'/'lapsed'/
-      // 'downgrade' are staff/Admin-SDK-only reasons, never reachable
+      // confirmed->cancelled direction REQUIRES cancelledBy (the caller's
+      // own uid) and cancelReason ('member' - the ONE value a member may
+      // ever write here; 'session-cancelled'/'lapsed'/'downgrade'/
+      // 'double-spend' are staff/Admin-SDK-only reasons, never reachable
       // through this branch). The cancelled->confirmed re-book direction
-      // stays exactly `hasOnly(['status'])` - re-booking never touches
-      // cancelledBy/cancelReason at all (hooks/live.js's isRebook branch
-      // only ever sends `{ status: 'confirmed' }`), so a malicious payload
-      // cannot smuggle a cancelledBy/cancelReason rewrite through the
-      // re-book direction by also flipping status.
+      // RE-DECIDES its charge (hooks/live.js): it may write only status,
+      // chargedFrom, graceTokenId (null when none) and rebookedAt, never
+      // cancelledBy/cancelReason. rebookChargeOk proves the charge the same
+      // way a create does (own unexpired token, a comp for a single athlete
+      // charging 'period'), and a single athlete's re-book must carry
+      // rebookedAt == request.time, so a stale client's status-only re-book
+      // can no longer re-attach a spent token. Monthly and Elite status-only
+      // re-books still pass when their stored charge is valid. The re-book
+      // arm also checks the household freeze (past_due/lapsed), as a create
+      // does.
       // 2026-09-30 (tester Mike, "cancel the entire series"): the cancel
       // direction - and ONLY it - may also carry `cancelledVia`, and the one
       // value it may hold afterwards is 'series' (hooks/cancelSeries.js; the
@@ -870,6 +914,33 @@ service cloud.firestore {
       // was matched to its session at create and cannot be edited since.
       // Both clauses sit last on their arm: && short-circuits, so the two
       // session reads are only paid by a write every earlier clause admits.
+      // Merge 2026-10-01 (single token onto the waitlist audit): each arm
+      // enforces BOTH sets of clauses. The cancel arm takes the single
+      // token's sessionDayNotOver (the helper at the top of this file, the
+      // same + 30 h cut-off) and then seatFreedInCommit; the re-book arm
+      // takes rebookHouseholdOk and rebookChargeOk and then
+      // sessionDayNotOver and seatTakenInCommit. Document budget for a
+      // re-book: me, athletes, households, graceTokens OR tokenPeriods
+      // (never both - a 'period' charge carries no token id), and the
+      // session read before and after - 6 of 10.
+      function rebookGraceOk(g, before) {
+        let gd = get(/databases/$(database)/documents/graceTokens/$(g)).data;
+        return gd.athleteId == before.athleteId && gd.expiresAt >= before.date;
+      }
+      function rebookHouseholdOk(before) {
+        let h = get(/databases/$(database)/documents/households/$(before.householdId)).data;
+        return !(h.get('membership', null) != null && h.membership.status in ['past_due', 'lapsed']);
+      }
+      function rebookChargeOk(before, after, diffKeys) {
+        let a = athleteData(before.athleteId);
+        let cf = after.get('chargedFrom', 'period');
+        let g = after.get('graceTokenId', null);
+        return cf in ['elite', 'grace', 'period']
+          && ((g == null && cf != 'grace') || (g is string && cf == 'grace' && rebookGraceOk(g, before)))
+          && perPurchaseChargeOk(a, after)
+          && (!diffKeys.hasAny(['rebookedAt']) || after.rebookedAt == request.time)
+          && (a.get('packageId', null) != 'single' || after.get('rebookedAt', null) == request.time);
+      }
       function memberBookingUpdateOk() {
         let before = resource.data;
         let after = request.resource.data;
@@ -884,16 +955,19 @@ service cloud.firestore {
             // from Calendly's email, never in-app (the webhook writes the
             // cancel). Absent source == 'portal'.
             && resource.data.get('source', null) != 'calendly'
+            && sessionDayNotOver(before.date)
             && seatFreedInCommit(before.sessionId))
           || (before.status == 'cancelled' && after.status == 'confirmed'
-              && diffKeys.hasOnly(['status'])
+              && diffKeys.hasOnly(['status', 'chargedFrom', 'graceTokenId', 'rebookedAt'])
               // Sprint 20 (review 2026-09-29): re-confirming is booking - the
               // same per-athlete billing and Oct 10 gates as a create, and
-              // never a Calendly-sourced row. The get() runs only on this
-              // arm (&& short-circuits) and is one cached document read.
+              // never a Calendly-sourced row. The gets run only on this arm
+              // (&& short-circuits); athletes is one cached document read.
               && resource.data.get('source', null) != 'calendly'
               && athleteBillingOk(athleteData(before.athleteId))
               && bookingOpenOk(athleteData(before.athleteId))
+              && rebookHouseholdOk(before)
+              && rebookChargeOk(before, after, diffKeys)
               && sessionDayNotOver(before.date)
               && seatTakenInCommit(before.sessionId))
         );
@@ -1373,6 +1447,12 @@ service cloud.firestore {
     // left; 'waitlist-expired' is history only (tokens minted before the
     // ruling keep reading back). Nothing in this block changes: the client
     // shape already admits 'session-cancelled' alone.
+    // Single token (owner rulings 2026-09-29/30): each paid one-time
+    // checkout mints `single_{checkoutSessionId}` (reason 'single-purchase',
+    // createdBy 'stripe') from the Stripe webhook - Admin SDK, outside this
+    // file. Nothing in this block changes for it either: no client can
+    // create, void or delete a purchased token, and the member read below
+    // serves it like any other token.
     match /graceTokens/{graceId} {
       function graceShapeOk() {
         let d = request.resource.data;

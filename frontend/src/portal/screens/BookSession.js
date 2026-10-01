@@ -10,6 +10,9 @@ import { AgeGroupLegend } from '../components/AgeGroupChip';
 import SkeletonCard, { SkeletonBar } from '../components/Skeleton';
 import { CapacityPill } from '../components/StatusBadge';
 import AllowancePools, { GraceLine, SpendNote } from '../components/AllowancePools';
+import PayButton from '../components/PayButton';
+import { SessionTokenPools } from '../components/SessionTokens';
+import { availableCount, BUY_SINGLE_LABEL, graceSpendLabel, isSingleTokenId, saleOpen, SINGLE_NOT_OPEN_LINE } from '../data/singleToken';
 import { canRetry, LockedDayNotice, reasonCopy, SeeMembershipLink } from '../components/BookingReasons';
 import { JoinWaitlistButton, leaveFailureCopy, OnWaitlist, waitingOn, WaitlistedConfirmationBody } from '../components/WaitlistAction';
 import { BackLink, Banner, Body, Card, ErrorNotice, ScreenTitle, SectionLabel, Tick } from '../components/Primitives';
@@ -255,7 +258,7 @@ export default function BookSession({
         setReserving(null);
         // Pin F: book() now resolves { status: 'waitlisted' } for a full
         // session instead of rejecting 'full' — same `booked` state either way.
-        finalizeBooked(session, result?.status === 'waitlisted', result?.position ?? null, result?.chargedFrom ?? null);
+        finalizeBooked(session, result?.status === 'waitlisted', result?.position ?? null, result?.chargedFrom ?? null, result?.graceTokenId ?? null);
       })
       .catch((err) => {
         if (!live.current) return;
@@ -292,7 +295,7 @@ export default function BookSession({
   // full "3:00 PM" string the session docs use; `booked` below splits it for
   // display).
   const bookedRaw = useRef(null);
-  const finalizeBooked = (session, waitlisted = false, position = null, chargedFrom = null) => {
+  const finalizeBooked = (session, waitlisted = false, position = null, chargedFrom = null, graceTokenId = null) => {
     bookedRaw.current = session;
     const [time, meridiem] = session.time.split(' ');
     setBooked({
@@ -306,6 +309,8 @@ export default function BookSession({
       // What the booking was actually charged to ('elite' | 'grace' |
       // 'period'), when the write says - the confirmation's "Spends" line.
       chargedFrom,
+      // The grace token it spent, if any: a bought single token's id says so.
+      graceTokenId,
     });
   };
 
@@ -345,7 +350,7 @@ export default function BookSession({
           name: booked.name,
           when: `${booked.dayLabel} · ${booked.time}`,
           // The charge the write made, when it said; else the screen's own read.
-          spendLabel: CHARGE_LABEL[booked.chargedFrom] ?? spendLabelFor(tokens),
+          spendLabel: chargeLabelFor(booked) ?? spendLabelFor(tokens),
           // Practice mode sends nothing to anyone - the seed guardian email
           // ("dana@email.com") read as a real notification in the athlete
           // walkthrough (QA 2026-09-08 #9).
@@ -367,7 +372,8 @@ export default function BookSession({
           athleteName,
           unlimited: Boolean(tokens?.unlimited),
         }}
-        onRepeat={booked.waitlisted ? undefined : handleRepeat}
+        // Never for a single athlete: every repeated week spends a bought token.
+        onRepeat={booked.waitlisted || tokens?.perPurchase ? undefined : handleRepeat}
         // The repeat reaches exactly as far as this athlete's window (the
         // selected child's, for a parent) - the same date that locks days.
         repeatWindow={{ end: openThroughDate, days: windowDays, elite: selfMember?.package?.kind === 'elite' }}
@@ -416,7 +422,11 @@ export default function BookSession({
 
             <div style={{ padding: '0 22px', display: 'flex', flexDirection: 'column', gap: 12 }}>
               {showGateBanner ? <BookingOpensBanner /> : null}
-              <TokensBanner tokens={tokens} />
+              <TokensBanner
+                tokens={tokens}
+                athleteId={isParent ? selectedAthleteId : selfMember?.athleteId}
+                billingStatus={isParent ? selectedAthlete?.billingStatus : selfMember?.billingStatus}
+              />
               {data?.seasonNote ? (
                 <Banner tone="green" title="Season">
                   {data.seasonNote}
@@ -627,12 +637,18 @@ function chargeKindFor(tokens) {
 function spendLabelFor(tokens) {
   const kind = chargeKindFor(tokens);
   if (kind === 'elite') return 'Included with Elite';
-  if (kind === 'grace') return 'a bonus token';
+  if (kind === 'grace') return graceSpendLabel(tokens);
   return '1 token';
 }
 
 /** The same labels by a booking's own `chargedFrom` (createBooking's result). */
 const CHARGE_LABEL = { elite: 'Included with Elite', grace: 'a bonus token', period: '1 token' };
+
+/** A grace charge paid with a bought single token (the write's graceTokenId says so) is a session token, never a bonus. */
+function chargeLabelFor(booked) {
+  if (booked.chargedFrom === 'grace' && isSingleTokenId(booked.graceTokenId)) return 'a session token';
+  return CHARGE_LABEL[booked.chargedFrom];
+}
 
 /**
  * Sprint 6 pin (TEAM.md, QA #2) — which household athlete this booking is
@@ -694,12 +710,29 @@ function AthleteSelector({ athletes, loading, selectedId, onSelect }) {
  * at submit turns a known constraint into a failed action, which is why this
  * is a banner and not an error. Elite shows no number (pin L).
  */
-function TokensBanner({ tokens }) {
+function TokensBanner({ tokens, athleteId, billingStatus }) {
   if (!tokens) return null;
   if (tokens.unlimited) {
     return (
       <Banner tone="green" title="Elite">
         Unlimited · every session type · no countdown.
+      </Banner>
+    );
+  }
+  // The single token (ruling 2026-09-29/30): bought, never reset - the
+  // count plus a Buy button while the athlete's billing is active. Until
+  // single tokens go on sale (owner ruling 2026-10-01, the booking-open
+  // gate) the button is a line saying when.
+  if (tokens.perPurchase) {
+    const none = availableCount(tokens) === 0;
+    return (
+      <Banner tone={none ? 'red' : 'neutral'} title={none ? 'No session token' : 'Your session tokens'}>
+        <SessionTokenPools tokens={tokens} style={{ margin: '4px 0 6px' }} />
+        {!athleteId || (billingStatus ?? 'active') !== 'active' ? null : saleOpen() ? (
+          <PayButton athleteId={athleteId} product="tier" label={BUY_SINGLE_LABEL} variant={none ? 'primary' : 'outline'} height={44} style={{ marginTop: 8 }} />
+        ) : (
+          <Body size={12} style={{ marginTop: 8 }}>{SINGLE_NOT_OPEN_LINE}</Body>
+        )}
       </Banner>
     );
   }

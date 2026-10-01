@@ -7,7 +7,8 @@ import * as callables from '../hooks/callables';
 import { verifySentNote } from '../data/authCopy';
 import { todayISO } from '../data/calendar';
 import { contractEnabled } from '../data/contractFlag';
-import { SINGLE_ON_SALE, SINGLE_TOKEN } from '../data/packages';
+import { SINGLE_TOKEN } from '../data/packages';
+import { saleOpen } from '../data/singleToken';
 import {
   EMAIL_RE, buildAddAthletesPayload, buildCreateFamilyPayload, contractAnswered, emptyEmergencyContact, facilityWaiverRequired,
   newAthleteEntry, restoredFacilityTick, toEmergencyForm, validateAthleteEntry, validateEmergencyContact,
@@ -203,9 +204,10 @@ export default function Registration({ variant, bare = false, mode = 'signup', a
     who: form.mode != null,
     contact: form.contact.name.trim() !== '' && EMAIL_RE.test(form.contact.email.trim()) && form.contact.phone.trim() !== '',
     athletes: athleteErrors.every((e) => !e.name && !e.dob && !e.handicap && !e.loginEmail) && emergencyOk,
-    // A restored draft may hold the single token from before it went off sale.
+    // A restored draft may hold the single token from before it is on sale
+    // (owner ruling 2026-10-01: from the booking-open gate, by the clock).
     package: form.athletes.every((a) => a.packageId != null) && athleteErrors.every((e) => !e.packageId)
-      && form.athletes.every((a) => a.packageId !== SINGLE_TOKEN.id || SINGLE_ON_SALE),
+      && form.athletes.every((a) => a.packageId !== SINGLE_TOKEN.id || saleOpen()),
     contract: form.athletes.every(contractAnswered),
     consent: form.consents.dataCollection && form.consents.videoCapture && form.signatureName.trim() !== ''
       && (!facilityRequired || form.consents.facilityAccess === true),

@@ -166,6 +166,45 @@ The recurring line's amount is read from Stripe (`stripe.prices.retrieve(priceId
 nor 7.2's JSON carry a price - so the restricted key needs Prices read (8, D12).
 The prepaid period is `prepaidPeriodFor` under the 48-hour rule (6.1, D11).
 
+**The single path (spec ruling 0.14, D20; 2026-09-30).** When `product ==
+'tier'` and the athlete's `packageId` (or package `kind`) is `single`, the
+price is always `catalogue.priceIdFor('single')` and the body is the pure,
+exported `singleSessionBody` (`checkout.js`): `mode: 'payment'`, the same
+`client_reference_id` (`__tier`), one line quantity 1, card only,
+`metadata` + `payment_intent_data.metadata` `{householdId, athleteId,
+product: 'tier', packageId: 'single'}`, `custom_text`, `expires_at =
+single.checkoutExpiresAt(now)`, `success_url` = the tier URL plus
+`&single=1`, and `customer` or `customer_email` + `customer_creation:
+'always'`. `prepaidFor` is never called and there is no
+`subscription_data`. Extra checks, all `failed-precondition` before
+`sessions.create`: `season-over` (single, under 30 min to 00:00 Chicago Feb
+28, 2027), `single-no-facility` (facility for a single athlete, checked
+first in the facility block), `household-past-due` and
+`household-lapsed-legacy` (single, after the household read),
+`price-mismatch` (after `prices.retrieve`, outside its catch: single needs
+`type 'one_time'`, no `recurring`, `unit_amount 6500`, `usd`, no
+`custom_unit_amount`; a tier price of type `one_time` is refused too).
+`already-active` treats `{status: 'active', oneTime: true}` with no
+`subscriptionId` as NOT live, so a single may buy again; for a `single`
+athlete with a live subscription it reads "This athlete still has a monthly
+plan - contact the academy to switch to session tokens.". `single-one-time`
+(840ed77) is retired.
+
+Owner ruling 2026-10-01 adds `single-not-open` (`failed-precondition`,
+"Single tokens are available from Sat, Oct 10 at 7 AM. Nothing has been
+charged."): a single-token checkout before `single.saleOpen(nowMs)`, which
+is `lib.bookingOpen(nowMs, null)` - the booking gate, `lib.BOOKING_OPENS_AT`,
+no second date. It is checked right after the package read, before
+`season-over` and before the Stripe client is built, so nothing is read from
+or sent to Stripe and a remembered open session is not handed back. The
+client mirror is `data/singleToken.js` `saleOpen()` (`bookingOpen(now, null)`
+from `data/calendar.js`) with the copy `SINGLE_NOT_OPEN_NOTE` (sign-up card),
+`SINGLE_NOT_OPEN_LINE` (where a Pay or Buy button would be) and
+`SINGLE_NOT_OPEN_MESSAGE` (the refusal, word for word). A single checkout
+goes through the same `reuseOpenSession` / `pendingCheckout` as a monthly
+one (two taps share one Stripe page; a completed session is never reused),
+and never reads the sibling discount.
+
 ## 2. Firestore shapes (absent == X stated for every new field)
 
 | Doc / field | Shape | Writer | absent == |
@@ -365,6 +404,19 @@ when `athleteId` is non-null (the screen reads `?paid=` via
 `billing.status === 'active'` bumps `athletes` + `billing` and strips the
 query. Timeout copy: 9.5.
 
+**Single token (spec ruling 0.14, 2026-09-30): the seam is now
+`usePaymentConfirmation(athleteId, {cs, single} = {})`.** ParentDashboard and
+AthleteDashboard pass `cs = params.get('cs')` and `single =
+params.get('single') === '1'` through `PaymentConfirming({athleteId, cs,
+single})`. A single return (`single && cs`) polls
+`fetchGraceTokensByAthlete(athleteId)` and confirms when a row's id is
+`single_${cs}` - a repeat buyer is already active, so `billing.status` proves
+nothing. Every other return confirms on `billingStatusOf(await
+fetchAthlete(athleteId)) === 'active'` (`data/billingCopy.js`; a `oneTime`
+athlete moved off `single` stays pending). The `confirmedPayments` key is
+`${athleteId}|${cs || ''}`, the effect depends on `[athleteId, cs, single]`,
+and a confirmation bumps `graceTokens` as well.
+
 ### 4.6 Login state on the athlete detail and the child card; `hubMemberFor` consent (D9)
 
 `liveAthleteDetail` (`hooks/index.js:3160`, the object that already carries
@@ -561,9 +613,11 @@ module.exports = {
 
 `functions/index.js` (`const {MAIL_SECRETS} = require('./portal/secrets');`),
 `promotion.js`, `stripe.js`, `checkout.js` and `calendly.js` (`./secrets`)
-each require the list they bind; `index.js` exports the 13 functions and
-NOTHING else - no constant re-export, so the emulator's "Loaded functions
-definitions from source" line lists exactly 13 names. `COURIER_AUTH_TOKEN`
+each require the list they bind; `index.js` exports the 13 functions (14
+since the single token: `onSingleTokenSpent`, 6.7) and NOTHING else - no
+constant re-export, so the emulator's "Loaded functions definitions from
+source" line lists exactly those names (`functions/test/check-exports.js`
+expects 14). `COURIER_AUTH_TOKEN`
 joins `MAIL_SECRETS` only if the owner creates that secret - a declared secret
 that does not exist fails the deploy. The table is unchanged: it is what each
 constant expands to.
@@ -574,7 +628,7 @@ constant expands to.
 | `createCheckoutSession` | `['STRIPE_SECRET_KEY']` |
 | `calendlyWebhook` | `['CALENDLY_WEBHOOK_SIGNING_KEY']` |
 | `createFamily`, `addAthletes`, `claimInvite` | `[]` (plain `https.onCall`) |
-| `onBookingCreated`, `onBookingCancelled`, `onHouseholdMembership`, `sessionReminders`, `tokenExpiryReminders`, `sweepWaitlist`, `onSessionBookedDecrease` | `MAIL_SECRETS` |
+| `onBookingCreated`, `onBookingCancelled`, `onHouseholdMembership`, `sessionReminders`, `tokenExpiryReminders`, `sweepWaitlist`, `onSessionBookedDecrease`, `onSingleTokenSpent` | `MAIL_SECRETS` |
 
 ### 6.5 `STRIPE_MODE` and the catalogue reader (`functions/portal/catalogue.js`)
 
@@ -601,6 +655,42 @@ duplicated in `functions/portal/calendly.js` from
 `frontend/src/portal/data/specialists.js:112` (the functions bundle cannot
 import CRA source) - change one, change both. `amendments.test.js:56` pins the
 frontend literal; the functions copy is the over-cadence flag's cap.
+
+### 6.7 `onSingleTokenSpent` (`functions/portal/single-guard.js`; spec D20, 2026-09-30)
+
+The 15th function (`waitlistPositions`, from the waitlist hardening, is the
+14th; `functions/test/check-exports.js` lists all 15):
+`functions.runWith({secrets: MAIL_SECRETS}).firestore
+.document('bookings/{bookingId}').onWrite`. It acts when the pure
+`spendsSingleToken(before, after)` is true: `after.status === 'confirmed'`,
+`single.isSingleTokenId(after.graceTokenId)` (`single_` prefix), and the
+booking is new, was cancelled, or changed token. `releaseDoubleSpends(store,
+tokenId)` queries `bookings where graceTokenId == tokenId`, keeps the
+non-cancelled rows and, when two or more remain, keeps ONE by `pickKeeper`:
+attended/noshow first, then `source 'calendly'`, then the earliest
+`spendKey` (`rebookedAt ?? createdAt`), then id. Every other row that is
+`confirmed` and not Calendly-sourced is cancelled in its own transaction
+(re-read; skipped unless still confirmed on the same token and the keeper is
+still live): `status 'cancelled'`, `cancelledBy 'system'`, `cancelReason
+'double-spend'`, `cancelledAt`, session `booked` = max(0, booked - 1). Then
+one `sendNotice` per loser: kind `booking-released`, category `schedule`,
+subjectKey `${bookingId}_released` (`notices.bookingReleased`). A duplicate it
+cannot cancel (Calendly, attended) is logged with `console.error`. Its own
+cancellations are not spends, so it never re-enters itself;
+`onBookingCancelled` ignores `cancelReason 'double-spend'`. Frontend copy:
+`BookingReasons.cancelReasonCopy('double-spend')`.
+
+**Shared single-token constants (`functions/portal/single.js`, pure):**
+`SEASON_END '2027-02-27'` (mirrors `data/season.js` `SEASON_BOUNDS.end`;
+`single.test.js` reads the literal from the frontend file),
+`SEASON_CUTOFF_MS` (00:00 Chicago Feb 28, 2027), `SINGLE_ID`,
+`SINGLE_PRICE_CENTS 6500`, `CHECKOUT_MIN_MS` (30 min), `tokenIdFor`,
+`isSingleTokenId`, `isSingleOnly`, `paymentIntentIdOf`, `saleOpen` (the
+booking gate, 2026-10-01), `seasonCheckoutOpen`, `checkoutExpiresAt`,
+`isRetiredSubscription`. The frontend mirror is `data/singleToken.js`
+(`isSingleTokenId`, `SINGLE_EXPIRES`, `saleOpen`). `candidateGraceExpiry`
+lives in `functions/portal/waitlist-order.js` with the rest of the promotion
+order; the sweep has no single-only branch and mints nothing.
 
 ## 7. Scripts
 
@@ -650,7 +740,9 @@ and `handicap`, plus one open `loginInvites` doc.
 | `functions/.secret.local` (gitignored by `*.local`, emulator only) | the SAME names as `.env.local`: with `runWith({secrets})` declared, the emulator reads a declared secret from `.secret.local` first and only then asks Secret Manager (D15) |
 
 **Restricted Stripe key scopes (D12), one key per mode:** Checkout Sessions
-**write**, Customers **read**, Prices **read**. `createCheckoutSession` reads
+**write**, Customers **write**, Prices **read** (Customers write since the
+2026-09-29 rehearsal, D12: Checkout creates the family's Customer, and the
+single token's payment sets `customer_creation: 'always'`). `createCheckoutSession` reads
 `unit_amount` off the price (1.5) - a key without Prices read surfaces as
 `stripe-error` on every Pay button; the same key serves `stripeWebhook`'s
 `checkout.sessions.list` / `listLineItems` reads (write includes read). The

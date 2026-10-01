@@ -26,6 +26,8 @@ let mockBook;
 let mockBookCalls;
 let mockHousehold;
 let mockLeave;
+// The booking athlete's paid state (the single token's Buy button reads it).
+let mockBillingStatus;
 jest.mock('../hooks', () => ({
   useBooking: () => ({
     data: { slots: [{ date: mockFirstSlot }], tokens: mockTokens, confirmation: mockConfirmation, seasonNote: null },
@@ -35,10 +37,11 @@ jest.mock('../hooks', () => ({
     bookingFor: mockBookingFor,
   }),
   useHouseholdAthletes: () => ({ data: mockHousehold, loading: false }),
-  useMembership: () => ({ data: { members: [{ athleteId: 'a1', name: 'Jordan', package: mockPackage }] } }),
+  useMembership: () => ({ data: { members: [{ athleteId: 'a1', name: 'Jordan', package: mockPackage, billingStatus: mockBillingStatus }] } }),
   useMonthSessions: (m) => mockMonth(m),
 }));
 jest.mock('../hooks/waitlist', () => ({ leaveWaitlist: (...args) => mockLeave(...args) }));
+jest.mock('../components/PayButton', () => ({ __esModule: true, default: ({ athleteId, product, label, variant }) => <button type="button">{label}|{athleteId}|{product}|{variant}</button> }));
 
 /** The tapped day's session card: tappable cards carry cursor: pointer (SessionCard sets it from onClick). */
 const sessionCard = (r) =>
@@ -61,6 +64,7 @@ beforeEach(() => {
   mockMarks = {};
   mockTokens = { left: 6, unlimited: false, grace: [] };
   mockConfirmation = { email: null, note: 'See you there.' };
+  mockBillingStatus = 'active';
   jest.useFakeTimers('modern');
 });
 afterEach(() => {
@@ -721,5 +725,92 @@ describe('waitlist hardening', () => {
       expect(cardAt(period, '4:00').textContent).toContain('Spends 1 token · 2 left');
       await period.unmount();
     });
+  });
+});
+
+describe('the single token (owner rulings 2026-09-29/30)', () => {
+  const SINGLE = { id: 'single', kind: 'single', windowDays: 30 };
+  const bought = { id: 'single_cs_1', expiresAt: '2027-02-27', reason: 'single-purchase', sourceSessionId: null };
+  const singleTokens = (grace) => ({ granted: 0, used: 0, reserved: 0, left: 0, unlimited: false, perPurchase: true, held: 0, grace });
+  // Live mode, so the confirmation offers Repeat weekly whenever it may.
+  beforeEach(() => { mockBookingFor = 'athlete'; });
+
+  test('one token: a tappable card, a session-token spend, and no Repeat weekly', async () => {
+    jest.setSystemTime(AT_OPEN);
+    mockPackage = SINGLE;
+    mockTokens = singleTokens([bought]);
+    const r = await renderScreen(<BookSession bare demoSelectedDate="2026-10-12" />);
+    expect(r.text()).toContain('Your session tokens');
+    expect(r.text()).toContain('1 session token - good through Sat, Feb 27');
+    expect(r.button('Buy a session token - $65|a1|tier|outline')).not.toBeNull();
+    const card = sessionCard(r);
+    expect(card.style.cursor).toBe('pointer');
+    expect(card.textContent).toContain('Uses a session token');
+    await act(async () => { card.click(); });
+    expect(mockBooked).toEqual(['s1']);
+    expect(r.text()).toContain('Slot reserved');
+    expect(r.text()).toContain('a session token');
+    expect(r.text()).not.toContain('Repeat weekly');
+    await r.unmount();
+  });
+
+  test('none left: a red No session token and the primary Buy button', async () => {
+    jest.setSystemTime(AT_OPEN);
+    mockPackage = SINGLE;
+    mockTokens = singleTokens([]);
+    const r = await renderScreen(<BookSession bare demoSelectedDate="2026-10-12" />);
+    expect(r.text()).toContain('No session token');
+    expect(r.button('Buy a session token - $65|a1|tier|primary')).not.toBeNull();
+    expect(sessionCard(r).style.cursor).toBe('default');
+    await r.unmount();
+  });
+
+  test('no Buy button while the athlete is not paid up', async () => {
+    jest.setSystemTime(AT_OPEN);
+    mockPackage = SINGLE;
+    mockTokens = singleTokens([]);
+    mockBillingStatus = 'pending';
+    const r = await renderScreen(<BookSession bare demoSelectedDate="2026-10-12" />);
+    expect(r.text()).not.toContain('Buy a session token');
+    await r.unmount();
+  });
+
+  test('a monthly athlete still gets Repeat weekly and the monthly banner', async () => {
+    jest.setSystemTime(AT_OPEN);
+    const r = await renderScreen(<BookSession bare demoSelectedDate="2026-10-12" />);
+    expect(r.text()).toContain('Your tokens this period');
+    expect(r.text()).not.toContain('Buy a session token');
+    await act(async () => { sessionCard(r).click(); });
+    expect(r.text()).toContain('Repeat weekly');
+    await r.unmount();
+  });
+
+  test('the confirmation names the session token the write spent, never a bonus token', async () => {
+    jest.setSystemTime(AT_OPEN);
+    mockPackage = SINGLE;
+    // After the write the screen's own tokens no longer list the spent token.
+    mockTokens = singleTokens([]);
+    mockTokens.left = 1; // an ops comp keeps the card tappable for the tap itself
+    mockBook = async () => ({ status: 'confirmed', chargedFrom: 'grace', graceTokenId: 'single_cs_1' });
+    const r = await renderScreen(<BookSession bare demoSelectedDate="2026-10-12" />);
+    await act(async () => { sessionCard(r).click(); });
+    expect(r.text()).toContain('Slot reserved');
+    expect(r.text()).toContain('a session token');
+    expect(r.text()).not.toContain('a bonus token');
+    await r.unmount();
+  });
+
+  // Owner ruling 2026-10-01: single tokens go on sale when booking opens.
+  test('before the gate there is no Buy button, only the line saying when', async () => {
+    jest.setSystemTime(BEFORE);
+    mockPackage = SINGLE;
+    mockTokens = singleTokens([]);
+    const r = await renderScreen(<BookSession bare demoSelectedDate="2026-10-12" />);
+    expect(r.text()).toContain('No session token');
+    expect(r.text()).not.toContain('Buy a session token');
+    expect(r.text()).toContain('Single tokens are available from Sat, Oct 10 at 7 AM.');
+    expect(r.text()).toContain('Booking opens Sat, Oct 10 at 7 AM');
+    expect(sessionCard(r).style.cursor).toBe('default');
+    await r.unmount();
   });
 });

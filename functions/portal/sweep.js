@@ -16,6 +16,10 @@
  * same-day promotion, portal/promotion.js) and is closed here the next
  * morning.
  *
+ * A single-token athlete (owner rulings 2026-09-29/30) needs no branch
+ * here: the entry held one of their own purchased season tokens, closing it
+ * frees that token, and the notice says so like everyone else's.
+ *
  * The body is a plain exported function on a fixed clock so the emulator
  * harness can drive it; index.js schedules it daily at 06:00 Chicago.
  */

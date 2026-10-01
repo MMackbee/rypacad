@@ -367,6 +367,29 @@ lint, frontend 44 suites / 235 tests, build all pass. Remaining:
    one live $65 smoke purchase, refunded and voided. Hard stop Oct 9: if not
    ready, keep `840ed77`'s refusal and sell no singles.
 
+**Update 2026-10-01 - merged onto develop on branch `single/merge`
+(`../wt-single-merge`), and a new owner ruling.** Single tokens are NOT
+available until booking opens, Sat, Oct 10, 2026 at 7:00 AM Chicago. The
+sale opens by the clock on both sides (`functions/portal/single.js`
+`saleOpen`, `frontend/src/portal/data/singleToken.js` `saleOpen` - both are
+the booking gate, no second date), so the code deploys before Oct 10 and
+nothing is flipped on the day. `SINGLE_ON_SALE` (section 9) is gone. What
+changes in the list above:
+
+- Item 3 is done by the merge. The major finding in item 2 is fixed (the
+  token meter names the session each bought token was used on and carries
+  the Buy button).
+- Item 4 cannot be run on the merged code before Oct 10 - checkout refuses
+  `single-not-open`. Use `node scripts/check-stripe-key.mjs` (it now
+  rehearses the single token's payment-mode session with the TEST key) or
+  rehearse from `../wt-single-int`. RUNBOOK 10.1.
+- Item 5 is now: all functions (15) -> firestore rules -> push; the live
+  smoke purchase is at 7:00 AM on Oct 10, not before. RUNBOOK 10.3 and 10.4
+  have the order and what a family sees between steps.
+- Waitlist: the sweep mints nothing for anyone (section 3.6, item 10);
+  the single branch's "no bonus for a single-only athlete" branch was
+  dropped in the merge.
+
 ## 5. Worktrees and teardown
 
 `../wt-single-int`, `../wt-single-l1`, `../wt-single-l2`, `../wt-single-l3`

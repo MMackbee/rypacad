@@ -17,6 +17,7 @@ import { facilitySourceLabel, householdFacility } from '../data/facility';
 import { FACILITY_ACCESS } from '../data/packages';
 import { CONNECTED_LINE, PAY_NOW, PENDING_PLAN_LINE, SINGLE_PLAN_LINE } from '../data/billingCopy';
 import { contractEnabled } from '../data/contractFlag';
+import { saleOpen, SINGLE_NOT_OPEN_LINE } from '../data/singleToken';
 import useBillingHub from '../hooks/billing';
 
 /**
@@ -115,7 +116,9 @@ export default function Billing({
             ) : (
               members.map((member) => (
                 <MemberSection key={member.athleteId} name={member.name}>
-                  <TokenMeter member={member} defaultOpen={members.length === 1} showPrices={staff} />
+                  {/* The single token is bought one at a time (ruling 2026-09-29/30): its
+                      meter carries the Buy button, from the day they go on sale; staff never pay. */}
+                  <TokenMeter member={member} defaultOpen={members.length === 1} showPrices={staff} buy={!staff} />
                   <CoachingLine coaching={member.coaching} />
                   {contractEnabled() ? (
                     // Athlete detail is a parent/staff route; the athlete's own is the Contract.
@@ -150,7 +153,9 @@ const SURFACES = {
  * The membership's standing — Stripe's status, the contract's copy, dates
  * only when recorded. Sprint 20 (spec 4.4): the `pending` branch lists one
  * Pay now per unpaid athlete (createCheckoutSession) instead of the card
- * portal CTA - there is no card to update before the first checkout.
+ * portal CTA - there is no card to update before the first checkout. A
+ * single-token athlete (`perPurchase`) gets the line saying when instead of
+ * a button until single tokens go on sale (owner ruling 2026-10-01).
  */
 function StatusHero({ status, portalUrl, staff = false }) {
   if (!status) return null;
@@ -173,8 +178,13 @@ function StatusHero({ status, portalUrl, staff = false }) {
       {cta && status.status === 'pending' ? (
         pendingAthletes.map((a) => (
           <div key={a.athleteId} style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 12, marginTop: 12 }}>
-            <div style={{ flex: 1, minWidth: 0, font: `600 13px ${font.body}`, color: color.text }}>{a.name}</div>
-            <PayButton athleteId={a.athleteId} product="tier" label={PAY_NOW} height={44} style={{ width: 132, flex: 'none' }} />
+            <div style={{ flex: 1, minWidth: 0, font: `600 13px ${font.body}`, color: color.text }}>
+              {a.name}
+              {a.perPurchase && !saleOpen() ? <Body size={11} tone={color.textTertiary} style={{ marginTop: 3 }}>{SINGLE_NOT_OPEN_LINE}</Body> : null}
+            </div>
+            {a.perPurchase && !saleOpen() ? null : (
+              <PayButton athleteId={a.athleteId} product="tier" label={PAY_NOW} height={44} style={{ width: 132, flex: 'none' }} />
+            )}
           </div>
         ))
       ) : cta ? (

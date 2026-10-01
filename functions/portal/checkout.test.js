@@ -1,19 +1,28 @@
 'use strict';
 const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const path = require('node:path');
 const {test, run} = require('./tiny');
+const lib = require('./lib');
 const prepaid = require('./prepaid');
+const single = require('./single');
 const checkout = require('./checkout');
 
 process.env.PORTAL_URL = 'https://portal.test';
 process.env.STRIPE_MODE = 'test';
 delete process.env.STRIPE_SIBLING_COUPON; // the sibling test sets it itself
-const CAT = {test: {'t-6': 'price_t6', 'elite': 'price_elite', 'single': null,
-  'facility-access': 'price_fac'}, live: {}};
+const CAT = {test: {'t-6': 'price_t6', 'elite': 'price_elite',
+  'single': 'price_single', 'facility-access': 'price_fac'}, live: {}};
 const OCT = Date.parse('2026-10-05T18:00:00Z');
+const NOV12 = Date.parse('2026-11-12T18:00:00Z');
+// The instant booking opens, and with it the single token's sale (owner
+// ruling 2026-10-01). OCT is before it; the single cases run at OPEN.
+const OPEN = lib.BOOKING_OPENS_AT;
 
 /**
  * @param {!Object} docs `{'athletes/a1': {...}}`.
- * @return {!Object} A Firestore stand-in for `collection().doc().get()`.
+ * @return {!Object} A Firestore stand-in for `collection().doc().get()`
+ *     and `collection().where(field, '==', v).get()`.
  */
 function fakeDb(docs) {
   return {collection: (c) => ({
@@ -42,14 +51,19 @@ function fakeDb(docs) {
 }
 /**
  * @param {!Array} calls Receives every `sessions.create` body.
- * @param {number=} cents `unit_amount` of every price.
- * @return {!Object} A Stripe stand-in.
+ * @param {number=} cents `unit_amount` of every monthly price.
+ * @param {!Object=} over Fields merged into every retrieved price.
+ * @return {!Object} A Stripe stand-in. `price_single` is the one-time $65
+ *     price; every other price is typeless, as the monthly cases expect.
  */
-function fakeStripe(calls, cents) {
+function fakeStripe(calls, cents, over) {
   const sessions = {};
   return {
-    prices: {retrieve: async (id) => ({id, unit_amount: cents || 29900,
-      currency: 'usd'})},
+    prices: {retrieve: async (id) => (id === 'price_single' ?
+      Object.assign({id, type: 'one_time', unit_amount: 6500,
+        currency: 'usd'}, over) :
+      Object.assign({id, unit_amount: cents || 29900, currency: 'usd'},
+          over))},
     checkout: {sessions: {
       create: async (body) => {
         calls.push(body);
@@ -88,9 +102,36 @@ const DOCS = {
   'users/u-femi': {role: 'athlete', athleteId: 'femi', householdId: 'oye'},
   'packages/t-6': {kind: 'tokens', tokens: 6, name: '6 tokens'},
   'packages/elite': {kind: 'elite', tokens: null, name: 'Elite'},
-  'athletes/sol': {householdId: 'novak', packageId: 'single',
+  'athletes/sol': {name: 'Sol', householdId: 'novak', packageId: 'single',
     billing: {status: 'pending'}},
   'packages/single': {kind: 'single', tokens: 1, name: 'Single token'},
+  // An athlete moved off Single by staff: payment-pending on t-6.
+  'athletes/mover': {householdId: 'novak', packageId: 't-6',
+    billing: {status: 'active', oneTime: true, subscriptionId: null}},
+  // A package whose KIND is single under another id.
+  'athletes/kindsol': {name: 'Kit', householdId: 'novak',
+    packageId: 'single-legacy', billing: {status: 'pending'}},
+  'packages/single-legacy': {kind: 'single', tokens: 1, name: 'Single'},
+  'athletes/osa': {name: 'Osa', householdId: 'oye', packageId: 'single'},
+  'users/u-osa': {role: 'athlete', athleteId: 'osa', householdId: 'oye'},
+  'households/pd': {guardian: {email: 'p@example.test'},
+    membership: {status: 'past_due'}},
+  'athletes/pdsol': {name: 'Pia', householdId: 'pd', packageId: 'single',
+    billing: {status: 'pending'}},
+  'users/u-pd': {role: 'parent', householdId: 'pd'},
+  'households/lap': {guardian: {email: 'l@example.test'},
+    membership: {status: 'lapsed'}},
+  'athletes/tia': {name: 'Tia', householdId: 'lap', packageId: 'single',
+    billing: {status: 'pending'}},
+  'athletes/tib': {name: 'Tib', householdId: 'lap', packageId: 't-6',
+    billing: {status: 'lapsed', subscriptionId: 'sub_tib'}},
+  'users/u-lap': {role: 'parent', householdId: 'lap'},
+  'households/leg': {guardian: {email: 'g@example.test'},
+    membership: {status: 'lapsed'}},
+  'athletes/leo': {name: 'Leo', householdId: 'leg', packageId: 'single',
+    billing: {status: 'pending'}},
+  'athletes/lex': {name: 'Lex', householdId: 'leg', packageId: 't-6'},
+  'users/u-leg': {role: 'parent', householdId: 'leg'},
 };
 // novak without max's Elite or fac's add-on: either one now refuses a
 // facility checkout for the rest of the family (checkout-family.test.js).
@@ -110,10 +151,33 @@ const call = (data, c, over) => {
  * @param {!Promise} p The handler call.
  * @param {string} code Expected HttpsError code.
  * @param {string} reason Expected `details.reason`.
+ * @param {string=} message Expected copy, when given.
  */
-async function refused(label, p, code, reason) {
+async function refused(label, p, code, reason, message) {
   await assert.rejects(p, (e) => e.code === code &&
-      e.details && e.details.reason === reason, label);
+      e.details && e.details.reason === reason &&
+      (message === undefined || e.message === message), label);
+}
+/**
+ * `call` with a fresh sessions.create spy; the refusal must come first.
+ * @param {string} label The case.
+ * @param {!Object} data The request.
+ * @param {!Object} c The context.
+ * @param {!Object} over Deps overrides; `docs` replaces entries of DOCS,
+ *     `price` is merged into the retrieved price, `now` is the clock (OPEN
+ *     when absent: single tokens are on sale).
+ * @param {string} reason Expected `details.reason`.
+ * @param {string=} message Expected copy.
+ */
+async function refusedFirst(label, data, c, over, reason, message) {
+  const calls = [];
+  const o = over || {};
+  const deps = {stripe: fakeStripe(calls, 29900, o.price),
+    now: o.now === undefined ? OPEN : o.now};
+  if (o.docs) deps.db = fakeDb(Object.assign({}, DOCS, o.docs));
+  await refused(label, call(data, c, deps).p, 'failed-precondition', reason,
+      message);
+  assert.equal(calls.length, 0, `${label}: sessions.create never called`);
 }
 
 test('tier before Nov 1: the exact session body', async () => {
@@ -143,10 +207,9 @@ test('tier before Nov 1: the exact session body', async () => {
 });
 
 test('athlete role, existing customer, Google account, prorated', async () => {
-  const nov12 = Date.parse('2026-11-12T18:00:00Z');
   const {calls, p} = call({athleteId: 'femi', product: 'tier'},
       ctx('u-femi', {firebase: {sign_in_provider: 'google.com'},
-        email_verified: false}), {now: nov12});
+        email_verified: false}), {now: NOV12});
   await p;
   const b = calls[0];
   assert.equal(b.customer, 'cus_oye');
@@ -239,33 +302,95 @@ test('refusals in the contract order', async () => {
       ctx('u-nina'), {stripe: boom}).p, 'unavailable', 'stripe-error');
 });
 
-test('single token (one-time, 2026-09-29): refused before any Stripe call',
+const LIFE_MS = 24 * 60 * 60 * 1000 - 5 * 60 * 1000;
+const metaOf = (hh, ath) => ({householdId: hh, athleteId: ath,
+  product: 'tier', packageId: 'single'});
+/**
+ * The single-token body the spec pins, for the novak family's parent.
+ * @param {string} ath The athlete id.
+ * @param {string} name The athlete's name.
+ * @param {number} nowMs The clock.
+ * @return {!Object} The expected `sessions.create` body.
+ */
+function singleBody(ath, name, nowMs) {
+  return {
+    mode: 'payment',
+    client_reference_id: `novak__${ath}__tier`,
+    line_items: [{price: 'price_single', quantity: 1}],
+    payment_method_types: ['card'],
+    metadata: metaOf('novak', ath),
+    payment_intent_data: {metadata: metaOf('novak', ath),
+      description: `Single session token - ${name}`},
+    custom_text: {submit: {message: 'One-time payment: one session token ' +
+      `for ${name}, good through Sat, Feb 27, 2027.`}},
+    expires_at: Math.floor((nowMs + LIFE_MS) / 1000),
+    success_url: `https://portal.test/portal/family?paid=${ath}` +
+        '&cs={CHECKOUT_SESSION_ID}&single=1',
+    cancel_url: 'https://portal.test/portal/family',
+    customer_email: 'nina@example.test',
+    customer_creation: 'always',
+  };
+}
+
+test('single: not on sale until booking opens (2026-10-01), no Stripe call',
     async () => {
       const touched = [];
-      const spy = {prices: {retrieve: async (id) => {
-        touched.push(id);
-        return {id, unit_amount: 6500, currency: 'usd'};
-      }}, checkout: {sessions: {create: async (b) => {
-        touched.push(b);
-        return {url: 'x'};
-      }}}};
-      const cat = {test: Object.assign({}, CAT.test,
-          {single: 'price_single'}), live: {}};
-      await refused('single', call({athleteId: 'sol', product: 'tier'},
-          ctx('u-nina'), {stripe: spy, catalogue: cat}).p,
-      'failed-precondition', 'single-one-time');
+      const note = (what) => async (x) => {
+        touched.push([what, x]);
+        return {id: 'cs_x', status: 'open', url: 'x'};
+      };
+      const spy = {prices: {retrieve: note('price')}, checkout: {sessions: {
+        create: note('create'), retrieve: note('retrieve'),
+        expire: note('expire')}}};
+      const NOT_YET = 'Single tokens are available from Sat, Oct 10 at 7 AM. ' +
+          'Nothing has been charged.';
+      const early = (label, athleteId, over) => refused(label, call(
+          {athleteId, product: 'tier'}, ctx('u-nina'),
+          Object.assign({stripe: spy}, over)).p,
+      'failed-precondition', 'single-not-open', NOT_YET);
+      // The gate is booking's own (lib.BOOKING_OPENS_AT), not a second date.
+      assert.equal(OPEN, Date.parse('2026-10-10T12:00:00Z'));
+      assert.equal(single.saleOpen(OPEN - 1), false);
+      assert.equal(single.saleOpen(OPEN), true);
+      assert.equal(single.saleOpen(OPEN), lib.bookingOpen(OPEN, null));
+      await early('single, Oct 5', 'sol');
+      await early('single, one millisecond early', 'sol', {now: OPEN - 1});
       // Same refusal when the packages/single doc is missing in Firestore.
       const noPkg = Object.assign({}, DOCS);
       delete noPkg['packages/single'];
-      await refused('single, no package doc', call(
-          {athleteId: 'sol', product: 'tier'}, ctx('u-nina'),
-          {stripe: spy, catalogue: cat, db: fakeDb(noPkg)}).p,
-      'failed-precondition', 'single-one-time');
+      await early('single, no package doc', 'sol', {db: fakeDb(noPkg)});
+      await early('a package of kind single', 'kindsol');
+      // A remembered open session is not handed back before the gate.
+      await early('single with a remembered session', 'sol', {db: fakeDb(
+          Object.assign({}, DOCS, {'athletes/sol': {name: 'Sol',
+            householdId: 'novak', packageId: 'single',
+            billing: {status: 'active', oneTime: true, subscriptionId: null},
+            pendingCheckout: {tier: {sessionId: 'cs_x',
+              priceId: 'price_single', discount: 'none'}}}}))});
+      // The athlete's own login is refused the same way.
+      await refused('single, the athlete\'s own login', call(
+          {athleteId: 'osa', product: 'tier'}, ctx('u-osa'), {stripe: spy}).p,
+      'failed-precondition', 'single-not-open', NOT_YET);
       assert.deepEqual(touched, [], 'Stripe was never called');
-      // The monthly packages are untouched by the guard.
+      // The same words the client pins: data/singleToken.js builds its copy
+      // from calendar.js BOOKING_OPENS_LABEL.
+      const cal = fs.readFileSync(path.join(__dirname,
+          '../../frontend/src/portal/data/calendar.js'), 'utf8');
+      const label = /BOOKING_OPENS_LABEL = '([^']+)'/.exec(cal);
+      assert.ok(label, 'BOOKING_OPENS_LABEL not found in calendar.js');
+      assert.equal(NOT_YET, `Single tokens are available from ${label[1]}. ` +
+          'Nothing has been charged.');
+      // From the gate on, the same request is sold.
+      const open = call({athleteId: 'sol', product: 'tier'}, ctx('u-nina'),
+          {now: OPEN});
+      await open.p;
+      assert.equal(open.calls.length, 1);
+      assert.equal(open.calls[0].mode, 'payment');
+      // The monthly packages are untouched by the gate.
       const ok = call({athleteId: 'lena', product: 'tier'}, ctx('u-nina'));
       assert.equal((await ok.p).url, 'https://checkout.stripe.com/c/cs_test_1');
       assert.equal(ok.calls.length, 1);
+      assert.equal(ok.calls[0].mode, 'subscription');
     });
 
 test('sibling discount (2026-09-30): 2+ membership families, coupon or code',
@@ -302,6 +427,21 @@ test('sibling discount (2026-09-30): 2+ membership families, coupon or code',
         {householdId: 'novak', packageId: null}}));
       assert.equal((await checkout.siblingEligible(only, 'novak', 'lena',
           't-6')).eligible, false);
+      // The single token is not a membership: `only` still holds mover, a
+      // single buyer moved to t-6 and yet to pay for it (a one-time billing
+      // block), and that never counts. Once the subscription is paid, it
+      // does.
+      assert.equal(DOCS['athletes/mover'].billing.oneTime, true);
+      const moved = fakeDb(Object.assign({}, DOCS, {'athletes/max':
+        {householdId: 'novak', packageId: 'single'}, 'athletes/fac':
+        {householdId: 'novak', packageId: null}, 'athletes/mover':
+        {householdId: 'novak', packageId: 't-6', billing: {status: 'active',
+          oneTime: false, subscriptionId: 'sub_mover'}}}));
+      assert.deepEqual(await sib(moved, 'novak', 'lena', 't-6'),
+          {eligible: true, lower: null});
+      // A single token never earns the discount either (no rank).
+      assert.deepEqual(await sib(two, 'novak', 'sol', 'single'),
+          {eligible: false, lower: null});
       // A never-paid (pending) sibling does not count (review 2026-09-30).
       const unpaid = fakeDb(Object.assign({}, DOCS, {'athletes/max':
         {householdId: 'novak', packageId: 'elite',
@@ -525,5 +665,205 @@ test('a coupon refused for any reason falls back to the code field',
         delete process.env.STRIPE_SIBLING_COUPON;
       }
     });
+
+test('single: the exact payment-mode body; prepaidFor never used',
+    async () => {
+      const orig = prepaid.prepaidPeriodFor;
+      let prepaidCalls = 0;
+      prepaid.prepaidPeriodFor = (...a) => {
+        prepaidCalls++;
+        return orig(...a);
+      };
+      // novak has paid siblings and a coupon is configured: the single
+      // token is not a membership, so neither a discount nor the code field.
+      process.env.STRIPE_SIBLING_COUPON = 'SIBLING20';
+      try {
+        for (const now of [OPEN, NOV12]) {
+          const {calls, p} = call({athleteId: 'sol', product: 'tier'},
+              ctx('u-nina'), {now});
+          assert.deepEqual(await p,
+              {url: 'https://checkout.stripe.com/c/cs_test_1'});
+          assert.equal(calls.length, 1);
+          assert.deepEqual(calls[0], singleBody('sol', 'Sol', now));
+        }
+        assert.equal(prepaidCalls, 0, 'no prepaid month for a single');
+        await call({athleteId: 'lena', product: 'tier'}, ctx('u-nina')).p;
+        assert.ok(prepaidCalls > 0, 'the spy sees the monthly path');
+      } finally {
+        prepaid.prepaidPeriodFor = orig;
+        delete process.env.STRIPE_SIBLING_COUPON;
+      }
+      assert.equal(new Date(`${single.SEASON_END}T12:00:00Z`)
+          .toLocaleDateString('en-US', {weekday: 'short', month: 'short',
+            day: 'numeric', year: 'numeric', timeZone: 'UTC'}),
+      checkout.SEASON_END_LABEL, 'the copy names single.SEASON_END');
+    });
+
+test('single: a linked customer only; athlete role; kind single', async () => {
+  const {calls, p} = call({athleteId: 'osa', product: 'tier'}, ctx('u-osa'),
+      {now: OPEN});
+  await p;
+  assert.equal(calls[0].customer, 'cus_oye');
+  assert.equal('customer_email' in calls[0], false);
+  assert.equal('customer_creation' in calls[0], false);
+  assert.equal(calls[0].success_url, 'https://portal.test/portal/home' +
+      '?paid=osa&cs={CHECKOUT_SESSION_ID}&single=1');
+  const noPkg = Object.assign({}, DOCS);
+  delete noPkg['packages/single'];
+  const bare = call({athleteId: 'sol', product: 'tier'}, ctx('u-nina'),
+      {db: fakeDb(noPkg), now: OPEN});
+  await bare.p;
+  assert.deepEqual(bare.calls[0], singleBody('sol', 'Sol', OPEN),
+      'packageId single alone is enough (no packages doc)');
+  const kind = call({athleteId: 'kindsol', product: 'tier'}, ctx('u-nina'),
+      {now: OPEN});
+  await kind.p;
+  assert.deepEqual(kind.calls[0], singleBody('kindsol', 'Kit', OPEN),
+      'a package of kind single sells the catalogue single price');
+});
+
+test('single: repeat purchases allowed; a monthly plan is refused',
+    async () => {
+      const paidOnce = () => Object.assign({}, DOCS, {'athletes/sol': {
+        name: 'Sol', householdId: 'novak', packageId: 'single', billing: {
+          status: 'active', oneTime: true, subscriptionId: null}}});
+      const repeat = call({athleteId: 'sol', product: 'tier'}, ctx('u-nina'),
+          {db: fakeDb(paidOnce()), now: OPEN});
+      await repeat.p;
+      assert.equal(repeat.calls[0].mode, 'payment');
+      // Two taps on Buy share one open page (QA S9); once that session is
+      // paid, the next Buy is a new session - one more token.
+      const docs = paidOnce();
+      const calls = [];
+      const st = fakeStripe(calls);
+      const deps = {db: fakeDb(docs), stripe: st, now: OPEN, catalogue: CAT};
+      const buy = () => checkout.createCheckoutSessionHandler(
+          {athleteId: 'sol', product: 'tier'}, ctx('u-nina'), deps);
+      const first = await buy();
+      assert.deepEqual(docs['athletes/sol'].pendingCheckout.tier,
+          {sessionId: 'cs_test_1', priceId: 'price_single', discount: 'none',
+            createdAt: new Date(OPEN).toISOString()});
+      assert.equal((await buy()).url, first.url);
+      assert.equal(calls.length, 1);
+      st.sessions.cs_test_1.status = 'complete';
+      assert.equal((await buy()).url,
+          'https://checkout.stripe.com/c/cs_test_2');
+      assert.equal(calls.length, 2);
+      assert.equal(calls[1].mode, 'payment');
+      const academy = 'This athlete still has a monthly plan - contact the ' +
+          'academy to switch to session tokens.';
+      await refusedFirst('active without oneTime', {athleteId: 'sol',
+        product: 'tier'}, ctx('u-nina'), {docs: {'athletes/sol': {
+        householdId: 'novak', packageId: 'single',
+        billing: {status: 'active'}}}}, 'already-active', academy);
+      await refusedFirst('past_due athlete', {athleteId: 'sol',
+        product: 'tier'}, ctx('u-nina'), {docs: {'athletes/sol': {
+        householdId: 'novak', packageId: 'single',
+        billing: {status: 'past_due', subscriptionId: 'sub_x'}}}},
+      'already-active', academy);
+      await refusedFirst('oneTime alongside a live subscription',
+          {athleteId: 'sol', product: 'tier'}, ctx('u-nina'), {docs: {
+            'athletes/sol': {householdId: 'novak', packageId: 'single',
+              billing: {status: 'active', oneTime: true,
+                subscriptionId: 'sub_x'}}}}, 'already-active', academy);
+    });
+
+test('single: household gates', async () => {
+  await refusedFirst('past_due household', {athleteId: 'pdsol',
+    product: 'tier'}, ctx('u-pd'), {}, 'household-past-due',
+  'A card on this family account needs updating before you can buy a ' +
+      'session token. Nothing has been charged.');
+  const lap = call({athleteId: 'tia', product: 'tier'}, ctx('u-lap'),
+      {now: OPEN});
+  await lap.p;
+  assert.equal(lap.calls[0].client_reference_id, 'lap__tia__tier',
+      'lapsed, every sibling billed: allowed');
+  await refusedFirst('lapsed with a legacy sibling', {athleteId: 'leo',
+    product: 'tier'}, ctx('u-leg'), {}, 'household-lapsed-legacy',
+  'This family account needs the academy\'s help before you can buy a ' +
+      'session token. Nothing has been charged.');
+});
+
+test('single: no facility add-on', async () => {
+  await refusedFirst('facility for sol', {athleteId: 'sol',
+    product: 'facility'}, ctx('u-nina'), {}, 'single-no-facility');
+  await refusedFirst('facility for a kind-single package', {
+    athleteId: 'kindsol', product: 'facility'}, ctx('u-nina'), {
+    docs: {'athletes/kindsol': {householdId: 'novak',
+      packageId: 'single-legacy', billing: {status: 'active',
+        oneTime: true}}}}, 'single-no-facility');
+});
+
+test('single: season cutoff (Feb 28 00:00 Chicago)', async () => {
+  const cutoff = Date.UTC(2027, 1, 28, 6) / 1000;
+  assert.equal(cutoff, 1803794400);
+  await refusedFirst('under 30 minutes left', {athleteId: 'sol',
+    product: 'tier'}, ctx('u-nina'),
+  {now: Date.parse('2027-02-28T05:31:00Z')}, 'season-over',
+  'Session tokens for this season are no longer on sale. Nothing has ' +
+      'been charged.');
+  for (const iso of ['2027-02-28T05:29:00Z', '2027-02-27T12:00:00Z']) {
+    const ok = call({athleteId: 'sol', product: 'tier'}, ctx('u-nina'),
+        {now: Date.parse(iso)});
+    await ok.p;
+    assert.equal(ok.calls[0].expires_at, cutoff, `${iso}: capped`);
+  }
+  const monthly = call({athleteId: 'lena', product: 'tier'}, ctx('u-nina'),
+      {now: Date.parse('2027-02-28T05:31:00Z')});
+  await monthly.p;
+  assert.equal(monthly.calls[0].mode, 'subscription',
+      'the cutoff is for single tokens only');
+});
+
+test('price-mismatch, never stripe-error, before any session', async () => {
+  const cases = {
+    'a recurring type': {type: 'recurring'},
+    'a recurring object': {recurring: {interval: 'month'}},
+    'unit_amount 650': {unit_amount: 650},
+    'custom_unit_amount': {custom_unit_amount: {enabled: true}},
+    'another currency': {currency: 'eur'},
+  };
+  for (const [label, price] of Object.entries(cases)) {
+    await refusedFirst(label, {athleteId: 'sol', product: 'tier'},
+        ctx('u-nina'), {price}, 'price-mismatch');
+  }
+  await refusedFirst('a t-6 price of type one_time', {athleteId: 'lena',
+    product: 'tier'}, ctx('u-nina'), {price: {type: 'one_time'}},
+  'price-mismatch');
+  const failing = {prices: fakeStripe([]).prices, checkout: {sessions: {
+    create: async () => {
+      throw new Error('stripe down');
+    }}}};
+  await refused('sessions.create failing is stripe-error', call(
+      {athleteId: 'sol', product: 'tier'}, ctx('u-nina'),
+      {stripe: failing, now: OPEN}).p, 'unavailable', 'stripe-error');
+});
+
+test('a oneTime athlete moved to t-6 gets the subscription body', async () => {
+  const {calls, p} = call({athleteId: 'mover', product: 'tier'},
+      ctx('u-nina'));
+  await p;
+  assert.deepEqual(calls[0], {
+    mode: 'subscription',
+    // novak: max is a paid Elite sibling, and no coupon is configured here.
+    allow_promotion_codes: true,
+    client_reference_id: 'novak__mover__tier',
+    line_items: [
+      {price: 'price_t6', quantity: 1},
+      {quantity: 1, price_data: {currency: 'usd', unit_amount: 29900,
+        product_data: {name: '6 tokens - November 2026, prepaid'}}},
+    ],
+    subscription_data: {trial_end: 1796104800, metadata: {
+      householdId: 'novak', athleteId: 'mover', product: 'tier',
+      packageId: 't-6', prepaidPeriodKey: '2026-11-01', prepaidTokens: '6'}},
+    custom_text: {submit: {message: 'Today\'s charge covers November 2026 ' +
+        'in full. Stripe calls the time until monthly billing starts on ' +
+        'Dec 1 a free trial - nothing else is charged before then.'}},
+    success_url: 'https://portal.test/portal/family?paid=mover' +
+        '&cs={CHECKOUT_SESSION_ID}',
+    cancel_url: 'https://portal.test/portal/family',
+    customer_email: 'nina@example.test',
+  });
+});
 
 run();

@@ -5,14 +5,34 @@
  * rules), then exercises each new rules clause as a real user via an
  * unsigned JWT (the emulator accepts alg:none). Exit 1 on any FAIL.
  *   node --env-file=scripts/emulator.env scripts/verify-rules.mjs
+ *
+ * TWO PASSES (single token, owner rulings 2026-09-29/30). The emulator's
+ * rules-load endpoint (PUT /emulator/v1/projects/{p}:securityRules) loads
+ * rules for the probe project only, after a self-check (broken rules -> 400,
+ * firestore.rules -> 200):
+ *   Pass A  the real ../firestore.rules, expectations keyed on the real
+ *           clock (beforeGate: the Oct 10 booking gate).
+ *   Pass B  a copy whose ONE 'timestamp.value(1791633600000)' is replaced by
+ *           'timestamp.value(0)', every case with post-gate expectations.
+ * The real file is reloaded at the end. When this emulator build has no
+ * rules-load endpoint, Pass B runs against a SECOND firestore emulator
+ * started on a scratch copy (the script writes it and prints the command;
+ * set RULES_POSTGATE_EMULATOR_HOST to that emulator's host).
  */
-import { fsFields, fsValue, localEmulatorHost } from './lib/firestore-rest.mjs';
+import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { fsFields, fsValue, localEmulatorHost, LOCAL_HOSTS } from './lib/firestore-rest.mjs';
 
-const HOST = localEmulatorHost({ required: true });
+let HOST = localEmulatorHost({ required: true });
 const PROJECT = 'demo-rules-probe';
-const BASE = `http://${HOST}/v1/projects/${PROJECT}/databases/(default)/documents`;
+const baseFor = (host) => `http://${host}/v1/projects/${PROJECT}/databases/(default)/documents`;
+let BASE = baseFor(HOST);
 const GATE_MS = 1791633600000;
-const beforeGate = Date.now() < GATE_MS;
+const GATE_LITERAL = 'timestamp.value(1791633600000)';
+const GATE_ZERO = 'timestamp.value(0)';
+let beforeGate = Date.now() < GATE_MS;
 let failures = 0;
 
 const b64 = (o) => Buffer.from(JSON.stringify(o)).toString('base64url');
@@ -39,8 +59,10 @@ async function commitAs(auth, writes) {
 // A create (currentDocument.exists false) plus REQUEST_TIME transforms.
 const createWrite = (col, id, fields, serverTime = ['createdAt']) => ({ update: { name: docName(col, id), fields: fsFields(fields) }, currentDocument: { exists: false },
   updateTransforms: serverTime.map((fieldPath) => ({ fieldPath, setToServerValue: 'REQUEST_TIME' })) });
-// An update of the masked fields only; a masked field with no value is a delete.
-const patchWrite = (col, id, fields, mask = Object.keys(fields)) => ({ update: { name: docName(col, id), fields: fsFields(fields) }, updateMask: { fieldPaths: mask }, currentDocument: { exists: true } });
+// An update of the masked fields only; a masked field with no value is a delete. `serverTime` names fields set to
+// REQUEST_TIME beside the mask (the re-book's rebookedAt: serverTimestamp()).
+const patchWrite = (col, id, fields, mask = Object.keys(fields), serverTime = []) => ({ update: { name: docName(col, id), fields: fsFields(fields) }, updateMask: { fieldPaths: mask }, currentDocument: { exists: true },
+  ...(serverTime.length ? { updateTransforms: serverTime.map((fieldPath) => ({ fieldPath, setToServerValue: 'REQUEST_TIME' })) } : {}) });
 // The session's seat count moved by `delta`, written as a plain value like live.js createBooking / cancelBooking.
 async function seatWrite(sessionId, delta) {
   const booked = Number((await call('GET', `/sessions/${sessionId}`, null, 'owner')).body?.fields?.booked?.integerValue ?? 0);
@@ -62,14 +84,42 @@ async function listAs(auth, col, filters) {
 // not about it. taskWindow keeps its fixed December dates: the Nov 1 anchor it probes is a fixed date too.
 const dayOut = (n) => new Date(Date.now() + n * 86400000).toISOString().slice(0, 10);
 const [DAY1, DAY2] = [dayOut(5), dayOut(6)];
+/** One `commit` write: an update of `mask` (default: the given fields) plus REQUEST_TIME transforms. */
+const updateAs = (auth, col, id, fields, mask = Object.keys(fields), serverTime = []) => commitAs(auth, [patchWrite(col, id, fields, mask, serverTime)]);
+// Single token: s3 sits a day past DAY2, and a single athlete's 'period' charge needs a comp whose period covers the
+// session date (rules: compPeriodOk), so the comps follow DAY1 - the month DAY1 falls in, and the month before it.
+const DAY3 = dayOut(7);
+const monthOf = (y, m) => ({ key: new Date(Date.UTC(y, m, 1)).toISOString().slice(0, 10), end: new Date(Date.UTC(y, m + 1, 0)).toISOString().slice(0, 10) });
+const COMP = monthOf(Number(DAY1.slice(0, 4)), Number(DAY1.slice(5, 7)) - 1);
+const COMP_PREV = monthOf(Number(DAY1.slice(0, 4)), Number(DAY1.slice(5, 7)) - 2);
 function expect(label, actual, wanted) {
   const ok = actual === wanted;
   if (!ok) failures += 1;
   console.log(`  ${ok ? 'PASS' : 'FAIL'}  ${label} -> ${actual} (wanted ${wanted})`);
 }
 
+/** Load rules for the probe project only. @return {Promise<number>} The HTTP status. */
+async function loadRules(content) {
+  const res = await fetch(`http://${HOST}/emulator/v1/projects/${PROJECT}:securityRules`, {
+    method: 'PUT', headers: { 'content-type': 'application/json', authorization: 'Bearer owner' },
+    body: JSON.stringify({ rules: { files: [{ name: 'firestore.rules', content }] } }),
+  });
+  await res.text().catch(() => null);
+  return res.status;
+}
+/** The post-gate copy: the ONE booking-gate literal set to the epoch. */
+function postGateCopy(rules) {
+  const parts = rules.split(GATE_LITERAL);
+  if (parts.length !== 2) {
+    throw new Error(`expected exactly one '${GATE_LITERAL}' in firestore.rules, found ${parts.length - 1}`);
+  }
+  return parts.join(GATE_ZERO);
+}
+const BROKEN_RULES = "rules_version = '2';\nservice cloud.firestore {\n  match /databases/{database}/documents {\n" +
+  '    match /x/{id} { allow read: if nope(; }\n  }\n}\n';
+
 const uid = { parent: 'p-probe', athlete: 'a-probe', ops: 'ops-probe', kid: 'kid-probe', stranger: 's-probe',
-  eliteLogin: 'elite-probe', other: 'p-other-probe', coach: 'coach-probe' };
+  eliteLogin: 'elite-probe', other: 'p-other-probe', coach: 'coach-probe', frozen: 'pf-probe' };
 const t = {
   // 2026-10-01: a paid Elite athlete's own login (its answers hold before the Oct 10 gate), a parent in ANOTHER household, a coach.
   eliteLogin: token(uid.eliteLogin, { email: 'eli@example.com', email_verified: true }),
@@ -81,6 +131,7 @@ const t = {
   kidVerified: token(uid.kid, { email: 'Kid@Example.com', email_verified: true }),
   kidUnverified: token(uid.kid, { email: 'Kid@Example.com', email_verified: false }),
   stranger: token(uid.stranger, { email: 'x@example.com', email_verified: true }),
+  frozen: token(uid.frozen, { email: 'fern@example.com', email_verified: true }),
 };
 
 async function setup() {
@@ -109,6 +160,33 @@ async function setup() {
   // ath-elite so the expectation is 200 before AND after the Oct 10 gate.
   await seed('graceTokens', 'grace-probe', { athleteId: 'ath-elite', householdId: 'hh', expiresAt: '2026-12-31', reason: 'session-cancelled',
     sourceSessionId: 's-cancelled', createdBy: uid.ops, createdAt: new Date() });
+  await setupSingle();
+}
+
+// Single token (rulings 2026-09-29/30): one-time buyers, a legacy single
+// athlete on comps, an athlete who moved off single unpaid, a frozen household.
+async function setupSingle() {
+  const oneTime = { status: 'active', oneTime: true };
+  await seed('users', uid.frozen, { role: 'parent', householdId: 'hh-frozen', athleteId: null });
+  await seed('households', 'hh-frozen', { name: 'Frozen family', periodAnchorDay: 1, membership: { status: 'past_due' } });
+  for (const [id, extra] of [
+    ['ath-single', { packageId: 'single', billing: oneTime }],
+    ['ath-single2', { packageId: 'single', billing: oneTime }],
+    ['ath-single-legacy', { packageId: 'single' }],
+    ['ath-moved', { packageId: 't-6', billing: oneTime }],
+    ['ath-frozen', { packageId: 't-6', billing: { status: 'active' }, householdId: 'hh-frozen' }],
+  ]) await seed('athletes', id, { name: id, householdId: 'hh', contractMinutes: null, coachId: null, ...extra });
+  await seed('sessions', 's3', { date: DAY3, time: '4:00 PM', type: 'training', capacity: 15, booked: 0, status: 'scheduled' });
+  // 2026-10-01: a session whose day is long over, its one seat counted, for the member-cancel refusal (case 17).
+  await seed('sessions', 's-past', { date: '2026-09-01', time: '4:00 PM', type: 'training', capacity: 15, booked: 1, status: 'scheduled' });
+  const purchase = (athleteId, expiresAt) => ({ athleteId, householdId: 'hh', expiresAt, reason: 'single-purchase', sourceSessionId: null,
+    createdBy: 'stripe', createdAt: new Date() });
+  await seed('graceTokens', 'single_cs_probe', purchase('ath-single', '2027-02-27'));
+  await seed('graceTokens', 'single_cs_other', purchase('ath-single2', '2027-02-27'));
+  await seed('graceTokens', 'single_cs_void', purchase('ath-single', '2000-01-01'));
+  await seed('tokenPeriods', `ath-single-legacy_${COMP.key}`, { athleteId: 'ath-single-legacy', periodKey: COMP.key, periodEnd: COMP.end, granted: 1 });
+  await seed('tokenPeriods', `ath-single-legacy_${COMP_PREV.key}`, { athleteId: 'ath-single-legacy', periodKey: COMP_PREV.key, periodEnd: COMP_PREV.end, granted: 1 });
+  await seed('tokenPeriods', `ath-single_${COMP.key}`, { athleteId: 'ath-single', periodKey: COMP.key, periodEnd: COMP.end, granted: 0 });
 }
 const booking = (athleteId) => ({ athleteId, sessionId: 's1', date: DAY1, type: 'training', periodKey: '2026-11-01',
   status: 'confirmed', householdId: 'hh', createdBy: uid.parent, chargedFrom: 'period' });
@@ -135,11 +213,14 @@ export async function task4() {
 }
 
 async function teardown() {
-  for (const [c, ids] of Object.entries({ users: Object.values(uid), households: ['hh', 'hh-other'], sessions: ['s1', 's2', 's-full'],
-    athletes: ['ath-active', 'ath-absent', 'ath-pending', 'ath-elite', 'ath-elite-pending', 'ath-other', 'new-1', 'new-2', 'new-3', 'new-4'],
-    bookings: ['ath-active_s1', 'ath-absent_s1', 'ath-pending_s1', 'ath-elite_s1', 'ath-elite-pending_s1', 'ath-elite_s2'],
-    graceTokens: ['grace-probe'],
-    waitlist: ['s-full_ath-pending', 's-full_ath-elite', 's-full_ath-active'] })) for (const id of ids) await del(c, id);
+  for (const [c, ids] of Object.entries({ users: Object.values(uid), households: ['hh', 'hh-other', 'hh-frozen'], sessions: ['s1', 's2', 's3', 's-full', 's-past'],
+    athletes: ['ath-active', 'ath-absent', 'ath-pending', 'ath-elite', 'ath-elite-pending', 'ath-other', 'new-1', 'new-2', 'new-3', 'new-4',
+      'ath-single', 'ath-single2', 'ath-single-legacy', 'ath-moved', 'ath-frozen'],
+    bookings: ['ath-active_s1', 'ath-absent_s1', 'ath-pending_s1', 'ath-elite_s1', 'ath-elite-pending_s1', 'ath-elite_s2', 'ath-pending_s-old',
+      'ath-single_s1', 'ath-single2_s1', 'ath-single-legacy_s1', 'ath-moved_s1', 'ath-elite_s3', 'ath-single_s2', 'ath-single_s3', 'ath-frozen_s2', 'ath-active_s-past'],
+    graceTokens: ['grace-probe', 'single_cs_probe', 'single_cs_other', 'single_cs_void'],
+    tokenPeriods: [`ath-single-legacy_${COMP.key}`, `ath-single-legacy_${COMP_PREV.key}`, `ath-single_${COMP.key}`],
+    waitlist: ['s-full_ath-pending', 's-full_ath-elite', 's-full_ath-active', 's-full_ath-moved'] })) for (const id of ids) await del(c, id);
 }
 
 export async function task5() {
@@ -470,13 +551,128 @@ export async function taskWaitlist() {
   for (const id of ['ath-elite_w-booked', 'ath-elite_w-rebook']) await del('bookings', id);
 }
 
-export { setup, teardown, seed, del, call, createAs, commitAs, bookAs, listAs, expect, token, t, uid, BASE };
-if (process.argv[1] && process.argv[1].endsWith('verify-rules.mjs')) {
+/**
+ * The single-token cases (rulesChanges 1-19). Case 15 is task5's monthly
+ * status-only re-book, 17's future-session half is task5's member cancel and
+ * 18 is task4's 'booking: billing active'. Refusals run before the create that
+ * succeeds on the same doc id, so each 403 is refused for its own reason.
+ * 2026-10-01 (merged onto the waitlist audit): every booking, re-book and
+ * cancel below carries the session's count write in the same commit, as
+ * live.js writes it (rules: seatTakenInCommit / seatFreedInCommit), so a
+ * refusal is still the clause its label names. Sessions sit a few days out
+ * (DAY1-DAY3) and the comps follow DAY1 (COMP, COMP_PREV).
+ */
+export async function taskSingle() {
+  console.log('Single token: charge, billing, re-book and cancel gates' + (beforeGate ? ' (before Oct 10)' : ' (after Oct 10)'));
+  const open = beforeGate ? 403 : 200;
+  // A single athlete's booking names the period its session date falls in: the comp lookup is keyed on it.
+  const row = (athleteId, over = {}) => ({ ...booking(athleteId), periodKey: COMP.key, ...over });
+  const grace = (athleteId, graceTokenId, over = {}) => row(athleteId, { chargedFrom: 'grace', graceTokenId, ...over });
+  const mk = (id, fields) => bookAs(t.parent, id, fields);
+  expect('2. single: another athlete\'s token refused', await mk('ath-single_s1', grace('ath-single', 'single_cs_other')), 403);
+  expect('3. single: a voided token refused', await mk('ath-single_s1', grace('ath-single', 'single_cs_void')), 403);
+  expect('4. single: grace with no token id refused', await mk('ath-single_s1', row('ath-single', { chargedFrom: 'grace' })), 403);
+  expect('5. single: elite refused', await mk('ath-single_s1', row('ath-single', { chargedFrom: 'elite' })), 403);
+  expect('6. single: period with no comp refused', await mk('ath-single2_s1', row('ath-single2')), 403);
+  expect('9. single: period against a granted-0 comp refused', await mk('ath-single_s1', row('ath-single')), 403);
+  expect('1. single + own token', await mk('ath-single_s1', grace('ath-single', 'single_cs_probe')), open);
+  expect("8. legacy single: last month's comp on this month's session refused", await mk('ath-single-legacy_s1', row('ath-single-legacy', { periodKey: COMP_PREV.key })), 403);
+  expect("7. legacy single: period against this month's comp", await mk('ath-single-legacy_s1', row('ath-single-legacy')), open);
+  expect('10. moved off single, unpaid: booking refused', await mk('ath-moved_s1', booking('ath-moved')), 403);
+  expect('10. moved off single, unpaid: waitlist refused', await createAs(t.parent, 'waitlist', 's-full_ath-moved', entry('ath-moved'), ['joinedAt']), 403);
+  expect('19. Elite charged elite (open before the gate too)', await mk('ath-elite_s3', { ...booking('ath-elite'), sessionId: 's3', date: DAY3, chargedFrom: 'elite' }), 200);
+
+  // A single row the member cancelled; it had spent single_cs_probe.
+  await seed('bookings', 'ath-single_s2', { athleteId: 'ath-single', sessionId: 's2', date: DAY2, type: 'training', periodKey: COMP.key,
+    status: 'cancelled', householdId: 'hh', createdBy: uid.parent, createdAt: new Date(), chargedFrom: 'grace', graceTokenId: 'single_cs_probe',
+    cancelledBy: uid.parent, cancelReason: 'member' });
+  // A family's status flip with the session's count write beside it: + 1 for a re-book, - 1 for a cancel.
+  const flip = async (auth, id, fields, seat, serverTime = []) => commitAs(auth, [patchWrite('bookings', id, fields, undefined, serverTime), await seatWrite(id.split('_')[1], seat)]);
+  const rebook = (id, fields, auth = t.parent) => flip(auth, id, { status: 'confirmed', ...fields }, 1, ['rebookedAt']);
+  expect('12. single re-book, status only (a stale client) refused', await flip(t.parent, 'ath-single_s2', { status: 'confirmed' }, 1), 403);
+  expect('13. single re-book naming another athlete\'s token refused', await rebook('ath-single_s2', { chargedFrom: 'grace', graceTokenId: 'single_cs_other' }), 403);
+  expect('14. single re-book naming a voided token refused', await rebook('ath-single_s2', { chargedFrom: 'grace', graceTokenId: 'single_cs_void' }), 403);
+  // 2026-10-01: the re-decided charge alone is not enough - the seat count must follow it in the same commit.
+  expect('11. single re-book re-deciding its charge with no count write refused', await updateAs(t.parent, 'bookings', 'ath-single_s2',
+    { status: 'confirmed', chargedFrom: 'grace', graceTokenId: 'single_cs_probe' }, undefined, ['rebookedAt']), 403);
+  expect('11. single re-book re-deciding its charge, rebookedAt == request.time', await rebook('ath-single_s2', { chargedFrom: 'grace', graceTokenId: 'single_cs_probe' }), open);
+
+  await seed('bookings', 'ath-frozen_s2', { athleteId: 'ath-frozen', sessionId: 's2', date: DAY2, type: 'training', periodKey: '2026-11-01',
+    status: 'cancelled', householdId: 'hh-frozen', createdBy: uid.frozen, createdAt: new Date(), chargedFrom: 'period', cancelledBy: uid.frozen, cancelReason: 'member' });
+  expect('16. re-book in a past_due household refused', await flip(t.frozen, 'ath-frozen_s2', { status: 'confirmed' }, 1), 403);
+
+  await seed('bookings', 'ath-active_s-past', { athleteId: 'ath-active', sessionId: 's-past', date: '2026-09-01', type: 'training', periodKey: '2026-09-01',
+    status: 'confirmed', householdId: 'hh', createdBy: uid.parent, createdAt: new Date(), chargedFrom: 'period' });
+  expect('17. member cancel after the session day refused', await flip(t.parent, 'ath-active_s-past',
+    { status: 'cancelled', cancelledBy: uid.parent, cancelReason: 'member' }, -1), 403);
+
+  // Merge 2026-10-01: a cancel has no opens-at gate, so a booking paid with a bought token is cancelled the way any
+  // booking is - before the day is over, with the count - 1 in the same commit (s3 holds one seat, case 19's).
+  await seed('bookings', 'ath-single_s3', { athleteId: 'ath-single', sessionId: 's3', date: DAY3, type: 'training', periodKey: COMP.key,
+    status: 'confirmed', householdId: 'hh', createdBy: uid.parent, createdAt: new Date(), chargedFrom: 'grace', graceTokenId: 'single_cs_probe' });
+  const cancelled = { status: 'cancelled', cancelledBy: uid.parent, cancelReason: 'member' };
+  expect('20. single: member cancel of a coming session with no count write refused', await updateAs(t.parent, 'bookings', 'ath-single_s3', cancelled), 403);
+  expect('20. single: member cancel of a coming session, count - 1 in the same commit', await flip(t.parent, 'ath-single_s3', cancelled, -1), 200);
+}
+
+/**
+ * Where Pass B runs when the emulator cannot load rules: a second emulator
+ * the operator starts on a scratch copy the script writes here.
+ * @return {string} The second emulator's host.
+ */
+function fallbackHost(postGateRules) {
+  const dir = join(tmpdir(), 'ryp-verify-rules-postgate');
+  mkdirSync(dir, { recursive: true });
+  writeFileSync(join(dir, 'firestore.rules'), postGateRules);
+  writeFileSync(join(dir, 'firebase.json'), JSON.stringify({ firestore: { rules: 'firestore.rules' },
+    emulators: { firestore: { port: 8085 }, hub: { port: 4405 }, logging: { port: 4505 }, ui: { enabled: false } } }, null, 2));
+  const host = process.env.RULES_POSTGATE_EMULATOR_HOST;
+  if (!host || !LOCAL_HOSTS.has(host.replace(/:\d+$/, ''))) {
+    console.error('This emulator has no rules-load endpoint. Start a second Firestore emulator on the post-gate copy:\n' +
+      `  cd "${dir}" && npx firebase-tools emulators:start --only firestore --project ${PROJECT}\n` +
+      'then re-run with RULES_POSTGATE_EMULATOR_HOST=127.0.0.1:8085 (a local host).');
+    process.exit(1);
+  }
+  return host;
+}
+
+async function runPass(label) {
+  console.log(`\n=== ${label} ===`);
   await setup();
   try {
     await task4(); await task5(); await taskContract(); await taskWindow(); await taskRepeat(); await taskPackageChange(); await taskSeriesCancel();
-    await taskSeats(); await taskPast(); await taskWaitlist();
+    await taskSeats(); await taskPast(); await taskWaitlist(); await taskSingle();
   } finally { await teardown(); }
-  console.log(failures ? `${failures} FAILED` : 'ALL PASS');
+}
+
+export { setup, teardown, seed, del, call, createAs, updateAs, commitAs, bookAs, listAs, expect, token, t, uid, BASE, loadRules, postGateCopy };
+if (process.argv[1] && process.argv[1].endsWith('verify-rules.mjs')) {
+  const realRules = readFileSync(fileURLToPath(new URL('../firestore.rules', import.meta.url)), 'utf8');
+  const postGateRules = postGateCopy(realRules);
+  const broken = await loadRules(BROKEN_RULES);
+  const endpoint = ![404, 405, 501].includes(broken);
+  if (endpoint) {
+    console.log('Rules-load endpoint self-check');
+    expect('a deliberately broken rules string is refused', broken, 400);
+    expect('firestore.rules loads', await loadRules(realRules), 200);
+    if (failures) { console.log(`${failures} FAILED (self-check) - no pass run`); process.exit(1); }
+  }
+  let passB = false;
+  try {
+    beforeGate = Date.now() < GATE_MS;
+    await runPass(`Pass A: the real firestore.rules, real clock (${beforeGate ? 'before' : 'after'} the Oct 10 gate)`);
+    if (endpoint) {
+      expect('post-gate copy loads', await loadRules(postGateRules), 200);
+    } else {
+      HOST = fallbackHost(postGateRules);
+      BASE = baseFor(HOST);
+    }
+    passB = true;
+    beforeGate = false;
+    await runPass('Pass B: the post-gate copy (gate literal set to 0), post-gate expectations');
+  } finally {
+    if (endpoint) expect('the real firestore.rules reloaded', await loadRules(realRules), 200);
+  }
+  console.log(failures ? `${failures} FAILED` : `ALL PASS${passB ? ' (both passes)' : ''}`);
   process.exit(failures ? 1 : 0);
 }

@@ -74,10 +74,21 @@ test('sibling discount: one line on the pending card when two members are monthl
   // single token: not a membership, so no discount on it.
   mockHub = withPackages(['t-12', 'single'], [{ athleteId: 'a2', name: 'Reese', perPurchase: true }]);
   mockHub.data.members.push({ athleteId: 'a3', name: 'Sam', package: { id: 't-6', kind: 'tokens' }, billing: { status: 'active', facility: null } });
+  // Single tokens are on sale from the booking-open gate (owner ruling 2026-10-01).
+  const GATE = Date.parse('2026-10-10T12:00:00Z');
+  const now = jest.spyOn(Date, 'now').mockReturnValue(GATE);
   const single = await renderScreen(<ParentDashboard bare />, { path: '/portal/family' });
   expect(single.button('Pay now|a2')).not.toBeNull();
   expect(single.text()).not.toContain('sibling');
   await single.unmount();
+  // Before it: no Pay button for the single token, only the line saying when.
+  now.mockReturnValue(GATE - 1);
+  const early = await renderScreen(<ParentDashboard bare />, { path: '/portal/family' });
+  expect(early.button('Pay now|a2')).toBeNull();
+  expect(early.text()).toContain('Single tokens are available from Sat, Oct 10 at 7 AM.');
+  expect(early.text()).not.toContain('sibling');
+  await early.unmount();
+  now.mockRestore();
 });
 
 test('card tokens: "Tokens start Nov 1" before the season, "Pay to start" unpaid - never a balance (tester report 2026-09-30)', async () => {

@@ -21,6 +21,7 @@ const form = (over) => ({
 // The clock is pinned: the receipt's gate and pay-terms lines depend on it.
 const EMAIL_DAY = Date.parse('2026-10-01T17:00:00Z');
 const NOV_1_CHICAGO = Date.parse('2026-11-01T05:00:00Z');
+const GATE = Date.parse('2026-10-10T12:00:00Z'); // BOOKING_OPENS_AT: Sat, Oct 10 at 7 AM Chicago
 beforeEach(() => { jest.spyOn(Date, 'now').mockReturnValue(EMAIL_DAY); mockLive = false; mockFamily = null; mockReads = []; });
 afterEach(() => { jest.restoreAllMocks(); });
 
@@ -63,13 +64,24 @@ test('from Nov 1 (checkout prorates) and for the one-time single token the recei
   expect(r.button("Pay for Reese's Elite|a2")).not.toBeNull();
   expect(r.text()).not.toContain('Today you pay');
   await r.unmount();
-  Date.now.mockReturnValue(EMAIL_DAY);
+  // On sale from the booking-open gate (owner ruling 2026-10-01), still before Nov 1.
+  Date.now.mockReturnValue(GATE);
   const single = form({ athletes: [{ ...newAthleteEntry(), name: 'Jordan', dob: '2012-06-17', packageId: 'single' }] });
   const s = await renderScreen(<RegistrationSuccess bare mode="signup" form={single} result={{ householdId: 'h1', athleteIds: ['a1'] }} account={{ email: 'dana@email.com' }} onFinish={() => {}} />);
   expect(s.button("Pay for Jordan's Single token|a1")).not.toBeNull();
   expect(s.text()).not.toContain('Today you pay');
   expect(s.text()).not.toContain('monthly from Dec 1');
   await s.unmount();
+});
+
+test('before single tokens go on sale the receipt offers no Pay button for one (owner ruling 2026-10-01)', async () => {
+  Date.now.mockReturnValue(GATE - 1);
+  const mixed = form({ athletes: [{ ...newAthleteEntry(), name: 'Jordan', dob: '2012-06-17', packageId: 'single' }, { ...newAthleteEntry(), name: 'Reese', dob: '2014-03-02', packageId: 't-6' }] });
+  const r = await renderScreen(<RegistrationSuccess bare mode="signup" form={mixed} result={{ householdId: 'h1', athleteIds: ['a1', 'a2'] }} account={{ email: 'dana@email.com' }} onFinish={() => {}} />);
+  expect(r.button("Pay for Jordan's Single token|a1")).toBeNull();
+  expect(r.text()).toContain('Jordan: Single tokens are available from Sat, Oct 10 at 7 AM.');
+  expect(r.button("Pay $299 for Reese's 6 tokens|a2")).not.toBeNull();
+  await r.unmount();
 });
 
 test('an unverified password account is told to open the verification link before Pay (UX P-04)', async () => {

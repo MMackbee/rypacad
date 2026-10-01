@@ -1,5 +1,6 @@
 import {
   billingBadge,
+  billingStatusOf,
   confirmedLine,
   FACILITY_COVERS,
   facilityLine,
@@ -172,6 +173,28 @@ test('the facility add-on asked for at sign-up, on the home pending card (owner 
   expect(facilityPendingTitle(true)).toBe("Facility access - pay when you're ready");
   expect(facilityWaitingLine(true)).toBe('Facility access · after the membership is paid');
   expect(facilityPayLabel(true)).toBe('Pay $300 for facility access');
+});
+
+test('facility add-on: never on the single token or a one-time buyer (owner ruling 2026-09-29/30)', () => {
+  const m = (over) => ({ athleteId: 'a', name: 'a', package: { kind: 'tokens' }, billing: { status: 'active', facility: null }, facilityAccess: false, ...over });
+  expect(familyFacilityCard([m({ package: { kind: 'single' } })])).toBeNull();
+  expect(familyFacilityCard([m({ billing: { status: 'active', oneTime: true, facility: null } })])).toBeNull();
+  expect(familyFacilityCard([m({ billing: { status: 'active', oneTime: false, facility: null } })])?.state).toBe('offer');
+  // A paid monthly sibling is still offered it, and it bills on that sibling.
+  expect(familyFacilityCard([m({ package: { kind: 'single' }, billing: { status: 'active', oneTime: true, facility: null } }), m({ athleteId: 'b' })]).holder.athleteId).toBe('b');
+});
+
+test('billingStatusOf: a one-time buyer moved off Single is pending (owner ruling 2026-09-29/30)', () => {
+  expect(billingStatusOf({ packageId: 't-6', billing: { status: 'active', oneTime: true } })).toBe('pending');
+  expect(billingStatusOf({ packageId: 'elite', billing: { status: 'active', oneTime: true } })).toBe('pending');
+  expect(billingStatusOf({ packageId: 'single', billing: { status: 'active', oneTime: true } })).toBe('active');
+  expect(billingStatusOf({ packageId: 't-6', billing: { status: 'active', oneTime: false } })).toBe('active');
+  expect(billingStatusOf({ packageId: 't-6', billing: { status: 'active' } })).toBe('active');
+  expect(billingStatusOf({ packageId: 't-6', billing: { status: 'lapsed', oneTime: true } })).toBe('lapsed');
+  expect(billingStatusOf({ packageId: 't-6' })).toBe('active'); // no billing block == active
+  expect(billingStatusOf({ packageId: 'single' })).toBe('active');
+  expect(billingStatusOf(null)).toBe('active');
+  expect(billingStatusOf(undefined)).toBe('active');
 });
 
 test('login status line (spec 3.2)', () => {

@@ -116,6 +116,8 @@ export default function AthleteDashboard({
       <div style={{ padding: '0 22px 24px', display: 'flex', flexDirection: 'column', gap: 12 }}>
         <PaymentConfirming
           athleteId={params.get('paid')}
+          cs={params.get('cs')}
+          single={params.get('single') === '1'}
           whatsNext={{ athlete, product: params.get('product'), self: true, selfManaged, onBook, onSeason: () => navigate('/portal/season'),
             facilityDue: facilityPending.length > 0 }}
         />

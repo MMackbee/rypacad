@@ -5,7 +5,8 @@ import Billing from './Billing';
 let mockHub;
 const ADD_FAMILY = 'Add family facility access · $300/month';
 jest.mock('../components/PayButton', () => ({ __esModule: true, default: ({ athleteId, product, label }) => <button type="button">{label}|{athleteId}|{product}</button> }));
-jest.mock('../components/TokenMeter', () => ({ __esModule: true, default: () => 'METER' }));
+// `buy` is the meter's own Pay/Buy affordance for a single athlete (TokenMeter.test.js covers the button).
+jest.mock('../components/TokenMeter', () => ({ __esModule: true, default: ({ member, buy }) => `METER|${member.athleteId}|${buy ? 'buy' : 'view'}` }));
 jest.mock('../hooks/billing', () => ({ __esModule: true, default: () => mockHub, useBillingHub: () => mockHub, usePaymentConfirmation: () => ({ state: 'idle' }), STRIPE_PORTAL_URL: 'https://billing.stripe.test/p/x' }));
 
 beforeEach(() => {
@@ -193,4 +194,54 @@ test('a failed load says the membership did not load, with no token wording', as
   expect(r.text()).toContain("Your membership didn't load. Check your connection and try again.");
   expect(r.text()).not.toMatch(/token/i);
   await r.unmount();
+});
+
+describe('the single token (rulings 2026-09-29/30, on sale from the booking-open gate 2026-10-01)', () => {
+  const GATE = Date.parse('2026-10-10T12:00:00Z'); // BOOKING_OPENS_AT: Sat, Oct 10 at 7 AM Chicago
+  const WHEN = 'Single tokens are available from Sat, Oct 10 at 7 AM.';
+  const single = { id: 'single', name: 'Single token', kind: 'single', windowDays: 30, price: 65 };
+  beforeEach(() => {
+    jest.spyOn(Date, 'now').mockReturnValue(GATE);
+    mockHub.data.members = mockHub.data.members.map((m) => ({ ...m, package: single }));
+    mockHub.data.status.pendingAthletes = [{ athleteId: 'a2', name: 'Reese', perPurchase: true }];
+  });
+  afterEach(() => { jest.restoreAllMocks(); });
+
+  test('the Buy button lives on the meter: the payer passes `buy`, the staff view never does', async () => {
+    const r = await renderScreen(<Billing bare />);
+    expect(r.text()).toContain('METER|a1|buy');
+    expect(r.text()).toContain('METER|a2|buy');
+    expect(r.text()).not.toContain('Buy a session token'); // never a second button beside the meter's
+    expect(r.button('Add facility access|a1|facility')).toBeNull(); // no add-on on a single token
+    await r.unmount();
+    const staff = await renderScreen(<Billing bare staff role="owner" householdId="h1" />);
+    expect(staff.text()).toContain('METER|a1|view');
+    expect(staff.text()).not.toContain('METER|a1|buy');
+    await staff.unmount();
+  });
+
+  test('from the gate on a pending single athlete has Pay now on the hero', async () => {
+    const r = await renderScreen(<Billing bare />);
+    expect(r.button('Pay now|a2|tier')).not.toBeNull();
+    expect(r.text()).not.toContain(WHEN);
+    await r.unmount();
+  });
+
+  test('before the gate the hero offers no Pay button for a single token, only the line saying when', async () => {
+    Date.now.mockReturnValue(GATE - 1);
+    // A monthly athlete pending beside them still pays before the gate; the single row says when.
+    mockHub.data.status.pendingAthletes = [{ athleteId: 'a2', name: 'Reese', perPurchase: true }, { athleteId: 'a3', name: 'Sam', perPurchase: false }];
+    const mixed = await renderScreen(<Billing bare />);
+    expect(mixed.button('Pay now|a2|tier')).toBeNull();
+    expect(mixed.text().split(WHEN)).toHaveLength(2);
+    expect(mixed.button('Pay now|a3|tier')).not.toBeNull();
+    await mixed.unmount();
+    // An all-single list as the hub hands it over before the gate (billingHub.js statusFor): the body says when, no cta.
+    mockHub.data.status = { ...mockHub.data.status, cta: null, pendingAthletes: [{ athleteId: 'a2', name: 'Reese', perPurchase: true }],
+      body: `Reese can book once their session token is paid for. ${WHEN} A session token is a one-time $65 payment.` };
+    const r = await renderScreen(<Billing bare />);
+    expect(r.text().split(WHEN)).toHaveLength(2);
+    expect(r.text()).not.toContain('Pay now');
+    await r.unmount();
+  });
 });

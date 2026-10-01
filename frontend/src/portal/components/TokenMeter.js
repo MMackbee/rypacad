@@ -3,9 +3,12 @@ import { format, parseISO } from 'date-fns';
 import { color, font, radius } from '../tokens';
 import StatusBadge from './StatusBadge';
 import { GraceLine } from './AllowancePools';
+import PayButton from './PayButton';
+import { SessionTokenHero } from './SessionTokens';
 import { Body, Card, SectionLabel } from './Primitives';
 import { longDayLabel } from '../data/calendar';
 import { firstPeriodLine, PAY_TO_START } from '../data/billingCopy';
+import { availableCount, BUY_SINGLE_LABEL, saleOpen, SINGLE_NOT_OPEN_LINE } from '../data/singleToken';
 
 /**
  * One athlete's tokens on the Billing hub (contract v2.4, Sprint 16): the
@@ -14,7 +17,11 @@ import { firstPeriodLine, PAY_TO_START } from '../data/billingCopy';
  * spot holding one, the bonus tokens on file, when the period resets and
  * what the next one grants. Every value comes from `hubMemberFor`
  * (data/billingHub.js), which runs the same `tokensFor` the booking gate
- * runs; this component never counts anything itself.
+ * runs; this component never counts anything itself. A single athlete
+ * (`tokens.perPurchase`, ruling 2026-09-29/30) has no period grant or reset:
+ * their hero is SessionTokenHero, and a row paid with a bought token reads
+ * 'Session token'. The hero names the session each spent token was used on
+ * and, for the payer (`buy`), carries the way to get another (SingleBuy).
  */
 
 function toneFor(left) {
@@ -42,7 +49,11 @@ const STATUS_BADGE = {
 };
 
 function Row({ row, last }) {
-  const badge = row.viaGrace ? { tone: 'yellow', label: 'Bonus token' } : STATUS_BADGE[row.status] || STATUS_BADGE.confirmed;
+  const badge = row.viaSingle
+    ? { tone: 'green', label: 'Session token' }
+    : row.viaGrace
+    ? { tone: 'yellow', label: 'Bonus token' }
+    : STATUS_BADGE[row.status] || STATUS_BADGE.confirmed;
   return (
     <div
       style={{
@@ -95,13 +106,26 @@ function Evidence({ member }) {
           Nothing booked in this period yet.
         </Body>
       )}
-      <Body size={11} tone={color.textTertiary} style={{ marginTop: 10 }}>
-        Next period from {longDayLabel(nextPeriod.start)}:{' '}
-        {tokens.unlimited ? 'unlimited' : `${nextPeriod.granted} token${nextPeriod.granted === 1 ? '' : 's'}`}
-        {nextPeriod.booked ? ` · ${nextPeriod.booked} already booked` : ''}
-        {nextPeriod.reserved ? ` · ${nextPeriod.reserved} on a waitlist` : ''}
-      </Body>
-      {lastPeriod && !tokens.unlimited ? (
+      {/* A single athlete's tokens are bought, never granted per period: no
+          grant line, only what is already booked past this period's end. */}
+      {tokens.perPurchase ? (
+        nextPeriod.booked || nextPeriod.reserved ? (
+          <Body size={11} tone={color.textTertiary} style={{ marginTop: 10 }}>
+            From {longDayLabel(nextPeriod.start)}:{' '}
+            {[nextPeriod.booked ? `${nextPeriod.booked} booked` : null, nextPeriod.reserved ? `${nextPeriod.reserved} on a waitlist` : null]
+              .filter(Boolean)
+              .join(' · ')}
+          </Body>
+        ) : null
+      ) : (
+        <Body size={11} tone={color.textTertiary} style={{ marginTop: 10 }}>
+          Next period from {longDayLabel(nextPeriod.start)}:{' '}
+          {tokens.unlimited ? 'unlimited' : `${nextPeriod.granted} token${nextPeriod.granted === 1 ? '' : 's'}`}
+          {nextPeriod.booked ? ` · ${nextPeriod.booked} already booked` : ''}
+          {nextPeriod.reserved ? ` · ${nextPeriod.reserved} on a waitlist` : ''}
+        </Body>
+      )}
+      {lastPeriod && !tokens.unlimited && !tokens.perPurchase ? (
         <Body size={11} tone={color.textTertiary} style={{ marginTop: 4 }}>
           Last period ({shortDay(lastPeriod.start)} – {shortDay(lastPeriod.end)}): used {lastPeriod.used} of {lastPeriod.granted}
         </Body>
@@ -137,7 +161,30 @@ function Toggle({ open, onToggle, count }) {
   );
 }
 
-export default function TokenMeter({ member, defaultOpen = false, showPrices = false }) {
+/**
+ * The single athlete's way to a token, in the hero (review 2026-09-30: "No
+ * session token" with nothing to tap). The same one-time checkout whether it
+ * is the first token (payment pending, or a lapsed membership moved to the
+ * single token) or another one: primary when there is nothing to book with,
+ * outline otherwise. Before single tokens go on sale (owner ruling
+ * 2026-10-01; data/singleToken.js saleOpen, the booking-open gate) it is a
+ * line saying when, never a button. A failing card ('past_due') is fixed in
+ * Stripe's portal, not by a second checkout.
+ */
+function SingleBuy({ member }) {
+  if ((member.billing?.status ?? 'active') === 'past_due') return null;
+  if (!saleOpen()) return <Body size={12}>{SINGLE_NOT_OPEN_LINE}</Body>;
+  const none = availableCount(member.tokens) === 0;
+  return <PayButton athleteId={member.athleteId} product="tier" label={BUY_SINGLE_LABEL} variant={none ? 'primary' : 'outline'} height={44} />;
+}
+
+/**
+ * @param {object} member  A hub member (data/billingHub.js hubMemberFor).
+ * @param {boolean} [buy]  The viewer pays for this athlete (a parent, or the
+ *   athlete's own login) - never the read-only staff view. Only the single
+ *   token has a button here; a monthly checkout stays on the pending card.
+ */
+export default function TokenMeter({ member, defaultOpen = false, showPrices = false, buy = false }) {
   const [open, setOpen] = useState(defaultOpen);
   const { package: pkg, tokens, period, expiryNudge, spent, reserved } = member;
   // v2.0.1 (Sprint 18): catalogue prices are withheld from parents and
@@ -184,6 +231,15 @@ export default function TokenMeter({ member, defaultOpen = false, showPrices = f
         <Toggle open={open} onToggle={() => setOpen((v) => !v)} count={count} />
         {open ? <Evidence member={member} /> : null}
       </Card>
+    );
+  }
+
+  if (tokens.perPurchase) {
+    return (
+      <SessionTokenHero member={member} price={price} buySlot={buy ? <SingleBuy member={member} /> : null}>
+        <Toggle open={open} onToggle={() => setOpen((v) => !v)} count={count} />
+        {open ? <Evidence member={member} /> : null}
+      </SessionTokenHero>
     );
   }
 

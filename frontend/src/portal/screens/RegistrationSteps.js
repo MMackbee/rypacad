@@ -6,7 +6,8 @@ import PackageCard from '../components/PackageCard';
 import { Body, Card, SectionLabel } from '../components/Primitives';
 import { Toggle } from '../components/Toggle';
 import { useEnrollmentForm } from '../hooks';
-import { ALL_PACKAGES, SINGLE_ON_SALE, packageById } from '../data/packages';
+import { ALL_PACKAGES, packageById } from '../data/packages';
+import { saleOpen, SINGLE_NOT_OPEN_NOTE } from '../data/singleToken';
 import {
   ADULT_REQUIRED, CHILD_LOGIN_ENABLED, U13_HELPER, ageOnDate, joinNames, toEmergencyForm, validateAthleteEntry,
   validateEmergencyContact,
@@ -304,10 +305,12 @@ function EmergencyContactCard({ mode, linkMode, value, onChange, showErrors }) {
  * to its own step, ContractStep (owner feedback 2026-09-30): under these
  * tabs it often landed on the wrong child.
  *
- * Until one-time checkout ships (SINGLE_ON_SALE), the single token card is
- * shown greyed out and cannot be picked: a family on it could never pay.
+ * Until single tokens go on sale (owner ruling 2026-10-01: when booking
+ * opens, Sat, Oct 10 at 7 AM - data/singleToken.js saleOpen, the booking-open
+ * gate, read off the clock) the single token card is shown as not yet available and cannot
+ * be picked: a family on it could not pay. From then on it is a pick like
+ * any other.
  */
-const SINGLE_OFF_SALE_NOTE = 'On sale before booking opens Sat, Oct 10. Pick a monthly package now, or come back then.';
 
 /** What a token is and that it does not carry over (tokens-and-billing-contract.md), before the parent picks 6, 12 or 16. */
 const TOKEN_EXPLAINER = "1 token = 1 session: a training block, a Tour event, or a session with Phil or Yannick. Tokens refresh on the 1st of each month; unused tokens don't carry over. Elite is unlimited.";
@@ -315,7 +318,7 @@ const TOKEN_EXPLAINER = "1 token = 1 session: a training block, a Tour event, or
 /** Still needs a pick: none yet, one no longer in the catalogue, or the single token before it is on sale. */
 function needsPackage(athlete) {
   const pkg = athlete.packageId == null ? null : packageById(athlete.packageId);
-  return !pkg || (pkg.kind === 'single' && !SINGLE_ON_SALE);
+  return !pkg || (pkg.kind === 'single' && !saleOpen());
 }
 
 export function PackageStep({ athletes, onUpdate, showErrors, mode = 'parent', facility = false, onFacility, household = null }) {
@@ -378,14 +381,14 @@ export function PackageStep({ athletes, onUpdate, showErrors, mode = 'parent', f
       <Body size={12} style={{ marginTop: -6 }}>{TOKEN_EXPLAINER}</Body>
       <div style={{ display: 'flex', flexDirection: 'column', gap: 11, marginTop: -6 }}>
         {ALL_PACKAGES.map((p) => {
-          const offSale = p.kind === 'single' && !SINGLE_ON_SALE;
+          const offSale = p.kind === 'single' && !saleOpen();
           return (
             <PackageCard
               key={p.id}
               pkg={p}
               selected={!offSale && active.packageId === p.id}
               onSelect={offSale ? undefined : () => pick(p.id)}
-              footnote={offSale ? SINGLE_OFF_SALE_NOTE : undefined}
+              footnote={offSale ? SINGLE_NOT_OPEN_NOTE : undefined}
             />
           );
         })}

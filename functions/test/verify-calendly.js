@@ -99,7 +99,8 @@ async function seed() {
   set('users', 'u-nina', {role: 'parent', householdId: 'novak', email: 'nina@example.test'});
   set('users', 'u-kemi', {role: 'parent', householdId: 'oyelaran', email: 'kemi@example.test'});
   set('users', 'u-sol', {role: 'athlete', athleteId: 'sol', householdId: 'quist', email: 'sol@example.test'});
-  // Sol's single October token is already spent on a training block.
+  // Sol is a legacy single athlete (no billing block). Since the single token became a one-time purchase
+  // (2026-09-30) the package grants no period token, and Sol has bought none: this booking is all Sol holds.
   set('sessions', '2026-10-05-1', {date: '2026-10-05', time: '3:00 PM', type: 'training', capacity: 15, booked: 1, bookable: true, label: null, status: 'scheduled'});
   set('bookings', 'sol_2026-10-05-1', {athleteId: 'sol', sessionId: '2026-10-05-1', householdId: 'quist', date: '2026-10-05', type: 'training', status: 'confirmed', periodKey: '2026-10-01', graceTokenId: null, chargedFrom: 'period', createdBy: 'u-sol', createdAt: TS(Date.now())});
   await B.commit();
@@ -167,10 +168,10 @@ async function main() {
   check('outcome', r, {outcome: 'applied', flag: null});
   check('femi booked, attendee parent', [(await get('bookings', `femi_${EVT(5)}`)).attendee, (await get('bookings', `femi_${EVT(5)}`)).householdId], ['parent', 'oyelaran']);
   r = await run(variant('invitee-created', 6, {utm: null, email: 'sol@example.test', start: '2026-10-21T21:00:00Z'}));
-  check('athlete account resolves directly; single token already spent -> over-cap', r, {outcome: 'applied', flag: 'over-cap'});
+  check('athlete account resolves directly; a single athlete with no bought token -> over-cap', r, {outcome: 'applied', flag: 'over-cap'});
   const solB = await get('bookings', `sol_${EVT(6)}`);
   check('flagged booking still written, period-charged', [solB.status, solB.chargedFrom, solB.graceTokenId, solB.flag], ['confirmed', 'period', null, 'over-cap']);
-  check('tokens derived: left floors at 0', (await position('sol', 'single', '2026-10-01')).left, 0);
+  check('tokens derived: the single package grants 0, left floors at 0', [(await position('sol', 'single', '2026-10-01')).granted, (await position('sol', 'single', '2026-10-01')).left], [0, 0]);
   check('ledger carries the flag', (await get('calendlyEvents', `${INV(6)}_invitee.created`)).flag, 'over-cap');
 
   log('\nSTEP G  the other flags');

@@ -47,6 +47,7 @@ import { act } from 'react';
 import { createRoot } from 'react-dom/client';
 import { useBooking, useHousehold, useHouseholdReservations, useSchedule } from './index';
 import * as live from './live';
+import * as grace from './grace';
 import * as waitlist from './waitlist';
 import * as calendar from '../data/calendar';
 
@@ -93,6 +94,42 @@ test('the family card: November\'s grant marked "starts", an unpaid child marked
   expect(reese.tokens).toMatchObject({ left: 16, startsOn: '2026-11-01', unpaid: true });
   expect(nico.tokens).toMatchObject({ unlimited: true, left: null });
   expect(nico.tokens).not.toHaveProperty('startsOn');
+  await h.unmount();
+});
+
+// Single token (owner rulings 2026-09-29/30): the balance IS the tokens the
+// family bought (graceTokens/single_*), so that child's card reads them live;
+// a monthly sibling's card keeps the bookings-only figure it always showed.
+test('the family card: a single-token child shows the tokens they bought, less one a waitlist spot holds', async () => {
+  calendar.todayISO.mockReturnValue('2026-11-20');
+  const SINGLE_PKG = { id: 'single', name: 'Single token', kind: 'single', tokens: 1, windowDays: 30 };
+  const bought = (id) => ({ id, athleteId: 'a2', expiresAt: '2027-02-27', reason: 'single-purchase' });
+  live.fetchCurrentUser.mockResolvedValue({ uid: 'p1', householdId: 'h1' });
+  live.fetchHousehold.mockResolvedValue({ id: 'h1', name: 'Whitfield family', periodAnchorDay: 1 });
+  live.fetchHouseholdAthletes.mockResolvedValue([
+    { id: 'a1', name: 'Jordan', householdId: 'h1', packageId: 't-16', billing: { status: 'active' } },
+    { id: 'a2', name: 'Reese', householdId: 'h1', packageId: 'single', billing: { status: 'active', oneTime: true } },
+  ]);
+  live.fetchPackage.mockImplementation(async (id) => (id === 'single' ? SINGLE_PKG : T16));
+  live.fetchBookings.mockImplementation(async (id) =>
+    id === 'a2' ? [{ id: 'a2_s1', sessionId: 's1', date: '2026-11-24', periodKey: '2026-11-01', status: 'confirmed', type: 'training', graceTokenId: 'single_cs_1' }] : []
+  );
+  live.fetchSessionsByIds.mockResolvedValue([]);
+  live.fetchGraceTokensByAthlete.mockResolvedValue([bought('single_cs_1'), bought('single_cs_2'), bought('single_cs_3')]);
+  waitlist.fetchWaitlistByAthlete.mockResolvedValue([{ id: 's9_a2', sessionId: 's9', athleteId: 'a2', householdId: 'h1', periodKey: '2026-12-01' }]);
+  grace.fetchTokenPeriod.mockResolvedValue(null);
+
+  const h = await mountHook(() => useHousehold());
+  expect(h.result.current.error).toBeNull();
+  const [jordan, reese] = h.result.current.data.children;
+  // Three bought: one spent on a booking, one held by the waitlist spot, one to book with. No period grant.
+  expect(reese.tokens).toMatchObject({ perPurchase: true, granted: 0, left: 0, held: 1, unpaid: false });
+  expect(reese.tokens.grace).toEqual([expect.objectContaining({ reason: 'single-purchase', expiresAt: '2027-02-27' })]);
+  expect(reese.billingStatus).toBe('active');
+  // Only the single child's inputs were read, the waitlist household-scoped.
+  expect(live.fetchGraceTokensByAthlete.mock.calls).toEqual([['a2']]);
+  expect(waitlist.fetchWaitlistByAthlete.mock.calls).toEqual([['a2', { householdId: 'h1' }]]);
+  expect(jordan.tokens).toMatchObject({ granted: 16, left: 16, perPurchase: false });
   await h.unmount();
 });
 

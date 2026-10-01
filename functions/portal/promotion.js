@@ -27,6 +27,16 @@
  *     promoted into, whatever the counter says.
  *
  * AUTO-CONFIRM, no acceptance window (owner's ruling, pinned Sprint 12).
+ *
+ * Single token (owner rulings 2026-09-29/30, portal/single.js): a purchased
+ * `single_{cs}` token is good all season, so it may have been spent in ANY
+ * period. portal/waitlist-order.js already reads every candidate's token
+ * spends across periods, and a single athlete's OTHER waitlist entries hold
+ * tokens (`tokensPosition` `held`). A purchased token is inventory, not a
+ * debt the Academy owes, so it earns no queue priority
+ * (`candidateGraceExpiry`, in waitlist-order.js with the rest of the order).
+ * A promotion that spends one is checked by portal/single-guard.js like any
+ * other spend.
  */
 
 'use strict';
@@ -348,6 +358,7 @@ const onSessionBookedDecrease = functions
         context.params.sessionId));
 
 module.exports = {
+  candidateGraceExpiry: order.candidateGraceExpiry,
   fillOpenSeats,
   handleSessionUpdate,
   joinedAtMillis: order.joinedAtMillis,

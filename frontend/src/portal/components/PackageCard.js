@@ -1,6 +1,7 @@
 import React from 'react';
 import { color, font, glow, radius, tint } from '../tokens';
 import { PRICES_RELEASED } from '../data/packages';
+import { SINGLE_EXPIRES_LABEL } from '../data/singleToken';
 
 /**
  * Package card — screens 02, 10, 15 (Sprint 12 pin, contract v2.0).
@@ -138,7 +139,7 @@ export default function PackageCard({
  */
 function entitlementLine(pkg, showPrices) {
   if (pkg.kind === 'elite') return `Unlimited · 24/7 access · book up to ${pkg.windowDays} days ahead`;
-  if (pkg.kind === 'single') return '1 session · good through Sat, Feb 27';
+  if (pkg.kind === 'single') return `1 session · good through ${SINGLE_EXPIRES_LABEL}`;
   if (pkg.tokens == null) return null;
   if (pkg.tokens === 1) return `1 token · books ${pkg.windowDays} days out`;
   // The per-token rate is a price: withheld with the rest (v2.0.1).

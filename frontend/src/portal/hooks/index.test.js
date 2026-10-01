@@ -7,6 +7,9 @@
  * liveBooking and its identity-only path, liveMonthSessions' waitlist join)
  * are driven through their hooks against mocked adapters - the reads each
  * one issues, which round they land in, and the payload they return.
+ *
+ * liveTokens (single token, owner ruling 2026-09-29/30) runs against the
+ * same mocked ./live, ./waitlist and ./grace fetchers.
  */
 jest.mock('../../firebase', () => ({ __esModule: true, default: {}, auth: { currentUser: null }, db: {}, functions: {}, storage: {} }));
 jest.mock('firebase/firestore', () => ({}));
@@ -43,8 +46,9 @@ jest.mock('./waitlist', () => ({
 
 import { act } from 'react';
 import { createRoot } from 'react-dom/client';
-import { coachingFor, genericSessionName, seedSpecialistDays, useAthleteDetail, useBooking, useMonthSessions, useSpecialistSlots } from './index';
+import { coachingFor, genericSessionName, liveTokens, seedSpecialistDays, useAthleteDetail, useBooking, useMonthSessions, useSpecialistSlots } from './index';
 import * as live from './live';
+import * as grace from './grace';
 import * as signups from './signups';
 import * as waitlist from './waitlist';
 import { BOOKING_CONFIRMATION } from '../data/seed';
@@ -551,4 +555,57 @@ test('seed useMonthSessions: the whole grid, marked from the generated season', 
   expect(dayMarks['2026-11-02']).toBeUndefined();
   expect(dayMarks['2026-12-06']).toBe('closed');
   await h.unmount();
+});
+
+describe('liveTokens (single token, owner ruling 2026-09-29/30)', () => {
+  const SINGLE = { id: 'single', kind: 'single', tokens: 1 };
+  const T6 = { id: 't-6', kind: 'tokens', tokens: 6 };
+  const ava = { id: 'ava', householdId: 'h1', packageId: 'single', billing: { status: 'active', oneTime: true } };
+  const bought = { id: 'single_cs_1', athleteId: 'ava', expiresAt: '2027-02-27', reason: 'single-purchase', sourceSessionId: null };
+  beforeEach(() => {
+    // CRA's resetMocks cleared these: nothing on file unless a test says so.
+    live.fetchGraceTokensByAthlete.mockResolvedValue([]);
+    waitlist.fetchWaitlistByAthlete.mockResolvedValue([]);
+    grace.fetchTokenPeriod.mockResolvedValue(null);
+  });
+
+  test("reads the athlete's grace tokens, the household-scoped waitlist and this period's tokenPeriods doc", async () => {
+    await liveTokens(ava, SINGLE, [], 15, '2026-11-20');
+    expect(live.fetchGraceTokensByAthlete).toHaveBeenCalledWith('ava');
+    // The filter a parent's waitlist read is provable on (waitlist hardening).
+    expect(waitlist.fetchWaitlistByAthlete).toHaveBeenCalledWith('ava', { householdId: 'h1' });
+    expect(grace.fetchTokenPeriod).toHaveBeenCalledWith('ava', '2026-11-15');
+  });
+
+  test('a single athlete with one bought token: grace 1, left 0, perPurchase, the reason joined on', async () => {
+    live.fetchGraceTokensByAthlete.mockResolvedValue([bought]);
+    const t = await liveTokens(ava, SINGLE, [], 1, '2026-11-20');
+    expect(t).toMatchObject({ granted: 0, left: 0, perPurchase: true, held: 0, unpaid: false });
+    expect(t.grace).toEqual([{ id: 'single_cs_1', expiresAt: '2027-02-27', reason: 'single-purchase', sourceSessionId: null }]);
+    // A booking that spent it, in any period, takes it off the balance.
+    const spent = [{ id: 'ava_s1', status: 'confirmed', periodKey: '2026-12-01', date: '2026-12-02', graceTokenId: 'single_cs_1' }];
+    expect((await liveTokens(ava, SINGLE, spent, 1, '2026-11-20')).grace).toEqual([]);
+    // A waitlist spot holds it.
+    waitlist.fetchWaitlistByAthlete.mockResolvedValue([{ id: 's9_ava', sessionId: 's9', athleteId: 'ava', periodKey: '2026-12-01' }]);
+    expect(await liveTokens(ava, SINGLE, [], 1, '2026-11-20')).toMatchObject({ grace: [], held: 1 });
+  });
+
+  test('an ops comp tokenPeriods doc yields left 1', async () => {
+    grace.fetchTokenPeriod.mockResolvedValue({ id: 'ava_2026-11-01', granted: 1 });
+    expect(await liveTokens(ava, SINGLE, [], 1, '2026-11-20')).toMatchObject({ granted: 1, left: 1, perPurchase: true });
+  });
+
+  test('before the season it reads the first period; a one-time buyer moved to a monthly package is marked unpaid', async () => {
+    const ben = { id: 'ben', householdId: 'h1', packageId: 't-6', billing: { status: 'active', oneTime: true } };
+    const t = await liveTokens(ben, T6, [], 1, '2026-10-20');
+    expect(grace.fetchTokenPeriod).toHaveBeenCalledWith('ben', '2026-11-01');
+    expect(t).toMatchObject({ granted: 6, left: 6, perPurchase: false, startsOn: '2026-11-01', unpaid: true });
+  });
+
+  test('no package reads nothing; a failed grace read rejects instead of showing 0', async () => {
+    expect(await liveTokens(ava, null, [], 1, '2026-11-20')).toBeNull();
+    expect(live.fetchGraceTokensByAthlete).not.toHaveBeenCalled();
+    live.fetchGraceTokensByAthlete.mockRejectedValue(new Error('permission-denied'));
+    await expect(liveTokens(ava, SINGLE, [], 1, '2026-11-20')).rejects.toThrow('permission-denied');
+  });
 });

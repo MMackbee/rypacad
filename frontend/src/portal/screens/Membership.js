@@ -76,7 +76,8 @@ export default function Membership({ variant = 'populated', bare = false, role =
             <StatusBanner status={status} />
             <PendingBanner pendingAthletes={status?.status === 'pending' ? status.pendingAthletes : []} body={status?.body} title={status?.title} />
             <MemberSection name={member.name} trailing={selfManaged ? <BillingLink onOpen={() => navigate('/portal/billing')} /> : null}>
-              <TokenMeter member={member} defaultOpen />
+              {/* `buy`: a single athlete's meter carries the way to a session token. */}
+              <TokenMeter member={member} defaultOpen buy />
               <CoachingLine coaching={member.coaching} />
               {contractEnabled() ? (
                 <ContractLine contractMinutes={member.contractMinutes} onOpen={() => navigate('/portal/contract')} />

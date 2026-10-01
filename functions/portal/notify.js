@@ -48,6 +48,7 @@ const LINKS = {
   'waitlist-removed': '/portal/schedule',
   'waitlist-expired': '/portal/schedule',
   'session-cancelled': '/portal/schedule',
+  'booking-released': '/portal/schedule',
   'reminder-24h': '/portal/schedule',
   'booking-revoked': '/portal/billing',
   'tokens-expiring': '/portal/billing',

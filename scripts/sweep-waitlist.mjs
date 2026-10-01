@@ -30,6 +30,10 @@
  *
  * IDEMPOTENT: a second run finds the entries already gone and does nothing.
  *
+ * A single-token athlete (owner rulings 2026-09-29/30) needs no branch here:
+ * the entry held one of their own purchased season tokens, and deleting it
+ * frees that token like anyone else's.
+ *
  * Dependency-free (Node >= 20 global fetch), Firestore REST like every other
  * script in this repo. Never writes anywhere but `waitlist` (delete).
  */

@@ -289,11 +289,18 @@ describe('per-athlete billing (Sprint 20, spec 4.4)', () => {
   test('statusFor: the single token is a one-time payment, never billed monthly (owner ruling, 2026-09-30)', () => {
     const monthly = "Ava can book once checkout is complete (token packages from Sat, Oct 10 at 7 AM). Billed monthly on the 1st once you've paid.";
     // An all-single pending list gets the one-time body; title, badge and CTA are unchanged.
-    const one = statusFor(null, { resetsOn: '2026-10-01', anchorDay: 1, pendingAthletes: [{ athleteId: 'a', name: 'Ava', status: 'pending', perPurchase: true }] });
+    const one = statusFor(null, { resetsOn: '2026-10-01', anchorDay: 1, now: AFTER_GATE, pendingAthletes: [{ athleteId: 'a', name: 'Ava', status: 'pending', perPurchase: true }] });
     expect(one).toMatchObject({ status: 'pending', badge: { tone: 'yellow', label: 'Payment pending' }, title: 'Payment pending - finish checkout to start booking', cta: 'Pay now' });
     expect(one.body).toBe('Ava can book once their session token is paid for. A session token is a one-time $65 payment.');
-    const two = statusFor(null, { pendingAthletes: [{ athleteId: 'a', name: 'Ava', perPurchase: true }, { athleteId: 'b', name: 'Ben', perPurchase: true }] });
+    const two = statusFor(null, { now: AFTER_GATE, pendingAthletes: [{ athleteId: 'a', name: 'Ava', perPurchase: true }, { athleteId: 'b', name: 'Ben', perPurchase: true }] });
     expect(two.body).toBe('Ava and Ben can book once their session token is paid for. A session token is a one-time $65 payment.');
+    // Owner ruling 2026-10-01: single tokens go on sale when booking opens - until then the body says when and there is no Pay button.
+    const early = statusFor(null, { now: BEFORE_GATE, pendingAthletes: [{ athleteId: 'a', name: 'Ava', status: 'pending', perPurchase: true }] });
+    expect(early).toMatchObject({ status: 'pending', title: 'Payment pending - finish checkout to start booking', cta: null });
+    expect(early.body).toBe('Ava can book once their session token is paid for. Single tokens are available from Sat, Oct 10 at 7 AM. A session token is a one-time $65 payment.');
+    expect(statusFor(null, { now: AFTER_GATE - 1, pendingAthletes: [{ athleteId: 'a', name: 'Ava', perPurchase: true }] }).cta).toBeNull();
+    // A list with a monthly athlete keeps its Pay button before the gate: that checkout is open.
+    expect(statusFor(null, { now: BEFORE_GATE, pendingAthletes: [{ athleteId: 'a', name: 'Ava', perPurchase: false }, { athleteId: 'b', name: 'Ben', perPurchase: true }] }).cta).toBe('Pay now');
     // A mixed list, or a monthly one, keeps the monthly body byte-for-byte.
     const mixed = statusFor(null, { now: BEFORE_GATE, pendingAthletes: [{ athleteId: 'a', name: 'Ava', perPurchase: false }, { athleteId: 'b', name: 'Ben', perPurchase: true }] });
     expect(mixed.body).toBe("Ava and Ben can book once checkout is complete (token packages from Sat, Oct 10 at 7 AM). Billed monthly on the 1st once you've paid.");
@@ -303,6 +310,9 @@ describe('per-athlete billing (Sprint 20, spec 4.4)', () => {
     const active = statusFor(null, { resetsOn: '2026-10-01', anchorDay: 1, allPerPurchase: true });
     expect(active).toMatchObject({ status: 'active', badge: { tone: 'green', label: 'Active' }, cta: null, paused: false });
     expect(active.body).toBe('Session tokens are one-time payments - nothing bills monthly.');
+    // Session tokens never reset, so the hero does not promise a reset date.
+    expect(active.title).toBe('Membership active');
+    expect(statusFor(null, { resetsOn: '2026-10-01', anchorDay: 1, allPerPurchase: false }).title).toBe(`Tokens reset ${longDayLabel('2026-10-01')}`);
     // The monthly pins are unchanged.
     expect(statusFor(null, { resetsOn: '2026-10-01', anchorDay: 1, allPerPurchase: false }).body).toBe('Billed monthly on the 1st. Nothing needs attention.');
     expect(statusFor({ status: 'active' }, { anchorDay: 15 }).body).toBe('Billed monthly on the 15th. Nothing needs attention.');
@@ -424,5 +434,74 @@ describe('before the season: the first (prepaid) period (tester report 2026-09-3
     const e = hubMemberFor(pre({ pkg: ELITE, today: '2026-10-20', bookings: [oct] }));
     expect(e.spent.map((r) => [r.id, r.date])).toEqual([['oct', '2026-10-24']]);
     expect(e.period).toMatchObject({ periodKey: '2026-11-01', preSeason: true });
+  });
+});
+
+describe('the single token (owner rulings 2026-09-29/30)', () => {
+  const single = { id: 'single', name: 'Single token', kind: 'single', tokens: 1, price: 65, windowDays: 30 };
+  const T6 = TOKEN_PACKAGES.find((p) => p.id === 't-6');
+
+  test('a one-time buyer moved to t-6 is pending, carries oneTime, and so reaches pendingOf', () => {
+    const moved = hubMemberFor({ ...fixture(), pkg: T6, athlete: { ...athlete, packageId: 't-6', billing: { status: 'active', oneTime: true } } });
+    expect(moved.billing).toEqual({ status: 'pending', facility: null, oneTime: true });
+    const onSingle = hubMemberFor({ ...fixture(), pkg: single, athlete: { ...athlete, packageId: 'single', billing: { status: 'active', oneTime: true } } });
+    expect(onSingle.billing).toEqual({ status: 'active', facility: null, oneTime: true });
+  });
+
+  test("a single member's next period grants 0 - tokens are bought, never granted", () => {
+    const m = hubMemberFor({ ...fixture(), pkg: single, bookings: [], waitlist: [], graceTokens: [] });
+    expect(m.nextPeriod.granted).toBe(0);
+    expect(m.lastPeriod.granted).toBe(0);
+    expect(m.tokens).toMatchObject({ granted: 0, left: 0, perPurchase: true });
+    // An ops comp for the last period still shows as granted.
+    expect(hubMemberFor({ ...fixture(), pkg: single, prevTokenPeriod: { granted: 1 } }).lastPeriod.granted).toBe(1);
+    // Monthly packages are unchanged.
+    expect(hubMemberFor(fixture()).nextPeriod.granted).toBe(12);
+  });
+
+  test('viaSingle marks the rows paid with a purchased single token', () => {
+    const { spent, reserved } = periodRows({
+      bookings: [
+        b('s', { graceTokenId: 'single_cs_1' }),
+        b('g', { date: '2026-12-21', graceTokenId: 'grace-1' }),
+        b('p', { date: '2026-12-22' }),
+      ],
+      waitlist: [{ id: 'w_jordan', sessionId: 'w', athleteId: 'jordan', periodKey: '2026-12-01', date: '2026-12-23' }],
+      periodKey: '2026-12-01',
+    });
+    expect(spent.map((r) => [r.id, r.viaGrace, r.viaSingle])).toEqual([
+      ['s', true, true],
+      ['g', true, false],
+      ['p', false, false],
+    ]);
+    expect(reserved.map((r) => r.viaSingle)).toEqual([false]);
+  });
+
+  test('singleUses: a single member lists the bought-token bookings of this period and the next, oldest first', () => {
+    const tok = (id) => ({ id, expiresAt: '2027-02-27', reason: 'single-purchase' });
+    const m = hubMemberFor({
+      ...fixture(),
+      pkg: single,
+      bookings: [
+        b('jan', { date: '2027-01-05', periodKey: '2027-01-01', graceTokenId: 'single_cs_3' }),
+        b('dec', { date: '2026-12-22', graceTokenId: 'single_cs_2' }),
+        b('att', { date: '2026-12-03', status: 'attended', graceTokenId: 'single_cs_1' }),
+        b('gone', { date: '2026-12-12', status: 'cancelled', graceTokenId: 'single_cs_4' }),
+        b('nov', { date: '2026-11-05', periodKey: '2026-11-01', graceTokenId: 'single_cs_5' }),
+        b('comp', { date: '2026-12-23' }),
+      ],
+      waitlist: [],
+      graceTokens: ['single_cs_1', 'single_cs_2', 'single_cs_3', 'single_cs_4', 'single_cs_5'].map(tok),
+      sessionsById: { 's-jan': { id: 's-jan', label: null, type: 'tournament', time: '9:00 AM', date: '2027-01-05' } },
+    });
+    // Not the cancelled row, not last period's, not the comp-charged one.
+    expect(m.singleUses.map((r) => [r.id, r.date, r.status, r.time, r.label])).toEqual([
+      ['att', '2026-12-03', 'attended', null, 'Training block'],
+      ['dec', '2026-12-22', 'confirmed', null, 'Training block'],
+      ['jan', '2027-01-05', 'confirmed', '9:00 AM', 'Tour event'],
+    ]);
+    // Only a single athlete carries the list; monthly and Elite entries are unchanged.
+    expect(hubMemberFor(fixture())).not.toHaveProperty('singleUses');
+    expect(hubMemberFor({ ...fixture(), pkg: ELITE })).not.toHaveProperty('singleUses');
   });
 });

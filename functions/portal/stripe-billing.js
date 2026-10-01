@@ -84,8 +84,11 @@ function applyAthleteInvoicePaid(tx, args) {
     return {outcome: 'facility-active', firstActive: false, detail: {}};
   }
   householdActive(tx, hh, event.id, period);
+  // A paid subscription invoice is never a one-time purchase: clear
+  // `oneTime` even when invoice.paid lands before checkout.session.completed
+  // on an upgrade from the single token.
   tx.update(athleteRef, billingPatch('tier',
-      {status: 'active', lastEventId: event.id}));
+      {status: 'active', lastEventId: event.id, oneTime: false}));
   const meta = metadataOf(invoice);
   const prepaid = invoice.billing_reason === 'subscription_create' &&
       /^\d{4}-\d{2}-\d{2}$/.test(String(meta.prepaidPeriodKey || ''));

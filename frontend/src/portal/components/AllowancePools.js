@@ -2,6 +2,8 @@ import React from 'react';
 import { color, font, radius } from '../tokens';
 import { longDayLabel } from '../data/calendar';
 import { tokenStartLabel } from '../data/billingCopy';
+import { tokenDayLabel } from '../data/singleToken';
+import { SessionTokenPools } from './SessionTokens';
 
 /**
  * The token meter — screens 03, 04, 05, 08, 19 (Sprint 12, contract v2.0).
@@ -17,6 +19,8 @@ import { tokenStartLabel } from '../data/billingCopy';
  *
  * Elite shows no number at all (pin L: "No countdown anywhere for Elite") —
  * `tokens.unlimited` short-circuits every branch below to a plain label.
+ * The single token (`tokens.perPurchase`, ruling 2026-09-29/30) has no
+ * period grant to count down from - it renders SessionTokenPools instead.
  */
 
 /** Exhausted reads as a stop, matching the handoff's red "limit reached" tone. */
@@ -43,6 +47,8 @@ export default function AllowancePools({ tokens, compact = false, style }) {
       </div>
     );
   }
+
+  if (tokens.perPurchase) return <SessionTokenPools tokens={tokens} compact={compact} style={style} />;
 
   const tone = toneFor(tokens.left);
   // Unpaid or before the first period (tester report 2026-09-30): "Pay to
@@ -110,6 +116,8 @@ export default function AllowancePools({ tokens, compact = false, style }) {
 const GRACE_REASON_COPY = {
   'session-cancelled': 'a session was cancelled',
   'waitlist-expired': "a waitlist spot wasn't filled in time",
+  // Not a bonus: a bought single token (ruling 2026-09-29/30), its own line below.
+  'single-purchase': 'Session token',
 };
 
 /**
@@ -123,6 +131,15 @@ export function GraceLine({ tokens, style }) {
   // Elite holds no tokens and can spend none: no bonus-token line for them.
   const grace = tokens?.unlimited ? null : tokens?.grace?.[0];
   if (!grace) return null;
+  if (grace.reason === 'single-purchase') {
+    // A single athlete's meter (SessionTokenPools) already says this.
+    if (tokens.perPurchase) return null;
+    return (
+      <div style={{ font: `400 11px ${font.body}`, color: color.secondary, marginTop: 6, ...style }}>
+        {`${GRACE_REASON_COPY['single-purchase']} - good through ${grace.expiresAt ? tokenDayLabel(grace.expiresAt) : 'the season end'}`}
+      </div>
+    );
+  }
   // A cancelled session's id starts with its date - name the block when we
   // can, fall back to the generic reason copy when we cannot.
   const sourceDate = /^\d{4}-\d{2}-\d{2}/.test(grace.sourceSessionId || '') ? grace.sourceSessionId.slice(0, 10) : null;
@@ -152,11 +169,14 @@ export function SpendNote({ tokens, style }) {
 
   const hasGrace = (tokens.grace?.length ?? 0) > 0;
   if (tokens.left === 0 && !hasGrace) {
-    return <SpendBadge tone={color.error} style={style}>No tokens left</SpendBadge>;
+    return <SpendBadge tone={color.error} style={style}>{tokens.perPurchase ? 'No session token' : 'No tokens left'}</SpendBadge>;
   }
+  // The soonest-expiring grace token is the one spent: a bought single
+  // token (ruling 2026-09-29/30) or a bonus.
+  const graceNote = tokens.grace?.[0]?.reason === 'single-purchase' ? 'Uses a session token' : 'Uses a bonus token';
   return (
     <SpendBadge tone={color.textTertiary} style={style}>
-      {hasGrace ? 'Uses a bonus token' : `Spends 1 token · ${tokens.left} left`}
+      {hasGrace ? graceNote : `Spends 1 token · ${tokens.left} left`}
     </SpendBadge>
   );
 }

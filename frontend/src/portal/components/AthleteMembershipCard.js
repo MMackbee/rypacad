@@ -10,7 +10,8 @@ import NumericField from './NumericField';
 import SavedToast from './SavedToast';
 import Segmented from './Segmented';
 import { Body, Card, SectionLabel } from './Primitives';
-import { ALL_PACKAGES, FACILITY_ACCESS, packageById, periodFor } from '../data/packages';
+import { ALL_PACKAGES, FACILITY_ACCESS, packageById, periodFallback, periodFor } from '../data/packages';
+import { packageSwitchWarning } from '../data/singleToken';
 import { addDaysISO, todayISO } from '../data/calendar';
 import { facilitySourceLabel, householdFacility } from '../data/facility';
 
@@ -157,6 +158,8 @@ function MembershipEditor({ athleteId, currentPackageId, householdId, initialAnc
 
   const assignState = useAssignPackages();
   const dirty = packageId !== (currentPackageId ?? '') || facilityAccess !== Boolean(initialFacilityAccess);
+  // A static warning on a move to or from Single token (ruling 2026-09-29/30).
+  const switchWarning = packageSwitchWarning(currentPackageId ?? '', packageId);
 
   const handleSave = async () => {
     if (!packageId) return;
@@ -184,6 +187,11 @@ function MembershipEditor({ athleteId, currentPackageId, householdId, initialAnc
       <SectionLabel style={{ marginBottom: 12 }}>Membership</SectionLabel>
       <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
         <SelectField label="Package" value={packageId} options={PACKAGE_SELECT_OPTIONS} onChange={setPackageId} />
+        {switchWarning ? (
+          <Body size={11} tone={color.secondary}>
+            {switchWarning}
+          </Body>
+        ) : null}
         <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
           <div style={{ flex: 1, minWidth: 0 }}>
             <div style={{ font: `600 13px ${font.body}`, color: color.text }}>Facility access</div>
@@ -244,8 +252,9 @@ function MembershipEditor({ athleteId, currentPackageId, householdId, initialAnc
  * "Issue tokens" (Sprint 13 pin C) — the cash/comp case: ops writes a
  * `tokenPeriods` doc directly rather than waiting on Stripe. Period select
  * defaults to the CURRENT period; granted defaults to the assigned
- * package's own token count, editable (a comp grant may differ from the
- * catalogue). Elite has no tokenPeriods doc (unlimited already), so this
+ * package's own token count (periodFallback: 0 for the single token, whose
+ * tokens are bought - a grant here is a comp), editable (a comp grant may
+ * differ from the catalogue). Elite has no tokenPeriods doc (unlimited already), so this
  * control does not render for it.
  */
 function IssueTokensEditor({ athleteId, packageId, anchorDay }) {
@@ -256,9 +265,9 @@ function IssueTokensEditor({ athleteId, packageId, anchorDay }) {
   const [periodChoice, setPeriodChoice] = useState('this');
   const periodKey = periodChoice === 'this' ? thisPeriod.periodKey : nextPeriod.periodKey;
 
-  const [granted, setGranted] = useState(pkg?.tokens ?? 0);
+  const [granted, setGranted] = useState(periodFallback(pkg));
   React.useEffect(() => {
-    setGranted(pkg?.tokens ?? 0);
+    setGranted(periodFallback(pkg));
   }, [packageId]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const [issuing, setIssuing] = useState(false);

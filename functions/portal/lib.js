@@ -3,13 +3,19 @@
  * server-side writers (contract v2.0 pin B, v2.1 pins C/E/F/H).
  *
  * CHANGE ONE, CHANGE BOTH. This is a deliberate duplicate of
- * `normalizeAnchorDay`, `periodFor` and `tokensFor` from
+ * `normalizeAnchorDay`, `periodFor`, `periodFallback` and `tokensFor` from
  * `frontend/src/portal/data/packages.js`, plus `createBooking`'s charge
- * order. That file is ESM and CRA-only, so Cloud Functions (CommonJS,
- * outside the CRA build) cannot import it. Any edit to the period math, the
- * token derivation or the charge order must land in BOTH files in the same
+ * order (hooks/live.js `selectGraceToken`/`assertPeriodTokensLeft`). That
+ * file is ESM and CRA-only, so Cloud Functions (CommonJS, outside the CRA
+ * build) cannot import it. Any edit to the period math, the token
+ * derivation or the charge order must land in ALL of those in the same
  * commit, or the client and the server will disagree about how many tokens
  * a family has.
+ *
+ * Single token (owner rulings 2026-09-29/30, portal/single.js): one paid
+ * $65 checkout is one graceTokens doc `single_{cs}` good to season end. The
+ * package grants no period token (`periodFallback` 0), a waitlist entry
+ * HOLDS a token (`held`), and a spend in any period counts (`graceSpends`).
  *
  * Design keystone (TEAM.md Sprint 12): ONE POOL, DERIVED. Nothing here is a
  * stored counter; `used`, `reserved` and grace consumption are all counts.
@@ -202,49 +208,75 @@ function isUnlimited(pkg) {
 }
 
 /**
+ * A period's grant when no `tokenPeriods` doc has been issued (pin C). The
+ * single token grants NO period token (rulings 2026-09-29/30): its tokens
+ * are bought one at a time as graceTokens `single_{cs}`, and a period token
+ * for a single athlete is only ever an ops comp (an issued doc).
+ * @param {?Object} pkg A `packages/{id}` document body.
+ * @return {number} 0 for kind 'single', else the package's tokens (0 when
+ *     absent; Elite's null is handled by the caller as unlimited).
+ */
+function periodFallback(pkg) {
+  if (pkg && pkg.kind === 'single') return 0;
+  return (pkg && pkg.tokens) || 0;
+}
+
+/**
  * One athlete's token position in one period — derived, never a stored
  * counter. Mirrors `tokensFor` in packages.js including the Sprint 13 seam
  * amendment: a grace-charged booking is NOT a period spend.
  *
+ * Single token (rulings 2026-09-29/30): `graceSpends` (graceSpendQueries)
+ * are bookings of ANY period that spent a grace id. For a per-purchase
+ * athlete each waitlist entry not in `ignoreWaitlistIds` HOLDS one token:
+ * the `held` latest-expiring ones are not offered.
+ *
  * @param {{pkg: ?Object, tokenPeriod: ?Object, bookings: !Array<!Object>,
  *     waitlist: !Array<!Object>, graceTokens: !Array<!Object>,
+ *     graceSpends: (!Array<!Object>|undefined),
  *     periodKey: string, today: string,
  *     ignoreWaitlistIds: (!Array<string>|undefined)}} args Inputs. All
  *     arrays are the athlete's own documents; filtering by period happens
  *     here so callers can hand over one date-range read.
  * @return {{granted: ?number, used: number, reserved: number,
  *     grace: !Array<{id: string, expiresAt: ?string}>, left: ?number,
- *     unlimited: boolean}} The position.
+ *     unlimited: boolean, perPurchase: boolean, held: number}} The
+ *     position. `held` is the number of waitlist entries holding a token.
  */
 function tokensPosition(args) {
   const pkg = args.pkg || null;
   const periodKey = args.periodKey;
   const today = args.today || todayISO();
   const skip = new Set(args.ignoreWaitlistIds || []);
-  const live = (args.bookings || []).filter(
-      (b) => b && b.status !== 'cancelled');
+  const notCancelled = (b) => b && b.status !== 'cancelled';
+  const live = (args.bookings || []).filter(notCancelled);
   // A grace-charged booking (graceTokenId set) is a second life for a token
   // the Academy could not honor — it never counts as a period spend.
   const used = live.filter(
       (b) => b.periodKey === periodKey && !b.graceTokenId).length;
   const reserved = (args.waitlist || []).filter(
       (w) => w && w.periodKey === periodKey && !skip.has(w.id)).length;
-  const consumed = new Set(live.map((b) => b.graceTokenId).filter(Boolean));
-  const grace = (args.graceTokens || [])
+  const spends = live.concat((args.graceSpends || []).filter(notCancelled));
+  const consumed = new Set(spends.map((b) => b.graceTokenId).filter(Boolean));
+  const unlimited = isUnlimited(pkg);
+  const perPurchase = Boolean(pkg) && !unlimited && pkg.kind === 'single';
+  const held = perPurchase ? (args.waitlist || []).filter(
+      (w) => w && !skip.has(w.id)).length : 0;
+  const sorted = (args.graceTokens || [])
       .filter((g) => g && !consumed.has(g.id) &&
           (!g.expiresAt || g.expiresAt >= today))
       .map((g) => ({id: g.id, expiresAt: g.expiresAt || null}))
       .sort((a, b) => String(a.expiresAt).localeCompare(String(b.expiresAt)));
-  const unlimited = isUnlimited(pkg);
+  const grace = sorted.slice(0, Math.max(0, sorted.length - held));
   let granted = 0;
   if (unlimited) {
     granted = null;
   } else if (pkg) {
     const issued = args.tokenPeriod && args.tokenPeriod.granted;
-    granted = Number.isInteger(issued) ? issued : (pkg.tokens || 0);
+    granted = Number.isInteger(issued) ? issued : periodFallback(pkg);
   }
   const left = unlimited ? null : Math.max(0, granted - used - reserved);
-  return {granted, used, reserved, grace, left, unlimited};
+  return {granted, used, reserved, grace, left, unlimited, perPurchase, held};
 }
 
 /**
@@ -278,14 +310,21 @@ function chargeFor(args) {
  * `households.membership` and `athletes.billing` are both absent == active.
  * @param {?Object} household A `households/{id}` body.
  * @param {?Object=} athlete An `athletes/{id}` body.
- * @return {boolean} False when the household is past_due/lapsed or the
- *     athlete's `billing.status` is present and not 'active'.
+ * @return {boolean} False when the household is past_due/lapsed, the
+ *     athlete's `billing.status` is present and not 'active', or the
+ *     billing is one-time (single token, rulings 2026-09-29/30) while the
+ *     package has moved off 'single' — payment-pending until the new
+ *     package is paid (firestore.rules athleteBillingOk is the rules half).
  */
 function membershipAllowsBooking(household, athlete) {
   const status = household && household.membership &&
       household.membership.status;
   if (status === 'past_due' || status === 'lapsed') return false;
   const billing = athlete && athlete.billing;
+  if (billing && billing.oneTime === true &&
+      athlete.packageId !== 'single') {
+    return false;
+  }
   return !billing || billing.status === 'active';
 }
 
@@ -365,6 +404,50 @@ function periodBookingsQuery(db, athleteId, period) {
       .where('date', '<=', period.periodEnd);
 }
 
+/** Firestore's cap on the values of one `in` filter. @const {number} */
+const IN_LIMIT = 30;
+
+/**
+ * The bookings of ANY period that spent one of an athlete's unexpired grace
+ * tokens (single token, rulings 2026-09-29/30): a season token can be spent
+ * outside the period `periodBookingsQuery` reads. The rows go to
+ * `tokensPosition` as `graceSpends`. Expired and voided tokens (a refund
+ * sets expiresAt '2000-01-01') are skipped: they are never offered anyway.
+ * @param {!Object} db An admin `Firestore`.
+ * @param {!Array<!Object>} graceRows The athlete's graceTokens rows
+ *     (`rows(snap)`, so each carries its `id`).
+ * @param {string} today `'YYYY-MM-DD'` in Chicago.
+ * @return {!Array<!Object>} Firestore `Query`s, one per 30 ids; [] when
+ *     there is no unexpired token.
+ */
+function graceSpendQueries(db, graceRows, today) {
+  const ids = (graceRows || [])
+      .filter((g) => g && g.id && (!g.expiresAt || g.expiresAt >= today))
+      .map((g) => g.id);
+  const queries = [];
+  for (let i = 0; i < ids.length; i += IN_LIMIT) {
+    queries.push(db.collection('bookings')
+        .where('graceTokenId', 'in', ids.slice(i, i + IN_LIMIT)));
+  }
+  return queries;
+}
+
+/**
+ * Run `graceSpendQueries` through a reader and flatten the result.
+ * @param {function(!Object): !Promise<!Object>} get Resolves a `Query` to a
+ *     `QuerySnapshot`: `(q) => tx.get(q)` inside a transaction, or
+ *     `(q) => q.get()` outside one.
+ * @param {!Array<!Object>} queries From `graceSpendQueries`.
+ * @return {!Promise<!Array<!Object>>} The bookings as `[{id, ...data}]`.
+ */
+async function readGraceSpends(get, queries) {
+  const out = [];
+  for (const q of queries || []) {
+    out.push(...rows(await get(q)));
+  }
+  return out;
+}
+
 /**
  * Turn a query snapshot into `[{id, ...data}]`, the shape every derivation
  * above expects (grace consumption is matched on the document id).
@@ -388,6 +471,7 @@ module.exports = {
   chicagoDate,
   chicagoDateFromUnix,
   chicagoTime,
+  graceSpendQueries,
   householdByCustomer,
   householdByCustomerQuery,
   householdFromSnap,
@@ -396,12 +480,14 @@ module.exports = {
   nextPeriod,
   normalizeAnchorDay,
   periodBookingsQuery,
+  periodFallback,
   periodFor,
   // Lazy: prepaid.js requires lib.js, so these resolve on first use.
   get PRORATE_JOINERS() {
     return require('./prepaid').PRORATE_JOINERS;
   },
   prepaidPeriodFor: (...a) => require('./prepaid').prepaidPeriodFor(...a),
+  readGraceSpends,
   rows,
   todayISO,
   tokenPeriodId,

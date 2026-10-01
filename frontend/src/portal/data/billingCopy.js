@@ -53,6 +53,20 @@ export function billingBadge(status) {
   return BADGES[status] || null;
 }
 
+/**
+ * An athlete's paid status as every gate and screen reads it (`billing`
+ * absent == active). One exception to the stored status: an athlete who
+ * bought single tokens (billing.oneTime) and was then moved to another
+ * package has paid for nothing on that package yet - 'pending' until its
+ * checkout completes (owner ruling 2026-09-29/30). The same rule as
+ * firestore.rules' athleteBillingOk and functions lib.membershipAllowsBooking.
+ */
+export function billingStatusOf(athlete) {
+  const billing = athlete?.billing;
+  if (billing?.status === 'active' && billing.oneTime === true && athlete.packageId !== 'single') return 'pending';
+  return billing?.status ?? 'active';
+}
+
 /*
  * The ONE family facility card (owner ruling 2026-09-30: the add-on is a
  * family add-on, and Elite covers the family - data/facility.js decides the
@@ -87,7 +101,8 @@ export function familyFacilityCard(members) {
     return { state: facility === 'active' && !holder.facilityAccessConsent ? 'paid-waiver-pending' : 'active', holder, lapsed: false };
   }
   if (family.eliteDueId) return null;
-  const paid = list.filter((m) => m.package?.kind === 'tokens' && (m.billing?.status ?? 'active') === 'active');
+  // Never the single token or a one-time buyer: it is never an add-on base (owner ruling 2026-09-29/30).
+  const paid = list.filter((m) => m.package?.kind === 'tokens' && m.billing?.oneTime !== true && (m.billing?.status ?? 'active') === 'active');
   const asked = paid.find((m) => m.facilityRequested === true) ?? null;
   if (!asked && list.some((m) => facilityRequestState(m) === 'waiting')) return null;
   const holder = asked ?? paid[0] ?? null;

@@ -34,11 +34,12 @@ import {
 } from 'firebase/firestore';
 import { auth, db } from '../../firebase';
 import { bump } from './invalidate';
-import { eliteDailyCapHit, normalizeAnchorDay, periodFor, windowDaysFor } from '../data/packages';
+import { eliteDailyCapHit, normalizeAnchorDay, periodFallback, periodFor, windowDaysFor } from '../data/packages';
 import { CHANGEABLE_PACKAGE_IDS } from '../data/packageChange';
 import { BOOKING_OPENS_LABEL, academyDateISO, bookingOpen, openThrough, todayISO, windowOpensOn } from '../data/calendar';
 import { SPECIALISTS, mentalCapFor } from '../data/specialists';
 import { SESSION_STARTED_COPY, sessionStarted, waitlistClosed } from '../data/sessionStart';
+import { billingStatusOf } from '../data/billingCopy';
 
 /** id -> catalogue entry, for the specialist-cap error copy below. */
 const SPECIALIST_BY_ID = new Map(SPECIALISTS.map((s) => [s.id, s]));
@@ -533,22 +534,28 @@ export async function joinWaitlist(
  * expires but scheduled for a date the token itself would have already
  * lapsed by.
  */
-function selectGraceToken(bookings, graceTokens, date) {
+function selectGraceToken(bookings, graceTokens, date, held = 0) {
   const live = (bookings || []).filter((b) => b && b.status !== 'cancelled');
   const consumed = new Set(live.map((b) => b.graceTokenId).filter(Boolean));
   const candidates = (graceTokens || [])
     .filter((g) => g && !consumed.has(g.id) && g.expiresAt >= date)
     .sort((a, b) => String(a.expiresAt).localeCompare(String(b.expiresAt)));
-  return candidates[0] ?? null;
+  // Single token (ruling 2026-09-29/30): each of a single athlete's other
+  // waitlist entries HOLDS one token, latest-expiring first (lib.js
+  // tokensPosition's `held`), so the soonest candidate pays only while one is
+  // left over.
+  return candidates.length > held ? candidates[0] : null;
 }
 
 /**
  * Per-athlete paid status (Sprint 20, spec 4.4): absent == active for every
  * athlete provisioned before this sprint; anything else blocks booking with
- * the pending copy. firestore.rules' athleteBillingOk() is the server half.
+ * the pending copy. billingStatusOf also reads a single-token buyer moved to
+ * another package as pending until it is paid (ruling 2026-09-29/30).
+ * firestore.rules' athleteBillingOk() is the server half.
  */
 export function assertAthleteBillingActive(athlete) {
-  const status = athlete?.billing?.status ?? 'active';
+  const status = billingStatusOf(athlete);
   if (status === 'active') return;
   throw new LiveDataError(ERR.INVALID, 'Payment pending - finish checkout to start booking', null, 'billing-pending');
 }
@@ -679,12 +686,24 @@ function assertEliteDailyCap(pkg, type, date, bookings) {
 export function assertPeriodTokensLeft(pkg, bookings, periodKey, issuedGrant, waitlist = [], currentPeriodKey = null) {
   if (!pkg || pkg.tokens !== null) {
     // Contract v2.1 pin C: an issued tokenPeriods doc (Stripe or ops) is the
-    // grant when it exists; the package's own tokens are the fallback.
-    const granted = pkg ? issuedGrant ?? pkg.tokens ?? 0 : 0;
+    // grant when it exists; periodFallback (the package's own tokens, 0 for
+    // the single token - ruling 2026-09-29/30) is the fallback.
+    const granted = pkg ? issuedGrant ?? periodFallback(pkg) : 0;
     const used = (bookings || []).filter(
       (b) => b.status !== 'cancelled' && b.periodKey === periodKey && !b.graceTokenId
     ).length;
     const reserved = (waitlist || []).filter((w) => w && w.periodKey === periodKey).length;
+    if (used + reserved >= granted && pkg?.kind === 'single') {
+      // Reached only with no usable purchased token: buy one, or free one.
+      throw new LiveDataError(
+        ERR.INVALID,
+        (waitlist || []).length > 0
+          ? 'Your session token is held by a waitlist spot - leave the waitlist or buy another token.'
+          : 'No session token left - buy one to book.',
+        null,
+        'no-session-token'
+      );
+    }
     if (used + reserved >= granted) {
       throw new LiveDataError(
         ERR.INVALID,
@@ -710,6 +729,20 @@ export function assertPeriodTokensLeft(pkg, bookings, periodKey, issuedGrant, wa
 // loaded is refused as 'full' with nothing written, and Repeat weekly never
 // asks, so it can never leave a waitlist place behind.
 const SESSION_FULL = Symbol('session-full');
+
+/**
+ * The re-book write (cancelled -> confirmed on the SAME doc): the charge is
+ * decided again, exactly as for a new booking, and stamped with
+ * `rebookedAt` (ruling 2026-09-29/30). firestore.rules' rebookChargeOk
+ * re-checks the charge, and a single athlete's re-book must carry
+ * rebookedAt == request.time, so a stale client can never re-attach a spent
+ * single token. `graceTokenId` is always written (null when none) so a
+ * token the booking held before its cancel is released. Pure; `stamp` is
+ * serverTimestamp() in the transaction below.
+ */
+export function rebookPatch(chargedFrom, graceTokenId, stamp) {
+  return { status: 'confirmed', chargedFrom, graceTokenId: graceTokenId ?? null, rebookedAt: stamp };
+}
 
 export async function createBooking(
   { athleteId, sessionId, date, type, householdId, attendee },
@@ -769,14 +802,21 @@ export async function createBooking(
     chargedFrom = 'elite';
   } else {
     const graceTokens = await fetchGraceTokensByAthlete(athleteId);
-    const grace = selectGraceToken(bookings, graceTokens, date);
+    // Single token (ruling 2026-09-29/30): the athlete's waitlist entries for
+    // OTHER sessions each hold a purchased token; this session's own entry
+    // does not (booking it releases the hold). Household-scoped, the filter
+    // a parent's waitlist read is provable on.
+    const heldBy = pkg?.kind === 'single'
+      ? (await fetchAthleteWaitlist(athleteId, { householdId })).filter((w) => w.sessionId !== sessionId)
+      : null;
+    const grace = selectGraceToken(bookings, graceTokens, date, heldBy ? heldBy.length : 0);
     if (grace) {
       chargedFrom = 'grace';
       graceTokenId = grace.id;
     } else if (!skipCapCheck) {
       const issued = await getDoc(doc(db, 'tokenPeriods', `${athleteId}_${periodKey}`)).catch(() => null);
       const issuedGrant = issued && issued.exists() ? issued.data().granted : undefined;
-      const waitlist = await fetchAthleteWaitlist(athleteId, { householdId });
+      const waitlist = heldBy ?? (await fetchAthleteWaitlist(athleteId, { householdId }));
       assertPeriodTokensLeft(pkg, bookings, periodKey, issuedGrant, waitlist, currentPeriodKey);
     }
   }
@@ -797,12 +837,12 @@ export async function createBooking(
     sessionId,
     date,
     type,
-    // periodKey (contract v2.0, pin B) and chargedFrom/graceTokenId
-    // (contract v2.1, pin E) are ALL write-once at create - a re-book (the
-    // isRebook branch below) only ever updates `status`
-    // (memberBookingUpdateOk's own hasOnly), so a booking keeps whatever it
-    // was FIRST charged even across a cancel/re-book cycle - the same
-    // "history, not a live join" discipline periodKey already established.
+    // periodKey (contract v2.0, pin B) is write-once at create. chargedFrom/
+    // graceTokenId (contract v2.1, pin E) are set here and RE-DECIDED on a
+    // re-book (the isRebook branch below writes rebookPatch: status, the
+    // fresh charge and rebookedAt - memberBookingUpdateOk's own hasOnly), so
+    // a re-booked session spends a token that is really free today, never
+    // the one it held before its cancel (ruling 2026-09-29/30).
     periodKey,
     status: 'confirmed',
     householdId,
@@ -889,10 +929,12 @@ export async function createBooking(
       if (isRebook) {
         // updateDoc-style partial write, NOT tx.set(bookingRef, booking) —
         // firestore.rules' memberBookingUpdateOk() only admits a diff
-        // hasOnly(['status']); rewriting the whole doc (even with identical
-        // values) would re-stamp createdAt via serverTimestamp() and widen
-        // the diff, and the rule would reject it.
-        tx.update(bookingRef, { status: 'confirmed' });
+        // hasOnly(['status', 'chargedFrom', 'graceTokenId', 'rebookedAt']);
+        // rewriting the whole doc would re-stamp createdAt and widen the
+        // diff, and the rule would reject it. The charge decided above is
+        // written, and rebookedAt stamps it (the double-spend guard orders
+        // a token's bookings by it).
+        tx.update(bookingRef, rebookPatch(chargedFrom, graceTokenId, serverTimestamp()));
       } else {
         tx.set(bookingRef, booking);
       }

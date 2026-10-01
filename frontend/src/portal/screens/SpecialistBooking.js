@@ -38,6 +38,7 @@ import { leaveWaitlist } from '../hooks/waitlist';
 import { waitlistClosed } from '../data/sessionStart';
 import { SPECIALISTS, repeatsWeekly } from '../data/specialists';
 import { windowDaysFor } from '../data/packages';
+import { graceSpendLabel, isSingleTokenId } from '../data/singleToken';
 // Pure calendar/season helpers per the seam rule already established in
 // BookSession.js/CommitmentContract.js/TourStandings.js - data still travels
 // through the hook seam below; these are formatting helpers, not response
@@ -304,6 +305,8 @@ export default function SpecialistBooking({
           tokens,
           // What the write actually charged ('elite' | 'grace' | 'period').
           chargedFrom: result && result.chargedFrom ? result.chargedFrom : null,
+          // The grace token the write spent, if any: a bought single token's id says so.
+          graceTokenId: result && result.graceTokenId ? result.graceTokenId : null,
           athleteName,
           // The window as it stood at the tap: the booking's own bump reloads
           // useMembership, so the confirmation renders with none in hand.
@@ -325,9 +328,10 @@ export default function SpecialistBooking({
   if (booked) {
     // Repeat weekly, as on Book a Session's confirmation (owner 2026-09-30):
     // live bookings only, Phil's sessions only (never Yannick's), never off a
-    // waitlist place. It reaches as far as this athlete's own window.
+    // waitlist place. It reaches as far as this athlete's own window. Never
+    // for a single athlete, as on Book a Session: every week spends a bought token.
     const repeat =
-      booking.bookingFor && !booked.waitlisted && repeatsWeekly(booked.specialist.id)
+      booking.bookingFor && !booked.waitlisted && !booked.tokens?.perPurchase && repeatsWeekly(booked.specialist.id)
         ? {
             windowEnd: booked.repeatWindow?.end ?? openThroughDate,
             windowDays: booked.repeatWindow?.days ?? windowDays,
@@ -912,7 +916,7 @@ function Confirmed({ bare, booked, repeat, onBack }) {
                 <MetaCol label="With" value={booked.specialist.name} />
               </div>
               <div style={{ borderTop: `1px solid ${color.border}`, marginTop: 14, paddingTop: 12 }}>
-                <Body size={12}>Spends {CHARGE_LABEL[booked.chargedFrom] ?? spendLabelFor(booked.tokens)}.</Body>
+                <Body size={12}>Spends {chargeLabelFor(booked) ?? spendLabelFor(booked.tokens)}.</Body>
               </div>
             </Card>
 
@@ -938,12 +942,18 @@ function Confirmed({ bare, booked, repeat, onBack }) {
 function spendLabelFor(tokens) {
   if (!tokens) return '1 token';
   if (tokens.unlimited) return 'nothing - included with Elite';
-  if ((tokens.grace?.length ?? 0) > 0) return 'a bonus token';
+  if ((tokens.grace?.length ?? 0) > 0) return graceSpendLabel(tokens);
   return '1 token';
 }
 
 /** The same labels by a booking's own `chargedFrom` (createBooking's result). */
 const CHARGE_LABEL = { elite: 'nothing - included with Elite', grace: 'a bonus token', period: '1 token' };
+
+/** A grace charge paid with a bought single token (the write's graceTokenId says so) is a session token, never a bonus. */
+function chargeLabelFor(booked) {
+  if (booked.chargedFrom === 'grace' && isSingleTokenId(booked.graceTokenId)) return 'a session token';
+  return CHARGE_LABEL[booked.chargedFrom];
+}
 
 function MetaCol({ label, value }) {
   return (

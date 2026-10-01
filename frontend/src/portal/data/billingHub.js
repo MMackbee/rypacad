@@ -12,8 +12,10 @@
  */
 
 import { addDaysISO, BOOKING_OPENS_LABEL, bookingOpen, longDayLabel } from './calendar';
-import { ELITE, normalizeAnchorDay, periodFor, SINGLE_TOKEN, tokensFor } from './packages';
+import { ELITE, normalizeAnchorDay, periodFallback, periodFor, SINGLE_TOKEN, tokensFor } from './packages';
+import { billingStatusOf } from './billingCopy';
 import { contractEnabled } from './contractFlag';
+import { isSingleTokenId, saleOpen, SINGLE_NOT_OPEN_LINE } from './singleToken';
 
 /**
  * The season's first token period - functions/portal/prepaid.js carries the
@@ -104,7 +106,8 @@ export function sessionLabel(session, fallbackType) {
  * Bookings and waitlist entries of one period as list rows, oldest first.
  * A booking row says how it was paid (`viaGrace`), so the list's count of
  * period-charged rows is exactly `tokens.used` and the grace-charged rows
- * are exactly the consumed bonus tokens.
+ * are exactly the consumed bonus tokens. `viaSingle` marks the grace rows
+ * paid with a purchased single token (`single_{cs}`, ruling 2026-09-29/30).
  */
 export function periodRows({ bookings, waitlist, periodKey, sessionsById = {} }) {
   const byDate = (a, b) => (a.date === b.date ? String(a.id).localeCompare(String(b.id)) : a.date < b.date ? -1 : 1);
@@ -121,6 +124,7 @@ export function periodRows({ bookings, waitlist, periodKey, sessionsById = {} })
         time: (session && session.time) || null,
         status: b.status || 'confirmed',
         viaGrace: Boolean(b.graceTokenId),
+        viaSingle: isSingleTokenId(b.graceTokenId),
       };
     })
     .sort(byDate);
@@ -137,6 +141,7 @@ export function periodRows({ bookings, waitlist, periodKey, sessionsById = {} })
         time: (session && session.time) || null,
         status: 'waitlisted',
         viaGrace: false,
+        viaSingle: false,
       };
     })
     .sort(byDate);
@@ -177,13 +182,20 @@ export function hubMemberFor(args) {
       })),
     },
     period,
-    athlete.billing?.status
+    billingStatusOf(athlete)
   );
 
   const { spent, reserved } = periodRows({ bookings, waitlist, periodKey: period.periodKey, sessionsById });
   const nextRows = periodRows({ bookings, waitlist, periodKey: nextPeriod.periodKey, sessionsById });
   const unlimited = tokens.unlimited;
-  const nextGranted = unlimited ? null : pkg ? pkg.tokens ?? 0 : 0;
+  // A bought token is good all season, so the session it was spent on can sit
+  // in the next period (the booking window reaches no further). The hero
+  // names these rows (SessionTokens.js singleUsesOf); only a single athlete
+  // carries the list.
+  const singleUses = tokens.perPurchase ? [...spent, ...nextRows.spent].filter((r) => r.viaSingle) : null;
+  // periodFallback: the single token grants no period token (ruling
+  // 2026-09-29/30), so its next period reads 0, never pkg.tokens.
+  const nextGranted = unlimited ? null : pkg ? periodFallback(pkg) : 0;
 
   const lastUsed = (bookings || []).filter(
     (b) => b && b.status !== 'cancelled' && b.periodKey === prevPeriod.periodKey && !b.graceTokenId
@@ -195,7 +207,7 @@ export function hubMemberFor(args) {
         periodKey: prevPeriod.periodKey,
         start: prevPeriod.periodKey,
         end: prevPeriod.periodEnd,
-        granted: unlimited ? null : prevTokenPeriod?.granted ?? pkg.tokens ?? 0,
+        granted: unlimited ? null : prevTokenPeriod?.granted ?? periodFallback(pkg),
         used: lastUsed,
       }
     : null;
@@ -226,6 +238,7 @@ export function hubMemberFor(args) {
     tokens,
     spent,
     reserved,
+    ...(singleUses ? { singleUses } : {}),
     nextPeriod: {
       periodKey: nextPeriod.periodKey,
       start: nextPeriod.periodKey,
@@ -263,9 +276,12 @@ export function hubMemberFor(args) {
     // Sprint 20 (spec 4.4): the per-athlete paid state that gates booking.
     // Absent == active for every athlete provisioned before this sprint;
     // `facility` is the add-on subscription's own state (null == no add-on).
+    // billingStatusOf: a single-token buyer moved to another package is
+    // 'pending' until it is paid; `oneTime` rides along only when set.
     billing: {
-      status: athlete.billing?.status ?? 'active',
+      status: billingStatusOf(athlete),
       facility: athlete.facilityBilling?.status ?? null,
+      ...(athlete.billing?.oneTime === true ? { oneTime: true } : {}),
     },
   };
 }
@@ -293,7 +309,9 @@ function attemptOf(membership) {
  * The single token is a one-time purchase (owner ruling, 2026-09-30): a
  * pending list of only single-token athletes (`perPurchase`, hooks/billing.js
  * pendingOf) and an all-single household (`opts.allPerPurchase`) never read
- * "billed monthly".
+ * "billed monthly". Until single tokens go on sale (owner ruling 2026-10-01,
+ * singleToken.js saleOpen - the Oct 10 gate) a pending list of only
+ * single-token athletes says when, and carries no `cta`.
  *
  * The monthly pending body names the Oct 10 gate until it opens (UX review
  * P-07: "can book as soon as checkout is complete" was untrue for token
@@ -347,17 +365,20 @@ export function statusFor(membership, opts = {}) {
     // Elite books as soon as it is paid, and holds no tokens: a pending list
     // of Elite athletes only gets no "token packages from" date.
     const elitePending = pendingAthletes.every((a) => a.packageId === ELITE.id);
+    // Single tokens go on sale when booking opens (owner ruling 2026-10-01):
+    // until then an all-single list says when, and offers no Pay button.
+    const singleNotOpen = perPurchase && !saleOpen(opts.now ?? Date.now());
     return {
       status: 'pending',
       tone: 'yellow',
       badge: { tone: 'yellow', label: ended ? 'Payment needed' : 'Payment pending' },
       title: ended ? 'Membership ended - pay to book again' : 'Payment pending - finish checkout to start booking',
       body: perPurchase
-        ? `${names} can book once their session token is paid for. A session token is a one-time $${SINGLE_TOKEN.price} payment.`
+        ? `${names} can book once their session token is paid for. ${singleNotOpen ? `${SINGLE_NOT_OPEN_LINE} ` : ''}A session token is a one-time $${SINGLE_TOKEN.price} payment.`
         : `${names} can book once checkout is complete${bookingOpen(opts.now ?? Date.now()) || elitePending ? '' : ` (token packages from ${BOOKING_OPENS_LABEL})`}. Billed monthly on the 1st once you've paid.`,
       ladder: null,
       ladderAt: null,
-      cta: 'Pay now',
+      cta: singleNotOpen ? null : 'Pay now',
       paused: false,
       pendingAthletes,
     };
@@ -385,15 +406,18 @@ export function statusFor(membership, opts = {}) {
     tone: 'default',
     badge: { tone: 'green', label: 'Active' },
     // `allUnlimited`: every athlete is Elite - no token wording (tester Mike 2026-09-30).
+    // `allPerPurchase`: session tokens never start or reset with a period - an all-single household reads 'Membership active'.
     title: opts.allUnlimited === true
       ? tokensStartOn
         ? `First period starts ${longDayLabel(tokensStartOn)}`
         : 'Membership active'
-      : tokensStartOn
-        ? `Tokens start ${longDayLabel(tokensStartOn)}`
-        : resetsOn
-          ? `Tokens reset ${longDayLabel(resetsOn)}`
-          : 'Membership active',
+      : opts.allPerPurchase === true
+        ? 'Membership active'
+        : tokensStartOn
+          ? `Tokens start ${longDayLabel(tokensStartOn)}`
+          : resetsOn
+            ? `Tokens reset ${longDayLabel(resetsOn)}`
+            : 'Membership active',
     body: opts.allPerPurchase === true
       ? 'Session tokens are one-time payments - nothing bills monthly.'
       : `${billingDay ? `Billed monthly on the ${billingDay}. ` : ''}Nothing needs attention.`,

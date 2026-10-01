@@ -1,10 +1,16 @@
 /**
- * createCheckoutSession (contract 1.5, spec 4.2 / 4.5): ONE Stripe Checkout
- * Session in subscription mode carrying the recurring tier (or facility)
- * price AND a one-time "prepaid month" line, with `trial_end` at 00:00
- * Chicago on the next 1st so every subscription anchors on the 1st
- * (rulings 0.11-0.13). Every Firestore read happens before the Stripe
- * calls; nothing is written here - the webhook (stripe.js) writes.
+ * createCheckoutSession (contract 1.5, spec 4.2 / 4.5). A monthly tier (or
+ * the facility add-on) is ONE Stripe Checkout Session in subscription mode
+ * carrying the recurring price AND a one-time "prepaid month" line, with
+ * `trial_end` at 00:00 Chicago on the next 1st so every subscription
+ * anchors on the 1st (rulings 0.11-0.13). The single session token (owner
+ * rulings 2026-09-29/30) is a PAYMENT-mode session of the one-time $65
+ * price, card only, expiring before the season cutoff; every paid session
+ * becomes one token in the webhook (stripe-single.js), so repeat purchases
+ * are allowed. It is on sale from the moment booking opens (ruling
+ * 2026-10-01, single.saleOpen): before that the handler refuses
+ * 'single-not-open'. Every Firestore read happens before the Stripe calls;
+ * nothing is written here - the webhook (stripe.js) writes.
  */
 'use strict';
 
@@ -15,6 +21,7 @@ const catalogue = require('./catalogue');
 const facility = require('./facility');
 const lib = require('./lib');
 const prepaid = require('./prepaid');
+const single = require('./single');
 const {CHECKOUT_SECRETS} = require('./secrets');
 
 const {HttpsError} = functions.https;
@@ -37,6 +44,9 @@ const PACKAGE_LABEL = {
   't-6': '6', 't-12': '12', 't-16': '16', 'elite': 'ELITE',
 };
 const FACILITY_NAME = 'Family facility access';
+/** single.SEASON_END as the family reads it (checkout.test.js checks). */
+const SEASON_END_LABEL = 'Sat, Feb 27, 2027';
+const NOTHING_CHARGED = 'Nothing has been charged.';
 
 let stripeClient;
 
@@ -66,6 +76,12 @@ function refuse(code, reason, message) {
   return new HttpsError(code, message, {reason});
 }
 
+/** @return {!Error} The 'stripe-error' refusal (Stripe itself failed). */
+function stripeUnavailable() {
+  return refuse('unavailable', 'stripe-error',
+      'Checkout is unavailable right now. Try again in a minute.');
+}
+
 /**
  * @param {!Object} store Firestore.
  * @param {string} collection The collection.
@@ -79,13 +95,27 @@ async function read(store, collection, id) {
 }
 
 /**
+ * Does this `billing` (or `facilityBilling`) block hold a live subscription?
+ * A 'past_due' subscription still EXISTS (Stripe is retrying the card). A
+ * paid single token (`oneTime` with no subscription) is not one.
+ * @param {?Object} b The billing map.
+ * @return {boolean} True for active or past_due, except a one-time block.
+ */
+function live(b) {
+  return Boolean(b) && (b.status === 'past_due' ||
+      (b.status === 'active' && !(b.oneTime === true && !b.subscriptionId)));
+}
+
+/**
  * Sibling discount (owner, 2026-09-30): the second and later memberships in
  * a family get it - this checkout qualifies when ANOTHER athlete in the
  * household already holds a PAID monthly membership (active or past_due;
  * no billing map = a legacy active member). Review 2026-09-30: a never-paid
  * sibling does not count, or one paying child plus an unpaid sibling would
  * keep the 'forever' coupon all season. The single token is a one-time
- * purchase, not a membership. Checked at checkout only.
+ * purchase, not a membership: neither the 'single' package nor a one-time
+ * billing block (a single buyer moved to a monthly package and still to
+ * pay for it) counts. Checked at checkout only.
  *
  * Owner ruling 2026-10-01 ("lesser value"): what a family saves is 20% of
  * the LOWER membership, whichever one it pays first. So this checkout is
@@ -109,8 +139,7 @@ async function siblingEligible(store, householdId, athleteId, packageId) {
   let best = null;
   snap.docs.forEach((doc) => {
     const a = doc.data() || {};
-    const paid = !a.billing || a.billing.status === 'active' ||
-        a.billing.status === 'past_due';
+    const paid = !a.billing || live(a.billing);
     const rank = PACKAGE_RANK[a.packageId] || 0;
     if (doc.id !== athleteId && paid && rank &&
         (!best || rank > PACKAGE_RANK[best])) best = a.packageId;
@@ -303,6 +332,89 @@ function sessionBody(a) {
 }
 
 /**
+ * The single session token's Checkout Session request body: a one-time
+ * payment of the single price, card only. Pure. Never `invoice_creation`:
+ * the webhook mints from the session itself.
+ * @param {{householdId: string, athleteId: string, athleteName: ?string,
+ *     priceId: string, role: string, portalUrl: string,
+ *     customerId: ?string, email: ?string, nowMs: number}} a Inputs.
+ * @return {!Object} What `stripe.checkout.sessions.create` receives.
+ */
+function singleSessionBody(a) {
+  const screen = a.role === 'athlete' ? 'home' : 'family';
+  const base = `${a.portalUrl}/portal/${screen}`;
+  const name = a.athleteName || 'your athlete';
+  const metadata = () => ({householdId: a.householdId,
+    athleteId: a.athleteId, product: 'tier', packageId: single.SINGLE_ID});
+  const body = {
+    mode: 'payment',
+    client_reference_id: `${a.householdId}__${a.athleteId}__tier`,
+    line_items: [{price: a.priceId, quantity: 1}],
+    payment_method_types: ['card'],
+    metadata: metadata(),
+    payment_intent_data: {metadata: metadata(),
+      description: `Single session token - ${name}`},
+    custom_text: {submit: {message: `One-time payment: one session token ` +
+      `for ${name}, good through ${SEASON_END_LABEL}.`}},
+    expires_at: single.checkoutExpiresAt(a.nowMs),
+    success_url: `${base}?paid=${a.athleteId}&cs={CHECKOUT_SESSION_ID}` +
+        '&single=1',
+    cancel_url: base,
+  };
+  if (a.customerId) {
+    body.customer = a.customerId;
+  } else {
+    body.customer_email = a.email;
+    body.customer_creation = 'always';
+  }
+  return body;
+}
+
+/**
+ * Does the Stripe price contradict what is being sold? The single token must
+ * be the one-time $65 USD price with no recurring or customer-chosen amount;
+ * a subscription checkout must never carry a one-time price.
+ * @param {?Object} price `stripe.prices.retrieve`'s result.
+ * @param {boolean} isSingle A single-token checkout.
+ * @return {boolean} True to refuse 'price-mismatch'.
+ */
+function priceMismatch(price, isSingle) {
+  const p = price || {};
+  if (!isSingle) return p.type === 'one_time';
+  return p.type !== 'one_time' || Boolean(p.recurring) ||
+      p.unit_amount !== single.SINGLE_PRICE_CENTS || p.currency !== 'usd' ||
+      Boolean(p.custom_unit_amount);
+}
+
+/**
+ * The single token's household gate: a past_due household must fix its card
+ * first, and a lapsed one is sold a token only when the webhook could lift
+ * it (no other athlete without a billing block).
+ * @param {!Object} store Firestore.
+ * @param {!Object} hh The household body (`{}` when missing).
+ * @param {!Object} athlete The buyer's body.
+ * @param {string} athleteId The buyer.
+ * @return {!Promise<void>} Throws the refusal.
+ */
+async function assertSingleHousehold(store, hh, athlete, athleteId) {
+  const status = hh.membership && hh.membership.status;
+  if (status === 'past_due') {
+    throw refuse('failed-precondition', 'household-past-due',
+        'A card on this family account needs updating before you can ' +
+        'buy a session token. ' + NOTHING_CHARGED);
+  }
+  if (status !== 'lapsed') return;
+  const snap = await store.collection('athletes')
+      .where('householdId', '==', athlete.householdId).get();
+  if (snap.docs.some((doc) => doc.id !== athleteId &&
+      !(doc.data() || {}).billing)) {
+    throw refuse('failed-precondition', 'household-lapsed-legacy',
+        'This family account needs the academy\'s help before you can ' +
+        'buy a session token. ' + NOTHING_CHARGED);
+  }
+}
+
+/**
  * createCheckoutSession. Checks in the contract's order, then one Stripe
  * price read and one session create.
  * @param {*} data `{athleteId, product}`.
@@ -348,9 +460,9 @@ async function createCheckoutSessionHandler(data, context, deps) {
   // A 'past_due' subscription still EXISTS (Stripe is retrying the card):
   // a second checkout would create a second subscription. The customer
   // portal's card update is the way back; only pending or lapsed (no live
-  // subscription) may start a checkout.
-  const live = (b) => Boolean(b) &&
-      (b.status === 'active' || b.status === 'past_due');
+  // subscription) may start a checkout. A paid single token (`oneTime`
+  // with no subscription) is not a subscription: buying again is allowed
+  // (`live`, above).
   const tierPaid = live(athlete.billing);
   const facilityPaid = live(athlete.facilityBilling);
   if (req.product === 'tier') {
@@ -359,26 +471,45 @@ async function createCheckoutSessionHandler(data, context, deps) {
           'Choose a package first.');
     }
     if (tierPaid) {
-      throw refuse('failed-precondition', 'already-active',
-          athlete.billing.status === 'past_due' ?
+      let copy = athlete.billing.status === 'past_due' ?
           'This membership has a subscription - update the card in Stripe.' :
-          'This membership is already paid.');
+          'This membership is already paid.';
+      if (athlete.packageId === single.SINGLE_ID) {
+        // Never tell the parent to cancel in Stripe themselves.
+        copy = 'This athlete still has a monthly plan - contact the ' +
+            'academy to switch to session tokens.';
+      }
+      throw refuse('failed-precondition', 'already-active', copy);
     }
   }
   const pkg = await read(store, 'packages', athlete.packageId);
-  // Owner ruling 2026-09-29: the single token is a ONE-TIME $65 payment, not
-  // a monthly package. This file only builds subscription checkouts, and the
-  // one-time path (payment-mode checkout + webhook + token model) is not
-  // built yet, so refuse before any Stripe call with a message that says so,
-  // instead of Stripe's rejection surfacing as 'Try again in a minute'.
-  if (req.product === 'tier' &&
-      (athlete.packageId === 'single' || (pkg && pkg.kind === 'single'))) {
-    throw refuse('failed-precondition', 'single-one-time',
-        'Single tokens are a one-time payment. Online payment for them ' +
-        'opens before booking starts on Sat, Oct 10. Nothing has been ' +
-        'charged.');
+  // Owner rulings 2026-09-29/30: the single token is a ONE-TIME $65 payment
+  // (payment-mode checkout below), sold from the day booking opens until 30
+  // minutes before the season cutoff so Stripe still accepts the session's
+  // expiry.
+  const singlePkg = athlete.packageId === single.SINGLE_ID ||
+      Boolean(pkg && pkg.kind === single.SINGLE_ID);
+  const isSingle = req.product === 'tier' && singlePkg;
+  // Owner ruling 2026-10-01: single tokens go on sale when booking opens
+  // (single.saleOpen, the lib.bookingOpen gate - Sat, Oct 10, 2026 at
+  // 7:00 AM Chicago). Clock-based, so this ships before that day; refused
+  // here, before any Stripe call.
+  if (isSingle && !single.saleOpen(nowMs)) {
+    throw refuse('failed-precondition', 'single-not-open',
+        'Single tokens are available from Sat, Oct 10 at 7 AM. ' +
+        NOTHING_CHARGED);
+  }
+  if (isSingle && !single.seasonCheckoutOpen(nowMs)) {
+    throw refuse('failed-precondition', 'season-over',
+        'Session tokens for this season are no longer on sale. ' +
+        NOTHING_CHARGED);
   }
   if (req.product === 'facility') {
+    if (singlePkg) {
+      throw refuse('failed-precondition', 'single-no-facility',
+          'Facility access comes with a monthly membership, not with ' +
+          'session tokens. ' + NOTHING_CHARGED);
+    }
     // Absent `billing` == active (spec 4.4): legacy athletes may add on.
     if (!lib.membershipAllowsBooking(null, athlete)) {
       throw refuse('failed-precondition', 'billing-not-active',
@@ -412,22 +543,26 @@ async function createCheckoutSessionHandler(data, context, deps) {
           'Pay for the Elite membership first.');
     }
   }
-  const key = req.product === 'facility' ? catalogue.FACILITY_KEY :
-      athlete.packageId;
+  // The single token always sells the catalogue's single price: the
+  // webhook accepts no other one-time price.
+  let key = isSingle ? single.SINGLE_ID : athlete.packageId;
+  if (req.product === 'facility') key = catalogue.FACILITY_KEY;
   const priceId = catalogue.priceIdFor(key, d.catalogue);
   if (!priceId) {
     throw refuse('failed-precondition', 'price-missing',
         'Pricing is not set up yet. Try again later.');
   }
   const hh = (await read(store, 'households', athlete.householdId)) || {};
+  if (isSingle) await assertSingleHousehold(store, hh, athlete, req.athleteId);
   const tokens = req.product === 'tier' && pkg && pkg.tokens !== undefined ?
       pkg.tokens : null;
-  // The add-on is not a membership: no sibling discount on it. The lookup
-  // is optional, so a failed read costs the family the discount, never
-  // the checkout.
+  // The add-on is not a membership: no sibling discount on it. Nor is the
+  // single token: it never earns the discount, and siblingEligible never
+  // counts it toward a sibling's. The lookup is optional, so a failed read
+  // costs the family the discount, never the checkout.
   const base = String(process.env.STRIPE_SIBLING_COUPON || '').trim() || null;
   const sibling = {eligible: false, coupon: base, lower: null};
-  if (req.product === 'tier') {
+  if (req.product === 'tier' && !isSingle) {
     try {
       const found = await siblingEligible(store, athlete.householdId,
           req.athleteId, athlete.packageId);
@@ -438,46 +573,69 @@ async function createCheckoutSessionHandler(data, context, deps) {
       console.error('siblingEligible failed, no discount:', err);
     }
   }
+  let client;
+  let price;
+  let discount = discountKey(sibling);
   try {
-    const client = d.stripe || stripe();
-    let discount = discountKey(sibling);
+    client = d.stripe || stripe();
     const open = await reuseOpenSession(client, athlete, req.product,
         priceId, discount);
     if (open) return {url: open};
-    const price = await client.prices.retrieve(priceId);
-    const args = {
-      householdId: athlete.householdId,
-      athleteId: req.athleteId,
-      product: req.product,
-      packageId: athlete.packageId || null,
-      priceId,
-      currency: price.currency || 'usd',
-      productName: req.product === 'facility' ? FACILITY_NAME :
-          (pkg && pkg.name) || athlete.packageId,
-      prepaid: prepaidFor(nowMs, {priceCents: price.unit_amount, tokens}),
-      role: me.role === 'athlete' ? 'athlete' : 'parent',
-      portalUrl: String(process.env.PORTAL_URL || '').replace(/\/$/, ''),
-      customerId: hh.stripeCustomerId || null,
-      email: token.email || (hh.guardian && hh.guardian.email) || null,
-      sibling,
-    };
+    price = await client.prices.retrieve(priceId);
+  } catch (err) {
+    console.error('createCheckoutSession stripe error:', err);
+    throw stripeUnavailable();
+  }
+  // Outside any catch: a wrong catalogue price is a setup error the
+  // family must never see as 'try again in a minute'.
+  if (priceMismatch(price, isSingle)) {
+    console.error(`createCheckoutSession: price ${priceId} does not match ` +
+        (isSingle ? 'the one-time $65 single token' : 'a subscription'));
+    throw refuse('failed-precondition', 'price-mismatch',
+        'Pricing is not set up correctly yet. ' + NOTHING_CHARGED);
+  }
+  const common = {
+    householdId: athlete.householdId,
+    athleteId: req.athleteId,
+    priceId,
+    role: me.role === 'athlete' ? 'athlete' : 'parent',
+    portalUrl: String(process.env.PORTAL_URL || '').replace(/\/$/, ''),
+    customerId: hh.stripeCustomerId || null,
+    email: token.email || (hh.guardian && hh.guardian.email) || null,
+  };
+  try {
     let session;
-    try {
-      session = await client.checkout.sessions.create(sessionBody(args));
-    } catch (err) {
-      if (!(sibling.eligible && sibling.coupon && couponRefused(err))) {
-        throw err;
+    if (isSingle) {
+      // One-time payment: no prepaid month, no trial, no discount.
+      session = await client.checkout.sessions.create(singleSessionBody(
+          Object.assign({athleteName: athlete.name || null, nowMs}, common)));
+    } else {
+      const args = Object.assign({
+        product: req.product,
+        packageId: athlete.packageId || null,
+        currency: price.currency || 'usd',
+        productName: req.product === 'facility' ? FACILITY_NAME :
+            (pkg && pkg.name) || athlete.packageId,
+        prepaid: prepaidFor(nowMs, {priceCents: price.unit_amount, tokens}),
+        sibling,
+      }, common);
+      try {
+        session = await client.checkout.sessions.create(sessionBody(args));
+      } catch (err) {
+        if (!(sibling.eligible && sibling.coupon && couponRefused(err))) {
+          throw err;
+        }
+        console.error(`sibling coupon ${sibling.coupon} refused by Stripe ` +
+            `(${process.env.STRIPE_MODE || 'test'} mode): ` +
+            `${err.message || err}; code field used instead`);
+        // The code field takes the plain 20% code, which is only right when
+        // 20% of THIS membership is owed; a pair coupon that is missing
+        // means no discount on this page rather than too large a one.
+        const fallback = {eligible: !sibling.lower, coupon: null};
+        discount = discountKey(fallback);
+        session = await client.checkout.sessions.create(sessionBody(
+            Object.assign({}, args, {sibling: fallback})));
       }
-      console.error(`sibling coupon ${sibling.coupon} refused by Stripe ` +
-          `(${process.env.STRIPE_MODE || 'test'} mode): ` +
-          `${err.message || err}; code field used instead`);
-      // The code field takes the plain 20% code, which is only right when
-      // 20% of THIS membership is owed; a pair coupon that is missing means
-      // no discount on this page rather than too large a one.
-      const fallback = {eligible: !sibling.lower, coupon: null};
-      discount = discountKey(fallback);
-      session = await client.checkout.sessions.create(sessionBody(
-          Object.assign({}, args, {sibling: fallback})));
     }
     // Remembered so a second Pay now reuses it (reuseOpenSession). A failed
     // write only loses that protection, never the checkout.
@@ -492,8 +650,7 @@ async function createCheckoutSessionHandler(data, context, deps) {
     return {url: session.url};
   } catch (err) {
     console.error('createCheckoutSession stripe error:', err);
-    throw refuse('unavailable', 'stripe-error',
-        'Checkout is unavailable right now. Try again in a minute.');
+    throw stripeUnavailable();
   }
 }
 
@@ -502,6 +659,7 @@ const createCheckoutSession = functions.runWith({secrets: CHECKOUT_SECRETS})
         context));
 
 module.exports = {
-  createCheckoutSession, createCheckoutSessionHandler, prepaidFor,
-  sessionBody, siblingCouponId, siblingEligible,
+  SEASON_END_LABEL, createCheckoutSession, createCheckoutSessionHandler,
+  prepaidFor, priceMismatch, sessionBody, siblingCouponId, siblingEligible,
+  singleSessionBody,
 };

@@ -92,3 +92,40 @@ test('plan: one line when nobody is paid yet; then 20% off the lower row, or the
   expect(dearer.button('Pay now|tier|a1')).not.toBeNull();
   await dearer.unmount();
 });
+
+// Owner ruling 2026-10-01: single tokens go on sale when booking opens (Sat,
+// Oct 10 at 7 AM Chicago) - no Pay button for one before then.
+describe('a single-token row and the booking-open gate', () => {
+  const GATE = Date.parse('2026-10-10T12:00:00Z'); // BOOKING_OPENS_AT
+  const WHEN = 'Single tokens are available from Sat, Oct 10 at 7 AM.';
+  const rows = [{ athleteId: 'a1', name: 'Jordan', perPurchase: true }, { athleteId: 'a2', name: 'Reese', perPurchase: false }];
+  afterEach(() => { jest.restoreAllMocks(); });
+
+  test('before the gate: the line saying when, no Pay button; a monthly row beside it still pays', async () => {
+    jest.spyOn(Date, 'now').mockReturnValue(GATE - 1);
+    const r = await renderScreen(<PendingBanner pendingAthletes={rows} title={TITLE} />);
+    expect(r.button('Pay now|tier|a1')).toBeNull();
+    expect(r.text().split(WHEN)).toHaveLength(2); // under Jordan's name only
+    expect(r.button('Pay now|tier|a2')).not.toBeNull();
+    await r.unmount();
+  });
+
+  test('before the gate, an all-single list whose body already says when: said once, still no button', async () => {
+    jest.spyOn(Date, 'now').mockReturnValue(GATE - 1);
+    const body = `Jordan can book once their session token is paid for. ${WHEN} A session token is a one-time $65 payment.`;
+    const r = await renderScreen(<PendingBanner pendingAthletes={[rows[0]]} title={TITLE} body={body} />);
+    expect(r.text()).toContain('Jordan');
+    expect(r.text().split(WHEN)).toHaveLength(2);
+    expect(r.text()).not.toContain('Pay now');
+    await r.unmount();
+  });
+
+  test('from the gate on: Pay now, and no line', async () => {
+    jest.spyOn(Date, 'now').mockReturnValue(GATE);
+    const r = await renderScreen(<PendingBanner pendingAthletes={rows} title={TITLE} />);
+    expect(r.button('Pay now|tier|a1')).not.toBeNull();
+    expect(r.button('Pay now|tier|a2')).not.toBeNull();
+    expect(r.text()).not.toContain(WHEN);
+    await r.unmount();
+  });
+});

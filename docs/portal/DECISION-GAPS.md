@@ -30,11 +30,16 @@ record of what was decided:
    pays either way - charging does not branch on it.
 6. ~~**Single token price**~~ - $65, `pending: false`.
 
-Still open:
+Still open: none.
 
-1. **Is `single` ever sold per visit?** The $65 one-token period package is
-   confirmed and built; selling a single visit a la carte is a Stripe-sprint
-   question. The catalogue entry costs nothing while it waits.
+1. ~~**Is `single` ever sold per visit?**~~ - CLOSED by the owner rulings of
+   2026-09-29/30 (`SPRINT-20-LAUNCH.md` ruling 0.14, D20): yes, and only
+   that way. The single token is a one-time $65 purchase, not a period
+   package: one paid Checkout Session is one token
+   (`graceTokens/single_{cs}`), valid through Sat, Feb 27, 2027; repeat
+   purchases are allowed; there is no monthly issuance; refunds are manual
+   (refund in Stripe, then void the token, never delete it). Built before
+   the Oct 10 07:00 gate (TEAM.md "Single session token").
 
 ## Stale premises in the Sept 15 handoff (checked against the tree)
 

@@ -11,11 +11,15 @@ jest.mock('firebase/firestore', () => ({
   doc: (_db, col, id) => ({ path: `${col}/${id}` }),
   where: () => null,
   query: (ref) => ref,
-  getDocs: async () => ({ docs: [], size: 0 }),
+  getDocs: async (ref) => mockQuery(ref.path),
   getDoc: async (ref) => mockSnap(ref.path),
   serverTimestamp: () => 'SERVER_TS',
   runTransaction: async (_db, fn) =>
-    fn({ get: async (ref) => mockSnap(ref.path), set: (ref, data) => mockWrites.push({ path: ref.path, data }), update: () => {} }),
+    fn({
+      get: async (ref) => mockSnap(ref.path),
+      set: (ref, data) => mockWrites.push({ path: ref.path, data }),
+      update: (ref, data) => mockUpdates.push({ path: ref.path, data }),
+    }),
 }));
 
 const mockDocs = {
@@ -25,13 +29,20 @@ const mockDocs = {
   'sessions/s1': { date: '2026-11-10', time: '4:00 PM', type: 'training', capacity: 8, booked: 0, status: 'scheduled' },
 };
 const mockWrites = [];
+const mockUpdates = [];
+// Collection name -> the rows a query on it returns (none unless a test sets them).
+const mockRows = {};
 function mockSnap(path) {
   const data = mockDocs[path];
   return { id: path.split('/')[1], exists: () => Boolean(data), data: () => data };
 }
+function mockQuery(name) {
+  const rows = mockRows[name] || [];
+  return { docs: rows.map((r) => ({ id: r.id, data: () => r })), size: rows.length };
+}
 
 import { auth } from '../../firebase';
-import { ERR, assertAthleteBillingActive, assertBookingOpen, assertPeriodTokensLeft, createBooking } from './live';
+import { ERR, assertAthleteBillingActive, assertBookingOpen, assertPeriodTokensLeft, createBooking, rebookPatch } from './live';
 import { BOOKING_OPENS_AT } from '../data/calendar';
 import { assertWithinBookingWindow } from './live';
 import { ELITE, TOKEN_PACKAGES } from '../data/packages';
@@ -49,6 +60,22 @@ describe('assertAthleteBillingActive', () => {
       expect(reasonOf(() => assertAthleteBillingActive({ billing: { status } })))
         .toEqual([ERR.INVALID, 'billing-pending', 'Payment pending - finish checkout to start booking']);
     }
+  });
+  test('a single-token buyer moved to another package is pending until it is paid (ruling 2026-09-29/30)', () => {
+    expect(reasonOf(() => assertAthleteBillingActive({ packageId: 't-6', billing: { status: 'active', oneTime: true } })))
+      .toEqual([ERR.INVALID, 'billing-pending', 'Payment pending - finish checkout to start booking']);
+    expect(reasonOf(() => assertAthleteBillingActive({ packageId: 'single', billing: { status: 'active', oneTime: true } }))).toBeNull();
+    expect(reasonOf(() => assertAthleteBillingActive({ packageId: 't-6', billing: { status: 'active', oneTime: false } }))).toBeNull();
+  });
+});
+
+describe('rebookPatch', () => {
+  test('writes the fresh charge and the rebookedAt stamp; graceTokenId is null when none', () => {
+    const stamp = { sentinel: 'serverTimestamp' };
+    expect(rebookPatch('grace', 'single_cs_1', stamp)).toEqual({ status: 'confirmed', chargedFrom: 'grace', graceTokenId: 'single_cs_1', rebookedAt: stamp });
+    expect(rebookPatch('period', null, stamp)).toEqual({ status: 'confirmed', chargedFrom: 'period', graceTokenId: null, rebookedAt: stamp });
+    expect(rebookPatch('elite', undefined, stamp)).toEqual({ status: 'confirmed', chargedFrom: 'elite', graceTokenId: null, rebookedAt: stamp });
+    expect(Object.keys(rebookPatch('period', null, stamp)).sort()).toEqual(['chargedFrom', 'graceTokenId', 'rebookedAt', 'status']);
   });
 });
 
@@ -121,5 +148,96 @@ describe('assertWithinBookingWindow counts from Nov 1 until then (owner ruling 2
     const t12 = TOKEN_PACKAGES.find((p) => p.id === 't-12');
     expect(reasonOf(() => assertWithinBookingWindow(t12, '2026-12-01', OCT_1))).toBeNull();
     expect(reasonOf(() => assertWithinBookingWindow(t12, '2026-12-02', OCT_1))[1]).toBe('outside-window');
+  });
+});
+
+// Owner rulings 2026-09-29/30: the single token grants no period token
+// (periodFallback 0), so reaching the period cap means "buy a token".
+describe('assertPeriodTokensLeft for the single token', () => {
+  const single = { id: 'single', kind: 'single', tokens: 1 };
+  test('no purchased token left: no-session-token with the buy copy', () => {
+    expect(reasonOf(() => assertPeriodTokensLeft(single, [], '2026-11-01', undefined, [], '2026-11-01')))
+      .toEqual([ERR.INVALID, 'no-session-token', 'No session token left - buy one to book.']);
+  });
+  test('a waitlist spot holds the token: the held copy', () => {
+    expect(reasonOf(() => assertPeriodTokensLeft(single, [], '2026-11-01', undefined, [{ sessionId: 's2', periodKey: '2026-12-01' }], '2026-11-01')))
+      .toEqual([ERR.INVALID, 'no-session-token', 'Your session token is held by a waitlist spot - leave the waitlist or buy another token.']);
+  });
+  test('an ops comp (issued tokenPeriods doc) still books as the period', () => {
+    expect(reasonOf(() => assertPeriodTokensLeft(single, [], '2026-11-01', 1, [], '2026-11-01'))).toBeNull();
+  });
+});
+
+// The single token on top of the waitlist hardening: a booking and a re-book
+// each spend one purchased token and move sessions.booked by exactly one in
+// the same commit (firestore.rules seatTakenInCommit); a token another
+// waitlist spot holds is never spent; nothing books before the Oct 10 gate.
+describe('createBooking for a single-token athlete', () => {
+  const args = { athleteId: 'a2', sessionId: 's1', date: '2026-11-10', type: 'training', householdId: 'h1' };
+  const token = (id) => ({ id, athleteId: 'a2', expiresAt: '2027-02-27', reason: 'single-purchase' });
+  beforeEach(() => {
+    jest.useFakeTimers('modern');
+    jest.setSystemTime(new Date('2026-10-12T17:00:00Z')); // after the gate, before the session
+    auth.currentUser = { uid: 'p1' };
+    mockWrites.length = 0;
+    mockUpdates.length = 0;
+    mockDocs['athletes/a2'] = { name: 'Ava', householdId: 'h1', packageId: 'single', billing: { status: 'active', oneTime: true } };
+    mockDocs['packages/single'] = { name: 'Single token', kind: 'single', tokens: 1, windowDays: 30 };
+    mockRows.graceTokens = [token('single_cs_1')];
+  });
+  afterEach(() => {
+    jest.useRealTimers();
+    auth.currentUser = null;
+    delete mockDocs['athletes/a2'];
+    delete mockDocs['packages/single'];
+    delete mockDocs['bookings/a2_s1'];
+    for (const name of Object.keys(mockRows)) delete mockRows[name];
+  });
+
+  test('a booking spends the purchased token and takes the seat in the same commit', async () => {
+    const out = await createBooking(args, { silent: true });
+    expect(mockWrites).toEqual([{ path: 'bookings/a2_s1', data: expect.objectContaining({ status: 'confirmed', chargedFrom: 'grace', graceTokenId: 'single_cs_1', periodKey: '2026-11-01' }) }]);
+    expect(mockWrites[0].data).not.toHaveProperty('rebookedAt');
+    expect(mockUpdates).toEqual([{ path: 'sessions/s1', data: { booked: 1 } }]);
+    expect(out).toMatchObject({ id: 'a2_s1', status: 'confirmed', chargedFrom: 'grace', graceTokenId: 'single_cs_1' });
+  });
+
+  test('a re-book decides the charge again, stamps rebookedAt and takes the seat in the same commit', async () => {
+    // Cancelled earlier; the token it held then was spent on another session since.
+    mockDocs['bookings/a2_s1'] = { athleteId: 'a2', sessionId: 's1', status: 'cancelled', chargedFrom: 'grace', graceTokenId: 'single_cs_1' };
+    mockRows.graceTokens = [token('single_cs_1'), token('single_cs_2')];
+    mockRows.bookings = [
+      { id: 'a2_s1', athleteId: 'a2', sessionId: 's1', status: 'cancelled', graceTokenId: 'single_cs_1', periodKey: '2026-11-01', date: '2026-11-10' },
+      { id: 'a2_s9', athleteId: 'a2', sessionId: 's9', status: 'confirmed', graceTokenId: 'single_cs_1', periodKey: '2026-11-01', date: '2026-11-12' },
+    ];
+    await createBooking(args, { silent: true });
+    expect(mockWrites).toEqual([]);
+    expect(mockUpdates).toEqual([
+      { path: 'bookings/a2_s1', data: { status: 'confirmed', chargedFrom: 'grace', graceTokenId: 'single_cs_2', rebookedAt: 'SERVER_TS' } },
+      { path: 'sessions/s1', data: { booked: 1 } },
+    ]);
+  });
+
+  test('a token held by another waitlist spot is not spent, and nothing is written', async () => {
+    mockRows.waitlist = [{ id: 's7_a2', sessionId: 's7', athleteId: 'a2', householdId: 'h1', periodKey: '2026-11-01' }];
+    await expect(createBooking(args, { silent: true })).rejects.toMatchObject({
+      reason: 'no-session-token',
+      message: 'Your session token is held by a waitlist spot - leave the waitlist or buy another token.',
+    });
+    // This session's own waitlist entry holds nothing back: booking it releases the hold.
+    mockRows.waitlist = [{ id: 's1_a2', sessionId: 's1', athleteId: 'a2', householdId: 'h1', periodKey: '2026-11-01' }];
+    await createBooking(args, { silent: true });
+    expect(mockWrites).toHaveLength(1);
+    expect(mockWrites[0].data).toMatchObject({ chargedFrom: 'grace', graceTokenId: 'single_cs_1' });
+  });
+
+  test('no token: refused with the buy copy; before the Oct 10 gate: refused as booking-not-open', async () => {
+    mockRows.graceTokens = [];
+    await expect(createBooking(args, { silent: true })).rejects.toMatchObject({ reason: 'no-session-token', message: 'No session token left - buy one to book.' });
+    mockRows.graceTokens = [token('single_cs_1')];
+    jest.setSystemTime(new Date('2026-10-09T17:00:00Z'));
+    await expect(createBooking(args, { silent: true })).rejects.toMatchObject({ reason: 'booking-not-open' });
+    expect(mockWrites).toEqual([]);
+    expect(mockUpdates).toEqual([]);
   });
 });

@@ -3,7 +3,8 @@
 // never prints it, refuses live keys. Part 1 reads the six catalogue prices.
 // Part 2 rehearses every call the portal makes with this key, using the
 // portal's own checkout builder: one test-mode Checkout Session is created,
-// read back, then expired. Nothing is charged; no card is involved. With
+// read back, then expired. The same is done for the one-time single-token
+// checkout (payment mode). Nothing is charged; no card is involved. With
 // --coupon <id> it also rehearses the sibling discount (a session created
 // with that coupon applied, then expired) and reports the coupon's terms.
 import readline from 'node:readline';
@@ -81,7 +82,10 @@ for (const [pkg, id, dollars] of PRICES) {
   found[pkg] = p;
   const issues = [];
   if (!p.active) issues.push('price is archived');
-  if (p.type !== 'recurring') issues.push('one-time price, subscription checkout will fail');
+  // The single token is a one-time $65 payment (checkout.js priceMismatch); every other price bills monthly.
+  if (pkg === 'single') {
+    if (checkout.priceMismatch(p, true)) issues.push('must be the one-time $65 USD price (not recurring, no customer-chosen amount)');
+  } else if (p.type !== 'recurring') issues.push('one-time price, subscription checkout will fail');
   else if (p.recurring.interval !== 'month' || p.recurring.interval_count !== 1) issues.push(`bills every ${p.recurring.interval_count} ${p.recurring.interval}`);
   if (p.billing_scheme !== 'per_unit' || p.unit_amount == null) issues.push('not a simple per-unit amount');
   if (p.currency !== 'usd') issues.push(`currency ${p.currency}`);
@@ -180,6 +184,26 @@ if (!t6 || t6.type !== 'recurring') {
     row('create checkout with the promo-code field', pc.ok, pc.ok ? 'session made (families type the code on the Stripe page)' : pc.msg);
     if (pc.ok) await api('POST', `checkout/sessions/${pc.json.id}/expire`);
     console.log('         (pass --coupon <id> to rehearse the automatic sibling discount)');
+  }
+}
+// 7. The single session token: a one-time $65 payment-mode checkout, built by the portal's own builder, created, read
+//    back and expired. The builder is pure, so the sale gate in createCheckoutSession (single tokens go on sale when
+//    booking opens, Sat Oct 10 at 7 AM) is not involved: this is how the body and the key's scopes are checked before then.
+const one = found['single'];
+if (!one || checkout.priceMismatch(one, true)) {
+  row('single-token checkout rehearsal', false, 'skipped: the single price must be the one-time $65 price first');
+} else {
+  const ss = await api('POST', 'checkout/sessions', checkout.singleSessionBody({
+    householdId: 'key-check', athleteId: 'key-check', athleteName: 'Key Check', priceId: one.id, role: 'parent',
+    portalUrl: PORTAL_URL, customerId: null, email: 'key-check@example.com', nowMs: Date.now(),
+  }));
+  row('create single-token checkout', ss.ok && ss.json.mode === 'payment' && ss.json.amount_total === 6500,
+    ss.ok ? `${ss.json.mode}-mode session made, $${(ss.json.amount_total || 0) / 100} one-time` : ss.msg);
+  if (ss.ok) {
+    const li = await api('GET', `checkout/sessions/${ss.json.id}/line_items?limit=10`);
+    row('read single-token line items', li.ok && li.json.data.length === 1, li.ok ? `${li.json.data.length} line` : li.msg);
+    const ex = await api('POST', `checkout/sessions/${ss.json.id}/expire`);
+    row('expire the single-token rehearsal', ex.ok, ex.ok ? 'cleaned up' : ex.msg);
   }
 }
 console.log(problems ? `\n${problems} need attention. Paste this output to Claude.` : '\nAll clear: the prices are right and this key can do everything the portal needs.');

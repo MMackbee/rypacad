@@ -169,15 +169,33 @@ async function loadCandidate(reader, store, entry, ctx) {
   });
   const charge = lib.chargeFor({position, sessionDate: session.date});
   if (!charge.chargedFrom) return fail(charge.reason || 'no-tokens-left');
-  // Ordering key: the bonus token this candidate would actually spend.
-  const spent = graceTokens.find((g) => g.id === charge.graceTokenId);
   return Object.assign(base, {
     ok: true,
     period,
     charge,
-    graceExpiry: charge.chargedFrom === 'grace' ?
-        (spent && spent.expiresAt) || '9999-12-31' : null,
+    // Ordering key: the bonus token this candidate would actually spend.
+    graceExpiry: candidateGraceExpiry(charge, graceTokens),
   });
+}
+
+/**
+ * A passing candidate's promotion-order key (pin F): the expiry of the
+ * bonus token its charge would actually spend. A purchased single token
+ * (reason 'single-purchase', rulings 2026-09-29/30) is bought inventory,
+ * not a token the Academy owes a family it already failed once, so it
+ * earns no priority: that entry queues by `joinedAt` like a period charge.
+ * @param {?Object} charge `lib.chargeFor`'s result.
+ * @param {!Array<!Object>} graceRows The athlete's graceTokens rows
+ *     (`{id, ...data}`).
+ * @return {?string} The charged token's `expiresAt` ('9999-12-31' when it
+ *     has none), or null when the charge earns no priority.
+ */
+function candidateGraceExpiry(charge, graceRows) {
+  if (!charge || charge.chargedFrom !== 'grace') return null;
+  const row = (graceRows || []).find(
+      (g) => g && g.id === charge.graceTokenId);
+  if (row && row.reason === 'single-purchase') return null;
+  return (row && row.expiresAt) || '9999-12-31';
 }
 
 /**
@@ -233,6 +251,7 @@ async function orderedCandidates(reader, store, args) {
 
 module.exports = {
   PLAIN,
+  candidateGraceExpiry,
   joinedAtMillis,
   loadCandidate,
   orderCandidates,
