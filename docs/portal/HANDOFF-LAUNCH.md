@@ -285,6 +285,23 @@ fix them before token booking opens on Oct 10. Distinct issues, worst first:
 Full findings with file:line evidence and fixes: the audit output saved by the
 session (`waitlist-audit.json`); re-run the audit if it is gone.
 
+### 3.7 After Nov 3 - waitlist checks that need real sessions (owner, 2026-10-01)
+
+The waitlist hardening (merge 456c997) is live. Three behaviours could not be
+tried by hand on Oct 1 because no session has happened yet; they are covered
+by unit tests and the emulator harnesses only. Check each on production in
+the first week of the season:
+
+1. **Past sessions.** A session that has started, or an earlier day, cannot
+   be booked or waitlisted: not offered on Book a Session or the Phil screen,
+   and a direct attempt is refused ("This session has already started.").
+2. **No same-day promotion.** Cancel a seat in a full session on the day it
+   runs: nobody on the waitlist is auto-booked.
+3. **The 06:00 sweep.** The morning after a full session with someone still
+   waiting, the entry is gone, the family has one "Waitlist closed" notice
+   saying the held token is free again, and no bonus token was created
+   (`graceTokens` has no new 'waitlist-expired' doc).
+
 ## 4. Work in flight
 
 ### 4.1 Month / Week toggle (owner request, must ship before the email)
