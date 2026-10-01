@@ -34,6 +34,9 @@
  * answers a raised capacity, an un-cancel and an academy cancel. A waitlist
  * never mints a bonus token.
  *
+ * The marketing site's scholarship form posts to submitScholarship
+ * (portal/scholarship.js, 2026-10-01): public, origin-checked, validated.
+ *
  * The 2025 `onBookingCreateNotifyChild` is DELETED with them: it read
  * `parentId` / `userId` / `childId`, fields no v1+ booking has ever carried,
  * so it could never fire. `booking-revoked` is NOT a trigger - portal/
@@ -84,6 +87,7 @@ const family = require('./portal/family');
 const {createCheckoutSession} = require('./portal/checkout');
 const {calendlyWebhook} = require('./portal/calendly');
 const {waitlistPositions} = require('./portal/waitlist-positions');
+const {submitScholarship} = require('./portal/scholarship');
 
 // ==========================================================================
 // PORTAL SERVER-SIDE WRITERS (Sprint 13, contract v2.1)
@@ -100,7 +104,7 @@ exports.waitlistPositions = waitlistPositions;
 // ==========================================================================
 // SPRINT 20 LAUNCH (contract v3.0.1): instant sign-up, child-login claim,
 // Checkout Sessions, Calendly. Handlers live in ./portal; this file exports
-// the 14 functions and nothing else (the secret lists stay in
+// the functions and nothing else (the secret lists stay in
 // ./portal/secrets). Secret binding (spec 8): every function declares its
 // secrets with runWith - a 1st-gen function sees only what it declares.
 // ==========================================================================
@@ -110,6 +114,10 @@ exports.addAthletes = family.addAthletes;
 exports.claimInvite = family.claimInvite;
 exports.createCheckoutSession = createCheckoutSession;
 exports.calendlyWebhook = calendlyWebhook;
+// The public website's scholarship form (owner 2026-10-01): a public POST
+// that stores the application and emails the director. It is not part of
+// the portal's contract and no client rule opens its collection.
+exports.submitScholarship = submitScholarship;
 
 // ==========================================================================
 // NOTIFICATION TRIGGERS (Sprint 14, contract v2.2)
