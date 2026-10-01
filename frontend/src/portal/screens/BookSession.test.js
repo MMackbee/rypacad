@@ -20,18 +20,25 @@ let mockTokens;
 let mockConfirmation;
 // Month-aware: each monthISO gets its own days (and day marks); October is the default.
 const mockMonth = (m) => ({ data: { days: mockMonths[m] ?? [], dayMarks: mockMarks[m] ?? {} }, loading: false, error: null });
+// Waitlist hardening: what book() answers (default: booked), the options each
+// tap sent, a parent's children, and the Leave waitlist write.
+let mockBook;
+let mockBookCalls;
+let mockHousehold;
+let mockLeave;
 jest.mock('../hooks', () => ({
   useBooking: () => ({
     data: { slots: [{ date: mockFirstSlot }], tokens: mockTokens, confirmation: mockConfirmation, seasonNote: null },
     loading: false, error: null,
-    book: async (s) => { mockBooked.push(s.id); return {}; },
+    book: async (s, opts) => { mockBooked.push(s.id); mockBookCalls.push([s.id, opts]); return mockBook ? mockBook(s, opts) : {}; },
     bookRecurring: (...args) => mockBookRecurring(...args),
     bookingFor: mockBookingFor,
   }),
-  useHouseholdAthletes: () => ({ data: [], loading: false }),
-  useMembership: () => ({ data: { members: [{ athleteId: 'a1', package: mockPackage }] } }),
+  useHouseholdAthletes: () => ({ data: mockHousehold, loading: false }),
+  useMembership: () => ({ data: { members: [{ athleteId: 'a1', name: 'Jordan', package: mockPackage }] } }),
   useMonthSessions: (m) => mockMonth(m),
 }));
+jest.mock('../hooks/waitlist', () => ({ leaveWaitlist: (...args) => mockLeave(...args) }));
 
 /** The tapped day's session card: tappable cards carry cursor: pointer (SessionCard sets it from onClick). */
 const sessionCard = (r) =>
@@ -42,6 +49,10 @@ beforeEach(() => {
 });
 beforeEach(() => {
   mockBooked = [];
+  mockBook = null;
+  mockBookCalls = [];
+  mockHousehold = [];
+  mockLeave = async () => ({});
   mockPackage = { id: 't-12', kind: 'tokens', windowDays: 30 };
   mockFirstSlot = '2026-10-12';
   mockMonths = { '2026-10-01': [{ date: '2026-10-12', sessions: [session] }] };
@@ -480,5 +491,235 @@ describe('Month/Week toggle (owner request 2026-09-30)', () => {
     expect(r.text()).toContain('Slot reserved');
     expect(onConfirmed).toHaveBeenCalledTimes(1);
     await r.unmount();
+  });
+});
+
+// Audit 2026-09-30, owner rulings R2-R4. Thu Nov 12 2026, 4:30 PM in Chicago.
+describe('waitlist hardening', () => {
+  const NOV_12 = new Date('2026-11-12T22:30:00Z');
+  const td = (r, iso) => r.container.querySelector(`td[data-date="${iso}"]`);
+  const tap = async (el) => { await act(async () => { el.click(); }); };
+  const block = (id, date, time, over = {}) => ({ ...session, id, date, time, ...over });
+  /** The card for one start time ("4:00", "6:00") on the open day. */
+  const cardAt = (r, time) =>
+    [...r.container.querySelectorAll('div')].find((el) => el.textContent.startsWith(time) && el.textContent.includes('Training block')) || null;
+  const refusal = (reason, message) => Object.assign(new Error(message), { reason });
+
+  beforeEach(() => {
+    jest.setSystemTime(NOV_12);
+    mockFirstSlot = '2026-11-10';
+    mockMonths = { '2026-11-01': [
+      { date: '2026-11-10', sessions: [block('past', '2026-11-10', '4:00 PM')] },
+      { date: '2026-11-12', sessions: [
+        block('started', '2026-11-12', '4:00 PM'),
+        block('later', '2026-11-12', '6:00 PM'),
+        block('tonight-full', '2026-11-12', '7:00 PM', { booked: 6 }),
+      ] },
+      { date: '2026-11-17', sessions: [block('s17', '2026-11-17', '4:00 PM')] },
+    ] };
+  });
+
+  test('a past day opens nothing; a later day does', async () => {
+    const r = await renderScreen(<BookSession bare />);
+    expect(td(r, '2026-11-10').getAttribute('role')).toBeNull();
+    expect(td(r, '2026-11-17').getAttribute('role')).toBe('button');
+    await tap(td(r, '2026-11-10'));
+    expect(cardAt(r, '4:00')).toBeNull();
+    await tap(td(r, '2026-11-17'));
+    expect(cardAt(r, '4:00').style.cursor).toBe('pointer');
+    await r.unmount();
+  });
+
+  test("today: a block that has started is shown without Book or Join; tonight's full block takes no new waitlist place", async () => {
+    const r = await renderScreen(<BookSession bare demoSelectedDate="2026-11-12" />);
+    const started = cardAt(r, '4:00');
+    expect(started.textContent).toContain('Started');
+    expect(started.style.cursor).toBe('default');
+    await tap(started);
+    expect(mockBooked).toEqual([]);
+    expect(cardAt(r, '6:00').style.cursor).toBe('pointer');
+    // No same-day promotion, so no Join waitlist on the day.
+    expect(cardAt(r, '7:00').textContent).toContain('Full');
+    expect(r.text()).not.toContain('Join waitlist');
+    await r.unmount();
+  });
+
+  test('a past day reached anyway (a screen left open overnight) offers nothing', async () => {
+    const r = await renderScreen(<BookSession bare demoSelectedDate="2026-11-10" />);
+    expect(cardAt(r, '4:00').textContent).toContain('Started');
+    expect(cardAt(r, '4:00').style.cursor).toBe('default');
+    await r.unmount();
+  });
+
+  test('a session that filled since the screen loaded: told so, nothing joined, and Join waitlist is its own tap', async () => {
+    mockBook = async (s, opts) => {
+      if (!opts?.joinWaitlist) throw refusal('full', 'This session just filled.');
+      return { status: 'waitlisted', position: 2 };
+    };
+    const r = await renderScreen(<BookSession bare demoSelectedDate="2026-11-17" />);
+    await tap(cardAt(r, '4:00'));
+    // The plain tap asked for no waitlist place.
+    expect(mockBookCalls).toEqual([['s17', undefined]]);
+    expect(r.text()).toContain('This session just filled. Nothing was reserved.');
+    expect(r.text()).not.toContain('tap the session to try again');
+    expect(r.text()).not.toContain("You're on the waitlist");
+    expect(cardAt(r, '4:00').textContent).toContain('Full');
+    await r.click('Join waitlist · reserves one token');
+    expect(mockBookCalls[1]).toEqual(['s17', { joinWaitlist: true }]);
+    expect(r.text()).toContain("You're on the waitlist");
+    expect(r.text()).toContain('On the waitlist - #2 in line');
+    expect(r.text()).toContain('If a spot opens, Jordan is booked automatically and one token is used. You can cancel until the day before.');
+    expect(r.text()).not.toMatch(/notif/i);
+    await r.unmount();
+  });
+
+  test('a started session refused by the write says so, with no "try again"', async () => {
+    mockBook = async () => { throw refusal('session-past', 'This session has already started.'); };
+    const r = await renderScreen(<BookSession bare demoSelectedDate="2026-11-17" />);
+    await tap(cardAt(r, '4:00'));
+    expect(r.text()).toContain('This session has already started. Nothing was reserved.');
+    expect(r.text()).not.toContain('tap the session to try again');
+    await r.unmount();
+  });
+
+  test('a refusal a second tap can change keeps "try again", with a hyphen', async () => {
+    mockBook = async () => { throw new Error('The network dropped.'); };
+    const r = await renderScreen(<BookSession bare demoSelectedDate="2026-11-17" />);
+    await tap(cardAt(r, '4:00'));
+    expect(r.text()).toContain('The network dropped. Nothing was reserved - tap the session to try again.');
+    await r.unmount();
+  });
+
+  describe('already waiting', () => {
+    beforeEach(() => {
+      mockMonths['2026-11-01'][2].sessions = [block('s17', '2026-11-17', '4:00 PM', { booked: 6, waitlisted: true, waitlistPosition: 2, waitlistBy: { a1: 2 } })];
+    });
+
+    test('the card says On the waitlist with the place and offers Leave, never Join again', async () => {
+      const left = [];
+      mockLeave = async (args) => { left.push(args); };
+      const r = await renderScreen(<BookSession bare demoSelectedDate="2026-11-17" />);
+      expect(r.text()).toContain('On the waitlist - #2 in line');
+      expect(r.text()).toContain('If a spot opens, Jordan is booked automatically and one token is used.');
+      expect(r.text()).not.toContain('Join waitlist');
+      await tap(cardAt(r, '4:00'));
+      expect(mockBooked).toEqual([]);
+      await r.click('Leave waitlist');
+      expect(left).toEqual([{ sessionId: 's17', athleteId: 'a1' }]);
+      await r.unmount();
+    });
+
+    test('no place from the server: On the waitlist without a number', async () => {
+      mockMonths['2026-11-01'][2].sessions[0].waitlistBy = { a1: null };
+      const r = await renderScreen(<BookSession bare demoSelectedDate="2026-11-17" />);
+      expect(r.text()).toContain('On the waitlist');
+      expect(r.text()).not.toContain('in line');
+      await r.unmount();
+    });
+
+    test('a leave refused because the athlete was just promoted says so by name', async () => {
+      mockLeave = async () => { throw refusal('promoted', 'This athlete was just booked into this session.'); };
+      const r = await renderScreen(<BookSession bare demoSelectedDate="2026-11-17" />);
+      await r.click('Leave waitlist');
+      expect(r.text()).toContain('Jordan was just booked into this session.');
+      await r.unmount();
+    });
+
+    test('any other refused leave shows a plain line, never the raw permissions text', async () => {
+      mockLeave = async () => { throw new Error('leaveWaitlist: Missing or insufficient permissions.'); };
+      const r = await renderScreen(<BookSession bare demoSelectedDate="2026-11-17" />);
+      await r.click('Leave waitlist');
+      expect(r.text()).toContain('That waitlist place could not be removed. Try again.');
+      expect(r.text()).not.toMatch(/permission/i);
+      await r.unmount();
+    });
+
+    // Review 2026-10-01: a refused leave reloads the month, and the row comes
+    // back without its waitlist place - the card that carried the line is
+    // gone. The banner above the list is what still says why.
+    test('a refused leave still says why once the month reloads without the waitlisted row', async () => {
+      mockLeave = async () => {
+        mockMonths['2026-11-01'][2].sessions = [block('s17', '2026-11-17', '4:00 PM', { booked: 6 })];
+        throw refusal('promoted', 'This athlete was just booked into this session.');
+      };
+      const r = await renderScreen(<BookSession bare demoSelectedDate="2026-11-17" />);
+      await r.click('Leave waitlist');
+      expect(r.text()).not.toContain('On the waitlist');
+      expect(r.text()).toContain('Jordan was just booked into this session.');
+      // It is about that day's card: another day clears it.
+      await tap(td(r, '2026-11-12'));
+      expect(r.text()).not.toContain('Jordan was just booked into this session.');
+      await r.unmount();
+    });
+
+    test('a parent: only the child who waits sees it; a sibling is still offered Join', async () => {
+      mockHousehold = [
+        { id: 'k1', name: 'Ava', tokens: { left: 3, unlimited: false, grace: [] } },
+        { id: 'k2', name: 'Nico', tokens: { left: 3, unlimited: false, grace: [] } },
+      ];
+      mockMonths['2026-11-01'][2].sessions[0].waitlistBy = { k2: 1 };
+      const r = await renderScreen(<BookSession bare role="parent" demoSelectedDate="2026-11-17" />);
+      // Ava (the first child) is not on it.
+      expect(r.button('Join waitlist · reserves one token')).not.toBeNull();
+      expect(r.text()).not.toContain('On the waitlist');
+      await r.click('Nico');
+      expect(r.text()).toContain('On the waitlist - #1 in line');
+      expect(r.button('Join waitlist · reserves one token')).toBeNull();
+      await r.unmount();
+    });
+  });
+
+  describe('Elite reads no token wording on the waitlist', () => {
+    beforeEach(() => {
+      mockPackage = { id: 'elite', kind: 'elite', windowDays: 45 };
+      mockTokens = { unlimited: true, grace: [] };
+      mockMonths['2026-11-01'][2].sessions = [block('s17', '2026-11-17', '4:00 PM', { booked: 6 })];
+    });
+
+    test('the join button, the confirmation and the Tour explainer', async () => {
+      mockBook = async () => ({ status: 'waitlisted', position: null });
+      mockMonths['2026-11-01'][2].sessions.push(block('tour', '2026-11-17', '10:30 AM', { type: 'tournament', label: null }));
+      const r = await renderScreen(<BookSession bare demoSelectedDate="2026-11-17" />);
+      expect(r.text()).toContain("A Tour event is the academy's Saturday tournament.");
+      expect(r.text()).not.toMatch(/token/i);
+      await r.click('Join waitlist');
+      expect(r.text()).toContain('If a spot opens, Jordan is booked automatically. You can cancel until the day before.');
+      expect(r.text()).not.toMatch(/token/i);
+      await r.unmount();
+    });
+  });
+
+  test('the confirmation says what the booking was actually charged to', async () => {
+    // A bonus token was spent: after the write the screen's own tokens no longer list it.
+    mockBook = async () => ({ status: 'confirmed', chargedFrom: 'grace' });
+    mockTokens = { left: 3, unlimited: false, grace: [] };
+    const r = await renderScreen(<BookSession bare demoSelectedDate="2026-11-17" />);
+    await tap(cardAt(r, '4:00'));
+    expect(r.text()).toContain('Slot reserved');
+    expect(r.text()).toContain('a bonus token');
+    await r.unmount();
+  });
+
+  describe('a bonus token when the period reads zero', () => {
+    test('a session on or before its expiry can be booked with it; a later one cannot', async () => {
+      mockTokens = { left: 0, used: 6, granted: 6, unlimited: false, grace: [{ id: 'g1', expiresAt: '2026-12-01', reason: 'session-cancelled' }] };
+      const ok = await renderScreen(<BookSession bare demoSelectedDate="2026-11-17" />);
+      expect(cardAt(ok, '4:00').style.cursor).toBe('pointer');
+      expect(cardAt(ok, '4:00').textContent).toContain('Uses a bonus token');
+      await ok.unmount();
+
+      mockTokens = { ...mockTokens, grace: [{ id: 'g1', expiresAt: '2026-11-15', reason: 'session-cancelled' }] };
+      const late = await renderScreen(<BookSession bare demoSelectedDate="2026-11-17" />);
+      expect(cardAt(late, '4:00').style.cursor).toBe('default');
+      expect(cardAt(late, '4:00').textContent).toContain('No tokens');
+      expect(cardAt(late, '4:00').textContent).not.toContain('Uses a bonus token');
+      await late.unmount();
+
+      // With a period token left, that later session spends the period token.
+      mockTokens = { ...mockTokens, left: 2, used: 4 };
+      const period = await renderScreen(<BookSession bare demoSelectedDate="2026-11-17" />);
+      expect(cardAt(period, '4:00').textContent).toContain('Spends 1 token · 2 left');
+      await period.unmount();
+    });
   });
 });

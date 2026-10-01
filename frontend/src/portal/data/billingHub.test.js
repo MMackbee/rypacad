@@ -270,6 +270,22 @@ describe('per-athlete billing (Sprint 20, spec 4.4)', () => {
     expect(statusFor(null, { resetsOn: '2026-10-01', anchorDay: 1 }).pendingAthletes).toBeUndefined();
   });
 
+  // Tester Mike 2026-09-30: no talk of tokens for Elite members.
+  test('statusFor: a household of Elite athletes only reads no token wording', () => {
+    const active = statusFor(null, { resetsOn: '2026-12-01', anchorDay: 1, allUnlimited: true });
+    expect(active).toMatchObject({ status: 'active', title: 'Membership active', body: 'Billed monthly on the 1st. Nothing needs attention.' });
+    const preSeason = statusFor(null, { resetsOn: '2026-10-01', tokensStartOn: '2026-11-01', anchorDay: 1, allUnlimited: true });
+    expect(preSeason.title).toBe(`First period starts ${longDayLabel('2026-11-01')}`);
+    // An Elite athlete books as soon as it is paid: no token-package date either.
+    const pending = statusFor(null, { now: BEFORE_GATE, pendingAthletes: [{ athleteId: 'e', name: 'Eli', packageId: 'elite' }] });
+    expect(pending.body).toBe("Eli can book once checkout is complete. Billed monthly on the 1st once you've paid.");
+    for (const s of [active, preSeason, pending]) expect(`${s.title} ${s.body}`).not.toMatch(/token/i);
+    // A mixed household keeps every token line.
+    expect(statusFor(null, { resetsOn: '2026-12-01', anchorDay: 1, allUnlimited: false }).title).toBe(`Tokens reset ${longDayLabel('2026-12-01')}`);
+    expect(statusFor(null, { now: BEFORE_GATE, pendingAthletes: [{ athleteId: 'e', name: 'Eli', packageId: 'elite' }, { athleteId: 'a', name: 'Ava', packageId: 't-6' }] }).body)
+      .toContain('(token packages from Sat, Oct 10 at 7 AM)');
+  });
+
   test('statusFor: the single token is a one-time payment, never billed monthly (owner ruling, 2026-09-30)', () => {
     const monthly = "Ava can book once checkout is complete (token packages from Sat, Oct 10 at 7 AM). Billed monthly on the 1st once you've paid.";
     // An all-single pending list gets the one-time body; title, badge and CTA are unchanged.

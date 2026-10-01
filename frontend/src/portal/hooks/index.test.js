@@ -23,11 +23,14 @@ jest.mock('./live', () => ({
   fetchAthlete: jest.fn(),
   fetchBookings: jest.fn(),
   fetchCurrentUser: jest.fn(),
+  fetchGraceTokensByAthlete: jest.fn(),
   fetchHousehold: jest.fn(),
   fetchPackage: jest.fn(),
   fetchSessionsByIds: jest.fn(),
   fetchSessionsInRange: jest.fn(),
 }));
+// The booking surfaces read the period's issued grant too (fetchTokenInputs).
+jest.mock('./grace', () => ({ ...jest.requireActual('./grace'), __esModule: true, fetchTokenPeriod: jest.fn() }));
 jest.mock('./signups', () => ({ ...jest.requireActual('./signups'), __esModule: true, fetchLoginInvite: jest.fn() }));
 jest.mock('./waitlist', () => ({
   ...jest.requireActual('./waitlist'),
@@ -35,6 +38,7 @@ jest.mock('./waitlist', () => ({
   fetchWaitlistByAthlete: jest.fn(),
   fetchWaitlistByHousehold: jest.fn(),
   fetchWaitlistBySession: jest.fn(),
+  fetchWaitlistPositions: jest.fn(),
 }));
 
 import { act } from 'react';
@@ -357,7 +361,7 @@ describe('live loaders (perf wave B)', () => {
         .mockRejectedValueOnce(refusal(null, 'Missing or insufficient permissions.', live.ERR.PERMISSION))
         .mockRejectedValueOnce(refusal('outside-window', 'That date opens for booking at 7 AM on 2026-10-17.'))
         .mockRejectedValueOnce(refusal(null, 'This athlete already has this session booked.'))
-        .mockResolvedValueOnce({ status: 'waitlisted' });
+        .mockRejectedValueOnce(refusal('full', 'This session just filled.'));
       const out = await repeat(h, '2026-11-03', '2026-12-16');
       expect(out.booked).toEqual([]);
       expect(out.skipped).toEqual([
@@ -414,9 +418,9 @@ describe('live loaders (perf wave B)', () => {
       { sessionId: 's1', athleteId: 'a1' },
       { sessionId: 's3', athleteId: 'a1' },
     ]);
-    waitlist.fetchWaitlistBySession.mockImplementation(async (id) =>
-      id === 's1' ? [{ athleteId: 'x' }, { athleteId: 'a1' }] : [{ athleteId: 'y' }]
-    );
+    // The place in line is the server's (waitlistPositions): a1 is second on
+    // s1; s3 comes back with no place for them.
+    waitlist.fetchWaitlistPositions.mockResolvedValue({ s1: { a1: 2 }, s3: {} });
 
     const h = await mountHook(() => useMonthSessions('2099-01'));
     await settle();
@@ -429,7 +433,8 @@ describe('live loaders (perf wave B)', () => {
     });
     await settle();
     expect(waitlist.fetchWaitlistByAthlete).toHaveBeenCalledWith('a1');
-    expect(waitlist.fetchWaitlistBySession.mock.calls.map((c) => c[0]).sort()).toEqual(['s1', 's3']);
+    expect(waitlist.fetchWaitlistPositions).toHaveBeenCalledWith(['s1', 's3']);
+    expect(waitlist.fetchWaitlistBySession).not.toHaveBeenCalled();
     const rows = h.result.current.data.days.flatMap((d) => d.sessions);
     const byId = Object.fromEntries(rows.map((r) => [r.id, r]));
     expect(byId.s1).toMatchObject({ waitlisted: true, waitlistPosition: 2 });

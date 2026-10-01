@@ -153,12 +153,14 @@ export function isTappableDay(variant, state) {
  * the open days (toggle review: a full day looked the same as one with
  * openings, which the old strip's dot told apart) but still tappable, so its
  * waitlist stays reachable. A day with no slots is 'open' (not tappable).
+ * `waitlist: false` (Yannick's sessions take no waitlist): a day with
+ * nothing open is 'open' too - there is nothing on it to tap for.
  */
-export function slotDayStates(days) {
+export function slotDayStates(days, { waitlist = true } = {}) {
   const out = {};
   for (const d of days || []) {
     const slots = d.slots || [];
-    out[d.date] = !slots.length ? 'open' : slots.some((s) => s && s.open) ? 'available' : 'full';
+    out[d.date] = !slots.length ? 'open' : slots.some((s) => s && s.open) ? 'available' : waitlist ? 'full' : 'open';
   }
   return out;
 }

@@ -32,7 +32,6 @@
 const admin = require('firebase-admin');
 const {FieldValue} = require('firebase-admin/firestore');
 const email = require('./email');
-const notices = require('./notices');
 const push = require('./push');
 
 /** The `notificationPrefs` defaults, per category. @const {!Object} */
@@ -46,6 +45,8 @@ const CATEGORY_DEFAULTS = {
 const LINKS = {
   'booking-confirmed': '/portal/schedule',
   'promoted': '/portal/schedule',
+  'waitlist-removed': '/portal/schedule',
+  'waitlist-expired': '/portal/schedule',
   'session-cancelled': '/portal/schedule',
   'reminder-24h': '/portal/schedule',
   'booking-revoked': '/portal/billing',
@@ -345,38 +346,8 @@ async function sendNotice(args) {
   return result;
 }
 
-/**
- * Tell an athlete and their household that a waitlist entry was promoted
- * into a confirmed booking (pin F: auto-confirm, no acceptance window, so
- * this is an FYI and not a call to action). Kept as its own export so
- * portal/promotion.js changes minimally.
- * @param {{athleteId: string, householdId: ?string, athlete: (?Object|
- *     undefined), athleteName: (?string|undefined), session: !Object,
- *     sessionId: string, bookingId: (?string|undefined),
- *     attendee: (?string|undefined)}} args The promotion.
- * @return {!Promise<!Object>} The `sendNotice` result.
- */
-async function notifyWaitlistPromotion(args) {
-  const athlete = args.athlete ||
-      (args.athleteName ? {name: args.athleteName} : null);
-  const copy = notices.promoted({
-    athlete,
-    session: args.session,
-    booking: {attendee: args.attendee || null},
-  });
-  const bookingId = args.bookingId || `${args.athleteId}_${args.sessionId}`;
-  return sendNotice({
-    kind: 'promoted',
-    category: 'schedule',
-    householdId: args.householdId || null,
-    athleteId: args.athleteId,
-    sessionId: args.sessionId,
-    bookingId,
-    subjectKey: bookingId,
-    title: copy.title,
-    body: copy.body,
-  });
-}
+// The waitlist's notices (promoted, removed, closed) are built and keyed in
+// portal/waitlist-notices.js and sent through `sendNotice` above.
 
 module.exports = {
   CATEGORY_DEFAULTS,
@@ -384,7 +355,6 @@ module.exports = {
   channelAllowed,
   courierEventId: email.courierEventId,
   getUserProfile,
-  notifyWaitlistPromotion,
   parentsForHousehold,
   profileFor,
   recipientsForAthlete,

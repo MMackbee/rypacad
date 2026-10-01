@@ -64,10 +64,17 @@ Athlete-side cancellations follow the existing 12-hour rule: ≥12h out, `used--
 
 ## 4. The one exception: grace tokens
 
-A token the Academy couldn't honor gets a second life. Two triggers, no others:
+A token the Academy couldn't honor gets a second life. One trigger, no others:
 
 1. **Academy-side session cancellation** — every confirmed booking on that session is cancelled and each athlete is minted one grace token.
-2. **Waitlist never promoted** — the session start passes with the athlete still waitlisted; their reserved token is released and one grace token is minted.
+2. **Waitlist never promoted — no grace token** (owner ruling, 2026-10-01; replaces the earlier "one grace token is minted"). When a waitlist closes without a spot, the entry is closed and the reserved token is simply free again. Nothing is minted, for anyone. This covers every way a waitlist closes without a spot:
+   - the session date passes with the athlete still waitlisted (the daily 06:00 sweep closes the entry the next morning);
+   - the Academy cancels the session the athlete was waiting on (the entry is closed at once; only the athletes who held a **booking** on that session get the grace token in item 1);
+   - a spot opens but the athlete fails a check a normal booking applies (the entry is removed and the family is told why).
+
+   In each case the family gets one notice. Elite reserves no token, so an Elite athlete's notice has no token sentence. Grace tokens minted under the old rule before 2026-10-01 stay valid until they expire.
+
+The same ruling fixed three more points of waitlist behavior: a session that has started or is in the past cannot be booked or waitlisted; a family is never auto-booked on the day of the session (it could not cancel), so entries still waiting on the day are closed by the next morning's sweep; and a promotion may never produce a booking a normal tap would refuse (unpaid or lapsed membership, no token for that period, Elite's one-per-type-per-day cap, outside the booking window). One check a normal tap applies is not repeated at promotion: the booking-open date (Oct 10, 2026). It cannot be reached, because the waitlist create rule already refuses a token athlete's join before booking opens, so no such entry exists to promote. If that rule ever changes, the same check must be added to promotion.
 
 ```
 graceTokens/{auto}
@@ -76,7 +83,7 @@ graceTokens/{auto}
   consumedBy: null | bookingId
 ```
 
-Grace tokens are spent **first**, soonest-expiry first, before period tokens. They are minted only for supply failures. An athlete leaving a waitlist voluntarily, cancelling their own booking, or being revoked on lapse gets no grace token.
+Grace tokens are spent **first**, soonest-expiry first, before period tokens. They are minted only when the Academy cancels a session on a booked athlete. An athlete whose waitlist closes without a spot, who leaves a waitlist voluntarily, cancels their own booking, or is revoked on lapse gets no grace token.
 
 This is the whole of the old rollover policy, generalized: one month of life, only when it wasn't the family's choice.
 
@@ -152,7 +159,7 @@ Transitions:
 
 - `provisional → confirmed` on `invoice.paid` for that period, oldest `createdAt` first. If issuance is smaller than the provisional count (downgrade), the excess go `cancelled`, newest first.
 - `waitlisted → confirmed` on promotion (§8); the reserved token becomes `used`.
-- `waitlisted → cancelled` + grace token, when the session start passes unpromoted.
+- `waitlisted → cancelled`, reserved token released and **no** grace token, when the waitlist closes without a spot (§4 item 2, owner ruling 2026-10-01).
 - Anything future `→ revoked` on lapse (§10).
 
 ---

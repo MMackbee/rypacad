@@ -46,5 +46,16 @@ export default function EntitlementSummary({ specialistId, tokens, capReached, o
   }
 
   if (!tokens) return null;
-  return <SpendNote tokens={tokens} />;
+  return (
+    <>
+      <SpendNote tokens={tokens} />
+      {/* A token held by a waitlist place is not left to spend - say where it
+          went, as Book a Session's banner does (AllowancePools.js). */}
+      {!tokens.unlimited && tokens.reserved > 0 ? (
+        <div style={{ font: `400 11px ${font.body}`, color: color.textTertiary, marginTop: 6 }}>
+          {tokens.reserved} held on a waitlist
+        </div>
+      ) : null}
+    </>
+  );
 }

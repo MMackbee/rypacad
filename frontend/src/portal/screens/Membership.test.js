@@ -73,3 +73,12 @@ test('the self-managed athlete has a Billing link beside the tokens card and a B
   expect(child.button('Billing')).toBeNull();
   await child.unmount();
 });
+
+// Review 2026-10-01: an Elite member holds no tokens, so the load error names none.
+test('a failed load says the membership did not load, with no token wording', async () => {
+  mockMine = { loading: false, error: new Error('offline'), data: null };
+  const r = await renderScreen(<Membership bare />);
+  expect(r.text()).toContain("Your membership didn't load. Check your connection and try again.");
+  expect(r.text()).not.toMatch(/token/i);
+  await r.unmount();
+});

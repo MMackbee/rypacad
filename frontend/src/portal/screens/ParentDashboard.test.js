@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { act } from 'react';
 import { renderScreen } from './testRender';
 import ParentDashboard from './ParentDashboard';
 
@@ -95,6 +95,32 @@ test('card tokens: "Tokens start Nov 1" before the season, "Pay to start" unpaid
   expect(n.text()).toContain('Elite · unlimited');
   expect(n.text()).not.toContain('Tokens start');
   await n.unmount();
+});
+
+// Tester Mike 2026-09-30: no talk of tokens for Elite members.
+test("an Elite child's card says Package, and booking for them shows no token line; a token child keeps both", async () => {
+  mockHub.data.members[1] = { ...mockHub.data.members[1], billing: { status: 'active', facility: null } };
+  mockHub.data.status = { status: 'active', tone: 'default', badge: { tone: 'green', label: 'Active' }, title: 'Membership active', body: '', cta: null, paused: false, pendingAthletes: [] };
+  mockTokens = {
+    a1: { granted: 12, used: 2, reserved: 0, left: 10, unlimited: false, grace: [], startsOn: null, unpaid: false },
+    a2: { unlimited: true, granted: null, left: null, grace: [] },
+  };
+  const TOKEN_LINE = "Every session spends one token from this athlete's period.";
+  const r = await renderScreen(<ParentDashboard bare />, { path: '/portal/family' });
+  expect(r.text()).toContain('Tokens');
+  expect(r.text()).toContain('Package');
+  expect(r.text()).toContain('Elite · unlimited');
+  // Each card's own "Book a session", in household order: Jordan, then Reese.
+  const bookButtons = () => [...r.container.querySelectorAll('button')].filter((b) => b.textContent.trim() === 'Book a session');
+  await act(async () => { bookButtons()[0].click(); });
+  expect(r.text()).toContain('Book for Jordan');
+  expect(r.text()).toContain(TOKEN_LINE);
+  await act(async () => { r.container.querySelector('div[style*="position: absolute"]').click(); });
+  expect(r.text()).not.toContain('Book for Jordan');
+  await act(async () => { bookButtons()[1].click(); });
+  expect(r.text()).toContain('Book for Reese');
+  expect(r.text()).not.toContain(TOKEN_LINE);
+  await r.unmount();
 });
 
 test('a past_due household membership on the hub shows the payment banner and ON HOLD cards', async () => {

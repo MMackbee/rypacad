@@ -100,7 +100,7 @@ async function liveMember(athlete, anchorDay, today) {
     athlete.packageId ? fetchPackage(athlete.packageId) : null,
     fetchBookings(athlete.id, { householdId: athlete.householdId }),
     fetchGraceTokensByAthlete(athlete.id),
-    fetchWaitlistByAthlete(athlete.id),
+    fetchWaitlistByAthlete(athlete.id, { householdId: athlete.householdId }), // the filter a parent's read is provable on
     fetchTokenPeriod(athlete.id, period.periodKey),
     fetchTokenPeriod(athlete.id, prevKey),
   ]);
@@ -173,6 +173,11 @@ export function allPerPurchaseOf(members) {
   return members.length > 0 && members.every((m) => m.package?.kind === 'single');
 }
 
+/** True when every member is Elite - the hero then carries no token wording (tester Mike 2026-09-30). */
+export function allUnlimitedOf(members) {
+  return members.length > 0 && members.every((m) => m.package?.kind === 'elite');
+}
+
 async function liveHub(householdId, today, ownAthletes = null) {
   warnMissingPortalUrl();
   const [household, athletes] = await Promise.all([fetchHousehold(householdId), ownAthletes || fetchHouseholdAthletes(householdId)]);
@@ -183,7 +188,7 @@ async function liveHub(householdId, today, ownAthletes = null) {
   return {
     household: householdView(household, anchorDay),
     members,
-    status: statusFor(membership, { resetsOn, tokensStartOn: tokensStartOf(members), anchorDay, pendingAthletes: pendingOf(members), allPerPurchase: allPerPurchaseOf(members) }),
+    status: statusFor(membership, { resetsOn, tokensStartOn: tokensStartOf(members), anchorDay, pendingAthletes: pendingOf(members), allPerPurchase: allPerPurchaseOf(members), allUnlimited: allUnlimitedOf(members) }),
     facilityPending: facilityPendingOf(members),
     portalUrl: STRIPE_PORTAL_URL,
   };
@@ -227,7 +232,7 @@ async function liveMyTokens(today) {
   return {
     household: household ? householdView(household, anchorDay) : null,
     member,
-    status: statusFor(membership, { resetsOn, tokensStartOn: tokensStartOf([member]), anchorDay, pendingAthletes: pendingOf([member]) }),
+    status: statusFor(membership, { resetsOn, tokensStartOn: tokensStartOf([member]), anchorDay, pendingAthletes: pendingOf([member]), allUnlimited: allUnlimitedOf([member]) }),
     facilityPending: facilityPendingOf([member]),
   };
 }

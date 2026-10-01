@@ -11,7 +11,8 @@ import { longDayLabel } from '../data/calendar';
 // the hook below; this is the same "single knob" pointsForPosition() every
 // standings/points display in the app must go through rather than
 // re-deriving its own table (data/tour.js TOUR_POINTS).
-import { TOUR_EVENT_EXPLAINER, pointsForPosition } from '../data/tour';
+import { pointsForPosition, tourEventExplainer } from '../data/tour';
+import useAllElite from '../hooks/elite';
 import * as hooks from '../hooks';
 
 /**
@@ -86,10 +87,14 @@ export default function TourStandings({
   role = 'athlete',
   athleteId,
   bare = false,
+  practice = false,
   onSignOut,
   onRetry,
 }) {
   const hookState = useTourStandings();
+  const family = role === 'athlete' || role === 'parent';
+  // `practice` (the onboarding walkthrough) reads nothing of the member's own.
+  const allElite = useAllElite({ enabled: family && !practice });
 
   const loading = variant === 'loading' || (variant === 'populated' && hookState.loading);
   const error =
@@ -134,8 +139,10 @@ export default function TourStandings({
   }, [brackets, role, athleteId]);
 
   const selected = brackets.find((b) => b.id === selectedBracketId) ?? brackets[0] ?? null;
-  // Families only: what a Tour event is, above the board it feeds.
-  const explainer = role === 'athlete' || role === 'parent' ? <Body size={12}>{TOUR_EVENT_EXPLAINER}</Body> : null;
+  // Families only: what a Tour event is, above the board it feeds. Its token
+  // sentence shows once a token athlete is known to be reading (allElite
+  // false) - never to an Elite family, nor while that is still loading.
+  const explainer = family ? <Body size={12}>{tourEventExplainer(allElite !== false)}</Body> : null;
 
   return (
     <PhoneFrame

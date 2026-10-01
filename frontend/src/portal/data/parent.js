@@ -87,6 +87,28 @@ export const NOTIFICATION_NOTE =
   'Membership and token notices are transactional, not marketing, and always go out by email. A parent who has switched push off still sees the banner on Billing.';
 
 /**
+ * The same settings for a family of Elite athletes only, who hold no tokens
+ * (tester Mike 2026-09-30: no talk of tokens for Elite members). Display
+ * copy only: category ids, and so what a save writes, are unchanged.
+ */
+const UNLIMITED_CATEGORY_COPY = {
+  billing: { name: 'Membership', description: 'Payment problems, membership changes' },
+};
+export const NOTIFICATION_NOTE_UNLIMITED =
+  'Membership notices are transactional, not marketing, and always go out by email. A parent who has switched push off still sees the banner on Billing.';
+
+/** A category as the reader should see it; `unlimited` true swaps in the Elite copy. */
+export function notificationCategoryFor(category, unlimited) {
+  const copy = unlimited ? UNLIMITED_CATEGORY_COPY[category?.id] : null;
+  return copy ? { ...category, ...copy } : category;
+}
+
+/** The footnote as the reader should see it (only the one shipped note has an Elite twin). */
+export function notificationNoteFor(note, unlimited) {
+  return unlimited && note === NOTIFICATION_NOTE ? NOTIFICATION_NOTE_UNLIMITED : note;
+}
+
+/**
  * Practice-mode "Recent notices" (contract v2.2, Sprint 14): the sample
  * Whitfield household's newest ledger rows, in the exact shape the Cloud
  * Functions write to `notifications/{kind}_{subjectKey}` — titles and

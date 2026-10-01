@@ -98,7 +98,7 @@ export default function BookChooser({ title = 'Book a session', onPick, style })
  * session" on the parent home. Same overlay idiom as CancelSheet: tapping
  * the scrim closes it.
  */
-export function BookChooserSheet({ open, athleteName, onPick, onClose }) {
+export function BookChooserSheet({ open, athleteName, unlimited = false, onPick, onClose }) {
   if (!open) return null;
   return (
     <div
@@ -116,9 +116,12 @@ export function BookChooserSheet({ open, athleteName, onPick, onClose }) {
         }}
       >
         <ScreenTitle size={19}>{athleteName ? `Book for ${athleteName}` : 'Book a session'}</ScreenTitle>
-        <Body size={12} style={{ marginTop: 6 }}>
-          Every session spends one token from this athlete's period.
-        </Body>
+        {/* Elite holds no tokens (tester Mike 2026-09-30): no token line for that athlete. */}
+        {unlimited ? null : (
+          <Body size={12} style={{ marginTop: 6 }}>
+            Every session spends one token from this athlete's period.
+          </Body>
+        )}
         <div style={{ display: 'flex', flexDirection: 'column', gap: 10, marginTop: 16 }}>
           {BOOK_OPTIONS.map((option) => (
             <OptionButton key={option.id} option={option} onPick={onPick} />

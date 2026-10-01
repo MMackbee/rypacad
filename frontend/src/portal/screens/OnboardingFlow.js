@@ -6,6 +6,7 @@ import PhoneFrame from '../components/PhoneFrame';
 import StatusBadge from '../components/StatusBadge';
 import { BackLink, Banner, Body, ScreenTitle } from '../components/Primitives';
 import useOnboardingStatus from '../hooks/onboarding';
+import useAllElite from '../hooks/elite';
 import { athleteSteps, parentSteps } from './OnboardingSteps';
 import { contractEnabled } from '../data/contractFlag';
 
@@ -51,6 +52,13 @@ export default function OnboardingFlow({ track = null, bare = false, initialStep
   // themselves already evaporated with the screens that held them.
   const [booking, setBooking] = useState(null);
   const [loggedDay, setLoggedDay] = useState(null);
+  // Is every athlete this member books for Elite (hooks/elite.js; tester Mike
+  // 2026-09-30)? Elite holds no tokens, so their walkthrough has no tokens
+  // step and its copy names none. The one read of the member's own this flow
+  // makes - the practice screens still show the sample family. The token
+  // wording comes in only once a token athlete is known (null while it
+  // loads; a failed read and the demo are false).
+  const unlimited = useAllElite() !== false;
 
   const activeTrack = track ?? chosen;
   const homePath = activeTrack === 'parent' ? '/portal/family' : '/portal/home';
@@ -60,6 +68,7 @@ export default function OnboardingFlow({ track = null, bare = false, initialStep
     return (
       <PhoneFrame bare={bare} header={<ChooserHeader onSkip={skip} />}>
         <TrackChooser
+          unlimited={unlimited}
           onPick={(t) => {
             setChosen(t);
             setStepIndex(0);
@@ -69,7 +78,7 @@ export default function OnboardingFlow({ track = null, bare = false, initialStep
     );
   }
 
-  const steps = activeTrack === 'parent' ? parentSteps() : athleteSteps();
+  const steps = activeTrack === 'parent' ? parentSteps(unlimited) : athleteSteps(unlimited);
   // Clamped once and used everywhere — an out-of-range initialStep lands on
   // the last step rather than mislabeling the counter.
   const index = Math.min(Math.max(stepIndex, 0), steps.length - 1);
@@ -221,7 +230,7 @@ function ChooserHeader({ onSkip }) {
 
 /* --------------------------------------------------------------- chooser -- */
 
-function TrackChooser({ onPick }) {
+function TrackChooser({ onPick, unlimited = false }) {
   const tracks = [
     {
       id: 'parent',
@@ -231,9 +240,12 @@ function TrackChooser({ onPick }) {
     {
       id: 'athlete',
       title: 'I’m an athlete',
-      // No contract mention while it is hidden (owner, 2026-09-30).
+      // No contract mention while it is hidden (owner, 2026-09-30), and no
+      // token mention for an Elite family.
       body: contractEnabled()
         ? 'Your view: the dashboard, booking a block, and logging your Commitment Contract day.'
+        : unlimited
+        ? 'Your view: the dashboard and booking a block.'
         : 'Your view: the dashboard, booking a block, and how your tokens work.',
     },
   ];

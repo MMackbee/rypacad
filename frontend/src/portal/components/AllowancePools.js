@@ -83,7 +83,8 @@ export default function AllowancePools({ tokens, compact = false, style }) {
         </span>
         {tokens.unpaid ? null : (
           <span style={{ font: `400 11px ${font.body}`, color: color.textTertiary }}>
-            {tokens.used} of {tokens.granted} used
+            {/* A token held by a waitlist place is not left to spend - say where it went. */}
+            {tokens.used} of {tokens.granted} used{tokens.reserved ? `, ${tokens.reserved} held on a waitlist` : ''}
           </span>
         )}
       </div>
@@ -119,7 +120,8 @@ const GRACE_REASON_COPY = {
  * soonest-first, so index 0 is always the one that would be spent next.
  */
 export function GraceLine({ tokens, style }) {
-  const grace = tokens?.grace?.[0];
+  // Elite holds no tokens and can spend none: no bonus-token line for them.
+  const grace = tokens?.unlimited ? null : tokens?.grace?.[0];
   if (!grace) return null;
   // A cancelled session's id starts with its date - name the block when we
   // can, fall back to the generic reason copy when we cannot.

@@ -38,6 +38,7 @@ import { eliteDailyCapHit, normalizeAnchorDay, periodFor, windowDaysFor } from '
 import { CHANGEABLE_PACKAGE_IDS } from '../data/packageChange';
 import { BOOKING_OPENS_LABEL, academyDateISO, bookingOpen, openThrough, todayISO, windowOpensOn } from '../data/calendar';
 import { SPECIALISTS, mentalCapFor } from '../data/specialists';
+import { SESSION_STARTED_COPY, sessionStarted, waitlistClosed } from '../data/sessionStart';
 
 /** id -> catalogue entry, for the specialist-cap error copy below. */
 const SPECIALIST_BY_ID = new Map(SPECIALISTS.map((s) => [s.id, s]));
@@ -384,11 +385,18 @@ export async function fetchBookings(athleteId, { householdId = null } = {}) {
  * counts against the period's grant (Sprint 16, contract v2.4), so "tokens
  * left" on the Billing hub and what the gate permits never disagree. Lives
  * here (not hooks/waitlist.js) because that module imports this one.
+ *
+ * The waitlist read rule is household-scoped like bookings (audit
+ * 2026-09-30): an athlete's own login proves the athleteId filter, a parent
+ * only a householdId one - so, as fetchBookings above, a parent-context
+ * caller passes its householdId and the query carries both.
  */
-export async function fetchAthleteWaitlist(athleteId) {
+export async function fetchAthleteWaitlist(athleteId, { householdId = null } = {}) {
   if (!athleteId) return [];
   try {
-    const snap = await getDocs(query(collection(db, 'waitlist'), where('athleteId', '==', athleteId)));
+    const filters = [where('athleteId', '==', athleteId)];
+    if (householdId) filters.push(where('householdId', '==', householdId));
+    const snap = await getDocs(query(collection(db, 'waitlist'), ...filters));
     return snap.docs.map((d) => ({ id: d.id, ...d.data() }));
   } catch (err) {
     throw wrap(err, 'fetchAthleteWaitlist');
@@ -449,8 +457,19 @@ export async function fetchGraceTokensByAthlete(athleteId) {
  * joinedAt, createdBy). Called both directly (useWaitlist's join()) and from
  * inside createBooking's full-session fallback below — one write path, no
  * duplicated shape logic between the two callers.
+ *
+ * Waitlist hardening (audit 2026-09-30). `time` and `type` are the
+ * session's, so the gates a booking runs apply to a waitlist place too:
+ * a session that has started is refused (R2), as is any session from its
+ * own day on (R3 - nobody is promoted on the day), a Yannick session (they
+ * take no waitlist) and an Elite athlete's second block of that type that
+ * day. An athlete already on this waitlist gets their entry back with
+ * nothing written: the entry is never updated, by rule.
  */
-export async function joinWaitlist({ sessionId, athleteId, householdId, date, periodKey, attendee }, { athlete = null, pkg = null } = {}) {
+export async function joinWaitlist(
+  { sessionId, athleteId, householdId, date, periodKey, attendee, time = null, type = null },
+  { athlete = null, pkg = null, bookings = null } = {}
+) {
   if (!sessionId || !athleteId || !householdId || !date || !periodKey) {
     throw new LiveDataError(
       ERR.INVALID,
@@ -458,6 +477,13 @@ export async function joinWaitlist({ sessionId, athleteId, householdId, date, pe
     );
   }
   const user = requireUser();
+  if (type === 'mental') {
+    throw new LiveDataError(ERR.INVALID, "Yannick's sessions have no waitlist.", null, 'no-waitlist');
+  }
+  assertSessionNotStarted({ date, time });
+  if (waitlistClosed({ date })) {
+    throw new LiveDataError(ERR.INVALID, 'The waitlist for this session has closed.', null, 'waitlist-closed');
+  }
   // Sprint 20 (spec 4.4, 5): the same two gates createBooking runs. Its
   // full-session fallback passes the docs it already read; useWaitlist's
   // own join() lands here cold and pays the two reads.
@@ -465,8 +491,15 @@ export async function joinWaitlist({ sessionId, athleteId, householdId, date, pe
   assertAthleteBillingActive(a);
   const p = pkg ?? (a.packageId ? await fetchPackage(a.packageId) : null);
   assertBookingOpen(p);
+  if (type && p && p.kind === 'elite') {
+    assertEliteDailyCap(p, type, date, bookings ?? (await fetchBookings(athleteId, { householdId })));
+  }
+  const id = `${sessionId}_${athleteId}`;
+  const mine = await fetchAthleteWaitlist(athleteId, { householdId });
+  if (mine.some((w) => w.id === id)) {
+    return { id, sessionId, athleteId, householdId, date, periodKey, existing: true };
+  }
   try {
-    const id = `${sessionId}_${athleteId}`;
     await setDoc(doc(db, 'waitlist', id), {
       sessionId,
       athleteId,
@@ -527,6 +560,17 @@ export function assertAthleteBillingActive(athlete) {
 export function assertBookingOpen(pkg, now = Date.now()) {
   if (bookingOpen(now, pkg)) return;
   throw new LiveDataError(ERR.INVALID, `Booking opens ${BOOKING_OPENS_LABEL}`, null, 'booking-not-open');
+}
+
+/**
+ * Owner ruling R2 (waitlist hardening): a session that has started or is in
+ * the past cannot be booked or waitlisted. `session` is { date, time } - a
+ * date alone is judged by its day. The rules refuse the same write once the
+ * session's calendar day is over; this is the to-the-minute client half.
+ */
+export function assertSessionNotStarted(session, now = new Date()) {
+  if (!sessionStarted(session, now)) return;
+  throw new LiveDataError(ERR.INVALID, SESSION_STARTED_COPY, null, 'session-past');
 }
 
 /**
@@ -659,11 +703,17 @@ export function assertPeriodTokensLeft(pkg, bookings, periodKey, issuedGrant, wa
 // catch to divert to joinWaitlist() instead of surfacing as an error. Never
 // exported, never a real LiveDataError - a full session is not a failure,
 // it is the pinned "book() resolves { status: 'waitlisted' }" path.
+//
+// Waitlist hardening (audit 2026-09-30): that path is taken only when the
+// caller ASKED for a waitlist place (`waitlistIfFull`, the Join waitlist
+// button). A plain Reserve tap on a session that filled since the screen
+// loaded is refused as 'full' with nothing written, and Repeat weekly never
+// asks, so it can never leave a waitlist place behind.
 const SESSION_FULL = Symbol('session-full');
 
 export async function createBooking(
   { athleteId, sessionId, date, type, householdId, attendee },
-  { skipCapCheck = false, silent = false, createdVia = null } = {}
+  { skipCapCheck = false, silent = false, createdVia = null, waitlistIfFull = false } = {}
 ) {
   if (!athleteId || !sessionId || !date || !type || !householdId) {
     throw new LiveDataError(
@@ -672,6 +722,9 @@ export async function createBooking(
     );
   }
   const user = requireUser();
+  // R2: a past day is refused before anything is read; today's start time is
+  // judged inside the transaction, off the session's own doc.
+  assertSessionNotStarted({ date });
   // The period a booking spends is the one its SESSION DATE falls in, never
   // the period it is made in (contract v2.0 §6, pin B) - read once here so
   // every check below and the write itself agree on the same anchor.
@@ -723,10 +776,13 @@ export async function createBooking(
     } else if (!skipCapCheck) {
       const issued = await getDoc(doc(db, 'tokenPeriods', `${athleteId}_${periodKey}`)).catch(() => null);
       const issuedGrant = issued && issued.exists() ? issued.data().granted : undefined;
-      const waitlist = await fetchAthleteWaitlist(athleteId);
+      const waitlist = await fetchAthleteWaitlist(athleteId, { householdId });
       assertPeriodTokensLeft(pkg, bookings, periodKey, issuedGrant, waitlist, currentPeriodKey);
     }
   }
+  // The session's own start time, read inside the transaction below - a
+  // waitlist join needs it for the same started check.
+  let sessionTime = null;
 
   // Contract v1.1: the booking id IS `{athleteId}_{sessionId}` — the
   // keyspace makes a second booking of the same session an overwrite
@@ -818,6 +874,9 @@ export async function createBooking(
           'This session changed since you loaded it — refresh and try again.'
         );
       }
+      // R2: today's session whose start time has passed, open or full.
+      assertSessionNotStarted(s);
+      sessionTime = s.time ?? null;
       const capacity = s.capacity ?? 0;
       const booked = s.booked ?? 0;
       if (booked >= capacity) {
@@ -850,10 +909,18 @@ export async function createBooking(
     return { id, ...booking, createdAt: null, status: 'confirmed' };
   } catch (err) {
     if (err === SESSION_FULL) {
+      if (!waitlistIfFull) {
+        // Nothing was written. The bump reloads the screen's stale "1 left"
+        // card as Full, where Join waitlist is its own tap.
+        if (!silent) bump('sessions');
+        throw new LiveDataError(ERR.INVALID, 'This session just filled.', null, 'full');
+      }
       // joinWaitlist bumps 'waitlist' itself on success - nothing more to
       // invalidate here (no bookings/sessions write happened on this path).
-      const entry = await joinWaitlist({ sessionId, athleteId, householdId, date, periodKey, attendee }, { athlete, pkg });
-      const queue = await getDocs(query(collection(db, 'waitlist'), where('sessionId', '==', sessionId))).catch(() => null);
+      const entry = await joinWaitlist(
+        { sessionId, athleteId, householdId, date, periodKey, attendee, time: sessionTime, type },
+        { athlete, pkg, bookings }
+      );
       return {
         id: entry.id,
         athleteId,
@@ -863,7 +930,9 @@ export async function createBooking(
         householdId,
         status: 'waitlisted',
         chargedFrom: null,
-        position: queue ? queue.size : null,
+        // The place in line is the server's to say (waitlistPositions,
+        // hooks/waitlist.js): the read rule shows a family its own entries only.
+        position: null,
       };
     }
     throw wrap(err, 'createBooking');

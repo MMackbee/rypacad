@@ -159,8 +159,8 @@ export const SCREEN_STATES = [
              // read as full, since the real season generator never produces
              // one - see BookSession.js's own doc comment).
              ['open', 'Join waitlist · tap a day, tap a session', { demoForceFull: true }],
-             // The waitlisted confirmation card (position line + "you'll be
-             // notified") - deep-mounted since seed mode's book() has no
+             // The waitlisted confirmation card (status line + "booked
+             // automatically") - deep-mounted since seed mode's book() has no
              // typed status yet (see BookSession.js's demoBookedWaitlisted note).
              ['open', 'Waitlisted confirmation', {
                demoForceFull: true,

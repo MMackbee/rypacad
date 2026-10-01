@@ -82,10 +82,14 @@ describe('assertPeriodTokensLeft names the period it means', () => {
 describe('createBooking stamps createdVia only when asked (owner report 2026-09-30: six notices for one repeat)', () => {
   const args = { athleteId: 'a1', sessionId: 's1', date: '2026-11-10', type: 'training', householdId: 'h1' };
   beforeEach(() => {
+    // Pinned before the Nov 10 session: a started session is refused (R2).
+    jest.useFakeTimers('modern');
+    jest.setSystemTime(new Date('2026-10-01T17:00:00Z'));
     auth.currentUser = { uid: 'p1' };
     mockWrites.length = 0;
   });
   afterEach(() => {
+    jest.useRealTimers();
     auth.currentUser = null;
   });
 

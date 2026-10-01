@@ -140,6 +140,10 @@ const LOPEZ_PERIOD = lib.periodFor(EXP_TODAY, ANCHOR_4);
 // sessions/bookings used by the scenarios
 const S_BOOK = `${plus2}-n1`;
 const S_PROMO = `${plus2}-n2`;
+// The promoted notice is keyed by booking id AND the entry's joinedAt, so a
+// second promotion into the same session sends its own notice (2026-10-01).
+const PROMO_JOINED = NOW.getTime();
+const PROMO_KEY = `teddy_${S_PROMO}_${PROMO_JOINED}`;
 const S_KERR1 = `${plus2}-n4`;
 const S_CANCEL = `${plus3}-n1`;
 const S_KERR2 = `${plus3}-n2`;
@@ -229,7 +233,7 @@ async function seed() {
   set('waitlist', `${S_EXP_W}_teddy`, {sessionId: S_EXP_W, athleteId: 'teddy', householdId: 'hart',
     date: EXP_TODAY, periodKey: HART_PERIOD.periodKey, joinedAt: TS(Date.now()), createdBy: 'u-teddy'});
   set('waitlist', `${S_PROMO}_teddy`, {sessionId: S_PROMO, athleteId: 'teddy', householdId: 'hart',
-    date: plus2, periodKey: lib.periodFor(plus2, ANCHOR_3).periodKey, joinedAt: TS(Date.now()), createdBy: 'u-teddy'});
+    date: plus2, periodKey: lib.periodFor(plus2, ANCHOR_3).periodKey, joinedAt: TS(PROMO_JOINED), createdBy: 'u-teddy'});
 
   // Grace tokens live on WREN so the promotion above cannot spend one (the
   // charge order prefers grace) - the expiry half of the job needs them
@@ -286,11 +290,13 @@ async function main() {
   b2.update(db.collection('sessions').doc(S_PROMO), {booked: 0});
   await b2.commit();
   await waitFor(async () => await exists('bookings', `teddy_${S_PROMO}`), 'teddy promoted into the open seat');
-  await waitFor(async () => !!(await get('notifications', `promoted_teddy_${S_PROMO}`)), 'promoted ledger row');
-  const l2 = await ledger(`promoted_teddy_${S_PROMO}`);
+  await waitFor(async () => !!(await get('notifications', `promoted_${PROMO_KEY}`)), 'promoted ledger row');
+  const l2 = await ledger(`promoted_${PROMO_KEY}`);
   check('promotion booking is system-written', [(await get('bookings', `teddy_${S_PROMO}`)).createdBy, (await get('bookings', `teddy_${S_PROMO}`)).promotedFromWaitlist], ['system', true]);
-  check('kind/category/subjectKey', [l2.kind, l2.category, l2.subjectKey], ['promoted', 'schedule', `teddy_${S_PROMO}`]);
-  check('body', l2.body, `A spot opened — Teddy is now booked for Training, ${notices.dayLabel(plus2)} at 3:00 PM.`);
+  // grace-teddy-old is already spent on a booking in ANOTHER period: the promotion must not spend it again.
+  check('promotion charged the period, not the spent bonus token', [(await get('bookings', `teddy_${S_PROMO}`)).chargedFrom, (await get('bookings', `teddy_${S_PROMO}`)).graceTokenId], ['period', null]);
+  check('kind/category/subjectKey/bookingId', [l2.kind, l2.category, l2.subjectKey, l2.bookingId], ['promoted', 'schedule', PROMO_KEY, `teddy_${S_PROMO}`]);
+  check('body', l2.body, `A spot opened - Teddy is now booked for Training, ${notices.dayLabel(plus2)} at 3:00 PM. One token was used. You can cancel in the app until the day before.`);
   check('recipients', l2.to, ['u-pat:skipped/off', 'u-robin:skipped/no-device', 'u-teddy:skipped/skipped']);
   await settle(1500);
   check('NO booking-confirmed for the promoted booking', await exists('notifications', `booking-confirmed_teddy_${S_PROMO}`), false);

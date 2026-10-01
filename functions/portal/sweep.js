@@ -4,12 +4,17 @@
  * stays for manual runs and must agree with this file).
  *
  * A waitlist entry whose session date has passed without a promotion is
- * EXPIRED: the reservation it held is released, and because the Academy
- * could not honour the seat the athlete gets a 'waitlist-expired' bonus
- * token (30 days), then one notice. Idempotent twice over: the grace doc
- * id is `{sessionId}_{athleteId}_waitlist` (create-only), and an athlete
- * who already holds a 'waitlist-expired' token for that session — under
- * this id or the manual script's older `sweep-…` ids — is not minted again.
+ * CLOSED: the entry is deleted, which frees the token it held, and the
+ * family gets one notice. NOTHING IS MINTED (owner ruling 2026-10-01: no
+ * bonus token from a waitlist, for anyone; contract section 4). The delete
+ * and the notice are portal/waitlist-close.js, shared with the "academy
+ * cancelled the session" path. Idempotent: the entry is gone after the
+ * first run, and the notice's ledger id is
+ * `{sessionId}_{athleteId}_waitlist_{joinedAtMillis}`.
+ *
+ * An entry still waiting on the day of its session is never promoted (no
+ * same-day promotion, portal/promotion.js) and is closed here the next
+ * morning.
  *
  * The body is a plain exported function on a fixed clock so the emulator
  * harness can drive it; index.js schedules it daily at 06:00 Chicago.
@@ -19,164 +24,43 @@
 
 const admin = require('firebase-admin');
 const lib = require('./lib');
-const notices = require('./notices');
-const notify = require('./notify');
-
-/** Bonus-token life, in days (contract §4). */
-const GRACE_DAYS = 30;
+const close = require('./waitlist-close');
 
 /**
- * The deterministic grace-token id for an expired waitlist entry.
- * @param {string} sessionId The session.
- * @param {string} athleteId The athlete.
- * @return {string} The id.
- */
-function graceIdFor(sessionId, athleteId) {
-  return `${sessionId}_${athleteId}_waitlist`;
-}
-
-/**
- * `'YYYY-MM-DD'` plus N days, UTC-noon arithmetic (no DST edge).
- * @param {string} dateISO `'YYYY-MM-DD'`.
- * @param {number} days Days to add.
- * @return {string} `'YYYY-MM-DD'`.
- */
-function addDays(dateISO, days) {
-  const [y, m, d] = String(dateISO).split('-').map(Number);
-  return new Date(Date.UTC(y, m - 1, d + days, 12)).toISOString().slice(0, 10);
-}
-
-/**
- * Whether this athlete already holds a 'waitlist-expired' token for the
- * session — any id, so a token the manual script minted counts too.
- * @param {!Object} store An admin Firestore.
- * @param {string} athleteId The athlete.
- * @param {string} sessionId The session.
- * @return {!Promise<boolean>} True when one exists.
- */
-async function alreadyMinted(store, athleteId, sessionId) {
-  const snap = await store.collection('graceTokens')
-      .where('athleteId', '==', athleteId)
-      .where('sourceSessionId', '==', sessionId)
-      .get();
-  return snap.docs.some((d) => (d.data() || {}).reason === 'waitlist-expired');
-}
-
-/**
- * Expire one entry: delete it and tell the family. Owner ruling 2026-10-01:
- * NO bonus token is minted for a waitlist that closes without a spot - the
- * token the entry held is simply free again once the entry is gone. (The
- * 2026-09-30 audit: the old mint gave two tokens for one on every miss and
- * paid out for a waitlist joined on a session already over.) `minted` stays
- * in the result, always false, for the callers that count it.
- * @param {!Object} store An admin Firestore.
- * @param {!Object} entry `{id, ...waitlist doc}`.
- * @param {{today: string, expiresAt: string, athletes: !Function,
- *     sessions: !Function}} ctx The run.
- * @return {!Promise<{minted: boolean, notified: boolean}>} What happened.
- */
-async function expireEntry(store, entry, ctx) {
-  const graceId = graceIdFor(entry.sessionId, entry.athleteId);
-  const entryRef = store.collection('waitlist').doc(entry.id);
-  const minted = false;
-  // A token an earlier run (or the manual script) minted for this very
-  // session means the family was already told: delete quietly.
-  const told = await alreadyMinted(store, entry.athleteId, entry.sessionId);
-  await entryRef.delete();
-
-  let notified = false;
-  if (!told) {
-    const [athlete, session] = await Promise.all([
-      ctx.athletes(entry.athleteId),
-      ctx.sessions(entry.sessionId),
-    ]);
-    const copy = notices.waitlistExpired({athlete, session});
-    const res = await notify.sendNotice({
-      kind: 'waitlist-expired',
-      category: 'schedule',
-      householdId: entry.householdId ||
-          (athlete && athlete.householdId) || null,
-      athleteId: entry.athleteId,
-      sessionId: entry.sessionId,
-      subjectKey: graceId,
-      title: copy.title,
-      body: copy.body,
-    });
-    notified = Boolean(res && res.sent);
-  }
-  return {minted, notified};
-}
-
-/**
- * A memoized document reader.
- * @param {!Object} store An admin Firestore.
- * @param {string} collection The collection.
- * @return {function(?string): !Promise<?Object>} The reader.
- */
-function cachedReader(store, collection) {
-  const cache = new Map();
-  return async (id) => {
-    if (!id) return null;
-    if (!cache.has(id)) {
-      const snap = await store.collection(collection).doc(id).get();
-      cache.set(id, snap.exists ? snap.data() : null);
-    }
-    return cache.get(id);
-  };
-}
-
-/**
- * Daily 06:00 America/Chicago: expire every waitlist entry dated before
- * today. A second run on the same day finds nothing to expire.
+ * Daily 06:00 America/Chicago: close every waitlist entry dated before
+ * today. A second run on the same day finds nothing to close.
  * @param {{now: (?Date|undefined), db: (?Object|undefined)}=} args The
  *     fixed clock and Firestore.
- * @return {!Promise<{today: string, expired: number, minted: number,
- *     skipped: number, notified: number}>} A summary.
+ * @return {!Promise<{today: string, expired: number, skipped: number,
+ *     notified: number}>} A summary; `skipped` counts entries with no
+ *     athlete or session, deleted without a notice.
  */
 async function runWaitlistSweep(args) {
   const a = args || {};
   const now = a.now instanceof Date ? a.now : new Date();
   const store = a.db || admin.firestore();
   const today = lib.todayISO(now);
-  const ctx = {
-    today,
-    expiresAt: addDays(today, GRACE_DAYS),
-    athletes: cachedReader(store, 'athletes'),
-    sessions: cachedReader(store, 'sessions'),
-  };
+  const ctx = close.readersFor(store);
   const snap = await store.collection('waitlist')
       .where('date', '<', today).get();
-  const summary = {
-    today, expired: snap.size, minted: 0, skipped: 0, notified: 0,
-  };
+  const summary = {today, expired: snap.size, skipped: 0, notified: 0};
   for (const doc of snap.docs) {
     const entry = Object.assign({id: doc.id}, doc.data() || {});
-    if (!entry.athleteId || !entry.sessionId) {
-      console.warn(`waitlist/${doc.id} has no athleteId/sessionId - ` +
-          'deleted, nothing minted');
-      await doc.ref.delete();
-      summary.skipped += 1;
-      continue;
-    }
     try {
-      const res = await expireEntry(store, entry, ctx);
-      if (res.minted) summary.minted += 1;
-      else summary.skipped += 1;
+      const res = await close.closeEntry(store, entry, ctx);
+      if (res.skipped) {
+        console.warn(`waitlist/${doc.id} has no athleteId/sessionId - ` +
+            'deleted, nobody told');
+        summary.skipped += 1;
+      }
       if (res.notified) summary.notified += 1;
     } catch (err) {
-      console.error(`waitlist/${doc.id} could not be expired:`, err);
+      console.error(`waitlist/${doc.id} could not be closed:`, err);
     }
   }
   console.log(`runWaitlistSweep ${today}: expired=${summary.expired} ` +
-      `minted=${summary.minted} skipped=${summary.skipped} ` +
-      `notified=${summary.notified}`);
+      `skipped=${summary.skipped} notified=${summary.notified}`);
   return summary;
 }
 
-module.exports = {
-  GRACE_DAYS,
-  addDays,
-  alreadyMinted,
-  graceIdFor,
-  runWaitlistSweep,
-};
+module.exports = {runWaitlistSweep};

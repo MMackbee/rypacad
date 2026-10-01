@@ -40,8 +40,18 @@ import { addDaysISO, lastSaturdayOnOrBefore, todayISO } from './calendar';
  * we explain what a tournament block is?"). The one copy - Book a Session
  * shows it on a day with a Tour event, the Tour tab to a parent or athlete.
  */
-export const TOUR_EVENT_EXPLAINER =
-  "A Tour event is the academy's Saturday tournament. Coaches record every score, you are ranked in your age bracket (10 & under, 11-13, 14 & up), and points count toward the season standings on the Tour tab. One token per event.";
+const TOUR_EVENT_BASE =
+  "A Tour event is the academy's Saturday tournament. Coaches record every score, you are ranked in your age bracket (10 & under, 11-13, 14 & up), and points count toward the season standings on the Tour tab.";
+export const TOUR_EVENT_EXPLAINER = `${TOUR_EVENT_BASE} One token per event.`;
+
+/**
+ * The explainer for the reader in front of it (tester Mike 2026-09-30: no
+ * talk of tokens for Elite). `unlimited` true drops the token sentence;
+ * anything else - a token athlete, or not known yet - keeps the full copy.
+ */
+export function tourEventExplainer(unlimited) {
+  return unlimited === true ? TOUR_EVENT_BASE : TOUR_EVENT_EXPLAINER;
+}
 
 /**
  * Position (1-indexed) -> points. Index 0 is 1st place.

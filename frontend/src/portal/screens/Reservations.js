@@ -4,12 +4,13 @@ import { useHouseholdReservations } from '../hooks';
 import { leaveWaitlist } from '../hooks/waitlist';
 import { cancelSeries, laterWeeks } from '../hooks/cancelSeries';
 import { formatDuration } from '../data/calendar';
+import { waitlistClosed } from '../data/sessionStart';
 import { attendeeNoteFor } from '../data/specialists';
 import BottomTabBar from '../components/BottomTabBar';
 import Button from '../components/Button';
 import CancelSheet from '../components/CancelSheet';
 import { CALENDLY_MANAGED_COPY, cancelReasonCopy } from '../components/BookingReasons';
-import { LeaveWaitlistButton, WaitlistPositionLine } from '../components/WaitlistAction';
+import { leaveFailureCopy, OnWaitlist } from '../components/WaitlistAction';
 import MediaPlaceholder from '../components/MediaPlaceholder';
 import MemberSection from '../components/MemberSection';
 import PhoneFrame from '../components/PhoneFrame';
@@ -17,7 +18,7 @@ import Segmented from '../components/Segmented';
 import SessionCard from '../components/SessionCard';
 import StatusBadge from '../components/StatusBadge';
 import { SkeletonBar, SkeletonSessionCard } from '../components/Skeleton';
-import { Body, ErrorNotice, ScreenTitle } from '../components/Primitives';
+import { Banner, Body, ErrorNotice, ScreenTitle } from '../components/Primitives';
 
 /**
  * 20 · Family Reservations — parent (Sprint 11 pin F, contract v1.9). Route
@@ -51,10 +52,16 @@ export default function Reservations({ variant = 'populated', bare = false, onBo
   // Mirrors MySchedule's leave-waitlist state; the write bumps bookings, so
   // the household list refreshes through its own seam.
   const [leavingId, setLeavingId] = useState(null);
-  const handleLeaveWaitlist = async (item) => {
+  // Why the last "Leave waitlist" was refused, in plain words - above the
+  // list, since a refused leave reloads it (see MySchedule.js).
+  const [leaveFailure, setLeaveFailure] = useState(null);
+  const handleLeaveWaitlist = async (item, name) => {
     setLeavingId(item.bookingId ?? `${item.athleteId}_${item.id}`);
+    setLeaveFailure(null);
     try {
       await leaveWaitlist({ sessionId: item.sessionId ?? item.id, athleteId: item.athleteId });
+    } catch (err) {
+      setLeaveFailure(leaveFailureCopy(err, name));
     } finally {
       setLeavingId(null);
     }
@@ -82,6 +89,12 @@ export default function Reservations({ variant = 'populated', bare = false, onBo
       <div style={{ padding: '0 22px 24px', display: 'flex', flexDirection: 'column', gap: 18 }}>
         <Segmented value={tab} onChange={setTab} />
 
+        {leaveFailure ? (
+          <Banner tone="yellow" title="Waitlist">
+            {leaveFailure}
+          </Banner>
+        ) : null}
+
         {loading ? (
           <ReservationsSkeleton />
         ) : error ? (
@@ -102,8 +115,12 @@ export default function Reservations({ variant = 'populated', bare = false, onBo
                 onCancelRequest={(item) =>
                   setCancelTarget({ ...item, athleteName: member.name, later: laterWeeks(item, member.upcoming) })
                 }
-                onLeaveWaitlist={(item) => handleLeaveWaitlist({ ...item, athleteId: member.athleteId })}
+                onLeaveWaitlist={(item) => handleLeaveWaitlist({ ...item, athleteId: member.athleteId }, member.name)}
                 leavingId={leavingId}
+                // Whose rows these are: the waitlist copy names the athlete,
+                // and an Elite athlete's rows carry no token wording.
+                name={member.name}
+                unlimited={Boolean(member.unlimited)}
               />
             </MemberSection>
           ))
@@ -124,7 +141,7 @@ export default function Reservations({ variant = 'populated', bare = false, onBo
   );
 }
 
-function MemberList({ items, past, onBook, onCancelRequest, onLeaveWaitlist, leavingId }) {
+function MemberList({ items, past, onBook, onCancelRequest, onLeaveWaitlist, leavingId, name = null, unlimited = false }) {
   if (!items || items.length === 0) {
     return (
       <Body size={12} tone={color.textTertiary} style={{ padding: '4px 2px' }}>
@@ -183,7 +200,7 @@ function MemberList({ items, past, onBook, onCancelRequest, onLeaveWaitlist, lea
             name={item.name}
             meta={metaParts.join(' · ')}
             variant={rowCancelled ? 'cancelled' : item.isToday ? 'live' : 'default'}
-            footnote={rowCancelled ? cancelReasonCopy(item.cancelReason) : null}
+            footnote={rowCancelled ? cancelReasonCopy(item.cancelReason, { unlimited }) : null}
             trailing={
               waitlisted ? (
                 <StatusBadge tone="yellow">Waitlisted</StatusBadge>
@@ -198,13 +215,15 @@ function MemberList({ items, past, onBook, onCancelRequest, onLeaveWaitlist, lea
             }
             action={
               past || rowCancelled ? null : waitlisted ? (
-                <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-                  <WaitlistPositionLine position={item.waitlistPosition} />
-                  <LeaveWaitlistButton
-                    loading={leavingId != null && leavingId === (item.bookingId ?? `${item.athleteId}_${item.id}`)}
-                    onClick={() => onLeaveWaitlist(item)}
-                  />
-                </div>
+                <OnWaitlist
+                  position={item.waitlistPosition}
+                  name={name}
+                  unlimited={unlimited}
+                  // The academy's clock, from the session's own day on (MySchedule.js).
+                  closed={waitlistClosed(item)}
+                  leaving={leavingId != null && leavingId === (item.bookingId ?? `${item.athleteId}_${item.id}`)}
+                  onLeave={() => onLeaveWaitlist(item)}
+                />
               ) : item.source === 'calendly' ? (
                 <Body size={11} tone={color.textTertiary}>{CALENDLY_MANAGED_COPY}</Body>
               ) : dayOf ? (

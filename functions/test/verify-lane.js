@@ -190,6 +190,11 @@ async function main() {
   check('waitlist 2026-11-18-1_dev deleted', await exists('waitlist', '2026-11-18-1_dev'), false);
   check('waitlist 2026-11-18-1_quinn deleted (past_due gate, no grace token minted)', await exists('waitlist', '2026-11-18-1_quinn'), false);
   check('no booking for quinn', await exists('bookings', 'quinn_2026-11-18-1'), false);
+  // 2026-10-01: a family removed at a gate is told why (keyed by the entry's joinedAt, the seed's t0).
+  const quinnNotice = `waitlist-removed_2026-11-18-1_quinn_${Date.parse('2026-11-15T12:00:00Z')}`;
+  await waitFor(async () => await exists('notifications', quinnNotice), 'quinn told the entry was removed');
+  check('quinn removal notice', ((await get('notifications', quinnNotice)) || {}).body,
+      'Quinn was next on the waitlist for Training, Wed, Nov 18 at 3:00 PM but could not be booked: the membership payment is not up to date.');
   check('graceTokens still 2 (consumption is derived, never deleted)', (await db.collection('graceTokens').get()).size, 2);
 
   // ---------------------------------------------------------------- STEP 1

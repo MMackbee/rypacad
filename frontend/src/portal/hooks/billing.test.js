@@ -184,7 +184,8 @@ test('Membership, Elite, before the season: November with its bookings, December
   expect(member.nextPeriod).toMatchObject({ start: '2026-12-01', granted: null, booked: 0 });
   expect(grace.fetchTokenPeriod).toHaveBeenCalledWith('a1', '2026-11-01');
   // Was "Tokens reset Thursday, Oct 1": nothing resets before the season.
-  expect(status.title).toBe(`Tokens start ${calendar.longDayLabel('2026-11-01')}`);
+  // Then "Tokens start ...": Elite holds no tokens (tester Mike 2026-09-30).
+  expect(status.title).toBe(`First period starts ${calendar.longDayLabel('2026-11-01')}`);
   await act(async () => root.unmount());
 });
 

@@ -12,7 +12,7 @@
  */
 
 import { addDaysISO, BOOKING_OPENS_LABEL, bookingOpen, longDayLabel } from './calendar';
-import { normalizeAnchorDay, periodFor, SINGLE_TOKEN, tokensFor } from './packages';
+import { ELITE, normalizeAnchorDay, periodFor, SINGLE_TOKEN, tokensFor } from './packages';
 import { contractEnabled } from './contractFlag';
 
 /**
@@ -344,6 +344,9 @@ export function statusFor(membership, opts = {}) {
     const names = listNames(pendingAthletes.map((a) => a.name));
     const ended = pendingAthletes.some((a) => a.status === 'lapsed');
     const perPurchase = pendingAthletes.every((a) => a.perPurchase === true);
+    // Elite books as soon as it is paid, and holds no tokens: a pending list
+    // of Elite athletes only gets no "token packages from" date.
+    const elitePending = pendingAthletes.every((a) => a.packageId === ELITE.id);
     return {
       status: 'pending',
       tone: 'yellow',
@@ -351,7 +354,7 @@ export function statusFor(membership, opts = {}) {
       title: ended ? 'Membership ended - pay to book again' : 'Payment pending - finish checkout to start booking',
       body: perPurchase
         ? `${names} can book once their session token is paid for. A session token is a one-time $${SINGLE_TOKEN.price} payment.`
-        : `${names} can book once checkout is complete${bookingOpen(opts.now ?? Date.now()) ? '' : ` (token packages from ${BOOKING_OPENS_LABEL})`}. Billed monthly on the 1st once you've paid.`,
+        : `${names} can book once checkout is complete${bookingOpen(opts.now ?? Date.now()) || elitePending ? '' : ` (token packages from ${BOOKING_OPENS_LABEL})`}. Billed monthly on the 1st once you've paid.`,
       ladder: null,
       ladderAt: null,
       cta: 'Pay now',
@@ -381,11 +384,16 @@ export function statusFor(membership, opts = {}) {
     status: 'active',
     tone: 'default',
     badge: { tone: 'green', label: 'Active' },
-    title: tokensStartOn
-      ? `Tokens start ${longDayLabel(tokensStartOn)}`
-      : resetsOn
-        ? `Tokens reset ${longDayLabel(resetsOn)}`
-        : 'Membership active',
+    // `allUnlimited`: every athlete is Elite - no token wording (tester Mike 2026-09-30).
+    title: opts.allUnlimited === true
+      ? tokensStartOn
+        ? `First period starts ${longDayLabel(tokensStartOn)}`
+        : 'Membership active'
+      : tokensStartOn
+        ? `Tokens start ${longDayLabel(tokensStartOn)}`
+        : resetsOn
+          ? `Tokens reset ${longDayLabel(resetsOn)}`
+          : 'Membership active',
     body: opts.allPerPurchase === true
       ? 'Session tokens are one-time payments - nothing bills monthly.'
       : `${billingDay ? `Billed monthly on the ${billingDay}. ` : ''}Nothing needs attention.`,

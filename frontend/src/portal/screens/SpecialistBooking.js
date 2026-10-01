@@ -2,8 +2,15 @@ import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { color, font, radius, tint } from '../tokens';
 import { SpendNote } from '../components/AllowancePools';
-import { capReachedCopy, LockedDayNotice, reasonCopy, SeeMembershipLink } from '../components/BookingReasons';
-import { JoinWaitlistButton, WaitlistedConfirmationBody } from '../components/WaitlistAction';
+import { canRetry, capReachedCopy, LockedDayNotice, reasonCopy, SeeMembershipLink } from '../components/BookingReasons';
+import {
+  JoinWaitlistButton,
+  leaveFailureCopy,
+  OnWaitlist,
+  waitingOn,
+  WaitlistedConfirmationBody,
+  waitlistPromiseCopy,
+} from '../components/WaitlistAction';
 import BookingOpensBanner from '../components/BookingOpensBanner';
 import BottomTabBar from '../components/BottomTabBar';
 import Button from '../components/Button';
@@ -27,6 +34,8 @@ import {
   Tick,
 } from '../components/Primitives';
 import { seedSpecialistDays, useBooking, useHouseholdAthletes, useMembership, useSpecialistSlots } from '../hooks';
+import { leaveWaitlist } from '../hooks/waitlist';
+import { waitlistClosed } from '../data/sessionStart';
 import { SPECIALISTS, repeatsWeekly } from '../data/specialists';
 import { windowDaysFor } from '../data/packages';
 // Pure calendar/season helpers per the seam rule already established in
@@ -137,7 +146,8 @@ export default function SpecialistBooking({
     // Pin F: 'sheet-full' forces a slot closed so the gallery can preview
     // the waitlist CTA without depending on a genuinely full seed slot.
     if (harnessStage === 'sheet-full') {
-      const day = demo.find((d) => d.slots.length > 0);
+      // A later day: today's waitlist takes nobody new, so its sheet has no Join.
+      const day = demo.find((d) => d.slots.length > 0 && d.date > todayISO()) ?? demo.find((d) => d.slots.length > 0);
       const slot = day?.slots[0];
       return slot && day ? { ...slot, date: day.date, open: false } : null;
     }
@@ -150,6 +160,10 @@ export default function SpecialistBooking({
   // Sprint 11 pin G: the typed reason behind `failure`'s message, when the
   // hook supplies one — see confirmReserve's catch block below.
   const [failureReason, setFailureReason] = useState(null);
+  // "Leave waitlist" from the sheet of a slot the athlete already waits on:
+  // in flight, and the last refusal in plain words (WaitlistAction.js).
+  const [leaving, setLeaving] = useState(false);
+  const [leaveFailure, setLeaveFailure] = useState(null);
   // Owner ruling 2026-09-22: a family chooses who attends a Yannick 1:1 - the
   // athlete, or the parent instead. Whose TOKEN is spent is a different
   // question, answered by the child selector above (a parent always books
@@ -247,7 +261,26 @@ export default function SpecialistBooking({
   const calendly = specialistId === 'mental' && slotsState.data?.bookingMode === 'calendly' && Boolean(slotsState.data?.calendlyUrl);
   const householdId = slotsState.data?.householdId ?? null;
 
-  const confirmReserve = (slot) => {
+  // Who the booking is for: by name for the waitlist copy, by id to leave one.
+  const athleteName =
+    (isParent ? householdAthletes.find((a) => a.id === selectedAthleteId)?.name : slotsState.data?.athlete?.name ?? selfMember?.name) ?? null;
+  const bookingAthleteId = isParent ? selectedAthleteId : slotsState.data?.athlete?.id ?? selfMember?.athleteId ?? null;
+  // The write reloads the slots itself, pass or fail; the sheet closes on a
+  // leave and says why on a refusal (the athlete was just promoted).
+  const leaveFromSheet = (slot) => {
+    if (leaving || !bookingAthleteId) return;
+    setLeaveFailure(null);
+    setLeaving(true);
+    leaveWaitlist({ sessionId: slot.sessionId, athleteId: bookingAthleteId })
+      .then(() => setSheetSlot(null))
+      .catch((err) => setLeaveFailure(leaveFailureCopy(err, athleteName)))
+      .then(() => setLeaving(false));
+  };
+
+  // `joinWaitlist` is the Join waitlist button's own request (audit
+  // 2026-09-30): a plain Reserve on a slot that filled since the list loaded
+  // is refused as 'full', and the sheet then offers the waitlist.
+  const confirmReserve = (slot, { joinWaitlist = false } = {}) => {
     if (reserving) return;
     if (disabledForNoAthlete || blocked) return;
     setFailure(null);
@@ -258,6 +291,7 @@ export default function SpecialistBooking({
         reserve(slot, {
           ...(isParent ? { athleteId: selectedAthleteId } : {}),
           ...(specialist.id === 'mental' ? { attendee } : {}),
+          ...(joinWaitlist ? { joinWaitlist: true } : {}),
         }))
       .then((result) => {
         setReserving(null);
@@ -268,6 +302,9 @@ export default function SpecialistBooking({
           date: slot.date,
           time: slot.time,
           tokens,
+          // What the write actually charged ('elite' | 'grace' | 'period').
+          chargedFrom: result && result.chargedFrom ? result.chargedFrom : null,
+          athleteName,
           // The window as it stood at the tap: the booking's own bump reloads
           // useMembership, so the confirmation renders with none in hand.
           repeatWindow: { end: openThroughDate, days: windowDays, elite: selfMember?.package?.kind === 'elite' },
@@ -307,7 +344,8 @@ export default function SpecialistBooking({
 
   const selectedDay = days.find((d) => d.date === selectedDate) || null;
   const selectedDateLocked = Boolean(selectedDate) && selectedDate > openThroughDate;
-  const dayStates = slotDayStates(days);
+  // Yannick's sessions take no waitlist, so his fully booked days open nothing.
+  const dayStates = slotDayStates(days, { waitlist: specialistId !== 'mental' });
   // Tournament (yellow) / closed (red) days, derived in the hook from every
   // session on the date (calendar lane 2026-09-30).
   const dayMarks = slotDayMarks(days);
@@ -352,7 +390,10 @@ export default function SpecialistBooking({
 
         {!specialist ? (
           <div style={{ padding: '0 22px', display: 'flex', flexDirection: 'column', gap: 12 }}>
-            <Body size={12}>Sessions with Phil and Yannick use a token, same as any other session.</Body>
+            {/* Elite holds no tokens (tester Mike 2026-09-30): no token line for them. */}
+            {selfMember?.package?.kind === 'elite' ? null : (
+              <Body size={12}>Sessions with Phil and Yannick use a token, same as any other session.</Body>
+            )}
             {SPECIALISTS.map((s) => (
               <SpecialistCard key={s.id} specialist={s} onSelect={() => setSpecialistId(s.id)} />
             ))}
@@ -428,6 +469,8 @@ export default function SpecialistBooking({
                       reserving={reserving}
                       onSelect={(slot, date) => {
                         setFailure(null);
+                        setFailureReason(null);
+                        setLeaveFailure(null);
                         setSheetSlot({ ...slot, date });
                       }}
                     />
@@ -458,6 +501,11 @@ export default function SpecialistBooking({
           attendee={attendee}
           onAttendee={setAttendee}
           onReserve={() => confirmReserve(sheetSlot)}
+          onJoinWaitlist={() => confirmReserve(sheetSlot, { joinWaitlist: true })}
+          athleteName={athleteName}
+          leaving={leaving}
+          leaveFailure={leaveFailure}
+          onLeave={() => leaveFromSheet(sheetSlot)}
           onSeeMembership={() => navigate('/portal/membership')}
         />
       ) : null}
@@ -517,6 +565,7 @@ function SpecialistHeader({ specialist }) {
  * empty list.
  */
 function spotLabel(slot) {
+  if (slot.waitlisted) return 'Waitlisted';
   if (slot.capacity <= 1) return slot.open ? 'Open' : 'Booked';
   if (!slot.open) return 'Full';
   const left = slot.capacity - slot.booked;
@@ -543,12 +592,19 @@ function SlotList({ day, specialist, disabled, reserving, onSelect }) {
               type={specialist.id}
               name={specialist.sessionNoun}
               meta={formatDuration(slot.durationMinutes)}
-              variant={slot.open ? 'default' : 'full'}
+              variant={slot.open && !slot.waitlisted ? 'default' : 'full'}
               // Pin F: a full slot's tap still opens the detail sheet - its
               // Reserve CTA becomes "Join waitlist" there (DetailSheet below).
-              onClick={!disabled && !pending ? () => onSelect(slot, day.date) : undefined}
+              // Not for Yannick: his sessions take no waitlist, so a booked
+              // time opens nothing. A slot the athlete already waits on
+              // always opens - its sheet is where they leave it.
+              onClick={
+                !pending && (slot.waitlisted || (!disabled && (slot.open || specialist.id !== 'mental')))
+                  ? () => onSelect(slot, day.date)
+                  : undefined
+              }
               trailing={
-                <CapacityPill state={slot.open ? 'available' : 'full'}>
+                <CapacityPill state={slot.open && !slot.waitlisted ? 'available' : 'full'}>
                   {spotLabel(slot)}
                 </CapacityPill>
               }
@@ -580,10 +636,29 @@ function DetailSheet({
   onAttendee,
   onClose,
   onReserve,
+  onJoinWaitlist,
+  athleteName,
+  leaving,
+  leaveFailure,
+  onLeave,
   onSeeMembership,
 }) {
   const [time, meridiem] = (slot.time || '').split(' ');
-  const full = !slot.open;
+  // A plain Reserve that found the slot full ('full') flips the sheet to the
+  // waitlist offer - joining is its own tap, never a side effect.
+  const full = !slot.open || failureReason === 'full';
+  const unlimited = Boolean(tokens?.unlimited);
+  // Already waiting: the status and Leave, never Join again.
+  const waiting = waitingOn(slot);
+  // Yannick's sessions take no waitlist; nor does any session from its own
+  // day on (R3: nobody is promoted on the day).
+  const noWaitlist = specialist.id === 'mental' || waitlistClosed(slot);
+  // A bonus token stands in only for a time on or before its expiry - the
+  // booking check's own rule (live.js selectGraceToken), judged per time as
+  // Book a Session's cards do. With none, and the period at zero, this time
+  // can be neither reserved nor waited for.
+  const hasGrace = (tokens?.grace ?? []).some((g) => !g.expiresAt || g.expiresAt >= slot.date);
+  const slotTokensSpent = tokens ? !tokens.unlimited && tokens.left === 0 && !hasGrace : false;
   return (
     <div
       onClick={saving ? undefined : onClose}
@@ -618,9 +693,12 @@ function DetailSheet({
         <Body size={12} style={{ marginTop: 12 }}>
           {specialist.whatToExpect}
         </Body>
-        <div style={{ marginTop: 10 }}>
-          <SpendNote tokens={tokens} />
-        </div>
+        {waiting ? null : (
+          <div style={{ marginTop: 10 }}>
+            {/* A bonus token that expires before this time is not what it spends. */}
+            <SpendNote tokens={tokens && !hasGrace ? { ...tokens, grace: [] } : tokens} />
+          </div>
+        )}
         {specialist.id === 'mental' && onAttendee ? (
           <div style={{ marginTop: 14 }}>
             <SectionLabel>Who is attending?</SectionLabel>
@@ -650,14 +728,15 @@ function DetailSheet({
               })}
             </div>
             <Body size={11} tone={color.textTertiary} style={{ marginTop: 6 }}>
-              Either way this books the session for the athlete and spends
-              their token. Yannick sees who to expect.
+              {unlimited
+                ? 'Either way this books the session for the athlete. Yannick sees who to expect.'
+                : 'Either way this books the session for the athlete and spends their token. Yannick sees who to expect.'}
             </Body>
           </div>
         ) : null}
-        {full ? (
+        {full && !waiting ? (
           <Body size={12} tone={color.secondary} style={{ marginTop: 12 }}>
-            This time is full — joining the waitlist reserves one token.
+            {noWaitlist || slotTokensSpent ? 'This time is full.' : `This time is full. ${waitlistPromiseCopy({ name: athleteName, unlimited })}`}
           </Body>
         ) : null}
         {capReached ? (
@@ -668,15 +747,28 @@ function DetailSheet({
         {failure ? (
           <div style={{ marginTop: 12 }}>
             <Body size={12} tone={color.error}>
-              {reasonCopy(failureReason) ?? failure} Nothing was reserved — try again.
+              {reasonCopy(failureReason) ?? failure} Nothing was reserved{canRetry(failureReason) ? ' - try again.' : '.'}
             </Body>
             {failureReason === 'membership-inactive' ? (
               <SeeMembershipLink onClick={onSeeMembership} style={{ marginTop: 6 }} />
             ) : null}
           </div>
         ) : null}
-        {full ? (
-          <JoinWaitlistButton loading={saving} disabled={disabled} height={54} onClick={onReserve} style={{ marginTop: 18 }} />
+        {waiting ? (
+          <OnWaitlist
+            position={waiting.position}
+            name={athleteName}
+            unlimited={unlimited}
+            closed={waitlistClosed(slot)}
+            leaving={leaving}
+            error={leaveFailure}
+            onLeave={onLeave}
+            style={{ marginTop: 14 }}
+          />
+        ) : slotTokensSpent ? null : full ? (
+          noWaitlist ? null : (
+            <JoinWaitlistButton unlimited={unlimited} loading={saving} disabled={disabled} height={54} onClick={onJoinWaitlist} style={{ marginTop: 18 }} />
+          )
         ) : (
           <Button height={54} loading={saving} disabled={disabled} style={{ marginTop: 18 }} onClick={onReserve}>
             {saving ? 'Reserving' : 'Reserve'}
@@ -790,6 +882,8 @@ function Confirmed({ bare, booked, repeat, onBack }) {
             name={booked.specialist.sessionNoun}
             when={`${longDayLabel(booked.date)} · ${booked.time}`}
             position={booked.position ?? null}
+            athleteName={booked.athleteName ?? null}
+            unlimited={Boolean(booked.tokens?.unlimited)}
           />
         ) : (
           <>
@@ -818,7 +912,7 @@ function Confirmed({ bare, booked, repeat, onBack }) {
                 <MetaCol label="With" value={booked.specialist.name} />
               </div>
               <div style={{ borderTop: `1px solid ${color.border}`, marginTop: 14, paddingTop: 12 }}>
-                <Body size={12}>Spends {spendLabelFor(booked.tokens)}.</Body>
+                <Body size={12}>Spends {CHARGE_LABEL[booked.chargedFrom] ?? spendLabelFor(booked.tokens)}.</Body>
               </div>
             </Card>
 
@@ -843,10 +937,13 @@ function Confirmed({ bare, booked, repeat, onBack }) {
 /** "elite" | "grace" | "token" spend copy — mirrors BookSession's own helper. */
 function spendLabelFor(tokens) {
   if (!tokens) return '1 token';
-  if (tokens.unlimited) return 'nothing — included with Elite';
+  if (tokens.unlimited) return 'nothing - included with Elite';
   if ((tokens.grace?.length ?? 0) > 0) return 'a bonus token';
   return '1 token';
 }
+
+/** The same labels by a booking's own `chargedFrom` (createBooking's result). */
+const CHARGE_LABEL = { elite: 'nothing - included with Elite', grace: 'a bonus token', period: '1 token' };
 
 function MetaCol({ label, value }) {
   return (

@@ -32,7 +32,10 @@ jest.mock('./waitlist', () => ({
   __esModule: true,
   fetchWaitlistByAthlete: jest.fn(),
   fetchWaitlistByHousehold: jest.fn(),
+  fetchWaitlistPositions: jest.fn(),
 }));
+// The booking surfaces read the period's issued grant too (fetchTokenInputs).
+jest.mock('./grace', () => ({ ...jest.requireActual('./grace'), __esModule: true, fetchTokenPeriod: jest.fn() }));
 // "Today" is pinned per test. The seed modules call todayISO() at import, so
 // the real one answers until resetMocks clears it before the first test.
 jest.mock('../data/calendar', () => {
