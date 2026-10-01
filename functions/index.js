@@ -67,7 +67,8 @@ const db = admin.firestore();
 
 const notify = require('./portal/notify');
 const notices = require('./portal/notices');
-const {shouldNoticeBookingCreated} = require('./portal/notify-gates');
+const {shouldNoticeBookingCreated, shouldNoticeMemberCancel} =
+    require('./portal/notify-gates');
 const jobs = require('./portal/jobs');
 const sweep = require('./portal/sweep');
 const {stripeWebhook} = require('./portal/stripe');
@@ -195,9 +196,10 @@ exports.onBookingCreated = functions
  * The academy cancelled a whole session: tell everyone who was booked into
  * it, and name the bonus token's expiry when one was minted for them.
  *
- * Only `cancelReason == 'session-cancelled'` sends. A member's own cancel is
- * their own action (not notified in v1, TEAM.md "Open" 3) and a billing
- * revoke is one household notice from portal/revoke.js, not one per booking.
+ * A member's own single cancel (`cancelReason == 'member'`) sends the
+ * 'booking-cancelled' receipt instead; one week of a series cancel
+ * (`cancelledVia == 'series'`) sends nothing. A billing revoke is one
+ * household notice from portal/revoke.js, not one per booking.
  */
 exports.onBookingCancelled = functions
     .runWith({secrets: MAIL_SECRETS})
@@ -219,6 +221,10 @@ exports.onBookingCancelled = functions
       const byMember = after.cancelReason === 'member';
       if (!byMember && after.cancelReason !== 'session-cancelled') return null;
       if (byMember) {
+        // One week of a series cancel (cancelledVia 'series') sends nothing:
+        // the family saw one summary on screen, not a notice per week. A
+        // single cancel still sends (portal/notify-gates.js, unit-tested).
+        if (!shouldNoticeMemberCancel(after)) return null;
         try {
           const [session, athlete] = await Promise.all([
             docBody('sessions', after.sessionId),

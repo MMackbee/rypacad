@@ -5,6 +5,7 @@
  * which is why it is a different module (D1).
  */
 import { longDayLabel } from './calendar';
+import { facilitySourceLabel, householdFacility } from './facility';
 
 export const SIGNUP_FILTERS = [['all', 'All'], ['unpaid', 'Unpaid'], ['flagged', 'Flagged']];
 
@@ -27,7 +28,22 @@ export function athleteLine(a) {
 const BILLING = { pending: 'Payment pending', active: 'Paid', past_due: 'Past due', lapsed: 'Lapsed' };
 export function paymentLabel(a) {
   const base = BILLING[a.billing] || 'Paid';
-  return a.facility ? `${base} · facility ${a.facility}` : base;
+  // The family's one add-on (owner ruling 2026-09-30), on the athlete it bills on.
+  return a.facility ? `${base} · family facility ${a.facility}` : base;
+}
+
+/**
+ * "Facility access: family add-on" / "Facility access: Elite" for EVERY
+ * athlete of a covered household (data/facility.js decides), null without
+ * access. It goes on the line under the name: the payment badge above names
+ * who pays, and cannot wrap.
+ */
+export function facilityAccessLabel(row) {
+  const family = householdFacility((row?.athletes || []).map((a) => ({
+    id: a.athleteId, packageId: a.packageId, billing: { status: a.billing }, facilityBilling: a.facility ? { status: a.facility } : null,
+  })));
+  const source = facilitySourceLabel(family, row?.mode === 'athlete');
+  return source ? `Facility access: ${source}` : null;
 }
 
 export function loginLabel(a) {

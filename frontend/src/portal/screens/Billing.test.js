@@ -3,6 +3,7 @@ import { renderScreen } from './testRender';
 import Billing from './Billing';
 
 let mockHub;
+const ADD_FAMILY = 'Add family facility access · $300/month';
 jest.mock('../components/PayButton', () => ({ __esModule: true, default: ({ athleteId, product, label }) => <button type="button">{label}|{athleteId}|{product}</button> }));
 jest.mock('../components/TokenMeter', () => ({ __esModule: true, default: () => 'METER' }));
 jest.mock('../hooks/billing', () => ({ __esModule: true, default: () => mockHub, useBillingHub: () => mockHub, usePaymentConfirmation: () => ({ state: 'idle' }), STRIPE_PORTAL_URL: 'https://billing.stripe.test/p/x' }));
@@ -24,9 +25,60 @@ test('pending hero pays, plan and connection copy, facility offer for the paid a
   expect(r.text()).toContain('Reese can book once checkout is complete (token packages from Sat, Oct 10 at 7 AM).');
   expect(r.text()).toContain('Your card and invoices are managed in Stripe.');
   expect(r.button('Manage billing in Stripe')).not.toBeNull();
-  expect(r.button('Add facility access|a1|facility')).not.toBeNull();
-  expect(r.button('Add facility access|a2|facility')).toBeNull();
+  // One family offer, billed on the paid token athlete - never one per child.
+  expect(r.button(`${ADD_FAMILY}|a1|facility`)).not.toBeNull();
+  expect(r.button(`${ADD_FAMILY}|a2|facility`)).toBeNull();
+  expect(r.text().split(ADD_FAMILY)).toHaveLength(2);
+  expect(r.text()).not.toContain('facility access:'); // no access yet: the plan rows say nothing
   await r.unmount();
+});
+
+describe('family facility access (owner ruling 2026-09-30)', () => {
+  const paid = { status: 'active', facility: null };
+  const elite = { id: 'elite', name: 'Elite', kind: 'elite', windowDays: 45, price: 999 };
+
+  test('offered once when both athletes are paid, on the first', async () => {
+    mockHub.data.members[1] = { ...mockHub.data.members[1], billing: paid };
+    const r = await renderScreen(<Billing bare />);
+    expect(r.button(`${ADD_FAMILY}|a1|facility`)).not.toBeNull();
+    expect(r.text().split(ADD_FAMILY)).toHaveLength(2);
+    await r.unmount();
+  });
+
+  test('one add-on covers the family: one status card, no offer, every athlete reads as covered', async () => {
+    mockHub.data.members[0] = { ...mockHub.data.members[0], billing: paid };
+    mockHub.data.members[1] = { ...mockHub.data.members[1], billing: { status: 'active', facility: 'active' }, facilityAccess: true, facilityAccessConsent: true };
+    const r = await renderScreen(<Billing bare />);
+    expect(r.text().split('Family facility access: active')).toHaveLength(2);
+    expect(r.text()).not.toContain(ADD_FAMILY);
+    expect(r.text().split('facility access: family add-on')).toHaveLength(3); // Jordan's plan row and Reese's
+    await r.unmount();
+  });
+
+  test('a live Elite membership covers the family: included, never offered', async () => {
+    mockHub.data.members[0] = { ...mockHub.data.members[0], billing: paid };
+    mockHub.data.members[1] = { ...mockHub.data.members[1], package: elite, billing: paid };
+    const r = await renderScreen(<Billing bare />);
+    expect(r.text().split('Included with Elite for your family')).toHaveLength(2);
+    expect(r.text()).not.toContain(ADD_FAMILY);
+    expect(r.text()).toContain('6 tokens a month · books 30 days out · facility access: Elite');
+    expect(r.text()).toContain('Elite · unlimited · books 45 days out · facility access: Elite');
+    await r.unmount();
+  });
+
+  test('Elite still to be paid: not included yet, and the add-on is not sold to a family about to have it (review 2026-09-30)', async () => {
+    mockHub.data.members[1] = { ...mockHub.data.members[1], package: elite };
+    const r = await renderScreen(<Billing bare />);
+    expect(r.text()).not.toContain(ADD_FAMILY);
+    expect(r.text()).not.toContain('Included with Elite');
+    expect(r.text()).not.toContain('facility access:');
+    await r.unmount();
+    // An Elite membership that ended blocks nothing: the paid token athlete is offered the add-on.
+    mockHub.data.members[1] = { ...mockHub.data.members[1], billing: { status: 'lapsed', facility: null } };
+    const ended = await renderScreen(<Billing bare />);
+    expect(ended.button(`${ADD_FAMILY}|a1|facility`)).not.toBeNull();
+    await ended.unmount();
+  });
 });
 
 test('a mixed household keeps the monthly plan copy and footer', async () => {
@@ -57,7 +109,8 @@ test('an all-single household reads one-time and has no monthly footer', async (
 test('staff view never pays', async () => {
   const r = await renderScreen(<Billing bare staff role="owner" householdId="h1" />);
   expect(r.button('Pay now|a2|tier')).toBeNull();
-  expect(r.button('Add facility access|a1|facility')).toBeNull();
+  expect(r.button(`${ADD_FAMILY}|a1|facility`)).toBeNull();
+  expect(r.text()).toContain('No family facility access add-on.');
   await r.unmount();
 });
 
@@ -89,7 +142,9 @@ describe('the self-managed athlete (role athlete, one-member household)', () => 
   test('facility add-on, the Stripe portal and the plan, under the athlete tab bar with Billing lit', async () => {
     const r = await renderScreen(<Billing bare role="athlete" />);
     expect(r.text()).toContain('Sam');
-    expect(r.button('Add facility access|a-self|facility')).not.toBeNull();
+    // Their own household: the add-on without the word "family".
+    expect(r.button('Add facility access · $300/month|a-self|facility')).not.toBeNull();
+    expect(r.text()).not.toMatch(/family facility/i);
     expect(r.text()).toContain('Your card and invoices are managed in Stripe.');
     expect(r.button('Manage billing in Stripe')).not.toBeNull();
     expect(r.text()).toContain('6 tokens a month · books 30 days out');

@@ -354,9 +354,24 @@ test('consent sheets: the adult athlete reads every sheet about themselves; rule
   expect(media.text()).toContain('We never publish a last name, school, or contact details of an athlete under 18.');
   await media.unmount();
   const facility = await renderScreen(<ConsentInfoSheet id="facilityAccess" mode="athlete" onClose={() => {}} />);
-  expect(facility.text()).toContain('Access is for you only.');
+  // Family facility access (owner ruling 2026-09-30): the household's athletes, a code for the household, a parent or guardian may come along.
+  expect(facility.text()).toContain('Access is for you and any other athlete in your household, and a parent or guardian may come along.');
+  expect(facility.text()).toContain('The entry code or key is for your household and must not be shared or lent outside it, including to teammates.');
+  expect(facility.text()).not.toContain('Access is for you only.');
+  // Kept: the under-16 rule, one guest to watch, damage.
   expect(facility.text()).toContain('An athlete under 16 must be accompanied by a parent, guardian or an adult the guardian has named to the academy in writing.');
+  expect(facility.text()).toContain('One guest may come along, but only to watch. Guests may not hit balls or use equipment.');
+  expect(facility.text()).toContain('Damage caused by misuse, or by a guest you brought, is charged to the member.');
   await facility.unmount();
+  const guardian = await renderScreen(<ConsentInfoSheet id="facilityAccess" mode="parent" onClose={() => {}} />);
+  expect(guardian.text()).toContain('Access is for the athletes in your household, and a parent or guardian may come along.');
+  expect(guardian.text()).toContain('The entry code or key is for your family and must not be shared or lent outside it, including to teammates.');
+  expect(guardian.text()).not.toContain('named athlete only');
+  expect(guardian.text()).toContain('An athlete under 16 must be accompanied by a parent, guardian or an adult the guardian has named to the academy in writing.');
+  expect(guardian.text()).toContain('One guest may come along, but only to watch. Guests may not hit balls or use equipment.');
+  expect(guardian.text()).toContain('Damage caused by misuse, or by a guest you brought, is charged to the member.');
+  expect(guardian.text()).toContain('Facility access is one monthly add-on per household');
+  await guardian.unmount();
 });
 
 test('every adult rewording still matches a guardian line, so editing one cannot silently drop it', () => {

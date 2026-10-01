@@ -23,6 +23,9 @@ test('rows, filters, the unmatched Calendly card and the household tap', async (
   const r = await renderScreen(<AdminSignups bare role="owner" onOpenHousehold={(id) => opened.push(id)} />);
   expect(r.text()).toContain('Jordan · 14 · 12 tokens · hcp 12');
   expect(r.text()).toContain('Payment pending');
+  // Facility access is the family's (owner ruling 2026-09-30): named under each athlete of a covered household only.
+  expect(r.text()).toContain('Login: none · Facility access: Elite');
+  expect(r.text().match(/Facility access/g)).toHaveLength(1);
   expect(r.text()).toContain('Calendly unresolved · 2026-11-05');
   // D16: one flagged household + one unmatched booking = Flagged · 2.
   expect(r.button('Flagged · 2')).not.toBeNull();

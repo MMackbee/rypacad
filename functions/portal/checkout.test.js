@@ -92,6 +92,10 @@ const DOCS = {
     billing: {status: 'pending'}},
   'packages/single': {kind: 'single', tokens: 1, name: 'Single token'},
 };
+// novak without max's Elite or fac's add-on: either one now refuses a
+// facility checkout for the rest of the family (checkout-family.test.js).
+const T6 = Object.assign({}, DOCS['athletes/fac'], {facilityBilling: null});
+const PLAIN = Object.assign({}, DOCS, {'athletes/fac': T6, 'athletes/max': T6});
 const ctx = (uid, over) => ({auth: {uid, token: Object.assign({
   email: 'nina@example.test', email_verified: true,
   firebase: {sign_in_provider: 'password'}}, over || {})}});
@@ -180,17 +184,15 @@ test('facility add-on: $300 line, elite sends empty tokens', async () => {
   const dup = call({athleteId: 'fac', product: 'facility'}, ctx('u-nina'));
   await refused('facility already active', dup.p, 'failed-precondition',
       'already-active');
-  const docs = Object.assign({}, DOCS, {'athletes/fac':
-    {householdId: 'novak', packageId: 't-6', billing: {status: 'active'}}});
   const good = call({athleteId: 'fac', product: 'facility'}, ctx('u-nina'),
-      {db: fakeDb(docs), stripe: fakeStripe(calls, 30000)});
+      {db: fakeDb(PLAIN), stripe: fakeStripe(calls, 30000)});
   await good.p;
   assert.equal(calls[0].client_reference_id, 'novak__fac__facility');
   assert.equal(calls[0].success_url, 'https://portal.test/portal/family' +
       '?paid=fac&product=facility&cs={CHECKOUT_SESSION_ID}');
   assert.equal(calls[0].line_items[0].price, 'price_fac');
   assert.equal(calls[0].line_items[1].price_data.product_data.name,
-      'Facility access - November 2026, prepaid');
+      'Family facility access - November 2026, prepaid');
   assert.deepEqual([calls[0].subscription_data.metadata.product,
     calls[0].subscription_data.metadata.prepaidTokens], ['facility', '']);
   assert.match(calls[0].custom_text.submit.message,
@@ -319,9 +321,8 @@ test('sibling discount (2026-09-30): 2+ membership families, coupon or code',
         assert.equal(auto.calls[0].allow_promotion_codes, undefined);
         // The facility add-on is not a membership: neither, even for them.
         const fac = call({athleteId: 'lena', product: 'facility'},
-            ctx('u-nina'), {db: fakeDb(Object.assign({}, DOCS,
-                {'athletes/lena': {householdId: 'novak', packageId: 't-6',
-                  billing: {status: 'active'}}}))});
+            ctx('u-nina'), {db: fakeDb(Object.assign({}, PLAIN,
+                {'athletes/lena': T6}))});
         await fac.p;
         assert.equal(fac.calls[0].discounts, undefined);
         assert.equal(fac.calls[0].allow_promotion_codes, undefined);
@@ -435,6 +436,7 @@ test('a second Pay now reuses the open session (QA S9: no double charge)',
       // The add-on keeps its own slot.
       docs['athletes/lena'].billing = {status: 'active'};
       docs['athletes/lena'].packageId = 't-6';
+      docs['athletes/max'] = docs['athletes/fac'] = T6;
       await checkout.createCheckoutSessionHandler(
           {athleteId: 'lena', product: 'facility'}, ctx('u-nina'),
           {db, stripe: st, now: OCT, catalogue: CAT});

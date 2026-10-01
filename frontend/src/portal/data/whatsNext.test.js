@@ -92,8 +92,8 @@ test('the clock: tokens can book once Oct 10 passes (through Dec 1 until Nov 1);
   ]);
 });
 
-test('a facility add-on ticked at sign-up and not yet paid adds one line, last (owner 2026-09-30)', () => {
-  const FAMILY = "Facility access: pay from your family page whenever you're ready.";
+test('the family facility add-on ticked at sign-up and not yet paid adds one line, last (owner 2026-09-30)', () => {
+  const FAMILY = "Family facility access: pay from your family page whenever you're ready.";
   expect(whatsNextFor({ packageId: 't-12', athlete: JORDAN, host: HOST, facilityDue: true, now: BEFORE_OPEN }).lines).toEqual([
     'Booking opens Sat, Oct 10 at 7 AM - book any training block, Tour event or Phil session then.',
     'Sessions start Tue, Nov 3.',
@@ -104,8 +104,11 @@ test('a facility add-on ticked at sign-up and not yet paid adds one line, last (
     'Reese can book now - training, Tour events and Phil, up to 30 days ahead.',
     FAMILY,
   ]);
-  // The athlete's own home is their home page.
+  // The athlete's own home is their home page. It is still the family's add-on on a child's login, as the pending
+  // card below it says; only the adult who is their own household (`selfManaged`) reads it without "family".
   expect(whatsNextFor({ packageId: 't-12', athlete: JORDAN, self: true, facilityDue: true, now: BEFORE_OPEN }).lines)
+    .toContain("Family facility access: pay from your home page whenever you're ready.");
+  expect(whatsNextFor({ packageId: 't-12', athlete: JORDAN, self: true, selfManaged: true, facilityDue: true, now: BEFORE_OPEN }).lines)
     .toContain("Facility access: pay from your home page whenever you're ready.");
   // Not asked, or already paid (facilityDue false): no line. Elite includes it.
   expect(whatsNextFor({ packageId: 't-12', athlete: REESE, now: BEFORE_OPEN }).lines.join(' ')).not.toMatch(/Facility/);

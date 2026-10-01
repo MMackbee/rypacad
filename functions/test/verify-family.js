@@ -55,7 +55,7 @@ const kid = (over) => Object.assign({name: 'Lena Novak', dob: '2012-06-17', pack
 const payload = (over) => Object.assign({
   mode: 'parent',
   contact: {name: 'Nina Novak', email: 'nina@example.test', phone: '+15550199', relationship: 'Mother'},
-  // Both tick the facility add-on (owner 2026-09-30): kept on Lena's 6 tokens, dropped on Max's Elite.
+  // Both tick the facility add-on: it is a family add-on and Elite covers the family (owner ruling 2026-09-30), so with Max on Elite nobody keeps it.
   athletes: [kid({loginEmail: 'Kid@Example.test', facilityRequested: true}), kid({name: 'Max Novak', dob: '2010-02-02', packageId: 'elite', contractMinutes: 45, handicap: null, facilityRequested: true})],
   emergencyContact: {name: ' Uncle Bo ', phone: '+15550100', relationship: 'Uncle'},
   medical: 'Peanut allergy',
@@ -97,7 +97,7 @@ async function main() {
   check('lena billing shape', Object.keys(lena.billing).sort(), ['checkoutSessionId', 'customerId', 'priceId', 'status', 'subscriptionId', 'updatedAt']);
   const max = await get('athletes', maxId);
   check('max handicap null, no loginEmail', [max.handicap, max.loginEmail], [null, null]);
-  check('facilityRequested: kept on 6 tokens, coerced false on Elite, never access', [lena.facilityRequested, max.facilityRequested, lena.facilityAccess, max.facilityAccess], [true, false, false, false]);
+  check('facilityRequested: an Elite athlete in the family means nobody keeps it, never access', [lena.facilityRequested, max.facilityRequested, lena.facilityAccess, max.facilityAccess], [false, false, false, false]);
   check('contractStart: Chicago today with a contract, absent without', [max.contractMinutes, max.contractStart, 'contractStart' in lena], [45, '2026-10-01', false]);
   const med = (await db.collection('athletes').doc(lenaId).collection('private').doc('medical').get()).data();
   check('private/medical on every athlete', [med.emergencyContact, med.medicalNotes, await (async () => (await db.collection('athletes').doc(maxId).collection('private').doc('medical').get()).exists)()], [{name: 'Uncle Bo', phone: '+15550100', relationship: 'Uncle'}, 'Peanut allergy', true]);

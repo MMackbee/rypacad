@@ -13,6 +13,7 @@ const functions = require('firebase-functions/v1');
 const admin = require('firebase-admin');
 // Modular import on purpose - see the note in portal/stripe.js:28-31.
 const {FieldValue} = require('firebase-admin/firestore');
+const facility = require('./facility');
 const lib = require('./lib');
 const validate = require('./family-validate');
 
@@ -66,7 +67,9 @@ const NO_FACILITY_ADD_ON = ['elite', 'single'];
  * contract counts from the later of that and the season start.
  * `facilityRequested` is the add-on ticked under the package cards (owner
  * request, Mike 2026-09-30) - a request, never access: the home pending
- * card offers its checkout once the membership is paid.
+ * card offers its checkout once the membership is paid. It is a FAMILY
+ * add-on (owner ruling 2026-09-30): the handlers pass entries through
+ * facility.js oneFacilityRequest first, so one athlete at most keeps it.
  * @param {!Object} a A normalized athlete entry.
  * @param {string} householdId The household.
  * @param {string} uid The caller (signs the facility waiver).
@@ -252,7 +255,8 @@ async function createFamilyHandler(data, context, deps) {
         emergencyContact: p.emergencyContact,
       });
       const athleteIds = writeAthletes(tx, {store, householdId: hhRef.id,
-        uid, athletes: p.athletes, emergencyContact: p.emergencyContact,
+        uid, athletes: facility.oneFacilityRequest(p.athletes),
+        emergencyContact: p.emergencyContact,
         medical: p.medical, facilityConsent: p.consents.facilityAccess,
         todayISO});
       tx.set(userRef, userDocFor(p, hhRef.id, athleteIds));
@@ -292,8 +296,14 @@ async function addAthletesHandler(data, context, deps) {
       guardianEmail: (hh.guardian && hh.guardian.email) || me.email || ''});
     return await store.runTransaction(async (tx) => {
       await refuseOpenInvites(tx, store, p.athletes);
+      // The family add-on: the athletes already here decide whether a
+      // request is kept (an Elite athlete, a request or a paid add-on).
+      const here = await tx.get(store.collection('athletes')
+          .where('householdId', '==', hhRef.id));
+      const athletes = facility.oneFacilityRequest(p.athletes,
+          here.docs.map((doc) => doc.data()));
       const athleteIds = writeAthletes(tx, {store, householdId: hhRef.id,
-        uid, athletes: p.athletes, emergencyContact: p.emergencyContact ||
+        uid, athletes, emergencyContact: p.emergencyContact ||
         validate.storedEmergencyContact(hh.emergencyContact),
         medical: p.medical, facilityConsent: false, todayISO});
       return {householdId: hhRef.id, athleteIds};

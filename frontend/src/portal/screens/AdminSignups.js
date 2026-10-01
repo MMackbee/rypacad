@@ -7,7 +7,7 @@ import Segmented from '../components/Segmented';
 import StatusBadge from '../components/StatusBadge';
 import { BackLink, Body, Card, ErrorNotice, ScreenTitle, SectionLabel } from '../components/Primitives';
 import {
-  SIGNUP_FILTERS, athleteLine, filterSignupRows, flagLabel, flaggedCount, loginLabel, paymentLabel, signedUpLabel, unresolvedLabel,
+  SIGNUP_FILTERS, athleteLine, facilityAccessLabel, filterSignupRows, flagLabel, flaggedCount, loginLabel, paymentLabel, signedUpLabel, unresolvedLabel,
 } from '../data/signupsReport';
 
 /**
@@ -95,6 +95,8 @@ function UnmatchedCard({ events }) {
 const TONE = { pending: 'yellow', active: 'green', past_due: 'yellow', lapsed: 'red' };
 
 function SignupRow({ row, onOpen }) {
+  // The family's, so every athlete of a covered household reads it (owner ruling 2026-09-30).
+  const facility = facilityAccessLabel(row);
   return (
     <div role={onOpen ? 'button' : undefined} aria-label={row.name} onClick={onOpen} style={{ cursor: onOpen ? 'pointer' : 'default' }}>
       <Card large>
@@ -116,7 +118,7 @@ function SignupRow({ row, onOpen }) {
               <div style={{ flex: 1, font: `500 12px ${font.body}`, color: color.text }}>{athleteLine(a)}</div>
               <StatusBadge tone={TONE[a.billing] || 'neutral'}>{paymentLabel(a)}</StatusBadge>
             </div>
-            <div style={{ font: `400 11px ${font.body}`, color: color.textTertiary, marginTop: 3 }}>{loginLabel(a)}</div>
+            <div style={{ font: `400 11px ${font.body}`, color: color.textTertiary, marginTop: 3 }}>{loginLabel(a)}{facility ? ` · ${facility}` : ''}</div>
           </div>
         ))}
         {row.flags.length ? (

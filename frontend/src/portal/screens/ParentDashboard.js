@@ -103,11 +103,12 @@ export default function ParentDashboard({
   // Pay now while the webhook lands - a second checkout double-subscribes.
   const pendingAthletes = (hubStatus?.status === 'pending' ? hubStatus.pendingAthletes : [])
     .filter((a) => a.athleteId !== paidAthleteId);
-  // The facility add-ons ticked at sign-up (owner 2026-09-30). One just paid
-  // for is confirming the same way: no second add-on checkout meanwhile. A
-  // membership return keeps its athlete's add-on row - it is the next step.
+  // The FAMILY facility add-on ticked at sign-up (owner 2026-09-30; one row
+  // at most). Just paid for, it is confirming the same way: no second add-on
+  // checkout meanwhile, whichever athlete it was billed on. A membership
+  // return keeps the add-on row - it is the next step.
   const facilityPending = hub.data?.facilityPending ?? [];
-  const facilityRows = facilityPending.filter((r) => !(params.get('product') === 'facility' && r.athleteId === paidAthleteId));
+  const facilityRows = params.get('product') === 'facility' && paidAthleteId ? [] : facilityPending;
   // Sprint 11 pin D entry point: same direct-navigate() precedent
   // AthleteDashboard's own coaching/membership links already use (this lane
   // never edits PortalRoutes.js) rather than a new onOpenMembership prop —
@@ -175,7 +176,7 @@ export default function ParentDashboard({
         <PaymentConfirming
           athleteId={paidAthleteId}
           whatsNext={{ athlete: paidChild, product: params.get('product'), onBook: paidChild ? () => setBookFor(paidChild) : undefined,
-            facilityDue: facilityPending.some((r) => r.athleteId === paidAthleteId) }}
+            facilityDue: facilityPending.some((r) => r.athleteId === paidAthleteId || r.state === 'pay') }}
         />
         {/* The sibling rule reads the whole family, paid members included. */}
         <PendingBanner pendingAthletes={pendingAthletes} facilityRows={facilityRows} body={hubStatus?.body} title={hubStatus?.title}

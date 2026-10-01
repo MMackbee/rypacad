@@ -29,4 +29,24 @@ function shouldNoticeBookingCreated(booking) {
   return b.createdVia !== 'repeat';
 }
 
-module.exports = {shouldNoticeBookingCreated};
+/**
+ * Whether a family's own cancel gets the 'booking-cancelled' receipt.
+ *
+ * - Only a member cancel (`cancelReason: 'member'`). The academy cancelling
+ *   a session and a Calendly cancellation are decided in the trigger and
+ *   never ask this gate.
+ * - Not one week of a series cancel (`cancelledVia: 'series'`, written by
+ *   the portal's cancelSeries and the one value the rules admit): the family
+ *   just saw one on-screen summary of every week, so a notice per week says
+ *   nothing new (tester Mike 2026-09-30). A single cancel carries no
+ *   `cancelledVia` and still sends.
+ * @param {?Object} booking The `bookings/{id}` body AFTER the cancel.
+ * @return {boolean} True when the receipt is owed.
+ */
+function shouldNoticeMemberCancel(booking) {
+  const b = booking || {};
+  if (b.status !== 'cancelled' || b.cancelReason !== 'member') return false;
+  return b.cancelledVia !== 'series';
+}
+
+module.exports = {shouldNoticeBookingCreated, shouldNoticeMemberCancel};

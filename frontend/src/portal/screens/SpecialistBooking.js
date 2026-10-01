@@ -11,6 +11,7 @@ import CalendlyPanel from '../components/CalendlyPanel';
 import { RangeCalendarCard } from '../components/CalendarCard';
 import EntitlementSummary from '../components/EntitlementSummary';
 import PhoneFrame from '../components/PhoneFrame';
+import RepeatWeekly from '../components/RepeatWeekly';
 import SessionCard from '../components/SessionCard';
 import { CapacityPill } from '../components/StatusBadge';
 import { Avatar } from '../components/MediaPlaceholder';
@@ -26,7 +27,7 @@ import {
   Tick,
 } from '../components/Primitives';
 import { seedSpecialistDays, useBooking, useHouseholdAthletes, useMembership, useSpecialistSlots } from '../hooks';
-import { SPECIALISTS } from '../data/specialists';
+import { SPECIALISTS, repeatsWeekly } from '../data/specialists';
 import { windowDaysFor } from '../data/packages';
 // Pure calendar/season helpers per the seam rule already established in
 // BookSession.js/CommitmentContract.js/TourStandings.js - data still travels
@@ -267,6 +268,9 @@ export default function SpecialistBooking({
           date: slot.date,
           time: slot.time,
           tokens,
+          // The window as it stood at the tap: the booking's own bump reloads
+          // useMembership, so the confirmation renders with none in hand.
+          repeatWindow: { end: openThroughDate, days: windowDays, elite: selfMember?.package?.kind === 'elite' },
           waitlisted: result && result.status === 'waitlisted',
           position: result && result.position != null ? result.position : null,
         });
@@ -282,7 +286,23 @@ export default function SpecialistBooking({
   };
 
   if (booked) {
-    return <Confirmed bare={bare} booked={booked} onBack={onBack} />;
+    // Repeat weekly, as on Book a Session's confirmation (owner 2026-09-30):
+    // live bookings only, Phil's sessions only (never Yannick's), never off a
+    // waitlist place. It reaches as far as this athlete's own window.
+    const repeat =
+      booking.bookingFor && !booked.waitlisted && repeatsWeekly(booked.specialist.id)
+        ? {
+            windowEnd: booked.repeatWindow?.end ?? openThroughDate,
+            windowDays: booked.repeatWindow?.days ?? windowDays,
+            elite: booked.repeatWindow?.elite ?? false,
+            onRepeat: (untilISO) =>
+              booking.bookRecurring(
+                { date: booked.date, time: booked.time, type: booked.specialist.id },
+                { athleteId: isParent ? selectedAthleteId : undefined, untilISO }
+              ),
+          }
+        : null;
+    return <Confirmed bare={bare} booked={booked} repeat={repeat} onBack={onBack} />;
   }
 
   const selectedDay = days.find((d) => d.date === selectedDate) || null;
@@ -744,7 +764,7 @@ function SlotsSkeleton() {
 }
 
 /** Confirmed - following BookSession's confirmation pattern. */
-function Confirmed({ bare, booked, onBack }) {
+function Confirmed({ bare, booked, repeat, onBack }) {
   return (
     <PhoneFrame
       bare={bare}
@@ -801,6 +821,18 @@ function Confirmed({ bare, booked, onBack }) {
                 <Body size={12}>Spends {spendLabelFor(booked.tokens)}.</Body>
               </div>
             </Card>
+
+            {repeat ? (
+              <RepeatWeekly
+                date={booked.date}
+                time={booked.time}
+                type={booked.specialist.id}
+                windowEnd={repeat.windowEnd}
+                windowDays={repeat.windowDays}
+                elite={repeat.elite}
+                onRepeat={repeat.onRepeat}
+              />
+            ) : null}
           </>
         )}
       </div>

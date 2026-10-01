@@ -15,6 +15,7 @@ import SkeletonCard, { SkeletonBar, SkeletonSessionCard } from '../components/Sk
 import { Banner, Body, Card, ErrorNotice, ScreenTitle, SectionLabel } from '../components/Primitives';
 import { useSchedule } from '../hooks';
 import { leaveWaitlist } from '../hooks/waitlist';
+import { cancelSeries, laterWeeks } from '../hooks/cancelSeries';
 // Pure calendar helper, not response data - same seam rule BookSession and
 // CommitmentContract already follow (see their own imports of this module).
 import { todayISO } from '../data/calendar';
@@ -62,7 +63,9 @@ export default function MySchedule({
   const { data, loading, error } = scheduleState;
   const [tab, setTab] = useState('upcoming');
   // The upcoming item currently in the confirm sheet ('keep it' / 'cancel
-  // reservation'), or null when the sheet is closed.
+  // reservation'), or null when the sheet is closed. `later` is its later
+  // weeks (hooks/cancelSeries.js), fixed when the sheet opens: the list
+  // reloads under the sheet once a cancel lands.
   const [cancelTarget, setCancelTarget] = useState(null);
   // Which waitlisted bookingId is mid-leave, for LeaveWaitlistButton's own
   // loading state (no confirm sheet - leaving costs nothing already spent).
@@ -164,7 +167,7 @@ export default function MySchedule({
             tokens={tokens}
             days={days}
             onBook={onBook}
-            onCancelRequest={setCancelTarget}
+            onCancelRequest={(s) => setCancelTarget({ ...s, later: laterWeeks(s, sessions) })}
             onLeaveWaitlist={handleLeaveWaitlist}
             leavingId={leavingId}
           />
@@ -176,6 +179,8 @@ export default function MySchedule({
           summary={`${cancelTarget.dayLabel} · ${cancelTarget.time} ${cancelTarget.meridiem} · ${cancelTarget.name}`}
           onClose={() => setCancelTarget(null)}
           onConfirm={() => cancel(cancelTarget.bookingId)}
+          laterWeeks={cancelTarget.later}
+          onConfirmSeries={() => cancelSeries([cancelTarget, ...cancelTarget.later], cancel)}
           onCancelled={() => setCancelTarget(null)}
         />
       ) : null}

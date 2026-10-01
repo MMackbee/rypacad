@@ -11,9 +11,9 @@ import { SEASON_LINK, whatsNextFor } from '../data/whatsNext';
  * the choice are data/whatsNext.js; this only lays them out. Book and the
  * season link hide when the screen has nowhere to send them.
  */
-export default function WhatsNextCard({ packageId, product, athlete, self = false, facilityDue = false, onBook, onSeason, style }) {
+export default function WhatsNextCard({ packageId, product, athlete, self = false, selfManaged = false, facilityDue = false, onBook, onSeason, style }) {
   const host = typeof window !== 'undefined' ? window.location.host : '';
-  const next = whatsNextFor({ packageId, product, athlete, self, host, facilityDue });
+  const next = whatsNextFor({ packageId, product, athlete, self, selfManaged, host, facilityDue });
   if (!next) return null;
   return (
     <Card tone="green" style={style}>

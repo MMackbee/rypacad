@@ -20,6 +20,7 @@ import { useEffect, useState } from 'react';
 import { facilityRequestState } from '../data/billingCopy';
 import { foldBeforeFirstPeriod, hubMemberFor, positionPeriodFor, statusFor } from '../data/billingHub';
 import { addDaysISO, todayISO } from '../data/calendar';
+import { householdFacility } from '../data/facility';
 import { normalizeAnchorDay, packageById, periodFor } from '../data/packages';
 import { GRACE_TOKEN, HOUSEHOLD, PAST_DUE_MEMBERSHIP, PERIOD_ANCHOR_DAY } from '../data/seed';
 import { bump, useInvalidation } from './invalidate';
@@ -139,17 +140,27 @@ export function pendingOf(members) {
 }
 
 /**
- * The facility add-ons ticked at sign-up that are still to pay (owner
+ * The facility add-on ticked at sign-up that is still to pay (owner
  * request, Mike 2026-09-30): `{ athleteId, name, state }`, state 'pay' (the
  * membership is active - PendingBanner shows the add-on's own Pay button)
  * or 'waiting' (the membership is still pending - a line, no button).
+ * It is a FAMILY add-on (owner ruling 2026-09-30): at most ONE row, for the
+ * athlete it bills on (a payable one first, should an older sign-up hold a
+ * request per child), and none once the family has access - another
+ * athlete's add-on, or Elite (data/facility.js householdFacility) - or
+ * while an Elite athlete is still to pay (review 2026-09-30).
  * Separate from pendingOf on purpose: an unpaid add-on never blocks
  * booking, so it must not turn the household status to 'pending'.
  */
 export function facilityPendingOf(members) {
-  return (members || [])
+  const list = members || [];
+  const family = householdFacility(list);
+  if (family.access || family.eliteDueId) return [];
+  const rows = list
     .map((m) => ({ athleteId: m.athleteId, name: m.name, state: facilityRequestState(m) }))
     .filter((r) => r.state !== null);
+  const row = rows.find((r) => r.state === 'pay') ?? rows[0];
+  return row ? [row] : [];
 }
 
 /** The first period's start while any member's position is still before it - the hero's "Tokens start" date (tester report 2026-09-30), Elite members included (owner report 2026-09-30: nothing resets Oct 1). null from Nov 1. */
@@ -361,6 +372,24 @@ export function useHouseholdsDirectory() {
   return useSeedResource(
     live ? null : seed,
     live ? { source: liveHouseholdsDirectory, deps: ['households-directory', ...gens] } : undefined
+  );
+}
+
+/**
+ * `{ data: { access, source, holderId, eliteId, eliteDueId } | null, loading, error }` -
+ * whether an athlete's FAMILY has facility access (data/facility.js), for
+ * the staff athlete card: one athlete's own flags no longer say (owner
+ * ruling 2026-09-30). A coach cannot list a household (rules), so on an
+ * error the caller reads the one athlete it has.
+ */
+export function useHouseholdFacility(householdId) {
+  const live = isLive();
+  const gen = useInvalidation('athletes');
+  return useSeedResource(
+    live ? null : householdFacility(HOUSEHOLD.children),
+    live && householdId
+      ? { source: async () => householdFacility(await fetchHouseholdAthletes(householdId)), deps: ['household-facility', householdId, gen] }
+      : undefined
   );
 }
 

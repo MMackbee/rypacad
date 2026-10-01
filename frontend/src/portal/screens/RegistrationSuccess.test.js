@@ -86,25 +86,57 @@ test('an unverified password account is told to open the verification link befor
   await verified.unmount();
 });
 
-test('a kept facility add-on gets one line under that athlete\'s Pay button, and no button of its own (owner 2026-09-30)', async () => {
-  const LINE = 'Facility access · $300/month - pay after the membership';
-  const athletes = [
-    { ...newAthleteEntry(), name: 'Jordan', dob: '2012-06-17', packageId: 't-12', facilityRequested: true },
-    { ...newAthleteEntry(), name: 'Reese', dob: '2014-03-02', packageId: 't-6' },
-    // A tick left behind on a switch to Elite is not an add-on.
-    { ...newAthleteEntry(), name: 'Sam', dob: '2013-01-01', packageId: 'elite', facilityRequested: true },
-  ];
-  const r = await renderScreen(<RegistrationSuccess bare mode="signup" form={form({ athletes })} result={{ householdId: 'h1', athleteIds: ['a1', 'a2', 'a3'] }} account={{ email: 'dana@email.com' }} onFinish={() => {}} />);
-  expect(r.text().split(LINE)).toHaveLength(2);
-  const jordan = r.button("Pay $569 for Jordan's 12 tokens|a1");
-  expect(jordan.nextSibling.textContent).toBe(LINE);
-  expect(r.button("Pay $299 for Reese's 6 tokens|a2").nextSibling.textContent).not.toBe(LINE);
+test('a kept family facility add-on gets ONE line under the Pay buttons, and no button of its own (owner 2026-09-30)', async () => {
+  const jordan = { ...newAthleteEntry(), name: 'Jordan Whitfield', dob: '2012-06-17', packageId: 't-12' };
+  const reese = { ...newAthleteEntry(), name: 'Reese', dob: '2014-03-02', packageId: 't-6' };
+  const sam = { ...newAthleteEntry(), name: 'Sam', dob: '2013-01-01', packageId: 'elite' };
+  const receipt = (over, ids, mode = 'signup') => renderScreen(<RegistrationSuccess bare mode={mode} form={form(over)} result={{ householdId: 'h1', athleteIds: ids }} account={{ email: 'dana@email.com' }} onFinish={() => {}} />);
+  // Two athletes: the line names whose membership the add-on waits for (the first on a token package).
+  const LINE = "Family facility access · $300/month - pay after Jordan's membership";
+  const r = await receipt({ facilityRequested: true, athletes: [jordan, reese] }, ['a1', 'a2']);
+  expect(r.text().split('Family facility access')).toHaveLength(2);
+  expect(r.button("Pay $299 for Reese's 6 tokens|a2").nextSibling.textContent).toBe(LINE);
   expect([...r.container.querySelectorAll('button')].map((b) => b.textContent).filter((t) => /facility/i.test(t))).toEqual([]);
   await r.unmount();
-  // Link mode's receipt says the same.
-  const link = await renderScreen(<RegistrationSuccess bare mode="link" form={form({ athletes: [athletes[0]] })} result={{ householdId: 'h1', athleteIds: ['a9'] }} account={{ email: 'dana@email.com' }} onFinish={() => {}} />);
-  expect(link.text()).toContain(LINE);
-  await link.unmount();
+  const one = await receipt({ facilityRequested: true, athletes: [jordan] }, ['a1']);
+  expect(one.text()).toContain('Family facility access · $300/month - pay after the membership');
+  await one.unmount();
+  // The adult signing up for themselves: no "family".
+  const self = await receipt({ mode: 'athlete', facilityRequested: true, athletes: [jordan] }, ['a1']);
+  expect(self.text()).toContain('Facility access · $300/month - pay after the membership');
+  expect(self.text()).not.toMatch(/family facility/i);
+  await self.unmount();
+  // Not ticked, or a tick left behind once anyone is on Elite (Elite covers the family): no line.
+  const none = await receipt({ athletes: [jordan, reese] }, ['a1', 'a2']);
+  expect(none.text()).not.toMatch(/facility access/i);
+  await none.unmount();
+  const elite = await receipt({ facilityRequested: true, athletes: [jordan, sam] }, ['a1', 'a3']);
+  expect(elite.text()).not.toMatch(/facility access/i);
+  await elite.unmount();
+});
+
+test('link mode: the facility line follows what addAthletes stored, read with the family', async () => {
+  const nico = { ...newAthleteEntry(), name: 'Nico', dob: '2015-05-05', packageId: 't-6' };
+  const link = () => renderScreen(<RegistrationSuccess bare mode="link" form={form({ facilityRequested: true, athletes: [nico] })} result={{ householdId: 'h1', athleteIds: ['a9'] }} account={{ email: 'dana@email.com' }} onFinish={() => {}} />);
+  const LINE = 'Family facility access · $300/month - pay after the membership';
+  mockLive = true;
+  mockFamily = [{ id: 'a1', packageId: 't-12', billing: { status: 'active' } }, { id: 'a9', packageId: 't-6', billing: { status: 'pending' }, facilityRequested: true }];
+  const kept = await link();
+  await kept.flush();
+  expect(kept.text()).toContain(LINE);
+  await kept.unmount();
+  // The family already had Elite, a request or the add-on: addAthletes stored false, so no line.
+  mockFamily = [{ id: 'a1', packageId: 'elite', billing: { status: 'active' } }, { id: 'a9', packageId: 't-6', billing: { status: 'pending' }, facilityRequested: false }];
+  const dropped = await link();
+  await dropped.flush();
+  expect(dropped.text()).not.toMatch(/facility access/i);
+  await dropped.unmount();
+  // The read failed: missing, never wrong.
+  mockFamily = new Error('offline');
+  const failed = await link();
+  await failed.flush();
+  expect(failed.text()).not.toMatch(/facility access/i);
+  await failed.unmount();
 });
 
 test('athlete mode goes home', async () => {

@@ -81,7 +81,10 @@ export default function Membership({ variant = 'populated', bare = false, role =
               {contractEnabled() ? (
                 <ContractLine contractMinutes={member.contractMinutes} onOpen={() => navigate('/portal/contract')} />
               ) : null}
-              <FacilityCard member={member} />
+              {/* Family facility access (owner ruling 2026-09-30). This login reads
+                  its own record only, so the offer is the self-managed adult's
+                  alone - a family buys it once, from the parent's Billing. */}
+              <FacilityCard members={[member]} self={selfManaged} offer={selfManaged} />
             </MemberSection>
           </>
         )}

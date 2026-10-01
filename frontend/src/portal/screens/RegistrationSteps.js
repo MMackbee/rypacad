@@ -318,7 +318,7 @@ function needsPackage(athlete) {
   return !pkg || (pkg.kind === 'single' && !SINGLE_ON_SALE);
 }
 
-export function PackageStep({ athletes, onUpdate, showErrors }) {
+export function PackageStep({ athletes, onUpdate, showErrors, mode = 'parent', facility = false, onFacility, household = null }) {
   const [activeKey, setActiveKey] = useState(athletes[0]?.key);
   const active = athletes.find((a) => a.key === activeKey) ?? athletes[0];
   const missing = athletes.filter(needsPackage);
@@ -390,8 +390,8 @@ export function PackageStep({ athletes, onUpdate, showErrors }) {
           );
         })}
       </div>
-      {/* The facility add-on, under the cards (owner 2026-09-30). */}
-      <FacilityAddOn athlete={active} name={label(active)} onUpdate={onUpdate} />
+      {/* The facility add-on, under the cards (owner 2026-09-30): ONE family tick, the same on every athlete's tab. */}
+      <FacilityAddOn athletes={athletes} checked={facility} onChange={onFacility} self={mode === 'athlete'} household={household} />
 
       {nextUp ? (
         <Button variant="outline" height={46} onClick={() => setActiveKey(nextUp.key)} style={{ boxShadow: 'none' }}>

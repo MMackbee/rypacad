@@ -13,7 +13,7 @@ import {
 import { windowDaysFor } from '../data/packages';
 import { addDaysISO, openThrough, windowOpensOn } from '../data/calendar';
 import { firstRunningWeek } from '../data/season';
-import { isSpecialistType } from '../data/specialists';
+import { isSpecialistType, repeatsWeekly } from '../data/specialists';
 
 /**
  * Repeat weekly, out of hooks/index.js (review 2026-09-30: the file was far
@@ -56,9 +56,11 @@ const REPEAT_STOP_REASONS = new Set(['membership-inactive', 'billing-pending', '
  * issued grants, grace tokens - so no running tally here can disagree
  * with them. A refusal of one week is a skip with its own reason
  * (REPEAT_SKIP_REASON); one that concerns the whole family (membership
- * paused, payment pending, not open yet) is rethrown. Recurrence is a
- * group-flow-only feature (specialist slots are filtered out of the range
- * query below), so the mental frequency knob never applies here.
+ * paused, payment pending, not open yet) is rethrown. A repeat stays in the
+ * slot's own lane (owner 2026-09-30, "yes to phil repeat"): a training block
+ * or Tour event repeats within the group flow, a Phil session only onto
+ * Phil's sessions, and a Yannick session (Calendly) is refused outright, so
+ * the mental frequency knob never applies here.
  *
  * Returns { booked: [{date,id}], skipped: [{date,reason,message?,opensOn?}],
  * windowEnd, next: {date,opensOn} | null } - `next` is the first week past
@@ -71,6 +73,9 @@ export default async function repeatWeekly(identity, slot, { athleteId, untilISO
   }
   if (!untilISO) {
     throw new LiveDataError(ERR.INVALID, 'bookRecurring() needs { untilISO }.');
+  }
+  if (!repeatsWeekly(slot.type)) {
+    throw new LiveDataError(ERR.INVALID, 'Repeat weekly is not offered for this session.');
   }
   const forAthleteId = identity.role === 'parent' ? athleteId : identity.athleteId;
   if (!forAthleteId) {
@@ -98,11 +103,13 @@ export default async function repeatWeekly(identity, slot, { athleteId, untilISO
   // one query per week was ~25 serial round-trips (finding 8a).
   const firstDate = addDaysISO(slot.date, 7);
   const lastDate = untilISO < windowEnd ? untilISO : windowEnd;
+  // The slot's own lane: the group flow for a block, Phil's sessions for his.
+  const inLane = isSpecialistType(slot.type) ? (s) => s.type === slot.type : isGroupBookable;
   const sessionsByDate = new Map();
   let lastSessionDate = null;
   if (firstDate <= lastDate) {
     for (const s of await fetchSessionsInRange(firstDate, lastDate)) {
-      if (!isGroupBookable(s)) continue; // recurrence is a group-flow feature
+      if (!inLane(s)) continue;
 
       const list = sessionsByDate.get(s.date) ?? [];
       list.push(s);

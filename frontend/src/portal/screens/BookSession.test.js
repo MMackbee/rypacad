@@ -224,7 +224,7 @@ describe('Repeat weekly in live mode (repeat report 2026-09-30)', () => {
     );
     expect(heading(r, '5 more weeks booked').style.color).toBe(GREEN);
     expect(r.text()).toContain('Nov 24: no session that day.');
-    expect(r.text()).toContain('Tue, Dec 22 opens 7 AM on Sat, Nov 7 — come back to add it.');
+    expect(r.text()).toContain('Tue, Dec 22 opens 7 AM on Sat, Nov 7 - come back to add it.');
     expect(r.text()).not.toContain('tokens reset');
     await r.unmount();
   });
@@ -254,8 +254,8 @@ describe('Repeat weekly in live mode (repeat report 2026-09-30)', () => {
     expect(r.text()).not.toContain('0 more weeks');
     expect(r.text()).toContain("Nov 10, Nov 17: no tokens left in that week's period.");
     expect(r.text()).toContain('Nov 24: full.');
-    expect(r.text()).toContain("Dec 1: didn't go through — Missing or insufficient permissions.");
-    expect(r.text()).toContain('Tue, Dec 8 opens 7 AM on Sun, Nov 8 — come back to add it.');
+    expect(r.text()).toContain("Dec 1: didn't go through - Missing or insufficient permissions.");
+    expect(r.text()).toContain('Tue, Dec 8 opens 7 AM on Sun, Nov 8 - come back to add it.');
     expect(r.text()).not.toContain('tokens reset');
     await r.unmount();
   });

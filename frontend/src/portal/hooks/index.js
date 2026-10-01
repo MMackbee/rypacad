@@ -815,9 +815,9 @@ export function useSchedule({ variant = 'upcoming', today = todayISO(), practice
    * document to mutate, so it resolves without touching the static seed
    * arrays.
    */
-  const cancel = async (bookingId) => {
+  const cancel = async (bookingId, opts) => {
     if (!live) return { id: bookingId, status: 'cancelled', simulated: true };
-    return cancelBooking({ bookingId });
+    return cancelBooking({ bookingId, ...opts }); // opts: a series cancel's { cancelledVia, silent } (cancelSeries.js)
   };
 
   return { ...state, cancel };
@@ -2317,9 +2317,9 @@ export function useHouseholdReservations() {
       : undefined
   );
 
-  const cancel = async (bookingId) => {
+  const cancel = async (bookingId, opts) => {
     if (!live) return { id: bookingId, status: 'cancelled', simulated: true };
-    return cancelBooking({ bookingId });
+    return cancelBooking({ bookingId, ...opts }); // opts: a series cancel's { cancelledVia, silent } (cancelSeries.js)
   };
 
   return { ...state, cancel };
@@ -3279,6 +3279,9 @@ async function liveAthleteDetail(athleteId) {
       // contractMinutes was added above. `fitnessPackageId` is DROPPED
       // (contract v2.0, pin A: the field is retired - one package now).
       packageId: athlete.packageId ?? null,
+      // Absent == active. The staff card reads it where it cannot list the
+      // household (a coach): Elite includes facility access only once paid.
+      billingStatus: athlete.billing?.status ?? 'active',
       // v2.0.1 (Sprint 18): the facility-access add-on and its waiver, for
       // the membership editor's toggle (locked without the waiver).
       facilityAccess: Boolean(athlete.facilityAccess),

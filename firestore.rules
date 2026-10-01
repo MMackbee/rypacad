@@ -753,15 +753,25 @@ service cloud.firestore {
       // only ever sends `{ status: 'confirmed' }`), so a malicious payload
       // cannot smuggle a cancelledBy/cancelReason rewrite through the
       // re-book direction by also flipping status.
+      // 2026-09-30 (tester Mike, "cancel the entire series"): the cancel
+      // direction - and ONLY it - may also carry `cancelledVia`, and the one
+      // value it may hold afterwards is 'series' (hooks/cancelSeries.js; the
+      // booking-cancelled trigger stays quiet for those, one on-screen
+      // summary instead of a notice per week). Absent means a single cancel,
+      // which also removes a marker a re-booked row still carries. Every
+      // other clause is unchanged, and no other branch (re-book, attendance,
+      // staff session cancel) can write the field. All it decides is whether
+      // the family's own receipt is sent.
       function memberBookingUpdateOk() {
         let before = resource.data;
         let after = request.resource.data;
         let diffKeys = after.diff(before).affectedKeys();
         return (
           (before.status == 'confirmed' && after.status == 'cancelled'
-            && diffKeys.hasOnly(['status', 'cancelledBy', 'cancelReason'])
+            && diffKeys.hasOnly(['status', 'cancelledBy', 'cancelReason', 'cancelledVia'])
             && after.cancelledBy == request.auth.uid
             && after.cancelReason == 'member'
+            && (!after.keys().hasAny(['cancelledVia']) || after.cancelledVia == 'series')
             // Sprint 20 (spec 6.1): a Calendly-sourced booking is cancelled
             // from Calendly's email, never in-app (the webhook writes the
             // cancel). Absent source == 'portal'.

@@ -62,19 +62,22 @@ test('pendingOf marks single-token athletes perPurchase and carries the package;
   expect(allPerPurchaseOf([])).toBe(false);
 });
 
-test('facilityPendingOf: the sign-up add-on requests still to pay, apart from pendingOf (owner 2026-09-30)', () => {
+test('facilityPendingOf: the family add-on asked for at sign-up and still to pay - ONE row, apart from pendingOf (owner ruling 2026-09-30)', () => {
   const m = (id, over) => ({ athleteId: id, name: id, facilityRequested: true, package: { id: 't-12', kind: 'tokens' }, billing: { status: 'active', facility: null }, ...over });
-  const members = [
-    m('ava'),
-    m('ben', { billing: { status: 'pending', facility: null } }),
-    m('cy', { billing: { status: 'active', facility: 'active' } }),
-    m('dee', { package: { id: 'elite', kind: 'elite' } }),
-    m('eve', { facilityRequested: false }),
-  ];
-  expect(facilityPendingOf(members)).toEqual([
-    { athleteId: 'ava', name: 'ava', state: 'pay' },
-    { athleteId: 'ben', name: 'ben', state: 'waiting' },
-  ]);
+  const unpaid = { billing: { status: 'pending', facility: null } };
+  expect(facilityPendingOf([m('ava'), m('eve', { facilityRequested: false })])).toEqual([{ athleteId: 'ava', name: 'ava', state: 'pay' }]);
+  expect(facilityPendingOf([m('ben', unpaid), m('eve', { facilityRequested: false })])).toEqual([{ athleteId: 'ben', name: 'ben', state: 'waiting' }]);
+  // Sign-ups from before the family ruling may hold a request per child: one row, a payable one first.
+  expect(facilityPendingOf([m('ben', unpaid), m('ava'), m('gil')])).toEqual([{ athleteId: 'ava', name: 'ava', state: 'pay' }]);
+  expect(facilityPendingOf([m('ben', unpaid), m('hal', unpaid)])).toEqual([{ athleteId: 'ben', name: 'ben', state: 'waiting' }]);
+  // The family already has access - another athlete's add-on, or Elite: nothing left to pay.
+  expect(facilityPendingOf([m('ava'), m('cy', { billing: { status: 'active', facility: 'active' } })])).toEqual([]);
+  expect(facilityPendingOf([m('ava'), m('cy', { facilityRequested: false, billing: { status: 'active', facility: 'past_due' } })])).toEqual([]);
+  expect(facilityPendingOf([m('ava'), m('dee', { package: { id: 'elite', kind: 'elite' } })])).toEqual([]);
+  // Elite still to pay (review 2026-09-30): no Pay row - the family would end up paying for both once Elite is paid.
+  expect(facilityPendingOf([m('ava'), m('dee', { package: { id: 'elite', kind: 'elite' }, ...unpaid })])).toEqual([]);
+  // Elite that ended blocks nothing: the request stands.
+  expect(facilityPendingOf([m('ava'), m('dee', { package: { id: 'elite', kind: 'elite' }, billing: { status: 'lapsed', facility: null } })])).toEqual([{ athleteId: 'ava', name: 'ava', state: 'pay' }]);
   // An unpaid add-on never makes an athlete pending (it does not block booking).
   expect(pendingOf([m('ava')])).toEqual([]);
   expect(facilityPendingOf([])).toEqual([]);

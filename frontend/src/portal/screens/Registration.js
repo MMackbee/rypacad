@@ -10,8 +10,9 @@ import { contractEnabled } from '../data/contractFlag';
 import { SINGLE_ON_SALE, SINGLE_TOKEN } from '../data/packages';
 import {
   EMAIL_RE, buildAddAthletesPayload, buildCreateFamilyPayload, contractAnswered, emptyEmergencyContact, facilityWaiverRequired,
-  newAthleteEntry, toAthleteEntry, toEmergencyForm, validateAthleteEntry, validateEmergencyContact,
+  newAthleteEntry, restoredFacilityTick, toEmergencyForm, validateAthleteEntry, validateEmergencyContact,
 } from '../data/signup';
+import useFamilyAthletes from '../hooks/familyAthletes';
 import { AthleteStep, ConsentStep, ConsentInfoSheet, ContactStep, ContractStep, PackageStep, SubmittingOverlay, WhoStep } from './RegistrationSteps';
 import RegistrationSuccess from './RegistrationSuccess';
 
@@ -88,11 +89,12 @@ function readDraft(key) {
 }
 /**
  * Still draft v1: one from before the split emergency fields holds one
- * string (it restores into the name field), and one from before the
- * facility add-on (owner 2026-09-30) restores its athletes unticked.
+ * string (it restores into the name field), one from before the facility
+ * add-on (owner 2026-09-30) restores unticked, and one from when the tick
+ * was per athlete restores the family tick if any athlete had it.
  */
 function restoreForm(f) {
-  return { ...f, emergencyContact: toEmergencyForm(f.emergencyContact), athletes: Array.isArray(f.athletes) ? f.athletes.map(toAthleteEntry) : f.athletes };
+  return { ...f, emergencyContact: toEmergencyForm(f.emergencyContact), facilityRequested: restoredFacilityTick(f) };
 }
 function writeDraft(key, value) {
   if (!key) return;
@@ -119,6 +121,7 @@ export default function Registration({ variant, bare = false, mode = 'signup', a
     mode: demo ? 'parent' : mode === 'link' ? 'parent' : null,
     contact: { name: demo ? 'Dana Whitfield' : '', email: demo ? 'dana@email.com' : account?.email ?? '', phone: demo ? '(612) 555-0148' : '', relationship: '' },
     athletes: [demo ? { ...newAthleteEntry(), key: 'demo-1', name: 'Jordan Whitfield' } : newAthleteEntry()],
+    facilityRequested: false, // the ONE family facility tick (owner ruling 2026-09-30)
     emergencyContact: emptyEmergencyContact(),
     medical: '',
     consents: { dataCollection: true, videoCapture: true, mediaRelease: false, facilityAccess: false },
@@ -191,8 +194,11 @@ export default function Registration({ variant, bare = false, mode = 'signup', a
     validateAthleteEntry(a, { todayISO: today, guardianEmail: form.contact.email, siblings: form.athletes, mode: form.mode || 'parent', contract: withContract })
   );
   const emergencyOk = Object.keys(validateEmergencyContact(form.emergencyContact)).length === 0;
-  // An athlete who kept the facility add-on makes its waiver required.
-  const facilityRequired = facilityWaiverRequired(form.athletes);
+  // A family that kept the facility add-on makes its waiver required.
+  const facilityRequired = facilityWaiverRequired(form);
+  // Link mode: the family being added to may already have facility access
+  // or have asked for it, and is then not offered the add-on again.
+  const household = useFamilyAthletes(account?.householdId, !demo && mode === 'link');
   const valid = {
     who: form.mode != null,
     contact: form.contact.name.trim() !== '' && EMAIL_RE.test(form.contact.email.trim()) && form.contact.phone.trim() !== '',
@@ -306,7 +312,10 @@ export default function Registration({ variant, bare = false, mode = 'signup', a
             medical={form.medical} onMedical={(v) => patch({ medical: v })} showErrors={showErrors}
             todayISO={today} guardianEmail={form.contact.email} onSwitchToParent={switchToParent} />
         ) : null}
-        {stepId === 'package' ? <PackageStep athletes={form.athletes} onUpdate={updateAthlete} showErrors={showErrors} /> : null}
+        {stepId === 'package' ? (
+          <PackageStep athletes={form.athletes} onUpdate={updateAthlete} showErrors={showErrors} mode={form.mode || 'parent'}
+            facility={form.facilityRequested === true} onFacility={(v) => patch({ facilityRequested: v })} household={household} />
+        ) : null}
         {stepId === 'contract' ? (
           <ContractStep mode={form.mode || 'parent'} athletes={form.athletes} onUpdate={updateAthlete} showErrors={showErrors} todayISO={today} />
         ) : null}

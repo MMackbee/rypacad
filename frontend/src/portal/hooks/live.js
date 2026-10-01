@@ -17,6 +17,7 @@ import {
   collection,
   collectionGroup,
   deleteDoc,
+  deleteField,
   doc,
   documentId,
   getDoc,
@@ -887,8 +888,13 @@ export async function createBooking(
  * before; day-of shows a "contact the academy" line instead of the button)
  * is the CALLER's job — this function performs no date check itself,
  * matching the rules' own accepted gap for v1.
+ *
+ * Cancel a series (2026-09-30, hooks/cancelSeries.js): each week is this
+ * same call with cancelledVia 'series' - the one marker the rules admit, so
+ * onBookingCancelled sends no notice per week - and `silent`, so the caller
+ * bumps once after its loop (as createBooking does for bookRecurring).
  */
-export async function cancelBooking({ bookingId }) {
+export async function cancelBooking({ bookingId, cancelledVia = null, silent = false }) {
   if (!bookingId) {
     throw new LiveDataError(ERR.INVALID, 'cancelBooking: bookingId is required.');
   }
@@ -930,13 +936,19 @@ export async function cancelBooking({ bookingId }) {
       // fields ride the SAME update as `status` so the rule's
       // hasOnly(['status','cancelledBy','cancelReason']) is satisfied in
       // one write, not a follow-up.
-      tx.update(bookingRef, { status: 'cancelled', cancelledBy: user.uid, cancelReason: 'member' });
+      // A single cancel clears the series marker a re-booked row may still
+      // carry from an earlier series cancel, so its own notice still goes
+      // (no field, no diff: the write is unchanged for every other row).
+      const via = cancelledVia === 'series' ? 'series' : deleteField();
+      tx.update(bookingRef, { status: 'cancelled', cancelledBy: user.uid, cancelReason: 'member', cancelledVia: via });
       tx.update(sessionRef, { booked: Math.max(0, booked - 1) });
     });
     // Post-write invalidation seam (Sprint 6 pin): both collections changed,
     // same discipline as createBooking — one bump each, after the commit.
-    bump('bookings');
-    bump('sessions');
+    if (!silent) {
+      bump('bookings');
+      bump('sessions');
+    }
     return { id: bookingId, status: 'cancelled' };
   } catch (err) {
     throw wrap(err, 'cancelBooking');

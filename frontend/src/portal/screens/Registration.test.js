@@ -361,7 +361,7 @@ test('link mode: the facility add-on ticked under the packages is sent; there is
   await r.fill('Date of birth', '2014-03-02');
   await r.click('Continue');
   await r.click('6 tokens');
-  await r.click('Add 24/7 facility access for Reese');
+  await r.click('Add 24/7 family facility access');
   await r.click('Continue');
   await r.click('Not yet for Reese');
   await r.click('Add athlete');
@@ -389,7 +389,7 @@ describe('facility add-on at sign-up (owner request, Mike 2026-09-30)', () => {
     const r = await renderScreen(<Registration bare mode="signup" account={{ email: 'dana@email.com' }} onRefresh={async () => {}} />);
     await toPackageStep(r);
     await r.click('12 tokens');
-    await r.click('Add 24/7 facility access for Jordan');
+    await r.click('Add 24/7 family facility access');
     await r.click('Continue');
     await r.click('Not yet for Jordan');
     await r.click('Continue');
@@ -415,7 +415,7 @@ describe('facility add-on at sign-up (owner request, Mike 2026-09-30)', () => {
     const r = await renderScreen(<Registration bare mode="signup" account={{ email: 'dana@email.com' }} onRefresh={async () => {}} />);
     await toPackageStep(r);
     await r.click('12 tokens');
-    await r.click('Add 24/7 facility access for Jordan');
+    await r.click('Add 24/7 family facility access');
     await r.click('Continue');
     await r.click('Not yet for Jordan');
     await r.click('Continue');
@@ -424,7 +424,7 @@ describe('facility add-on at sign-up (owner request, Mike 2026-09-30)', () => {
     expect(r.text()).toContain(WAIVER_ERROR);
     await r.click('‹ Back');
     await r.click('‹ Back');
-    await r.click('Add 24/7 facility access for Jordan');
+    await r.click('Add 24/7 family facility access');
     await r.click('Continue');
     await r.click('Continue');
     expect(r.text()).toContain('Optional - needed only for the facility access add-on');
@@ -440,9 +440,9 @@ describe('facility add-on at sign-up (owner request, Mike 2026-09-30)', () => {
     const r = await renderScreen(<Registration bare mode="signup" account={{ email: 'dana@email.com' }} onRefresh={async () => {}} />);
     await toPackageStep(r);
     await r.click('12 tokens');
-    await r.click('Add 24/7 facility access for Jordan');
+    await r.click('Add 24/7 family facility access');
     await r.click('Elite');
-    expect(r.text()).toContain('24/7 facility access · Included with Elite');
+    expect(r.text()).toContain('24/7 facility access · Included for your whole family with Elite');
     await r.click('Continue');
     await r.click('Not yet for Jordan');
     await r.click('Continue');
@@ -460,11 +460,11 @@ describe('facility add-on at sign-up (owner request, Mike 2026-09-30)', () => {
     const first = await renderScreen(<Registration bare mode="signup" account={account} />);
     await toPackageStep(first);
     await first.click('16 tokens');
-    await first.click('Add 24/7 facility access for Jordan');
+    await first.click('Add 24/7 family facility access');
     await first.unmount();
     const second = await renderScreen(<Registration bare mode="signup" account={account} />);
     expect(second.text()).toContain('Step 4 of 6');
-    expect(second.button('Add 24/7 facility access for Jordan').getAttribute('aria-checked')).toBe('true');
+    expect(second.button('Add 24/7 family facility access').getAttribute('aria-checked')).toBe('true');
     await second.unmount();
     window.sessionStorage.clear();
   });

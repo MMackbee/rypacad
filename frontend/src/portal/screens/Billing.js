@@ -13,6 +13,7 @@ import StatusBadge from '../components/StatusBadge';
 import TokenMeter from '../components/TokenMeter';
 import { BackLink, Body, Card, ErrorNotice, ScreenTitle, SectionLabel } from '../components/Primitives';
 import { ordinal, statusFor } from '../data/billingHub';
+import { facilitySourceLabel, householdFacility } from '../data/facility';
 import { FACILITY_ACCESS } from '../data/packages';
 import { CONNECTED_LINE, PAY_NOW, PENDING_PLAN_LINE, SINGLE_PLAN_LINE } from '../data/billingCopy';
 import { contractEnabled } from '../data/contractFlag';
@@ -124,12 +125,13 @@ export default function Billing({
                       onOpen={() => navigate(self ? '/portal/contract' : `/portal/athlete/${member.athleteId}`)}
                     />
                   ) : null}
-                  <FacilityCard member={member} readOnly={staff} />
                 </MemberSection>
               ))
             )}
 
-            {members.length ? <PlanCard household={data?.household} members={members} showPrices={staff} /> : null}
+            {/* ONE family card, never one per athlete (owner ruling 2026-09-30). */}
+            <FacilityCard members={members} readOnly={staff} self={self} />
+            {members.length ? <PlanCard household={data?.household} members={members} showPrices={staff} self={self} /> : null}
             <ConnectionCard household={data?.household} portalUrl={data?.portalUrl} />
           </>
         )}
@@ -236,10 +238,13 @@ function ContractLine({ contractMinutes, target = 'athlete', onOpen }) {
  * The plan: one row per athlete, catalogue prices as facts, the billing day.
  * The single token is a one-time purchase: its row reads "one-time", and the
  * monthly billing footer only shows when someone is on a monthly package.
+ * Facility access is the family's (data/facility.js): every athlete's row
+ * says where it comes from - "family add-on" or "Elite".
  */
-function PlanCard({ household, members, showPrices = false }) {
+function PlanCard({ household, members, showPrices = false, self = false }) {
   const anyPending = showPrices && members.some((m) => m.package?.pending);
   const anyMonthly = members.some((m) => m.package?.kind !== 'single');
+  const facilitySource = facilitySourceLabel(householdFacility(members), self);
   return (
     <Card large>
       <SectionLabel style={{ marginBottom: 6 }}>Plan</SectionLabel>
@@ -265,7 +270,7 @@ function PlanCard({ household, members, showPrices = false }) {
                     ? `${m.package.name} · one-time`
                     : `${m.package.name} a month`}
               {m.package?.windowDays ? ` · books ${m.package.windowDays} days out` : ''}
-              {m.facilityAccess ? ' · + facility access' : m.package?.kind === 'elite' ? ' · facility access included' : ''}
+              {facilitySource ? ` · facility access: ${facilitySource}` : ''}
               {m.billing?.status === 'pending' || m.billing?.status === 'lapsed'
                 ? ` · ${m.package?.kind === 'single' ? SINGLE_PLAN_LINE : PENDING_PLAN_LINE}`
                 : ''}

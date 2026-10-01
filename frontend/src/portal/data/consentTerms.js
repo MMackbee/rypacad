@@ -60,7 +60,7 @@ export const CONSENT_TERMS = {
     {
       heading: 'Who may enter',
       lines: [
-        'Access is for the named athlete only. The entry code or key is personal and must not be shared or lent, including to teammates.',
+        'Access is for the athletes in your household, and a parent or guardian may come along. The entry code or key is for your family and must not be shared or lent outside it, including to teammates.',
         'An athlete under 16 must be accompanied by a parent, guardian or an adult the guardian has named to the academy in writing.',
         'One guest may come along, but only to watch. Guests may not hit balls or use equipment.',
       ],
@@ -92,7 +92,7 @@ export const CONSENT_TERMS = {
     {
       heading: 'Cost and cancelling',
       lines: [
-        'Facility access is a separate monthly add-on to a membership, billed with it. Cancel any time from Billing; access ends at the end of the paid month.',
+        'Facility access is one monthly add-on per household, billed alongside a membership, and is included with Elite. Cancel any time from Billing; access ends at the end of the paid month.',
       ],
     },
   ],
@@ -129,8 +129,8 @@ export const SELF_WORDING = {
     'RYP Academy may use photos and video of you taken at the academy, at academy events and at tournaments we attend.',
   'This is optional. Declining changes nothing about enrollment, training or how coaches treat your athlete.':
     'This is optional. Declining changes nothing about enrollment, training or how coaches treat you.',
-  'Access is for the named athlete only. The entry code or key is personal and must not be shared or lent, including to teammates.':
-    'Access is for you only. The entry code or key is personal and must not be shared or lent, including to teammates.',
+  'Access is for the athletes in your household, and a parent or guardian may come along. The entry code or key is for your family and must not be shared or lent outside it, including to teammates.':
+    'Access is for you and any other athlete in your household, and a parent or guardian may come along. The entry code or key is for your household and must not be shared or lent outside it, including to teammates.',
   'By signing, you accept that risk for yourself, or for the athlete you are responsible for, and agree that the academy is not liable for injury or loss during unsupervised use except where caused by the academy’s own negligence.':
     'By signing, you accept that risk for yourself and agree that the academy is not liable for injury or loss during unsupervised use except where caused by the academy’s own negligence.',
 };

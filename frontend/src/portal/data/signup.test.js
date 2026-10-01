@@ -1,6 +1,6 @@
 import {
-  ageOnDate, buildAddAthletesPayload, buildCreateFamilyPayload, contractAnswered, emptyEmergencyContact, facilityOptionFor,
-  facilityWaiverRequired, isAdultOnDate, joinNames, newAthleteEntry, normalizeHandicap, toAthleteEntry, toEmergencyForm,
+  ageOnDate, buildAddAthletesPayload, buildCreateFamilyPayload, contractAnswered, emptyEmergencyContact, facilityHolderIndex, facilityOptionFor,
+  facilityWaiverRequired, familyFacilityOption, isAdultOnDate, joinNames, newAthleteEntry, normalizeHandicap, restoredFacilityTick, toEmergencyForm,
   validateAthleteEntry, validateEmergencyContact, wantsFacility,
 } from './signup';
 
@@ -102,16 +102,20 @@ describe('payloads (contract 1.2 / 1.3)', () => {
       medical: 'Peanut allergy',
     });
   });
-  test('facilityRequested: sent true only for a ticked token package, in both bodies', () => {
-    const ticked = (over) => entry({ facilityRequested: true, ...over });
-    const athletes = [ticked(), ticked({ packageId: 'elite' }), ticked({ packageId: 'single' }), ticked({ packageId: null }), entry()];
+  test('facilityRequested: the family tick is sent on exactly ONE athlete, the first with a 6, 12 or 16 token package, in both bodies', () => {
     const flags = (body) => body.athletes.map((a) => a.facilityRequested);
-    expect(flags(buildCreateFamilyPayload({ ...form, athletes }))).toEqual([true, false, false, false, false]);
-    expect(flags(buildAddAthletesPayload({ ...form, athletes }))).toEqual([true, false, false, false, false]);
-    // An old draft's entry (no field) sends false, never undefined.
-    const { facilityRequested, ...legacy } = entry();
-    expect(facilityRequested).toBe(false);
-    expect(buildCreateFamilyPayload({ ...form, athletes: [legacy] }).athletes[0].facilityRequested).toBe(false);
+    const ticked = (athletes) => ({ ...form, facilityRequested: true, athletes });
+    const three = [entry({ packageId: 'single' }), entry({ packageId: 't-6' }), entry({ packageId: 't-16' }), entry({ packageId: null })];
+    expect(flags(buildCreateFamilyPayload(ticked(three)))).toEqual([false, true, false, false]);
+    expect(flags(buildAddAthletesPayload(ticked(three)))).toEqual([false, true, false, false]);
+    // Elite covers the family: nobody carries it, whatever was ticked before the Elite pick.
+    expect(flags(buildCreateFamilyPayload(ticked([entry(), entry({ packageId: 'elite' })])))).toEqual([false, false]);
+    // Nobody on a 6, 12 or 16 token package: not offered, so never sent.
+    expect(flags(buildCreateFamilyPayload(ticked([entry({ packageId: 'single' })])))).toEqual([false]);
+    // Not ticked, or a form from before the tick existed (no field): false, never undefined.
+    expect(flags(buildCreateFamilyPayload({ ...form, facilityRequested: false }))).toEqual([false, false]);
+    expect(flags(buildCreateFamilyPayload(form))).toEqual([false, false]);
+    expect(flags(buildAddAthletesPayload(form))).toEqual([false, false]);
   });
   test('the emergency contact is sent trimmed, relationship optional; all blank is null', () => {
     const ec = { name: ' Uncle Bo ', phone: ' (612) 555-0100 ', relationship: ' Uncle ' };
@@ -151,14 +155,44 @@ describe('emergency contact', () => {
   });
 });
 
-describe('facility add-on (owner request, Mike 2026-09-30)', () => {
-  test('a new entry is unticked; an old draft entry restores unticked, a ticked one stays ticked', () => {
-    expect(newAthleteEntry().facilityRequested).toBe(false);
-    const { facilityRequested, ...old } = entry();
-    expect(old).not.toHaveProperty('facilityRequested');
-    expect(toAthleteEntry(old)).toEqual({ ...old, facilityRequested });
-    expect(toAthleteEntry(entry({ facilityRequested: true })).facilityRequested).toBe(true);
-    expect(toAthleteEntry(entry({ facilityRequested: 'yes' })).facilityRequested).toBe(false);
+describe('facility add-on (owner request, Mike 2026-09-30; a FAMILY add-on, owner ruling 2026-09-30)', () => {
+  test('the tick is the family\'s, not an athlete\'s; a draft from the per-athlete form restores it when any athlete had one', () => {
+    expect(newAthleteEntry()).not.toHaveProperty('facilityRequested');
+    expect(restoredFacilityTick({ facilityRequested: true, athletes: [entry()] })).toBe(true);
+    expect(restoredFacilityTick({ facilityRequested: false, athletes: [entry()] })).toBe(false);
+    // Unticked since: the family field decides, not a per-athlete tick the old draft left on an entry.
+    expect(restoredFacilityTick({ facilityRequested: false, athletes: [entry({ facilityRequested: true })] })).toBe(false);
+    expect(restoredFacilityTick({ athletes: [entry(), entry({ facilityRequested: true })] })).toBe(true); // an old draft
+    expect(restoredFacilityTick({ athletes: [entry({ facilityRequested: false }), entry({ facilityRequested: 'yes' })] })).toBe(false);
+    expect(restoredFacilityTick({ athletes: [entry()] })).toBe(false);
+    expect(restoredFacilityTick({})).toBe(false);
+    expect(restoredFacilityTick(null)).toBe(false);
+  });
+  test('the family option: Elite on any athlete includes it, a 6, 12 or 16 token package offers it, nothing else does', () => {
+    expect(familyFacilityOption([entry({ packageId: 't-6' })])).toBe('offer');
+    expect(familyFacilityOption([entry({ packageId: 'single' }), entry({ packageId: 't-16' })])).toBe('offer');
+    expect(familyFacilityOption([entry({ packageId: 't-12' }), entry({ packageId: 'elite' })])).toBe('included');
+    expect(familyFacilityOption([entry({ packageId: 'elite' })])).toBe('included');
+    expect(familyFacilityOption([entry({ packageId: 'single' })])).toBeNull();
+    expect(familyFacilityOption([entry({ packageId: null }), entry({ packageId: 't-20' })])).toBeNull();
+    expect(familyFacilityOption([])).toBeNull();
+    expect(familyFacilityOption(undefined)).toBeNull();
+  });
+  test('adding to a family (link mode): the athletes already in it decide too, as addAthletes does', () => {
+    const adding = [entry({ packageId: 't-6' })];
+    const there = (over) => [{ id: 'r', packageId: 't-6', billing: { status: 'active' }, ...over }];
+    expect(familyFacilityOption(adding, there())).toBe('offer');
+    expect(familyFacilityOption(adding, [])).toBe('offer');
+    expect(familyFacilityOption(adding, null)).toBe('offer'); // the family is still loading, or did not load: addAthletes decides
+    expect(familyFacilityOption(adding, there({ packageId: 'elite' }))).toBe('included');
+    expect(familyFacilityOption([entry({ packageId: null })], there({ packageId: 'elite' }))).toBe('included');
+    // Elite still to be paid: nothing to include yet, and addAthletes stores no request either.
+    expect(familyFacilityOption(adding, there({ packageId: 'elite', billing: { status: 'pending' } }))).toBeNull();
+    expect(familyFacilityOption(adding, there({ packageId: 'elite', billing: { status: 'lapsed' } }))).toBe('offer');
+    // Already asked for, or already paid: not offered a second time.
+    expect(familyFacilityOption(adding, there({ facilityRequested: true }))).toBeNull();
+    expect(familyFacilityOption(adding, there({ facilityBilling: { status: 'active' } }))).toBeNull();
+    expect(familyFacilityOption(adding, there({ facilityBilling: { status: 'lapsed' } }))).toBe('offer');
   });
   test('offered on the token packages, included with Elite, never on the single token or no pick', () => {
     for (const id of ['t-6', 't-12', 't-16']) expect(facilityOptionFor(id)).toBe('offer');
@@ -167,16 +201,22 @@ describe('facility add-on (owner request, Mike 2026-09-30)', () => {
     expect(facilityOptionFor(null)).toBeNull();
     expect(facilityOptionFor('t-20')).toBeNull();
   });
-  test('a tick counts only where it is offered; the waiver is required once any athlete keeps one', () => {
-    expect(wantsFacility(entry({ facilityRequested: true }))).toBe(true);
-    expect(wantsFacility(entry({ facilityRequested: true, packageId: 'elite' }))).toBe(false);
-    expect(wantsFacility(entry({ facilityRequested: true, packageId: 'single' }))).toBe(false);
-    expect(wantsFacility(entry())).toBe(false);
+  test('the tick counts only where it is offered; the waiver is required while it counts; one athlete carries it', () => {
+    const f = (facilityRequested, ...athletes) => ({ facilityRequested, athletes });
+    expect(wantsFacility(f(true, entry()))).toBe(true);
+    expect(wantsFacility(f(true, entry({ packageId: 'single' }), entry({ packageId: 't-6' })))).toBe(true);
+    expect(wantsFacility(f(true, entry(), entry({ packageId: 'elite' })))).toBe(false);
+    expect(wantsFacility(f(true, entry({ packageId: 'single' })))).toBe(false);
+    expect(wantsFacility(f(false, entry()))).toBe(false);
+    expect(wantsFacility(f(undefined, entry()))).toBe(false);
     expect(wantsFacility(null)).toBe(false);
-    expect(facilityWaiverRequired([entry(), entry({ facilityRequested: true, packageId: 't-6' })])).toBe(true);
-    expect(facilityWaiverRequired([entry(), entry({ facilityRequested: true, packageId: 'elite' })])).toBe(false);
-    expect(facilityWaiverRequired([])).toBe(false);
+    expect(facilityWaiverRequired(f(true, entry(), entry({ packageId: 't-6' })))).toBe(true);
+    expect(facilityWaiverRequired(f(true, entry(), entry({ packageId: 'elite' })))).toBe(false);
+    expect(facilityWaiverRequired(f(false, entry()))).toBe(false);
     expect(facilityWaiverRequired(undefined)).toBe(false);
+    expect(facilityHolderIndex(f(true, entry({ packageId: 'single' }), entry({ packageId: 't-6' }), entry()))).toBe(1);
+    expect(facilityHolderIndex(f(false, entry()))).toBe(-1);
+    expect(facilityHolderIndex(f(true, entry(), entry({ packageId: 'elite' })))).toBe(-1);
   });
 });
 

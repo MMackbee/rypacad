@@ -274,10 +274,51 @@ export async function taskPackageChange() {
   await del('users', selfUid);
 }
 
+// Tester Mike 2026-09-30: "cancel this and the later weeks" marks each week's
+// cancel cancelledVia 'series' so onBookingCancelled sends no notice per week.
+// memberBookingUpdateOk admits that one value, on the cancel direction only.
+// Paid Elite rows where a re-book is tried, so its answer holds before the gate too.
+export async function taskSeriesCancel() {
+  console.log("Series cancel: a family cancel may carry cancelledVia 'series', nothing else, and no other write sets it");
+  const rows = [['ath-elite_ser-1', 'confirmed'], ['ath-active_ser-2', 'confirmed'], ['ath-elite_ser-3', 'confirmed'], ['ath-elite_ser-4', 'confirmed'], ['ath-elite_ser-5', 'cancelled']];
+  for (const [id, status] of rows) {
+    await seed('bookings', id, { athleteId: id.split('_')[0], sessionId: id.split('_')[1], date: '2026-11-04', type: 'training', periodKey: '2026-11-01',
+      status, householdId: 'hh', createdBy: uid.parent, createdAt: new Date(), chargedFrom: id.startsWith('ath-elite') ? 'elite' : 'period',
+      ...(status === 'cancelled' ? { cancelledBy: uid.parent, cancelReason: 'member' } : {}) });
+  }
+  // `mask` names the fields the write touches; a masked field with no value is a delete.
+  const patch = (id, fields, auth, mask = Object.keys(fields)) => call('PATCH', `/bookings/${id}?${mask.map((k) => `updateMask.fieldPaths=${k}`).join('&')}`,
+    { fields: fsFields(fields) }, auth).then((r) => r.status);
+  const cancelBy = (who, extra) => ({ status: 'cancelled', cancelledBy: uid[who], cancelReason: 'member', ...extra });
+  // live.js cancelBooking's single cancel: the three fields plus cancelledVia: deleteField().
+  const single = ['status', 'cancelledBy', 'cancelReason', 'cancelledVia'];
+  expect("parent cancels with cancelledVia 'series'", await patch('ath-elite_ser-1', cancelBy('parent', { cancelledVia: 'series' }), t.parent), 200);
+  expect("athlete cancels their own with cancelledVia 'series'", await patch('ath-active_ser-2', cancelBy('athlete', { cancelledVia: 'series' }), t.athlete), 200);
+  expect('any other cancelledVia refused', await patch('ath-elite_ser-3', cancelBy('parent', { cancelledVia: 'bulk' }), t.parent), 403);
+  expect('cancelledVia null refused', await patch('ath-elite_ser-3', cancelBy('parent', { cancelledVia: null }), t.parent), 403);
+  expect('cancelledVia true refused', await patch('ath-elite_ser-3', cancelBy('parent', { cancelledVia: true }), t.parent), 403);
+  expect("'series' with another user's cancelledBy refused (every earlier clause holds)", await patch('ath-elite_ser-3', cancelBy('athlete', { cancelledVia: 'series' }), t.parent), 403);
+  expect("'series' with another cancelReason refused", await patch('ath-elite_ser-3', { ...cancelBy('parent', { cancelledVia: 'series' }), cancelReason: 'session-cancelled' }, t.parent), 403);
+  expect("a stranger cannot cancel with 'series'", await patch('ath-elite_ser-3', { ...cancelBy('parent', { cancelledVia: 'series' }), cancelledBy: uid.stranger }, t.stranger), 403);
+  expect('a single cancel (the client write: no marker to remove) still accepted', await patch('ath-elite_ser-3', cancelBy('parent'), t.parent, single), 200);
+  // Non-cancel writes cannot set the field.
+  expect('cancelledVia alone on a confirmed booking refused', await patch('ath-elite_ser-4', { cancelledVia: 'series' }, t.parent), 403);
+  expect('a re-book cannot set cancelledVia', await patch('ath-elite_ser-5', { status: 'confirmed', cancelledVia: 'series' }, t.parent), 403);
+  expect('cancelledVia alone on a cancelled booking refused', await patch('ath-elite_ser-5', { cancelledVia: 'series' }, t.parent), 403);
+  expect("the academy's session cancel cannot carry it", await patch('ath-elite_ser-4', { status: 'cancelled', cancelledBy: uid.ops, cancelReason: 'session-cancelled', cancelledVia: 'series' }, t.ops), 403);
+  expect("the academy's session cancel without it still accepted", await patch('ath-elite_ser-4', { status: 'cancelled', cancelledBy: uid.ops, cancelReason: 'session-cancelled' }, t.ops), 200);
+  // A series-cancelled row that is booked again keeps the marker (a re-book
+  // writes status alone); the next single cancel removes it, so its notice goes.
+  expect('re-book of a series-cancelled row (status alone)', await patch('ath-elite_ser-1', { status: 'confirmed' }, t.parent), 200);
+  expect('a single cancel removes the old series marker', await patch('ath-elite_ser-1', cancelBy('parent'), t.parent, single), 200);
+  expect('the marker is gone', (await call('GET', '/bookings/ath-elite_ser-1', null, 'owner')).body?.fields?.cancelledVia, undefined);
+  for (const [id] of rows) await del('bookings', id);
+}
+
 export { setup, teardown, seed, del, call, createAs, expect, token, t, uid, BASE };
 if (process.argv[1] && process.argv[1].endsWith('verify-rules.mjs')) {
   await setup();
-  try { await task4(); await task5(); await taskContract(); await taskWindow(); await taskRepeat(); await taskPackageChange(); } finally { await teardown(); }
+  try { await task4(); await task5(); await taskContract(); await taskWindow(); await taskRepeat(); await taskPackageChange(); await taskSeriesCancel(); } finally { await teardown(); }
   console.log(failures ? `${failures} FAILED` : 'ALL PASS');
   process.exit(failures ? 1 : 0);
 }

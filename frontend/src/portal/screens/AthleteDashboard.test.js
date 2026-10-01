@@ -13,11 +13,14 @@ let mockOnboarding = null;
 let mockMine = { data: null, loading: false, error: null };
 jest.mock('../hooks/packageChange', () => ({ useChangePackage: () => ({ change: async () => ({}) }) }));
 let mockTokens = null;
+let mockConfirm = { state: 'idle', packageId: null };
+let mockSelfManaged = false;
 jest.mock('../components/PayButton', () => ({ __esModule: true, default: () => null }));
+jest.mock('../hooks/useAuthSession', () => ({ __esModule: true, useSelfManaged: () => mockSelfManaged }));
 jest.mock('../hooks/billing', () => ({
   __esModule: true,
   useMyTokens: () => mockMine,
-  usePaymentConfirmation: () => ({ state: 'idle', packageId: null }),
+  usePaymentConfirmation: () => mockConfirm,
 }));
 jest.mock('../hooks', () => ({
   useAthleteDashboard: () => ({
@@ -88,17 +91,36 @@ test("the facility add-on ticked at sign-up shows on the athlete's own home too 
   const pending = { status: 'pending', title: 'Payment pending', body: null, pendingAthletes: [{ athleteId: 'a1', name: 'Jordan', status: 'pending', packageId: 't-6', perPurchase: false }] };
   mockMine = { loading: false, error: null, data: { status: pending, facilityPending: [{ athleteId: 'a1', name: 'Jordan', state: 'waiting' }] } };
   const w = await renderScreen(<AthleteDashboard bare />);
-  expect(w.text()).toContain('Facility access · after the membership is paid');
+  // A child's login is part of a family: the add-on is the family's (owner ruling 2026-09-30).
+  expect(w.text()).toContain('Family facility access · after the membership is paid');
   await w.unmount();
   mockMine = { loading: false, error: null, data: { status: { status: 'active' }, facilityPending: [{ athleteId: 'a1', name: 'Jordan', state: 'pay' }] } };
   const r = await renderScreen(<AthleteDashboard bare />);
-  expect(r.text()).toContain("Facility access - pay when you're ready");
-  expect(r.text()).toContain('Facility access for Jordan');
+  expect(r.text()).toContain("Family facility access - pay when you're ready");
   await r.unmount();
   // Back from the add-on's own checkout: nothing to pay twice while it confirms.
   const back = await renderScreen(<AthleteDashboard bare />, { path: '/portal/home?paid=a1&product=facility' });
-  expect(back.text()).not.toContain('Facility access for Jordan');
+  expect(back.text()).not.toContain("pay when you're ready");
   await back.unmount();
+  mockMine = { data: null, loading: false, error: null };
+});
+
+test("What's next names the add-on as the pending card under it does: the family's on a child's login, plain for the adult on their own (review 2026-09-30)", async () => {
+  mockContract = null;
+  mockConfirm = { state: 'confirmed', packageId: 't-6' };
+  mockMine = { loading: false, error: null, data: { status: { status: 'active' }, facilityPending: [{ athleteId: 'a1', name: 'Jordan', state: 'pay' }] } };
+  const child = await renderScreen(<AthleteDashboard bare />, { path: '/portal/home?paid=a1' });
+  expect(child.text()).toContain("Family facility access: pay from your home page whenever you're ready.");
+  expect(child.text()).toContain("Family facility access - pay when you're ready");
+  await child.unmount();
+  mockSelfManaged = true;
+  const adult = await renderScreen(<AthleteDashboard bare />, { path: '/portal/home?paid=a1' });
+  expect(adult.text()).toContain("Facility access: pay from your home page whenever you're ready.");
+  expect(adult.text()).toContain("Facility access - pay when you're ready");
+  expect(adult.text()).not.toContain('Family facility access');
+  await adult.unmount();
+  mockSelfManaged = false;
+  mockConfirm = { state: 'idle', packageId: null };
   mockMine = { data: null, loading: false, error: null };
 });
 

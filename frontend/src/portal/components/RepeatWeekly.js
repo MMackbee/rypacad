@@ -14,11 +14,12 @@ import { SEASON_BOUNDS, firstRunningWeek } from '../data/season';
  * past it (no standing reservations). When no further week is inside the
  * window the card says when the next one opens instead of offering a button
  * that would book nothing. Split out of BookSession.js, which is over the
- * 500-line guideline, so that file does not grow.
+ * 500-line guideline, so that file does not grow. The same card follows a
+ * Phil booking on the specialist screen (owner 2026-09-30).
  *
  * @param {string} date        The booked session's date ('yyyy-MM-dd').
  * @param {string} time        Its start, '4:00 PM'.
- * @param {string} type        Its session type ('training'), to tell a holiday extra from a closure.
+ * @param {string} type        Its session type ('training', 'phil'): tells a holiday extra from a closure, and words the skipped weeks.
  * @param {string} windowEnd   The last bookable date for THIS athlete's package (openThrough).
  * @param {number} windowDays  That package's window, for the "N days ahead" line.
  * @param {boolean} elite      Elite spends no token, so no token line.
@@ -50,7 +51,7 @@ export default function RepeatWeekly({ date, time, type, windowEnd, windowDays, 
       {repeat === 'working' ? (
         <Body size={12}>Booking your repeats…</Body>
       ) : repeat ? (
-        <RepeatSummary result={repeat} />
+        <RepeatSummary result={repeat} type={type} />
       ) : nextWeek > windowEnd ? (
         <Body size={12}>
           Next {weekday} ({shortDay(nextWeek)}) opens for booking at 7 AM on{' '}
@@ -94,28 +95,34 @@ const SKIP_COPY = [
   ['error', "didn't go through"],
 ];
 const KNOWN_SKIPS = new Set(SKIP_COPY.map(([reason]) => reason));
+/** The two reasons that name the session, as they read after a Phil booking. */
+const PHIL_SKIP_COPY = {
+  'no session': 'no session with Phil at that time',
+  'one per day': "there's already a session with Phil booked that day (Elite includes one a day)",
+};
 
 /**
  * One line per skip reason, naming the weeks (all the same weekday, so the
  * date alone), plus the first week past the window and when it opens.
  */
-function skipLines(skipped) {
-  return SKIP_COPY.map(([reason, copy]) => {
+function skipLines(skipped, type) {
+  return SKIP_COPY.map(([reason, groupCopy]) => {
+    const copy = (type === 'phil' && PHIL_SKIP_COPY[reason]) || groupCopy;
     const weeks = skipped.filter((s) => (KNOWN_SKIPS.has(s.reason) ? s.reason : 'error') === reason);
     if (!weeks.length) return null;
     const first = weeks[0];
     const detail =
       reason === 'not open yet' && first.opensOn
-        ? ` — the first opens 7 AM on ${shortDay(first.opensOn)}`
+        ? ` - the first opens 7 AM on ${shortDay(first.opensOn)}`
         : reason === 'error' && first.message
-          ? ` — ${first.message}`
+          ? ` - ${first.message}`
           : '';
     const line = `${weeks.map((s) => format(parseISO(s.date), 'MMM d')).join(', ')}: ${copy}${detail}`;
     return /[.!?]$/.test(line) ? line : `${line}.`;
   }).filter(Boolean);
 }
 
-function RepeatSummary({ result }) {
+function RepeatSummary({ result, type }) {
   if (result.failed) {
     return (
       <Body size={12} tone={color.error}>
@@ -135,14 +142,14 @@ function RepeatSummary({ result }) {
           Every week you can book right now is reserved.
         </Body>
       ) : null}
-      {skipLines(skipped).map((line) => (
+      {skipLines(skipped, type).map((line) => (
         <Body key={line} size={12} style={{ marginTop: 8 }}>
           {line}
         </Body>
       ))}
       {result.next ? (
         <Body size={12} style={{ marginTop: 8 }}>
-          {shortDay(result.next.date)} opens 7 AM on {shortDay(result.next.opensOn)} — come back to add it.
+          {shortDay(result.next.date)} opens 7 AM on {shortDay(result.next.opensOn)} - come back to add it.
         </Body>
       ) : null}
     </>

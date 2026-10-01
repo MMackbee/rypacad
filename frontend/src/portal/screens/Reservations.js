@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { color, font } from '../tokens';
 import { useHouseholdReservations } from '../hooks';
 import { leaveWaitlist } from '../hooks/waitlist';
+import { cancelSeries, laterWeeks } from '../hooks/cancelSeries';
 import { formatDuration } from '../data/calendar';
 import { attendeeNoteFor } from '../data/specialists';
 import BottomTabBar from '../components/BottomTabBar';
@@ -96,7 +97,11 @@ export default function Reservations({ variant = 'populated', bare = false, onBo
                 items={tab === 'past' ? member.past : member.upcoming}
                 past={tab === 'past'}
                 onBook={onBook}
-                onCancelRequest={(item) => setCancelTarget({ ...item, athleteName: member.name })}
+                // `later`: this member's later weeks of the same session
+                // (hooks/cancelSeries.js), fixed when the sheet opens.
+                onCancelRequest={(item) =>
+                  setCancelTarget({ ...item, athleteName: member.name, later: laterWeeks(item, member.upcoming) })
+                }
                 onLeaveWaitlist={(item) => handleLeaveWaitlist({ ...item, athleteId: member.athleteId })}
                 leavingId={leavingId}
               />
@@ -110,6 +115,8 @@ export default function Reservations({ variant = 'populated', bare = false, onBo
           summary={`${cancelTarget.athleteName} · ${cancelTarget.dayLabel} · ${cancelTarget.time} ${cancelTarget.meridiem} · ${cancelTarget.name}`}
           onClose={() => setCancelTarget(null)}
           onConfirm={() => cancel(cancelTarget.bookingId)}
+          laterWeeks={cancelTarget.later}
+          onConfirmSeries={() => cancelSeries([cancelTarget, ...cancelTarget.later], cancel)}
           onCancelled={() => setCancelTarget(null)}
         />
       ) : null}

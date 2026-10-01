@@ -1,22 +1,26 @@
-import React, { useEffect, useState } from 'react';
+import React from 'react';
 import { color, font, tint } from '../tokens';
 import Button from '../components/Button';
 import PayButton from '../components/PayButton';
 import PhoneFrame from '../components/PhoneFrame';
 import { Body, Card, ScreenTitle, SectionLabel, Tick } from '../components/Primitives';
 import { STUDENT_LOGIN_CTA, VERIFIED, VERIFY_EMAIL_SENDER } from '../data/authCopy';
-import { CONFIRMING, PAY_NOW } from '../data/billingCopy';
+import { CONFIRMING, PAY_NOW, facilityName } from '../data/billingCopy';
 import { BOOKING_OPENS_LABEL, bookingOpen } from '../data/calendar';
 import { FACILITY_ACCESS, packageById, PRICES_RELEASED, SIBLING_DISCOUNT_NOTE, siblingDiscountApplies } from '../data/packages';
-import { wantsFacility } from '../data/signup';
-import { fetchHouseholdAthletes, isLive } from '../hooks/live';
+import { facilityHolderIndex } from '../data/signup';
+import useFamilyAthletes from '../hooks/familyAthletes';
 
 /**
- * Under the Pay button of an athlete who kept the facility add-on (owner
+ * Under the Pay buttons of a family that kept the facility add-on (owner
+ * 2026-09-30): ONE line, the add-on is the family's (owner ruling
  * 2026-09-30). No button: createCheckoutSession refuses the add-on until
- * the membership is paid, so the family page offers it then.
+ * the membership it bills on is paid, so the family page offers it then -
+ * `holder` names that athlete when the receipt lists more than one. `self`
+ * (the adult signing up for themselves) drops the word "family".
  */
-export const FACILITY_RECEIPT_LINE = `Facility access · $${FACILITY_ACCESS.price}/month - pay after the membership`;
+export const facilityReceiptLine = ({ self = false, holder = null } = {}) =>
+  `${facilityName(self)} · $${FACILITY_ACCESS.price}/month - pay after ${holder ? `${holder}'s` : 'the'} membership`;
 
 /**
  * Until 00:00 Nov 1 America/Chicago every checkout prepays November in full
@@ -32,24 +36,6 @@ function pricedMonthly(pkg) {
 }
 
 /**
- * The sibling discount counts the whole family (checkout.js siblingEligible),
- * and a linked athlete joins a family that may already hold a membership:
- * link mode reads the family once, the new athletes included (the callable
- * committed them before it returned). A failed read leaves the receipt's
- * own athletes to decide - the note may then be missing, never wrong.
- */
-function useFamilyAthletes(householdId, enabled) {
-  const [athletes, setAthletes] = useState(null);
-  useEffect(() => {
-    if (!enabled || !householdId || !isLive()) return undefined;
-    let alive = true;
-    fetchHouseholdAthletes(householdId).then((list) => { if (alive) setAthletes(list); }, () => {});
-    return () => { alive = false; };
-  }, [householdId, enabled]);
-  return athletes;
-}
-
-/**
  * "You're in" (Sprint 20, spec 2.1 Success): the receipt, one Pay button per
  * athlete (createCheckoutSession), what happens next, and the role's home.
  * No walkthrough hop (spec 9: Success -> walkthrough -> NotProvisioned loop).
@@ -61,8 +47,20 @@ function useFamilyAthletes(householdId, enabled) {
  */
 export default function RegistrationSuccess({ bare = false, mode = 'signup', form, result, account, onFinish }) {
   const athleteMode = form.mode === 'athlete';
-  const rows = form.athletes.map((a, i) => ({ ...a, athleteId: result?.athleteIds?.[i] ?? null, pkg: packageById(a.packageId), facility: wantsFacility(a) }));
+  const rows = form.athletes.map((a, i) => ({ ...a, athleteId: result?.athleteIds?.[i] ?? null, pkg: packageById(a.packageId) }));
+  // Link mode reads the family once, the new athletes included (the callable
+  // committed them before it returned): the sibling discount counts the whole
+  // family (checkout.js siblingEligible), and addAthletes keeps a facility
+  // request only when the family there has neither access nor a request.
   const family = useFamilyAthletes(result?.householdId, mode === 'link');
+  // The athlete the family facility add-on bills on, or -1. Sign-up: the
+  // form's own rule, which createFamily shares. Link mode: what addAthletes
+  // stored, so the line shows only once the family read confirms it.
+  const facilityAt = mode === 'link'
+    ? rows.findIndex((r) => r.athleteId != null && (family || []).some((a) => a.id === r.athleteId && a.facilityRequested === true))
+    : facilityHolderIndex(form);
+  const facilityLine = facilityAt < 0 ? null
+    : facilityReceiptLine({ self: athleteMode, holder: rows.length > 1 ? rows[facilityAt].name.trim().split(/\s+/)[0] : null });
   // The receipt's own athletes are never paid yet, so on their own they can
   // only be the unpaid side of the rule; a paid sibling comes from the family
   // read (link mode). Sign-up therefore shows no note: the first membership
@@ -119,11 +117,9 @@ export default function RegistrationSuccess({ bare = false, mode = 'signup', for
           ) : null}
           <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
             {rows.map((r) => (
-              <React.Fragment key={r.key}>
-                <PayButton athleteId={r.athleteId} email={account?.email ?? null} label={payLabel(r)} />
-                {r.facility ? <Body size={12}>{FACILITY_RECEIPT_LINE}</Body> : null}
-              </React.Fragment>
+              <PayButton key={r.key} athleteId={r.athleteId} email={account?.email ?? null} label={payLabel(r)} />
             ))}
+            {facilityLine ? <Body size={12}>{facilityLine}</Body> : null}
           </div>
         </Card>
         <Card large style={{ width: '100%' }}>

@@ -34,13 +34,15 @@ export function hasUnclaimedLogin(athlete) {
  * @param {?string} [a.product]  The return's `product`; 'facility' == the add-on.
  * @param {?object} [a.athlete]  `{ name, loginEmail, login }` off the home's data.
  * @param {boolean} [a.self]     The athlete reading their own home: "you", no login line.
+ * @param {boolean} [a.selfManaged]  The adult who is their own household: the
+ *   add-on reads without "family". A child's own login keeps the family wording.
  * @param {string} [a.host]      Where the portal lives, for the sign-in line.
- * @param {boolean} [a.facilityDue]  The facility add-on was ticked at sign-up and is
- *   not paid yet (hooks/billing.js facilityPendingOf; owner 2026-09-30).
+ * @param {boolean} [a.facilityDue]  The family facility add-on was ticked at sign-up
+ *   and is not paid yet (hooks/billing.js facilityPendingOf; owner 2026-09-30).
  * @param {number} [a.now]
  * @return {?{ title: string, lines: string[], book: ?string, season: boolean }}
  */
-export function whatsNextFor({ packageId, product = null, athlete = null, self = false, host = '', facilityDue = false, now = Date.now() }) {
+export function whatsNextFor({ packageId, product = null, athlete = null, self = false, selfManaged = false, host = '', facilityDue = false, now = Date.now() }) {
   if (product === 'facility') return null;
   const pkg = packageById(packageId);
   if (!pkg || (pkg.kind !== 'tokens' && pkg.kind !== 'elite')) return null;
@@ -68,7 +70,7 @@ export function whatsNextFor({ packageId, product = null, athlete = null, self =
   }
   // Its Pay button sits on the same page, on the pending card below.
   if (facilityDue && pkg.kind === 'tokens') {
-    lines.push(`Facility access: pay from your ${self ? 'home' : 'family'} page whenever you're ready.`);
+    lines.push(`${selfManaged ? 'Facility access' : 'Family facility access'}: pay from your ${self ? 'home' : 'family'} page whenever you're ready.`);
   }
   return { title: WHATS_NEXT_TITLE, lines, book, season: pkg.kind === 'tokens' };
 }

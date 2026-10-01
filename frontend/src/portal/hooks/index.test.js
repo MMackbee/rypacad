@@ -143,6 +143,7 @@ describe('live loaders (perf wave B)', () => {
       boardLabel: 'months on the Board — not tracked live yet',
       contractMinutes: 45,
       packageId: 't-12',
+      billingStatus: 'active', // absent billing == active
       facilityAccess: false,
       facilityAccessConsent: null,
       loginEmail: 'jordan@email.com',

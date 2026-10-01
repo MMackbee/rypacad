@@ -6,6 +6,7 @@ import ChangePackageSheet, { ChangePackageLink } from '../components/ChangePacka
 import PaymentConfirming from '../components/PaymentConfirming';
 import WalkthroughOffer from '../components/WalkthroughOffer';
 import { useMyTokens } from '../hooks/billing';
+import { useSelfManaged } from '../hooks/useAuthSession';
 import AllowancePools, { GraceLine } from '../components/AllowancePools';
 import BookChooser, { bookNavigation } from '../components/BookChooser';
 import BottomTabBar from '../components/BottomTabBar';
@@ -65,7 +66,10 @@ export default function AthleteDashboard({
   const mineStatus = mine.data?.status ?? null;
   const [params] = useSearchParams();
   // The facility add-on ticked at sign-up (owner 2026-09-30), as on the
-  // family page: hidden only while its own ?paid= return confirms.
+  // family page: hidden only while its own ?paid= return confirms. It is the
+  // FAMILY's add-on on a child's login; the adult who is their own household
+  // reads it without the word "family".
+  const selfManaged = useSelfManaged();
   const facilityPending = mine.data?.facilityPending ?? [];
   const facilityRows = facilityPending.filter((r) => !(params.get('product') === 'facility' && r.athleteId === params.get('paid')));
   // Their own package can still change before Pay now (tester S4, 2026-09-30).
@@ -112,13 +116,14 @@ export default function AthleteDashboard({
       <div style={{ padding: '0 22px 24px', display: 'flex', flexDirection: 'column', gap: 12 }}>
         <PaymentConfirming
           athleteId={params.get('paid')}
-          whatsNext={{ athlete, product: params.get('product'), self: true, onBook, onSeason: () => navigate('/portal/season'),
+          whatsNext={{ athlete, product: params.get('product'), self: true, selfManaged, onBook, onSeason: () => navigate('/portal/season'),
             facilityDue: facilityPending.length > 0 }}
         />
         {/* No second Pay now while the ?paid= return confirms (double subscription). */}
         <PendingBanner
           pendingAthletes={(mineStatus?.status === 'pending' ? mineStatus.pendingAthletes : []).filter((a) => a.athleteId !== params.get('paid'))}
           facilityRows={facilityRows}
+          self={selfManaged}
           body={mineStatus?.body}
           title={mineStatus?.title}
           renderRowExtra={(a) => <ChangePackageLink athlete={a} onOpen={setChangeFor} />}

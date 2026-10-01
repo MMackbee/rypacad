@@ -6,8 +6,9 @@
  * fields are ignored: not validated, and sent as null. `contract` overrides
  * the flag (the harness's contract step); it defaults to it at call time.
  */
-import { ALL_PACKAGES, packageById } from './packages';
+import { ALL_PACKAGES, ELITE, packageById } from './packages';
 import { contractEnabled } from './contractFlag';
+import { householdFacility } from './facility';
 
 export const EMAIL_RE = /^\S+@\S+\.\S+$/;
 export const TIER_MINUTES = [20, 45, 90];
@@ -27,13 +28,21 @@ export function newAthleteEntry() {
   seq += 1;
   return {
     key: `new-${seq}`, name: '', dob: '', packageId: null, contractMinutes: null, contractPicked: false, handicap: '', ownLogin: false, loginEmail: '',
-    facilityRequested: false,
   };
 }
 
-/** A draft saved before the facility add-on existed restores unticked (still draft v1). */
-export function toAthleteEntry(a) {
-  return { ...a, facilityRequested: a?.facilityRequested === true };
+/**
+ * The form's family facility tick (`form.facilityRequested`) as a saved draft
+ * restores it. The tick was once per athlete: a draft from that form (still
+ * draft v1, no family field) restores ticked when any of its athletes was;
+ * one from before the add-on existed restores unticked. Once the family
+ * field is there it alone decides - the old per-athlete ticks stay behind on
+ * the entries, unread.
+ */
+export function restoredFacilityTick(form) {
+  if (!form) return false;
+  if (typeof form.facilityRequested === 'boolean') return form.facilityRequested;
+  return Array.isArray(form.athletes) && form.athletes.some((a) => a?.facilityRequested === true);
 }
 
 /**
@@ -50,14 +59,39 @@ export function facilityOptionFor(packageId) {
   return kind === 'elite' ? 'included' : null;
 }
 
-/** A tick that still counts: one left on before switching to Elite or the single token means nothing (createFamily stores false too). */
-export function wantsFacility(a) {
-  return Boolean(a) && a.facilityRequested === true && facilityOptionFor(a.packageId) === 'offer';
+/**
+ * It is a FAMILY add-on (owner ruling 2026-09-30): one tick for the whole
+ * form, offered once, never once per child. 'included' when any athlete in
+ * the form is on Elite (Elite covers the family); 'offer' when someone is on
+ * a 6, 12 or 16 token package; null otherwise. `existing` (link mode) is the
+ * athletes already in the family: a live Elite membership there includes it
+ * too, and anything that makes addAthletes store no request - an Elite
+ * athlete still to pay, a request already made, an add-on already paid -
+ * means it is not offered again. null while unknown: addAthletes decides.
+ */
+export function familyFacilityOption(athletes, existing = null) {
+  const options = (athletes || []).map((a) => facilityOptionFor(a?.packageId));
+  const there = (existing || []).filter(Boolean);
+  const family = householdFacility(there);
+  if (options.includes('included') || family.source === 'elite') return 'included';
+  if (!options.includes('offer')) return null;
+  const blocked = family.access || there.some((a) => a.facilityRequested === true || (a.packageId === ELITE.id && a.billing?.status !== 'lapsed'));
+  return blocked ? null : 'offer';
 }
 
-/** The consent step's facility waiver turns required once any athlete keeps the add-on. */
-export function facilityWaiverRequired(athletes) {
-  return (athletes || []).some(wantsFacility);
+/** The family tick that still counts: one left on before an Elite pick, or with nobody on a token package, means nothing (createFamily stores false too). */
+export function wantsFacility(form) {
+  return Boolean(form) && form.facilityRequested === true && familyFacilityOption(form.athletes) === 'offer';
+}
+
+/** Which athlete the request is sent on - the add-on bills on one athlete: the first with a 6, 12 or 16 token package. -1 == nobody. */
+export function facilityHolderIndex(form) {
+  return wantsFacility(form) ? form.athletes.findIndex((a) => facilityOptionFor(a?.packageId) === 'offer') : -1;
+}
+
+/** The consent step's facility waiver turns required once the family keeps the add-on. */
+export function facilityWaiverRequired(form) {
+  return wantsFacility(form);
 }
 export const FACILITY_WAIVER_FOOTNOTE = 'Needed for the facility access you picked';
 export const FACILITY_WAIVER_REQUIRED =
@@ -150,7 +184,7 @@ export function validateAthleteEntry(a, { todayISO, guardianEmail = '', siblings
   return errors;
 }
 
-function athleteBody(a, contract) {
+function athleteBody(a, contract, facilityRequested) {
   return {
     name: a.name.trim(),
     dob: a.dob,
@@ -159,8 +193,14 @@ function athleteBody(a, contract) {
     contractMinutes: contract ? a.contractMinutes ?? null : null,
     handicap: normalizeHandicap(a.handicap) ?? null,
     loginEmail: a.ownLogin && a.loginEmail ? lower(a.loginEmail) : null,
-    facilityRequested: wantsFacility(a),
+    facilityRequested,
   };
+}
+
+/** Every athlete's body; the family facility tick rides on exactly one of them (facilityHolderIndex). */
+function athleteBodies(form, contract) {
+  const holder = facilityHolderIndex(form);
+  return form.athletes.map((a, i) => athleteBody(a, contract, i === holder));
 }
 
 /** Contract 1.2 request body. Athlete mode: no relationship, no child login (the caller IS the login). */
@@ -174,7 +214,7 @@ export function buildCreateFamilyPayload(form, { contract = contractEnabled() } 
       phone: form.contact.phone.trim(),
       relationship: parent ? form.contact.relationship || null : null,
     },
-    athletes: form.athletes.map((a) => athleteBody(a, contract)).map((a) => (parent ? a : { ...a, loginEmail: null })),
+    athletes: athleteBodies(form, contract).map((a) => (parent ? a : { ...a, loginEmail: null })),
     emergencyContact: emergencyBody(form.emergencyContact),
     medical: form.medical.trim() || null,
     consents: {
@@ -190,7 +230,7 @@ export function buildCreateFamilyPayload(form, { contract = contractEnabled() } 
 /** Contract 1.3 request body (Settings' "Link another athlete"). A null contact means "use the household's". */
 export function buildAddAthletesPayload(form, { contract = contractEnabled() } = {}) {
   return {
-    athletes: form.athletes.map((a) => athleteBody(a, contract)),
+    athletes: athleteBodies(form, contract),
     emergencyContact: emergencyBody(form.emergencyContact),
     medical: form.medical.trim() || null,
   };

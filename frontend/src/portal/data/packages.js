@@ -84,6 +84,10 @@ export const PRICES_RELEASED = true;
  * package - a line item, never a session entitlement. Lives on the athlete
  * as `facilityAccess` (ops/owner-set, needs the signed waiver in
  * `facilityAccessConsent`). Elite includes it (`access247`).
+ * Owner ruling 2026-09-30: it is a FAMILY add-on - one per household, with
+ * a 6, 12 or 16 token package, covering every athlete in it; a live Elite
+ * membership covers the household too. It still bills on one athlete.
+ * data/facility.js householdFacility is the one place that decides access.
  */
 export const FACILITY_ACCESS = { id: 'facility-access', name: 'Facility access', price: 300, pending: false };
 

@@ -12,6 +12,7 @@ const functions = require('firebase-functions/v1');
 const admin = require('firebase-admin');
 const Stripe = require('stripe');
 const catalogue = require('./catalogue');
+const facility = require('./facility');
 const lib = require('./lib');
 const prepaid = require('./prepaid');
 const {CHECKOUT_SECRETS} = require('./secrets');
@@ -24,7 +25,7 @@ const {HttpsError} = functions.https;
  */
 const MIN_TRIAL_LEAD_MS = 49 * 60 * 60 * 1000;
 const PRODUCTS = ['tier', 'facility'];
-const FACILITY_NAME = 'Facility access';
+const FACILITY_NAME = 'Family facility access';
 
 let stripeClient;
 
@@ -89,6 +90,20 @@ async function siblingEligible(store, householdId, athleteId) {
     return doc.id !== athleteId && Boolean(a.packageId) &&
         a.packageId !== 'single' && paid;
   });
+}
+
+/**
+ * The household's athlete docs, each with its id, for the family facility
+ * checks (facility.js householdFacility).
+ * @param {!Object} store Firestore.
+ * @param {?string} householdId The family.
+ * @return {!Promise<!Array<!Object>>} `[{id, ...data}]`.
+ */
+async function householdAthletes(store, householdId) {
+  if (!householdId) return [];
+  const snap = await store.collection('athletes')
+      .where('householdId', '==', householdId).get();
+  return snap.docs.map((doc) => Object.assign({id: doc.id}, doc.data()));
 }
 
 /**
@@ -332,6 +347,25 @@ async function createCheckoutSessionHandler(data, context, deps) {
     if (facilityPaid) {
       throw refuse('failed-precondition', 'already-active',
           'Facility access is already paid.');
+    }
+    // Owner ruling 2026-09-30: the add-on is one per FAMILY and a live
+    // Elite membership covers the family. It still bills on this athlete.
+    const family = facility.householdFacility(
+        await householdAthletes(store, athlete.householdId));
+    if (family.holderId && family.holderId !== req.athleteId) {
+      throw refuse('failed-precondition', 'family-has-facility',
+          'Your family already has facility access.');
+    }
+    if (family.eliteId) {
+      throw refuse('failed-precondition', 'elite-includes-facility',
+          'Elite already includes facility access for your family.');
+    }
+    // An Elite athlete still to pay (review 2026-09-30): selling the add-on
+    // now would leave the family paying for both once Elite is paid.
+    if (family.eliteDueId) {
+      throw refuse('failed-precondition', 'elite-includes-facility',
+          'Elite includes facility access for your family. ' +
+          'Pay for the Elite membership first.');
     }
   }
   const key = req.product === 'facility' ? catalogue.FACILITY_KEY :

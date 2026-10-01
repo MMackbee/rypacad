@@ -216,19 +216,27 @@ describe('Commitment Contract hidden (owner ruling 2026-09-30)', () => {
   });
 });
 
-describe('the facility add-on ticked at sign-up (owner request, Mike 2026-09-30)', () => {
-  const WAITING = 'Facility access · after the membership is paid';
-  const JORDAN_PAY = "Pay $300 for Jordan's facility access|a1";
+describe('the family facility add-on ticked at sign-up (owner request, Mike 2026-09-30; one per family, owner ruling 2026-09-30)', () => {
+  const WAITING = 'Family facility access · after the membership is paid';
+  const JORDAN_PAY = 'Pay $300 for family facility access|a1';
   beforeEach(() => {
-    mockHub.data.facilityPending = [{ athleteId: 'a1', name: 'Jordan', state: 'pay' }, { athleteId: 'a2', name: 'Reese', state: 'waiting' }];
+    mockHub.data.facilityPending = [{ athleteId: 'a1', name: 'Jordan', state: 'pay' }];
   });
 
-  test('a paid membership gets the add-on row and button; a pending one gets the line under its Pay now', async () => {
+  test('billed on a paid membership: ONE family row and button, under the other athlete\'s Pay now', async () => {
     const r = await renderScreen(<ParentDashboard bare />, { path: '/portal/family' });
-    expect(r.text()).toContain('Facility access for Jordan');
     expect(r.button(JORDAN_PAY)).not.toBeNull();
+    expect(r.button('Pay now|a2')).not.toBeNull();
+    expect(r.text()).not.toContain(WAITING);
+    expect([...r.container.querySelectorAll('button')].filter((b) => /facility/i.test(b.textContent))).toHaveLength(1);
+    await r.unmount();
+  });
+
+  test('billed on a membership still to pay: a line under that Pay now, no add-on button', async () => {
+    mockHub.data.facilityPending = [{ athleteId: 'a2', name: 'Reese', state: 'waiting' }];
+    const r = await renderScreen(<ParentDashboard bare />, { path: '/portal/family' });
     expect(r.button('Pay now|a2').parentElement.textContent).toContain(WAITING);
-    expect(r.button("Pay $300 for Reese's facility access|a2")).toBeNull();
+    expect([...r.container.querySelectorAll('button')].filter((b) => /facility/i.test(b.textContent))).toHaveLength(0);
     await r.unmount();
   });
 
@@ -236,7 +244,7 @@ describe('the facility add-on ticked at sign-up (owner request, Mike 2026-09-30)
     mockHub.data.status = { status: 'active', title: 'Tokens start Sun, Nov 1', body: 'Billed monthly on the 1st. Nothing needs attention.' };
     mockHub.data.facilityPending = [{ athleteId: 'a1', name: 'Jordan', state: 'pay' }];
     const r = await renderScreen(<ParentDashboard bare />, { path: '/portal/family' });
-    expect(r.text()).toContain("Facility access - pay when you're ready");
+    expect(r.text()).toContain("Family facility access - pay when you're ready");
     expect(r.button(JORDAN_PAY)).not.toBeNull();
     expect(r.text()).not.toContain('Payment pending - finish checkout');
     expect(r.button('Pay now|a2')).toBeNull();
@@ -249,6 +257,11 @@ describe('the facility add-on ticked at sign-up (owner request, Mike 2026-09-30)
     expect(r.button(JORDAN_PAY)).toBeNull();
     expect(r.button('Pay now|a2')).not.toBeNull();
     await r.unmount();
+    // Paid from Billing on another athlete while the request waits on Reese: the family's one add-on is confirming all the same.
+    mockHub.data.facilityPending = [{ athleteId: 'a2', name: 'Reese', state: 'waiting' }];
+    const other = await renderScreen(<ParentDashboard bare />, { path: '/portal/family?paid=a1&product=facility&cs=cs_3' });
+    expect(other.text()).not.toContain(WAITING);
+    await other.unmount();
   });
 
   test("back from a membership checkout: What's next points at the add-on, and its row is right there", async () => {
@@ -257,13 +270,22 @@ describe('the facility add-on ticked at sign-up (owner request, Mike 2026-09-30)
       mockConfirm = { state: 'confirmed', billingStatus: 'active', packageId: 't-12' };
       const r = await renderScreen(<ParentDashboard bare />, { path: '/portal/family?paid=a1&cs=cs_4' });
       expect(r.text()).toContain("What's next");
-      expect(r.text()).toContain("Facility access: pay from your family page whenever you're ready.");
+      expect(r.text()).toContain("Family facility access: pay from your family page whenever you're ready.");
       expect(r.button(JORDAN_PAY)).not.toBeNull();
       await r.unmount();
+      // Another athlete's membership just paid while the add-on is payable: the same one line.
+      const sibling = await renderScreen(<ParentDashboard bare />, { path: '/portal/family?paid=a2&cs=cs_4' });
+      expect(sibling.text().split("Family facility access: pay from your family page whenever you're ready.")).toHaveLength(2);
+      await sibling.unmount();
+      // The add-on waits on a membership that is not the one just paid: not payable yet, so no line.
+      mockHub.data.facilityPending = [{ athleteId: 'a2', name: 'Reese', state: 'waiting' }];
+      const waiting = await renderScreen(<ParentDashboard bare />, { path: '/portal/family?paid=a1&cs=cs_4' });
+      expect(waiting.text()).not.toContain('pay from your family page');
+      await waiting.unmount();
       mockHub.data.facilityPending = [];
       const none = await renderScreen(<ParentDashboard bare />, { path: '/portal/family?paid=a1&cs=cs_4' });
       expect(none.text()).toContain("What's next");
-      expect(none.text()).not.toContain('Facility access');
+      expect(none.text()).not.toMatch(/facility access/i);
       await none.unmount();
     } finally {
       clock.mockRestore();

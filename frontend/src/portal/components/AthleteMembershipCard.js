@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { color, font } from '../tokens';
 import { useAssignPackages, useHouseholdSettings, useIssueTokens } from '../hooks';
+import { useHouseholdFacility } from '../hooks/billing';
 import Button from './Button';
 import { Toggle } from './Toggle';
 import Field, { SelectField } from './Field';
@@ -11,6 +12,7 @@ import Segmented from './Segmented';
 import { Body, Card, SectionLabel } from './Primitives';
 import { ALL_PACKAGES, FACILITY_ACCESS, packageById, periodFor } from '../data/packages';
 import { addDaysISO, todayISO } from '../data/calendar';
+import { facilitySourceLabel, householdFacility } from '../data/facility';
 
 /**
  * AthleteDetail's staff-side Membership card (Sprint 12 pin, TEAM.md
@@ -51,7 +53,16 @@ const PACKAGE_SELECT_OPTIONS = ALL_PACKAGES.map((p) => ({
 export default function AthleteMembershipCard({ athleteId, athlete, role }) {
   const canEdit = role === 'ops' || role === 'owner';
   const canView = canEdit || role === 'coach' || role === 'mental';
+  // Facility access is the FAMILY's (owner ruling 2026-09-30): one add-on or
+  // a live Elite membership covers every athlete in the household, so the
+  // card reads the household and names the source. Where the household did
+  // not load (a coach cannot list one) the athlete's own record still
+  // answers: its flag, or its own paid Elite membership - never a sibling's.
+  const household = useHouseholdFacility(canView ? athlete?.householdId ?? null : null);
   if (!canView) return null;
+  const own = { id: athleteId, packageId: athlete?.packageId, billing: { status: athlete?.billingStatus }, facilityAccess: athlete?.facilityAccess === true };
+  const family = household.data?.access ? household.data : householdFacility([own]);
+  const familyFacility = family.access ? `Yes - ${facilitySourceLabel(family)}` : 'No';
 
   const currentPackageId = athlete?.packageId ?? null;
 
@@ -61,7 +72,7 @@ export default function AthleteMembershipCard({ athleteId, athlete, role }) {
       <Card large>
         <SectionLabel style={{ marginBottom: 12 }}>Membership</SectionLabel>
         <ReadOnlyRow label="Package" value={packageName} />
-        <ReadOnlyRow label="Facility access" value={athlete?.facilityAccess ? 'Yes' : 'No'} style={{ marginTop: 8 }} />
+        <ReadOnlyRow label="Facility access" value={familyFacility} style={{ marginTop: 8 }} />
       </Card>
     );
   }
@@ -75,6 +86,7 @@ export default function AthleteMembershipCard({ athleteId, athlete, role }) {
         initialAnchorDay={athlete?.periodAnchorDay ?? 1}
         initialFacilityAccess={Boolean(athlete?.facilityAccess)}
         hasConsent={Boolean(athlete?.facilityAccessConsent)}
+        familyFacility={familyFacility}
       />
       {athlete?.householdId ? <HouseholdBillingLink householdId={athlete.householdId} /> : null}
     </>
@@ -122,7 +134,7 @@ function ReadOnlyRow({ label, value, style }) {
   );
 }
 
-function MembershipEditor({ athleteId, currentPackageId, householdId, initialAnchorDay, initialFacilityAccess = false, hasConsent = false }) {
+function MembershipEditor({ athleteId, currentPackageId, householdId, initialAnchorDay, initialFacilityAccess = false, hasConsent = false, familyFacility = 'No' }) {
   const [packageId, setPackageId] = useState(currentPackageId ?? '');
   // v2.0.1 (Sprint 18): the $300 facility-access add-on, switchable only
   // once the signed waiver is on the athlete (rules enforce the same).
@@ -187,6 +199,8 @@ function MembershipEditor({ athleteId, currentPackageId, householdId, initialAnc
             <span style={{ font: `500 12px ${font.body}`, color: color.textTertiary }}>{facilityAccess ? 'On' : 'Off'}</span>
           )}
         </div>
+        {/* What the household has - the switch above is this athlete's own record. */}
+        <ReadOnlyRow label="Family facility access" value={familyFacility} />
       </div>
 
       {error ? (

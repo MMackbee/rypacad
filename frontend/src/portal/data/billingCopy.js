@@ -5,6 +5,7 @@
  */
 import { format, parseISO } from 'date-fns';
 import { BOOKING_OPENS_LABEL, longDayLabel, monthName } from './calendar';
+import { householdFacility } from './facility';
 import { FACILITY_ACCESS, SINGLE_TOKEN } from './packages';
 
 export const PENDING_TITLE = 'Payment pending - finish checkout to start booking';
@@ -52,24 +53,67 @@ export function billingBadge(status) {
   return BADGES[status] || null;
 }
 
-/** null == no card (Elite includes it; a tier not yet active cannot add it). */
-export function facilityCardState(member) {
-  if (!member || !member.package || member.package.kind === 'elite') return null;
-  if ((member.billing?.status ?? 'active') !== 'active') return null;
-  const facility = member.billing?.facility ?? null;
-  if (facility == null) return member.facilityAccess ? 'active' : 'offer';
-  if (facility === 'active') return member.facilityAccessConsent ? 'active' : 'paid-waiver-pending';
-  return facility; // 'past_due' | 'lapsed'
+/*
+ * The ONE family facility card (owner ruling 2026-09-30: the add-on is a
+ * family add-on, and Elite covers the family - data/facility.js decides the
+ * access). `{ state, holder, lapsed }` over the household's hub members;
+ * null == no card:
+ *   'elite'   a live Elite membership covers everyone - nothing to buy.
+ *             `holder` is set only when an add-on subscription is still
+ *             live beside it (review 2026-09-30): the family is billed for
+ *             something Elite includes, and the card says so
+ *   'active' | 'paid-waiver-pending' | 'past_due'   the add-on, read off the
+ *             athlete it bills on (`holder`); the waiver stays ops-verified
+ *   'offer'   no access yet, and a paid 6, 12 or 16 token athlete to bill it
+ *             on: `holder`, the first one - the one who asked at sign-up
+ *             ahead of the rest, so this card and the home pending card open
+ *             the same checkout. `lapsed` when an earlier add-on ended.
+ * No offer (review 2026-09-30) while an Elite athlete is still to pay - the
+ * family would end up paying for both - or while the one who asked is still
+ * unpaid: the home pending card names that athlete, and a second offer on a
+ * sibling could open a second checkout.
+ */
+export function familyFacilityCard(members) {
+  const list = (members || []).filter(Boolean);
+  const family = householdFacility(list);
+  if (family.source === 'elite') {
+    const billed = list.find((m) => m.athleteId === family.holderId && (m.billing?.facility === 'active' || m.billing?.facility === 'past_due')) ?? null;
+    return { state: 'elite', holder: billed, lapsed: false };
+  }
+  if (family.source === 'add-on') {
+    const holder = list.find((m) => m.athleteId === family.holderId) ?? null;
+    const facility = holder?.billing?.facility ?? null;
+    if (facility === 'past_due') return { state: 'past_due', holder, lapsed: false };
+    return { state: facility === 'active' && !holder.facilityAccessConsent ? 'paid-waiver-pending' : 'active', holder, lapsed: false };
+  }
+  if (family.eliteDueId) return null;
+  const paid = list.filter((m) => m.package?.kind === 'tokens' && (m.billing?.status ?? 'active') === 'active');
+  const asked = paid.find((m) => m.facilityRequested === true) ?? null;
+  if (!asked && list.some((m) => facilityRequestState(m) === 'waiting')) return null;
+  const holder = asked ?? paid[0] ?? null;
+  return holder ? { state: 'offer', holder, lapsed: list.some((m) => m.billing?.facility === 'lapsed') } : null;
 }
 
+/** "Family facility access" - without "family" (`self`) for the adult who is their own household. */
+export const facilityName = (self = false) => (self ? 'Facility access' : 'Family facility access');
+export const FACILITY_COVERS = 'One add-on covers every athlete in your household, and a parent or guardian may come along.';
+export const facilityOfferLabel = (self = false) => `Add ${self ? '' : 'family '}facility access · $${FACILITY_ACCESS.price}/month`;
+export const facilityOfferBody = (self = false) => `24/7 access to the facility. ${self ? '' : `${FACILITY_COVERS} `}Billed monthly. The signed waiver is checked by the academy before the door opens.`;
+
 const FACILITY_LINES = {
-  'paid-waiver-pending': 'Facility access: paid - waiver pending',
-  active: 'Facility access: active',
-  past_due: 'Facility access: payment past due',
-  lapsed: 'Facility access: lapsed',
+  'paid-waiver-pending': 'paid - waiver pending',
+  active: 'active',
+  past_due: 'payment past due',
+  lapsed: 'lapsed',
 };
-export function facilityLine(state) {
-  return FACILITY_LINES[state] || null;
+export function facilityLine(state, self = false) {
+  if (state === 'elite') return self ? 'Included with Elite' : 'Included with Elite for your family';
+  return FACILITY_LINES[state] ? `${facilityName(self)}: ${FACILITY_LINES[state]}` : null;
+}
+/** Under the Elite line while an add-on subscription is still live (review 2026-09-30); `staff` is the read-only staff view. */
+export function facilityStillBilledLine(self = false, staff = false) {
+  if (staff) return 'This family is still paying for the family add-on. Elite includes it - cancel the add-on in Stripe.';
+  return `You are still paying for the ${self ? 'facility' : 'family'} add-on. Elite includes it - ask the academy to cancel the add-on.`;
 }
 
 /*
@@ -89,10 +133,10 @@ export function facilityRequestState(member) {
   if (status === 'active') return 'pay';
   return status === 'pending' ? 'waiting' : null;
 }
-export const FACILITY_PENDING_TITLE = "Facility access - pay when you're ready";
-export const FACILITY_WAITING_LINE = 'Facility access · after the membership is paid';
-export const facilityRowTitle = (name) => `Facility access for ${name}`;
-export const facilityPayLabel = (name) => `Pay $${FACILITY_ACCESS.price} for ${String(name ?? '').trim().split(/\s+/)[0] || 'your athlete'}'s facility access`;
+/* One family row, never one per child (owner ruling 2026-09-30): nothing here names an athlete. */
+export const facilityPendingTitle = (self = false) => `${facilityName(self)} - pay when you're ready`;
+export const facilityWaitingLine = (self = false) => `${facilityName(self)} · after the membership is paid`;
+export const facilityPayLabel = (self = false) => `Pay $${FACILITY_ACCESS.price} for ${self ? '' : 'family '}facility access`;
 
 /** "Login: none / not claimed / claimed <date>" for the athlete card. */
 export function loginStatusLine({ loginEmail, login } = {}) {

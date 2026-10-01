@@ -78,6 +78,16 @@ export function isSpecialistType(type) {
 }
 
 /**
+ * Whether a booking of this session type is offered "Repeat weekly" (owner
+ * 2026-09-30, "yes to phil repeat"). Phil's sessions sit on the academy
+ * calendar at the same time each week, so they repeat like a training block
+ * or a Tour event; Yannick's are booked through Calendly and never do.
+ */
+export function repeatsWeekly(type) {
+  return type === 'phil' || !isSpecialistType(type);
+}
+
+/**
  * Per-specialist-TYPE, per-calendar-month FREQUENCY knob (contract v2.0,
  * Sprint 12 pin K — supersedes the Sprint 9/11 flat per-athlete cap this
  * same name used to hold). Under the token model a specialist session

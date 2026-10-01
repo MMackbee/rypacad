@@ -7,7 +7,7 @@ jest.mock('../components/PayButton', () => ({ __esModule: true, default: ({ athl
 jest.mock('../components/TokenMeter', () => ({ __esModule: true, default: () => 'METER' }));
 jest.mock('../hooks/billing', () => ({ __esModule: true, default: () => ({}), useMyTokens: () => mockMine, usePaymentConfirmation: () => ({ state: 'idle' }), STRIPE_PORTAL_URL: null }));
 
-test('pending athlete sees the banner and Pay now; paid athlete sees the facility offer', async () => {
+test('pending athlete sees the banner and Pay now; the add-on is offered to the adult who is their own household, never on a child\'s login', async () => {
   const base = { athleteId: 'a1', name: 'Jordan', package: { kind: 'tokens', name: '12 tokens' }, tokens: { left: 12 }, coaching: null, contractMinutes: null, facilityAccess: false };
   mockMine = { loading: false, error: null, data: { member: { ...base, billing: { status: 'pending', facility: null } },
     status: { status: 'pending', paused: false, body: "Jordan can book once checkout is complete (token packages from Sat, Oct 10 at 7 AM). Billed monthly on the 1st once you've paid.", pendingAthletes: [{ athleteId: 'a1', name: 'Jordan' }] } } };
@@ -15,12 +15,30 @@ test('pending athlete sees the banner and Pay now; paid athlete sees the facilit
   expect(p.text()).toContain('Payment pending - finish checkout to start booking');
   expect(p.text()).toContain('Jordan can book once checkout is complete (token packages from Sat, Oct 10 at 7 AM).');
   expect(p.button('Pay now|a1|tier')).not.toBeNull();
-  expect(p.button('Add facility access|a1|facility')).toBeNull();
+  expect(p.text()).not.toMatch(/facility/i);
   await p.unmount();
   mockMine = { loading: false, error: null, data: { member: { ...base, billing: { status: 'active', facility: null } }, status: { status: 'active', paused: false, pendingAthletes: [] } } };
-  const a = await renderScreen(<Membership bare />);
-  expect(a.button('Add facility access|a1|facility')).not.toBeNull();
+  const a = await renderScreen(<Membership bare selfManaged />);
+  expect(a.button('Add facility access · $300/month|a1|facility')).not.toBeNull();
   await a.unmount();
+  // Family facility access is offered once per family, in the parent's Billing (owner ruling 2026-09-30):
+  // a child's login reads its own record only, so it never offers what a sibling may already cover.
+  const child = await renderScreen(<Membership bare />);
+  expect(child.text()).not.toMatch(/facility/i);
+  await child.unmount();
+});
+
+test('access the athlete\'s own record shows is said, with its source', async () => {
+  const base = { athleteId: 'a1', name: 'Jordan', tokens: { left: 12 }, coaching: null, contractMinutes: null, facilityAccess: false };
+  const status = { status: 'active', paused: false, pendingAthletes: [] };
+  mockMine = { loading: false, error: null, data: { status, member: { ...base, package: { kind: 'tokens', name: '12 tokens' }, billing: { status: 'active', facility: 'active' }, facilityAccessConsent: true } } };
+  const holder = await renderScreen(<Membership bare />);
+  expect(holder.text()).toContain('Family facility access: active');
+  await holder.unmount();
+  mockMine = { loading: false, error: null, data: { status, member: { ...base, package: { kind: 'elite', name: 'Elite' }, tokens: { unlimited: true }, billing: { status: 'active', facility: null } } } };
+  const elite = await renderScreen(<Membership bare />);
+  expect(elite.text()).toContain('Included with Elite for your family');
+  await elite.unmount();
 });
 
 test('the contract tier line shows only with the Commitment Contract on (owner ruling 2026-09-30)', async () => {
