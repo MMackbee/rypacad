@@ -37,6 +37,11 @@ import { contractEnabled } from '../data/contractFlag';
  * 2026-09-30) the athlete track skips its log step and no step's copy
  * mentions the contract. The lists are built per call, so the flag is read
  * when the walkthrough renders.
+ *
+ * `unlimited` (an Elite family, hooks/elite.js; tester Mike 2026-09-30): an
+ * Elite member holds no tokens, so their track has no tokens step and none
+ * of this file's own copy names one. The practice screens still show the
+ * sample family, tokens and all.
  */
 
 /* ----------------------------------------------------------- step content -- */
@@ -141,8 +146,15 @@ function PoolsStep() {
  * they are gone — the walkthrough's last job is making sure nothing it staged
  * could be mistaken for a real record.
  */
-function DoneStep({ track, booking, loggedDay }) {
+function DoneStep({ track, booking, loggedDay, unlimited = false }) {
   const contract = contractEnabled();
+  const untouched = unlimited
+    ? contract
+      ? 'Your real schedule and the Commitment Contract are exactly as they were.'
+      : 'Your real schedule is exactly as it was.'
+    : contract
+    ? 'Your real schedule, the Commitment Contract, and your token balance are exactly as they were.'
+    : 'Your real schedule and your token balance are exactly as they were.';
   return (
     <OwnStep>
       <Card tone="green" large>
@@ -154,7 +166,7 @@ function DoneStep({ track, booking, loggedDay }) {
             done={Boolean(booking)}
             label={
               booking
-                ? `Practice booking — ${booking.name} · ${booking.when} · would have spent 1 token`
+                ? `Practice booking - ${booking.name} · ${booking.when}${unlimited ? '' : ' · would have spent 1 token'}`
                 : 'No practice booking was made'
             }
           />
@@ -170,9 +182,7 @@ function DoneStep({ track, booking, loggedDay }) {
           ) : null}
         </div>
         <Body size={13} style={{ marginTop: 14 }}>
-          {contract
-            ? 'Those entries were practice, and they are already gone. Your real schedule, the Commitment Contract, and your token balance are exactly as they were.'
-            : 'Those entries were practice, and they are already gone. Your real schedule and your token balance are exactly as they were.'}
+          Those entries were practice, and they are already gone. {untouched}
         </Body>
       </Card>
     </OwnStep>
@@ -207,7 +217,7 @@ function RecapRow({ done, label }) {
  * Booking step, shared by both tracks: the REAL BookSession with the pinned
  * `practice` option. Completes only when its confirmation renders.
  */
-const bookStep = (instructionBody) => ({
+const bookStep = (instructionBody, unlimited = false) => ({
   id: 'book',
   title: 'Book a session',
   gate: 'book',
@@ -215,8 +225,9 @@ const bookStep = (instructionBody) => ({
   instruction: { title: 'Try it', body: instructionBody },
   instructionDone: {
     title: 'Booked',
-    body:
-      'That confirmation is exactly what a real booking shows — including the token it spends. This one is practice: nothing was reserved and nothing was spent.',
+    body: unlimited
+      ? 'That confirmation is exactly what a real booking shows. This one is practice: nothing was reserved.'
+      : 'That confirmation is exactly what a real booking shows - including the token it spends. This one is practice: nothing was reserved and nothing was spent.',
   },
   render: ({ onBooked }) => (
     <Fill>
@@ -237,12 +248,12 @@ const welcomeStep = (bullets) => ({
   render: () => <WelcomeStep bullets={bullets} />,
 });
 
-const doneStep = {
+const doneStep = (unlimited = false) => ({
   id: 'done',
   title: 'That was practice',
   instruction: null,
-  render: (ctx) => <DoneStep {...ctx} />,
-};
+  render: (ctx) => <DoneStep {...ctx} unlimited={unlimited} />,
+});
 
 /** The logging step: the REAL Contract screen in practice mode. Contract on only. */
 const logStep = {
@@ -267,11 +278,25 @@ const logStep = {
   ),
 };
 
-export function athleteSteps() {
+/** The athlete's home-screen line: with the contract, with tokens, or neither. */
+function dashboardBody(contract, unlimited) {
+  if (unlimited) {
+    return contract
+      ? 'This is your home screen: your next session and your Commitment Contract. Scroll it, then continue.'
+      : 'This is your home screen: your next session and what you have coming up. Scroll it, then continue.';
+  }
+  return contract
+    ? 'This is your home screen: your next session, your Commitment Contract, and the tokens you have left this period. Scroll it, then continue.'
+    : 'This is your home screen: your next session and the tokens you have left this period. Scroll it, then continue.';
+}
+
+export function athleteSteps(unlimited = false) {
   const contract = contractEnabled();
   return [
     welcomeStep([
-      'Book training blocks and Tour events - every session spends one token from your period.',
+      unlimited
+        ? 'Book training blocks and Tour events.'
+        : 'Book training blocks and Tour events - every session spends one token from your period.',
       ...(contract
         ? ['Log your Commitment Contract day in one tap.', 'Log your practice minutes and watch your commitment streak build.']
         : []),
@@ -279,12 +304,7 @@ export function athleteSteps() {
     {
       id: 'dashboard',
       title: 'Your dashboard',
-      instruction: {
-        title: 'Look around',
-        body: contract
-          ? 'This is your home screen: your next session, your Commitment Contract, and the tokens you have left this period. Scroll it, then continue.'
-          : 'This is your home screen: your next session and the tokens you have left this period. Scroll it, then continue.',
-      },
+      instruction: { title: 'Look around', body: dashboardBody(contract, unlimited) },
       render: () => (
         <Fill>
           <AthleteDashboard bare variant="populated" practice />
@@ -292,40 +312,56 @@ export function athleteSteps() {
       ),
     },
     bookStep(
-      'Book a block for real: pick a day, tap an open block, and land on the confirmation. Each block says what it spends — one token — before you commit.'
+      unlimited
+        ? 'Book a block for real: pick a day, tap an open block, and land on the confirmation. Each block says what it includes before you commit.'
+        : 'Book a block for real: pick a day, tap an open block, and land on the confirmation. Each block says what it spends - one token - before you commit.',
+      unlimited
     ),
     ...(contract ? [logStep] : []),
-    {
-      id: 'pools',
-      title: 'Your tokens',
-      instruction: {
-        title: 'One rule to keep',
-        body: 'The single most useful thing to know before you book on your own.',
-      },
-      render: () => <PoolsStep />,
-    },
-    doneStep,
+    // Elite holds no tokens: no tokens step.
+    ...(unlimited
+      ? []
+      : [
+          {
+            id: 'pools',
+            title: 'Your tokens',
+            instruction: {
+              title: 'One rule to keep',
+              body: 'The single most useful thing to know before you book on your own.',
+            },
+            render: () => <PoolsStep />,
+          },
+        ]),
+    doneStep(unlimited),
   ];
 }
 
-export function parentSteps() {
+export function parentSteps(unlimited = false) {
   const contract = contractEnabled();
+  // The Behind badge is contract copy: it and its sentence go while hidden.
+  const behind = contract
+    ? ` Her yellow Behind badge means she has missed more than ${BEHIND_BUFFER_DAYS} weekdays of her Commitment Contract this month.`
+    : '';
   return [
     welcomeStep([
-      'Book training blocks and Tour events for your athletes - every session spends one token from that athlete\'s period.',
+      unlimited
+        ? 'Book training blocks and Tour events for your athletes.'
+        : 'Book training blocks and Tour events for your athletes - every session spends one token from that athlete\'s period.',
       ...(contract ? ['See each athlete’s Commitment Contract standing at a glance.'] : []),
       'Follow the RYP Tour - the season leaderboard for Tour events - and choose exactly how the academy reaches you.',
     ]),
     {
       id: 'family',
       title: 'Your family',
-      instruction: {
-        title: 'Look at the balances',
-        // The Behind badge is contract copy: it and its sentence go while hidden.
-        body: `One card per athlete. Notice Reese: her Tokens row is what she has left this period - every session spends one, and her next one is a Tour event.${
-          contract ? ` Her yellow Behind badge means she has missed more than ${BEHIND_BUFFER_DAYS} weekdays of her Commitment Contract this month.` : ''
-        }`,
-      },
+      instruction: unlimited
+        ? {
+            title: 'Look at the cards',
+            body: `One card per athlete. Notice Reese: her next session is a Tour event.${behind}`,
+          }
+        : {
+            title: 'Look at the balances',
+            body: `One card per athlete. Notice Reese: her Tokens row is what she has left this period - every session spends one, and her next one is a Tour event.${behind}`,
+          },
       // `practice` pins the Whitfield seed (tester report 2026-09-30): without
       // it a signed-in parent saw their own family here, and no Reese.
       render: () => (
@@ -335,7 +371,10 @@ export function parentSteps() {
       ),
     },
     bookStep(
-      'Book a block the way you would for your athlete: pick a day, tap an open block, reach the confirmation. Each block says what it spends — one token — before you commit.'
+      unlimited
+        ? 'Book a block the way you would for your athlete: pick a day, tap an open block, reach the confirmation. Each block says what it includes before you commit.'
+        : 'Book a block the way you would for your athlete: pick a day, tap an open block, reach the confirmation. Each block says what it spends - one token - before you commit.',
+      unlimited
     ),
     {
       // Billing's old walkthrough slot (Sprint 7: billing is parked, its tab
@@ -354,11 +393,11 @@ export function parentSteps() {
       // (review 2026-09-30 - it read and wrote the signed-in parent's settings).
       render: () => (
         <Flow>
-          <TourStandings bare role="parent" />
+          <TourStandings bare role="parent" practice />
           <NotificationPreferences bare variant="default" practice />
         </Flow>
       ),
     },
-    doneStep,
+    doneStep(unlimited),
   ];
 }

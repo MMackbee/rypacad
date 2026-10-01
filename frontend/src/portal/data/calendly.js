@@ -35,3 +35,6 @@ export function calendlyLinkFor({ url, athleteId, athleteName, householdId, name
 
 export const CALENDLY_NOTE =
   "Yannick's confirmation, reminders and cancellations come from Calendly. The session appears on My Schedule within a minute and spends one token.";
+/** The same note for an Elite athlete, who holds no tokens (tester Mike 2026-09-30). */
+export const CALENDLY_NOTE_UNLIMITED =
+  "Yannick's confirmation, reminders and cancellations come from Calendly. The session appears on My Schedule within a minute.";

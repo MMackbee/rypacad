@@ -28,6 +28,12 @@
  *   tokenExpiryReminders   daily 09:00 America/Chicago
  *   sweepWaitlist          daily 06:00 America/Chicago (Sprint 17, v2.5)
  *
+ * Waitlist hardening (owner rulings 2026-10-01) adds one callable,
+ * waitlistPositions (portal/waitlist-positions.js), and widens
+ * onSessionBookedDecrease: it is the one sessions trigger, and now also
+ * answers a raised capacity, an un-cancel and an academy cancel. A waitlist
+ * never mints a bonus token.
+ *
  * The 2025 `onBookingCreateNotifyChild` is DELETED with them: it read
  * `parentId` / `userId` / `childId`, fields no v1+ booking has ever carried,
  * so it could never fire. `booking-revoked` is NOT a trigger - portal/
@@ -77,18 +83,24 @@ const {MAIL_SECRETS} = require('./portal/secrets');
 const family = require('./portal/family');
 const {createCheckoutSession} = require('./portal/checkout');
 const {calendlyWebhook} = require('./portal/calendly');
+const {waitlistPositions} = require('./portal/waitlist-positions');
 
 // ==========================================================================
 // PORTAL SERVER-SIDE WRITERS (Sprint 13, contract v2.1)
 // ==========================================================================
 
 exports.stripeWebhook = stripeWebhook;
+// The one sessions trigger (waitlist hardening, 2026-10-01): fills a seat
+// freed by a cancel, a raised capacity or an un-cancel, and closes the
+// waitlist when the academy cancels the session.
 exports.onSessionBookedDecrease = onSessionBookedDecrease;
+// A family's place on a waitlist, in the order promotion uses (callable).
+exports.waitlistPositions = waitlistPositions;
 
 // ==========================================================================
 // SPRINT 20 LAUNCH (contract v3.0.1): instant sign-up, child-login claim,
 // Checkout Sessions, Calendly. Handlers live in ./portal; this file exports
-// the 13 functions and nothing else (the secret lists stay in
+// the 14 functions and nothing else (the secret lists stay in
 // ./portal/secrets). Secret binding (spec 8): every function declares its
 // secrets with runWith - a 1st-gen function sees only what it declares.
 // ==========================================================================
@@ -354,10 +366,10 @@ exports.tokenExpiryReminders = functions
     });
 
 /**
- * Daily 06:00 America/Chicago - expire every waitlist entry whose session
- * date has passed: mint the 'waitlist-expired' bonus token, delete the
- * entry, notify (portal/sweep.js; contract v2.5). The manual
- * scripts/sweep-waitlist.mjs does the same by hand.
+ * Daily 06:00 America/Chicago - close every waitlist entry whose session
+ * date has passed: delete the entry, which frees the token it held, and
+ * notify. Nothing is minted (owner ruling 2026-10-01; portal/sweep.js).
+ * The manual scripts/sweep-waitlist.mjs does the delete by hand.
  */
 exports.sweepWaitlist = functions
     .runWith({secrets: MAIL_SECRETS})

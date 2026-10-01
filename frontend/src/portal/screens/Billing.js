@@ -93,7 +93,7 @@ export default function Billing({
           <BillingSkeleton />
         ) : error ? (
           <ErrorNotice title="Billing didn't load" onRetry={onRetry}>
-            Your tokens and membership didn't load. Check your connection and try again.
+            Your membership didn't load. Check your connection and try again.
           </ErrorNotice>
         ) : (
           <>
@@ -244,6 +244,8 @@ function ContractLine({ contractMinutes, target = 'athlete', onOpen }) {
 function PlanCard({ household, members, showPrices = false, self = false }) {
   const anyPending = showPrices && members.some((m) => m.package?.pending);
   const anyMonthly = members.some((m) => m.package?.kind !== 'single');
+  // Tokens reset for a monthly token package only; Elite holds none.
+  const anyMonthlyTokens = members.some((m) => m.package && m.package.kind !== 'single' && m.package.kind !== 'elite');
   const facilitySource = facilitySourceLabel(householdFacility(members), self);
   return (
     <Card large>
@@ -287,7 +289,7 @@ function PlanCard({ household, members, showPrices = false, self = false }) {
       ))}
       {anyMonthly ? (
         <Body size={11} tone={color.textTertiary} style={{ marginTop: 10 }}>
-          Billed monthly on the {ordinal(household?.anchorDay ?? 1)}. Tokens reset the same day.
+          Billed monthly on the {ordinal(household?.anchorDay ?? 1)}.{anyMonthlyTokens ? ' Tokens reset the same day.' : ''}
           {anyPending ? " Prices marked pending are awaiting the academy's confirmation." : ''}
         </Body>
       ) : null}

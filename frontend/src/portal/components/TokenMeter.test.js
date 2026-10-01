@@ -20,6 +20,15 @@ test('parents still see no price', async () => {
   await r.unmount();
 });
 
+// Tester Mike 2026-09-30: no talk of tokens for Elite.
+test('an Elite card reads Sessions / Unlimited, with no token wording', async () => {
+  const r = await renderScreen(<TokenMeter member={elite} />);
+  expect(r.text()).toContain('Sessions');
+  expect(r.text()).toContain('Unlimited');
+  expect(r.text()).not.toMatch(/token/i);
+  await r.unmount();
+});
+
 // Tester report 2026-09-30 (Yannick 5, 6): real hub rows, from hubMemberFor.
 const T16 = TOKEN_PACKAGES.find((p) => p.id === 't-16');
 const member = (over = {}) =>

@@ -64,6 +64,54 @@ service cloud.firestore {
         || a.get('packageId', null) == 'elite';
     }
 
+    // 2026-10-01 (waitlist audit, owner ruling R2): a session whose day is
+    // over cannot be booked or waitlisted. `sessionDate` is the session's
+    // own 'YYYY-MM-DD' (every caller has already matched it to the session
+    // doc, or reads it off a booking that was matched at create), turned
+    // into a timestamp the way withinOuterBookingBound does for the far end
+    // of the window: split() + int() + timestamp.date(), no substring().
+    // timestamp.date() is midnight UTC, and the offset chosen is + 30 HOURS:
+    // midnight America/Chicago at the END of that day under CST (UTC-6, the
+    // whole Nov-Mar season) and 01:00 the next morning under CDT (UTC-5).
+    // Safe in both: it never closes a session's own day early, so a same-day
+    // booking still reaches the rule in either zone, and the most it lets
+    // through is one hour past midnight in summer, on a session the client
+    // already refuses and promotion never fills on the day. 29 hours would
+    // be exact under CDT but would shut the last hour of the day under CST.
+    // The start TIME is not checked here - sessions.time is display text
+    // ('4:00 PM') - so "has it started" stays with the client and the
+    // promotion function; this is the server-side floor under both.
+    function sessionDayNotOver(sessionDate) {
+      let parts = sessionDate.split('-');
+      return request.time
+        < timestamp.date(int(parts[0]), int(parts[1]), int(parts[2])) + duration.value(30, 'h');
+    }
+
+    // 2026-10-01 (waitlist audit, "the rules do not protect capacity"): a
+    // family's booking write and its seat count move in ONE commit or not
+    // at all. get() is the session before this commit and getAfter() the
+    // session as this commit leaves it, so "taken" is the count going up by
+    // exactly one (a booking, a re-book) and "freed" is it going down by
+    // exactly one (a cancel). A booking written on its own reads the same
+    // count on both sides and is refused - that was the way round a full
+    // session and everyone waiting on it. The counter write itself is still
+    // judged by the sessions block (bookedDiffOk: one step, within
+    // 0..capacity), so "taken" also means a seat was free. createBooking and
+    // cancelBooking (hooks/live.js) have always written both documents in
+    // one transaction, so no client change rides this. Admin SDK writers
+    // (promotion, the Stripe revoke, Calendly) bypass rules and keep their
+    // own counts. One extra document access per booking write (the parent +
+    // grace create goes from 5 to 6 of the 10-document cap).
+    function seatTakenInCommit(sessionId) {
+      return getAfter(/databases/$(database)/documents/sessions/$(sessionId)).data.booked
+        == get(/databases/$(database)/documents/sessions/$(sessionId)).data.booked + 1;
+    }
+
+    function seatFreedInCommit(sessionId) {
+      return getAfter(/databases/$(database)/documents/sessions/$(sessionId)).data.booked
+        == get(/databases/$(database)/documents/sessions/$(sessionId)).data.booked - 1;
+    }
+
     // ---- users ---------------------------------------------------------
     // Matrix: "users self-read" (+ owner → all). Sprint 10 (contract v1.8,
     // "make it real"): ops now reads the full users collection too (E,
@@ -419,7 +467,46 @@ service cloud.firestore {
           && after.booked <= before.capacity;
       }
 
-      allow update: if signedIn() && bookedDiffOk();
+      // 2026-10-01 (waitlist audit): WHO may move the count. It used to be
+      // any signed-in account, with no booking behind the write - one bare
+      // -1 on a full block made the promotion trigger fill a seat nobody
+      // gave up. Now:
+      //   - only a family account moves it at all (athlete or parent, the
+      //     only roles the booking rules let book or cancel). A login with
+      //     no users doc errors on me() and is refused; staff never move the
+      //     count (Cancel session leaves it alone - sessionCancelOk below).
+      //   - an ATHLETE login must change its own booking in the same commit:
+      //     bookings/{athleteId}_{sessionId} ends 'confirmed' having been
+      //     absent or 'cancelled' for +1, or goes 'confirmed' -> 'cancelled'
+      //     for -1. A bare +1 or -1 from an athlete login is refused.
+      //   - a PARENT is held to the role check only. ACCEPTED GAP, flagged
+      //     in the audit hand-off: this write carries nothing but `booked`,
+      //     and a parent may be booking any of several children, so the rule
+      //     cannot name the booking to look up (households carry no athlete
+      //     list). The other direction IS enforced for a parent too - no
+      //     booking or cancel lands without its counter write
+      //     (seatTakenInCommit / seatFreedInCommit on bookings). A parent's
+      //     bare -1 can still wake the promotion trigger; whether a seat is
+      //     really free is promotion's own check, not this file's. Closing
+      //     it here needs the client to name the booking on this write, or
+      //     booking to move behind a callable.
+      function ownBookingMoved(athleteId) {
+        let idBooking = athleteId + '_' + sessionId;
+        let after = getAfter(/databases/$(database)/documents/bookings/$(idBooking)).data.status;
+        return request.resource.data.booked == resource.data.booked + 1
+          ? (after == 'confirmed'
+              && (!exists(/databases/$(database)/documents/bookings/$(idBooking))
+                  || get(/databases/$(database)/documents/bookings/$(idBooking)).data.status == 'cancelled'))
+          : (after == 'cancelled'
+              && get(/databases/$(database)/documents/bookings/$(idBooking)).data.status == 'confirmed');
+      }
+
+      function bookedMoverOk() {
+        return me().role == 'parent'
+          || (me().role == 'athlete' && ownBookingMoved(me().athleteId));
+      }
+
+      allow update: if signedIn() && bookedDiffOk() && bookedMoverOk();
 
       // Sprint 10 (contract v1.8, H "Session notes"): a second, independent
       // field-limited update branch — coachNote (string <=500 or null) is
@@ -611,10 +698,20 @@ service cloud.firestore {
       // second booking of the same session by the same athlete an overwrite
       // attempt on an existing doc — which create rejects — rather than a
       // duplicate that inflates counts.
+      //
+      // 2026-10-01 (waitlist audit): two clauses joined the list, both
+      // defined with the helpers at the top of this file. sessionDayNotOver
+      // is the near end of the window withinOuterBookingBound closes at the
+      // far end (ruling R2: no booking on a session whose day is over), and
+      // seatTakenInCommit requires the session's `booked` to go up by
+      // exactly one in this same commit, so a booking can no longer be
+      // written past a full session's count.
       allow create: if signedIn()
         && bookingShapeOk()
         && bookingMatchesSession()
         && withinOuterBookingBound()
+        && sessionDayNotOver(request.resource.data.date)
+        && seatTakenInCommit(request.resource.data.sessionId)
         && bookingGraceOk()
         && bookingHouseholdOk()
         && bookingId
@@ -762,6 +859,17 @@ service cloud.firestore {
       // other clause is unchanged, and no other branch (re-book, attendance,
       // staff session cancel) can write the field. All it decides is whether
       // the family's own receipt is sent.
+      // 2026-10-01 (waitlist audit): this supersedes the "capacity is
+      // deliberately NOT re-verified here" paragraph above. Each direction
+      // now proves its counter write landed in the same commit - a cancel
+      // with seatFreedInCommit (booked - 1), a re-book with
+      // seatTakenInCommit (booked + 1) - so a status flip can no longer be
+      // sent without the seat count following it (a re-book written alone
+      // was a second way past a full session). A re-book is booking, so it
+      // also takes sessionDayNotOver (ruling R2); the booking's own `date`
+      // was matched to its session at create and cannot be edited since.
+      // Both clauses sit last on their arm: && short-circuits, so the two
+      // session reads are only paid by a write every earlier clause admits.
       function memberBookingUpdateOk() {
         let before = resource.data;
         let after = request.resource.data;
@@ -775,7 +883,8 @@ service cloud.firestore {
             // Sprint 20 (spec 6.1): a Calendly-sourced booking is cancelled
             // from Calendly's email, never in-app (the webhook writes the
             // cancel). Absent source == 'portal'.
-            && resource.data.get('source', null) != 'calendly')
+            && resource.data.get('source', null) != 'calendly'
+            && seatFreedInCommit(before.sessionId))
           || (before.status == 'cancelled' && after.status == 'confirmed'
               && diffKeys.hasOnly(['status'])
               // Sprint 20 (review 2026-09-29): re-confirming is booking - the
@@ -784,7 +893,9 @@ service cloud.firestore {
               // arm (&& short-circuits) and is one cached document read.
               && resource.data.get('source', null) != 'calendly'
               && athleteBillingOk(athleteData(before.athleteId))
-              && bookingOpenOk(athleteData(before.athleteId)))
+              && bookingOpenOk(athleteData(before.athleteId))
+              && sessionDayNotOver(before.date)
+              && seatTakenInCommit(before.sessionId))
         );
       }
 
@@ -1256,6 +1367,12 @@ service cloud.firestore {
     // 'session-cancelled' only) and the waitlist expiry sweep (reason
     // 'waitlist-expired', Admin SDK - bypasses this file, so the CLIENT
     // shape check below never needs to admit that reason at all).
+    // Owner ruling 2026-10-01 (R1): a waitlist that closes without a spot
+    // mints NOTHING any more - the entry is closed and the held token is
+    // simply free again. The staff cancel above is the one minting trigger
+    // left; 'waitlist-expired' is history only (tokens minted before the
+    // ruling keep reading back). Nothing in this block changes: the client
+    // shape already admits 'session-cancelled' alone.
     match /graceTokens/{graceId} {
       function graceShapeOk() {
         let d = request.resource.data;
@@ -1306,6 +1423,10 @@ service cloud.firestore {
     // athleteId, householdId, date, periodKey, joinedAt, createdBy }. Doc id
     // `{sessionId}_{athleteId}` - one entry per athlete per session, the
     // same keyspace discipline bookings/contractLogs/tokenPeriods use.
+    // 2026-10-01 (waitlist audit, owner ruling R2): create is refused for
+    // a session whose day is over, for a 'mental' session, and for an
+    // athlete already booked on the session; read is household-scoped.
+    // Promotion and the 06:00 sweep stay Admin SDK and outside this file.
     match /waitlist/{entryId} {
       function waitlistShapeOk() {
         let d = request.resource.data;
@@ -1337,11 +1458,19 @@ service cloud.firestore {
       // Absent means the same thing an explicit 'scheduled' means everywhere
       // else this file reads the field (bookings' -1 branch comment already
       // documents the same generator gap) - `get('status','scheduled')`.
+      // 2026-10-01 (waitlist audit): never a 'mental' session. Yannick's
+      // appointments are booked through Calendly (capacity 1, booked 1 from
+      // the moment the webhook writes them), so they always read "full" and
+      // could be queued on, yet a Calendly cancel closes the session rather
+      // than freeing a seat - the entry could never be promoted and only
+      // held the family's token. `type` is read null-safe so a session with
+      // no type keeps whatever answer the other clauses give it.
       function waitlistSessionOk() {
         let s = get(/databases/$(database)/documents/sessions/$(request.resource.data.sessionId)).data;
         return s.date == request.resource.data.date
           && s.booked >= s.capacity
-          && s.get('status', 'scheduled') == 'scheduled';
+          && s.get('status', 'scheduled') == 'scheduled'
+          && s.get('type', null) != 'mental';
       }
 
       // The freeze (contract v2.1, pin H), identical in shape to bookings'
@@ -1360,9 +1489,29 @@ service cloud.firestore {
           && bookingOpenOk(a);
       }
 
+      // 2026-10-01 (waitlist audit): an athlete who already holds a live
+      // booking on this session has nothing to wait for, so the join is
+      // refused and promotion never meets an entry whose seat is already
+      // taken. Only a CANCELLED booking (the keyspace keeps the doc) leaves
+      // the athlete free to queue. A second ENTRY needs no clause of its
+      // own: the id is {sessionId}_{athleteId}, so a repeat join is an
+      // update of the existing doc and this block grants no update at all.
+      function waitlistNotBookedOk() {
+        let idBooking = request.resource.data.athleteId + '_' + request.resource.data.sessionId;
+        return !exists(/databases/$(database)/documents/bookings/$(idBooking))
+          || get(/databases/$(database)/documents/bookings/$(idBooking)).data.status == 'cancelled';
+      }
+
+      // 2026-10-01: sessionDayNotOver (ruling R2, top of this file) - no
+      // joining the queue of a session whose day is over; nobody could be
+      // promoted into it and the entry only held a token until the sweep.
+      // The date it reads is the one waitlistSessionOk has just matched to
+      // the session doc.
       allow create: if signedIn()
         && waitlistShapeOk()
         && waitlistSessionOk()
+        && sessionDayNotOver(request.resource.data.date)
+        && waitlistNotBookedOk()
         && waitlistHouseholdOk()
         && entryId == request.resource.data.sessionId + '_' + request.resource.data.athleteId
         && waitlistAthleteOk()
@@ -1381,27 +1530,63 @@ service cloud.firestore {
         || (me().role == 'parent' && me().householdId == resource.data.householdId)
       );
 
-      // READ - flagged as a deliberate widening, not an oversight (routing
-      // report elaborates). The pinned hook seam wants a 1-based `position`
-      // (useWaitlist), computed client-side from a `sessionId ==` list query
-      // across EVERY family waiting on that session. A family-scoped read
-      // rule cannot make that query provable - its own equality filter is
-      // sessionId, never householdId/athleteId, exactly the "list queries
-      // must carry the matching equality filter, or the query is denied
-      // wholesale" limit this file documents on athletes/bookings above -
-      // so a position query under a family-scoped rule would either fail
-      // outright or, best case, silently return only the caller's own
-      // entry, making `position` always read "1". A wrong number is worse
-      // than an unbuilt feature. A waitlist doc carries no name, dob,
-      // contact, or medical fact, only opaque athleteId/householdId keys
-      // that the athletes/households read rules keep locked down for every
-      // OTHER family regardless (an outsider resolves the id to nothing),
-      // plus schedule facts (date, periodKey) already visible academy-wide
-      // via sessions.booked. Queue order for a full session is treated as
-      // schedule-adjacent, the same call already made for sessions.read and
-      // tournamentResults.read (both signedIn()-only, no resource.data
-      // check) - not family data. PM may override.
-      allow read: if signedIn();
+      // READ - household-scoped, the same shape as the bookings read above
+      // (2026-10-01, waitlist audit). It was `signedIn()` alone, a widening
+      // made so the client could count a 1-based position from a
+      // `sessionId ==` list across every family, on the reasoning that an
+      // outsider resolves the ids to nothing. That reasoning was wrong:
+      // tournamentResults is readable by any login and pairs athleteId with
+      // the child's name, so any account - another family, or a login with
+      // no role at all - could read "this named child is waiting on this
+      // session". Position now comes from the waitlistPositions callable
+      // (Admin SDK, returns the caller's own athletes only), so no client
+      // needs another family's entry.
+      //
+      // List queries must carry the matching equality filter or the whole
+      // query is denied (the limit this file documents on athletes and
+      // bookings): an athlete login filters `athleteId ==` its own, a parent
+      // filters `householdId ==` its own (alone, or beside an athleteId
+      // filter - fetchBookings' shape). A `sessionId ==` list, or a parent's
+      // `athleteId ==` list with no householdId, is refused for a family
+      // account. coach/mental/ops/owner read all, as on bookings.
+      //
+      // DEPLOY ORDER (integration review 2026-10-01) - this file goes LAST:
+      //   1. functions (onSessionBookedDecrease, sweepWaitlist and the new
+      //      waitlistPositions);
+      //   2. the frontend;
+      //   3. wait for open tabs to reload - a tab left open keeps the old
+      //      bundle;
+      //   4. these rules, once scripts/verify-rules.mjs is green on the
+      //      emulator.
+      // The bundle before this change lists a parent's waitlist by
+      // `athleteId ==` alone, which this rule refuses: with these rules ahead
+      // of the frontend, Billing and Membership fail to load for every parent
+      // and a parent's token booking fails with a permissions error.
+      //
+      // The null-resource branch mirrors bookings' nullReadOk: a get() of an
+      // entry that does not exist is answered (not found) only inside the
+      // caller's own keyspace, by the id's athlete - the LAST '_' segment
+      // here, since the id is {sessionId}_{athleteId} and athlete ids never
+      // contain an underscore.
+      function waitlistNullReadOk() {
+        let parts = entryId.split('_');
+        let idAthlete = parts[parts.size() - 1];
+        return (me().role == 'athlete' && me().athleteId == idAthlete)
+          || (me().role == 'parent'
+              && exists(/databases/$(database)/documents/athletes/$(idAthlete))
+              && athleteData(idAthlete).householdId == me().householdId)
+          || me().role in ['coach', 'mental', 'ops', 'owner'];
+      }
+
+      allow read: if signedIn() && (
+        resource == null
+          ? waitlistNullReadOk()
+          : (
+            (me().role == 'athlete' && me().athleteId == resource.data.athleteId)
+            || (me().role == 'parent' && me().householdId == resource.data.householdId)
+            || me().role in ['coach', 'mental', 'ops', 'owner']
+          )
+      );
 
       // No update ever - nothing on a waitlist entry is ever mutated; a
       // change is always a delete (leave) or a promotion (which deletes the

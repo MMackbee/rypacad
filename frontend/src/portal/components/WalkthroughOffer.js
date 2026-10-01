@@ -20,6 +20,8 @@ import { contractEnabled } from '../data/contractFlag';
  * mode: the walkthrough embeds these same home screens.
  *
  * @param {'parent'|'athlete'} track
+ * @param {boolean} [unlimited]  An Elite athlete holds no tokens: their
+ *   walkthrough has no tokens step, and the offer does not name one.
  */
 const BODY = {
   parent:
@@ -30,12 +32,15 @@ const BODY = {
 /** The athlete line while the contract is hidden (owner, 2026-09-30): the walkthrough skips its log step. */
 const ATHLETE_NO_CONTRACT =
   'A short practice run on the real screens with sample data: look around your home, book a block, see how tokens work. Nothing you try in it becomes real.';
+const ATHLETE_NO_CONTRACT_ELITE =
+  'A short practice run on the real screens with sample data: look around your home and book a block. Nothing you try in it becomes real.';
 
-export default function WalkthroughOffer({ track, style }) {
+export default function WalkthroughOffer({ track, unlimited = false, style }) {
   const navigate = useNavigate();
   const { completed, offered, markOffered } = useOnboardingStatus();
   if (!BODY[track] || completed[track] || offered[track]) return null;
-  const body = track === 'athlete' && !contractEnabled() ? ATHLETE_NO_CONTRACT : BODY[track];
+  const athleteNoContract = unlimited ? ATHLETE_NO_CONTRACT_ELITE : ATHLETE_NO_CONTRACT;
+  const body = track === 'athlete' && !contractEnabled() ? athleteNoContract : BODY[track];
 
   const take = () => {
     markOffered(track);

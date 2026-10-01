@@ -49,6 +49,13 @@ export const callCreateFamily = callable('createFamily');
 export const callAddAthletes = callable('addAthletes');
 /** `{ url }` (contract 1.5). */
 export const callCreateCheckoutSession = callable('createCheckoutSession');
+/**
+ * `{ sessionIds }` (1 to 50) -> `{ positions: { [sessionId]: { [athleteId]: number } } }`:
+ * the caller's own athletes' 1-based places, in the order promotion uses.
+ * Screens read it through hooks/waitlist.js#fetchWaitlistPositions, which
+ * never throws - a place in line is simply not shown when this fails.
+ */
+export const callWaitlistPositions = callable('waitlistPositions');
 const claimInvite = callable('claimInvite');
 /** `{ state, householdId, athleteId }` - ids only on 'claimed' (D7); never throws for an expected state (contract 1.4). */
 export const callClaimInvite = () => claimInvite({});

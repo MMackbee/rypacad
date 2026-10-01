@@ -9,11 +9,25 @@ import { TOUR_EVENT_EXPLAINER, TOUR_SEED, deriveTourStandings } from '../data/to
  * a Tour event is on the Tour tab; staff get the board without it.
  */
 let mockStandings;
+// hooks/elite.js: true when every athlete of the family is Elite, null while that loads.
+let mockAllElite;
 jest.mock('../hooks', () => ({ useTourStandings: () => mockStandings }));
 jest.mock('../hooks/useAuthSession', () => ({ __esModule: true, useSelfManaged: () => false }));
+jest.mock('../hooks/elite', () => ({ __esModule: true, default: () => mockAllElite }));
 
 beforeEach(() => {
   mockStandings = { data: TOUR_SEED, loading: false, error: null };
+  mockAllElite = false;
+});
+
+// Tester Mike 2026-09-30: no talk of tokens for Elite members.
+test.each([['an Elite family', true], ['a family still loading', null]])('%s reads the explainer without its token sentence', async (_who, allElite) => {
+  mockAllElite = allElite;
+  const r = await renderScreen(<TourStandings bare role="parent" />);
+  expect(r.text()).toContain("A Tour event is the academy's Saturday tournament.");
+  expect(r.text()).toContain('points count toward the season standings on the Tour tab.');
+  expect(r.text()).not.toContain('One token per event.');
+  await r.unmount();
 });
 
 test('the explainer is the owner\'s wording, one copy', () => {

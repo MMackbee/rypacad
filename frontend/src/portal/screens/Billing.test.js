@@ -106,6 +106,18 @@ test('an all-single household reads one-time and has no monthly footer', async (
   await r.unmount();
 });
 
+// Tester Mike 2026-09-30: no talk of tokens for Elite members.
+test('a household of Elite athletes only: billed monthly, and nothing about tokens resetting', async () => {
+  const elite = { id: 'elite', name: 'Elite', kind: 'elite', windowDays: 45, price: 999 };
+  mockHub.data.members = mockHub.data.members.map((m) => ({ ...m, package: elite, tokens: { unlimited: true }, billing: { status: 'active', facility: null } }));
+  mockHub.data.status = { status: 'active', tone: 'default', badge: { tone: 'green', label: 'Active' }, title: 'Membership active',
+    body: 'Billed monthly on the 1st. Nothing needs attention.', ladder: null, ladderAt: null, cta: null, paused: false, pendingAthletes: [] };
+  const r = await renderScreen(<Billing bare />);
+  expect(r.text()).toContain('Billed monthly on the 1st.');
+  expect(r.text()).not.toContain('Tokens reset the same day');
+  await r.unmount();
+});
+
 test('staff view never pays', async () => {
   const r = await renderScreen(<Billing bare staff role="owner" householdId="h1" />);
   expect(r.button('Pay now|a2|tier')).toBeNull();
@@ -172,4 +184,13 @@ describe('the self-managed athlete (role athlete, one-member household)', () => 
       delete process.env.REACT_APP_CONTRACT_ENABLED;
     }
   });
+});
+
+// Review 2026-10-01: an Elite family holds no tokens, so the load error names none.
+test('a failed load says the membership did not load, with no token wording', async () => {
+  mockHub = { loading: false, error: new Error('offline'), data: null };
+  const r = await renderScreen(<Billing bare />);
+  expect(r.text()).toContain("Your membership didn't load. Check your connection and try again.");
+  expect(r.text()).not.toMatch(/token/i);
+  await r.unmount();
 });

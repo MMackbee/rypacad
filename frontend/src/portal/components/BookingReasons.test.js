@@ -1,6 +1,6 @@
 import React from 'react';
 import { renderScreen } from '../screens/testRender';
-import { CALENDLY_MANAGED_COPY, LockedDayNotice, reasonCopy } from './BookingReasons';
+import { CALENDLY_MANAGED_COPY, LockedDayNotice, canRetry, cancelReasonCopy, reasonCopy } from './BookingReasons';
 
 describe('Sprint 20 booking reasons (contract 3.6)', () => {
   test('billing pending', () => {
@@ -20,6 +20,24 @@ describe('Sprint 20 booking reasons (contract 3.6)', () => {
   });
   test('unknown reasons stay null', () => {
     expect(reasonCopy('nope')).toBeNull();
+  });
+});
+
+describe('waitlist hardening (audit 2026-09-30)', () => {
+  test('a session that filled or started, and a closed waitlist, each say so plainly', () => {
+    expect(reasonCopy('full')).toBe('This session just filled.');
+    expect(reasonCopy('session-past')).toBe('This session has already started.');
+    expect(reasonCopy('waitlist-closed')).toBe('The waitlist for this session has closed.');
+  });
+  test('"tap to try again" is offered only where a second tap can work', () => {
+    expect(canRetry('no-tokens-left')).toBe(true);
+    expect(canRetry(null)).toBe(true);
+    for (const reason of ['full', 'session-past', 'waitlist-closed', 'no-waitlist']) expect(canRetry(reason)).toBe(false);
+  });
+  test('an academy cancellation mentions the bonus token to a token athlete only', () => {
+    expect(cancelReasonCopy('session-cancelled')).toBe('Cancelled by the academy - a bonus token was added.');
+    expect(cancelReasonCopy('session-cancelled', { unlimited: true })).toBe('Cancelled by the academy.');
+    expect(cancelReasonCopy('lapsed', { unlimited: true })).toBe('Cancelled — membership lapsed.');
   });
 });
 

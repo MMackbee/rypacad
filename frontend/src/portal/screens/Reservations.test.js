@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { act } from 'react';
 import { renderScreen } from './testRender';
 import Reservations from './Reservations';
 
@@ -9,13 +9,16 @@ const row = (over) => ({
 });
 let mockRows;
 let mockSiblingRows = [];
+// Whether the sibling (Nico) is Elite, and the Leave waitlist write.
+let mockSiblingUnlimited = false;
+let mockLeave = async () => {};
 const mockCancels = [];
 jest.mock('../hooks', () => ({
   useHouseholdReservations: () => ({
     data: {
       members: [
-        { athleteId: 'a1', name: 'Jordan', upcoming: mockRows, past: [] },
-        ...(mockSiblingRows.length ? [{ athleteId: 'a2', name: 'Nico', upcoming: mockSiblingRows, past: [] }] : []),
+        { athleteId: 'a1', name: 'Jordan', unlimited: false, upcoming: mockRows, past: [] },
+        ...(mockSiblingRows.length ? [{ athleteId: 'a2', name: 'Nico', unlimited: mockSiblingUnlimited, upcoming: mockSiblingRows, past: [] }] : []),
       ],
     },
     loading: false,
@@ -23,7 +26,64 @@ jest.mock('../hooks', () => ({
     cancel: async (...args) => { mockCancels.push(args); },
   }),
 }));
-jest.mock('../hooks/waitlist', () => ({ leaveWaitlist: async () => {} }));
+jest.mock('../hooks/waitlist', () => ({ leaveWaitlist: (...args) => mockLeave(...args) }));
+
+// Audit 2026-09-30: what a waitlisted row says, per child, and a refused leave.
+describe('waitlisted rows', () => {
+  const waiting = (athleteId, over) =>
+    row({ id: `w-${athleteId}`, sessionId: `w-${athleteId}`, bookingId: null, athleteId, type: 'training', name: 'Training block', status: 'waitlisted', waitlistPosition: 2, cancellable: false, ...over });
+  beforeEach(() => {
+    mockLeave = async () => {};
+    mockSiblingUnlimited = true;
+    mockRows = [waiting('a1')];
+    mockSiblingRows = [
+      waiting('a2', { waitlistPosition: null }),
+      row({ id: 'c1', sessionId: 'c1', bookingId: 'a2_c1', athleteId: 'a2', type: 'training', name: 'Training block', status: 'cancelled', cancelReason: 'session-cancelled', cancellable: false }),
+    ];
+  });
+  afterEach(() => {
+    mockSiblingRows = [];
+    mockSiblingUnlimited = false;
+  });
+
+  test('each child by name; the token child is told a token is used, the Elite child reads no token wording', async () => {
+    const r = await renderScreen(<Reservations bare />);
+    expect(r.text()).toContain('On the waitlist - #2 in line');
+    expect(r.text()).toContain('If a spot opens, Jordan is booked automatically and one token is used. You can cancel until the day before.');
+    expect(r.text()).toContain('If a spot opens, Nico is booked automatically. You can cancel until the day before.');
+    expect(r.text()).toContain('Cancelled by the academy.');
+    expect(r.text()).not.toContain('a bonus token was added');
+    expect(r.text()).not.toMatch(/notif/i);
+    await r.unmount();
+  });
+
+  test('a leave refused because the child was just promoted names the child', async () => {
+    const asked = [];
+    mockLeave = async (args) => { asked.push(args); throw Object.assign(new Error('x'), { reason: 'promoted' }); };
+    const r = await renderScreen(<Reservations bare />);
+    const leaveButtons = [...r.container.querySelectorAll('button')].filter((b) => b.textContent.trim() === 'Leave waitlist');
+    expect(leaveButtons).toHaveLength(2);
+    await act(async () => { leaveButtons[1].click(); });
+    expect(asked).toEqual([{ sessionId: 'w-a2', athleteId: 'a2' }]);
+    expect(r.text()).toContain('Nico was just booked into this session.');
+    await r.unmount();
+  });
+
+  // The academy's clock, not the phone's `isToday` (review 2026-10-01).
+  test("a place still held after the session's day (not swept yet) no longer promises a booking", async () => {
+    jest.useFakeTimers('modern');
+    jest.setSystemTime(new Date('2026-11-11T09:00:00Z')); // 3 AM in Chicago, Nov 11; the rows are Nov 10
+    try {
+      const r = await renderScreen(<Reservations bare />);
+      expect(r.text()).not.toContain('If a spot opens');
+      expect(r.text()).toContain('Nobody is booked from a waitlist on the day of the session. This place will close and its token will be free again.');
+      expect(r.text()).toContain('Nobody is booked from a waitlist on the day of the session. This place will close.');
+      await r.unmount();
+    } finally {
+      jest.useRealTimers();
+    }
+  });
+});
 
 test('a Calendly row says to cancel from the email; a portal row keeps Cancel', async () => {
   mockRows = [

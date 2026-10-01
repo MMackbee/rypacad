@@ -158,7 +158,8 @@ export default function TokenMeter({ member, defaultOpen = false, showPrices = f
     return (
       <Card large tone="green">
         <div style={{ display: 'flex', alignItems: 'baseline', gap: 8 }}>
-          <SectionLabel style={{ flex: 1 }}>Tokens</SectionLabel>
+          {/* Elite holds no tokens (tester Mike 2026-09-30): the label says what is unlimited. */}
+          <SectionLabel style={{ flex: 1 }}>Sessions</SectionLabel>
           <span style={{ font: `400 11px ${font.body}`, color: color.textTertiary }}>{price}</span>
         </div>
         <div style={{ font: `700 28px ${font.head}`, color: color.primary, marginTop: 8 }}>Unlimited</div>

@@ -250,3 +250,15 @@ test('slotDayStates: an open slot makes a day available; all-full is its own tap
   ).toEqual({ '2026-10-02': 'available', '2026-10-03': 'full', '2026-10-04': 'open', '2026-10-05': 'open', '2026-10-06': 'available' });
   expect(slotDayStates(undefined)).toEqual({});
 });
+
+test("slotDayStates without a waitlist (Yannick's sessions): a fully booked day opens nothing", () => {
+  expect(
+    slotDayStates(
+      [
+        { date: '2026-10-02', slots: [{ id: 'a', open: true }] },
+        { date: '2026-10-03', slots: [{ id: 'b', open: false }] },
+      ],
+      { waitlist: false }
+    )
+  ).toEqual({ '2026-10-02': 'available', '2026-10-03': 'open' });
+});

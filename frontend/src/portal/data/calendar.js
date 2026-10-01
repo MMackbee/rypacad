@@ -349,10 +349,21 @@ function academyLocalParts(date) {
     month: '2-digit',
     day: '2-digit',
     hour: '2-digit',
+    minute: '2-digit',
   }).formatToParts(date);
   const get = (type) => parts.find((p) => p.type === type)?.value;
   // Some engines print midnight as "24" under hour12: false.
-  return { date: get('year') + '-' + get('month') + '-' + get('day'), hour: Number(get('hour')) % 24 };
+  return { date: get('year') + '-' + get('month') + '-' + get('day'), hour: Number(get('hour')) % 24, minute: Number(get('minute')) };
+}
+
+/**
+ * The academy's wall clock: its calendar date and minutes since midnight in
+ * America/Chicago. What "has this session started" is judged against
+ * (data/sessionStart.js), never the phone's own clock.
+ */
+export function academyClock(now = new Date()) {
+  const { date, hour, minute } = academyLocalParts(now);
+  return { date, minutes: hour * 60 + minute };
 }
 
 /**

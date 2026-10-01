@@ -123,17 +123,22 @@ function bookingConfirmed(args) {
 }
 
 /**
- * kind `promoted` - a waitlist spot opened and was auto-confirmed.
- * @param {{athlete: ?Object, session: ?Object, booking: (?Object|undefined)}}
- *     args Copy inputs.
+ * kind `promoted` - a waitlist spot opened and was auto-confirmed. Says what
+ * happened: the athlete is booked, a token was used, and it can still be
+ * cancelled (owner ruling 2026-10-01). Elite has no tokens, so `elite`
+ * drops the token sentence.
+ * @param {{athlete: ?Object, session: ?Object, booking: (?Object|undefined),
+ *     elite: (boolean|undefined)}} args Copy inputs.
  * @return {{title: string, body: string}} The notice.
  */
 function promoted(args) {
   const name = firstNameOf(args.athlete);
   return {
     title: 'A spot opened up',
-    body: `A spot opened — ${name} is now booked for ` +
-        `${sessionPhrase(args.session)}.` + attendeeNote(args.booking),
+    body: `A spot opened - ${name} is now booked for ` +
+        `${sessionPhrase(args.session)}.` + attendeeNote(args.booking) +
+        (args.elite ? '' : ' One token was used.') +
+        ' You can cancel in the app until the day before.',
   };
 }
 
@@ -276,10 +281,11 @@ function membership(args) {
 }
 
 /**
- * kind `waitlist-expired` - the session passed without a spot; a bonus
- * token was minted (Sprint 17, contract v2.5).
- * @param {{athlete: ?Object, session: ?Object, expiresAt: string}} args
- *     Copy inputs.
+ * kind `waitlist-expired` - the session passed without a spot. Nothing is
+ * minted (owner ruling 2026-10-01): the held token is simply free again.
+ * Elite holds no token, so `elite` drops that sentence.
+ * @param {{athlete: ?Object, session: ?Object, elite: (boolean|undefined)}}
+ *     args Copy inputs.
  * @return {{title: string, body: string}} The notice.
  */
 function waitlistExpired(args) {
@@ -287,8 +293,61 @@ function waitlistExpired(args) {
   return {
     title: 'Waitlist closed',
     body: `The waitlist for ${sessionPhrase(args.session)} closed without ` +
-        `a spot for ${name}. A bonus token was added to ${name}'s account ` +
-        `(expires ${dayLabel(args.expiresAt)}).`,
+        `a spot for ${name}.` +
+        (args.elite ? '' : ' The token held for it is free to use again.'),
+  };
+}
+
+/**
+ * kind `session-cancelled`, for a family that was WAITING on the session
+ * the academy cancelled (a booked family gets `sessionCancelled` above).
+ * @param {{athlete: ?Object, session: ?Object, elite: (boolean|undefined)}}
+ *     args Copy inputs.
+ * @return {{title: string, body: string}} The notice.
+ */
+function waitlistCancelled(args) {
+  const name = firstNameOf(args.athlete);
+  return {
+    title: 'Session cancelled',
+    body: `${sessionPhrase(args.session)} was cancelled by the academy. ` +
+        `${name} was on its waitlist` +
+        (args.elite ? '.' : '; the token held for it is free to use again.'),
+  };
+}
+
+/** Why a waiting athlete could not be booked, in plain words. */
+const REMOVED_REASONS = {
+  'membership-inactive': 'the membership payment is not up to date',
+  'no-package': 'no membership package is set',
+  'no-tokens-left': 'no tokens are left for that period',
+  'outside-window': 'that date is not open for booking yet',
+};
+
+/** What Elite may hold one of per day, by session type. */
+const ONE_A_DAY = {
+  training: 'training block',
+  tournament: 'Tour event',
+  phil: 'session with Phil',
+};
+
+/**
+ * kind `waitlist-removed` - a seat opened and this athlete was next, but a
+ * check a normal booking applies refused it, so the entry was removed.
+ * @param {{athlete: ?Object, session: ?Object, reason: ?string}} args Copy
+ *     inputs; `reason` is the promotion gate that failed.
+ * @return {{title: string, body: string}} The notice.
+ */
+function waitlistRemoved(args) {
+  const name = firstNameOf(args.athlete);
+  const type = args.session && args.session.type;
+  const why = args.reason === 'one-per-day' ?
+      `Elite includes one ${ONE_A_DAY[type] || ONE_A_DAY.training} a day ` +
+          'and one is already booked that day' :
+      REMOVED_REASONS[args.reason] || 'the booking did not go through';
+  return {
+    title: 'Removed from waitlist',
+    body: `${name} was next on the waitlist for ` +
+        `${sessionPhrase(args.session)} but could not be booked: ${why}.`,
   };
 }
 
@@ -333,5 +392,7 @@ module.exports = {
   sessionPhrase,
   timeLabel,
   tokensExpiring,
+  waitlistCancelled,
   waitlistExpired,
+  waitlistRemoved,
 };

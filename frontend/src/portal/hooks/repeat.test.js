@@ -27,12 +27,16 @@ jest.mock('firebase/firestore', () => {
     },
     getDoc: async (ref) => snap(ref),
     serverTimestamp: () => 'SERVER_TS',
-    runTransaction: async (_db, fn) =>
-      fn({
+    setDoc: async (ref, data) => { mockStore[ref.col][ref.id] = data; },
+    runTransaction: async (_db, fn) => {
+      // What another family did between the range read and this week's write.
+      if (mockBeforeTx) mockBeforeTx();
+      return fn({
         get: async (ref) => snap(ref),
         set: (ref, data) => { mockStore[ref.col][ref.id] = data; },
         update: (ref, patch) => { Object.assign(mockStore[ref.col][ref.id], patch); },
-      }),
+      });
+    },
   };
 });
 
@@ -41,6 +45,7 @@ import repeatWeekly from './repeat';
 import { ERR } from './live';
 
 let mockStore;
+let mockBeforeTx;
 
 const OCT_1 = new Date('2026-10-01T17:00:00Z'); // noon Chicago: every window counts from Nov 1
 const ATHLETE = { role: 'athlete', athleteId: 'a1', householdId: 'h1' };
@@ -68,6 +73,7 @@ beforeEach(() => {
   jest.useFakeTimers('modern');
   jest.setSystemTime(OCT_1);
   auth.currentUser = { uid: 'u1' };
+  mockBeforeTx = null;
   mockStore = {
     households: { h1: { name: 'Whitfield family', periodAnchorDay: 1 } },
     athletes: {
@@ -153,6 +159,24 @@ test('Elite with another Phil session already booked that date: that week is ski
   // A full week is skipped, never queued: a repeat joins no waitlist.
   expect(mockStore.waitlist).toEqual({});
   expect(mockStore.sessions['p-1203'].booked).toBe(6);
+});
+
+// Audit 2026-09-30: a week that fills AFTER the repeat read the schedule used
+// to become a real waitlist place the summary reported as "full".
+test('a week that fills between the schedule read and its write is skipped as full, and no waitlist place is left behind', async () => {
+  const phil = session('p-1105', 'phil', '2026-11-05');
+  session('p-1112', 'phil', '2026-11-12');
+  session('p-1119', 'phil', '2026-11-19', '4:00 PM', { booked: 5 });
+  hold('a1', 'p-1105');
+  // Another family takes Nov 19's last seat once the repeat is under way.
+  mockBeforeTx = () => { mockStore.sessions['p-1119'].booked = 6; };
+
+  const out = await repeatWeekly(PARENT, phil, { athleteId: 'a1', untilISO: '2026-11-19' });
+  expect(out.skipped).toEqual([{ date: '2026-11-19', reason: 'full' }]);
+  expect(dates(out.booked)).toEqual(['2026-11-12']);
+  expect(mockStore.waitlist).toEqual({});
+  expect(mockStore.bookings['a1_p-1119']).toBeUndefined();
+  expect(mockStore.sessions['p-1119'].booked).toBe(6);
 });
 
 test("a token package: each week spends from the period its session falls in, and stops at that package's window", async () => {

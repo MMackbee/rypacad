@@ -64,7 +64,7 @@ export default function Membership({ variant = 'populated', bare = false, role =
           <MembershipSkeleton />
         ) : error ? (
           <ErrorNotice title="Membership didn't load" onRetry={onRetry}>
-            Your tokens didn't load. Check your connection and try again.
+            Your membership didn't load. Check your connection and try again.
           </ErrorNotice>
         ) : !member ? (
           <Card large>

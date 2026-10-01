@@ -137,7 +137,7 @@ export default function AthleteDashboard({
           <MediaPlaceholder height={126} caption="WELCOME VIDEO — Luke, 60 sec — what the first week looks like" />
         ) : null}
         {/* First-visit walkthrough offer, below Pay; never inside the walkthrough itself. */}
-        {practice ? null : <WalkthroughOffer track="athlete" />}
+        {practice ? null : <WalkthroughOffer track="athlete" unlimited={Boolean(athlete?.tokens?.unlimited)} />}
 
         {next ? (
           <NextSessionCard next={next} />
@@ -147,7 +147,7 @@ export default function AthleteDashboard({
           // used, not a separate state to keep in sync by hand. Suppressed
           // only for 'new', whose own "Start here" messaging already fills
           // this space.
-          <NoSessions onBook={onBook} />
+          <NoSessions onBook={onBook} unlimited={Boolean(athlete?.tokens?.unlimited)} />
         ) : null}
 
         {/*
@@ -163,7 +163,8 @@ export default function AthleteDashboard({
         {athlete?.tokens ? (
           <Card>
             <div style={{ display: 'flex', alignItems: 'baseline', gap: 10, marginBottom: 12 }}>
-              <SectionLabel style={{ flex: 1 }}>Tokens this period</SectionLabel>
+              {/* Elite holds no tokens (tester Mike 2026-09-30): no token label. */}
+              <SectionLabel style={{ flex: 1 }}>{athlete.tokens.unlimited ? 'Your package' : 'Tokens this period'}</SectionLabel>
               {/*
                 Sprint 11 pin D entry point: "AthleteDashboard's allowance
                 card gets a 'Membership' link." Direct navigate(), same
@@ -461,7 +462,8 @@ function OnboardingChecklist({ items }) {
   );
 }
 
-function NoSessions({ onBook }) {
+/** `unlimited` (Elite) has no token to keep, so the token sentence goes. */
+function NoSessions({ onBook, unlimited = false }) {
   return (
     <div
       style={{
@@ -477,8 +479,8 @@ function NoSessions({ onBook }) {
     >
       <ScreenTitle size={17}>No upcoming sessions</ScreenTitle>
       <Body size={12}>
-        Nothing is on your schedule right now — book any open block. Cancelling with notice keeps
-        your token.
+        Nothing is on your schedule right now - book any open block.
+        {unlimited ? '' : ' Cancelling with notice keeps your token.'}
       </Body>
       <Button height={46} onClick={onBook} style={{ marginTop: 4 }}>
         Browse open slots

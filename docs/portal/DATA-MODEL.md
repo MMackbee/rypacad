@@ -413,6 +413,48 @@ anywhere in the app; the seed script (below) sets `booked` directly because it
 is standing up state that *represents* the outcome of transactions that never
 literally ran, not because `booked` has a second real writer.
 
+**2026-10-01 (waitlist audit) - the rules now hold the two writes together.**
+Until this date the rules judged each write on its own, so a hand-made
+request could create a booking with no count write (a seat past a full
+session, ahead of the waitlist) or move the count with no booking behind it
+(a bare `- 1` made the promotion trigger fill a seat nobody gave up).
+`firestore.rules` now requires, with `getAfter()`:
+
+- **booking create and the member re-book** (`cancelled -> confirmed`): the
+  session's `booked` goes up by exactly one in the same commit
+  (`seatTakenInCommit`). Together with the `sessions` rule's own
+  within-capacity check, a family booking can no longer land on a full
+  session.
+- **the member cancel** (`confirmed -> cancelled`): `booked` goes down by
+  exactly one in the same commit (`seatFreedInCommit`).
+- **the count itself** (`sessions` update, `bookedMoverOk`): only an athlete
+  or parent account may move it - a login with no role doc and every staff
+  role are refused. An **athlete login** must also change its own booking
+  `bookings/{athleteId}_{sessionId}` in that commit (to `confirmed` for
+  `+ 1`, `confirmed -> cancelled` for `- 1`).
+- **Accepted gap, parents only:** the session write carries nothing but
+  `booked`, and a parent may be booking any of several children (a household
+  carries no athlete list), so the rule cannot name which booking to look
+  up. A parent's bare `+ 1` / `- 1` is still accepted by the rules.
+  Promotion must therefore never trust the count alone. Closing it in the
+  rules needs the client to name the booking on the session write, or
+  booking to move behind a callable.
+
+The client was not changed: `createBooking` and `cancelBooking`
+(`hooks/live.js`) have always written both documents in one transaction, and
+Repeat weekly and Cancel a series go through those same two functions. Staff
+"Cancel session" never touches `booked` and is unaffected. Admin SDK writers
+(promotion, the Stripe revoke, the Calendly webhook) bypass rules and keep
+their own counts.
+
+**Past sessions (owner ruling R2, 2026-10-01).** Booking create, the member
+re-book and waitlist create are refused once the session's calendar day is
+over: `request.time` must be before the session date at 00:00 UTC plus 30
+hours (`sessionDayNotOver`) - midnight America/Chicago under CST, 01:00 under
+CDT. The start time is not checked by the rules (`sessions.time` is display
+text); "has it started" is the client's and the promotion function's check,
+with this as the server-side floor under both.
+
 `booked` remains authoritative for **capacity display only** — the
 roster/attendance truth is always the `bookings` query
 ([index 5](#5-bookings-sessionid-asc-status-asc--session-roster), reasoning
@@ -484,6 +526,12 @@ booking, then writes both of:
    landing: no rules shape change, only the routing lane's rules
    verifying/extending the existing diff check for `-1` the same way it
    already does for `+1`.
+
+**2026-10-01:** the rules now refuse either write without the other - a
+cancel must come with `booked - 1` and a re-book with `booked + 1` in the
+same commit, and a re-book is refused once the session's day is over. See
+[the booking transaction](#booking-transaction-attendance-and-parent-linkage-contract-v14-sprint-6)
+above for the full statement and the one accepted gap.
 
 **Client gate, not a stored field:** cancellable through the day *before* the
 session; day-of shows a "contact the academy" message instead of the button.
@@ -1398,6 +1446,13 @@ writes per the Sprint 10 ~20-doc rules cap); (2) `scripts/sweep-waitlist.mjs`
 own cancellation, leaving a waitlist voluntarily, or revocation (lapse)
 mints nothing.
 
+**Owner ruling 2026-10-01 (R1): trigger (2) is retired.** A waitlist entry
+that closes without a spot mints nothing - the entry is closed and the held
+token is free again. The staff "Cancel session" trigger (1) is the only one
+left. `'waitlist-expired'` tokens minted before the ruling stay readable and
+spendable until they expire. See the [`waitlist`](#waitlist-contract-v21-part-2)
+section below.
+
 Seed: **one real doc**, `graceTokens/grace-1` — `athleteId: 'reese'`,
 `reason: 'session-cancelled'`, `sourceSessionId: '2026-11-11-0'` (a real
 generated Wednesday training block, not otherwise referenced by any other
@@ -1447,12 +1502,48 @@ expiry, then `joinedAt` ascending — auto-confirm, no acceptance window) —
 not built by this DB-lane pass; `scripts/sweep-waitlist.mjs` (below) is
 this collection's *other* writer, for the expiry side.
 
+**2026-10-01 (waitlist audit and owner rulings) - what the rules enforce
+now.** This supersedes the paragraph above where they differ.
+
+- **No bonus token from a waitlist (R1).** An entry that closes without a
+  spot is closed and the held token is simply free again. Nothing is minted.
+  Bonus tokens remain only for a session the academy cancels on a booked
+  athlete. No rules change was needed: a client could never write a
+  `'waitlist-expired'` token.
+- **Create** keeps every earlier check (own athlete or household parent,
+  session full and scheduled, membership not `past_due`/`lapsed`, per-athlete
+  billing, the Oct 10 gate) and is also refused:
+  - once the session's calendar day is over (R2, `sessionDayNotOver` - the
+    same clause booking create takes);
+  - for a session of type `mental` - Yannick's appointments are booked
+    through Calendly and can never be promoted into;
+  - for an athlete who holds a booking on that session in any status but
+    `cancelled` (`waitlistNotBookedOk`). A second entry for the same athlete
+    was already impossible: the id is `{sessionId}_{athleteId}` and no update
+    is granted.
+- **Read is household-scoped, the same shape as `bookings`.** It was any
+  signed-in account. An athlete login reads entries whose `athleteId` is its
+  own; a parent reads entries whose `householdId` is its own;
+  coach/mental/ops/owner read all. A `get()` of an entry that does not exist
+  is answered only inside the caller's own keyspace (by the id's athlete).
+  **List queries must carry the matching filter or the whole query is
+  refused:** `athleteId ==` for an athlete login, `householdId ==` for a
+  parent (alone, or beside an `athleteId ==` filter). A `sessionId ==` list
+  is refused for every family account.
+- **Queue position is no longer computed on the client.** It comes from the
+  `waitlistPositions` callable (Admin SDK): input `{ sessionIds }`, output
+  the caller's own athletes' 1-based places in the order promotion uses.
+  The `waitlist (sessionId, joinedAt)` index now serves the server only.
+- **Delete (leave)** is unchanged.
+
 **`attendee` rides the entry too** (owner ruling 2026-09-22): Yannick's 1:1
 has capacity 1, so "full" is the ordinary path for it, and a family that
 chose the parent must not silently lose that choice when a seat opens.
 `promoteOneSeat` copies the field onto the booking it writes. Same rule as
 the booking field: `'athlete' | 'parent'`, admitted by the rules only on a
-`mental` entry, absent reads as the athlete.
+`mental` entry, absent reads as the athlete. **2026-10-01:** the rules no
+longer accept a waitlist entry on a `mental` session at all, so no new entry
+carries the field; the shape still admits it for entries written before.
 
 Seed: **ONE seed-only FULL session**, capacity **2** — **the single
 deliberate exception to the flat capacity-15 rule (contract v2.0 pin J)

@@ -91,7 +91,7 @@ import {
 // import FROM ./live (one-directional, matching useAuthSession.js/
 // useRoster.js's own existing pattern), never the other way.
 import useIssueTokens, { cancelSession, fetchTokenPeriod, setHouseholdStripeIds } from './grace';
-import useWaitlist, { fetchWaitlistByAthlete, fetchWaitlistByHousehold, fetchWaitlistBySession } from './waitlist';
+import useWaitlist, { fetchWaitlistByAthlete, fetchWaitlistByHousehold, fetchWaitlistPositions, positionOf } from './waitlist';
 import useRecentNotices from './notices';
 import usePush from './push';
 import useSignups, { fetchLoginInvite } from './signups';
@@ -195,6 +195,7 @@ import { hideContractParts } from '../data/contractFlag';
 import repeatWeekly, { isGroupBookable } from './repeat';
 import { MARKS_LOOKAHEAD_DAYS, dayMarksFor, monthGridBounds } from '../data/calendarViews';
 import { foldBeforeFirstPeriod, positionPeriodFor, withTokenStart } from '../data/billingHub';
+import { sessionStarted } from '../data/sessionStart';
 
 export { default as useSeedResource } from './useSeedResource';
 export { default as useAuthSession } from './useAuthSession';
@@ -286,7 +287,7 @@ function displaySession(s, today) {
  * Shared copy for the booking waitlist note - one string, both data modes.
  */
 const WAITLIST_NOTE =
-  'Join the waitlist - you are notified if a spot opens, and unlimited makeups still apply.';
+  'Join the waitlist - if a spot opens the athlete is booked automatically.';
 
 /* ------------------------------------------------------------------------- *
  * Live assembly - Firestore docs (via ./live.js) into the exact payload
@@ -439,29 +440,41 @@ function byDateThenId(a, b) {
 }
 
 /**
+ * What a token position is derived from besides bookings (contract v2.1):
+ * the athlete's bonus tokens, the waitlist entries holding a token, and this
+ * period's issued grant. The booking check (live.js createBooking) counts
+ * all three, so every booking surface reads them too (audit 2026-09-30) -
+ * otherwise a held token showed as "1 left" and a bonus token could not be
+ * spent once the period read zero. `householdId` scopes the waitlist read
+ * for a parent, as the rule needs.
+ */
+async function fetchTokenInputs(athleteId, householdId, anchorDay, today) {
+  const [graceTokens, waitlist, tokenPeriod] = await Promise.all([
+    fetchGraceTokensByAthlete(athleteId),
+    fetchWaitlistByAthlete(athleteId, { householdId }),
+    fetchTokenPeriod(athleteId, positionPeriodFor(today, anchorDay).periodKey),
+  ]);
+  return { graceTokens, waitlist, tokenPeriod };
+}
+
+/**
  * Waitlist entries resolved into rows shaped like a booking row (contract
  * v2.1, pin F: "waitlisted items merged... with waitlistPosition"), shared
  * by useSchedule and useHouseholdReservations' live branches so the two can
- * never disagree about what a waitlisted row looks like. One
- * fetchWaitlistBySession() per DISTINCT session among the entries (an
- * athlete/household waitlists at most a handful of sessions at once) to
- * compute each entry's 1-based position in its own queue - the SAME
- * derivation useWaitlist's own position math uses. `sessionsById` is a
- * pre-fetched map the caller already built (so this never issues its own
- * redundant fetchSessionsByIds call).
+ * never disagree about what a waitlisted row looks like. The place in line
+ * is ONE fetchWaitlistPositions() call for every session among the entries
+ * (the waitlistPositions callable: the order promotion uses, the caller's
+ * own athletes only) - null when it is unknown, never a failed list.
+ * `sessionsById` is a pre-fetched map the caller already built (so this
+ * never issues its own redundant fetchSessionsByIds call).
  */
 async function resolveWaitlistRows(entries, sessionsById, today, anchorDay, currentPeriodKey) {
   if (!entries.length) return [];
-  const uniqueSessionIds = [...new Set(entries.map((e) => e.sessionId))];
-  const queues = new Map(
-    await Promise.all(uniqueSessionIds.map(async (id) => [id, await fetchWaitlistBySession(id)]))
-  );
+  const positions = await fetchWaitlistPositions(entries.map((e) => e.sessionId));
   return entries
     .map((e) => {
       const s = sessionsById.get(e.sessionId);
       if (!s) return null; // dropped, same null-resolve rule as a booking whose session vanished
-      const queue = queues.get(e.sessionId) || [];
-      const idx = queue.findIndex((q) => q.athleteId === e.athleteId);
       const periodKey = periodFor(s.date, anchorDay).periodKey;
       const specialist = SPECIALIST_BY_ID.get(s.type);
       return {
@@ -469,7 +482,7 @@ async function resolveWaitlistRows(entries, sessionsById, today, anchorDay, curr
         badge: { tone: 'yellow', label: 'Waitlisted' },
         bookingId: null,
         status: 'waitlisted',
-        waitlistPosition: idx >= 0 ? idx + 1 : null,
+        waitlistPosition: positionOf(positions, e.sessionId, e.athleteId),
         athleteId: e.athleteId,
         // Shape parity with reservationRow's own confirmed-booking rows -
         // durationMinutes/instructor read the same way regardless of status.
@@ -669,7 +682,13 @@ async function liveBooking(today, { withSlots = true } = {}) {
     ]);
     const anchorDay = normalizeAnchorDay(household?.periodAnchorDay);
     windowDays = windowDaysFor(pkg);
-    tokens = deriveTokens(pkg, bookings, anchorDay, today, { billingStatus: athlete.billing?.status });
+    // The position the booking check enforces: waitlist holds and bonus
+    // tokens counted (fetchTokenInputs).
+    const inputs = await fetchTokenInputs(athlete.id, athlete.householdId, anchorDay, today);
+    tokens = withGraceReasons(
+      deriveTokens(pkg, bookings, anchorDay, today, { ...inputs, billingStatus: athlete.billing?.status }),
+      inputs.graceTokens
+    );
     identity = { role: 'athlete', athleteId: athlete.id, householdId: athlete.householdId };
   } else {
     identity = { role: 'parent', householdId: who.profile.householdId };
@@ -945,8 +964,14 @@ export function useBooking({ variant = 'open', today = todayISO(), practice = fa
    * needed, same plain-object convention `err.message` already relies on)
    * alongside the existing plain-language `err.message` fallback for every
    * other case.
+   *
+   * `joinWaitlist` (audit 2026-09-30) is the Join waitlist button's own
+   * request: only then does a full session resolve { status: 'waitlisted' },
+   * with the athlete's place from the waitlistPositions callable (null when
+   * it is unknown). Without it a full session rejects with reason 'full' and
+   * nothing is written.
    */
-  const book = async (slot, { athleteId, attendee } = {}) => {
+  const book = async (slot, { athleteId, attendee, joinWaitlist = false } = {}) => {
     if (!live) return slot;
     if (!identity) {
       throw new LiveDataError(
@@ -954,30 +979,25 @@ export function useBooking({ variant = 'open', today = todayISO(), practice = fa
         'book() called before the booking data finished loading.'
       );
     }
-    if (identity.role === 'parent') {
-      if (!athleteId) {
-        throw new LiveDataError(
-          ERR.INVALID,
-          'book() needs the child to book for - pass { athleteId } for a parent account.'
-        );
-      }
-      return createBooking({
-        athleteId,
-        sessionId: slot.id,
-        date: slot.date,
-        type: slot.type,
-        householdId: identity.householdId,
-        attendee,
-      });
+    if (identity.role === 'parent' && !athleteId) {
+      throw new LiveDataError(
+        ERR.INVALID,
+        'book() needs the child to book for - pass { athleteId } for a parent account.'
+      );
     }
-    return createBooking({
-      athleteId: identity.athleteId,
+    const booking = {
+      athleteId: identity.role === 'parent' ? athleteId : identity.athleteId,
       sessionId: slot.id,
       date: slot.date,
       type: slot.type,
       householdId: identity.householdId,
       attendee,
-    });
+    };
+    const result = await (joinWaitlist ? createBooking(booking, { waitlistIfFull: true }) : createBooking(booking));
+    if (result && result.status === 'waitlisted') {
+      return { ...result, position: positionOf(await fetchWaitlistPositions([slot.id]), slot.id, booking.athleteId) };
+    }
+    return result;
   };
 
   // Repeat weekly lives in hooks/repeat.js (review 2026-09-30, the 500-line rule).
@@ -1053,16 +1073,19 @@ async function liveMonthSessions(monthISO, today) {
     const entries = await (who.role === 'athlete'
       ? fetchWaitlistByAthlete(who.profile.athleteId)
       : fetchWaitlistByHousehold(who.profile.householdId));
-    const bySession = new Map(entries.map((e) => [e.sessionId, e]));
-    // Every waitlisted row's queue in parallel (perf wave B), then annotate
-    // the rows in place exactly as the sequential loop did.
+    const bySession = new Map();
+    for (const e of entries) bySession.set(e.sessionId, [...(bySession.get(e.sessionId) ?? []), e]);
+    // One positions call for every waitlisted row (the waitlistPositions
+    // callable; empty when it is unavailable), then annotate the rows in
+    // place. `waitlistBy` is WHO waits and their place - a parent's two
+    // children can wait on one session, and the card must know which.
     const rows = days.flatMap((day) => day.sessions).filter((row) => bySession.has(row.id));
-    const queues = await Promise.all(rows.map((row) => fetchWaitlistBySession(row.id)));
-    rows.forEach((row, i) => {
-      const entry = bySession.get(row.id);
-      const idx = queues[i].findIndex((q) => q.athleteId === entry.athleteId);
+    const positions = rows.length ? await fetchWaitlistPositions(rows.map((row) => row.id)) : {};
+    rows.forEach((row) => {
+      const waiting = bySession.get(row.id);
       row.waitlisted = true;
-      row.waitlistPosition = idx >= 0 ? idx + 1 : null;
+      row.waitlistPosition = positionOf(positions, row.id, waiting[0].athleteId);
+      row.waitlistBy = Object.fromEntries(waiting.map((e) => [e.athleteId, positionOf(positions, row.id, e.athleteId)]));
     });
   }
   return { month: label, days, dayMarks };
@@ -1091,6 +1114,8 @@ export function useMonthSessions(monthISO, { practice = false } = {}) {
   // sessions.booked - re-run so spots-left stays correct after a write made
   // anywhere, not just through this hook instance.
   const sessionsGen = useInvalidation('sessions');
+  // A waitlist join or leave changes a row's "On the waitlist" state.
+  const waitlistGen = useInvalidation('waitlist');
 
   const seedValue = () => {
     const { label } = monthBounds(resolvedMonth);
@@ -1106,7 +1131,7 @@ export function useMonthSessions(monthISO, { practice = false } = {}) {
     live
       ? {
           source: () => liveMonthSessions(resolvedMonth, today),
-          deps: ['month-sessions', resolvedMonth, sessionsGen],
+          deps: ['month-sessions', resolvedMonth, sessionsGen, waitlistGen],
         }
       : undefined
   );
@@ -1202,7 +1227,9 @@ async function liveSpecialistDays(specialistId, today, windowDays) {
 
   const byDate = new Map();
   for (const s of sessions) {
-    if (s.type !== specialistId || s.status === 'cancelled') continue;
+    // `bookable: false` is another family's Calendly appointment with
+    // Yannick (functions/portal/calendly.js) - never a slot to offer.
+    if (s.type !== specialistId || s.status === 'cancelled' || s.bookable === false) continue;
     const list = byDate.get(s.date);
     if (list) list.push(s);
     else byDate.set(s.date, [s]);
@@ -1210,8 +1237,10 @@ async function liveSpecialistDays(specialistId, today, windowDays) {
 
   const days = [];
   for (let date = today; date <= toDate; date = addDaysISO(date, 1)) {
+    // R2: a session that has started cannot be booked or waitlisted, so
+    // today's earlier times are not offered at all.
     const onDate = (byDate.get(date) ?? [])
-      .slice()
+      .filter((s) => !sessionStarted(s))
       .sort((a, b) => (parseTimeToMinutes(a.time) ?? 0) - (parseTimeToMinutes(b.time) ?? 0));
     days.push({
       date,
@@ -1297,14 +1326,26 @@ async function liveSpecialistSlots(specialistId, athleteIdOverride, today) {
   ]);
   const anchorDay = normalizeAnchorDay(household?.periodAnchorDay);
   const windowDays = windowDaysFor(pkg);
-  const rawDays = await liveSpecialistDays(specialistId, today, windowDays);
+  const [rawDays, inputs] = await Promise.all([
+    liveSpecialistDays(specialistId, today, windowDays),
+    fetchTokenInputs(athleteId, athlete.householdId, anchorDay, today),
+  ]);
+  // The sessions this athlete already waits for, each with its place when
+  // the server says one: the sheet shows "On the waitlist", never Join again.
+  const waiting = new Set((inputs.waitlist ?? []).map((w) => w.sessionId));
+  const waitingHere = rawDays.flatMap((d) => d.slots).filter((s) => waiting.has(s.sessionId)).map((s) => s.sessionId);
+  const positions = waitingHere.length ? await fetchWaitlistPositions(waitingHere) : {};
   // K04: the cadence is judged for each SLOT's month; the top-level
   // capReached keeps today's month for the summary line.
   const days = rawDays.map((d) => ({
     ...d,
     capReached: specialistId === 'mental' && coachingFor(bookings, today, pkg, d.date.slice(0, 7)).capReached,
+    slots: d.slots.map((s) =>
+      waiting.has(s.sessionId) ? { ...s, waitlisted: true, waitlistPosition: positionOf(positions, s.sessionId, athleteId) } : s
+    ),
   }));
-  const tokens = tokensWithNextPeriod(pkg, bookings, anchorDay, today);
+  // The position the booking check enforces (fetchTokenInputs).
+  const tokens = withGraceReasons(tokensWithNextPeriod(pkg, bookings, anchorDay, today, inputs), inputs.graceTokens);
   const capReached = specialistId === 'mental' && coachingFor(bookings, today, pkg).capReached;
   // Sprint 20 (spec 6.1): Calendly only when the registry says so AND a URL
   // is configured; otherwise the in-app list, so seed/emulator keep working.
@@ -1709,10 +1750,12 @@ async function liveHouseholdAthletes(today) {
   const anchorDay = normalizeAnchorDay(household.periodAnchorDay);
   return Promise.all(
     athletes.map(async (a) => {
-      const [pkg, bookings] = await Promise.all([
+      const [pkg, bookings, inputs] = await Promise.all([
         a.packageId ? fetchPackage(a.packageId) : null,
         // Parent context — compound filter for rules provability (fetchBookings).
         fetchBookings(a.id, { householdId: profile.householdId }),
+        // Waitlist holds and bonus tokens, as the booking check counts them.
+        fetchTokenInputs(a.id, profile.householdId, anchorDay, today),
       ]);
       return {
         id: a.id,
@@ -1720,7 +1763,10 @@ async function liveHouseholdAthletes(today) {
         packageId: a.packageId ?? null,
         packageName: pkg ? pkg.name : null,
         billingStatus: a.billing?.status ?? 'active',
-        tokens: deriveTokens(pkg, bookings, anchorDay, today, { billingStatus: a.billing?.status }),
+        tokens: withGraceReasons(
+          deriveTokens(pkg, bookings, anchorDay, today, { ...inputs, billingStatus: a.billing?.status }),
+          inputs.graceTokens
+        ),
       };
     })
   );
@@ -1898,7 +1944,8 @@ async function liveMemberEntry(a, today, anchorDay) {
     a.packageId ? fetchPackage(a.packageId) : null,
     fetchBookings(a.id, { householdId: a.householdId }),
     fetchGraceTokensByAthlete(a.id),
-    fetchWaitlistByAthlete(a.id),
+    // The household filter is what a parent's read is provable on (waitlist.js).
+    fetchWaitlistByAthlete(a.id, { householdId: a.householdId }),
     // Contract v2.1, pin C: read BY ID for the current period only - "no
     // query, no index". Absent (no doc issued yet) resolves to null, which
     // tokensFor treats as "the package's own grant" (pin C's own words).
@@ -2213,7 +2260,10 @@ async function liveHouseholdReservations(today) {
     ).map((s) => [s.id, s])
   );
 
-  const byAthlete = new Map(athletes.map((a) => [a.id, { athleteId: a.id, name: a.name, upcoming: [], past: [] }]));
+  // `unlimited`: an Elite athlete's rows carry no token wording (Reservations.js).
+  const byAthlete = new Map(
+    athletes.map((a) => [a.id, { athleteId: a.id, name: a.name, unlimited: packageById(a.packageId)?.tokens === null, upcoming: [], past: [] }])
+  );
   for (const b of bookings) {
     const s = sessionsById.get(b.sessionId);
     const bucket = byAthlete.get(b.athleteId);
@@ -2308,7 +2358,10 @@ export function useHouseholdReservations() {
   const today = todayISO();
   const bookingsGen = useInvalidation('bookings');
 
-  const seedMembers = HOUSEHOLD.children.map((c) => seedReservationMember(c, today));
+  const seedMembers = HOUSEHOLD.children.map((c) => ({
+    ...seedReservationMember(c, today),
+    unlimited: packageById(c.packageId)?.tokens === null, // as the live branch
+  }));
 
   const state = useSeedResource(
     live ? null : { members: seedMembers },

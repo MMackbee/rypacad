@@ -4,7 +4,7 @@ import BottomTabBar from '../components/BottomTabBar';
 import Button from '../components/Button';
 import CancelSheet from '../components/CancelSheet';
 import { CALENDLY_MANAGED_COPY, cancelReasonCopy } from '../components/BookingReasons';
-import { LeaveWaitlistButton, WaitlistPositionLine } from '../components/WaitlistAction';
+import { leaveFailureCopy, OnWaitlist } from '../components/WaitlistAction';
 import MediaPlaceholder from '../components/MediaPlaceholder';
 import PhoneFrame from '../components/PhoneFrame';
 import Segmented from '../components/Segmented';
@@ -19,6 +19,7 @@ import { cancelSeries, laterWeeks } from '../hooks/cancelSeries';
 // Pure calendar helper, not response data - same seam rule BookSession and
 // CommitmentContract already follow (see their own imports of this module).
 import { todayISO } from '../data/calendar';
+import { waitlistClosed } from '../data/sessionStart';
 import { attendeeNoteFor } from '../data/specialists';
 
 /**
@@ -70,6 +71,10 @@ export default function MySchedule({
   // Which waitlisted bookingId is mid-leave, for LeaveWaitlistButton's own
   // loading state (no confirm sheet - leaving costs nothing already spent).
   const [leavingId, setLeavingId] = useState(null);
+  // Why the last "Leave waitlist" was refused, in plain words. It sits above
+  // the list: a refused leave reloads it, and a row the athlete was promoted
+  // off is no longer there to carry the line.
+  const [leaveFailure, setLeaveFailure] = useState(null);
 
   const past = tab === 'past';
   const today = todayISO();
@@ -130,8 +135,12 @@ export default function MySchedule({
   // bookings, so this list refreshes through its own seam.
   const handleLeaveWaitlist = async (item) => {
     setLeavingId(item.bookingId ?? item.id);
+    setLeaveFailure(null);
     try {
       await leaveWaitlist({ sessionId: item.sessionId ?? item.id, athleteId: item.athleteId });
+    } catch (err) {
+      // This is the athlete's own schedule: no name, so "You were just booked".
+      setLeaveFailure(leaveFailureCopy(err));
     } finally {
       setLeavingId(null);
     }
@@ -151,6 +160,12 @@ export default function MySchedule({
         {/* The tabs are local UI state, not fetched data — they stay live (and
             hold their place) while the list loads or fails. */}
         <Segmented value={tab} onChange={setTab} />
+
+        {leaveFailure ? (
+          <Banner tone="yellow" title="Waitlist">
+            {leaveFailure}
+          </Banner>
+        ) : null}
 
         {loading ? (
           <ScheduleSkeleton />
@@ -198,7 +213,8 @@ function ScheduleBody({ past, sessions, cancelled, tokens, days, onBook, onCance
         */}
         {tokens ? (
           <Card>
-            <SectionLabel style={{ marginBottom: 12 }}>Tokens this period</SectionLabel>
+            {/* Elite holds no tokens (tester Mike 2026-09-30): no token label. */}
+            <SectionLabel style={{ marginBottom: 12 }}>{tokens.unlimited ? 'Your package' : 'Tokens this period'}</SectionLabel>
             <AllowancePools tokens={tokens} />
             <GraceLine tokens={tokens} />
           </Card>
@@ -230,7 +246,7 @@ function ScheduleBody({ past, sessions, cancelled, tokens, days, onBook, onCance
               variant="cancelled"
               // Pin G: the system cancellation reasons state plainly what
               // happened; a member's own cancel ('member') has nothing to add.
-              footnote={cancelReasonCopy(cancelled.cancelReason)}
+              footnote={cancelReasonCopy(cancelled.cancelReason, { unlimited: Boolean(tokens?.unlimited) })}
             />
           </div>
         ) : null}
@@ -274,7 +290,7 @@ function ScheduleBody({ past, sessions, cancelled, tokens, days, onBook, onCance
                   name={s.name}
                   meta={attendeeNoteFor(s) ?? s.meta}
                   variant={rowCancelled ? 'cancelled' : s.isToday ? 'live' : 'default'}
-                  footnote={rowCancelled ? cancelReasonCopy(s.cancelReason) : null}
+                  footnote={rowCancelled ? cancelReasonCopy(s.cancelReason, { unlimited: Boolean(tokens?.unlimited) }) : null}
                   trailing={
                     waitlisted ? (
                       <StatusBadge tone="yellow">Waitlisted</StatusBadge>
@@ -289,13 +305,15 @@ function ScheduleBody({ past, sessions, cancelled, tokens, days, onBook, onCance
                   }
                   action={
                     past || rowCancelled ? null : waitlisted ? (
-                      <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-                        <WaitlistPositionLine position={s.waitlistPosition} />
-                        <LeaveWaitlistButton
-                          loading={leavingId != null && leavingId === (s.bookingId ?? s.id)}
-                          onClick={() => onLeaveWaitlist(s)}
-                        />
-                      </div>
+                      <OnWaitlist
+                        position={s.waitlistPosition}
+                        unlimited={Boolean(tokens?.unlimited)}
+                        // The academy's clock, and any day from the session's
+                        // own on: an entry the 06:00 sweep has not closed yet.
+                        closed={waitlistClosed(s)}
+                        leaving={leavingId != null && leavingId === (s.bookingId ?? s.id)}
+                        onLeave={() => onLeaveWaitlist(s)}
+                      />
                     ) : s.source === 'calendly' ? (
                       <Body size={11} tone={color.textTertiary}>{CALENDLY_MANAGED_COPY}</Body>
                     ) : dayOf ? (

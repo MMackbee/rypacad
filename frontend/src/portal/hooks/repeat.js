@@ -42,6 +42,9 @@ const REPEAT_SKIP_REASON = new Map([
   ['outside-window', 'not open yet'],
   ['no-tokens-left', 'period limit'],
   ['one-per-day', 'one per day'],
+  // The session filled after the schedule was read: createBooking refuses it
+  // as 'full' and writes nothing - a repeat never asks for a waitlist place.
+  ['full', 'full'],
 ]);
 const REPEAT_STOP_REASONS = new Set(['membership-inactive', 'billing-pending', 'booking-not-open']);
 
@@ -152,7 +155,10 @@ export default async function repeatWeekly(identity, slot, { athleteId, untilISO
         // one invalidation bump in the finally below instead of a refetch
         // storm per iteration (finding 8b). The window caps this at ~7 weeks.
         // createdVia 'repeat': no per-week notice (functions/index.js).
-        const result = await createBooking(
+        // No waitlistIfFull: a week that fills between the pre-check above
+        // and the transaction is refused as 'full' (the catch below), with
+        // no waitlist place written (audit 2026-09-30).
+        await createBooking(
           {
             athleteId: forAthleteId,
             sessionId: match.id,
@@ -162,13 +168,6 @@ export default async function repeatWeekly(identity, slot, { athleteId, untilISO
           },
           { silent: true, createdVia: 'repeat' }
         );
-        // A race that fills the session between the pre-check above and the
-        // transaction resolves as 'waitlisted' instead of 'confirmed' -
-        // reported as skipped, not counted as booked (contract v2.1, pin F).
-        if (result.status === 'waitlisted') {
-          skipped.push({ date, reason: 'full' });
-          continue;
-        }
         booked.push({ date: match.date, id: match.id });
         have.add(match.id);
       } catch (err) {

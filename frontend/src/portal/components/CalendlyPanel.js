@@ -3,7 +3,7 @@ import { color, font, radius, tint } from '../tokens';
 import Button from './Button';
 import { capReachedCopy, reasonCopy } from './BookingReasons';
 import { Banner, Body, Card, SectionLabel } from './Primitives';
-import { calendlyLinkFor, CALENDLY_NOTE } from '../data/calendly';
+import { calendlyLinkFor, CALENDLY_NOTE, CALENDLY_NOTE_UNLIMITED } from '../data/calendly';
 import { attendeeContact, calendlyBlockReason } from '../data/specialistGate';
 
 /** Yannick via Calendly (spec 6.1): one button, gated exactly like an in-app booking, opening a prefilled link in a new tab. */
@@ -30,7 +30,7 @@ export default function CalendlyPanel({ data, tokens, capReached, attendee, onAt
       ) : (
         <Button height={50} onClick={() => open(link)} style={{ marginTop: 14 }}>Book with Yannick</Button>
       )}
-      <Body size={11} tone={color.textTertiary} style={{ marginTop: 10 }}>{CALENDLY_NOTE}</Body>
+      <Body size={11} tone={color.textTertiary} style={{ marginTop: 10 }}>{tokens?.unlimited ? CALENDLY_NOTE_UNLIMITED : CALENDLY_NOTE}</Body>
     </Card>
   );
 }

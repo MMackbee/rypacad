@@ -140,6 +140,44 @@ test('the tokens card: "Tokens start Nov 1" before the season, "Pay to start" un
   mockTokens = null;
 });
 
+// Tester Mike 2026-09-30: no talk of tokens for Elite members.
+test('the empty state and the package card: token wording for a token athlete, none for Elite', async () => {
+  mockContract = null;
+  mockTokens = { granted: 6, used: 1, reserved: 0, left: 5, unlimited: false, grace: [], startsOn: null, unpaid: false };
+  const member = await renderScreen(<AthleteDashboard bare />);
+  expect(member.text()).toContain('Nothing is on your schedule right now - book any open block. Cancelling with notice keeps your token.');
+  expect(member.text()).toContain('Tokens this period');
+  await member.unmount();
+
+  mockTokens = { unlimited: true, granted: null, left: null, grace: [{ id: 'g1', expiresAt: '2026-12-01', reason: 'session-cancelled' }] };
+  const elite = await renderScreen(<AthleteDashboard bare />);
+  expect(elite.text()).toContain('Nothing is on your schedule right now - book any open block.');
+  expect(elite.text()).toContain('Your package');
+  expect(elite.text()).toContain('Elite · unlimited');
+  expect(elite.text()).not.toMatch(/token/i);
+  await elite.unmount();
+  mockTokens = null;
+});
+
+// Review 2026-10-01: the first-visit walkthrough offer names tokens while the
+// contract is hidden - not to an Elite athlete.
+test('the walkthrough offer: "see how tokens work" for a token athlete, no token wording for Elite', async () => {
+  delete process.env.REACT_APP_CONTRACT_ENABLED;
+  try { window.localStorage.clear(); } catch (e) { /* storage unavailable */ }
+  mockContract = null;
+  mockTokens = { granted: 6, used: 1, reserved: 0, left: 5, unlimited: false, grace: [], startsOn: null, unpaid: false };
+  const member = await renderScreen(<AthleteDashboard bare />);
+  expect(member.text()).toContain('look around your home, book a block, see how tokens work.');
+  await member.unmount();
+
+  mockTokens = { unlimited: true, granted: null, left: null, grace: [] };
+  const elite = await renderScreen(<AthleteDashboard bare />);
+  expect(elite.text()).toContain('look around your home and book a block. Nothing you try in it becomes real.');
+  expect(elite.text()).not.toMatch(/token/i);
+  await elite.unmount();
+  mockTokens = null;
+});
+
 describe('Commitment Contract hidden (owner ruling 2026-09-30)', () => {
   const behind = {
     logged: 0, total: 6, month: 'November', pct: 0, kind: 'behind',

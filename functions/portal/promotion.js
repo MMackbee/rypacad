@@ -5,15 +5,26 @@
  * `sessions.participants` / `sessions.waitlist` arrays that no v1+ session
  * has ever carried and so could never fire.
  *
- * A seat opening is `sessions.booked` DECREASING. Every path that frees a
- * seat goes through it: a member cancelling, staff cancelling a session, and
- * the Stripe handler revoking on lapse. The trigger then walks the session's
- * waitlist and promotes while seats and entries remain.
+ * A seat opens when `sessions.booked` DECREASES (a member cancelling, the
+ * Stripe handler revoking on lapse), when `capacity` is RAISED, or when a
+ * cancelled session is set back to scheduled. The one sessions trigger then
+ * walks the waitlist and promotes while seats and entries remain. The same
+ * trigger closes the waitlist when the academy CANCELS the session
+ * (portal/waitlist-close.js).
  *
- * Rules are bypassed under the admin SDK, so this module replicates EVERY
- * client gate itself — membership not past_due/lapsed, the period cap
- * counted exactly as `tokensFor` counts it, and the grace-first charge
- * order. It never branches on `sessions.type`: one pool (design keystone).
+ * Rules are bypassed under the admin SDK, so every gate a normal booking
+ * passes is applied before a promotion; the gates and the order live in
+ * portal/waitlist-order.js, shared with the position families are shown.
+ * Charging never branches on `sessions.type`: one pool (design keystone).
+ *
+ * OWNER RULINGS 2026-10-01, all enforced here:
+ *   - No same-day promotion: a session dated today or earlier is never
+ *     promoted into (the family could not cancel). Entries still waiting
+ *     are closed by the next morning's sweep.
+ *   - A candidate who fails a gate is removed from the list AND told why.
+ *   - The seat count is the real one: the larger of `sessions.booked` and
+ *     the session's non-cancelled bookings. A full session is never
+ *     promoted into, whatever the counter says.
  *
  * AUTO-CONFIRM, no acceptance window (owner's ruling, pinned Sprint 12).
  */
@@ -26,7 +37,9 @@ const admin = require('firebase-admin');
 // survive the Functions emulator's admin stub; the modular export does.
 const {FieldValue} = require('firebase-admin/firestore');
 const lib = require('./lib');
-const notify = require('./notify');
+const close = require('./waitlist-close');
+const order = require('./waitlist-order');
+const tell = require('./waitlist-notices');
 const {MAIL_SECRETS} = require('./secrets');
 
 /** A safety stop; a session's capacity is 15, so this can never bind. */
@@ -52,136 +65,6 @@ function sessionStatus(session) {
  */
 function db() {
   return admin.firestore();
-}
-
-/**
- * Milliseconds from a `joinedAt` that may be a Firestore Timestamp, a Date
- * or an ISO string (the seed writes one shape, the client another).
- * @param {*} value The stored `joinedAt`.
- * @return {number} Epoch millis; `Infinity` sorts an unusable value last.
- */
-function joinedAtMillis(value) {
-  if (!value) return Infinity;
-  if (typeof value.toMillis === 'function') return value.toMillis();
-  if (value instanceof Date) return value.getTime();
-  const parsed = Date.parse(String(value));
-  return Number.isFinite(parsed) ? parsed : Infinity;
-}
-
-/**
- * Everything one waitlist entry's gates need. READ ONLY — a Firestore
- * transaction requires every read before any write, so the caller loads all
- * candidates first and only then decides and writes.
- * @param {!Object} tx The transaction.
- * @param {!Object} entry `{id, ...}` from the waitlist query.
- * @param {!Object} session The session body.
- * @param {string} sessionId The session id.
- * @param {string} today Today in America/Chicago.
- * @return {!Promise<!Object>} A candidate: the entry, its gate verdict and,
- *     when it passes, the charge that would pay for it.
- */
-async function loadCandidate(tx, entry, session, sessionId, today) {
-  const base = {entry, ok: false, reason: null, graceExpiry: null};
-  const athleteId = entry.athleteId;
-  if (!athleteId) return Object.assign(base, {reason: 'no-athlete'});
-
-  const athleteSnap = await tx.get(db().collection('athletes').doc(athleteId));
-  if (!athleteSnap.exists) return Object.assign(base, {reason: 'no-athlete'});
-  const athlete = athleteSnap.data() || {};
-  const householdId = athlete.householdId || entry.householdId || null;
-
-  let household = null;
-  if (householdId) {
-    const hhSnap = await tx.get(
-        db().collection('households').doc(householdId));
-    household = hhSnap.exists ? hhSnap.data() : null;
-  }
-  if (!lib.membershipAllowsBooking(household, athlete)) {
-    return Object.assign(base, {reason: 'membership-inactive'});
-  }
-
-  // The period is derived from the SESSION's date and the household's own
-  // anchor — never from the entry's stored periodKey, which a client wrote.
-  const anchorDay = household && household.periodAnchorDay;
-  const period = lib.periodFor(session.date, anchorDay);
-
-  let pkg = null;
-  if (athlete.packageId) {
-    const pkgSnap = await tx.get(
-        db().collection('packages').doc(athlete.packageId));
-    pkg = pkgSnap.exists ? pkgSnap.data() : null;
-  }
-  if (!pkg) return Object.assign(base, {reason: 'no-package'});
-
-  const tpSnap = await tx.get(db().collection('tokenPeriods')
-      .doc(lib.tokenPeriodId(athleteId, period.periodKey)));
-  const tokenPeriod = tpSnap.exists ? tpSnap.data() : null;
-
-  const bookingSnap = await tx.get(
-      lib.periodBookingsQuery(db(), athleteId, period));
-  const bookings = lib.rows(bookingSnap);
-  const already = bookings.find(
-      (b) => b.id === lib.bookingId(athleteId, sessionId) &&
-          b.status !== 'cancelled');
-  if (already) return Object.assign(base, {reason: 'already-booked'});
-
-  const waitSnap = await tx.get(db().collection('waitlist')
-      .where('athleteId', '==', athleteId));
-  const graceSnap = await tx.get(db().collection('graceTokens')
-      .where('athleteId', '==', athleteId));
-
-  const position = lib.tokensPosition({
-    pkg,
-    tokenPeriod,
-    bookings,
-    // The entry being promoted IS the reservation now being spent, so it
-    // must not also count against the cap it is paying into.
-    waitlist: lib.rows(waitSnap).map((w) => ({
-      id: w.id,
-      periodKey: lib.periodFor(w.date || session.date, anchorDay).periodKey,
-    })),
-    ignoreWaitlistIds: [entry.id],
-    graceTokens: lib.rows(graceSnap),
-    periodKey: period.periodKey,
-    today,
-  });
-  const charge = lib.chargeFor({position, sessionDate: session.date});
-  if (!charge.chargedFrom) {
-    return Object.assign(base, {reason: charge.reason || 'no-tokens-left'});
-  }
-  return {
-    entry,
-    ok: true,
-    reason: null,
-    athlete,
-    athleteId,
-    householdId,
-    period,
-    charge,
-    // Ordering key: the grace token this candidate would actually spend.
-    graceExpiry: charge.chargedFrom === 'grace' ?
-        (position.grace[0] && position.grace[0].expiresAt) || '9999-12-31' :
-        null,
-  };
-}
-
-/**
- * The promotion order (pin F): entries whose athlete holds an unconsumed,
- * unexpired grace token first, soonest expiry first, then `joinedAt` asc.
- * "Grace holders first" is the old rollover priority under tokens — a family
- * the Academy already failed once goes to the front.
- * @param {!Array<!Object>} candidates Loaded candidates.
- * @return {!Array<!Object>} A new, ordered array.
- */
-function orderCandidates(candidates) {
-  return candidates.slice().sort((a, b) => {
-    if (a.graceExpiry && !b.graceExpiry) return -1;
-    if (!a.graceExpiry && b.graceExpiry) return 1;
-    if (a.graceExpiry && b.graceExpiry && a.graceExpiry !== b.graceExpiry) {
-      return a.graceExpiry < b.graceExpiry ? -1 : 1;
-    }
-    return joinedAtMillis(a.entry.joinedAt) - joinedAtMillis(b.entry.joinedAt);
-  });
 }
 
 /**
@@ -215,55 +98,86 @@ function promotedBooking(cand, sessionId, session) {
 }
 
 /**
- * Fill exactly one seat, in one transaction. Reads the session and its
- * waitlist, loads every candidate, orders them, deletes the ones that fail a
- * gate (no grace token — the athlete's own circumstances, not a supply
- * failure), and promotes the first that passes.
+ * What a notice needs about one candidate, promoted or dropped.
+ * @param {!Object} cand A loaded candidate.
  * @param {string} sessionId The session.
- * @param {string} today Today in America/Chicago.
+ * @param {!Object} session The session body.
+ * @return {!Object} The record `fillOpenSeats` hands to the notices.
+ */
+function recordOf(cand, sessionId, session) {
+  return {
+    athleteId: cand.athleteId,
+    householdId: cand.householdId,
+    athleteName: (cand.athlete && cand.athlete.name) || null,
+    joinedAt: order.joinedAtMillis(cand.entry.joinedAt),
+    reason: cand.reason,
+    sessionId,
+    session,
+  };
+}
+
+/**
+ * Fill exactly one seat, in one transaction. Reads the session, its live
+ * bookings and its waitlist, loads every candidate in order, deletes the
+ * ones ahead of the first that passes (they failed a gate - the athlete's
+ * own circumstances, not a supply failure, and `fillOpenSeats` tells them),
+ * and promotes the first that passes.
+ * @param {string} sessionId The session.
+ * @param {{today: string, now: !Date}} clock Today in America/Chicago and
+ *     the instant it was read from.
+ * @param {!Object=} store An admin Firestore; the default one when absent.
  * @return {!Promise<{done: boolean, promoted: ?Object, dropped:
  *     !Array<!Object>, reason: ?string}>} What happened.
  */
-async function promoteOneSeat(sessionId, today) {
-  const sessionRef = db().collection('sessions').doc(sessionId);
-  return db().runTransaction(async (tx) => {
-    const none = {done: true, promoted: null, dropped: [], reason: null};
+async function promoteOneSeat(sessionId, clock, store) {
+  const fs = store || db();
+  const sessionRef = fs.collection('sessions').doc(sessionId);
+  return fs.runTransaction(async (tx) => {
+    const stop = (reason, dropped) =>
+      ({done: true, promoted: null, dropped: dropped || [], reason});
 
     const sessionSnap = await tx.get(sessionRef);
-    if (!sessionSnap.exists) {
-      return Object.assign({}, none, {reason: 'session-missing'});
-    }
+    if (!sessionSnap.exists) return stop('session-missing');
     const session = sessionSnap.data() || {};
     if (sessionStatus(session) !== 'scheduled') {
-      return Object.assign({}, none, {reason: 'session-not-scheduled'});
+      return stop('session-not-scheduled');
     }
+    // No same-day promotion (owner ruling 2026-10-01): from midnight the
+    // family could not cancel. The 06:00 sweep closes what is still waiting.
+    if (session.date && session.date <= clock.today) {
+      return stop('same-day-or-past');
+    }
+
+    // The real seat count: the counter can be written by any signed-in
+    // client, so a seat must be free by the counter AND by the roster.
     const booked = Number(session.booked || 0);
     const capacity = Number(session.capacity || 0);
-    if (booked >= capacity) {
-      return Object.assign({}, none, {reason: 'full'});
-    }
-    // Never promote into a block that has already happened; the waitlist
-    // sweep (scripts/sweep-waitlist.mjs, db lane) is what retires those
-    // entries, and it mints the grace token this path must not.
-    if (session.date && session.date < today) {
-      return Object.assign({}, none, {reason: 'session-past'});
+    const live = lib.rows(await tx.get(fs.collection('bookings')
+        .where('sessionId', '==', sessionId)))
+        .filter((b) => b.status !== 'cancelled').length;
+    const taken = Math.max(live, booked);
+    // A counter below the roster is wrong: write the true count back.
+    const heal = () => {
+      if (live > booked) tx.update(sessionRef, {booked: live});
+    };
+    if (taken >= capacity) {
+      heal();
+      return stop('full');
     }
 
-    const entriesSnap = await tx.get(db().collection('waitlist')
-        .where('sessionId', '==', sessionId)
-        .orderBy('joinedAt', 'asc'));
-    if (entriesSnap.empty) {
-      return Object.assign({}, none, {reason: 'waitlist-empty'});
+    const entries = await order.sessionEntries(tx, fs, sessionId);
+    if (entries.length === 0) {
+      heal();
+      return stop('waitlist-empty');
     }
-    const entries = lib.rows(entriesSnap);
-
+    const ordered = await order.orderedCandidates(tx, fs, {
+      sessionId,
+      session,
+      entries,
+      today: clock.today,
+      now: clock.now,
+    });
     // ---- every read happens above this line ----
-    const candidates = [];
-    for (const entry of entries) {
-      candidates.push(
-          await loadCandidate(tx, entry, session, sessionId, today));
-    }
-    const ordered = orderCandidates(candidates);
 
     const dropped = [];
     let promoted = null;
@@ -272,53 +186,65 @@ async function promoteOneSeat(sessionId, today) {
         promoted = cand;
         break;
       }
-      dropped.push({athleteId: cand.entry.athleteId, reason: cand.reason});
-      tx.delete(db().collection('waitlist').doc(cand.entry.id));
+      dropped.push(recordOf(cand, sessionId, session));
+      tx.delete(fs.collection('waitlist').doc(cand.entry.id));
     }
 
     if (!promoted) {
-      return {done: true, promoted: null, dropped, reason: 'no-candidate'};
+      heal();
+      return stop('no-candidate', dropped);
     }
 
     tx.set(
-        db().collection('bookings')
+        fs.collection('bookings')
             .doc(lib.bookingId(promoted.athleteId, sessionId)),
         promotedBooking(promoted, sessionId, session));
-    tx.update(sessionRef, {booked: booked + 1});
-    tx.delete(db().collection('waitlist').doc(promoted.entry.id));
+    tx.update(sessionRef, {booked: taken + 1});
+    tx.delete(fs.collection('waitlist').doc(promoted.entry.id));
 
     return {
       done: false,
       dropped,
       reason: null,
-      promoted: {
-        athleteId: promoted.athleteId,
-        householdId: promoted.householdId,
-        athleteName: promoted.athlete.name || null,
+      promoted: Object.assign(recordOf(promoted, sessionId, session), {
         attendee: promoted.entry.attendee || null,
         chargedFrom: promoted.charge.chargedFrom,
         graceTokenId: promoted.charge.graceTokenId,
         periodKey: promoted.period.periodKey,
-        session,
-      },
+      }),
     };
   });
 }
 
 /**
- * Promote while seats and entries remain, then notify each promoted family.
- * Notifications are sent AFTER their transaction commits: Courier is not
- * transactional, and a failed send must never roll back a seat.
- * @param {string} sessionId The session whose `booked` dropped.
+ * Promote while seats and entries remain, then tell each promoted family
+ * and each family whose entry was removed. Notices are sent AFTER their
+ * transaction commits: a send is not transactional, and a failed one must
+ * never roll back a seat. A seat whose transaction throws ends the run
+ * without losing the notices for the seats before it.
+ * @param {string} sessionId The session with a seat to fill.
+ * @param {{db: (!Object|undefined), now: (!Date|undefined)}=} deps The
+ *     Firestore and the clock, injectable for tests.
  * @return {!Promise<{promoted: number, dropped: number}>} A summary.
  */
-async function fillOpenSeats(sessionId) {
-  const today = lib.todayISO();
+async function fillOpenSeats(sessionId, deps) {
+  const opts = deps || {};
+  const now = opts.now instanceof Date ? opts.now : new Date();
+  const clock = {today: lib.todayISO(now), now};
   const promotions = [];
-  let dropped = 0;
+  const removals = [];
   for (let i = 0; i < MAX_PROMOTIONS_PER_EVENT; i += 1) {
-    const result = await promoteOneSeat(sessionId, today);
-    dropped += result.dropped.length;
+    // A seat that throws stops the run, but the seats already committed
+    // stay booked, so their notices below must still go out.
+    let result;
+    try {
+      result = await promoteOneSeat(sessionId, clock, opts.db);
+    } catch (err) {
+      console.error(`promotion stopped: session=${sessionId} ` +
+          `seat=${i + 1}:`, err);
+      break;
+    }
+    removals.push(...result.dropped);
     for (const d of result.dropped) {
       console.log(
           `waitlist entry dropped: session=${sessionId} ` +
@@ -341,58 +267,93 @@ async function fillOpenSeats(sessionId) {
 
   for (const p of promotions) {
     try {
-      await notify.notifyWaitlistPromotion({
-        athleteId: p.athleteId,
-        householdId: p.householdId,
-        athleteName: p.athleteName,
-        attendee: p.attendee,
-        sessionId,
-        session: p.session,
-      });
+      await tell.promoted(p);
     } catch (err) {
       console.error('promotion notification failed:', err);
     }
   }
-  return {promoted: promotions.length, dropped};
+  for (const r of removals) {
+    try {
+      await tell.removed(r);
+    } catch (err) {
+      console.error('waitlist removal notification failed:', err);
+    }
+  }
+  return {promoted: promotions.length, dropped: removals.length};
 }
 
 /**
- * The trigger itself: `sessions/{sessionId}` updated with `booked`
- * decreasing, `status == 'scheduled'` and a seat actually free.
+ * Whether a session update opened a seat the waitlist may fill: the
+ * session is scheduled with room, and `booked` went down, `capacity` went
+ * up, or the session came back from cancelled.
  *
- * Promotion INCREASES `booked`, so this can never re-enter itself.
+ * A promotion only INCREASES `booked` (as does writing a true count back),
+ * so the trigger can never re-enter itself.
+ * @param {!Object} before The session before the update.
+ * @param {!Object} after The session after it.
+ * @return {boolean} True when promotion should run.
+ */
+function seatOpened(before, after) {
+  if (sessionStatus(after) !== 'scheduled') return false;
+  const booked = Number(after.booked || 0);
+  const capacity = Number(after.capacity || 0);
+  if (!(booked < capacity)) return false;
+  return booked < Number(before.booked || 0) ||
+      capacity > Number(before.capacity || 0) ||
+      sessionStatus(before) !== 'scheduled';
+}
+
+/**
+ * The trigger's body, exported so the unit tests can drive it.
+ * @param {!Object} before The session before the update.
+ * @param {!Object} after The session after it.
+ * @param {string} sessionId The session.
+ * @param {{db: (!Object|undefined), now: (!Date|undefined)}=} deps The
+ *     Firestore and the clock, injectable for tests.
+ * @return {!Promise<null>} Always null; a failure is logged, never thrown.
+ */
+async function handleSessionUpdate(before, after, sessionId, deps) {
+  try {
+    if (sessionStatus(before) !== 'cancelled' &&
+        sessionStatus(after) === 'cancelled') {
+      // It re-reads the session: a late cancel event closes nothing.
+      const summary = await close.closeSessionWaitlist(
+          (deps && deps.db) || db(), sessionId);
+      console.log(`onSessionBookedDecrease: session=${sessionId} ` +
+          `cancelled, waitlist closed=${summary.closed} ` +
+          `notified=${summary.notified}`);
+      return null;
+    }
+    if (!seatOpened(before, after)) return null;
+    const summary = await fillOpenSeats(sessionId, deps);
+    console.log(`onSessionBookedDecrease: session=${sessionId} ` +
+        `promoted=${summary.promoted} dropped=${summary.dropped}`);
+  } catch (err) {
+    console.error('onSessionBookedDecrease error:', err);
+  }
+  return null;
+}
+
+/**
+ * The one trigger on `sessions/{sessionId}`. The name is the deployed one
+ * and stays (renaming a function deletes and recreates it); it now also
+ * answers a raised capacity, an un-cancel and an academy cancel.
  */
 const onSessionBookedDecrease = functions
     .runWith({secrets: MAIL_SECRETS})
     .firestore
     .document('sessions/{sessionId}')
-    .onUpdate(async (change, context) => {
-      const before = change.before.data() || {};
-      const after = change.after.data() || {};
-      const beforeBooked = Number(before.booked || 0);
-      const afterBooked = Number(after.booked || 0);
-      const capacity = Number(after.capacity || 0);
-
-      if (!(afterBooked < beforeBooked)) return null;
-      if (sessionStatus(after) !== 'scheduled') return null;
-      if (!(afterBooked < capacity)) return null;
-
-      try {
-        const summary = await fillOpenSeats(context.params.sessionId);
-        console.log(
-            `onSessionBookedDecrease: session=${context.params.sessionId} ` +
-            `promoted=${summary.promoted} dropped=${summary.dropped}`);
-      } catch (err) {
-        console.error('onSessionBookedDecrease error:', err);
-      }
-      return null;
-    });
+    .onUpdate((change, context) => handleSessionUpdate(
+        change.before.data() || {}, change.after.data() || {},
+        context.params.sessionId));
 
 module.exports = {
   fillOpenSeats,
-  joinedAtMillis,
+  handleSessionUpdate,
+  joinedAtMillis: order.joinedAtMillis,
   onSessionBookedDecrease,
-  orderCandidates,
+  orderCandidates: order.orderCandidates,
   promoteOneSeat,
+  seatOpened,
   sessionStatus,
 };

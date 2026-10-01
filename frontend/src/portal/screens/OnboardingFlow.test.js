@@ -36,6 +36,11 @@ jest.mock('../components/PayButton', () => ({
   default: ({ athleteId, label = 'Pay now' }) => <button type="button">{label}|{athleteId}</button>,
   startCheckout: async () => {},
 }));
+// The flow's own question - is this family all Elite (hooks/elite.js) - is
+// the one read of the member's own that it makes, to pick its copy; it is
+// stood in here so "no live read" below stays a claim about the practice
+// screens. A token family, as in seed mode.
+jest.mock('../hooks/elite', () => ({ __esModule: true, default: () => false }));
 
 const OFFER = 'Take the walkthrough';
 /** A leaf element whose whole text is `name` - a rendered athlete card's name line. */

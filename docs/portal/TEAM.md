@@ -1479,6 +1479,13 @@ helpers. **Auto-confirm, no acceptance window in v1** (owner: fine).
 Expiry sweep: `scripts/sweep-waitlist.mjs` (daily, run with the export):
 entries with `date < today` → delete + mint grace token.
 
+SUPERSEDED 2026-10-01 (owner ruling, waitlist hardening), for E and F above:
+a waitlist that closes without a spot mints nothing - the entry is closed
+and the held token is free again. The one minting trigger left is staff
+"Cancel session" on a booked athlete. Current statement:
+`tokens-and-billing-contract.md` section 4 and `DATA-MODEL.md` (graceTokens,
+waitlist).
+
 **G. CANCELLATION — unchanged.** Client gate stays "until the day before";
 rules' `confirmed <-> cancelled` member branch stays; cancelled bookings
 never count. The Aug 27 contract's 12-hour rule was never built and is
@@ -1876,6 +1883,21 @@ token. AUTO-CONFIRM, no acceptance window. Expiry sweep:
 emulator): entries with `date < today` → delete + mint one grace token
 (reason 'waitlist-expired', createdBy 'sweep').
 
+SUPERSEDED 2026-10-01 (owner rulings, waitlist hardening), for E and F above:
+- a waitlist that closes without a spot mints nothing - the entry is closed
+  and the held token is free again. Minting trigger (2) is retired; staff
+  "Cancel session" on a booked athlete is the only one left. The sweep
+  (`functions/portal/sweep.js`, `scripts/sweep-waitlist.mjs`) deletes the
+  entry and nothing else; the function also sends the one notice.
+- the one sessions trigger also answers a raised capacity, an un-cancel and
+  an academy cancel (which closes that session's waitlist), never promotes
+  on the day of the session, and tells a family whose entry failed a gate.
+- `book()` joins the waitlist only when the family asked for it (Join
+  waitlist); a plain Reserve on a session that just filled is refused.
+
+Current statement: `tokens-and-billing-contract.md` section 4 and
+`DATA-MODEL.md` (graceTokens, waitlist).
+
 **G. CANCELLATION REASONS.** `bookings` gain optional `cancelledBy` (uid |
 'system') and `cancelReason` ('member' | 'session-cancelled' | 'lapsed' |
 'downgrade'). A member's own cancel writes `cancelledBy` = uid and
@@ -2067,6 +2089,13 @@ Reconciled at integration:
   pinned position needs every entry on the session and a family-scoped
   rule cannot make that list query provable. Entries hold opaque ids only.
   PM sign-off recorded here.
+  SUPERSEDED 2026-10-01 (waitlist hardening): the waitlist read is
+  household-scoped like bookings - an athlete login reads entries with its
+  own athleteId, a parent entries with its own householdId; coach, mental,
+  ops and owner read all. The ids were not opaque: `tournamentResults` pairs
+  athleteId with the child's name. The place in line comes from the
+  `waitlistPositions` callable (`functions/portal/waitlist-positions.js`),
+  for the caller's own athletes only.
 
 Server replay (PM, merged checkout, isolated emulator 8082/5001): ALL
 CHECKS PASSED - invoice.paid issues per athlete, sets the anchor and
@@ -2222,6 +2251,17 @@ Deterministic ids (`{kind}_{subject}`): `booking-confirmed_{bookingId}`,
 | tokens-expiring | billing | scheduled daily 09:00 America/Chicago: athletes on a token package whose current period ends in exactly 3 days with `left > 0` (tokensFor mirror, grace excluded) | parents | "<Name> has <N> tokens left that expire <date>. Book before then." |
 | grace-expiring | billing | same job: unconsumed grace tokens expiring in exactly 3 days | parents | "<Name>'s bonus token expires <date>." |
 | membership | billing | onUpdate `households` when `membership.status` changes | parents | past_due: "A payment didn't go through — new bookings are paused until it clears." lapsed: "Membership lapsed — upcoming bookings were released." active after lapsed/past_due: "Payment received — booking is open again." |
+
+SUPERSEDED 2026-10-01 (waitlist hardening), for the `promoted` row:
+`notifyWaitlistPromotion` is removed. The waitlist's notices live in
+`functions/portal/waitlist-notices.js` and go through the same `sendNotice`
+ledger: `promoted`, `waitlist-removed` (next in line but a booking check
+refused it), `session-cancelled` (the academy cancelled a session the family
+was waiting on) and `waitlist-expired`. Each ledger id carries the entry's
+`joinedAt` millis (`promoted_{bookingId}_{joinedAt}`,
+`waitlist-expired_{sessionId}_{athleteId}_waitlist_{joinedAt}`), so a second
+time on the same list sends its own notice. No waitlist notice mentions a
+bonus token.
 
 Scheduled jobs use the v1 API (`functions.pubsub.schedule(...).timeZone(
 'America/Chicago')`, matching the explicit `/v1` import). Each job's body
@@ -2621,6 +2661,13 @@ Keystones:
   for <session> closed without a spot for <Name> — a bonus token was
   added (expires <date>)." `scripts/sweep-waitlist.mjs` stays for manual
   runs and must agree with the function on id and shape.
+  SUPERSEDED 2026-10-01 (owner ruling): the sweep mints nothing. It deletes
+  the entry, which frees the held token, and sends the one
+  `waitlist-expired` notice: "The waitlist for <session> closed without a
+  spot for <Name>. The token held for it is free to use again." (no token
+  sentence for an Elite athlete). An entry still waiting on the day of its
+  session is not promoted and is closed by the next morning's run. The
+  manual script deletes and sends no notice.
 - COSMETIC, CLOSED: the specialist Sessions screen listed today's
   sessions twice (the pinned Today section and the day list); the day
   list now skips today when the pinned section renders it.
@@ -2661,6 +2708,12 @@ pinned Today section renders it. Fix found in the live pass: the Sprint 16
 parent redirect on `/portal/membership` fired before the auth session
 resolved, so an athlete was read as a parent, sent to Billing and bounced
 home — MembershipRoute now waits for the session.
+
+SUPERSEDED 2026-10-01 (owner ruling): `runWaitlistSweep` and
+`scripts/sweep-waitlist.mjs` no longer mint anything - see the note on the
+Sprint 17 pin above. `graceTokens/{sessionId}_{athleteId}_waitlist` docs
+minted before the ruling are left in place and stay spendable until they
+expire.
 
 Verified: `verify-sweep.js` (isolated emulator; two expirations minted +
 notified with the pinned copy, one skipped for the script's existing token,

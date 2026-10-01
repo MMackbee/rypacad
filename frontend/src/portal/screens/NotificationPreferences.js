@@ -10,7 +10,8 @@ import SavedToast from '../components/SavedToast';
 import { Toggle } from '../components/Toggle';
 import { SectionLabel, Body, Card, ScreenTitle } from '../components/Primitives';
 import { useNotificationPrefs } from '../hooks';
-import { channelLocked } from '../data/parent';
+import useAllElite from '../hooks/elite';
+import { channelLocked, notificationCategoryFor, notificationNoteFor } from '../data/parent';
 
 /**
  * 11 · Notification Preferences - parent.
@@ -59,6 +60,9 @@ export default function NotificationPreferences({
 }) {
   const prefsState = useNotificationPrefs({ variant, practice });
   const { data } = prefsState;
+  // Elite holds no tokens (tester Mike 2026-09-30): the token wording shows
+  // once a token athlete is known to be in the family, never before.
+  const noTokenWording = useAllElite({ enabled: !practice }) !== false;
   /**
    * Sprint 10 pin G (TEAM.md, contract v1.8): useNotificationPrefs gains
    * save(prefs) writing the whole notificationPrefs map in one shot (rules:
@@ -158,14 +162,14 @@ export default function NotificationPreferences({
         {(data?.categories ?? []).map((cat) => (
           <CategoryCard
             key={cat.id}
-            category={cat}
+            category={notificationCategoryFor(cat, noTokenWording)}
             value={{ email: valueFor(cat, 'email'), push: valueFor(cat, 'push') }}
             onChange={(channel, v) => set(cat, channel, v)}
           />
         ))}
 
         <Body size={11} tone={color.textTertiary}>
-          {data?.note}
+          {notificationNoteFor(data?.note, noTokenWording)}
         </Body>
 
         {practice ? null : (
@@ -174,7 +178,7 @@ export default function NotificationPreferences({
 
             {/* Parent-only: /portal/register's link mode refuses an athlete. */}
             {onLinkAthlete && role === 'parent' ? <LinkAthleteRow onLinkAthlete={onLinkAthlete} /> : null}
-            <MembershipRow role={role} />
+            <MembershipRow role={role} noTokenWording={noTokenWording} />
             <ReplayWalkthroughRow />
             <SignOutRow onSignOut={onSignOut} />
           </>
@@ -225,7 +229,7 @@ function LinkAthleteRow({ onLinkAthlete }) {
  * already use (this lane never edits PortalRoutes.js) — one static internal
  * route needs no caller-supplied callback prop.
  */
-function MembershipRow({ role = 'parent' }) {
+function MembershipRow({ role = 'parent', noTokenWording = false }) {
   const navigate = useNavigate();
   // Sprint 16: a parent's membership view is the Billing hub.
   const parent = role !== 'athlete';
@@ -248,7 +252,7 @@ function MembershipRow({ role = 'parent' }) {
           cursor: 'pointer',
         }}
       >
-        <span>{parent ? 'Billing & tokens' : 'Membership'}</span>
+        <span>{parent ? (noTokenWording ? 'Billing' : 'Billing & tokens') : 'Membership'}</span>
         <span aria-hidden="true" style={{ color: color.textTertiary }}>
           ›
         </span>

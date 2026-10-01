@@ -215,6 +215,7 @@ export default function ParentDashboard({
         <BookChooserSheet
           open={Boolean(bookFor)}
           athleteName={bookFor?.name}
+          unlimited={Boolean(bookFor?.tokens?.unlimited)}
           onPick={(option) => {
             const child = bookFor;
             setBookFor(null);
@@ -422,7 +423,7 @@ function ChildCard({ child, onHold, billingStatus, onOpen, onBookFor, onOpenMemb
         per child now (Elite: "Elite · unlimited", AllowancePools' own
         unlimited branch).
       */}
-      <MetaRow label="Tokens" style={{ marginTop: 12 }}>
+      <MetaRow label={child.tokens?.unlimited ? 'Package' : 'Tokens'} style={{ marginTop: 12 }}>
         {child.tokens ? (
           <AllowancePools tokens={child.tokens} compact />
         ) : (

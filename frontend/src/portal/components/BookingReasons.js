@@ -2,6 +2,7 @@ import React from 'react';
 import { color, font } from '../tokens';
 import { Banner } from './Primitives';
 import { BOOKING_OPENS_AT, BOOKING_OPENS_LABEL, academyDateISO, longDayLabel, nextMonthFirstShort, todayISO, windowOpensOn } from '../data/calendar';
+import { SESSION_STARTED_COPY } from '../data/sessionStart';
 
 /**
  * Shared booking-rejection/lock/cancellation copy (Sprint 12 pin, contract
@@ -33,9 +34,20 @@ export function reasonCopy(reason) {
   if (reason === 'billing-pending') return 'Payment pending - finish checkout to start booking';
   if (reason === 'booking-not-open') return `Booking opens ${BOOKING_OPENS_LABEL}`;
   if (reason === 'calendly-managed') return "Cancel or reschedule from Calendly's email";
-  if (reason === 'full') return 'That block filled before the reservation completed.';
+  // Waitlist hardening (audit 2026-09-30): a plain reserve on a session that
+  // filled since the screen loaded joins no waitlist; a started session takes
+  // no booking; from the session's own day its waitlist takes nobody new.
+  if (reason === 'full') return 'This session just filled.';
+  if (reason === 'session-past') return SESSION_STARTED_COPY;
+  if (reason === 'waitlist-closed') return 'The waitlist for this session has closed.';
+  if (reason === 'no-waitlist') return "Yannick's sessions have no waitlist.";
   if (reason === 'membership-inactive') return "This membership isn't active right now.";
   return null;
+}
+
+/** False for the refusals a second tap on the same session cannot change. */
+export function canRetry(reason) {
+  return !['full', 'session-past', 'waitlist-closed', 'no-waitlist'].includes(reason);
 }
 
 /** The non-cancellable Calendly row's action copy (MySchedule, Reservations). */
@@ -75,9 +87,12 @@ export function SeeMembershipLink({ onClick, style }) {
  * bookings.cancelReason (pin G, contract v2.1): the system reasons a
  * cancelled row states plainly rather than leaving blank — a member's own
  * cancellation ('member') needs no explanation and renders nothing.
+ * `unlimited` (Elite) has no tokens, so no bonus-token sentence.
  */
-export function cancelReasonCopy(reason) {
-  if (reason === 'session-cancelled') return 'Cancelled by the academy — a bonus token was added.';
+export function cancelReasonCopy(reason, { unlimited = false } = {}) {
+  if (reason === 'session-cancelled') {
+    return unlimited ? 'Cancelled by the academy.' : 'Cancelled by the academy - a bonus token was added.';
+  }
   if (reason === 'lapsed') return 'Cancelled — membership lapsed.';
   if (reason === 'downgrade') return 'Cancelled — package changed.';
   return null;
