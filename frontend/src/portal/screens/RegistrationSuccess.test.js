@@ -153,7 +153,7 @@ test('athlete mode goes home', async () => {
 });
 
 describe('sibling discount (checkout.js siblingEligible, owner 2026-09-30)', () => {
-  const NOTE = '10% sibling discount comes off at checkout.';
+  const NOTE = '20% sibling discount comes off at checkout.';
   const avery = { ...newAthleteEntry(), name: 'Avery', dob: '2013-05-01', packageId: 't-16' };
 
   test('two monthly athletes at sign-up: no line yet (nobody is paid), and the buttons keep the catalogue price', async () => {

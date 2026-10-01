@@ -92,13 +92,14 @@ export const PRICES_RELEASED = true;
 export const FACILITY_ACCESS = { id: 'facility-access', name: 'Facility access', price: 300, pending: false };
 
 /**
- * Sibling discount (owner, 2026-09-30): Stripe takes this percentage off
+ * Sibling discount (owner, 2026-09-30; 20% as in past years, 2026-10-01):
+ * Stripe takes this percentage off
  * every membership checkout of a family with two or more monthly athletes
  * (functions/portal/checkout.js). Stripe's coupon is the source of truth for
  * the amount, so the portal only says it applies - it never shows a
  * discounted price, and the Pay buttons keep the catalogue figure.
  */
-export const SIBLING_DISCOUNT_PCT = 10;
+export const SIBLING_DISCOUNT_PCT = 20;
 export const SIBLING_DISCOUNT_NOTE = `${SIBLING_DISCOUNT_PCT}% sibling discount comes off at checkout.`;
 
 /**

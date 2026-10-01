@@ -56,7 +56,7 @@ test('pending banner with one Pay now per unpaid athlete; the unpaid card is bad
 });
 
 test('sibling discount: one line on the pending card when two members are monthly, Pay now unchanged (owner 2026-09-30)', async () => {
-  const NOTE = '10% sibling discount comes off at checkout.';
+  const NOTE = '20% sibling discount comes off at checkout.';
   const withPackages = (ids, pending = mockHub.data.status.pendingAthletes) => ({ ...mockHub, data: { ...mockHub.data,
     members: mockHub.data.members.map((m, i) => ({ ...m, package: ids[i] ? { id: ids[i], kind: ids[i] === 'single' ? 'single' : 'tokens' } : null })),
     status: { ...mockHub.data.status, pendingAthletes: pending } } });
