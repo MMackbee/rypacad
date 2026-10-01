@@ -196,6 +196,23 @@ athletes, invites, auth users and Stripe test customers afterwards.
 test prices (it refuses live keys by design; adapt it for a live price-only
 check if needed).
 
+### 3.4a Morning of Oct 1, before the email - turn portal email on
+
+Portal notice emails are OFF: `SMTP_HOST` is not in `functions/.env`, so
+every notice email is recorded 'skipped' (in-app notices and push still work;
+Firebase's verification email is separate). The booking confirmation screen
+tells families a confirmation email is on its way, so this goes on before the
+launch email.
+
+1. Mike: a Google Workspace mailbox (suggested `portal@rypgolf.com`, name
+   "RYP Academy"), 2-Step Verification on, an app password created.
+2. Owner: `npx firebase-tools functions:secrets:set SMTP_USER --project rypacad`
+   (the address) and the same for `SMTP_PASS` (the app password).
+3. Add to `functions/.env`: `SMTP_HOST=smtp.gmail.com`, `SMTP_PORT=465`,
+   `SMTP_SECURE=true`, `SMTP_FROM=RYP Academy <the address>`.
+4. `npx firebase-tools deploy --only functions --project rypacad`, then one
+   test booking: the ledger row should read 'sent' and the email should arrive.
+
 ### 3.5 Before Nov 1 - proration (owner, 2026-09-30)
 
 The website tells families "joining mid-month or upgrading is prorated to the
