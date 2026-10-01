@@ -273,32 +273,45 @@ test('sibling discount (2026-09-30): 2+ membership families, coupon or code',
       // novak has lena, max and fac on monthly packages (nopkg and the single
       // token sol do not count); oye has femi alone.
       const two = fakeDb(DOCS);
-      // lena has paid siblings (max active, fac active); max's own checkout
-      // also sees fac; femi is alone in oye.
-      assert.equal(await checkout.siblingEligible(two, 'novak', 'lena'), true);
-      assert.equal(await checkout.siblingEligible(two, 'novak', 'max'), true);
-      assert.equal(await checkout.siblingEligible(two, 'oye', 'femi'), false);
+      // lena (6 tokens) has paid siblings on the same or a dearer package
+      // (max Elite, fac 6 tokens); femi is alone in oye. Owner 2026-10-01
+      // ("lesser value"): max's Elite is the family's highest membership,
+      // so the paid 6-token siblings never discount it.
+      assert.equal(await checkout.siblingEligible(two, 'novak', 'lena',
+          't-6'), true);
+      assert.equal(await checkout.siblingEligible(two, 'novak', 'max',
+          'elite'), false);
+      assert.equal(await checkout.siblingEligible(two, 'oye', 'femi', 't-6'),
+          false);
+      // Same price counts; a cheaper paid sibling does not; an unknown
+      // package is never discounted.
+      assert.equal(await checkout.siblingEligible(two, 'novak', 'lena',
+          'elite'), true);
+      assert.equal(await checkout.siblingEligible(two, 'novak', 'max',
+          't-16'), false);
+      assert.equal(await checkout.siblingEligible(two, 'novak', 'lena',
+          'mystery'), false);
       const only = fakeDb(Object.assign({}, DOCS, {'athletes/max':
         {householdId: 'novak', packageId: 'single'}, 'athletes/fac':
         {householdId: 'novak', packageId: null}}));
-      assert.equal(await checkout.siblingEligible(only, 'novak', 'lena'),
-          false);
+      assert.equal(await checkout.siblingEligible(only, 'novak', 'lena',
+          't-6'), false);
       // A never-paid (pending) sibling does not count (review 2026-09-30).
       const unpaid = fakeDb(Object.assign({}, DOCS, {'athletes/max':
         {householdId: 'novak', packageId: 'elite',
           billing: {status: 'pending'}},
       'athletes/fac': {householdId: 'novak', packageId: 't-6',
         billing: {status: 'pending'}}}));
-      assert.equal(await checkout.siblingEligible(unpaid, 'novak', 'lena'),
-          false);
+      assert.equal(await checkout.siblingEligible(unpaid, 'novak', 'lena',
+          't-6'), false);
       // The athlete being paid for never counts as their own sibling.
       const self = fakeDb(Object.assign({}, DOCS, {'athletes/max':
         {householdId: 'novak', packageId: 'single'}, 'athletes/fac':
         {householdId: 'novak', packageId: null}, 'athletes/lena':
         {householdId: 'novak', packageId: 't-6',
           billing: {status: 'active'}}}));
-      assert.equal(await checkout.siblingEligible(self, 'novak', 'lena'),
-          false);
+      assert.equal(await checkout.siblingEligible(self, 'novak', 'lena',
+          't-6'), false);
       // No coupon configured: the eligible family gets the code field only.
       const saved = process.env.STRIPE_SIBLING_COUPON;
       delete process.env.STRIPE_SIBLING_COUPON;
@@ -339,8 +352,8 @@ test('sibling: lapsed siblings do not count; a missing coupon falls back',
           billing: {status: 'lapsed'}},
         'athletes/fac': {householdId: 'novak', packageId: 't-6',
           billing: {status: 'lapsed'}}}));
-      assert.equal(await checkout.siblingEligible(lapsed, 'novak', 'lena'),
-          false);
+      assert.equal(await checkout.siblingEligible(lapsed, 'novak', 'lena',
+          't-6'), false);
       // A read failure costs the discount, not the checkout.
       const broken = Object.assign(fakeDb(DOCS), {collection: (c) =>
         Object.assign(fakeDb(DOCS).collection(c), {where: () => ({

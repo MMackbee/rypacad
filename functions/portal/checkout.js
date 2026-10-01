@@ -25,6 +25,13 @@ const {HttpsError} = functions.https;
  */
 const MIN_TRIAL_LEAD_MS = 49 * 60 * 60 * 1000;
 const PRODUCTS = ['tier', 'facility'];
+/**
+ * Monthly memberships by price, lowest first ($299 < $569 < $719 < $999;
+ * frontend/src/portal/data/packages.js holds the figures). Only the order
+ * matters here. The single token is not a membership and has no rank.
+ * @const {!Object<string, number>}
+ */
+const PACKAGE_RANK = {'t-6': 1, 't-12': 2, 't-16': 3, 'elite': 4};
 const FACILITY_NAME = 'Family facility access';
 
 let stripeClient;
@@ -75,20 +82,28 @@ async function read(store, collection, id) {
  * sibling does not count, or one paying child plus an unpaid sibling would
  * keep the 'forever' coupon all season. The single token is a one-time
  * purchase, not a membership. Checked at checkout only.
+ *
+ * Owner ruling 2026-10-01 ("lesser value"): the family's highest membership
+ * is always full price. The discount comes off THIS membership only when
+ * the paid sibling's membership costs the same or more, so paying the
+ * cheaper child first no longer moves the discount onto the dearer one.
  * @param {!Object} store Firestore.
  * @param {string} householdId The family.
  * @param {string} athleteId The athlete being paid for (never counts).
+ * @param {?string} packageId The package being paid for.
  * @return {!Promise<boolean>} Whether this checkout qualifies.
  */
-async function siblingEligible(store, householdId, athleteId) {
+async function siblingEligible(store, householdId, athleteId, packageId) {
+  const mine = PACKAGE_RANK[packageId];
+  if (!mine) return false; // unknown package: never discounted by guess
   const snap = await store.collection('athletes')
       .where('householdId', '==', householdId).get();
   return snap.docs.some((doc) => {
     const a = doc.data() || {};
     const paid = !a.billing || a.billing.status === 'active' ||
         a.billing.status === 'past_due';
-    return doc.id !== athleteId && Boolean(a.packageId) &&
-        a.packageId !== 'single' && paid;
+    return doc.id !== athleteId && paid &&
+        (PACKAGE_RANK[a.packageId] || 0) >= mine;
   });
 }
 
@@ -388,7 +403,7 @@ async function createCheckoutSessionHandler(data, context, deps) {
   if (req.product === 'tier') {
     try {
       sibling.eligible = await siblingEligible(store, athlete.householdId,
-          req.athleteId);
+          req.athleteId, athlete.packageId);
     } catch (err) {
       console.error('siblingEligible failed, no discount:', err);
     }

@@ -19,7 +19,7 @@ import AllowancePools from '../components/AllowancePools';
 import SkeletonCard, { SkeletonBar } from '../components/Skeleton';
 import { AlertGlyph, Body, Card, ErrorNotice, ScreenTitle } from '../components/Primitives';
 import { useHousehold } from '../hooks';
-import { ALL_PACKAGES, siblingDiscountApplies } from '../data/packages';
+import { ALL_PACKAGES, siblingDiscountApplies, siblingPlan } from '../data/packages';
 import { contractEnabled } from '../data/contractFlag';
 
 /**
@@ -180,7 +180,7 @@ export default function ParentDashboard({
         />
         {/* The sibling rule reads the whole family, paid members included. */}
         <PendingBanner pendingAthletes={pendingAthletes} facilityRows={facilityRows} body={hubStatus?.body} title={hubStatus?.title}
-          siblingDiscount={siblingDiscountApplies(hub.data?.members)}
+          siblingDiscount={siblingDiscountApplies(hub.data?.members)} plan={siblingPlan(hub.data?.members)}
           renderRowExtra={(a) => <ChangePackageLink athlete={a} onOpen={setChangeFor} />} />
         {onHold ? (
           <PaymentBanner billing={flagged ? billing : bannerFor(membershipStatus)} onOpen={() => navigate('/portal/billing')} />

@@ -6,7 +6,7 @@
  */
 import {
   ALL_PACKAGES, ELITE, PRICES_RELEASED, SIBLING_DISCOUNT_NOTE, SIBLING_DISCOUNT_PCT, SINGLE_TOKEN, TOKEN_PACKAGES,
-  normalizeAnchorDay, periodFor, siblingDiscountApplies, tokensFor, windowDaysFor,
+  normalizeAnchorDay, periodFor, siblingDiscountApplies, siblingPlan, tokensFor, windowDaysFor,
 } from './packages';
 import { SEASON_BOUNDS } from './season';
 
@@ -157,5 +157,27 @@ describe('siblingDiscountApplies', () => {
     expect(siblingDiscountApplies([member('t-6', 'pending'), member('t-12', 'pending')])).toBe(false);
     expect(siblingDiscountApplies([member('t-6'), member(null)])).toBe(false);
     expect(siblingDiscountApplies([member('t-6'), member('t-12', 'lapsed')])).toBe(false);
+  });
+});
+
+// Owner 2026-10-01 ("lesser value"): the same rule as checkout.js siblingEligible.
+describe('siblingPlan', () => {
+  const p = (id, packageId, status, name) => ({ id, name, packageId, billing: status ? { status } : undefined });
+  test('the highest membership is full price; cheaper ones wait for it, then get the discount', () => {
+    expect(siblingPlan([p('c', 'elite', 'pending', 'Casey Hart'), p('b', 't-6', 'pending', 'Blake Hart')]))
+      .toEqual({ c: { state: 'full', first: null }, b: { state: 'wait', first: 'Casey' } });
+    expect(siblingPlan([p('c', 'elite', 'active'), p('b', 't-6', 'pending')])).toEqual({ b: { state: 'discount', first: null } });
+  });
+  test('a paid cheaper sibling never discounts a dearer membership; equal prices do', () => {
+    expect(siblingPlan([p('b', 't-6', 'active'), p('c', 'elite', 'pending')])).toEqual({ c: { state: 'full', first: null } });
+    expect(siblingPlan([p('a', 't-12', 'active'), p('b', 't-12', 'pending')])).toEqual({ b: { state: 'discount', first: null } });
+    expect(siblingPlan([p('a', 't-12', 'pending'), p('b', 't-12', 'pending')])).toEqual({ a: { state: 'full', first: null }, b: { state: 'full', first: null } });
+  });
+  test('the single token and a lapsed sibling never make anyone wait or qualify', () => {
+    expect(siblingPlan([p('s', 'single', 'pending'), p('b', 't-6', 'pending')])).toEqual({ b: { state: 'full', first: null } });
+    expect(siblingPlan([p('c', 'elite', 'lapsed'), p('b', 't-6', 'pending')])).toEqual({ c: { state: 'full', first: null }, b: { state: 'full', first: null } });
+    expect(siblingPlan([{ athleteId: 'm1', name: 'Max', package: { id: 'elite' }, billing: { status: 'active' } }, { athleteId: 'm2', name: 'Lena', package: { id: 't-16' }, billing: { status: 'pending' } }]))
+      .toEqual({ m2: { state: 'discount', first: null } });
+    expect(siblingPlan(null)).toEqual({});
   });
 });

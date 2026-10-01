@@ -72,3 +72,21 @@ test('the adult who is their own household reads it without "family"', async () 
   expect(waiting.text()).not.toMatch(/family/i);
   await waiting.unmount();
 });
+
+// Owner 2026-10-01 ("lesser value"): the highest membership is full price and paid first; 20% then comes off the others.
+test('plan: a discounted row says so; a row waiting on a dearer sibling names who to pay first, with a way to pay at full price anyway', async () => {
+  const rows = [{ athleteId: 'a1', name: 'Casey', packageId: 'elite' }, { athleteId: 'a2', name: 'Blake', packageId: 't-6' }];
+  const r = await renderScreen(<PendingBanner pendingAthletes={rows} title={TITLE} siblingDiscount
+    plan={{ a1: { state: 'full', first: null }, a2: { state: 'wait', first: 'Casey' } }} />);
+  expect(r.button('Pay now|tier|a1')).not.toBeNull();
+  expect(r.button('Pay now|tier|a2')).toBeNull();
+  expect(r.text()).toContain("Pay Casey's membership first - 20% then comes off this one.");
+  expect(r.text()).not.toContain('20% sibling discount comes off at checkout.');
+  await r.click('Pay now at full price');
+  expect(r.button('Pay now|tier|a2')).not.toBeNull();
+  await r.unmount();
+  const paid = await renderScreen(<PendingBanner pendingAthletes={[rows[1]]} title={TITLE} plan={{ a2: { state: 'discount', first: null } }} />);
+  expect(paid.text()).toContain('20% sibling discount comes off at checkout.');
+  expect(paid.button('Pay now|tier|a2')).not.toBeNull();
+  await paid.unmount();
+});

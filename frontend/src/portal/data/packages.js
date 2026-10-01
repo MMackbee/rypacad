@@ -122,6 +122,40 @@ export function siblingDiscountApplies(athletes) {
 }
 
 /**
+ * Who gets the sibling discount at the next checkout, per unpaid athlete
+ * (owner 2026-10-01, "lesser value"; the same rule as checkout.js
+ * siblingEligible, kept in step by hand): the family's highest membership is
+ * full price, and the discount comes off a membership only when the family
+ * already PAYS one that costs the same or more. So when a dearer membership
+ * is still unpaid, the cheaper one should wait for it.
+ * Takes athlete docs (`id`, `packageId`) or billing-hub members
+ * (`athleteId`, `package.id`). Returns { [athleteId]: { state, first } }:
+ *   'discount'  a paid sibling's membership costs the same or more
+ *   'wait'      a dearer unpaid sibling should be paid first (`first` = name)
+ *   'full'      this is the family's highest membership (or the only one)
+ */
+export function siblingPlan(athletes) {
+  const priceOf = (a) => {
+    const pkg = packageById(a ? (a.packageId ?? a.package?.id) : null);
+    return pkg && pkg.kind !== 'single' ? pkg.price : 0;
+  };
+  const monthly = (athletes || []).filter((a) => priceOf(a) > 0);
+  const paid = (a) => !a.billing || a.billing.status === 'active' || a.billing.status === 'past_due';
+  const plan = {};
+  monthly.filter((a) => !paid(a)).forEach((a) => {
+    const others = monthly.filter((o) => o !== a);
+    if (others.some((o) => paid(o) && priceOf(o) >= priceOf(a))) { plan[a.athleteId ?? a.id] = { state: 'discount', first: null }; return; }
+    // A lapsed sibling may never come back, so nobody waits on one.
+    const dearer = others.filter((o) => !paid(o) && o.billing?.status !== 'lapsed' && priceOf(o) > priceOf(a)).sort((x, y) => priceOf(y) - priceOf(x))[0];
+    plan[a.athleteId ?? a.id] = dearer ? { state: 'wait', first: String(dearer.name || '').trim().split(/\s+/)[0] || null } : { state: 'full', first: null };
+  });
+  return plan;
+}
+
+/** The line under a row that should wait for a dearer sibling's payment. */
+export const siblingWaitNote = (first) => `Pay ${first || 'the higher membership'}'s membership first - ${SIBLING_DISCOUNT_PCT}% then comes off this one.`;
+
+/**
  * Elite's frequency caps (v2.0.1, Sprint 18; owner 2026-09-30): at most ONE
  * training block, ONE tournament and ONE Phil booking per date, so a family
  * can book the Saturday morning training AND that day's tournament. Not a pool,

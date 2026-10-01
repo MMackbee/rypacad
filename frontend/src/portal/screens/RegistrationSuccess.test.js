@@ -154,11 +154,15 @@ test('athlete mode goes home', async () => {
 
 describe('sibling discount (checkout.js siblingEligible, owner 2026-09-30)', () => {
   const NOTE = '20% sibling discount comes off at checkout.';
+  // Owner 2026-10-01 ("lesser value"): the highest membership is paid first, at full price.
+  const FIRST = 'Pay the highest membership first - 20% sibling discount then comes off the others.';
   const avery = { ...newAthleteEntry(), name: 'Avery', dob: '2013-05-01', packageId: 't-16' };
 
-  test('two monthly athletes at sign-up: no line yet (nobody is paid), and the buttons keep the catalogue price', async () => {
+  test('two monthly athletes at sign-up: pay the dearer one first, no discount line yet, and the buttons keep the catalogue price', async () => {
     const r = await renderScreen(<RegistrationSuccess bare mode="signup" form={form()} result={{ householdId: 'h1', athleteIds: ['a1', 'a2'] }} account={{ email: 'dana@email.com' }} onFinish={() => {}} />);
-    expect(r.text()).not.toContain('sibling');
+    expect(r.text()).toContain(FIRST);
+    expect(r.text()).not.toContain(NOTE);
+    expect(r.text().indexOf("Reese's Elite")).toBeLessThan(r.text().indexOf("Jordan's 12 tokens"));
     expect(r.button("Pay $569 for Jordan's 12 tokens|a1")).not.toBeNull();
     expect(r.button("Pay $999 for Reese's Elite|a2")).not.toBeNull();
     expect(r.text()).not.toMatch(/\$512|\$899|\$647/);
@@ -179,7 +183,7 @@ describe('sibling discount (checkout.js siblingEligible, owner 2026-09-30)', () 
 
   test('link mode counts the family already there: a paid sibling qualifies, a lapsed one does not', async () => {
     mockLive = true;
-    mockFamily = [{ id: 'old', householdId: 'h1', packageId: 't-6', billing: { status: 'active' } }, { id: 'a9', householdId: 'h1', packageId: 't-16', billing: { status: 'pending' } }];
+    mockFamily = [{ id: 'old', householdId: 'h1', packageId: 'elite', billing: { status: 'active' } }, { id: 'a9', householdId: 'h1', packageId: 't-16', billing: { status: 'pending' } }];
     const r = await renderScreen(<RegistrationSuccess bare mode="link" form={form({ athletes: [avery] })} result={{ householdId: 'h1', athleteIds: ['a9'] }} account={{ email: 'dana@email.com' }} onFinish={() => {}} />);
     await r.flush();
     expect(mockReads).toEqual(['h1']);
@@ -187,7 +191,13 @@ describe('sibling discount (checkout.js siblingEligible, owner 2026-09-30)', () 
     expect(r.button("Pay $719 for Avery's 16 tokens|a9")).not.toBeNull();
     expect(r.text()).toContain('Today you pay $719 for November');
     await r.unmount();
-    mockFamily = [{ ...mockFamily[0], billing: { status: 'lapsed' } }, mockFamily[1]];
+    // A paid sibling on a CHEAPER package does not discount the dearer new one.
+    mockFamily = [{ ...mockFamily[0], packageId: 't-6' }, mockFamily[1]];
+    const cheaper = await renderScreen(<RegistrationSuccess bare mode="link" form={form({ athletes: [avery] })} result={{ householdId: 'h1', athleteIds: ['a9'] }} account={{ email: 'dana@email.com' }} onFinish={() => {}} />);
+    await cheaper.flush();
+    expect(cheaper.text()).not.toContain('sibling');
+    await cheaper.unmount();
+    mockFamily = [{ ...mockFamily[0], packageId: 'elite', billing: { status: 'lapsed' } }, mockFamily[1]];
     const lapsed = await renderScreen(<RegistrationSuccess bare mode="link" form={form({ athletes: [avery] })} result={{ householdId: 'h1', athleteIds: ['a9'] }} account={{ email: 'dana@email.com' }} onFinish={() => {}} />);
     await lapsed.flush();
     expect(lapsed.text()).not.toContain('sibling');
@@ -202,10 +212,12 @@ describe('sibling discount (checkout.js siblingEligible, owner 2026-09-30)', () 
     expect(mockReads).toEqual(['h1']);
     expect(r.text()).not.toContain('sibling');
     await r.unmount();
-    // Two new athletes with no readable family: neither is paid, so no note.
+    // Two new athletes with no readable family: neither is paid, so no
+    // discount line, only which one to pay first.
     const two = await renderScreen(<RegistrationSuccess bare mode="link" form={form()} result={{ householdId: 'h1', athleteIds: ['a1', 'a2'] }} account={{ email: 'dana@email.com' }} onFinish={() => {}} />);
     await two.flush();
-    expect(two.text()).not.toContain('sibling');
+    expect(two.text()).not.toContain(NOTE);
+    expect(two.text()).toContain(FIRST);
     await two.unmount();
   });
 });
