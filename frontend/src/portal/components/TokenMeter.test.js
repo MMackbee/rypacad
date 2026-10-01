@@ -166,6 +166,7 @@ test('monthly rendering is unchanged', async () => {
 describe('a single athlete: where the token went, and the way to another', () => {
   const BUY = 'Buy a session token - $65';
   const WHEN = 'Single tokens are available from Sat, Oct 10 at 7 AM.';
+  const ASK = 'Ask a parent or guardian to buy a session token.';
   const token = (id) => ({ id, expiresAt: '2027-02-27', reason: 'single-purchase' });
   const sessionsById = { 's-b1': { id: 's-b1', date: '2026-11-20', time: '4:00 PM', type: 'training', label: 'Training block' } };
   const single = (over = {}) => hubMemberFor({ athlete, pkg: SINGLE_TOKEN, anchorDay: 1, today, bookings: [], graceTokens: [], sessionsById, ...over });
@@ -194,24 +195,53 @@ describe('a single athlete: where the token went, and the way to another', () =>
     await one.unmount();
   });
 
-  test('a payment-pending single athlete gets the Pay button once single tokens are on sale', async () => {
-    const pending = single({ athlete: { ...athlete, packageId: 'single', billing: { status: 'pending' } } });
-    expect(pending.billing.status).toBe('pending');
-    const r = await renderScreen(<TokenMeter member={pending} buy />);
-    expect(r.button(`${BUY}|ava|tier|primary`)).not.toBeNull();
-    expect(r.text()).not.toContain(WHEN);
+  // Owner ruling 2026-10-01 ("drop one"): the hero's or the banner's Pay now is
+  // that athlete's one checkout button - the meter adds no second one, and
+  // never repeats the Oct 10 sentence those cards already say.
+  test('a payment-pending or ended single athlete gets nothing on the meter, before the gate or after', async () => {
+    for (const status of ['pending', 'lapsed']) {
+      const unpaid = single({ athlete: { ...athlete, packageId: 'single', billing: { status } } });
+      expect(unpaid.billing.status).toBe(status);
+      for (const now of [BOOKING_OPENS_AT, BOOKING_OPENS_AT - 1]) {
+        Date.now.mockReturnValue(now);
+        const r = await renderScreen(<TokenMeter member={unpaid} buy />);
+        expect(r.container.querySelectorAll('button')).toHaveLength(1); // the evidence toggle alone
+        expect(r.text()).not.toContain(BUY);
+        expect(r.text()).not.toContain(WHEN);
+        expect(r.text()).not.toContain(ASK);
+        await r.unmount();
+      }
+    }
+  });
+
+  test('before the gate a paid-up athlete has no button, only the line saying when', async () => {
+    Date.now.mockReturnValue(BOOKING_OPENS_AT - 1);
+    const r = await renderScreen(<TokenMeter member={spentOne()} buy />);
+    expect(r.text()).not.toContain(BUY);
+    expect(r.text().split(WHEN)).toHaveLength(2);
     await r.unmount();
   });
 
-  test('before the gate there is no button, only the line saying when', async () => {
+  // Owner ruling 2026-10-01 ("not unless the child is 18+"): `askGuardian` is
+  // the under-18 athlete's own login.
+  test('an under-18 athlete on their own login reads who buys it, never the button', async () => {
+    const r = await renderScreen(<TokenMeter member={spentOne()} buy askGuardian />);
+    expect(r.text().split(ASK)).toHaveLength(2);
+    expect(r.text()).not.toContain(BUY);
+    expect(r.container.querySelectorAll('button')).toHaveLength(1); // the evidence toggle alone
+    await r.unmount();
+    // Until the sale opens they read when, as everyone does.
     Date.now.mockReturnValue(BOOKING_OPENS_AT - 1);
-    const pending = single({ athlete: { ...athlete, packageId: 'single', billing: { status: 'pending' } } });
-    for (const member of [pending, spentOne()]) {
-      const r = await renderScreen(<TokenMeter member={member} buy />);
-      expect(r.text()).not.toContain(BUY);
-      expect(r.text()).toContain(WHEN);
-      await r.unmount();
-    }
+    const early = await renderScreen(<TokenMeter member={spentOne()} buy askGuardian />);
+    expect(early.text()).toContain(WHEN);
+    expect(early.text()).not.toContain(ASK);
+    expect(early.text()).not.toContain(BUY);
+    await early.unmount();
+    // The staff view (no `buy`) reads neither.
+    Date.now.mockReturnValue(BOOKING_OPENS_AT);
+    const staff = await renderScreen(<TokenMeter member={spentOne()} showPrices askGuardian />);
+    expect(staff.text()).not.toContain(ASK);
+    await staff.unmount();
   });
 
   test('the staff view (no `buy`) never gets a button or the line; a failing card is fixed in Stripe', async () => {
@@ -263,5 +293,12 @@ describe('a single athlete: where the token went, and the way to another', () =>
     expect(r.text()).not.toContain(BUY);
     expect(r.text()).not.toContain(WHEN);
     await r.unmount();
+    // Nor the under-18 line: a monthly or Elite meter is the same on a child's login.
+    for (const pkg of [T12, ELITE]) {
+      const child = await renderScreen(<TokenMeter member={hubMemberFor({ athlete, pkg, anchorDay: 1, today, bookings: [], graceTokens: [] })} buy askGuardian />);
+      expect(child.text()).not.toContain(ASK);
+      expect(child.text()).not.toContain(BUY);
+      await child.unmount();
+    }
   });
 });

@@ -222,6 +222,9 @@ export function hubMemberFor(args) {
   return {
     athleteId: athlete.id,
     name: athlete.name,
+    // Their own login reads it: who may buy a session token there
+    // (singleToken.js ownLoginMayBuy). null when not on file.
+    dob: athlete.dob ?? null,
     package: pkg
       ? {
           id: pkg.id,
@@ -311,7 +314,10 @@ function attemptOf(membership) {
  * pendingOf) and an all-single household (`opts.allPerPurchase`) never read
  * "billed monthly". Until single tokens go on sale (owner ruling 2026-10-01,
  * singleToken.js saleOpen - the Oct 10 gate) a pending list of only
- * single-token athletes says when, and carries no `cta`.
+ * single-token athletes says when, and carries no `cta`. A mixed pending
+ * list reads both sentences, each naming only its own athletes. A household
+ * of Elite and single-token athletes only (`opts.noMonthlyTokens`) reads the
+ * Elite title: nobody's tokens start or reset.
  *
  * The monthly pending body names the Oct 10 gate until it opens (UX review
  * P-07: "can book as soon as checkout is complete" was untrue for token
@@ -359,23 +365,29 @@ export function statusFor(membership, opts = {}) {
   // a cancelled subscription (review 2026-09-28). Copy is the contract's,
   // shared with the home banners.
   if (pendingAthletes.length > 0) {
-    const names = listNames(pendingAthletes.map((a) => a.name));
+    const namesOf = (list) => listNames(list.map((a) => a.name));
     const ended = pendingAthletes.some((a) => a.status === 'lapsed');
-    const perPurchase = pendingAthletes.every((a) => a.perPurchase === true);
+    // Each sentence names only the athletes it is true of: in a mixed list
+    // the single-token athletes are never told "billed monthly".
+    const singles = pendingAthletes.filter((a) => a.perPurchase === true);
+    const monthly = pendingAthletes.filter((a) => a.perPurchase !== true);
+    const perPurchase = monthly.length === 0;
     // Elite books as soon as it is paid, and holds no tokens: a pending list
-    // of Elite athletes only gets no "token packages from" date.
-    const elitePending = pendingAthletes.every((a) => a.packageId === ELITE.id);
+    // whose monthly athletes are all Elite gets no "token packages from" date.
+    const elitePending = monthly.every((a) => a.packageId === ELITE.id);
     // Single tokens go on sale when booking opens (owner ruling 2026-10-01):
-    // until then an all-single list says when, and offers no Pay button.
+    // until then an all-single list says when, and offers no Pay button. In
+    // a mixed list each single-token row says when (PendingBanner, the
+    // Billing hero), so the body does not.
     const singleNotOpen = perPurchase && !saleOpen(opts.now ?? Date.now());
+    const singleBody = `${namesOf(singles)} can book once their session token is paid for. ${singleNotOpen ? `${SINGLE_NOT_OPEN_LINE} ` : ''}A session token is a one-time $${SINGLE_TOKEN.price} payment.`;
+    const monthlyBody = `${namesOf(monthly)} can book once checkout is complete${bookingOpen(opts.now ?? Date.now()) || elitePending ? '' : ` (token packages from ${BOOKING_OPENS_LABEL})`}. Billed monthly on the 1st once you've paid.`;
     return {
       status: 'pending',
       tone: 'yellow',
       badge: { tone: 'yellow', label: ended ? 'Payment needed' : 'Payment pending' },
       title: ended ? 'Membership ended - pay to book again' : 'Payment pending - finish checkout to start booking',
-      body: perPurchase
-        ? `${names} can book once their session token is paid for. ${singleNotOpen ? `${SINGLE_NOT_OPEN_LINE} ` : ''}A session token is a one-time $${SINGLE_TOKEN.price} payment.`
-        : `${names} can book once checkout is complete${bookingOpen(opts.now ?? Date.now()) || elitePending ? '' : ` (token packages from ${BOOKING_OPENS_LABEL})`}. Billed monthly on the 1st once you've paid.`,
+      body: perPurchase ? singleBody : singles.length > 0 ? `${monthlyBody} ${singleBody}` : monthlyBody,
       ladder: null,
       ladderAt: null,
       cta: singleNotOpen ? null : 'Pay now',
@@ -407,7 +419,8 @@ export function statusFor(membership, opts = {}) {
     badge: { tone: 'green', label: 'Active' },
     // `allUnlimited`: every athlete is Elite - no token wording (tester Mike 2026-09-30).
     // `allPerPurchase`: session tokens never start or reset with a period - an all-single household reads 'Membership active'.
-    title: opts.allUnlimited === true
+    // `noMonthlyTokens`: Elite and single-token athletes only (hooks/billing.js noMonthlyTokensOf) - nobody's tokens start or reset, so the Elite title.
+    title: opts.allUnlimited === true || (opts.noMonthlyTokens === true && opts.allPerPurchase !== true)
       ? tokensStartOn
         ? `First period starts ${longDayLabel(tokensStartOn)}`
         : 'Membership active'

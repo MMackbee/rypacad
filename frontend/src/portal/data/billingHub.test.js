@@ -301,9 +301,23 @@ describe('per-athlete billing (Sprint 20, spec 4.4)', () => {
     expect(statusFor(null, { now: AFTER_GATE - 1, pendingAthletes: [{ athleteId: 'a', name: 'Ava', perPurchase: true }] }).cta).toBeNull();
     // A list with a monthly athlete keeps its Pay button before the gate: that checkout is open.
     expect(statusFor(null, { now: BEFORE_GATE, pendingAthletes: [{ athleteId: 'a', name: 'Ava', perPurchase: false }, { athleteId: 'b', name: 'Ben', perPurchase: true }] }).cta).toBe('Pay now');
-    // A mixed list, or a monthly one, keeps the monthly body byte-for-byte.
+    // A mixed list: the monthly sentence names the monthly athletes only, byte-for-byte, and the single-token athletes get the one-time
+    // sentence - never "billed monthly". Before the gate each single-token row says when (PendingBanner, the Billing hero), so the body does not.
     const mixed = statusFor(null, { now: BEFORE_GATE, pendingAthletes: [{ athleteId: 'a', name: 'Ava', perPurchase: false }, { athleteId: 'b', name: 'Ben', perPurchase: true }] });
-    expect(mixed.body).toBe("Ava and Ben can book once checkout is complete (token packages from Sat, Oct 10 at 7 AM). Billed monthly on the 1st once you've paid.");
+    expect(mixed.body).toBe(`${monthly} Ben can book once their session token is paid for. A session token is a one-time $65 payment.`);
+    expect(mixed.body).not.toContain('Single tokens are available from');
+    expect(mixed.body.split('Billed monthly')).toHaveLength(2);
+    expect(mixed.body).not.toMatch(/Ben[^.]*checkout is complete/);
+    const mixedOpen = statusFor(null, { now: AFTER_GATE, pendingAthletes: [
+      { athleteId: 'a', name: 'Ava', packageId: 't-12' }, { athleteId: 'b', name: 'Ben', perPurchase: true, packageId: 'single' },
+      { athleteId: 'c', name: 'Cy', packageId: 'elite' }, { athleteId: 'd', name: 'Dee', perPurchase: true, packageId: 'single' },
+    ] });
+    expect(mixedOpen.body).toBe("Ava and Cy can book once checkout is complete. Billed monthly on the 1st once you've paid. Ben and Dee can book once their session token is paid for. A session token is a one-time $65 payment.");
+    expect(mixedOpen).toMatchObject({ status: 'pending', title: 'Payment pending - finish checkout to start booking', cta: 'Pay now' });
+    // Elite and a single token, before the gate: no "token packages from" date for Elite, as in an all-Elite list.
+    expect(statusFor(null, { now: BEFORE_GATE, pendingAthletes: [{ athleteId: 'e', name: 'Eli', packageId: 'elite' }, { athleteId: 'b', name: 'Ben', perPurchase: true, packageId: 'single' }] }).body)
+      .toBe("Eli can book once checkout is complete. Billed monthly on the 1st once you've paid. Ben can book once their session token is paid for. A session token is a one-time $65 payment.");
+    // A monthly list keeps the monthly body byte-for-byte.
     expect(statusFor(null, { now: BEFORE_GATE, pendingAthletes: [{ athleteId: 'a', name: 'Ava', perPurchase: false }] }).body).toBe(monthly);
     expect(statusFor(null, { now: BEFORE_GATE, pendingAthletes: [{ athleteId: 'a', name: 'Ava' }] }).body).toBe(monthly);
     // An all-single household that is active: nothing bills monthly.
@@ -313,6 +327,16 @@ describe('per-athlete billing (Sprint 20, spec 4.4)', () => {
     // Session tokens never reset, so the hero does not promise a reset date.
     expect(active.title).toBe('Membership active');
     expect(statusFor(null, { resetsOn: '2026-10-01', anchorDay: 1, allPerPurchase: false }).title).toBe(`Tokens reset ${longDayLabel('2026-10-01')}`);
+    // Elite and single-token athletes only: Elite holds no tokens and session tokens never reset, so the hero promises neither a start nor a reset.
+    const eliteAndSingle = statusFor(null, { resetsOn: '2026-12-01', anchorDay: 1, noMonthlyTokens: true });
+    expect(eliteAndSingle).toMatchObject({ status: 'active', title: 'Membership active', body: 'Billed monthly on the 1st. Nothing needs attention.' });
+    expect(statusFor(null, { resetsOn: '2026-10-01', tokensStartOn: '2026-11-01', anchorDay: 1, noMonthlyTokens: true }).title).toBe(`First period starts ${longDayLabel('2026-11-01')}`);
+    // An all-single household carries both flags and keeps its own title and body, before the season too.
+    expect(statusFor(null, { resetsOn: '2026-10-01', tokensStartOn: '2026-11-01', anchorDay: 1, noMonthlyTokens: true, allPerPurchase: true }))
+      .toMatchObject({ title: 'Membership active', body: 'Session tokens are one-time payments - nothing bills monthly.' });
+    // Anyone on a monthly token package keeps the token dates.
+    expect(statusFor(null, { resetsOn: '2026-12-01', anchorDay: 1, noMonthlyTokens: false }).title).toBe(`Tokens reset ${longDayLabel('2026-12-01')}`);
+    expect(statusFor(null, { resetsOn: '2026-10-01', tokensStartOn: '2026-11-01', anchorDay: 1, noMonthlyTokens: false }).title).toBe(`Tokens start ${longDayLabel('2026-11-01')}`);
     // The monthly pins are unchanged.
     expect(statusFor(null, { resetsOn: '2026-10-01', anchorDay: 1, allPerPurchase: false }).body).toBe('Billed monthly on the 1st. Nothing needs attention.');
     expect(statusFor({ status: 'active' }, { anchorDay: 15 }).body).toBe('Billed monthly on the 15th. Nothing needs attention.');

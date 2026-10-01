@@ -4,7 +4,7 @@ import PayButton from './PayButton';
 import { Body, Card, SectionLabel } from './Primitives';
 import { PAY_NOW, PENDING_TITLE, facilityName, facilityPayLabel, facilityPendingTitle, facilityWaitingLine } from '../data/billingCopy';
 import { SIBLING_DISCOUNT_NOTE, SIBLING_ORDER_NOTE, siblingPartialNote } from '../data/packages';
-import { saleOpen, SINGLE_NOT_OPEN_LINE } from '../data/singleToken';
+import { saleOpen, SINGLE_ASK_GUARDIAN_LINE, SINGLE_NOT_OPEN_LINE } from '../data/singleToken';
 
 /**
  * One banner, one Pay now per athlete who needs a checkout - pending, or lapsed and re-subscribing (spec 4.4). `title` is the hub status title (the lapsed wording differs); renders nothing when nobody is listed.
@@ -16,11 +16,13 @@ import { saleOpen, SINGLE_NOT_OPEN_LINE } from '../data/singleToken';
  * With only the 'pay' row left the card carries its own title, and never the hub's `title`/`body`, which then describe the membership, not an unpaid add-on.
  * `self` (the adult who is their own household) drops the word "family".
  * A single-token row (`perPurchase`) has no Pay button until single tokens go on sale (owner ruling 2026-10-01; data/singleToken.js saleOpen, the booking-open gate): the row says when instead.
+ * `askGuardian` (an under-18 athlete's own login; owner ruling 2026-10-01, data/singleToken.js ownLoginMayBuy is false): from the gate on, a single-token row reads who buys it instead of Pay now. A monthly row keeps its Pay now.
  */
-export default function PendingBanner({ pendingAthletes, facilityRows = null, body, title = null, email = null, siblingDiscount = false, plan = null, renderRowExtra = null, self = false, style }) {
+export default function PendingBanner({ pendingAthletes, facilityRows = null, body, title = null, email = null, siblingDiscount = false, plan = null, renderRowExtra = null, self = false, askGuardian = false, style }) {
   const tier = pendingAthletes || [];
   const planOf = (a) => (plan && !a.perPurchase ? plan[a.athleteId] : null) || null;
   const notYet = (a) => a.perPurchase === true && !saleOpen();
+  const guardianBuys = (a) => askGuardian && a.perPurchase === true && !notYet(a);
   // An all-single list's body already says when (billingHub.js statusFor): never twice.
   const bodySaysWhen = Boolean(body) && body.includes(SINGLE_NOT_OPEN_LINE);
   const waiting = new Set((facilityRows || []).filter((r) => r.state === 'waiting').map((r) => r.athleteId));
@@ -45,8 +47,9 @@ export default function PendingBanner({ pendingAthletes, facilityRows = null, bo
             {planOf(a)?.state === 'discount' ? <Body size={11} style={{ marginTop: 3 }}>{SIBLING_DISCOUNT_NOTE}</Body> : null}
             {planOf(a)?.state === 'partial' ? <Body size={11} style={{ marginTop: 3 }}>{siblingPartialNote(planOf(a).amount)}</Body> : null}
             {notYet(a) && !bodySaysWhen ? <Body size={11} tone={color.textTertiary} style={{ marginTop: 3 }}>{SINGLE_NOT_OPEN_LINE}</Body> : null}
+            {guardianBuys(a) ? <Body size={12} style={{ marginTop: 3 }}>{SINGLE_ASK_GUARDIAN_LINE}</Body> : null}
           </div>
-          {notYet(a) ? null : (
+          {notYet(a) || guardianBuys(a) ? null : (
             <PayButton athleteId={a.athleteId} product="tier" label={PAY_NOW} height={44} email={email} style={{ width: 132, flex: 'none' }} />
           )}
         </div>

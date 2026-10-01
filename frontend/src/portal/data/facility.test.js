@@ -32,6 +32,22 @@ describe('householdFacility over athlete docs', () => {
       .toEqual({ ...NONE, access: true, source: 'elite', holderId: 'b', eliteId: 'e' });
   });
 
+  test('a single-token buyer moved to Elite is still to pay: no Elite access until the Elite checkout lands', () => {
+    // The stored one-time block stays { active, oneTime } until then (billingCopy.js billingStatusOf reads it as pending).
+    const moved = doc('e', { packageId: 'elite', billing: { status: 'active', oneTime: true, subscriptionId: null } });
+    expect(householdFacility([doc('a'), moved])).toEqual({ ...NONE, eliteDueId: 'e' });
+    // Paid: the checkout clears oneTime, and Elite covers the family.
+    expect(householdFacility([doc('a'), doc('e', { packageId: 'elite', billing: { status: 'active', oneTime: false, subscriptionId: 'sub_e' } })]))
+      .toEqual({ ...NONE, access: true, source: 'elite', eliteId: 'e' });
+    // The family's own add-on is what covers it meanwhile.
+    expect(householdFacility([doc('b', { facilityBilling: { status: 'active' } }), moved]))
+      .toEqual({ ...NONE, access: true, source: 'add-on', holderId: 'b', eliteDueId: 'e' });
+    // On the single package the one-time block is a paid session token, nothing to do with Elite.
+    expect(householdFacility([doc('s', { packageId: 'single', billing: { status: 'active', oneTime: true } })])).toEqual(NONE);
+    // The hub member for the same athlete (status already 'pending', oneTime riding along) reads the same.
+    expect(householdFacility([member('e', { package: { id: 'elite', kind: 'elite' }, billing: { status: 'pending', facility: null, oneTime: true } })])).toEqual({ ...NONE, eliteDueId: 'e' });
+  });
+
   test('nothing to read is no access', () => {
     for (const empty of [[], null, undefined, [null, undefined]]) expect(householdFacility(empty)).toEqual(NONE);
   });

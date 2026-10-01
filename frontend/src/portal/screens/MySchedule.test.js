@@ -108,6 +108,18 @@ describe('a waitlisted row', () => {
     expect(r.text()).toContain('Cancelled by the academy - a bonus token was added.');
     await r.unmount();
   });
+
+  // A session token is good all season: its card never says "this period".
+  test('a single-token athlete: the card is labelled without a period', async () => {
+    mockTokens = { unlimited: false, perPurchase: true, granted: 0, used: 0, reserved: 0, left: 0, held: 0, grace: [{ id: 'single_cs_1', expiresAt: '2027-02-27', reason: 'single-purchase', sourceSessionId: null }] };
+    mockRows = [row()];
+    const r = await renderScreen(<MySchedule bare />);
+    expect(r.text()).toContain('Your session tokens');
+    expect(r.text()).toContain('1 session token - good through Sat, Feb 27');
+    expect(r.text()).not.toContain('Tokens this period');
+    expect(r.text()).not.toContain('Your package');
+    await r.unmount();
+  });
 });
 
 test('a Calendly row says to cancel from the email; a portal row keeps Cancel', async () => {

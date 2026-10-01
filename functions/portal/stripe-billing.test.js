@@ -122,4 +122,75 @@ test('otherTierLive: a live sibling keeps the household; pending/lapsed do not',
       assert.equal(await live([doc('a1', 'lapsed'), legacy]), true);
     });
 
+test('otherTiers: unbilled only when every live sibling is a single token',
+    async () => {
+      const doc = (id, billing) => ({id, data: () => ({billing})});
+      const single = {status: 'active', oneTime: true, subscriptionId: null};
+      const monthly = {status: 'active', subscriptionId: 'sub_2'};
+      const dbWith = (docs) => ({collection: () => ({where: () => docs})});
+      const tx = {get: async (docs) => ({docs})};
+      const others = (docs) => b.otherTiers(tx, dbWith(docs), 'h1', 'a1');
+      const ben = doc('a1', {status: 'past_due', subscriptionId: 'sub_1'});
+      assert.deepEqual(await others([ben, doc('a2', single)]),
+          {live: true, unbilled: true});
+      assert.deepEqual(await others([ben, doc('a2', single),
+        doc('a3', single), doc('a4', {status: 'pending'})]),
+      {live: true, unbilled: true}, 'a pending sibling bills nothing');
+      // A sibling Stripe still bills (or still retries) clears it itself.
+      assert.deepEqual(await others([ben, doc('a2', single),
+        doc('a3', monthly)]), {live: true, unbilled: false});
+      assert.deepEqual(await others([ben, doc('a2', single),
+        doc('a3', {status: 'past_due', subscriptionId: 'sub_3'})]),
+      {live: true, unbilled: false});
+      assert.deepEqual(await others([ben, doc('a2', single),
+        {id: 'a3', data: () => ({})}]), {live: true, unbilled: false},
+      'a legacy sibling is billed on the household subscription');
+      // A one-time block that subscribed since is a subscription.
+      assert.deepEqual(await others([ben, doc('a2',
+          {status: 'active', oneTime: true, subscriptionId: 'sub_4'})]),
+      {live: true, unbilled: false});
+      // Nobody live: the household lapses, nothing to lift.
+      assert.deepEqual(await others([ben, doc('a2', {status: 'lapsed'})]),
+          {live: false, unbilled: false});
+      assert.deepEqual(await others([ben]), {live: false, unbilled: false});
+    });
+
+test('liftEndedFreeze: past_due ends with the subscription, singles only',
+    () => {
+      const frozen = {id: 'h1', ref: {path: 'households/h1'}, data: {
+        membership: {status: 'past_due', attemptCount: 3,
+          nextPaymentAttempt: null, lastFailedAt: '2026-12-08'}}};
+      const lift = recorder();
+      assert.equal(b.liftEndedFreeze(lift.tx, frozen,
+          {live: true, unbilled: true}, 'evt_9', 'canceled'), true);
+      assert.equal(lift.writes.length, 1);
+      const h = Object.assign({}, lift.writes[0].data);
+      assert.ok(h['membership.updatedAt'], 'updatedAt is a server timestamp');
+      delete h['membership.updatedAt'];
+      assert.deepEqual([lift.writes[0].op, lift.writes[0].path, h],
+          ['update', 'households/h1', {
+            'membership.status': 'active',
+            'membership.stripeSubscriptionStatus': 'canceled',
+            'membership.lastEventId': 'evt_9',
+            'membership.attemptCount': null,
+            'membership.nextPaymentAttempt': null,
+            'membership.lastFailedAt': null}]);
+      // A sibling Stripe still bills keeps the freeze until its invoice.
+      const kept = recorder();
+      assert.equal(b.liftEndedFreeze(kept.tx, frozen,
+          {live: true, unbilled: false}, 'evt_9', 'canceled'), false);
+      // Nobody live: applyLapsed owns the household write.
+      assert.equal(b.liftEndedFreeze(kept.tx, frozen,
+          {live: false, unbilled: false}, 'evt_9', 'unpaid'), false);
+      // Never a lift of anything but the card freeze.
+      for (const membership of [undefined, {status: 'active'},
+        {status: 'lapsed'}]) {
+        assert.equal(b.liftEndedFreeze(kept.tx, {id: 'h1',
+          ref: {path: 'households/h1'}, data: {membership}},
+        {live: true, unbilled: true}, 'evt_9', 'canceled'), false,
+        String(membership && membership.status));
+      }
+      assert.equal(kept.writes.length, 0);
+    });
+
 run();

@@ -8,7 +8,7 @@ import { SessionTokenHero } from './SessionTokens';
 import { Body, Card, SectionLabel } from './Primitives';
 import { longDayLabel } from '../data/calendar';
 import { firstPeriodLine, PAY_TO_START } from '../data/billingCopy';
-import { availableCount, BUY_SINGLE_LABEL, saleOpen, SINGLE_NOT_OPEN_LINE } from '../data/singleToken';
+import { availableCount, BUY_SINGLE_LABEL, saleOpen, SINGLE_ASK_GUARDIAN_LINE, SINGLE_NOT_OPEN_LINE } from '../data/singleToken';
 
 /**
  * One athlete's tokens on the Billing hub (contract v2.4, Sprint 16): the
@@ -21,7 +21,7 @@ import { availableCount, BUY_SINGLE_LABEL, saleOpen, SINGLE_NOT_OPEN_LINE } from
  * (`tokens.perPurchase`, ruling 2026-09-29/30) has no period grant or reset:
  * their hero is SessionTokenHero, and a row paid with a bought token reads
  * 'Session token'. The hero names the session each spent token was used on
- * and, for the payer (`buy`), carries the way to get another (SingleBuy).
+ * and, for the payer (`buy`), carries the way to get another (singleBuySlot).
  */
 
 function toneFor(left) {
@@ -162,18 +162,23 @@ function Toggle({ open, onToggle, count }) {
 }
 
 /**
- * The single athlete's way to a token, in the hero (review 2026-09-30: "No
- * session token" with nothing to tap). The same one-time checkout whether it
- * is the first token (payment pending, or a lapsed membership moved to the
- * single token) or another one: primary when there is nothing to book with,
- * outline otherwise. Before single tokens go on sale (owner ruling
- * 2026-10-01; data/singleToken.js saleOpen, the booking-open gate) it is a
- * line saying when, never a button. A failing card ('past_due') is fixed in
- * Stripe's portal, not by a second checkout.
+ * The single athlete's way to ANOTHER token, in the hero (review 2026-09-30:
+ * "No session token" with nothing to tap): primary when there is nothing to
+ * book with, outline otherwise. Only for an athlete whose billing is active
+ * (owner ruling 2026-10-01, "drop one"): while payment is pending or the
+ * membership ended (hooks/billing.js pendingOf) the same one-time checkout is
+ * the hero's or PendingBanner's Pay now, so there is never a second button
+ * for it here, nor the Oct 10 sentence twice. A failing card ('past_due') is
+ * fixed in Stripe's portal, not by a second checkout. Before single tokens go
+ * on sale (owner ruling 2026-10-01; data/singleToken.js saleOpen, the
+ * booking-open gate) it is a line saying when, never a button; from then on
+ * an under-18 athlete's own login (`askGuardian`) reads who buys it instead.
+ * null when there is nothing to show, so the hero draws no empty slot.
  */
-function SingleBuy({ member }) {
-  if ((member.billing?.status ?? 'active') === 'past_due') return null;
+function singleBuySlot(member, askGuardian) {
+  if ((member.billing?.status ?? 'active') !== 'active') return null;
   if (!saleOpen()) return <Body size={12}>{SINGLE_NOT_OPEN_LINE}</Body>;
+  if (askGuardian) return <Body size={12}>{SINGLE_ASK_GUARDIAN_LINE}</Body>;
   const none = availableCount(member.tokens) === 0;
   return <PayButton athleteId={member.athleteId} product="tier" label={BUY_SINGLE_LABEL} variant={none ? 'primary' : 'outline'} height={44} />;
 }
@@ -183,8 +188,11 @@ function SingleBuy({ member }) {
  * @param {boolean} [buy]  The viewer pays for this athlete (a parent, or the
  *   athlete's own login) - never the read-only staff view. Only the single
  *   token has a button here; a monthly checkout stays on the pending card.
+ * @param {boolean} [askGuardian]  With `buy`, on an under-18 athlete's own
+ *   login (data/singleToken.js ownLoginMayBuy is false): the line telling
+ *   them a parent or guardian buys it, never the button.
  */
-export default function TokenMeter({ member, defaultOpen = false, showPrices = false, buy = false }) {
+export default function TokenMeter({ member, defaultOpen = false, showPrices = false, buy = false, askGuardian = false }) {
   const [open, setOpen] = useState(defaultOpen);
   const { package: pkg, tokens, period, expiryNudge, spent, reserved } = member;
   // v2.0.1 (Sprint 18): catalogue prices are withheld from parents and
@@ -236,7 +244,7 @@ export default function TokenMeter({ member, defaultOpen = false, showPrices = f
 
   if (tokens.perPurchase) {
     return (
-      <SessionTokenHero member={member} price={price} buySlot={buy ? <SingleBuy member={member} /> : null}>
+      <SessionTokenHero member={member} price={price} buySlot={buy ? singleBuySlot(member, askGuardian) : null}>
         <Toggle open={open} onToggle={() => setOpen((v) => !v)} count={count} />
         {open ? <Evidence member={member} /> : null}
       </SessionTokenHero>

@@ -213,8 +213,11 @@ function ScheduleBody({ past, sessions, cancelled, tokens, days, onBook, onCance
         */}
         {tokens ? (
           <Card>
-            {/* Elite holds no tokens (tester Mike 2026-09-30): no token label. */}
-            <SectionLabel style={{ marginBottom: 12 }}>{tokens.unlimited ? 'Your package' : 'Tokens this period'}</SectionLabel>
+            {/* Elite holds no tokens (tester Mike 2026-09-30): no token label.
+                Session tokens are good all season: no "this period". */}
+            <SectionLabel style={{ marginBottom: 12 }}>
+              {tokens.unlimited ? 'Your package' : tokens.perPurchase ? 'Your session tokens' : 'Tokens this period'}
+            </SectionLabel>
             <AllowancePools tokens={tokens} />
             <GraceLine tokens={tokens} />
           </Card>

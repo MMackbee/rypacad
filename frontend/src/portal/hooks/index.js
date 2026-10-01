@@ -1952,6 +1952,7 @@ function seedMemberEntry(child, today) {
   return {
     athleteId: child.id,
     name: child.name,
+    dob: child.dob ?? null,
     billingStatus: child.billingStatus ?? 'active',
     package: pkg
       ? { id: pkg.id, name: pkg.name, price: pkg.price ?? null, pending: pkg.pending ?? false, tokens: pkg.tokens ?? null, windowDays: pkg.windowDays ?? null, kind: pkg.kind ?? null }
@@ -1991,6 +1992,9 @@ async function liveMemberEntry(a, today, anchorDay) {
   return {
     athleteId: a.id,
     name: a.name,
+    // The athlete's own Book a Session reads it: who may buy a session
+    // token there (data/singleToken.js ownLoginMayBuy). null when not on file.
+    dob: a.dob ?? null,
     billingStatus: billingStatusOf(a),
     package: pkg
       ? {
@@ -2071,7 +2075,7 @@ async function liveMembership(today) {
  * Sprint 12, contract v2.0 pin N) - the parked Billing surface's
  * replacement: what each athlete's ONE package ENTITLES them to, never what
  * is owed. `{ data: { household: {id,name,periodAnchorDay}|null, members:
- * [{ athleteId, name, package, tokens, contractMinutes, periodEnd }] },
+ * [{ athleteId, name, dob, package, tokens, contractMinutes, periodEnd }] },
  * loading, error }`. Parent: every household athlete, household order.
  * Athlete: self only, household null.
  */

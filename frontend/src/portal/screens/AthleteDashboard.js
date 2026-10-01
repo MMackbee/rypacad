@@ -19,7 +19,9 @@ import AgeGroupChip from '../components/AgeGroupChip';
 import SkeletonCard, { SkeletonBar } from '../components/Skeleton';
 import { Body, Card, ErrorNotice, ScreenTitle, SectionLabel, SignOutButton, Tick } from '../components/Primitives';
 import { useAthleteDashboard } from '../hooks';
+import { todayISO } from '../data/calendar';
 import { contractEnabled } from '../data/contractFlag';
+import { ownLoginMayBuy } from '../data/singleToken';
 
 /**
  * 03 · Athlete Dashboard - athlete.
@@ -72,8 +74,17 @@ export default function AthleteDashboard({
   const selfManaged = useSelfManaged();
   const facilityPending = mine.data?.facilityPending ?? [];
   const facilityRows = facilityPending.filter((r) => !(params.get('product') === 'facility' && r.athleteId === params.get('paid')));
+  // A session token is bought by an adult (owner ruling 2026-10-01): an
+  // under-18 athlete's own pending card says who buys it instead of Pay now.
+  // A monthly package's Pay now is unchanged.
+  const askGuardian = !ownLoginMayBuy({ selfManaged, dob: mine.data?.member?.dob, todayISO: todayISO() });
   // Their own package can still change before Pay now (tester S4, 2026-09-30).
+  // Not from a single-token row unless this is the self-managed adult: the
+  // rules let only that adult or a parent change a package, and an under-18
+  // athlete's single-token row has no Pay now, so the link would be the one
+  // thing to tap and its save would fail. A monthly row is unchanged.
   const [changeFor, setChangeFor] = useState(null);
+  const changeLink = (a) => (a.perPurchase && !selfManaged ? null : <ChangePackageLink athlete={a} onOpen={setChangeFor} />);
 
   return (
     <PhoneFrame
@@ -126,9 +137,10 @@ export default function AthleteDashboard({
           pendingAthletes={(mineStatus?.status === 'pending' ? mineStatus.pendingAthletes : []).filter((a) => a.athleteId !== params.get('paid'))}
           facilityRows={facilityRows}
           self={selfManaged}
+          askGuardian={askGuardian}
           body={mineStatus?.body}
           title={mineStatus?.title}
-          renderRowExtra={(a) => <ChangePackageLink athlete={a} onOpen={setChangeFor} />}
+          renderRowExtra={changeLink}
         />
         <ChangePackageSheet athlete={changeFor} self onClose={() => setChangeFor(null)} />
         {/* Live: shown until a published diagnostic exists (contract v1.8 C);
@@ -165,8 +177,11 @@ export default function AthleteDashboard({
         {athlete?.tokens ? (
           <Card>
             <div style={{ display: 'flex', alignItems: 'baseline', gap: 10, marginBottom: 12 }}>
-              {/* Elite holds no tokens (tester Mike 2026-09-30): no token label. */}
-              <SectionLabel style={{ flex: 1 }}>{athlete.tokens.unlimited ? 'Your package' : 'Tokens this period'}</SectionLabel>
+              {/* Elite holds no tokens (tester Mike 2026-09-30): no token label.
+                  Session tokens are good all season: no "this period". */}
+              <SectionLabel style={{ flex: 1 }}>
+                {athlete.tokens.unlimited ? 'Your package' : athlete.tokens.perPurchase ? 'Your session tokens' : 'Tokens this period'}
+              </SectionLabel>
               {/*
                 Sprint 11 pin D entry point: "AthleteDashboard's allowance
                 card gets a 'Membership' link." Direct navigate(), same

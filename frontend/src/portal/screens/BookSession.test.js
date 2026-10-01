@@ -28,6 +28,8 @@ let mockHousehold;
 let mockLeave;
 // The booking athlete's paid state (the single token's Buy button reads it).
 let mockBillingStatus;
+// Their date of birth, as the member row carries it: on their own login the Buy button is an adult's.
+let mockDob;
 jest.mock('../hooks', () => ({
   useBooking: () => ({
     data: { slots: [{ date: mockFirstSlot }], tokens: mockTokens, confirmation: mockConfirmation, seasonNote: null },
@@ -37,7 +39,7 @@ jest.mock('../hooks', () => ({
     bookingFor: mockBookingFor,
   }),
   useHouseholdAthletes: () => ({ data: mockHousehold, loading: false }),
-  useMembership: () => ({ data: { members: [{ athleteId: 'a1', name: 'Jordan', package: mockPackage, billingStatus: mockBillingStatus }] } }),
+  useMembership: () => ({ data: { members: [{ athleteId: 'a1', name: 'Jordan', dob: mockDob, package: mockPackage, billingStatus: mockBillingStatus }] } }),
   useMonthSessions: (m) => mockMonth(m),
 }));
 jest.mock('../hooks/waitlist', () => ({ leaveWaitlist: (...args) => mockLeave(...args) }));
@@ -65,6 +67,7 @@ beforeEach(() => {
   mockTokens = { left: 6, unlimited: false, grace: [] };
   mockConfirmation = { email: null, note: 'See you there.' };
   mockBillingStatus = 'active';
+  mockDob = null;
   jest.useFakeTimers('modern');
 });
 afterEach(() => {
@@ -732,8 +735,10 @@ describe('the single token (owner rulings 2026-09-29/30)', () => {
   const SINGLE = { id: 'single', kind: 'single', windowDays: 30 };
   const bought = { id: 'single_cs_1', expiresAt: '2027-02-27', reason: 'single-purchase', sourceSessionId: null };
   const singleTokens = (grace) => ({ granted: 0, used: 0, reserved: 0, left: 0, unlimited: false, perPurchase: true, held: 0, grace });
-  // Live mode, so the confirmation offers Repeat weekly whenever it may.
-  beforeEach(() => { mockBookingFor = 'athlete'; });
+  const ASK = 'Ask a parent or guardian to buy a session token.';
+  // Live mode, so the confirmation offers Repeat weekly whenever it may. The
+  // athlete booking is an adult on their own login unless a test says otherwise.
+  beforeEach(() => { mockBookingFor = 'athlete'; mockDob = '2000-01-01'; });
 
   test('one token: a tappable card, a session-token spend, and no Repeat weekly', async () => {
     jest.setSystemTime(AT_OPEN);
@@ -775,6 +780,106 @@ describe('the single token (owner rulings 2026-09-29/30)', () => {
     await r.unmount();
   });
 
+  // A calendar of dead "No tokens" blocks said nothing about why: the banner now does, with no button (Pay now is on the home and Billing).
+  test('payment pending or ended: the banner says so, with no purchase button here', async () => {
+    jest.setSystemTime(AT_OPEN);
+    mockPackage = SINGLE;
+    mockTokens = singleTokens([]);
+    const PENDING = 'Payment pending - finish checkout to start booking';
+    const purchaseButtons = (r) => [...r.container.querySelectorAll('button')].map((b) => b.textContent).filter((t) => t.includes('|a1|tier'));
+    for (const status of ['pending', 'lapsed']) {
+      mockBillingStatus = status;
+      // An adult on their own login.
+      const own = await renderScreen(<BookSession bare demoSelectedDate="2026-10-12" />);
+      expect(own.text()).toContain('No session token');
+      expect(own.text().split(PENDING)).toHaveLength(2);
+      expect(own.text()).not.toContain(ASK);
+      expect(purchaseButtons(own)).toEqual([]);
+      await own.unmount();
+      // An under-18 athlete on their own login reads who buys it.
+      mockDob = '2012-06-17';
+      const child = await renderScreen(<BookSession bare demoSelectedDate="2026-10-12" />);
+      expect(child.text().split(ASK)).toHaveLength(2);
+      expect(child.text()).not.toContain(PENDING);
+      expect(purchaseButtons(child)).toEqual([]);
+      await child.unmount();
+      // A parent booking for that child reads the pending line, never the guardian one.
+      mockHousehold = [{ id: 'a1', name: 'Jordan', billingStatus: status, tokens: singleTokens([]) }];
+      const parent = await renderScreen(<BookSession bare role="parent" demoSelectedDate="2026-10-12" />);
+      expect(parent.text().split(PENDING)).toHaveLength(2);
+      expect(parent.text()).not.toContain(ASK);
+      expect(purchaseButtons(parent)).toEqual([]);
+      await parent.unmount();
+      mockHousehold = [];
+      mockDob = '2000-01-01';
+    }
+    // A failing card is fixed in Stripe: no line and no button for past_due.
+    mockBillingStatus = 'past_due';
+    const frozen = await renderScreen(<BookSession bare demoSelectedDate="2026-10-12" />);
+    expect(frozen.text()).not.toContain(PENDING);
+    expect(frozen.text()).not.toContain(ASK);
+    expect(purchaseButtons(frozen)).toEqual([]);
+    await frozen.unmount();
+    // Before the gate a pending athlete reads neither line, as before.
+    jest.setSystemTime(BEFORE);
+    mockBillingStatus = 'pending';
+    const early = await renderScreen(<BookSession bare demoSelectedDate="2026-10-12" />);
+    expect(early.text()).not.toContain(PENDING);
+    expect(early.text()).not.toContain(ASK);
+    expect(purchaseButtons(early)).toEqual([]);
+    await early.unmount();
+  });
+
+  // Owner ruling 2026-10-01 ("not unless the child is 18+").
+  test('an under-18 athlete on their own login reads who buys it, never the Buy button', async () => {
+    jest.setSystemTime(AT_OPEN);
+    mockPackage = SINGLE;
+    mockTokens = singleTokens([]);
+    // 14, and no date of birth on file: both read the line.
+    for (const dob of ['2012-06-17', null]) {
+      mockDob = dob;
+      const r = await renderScreen(<BookSession bare demoSelectedDate="2026-10-12" />);
+      expect(r.text()).toContain('No session token');
+      expect(r.text().split(ASK)).toHaveLength(2);
+      expect(r.text()).not.toContain('Buy a session token');
+      await r.unmount();
+    }
+    // With a token in hand they still book with it; only the purchase is the adult's.
+    mockDob = '2012-06-17';
+    mockTokens = singleTokens([bought]);
+    const one = await renderScreen(<BookSession bare demoSelectedDate="2026-10-12" />);
+    expect(one.text().split(ASK)).toHaveLength(2);
+    expect(one.text()).not.toContain('Buy a session token');
+    expect(sessionCard(one).style.cursor).toBe('pointer');
+    await one.unmount();
+  });
+
+  test('a parent booking for that child gets the Buy button, and never the line', async () => {
+    jest.setSystemTime(AT_OPEN);
+    mockPackage = SINGLE;
+    mockDob = '2012-06-17';
+    mockHousehold = [{ id: 'a1', name: 'Jordan', billingStatus: 'active', tokens: singleTokens([]) }];
+    const r = await renderScreen(<BookSession bare role="parent" demoSelectedDate="2026-10-12" />);
+    expect(r.button('Buy a session token - $65|a1|tier|primary')).not.toBeNull();
+    expect(r.text()).not.toContain(ASK);
+    await r.unmount();
+  });
+
+  test('an under-18 athlete on a monthly package or Elite reads nothing about buying', async () => {
+    jest.setSystemTime(AT_OPEN);
+    mockDob = '2012-06-17';
+    const monthly = await renderScreen(<BookSession bare demoSelectedDate="2026-10-12" />);
+    expect(monthly.text()).toContain('Your tokens this period');
+    expect(monthly.text()).not.toContain(ASK);
+    await monthly.unmount();
+    mockPackage = { id: 'elite', kind: 'elite', windowDays: 45 };
+    mockTokens = { unlimited: true, grace: [] };
+    const elite = await renderScreen(<BookSession bare demoSelectedDate="2026-10-12" />);
+    expect(elite.text()).not.toContain(ASK);
+    expect(elite.text()).not.toMatch(/token/i);
+    await elite.unmount();
+  });
+
   test('a monthly athlete still gets Repeat weekly and the monthly banner', async () => {
     jest.setSystemTime(AT_OPEN);
     const r = await renderScreen(<BookSession bare demoSelectedDate="2026-10-12" />);
@@ -812,5 +917,11 @@ describe('the single token (owner rulings 2026-09-29/30)', () => {
     expect(r.text()).toContain('Booking opens Sat, Oct 10 at 7 AM');
     expect(sessionCard(r).style.cursor).toBe('default');
     await r.unmount();
+    // An under-18 athlete reads the same sentence until then, once.
+    mockDob = '2012-06-17';
+    const child = await renderScreen(<BookSession bare demoSelectedDate="2026-10-12" />);
+    expect(child.text().split('Single tokens are available from Sat, Oct 10 at 7 AM.')).toHaveLength(2);
+    expect(child.text()).not.toContain(ASK);
+    await child.unmount();
   });
 });

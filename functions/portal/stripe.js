@@ -316,12 +316,14 @@ async function handleEvent(event) {
           product, status, priceId: null, eventId: event.id});
       } else if (final) {
         // D17: a FINAL failure ends this athlete's subscription (Stripe's
-        // dunning cancels it next) - the same per-athlete rule as deleted.
-        const siblingLive = await billing.otherTierLive(tx, db(), hh.id,
+        // dunning cancels it next) - the same per-athlete rule as deleted,
+        // and the same end to a freeze only single-token siblings outlive.
+        const others = await billing.otherTiers(tx, db(), hh.id,
             athleteRef.id);
         billing.applyAthleteStatus(tx, {athleteRef, athlete, product,
           status, priceId: null, eventId: event.id});
-        applied = siblingLive ?
+        billing.liftEndedFreeze(tx, hh, others, event.id, 'unpaid');
+        applied = others.live ?
             {outcome: 'processing', followUp: 'revoke-athlete', detail: {}} :
             applyLapsed(tx, event, hh, 'unpaid');
       } else {
@@ -341,12 +343,17 @@ async function handleEvent(event) {
         // D17: THIS athlete lapses and loses their future bookings; the
         // household (and every sibling's bookings) only when no sibling
         // still holds a live tier. The read precedes every write here.
-        const siblingLive = await billing.otherTierLive(tx, db(), hh.id,
+        // When the live siblings are all paid single tokens, a card freeze
+        // this subscription left behind ends with it (liftEndedFreeze):
+        // no later invoice.paid would ever clear it.
+        const others = await billing.otherTiers(tx, db(), hh.id,
             athleteRef.id);
         billing.applyAthleteStatus(tx, {athleteRef, athlete, product,
           status: 'lapsed', priceId: resolve.priceIdOf(object),
           eventId: event.id});
-        applied = siblingLive ?
+        billing.liftEndedFreeze(tx, hh, others, event.id,
+            object.status || 'canceled');
+        applied = others.live ?
             {outcome: 'processing', followUp: 'revoke-athlete', detail: {}} :
             applyLapsed(tx, event, hh, object.status || 'canceled');
       }
@@ -398,6 +405,11 @@ async function handleEvent(event) {
     console.error(`stripe event ${event.id}: ${outcome} for athlete ` +
         `${planned.athlete ? planned.athlete.id : null} ` +
         `(${JSON.stringify(planned.detail)}) - needs ops review`);
+  } else if (isCheckout && stripeSingle.paidWithoutToken(object, outcome)) {
+    // The family paid and holds no token: repair the row (RUNBOOK 10.7).
+    console.error(`stripe event ${event.id}: paid single checkout ` +
+        `${object.id} (${object.client_reference_id}) recorded ${outcome}, ` +
+        'no token issued - needs ops review');
   }
   if (planned.firstActive && planned.athlete) {
     await billing.sendPaymentReceived({householdId: planned.household.id,

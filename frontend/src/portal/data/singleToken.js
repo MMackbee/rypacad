@@ -14,6 +14,7 @@ import { format, parseISO } from 'date-fns';
 import { BOOKING_OPENS_LABEL, bookingOpen } from './calendar';
 import { SINGLE_TOKEN } from './packages';
 import { SEASON_BOUNDS } from './season';
+import { isAdultOnDate } from './signup';
 
 /**
  * Whether single tokens are on sale yet (owner ruling 2026-10-01): from the
@@ -56,6 +57,23 @@ export function isSingleTokenId(id) {
 
 /** The Buy button's label: 'Buy a session token - $65'. */
 export const BUY_SINGLE_LABEL = `Buy a session token - $${SINGLE_TOKEN.price}`;
+
+/**
+ * Whether an ATHLETE'S OWN LOGIN is offered the single token's Pay or Buy
+ * button (owner ruling 2026-10-01: "not unless the child is 18+"). True for
+ * the adult who signed up for themselves (user.selfManaged) and for an athlete
+ * whose date of birth says 18 or older on `todayISO` (signup.js ADULT_AGE);
+ * no date of birth on file counts as under 18. A parent's view and the staff
+ * view never ask. Screens only: who createCheckoutSession lets pay is the
+ * server's rule, unchanged.
+ * @param {{selfManaged?: boolean, dob?: string|null, todayISO: string}} who
+ */
+export function ownLoginMayBuy({ selfManaged = false, dob = null, todayISO } = {}) {
+  return selfManaged === true || isAdultOnDate(dob, todayISO);
+}
+
+/** Where that button would be on an under-18 athlete's own login (SINGLE_NOT_OPEN_LINE until the sale opens). */
+export const SINGLE_ASK_GUARDIAN_LINE = 'Ask a parent or guardian to buy a session token.';
 
 /**
  * Tokens a single athlete can book with right now: every usable grace token

@@ -10,12 +10,17 @@ import { packageById } from './packages';
 
 const live = (status) => status === 'active' || status === 'past_due';
 
-/** One athlete's facts, from an athlete doc (`id`, `packageId`, `facilityBilling`) or a billing-hub member (`athleteId`, `package`, `billing.facility`). Absent `billing` == active. */
+/**
+ * One athlete's facts, from an athlete doc (`id`, `packageId`, `facilityBilling`) or a billing-hub member (`athleteId`, `package`, `billing.facility`). Absent `billing` == active.
+ * A single-token buyer moved to another package keeps the one-time block (`oneTime`, status 'active') until that package is paid: 'pending', the rule of billingCopy.js billingStatusOf (a hub member's status already is; an athlete doc's is the stored one).
+ */
 function facts(a) {
+  const packageId = a.package?.id ?? a.packageId ?? null;
+  const status = a.billing?.status ?? 'active';
   return {
     id: a.athleteId ?? a.id ?? null,
-    kind: a.package?.kind ?? packageById(a.package?.id ?? a.packageId)?.kind ?? null,
-    tier: a.billing?.status ?? 'active',
+    kind: a.package?.kind ?? packageById(packageId)?.kind ?? null,
+    tier: status === 'active' && a.billing?.oneTime === true && packageId !== 'single' ? 'pending' : status,
     facility: a.facilityBilling?.status ?? a.billing?.facility ?? null,
     granted: a.facilityAccess === true,
   };

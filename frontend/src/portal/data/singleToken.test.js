@@ -4,8 +4,10 @@ import {
   graceSpendLabel,
   heldLine,
   isSingleTokenId,
+  ownLoginMayBuy,
   packageSwitchWarning,
   saleOpen,
+  SINGLE_ASK_GUARDIAN_LINE,
   SINGLE_EXPIRES,
   SINGLE_EXPIRES_LABEL,
   SINGLE_NOT_OPEN_LINE,
@@ -62,6 +64,44 @@ test('isSingleTokenId matches functions/portal/single.js', () => {
 
 test('the buy label names the one-time price', () => {
   expect(BUY_SINGLE_LABEL).toBe('Buy a session token - $65');
+});
+
+// Owner ruling 2026-10-01 ("not unless the child is 18+"): on an athlete's own
+// login the single token's Pay or Buy button is an adult's.
+describe('ownLoginMayBuy: who an athlete login offers the $65 button to', () => {
+  const today = '2026-10-12';
+
+  test('18 by date of birth: the day before the birthday is still under 18, the birthday itself is not', () => {
+    expect(ownLoginMayBuy({ dob: '2008-10-13', todayISO: today })).toBe(false); // 17 years 364 days
+    expect(ownLoginMayBuy({ dob: '2008-10-12', todayISO: today })).toBe(true); // exactly 18 today
+    expect(ownLoginMayBuy({ dob: '2008-10-11', todayISO: today })).toBe(true);
+    expect(ownLoginMayBuy({ dob: '2012-06-17', todayISO: today })).toBe(false);
+    expect(ownLoginMayBuy({ dob: '1990-01-01', todayISO: today })).toBe(true);
+    // Born Feb 29: 18 on Mar 1 of a year with no Feb 29.
+    expect(ownLoginMayBuy({ dob: '2008-02-29', todayISO: '2026-02-28' })).toBe(false);
+    expect(ownLoginMayBuy({ dob: '2008-02-29', todayISO: '2026-03-01' })).toBe(true);
+  });
+
+  test('the self-managed adult may, whatever is on file', () => {
+    expect(ownLoginMayBuy({ selfManaged: true, todayISO: today })).toBe(true); // no dob
+    expect(ownLoginMayBuy({ selfManaged: true, dob: null, todayISO: today })).toBe(true);
+    expect(ownLoginMayBuy({ selfManaged: true, dob: '2012-06-17', todayISO: today })).toBe(true);
+  });
+
+  test('no date of birth on file, or one that is not a date, counts as under 18', () => {
+    expect(ownLoginMayBuy({ todayISO: today })).toBe(false);
+    expect(ownLoginMayBuy({ selfManaged: false, dob: null, todayISO: today })).toBe(false);
+    expect(ownLoginMayBuy({ dob: '', todayISO: today })).toBe(false);
+    expect(ownLoginMayBuy({ dob: '06/17/1990', todayISO: today })).toBe(false);
+    expect(ownLoginMayBuy({ dob: '1990-01-01' })).toBe(false); // no clock, no claim
+    expect(ownLoginMayBuy()).toBe(false);
+    // Only the session's own true counts as self-managed.
+    expect(ownLoginMayBuy({ selfManaged: 'yes', todayISO: today })).toBe(false);
+  });
+
+  test('the line an under-18 athlete reads instead of the button', () => {
+    expect(SINGLE_ASK_GUARDIAN_LINE).toBe('Ask a parent or guardian to buy a session token.');
+  });
 });
 
 test('availableCount is grace plus comp tokens left', () => {

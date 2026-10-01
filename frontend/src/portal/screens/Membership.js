@@ -10,7 +10,9 @@ import SkeletonCard, { SkeletonBar } from '../components/Skeleton';
 import TokenMeter from '../components/TokenMeter';
 import { BackLink, Banner, Body, Card, ErrorNotice, ScreenTitle, SectionLabel } from '../components/Primitives';
 import { useMyTokens } from '../hooks/billing';
+import { todayISO } from '../data/calendar';
 import { contractEnabled } from '../data/contractFlag';
+import { ownLoginMayBuy } from '../data/singleToken';
 
 /**
  * 19 · Membership — the athlete's own tokens (Sprint 12 pin, contract v2.0;
@@ -27,6 +29,11 @@ import { contractEnabled } from '../data/contractFlag';
  * due / lapsed), never as amounts or cards - except for the self-managed
  * 18+ athlete, who pays for themselves (Mike S6 2026-09-30): a "Billing ›"
  * link beside their name, over the tokens card, opens their Billing hub.
+ *
+ * A session token is bought by an adult (owner ruling 2026-10-01): an
+ * under-18 athlete's own login (data/singleToken.js ownLoginMayBuy) reads
+ * who buys it where the single token's Pay or Buy button would be. A monthly
+ * package's Pay now is unchanged.
  *
  * @param {'populated'|'past_due'|'lapsed'|'loading'|'error'|'empty'} variant
  *   Harness-only. Live routes pass nothing.
@@ -45,6 +52,7 @@ export default function Membership({ variant = 'populated', bare = false, role =
   const data = demo ? null : hook.data;
   const member = data?.member ?? null;
   const status = data?.status ?? null;
+  const askGuardian = !ownLoginMayBuy({ selfManaged, dob: member?.dob, todayISO: todayISO() });
 
   return (
     <PhoneFrame
@@ -74,10 +82,11 @@ export default function Membership({ variant = 'populated', bare = false, role =
         ) : (
           <>
             <StatusBanner status={status} />
-            <PendingBanner pendingAthletes={status?.status === 'pending' ? status.pendingAthletes : []} body={status?.body} title={status?.title} />
+            <PendingBanner pendingAthletes={status?.status === 'pending' ? status.pendingAthletes : []} body={status?.body} title={status?.title} askGuardian={askGuardian} />
             <MemberSection name={member.name} trailing={selfManaged ? <BillingLink onOpen={() => navigate('/portal/billing')} /> : null}>
-              {/* `buy`: a single athlete's meter carries the way to a session token. */}
-              <TokenMeter member={member} defaultOpen buy />
+              {/* `buy`: a paid-up single athlete's meter carries the way to another session
+                  token; while payment is pending the banner's Pay now is the one button. */}
+              <TokenMeter member={member} defaultOpen buy askGuardian={askGuardian} />
               <CoachingLine coaching={member.coaching} />
               {contractEnabled() ? (
                 <ContractLine contractMinutes={member.contractMinutes} onOpen={() => navigate('/portal/contract')} />

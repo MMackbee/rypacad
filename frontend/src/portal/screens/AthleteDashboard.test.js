@@ -159,6 +159,19 @@ test('the empty state and the package card: token wording for a token athlete, n
   mockTokens = null;
 });
 
+// A session token is good all season: its card never says "this period".
+test('the tokens card of a single-token athlete is labelled without a period', async () => {
+  mockContract = null;
+  mockTokens = { granted: 0, used: 0, reserved: 0, left: 0, unlimited: false, perPurchase: true, held: 0, grace: [{ id: 'single_cs_1', expiresAt: '2027-02-27', reason: 'single-purchase', sourceSessionId: null }] };
+  const r = await renderScreen(<AthleteDashboard bare />);
+  expect(r.text()).toContain('Your session tokens');
+  expect(r.text()).toContain('1 session token - good through Sat, Feb 27');
+  expect(r.text()).not.toContain('Tokens this period');
+  expect(r.text()).not.toContain('Your package');
+  await r.unmount();
+  mockTokens = null;
+});
+
 // Review 2026-10-01: the first-visit walkthrough offer names tokens while the
 // contract is hidden - not to an Elite athlete.
 test('the walkthrough offer: "see how tokens work" for a token athlete, no token wording for Elite', async () => {

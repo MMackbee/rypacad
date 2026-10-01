@@ -135,11 +135,38 @@ function applyAthleteStatus(tx, args) {
 }
 
 /**
+ * The household's OTHER athletes when one athlete's tier subscription ends
+ * (D17), from one read. `live`: one of them still holds a live tier
+ * (`billing.status` active or past_due) - a pending or lapsed sibling keeps
+ * nothing alive. `unbilled`: every live one is a paid single token
+ * (`oneTime`, no subscription), so Stripe will never send this household
+ * another invoice.paid. Legacy athletes (no `billing`) never reach here as
+ * the subject: they resolve by customer -> applyLegacy.
+ * @param {!Object} tx The transaction (the read precedes every write).
+ * @param {!Object} db Firestore.
+ * @param {string} householdId The household.
+ * @param {string} athleteId The athlete whose subscription ended.
+ * @return {!Promise<{live: boolean, unbilled: boolean}>} The two facts.
+ */
+async function otherTiers(tx, db, householdId, athleteId) {
+  const snap = await tx.get(db.collection('athletes')
+      .where('householdId', '==', householdId));
+  // Absent `billing` == active (spec 4.4): a legacy sibling keeps the
+  // household live too, and its household subscription still bills.
+  const live = snap.docs.filter((d) => d.id !== athleteId)
+      .map((d) => (d.data() || {}).billing)
+      .filter((b) => !b || ['active', 'past_due'].includes(b.status));
+  return {
+    live: live.length > 0,
+    unbilled: live.length > 0 && live.every((b) => Boolean(b) &&
+        b.status === 'active' && b.oneTime === true && !b.subscriptionId),
+  };
+}
+
+/**
  * Does any OTHER athlete in the household still hold a live tier
- * subscription (`billing.status` active or past_due)? Decides whether one
- * athlete's `customer.subscription.deleted` lapses the household (D17). A
- * pending or lapsed sibling keeps nothing alive. Legacy athletes (no
- * `billing`) never reach here: they resolve by customer -> applyLegacy.
+ * (`otherTiers(...).live`)? Decides whether one athlete's
+ * `customer.subscription.deleted` lapses the household (D17).
  * @param {!Object} tx The transaction (the read precedes every write).
  * @param {!Object} db Firestore.
  * @param {string} householdId The household.
@@ -147,15 +174,39 @@ function applyAthleteStatus(tx, args) {
  * @return {!Promise<boolean>} True when a sibling keeps the household live.
  */
 async function otherTierLive(tx, db, householdId, athleteId) {
-  const snap = await tx.get(db.collection('athletes')
-      .where('householdId', '==', householdId));
-  // Absent `billing` == active (spec 4.4): a legacy sibling keeps the
-  // household live too.
-  return snap.docs.some((d) => {
-    const b = (d.data() || {}).billing;
-    return d.id !== athleteId &&
-        (!b || ['active', 'past_due'].includes(b.status));
+  return (await otherTiers(tx, db, householdId, athleteId)).live;
+}
+
+/**
+ * End a card freeze that has outlived its subscription. A retrying card
+ * sets `membership.status` 'past_due' for the whole household, and only a
+ * later tier invoice.paid clears it (householdActive). When the athlete's
+ * subscription then ENDS and the siblings still live are all paid single
+ * tokens (`others.unbilled`), no invoice will ever come: their paid tokens
+ * would stay unbookable and a single checkout refused
+ * ('household-past-due') with no card left to update. So the freeze ends
+ * with the subscription. A sibling with a subscription of its own, a
+ * legacy sibling, or one still past_due keeps the freeze exactly as before.
+ * @param {!Object} tx The transaction.
+ * @param {!Object} hh The household `{id, ref, data}`.
+ * @param {{live: boolean, unbilled: boolean}} others `otherTiers`' result.
+ * @param {string} eventId The event.
+ * @param {string} subStatus The ended subscription's Stripe status.
+ * @return {boolean} True when the freeze was lifted.
+ */
+function liftEndedFreeze(tx, hh, others, eventId, subStatus) {
+  const membership = (hh.data && hh.data.membership) || {};
+  if (membership.status !== 'past_due' || !others.unbilled) return false;
+  tx.update(hh.ref, {
+    'membership.status': 'active',
+    'membership.stripeSubscriptionStatus': subStatus,
+    'membership.lastEventId': eventId,
+    'membership.attemptCount': null,
+    'membership.nextPaymentAttempt': null,
+    'membership.lastFailedAt': null,
+    'membership.updatedAt': now(),
   });
+  return true;
 }
 
 /**
@@ -184,5 +235,5 @@ async function sendPaymentReceived(args) {
 
 module.exports = {
   applyAthleteInvoicePaid, applyAthleteStatus, billingPatch, householdActive,
-  otherTierLive, sendPaymentReceived,
+  liftEndedFreeze, otherTierLive, otherTiers, sendPaymentReceived,
 };

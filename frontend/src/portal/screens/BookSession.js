@@ -12,11 +12,13 @@ import { CapacityPill } from '../components/StatusBadge';
 import AllowancePools, { GraceLine, SpendNote } from '../components/AllowancePools';
 import PayButton from '../components/PayButton';
 import { SessionTokenPools } from '../components/SessionTokens';
-import { availableCount, BUY_SINGLE_LABEL, graceSpendLabel, isSingleTokenId, saleOpen, SINGLE_NOT_OPEN_LINE } from '../data/singleToken';
+import { availableCount, BUY_SINGLE_LABEL, graceSpendLabel, isSingleTokenId, ownLoginMayBuy, saleOpen, SINGLE_ASK_GUARDIAN_LINE, SINGLE_NOT_OPEN_LINE } from '../data/singleToken';
+import { PENDING_TITLE } from '../data/billingCopy';
 import { canRetry, LockedDayNotice, reasonCopy, SeeMembershipLink } from '../components/BookingReasons';
 import { JoinWaitlistButton, leaveFailureCopy, OnWaitlist, waitingOn, WaitlistedConfirmationBody } from '../components/WaitlistAction';
 import { BackLink, Banner, Body, Card, ErrorNotice, ScreenTitle, SectionLabel, Tick } from '../components/Primitives';
 import { useBooking, useHouseholdAthletes, useMembership, useMonthSessions } from '../hooks';
+import { useSelfManaged } from '../hooks/useAuthSession';
 import { leaveWaitlist } from '../hooks/waitlist';
 // Pure calendar/season helpers, not response data - the data itself travels
 // through the hook seam, but a formatting/derivation helper already imported
@@ -169,6 +171,12 @@ export default function BookSession({
     ? membershipMembers.find((m) => m.athleteId === selectedAthleteId) ?? null
     : membershipMembers[0] ?? null;
   const windowDays = windowDaysFor(selfMember?.package ?? null);
+  // A session token is bought by an adult (owner ruling 2026-10-01): on an
+  // athlete's own login the Buy button shows only to the self-managed 18+
+  // athlete, or one whose date of birth says 18 or older; anyone younger
+  // reads who buys it. A parent's view never asks.
+  const selfManaged = useSelfManaged();
+  const askGuardian = !isParent && !ownLoginMayBuy({ selfManaged, dob: selfMember?.dob, todayISO: todayISO() });
   // Onboarding practice books seed data: no day is ever locked there, or the
   // walkthrough's booking step cannot be finished (Mike, 2026-09-30).
   const openThroughDate = practice ? SEASON_BOUNDS.end : openThrough(new Date(), windowDays);
@@ -426,6 +434,7 @@ export default function BookSession({
                 tokens={tokens}
                 athleteId={isParent ? selectedAthleteId : selfMember?.athleteId}
                 billingStatus={isParent ? selectedAthlete?.billingStatus : selfMember?.billingStatus}
+                askGuardian={askGuardian}
               />
               {data?.seasonNote ? (
                 <Banner tone="green" title="Season">
@@ -710,7 +719,7 @@ function AthleteSelector({ athletes, loading, selectedId, onSelect }) {
  * at submit turns a known constraint into a failed action, which is why this
  * is a banner and not an error. Elite shows no number (pin L).
  */
-function TokensBanner({ tokens, athleteId, billingStatus }) {
+function TokensBanner({ tokens, athleteId, billingStatus, askGuardian = false }) {
   if (!tokens) return null;
   if (tokens.unlimited) {
     return (
@@ -722,16 +731,26 @@ function TokensBanner({ tokens, athleteId, billingStatus }) {
   // The single token (ruling 2026-09-29/30): bought, never reset - the
   // count plus a Buy button while the athlete's billing is active. Until
   // single tokens go on sale (owner ruling 2026-10-01, the booking-open
-  // gate) the button is a line saying when.
+  // gate) the button is a line saying when; from then on an under-18
+  // athlete's own login (`askGuardian`) reads who buys it instead.
+  // While payment is pending (or the membership ended) there is no button
+  // here - Pay now is on the home and Billing (owner ruling 2026-10-01,
+  // "drop one") - but from the gate on the banner says why nothing can be
+  // booked, as a monthly athlete's "Pay to start" does.
   if (tokens.perPurchase) {
     const none = availableCount(tokens) === 0;
+    const unpaid = billingStatus === 'pending' || billingStatus === 'lapsed';
     return (
       <Banner tone={none ? 'red' : 'neutral'} title={none ? 'No session token' : 'Your session tokens'}>
         <SessionTokenPools tokens={tokens} style={{ margin: '4px 0 6px' }} />
-        {!athleteId || (billingStatus ?? 'active') !== 'active' ? null : saleOpen() ? (
-          <PayButton athleteId={athleteId} product="tier" label={BUY_SINGLE_LABEL} variant={none ? 'primary' : 'outline'} height={44} style={{ marginTop: 8 }} />
-        ) : (
+        {athleteId && unpaid && saleOpen() ? (
+          <Body size={12} style={{ marginTop: 8 }}>{askGuardian ? SINGLE_ASK_GUARDIAN_LINE : PENDING_TITLE}</Body>
+        ) : !athleteId || (billingStatus ?? 'active') !== 'active' ? null : !saleOpen() ? (
           <Body size={12} style={{ marginTop: 8 }}>{SINGLE_NOT_OPEN_LINE}</Body>
+        ) : askGuardian ? (
+          <Body size={12} style={{ marginTop: 8 }}>{SINGLE_ASK_GUARDIAN_LINE}</Body>
+        ) : (
+          <PayButton athleteId={athleteId} product="tier" label={BUY_SINGLE_LABEL} variant={none ? 'primary' : 'outline'} height={44} style={{ marginTop: 8 }} />
         )}
       </Banner>
     );

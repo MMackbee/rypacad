@@ -144,4 +144,22 @@ async function applySinglePurchase(tx, args) {
     detail};
 }
 
-module.exports = {applySinglePurchase, singleTokenDoc};
+/**
+ * A PAID payment-mode session of the portal's (it carries a client
+ * reference) that left no token behind: the family is out the price until
+ * ops repairs the ledger row (RUNBOOK 10.7). 'duplicate-purchase' is a
+ * replay of a token already issued; a session with no reference is not the
+ * portal's sale.
+ * @param {?Object} session The checkout event's `data.object`.
+ * @param {?string} outcome The ledger outcome.
+ * @return {boolean} True when the row needs ops review.
+ */
+function paidWithoutToken(session, outcome) {
+  const s = session || {};
+  return s.mode === 'payment' && s.payment_status === 'paid' &&
+      Boolean(s.client_reference_id) &&
+      !String(outcome).startsWith('issued-single') &&
+      outcome !== 'duplicate-purchase';
+}
+
+module.exports = {applySinglePurchase, paidWithoutToken, singleTokenDoc};

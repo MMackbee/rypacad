@@ -34,7 +34,7 @@ jest.mock('../data/calendar', () => {
 
 import { act } from 'react';
 import { createRoot } from 'react-dom/client';
-import useBillingHub, { allPerPurchaseOf, facilityPendingOf, pendingOf, tokensStartOf, useMyTokens, usePaymentConfirmation, warnMissingPortalUrl } from './billing';
+import useBillingHub, { allPerPurchaseOf, facilityPendingOf, noMonthlyTokensOf, pendingOf, tokensStartOf, useMyTokens, usePaymentConfirmation, warnMissingPortalUrl } from './billing';
 import * as live from './live';
 import * as grace from './grace';
 import * as waitlist from './waitlist';
@@ -146,6 +146,55 @@ test('the live hub counts and labels an October booking under November (review 2
   // The add-on ticked at sign-up (no billing doc == active membership): ready to pay.
   expect(result.current.data.facilityPending).toEqual([{ athleteId: 'a1', name: 'Jordan', state: 'pay' }]);
   await act(async () => root.unmount());
+});
+
+test('noMonthlyTokensOf: true only when every member is Elite or on the single token', () => {
+  const m = (kind) => ({ package: kind ? { kind } : null });
+  expect(noMonthlyTokensOf([m('elite'), m('single')])).toBe(true);
+  expect(noMonthlyTokensOf([m('elite')])).toBe(true);
+  expect(noMonthlyTokensOf([m('single'), m('single')])).toBe(true);
+  expect(noMonthlyTokensOf([m('elite'), m('single'), m('tokens')])).toBe(false);
+  expect(noMonthlyTokensOf([m('elite'), m(null)])).toBe(false);
+  expect(noMonthlyTokensOf([])).toBe(false);
+});
+
+// An Elite child and a single-token child, both paid: the hero read "Tokens
+// start Sunday, Nov 1" and then "Tokens reset <date>", though Elite holds no
+// tokens and session tokens never reset.
+test('the live hub of an Elite and a single-token athlete promises no token start or reset', async () => {
+  const PACKAGES = {
+    elite: { id: 'elite', name: 'Elite', kind: 'elite', tokens: null, windowDays: 45 },
+    single: { id: 'single', name: 'Single token', kind: 'single', tokens: 0 },
+    't-6': { id: 't-6', name: '6 tokens', kind: 'tokens', tokens: 6 },
+  };
+  const titleFor = async (today, packageIds) => {
+    calendar.todayISO.mockReturnValue(today);
+    live.isLive.mockReturnValue(true);
+    live.fetchHousehold.mockResolvedValue({ id: 'h1', name: 'Hart family', periodAnchorDay: 1 });
+    live.fetchHouseholdAthletes.mockResolvedValue(packageIds.map((packageId, i) => ({ id: `a${i}`, name: `A${i}`, householdId: 'h1', packageId })));
+    live.fetchPackage.mockImplementation(async (id) => PACKAGES[id]);
+    live.fetchBookings.mockResolvedValue([]);
+    live.fetchGraceTokensByAthlete.mockResolvedValue([]);
+    grace.fetchTokenPeriod.mockResolvedValue(null);
+    waitlist.fetchWaitlistByAthlete.mockResolvedValue([]);
+    const result = { current: null };
+    function Probe() {
+      result.current = useBillingHub({ householdId: 'h1' });
+      return null;
+    }
+    const root = createRoot(document.createElement('div'));
+    await act(async () => { root.render(<Probe />); });
+    await act(async () => { await new Promise((r) => setTimeout(r, 0)); });
+    expect(result.current.error).toBeNull();
+    const { title } = result.current.data.status;
+    await act(async () => root.unmount());
+    return title;
+  };
+  expect(await titleFor('2026-12-10', ['elite', 'single'])).toBe('Membership active');
+  expect(await titleFor('2026-10-20', ['elite', 'single'])).toBe(`First period starts ${calendar.longDayLabel('2026-11-01')}`);
+  // A sibling on a monthly token package keeps the token dates.
+  expect(await titleFor('2026-12-10', ['elite', 'single', 't-6'])).toBe(`Tokens reset ${calendar.longDayLabel('2027-01-01')}`);
+  expect(await titleFor('2026-10-20', ['elite', 'single', 't-6'])).toBe(`Tokens start ${calendar.longDayLabel('2026-11-01')}`);
 });
 
 // Owner report 2026-09-30 (Mike): Membership for an Elite athlete read "Nothing

@@ -23,7 +23,10 @@ function live(b) {
 /**
  * Whether a household has facility access, and why. An add-on counts while
  * its subscription is live (active or past_due); Elite while its membership
- * is (active or past_due, or no `billing` map on a legacy athlete).
+ * is (active or past_due, or no `billing` map on a legacy athlete). A
+ * single-token buyer moved to Elite keeps the one-time block (`oneTime`,
+ * status 'active') until the Elite checkout lands: still to pay, the way
+ * lib.membershipAllowsBooking reads the same block.
  * @param {?Array<?Object>} athletes The household's athlete docs, each with
  *     its `id`.
  * @return {{access: boolean, source: ?string, holderId: ?string,
@@ -34,11 +37,13 @@ function live(b) {
  */
 function householdFacility(athletes) {
   const list = (athletes || []).filter(Boolean);
+  const oneTime = (a) => Boolean(a.billing) && a.billing.oneTime === true;
   const holder = list.find((a) => live(a.facilityBilling));
-  const elite = list.find((a) => a.packageId === ELITE_ID &&
+  const elite = list.find((a) => a.packageId === ELITE_ID && !oneTime(a) &&
       (!a.billing || live(a.billing)));
   const due = list.find((a) => a.packageId === ELITE_ID &&
-      Boolean(a.billing) && a.billing.status === 'pending');
+      Boolean(a.billing) && (a.billing.status === 'pending' ||
+      (oneTime(a) && a.billing.status === 'active')));
   return {
     access: Boolean(holder || elite),
     source: elite ? 'elite' : holder ? 'add-on' : null,

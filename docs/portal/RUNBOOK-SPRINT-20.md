@@ -420,7 +420,9 @@ by a builder.
    0". A tab left open on the old site keeps working until it is reloaded
    (its status-only re-book passes the new rules).
 4. Nothing to do on Oct 10. At 7:00 AM Chicago the card becomes a pick like
-   any other, "Buy a session token - $65" appears, and the same instant
+   any other, "Buy a session token - $65" appears for an active athlete (a
+   payment-pending one sees "Pay now"; an under-18 athlete's own login sees
+   the ask-a-parent line), and the same instant
    `createCheckoutSession` starts selling. Do 10.4 then.
 
 Steps 1 and 2 may swap (each is compatible with everything live); step 3 is
@@ -503,6 +505,24 @@ nothing. Each token stores its `paymentIntentId` for the Stripe lookup.
   released" notice) and any `issued-single-late`,
   `issued-single-amount-check` or `issued-single-household-lapsed` ledger
   rows (the function also logs each one).
+- Review daily: `stripeEvents` rows with `checkoutMode 'payment'` whose
+  outcome is not `issued-single...` or `duplicate-purchase` (`unmatched`,
+  `unexpected-one-time`, `ignored`, `stripe-lookup-failed`). When Stripe
+  shows that session PAID, the family has paid $65 and holds no token:
+  repair it as in the rule above. The function logs each paid one that
+  carries a portal reference as an error, "no token issued - needs ops
+  review".
+- Review daily: refunds and disputes on the single price in Stripe, against
+  the tokens. Each refunded or disputed $65 payment's token (`graceTokens`
+  where `paymentIntentId` is that payment's) must read `expiresAt
+  '2000-01-01'` (10.6). The portal does not hear about a refund or a
+  dispute: until the token is voided the athlete can still book with it.
+- A monthly athlete's subscription that ends after failed payments, in a
+  family whose other paying athletes hold only session tokens: the webhook
+  sets the household back to `active` in the same event (no invoice would
+  ever clear `past_due`), the session-token athletes book again and the
+  ended athlete gets Pay now. A sibling with a monthly subscription keeps
+  the freeze until that sibling's next paid invoice, as before.
 - After any calendar sync that prints `cancel ... (booked N)`, open that
   session in Roster and run **Cancel remaining bookings**: monthly members
   get a bonus token, session-token holders get their token back, and each

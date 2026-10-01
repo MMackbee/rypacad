@@ -117,7 +117,8 @@ export default function Billing({
               members.map((member) => (
                 <MemberSection key={member.athleteId} name={member.name}>
                   {/* The single token is bought one at a time (ruling 2026-09-29/30): its
-                      meter carries the Buy button, from the day they go on sale; staff never pay. */}
+                      meter carries the Buy button, from the day they go on sale; staff never pay.
+                      A pending athlete pays from the hero's Pay now alone (owner 2026-10-01). */}
                   <TokenMeter member={member} defaultOpen={members.length === 1} showPrices={staff} buy={!staff} />
                   <CoachingLine coaching={member.coaching} />
                   {contractEnabled() ? (

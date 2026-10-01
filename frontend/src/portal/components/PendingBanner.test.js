@@ -98,6 +98,7 @@ test('plan: one line when nobody is paid yet; then 20% off the lower row, or the
 describe('a single-token row and the booking-open gate', () => {
   const GATE = Date.parse('2026-10-10T12:00:00Z'); // BOOKING_OPENS_AT
   const WHEN = 'Single tokens are available from Sat, Oct 10 at 7 AM.';
+  const ASK = 'Ask a parent or guardian to buy a session token.';
   const rows = [{ athleteId: 'a1', name: 'Jordan', perPurchase: true }, { athleteId: 'a2', name: 'Reese', perPurchase: false }];
   afterEach(() => { jest.restoreAllMocks(); });
 
@@ -126,6 +127,38 @@ describe('a single-token row and the booking-open gate', () => {
     expect(r.button('Pay now|tier|a1')).not.toBeNull();
     expect(r.button('Pay now|tier|a2')).not.toBeNull();
     expect(r.text()).not.toContain(WHEN);
+    expect(r.text()).not.toContain(ASK);
+    await r.unmount();
+  });
+
+  // Owner ruling 2026-10-01 ("not unless the child is 18+"): `askGuardian` is
+  // an under-18 athlete's own login.
+  test('askGuardian, from the gate on: the single row reads who buys it, no Pay now; a monthly row still pays', async () => {
+    jest.spyOn(Date, 'now').mockReturnValue(GATE);
+    const r = await renderScreen(<PendingBanner pendingAthletes={rows} title={TITLE} askGuardian />);
+    expect(r.button('Pay now|tier|a1')).toBeNull();
+    expect(r.text().split(ASK)).toHaveLength(2); // under Jordan's name only
+    expect(r.button('Pay now|tier|a2')).not.toBeNull();
+    expect(r.button('Pay now|tier|a2').parentElement.textContent).not.toContain(ASK);
+    expect(r.text()).not.toContain(WHEN);
+    await r.unmount();
+  });
+
+  test('askGuardian, before the gate: the line saying when, as for everyone', async () => {
+    jest.spyOn(Date, 'now').mockReturnValue(GATE - 1);
+    const r = await renderScreen(<PendingBanner pendingAthletes={rows} title={TITLE} askGuardian />);
+    expect(r.button('Pay now|tier|a1')).toBeNull();
+    expect(r.text().split(WHEN)).toHaveLength(2);
+    expect(r.text()).not.toContain(ASK);
+    expect(r.button('Pay now|tier|a2')).not.toBeNull();
+    await r.unmount();
+  });
+
+  test('askGuardian never touches the facility add-on row', async () => {
+    jest.spyOn(Date, 'now').mockReturnValue(GATE);
+    const r = await renderScreen(<PendingBanner pendingAthletes={[]} facilityRows={[{ athleteId: 'a2', name: 'Reese', state: 'pay' }]} askGuardian />);
+    expect(r.button('Pay $300 for family facility access|facility|a2')).not.toBeNull();
+    expect(r.text()).not.toContain(ASK);
     await r.unmount();
   });
 });

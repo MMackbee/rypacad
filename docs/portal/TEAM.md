@@ -3497,13 +3497,23 @@ Pins added (change one, change both): `saleOpen` in
 `functions/portal/single.js` and `frontend/src/portal/data/singleToken.js`;
 the refusal's words in `checkout.js` and `SINGLE_NOT_OPEN_MESSAGE`.
 
+Owner rulings 2026-10-01 on the open items, all applied on this branch:
+- One button, not two: a payment-pending single athlete pays from the hero's
+  or banner's "Pay now"; the meter's "Buy a session token - $65" shows only
+  for an active athlete.
+- An athlete's own login shows a $65 button only when the athlete is 18+
+  (self-managed, or by date of birth: `ownLoginMayBuy` in
+  `data/singleToken.js`). Under 18 reads "Ask a parent or guardian to buy a
+  session token." Client-side only; the server's caller check is unchanged.
+- Two taps on Buy share one open Checkout Session: kept.
+- Sign-up keeps accepting `single` before the gate: nothing can be bought,
+  minted or spent before it.
+- Fixed in the same pass (independent review): a household no longer stays
+  past due when the lapsed monthly sibling's only live sibling is a paid
+  single-token athlete (`liftEndedFreeze`); `facility.js` (both sides) no
+  longer reads a one-time buyer moved to Elite and unpaid as a live Elite.
+
 Open items (none blocks the harness run):
-- Billing shows a payment-pending single athlete two buttons from the gate
-  on: the hero's "Pay now" and the meter's "Buy a session token - $65". Both
-  open the same Stripe page; owner may want one.
-- The athlete's own Membership page now carries the $65 Buy button.
-- `facility.js` (both sides) reads an Elite athlete with a one-time billing
-  block, moved to Elite by staff and not yet paid, as a live Elite.
 - "Change package" is offered to a one-time buyer moved to a monthly package
   (reads pending) but the rules refuse the write (stored status is active).
 - `checkout.js` is 665 lines and `lib.js` 496; neither was split in a merge.

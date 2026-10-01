@@ -178,6 +178,11 @@ export function allUnlimitedOf(members) {
   return members.length > 0 && members.every((m) => m.package?.kind === 'elite');
 }
 
+/** True when every member is Elite or on the single token - nobody holds a monthly token package, so the hero promises neither "Tokens start" nor "Tokens reset" (Elite holds no tokens; session tokens never reset). */
+export function noMonthlyTokensOf(members) {
+  return members.length > 0 && members.every((m) => m.package?.kind === 'elite' || m.package?.kind === 'single');
+}
+
 async function liveHub(householdId, today, ownAthletes = null) {
   warnMissingPortalUrl();
   const [household, athletes] = await Promise.all([fetchHousehold(householdId), ownAthletes || fetchHouseholdAthletes(householdId)]);
@@ -188,7 +193,7 @@ async function liveHub(householdId, today, ownAthletes = null) {
   return {
     household: householdView(household, anchorDay),
     members,
-    status: statusFor(membership, { resetsOn, tokensStartOn: tokensStartOf(members), anchorDay, pendingAthletes: pendingOf(members), allPerPurchase: allPerPurchaseOf(members), allUnlimited: allUnlimitedOf(members) }),
+    status: statusFor(membership, { resetsOn, tokensStartOn: tokensStartOf(members), anchorDay, pendingAthletes: pendingOf(members), allPerPurchase: allPerPurchaseOf(members), allUnlimited: allUnlimitedOf(members), noMonthlyTokens: noMonthlyTokensOf(members) }),
     facilityPending: facilityPendingOf(members),
     portalUrl: STRIPE_PORTAL_URL,
   };

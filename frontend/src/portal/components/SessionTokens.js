@@ -87,7 +87,9 @@ export function SessionTokenPools({ tokens, compact = false, style }) {
  * branch): the number that can be booked, how long it lasts, the session
  * each spent token was used on, any waitlist hold - no reset line, no bonus
  * chip, no "of N". `buySlot` is the Buy button (or, before the gate, the
- * line saying when); `children` is the evidence toggle TokenMeter passes in.
+ * line saying when; on an under-18 athlete's own login, who buys it; nothing
+ * while payment is pending); `children` is the evidence toggle TokenMeter
+ * passes in.
  */
 export function SessionTokenHero({ member, buySlot = null, price = null, children }) {
   const { package: pkg, tokens } = member;

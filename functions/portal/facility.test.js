@@ -52,6 +52,33 @@ test('household access: a live Elite membership covers the family', () => {
     eliteDueId: null});
 });
 
+test('household access: a single-token buyer moved to Elite is still to pay',
+    () => {
+      // The one-time block stays {active, oneTime} until Elite is paid.
+      const moved = ath('e', {packageId: 'elite',
+        billing: {status: 'active', oneTime: true, subscriptionId: null}});
+      assert.deepEqual(facility.householdFacility([ath('a'), moved]),
+          Object.assign({}, NONE, {eliteDueId: 'e'}));
+      // Paid: the checkout clears `oneTime` and Elite covers the family.
+      assert.deepEqual(facility.householdFacility([ath('a'), ath('e',
+          {packageId: 'elite', billing: {status: 'active', oneTime: false,
+            subscriptionId: 'sub_e'}})]),
+      {access: true, source: 'elite', holderId: null, eliteId: 'e',
+        eliteDueId: null});
+      // A family's own add-on is still what covers it meanwhile.
+      assert.deepEqual(facility.householdFacility([
+        ath('b', {facilityBilling: {status: 'active'}}), moved]),
+      {access: true, source: 'add-on', holderId: 'b', eliteId: null,
+        eliteDueId: 'e'});
+      // On the single package the one-time block is a paid single token.
+      assert.deepEqual(facility.householdFacility([ath('s',
+          {packageId: 'single', billing: {status: 'active', oneTime: true}})]),
+      NONE);
+      // Still to pay, so a new athlete's add-on request is still dropped.
+      assert.deepEqual(flags(facility.oneFacilityRequest(
+          [entry('t-6', true)], [moved])), [false]);
+    });
+
 test('household access: nothing to read is no access', () => {
   for (const empty of [[], null, undefined, [null, undefined, {}]]) {
     assert.deepEqual(facility.householdFacility(empty), NONE);

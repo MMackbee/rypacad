@@ -227,6 +227,30 @@ test('late purchase and amount check', async () => {
   'late outranks amount-check');
 });
 
+test('paidWithoutToken: a paid portal session that minted nothing', () => {
+  const paid = {mode: 'payment', payment_status: 'paid',
+    client_reference_id: 'quist__sol__tier'};
+  for (const outcome of ['unmatched', 'unexpected-one-time', 'ignored',
+    'stripe-lookup-failed']) {
+    assert.equal(s.paidWithoutToken(paid, outcome), true, outcome);
+  }
+  // A token was issued (the review outcomes log their own line), or this
+  // is a replay of one already issued.
+  for (const outcome of ['issued-single', 'issued-single-topup',
+    'issued-single-late', 'issued-single-amount-check',
+    'issued-single-household-lapsed', 'duplicate-purchase']) {
+    assert.equal(s.paidWithoutToken(paid, outcome), false, outcome);
+  }
+  // Nobody was charged, a subscription checkout, or not the portal's sale.
+  assert.equal(s.paidWithoutToken(Object.assign({}, paid,
+      {payment_status: 'unpaid'}), 'single-unpaid'), false);
+  assert.equal(s.paidWithoutToken(Object.assign({}, paid,
+      {mode: 'subscription'}), 'unexpected-quantity'), false);
+  assert.equal(s.paidWithoutToken(Object.assign({}, paid,
+      {client_reference_id: null}), 'ignored'), false);
+  assert.equal(s.paidWithoutToken(null, 'unmatched'), false);
+});
+
 test('a session with no customer never clears the linked one', async () => {
   DATA = {};
   const {tx, writes} = recorder();
