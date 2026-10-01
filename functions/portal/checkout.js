@@ -32,6 +32,10 @@ const PRODUCTS = ['tier', 'facility'];
  * @const {!Object<string, number>}
  */
 const PACKAGE_RANK = {'t-6': 1, 't-12': 2, 't-16': 3, 'elite': 4};
+/** The package's part of a pair coupon id. @const {!Object<string, string>} */
+const PACKAGE_LABEL = {
+  't-6': '6', 't-12': '12', 't-16': '16', 'elite': 'ELITE',
+};
 const FACILITY_NAME = 'Family facility access';
 
 let stripeClient;
@@ -83,28 +87,53 @@ async function read(store, collection, id) {
  * keep the 'forever' coupon all season. The single token is a one-time
  * purchase, not a membership. Checked at checkout only.
  *
- * Owner ruling 2026-10-01 ("lesser value"): the family's highest membership
- * is always full price. The discount comes off THIS membership only when
- * the paid sibling's membership costs the same or more, so paying the
- * cheaper child first no longer moves the discount onto the dearer one.
+ * Owner ruling 2026-10-01 ("lesser value"): what a family saves is 20% of
+ * the LOWER membership, whichever one it pays first. So this checkout is
+ * measured against the dearest membership the family already pays:
+ *   - it costs the same or more than this one: the plain coupon, 20% off
+ *     this membership (`lower` null);
+ *   - it costs less: this membership is the family's highest, and what
+ *     comes off it is 20% of that cheaper one (`lower` = its package id),
+ *     through the coupon `siblingCouponId` names.
  * @param {!Object} store Firestore.
  * @param {string} householdId The family.
  * @param {string} athleteId The athlete being paid for (never counts).
  * @param {?string} packageId The package being paid for.
- * @return {!Promise<boolean>} Whether this checkout qualifies.
+ * @return {!Promise<{eligible: boolean, lower: ?string}>} The decision.
  */
 async function siblingEligible(store, householdId, athleteId, packageId) {
   const mine = PACKAGE_RANK[packageId];
-  if (!mine) return false; // unknown package: never discounted by guess
+  if (!mine) return {eligible: false, lower: null}; // unknown: no guess
   const snap = await store.collection('athletes')
       .where('householdId', '==', householdId).get();
-  return snap.docs.some((doc) => {
+  let best = null;
+  snap.docs.forEach((doc) => {
     const a = doc.data() || {};
     const paid = !a.billing || a.billing.status === 'active' ||
         a.billing.status === 'past_due';
-    return doc.id !== athleteId && paid &&
-        (PACKAGE_RANK[a.packageId] || 0) >= mine;
+    const rank = PACKAGE_RANK[a.packageId] || 0;
+    if (doc.id !== athleteId && paid && rank &&
+        (!best || rank > PACKAGE_RANK[best])) best = a.packageId;
   });
+  if (!best) return {eligible: false, lower: null};
+  return {eligible: true, lower: PACKAGE_RANK[best] >= mine ? null : best};
+}
+
+/**
+ * The coupon id for a sibling decision. The plain coupon (`base`, 20%) when
+ * the discount is 20% of the membership being paid; otherwise the coupon
+ * that takes 20% of the LOWER membership off the dearer one, named
+ * `<base>_<lower>_<this>` (SIBLING20_6_ELITE ...), a percent coupon created
+ * in Stripe for each pair so a prorated first month scales with it.
+ * @param {?string} base STRIPE_SIBLING_COUPON.
+ * @param {?string} lower The cheaper paid sibling's package id, or null.
+ * @param {?string} packageId The package being paid for.
+ * @return {?string} The coupon id, or null when none is configured.
+ */
+function siblingCouponId(base, lower, packageId) {
+  if (!base) return null;
+  if (!lower) return base;
+  return `${base}_${PACKAGE_LABEL[lower]}_${PACKAGE_LABEL[packageId]}`;
 }
 
 /**
@@ -396,14 +425,15 @@ async function createCheckoutSessionHandler(data, context, deps) {
   // The add-on is not a membership: no sibling discount on it. The lookup
   // is optional, so a failed read costs the family the discount, never
   // the checkout.
-  const sibling = {
-    eligible: false,
-    coupon: String(process.env.STRIPE_SIBLING_COUPON || '').trim() || null,
-  };
+  const base = String(process.env.STRIPE_SIBLING_COUPON || '').trim() || null;
+  const sibling = {eligible: false, coupon: base, lower: null};
   if (req.product === 'tier') {
     try {
-      sibling.eligible = await siblingEligible(store, athlete.householdId,
+      const found = await siblingEligible(store, athlete.householdId,
           req.athleteId, athlete.packageId);
+      sibling.eligible = found.eligible;
+      sibling.lower = found.lower;
+      sibling.coupon = siblingCouponId(base, found.lower, athlete.packageId);
     } catch (err) {
       console.error('siblingEligible failed, no discount:', err);
     }
@@ -441,7 +471,10 @@ async function createCheckoutSessionHandler(data, context, deps) {
       console.error(`sibling coupon ${sibling.coupon} refused by Stripe ` +
           `(${process.env.STRIPE_MODE || 'test'} mode): ` +
           `${err.message || err}; code field used instead`);
-      const fallback = {eligible: true, coupon: null};
+      // The code field takes the plain 20% code, which is only right when
+      // 20% of THIS membership is owed; a pair coupon that is missing means
+      // no discount on this page rather than too large a one.
+      const fallback = {eligible: !sibling.lower, coupon: null};
       discount = discountKey(fallback);
       session = await client.checkout.sessions.create(sessionBody(
           Object.assign({}, args, {sibling: fallback})));
@@ -470,5 +503,5 @@ const createCheckoutSession = functions.runWith({secrets: CHECKOUT_SECRETS})
 
 module.exports = {
   createCheckoutSession, createCheckoutSessionHandler, prepaidFor,
-  sessionBody, siblingEligible,
+  sessionBody, siblingCouponId, siblingEligible,
 };

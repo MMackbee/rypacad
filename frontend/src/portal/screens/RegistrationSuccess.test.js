@@ -154,11 +154,11 @@ test('athlete mode goes home', async () => {
 
 describe('sibling discount (checkout.js siblingEligible, owner 2026-09-30)', () => {
   const NOTE = '20% sibling discount comes off at checkout.';
-  // Owner 2026-10-01 ("lesser value"): the highest membership is paid first, at full price.
-  const FIRST = 'Pay the highest membership first - 20% sibling discount then comes off the others.';
+  // Owner 2026-10-01 ("lesser value"): 20% of the lower membership, in either payment order.
+  const FIRST = 'Sibling discount: 20% of the lower membership comes off the second one you pay.';
   const avery = { ...newAthleteEntry(), name: 'Avery', dob: '2013-05-01', packageId: 't-16' };
 
-  test('two monthly athletes at sign-up: pay the dearer one first, no discount line yet, and the buttons keep the catalogue price', async () => {
+  test('two monthly athletes at sign-up: one line says how the discount works, and the buttons keep the catalogue price', async () => {
     const r = await renderScreen(<RegistrationSuccess bare mode="signup" form={form()} result={{ householdId: 'h1', athleteIds: ['a1', 'a2'] }} account={{ email: 'dana@email.com' }} onFinish={() => {}} />);
     expect(r.text()).toContain(FIRST);
     expect(r.text()).not.toContain(NOTE);
@@ -191,11 +191,12 @@ describe('sibling discount (checkout.js siblingEligible, owner 2026-09-30)', () 
     expect(r.button("Pay $719 for Avery's 16 tokens|a9")).not.toBeNull();
     expect(r.text()).toContain('Today you pay $719 for November');
     await r.unmount();
-    // A paid sibling on a CHEAPER package does not discount the dearer new one.
+    // A paid sibling on a CHEAPER package: 20% of that cheaper one comes off the dearer new one.
     mockFamily = [{ ...mockFamily[0], packageId: 't-6' }, mockFamily[1]];
     const cheaper = await renderScreen(<RegistrationSuccess bare mode="link" form={form({ athletes: [avery] })} result={{ householdId: 'h1', athleteIds: ['a9'] }} account={{ email: 'dana@email.com' }} onFinish={() => {}} />);
     await cheaper.flush();
-    expect(cheaper.text()).not.toContain('sibling');
+    expect(cheaper.text()).toContain('Sibling discount: about $59.80 a month (20% of the lower membership) comes off at checkout.');
+    expect(cheaper.text()).not.toContain(NOTE);
     await cheaper.unmount();
     mockFamily = [{ ...mockFamily[0], packageId: 'elite', billing: { status: 'lapsed' } }, mockFamily[1]];
     const lapsed = await renderScreen(<RegistrationSuccess bare mode="link" form={form({ athletes: [avery] })} result={{ householdId: 'h1', athleteIds: ['a9'] }} account={{ email: 'dana@email.com' }} onFinish={() => {}} />);
@@ -213,7 +214,7 @@ describe('sibling discount (checkout.js siblingEligible, owner 2026-09-30)', () 
     expect(r.text()).not.toContain('sibling');
     await r.unmount();
     // Two new athletes with no readable family: neither is paid, so no
-    // discount line, only which one to pay first.
+    // discount line, only how it will work.
     const two = await renderScreen(<RegistrationSuccess bare mode="link" form={form()} result={{ householdId: 'h1', athleteIds: ['a1', 'a2'] }} account={{ email: 'dana@email.com' }} onFinish={() => {}} />);
     await two.flush();
     expect(two.text()).not.toContain(NOTE);

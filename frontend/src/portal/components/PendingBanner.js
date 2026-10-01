@@ -1,14 +1,14 @@
-import React, { useState } from 'react';
+import React from 'react';
 import { color, font } from '../tokens';
 import PayButton from './PayButton';
 import { Body, Card, SectionLabel } from './Primitives';
 import { PAY_NOW, PENDING_TITLE, facilityName, facilityPayLabel, facilityPendingTitle, facilityWaitingLine } from '../data/billingCopy';
-import { SIBLING_DISCOUNT_NOTE, siblingWaitNote } from '../data/packages';
+import { SIBLING_DISCOUNT_NOTE, SIBLING_ORDER_NOTE, siblingPartialNote } from '../data/packages';
 
 /**
  * One banner, one Pay now per athlete who needs a checkout - pending, or lapsed and re-subscribing (spec 4.4). `title` is the hub status title (the lapsed wording differs); renders nothing when nobody is listed.
  * `siblingDiscount` (the caller's siblingDiscountApplies over the whole family) adds the one-line note Stripe's price would otherwise contradict; a one-time single token is not a membership, so an all-single list never shows it.
- * `plan` (data/packages.js siblingPlan; owner 2026-10-01, "lesser value") replaces that single note with a line per row: a row that gets the discount says so, and a row that should wait for a dearer sibling shows who to pay first, with a plain "pay now at full price" way past it.
+ * `plan` (data/packages.js siblingPlan; owner 2026-10-01, "lesser value") replaces that single note with a line per row: 20% off this one, or the dollar figure when 20% of a cheaper paid membership comes off a dearer one; with nobody paid yet and several to pay, one line says how it works.
  * `renderRowExtra(athlete)` adds a line under a row's name (the family page's Change package link).
  * `facilityRows` (hooks/billing.js facilityPendingOf; owner 2026-09-30) is the FAMILY facility add-on ticked at sign-up - one row at most, for the athlete it bills on, and it names nobody: a 'pay' row gets the add-on's own Pay button;
  * a 'waiting' one (membership unpaid) is a line under that athlete's membership row, no button - the add-on checkout is refused until the membership is paid.
@@ -16,7 +16,6 @@ import { SIBLING_DISCOUNT_NOTE, siblingWaitNote } from '../data/packages';
  * `self` (the adult who is their own household) drops the word "family".
  */
 export default function PendingBanner({ pendingAthletes, facilityRows = null, body, title = null, email = null, siblingDiscount = false, plan = null, renderRowExtra = null, self = false, style }) {
-  const [fullPrice, setFullPrice] = useState({});
   const tier = pendingAthletes || [];
   const planOf = (a) => (plan && !a.perPurchase ? plan[a.athleteId] : null) || null;
   const waiting = new Set((facilityRows || []).filter((r) => r.state === 'waiting').map((r) => r.athleteId));
@@ -29,6 +28,9 @@ export default function PendingBanner({ pendingAthletes, facilityRows = null, bo
       {!plan && siblingDiscount && tier.some((a) => !a.perPurchase) ? (
         <Body size={12} style={{ marginTop: 8 }}>{SIBLING_DISCOUNT_NOTE}</Body>
       ) : null}
+      {plan && tier.filter((a) => planOf(a)).length > 1 && tier.every((a) => !planOf(a) || planOf(a).state === 'full') ? (
+        <Body size={12} style={{ marginTop: 8 }}>{SIBLING_ORDER_NOTE}</Body>
+      ) : null}
       {tier.map((a) => (
         <div key={a.athleteId} style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 12, marginTop: 12 }}>
           <div style={{ flex: 1, minWidth: 0, font: `600 13px ${font.body}`, color: color.text }}>
@@ -36,16 +38,9 @@ export default function PendingBanner({ pendingAthletes, facilityRows = null, bo
             {renderRowExtra ? renderRowExtra(a) : null}
             {waiting.has(a.athleteId) ? <Body size={11} tone={color.textTertiary} style={{ marginTop: 3 }}>{facilityWaitingLine(self)}</Body> : null}
             {planOf(a)?.state === 'discount' ? <Body size={11} style={{ marginTop: 3 }}>{SIBLING_DISCOUNT_NOTE}</Body> : null}
-            {planOf(a)?.state === 'wait' ? <Body size={11} style={{ marginTop: 3 }}>{siblingWaitNote(planOf(a).first)}</Body> : null}
+            {planOf(a)?.state === 'partial' ? <Body size={11} style={{ marginTop: 3 }}>{siblingPartialNote(planOf(a).amount)}</Body> : null}
           </div>
-          {planOf(a)?.state === 'wait' && !fullPrice[a.athleteId] ? (
-            <button type="button" onClick={() => setFullPrice((s) => ({ ...s, [a.athleteId]: true }))}
-              style={{ flex: 'none', background: 'none', border: 'none', padding: 0, cursor: 'pointer', font: `600 12px ${font.body}`, color: color.textTertiary, textDecoration: 'underline' }}>
-              Pay now at full price
-            </button>
-          ) : (
-            <PayButton athleteId={a.athleteId} product="tier" label={PAY_NOW} height={44} email={email} style={{ width: 132, flex: 'none' }} />
-          )}
+          <PayButton athleteId={a.athleteId} product="tier" label={PAY_NOW} height={44} email={email} style={{ width: 132, flex: 'none' }} />
         </div>
       ))}
       {pay.map((r) => (

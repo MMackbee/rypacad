@@ -162,22 +162,22 @@ describe('siblingDiscountApplies', () => {
 
 // Owner 2026-10-01 ("lesser value"): the same rule as checkout.js siblingEligible.
 describe('siblingPlan', () => {
-  const p = (id, packageId, status, name) => ({ id, name, packageId, billing: status ? { status } : undefined });
-  test('the highest membership is full price; cheaper ones wait for it, then get the discount', () => {
-    expect(siblingPlan([p('c', 'elite', 'pending', 'Casey Hart'), p('b', 't-6', 'pending', 'Blake Hart')]))
-      .toEqual({ c: { state: 'full', first: null }, b: { state: 'wait', first: 'Casey' } });
-    expect(siblingPlan([p('c', 'elite', 'active'), p('b', 't-6', 'pending')])).toEqual({ b: { state: 'discount', first: null } });
+  const p = (id, packageId, status) => ({ id, packageId, billing: status ? { status } : undefined });
+  test('nobody paid: full price for now; then 20% off the lower one, or 20% of the lower one off the dearer', () => {
+    expect(siblingPlan([p('c', 'elite', 'pending'), p('b', 't-6', 'pending')])).toEqual({ c: { state: 'full', amount: null }, b: { state: 'full', amount: null } });
+    expect(siblingPlan([p('c', 'elite', 'active'), p('b', 't-6', 'pending')])).toEqual({ b: { state: 'discount', amount: null } });
+    expect(siblingPlan([p('b', 't-6', 'active'), p('c', 'elite', 'pending')])).toEqual({ c: { state: 'partial', amount: 59.8 } });
+    expect(siblingPlan([p('a', 't-12', 'active'), p('b', 't-16', 'pending')])).toEqual({ b: { state: 'partial', amount: 113.8 } });
   });
-  test('a paid cheaper sibling never discounts a dearer membership; equal prices do', () => {
-    expect(siblingPlan([p('b', 't-6', 'active'), p('c', 'elite', 'pending')])).toEqual({ c: { state: 'full', first: null } });
-    expect(siblingPlan([p('a', 't-12', 'active'), p('b', 't-12', 'pending')])).toEqual({ b: { state: 'discount', first: null } });
-    expect(siblingPlan([p('a', 't-12', 'pending'), p('b', 't-12', 'pending')])).toEqual({ a: { state: 'full', first: null }, b: { state: 'full', first: null } });
+  test('equal prices get 20%; the dearest PAID membership is the measure', () => {
+    expect(siblingPlan([p('a', 't-12', 'active'), p('b', 't-12', 'pending')])).toEqual({ b: { state: 'discount', amount: null } });
+    expect(siblingPlan([p('a', 't-6', 'active'), p('b', 't-16', 'past_due'), p('c', 'elite', 'pending')])).toEqual({ c: { state: 'partial', amount: 143.8 } });
   });
-  test('the single token and a lapsed sibling never make anyone wait or qualify', () => {
-    expect(siblingPlan([p('s', 'single', 'pending'), p('b', 't-6', 'pending')])).toEqual({ b: { state: 'full', first: null } });
-    expect(siblingPlan([p('c', 'elite', 'lapsed'), p('b', 't-6', 'pending')])).toEqual({ c: { state: 'full', first: null }, b: { state: 'full', first: null } });
-    expect(siblingPlan([{ athleteId: 'm1', name: 'Max', package: { id: 'elite' }, billing: { status: 'active' } }, { athleteId: 'm2', name: 'Lena', package: { id: 't-16' }, billing: { status: 'pending' } }]))
-      .toEqual({ m2: { state: 'discount', first: null } });
+  test('the single token and a lapsed sibling never count', () => {
+    expect(siblingPlan([p('s', 'single', 'pending'), p('b', 't-6', 'pending')])).toEqual({ b: { state: 'full', amount: null } });
+    expect(siblingPlan([p('c', 'elite', 'lapsed'), p('b', 't-6', 'pending')])).toEqual({ c: { state: 'full', amount: null }, b: { state: 'full', amount: null } });
+    expect(siblingPlan([{ athleteId: 'm1', package: { id: 'elite' }, billing: { status: 'active' } }, { athleteId: 'm2', package: { id: 't-16' }, billing: { status: 'pending' } }]))
+      .toEqual({ m2: { state: 'discount', amount: null } });
     expect(siblingPlan(null)).toEqual({});
   });
 });

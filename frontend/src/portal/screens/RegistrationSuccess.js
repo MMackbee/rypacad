@@ -7,7 +7,7 @@ import { Body, Card, ScreenTitle, SectionLabel, Tick } from '../components/Primi
 import { STUDENT_LOGIN_CTA, VERIFIED, VERIFY_EMAIL_SENDER } from '../data/authCopy';
 import { CONFIRMING, PAY_NOW, facilityName } from '../data/billingCopy';
 import { BOOKING_OPENS_LABEL, bookingOpen } from '../data/calendar';
-import { FACILITY_ACCESS, packageById, PRICES_RELEASED, SIBLING_DISCOUNT_NOTE, SIBLING_DISCOUNT_PCT, siblingPlan } from '../data/packages';
+import { FACILITY_ACCESS, packageById, PRICES_RELEASED, SIBLING_DISCOUNT_NOTE, SIBLING_ORDER_NOTE, siblingPartialNote, siblingPlan } from '../data/packages';
 import { facilityHolderIndex } from '../data/signup';
 import useFamilyAthletes from '../hooks/familyAthletes';
 
@@ -65,14 +65,15 @@ export default function RegistrationSuccess({ bare = false, mode = 'signup', for
   // only be the unpaid side of the rule; a paid sibling comes from the family
   // read (link mode). Sign-up therefore shows no note: the first membership
   // is full price, the note appears on the family page for the next one.
-  // Owner 2026-10-01 ("lesser value"): the highest membership is full price
-  // and is paid first; 20% then comes off the others. The Pay buttons are
-  // listed dearest first and a line says so when the order matters.
+  // Owner 2026-10-01 ("lesser value"): the family saves 20% of the lower
+  // membership in either payment order (checkout.js). The receipt says how
+  // it works when nobody is paid yet, and what comes off when a sibling is.
   const unpaidRows = rows.map((r) => ({ id: r.athleteId ?? r.key, name: r.name, packageId: r.packageId, billing: { status: 'pending' } }));
   const plan = siblingPlan(family?.length ? family : unpaidRows);
   const planOf = (r) => plan[r.athleteId ?? r.key] || null;
   const siblingDiscount = rows.some((r) => planOf(r)?.state === 'discount');
-  const payFirst = rows.some((r) => planOf(r)?.state === 'wait');
+  const partial = rows.map((r) => planOf(r)).find((p) => p?.state === 'partial') || null;
+  const orderNote = rows.filter((r) => planOf(r)).length > 1 && rows.every((r) => !planOf(r) || planOf(r).state === 'full');
   const payRows = [...rows].sort((a, b) => (b.pkg && b.pkg.kind !== 'single' ? b.pkg.price : 0) - (a.pkg && a.pkg.kind !== 'single' ? a.pkg.price : 0));
   const prepaysNovember = Date.now() < PREPAYS_NOVEMBER_UNTIL;
   const priced = prepaysNovember ? rows.filter((r) => pricedMonthly(r.pkg)) : [];
@@ -119,7 +120,8 @@ export default function RegistrationSuccess({ bare = false, mode = 'signup', for
           <SectionLabel style={{ marginBottom: 12 }}>Pay</SectionLabel>
           {payTerms ? <Body size={12} style={{ marginBottom: 12 }}>{payTerms}</Body> : null}
           {siblingDiscount ? <Body size={12} style={{ marginBottom: 12 }}>{SIBLING_DISCOUNT_NOTE}</Body> : null}
-          {payFirst ? <Body size={12} style={{ marginBottom: 12 }}>{`Pay the highest membership first - ${SIBLING_DISCOUNT_PCT}% sibling discount then comes off the others.`}</Body> : null}
+          {partial ? <Body size={12} style={{ marginBottom: 12 }}>{siblingPartialNote(partial.amount)}</Body> : null}
+          {orderNote ? <Body size={12} style={{ marginBottom: 12 }}>{SIBLING_ORDER_NOTE}</Body> : null}
           {account?.emailVerified === false && account.email ? (
             <Body size={12} style={{ marginBottom: 12 }}>{`First open the link we emailed to ${account.email} (from ${VERIFY_EMAIL_SENDER} - check spam), then tap Pay.`}</Body>
           ) : null}

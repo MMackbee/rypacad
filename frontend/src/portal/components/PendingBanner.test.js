@@ -73,20 +73,22 @@ test('the adult who is their own household reads it without "family"', async () 
   await waiting.unmount();
 });
 
-// Owner 2026-10-01 ("lesser value"): the highest membership is full price and paid first; 20% then comes off the others.
-test('plan: a discounted row says so; a row waiting on a dearer sibling names who to pay first, with a way to pay at full price anyway', async () => {
+// Owner 2026-10-01 ("lesser value"): the family saves 20% of the lower membership in either payment order.
+test('plan: one line when nobody is paid yet; then 20% off the lower row, or the dollar figure off a dearer row', async () => {
   const rows = [{ athleteId: 'a1', name: 'Casey', packageId: 'elite' }, { athleteId: 'a2', name: 'Blake', packageId: 't-6' }];
+  const ORDER = 'Sibling discount: 20% of the lower membership comes off the second one you pay.';
   const r = await renderScreen(<PendingBanner pendingAthletes={rows} title={TITLE} siblingDiscount
-    plan={{ a1: { state: 'full', first: null }, a2: { state: 'wait', first: 'Casey' } }} />);
+    plan={{ a1: { state: 'full', amount: null }, a2: { state: 'full', amount: null } }} />);
+  expect(r.text().split(ORDER)).toHaveLength(2);
   expect(r.button('Pay now|tier|a1')).not.toBeNull();
-  expect(r.button('Pay now|tier|a2')).toBeNull();
-  expect(r.text()).toContain("Pay Casey's membership first - 20% then comes off this one.");
-  expect(r.text()).not.toContain('20% sibling discount comes off at checkout.');
-  await r.click('Pay now at full price');
-  expect(r.button('Pay now|tier|a2')).not.toBeNull();
+  expect(r.button('Pay now|tier|a2')).not.toBeNull(); // nobody is made to wait
   await r.unmount();
-  const paid = await renderScreen(<PendingBanner pendingAthletes={[rows[1]]} title={TITLE} plan={{ a2: { state: 'discount', first: null } }} />);
-  expect(paid.text()).toContain('20% sibling discount comes off at checkout.');
-  expect(paid.button('Pay now|tier|a2')).not.toBeNull();
-  await paid.unmount();
+  const lower = await renderScreen(<PendingBanner pendingAthletes={[rows[1]]} title={TITLE} plan={{ a2: { state: 'discount', amount: null } }} />);
+  expect(lower.text()).toContain('20% sibling discount comes off at checkout.');
+  expect(lower.text()).not.toContain(ORDER);
+  await lower.unmount();
+  const dearer = await renderScreen(<PendingBanner pendingAthletes={[rows[0]]} title={TITLE} plan={{ a1: { state: 'partial', amount: 59.8 } }} />);
+  expect(dearer.text()).toContain('Sibling discount: about $59.80 a month (20% of the lower membership) comes off at checkout.');
+  expect(dearer.button('Pay now|tier|a1')).not.toBeNull();
+  await dearer.unmount();
 });

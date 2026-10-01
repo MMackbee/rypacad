@@ -122,17 +122,17 @@ export function siblingDiscountApplies(athletes) {
 }
 
 /**
- * Who gets the sibling discount at the next checkout, per unpaid athlete
+ * What the sibling discount does at the next checkout, per unpaid athlete
  * (owner 2026-10-01, "lesser value"; the same rule as checkout.js
- * siblingEligible, kept in step by hand): the family's highest membership is
- * full price, and the discount comes off a membership only when the family
- * already PAYS one that costs the same or more. So when a dearer membership
- * is still unpaid, the cheaper one should wait for it.
+ * siblingEligible, kept in step by hand): a family saves 20% of the LOWER
+ * membership, whichever one it pays first. Measured against the dearest
+ * membership the family already pays.
  * Takes athlete docs (`id`, `packageId`) or billing-hub members
- * (`athleteId`, `package.id`). Returns { [athleteId]: { state, first } }:
- *   'discount'  a paid sibling's membership costs the same or more
- *   'wait'      a dearer unpaid sibling should be paid first (`first` = name)
- *   'full'      this is the family's highest membership (or the only one)
+ * (`athleteId`, `package.id`). Returns { [athleteId]: { state, amount } }:
+ *   'discount'  the paid one costs the same or more: 20% off this one
+ *   'partial'   the paid one costs less: 20% of THAT price comes off this
+ *               one (`amount`, dollars a month, to the cent Stripe rounds)
+ *   'full'      nobody in the family is paid yet (or this is the only one)
  */
 export function siblingPlan(athletes) {
   const priceOf = (a) => {
@@ -143,17 +143,19 @@ export function siblingPlan(athletes) {
   const paid = (a) => !a.billing || a.billing.status === 'active' || a.billing.status === 'past_due';
   const plan = {};
   monthly.filter((a) => !paid(a)).forEach((a) => {
-    const others = monthly.filter((o) => o !== a);
-    if (others.some((o) => paid(o) && priceOf(o) >= priceOf(a))) { plan[a.athleteId ?? a.id] = { state: 'discount', first: null }; return; }
-    // A lapsed sibling may never come back, so nobody waits on one.
-    const dearer = others.filter((o) => !paid(o) && o.billing?.status !== 'lapsed' && priceOf(o) > priceOf(a)).sort((x, y) => priceOf(y) - priceOf(x))[0];
-    plan[a.athleteId ?? a.id] = dearer ? { state: 'wait', first: String(dearer.name || '').trim().split(/\s+/)[0] || null } : { state: 'full', first: null };
+    const top = Math.max(0, ...monthly.filter((x) => x !== a && paid(x)).map(priceOf));
+    const key = a.athleteId ?? a.id;
+    if (!top) plan[key] = { state: 'full', amount: null };
+    else if (top >= priceOf(a)) plan[key] = { state: 'discount', amount: null };
+    else plan[key] = { state: 'partial', amount: Math.round(top * SIBLING_DISCOUNT_PCT) / 100 };
   });
   return plan;
 }
 
-/** The line under a row that should wait for a dearer sibling's payment. */
-export const siblingWaitNote = (first) => `Pay ${first || 'the higher membership'}'s membership first - ${SIBLING_DISCOUNT_PCT}% then comes off this one.`;
+/** The line under a dearer row whose discount is 20% of the cheaper paid membership. */
+export const siblingPartialNote = (amount) => `Sibling discount: about $${Number(amount).toFixed(2)} a month (${SIBLING_DISCOUNT_PCT}% of the lower membership) comes off at checkout.`;
+/** The one line for a family with several unpaid memberships and none paid yet. */
+export const SIBLING_ORDER_NOTE = `Sibling discount: ${SIBLING_DISCOUNT_PCT}% of the lower membership comes off the second one you pay.`;
 
 /**
  * Elite's frequency caps (v2.0.1, Sprint 18; owner 2026-09-30): at most ONE

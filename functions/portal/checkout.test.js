@@ -273,45 +273,51 @@ test('sibling discount (2026-09-30): 2+ membership families, coupon or code',
       // novak has lena, max and fac on monthly packages (nopkg and the single
       // token sol do not count); oye has femi alone.
       const two = fakeDb(DOCS);
-      // lena (6 tokens) has paid siblings on the same or a dearer package
-      // (max Elite, fac 6 tokens); femi is alone in oye. Owner 2026-10-01
-      // ("lesser value"): max's Elite is the family's highest membership,
-      // so the paid 6-token siblings never discount it.
-      assert.equal(await checkout.siblingEligible(two, 'novak', 'lena',
-          't-6'), true);
-      assert.equal(await checkout.siblingEligible(two, 'novak', 'max',
-          'elite'), false);
-      assert.equal(await checkout.siblingEligible(two, 'oye', 'femi', 't-6'),
-          false);
-      // Same price counts; a cheaper paid sibling does not; an unknown
-      // package is never discounted.
-      assert.equal(await checkout.siblingEligible(two, 'novak', 'lena',
-          'elite'), true);
-      assert.equal(await checkout.siblingEligible(two, 'novak', 'max',
-          't-16'), false);
-      assert.equal(await checkout.siblingEligible(two, 'novak', 'lena',
-          'mystery'), false);
+      // Owner 2026-10-01 ("lesser value"): the saving is 20% of the LOWER
+      // membership in either payment order. lena (6 tokens) with max's
+      // Elite paid: the plain coupon. max's Elite with only 6-token siblings
+      // paid: eligible, measured against that cheaper package.
+      const sib = (...a) => checkout.siblingEligible(...a);
+      assert.deepEqual(await sib(two, 'novak', 'lena', 't-6'),
+          {eligible: true, lower: null});
+      assert.deepEqual(await sib(two, 'novak', 'max', 'elite'),
+          {eligible: true, lower: 't-6'});
+      assert.deepEqual(await sib(two, 'novak', 'max', 't-16'),
+          {eligible: true, lower: 't-6'});
+      assert.deepEqual(await sib(two, 'novak', 'lena', 'elite'),
+          {eligible: true, lower: null});
+      assert.deepEqual(await sib(two, 'oye', 'femi', 't-6'),
+          {eligible: false, lower: null});
+      assert.deepEqual(await sib(two, 'novak', 'lena', 'mystery'),
+          {eligible: false, lower: null});
+      assert.equal(checkout.siblingCouponId('SIBLING20', null, 't-6'),
+          'SIBLING20');
+      assert.equal(checkout.siblingCouponId('SIBLING20', 't-6', 'elite'),
+          'SIBLING20_6_ELITE');
+      assert.equal(checkout.siblingCouponId('SIBLING20', 't-12', 't-16'),
+          'SIBLING20_12_16');
+      assert.equal(checkout.siblingCouponId(null, 't-6', 'elite'), null);
       const only = fakeDb(Object.assign({}, DOCS, {'athletes/max':
         {householdId: 'novak', packageId: 'single'}, 'athletes/fac':
         {householdId: 'novak', packageId: null}}));
-      assert.equal(await checkout.siblingEligible(only, 'novak', 'lena',
-          't-6'), false);
+      assert.equal((await checkout.siblingEligible(only, 'novak', 'lena',
+          't-6')).eligible, false);
       // A never-paid (pending) sibling does not count (review 2026-09-30).
       const unpaid = fakeDb(Object.assign({}, DOCS, {'athletes/max':
         {householdId: 'novak', packageId: 'elite',
           billing: {status: 'pending'}},
       'athletes/fac': {householdId: 'novak', packageId: 't-6',
         billing: {status: 'pending'}}}));
-      assert.equal(await checkout.siblingEligible(unpaid, 'novak', 'lena',
-          't-6'), false);
+      assert.equal((await checkout.siblingEligible(unpaid, 'novak', 'lena',
+          't-6')).eligible, false);
       // The athlete being paid for never counts as their own sibling.
       const self = fakeDb(Object.assign({}, DOCS, {'athletes/max':
         {householdId: 'novak', packageId: 'single'}, 'athletes/fac':
         {householdId: 'novak', packageId: null}, 'athletes/lena':
         {householdId: 'novak', packageId: 't-6',
           billing: {status: 'active'}}}));
-      assert.equal(await checkout.siblingEligible(self, 'novak', 'lena',
-          't-6'), false);
+      assert.equal((await checkout.siblingEligible(self, 'novak', 'lena',
+          't-6')).eligible, false);
       // No coupon configured: the eligible family gets the code field only.
       const saved = process.env.STRIPE_SIBLING_COUPON;
       delete process.env.STRIPE_SIBLING_COUPON;
@@ -332,6 +338,17 @@ test('sibling discount (2026-09-30): 2+ membership families, coupon or code',
         assert.deepStrictEqual(auto.calls[0].discounts,
             [{coupon: 'SIBLING10'}]);
         assert.equal(auto.calls[0].allow_promotion_codes, undefined);
+        // The dearer membership paid second: the pair coupon, which takes
+        // 20% of the cheaper paid membership off it.
+        const dear = call({athleteId: 'lena', product: 'tier'}, ctx('u-nina'),
+            {db: fakeDb(Object.assign({}, DOCS, {
+              'athletes/lena': {householdId: 'novak', packageId: 'elite',
+                billing: {status: 'pending'}},
+              'athletes/max': {householdId: 'novak', packageId: 't-6',
+                billing: {status: 'active'}}}))});
+        await dear.p;
+        assert.deepStrictEqual(dear.calls[0].discounts,
+            [{coupon: 'SIBLING10_6_ELITE'}]);
         // The facility add-on is not a membership: neither, even for them.
         const fac = call({athleteId: 'lena', product: 'facility'},
             ctx('u-nina'), {db: fakeDb(Object.assign({}, PLAIN,
@@ -352,8 +369,8 @@ test('sibling: lapsed siblings do not count; a missing coupon falls back',
           billing: {status: 'lapsed'}},
         'athletes/fac': {householdId: 'novak', packageId: 't-6',
           billing: {status: 'lapsed'}}}));
-      assert.equal(await checkout.siblingEligible(lapsed, 'novak', 'lena',
-          't-6'), false);
+      assert.equal((await checkout.siblingEligible(lapsed, 'novak', 'lena',
+          't-6')).eligible, false);
       // A read failure costs the discount, not the checkout.
       const broken = Object.assign(fakeDb(DOCS), {collection: (c) =>
         Object.assign(fakeDb(DOCS).collection(c), {where: () => ({
