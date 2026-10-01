@@ -196,6 +196,25 @@ athletes, invites, auth users and Stripe test customers afterwards.
 test prices (it refuses live keys by design; adapt it for a live price-only
 check if needed).
 
+### 3.5 Before Nov 1 - proration (owner, 2026-09-30)
+
+The website tells families "joining mid-month or upgrading is prorated to the
+day", and the owner has ruled that copy stays. The app has to match it before
+the season's first billing month starts on Nov 1:
+
+1. **Mid-month joiners** - built, not yet exercised. `functions/portal/prepaid.js`
+   (`PRORATE_JOINERS = true`, ruling 0.13) prorates the first charge and the
+   month's tokens by days remaining, but only once the Chicago date is on or
+   after `SEASON_FIRST_PERIOD`, so nothing on production has run it. Unit
+   tests exist (`prepaid.test.js`, `checkout.test.js`). Still to do: an
+   end-to-end check with the clock past Nov 1 (emulator or a test-mode
+   checkout): the Stripe line amount and label, the token count on Membership
+   and Billing, the "First period" copy, and the sibling discount on top of a
+   prorated amount.
+2. **Upgrading a paid membership** - not built. Change package exists only
+   for an unpaid (pending) athlete. Either build a prorated upgrade for paid
+   members or take "or upgrading" out of the website and FAQ copy.
+
 ## 4. Work in flight
 
 ### 4.1 Month / Week toggle (owner request, must ship before the email)
