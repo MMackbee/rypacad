@@ -42,10 +42,15 @@ test('Tour naming (2026-09-30): the fallback label, never a typed one',
           'Reminder: Teddy has Tour event tomorrow at 9:00 AM.');
       assert.equal(notices.sessionCancelled({athlete, session: tour}).body,
           'Tour event on Sat, Nov 7 was cancelled by the academy.');
-      assert.equal(notices.waitlistExpired({athlete, session: tour,
-        expiresAt: '2026-12-07'}).body, 'The waitlist for Tour event, Sat, ' +
-          'Nov 7 at 9:00 AM closed without a spot for Teddy. A bonus token ' +
-          'was added to Teddy\'s account (expires Mon, Dec 7).');
+      // Owner ruling 2026-10-01: no bonus token; the held token is free.
+      assert.equal(notices.waitlistExpired({athlete, session: tour}).body,
+          'The waitlist for Tour event, Sat, Nov 7 at 9:00 AM closed ' +
+          'without a spot for Teddy. The token held for it is free to use ' +
+          'again.');
+      assert.equal(notices.waitlistExpired({
+        athlete: {...athlete, packageId: 'elite'}, session: tour}).body,
+      'The waitlist for Tour event, Sat, Nov 7 at 9:00 AM closed ' +
+          'without a spot for Teddy.');
     });
 
 run();

@@ -18,7 +18,6 @@
 'use strict';
 
 const admin = require('firebase-admin');
-const {FieldValue} = require('firebase-admin/firestore');
 const lib = require('./lib');
 const notices = require('./notices');
 const notify = require('./notify');
@@ -64,7 +63,12 @@ async function alreadyMinted(store, athleteId, sessionId) {
 }
 
 /**
- * Expire one entry: mint (unless already minted), delete, notify.
+ * Expire one entry: delete it and tell the family. Owner ruling 2026-10-01:
+ * NO bonus token is minted for a waitlist that closes without a spot - the
+ * token the entry held is simply free again once the entry is gone. (The
+ * 2026-09-30 audit: the old mint gave two tokens for one on every miss and
+ * paid out for a waitlist joined on a session already over.) `minted` stays
+ * in the result, always false, for the callers that count it.
  * @param {!Object} store An admin Firestore.
  * @param {!Object} entry `{id, ...waitlist doc}`.
  * @param {{today: string, expiresAt: string, athletes: !Function,
@@ -73,34 +77,20 @@ async function alreadyMinted(store, athleteId, sessionId) {
  */
 async function expireEntry(store, entry, ctx) {
   const graceId = graceIdFor(entry.sessionId, entry.athleteId);
-  const graceRef = store.collection('graceTokens').doc(graceId);
   const entryRef = store.collection('waitlist').doc(entry.id);
-  const minted =
-      !(await alreadyMinted(store, entry.athleteId, entry.sessionId));
-  const batch = store.batch();
-  if (minted) {
-    batch.create(graceRef, {
-      athleteId: entry.athleteId,
-      householdId: entry.householdId || null,
-      expiresAt: ctx.expiresAt,
-      reason: 'waitlist-expired',
-      sourceSessionId: entry.sessionId,
-      createdBy: 'sweep',
-      createdAt: FieldValue.serverTimestamp(),
-    });
-  }
-  batch.delete(entryRef);
-  await batch.commit();
+  const minted = false;
+  // A token an earlier run (or the manual script) minted for this very
+  // session means the family was already told: delete quietly.
+  const told = await alreadyMinted(store, entry.athleteId, entry.sessionId);
+  await entryRef.delete();
 
   let notified = false;
-  if (minted) {
+  if (!told) {
     const [athlete, session] = await Promise.all([
       ctx.athletes(entry.athleteId),
       ctx.sessions(entry.sessionId),
     ]);
-    const copy = notices.waitlistExpired({
-      athlete, session, expiresAt: ctx.expiresAt,
-    });
+    const copy = notices.waitlistExpired({athlete, session});
     const res = await notify.sendNotice({
       kind: 'waitlist-expired',
       category: 'schedule',

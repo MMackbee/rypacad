@@ -276,10 +276,10 @@ function membership(args) {
 }
 
 /**
- * kind `waitlist-expired` - the session passed without a spot; a bonus
- * token was minted (Sprint 17, contract v2.5).
- * @param {{athlete: ?Object, session: ?Object, expiresAt: string}} args
- *     Copy inputs.
+ * kind `waitlist-expired` - the session passed without a spot. Owner
+ * ruling 2026-10-01: nothing is minted; the token the entry held is free
+ * again. Elite holds no token, so that sentence is left off.
+ * @param {{athlete: ?Object, session: ?Object}} args Copy inputs.
  * @return {{title: string, body: string}} The notice.
  */
 function waitlistExpired(args) {
@@ -287,8 +287,9 @@ function waitlistExpired(args) {
   return {
     title: 'Waitlist closed',
     body: `The waitlist for ${sessionPhrase(args.session)} closed without ` +
-        `a spot for ${name}. A bonus token was added to ${name}'s account ` +
-        `(expires ${dayLabel(args.expiresAt)}).`,
+        `a spot for ${name}.` +
+        ((args.athlete && args.athlete.packageId) === 'elite' ? '' :
+          ' The token held for it is free to use again.'),
   };
 }
 
