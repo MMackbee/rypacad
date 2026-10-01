@@ -136,7 +136,7 @@ describe('the catalogue after Sprint 20', () => {
 // athletes do not qualify.
 describe('siblingDiscountApplies', () => {
   test('a paid membership plus an unpaid monthly sibling qualifies', () => {
-    expect(SIBLING_DISCOUNT_PCT).toBe(10);
+    expect(SIBLING_DISCOUNT_PCT).toBe(20);
     expect(SIBLING_DISCOUNT_NOTE).toBe('20% sibling discount comes off at checkout.');
     expect(siblingDiscountApplies([{ packageId: 't-16' }, { packageId: 'elite', billing: { status: 'pending' } }])).toBe(true);
     expect(siblingDiscountApplies([{ packageId: 't-16', billing: { status: 'past_due' } }, { packageId: 't-6', billing: { status: 'pending' } }])).toBe(true);
