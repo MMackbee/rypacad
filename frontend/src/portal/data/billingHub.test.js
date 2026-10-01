@@ -128,6 +128,9 @@ describe('hubMemberFor', () => {
 describe('periodRows / sessionLabel', () => {
   test('labels fall back from the session label to the type', () => {
     expect(sessionLabel({ label: 'Fall Scramble', type: 'tournament' })).toBe('Fall Scramble');
+    // The generic name is the Tour's (owner naming rule 2026-09-30); a typed label stays as typed.
+    expect(sessionLabel({ label: null, type: 'tournament' })).toBe('Tour event');
+    expect(sessionLabel({ label: 'Holiday Tournament', type: 'tournament' })).toBe('Holiday Tournament');
     expect(sessionLabel({ label: null, type: 'phil' })).toBe('Performance session');
     expect(sessionLabel(null, 'mental')).toBe('Mental game session');
     expect(sessionLabel(null, null)).toBe('Session');

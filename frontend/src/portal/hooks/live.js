@@ -611,7 +611,7 @@ function assertEliteDailyCap(pkg, type, date, bookings) {
     type === 'phil'
       ? "Elite includes one session with Phil a day, and there's already one booked that day."
       : type === 'tournament'
-        ? "Elite includes one tournament a day, and there's already one booked that day."
+        ? "Elite includes one Tour event a day, and there's already one booked that day."
         : "Elite includes one training block a day, and there's already one booked that day.",
     null,
     'one-per-day'

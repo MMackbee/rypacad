@@ -163,6 +163,25 @@ function prepaidFor(nowMs, args) {
   return prepaid.prepaidPeriodFor(p.trialEnd * 1000 + 60 * 60 * 1000, args);
 }
 
+const billDay = new Intl.DateTimeFormat('en-US', {
+  month: 'short', day: 'numeric', timeZone: lib.TZ,
+});
+
+/**
+ * The sentence beside the pay button. Stripe renders `trial_end` as "N days
+ * free" and testers read that as a trial of the academy (2026-09-30); this
+ * says what today's charge is for and when the next one happens.
+ * @param {!Object} p `prepaidFor`'s result.
+ * @return {string} `custom_text.submit.message` (Stripe's limit is 1200).
+ */
+function trialNote(p) {
+  const covers = p.prorated ? `the rest of ${p.label}` : `${p.label} in full`;
+  return `Today's charge covers ${covers}. Stripe calls the time until ` +
+      'monthly billing starts on ' +
+      `${billDay.format(new Date(p.trialEnd * 1000))} a free trial - ` +
+      'nothing else is charged before then.';
+}
+
 /**
  * The Checkout Session request body (spec 4.2). Pure.
  * @param {{householdId: string, athleteId: string, product: string,
@@ -200,6 +219,7 @@ function sessionBody(a) {
             String(a.prepaid.tokens),
       },
     },
+    custom_text: {submit: {message: trialNote(a.prepaid)}},
     // The add-on's return names itself so the portal's "What's next" card
     // stays off it; the tier return is unchanged.
     success_url: `${base}?paid=${a.athleteId}` +

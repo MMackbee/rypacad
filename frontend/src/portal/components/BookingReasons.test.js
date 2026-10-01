@@ -13,6 +13,11 @@ describe('Sprint 20 booking reasons (contract 3.6)', () => {
     expect(reasonCopy('calendly-managed')).toBe("Cancel or reschedule from Calendly's email");
     expect(CALENDLY_MANAGED_COPY).toBe(reasonCopy('calendly-managed'));
   });
+  test("Elite's one-per-day cap names the Tour event (owner naming rule 2026-09-30)", () => {
+    expect(reasonCopy('one-per-day')).toBe(
+      "Elite includes one training block, one Tour event and one Phil session a day - there's already one of those booked that day."
+    );
+  });
   test('unknown reasons stay null', () => {
     expect(reasonCopy('nope')).toBeNull();
   });

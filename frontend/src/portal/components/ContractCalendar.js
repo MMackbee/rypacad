@@ -2,7 +2,7 @@ import React from 'react';
 import FullCalendar from '@fullcalendar/react';
 import dayGridPlugin from '@fullcalendar/daygrid';
 import { color } from '../tokens';
-import { CLOSED_TITLE, MARK_PAINT, MARK_SR_TEXT, TOURNAMENT_GLYPH } from './DayMarks';
+import { CLOSED_TITLE, MARK_PAINT, MARK_SR_TEXT } from './DayMarks';
 
 /**
  * The month grid, drawn by FullCalendar. Shared by the Commitment Contract
@@ -117,16 +117,15 @@ export default function ContractCalendar({ start, dayStates = {}, onSelectDay, v
           if (markFor(iso)) classes.push(`ryp-mark-${markFor(iso)}`);
           return classes;
         }}
-        // Marked days only: the number, the star, and the words a screen
-        // reader appends (the cell's name comes from this anchor). A static
-        // html string - the day number is digits, the rest constants.
+        // Marked days only: the number and the words a screen reader
+        // appends (the cell's name comes from this anchor). A static html
+        // string - the day number is digits, the rest constants.
         dayCellContent={
           dayMarks && variant === 'booking'
             ? (arg) => {
                 const mark = markFor(stateFor(arg.date).iso);
                 if (!mark) return arg.dayNumberText;
-                const star = mark === 'tournament' ? `<span class="ryp-mark-glyph" aria-hidden="true">${TOURNAMENT_GLYPH}</span>` : '';
-                return { html: `${arg.dayNumberText}${star}<span class="ryp-sr">${MARK_SR_TEXT[mark]}</span>` };
+                return { html: `${arg.dayNumberText}<span class="ryp-sr">${MARK_SR_TEXT[mark]}</span>` };
               }
             : undefined
         }
@@ -225,7 +224,6 @@ const CALENDAR_CSS = `
   background: ${MARK_PAINT.closed.background}; border-color: ${MARK_PAINT.closed.borderColor}; color: ${MARK_PAINT.closed.color};
 }
 .ryp-contract-cal .ryp-mark-closed .fc-daygrid-day-number { text-decoration: line-through; }
-.ryp-contract-cal .ryp-mark-glyph { margin-left: 2px; font-size: 8px; }
 .ryp-contract-cal .ryp-sr {
   position: absolute; width: 1px; height: 1px; margin: -1px; padding: 0;
   overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0;

@@ -179,21 +179,22 @@ describe('booking day marks (owner ruling 2026-09-30)', () => {
     return `rgb(${[r, g, b].map((v, i) => Math.round(v * a + bb[i] * (1 - a))).join(', ')})`;
   };
 
-  test('a tournament day: yellow, a star, and "tournament day" in its name; still a button', async () => {
+  test('a tournament day: yellow, no star, and "Tour day" in its name; still a button', async () => {
     const onSelectDay = jest.fn();
     const r = await renderScreen(<WeekView weekStart={WEEK} dayStates={states} dayMarks={marks} variant="booking" onSelectDay={onSelectDay} />);
     const t = cell(r, '2026-10-10');
     expect(t.tagName).toBe('BUTTON');
-    expect(t.getAttribute('aria-label')).toBe('Saturday, Oct 10, tournament day');
+    expect(t.getAttribute('aria-label')).toBe('Saturday, Oct 10, Tour day');
     expect(t.getAttribute('data-mark')).toBe('tournament');
     expect(t.style.background).toBe('rgba(244, 238, 25, 0.1)');
     expect(t.style.borderColor.toLowerCase()).toBe('#f4ee19');
-    expect(t.textContent).toBe('Sat10★');
-    expect(t.querySelector('[aria-hidden="true"]').textContent).toBe('★');
+    // The colour is the mark (tester 2026-09-30): no star in the pill.
+    expect(t.textContent).toBe('Sat10');
+    expect(t.querySelector('[aria-hidden="true"]')).toBeNull();
     await act(async () => { t.click(); });
     expect(onSelectDay).toHaveBeenCalledWith({ iso: '2026-10-10', day: 10, state: 'available' });
     // Full and a tournament day: both said, and still dashed.
-    expect(cell(r, '2026-10-09').getAttribute('aria-label')).toBe('Friday, Oct 9, tournament day, full - waitlist only');
+    expect(cell(r, '2026-10-09').getAttribute('aria-label')).toBe('Friday, Oct 9, Tour day, full - waitlist only');
     expect(cell(r, '2026-10-09').style.borderStyle).toBe('dashed');
     // An unmarked day is untouched.
     expect(cell(r, '2026-10-06').getAttribute('aria-label')).toBe('Tuesday, Oct 6');
@@ -223,14 +224,14 @@ describe('booking day marks (owner ruling 2026-09-30)', () => {
     await r.unmount();
   });
 
-  test('a selected tournament day keeps the green fill and its star', async () => {
+  test('a selected tournament day keeps the green fill, with no star', async () => {
     const r = await renderScreen(
       <WeekView weekStart={WEEK} dayStates={states} dayMarks={marks} variant="booking" selected="2026-10-10" onSelectDay={() => {}} />
     );
     const t = cell(r, '2026-10-10');
     expect(t.style.background).toBe('rgb(0, 175, 81)');
     expect(t.style.color).toBe('rgb(0, 0, 0)');
-    expect(t.textContent).toContain('★');
+    expect(t.textContent).toBe('Sat10');
     await r.unmount();
   });
 

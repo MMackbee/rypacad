@@ -134,7 +134,7 @@ describe("What's next under Payment received (owner decision 2026-09-30)", () =>
     const text = r.text();
     expect(text).toContain("What's next");
     expect(text.indexOf('Payment received')).toBeLessThan(text.indexOf("What's next"));
-    expect(text).toContain('Booking opens Sat, Oct 10 at 7 AM - book any training block, tournament or Phil session then.');
+    expect(text).toContain('Booking opens Sat, Oct 10 at 7 AM - book any training block, Tour event or Phil session then.');
     expect(text).toContain('Sessions start Tue, Nov 3.');
     expect(text).toContain(`Jordan can sign in at ${window.location.host}/portal/signin with jordan@email.com.`);
     expect(text).not.toContain('See the season calendar');
@@ -146,7 +146,7 @@ describe("What's next under Payment received (owner decision 2026-09-30)", () =>
     mockConfirm = { state: 'confirmed', billingStatus: 'active', packageId: 'elite' };
     const r = await renderScreen(<ParentDashboard bare />, { path: '/portal/family?paid=a2' });
     // Date.now() is pinned to Oct 5 above: the window counts from Nov 1.
-    expect(r.text()).toContain('Reese can book now - training, tournaments and Phil, through Wed, Dec 16.');
+    expect(r.text()).toContain('Reese can book now - training, Tour events and Phil, through Wed, Dec 16.');
     expect(r.text()).not.toContain('sign in at');
     expect(r.text()).not.toContain('Book for Reese');
     await r.click("Book Reese's first session");

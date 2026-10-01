@@ -226,7 +226,7 @@ const SPECIALIST_BY_ID = new Map(SPECIALISTS.map((sp) => [sp.id, sp]));
 
 /**
  * The generic name a session with no explicit label falls back to —
- * 'Tournament block' / 'Training block' for the generator's two original
+ * 'Tour event' / 'Training block' for the generator's two original
  * types, or (Sprint 9 pin, contract v1.7) '<sessionNoun> · <name>' for a
  * specialist 1-on-1 (data/specialists.js), e.g. "Mental game session ·
  * Yannick" — NEVER 'Training block' for a phil/mental session. Shared by
@@ -240,7 +240,7 @@ const SPECIALIST_BY_ID = new Map(SPECIALISTS.map((sp) => [sp.id, sp]));
 export function genericSessionName(type) {
   const specialist = SPECIALIST_BY_ID.get(type);
   if (specialist) return `${specialist.sessionNoun} · ${specialist.name}`;
-  return type === 'tournament' ? 'Tournament block' : 'Training block';
+  return type === 'tournament' ? 'Tour event' : 'Training block';
 }
 
 /** How a season session renders on a schedule or booking list. */
@@ -267,7 +267,7 @@ function displaySession(s, today) {
     // nothing is invented here. `overflow` is retired (contract v2.0, pin J
     // - the Friday overflow block concept is gone from the locked weekly
     // schedule; the generator no longer produces the field at all).
-    meta: s.special ? 'Holiday event · open to tournament competitors' : null,
+    meta: s.special ? 'Holiday event · open to Tour competitors' : null,
     // Suggested age group (owner, 2026-09-22), derived HERE rather than in a
     // screen: this is the last place that holds the session's own date next
     // to its full time string ("4:00 PM"). Below, `time` and `meridiem` are

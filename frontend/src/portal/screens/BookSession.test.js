@@ -1,6 +1,8 @@
 import React, { act } from 'react';
 import { renderScreen } from './testRender';
 import BookSession from './BookSession';
+import { BOOKING_CONFIRMATION } from '../data/seed';
+import { TOUR_EVENT_EXPLAINER } from '../data/tour';
 
 const BEFORE = new Date('2026-10-09T12:00:00Z'); // Fri Oct 9, 07:00 Chicago - the day before
 const AT_OPEN = new Date('2026-10-10T12:00:00Z'); // BOOKING_OPENS_AT exactly
@@ -13,11 +15,14 @@ let mockMonths;
 let mockBookingFor;
 let mockBookRecurring;
 let mockMarks;
+// The booking athlete's token position and the hook's confirmation payload.
+let mockTokens;
+let mockConfirmation;
 // Month-aware: each monthISO gets its own days (and day marks); October is the default.
 const mockMonth = (m) => ({ data: { days: mockMonths[m] ?? [], dayMarks: mockMarks[m] ?? {} }, loading: false, error: null });
 jest.mock('../hooks', () => ({
   useBooking: () => ({
-    data: { slots: [{ date: mockFirstSlot }], tokens: { left: 6, unlimited: false, grace: [] }, confirmation: { email: null, note: 'See you there.' }, seasonNote: null },
+    data: { slots: [{ date: mockFirstSlot }], tokens: mockTokens, confirmation: mockConfirmation, seasonNote: null },
     loading: false, error: null,
     book: async (s) => { mockBooked.push(s.id); return {}; },
     bookRecurring: (...args) => mockBookRecurring(...args),
@@ -43,6 +48,8 @@ beforeEach(() => {
   mockBookingFor = null;
   mockBookRecurring = jest.fn(async () => ({ booked: [], skipped: [], windowEnd: null, next: null }));
   mockMarks = {};
+  mockTokens = { left: 6, unlimited: false, grace: [] };
+  mockConfirmation = { email: null, note: 'See you there.' };
   jest.useFakeTimers('modern');
 });
 afterEach(() => {
@@ -82,6 +89,41 @@ test('Elite books before the gate (the paid package, spec 4.3)', async () => {
   expect(r.text()).not.toContain('Booking opens Sat, Oct 10 at 7 AM');
   expect(sessionCard(r).style.cursor).toBe('pointer');
   await r.unmount();
+});
+
+describe('the cancel line on the confirmation card (tester 2026-09-30: Elite has no tokens)', () => {
+  /** Tap Oct 12's block through to Slot reserved, on the real confirmation copy both data paths carry. */
+  async function reserve() {
+    jest.setSystemTime(AT_OPEN);
+    mockConfirmation = { ...BOOKING_CONFIRMATION, email: null };
+    const r = await renderScreen(<BookSession bare demoSelectedDate="2026-10-12" />);
+    await act(async () => { sessionCard(r).click(); });
+    expect(r.text()).toContain('Slot reserved');
+    return r;
+  }
+  test('a token athlete keeps the token sentence', async () => {
+    const r = await reserve();
+    expect(r.text()).toContain('1 token');
+    expect(r.text()).toContain('Cancel until the day before the session to keep your token.');
+    await r.unmount();
+  });
+  test('an Elite (unlimited) athlete is not told about a token', async () => {
+    mockPackage = { id: 'elite', kind: 'elite', windowDays: 45 };
+    mockTokens = { unlimited: true, grace: [] };
+    const r = await reserve();
+    expect(r.text()).toContain('Included with Elite');
+    expect(r.text()).toContain('Cancel until the day before the session.');
+    expect(r.text()).not.toContain('to keep your token');
+    await r.unmount();
+  });
+  test('an older payload with no Elite line falls back to the one it has', async () => {
+    mockTokens = { unlimited: true, grace: [] };
+    jest.setSystemTime(AT_OPEN);
+    const r = await renderScreen(<BookSession bare demoSelectedDate="2026-10-12" />);
+    await act(async () => { sessionCard(r).click(); });
+    expect(r.text()).toContain('See you there.');
+    await r.unmount();
+  });
 });
 
 describe('the window counts from Nov 1 until then (owner ruling 2026-09-30; UX review #8)', () => {
@@ -376,13 +418,15 @@ describe('Month/Week toggle (owner request 2026-09-30)', () => {
   test('a tournament Saturday and a closed Sunday paint in both views, with the legend and the new caption', async () => {
     jest.setSystemTime(new Date('2026-11-04T15:00:00Z'));
     mockFirstSlot = '2026-11-05';
-    const tournament = { ...session, id: 't1', date: '2026-11-07', time: '10:30 AM', type: 'tournament', label: 'Tournament block' };
+    // No label of its own: the generic name is the Tour's (owner naming rule 2026-09-30).
+    const tournament = { ...session, id: 't1', date: '2026-11-07', time: '10:30 AM', type: 'tournament', label: null };
     mockMonths = { '2026-11-01': [{ date: '2026-11-05', sessions: [{ ...session, date: '2026-11-05' }] }, { date: '2026-11-07', sessions: [tournament] }] };
     mockMarks = { '2026-11-01': { '2026-11-07': 'tournament', '2026-11-08': 'closed' } };
     const r = await renderScreen(<BookSession bare />);
     expect(navLabel(r)).toBe('November 2026');
     expect(r.text()).toContain('Green and yellow days have bookable sessions — tap one to see times.');
-    expect(r.container.querySelector('.ryp-day-mark-legend').textContent).toContain('Tournament day');
+    expect(r.container.querySelector('.ryp-day-mark-legend').textContent).toContain('Tour day');
+    expect(r.text()).not.toContain('★');
     expect(r.container.querySelector('.ryp-day-mark-legend').textContent).toContain('Academy closed');
     expect(td(r, '2026-11-07').classList.contains('ryp-mark-tournament')).toBe(true);
     expect(td(r, '2026-11-07').getAttribute('role')).toBe('button');
@@ -393,8 +437,26 @@ describe('Month/Week toggle (owner request 2026-09-30)', () => {
     expect(pill(r, '2026-11-08').tagName).toBe('DIV');
     expect(pill(r, '2026-11-08').getAttribute('title')).toBe('Academy closed');
     expect(r.container.querySelector('.ryp-day-mark-legend')).not.toBeNull();
-    await r.click('Saturday, Nov 7, tournament day');
-    expect(r.text()).toContain('Tournament block');
+    // A training-only day: no Tour explainer.
+    await r.click('Thursday, Nov 5');
+    expect(sessionCard(r)).not.toBeNull();
+    expect(r.text()).not.toContain(TOUR_EVENT_EXPLAINER);
+    // The Tour day: the chip says Tour, the card Tour event, and the explainer sits with the list.
+    await r.click('Saturday, Nov 7, Tour day');
+    const card = [...r.container.querySelectorAll('div')].find((el) => el.textContent.startsWith('10:30AMTourTour event'));
+    expect(card).toBeDefined();
+    expect(r.text()).toContain(TOUR_EVENT_EXPLAINER);
+    expect(r.text()).not.toMatch(/Tournament block|Tournament day/);
+    await r.unmount();
+  });
+
+  test('a calendar label on a Tour event stays exactly as typed', async () => {
+    jest.setSystemTime(new Date('2026-11-04T15:00:00Z'));
+    mockFirstSlot = '2026-11-07';
+    mockMonths = { '2026-11-01': [{ date: '2026-11-07', sessions: [{ ...session, id: 't1', date: '2026-11-07', time: '10:30 AM', type: 'tournament', label: 'Fall Tournament' }] }] };
+    const r = await renderScreen(<BookSession bare demoSelectedDate="2026-11-07" />);
+    expect(r.text()).toContain('Fall Tournament');
+    expect(r.text()).toContain(TOUR_EVENT_EXPLAINER);
     await r.unmount();
   });
 

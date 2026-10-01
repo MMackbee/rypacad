@@ -18,7 +18,7 @@ export const BOOK_OPTIONS = [
   {
     id: 'golf',
     title: 'Golf session',
-    blurb: 'Training blocks and Saturday tournaments',
+    blurb: 'Training blocks and Tour events',
     path: '/portal/book',
     specialistId: null,
   },

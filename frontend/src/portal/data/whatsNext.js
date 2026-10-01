@@ -56,10 +56,10 @@ export function whatsNextFor({ packageId, product = null, athlete = null, self =
     const reach = windowAnchored(new Date(now))
       ? `through ${format(parseISO(openThrough(new Date(now), days)), 'EEE, MMM d')}`
       : `up to ${days} days ahead`;
-    lines.push(`${self ? 'You' : name} can book now - training, tournaments and Phil, ${reach}.`);
+    lines.push(`${self ? 'You' : name} can book now - training, Tour events and Phil, ${reach}.`);
     book = self ? 'Book your first session' : `Book ${first ?? 'your athlete'}'s first session`;
   } else {
-    lines.push(`Booking opens ${BOOKING_OPENS_LABEL} - book any training block, tournament or Phil session then.`);
+    lines.push(`Booking opens ${BOOKING_OPENS_LABEL} - book any training block, Tour event or Phil session then.`);
   }
   const today = format(new Date(now), 'yyyy-MM-dd');
   if (pkg.kind === 'tokens' && today < SEASON_BOUNDS.start) lines.push(`Sessions start ${SEASON_START_LABEL}.`);

@@ -10,7 +10,7 @@ import { color, font, radius, tint } from '../tokens';
 
 export const TYPES = {
   training: { label: 'Training', fg: color.textSecondary, bg: 'transparent', bd: color.border },
-  tournament: { label: 'Tournament', fg: color.secondary, bg: tint.yellow, bd: tint.yellowBorder },
+  tournament: { label: 'Tour', fg: color.secondary, bg: tint.yellow, bd: tint.yellowBorder },
   cancelled: { label: 'Cancelled', fg: color.error, bg: tint.red, bd: tint.redBorder },
   makeup: { label: 'Makeup', fg: color.primary, bg: tint.green, bd: color.primary },
   diagnostic: { label: 'Diagnostic', fg: color.primary, bg: tint.green, bd: color.primary },

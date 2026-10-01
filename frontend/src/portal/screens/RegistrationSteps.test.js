@@ -138,7 +138,7 @@ test('prices read per month, Elite reads how far ahead it books, and tokens are 
   const r = await renderScreen(<PackageStep athletes={[{ ...newAthleteEntry(), name: 'Nico' }]} onUpdate={() => {}} showErrors={false} />);
   expect(r.button('Elite').textContent).toContain('Unlimited · 24/7 access · book up to 45 days ahead');
   expect(r.button('Elite').textContent).toContain('$999/ month');
-  expect(r.text()).toContain("Package — Nico1 token = 1 session: a training block, a tournament, or a session with Phil or Yannick. Tokens refresh on the 1st of each month; unused tokens don't carry over. Elite is unlimited.");
+  expect(r.text()).toContain("Package — Nico1 token = 1 session: a training block, a Tour event, or a session with Phil or Yannick. Tokens refresh on the 1st of each month; unused tokens don't carry over. Elite is unlimited.");
   await r.unmount();
 });
 

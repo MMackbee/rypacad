@@ -128,6 +128,9 @@ test('tier before Nov 1: the exact session body', async () => {
     subscription_data: {trial_end: 1796104800, metadata: {
       householdId: 'novak', athleteId: 'lena', product: 'tier',
       packageId: 't-6', prepaidPeriodKey: '2026-11-01', prepaidTokens: '6'}},
+    custom_text: {submit: {message: 'Today\'s charge covers November 2026 ' +
+        'in full. Stripe calls the time until monthly billing starts on ' +
+        'Dec 1 a free trial - nothing else is charged before then.'}},
     success_url: 'https://portal.test/portal/family?paid=lena' +
         '&cs={CHECKOUT_SESSION_ID}',
     cancel_url: 'https://portal.test/portal/family',
@@ -150,6 +153,9 @@ test('athlete role, existing customer, Google account, prorated', async () => {
   assert.equal(b.line_items[1].price_data.unit_amount,
       Math.round(29900 * 19 / 30));
   assert.equal(b.subscription_data.metadata.prepaidTokens, '4');
+  assert.equal(b.custom_text.submit.message, 'Today\'s charge covers the ' +
+      'rest of November 2026. Stripe calls the time until monthly billing ' +
+      'starts on Dec 1 a free trial - nothing else is charged before then.');
 });
 
 test('facility add-on: $300 line, elite sends empty tokens', async () => {
@@ -187,6 +193,8 @@ test('facility add-on: $300 line, elite sends empty tokens', async () => {
       'Facility access - November 2026, prepaid');
   assert.deepEqual([calls[0].subscription_data.metadata.product,
     calls[0].subscription_data.metadata.prepaidTokens], ['facility', '']);
+  assert.match(calls[0].custom_text.submit.message,
+      /^Today's charge covers November 2026 in full\. .* on Dec 1 a free /);
 });
 
 test('under 48 h to the 1st: prepay next month in full (D11)', async () => {
@@ -198,6 +206,11 @@ test('under 48 h to the 1st: prepay next month in full (D11)', async () => {
   const nov28 = Date.parse('2026-11-28T12:00:00Z');
   assert.equal(checkout.prepaidFor(nov28, {priceCents: 29900, tokens: 6})
       .periodKey, '2026-11-01');
+  const late = call({athleteId: 'lena', product: 'tier'}, ctx('u-nina'),
+      {now: nov30});
+  await late.p;
+  assert.match(late.calls[0].custom_text.submit.message,
+      /covers December 2026 in full\. .* starts on Jan 1 a free trial - /);
 });
 
 test('refusals in the contract order', async () => {

@@ -20,10 +20,14 @@
 
 'use strict';
 
-/** Display names for a session with no `label` of its own. @const */
+/**
+ * Display names for a session with no `label` of its own. The type id stays
+ * 'tournament'; families read "Tour event" (owner naming rule, 2026-09-30).
+ * @const
+ */
 const TYPE_LABELS = {
   training: 'Training',
-  tournament: 'Tournament',
+  tournament: 'Tour event',
   phil: 'Phil 1-on-1',
   mental: 'Mental session',
   adult: 'Adult block',

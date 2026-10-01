@@ -12,7 +12,7 @@
  * Dates key off the real calendar (see ./calendar.js): headers show the actual
  * today, token periods anchor on PERIOD_ANCHOR_DAY (below) and roll from
  * there, and bookings reference the generated season's opening week. Session
- * names are the generic "Training block" / "Tournament block" - the
+ * names are the generic "Training block" / "Tour event" - the
  * Workshop/Lab/Arena rotation was a placeholder, and no invented name ships
  * before real sessions exist to book.
  *
@@ -187,6 +187,8 @@ export const BOOKING_CONFIRMATION = {
   when: 'Tue Nov 3 · 4:00 PM',
   email: 'dana@email.com',
   note: 'Cancel until the day before the session to keep your token.',
+  // Elite is unlimited - there is no token to keep (tester, 2026-09-30).
+  noteUnlimited: 'Cancel until the day before the session.',
 };
 
 /** Screen 08. Fixed-height cards regardless of how much data a child has. */
@@ -218,7 +220,7 @@ export const HOUSEHOLD = {
       age: 12,
       ageLine: 'Age 12 · 20 min tier',
       standing: { tone: 'yellow', label: 'Behind' },
-      next: { type: 'tournament', when: 'Sat 10:30 AM', meta: 'Tournament block' },
+      next: { type: 'tournament', when: 'Sat 10:30 AM', meta: 'Tour event' },
       contract: 54,
       packageId: 't-6',
       // 4 of 6 used - the same total spend her old two-pool demo modelled

@@ -27,7 +27,7 @@ export function reasonCopy(reason) {
   if (reason === 'outside-window') return "That date isn't open for booking yet.";
   if (reason === 'cap-reached') return capReachedCopy();
   // v2.0.1 (Sprint 18): Elite's per-day frequency caps.
-  if (reason === 'one-per-day') return "Elite includes one training block, one tournament and one Phil session a day — there's already one of those booked that day.";
+  if (reason === 'one-per-day') return "Elite includes one training block, one Tour event and one Phil session a day - there's already one of those booked that day.";
   // Sprint 20 (contract 3.6): the per-athlete paid gate, the Oct 10 gate and
   // Calendly-managed rows. Copy is section 9's, verbatim.
   if (reason === 'billing-pending') return 'Payment pending - finish checkout to start booking';

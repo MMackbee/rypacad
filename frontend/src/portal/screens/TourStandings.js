@@ -11,7 +11,7 @@ import { longDayLabel } from '../data/calendar';
 // the hook below; this is the same "single knob" pointsForPosition() every
 // standings/points display in the app must go through rather than
 // re-deriving its own table (data/tour.js TOUR_POINTS).
-import { pointsForPosition } from '../data/tour';
+import { TOUR_EVENT_EXPLAINER, pointsForPosition } from '../data/tour';
 import * as hooks from '../hooks';
 
 /**
@@ -61,7 +61,7 @@ function ordinal(n) {
  * No invented data: every name, score and point total is exactly what the
  * hook returns. Rank ties are the hook's own math (TEAM.md: "ties share a
  * rank") - this screen renders `standing.rank` verbatim, never recomputing
- * it. An event with no real label reads "Tournament block", same fallback
+ * it. An event with no real label reads "Tour event", same fallback
  * every other screen uses for an unnamed session.
  *
  * `athleteId` (Sprint 8 pin) is new and optional, defaulting to undefined -
@@ -134,6 +134,8 @@ export default function TourStandings({
   }, [brackets, role, athleteId]);
 
   const selected = brackets.find((b) => b.id === selectedBracketId) ?? brackets[0] ?? null;
+  // Families only: what a Tour event is, above the board it feeds.
+  const explainer = role === 'athlete' || role === 'parent' ? <Body size={12}>{TOUR_EVENT_EXPLAINER}</Body> : null;
 
   return (
     <PhoneFrame
@@ -158,11 +160,13 @@ export default function TourStandings({
           </ErrorNotice>
         </div>
       ) : isEmpty ? (
-        <div style={{ padding: '0 22px 24px' }}>
+        <div style={{ padding: '0 22px 24px', display: 'flex', flexDirection: 'column', gap: 14 }}>
+          {explainer}
           <EmptyTour />
         </div>
       ) : (
         <div style={{ padding: '0 22px 24px', display: 'flex', flexDirection: 'column', gap: 14 }}>
+          {explainer}
           {brackets.length ? (
             <BracketSelector brackets={brackets} selectedId={selected?.id} onSelect={setSelectedBracketId} />
           ) : null}
@@ -226,7 +230,7 @@ function EmptyTour() {
     >
       <MediaPlaceholder height={44} style={{ width: 44 }} />
       <ScreenTitle size={17}>Nothing on the board yet</ScreenTitle>
-      <Body size={12}>The Tour starts with the first Saturday tournament.</Body>
+      <Body size={12}>The RYP Tour starts with the first Tour event.</Body>
     </div>
   );
 }
@@ -416,7 +420,7 @@ function RankBadge({ rank, celebrated, size = 34 }) {
 function RecentTournaments({ events, bracketId }) {
   return (
     <div>
-      <SectionLabel style={{ marginBottom: 10 }}>Recent tournaments</SectionLabel>
+      <SectionLabel style={{ marginBottom: 10 }}>Recent Tour events</SectionLabel>
       <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
         {/* v1.6.1: an event is a DATE (all of one Saturday's blocks merged),
             so the date is the identity. */}
@@ -445,9 +449,9 @@ function EventCard({ event, bracketId }) {
         {longDayLabel(event.date)}
       </div>
       <div style={{ font: `700 15px ${font.head}`, color: color.text, marginTop: 3 }}>
-        {/* No invented session names — the same "Tournament block" fallback
+        {/* No invented session names — the same "Tour event" fallback
             every other screen uses for an unlabeled session (TEAM.md). */}
-        {event.label || 'Tournament block'}
+        {event.label || 'Tour event'}
       </div>
       {podium.length ? (
         <div style={{ display: 'flex', gap: 10, marginTop: 12 }}>

@@ -9,11 +9,12 @@ import { color, font, tint } from '../tokens';
  * this file is the one paint, copy and legend that WeekView, ContractCalendar
  * and the cards share, so the views cannot disagree.
  *
- * Colour is never the only signal: a tournament day carries a star and the
- * words "tournament day"; a closed day is struck through and says "Academy
- * closed" (title + screen-reader text); the legend names both. The yellow and
- * red are TypeChip's own tournament / cancelled pair. The Commitment Contract
- * never passes marks (Sprint 5: it has no closed state).
+ * A Tour day is the yellow alone plus the screen-reader words "Tour day" (the
+ * star went 2026-09-30, tester: "the color is enough"); a closed day is struck
+ * through and says "Academy closed" (title + screen-reader text); the legend
+ * names both. The yellow and red are TypeChip's own tournament / cancelled
+ * pair. The Commitment Contract never passes marks (Sprint 5: it has no closed
+ * state).
  */
 
 /** Fill / outline / date colour per mark. Closed red on its fill over the card is ~4.6:1. */
@@ -23,10 +24,9 @@ export const MARK_PAINT = {
 };
 
 /** The screen-reader words that follow the date. */
-export const MARK_SR_TEXT = { tournament: ', tournament day', closed: ', academy closed' };
+export const MARK_SR_TEXT = { tournament: ', Tour day', closed: ', academy closed' };
 
 export const CLOSED_TITLE = 'Academy closed';
-export const TOURNAMENT_GLYPH = '★';
 
 /** Visually hidden but still read aloud. */
 export const SR_ONLY = {
@@ -62,7 +62,7 @@ function MarkChip({ mark }) {
         textDecoration: mark === 'closed' ? 'line-through' : 'none',
       }}
     >
-      {mark === 'tournament' ? TOURNAMENT_GLYPH : '7'}
+      {mark === 'closed' ? '7' : null}
     </span>
   );
 }
@@ -73,7 +73,7 @@ function MarkChip({ mark }) {
  */
 export function DayMarkLegend() {
   const items = [
-    ['tournament', 'Tournament day'],
+    ['tournament', 'Tour day'],
     ['closed', CLOSED_TITLE],
   ];
   return (

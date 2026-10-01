@@ -3,7 +3,7 @@ import { color, font } from '../tokens';
 import { longDayLabel } from '../data/calendar';
 import { datePill } from '../data/season';
 import { isTappableDay, weekDaysISO } from '../data/calendarViews';
-import { CLOSED_TITLE, MARK_PAINT, MARK_SR_TEXT, SR_ONLY, TOURNAMENT_GLYPH } from './DayMarks';
+import { CLOSED_TITLE, MARK_PAINT, MARK_SR_TEXT, SR_ONLY } from './DayMarks';
 
 /**
  * ContractCalendar's state palette (CALENDAR_CSS), so a day reads the same in
@@ -104,11 +104,6 @@ export default function WeekView({
             <span style={{ font: `500 10px ${font.body}`, textTransform: 'uppercase' }}>{pill.dow}</span>
             <span style={{ font: `700 17px ${font.head}`, ...(mark === 'closed' ? { textDecoration: 'line-through' } : null) }}>
               {pill.date}
-              {mark === 'tournament' ? (
-                <span aria-hidden="true" style={{ fontSize: 10, marginLeft: 2, verticalAlign: 'top' }}>
-                  {TOURNAMENT_GLYPH}
-                </span>
-              ) : null}
             </span>
           </>
         );

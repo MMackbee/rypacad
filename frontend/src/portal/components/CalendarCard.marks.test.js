@@ -66,17 +66,17 @@ const MARKS = {
 };
 
 describe('SessionsCalendarCard marks', () => {
-  test('Month: marked cells get ryp-mark-* classes, the star and screen-reader words; a closed day is never a button', async () => {
+  test('Month: marked cells get ryp-mark-* classes and screen-reader words, no star; a closed day is never a button', async () => {
     jest.setSystemTime(new Date('2026-11-04T15:00:00'));
     const r = await renderScreen(<Harness initialMonth="2026-11-01" statesByMonth={STATES} marksByMonth={MARKS} />);
     const t = td(r, '2026-11-07');
     expect(t.classList.contains('ryp-mark-tournament')).toBe(true);
     expect(t.getAttribute('role')).toBe('button');
-    // The cell's accessible name is its day-number anchor: the date, then the words (the star is hidden).
+    // The cell's accessible name is its day-number anchor: the date, then the words. No star (tester 2026-09-30).
     const name = document.getElementById(t.getAttribute('aria-labelledby'));
-    expect(name.textContent).toBe('7★, tournament day');
-    expect(name.querySelector('.ryp-mark-glyph').getAttribute('aria-hidden')).toBe('true');
-    expect(name.querySelector('.ryp-sr').textContent).toBe(', tournament day');
+    expect(name.textContent).toBe('7, Tour day');
+    expect(name.querySelector('.ryp-mark-glyph')).toBeNull();
+    expect(name.querySelector('.ryp-sr').textContent).toBe(', Tour day');
     const c = td(r, '2026-11-08');
     expect(c.classList.contains('ryp-mark-closed')).toBe(true);
     expect(c.getAttribute('role')).toBeNull();
@@ -89,6 +89,7 @@ describe('SessionsCalendarCard marks', () => {
     const css = cssText(r);
     expect(css).toContain('.ryp-contract-cal .ryp-mark-closed .fc-daygrid-day-number { text-decoration: line-through; }');
     expect(css).toContain('.ryp-contract-cal .ryp-mark-tournament .fc-daygrid-day-frame {\n  background: rgba(244,238,25,.10); border-color: #F4EE19;');
+    expect(css).not.toContain('ryp-mark-glyph');
     await tap(c);
     expect(c.classList.contains('ryp-day-selected')).toBe(false);
     await r.unmount();
@@ -111,7 +112,10 @@ describe('SessionsCalendarCard marks', () => {
   test('the legend shows under the grid in both views, and not without dayMarks', async () => {
     jest.setSystemTime(new Date('2026-11-04T15:00:00'));
     const r = await renderScreen(<Harness initialMonth="2026-11-01" statesByMonth={STATES} marksByMonth={MARKS} />);
-    expect(legend(r).textContent).toBe('★Tournament day7Academy closed');
+    // The Tour swatch is the yellow alone; the closed swatch keeps its struck-through 7.
+    expect(legend(r).textContent).toBe('Tour day7Academy closed');
+    expect(legend(r).querySelector('[data-mark="tournament"]').textContent).toBe('');
+    expect(legend(r).querySelector('[data-mark="tournament"]').style.background).toBe('rgba(244, 238, 25, 0.1)');
     expect([...legend(r).querySelectorAll('[data-mark]')].every((chip) => chip.getAttribute('aria-hidden') === 'true')).toBe(true);
     await r.click('Week');
     expect(legend(r)).not.toBeNull();
@@ -133,7 +137,7 @@ describe('SessionsCalendarCard marks', () => {
     jest.setSystemTime(new Date('2026-11-30T15:00:00'));
     const r = await renderScreen(<Harness initialMonth="2026-11-01" statesByMonth={STATES} marksByMonth={MARKS} />);
     expect(navLabel(r)).toBe('Nov 30 – Dec 6');
-    expect(pill(r, '2026-12-05').getAttribute('aria-label')).toBe('Saturday, Dec 5, tournament day');
+    expect(pill(r, '2026-12-05').getAttribute('aria-label')).toBe('Saturday, Dec 5, Tour day');
     expect(pill(r, '2026-12-06').tagName).toBe('DIV');
     expect(pill(r, '2026-12-06').getAttribute('title')).toBe('Academy closed');
     await r.unmount();
@@ -159,14 +163,14 @@ describe('SessionsCalendarCard marks', () => {
     await r.unmount();
   });
 
-  test('a selected tournament day keeps the green fill (the selected rule outranks the mark) and its star', async () => {
+  test('a selected tournament day keeps the green fill (the selected rule outranks the mark), with no star', async () => {
     jest.setSystemTime(new Date('2026-11-04T15:00:00'));
     const r = await renderScreen(<Harness initialMonth="2026-11-01" statesByMonth={STATES} marksByMonth={MARKS} initialSelected="2026-11-07" />);
     const t = td(r, '2026-11-07');
     expect(['ryp-day-selected', 'ryp-day-available', 'ryp-mark-tournament'].every((c) => t.classList.contains(c))).toBe(true);
     // Four classes beat the mark's three, wherever the rules sit.
     expect(cssText(r)).toContain('.ryp-cal-month .ryp-day-selected.ryp-day-available .fc-daygrid-day-frame { background: #00AF51; color: #000; }');
-    expect(t.textContent).toContain('★');
+    expect(t.textContent).toBe('7, Tour day');
     await r.unmount();
   });
 });

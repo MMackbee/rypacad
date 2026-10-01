@@ -319,7 +319,7 @@ describe('Month/Week calendar card (owner request 2026-09-30)', () => {
     expect(r.text()).toContain('Days marked green or yellow have open times — tap one to see them.');
     expect(r.container.querySelector('.ryp-day-mark-legend')).not.toBeNull();
     const t = pill(r, DAY_A);
-    expect(t.getAttribute('aria-label')).toBe('Friday, Oct 16, tournament day');
+    expect(t.getAttribute('aria-label')).toBe('Friday, Oct 16, Tour day');
     expect(t.getAttribute('aria-pressed')).toBe('true');
     const closed = pill(r, TODAY);
     expect(closed.tagName).toBe('DIV');
@@ -343,7 +343,7 @@ describe('Month/Week calendar card (owner request 2026-09-30)', () => {
     expect(g.text()).toContain('Days marked green have open times — tap one to see them.');
     expect(pill(g, TODAY).tagName).toBe('DIV');
     expect(pill(g, TODAY).getAttribute('data-mark')).toBe('tournament');
-    expect(pill(g, TODAY).textContent).toContain(', tournament day');
+    expect(pill(g, TODAY).textContent).toContain(', Tour day');
     await g.unmount();
   });
 

@@ -310,7 +310,7 @@ function EmergencyContactCard({ mode, linkMode, value, onChange, showErrors }) {
 const SINGLE_OFF_SALE_NOTE = 'On sale before booking opens Sat, Oct 10. Pick a monthly package now, or come back then.';
 
 /** What a token is and that it does not carry over (tokens-and-billing-contract.md), before the parent picks 6, 12 or 16. */
-const TOKEN_EXPLAINER = "1 token = 1 session: a training block, a tournament, or a session with Phil or Yannick. Tokens refresh on the 1st of each month; unused tokens don't carry over. Elite is unlimited.";
+const TOKEN_EXPLAINER = "1 token = 1 session: a training block, a Tour event, or a session with Phil or Yannick. Tokens refresh on the 1st of each month; unused tokens don't carry over. Elite is unlimited.";
 
 /** Still needs a pick: none yet, one no longer in the catalogue, or the single token before it is on sale. */
 function needsPackage(athlete) {

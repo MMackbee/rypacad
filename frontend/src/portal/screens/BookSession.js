@@ -22,6 +22,7 @@ import BookingOpensBanner from '../components/BookingOpensBanner';
 import { windowDaysFor } from '../data/packages';
 import { SEASON_BOUNDS, capacityFor, dayLabel } from '../data/season';
 import { DEFAULT_DURATION_MINUTES } from '../data/schedule';
+import { TOUR_EVENT_EXPLAINER } from '../data/tour';
 import { bookingOpen, openThrough, parseTimeToMinutes, todayISO } from '../data/calendar';
 import { buildMonthDayMaps, useMonthNavState } from '../components/MonthCalendar';
 import RepeatWeekly from '../components/RepeatWeekly';
@@ -34,7 +35,7 @@ function formatCapacity(session) {
 }
 
 function displayNameFor(session) {
-  return session.label || (session.type === 'tournament' ? 'Tournament block' : 'Training block');
+  return session.label || (session.type === 'tournament' ? 'Tour event' : 'Training block');
 }
 
 /** First-of-month ISO, shifted by whole months — day-of-month is always 1. */
@@ -309,7 +310,8 @@ export default function BookSession({
           // ("dana@email.com") read as a real notification in the athlete
           // walkthrough (QA 2026-09-08 #9).
           email: practice ? null : data?.confirmation?.email,
-          note: data?.confirmation?.note,
+          // Elite has no token to keep, so its cancel line stops short.
+          note: (tokens?.unlimited && data?.confirmation?.noteUnlimited) || data?.confirmation?.note,
           // For the add-to-calendar template link.
           date: booked.date,
           time: booked.time,
@@ -454,6 +456,8 @@ function DaySessionList({ iso, sessions, tokens, reserving, disabled, onSelect }
           choosing rather than hunting for it. Only when the day actually has a
           suggestion - Fridays, Saturdays and tournament-only days show none. */}
       {sessions.some((s) => s.ageGroup) ? <AgeGroupLegend style={{ margin: '2px 0 8px' }} /> : null}
+      {/* What a Tour event is, on the day a family first meets one to book. */}
+      {sessions.some((s) => s.type === 'tournament') ? <Body size={12}>{TOUR_EVENT_EXPLAINER}</Body> : null}
       {sessions.length === 0 ? (
         <Body size={12}>No sessions are scheduled yet.</Body>
       ) : (

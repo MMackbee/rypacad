@@ -88,7 +88,7 @@ export function ordinal(n) {
 
 const TYPE_LABELS = {
   training: 'Training block',
-  tournament: 'Tournament',
+  tournament: 'Tour event',
   phil: 'Performance session',
   mental: 'Mental game session',
   adult: 'Adult block',

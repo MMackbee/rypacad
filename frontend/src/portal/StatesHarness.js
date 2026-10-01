@@ -137,7 +137,7 @@ export const SCREEN_STATES = [
                  }),
              }],
              ['full', 'Block full'],
-             ['limitTraining', 'Training spent'], ['limitTournament', 'Tournaments spent'],
+             ['limitTraining', 'Training spent'], ['limitTournament', 'Tour events spent'],
              ['confirmed', 'Confirmed'],
              // Sprint 6 pin (TEAM.md, QA #2): a parent gets the child selector
              // above the calendar; an athlete never does.
@@ -211,18 +211,18 @@ export const SCREEN_STATES = [
   { id: '13', title: 'Session Roster & Attendance', Screen: SessionAttendance, role: 'coach',
     states: [['pre', 'Pre-session'], ['progress', 'In progress'], ['complete', 'Completed'],
              ['noshow', 'No-shows'],
-             // Sprint 7 pin (TEAM.md): "Enter results" on a TOURNAMENT
+             // Sprint 7 pin (TEAM.md): "Enter Tour results" on a TOURNAMENT
              // session, now the Sprint 8 SCORE-entry flow (contract v1.6) -
              // a coach types strokes per athlete instead of tapping a
              // finishing order; position derives downstream. `name: null`
-             // so displaySession's own "Tournament block" fallback names it
+             // so displaySession's own "Tour event" fallback names it
              // - no invented event name. Tap through the button to see the
              // score-entry flow; seed mode has no persisted results, so it
              // always opens blank, and every row's bracket chip reads
              // "Open" - `useAthleteBrackets` has no export in this worktree
              // yet (Sprint 8 hook seam, TEAM.md), so Roster.js's inert
              // fallback (`{}`, never fetches) is what's live here.
-             ['pre', 'Tournament · enter scores',
+             ['pre', 'Tour event · enter scores',
                { block: { type: 'tournament', name: null, time: '8:30 AM', date: null, meta: null } }],
              // Sprint 13 pin E: staff-only "Cancel session" - ops/owner see
              // it regardless of live/sessionId (Roster.js's own doc comment
@@ -274,7 +274,7 @@ export const SCREEN_STATES = [
   { id: 'TOUR', title: 'RYP Tour', Screen: TourStandings, role: 'athlete + parent + staff',
     states: [['populated', 'Populated'],
              ['populated', 'Athlete · own bracket + results', { role: 'athlete', athleteId: 'jordan' }],
-             ['empty', 'Before first tournament'],
+             ['empty', 'Before first Tour event'],
              ['loading', 'Loading'], ['error', 'Load failure']] },
   /*
    * Specialist Booking (Sprint 9 pin, TEAM.md, "specialist 1-on-1s") - the
@@ -501,7 +501,7 @@ function ComponentGallery() {
               trailing={<StatusBadge tone="green">Confirmed</StatusBadge>} />
             <SessionCard time="4:00" meridiem="PM" type="training" name="Training block" meta="Sim 2 · Luke"
               variant="live" trailing={<StatusBadge tone="green">Now</StatusBadge>} />
-            <SessionCard time="8:30" meridiem="AM" type="tournament" name="Tournament block"
+            <SessionCard time="8:30" meridiem="AM" type="tournament" name="Tour event"
               meta="Brock · net scoring" variant="tournament" />
             <SessionCard time="5:00" meridiem="PM" type="cancelled" name="Training block" variant="cancelled" />
             <SessionCard time="4:00" meridiem="PM" type="training" name="Training block" meta="Sim 2" variant="full"
@@ -568,7 +568,7 @@ function ComponentGallery() {
           <AllowancePools tokens={TOKENS_GRACE} />
           <GraceLine tokens={TOKENS_GRACE} />
           <div style={{ font: `400 11px/1.5 ${font.body}`, color: color.textTertiary, marginTop: 14 }}>
-            A token is spent by any bookable session now — training, tournament, Phil, Yannick.
+            A token is spent by any bookable session now - training, Tour event, Phil, Yannick.
             Elite shows no number.
           </div>
         </Spec>

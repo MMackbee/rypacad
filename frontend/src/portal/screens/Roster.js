@@ -557,7 +557,7 @@ export function SessionAttendance({ variant = 'pre', bare = false, onBack, sessi
           </div>
         ) : null}
 
-        {/* Sprint 7 pin (TEAM.md): "Enter results" on a TOURNAMENT session
+        {/* Sprint 7 pin (TEAM.md): "Enter Tour results" on a TOURNAMENT session
             only - the block/type info the screen already receives. Never
             time-gated, same as attendance's Start session - a coach may
             legitimately enter or correct results at any point. */}
@@ -569,7 +569,7 @@ export function SessionAttendance({ variant = 'pre', bare = false, onBack, sessi
               style={{ boxShadow: 'none' }}
               onClick={() => setView('results')}
             >
-              {tournamentResults.data?.results?.length ? 'Edit results' : 'Enter results'}
+              {tournamentResults.data?.results?.length ? 'Edit Tour results' : 'Enter Tour results'}
             </Button>
           </div>
         ) : null}
@@ -768,7 +768,7 @@ function ResultsEntry({ bare, session, roster, resultsState, onBack }) {
           <Body size={12} style={{ marginTop: 10 }}>
             {allScored
               ? 'Every athlete has a score.'
-              : "Enter each athlete's strokes. Standings are calculated automatically."}
+              : "Enter each athlete's strokes. Tour standings are calculated automatically."}
           </Body>
         </div>
       }

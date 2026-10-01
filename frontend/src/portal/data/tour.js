@@ -36,6 +36,14 @@ import { differenceInYears, parseISO } from 'date-fns';
 import { addDaysISO, lastSaturdayOnOrBefore, todayISO } from './calendar';
 
 /**
+ * What a Tour event is, in the owner's wording (2026-09-30, tester: "where do
+ * we explain what a tournament block is?"). The one copy - Book a Session
+ * shows it on a day with a Tour event, the Tour tab to a parent or athlete.
+ */
+export const TOUR_EVENT_EXPLAINER =
+  "A Tour event is the academy's Saturday tournament. Coaches record every score, you are ranked in your age bracket (10 & under, 11-13, 14 & up), and points count toward the season standings on the Tour tab. One token per event.";
+
+/**
  * Position (1-indexed) -> points. Index 0 is 1st place.
  *
  * Tuned for a ~25-kid weekly field (owner's sizing, 2026-09-10): the winner
@@ -275,7 +283,7 @@ export function deriveTourStandings(results, { nameById = new Map(), labelById =
   // Events, one per DATE (v1.6.1), most recent first; each event's results
   // sorted bracket order then derived position. The label is any explicit
   // session label among that date's blocks (a holiday special names the
-  // whole weekly event), else the plain 'Tournament block' fallback.
+  // whole weekly event), else the plain 'Tour event' fallback.
   const rawLabelOf = (sessionId) =>
     (labelById.get ? labelById.get(sessionId) : labelById[sessionId]) || null;
   const bracketRank = new Map(BRACKET_ORDER.map((id, i) => [id, i]));
@@ -293,7 +301,7 @@ export function deriveTourStandings(results, { nameById = new Map(), labelById =
     .sort((a, b) => (a.date < b.date ? 1 : a.date > b.date ? -1 : 0))
     .map((ev) => ({
       date: ev.date,
-      label: [...ev.sessionIds].sort().map(rawLabelOf).find(Boolean) || 'Tournament block',
+      label: [...ev.sessionIds].sort().map(rawLabelOf).find(Boolean) || 'Tour event',
       results: ev.rows
         .slice()
         .sort((a, b) => {
@@ -335,7 +343,7 @@ export function deriveTourStandings(results, { nameById = new Map(), labelById =
  * Three past Saturdays (real tournament block time slot, per HOUSEHOLD's
  * "Sat 10:30 AM" tournament entries), computed off today rather than
  * hardcoded, so the demo never shows a "past" tournament in the future.
- * Every event uses the plain 'Tournament block' label — the only invented
+ * Every event uses the plain 'Tour event' label — the only invented
  * per-event names in this codebase are the real holiday specials in
  * data/season.js, and none of those had happened yet as of any of these
  * three dates.
@@ -357,9 +365,9 @@ const TOUR_SEED_NAMES = {
 };
 
 const TOUR_SEED_LABELS = {
-  [`${EVENT_1}-1`]: 'Tournament block',
-  [`${EVENT_2}-1`]: 'Tournament block',
-  [`${EVENT_3}-1`]: 'Tournament block',
+  [`${EVENT_1}-1`]: 'Tour event',
+  [`${EVENT_2}-1`]: 'Tour event',
+  [`${EVENT_3}-1`]: 'Tour event',
 };
 
 // [sessionId, date, athleteId, bracket, score] per row. Nico's field (5 kids

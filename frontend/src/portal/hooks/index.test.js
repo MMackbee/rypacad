@@ -39,7 +39,7 @@ jest.mock('./waitlist', () => ({
 
 import { act } from 'react';
 import { createRoot } from 'react-dom/client';
-import { coachingFor, seedSpecialistDays, useAthleteDetail, useBooking, useMonthSessions, useSpecialistSlots } from './index';
+import { coachingFor, genericSessionName, seedSpecialistDays, useAthleteDetail, useBooking, useMonthSessions, useSpecialistSlots } from './index';
 import * as live from './live';
 import * as signups from './signups';
 import * as waitlist from './waitlist';
@@ -63,6 +63,11 @@ test('seed mental slots are the three 30-minute Yannick times; Phil slots are 45
   expect(mentalDay.slots.map((s) => [s.time, s.durationMinutes])).toEqual([['4:00 PM', 30], ['4:30 PM', 30], ['5:00 PM', 30]]);
   const philDay = seedSpecialistDays('phil', '2026-10-05', 30).find((d) => d.slots.length); // Mon
   expect(philDay.slots.every((s) => s.durationMinutes === 45)).toBe(true);
+});
+
+test('an unnamed tournament-type session reads "Tour event" (owner naming rule 2026-09-30)', () => {
+  expect(genericSessionName('tournament')).toBe('Tour event');
+  expect(genericSessionName('training')).toBe('Training block');
 });
 
 /* ---------------------------- live loaders ---------------------------- */
@@ -247,6 +252,11 @@ describe('live loaders (perf wave B)', () => {
     expect(h.result.current.error).toBeNull();
     expect(h.result.current.bookingFor).toBe('athlete');
     expect(h.result.current.data).toMatchObject({ dates: [], slots: [], seasonNote: null });
+    // Both cancel lines ride the live payload; the screen picks by the booking athlete's tokens.
+    expect(h.result.current.data.confirmation).toMatchObject({
+      note: 'Cancel until the day before the session to keep your token.',
+      noteUnlimited: 'Cancel until the day before the session.',
+    });
     await h.unmount();
   });
 

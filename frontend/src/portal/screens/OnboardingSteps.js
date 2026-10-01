@@ -127,7 +127,7 @@ function PoolsStep() {
       </Card>
       <Card large>
         <Body size={13}>
-          Every session spends one token — training, tournaments, Phil's performance
+          Every session spends one token - training, Tour events, Phil's performance
           sessions and Yannick's mental game sessions alike. Tokens are issued each billing
           period and expire when it ends, and every balance in the portal is that one number.
         </Body>
@@ -271,7 +271,7 @@ export function athleteSteps() {
   const contract = contractEnabled();
   return [
     welcomeStep([
-      'Book training and tournament blocks — every session spends one token from your period.',
+      'Book training blocks and Tour events - every session spends one token from your period.',
       ...(contract
         ? ['Log your Commitment Contract day in one tap.', 'Log your practice minutes and watch your commitment streak build.']
         : []),
@@ -312,9 +312,9 @@ export function parentSteps() {
   const contract = contractEnabled();
   return [
     welcomeStep([
-      'Book training and tournament blocks for your athletes — every session spends one token from that athlete\'s period.',
+      'Book training blocks and Tour events for your athletes - every session spends one token from that athlete\'s period.',
       ...(contract ? ['See each athlete’s Commitment Contract standing at a glance.'] : []),
-      'Follow the RYP Tour — the season leaderboard for Saturday tournaments — and choose exactly how the academy reaches you.',
+      'Follow the RYP Tour - the season leaderboard for Tour events - and choose exactly how the academy reaches you.',
     ]),
     {
       id: 'family',
@@ -322,7 +322,7 @@ export function parentSteps() {
       instruction: {
         title: 'Look at the balances',
         // The Behind badge is contract copy: it and its sentence go while hidden.
-        body: `One card per athlete. Notice Reese: her Tokens row is what she has left this period — every session spends one, and her next one is a tournament.${
+        body: `One card per athlete. Notice Reese: her Tokens row is what she has left this period - every session spends one, and her next one is a Tour event.${
           contract ? ` Her yellow Behind badge means she has missed more than ${BEHIND_BUFFER_DAYS} weekdays of her Commitment Contract this month.` : ''
         }`,
       },
@@ -346,7 +346,7 @@ export function parentSteps() {
       instruction: {
         title: 'Two quick stops',
         body:
-          'The Tour tab is the season leaderboard: every Saturday tournament banks points toward the standings, and the whole academy is on the board. Below it, Notifications is where you choose email or push per category. Scroll through, then continue.',
+          'The Tour tab is the season leaderboard: every Tour event banks points toward the standings, and the whole academy is on the board. Below it, Notifications is where you choose email or push per category. Scroll through, then continue.',
       },
       // The standings are academy-public, the same board for every family.
       // Notifications is the parent's own, so `practice` pins the seed and keeps
