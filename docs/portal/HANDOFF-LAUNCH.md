@@ -232,6 +232,58 @@ the season's first billing month starts on Nov 1:
    for an unpaid (pending) athlete. Either build a prorated upgrade for paid
    members or take "or upgrading" out of the website and FAQ copy.
 
+### 3.6 Before Oct 10 - waitlist hardening (audit 2026-09-30)
+
+A read-only audit of the waitlist (five readers, every finding re-traced by a
+second agent: 51 confirmed, 1 refuted) after Mike's Phil waitlist test. The
+happy path works for training blocks and Phil sessions alike: join, position,
+automatic promotion when a seat is cancelled, the 'promoted' notice, the 06:00
+sweep. None of the problems below is reachable before sessions exist (Nov 3);
+fix them before token booking opens on Oct 10. Distinct issues, worst first:
+
+1. **Past sessions (high).** Nothing stops a booking or a waitlist join on a
+   session that already happened. A join on a past full session can never be
+   promoted, so the next 06:00 sweep mints a bonus token: a free token per
+   past full session. A past session with space books outright and spends a
+   token. Guard in the sweep (no token when `joinedAt` is after the session
+   start), in the rules (lower date bound on booking and waitlist create) and
+   in `createBooking` / `joinWaitlist`; make past days inert on both screens.
+2. **Academy cancels a full session.** Its waitlist entries stay: still
+   "Waitlisted", token held, no notice, until the sweep the day after the
+   session date.
+3. **Promotion skips checks a normal booking makes.** Elite's one-per-type-
+   per-day cap and Yannick's monthly limit are not applied when joining or at
+   promotion; a Phil waitlist at the hour of a held training block promotes
+   into a double booking.
+4. **Bonus tokens.** A bonus token already spent in another period is spent
+   again at promotion and jumps the line (`promotion.js` loadCandidate only
+   reads the session's period). Booking screens ignore waitlist holds and
+   bonus tokens, so a bonus token cannot be spent once period tokens read
+   zero. Elite athletes are minted bonus tokens they cannot use.
+5. **No promotion cutoff.** A family can be auto-booked late the evening
+   before or on the day and cannot cancel. Suggested: no same-day promotion
+   (`session.date <= today`) and say in the notice that a token was used.
+6. **Privacy.** `waitlist` is readable by any signed-in account, and the ids
+   resolve to children's names through `tournamentResults`. Scope the read
+   rule like bookings.
+7. **Counter integrity.** The rules allow booked plus or minus 1 from any
+   signed-in user and do not tie a booking create to the +1, so a hand-made
+   request can skip the line or force a promotion into a full session.
+   Promotion should count real bookings; the rules should pair the writes.
+8. **Raising capacity or un-cancelling promotes nobody.**
+9. **Screens.** "You'll be notified if a spot opens" (the family is booked
+   and charged automatically); an already-waitlisted family is offered "Join
+   waitlist" again and gets a raw permissions error; a failed "Leave
+   waitlist" says nothing; Repeat weekly reports a week as "full" when it
+   actually joined that week's waitlist; the shown position ignores the
+   bonus-token priority.
+10. **Owner ruling needed:** an unfilled waitlist place returns the held token
+    AND mints a bonus token (two for one). Contract 4.2 says so; confirm or
+    change to a replacement only when the period has ended.
+
+Full findings with file:line evidence and fixes: the audit output saved by the
+session (`waitlist-audit.json`); re-run the audit if it is gone.
+
 ## 4. Work in flight
 
 ### 4.1 Month / Week toggle (owner request, must ship before the email)
