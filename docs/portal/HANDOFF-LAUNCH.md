@@ -302,6 +302,34 @@ the first week of the season:
    saying the held token is free again, and no bonus token was created
    (`graceTokens` has no new 'waitlist-expired' doc).
 
+### 3.8 Before Mar 1 - billing must end with the season (owner, 2026-10-01)
+
+Owner ruling: the season ends Sat 2027-02-27 and billing ends with it. The
+website says so ("Monthly on the 1st, ending with the season on February 27,
+2027"; "Nothing continues once the season ends"). The app does not do it yet:
+every membership and facility subscription is created with no end date
+(`functions/portal/checkout.js`, subscription mode, no `cancel_at`), so each
+would charge again on Mar 1, 2027. The last charge that should happen is
+Feb 1 (it pays for February).
+
+Checkout Sessions cannot set `cancel_at`, so this needs one of:
+1. the webhook sets `cancel_at` (Feb 28, 2027) on each subscription when it
+   is created - needs Subscriptions write on the portal's restricted key; or
+2. a one-off run before Mar 1 that sets `cancel_at` on every active
+   subscription (Stripe CLI or a script), plus the same for late joiners.
+Either way the portal should then show the family their end date, and a
+lapse on Feb 28 must not read as a failed payment.
+
+### 3.9 Single tokens open Oct 10 (owner, 2026-10-01)
+
+Owner ruling: single tokens are not available until booking opens, Sat Oct 10
+at 7 AM Chicago, and the purchase must work by then. The built feature
+(branch `single/integration`, section 4.4) is being merged into today's
+develop on branch `single/merge` (worktree `../wt-single-merge`), with the
+sale gated on the booking-open clock so it can deploy early. Still to do
+after the merge: the emulator harnesses, a test-mode rehearsal, then the
+deploy in 4.4's order and one live $65 purchase, refunded.
+
 ## 4. Work in flight
 
 ### 4.1 Month / Week toggle (owner request, must ship before the email)
