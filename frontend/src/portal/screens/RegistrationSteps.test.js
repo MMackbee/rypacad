@@ -309,9 +309,13 @@ test('the consent sheets show the full media terms and facility rules', async ()
     expect(r.text().indexOf(first)).toBeGreaterThan(-1);
     await r.unmount();
   }
-  // The data sheet keeps its access matrix and gains nothing it should not.
+  // The data sheet keeps its access matrix, says what research use covers
+  // (owner 2026-10-01), and gains nothing it should not.
   const d = await renderScreen(<ConsentInfoSheet id="dataCollection" onClose={() => {}} />);
   expect(d.text()).toContain('Owner/Director');
+  expect(d.text()).toContain('Training and performance numbers may also be used in research, with names removed.');
+  expect(d.text()).toContain('Research use');
+  for (const line of CONSENT_TERMS.dataCollection[0].lines) expect(d.text()).toContain(line);
   expect(d.text()).not.toContain('Who may enter');
   await d.unmount();
 });

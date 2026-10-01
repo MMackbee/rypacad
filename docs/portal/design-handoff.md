@@ -104,7 +104,7 @@ After the list, a dashed slot marker: `1px dashed #333`, monospace 400/11px `#6f
 
 Three cards, each with a 26px checkbox (checked: `#00AF51` fill with a CSS tick; unchecked: `1.5px solid #555`), 13px gap, then title 600/14px white, body 400/12px `#CCC` at 1.55 line-height, and a link in 500/12px `#00AF51`:
 
-1. **Data collection** — "Name, date of birth, guardian contact, emergency and medical info, and training records. Collected only where a feature needs it." · "Read what is stored →" · checked
+1. **Data collection** — "Name, date of birth, guardian contact, emergency and medical info, and training records. Collected only where a feature needs it. Training and performance numbers may also be used in research, with names removed." · "Read what is stored →" · checked
 2. **Video capture** — "Multi-angle swing video at the Diagnostic and during training blocks, used for coaching review and benchmarked against your athlete's own progress." · "Read retention policy →" · checked
 3. **Media release** — "Permission to use photos or video of your athlete in RYP marketing. Declining does not affect enrollment or training." · "Read media terms →" · **unchecked**, with a footnote in 500/10px `#F4EE19` uppercase: "Optional — enrollment continues either way"
 

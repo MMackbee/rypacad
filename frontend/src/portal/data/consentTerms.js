@@ -8,6 +8,18 @@
  * paragraph or bullet.
  */
 export const CONSENT_TERMS = {
+  // Owner 2026-10-01 (Phil): research use rides on the Data collection
+  // consent, so the sheet says exactly what that covers.
+  dataCollection: [
+    {
+      heading: 'Research use',
+      lines: [
+        'RYP Academy may use training and performance numbers, such as attendance, fitness results and swing measurements, in research it may publish, on their own or combined with other data the academy collects.',
+        'Names, contact details, dates of birth and anything else that identifies a person are removed first. Video and photos are never published under this consent.',
+        'Ask us in writing at any time and we leave your athlete’s numbers out of any future research.',
+      ],
+    },
+  ],
   videoCapture: [
     {
       heading: 'What we record',
@@ -107,8 +119,10 @@ export const CONSENT_TERMS = {
  * a guardian line and its entry here too - a test fails if a key goes stale.
  */
 export const SELF_WORDING = {
-  'Name, date of birth, guardian contact, emergency and medical info, and training records. Collected only where a feature needs it.':
-    'Your name, date of birth, contact details, emergency and medical info, and training records. Collected only where a feature needs it.',
+  'Name, date of birth, guardian contact, emergency and medical info, and training records. Collected only where a feature needs it. Training and performance numbers may also be used in research, with names removed.':
+    'Your name, date of birth, contact details, emergency and medical info, and training records. Collected only where a feature needs it. Your training and performance numbers may also be used in research, with names removed.',
+  'Ask us in writing at any time and we leave your athlete’s numbers out of any future research.':
+    'Ask us in writing at any time and we leave your numbers out of any future research.',
   'Multi-angle swing video at the Diagnostic and during training blocks, used for coaching review and benchmarked against your athlete’s own progress.':
     'Multi-angle swing video at the Diagnostic and during training blocks, used for coaching review and benchmarked against your own progress.',
   'Permission to use photos or video of your athlete in RYP marketing. Declining does not affect enrollment or training.':
