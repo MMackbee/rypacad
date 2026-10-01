@@ -10,15 +10,21 @@ import Registration from './Registration';
  * checked too. Registration.test.js covers the flag ON, unchanged.
  */
 const mockCalls = [];
+let mockAddError = null;
 // Not `virtual`: see PayButton.test.js.
 jest.mock('../hooks/callables', () => ({
   callCreateFamily: async (payload) => { mockCalls.push(['createFamily', payload]); return { householdId: 'h1', athleteIds: ['a1'] }; },
-  callAddAthletes: async (payload) => { mockCalls.push(['addAthletes', payload]); return { householdId: 'h1', athleteIds: ['a2'] }; },
+  callAddAthletes: async (payload) => {
+    mockCalls.push(['addAthletes', payload]);
+    if (mockAddError) throw mockAddError;
+    return { householdId: 'h1', athleteIds: ['a2'] };
+  },
 }));
 jest.mock('../components/PayButton', () => ({ __esModule: true, default: ({ label }) => <button type="button">{label}</button> }));
 
 beforeEach(() => {
   mockCalls.length = 0;
+  mockAddError = null;
   delete process.env.REACT_APP_CONTRACT_ENABLED;
   window.sessionStorage.clear();
 });
@@ -68,6 +74,33 @@ test('sign-up is 5 steps with no contract anywhere, and sends contractMinutes nu
   await r.unmount();
 });
 
+test('an 18+ athlete signing for themselves reads the consents and sheets about themselves; the payload is unchanged', async () => {
+  const r = await renderScreen(<Registration bare mode="signup" account={{ email: 'sam@email.com' }} onRefresh={async () => {}} />);
+  await r.click("I'm the athlete (18+)");
+  await r.click('Continue');
+  await r.fill('Your name', 'Sam Reed');
+  await r.fill('Mobile', '(612) 555-0177');
+  await r.click('Continue');
+  await r.fill('Athlete name', 'Sam Reed');
+  await r.fill('Date of birth', '2000-01-01');
+  await r.click('Continue');
+  await r.click('12 tokens');
+  await r.click('Continue');
+  expect(r.text()).toContain('Step 5 of 5');
+  expect(r.text()).toContain('benchmarked against your own progress.');
+  expect(r.text()).not.toMatch(/your athlete|Signing as the guardian/);
+  await r.click('Read retention policy →');
+  expect(r.text()).toContain('Multi-angle video of you swinging');
+  await r.click('Close');
+  await r.fill('Type your full legal name', 'Sam Reed');
+  await r.click('Sign and submit');
+  expect(mockCalls[0][1]).toMatchObject({
+    mode: 'athlete', signatureName: 'Sam Reed',
+    consents: { dataCollection: true, videoCapture: true, mediaRelease: false, facilityAccess: false },
+  });
+  await r.unmount();
+});
+
 test('link mode is 2 steps: the package step submits, contractMinutes null', async () => {
   const r = await renderScreen(<Registration bare mode="link" account={{ email: 'dana@email.com' }} />);
   expect(r.text()).toContain('Step 1 of 2');
@@ -82,6 +115,74 @@ test('link mode is 2 steps: the package step submits, contractMinutes null', asy
     emergencyContact: null, medical: null,
   }]);
   await r.unmount();
+});
+
+describe('a refused login email (tester 2026-09-30: it stayed red after Own login went off)', () => {
+  const PENDING = 'That email already has a pending athlete login.';
+  const refusal = (message, reason) => Object.assign(new Error(message), { reason });
+
+  async function submitWithLogin(r) {
+    await r.fill('Athlete name', 'Reese');
+    await r.fill('Date of birth', '2014-03-02');
+    await r.click('Own login?');
+    await r.fill('Login email', 'reese@email.com');
+    await r.click('Continue');
+    await r.click('6 tokens');
+    await r.click('Add athlete');
+  }
+
+  test('clears when Own login goes off or the login email changes, and the next submit sends the new email', async () => {
+    mockAddError = refusal(PENDING, 'child-email-duplicate');
+    const r = await renderScreen(<Registration bare mode="link" account={{ email: 'dana@email.com' }} />);
+    await submitWithLogin(r);
+    expect(r.text()).toContain(PENDING);
+    await r.click('‹ Back');
+    expect(r.text()).toContain(PENDING); // nothing it names has changed yet
+    await r.click('Own login?');
+    expect(r.text()).not.toContain(PENDING);
+    await r.click('Own login?');
+    await r.click('Continue');
+    await r.click('Add athlete');
+    expect(r.text()).toContain(PENDING);
+    await r.click('‹ Back');
+    await r.fill('Login email', 'reese.r@email.com');
+    expect(r.text()).not.toContain(PENDING);
+    mockAddError = null;
+    await r.click('Continue');
+    await r.click('Add athlete');
+    expect(mockCalls).toHaveLength(3);
+    expect(mockCalls[2][1].athletes[0].loginEmail).toBe('reese.r@email.com');
+    await r.unmount();
+  });
+
+  test('any other refusal stays on screen through a login change, until the next submit', async () => {
+    mockAddError = refusal('Sign-up could not be saved. Try again.', 'write-failed');
+    const r = await renderScreen(<Registration bare mode="link" account={{ email: 'dana@email.com' }} />);
+    await submitWithLogin(r);
+    await r.click('‹ Back');
+    await r.click('Own login?');
+    expect(r.text()).toContain('Sign-up could not be saved. Try again.');
+    mockAddError = null;
+    await r.click('Continue');
+    await r.click('Add athlete');
+    expect(r.text()).not.toContain('Sign-up could not be saved. Try again.');
+    await r.unmount();
+  });
+
+  test('removing the athlete with the refused login clears it too', async () => {
+    mockAddError = refusal(PENDING, 'child-email-duplicate');
+    const form = sixStepDraft({ name: 'Reese', ownLogin: true, loginEmail: 'reese@email.com' });
+    form.athletes.push({ ...form.athletes[0], key: 'k2', name: 'Jordan', ownLogin: false, loginEmail: '' });
+    window.sessionStorage.setItem('ryp.signupDraft.link.u-two', JSON.stringify({ v: 1, step: 1, form }));
+    const r = await renderScreen(<Registration bare mode="link" account={{ uid: 'u-two', email: 'dana@email.com' }} />);
+    await r.click('Add athlete');
+    expect(r.text()).toContain(PENDING);
+    await r.click('‹ Back');
+    await r.click('Remove'); // Reese's card is first
+    expect(r.container.querySelector('[aria-label="Athlete name"]').value).toBe('Jordan');
+    expect(r.text()).not.toContain(PENDING);
+    await r.unmount();
+  });
 });
 
 test('a 6-step draft on the old consent step reopens on consent (clamped); its 45 is not sent', async () => {

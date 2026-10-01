@@ -115,7 +115,17 @@ const VIEW_COPY = {
   },
 };
 
-function NotProvisionedBody({ bare, email, view, onStartEnrollment, onCheckAgain, onResend, onSignOut, signingOut }) {
+function NotProvisionedBody({ bare, email, view: current, onStartEnrollment, onCheckAgain, onResend, onSignOut, signingOut }) {
+  // I've verified / Check again re-run the claim, which passes through
+  // 'checking'. Hold the view the tap came from until it returns so
+  // VerifyState and StrangerState stay mounted and keep their note and open
+  // panel (guide 4.3/4.7); the first-load claim still shows the checking card.
+  const [held, setHeld] = useState(null);
+  const view = current === 'checking' && held ? held : current;
+  const recheck = async () => {
+    setHeld(view);
+    try { return onCheckAgain ? await onCheckAgain() : 'none'; } finally { setHeld(null); }
+  };
   const copy = VIEW_COPY[view] || VIEW_COPY.stranger;
   return (
     <PhoneFrame bare={bare}>
@@ -142,13 +152,13 @@ function NotProvisionedBody({ bare, email, view, onStartEnrollment, onCheckAgain
             <Body size={12}>Checking your account…</Body>
           </Card>
         ) : view === 'verify' ? (
-          <VerifyState onResend={onResend} onVerified={onCheckAgain} />
+          <VerifyState onResend={onResend} onVerified={recheck} />
         ) : view === 'already-claimed' ? (
           <Banner tone="yellow" title="Already set up">{ALREADY_CLAIMED}</Banner>
         ) : view === 'legacy' ? (
           onStartEnrollment ? <Button onClick={onStartEnrollment}>{LEGACY_CTA}</Button> : null
         ) : (
-          <StrangerState onStartEnrollment={onStartEnrollment} onCheckAgain={onCheckAgain} />
+          <StrangerState onStartEnrollment={onStartEnrollment} onCheckAgain={recheck} />
         )}
 
         <div style={{ flex: 1, minHeight: 24 }} />

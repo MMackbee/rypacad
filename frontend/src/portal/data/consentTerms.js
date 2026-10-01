@@ -97,3 +97,45 @@ export const CONSENT_TERMS = {
     },
   ],
 };
+
+/**
+ * The 18+ athlete signing for themselves (registration's "I'm the athlete
+ * (18+)", form mode 'athlete') reads the consent rows (data/seed.js
+ * CONSENTS) and the terms above in the second person (tester report
+ * 2026-09-30). Keyed by the guardian wording: a line not listed reads the
+ * same for both, including the rules about minors, which still apply. Edit
+ * a guardian line and its entry here too - a test fails if a key goes stale.
+ */
+export const SELF_WORDING = {
+  'Name, date of birth, guardian contact, emergency and medical info, and training records. Collected only where a feature needs it.':
+    'Your name, date of birth, contact details, emergency and medical info, and training records. Collected only where a feature needs it.',
+  'Multi-angle swing video at the Diagnostic and during training blocks, used for coaching review and benchmarked against your athlete’s own progress.':
+    'Multi-angle swing video at the Diagnostic and during training blocks, used for coaching review and benchmarked against your own progress.',
+  'Permission to use photos or video of your athlete in RYP marketing. Declining does not affect enrollment or training.':
+    'Permission to use photos or video of you in RYP marketing. Declining does not affect enrollment or training.',
+  'Only needed if you add 24/7 facility access to a package. Signing as the guardian also gives permission for an athlete under 18. You can add access later — the academy will ask for this then.':
+    'Only needed if you add 24/7 facility access to a package. Signing as the athlete, you accept the facility rules for yourself. You can add access later - the academy will ask for this then.',
+  'Multi-angle video of your athlete swinging, plus launch-monitor data, at the Diagnostic and during training blocks.':
+    'Multi-angle video of you swinging, plus launch-monitor data, at the Diagnostic and during training blocks.',
+  'Coaches review it with the athlete and compare it against that athlete’s own earlier swings. It is never ranked against other athletes.':
+    'Coaches review it with you and compare it against your own earlier swings. It is never ranked against other athletes.',
+  'Clips are shared inside the portal with the athlete, their parents or guardians, and their coaches. Nothing is posted publicly under this consent.':
+    'Clips are shared inside the portal with you and your coaches. Nothing is posted publicly under this consent.',
+  'Video stays for the length of the membership plus 12 months, so an athlete who returns can see their progress.':
+    'Video stays for the length of the membership plus 12 months, so if you return you can see your progress.',
+  'Ask us in writing at any time and we delete an athlete’s video within 30 days, except clips a coach has already attached to a written diagnostic, which are kept with that record.':
+    'Ask us in writing at any time and we delete your video within 30 days, except clips a coach has already attached to a written diagnostic, which are kept with that record.',
+  'RYP Academy may use photos and video of your athlete taken at the academy, at academy events and at tournaments we attend.':
+    'RYP Academy may use photos and video of you taken at the academy, at academy events and at tournaments we attend.',
+  'This is optional. Declining changes nothing about enrollment, training or how coaches treat your athlete.':
+    'This is optional. Declining changes nothing about enrollment, training or how coaches treat you.',
+  'Access is for the named athlete only. The entry code or key is personal and must not be shared or lent, including to teammates.':
+    'Access is for you only. The entry code or key is personal and must not be shared or lent, including to teammates.',
+  'By signing, you accept that risk for yourself, or for the athlete you are responsible for, and agree that the academy is not liable for injury or loss during unsupervised use except where caused by the academy’s own negligence.':
+    'By signing, you accept that risk for yourself and agree that the academy is not liable for injury or loss during unsupervised use except where caused by the academy’s own negligence.',
+};
+
+/** A consent row or terms line as `mode` reads it: 'athlete' gets SELF_WORDING, anyone else the text unchanged. */
+export function consentWording(text, mode) {
+  return mode === 'athlete' ? SELF_WORDING[text] ?? text : text;
+}

@@ -127,7 +127,7 @@ export default function Registration({ variant, bare = false, mode = 'signup', a
   const [showErrors, setShowErrors] = useState(false);
   const [errorTick, setErrorTick] = useState(0); // bumps on every invalid Continue
   const contentRef = useRef(null);
-  const [submitError, setSubmitError] = useState(null);
+  const [submitError, setSubmitError] = useState(null); // { message, reason } of the last refused submit
   const [infoSheet, setInfoSheet] = useState(null);
   const [result, setResult] = useState(demo ? { householdId: 'demo', athleteIds: ['demo-1'] } : null);
 
@@ -163,9 +163,20 @@ export default function Registration({ variant, bare = false, mode = 'signup', a
   const setContact = (fn) => setForm((f) => ({ ...f, contact: typeof fn === 'function' ? fn(f.contact) : fn }));
   const setConsents = (fn) => setForm((f) => ({ ...f, consents: typeof fn === 'function' ? fn(f.consents) : fn }));
   const setEmergency = (p) => setForm((f) => ({ ...f, emergencyContact: { ...toEmergencyForm(f.emergencyContact), ...p } }));
-  const updateAthlete = (key, p) => setForm((f) => ({ ...f, athletes: f.athletes.map((a) => (a.key === key ? { ...a, ...p } : a)) }));
+  // A refused login email (the function's child-email-* reasons: pending,
+  // already a login, the guardian's own) is stale once that login changes, so
+  // it clears then, not only on the next submit (tester 2026-09-30: it stayed
+  // red after Own login went off). Any other refusal stays until the submit.
+  const clearLoginRefusal = () => setSubmitError((e) => (e && /^child-email-/.test(e.reason || '') ? null : e));
+  const updateAthlete = (key, p) => {
+    if ('ownLogin' in p || 'loginEmail' in p) clearLoginRefusal();
+    setForm((f) => ({ ...f, athletes: f.athletes.map((a) => (a.key === key ? { ...a, ...p } : a)) }));
+  };
   const addAthlete = () => setForm((f) => ({ ...f, athletes: [...f.athletes, newAthleteEntry()] }));
-  const removeAthlete = (key) => setForm((f) => ({ ...f, athletes: f.athletes.length > 1 ? f.athletes.filter((a) => a.key !== key) : f.athletes }));
+  const removeAthlete = (key) => {
+    if (form.athletes.length > 1 && form.athletes.find((a) => a.key === key)?.ownLogin) clearLoginRefusal();
+    setForm((f) => ({ ...f, athletes: f.athletes.length > 1 ? f.athletes.filter((a) => a.key !== key) : f.athletes }));
+  };
   const switchToParent = () => { patch({ mode: 'parent' }); setStep(0); setShowErrors(false); };
   const setMode = (m) => setForm((f) => ({ ...f, mode: m, athletes: m === 'athlete' ? f.athletes.slice(0, 1) : f.athletes }));
 
@@ -247,7 +258,10 @@ export default function Registration({ variant, bare = false, mode = 'signup', a
       }
       submitting.current = false;
       setPhase('form');
-      setSubmitError(err && typeof err.message === 'string' && err.message ? err.message : 'Sign-up could not be saved. Try again.');
+      setSubmitError({
+        message: err && typeof err.message === 'string' && err.message ? err.message : 'Sign-up could not be saved. Try again.',
+        reason: (err && err.reason) || null,
+      });
     }
   };
   // Leaving the receipt: flip `provisioned` now (the route lands the role's
@@ -274,7 +288,7 @@ export default function Registration({ variant, bare = false, mode = 'signup', a
       header={<StepHeader step={step} steps={steps} onBack={goBack} />}
       footer={
         <div style={{ borderTop: `1px solid ${color.frameRule}`, padding: '14px 22px 22px' }}>
-          {submitError || fixNote ? <Body size={12} tone={color.error} style={{ marginBottom: 10, textAlign: 'center' }}>{submitError || fixNote}</Body> : null}
+          {submitError || fixNote ? <Body size={12} tone={color.error} style={{ marginBottom: 10, textAlign: 'center' }}>{submitError ? submitError.message : fixNote}</Body> : null}
           {/* Never disabled for an invalid step: the tap is what reveals which
               field needs fixing (handleContinue sets showErrors). A greyed-out
               button with no message stranded parents (launch test 2026-09-29). */}
@@ -303,7 +317,7 @@ export default function Registration({ variant, bare = false, mode = 'signup', a
         ) : null}
       </div>
       {phase === 'submitting' ? <SubmittingOverlay mode={mode} /> : null}
-      {infoSheet ? <ConsentInfoSheet id={infoSheet} onClose={() => setInfoSheet(null)} /> : null}
+      {infoSheet ? <ConsentInfoSheet id={infoSheet} mode={form.mode} onClose={() => setInfoSheet(null)} /> : null}
     </PhoneFrame>
   );
 }

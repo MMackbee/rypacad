@@ -2,7 +2,8 @@ import React from 'react';
 import { format, parseISO } from 'date-fns';
 import { renderScreen } from './testRender';
 import { AthleteStep, ConsentInfoSheet, ConsentStep, ContractStep, PackageStep, WhoStep } from './RegistrationSteps';
-import { CONSENT_TERMS } from '../data/consentTerms';
+import { CONSENT_TERMS, SELF_WORDING } from '../data/consentTerms';
+import { CONSENTS } from '../data/seed';
 import { emptyEmergencyContact, newAthleteEntry } from '../data/signup';
 import { SEASON_BOUNDS } from '../data/season';
 import { SINGLE_ON_SALE } from '../data/packages';
@@ -313,4 +314,55 @@ test('the consent sheets show the full media terms and facility rules', async ()
   expect(d.text()).toContain('Owner/Director');
   expect(d.text()).not.toContain('Who may enter');
   await d.unmount();
+});
+
+// Tester report 2026-09-30: an 18+ athlete signing for themselves read
+// guardian wording ("your athlete's progress", "Signing as the guardian").
+const GUARDIAN_WORDING = /your athlete|that athlete|an athlete’s|named athlete|parents or guardians|athlete you are responsible for|Signing as the guardian|guardian contact/;
+
+test('consent rows: the adult athlete reads them about themselves; the guardian rows are unchanged', async () => {
+  const props = { consents: { dataCollection: true, videoCapture: true }, onChange: () => {}, signatureName: '', onSignatureChange: () => {}, onOpenInfo: () => {}, showErrors: false };
+  const a = await renderScreen(<ConsentStep mode="athlete" {...props} />);
+  expect(a.text()).toContain('Your name, date of birth, contact details, emergency and medical info, and training records.');
+  expect(a.text()).toContain('benchmarked against your own progress.');
+  expect(a.text()).toContain('Permission to use photos or video of you in RYP marketing.');
+  expect(a.text()).toContain('Signing as the athlete, you accept the facility rules for yourself.');
+  expect(a.text()).not.toMatch(GUARDIAN_WORDING);
+  await a.unmount();
+  const p = await renderScreen(<ConsentStep mode="parent" {...props} />);
+  for (const consent of CONSENTS) expect(p.text()).toContain(consent.body);
+  await p.unmount();
+});
+
+test('consent sheets: the adult athlete reads every sheet about themselves; rules about minors stay', async () => {
+  for (const id of ['dataCollection', 'videoCapture', 'mediaRelease', 'facilityAccess']) {
+    const a = await renderScreen(<ConsentInfoSheet id={id} mode="athlete" onClose={() => {}} />);
+    expect(a.text()).not.toMatch(GUARDIAN_WORDING);
+    for (const section of CONSENT_TERMS[id] || []) expect(a.text()).toContain(section.heading);
+    await a.unmount();
+    // The guardian sheet keeps every line as written.
+    const p = await renderScreen(<ConsentInfoSheet id={id} mode="parent" onClose={() => {}} />);
+    for (const section of CONSENT_TERMS[id] || []) for (const line of section.lines) expect(p.text()).toContain(line);
+    await p.unmount();
+  }
+  const video = await renderScreen(<ConsentInfoSheet id="videoCapture" mode="athlete" onClose={() => {}} />);
+  expect(video.text()).toContain('Multi-angle video of you swinging, plus launch-monitor data');
+  expect(video.text()).toContain('Clips are shared inside the portal with you and your coaches.');
+  await video.unmount();
+  const media = await renderScreen(<ConsentInfoSheet id="mediaRelease" mode="athlete" onClose={() => {}} />);
+  expect(media.text()).toContain('or how coaches treat you.');
+  expect(media.text()).toContain('We never publish a last name, school, or contact details of an athlete under 18.');
+  await media.unmount();
+  const facility = await renderScreen(<ConsentInfoSheet id="facilityAccess" mode="athlete" onClose={() => {}} />);
+  expect(facility.text()).toContain('Access is for you only.');
+  expect(facility.text()).toContain('An athlete under 16 must be accompanied by a parent, guardian or an adult the guardian has named to the academy in writing.');
+  await facility.unmount();
+});
+
+test('every adult rewording still matches a guardian line, so editing one cannot silently drop it', () => {
+  const guardian = [...CONSENTS.map((c) => c.body), ...Object.values(CONSENT_TERMS).flat().flatMap((s) => s.lines)];
+  for (const [from, to] of Object.entries(SELF_WORDING)) {
+    expect(guardian).toContain(from);
+    expect(to).not.toMatch(GUARDIAN_WORDING);
+  }
 });

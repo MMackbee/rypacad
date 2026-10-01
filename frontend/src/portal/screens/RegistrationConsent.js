@@ -4,7 +4,7 @@ import Button from '../components/Button';
 import Field from '../components/Field';
 import { Body, Card, ScreenTitle, Tick } from '../components/Primitives';
 import { useEnrollmentForm } from '../hooks';
-import { CONSENT_TERMS } from '../data/consentTerms';
+import { CONSENT_TERMS, consentWording } from '../data/consentTerms';
 import { FACILITY_WAIVER_FOOTNOTE, FACILITY_WAIVER_REQUIRED } from '../data/signup';
 
 /**
@@ -13,7 +13,9 @@ import { FACILITY_WAIVER_FOOTNOTE, FACILITY_WAIVER_REQUIRED } from '../data/sign
  * under 500 lines (the plan's cut plus the new athlete fields ran to 586).
  * RegistrationSteps.js re-exports ConsentStep and ConsentInfoSheet, so
  * Registration.js imports every step from one module as before. The
- * components themselves are the Sprint 10 code, with the adult copy variant.
+ * components themselves are the Sprint 10 code, with the adult copy variant:
+ * `mode` 'athlete' (the 18+ self sign-up) reads every row and sheet in the
+ * second person via consentWording (data/consentTerms.js).
  * `facilityRequired` (an athlete kept the facility add-on on the package
  * step, owner 2026-09-30) makes the optional facility waiver required: its
  * footnote says why, and the error says how to get past it either way.
@@ -49,7 +51,7 @@ export function ConsentStep({ mode, consents, onChange, signatureName, onSignatu
             <div style={{ flex: 1, minWidth: 0 }}>
               <div style={{ font: `600 14px ${font.body}`, color: color.text }}>{consent.title}</div>
               <Body size={12} style={{ marginTop: 6 }}>
-                {consent.body}
+                {consentWording(consent.body, mode)}
               </Body>
               <button
                 type="button"
@@ -160,7 +162,7 @@ const CONSENT_INFO = {
   mediaRelease: { title: 'Media terms', extra: null },
 };
 
-export function ConsentInfoSheet({ id, onClose }) {
+export function ConsentInfoSheet({ id, mode, onClose }) {
   const { data } = useEnrollmentForm();
   const consent = (data?.consents ?? []).find((c) => c.id === id);
   const info = CONSENT_INFO[id] || { title: 'What is stored', extra: null };
@@ -184,7 +186,7 @@ export function ConsentInfoSheet({ id, onClose }) {
       >
         <ScreenTitle size={19}>{info.title}</ScreenTitle>
         <Body size={12} style={{ marginTop: 10 }}>
-          {consent?.body}
+          {consentWording(consent?.body, mode)}
         </Body>
         {info.extra}
         {/* The full terms (data/consentTerms.js), section by section. */}
@@ -192,7 +194,7 @@ export function ConsentInfoSheet({ id, onClose }) {
           <div key={section.heading} style={{ marginTop: 14 }}>
             <div style={{ font: `600 12px ${font.body}`, color: color.text }}>{section.heading}</div>
             {section.lines.map((line) => (
-              <Body key={line} size={12} style={{ marginTop: 6 }}>{line}</Body>
+              <Body key={line} size={12} style={{ marginTop: 6 }}>{consentWording(line, mode)}</Body>
             ))}
           </div>
         ))}
