@@ -41,6 +41,7 @@ jest.mock('./screens/NotificationPreferences', () => mockScreen('NotificationPre
 jest.mock('./screens/Reservations', () => mockScreen('Reservations'));
 jest.mock('./screens/AdminDashboard', () => mockScreen('AdminDashboard'));
 jest.mock('./screens/AdminSignups', () => mockScreen('AdminSignups'));
+jest.mock('./screens/AdminScholarships', () => mockScreen('AdminScholarships'));
 jest.mock('./screens/StaffRoles', () => mockScreen('StaffRoles'));
 jest.mock('./screens/TourStandings', () => mockScreen('TourStandings'));
 jest.mock('./screens/SpecialistDay', () => mockScreen('SpecialistDay'));
@@ -133,6 +134,16 @@ test('a parent landing on family warms the likely next screens after 2.5 s', asy
   expect(mockLoaded.has('CommitmentContract')).toBe(false);
   expect(mockLoaded.has('SeasonSchedule')).toBe(false);
   expect(mockLoaded.has('OnboardingFlow')).toBe(false);
+});
+
+// Scholarships is the owner's alone (2026-10-01). The warm-up runs before the
+// role is known, so the Admin landing never fetches that chunk for ops.
+test('the admin landing warms its next screens, never the owner-only Scholarships chunk', async () => {
+  await mount('/portal/admin');
+  await advance(2500);
+  expect(mockLoaded.has('AdminSignups')).toBe(true);
+  expect(mockLoaded.has('StaffRoles')).toBe(true);
+  expect(mockLoaded.has('AdminScholarships')).toBe(false);
 });
 
 // Commitment Contract hidden (owner ruling 2026-09-30): its chunk is never

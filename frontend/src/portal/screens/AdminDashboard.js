@@ -8,6 +8,7 @@ import PhoneFrame from '../components/PhoneFrame';
 import StatusBadge from '../components/StatusBadge';
 import { Body, Card, ScreenTitle, SectionLabel, SignOutButton } from '../components/Primitives';
 import HouseholdsCard from '../components/HouseholdsCard';
+import ScholarshipsCard from '../components/ScholarshipsCard';
 import { useAdminDashboard } from '../hooks';
 import { contractEnabled } from '../data/contractFlag';
 
@@ -71,6 +72,10 @@ const useSignups = hooks.useSignups || useSignupsFallback;
  *   defaults to 'owner' (the superset) only for the harness/an un-wired
  *   caller - see the sprint report.
  * @param {() => void} [onSignOut]  Hidden when not supplied (harness/demo).
+ * @param {() => void} [onOpenScholarships]  2026-10-01: the Scholarship
+ *   applications card (components/ScholarshipsCard.js) mounts only with this
+ *   AND role 'owner'. The route supplies it once the session is known to be
+ *   an owner's; ops never mounts the card, so never makes its read.
  * @param {object} [demoMembership]  HARNESS-ONLY (Sprint 13, contract v2.1) —
  *   overrides the Membership card's data. useAdminDashboard's seed branch
  *   does not produce a `membership` field in this worktree yet (routing
@@ -84,6 +89,7 @@ export default function AdminDashboard({
   onOpenAthlete,
   onOpenHousehold,
   onOpenSignups,
+  onOpenScholarships,
   demoMembership,
 }) {
   const { data } = useAdminDashboard();
@@ -146,6 +152,9 @@ export default function AdminDashboard({
       <div style={{ padding: '0 22px 24px', display: 'flex', flexDirection: 'column', gap: 12 }}>
         <OutstandingCard items={outstanding} onOpenAthlete={onOpenAthlete} />
         <SignupsCard onOpenSignups={onOpenSignups} />
+        {/* Owner only (2026-10-01): mounting the card is the read, which the
+            rules refuse to ops. */}
+        {role === 'owner' && onOpenScholarships ? <ScholarshipsCard onOpen={onOpenScholarships} /> : null}
         <MetricGrid metrics={metrics} />
         <MembershipCard membership={demoMembership ?? data?.membership} />
         {/* Sprint 17 (contract v2.5): every household -> its staff billing
