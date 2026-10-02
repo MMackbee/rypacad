@@ -3,9 +3,10 @@
  * screen of the portal"). The public website's form posts to the
  * submitScholarship function, which stores one doc per family + athlete +
  * season at scholarshipApplications/{id}; this file is the portal's side:
- * the owner's read of them and the one client write, the decision.
+ * the owner's read of them and the two client writes, the decision and the
+ * delete.
  *
- * OWNER ONLY. firestore.rules grants the read and the decision to
+ * OWNER ONLY. firestore.rules grants the read, the decision and the delete to
  * users/{uid}.role == 'owner' and to nobody else - the docs hold a child's
  * name and date of birth and a family's finances - so only an owner's screen
  * may mount useScholarships(): mounting it IS the read. AdminDashboard shows
@@ -21,7 +22,7 @@ import { bump, useInvalidation } from './invalidate';
 import useSeedResource from './useSeedResource';
 import { SCHOLARSHIP_STATUSES, scholarshipCounts, sortScholarships } from '../data/scholarships';
 
-/** The invalidation key: a decision bumps it, and every mounted useScholarships() reads again. */
+/** The invalidation key: a decision or a delete bumps it, and every mounted useScholarships() reads again. */
 export const SCHOLARSHIPS_KEY = 'scholarshipApplications';
 
 /**
@@ -63,6 +64,12 @@ export async function fetchScholarshipApplications() {
  * (Omitted, the check is skipped.) The transaction's write is the same three
  * fields, so the rule is unchanged.
  *
+ * The same read finds an application that is NO LONGER THERE - the owner
+ * deleted it in another tab (deleteScholarship below) while this list still
+ * showed it. Nothing is written and it rejects with reason 'gone'; that
+ * refusal bumps the key as well, for the same reason: the row on screen is
+ * not what is stored, and without a fresh read every retry would fail alike.
+ *
  * Demo (seed) mode writes nothing and resolves, like every other write off
  * the live flag.
  */
@@ -84,7 +91,7 @@ export async function decideScholarship({ id, status, updatedAtMs } = {}) {
     await runTransaction(db, async (tx) => {
       const snap = await tx.get(ref);
       if (!snap.exists()) {
-        throw new LiveDataError(ERR.NOT_FOUND, 'decideScholarship: no such application.');
+        throw new LiveDataError(ERR.NOT_FOUND, 'decideScholarship: no such application.', null, 'gone');
       }
       if (updatedAtMs !== undefined && snap.data().updatedAtMs !== updatedAtMs) {
         throw new LiveDataError(ERR.INVALID, 'decideScholarship: the application was sent again after it was read.', null, 'resubmitted');
@@ -92,11 +99,56 @@ export async function decideScholarship({ id, status, updatedAtMs } = {}) {
       tx.update(ref, decision);
     });
   } catch (err) {
-    if (err instanceof LiveDataError && err.reason === 'resubmitted') bump(SCHOLARSHIPS_KEY);
+    if (err instanceof LiveDataError && ['resubmitted', 'gone'].includes(err.reason)) bump(SCHOLARSHIPS_KEY);
     throw wrap(err, 'decideScholarship');
   }
   bump(SCHOLARSHIPS_KEY);
   return { id, status };
+}
+
+/**
+ * Delete one application for good (owner, 2026-10-01: the website's privacy
+ * page tells a family "Ask us to delete yours at any time"). The whole doc,
+ * in one delete - firestore.rules admits it from an owner and from nobody
+ * else. Then bumps the key so the list and the dashboard count read again.
+ * A refused or failed delete rejects and bumps nothing: the application is
+ * still there.
+ *
+ * No read first, unlike the decision, so the delete carries no condition:
+ * whatever is stored under the id goes, and a delete of a doc that is
+ * ALREADY GONE (deleted in another tab) commits like any other - it is
+ * done, not an error.
+ *
+ * It still runs in a transaction, for one reason: a transaction is sent now
+ * or it fails. A bare deleteDoc on a device that is offline neither lands
+ * nor fails - it waits in the SDK and is sent when the connection returns,
+ * which for a delete that cannot be undone could be long after the owner
+ * gave up on it. This one either deletes or says it did not.
+ *
+ * It deletes the doc and nothing else. The copy submitScholarship emailed to
+ * the director is in a mailbox, out of this app's reach; the screen says so
+ * before it calls this. If the family sends the form again afterwards, the
+ * function finds no doc and stores a new application, status 'new'.
+ *
+ * Demo (seed) mode deletes nothing and resolves, like every other write off
+ * the live flag.
+ */
+export async function deleteScholarship({ id } = {}) {
+  if (!id || typeof id !== 'string') {
+    throw new LiveDataError(ERR.INVALID, 'deleteScholarship: id is required.');
+  }
+  if (!isLive()) return { id, simulated: true };
+  requireUser();
+  const ref = doc(db, 'scholarshipApplications', id);
+  try {
+    await runTransaction(db, async (tx) => {
+      tx.delete(ref);
+    });
+  } catch (err) {
+    throw wrap(err, 'deleteScholarship');
+  }
+  bump(SCHOLARSHIPS_KEY);
+  return { id };
 }
 
 async function liveScholarships() {

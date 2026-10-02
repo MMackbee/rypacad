@@ -1,5 +1,5 @@
 import {
-  SCHOLARSHIP_FILTERS, ageOn, athleteLine, decisionActions, emailStatusLabel, emptyCopy, filterScholarships, guardianLine, mailtoHref, requestLine,
+  SCHOLARSHIP_FILTERS, ageOn, athleteLine, decisionActions, deleteWarnings, emailStatusLabel, emptyCopy, filterScholarships, guardianLine, mailtoHref, requestLine,
   scholarshipCounts, sentLine, sortScholarships, statusOf, submissionsLabel, submittedLabel, telHref, updatedSinceDecision,
 } from './scholarships';
 
@@ -92,6 +92,19 @@ test('the three decisions keep their order whatever the status; the one the appl
   expect(decisionActions({ status: 'paid' }).map(([, , current]) => current)).toEqual([false, false, true]);
   // No button ever moves: the same status sits in the same place for every application.
   for (const status of ['new', 'approved', 'declined']) expect(decisionActions({ status }).map(([s]) => s)).toEqual(['approved', 'declined', 'new']);
+});
+
+test('before a delete: it cannot be undone, and the emailed copies are not deleted - whoever the application is for', () => {
+  const email = "Copies emailed to the director are not deleted. Delete them from the academy's email by hand.";
+  expect(deleteWarnings({ athlete: ' Sam Hart ' })).toEqual(["Sam Hart's application will be deleted from the portal. This cannot be undone.", email]);
+  // No name to restate: both warnings are still said.
+  for (const app of [{ athlete: '   ' }, { athlete: 7 }, {}, null, undefined]) {
+    expect(deleteWarnings(app)).toEqual(['This application will be deleted from the portal. This cannot be undone.', email]);
+  }
+  // The same two warnings whatever the status, and whether or not the last email went out: earlier ones may have.
+  for (const extra of [{ status: 'approved' }, { status: 'declined' }, { email_status: 'failed' }, { submissions: 3 }]) {
+    expect(deleteWarnings({ athlete: 'Sam Hart', ...extra })).toEqual(deleteWarnings({ athlete: 'Sam Hart' }));
+  }
 });
 
 test('empty copy: nothing at all, or nothing under this filter', () => {

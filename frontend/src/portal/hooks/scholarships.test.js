@@ -1,8 +1,9 @@
 /**
- * hooks/scholarships.js: the owner's read of scholarshipApplications and the
- * decision write. The write's shape is the contract with firestore.rules
- * (scholarshipDecisionOk; scripts/verify-rules.mjs taskScholarship), so it
- * is pinned field for field here.
+ * hooks/scholarships.js: the owner's read of scholarshipApplications, the
+ * decision write and the delete. Each write's shape is the contract with
+ * firestore.rules (scholarshipDecisionOk and the delete clause;
+ * scripts/verify-rules.mjs taskScholarship), so the decision is pinned field
+ * for field here and the delete as the one plain delete it is.
  */
 import React, { act } from 'react';
 import { createRoot } from 'react-dom/client';
@@ -20,8 +21,11 @@ jest.mock('firebase/firestore', () => ({
     return { docs: Object.entries(mockStore[ref.col] ?? {}).map(([id, data]) => ({ id, data: () => data })) };
   },
   // The decision is one transaction: a read of the doc, then the update. The update is recorded as { ref, patch }.
+  // The delete is one too, with no read: it is recorded as the ref it deletes and, like Firestore's own, does not ask
+  // whether the doc is there - deleting one that is not commits all the same.
   runTransaction: async (_db, run) => {
     const updates = [];
+    const deletes = [];
     await run({
       get: async (ref) => {
         mockTxReads.push(`${ref.col}/${ref.id}`);
@@ -29,9 +33,12 @@ jest.mock('firebase/firestore', () => ({
         return { exists: () => data !== undefined, data: () => data };
       },
       update: (ref, patch) => { updates.push({ ref, patch }); },
+      delete: (ref) => { deletes.push(ref); },
     });
     mockWrites.push(...updates);
+    mockDeletes.push(...deletes);
     if (mockWriteError) throw mockWriteError;
+    for (const ref of deletes) delete (mockStore[ref.col] ?? {})[ref.id];
   },
 }));
 jest.mock('./invalidate', () => ({ __esModule: true, bump: jest.fn(), useInvalidation: () => 0 }));
@@ -39,12 +46,13 @@ jest.mock('./invalidate', () => ({ __esModule: true, bump: jest.fn(), useInvalid
 import { auth } from '../../firebase';
 import { ERR } from './live';
 import { bump } from './invalidate';
-import useScholarships, { SCHOLARSHIPS_KEY, decideScholarship, fetchScholarshipApplications } from './scholarships';
+import useScholarships, { SCHOLARSHIPS_KEY, decideScholarship, deleteScholarship, fetchScholarshipApplications } from './scholarships';
 
 let mockStore;
 let mockReads;
 let mockTxReads;
 let mockWrites;
+let mockDeletes;
 let mockReadError;
 let mockWriteError;
 
@@ -60,6 +68,7 @@ beforeEach(() => {
   mockReads = [];
   mockTxReads = [];
   mockWrites = [];
+  mockDeletes = [];
   mockReadError = null;
   mockWriteError = null;
   mockStore = {
@@ -122,10 +131,21 @@ describe('decideScholarship writes exactly what the rule admits', () => {
     expect(mockWrites[1]).toEqual({ ref: { col: 'scholarshipApplications', id: 'newest' }, patch: { status: 'declined', decidedBy: 'owner-1', decidedAt: 'SERVER_TIME' } });
   });
 
-  test('an application that is no longer there: not found, nothing written, nothing reloaded', async () => {
-    expect(await caught(decideScholarship({ id: 'gone', status: 'approved', updatedAtMs: 300 }))).toMatchObject({ code: ERR.NOT_FOUND });
+  // Until the owner could delete, a doc could not disappear, and this refusal reloaded nothing. Now it can (another tab),
+  // and a list that still shows it would fail the same way on every retry: the refusal reloads, as 'resubmitted' does.
+  test("an application that is no longer there: not found with reason 'gone', nothing written, and the list reloads", async () => {
+    expect(await caught(decideScholarship({ id: 'gone', status: 'approved', updatedAtMs: 300 }))).toMatchObject({ code: ERR.NOT_FOUND, reason: 'gone' });
     expect(mockWrites).toEqual([]);
-    expect(bump).not.toHaveBeenCalled();
+    expect(bump.mock.calls).toEqual([[SCHOLARSHIPS_KEY]]);
+    // The same for one this owner deleted a moment ago, whatever the decision and with or without a version.
+    await deleteScholarship({ id: 'newest' });
+    for (const args of [{ status: 'approved', updatedAtMs: 300 }, { status: 'declined' }, { status: 'new', updatedAtMs: 300 }]) {
+      expect(await caught(decideScholarship({ id: 'newest', ...args }))).toMatchObject({ code: ERR.NOT_FOUND, reason: 'gone' });
+    }
+    expect(mockWrites).toEqual([]);
+    expect(Object.keys(mockStore.scholarshipApplications)).toEqual(['older', 'middle']);
+    // One reload for the first refusal, one for the delete, one for each refusal after it.
+    expect(bump.mock.calls).toEqual(Array(5).fill([SCHOLARSHIPS_KEY]));
   });
 
   test("reopen: status 'new', decidedBy and decidedAt removed", async () => {
@@ -163,6 +183,60 @@ describe('decideScholarship writes exactly what the rule admits', () => {
     auth.currentUser = null;
     await expect(decideScholarship({ id: 'newest', status: 'approved' })).resolves.toEqual({ id: 'newest', status: 'approved', simulated: true });
     expect(mockWrites).toEqual([]);
+    expect(bump).not.toHaveBeenCalled();
+  });
+});
+
+describe('deleteScholarship is one delete of the whole application, with no condition on it', () => {
+  test('that document and no other: no read first, no update, then the key is bumped', async () => {
+    await expect(deleteScholarship({ id: 'middle' })).resolves.toEqual({ id: 'middle' });
+    expect(mockDeletes).toEqual([{ col: 'scholarshipApplications', id: 'middle' }]);
+    // Nothing is read to decide whether to delete, so nothing can make the delete conditional; no field is written.
+    expect(mockTxReads).toEqual([]);
+    expect(mockReads).toEqual([]);
+    expect(mockWrites).toEqual([]);
+    expect(bump.mock.calls).toEqual([[SCHOLARSHIPS_KEY]]);
+    // The next read (the list, and the dashboard card's count) no longer has it.
+    expect((await fetchScholarshipApplications()).map((r) => r.id)).toEqual(['older', 'newest']);
+  });
+
+  test('already gone (deleted in another tab): the same delete, done, and the list reloads - never an error', async () => {
+    await deleteScholarship({ id: 'middle' });
+    await expect(deleteScholarship({ id: 'middle' })).resolves.toEqual({ id: 'middle' });
+    await expect(deleteScholarship({ id: 'never-there' })).resolves.toEqual({ id: 'never-there' });
+    expect(mockDeletes.map((ref) => ref.id)).toEqual(['middle', 'middle', 'never-there']);
+    expect(mockTxReads).toEqual([]);
+    expect(bump.mock.calls).toEqual([[SCHOLARSHIPS_KEY], [SCHOLARSHIPS_KEY], [SCHOLARSHIPS_KEY]]);
+  });
+
+  test('no id: refused here, nothing deleted', async () => {
+    for (const args of [{}, { id: '' }, { id: 7 }, { id: null }, undefined]) {
+      expect(await caught(deleteScholarship(args))).toMatchObject({ code: ERR.INVALID });
+    }
+    expect(mockDeletes).toEqual([]);
+    expect(bump).not.toHaveBeenCalled();
+  });
+
+  test('a refused or failed delete rejects with the typed error, deletes nothing and reloads nothing', async () => {
+    mockWriteError = denied();
+    expect(await caught(deleteScholarship({ id: 'newest' }))).toMatchObject({ code: ERR.PERMISSION });
+    mockWriteError = Object.assign(new Error('offline'), { code: 'unavailable' });
+    expect(await caught(deleteScholarship({ id: 'newest' }))).toMatchObject({ code: ERR.UNAVAILABLE });
+    expect(Object.keys(mockStore.scholarshipApplications)).toEqual(['older', 'newest', 'middle']);
+    expect(bump).not.toHaveBeenCalled();
+  });
+
+  test('signed out: refused before any delete', async () => {
+    auth.currentUser = null;
+    expect(await caught(deleteScholarship({ id: 'newest' }))).toMatchObject({ code: ERR.UNAUTHENTICATED });
+    expect(mockDeletes).toEqual([]);
+  });
+
+  test('demo (seed) mode: resolves, deletes nothing, reloads nothing', async () => {
+    delete process.env.REACT_APP_PORTAL_LIVE_DATA;
+    auth.currentUser = null;
+    await expect(deleteScholarship({ id: 'newest' })).resolves.toEqual({ id: 'newest', simulated: true });
+    expect(mockDeletes).toEqual([]);
     expect(bump).not.toHaveBeenCalled();
   });
 });
