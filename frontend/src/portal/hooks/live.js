@@ -40,6 +40,8 @@ import { BOOKING_OPENS_LABEL, academyDateISO, bookingOpen, openThrough, todayISO
 import { SPECIALISTS, mentalCapFor } from '../data/specialists';
 import { SESSION_STARTED_COPY, sessionStarted, waitlistClosed } from '../data/sessionStart';
 import { billingStatusOf } from '../data/billingCopy';
+import { HANDICAP_RESERVED, handicapLimitOf, handicapValueOk, reservedRefusal } from '../data/reserved';
+import { HANDICAP_RANGE_ERROR } from '../data/signup';
 
 /** id -> catalogue entry, for the specialist-cap error copy below. */
 const SPECIALIST_BY_ID = new Map(SPECIALISTS.map((s) => [s.id, s]));
@@ -71,7 +73,9 @@ export const ERR = {
  * that chain replaces the error object.
  * Sprint 20 adds 'billing-pending' (athlete not paid), 'booking-not-open'
  * (before the Oct 10 gate) and 'calendly-managed' (a Calendly-sourced
- * booking is cancelled from Calendly, not here).
+ * booking is cancelled from Calendly, not here). 2026-10-02 adds
+ * 'handicap-reserved' (a session with a handicap limit the athlete does not
+ * meet - assertReservedEligible below).
  */
 export class LiveDataError extends Error {
   constructor(code, message, cause = null, reason = null) {
@@ -466,9 +470,15 @@ export async function fetchGraceTokensByAthlete(athleteId) {
  * take no waitlist) and an Elite athlete's second block of that type that
  * day. An athlete already on this waitlist gets their entry back with
  * nothing written: the entry is never updated, by rule.
+ *
+ * `maxHandicap` (2026-10-02) is the session's too: a reserved session's
+ * waitlist takes only an athlete who could book it (assertReservedEligible).
+ * Promotion judges it again (functions/portal/waitlist-order.js): an entry
+ * made before the limit, or before staff raised a handicap, is removed with
+ * a notice when its turn comes, never seated.
  */
 export async function joinWaitlist(
-  { sessionId, athleteId, householdId, date, periodKey, attendee, time = null, type = null },
+  { sessionId, athleteId, householdId, date, periodKey, attendee, time = null, type = null, maxHandicap = null },
   { athlete = null, pkg = null, bookings = null } = {}
 ) {
   if (!sessionId || !athleteId || !householdId || !date || !periodKey) {
@@ -492,6 +502,7 @@ export async function joinWaitlist(
   assertAthleteBillingActive(a);
   const p = pkg ?? (a.packageId ? await fetchPackage(a.packageId) : null);
   assertBookingOpen(p);
+  assertReservedEligible({ maxHandicap }, a);
   if (type && p && p.kind === 'elite') {
     assertEliteDailyCap(p, type, date, bookings ?? (await fetchBookings(athleteId, { householdId })));
   }
@@ -578,6 +589,20 @@ export function assertBookingOpen(pkg, now = Date.now()) {
 export function assertSessionNotStarted(session, now = new Date()) {
   if (!sessionStarted(session, now)) return;
   throw new LiveDataError(ERR.INVALID, SESSION_STARTED_COPY, null, 'session-past');
+}
+
+/**
+ * Handicap-reserved sessions (owner ruling 2026-10-02): a session carrying an
+ * integer maxHandicap takes only an athlete whose handicap on file is at or
+ * under it - none on file is refused too. `session` is anything carrying
+ * maxHandicap; an open session passes for everyone. The message is the line
+ * the screens show (data/reserved.js); firestore.rules' reservedOk() is the
+ * server half, for a booking, a re-book and a waitlist join alike.
+ */
+export function assertReservedEligible(session, athlete) {
+  const refusal = reservedRefusal(session, athlete);
+  if (refusal === null) return;
+  throw new LiveDataError(ERR.INVALID, refusal, null, HANDICAP_RESERVED);
 }
 
 /**
@@ -821,8 +846,10 @@ export async function createBooking(
     }
   }
   // The session's own start time, read inside the transaction below - a
-  // waitlist join needs it for the same started check.
+  // waitlist join needs it for the same started check, and its handicap
+  // limit for the same reserved check.
   let sessionTime = null;
+  let sessionLimit = null;
 
   // Contract v1.1: the booking id IS `{athleteId}_{sessionId}` — the
   // keyspace makes a second booking of the same session an overwrite
@@ -917,6 +944,11 @@ export async function createBooking(
       // R2: today's session whose start time has passed, open or full.
       assertSessionNotStarted(s);
       sessionTime = s.time ?? null;
+      // 2026-10-02: a handicap-reserved session, judged off the session's
+      // own doc and BEFORE the full check - an athlete it is not for gets
+      // neither a seat nor a waitlist place. A re-book is held to it too.
+      sessionLimit = handicapLimitOf(s);
+      assertReservedEligible(s, athlete);
       const capacity = s.capacity ?? 0;
       const booked = s.booked ?? 0;
       if (booked >= capacity) {
@@ -960,7 +992,7 @@ export async function createBooking(
       // joinWaitlist bumps 'waitlist' itself on success - nothing more to
       // invalidate here (no bookings/sessions write happened on this path).
       const entry = await joinWaitlist(
-        { sessionId, athleteId, householdId, date, periodKey, attendee, time: sessionTime, type },
+        { sessionId, athleteId, householdId, date, periodKey, attendee, time: sessionTime, type, maxHandicap: sessionLimit },
         { athlete, pkg, bookings }
       );
       return {
@@ -976,6 +1008,14 @@ export async function createBooking(
         // hooks/waitlist.js): the read rule shows a family its own entries only.
         position: null,
       };
+    }
+    // Nothing was written. A reserved refusal here means the screen offered
+    // a card it should not have: the limit was stamped, or the handicap on
+    // file changed, after it loaded. The bumps redraw the card with its tag,
+    // inert, as the 'full' refusal above redraws a stale "1 left".
+    if (err?.reason === HANDICAP_RESERVED && !silent) {
+      bump('sessions');
+      bump('athletes');
     }
     throw wrap(err, 'createBooking');
   }
@@ -1724,6 +1764,29 @@ export async function changePendingPackage(athleteId, packageId) {
     return { athleteId, packageId };
   } catch (err) {
     throw wrap(err, 'changePendingPackage');
+  }
+}
+
+/**
+ * Set or correct an athlete's handicap (2026-10-02) - ops/owner only,
+ * enforced by firestore.rules' handicapUpdateOk(), not here. `handicap` is
+ * sign-up's value: an integer 0 to 54 (a plus handicap is entered as 0), or
+ * null for none on file. It decides who may book a handicap-reserved session
+ * (data/reserved.js), so a family never writes it after sign-up. Nothing
+ * already booked is touched, and neither is a waitlist place already held.
+ */
+export async function setAthleteHandicap({ athleteId, handicap }) {
+  if (!athleteId) throw new LiveDataError(ERR.INVALID, 'setAthleteHandicap: athleteId is required.');
+  if (!handicapValueOk(handicap)) {
+    throw new LiveDataError(ERR.INVALID, HANDICAP_RANGE_ERROR, null, 'handicap-range');
+  }
+  requireUser();
+  try {
+    await updateDoc(doc(db, 'athletes', athleteId), { handicap, updatedAt: serverTimestamp() });
+    bump('athletes');
+    return { athleteId, handicap };
+  } catch (err) {
+    throw wrap(err, 'setAthleteHandicap');
   }
 }
 

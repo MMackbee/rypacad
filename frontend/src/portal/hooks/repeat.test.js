@@ -211,3 +211,64 @@ test("Yannick's sessions never repeat: a 'mental' slot is refused before anythin
   expect(written()).toEqual([]);
   expect(mockStore.sessions['m-1112'].booked).toBe(0);
 });
+
+// Owner ruling 2026-10-02: a handicap-reserved week is skipped for an athlete
+// it is not for, with the typed reason and the line that says why - never a
+// generic error, and never a booking.
+test('a handicap-reserved week is skipped as handicap-reserved for an athlete over the limit or with none on file; an eligible athlete books it', async () => {
+  // Tuesdays at 3:00 PM. Nov 10 and Nov 24 are reserved (handicap 5 or better); Nov 17 is open.
+  const block = session('t-1103', 'training', '2026-11-03', '3:00 PM');
+  session('t-1110', 'training', '2026-11-10', '3:00 PM', { maxHandicap: 5 });
+  session('t-1117', 'training', '2026-11-17', '3:00 PM');
+  session('t-1124', 'training', '2026-11-24', '3:00 PM', { maxHandicap: 5, booked: 14 });
+  hold('a1', 't-1103');
+
+  // No handicap on file.
+  const none = 'Reserved for handicaps of 5 or better. No handicap is on file for Jordan. Ask the academy to add it.';
+  const out = await repeatWeekly(ATHLETE, block, { untilISO: '2026-11-24' });
+  expect(out.booked).toEqual([{ date: '2026-11-17', id: 't-1117' }]);
+  // Nov 24 is full as well: the reserved reason is the one named, and nothing is queued.
+  expect(out.skipped).toEqual([
+    { date: '2026-11-10', reason: 'handicap-reserved', message: none },
+    { date: '2026-11-24', reason: 'handicap-reserved', message: none },
+  ]);
+  expect(written()).toEqual(['a1_t-1117']);
+  expect(mockStore.sessions['t-1110'].booked).toBe(0);
+  expect(mockStore.waitlist).toEqual({});
+
+  // Above the limit: the one line, no "none on file".
+  mockStore.athletes.a1.handicap = 9;
+  mockStore.sessions['t-1124'].booked = 0;
+  const over = await repeatWeekly(ATHLETE, block, { untilISO: '2026-11-24' });
+  expect(over.booked).toEqual([]);
+  expect(over.skipped).toEqual([
+    { date: '2026-11-10', reason: 'handicap-reserved', message: 'Reserved for handicaps of 5 or better.' },
+    { date: '2026-11-17', reason: 'already booked' },
+    { date: '2026-11-24', reason: 'handicap-reserved', message: 'Reserved for handicaps of 5 or better.' },
+  ]);
+
+  // At the limit (a plus handicap is stored as 0): both reserved weeks book.
+  for (const handicap of [5, 0]) {
+    mockStore.athletes.a1.handicap = handicap;
+    delete mockStore.bookings['a1_t-1110'];
+    delete mockStore.bookings['a1_t-1124'];
+    const ok = await repeatWeekly(PARENT, block, { athleteId: 'a1', untilISO: '2026-11-24' });
+    expect(dates(ok.booked)).toEqual(['2026-11-10', '2026-11-24']);
+    expect(ok.skipped).toEqual([{ date: '2026-11-17', reason: 'already booked' }]);
+  }
+});
+
+test('a week reserved between the schedule read and its write is skipped as handicap-reserved, never as an error', async () => {
+  const block = session('t-1103', 'training', '2026-11-03', '3:00 PM');
+  session('t-1110', 'training', '2026-11-10', '3:00 PM');
+  hold('a1', 't-1103');
+  mockStore.athletes.a1.handicap = 12;
+  // The academy's sync stamps the limit once the repeat is under way.
+  mockBeforeTx = () => { mockStore.sessions['t-1110'].maxHandicap = 5; };
+
+  const out = await repeatWeekly(ATHLETE, block, { untilISO: '2026-11-10' });
+  expect(out.booked).toEqual([]);
+  expect(out.skipped).toEqual([{ date: '2026-11-10', reason: 'handicap-reserved', message: 'Reserved for handicaps of 5 or better.' }]);
+  expect(written()).toEqual([]);
+  expect(mockStore.sessions['t-1110'].booked).toBe(0);
+});

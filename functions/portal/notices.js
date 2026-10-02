@@ -386,9 +386,12 @@ const ONE_A_DAY = {
 function waitlistRemoved(args) {
   const name = firstNameOf(args.athlete);
   const type = args.session && args.session.type;
+  const limit = args.session && args.session.maxHandicap;
   const why = args.reason === 'one-per-day' ?
       `Elite includes one ${ONE_A_DAY[type] || ONE_A_DAY.training} a day ` +
           'and one is already booked that day' :
+      args.reason === 'handicap-reserved' && Number.isInteger(limit) ?
+      `that block is reserved for handicaps of ${limit} or better` :
       REMOVED_REASONS[args.reason] || 'the booking did not go through';
   return {
     title: 'Removed from waitlist',

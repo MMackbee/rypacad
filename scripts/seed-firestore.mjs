@@ -42,6 +42,10 @@
  *                 the single exception to the flat 15 cap anywhere in this
  *                 seed, hand-added on a new `-w0` letter), booked by jordan
  *                 and reese, with nico waitlisted.
+ *   sessions    — ONE seed-only handicap-reserved session (owner ruling
+ *                 2026-10-02), `2026-11-17-r0`: a Tuesday 3:00 PM training
+ *                 block with `maxHandicap: 5`. jordan (handicap 4) may book
+ *                 it, reese (27) may not, nico has none on file.
  *   households.membership — absent on whitfield (active); `past_due` on
  *                 parker, which also gets `stripeCustomerId: 'cus_seed_parker'`.
  *   notifications — three Whitfield ledger rows (contract v2.2, Sprint 14):
@@ -563,7 +567,10 @@ function buildDocs(portal) {
   // child). jordan already has her own legacy users doc (athlete-jordan,
   // email null) so she stays null; reese is the invited-not-claimed case
   // (loginInvites below); nico has no login and is the PAYMENT-PENDING case.
-  const WHITFIELD_HANDICAPS = { jordan: 14, reese: 27, nico: null };
+  // 2026-10-02: jordan is 4 (was 14), so the family holds the three cases a
+  // handicap-reserved session tells apart (section G below) - at or under
+  // the limit, over it, and none on file. Same values as data/seed.js.
+  const WHITFIELD_HANDICAPS = { jordan: 4, reese: 27, nico: null };
   const WHITFIELD_LOGIN_EMAILS = { jordan: null, reese: 'reese.whitfield@example.com', nico: null };
   const coachUid = 'coach-luke';
   const athletes = new Map();
@@ -1369,6 +1376,37 @@ function buildDocs(portal) {
     ],
   ]);
 
+  // G. HANDICAP-RESERVED (owner ruling 2026-10-02) — ONE seed-only reserved
+  // session, hand-added the same way as the `-w0` full session above (new
+  // letter, `-r0`, "reserved"): a Tuesday 3:00 PM training block carrying
+  // `maxHandicap: 5`, the field sync-calendar-sessions.mjs stamps on every
+  // Tuesday 3 PM training block in production (its RESERVED_RULES). The
+  // generator still produces no Tuesday 3 PM block, so no other id moves.
+  // With WHITFIELD_HANDICAPS it shows every case from one family: jordan (4)
+  // may book it, reese (27) is over the limit, nico has none on file.
+  // Capacity is read off that Tuesday's own generated 4 PM block.
+  const RESERVED_SESSION_ID = '2026-11-17-r0';
+  const tuesdayBlock = sessions.get('2026-11-17-0');
+  if (!tuesdayBlock || sessions.has(RESERVED_SESSION_ID)) {
+    throw new Error(`Seed reserved-session id ${RESERVED_SESSION_ID} needs the generated 2026-11-17-0 and a free id of its own.`);
+  }
+  sessions.set(RESERVED_SESSION_ID, {
+    date: '2026-11-17',
+    time: '3:00 PM',
+    durationMinutes: 60,
+    type: 'training',
+    capacity: tuesdayBlock.capacity,
+    booked: 0,
+    coachId: null,
+    label: null,
+    special: false,
+    bookable: true,
+    status: 'scheduled',
+    gcalEventId: null,
+    coachNote: null,
+    maxHandicap: 5,
+  });
+
   // H. MEMBERSHIP STATUS + STRIPE — whitfield stays ABSENT (contract:
   // absent == active; every household provisioned before Part 2 stays
   // bookable with zero migration). `parker` (anchor 15, already this seed's
@@ -1756,6 +1794,11 @@ async function main() {
     for (const [id, doc] of collections.waitlist) {
       console.log(`  waitlist/${id}: athleteId=${doc.athleteId} periodKey=${doc.periodKey} joinedAt=${doc.joinedAt.toISOString()}`);
     }
+  }
+
+  console.log('\nHandicap-reserved session (owner ruling 2026-10-02 — the ONE session carrying maxHandicap):');
+  for (const [id, doc] of collections.sessions) {
+    if (doc.maxHandicap != null) console.log(`  sessions/${id}: time=${doc.time} type=${doc.type} maxHandicap=${doc.maxHandicap} booked=${doc.booked}/${doc.capacity}`);
   }
 
   console.log('\nhouseholds.membership (contract v2.1, pin H):');

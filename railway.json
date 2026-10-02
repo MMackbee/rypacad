@@ -7,6 +7,10 @@
   "deploy": {
     "startCommand": "cd frontend && npx serve -s build -l ${PORT:-3000}",
     "restartPolicyType": "ON_FAILURE",
-    "restartPolicyMaxRetries": 3
+    "restartPolicyMaxRetries": 3,
+    "healthcheckPath": "/",
+    "healthcheckTimeout": 120,
+    "overlapSeconds": 30,
+    "drainingSeconds": 30
   }
 }

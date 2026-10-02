@@ -693,6 +693,137 @@ export async function taskScholarship() {
   for (const [c, d] of [[col, id], [col, 'app-new'], ['scholarshipMeta', day], ['scholarshipMeta', '2026-10-03'], ...[...Object.values(owners), specialistUid].map((u) => ['users', u])]) await del(c, d);
 }
 
+// Owner ruling 2026-10-02: "the Tuesday at 3 pm session is supposed to be reserved for under 5 handicaps so 5-0 and
+// any + handicaps". A session carrying an int maxHandicap takes a family's booking, re-book or waitlist join only from
+// an athlete whose stored handicap is an int at or under it (rules: reservedOk); no handicap on file is refused. A
+// session with no maxHandicap, or a null one, is as it was. No client writes maxHandicap (the calendar sync stamps
+// it), and only ops and the owner write an athlete's handicap, in sign-up's range (rules: handicapUpdateOk).
+// Paid Elite athletes throughout, so no answer depends on the Oct 10 gate; it seeds and removes everything it touches.
+export async function taskReserved() {
+  console.log('Reserved: a session with maxHandicap takes only a handicap at or under it; an open session is as it was; staff set the handicap');
+  const who = { h5: 5, h0: 0, h3: 3, h6: 6, hnull: null, hnone: undefined, hmove: 4 };
+  const ath = (k) => `ath-${k}`;
+  const [h3Uid, ownerUid] = ['h3-res-probe', 'owner-res-probe'];
+  const h3Login = token(h3Uid, { email: 'h3@example.com', email_verified: true });
+  const owner = token(ownerUid, { email: 'owner-res@example.com', email_verified: true });
+  const block = (extra) => ({ date: DAY1, time: '3:00 PM', type: 'training', capacity: 15, booked: 0, status: 'scheduled', ...extra });
+  const sessions = { 'r-res': { maxHandicap: 5 }, 'r-open': {}, 'r-null': { maxHandicap: null }, 'r-rebook': { maxHandicap: 5 }, 'r-cancel': { maxHandicap: 5 },
+    'r-full': { maxHandicap: 5, capacity: 1, booked: 1 }, 'r-full-open': { capacity: 1, booked: 1 } };
+  const row = (k, sessionId, by = 'parent') => ({ ...booking(ath(k)), sessionId, chargedFrom: 'elite', createdBy: by === 'parent' ? uid.parent : h3Uid });
+  const book = (k, sessionId) => bookAs(t.parent, `${ath(k)}_${sessionId}`, row(k, sessionId));
+  const bookOwn = (sessionId) => bookAs(h3Login, `${ath('h3')}_${sessionId}`, row('h3', sessionId, 'login'));
+  const join = (k, sessionId) => createAs(t.parent, 'waitlist', `${sessionId}_${ath(k)}`, { ...entry(ath(k)), sessionId }, ['joinedAt']);
+  const setHandicap = (k, handicap) => seed('athletes', ath(k), { name: ath(k), householdId: 'hh', contractMinutes: null, coachId: null, packageId: 'elite',
+    billing: { status: 'active' }, handicap });
+  // Everything this task writes, removed whether it finishes or throws part-way.
+  const cleanup = async () => {
+    for (const sessionId of Object.keys(sessions)) {
+      for (const k of Object.keys(who)) { await del('bookings', `${ath(k)}_${sessionId}`); await del('waitlist', `${sessionId}_${ath(k)}`); }
+      await del('sessions', sessionId);
+    }
+    for (const k of Object.keys(who)) await del('athletes', ath(k));
+    for (const u of [h3Uid, ownerUid]) await del('users', u);
+  };
+  try {
+    for (const [k, handicap] of Object.entries(who)) {
+      await seed('athletes', ath(k), { name: ath(k), householdId: 'hh', contractMinutes: null, coachId: null, packageId: 'elite', billing: { status: 'active' },
+        ...(handicap === undefined ? {} : { handicap }) });
+    }
+    await seed('users', h3Uid, { role: 'athlete', athleteId: ath('h3'), householdId: 'hh' });
+    await seed('users', ownerUid, { role: 'owner' });
+    for (const [id, extra] of Object.entries(sessions)) await seed('sessions', id, block(extra));
+    await reservedCases({ ath, h3Login, owner, row, book, bookOwn, join, setHandicap });
+  } finally { await cleanup(); }
+}
+
+// taskReserved's cases, against what it has just seeded.
+async function reservedCases({ ath, h3Login, owner, row, book, bookOwn, join, setHandicap }) {
+  // The reserved session. The refusals run first, so each 403 is the reserved clause and nothing else.
+  expect('reserved: parent books an athlete with handicap 6 refused', await book('h6', 'r-res'), 403);
+  expect('reserved: handicap null refused', await book('hnull', 'r-res'), 403);
+  expect('reserved: no handicap field at all refused', await book('hnone', 'r-res'), 403);
+  // A tab still on the bundle from before the rollout sends this same commit: it is refused whole, so no seat is taken
+  // without its booking.
+  expect('the refused bookings took no seat', (await call('GET', '/sessions/r-res', null, 'owner')).body?.fields?.booked?.integerValue, '0');
+  expect('and wrote no booking', (await call('GET', `/bookings/${ath('h6')}_r-res`, null, 'owner')).status, 404);
+  expect('reserved: parent books an athlete with handicap 5 (the limit)', await book('h5', 'r-res'), 200);
+  expect('reserved: parent books an athlete with handicap 0 (a plus handicap)', await book('h0', 'r-res'), 200);
+  expect('reserved: an athlete login with handicap 3 books itself', await bookOwn('r-res'), 200);
+  // The same six on an identical session with no maxHandicap, and with maxHandicap null: booked as before.
+  for (const [sessionId, label] of [['r-open', 'no maxHandicap'], ['r-null', 'maxHandicap null']]) {
+    for (const k of ['h5', 'h0', 'h6', 'hnull', 'hnone']) expect(`open (${label}): parent books ${ath(k)}`, await book(k, sessionId), 200);
+    expect(`open (${label}): the athlete login books itself`, await bookOwn(sessionId), 200);
+  }
+
+  // The waitlist of a FULL reserved session: the eligible athlete is admitted, the others refused - and the same
+  // three join a full session with no limit, so the refusal is the reserved clause.
+  expect('waitlist on a full reserved session: handicap 5 admitted', await join('h5', 'r-full'), 200);
+  for (const k of ['h6', 'hnull', 'hnone']) {
+    expect(`waitlist on a full reserved session: ${ath(k)} refused`, await join(k, 'r-full'), 403);
+    expect(`waitlist on a full open session: ${ath(k)} admitted`, await join(k, 'r-full-open'), 200);
+  }
+
+  // A re-book is booking: a cancelled row on a reserved session is refused once the handicap is over the limit.
+  await seed('bookings', `${ath('hmove')}_r-rebook`, { ...row('hmove', 'r-rebook'), status: 'cancelled', createdAt: new Date(), cancelledBy: uid.parent, cancelReason: 'member' });
+  const flip = async (fields, seat) => commitAs(t.parent, [patchWrite('bookings', `${ath('hmove')}_r-rebook`, fields), await seatWrite('r-rebook', seat)]);
+  await setHandicap('hmove', 9);
+  expect('re-book on a reserved session refused once the handicap is above the limit', await flip({ status: 'confirmed' }, 1), 403);
+  await setHandicap('hmove', null);
+  expect('re-book refused with the handicap off the file', await flip({ status: 'confirmed' }, 1), 403);
+  await setHandicap('hmove', 4);
+  expect('the same re-book accepted with the handicap back under the limit', await flip({ status: 'confirmed' }, 1), 200);
+  await setHandicap('hmove', 9);
+  expect('a booking already held is still cancelled by its family when the handicap has gone up', await flip({ status: 'cancelled', cancelledBy: uid.parent, cancelReason: 'member' }, -1), 200);
+
+  // Staff writes that worked before still work, on a reserved session as on any other.
+  expect('ops writes a coach note on a reserved session', await updateAs(t.ops, 'sessions', 'r-res', { coachNote: 'Short game focus' }), 200);
+  expect('ops cancels a booking on a reserved session (the academy cancel)',
+    await updateAs(t.ops, 'bookings', `${ath('h5')}_r-res`, { status: 'cancelled', cancelledBy: uid.ops, cancelReason: 'session-cancelled' }), 200);
+  expect('owner cancels a reserved session', await updateAs(owner, 'sessions', 'r-cancel', { status: 'cancelled' }), 200);
+  expect('owner cancels an open session', await updateAs(owner, 'sessions', 'r-full-open', { status: 'cancelled' }), 200);
+  expect('ops assigns a package (the staff branch) as before', await updateAs(t.ops, 'athletes', ath('h6'), { packageId: 't-12' }), 200);
+
+  // maxHandicap is the sync's to write: no client sets, changes or removes it.
+  expect('parent cannot set maxHandicap on an open session', await updateAs(t.parent, 'sessions', 'r-open', { maxHandicap: 54 }), 403);
+  expect('parent cannot raise maxHandicap on a reserved session', await updateAs(t.parent, 'sessions', 'r-res', { maxHandicap: 54 }), 403);
+  expect('parent cannot remove maxHandicap from a reserved session', await updateAs(t.parent, 'sessions', 'r-res', {}, ['maxHandicap']), 403);
+  const bookedNow = Number((await call('GET', '/sessions/r-res', null, 'owner')).body?.fields?.booked?.integerValue ?? 0);
+  expect('parent cannot slip maxHandicap in beside a seat count', await updateAs(t.parent, 'sessions', 'r-res', { booked: bookedNow + 1, maxHandicap: 54 }), 403);
+  expect('an athlete login cannot write maxHandicap', await updateAs(h3Login, 'sessions', 'r-res', { maxHandicap: 54 }), 403);
+  expect('ops cannot write maxHandicap either (the calendar sync stamps it)', await updateAs(t.ops, 'sessions', 'r-open', { maxHandicap: 5 }), 403);
+  expect('nor can the owner', await updateAs(owner, 'sessions', 'r-open', { maxHandicap: 5 }), 403);
+  expect('the reserved session still carries its limit', (await call('GET', '/sessions/r-res', null, 'owner')).body?.fields?.maxHandicap?.integerValue, '5');
+
+  // An athlete's handicap after sign-up: never the family's to write.
+  expect('parent cannot write handicap on their athlete', await updateAs(t.parent, 'athletes', ath('h6'), { handicap: 0 }), 403);
+  expect('parent cannot write it with the server updatedAt either', await updateAs(t.parent, 'athletes', ath('h6'), { handicap: 0 }, ['handicap'], ['updatedAt']), 403);
+  expect('parent cannot write it beside a contract tier', await updateAs(t.parent, 'athletes', ath('h6'), { contractMinutes: 45, handicap: 0 }), 403);
+  expect('parent cannot remove it', await updateAs(t.parent, 'athletes', ath('h6'), {}, ['handicap']), 403);
+  expect('an athlete login cannot write its own handicap', await updateAs(h3Login, 'athletes', ath('h3'), { handicap: 0 }), 403);
+  expect('a coach cannot write a handicap', await updateAs(t.coach, 'athletes', ath('h6'), { handicap: 0 }), 403);
+  expect('a login with no role cannot write a handicap', await updateAs(t.stranger, 'athletes', ath('h6'), { handicap: 0 }), 403);
+  expect('still 6 after every refused write', (await call('GET', `/athletes/${ath('h6')}`, null, 'owner')).body?.fields?.handicap?.integerValue, '6');
+
+  // ops and owner set or correct it, in sign-up's range (0 to 54, or none).
+  for (const [role, auth] of [['ops', t.ops], ['owner', owner]]) {
+    for (const handicap of [0, 54, null]) expect(`${role} sets handicap ${handicap}`, await updateAs(auth, 'athletes', ath('h6'), { handicap }), 200);
+    for (const handicap of [-1, 55, 'scratch', 4.5]) expect(`${role}: handicap ${JSON.stringify(handicap)} refused`, await updateAs(auth, 'athletes', ath('h6'), { handicap }), 403);
+    expect(`${role} sets it with the server updatedAt (the client write, live.js setAthleteHandicap)`, await updateAs(auth, 'athletes', ath('h6'), { handicap: 12 }, ['handicap'], ['updatedAt']), 200);
+    // The handicap changes in this write too, so the package branch (which does not pin updatedAt) is not what answers.
+    expect(`${role}: a client-chosen updatedAt refused`, await updateAs(auth, 'athletes', ath('h6'), { handicap: 13, updatedAt: new Date('2026-01-01T00:00:00Z') }), 403);
+    expect(`${role}: handicap beside another field (coachId) refused`, await updateAs(auth, 'athletes', ath('h6'), { handicap: 3, coachId: 'c1' }), 403);
+    // A billing value that differs from the stored 'active': an unchanged one is not in the diff, and the write would
+    // then be the handicap alone.
+    expect(`${role}: handicap beside billing refused`, await updateAs(auth, 'athletes', ath('h6'), { handicap: 3, billing: { status: 'past_due' } }), 403);
+    expect(`${role} removes the field (none on file)`, await updateAs(auth, 'athletes', ath('h6'), {}, ['handicap']), 200);
+  }
+  // The academy adds a handicap and the family can book the reserved session; corrected upward, it cannot.
+  expect('ops adds handicap 2 for the athlete with none on file', await updateAs(t.ops, 'athletes', ath('hnull'), { handicap: 2 }, ['handicap'], ['updatedAt']), 200);
+  expect('that athlete now books the reserved session', await book('hnull', 'r-res'), 200);
+  expect('owner corrects handicap 0 up to 7', await updateAs(owner, 'athletes', ath('h0'), { handicap: 7 }, ['handicap'], ['updatedAt']), 200);
+  expect('that athlete no longer joins the reserved waitlist', await join('h0', 'r-full'), 403);
+}
+
 /**
  * The single-token cases (rulesChanges 1-19). Case 15 is task5's monthly
  * status-only re-book, 17's future-session half is task5's member cancel and
@@ -783,7 +914,7 @@ async function runPass(label) {
   await setup();
   try {
     await task4(); await task5(); await taskContract(); await taskWindow(); await taskRepeat(); await taskPackageChange(); await taskSeriesCancel();
-    await taskSeats(); await taskPast(); await taskWaitlist(); await taskSingle(); await taskScholarship();
+    await taskSeats(); await taskPast(); await taskWaitlist(); await taskSingle(); await taskScholarship(); await taskReserved();
   } finally { await teardown(); }
 }
 

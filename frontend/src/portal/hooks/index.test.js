@@ -112,7 +112,7 @@ describe('live loaders (perf wave B)', () => {
     live.fetchHousehold.mockResolvedValue({ id: 'h1', name: 'Whitfield family', periodAnchorDay: 15 });
     live.fetchBookings.mockReturnValue(bookingsGate.promise);
     signups.fetchLoginInvite.mockResolvedValue(null);
-    live.fetchSessionsByIds.mockResolvedValue([{ id: 's1', time: '4:00 PM', label: 'Junior block' }]);
+    live.fetchSessionsByIds.mockResolvedValue([{ id: 's1', time: '4:00 PM', label: 'Junior block', maxHandicap: 5 }]);
 
     const h = await mountHook(() => useAthleteDetail({ athleteId: 'a1' }));
     // Round 1: both issued before the athlete resolves.
@@ -121,7 +121,7 @@ describe('live loaders (perf wave B)', () => {
     expect(live.fetchBookings).not.toHaveBeenCalled();
 
     await act(async () => {
-      athleteGate.resolve({ id: 'a1', name: 'Jordan Whitfield', packageId: 't-12', householdId: 'h1', contractMinutes: 45, loginEmail: 'jordan@email.com' });
+      athleteGate.resolve({ id: 'a1', name: 'Jordan Whitfield', packageId: 't-12', householdId: 'h1', contractMinutes: 45, loginEmail: 'jordan@email.com', handicap: 4 });
     });
     await settle();
     // Round 2: all four issued while the bookings are still in flight.
@@ -154,14 +154,17 @@ describe('live loaders (perf wave B)', () => {
       billingStatus: 'active', // absent billing == active
       facilityAccess: false,
       facilityAccessConsent: null,
+      // 2026-10-02: the handicap on file, off the athlete doc already read.
+      handicap: 4,
       loginEmail: 'jordan@email.com',
       login: loginStateFor('jordan@email.com', null),
       householdId: 'h1',
       householdName: 'Whitfield family',
       periodAnchorDay: 15,
     });
+    // The session's handicap limit rides the same sessions join (null on an open block).
     expect(data.upcoming).toEqual([
-      { id: 's1', date: '2099-01-06', dayLabel: expect.any(String), time: '4:00 PM', name: 'Junior block', status: 'confirmed' },
+      { id: 's1', date: '2099-01-06', dayLabel: expect.any(String), time: '4:00 PM', name: 'Junior block', status: 'confirmed', maxHandicap: 5 },
     ]);
     expect(data).toMatchObject({ history: [], checklist: [], hasEnoughData: true });
     await h.unmount();

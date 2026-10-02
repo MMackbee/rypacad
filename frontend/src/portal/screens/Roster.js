@@ -8,6 +8,7 @@ import PhoneFrame from '../components/PhoneFrame';
 import StatusBadge from '../components/StatusBadge';
 import TypeChip from '../components/TypeChip';
 import AgeGroupChip from '../components/AgeGroupChip';
+import { ReservedChip } from '../components/Reserved';
 import { BackLink, Body, Card, ScreenTitle, SectionLabel, SignOutButton, Tick } from '../components/Primitives';
 import useRoster from '../hooks/useRoster';
 import * as hooks from '../hooks';
@@ -20,6 +21,7 @@ import { DEFAULT_DURATION_MINUTES } from '../data/schedule';
 // through the hooks above.
 import { parseTimeToMinutes, todayISO } from '../data/calendar';
 import { dayLabel } from '../data/season';
+import { reservedTag } from '../data/reserved';
 // Row metas lose "45 min tier" / "contract behind" while the contract is hidden (owner, 2026-09-30).
 
 /**
@@ -471,6 +473,8 @@ export function SessionAttendance({ variant = 'pre', bare = false, onBack, sessi
           <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
             <TypeChip type={session?.type} />
             <AgeGroupChip group={session?.ageGroup} />
+            {/* A handicap-reserved block: the limit is the hook's own read of the session. */}
+            <ReservedChip tag={reservedTag({ maxHandicap: liveAttendance.sessionMaxHandicap })} />
             <span style={{ font: `400 11px ${font.body}`, color: color.textTertiary }}>
               {session?.blockLabel}
             </span>

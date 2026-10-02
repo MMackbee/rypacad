@@ -182,6 +182,45 @@ test('a seat that fails later does not lose the notices already earned',
           [['promoted', 'sam'], ['waitlist-removed', 'kai']]);
     });
 
+test('a handicap-reserved block: only an eligible athlete is seated',
+    async () => {
+      // Kai joined first but is over the limit (staff raised it after the
+      // join); Ava has none on file; Sam is at the limit and gets the seat.
+      const docs = world(entry('s1', 'kai', 'reyes', 0),
+          entry('s1', 'ava', 'lopez', 3), entry('s1', 'sam', 'hart', 6),
+          {'sessions/s1': session({maxHandicap: 5})},
+          {'athletes/kai': {name: 'Kai Reyes', householdId: 'reyes',
+            packageId: 't-12', handicap: 9}},
+          {'athletes/sam': {name: 'Sam Hart', householdId: 'hart',
+            packageId: 't-12', handicap: 5}});
+      await cancelSeat(docs, 'x1');
+      assert.equal(docs['bookings/sam_s1'].status, 'confirmed');
+      assert.equal('bookings/kai_s1' in docs, false);
+      assert.equal('bookings/ava_s1' in docs, false);
+      assert.equal(docs['sessions/s1'].booked, 2);
+      assert.deepEqual(['waitlist/s1_kai', 'waitlist/s1_ava',
+        'waitlist/s1_sam'].map((k) => k in docs), [false, false, false]);
+      assert.deepEqual(bodies('waitlist-removed'), [
+        `Kai was next on the waitlist for ${BLOCK} but could not be ` +
+            'booked: that block is reserved for handicaps of 5 or better.',
+        `Ava was next on the waitlist for ${BLOCK} but could not be ` +
+            'booked: that block is reserved for handicaps of 5 or better.']);
+      assert.equal(bodies('promoted').length, 1);
+      // The same three on an open block: joining order decides, as before.
+      const open = world(entry('s1', 'kai', 'reyes', 0),
+          entry('s1', 'sam', 'hart', 6),
+          {'athletes/kai': {name: 'Kai Reyes', householdId: 'reyes',
+            packageId: 't-12', handicap: 9}});
+      await cancelSeat(open, 'x1');
+      assert.equal(open['bookings/kai_s1'].status, 'confirmed');
+      assert.equal('waitlist/s1_sam' in open, true);
+      // maxHandicap null is an open block too.
+      const nul = world(entry('s1', 'kai', 'reyes', 0),
+          {'sessions/s1': session({maxHandicap: null})});
+      await cancelSeat(nul, 'x1');
+      assert.equal(nul['bookings/kai_s1'].status, 'confirmed');
+    });
+
 test('no tokens left, and a date outside the booking window', async () => {
   const docs = world(entry('s1', 'kai', 'reyes', 0),
       {'tokenPeriods/kai_2026-11-01': {granted: 0}});

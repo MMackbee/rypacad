@@ -33,6 +33,13 @@
  * BOOKABLE events. `label` is null for the generic titles ("Training block",
  * "Tournament", "Tournament block") and the full summary otherwise.
  *
+ * Handicap-reserved sessions (owner, 2026-10-02): RESERVED_RULES below is the
+ * ONE table saying which sessions are reserved (today: every Tuesday 3:00 PM
+ * training block, handicap 5 or better). A matching session is written with
+ * `maxHandicap`; every other session carries no such field. An existing
+ * session picks the field up - or loses it - on the next run, and the plan
+ * names each one. A session that never carried it is not touched by this.
+ *
  * Upsert semantics against the target Firestore (contract v1.2):
  *   - new event                -> create (booked 0, status 'scheduled')
  *   - existing session, matched by gcalEventId (fallback: by doc id, but only
@@ -125,6 +132,9 @@ function classifyTitle(summary) {
   // NOT be titled "Training…"/"Tournament…" - any other title lands here
   // and stays display-only, which is the intended behaviour until its
   // booking path is ruled on.
+  // 2026-10-02: ruled on for TUESDAY - that block is booked in the portal by
+  // handicap (RESERVED_RULES below), so its event must now be titled
+  // "Training…" or no session exists to reserve. Thursday's is unchanged.
   return null; // anything else (and every all-day event) is display-only
 }
 
@@ -132,6 +142,45 @@ function classifyTitle(summary) {
 // name": label stays null and the app shows its own generic display name.
 // Anything longer ("Tournament — Holiday Classic") is kept as the label.
 const GENERIC_TITLE = /^(?:training|tournament)(?:\s+(?:block|session))?$/i;
+
+// Handicap-reserved sessions (owner ruling, 2026-10-02: "the Tuesday at 3 pm
+// session is supposed to be reserved for under 5 handicaps so 5-0 and any +
+// handicaps"). ONE table: a session whose weekday, start time and type match
+// a row is written with sessions/{id}.maxHandicap; no other session carries
+// the field. The app and firestore.rules read that field and nothing else, so
+// changing who a block is reserved for is an edit here and a re-run of this
+// script - never a change in the app. Emptying the table removes the field
+// from every session that carries it.
+//   weekday  Date#getUTCDay() of the session's own 'YYYY-MM-DD' (0 Sunday ..
+//            6 Saturday; Tuesday is 2), read as a calendar date - see
+//            reservedLimitFor, so the machine's time zone never moves a day.
+//   time     the session's own time as this script writes it ('3:00 PM').
+//   type     'training' only: the 3 PM fitness session with Phil that runs
+//            at the same time is type 'phil' and stays open to everyone.
+// The session must be BOOKABLE to be reserved: a Tuesday 3 PM calendar event
+// whose title does not start with "Training" is display-only (classifyTitle)
+// and never becomes a session at all.
+// A run stamps only the sessions inside its window, and the default window is
+// 90 days (DEFAULT_WINDOW_DAYS): after adding or changing a row, run once
+// with --to the last day of the season (2027-02-27) so no later block is
+// left open to everyone.
+export const RESERVED_RULES = [
+  { weekday: 2, time: '3:00 PM', type: 'training', maxHandicap: 5 },
+];
+
+/**
+ * The handicap limit for one session ({ date, time, type }), or null when no
+ * rule reserves it. The weekday comes from the date string's own year, month
+ * and day through Date.UTC, never from a local-time Date: '2026-11-03' is a
+ * Tuesday wherever this runs.
+ */
+export function reservedLimitFor(session, rules = RESERVED_RULES) {
+  const m = String(session.date ?? '').match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (!m) return null;
+  const weekday = new Date(Date.UTC(Number(m[1]), Number(m[2]) - 1, Number(m[3]))).getUTCDay();
+  const rule = rules.find((r) => r.weekday === weekday && r.time === session.time && r.type === session.type);
+  return rule ? rule.maxHandicap : null;
+}
 
 // ---------------------------------------------------------------------------
 // Args
@@ -309,8 +358,9 @@ function formatTime(h, m) {
 /**
  * @returns {{ sessions: Map<string, object>, counts: object }}
  *   sessions keyed by `YYYY-MM-DD-<n>`; counts of skipped categories.
+ *   `rules` is the reserved table (RESERVED_RULES; a test passes its own).
  */
-function mapEvents(items, from, to) {
+function mapEvents(items, from, to, rules = RESERVED_RULES) {
   const counts = { bookable: 0, allDay: 0, displayOnly: 0, cancelled: 0, outOfWindow: 0, displayOnlyTitles: new Map() };
   const byDate = new Map(); // date -> [{ minutes, event fields }]
 
@@ -370,6 +420,9 @@ function mapEvents(items, from, to) {
     const list = byDate.get(date);
     list.sort((a, b) => a.minutes - b.minutes || String(a.gcalEventId).localeCompare(String(b.gcalEventId)));
     list.forEach(({ minutes, ...s }, i) => {
+      // Present only on a reserved session; an open one has no such key, so
+      // the doc it is created as is the doc it always was.
+      const maxHandicap = reservedLimitFor(s, rules);
       sessions.set(`${date}-${i}`, {
         date: s.date,
         time: s.time,
@@ -383,6 +436,7 @@ function mapEvents(items, from, to) {
         overflow: false,
         status: 'scheduled',
         gcalEventId: s.gcalEventId,
+        ...(maxHandicap !== null ? { maxHandicap } : {}),
       });
     });
   }
@@ -499,6 +553,21 @@ async function commit(target, writes) {
 // in the portal remain preserved by the mask.
 const SYNCED_FIELDS = ['date', 'time', 'durationMinutes', 'type', 'capacity', 'label', 'status', 'gcalEventId'];
 
+// maxHandicap is synced too, but OUTSIDE SYNCED_FIELDS, because an open
+// session carries no such field at all: "no field" (or null) on the existing
+// doc and "no limit" from the rules are the same thing and are not a change.
+// So the first run after a rule is added updates exactly the reserved
+// sessions, and every other session stays `unchanged`. null when it stays as
+// it is; 'set' when the rules give a limit the doc does not carry; 'remove'
+// when the doc carries one no rule gives any more (the table was emptied, or
+// the event moved off the reserved slot).
+function limitChange(cur, doc) {
+  const want = doc.maxHandicap ?? null;
+  if ((cur.maxHandicap ?? null) === want) return null;
+  return want === null ? 'remove' : 'set';
+}
+const isDirty = (cur, doc) => SYNCED_FIELDS.some((f) => (cur[f] ?? null) !== doc[f]) || limitChange(cur, doc) !== null;
+
 function planSync(desired, existing, resultSessionIds = new Set()) {
   const plan = { creates: [], updates: [], unchanged: [], deletes: [], cancels: [], conflicts: [], seededUntouched: [] };
   const byGcal = new Map();
@@ -529,14 +598,13 @@ function planSync(desired, existing, resultSessionIds = new Set()) {
       } else {
         // Never orphan bookings — or tournament results (contract v1.5.1) —
         // by moving the doc; patch in place and flag it.
-        plan.updates.push({ id: matchId, doc, keptId: true });
+        plan.updates.push({ id: matchId, doc, keptId: true, limit: limitChange(cur, doc) });
         plan.conflicts.push(`sessions/${matchId} has ${cur.booked ?? 0} booking(s)${resultSessionIds.has(matchId) ? ' and tournament results' : ''} but its event now maps to ${id}; patched in place — id no longer encodes day-order.`);
       }
       continue;
     }
 
-    const dirty = SYNCED_FIELDS.some((f) => (cur[f] ?? null) !== doc[f]);
-    if (dirty) plan.updates.push({ id, doc });
+    if (isDirty(cur, doc)) plan.updates.push({ id, doc, limit: limitChange(cur, doc) });
     else plan.unchanged.push(id);
   }
 
@@ -575,8 +643,7 @@ function planSync(desired, existing, resultSessionIds = new Set()) {
     const next = [];
     for (const m of pending) {
       if (!held.has(m.to)) { next.push(m); continue; }
-      const dirty = SYNCED_FIELDS.some((f) => (m.cur[f] ?? null) !== m.doc[f]);
-      if (dirty) plan.updates.push({ id: m.from, doc: m.doc, keptId: true });
+      if (isDirty(m.cur, m.doc)) plan.updates.push({ id: m.from, doc: m.doc, keptId: true, limit: limitChange(m.cur, m.doc) });
       else plan.unchanged.push(m.from);
       held.add(m.from);
       changed = true;
@@ -606,16 +673,62 @@ function planSync(desired, existing, resultSessionIds = new Set()) {
 function planWrites(plan) {
   const writes = [];
   for (const { id, doc } of plan.creates) writes.push({ update: { name: docName(id), fields: fsFields(doc) } });
-  for (const { id, doc } of plan.updates) {
+  for (const { id, doc, limit } of plan.updates) {
     // Masked patch: only the synced fields change; booked (and anything else,
     // e.g. coachId assignments made in the portal) is preserved.
     const patch = Object.fromEntries(SYNCED_FIELDS.map((f) => [f, doc[f]]));
-    writes.push({ update: { name: docName(id), fields: fsFields(patch) }, updateMask: { fieldPaths: SYNCED_FIELDS } });
+    // maxHandicap joins the mask only when it changes (limitChange): 'set'
+    // writes the rule's limit; 'remove' names it in the mask with no value,
+    // which deletes the field. Otherwise the patch is the one it always was.
+    if (limit === 'set') patch.maxHandicap = doc.maxHandicap;
+    const fieldPaths = limit ? [...SYNCED_FIELDS, 'maxHandicap'] : SYNCED_FIELDS;
+    writes.push({ update: { name: docName(id), fields: fsFields(patch) }, updateMask: { fieldPaths } });
   }
   for (const { id } of plan.cancels)
     writes.push({ update: { name: docName(id), fields: fsFields({ status: 'cancelled' }) }, updateMask: { fieldPaths: ['status'] } });
   for (const { id } of plan.deletes) writes.push({ delete: docName(id) });
   return writes;
+}
+
+/**
+ * The plan line's note for an update that changes maxHandicap. A session
+ * that is being reserved while it already holds bookings says so: the limit
+ * decides who may book from now on, and whoever is already booked stays
+ * booked until the academy moves them. The same goes for its waitlist, which
+ * this script never reads (it cannot count it): an entry already queued
+ * stays, and promotion does not check a handicap, so the note names it too.
+ */
+function describeLimit(limit, doc, cur) {
+  if (limit === 'set') {
+    const held = cur?.booked ?? 0;
+    return ` + maxHandicap ${doc.maxHandicap} (reserved: handicap ${doc.maxHandicap} or better)` +
+      (held > 0 ? ` - ${held} booking(s) already on it are kept, as is any waitlist; check both` : '');
+  }
+  if (limit === 'remove') return ' - maxHandicap removed (no rule reserves this session now)';
+  return '';
+}
+
+/**
+ * The plan as the lines a run prints - what is read before a production run
+ * is applied. Pure, so scripts/test reads the same lines against an existing
+ * target without one. An unchanged session is counted, never listed.
+ */
+function planReport(plan, desired, existing) {
+  const lines = [
+    `Plan: ${plan.creates.length} create, ${plan.updates.length} update, ${plan.unchanged.length} unchanged, ` +
+      `${plan.deletes.length} delete, ${plan.cancels.length} cancel, ${plan.seededUntouched.length} seeded-untouched`,
+  ];
+  const reserved = [...desired].filter(([, doc]) => doc.maxHandicap != null);
+  if (reserved.length) {
+    lines.push(`Handicap-reserved in window: ${reserved.length} session(s) - ${reserved.map(([id, doc]) => `${id} ${doc.time} (${doc.maxHandicap} or better)`).join(', ')}`);
+  }
+  for (const { id, doc } of plan.creates) lines.push(`  create  sessions/${id} ${JSON.stringify(doc)}`);
+  for (const { id, doc, keptId, limit } of plan.updates)
+    lines.push(`  update  sessions/${id}${keptId ? ' (id kept for its bookings)' : ''} <- ${JSON.stringify(Object.fromEntries(SYNCED_FIELDS.map((f) => [f, doc[f]])))}${describeLimit(limit, doc, existing.get(id))}`);
+  for (const { id, reason } of plan.deletes) lines.push(`  delete  sessions/${id} (booked 0, ${reason})`);
+  for (const { id, booked } of plan.cancels) lines.push(`  cancel  sessions/${id} (booked ${booked} — never deleted)`);
+  for (const c of plan.conflicts) lines.push(`  CONFLICT: ${c}`);
+  return lines;
 }
 
 // ---------------------------------------------------------------------------
@@ -659,16 +772,7 @@ async function main() {
   else console.log(`Existing sessions in window (${target.label}): ${existing.size}; sessions with tournament results (delete-protected): ${resultSessionIds.size}`);
 
   const plan = planSync(desired, existing, resultSessionIds);
-  console.log(
-    `Plan: ${plan.creates.length} create, ${plan.updates.length} update, ${plan.unchanged.length} unchanged, ` +
-      `${plan.deletes.length} delete, ${plan.cancels.length} cancel, ${plan.seededUntouched.length} seeded-untouched`
-  );
-  for (const { id, doc } of plan.creates) console.log(`  create  sessions/${id} ${JSON.stringify(doc)}`);
-  for (const { id, doc, keptId } of plan.updates)
-    console.log(`  update  sessions/${id}${keptId ? ' (id kept for its bookings)' : ''} <- ${JSON.stringify(Object.fromEntries(SYNCED_FIELDS.map((f) => [f, doc[f]])))}`);
-  for (const { id, reason } of plan.deletes) console.log(`  delete  sessions/${id} (booked 0, ${reason})`);
-  for (const { id, booked } of plan.cancels) console.log(`  cancel  sessions/${id} (booked ${booked} — never deleted)`);
-  for (const c of plan.conflicts) console.log(`  CONFLICT: ${c}`);
+  for (const line of planReport(plan, desired, existing)) console.log(line);
 
   if (DRY_RUN) {
     console.log('\n[dry-run] nothing written.');
@@ -693,7 +797,16 @@ async function main() {
   console.log('Done.');
 }
 
-main().catch((err) => {
-  console.error(err.message || err);
-  process.exit(1);
-});
+// The pure halves, for scripts/test (RESERVED_RULES and reservedLimitFor are
+// exported where they are defined).
+export { SYNCED_FIELDS, mapEvents, planReport, planSync, planWrites };
+
+// Run only as the entry script: a test imports the functions above and must
+// not start a sync. Matched on the file name, so a path through a junction or
+// a symlink still runs it.
+if (path.basename(process.argv[1] || '') === 'sync-calendar-sessions.mjs') {
+  main().catch((err) => {
+    console.error(err.message || err);
+    process.exit(1);
+  });
+}

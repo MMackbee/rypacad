@@ -9,6 +9,7 @@ import StatusBadge from '../components/StatusBadge';
 import { Body, Card, ScreenTitle, SectionLabel, SignOutButton } from '../components/Primitives';
 import HouseholdsCard from '../components/HouseholdsCard';
 import ScholarshipsCard from '../components/ScholarshipsCard';
+import { ReservedBlocks } from '../components/Reserved';
 import { useAdminDashboard } from '../hooks';
 import { contractEnabled } from '../data/contractFlag';
 
@@ -161,7 +162,7 @@ export default function AdminDashboard({
             view. Hidden when the route supplies no destination (harness). */}
         {onOpenHousehold ? <HouseholdsCard onOpenHousehold={onOpenHousehold} /> : null}
         <EnrollmentCard rows={enrollmentRows} highlight={filtered ? active.id : null} />
-        <BlockFillCard bars={data?.blockFill ?? []} filtered={filtered} />
+        <BlockFillCard bars={data?.blockFill ?? []} reserved={data?.reservedBlocks ?? []} filtered={filtered} />
         {/* Billing card: hidden in live mode per the pin - there was never
             one on this screen to remove; billing stays parked. */}
       </div>
@@ -451,7 +452,7 @@ function EnrollmentCard({ rows, highlight }) {
  * gone from the schedule generator. Nothing replaces it; a quiet Friday now
  * reads exactly like a quiet day anywhere else in the week.
  */
-function BlockFillCard({ bars, filtered }) {
+function BlockFillCard({ bars, reserved, filtered }) {
   const barColor = (pct) => {
     if (pct >= 90) return color.primary;
     if (pct >= 50) return 'rgba(0,175,81,.55)';
@@ -477,6 +478,9 @@ function BlockFillCard({ bars, filtered }) {
           </div>
         ))}
       </div>
+
+      {/* The week's handicap-reserved blocks, with the tag families see. */}
+      <ReservedBlocks blocks={reserved} style={{ marginTop: 14 }} />
 
       {filtered ? (
         <Body size={11} tone={color.textTertiary} style={{ marginTop: 14 }}>

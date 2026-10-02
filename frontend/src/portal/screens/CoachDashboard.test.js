@@ -4,16 +4,19 @@ import CoachDashboard from './CoachDashboard';
 
 const session = { id: 'nov5-4pm', date: '2026-11-05', time: '4:00 PM', type: 'training', name: 'Training block', capacity: 8, booked: 3 };
 let mockRequested;
-// Month-aware: November has one session on Nov 5; every other month is empty.
+// Nov 5's sessions (one open block unless a test says otherwise), and today's blocks on the Overview.
+let mockNov5 = [session];
+let mockBlocks = [];
+// Month-aware: November has its sessions on Nov 5; every other month is empty.
 const mockMonth = (m) => {
   mockRequested.push(m);
-  const days = m === '2026-11-01' ? [{ date: '2026-11-05', sessions: [session] }] : [];
+  const days = m === '2026-11-01' ? [{ date: '2026-11-05', sessions: mockNov5 }] : [];
   return { data: { days }, loading: false, error: null };
 };
 let mockAttention = [];
 let mockStudents = [];
 jest.mock('../hooks', () => ({
-  useCoachDay: () => ({ data: { coach: { name: 'Coach', date: '2026-11-04' }, blocks: [], attention: mockAttention } }),
+  useCoachDay: () => ({ data: { coach: { name: 'Coach', date: '2026-11-04' }, blocks: mockBlocks, attention: mockAttention } }),
   // The real roster hook drops the contract part of meta while the contract is hidden; the mock does the same.
   useCoachRoster: () => ({ data: mockStudents.map((s) => ({ ...s, meta: jest.requireActual('../data/contractFlag').hideContractParts(s.meta) })), loading: false }),
   useMonthSessions: (m) => mockMonth(m),
@@ -164,4 +167,54 @@ test('Students rows drop the contract tier while the contract is hidden', async 
     mockStudents = [];
     delete process.env.REACT_APP_CONTRACT_ENABLED;
   }
+});
+
+// Owner ruling 2026-10-02: staff see the same tag families do on a handicap-reserved block.
+describe('a handicap-reserved block', () => {
+  const TAG = 'Handicap 5 or better';
+  const reserved = { id: 'nov5-3pm', date: '2026-11-05', time: '3:00 PM', type: 'training', name: 'Training block', capacity: 6, booked: 2, maxHandicap: 5 };
+  const cardAt = (r, time) =>
+    [...r.container.querySelectorAll('div')].find((el) => el.textContent.startsWith(time) && el.textContent.includes('Training block')) || null;
+  afterEach(() => {
+    mockNov5 = [session];
+    mockBlocks = [];
+  });
+
+  test('the Sessions list tags it, not the open block beside it, and it opens its roster as any block does', async () => {
+    mockNov5 = [reserved, session];
+    const onOpenRoster = jest.fn();
+    const r = await openSessions(onOpenRoster);
+    await tap(td(r, '2026-11-05'));
+    expect(cardAt(r, '3:00').textContent).toBe(`3:00PMTraining${TAG}Training block2 of 6 booked`);
+    expect(cardAt(r, '4:00').textContent).toBe('4:00PMTrainingTraining block3 of 8 booked');
+    await tap(cardAt(r, '3:00'));
+    expect(onOpenRoster).toHaveBeenCalledWith({
+      sessionId: 'nov5-3pm',
+      date: '2026-11-05',
+      time: '3:00 PM',
+      type: 'training',
+      name: 'Training block',
+      meta: '2 of 6 booked',
+    });
+    await r.unmount();
+  });
+
+  test("today's Overview tags the reserved block only", async () => {
+    mockBlocks = [
+      { id: 'b1', sessionId: '2026-11-04-0', time: '3:00 PM', type: 'training', name: 'Training block', meta: '2 of 6 booked', status: 'next', maxHandicap: 5 },
+      { id: 'b2', sessionId: '2026-11-04-1', time: '4:00 PM', type: 'training', name: 'Training block', meta: '3 of 6 booked', status: 'next', maxHandicap: null },
+    ];
+    const r = await renderScreen(<CoachDashboard bare />);
+    expect(cardAt(r, '3:00').textContent).toContain(`Training${TAG}Training block`);
+    expect(cardAt(r, '4:00').textContent).not.toContain('Handicap');
+    expect(r.text().split(TAG)).toHaveLength(2);
+    await r.unmount();
+  });
+
+  test('with no reserved block the coach screens carry no tag at all', async () => {
+    const r = await openSessions(() => {});
+    await tap(td(r, '2026-11-05'));
+    expect(r.text()).not.toContain('Handicap');
+    await r.unmount();
+  });
 });

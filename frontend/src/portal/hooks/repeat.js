@@ -14,6 +14,7 @@ import { windowDaysFor } from '../data/packages';
 import { addDaysISO, openThrough, windowOpensOn } from '../data/calendar';
 import { firstRunningWeek } from '../data/season';
 import { isSpecialistType, repeatsWeekly } from '../data/specialists';
+import { HANDICAP_RESERVED, reservedEligible, reservedRefusal } from '../data/reserved';
 
 /**
  * Repeat weekly, out of hooks/index.js (review 2026-09-30: the file was far
@@ -45,6 +46,10 @@ const REPEAT_SKIP_REASON = new Map([
   // The session filled after the schedule was read: createBooking refuses it
   // as 'full' and writes nothing - a repeat never asks for a waitlist place.
   ['full', 'full'],
+  // 2026-10-02: that week's session is handicap-reserved and not for this
+  // athlete (the limit was stamped after the schedule was read). The skip
+  // keeps the typed reason as its own name, with the line that says why.
+  [HANDICAP_RESERVED, HANDICAP_RESERVED],
 ]);
 const REPEAT_STOP_REASONS = new Set(['membership-inactive', 'billing-pending', 'booking-not-open']);
 
@@ -146,6 +151,13 @@ export default async function repeatWeekly(identity, slot, { athleteId, untilISO
         skipped.push({ date, reason: 'already booked' });
         continue;
       }
+      // 2026-10-02: a handicap-reserved week this athlete may not book is
+      // named up front, before 'full' - a full block it is not for is still
+      // not for it - and before any of createBooking's reads.
+      if (!reservedEligible(match, athlete)) {
+        skipped.push({ date, reason: HANDICAP_RESERVED, message: reservedRefusal(match, athlete) });
+        continue;
+      }
       if ((match.booked ?? 0) >= (match.capacity ?? 0)) {
         skipped.push({ date, reason: 'full' });
         continue;
@@ -178,7 +190,7 @@ export default async function repeatWeekly(identity, slot, { athleteId, untilISO
           date,
           reason,
           ...(reason === 'not open yet' ? { opensOn: windowOpensOn(date, windowDays) } : {}),
-          ...(reason === 'error' ? { message: err?.message || null } : {}),
+          ...(reason === 'error' || reason === HANDICAP_RESERVED ? { message: err?.message || null } : {}),
         });
       }
     }

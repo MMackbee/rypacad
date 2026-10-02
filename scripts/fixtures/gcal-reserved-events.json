@@ -1,0 +1,64 @@
+{
+  "kind": "calendar#events",
+  "summary": "RYP Academy schedule (handicap-reserved fixture)",
+  "timeZone": "America/Chicago",
+  "description": "API-shaped sample of a Google Calendar events.list response for the handicap-reserved rule in sync-calendar-sessions.mjs (RESERVED_RULES: Tuesday, 3:00 PM, training, handicap 5 or better). Two Tuesdays each carry a 3 PM training event (one titled 'Training block', one the hand-entered 'Training Session') that must be reserved. Everything else must stay open: the 3 PM 'Fitness with Phil' that runs beside the first one, a Tuesday 4 PM block, a Tuesday 3:30 PM block, and 3 PM training blocks on a Wednesday and a Thursday.",
+  "items": [
+    {
+      "kind": "calendar#event",
+      "id": "res-tue-1103-1500",
+      "status": "confirmed",
+      "summary": "Training block",
+      "start": { "dateTime": "2026-11-03T15:00:00-06:00", "timeZone": "America/Chicago" },
+      "end": { "dateTime": "2026-11-03T16:00:00-06:00", "timeZone": "America/Chicago" }
+    },
+    {
+      "kind": "calendar#event",
+      "id": "res-tue-1103-1500-phil",
+      "status": "confirmed",
+      "summary": "Fitness with Phil",
+      "start": { "dateTime": "2026-11-03T15:00:00-06:00", "timeZone": "America/Chicago" },
+      "end": { "dateTime": "2026-11-03T15:45:00-06:00", "timeZone": "America/Chicago" }
+    },
+    {
+      "kind": "calendar#event",
+      "id": "res-tue-1103-1600",
+      "status": "confirmed",
+      "summary": "Training block",
+      "start": { "dateTime": "2026-11-03T16:00:00-06:00", "timeZone": "America/Chicago" },
+      "end": { "dateTime": "2026-11-03T17:00:00-06:00", "timeZone": "America/Chicago" }
+    },
+    {
+      "kind": "calendar#event",
+      "id": "res-wed-1104-1500",
+      "status": "confirmed",
+      "summary": "Training block",
+      "start": { "dateTime": "2026-11-04T15:00:00-06:00", "timeZone": "America/Chicago" },
+      "end": { "dateTime": "2026-11-04T16:00:00-06:00", "timeZone": "America/Chicago" }
+    },
+    {
+      "kind": "calendar#event",
+      "id": "res-thu-1105-1500",
+      "status": "confirmed",
+      "summary": "Training Session",
+      "start": { "dateTime": "2026-11-05T15:00:00-06:00", "timeZone": "America/Chicago" },
+      "end": { "dateTime": "2026-11-05T16:00:00-06:00", "timeZone": "America/Chicago" }
+    },
+    {
+      "kind": "calendar#event",
+      "id": "res-tue-1110-1500",
+      "status": "confirmed",
+      "summary": "Training Session",
+      "start": { "dateTime": "2026-11-10T15:00:00-06:00", "timeZone": "America/Chicago" },
+      "end": { "dateTime": "2026-11-10T16:00:00-06:00", "timeZone": "America/Chicago" }
+    },
+    {
+      "kind": "calendar#event",
+      "id": "res-tue-1110-1530",
+      "status": "confirmed",
+      "summary": "Training block",
+      "start": { "dateTime": "2026-11-10T15:30:00-06:00", "timeZone": "America/Chicago" },
+      "end": { "dateTime": "2026-11-10T16:30:00-06:00", "timeZone": "America/Chicago" }
+    }
+  ]
+}

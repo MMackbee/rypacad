@@ -15,6 +15,8 @@ export const TIER_MINUTES = [20, 45, 90];
 export const ADULT_AGE = 18;
 export const HANDICAP_MIN = 0;
 export const HANDICAP_MAX = 54;
+/** The one wording of that range: sign-up's form and the academy's handicap edit (hooks/handicap.js) both say it. */
+export const HANDICAP_RANGE_ERROR = 'Handicap is a whole number from 0 to 54, or leave it blank.';
 /** Spec 13 cut line: flip to false to hide the own-login toggle if claimInvite slips. */
 export const CHILD_LOGIN_ENABLED = true;
 export const U13_HELPER =
@@ -171,7 +173,7 @@ export function validateAthleteEntry(a, { todayISO, guardianEmail = '', siblings
   else if (mode === 'athlete' && age < ADULT_AGE) errors.dob = ADULT_REQUIRED;
   if (a.packageId != null && !ALL_PACKAGES.some((p) => p.id === a.packageId)) errors.packageId = 'Pick a package from the list.';
   if (contract && a.contractMinutes != null && !TIER_MINUTES.includes(a.contractMinutes)) errors.contractMinutes = 'Pick 20, 45 or 90 minutes.';
-  if (normalizeHandicap(a.handicap) === undefined) errors.handicap = 'Handicap is a whole number from 0 to 54, or leave it blank.';
+  if (normalizeHandicap(a.handicap) === undefined) errors.handicap = HANDICAP_RANGE_ERROR;
   // Own login is a parent-mode choice (the adult athlete IS the login); a
   // toggle left on before switching to athlete mode is ignored, as the
   // payload builder and createFamily ignore it.

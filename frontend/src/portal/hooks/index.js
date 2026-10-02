@@ -199,7 +199,11 @@ import repeatWeekly, { isGroupBookable } from './repeat';
 import { MARKS_LOOKAHEAD_DAYS, dayMarksFor, monthGridBounds } from '../data/calendarViews';
 import { foldBeforeFirstPeriod, positionPeriodFor, withTokenStart } from '../data/billingHub';
 import { sessionStarted } from '../data/sessionStart';
+import { handicapLimitOf, handicapOf } from '../data/reserved';
 
+// 2026-10-02: the academy's handicap edit (hooks/handicap.js), on this seam
+// like every other staff write a screen reaches.
+export { setAthleteHandicap } from './handicap';
 export { default as useSeedResource } from './useSeedResource';
 export { default as useAuthSession } from './useAuthSession';
 export { default as useRoster } from './useRoster';
@@ -285,6 +289,10 @@ function displaySession(s, today) {
     // before the field existed, and on every weekday block, which is why the
     // fallback is the 60-minute default rather than a guess per screen.
     durationMinutes: s.durationMinutes ?? DEFAULT_DURATION_MINUTES,
+    // 2026-10-02: the handicap limit of a reserved block, or null for an
+    // open one (every session before the field existed, and the whole seed
+    // season). Screens tag and gate on it through data/reserved.js.
+    maxHandicap: handicapLimitOf(s),
   };
 }
 
@@ -1690,6 +1698,8 @@ async function liveChildCard(a, today, anchorDay) {
     packageId: a.packageId ?? null,
     // Sprint 20 (spec 4.4): the parent home banner and Pay button key off this; absent == active.
     billingStatus: billingStatusOf(a),
+    // 2026-10-02: the handicap on file (null == none), off the doc in hand.
+    handicap: handicapOf(a),
     loginEmail,
     login,
     tokens: await homeTokens(a, pkg, bookings, anchorDay, today),
@@ -1745,6 +1755,7 @@ export function useHousehold({ variant = 'three', practice = false } = {}) {
     ...c,
     ageLine: hideContractParts(c.ageLine),
     billingStatus: c.billingStatus ?? 'active',
+    handicap: handicapOf(c),
     // Sprint 20 (spec 3.2): the seed family has no child logins - state 'none'.
     loginEmail: null,
     login: { state: 'none', claimedAt: null },
@@ -1798,6 +1809,9 @@ async function liveHouseholdAthletes(today) {
         packageId: a.packageId ?? null,
         packageName: pkg ? pkg.name : null,
         billingStatus: billingStatusOf(a),
+        // 2026-10-02: Book a Session judges each child against a reserved
+        // block on this (data/reserved.js); null == none on file.
+        handicap: handicapOf(a),
         tokens: withGraceReasons(
           deriveTokens(pkg, bookings, anchorDay, today, { ...inputs, billingStatus: billingStatusOf(a) }),
           inputs.graceTokens
@@ -1830,6 +1844,7 @@ export function useHouseholdAthletes() {
     packageId: c.packageId,
     packageName: packageById(c.packageId)?.name ?? null,
     billingStatus: c.billingStatus ?? 'active',
+    handicap: handicapOf(c),
     tokens: c.tokens,
   }));
   return useSeedResource(
@@ -1957,6 +1972,7 @@ function seedMemberEntry(child, today) {
     name: child.name,
     dob: child.dob ?? null,
     billingStatus: child.billingStatus ?? 'active',
+    handicap: handicapOf(child),
     package: pkg
       ? { id: pkg.id, name: pkg.name, price: pkg.price ?? null, pending: pkg.pending ?? false, tokens: pkg.tokens ?? null, windowDays: pkg.windowDays ?? null, kind: pkg.kind ?? null }
       : null,
@@ -1999,6 +2015,9 @@ async function liveMemberEntry(a, today, anchorDay) {
     // token there (data/singleToken.js ownLoginMayBuy). null when not on file.
     dob: a.dob ?? null,
     billingStatus: billingStatusOf(a),
+    // 2026-10-02: the athlete's own Book a Session judges a reserved block
+    // on this (data/reserved.js); null == none on file.
+    handicap: handicapOf(a),
     package: pkg
       ? {
           id: pkg.id,
@@ -2601,6 +2620,9 @@ export function useCoachDay({ variant = 'today' } = {}) {
             // where the raw session still has both halves.
             ageGroup: ageGroupFor(s),
             durationMinutes: runs,
+            // 2026-10-02: a reserved block's handicap limit, so the coach's
+            // day and the roster it opens carry the same tag families see.
+            maxHandicap: handicapLimitOf(s),
           };
         }),
       concurrent: false,
@@ -3349,6 +3371,7 @@ async function liveAthleteDetail(athleteId) {
       time: s?.time ?? null,
       name: s?.label || genericSessionName(b.type),
       status: b.status,
+      maxHandicap: handicapLimitOf(s),
     };
   });
 
@@ -3378,6 +3401,9 @@ async function liveAthleteDetail(athleteId) {
       // the membership editor's toggle (locked without the waiver).
       facilityAccess: Boolean(athlete.facilityAccess),
       facilityAccessConsent: athlete.facilityAccessConsent ?? null,
+      // 2026-10-02: the handicap on file (null == none) - what the staff
+      // edit (setAthleteHandicap) shows and corrects.
+      handicap: handicapOf(athlete),
       // Sprint 20 (spec 3.2, D9): the child's own login state.
       loginEmail,
       login,
@@ -3419,7 +3445,7 @@ export function useAthleteDetail({ athleteId, variant = 'populated' } = {}) {
   const seedValue = {
     // householdName: the back link's label (AthleteDetail reads it here now,
     // not from a second useHousehold) - the same name useHousehold's seed shows.
-    athlete: { ...ATHLETE_DETAIL, subline: hideContractParts(ATHLETE_DETAIL.subline), householdName: HOUSEHOLD.name, loginEmail: null, login: { state: 'none', claimedAt: null } },
+    athlete: { ...ATHLETE_DETAIL, subline: hideContractParts(ATHLETE_DETAIL.subline), householdName: HOUSEHOLD.name, handicap: handicapOf(seedChildById(SEED_ATHLETE_ID)), loginEmail: null, login: { state: 'none', claimedAt: null } },
     history: full ? CONTRACT_HISTORY : [],
     checklist: full ? [] : LIMITED_DATA_CHECKLIST,
     hasEnoughData: full,
@@ -3720,6 +3746,9 @@ async function liveAdminDashboard(today) {
   const fillByDay = new Map(['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'].map((d) => [d, { booked: 0, capacity: 0 }]));
   let totalBooked = 0;
   let totalCapacity = 0;
+  // 2026-10-02: the week's handicap-reserved blocks, named beside the bars
+  // (a bar is a whole day, so the tag cannot ride on it) - same read.
+  const reservedBlocks = [];
   for (const s of sessionsThisWeek) {
     if (s.status === 'cancelled' || !isGroupBookable(s)) continue;
     const day = fillByDay.get(shortWeekday(s.date));
@@ -3728,7 +3757,19 @@ async function liveAdminDashboard(today) {
     day.capacity += s.capacity ?? 0;
     totalBooked += s.booked ?? 0;
     totalCapacity += s.capacity ?? 0;
+    if (handicapLimitOf(s) != null) {
+      reservedBlocks.push({
+        sessionId: s.id,
+        date: s.date,
+        day: shortWeekday(s.date),
+        time: s.time ?? null,
+        maxHandicap: handicapLimitOf(s),
+        booked: s.booked ?? 0,
+        capacity: s.capacity ?? 0,
+      });
+    }
   }
+  reservedBlocks.sort((a, b) => a.date.localeCompare(b.date) || (parseTimeToMinutes(a.time) ?? 0) - (parseTimeToMinutes(b.time) ?? 0));
   const blockFill = [...fillByDay.entries()].map(([day, v]) => ({
     day,
     pct: v.capacity ? Math.round((v.booked / v.capacity) * 100) : 0,
@@ -3745,6 +3786,7 @@ async function liveAdminDashboard(today) {
     enrollment,
     highlightPackage: null,
     blockFill,
+    reservedBlocks,
     filter: TIER_FILTERS[0],
     weekLabel: `Week of ${longDayLabel(weekStart)}`,
     membership,
@@ -3790,6 +3832,8 @@ export function useAdminDashboard({ variant = 'populated' } = {}) {
           enrollment: ENROLLMENT_BY_PACKAGE,
           highlightPackage: filter.id === 'all' ? null : filter.id,
           blockFill: BLOCK_FILL,
+          // The seed season has no handicap-reserved block.
+          reservedBlocks: [],
           filter,
           weekLabel: null,
           // Contract v2.1, pin H: the harness's one named seed household
@@ -3985,7 +4029,7 @@ export function useSessionAttendance(sessionId) {
   // small resource — the rows above are pinned as a bare array.
   const sessionsGen = useInvalidation('sessions');
   const noteState = useSeedResource(
-    live && sessionId ? null : { coachNote: null, status: 'scheduled' },
+    live && sessionId ? null : { coachNote: null, status: 'scheduled', maxHandicap: null },
     live && sessionId
       ? {
           source: async () => {
@@ -3993,7 +4037,9 @@ export function useSessionAttendance(sessionId) {
             // `status` null-safe (the same generator gap firestore.rules'
             // waitlistSessionOk/sessionCancelOk document) — absent means
             // 'scheduled', never a crash on an older/generator-seeded doc.
-            return { coachNote: s?.coachNote ?? null, status: s?.status ?? 'scheduled' };
+            // 2026-10-02: the same read carries the session's handicap limit
+            // (null on an open session), for the roster's reserved tag.
+            return { coachNote: s?.coachNote ?? null, status: s?.status ?? 'scheduled', maxHandicap: handicapLimitOf(s) };
           },
           deps: ['session-note', sessionId, sessionsGen],
         }
@@ -4022,6 +4068,7 @@ export function useSessionAttendance(sessionId) {
     setSessionNote,
     sessionNote: noteState.data?.coachNote ?? null,
     sessionStatus: noteState.data?.status ?? 'scheduled',
+    sessionMaxHandicap: noteState.data?.maxHandicap ?? null,
     cancelSession: doCancelSession,
   };
 }

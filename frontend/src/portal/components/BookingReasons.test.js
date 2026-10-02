@@ -60,6 +60,13 @@ describe('waitlist hardening (audit 2026-09-30)', () => {
   });
 });
 
+describe('a handicap-reserved block (owner ruling 2026-10-02)', () => {
+  test('the refusal reads plainly, and a second tap cannot change it', () => {
+    expect(reasonCopy('handicap-reserved')).toBe('This session is reserved for lower handicaps.');
+    expect(canRetry('handicap-reserved')).toBe(false);
+  });
+});
+
 describe('LockedDayNotice and the Oct 10 gate (UX review #8)', () => {
   const notice = async (props) => {
     const r = await renderScreen(<LockedDayNotice {...props} />);

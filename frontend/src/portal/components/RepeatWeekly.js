@@ -92,6 +92,9 @@ const SKIP_COPY = [
   ['no session', 'no session that day'],
   ['already booked', 'already booked'],
   ['one per day', "there's already one booked that day (Elite includes one a day)"],
+  // A week whose block is reserved by handicap (owner ruling 2026-10-02):
+  // the skip's own message is the card's line and replaces this one.
+  ['handicap-reserved', 'reserved for lower handicaps'],
   ['error', "didn't go through"],
 ];
 const KNOWN_SKIPS = new Set(SKIP_COPY.map(([reason]) => reason));
@@ -107,10 +110,10 @@ const PHIL_SKIP_COPY = {
  */
 function skipLines(skipped, type) {
   return SKIP_COPY.map(([reason, groupCopy]) => {
-    const copy = (type === 'phil' && PHIL_SKIP_COPY[reason]) || groupCopy;
     const weeks = skipped.filter((s) => (KNOWN_SKIPS.has(s.reason) ? s.reason : 'error') === reason);
     if (!weeks.length) return null;
     const first = weeks[0];
+    const copy = (reason === 'handicap-reserved' && first.message) || (type === 'phil' && PHIL_SKIP_COPY[reason]) || groupCopy;
     const detail =
       reason === 'not open yet' && first.opensOn
         ? ` - the first opens 7 AM on ${shortDay(first.opensOn)}`

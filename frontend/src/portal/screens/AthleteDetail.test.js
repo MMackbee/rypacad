@@ -3,6 +3,8 @@ import { renderScreen } from './testRender';
 import AthleteDetail from './AthleteDetail';
 
 let mockDetail;
+// The staff handicap edit's write (hooks/handicap.js), as the screen reaches it.
+let mockSetHandicap;
 // The real useAthleteDetail composes the subline without the contract part while the contract is hidden; the mock does the same.
 jest.mock('../hooks', () => ({
   useAthleteDetail: () => (mockDetail?.data?.athlete
@@ -15,6 +17,7 @@ jest.mock('../hooks', () => ({
   useAssignPackages: () => ({ assign: async () => {} }),
   useHouseholdSettings: () => ({ saving: false }),
   useIssueTokens: () => ({ issue: async () => {} }),
+  setAthleteHandicap: (...args) => mockSetHandicap(...args),
 }));
 
 test('the login line reads the invite state', async () => {
@@ -100,4 +103,69 @@ describe('Commitment Contract hidden (owner ruling 2026-09-30)', () => {
     expect(l.text()).toContain('Attendance, contract history, and progress summaries');
     await l.unmount();
   });
+});
+
+// Owner ruling 2026-10-02: ops and owner set or correct the handicap a
+// reserved block is booked on; a coach, a parent and an athlete never do.
+describe('the staff handicap edit', () => {
+  const athlete = { name: 'Jordan', subline: 'Age 14', contractMinutes: 45, packageId: 't-12', householdId: 'h1', handicap: 14 };
+  const detail = (over = {}) => ({ data: { athlete: { ...athlete, ...over }, history: [], checklist: [], hasEnoughData: false }, loading: false, error: null });
+  beforeEach(() => { mockSetHandicap = jest.fn(async (args) => args); });
+
+  test('ops and owner see the value on file and can change it; the write names this athlete', async () => {
+    for (const role of ['ops', 'owner']) {
+      mockDetail = detail();
+      mockSetHandicap.mockClear();
+      const r = await renderScreen(<AthleteDetail bare athleteId="a1" role={role} backLabel="Admin" onBack={() => {}} />);
+      expect(r.text()).toContain('On file14');
+      await r.fill('Set handicap', '5');
+      await r.click('Save handicap');
+      expect(mockSetHandicap).toHaveBeenCalledTimes(1);
+      expect(mockSetHandicap).toHaveBeenCalledWith({ athleteId: 'a1', handicap: 5 });
+      expect(r.text()).toContain('Handicap saved');
+      expect(r.text()).toContain('On file5');
+      await r.unmount();
+    }
+  });
+
+  test('none on file reads None', async () => {
+    mockDetail = detail({ handicap: null });
+    const r = await renderScreen(<AthleteDetail bare athleteId="a1" role="ops" backLabel="Admin" onBack={() => {}} />);
+    expect(r.text()).toContain('On fileNone');
+    await r.unmount();
+  });
+
+  test('a coach, a mental coach, a parent and an athlete see no handicap edit', async () => {
+    mockDetail = detail();
+    for (const role of ['coach', 'mental', 'parent', 'athlete']) {
+      const r = await renderScreen(<AthleteDetail bare athleteId="a1" role={role} onBack={() => {}} />);
+      expect(r.container.querySelector('[aria-label="Set handicap"]')).toBeNull();
+      expect(r.button('Save handicap')).toBeNull();
+      expect(r.text()).not.toContain('On file');
+      await r.unmount();
+    }
+    expect(mockSetHandicap).not.toHaveBeenCalled();
+  });
+});
+
+// Owner ruling 2026-10-02: every list of sessions staff read shows the reserved tag - here it sits under the handicap
+// edit, so a booking kept on a block the athlete no longer qualifies for is not missed.
+test('Scheduled sessions: a handicap-reserved block carries the tag, an open one does not', async () => {
+  const athlete = { name: 'Jordan', subline: 'Age 14', contractMinutes: null, packageId: 't-12', householdId: 'h1', handicap: 9, attendance: '94%', attendanceLabel: 'attendance since Nov' };
+  const upcoming = [
+    { id: 'b1', dayLabel: 'Tuesday, Nov 17', time: '3:00 PM', name: 'Training block', status: 'confirmed', maxHandicap: 5 },
+    { id: 'b2', dayLabel: 'Tuesday, Nov 17', time: '4:00 PM', name: 'Training block', status: 'confirmed', maxHandicap: null },
+    { id: 'b3', dayLabel: 'Wednesday, Nov 18', time: '4:00 PM', name: 'Training block', status: 'confirmed' },
+  ];
+  mockDetail = { data: { athlete, upcoming, history: [], checklist: [], hasEnoughData: true }, loading: false, error: null };
+  mockSetHandicap = jest.fn();
+  for (const role of ['ops', 'owner', 'coach', 'parent']) {
+    const r = await renderScreen(<AthleteDetail bare athleteId="a1" role={role} backLabel="Admin" onBack={() => {}} />);
+    expect(r.text()).toContain('Scheduled sessions · 3');
+    expect(r.text()).toContain('Training blockHandicap 5 or betterTuesday, Nov 17 · 3:00 PMConfirmed');
+    expect(r.text().match(/Handicap 5 or better/g)).toHaveLength(1);
+    expect(r.text()).toContain('Training blockTuesday, Nov 17 · 4:00 PMConfirmed');
+    expect(r.text()).toContain('Training blockWednesday, Nov 18 · 4:00 PMConfirmed');
+    await r.unmount();
+  }
 });

@@ -1,6 +1,7 @@
 import React from 'react';
 import { color, font, glow, radius, tint } from '../tokens';
 import AgeGroupChip from './AgeGroupChip';
+import { ReservedChip } from './Reserved';
 import TypeChip from './TypeChip';
 
 /**
@@ -46,6 +47,8 @@ const VARIANTS = {
  *                           than the card deriving it: the card is given a time
  *                           already split from its date, and a hint that guessed
  *                           its own weekday would be wrong somewhere.
+ * @param {string} reserved  The handicap-reserved tag from `reservedTag(session)`
+ *                           (data/reserved.js), or null on an open block.
  */
 export default function SessionCard({
   time,
@@ -61,6 +64,7 @@ export default function SessionCard({
   action,
   spendNote,
   ageGroup = null,
+  reserved = null,
   gutter = 52,
   ruleHeight = 36,
   nameSize = 14,
@@ -111,6 +115,7 @@ export default function SessionCard({
           <div style={{ display: 'flex', alignItems: 'center', gap: 5, marginBottom: 6, flexWrap: 'wrap' }}>
             <TypeChip type={type} />
             <AgeGroupChip group={ageGroup} />
+            <ReservedChip tag={reserved} />
           </div>
           <div
             style={{

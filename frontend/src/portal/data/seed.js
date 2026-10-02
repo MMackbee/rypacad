@@ -209,6 +209,11 @@ export const HOUSEHOLD = {
       // pointer now. t-12 matches ATHLETE_PACKAGE/TOKENS above (jordan is
       // the seed's "signed-in athlete" fixture, SEED_ATHLETE_ID in hooks).
       packageId: 't-12',
+      // 2026-10-02: the handicap on file, the three cases a handicap-reserved
+      // block tells apart (data/reserved.js) - jordan 4 may book one, reese
+      // 27 is over the limit, nico has none on file. Kept in sync with
+      // scripts/seed-firestore.mjs (WHITFIELD_HANDICAPS).
+      handicap: 4,
       tokens: tokensFor(null, TOKEN_PACKAGES.find((p) => p.id === 't-12'), tokenRows(4), [], [], PERIOD.periodKey, {
         today: todayISO(),
       }),
@@ -223,6 +228,7 @@ export const HOUSEHOLD = {
       next: { type: 'tournament', when: 'Sat 10:30 AM', meta: 'Tour event' },
       contract: 54,
       packageId: 't-6',
+      handicap: 27,
       // 4 of 6 used - the same total spend her old two-pool demo modelled
       // (2 training + 2 tournament), now one number under one pool.
       tokens: tokensFor(null, TOKEN_PACKAGES.find((p) => p.id === 't-6'), tokenRows(4), [], [], PERIOD.periodKey, {
@@ -238,6 +244,7 @@ export const HOUSEHOLD = {
       next: { type: 'training', when: 'Mon 5:00 PM', meta: 'Training block' },
       contract: null,
       packageId: 't-6',
+      handicap: null,
       tokens: tokensFor(null, TOKEN_PACKAGES.find((p) => p.id === 't-6'), tokenRows(0), [], [], PERIOD.periodKey, {
         today: todayISO(),
       }),

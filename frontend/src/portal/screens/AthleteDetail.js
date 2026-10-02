@@ -4,14 +4,17 @@ import * as hooks from '../hooks';
 import AthleteMembershipCard from '../components/AthleteMembershipCard';
 import BottomTabBar from '../components/BottomTabBar';
 import Button from '../components/Button';
+import HandicapCard from '../components/HandicapCard';
 import { Avatar } from '../components/MediaPlaceholder';
 import PhoneFrame from '../components/PhoneFrame';
 import ProgressMeter, { meterColor } from '../components/ProgressMeter';
+import { ReservedChip } from '../components/Reserved';
 import SavedToast from '../components/SavedToast';
 import { BackLink, Body, Card, ScreenTitle, SectionLabel, Tick } from '../components/Primitives';
 import { useAthleteDetail } from '../hooks';
 import { loginStatusLine } from '../data/billingCopy';
 import { contractEnabled } from '../data/contractFlag';
+import { reservedTag } from '../data/reserved';
 
 /**
  * Sprint 10 pin C: same fallback rationale as DiagnosticCapture.js's own
@@ -135,6 +138,8 @@ export default function AthleteDetail({ variant = 'populated', bare = false, ath
     >
       <div style={{ padding: '0 22px 24px', display: 'flex', flexDirection: 'column', gap: 12 }}>
         <AthleteMembershipCard athleteId={athleteId} athlete={athlete} role={role} />
+        {/* The handicap on file, ops and owner only: a reserved block is booked on it. */}
+        <HandicapCard athleteId={athleteId} athlete={athlete} role={role} />
         {/* Sprint 20 (spec 3.2): the child-login state. Rendered only when the
             payload carries loginEmail (legacy athletes have neither field). */}
         {athlete && 'loginEmail' in athlete ? (
@@ -525,7 +530,11 @@ function UpcomingSessions({ upcoming }) {
               }}
             >
               <div style={{ flex: 1, minWidth: 0 }}>
-                <div style={{ font: `600 13px ${font.body}`, color: color.text }}>{u.name}</div>
+                <div style={{ font: `600 13px ${font.body}`, color: color.text }}>
+                  {u.name}
+                  {/* A handicap-reserved block says so here too: this is where staff change the handicap. */}
+                  <ReservedChip tag={reservedTag(u)} style={{ marginLeft: 8 }} />
+                </div>
                 <div style={{ font: `400 11px ${font.body}`, color: color.textTertiary, marginTop: 2 }}>
                   {u.dayLabel}
                   {u.time ? ` · ${u.time}` : ''}

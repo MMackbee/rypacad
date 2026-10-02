@@ -30,6 +30,11 @@ let mockLeave;
 let mockBillingStatus;
 // Their date of birth, as the member row carries it: on their own login the Buy button is an adult's.
 let mockDob;
+// Their handicap on file (null: none), and whether the member row has loaded at all.
+let mockHandicap;
+let mockMemberLoaded;
+// Set when the membership read itself failed (the hook's error, not a row still loading).
+let mockMemberError;
 jest.mock('../hooks', () => ({
   useBooking: () => ({
     data: { slots: [{ date: mockFirstSlot }], tokens: mockTokens, confirmation: mockConfirmation, seasonNote: null },
@@ -39,7 +44,9 @@ jest.mock('../hooks', () => ({
     bookingFor: mockBookingFor,
   }),
   useHouseholdAthletes: () => ({ data: mockHousehold, loading: false }),
-  useMembership: () => ({ data: { members: [{ athleteId: 'a1', name: 'Jordan', dob: mockDob, package: mockPackage, billingStatus: mockBillingStatus }] } }),
+  useMembership: () => (mockMemberError
+    ? { data: null, loading: false, error: mockMemberError }
+    : { data: { members: mockMemberLoaded ? [{ athleteId: 'a1', name: 'Jordan', dob: mockDob, package: mockPackage, billingStatus: mockBillingStatus, handicap: mockHandicap }] : [] } }),
   useMonthSessions: (m) => mockMonth(m),
 }));
 jest.mock('../hooks/waitlist', () => ({ leaveWaitlist: (...args) => mockLeave(...args) }));
@@ -68,6 +75,9 @@ beforeEach(() => {
   mockConfirmation = { email: null, note: 'See you there.' };
   mockBillingStatus = 'active';
   mockDob = null;
+  mockHandicap = null;
+  mockMemberLoaded = true;
+  mockMemberError = null;
   jest.useFakeTimers('modern');
 });
 afterEach(() => {
@@ -297,6 +307,36 @@ describe('Repeat weekly in live mode (repeat report 2026-09-30)', () => {
     expect(r.text()).not.toContain('Dec 23');
     expect(mockBookRecurring).not.toHaveBeenCalled();
     await r.unmount();
+  });
+
+  // Owner ruling 2026-10-02: a week whose block is reserved by handicap is its own line, never "didn't go through".
+  test('a week reserved by handicap is skipped with the line that says why', async () => {
+    jest.setSystemTime(OCT_1);
+    const LINE = 'Reserved for handicaps of 5 or better.';
+    mockBookRecurring = jest.fn(async () => ({
+      booked: [{ date: '2026-11-24', id: 't_2026-11-24' }],
+      skipped: [
+        { date: '2026-11-10', reason: 'handicap-reserved', message: LINE },
+        { date: '2026-11-17', reason: 'handicap-reserved', message: LINE },
+      ],
+      windowEnd: '2026-12-16',
+      next: null,
+    }));
+    const r = await reserve('2026-11-03');
+    await r.click('Repeat every Tuesday through Wed, Dec 16');
+    await r.flush();
+    expect(r.text()).toContain('1 more week booked');
+    expect(r.text()).toContain(`Nov 10, Nov 17: ${LINE}`);
+    expect(r.text()).not.toContain("didn't go through");
+    await r.unmount();
+    // A skip that carries no line of its own still names the reason.
+    mockBookRecurring = jest.fn(async () => ({ booked: [], skipped: [{ date: '2026-11-10', reason: 'handicap-reserved' }], windowEnd: '2026-12-16', next: null }));
+    const bare = await reserve('2026-11-03');
+    await bare.click('Repeat every Tuesday through Wed, Dec 16');
+    await bare.flush();
+    expect(bare.text()).toContain('Nov 10: reserved for lower handicaps.');
+    expect(bare.text()).not.toContain("didn't go through");
+    await bare.unmount();
   });
 
   test('a rejected repeat shows its error text', async () => {
@@ -923,5 +963,218 @@ describe('the single token (owner rulings 2026-09-29/30)', () => {
     expect(child.text().split('Single tokens are available from Sat, Oct 10 at 7 AM.')).toHaveLength(2);
     expect(child.text()).not.toContain(ASK);
     await child.unmount();
+  });
+});
+
+// Owner ruling 2026-10-02: the Tuesday 3 PM training block is reserved for
+// handicaps of 5 or better (sessions.maxHandicap; data/reserved.js decides).
+describe('a handicap-reserved block', () => {
+  const NOV_12 = new Date('2026-11-12T22:30:00Z');
+  const TAG = 'Handicap 5 or better';
+  const LINE = 'Reserved for handicaps of 5 or better.';
+  const noneOnFile = (first) => `${LINE} No handicap is on file for ${first}. Ask the academy to add it.`;
+  const reserved = (over = {}) => ({ ...session, id: 'tue3', date: '2026-11-17', time: '3:00 PM', maxHandicap: 5, ...over });
+  const open = { ...session, id: 'tue4', date: '2026-11-17', time: '4:00 PM' };
+  const cardAt = (r, time) =>
+    [...r.container.querySelectorAll('div')].find((el) => el.textContent.startsWith(time) && el.textContent.includes('Training block')) || null;
+  const tap = async (el) => { await act(async () => { el.click(); }); };
+  const show = () => renderScreen(<BookSession bare demoSelectedDate="2026-11-17" />);
+  const tokens = { left: 3, unlimited: false, grace: [] };
+
+  beforeEach(() => {
+    jest.setSystemTime(NOV_12);
+    mockFirstSlot = '2026-11-17';
+    mockMonths = { '2026-11-01': [{ date: '2026-11-17', sessions: [reserved(), open] }] };
+  });
+
+  test('the tag reads for everyone; an athlete at the limit, or on 0 for a plus handicap, books as today', async () => {
+    for (const handicap of [5, 0]) {
+      mockHandicap = handicap;
+      mockBooked = [];
+      const r = await show();
+      const card = cardAt(r, '3:00');
+      expect(card.textContent).toContain(TAG);
+      expect(card.textContent).toContain('Spends 1 token');
+      expect(card.textContent).not.toContain('Reserved');
+      // The open block beside it carries no tag.
+      expect(cardAt(r, '4:00').textContent).not.toContain('Handicap');
+      expect(card.style.cursor).toBe('pointer');
+      await tap(card);
+      expect(mockBooked).toEqual(['tue3']);
+      expect(r.text()).toContain('Slot reserved');
+      await r.unmount();
+    }
+  });
+
+  test('a handicap over the limit: the tag and the line, and the block cannot be booked', async () => {
+    mockHandicap = 14;
+    const r = await show();
+    const card = cardAt(r, '3:00');
+    // Time, type chip, the tag, name, a Reserved pill for the spots, then the one line - no spend note.
+    expect(card.textContent).toBe(`3:00PMTraining${TAG}Training blockReserved${LINE}`);
+    expect(card.style.cursor).toBe('default');
+    await tap(card);
+    expect(mockBooked).toEqual([]);
+    expect(r.text()).not.toContain('Slot reserved');
+    // Every other block that day is theirs to book, as before.
+    expect(cardAt(r, '4:00').style.cursor).toBe('pointer');
+    await r.unmount();
+  });
+
+  test('no handicap on file: the same line, naming the athlete and who adds it', async () => {
+    mockHandicap = null;
+    const r = await show();
+    const card = cardAt(r, '3:00');
+    expect(card.textContent).toContain(noneOnFile('Jordan'));
+    expect(card.style.cursor).toBe('default');
+    await tap(card);
+    expect(mockBooked).toEqual([]);
+    await r.unmount();
+  });
+
+  test('a full reserved block: its waitlist is offered to an eligible athlete only', async () => {
+    mockMonths['2026-11-01'][0].sessions = [reserved({ booked: 6 })];
+    mockHandicap = 3;
+    const eligible = await show();
+    expect(cardAt(eligible, '3:00').textContent).toContain('Full');
+    expect(eligible.button('Join waitlist · reserves one token')).not.toBeNull();
+    await eligible.unmount();
+    for (const handicap of [14, null]) {
+      mockHandicap = handicap;
+      const r = await show();
+      expect(r.text()).not.toContain('Join waitlist');
+      expect(cardAt(r, '3:00').textContent).toContain(LINE);
+      await tap(cardAt(r, '3:00'));
+      expect(mockBookCalls).toEqual([]);
+      await r.unmount();
+    }
+  });
+
+  test('a parent: each child is judged on their own handicap', async () => {
+    mockHousehold = [
+      { id: 'k1', name: 'Ava Lund', handicap: 2, tokens },
+      { id: 'k2', name: 'Nico Lund', handicap: 18, tokens },
+      { id: 'k3', name: 'Mia Lund', handicap: null, tokens },
+    ];
+    const r = await renderScreen(<BookSession bare role="parent" demoSelectedDate="2026-11-17" />);
+    // Ava (the first child) is eligible.
+    expect(cardAt(r, '3:00').textContent).toContain(TAG);
+    expect(cardAt(r, '3:00').style.cursor).toBe('pointer');
+    expect(r.text()).not.toContain(LINE);
+    await r.click('Nico Lund');
+    expect(cardAt(r, '3:00').style.cursor).toBe('default');
+    expect(cardAt(r, '3:00').textContent).toContain(LINE);
+    expect(r.text()).not.toContain('No handicap is on file');
+    await tap(cardAt(r, '3:00'));
+    await r.click('Mia Lund');
+    expect(cardAt(r, '3:00').textContent).toContain(noneOnFile('Mia'));
+    await tap(cardAt(r, '3:00'));
+    expect(mockBookCalls).toEqual([]);
+    // The open block is still every child's to book.
+    expect(cardAt(r, '4:00').style.cursor).toBe('pointer');
+    await r.click('Ava Lund');
+    await tap(cardAt(r, '3:00'));
+    expect(mockBookCalls).toEqual([['tue3', { athleteId: 'k1' }]]);
+    expect(r.text()).toContain('Slot reserved');
+    await r.unmount();
+  });
+
+  test('an athlete already waiting when the block was reserved keeps the place and Leave', async () => {
+    mockMonths['2026-11-01'][0].sessions = [reserved({ booked: 6, waitlisted: true, waitlistPosition: 1, waitlistBy: { a1: 1 } })];
+    mockHandicap = 14;
+    const r = await show();
+    expect(r.text()).toContain('On the waitlist - #1 in line');
+    expect(r.button('Leave waitlist')).not.toBeNull();
+    expect(r.text()).not.toContain('Join waitlist');
+    await r.unmount();
+  });
+
+  test('Elite reads the line with no token wording', async () => {
+    mockPackage = { id: 'elite', kind: 'elite', windowDays: 45 };
+    mockTokens = { unlimited: true, grace: [] };
+    mockHandicap = null;
+    const r = await show();
+    expect(cardAt(r, '3:00').textContent).toContain(noneOnFile('Jordan'));
+    expect(cardAt(r, '3:00').style.cursor).toBe('default');
+    expect(r.text()).not.toMatch(/token/i);
+    await r.unmount();
+  });
+
+  test('until the athlete row has loaded the reserved block is inert and says nothing yet', async () => {
+    mockMemberLoaded = false;
+    const r = await show();
+    const card = cardAt(r, '3:00');
+    expect(card.textContent).toContain(TAG);
+    expect(card.textContent).not.toContain(LINE);
+    expect(card.style.cursor).toBe('default');
+    await tap(card);
+    expect(mockBooked).toEqual([]);
+    expect(cardAt(r, '4:00').style.cursor).toBe('pointer');
+    await r.unmount();
+  });
+
+  // The membership read rejected: the row is not on its way. Holding the card back would leave an eligible athlete
+  // looking at "Reserved" with no reason until a reload, so the tap goes through and the write decides.
+  test('the athlete row failed to load: the reserved block is not held back, and the write decides', async () => {
+    mockMemberError = new Error('The network dropped.');
+    const r = await show();
+    const card = cardAt(r, '3:00');
+    expect(card.textContent).toContain(TAG);
+    expect(card.textContent).not.toContain('Reserved');
+    expect(card.style.cursor).toBe('pointer');
+    await tap(card);
+    expect(mockBooked).toEqual(['tue3']);
+    expect(r.text()).toContain('Slot reserved');
+    await r.unmount();
+    // An athlete it is not for: createBooking reads the athlete itself and refuses with the card's line.
+    mockBook = async () => { throw Object.assign(new Error(LINE), { reason: 'handicap-reserved' }); };
+    const refused = await show();
+    await tap(cardAt(refused, '3:00'));
+    expect(refused.text()).toContain(`${LINE} Nothing was reserved.`);
+    expect(refused.text()).not.toContain('Slot reserved');
+    await refused.unmount();
+  });
+
+  test('a block with no handicap limit renders exactly as today, whatever is on file', async () => {
+    const drawn = [];
+    for (const row of [open, { ...open, maxHandicap: null }]) {
+      for (const handicap of [null, 3, 40]) {
+        mockMonths = { '2026-11-01': [{ date: '2026-11-17', sessions: [row] }] };
+        mockHandicap = handicap;
+        const r = await show();
+        const card = cardAt(r, '4:00');
+        expect(card.style.cursor).toBe('pointer');
+        drawn.push(card.outerHTML);
+        expect(r.text()).not.toContain('Handicap');
+        expect(r.text()).not.toContain('Reserved');
+        await r.unmount();
+      }
+    }
+    expect(new Set(drawn).size).toBe(1);
+    // The card as it read before the field existed: time, type chip, name, spend note, spots left.
+    const r = await show();
+    expect(cardAt(r, '4:00').textContent).toBe('4:00PMTrainingTraining blockSpends 1 token · 6 left4 left');
+    await tap(cardAt(r, '4:00'));
+    expect(mockBooked).toEqual(['tue4']);
+    expect(r.text()).toContain('Slot reserved');
+    await r.unmount();
+  });
+
+  test('a block reserved since the screen loaded: the write refuses with its own line, and no "try again"', async () => {
+    mockMonths = { '2026-11-01': [{ date: '2026-11-17', sessions: [open] }] };
+    mockHandicap = 14;
+    mockBook = async () => { throw Object.assign(new Error(LINE), { reason: 'handicap-reserved' }); };
+    const r = await show();
+    await tap(cardAt(r, '4:00'));
+    expect(r.text()).toContain(`${LINE} Nothing was reserved.`);
+    expect(r.text()).not.toContain('tap the session to try again');
+    expect(r.text()).not.toContain('Slot reserved');
+    await r.unmount();
+    // A refusal that carries no line of its own still reads plainly.
+    mockBook = async () => { throw Object.assign(new Error(''), { reason: 'handicap-reserved' }); };
+    const bare = await show();
+    await tap(cardAt(bare, '4:00'));
+    expect(bare.text()).toContain('This session is reserved for lower handicaps. Nothing was reserved.');
+    await bare.unmount();
   });
 });

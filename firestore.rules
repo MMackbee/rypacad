@@ -120,6 +120,50 @@ service cloud.firestore {
         == get(/databases/$(database)/documents/sessions/$(sessionId)).data.booked - 1;
     }
 
+    // 2026-10-02 (owner: "the Tuesday at 3 pm session is supposed to be
+    // reserved for under 5 handicaps so 5-0 and any + handicaps"): a session
+    // may carry `maxHandicap`, an int stamped by the calendar sync
+    // (scripts/sync-calendar-sessions.mjs RESERVED_RULES) and by nothing a
+    // client can write - the sessions block below grants no client that
+    // field. `s` is the session and `a` the athlete, both documents the
+    // calling clause has ALREADY read, so this costs no document access.
+    // A session with no maxHandicap, a null one, or one that is not an int
+    // is OPEN: the first line is true and the athlete is never looked at,
+    // so every write these rules admitted before this clause they still
+    // admit. On a reserved session the athlete's stored handicap must be an
+    // int at or under the limit (a plus handicap is stored as 0). None on
+    // file - null, or no field at all - is refused, whatever the package.
+    // Used by a family's booking create, its re-book and its waitlist join.
+    // Staff write none of those through this file.
+    // data/reserved.js reservedEligible is the client half.
+    //
+    // NOT COVERED HERE, BUT COVERED: waitlist promotion writes its booking
+    // with the Admin SDK (functions/portal/waitlist-order.js loadCandidate),
+    // which skips this file, so that function applies the same limit itself
+    // (reason 'handicap-reserved'). An entry made before the session was
+    // stamped, or held by an athlete whose handicap the academy raised
+    // after the join, is removed with a notice when its turn comes.
+    //
+    // ROLLOUT ORDER, each step safe with families booking:
+    //   0. functions - promotion's limit, inert until a session is stamped;
+    //   1. this file - with no session stamped the first line is true for
+    //      every write, so nothing new is refused, and the bundle that is
+    //      live sends no handicap update for the new branch to answer;
+    //   2. the frontend - with no session stamped it is the app it was, and
+    //      the staff Handicap card saves from its first load;
+    //   3. the calendar sync, which stamps the sessions - LAST, and for the
+    //      whole season: `--prod --dry-run --to 2027-02-27`, then the same
+    //      with `--yes`. Its default window is 90 days, which would leave
+    //      the January and February Tuesdays open to everyone. Stamped
+    //      ahead of this file the limit is only the screens' word, and a
+    //      tab still on the old bundle books past it.
+    // After step 3 a tab on the old bundle is refused here: its booking and
+    // its seat count are one commit, so neither lands.
+    function reservedOk(s, a) {
+      return !(s.get('maxHandicap', null) is int)
+        || (a.get('handicap', null) is int && a.handicap <= s.maxHandicap);
+    }
+
     // ---- users ---------------------------------------------------------
     // Matrix: "users self-read" (+ owner → all). Sprint 10 (contract v1.8,
     // "make it real"): ops now reads the full users collection too (E,
@@ -293,6 +337,29 @@ service cloud.firestore {
               || resource.data.get('facilityAccessConsent', null) != null);
       }
       allow update: if signedIn() && me().role in ['ops', 'owner'] && packageAssignmentUpdateOk();
+
+      // 2026-10-02: the academy sets or corrects an athlete's handicap
+      // (hooks/live.js setAthleteHandicap) - one more field-limited update
+      // branch, the same one-purpose shape as the two above.
+      // Until now the field could only be written at create (sign-up, the
+      // approval batch): no update clause named it. It now decides who may
+      // book a handicap-reserved session (reservedOk, top of this file), so
+      // the grant is as narrow as it can be: ops and owner only, the one
+      // field (+ updatedAt, the server time when written), and sign-up's
+      // own value range - an int 0..54, or null / removed for "none on
+      // file". A string, a float, -1 or 55 is refused. A parent or an
+      // athlete still cannot change a handicap after sign-up: neither
+      // member branch on this match (contractMinutesUpdateOk,
+      // pendingPackageUpdateOk) admits the field.
+      function handicapUpdateOk() {
+        let after = request.resource.data;
+        let changed = after.diff(resource.data).affectedKeys();
+        return changed.hasOnly(['handicap', 'updatedAt'])
+          && (after.get('handicap', null) == null
+              || (after.handicap is int && after.handicap >= 0 && after.handicap <= 54))
+          && (!changed.hasAny(['updatedAt']) || after.updatedAt == request.time);
+      }
+      allow update: if signedIn() && me().role in ['ops', 'owner'] && handicapUpdateOk();
 
       // Tester S4 (2026-09-30): a family may switch the package picked at
       // sign-up BEFORE the first payment - the household parent, or the
@@ -697,6 +764,18 @@ service cloud.firestore {
           && s.type == request.resource.data.type;
       }
 
+      // 2026-10-02: a handicap-reserved session (reservedOk, top of this
+      // file). The session and the athlete are the two documents
+      // bookingMatchesSession and bookingAthleteOk have just read, so the
+      // create's document count does not move: me, the session before and
+      // after this commit, the athlete, the household, and a grace token OR
+      // a comp period - still 6 of the 10-document cap on the longest path.
+      function bookingReservedOk() {
+        return reservedOk(
+          get(/databases/$(database)/documents/sessions/$(request.resource.data.sessionId)).data,
+          athleteData(request.resource.data.athleteId));
+      }
+
       // Hard OUTER bound on how far out a booking may reach (contract v2.0,
       // pin D) — a genuine server-side gate, not the client's own window
       // display: no package this catalogue can ever carry books further
@@ -743,6 +822,11 @@ service cloud.firestore {
       // seatTakenInCommit requires the session's `booked` to go up by
       // exactly one in this same commit, so a booking can no longer be
       // written past a full session's count.
+      //
+      // 2026-10-02: bookingReservedOk sits after bookingAthleteOk, which is
+      // what proves the athlete doc exists. It refuses a family's booking on
+      // a handicap-reserved session the athlete does not qualify for, and
+      // is true for every session without a limit.
       allow create: if signedIn()
         && bookingShapeOk()
         && bookingMatchesSession()
@@ -754,6 +838,7 @@ service cloud.firestore {
         && bookingId
              == request.resource.data.athleteId + '_' + request.resource.data.sessionId
         && bookingAthleteOk()
+        && bookingReservedOk()
         && (
           (me().role == 'athlete'
             && me().athleteId == request.resource.data.athleteId)
@@ -923,6 +1008,15 @@ service cloud.firestore {
       // re-book: me, athletes, households, graceTokens OR tokenPeriods
       // (never both - a 'period' charge carries no token id), and the
       // session read before and after - 6 of 10.
+      // 2026-10-02: a re-book is booking, so it takes reservedOk too (top
+      // of this file) - a cancelled booking on a handicap-reserved session
+      // cannot be re-confirmed once the athlete's handicap is over the
+      // limit or off the file. It reads the booking's own session and
+      // athlete, the documents seatTakenInCommit and athleteBillingOk read
+      // on this arm already, so the count stays 6 of 10. It sits between
+      // sessionDayNotOver and seatTakenInCommit, so the session reads are
+      // still only paid by a write every earlier clause admits. The cancel
+      // arm is untouched: anyone may still cancel what they hold.
       function rebookGraceOk(g, before) {
         let gd = get(/databases/$(database)/documents/graceTokens/$(g)).data;
         return gd.athleteId == before.athleteId && gd.expiresAt >= before.date;
@@ -969,6 +1063,9 @@ service cloud.firestore {
               && rebookHouseholdOk(before)
               && rebookChargeOk(before, after, diffKeys)
               && sessionDayNotOver(before.date)
+              && reservedOk(
+                   get(/databases/$(database)/documents/sessions/$(before.sessionId)).data,
+                   athleteData(before.athleteId))
               && seatTakenInCommit(before.sessionId))
         );
       }
@@ -1569,6 +1666,21 @@ service cloud.firestore {
           && bookingOpenOk(a);
       }
 
+      // 2026-10-02: a handicap-reserved session's waitlist takes only an
+      // athlete who could book it (reservedOk, top of this file), so nobody
+      // joins - and holds a token - for a seat they could not book. It is
+      // judged here at the join, and again by promotion when the entry's
+      // turn comes (functions/portal/waitlist-order.js). The session and
+      // the athlete are the documents waitlistSessionOk and
+      // waitlistAthleteOk have just read: the join stays at me, the
+      // session, the athlete's own booking id, the household and the
+      // athlete - 5 of the 10-document cap.
+      function waitlistReservedOk() {
+        return reservedOk(
+          get(/databases/$(database)/documents/sessions/$(request.resource.data.sessionId)).data,
+          athleteData(request.resource.data.athleteId));
+      }
+
       // 2026-10-01 (waitlist audit): an athlete who already holds a live
       // booking on this session has nothing to wait for, so the join is
       // refused and promotion never meets an entry whose seat is already
@@ -1595,6 +1707,7 @@ service cloud.firestore {
         && waitlistHouseholdOk()
         && entryId == request.resource.data.sessionId + '_' + request.resource.data.athleteId
         && waitlistAthleteOk()
+        && waitlistReservedOk()
         && (
           (me().role == 'athlete' && me().athleteId == request.resource.data.athleteId)
           || (me().role == 'parent' && me().householdId == request.resource.data.householdId)

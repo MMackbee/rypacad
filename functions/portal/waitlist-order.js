@@ -106,6 +106,16 @@ async function loadCandidate(reader, store, entry, ctx) {
   if (!lib.membershipAllowsBooking(household, athlete)) {
     return fail('membership-inactive');
   }
+  // A handicap-reserved block (owner ruling 2026-10-02): the rules stop an
+  // ineligible athlete joining its waitlist, but this write is the Admin
+  // SDK's and the rules never see it. An athlete whose handicap staff raised
+  // after joining, or who queued before the block was reserved, is not
+  // seated here either.
+  if (Number.isInteger(session.maxHandicap) &&
+      !(Number.isInteger(athlete.handicap) &&
+          athlete.handicap <= session.maxHandicap)) {
+    return fail('handicap-reserved');
+  }
 
   // The period is derived from the SESSION's date and the household's own
   // anchor - never from the entry's stored periodKey, which a client wrote.

@@ -18,6 +18,7 @@ import { buildMonthDayMaps, useMonthNavState } from '../components/MonthCalendar
 import { longDayLabel, parseTimeToMinutes, todayISO } from '../data/calendar';
 import { SEASON_BOUNDS } from '../data/season';
 import { contractEnabled } from '../data/contractFlag';
+import { reservedTag } from '../data/reserved';
 
 /**
  * 12 · Coach Dashboard - coach.
@@ -257,6 +258,8 @@ function SessionsTab({ firstSessionDate, onOpenRoster }) {
                 meridiem={meridiem}
                 type={session.type}
                 ageGroup={session.ageGroup}
+                // A handicap-reserved block carries the tag families see.
+                reserved={reservedTag(session)}
                 name={session.name}
                 meta={`${session.booked ?? 0} of ${session.capacity ?? '—'} booked`}
                 nameSize={15}
@@ -382,6 +385,7 @@ function BlockCard({ block, blockIndex, onOpenRoster }) {
       meridiem={meridiem}
       type={block.type}
       ageGroup={block.ageGroup}
+      reserved={reservedTag(block)}
       name={block.name}
       meta={block.meta}
       nameSize={15}

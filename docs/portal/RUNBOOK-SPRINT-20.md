@@ -178,6 +178,25 @@ This runs BEFORE any smoke booking. Families see a session only once its date
 is inside their package's 30-day booking window (45 for Elite), and before
 Oct 10 a non-Elite family sees it with Reserve disabled.
 
+**Handicap-reserved Tuesdays (owner ruling 2026-10-02).** The sync stamps
+`maxHandicap: 5` on every Tuesday 3:00 PM `Training...` block
+(`RESERVED_RULES`, docs/portal/DATA-MODEL.md). Run it for this only AFTER the
+`firestore.rules` that enforce the limit are deployed, and for the whole
+season, not the 90-day default:
+
+```bash
+node scripts/sync-calendar-sessions.mjs --prod --dry-run --to 2027-02-27
+node scripts/sync-calendar-sessions.mjs --prod --yes --to 2027-02-27
+```
+
+The dry run's `Handicap-reserved in window` line must name every Tuesday
+3 PM block from Nov 3 through Feb 23. If the line is missing, the calendar
+event is not titled `Training...` and nothing would be reserved: stop. The
+wider window also applies any other calendar edit made for January and
+February, so read the whole plan. Each `+ maxHandicap 5` update that says
+bookings are already on the block needs a look at its bookings and its
+waitlist before `--yes`.
+
 ## 6. Packages + production smoke, TEST Stripe (12.8)
 
 ```bash

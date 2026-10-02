@@ -180,6 +180,15 @@ turn into bonus tokens, and the two now mint the same document id.
    schedule; its booking path is an owner ruling for a later sprint. When it
    reaches the shared calendar its title must not begin "Training" or
    "Tournament", or the sync makes it bookable by everyone.
+   **TUESDAY RULED 2026-10-02:** the Tuesday 3 PM block is booked in the
+   portal, reserved for handicaps of 5 or better (`sessions.maxHandicap`,
+   stamped by the sync's `RESERVED_RULES`; DATA-MODEL.md). Its calendar
+   title must now begin "Training" so the session exists. Thursday 3 PM is
+   still unruled and still must not. Waitlist promotion applies the same
+   limit (`functions/portal/waitlist-order.js` `loadCandidate`, reason
+   `handicap-reserved`): an entry made before the stamp, or held by an
+   athlete whose handicap staff raised later, is removed with a notice
+   when its turn comes, never seated.
 2. **`t-20` retired** — gone from the catalogue and seeds; production loses
    the doc on the next user-gated `provision-family.mjs` catalogue run. Any
    athlete still pointing at it reads "no package" until reassigned.

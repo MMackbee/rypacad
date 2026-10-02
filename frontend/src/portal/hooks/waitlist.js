@@ -38,6 +38,7 @@ import {
   wrap,
 } from './live';
 import { normalizeAnchorDay, periodFor } from '../data/packages';
+import { handicapLimitOf } from '../data/reserved';
 
 /**
  * Every waitlist entry for one session, joinedAt ascending. STAFF ONLY under
@@ -256,9 +257,11 @@ export default function useWaitlist(sessionId, { athleteId } = {}) {
         date: session.date,
         periodKey,
         // The session's own start time and type: joinWaitlist's started,
-        // Yannick and Elite one-a-day checks read them.
+        // Yannick and Elite one-a-day checks read them. Its handicap limit
+        // (2026-10-02) feeds the reserved check the same way.
         time: session.time ?? null,
         type: session.type ?? null,
+        maxHandicap: handicapLimitOf(session),
       });
     } catch (err) {
       setError(err);

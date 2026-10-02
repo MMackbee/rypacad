@@ -43,13 +43,17 @@ export function reasonCopy(reason) {
   if (reason === 'session-past') return SESSION_STARTED_COPY;
   if (reason === 'waitlist-closed') return 'The waitlist for this session has closed.';
   if (reason === 'no-waitlist') return "Yannick's sessions have no waitlist.";
+  // Owner ruling 2026-10-02: a block reserved by handicap (data/reserved.js).
+  // The card says the limit; this is the write's refusal, when a screen
+  // loaded before the block was reserved let the tap through.
+  if (reason === 'handicap-reserved') return 'This session is reserved for lower handicaps.';
   if (reason === 'membership-inactive') return "This membership isn't active right now.";
   return null;
 }
 
 /** False for the refusals a second tap on the same session cannot change. */
 export function canRetry(reason) {
-  return !['full', 'session-past', 'waitlist-closed', 'no-waitlist'].includes(reason);
+  return !['full', 'session-past', 'waitlist-closed', 'no-waitlist', 'handicap-reserved'].includes(reason);
 }
 
 /** The non-cancellable Calendly row's action copy (MySchedule, Reservations). */

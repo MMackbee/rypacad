@@ -93,7 +93,7 @@ needs — and nothing medical (see the subcollection below).
 | `updatedAt` | timestamp \| absent | **Contract v1.9 (Sprint 11 pin B), narrowed by v2.0 (Sprint 12 pin A).** Written ONLY by the ops/owner package-assignment branch: `after.diff(resource.data).affectedKeys().hasOnly(['packageId', 'updatedAt'])` — the mask narrows from `['packageId', 'fitnessPackageId', 'updatedAt']` now that there is one field to assign, not two. Caller `ops \| owner`, a field-limited update alongside `contractMinutes`' own single-field branch in this table. Backs `setAthletePackages(athleteId, { packageId })` → `useAssignPackages()` (routing lane); one `bump('athletes')` per write. Assignment is IMMEDIATE and un-prorated — token position is derived, so headroom changes for the *next* booking only; nothing already booked is touched. Absent on every seeded/provisioned athlete until the first reassignment through this branch. |
 | `contractMinutes` | number \| null | `20 \| 45 \| 90 \| null` — Commitment Contract tier (**90 since the owner's ruling of 2026-09-22**; 95 was the original handoff's value and the rules still ACCEPT it, so an athlete who already holds it is not broken — nothing offers it any more). **Contract v1.8 (Sprint 10 pin B): client-settable.** Rules allow an update of ONLY this field (`diff.hasOnly(['contractMinutes'])`) by two callers: the athlete's own `users` account, or the household's parent — the same three-way linkage reasoning as a booking create (own athlete, or own household's athlete via `get()`), not open to any signed-in user. This is what lets `useContract().setTier(minutes)` back the NoContract tier picker's CTA (athlete) and AthleteDetail's "Start a contract" card (parent) instead of both being dead ends. `nico` stays seeded `null` on purpose (below) so this intake path always has a real no-tier athlete to exercise. |
 | `coachId` | string \| null | uid of a `users` doc with `role == 'coach'`. Coach access filters on this assignment, never on role alone. |
-| `handicap` | int 0..54 \| null | **Contract v3.0.1 (Sprint 20).** Current handicap from sign-up ("none yet" == null). Rules admit it on create only in range; ops edits later. Absent == null. Seed: jordan 14, reese 27, nico null. |
+| `handicap` | int 0..54 \| null | **Contract v3.0.1 (Sprint 20).** Current handicap from sign-up ("none yet" == null). A plus handicap is entered as 0. Rules admit it on create only in range. **2026-10-02:** ops and the owner may update this one field afterwards (`handicapUpdateOk`: `handicap` + the server `updatedAt`, int 0..54 or null / removed; `hooks/handicap.js` `setAthleteHandicap({ athleteId, handicap })`). A parent or an athlete can never change it after sign-up. It decides who may book a handicap-reserved session (`sessions.maxHandicap`, below). Absent == null. Seed: jordan 4, reese 27, nico null. |
 | `loginEmail` | string \| null | Sprint 20. The child's own login address, lower-cased by client AND function; null == the parent's account runs the child. Pairs with `loginInvites/{loginEmail}`. Absent == null. |
 | `billing` | map \| absent | **Sprint 20 - server-written only (`createFamily`, `stripeWebhook`), never in a client `hasOnly`.** `{ status: 'pending' \| 'active' \| 'past_due' \| 'lapsed', customerId, subscriptionId, priceId, checkoutSessionId, lastEventId, updatedAt }` (ids null until `checkout.session.completed`; `lastEventId` is the Stripe `event.id` of the last webhook write, the same cross-reference `households.membership.lastEventId` keeps - PM ruling D8; `createFamily`'s `pending` map does not carry it, the webhook adds it on the first write, so absent == no webhook write yet). **ABSENT == `active`** - every athlete provisioned before Sprint 20 books unchanged. `pending` is the booking gate (rules `athleteBillingOk`, client `billing-pending`). Seed: `pending` on nico only, exactly as `createFamily` writes it (no `lastEventId`). **Single token (owner rulings 2026-09-29/30, spec D20):** a paid one-time single purchase writes `{ status: 'active', oneTime: true, subscriptionId: null, customerId, priceId, checkoutSessionId (the latest purchase), lastEventId }`. `oneTime` absent == false; the subscription checkout and the tier `invoice.paid` writers set `oneTime: false`. A `oneTime` athlete whose `packageId` is no longer `'single'` is payment-PENDING until the new package is paid (rules `athleteBillingOk`, `live.js`, `lib.membershipAllowsBooking`, `data/billingCopy.js` `billingStatusOf`). `retiredSubscriptionIds: string[]` (absent == []) holds a former tier subscription the single purchase replaced; the webhook records later events for one as `ignored-retired-subscription` and writes nothing. `stripe-billing.otherTierLive` counts an active single athlete as a live tier, so a single sibling's paid tokens keep the household from lapsing when a monthly sibling's subscription ends (documented, no code change). |
 | `facilityBilling` | map \| absent | Sprint 20, webhook only. `{ status: 'active' \| 'past_due' \| 'lapsed', customerId, subscriptionId, priceId, checkoutSessionId, lastEventId, updatedAt }` - the same shape as `billing` minus `pending` (PM ruling D8; the webhook's `billingPatch` writes both maps through one helper) - the $300 add-on subscription; absent == no add-on. Paid -> `facilityAccess: true`; lapse/delete -> `facilityAccess: false`. **Scope of a facility lapse (PM ruling D10):** `customer.subscription.deleted` / `invoice.payment_failed` resolved to `product: 'facility'` write `facilityBilling.status` and `facilityAccess: false` ONLY - never `households.membership`, never `billing`, never a booking revocation. The household-freeze in spec 4.3 ("AND to household membership exactly as today") applies to the TIER subscription only. `facilityAccessConsent` stays ops-verified. |
@@ -166,6 +166,7 @@ cases.
 | `status` | string | **Contract v1.2.** `scheduled \| cancelled`, default `scheduled`. The calendar sync sets `cancelled` — never deletes — when a synced session's calendar instance disappears but the session has bookings, so families are told rather than ghosted. |
 | `gcalEventId` | string \| null | **Contract v1.2.** The calendar instance id a synced session came from; null for generator-seeded sessions. The sync matches sessions by this id, so a retitled or retimed event updates its session instead of duplicating it. |
 | `coachNote` | string \| null | `<= 500` chars. **Contract v1.8 (Sprint 10 pin H).** Rules allow an update of ONLY this field (a second field-limited branch beside the `booked`-diff clause) by the assigned coach, any specialist, or mental/ops/owner. Backs `useSessionAttendance().setSessionNote(sessionId, note)` and the roster's "Add a session note" editor — the same inline-editor idiom the no-show reason already uses. Null on every seeded session except one past attended training block (see the [seeding workflow](#seeding--emulator-workflow) below). |
+| `maxHandicap` | int \| absent | **Owner ruling 2026-10-02** ("the Tuesday at 3 pm session is supposed to be reserved for under 5 handicaps so 5-0 and any + handicaps"). The handicap limit of a reserved session; today `5` on every Tuesday 3:00 PM `training` block and on nothing else (the 3 PM fitness session with Phil at the same time is not reserved). **Absent or null == open to everyone**, which is every session written before the field existed. Stamped only by the calendar sync from its one `RESERVED_RULES` table ([Calendar → sessions sync](#calendar--sessions-sync)); no client can write it, staff included. An athlete may book, re-book or join the waitlist of a session that carries it only when `athletes.handicap` is an int at or under it; no handicap on file is refused, on every package. Enforced by `firestore.rules` `reservedOk()` on a family's booking create, re-book and waitlist join (the documents those clauses already read, so no extra document access), and mirrored on the client by `data/reserved.js` (`reservedEligible`, typed reason `'handicap-reserved'`). Bookings and waitlist entries made before a session was stamped are left as they are, and so are those of an athlete whose handicap the academy raises afterwards. **Promotion applies the same limit** (`functions/portal/waitlist-order.js` `loadCandidate`, reason `handicap-reserved`; the Admin SDK skips the rules, so the function checks it itself): an entry made before the stamp, or held by an athlete whose handicap staff raised later, is removed with a `waitlist-removed` notice when its turn comes, never seated. Seed: one hand-added session, `2026-11-17-r0`. |
 | `source` | string \| absent | **Sprint 20.** `'calendly'` on `cal-` docs written by `calendlyWebhook`; absent == `'portal'`/sync. |
 | `calendlyEventUri` | string \| absent | Sprint 20, `cal-` docs only. |
 | `bookable` (Calendly) | boolean | `false` on every `cal-` doc so `liveSpecialistDays` never offers a freed Calendly slot in-app; absent == true (`hooks/index.js:260`). |
@@ -328,6 +329,36 @@ timezone.
   deleted-and-recreated when empty, but patched in place (id kept, flagged as
   a CONFLICT in the run report) when it has bookings — preserving bookings
   outranks the id convention.
+- **Handicap-reserved sessions (2026-10-02).** `RESERVED_RULES` in the script
+  is the one table that says which sessions are reserved: a row is
+  `{ weekday, time, type, maxHandicap }`, today
+  `{ weekday: 2, time: '3:00 PM', type: 'training', maxHandicap: 5 }`. The
+  weekday is taken from the session's own `YYYY-MM-DD` as a calendar date, so
+  the machine's time zone cannot move it. A matching session is created with
+  `maxHandicap`; an existing one gets it through the same masked patch, with
+  `maxHandicap` added to the mask. A session no rule matches is created with
+  no such field, and an existing session that has none (or null) is
+  `unchanged`, so the first run after a rule is added updates exactly the
+  reserved sessions. When a rule is removed, or the event moves off the
+  reserved slot, the field is deleted from the sessions that carry it. The
+  plan lists the reserved sessions in the window and marks each update
+  (`+ maxHandicap 5`, with a note when the session already has bookings, or
+  `maxHandicap removed`). The note counts bookings only - the sync does not
+  read the waitlist, so a block that is full may also hold a queue to check.
+  Only a bookable event can be reserved: a Tuesday
+  3 PM event whose title does not start with "Training" is display-only and
+  never becomes a session. **Rollout order:** `firestore.rules`, then the
+  frontend, then this sync - it stamps LAST. Until a session is
+  stamped the new rules and the new frontend behave exactly as before
+  (rules first, so the staff Handicap card saves from its first load);
+  stamped ahead of the rules, the limit would only be the screens' word.
+  **The first stamp covers the whole season:**
+  `node scripts/sync-calendar-sessions.mjs --prod --dry-run --to 2027-02-27`,
+  then the same with `--yes`. The default window is 90 days, which stops
+  short of the January and February Tuesdays and would leave them open to
+  everyone; the dry run's `Handicap-reserved in window` line must name every
+  Tuesday 3 PM block from Nov 3 through Feb 23 (17 Tuesdays, less any the
+  calendar does not run).
 
 Same production guard as the seed script: writes require
 `FIRESTORE_EMULATOR_HOST` pointing at a local host or the script exits;
@@ -2140,6 +2171,13 @@ The seed script:
     `status` field at all (the pre-existing gap this document has flagged
     since Sprint 9); see the `waitlist` collection section above for why
     this matters to routing's pin-F rule.
+  - ONE seed-only handicap-reserved session (2026-10-02),
+    `2026-11-17-r0`, hand-added on a new letter (`-r`) the same way: a
+    Tuesday 3:00 PM `training` block with `maxHandicap: 5`, `booked: 0`,
+    capacity copied from that day's generated 4 PM block. The generator
+    still produces no Tuesday 3 PM block, so no other id moves. The
+    Whitfield handicaps (jordan 4, reese 27, nico null) give one athlete
+    who may book it, one over the limit and one with none on file.
   - `households.membership` — **absent on `whitfield`** (stays active, zero
     migration) and `{ status: 'past_due', stripeSubscriptionStatus:
     'past_due', currentPeriodStart, currentPeriodEnd, lastEventId:
