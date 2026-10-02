@@ -1,8 +1,14 @@
-import React, { useState } from 'react';
+import React, { useRef, useState } from 'react';
 import { color, radius, tint } from '../tokens';
 import Button from './Button';
 import { Body, ScreenTitle } from './Primitives';
 import { seriesOffer, seriesSummary } from '../hooks/cancelSeries';
+
+/**
+ * `keepFirst` only: how long after the sheet opens a confirm tap is still the
+ * double tap that opened it. Well under the time it takes to read the question.
+ */
+export const SETTLE_MS = 500;
 
 /**
  * The "keep it / cancel reservation" bottom sheet — Sprint 9's cancellation
@@ -30,6 +36,20 @@ import { seriesOffer, seriesSummary } from '../hooks/cancelSeries';
  * that were not and why - instead of closing. With no later weeks (and for
  * Roster, which passes neither prop) the sheet is exactly as before.
  *
+ * Deleting a scholarship application (owner, 2026-10-01) is the same
+ * confirm step again - AdminScholarships.js - with two more overridables.
+ * `busyLabel` because that write is not a cancellation. `keepFirst` because
+ * its Delete button can sit just above the tab bar, where this sheet's upper
+ * button lands when it opens: with the keep button on top, the second tap of
+ * a double tap closes the sheet instead of confirming, and the keep button
+ * is first in the tab order and takes the focus, so Enter or Space on a
+ * freshly opened sheet keeps too. Where the buttons land is layout, though,
+ * and nothing pins it, so `keepFirst` does not rest on it alone: a confirm
+ * tap in the sheet's first half second (SETTLE_MS) is taken for the tail of
+ * the tap that opened it and does nothing - a delete cannot be confirmed
+ * before the question has been on screen. Passing neither leaves the sheet
+ * as it was.
+ *
  * @param {string} title  Defaults to the member-cancel wording.
  * @param {React.ReactNode} summary  The one-line "Tue Nov 4 · 4:00 PM ·
  *   Training block" restatement of what is being cancelled — the caller
@@ -37,7 +57,13 @@ import { seriesOffer, seriesSummary } from '../hooks/cancelSeries';
  *   differently (Reservations rows carry an athlete name; Roster's own
  *   cancel-session sheet states a booking + grace-token count instead).
  * @param {string} [confirmLabel]  Defaults to "Cancel reservation".
+ * @param {string} [busyLabel]  The confirm button while onConfirm runs.
+ *   Defaults to "Cancelling".
  * @param {string} [keepLabel]  Defaults to "Keep it".
+ * @param {boolean} [keepFirst]  The keep button above the confirm button(s)
+ *   and focused when the sheet opens, and no confirm taken in the sheet's
+ *   first half second. Defaults to false: keep last, no focus moved, a
+ *   confirm taken at once.
  * @param {() => Promise<any>} onConfirm  Must reject with a human-readable
  *   `.message` on failure — this sheet renders it verbatim, never a generic
  *   "something went wrong".
@@ -52,7 +78,9 @@ export default function CancelSheet({
   title = 'Cancel this reservation?',
   summary,
   confirmLabel = 'Cancel reservation',
+  busyLabel = 'Cancelling',
   keepLabel = 'Keep it',
+  keepFirst = false,
   laterWeeks,
   onClose,
   onConfirm,
@@ -64,6 +92,8 @@ export default function CancelSheet({
   const [error, setError] = useState(null);
   // cancelSeries' result once a series run changed anything or finished.
   const [result, setResult] = useState(null);
+  // When the sheet opened. Only keepFirst reads it.
+  const openedAt = useRef(Date.now());
   const offer = onConfirmSeries ? seriesOffer(laterWeeks) : null;
   const done = result ? seriesSummary(result) : null;
 
@@ -88,6 +118,9 @@ export default function CancelSheet({
   };
 
   const handleCancel = async () => {
+    // keepFirst: too soon after opening to be an answer. (A clock set back while the sheet is open is not "too soon".)
+    const sinceOpened = Date.now() - openedAt.current;
+    if (keepFirst && sinceOpened >= 0 && sinceOpened < SETTLE_MS) return;
     setSaving('one');
     setError(null);
     try {
@@ -102,6 +135,12 @@ export default function CancelSheet({
       );
     }
   };
+
+  const keep = (
+    <Button variant="outline" height={50} disabled={Boolean(saving)} autoFocus={keepFirst} style={{ boxShadow: 'none' }} onClick={onClose}>
+      {keepLabel}
+    </Button>
+  );
 
   return (
     <div
@@ -152,6 +191,7 @@ export default function CancelSheet({
           </div>
         ) : (
           <div style={{ display: 'flex', flexDirection: 'column', gap: 10, marginTop: 16 }}>
+            {keepFirst ? keep : null}
             <Button
               variant="dangerOutline"
               height={50}
@@ -160,7 +200,7 @@ export default function CancelSheet({
               style={{ boxShadow: 'none' }}
               onClick={handleCancel}
             >
-              {saving === 'one' ? 'Cancelling' : offer ? 'Cancel just this one' : confirmLabel}
+              {saving === 'one' ? busyLabel : offer ? 'Cancel just this one' : confirmLabel}
             </Button>
             {offer ? (
               <Button
@@ -174,9 +214,7 @@ export default function CancelSheet({
                 {saving === 'series' ? 'Cancelling' : offer.confirmLabel}
               </Button>
             ) : null}
-            <Button variant="outline" height={50} disabled={Boolean(saving)} style={{ boxShadow: 'none' }} onClick={onClose}>
-              {keepLabel}
-            </Button>
+            {keepFirst ? null : keep}
           </div>
         )}
       </div>

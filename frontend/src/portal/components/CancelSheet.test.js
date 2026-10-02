@@ -1,6 +1,6 @@
 import React, { act } from 'react';
 import { createRoot } from 'react-dom/client';
-import CancelSheet from './CancelSheet';
+import CancelSheet, { SETTLE_MS } from './CancelSheet';
 
 /**
  * The cancel dialog with and without a series (tester Mike, 2026-09-30):
@@ -62,6 +62,92 @@ describe('without a series the dialog is exactly as before', () => {
     expect(r.text()).toContain('This booking no longer exists.');
     expect(r.calls.cancelled).toBe(0);
     expect(r.labels()).toEqual(['Cancel reservation', 'Keep it']);
+    await r.unmount();
+  });
+});
+
+describe('keepFirst and busyLabel (the scholarship delete, 2026-10-01)', () => {
+  const labels = { title: 'Delete this application?', confirmLabel: 'Delete for good', keepLabel: 'Keep application' };
+  // The clock is the test's: with keepFirst the sheet takes no confirm in its first half second.
+  let now;
+  beforeEach(() => { now = Date.parse('2026-10-01T15:00:00Z'); jest.spyOn(Date, 'now').mockImplementation(() => now); });
+  afterEach(() => { jest.restoreAllMocks(); });
+  const off = (r) => [...r.container.querySelectorAll('button')].map((b) => b.disabled);
+
+  test('left out, the keep button is last and the sheet takes no focus', async () => {
+    const r = await mount(labels);
+    expect(r.labels()).toEqual(['Delete for good', 'Keep application']);
+    expect(r.container.contains(document.activeElement)).toBe(false);
+    await r.unmount();
+  });
+
+  test('keepFirst: the keep button is first, holds the focus, and still only closes', async () => {
+    const r = await mount({ ...labels, keepFirst: true });
+    expect(r.labels()).toEqual(['Keep application', 'Delete for good']);
+    expect(document.activeElement.textContent.trim()).toBe('Keep application');
+    await r.click('Keep application');
+    expect(r.calls).toEqual({ close: 1, cancelled: 0, one: 0, series: 0 });
+    await r.unmount();
+  });
+
+  test('busyLabel names the write while it runs; both buttons are off until it lands, so a second tap confirms nothing', async () => {
+    let land;
+    let confirms = 0;
+    const r = await mount({ ...labels, keepFirst: true, busyLabel: 'Deleting', onConfirm: () => { confirms += 1; return new Promise((resolve) => { land = resolve; }); } });
+    now += SETTLE_MS;
+    await r.click('Delete for good');
+    expect(r.labels()).toEqual(['Keep application', 'Deleting']);
+    expect([...r.container.querySelectorAll('button')].map((b) => b.disabled)).toEqual([true, true]);
+    await r.click('Deleting');
+    await r.click('Keep application');
+    expect(confirms).toBe(1);
+    expect(r.calls).toEqual({ close: 0, cancelled: 0, one: 0, series: 0 });
+    await act(async () => { land(); });
+    expect(confirms).toBe(1);
+    expect(r.calls).toEqual({ close: 0, cancelled: 1, one: 0, series: 0 });
+    await r.unmount();
+  });
+
+  test('keepFirst: a confirm in the first half second is the tail of the tap that opened the sheet and does nothing; after it, it confirms', async () => {
+    const r = await mount({ ...labels, keepFirst: true });
+    // The second tap of a double tap, at once and again just inside the half second.
+    await r.click('Delete for good');
+    now += SETTLE_MS - 1;
+    await r.click('Delete for good');
+    // Nothing started: no write, nothing closed, no message, and both buttons as they were.
+    expect(r.calls).toEqual({ close: 0, cancelled: 0, one: 0, series: 0 });
+    expect(r.labels()).toEqual(['Keep application', 'Delete for good']);
+    expect(off(r)).toEqual([false, false]);
+    expect(r.text()).not.toMatch(/could not|Try again/);
+    now += 1;
+    await r.click('Delete for good');
+    expect(r.calls).toEqual({ close: 0, cancelled: 1, one: 1, series: 0 });
+    await r.unmount();
+  });
+
+  test('keepFirst: keeping is taken at once, and a clock set back while the sheet is open does not lock the confirm', async () => {
+    const kept = await mount({ ...labels, keepFirst: true });
+    await kept.click('Keep application');
+    expect(kept.calls).toEqual({ close: 1, cancelled: 0, one: 0, series: 0 });
+    await kept.unmount();
+    const r = await mount({ ...labels, keepFirst: true });
+    now -= 60 * 60 * 1000;
+    await r.click('Delete for good');
+    expect(r.calls).toEqual({ close: 0, cancelled: 1, one: 1, series: 0 });
+    await r.unmount();
+  });
+
+  test('without keepFirst a confirm is taken at once, as it always was', async () => {
+    const r = await mount(labels);
+    await r.click('Delete for good');
+    expect(r.calls).toEqual({ close: 0, cancelled: 1, one: 1, series: 0 });
+    await r.unmount();
+  });
+
+  test('without busyLabel the working label is the one it always was', async () => {
+    const r = await mount({ onConfirm: () => new Promise(() => {}) });
+    await r.click('Cancel reservation');
+    expect(r.labels()).toEqual(['Cancelling', 'Keep it']);
     await r.unmount();
   });
 });

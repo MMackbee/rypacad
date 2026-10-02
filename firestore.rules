@@ -1658,15 +1658,16 @@ service cloud.firestore {
     // (functions/portal/scholarship.js, Admin SDK) from the public website's
     // form, and read at /portal/admin/scholarships.
     //
-    // OWNER ONLY, to read and to decide - not ops, not a coach or a
-    // specialist, not a family account. The doc holds a child's name and
+    // OWNER ONLY, to read, to decide and to delete - not ops, not a coach or
+    // a specialist, not a family account. The doc holds a child's name and
     // date of birth and a family's own account of its finances, and nobody
     // but the owner has a job to do with it. The role is compared with ==,
     // not `in [...]`, so the staff lists used everywhere else in this file
     // can never be pasted in here by habit.
     //
-    // The one client write is the DECISION, a label and nothing more (it
-    // moves no billing, no package and no Stripe object, and sends no email):
+    // The one client write that changes a doc is the DECISION, a label and
+    // nothing more (it moves no billing, no package and no Stripe object, and
+    // sends no email):
     //   - approve / decline: status 'approved' | 'declined', decidedBy the
     //     caller's own uid and decidedAt request.time (the client writes
     //     serverTimestamp()) - checked on the doc as the write leaves it, so
@@ -1674,15 +1675,31 @@ service cloud.firestore {
     //   - reopen: status back to 'new' with decidedBy and decidedAt removed.
     // affectedKeys() pins the write to those three fields: the answers the
     // family typed, the counters and email_status cannot be edited by any
-    // client, the owner included. No create and no delete clause - an
-    // application only ever arrives through the function, and a
-    // resubmission there is an Admin SDK merge that leaves these three
-    // fields as the owner set them.
+    // client, the owner included. No create clause - an application only
+    // ever arrives through the function, and a resubmission there is an
+    // Admin SDK merge that leaves these three fields as the owner set them.
+    //
+    // The other client write is the owner's DELETE (owner 2026-10-01: the
+    // website's privacy page tells a family "Ask us to delete yours at any
+    // time", and this is how that is kept). Owner only, like the read, and
+    // the whole doc goes - there is no partial delete. The condition never
+    // reads the document, so deleting one that is already gone (a second
+    // tab) is allowed and changes nothing. It removes the doc and nothing
+    // else: the copy the function emailed to the director is not in
+    // Firestore and is deleted from the academy's email by hand. A family
+    // that sends the form again afterwards is a first submission to the
+    // function - a new doc, status 'new'. (One exception, in DATA-MODEL.md:
+    // a form the function was already handling when the delete landed. It
+    // read the doc before the delete and merges after it, so the doc comes
+    // back with the earlier count and first-sent time and NO status field,
+    // which the screen reads as new. The decision below still applies to
+    // such a doc: it is checked on the doc as the write leaves it.)
     //
     // DEPLOY ORDER: functions:submitScholarship first (the build before it
     // rewrites status to 'new' on a resubmission, which would undo a
     // decision), then this file, then the frontend - the owner's card and
-    // screen read nothing until this block is live.
+    // screen read nothing until this block is live, and the screen's Delete
+    // is refused until the delete clause is.
     match /scholarshipApplications/{applicationId} {
       function scholarshipDecisionOk() {
         let d = request.resource.data;
@@ -1702,6 +1719,10 @@ service cloud.firestore {
       allow read: if signedIn() && me().role == 'owner';
 
       allow update: if signedIn() && me().role == 'owner' && scholarshipDecisionOk();
+
+      // The same condition as the read: the owner, whatever the doc holds
+      // and whether or not it is still there.
+      allow delete: if signedIn() && me().role == 'owner';
     }
 
     // ---- scholarshipMeta --------------------------------------------------

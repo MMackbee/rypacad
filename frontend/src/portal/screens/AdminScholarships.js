@@ -1,17 +1,18 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { TOUCH_MIN, color, font } from '../tokens';
 import { useScholarships } from '../hooks';
-import { decideScholarship } from '../hooks/scholarships';
+import { decideScholarship, deleteScholarship } from '../hooks/scholarships';
 import BottomTabBar from '../components/BottomTabBar';
 import Button from '../components/Button';
+import CancelSheet from '../components/CancelSheet';
 import PhoneFrame from '../components/PhoneFrame';
 import Segmented from '../components/Segmented';
 import StatusBadge from '../components/StatusBadge';
 import { BackLink, Banner, Body, Card, ErrorNotice, ScreenTitle, SectionLabel } from '../components/Primitives';
 import { todayISO } from '../data/calendar';
 import {
-  SCHOLARSHIP_FILTERS, SCHOLARSHIP_STATUS, ageOn, athleteLine, decisionActions, emailStatusLabel, emptyCopy, filterScholarships, guardianLine, mailtoHref,
-  requestLine, scholarshipCounts, sentLine, sentMs, statusOf, submissionsLabel, submittedLabel, telHref, updatedSinceDecision,
+  SCHOLARSHIP_FILTERS, SCHOLARSHIP_STATUS, ageOn, athleteLine, decisionActions, deleteWarnings, emailStatusLabel, emptyCopy, filterScholarships, guardianLine,
+  mailtoHref, requestLine, scholarshipCounts, sentLine, sentMs, statusOf, submissionsLabel, submittedLabel, telHref, updatedSinceDecision,
 } from '../data/scholarships';
 
 /**
@@ -42,6 +43,22 @@ import {
  * nothing and says so - including one refused because the family sent the
  * form again while the owner had the earlier answers open.
  *
+ * Delete (owner, 2026-10-01: the website's privacy page tells a family "Ask
+ * us to delete yours at any time"). On an open application only - never a
+ * list row, never in bulk - in a card of its own under the decision, and
+ * behind the app's confirm sheet (components/CancelSheet.js): the first tap
+ * writes nothing and says that it cannot be undone and that the copies
+ * emailed to the director are NOT deleted with it. Confirmed, the
+ * application leaves the rows on screen at once - every filter and count -
+ * and the screen goes back to the list the way Back does. A delete that
+ * fails changes nothing and says so in the sheet, which stays open. It is
+ * also kept on the screen (`failed`), because the phone's Back can close the
+ * application - and the sheet with it - while the delete is still being
+ * written: the application's row and its Delete card then say it did not
+ * delete, until the next write is tried. A decision on an application that
+ * was deleted somewhere else (another tab) has nothing left to decide: the
+ * application leaves the screen the same way.
+ *
  * @param {() => void} [onRetry]  Reads again after a load error; the button
  *   is hidden when the route supplies none.
  * @param {string|null} [openId]  The open application's id, from the route.
@@ -56,22 +73,27 @@ export default function AdminScholarships({ bare = false, role = 'owner', onBack
   const [localId, setLocalId] = useState(null);
   const [held, setHeld] = useState(null);
   const [decided, setDecided] = useState({});
+  const [deleted, setDeleted] = useState({});
   const [saving, setSaving] = useState(null);
   const [failed, setFailed] = useState(null);
   const routed = typeof onOpen === 'function';
   const openId = routed ? routedId : localId;
   const openApp = routed ? onOpen : setLocalId;
   const closeApp = routed ? onClose : () => setLocalId(null);
+  // The open id as it is NOW, for a delete that lands after the render that started it.
+  const nowOpen = useRef(openId);
+  nowOpen.current = openId;
 
-  // A fresh read is the truth: it replaces the held rows and every local decision laid over them.
+  // A fresh read is the truth: it replaces the held rows and every local decision and delete laid over them.
   useEffect(() => {
     if (!data) return;
     setHeld(data.rows ?? []);
     setDecided({});
+    setDeleted({});
   }, [data]);
 
   const loaded = data?.rows ?? held;
-  const rows = (loaded ?? []).map((row) => (decided[row.id] ? { ...row, ...decided[row.id] } : row));
+  const rows = (loaded ?? []).filter((row) => !deleted[row.id]).map((row) => (decided[row.id] ? { ...row, ...decided[row.id] } : row));
   const counts = scholarshipCounts(rows);
   const today = todayISO();
   // Not gated on `error`: a reload that fails after a decision saved must not close the application the owner is reading.
@@ -87,18 +109,45 @@ export default function AdminScholarships({ bare = false, role = 'owner', onBack
       // Reopening drops the decision; the server's own decidedAt arrives with the next read.
       setDecided((d) => ({ ...d, [app.id]: { status, decidedAtMs: status === 'new' ? null : Date.now() } }));
     } catch (err) {
-      setFailed({ id: app.id, resubmitted: err?.reason === 'resubmitted' });
+      // Deleted somewhere else (another tab) since this list was read: nothing is left to decide, so it goes as a delete does.
+      if (err?.reason === 'gone') removed(app);
+      else setFailed({ id: app.id, resubmitted: err?.reason === 'resubmitted' });
     } finally {
       setSaving(null);
     }
   };
 
+  // The confirmed delete. It rejects with the screen's own words, never the raw error: the confirm sheet shows a
+  // rejection's message as it is. One already deleted elsewhere (another tab) resolves in the hook, so it is done here too.
+  const remove = async (app) => {
+    if (saving) throw new Error(NOT_DELETED);
+    setSaving({ id: app.id, status: 'deleting' });
+    setFailed(null);
+    try {
+      await deleteScholarship({ id: app.id });
+    } catch (err) {
+      // Kept as well as thrown: the owner may have gone back while it was being written, and then no sheet is left to say it.
+      setFailed({ id: app.id, deleting: true });
+      throw new Error(NOT_DELETED);
+    } finally {
+      setSaving(null);
+    }
+  };
+  // Gone: off the rows on screen at once, so no filter or count waits for the fresh read, and back to the list -
+  // unless the owner went back while it was being written, when a second step back would leave the screen.
+  const removed = (app) => {
+    setDeleted((d) => ({ ...d, [app.id]: true }));
+    if (nowOpen.current === app.id) closeApp();
+  };
+
   if (open) {
-    // `busy` is any decision still being written, this application's or another's: one write at a time, and no button
-    // that looks live while it would do nothing.
+    // `busy` is any decision or delete still being written, this application's or another's: one write at a time, and
+    // no button that looks live while it would do nothing. Keyed by the application, so one's open confirmation is
+    // never another's.
     return (
-      <ApplicationDetail bare={bare} role={role} app={open} today={today} saving={saving?.id === open.id ? saving.status : null} busy={Boolean(saving)}
-        failed={failed?.id === open.id ? failed : null} onBack={closeApp} onDecide={(status) => decide(open, status)} />
+      <ApplicationDetail key={open.id} bare={bare} role={role} app={open} today={today} saving={saving?.id === open.id ? saving.status : null}
+        busy={Boolean(saving)} failed={failed?.id === open.id ? failed : null} onBack={closeApp} onDecide={(status) => decide(open, status)}
+        onDelete={() => remove(open)} onDeleted={() => removed(open)} />
     );
   }
 
@@ -126,7 +175,7 @@ export default function AdminScholarships({ bare = false, role = 'owner', onBack
         ) : shown.length === 0 ? (
           <Body size={12} tone={color.textTertiary}>{emptyCopy(filter, rows.length)}</Body>
         ) : (
-          shown.map((app) => <ApplicationRow key={app.id} app={app} today={today} failed={failed?.id === app.id} onOpen={() => openApp(app.id)} />)
+          shown.map((app) => <ApplicationRow key={app.id} app={app} today={today} failed={failed?.id === app.id ? failed : null} onOpen={() => openApp(app.id)} />)
         )}
       </div>
     </PhoneFrame>
@@ -169,7 +218,7 @@ function ApplicationRow({ app, today, failed, onOpen }) {
         {updatedSinceDecision(app) ? (
           <div style={{ marginTop: 10 }}><StatusBadge tone="yellow">Updated since your decision</StatusBadge></div>
         ) : null}
-        {failed ? <Body size={12} tone={color.error} style={{ marginTop: 8 }}>Your decision didn't save.</Body> : null}
+        {failed ? <Body size={12} tone={color.error} style={{ marginTop: 8 }}>{failed.deleting ? "That didn't delete." : "Your decision didn't save."}</Body> : null}
       </Card>
     </div>
   );
@@ -215,8 +264,21 @@ function Contact({ href, children }) {
 
 const ACTION_VARIANT = { approved: 'primary', declined: 'dangerOutline', new: 'outline' };
 const ACTION_BUSY = { approved: 'Approving', declined: 'Declining', new: 'Reopening' };
+/** What the confirm sheet says when a delete is refused or fails. The cause is not known here, so it names none. */
+const NOT_DELETED = "That didn't delete. This application is still here. Try again.";
 
-function ApplicationDetail({ bare, role, app, today, saving, busy, failed, onBack, onDecide }) {
+function ApplicationDetail({ bare, role, app, today, saving, busy, failed, onBack, onDecide, onDelete, onDeleted }) {
+  // The delete confirmation, and the button that opened it: keeping the application hands the focus back to that button.
+  const [confirming, setConfirming] = useState(false);
+  const opener = useRef(null);
+  const ask = (e) => {
+    opener.current = e.currentTarget;
+    setConfirming(true);
+  };
+  const keep = () => {
+    setConfirming(false);
+    opener.current?.focus();
+  };
   const status = statusOf(app);
   const badge = SCHOLARSHIP_STATUS[status];
   const age = ageOn(app.dob, today);
@@ -225,9 +287,10 @@ function ApplicationDetail({ bare, role, app, today, saving, busy, failed, onBac
   const still = badge.label.toLowerCase();
   // Three buttons that never move or change meaning (data/scholarships.js decisionActions): Approve and Decline side by
   // side, Reopen beneath, each ALWAYS rendered. The one the application already is is disabled rather than removed - a
-  // button that left would let the others shift into its place, under a second tap.
+  // button that left would let the others shift into its place, under a second tap. All three are off while the delete
+  // confirmation is open: it covers them, but a keyboard still reaches them.
   const action = ([next, label, current]) => (
-    <Button key={next} variant={ACTION_VARIANT[next]} height={48} loading={saving === next} disabled={current || (busy && saving !== next)}
+    <Button key={next} variant={ACTION_VARIANT[next]} height={48} loading={saving === next} disabled={current || confirming || (busy && saving !== next)}
       onClick={() => onDecide(next)} style={{ boxShadow: 'none', font: `600 14px ${font.body}` }}>
       {saving === next ? ACTION_BUSY[next] : label}
     </Button>
@@ -296,7 +359,7 @@ function ApplicationDetail({ bare, role, app, today, saving, busy, failed, onBac
           <Body size={12}>A label for your records. It sends no email and changes no billing.</Body>
           <div style={{ display: 'flex', gap: 10, marginTop: 12 }}>{[approve, decline].map(action)}</div>
           <div style={{ marginTop: 10 }}>{action(reopen)}</div>
-          {failed ? (
+          {failed && !failed.deleting ? (
             <Body size={12} tone={color.error} style={{ marginTop: 10 }}>
               {failed.resubmitted
                 ? `That decision didn't save. The family sent this again while you had it open, and it is still ${still}. Read it again, then decide.`
@@ -304,7 +367,37 @@ function ApplicationDetail({ bare, role, app, today, saving, busy, failed, onBac
             </Body>
           ) : null}
         </Card>
+
+        {/* A card of its own, last on the page, with its button under its sentence. A decision can remove the "Updated
+            since your decision" banner, which moves the page up by that banner's height; the gap, this label and this
+            sentence are taller than the banner, so the button never arrives under a tap meant for a decision. A delete
+            that failed says so under the button, where it moves nothing - and not while the confirmation is up again:
+            that one is a new question, and the sheet says it if it fails too. */}
+        <Card large style={{ marginTop: 12 }}>
+          <SectionLabel style={{ marginBottom: 6 }}>Delete</SectionLabel>
+          <Body size={12}>
+            For when a family asks you to delete their application. It cannot be undone, and copies emailed to the director are not deleted with it.
+          </Body>
+          <Button variant="dangerOutline" height={48} disabled={busy} onClick={ask} style={{ marginTop: 12, boxShadow: 'none', font: `600 14px ${font.body}` }}>
+            Delete application
+          </Button>
+          {failed?.deleting && !confirming ? <Body size={12} tone={color.error} style={{ marginTop: 10 }}>{NOT_DELETED}</Body> : null}
+        </Card>
       </div>
+
+      {confirming ? (
+        <CancelSheet
+          keepFirst
+          title="Delete this application?"
+          summary={deleteWarnings(app).map((line, i) => <div key={line} style={{ marginTop: i ? 8 : 0 }}>{line}</div>)}
+          confirmLabel="Delete for good"
+          busyLabel="Deleting"
+          keepLabel="Keep application"
+          onClose={keep}
+          onConfirm={onDelete}
+          onCancelled={onDeleted}
+        />
+      ) : null}
     </PhoneFrame>
   );
 }

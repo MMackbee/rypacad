@@ -471,12 +471,14 @@ export async function taskWaitlist() {
 }
 
 // Owner 2026-10-01 ("build that into the admin screen of the portal"): scholarshipApplications is the OWNER's alone -
-// a child's date of birth and a family's finances. Read (get and list) and the decision are refused to every other
-// role; the decision is status + decidedBy (the caller) + decidedAt (server time), or a reopen that removes both, and
-// nothing else on the doc is client-writable. scholarshipMeta (the function's daily counter) is closed to everyone.
+// a child's date of birth and a family's finances. Read (get and list), the decision and the delete are refused to
+// every other role; the decision is status + decidedBy (the caller) + decidedAt (server time), or a reopen that removes
+// both, and nothing else on the doc is client-writable. The owner may delete an application outright (owner 2026-10-01:
+// the privacy page's "Ask us to delete yours at any time"), one that is already gone included.
+// scholarshipMeta (the function's daily counter) is closed to everyone.
 // No clock or gate in any answer, and it seeds and removes everything it touches, so it reads the same in every pass.
 export async function taskScholarship() {
-  console.log('Scholarships: owner-only read and decision (status, decidedBy, decidedAt and nothing else); scholarshipMeta closed to every client');
+  console.log('Scholarships: owner-only read, decision (status, decidedBy, decidedAt and nothing else) and delete; scholarshipMeta closed to every client');
   const col = 'scholarshipApplications';
   const [id, day] = ['app-probe', '2026-10-02'];
   const owners = { owner: 'owner-probe', owner2: 'owner2-probe' };
@@ -558,12 +560,44 @@ export async function taskScholarship() {
   }
   expect('owner removing an answer (need) refused', await patchAs(owner, {}, ['need']), 403);
   expect('owner create refused', await createAs(owner, col, 'app-new', application, []), 403);
-  expect('owner delete refused', (await call('DELETE', `/${col}/${id}`, null, owner)).status, 403);
   for (const [who, auth, by] of [['ops', t.ops, uid.ops], ['coach', t.coach, uid.coach], ['specialist', specialist, specialistUid], ['parent', t.parent, uid.parent]]) {
     expect(`${who} decision (the exact shape, in their own name) refused`, await decideAs(auth, { status: 'approved', decidedBy: by }), 403);
   }
   expect('ops reopen refused', await reopenAs(t.ops), 403);
   expect('nothing refused above was written', await stored(), 'new|none|none|untouched');
+
+  // The delete, written as hooks/scholarships.js deleteScholarship writes it: one commit holding a delete with no
+  // precondition, so it never asks whether the doc is still there. Owner only. It runs after everything above, which
+  // needed the doc; the doc is seeded again for the second owner.
+  const deleteWrite = (c, d) => [{ delete: docName(c, d) }];
+  const deleteAs = (auth, d = id) => commitAs(auth, deleteWrite(col, d));
+  const there = async (d = id) => (await call('GET', `/${col}/${d}`, null, 'owner')).status;
+  for (const [who, auth] of [['ops', t.ops], ['coach', t.coach], ['specialist', specialist], ['parent', t.parent], ['athlete', t.athlete], ['a login with no role', t.stranger]]) {
+    expect(`${who}: delete refused`, await deleteAs(auth), 403);
+  }
+  expect('signed out: delete refused', await anon(':commit', { writes: deleteWrite(col, id) }), 403);
+  expect('ops: delete through the plain REST call refused too', (await call('DELETE', `/${col}/${id}`, null, t.ops)).status, 403);
+  expect('still stored after every refused delete', await stored(), 'new|none|none|untouched');
+  expect('owner deletes the application', await deleteAs(owner), 200);
+  expect('it is gone', await there(), 404);
+  expect('owner deletes it again (already gone, a second tab): not an error', await deleteAs(owner), 200);
+  expect('owner deletes an application that never existed: not an error', await deleteAs(owner, 'app-never'), 200);
+  expect('ops deleting one that is already gone still refused', await deleteAs(t.ops), 403);
+  expect('still gone, and nothing was created by a delete', `${await there()}|${await there('app-never')}`, '404|404');
+  await seed(col, id, application);
+  // The same expectation this task carried as "owner delete refused" before the owner asked for the delete: the plain REST call.
+  expect('a second owner may delete', (await call('DELETE', `/${col}/${id}`, null, owner2)).status, 200);
+  expect('it is gone again', await there(), 404);
+  // A form the function was already handling when a delete landed is merged over nothing, so the doc comes back with NO
+  // status field (DATA-MODEL.md, "After a delete the form starts over"). The screen reads it as new. It is still the
+  // owner's alone, and the owner can still decide it and delete it.
+  await seed(col, id, Object.fromEntries(Object.entries(application).filter(([field]) => field !== 'status')));
+  expect('an application stored with no status: ops read refused', await get(t.ops), 403);
+  expect('an application stored with no status: ops delete refused', await deleteAs(t.ops), 403);
+  expect('an application stored with no status: owner approves it', await decideAs(owner, { status: 'approved', decidedBy: owners.owner }), 200);
+  expect('stored as approved by that owner, stamped, answers untouched', await stored(), `approved|${owners.owner}|stamped|untouched`);
+  expect('owner deletes it', await deleteAs(owner), 200);
+  expect('and it is gone', await there(), 404);
 
   // scholarshipMeta: the function's counter, closed to every client - the owner included.
   expect('scholarshipMeta: owner read refused', await get(owner, 'scholarshipMeta', day), 403);
@@ -571,6 +605,7 @@ export async function taskScholarship() {
   expect('scholarshipMeta: owner update refused', await commitAs(owner, [patchWrite('scholarshipMeta', day, { count: 0 })]), 403);
   expect('scholarshipMeta: owner create refused', await createAs(owner, 'scholarshipMeta', '2026-10-03', { count: 1 }, []), 403);
   expect('scholarshipMeta: owner delete refused', (await call('DELETE', `/scholarshipMeta/${day}`, null, owner)).status, 403);
+  expect("scholarshipMeta: owner delete written as the application's delete is written refused", await commitAs(owner, deleteWrite('scholarshipMeta', day)), 403);
   expect('scholarshipMeta: ops read refused', await get(t.ops, 'scholarshipMeta', day), 403);
   expect('scholarshipMeta: the counter is untouched', (await call('GET', `/scholarshipMeta/${day}`, null, 'owner')).body?.fields?.count?.integerValue, '3');
 

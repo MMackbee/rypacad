@@ -138,6 +138,21 @@ export function decisionActions(app) {
   return ['approved', 'declined', 'new'].map((s) => [s, ACTION[s], s === current]);
 }
 
+/**
+ * The two things the owner reads before a delete is written, in the order
+ * they are shown: it is permanent, and it does not reach the email.
+ * submitScholarship emails the director every time a family sends the form,
+ * so there can be several copies and none of them is the portal's to remove.
+ * The first line names the athlete so it is plain WHICH application goes.
+ */
+export function deleteWarnings(app) {
+  const name = typed(app?.athlete);
+  return [
+    `${name ? `${name}'s application` : 'This application'} will be deleted from the portal. This cannot be undone.`,
+    "Copies emailed to the director are not deleted. Delete them from the academy's email by hand.",
+  ];
+}
+
 /** The list's empty line: nothing has arrived at all, or nothing sits under this filter. */
 export function emptyCopy(filter, total) {
   if (!total || !SCHOLARSHIP_STATUSES.includes(filter)) return 'No applications yet.';
