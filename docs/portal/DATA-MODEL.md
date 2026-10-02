@@ -33,6 +33,8 @@ serves.
 | `stripeEvents` | the Stripe `event.id` | **Contract v2.1, Part 2 — BUILT.** Idempotency ledger for the webhook handler — the id IS the dedupe key, the same rationale as every other keyspace-enforced collection in this table. Seed uses one fake event id (`evt_seed_2`) matching the format a real Stripe event id would take, never a real one. See [below](#stripeevents-contract-v21-part-2). |
 | `loginInvites` | the child's login email, lower-cased | **Contract v3.0.1 (Sprint 20).** One open invite per address by construction; `claimInvite` looks the caller's `token.email.lower()` up by id, no query. `status` is `open` / `claimed` / `orphaned` (the athlete doc is gone). Contrast `staffInvites` (auto id, script-consumed). Seed: `reese.whitfield@example.com`. |
 | `calendlyEvents` | `{inviteeUuid}_{event}` | **Contract v3.0.1 (Sprint 20).** `calendlyWebhook`'s idempotency ledger, the `stripeEvents` pattern with a composed id (Calendly has no event id; the invitee uri's uuid + `invitee.created \| invitee.canceled` is unique per delivery). Seed: `seedinv0001_invitee.created`. |
+| `scholarshipApplications` | first 32 hex chars of `sha256(season \| email \| athlete name, lower-cased \| dob)` | **2026-10-01.** One application per family + athlete + season, enforced by the keyspace: `submitScholarship` computes the id from the answers, so a family sending the form again lands on the same doc. Not guessable from outside and never shown. No seed. See [below](#scholarshipapplicationsid-owner-2026-10-01). |
+| `scholarshipMeta` | the UTC day, `YYYY-MM-DD` | **2026-10-01.** `submitScholarship`'s daily counter, one doc per day. No seed. |
 | `sessions` (Calendly) | `cal-<eventUuid>` | **Contract v3.0.1 (Sprint 20).** Written only by `calendlyWebhook`; never date-prefixed (the id is Calendly's event uuid, so a reschedule that moves the date keeps the doc), never carries tournament results, and invisible to the sync's reap (`gcalEventId: null`, so `planSync` files it under `seededUntouched`). |
 
 ## Collections
@@ -898,6 +900,48 @@ Backs "own login?" at sign-up and the claim on first sign-in (SPRINT-20-LAUNCH.m
 | `receivedAt` | timestamp | |
 | `outcome` | string | `applied \| duplicate \| unresolved \| already-cancelled \| rescheduled \| not-found \| malformed`. **`malformed` (PM ruling D8):** a verified body with no invitee uri or unparseable start/end times - nothing else can be keyed, so the row is written under the best id available and no session/booking is touched; HTTP 200. `ignored` (an event type the subscription never sends) is RETURNED to the caller only, never written. `duplicate` is likewise never written (the existing row is the guard). |
 | `flag` | string \| null | **PM ruling D8.** The booking's flag as written on `applied`: `'over-cap' \| 'over-cadence' \| 'membership-inactive' \| 'before-open' \| null` (clean); null on every non-`applied` outcome. Denormalized so the report reads flags from one collection scan. Precedence when several apply: `membership-inactive` > `before-open` > `over-cadence` > `over-cap`. |
+
+### `scholarshipApplications/{id}` (owner, 2026-10-01)
+
+The scholarship form on the public website. **Writer:** the `submitScholarship` HTTPS function (`functions/portal/scholarship.js`, Admin SDK) - the only thing that ever creates a doc, and the only writer of every field but the decision. **Reader: the owner only** (`users/{uid}.role == 'owner'`) - not ops, not a coach or specialist, not a family account: the doc holds a child's name and date of birth and a family's account of its finances. Read at `/portal/admin/scholarships` (`hooks/scholarships.js`, `screens/AdminScholarships.js`) and counted on the owner's Admin dashboard card; an ops dashboard never mounts that card, so never asks.
+
+**The one client write is the owner's decision** (`decideScholarship`), a label and nothing more - it moves no billing, package or Stripe object and sends no email. `firestore.rules` pins it to three fields with `affectedKeys()`:
+
+- approve / decline: `status`, `decidedBy` = the caller's own uid, `decidedAt` = server time;
+- reopen: `status: 'new'`, `decidedBy` and `decidedAt` removed.
+
+Nothing else is client-writable, by anyone; no client create, no client delete. **A resubmission keeps the decision:** the function merges the new answers over the doc and names none of the three decision fields, so they stay as stored (a first submission is `new`). The screen marks a decided application "Updated since your decision" when `updatedAtMs` is later than `decidedAt`.
+
+**A decision is made on the version the owner read.** The list is a one-shot read, so `decideScholarship` writes inside a transaction that reads the doc first: when its `updatedAtMs` is no longer the one on screen (the family sent the form again in between), nothing is written, the list reloads and the screen says so. The transaction's write is the same three fields, so the rule above is all it needs. One gap remains and is not closed in the client: the function stamps `updatedAtMs` when a request arrives and writes after its email is sent, so a decision made in those few seconds is later than `updatedAtMs` and carries no "Updated since your decision" mark.
+
+Everything the family typed is untrusted text: the screen renders it as text only, and builds its `mailto:` / `tel:` links in `data/scholarships.js` from the address or the digits alone.
+
+| Field | Type | Notes |
+|---|---|---|
+| `parent` | string | Parent or guardian's full name. |
+| `relationship` | `'Parent' \| 'Guardian' \| 'Other'` | |
+| `email` | string | Lower-cased by the function. |
+| `phone` | string | As typed (at least 10 digits). |
+| `athlete` | string | The athlete's full name. |
+| `dob` | string | `YYYY-MM-DD`. The screen shows the age on the day it is opened. |
+| `school`, `grade`, `handicap`, `events`, `need` | string | Optional; `''` when not given. `events` is the form's "tournaments played in the last 12 months"; `need` is the family situation. |
+| `average` | string | Scoring average, free text ("none yet" is allowed). |
+| `package` | `'6 tokens' \| '12 tokens' \| '16 tokens' \| 'Elite' \| 'Not sure yet'` | The package the family has in mind - a label, not a `packages` id. |
+| `level` | `'Partial' \| 'Full'` | The assistance requested. |
+| `statement` | string | The personal statement, 40 to 6000 characters. |
+| `season` | `'2026-27'` | |
+| `status` | `'new' \| 'approved' \| 'declined'` | `new` from the function; `approved` / `declined` / back to `new` from the owner. |
+| `decidedBy` | uid | **Decision field.** The owner who approved or declined. Absent while `new`. |
+| `decidedAt` | timestamp | **Decision field.** Server time of that decision. Absent while `new`. The hook hands it to the screen as `decidedAtMs`. |
+| `submissions` | number | How many times the family has sent it. |
+| `createdAtMs`, `updatedAtMs` | number | Epoch ms of the first and the latest submission. The list is newest first by `updatedAtMs`. |
+| `email_status` | string | Whether the function's email to the director went out: `sent`, or `failed` / `skipped`. The application is stored either way. |
+
+Query: the owner's screen reads the whole collection in one unfiltered `getDocs` and sorts in the browser - no index, no `firestore.indexes.json` change. Rules probe: `scripts/verify-rules.mjs` `taskScholarship`.
+
+### `scholarshipMeta/{YYYY-MM-DD}` (2026-10-01)
+
+`submitScholarship`'s daily cap: `{ count: number }`, one doc per UTC day, read and written by the function alone (Admin SDK). The function refuses new applications for the day once `count` reaches 100, which protects the director's inbox. **Closed to every client, the owner included** - `firestore.rules` names the collection with `allow read, write: if false`, the `stripeEvents` pattern. No screen reads it.
 
 ### Billing rows (derived, no new collection)
 

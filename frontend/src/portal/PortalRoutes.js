@@ -46,6 +46,9 @@ const loadSettings = () => import('./screens/NotificationPreferences');
 const loadReservations = () => import('./screens/Reservations');
 const loadAdmin = () => import('./screens/AdminDashboard');
 const loadAdminSignups = () => import('./screens/AdminSignups');
+// Owner only, and never warmed below: the warm-up runs before the role is
+// known, and ops has no use for this chunk.
+const loadAdminScholarships = () => import('./screens/AdminScholarships');
 const loadStaff = () => import('./screens/StaffRoles');
 const loadTour = () => import('./screens/TourStandings');
 const loadSpecialistDay = () => import('./screens/SpecialistDay');
@@ -67,6 +70,7 @@ const NotificationPreferences = lazy(loadSettings);
 const Reservations = lazy(loadReservations);
 const AdminDashboard = lazy(loadAdmin);
 const AdminSignups = lazy(loadAdminSignups);
+const AdminScholarships = lazy(loadAdminScholarships);
 const StaffRoles = lazy(loadStaff);
 const TourStandings = lazy(loadTour);
 const SpecialistDay = lazy(loadSpecialistDay);
@@ -394,6 +398,12 @@ function AdminRoute({ onOpenAthlete, onSignOut }) {
   const { user } = useAuthSession(live ? undefined : { variant: 'idle' });
   const navigate = useNavigate();
   const role = (live && user?.role) || 'owner';
+  // Scholarship applications are the owner's alone (2026-10-01). `role`
+  // above falls back to 'owner' while this route's own session is still
+  // resolving, so the card's destination is handed over only once the
+  // session HAS resolved to an owner: an ops dashboard never mounts the
+  // card, not even for that first render, and so never makes its read.
+  const owner = live ? user?.role === 'owner' : true;
   return (
     <AdminDashboard
       bare
@@ -401,6 +411,7 @@ function AdminRoute({ onOpenAthlete, onSignOut }) {
       onOpenAthlete={onOpenAthlete}
       onOpenHousehold={(id) => navigate(`/portal/admin/households/${id}`)}
       onOpenSignups={() => navigate('/portal/admin/signups')}
+      onOpenScholarships={owner ? () => navigate('/portal/admin/scholarships') : undefined}
       onSignOut={onSignOut}
     />
   );
@@ -414,6 +425,30 @@ function SignupsRoute() {
   return (
     <AdminSignups bare role={(live && user?.role) || 'owner'} onBack={() => navigate('/portal/admin')}
       onOpenHousehold={(id) => navigate(`/portal/admin/households/${id}`)} />
+  );
+}
+
+/**
+ * Scholarship applications (owner, 2026-10-01). Owner only - RequireRole
+ * below admits no other role, so the role here is a constant. An application
+ * opens inside the screen, as a history entry of its own on this same path:
+ * which one is open rides in navigation state (never the URL), so the
+ * phone's Back closes the application instead of leaving for Admin, and the
+ * screen - still mounted - keeps its filter.
+ */
+function ScholarshipsRoute() {
+  const navigate = useNavigate();
+  const { state } = useLocation();
+  return (
+    <AdminScholarships
+      bare
+      role="owner"
+      openId={state?.application ?? null}
+      onOpen={(id) => navigate('/portal/admin/scholarships', { state: { application: id } })}
+      onClose={() => navigate(-1)}
+      onBack={() => navigate('/portal/admin')}
+      onRetry={() => bump('scholarshipApplications')}
+    />
   );
 }
 
@@ -891,6 +926,17 @@ export default function PortalRoutes() {
         element={
           <RequireRole roles={['ops', 'owner']}>
             <SignupsRoute />
+          </RequireRole>
+        }
+      />
+      {/* Scholarship applications (owner, 2026-10-01): OWNER only, not ops -
+          a child's date of birth and a family's finances. firestore.rules
+          holds the same line; ops landing here is sent back to Admin. */}
+      <Route
+        path="admin/scholarships"
+        element={
+          <RequireRole roles={['owner']}>
+            <ScholarshipsRoute />
           </RequireRole>
         }
       />

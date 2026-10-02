@@ -95,6 +95,7 @@ import useWaitlist, { fetchWaitlistByAthlete, fetchWaitlistByHousehold, fetchWai
 import useRecentNotices from './notices';
 import usePush from './push';
 import useSignups, { fetchLoginInvite } from './signups';
+import useScholarships from './scholarships';
 import {
   COACH,
   COACH_BLOCKS,
@@ -207,7 +208,9 @@ export { default as useOnboardingStatus } from './onboarding';
 // every portal hook from this one seam, same as every hook above.
 // Sprint 16: hooks/billing.js derives the hub's coaching line with the same
 // helper useMembership uses, so the two can never disagree.
-export { coachingFor, useIssueTokens, usePush, useRecentNotices, useSignups, useWaitlist };
+// 2026-10-01: useScholarships is the OWNER's read of scholarshipApplications;
+// only an owner's screen may mount it (hooks/scholarships.js).
+export { coachingFor, useIssueTokens, usePush, useRecentNotices, useScholarships, useSignups, useWaitlist };
 
 /**
  * Harness demo states (contract v1.1): every data-bearing hook accepts

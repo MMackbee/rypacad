@@ -1652,6 +1652,70 @@ service cloud.firestore {
       allow read, write: if false;
     }
 
+    // ---- scholarshipApplications ------------------------------------------
+    // 2026-10-01 (owner: "build that into the admin screen of the portal").
+    // One doc per family + athlete + season, written by submitScholarship
+    // (functions/portal/scholarship.js, Admin SDK) from the public website's
+    // form, and read at /portal/admin/scholarships.
+    //
+    // OWNER ONLY, to read and to decide - not ops, not a coach or a
+    // specialist, not a family account. The doc holds a child's name and
+    // date of birth and a family's own account of its finances, and nobody
+    // but the owner has a job to do with it. The role is compared with ==,
+    // not `in [...]`, so the staff lists used everywhere else in this file
+    // can never be pasted in here by habit.
+    //
+    // The one client write is the DECISION, a label and nothing more (it
+    // moves no billing, no package and no Stripe object, and sends no email):
+    //   - approve / decline: status 'approved' | 'declined', decidedBy the
+    //     caller's own uid and decidedAt request.time (the client writes
+    //     serverTimestamp()) - checked on the doc as the write leaves it, so
+    //     a decision can never name another person or another moment;
+    //   - reopen: status back to 'new' with decidedBy and decidedAt removed.
+    // affectedKeys() pins the write to those three fields: the answers the
+    // family typed, the counters and email_status cannot be edited by any
+    // client, the owner included. No create and no delete clause - an
+    // application only ever arrives through the function, and a
+    // resubmission there is an Admin SDK merge that leaves these three
+    // fields as the owner set them.
+    //
+    // DEPLOY ORDER: functions:submitScholarship first (the build before it
+    // rewrites status to 'new' on a resubmission, which would undo a
+    // decision), then this file, then the frontend - the owner's card and
+    // screen read nothing until this block is live.
+    match /scholarshipApplications/{applicationId} {
+      function scholarshipDecisionOk() {
+        let d = request.resource.data;
+        return d.diff(resource.data).affectedKeys().hasOnly(['status', 'decidedBy', 'decidedAt'])
+          && (
+            (d.status in ['approved', 'declined']
+              && d.get('decidedBy', null) == request.auth.uid
+              && d.get('decidedAt', null) == request.time)
+            || (d.status == 'new'
+              && !d.keys().hasAny(['decidedBy', 'decidedAt']))
+          );
+      }
+
+      // get and list alike: the condition never reads the document, so the
+      // owner's unfiltered list of the collection is provable and everyone
+      // else's is refused wholesale.
+      allow read: if signedIn() && me().role == 'owner';
+
+      allow update: if signedIn() && me().role == 'owner' && scholarshipDecisionOk();
+    }
+
+    // ---- scholarshipMeta --------------------------------------------------
+    // 2026-10-01. submitScholarship's daily counter ({ count }, doc id the
+    // UTC day 'YYYY-MM-DD') - the cap that protects the director's inbox.
+    // Read and written by the function alone (Admin SDK), and no screen has
+    // a use for it, so no client gets it, the owner included. Like
+    // stripeEvents above, this block grants nothing deny-by-default did not
+    // already refuse; it is here so the collection is named and its "deny
+    // all clients" is on the page.
+    match /scholarshipMeta/{day} {
+      allow read, write: if false;
+    }
+
     // No catch-all. Everything not matched above is denied.
   }
 }

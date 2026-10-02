@@ -470,12 +470,119 @@ export async function taskWaitlist() {
   for (const id of ['ath-elite_w-booked', 'ath-elite_w-rebook']) await del('bookings', id);
 }
 
+// Owner 2026-10-01 ("build that into the admin screen of the portal"): scholarshipApplications is the OWNER's alone -
+// a child's date of birth and a family's finances. Read (get and list) and the decision are refused to every other
+// role; the decision is status + decidedBy (the caller) + decidedAt (server time), or a reopen that removes both, and
+// nothing else on the doc is client-writable. scholarshipMeta (the function's daily counter) is closed to everyone.
+// No clock or gate in any answer, and it seeds and removes everything it touches, so it reads the same in every pass.
+export async function taskScholarship() {
+  console.log('Scholarships: owner-only read and decision (status, decidedBy, decidedAt and nothing else); scholarshipMeta closed to every client');
+  const col = 'scholarshipApplications';
+  const [id, day] = ['app-probe', '2026-10-02'];
+  const owners = { owner: 'owner-probe', owner2: 'owner2-probe' };
+  for (const u of Object.values(owners)) await seed('users', u, { role: 'owner' });
+  const owner = token(owners.owner, { email: 'owner@example.com', email_verified: true });
+  const owner2 = token(owners.owner2, { email: 'owner2@example.com', email_verified: true });
+  // A specialist (role 'mental' with a specialistId): staff on most of this file's read lists, and on neither clause here.
+  const specialistUid = 'mental-probe';
+  await seed('users', specialistUid, { role: 'mental', specialistId: 'mental' });
+  const specialist = token(specialistUid, { email: 'mental@example.com', email_verified: true });
+  // The function's own shape (functions/portal/scholarship.js), status 'new'.
+  const application = { parent: 'Dana Hart', relationship: 'Parent', email: 'dana@example.com', phone: '612-555-0100', athlete: 'Sam Hart', dob: '2012-05-01',
+    school: '', grade: '8', average: '82.1', handicap: '', events: '', package: '12 tokens', level: 'Partial', need: '',
+    statement: 'Sam tries hard, trains smart and backs his teammates.', season: '2026-27', status: 'new', submissions: 1,
+    createdAtMs: 1790953200000, updatedAtMs: 1790953200000, email_status: 'sent' };
+  await seed(col, id, application);
+  await seed('scholarshipMeta', day, { count: 3 });
+
+  // Reads. A signed-out caller sends no Authorization header at all (the shared helpers always send one).
+  const anon = async (path, body) => {
+    const res = await fetch(`${BASE}${path}`, { method: body ? 'POST' : 'GET', headers: { 'content-type': 'application/json' }, body: body ? JSON.stringify(body) : undefined });
+    const json = await res.json().catch(() => null);
+    const err = Array.isArray(json) ? json.find((r) => r && r.error)?.error : json?.error;
+    return err ? err.code : res.status;
+  };
+  const get = (auth, c = col, d = id) => call('GET', `/${c}/${d}`, null, auth).then((r) => r.status);
+  expect('owner reads one application', await get(owner), 200);
+  expect('owner lists every application', await listAs(owner, col, {}), 200);
+  expect('a second owner reads it too', await get(owner2), 200);
+  for (const [who, auth] of [['ops', t.ops], ['coach', t.coach], ['specialist', specialist], ['parent', t.parent], ['athlete', t.athlete], ['a login with no role', t.stranger]]) {
+    expect(`${who}: read refused`, await get(auth), 403);
+    expect(`${who}: list refused`, await listAs(auth, col, {}), 403);
+  }
+  expect('signed out: read refused', await anon(`/${col}/${id}`), 403);
+  expect('signed out: list refused', await anon(':runQuery', { structuredQuery: { from: [{ collectionId: col }] } }), 403);
+
+  // The decision, written as hooks/scholarships.js decideScholarship writes it (a transaction's update): the mask is the
+  // plain fields, serverTimestamp() is a REQUEST_TIME transform beside it, and deleteField() is a masked field with no value.
+  const decideAs = (auth, fields, mask = Object.keys(fields)) => commitAs(auth, [{ ...patchWrite(col, id, fields, mask),
+    updateTransforms: [{ fieldPath: 'decidedAt', setToServerValue: 'REQUEST_TIME' }] }]);
+  const reopenAs = (auth) => commitAs(auth, [patchWrite(col, id, { status: 'new' }, ['status', 'decidedBy', 'decidedAt'])]);
+  const patchAs = (auth, fields, mask = Object.keys(fields)) => commitAs(auth, [patchWrite(col, id, fields, mask)]);
+  // What is stored, read back past the rules: 'status|decidedBy|decidedAt is a timestamp|the answers are untouched'.
+  const stored = async () => {
+    const f = (await call('GET', `/${col}/${id}`, null, 'owner')).body?.fields ?? {};
+    const untouched = f.email?.stringValue === application.email && f.statement?.stringValue === application.statement && f.level?.stringValue === application.level
+      && f.submissions?.integerValue === '1' && f.updatedAtMs?.integerValue === String(application.updatedAtMs);
+    return `${f.status?.stringValue}|${f.decidedBy?.stringValue ?? 'none'}|${f.decidedAt?.timestampValue ? 'stamped' : 'none'}|${untouched ? 'untouched' : 'CHANGED'}`;
+  };
+  expect('owner approves: status + decidedBy (own uid) + decidedAt (server time)', await decideAs(owner, { status: 'approved', decidedBy: owners.owner }), 200);
+  expect('stored as approved by that owner, stamped, answers untouched', await stored(), `approved|${owners.owner}|stamped|untouched`);
+  // A decided application cannot be flipped under its old stamp: every decision carries its own decidedBy and decidedAt.
+  expect('status-only flip (approved to declined) by the same owner refused: decidedAt would be the old moment', await patchAs(owner, { status: 'declined' }), 403);
+  expect("status-only flip by a second owner refused: decidedBy would still be the first owner's", await patchAs(owner2, { status: 'declined' }), 403);
+  expect('a flip that renames decidedBy but keeps the old decidedAt refused', await patchAs(owner2, { status: 'declined', decidedBy: owners.owner2 }), 403);
+  expect('still approved by the first owner after the refused flips', await stored(), `approved|${owners.owner}|stamped|untouched`);
+  expect('reopen that leaves decidedBy and decidedAt behind refused', await patchAs(owner, { status: 'new' }), 403);
+  expect('reopen that removes decidedBy but keeps decidedAt refused', await patchAs(owner, { status: 'new' }, ['status', 'decidedBy']), 403);
+  expect('owner declines', await decideAs(owner, { status: 'declined', decidedBy: owners.owner }), 200);
+  expect('stored as declined by that owner, stamped, answers untouched', await stored(), `declined|${owners.owner}|stamped|untouched`);
+  expect('a second owner decides in their own name', await decideAs(owner2, { status: 'approved', decidedBy: owners.owner2 }), 200);
+  expect('stored as approved by the second owner', await stored(), `approved|${owners.owner2}|stamped|untouched`);
+  expect("owner reopens: status 'new', decidedBy and decidedAt removed", await reopenAs(owner), 200);
+  expect('stored as new with no decision fields, answers untouched', await stored(), 'new|none|none|untouched');
+
+  // Refused. The doc is 'new' with no decision fields from here on, so each refusal is the clause its label names.
+  expect("a decision carrying someone else's uid in decidedBy refused", await decideAs(owner, { status: 'approved', decidedBy: owners.owner2 }), 403);
+  expect('a decision with no decidedBy refused', await decideAs(owner, { status: 'approved' }), 403);
+  expect('a decision with a client-chosen decidedAt refused',
+    await patchAs(owner, { status: 'approved', decidedBy: owners.owner, decidedAt: new Date('2026-01-01T00:00:00Z') }), 403);
+  expect('a decision with no decidedAt refused', await patchAs(owner, { status: 'approved', decidedBy: owners.owner }), 403);
+  for (const status of ['waitlisted', 'paid', '', null]) {
+    expect(`a status outside the three (${JSON.stringify(status)}) refused`, await decideAs(owner, { status, decidedBy: owners.owner }), 403);
+  }
+  expect("status 'new' beside a decidedBy and decidedAt refused", await decideAs(owner, { status: 'new', decidedBy: owners.owner }), 403);
+  for (const [field, value] of [['email', 'someone@example.com'], ['statement', 'Rewritten.'], ['level', 'Full'], ['submissions', 9], ['updatedAtMs', 1], ['email_status', 'failed'], ['note', 'x']]) {
+    expect(`owner editing ${field} alone refused`, await patchAs(owner, { [field]: value }), 403);
+    expect(`owner editing ${field} inside an otherwise valid decision refused`, await decideAs(owner, { status: 'approved', decidedBy: owners.owner, [field]: value }), 403);
+  }
+  expect('owner removing an answer (need) refused', await patchAs(owner, {}, ['need']), 403);
+  expect('owner create refused', await createAs(owner, col, 'app-new', application, []), 403);
+  expect('owner delete refused', (await call('DELETE', `/${col}/${id}`, null, owner)).status, 403);
+  for (const [who, auth, by] of [['ops', t.ops, uid.ops], ['coach', t.coach, uid.coach], ['specialist', specialist, specialistUid], ['parent', t.parent, uid.parent]]) {
+    expect(`${who} decision (the exact shape, in their own name) refused`, await decideAs(auth, { status: 'approved', decidedBy: by }), 403);
+  }
+  expect('ops reopen refused', await reopenAs(t.ops), 403);
+  expect('nothing refused above was written', await stored(), 'new|none|none|untouched');
+
+  // scholarshipMeta: the function's counter, closed to every client - the owner included.
+  expect('scholarshipMeta: owner read refused', await get(owner, 'scholarshipMeta', day), 403);
+  expect('scholarshipMeta: owner list refused', await listAs(owner, 'scholarshipMeta', {}), 403);
+  expect('scholarshipMeta: owner update refused', await commitAs(owner, [patchWrite('scholarshipMeta', day, { count: 0 })]), 403);
+  expect('scholarshipMeta: owner create refused', await createAs(owner, 'scholarshipMeta', '2026-10-03', { count: 1 }, []), 403);
+  expect('scholarshipMeta: owner delete refused', (await call('DELETE', `/scholarshipMeta/${day}`, null, owner)).status, 403);
+  expect('scholarshipMeta: ops read refused', await get(t.ops, 'scholarshipMeta', day), 403);
+  expect('scholarshipMeta: the counter is untouched', (await call('GET', `/scholarshipMeta/${day}`, null, 'owner')).body?.fields?.count?.integerValue, '3');
+
+  for (const [c, d] of [[col, id], [col, 'app-new'], ['scholarshipMeta', day], ['scholarshipMeta', '2026-10-03'], ...[...Object.values(owners), specialistUid].map((u) => ['users', u])]) await del(c, d);
+}
+
 export { setup, teardown, seed, del, call, createAs, commitAs, bookAs, listAs, expect, token, t, uid, BASE };
 if (process.argv[1] && process.argv[1].endsWith('verify-rules.mjs')) {
   await setup();
   try {
     await task4(); await task5(); await taskContract(); await taskWindow(); await taskRepeat(); await taskPackageChange(); await taskSeriesCancel();
-    await taskSeats(); await taskPast(); await taskWaitlist();
+    await taskSeats(); await taskPast(); await taskWaitlist(); await taskScholarship();
   } finally { await teardown(); }
   console.log(failures ? `${failures} FAILED` : 'ALL PASS');
   process.exit(failures ? 1 : 0);

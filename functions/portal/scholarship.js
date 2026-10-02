@@ -17,6 +17,12 @@
  *  - a daily cap protects the director's inbox.
  * It never emails the applicant: an open endpoint that mails any address it
  * is given would be a relay.
+ *
+ * The owner decides each application in the portal (2026-10-01,
+ * /portal/admin/scholarships): firestore.rules lets an owner write `status`
+ * ('new' | 'approved' | 'declined'), `decidedBy` and `decidedAt`, nothing
+ * else. A resubmission replaces the family's answers and leaves those three
+ * fields exactly as they are stored.
  */
 'use strict';
 
@@ -38,6 +44,7 @@ const RELATIONSHIPS = ['Parent', 'Guardian', 'Other'];
 const PACKAGES = ['6 tokens', '12 tokens', '16 tokens', 'Elite',
   'Not sure yet'];
 const LEVELS = ['Partial', 'Full'];
+const STATUSES = ['new', 'approved', 'declined'];
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 
@@ -274,15 +281,24 @@ async function submitScholarshipHandler(req, res, deps) {
       to: process.env.SCHOLARSHIP_TO || DEFAULT_TO,
       subject: mail.subject, text: mail.text, kind: 'scholarship',
     });
-    await ref.set(Object.assign({}, app, {
+    const row = Object.assign({}, app, {
       season: SEASON,
-      status: 'new',
       submissions: (prior && Number(prior.submissions) || 0) + 1,
       createdAtMs: prior && prior.createdAtMs ? prior.createdAtMs :
           now.getTime(),
       updatedAtMs: now.getTime(),
       email_status: sent && sent.status ? sent.status : 'failed',
-    }));
+    });
+    // A resubmission is MERGED and names no decision field, so the owner's
+    // status, decidedBy and decidedAt stay as stored - a decision made while
+    // this request was sending its email included. `row` carries every
+    // answer ('' when not given), so the merge still replaces them all. A
+    // first submission is 'new'.
+    if (prior && STATUSES.includes(prior.status)) {
+      await ref.set(row, {merge: true});
+    } else {
+      await ref.set(Object.assign(row, {status: 'new'}));
+    }
     res.status(200).json({ok: true});
   } catch (err) {
     console.error('scholarship application failed:', err);

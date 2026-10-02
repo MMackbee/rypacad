@@ -17,16 +17,22 @@ const GOOD = {
 };
 
 /**
- * A stand-in store.
+ * A stand-in store. `{merge: true}` keeps the stored fields a write does not
+ * name, as the Admin SDK does, and a read hands back a COPY, as a Firestore
+ * snapshot does: a write that lands after the read is not seen through it.
  * @param {!Object} docs `{'collection/id': body}`, written in place.
  * @return {!Object} The store.
  */
 function fakeStore(docs) {
   return {collection: (c) => ({doc: (id) => ({
-    get: async () => ({exists: `${c}/${id}` in docs,
-      data: () => docs[`${c}/${id}`]}),
-    set: async (body) => {
-      docs[`${c}/${id}`] = body;
+    get: async () => {
+      const exists = `${c}/${id}` in docs;
+      const copy = exists ? Object.assign({}, docs[`${c}/${id}`]) : undefined;
+      return {exists, data: () => copy};
+    },
+    set: async (body, opts) => {
+      docs[`${c}/${id}`] = opts && opts.merge ?
+          Object.assign({}, docs[`${c}/${id}`], body) : body;
     },
   })})};
 }
@@ -34,7 +40,7 @@ function fakeStore(docs) {
 /**
  * One request through the handler.
  * @param {*} body The request body.
- * @param {!Object=} opts `{method, origin, docs, db, now, mail}`.
+ * @param {!Object=} opts `{method, origin, docs, db, now, mail, duringSend}`.
  * @return {!Promise<!Object>} `{status, json, headers, docs, mails}`.
  */
 async function post(body, opts) {
@@ -63,6 +69,7 @@ async function post(body, opts) {
     db: o.db || fakeStore(docs), now: o.now || NOW,
     sendEmail: async (m) => {
       mails.push(m);
+      if (o.duringSend) o.duringSend(docs);
       return o.mail || {status: 'sent'};
     },
   });
@@ -154,6 +161,92 @@ test('a resubmission replaces the row; inside a minute it is refused',
       assert.deepEqual([later.docs[rows[0]].average,
         later.docs[rows[0]].submissions, later.docs[rows[0]].createdAtMs],
       ['79.0', 2, NOW.getTime()]);
+    });
+
+// The owner decides in the portal (firestore.rules: status, decidedBy and
+// decidedAt, nothing else). A family sending the form again must not undo it.
+const KEY = 'scholarshipApplications/' +
+    scholarship.applicationId(scholarship.validate(GOOD, NOW));
+const LATER = new Date(NOW.getTime() + 3600000);
+
+test('a first submission and a resubmission of a new one are new',
+    async () => {
+      const first = await post(GOOD);
+      assert.equal(first.docs[KEY].status, 'new');
+      assert.equal('decidedBy' in first.docs[KEY], false);
+      assert.equal('decidedAt' in first.docs[KEY], false);
+      const again = await post(Object.assign({}, GOOD, {grade: '9'}),
+          {docs: first.docs, now: LATER});
+      assert.equal(again.status, 200);
+      assert.deepEqual([again.docs[KEY].status, again.docs[KEY].grade,
+        again.docs[KEY].submissions], ['new', '9', 2]);
+      assert.equal('decidedBy' in again.docs[KEY], false);
+      assert.equal('decidedAt' in again.docs[KEY], false);
+    });
+
+test('a decided application resubmitted keeps the decision; the answers ' +
+    'and updatedAtMs still move', async () => {
+  for (const status of ['approved', 'declined']) {
+    const first = await post(GOOD);
+    const decidedAt = {seconds: 1791000000, nanoseconds: 0};
+    Object.assign(first.docs[KEY], {status, decidedBy: 'owner-1', decidedAt});
+    const again = await post(Object.assign({}, GOOD,
+        {average: '79.0', need: 'One income this year.', school: ''}),
+    {docs: first.docs, now: LATER, mail: {status: 'failed'}});
+    assert.equal(again.status, 200, status);
+    const row = again.docs[KEY];
+    assert.deepEqual([row.status, row.decidedBy, row.decidedAt],
+        [status, 'owner-1', decidedAt]);
+    assert.deepEqual([row.average, row.need, row.school, row.submissions,
+      row.createdAtMs, row.updatedAtMs, row.email_status],
+    ['79.0', 'One income this year.', '', 2, NOW.getTime(),
+      LATER.getTime(), 'failed']);
+    assert.equal(again.mails.length, 1); // the director still hears of it
+  }
+});
+
+test('a decision made while the resubmission is in flight is kept',
+    async () => {
+      const first = await post(GOOD);
+      // The owner approves between this request's read and its write. The
+      // handler's read is a snapshot taken before that, so only a write
+      // that names no decision field (the merge) can keep it.
+      const again = await post(GOOD, {docs: first.docs, now: LATER,
+        duringSend: (docs) => Object.assign(docs[KEY],
+            {status: 'approved', decidedBy: 'owner-1', decidedAt: 'T'})});
+      assert.equal(again.status, 200);
+      assert.deepEqual([again.docs[KEY].status, again.docs[KEY].decidedBy,
+        again.docs[KEY].decidedAt, again.docs[KEY].submissions],
+      ['approved', 'owner-1', 'T', 2]);
+    });
+
+test('status, decidedBy and decidedAt in the posted body are never stored',
+    async () => {
+      // The endpoint is public: a caller must not be able to decide.
+      const forged = Object.assign({}, GOOD,
+          {status: 'approved', decidedBy: 'x', decidedAt: 'y'});
+      const first = await post(forged);
+      assert.equal(first.status, 200);
+      assert.equal(first.docs[KEY].status, 'new');
+      assert.equal('decidedBy' in first.docs[KEY], false);
+      assert.equal('decidedAt' in first.docs[KEY], false);
+      // Nor can sending it again overturn the owner's decline.
+      Object.assign(first.docs[KEY],
+          {status: 'declined', decidedBy: 'owner-1', decidedAt: 'T'});
+      const again = await post(forged, {docs: first.docs, now: LATER});
+      assert.equal(again.status, 200);
+      assert.deepEqual([again.docs[KEY].status, again.docs[KEY].decidedBy,
+        again.docs[KEY].decidedAt, again.docs[KEY].submissions],
+      ['declined', 'owner-1', 'T', 2]);
+    });
+
+test('a stored status outside the three is a fresh, undecided row',
+    async () => {
+      const first = await post(GOOD);
+      Object.assign(first.docs[KEY], {status: 'paid', decidedBy: 'x'});
+      const again = await post(GOOD, {docs: first.docs, now: LATER});
+      assert.equal(again.docs[KEY].status, 'new');
+      assert.equal('decidedBy' in again.docs[KEY], false);
     });
 
 test('the daily cap, a failed email and a store failure', async () => {
