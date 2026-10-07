@@ -422,6 +422,21 @@ test('sibling discount (2026-09-30): 2+ membership families, coupon or code',
       assert.equal(checkout.siblingCouponId('SIBLING20', 't-12', 't-16'),
           'SIBLING20_12_16');
       assert.equal(checkout.siblingCouponId(null, 't-6', 'elite'), null);
+      // t-8 (2026-10-07): the four pair coupons made in Stripe for it, and
+      // the existing pair ids unchanged by the re-ranking.
+      assert.deepEqual([
+        checkout.siblingCouponId('SIBLING20', 't-6', 't-8'),
+        checkout.siblingCouponId('SIBLING20', 't-8', 't-12'),
+        checkout.siblingCouponId('SIBLING20', 't-8', 't-16'),
+        checkout.siblingCouponId('SIBLING20', 't-8', 'elite'),
+        checkout.siblingCouponId('SIBLING20', 't-6', 't-12'),
+        checkout.siblingCouponId('SIBLING20', 't-16', 'elite'),
+      ], ['SIBLING20_6_8', 'SIBLING20_8_12', 'SIBLING20_8_16',
+        'SIBLING20_8_ELITE', 'SIBLING20_6_12', 'SIBLING20_16_ELITE']);
+      // 8 tokens sits between 6 and 12: lena's paid 6 tokens is the lower
+      // membership for an 8-token checkout.
+      assert.deepEqual(await sib(two, 'novak', 'max', 't-8'),
+          {eligible: true, lower: 't-6'});
       const only = fakeDb(Object.assign({}, DOCS, {'athletes/max':
         {householdId: 'novak', packageId: 'single'}, 'athletes/fac':
         {householdId: 'novak', packageId: null}}));

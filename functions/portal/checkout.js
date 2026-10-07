@@ -33,15 +33,15 @@ const {HttpsError} = functions.https;
 const MIN_TRIAL_LEAD_MS = 49 * 60 * 60 * 1000;
 const PRODUCTS = ['tier', 'facility'];
 /**
- * Monthly memberships by price, lowest first ($299 < $569 < $719 < $999;
+ * Monthly memberships by price, lowest first ($299 < $389 < $569 < $719 < $999;
  * frontend/src/portal/data/packages.js holds the figures). Only the order
  * matters here. The single token is not a membership and has no rank.
  * @const {!Object<string, number>}
  */
-const PACKAGE_RANK = {'t-6': 1, 't-12': 2, 't-16': 3, 'elite': 4};
+const PACKAGE_RANK = {'t-6': 1, 't-8': 2, 't-12': 3, 't-16': 4, 'elite': 5};
 /** The package's part of a pair coupon id. @const {!Object<string, string>} */
 const PACKAGE_LABEL = {
-  't-6': '6', 't-12': '12', 't-16': '16', 'elite': 'ELITE',
+  't-6': '6', 't-8': '8', 't-12': '12', 't-16': '16', 'elite': 'ELITE',
 };
 const FACILITY_NAME = 'Family facility access';
 /** single.SEASON_END as the family reads it (checkout.test.js checks). */

@@ -78,7 +78,7 @@ export function billingStatusOf(athlete) {
  *             something Elite includes, and the card says so
  *   'active' | 'paid-waiver-pending' | 'past_due'   the add-on, read off the
  *             athlete it bills on (`holder`); the waiver stays ops-verified
- *   'offer'   no access yet, and a paid 6, 12 or 16 token athlete to bill it
+ *   'offer'   no access yet, and a paid 6, 8, 12 or 16 token athlete to bill it
  *             on: `holder`, the first one - the one who asked at sign-up
  *             ahead of the rest, so this card and the home pending card open
  *             the same checkout. `lapsed` when an earlier add-on ended.

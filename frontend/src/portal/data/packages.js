@@ -34,11 +34,13 @@
  * ========================================================================== */
 
 /** Token packages (contract section 1): tokens per billing period. */
-// v2.0.1 (Sprint 18, the owner's pricing sheet of 2026-09-17): three token
+// v2.0.1 (Sprint 18, the owner's pricing sheet of 2026-09-17): token
 // packages - t-20 is RETIRED - at the owner's own figures (pending: false).
+// t-8 added 2026-10-07 (owner, from family feedback): 8 tokens at $389.
 // The prices are NOT released to parents: see PRICES_RELEASED below.
 export const TOKEN_PACKAGES = [
   { id: 't-6',  name: '6 tokens',  kind: 'tokens', tokens: 6,  price: 299, pending: false, windowDays: 30 },
+  { id: 't-8',  name: '8 tokens',  kind: 'tokens', tokens: 8,  price: 389, pending: false, windowDays: 30 },
   { id: 't-12', name: '12 tokens', kind: 'tokens', tokens: 12, price: 569, pending: false, windowDays: 30 },
   { id: 't-16', name: '16 tokens', kind: 'tokens', tokens: 16, price: 719, pending: false, windowDays: 30 },
 ];
@@ -86,7 +88,7 @@ export const PRICES_RELEASED = true;
  * as `facilityAccess` (ops/owner-set, needs the signed waiver in
  * `facilityAccessConsent`). Elite includes it (`access247`).
  * Owner ruling 2026-09-30: it is a FAMILY add-on - one per household, with
- * a 6, 12 or 16 token package, covering every athlete in it; a live Elite
+ * a 6, 8, 12 or 16 token package, covering every athlete in it; a live Elite
  * membership covers the household too. It still bills on one athlete.
  * data/facility.js householdFacility is the one place that decides access.
  */

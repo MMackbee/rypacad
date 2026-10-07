@@ -20,7 +20,7 @@ test('a pickable card lights box, tint and dot from `selected` alone - emphasis 
   const r = await renderScreen(
     <div>
       <PackageCard pkg={ELITE} emphasised onSelect={() => {}} />
-      <PackageCard pkg={TOKEN_PACKAGES[1]} selected onSelect={() => {}} />
+      <PackageCard pkg={TOKEN_PACKAGES.find((p) => p.id === 't-12')} selected onSelect={() => {}} />
     </div>
   );
   expect(marks(r.button('Elite'))).toEqual({ box: false, tint: false, glow: false, dot: false });

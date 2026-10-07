@@ -51,9 +51,10 @@ test('retiredPriceIdsFor: the top-level retired block, per mode', () => {
   assert.deepEqual(cat.retiredPriceIdsFor('single'), []);
 });
 
-test('the committed JSON has exactly the twelve keys; test ids present', () => {
+test('the committed JSON: exactly fourteen keys, test ids present', () => {
   const json = cat.loadCatalogue();
-  const keys = ['t-6', 't-12', 't-16', 'elite', 'single', 'facility-access'];
+  const keys = ['t-6', 't-8', 't-12', 't-16', 'elite', 'single',
+    'facility-access'];
   assert.deepEqual(Object.keys(json).sort(), ['live', 'test']);
   assert.deepEqual(Object.keys(json.test).sort(), keys.slice().sort());
   assert.deepEqual(Object.keys(json.live).sort(), keys.slice().sort());

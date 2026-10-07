@@ -166,7 +166,7 @@ describe('tokensFor: the single token', () => {
 
 describe('the catalogue after Sprint 20', () => {
   test('token packages and single roll a 30-day window; Elite keeps 45', () => {
-    expect(TOKEN_PACKAGES.map((p) => p.windowDays)).toEqual([30, 30, 30]);
+    expect(TOKEN_PACKAGES.map((p) => p.windowDays)).toEqual([30, 30, 30, 30]);
     expect(SINGLE_TOKEN.windowDays).toBe(30);
     expect(ELITE.windowDays).toBe(45);
     expect(windowDaysFor(null)).toBe(30);

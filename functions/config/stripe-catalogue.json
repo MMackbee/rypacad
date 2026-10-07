@@ -1,6 +1,7 @@
 {
   "test": {
     "t-6": "price_1UKkzSD16IMJzfAPSoZioKKA",
+    "t-8": "price_1UO4XbD16IMJzfAPdXxaRhko",
     "t-12": "price_1UKl1qD16IMJzfAPERVeoeaN",
     "t-16": "price_1UKl2XD16IMJzfAPQyEUFpbP",
     "elite": "price_1UKl5HD16IMJzfAPMyX25Aei",
@@ -9,6 +10,7 @@
   },
   "live": {
     "t-6": "price_1ULPVRD16IMJzfAPNfVhOmVs",
+    "t-8": "price_1UO2NyD16IMJzfAPNon2ouuf",
     "t-12": "price_1ULPWID16IMJzfAPbBp8AQy8",
     "t-16": "price_1ULPWgD16IMJzfAP5IWW9l4A",
     "elite": "price_1ULPXJD16IMJzfAPL8NJphoo",

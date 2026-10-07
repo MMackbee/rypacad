@@ -41,7 +41,7 @@ const DEFAULT_ORIGINS =
 const DEFAULT_TO = 'makel@rypgolf.com';
 
 const RELATIONSHIPS = ['Parent', 'Guardian', 'Other'];
-const PACKAGES = ['6 tokens', '12 tokens', '16 tokens', 'Elite',
+const PACKAGES = ['6 tokens', '8 tokens', '12 tokens', '16 tokens', 'Elite',
   'Not sure yet'];
 const LEVELS = ['Partial', 'Full'];
 const STATUSES = ['new', 'approved', 'declined'];

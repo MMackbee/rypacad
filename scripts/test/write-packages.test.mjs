@@ -4,7 +4,7 @@ import { spawnSync } from 'node:child_process';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
-  parseArgs, loadCatalogue, planPackageWrites, CATALOGUE_PATH, CATALOGUE_KEYS, PRICE_ID_RE,
+  parseArgs, loadCatalogue, planPackageWrites, createDoc, CATALOGUE_PATH, CATALOGUE_KEYS, PRICE_ID_RE,
 } from '../write-packages.mjs';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
@@ -25,10 +25,11 @@ test('parseArgs: mode required, exactly one of --dry-run | --yes', () => {
   assert.ok(parseArgs(['--mode', 'test', '--dry-run', '--yes']).error);
   assert.ok(parseArgs(['--mode', 'prod', '--yes']).error);
   assert.deepEqual(parseArgs(['--prod', '--mode', 'live', '--yes']),
-    { prod: true, mode: 'live', dryRun: false, yes: true, catalogue: null });
+    { prod: true, mode: 'live', dryRun: false, yes: true, catalogue: null, createMissing: false });
+  assert.equal(parseArgs(['--prod', '--mode', 'live', '--dry-run', '--create-missing']).createMissing, true);
 });
 
-test('the committed catalogue has exactly the twelve keys; test ids present, live null or pasted', () => {
+test('the committed catalogue has exactly the fourteen keys; test ids present, live null or pasted', () => {
   const cat = loadCatalogue(CATALOGUE_PATH);
   for (const mode of ['test', 'live']) {
     assert.deepEqual(Object.keys(cat[mode]).sort(), [...CATALOGUE_KEYS].sort());
@@ -85,4 +86,9 @@ test('a null live block aborts before any target is touched (the sample fixture 
     { cwd: path.join(here, '..', '..'), encoding: 'utf8' });
   assert.equal(r.status, 1);
   assert.match(r.stderr, /live\.t-6: price id missing/);
+});
+
+test('createDoc: the whole seam package plus its price id, no undefined fields', () => {
+  const doc = createDoc({ id: 't-8', name: '8 tokens', kind: 'tokens', tokens: 8, price: 389, pending: false, windowDays: 30, access247: undefined }, 'price_1Sample0000t8');
+  assert.deepEqual(doc, { name: '8 tokens', kind: 'tokens', tokens: 8, price: 389, pending: false, windowDays: 30, stripePriceId: 'price_1Sample0000t8' });
 });

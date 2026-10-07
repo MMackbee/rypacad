@@ -7,7 +7,7 @@
  *   node scripts/provision-family.mjs             # write it
  *
  * CONTRACT v2.0 (Sprint 12 pin, "the token model", Part 1 only): ONE token
- * catalogue (t-6/t-12/t-16/elite/single; t-20 retired v2.0.1) replaces the two-pool
+ * catalogue (t-6/t-8/t-12/t-16/elite/single; t-20 retired v2.0.1) replaces the two-pool
  * golf/fitness/elite-247/drop-in catalogue. Production is the ONE place
  * prices reach Firestore (v1.1 rule — seed-firestore.mjs strips price, this
  * script doesn't), so this bundle keeps `price` and the new `pending` flag

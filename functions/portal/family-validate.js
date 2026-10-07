@@ -9,8 +9,8 @@
 
 const lib = require('./lib');
 
-/** `ALL_PACKAGES` ids (`data/packages.js:41-62`). @const {!Array<string>} */
-const PACKAGE_IDS = ['t-6', 't-12', 't-16', 'elite', 'single'];
+/** `ALL_PACKAGES` ids (frontend data/packages.js). @const {!Array<string>} */
+const PACKAGE_IDS = ['t-6', 't-8', 't-12', 't-16', 'elite', 'single'];
 /** The tiers the client accepts (`live.js:1451`). @const {!Array<number>} */
 const TIER_MINUTES = [20, 45, 90];
 /** `Registration.js:66`. @const {!RegExp} */

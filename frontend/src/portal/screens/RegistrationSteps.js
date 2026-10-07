@@ -312,7 +312,7 @@ function EmergencyContactCard({ mode, linkMode, value, onChange, showErrors }) {
  * any other.
  */
 
-/** What a token is and that it does not carry over (tokens-and-billing-contract.md), before the parent picks 6, 12 or 16. */
+/** What a token is and that it does not carry over (tokens-and-billing-contract.md), before the parent picks 6, 8, 12 or 16. */
 const TOKEN_EXPLAINER = "1 token = 1 session: a training block, a Tour event, or a session with Phil or Yannick. Tokens refresh on the 1st of each month; unused tokens don't carry over. Elite is unlimited.";
 
 /** Still needs a pick: none yet, one no longer in the catalogue, or the single token before it is on sale. */

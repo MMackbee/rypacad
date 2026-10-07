@@ -376,7 +376,7 @@ service cloud.firestore {
         let after = request.resource.data;
         let changed = after.diff(resource.data).affectedKeys();
         return changed.hasOnly(['packageId', 'updatedAt'])
-          && after.packageId in ['t-6', 't-12', 't-16', 'elite']
+          && after.packageId in ['t-6', 't-8', 't-12', 't-16', 'elite']
           && resource.data.get('billing', {}).get('status', null) == 'pending'
           && (!changed.hasAny(['updatedAt']) || after.updatedAt == request.time);
       }

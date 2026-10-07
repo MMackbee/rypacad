@@ -19,7 +19,7 @@ beforeEach(() => {
 const reese = { athleteId: 'a2', name: 'Reese', status: 'pending', packageId: 'elite', perPurchase: false };
 
 test('only a never-paid athlete can change, and only to a monthly package', () => {
-  expect(CHANGEABLE_PACKAGE_IDS).toEqual(['t-6', 't-12', 't-16', 'elite']);
+  expect(CHANGEABLE_PACKAGE_IDS).toEqual(['t-6', 't-8', 't-12', 't-16', 'elite']);
   expect(['pending', 'lapsed', 'active', 'past_due', undefined].map(canChangePackage)).toEqual([true, false, false, false, false]);
 });
 

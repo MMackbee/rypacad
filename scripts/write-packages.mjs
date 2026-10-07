@@ -15,7 +15,10 @@
  * Each write is packages/{id} with updateMask ['stripePriceId', 'windowDays']
  * and nothing else: never households (provision-family.mjs full-replaces
  * those), never a create (a missing packages doc is a refusal, so a partial
- * doc can never appear). windowDays comes from the seam (ALL_PACKAGES) and is
+ * doc can never appear) - unless --create-missing is passed: then a package
+ * the seam has and Firestore lacks (t-8, added 2026-10-07) is created whole
+ * from ALL_PACKAGES plus its price id, with an exists:false precondition so a
+ * create can never overwrite a doc. windowDays comes from the seam (ALL_PACKAGES) and is
  * asserted against the ruling (token 30 / elite 45) so the script cannot run
  * before the routing lane's packages.js change is merged.
  *
@@ -35,7 +38,7 @@ const dataDir = path.join(repoRoot, 'frontend', 'src', 'portal', 'data');
 
 export const CATALOGUE_PATH = path.join(repoRoot, 'functions', 'config', 'stripe-catalogue.json');
 export const FACILITY_KEY = 'facility-access';
-export const CATALOGUE_KEYS = ['t-6', 't-12', 't-16', 'elite', 'single', FACILITY_KEY];
+export const CATALOGUE_KEYS = ['t-6', 't-8', 't-12', 't-16', 'elite', 'single', FACILITY_KEY];
 export const PRICE_ID_RE = /^price_[A-Za-z0-9]{8,}$/;
 // Spec 5 / interfaces 3.2: the ruling the seam must already state.
 export const EXPECTED_WINDOW = { tokens: 30, single: 30, elite: 45 };
@@ -49,7 +52,7 @@ export function parseArgs(argv) {
   const dryRun = has('--dry-run');
   const yes = has('--yes');
   if (dryRun === yes) return { error: 'Pass exactly one of --dry-run (plan only) or --yes (write).' };
-  return { prod: has('--prod'), mode, dryRun, yes, catalogue: after('--catalogue') };
+  return { prod: has('--prod'), mode, dryRun, yes, catalogue: after('--catalogue'), createMissing: has('--create-missing') };
 }
 
 export function loadCatalogue(file) {
@@ -78,6 +81,14 @@ export function planPackageWrites(catalogue, mode, packages) {
   }
   for (const p of packages) if (!(p.id in map)) problems.push(`${mode} catalogue has no entry for package "${p.id}"`);
   return { plan: problems.length ? [] : plan, problems };
+}
+
+/** Pure: the whole packages/{id} doc a --create-missing run writes - the seam's fields plus the price id; the id is the doc id, not a field (as provision-family.mjs writes the others). */
+export function createDoc(pkg, stripePriceId) {
+  const { id, ...fields } = pkg;
+  const doc = { ...fields, stripePriceId };
+  for (const k of Object.keys(doc)) if (doc[k] === undefined) delete doc[k];
+  return doc;
 }
 
 export function diffLine(id, current, next) {
@@ -112,8 +123,14 @@ async function main() {
   for (const row of plan) {
     const current = target ? await getDoc(target, 'packages', row.id) : undefined;
     if (target && current === null) {
-      console.error(`  ABORT: packages/${row.id} does not exist on ${target.label} - run the catalogue provisioner first.`);
-      process.exit(1);
+      if (!args.createMissing) {
+        console.error(`  ABORT: packages/${row.id} does not exist on ${target.label} - pass --create-missing to create it from packages.js.`);
+        process.exit(1);
+      }
+      const doc = createDoc(ALL_PACKAGES.find((p) => p.id === row.id), row.stripePriceId);
+      console.log(`  packages/${row.id}: create ${JSON.stringify(doc)}`);
+      writes.push({ update: { name: docName('packages', row.id), fields: fsFields(doc) }, currentDocument: { exists: false } });
+      continue;
     }
     console.log('  ' + diffLine(row.id, current, row));
     const { id, ...fields } = row;
@@ -125,7 +142,7 @@ async function main() {
   if (args.dryRun) { console.log('\n[dry-run] nothing written.'); return; }
   if (args.prod && !args.yes) { console.log('\nRe-run with --yes to write PRODUCTION.'); process.exit(1); }
   await commit(target, writes);
-  console.log(`Done: ${writes.length} packages doc(s) updated on ${target.label}.`);
+  console.log(`Done: ${writes.length} packages doc(s) written on ${target.label}.`);
 }
 
 const invokedDirectly = process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url);
