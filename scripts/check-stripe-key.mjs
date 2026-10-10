@@ -1,6 +1,6 @@
 // Usage: node scripts/check-stripe-key.mjs [--coupon SIBLING10]   (asks for an rk_test_ key, hidden)
 // Stripe TEST key check for the portal functions. Asks for the key (hidden),
-// never prints it, refuses live keys. Part 1 reads the seven catalogue prices.
+// never prints it, refuses live keys. Part 1 reads the eight catalogue prices.
 // Part 2 rehearses every call the portal makes with this key, using the
 // portal's own checkout builder: one test-mode Checkout Session is created,
 // read back, then expired. The same is done for the one-time single-token
@@ -19,6 +19,7 @@ const PORTAL_URL = 'https://portal.rypacademy.com';
 const couponArg = process.argv.indexOf('--coupon');
 let COUPON = couponArg > -1 ? String(process.argv[couponArg + 1] || '').trim() : '';
 const PRICES = [
+  ['t-4', 'price_1UOyluD16IMJzfAPh92Ufqrp', 219, 4],
   ['t-6', 'price_1UKkzSD16IMJzfAPSoZioKKA', 299, 6],
   ['t-8', 'price_1UO4XbD16IMJzfAPdXxaRhko', 389, 8],
   ['t-12', 'price_1UKl1qD16IMJzfAPERVeoeaN', 569, 12],

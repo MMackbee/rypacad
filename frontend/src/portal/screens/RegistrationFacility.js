@@ -19,7 +19,7 @@ export const facilityIncluded = (self = false) => `24/7 facility access · Inclu
  * Billing). It is a FAMILY add-on (owner ruling 2026-09-30): ONE tick for
  * the whole form, the same whichever athlete's tab is open, sign-up and link
  * mode alike - `form.facilityRequested`, never a field of one athlete. With
- * someone on a 6, 8, 12 or 16 token package it is the tick; with anyone on
+ * someone on a 4, 6, 8, 12 or 16 token package it is the tick; with anyone on
  * Elite it reads "Included" for the whole family; otherwise nothing
  * (data/signup.js familyFacilityOption). Kept out of RegistrationSteps.js
  * for the 500-line rule and re-exported from there, like

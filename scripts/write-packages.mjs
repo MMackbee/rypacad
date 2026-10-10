@@ -38,7 +38,7 @@ const dataDir = path.join(repoRoot, 'frontend', 'src', 'portal', 'data');
 
 export const CATALOGUE_PATH = path.join(repoRoot, 'functions', 'config', 'stripe-catalogue.json');
 export const FACILITY_KEY = 'facility-access';
-export const CATALOGUE_KEYS = ['t-6', 't-8', 't-12', 't-16', 'elite', 'single', FACILITY_KEY];
+export const CATALOGUE_KEYS = ['t-4', 't-6', 't-8', 't-12', 't-16', 'elite', 'single', FACILITY_KEY];
 export const PRICE_ID_RE = /^price_[A-Za-z0-9]{8,}$/;
 // Spec 5 / interfaces 3.2: the ruling the seam must already state.
 export const EXPECTED_WINDOW = { tokens: 30, single: 30, elite: 45 };

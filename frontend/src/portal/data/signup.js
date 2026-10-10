@@ -65,7 +65,7 @@ export function facilityOptionFor(packageId) {
  * It is a FAMILY add-on (owner ruling 2026-09-30): one tick for the whole
  * form, offered once, never once per child. 'included' when any athlete in
  * the form is on Elite (Elite covers the family); 'offer' when someone is on
- * a 6, 8, 12 or 16 token package; null otherwise. `existing` (link mode) is the
+ * a 4, 6, 8, 12 or 16 token package; null otherwise. `existing` (link mode) is the
  * athletes already in the family: a live Elite membership there includes it
  * too, and anything that makes addAthletes store no request - an Elite
  * athlete still to pay, a request already made, an add-on already paid -
@@ -86,7 +86,7 @@ export function wantsFacility(form) {
   return Boolean(form) && form.facilityRequested === true && familyFacilityOption(form.athletes) === 'offer';
 }
 
-/** Which athlete the request is sent on - the add-on bills on one athlete: the first with a 6, 8, 12 or 16 token package. -1 == nobody. */
+/** Which athlete the request is sent on - the add-on bills on one athlete: the first with a 4, 6, 8, 12 or 16 token package. -1 == nobody. */
 export function facilityHolderIndex(form) {
   return wantsFacility(form) ? form.athletes.findIndex((a) => facilityOptionFor(a?.packageId) === 'offer') : -1;
 }

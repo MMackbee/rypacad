@@ -7,7 +7,7 @@
  *
  * CONTRACT v2.0 (Sprint 12 pin, "the token model", TEAM.md, Part 1 only):
  * one fungible token pool replaces the two-pool golf/fitness model.
- *   packages    — SIX docs (t-6, t-8, t-12, t-16, elite, single; t-20 retired v2.0.1) from the
+ *   packages    — SEVEN docs (t-4, t-6, t-8, t-12, t-16, elite, single; t-20 retired v2.0.1) from the
  *                 seam's TOKEN_PACKAGES/ELITE/SINGLE_TOKEN in packages.js —
  *                 the g-*, f-*, drop-in, elite-247 catalogue is GONE. price
  *                 and pending are both stripped before writing (no dollar

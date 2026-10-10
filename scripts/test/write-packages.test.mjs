@@ -29,7 +29,7 @@ test('parseArgs: mode required, exactly one of --dry-run | --yes', () => {
   assert.equal(parseArgs(['--prod', '--mode', 'live', '--dry-run', '--create-missing']).createMissing, true);
 });
 
-test('the committed catalogue has exactly the fourteen keys; test ids present, live null or pasted', () => {
+test('the committed catalogue has exactly the sixteen keys; test ids present, live null or pasted', () => {
   const cat = loadCatalogue(CATALOGUE_PATH);
   for (const mode of ['test', 'live']) {
     assert.deepEqual(Object.keys(cat[mode]).sort(), [...CATALOGUE_KEYS].sort());

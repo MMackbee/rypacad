@@ -6,8 +6,8 @@ import { facilityLine, facilityName, facilityOfferBody, facilityOfferLabel, faci
 
 /**
  * The $300/month FAMILY facility add-on (spec 4.5; owner ruling 2026-09-30):
- * ONE card for the household, never one per child. Offered once a 6, 8, 12
- * or 16 token membership is paid and billed on that athlete; never offered
+ * ONE card for the household, never one per child. Offered once a 4, 6, 8,
+ * 12 or 16 token membership is paid and billed on that athlete; never offered
  * while a live Elite membership covers the family. The waiver stays ops-
  * verified: "paid - waiver pending" until consent is on file.
  * `members` are the household's hub members. `self` (the adult who is their

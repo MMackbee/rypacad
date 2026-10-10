@@ -433,6 +433,11 @@ test('sibling discount (2026-09-30): 2+ membership families, coupon or code',
         checkout.siblingCouponId('SIBLING20', 't-16', 'elite'),
       ], ['SIBLING20_6_8', 'SIBLING20_8_12', 'SIBLING20_8_16',
         'SIBLING20_8_ELITE', 'SIBLING20_6_12', 'SIBLING20_16_ELITE']);
+      // t-4 (2026-10-10), the cheapest: five more pair coupons.
+      assert.deepEqual(['t-6', 't-8', 't-12', 't-16', 'elite'].map((p) =>
+        checkout.siblingCouponId('SIBLING20', 't-4', p)),
+      ['SIBLING20_4_6', 'SIBLING20_4_8', 'SIBLING20_4_12', 'SIBLING20_4_16',
+        'SIBLING20_4_ELITE']);
       // 8 tokens sits between 6 and 12: lena's paid 6 tokens is the lower
       // membership for an 8-token checkout.
       assert.deepEqual(await sib(two, 'novak', 'max', 't-8'),

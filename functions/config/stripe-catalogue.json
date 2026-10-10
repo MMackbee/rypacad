@@ -1,5 +1,6 @@
 {
   "test": {
+    "t-4": "price_1UOyluD16IMJzfAPh92Ufqrp",
     "t-6": "price_1UKkzSD16IMJzfAPSoZioKKA",
     "t-8": "price_1UO4XbD16IMJzfAPdXxaRhko",
     "t-12": "price_1UKl1qD16IMJzfAPERVeoeaN",
@@ -9,6 +10,7 @@
     "facility-access": "price_1UKlG2D16IMJzfAPomCAirrw"
   },
   "live": {
+    "t-4": "price_1UOylzD16IMJzfAP9f9ELyh3",
     "t-6": "price_1ULPVRD16IMJzfAPNfVhOmVs",
     "t-8": "price_1UO2NyD16IMJzfAPNon2ouuf",
     "t-12": "price_1ULPWID16IMJzfAPbBp8AQy8",

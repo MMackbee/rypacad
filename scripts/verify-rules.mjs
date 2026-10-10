@@ -369,6 +369,7 @@ export async function taskPackageChange() {
   expect('parent switches a pending athlete, Elite -> 6 tokens', await patchAth('ath-pkg-pending', { packageId: 't-6' }, t.parent), 200);
   expect('parent switches again with the server updatedAt (the client write)', await stamped('ath-pkg-pending', { packageId: 't-12' }, t.parent), 200);
   expect('parent switches a pending athlete to 8 tokens (t-8, 2026-10-07)', await stamped('ath-pkg-pending', { packageId: 't-8' }, t.parent), 200);
+  expect('parent switches a pending athlete to 4 tokens (t-4, 2026-10-10)', await stamped('ath-pkg-pending', { packageId: 't-4' }, t.parent), 200);
   expect('parent switches back to Elite', await stamped('ath-pkg-pending', { packageId: 'elite' }, t.parent), 200);
   expect('the one-time single token refused', await patchAth('ath-pkg-pending', { packageId: 'single' }, t.parent), 403);
   expect('a retired package refused', await patchAth('ath-pkg-pending', { packageId: 't-20' }, t.parent), 403);

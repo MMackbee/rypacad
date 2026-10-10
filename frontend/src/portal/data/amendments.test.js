@@ -8,15 +8,16 @@ import { MENTAL_MONTHLY_CAP, PARENT_ATTENDING_NOTE, SPECIALIST_MONTHLY_CAP, atte
 import { CAPACITY, CAPACITY_BY_TYPE, WEEKDAY_BLOCKS, capacityForType, generateSeason } from './schedule';
 
 describe('the catalogue (v2.0.1)', () => {
-  test('four token packages at the pricing-sheet figures (t-8 added 2026-10-07), t-20 retired', () => {
+  test('five token packages at the pricing-sheet figures (t-8 2026-10-07, t-4 2026-10-10), t-20 retired', () => {
     expect(TOKEN_PACKAGES.map((p) => [p.id, p.tokens, p.price, p.pending])).toEqual([
+      ['t-4', 4, 219, false],
       ['t-6', 6, 299, false],
       ['t-8', 8, 389, false],
       ['t-12', 12, 569, false],
       ['t-16', 16, 719, false],
     ]);
     expect(packageById('t-20')).toBeNull();
-    expect(ALL_PACKAGES.map((p) => p.id)).toEqual(['t-6', 't-8', 't-12', 't-16', 'elite', 'single']);
+    expect(ALL_PACKAGES.map((p) => p.id)).toEqual(['t-4', 't-6', 't-8', 't-12', 't-16', 'elite', 'single']);
   });
 
   test('Elite is $999 all-in with facility access included; the add-on is $300', () => {

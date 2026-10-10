@@ -9,7 +9,7 @@
 'use strict';
 
 /** The monthly token packages - the only ones the add-on goes with. */
-const ADD_ON_PACKAGES = ['t-6', 't-8', 't-12', 't-16'];
+const ADD_ON_PACKAGES = ['t-4', 't-6', 't-8', 't-12', 't-16'];
 const ELITE_ID = 'elite';
 
 /**
