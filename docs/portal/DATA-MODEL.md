@@ -1584,7 +1584,14 @@ Checkout Session, written ONLY by `stripeWebhook` (Admin SDK, inside the
 mirrors data/season.js SEASON_BOUNDS.end), reason: 'single-purchase',
 sourceSessionId: null, createdBy: 'stripe', createdAt, checkoutSessionId,
 paymentIntentId (string), amountTotal, currency, priceId, purchasedOn (the
-Chicago date of event.created), eventId }`. The id makes a redelivery or a
+Chicago date of event.created), eventId }`, plus `memberRate` (the package
+id, e.g. `'t-8'`) on a member's extra session (owner 2026-10-10): the same
+one-time checkout bought by a paid monthly token member with a
+`MEMBER_RATE_<tokens>` coupon (functions/portal/extra.js), minted as a
+top-up; `amountTotal` is then the member rate, not 6500. The checkout
+remembers an open extra page in `athletes.pendingCheckout.extra`
+(`{sessionId, priceId, discount: <coupon id>, createdAt}`), beside the
+`tier` and `facility` slots. The id makes a redelivery or a
 manual Resend a no-op (`duplicate-purchase`), and every new paid session a
 new token. Consumed exactly like any grace token (derived), but promotion
 and Calendly read spends from EVERY period (`bookings where graceTokenId in
@@ -1749,7 +1756,7 @@ Outcomes gain: `applied-checkout` (`checkout.session.completed` applied to the a
 
 **Facility add-on events (PM ruling D10):** every event that resolves to `product: 'facility'` (`invoice.paid`, `invoice.payment_failed`, `customer.subscription.updated`, `customer.subscription.deleted`) records its usual outcome but its ONLY writes are `athletes.facilityBilling` (+ `facilityAccess`) — household `membership` is untouched and no booking is revoked. The household freeze (`applyPastDue`) belongs to the tier subscription; the household lapse and `revokeHousehold` apply only when a tier subscription ends and no sibling still holds an active/past_due tier (D17) — otherwise only that athlete lapses (`athlete-lapsed`).
 
-**Single token (owner rulings 2026-09-29/30, spec D20):** outcomes gain `issued-single` (a paid payment-mode single checkout minted `graceTokens/single_{cs}`), `issued-single-topup` (the athlete still holds a live monthly subscription: token minted, billing untouched), `issued-single-late` (bought after 2027-02-27), `issued-single-amount-check` (`amount_total != 6500`), `issued-single-household-lapsed` (the household stays lapsed because another athlete has no `billing` block), `duplicate-purchase` (the token doc already exists), `single-unpaid` (`payment_status != 'paid'`), `unexpected-one-time` (a payment-mode session that is not exactly one single-price line on a `tier` client reference; nothing written) and `ignored-retired-subscription` (a late event for an id in `athletes.billing.retiredSubscriptionIds`; nothing written). The late, amount-check and household-lapsed rows are logged for ops review. Checkout rows gain `checkoutMode` (`object.mode`; null off checkout) and `clientReference` (`client_reference_id`; null off checkout). The legacy household-wide `invoice.paid` / `customer.subscription.updated` paths skip any athlete that carries a `billing` block (recorded as `{athleteId, reason: 'per-athlete-billing'}`).
+**Single token (owner rulings 2026-09-29/30, spec D20):** outcomes gain `issued-single` (a paid payment-mode single checkout minted `graceTokens/single_{cs}`), `issued-single-topup` (the athlete still holds a live monthly subscription: token minted, billing untouched), `issued-single-late` (bought after 2027-02-27), `issued-single-amount-check` (`amount_total != 6500`, or != the member rate a session's `metadata.memberRate` names; `detail` gains `amountTotal` and `expectedCents`), `issued-single-extra-no-plan` (a member-rate extra session paid after the athlete's subscription ended: token minted, billing untouched, never a move to single; owner 2026-10-10), `issued-single-household-lapsed` (the household stays lapsed because another athlete has no `billing` block), `duplicate-purchase` (the token doc already exists), `single-unpaid` (`payment_status != 'paid'`), `unexpected-one-time` (a payment-mode session that is not exactly one single-price line on a `tier` client reference; nothing written) and `ignored-retired-subscription` (a late event for an id in `athletes.billing.retiredSubscriptionIds`; nothing written). The late, amount-check, household-lapsed and extra-no-plan rows are logged for ops review. Checkout rows gain `checkoutMode` (`object.mode`; null off checkout) and `clientReference` (`client_reference_id`; null off checkout). The legacy household-wide `invoice.paid` / `customer.subscription.updated` paths skip any athlete that carries a `billing` block (recorded as `{athleteId, reason: 'per-athlete-billing'}`).
 
 Seed: **one fake doc**, `stripeEvents/evt_seed_2` — `{ type:
 'invoice.payment_failed', customer: 'cus_seed_parker', householdId:

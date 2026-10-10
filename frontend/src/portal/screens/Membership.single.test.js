@@ -145,3 +145,61 @@ describe('the adult on their own login', () => {
     await pending.unmount();
   });
 });
+
+// The extra session at the member rate (owner, 2026-10-10) on the athlete's
+// own login: an adult's, like the single token - once the period's tokens
+// are all used (a bought extra is spent before them).
+describe('a paid monthly member on their own login: the extra session', () => {
+  const EXTRA = 'Buy an extra session';
+  const ASK_EXTRA = 'Ask a parent or guardian to buy an extra session.';
+  const LINE = '$47.42 - your 12-token rate. Good through Sat, Feb 27, 2027.';
+  const booked = (n) => Array.from({ length: n }, (_, i) => ({ id: `ava_b${i}`, athleteId: 'ava', status: 'confirmed', periodKey: '2026-11-01', date: '2026-11-20', sessionId: `s-${i}`, type: 'training' }));
+  const paid = ({ dob, membership = null, used = 12 }) => {
+    const member = hubMemberFor({ athlete: { id: 'ava', name: 'Ava', packageId: 't-12', billing: { status: 'active', subscriptionId: 'sub_ava' }, ...(dob ? { dob } : {}) }, pkg: T12, anchorDay: 1, today, bookings: booked(used), waitlist: [], graceTokens: [] });
+    return { loading: false, error: null, data: { household: { id: 'h1', membership }, member, status: statusFor(membership, { anchorDay: 1 }), facilityPending: [] } };
+  };
+  const extraButtons = (r) => [...r.container.querySelectorAll('button')].map((b) => b.textContent).filter((t) => t.endsWith('|ava|extra'));
+
+  test('under 18: the line saying who buys it, never the button', async () => {
+    mockMine = paid({ dob: CHILD });
+    const r = await renderScreen(<Membership bare />);
+    expect(r.text().split(ASK_EXTRA)).toHaveLength(2);
+    expect(extraButtons(r)).toEqual([]);
+    expect(r.text()).not.toContain(LINE);
+    await r.unmount();
+  });
+
+  test('self-managed, or 18 and over by date of birth: the line and the button', async () => {
+    mockMine = paid({ dob: null });
+    const self = await renderScreen(<Membership bare selfManaged />);
+    expect(extraButtons(self)).toEqual([`${EXTRA}|ava|extra`]);
+    expect(self.text()).toContain(LINE);
+    expect(self.text()).not.toContain(ASK_EXTRA);
+    await self.unmount();
+    mockMine = paid({ dob: ADULT });
+    const adult = await renderScreen(<Membership bare />);
+    expect(extraButtons(adult)).toEqual([`${EXTRA}|ava|extra`]);
+    await adult.unmount();
+  });
+
+  test('tokens still left this period: neither the button nor the line', async () => {
+    mockMine = paid({ dob: ADULT, used: 4 });
+    const r = await renderScreen(<Membership bare />);
+    expect(extraButtons(r)).toEqual([]);
+    expect(r.text()).not.toContain(LINE);
+    await r.unmount();
+    mockMine = paid({ dob: CHILD, used: 4 });
+    const child = await renderScreen(<Membership bare />);
+    expect(child.text()).not.toContain(ASK_EXTRA);
+    await child.unmount();
+  });
+
+  test('a family on hold: neither the button nor the line', async () => {
+    mockMine = paid({ dob: ADULT, membership: { status: 'past_due' } });
+    const r = await renderScreen(<Membership bare />);
+    expect(extraButtons(r)).toEqual([]);
+    expect(r.text()).not.toContain(LINE);
+    expect(r.text()).not.toContain(ASK_EXTRA);
+    await r.unmount();
+  });
+});

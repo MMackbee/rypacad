@@ -13,6 +13,7 @@ import {
   positionPeriodFor,
   sessionLabel,
   statusFor,
+  tierBillingOf,
   withTokenStart,
 } from './billingHub';
 import { ELITE, TOKEN_PACKAGES } from './packages';
@@ -234,6 +235,23 @@ describe('per-athlete billing (Sprint 20, spec 4.4)', () => {
     expect(pending.billing).toEqual({ status: 'pending', facility: null });
     const add = hubMemberFor({ ...fixture(), athlete: { ...athlete, billing: { status: 'active' }, facilityBilling: { status: 'active' } } });
     expect(add.billing).toEqual({ status: 'active', facility: 'active' });
+  });
+
+  // The extra session (owner, 2026-10-10) tops up a live subscription: the
+  // member says whether one is on file, never its id.
+  test('hubMemberFor carries `subscribed` only when a subscription is on file', () => {
+    const sub = hubMemberFor({ ...fixture(), athlete: { ...athlete, billing: { status: 'active', subscriptionId: 'sub_1' } } });
+    expect(sub.billing).toEqual({ status: 'active', facility: null, subscribed: true });
+    const none = hubMemberFor({ ...fixture(), athlete: { ...athlete, billing: { status: 'active', subscriptionId: null } } });
+    expect(none.billing).toEqual({ status: 'active', facility: null });
+  });
+
+  // The same map rides on useMembership's rows (Book a Session's offer).
+  test('tierBillingOf: status, plus oneTime and subscribed only when set', () => {
+    expect(tierBillingOf({ billing: { status: 'active', subscriptionId: 'sub_1' } })).toEqual({ status: 'active', subscribed: true });
+    expect(tierBillingOf({ billing: { status: 'past_due', subscriptionId: 'sub_1' } })).toEqual({ status: 'past_due', subscribed: true });
+    expect(tierBillingOf({ packageId: 'single', billing: { status: 'active', oneTime: true, subscriptionId: null } })).toEqual({ status: 'active', oneTime: true });
+    expect(tierBillingOf({})).toEqual({ status: 'active' }); // absent billing == active (a legacy member): no subscription on file
   });
 
   test('hubMemberFor carries the facility waiver as a boolean (spec 4.5: "paid - waiver pending" vs "active")', () => {

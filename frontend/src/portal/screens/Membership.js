@@ -12,7 +12,7 @@ import { BackLink, Banner, Body, Card, ErrorNotice, ScreenTitle, SectionLabel } 
 import { useMyTokens } from '../hooks/billing';
 import { todayISO } from '../data/calendar';
 import { contractEnabled } from '../data/contractFlag';
-import { ownLoginMayBuy } from '../data/singleToken';
+import { householdOnHold, ownLoginMayBuy } from '../data/singleToken';
 
 /**
  * 19 · Membership — the athlete's own tokens (Sprint 12 pin, contract v2.0;
@@ -85,8 +85,9 @@ export default function Membership({ variant = 'populated', bare = false, role =
             <PendingBanner pendingAthletes={status?.status === 'pending' ? status.pendingAthletes : []} body={status?.body} title={status?.title} askGuardian={askGuardian} />
             <MemberSection name={member.name} trailing={selfManaged ? <BillingLink onOpen={() => navigate('/portal/billing')} /> : null}>
               {/* `buy`: a paid-up single athlete's meter carries the way to another session
-                  token; while payment is pending the banner's Pay now is the one button. */}
-              <TokenMeter member={member} defaultOpen buy askGuardian={askGuardian} />
+                  token, and a paid monthly token member's an extra session at their rate;
+                  while payment is pending the banner's Pay now is the one button. */}
+              <TokenMeter member={member} defaultOpen buy askGuardian={askGuardian} onHold={householdOnHold(data?.household)} />
               <CoachingLine coaching={member.coaching} />
               {contractEnabled() ? (
                 <ContractLine contractMinutes={member.contractMinutes} onOpen={() => navigate('/portal/contract')} />

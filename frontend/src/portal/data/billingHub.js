@@ -279,13 +279,27 @@ export function hubMemberFor(args) {
     // Sprint 20 (spec 4.4): the per-athlete paid state that gates booking.
     // Absent == active for every athlete provisioned before this sprint;
     // `facility` is the add-on subscription's own state (null == no add-on).
-    // billingStatusOf: a single-token buyer moved to another package is
-    // 'pending' until it is paid; `oneTime` rides along only when set.
+    // tierBillingOf: status, `oneTime` and `subscribed` (below).
     billing: {
-      status: billingStatusOf(athlete),
+      ...tierBillingOf(athlete),
       facility: athlete.facilityBilling?.status ?? null,
-      ...(athlete.billing?.oneTime === true ? { oneTime: true } : {}),
     },
+  };
+}
+
+/**
+ * The athlete's membership billing as the screens read it. billingStatusOf:
+ * a single-token buyer moved to another package is 'pending' until it is
+ * paid; `oneTime` rides along only when set, and so does `subscribed` (a
+ * Stripe subscription on file - what an extra session tops up;
+ * singleToken.js extraSessionOffer). The hub member and the useMembership
+ * row (Book a Session) carry the same map.
+ */
+export function tierBillingOf(athlete) {
+  return {
+    status: billingStatusOf(athlete),
+    ...(athlete?.billing?.oneTime === true ? { oneTime: true } : {}),
+    ...(athlete?.billing?.subscriptionId ? { subscribed: true } : {}),
   };
 }
 

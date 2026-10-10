@@ -197,7 +197,7 @@ import { loginStateFor } from '../data/signups';
 import { hideContractParts } from '../data/contractFlag';
 import repeatWeekly, { isGroupBookable } from './repeat';
 import { MARKS_LOOKAHEAD_DAYS, dayMarksFor, monthGridBounds } from '../data/calendarViews';
-import { foldBeforeFirstPeriod, positionPeriodFor, withTokenStart } from '../data/billingHub';
+import { foldBeforeFirstPeriod, positionPeriodFor, tierBillingOf, withTokenStart } from '../data/billingHub';
 import { sessionStarted } from '../data/sessionStart';
 import { handicapLimitOf, handicapOf } from '../data/reserved';
 
@@ -428,11 +428,23 @@ export async function liveTokens(athlete, pkg, bookings, anchorDay, today) {
 /**
  * The position on a home card (the parent's ChildCard, the athlete's home).
  * A single athlete's balance IS the tokens they bought, so theirs is read
- * live; every other package keeps the bookings-only figure these cards show.
+ * live. A monthly token member's is read live too since the extra session
+ * (owner 2026-10-10; review the same day): a bought extra is a grace token,
+ * and the family page its checkout returns to must count it ("0 tokens left
+ * + 1 session token") - with the waitlist holds and the issued grant, it
+ * then agrees with the meters. Should those reads fail, the card keeps the
+ * bookings-only figure it always showed rather than failing the home. Elite
+ * has no count to read.
  */
-function homeTokens(athlete, pkg, bookings, anchorDay, today) {
+async function homeTokens(athlete, pkg, bookings, anchorDay, today) {
   if (pkg && pkg.kind === 'single') return liveTokens(athlete, pkg, bookings, anchorDay, today);
-  return deriveTokens(pkg, bookings, anchorDay, today, { billingStatus: billingStatusOf(athlete) });
+  const bookingsOnly = () => deriveTokens(pkg, bookings, anchorDay, today, { billingStatus: billingStatusOf(athlete) });
+  if (!pkg || pkg.kind !== 'tokens') return bookingsOnly();
+  try {
+    return await liveTokens(athlete, pkg, bookings, anchorDay, today);
+  } catch (err) {
+    return bookingsOnly();
+  }
 }
 
 /** Sort key: chronological, then block order (session ids end in the block index). */
@@ -2015,6 +2027,10 @@ async function liveMemberEntry(a, today, anchorDay) {
     // token there (data/singleToken.js ownLoginMayBuy). null when not on file.
     dob: a.dob ?? null,
     billingStatus: billingStatusOf(a),
+    // Book a Session's out-of-tokens banner offers an extra session at the
+    // member rate only on a live, paid subscription (singleToken.js
+    // extraSessionOffer): status, plus oneTime / subscribed when set.
+    billing: tierBillingOf(a),
     // 2026-10-02: the athlete's own Book a Session judges a reserved block
     // on this (data/reserved.js); null == none on file.
     handicap: handicapOf(a),

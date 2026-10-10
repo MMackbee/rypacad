@@ -302,3 +302,115 @@ describe('a single athlete: where the token went, and the way to another', () =>
     }
   });
 });
+
+// The extra session at the member rate (owner, 2026-10-10): a paid monthly
+// token member's meter carries one more session at their package's rate,
+// once nothing is left to book with (a bought extra is spent before the
+// month's own tokens - review 2026-10-10).
+describe('a paid monthly member: an extra session at their rate', () => {
+  const EXTRA = 'Buy an extra session';
+  const ASK = 'Ask a parent or guardian to buy an extra session.';
+  const T8 = TOKEN_PACKAGES.find((p) => p.id === 't-8');
+  const LINE = '$48.63 - your 8-token rate. Good through Sat, Feb 27, 2027.';
+  const PAID = { status: 'active', subscriptionId: 'sub_ava' };
+  // Every token of the period booked: the meter reads 0 left.
+  const spentAll = (pkg) => Array.from({ length: pkg.tokens ?? 0 }, (_, i) => booking(`b${i}`));
+  const monthly = ({ pkg = T8, billing = PAID, bookings = spentAll(pkg), graceTokens = [] } = {}) =>
+    hubMemberFor({ athlete: { ...athlete, packageId: pkg.id, billing }, pkg, anchorDay: 1, today, bookings, waitlist: [], graceTokens });
+  const extraButtons = (r) => [...r.container.querySelectorAll('button')].map((b) => b.textContent).filter((t) => t.startsWith(EXTRA));
+
+  beforeEach(() => { jest.spyOn(Date, 'now').mockReturnValue(BOOKING_OPENS_AT); });
+  afterEach(() => { jest.restoreAllMocks(); });
+
+  test('out of tokens: the line and the primary button, starting the extra checkout', async () => {
+    const hub = monthly();
+    expect(hub.billing).toEqual({ status: 'active', facility: null, subscribed: true });
+    const r = await renderScreen(<TokenMeter member={hub} buy />);
+    expect(r.text()).toContain('0of 8 left');
+    expect(r.text().split(LINE)).toHaveLength(2);
+    expect(extraButtons(r)).toEqual([`${EXTRA}|ava|extra|primary`]);
+    expect(r.text()).not.toContain('Buy a session token');
+    await r.unmount();
+  });
+
+  test('every package names its own rate', async () => {
+    const rates = { 't-4': '$54.75', 't-6': '$49.83', 't-12': '$47.42', 't-16': '$44.94' };
+    for (const [id, rate] of Object.entries(rates)) {
+      const pkg = TOKEN_PACKAGES.find((p) => p.id === id);
+      const r = await renderScreen(<TokenMeter member={monthly({ pkg })} buy />);
+      expect(r.text()).toContain(`${rate} - your ${pkg.tokens}-token rate. Good through Sat, Feb 27, 2027.`);
+      expect(extraButtons(r)).toHaveLength(1);
+      await r.unmount();
+    }
+  });
+
+  test('nothing while a token is left to book with - a period token, a bonus, or an extra already bought', async () => {
+    for (const bookings of [[], spentAll(T8).slice(1)]) {
+      const r = await renderScreen(<TokenMeter member={monthly({ bookings })} buy />);
+      expect(extraButtons(r)).toEqual([]);
+      expect(r.text()).not.toContain(LINE);
+      await r.unmount();
+    }
+    const bought = { id: 'single_cs_1', expiresAt: '2027-02-27', reason: 'single-purchase' };
+    const bonus = await renderScreen(<TokenMeter member={monthly({ graceTokens: [bought] })} buy />);
+    expect(bonus.text()).toContain('0of 8 left');
+    expect(bonus.text()).toContain('Bonus 1');
+    expect(bonus.text()).toContain('Session token - good through Sat, Feb 27');
+    expect(extraButtons(bonus)).toEqual([]);
+    await bonus.unmount();
+    // ...and the under-18 line follows the button.
+    const child = await renderScreen(<TokenMeter member={monthly({ bookings: [] })} buy askGuardian />);
+    expect(child.text()).not.toContain(ASK);
+    await child.unmount();
+  });
+
+  test('nothing while unpaid, past due, one-time, without a subscription, or before the sale', async () => {
+    const blocked = [
+      { status: 'pending' },
+      { status: 'lapsed', subscriptionId: 'sub_ava' },
+      { status: 'past_due', subscriptionId: 'sub_ava' },
+      { status: 'active' },
+      { status: 'active', oneTime: true, subscriptionId: 'sub_ava' },
+    ];
+    for (const billing of blocked) {
+      const r = await renderScreen(<TokenMeter member={monthly({ billing })} buy />);
+      expect(extraButtons(r)).toEqual([]);
+      expect(r.text()).not.toContain(LINE);
+      await r.unmount();
+    }
+    Date.now.mockReturnValue(BOOKING_OPENS_AT - 1);
+    const early = await renderScreen(<TokenMeter member={monthly()} buy />);
+    expect(extraButtons(early)).toEqual([]);
+    expect(early.text()).not.toContain(LINE);
+    await early.unmount();
+  });
+
+  test('nothing while the family is on hold, nor on the staff view', async () => {
+    const held = await renderScreen(<TokenMeter member={monthly()} buy onHold />);
+    expect(extraButtons(held)).toEqual([]);
+    await held.unmount();
+    const staff = await renderScreen(<TokenMeter member={monthly()} showPrices />);
+    expect(extraButtons(staff)).toEqual([]);
+    expect(staff.text()).not.toContain(LINE);
+    await staff.unmount();
+  });
+
+  test('an under-18 athlete on their own login reads who buys it', async () => {
+    const r = await renderScreen(<TokenMeter member={monthly()} buy askGuardian />);
+    expect(r.text().split(ASK)).toHaveLength(2);
+    expect(extraButtons(r)).toEqual([]);
+    expect(r.text()).not.toContain(LINE);
+    await r.unmount();
+  });
+
+  test("never on Elite or the single token's meter", async () => {
+    const elite = await renderScreen(<TokenMeter member={monthly({ pkg: ELITE, bookings: [] })} buy />);
+    expect(extraButtons(elite)).toEqual([]);
+    expect(elite.text()).not.toMatch(/token/i);
+    await elite.unmount();
+    const one = await renderScreen(<TokenMeter member={monthly({ pkg: SINGLE_TOKEN, billing: { status: 'active', oneTime: true }, bookings: [] })} buy />);
+    expect(extraButtons(one)).toEqual([]);
+    expect(one.text()).toContain('Buy a session token - $65');
+    await one.unmount();
+  });
+});

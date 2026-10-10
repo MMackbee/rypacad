@@ -129,6 +129,7 @@ export default function AthleteDashboard({
           athleteId={params.get('paid')}
           cs={params.get('cs')}
           single={params.get('single') === '1'}
+          extra={params.get('extra') === '1'}
           whatsNext={{ athlete, product: params.get('product'), self: true, selfManaged, onBook, onSeason: () => navigate('/portal/season'),
             facilityDue: facilityPending.length > 0 }}
         />

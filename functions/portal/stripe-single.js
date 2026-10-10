@@ -9,10 +9,18 @@
  * has read the household, the athlete and the line items; this module makes
  * its own reads (the token doc, the household's athletes when it is lapsed)
  * before any write. It never writes tokenPeriods or periodAnchorDay.
+ *
+ * The extra session at the member rate (owner, 2026-10-10; extra.js) is
+ * the same session with a coupon and `metadata.memberRate`: one token, a
+ * top-up of the live subscription. The discounted amount is accepted for
+ * exactly the rate the metadata names. A member-rate session never moves
+ * the athlete to the single package: with no live subscription left by the
+ * time it is paid, the token is still issued and ops reviews the row.
  */
 'use strict';
 
 const {FieldValue} = require('firebase-admin/firestore');
+const extra = require('./extra');
 const lib = require('./lib');
 const single = require('./single');
 const {billingPatch} = require('./stripe-billing');
@@ -36,7 +44,8 @@ function idOf(v) {
  */
 function singleTokenDoc(a) {
   const s = a.session || {};
-  return {
+  const memberRate = (s.metadata && s.metadata.memberRate) || null;
+  return Object.assign({
     athleteId: a.athleteId,
     householdId: a.householdId,
     expiresAt: single.SEASON_END,
@@ -51,7 +60,7 @@ function singleTokenDoc(a) {
     priceId: a.priceId || null,
     purchasedOn: lib.chicagoDateFromUnix(a.event && a.event.created),
     eventId: (a.event && a.event.id) || null,
-  };
+  }, memberRate ? {memberRate} : {}); // an extra session: whose rate, audit
 }
 
 /**
@@ -81,8 +90,12 @@ async function applySinglePurchase(tx, args) {
   const {db, event, session, ref, priceId, athlete, athleteRef, hh} = args;
   const graceTokenId = single.tokenIdFor(session.id);
   const tokenRef = db.collection('graceTokens').doc(graceTokenId);
-  const detail = {graceTokenId, expiresAt: single.SEASON_END,
-    paymentIntentId: single.paymentIntentIdOf(session)};
+  // An extra session at the member rate (checkout.js extraSessionBody).
+  const memberRate = (session.metadata && session.metadata.memberRate) ||
+      null;
+  const detail = Object.assign({graceTokenId, expiresAt: single.SEASON_END,
+    paymentIntentId: single.paymentIntentIdOf(session)},
+  memberRate ? {memberRate} : {});
   const none = (outcome) => ({outcome, firstActive: false, detail});
 
   // ---- reads ----
@@ -92,7 +105,9 @@ async function applySinglePurchase(tx, args) {
   const membership = (hh.data && hh.data.membership) || {};
   const lapsed = membership.status === 'lapsed';
   let lift = false;
-  if (lapsed) {
+  // A member's extra session never lifts a lapsed household: it buys one
+  // more token, not the membership.
+  if (lapsed && !memberRate) {
     const snap = await tx.get(db.collection('athletes')
         .where('householdId', '==', hh.id));
     lift = othersAllBilled(snap, athleteRef.id);
@@ -106,7 +121,9 @@ async function applySinglePurchase(tx, args) {
   const topUp = Boolean(billing.subscriptionId) && billing.oneTime !== true &&
       ['active', 'past_due'].includes(billing.status);
   const customerId = idOf(session.customer);
-  if (!topUp) {
+  // A member-rate session is never a move to the single package, even when
+  // the subscription ended before it was paid: billing stays as it is.
+  if (!topUp && !memberRate) {
     const old = billing.subscriptionId || null;
     const patch = billingPatch('tier', {
       status: 'active', oneTime: true, subscriptionId: null,
@@ -128,18 +145,31 @@ async function applySinglePurchase(tx, args) {
       membershipPatch({status: 'active', lastEventId: event.id}) : undefined);
 
   const purchasedOn = lib.chicagoDateFromUnix(event.created);
+  // $65, or exactly the member rate the session's metadata names - a top-up
+  // is held to it too (a member-rate session charged $65 is flagged).
+  const expectedCents = extra.expectedAmountCents(session);
+  const amountOk = session.amount_total === expectedCents;
+  if (!amountOk) {
+    // Ops sees what was charged against what was due, whichever review
+    // outcome the row gets (an extra session paid with no plan left can be
+    // both).
+    Object.assign(detail, {expectedCents, amountTotal:
+      Number.isInteger(session.amount_total) ? session.amount_total : null});
+  }
   let outcome = 'issued-single';
   if (purchasedOn && purchasedOn > single.SEASON_END) {
     outcome = 'issued-single-late';
+  } else if (memberRate && !topUp) {
+    outcome = 'issued-single-extra-no-plan';
   } else if (topUp) {
-    outcome = 'issued-single-topup';
+    outcome = amountOk ? 'issued-single-topup' : 'issued-single-amount-check';
   } else if (lapsed && !lift) {
     outcome = 'issued-single-household-lapsed';
-  } else if (session.amount_total !== single.SINGLE_PRICE_CENTS) {
+  } else if (!amountOk) {
     outcome = 'issued-single-amount-check';
   }
   return {outcome,
-    firstActive: !topUp && Boolean(athlete.billing) &&
+    firstActive: !topUp && !memberRate && Boolean(athlete.billing) &&
         athlete.billing.status !== 'active',
     detail};
 }

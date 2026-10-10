@@ -23,6 +23,19 @@ import { SessionTokenPools } from './SessionTokens';
  * period grant to count down from - it renders SessionTokenPools instead.
  */
 
+/**
+ * The compact line's grace tokens beside the period count (review
+ * 2026-10-10: a parent back from buying an extra session read "0 tokens
+ * left" under "ready to book"): ' + 1 session token' when every one was
+ * bought (single-purchase), else ' + 2 bonus tokens'. Empty without any.
+ */
+function graceExtra(grace) {
+  const n = grace?.length ?? 0;
+  if (n === 0) return '';
+  const word = grace.every((g) => g?.reason === 'single-purchase') ? 'session token' : 'bonus token';
+  return ` + ${n} ${word}${n === 1 ? '' : 's'}`;
+}
+
 /** Exhausted reads as a stop, matching the handoff's red "limit reached" tone. */
 function toneFor(left) {
   if (left === 0) return color.error;
@@ -64,6 +77,7 @@ export default function AllowancePools({ tokens, compact = false, style }) {
       <span style={{ font: `400 11px ${font.body}`, color: color.textTertiary, ...style }}>
         <span style={{ font: `600 12px ${font.body}`, color: tone }}>{tokens.left}</span> token
         {tokens.left === 1 ? '' : 's'} left
+        {graceExtra(tokens.grace)}
       </span>
     );
   }

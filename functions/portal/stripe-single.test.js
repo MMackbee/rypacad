@@ -260,4 +260,175 @@ test('a session with no customer never clears the linked one', async () => {
   assert.equal(byPath(writes, 'households/quist').length, 0);
 });
 
+// The extra session at the member rate (owner, 2026-10-10): the single
+// token's session with a coupon and metadata.memberRate (checkout.js
+// extraSessionBody), bought by a paid monthly member.
+const MEMBER = {householdId: 'quist', packageId: 't-8', billing: {
+  status: 'active', subscriptionId: 'sub_live', customerId: 'cus_q'}};
+/**
+ * @param {string} rate The package whose member rate was sold.
+ * @param {number} cents What Stripe charged.
+ * @param {!Object=} over More argsFor overrides.
+ * @return {!Object} applySinglePurchase's args for the extra session.
+ */
+const extraArgs = (rate, cents, over) => argsFor(Object.assign({
+  athlete: MEMBER,
+  session: {amount_total: cents, metadata: {householdId: 'quist',
+    athleteId: 'sol', product: 'tier', packageId: 'single',
+    memberRate: rate}}}, over));
+
+test('an extra session: exactly one token, a top-up, billing untouched',
+    async () => {
+      DATA = {};
+      const {tx, writes} = recorder();
+      const out = await s.applySinglePurchase(tx, extraArgs('t-8', 4863));
+      assert.deepEqual([out.outcome, out.firstActive],
+          ['issued-single-topup', false]);
+      assert.deepEqual(out.detail, {graceTokenId: 'single_cs_x',
+        expiresAt: '2027-02-27', paymentIntentId: 'pi_x', memberRate: 't-8'});
+      const tokens = writes.filter((w) => w.path.startsWith('graceTokens/'));
+      assert.equal(tokens.length, 1, 'one token');
+      assert.equal(tokens[0].op, 'set');
+      const t = Object.assign({}, tokens[0].data);
+      delete t.createdAt;
+      assert.deepEqual(t, {athleteId: 'sol', householdId: 'quist',
+        expiresAt: '2027-02-27', reason: 'single-purchase',
+        sourceSessionId: null, createdBy: 'stripe', checkoutSessionId: 'cs_x',
+        paymentIntentId: 'pi_x', amountTotal: 4863, currency: 'usd',
+        priceId: 'price_single', purchasedOn: '2026-10-01', eventId: 'evt_x',
+        memberRate: 't-8'});
+      assert.equal(byPath(writes, 'athletes/sol').length, 0,
+          'never moved to the single package, billing untouched');
+      // Only the customer link on the household; never a membership change.
+      assert.deepEqual(writes.map((w) => w.path).sort(),
+          ['graceTokens/single_cs_x', 'households/quist']);
+      assert.equal(Object.keys(byPath(writes, 'households/quist')[0].data)
+          .some((k) => k.startsWith('membership.')), false);
+      // A redelivery mints nothing more.
+      DATA = {graceTokens: {single_cs_x: {athleteId: 'sol'}}};
+      const dup = recorder();
+      const d = await s.applySinglePurchase(dup.tx, extraArgs('t-8', 4863));
+      assert.deepEqual([d.outcome, dup.writes.length],
+          ['duplicate-purchase', 0]);
+    });
+
+test('every member rate is accepted at exactly its own amount', async () => {
+  const rates = {'t-4': 5475, 't-6': 4983, 't-8': 4863, 't-12': 4742,
+    't-16': 4494};
+  for (const [rate, cents] of Object.entries(rates)) {
+    DATA = {};
+    const ok = recorder();
+    const athlete = Object.assign({}, MEMBER, {packageId: rate});
+    assert.equal((await s.applySinglePurchase(ok.tx, extraArgs(rate, cents,
+        {athlete}))).outcome, 'issued-single-topup', rate);
+    assert.equal(ok.writes.filter((w) =>
+      w.path.startsWith('graceTokens/')).length, 1, rate);
+  }
+  // A failing card is still a live subscription: a top-up, past_due kept.
+  DATA = {};
+  const pd = recorder();
+  const pastDue = Object.assign({}, MEMBER, {billing: {status: 'past_due',
+    subscriptionId: 'sub_live'}});
+  assert.equal((await s.applySinglePurchase(pd.tx, extraArgs('t-8', 4863,
+      {athlete: pastDue}))).outcome, 'issued-single-topup');
+  assert.equal(byPath(pd.writes, 'athletes/sol').length, 0);
+});
+
+test('any other amount on a top-up is flagged; the token is still issued',
+    async () => {
+      const outcomeOf = async (args) => {
+        DATA = {};
+        const r = recorder();
+        const out = await s.applySinglePurchase(r.tx, args);
+        assert.equal(r.writes.filter((w) =>
+          w.path.startsWith('graceTokens/')).length, 1, 'paid: one token');
+        assert.equal(byPath(r.writes, 'athletes/sol').length, 0);
+        return out.outcome;
+      };
+      // A member-rate session that charged $65, or another package's rate.
+      assert.equal(await outcomeOf(extraArgs('t-8', 6500)),
+          'issued-single-amount-check');
+      assert.equal(await outcomeOf(extraArgs('t-8', 4742)),
+          'issued-single-amount-check');
+      assert.equal(await outcomeOf(extraArgs('elite', 4863)),
+          'issued-single-amount-check', 'a rate nobody sells');
+      // Without the metadata only $65 is right: the discount is accepted
+      // for a member-rate session alone.
+      assert.equal(await outcomeOf(argsFor({athlete: MEMBER})),
+          'issued-single-topup');
+      assert.equal(await outcomeOf(argsFor({athlete: MEMBER,
+        session: {amount_total: 4863}})), 'issued-single-amount-check');
+      // A single-package buyer is still held to $65.
+      DATA = {};
+      const sp = recorder();
+      assert.equal((await s.applySinglePurchase(sp.tx, argsFor({session:
+        {amount_total: 4863}}))).outcome, 'issued-single-amount-check');
+      // The review row says what was charged against what was due; a right
+      // amount adds nothing.
+      DATA = {};
+      const wrong = await s.applySinglePurchase(recorder().tx,
+          extraArgs('t-8', 6500));
+      assert.deepEqual([wrong.detail.amountTotal, wrong.detail.expectedCents],
+          [6500, 4863]);
+      DATA = {};
+      const nobody = await s.applySinglePurchase(recorder().tx,
+          extraArgs('elite', 4863));
+      assert.deepEqual([nobody.detail.amountTotal,
+        nobody.detail.expectedCents], [4863, null]);
+      DATA = {};
+      const right = await s.applySinglePurchase(recorder().tx,
+          extraArgs('t-8', 4863));
+      assert.equal('amountTotal' in right.detail, false);
+      assert.equal('expectedCents' in right.detail, false);
+    });
+
+test('an extra session paid after the subscription ended: never a move to ' +
+    'Single', async () => {
+  for (const billing of [{status: 'lapsed', subscriptionId: 'sub_live'},
+    {status: 'pending'}, {status: 'active', oneTime: true,
+      subscriptionId: null}]) {
+    DATA = {};
+    const {tx, writes} = recorder();
+    const out = await s.applySinglePurchase(tx, extraArgs('t-8', 4863,
+        {athlete: {householdId: 'quist', packageId: 't-8', billing}}));
+    assert.deepEqual([out.outcome, out.firstActive],
+        ['issued-single-extra-no-plan', false], JSON.stringify(billing));
+    assert.equal(byPath(writes, 'graceTokens/single_cs_x').length, 1,
+        'the family paid: the token is issued');
+    assert.equal(byPath(writes, 'athletes/sol').length, 0,
+        'no package move, no billing patch, nothing retired');
+  }
+  // Nor does it lift a lapsed household (no sibling read either).
+  DATA = {athletes: {sol: {householdId: 'quist', billing: {status: 'lapsed'}}}};
+  const lap = recorder();
+  const out = await s.applySinglePurchase(lap.tx, extraArgs('t-8', 4863, {
+    athlete: {householdId: 'quist', packageId: 't-8',
+      billing: {status: 'lapsed', subscriptionId: 'sub_live'}},
+    hh: {id: 'quist', ref: {path: 'households/quist'},
+      data: {stripeCustomerId: 'cus_q', membership: {status: 'lapsed'}}}}));
+  assert.equal(out.outcome, 'issued-single-extra-no-plan');
+  assert.equal(lap.gets.some((g) => g.startsWith('athletes?')), false);
+  assert.equal(lap.writes.some((w) => 'membership.status' in w.data), false);
+  // Paid at the wrong amount as well: still the no-plan row, and the detail
+  // carries the amount check so ops sees both.
+  DATA = {};
+  const both = await s.applySinglePurchase(recorder().tx, extraArgs('t-8',
+      6500, {athlete: {householdId: 'quist', packageId: 't-8',
+        billing: {status: 'pending'}}}));
+  assert.equal(both.outcome, 'issued-single-extra-no-plan');
+  assert.deepEqual([both.detail.amountTotal, both.detail.expectedCents],
+      [6500, 4863]);
+  // Late still outranks it; the row is a review outcome with a token.
+  DATA = {};
+  const late = recorder();
+  assert.equal((await s.applySinglePurchase(late.tx, extraArgs('t-8', 4863, {
+    athlete: {householdId: 'quist', packageId: 't-8',
+      billing: {status: 'lapsed'}},
+    event: {created: secs('2027-03-01T12:00:00Z')}}))).outcome,
+  'issued-single-late');
+  assert.equal(s.paidWithoutToken({mode: 'payment', payment_status: 'paid',
+    client_reference_id: 'quist__sol__tier'}, 'issued-single-extra-no-plan'),
+  false);
+});
+
 run();

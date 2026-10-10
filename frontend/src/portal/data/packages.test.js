@@ -6,7 +6,7 @@
  */
 import {
   ALL_PACKAGES, ELITE, PRICES_RELEASED, SIBLING_DISCOUNT_NOTE, SIBLING_DISCOUNT_PCT, SINGLE_TOKEN, TOKEN_PACKAGES,
-  normalizeAnchorDay, periodFallback, periodFor, siblingDiscountApplies, siblingPlan, tokensFor, windowDaysFor,
+  memberSessionRate, normalizeAnchorDay, periodFallback, periodFor, siblingDiscountApplies, siblingPlan, tokensFor, windowDaysFor,
 } from './packages';
 import { SEASON_BOUNDS } from './season';
 
@@ -236,5 +236,36 @@ describe('siblingPlan', () => {
     expect(siblingPlan([{ athleteId: 'm1', package: { id: 'elite' }, billing: { status: 'active' } }, { athleteId: 'm2', package: { id: 't-16' }, billing: { status: 'pending' } }]))
       .toEqual({ m2: { state: 'discount', amount: null } });
     expect(siblingPlan(null)).toEqual({});
+  });
+});
+
+// The extra session (owner, 2026-10-10): a monthly token member's per-session
+// rate, round(price * 100 / tokens) / 100. functions/portal/extra.js holds the
+// same five figures (its test reads TOKEN_PACKAGES) and the Stripe coupons
+// take 6500 minus each off the $65 single price.
+describe('memberSessionRate', () => {
+  test('all five token packages, to the cent', () => {
+    expect(TOKEN_PACKAGES.map((p) => [p.id, memberSessionRate(p)])).toEqual([
+      ['t-4', 54.75],
+      ['t-6', 49.83],
+      ['t-8', 48.63],
+      ['t-12', 47.42],
+      ['t-16', 44.94],
+    ]);
+    // What each coupon takes off $65, in cents (MEMBER_RATE_<tokens>).
+    expect(TOKEN_PACKAGES.map((p) => Math.round((SINGLE_TOKEN.price - memberSessionRate(p)) * 100))).toEqual([1025, 1517, 1637, 1758, 2006]);
+  });
+  test("the hub member's package shape works the same", () => {
+    expect(memberSessionRate({ id: 't-8', name: '8 tokens', kind: 'tokens', tokens: 8, price: 389, pending: false })).toBe(48.63);
+  });
+  test('null for Elite, the single token, nothing, or a package without a price', () => {
+    expect(memberSessionRate(ELITE)).toBeNull();
+    expect(memberSessionRate(SINGLE_TOKEN)).toBeNull();
+    expect(memberSessionRate(null)).toBeNull();
+    expect(memberSessionRate(undefined)).toBeNull();
+    expect(memberSessionRate({ kind: 'tokens', tokens: 8, price: null })).toBeNull();
+    expect(memberSessionRate({ kind: 'tokens', tokens: 0, price: 389 })).toBeNull();
+    expect(memberSessionRate({ kind: 'tokens', tokens: null, price: 389 })).toBeNull();
+    expect(memberSessionRate({ kind: 'tokens', tokens: 8, price: 0 })).toBeNull();
   });
 });

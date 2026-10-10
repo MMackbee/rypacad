@@ -522,8 +522,18 @@ nothing. Each token stores its `paymentIntentId` for the Stripe lookup.
 - Review daily: `double-spend` cancellations (`bookings` where
   `cancelReason == 'double-spend'`; each family also got a "Booking
   released" notice) and any `issued-single-late`,
-  `issued-single-amount-check` or `issued-single-household-lapsed` ledger
-  rows (the function also logs each one).
+  `issued-single-amount-check`, `issued-single-household-lapsed` or
+  `issued-single-extra-no-plan` ledger rows (the function also logs each
+  one). An amount-check row's `detail` carries `amountTotal` (what Stripe
+  charged) and `expectedCents` ($65, or the member rate the session's
+  `metadata.memberRate` names); refund the difference.
+- `issued-single-extra-no-plan` (owner 2026-10-10, the extra session at the
+  member rate): a monthly member paid for an extra session after their
+  subscription had ended. The token was issued and billing left alone.
+  Check the athlete: if they are re-subscribing, nothing to do; otherwise
+  refund the extra and void the token (10.6), or leave it if the family
+  will still book with it. If `detail.amountTotal` is present the amount
+  was wrong too.
 - Review daily: `stripeEvents` rows with `checkoutMode 'payment'` whose
   outcome is not `issued-single...` or `duplicate-purchase` (`unmatched`,
   `unexpected-one-time`, `ignored`, `stripe-lookup-failed`). When Stripe

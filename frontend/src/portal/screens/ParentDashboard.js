@@ -177,6 +177,7 @@ export default function ParentDashboard({
           athleteId={paidAthleteId}
           cs={params.get('cs')}
           single={params.get('single') === '1'}
+          extra={params.get('extra') === '1'}
           whatsNext={{ athlete: paidChild, product: params.get('product'), onBook: paidChild ? () => setBookFor(paidChild) : undefined,
             facilityDue: facilityPending.some((r) => r.athleteId === paidAthleteId || r.state === 'pay') }}
         />

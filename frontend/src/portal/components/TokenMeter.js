@@ -8,7 +8,15 @@ import { SessionTokenHero } from './SessionTokens';
 import { Body, Card, SectionLabel } from './Primitives';
 import { longDayLabel } from '../data/calendar';
 import { firstPeriodLine, PAY_TO_START } from '../data/billingCopy';
-import { availableCount, BUY_SINGLE_LABEL, saleOpen, SINGLE_ASK_GUARDIAN_LINE, SINGLE_NOT_OPEN_LINE } from '../data/singleToken';
+import {
+  availableCount,
+  BUY_EXTRA_LABEL,
+  BUY_SINGLE_LABEL,
+  extraSessionOffer,
+  saleOpen,
+  SINGLE_ASK_GUARDIAN_LINE,
+  SINGLE_NOT_OPEN_LINE,
+} from '../data/singleToken';
 
 /**
  * One athlete's tokens on the Billing hub (contract v2.4, Sprint 16): the
@@ -22,6 +30,9 @@ import { availableCount, BUY_SINGLE_LABEL, saleOpen, SINGLE_ASK_GUARDIAN_LINE, S
  * their hero is SessionTokenHero, and a row paid with a bought token reads
  * 'Session token'. The hero names the session each spent token was used on
  * and, for the payer (`buy`), carries the way to get another (singleBuySlot).
+ * A paid monthly token member's meter carries, for the payer, one more
+ * session at their package's rate once nothing is left to book with
+ * (ExtraSessionBuy; owner, 2026-10-10).
  */
 
 function toneFor(left) {
@@ -184,15 +195,49 @@ function singleBuySlot(member, askGuardian) {
 }
 
 /**
+ * A paid monthly token member's way to ONE MORE session at their package's
+ * per-session rate (owner, 2026-10-10: "Buy an extra session", the discount
+ * applied at checkout): the line naming the rate, then the button, which
+ * starts the product 'extra' checkout. `offer` is data/singleToken.js
+ * extraSessionOffer's answer - it decides when: once nothing is left to
+ * book with, never while payment is pending, the card is failing, the
+ * family is on hold, or before single tokens go on sale. An under-18
+ * athlete's own login (`state: 'ask'`) reads who buys it instead. Book a
+ * Session's out-of-tokens banner renders the same slot. Nothing when there
+ * is no offer.
+ */
+export function ExtraSessionBuy({ athleteId, offer, style }) {
+  if (!offer || !athleteId) return null;
+  if (offer.state === 'ask') {
+    return (
+      <Body size={12} style={{ marginTop: 10, ...style }}>
+        {offer.line}
+      </Body>
+    );
+  }
+  return (
+    <div style={{ marginTop: 12, ...style }}>
+      <Body size={12} tone={color.textSecondary}>
+        {offer.line}
+      </Body>
+      <PayButton athleteId={athleteId} product="extra" label={BUY_EXTRA_LABEL} variant="primary" height={44} style={{ marginTop: 8 }} />
+    </div>
+  );
+}
+
+/**
  * @param {object} member  A hub member (data/billingHub.js hubMemberFor).
  * @param {boolean} [buy]  The viewer pays for this athlete (a parent, or the
- *   athlete's own login) - never the read-only staff view. Only the single
- *   token has a button here; a monthly checkout stays on the pending card.
+ *   athlete's own login) - never the read-only staff view. The single token
+ *   has its Buy button here, and a paid monthly token member the extra
+ *   session's; a monthly checkout stays on the pending card.
  * @param {boolean} [askGuardian]  With `buy`, on an under-18 athlete's own
  *   login (data/singleToken.js ownLoginMayBuy is false): the line telling
  *   them a parent or guardian buys it, never the button.
+ * @param {boolean} [onHold]  The household is past due or lapsed
+ *   (singleToken.js householdOnHold): no extra session is offered.
  */
-export default function TokenMeter({ member, defaultOpen = false, showPrices = false, buy = false, askGuardian = false }) {
+export default function TokenMeter({ member, defaultOpen = false, showPrices = false, buy = false, askGuardian = false, onHold = false }) {
   const [open, setOpen] = useState(defaultOpen);
   const { package: pkg, tokens, period, expiryNudge, spent, reserved } = member;
   // v2.0.1 (Sprint 18): catalogue prices are withheld from parents and
@@ -308,6 +353,7 @@ export default function TokenMeter({ member, defaultOpen = false, showPrices = f
           {expiryNudge.left} {expiryNudge.left === 1 ? 'token expires' : 'tokens expire'} {longDayLabel(expiryNudge.on)} — book before then.
         </Body>
       ) : null}
+      {buy ? <ExtraSessionBuy athleteId={member.athleteId} offer={extraSessionOffer(member, { askGuardian, onHold })} /> : null}
 
       <Toggle open={open} onToggle={() => setOpen((v) => !v)} count={count} />
       {open ? <Evidence member={member} /> : null}

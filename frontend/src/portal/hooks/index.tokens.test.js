@@ -98,8 +98,9 @@ test('the family card: November\'s grant marked "starts", an unpaid child marked
 });
 
 // Single token (owner rulings 2026-09-29/30): the balance IS the tokens the
-// family bought (graceTokens/single_*), so that child's card reads them live;
-// a monthly sibling's card keeps the bookings-only figure it always showed.
+// family bought (graceTokens/single_*), so that child's card reads them live.
+// Since the extra session (owner 2026-10-10) a monthly sibling's card is read
+// live as well; an Elite one never.
 test('the family card: a single-token child shows the tokens they bought, less one a waitlist spot holds', async () => {
   calendar.todayISO.mockReturnValue('2026-11-20');
   const SINGLE_PKG = { id: 'single', name: 'Single token', kind: 'single', tokens: 1, windowDays: 30 };
@@ -115,8 +116,8 @@ test('the family card: a single-token child shows the tokens they bought, less o
     id === 'a2' ? [{ id: 'a2_s1', sessionId: 's1', date: '2026-11-24', periodKey: '2026-11-01', status: 'confirmed', type: 'training', graceTokenId: 'single_cs_1' }] : []
   );
   live.fetchSessionsByIds.mockResolvedValue([]);
-  live.fetchGraceTokensByAthlete.mockResolvedValue([bought('single_cs_1'), bought('single_cs_2'), bought('single_cs_3')]);
-  waitlist.fetchWaitlistByAthlete.mockResolvedValue([{ id: 's9_a2', sessionId: 's9', athleteId: 'a2', householdId: 'h1', periodKey: '2026-12-01' }]);
+  live.fetchGraceTokensByAthlete.mockImplementation(async (id) => (id === 'a2' ? [bought('single_cs_1'), bought('single_cs_2'), bought('single_cs_3')] : []));
+  waitlist.fetchWaitlistByAthlete.mockImplementation(async (id) => (id === 'a2' ? [{ id: 's9_a2', sessionId: 's9', athleteId: 'a2', householdId: 'h1', periodKey: '2026-12-01' }] : []));
   grace.fetchTokenPeriod.mockResolvedValue(null);
 
   const h = await mountHook(() => useHousehold());
@@ -126,11 +127,48 @@ test('the family card: a single-token child shows the tokens they bought, less o
   expect(reese.tokens).toMatchObject({ perPurchase: true, granted: 0, left: 0, held: 1, unpaid: false });
   expect(reese.tokens.grace).toEqual([expect.objectContaining({ reason: 'single-purchase', expiresAt: '2027-02-27' })]);
   expect(reese.billingStatus).toBe('active');
-  // Only the single child's inputs were read, the waitlist household-scoped.
-  expect(live.fetchGraceTokensByAthlete.mock.calls).toEqual([['a2']]);
-  expect(waitlist.fetchWaitlistByAthlete.mock.calls).toEqual([['a2', { householdId: 'h1' }]]);
-  expect(jordan.tokens).toMatchObject({ granted: 16, left: 16, perPurchase: false });
+  // Both children's inputs were read, the waitlist household-scoped.
+  expect(live.fetchGraceTokensByAthlete.mock.calls.map(([id]) => id).sort()).toEqual(['a1', 'a2']);
+  expect([...waitlist.fetchWaitlistByAthlete.mock.calls].sort()).toEqual([['a1', { householdId: 'h1' }], ['a2', { householdId: 'h1' }]]);
+  expect(jordan.tokens).toMatchObject({ granted: 16, left: 16, perPurchase: false, grace: [] });
   await h.unmount();
+});
+
+// The extra session (owner 2026-10-10; review the same day): the checkout
+// returns a parent to the family page, whose card must count the bought
+// token - read live for a monthly member, never failing the home.
+test('the family card: a monthly member\'s bought extra counts beside the period; a failed read keeps the old figure', async () => {
+  calendar.todayISO.mockReturnValue('2026-11-20');
+  const used = Array.from({ length: 16 }, (_, i) => ({ id: `a1_s${i}`, sessionId: `s${i}`, date: '2026-11-21', periodKey: '2026-11-01', status: 'confirmed', type: 'training' }));
+  live.fetchCurrentUser.mockResolvedValue({ uid: 'p1', householdId: 'h1' });
+  live.fetchHousehold.mockResolvedValue({ id: 'h1', name: 'Whitfield family', periodAnchorDay: 1 });
+  live.fetchHouseholdAthletes.mockResolvedValue([
+    { id: 'a1', name: 'Jordan', householdId: 'h1', packageId: 't-16', billing: { status: 'active', subscriptionId: 'sub_a1' } },
+    { id: 'a3', name: 'Nico', householdId: 'h1', packageId: 'elite' },
+  ]);
+  live.fetchPackage.mockImplementation(async (id) => (id === 'elite' ? ELITE_PKG : T16));
+  live.fetchBookings.mockImplementation(async (id) => (id === 'a1' ? used : []));
+  live.fetchSessionsByIds.mockResolvedValue([]);
+  live.fetchGraceTokensByAthlete.mockResolvedValue([{ id: 'single_cs_9', athleteId: 'a1', expiresAt: '2027-02-27', reason: 'single-purchase', memberRate: 't-16' }]);
+  waitlist.fetchWaitlistByAthlete.mockResolvedValue([]);
+  grace.fetchTokenPeriod.mockResolvedValue(null);
+
+  const h = await mountHook(() => useHousehold());
+  expect(h.result.current.error).toBeNull();
+  const [jordan, nico] = h.result.current.data.children;
+  expect(jordan.tokens).toMatchObject({ granted: 16, used: 16, left: 0 });
+  expect(jordan.tokens.grace).toEqual([expect.objectContaining({ id: 'single_cs_9', reason: 'single-purchase' })]);
+  expect(nico.tokens).toMatchObject({ unlimited: true, left: null });
+  // Elite reads no token inputs.
+  expect(live.fetchGraceTokensByAthlete.mock.calls).toEqual([['a1']]);
+  await h.unmount();
+
+  // The grace read fails: the home still loads, with the bookings-only figure.
+  live.fetchGraceTokensByAthlete.mockRejectedValue(new Error('unavailable'));
+  const down = await mountHook(() => useHousehold());
+  expect(down.result.current.error).toBeNull();
+  expect(down.result.current.data.children[0].tokens).toMatchObject({ granted: 16, used: 16, left: 0, grace: [] });
+  await down.unmount();
 });
 
 test('Book a Session as an athlete: November before Nov 1, the current period from then on', async () => {

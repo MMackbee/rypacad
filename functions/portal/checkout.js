@@ -9,7 +9,10 @@
  * becomes one token in the webhook (stripe-single.js), so repeat purchases
  * are allowed. It is on sale from the moment booking opens (ruling
  * 2026-10-01, single.saleOpen): before that the handler refuses
- * 'single-not-open'. Every Firestore read happens before the Stripe calls;
+ * 'single-not-open'. The extra session (owner, 2026-10-10; product
+ * 'extra', extra.js) is that same one-time checkout for a PAID monthly token
+ * member, at their package's per-session rate through a Stripe coupon -
+ * never at $65. Every Firestore read happens before the Stripe calls;
  * nothing is written here - the webhook (stripe.js) writes.
  */
 'use strict';
@@ -18,6 +21,7 @@ const functions = require('firebase-functions/v1');
 const admin = require('firebase-admin');
 const Stripe = require('stripe');
 const catalogue = require('./catalogue');
+const extra = require('./extra');
 const facility = require('./facility');
 const lib = require('./lib');
 const prepaid = require('./prepaid');
@@ -31,7 +35,7 @@ const {HttpsError} = functions.https;
  * lead keeps a clock-skewed request clear of Stripe's boundary.
  */
 const MIN_TRIAL_LEAD_MS = 49 * 60 * 60 * 1000;
-const PRODUCTS = ['tier', 'facility'];
+const PRODUCTS = ['tier', 'facility', 'extra'];
 /**
  * Monthly memberships by price, lowest first ($219 < $299 < $389 < $569 <
  * $719 < $999;
@@ -190,15 +194,22 @@ async function householdAthletes(store, householdId) {
  * 2026-09-30). The open session is reused while it is for the same price
  * AND the same discount decision; one for a different price (the family
  * changed package) or discount (a sibling was added or lapsed since) is
- * expired first.
+ * expired first. The extra session (product 'extra') keeps its own slot and
+ * its coupon is its discount, and Stripe's own record of the session must
+ * name the same member rate (none for the $65 token): a $65 page is never
+ * handed to an extra purchase, nor a member-rate page to a $65 one.
  * @param {!Object} client Stripe.
  * @param {!Object} athlete The athlete doc.
- * @param {string} product 'tier' | 'facility'.
+ * @param {string} product 'tier' | 'facility' | 'extra'.
  * @param {string} priceId What this checkout would charge.
- * @param {string} discount `discountKey`'s value for this checkout.
+ * @param {string} discount `discountKey`'s value for this checkout, or the
+ *     member-rate coupon id.
+ * @param {?string=} memberRate The package whose member rate this checkout
+ *     sells (extra only), else null.
  * @return {!Promise<?string>} The open session's url, or null.
  */
-async function reuseOpenSession(client, athlete, product, priceId, discount) {
+async function reuseOpenSession(client, athlete, product, priceId, discount,
+    memberRate) {
   const pending = athlete.pendingCheckout && athlete.pendingCheckout[product];
   if (!pending || !pending.sessionId) return null;
   let s;
@@ -208,8 +219,13 @@ async function reuseOpenSession(client, athlete, product, priceId, discount) {
     return null;
   }
   if (s.status !== 'open' || !s.url) return null;
+  const rateOf = (s.metadata && s.metadata.memberRate) || null;
+  // A member-rate page is reused only while Stripe charges exactly that
+  // rate on it (createExtraSession hands out no other amount).
+  const amountOk = !rateOf || s.amount_total === extra.expectedAmountCents(s);
   const sameDeal = pending.priceId === priceId &&
-      (pending.discount || 'none') === discount;
+      (pending.discount || 'none') === discount &&
+      rateOf === (memberRate || null) && amountOk;
   if (sameDeal) return s.url;
   try {
     await client.checkout.sessions.expire(s.id);
@@ -239,6 +255,48 @@ function discountKey(sibling) {
  */
 function couponRefused(err) {
   return Boolean(err) && String(err.param || '').startsWith('discounts');
+}
+
+/**
+ * Creates the extra session's page and holds it to the member rate. The
+ * MEMBER_RATE_* coupons are made by hand, once per mode: one Stripe refuses
+ * (missing, expired, not applicable) or one it accepts that does not bring
+ * the total to exactly the rate (a mistyped amount, a percent off) is
+ * refused 'member-rate-missing' - a wrong page is expired at once, so the
+ * family is never sent to it. Never the $65 page instead: the family was
+ * offered its rate.
+ * @param {!Object} client Stripe.
+ * @param {!Object} body extraSessionBody's result.
+ * @param {!Object} rate extra.memberRateFor's result.
+ * @return {!Promise<!Object>} The Checkout Session, at exactly the rate.
+ */
+async function createExtraSession(client, body, rate) {
+  const mode = process.env.STRIPE_MODE || 'test';
+  const missing = () => refuse('failed-precondition', 'member-rate-missing',
+      'The member rate is not set up right now. Try again later, or ' +
+      'contact the academy. ' + NOTHING_CHARGED);
+  let session;
+  try {
+    session = await client.checkout.sessions.create(body);
+  } catch (err) {
+    if (!couponRefused(err)) throw err;
+    console.error(`member-rate coupon ${rate.coupon} refused by Stripe ` +
+        `(${mode} mode): ${err.message || err}; extra session refused`);
+    throw missing();
+  }
+  // Stripe's own total, after the coupon: no extra call, no coupon read.
+  if (session.amount_total !== rate.cents) {
+    console.error(`member-rate coupon ${rate.coupon} (${mode} mode) left ` +
+        `${session.amount_total} cents to pay, not ${rate.cents}; extra ` +
+        `session ${session.id} expired and refused`);
+    try {
+      await client.checkout.sessions.expire(session.id);
+    } catch (err) {
+      // It expires on its own within 24 h, and nobody is sent to it.
+    }
+    throw missing();
+  }
+  return session;
 }
 
 /**
@@ -371,6 +429,36 @@ function singleSessionBody(a) {
     body.customer_email = a.email;
     body.customer_creation = 'always';
   }
+  return body;
+}
+
+/**
+ * The extra session's Checkout Session request body (owner, 2026-10-10):
+ * the single token's body - the same price and client reference, so the
+ * webhook's single path mints it as a top-up - with the member-rate coupon
+ * applied for the family and copy naming the rate. `memberRate` in the
+ * metadata is for audit and tells the webhook which amount to expect; the
+ * return adds `extra=1` for the portal's confirmation line. Pure.
+ * @param {{householdId: string, athleteId: string, athleteName: ?string,
+ *     priceId: string, role: string, portalUrl: string,
+ *     customerId: ?string, email: ?string, nowMs: number,
+ *     rate: !Object}} a Inputs; `rate` is extra.memberRateFor's result.
+ * @return {!Object} What `stripe.checkout.sessions.create` receives.
+ */
+function extraSessionBody(a) {
+  const body = singleSessionBody(a);
+  const name = a.athleteName || 'your athlete';
+  const metadata = () => Object.assign({}, body.metadata,
+      {memberRate: a.rate.packageId});
+  body.metadata = metadata();
+  body.payment_intent_data = {metadata: metadata(),
+    description: `Extra session token - ${name} ` +
+        `(${a.rate.tokens}-token rate)`};
+  body.custom_text = {submit: {message: `Extra session for ${name} at ` +
+    `your ${a.rate.tokens}-token rate (${a.rate.label}), good through ` +
+    `${SEASON_END_LABEL}.`}};
+  body.discounts = [{coupon: a.rate.coupon}];
+  body.success_url = `${body.success_url}&extra=1`;
   return body;
 }
 
@@ -508,6 +596,15 @@ async function createCheckoutSessionHandler(data, context, deps) {
         'Session tokens for this season are no longer on sale. ' +
         NOTHING_CHARGED);
   }
+  // Owner 2026-10-10: the extra session is for a PAID monthly token member
+  // only (the webhook's top-up; anyone else would be moved to the single
+  // package), at their package's rate, on sale with the single token.
+  const isExtra = req.product === 'extra';
+  const rate = isExtra ? extra.memberRateFor(athlete.packageId) : null;
+  if (isExtra) {
+    const no = extra.athleteRefusal({athlete, pkg, nowMs});
+    if (no) throw refuse('failed-precondition', no.reason, no.message);
+  }
   if (req.product === 'facility') {
     if (singlePkg) {
       throw refuse('failed-precondition', 'single-no-facility',
@@ -548,8 +645,8 @@ async function createCheckoutSessionHandler(data, context, deps) {
     }
   }
   // The single token always sells the catalogue's single price: the
-  // webhook accepts no other one-time price.
-  let key = isSingle ? single.SINGLE_ID : athlete.packageId;
+  // webhook accepts no other one-time price. So does the extra session.
+  let key = isSingle || isExtra ? single.SINGLE_ID : athlete.packageId;
   if (req.product === 'facility') key = catalogue.FACILITY_KEY;
   const priceId = catalogue.priceIdFor(key, d.catalogue);
   if (!priceId) {
@@ -558,6 +655,10 @@ async function createCheckoutSessionHandler(data, context, deps) {
   }
   const hh = (await read(store, 'households', athlete.householdId)) || {};
   if (isSingle) await assertSingleHousehold(store, hh, athlete, req.athleteId);
+  if (isExtra) {
+    const no = extra.householdRefusal(hh);
+    if (no) throw refuse('failed-precondition', no.reason, no.message);
+  }
   const tokens = req.product === 'tier' && pkg && pkg.tokens !== undefined ?
       pkg.tokens : null;
   // The add-on is not a membership: no sibling discount on it. Nor is the
@@ -579,11 +680,13 @@ async function createCheckoutSessionHandler(data, context, deps) {
   }
   let client;
   let price;
-  let discount = discountKey(sibling);
+  // The extra session's discount is its member-rate coupon, never the
+  // sibling decision: the reuse below compares it with the open session's.
+  let discount = isExtra ? rate.coupon : discountKey(sibling);
   try {
     client = d.stripe || stripe();
     const open = await reuseOpenSession(client, athlete, req.product,
-        priceId, discount);
+        priceId, discount, isExtra ? rate.packageId : null);
     if (open) return {url: open};
     price = await client.prices.retrieve(priceId);
   } catch (err) {
@@ -592,9 +695,10 @@ async function createCheckoutSessionHandler(data, context, deps) {
   }
   // Outside any catch: a wrong catalogue price is a setup error the
   // family must never see as 'try again in a minute'.
-  if (priceMismatch(price, isSingle)) {
+  if (priceMismatch(price, isSingle || isExtra)) {
     console.error(`createCheckoutSession: price ${priceId} does not match ` +
-        (isSingle ? 'the one-time $65 single token' : 'a subscription'));
+        (isSingle || isExtra ? 'the one-time $65 single token' :
+            'a subscription'));
     throw refuse('failed-precondition', 'price-mismatch',
         'Pricing is not set up correctly yet. ' + NOTHING_CHARGED);
   }
@@ -609,7 +713,11 @@ async function createCheckoutSessionHandler(data, context, deps) {
   };
   try {
     let session;
-    if (isSingle) {
+    if (isExtra) {
+      session = await createExtraSession(client, extraSessionBody(
+          Object.assign({athleteName: athlete.name || null, nowMs, rate},
+              common)), rate);
+    } else if (isSingle) {
       // One-time payment: no prepaid month, no trial, no discount.
       session = await client.checkout.sessions.create(singleSessionBody(
           Object.assign({athleteName: athlete.name || null, nowMs}, common)));
@@ -653,6 +761,7 @@ async function createCheckoutSessionHandler(data, context, deps) {
     }
     return {url: session.url};
   } catch (err) {
+    if (err instanceof HttpsError) throw err; // a refusal, already worded
     console.error('createCheckoutSession stripe error:', err);
     throw stripeUnavailable();
   }
@@ -664,6 +773,6 @@ const createCheckoutSession = functions.runWith({secrets: CHECKOUT_SECRETS})
 
 module.exports = {
   SEASON_END_LABEL, createCheckoutSession, createCheckoutSessionHandler,
-  prepaidFor, priceMismatch, sessionBody, siblingCouponId, siblingEligible,
-  singleSessionBody,
+  extraSessionBody, prepaidFor, priceMismatch, sessionBody, siblingCouponId,
+  siblingEligible, singleSessionBody,
 };

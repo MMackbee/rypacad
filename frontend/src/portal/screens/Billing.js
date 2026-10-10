@@ -17,7 +17,7 @@ import { facilitySourceLabel, householdFacility } from '../data/facility';
 import { FACILITY_ACCESS } from '../data/packages';
 import { CONNECTED_LINE, PAY_NOW, PENDING_PLAN_LINE, SINGLE_PLAN_LINE } from '../data/billingCopy';
 import { contractEnabled } from '../data/contractFlag';
-import { saleOpen, SINGLE_NOT_OPEN_LINE } from '../data/singleToken';
+import { householdOnHold, saleOpen, SINGLE_NOT_OPEN_LINE } from '../data/singleToken';
 import useBillingHub from '../hooks/billing';
 
 /**
@@ -70,6 +70,8 @@ export default function Billing({
   const status = data?.status ?? null;
   const isEmpty = !loading && !error && members.length === 0;
   const self = !staff && role === 'athlete';
+  // A failing card or a lapsed membership: no extra session on any meter.
+  const onHold = householdOnHold(data?.household);
 
   return (
     <PhoneFrame
@@ -118,8 +120,10 @@ export default function Billing({
                 <MemberSection key={member.athleteId} name={member.name}>
                   {/* The single token is bought one at a time (ruling 2026-09-29/30): its
                       meter carries the Buy button, from the day they go on sale; staff never pay.
-                      A pending athlete pays from the hero's Pay now alone (owner 2026-10-01). */}
-                  <TokenMeter member={member} defaultOpen={members.length === 1} showPrices={staff} buy={!staff} />
+                      A pending athlete pays from the hero's Pay now alone (owner 2026-10-01).
+                      A paid monthly token member's meter offers an extra session at their
+                      package's rate (owner 2026-10-10). */}
+                  <TokenMeter member={member} defaultOpen={members.length === 1} showPrices={staff} buy={!staff} onHold={onHold} />
                   <CoachingLine coaching={member.coaching} />
                   {contractEnabled() ? (
                     // Athlete detail is a parent/staff route; the athlete's own is the Contract.

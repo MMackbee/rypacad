@@ -12,7 +12,7 @@
  */
 import { format, parseISO } from 'date-fns';
 import { BOOKING_OPENS_LABEL, bookingOpen } from './calendar';
-import { SINGLE_TOKEN } from './packages';
+import { memberSessionRate, SINGLE_TOKEN } from './packages';
 import { SEASON_BOUNDS } from './season';
 import { isAdultOnDate } from './signup';
 
@@ -115,6 +115,93 @@ export function singleConfirmedLine(open) {
   return open
     ? 'Payment received - your session token is ready to book.'
     : `Payment received - your session token is ready. Booking opens ${BOOKING_OPENS_LABEL}.`;
+}
+
+/*
+ * The extra session (owner, 2026-10-10): a paid monthly token member buys
+ * one more session token at their package's per-session rate
+ * (packages.js memberSessionRate), the discount applied at checkout - no
+ * code. It is the single token's checkout with product 'extra' and a coupon
+ * (functions/portal/checkout.js), minted the same way: a graceTokens
+ * single_{cs} doc good through the season's last day, which the monthly
+ * meter names a session token (its Bonus chip counts it).
+ *
+ * Offered only once nothing is left to book with (outOfTokens; review
+ * 2026-10-10, pending the owner's ruling): the charge order (pin E) spends
+ * any grace token before the period's own, so an extra bought while tokens
+ * are left would be spent first and leave a monthly token to expire at the
+ * reset - the family would have paid for nothing.
+ */
+
+/** 'Sat, Feb 27, 2027' - the extra session's line names the year, as its Stripe page does. */
+export const SINGLE_EXPIRES_YEAR_LABEL = format(parseISO(SINGLE_EXPIRES), 'EEE, MMM d, yyyy');
+/** The monthly meter's button. */
+export const BUY_EXTRA_LABEL = 'Buy an extra session';
+/** Where that button would be on an under-18 athlete's own login (ownLoginMayBuy false). */
+export const EXTRA_ASK_GUARDIAN_LINE = 'Ask a parent or guardian to buy an extra session.';
+
+/** '$48.63 - your 8-token rate. Good through Sat, Feb 27, 2027.' - null without a member rate. */
+export function extraSessionLine(pkg) {
+  const rate = memberSessionRate(pkg);
+  if (rate == null) return null;
+  return `$${rate.toFixed(2)} - your ${pkg.tokens}-token rate. Good through ${SINGLE_EXPIRES_YEAR_LABEL}.`;
+}
+
+/** A family whose card is failing (past_due) or whose membership lapsed buys nothing more until that is fixed. */
+export function householdOnHold(household) {
+  const status = household?.membership?.status;
+  return status === 'past_due' || status === 'lapsed';
+}
+
+/**
+ * A monthly token position with nothing left to book with: no period token
+ * left (a waitlist hold counts as spent) and no grace token - a bonus, or
+ * an extra session already bought. False for Elite, the single token, an
+ * unpaid meter or no position at all.
+ */
+export function outOfTokens(tokens) {
+  if (!tokens || tokens.unlimited || tokens.perPurchase || tokens.unpaid) return false;
+  return tokens.left === 0 && (tokens.grace?.length ?? 0) === 0;
+}
+
+/**
+ * What a monthly token meter offers for an extra session, or null for
+ * nothing at all:
+ *   { state: 'buy', line }  the rate line and the Buy button
+ *   { state: 'ask', line }  an under-18 athlete's own login (`askGuardian`):
+ *                           who buys it, never the button
+ * Only for a token package with a member rate whose billing is a live, PAID
+ * monthly subscription - active, not a one-time block, a subscription on
+ * file (`billing.subscribed`) - in a household not on hold, once single
+ * tokens are on sale (saleOpen), and once nothing is left to book with
+ * (outOfTokens - see the note above). A failing card is fixed in Stripe
+ * first. The billing and household rules are functions/portal/extra.js
+ * athleteRefusal and householdRefusal, which refuse anything else - CHANGE
+ * ONE, CHANGE BOTH. The tokens rule is the screens' alone.
+ * @param {object} member `{ package, billing, tokens }` - a hub member
+ *   (data/billingHub.js hubMemberFor) or a useMembership row.
+ * @param {{askGuardian?: boolean, onHold?: boolean, now?: number}} [opts]
+ */
+export function extraSessionOffer(member, { askGuardian = false, onHold = false, now = Date.now() } = {}) {
+  const line = extraSessionLine(member?.package);
+  if (!line) return null;
+  const billing = member?.billing;
+  if (!billing || billing.status !== 'active' || billing.oneTime === true || billing.subscribed !== true) return null;
+  if (onHold || !saleOpen(now)) return null;
+  if (!outOfTokens(member?.tokens)) return null;
+  return askGuardian ? { state: 'ask', line: EXTRA_ASK_GUARDIAN_LINE } : { state: 'buy', line };
+}
+
+/**
+ * The ?paid=...&single=1&extra=1 return once the token exists. It names the
+ * thing as the meters do (a session token, good through the season end),
+ * never where it shows: the family page's card counts it beside the period
+ * ("0 tokens left + 1 session token"), the meters list it.
+ */
+export function extraConfirmedLine(open) {
+  return open
+    ? `Payment received - your extra session token is ready to book, good through ${SINGLE_EXPIRES_LABEL}.`
+    : `Payment received - your extra session token is ready. Booking opens ${BOOKING_OPENS_LABEL}.`;
 }
 
 /**

@@ -40,6 +40,13 @@ describe('the single token (owner ruling 2026-09-29/30)', () => {
 describe('monthly and Elite rendering is unchanged', () => {
   test('the meter', async () => {
     expect(await text(<AllowancePools tokens={monthly()} compact />)).toBe('6 tokens left');
+    // The family card's compact line counts grace tokens beside the period
+    // (review 2026-10-10: back from buying an extra session, "0 tokens left"
+    // alone read as if it had not arrived).
+    expect(await text(<AllowancePools tokens={monthly({ left: 0, used: 6, grace: [bought] })} compact />)).toBe('0 tokens left + 1 session token');
+    expect(await text(<AllowancePools tokens={monthly({ grace: [bonus] })} compact />)).toBe('6 tokens left + 1 bonus token');
+    expect(await text(<AllowancePools tokens={monthly({ left: 1, grace: [bonus, bought] })} compact />)).toBe('1 token left + 2 bonus tokens');
+    expect(await text(<AllowancePools tokens={monthly({ left: 0, grace: [bought, { ...bought, id: 'single_b' }] })} compact />)).toBe('0 tokens left + 2 session tokens');
     const full = await text(<AllowancePools tokens={monthly({ used: 2, left: 4 })} />);
     expect(full).toContain('4 left');
     expect(full).toContain('2 of 6 used');

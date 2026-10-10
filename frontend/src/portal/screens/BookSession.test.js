@@ -3,6 +3,7 @@ import { renderScreen } from './testRender';
 import BookSession from './BookSession';
 import { BOOKING_CONFIRMATION } from '../data/seed';
 import { TOUR_EVENT_EXPLAINER } from '../data/tour';
+import { TOKEN_PACKAGES } from '../data/packages';
 
 const BEFORE = new Date('2026-10-09T12:00:00Z'); // Fri Oct 9, 07:00 Chicago - the day before
 const AT_OPEN = new Date('2026-10-10T12:00:00Z'); // BOOKING_OPENS_AT exactly
@@ -35,6 +36,10 @@ let mockHandicap;
 let mockMemberLoaded;
 // Set when the membership read itself failed (the hook's error, not a row still loading).
 let mockMemberError;
+// The member row's billing map (tierBillingOf) and the parent's household
+// (useMembership): the extra session's offer reads both.
+let mockBilling;
+let mockMembershipHousehold;
 jest.mock('../hooks', () => ({
   useBooking: () => ({
     data: { slots: [{ date: mockFirstSlot }], tokens: mockTokens, confirmation: mockConfirmation, seasonNote: null },
@@ -46,7 +51,7 @@ jest.mock('../hooks', () => ({
   useHouseholdAthletes: () => ({ data: mockHousehold, loading: false }),
   useMembership: () => (mockMemberError
     ? { data: null, loading: false, error: mockMemberError }
-    : { data: { members: mockMemberLoaded ? [{ athleteId: 'a1', name: 'Jordan', dob: mockDob, package: mockPackage, billingStatus: mockBillingStatus, handicap: mockHandicap }] : [] } }),
+    : { data: { household: mockMembershipHousehold, members: mockMemberLoaded ? [{ athleteId: 'a1', name: 'Jordan', dob: mockDob, package: mockPackage, billingStatus: mockBillingStatus, billing: mockBilling, handicap: mockHandicap }] : [] } }),
   useMonthSessions: (m) => mockMonth(m),
 }));
 jest.mock('../hooks/waitlist', () => ({ leaveWaitlist: (...args) => mockLeave(...args) }));
@@ -78,6 +83,8 @@ beforeEach(() => {
   mockHandicap = null;
   mockMemberLoaded = true;
   mockMemberError = null;
+  mockBilling = undefined;
+  mockMembershipHousehold = null;
   jest.useFakeTimers('modern');
 });
 afterEach(() => {
@@ -963,6 +970,82 @@ describe('the single token (owner rulings 2026-09-29/30)', () => {
     expect(child.text().split('Single tokens are available from Sat, Oct 10 at 7 AM.')).toHaveLength(2);
     expect(child.text()).not.toContain(ASK);
     await child.unmount();
+  });
+});
+
+// The extra session at the member rate (owner, 2026-10-10): where a paid
+// monthly member runs out - the red "No tokens left this period" banner -
+// the meters' own offer (data/singleToken.js extraSessionOffer).
+describe('the extra session where a member runs out (owner 2026-10-10)', () => {
+  const T8 = { ...TOKEN_PACKAGES.find((p) => p.id === 't-8'), windowDays: 30 };
+  const PAID = { status: 'active', subscribed: true };
+  const OUT = { granted: 8, used: 8, reserved: 0, left: 0, unlimited: false, grace: [] };
+  const LINE = '$48.63 - your 8-token rate. Good through Sat, Feb 27, 2027.';
+  const BUY = 'Buy an extra session|a1|extra|primary';
+  const ASK = 'Ask a parent or guardian to buy an extra session.';
+  const extraButtons = (r) => [...r.container.querySelectorAll('button')].map((b) => b.textContent).filter((t) => t.includes('|extra|'));
+  beforeEach(() => {
+    jest.setSystemTime(AT_OPEN);
+    mockPackage = T8;
+    mockBilling = PAID;
+    mockTokens = OUT;
+    mockDob = '2000-01-01'; // an adult on their own login unless a test says otherwise
+  });
+
+  test('out of tokens: the red banner carries the rate line and the button', async () => {
+    const r = await renderScreen(<BookSession bare demoSelectedDate="2026-10-12" />);
+    expect(r.text()).toContain('No tokens left this period');
+    expect(r.text().split(LINE)).toHaveLength(2);
+    expect(extraButtons(r)).toEqual([BUY]);
+    expect(r.text()).not.toContain('Buy a session token');
+    await r.unmount();
+  });
+
+  test('not while a period token or a grace token is left', async () => {
+    for (const tokens of [{ ...OUT, left: 2, used: 6 }, { ...OUT, grace: [{ id: 'single_cs_1', expiresAt: '2027-02-27', reason: 'single-purchase' }] }]) {
+      mockTokens = tokens;
+      const r = await renderScreen(<BookSession bare demoSelectedDate="2026-10-12" />);
+      expect(extraButtons(r)).toEqual([]);
+      expect(r.text()).not.toContain(LINE);
+      await r.unmount();
+    }
+  });
+
+  test('an under-18 athlete on their own login reads who buys it', async () => {
+    mockDob = '2012-06-17';
+    const r = await renderScreen(<BookSession bare demoSelectedDate="2026-10-12" />);
+    expect(r.text().split(ASK)).toHaveLength(2);
+    expect(extraButtons(r)).toEqual([]);
+    await r.unmount();
+  });
+
+  test('a parent booking for that child gets the button', async () => {
+    mockDob = '2012-06-17';
+    mockHousehold = [{ id: 'a1', name: 'Jordan', billingStatus: 'active', tokens: OUT }];
+    const r = await renderScreen(<BookSession bare role="parent" demoSelectedDate="2026-10-12" />);
+    expect(extraButtons(r)).toEqual([BUY]);
+    expect(r.text()).not.toContain(ASK);
+    await r.unmount();
+    // ...but not while the family is on hold.
+    mockMembershipHousehold = { id: 'h1', membership: { status: 'past_due' } };
+    const held = await renderScreen(<BookSession bare role="parent" demoSelectedDate="2026-10-12" />);
+    expect(extraButtons(held)).toEqual([]);
+    await held.unmount();
+  });
+
+  test('nothing without a live, paid subscription, or before the sale opens', async () => {
+    for (const billing of [undefined, { status: 'active' }, { status: 'past_due', subscribed: true }, { status: 'pending' }, { status: 'active', oneTime: true, subscribed: true }]) {
+      mockBilling = billing;
+      const r = await renderScreen(<BookSession bare demoSelectedDate="2026-10-12" />);
+      expect(extraButtons(r)).toEqual([]);
+      expect(r.text()).not.toContain(LINE);
+      await r.unmount();
+    }
+    mockBilling = PAID;
+    jest.setSystemTime(BEFORE);
+    const early = await renderScreen(<BookSession bare demoSelectedDate="2026-10-12" />);
+    expect(extraButtons(early)).toEqual([]);
+    await early.unmount();
   });
 });
 

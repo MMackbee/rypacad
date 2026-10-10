@@ -30,7 +30,9 @@
  *
  * The single session token (owner rulings 2026-09-29/30) is a PAYMENT-mode
  * checkout of the catalogue's single price: stripe-single.js mints one
- * `graceTokens/single_{cs}` per paid session. Late events for a
+ * `graceTokens/single_{cs}` per paid session; a member's extra session at
+ * the member rate (extra.js) is the same session with a coupon, minted as a
+ * top-up. Late events for a
  * subscription an athlete gave up for single tokens
  * (`billing.retiredSubscriptionIds`) are recorded
  * 'ignored-retired-subscription' and write nothing.
@@ -58,9 +60,14 @@ const {STRIPE_WEBHOOK_SECRETS} = require('./secrets');
 const {applyLapsed, applyLegacy, applyPastDue, invoicePeriod,
   membershipPatch} = legacy;
 
-/** Single-token outcomes ops reviews by hand (RUNBOOK): logged as errors. */
+/**
+ * Single-token outcomes ops reviews by hand (RUNBOOK): logged as errors.
+ * 'issued-single-extra-no-plan': a member-rate extra session paid after the
+ * athlete's subscription ended - the token is issued, billing untouched.
+ */
 const SINGLE_REVIEW = new Set(['issued-single-late',
-  'issued-single-amount-check', 'issued-single-household-lapsed']);
+  'issued-single-amount-check', 'issued-single-household-lapsed',
+  'issued-single-extra-no-plan']);
 
 /** Event types this handler acts on; anything else is recorded as ignored. */
 const HANDLED = new Set([

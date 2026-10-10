@@ -77,6 +77,25 @@ export const SINGLE_TOKEN = { id: 'single', name: 'Single token', kind: 'single'
 export const ALL_PACKAGES = [...TOKEN_PACKAGES, ELITE, SINGLE_TOKEN];
 
 /**
+ * The member rate for an extra session (owner, 2026-10-10): a family on a
+ * monthly token package buys one more session token at its package's
+ * per-session price, round(price * 100 / tokens) / 100 dollars - $54.75,
+ * $49.83, $48.63, $47.42 and $44.94 for 4, 6, 8, 12 and 16 tokens. null for
+ * Elite (unlimited), the single token and a package without a price. Stripe
+ * coupons MEMBER_RATE_<tokens> take the difference off the $65 single price;
+ * the server's table is functions/portal/extra.js MEMBER_RATES, whose test
+ * reads TOKEN_PACKAGES above - CHANGE ONE, CHANGE BOTH (and the coupon).
+ * @param {?{kind: string, price: ?number, tokens: ?number}} pkg A package.
+ * @return {?number} Dollars, to the cent.
+ */
+export function memberSessionRate(pkg) {
+  if (!pkg || pkg.kind !== 'tokens') return null;
+  const { price, tokens } = pkg;
+  if (!Number.isFinite(price) || price <= 0 || !Number.isInteger(tokens) || tokens <= 0) return null;
+  return Math.round((price * 100) / tokens) / 100;
+}
+
+/**
  * v2.0.1 (Sprint 18): the owner's prices are in the catalogue but NOT
  * released to parents. Every parent/athlete-facing price render checks this;
  * staff surfaces (the membership editor, the staff billing view) always show

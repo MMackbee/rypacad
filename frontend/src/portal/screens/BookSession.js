@@ -12,7 +12,19 @@ import { CapacityPill } from '../components/StatusBadge';
 import AllowancePools, { GraceLine, SpendNote } from '../components/AllowancePools';
 import PayButton from '../components/PayButton';
 import { SessionTokenPools } from '../components/SessionTokens';
-import { availableCount, BUY_SINGLE_LABEL, graceSpendLabel, isSingleTokenId, ownLoginMayBuy, saleOpen, SINGLE_ASK_GUARDIAN_LINE, SINGLE_NOT_OPEN_LINE } from '../data/singleToken';
+import { ExtraSessionBuy } from '../components/TokenMeter';
+import {
+  availableCount,
+  BUY_SINGLE_LABEL,
+  extraSessionOffer,
+  graceSpendLabel,
+  householdOnHold,
+  isSingleTokenId,
+  ownLoginMayBuy,
+  saleOpen,
+  SINGLE_ASK_GUARDIAN_LINE,
+  SINGLE_NOT_OPEN_LINE,
+} from '../data/singleToken';
 import { PENDING_TITLE } from '../data/billingCopy';
 import { canRetry, LockedDayNotice, reasonCopy, SeeMembershipLink } from '../components/BookingReasons';
 import { JoinWaitlistButton, leaveFailureCopy, OnWaitlist, waitingOn, WaitlistedConfirmationBody } from '../components/WaitlistAction';
@@ -350,6 +362,18 @@ export default function BookSession({
   // (contract v2.0): ONE pool now - `tokens`, not `allowance` (renamed
   // alongside useMembership's own shape, per the sprint report).
   const tokens = isParent ? selectedAthlete?.tokens : data?.tokens;
+  // Owner 2026-10-10: out of tokens, a paid monthly token member is offered
+  // one more session at their package's rate - the meters' own rule
+  // (data/singleToken.js extraSessionOffer) over the member row's package
+  // and billing and this screen's balance. Never in onboarding practice. An
+  // athlete's own row carries no household (null: not on hold here); the
+  // server refuses a family on hold either way.
+  const extraOffer = practice
+    ? null
+    : extraSessionOffer(
+        { package: selfMember?.package ?? null, billing: selfMember?.billing ?? null, tokens },
+        { askGuardian, onHold: householdOnHold(membershipState.data?.household) }
+      );
   const days = monthState.data?.days ?? [];
   const { dayStates: paintedDayStates, sessionsByDate } = buildMonthDayMaps(days);
   // R2: a past day opens nothing. Practice books seed data and never locks.
@@ -445,6 +469,7 @@ export default function BookSession({
                 athleteId={isParent ? selectedAthleteId : selfMember?.athleteId}
                 billingStatus={isParent ? selectedAthlete?.billingStatus : selfMember?.billingStatus}
                 askGuardian={askGuardian}
+                extraOffer={extraOffer}
               />
               {data?.seasonNote ? (
                 <Banner tone="green" title="Season">
@@ -741,9 +766,11 @@ function AthleteSelector({ athletes, loading, selectedId, onSelect }) {
  * two-pool banner to a single balance. A limited package hits a ceiling on
  * every visit, so the balance has to be standing context — surfacing it only
  * at submit turns a known constraint into a failed action, which is why this
- * is a banner and not an error. Elite shows no number (pin L).
+ * is a banner and not an error. Elite shows no number (pin L). A paid
+ * monthly member with nothing left carries `extraOffer` (the extra session
+ * at their package's rate, data/singleToken.js extraSessionOffer).
  */
-function TokensBanner({ tokens, athleteId, billingStatus, askGuardian = false }) {
+function TokensBanner({ tokens, athleteId, billingStatus, askGuardian = false, extraOffer = null }) {
   if (!tokens) return null;
   if (tokens.unlimited) {
     return (
@@ -787,6 +814,8 @@ function TokensBanner({ tokens, athleteId, billingStatus, askGuardian = false })
     <Banner tone={spent ? 'red' : 'neutral'} title={spent ? 'No tokens left this period' : 'Your tokens this period'}>
       <AllowancePools tokens={tokens} style={{ margin: '4px 0 6px' }} />
       {hasGrace ? <GraceLine tokens={tokens} /> : null}
+      {/* Owner 2026-10-10: where a member runs out, the extra session at their rate. */}
+      <ExtraSessionBuy athleteId={athleteId} offer={extraOffer} />
     </Banner>
   );
 }
