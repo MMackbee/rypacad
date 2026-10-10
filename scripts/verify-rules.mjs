@@ -911,12 +911,27 @@ function fallbackHost(postGateRules) {
   return host;
 }
 
+// 2026-10-10: staff re-issue a period Stripe already issued (Issue tokens is a whole-doc set).
+async function taskReissue() {
+  const id = 'ath-active_2026-11-01';
+  const base = { athleteId: 'ath-active', householdId: 'hh', periodKey: '2026-11-01', periodEnd: '2026-11-30' };
+  await seed('tokenPeriods', id, { ...base, granted: 8, source: 'stripe', eventId: 'evt_probe', prepaid: true, createdAt: new Date() });
+  const set = (auth, fields) => commitAs(auth, [{ update: { name: docName('tokenPeriods', id), fields: fsFields(fields) },
+    updateTransforms: [{ fieldPath: 'createdAt', setToServerValue: 'REQUEST_TIME' }] }]);
+  expect('ops re-issues a period Stripe already issued (8 -> 9)', await set(t.ops, { ...base, granted: 9, source: 'ops', eventId: null }), 200);
+  expect('a parent cannot re-issue a period', await set(t.parent, { ...base, granted: 12, source: 'ops', eventId: null }), 403);
+  expect('a re-issue cannot move the period to another household', await set(t.ops, { ...base, householdId: 'hh-other', granted: 9, source: 'ops', eventId: null }), 403);
+  expect("a re-issue cannot claim to be Stripe's", await set(t.ops, { ...base, granted: 9, source: 'stripe', eventId: 'evt_fake' }), 403);
+  expect('a re-issue stays within 0..40', await set(t.ops, { ...base, granted: 41, source: 'ops', eventId: null }), 403);
+  await del('tokenPeriods', id);
+}
+
 async function runPass(label) {
   console.log(`\n=== ${label} ===`);
   await setup();
   try {
     await task4(); await task5(); await taskContract(); await taskWindow(); await taskRepeat(); await taskPackageChange(); await taskSeriesCancel();
-    await taskSeats(); await taskPast(); await taskWaitlist(); await taskSingle(); await taskScholarship(); await taskReserved();
+    await taskSeats(); await taskPast(); await taskWaitlist(); await taskSingle(); await taskScholarship(); await taskReserved(); await taskReissue();
   } finally { await teardown(); }
 }
 

@@ -1489,6 +1489,17 @@ service cloud.firestore {
         && request.resource.data.householdId
              == athleteData(request.resource.data.athleteId).householdId;
 
+      // 2026-10-10 (owner): Issue tokens re-issues a period that already has
+      // a doc - every paid family's November was issued by Stripe at
+      // checkout, so a create-only rule refused raising it (a family moved to
+      // a bigger package, an extra session agreed by phone). The same staff,
+      // the same shape (source 'ops', server time), the same athlete,
+      // household and period; the client write is a whole-doc set.
+      allow update: if signedIn() && me().role in ['ops', 'owner'] && tokenPeriodShapeOk()
+        && request.resource.data.athleteId == resource.data.athleteId
+        && request.resource.data.householdId == resource.data.householdId
+        && request.resource.data.periodKey == resource.data.periodKey;
+
       // Member read own (own athlete, or the parent whose household matches
       // - ONE get() of the athlete doc to prove the link, the same join
       // pattern private/medical and the bookings coach clause already use);
