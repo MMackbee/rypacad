@@ -5,7 +5,7 @@ import { Body, ScreenTitle, SectionLabel } from './Primitives';
 
 /**
  * The three ways to book (owner feedback, 2026-09-16): a golf block, a
- * performance session with Phil, a mental game session with Yannick. The
+ * Performance with Phil session, a mental game session with Yannick. The
  * same chooser sits on both home screens, and a parent tapping a kid's
  * "Book a session" gets it as a sheet - the kid is chosen first, the session
  * type second. Every option spends one token (contract v2.0); the blurb
@@ -24,8 +24,8 @@ export const BOOK_OPTIONS = [
   },
   {
     id: 'phil',
-    title: 'Performance session',
-    blurb: 'Strength, speed and athleticism with Phil — small group',
+    title: 'Performance with Phil',
+    blurb: 'Strength, speed and athleticism for golf — small group',
     path: '/portal/coaching',
     specialistId: 'phil',
   },

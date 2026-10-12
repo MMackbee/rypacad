@@ -409,7 +409,9 @@ function mapEvents(items, from, to, rules = RESERVED_RULES) {
       time: formatTime(Number(hh), Number(mm)),
       durationMinutes,
       type,
-      label: GENERIC_TITLE.test(summary) ? null : summary,
+      // Owner 2026-10-12: Phil's sessions are "Performance with Phil" everywhere,
+      // whatever the calendar title says ("Fitness Session", "Phil - ...").
+      label: type === 'phil' ? PHIL_LABEL : (GENERIC_TITLE.test(summary) ? null : summary),
       gcalEventId: ev.id,
     });
     byDate.set(date, list);
@@ -551,6 +553,9 @@ async function commit(target, writes) {
 // capacity is synced (not just set on create) so a capacity-rule change
 // reaches sessions that already exist; `booked` and coach assignments made
 // in the portal remain preserved by the mask.
+/** The one name for Phil's sessions (owner, 2026-10-12). */
+export const PHIL_LABEL = 'Performance with Phil';
+
 const SYNCED_FIELDS = ['date', 'time', 'durationMinutes', 'type', 'capacity', 'label', 'status', 'gcalEventId'];
 
 // maxHandicap is synced too, but OUTSIDE SYNCED_FIELDS, because an open

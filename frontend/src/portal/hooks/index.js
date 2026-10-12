@@ -249,7 +249,8 @@ const SPECIALIST_BY_ID = new Map(SPECIALISTS.map((sp) => [sp.id, sp]));
  */
 export function genericSessionName(type) {
   const specialist = SPECIALIST_BY_ID.get(type);
-  if (specialist) return `${specialist.sessionNoun} · ${specialist.name}`;
+  // "Performance with Phil" already names him; Yannick's reads "Mental game session · Yannick".
+  if (specialist) return specialist.sessionNoun.includes(specialist.name) ? specialist.sessionNoun : `${specialist.sessionNoun} · ${specialist.name}`;
   return type === 'tournament' ? 'Tour event' : 'Training block';
 }
 

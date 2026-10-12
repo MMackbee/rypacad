@@ -20,7 +20,7 @@ test('durationMinutes comes from the event end time (regex fix at sync:317)', ()
   const r = dryRun();
   assert.equal(r.status, 0, r.stderr);
   assert.match(r.stdout, /session 2026-01-10-0: \{[^\n]*"durationMinutes":120[^\n]*"type":"tournament"/);
-  assert.match(r.stdout, /session 2026-01-08-0: \{[^\n]*"durationMinutes":45[^\n]*"type":"phil"[^\n]*"label":"Phil - performance block"/);
+  assert.match(r.stdout, /session 2026-01-08-0: \{[^\n]*"durationMinutes":45[^\n]*"type":"phil"[^\n]*"label":"Performance with Phil"/);
   assert.match(r.stdout, /session 2026-01-05-0: \{[^\n]*"time":"3:00 PM"[^\n]*"durationMinutes":60/);
 });
 
@@ -32,8 +32,8 @@ test('Yannick / mental titles are display-only: never a session, counted as skip
 
 test('fitness titles and "Phil" anywhere in the title are Phil sessions (2026-09-29)', () => {
   const r = dryRun();
-  assert.match(r.stdout, /session 2026-01-07-0: \{[^\n]*"time":"3:00 PM"[^\n]*"durationMinutes":45[^\n]*"type":"phil"[^\n]*"label":"Fitness with Phil"/);
-  assert.match(r.stdout, /session 2026-01-09-0: \{[^\n]*"durationMinutes":45[^\n]*"type":"phil"[^\n]*"label":"Speed & strength w\/ Phil"/);
+  assert.match(r.stdout, /session 2026-01-07-0: \{[^\n]*"time":"3:00 PM"[^\n]*"durationMinutes":45[^\n]*"type":"phil"[^\n]*"label":"Performance with Phil"/);
+  assert.match(r.stdout, /session 2026-01-09-0: \{[^\n]*"durationMinutes":45[^\n]*"type":"phil"[^\n]*"label":"Performance with Phil"/);
 });
 
 test('the dry run names every display-only timed title with its dates', () => {

@@ -37,7 +37,7 @@ const {SEASON_END} = require('./single');
 const TYPE_LABELS = {
   training: 'Training',
   tournament: 'Tour event',
-  phil: 'Phil 1-on-1',
+  phil: 'Performance with Phil',
   mental: 'Mental session',
   adult: 'Adult block',
 };
@@ -373,7 +373,7 @@ const REMOVED_REASONS = {
 const ONE_A_DAY = {
   training: 'training block',
   tournament: 'Tour event',
-  phil: 'session with Phil',
+  phil: 'Performance with Phil session',
 };
 
 /**

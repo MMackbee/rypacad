@@ -171,7 +171,7 @@ describe("What's next under Payment received (owner decision 2026-09-30)", () =>
     const text = r.text();
     expect(text).toContain("What's next");
     expect(text.indexOf('Payment received')).toBeLessThan(text.indexOf("What's next"));
-    expect(text).toContain('Booking opens Sat, Oct 10 at 7 AM - book any training block, Tour event or Phil session then.');
+    expect(text).toContain('Booking opens Sat, Oct 10 at 7 AM - book any training block, Tour event or Performance with Phil session then.');
     expect(text).toContain('Sessions start Tue, Nov 3.');
     expect(text).toContain(`Jordan can sign in at ${window.location.host}/portal/signin with jordan@email.com.`);
     expect(text).not.toContain('See the season calendar');

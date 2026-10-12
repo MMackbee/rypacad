@@ -5,7 +5,7 @@ import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
-  RESERVED_RULES, SYNCED_FIELDS, mapEvents, planReport, planSync, planWrites, reservedLimitFor,
+  PHIL_LABEL, RESERVED_RULES, SYNCED_FIELDS, mapEvents, planReport, planSync, planWrites, reservedLimitFor,
 } from '../sync-calendar-sessions.mjs';
 
 // Handicap-reserved sessions (owner, 2026-10-02): the Tuesday 3:00 PM training
@@ -200,4 +200,14 @@ test('a booked session patched in place under its old id still takes the limit; 
   assert.deepEqual(keptWrite.update.fields.maxHandicap, { integerValue: '5' });
   // The other update (Nov 3's reserved block) aside, no write names maxHandicap.
   assert.equal(writes.filter((w) => w.updateMask?.fieldPaths.includes('maxHandicap')).length, 2);
+});
+
+test('every Phil session is named "Performance with Phil", whatever its calendar title (owner, 2026-10-12)', () => {
+  const sessions = [...mapEvents(items, FROM, TO).sessions.values()];
+  const phil = sessions.filter((s) => s.type === 'phil');
+  assert.ok(phil.length > 0);
+  for (const s of phil) assert.equal(s.label, PHIL_LABEL);
+  assert.equal(PHIL_LABEL, 'Performance with Phil');
+  // Golf blocks keep their own rule: a generic title has no label.
+  assert.ok(sessions.some((s) => s.type === 'training' && s.label === null));
 });

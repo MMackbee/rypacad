@@ -98,8 +98,8 @@ test('a Phil confirmation offers the repeat through the window; the tap sends th
     { athleteId: undefined, untilISO: '2026-12-16' }
   );
   expect(r.text()).toContain('2 more weeks booked');
-  expect(r.text()).toContain("Nov 19: there's already a session with Phil booked that day (Elite includes one a day).");
-  expect(r.text()).toContain('Nov 26: no session with Phil at that time.');
+  expect(r.text()).toContain("Nov 19: there's already a Performance with Phil session booked that day (Elite includes one a day).");
+  expect(r.text()).toContain('Nov 26: no Performance with Phil session at that time.');
   expect(r.text()).toContain('Dec 3: full.');
   expect(r.text()).toContain('Thu, Dec 17 opens 7 AM on Mon, Nov 2');
   await r.unmount();

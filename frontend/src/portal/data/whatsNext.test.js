@@ -11,7 +11,7 @@ test('token package before Oct 10: opens, season start, unclaimed login - three 
   expect(whatsNextFor({ packageId: 't-12', athlete: JORDAN, host: HOST, now: BEFORE_OPEN })).toEqual({
     title: "What's next",
     lines: [
-      'Booking opens Sat, Oct 10 at 7 AM - book any training block, Tour event or Phil session then.',
+      'Booking opens Sat, Oct 10 at 7 AM - book any training block, Tour event or Performance with Phil session then.',
       'Sessions start Tue, Nov 3.',
       'Jordan can sign in at rypacad.ryptest.com/portal/signin with jordan@email.com.',
     ],
@@ -20,7 +20,7 @@ test('token package before Oct 10: opens, season start, unclaimed login - three 
   });
   for (const id of ['t-6', 't-16']) {
     expect(whatsNextFor({ packageId: id, athlete: REESE, host: HOST, now: BEFORE_OPEN }).lines).toEqual([
-      'Booking opens Sat, Oct 10 at 7 AM - book any training block, Tour event or Phil session then.',
+      'Booking opens Sat, Oct 10 at 7 AM - book any training block, Tour event or Performance with Phil session then.',
       'Sessions start Tue, Nov 3.',
     ]);
   }
@@ -95,7 +95,7 @@ test('the clock: tokens can book once Oct 10 passes (through Dec 1 until Nov 1);
 test('the family facility add-on ticked at sign-up and not yet paid adds one line, last (owner 2026-09-30)', () => {
   const FAMILY = "Family facility access: pay from your family page whenever you're ready.";
   expect(whatsNextFor({ packageId: 't-12', athlete: JORDAN, host: HOST, facilityDue: true, now: BEFORE_OPEN }).lines).toEqual([
-    'Booking opens Sat, Oct 10 at 7 AM - book any training block, Tour event or Phil session then.',
+    'Booking opens Sat, Oct 10 at 7 AM - book any training block, Tour event or Performance with Phil session then.',
     'Sessions start Tue, Nov 3.',
     'Jordan can sign in at rypacad.ryptest.com/portal/signin with jordan@email.com.',
     FAMILY,

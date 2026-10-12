@@ -43,7 +43,7 @@ export const SPECIALISTS = [
     id: 'phil',
     name: 'Phil',
     discipline: 'Performance coaching',
-    sessionNoun: 'Performance session',
+    sessionNoun: 'Performance with Phil',
     capacity: 6,
     durationMinutes: 45,
     whatToExpect:

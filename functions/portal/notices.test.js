@@ -115,8 +115,8 @@ test('waitlistRemoved: next in line but could not be booked, and why',
           'booked: Elite includes one Tour event a day and one is already ' +
           'booked that day.');
       assert.equal(body('one-per-day', Object.assign({}, block,
-          {type: 'phil'})).endsWith('Elite includes one session with Phil ' +
-          'a day and one is already booked that day.'), true);
+          {type: 'phil'})).endsWith('Elite includes one Performance with ' +
+          'Phil session a day and one is already booked that day.'), true);
       assert.equal(body('something-new'),
           `${lead}the booking did not go through.`);
     });

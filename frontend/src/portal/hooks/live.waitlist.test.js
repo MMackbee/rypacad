@@ -201,7 +201,7 @@ describe("Elite's one a day applies to a waitlist place exactly as to a booking"
     }));
     expect(err).toMatchObject({
       reason: 'one-per-day',
-      message: "Elite includes one session with Phil a day, and there's already one booked that day.",
+      message: "Elite includes one Performance with Phil session a day, and there's already one booked that day.",
     });
     expect(mockStore.waitlist).toEqual({});
   });

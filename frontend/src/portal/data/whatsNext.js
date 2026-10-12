@@ -61,7 +61,7 @@ export function whatsNextFor({ packageId, product = null, athlete = null, self =
     lines.push(`${self ? 'You' : name} can book now - training, Tour events and Phil, ${reach}.`);
     book = self ? 'Book your first session' : `Book ${first ?? 'your athlete'}'s first session`;
   } else {
-    lines.push(`Booking opens ${BOOKING_OPENS_LABEL} - book any training block, Tour event or Phil session then.`);
+    lines.push(`Booking opens ${BOOKING_OPENS_LABEL} - book any training block, Tour event or Performance with Phil session then.`);
   }
   const today = format(new Date(now), 'yyyy-MM-dd');
   if (pkg.kind === 'tokens' && today < SEASON_BOUNDS.start) lines.push(`Sessions start ${SEASON_START_LABEL}.`);

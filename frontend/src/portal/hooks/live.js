@@ -686,7 +686,7 @@ function assertEliteDailyCap(pkg, type, date, bookings) {
   throw new LiveDataError(
     ERR.INVALID,
     type === 'phil'
-      ? "Elite includes one session with Phil a day, and there's already one booked that day."
+      ? "Elite includes one Performance with Phil session a day, and there's already one booked that day."
       : type === 'tournament'
         ? "Elite includes one Tour event a day, and there's already one booked that day."
         : "Elite includes one training block a day, and there's already one booked that day.",

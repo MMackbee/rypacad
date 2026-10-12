@@ -91,7 +91,7 @@ export function ordinal(n) {
 const TYPE_LABELS = {
   training: 'Training block',
   tournament: 'Tour event',
-  phil: 'Performance session',
+  phil: 'Performance with Phil',
   mental: 'Mental game session',
   adult: 'Adult block',
 };

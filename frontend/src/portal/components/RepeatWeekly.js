@@ -100,8 +100,8 @@ const SKIP_COPY = [
 const KNOWN_SKIPS = new Set(SKIP_COPY.map(([reason]) => reason));
 /** The two reasons that name the session, as they read after a Phil booking. */
 const PHIL_SKIP_COPY = {
-  'no session': 'no session with Phil at that time',
-  'one per day': "there's already a session with Phil booked that day (Elite includes one a day)",
+  'no session': 'no Performance with Phil session at that time',
+  'one per day': "there's already a Performance with Phil session booked that day (Elite includes one a day)",
 };
 
 /**

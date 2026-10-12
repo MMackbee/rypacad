@@ -132,7 +132,7 @@ describe('periodRows / sessionLabel', () => {
     // The generic name is the Tour's (owner naming rule 2026-09-30); a typed label stays as typed.
     expect(sessionLabel({ label: null, type: 'tournament' })).toBe('Tour event');
     expect(sessionLabel({ label: 'Holiday Tournament', type: 'tournament' })).toBe('Holiday Tournament');
-    expect(sessionLabel({ label: null, type: 'phil' })).toBe('Performance session');
+    expect(sessionLabel({ label: null, type: 'phil' })).toBe('Performance with Phil');
     expect(sessionLabel(null, 'mental')).toBe('Mental game session');
     expect(sessionLabel(null, null)).toBe('Session');
   });
