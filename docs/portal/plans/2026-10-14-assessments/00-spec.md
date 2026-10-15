@@ -29,6 +29,10 @@ builds it into the portal.
 6. Visibility: raw data to **all coaches**; digested data to **athletes and parents**.
 7. Screens adapt to window size: phone, tablet and desktop each get their own layout.
 8. Athlete sex is entered by the coach at intake (staff-only).
+9. Phil (2026-10-15, via the owner): the scoring matches the protocol. Procedure details that may
+   change after the first timed wave are **settings, not code** (Section 4.6). Every result keeps the
+   protocol version and the circuit mode it was run under, so a reduced-trial or short-rest result is
+   never compared as if it were full-spec. Thresholds stay in one editable table.
 
 ## 3. People and permissions
 
@@ -51,7 +55,7 @@ builds it into the portal.
 |---|---|
 | `kind` | `'baseline' \| 'mid' \| 'end'` |
 | `protocolVersion` | `'v1.2'` (cross-version comparisons are flagged) |
-| `circuitMode` | trial counts and rest used: `{gripTrials, gripRestSec:[15,20], cmjScored, hopSets, medballThrows}` so a cut or shortened protocol is never treated as full-spec |
+| `circuitMode` | a snapshot of the settings this window ran under (Section 4.6): trial counts, grip rest and the circuit-rest flag, stations on, McGill mode, med ball side, golf timing, wave size, hop and RSImod entry modes, coefficient set. Results run under different modes or versions are flagged, never silently compared |
 | `status` | `'open' \| 'complete'` |
 | `circuitDate`, `golfDate`, `mcgillDate` | `YYYY-MM-DD`, set by the coach (within 14 days of entry); golf is due within 7 days of the circuit; McGill may be a separate block within 14 days |
 | `weeksOfExposure` | weeks from the athlete's first-test date to `circuitDate` |
@@ -60,9 +64,9 @@ builds it into the portal.
 | `log` | training and location log: `{location 'ryp'\|'external'\|'none', externalContent 'machines'\|'bodyweight'\|'class'\|null, weeklyHours, rypSessionsSincePrior, golfVolume, competitiveLevel, otherSport, otherSportHours}` |
 | `anthro` | `{standing:[cm], mass:[kg], boxHeight, sittingRaw:[cm], arm:[cm], hand:[cm], growthFlag}` — up to 3 measures each; sitting, arm and hand at baseline/end only |
 | `grip` | `{right:[kg x3], left:[kg x3], deviceRight, deviceLeft, handlePosition, dominant}` |
-| `cmj` | `{trials:[{heightCm, rsiMod, peakPowerW, peakPowerWkg, asymmetryPct}], software, samplingHz}` |
-| `hop` | `{sets:[{rsiBest5, gctMs}]}` |
-| `medball` | `{massKg, side, method 'radar'\|'distance', throws:[x3]}` |
+| `cmj` | `{trials:[{heightCm, rsiMod, timeToTakeoffMs, peakPowerW, peakPowerWkg, asymmetryPct}], software, samplingHz}` — RSImod is either typed from Smart2Move or computed as height ÷ time to take-off (setting) |
+| `hop` | per-set summary `{sets:[{rsiBest5, gctMs}]}` **or** per-hop `{sets:[{hops:[{rsi, gctMs} x10]}]}` (setting; Phil confirms which once he has the plates) |
+| `medball` | `{massKg, side, method 'speed'\|'distance', throws:[...]}` |
 | `mcgill` | `{flexorSec, extensorSec, sideRightSec, sideLeftSec, skippedBackPain}` — 300 means capped |
 | `golf` | `{speeds:[mph x5], driver, parallaxComposite, fps}` |
 | `notTested` | `{[station]: 'absent'\|'ill'\|'pain'\|'injury'\|'equipment'}` |
@@ -72,7 +76,9 @@ Scores are **never stored as typed finals**; they are computed from these trials
 
 ### 4.2 `athletes/{athleteId}/assessmentProfile/current` (staff only)
 
-`{sex 'male'|'female', firstTestDate, medballMassKg, dominantHand, gripDevice, handlePosition, driver}`.
+`{sex 'male'|'female', firstTestDate, medballMassKg, medballMethod 'speed'|'distance', dominantHand, gripDevice, handlePosition, driver, season}`.
+The med ball method is fixed per athlete per season at the first test; entering the other method later
+that season is refused (Phil: "block mixing").
 `firstTestDate` is set by the first circuit and anchors the athlete's rolling baseline. The med
 ball mass is assigned at the first test (<45 kg: 2 kg; 45-65 kg: 3 kg; >65 kg: 4 kg) and kept all season.
 
@@ -90,6 +96,26 @@ Grip 0-100 kg; standing height 90-215 cm; mass 15-160 kg; sitting raw 40-140 cm;
 arm 40-110 cm; hand 10-25 cm; CMJ height 0-90 cm; RSImod 0-2; peak power 0-8000 W; asymmetry 0-60 %;
 RSI best-5 0-5; GCT 80-600 ms; med ball 0-60 mph (radar) or 0-25 m (distance); McGill 0-300 s;
 clubhead 30-140 mph; Parallax composite 0-100 (Phil to confirm the scale); fps 30-1000.
+
+### 4.6 Settings — `assessmentSettings/current` (Phil, owner; read by all staff)
+
+Editable on a staff Settings screen. Saving a change that alters procedure asks for the new protocol
+version label (suggests the next patch, e.g. v1.2 -> v1.2.1) because the protocol says any procedure
+change increments the version.
+
+| Setting | Default (v1.2) |
+|---|---|
+| Trial counts | grip 3 per hand; CMJ 1 practice + 2 scored; 10/5 1 practice + 2 scored sets; med ball 1 practice + 3 scored; clubhead 3 warm-up + 5 maximal |
+| Grip rest | 15-20 s, flagged "circuit rest interval" |
+| Stations on | intake, anthropometrics, grip, CMJ, 10/5, med ball, McGill (baseline/end); segment measures optional; Keiser off |
+| McGill | inside the wave, or its own block within 14 days |
+| Med ball side | trail (alternative: dominant) |
+| Golf timing | same day as the circuit, or within 7 days (Phil hopes same day for research consistency) |
+| Wave | 4 athletes per wave; waves per session 5 |
+| 10/5 entry | per-set summary (default) or every hop |
+| CMJ RSImod | typed from Smart2Move (default) or computed from height and time to take-off |
+| Maturity coefficients | the protocol's Moore (2015) values, marked **unverified** until Phil checks the paper; results show "estimate, coefficients unverified" while unverified |
+| Thresholds | clubhead ±2 %, CMJ ±5 %, 10/5 RSI ±8 %, med ball ±5 %, grip ±5 %, Parallax none |
 
 ### 4.5 Family summary (in-season, B)
 
@@ -130,14 +156,21 @@ All from the protocol (Sections 3-5). **Phil to confirm** items are marked.
 - **Anthropometrics**: final = mean of the closest two of up to three measures; sitting = raw − box
   (third measure if the first two differ by > 0.4 cm); leg length = standing − sitting; decimal age
   from DOB at the circuit date; growth flag if standing height rose > 3 cm since the prior window.
+  When the growth flag trips, the window marks sitting height as stale and offers an optional repeat
+  sitting-height measure; if taken, the maturity offset uses it.
 - **Maturity offset (Moore et al. 2015)**: boys −8.128741 + 0.0070346 × (age × sitting height);
   girls −7.709133 + 0.0042232 × (age × standing height). Category: pre (< −1.0), circa (−1.0 to
   +1.0), post (> +1.0). Mid-season uses the most recent full anthropometrics plus the growth check.
-  **Phil to confirm the coefficients against the source** (the protocol requires it).
+  **Phil to confirm the coefficients against the source** (the protocol requires it); until then they
+  are marked unverified (setting). Unit-test anchors from Phil (they check the app matches the
+  document, not the paper): boy, age 14.0, sitting height 78.0 cm -> about −0.447; girl, age 12.0,
+  standing height 150.0 cm -> about −0.107.
 - **Grip**: best per hand; best ÷ body mass; flagged "circuit rest interval".
 - **CMJ**: best height and best RSImod; peak power (W, W/kg); L/R asymmetry coach-only.
-- **10/5**: best set's best-5 RSI; a set whose contact time > 250 ms is a QC flag, not reported.
-  **Phil to confirm Smart2Move shows a best-5 RSI and mean contact time per set.**
+- **10/5**: best set's best-5 RSI (per-hop entry: mean of the 5 highest RSIs in the set); the
+  250 ms contact-time flag applies per set, and a flagged set is not reported. **Phil confirms with
+  the plates what Smart2Move shows per set and how it defines RSI** (entry mode is a setting).
+- **CMJ RSImod**: typed, or height ÷ time to take-off (setting); Phil confirms what Smart2Move shows.
 - **Med ball**: best trail-side speed (or distance), with ball mass and side.
 - **Clubhead**: best and mean of the top 3 of 5; Parallax composite as entered; fps < 120 marks
   timing gaps directional only (raw variables are not in the MVP).
