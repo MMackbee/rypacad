@@ -565,3 +565,90 @@ nothing. Each token stores its `paymentIntentId` for the Stripe lookup.
 | Buy -> "needs the academy's help" | `household-lapsed-legacy` | sort out the legacy sibling (its own checkout) first, then the family retries |
 | Facility add-on refused for a single | `single-no-facility` | expected: facility needs a monthly membership |
 | `?paid=...&single=1` never confirms | the webhook is the OLD one (`ignored`) or not receiving | 10.3 step 1, then the recovery rule above |
+
+## 11. Portal feedback to Slack (2026-10-15, one time)
+
+The Feedback button on every signed-in screen posts a note and a
+screenshot to a private Slack channel through `submitFeedback` (spec:
+`docs/portal/plans/2026-10-15-feedback/00-spec.md`). Until both settings
+below exist the panel answers "Feedback is not set up yet."
+
+**Do 11.1-11.3 before the next functions deploy of ANY kind once this code
+is merged.** `submitFeedback` declares `SLACK_FEEDBACK_TOKEN`, and a
+declared secret that does not exist fails the whole deploy (section 9).
+
+### 11.1 The Slack app
+
+1. https://api.slack.com/apps -> **Create New App** -> **From scratch**.
+   Name it "RYP Portal Feedback", pick the RYP workspace.
+2. **OAuth & Permissions** -> **Bot Token Scopes**: add `chat:write` and
+   `files:write`. Nothing else.
+3. **Install to Workspace** -> Allow. The page now shows a **Bot User OAuth
+   Token** (`xoxb-...`). It goes into the hidden prompt in 11.3 and nowhere
+   else - not a file, not a chat, not `functions/.env`.
+
+### 11.2 The private channel
+
+1. In Slack, create a **private** channel, e.g. `#portal-feedback`, and add
+   the people who should read the feedback.
+2. In that channel: `/invite @RYP Portal Feedback`. A bot can post only to
+   a private channel it is a member of; without this Slack answers
+   `not_in_channel` and every send fails.
+3. Click the channel's name -> **About** -> copy the **Channel ID**
+   (`C0...`). The ID, not the name.
+
+### 11.3 Settings
+
+```bash
+npx firebase-tools functions:secrets:set SLACK_FEEDBACK_TOKEN --project rypacad   # paste the xoxb- token at the hidden prompt
+```
+
+Add one line to `functions/.env` (non-secret; the deploy reads it), with
+your channel id:
+
+```
+SLACK_FEEDBACK_CHANNEL=C0123ABCDEF
+```
+
+The token must NOT be in `.env` (a name in both places fails the deploy).
+Check (prints a count only):
+
+```bash
+grep -c "^SLACK_FEEDBACK_TOKEN=" functions/.env   # must print 0
+```
+
+### 11.4 Deploy - functions, then rules, then the frontend
+
+```bash
+cd functions && npm run lint && cd ..
+npx firebase-tools deploy --only functions:submitFeedback --project rypacad
+npx firebase-tools deploy --only firestore:rules --project rypacad
+git push origin develop:main   # the frontend: Railway rebuilds the site
+```
+
+Expected: `submitFeedback` created (17 functions in all from now on). The
+rules deploy only names the new `feedbackLimits` collection as closed - it
+was already denied - so it can ride with the next rules deploy if one is
+due. The function goes first: a button whose function is not deployed
+fails every send.
+
+### 11.5 Smoke
+
+1. Sign in to the portal (any account), open any screen, tap **Feedback**,
+   type "test", **Send**. Expect "Thanks - sent to the RYP team." and a post
+   in the channel: "Portal feedback from <name> (<role>, <email>)", the
+   page, the device and the screenshot.
+2. Again with **Include screenshot** off: a text-only post.
+
+| Panel says | Cause | Fix |
+|---|---|---|
+| "Feedback is not set up yet." | the secret or `SLACK_FEEDBACK_CHANNEL` is missing | 11.3, then redeploy `functions:submitFeedback` |
+| "Feedback could not be sent right now. Try again in a minute." | Slack refused; the log line `submitFeedback: Slack <method> failed: <code>` says why | `not_in_channel`: 11.2 step 2. `channel_not_found`: the channel id. `missing_scope`: add the scope (11.1 step 2), reinstall the app, set the new token (11.3), redeploy. `invalid_auth` / `token_revoked`: set the token again, redeploy |
+| "That is a lot of feedback in one hour..." | that account sent 10 in the last hour | expected; it clears itself |
+
+Logs: `npx firebase-tools functions:log --only submitFeedback --project
+rypacad`. They never contain the token or the image.
+
+Rotating the token: set the secret again (11.3), then `npx firebase-tools
+deploy --only functions:submitFeedback --project rypacad` - a function binds
+a secret's version at deploy time.

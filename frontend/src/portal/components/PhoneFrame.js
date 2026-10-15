@@ -36,6 +36,9 @@ export const FrameEmbedContext = createContext(null);
  */
 const SUPPORTS_DVH = typeof CSS !== 'undefined' && Boolean(CSS.supports) && CSS.supports('height', '100dvh');
 
+/** The bare frame's phone column on a wide screen. The Feedback button lines up with it. */
+export const BARE_MAX_WIDTH = 430;
+
 export default function PhoneFrame({
   width = 390,
   height = 812,
@@ -62,7 +65,7 @@ export default function PhoneFrame({
           // Fills the host's flex column (OnboardingFlow's content area) —
           // definite height from the parent, so internal scrolling still works.
           width: '100%',
-          maxWidth: 430,
+          maxWidth: BARE_MAX_WIDTH,
           margin: '0 auto',
           flex: '1 1 auto',
           minHeight: 0,
@@ -72,14 +75,14 @@ export default function PhoneFrame({
       ? {
           // Natural height: the host scrolls a stack of screens as one page.
           width: '100%',
-          maxWidth: 430,
+          maxWidth: BARE_MAX_WIDTH,
           margin: '0 auto',
           flex: 'none',
           background: color.bg,
         }
       : {
           width: '100%',
-          maxWidth: 430,
+          maxWidth: BARE_MAX_WIDTH,
           margin: '0 auto',
           height: '100dvh',
           minHeight: SUPPORTS_DVH ? undefined : '100vh',
@@ -108,7 +111,9 @@ export default function PhoneFrame({
     // (the sheet's own content and disabled/enabled state were always
     // correct) — this was a pure CSS containment gap, not a logic bug, and
     // predates this sprint; fixed here since every sheet in the app shares
-    // this one root.
+    // this one root. Each sheet's overlay also carries data-portal-overlay
+    // (2026-10-15): the Feedback button steps aside while one is open, so a
+    // new sheet should carry it too.
     <div style={{ ...frame, position: 'relative', overflow: 'hidden', display: 'flex', flexDirection: 'column', ...style }}>
       {bare ? null : <StatusBar />}
       {header ? <div style={{ flex: 'none' }}>{header}</div> : null}
@@ -124,7 +129,8 @@ export default function PhoneFrame({
       >
         {children}
       </div>
-      {footer ? <div style={{ flex: 'none' }}>{footer}</div> : null}
+      {/* data-portal-frame-footer: the Feedback button (FeedbackButton.js) sits above this, whatever it holds. */}
+      {footer ? <div data-portal-frame-footer="" style={{ flex: 'none' }}>{footer}</div> : null}
     </div>
   );
 }

@@ -309,3 +309,32 @@ describe('/portal/admin/scholarships is the owner alone (2026-10-01)', () => {
     await r.unmount();
   });
 });
+
+describe('the Feedback button (2026-10-15): mounted once beside the routes', () => {
+  const buttons = () => document.body.querySelectorAll('button[aria-label="Send feedback"]');
+
+  test('a signed-in account gets exactly one, outside the screen it sits over', async () => {
+    mockLive.value = true;
+    mockUser.value = { uid: 'u2', role: 'parent' };
+    const r = await mount('/portal/family');
+    expect(r.container.textContent).toBe('FAMILY HOME');
+    expect(buttons()).toHaveLength(1);
+    expect(r.container.contains(buttons()[0])).toBe(false);
+    await r.unmount();
+    expect(buttons()).toHaveLength(0);
+  });
+
+  test('none while the session resolves, and none in seed mode', async () => {
+    mockLive.value = true;
+    mockDeferred.value = true;
+    mockUser.value = null;
+    const r = await mount('/portal/family');
+    expect(buttons()).toHaveLength(0);
+    await r.unmount();
+    mockLive.value = false;
+    mockDeferred.value = false;
+    const seed = await mount('/portal/does-not-exist');
+    expect(buttons()).toHaveLength(0);
+    await seed.unmount();
+  });
+});

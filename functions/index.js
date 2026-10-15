@@ -37,6 +37,9 @@
  * The marketing site's scholarship form posts to submitScholarship
  * (portal/scholarship.js, 2026-10-01): public, origin-checked, validated.
  *
+ * The portal's Feedback button calls submitFeedback (portal/feedback.js,
+ * 2026-10-15): signed-in, rate-limited, posted to a private Slack channel.
+ *
  * The 2025 `onBookingCreateNotifyChild` is DELETED with them: it read
  * `parentId` / `userId` / `childId`, fields no v1+ booking has ever carried,
  * so it could never fire. `booking-revoked` is NOT a trigger - portal/
@@ -95,6 +98,7 @@ const {waitlistPositions} = require('./portal/waitlist-positions');
 const single = require('./portal/single');
 const {onSingleTokenSpent} = require('./portal/single-guard');
 const {submitScholarship} = require('./portal/scholarship');
+const {submitFeedback} = require('./portal/feedback');
 
 // ==========================================================================
 // PORTAL SERVER-SIDE WRITERS (Sprint 13, contract v2.1)
@@ -127,6 +131,10 @@ exports.calendlyWebhook = calendlyWebhook;
 // that stores the application and emails the director. It is not part of
 // the portal's contract and no client rule opens its collection.
 exports.submitScholarship = submitScholarship;
+// The portal's Feedback button (owner 2026-10-15): a signed-in callable that
+// posts a note and a screenshot to a private Slack channel. It binds
+// SLACK_FEEDBACK_TOKEN, which must exist before any functions deploy.
+exports.submitFeedback = submitFeedback;
 
 // ==========================================================================
 // NOTIFICATION TRIGGERS (Sprint 14, contract v2.2)

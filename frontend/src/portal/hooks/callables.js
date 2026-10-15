@@ -56,6 +56,12 @@ export const callCreateCheckoutSession = callable('createCheckoutSession');
  * never throws - a place in line is simply not shown when this fails.
  */
 export const callWaitlistPositions = callable('waitlistPositions');
+/**
+ * `{ note, page, viewport, userAgent, appVersion, image? }` -> `{ ok }`: the
+ * Feedback button (2026-10-15) posts a note and a screenshot to the RYP
+ * team's Slack. Built by hooks/feedback.js#feedbackPayload.
+ */
+export const callSubmitFeedback = callable('submitFeedback');
 const claimInvite = callable('claimInvite');
 /** `{ state, householdId, athleteId }` - ids only on 'claimed' (D7); never throws for an expected state (contract 1.4). */
 export const callClaimInvite = () => claimInvite({});

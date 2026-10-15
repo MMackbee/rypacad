@@ -491,6 +491,7 @@ function DaySheet({ day, onClose, onAddLate, onRemove }) {
 
   return (
     <div
+      data-portal-overlay=""
       onClick={removing ? undefined : onClose}
       style={{
         position: 'absolute',
@@ -570,6 +571,7 @@ function LogSheet({ contractMinutes, forDate, onClose, onSave }) {
 
   return (
     <div
+      data-portal-overlay=""
       onClick={onClose}
       style={{
         position: 'absolute',

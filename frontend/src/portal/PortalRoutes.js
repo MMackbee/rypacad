@@ -14,6 +14,7 @@ import Registration from './screens/Registration';
 // 7) so the route is real the moment both branches merge.
 import ParentDashboard from './screens/ParentDashboard';
 import AthleteDashboard from './screens/AthleteDashboard';
+import FeedbackButton from './components/FeedbackButton';
 import { bump } from './hooks/invalidate';
 
 /*
@@ -662,6 +663,11 @@ export default function PortalRoutes() {
   }, [segment]);
 
   return (
+    <>
+    {/* The Feedback button (2026-10-15), mounted once for every route: it
+        shows itself only to a signed-in, provisioned account and never on
+        sign-in, sign-up or not-provisioned (hooks/feedback.js). */}
+    <FeedbackButton />
     <Suspense fallback={null}>
     <Routes>
       <Route index element={<PortalIndex />} />
@@ -956,5 +962,6 @@ export default function PortalRoutes() {
       <Route path="*" element={<Navigate to="/portal" replace />} />
     </Routes>
     </Suspense>
+    </>
   );
 }

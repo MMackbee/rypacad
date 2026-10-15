@@ -144,6 +144,7 @@ export default function CancelSheet({
 
   return (
     <div
+      data-portal-overlay=""
       onClick={saving ? undefined : done ? onCancelled : onClose}
       style={{
         position: 'absolute',
