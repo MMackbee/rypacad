@@ -2,13 +2,13 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Replace Diagnostic Capture with Phil Herder's Physical Performance Assessment protocol v1.2 in the portal: wave-of-four circuit entry, golf-session clubhead and Parallax entry, computed scores and change markers, a coach results view, editable protocol settings, research consent at sign-up plus a one-time confirm for existing families, and a staging test copy for Phil's dry run.
+**Goal:** Replace Diagnostic Capture with Phil Herder's Physical Performance Assessment protocol v1.2 in the portal: wave-of-four circuit entry, golf-session clubhead and Parallax entry, computed scores and change markers, a coach results view, editable protocol settings, research consent at sign-up plus a one-time confirm for existing families, and a production test family for the owner's and Phil's test on the staging site (rypacad.ryptest.com, which runs on the production backend).
 
 **Architecture:** Every score is computed from stored trials by pure modules in `frontend/src/portal/data/` (`assessmentScoring.js`, `assessmentSettings.js`, `assessmentWindows.js`, `assessmentInput.js`, `assessmentAccess.js`, `assessmentResults.js`, `researchConsent.js`), unit-tested with jest. Firestore access lives in new hook modules (`hooks/assessmentsLive.js` writes and reads, `hooks/assessments.js` seed/live read hooks, `hooks/researchConsent.js`) following the `scholarships.js` precedent: they import primitives from `./live`, never the other way, and fall back to seed data when `isLive()` is false. `firestore.rules` is the boundary (per-section field masks, numeric ranges, `enteredBy == uid`, `updatedAt == request.time`), proven by new probe modules run from `scripts/verify-rules.mjs`. Screens use a new responsive frame (`components/AssessmentFrame.js`) instead of the 430 px column.
 
 **Tech Stack:** React 18 (CRA 5, plain JS), react-router-dom 6, firebase 9 modular SDK (`firebase/firestore`), jest via react-scripts, Firestore rules v2 (emulator REST probes, Node 22 ESM, dependency-free), Cloud Functions v1 (`firebase-functions/v1`, firebase-admin, tiny runner tests, eslint-config-google), Node `node:test` for scripts.
 
-**Spec:** `docs/portal/plans/2026-10-14-assessments/00-spec.md` (approved; owner and Phil rulings 2026-10-14/15). Procedure text and standard cues are quoted from Phil's protocol document `RYP_Academy_Assessment_ProtocolV1.2.pdf` (Sections 2-5), the source the spec summarizes. This plan is the MVP release (spec 1, release A); what it could only default is listed for the owner and Phil in Task 26 Step 1.
+**Spec:** `docs/portal/plans/2026-10-14-assessments/00-spec.md` (approved; owner and Phil rulings 2026-10-14/15; the owner's staging ruling of 2026-10-15: no separate staging Firebase project). Procedure text and standard cues are quoted from Phil's protocol document `RYP_Academy_Assessment_ProtocolV1.2.pdf` (Sections 2-5), the source the spec summarizes. This plan is the MVP release (spec 1, release A); what it could only default is listed for the owner and Phil in Task 27 Step 1.
 
 ## Global Constraints
 
@@ -29,16 +29,17 @@
 - An open window is in progress for 14 days (the entry window). After that it reads "Open since Nov 3: mark it complete", cannot join a wave, `startWave` skips it, and the rules refuse to move it into a wave or to a new circuit date; it is marked complete instead.
 - Dates are set by the coach within 14 days of entry (never in the future, academy date in America/Chicago); golf is due within 7 days of the circuit (or the same day when the setting says so); McGill as a separate block within 14 days.
 - Layout: phone < 700 px one athlete at a time; tablet 700-1100 px two columns; desktop > 1100 px the full grid of four and a results table.
-- Access: owner and ops read and write; Phil (`specialistId 'phil'`) and coach or mental accounts with `users.assessor == true` read and write all sections; every other coach reads and writes the golf section only; families have no raw access; delete is owner only (spec 3's bullet; its table also names ops, so the owner confirms in Task 26 Step 1); only the owner sets `users.assessor`.
+- Access: owner and ops read and write; Phil (`specialistId 'phil'`) and coach or mental accounts with `users.assessor == true` read and write all sections; every other coach reads and writes the golf section only; families have no raw access; delete is owner only (spec 3's bullet; its table also names ops, so the owner confirms in Task 27 Step 1); only the owner sets `users.assessor`.
 - Research consent: ticked = yes, unticked = no, both recorded; an athlete under 18 is yes only with the assent box ticked too; 18+ answer for themselves; `consents.research = { value, assent, recordedAt, recordedBy }`; research use applies only to windows whose `circuitDate` is on or after a `value == true` `recordedAt`; an athlete whose research answer is not recorded cannot be added to a wave.
-- Consent wording is the owner-approved copy of 2026-10-15, verbatim, and nothing else; `{name}` is the athlete's first name. The spec words only the 18+ checkbox, so an 18+ member on their own login reads the approved line, Read more sheet and one-time confirm with their own first name; second-person drafts wait for the owner (Task 26 Step 1).
+- Consent wording is the owner-approved copy of 2026-10-15, verbatim, and nothing else; `{name}` is the athlete's first name. The spec words only the 18+ checkbox, so an 18+ member on their own login reads the approved line, Read more sheet and one-time confirm with their own first name; second-person drafts wait for the owner (Task 27 Step 1).
 - Not in this plan: release B (the family summary, spec 4.5: `athletes/{athleteId}/assessmentReports`, its rules and spec 9's "family summary read" probe; families read no assessment data in this release) and release C (Smart2Move file import).
-- Production rollout in the spec 10 order: functions, rules, portal. The diagnostics read rules stay, read-only, for this release (the live bundle reads diagnostics beside everything else on the athlete home and the admin dashboard) and go once the portal is live (Task 27).
-- The staging test copy (`REACT_APP_TEST_COPY=true`) refuses to start against any Firebase project but `ryp-academy-app`; every staging deploy names `--project staging` (`.firebaserc`'s default is production).
+- Staging (owner, 2026-10-15: no separate staging Firebase project) is the existing Railway "Staging" environment: project "RYP Academy Portal", service `rypacad`, building branch `develop` and serving https://rypacad.ryptest.com (also rypacad-staging.up.railway.app). Its bundle uses the PRODUCTION Firebase project `rypacad`: real families' data, live Stripe, real session seats. Production builds `main` at https://portal.rypacademy.com. The owner and Phil test with one production test family (`households/ryp-test-family` "RYP Test Family", `test: true` on the household and its athletes, Task 26) that never books, waitlists or pays; every staff count and report leaves `test: true` households out (Task 25), and so does any ad-hoc export made for the owner (a past-families list).
+- Backward compatible with `main`: staging shares production's backend, so every function and rules change the staging test needs is deployed to PRODUCTION before the live portal is updated, and the portal live on `main` must keep working on it. `createFamily` accepts the old payload (an athlete with no `research` is stored as not answered; sign-up never fails; Task 20); the rules only ADD access (assessments, profiles, settings, the assessor's athlete read, the `consents.research` branch), guard only the new `users.assessor` field (which `main` never writes), and remove nothing `main` uses: Diagnostic Capture's rules stay exactly as they are, reads and writes, for this release (Task 9) and go after it (Task 28).
+- Rollout (Task 27): `assessments/v1.2` merges into `develop` only when the build is complete and reviewed, so a production push never carries half-built assessment code; then functions and rules are deployed to production (safe for `main`); then `git push origin develop` (staging only); the owner and Phil test at https://rypacad.ryptest.com with the test family; after sign-off `git push origin develop:main`; then the Task 28 cleanup (the diagnostics rules) last.
 - Files stay under 500 lines; new code goes in new files; the grandfathered `hooks/live.js`, `hooks/index.js`, `PortalRoutes.js`, `Roster.js`, `seed-firestore.mjs` and `verify-rules.mjs` only get the edits named here.
 - Repo files are CRLF (`core.autocrlf=true`): edit existing files with the Edit tool; never `sed -i`; new files may be written with the Write tool.
-- Never push, never deploy, never run a command with `--prod`, never touch production data, never start a dev server on port 3000, never read credential stores. The staging seed's `--yes` run is the owner's.
-- Test commands: `node functions/portal/<file>.test.js`; `cd functions && npx eslint .`; `cd frontend && CI=true npx react-scripts test --watchAll=false <pattern>`; `cd frontend && npx eslint src/portal`; `cd frontend && npm run build`; `node --test scripts/test/*.test.mjs`; `npx firebase-tools emulators:exec --only firestore --project rypacad "node --env-file=scripts/emulator.env scripts/verify-rules.mjs"`.
+- Never push, never deploy, never run a command with `--prod`, never touch production data, never start a dev server on port 3000, never read credential stores. The test-family script touches production only as the owner's `--prod` runs (`--dry-run` first, then `--yes`); the agent runs it against the local emulators.
+- Test commands: `node functions/portal/<file>.test.js`; `cd functions && npx eslint .`; `cd frontend && CI=true npx react-scripts test --watchAll=false <pattern>`; `cd frontend && npx eslint src/portal`; `cd frontend && npm run build`; `node --test scripts/test/*.test.mjs`; `npx firebase-tools emulators:exec --only firestore --project rypacad "node --env-file=scripts/emulator.env scripts/verify-rules.mjs"`; `npx firebase-tools emulators:exec --only firestore,auth --project rypacad "node --test scripts/test/provision-test-family.test.mjs"`.
 - Every commit message ends with `Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>`; work stays on branch `assessments/v1.2` in `C:\Users\Mac\Desktop\rypacadapp\wt-assessments`.
 
 ## Review Focus
@@ -48,6 +49,8 @@
 3. **A typo or a tablet keyboard quirk in a trial.** "32,5" is 32.5; "32.5kg", "150" for grip or "-3" are refused inline and never sent, so one bad entry cannot fail the section's save and drop the trials already typed. Pinned in Task 11 Step 1 (TrialInput) and Task 14 Step 1 (grip station keeps R1 when R2 is refused).
 4. **An incomplete athlete record.** Legacy athletes may have no date of birth, sex is entered at intake, a mid-season window has no sitting height, the box height may be missing. Results must say what is missing and show no maturity category, never NaN or a wrong category. Pinned in Task 17 Step 1.
 5. **A family's research save fails.** If the rules refuse it (a rules deploy that failed or was rolled back) or the parent is offline, "Save my answer" fails; the family must not be trapped behind the sheet. After a failure the sheet offers "Skip for now", and the question returns at the next sign-in. Pinned in Task 23 Step 1.
+6. **The live portal on the new backend.** Functions and rules reach production days before `main` is updated (staging shares the backend); a family signing up on the live portal, a coach saving a capture there and the owner's live dashboard must all keep working. createFamily stores an old payload's athletes with research not answered and never fails (Task 20 Step 1, "a tab on the old bundle"); the rules only add (Tasks 4, 22) and keep every diagnostics grant (Task 9 Step 1, "a new capture still saves"); Task 27 Step 3 checks that no `allow` line is removed against `origin/main` before anything is deployed.
+7. **The test family beside real families.** It lives in the production database, so it must never be counted as a family, never touch a real household, and never book or pay. The admin dashboard and the sign-ups report leave `test: true` households out (Task 25 Step 1); the script only creates its own fixed ids under an exists:false precondition and refuses a household not marked test, an athlete of another household or a login that is already someone's (Task 26 Step 1); its athletes have no package and no billing.
 
 ---
 
@@ -62,6 +65,8 @@
 - Create `assessmentResults.js` - the coach results view model per window (scores, maturity, markers, flags, rows for the table).
 - Create `assessmentSeed.js` - the seed-mode fixture (fake athletes, windows, profiles).
 - Create `researchConsent.js` - the approved research copy, the yes/no/assent rule, first names, under-18 test.
+- Create `testFamily.js` - `isTestHousehold`, `withoutTestFamilies`: staff counts and reports leave out `test: true` households and their athletes.
+- Modify `signups.js` - the sign-ups report leaves out test households.
 - Modify `seed.js` - drop `DIAGNOSTIC_ATHLETE`/`DIAGNOSTIC_SECTIONS`, rename the coach seed row, drop the research sentence from the data-collection consent.
 - Modify `athlete.js` - drop the Practice DNA fixtures.
 - Modify `admin.js` - the seed "Diagnostic not entered" row becomes "Baseline due".
@@ -75,7 +80,7 @@
 - Create `assessorTab.js` - the signed-in session's "shows the Assessments tab" flag for BottomTabBar.
 - Create `researchConsent.js` - `saveResearchConsent` and `useResearchConfirm`.
 - Modify `useAuthSession.js` - `user.assessor`, publish the tab flag.
-- Modify `index.js` - remove the diagnostics hooks; admin "Baseline due" from assessment windows; staff rows carry `assessor`.
+- Modify `index.js` - remove the diagnostics hooks; admin "Baseline due" from assessment windows; staff rows carry `assessor`; the admin dashboard leaves out test households.
 - Modify `live.js` - remove the three diagnostics functions.
 
 **Components (frontend/src/portal/components/)**
@@ -101,28 +106,25 @@
 - Create `ResearchChoice.js` - the research checkbox, the line under it and the assent box.
 - Create `ResearchSheet.js` - the "Read more" sheet.
 - Create `ResearchConfirmGate.js` - the one-time confirm for existing families.
-- Create `TestCopyRibbon.js` - the "Test copy" marker on the staging build.
-- Create `frontend/src/testCopyGuard.js` - a test-copy build refuses to start against any project but staging; `frontend/src/firebase.js` calls it first.
 - Modify `BottomTabBar.js` - Capture goes; Assessments for Phil and assessors.
 
 **Screens and routes (frontend/src/portal/)**
 - Create `AssessmentRoutes.js` - route wrappers and the assessment guard (keeps `PortalRoutes.js` from growing).
 - Create `screens/AssessmentList.js`, `screens/AssessmentWave.js`, `screens/AssessmentResults.js`, `screens/AssessmentGolf.js`, `screens/AssessmentSettings.js`.
-- Modify `PortalRoutes.js` - remove the capture route; add the assessment routes, the research gate, the ribbon.
+- Modify `PortalRoutes.js` - remove the capture route; add the assessment routes and the research gate.
 - Modify `screens/AdminDashboard.js`, `screens/AthleteDetail.js`, `screens/AthleteDashboard.js`, `screens/StaffRoles.js`, `screens/Roster.js`, `screens/RegistrationConsent.js`, `screens/Registration.js`, `StatesHarness.js`.
 - Delete `screens/DiagnosticCapture.js`, `screens/DiagnosticCapture.test.js`, `screens/PracticeDNA.js`.
 
 **Server and scripts**
-- Modify `firestore.rules` - assessments, profiles, settings, collection-group reads, the assessor guard and read, the research branch; diagnostics read-only (Task 9), then removed once the portal is live (Task 27).
+- Modify `firestore.rules` - assessments, profiles, settings, collection-group reads, the assessor guard and read, the research branch, every one of them additive; the diagnostics rules unchanged for the release (Task 9), then removed after it (Task 28).
 - Create `scripts/rules-probes/assessments.mjs`, `scripts/rules-probes/research.mjs` - emulator probes, run by `scripts/verify-rules.mjs`.
 - Modify `scripts/verify-rules.mjs` - export `docName`, run the new probe tasks.
 - Modify `functions/portal/family-validate.js`, `functions/portal/family.js` - store the consents, research per athlete.
 - Create `functions/portal/family-consents.test.js` - createFamily writes the consents (stand-in Firestore).
 - Modify `scripts/seed-firestore.mjs` - assessments fixtures replace diagnostics.
-- Create `scripts/lib/assessment-fixtures.mjs`, `scripts/test/assessment-fixtures.test.mjs` - the invented athletes' windows, profiles and research answers, shared by both seeds.
-- Create `scripts/seed-staging-assessments.mjs`, `scripts/test/seed-staging-assessments.test.mjs` - the staging-only seed.
-- Modify `docs/portal/DATA-MODEL.md` - assessments, profile, settings, consents; diagnostics removed.
-- Modify `.firebaserc` - the `staging` alias for `ryp-academy-app`.
+- Create `scripts/lib/assessment-fixtures.mjs`, `scripts/test/assessment-fixtures.test.mjs` - the invented athletes' windows, profiles and research answers for the emulator seed.
+- Create `scripts/provision-test-family.mjs`, `scripts/test/provision-test-family.test.mjs` - the owner-run production test family for the staging test (create-only, `--dry-run` / `--yes`, `--reset` for another rehearsal).
+- Modify `docs/portal/DATA-MODEL.md` - assessments, profile, settings, consents, test households; diagnostics removed.
 
 ---
 
@@ -3398,7 +3400,7 @@ Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 
 ### Task 7: "Baseline due" on the admin dashboard
 
-Spec 8: the admin "Diagnostic not entered" row becomes "Baseline due", read from the assessment windows instead of the diagnostics collection group. This task replaces that read (and `fetchAllDiagnostics` with it); Task 8 removes the rest of Diagnostic Capture from the portal and Task 9 its rules, seed and data-model section. An athlete is "Baseline due" when they have no baseline window in the current season (`seasonOf(today)`), the same rule the assessments list uses.
+Spec 8: the admin "Diagnostic not entered" row becomes "Baseline due", read from the assessment windows instead of the diagnostics collection group. This task replaces that read (and `fetchAllDiagnostics` with it); Task 8 removes the rest of Diagnostic Capture from the portal and Task 9 its seed and data-model section (its rules stay until after the release, Task 28). An athlete is "Baseline due" when they have no baseline window in the current season (`seasonOf(today)`), the same rule the assessments list uses.
 
 **Files:**
 - Modify: `frontend/src/portal/hooks/index.js` (imports ~44-123; `deriveWhoNeedsCall` ~3563-3630; `liveAdminDashboard` ~3650-3742; `useAdminDashboard` ~3824-3872)
@@ -3910,7 +3912,7 @@ Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 
 ### Task 8: Remove Diagnostic Capture from the portal
 
-Spec 8: production holds 0 diagnostics docs (checked 2026-10-14). Everything of the old capture leaves the portal: the screen and its route and tab, `DIAGNOSTIC_SECTIONS`, the diagnostics hooks and live functions, the AthleteDetail capture card and the unrouted Practice DNA stub. The athlete home's "Book your Diagnostic" card keyed off the diagnostics read; with that read gone it shows only in the harness's `new` variant. The rules, the emulator seed and DATA-MODEL follow in Task 9.
+Spec 8: production holds 0 diagnostics docs (checked 2026-10-14). Everything of the old capture leaves the portal: the screen and its route and tab, `DIAGNOSTIC_SECTIONS`, the diagnostics hooks and live functions, the AthleteDetail capture card and the unrouted Practice DNA stub. The athlete home's "Book your Diagnostic" card keyed off the diagnostics read; with that read gone it shows only in the harness's `new` variant. The emulator seed and DATA-MODEL follow in Task 9; the diagnostics rules stay, unchanged, until after the release (Tasks 9 and 28).
 
 **Files:**
 - Delete: `frontend/src/portal/screens/DiagnosticCapture.js`, `frontend/src/portal/screens/DiagnosticCapture.test.js`, `frontend/src/portal/screens/PracticeDNA.js`
@@ -4950,41 +4952,42 @@ Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 
 ---
 
-### Task 9: Diagnostics rules read-only, the emulator seed and the data model
+### Task 9: Diagnostics rules kept for the release; the emulator seed and the data model
 
-Spec 8 removes the diagnostics rules, but the live bundle reads diagnostics on the athlete home and the admin dashboard inside one `Promise.all` with everything else: rules that refuse those reads would fail both screens for every family and the owner from the rules deploy until the new portal is live. So this release keeps the diagnostics **read** rules (read-only: create and update go) and deploys in the spec 10 order (functions, rules, portal) with no broken window; Task 27, after the portal is live, removes the read rules too. The emulator seed's diagnostics and DATA-MODEL's diagnostics section go now.
+Spec 8 removes the diagnostics rules, but not before the release. Staging shares production's backend (Global Constraints), so these rules reach production days before `main` is updated (Task 27 Step 4), and the portal live on `main` still uses them: its athlete home and admin dashboard read diagnostics inside one `Promise.all` with everything else (a refused read fails the whole screen for every family and the owner), and its Capture tab saves captures. So this release keeps every diagnostics grant exactly as it is, reads and writes; the new portal simply never uses them (Tasks 7 and 8 removed every diagnostics read and write from the frontend). A probe pins the grants so no later edit drops one before the release, and comments mark the blocks for Task 28, which removes them after the release. The emulator seed's diagnostics and DATA-MODEL's diagnostics section go now.
 
 **Files:**
-- Modify: `firestore.rules` (~394-454: the per-athlete diagnostics match keeps its read rule only; ~477-507: the collection-group read stays, with a note)
-- Modify: `scripts/rules-probes/assessments.mjs` (append `taskDiagnosticsReadOnly`), `scripts/verify-rules.mjs` (import, runPass)
+- Modify: `firestore.rules` (comments only: the per-athlete diagnostics match ~394 and the diagnostics collection-group read ~477 are marked for removal after the release)
+- Modify: `scripts/rules-probes/assessments.mjs` (append `taskDiagnosticsKept`), `scripts/verify-rules.mjs` (import, runPass)
 - Modify: `scripts/seed-firestore.mjs` (~139-145, ~985-1045, ~1531, ~1688-1694), `docs/portal/DATA-MODEL.md` (~28, ~812-876, ~1357-1366, ~2055-2058)
 - Test: `scripts/verify-rules.mjs` (emulator, both passes)
 
 **Interfaces:**
 - Consumes: `groupListAs`, `tok`, `uids`, `ATH` in `scripts/rules-probes/assessments.mjs` (Task 4).
-- Produces: `taskDiagnosticsReadOnly()` in `scripts/rules-probes/assessments.mjs` (Task 27 replaces it with `taskDiagnosticsGone()`); `scripts/verify-rules.mjs` runs `await taskAssessments(); await taskDiagnosticsReadOnly();`.
+- Produces: `taskDiagnosticsKept()` in `scripts/rules-probes/assessments.mjs` (Task 28 replaces it with `taskDiagnosticsGone()`); `scripts/verify-rules.mjs` runs `await taskAssessments(); await taskDiagnosticsKept();`.
 
-- [ ] **Step 1: Write the failing probe**
+- [ ] **Step 1: Write the probe that pins what `main` still uses**
 
 Append to `scripts/rules-probes/assessments.mjs`:
 
 ```js
-// Assessments spec 8: Diagnostic Capture is gone (production held 0 docs on 2026-10-14). Its rules stay
-// read-only for this release - a portal bundle from before it reads diagnostics beside everything else
-// while the rules deploy first - and plan Task 27 removes the reads after the portal is live.
-export async function taskDiagnosticsReadOnly() {
-  console.log('Diagnostics: read-only for this release (Diagnostic Capture removed)');
+// Assessments spec 8: Diagnostic Capture is gone from the new portal (production held 0 docs on 2026-10-14), but its
+// rules stay exactly as they are for this release: the rules reach production before the live portal (main) is
+// updated - staging shares production's backend (plan Task 27) - and main's athlete home and admin dashboard read
+// diagnostics while its Capture tab saves them. Plan Task 28 removes every diagnostics grant after the release.
+export async function taskDiagnosticsKept() {
+  console.log('Diagnostics: unchanged for this release (the live portal still reads and saves captures)');
   const owner = tok(uids.owner);
   await seed('users', uids.owner, { role: 'owner' });
   await seed('athletes', ATH, { name: 'Probe Athlete', householdId: 'hh', dob: '2012-04-10', contractMinutes: null, coachId: 'coach-probe', packageId: 't-6' });
   await seed(`athletes/${ATH}/diagnostics`, 'old-1', { athleteId: ATH, capturedBy: 'coach-probe', status: 'published', values: {}, notes: null });
   try {
     for (const [who, auth] of [['the owner', owner], ['ops', t.ops], ['the assigned coach', t.coach]]) {
-      expect(`${who}: a capture still reads (an old bundle keeps loading)`, await call('GET', `/athletes/${ATH}/diagnostics/old-1`, null, auth).then(status), 200);
+      expect(`${who}: a capture still reads (the live portal keeps loading)`, await call('GET', `/athletes/${ATH}/diagnostics/old-1`, null, auth).then(status), 200);
     }
     expect('the owner: the collection-group list still reads', await groupListAs(owner, 'diagnostics'), 200);
-    expect('the assigned coach: a new capture refused', await createAs(t.coach, `athletes/${ATH}/diagnostics`, 'new-1',
-      { athleteId: ATH, capturedBy: 'coach-probe', status: 'draft', values: {}, notes: null }, ['capturedAt', 'updatedAt']), 403);
+    expect('the assigned coach: a new capture still saves (the live Capture tab)', await createAs(t.coach, `athletes/${ATH}/diagnostics`, 'new-1',
+      { athleteId: ATH, capturedBy: 'coach-probe', status: 'draft', values: {}, notes: null }, ['capturedAt', 'updatedAt']), 200);
   } finally {
     await del(`athletes/${ATH}/diagnostics`, 'old-1');
     await del(`athletes/${ATH}/diagnostics`, 'new-1');
@@ -5003,7 +5006,7 @@ import { taskAssessments } from './rules-probes/assessments.mjs';
 with:
 
 ```js
-import { taskAssessments, taskDiagnosticsReadOnly } from './rules-probes/assessments.mjs';
+import { taskAssessments, taskDiagnosticsKept } from './rules-probes/assessments.mjs';
 ```
 
 and replace:
@@ -5015,15 +5018,15 @@ and replace:
 with:
 
 ```js
-    await taskAssessments(); await taskDiagnosticsReadOnly();
+    await taskAssessments(); await taskDiagnosticsKept();
 ```
 
-- [ ] **Step 2: Run the probe to verify it fails**
+- [ ] **Step 2: Run the probe: it passes on the rules as they are**
 
 Run: `npx firebase-tools emulators:exec --only firestore --project rypacad "node --env-file=scripts/emulator.env scripts/verify-rules.mjs"`
-Expected: FAIL - `the assigned coach: a new capture refused -> 200 (wanted 403)`; the read lines pass.
+Expected: `ALL PASS (both passes)`, including the three `a capture still reads` lines, `the owner: the collection-group list still reads` and `the assigned coach: a new capture still saves (the live Capture tab)`. This probe is a guard, not new behavior: the rules already grant what `main` needs, and from here on any edit that drops one of those grants before the release fails it.
 
-- [ ] **Step 3: The diagnostics rules become read-only**
+- [ ] **Step 3: Mark the diagnostics rules for removal after the release (comments only)**
 
 In `firestore.rules`, replace:
 
@@ -5036,56 +5039,15 @@ with:
 
 ```
       // ---- athletes/{id}/diagnostics/{captureId} -----------------------
-      // READ-ONLY since 2026-10-14: Diagnostic Capture was removed
-      // (assessments spec 8; production held 0 docs) and no client writes
-      // a capture any more. The read grant stays for this release only: a
-      // portal bundle from before it reads diagnostics on the athlete home
-      // and the admin dashboard beside everything else, and the rules
-      // deploy ahead of the portal (spec 10). The follow-up after the
-      // portal is live (assessments plan Task 27) removes this block and
-      // the collection-group read below.
+      // KEPT FOR THIS RELEASE ONLY (2026-10-14): Diagnostic Capture is gone
+      // from the portal (assessments spec 8; production held 0 docs), but
+      // these rules reach production before the live portal is updated
+      // (staging shares production's backend, assessments plan Task 27),
+      // and the portal on main still reads diagnostics on the athlete home
+      // and the admin dashboard and saves them from its Capture tab. The
+      // follow-up after the release (assessments plan Task 28) removes this
+      // block and the collection-group read below.
       // Sprint 10 (contract v1.8, C "Diagnostics persistence"). Shape:
-```
-
-then replace:
-
-```
-        // Field/type checks only — caller-identity on capturedBy is handled
-        // separately per create/update below, because the two operations
-        // mean different things for that field (see the comment there).
-        function diagnosticFieldsOk() {
-          let d = request.resource.data;
-          return d.keys().hasAll(['athleteId', 'capturedBy', 'capturedAt', 'updatedAt', 'status', 'values', 'notes'])
-            && d.keys().hasOnly(['athleteId', 'capturedBy', 'capturedAt', 'updatedAt', 'status', 'values', 'notes'])
-            && d.athleteId == athleteId
-            && d.capturedBy is string
-            && d.status in ['draft', 'published']
-            && d.values is map
-            && (d.notes is string || d.notes == null);
-        }
-        // On CREATE, capturedBy is who is capturing right now — the caller.
-        allow create: if signedIn() && diagnosticStaffOk() && diagnosticFieldsOk()
-          && request.resource.data.capturedBy == request.auth.uid
-          && request.resource.data.capturedAt == request.time
-          && request.resource.data.updatedAt == request.time;
-        // On UPDATE, capturedBy/capturedAt stay whatever they originally
-        // were — immutable history, NOT re-pinned to the current caller.
-        // Deliberately does NOT require the current editor to be the
-        // original capturer: any qualifying staff member (diagnosticStaffOk)
-        // may continue or publish a draft someone else opened — a
-        // specialist finishing a coach's in-progress capture is a real
-        // workflow, not an edge case to block.
-        allow update: if signedIn() && diagnosticStaffOk() && diagnosticFieldsOk()
-          && request.resource.data.capturedAt == resource.data.capturedAt
-          && request.resource.data.capturedBy == resource.data.capturedBy
-          && request.resource.data.updatedAt == request.time;
-        allow read: if signedIn() && (
-```
-
-with:
-
-```
-        allow read: if signedIn() && (
 ```
 
 then replace:
@@ -5099,8 +5061,9 @@ with:
 
 ```
     // ---- diagnostics collection-group read ------------------------------
-    // Read-only until assessments plan Task 27 removes it with the
-    // per-athlete diagnostics match (Diagnostic Capture removed 2026-10-14).
+    // Kept for this release only, like the per-athlete match above; plan
+    // Task 28 removes both after the release (Diagnostic Capture removed
+    // 2026-10-14; the portal on main still reads this).
     // Sprint 10 (contract v1.8, C + D): the Admin "athletes with no
 ```
 
@@ -5333,7 +5296,7 @@ with:
 ```
 ### `athletes/{athleteId}/diagnostics/{captureId}` (removed 2026-10-14)
 
-Diagnostic Capture was removed with the assessments release (assessments spec 8; production held 0 docs on 2026-10-14). The portal no longer reads or writes a capture. `firestore.rules` keeps a read-only grant (per athlete and collection group) so a bundle from before the release keeps loading while the rules deploy first; the follow-up after the portal is live (assessments plan Task 27) removes it and this note.
+Diagnostic Capture was removed with the assessments release (assessments spec 8; production held 0 docs on 2026-10-14). The new portal no longer reads or writes a capture. `firestore.rules` keeps every diagnostics grant (reads and writes, per athlete and collection group) for this release: the rules reach production before the live portal is updated (staging shares production's backend), and the portal on `main` still reads and saves captures. The follow-up after the release (assessments plan Task 28) removes them and this note.
 
 ### `staffInvites/{id}` (contract v1.8, Sprint 10)
 ```
@@ -5388,6 +5351,9 @@ with:
 Run: `npx firebase-tools emulators:exec --only firestore --project rypacad "node --env-file=scripts/emulator.env scripts/verify-rules.mjs"`
 Expected: `ALL PASS (both passes)`, including every `Diagnostics:` line.
 
+Run: `git diff HEAD -- firestore.rules | grep -E "^-\s*allow "` (this task's uncommitted rules change)
+Expected: no output: comments only, no grant removed.
+
 Run: `node scripts/seed-firestore.mjs --dry-run`
 Expected: the plan prints with no `athletes/jordan/diagnostics` collection and exits 0.
 
@@ -5401,11 +5367,12 @@ Expected: no output.
 
 ```bash
 git add firestore.rules scripts/rules-probes/assessments.mjs scripts/verify-rules.mjs scripts/seed-firestore.mjs docs/portal/DATA-MODEL.md
-git commit -m "chore(assessments): diagnostics rules read-only; seed and data model
+git commit -m "chore(assessments): diagnostics rules kept for the release; seed and data model
 
-No client creates or updates a capture; the read grants stay for this
-release so the live bundle keeps loading while the rules deploy first
-(spec 10 order), and go after the portal is live. The emulator seed's
+The new portal never reads or writes a capture, but the portal on main
+still does, and the rules reach production before main is updated
+(staging shares production's backend): every diagnostics grant stays
+until after the release, pinned by a probe. The emulator seed's
 captures and DATA-MODEL's diagnostics section go now.
 
 Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
@@ -7986,7 +7953,7 @@ export function painStopBefore(w, stationId) {
  * tested and pain-stop controls (notTested.readiness) - skips every later
  * station, and a pain stop at any station ends that athlete's later stations
  * (protocol Section 2: do not test an athlete who reports current pain;
- * Phil confirms, Task 26 Step 1). "Undo not tested" at the station where it
+ * Phil confirms, Task 27 Step 1). "Undo not tested" at the station where it
  * was recorded opens the later ones again.
  */
 export default function StationShell({ station, athletes, layout, order, entries, onRetry, onNotTested, renderAthlete }) {
@@ -12472,7 +12439,7 @@ Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 
 **Interfaces:**
 - Consumes: the createFamily contract of Task 20 (`athletes[i].research = { value, assent }`, re-normalized on the server); `isAdultOnDate(dob, todayISO)` in `data/signup.js`; `Tick` in `components/Primitives.js`.
-- Produces: `data/researchConsent.js` - `firstName(name)`, `researchLabel(name)`, `researchLine(name)`, `assentLabel(name)`, `RESEARCH_SELF_LABEL`, `researchSheet(name)` (`[{ heading, lines }]`), `RESEARCH_CONFIRM_TITLE`, `confirmBody(name)`, `RESEARCH_SAVE_LABEL`, `RESEARCH_CONTACT`, `researchAnswer({ ticked, assent, minor })` returning `{ value, assent }` (the same rule as the server's `normalizeResearch`); `components/Checkbox.js` default export `Checkbox({ checked, onChange, label })` (still re-exported by `RegistrationConsent.js` for `RegistrationFacility.js`); `ResearchChoice({ name, self, minor, ticked, assent, onChange({ ticked, assent }), onReadMore })`; `ResearchSheet({ name, onClose })`; `ConsentStep`'s new optional props `athletes`, `todayISO`, `onResearch(key, { research, researchAssent })`, `onOpenResearch({ name, self })`; `newAthleteEntry()` gains `research: false, researchAssent: false`. Only approved copy (spec 7, owner 2026-10-15) is used: an 18+ athlete on their own login gets the approved first-person checkbox, and the approved line under it and Read more sheet with their own first name (the second-person drafts wait for the owner, Task 26 Step 1); `buildCreateFamilyPayload(form, { contract, todayISO })`. Task 23 reuses `researchConsent.js`, `ResearchChoice` and `ResearchSheet`.
+- Produces: `data/researchConsent.js` - `firstName(name)`, `researchLabel(name)`, `researchLine(name)`, `assentLabel(name)`, `RESEARCH_SELF_LABEL`, `researchSheet(name)` (`[{ heading, lines }]`), `RESEARCH_CONFIRM_TITLE`, `confirmBody(name)`, `RESEARCH_SAVE_LABEL`, `RESEARCH_CONTACT`, `researchAnswer({ ticked, assent, minor })` returning `{ value, assent }` (the same rule as the server's `normalizeResearch`); `components/Checkbox.js` default export `Checkbox({ checked, onChange, label })` (still re-exported by `RegistrationConsent.js` for `RegistrationFacility.js`); `ResearchChoice({ name, self, minor, ticked, assent, onChange({ ticked, assent }), onReadMore })`; `ResearchSheet({ name, onClose })`; `ConsentStep`'s new optional props `athletes`, `todayISO`, `onResearch(key, { research, researchAssent })`, `onOpenResearch({ name, self })`; `newAthleteEntry()` gains `research: false, researchAssent: false`. Only approved copy (spec 7, owner 2026-10-15) is used: an 18+ athlete on their own login gets the approved first-person checkbox, and the approved line under it and Read more sheet with their own first name (the second-person drafts wait for the owner, Task 27 Step 1); `buildCreateFamilyPayload(form, { contract, todayISO })`. Task 23 reuses `researchConsent.js`, `ResearchChoice` and `ResearchSheet`.
 
 - [ ] **Step 1: Write the failing tests**
 
@@ -12489,7 +12456,7 @@ test('the approved copy (owner, 2026-10-15), with the first name', () => {
   expect(researchLine('Jordan')).toBe("Saying no changes nothing about Jordan's coaching or testing.");
   expect(assentLabel('Jordan')).toBe("I've talked about this with Jordan, and they agree too.");
   expect(RESEARCH_SELF_LABEL).toBe('Research (optional): my results may be used in research.');
-  // Nothing beyond the approved copy: the second-person drafts wait for the owner (plan Task 26 Step 1).
+  // Nothing beyond the approved copy: the second-person drafts wait for the owner (plan Task 27 Step 1).
   const copy = require('./researchConsent');
   expect(copy.RESEARCH_SELF_LINE).toBeUndefined();
   expect(copy.confirmSelfBody).toBeUndefined();
@@ -12706,7 +12673,7 @@ Create `frontend/src/portal/data/researchConsent.js`:
  * the athlete's first name. The spec words the 18+ checkbox only, so an 18+
  * member on their own login gets that checkbox and the approved line and
  * Read more sheet with their own first name. Second-person rewordings are
- * the owner's to approve first (plan Task 26 Step 1).
+ * the owner's to approve first (plan Task 27 Step 1).
  *
  * The rule, the same one functions/portal/family-validate.js
  * normalizeResearch applies: ticked = yes, unticked = no, both recorded; an
@@ -13211,7 +13178,7 @@ Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 
 ### Task 22: Research consent rules - the one-time answer and the owner's recorded change
 
-The rules half of the one-time research confirm (spec 4.3, 7): the household's parent, or the 18+ member who created their own household, records `consents.research` once; the owner records a later change with the earlier answer kept on the history. Task 23 builds the screens on this contract. A parent may answer for an 18+ athlete in their household (assent null) until the owner rules otherwise (Task 26 Step 1).
+The rules half of the one-time research confirm (spec 4.3, 7): the household's parent, or the 18+ member who created their own household, records `consents.research` once; the owner records a later change with the earlier answer kept on the history. Task 23 builds the screens on this contract. A parent may answer for an 18+ athlete in their household (assent null) until the owner rules otherwise (Task 27 Step 1).
 
 **Files:**
 - Modify: `firestore.rules` (the research branch on `athletes/{athleteId}`)
@@ -13220,7 +13187,7 @@ The rules half of the one-time research confirm (spec 4.3, 7): the household's p
 - Test: `scripts/verify-rules.mjs` (emulator, both passes)
 
 **Interfaces:**
-- Consumes: the athlete doc's `consents.research` written by createFamily (Task 20); `verify-rules.mjs` exports `updateAs`, `seed`, `del`, `expect`, `token`, `t`, `uid`; Task 9's runPass line `await taskAssessments(); await taskDiagnosticsReadOnly();`.
+- Consumes: the athlete doc's `consents.research` written by createFamily (Task 20); `verify-rules.mjs` exports `updateAs`, `seed`, `del`, `expect`, `token`, `t`, `uid`; Task 9's runPass line `await taskAssessments(); await taskDiagnosticsKept();`.
 - Produces: rules - the household's parent, or the 18+ member who created their own household, sets `consents.research` once (that key only, while none is recorded), `{ value, assent, recordedAt: <server>, recordedBy: <caller> }`; the owner records a change, `{ value, assent, recordedAt: <server>, recordedBy: <owner>, history: [...earlier history, the answer it replaces] }`; a yes under 18 needs the assent, 18+ the assent is null. `scripts/rules-probes/research.mjs` exports `taskResearch()`.
 
 - [ ] **Step 1: Write the failing probe**
@@ -13306,26 +13273,26 @@ export async function taskResearch() {
 In `scripts/verify-rules.mjs`, replace:
 
 ```js
-import { taskAssessments, taskDiagnosticsReadOnly } from './rules-probes/assessments.mjs';
+import { taskAssessments, taskDiagnosticsKept } from './rules-probes/assessments.mjs';
 ```
 
 with:
 
 ```js
-import { taskAssessments, taskDiagnosticsReadOnly } from './rules-probes/assessments.mjs';
+import { taskAssessments, taskDiagnosticsKept } from './rules-probes/assessments.mjs';
 import { taskResearch } from './rules-probes/research.mjs';
 ```
 
 then replace:
 
 ```js
-    await taskAssessments(); await taskDiagnosticsReadOnly();
+    await taskAssessments(); await taskDiagnosticsKept();
 ```
 
 with:
 
 ```js
-    await taskAssessments(); await taskDiagnosticsReadOnly(); await taskResearch();
+    await taskAssessments(); await taskDiagnosticsKept(); await taskResearch();
 ```
 
 - [ ] **Step 2: Run the probe to verify it fails**
@@ -14227,7 +14194,7 @@ Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 
 **Interfaces:**
 - Consumes: the bundled `circuitModeOf`, `DEFAULT_SETTINGS`, `PROTOCOL_VERSION` (`data/assessmentSettings.js`) and `seasonOf` (`data/assessmentWindows.js`) through `scripts/lib/bundle-frontend.mjs`; the window, profile and consents shapes of Tasks 4, 20 and 22.
-- Produces: `assessmentFixtures({ todayISO, mode, seasonOf, athletes, protocolVersion, coachUid, guardianUid, signatureName })` returning `{ consents: { [athleteId]: consentsMap }, collections: { 'athletes/<id>/assessments': Map, 'athletes/<id>/assessmentProfile': Map } }`, `STORIES` (`tested | due | declined | unanswered`), `addDaysISO(iso, n)`; Task 25's staging seed reuses all three. The emulator gets: jordan tested at baseline 63 days back (mid-season eligible), reese research no (baseline due), nico not answered (the list cannot add him; Dana's one-time confirm asks), sage-parker research yes (baseline due).
+- Produces: `assessmentFixtures({ todayISO, mode, seasonOf, athletes, protocolVersion, coachUid, guardianUid, signatureName })` returning `{ consents: { [athleteId]: consentsMap }, collections: { 'athletes/<id>/assessments': Map, 'athletes/<id>/assessmentProfile': Map } }`, `STORIES` (`tested | due | declined | unanswered`), `addDaysISO(iso, n)`. The emulator gets: jordan tested at baseline 63 days back (mid-season eligible), reese research no (baseline due), nico not answered (the list cannot add him; Dana's one-time confirm asks), sage-parker research yes (baseline due).
 
 - [ ] **Step 1: Write the failing test**
 
@@ -14313,8 +14280,7 @@ Create `scripts/lib/assessment-fixtures.mjs`:
 /**
  * Assessment fixtures (docs/portal/plans/2026-10-14-assessments): the
  * windows, assessment profiles and research answers the emulator seed
- * (scripts/seed-firestore.mjs) and the staging test copy
- * (scripts/seed-staging-assessments.mjs) write for INVENTED athletes only.
+ * (scripts/seed-firestore.mjs) writes for INVENTED athletes only.
  * Pure and dependency-free: dates are relative to `todayISO`; `mode` is the
  * caller's circuitModeOf(DEFAULT_SETTINGS) and `seasonOf` the frontend's,
  * both bundled from frontend/src/portal/data, so the protocol is never
@@ -14618,556 +14584,829 @@ git add scripts/lib/assessment-fixtures.mjs scripts/test/assessment-fixtures.tes
 git commit -m "chore(seed): assessment fixtures for the emulator, and the data model
 
 Invented athletes in every list state (tested, due, declined, not
-answered), shared with the staging test copy; DATA-MODEL documents the
-windows, profile, settings, users.assessor and athletes.consents.
+answered) for the emulator seed; DATA-MODEL documents the windows,
+profile, settings, users.assessor and athletes.consents.
 
 Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 ```
 
 ---
 
-### Task 25: The staging-safe seed and the "Test copy" marker
+### Task 25: Test households left out of the admin dashboard and the sign-ups report
+
+Staging runs on the production database (Global Constraints; owner, 2026-10-15), so the test family Task 26 provisions - `households/ryp-test-family` "RYP Test Family", `test: true` on the household and on each of its athletes - sits beside real families. Every staff count and report leaves `test: true` households and their athletes out: the admin dashboard (enrolled athletes, membership counts, the lapsed-households list, the outstanding rows including "Baseline due", enrollment by package) and the sign-ups report. Working lists - the assessments list Phil runs the staging test from, the staff households directory - still show the test family by name, so it can be used.
 
 **Files:**
-- Create: `scripts/seed-staging-assessments.mjs`
-- Create: `scripts/test/seed-staging-assessments.test.mjs`
-- Create: `frontend/src/portal/components/TestCopyRibbon.js`
-- Create: `frontend/src/testCopyGuard.js` (the test copy refuses to start against any project but staging)
-- Modify: `frontend/src/firebase.js` (the guard runs before Firebase is initialized)
-- Modify: `frontend/src/portal/PortalRoutes.js` (render the marker)
-- Modify: `.firebaserc` (a `staging` alias for `ryp-academy-app`)
-- Test: `frontend/src/portal/components/TestCopyRibbon.test.js`, `frontend/src/testCopyGuard.test.js`
+- Create: `frontend/src/portal/data/testFamily.js`
+- Create: `frontend/src/portal/data/testFamily.test.js`
+- Modify: `frontend/src/portal/data/signups.js` (import; `buildSignupRows` ~60-66)
+- Modify: `frontend/src/portal/data/signups.test.js` (append)
+- Modify: `frontend/src/portal/hooks/index.js` (import beside Task 7's `seasonOf`; the reads at the top of `liveAdminDashboard`)
+- Modify: `frontend/src/portal/hooks/index.assessments.test.js` (append)
+- Modify: `docs/portal/DATA-MODEL.md` (append the test-household section)
 
 **Interfaces:**
-- Consumes: `assessmentFixtures` (Task 24); `fsFields` (`scripts/lib/firestore-rest.mjs`, pure encoding only - its `PROJECT_ID`, `docName` and `commit` are production-bound and are never imported here); `prodAccessToken` (`scripts/lib/prod-auth.mjs`, the owner's firebase-tools login, called only on `--yes`); `bundleFrontend`.
-- Produces: `scripts/seed-staging-assessments.mjs` exporting `STAGING_PROJECT = 'ryp-academy-app'`, `PRODUCTION_PROJECT = 'rypacad'`, `HOUSEHOLD_ID`, `TEST_ATHLETES`, `assertStagingTarget(project)`, `parseArgs(argv)`, `planStaging({ todayISO, mode, seasonOf, protocolVersion, ownerUid, philUid, assessorUid })` returning `[{ path, data }]`, `main({ argv, fetchImpl, getToken, loadPortal, log, todayISO })`. Flags: `--dry-run` (offline: no token, no network), `--yes` (the owner's write), `--wipe-assessments` (with `--yes`: deletes the test athletes' windows and profiles and `assessmentSettings/current` first), `--owner-uid`, `--phil-uid`, `--assessor-uid` (staff role docs on staging), `--project` (anything but `ryp-academy-app` is refused). `TestCopyRibbon` (shown when `REACT_APP_TEST_COPY=true`); `frontend/src/testCopyGuard.js` exporting `TEST_COPY_PROJECT = 'ryp-academy-app'` and `assertTestCopyTarget(env)` (throws when `REACT_APP_TEST_COPY === 'true'` and `REACT_APP_FIREBASE_PROJECT_ID` is anything but `ryp-academy-app`, naming `rypacad` as the LIVE database), called by `firebase.js` before `initializeApp`, so a test-copy build pointed at production never starts; the `.firebaserc` alias `staging` (`--project staging` is `ryp-academy-app`). Task 26's owner steps run these.
+- Consumes: `buildSignupRows` (`data/signups.js`); `liveAdminDashboard` as Task 7 left it (`fetchAllAssessmentWindows().catch(() => null)` beside `fetchAllHouseholds()`); `mountHook`, `ATHLETES` and the `live`, `adapter` and `calendar` mocks of `hooks/index.assessments.test.js` (Tasks 7 and 10).
+- Produces: `isTestHousehold(household)` (`household.test === true`) and `withoutTestFamilies({ households, athletes })` returning `{ households, athletes }` without the test households, their athletes, and any athlete marked `test: true` (an athlete's own mark covers a caller that has no household list, like the sign-ups report's signed-up households); `households.test` and `athletes.test` documented in DATA-MODEL (Task 26 writes them).
 
 - [ ] **Step 1: Write the failing tests**
 
-Create `scripts/test/seed-staging-assessments.test.mjs`:
+Create `frontend/src/portal/data/testFamily.test.js`:
+
+```js
+import { isTestHousehold, withoutTestFamilies } from './testFamily';
+
+test('only test: true marks a test household', () => {
+  expect(isTestHousehold({ id: 'ryp-test-family', test: true })).toBe(true);
+  for (const h of [{ id: 'kim' }, { id: 'lee', test: 'yes' }, { id: 'ng', test: false }, null, undefined]) {
+    expect(isTestHousehold(h)).toBe(false);
+  }
+});
+
+test('leaves out the test households, their athletes and any athlete marked test; keeps everything else, in order', () => {
+  const households = [
+    { id: 'kim', name: 'Kim family' },
+    { id: 'ryp-test-family', name: 'RYP Test Family', test: true },
+    { id: 'lee', name: 'Lee family', test: 'yes' },
+  ];
+  const athletes = [
+    { id: 'k1', householdId: 'kim' },
+    { id: 'ryp-test-ava', householdId: 'ryp-test-family', test: true },
+    { id: 'ryp-test-max', householdId: 'ryp-test-family' }, // the household's mark is enough
+    { id: 'stray', householdId: 'kim', test: true }, // and so is the athlete's own
+    { id: 'l1', householdId: 'lee' },
+    { id: 'none' },
+  ];
+  const out = withoutTestFamilies({ households, athletes });
+  expect(out.households.map((h) => h.id)).toEqual(['kim', 'lee']);
+  expect(out.athletes.map((a) => a.id)).toEqual(['k1', 'l1', 'none']);
+});
+
+test('missing lists read as empty', () => {
+  expect(withoutTestFamilies({})).toEqual({ households: [], athletes: [] });
+});
+```
+
+Append to `frontend/src/portal/data/signups.test.js`:
+
+```js
+
+test('a test household (test: true) is never a sign-up row, and its athletes make no duplicate flag (owner, 2026-10-15)', () => {
+  const real = { id: 'kim', name: 'Kim family', signup: { at: new Date('2026-10-01T09:00:00'), mode: 'parent' }, guardian: { name: 'Pat Kim', email: 'pat@x.com', phone: '1' } };
+  const testFamily = { id: 'ryp-test-family', name: 'RYP Test Family', test: true, signup: { at: new Date('2026-10-02T09:00:00'), mode: 'parent' }, guardian: { name: 'RYP Test Parent', email: 'makel+testparent@rypgolf.com', phone: null } };
+  const kids = [
+    { id: 'k1', householdId: 'kim', name: 'Ava Kim', dob: '2012-05-14', packageId: 't-6', billing: { status: 'pending' } },
+    // Same name and birthday as a real child: still no duplicate flag, the test family is not a family.
+    { id: 'ryp-test-ava', householdId: 'ryp-test-family', test: true, name: 'Ava Kim', dob: '2012-05-14', packageId: null },
+  ];
+  const { rows, counts } = buildSignupRows({ households: [testFamily, real], athletes: kids, now });
+  expect(rows.map((r) => r.householdId)).toEqual(['kim']);
+  expect(rows[0].flags).toEqual([]);
+  expect(counts).toEqual({ all: 1, unpaid: 1, flagged: 0, unresolved: 0 });
+});
+```
+
+Append to `frontend/src/portal/hooks/index.assessments.test.js`:
+
+```js
+
+test('the test family (test: true) is left out of the dashboard: counts, the lapsed list, Baseline due and enrollment (owner, 2026-10-15)', async () => {
+  calendar.todayISO.mockReturnValue('2026-11-10');
+  live.isLive.mockReturnValue(true);
+  live.fetchAllAthletes.mockResolvedValue([
+    ...ATHLETES.map((a) => ({ ...a, householdId: 'whitfield' })),
+    { id: 'ryp-test-ava', name: 'Ava Test', householdId: 'ryp-test-family', test: true, contractMinutes: null, packageId: null },
+    { id: 'ryp-test-max', name: 'Max Test', householdId: 'ryp-test-family', contractMinutes: null, packageId: 't-6' },
+  ]);
+  live.fetchAllHouseholds.mockResolvedValue([
+    { id: 'whitfield', name: 'Whitfield family' },
+    { id: 'ryp-test-family', name: 'RYP Test Family', test: true, membership: { status: 'lapsed' } },
+  ]);
+  for (const f of [live.fetchContractLogsSince, live.fetchNoShowBookingsSince, live.fetchPendingEnrollmentRequests, live.fetchSessionsInRange]) {
+    f.mockResolvedValue([]);
+  }
+  adapter.fetchAllAssessmentWindows.mockResolvedValue([]);
+  const h = await mountHook(() => useAdminDashboard());
+  const { metrics, membership, outstanding, enrollment } = h.result.current.data;
+  expect(metrics.enrolled).toBe(2);
+  expect(membership).toEqual({ active: 1, pastDue: 0, lapsed: 0, pending: 0, lapsedHouseholds: [] });
+  expect(outstanding.map((r) => r.id)).toEqual(['baseline-a1', 'baseline-a2']);
+  expect(enrollment).toEqual([{ id: 't-6', name: expect.any(String), athletes: 2 }]);
+  await h.unmount();
+});
+```
+
+- [ ] **Step 2: Run the tests to verify they fail**
+
+Run: `cd frontend && CI=true npx react-scripts test --watchAll=false src/portal/data/testFamily.test.js src/portal/data/signups.test.js src/portal/hooks/index.assessments.test.js`
+Expected: FAIL - "Cannot find module './testFamily'"; the sign-ups report lists `ryp-test-family` and flags both Avas; the dashboard counts 4 enrolled and the lapsed test household, and lists `baseline-ryp-test-ava` and `baseline-ryp-test-max`.
+
+- [ ] **Step 3: Write minimal implementation**
+
+Create `frontend/src/portal/data/testFamily.js`:
+
+```js
+/**
+ * Test households (owner, 2026-10-15). Staging - the Railway "Staging"
+ * environment at rypacad.ryptest.com, built from develop - runs on the
+ * PRODUCTION database, so the one test family the owner and Phil test with
+ * (scripts/provision-test-family.mjs) sits beside real families, marked
+ * `test: true` on the household and on each of its athletes. Every staff
+ * count and report leaves it out; working lists (the assessments list, the
+ * staff households directory) still show it by name, so it can be used.
+ * PURE - no React, no Firebase.
+ */
+
+/** True only for a household marked `test: true`. */
+export function isTestHousehold(household) {
+  return household?.test === true;
+}
+
+/**
+ * `{ households, athletes }` without the test households, their athletes
+ * and any athlete marked `test: true` (the athlete's own mark covers a
+ * caller whose household list is partial, like the sign-ups report's).
+ */
+export function withoutTestFamilies({ households = [], athletes = [] }) {
+  const testIds = new Set(households.filter(isTestHousehold).map((h) => h.id));
+  return {
+    households: households.filter((h) => !isTestHousehold(h)),
+    athletes: athletes.filter((a) => a?.test !== true && !testIds.has(a?.householdId)),
+  };
+}
+```
+
+In `frontend/src/portal/data/signups.js`, replace:
+
+```js
+import { billingStatusOf } from './billingCopy';
+```
+
+with:
+
+```js
+import { billingStatusOf } from './billingCopy';
+import { withoutTestFamilies } from './testFamily';
+```
+
+then replace:
+
+```js
+ * the input order (hooks/signups.js queries `signup.at desc`). Returns
+ * `{ rows, counts: { all, unpaid, flagged, unresolved }, unresolved }` (D9).
+ */
+export function buildSignupRows({ households = [], athletes = [], invites = [], flaggedBookings = [], calendlyEvents = [], now = new Date() }) {
+  const today = format(now, 'yyyy-MM-dd');
+```
+
+with:
+
+```js
+ * the input order (hooks/signups.js queries `signup.at desc`). Returns
+ * `{ rows, counts: { all, unpaid, flagged, unresolved }, unresolved }` (D9).
+ * A test household (`test: true`, data/testFamily.js) is never a row, and
+ * its athletes never make a duplicate-child flag.
+ */
+export function buildSignupRows({ households: allHouseholds = [], athletes: allAthletes = [], invites = [], flaggedBookings = [], calendlyEvents = [], now = new Date() }) {
+  // Owner 2026-10-15: staging shares the production database, so the test
+  // family sits beside real ones; the report leaves it out.
+  const { households, athletes } = withoutTestFamilies({ households: allHouseholds, athletes: allAthletes });
+  const today = format(now, 'yyyy-MM-dd');
+```
+
+In `frontend/src/portal/hooks/index.js`, replace:
+
+```js
+import { seasonOf } from '../data/assessmentWindows';
+```
+
+with:
+
+```js
+import { seasonOf } from '../data/assessmentWindows';
+import { withoutTestFamilies } from '../data/testFamily';
+```
+
+then replace:
+
+```js
+  const [athletes, sessionsThisWeek, pending, noshowBookings, contractLogs, windows, households] =
+    await Promise.all([
+      fetchAllAthletes(),
+      fetchSessionsInRange(weekStart, weekEnd),
+      fetchPendingEnrollmentRequests(),
+      fetchNoShowBookingsSince(monthStart),
+      fetchContractLogsSince(monthStart),
+      fetchAllAssessmentWindows().catch(() => null),
+      fetchAllHouseholds(),
+    ]);
+```
+
+with:
+
+```js
+  const [allAthletes, sessionsThisWeek, pending, noshowBookings, contractLogs, windows, allHouseholds] =
+    await Promise.all([
+      fetchAllAthletes(),
+      fetchSessionsInRange(weekStart, weekEnd),
+      fetchPendingEnrollmentRequests(),
+      fetchNoShowBookingsSince(monthStart),
+      fetchContractLogsSince(monthStart),
+      fetchAllAssessmentWindows().catch(() => null),
+      fetchAllHouseholds(),
+    ]);
+  // Owner 2026-10-15: staging shares this database, so the test family
+  // (test: true, data/testFamily.js) is left out of every count and list
+  // below. It never books, so no booking or contract log names it.
+  const { households, athletes } = withoutTestFamilies({ households: allHouseholds, athletes: allAthletes });
+```
+
+- [ ] **Step 4: The data model**
+
+Append to `docs/portal/DATA-MODEL.md`:
+
+```md
+
+## Test households (2026-10-15)
+
+Staging - the Railway "Staging" environment, https://rypacad.ryptest.com, built from `develop` - runs on the production Firebase project, so the one test family the owner and Phil test with sits beside real families (owner, 2026-10-15: no separate staging database).
+
+- `households.test` and `athletes.test` (boolean, absent == false): `true` only on the test family - `households/ryp-test-family` "RYP Test Family" and its athletes `ryp-test-ava` (under 18) and `ryp-test-max` (18+) - written by the owner-run `scripts/provision-test-family.mjs` (`--dry-run`, then `--yes`). No client writes either field.
+- Every staff count and report leaves `test: true` households and their athletes out (`frontend/src/portal/data/testFamily.js`): the admin dashboard (enrolled, membership counts, lapsed households, outstanding rows, enrollment by package) and the sign-ups report. An ad-hoc export made for the owner (a past-families list) skips them too. Working lists (the assessments list, the staff households directory) show the test family by name.
+- The test family has no package, no billing and no Stripe ids, and never books, waitlists or pays: sessions and Stripe are live on staging. Its research answers start unanswered (the parent answers the one-time confirm at staging); `--reset` deletes its athletes' assessment windows and profiles and clears those answers, for another rehearsal.
+```
+
+- [ ] **Step 5: Run the tests to verify they pass**
+
+Run: `cd frontend && CI=true npx react-scripts test --watchAll=false src/portal/data src/portal/hooks src/portal/screens/AdminDashboard src/portal/screens/AdminSignups`
+Expected: PASS - `testFamily.test.js`, `signups.test.js`, `index.assessments.test.js` and every other data, hooks and admin suite.
+
+Run: `cd frontend && npx eslint src/portal`
+Expected: no output.
+
+- [ ] **Step 6: Commit**
+
+```bash
+git add frontend/src/portal/data/testFamily.js frontend/src/portal/data/testFamily.test.js frontend/src/portal/data/signups.js frontend/src/portal/data/signups.test.js frontend/src/portal/hooks/index.js frontend/src/portal/hooks/index.assessments.test.js docs/portal/DATA-MODEL.md
+git commit -m "feat(admin): leave the staging test family out of the counts
+
+Staging runs on the production database, so the test family (test: true)
+sits beside real ones: the admin dashboard and the sign-ups report leave
+test households and their athletes out; DATA-MODEL documents the marker.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
+```
+
+---
+
+### Task 26: The production test family for the staging test
+
+There is no separate test database (owner, 2026-10-15), so the owner and Phil test the assessments on staging with one invented household in production, made by an owner-run script in the style of `scripts/link-subscription.mjs` and `scripts/mark-email-verified.mjs`: `--dry-run` prints exactly what it would create, `--yes` writes it (the owner runs both against production with `--prod`; the agent only ever runs it against the local emulators). It creates `households/ryp-test-family` "RYP Test Family" (`test: true`), two athletes marked `test: true` with complete test data for a wave - Ava Test (under 18) and Max Test (18+; left out with `--no-adult`) - and the `users` doc that makes a login the owner controls (passed as `--parent-email`, for example `makel+testparent@rypgolf.com`) the family's parent. It is create-only and idempotent, refuses anything under its ids that is not the test family, and never writes a booking, a payment or a Stripe id. `--reset` clears the test athletes' assessments and research answers for another rehearsal (a season allows one baseline per athlete).
+
+**Files:**
+- Create: `scripts/provision-test-family.mjs`
+- Create: `scripts/test/provision-test-family.test.mjs`
+- Test: `scripts/test/provision-test-family.test.mjs` (`node --test`; its last test runs against the Firestore and Auth emulators when both are up)
+
+**Interfaces:**
+- Consumes: `resolveTarget`, `getDoc`, `commit`, `docName`, `fsFields`, `fsDecode`, `PROJECT_ID` (`scripts/lib/firestore-rest.mjs`: production with `--prod`, else the local emulator only); `authTarget`, `lookup` (`scripts/mark-email-verified.mjs`: the Identity Toolkit login lookup, production with `--prod`, else the local Auth emulator only); the `households.test` / `athletes.test` marker Task 25 filters on; the window and profile paths of Task 4 (`athletes/{id}/assessments`, `athletes/{id}/assessmentProfile`).
+- Produces: `scripts/provision-test-family.mjs` exporting `TEST_HOUSEHOLD_ID = 'ryp-test-family'`, `TEST_ATHLETES` (`ryp-test-ava` under 18, `ryp-test-max` 18+), `parseArgs(argv)`, `planTestFamily({ parentUid, parentEmail, todayISO, adult })` returning `[{ collection, id, path, data }]`, `loginRefusal(login)`, `refusal(docs, existing)`, `createWrites(docs, existing)`, `resetWrites(found)` and `main(argv, { io, log, error, todayISO })` returning the exit code. Flags: `--prod`, `--parent-email <address>`, exactly one of `--dry-run` / `--yes`, `--no-adult`, `--reset` (no parent needed). Task 27 Steps 6 and 7 run it.
+
+- [ ] **Step 1: Write the failing tests**
+
+Create `scripts/test/provision-test-family.test.mjs`:
 
 ```js
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { HOUSEHOLD_ID, STAGING_PROJECT, TEST_ATHLETES, assertStagingTarget, main, parseArgs, planStaging } from '../seed-staging-assessments.mjs';
+import { TEST_ATHLETES, TEST_HOUSEHOLD_ID, loginRefusal, main, parseArgs, planTestFamily, refusal } from '../provision-test-family.mjs';
+import { commit, docName, fsDecode, fsFields, getDoc, resolveTarget } from '../lib/firestore-rest.mjs';
 
-const seasonOf = () => '2026-27';
-const portal = { circuitModeOf: () => ({ waveSize: 4 }), DEFAULT_SETTINGS: {}, PROTOCOL_VERSION: 'v1.2', seasonOf };
-/** A recording stand-in for fetch: every call is kept; list calls answer from `subdocs`. */
-function fakeFetch(subdocs = {}) {
-  const calls = [];
-  const fn = async (url, init = {}) => {
-    calls.push({ url, init });
-    if (!init.method || init.method === 'GET') {
-      const key = Object.keys(subdocs).find((k) => url.includes(`/documents/${k}?`));
-      return { ok: true, status: 200, json: async () => ({ documents: (subdocs[key] || []).map((p) => ({ name: `projects/${STAGING_PROJECT}/databases/(default)/documents/${p}` })) }) };
-    }
-    return { ok: true, status: 200, json: async () => ({}) };
+const EMAIL = 'makel+testparent@rypgolf.com';
+const TODAY = '2026-10-15';
+const quiet = { log: () => {}, error: () => {} };
+const yearsOn = (dob, today) => {
+  const [y, m, d] = dob.split('-').map(Number);
+  const [ty, tm, td] = today.split('-').map(Number);
+  return ty - y - (tm < m || (tm === m && td < d) ? 1 : 0);
+};
+const ours = () => Object.fromEntries(planTestFamily({ parentUid: 'u-test', parentEmail: EMAIL, todayISO: TODAY }).map((d) => [d.path, structuredClone(d.data)]));
+
+/** A stand-in for production: docs by path, subcollection ids, one login; every commit kept and applied. */
+function fakeIo({ docs = {}, subs = {}, login = { localId: 'u-test', email: EMAIL } } = {}) {
+  const commits = [];
+  const pathOf = (name) => name.split('/documents/')[1];
+  const io = {
+    label: 'fake production',
+    lookupLogin: async () => login,
+    readDoc: async (collection, id) => docs[`${collection}/${id}`] ?? null,
+    listIds: async (parent, collectionId) => subs[`${parent}/${collectionId}`] ?? [],
+    commitWrites: async (writes) => {
+      commits.push(writes);
+      for (const w of writes) {
+        if (w.delete) delete docs[pathOf(w.delete)];
+        else if (w.updateMask) docs[pathOf(w.update.name)].consents.research = null;
+        else docs[pathOf(w.update.name)] = fsDecode(w.update.fields);
+      }
+    },
   };
-  return Object.assign(fn, { calls });
+  return { io, docs, commits };
 }
-const run = (argv, extra = {}) => main({ argv, fetchImpl: extra.fetchImpl ?? fakeFetch(), getToken: extra.getToken ?? (async () => 'TOKEN'), loadPortal: () => portal, log: () => {}, todayISO: '2026-10-15' });
+const run = (argv, fake, extra = {}) => main(argv, { ...quiet, ...extra, io: fake.io, todayISO: TODAY });
 
-test('only the staging test copy is ever a target; production is refused by name', async () => {
-  assert.equal(assertStagingTarget('ryp-academy-app'), 'ryp-academy-app');
-  assert.throws(() => assertStagingTarget('rypacad'), /PRODUCTION/);
-  assert.throws(() => assertStagingTarget('some-other-project'), /not the staging test copy/);
-  const fetchImpl = fakeFetch();
-  let tokens = 0;
-  await assert.rejects(run(['--yes', '--project', 'rypacad'], { fetchImpl, getToken: async () => { tokens += 1; return 'T'; } }), /PRODUCTION/);
-  assert.equal(fetchImpl.calls.length, 0);
-  assert.equal(tokens, 0);
+test('parseArgs: the parent login and exactly one of --dry-run | --yes; --reset needs no login', () => {
+  assert.ok(parseArgs(['--parent-email', EMAIL]).error);
+  assert.ok(parseArgs(['--parent-email', EMAIL, '--dry-run', '--yes']).error);
+  assert.ok(parseArgs(['--dry-run']).error);
+  assert.ok(parseArgs(['--parent-email', 'not-an-email', '--yes']).error);
+  assert.ok(parseArgs(['--parent-email', EMAIL, '--yes', '--force']).error);
+  assert.deepEqual(parseArgs(['--prod', '--parent-email', ' Makel+TestParent@RYPgolf.com ', '--dry-run', '--no-adult']),
+    { prod: true, parentEmail: EMAIL, dryRun: true, yes: false, adult: false, reset: false });
+  assert.deepEqual(parseArgs(['--reset', '--yes']), { prod: false, parentEmail: null, dryRun: false, yes: true, adult: true, reset: true });
 });
 
-test('without --dry-run or --yes nothing happens', async () => {
-  const fetchImpl = fakeFetch();
-  await assert.rejects(run([], { fetchImpl }), /--dry-run.*--yes/);
-  assert.equal(fetchImpl.calls.length, 0);
+test('the plan: one household marked test, two test athletes (under 18, 18+) with no package, no billing and research unanswered, and the parent login', () => {
+  const docs = planTestFamily({ parentUid: 'u-test', parentEmail: EMAIL, todayISO: TODAY });
+  assert.deepEqual(docs.map((d) => d.path), [`households/${TEST_HOUSEHOLD_ID}`, 'athletes/ryp-test-ava', 'athletes/ryp-test-max', 'users/u-test']);
+  const [household, ava, max, user] = docs.map((d) => d.data);
+  assert.deepEqual([household.name, household.test, 'signup' in household], ['RYP Test Family', true, false]);
+  assert.deepEqual([household.stripeCustomerId, household.stripeSubscriptionId, household.stripeCustomerIds], [null, null, []]);
+  for (const a of [ava, max]) {
+    assert.deepEqual([a.test, a.householdId, a.packageId, 'billing' in a], [true, TEST_HOUSEHOLD_ID, null, false]);
+    assert.deepEqual(a.consents, { dataCollection: true, videoCapture: true, mediaRelease: false, research: null, signature: { name: 'RYP Test Parent', date: TODAY } });
+  }
+  assert.ok(yearsOn(ava.dob, TODAY) < 18 && yearsOn(ava.dob, '2027-07-31') < 18, 'Ava stays under 18 all season');
+  assert.ok(yearsOn(max.dob, TODAY) >= 18, 'Max is 18+');
+  assert.deepEqual([user.role, user.householdId, user.athleteId, user.email, user.staff], ['parent', TEST_HOUSEHOLD_ID, null, EMAIL, false]);
+  assert.deepEqual(planTestFamily({ parentUid: 'u-test', parentEmail: EMAIL, todayISO: TODAY, adult: false }).map((d) => d.path),
+    [`households/${TEST_HOUSEHOLD_ID}`, 'athletes/ryp-test-ava', 'users/u-test']);
+  assert.deepEqual(TEST_ATHLETES.map((a) => a.id), ['ryp-test-ava', 'ryp-test-max']);
 });
 
-test('--dry-run is offline: no token, no request, the plan returned', async () => {
-  const fetchImpl = fakeFetch();
-  let tokens = 0;
-  const out = await run(['--dry-run'], { fetchImpl, getToken: async () => { tokens += 1; return 'T'; } });
-  assert.equal(fetchImpl.calls.length, 0);
-  assert.equal(tokens, 0);
-  assert.equal(out.written, 0);
-  assert.ok(out.docs.length > TEST_ATHLETES.length);
+test('refusal: anything under the test ids that is not the test family stops the run', () => {
+  const docs = planTestFamily({ parentUid: 'u-test', parentEmail: EMAIL, todayISO: TODAY });
+  assert.equal(refusal(docs, {}), null);
+  assert.equal(refusal(docs, ours()), null);
+  assert.match(refusal(docs, { [`households/${TEST_HOUSEHOLD_ID}`]: { name: 'Kim family' } }), /not marked test: true/);
+  assert.match(refusal(docs, { 'athletes/ryp-test-ava': { name: 'Ava Kim', householdId: 'kim' } }), /not a test-family athlete/);
+  assert.match(refusal(docs, { 'athletes/ryp-test-ava': { householdId: TEST_HOUSEHOLD_ID } }), /not a test-family athlete/);
+  assert.match(refusal(docs, { 'users/u-test': { role: 'parent', householdId: 'kim' } }), /already has a portal record/);
+  assert.match(refusal(docs, { 'users/u-test': { role: 'owner', householdId: null } }), /already has a portal record/);
+  assert.match(loginRefusal(null), /Sign in once at https:\/\/rypacad\.ryptest\.com/);
+  assert.match(loginRefusal({ localId: 'u', disabled: true }), /disabled/);
+  assert.equal(loginRefusal({ localId: 'u' }), null);
 });
 
-test('the plan: one invented household, every athlete named "... Test", fixtures for the tested ones, staff only when asked', () => {
-  const docs = planStaging({ todayISO: '2026-10-15', mode: { waveSize: 4 }, seasonOf, protocolVersion: 'v1.2' });
-  const athletes = docs.filter((d) => /^athletes\/[^/]+$/.test(d.path));
-  assert.equal(athletes.length, 8);
-  assert.ok(athletes.every((d) => d.data.householdId === HOUSEHOLD_ID && / Test$/.test(d.data.name)));
-  assert.equal(docs.filter((d) => d.path.startsWith('users/')).length, 0);
-  assert.deepEqual(docs.filter((d) => d.path.endsWith('/assessments/2026-27-baseline')).map((d) => d.path).sort(), ['athletes/test-ava/assessments/2026-27-baseline', 'athletes/test-ben/assessments/2026-27-baseline']);
-  assert.equal(athletes.find((d) => d.path === 'athletes/test-hal').data.consents.research, null);
-  const staffed = planStaging({ todayISO: '2026-10-15', mode: {}, seasonOf, protocolVersion: 'v1.2', ownerUid: 'u-owner', philUid: 'u-phil', assessorUid: 'u-data' });
-  const users = Object.fromEntries(staffed.filter((d) => d.path.startsWith('users/')).map((d) => [d.path, d.data]));
-  assert.deepEqual([users['users/u-owner'].role, users['users/u-phil'].specialistId, users['users/u-data'].assessor], ['owner', 'phil', true]);
+test('--dry-run reads and prints the plan, and writes nothing', async () => {
+  const fake = fakeIo();
+  const lines = [];
+  assert.equal(await run(['--parent-email', EMAIL, '--dry-run'], fake, { log: (l) => lines.push(l) }), 0);
+  assert.equal(fake.commits.length, 0);
+  assert.ok(lines.some((l) => /create\s+households\/ryp-test-family/.test(l)));
+  assert.ok(lines.some((l) => /create\s+users\/u-test/.test(l)));
+  assert.ok(lines.includes('Would create 4 docs. Run again with --yes instead of --dry-run.'));
 });
 
-test('--yes writes to ryp-academy-app only, with the owner token, in one commit per 400 writes', async () => {
-  const fetchImpl = fakeFetch();
-  const out = await run(['--yes', '--phil-uid', 'u-phil'], { fetchImpl });
-  assert.ok(fetchImpl.calls.length >= 1);
-  assert.ok(fetchImpl.calls.every((c) => c.url.includes(`/projects/${STAGING_PROJECT}/`) && !c.url.includes('/projects/rypacad/')));
-  assert.ok(fetchImpl.calls.every((c) => c.init.headers.authorization === 'Bearer TOKEN'));
-  const writes = fetchImpl.calls.flatMap((c) => JSON.parse(c.init.body).writes);
-  assert.equal(writes.length, out.docs.length);
-  assert.ok(writes.every((w) => w.update.name.startsWith(`projects/${STAGING_PROJECT}/databases/(default)/documents/`)));
+test('--yes creates every doc under exists:false in one commit; a re-run changes nothing', async () => {
+  const fake = fakeIo();
+  assert.equal(await run(['--parent-email', EMAIL, '--yes'], fake), 0);
+  assert.equal(fake.commits.length, 1);
+  assert.equal(fake.commits[0].length, 4);
+  assert.ok(fake.commits[0].every((w) => w.update && w.currentDocument.exists === false));
+  assert.ok(fake.commits[0].every((w) => /\/documents\/(households|athletes|users)\/[^/]+$/.test(w.update.name)));
+  assert.equal(fake.docs[`households/${TEST_HOUSEHOLD_ID}`].test, true);
+  fake.docs['athletes/ryp-test-ava'].consents.research = { value: false, assent: false }; // the parent answered at staging
+  const lines = [];
+  assert.equal(await run(['--parent-email', EMAIL, '--yes'], fake, { log: (l) => lines.push(l) }), 0);
+  assert.equal(fake.commits.length, 1);
+  assert.ok(lines.includes('Nothing to do: RYP Test Family is already there.'));
+  assert.deepEqual(fake.docs['athletes/ryp-test-ava'].consents.research, { value: false, assent: false });
 });
 
-test('--wipe-assessments deletes only the test athletes\' windows and profiles and the settings, before writing', async () => {
-  const fetchImpl = fakeFetch({ 'athletes/test-cal/assessments': ['athletes/test-cal/assessments/2026-27-baseline'], 'athletes/test-ava/assessmentProfile': ['athletes/test-ava/assessmentProfile/current'] });
-  await run(['--yes', '--wipe-assessments'], { fetchImpl });
-  const lists = fetchImpl.calls.filter((c) => !c.init.method || c.init.method === 'GET');
-  assert.equal(lists.length, TEST_ATHLETES.length * 2);
-  assert.ok(lists.every((c) => /\/documents\/athletes\/test-[a-z]+\/(assessments|assessmentProfile)\?/.test(c.url)));
-  const commits = fetchImpl.calls.filter((c) => c.init.method === 'POST');
-  const deletes = JSON.parse(commits[0].init.body).writes.map((w) => w.delete);
-  assert.deepEqual(deletes.map((d) => d.split('/documents/')[1]).sort(), ['assessmentSettings/current', 'athletes/test-ava/assessmentProfile/current', 'athletes/test-cal/assessments/2026-27-baseline']);
-  assert.ok(JSON.parse(commits[1].init.body).writes.every((w) => w.update));
+test('a missing piece is created alone; what is there stays as it is', async () => {
+  const docs = ours();
+  delete docs['athletes/ryp-test-max'];
+  const fake = fakeIo({ docs });
+  assert.equal(await run(['--parent-email', EMAIL, '--yes'], fake), 0);
+  assert.deepEqual(fake.commits[0].map((w) => w.update.name.split('/documents/')[1]), ['athletes/ryp-test-max']);
 });
 
-test('the flags parse', () => {
-  assert.deepEqual(parseArgs(['--yes', '--wipe-assessments', '--owner-uid', 'o', '--phil-uid', 'p']), { project: STAGING_PROJECT, dryRun: false, yes: true, wipe: true, ownerUid: 'o', philUid: 'p', assessorUid: null });
-});
-```
-
-Create `frontend/src/portal/components/TestCopyRibbon.test.js`:
-
-```js
-import React from 'react';
-import { renderScreen } from '../screens/testRender';
-import TestCopyRibbon from './TestCopyRibbon';
-
-const saved = { copy: process.env.REACT_APP_TEST_COPY, project: process.env.REACT_APP_FIREBASE_PROJECT_ID };
-afterEach(() => {
-  process.env.REACT_APP_TEST_COPY = saved.copy;
-  process.env.REACT_APP_FIREBASE_PROJECT_ID = saved.project;
-  if (saved.copy === undefined) delete process.env.REACT_APP_TEST_COPY;
-  if (saved.project === undefined) delete process.env.REACT_APP_FIREBASE_PROJECT_ID;
+test('refused before any write: a real household under the test id, a login that is another family\'s, no login', async () => {
+  for (const fake of [
+    fakeIo({ docs: { [`households/${TEST_HOUSEHOLD_ID}`]: { name: 'Kim family' } } }),
+    fakeIo({ docs: { 'users/u-test': { role: 'parent', householdId: 'kim' } } }),
+    fakeIo({ login: null }),
+  ]) {
+    assert.equal(await run(['--parent-email', EMAIL, '--yes'], fake), 1);
+    assert.equal(fake.commits.length, 0);
+  }
 });
 
-test('nothing on the live portal', async () => {
-  delete process.env.REACT_APP_TEST_COPY;
-  const r = await renderScreen(<TestCopyRibbon />);
-  expect(r.text()).toBe('');
-  await r.unmount();
+test('--reset: only the test athletes\' windows and profiles go and their research clears; never the settings, never a real household', async () => {
+  const subs = { 'athletes/ryp-test-ava/assessments': ['2026-27-baseline'], 'athletes/ryp-test-ava/assessmentProfile': ['current'] };
+  const answered = () => {
+    const docs = ours();
+    docs['athletes/ryp-test-ava'].consents.research = { value: true, assent: true };
+    return docs;
+  };
+  const dry = fakeIo({ docs: answered(), subs });
+  assert.equal(await run(['--reset', '--dry-run'], dry), 0);
+  assert.equal(dry.commits.length, 0);
+  const fake = fakeIo({ docs: answered(), subs });
+  assert.equal(await run(['--reset', '--yes'], fake), 0);
+  const [writes] = fake.commits;
+  assert.deepEqual(writes.filter((w) => w.delete).map((w) => [w.delete.split('/documents/')[1], w.currentDocument.exists]),
+    [['athletes/ryp-test-ava/assessments/2026-27-baseline', true], ['athletes/ryp-test-ava/assessmentProfile/current', true]]);
+  assert.deepEqual(writes.filter((w) => w.update).map((w) => [w.update.name.split('/documents/')[1], w.updateMask.fieldPaths]),
+    [['athletes/ryp-test-ava', ['consents.research']], ['athletes/ryp-test-max', ['consents.research']]]);
+  assert.ok(writes.every((w) => !JSON.stringify(w).includes('assessmentSettings')));
+  assert.equal(fake.docs['athletes/ryp-test-ava'].consents.research, null);
+  const real = fakeIo({ docs: { [`households/${TEST_HOUSEHOLD_ID}`]: { name: 'Kim family' } } });
+  assert.equal(await run(['--reset', '--yes'], real), 1);
+  assert.equal(real.commits.length, 0);
 });
 
-test('the test copy says so on every screen', async () => {
-  process.env.REACT_APP_TEST_COPY = 'true';
-  process.env.REACT_APP_FIREBASE_PROJECT_ID = 'ryp-academy-app';
-  const r = await renderScreen(<TestCopyRibbon />);
-  expect(r.text()).toBe('Test copy · fake athletes');
-  await r.unmount();
-});
+// Against the local emulators; skipped unless both run, e.g.
+//   npx firebase-tools emulators:exec --only firestore,auth --project rypacad "node --test scripts/test/provision-test-family.test.mjs"
+const emulators = Boolean(process.env.FIRESTORE_EMULATOR_HOST && process.env.FIREBASE_AUTH_EMULATOR_HOST);
+test('against the emulators: a real household is refused, the dry run writes nothing, --yes creates the family once, --reset clears it', { skip: !emulators }, async () => {
+  const store = await resolveTarget({ prod: false });
+  const email = `testparent-${process.hrtime.bigint()}@example.test`;
+  const res = await fetch(`http://${process.env.FIREBASE_AUTH_EMULATOR_HOST}/identitytoolkit.googleapis.com/v1/accounts:signUp?key=emulator`, {
+    method: 'POST', headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ email, password: 'emulator-only-pw', returnSecureToken: true }),
+  });
+  assert.equal(res.status, 200);
+  const uid = (await res.json()).localId;
+  const WINDOW = 'athletes/ryp-test-ava/assessments/2026-27-baseline';
+  const paths = [`households/${TEST_HOUSEHOLD_ID}`, 'athletes/ryp-test-ava', 'athletes/ryp-test-max', `users/${uid}`, WINDOW];
+  const read = (p) => getDoc(store, p.slice(0, p.lastIndexOf('/')), p.slice(p.lastIndexOf('/') + 1));
+  const clean = () => commit(store, paths.map((p) => ({ delete: docName(p.slice(0, p.lastIndexOf('/')), p.slice(p.lastIndexOf('/') + 1)) })));
+  await clean();
+  try {
+    await commit(store, [{ update: { name: docName('households', TEST_HOUSEHOLD_ID), fields: fsFields({ name: 'Kim family' }) } }]);
+    assert.equal(await main(['--parent-email', email, '--yes'], quiet), 1);
+    assert.equal(await read('athletes/ryp-test-ava'), null);
+    assert.equal((await read(`households/${TEST_HOUSEHOLD_ID}`)).name, 'Kim family');
+    await clean();
 
-```
+    assert.equal(await main(['--parent-email', email, '--dry-run'], quiet), 0);
+    assert.equal(await read(`households/${TEST_HOUSEHOLD_ID}`), null);
 
-Create `frontend/src/testCopyGuard.test.js`:
+    assert.equal(await main(['--parent-email', email.toUpperCase(), '--yes'], quiet), 0);
+    assert.equal((await read(`households/${TEST_HOUSEHOLD_ID}`)).test, true);
+    assert.equal((await read('athletes/ryp-test-max')).test, true);
+    const user = await read(`users/${uid}`);
+    assert.deepEqual([user.role, user.householdId], ['parent', TEST_HOUSEHOLD_ID]);
+    assert.equal(await main(['--parent-email', email, '--yes'], quiet), 0); // nothing to do
 
-```js
-import { TEST_COPY_PROJECT, assertTestCopyTarget } from './testCopyGuard';
-
-test('the live portal (no test-copy flag) starts as it always has', () => {
-  expect(() => assertTestCopyTarget({ REACT_APP_FIREBASE_PROJECT_ID: 'rypacad' })).not.toThrow();
-  expect(() => assertTestCopyTarget({})).not.toThrow();
-});
-
-test('the test copy starts against the staging project', () => {
-  expect(TEST_COPY_PROJECT).toBe('ryp-academy-app');
-  expect(() => assertTestCopyTarget({ REACT_APP_TEST_COPY: 'true', REACT_APP_FIREBASE_PROJECT_ID: 'ryp-academy-app' })).not.toThrow();
-});
-
-test('a test copy built against the live database, or any other project, refuses to start', () => {
-  expect(() => assertTestCopyTarget({ REACT_APP_TEST_COPY: 'true', REACT_APP_FIREBASE_PROJECT_ID: 'rypacad' })).toThrow(/the LIVE database/);
-  expect(() => assertTestCopyTarget({ REACT_APP_TEST_COPY: 'true', REACT_APP_FIREBASE_PROJECT_ID: 'some-other-project' })).toThrow(/not ryp-academy-app/);
-  expect(() => assertTestCopyTarget({ REACT_APP_TEST_COPY: 'true' })).toThrow(/not ryp-academy-app/);
+    await commit(store, [{ update: { name: docName('athletes/ryp-test-ava/assessments', '2026-27-baseline'), fields: fsFields({ athleteId: 'ryp-test-ava', kind: 'baseline' }) } }]);
+    assert.equal(await main(['--reset', '--yes'], quiet), 0);
+    assert.equal(await read(WINDOW), null);
+    const ava = await read('athletes/ryp-test-ava');
+    assert.deepEqual([ava.test, ava.consents.research, ava.consents.dataCollection], [true, null, true]);
+  } finally {
+    await clean();
+  }
 });
 ```
 
 - [ ] **Step 2: Run the tests to verify they fail**
 
 Run: `node --test scripts/test/*.test.mjs`
-Expected: FAIL - "Cannot find module ... scripts/seed-staging-assessments.mjs".
-
-Run: `cd frontend && CI=true npx react-scripts test --watchAll=false src/portal/components/TestCopyRibbon.test.js src/testCopyGuard.test.js`
-Expected: FAIL - "Cannot find module './TestCopyRibbon'" and "Cannot find module './testCopyGuard'".
+Expected: FAIL - "Cannot find module ... scripts/provision-test-family.mjs".
 
 - [ ] **Step 3: Write minimal implementation**
 
-Create `scripts/seed-staging-assessments.mjs`:
+Create `scripts/provision-test-family.mjs`:
 
 ```js
 #!/usr/bin/env node
 /**
- * The staging TEST COPY's fake athletes, for Phil's dry run before release
- * (assessments spec 9; owner, 2026-10-15): one invented household, eight
- * invented athletes named "... Test" in every list state, and - when the
- * owner passes their staging uids - the staff role docs that let the owner,
- * Phil and the data-collection coach sign in to the test copy.
+ * The production TEST FAMILY for the staging test (owner, 2026-10-15).
+ * Staging is the Railway "Staging" environment: it builds `develop`, serves
+ * https://rypacad.ryptest.com and runs on the PRODUCTION Firebase project,
+ * beside real families - there is no separate test database. The owner and
+ * Phil test the assessments with this one invented household:
  *
- *   node scripts/seed-staging-assessments.mjs --dry-run
- *   node scripts/seed-staging-assessments.mjs --yes [--owner-uid <uid>] [--phil-uid <uid>] [--assessor-uid <uid>] [--wipe-assessments]
+ *   households/ryp-test-family   "RYP Test Family", test: true
+ *   athletes/ryp-test-ava        Ava Test, under 18, test: true
+ *   athletes/ryp-test-max        Max Test, 18+, test: true (not with --no-adult)
+ *   users/<uid>                  the parent login (--parent-email), role parent
  *
- * Safety: the ONLY project this script will write is the staging project
- * `ryp-academy-app`; `rypacad` (production) and every other id are refused
- * before any token is read or request made. It never imports the
- * production-bound helpers of lib/firestore-rest.mjs (their PROJECT_ID is
- * rypacad) - only the pure value encoder. --dry-run is offline. --yes is
- * the owner's: it authenticates as their firebase-tools login. Writes
- * replace the script's own docs only (fixed ids); --wipe-assessments also
- * deletes what Phil typed into the test athletes and the settings doc.
+ *   node scripts/provision-test-family.mjs --prod --parent-email makel+testparent@rypgolf.com --dry-run
+ *   node scripts/provision-test-family.mjs --prod --parent-email makel+testparent@rypgolf.com --yes
+ *   node scripts/provision-test-family.mjs --prod --reset (--dry-run | --yes)
+ *
+ * Without --prod it targets the local emulators (FIRESTORE_EMULATOR_HOST and
+ * FIREBASE_AUTH_EMULATOR_HOST, local hosts only). Production auth is
+ * scripts/lib/prod-auth.mjs, the developer's firebase-tools login; every
+ * --prod run is the owner's, the dry run first.
+ *
+ * The parent login must exist first: the owner signs in once at
+ * https://rypacad.ryptest.com/portal/signin with that address (a password
+ * login) and stops at the sign-up form - finishing sign-up would make a
+ * real household with a payment step.
+ *
+ * Safety: it only CREATES the docs above, each under an exists:false
+ * precondition, so a re-run changes nothing already there (what the parent
+ * or Phil changed stays). It refuses, before writing anything, when the
+ * household exists without test: true, when an athlete id belongs to
+ * anything but the test family, or when the login already has a portal
+ * record that is not this family's parent. It never writes a booking, a
+ * payment or a Stripe id: the athletes have no package and no billing, so
+ * there is nothing to book with and nothing to pay for (createCheckoutSession
+ * refuses 'no-package'). Research starts unanswered: the parent answers it
+ * once at staging, which is how the one-time confirm gets tested. --reset
+ * deletes only the test athletes' assessments and assessmentProfile docs and
+ * clears their consents.research - never the protocol settings, which
+ * staging shares with production.
  */
+
 import path from 'node:path';
-import { fileURLToPath, pathToFileURL } from 'node:url';
-import { bundleFrontend, fwdPath } from './lib/bundle-frontend.mjs';
-import { fsFields } from './lib/firestore-rest.mjs';
-import { prodAccessToken } from './lib/prod-auth.mjs';
-import { assessmentFixtures } from './lib/assessment-fixtures.mjs';
+import { fileURLToPath } from 'node:url';
+import { PROJECT_ID, commit, docName, fsFields, getDoc, resolveTarget } from './lib/firestore-rest.mjs';
+import { authTarget, lookup } from './mark-email-verified.mjs';
 
-export const STAGING_PROJECT = 'ryp-academy-app';
-export const PRODUCTION_PROJECT = 'rypacad';
-export const HOUSEHOLD_ID = 'test-copy-family';
+export const TEST_HOUSEHOLD_ID = 'ryp-test-family';
+/** The invented athletes: Ava stays under 18 all season, Max is 18+. */
 export const TEST_ATHLETES = [
-  { id: 'test-ava', name: 'Ava Test', dob: '2012-04-10', story: 'tested', sex: 'female' },
-  { id: 'test-ben', name: 'Ben Test', dob: '2010-08-22', story: 'tested', sex: 'male' },
-  { id: 'test-cal', name: 'Cal Test', dob: '2013-01-30', story: 'due' },
-  { id: 'test-dev', name: 'Dev Test', dob: '2011-11-05', story: 'due' },
-  { id: 'test-eli', name: 'Eli Test', dob: '2009-06-14', story: 'due' },
-  { id: 'test-fay', name: 'Fay Test', dob: '2014-02-19', story: 'due' },
-  { id: 'test-gus', name: 'Gus Test', dob: '2012-09-01', story: 'declined' },
-  { id: 'test-hal', name: 'Hal Test', dob: '2013-05-25', story: 'unanswered' },
+  { id: 'ryp-test-ava', name: 'Ava Test', dob: '2012-05-14', handicap: 14, adult: false },
+  { id: 'ryp-test-max', name: 'Max Test', dob: '2007-03-02', handicap: 6, adult: true },
 ];
-const BATCH = 400;
+const PARENT_NAME = 'RYP Test Parent';
+const STAGING = 'https://rypacad.ryptest.com';
+const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+const USAGE = 'Usage: node scripts/provision-test-family.mjs [--prod] (--parent-email <address> [--no-adult] | --reset) (--dry-run | --yes)';
 
-export function assertStagingTarget(project) {
-  if (project === PRODUCTION_PROJECT) {
-    throw new Error(`Refusing: ${project} is PRODUCTION. This script only writes the staging test copy (${STAGING_PROJECT}).`);
-  }
-  if (project !== STAGING_PROJECT) throw new Error(`Refusing: ${project} is not the staging test copy (${STAGING_PROJECT}).`);
-  return project;
-}
-
+/** @return {{prod, parentEmail, dryRun, yes, adult, reset} | {error: string}} */
 export function parseArgs(argv) {
-  const has = (f) => argv.includes(f);
-  const val = (f) => {
-    const i = argv.indexOf(f);
-    return i > -1 ? argv[i + 1] ?? null : null;
-  };
-  return {
-    project: val('--project') ?? STAGING_PROJECT,
-    dryRun: has('--dry-run'),
-    yes: has('--yes'),
-    wipe: has('--wipe-assessments'),
-    ownerUid: val('--owner-uid'),
-    philUid: val('--phil-uid'),
-    assessorUid: val('--assessor-uid'),
-  };
+  const out = { prod: false, parentEmail: null, dryRun: false, yes: false, adult: true, reset: false };
+  for (let i = 0; i < argv.length; i++) {
+    const a = argv[i];
+    if (a === '--prod') out.prod = true;
+    else if (a === '--dry-run') out.dryRun = true;
+    else if (a === '--yes') out.yes = true;
+    else if (a === '--no-adult') out.adult = false;
+    else if (a === '--reset') out.reset = true;
+    else if (a === '--parent-email') out.parentEmail = argv[++i] ?? null;
+    else return { error: `Unknown argument: ${a}` };
+  }
+  if (out.dryRun === out.yes) return { error: 'Pass exactly one of --dry-run or --yes.' };
+  if (out.reset) return { ...out, parentEmail: null };
+  const parentEmail = (out.parentEmail || '').trim().toLowerCase();
+  if (!EMAIL_RE.test(parentEmail)) return { error: 'Pass --parent-email with the address of the login the owner made for the test parent.' };
+  return { ...out, parentEmail };
 }
 
-/** Every doc the test copy needs, `{ path, data }`, fixed ids only. */
-export function planStaging({ todayISO, mode, seasonOf, protocolVersion, ownerUid = null, philUid = null, assessorUid = null }) {
-  const fx = assessmentFixtures({
-    todayISO, mode, seasonOf, protocolVersion, coachUid: philUid ?? 'phil', guardianUid: 'test-copy-guardian', signatureName: 'Test Guardian', athletes: TEST_ATHLETES,
-  });
+/** Every doc the test family needs, `{ collection, id, path, data }`: fixed ids plus the parent's uid. Pure. */
+export function planTestFamily({ parentUid, parentEmail, todayISO, adult = true }) {
   const docs = [{
-    path: `households/${HOUSEHOLD_ID}`,
-    data: { name: 'Test family (test copy)', guardian: { name: 'Test Guardian', email: 'test-guardian@example.com', phone: null }, stripeCustomerId: null, stripeSubscriptionId: null, periodAnchorDay: 1 },
+    collection: 'households',
+    id: TEST_HOUSEHOLD_ID,
+    data: {
+      name: 'RYP Test Family', test: true,
+      guardian: { name: PARENT_NAME, email: parentEmail, phone: null, relationship: 'Parent' },
+      stripeCustomerId: null, stripeSubscriptionId: null, stripeCustomerIds: [],
+      createdBy: parentUid, emergencyContact: null,
+    },
   }];
-  for (const a of TEST_ATHLETES) {
+  for (const a of TEST_ATHLETES.filter((x) => adult || !x.adult)) {
     docs.push({
-      path: `athletes/${a.id}`,
-      data: { name: a.name, dob: a.dob, householdId: HOUSEHOLD_ID, packageId: 't-6', contractMinutes: null, coachId: null, handicap: null, loginEmail: null, consents: fx.consents[a.id] },
+      collection: 'athletes',
+      id: a.id,
+      data: {
+        name: a.name, dob: a.dob, householdId: TEST_HOUSEHOLD_ID, test: true,
+        packageId: null, contractMinutes: null, coachId: null, handicap: a.handicap, loginEmail: null,
+        facilityAccess: false, facilityRequested: false,
+        consents: { dataCollection: true, videoCapture: true, mediaRelease: false, research: null, signature: { name: PARENT_NAME, date: todayISO } },
+      },
     });
   }
-  for (const [col, docsIn] of Object.entries(fx.collections)) for (const [id, data] of docsIn) docs.push({ path: `${col}/${id}`, data });
-  const staff = (role, specialistId, displayName, extra = {}) => ({ role, householdId: null, athleteId: null, staff: true, specialistId, displayName, email: null, ...extra });
-  if (ownerUid) docs.push({ path: `users/${ownerUid}`, data: staff('owner', null, 'Owner (test copy)') });
-  if (philUid) docs.push({ path: `users/${philUid}`, data: staff('coach', 'phil', 'Phil Herder') });
-  if (assessorUid) docs.push({ path: `users/${assessorUid}`, data: staff('coach', null, 'Data coach (test copy)', { assessor: true }) });
-  return docs;
+  docs.push({
+    collection: 'users',
+    id: parentUid,
+    data: { role: 'parent', householdId: TEST_HOUSEHOLD_ID, athleteId: null, staff: false, specialistId: null, displayName: PARENT_NAME, email: parentEmail, phone: null },
+  });
+  return docs.map((d) => ({ ...d, path: `${d.collection}/${d.id}` }));
 }
 
-const docName = (project, p) => `projects/${project}/databases/(default)/documents/${p}`;
-const base = (project) => `https://firestore.googleapis.com/v1/projects/${project}/databases/(default)/documents`;
-
-async function commit(project, writes, { fetchImpl, auth }) {
-  for (let i = 0; i < writes.length; i += BATCH) {
-    const res = await fetchImpl(`${base(project)}:commit`, {
-      method: 'POST',
-      headers: { authorization: auth, 'content-type': 'application/json' },
-      body: JSON.stringify({ writes: writes.slice(i, i + BATCH) }),
-    });
-    if (!res.ok) throw new Error(`Commit to ${project} failed (${res.status}).`);
-  }
+/** Why the parent login cannot be used, or null. */
+export function loginRefusal(login) {
+  if (!login) return `No login has this email. Sign in once at ${STAGING}/portal/signin with it (stop at the sign-up form), then run this again.`;
+  if (login.disabled === true) return 'This login is disabled. Nothing written.';
+  return null;
 }
 
-/** The paths --wipe-assessments deletes: the test athletes' windows and profiles, and the settings doc. Nothing else. */
-async function wipePaths(project, { fetchImpl, auth }) {
-  const paths = [];
-  for (const a of TEST_ATHLETES) {
-    for (const sub of ['assessments', 'assessmentProfile']) {
-      const res = await fetchImpl(`${base(project)}/athletes/${a.id}/${sub}?pageSize=100`, { headers: { authorization: auth } });
-      if (res.status === 404) continue;
-      if (!res.ok) throw new Error(`Listing athletes/${a.id}/${sub} on ${project} failed (${res.status}).`);
-      const body = await res.json();
-      for (const d of body.documents || []) paths.push(d.name.split('/documents/')[1]);
+/** Why nothing may be written, or null. `existing` maps each planned path to its doc as read (null when absent). */
+export function refusal(docs, existing) {
+  for (const d of docs) {
+    const cur = existing[d.path];
+    if (!cur) continue;
+    if (d.collection === 'households' && cur.test !== true) {
+      return `${d.path} exists and is not marked test: true. Nothing written.`;
+    }
+    if (d.collection === 'athletes' && (cur.test !== true || cur.householdId !== TEST_HOUSEHOLD_ID)) {
+      return `${d.path} exists and is not a test-family athlete (household ${cur.householdId ?? 'none'}). Nothing written.`;
+    }
+    if (d.collection === 'users' && (cur.role !== 'parent' || cur.householdId !== TEST_HOUSEHOLD_ID)) {
+      return `That login already has a portal record (${cur.role ?? 'no role'}, household ${cur.householdId ?? 'none'}). Use an address that has never finished sign-up. Nothing written.`;
     }
   }
-  return [...paths, 'assessmentSettings/current'];
+  return null;
 }
 
-function loadPortalData() {
-  const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
-  const dataDir = path.join(repoRoot, 'frontend', 'src', 'portal', 'data');
-  return bundleFrontend(repoRoot, [
-    `export { DEFAULT_SETTINGS, PROTOCOL_VERSION, circuitModeOf } from '${fwdPath(path.join(dataDir, 'assessmentSettings.js'))}';`,
-    `export { seasonOf } from '${fwdPath(path.join(dataDir, 'assessmentWindows.js'))}';`,
-  ], { tmpPrefix: 'ryp-staging-' });
+/** The commit: every planned doc not there yet, created under exists:false, so a re-run never overwrites. */
+export function createWrites(docs, existing) {
+  return docs.filter((d) => !existing[d.path]).map((d) => ({
+    update: { name: docName(d.collection, d.id), fields: fsFields(d.data) },
+    currentDocument: { exists: false },
+  }));
 }
 
-export async function main({
-  argv = process.argv.slice(2), fetchImpl = fetch, getToken = prodAccessToken, loadPortal = loadPortalData, log = console.log,
-  todayISO = new Date().toISOString().slice(0, 10),
-} = {}) {
-  const args = parseArgs(argv);
-  const project = assertStagingTarget(args.project);
-  if (!args.dryRun && !args.yes) throw new Error('Nothing written. Re-run with --dry-run to see the plan, or --yes (the owner) to write the staging test copy.');
-  const portal = loadPortal();
-  const docs = planStaging({
-    todayISO, mode: portal.circuitModeOf(portal.DEFAULT_SETTINGS), seasonOf: portal.seasonOf, protocolVersion: portal.PROTOCOL_VERSION,
-    ownerUid: args.ownerUid, philUid: args.philUid, assessorUid: args.assessorUid,
-  });
-  log(`Staging test copy (${project}): ${docs.length} docs`);
-  for (const d of docs) log(`  ${d.path}`);
+/** --reset: each test athlete's windows and profiles deleted, its research answer cleared. `found`: [{ athleteId, windows, profiles }]. */
+export function resetWrites(found) {
+  const writes = [];
+  for (const f of found) {
+    for (const id of f.windows) writes.push({ delete: docName(`athletes/${f.athleteId}/assessments`, id), currentDocument: { exists: true } });
+    for (const id of f.profiles) writes.push({ delete: docName(`athletes/${f.athleteId}/assessmentProfile`, id), currentDocument: { exists: true } });
+    writes.push({
+      update: { name: docName('athletes', f.athleteId), fields: fsFields({ consents: { research: null } }) },
+      updateMask: { fieldPaths: ['consents.research'] },
+      currentDocument: { exists: true },
+    });
+  }
+  return writes;
+}
+
+function describe(d) {
+  if (d.collection === 'households') return `${d.data.name}, test: true`;
+  if (d.collection === 'users') return `parent of ${TEST_HOUSEHOLD_ID}`;
+  const adult = TEST_ATHLETES.find((a) => a.id === d.id).adult;
+  return `${d.data.name}, born ${d.data.dob} (${adult ? '18+' : 'under 18'}), test: true, no package, research not answered`;
+}
+
+async function readAll(io, docs) {
+  const out = {};
+  for (const d of docs) out[d.path] = await io.readDoc(d.collection, d.id);
+  return out;
+}
+
+async function provision(args, io, { log, error, todayISO }) {
+  const login = await io.lookupLogin(args.parentEmail);
+  const noLogin = loginRefusal(login);
+  if (noLogin) {
+    error(noLogin);
+    return 1;
+  }
+  const docs = planTestFamily({ parentUid: login.localId, parentEmail: args.parentEmail, todayISO, adult: args.adult });
+  const existing = await readAll(io, docs);
+  const why = refusal(docs, existing);
+  if (why) {
+    error(`Refusing: ${why}`);
+    return 1;
+  }
+  log(`  parent login   ${args.parentEmail} (uid ${login.localId})`);
+  for (const d of docs) log(`  ${existing[d.path] ? 'already there' : 'create'}  ${d.path}  ${describe(d)}`);
+  const writes = createWrites(docs, existing);
+  if (!writes.length) {
+    log('Nothing to do: RYP Test Family is already there.');
+    return 0;
+  }
   if (args.dryRun) {
-    log('[dry-run] nothing written; no token read, no request made.');
-    return { written: 0, docs };
+    log(`Would create ${writes.length} docs. Run again with --yes instead of --dry-run.`);
+    return 0;
   }
-  const auth = `Bearer ${await getToken()}`;
-  if (args.wipe) {
-    const gone = await wipePaths(project, { fetchImpl, auth });
-    await commit(project, gone.map((p) => ({ delete: docName(project, p) })), { fetchImpl, auth });
-    log(`Wiped ${gone.length} assessment docs on ${project}.`);
+  await io.commitWrites(writes);
+  const after = await readAll(io, docs);
+  if (docs.some((d) => !after[d.path]) || refusal(docs, after)) {
+    error('Written, but the test family does not read back whole. Check it in the Firebase console.');
+    return 1;
   }
-  await commit(project, docs.map((d) => ({ update: { name: docName(project, d.path), fields: fsFields(d.data) } })), { fetchImpl, auth });
-  log(`Written: ${docs.length} docs to ${project}.`);
-  return { written: docs.length, docs };
+  log(`Created ${writes.length} docs. RYP Test Family is ready: sign in at ${STAGING}/portal/signin as ${args.parentEmail}.`);
+  return 0;
 }
 
-if (process.argv[1] && pathToFileURL(process.argv[1]).href === import.meta.url) {
-  main().catch((err) => {
-    console.error(err.message || err);
-    process.exit(1);
-  });
+async function reset(args, io, { log, error }) {
+  const household = await io.readDoc('households', TEST_HOUSEHOLD_ID);
+  if (!household || household.test !== true) {
+    error(`Refusing: households/${TEST_HOUSEHOLD_ID} is ${household ? 'not marked test: true' : 'not there'}. Nothing written.`);
+    return 1;
+  }
+  const found = [];
+  for (const a of TEST_ATHLETES) {
+    const doc = await io.readDoc('athletes', a.id);
+    if (!doc) continue;
+    if (doc.test !== true || doc.householdId !== TEST_HOUSEHOLD_ID) {
+      error(`Refusing: athletes/${a.id} is not a test-family athlete. Nothing written.`);
+      return 1;
+    }
+    const windows = await io.listIds(`athletes/${a.id}`, 'assessments');
+    const profiles = await io.listIds(`athletes/${a.id}`, 'assessmentProfile');
+    const r = doc.consents?.research ?? null;
+    log(`  reset  athletes/${a.id}: ${windows.length} window(s) and ${profiles.length} profile(s) go; research ${r ? (r.value ? 'yes' : 'no') : 'not answered'} -> not answered`);
+    found.push({ athleteId: a.id, windows, profiles });
+  }
+  if (!found.length) {
+    log('Nothing to reset: the test family has no athletes.');
+    return 0;
+  }
+  const writes = resetWrites(found);
+  if (args.dryRun) {
+    log(`Would apply ${writes.length} writes. Run again with --yes instead of --dry-run.`);
+    return 0;
+  }
+  await io.commitWrites(writes);
+  log('Reset: Phil can start a new baseline wave with the test athletes, and the parent is asked about research again.');
+  return 0;
 }
-```
 
-Create `frontend/src/portal/components/TestCopyRibbon.js`:
-
-```js
-import React from 'react';
-import { color, font, radius } from '../tokens';
-
-/**
- * The staging test copy's marker (assessments spec 9): a build with
- * REACT_APP_TEST_COPY=true (the separate Railway service Phil uses for the
- * dry run) says "Test copy" on every screen, so nobody mistakes it for the
- * live portal. A test-copy build pointed at any project but staging never
- * gets this far: frontend/src/testCopyGuard.js stops it before Firebase
- * starts. The live portal never sets the variable.
- */
-export default function TestCopyRibbon() {
-  if (process.env.REACT_APP_TEST_COPY !== 'true') return null;
-  return (
-    <div
-      role="status"
-      style={{
-        position: 'fixed', top: 6, right: 6, zIndex: 1000, pointerEvents: 'none',
-        padding: '3px 10px', borderRadius: radius.pill,
-        background: color.secondary, color: '#000',
-        font: `700 10px ${font.body}`, letterSpacing: '.08em', textTransform: 'uppercase',
-      }}
-    >
-      Test copy · fake athletes
-    </div>
-  );
+async function listIds(store, parent, collectionId) {
+  const url = `${store.base}/projects/${PROJECT_ID}/databases/(default)/documents/${parent}/${collectionId}?pageSize=300`;
+  const res = await fetch(url, { headers: { Authorization: store.auth } });
+  if (!res.ok) throw new Error(`List ${parent}/${collectionId} against ${store.label} failed (${res.status}): ${await res.text()}`);
+  return ((await res.json()).documents || []).map((d) => d.name.split('/').pop());
 }
-```
 
-Create `frontend/src/testCopyGuard.js`:
-
-```js
-/**
- * The staging test copy's guard (assessments spec 9): a build with
- * REACT_APP_TEST_COPY=true is Phil's rehearsal portal and must point at the
- * staging project. Any other project - above all the live one, rypacad -
- * refuses to start, before Firebase is initialized (firebase.js calls this
- * first), so a rehearsal wave can never be written beside real families.
- * `env` is process.env, which CRA fills at build time.
- */
-export const TEST_COPY_PROJECT = 'ryp-academy-app';
-
-export function assertTestCopyTarget(env) {
-  if (env.REACT_APP_TEST_COPY !== 'true') return;
-  const project = env.REACT_APP_FIREBASE_PROJECT_ID;
-  if (project === TEST_COPY_PROJECT) return;
-  throw new Error(
-    `Refusing to start: this is the test copy (REACT_APP_TEST_COPY=true) but REACT_APP_FIREBASE_PROJECT_ID is "${project ?? ''}", not ${TEST_COPY_PROJECT}${project === 'rypacad' ? ' - that is the LIVE database' : ''}. Fix the test copy service's variables and redeploy.`
-  );
+/** Production with --prod (the developer's firebase-tools login), else the local emulators only. */
+async function liveIo(prod) {
+  const store = await resolveTarget({ prod });
+  return {
+    label: store.label,
+    lookupLogin: async (email) => {
+      const auth = await authTarget({ prod });
+      if (auth.error) throw new Error(auth.error);
+      return lookup(auth, email);
+    },
+    readDoc: (collection, id) => getDoc(store, collection, id),
+    listIds: (parent, collectionId) => listIds(store, parent, collectionId),
+    commitWrites: (writes) => commit(store, writes),
+  };
 }
-```
 
-In `frontend/src/firebase.js`, replace:
-
-```js
-import { connectFunctionsEmulator, getFunctions } from 'firebase/functions';
-```
-
-with:
-
-```js
-import { connectFunctionsEmulator, getFunctions } from 'firebase/functions';
-import { assertTestCopyTarget } from './testCopyGuard';
-```
-
-then replace:
-
-```js
-// Initialize Firebase
-let app;
-```
-
-with:
-
-```js
-// Assessments spec 9: the staging test copy never starts against any
-// project but staging (testCopyGuard.js) - checked before Firebase starts.
-assertTestCopyTarget(process.env);
-
-// Initialize Firebase
-let app;
-```
-
-In `.firebaserc`, replace:
-
-```json
-    "default": "rypacad"
-```
-
-with:
-
-```json
-    "default": "rypacad",
-    "staging": "ryp-academy-app"
-```
-
-In `frontend/src/portal/PortalRoutes.js`, replace:
-
-```js
-import ResearchConfirmGate from './components/ResearchConfirmGate';
-```
-
-with:
-
-```js
-import ResearchConfirmGate from './components/ResearchConfirmGate';
-import TestCopyRibbon from './components/TestCopyRibbon';
-```
-
-then replace:
-
-```js
-  return (
-    <Suspense fallback={null}>
-    <Routes>
-```
-
-with:
-
-```js
-  return (
-    <>
-    {/* Assessments spec 9: the staging test copy says so on every screen. */}
-    <TestCopyRibbon />
-    <Suspense fallback={null}>
-    <Routes>
-```
-
-then replace:
-
-```js
-    </Routes>
-    </Suspense>
-  );
+export async function main(argv = process.argv.slice(2), deps = {}) {
+  const log = deps.log ?? console.log;
+  const error = deps.error ?? console.error;
+  const args = parseArgs(argv);
+  if (args.error) {
+    error(args.error);
+    error(USAGE);
+    return 1;
+  }
+  const io = deps.io ?? (await liveIo(args.prod));
+  log(`Target: ${io.label}${args.dryRun ? ' (dry run, nothing is written)' : ''}`);
+  const ctx = { log, error, todayISO: deps.todayISO ?? new Date().toISOString().slice(0, 10) };
+  return args.reset ? reset(args, io, ctx) : provision(args, io, ctx);
 }
-```
 
-with:
-
-```js
-    </Routes>
-    </Suspense>
-    </>
-  );
-}
+const invokedDirectly = process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url);
+if (invokedDirectly) main().then((c) => { process.exitCode = c; }, (e) => { console.error(e.message); process.exitCode = 1; });
 ```
 
 - [ ] **Step 4: Run the tests to verify they pass**
 
 Run: `node --test scripts/test/*.test.mjs`
-Expected: PASS (`# fail 0`).
+Expected: PASS (`# fail 0`); the emulator tests are skipped.
 
-Run: `node scripts/seed-staging-assessments.mjs --dry-run`
-Expected: `Staging test copy (ryp-academy-app): 13 docs`, the paths (one household, eight athletes, two windows, two profiles), then `[dry-run] nothing written; no token read, no request made.`
+Run: `npx firebase-tools emulators:exec --only firestore,auth --project rypacad "node --test scripts/test/provision-test-family.test.mjs"`
+Expected: `# pass 9`, `# fail 0`, `# skipped 0` (the emulator test ran: the real household was refused, the dry run wrote nothing, `--yes` created the family once, `--reset` cleared it).
 
-Run: `node scripts/seed-staging-assessments.mjs --dry-run --project rypacad`
-Expected: exit 1, "Refusing: rypacad is PRODUCTION. This script only writes the staging test copy (ryp-academy-app)."
-
-Run: `cd frontend && CI=true npx react-scripts test --watchAll=false src/portal/components/TestCopyRibbon.test.js src/testCopyGuard.test.js src/portal/PortalRoutes src/portal/AssessmentRoutes.test.js`
-Expected: PASS.
-
-Run: `cd frontend && npm run build`
-Expected: "Compiled successfully." (the live build sets no REACT_APP_TEST_COPY, so the guard passes).
-
-Run: `node -e "console.log(JSON.parse(require('fs').readFileSync('.firebaserc', 'utf8')).projects)"`
-Expected: `{ default: 'rypacad', staging: 'ryp-academy-app' }` (the default stays production; the test copy is always named).
+Run: `node scripts/provision-test-family.mjs --parent-email a@b.co`
+Expected: exit 1, `Pass exactly one of --dry-run or --yes.` and the usage line (nothing read, nothing written).
 
 - [ ] **Step 5: Commit**
 
 ```bash
-git add scripts/seed-staging-assessments.mjs scripts/test/seed-staging-assessments.test.mjs frontend/src/portal/components/TestCopyRibbon.js frontend/src/portal/components/TestCopyRibbon.test.js frontend/src/testCopyGuard.js frontend/src/testCopyGuard.test.js frontend/src/firebase.js frontend/src/portal/PortalRoutes.js .firebaserc
-git commit -m "chore(staging): fake-athlete seed for the test copy, and its marker
+git add scripts/provision-test-family.mjs scripts/test/provision-test-family.test.mjs
+git commit -m "chore(staging): the production test family for the staging test
 
-A seed that can only write ryp-academy-app (production refused by name,
-offline dry run, owner-run --yes, optional wipe of what the dry run
-typed), a Test copy badge on a build with REACT_APP_TEST_COPY, a test copy
-that refuses to start against any project but staging, and a staging
-alias so no rules deploy for it falls through to production.
+Staging runs on the production database, so the owner and Phil test with
+one invented household: RYP Test Family (test: true), Ava (under 18) and
+Max (18+) with complete test data and no package, and the owner's test
+parent login. Create-only under exists:false, idempotent, refuses any
+household not marked test or a login that is someone's; --dry-run first,
+--yes is the owner's; --reset clears the test athletes' assessments.
 
 Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 ```
 
 ---
 
-### Task 26: Owner-run steps - rulings, the staging test copy for Phil, then production
+### Task 27: Owner-run steps - rulings, the backend to production, the staging test, then the release
 
-Every step below is the **owner's** (or Phil's) to run (rulings, pushes, deploys, Firebase console, Railway, and the staging seed's `--yes`). The implementing agent prepares, runs the gates, and hands the commands over in its final message; it never pushes, deploys or writes to a hosted project itself.
+Staging is the existing Railway "Staging" environment (project "RYP Academy Portal", service `rypacad`): it builds `develop` and serves https://rypacad.ryptest.com (also rypacad-staging.up.railway.app) on the PRODUCTION Firebase project `rypacad`. Production builds `main` at https://portal.rypacademy.com. There is no staging Firebase project (owner, 2026-10-15). So the order is: the finished build merges into `develop`; functions and rules go to production first, both backward compatible with the portal live on `main`; `develop` goes to staging, where the owner and Phil test with the test family (Task 26); after sign-off, `develop:main` releases; Task 28 cleans up last.
 
-**Files:** none changed here (a ruling that changes code goes on `assessments/v1.2` as its own commit, with its tests, before Step 8). Branch `assessments/v1.2` in `C:\Users\Mac\Desktop\rypacadapp\wt-assessments`; the main checkout is `C:\Users\Mac\Desktop\rypacadapp\rypacad` (`develop`; `main` is production and deploys on push).
+Every step marked owner (or Phil) is theirs to run: rulings, deploys, pushes, Railway, and both `--prod` runs of the test-family script. The implementing agent runs the gates and the merge after the owner's go, and hands every command over in its final message; it never pushes, deploys or writes to production itself.
+
+**Files:** none changed here. A ruling or a staging finding that changes code is its own reviewed commit with its tests: on `assessments/v1.2` before Step 3, or after it on a short branch from `develop`, merged back. Branch `assessments/v1.2` in `C:\Users\Mac\Desktop\rypacadapp\wt-assessments`; the main checkout is `C:\Users\Mac\Desktop\rypacadapp\rypacad` (`develop` builds staging; `main` is production and deploys on push).
 
 **Interfaces:**
-- Consumes: everything in Tasks 1-25; `scripts/seed-staging-assessments.mjs` (Task 25); `firestore.rules` (Tasks 4, 9, 22); `functions/portal/family.js` (Task 20); `REACT_APP_TEST_COPY`, `frontend/src/testCopyGuard.js` and the `.firebaserc` alias `staging` (Task 25).
-- Produces: the owner's and Phil's rulings on what the plan could only default; a separate test copy of the portal on the staging Firebase project `ryp-academy-app` with fake athletes, served by its own Railway service from the branch; then the production rollout in the spec 10 order: functions, rules, portal. Task 27 follows once the portal is live.
+- Consumes: everything in Tasks 1-26; `firestore.rules` (Tasks 4, 9, 22); `functions/portal/family.js` (Task 20); the test-household filters (Task 25); `scripts/provision-test-family.mjs` (Task 26).
+- Produces: the owner's and Phil's rulings; the new functions and rules live in production, safe for `main`; the new portal on staging, tested with the test family; the release (`git push origin develop:main`). Task 28 follows the release.
 
-- [ ] **Step 1: Rulings before the merge (owner and Phil)**
+- [ ] **Step 1: Rulings (owner and Phil)**
 
-The plan implements a default for each; the agent lists them in its final message, and the answers are needed before Step 8 (the dry run in Step 7 is the place to try them):
+The plan implements a default for each; the agent lists them in its final message, and the answers are needed before the release (Step 8); the staging test (Step 7) is the place to try them:
 
 1. **Phil - a pain stop at any station.** The plan ends every later station for that athlete after a pain stop anywhere in the circuit (protocol Section 2: do not test an athlete who reports current pain); "Undo not tested" at that station opens them again. If Phil rules that a pain stop ends only that station, `painStopBefore` in `components/assessments/StationShell.js` returns null for every station after intake, and `StationShell.test.js` says so.
 2. **Phil - late joiners and the season end.** With the season ending Feb 27 (`SEASON_BOUNDS.end`), a baseline after Nov 7 leaves no room for mid-season and end of season 8 weeks apart, so those athletes default to end of season (mid-season still selectable on the start-wave sheet). The protocol's cover says end of season is in March: confirm that the academy's end-of-season window is the last weeks before Feb 27.
@@ -15178,6 +15417,9 @@ The plan implements a default for each; the agent lists them in its final messag
    If approved, they go in `data/researchConsent.js` beside the approved copy and are used where `self` is true (`ResearchChoice`, `ResearchSheet`, `ResearchConfirmGate`), with tests pinning each string.
 4. **Owner - a parent answering for an 18+ athlete in their household.** Sign-up and the rules let the parent answer research for an athlete aged 18 or over with no agreement from that athlete (assent null); the spec covers only 18+ athletes on their own login. The alternatives: the parent ticks the assent box for every athlete they answer for, whatever the age (sign-up, `normalizeResearch` and the rules branch change together), or only the athlete answers (then an 18+ athlete with no login stays "not answered" and cannot join a wave).
 5. **Owner - who deletes raw assessments.** The spec's table gives owner and ops delete; its bullet says owner only. The plan implements owner only (`firestore.rules` and the probes "Phil cannot delete a window", "ops cannot delete a window"). If ops may delete too, that is one rules line and the ops probe flips to 200.
+6. **Owner - no other release while the assessments wait on `develop`.** From Step 3's merge until Step 8, `develop` holds the unreleased assessments, so any `git push origin develop:main` would release them. The plan holds every release from `develop` until Phil's sign-off; an urgent production fix in that time goes on a branch cut from `origin/main`, is pushed to `main` (`git push origin <branch>:main`, which deploys), and is merged into `develop`. If the owner prefers, Step 3 can wait until the staging test is about to start.
+7. **Owner - the test family after the release.** It stays in production for later staging tests: its athletes are on Phil's Assessments list by name (Ava Test, Max Test) and their windows stay with them until `--reset`; every count and report leaves it out (Task 25). The alternative is to hide `test: true` athletes from the assessments list on the live portal only (a build-time switch staging sets and production does not).
+8. **Owner and Phil - four athletes for a timed wave.** The test family has two athletes (one under 18, one 18+), so Phil's staging wave is a wave of two; timing a full wave of four (spec 11) needs two more invented athletes (two entries in `TEST_ATHLETES`, Task 26) or Phil times his first real wave on Nov 3.
 
 - [ ] **Step 2: Every gate green on the branch (agent)**
 
@@ -15201,108 +15443,111 @@ Expected: `# fail 0`.
 Run: `npx firebase-tools emulators:exec --only firestore --project rypacad "node --env-file=scripts/emulator.env scripts/verify-rules.mjs"`
 Expected: `ALL PASS (both passes)`.
 
-Run: `node scripts/seed-firestore.mjs --dry-run && node scripts/seed-staging-assessments.mjs --dry-run`
-Expected: both end with their "nothing written" line.
+Run: `npx firebase-tools emulators:exec --only firestore,auth --project rypacad "node --test scripts/test/provision-test-family.test.mjs"`
+Expected: `# fail 0`, `# skipped 0`.
 
-- [ ] **Step 3: Staging project ready, and empty (owner, Firebase console, work account)**
+Run: `node scripts/seed-firestore.mjs --dry-run`
+Expected: ends with its "nothing written" line.
 
-In the Firebase console for `ryp-academy-app`:
-1. Firestore Database: if there is no `(default)` database, create one in Native mode, in the same location as `rypacad`.
-2. Authentication > Sign-in method: enable Google (and Email/Password if Phil signs in with a password on the live portal).
-3. Project settings > Your apps: if there is no web app, add one; keep its config values (apiKey, authDomain, projectId `ryp-academy-app`, storageBucket, messagingSenderId, appId) for Step 5.
+- [ ] **Step 3: Merge into `develop` - only complete and reviewed (agent, after the owner's go)**
 
-Expected: Firestore shows an empty `(default)` database (no collections); Authentication > Users lists nobody; Google sign-in is enabled.
-
-**Hard stop - anything already there.** The project was in use until 2026-09-17, and the assessments list reads every athlete doc in the project, so anything left would show on Phil's tablet beside the fake athletes. If Firestore holds any collection, or Authentication lists any user, stop and clear it first: export what must be kept, delete every collection and every user, and re-check that both are empty before Step 4.
-
-- [ ] **Step 4: Rules on staging, and the branch on GitHub (owner)**
-
-Run: `cd C:\Users\Mac\Desktop\rypacadapp\wt-assessments && npx firebase-tools deploy --only firestore:rules --project staging`
-Expected: "=== Deploying to 'ryp-academy-app'...", "rules file firestore.rules compiled successfully", "Deploy complete!". Only staging's rules change. Never drop `--project staging`: `.firebaserc`'s default is `rypacad`, so without it this would put the new rules on production ahead of the functions. If the first line names `rypacad`, stop and tell the agent.
-
-Run: `cd C:\Users\Mac\Desktop\rypacadapp\wt-assessments && git push origin assessments/v1.2`
-Expected: the branch on GitHub (no deploy: Railway's production service builds `main` only).
-
-- [ ] **Step 5: The test copy's Railway service (owner, Railway dashboard)**
-
-1. New service from the same GitHub repo, branch `assessments/v1.2`, with the production portal service's root directory, build and start commands copied exactly.
-2. Variables: the six `REACT_APP_FIREBASE_*` values from Step 3's staging web app (never the `rypacad` ones), `REACT_APP_PORTAL_LIVE_DATA=true`, `REACT_APP_TEST_COPY=true`, `REACT_APP_CONTRACT_ENABLED` as production has it. Leave `REACT_APP_STRIPE_PUBLISHABLE_KEY` unset (no payments on the test copy). CRA bakes `REACT_APP_*` at build, so set them before the first deploy, or redeploy after.
-3. Generate a Railway domain for the service, then add that domain to `ryp-academy-app` > Authentication > Settings > Authorized domains.
-
-Expected: the domain serves the portal with a yellow "TEST COPY · FAKE ATHLETES" badge at the top right. A blank page whose browser console reads "Refusing to start: this is the test copy ..." means `REACT_APP_FIREBASE_PROJECT_ID` is not `ryp-academy-app` (with `rypacad`, the message names the LIVE database): the build never started Firebase; fix the variables and redeploy before anyone signs in.
-
-- [ ] **Step 6: Staff on the test copy, and the fake athletes (owner)**
-
-1. The owner and Phil each open the test copy once and sign in (they land on "not set up"). The data-collection coach does too, if they will rehearse.
-2. Copy each person's User UID from `ryp-academy-app` > Authentication > Users.
-3. Run (the owner's firebase-tools login must be the work account: `npx firebase-tools login:list`):
-
-Run: `cd C:\Users\Mac\Desktop\rypacadapp\wt-assessments && node scripts/seed-staging-assessments.mjs --dry-run --owner-uid <ownerUid> --phil-uid <philUid>`
-Expected: `Staging test copy (ryp-academy-app): 15 docs` and the list, `[dry-run] nothing written; no token read, no request made.`
-
-Run: `cd C:\Users\Mac\Desktop\rypacadapp\wt-assessments && node scripts/seed-staging-assessments.mjs --yes --owner-uid <ownerUid> --phil-uid <philUid>`
-Expected: `Written: 15 docs to ryp-academy-app.` Add `--assessor-uid <dataCoachUid>` for the data-collection coach (16 docs).
-
-- [ ] **Step 7: Phil's dry run on his tablet (Phil, with the owner)**
-
-On the test copy: Phil's Assessments tab lists Ava and Ben "Mid-season eligible", Cal, Dev, Eli, Fay and Gus "Baseline due" (Gus said no to research), and Hal "Waiting on the family's research answer". Phil runs a timed wave of four (Cal, Dev, Eli, Fay), every station, on the tablet, then opens results. What he checks against the equipment (spec 11): what Smart2Move shows per CMJ and per 10/5 set (settings: RSImod typed or computed, 10/5 per set or every hop), the radar on the med ball, Parallax frame rate and composite scale, McGill inside the wave or as its own block, and the wave timing; and Step 1's pain stop. Golf entry has no roster on staging (no sessions): open `/portal/assessments/golf/test-cal`. Settings changes made here stay on the test copy.
-
-To reset for another rehearsal:
-
-Run: `cd C:\Users\Mac\Desktop\rypacadapp\wt-assessments && node scripts/seed-staging-assessments.mjs --yes --wipe-assessments --owner-uid <ownerUid> --phil-uid <philUid>`
-Expected: `Wiped N assessment docs on ryp-academy-app.` then `Written: 15 docs to ryp-academy-app.`
-
-Code changes from the dry run or from Step 1's rulings go on `assessments/v1.2` (re-run Step 2, owner pushes the branch; the test copy redeploys).
-
-- [ ] **Step 8: Production - merge and gates (agent, then owner approval)**
-
-After Phil's sign-off, every Step 1 ruling answered, and the owner's go:
+Assessments reach `develop` only when the whole build (Tasks 1-26) is done, every Step 2 gate is green and the review has passed: `develop` is what staging builds and what `develop:main` releases, so a push to production never carries half-built assessment code.
 
 Run: `cd C:\Users\Mac\Desktop\rypacadapp\rypacad && git checkout develop && git merge --no-ff assessments/v1.2`
 Expected: a merge commit on `develop`, no conflicts (if `develop` moved, resolve and re-run Step 2's gates in the main checkout).
 
 Re-run every Step 2 command in `C:\Users\Mac\Desktop\rypacadapp\rypacad`. Expected: the same results.
 
-Before going live, check the dependencies (spec 10): the data-collection coach has a staff login; golf coaches have logins. Without the staff-audit fix for coach athlete reads, a golf coach's clubhead screen and results show the name from the roster and "the athlete record could not be read" for maturity; entry still works.
+Run: `cd C:\Users\Mac\Desktop\rypacadapp\rypacad && git fetch origin && git diff origin/main -- firestore.rules | grep -E "^-\s*allow "`
+Expected: no output: against what is live, the rules only add (Tasks 4 and 22) and Task 9 kept every diagnostics grant. Any line here removes a rule the portal on `main` may rely on; stop and make it backward compatible before Step 4.
 
-- [ ] **Step 9: Production - functions, then rules, then portal, back to back (owner)**
+Run: `cd C:\Users\Mac\Desktop\rypacadapp\rypacad && git diff --stat origin/main -- functions`
+Expected: `functions/portal/family.js`, `family-validate.js` and their tests from this plan, and anything else already on `develop`. Every function deployed in Step 4 must accept what `main`'s bundle sends; for createFamily that is Task 20's "a tab on the old bundle sends no research: stored as not asked".
 
-The spec 10 order, with no broken window: the rules keep the diagnostics reads (read-only, Task 9), so the live bundle - whose athlete home and admin dashboard read diagnostics beside everything else - keeps loading between the rules deploy and the portal push, and every read the new portal makes is granted by the time it is live. Production holds 0 diagnostics docs (checked 2026-10-14), so nothing is lost.
+- [ ] **Step 4: The backend to production first - functions, then rules (owner)**
+
+These deploys land while `main`'s portal is still the live one, and that is safe: createFamily accepts `main`'s sign-up payload (an athlete with no research answer is stored as not answered; sign-up never fails), the rules only add access (assessments, profiles, settings, the assessor's athlete read, the research branch) and guard only the new `users.assessor` field, which `main` never writes, and every diagnostics grant `main` uses stays (Task 9). Production holds 0 diagnostics docs.
 
 Run: `cd C:\Users\Mac\Desktop\rypacadapp\rypacad && npx firebase-tools deploy --only functions:createFamily,functions:addAthletes,functions:claimInvite --project rypacad`
-Expected: "Deploy complete!" for the three functions (createFamily now stores consents and research answers; the live bundle's sign-up sends none and is unaffected).
+Expected: "Deploy complete!" for the three functions.
 
 Run: `cd C:\Users\Mac\Desktop\rypacadapp\rypacad && npx firebase-tools deploy --only firestore:rules --project rypacad`
-Expected: "Deploy complete!". The live portal still loads every screen.
+Expected: "Deploy complete!".
+
+Then on https://portal.rypacademy.com (still `main`'s portal): the owner's admin dashboard loads, a family home loads (the owner's own test login), and a coach's Capture tab opens. If any screen fails to load, stop and tell the agent before Step 5.
+
+- [ ] **Step 5: The new portal to staging (owner)**
+
+Run: `cd C:\Users\Mac\Desktop\rypacadapp\rypacad && git push origin develop`
+Expected: Railway's Staging environment (project "RYP Academy Portal", service `rypacad`) builds `develop` and serves https://rypacad.ryptest.com within a few minutes; https://portal.rypacademy.com is untouched (it builds `main`). Signed in at staging, Phil's tab bar shows Assessments (no Capture) and the owner's admin shows the Assessments card.
+
+Staging is production's data: anything typed there is real (Step 7's ground rules).
+
+- [ ] **Step 6: The test family (owner)**
+
+1. At https://rypacad.ryptest.com/portal/signin, create a password login for an address the owner controls that has never signed up, for example `makel+testparent@rypgolf.com`. Stop at the sign-up form: finishing it would make a real household with a payment step.
+2. Run (the owner's firebase-tools login must be the work account: `npx firebase-tools login:list`):
+
+Run: `cd C:\Users\Mac\Desktop\rypacadapp\rypacad && node scripts/provision-test-family.mjs --prod --parent-email makel+testparent@rypgolf.com --dry-run`
+Expected: `Target: production (project rypacad) (dry run, nothing is written)`, the login's uid, four `create` lines (`households/ryp-test-family`, `athletes/ryp-test-ava`, `athletes/ryp-test-max`, `users/<uid>`), then `Would create 4 docs. Run again with --yes instead of --dry-run.` A `Refusing:` line, or `No login has this email`, means stop and tell the agent.
+
+Run: `cd C:\Users\Mac\Desktop\rypacadapp\rypacad && node scripts/provision-test-family.mjs --prod --parent-email makel+testparent@rypgolf.com --yes`
+Expected: `Created 4 docs. RYP Test Family is ready: sign in at https://rypacad.ryptest.com/portal/signin as makel+testparent@rypgolf.com.` A second run prints `Nothing to do: RYP Test Family is already there.`
+
+Until the release, the live dashboard on `main` counts the test family (one more active household, two more enrolled athletes, two "Diagnostic not entered" rows); staging's dashboard leaves it out (Task 25).
+
+- [ ] **Step 7: The staging test (owner and Phil, with the test family)**
+
+Ground rules, because staging is production: Stripe is live and sessions are real seats, so the test family never books, waitlists or pays (its athletes have no package, so there is nothing to pay for, and the assessment flow needs no booking); a wave holds only Ava Test and Max Test (real athletes cannot join a wave yet anyway: their research is "not answered" until their families answer on the released portal); Settings saved here are the live settings, and a procedure change raises the live protocol version, so keep the v1.2 defaults unless Phil means the change for Nov 3; "Record a change" on a real athlete is a real change.
+
+1. Owner, signed in at staging as the test parent: "One quick question about research" asks about Ava and Max; answer, Save my answer; the family home opens with no payment step; signing in again does not ask again.
+2. Owner, on the owner's own login, Staff & Roles: switch Assessments on for the data-collection coach (a real permission; it stays).
+3. Phil on his tablet: Assessments lists Ava Test and Max Test "Baseline due"; start a wave with the two, run every station, then open results. What he checks against the equipment (spec 11): what Smart2Move shows per CMJ and per 10/5 set (settings: RSImod typed or computed, 10/5 per set or every hop), the radar on the med ball, Parallax frame rate and composite scale, McGill inside the wave or as its own block, and the station timing; and Step 1's pain stop.
+4. A golf coach on their own login: open https://rypacad.ryptest.com/portal/assessments/golf/ryp-test-ava (the test athletes are on no session roster), enter five swings and a Parallax composite; Phil's results show the clubhead rows.
+5. The wave at phone, tablet and desktop widths (spec 5).
+
+For another rehearsal (a season allows one baseline per athlete):
+
+Run: `cd C:\Users\Mac\Desktop\rypacadapp\rypacad && node scripts/provision-test-family.mjs --prod --reset --dry-run`
+Expected: one `reset athletes/ryp-test-ava: N window(s) and M profile(s) go; research ... -> not answered` line per test athlete, then `Would apply K writes. Run again with --yes instead of --dry-run.`
+
+Run: `cd C:\Users\Mac\Desktop\rypacadapp\rypacad && node scripts/provision-test-family.mjs --prod --reset --yes`
+Expected: `Reset: Phil can start a new baseline wave with the test athletes, and the parent is asked about research again.` Only the test athletes' windows, profiles and research answers change; the settings stay.
+
+Code changes from the test or from Step 1's rulings: reviewed commits merged into `develop`, Step 2's gates again, Step 4 again if functions or rules changed, then Step 5 again.
+
+- [ ] **Step 8: The release (owner, after Phil's sign-off)**
+
+After Phil's sign-off, every Step 1 ruling answered, and the owner's go. Check the dependencies first (spec 10): the data-collection coach has a staff login with Assessments on; golf coaches have logins. Without the staff-audit fix for coach athlete reads, a golf coach's clubhead screen and results show the name from the roster and "the athlete record could not be read" for maturity; entry still works.
 
 Run: `cd C:\Users\Mac\Desktop\rypacadapp\rypacad && git push origin develop:main`
-Expected: Railway builds and deploys the portal; wait for the deploy to finish.
+Expected: this deploys production: Railway builds `main` and serves the new portal at https://portal.rypacademy.com; wait for the deploy to finish. The functions and rules are already live (Step 4).
 
-Then Task 27 removes the diagnostics read rules.
+Then Task 28 removes the diagnostics rules.
 
-- [ ] **Step 10: Production checks (owner)**
+- [ ] **Step 9: Production checks (owner)**
 
-1. Owner: Admin shows the Assessments card; Assessments lists every academy athlete with "Research: not answered" until families answer; Staff & Roles shows the Assessments switch on coach and mental rows - switch it on for the data-collection coach.
-2. Phil: his tab bar shows Assessments (no Capture); Settings shows protocol v1.2 defaults ("nothing has been saved yet").
-3. A family sign-in (the owner's own test household, never a real family's account): "One quick question about research" appears once; after Save my answer the home opens and it does not ask again.
-4. No assessment data exists until Phil's first wave on Nov 3; no purge or backfill of real families' records is part of this release.
+1. Owner: Admin shows the Assessments card and leaves the test family out of every count; Assessments lists every academy athlete with "Research: not answered" until their families answer; Staff & Roles shows the Assessments switch on coach and mental rows.
+2. Phil: his tab bar shows Assessments (no Capture); Settings shows what was saved at staging, or the v1.2 defaults ("nothing has been saved yet").
+3. The test parent on https://portal.rypacademy.com: the family home opens (research answered at staging); real families get "One quick question about research" once, at their next sign-in.
+4. No assessment data exists for real athletes until Phil's first wave on Nov 3; no purge or backfill of real families' records is part of this release.
 
-If the portal must be rolled back: the owner reverts the merge on `develop` (`git revert -m 1 <mergeCommit>`), pushes `develop:main` first (the old bundle runs on the new rules: the diagnostics reads are still granted), then deploys the reverted rules (`cd C:\Users\Mac\Desktop\rypacadapp\rypacad && npx firebase-tools deploy --only firestore:rules --project rypacad`). The functions can stay: the old bundle never sends a research answer and ignores the stored consents.
+If the portal must be rolled back: the owner reverts the merge on `develop` (`git revert -m 1 <mergeCommit>`), then runs `git push origin develop:main` (production) and `git push origin develop` (staging). The functions and rules stay: they went first precisely because the old portal runs on them (Step 4).
 
 ---
 
-### Task 27: After the portal is live - remove the diagnostics read rules
+### Task 28: After the release - remove the diagnostics rules
 
-The follow-up Task 9 left for after the release (spec 8, spec 10 order): once the new portal is live no bundle reads diagnostics, so the read-only grants go. **Start only after the owner confirms Task 26 Step 8 is done and the new portal is live.** Work on a new branch from `develop` in the main checkout (`assessments/v1.2` is merged by then): a commit on `develop` before the release would deploy these rules too early.
+The follow-up Task 9 left for after the release (spec 8, spec 10): once the new portal is live on `main`, no bundle reads or writes diagnostics, so every diagnostics grant goes. **Start only after the owner confirms Task 27 Step 8 (the release) is done and the new portal is live.** Work on a new branch from `develop` in the main checkout (`assessments/v1.2` is merged by then): a commit on `develop` before the release would go out with a backend deploy (Task 27 Step 4) while `main`'s Capture tab and dashboards still use these grants.
 
 **Files:**
-- Modify: `firestore.rules` (the read-only per-athlete diagnostics match ~394-430; the diagnostics collection-group read ~477-510; one comment ~1590)
-- Modify: `scripts/rules-probes/assessments.mjs` (`taskDiagnosticsReadOnly` becomes `taskDiagnosticsGone`), `scripts/verify-rules.mjs` (import, runPass)
+- Modify: `firestore.rules` (the per-athlete diagnostics match ~394-460; the diagnostics collection-group read ~480-515; one comment ~1600)
+- Modify: `scripts/rules-probes/assessments.mjs` (`taskDiagnosticsKept` becomes `taskDiagnosticsGone`), `scripts/verify-rules.mjs` (import, runPass)
 - Modify: `docs/portal/DATA-MODEL.md` (the "removed 2026-10-14" note)
 - Test: `scripts/verify-rules.mjs` (emulator, both passes)
 
 **Interfaces:**
-- Consumes: `taskDiagnosticsReadOnly`, `groupListAs`, `tok`, `uids`, `ATH` in `scripts/rules-probes/assessments.mjs` (Tasks 4, 9); the read-only diagnostics rules of Task 9.
+- Consumes: `taskDiagnosticsKept`, `groupListAs`, `tok`, `uids`, `ATH` in `scripts/rules-probes/assessments.mjs` (Tasks 4, 9); the diagnostics rules Task 9 kept, reads and writes.
 - Produces: `taskDiagnosticsGone()`; no diagnostics grant left in `firestore.rules`.
 
 - [ ] **Step 1: The branch**
@@ -15315,22 +15560,23 @@ Expected: "Switched to a new branch 'assessments/diagnostics-rules'".
 In `scripts/rules-probes/assessments.mjs`, replace:
 
 ```js
-// Assessments spec 8: Diagnostic Capture is gone (production held 0 docs on 2026-10-14). Its rules stay
-// read-only for this release - a portal bundle from before it reads diagnostics beside everything else
-// while the rules deploy first - and plan Task 27 removes the reads after the portal is live.
-export async function taskDiagnosticsReadOnly() {
-  console.log('Diagnostics: read-only for this release (Diagnostic Capture removed)');
+// Assessments spec 8: Diagnostic Capture is gone from the new portal (production held 0 docs on 2026-10-14), but its
+// rules stay exactly as they are for this release: the rules reach production before the live portal (main) is
+// updated - staging shares production's backend (plan Task 27) - and main's athlete home and admin dashboard read
+// diagnostics while its Capture tab saves them. Plan Task 28 removes every diagnostics grant after the release.
+export async function taskDiagnosticsKept() {
+  console.log('Diagnostics: unchanged for this release (the live portal still reads and saves captures)');
   const owner = tok(uids.owner);
   await seed('users', uids.owner, { role: 'owner' });
   await seed('athletes', ATH, { name: 'Probe Athlete', householdId: 'hh', dob: '2012-04-10', contractMinutes: null, coachId: 'coach-probe', packageId: 't-6' });
   await seed(`athletes/${ATH}/diagnostics`, 'old-1', { athleteId: ATH, capturedBy: 'coach-probe', status: 'published', values: {}, notes: null });
   try {
     for (const [who, auth] of [['the owner', owner], ['ops', t.ops], ['the assigned coach', t.coach]]) {
-      expect(`${who}: a capture still reads (an old bundle keeps loading)`, await call('GET', `/athletes/${ATH}/diagnostics/old-1`, null, auth).then(status), 200);
+      expect(`${who}: a capture still reads (the live portal keeps loading)`, await call('GET', `/athletes/${ATH}/diagnostics/old-1`, null, auth).then(status), 200);
     }
     expect('the owner: the collection-group list still reads', await groupListAs(owner, 'diagnostics'), 200);
-    expect('the assigned coach: a new capture refused', await createAs(t.coach, `athletes/${ATH}/diagnostics`, 'new-1',
-      { athleteId: ATH, capturedBy: 'coach-probe', status: 'draft', values: {}, notes: null }, ['capturedAt', 'updatedAt']), 403);
+    expect('the assigned coach: a new capture still saves (the live Capture tab)', await createAs(t.coach, `athletes/${ATH}/diagnostics`, 'new-1',
+      { athleteId: ATH, capturedBy: 'coach-probe', status: 'draft', values: {}, notes: null }, ['capturedAt', 'updatedAt']), 200);
   } finally {
     await del(`athletes/${ATH}/diagnostics`, 'old-1');
     await del(`athletes/${ATH}/diagnostics`, 'new-1');
@@ -15368,7 +15614,7 @@ export async function taskDiagnosticsGone() {
 In `scripts/verify-rules.mjs`, replace:
 
 ```js
-import { taskAssessments, taskDiagnosticsReadOnly } from './rules-probes/assessments.mjs';
+import { taskAssessments, taskDiagnosticsKept } from './rules-probes/assessments.mjs';
 ```
 
 with:
@@ -15380,7 +15626,7 @@ import { taskAssessments, taskDiagnosticsGone } from './rules-probes/assessments
 and replace:
 
 ```js
-    await taskAssessments(); await taskDiagnosticsReadOnly(); await taskResearch();
+    await taskAssessments(); await taskDiagnosticsKept(); await taskResearch();
 ```
 
 with:
@@ -15390,25 +15636,25 @@ with:
 ```
 
 Run: `npx firebase-tools emulators:exec --only firestore --project rypacad "node --env-file=scripts/emulator.env scripts/verify-rules.mjs"`
-Expected: FAIL - `the owner: diagnostics read refused -> 200 (wanted 403)` and the other read lines.
+Expected: FAIL - `the owner: diagnostics read refused -> 200 (wanted 403)`, the other read lines and `the assigned coach: a new capture refused -> 200 (wanted 403)`.
 
 - [ ] **Step 3: Remove the diagnostics rules and the data-model note**
 
-In `firestore.rules`, delete the read-only per-athlete diagnostics match:
+In `firestore.rules`, delete the per-athlete diagnostics match:
 
 In `firestore.rules`, replace:
 
 ```
 
       // ---- athletes/{id}/diagnostics/{captureId} -----------------------
-      // READ-ONLY since 2026-10-14: Diagnostic Capture was removed
-      // (assessments spec 8; production held 0 docs) and no client writes
-      // a capture any more. The read grant stays for this release only: a
-      // portal bundle from before it reads diagnostics on the athlete home
-      // and the admin dashboard beside everything else, and the rules
-      // deploy ahead of the portal (spec 10). The follow-up after the
-      // portal is live (assessments plan Task 27) removes this block and
-      // the collection-group read below.
+      // KEPT FOR THIS RELEASE ONLY (2026-10-14): Diagnostic Capture is gone
+      // from the portal (assessments spec 8; production held 0 docs), but
+      // these rules reach production before the live portal is updated
+      // (staging shares production's backend, assessments plan Task 27),
+      // and the portal on main still reads diagnostics on the athlete home
+      // and the admin dashboard and saves them from its Capture tab. The
+      // follow-up after the release (assessments plan Task 28) removes this
+      // block and the collection-group read below.
       // Sprint 10 (contract v1.8, C "Diagnostics persistence"). Shape:
       // { athleteId, capturedBy (uid), capturedAt, updatedAt,
       //   status: 'draft'|'published', values: map, notes: string|null }.
@@ -15432,6 +15678,35 @@ In `firestore.rules`, replace:
             || (me().role == 'coach' && athleteData(athleteId).coachId == request.auth.uid)
             || me().get('specialistId', null) != null;
         }
+        // Field/type checks only — caller-identity on capturedBy is handled
+        // separately per create/update below, because the two operations
+        // mean different things for that field (see the comment there).
+        function diagnosticFieldsOk() {
+          let d = request.resource.data;
+          return d.keys().hasAll(['athleteId', 'capturedBy', 'capturedAt', 'updatedAt', 'status', 'values', 'notes'])
+            && d.keys().hasOnly(['athleteId', 'capturedBy', 'capturedAt', 'updatedAt', 'status', 'values', 'notes'])
+            && d.athleteId == athleteId
+            && d.capturedBy is string
+            && d.status in ['draft', 'published']
+            && d.values is map
+            && (d.notes is string || d.notes == null);
+        }
+        // On CREATE, capturedBy is who is capturing right now — the caller.
+        allow create: if signedIn() && diagnosticStaffOk() && diagnosticFieldsOk()
+          && request.resource.data.capturedBy == request.auth.uid
+          && request.resource.data.capturedAt == request.time
+          && request.resource.data.updatedAt == request.time;
+        // On UPDATE, capturedBy/capturedAt stay whatever they originally
+        // were — immutable history, NOT re-pinned to the current caller.
+        // Deliberately does NOT require the current editor to be the
+        // original capturer: any qualifying staff member (diagnosticStaffOk)
+        // may continue or publish a draft someone else opened — a
+        // specialist finishing a coach's in-progress capture is a real
+        // workflow, not an edge case to block.
+        allow update: if signedIn() && diagnosticStaffOk() && diagnosticFieldsOk()
+          && request.resource.data.capturedAt == resource.data.capturedAt
+          && request.resource.data.capturedBy == resource.data.capturedBy
+          && request.resource.data.updatedAt == request.time;
         allow read: if signedIn() && (
           diagnosticStaffOk()
           || (me().role == 'athlete' && me().athleteId == athleteId && resource.data.status == 'published')
@@ -15454,8 +15729,9 @@ then, in `firestore.rules`, replace:
 
 ```
     // ---- diagnostics collection-group read ------------------------------
-    // Read-only until assessments plan Task 27 removes it with the
-    // per-athlete diagnostics match (Diagnostic Capture removed 2026-10-14).
+    // Kept for this release only, like the per-athlete match above; plan
+    // Task 28 removes both after the release (Diagnostic Capture removed
+    // 2026-10-14; the portal on main still reads this).
     // Sprint 10 (contract v1.8, C + D): the Admin "athletes with no
     // published diagnostic" list is one collectionGroup('diagnostics')
     // query rather than an N-athlete fan-out, and Firestore requires a
@@ -15521,7 +15797,7 @@ In `docs/portal/DATA-MODEL.md`, replace:
 ```
 ### `athletes/{athleteId}/diagnostics/{captureId}` (removed 2026-10-14)
 
-Diagnostic Capture was removed with the assessments release (assessments spec 8; production held 0 docs on 2026-10-14). The portal no longer reads or writes a capture. `firestore.rules` keeps a read-only grant (per athlete and collection group) so a bundle from before the release keeps loading while the rules deploy first; the follow-up after the portal is live (assessments plan Task 27) removes it and this note.
+Diagnostic Capture was removed with the assessments release (assessments spec 8; production held 0 docs on 2026-10-14). The new portal no longer reads or writes a capture. `firestore.rules` keeps every diagnostics grant (reads and writes, per athlete and collection group) for this release: the rules reach production before the live portal is updated (staging shares production's backend), and the portal on `main` still reads and saves captures. The follow-up after the release (assessments plan Task 28) removes them and this note.
 
 ### `staffInvites/{id}` (contract v1.8, Sprint 10)
 ```
@@ -15544,10 +15820,11 @@ Expected: no output.
 
 ```bash
 git add firestore.rules scripts/rules-probes/assessments.mjs scripts/verify-rules.mjs docs/portal/DATA-MODEL.md
-git commit -m "chore(rules): remove the diagnostics read grants
+git commit -m "chore(rules): remove the diagnostics grants
 
-The assessments portal is live and no bundle reads diagnostics any more;
-the read-only grants kept for the release go (production held 0 docs).
+The assessments portal is live on main and no bundle reads or writes
+diagnostics any more; the grants kept for the release go (production
+held 0 docs).
 
 Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 ```
@@ -15555,7 +15832,7 @@ Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 Hand the owner (in the final message; the agent never pushes or deploys):
 
 Run: `cd C:\Users\Mac\Desktop\rypacadapp\rypacad && git checkout develop && git merge --no-ff assessments/diagnostics-rules && npx firebase-tools deploy --only firestore:rules --project rypacad`
-Expected: "Deploy complete!". The athlete home and the admin dashboard still load (the new portal never reads diagnostics).
+Expected: "Deploy complete!". The athlete home and the admin dashboard still load (the released portal never reads diagnostics).
 
-Run: `cd C:\Users\Mac\Desktop\rypacadapp\rypacad && git push origin develop:main`
-Expected: Railway redeploys the same portal (no portal change in this commit).
+Run: `cd C:\Users\Mac\Desktop\rypacadapp\rypacad && git push origin develop && git push origin develop:main`
+Expected: staging, then production (the second push deploys it), rebuild the same portal: this commit changes no portal code.

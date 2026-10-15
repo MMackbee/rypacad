@@ -221,9 +221,9 @@ All from the protocol (Sections 3-5). **Phil to confirm** items are marked.
 
 Production holds **0** diagnostics docs (checked 2026-10-14). Remove: `screens/DiagnosticCapture.js`
 and its route/tab, `DIAGNOSTIC_SECTIONS`, the diagnostics hooks and live functions, the diagnostics
-and collection-group rules, the AthleteDetail "Progress" card, the unrouted PracticeDNA stub, the
-seed's diagnostics, and DATA-MODEL's diagnostics section. The admin "Diagnostic not entered" row
-becomes "Baseline due".
+and collection-group rules (after the release: Section 10), the AthleteDetail "Progress" card, the
+unrouted PracticeDNA stub, the seed's diagnostics, and DATA-MODEL's diagnostics section. The admin
+"Diagnostic not entered" row becomes "Baseline due".
 
 ## 9. Testing
 
@@ -233,17 +233,39 @@ becomes "Baseline due".
   parents and athletes no raw access; family summary read; ranges refused; consent branch.
 - Screens: component tests per station and the results view; a full wave end to end on the
   emulator; layout checks at phone, tablet and desktop widths (never on localhost:3000).
-- Dry run with Phil before release on a **separate test copy** of the portal (owner, 2026-10-15):
-  the staging Firebase project `ryp-academy-app` (work account, unused since the 2026-09-17
-  cleanup) with fake athletes, built from the `assessments/v1.2` branch and served at its own web
-  address (a separate Railway service), so Phil can run a full wave on his tablet without touching
-  real families. Setup needs the owner for the Railway service, its environment variables and the
-  staging project's sign-in settings; the steps are in the implementation plan.
+- Staging test with Phil before release (owner, 2026-10-15). There is **no separate staging
+  Firebase project** (the owner ruled it "overly complicated"). Testing happens on the existing
+  Railway **Staging** environment: project "RYP Academy Portal", service `rypacad`, which builds the
+  `develop` branch and serves https://rypacad.ryptest.com (also rypacad-staging.up.railway.app). Its
+  bundle uses the **production** Firebase project `rypacad`: real families' data, live Stripe and
+  real session seats. So the owner and Phil test with one **test family in the production
+  database**: household "RYP Test Family", marked `test: true`, with a parent login the owner
+  controls (created by signing in once at staging, for example `makel+testparent@rypgolf.com`) and
+  two invented athletes, one under 18 and one 18+, with complete test data for a wave. An
+  owner-run script makes it (`scripts/provision-test-family.mjs`, in the style of
+  `link-subscription.mjs`: `--dry-run` prints exactly what it would create, the owner runs
+  `--yes`); it only creates its own docs, is safe to re-run, refuses any household not marked
+  test, and never creates bookings or Stripe objects. The test family has no package and never
+  books, waitlists or pays; the assessment flow needs no booking (Phil runs a wave of the two test
+  athletes, a golf coach enters clubhead speed from the athlete's link, the owner answers the
+  one-time research question as the test parent). Admin counts and reports (the dashboard, the
+  sign-ups report, past-families style lists) leave out `test: true` households. Because staging is
+  production's data, settings saved there are the live settings, and only the test athletes go in
+  a wave.
 
 ## 10. Rollout and dependencies
 
-- Merge `assessments/v1.2` to develop after approval, then: functions deploy (consent storage),
-  rules deploy, portal push (`git push origin develop:main`).
+- Staging shares production's backend, so every function and rules change the staging test needs
+  is deployed to **production before the live portal is updated**, and each is backward compatible
+  with the portal live on `main`: `createFamily` accepts the old sign-up payload (no research answer:
+  recorded as not answered, sign-up never fails); the rules only add access (assessments, profiles,
+  settings, the `consents.research` branch, the Assessments permission) and remove nothing the live
+  portal uses; Diagnostic Capture's rules stay, reads and writes, until after the release.
+- Order: (1) `assessments/v1.2` merges into `develop` only when the build is complete and reviewed,
+  so a production push never carries half-built assessment code; (2) functions deploy, then rules
+  deploy, to production (safe for the live portal); (3) `git push origin develop` (staging only);
+  (4) the owner and Phil test at rypacad.ryptest.com with the test family; (5) after sign-off,
+  `git push origin develop:main` (production); (6) last, the diagnostics rules are removed.
 - Depends on: a staff login with the Assessments permission for the data-collection coach; golf
   coach logins and the coach athlete-read fix from the staff audit for golf-session entry.
 
