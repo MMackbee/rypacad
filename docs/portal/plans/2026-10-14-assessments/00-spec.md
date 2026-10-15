@@ -153,8 +153,33 @@ All from the protocol (Sections 3-5). **Phil to confirm** items are marked.
 ## 7. Consent and sign-up
 
 - Sign-up's consent step gains a **research** checkbox (ticked = yes, unticked = no; both recorded)
-  with a child-assent confirmation; 18+ self-managed athletes answer for themselves. Wording to be
-  supplied/approved by the owner to match the privacy policy.
+  with a child-assent confirmation; 18+ self-managed athletes answer for themselves. For an athlete
+  under 18, research is "yes" only when both the parent's box and the assent box are ticked.
+- The research paragraph moves out of the Data collection sheet (it was an opt-out there) into this
+  separate opt-in choice.
+- Wording (draft 2026-10-15, owner to approve; `{name}` is the athlete's first name):
+  - Checkbox: **Research (optional): {name}'s results may be used in research.**
+    Line under it: "Saying no changes nothing about {name}'s coaching or testing."
+  - Assent checkbox (under 18, shown once the first is ticked): **I've talked about this with
+    {name}, and they agree too.**
+  - 18+ own login: **Research (optional): my results may be used in research.**
+  - "Read more" sheet:
+    - *What it covers.* RYP Academy and the RYP Golf Research Institute study how junior golfers
+      develop. With your permission we include {name}'s results in that research: the physical
+      assessment (strength, jump, throw and trunk tests, height and growth measures), clubhead
+      speed and swing-sequencing numbers, attendance, and the training details you tell us about.
+    - *How it is used.* Names, contact details, dates of birth and anything else that identifies a
+      person are removed first. Findings may be published or shared with research partners only in
+      that form. Video and photos are never used under this consent.
+    - *Your choice.* This is optional. If you say no, {name} is tested and coached exactly the same
+      way, and their results are used only to coach them. You can change your answer at any time by
+      emailing makel@rypgolf.com. A change applies from that date on; results from before a "yes"
+      are never added later.
+  - One-time confirm for existing families: title **One quick question about research**; body
+    "This season Phil Herder's assessment program measures each athlete's strength, power and
+    growth. We'd like to include {name}'s results in RYP's research, with names removed. It's
+    optional and changes nothing about their coaching." Then the same checkboxes, the "Read more"
+    sheet and a **Save my answer** button (unticked saves as no).
 - `createFamily` stores all consents it already asks for (4.3).
 - Existing athletes without `consents.research` see the same checkbox once as a "please confirm"
   step at the parent's next sign-in.
@@ -175,9 +200,12 @@ becomes "Baseline due".
   parents and athletes no raw access; family summary read; ranges refused; consent branch.
 - Screens: component tests per station and the results view; a full wave end to end on the
   emulator; layout checks at phone, tablet and desktop widths (never on localhost:3000).
-- Dry run with Phil before release: recommended on a separate test copy of the portal (staging
-  Firebase project + its own web address) so he can use his tablet; fallback is the emulator on the
-  owner's machine. To be chosen at spec review.
+- Dry run with Phil before release on a **separate test copy** of the portal (owner, 2026-10-15):
+  the staging Firebase project `ryp-academy-app` (work account, unused since the 2026-09-17
+  cleanup) with fake athletes, built from the `assessments/v1.2` branch and served at its own web
+  address (a separate Railway service), so Phil can run a full wave on his tablet without touching
+  real families. Setup needs the owner for the Railway service, its environment variables and the
+  staging project's sign-in settings; the steps are in the implementation plan.
 
 ## 10. Rollout and dependencies
 
