@@ -8,28 +8,33 @@
 
 **Tech Stack:** React 18 (CRA 5, plain JS), react-router-dom 6, firebase 9 modular SDK (`firebase/firestore`), jest via react-scripts, Firestore rules v2 (emulator REST probes, Node 22 ESM, dependency-free), Cloud Functions v1 (`firebase-functions/v1`, firebase-admin, tiny runner tests, eslint-config-google), Node `node:test` for scripts.
 
-**Spec:** `docs/portal/plans/2026-10-14-assessments/00-spec.md` (approved; owner and Phil rulings 2026-10-14/15). Procedure text and standard cues are quoted from Phil's protocol document `RYP_Academy_Assessment_ProtocolV1.2.pdf` (Sections 2-5), the source the spec summarizes.
+**Spec:** `docs/portal/plans/2026-10-14-assessments/00-spec.md` (approved; owner and Phil rulings 2026-10-14/15). Procedure text and standard cues are quoted from Phil's protocol document `RYP_Academy_Assessment_ProtocolV1.2.pdf` (Sections 2-5), the source the spec summarizes. This plan is the MVP release (spec 1, release A); what it could only default is listed for the owner and Phil in Task 26 Step 1.
 
 ## Global Constraints
 
 - Protocol version label default `v1.2`; a procedure change asks for a new label and suggests the next patch (`v1.2` -> `v1.2.1`, `v1.2.1` -> `v1.2.2`).
 - One window doc per athlete per test window: `athletes/{athleteId}/assessments/{season}-{kind}`, kind `baseline | mid | end`, season August-July (`2026-27` for 2026-11-03).
-- Every result keeps `protocolVersion` and the `circuitMode` snapshot it ran under; results under a different version or mode are flagged and their change markers are switched off, never silently compared.
+- Every result keeps `protocolVersion` and the `circuitMode` snapshot it ran under; results under a different version or procedure mode (trial counts, grip rest, stations, McGill mode, med ball side, golf timing) are flagged and their change markers are switched off, never silently compared; results under another 10/5 or RSImod entry mode are flagged and the 10/5 marker is switched off. The coefficient set is kept on the window, but every maturity offset is computed with the current coefficients.
 - Scores are never stored as typed finals; they are computed from trials (protocol Section 5).
 - Validation ranges, enforced in `firestore.rules` and mirrored in `data/assessmentInput.js`: grip 0-100 kg; standing height 90-215 cm; mass 15-160 kg; sitting raw 40-140 cm; box 20-80 cm; arm 40-110 cm; hand 10-25 cm; CMJ height 0-90 cm; RSImod 0-2; peak power 0-8000 W; asymmetry 0-60 %; RSI best-5 0-5; GCT 80-600 ms; med ball 0-60 mph (radar) or 0-25 m (distance); McGill 0-300 s; clubhead 30-140 mph; Parallax composite 0-100; fps 30-1000.
 - Ranges the spec does not give, chosen here: peak power 0-100 W/kg; time to take-off 100-2000 ms; plate sampling 1-5000 Hz; weekly and golf hours 0-60; hours since a hard session 0-336; RYP sessions since prior 0-200; other-sport hours 0-40; text fields 40 (device, handle, driver, sport) or 80 (golf volume, competitive level) characters.
 - Trial-count caps (settings form and rules): grip 1-5 per hand, CMJ scored 1-3, 10/5 scored sets 1-4 with 10 hops per set, med ball scored 1-5, clubhead maximal 1-8; wave size 1-4; waves per session 1-10.
 - One section per window write (`saveSection`), so the rules check only that section's trials and stay inside Firestore's per-request expression cap (measured on the emulator: a fourth CMJ trial or a second every-hop 10/5 set checked value by value is refused for cost alone). A 10/5 set is Smart2Move's summary `{ rsiBest5, gctMs }` or every hop as two parallel lists `{ hopRsi: [<=10], hopGctMs: [<=10] }`; every-hop values are range-checked by the client only.
-- Med ball mass at the first test of the season by body mass: under 45 kg = 2 kg; 45-65 kg = 3 kg; over 65 kg = 4 kg; mass and method (speed or distance) are fixed for the season ("block mixing"); the owner may correct a mistake.
+- The circuit runs on one shared tablet (spec decision 2): a section is written whole, so two devices typing into the same athlete's section are last writer wins. The rules cannot tell a stale copy from a correction (an unchanged section plus a moved `wave` reads as a legitimate re-wave), and a read-then-write transaction would refuse every save made offline, so this release does not guard it in code: one device works on an athlete at a time (starting a wave with an athlete moves them out of the wave they were in, so the screen that held them is closed first).
+- Med ball mass at the first test of the season by body mass: under 45 kg = 2 kg; 45-65 kg = 3 kg; over 65 kg = 4 kg; mass and method (speed or distance) are fixed for the season ("block mixing"), the profile's season only moves forward, and a window takes a med ball only under a profile of its own season; the owner may correct a mistake.
 - Maturity offset (Moore et al. 2015, as printed in the protocol): boys -8.128741 + 0.0070346 x (age x sitting height); girls -7.709133 + 0.0042232 x (age x standing height). Category: pre (< -1.0), circa (-1.0 to +1.0), post (> +1.0). Coefficients are a setting marked unverified until Phil checks the paper; results then say "estimate, coefficients unverified". Anchors: boy 14.0 / sitting 78.0 -> -0.447; girl 12.0 / standing 150.0 -> -0.107.
 - Change-marker thresholds (one editable table): clubhead +/-2 %, CMJ +/-5 %, 10/5 RSI +/-8 %, med ball +/-5 %, grip +/-5 %, Parallax none. Green = gain beyond threshold, gray = within, yellow = drop beyond with "check maturity and readiness".
-- Flags: growth > 3 cm since the prior window; 10/5 contact time > 250 ms (that set is not reported); Parallax under 120 fps = timing gaps directional only; McGill flexion:extension > 1.0, right:left differs from 1.0 by more than 0.05, side bridge:extension > 0.75; a 300 s hold is "300+ (capped)" and its ratios are marked capped; first retest = learning effect; cross-version; different circuit mode; windows less than 8 weeks (56 days) apart.
-- Windows are timed from the athlete's own first test and at least 8 weeks apart; a late joiner whose mid-season window would not leave 8 weeks before the season end (`SEASON_BOUNDS.end`, 2027-02-27) goes straight to end of season.
+- Flags: growth > 3 cm since the prior window; 10/5 contact time > 250 ms (that set is not reported); Parallax under 120 fps = timing gaps directional only; McGill flexion:extension > 1.0, right:left differs from 1.0 by more than 0.05, side bridge:extension > 0.75; a 300 s hold is "300+ (capped)" and its ratios are marked capped; first retest = learning effect; cross-version; different circuit mode; another 10/5 or RSImod entry mode; windows less than 8 weeks (56 days) apart.
+- Windows are timed from the athlete's own first test and at least 8 weeks apart; a late joiner whose mid-season window (8 weeks after the baseline) would not leave 8 weeks before the season end (`SEASON_BOUNDS.end`, 2027-02-27; a baseline after Nov 7) defaults to end of season, mid-season still selectable.
+- An open window is in progress for 14 days (the entry window). After that it reads "Open since Nov 3: mark it complete", cannot join a wave, `startWave` skips it, and the rules refuse to move it into a wave or to a new circuit date; it is marked complete instead.
 - Dates are set by the coach within 14 days of entry (never in the future, academy date in America/Chicago); golf is due within 7 days of the circuit (or the same day when the setting says so); McGill as a separate block within 14 days.
 - Layout: phone < 700 px one athlete at a time; tablet 700-1100 px two columns; desktop > 1100 px the full grid of four and a results table.
-- Access: owner and ops read and write; Phil (`specialistId 'phil'`) and coach or mental accounts with `users.assessor == true` read and write all sections; every other coach reads and writes the golf section only; families have no raw access; delete is owner only; only the owner sets `users.assessor`.
+- Access: owner and ops read and write; Phil (`specialistId 'phil'`) and coach or mental accounts with `users.assessor == true` read and write all sections; every other coach reads and writes the golf section only; families have no raw access; delete is owner only (spec 3's bullet; its table also names ops, so the owner confirms in Task 26 Step 1); only the owner sets `users.assessor`.
 - Research consent: ticked = yes, unticked = no, both recorded; an athlete under 18 is yes only with the assent box ticked too; 18+ answer for themselves; `consents.research = { value, assent, recordedAt, recordedBy }`; research use applies only to windows whose `circuitDate` is on or after a `value == true` `recordedAt`; an athlete whose research answer is not recorded cannot be added to a wave.
-- Consent wording is the owner-approved copy of 2026-10-15, verbatim; `{name}` is the athlete's first name.
+- Consent wording is the owner-approved copy of 2026-10-15, verbatim, and nothing else; `{name}` is the athlete's first name. The spec words only the 18+ checkbox, so an 18+ member on their own login reads the approved line, Read more sheet and one-time confirm with their own first name; second-person drafts wait for the owner (Task 26 Step 1).
+- Not in this plan: release B (the family summary, spec 4.5: `athletes/{athleteId}/assessmentReports`, its rules and spec 9's "family summary read" probe; families read no assessment data in this release) and release C (Smart2Move file import).
+- Production rollout in the spec 10 order: functions, rules, portal. The diagnostics read rules stay, read-only, for this release (the live bundle reads diagnostics beside everything else on the athlete home and the admin dashboard) and go once the portal is live (Task 27).
+- The staging test copy (`REACT_APP_TEST_COPY=true`) refuses to start against any Firebase project but `ryp-academy-app`; every staging deploy names `--project staging` (`.firebaserc`'s default is production).
 - Files stay under 500 lines; new code goes in new files; the grandfathered `hooks/live.js`, `hooks/index.js`, `PortalRoutes.js`, `Roster.js`, `seed-firestore.mjs` and `verify-rules.mjs` only get the edits named here.
 - Repo files are CRLF (`core.autocrlf=true`): edit existing files with the Edit tool; never `sed -i`; new files may be written with the Write tool.
 - Never push, never deploy, never run a command with `--prod`, never touch production data, never start a dev server on port 3000, never read credential stores. The staging seed's `--yes` run is the owner's.
@@ -38,11 +43,11 @@
 
 ## Review Focus
 
-1. **An evening wave dated tomorrow.** Sessions run until 7 PM Chicago, which is after midnight UTC; a reasonable coach expects the circuit date to be the academy's date. The start-wave sheet must default to `academyDateISO()`, never a UTC date. Pinned in Task 10 Step 1 (system time 2026-11-04T00:30Z shows 2026-11-03).
-2. **The tablet loses wifi mid-wave.** A Firestore write offline neither lands nor fails; the coach expects to know which entries are not on the server and not to lose them by leaving. A save not acknowledged in 8 s shows "Not saved yet", the typed values stay, and leaving the wave asks first. Pinned in Task 9 Step 1 (tracker) and Task 11 Step 1 (leave guard).
-3. **A typo or a tablet keyboard quirk in a trial.** "32,5" is 32.5; "32.5kg", "150" for grip or "-3" are refused inline and never sent, so one bad entry cannot fail the section's save and drop the trials already typed. Pinned in Task 9 Step 1 (TrialInput) and Task 12 Step 1 (grip station keeps R1 when R2 is refused).
-4. **An incomplete athlete record.** Legacy athletes may have no date of birth, sex is entered at intake, a mid-season window has no sitting height, the box height may be missing. Results must say what is missing and show no maturity category, never NaN or a wrong category. Pinned in Task 15 Step 1.
-5. **A family's research save fails.** If the portal ships before the rules, or the parent is offline, "Save my answer" is refused; the family must not be trapped behind the sheet. After a failure the sheet offers "Skip for now", and the question returns at the next sign-in. Pinned in Task 20 Step 1.
+1. **An evening wave dated tomorrow.** Sessions run until 7 PM Chicago, which is after midnight UTC; a reasonable coach expects the circuit date to be the academy's date. The start-wave sheet must default to `academyDateISO()`, never a UTC date. Pinned in Task 12 Step 1 (system time 2026-11-04T00:30Z shows 2026-11-03).
+2. **The tablet loses wifi mid-wave.** A Firestore write offline neither lands nor fails, and the SDK's memory cache drops it if the page reloads or iPad Safari evicts it (Safari also ignores the leave prompt); the coach expects to know which entries are not on the server and not to lose them. A save not acknowledged in 8 s shows "Not saved yet", the typed values stay, leaving the wave asks first, and every unsaved entry is kept on the tablet until the server has it, then shown and sent again when the wave reopens. Pinned in Task 11 Step 1 (tracker, device store) and Task 13 Step 1 (leave guard, reopening).
+3. **A typo or a tablet keyboard quirk in a trial.** "32,5" is 32.5; "32.5kg", "150" for grip or "-3" are refused inline and never sent, so one bad entry cannot fail the section's save and drop the trials already typed. Pinned in Task 11 Step 1 (TrialInput) and Task 14 Step 1 (grip station keeps R1 when R2 is refused).
+4. **An incomplete athlete record.** Legacy athletes may have no date of birth, sex is entered at intake, a mid-season window has no sitting height, the box height may be missing. Results must say what is missing and show no maturity category, never NaN or a wrong category. Pinned in Task 17 Step 1.
+5. **A family's research save fails.** If the rules refuse it (a rules deploy that failed or was rolled back) or the parent is offline, "Save my answer" fails; the family must not be trapped behind the sheet. After a failure the sheet offers "Skip for now", and the question returns at the next sign-in. Pinned in Task 23 Step 1.
 
 ---
 
@@ -66,7 +71,7 @@
 **Hooks (frontend/src/portal/hooks/)**
 - Create `assessmentsLive.js` - Firestore reads and writes for windows, profiles, settings, the wave start transaction, the assessor flag.
 - Create `assessments.js` - `useAssessmentSettings`, `useAssessmentRoster`, `useWave`, `useAthleteAssessments`, `useOpenAssessmentWindows` (seed and live).
-- Create `assessmentSaves.js` - the save tracker: saving / saved / slow / error per entry, retry, leave guard.
+- Create `assessmentSaves.js` - the save tracker: saving / saved / slow / error per entry, retry, leave guard; the device store that keeps unsaved entries until the server has them.
 - Create `assessorTab.js` - the signed-in session's "shows the Assessments tab" flag for BottomTabBar.
 - Create `researchConsent.js` - `saveResearchConsent` and `useResearchConfirm`.
 - Modify `useAuthSession.js` - `user.assessor`, publish the tab flag.
@@ -97,6 +102,7 @@
 - Create `ResearchSheet.js` - the "Read more" sheet.
 - Create `ResearchConfirmGate.js` - the one-time confirm for existing families.
 - Create `TestCopyRibbon.js` - the "Test copy" marker on the staging build.
+- Create `frontend/src/testCopyGuard.js` - a test-copy build refuses to start against any project but staging; `frontend/src/firebase.js` calls it first.
 - Modify `BottomTabBar.js` - Capture goes; Assessments for Phil and assessors.
 
 **Screens and routes (frontend/src/portal/)**
@@ -107,7 +113,7 @@
 - Delete `screens/DiagnosticCapture.js`, `screens/DiagnosticCapture.test.js`, `screens/PracticeDNA.js`.
 
 **Server and scripts**
-- Modify `firestore.rules` - assessments, profiles, settings, collection-group reads, the assessor guard and read, the research branch; diagnostics removed.
+- Modify `firestore.rules` - assessments, profiles, settings, collection-group reads, the assessor guard and read, the research branch; diagnostics read-only (Task 9), then removed once the portal is live (Task 27).
 - Create `scripts/rules-probes/assessments.mjs`, `scripts/rules-probes/research.mjs` - emulator probes, run by `scripts/verify-rules.mjs`.
 - Modify `scripts/verify-rules.mjs` - export `docName`, run the new probe tasks.
 - Modify `functions/portal/family-validate.js`, `functions/portal/family.js` - store the consents, research per athlete.
@@ -116,6 +122,7 @@
 - Create `scripts/lib/assessment-fixtures.mjs`, `scripts/test/assessment-fixtures.test.mjs` - the invented athletes' windows, profiles and research answers, shared by both seeds.
 - Create `scripts/seed-staging-assessments.mjs`, `scripts/test/seed-staging-assessments.test.mjs` - the staging-only seed.
 - Modify `docs/portal/DATA-MODEL.md` - assessments, profile, settings, consents; diagnostics removed.
+- Modify `.firebaserc` - the `staging` alias for `ryp-academy-app`.
 
 ---
 
@@ -633,16 +640,16 @@ Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 - Test: `frontend/src/portal/data/assessmentWindows.test.js`
 
 **Interfaces:**
-- Consumes: `isoToMs` (Task 1); `addDaysISO`, `academyDateISO` from `data/calendar.js`.
+- Consumes: `isoToMs` (Task 1); `addDaysISO`, `academyDateISO` from `data/calendar.js`; `SEASON_BOUNDS` from `data/season.js` (`{ start: '2026-11-03', end: '2027-02-27' }`).
 - Produces, `assessmentSettings.js`:
-  - `PROTOCOL_VERSION = 'v1.2'`, `DEFAULT_SETTINGS`, `SETTINGS_KEYS`, `TRIAL_LIMITS: { [countKey]: [min, max] }`, `PROCEDURE_KEYS`, `MODE_KEYS`, `NOT_TESTED_REASONS: [key, label][]`, `STATIONS: { id, label, sections, notTestedKeys, cue }[]`
+  - `PROTOCOL_VERSION = 'v1.2'`, `DEFAULT_SETTINGS`, `SETTINGS_KEYS`, `TRIAL_LIMITS: { [countKey]: [min, max] }`, `PROCEDURE_KEYS`, `MODE_KEYS` (the six procedure keys that switch every marker off, then `ENTRY_KEYS`), `ENTRY_KEYS = ['hopEntry', 'rsiModEntry']`, `NOT_TESTED_REASONS: [key, label][]`, `STATIONS: { id, label, sections, notTestedKeys, cue }[]`
   - `withDefaults(stored): Settings`, `procedureChanged(before, after): boolean`, `nextPatch(version): string`, `validVersionLabel(label): boolean`
   - `circuitModeOf(settings): CircuitMode` = `{ trialCounts, gripRestSec, stations, mcgillMode, medballSide, golfTiming, waveSize, hopEntry, rsiModEntry, coefficientSet, coefficientsVerified }`
   - `modeDifferences(a: CircuitMode, b: CircuitMode): string[]`, `medballMassFor(massKg): 2|3|4|null`, `stationsFor(circuitMode, kinds: string[]): Station[]`
 - Produces, `assessmentWindows.js`:
   - `KINDS`, `KIND_LABEL`, `ASSESSMENT_SECTIONS` (the ten section names), `MIN_GAP_DAYS = 56`, `ENTRY_WINDOW_DAYS = 14`, `GOLF_WINDOW_DAYS = 7`, `MCGILL_WINDOW_DAYS = 14`, `CONSENT_LABEL`
   - `seasonOf(dateISO): string|null`, `windowIdFor(season, kind): string`, `daysBetween(fromISO, toISO): number|null`, `weeksBetween(fromISO, toISO): number|null`, `shortDate(iso): string` ("Nov 3")
-  - `dueStatus(windows, today): { kind, kinds: string[], label, inProgress, eligibleOn, lastTestDate, windowId }`
+  - `dueStatus(windows, today): { kind, kinds: string[], label, inProgress, stale, eligibleOn, lastTestDate, windowId }`; `staleOpen(window, today): boolean` (an open window whose circuit date is more than 14 days before `today`: it is completed, never re-waved)
   - `consentStatus(athlete): 'yes'|'no'|'unanswered'`, `waveBlock(row): string|null`, `circuitDateProblem(date, today): string|null`, `newWaveId(circuitDate, random = Math.random): string`
   - `toISODate(value): string|null` (Firestore Timestamp, Date, ms or ISO string -> Chicago date), `researchCountsFrom(research): string|null`, `inResearch(research, circuitDate): boolean`
 
@@ -652,7 +659,7 @@ Create `frontend/src/portal/data/assessmentSettings.test.js`:
 
 ```js
 import {
-  DEFAULT_SETTINGS, circuitModeOf, medballMassFor, modeDifferences, nextPatch, procedureChanged, stationsFor, validVersionLabel, withDefaults,
+  DEFAULT_SETTINGS, ENTRY_KEYS, circuitModeOf, medballMassFor, modeDifferences, nextPatch, procedureChanged, stationsFor, validVersionLabel, withDefaults,
 } from './assessmentSettings';
 
 describe('settings merge (spec 4.6)', () => {
@@ -711,11 +718,14 @@ describe('the circuit mode a window is run under', () => {
       coefficientSet: 'moore-2015', coefficientsVerified: false,
     });
   });
-  test('reduced trials or a different rest differ; an entry mode does not', () => {
+  test('reduced trials, a different rest or another entry mode differ (spec 4.1); the coefficient set does not', () => {
     const full = circuitModeOf(DEFAULT_SETTINGS);
     const cut = circuitModeOf({ ...DEFAULT_SETTINGS, trialCounts: { ...DEFAULT_SETTINGS.trialCounts, hopScored: 1 } });
     expect(modeDifferences(full, cut)).toEqual(['trialCounts']);
-    expect(modeDifferences(full, circuitModeOf({ ...DEFAULT_SETTINGS, hopEntry: 'per-hop' }))).toEqual([]);
+    expect(modeDifferences(full, circuitModeOf({ ...DEFAULT_SETTINGS, hopEntry: 'per-hop', rsiModEntry: 'computed' }))).toEqual(['hopEntry', 'rsiModEntry']);
+    expect(ENTRY_KEYS).toEqual(['hopEntry', 'rsiModEntry']);
+    // Every maturity offset is computed with the current coefficients, so windows under another set stay comparable.
+    expect(modeDifferences(full, { ...full, coefficientSet: 'other-2020' })).toEqual([]);
     expect(modeDifferences(full, null)).toEqual([]);
   });
 });
@@ -753,7 +763,7 @@ Create `frontend/src/portal/data/assessmentWindows.test.js`:
 
 ```js
 import {
-  circuitDateProblem, consentStatus, daysBetween, dueStatus, inResearch, newWaveId, researchCountsFrom, seasonOf, toISODate, waveBlock,
+  circuitDateProblem, consentStatus, daysBetween, dueStatus, inResearch, newWaveId, researchCountsFrom, seasonOf, staleOpen, toISODate, waveBlock,
   weeksBetween, windowIdFor,
 } from './assessmentWindows';
 
@@ -780,14 +790,31 @@ describe('what is due (spec 5, list)', () => {
   test('never tested this season: baseline due', () => {
     expect(dueStatus([], '2026-11-03')).toMatchObject({ kind: 'baseline', kinds: ['baseline'], label: 'Baseline due', lastTestDate: null });
   });
-  test('an open window is in progress, whatever else is true', () => {
+  test('an open window is in progress for 14 days', () => {
     expect(dueStatus([win('baseline', '2026-11-03', { status: 'open' })], '2026-11-04')).toMatchObject({
-      kind: 'baseline', kinds: ['baseline'], label: 'Baseline in progress', inProgress: true, windowId: '2026-27-baseline',
+      kind: 'baseline', kinds: ['baseline'], label: 'Baseline in progress', inProgress: true, stale: false, windowId: '2026-27-baseline',
     });
+    expect(dueStatus([win('baseline', '2026-11-03', { status: 'open' })], '2026-11-17')).toMatchObject({ kind: 'baseline', stale: false });
+  });
+  test('an open window more than 14 days old is never re-waved: it reads "mark it complete" and blocks the wave', () => {
+    const left = [win('baseline', '2026-11-03', { status: 'open' })];
+    expect(dueStatus(left, '2026-11-18')).toMatchObject({
+      kind: null, kinds: [], label: 'Open since Nov 3: mark it complete', inProgress: true, stale: true, windowId: '2026-27-baseline',
+    });
+    expect(waveBlock({ consent: 'yes', due: dueStatus(left, '2027-01-05') })).toBe('Open since Nov 3: mark it complete');
+    expect(staleOpen(left[0], '2026-11-17')).toBe(false);
+    expect(staleOpen(left[0], '2026-11-18')).toBe(true);
+    expect(staleOpen(win('baseline', '2026-11-03'), '2027-01-05')).toBe(false);
   });
   test('mid-season is eligible 8 weeks after the baseline, and end of season may be chosen instead (late joiners)', () => {
     expect(dueStatus([win('baseline', '2026-11-03')], '2026-12-28')).toMatchObject({ kind: null, kinds: [], label: 'Mid-season from Dec 29', eligibleOn: '2026-12-29' });
     expect(dueStatus([win('baseline', '2026-11-03')], '2026-12-29')).toMatchObject({ kind: 'mid', kinds: ['mid', 'end'], label: 'Mid-season eligible', lastTestDate: '2026-11-03' });
+  });
+  test('a late joiner whose mid-season would leave no 8 weeks before the season end (Feb 27) defaults to end of season; mid-season stays a choice', () => {
+    expect(dueStatus([win('baseline', '2026-12-15')], '2027-02-08')).toMatchObject({ kind: null, kinds: [], label: 'End of season from Feb 9', eligibleOn: '2027-02-09' });
+    expect(dueStatus([win('baseline', '2026-12-15')], '2027-02-09')).toMatchObject({ kind: 'end', kinds: ['end', 'mid'], label: 'End of season' });
+    expect(dueStatus([win('baseline', '2026-11-07')], '2027-01-02')).toMatchObject({ kind: 'mid', kinds: ['mid', 'end'] });
+    expect(dueStatus([win('baseline', '2026-11-08')], '2027-01-03')).toMatchObject({ kind: 'end', kinds: ['end', 'mid'] });
   });
   test('end of season 8 weeks after mid-season; then the season is complete', () => {
     const done = [win('baseline', '2026-11-03'), win('mid', '2026-12-29')];
@@ -896,8 +923,17 @@ export const TRIAL_LIMITS = {
 /** The settings that change the procedure: saving one asks for a new protocol version label. */
 export const PROCEDURE_KEYS = ['trialCounts', 'gripRestSec', 'stations', 'mcgillMode', 'medballSide', 'golfTiming', 'waveSize'];
 
-/** The circuit-mode keys two results must share to be compared (protocol Section 5: "trial counts and rest intervals used"). */
-export const MODE_KEYS = ['trialCounts', 'gripRestSec', 'stations', 'mcgillMode', 'medballSide', 'golfTiming'];
+/**
+ * The entry modes (spec 4.1: "hop and RSImod entry modes"): results typed
+ * under another mode are flagged, and only the marker that entry feeds is
+ * switched off (the 10/5 marker for hopEntry; RSImod has no marker). The
+ * coefficient set is kept on the window but is not a mode difference:
+ * every maturity offset is computed with the current coefficients.
+ */
+export const ENTRY_KEYS = ['hopEntry', 'rsiModEntry'];
+
+/** The circuit-mode keys two results must share to be compared (protocol Section 5: "trial counts and rest intervals used"), then the entry modes. */
+export const MODE_KEYS = ['trialCounts', 'gripRestSec', 'stations', 'mcgillMode', 'medballSide', 'golfTiming', ...ENTRY_KEYS];
 
 /** Not-tested codes (protocol Section 5): absent, ill, pain, injury, equipment failure. */
 export const NOT_TESTED_REASONS = [['absent', 'Absent'], ['ill', 'Ill'], ['pain', 'Pain'], ['injury', 'Injury'], ['equipment', 'Equipment']];
@@ -1022,10 +1058,12 @@ Create `frontend/src/portal/data/assessmentWindows.js`:
  * entry must pass. PURE. Windows are timed from the athlete's own first test
  * and are at least 8 weeks apart; a late joiner may skip mid-season and be
  * compared at end of season instead, which is the coach's choice at the
- * start of a wave (`kinds`).
+ * start of a wave (`kinds`, the default first). An open window is in
+ * progress for 14 days; after that it is completed, never re-waved.
  */
 import { academyDateISO, addDaysISO } from './calendar';
 import { isoToMs } from './assessmentScoring';
+import { SEASON_BOUNDS } from './season';
 
 export const KINDS = ['baseline', 'mid', 'end'];
 export const KIND_LABEL = { baseline: 'Baseline', mid: 'Mid-season', end: 'End of season' };
@@ -1071,20 +1109,38 @@ export function shortDate(iso) {
 const byDate = (a, b) => (a.circuitDate || '').localeCompare(b.circuitDate || '');
 
 /**
+ * An open window whose circuit date is more than 14 days before `today`.
+ * Windows stay open for days (golf and a McGill block are entered on an open
+ * window), but past the 14-day entry window a new wave would type over its
+ * trials under a new date: it is marked complete instead (the rules refuse
+ * the re-wave too).
+ */
+export function staleOpen(w, today) {
+  return Boolean(w) && w.status === 'open' && (daysBetween(w.circuitDate, today) ?? 0) > ENTRY_WINDOW_DAYS;
+}
+
+/**
  * What an athlete is due today, from their windows (any season): an open
- * window is in progress; never tested this season is "Baseline due"; mid
- * season is eligible 8 weeks after the baseline (end of season may be chosen
- * instead, for a late joiner); end of season 8 weeks after mid season.
- * `kinds` are the windows a wave may start for them now, the first being the
- * default; `kind` is null when nothing can start.
+ * window is in progress for 14 days, then reads "mark it complete"; never
+ * tested this season is "Baseline due"; mid season is eligible 8 weeks after
+ * the baseline (end of season may be chosen instead); end of season 8 weeks
+ * after mid season. A late joiner - a mid-season window 8 weeks after the
+ * baseline would leave no 8 weeks before the season end (SEASON_BOUNDS.end) -
+ * defaults to end of season (protocol Section 1: "will be compared at end of
+ * season instead"), mid-season still a choice. `kinds` are the windows a wave
+ * may start for them now, the first being the default; `kind` is null when
+ * nothing can start.
  */
 export function dueStatus(windows, today) {
   const season = seasonOf(today);
   const all = (windows || []).filter((w) => w && w.circuitDate).sort(byDate);
   const lastTestDate = all.length ? all[all.length - 1].circuitDate : null;
   const mine = all.filter((w) => w.season === season);
-  const base = { inProgress: false, eligibleOn: null, lastTestDate, windowId: null };
+  const base = { inProgress: false, stale: false, eligibleOn: null, lastTestDate, windowId: null };
   const open = mine.find((w) => w.status === 'open');
+  if (open && staleOpen(open, today)) {
+    return { ...base, kind: null, kinds: [], label: `Open since ${shortDate(open.circuitDate)}: mark it complete`, inProgress: true, stale: true, windowId: open.id };
+  }
   if (open) return { ...base, kind: open.kind, kinds: [open.kind], label: `${KIND_LABEL[open.kind]} in progress`, inProgress: true, windowId: open.id };
   const has = (k) => mine.find((w) => w.kind === k);
   const after = (prev, kinds, label) => {
@@ -1094,7 +1150,12 @@ export function dueStatus(windows, today) {
       : { ...base, kind: null, kinds: [], label: `${KIND_LABEL[kinds[0]]} from ${shortDate(eligibleOn)}`, eligibleOn };
   };
   if (!has('baseline')) return { ...base, kind: 'baseline', kinds: ['baseline'], label: 'Baseline due' };
-  if (!has('mid') && !has('end')) return after(has('baseline'), ['mid', 'end'], 'Mid-season eligible');
+  if (!has('mid') && !has('end')) {
+    const seasonEnd = seasonOf(SEASON_BOUNDS.end) === season ? SEASON_BOUNDS.end : null;
+    const midOn = addDaysISO(has('baseline').circuitDate, MIN_GAP_DAYS);
+    const late = seasonEnd != null && addDaysISO(midOn, MIN_GAP_DAYS) > seasonEnd;
+    return late ? after(has('baseline'), ['end', 'mid'], 'End of season') : after(has('baseline'), ['mid', 'end'], 'Mid-season eligible');
+  }
   if (!has('end')) return after(has('mid'), ['end'], 'End of season');
   return { ...base, kind: null, kinds: [], label: 'Season complete' };
 }
@@ -1158,8 +1219,10 @@ git add frontend/src/portal/data/assessmentSettings.js frontend/src/portal/data/
 git commit -m "feat(assessments): protocol settings, circuit mode and test windows
 
 Settings are data with v1.2 defaults; a procedure change asks for a new
-version label; windows are due 8 weeks apart from the athlete's own first
-test; research counts only from a recorded yes.
+version label; entry modes are part of the circuit mode; windows are due 8
+weeks apart from the athlete's own first test, a late joiner defaults to
+end of season, and an open window past 14 days is completed, never
+re-waved; research counts only from a recorded yes.
 
 Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 ```
@@ -1448,9 +1511,9 @@ Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 **Interfaces:**
 - Consumes: `seed`, `del`, `call`, `createAs`, `updateAs`, `listAs`, `expect`, `token`, `t`, `BASE` exported by `scripts/verify-rules.mjs`.
 - Produces (rules contract every later task writes against):
-  - `athletes/{athleteId}/assessments/{season}-{kind}`: create by `assessStaff()` with exactly `{ athleteId, season, kind, protocolVersion, circuitMode, status: 'open', circuitDate, golfDate: null, mcgillDate: null, weeksOfExposure, wave: { id, position 1-4, coachUid: <caller> }, enteredBy: {}, createdAt: <server>, updatedAt: <server> }`; update by `assessStaff()` of ONE section per write - `{ <section>, enteredBy.<section>: <caller>, updatedAt: <server> }` for a section in `readiness|log|anthro|grip|cmj|hop|medball|mcgill|golf|notTested` - or of the window fields `status|circuitDate|golfDate|mcgillDate|weeksOfExposure|wave` (+ `updatedAt`) with no section and no mark; update by any `coach` of `golf` (one-section form) or `golfDate` alone on an open window; CMJ holds at most 3 trials; a 10/5 set is `{ rsiBest5, gctMs }` or `{ hopRsi: [<=10], hopGctMs: [<=10] }`; read by `assessReader()`; delete by the owner.
-  - `athletes/{athleteId}/assessmentProfile/current`: `{ athleteId, sex, firstTestDate, medballMassKg, medballMethod, dominantHand, gripDevice, handlePosition, driver, season, updatedAt: <server>, updatedBy: <caller> }`, written by `assessStaff()`; `firstTestDate`, and within a season `medballMethod`/`medballMassKg`, fixed once set (the owner may correct).
-  - `assessmentSettings/current`: written by the owner or Phil, read by every staff role.
+  - `athletes/{athleteId}/assessments/{season}-{kind}`: create by `assessStaff()` with exactly `{ athleteId, season, kind, protocolVersion, circuitMode, status: 'open', circuitDate, golfDate: null, mcgillDate: null, weeksOfExposure, wave: { id, position 1-4, coachUid: <caller> }, enteredBy: {}, createdAt: <server>, updatedAt: <server> }`, where `season` is the circuit date's August-July season, `protocolVersion` reads `vN.N[.N]` and `circuitMode` holds only `circuitModeOf`'s keys; update by `assessStaff()` of ONE section per write - `{ <section>, enteredBy.<section>: <caller>, updatedAt: <server> }` for a section in `readiness|log|anthro|grip|cmj|hop|medball|mcgill|golf|notTested` - or of the window fields `status|circuitDate|golfDate|mcgillDate|weeksOfExposure|wave` (+ `updatedAt`) with no section and no mark, where a change of `wave` or `circuitDate` needs the window's own stored circuit date within the last 16 days (an older open window is completed, never re-waved); update by any `coach` of `golf` (one-section form) or `golfDate` alone on an open window; CMJ holds at most 3 trials; a 10/5 set is `{ rsiBest5, gctMs }` or `{ hopRsi: [<=10], hopGctMs: [<=10] }`; a med ball write needs the profile's `season` to be the window's (the owner may correct); read by `assessReader()`; delete by the owner.
+  - `athletes/{athleteId}/assessmentProfile/current`: `{ athleteId, sex, firstTestDate, medballMassKg, medballMethod, dominantHand, gripDevice, handlePosition, driver, season, updatedAt: <server>, updatedBy: <caller> }`, written by `assessStaff()`; `firstTestDate`, and within a season `medballMethod`/`medballMassKg`, fixed once set; `season` only moves forward (the owner may correct all of these).
+  - `assessmentSettings/current`: written by the owner or Phil, read by every staff role; every value checked (trial counts, thresholds 0-50 or null, coefficients `{ a: -20..0, b: 0..0.1 }` per sex, `verified` and every station switch a bool, grip rest shortest <= longest).
   - Collection-group reads of `assessments` and `assessmentProfile` for `assessReader()`.
   - `users.assessor` (bool): set or changed by the owner only. An assessor coach lists every athlete.
   - `scripts/rules-probes/assessments.mjs` exports `taskAssessments()`.
@@ -1467,12 +1530,20 @@ Create `scripts/rules-probes/assessments.mjs`:
  * the golf-only coach branch; the med ball season lock; the collection-group
  * reads; the owner-only users.assessor and the assessor's athlete list. Run
  * by scripts/verify-rules.mjs in both passes. It seeds and removes everything
- * it touches; the only clock it reads is recentDate's (dates relative to
- * today).
+ * it touches; the only clock it reads is today's (recentDate's dates, and the
+ * season a window dated today belongs to).
  */
 import { BASE, call, createAs, del, expect, listAs, seed, t, token, updateAs } from '../verify-rules.mjs';
 
-const SEASON = '2026-27';
+const dayOut = (n) => new Date(Date.now() + n * 86400000).toISOString().slice(0, 10);
+/** The August-July season of a date ('2026-27'), as the rules tie a window's season to its circuit date. */
+const seasonFor = (iso) => {
+  const y = Number(iso.slice(0, 4));
+  const start = Number(iso.slice(5, 7)) >= 8 ? y : y - 1;
+  return `${start}-${String((start + 1) % 100).padStart(2, '0')}`;
+};
+const SEASON = seasonFor(dayOut(0));
+const NEXT_SEASON = seasonFor(dayOut(366));
 const ATH = 'ath-assess';
 const W = `${SEASON}-baseline`;
 const W_END = `${SEASON}-end`;
@@ -1480,7 +1551,6 @@ const COL = `athletes/${ATH}/assessments`;
 const PROFILE = `athletes/${ATH}/assessmentProfile`;
 const uids = { phil: 'phil-assess-probe', assessor: 'assessor-probe', owner: 'owner-assess-probe', mental: 'mental-assess-probe', toggle: 'toggle-assess-probe' };
 const tok = (u) => token(u, { email: `${u}@example.com`, email_verified: true });
-const dayOut = (n) => new Date(Date.now() + n * 86400000).toISOString().slice(0, 10);
 const status = (r) => r.status;
 
 /** A collection-group list as a real user; a refused query answers 403 on the response or in the stream. */
@@ -1497,7 +1567,9 @@ const windowBody = (over = {}) => ({ athleteId: ATH, season: SEASON, kind: 'base
 const settingsBody = (over = {}) => ({ protocolVersion: 'v1.2',
   trialCounts: { grip: 3, cmjPractice: 1, cmjScored: 2, hopPractice: 1, hopScored: 2, medballPractice: 1, medballScored: 3, clubheadWarmup: 3, clubheadMax: 5 },
   gripRestSec: { min: 15, max: 20 }, stations: { intake: true, mcgill: true }, mcgillMode: 'wave', medballSide: 'trail', golfTiming: 'within-7', waveSize: 4,
-  wavesPerSession: 5, hopEntry: 'summary', rsiModEntry: 'typed', coefficients: { set: 'moore-2015', verified: false }, thresholds: { clubhead: 2 }, updatedBy: uids.phil, ...over });
+  wavesPerSession: 5, hopEntry: 'summary', rsiModEntry: 'typed',
+  coefficients: { set: 'moore-2015', verified: false, boys: { a: -8.128741, b: 0.0070346 }, girls: { a: -7.709133, b: 0.0042232 } },
+  thresholds: { clubhead: 2, parallax: null }, updatedBy: uids.phil, ...over });
 
 /** A section write as hooks/assessmentsLive.js saveSection sends it: the section, enteredBy.<section>, updatedAt server time. */
 const section = (auth, by, name, value, id = W, extraMarks = []) => updateAs(auth, COL, id, { [name]: value, enteredBy: { [name]: by, ...Object.fromEntries(extraMarks.map((m) => [m, by])) } },
@@ -1511,7 +1583,7 @@ export async function taskAssessments() {
   const mental = tok(uids.mental);
   const toggle = tok(uids.toggle);
   const cleanup = async () => {
-    for (const id of [W, W_END, `${SEASON}-mid`]) await del(COL, id);
+    for (const id of [W, W_END, `${SEASON}-mid`, '1999-00-baseline']) await del(COL, id);
     await del(PROFILE, 'current');
     await del('assessmentSettings', 'current');
     await del('athletes', ATH);
@@ -1537,6 +1609,9 @@ export async function taskAssessments() {
     expect('a window cannot open dated 20 days back', await createAs(phil, COL, W, windowBody({ circuitDate: dayOut(-20) }), ['createdAt', 'updatedAt']), 403);
     expect('a window cannot open with entries already marked', await createAs(phil, COL, W, windowBody({ enteredBy: { grip: uids.phil } }), ['createdAt', 'updatedAt']), 403);
     expect("a window cannot name another coach's wave", await createAs(phil, COL, W, windowBody({ wave: { id: 'w', position: 1, coachUid: uids.assessor } }), ['createdAt', 'updatedAt']), 403);
+    expect("a window's season is its circuit date's season", await createAs(phil, COL, '1999-00-baseline', windowBody({ season: '1999-00' }), ['createdAt', 'updatedAt']), 403);
+    expect('a protocol label that is not vN.N refused', await createAs(phil, COL, W, windowBody({ protocolVersion: 'junk' }), ['createdAt', 'updatedAt']), 403);
+    expect('a circuit mode with keys no snapshot has refused', await createAs(phil, COL, W, windowBody({ circuitMode: { anything: 'x' } }), ['createdAt', 'updatedAt']), 403);
     expect('Phil opens a baseline window', await createAs(phil, COL, W, windowBody(), ['createdAt', 'updatedAt']), 200);
     expect('an assessor coach opens an end window', await createAs(assessor, COL, W_END, windowBody({ kind: 'end', wave: { id: 'wave-probe', position: 2, coachUid: uids.assessor } }), ['createdAt', 'updatedAt']), 200);
 
@@ -1588,6 +1663,14 @@ export async function taskAssessments() {
     expect('Phil changes the circuit date within 14 days', await updateAs(phil, COL, W, { circuitDate: dayOut(-3) }, ['circuitDate'], ['updatedAt']), 200);
     expect('a circuit date 20 days back refused', await updateAs(phil, COL, W, { circuitDate: dayOut(-20) }, ['circuitDate'], ['updatedAt']), 403);
     expect('a circuit date two days ahead refused', await updateAs(phil, COL, W, { circuitDate: dayOut(2) }, ['circuitDate'], ['updatedAt']), 403);
+    // A window left open past the entry window is completed, never re-waved (a new wave would type over its trials under a new date).
+    const MID = `${SEASON}-mid`;
+    await seed(COL, MID, { ...windowBody({ kind: 'mid', circuitDate: dayOut(-30) }), createdAt: new Date(), updatedAt: new Date() });
+    expect('a window open 30 days cannot be re-waved to today', await updateAs(phil, COL, MID, { circuitDate: dayOut(0), wave: { id: 'wave-probe-2', position: 1, coachUid: uids.phil }, weeksOfExposure: 4 },
+      ['circuitDate', 'wave', 'weeksOfExposure'], ['updatedAt']), 403);
+    expect('a window open 30 days cannot join another wave', await updateAs(phil, COL, MID, { wave: { id: 'wave-probe-2', position: 1, coachUid: uids.phil } }, ['wave'], ['updatedAt']), 403);
+    expect('a window open 30 days is still marked complete', await updateAs(phil, COL, MID, { status: 'complete' }, ['status'], ['updatedAt']), 200);
+    await del(COL, MID);
 
     // The med ball method and mass are fixed for the season once the profile holds them.
     const profile = { athleteId: ATH, sex: 'female', firstTestDate: dayOut(0), medballMassKg: 3, medballMethod: 'speed', dominantHand: 'right',
@@ -1604,8 +1687,14 @@ export async function taskAssessments() {
     expect('Phil updates the sex on the profile', await updateAs(phil, PROFILE, 'current', { sex: 'male', updatedBy: uids.phil }, ['sex', 'updatedBy'], ['updatedAt']), 200);
     expect('Phil cannot switch the season method', await updateAs(phil, PROFILE, 'current', { medballMethod: 'distance', updatedBy: uids.phil }, ['medballMethod', 'updatedBy'], ['updatedAt']), 403);
     expect('Phil cannot move the first test date', await updateAs(phil, PROFILE, 'current', { firstTestDate: dayOut(-1), updatedBy: uids.phil }, ['firstTestDate', 'updatedBy'], ['updatedAt']), 403);
-    expect('a new season resets the method', await updateAs(phil, PROFILE, 'current', { season: '2027-28', medballMethod: null, medballMassKg: null, updatedBy: uids.phil },
+    // "Block mixing" cannot be undone by moving the season: back to an old one and the lock would be off.
+    expect('the season never moves back (with the method switched in the same write)', await updateAs(phil, PROFILE, 'current',
+      { season: '1999-00', medballMethod: 'distance', medballMassKg: 4, updatedBy: uids.phil }, ['season', 'medballMethod', 'medballMassKg', 'updatedBy'], ['updatedAt']), 403);
+    expect('a new season resets the method', await updateAs(phil, PROFILE, 'current', { season: NEXT_SEASON, medballMethod: null, medballMassKg: null, updatedBy: uids.phil },
       ['season', 'medballMethod', 'medballMassKg', 'updatedBy'], ['updatedAt']), 200);
+    expect("a window of another season than the profile's takes no med ball from staff", await section(phil, uids.phil, 'medball', { ...throws, method: 'distance', throws: [6.2] }), 403);
+    expect('and the season cannot be put back', await updateAs(phil, PROFILE, 'current', { season: SEASON, updatedBy: uids.phil }, ['season', 'updatedBy'], ['updatedAt']), 403);
+    expect("the owner may still correct that window's med ball", await section(owner, uids.owner, 'medball', throws), 200);
     expect('the owner corrects a method', await updateAs(owner, PROFILE, 'current', { season: SEASON, medballMethod: 'distance', updatedBy: uids.owner },
       ['season', 'medballMethod', 'updatedBy'], ['updatedAt']), 200);
 
@@ -1638,6 +1727,15 @@ export async function taskAssessments() {
     expect('six grip trials refused', await ownerSettings({ trialCounts: { ...settingsBody().trialCounts, grip: 6 } }), 403);
     expect('four scored CMJs refused', await ownerSettings({ trialCounts: { ...settingsBody().trialCounts, cmjScored: 4 } }), 403);
     expect('a version label without the v refused', await ownerSettings({ protocolVersion: '1.2.2' }), 403);
+    const coefficients = settingsBody().coefficients;
+    expect('a threshold that is not a number refused', await ownerSettings({ thresholds: { clubhead: 'ten' } }), 403);
+    expect('a threshold outside 0-50 % refused', await ownerSettings({ thresholds: { cmj: -50 } }), 403);
+    expect('a coefficient that is not a number refused', await ownerSettings({ coefficients: { ...coefficients, boys: { a: 'abc', b: 0.0070346 } } }), 403);
+    expect('a coefficient set without the girls refused', await ownerSettings({ coefficients: { set: 'moore-2015', verified: false, boys: coefficients.boys } }), 403);
+    expect('the coefficient check is true or false', await ownerSettings({ coefficients: { ...coefficients, verified: 'yes' } }), 403);
+    expect('a station is on or off', await ownerSettings({ stations: { grip: 'maybe' } }), 403);
+    expect('the shortest grip rest is not longer than the longest', await ownerSettings({ gripRestSec: { min: 30, max: 10 } }), 403);
+    expect('the owner corrects a coefficient against the paper', await ownerSettings({ coefficients: { ...coefficients, verified: true, boys: { a: -8.1, b: 0.007 } } }), 200);
     expect('another document id refused', await createAs(phil, 'assessmentSettings', 'draft', settingsBody(), ['updatedAt']), 403);
     for (const [who, auth, wanted] of [['a plain coach', t.coach, 200], ['mental', mental, 200], ['ops', t.ops, 200], ['the parent', t.parent, 403], ['an athlete login', t.athlete, 403]]) {
       expect(`${who}: settings read`, await call('GET', '/assessmentSettings/current', null, auth).then(status), wanted);
@@ -1770,6 +1868,15 @@ with:
       let day = timestamp.date(int(p[0]), int(p[1]), int(p[2]));
       return day > request.time - duration.value(16, 'd')
         && day < request.time + duration.value(1, 'd');
+    }
+    // The August-July season a 'YYYY-MM-DD' date falls in ('2026-27' for
+    // 2026-11-03; data/assessmentWindows.js seasonOf): a window's season is
+    // its circuit date's.
+    function seasonOk(season, date) {
+      let p = date.split('-');
+      let start = int(p[1]) >= 8 ? int(p[0]) : int(p[0]) - 1;
+      let s = season.split('-');
+      return s.size() == 2 && int(s[0]) == start && int(s[1]) == (start + 1) % 100;
     }
 ```
 
@@ -1971,9 +2078,12 @@ with:
         // A 10/5 set is Smart2Move's per-set summary { rsiBest5, gctMs }, or
         // every hop as two parallel lists { hopRsi, hopGctMs } (the hopEntry
         // setting) - never both. Every-hop values are checked for shape
-        // here, not range: two sets of twenty values each are past what one
-        // request may evaluate. data/assessmentInput.js holds their ranges
-        // (rsi 0-5, gctMs 80-600) and never sends a value outside them.
+        // here, not type or range: two sets of twenty values each are past
+        // what one request may evaluate (measured on the emulator: a value-
+        // by-value type check passes one set and refuses a second for cost
+        // alone). data/assessmentInput.js holds their ranges (rsi 0-5,
+        // gctMs 80-600) and never sends a value outside them, and
+        // data/assessmentScoring.js hopSet scores numbers only.
         function hopSetOk(s) {
           return s == null || (s is map && (
             (s.keys().hasOnly(['rsiBest5', 'gctMs'])
@@ -1992,14 +2102,18 @@ with:
             && (l.size() < 3 || hopSetOk(l[2]))
             && (l.size() < 4 || hopSetOk(l[3]));
         }
+        // The profile holds the season's method and mass, so a med ball
+        // write needs the profile to be in the window's own season (a
+        // profile moved to another season would otherwise switch the lock
+        // off) and then matches it. The owner may correct.
         function medballMatches(p, m) {
-          return p.get('season', null) != request.resource.data.season
-            || ((p.get('medballMethod', null) == null || p.medballMethod == m.method)
-              && (p.get('medballMassKg', null) == null || m.get('massKg', null) == null || p.medballMassKg == m.massKg));
+          return (p.get('season', null) == null || p.season == request.resource.data.season)
+            && (p.get('medballMethod', null) == null || p.medballMethod == m.method)
+            && (p.get('medballMassKg', null) == null || m.get('massKg', null) == null || p.medballMassKg == m.massKg);
         }
         function medballLockOk(m) {
           let path = /databases/$(database)/documents/athletes/$(athleteId)/assessmentProfile/current;
-          return !exists(path) || medballMatches(get(path).data, m);
+          return !exists(path) || me().role == 'owner' || medballMatches(get(path).data, m);
         }
         function medballOk(m) {
           return m is map
@@ -2042,12 +2156,16 @@ with:
             && marks.hasOnly([s])
             && d.enteredBy.get(s, null) == request.auth.uid;
         }
-        // The window's own fields: no section and no mark.
+        // The window's own fields: no section and no mark. Moving a window
+        // into a wave or to another circuit date needs its stored circuit
+        // date to be recent too: a window left open past the entry window
+        // is completed, never re-waved over its trials.
         function fieldsWrite(d, changed, marks) {
           return changed.hasOnly(['status', 'circuitDate', 'golfDate', 'mcgillDate', 'weeksOfExposure', 'wave', 'updatedAt'])
             && marks.size() == 0
             && d.status in ['open', 'complete']
-            && (!changed.hasAny(['circuitDate']) || (isoDate(d.circuitDate) && recentDate(d.circuitDate)))
+            && (!changed.hasAny(['wave', 'circuitDate']) || (isoDate(resource.data.circuitDate) && recentDate(resource.data.circuitDate)))
+            && (!changed.hasAny(['circuitDate']) || (isoDate(d.circuitDate) && recentDate(d.circuitDate) && seasonOk(d.season, d.circuitDate)))
             && (!changed.hasAny(['golfDate']) || d.golfDate == null || (isoDate(d.golfDate) && recentDate(d.golfDate)))
             && (!changed.hasAny(['mcgillDate']) || d.mcgillDate == null || (isoDate(d.mcgillDate) && recentDate(d.mcgillDate)))
             && (!changed.hasAny(['weeksOfExposure']) || weeksOk(d))
@@ -2061,10 +2179,11 @@ with:
             && d.season is string && d.season.matches('[0-9]{4}-[0-9]{2}')
             && d.kind in ['baseline', 'mid', 'end']
             && windowId == d.season + '-' + d.kind
-            && d.protocolVersion is string && d.protocolVersion.size() <= 16
+            && d.protocolVersion is string && d.protocolVersion.size() <= 16 && d.protocolVersion.matches('v[0-9]+[.][0-9]+([.][0-9]+)?')
             && d.circuitMode is map
+            && d.circuitMode.keys().hasOnly(['trialCounts', 'gripRestSec', 'stations', 'mcgillMode', 'medballSide', 'golfTiming', 'waveSize', 'hopEntry', 'rsiModEntry', 'coefficientSet', 'coefficientsVerified'])
             && d.status == 'open'
-            && isoDate(d.circuitDate) && recentDate(d.circuitDate)
+            && isoDate(d.circuitDate) && recentDate(d.circuitDate) && seasonOk(d.season, d.circuitDate)
             && d.get('golfDate', null) == null && d.get('mcgillDate', null) == null
             && weeksOk(d)
             && waveOk(d.wave)
@@ -2132,14 +2251,19 @@ with:
         }
         // Phil: "block mixing" - within a season the med ball method and
         // mass never change once set, and the first-test date never moves.
-        // The owner may correct a mistake.
+        // The season only moves forward ('2026-27' -> '2027-28'): moving it
+        // back, or to an old one, would switch the lock off. The owner may
+        // correct a mistake.
         function profileLockOk() {
           let before = resource.data;
           let after = request.resource.data;
+          let was = before.get('season', null);
+          let now = after.get('season', null);
           return (before.get('firstTestDate', null) == null || after.get('firstTestDate', null) == before.firstTestDate)
-            && (before.get('season', null) != after.get('season', null)
-              || ((before.get('medballMethod', null) == null || after.get('medballMethod', null) == before.medballMethod)
-                && (before.get('medballMassKg', null) == null || after.get('medballMassKg', null) == before.medballMassKg)));
+            && (was == now
+              ? ((before.get('medballMethod', null) == null || after.get('medballMethod', null) == before.medballMethod)
+                && (before.get('medballMassKg', null) == null || after.get('medballMassKg', null) == before.medballMassKg))
+              : (was == null || (now is string && now > was)));
         }
         allow read: if signedIn() && assessReader();
         allow create: if signedIn() && assessStaff() && profileOk();
@@ -2192,10 +2316,24 @@ with:
     // Procedure details are settings, not code: Phil (specialistId 'phil')
     // and the owner edit them; every staff role reads them. Trial counts are
     // capped where the window rules stop checking (data/assessmentSettings.js
-    // TRIAL_LIMITS); the version label is 'v1.2' or 'v1.2.1'.
+    // TRIAL_LIMITS); the version label is 'v1.2' or 'v1.2.1'. Every value
+    // the scoring reads is checked too (data/assessmentInput.js RANGES
+    // thresholdPct, coefficientA, coefficientB): a threshold is 0-50 % or
+    // null (no marker), each Moore coefficient a number, the coefficient
+    // check and every station switch a bool, grip rest shortest <= longest.
     match /assessmentSettings/{docId} {
       function countOk(c, key, lo, hi) {
         return c.get(key, null) is int && c[key] >= lo && c[key] <= hi;
+      }
+      function thresholdOk(t, key) {
+        return t.get(key, null) == null || inRange(t[key], 0, 50);
+      }
+      function stationOk(s, key) {
+        return s.get(key, true) is bool;
+      }
+      function coefficientOk(c) {
+        return c is map && c.keys().hasOnly(['a', 'b'])
+          && inRange(c.get('a', null), -20, 0) && inRange(c.get('b', null), 0, 0.1);
       }
       function settingsOk() {
         let d = request.resource.data;
@@ -2210,8 +2348,14 @@ with:
           && countOk(c, 'hopPractice', 0, 2) && countOk(c, 'hopScored', 1, 4)
           && countOk(c, 'medballPractice', 0, 3) && countOk(c, 'medballScored', 1, 5)
           && countOk(c, 'clubheadWarmup', 0, 5) && countOk(c, 'clubheadMax', 1, 8)
-          && d.gripRestSec is map && inRange(d.gripRestSec.get('min', null), 0, 120) && inRange(d.gripRestSec.get('max', null), 0, 120)
+          && d.gripRestSec is map && d.gripRestSec.keys().hasOnly(['min', 'max'])
+          && inRange(d.gripRestSec.get('min', null), 0, 120) && inRange(d.gripRestSec.get('max', null), 0, 120)
+          && d.gripRestSec.min <= d.gripRestSec.max
           && d.stations is map
+          && d.stations.keys().hasOnly(['intake', 'anthro', 'grip', 'cmj', 'hop', 'medball', 'mcgill', 'segments', 'keiser'])
+          && stationOk(d.stations, 'intake') && stationOk(d.stations, 'anthro') && stationOk(d.stations, 'grip')
+          && stationOk(d.stations, 'cmj') && stationOk(d.stations, 'hop') && stationOk(d.stations, 'medball')
+          && stationOk(d.stations, 'mcgill') && stationOk(d.stations, 'segments') && stationOk(d.stations, 'keiser')
           && d.mcgillMode in ['wave', 'separate']
           && d.medballSide in ['trail', 'dominant']
           && d.golfTiming in ['same-day', 'within-7']
@@ -2220,7 +2364,14 @@ with:
           && d.hopEntry in ['summary', 'per-hop']
           && d.rsiModEntry in ['typed', 'computed']
           && d.coefficients is map
+          && d.coefficients.keys().hasOnly(['set', 'verified', 'boys', 'girls'])
+          && d.coefficients.get('set', null) is string && d.coefficients.set.size() <= 40
+          && d.coefficients.get('verified', null) is bool
+          && coefficientOk(d.coefficients.get('boys', null)) && coefficientOk(d.coefficients.get('girls', null))
           && d.thresholds is map
+          && d.thresholds.keys().hasOnly(['clubhead', 'cmj', 'hop', 'medball', 'grip', 'parallax'])
+          && thresholdOk(d.thresholds, 'clubhead') && thresholdOk(d.thresholds, 'cmj') && thresholdOk(d.thresholds, 'hop')
+          && thresholdOk(d.thresholds, 'medball') && thresholdOk(d.thresholds, 'grip') && thresholdOk(d.thresholds, 'parallax')
           && d.updatedAt == request.time
           && d.updatedBy == request.auth.uid;
       }
@@ -2244,8 +2395,10 @@ git commit -m "feat(rules): assessments windows, profiles, settings and the asse
 
 Staff write every section, other coaches the golf section of an open
 window, families nothing; per-section shapes and spec ranges; enteredBy is
-the writer; the med ball method is fixed for the season; users.assessor is
-the owner's to give.
+the writer; a window's season is its circuit date's and an old open window
+is never re-waved; the med ball method is fixed for the season and the
+season only moves forward; every settings value is checked;
+users.assessor is the owner's to give.
 
 Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 ```
@@ -2259,15 +2412,15 @@ Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 - Test: `frontend/src/portal/hooks/assessmentsLive.test.js`
 
 **Interfaces:**
-- Consumes: `ERR`, `LiveDataError`, `isLive`, `requireUser`, `wrap` (`hooks/live.js`); `bump` (`hooks/invalidate.js`); `SETTINGS_KEYS`, `circuitModeOf`, `validVersionLabel`, `withDefaults` (Task 2); `ASSESSMENT_SECTIONS`, `KINDS`, `seasonOf`, `weeksBetween`, `windowIdFor` (Task 2); the rules contract of Task 4.
+- Consumes: `ERR`, `LiveDataError`, `isLive`, `requireUser`, `wrap` (`hooks/live.js`); `bump` (`hooks/invalidate.js`); `academyDateISO` (`data/calendar.js`); `SETTINGS_KEYS`, `circuitModeOf`, `validVersionLabel`, `withDefaults` (Task 2); `ASSESSMENT_SECTIONS`, `KINDS`, `seasonOf`, `staleOpen`, `weeksBetween`, `windowIdFor` (Task 2); the rules contract of Task 4.
 - Produces:
   - `ASSESSMENTS_KEY = 'assessments'`, `ASSESSMENT_SETTINGS_KEY = 'assessmentSettings'`, `WINDOW_FIELDS`, `PROFILE_FIELDS`, `MAX_WAVE = 4`
   - `fetchAssessmentSettings(): Promise<object|null>`
   - `fetchAllAssessmentWindows(): Promise<Window[]>` (collection group; each row `{ id, athleteId, ...doc }`)
   - `fetchAthleteWindows(athleteId): Promise<Window[]>`
   - `fetchAllAssessmentProfiles(): Promise<Profile[]>`, `fetchAssessmentProfile(athleteId): Promise<Profile|null>`
-  - `startWave({ waveId, circuitDate, entries: { athleteId, kind, position }[], settings }): Promise<{ waveId, started: string[], skipped: { athleteId, reason }[] }>`
-  - `saveSection({ athleteId, windowId, section, value }): Promise<{ section }>` (never bumps)
+  - `startWave({ waveId, circuitDate, entries: { athleteId, kind, position }[], settings, today? }): Promise<{ waveId, started: string[], skipped: { athleteId, reason: 'complete'|'stale' }[] }>` (`today` defaults to `academyDateISO()`)
+  - `saveSection({ athleteId, windowId, section, value }): Promise<{ section }>` (never bumps; last writer wins - the circuit runs on one shared tablet)
   - `saveWindowFields({ athleteId, windowId, fields }): Promise<object>` (bumps only for `status`)
   - `saveAssessmentProfile({ athleteId, patch }): Promise<object>`
   - `saveAssessmentSettings(settings): Promise<{ protocolVersion }>`
@@ -2403,7 +2556,7 @@ describe('saveSection writes one section, its mark and the server time - nothing
 
 describe('startWave', () => {
   const settings = DEFAULT_SETTINGS;
-  const start = (entries, over = {}) => startWave({ waveId: 'wave-2026-11-03-abc', circuitDate: '2026-11-03', entries, settings, ...over });
+  const start = (entries, over = {}) => startWave({ waveId: 'wave-2026-11-03-abc', circuitDate: '2026-11-03', entries, settings, today: '2026-11-05', ...over });
 
   test('opens a window and a profile per new athlete, exactly as the rules admit', async () => {
     const r = await start([{ athleteId: 'a1', kind: 'baseline', position: 1 }]);
@@ -2430,6 +2583,19 @@ describe('startWave', () => {
     expect(mockWrites).toEqual([['update', 'athletes/a1/assessments/2026-27-baseline', {
       wave: { id: 'wave-2026-11-03-abc', position: 2, coachUid: 'phil' }, circuitDate: '2026-11-05', weeksOfExposure: 0, updatedAt: 'SERVER_TIME',
     }]]);
+  });
+
+  test('an open window more than 14 days old is skipped, never moved into the wave (it is completed instead)', async () => {
+    mockStore['athletes/a1/assessments/2026-27-baseline'] = { athleteId: 'a1', status: 'open', grip: { right: [30] }, circuitDate: '2026-11-03' };
+    const r = await start([{ athleteId: 'a1', kind: 'baseline', position: 1 }], { circuitDate: '2026-11-20', today: '2026-11-20' });
+    expect(r).toEqual({ waveId: 'wave-2026-11-03-abc', started: [], skipped: [{ athleteId: 'a1', reason: 'stale' }] });
+    expect(mockWrites).toEqual([]);
+  });
+
+  test('a profile already in a later season is left alone: the season only moves forward', async () => {
+    mockStore['athletes/a1/assessmentProfile/current'] = { athleteId: 'a1', firstTestDate: '2026-11-03', season: '2027-28' };
+    await start([{ athleteId: 'a1', kind: 'end', position: 1 }]);
+    expect(mockWrites.map(([, path]) => path)).toEqual(['athletes/a1/assessments/2026-27-end']);
   });
 
   test('a complete window is skipped; weeks of exposure count from the first test; a new season resets the med ball', async () => {
@@ -2514,7 +2680,8 @@ Create `frontend/src/portal/hooks/assessmentsLive.js`:
  *     trials. It never bumps - the wave screen holds what was typed, and a
  *     refetch of every window per keystroke would flash the screen;
  *   - startWave opens (or re-waves) up to four athletes' windows in one
- *     transaction, keeping every entry of a window that is already open.
+ *     transaction, keeping every entry of a window that is already open;
+ *     an open window more than 14 days old is skipped, never re-waved.
  * Seed mode (isLive() false) writes nothing and resolves, like every other
  * write off the live flag.
  */
@@ -2522,8 +2689,9 @@ import { collection, collectionGroup, doc, getDoc, getDocs, runTransaction, serv
 import { db } from '../../firebase';
 import { ERR, LiveDataError, isLive, requireUser, wrap } from './live';
 import { bump } from './invalidate';
+import { academyDateISO } from '../data/calendar';
 import { SETTINGS_KEYS, circuitModeOf, validVersionLabel, withDefaults } from '../data/assessmentSettings';
-import { ASSESSMENT_SECTIONS, KINDS, seasonOf, weeksBetween, windowIdFor } from '../data/assessmentWindows';
+import { ASSESSMENT_SECTIONS, KINDS, seasonOf, staleOpen, weeksBetween, windowIdFor } from '../data/assessmentWindows';
 
 export const ASSESSMENTS_KEY = 'assessments';
 export const ASSESSMENT_SETTINGS_KEY = 'assessmentSettings';
@@ -2617,11 +2785,15 @@ function profileFor(prev, athleteId, season, circuitDate, uid) {
  * Start a wave (spec 5, list -> Start wave): for each athlete, open the
  * window `{season}-{kind}` with the settings' circuit-mode snapshot, or - when
  * that window is already open (absent last time, or a second tablet) - move
- * it into this wave and keep every entry. A complete window is skipped.
- * Creates the profile (first-test date) when the athlete has none for this
- * season. One transaction: every athlete starts or none does.
+ * it into this wave and keep every entry. A complete window is skipped, and
+ * so is an open one whose circuit date is more than 14 days before `today`
+ * (reason 'stale': it is marked complete, never re-waved over its trials;
+ * firestore.rules refuses that move too). Creates the profile (first-test
+ * date) when the athlete has none for this season; a profile already in a
+ * later season is left alone (the rules let the season only move forward).
+ * One transaction: every athlete starts or none does.
  */
-export async function startWave({ waveId, circuitDate, entries, settings }) {
+export async function startWave({ waveId, circuitDate, entries, settings, today = academyDateISO() }) {
   if (!waveId || typeof waveId !== 'string') throw invalid('startWave: waveId is required.');
   const season = seasonOf(circuitDate);
   if (!season) throw invalid('startWave: circuitDate must be a YYYY-MM-DD date.');
@@ -2654,6 +2826,10 @@ export async function startWave({ waveId, circuitDate, entries, settings }) {
           skipped.push({ athleteId: r.e.athleteId, reason: 'complete' });
           continue;
         }
+        if (r.window.exists() && staleOpen(r.window.data(), today)) {
+          skipped.push({ athleteId: r.e.athleteId, reason: 'stale' });
+          continue;
+        }
         const wave = { id: waveId, position: r.e.position, coachUid: user.uid };
         const weeksOfExposure = weeksBetween(prof?.firstTestDate ?? circuitDate, circuitDate) ?? 0;
         if (r.window.exists()) {
@@ -2665,7 +2841,7 @@ export async function startWave({ waveId, circuitDate, entries, settings }) {
             createdAt: serverTimestamp(), updatedAt: serverTimestamp(),
           });
         }
-        if (!prof || !prof.firstTestDate || prof.season !== season) {
+        if (!prof || !prof.firstTestDate || (prof.season ?? '') < season) {
           tx.set(r.pRef, profileFor(prof, r.e.athleteId, season, circuitDate, user.uid));
         }
         started.push(r.e.athleteId);
@@ -2679,7 +2855,14 @@ export async function startWave({ waveId, circuitDate, entries, settings }) {
   return { waveId, ...result };
 }
 
-/** One section as typed (spec 5: "Every entry saves as typed"): the section, its enteredBy mark, the server time. */
+/**
+ * One section as typed (spec 5: "Every entry saves as typed"): the section,
+ * its enteredBy mark, the server time. The section is written whole, so two
+ * devices typing into the same section are last writer wins: the circuit
+ * runs on one shared tablet (spec decision 2), and the rules cannot tell a
+ * stale copy from a correction without a transaction, which would refuse
+ * every save made offline.
+ */
 export async function saveSection({ athleteId, windowId, section, value }) {
   if (!athleteId || !windowId) throw invalid('saveSection: athleteId and windowId are required.');
   if (!ASSESSMENT_SECTIONS.includes(section)) throw invalid(`saveSection: ${section} is not a section.`);
@@ -2771,7 +2954,8 @@ git add frontend/src/portal/hooks/assessmentsLive.js frontend/src/portal/hooks/a
 git commit -m "feat(assessments): Firestore adapter for windows, profiles, settings and the assessor flag
 
 One section per write, as the rules check it; startWave opens or re-waves
-up to four windows in one transaction and never resets an open window.
+up to four windows in one transaction, never resets an open window, and
+skips one left open past the 14-day entry window.
 
 Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 ```
@@ -2796,7 +2980,7 @@ Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
   - `useAssessmentRoster({ today }): { data: { rows }, loading, error }`
   - `useWave(waveId): { data: WaveView|null, loading, error }`
   - `useAthleteAssessments(athleteId): { data: { athlete: { id, name, dob, consents }|null, profile, windows, settings }, loading, error }`
-  - `useOpenAssessmentWindows(): { data: { byAthlete }, loading, error }`
+  - `useOpenAssessmentWindows({ enabled = true } = {}): { data: { byAthlete }, loading, error }` (disabled: no read, `byAthlete` empty - a viewer the rules refuse never sends the collection-group query)
 
 - [ ] **Step 1: Write the failing test**
 
@@ -2939,6 +3123,13 @@ describe('live mode', () => {
     const open = await mountHook(() => useOpenAssessmentWindows());
     expect(Object.keys(open.result.current.data.byAthlete)).toEqual(['a']);
     await open.unmount();
+  });
+
+  test('a viewer who may not read windows (mental without the permission) sends no read at all', async () => {
+    const off = await mountHook(() => useOpenAssessmentWindows({ enabled: false }));
+    expect(off.result.current.data).toEqual({ byAthlete: {} });
+    expect(adapter.fetchAllAssessmentWindows).not.toHaveBeenCalled();
+    await off.unmount();
   });
 });
 ```
@@ -3170,12 +3361,17 @@ export function useAthleteAssessments(athleteId) {
   );
 }
 
-/** Which athletes have an open window: the golf coach's "Clubhead speed" entry on the session roster. */
-export function useOpenAssessmentWindows() {
-  const live = isLive();
+/**
+ * Which athletes have an open window: the golf coach's "Clubhead speed"
+ * entry on the session roster. `enabled: false` (a viewer the rules refuse,
+ * such as a mental account without the Assessments permission) reads
+ * nothing and answers no open windows.
+ */
+export function useOpenAssessmentWindows({ enabled = true } = {}) {
+  const live = isLive() && enabled;
   const gen = useInvalidation(ASSESSMENTS_KEY);
   return useSeedResource(
-    live ? null : { byAthlete: openWindowsByAthlete(SEED_ASSESSMENT_WINDOWS) },
+    live ? null : { byAthlete: enabled ? openWindowsByAthlete(SEED_ASSESSMENT_WINDOWS) : {} },
     live ? { source: async () => ({ byAthlete: openWindowsByAthlete(await fetchAllAssessmentWindows()) }), deps: ['assessment-open', gen] } : undefined
   );
 }
@@ -3200,29 +3396,20 @@ Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 
 ---
 
-### Task 7: Remove Diagnostic Capture
+### Task 7: "Baseline due" on the admin dashboard
 
-Spec 8: production holds 0 diagnostics docs (checked 2026-10-14). Everything of the old capture goes: the screen and its route and tab, `DIAGNOSTIC_SECTIONS`, the diagnostics hooks and live functions, the diagnostics and collection-group rules, the AthleteDetail capture card, the unrouted Practice DNA stub, the seed's diagnostics and DATA-MODEL's diagnostics section. The admin "Diagnostic not entered" row becomes "Baseline due", read from the assessment windows. The athlete home's "Book your Diagnostic" card keyed off the diagnostics read; with that read gone it shows only in the harness's `new` variant.
+Spec 8: the admin "Diagnostic not entered" row becomes "Baseline due", read from the assessment windows instead of the diagnostics collection group. This task replaces that read (and `fetchAllDiagnostics` with it); Task 8 removes the rest of Diagnostic Capture from the portal and Task 9 its rules, seed and data-model section. An athlete is "Baseline due" when they have no baseline window in the current season (`seasonOf(today)`), the same rule the assessments list uses.
 
 **Files:**
-- Delete: `frontend/src/portal/screens/DiagnosticCapture.js`, `frontend/src/portal/screens/DiagnosticCapture.test.js`, `frontend/src/portal/screens/PracticeDNA.js`
-- Modify: `frontend/src/portal/PortalRoutes.js` (~lines 39, 63, 104, 111, 894-902), `frontend/src/portal/PortalRoutes.warm.test.js:34`, `frontend/src/portal/PortalRoutes.test.js` (append a test)
-- Modify: `frontend/src/portal/components/BottomTabBar.js:63-82`, `frontend/src/portal/components/BottomTabBar.test.js:54-62`
-- Modify: `frontend/src/portal/StatesHarness.js` (~lines 33, 35, 169-170, 241-243, 703)
-- Modify: `frontend/src/portal/hooks/index.js` (imports ~44-123, 150-160; ~2741-2818; ~2915-2971; ~3031-3046; ~3563-3742; ~3824-3872)
-- Modify: `frontend/src/portal/hooks/live.js` (import line 18; ~1821-1891; ~1967-1984)
-- Modify: `frontend/src/portal/screens/AthleteDetail.js` (~19-39, 75, 158, 241-303), `frontend/src/portal/screens/AthleteDetail.test.js:15`
-- Modify: `frontend/src/portal/screens/AthleteDashboard.js:147-149`, `frontend/src/portal/screens/AthleteDashboard.test.js`
-- Modify: `frontend/src/portal/data/seed.js` (~324-326, 348-400), `frontend/src/portal/data/admin.js:22`, `frontend/src/portal/data/athlete.js` (~34-140)
-- Modify: `frontend/src/portal/hooks/index.contract.test.js` (~19, 130, 197), `frontend/src/portal/hooks/index.reserved.test.js` (~20, 217)
+- Modify: `frontend/src/portal/hooks/index.js` (imports ~44-123; `deriveWhoNeedsCall` ~3563-3630; `liveAdminDashboard` ~3650-3742; `useAdminDashboard` ~3824-3872)
+- Modify: `frontend/src/portal/hooks/live.js` (import line 18; `fetchAllDiagnostics` ~1967-1984)
+- Modify: `frontend/src/portal/data/seed.js` (~324-326), `frontend/src/portal/data/admin.js:22`
+- Modify: `frontend/src/portal/hooks/index.contract.test.js` (~130), `frontend/src/portal/hooks/index.reserved.test.js` (~20, 217)
 - Create: `frontend/src/portal/hooks/index.assessments.test.js`
-- Modify: `firestore.rules` (~394-454, ~477-507, ~1590-1595), `scripts/rules-probes/assessments.mjs` (append), `scripts/verify-rules.mjs` (import, runPass)
-- Modify: `scripts/seed-firestore.mjs` (~139-145, ~985-1045, ~1531, ~1688-1694), `docs/portal/DATA-MODEL.md` (~28, ~812-876, ~1357-1366, ~2055-2058)
-- Test: the files above.
 
 **Interfaces:**
-- Consumes: `ASSESSMENTS_KEY`, `fetchAllAssessmentWindows` (Task 5); `groupListAs`, `tok`, `uids`, `ATH` in `scripts/rules-probes/assessments.mjs` (Task 4).
-- Produces: `deriveWhoNeedsCall({ athletes, pendingCount, noshowBookings, contractLogs, baselineAthleteIds: string[]|null, today })` returning `{ pendingEnrollment, noshows, contractBehind, baselineDue: { athleteId, name }[] }`; admin outstanding rows `{ id: 'baseline-<athleteId>', kind: 'baseline', why: 'Baseline due', tag: 'Assessment', tone: 'yellow' }`; `taskDiagnosticsGone()` in `scripts/rules-probes/assessments.mjs`; `BottomTabBar` coach set `Today, Roster` and Phil set `Sessions, Tour` (Task 8 adds Assessments).
+- Consumes: `ASSESSMENTS_KEY`, `fetchAllAssessmentWindows` (Task 5); `seasonOf` (Task 2).
+- Produces: `deriveWhoNeedsCall({ athletes, pendingCount, noshowBookings, contractLogs, baselineAthleteIds: string[]|null, today })` returning `{ pendingEnrollment, noshows, contractBehind, baselineDue: { athleteId, name }[] }`; admin outstanding rows `{ id: 'baseline-<athleteId>', kind: 'baseline', why: 'Baseline due', tag: 'Assessment', tone: 'yellow' }`; `hooks/index.assessments.test.js` (Task 10 adds to it).
 
 - [ ] **Step 1: Write the failing tests**
 
@@ -3232,7 +3419,7 @@ Create `frontend/src/portal/hooks/index.assessments.test.js`:
 /**
  * Diagnostic Capture is gone (assessments spec 8): the admin "Diagnostic not
  * entered" row is "Baseline due" now, read from the assessment windows - and
- * a refused windows read (a portal build live before the rules) drops those
+ * a refused windows read (rules that do not grant it yet) drops those
  * rows instead of the whole dashboard.
  */
 jest.mock('../../firebase', () => ({ __esModule: true, default: {}, auth: { currentUser: null }, db: {}, functions: {}, storage: {} }));
@@ -3301,12 +3488,19 @@ describe('the admin dashboard', () => {
     }
   });
 
-  test('"Baseline due" for an athlete with no baseline window (an open one counts as tested)', async () => {
-    adapter.fetchAllAssessmentWindows.mockResolvedValue([{ id: '2026-27-baseline', athleteId: 'a2', kind: 'baseline', status: 'open' }]);
+  test('"Baseline due" for an athlete with no baseline window this season (an open one counts as tested)', async () => {
+    adapter.fetchAllAssessmentWindows.mockResolvedValue([{ id: '2026-27-baseline', athleteId: 'a2', season: '2026-27', kind: 'baseline', status: 'open' }]);
     const h = await mountHook(() => useAdminDashboard());
     expect(h.result.current.data.outstanding).toEqual([
       { id: 'baseline-a1', kind: 'baseline', athleteId: 'a1', who: 'Jordan Whitfield', why: 'Baseline due', tag: 'Assessment', tone: 'yellow', packageIds: null },
     ]);
+    await h.unmount();
+  });
+
+  test('a baseline from last season does not count, as on the assessments list', async () => {
+    adapter.fetchAllAssessmentWindows.mockResolvedValue([{ id: '2025-26-baseline', athleteId: 'a2', season: '2025-26', kind: 'baseline', status: 'complete' }]);
+    const h = await mountHook(() => useAdminDashboard());
+    expect(h.result.current.data.outstanding.map((r) => r.id)).toEqual(['baseline-a1', 'baseline-a2']);
     await h.unmount();
   });
 
@@ -3320,6 +3514,422 @@ describe('the admin dashboard', () => {
   });
 });
 ```
+
+- [ ] **Step 2: Run the tests to verify they fail**
+
+Run: `cd frontend && CI=true npx react-scripts test --watchAll=false src/portal/hooks/index.assessments.test.js`
+Expected: FAIL - `baselineDue` is undefined and the dashboard still reads diagnostics.
+
+- [ ] **Step 3: The admin dashboard reads the assessment windows**
+
+In `frontend/src/portal/hooks/index.js`, replace:
+
+```js
+  fetchAllAthletes,
+  fetchAllDiagnostics,
+  fetchAllHouseholds,
+```
+
+with:
+
+```js
+  fetchAllAthletes,
+  fetchAllHouseholds,
+```
+
+then replace:
+
+```js
+import useScholarships from './scholarships';
+```
+
+with:
+
+```js
+import useScholarships from './scholarships';
+// 2026-10-14 (assessments spec 8): the admin "Baseline due" row reads the
+// assessment windows, the module that replaced the diagnostics reads.
+import { ASSESSMENTS_KEY, fetchAllAssessmentWindows } from './assessmentsLive';
+import { seasonOf } from '../data/assessmentWindows';
+```
+
+Then, in `frontend/src/portal/hooks/index.js`, replace:
+
+```js
+ * @param {Array} args.publishedDiagnosticAthleteIds - athleteIds with >=1 published diagnostic.
+```
+
+with:
+
+```js
+ * @param {Array|null} args.baselineAthleteIds - athleteIds with a baseline assessment window this season (any status); null when the windows could not be read, which lists nobody.
+```
+
+then replace:
+
+```js
+  contractLogs,
+  publishedDiagnosticAthleteIds,
+  today,
+}) {
+```
+
+with:
+
+```js
+  contractLogs,
+  baselineAthleteIds,
+  today,
+}) {
+```
+
+then replace:
+
+```js
+  const publishedSet = new Set(publishedDiagnosticAthleteIds ?? []);
+  const missingDiagnostic = athletes
+    .filter((a) => !publishedSet.has(a.id))
+    .map((a) => ({ athleteId: a.id, name: a.name ?? null }));
+
+  return {
+    pendingEnrollment: { count: pendingCount },
+    noshows,
+    contractBehind,
+    missingDiagnostic,
+  };
+```
+
+with:
+
+```js
+  // Assessments spec 8: "Baseline due" replaces "Diagnostic not entered" -
+  // an athlete with no baseline window is due one. Unknown (null) lists
+  // nobody rather than every athlete.
+  const tested = new Set(baselineAthleteIds ?? []);
+  const baselineDue = baselineAthleteIds == null
+    ? []
+    : athletes.filter((a) => !tested.has(a.id)).map((a) => ({ athleteId: a.id, name: a.name ?? null }));
+
+  return {
+    pendingEnrollment: { count: pendingCount },
+    noshows,
+    contractBehind,
+    baselineDue,
+  };
+```
+
+then replace:
+
+```js
+  const [athletes, sessionsThisWeek, pending, noshowBookings, contractLogs, diagnostics, households] =
+    await Promise.all([
+      fetchAllAthletes(),
+      fetchSessionsInRange(weekStart, weekEnd),
+      fetchPendingEnrollmentRequests(),
+      fetchNoShowBookingsSince(monthStart),
+      fetchContractLogsSince(monthStart),
+      fetchAllDiagnostics(),
+      fetchAllHouseholds(),
+    ]);
+```
+
+with:
+
+```js
+  // The assessment windows read may fail on its own (rules that do not
+  // grant it yet): that drops the "Baseline due" rows, never the dashboard.
+  const [athletes, sessionsThisWeek, pending, noshowBookings, contractLogs, windows, households] =
+    await Promise.all([
+      fetchAllAthletes(),
+      fetchSessionsInRange(weekStart, weekEnd),
+      fetchPendingEnrollmentRequests(),
+      fetchNoShowBookingsSince(monthStart),
+      fetchContractLogsSince(monthStart),
+      fetchAllAssessmentWindows().catch(() => null),
+      fetchAllHouseholds(),
+    ]);
+```
+
+then replace:
+
+```js
+  const publishedDiagnosticAthleteIds = diagnostics
+    .filter((d) => d.status === 'published')
+    .map((d) => d.athleteId);
+  const who = deriveWhoNeedsCall({
+    athletes,
+    pendingCount: pending.length,
+    noshowBookings,
+    contractLogs,
+    publishedDiagnosticAthleteIds,
+    today,
+  });
+```
+
+with:
+
+```js
+  // This season's baselines only (the list's rule, data/assessmentWindows.js dueStatus): last season's do not count.
+  const season = seasonOf(today);
+  const baselineAthleteIds = windows == null ? null : windows.filter((w) => w.kind === 'baseline' && w.season === season).map((w) => w.athleteId);
+  const who = deriveWhoNeedsCall({
+    athletes,
+    pendingCount: pending.length,
+    noshowBookings,
+    contractLogs,
+    baselineAthleteIds,
+    today,
+  });
+```
+
+then replace:
+
+```js
+  for (const d of who.missingDiagnostic) {
+    outstanding.push({
+      id: `diagnostic-${d.athleteId}`,
+      kind: 'diagnostic',
+      athleteId: d.athleteId,
+      who: d.name ?? d.athleteId,
+      why: 'Diagnostic not entered',
+      tag: 'Onboarding',
+      tone: 'yellow',
+      packageIds: null,
+    });
+  }
+```
+
+with:
+
+```js
+  for (const d of who.baselineDue) {
+    outstanding.push({
+      id: `baseline-${d.athleteId}`,
+      kind: 'baseline',
+      athleteId: d.athleteId,
+      who: d.name ?? d.athleteId,
+      why: 'Baseline due',
+      tag: 'Assessment',
+      tone: 'yellow',
+      packageIds: null,
+    });
+  }
+```
+
+then replace:
+
+```js
+  const contractLogsGen = useInvalidation('contractLogs');
+  const diagnosticsGen = useInvalidation('diagnostics');
+  const enrollmentGen = useInvalidation('enrollmentRequests');
+```
+
+with:
+
+```js
+  const contractLogsGen = useInvalidation('contractLogs');
+  const assessmentsGen = useInvalidation(ASSESSMENTS_KEY);
+  const enrollmentGen = useInvalidation('enrollmentRequests');
+```
+
+then replace:
+
+```js
+            contractLogsGen,
+            diagnosticsGen,
+            enrollmentGen,
+```
+
+with:
+
+```js
+            contractLogsGen,
+            assessmentsGen,
+            enrollmentGen,
+```
+
+In `frontend/src/portal/hooks/live.js`, replace:
+
+```js
+  collection,
+  collectionGroup,
+  deleteDoc,
+```
+
+with:
+
+```js
+  collection,
+  deleteDoc,
+```
+
+and the collection-group read:
+
+In `frontend/src/portal/hooks/live.js`, replace:
+
+```
+/**
+ * Every diagnostics capture academy-wide, via the collectionGroup read
+ * firestore.rules' `/{path=**}/diagnostics/{captureId}` match grants
+ * (contract v1.8, C + D). Unfiltered and sorted/filtered client-side
+ * (status === 'published' for the "no diagnostic yet" list) rather than a
+ * `where('status', ...)` server-side filter, so this needs no
+ * collection-group-scoped index at all — the routing lane's own
+ * "index-free where reasonably possible" preference, since collection-group
+ * equality indexes are NOT automatic the way single-collection ones are.
+ */
+export async function fetchAllDiagnostics() {
+  try {
+    const snap = await getDocs(collectionGroup(db, 'diagnostics'));
+    return snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+  } catch (err) {
+    throw wrap(err, 'fetchAllDiagnostics');
+  }
+}
+
+/**
+```
+
+with:
+
+```
+/**
+```
+
+In `frontend/src/portal/hooks/index.contract.test.js`, replace:
+
+```js
+    deriveWhoNeedsCall({ athletes, pendingCount: 0, noshowBookings: [], contractLogs, publishedDiagnosticAthleteIds: [], today })
+```
+
+with:
+
+```js
+    deriveWhoNeedsCall({ athletes, pendingCount: 0, noshowBookings: [], contractLogs, baselineAthleteIds: [], today })
+```
+
+In `frontend/src/portal/hooks/index.reserved.test.js`, replace:
+
+```js
+  fetchAllAthletes: jest.fn(),
+  fetchAllDiagnostics: jest.fn(),
+  fetchAllHouseholds: jest.fn(),
+```
+
+with:
+
+```js
+  fetchAllAthletes: jest.fn(),
+  fetchAllHouseholds: jest.fn(),
+```
+
+then replace:
+
+```js
+jest.mock('./grace', () => ({ ...jest.requireActual('./grace'), __esModule: true, fetchTokenPeriod: jest.fn() }));
+```
+
+with:
+
+```js
+jest.mock('./grace', () => ({ ...jest.requireActual('./grace'), __esModule: true, fetchTokenPeriod: jest.fn() }));
+jest.mock('./assessmentsLive', () => ({ ...jest.requireActual('./assessmentsLive'), __esModule: true, fetchAllAssessmentWindows: jest.fn() }));
+```
+
+then replace:
+
+```js
+import * as grace from './grace';
+```
+
+with:
+
+```js
+import * as grace from './grace';
+import * as adapter from './assessmentsLive';
+```
+
+then replace:
+
+```js
+      live.fetchContractLogsSince, live.fetchAllDiagnostics, live.fetchAllHouseholds]) fetch.mockResolvedValue([]);
+```
+
+with:
+
+```js
+      live.fetchContractLogsSince, adapter.fetchAllAssessmentWindows, live.fetchAllHouseholds]) fetch.mockResolvedValue([]);
+```
+
+In `frontend/src/portal/data/seed.js`, replace:
+
+```js
+  { id: 'o1', label: 'Diagnostic not entered', detail: '2 athletes' },
+```
+
+with:
+
+```js
+  { id: 'o1', label: 'Baseline due', detail: '2 athletes' },
+```
+
+In `frontend/src/portal/data/admin.js`, replace:
+
+```js
+  { id: 'o4', who: '2 athletes', why: 'Diagnostic not entered since enrollment', tag: 'Onboarding', tone: 'yellow', packageIds: ['t-6'] },
+```
+
+with:
+
+```js
+  { id: 'o4', who: '2 athletes', why: 'Baseline due', tag: 'Assessment', tone: 'yellow', packageIds: ['t-6'] },
+```
+
+- [ ] **Step 4: Run the tests to verify they pass**
+
+Run: `cd frontend && CI=true npx react-scripts test --watchAll=false src/portal/hooks src/portal/screens/AdminDashboard`
+Expected: PASS - `index.assessments.test.js`, `index.contract.test.js`, `index.reserved.test.js` and every other hooks suite.
+
+Run: `cd frontend && npx eslint src/portal`
+Expected: no output (no unused `collectionGroup` or `fetchAllDiagnostics` left behind).
+
+- [ ] **Step 5: Commit**
+
+```bash
+git add frontend/src/portal/hooks/index.js frontend/src/portal/hooks/live.js frontend/src/portal/hooks/index.assessments.test.js frontend/src/portal/hooks/index.contract.test.js frontend/src/portal/hooks/index.reserved.test.js frontend/src/portal/data/seed.js frontend/src/portal/data/admin.js
+git commit -m "feat(assessments): Baseline due on the admin dashboard
+
+The Diagnostic not entered row becomes Baseline due, read from this
+season's assessment windows; a refused windows read drops those rows,
+never the dashboard. The diagnostics collection-group read goes.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
+```
+
+---
+
+### Task 8: Remove Diagnostic Capture from the portal
+
+Spec 8: production holds 0 diagnostics docs (checked 2026-10-14). Everything of the old capture leaves the portal: the screen and its route and tab, `DIAGNOSTIC_SECTIONS`, the diagnostics hooks and live functions, the AthleteDetail capture card and the unrouted Practice DNA stub. The athlete home's "Book your Diagnostic" card keyed off the diagnostics read; with that read gone it shows only in the harness's `new` variant. The rules, the emulator seed and DATA-MODEL follow in Task 9.
+
+**Files:**
+- Delete: `frontend/src/portal/screens/DiagnosticCapture.js`, `frontend/src/portal/screens/DiagnosticCapture.test.js`, `frontend/src/portal/screens/PracticeDNA.js`
+- Modify: `frontend/src/portal/PortalRoutes.js` (~lines 39, 63, 104, 111, 894-902), `frontend/src/portal/PortalRoutes.warm.test.js:34`, `frontend/src/portal/PortalRoutes.test.js` (append a test)
+- Modify: `frontend/src/portal/components/BottomTabBar.js:63-82`, `frontend/src/portal/components/BottomTabBar.test.js:54-62`
+- Modify: `frontend/src/portal/StatesHarness.js` (~lines 33, 35, 169-170, 241-243, 703)
+- Modify: `frontend/src/portal/hooks/index.js` (imports ~44-123, 150-160; ~2741-2818; ~2915-2971; ~3031-3046)
+- Modify: `frontend/src/portal/hooks/live.js` (~1821-1891)
+- Modify: `frontend/src/portal/screens/AthleteDetail.js` (~19-39, 75, 158, 241-303), `frontend/src/portal/screens/AthleteDetail.test.js:15`
+- Modify: `frontend/src/portal/screens/AthleteDashboard.js:147-149`, `frontend/src/portal/screens/AthleteDashboard.test.js`
+- Modify: `frontend/src/portal/data/seed.js` (~348-400), `frontend/src/portal/data/athlete.js` (~34-140)
+- Modify: `frontend/src/portal/hooks/index.contract.test.js` (~19, 197)
+- Test: the test files above.
+
+**Interfaces:**
+- Consumes: Task 7's `hooks/index.js` (the admin dashboard no longer reads diagnostics).
+- Produces: `BottomTabBar` coach set `Today, Roster` and Phil set `Sessions, Tour` (Task 10 adds Assessments); no `useDiagnostic`, `usePracticeDNA`, `fetchAthleteDiagnostics` or `saveDiagnosticCapture` anywhere in the portal.
+
+- [ ] **Step 1: Write the failing tests**
 
 In `frontend/src/portal/components/BottomTabBar.test.js`, replace:
 
@@ -3401,62 +4011,10 @@ test("a coach's old Capture link lands on their own home (Diagnostic Capture is 
 });
 ```
 
-Append to `scripts/rules-probes/assessments.mjs`:
-
-```js
-// Assessments spec 8: Diagnostic Capture is gone, and every diagnostics grant with it (production held 0 docs on 2026-10-14).
-export async function taskDiagnosticsGone() {
-  console.log('Diagnostics: no client reads or writes any more (Diagnostic Capture removed)');
-  const owner = tok(uids.owner);
-  await seed('users', uids.owner, { role: 'owner' });
-  await seed('athletes', ATH, { name: 'Probe Athlete', householdId: 'hh', dob: '2012-04-10', contractMinutes: null, coachId: 'coach-probe', packageId: 't-6' });
-  await seed(`athletes/${ATH}/diagnostics`, 'old-1', { athleteId: ATH, capturedBy: 'coach-probe', status: 'published', values: {}, notes: null });
-  try {
-    for (const [who, auth] of [['the owner', owner], ['ops', t.ops], ['the assigned coach', t.coach], ['the parent', t.parent]]) {
-      expect(`${who}: diagnostics read refused`, await call('GET', `/athletes/${ATH}/diagnostics/old-1`, null, auth).then(status), 403);
-    }
-    expect('the owner: diagnostics collection-group list refused', await groupListAs(owner, 'diagnostics'), 403);
-    expect('the assigned coach: a new capture refused', await createAs(t.coach, `athletes/${ATH}/diagnostics`, 'new-1',
-      { athleteId: ATH, capturedBy: 'coach-probe', status: 'draft', values: {}, notes: null }, ['capturedAt', 'updatedAt']), 403);
-  } finally {
-    await del(`athletes/${ATH}/diagnostics`, 'old-1');
-    await del('athletes', ATH);
-    await del('users', uids.owner);
-  }
-}
-```
-
-In `scripts/verify-rules.mjs`, replace:
-
-```js
-import { taskAssessments } from './rules-probes/assessments.mjs';
-```
-
-with:
-
-```js
-import { taskAssessments, taskDiagnosticsGone } from './rules-probes/assessments.mjs';
-```
-
-and replace:
-
-```js
-    await taskAssessments();
-```
-
-with:
-
-```js
-    await taskAssessments(); await taskDiagnosticsGone();
-```
-
 - [ ] **Step 2: Run the tests to verify they fail**
 
-Run: `cd frontend && CI=true npx react-scripts test --watchAll=false src/portal/hooks/index.assessments.test.js src/portal/components/BottomTabBar.test.js src/portal/screens/AthleteDashboard.test.js src/portal/PortalRoutes.test.js`
-Expected: FAIL - `index.assessments.test.js` (`baselineDue` is undefined; the dashboard still reads diagnostics), `BottomTabBar.test.js` (received `['Today', 'Roster', 'Capture']`), `AthleteDashboard.test.js` (text contains "Book your Diagnostic"), `PortalRoutes.test.js` (pathname is `/portal/capture`).
-
-Run: `npx firebase-tools emulators:exec --only firestore --project rypacad "node --env-file=scripts/emulator.env scripts/verify-rules.mjs"`
-Expected: FAIL - `the owner: diagnostics read refused -> 200 (wanted 403)` and the other Diagnostics lines.
+Run: `cd frontend && CI=true npx react-scripts test --watchAll=false src/portal/components/BottomTabBar.test.js src/portal/screens/AthleteDashboard.test.js src/portal/PortalRoutes.test.js`
+Expected: FAIL - `BottomTabBar.test.js` (received `['Today', 'Roster', 'Capture']`), `AthleteDashboard.test.js` (text contains "Book your Diagnostic"), `PortalRoutes.test.js` (pathname is `/portal/capture`).
 
 - [ ] **Step 3: Delete the screens and their route, tab and harness entries**
 
@@ -3650,14 +4208,11 @@ with:
             <SavedToast message="Draft saved" />
 ```
 
-- [ ] **Step 4: Remove the diagnostics hooks and live functions; "Baseline due" on Admin**
+- [ ] **Step 4: Remove the diagnostics hooks and live functions**
 
 In `frontend/src/portal/hooks/index.js`, replace:
 
 ```js
-  fetchAllAthletes,
-  fetchAllDiagnostics,
-  fetchAllHouseholds,
   fetchAthlete,
   fetchAthleteDiagnostics,
   fetchAthletesByIds,
@@ -3666,8 +4221,6 @@ In `frontend/src/portal/hooks/index.js`, replace:
 with:
 
 ```js
-  fetchAllAthletes,
-  fetchAllHouseholds,
   fetchAthlete,
   fetchAthletesByIds,
 ```
@@ -3685,21 +4238,6 @@ with:
 ```js
   isLive,
   saveNotificationPrefs,
-```
-
-then replace:
-
-```js
-import useScholarships from './scholarships';
-```
-
-with:
-
-```js
-import useScholarships from './scholarships';
-// 2026-10-14 (assessments spec 8): the admin "Baseline due" row reads the
-// assessment windows, the module that replaced the diagnostics reads.
-import { ASSESSMENTS_KEY, fetchAllAssessmentWindows } from './assessmentsLive';
 ```
 
 then replace:
@@ -3909,215 +4447,6 @@ with:
 /** GET + POST /athletes/:id/commitment-contract (07). */
 ```
 
-Then, in `frontend/src/portal/hooks/index.js`, replace:
-
-```js
- * @param {Array} args.publishedDiagnosticAthleteIds - athleteIds with >=1 published diagnostic.
-```
-
-with:
-
-```js
- * @param {Array|null} args.baselineAthleteIds - athleteIds with a baseline assessment window (any status); null when the windows could not be read, which lists nobody.
-```
-
-then replace:
-
-```js
-  contractLogs,
-  publishedDiagnosticAthleteIds,
-  today,
-}) {
-```
-
-with:
-
-```js
-  contractLogs,
-  baselineAthleteIds,
-  today,
-}) {
-```
-
-then replace:
-
-```js
-  const publishedSet = new Set(publishedDiagnosticAthleteIds ?? []);
-  const missingDiagnostic = athletes
-    .filter((a) => !publishedSet.has(a.id))
-    .map((a) => ({ athleteId: a.id, name: a.name ?? null }));
-
-  return {
-    pendingEnrollment: { count: pendingCount },
-    noshows,
-    contractBehind,
-    missingDiagnostic,
-  };
-```
-
-with:
-
-```js
-  // Assessments spec 8: "Baseline due" replaces "Diagnostic not entered" -
-  // an athlete with no baseline window is due one. Unknown (null) lists
-  // nobody rather than every athlete.
-  const tested = new Set(baselineAthleteIds ?? []);
-  const baselineDue = baselineAthleteIds == null
-    ? []
-    : athletes.filter((a) => !tested.has(a.id)).map((a) => ({ athleteId: a.id, name: a.name ?? null }));
-
-  return {
-    pendingEnrollment: { count: pendingCount },
-    noshows,
-    contractBehind,
-    baselineDue,
-  };
-```
-
-then replace:
-
-```js
-  const [athletes, sessionsThisWeek, pending, noshowBookings, contractLogs, diagnostics, households] =
-    await Promise.all([
-      fetchAllAthletes(),
-      fetchSessionsInRange(weekStart, weekEnd),
-      fetchPendingEnrollmentRequests(),
-      fetchNoShowBookingsSince(monthStart),
-      fetchContractLogsSince(monthStart),
-      fetchAllDiagnostics(),
-      fetchAllHouseholds(),
-    ]);
-```
-
-with:
-
-```js
-  // The assessment windows read may fail on its own (a portal build live
-  // before the rules that grant it): that drops the "Baseline due" rows,
-  // never the dashboard.
-  const [athletes, sessionsThisWeek, pending, noshowBookings, contractLogs, windows, households] =
-    await Promise.all([
-      fetchAllAthletes(),
-      fetchSessionsInRange(weekStart, weekEnd),
-      fetchPendingEnrollmentRequests(),
-      fetchNoShowBookingsSince(monthStart),
-      fetchContractLogsSince(monthStart),
-      fetchAllAssessmentWindows().catch(() => null),
-      fetchAllHouseholds(),
-    ]);
-```
-
-then replace:
-
-```js
-  const publishedDiagnosticAthleteIds = diagnostics
-    .filter((d) => d.status === 'published')
-    .map((d) => d.athleteId);
-  const who = deriveWhoNeedsCall({
-    athletes,
-    pendingCount: pending.length,
-    noshowBookings,
-    contractLogs,
-    publishedDiagnosticAthleteIds,
-    today,
-  });
-```
-
-with:
-
-```js
-  const baselineAthleteIds = windows == null ? null : windows.filter((w) => w.kind === 'baseline').map((w) => w.athleteId);
-  const who = deriveWhoNeedsCall({
-    athletes,
-    pendingCount: pending.length,
-    noshowBookings,
-    contractLogs,
-    baselineAthleteIds,
-    today,
-  });
-```
-
-then replace:
-
-```js
-  for (const d of who.missingDiagnostic) {
-    outstanding.push({
-      id: `diagnostic-${d.athleteId}`,
-      kind: 'diagnostic',
-      athleteId: d.athleteId,
-      who: d.name ?? d.athleteId,
-      why: 'Diagnostic not entered',
-      tag: 'Onboarding',
-      tone: 'yellow',
-      packageIds: null,
-    });
-  }
-```
-
-with:
-
-```js
-  for (const d of who.baselineDue) {
-    outstanding.push({
-      id: `baseline-${d.athleteId}`,
-      kind: 'baseline',
-      athleteId: d.athleteId,
-      who: d.name ?? d.athleteId,
-      why: 'Baseline due',
-      tag: 'Assessment',
-      tone: 'yellow',
-      packageIds: null,
-    });
-  }
-```
-
-then replace:
-
-```js
-  const contractLogsGen = useInvalidation('contractLogs');
-  const diagnosticsGen = useInvalidation('diagnostics');
-  const enrollmentGen = useInvalidation('enrollmentRequests');
-```
-
-with:
-
-```js
-  const contractLogsGen = useInvalidation('contractLogs');
-  const assessmentsGen = useInvalidation(ASSESSMENTS_KEY);
-  const enrollmentGen = useInvalidation('enrollmentRequests');
-```
-
-then replace:
-
-```js
-            contractLogsGen,
-            diagnosticsGen,
-            enrollmentGen,
-```
-
-with:
-
-```js
-            contractLogsGen,
-            assessmentsGen,
-            enrollmentGen,
-```
-
-In `frontend/src/portal/hooks/live.js`, replace:
-
-```js
-  collection,
-  collectionGroup,
-  deleteDoc,
-```
-
-with:
-
-```js
-  collection,
-  deleteDoc,
-```
-
 then delete the two per-athlete diagnostics functions:
 
 In `frontend/src/portal/hooks/live.js`, replace:
@@ -4205,39 +4534,6 @@ with:
 /**
 ```
 
-and the collection-group read:
-
-In `frontend/src/portal/hooks/live.js`, replace:
-
-```
-/**
- * Every diagnostics capture academy-wide, via the collectionGroup read
- * firestore.rules' `/{path=**}/diagnostics/{captureId}` match grants
- * (contract v1.8, C + D). Unfiltered and sorted/filtered client-side
- * (status === 'published' for the "no diagnostic yet" list) rather than a
- * `where('status', ...)` server-side filter, so this needs no
- * collection-group-scoped index at all — the routing lane's own
- * "index-free where reasonably possible" preference, since collection-group
- * equality indexes are NOT automatic the way single-collection ones are.
- */
-export async function fetchAllDiagnostics() {
-  try {
-    const snap = await getDocs(collectionGroup(db, 'diagnostics'));
-    return snap.docs.map((d) => ({ id: d.id, ...d.data() }));
-  } catch (err) {
-    throw wrap(err, 'fetchAllDiagnostics');
-  }
-}
-
-/**
-```
-
-with:
-
-```
-/**
-```
-
 In `frontend/src/portal/hooks/index.contract.test.js`, replace:
 
 ```js
@@ -4256,18 +4552,6 @@ with:
 then replace:
 
 ```js
-    deriveWhoNeedsCall({ athletes, pendingCount: 0, noshowBookings: [], contractLogs, publishedDiagnosticAthleteIds: [], today })
-```
-
-with:
-
-```js
-    deriveWhoNeedsCall({ athletes, pendingCount: 0, noshowBookings: [], contractLogs, baselineAthleteIds: [], today })
-```
-
-then replace:
-
-```js
     live.fetchContractLogs.mockResolvedValue([]);
     live.fetchAthleteDiagnostics.mockResolvedValue([]);
     const h = await mountHook(() => useAthleteDashboard());
@@ -4278,59 +4562,6 @@ with:
 ```js
     live.fetchContractLogs.mockResolvedValue([]);
     const h = await mountHook(() => useAthleteDashboard());
-```
-
-In `frontend/src/portal/hooks/index.reserved.test.js`, replace:
-
-```js
-  fetchAllAthletes: jest.fn(),
-  fetchAllDiagnostics: jest.fn(),
-  fetchAllHouseholds: jest.fn(),
-```
-
-with:
-
-```js
-  fetchAllAthletes: jest.fn(),
-  fetchAllHouseholds: jest.fn(),
-```
-
-then replace:
-
-```js
-jest.mock('./grace', () => ({ ...jest.requireActual('./grace'), __esModule: true, fetchTokenPeriod: jest.fn() }));
-```
-
-with:
-
-```js
-jest.mock('./grace', () => ({ ...jest.requireActual('./grace'), __esModule: true, fetchTokenPeriod: jest.fn() }));
-jest.mock('./assessmentsLive', () => ({ ...jest.requireActual('./assessmentsLive'), __esModule: true, fetchAllAssessmentWindows: jest.fn() }));
-```
-
-then replace:
-
-```js
-import * as grace from './grace';
-```
-
-with:
-
-```js
-import * as grace from './grace';
-import * as adapter from './assessmentsLive';
-```
-
-then replace:
-
-```js
-      live.fetchContractLogsSince, live.fetchAllDiagnostics, live.fetchAllHouseholds]) fetch.mockResolvedValue([]);
-```
-
-with:
-
-```js
-      live.fetchContractLogsSince, adapter.fetchAllAssessmentWindows, live.fetchAllHouseholds]) fetch.mockResolvedValue([]);
 ```
 
 - [ ] **Step 5: The athlete screens and the seed data**
@@ -4504,18 +4735,6 @@ with:
         {variant === 'new' ? <StartHere onBook={onBook} /> : null}
 ```
 
-In `frontend/src/portal/data/seed.js`, replace:
-
-```js
-  { id: 'o1', label: 'Diagnostic not entered', detail: '2 athletes' },
-```
-
-with:
-
-```js
-  { id: 'o1', label: 'Baseline due', detail: '2 athletes' },
-```
-
 and delete the capture catalogue:
 
 In `frontend/src/portal/data/seed.js`, replace:
@@ -4574,18 +4793,6 @@ with:
 
 ```
 /**
-```
-
-In `frontend/src/portal/data/admin.js`, replace:
-
-```js
-  { id: 'o4', who: '2 athletes', why: 'Diagnostic not entered since enrollment', tag: 'Onboarding', tone: 'yellow', packageIds: ['t-6'] },
-```
-
-with:
-
-```js
-  { id: 'o4', who: '2 athletes', why: 'Baseline due', tag: 'Assessment', tone: 'yellow', packageIds: ['t-6'] },
 ```
 
 In `frontend/src/portal/data/athlete.js`, delete the Practice DNA fixtures:
@@ -4717,37 +4924,132 @@ with:
 /* ---------------------------------------------------------------- 07 ----- */
 ```
 
-- [ ] **Step 6: The rules, the emulator seed and the data model**
+- [ ] **Step 6: Run every gate to verify it passes**
 
-In `firestore.rules`, delete the per-athlete diagnostics match:
+Run: `cd frontend && CI=true npx react-scripts test --watchAll=false src/portal`
+Expected: PASS - every portal suite, including `BottomTabBar.test.js`, `AthleteDashboard.test.js`, `PortalRoutes.test.js`, `PortalRoutes.warm.test.js`, `AthleteDetail.test.js`, `index.contract.test.js` and `index.assessments.test.js`.
+
+Run: `cd frontend && npx eslint src/portal && npm run build`
+Expected: no lint errors (no unused `DNA_*` or `DIAGNOSTIC_*` left behind); "Compiled successfully".
+
+Run: `git grep -n -E "DiagnosticCapture|PracticeDNA|DIAGNOSTIC_SECTIONS|useDiagnostic|fetchAllDiagnostics|fetchAthleteDiagnostics|saveDiagnosticCapture|usePracticeDNA" -- frontend`
+Expected: no output.
+
+- [ ] **Step 7: Commit**
+
+```bash
+git add -A frontend/src/portal
+git commit -m "chore(assessments): remove Diagnostic Capture from the portal
+
+Screen, route, tab, harness entries, diagnostics hooks and live
+functions, the athlete detail card and the Practice DNA stub go; the
+athlete home's diagnostics read goes with them.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
+```
+
+---
+
+### Task 9: Diagnostics rules read-only, the emulator seed and the data model
+
+Spec 8 removes the diagnostics rules, but the live bundle reads diagnostics on the athlete home and the admin dashboard inside one `Promise.all` with everything else: rules that refuse those reads would fail both screens for every family and the owner from the rules deploy until the new portal is live. So this release keeps the diagnostics **read** rules (read-only: create and update go) and deploys in the spec 10 order (functions, rules, portal) with no broken window; Task 27, after the portal is live, removes the read rules too. The emulator seed's diagnostics and DATA-MODEL's diagnostics section go now.
+
+**Files:**
+- Modify: `firestore.rules` (~394-454: the per-athlete diagnostics match keeps its read rule only; ~477-507: the collection-group read stays, with a note)
+- Modify: `scripts/rules-probes/assessments.mjs` (append `taskDiagnosticsReadOnly`), `scripts/verify-rules.mjs` (import, runPass)
+- Modify: `scripts/seed-firestore.mjs` (~139-145, ~985-1045, ~1531, ~1688-1694), `docs/portal/DATA-MODEL.md` (~28, ~812-876, ~1357-1366, ~2055-2058)
+- Test: `scripts/verify-rules.mjs` (emulator, both passes)
+
+**Interfaces:**
+- Consumes: `groupListAs`, `tok`, `uids`, `ATH` in `scripts/rules-probes/assessments.mjs` (Task 4).
+- Produces: `taskDiagnosticsReadOnly()` in `scripts/rules-probes/assessments.mjs` (Task 27 replaces it with `taskDiagnosticsGone()`); `scripts/verify-rules.mjs` runs `await taskAssessments(); await taskDiagnosticsReadOnly();`.
+
+- [ ] **Step 1: Write the failing probe**
+
+Append to `scripts/rules-probes/assessments.mjs`:
+
+```js
+// Assessments spec 8: Diagnostic Capture is gone (production held 0 docs on 2026-10-14). Its rules stay
+// read-only for this release - a portal bundle from before it reads diagnostics beside everything else
+// while the rules deploy first - and plan Task 27 removes the reads after the portal is live.
+export async function taskDiagnosticsReadOnly() {
+  console.log('Diagnostics: read-only for this release (Diagnostic Capture removed)');
+  const owner = tok(uids.owner);
+  await seed('users', uids.owner, { role: 'owner' });
+  await seed('athletes', ATH, { name: 'Probe Athlete', householdId: 'hh', dob: '2012-04-10', contractMinutes: null, coachId: 'coach-probe', packageId: 't-6' });
+  await seed(`athletes/${ATH}/diagnostics`, 'old-1', { athleteId: ATH, capturedBy: 'coach-probe', status: 'published', values: {}, notes: null });
+  try {
+    for (const [who, auth] of [['the owner', owner], ['ops', t.ops], ['the assigned coach', t.coach]]) {
+      expect(`${who}: a capture still reads (an old bundle keeps loading)`, await call('GET', `/athletes/${ATH}/diagnostics/old-1`, null, auth).then(status), 200);
+    }
+    expect('the owner: the collection-group list still reads', await groupListAs(owner, 'diagnostics'), 200);
+    expect('the assigned coach: a new capture refused', await createAs(t.coach, `athletes/${ATH}/diagnostics`, 'new-1',
+      { athleteId: ATH, capturedBy: 'coach-probe', status: 'draft', values: {}, notes: null }, ['capturedAt', 'updatedAt']), 403);
+  } finally {
+    await del(`athletes/${ATH}/diagnostics`, 'old-1');
+    await del(`athletes/${ATH}/diagnostics`, 'new-1');
+    await del('athletes', ATH);
+    await del('users', uids.owner);
+  }
+}
+```
+
+In `scripts/verify-rules.mjs`, replace:
+
+```js
+import { taskAssessments } from './rules-probes/assessments.mjs';
+```
+
+with:
+
+```js
+import { taskAssessments, taskDiagnosticsReadOnly } from './rules-probes/assessments.mjs';
+```
+
+and replace:
+
+```js
+    await taskAssessments();
+```
+
+with:
+
+```js
+    await taskAssessments(); await taskDiagnosticsReadOnly();
+```
+
+- [ ] **Step 2: Run the probe to verify it fails**
+
+Run: `npx firebase-tools emulators:exec --only firestore --project rypacad "node --env-file=scripts/emulator.env scripts/verify-rules.mjs"`
+Expected: FAIL - `the assigned coach: a new capture refused -> 200 (wanted 403)`; the read lines pass.
+
+- [ ] **Step 3: The diagnostics rules become read-only**
 
 In `firestore.rules`, replace:
 
 ```
       // ---- athletes/{id}/diagnostics/{captureId} -----------------------
       // Sprint 10 (contract v1.8, C "Diagnostics persistence"). Shape:
-      // { athleteId, capturedBy (uid), capturedAt, updatedAt,
-      //   status: 'draft'|'published', values: map, notes: string|null }.
-      // Writers: the assigned coach, any specialist (me().get('specialistId',
-      // null) != null — Sprint 9's null-safe pattern, reused verbatim), or
-      // mental/ops/owner — the SAME set that already writes tournamentResults
-      // and reads athletes academy-wide. Readers: the athlete's own user and
-      // the household parent see PUBLISHED captures only (never a draft mid-
-      // capture); staff (the same writer set) see everything, drafts
-      // included, so a coach can resume their own in-progress capture.
-      //
-      // No null-resource read branch is needed here (unlike bookings/
-      // contractLogs' `{athleteId}_{date}`-style deterministic-id probes):
-      // captureId is an auto-id, never guessed by a client transaction —
-      // saveDraft's upsert finds an existing open draft via a QUERY
-      // (hooks/live.js), not a get() on a constructed id, so `resource` is
-      // never null for a write this rule evaluates.
-      match /diagnostics/{captureId} {
-        function diagnosticStaffOk() {
-          return me().role in ['mental', 'ops', 'owner']
-            || (me().role == 'coach' && athleteData(athleteId).coachId == request.auth.uid)
-            || me().get('specialistId', null) != null;
-        }
+```
+
+with:
+
+```
+      // ---- athletes/{id}/diagnostics/{captureId} -----------------------
+      // READ-ONLY since 2026-10-14: Diagnostic Capture was removed
+      // (assessments spec 8; production held 0 docs) and no client writes
+      // a capture any more. The read grant stays for this release only: a
+      // portal bundle from before it reads diagnostics on the athlete home
+      // and the admin dashboard beside everything else, and the rules
+      // deploy ahead of the portal (spec 10). The follow-up after the
+      // portal is live (assessments plan Task 27) removes this block and
+      // the collection-group read below.
+      // Sprint 10 (contract v1.8, C "Diagnostics persistence"). Shape:
+```
+
+then replace:
+
+```
         // Field/type checks only — caller-identity on capturedBy is handled
         // separately per create/update below, because the two operations
         // mean different things for that field (see the comment there).
@@ -4778,86 +5080,31 @@ In `firestore.rules`, replace:
           && request.resource.data.capturedBy == resource.data.capturedBy
           && request.resource.data.updatedAt == request.time;
         allow read: if signedIn() && (
-          diagnosticStaffOk()
-          || (me().role == 'athlete' && me().athleteId == athleteId && resource.data.status == 'published')
-          || (me().role == 'parent'
-              && athleteData(athleteId).householdId == me().householdId
-              && resource.data.status == 'published')
-        );
-      }
-
-      // ---- athletes/{id}/private/medical -------------------------------
 ```
 
 with:
 
 ```
-      // ---- athletes/{id}/private/medical -------------------------------
-```
-
-then, in `firestore.rules`, replace:
-
-```
-    // ---- diagnostics collection-group read ------------------------------
-    // Sprint 10 (contract v1.8, C + D): the Admin "athletes with no
-    // published diagnostic" list is one collectionGroup('diagnostics')
-    // query rather than an N-athlete fan-out, and Firestore requires a
-    // rule matched via the {path=**} recursive wildcard for a
-    // collection-group query to be allowed at all (the nested
-    // /athletes/{athleteId}/diagnostics/{captureId} rule above governs
-    // normal per-athlete reads/writes but does NOT, by itself, license a
-    // cross-athlete group query).
-    //
-    // Deliberately narrower than a literal reading of the pin's "coach/
-    // mental/ops/owner/specialists" list: mental/ops/owner and any
-    // specialist are academy-wide by the SAME precedent as the athletes
-    // matrix's v1.7.1 specialist widening, so they read unconditionally.
-    // A plain coach does NOT get an unconditional academy-wide grant here —
-    // that would let a group query return every OTHER coach's assigned
-    // athletes' diagnostics too, which is exactly the cross-family leak this
-    // file's own non-negotiable ("assigned athletes only, by assignment,
-    // never by role") exists to prevent. Instead a coach's read is proven
-    // per-document the same way the bookings/contractLogs coach clauses
-    // already do it: athleteData(resource.data.athleteId).coachId == caller,
-    // which the diagnostics shape guarantees resource.data.athleteId always
-    // carries. Flagged in the routing report as a deliberate tightening
-    // beyond the pin's literal wording, not an oversight.
-    match /{path=**}/diagnostics/{captureId} {
-      allow read: if signedIn() && (
-        me().role in ['mental', 'ops', 'owner']
-        || me().get('specialistId', null) != null
-        || (me().role == 'coach' && athleteData(resource.data.athleteId).coachId == request.auth.uid)
-      );
-    }
-
-    // ---- assessments collection-group reads (2026-10-14) ---------------
-```
-
-with:
-
-```
-    // ---- assessments collection-group reads (2026-10-14) ---------------
+        allow read: if signedIn() && (
 ```
 
 then replace:
 
 ```
-      // verified against the emulator for exactly this shape - the coach-
-      // roster and diagnostics collection-group clauses elsewhere in this
-      // file). ops/owner read academy-wide - the same staff-sees-everything
-      // precedent bookings/athletes/diagnostics/contractLogs all already
-      // grant, extended here so a support call can see a family's grace
+    // ---- diagnostics collection-group read ------------------------------
+    // Sprint 10 (contract v1.8, C + D): the Admin "athletes with no
 ```
 
 with:
 
 ```
-      // verified against the emulator for exactly this shape - the coach-
-      // roster clauses elsewhere in this file). ops/owner read academy-wide -
-      // the same staff-sees-everything precedent bookings/athletes/
-      // contractLogs all already grant, extended here so a support call can
-      // see a family's grace
+    // ---- diagnostics collection-group read ------------------------------
+    // Read-only until assessments plan Task 27 removes it with the
+    // per-athlete diagnostics match (Diagnostic Capture removed 2026-10-14).
+    // Sprint 10 (contract v1.8, C + D): the Admin "athletes with no
 ```
+
+- [ ] **Step 4: The emulator seed and the data model**
 
 In `scripts/seed-firestore.mjs`, delete the header paragraph:
 
@@ -5084,6 +5331,10 @@ newer capture is a new fact, not a correction of the old one.
 with:
 
 ```
+### `athletes/{athleteId}/diagnostics/{captureId}` (removed 2026-10-14)
+
+Diagnostic Capture was removed with the assessments release (assessments spec 8; production held 0 docs on 2026-10-14). The portal no longer reads or writes a capture. `firestore.rules` keeps a read-only grant (per athlete and collection group) so a bundle from before the release keeps loading while the rules deploy first; the follow-up after the portal is live (assessments plan Task 27) removes it and this note.
+
 ### `staffInvites/{id}` (contract v1.8, Sprint 10)
 ```
 
@@ -5132,39 +5383,37 @@ with:
 - seeds ONE pending `staffInvites` doc (contract v1.8, pin E) at a
 ```
 
-- [ ] **Step 7: Run every gate to verify it passes**
-
-Run: `cd frontend && CI=true npx react-scripts test --watchAll=false src/portal`
-Expected: PASS - every portal suite, including `index.assessments.test.js`, `BottomTabBar.test.js`, `AthleteDashboard.test.js`, `PortalRoutes.test.js`, `PortalRoutes.warm.test.js`, `AthleteDetail.test.js`, `index.contract.test.js` and `index.reserved.test.js`.
-
-Run: `cd frontend && npx eslint src/portal && npm run build`
-Expected: no lint errors (no unused `collectionGroup`, `DNA_*`, `DIAGNOSTIC_*` left behind); "Compiled successfully".
-
-Run: `git grep -n -E "DiagnosticCapture|PracticeDNA|DIAGNOSTIC_SECTIONS|useDiagnostic|fetchAllDiagnostics|fetchAthleteDiagnostics|saveDiagnosticCapture|usePracticeDNA" -- frontend scripts firestore.rules functions`
-Expected: no output.
-
-Run: `node scripts/seed-firestore.mjs --dry-run`
-Expected: the plan prints with no `athletes/jordan/diagnostics` collection and exits 0.
+- [ ] **Step 5: Run every gate to verify it passes**
 
 Run: `npx firebase-tools emulators:exec --only firestore --project rypacad "node --env-file=scripts/emulator.env scripts/verify-rules.mjs"`
 Expected: `ALL PASS (both passes)`, including every `Diagnostics:` line.
 
-- [ ] **Step 8: Commit**
+Run: `node scripts/seed-firestore.mjs --dry-run`
+Expected: the plan prints with no `athletes/jordan/diagnostics` collection and exits 0.
+
+Run: `node --test scripts/test/*.test.mjs`
+Expected: `# fail 0`.
+
+Run: `git grep -n -E "DiagnosticCapture|PracticeDNA|DIAGNOSTIC_SECTIONS|useDiagnostic|fetchAllDiagnostics|fetchAthleteDiagnostics|saveDiagnosticCapture|usePracticeDNA" -- frontend scripts firestore.rules functions`
+Expected: no output.
+
+- [ ] **Step 6: Commit**
 
 ```bash
-git add -A frontend/src/portal firestore.rules scripts/rules-probes/assessments.mjs scripts/verify-rules.mjs scripts/seed-firestore.mjs docs/portal/DATA-MODEL.md
-git commit -m "chore(assessments): remove Diagnostic Capture
+git add firestore.rules scripts/rules-probes/assessments.mjs scripts/verify-rules.mjs scripts/seed-firestore.mjs docs/portal/DATA-MODEL.md
+git commit -m "chore(assessments): diagnostics rules read-only; seed and data model
 
-Screen, route, tab, harness entries, diagnostics hooks and live functions,
-rules, seed and data-model section go; the admin row becomes Baseline due,
-read from the assessment windows, and survives a refused read.
+No client creates or updates a capture; the read grants stay for this
+release so the live bundle keeps loading while the rules deploy first
+(spec 10 order), and go after the portal is live. The emulator seed's
+captures and DATA-MODEL's diagnostics section go now.
 
 Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 ```
 
 ---
 
-### Task 8: The Assessments permission - session, tab bar and Staff & Roles
+### Task 10: The Assessments permission - session, tab bar and Staff & Roles
 
 **Files:**
 - Create: `frontend/src/portal/hooks/assessorTab.js`
@@ -5789,7 +6038,7 @@ Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 
 ---
 
-### Task 9: Responsive frame, trial inputs and save tracking
+### Task 11: Responsive frame, trial inputs and save tracking
 
 **Files:**
 - Create: `frontend/src/portal/components/AssessmentFrame.js`
@@ -5807,6 +6056,7 @@ Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
   - `Choice({ label, value, options: [key, text][], onChange(key|null), clearable, disabled })`; each option button's aria-label is `` `${label}: ${text}` ``
   - `SaveState({ entry, onRetry })`
   - `useSaveTracker(): { entries: { [key]: { state: 'saving'|'saved'|'slow'|'error', message } }, run(key, fn: () => Promise), retry(key), unsaved: number }`; `SLOW_SAVE_MS = 8000`, `SLOW_SAVE_COPY`
+  - the device store of unsaved entries (Review Focus 2): `PENDING_KEY = 'ryp.assessments.pending'`, `pendingKey({ kind, athleteId, windowId, section })`, `keepPending({ kind: 'section'|'fields'|'profile', athleteId, windowId?, section?, value }): Kept` (adds `key` and `stamp`; a section replaces, a fields or profile patch merges), `dropPending(kept)` (only when it is still the latest kept for its key), `pendingFor(pairs: [athleteId, windowId][]): Kept[]`
 
 - [ ] **Step 1: Write the failing tests**
 
@@ -5922,7 +6172,7 @@ Create `frontend/src/portal/hooks/assessmentSaves.test.js`:
 ```js
 import React, { act } from 'react';
 import { createRoot } from 'react-dom/client';
-import useSaveTracker, { SLOW_SAVE_COPY, SLOW_SAVE_MS } from './assessmentSaves';
+import useSaveTracker, { PENDING_KEY, SLOW_SAVE_COPY, SLOW_SAVE_MS, dropPending, keepPending, pendingFor } from './assessmentSaves';
 
 async function mountTracker() {
   const result = { current: null };
@@ -5936,7 +6186,10 @@ async function mountTracker() {
 }
 const flush = () => act(async () => { for (let i = 0; i < 5; i += 1) await Promise.resolve(); });
 
-beforeEach(() => { jest.useFakeTimers(); });
+beforeEach(() => {
+  jest.useFakeTimers();
+  try { window.localStorage.clear(); } catch (err) { /* jsdom always has it */ }
+});
 afterEach(() => { jest.useRealTimers(); });
 
 describe('the save tracker (Review Focus 2: the tablet loses wifi)', () => {
@@ -5990,6 +6243,36 @@ describe('the save tracker (Review Focus 2: the tablet loses wifi)', () => {
     await flush();
     expect(ask()).toBe(false);
     await h.unmount();
+  });
+});
+
+describe("the device store (Review Focus 2: a reload, or iPad Safari evicting the page, drops the SDK's queued writes)", () => {
+  const grip = (right) => ({ kind: 'section', athleteId: 'a1', windowId: '2026-27-baseline', section: 'grip', value: { right } });
+  test('an unsaved section is kept until the server has it; only the latest save of it drops it', () => {
+    const first = keepPending(grip([30]));
+    const second = keepPending(grip([30, 31]));
+    expect(first.key).toBe('a1:2026-27-baseline:grip');
+    expect(pendingFor([['a1', '2026-27-baseline']]).map((k) => k.value)).toEqual([{ right: [30, 31] }]);
+    dropPending(first);
+    expect(pendingFor([['a1', '2026-27-baseline']])).toHaveLength(1);
+    dropPending(second);
+    expect(pendingFor([['a1', '2026-27-baseline']])).toEqual([]);
+    expect(window.localStorage.getItem(PENDING_KEY)).toBeNull();
+  });
+  test('profile and field patches merge, so an earlier patch still waiting is not lost; other windows stay out', () => {
+    keepPending({ kind: 'profile', athleteId: 'a1', value: { sex: 'female' } });
+    keepPending({ kind: 'profile', athleteId: 'a1', value: { dominantHand: 'right' } });
+    keepPending({ kind: 'fields', athleteId: 'a1', windowId: '2026-27-baseline', value: { mcgillDate: '2026-11-05' } });
+    keepPending({ kind: 'section', athleteId: 'a2', windowId: '2026-27-mid', section: 'cmj', value: { trials: [] } });
+    expect(pendingFor([['a1', '2026-27-baseline']]).map((k) => [k.key, k.value])).toEqual([
+      ['a1:profile', { sex: 'female', dominantHand: 'right' }],
+      ['a1:2026-27-baseline:fields', { mcgillDate: '2026-11-05' }],
+    ]);
+  });
+  test('storage that is unreadable keeps nothing and never throws', () => {
+    window.localStorage.setItem(PENDING_KEY, 'not json');
+    expect(pendingFor([['a1', '2026-27-baseline']])).toEqual([]);
+    expect(() => keepPending(grip([30]))).not.toThrow();
   });
 });
 ```
@@ -6269,6 +6552,14 @@ Create `frontend/src/portal/hooks/assessmentSaves.js`:
  * `unsaved` counts every entry not saved; while it is above 0 closing or
  * reloading the tab asks first, and the wave screen's back link asks too.
  * The latest save of an entry decides its state.
+ *
+ * iPad Safari ignores the beforeunload prompt, and the Firestore SDK's
+ * memory cache drops writes still queued when the page reloads or Safari
+ * evicts it. So the wave also keeps every save on this device (localStorage,
+ * PENDING_KEY) until the server has it, and re-applies and re-sends what is
+ * still there when the wave opens again (screens/AssessmentWave.js).
+ * Storage can be missing, full or unreadable: every access is guarded, and a
+ * save never waits on it.
  */
 import { useCallback, useEffect, useRef, useState } from 'react';
 
@@ -6327,6 +6618,66 @@ export default function useSaveTracker() {
 
   return { entries, run, retry, unsaved };
 }
+
+/** Unsaved entries kept on this device: { [key]: { key, kind, athleteId, windowId, section, value, stamp } }. */
+export const PENDING_KEY = 'ryp.assessments.pending';
+let stamps = 0;
+
+function readPending() {
+  try {
+    const raw = window.localStorage.getItem(PENDING_KEY);
+    const all = raw ? JSON.parse(raw) : {};
+    return all && typeof all === 'object' && !Array.isArray(all) ? all : {};
+  } catch (err) {
+    return {};
+  }
+}
+
+function writePending(all) {
+  try {
+    if (Object.keys(all).length) window.localStorage.setItem(PENDING_KEY, JSON.stringify(all));
+    else window.localStorage.removeItem(PENDING_KEY);
+  } catch (err) {
+    /* private mode or full: the in-page tracker still holds the entry */
+  }
+}
+
+/** One entry's storage key: a window's section, a window's own fields, or the athlete's profile. */
+export function pendingKey({ kind, athleteId, windowId, section }) {
+  if (kind === 'profile') return `${athleteId}:profile`;
+  return `${athleteId}:${windowId}:${kind === 'fields' ? 'fields' : section}`;
+}
+
+/**
+ * Keep one save until the server has it, and return it as kept. A section is
+ * written whole, so it replaces what was kept; a fields or profile patch
+ * merges into what is kept, so an earlier patch still waiting is not lost.
+ */
+export function keepPending(entry) {
+  const all = readPending();
+  const key = pendingKey(entry);
+  const prev = all[key];
+  stamps += 1;
+  const value = entry.kind !== 'section' && prev ? { ...prev.value, ...entry.value } : entry.value;
+  const kept = { ...entry, key, value, stamp: `${Date.now()}-${stamps}` };
+  all[key] = kept;
+  writePending(all);
+  return kept;
+}
+
+/** The server has this save: drop it, unless a later save of the same entry is kept. */
+export function dropPending(kept) {
+  const all = readPending();
+  if (all[kept.key] && all[kept.key].stamp === kept.stamp) {
+    delete all[kept.key];
+    writePending(all);
+  }
+}
+
+/** What is still kept for these athletes' windows, given as [athleteId, windowId] pairs. */
+export function pendingFor(pairs) {
+  return Object.values(readPending()).filter((e) => e && pairs.some(([athleteId, windowId]) => e.athleteId === athleteId && (e.kind === 'profile' || e.windowId === windowId)));
+}
 ```
 
 - [ ] **Step 4: Run the tests to verify they pass**
@@ -6342,14 +6693,15 @@ git commit -m "feat(assessments): responsive frame, trial inputs and save tracki
 
 Phone, tablet and desktop layout classes; typed trials parsed and range
 checked before they are sent; every save tracked, slow saves called out,
-and leaving with unsaved entries asks first.
+leaving with unsaved entries asks first, and unsaved entries are kept on
+the device until the server has them.
 
 Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 ```
 
 ---
 
-### Task 10: The assessments list, starting a wave, and the way in
+### Task 12: The assessments list, starting a wave, and the way in
 
 **Files:**
 - Create: `frontend/src/portal/screens/AssessmentList.js`
@@ -6361,10 +6713,10 @@ Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 - Test: `frontend/src/portal/screens/AssessmentList.test.js`, `frontend/src/portal/AssessmentRoutes.test.js`, `frontend/src/portal/screens/AdminDashboard.test.js` (append)
 
 **Interfaces:**
-- Consumes: `useAssessmentRoster`, `useAssessmentSettings` (Task 6); `startWave` (Task 5); `assessmentAccess`, `SEED_VIEWER` (Task 3); `CONSENT_LABEL`, `KIND_LABEL`, `circuitDateProblem`, `newWaveId`, `shortDate`, `waveBlock` (Task 2); `academyDateISO` (`data/calendar.js`); `AssessmentFrame`, `useLayoutClass`, `Choice` (Task 9); `BottomTabBar` `assessments` prop (Task 8).
+- Consumes: `useAssessmentRoster`, `useAssessmentSettings` (Task 6); `startWave` (Task 5); `assessmentAccess`, `SEED_VIEWER` (Task 3); `CONSENT_LABEL`, `KIND_LABEL`, `circuitDateProblem`, `newWaveId`, `shortDate`, `waveBlock` (Task 2); `academyDateISO` (`data/calendar.js`); `AssessmentFrame`, `useLayoutClass`, `Choice` (Task 11); `BottomTabBar` `assessments` prop (Task 10).
 - Produces:
   - `AssessmentList({ bare, viewer, onOpenWave(waveId), onOpenAthlete(athleteId, name), onOpenSettings(), onBack? })`
-  - `StartWaveSheet({ rows, settings, today, onClose, onStarted({ waveId, started, skipped }) })`
+  - `StartWaveSheet({ rows, settings, today, onClose, onStarted({ waveId, started, skipped }) })`; `SKIP_REASON` (the copy for `startWave`'s `complete` and `stale` skips: an athlete the wave could not take is named before the wave opens)
   - `AssessmentsEntryCard({ onOpen, title?, body?, label? })`
   - `AssessmentRoutes.js`: `RequireAssessment({ level: 'staff'|'reader', landingFor, children })`, `useViewer(): { viewer, loading }`, `AssessmentListRoute()`, `loadAssessmentList`
   - Route `/portal/assessments` (staff only); `AdminDashboard` prop `onOpenAssessments`
@@ -6381,6 +6733,7 @@ import AssessmentList from './AssessmentList';
 let mockRows;
 let mockStarts;
 let mockStartFails;
+let mockSkipped;
 jest.mock('../hooks/assessments', () => ({
   useAssessmentRoster: () => ({ data: { rows: mockRows }, loading: false, error: null }),
   useAssessmentSettings: () => ({ data: { settings: jest.requireActual('../data/assessmentSettings').withDefaults(null), stored: false }, loading: false, error: null }),
@@ -6389,7 +6742,8 @@ jest.mock('../hooks/assessmentsLive', () => ({
   startWave: async (args) => {
     mockStarts.push(args);
     if (mockStartFails) throw new Error('unavailable');
-    return { waveId: args.waveId, started: args.entries.map((e) => e.athleteId), skipped: [] };
+    const skipped = mockSkipped.filter((s) => args.entries.some((e) => e.athleteId === s.athleteId));
+    return { waveId: args.waveId, started: args.entries.map((e) => e.athleteId).filter((id) => !skipped.some((s) => s.athleteId === id)), skipped };
   },
 }));
 
@@ -6399,6 +6753,7 @@ const PHIL = { uid: 'phil', role: 'coach', specialistId: 'phil' };
 beforeEach(() => {
   mockStarts = [];
   mockStartFails = false;
+  mockSkipped = [];
   mockRows = [
     { athleteId: 'a', name: 'Ava Moreno', consent: 'yes', due: due('Baseline due', 'baseline'), windows: [] },
     { athleteId: 'b', name: 'Ben Ortiz', consent: 'no', due: due('Baseline due', 'baseline'), windows: [] },
@@ -6475,6 +6830,46 @@ test('a circuit date outside the last 14 days, or a failed start, keeps the shee
   await r.click('Start wave');
   expect(r.text()).toContain('The wave did not start. Check the connection and try again.');
   expect(r.button('Start wave')).not.toBeNull();
+  await r.unmount();
+});
+
+test('athletes the wave could not take are named before it opens; a wave of nobody opens nothing', async () => {
+  mockSkipped = [{ athleteId: 'd', reason: 'complete' }, { athleteId: 'e', reason: 'stale' }];
+  const opened = [];
+  const r = await list({ onOpenWave: (id) => opened.push(id) });
+  for (const name of ['Ava Moreno', 'Dev Patel', 'Eli Brooks']) await r.click(`Select ${name}`);
+  await r.click('Start wave · 3 of 4');
+  await r.click('Start wave');
+  expect(r.text()).toContain('Not in this wave: Dev Patel (that window is already complete), Eli Brooks (that window has been open more than 14 days: mark it complete first).');
+  expect(opened).toEqual([]);
+  await r.click('Open the wave');
+  expect(opened).toEqual([mockStarts[0].waveId]);
+  await r.unmount();
+
+  mockSkipped = [{ athleteId: 'a', reason: 'complete' }];
+  const none = await list({ onOpenWave: (id) => opened.push(id) });
+  await none.click('Select Ava Moreno');
+  await none.click('Start wave · 1 of 4');
+  await none.click('Start wave');
+  expect(none.text()).toContain('No wave started');
+  expect(none.button('Open the wave')).toBeNull();
+  await none.click('Close');
+  expect(opened).toHaveLength(1);
+  expect(none.text()).not.toContain('No wave started');
+  await none.unmount();
+});
+
+test('a window in progress says since when; one open past 14 days says to complete it and cannot join a wave', async () => {
+  const open = [{ id: '2026-27-baseline', circuitDate: '2026-11-03', status: 'open' }];
+  mockRows = [
+    { athleteId: 'a', name: 'Ava Moreno', consent: 'yes', due: due('Baseline in progress', 'baseline', { inProgress: true, windowId: '2026-27-baseline' }), windows: open },
+    { athleteId: 'b', name: 'Ben Ortiz', consent: 'yes', due: due('Open since Nov 3: mark it complete', null, { inProgress: true, stale: true, windowId: '2026-27-baseline' }), windows: open },
+  ];
+  const r = await list();
+  expect(r.text()).toContain('Baseline in progress · since Nov 3');
+  expect(r.text()).toContain('Open since Nov 3: mark it complete');
+  expect(r.button('Select Ava Moreno').disabled).toBe(false);
+  expect(r.button('Select Ben Ortiz').disabled).toBe(true);
   await r.unmount();
 });
 
@@ -6625,20 +7020,31 @@ import { KIND_LABEL, circuitDateProblem, newWaveId } from '../../data/assessment
 
 export const LETTERS = ['A', 'B', 'C', 'D'];
 
+/** Why startWave left an athlete out (hooks/assessmentsLive.js). */
+export const SKIP_REASON = {
+  complete: 'that window is already complete',
+  stale: 'that window has been open more than 14 days: mark it complete first',
+};
+
 /**
  * Start a wave (spec 5): the circuit date - the academy's date today by
  * default, never a UTC date (Review Focus 1), editable within the last 14
  * days - and, for an athlete who may take either, which window this is
- * (mid-season, or end of season for a late joiner). The rotation order is
- * the order the athletes were picked: A, B, C, D. The CancelSheet idiom: it
- * restates what is about to happen and never closes on failure.
+ * (mid-season, or end of season for a late joiner; the default is first).
+ * The rotation order is the order the athletes were picked: A, B, C, D. The
+ * CancelSheet idiom: it restates what is about to happen and never closes on
+ * failure. An athlete the wave could not take (a window already complete,
+ * or one left open past the 14-day entry window, perhaps by a second
+ * tablet) is named before the wave opens, never dropped silently.
  */
 export default function StartWaveSheet({ rows, settings, today, onClose, onStarted }) {
   const [date, setDate] = useState(today);
   const [kinds, setKinds] = useState(() => Object.fromEntries(rows.map((r) => [r.athleteId, r.due.kind])));
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState(null);
+  const [done, setDone] = useState(null);
   const problem = circuitDateProblem(date, today);
+  const nameOf = (id) => rows.find((r) => r.athleteId === id)?.name ?? id;
 
   const start = async () => {
     if (problem || saving) return;
@@ -6650,13 +7056,42 @@ export default function StartWaveSheet({ rows, settings, today, onClose, onStart
         circuitDate: date,
         entries: rows.map((r, i) => ({ athleteId: r.athleteId, kind: kinds[r.athleteId], position: i + 1 })),
         settings,
+        today,
       });
-      onStarted(result);
+      if (result.skipped.length === 0) {
+        onStarted(result);
+        return;
+      }
+      setSaving(false);
+      setDone(result);
     } catch (err) {
       setSaving(false);
       setError('The wave did not start. Check the connection and try again.');
     }
   };
+
+  if (done) {
+    return (
+      <div onClick={onClose} style={{ position: 'absolute', inset: 0, background: tint.overlay, display: 'flex', alignItems: 'flex-end', justifyContent: 'center' }}>
+        <div
+          onClick={(e) => e.stopPropagation()}
+          style={{ width: '100%', maxWidth: 520, background: color.surface, borderTop: `1px solid ${color.border}`, borderRadius: `${radius.cardLarge} ${radius.cardLarge} 0 0`, padding: '20px 22px 26px' }}
+        >
+          <ScreenTitle size={19}>{done.started.length ? 'Wave started' : 'No wave started'}</ScreenTitle>
+          <Body size={12} style={{ marginTop: 8 }}>
+            Not in this wave: {done.skipped.map((s) => `${nameOf(s.athleteId)} (${SKIP_REASON[s.reason] ?? s.reason})`).join(', ')}.
+          </Body>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 10, marginTop: 16 }}>
+            {done.started.length ? (
+              <Button height={50} onClick={() => onStarted(done)}>Open the wave</Button>
+            ) : (
+              <Button variant="outline" height={50} style={{ boxShadow: 'none' }} onClick={() => onStarted(done)}>Close</Button>
+            )}
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div onClick={saving ? undefined : onClose} style={{ position: 'absolute', inset: 0, background: tint.overlay, display: 'flex', alignItems: 'flex-end', justifyContent: 'center' }}>
@@ -6759,7 +7194,9 @@ const COLUMNS = '44px 2fr 1.4fr 1.6fr 1fr';
 /**
  * Assessments - the list (spec 5). Every academy athlete with their research
  * consent (yes / no / not answered), what is due ("Baseline due",
- * "Mid-season eligible", "End of season", in progress) and the last test.
+ * "Mid-season eligible", "End of season", in progress and since when, or
+ * "Open since Nov 3: mark it complete" past the 14-day entry window) and the
+ * last test.
  * Staff pick up to the wave size (four) and start a wave; an athlete whose
  * research answer is not recorded cannot be added, and nor can one who is
  * not due. Phone: one column; tablet and desktop: a table.
@@ -6855,13 +7292,14 @@ function Row({ row, layout, staff, selected, full, onToggle, onOpen }) {
   const block = waveBlock(row);
   const disabled = Boolean(block) || (!selected && full);
   const last = row.due.lastTestDate ? `Last test ${shortDate(row.due.lastTestDate)}` : 'Never tested';
+  const since = row.due.inProgress && !row.due.stale ? row.windows.find((w) => w.id === row.due.windowId)?.circuitDate ?? null : null;
   const name = (
     <button type="button" onClick={onOpen} style={{ background: 'none', border: 'none', padding: 0, textAlign: 'left', font: `600 14px ${font.body}`, color: color.text, cursor: 'pointer' }}>
       {row.name}
     </button>
   );
   const consent = <StatusBadge tone={CONSENT_TONE[row.consent]}>{CONSENT_LABEL[row.consent]}</StatusBadge>;
-  const dueText = <span style={{ font: `500 12px ${font.body}`, color: row.due.kind ? color.secondary : color.textTertiary }}>{row.due.label}</span>;
+  const dueText = <span style={{ font: `500 12px ${font.body}`, color: row.due.kind ? color.secondary : color.textTertiary }}>{row.due.label}{since ? ` · since ${shortDate(since)}` : ''}</span>;
   const lastText = <span style={{ font: `400 12px ${font.body}`, color: color.textTertiary }}>{last}</span>;
   const select = staff ? <SelectBox checked={selected} disabled={disabled} label={`Select ${row.name}`} onClick={() => onToggle(row)} /> : <span />;
   const note = row.consent === 'unanswered' ? <Body size={11} tone={color.secondary}>{block}</Body> : null;
@@ -7104,15 +7542,16 @@ git add frontend/src/portal/screens/AssessmentList.js frontend/src/portal/screen
 git commit -m "feat(assessments): the athlete list and starting a wave
 
 Every athlete with research consent, what is due and the last test; pick up
-to four and start a wave dated by the academy; owners and ops reach it from
-Admin, Phil and assessors from the tab.
+to four and start a wave dated by the academy, naming any athlete the wave
+could not take; owners and ops reach it from Admin, Phil and assessors from
+the tab.
 
 Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 ```
 
 ---
 
-### Task 11: The wave screen and the readiness & intake station
+### Task 13: The wave screen and the readiness & intake station
 
 **Files:**
 - Create: `frontend/src/portal/screens/AssessmentWave.js`
@@ -7122,14 +7561,15 @@ Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 - Create: `frontend/src/portal/components/assessments/FieldRow.js`
 - Create: `frontend/src/portal/components/assessments/IntakeStation.js`
 - Modify: `frontend/src/portal/AssessmentRoutes.js` (add the wave route wrapper), `frontend/src/portal/PortalRoutes.js` (import, one `<Route>`)
-- Test: `frontend/src/portal/screens/AssessmentWave.test.js`, `frontend/src/portal/AssessmentRoutes.test.js` (one mock, one test)
+- Test: `frontend/src/portal/screens/AssessmentWave.test.js`, `frontend/src/portal/components/assessments/StationShell.test.js`, `frontend/src/portal/AssessmentRoutes.test.js` (one mock, one test)
 
 **Interfaces:**
-- Consumes: `useWave` (Task 6); `saveSection`, `saveAssessmentProfile`, `saveWindowFields` (Task 5); `useSaveTracker` (Task 9); `AssessmentFrame`, `useLayoutClass`, `TrialInput`, `TextEntry`, `Choice`, `SaveState` (Task 9); `stationsFor`, `NOT_TESTED_REASONS` (Task 2); `shortDate` (Task 2); `LETTERS` (Task 10, `StartWaveSheet.js`); `CancelSheet`; `useViewer` (Task 10).
+- Consumes: `useWave` (Task 6); `saveSection`, `saveAssessmentProfile`, `saveWindowFields` (Task 5); `useSaveTracker`, `keepPending`, `dropPending`, `pendingFor` (Task 11); `AssessmentFrame`, `useLayoutClass`, `TrialInput`, `TextEntry`, `Choice`, `SaveState` (Task 11); `stationsFor`, `NOT_TESTED_REASONS`, `STATIONS` (Task 2); `shortDate` (Task 2); `LETTERS` (Task 12, `StartWaveSheet.js`); `CancelSheet`; `useViewer` (Task 12).
 - Produces:
-  - `AssessmentWave({ bare, waveId, initialStation, onBack })`; `STATION_VIEWS` (exported) maps a station id to `{ View, rotation? }` - Task 12-14 add `anthro`, `grip`, `jump`, `medball`, `mcgill`
+  - `AssessmentWave({ bare, waveId, initialStation, onBack })`; `STATION_VIEWS` (exported) maps a station id to `{ View, rotation? }` - Task 14-16 add `anthro`, `grip`, `jump`, `medball`, `mcgill`
   - Every station view: `View({ athlete, equipment, circuitMode, onSave(athleteId, section, value), onSaveProfile(athleteId, patch), onSaveFields(athleteId, fields) })`; `rotation(athletes, circuitMode): string|null` is the order line under the cue
-  - `StationShell({ station, athletes, layout, order, entries, onRetry, onNotTested(athleteId, keys, reason|null), renderAthlete(athlete) })`
+  - `StationShell({ station, athletes, layout, order, entries, onRetry, onNotTested(athleteId, keys, reason|null), renderAthlete(athlete) })`; `painStopBefore(window, stationId): Station|null` (the earlier station, in the fixed order, where the athlete was stopped for pain)
+  - `AssessmentWave` keeps every save on the device until the server has it and, when the wave opens, re-applies and re-sends what is still kept (Task 11's store)
   - `useEquipment(): [equipment, update(patch)]`, `EQUIPMENT_KEY = 'ryp.assessments.equipment'`, `EMPTY_EQUIPMENT = { dynamometer1, dynamometer2, handlePosition, boxHeight, plateSoftware, samplingHz, radarMethod }`
   - `FieldRow({ label, children })`, `NotTestedSheet({ name, onPick(reason), onClose })`
   - Route `/portal/assessments/wave/:waveId` (staff), `AssessmentWaveRoute`, `loadAssessmentWave`
@@ -7262,6 +7702,23 @@ test('leaving with an entry not on the server asks first (Review Focus 2); with 
   await r2.unmount();
 });
 
+test('an entry not on the server is kept on this tablet: reopening the wave shows it and sends it again (Review Focus 2)', async () => {
+  mockHang = true;
+  const first = await wave();
+  await type(first, 'Ava Moreno hours since a hard session', '20');
+  await first.unmount();
+  mockHang = false;
+  mockSaves = [];
+  const again = await wave();
+  await again.flush();
+  expect(field(again, 'Ava Moreno hours since a hard session').value).toBe('20');
+  expect(sections('readiness')).toEqual([{ athleteId: 'a', windowId: '2026-27-baseline', section: 'readiness',
+    value: { status: null, reason: null, hoursSinceHardSession: 20, golfToday: null, notes: null } }]);
+  expect(again.text()).toContain('All saved');
+  expect(window.localStorage.getItem('ryp.assessments.pending')).toBeNull();
+  await again.unmount();
+});
+
 test('equipment is entered once and remembered on this device', async () => {
   window.localStorage.setItem('ryp.assessments.equipment', JSON.stringify({ dynamometer1: 'D-07', dynamometer2: 'D-09', handlePosition: '3' }));
   const r = await wave();
@@ -7309,10 +7766,54 @@ test('a wave opens for staff; a coach without the permission goes home', async (
 });
 ```
 
+Create `frontend/src/portal/components/assessments/StationShell.test.js`:
+
+```js
+import React from 'react';
+import { renderScreen } from '../../screens/testRender';
+import StationShell, { painStopBefore } from './StationShell';
+import { STATIONS } from '../../data/assessmentSettings';
+
+// StationShell reads LETTERS from StartWaveSheet, which imports the Firestore adapter.
+jest.mock('../../hooks/assessmentsLive', () => ({ startWave: async () => ({}) }));
+
+const station = (id) => STATIONS.find((s) => s.id === id);
+const athlete = (w) => ({ athleteId: 'a', name: 'Ava Moreno', position: 1, window: { id: '2026-27-baseline', ...w } });
+const shell = (id, w) => renderScreen(
+  <StationShell station={station(id)} athletes={[athlete(w)]} layout="tablet" order={null} entries={{}} onRetry={() => {}} onNotTested={() => {}} renderAthlete={() => 'STATION INPUTS'} />
+);
+
+test('not tested at intake - the readiness answer, the not-tested control or a pain stop - skips every later station', async () => {
+  for (const w of [{ readiness: { status: 'not-tested', reason: 'ill' } }, { notTested: { readiness: 'ill' } }, { notTested: { readiness: 'pain' } }]) {
+    const r = await shell('anthro', w);
+    expect(r.text()).not.toContain('STATION INPUTS');
+    expect(r.text()).toContain('Not tested at readiness');
+    await r.unmount();
+  }
+  const intake = await shell('intake', { notTested: { readiness: 'pain' } });
+  expect(intake.text()).toContain('Stopped for pain. Retest within 7 days; refer per RYP policy.');
+  await intake.unmount();
+});
+
+test('a pain stop at a station ends the later ones for that athlete; the stations before it are untouched', async () => {
+  const w = { notTested: { grip: 'pain' } };
+  expect(painStopBefore(w, 'medball').id).toBe('grip');
+  expect(painStopBefore(w, 'grip')).toBeNull();
+  expect(painStopBefore(w, 'anthro')).toBeNull();
+  const later = await shell('jump', w);
+  expect(later.text()).toContain('Stopped for pain at Grip. Retest within 7 days; refer per RYP policy.');
+  expect(later.text()).not.toContain('STATION INPUTS');
+  await later.unmount();
+  const before = await shell('anthro', w);
+  expect(before.text()).toContain('STATION INPUTS');
+  await before.unmount();
+});
+```
+
 - [ ] **Step 2: Run the tests to verify they fail**
 
-Run: `cd frontend && CI=true npx react-scripts test --watchAll=false src/portal/screens/AssessmentWave.test.js src/portal/AssessmentRoutes.test.js`
-Expected: FAIL - "Cannot find module './AssessmentWave'" and the wave path landing on the index.
+Run: `cd frontend && CI=true npx react-scripts test --watchAll=false src/portal/screens/AssessmentWave.test.js src/portal/components/assessments/StationShell.test.js src/portal/AssessmentRoutes.test.js`
+Expected: FAIL - "Cannot find module './AssessmentWave'", "Cannot find module './StationShell'" and the wave path landing on the index.
 
 - [ ] **Step 3: Shared pieces: field row, not-tested sheet, equipment**
 
@@ -7461,10 +7962,19 @@ import SaveState from './SaveState';
 import NotTestedSheet from './NotTestedSheet';
 import { LETTERS } from './StartWaveSheet';
 import { Body, Card, SectionLabel } from '../Primitives';
-import { NOT_TESTED_REASONS } from '../../data/assessmentSettings';
+import { NOT_TESTED_REASONS, STATIONS } from '../../data/assessmentSettings';
 
 const REASON_LABEL = Object.fromEntries(NOT_TESTED_REASONS);
 const RANK = { error: 3, slow: 2, saving: 1, saved: 0 };
+
+/**
+ * The earlier station, in the fixed order, where this athlete was stopped
+ * for pain, or null. Intake is the readiness check's own case (below).
+ */
+export function painStopBefore(w, stationId) {
+  const at = STATIONS.findIndex((s) => s.id === stationId);
+  return STATIONS.slice(0, Math.max(0, at)).find((s) => s.id !== 'intake' && s.notTestedKeys.some((k) => w.notTested?.[k] === 'pain')) ?? null;
+}
 
 /**
  * One station of the wave (spec 5): its standard cue, the athletes in
@@ -7472,7 +7982,12 @@ const RANK = { error: 3, slow: 2, saving: 1, saved: 0 };
  * protocol's reason codes and a pain stop ("Stop any test immediately if
  * the athlete reports pain"). Phone (< 700 px) shows one athlete at a time
  * with a switcher; tablet two columns; desktop all four side by side. An
- * athlete not tested at readiness skips every later station.
+ * athlete not tested at readiness - the readiness answer, or intake's not
+ * tested and pain-stop controls (notTested.readiness) - skips every later
+ * station, and a pain stop at any station ends that athlete's later stations
+ * (protocol Section 2: do not test an athlete who reports current pain;
+ * Phil confirms, Task 26 Step 1). "Undo not tested" at the station where it
+ * was recorded opens the later ones again.
  */
 export default function StationShell({ station, athletes, layout, order, entries, onRetry, onNotTested, renderAthlete }) {
   const [current, setCurrent] = useState(0);
@@ -7524,7 +8039,10 @@ export default function StationShell({ station, athletes, layout, order, entries
 function AthleteCard({ athlete, station, entries, onRetry, onNotTested, onAsk, renderAthlete }) {
   const w = athlete.window;
   const reason = station.notTestedKeys.map((k) => w.notTested?.[k]).find(Boolean) ?? null;
-  const atReadiness = station.id !== 'intake' && w.readiness?.status === 'not-tested';
+  const readinessOff = w.readiness?.status === 'not-tested' || Boolean(w.notTested?.readiness);
+  const atReadiness = station.id !== 'intake' && readinessOff;
+  const readinessReason = (w.readiness?.status === 'not-tested' ? w.readiness.reason : null) ?? w.notTested?.readiness ?? null;
+  const painAt = station.id !== 'intake' && !atReadiness ? painStopBefore(w, station.id) : null;
   const keys = [...station.sections, 'notTested', 'profile', 'fields'].map((s) => `${athlete.athleteId}:${s}`);
   const tracked = keys.filter((k) => entries[k]);
   const worstKey = tracked.sort((x, y) => RANK[entries[y].state] - RANK[entries[x].state])[0];
@@ -7545,7 +8063,9 @@ function AthleteCard({ athlete, station, entries, onRetry, onNotTested, onAsk, r
           </Button>
         </div>
       ) : atReadiness ? (
-        <Body size={13}>Not tested at readiness ({REASON_LABEL[w.readiness.reason] ?? 'no reason given'}). Retest within 7 days.</Body>
+        <Body size={13}>Not tested at readiness ({REASON_LABEL[readinessReason] ?? 'no reason given'}). Retest within 7 days.</Body>
+      ) : painAt ? (
+        <Body size={13} tone={color.error}>Stopped for pain at {painAt.label}. Retest within 7 days; refer per RYP policy.</Body>
       ) : (
         <>
           {renderAthlete(athlete)}
@@ -7659,7 +8179,7 @@ import IntakeStation from '../components/assessments/IntakeStation';
 import { BackLink, Body, ErrorNotice, ScreenTitle } from '../components/Primitives';
 import { useWave } from '../hooks/assessments';
 import { saveAssessmentProfile, saveSection, saveWindowFields } from '../hooks/assessmentsLive';
-import useSaveTracker from '../hooks/assessmentSaves';
+import useSaveTracker, { dropPending, keepPending, pendingFor } from '../hooks/assessmentSaves';
 import { stationsFor } from '../data/assessmentSettings';
 import { shortDate } from '../data/assessmentWindows';
 
@@ -7671,6 +8191,21 @@ export const STATION_VIEWS = {
   intake: { View: IntakeStation },
 };
 
+/** The save tracker's key for a kept entry: athleteId:section, athleteId:profile or athleteId:fields. */
+const trackerKey = (kept) => `${kept.athleteId}:${kept.kind === 'section' ? kept.section : kept.kind}`;
+
+/** Send one kept save (`value` is what this write carries); the device copy goes once the server has it. */
+function send(kept, value = kept.value) {
+  const done = (result) => {
+    dropPending(kept);
+    return result;
+  };
+  const { athleteId, windowId } = kept;
+  if (kept.kind === 'section') return saveSection({ athleteId, windowId, section: kept.section, value }).then(done);
+  if (kept.kind === 'fields') return saveWindowFields({ athleteId, windowId, fields: value }).then(done);
+  return saveAssessmentProfile({ athleteId, patch: value }).then(done);
+}
+
 /**
  * One wave of four (spec 5): the fixed station order, each station's cue,
  * the athletes in rotation order, the equipment entered once, and every
@@ -7678,7 +8213,11 @@ export const STATION_VIEWS = {
  * (hooks/assessmentsLive.js saveSection). What was typed lives here once the
  * wave has loaded, so nothing a background read brings back can overwrite
  * it; the save tracker says what has not reached the server yet, and
- * leaving with anything unsaved asks first (Review Focus 2).
+ * leaving with anything unsaved asks first (Review Focus 2). Every save is
+ * also kept on this device until the server has it: a reload, or iPad
+ * Safari evicting the page, loses the SDK's queued writes and ignores the
+ * leave prompt, so when the wave opens again what is still kept is shown
+ * and sent again.
  * `initialStation` reopens one station (the McGill block run later).
  */
 export default function AssessmentWave({ bare = false, waveId, initialStation = null, onBack }) {
@@ -7691,11 +8230,21 @@ export default function AssessmentWave({ bare = false, waveId, initialStation = 
   const [index, setIndex] = useState(null);
   const [leaving, setLeaving] = useState(false);
 
+  const { run } = tracker;
   useEffect(() => {
     if (windows || !data) return;
-    setWindows(Object.fromEntries(data.athletes.map((a) => [a.athleteId, a.window])));
-    setProfiles(Object.fromEntries(data.athletes.map((a) => [a.athleteId, a.profile])));
-  }, [data, windows]);
+    const kept = pendingFor(data.athletes.map((a) => [a.athleteId, a.windowId]));
+    const ws = Object.fromEntries(data.athletes.map((a) => [a.athleteId, a.window]));
+    const ps = Object.fromEntries(data.athletes.map((a) => [a.athleteId, a.profile]));
+    for (const k of kept) {
+      if (k.kind === 'section') ws[k.athleteId] = { ...ws[k.athleteId], [k.section]: k.value };
+      else if (k.kind === 'fields') ws[k.athleteId] = { ...ws[k.athleteId], ...k.value };
+      else ps[k.athleteId] = { ...(ps[k.athleteId] || {}), ...k.value };
+    }
+    setWindows(ws);
+    setProfiles(ps);
+    for (const k of kept) run(trackerKey(k), () => send(k));
+  }, [data, windows, run]);
 
   const athletes = data && windows ? data.athletes.map((a) => ({ ...a, window: windows[a.athleteId], profile: profiles[a.athleteId] ?? null })) : [];
   const stations = data ? stationsFor(data.circuitMode, data.athletes.map((a) => a.kind)).filter((s) => STATION_VIEWS[s.id]) : [];
@@ -7705,16 +8254,19 @@ export default function AssessmentWave({ bare = false, waveId, initialStation = 
   const saveSectionOf = (athleteId, section, value) => {
     const windowId = windows[athleteId].id;
     setWindows((all) => ({ ...all, [athleteId]: { ...all[athleteId], [section]: value } }));
-    tracker.run(`${athleteId}:${section}`, () => saveSection({ athleteId, windowId, section, value }));
+    const kept = keepPending({ kind: 'section', athleteId, windowId, section, value });
+    tracker.run(`${athleteId}:${section}`, () => send(kept));
   };
   const saveProfileOf = (athleteId, patch) => {
     setProfiles((all) => ({ ...all, [athleteId]: { ...(all[athleteId] || {}), ...patch } }));
-    tracker.run(`${athleteId}:profile`, () => saveAssessmentProfile({ athleteId, patch }));
+    const kept = keepPending({ kind: 'profile', athleteId, value: patch });
+    tracker.run(`${athleteId}:profile`, () => send(kept, patch));
   };
   const saveFieldsOf = (athleteId, fields) => {
     const windowId = windows[athleteId].id;
     setWindows((all) => ({ ...all, [athleteId]: { ...all[athleteId], ...fields } }));
-    tracker.run(`${athleteId}:fields`, () => saveWindowFields({ athleteId, windowId, fields }));
+    const kept = keepPending({ kind: 'fields', athleteId, windowId, value: fields });
+    tracker.run(`${athleteId}:fields`, () => send(kept, fields));
   };
   const markNotTested = (athleteId, keys, reason) => {
     const next = { ...(windows[athleteId].notTested || {}) };
@@ -7890,7 +8442,7 @@ with:
 
 - [ ] **Step 6: Run the tests to verify they pass**
 
-Run: `cd frontend && CI=true npx react-scripts test --watchAll=false src/portal/screens/AssessmentWave.test.js src/portal/AssessmentRoutes.test.js`
+Run: `cd frontend && CI=true npx react-scripts test --watchAll=false src/portal/screens/AssessmentWave.test.js src/portal/components/assessments/StationShell.test.js src/portal/AssessmentRoutes.test.js`
 Expected: PASS.
 
 - [ ] **Step 7: Commit**
@@ -7900,15 +8452,16 @@ git add frontend/src/portal/screens/AssessmentWave.js frontend/src/portal/screen
 git commit -m "feat(assessments): the wave screen and readiness & intake
 
 Fixed station order with the standard cues, not tested with reason codes
-and a pain stop, equipment remembered on the tablet, phone / tablet /
-desktop layouts, and a guard on leaving with unsaved entries.
+and a pain stop that ends the athlete's later stations, equipment
+remembered on the tablet, phone / tablet / desktop layouts, a guard on
+leaving with unsaved entries, and unsaved entries re-sent on reopening.
 
 Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 ```
 
 ---
 
-### Task 12: Anthropometrics and grip stations
+### Task 14: Anthropometrics and grip stations
 
 **Files:**
 - Create: `frontend/src/portal/components/assessments/testHarness.js` (test support, imported by station tests only)
@@ -7918,7 +8471,7 @@ Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 - Test: `frontend/src/portal/components/assessments/AnthroStation.test.js`, `frontend/src/portal/components/assessments/GripStation.test.js`, `frontend/src/portal/screens/AssessmentWave.test.js` (append)
 
 **Interfaces:**
-- Consumes: the station-view contract and `STATION_VIEWS` (Task 11); `TrialInput`, `Choice`, `FieldRow` (Tasks 9, 11); `anthroFinals`, `growthCm`, `GROWTH_FLAG_CM`, `gripScores` (Task 1); `setAt` (Task 3); `shortDate` (Task 2); `LETTERS` (Task 10); `EMPTY_EQUIPMENT` (Task 11).
+- Consumes: the station-view contract and `STATION_VIEWS` (Task 13); `TrialInput`, `Choice`, `FieldRow` (Tasks 11, 13); `anthroFinals`, `growthCm`, `GROWTH_FLAG_CM`, `gripScores` (Task 1); `setAt` (Task 3); `shortDate` (Task 2); `LETTERS` (Task 12); `EMPTY_EQUIPMENT` (Task 13).
 - Produces:
   - `StationHarness({ View, athlete, equipment?, circuitMode?, saves: [] })` (test support: holds the window and profile, records every save as `[section|'profile'|'fields', value]`)
   - `AnthroStation` view, `EMPTY_ANTHRO`; `GripStation` view, `EMPTY_GRIP`, `gripRotation(athletes, circuitMode): string`
@@ -8094,6 +8647,19 @@ test('the wave offers anthropometrics and grip after intake, with the grip rotat
   await r.click('3 Grip');
   expect(r.text()).toContain('Squeeze as hard as you can. Go, go, go, relax.');
   expect(r.text()).toContain('Dynamometer 1: A right, A left, B right, B left');
+  await r.unmount();
+});
+
+test('a pain stop at intake: the athlete is offered no anthropometrics or grip (safety)', async () => {
+  const r = await wave();
+  await r.click('Ava Moreno: pain, stop');
+  expect(r.text()).toContain('Stopped for pain.');
+  await r.click('2 Anthropometrics');
+  expect(field(r, 'Ava Moreno standing height 1')).toBeNull();
+  expect(field(r, 'Ben Ortiz standing height 1')).not.toBeNull();
+  expect(r.text()).toContain('Not tested at readiness (Pain). Retest within 7 days.');
+  await r.click('3 Grip');
+  expect(field(r, 'Ava Moreno grip right 1')).toBeNull();
   await r.unmount();
 });
 ```
@@ -8307,7 +8873,7 @@ Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 
 ---
 
-### Task 13: Jump (CMJ, then 10/5) and med ball stations
+### Task 15: Jump (CMJ, then 10/5) and med ball stations
 
 **Files:**
 - Create: `frontend/src/portal/components/assessments/JumpStation.js`
@@ -8316,7 +8882,7 @@ Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 - Test: `frontend/src/portal/components/assessments/JumpStation.test.js`, `frontend/src/portal/components/assessments/MedballStation.test.js`, `frontend/src/portal/screens/AssessmentWave.test.js` (append)
 
 **Interfaces:**
-- Consumes: the station-view contract (Task 11); `StationHarness`, `stationAthlete`, `MODE` (Task 12); `cmjScores`, `hopScores`, `hopSet`, `medballScores`, `anthroFinals` (Task 1); `medballMassFor` (Task 2); `setAt` (Task 3); `LETTERS` (Task 10).
+- Consumes: the station-view contract (Task 13); `StationHarness`, `stationAthlete`, `MODE` (Task 14); `cmjScores`, `hopScores`, `hopSet`, `medballScores`, `anthroFinals` (Task 1); `medballMassFor` (Task 2); `setAt` (Task 3); `LETTERS` (Task 12).
 - Produces: `JumpStation` view, `EMPTY_CMJ`, `EMPTY_TRIAL`, `jumpRotation(athletes, circuitMode)`; `MedballStation` view, `medballRotation(athletes, circuitMode)`; `STATION_VIEWS.jump`, `STATION_VIEWS.medball`. CMJ is written as `{ trials: [trial|null x scored], software, samplingHz }`; 10/5 as `{ sets: [{ rsiBest5, gctMs } | { hopRsi: [x10], hopGctMs: [x10] } | null] }`; med ball as `{ massKg, side, method, throws }`, with the profile's season method and mass set on the first throw.
 
 - [ ] **Step 1: Write the failing tests**
@@ -8712,7 +9278,7 @@ Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 
 ---
 
-### Task 14: McGill station and the hold timer
+### Task 16: McGill station and the hold timer
 
 **Files:**
 - Create: `frontend/src/portal/components/assessments/HoldTimer.js`
@@ -8721,8 +9287,8 @@ Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 - Test: `frontend/src/portal/components/assessments/HoldTimer.test.js`, `frontend/src/portal/components/assessments/McGillStation.test.js`, `frontend/src/portal/screens/AssessmentWave.test.js` (append)
 
 **Interfaces:**
-- Consumes: the station-view contract (Task 11); `StationHarness`, `stationAthlete`, `MODE` (Task 12); `CAP_SECONDS`, `round`, `holdLabel`, `mcgillScores` (Task 1); `MCGILL_WINDOW_DAYS`, `daysBetween`, `shortDate`, `toISODate` (Task 2); `TrialInput` (Task 9); `LETTERS` (Task 10); `AssessmentWave`'s `initialStation` prop (Task 11).
-- Produces: `HoldTimer({ label, value, onCommit, disabled })` and `TICK_MS`; `McGillStation` view, `EMPTY_MCGILL`, `HOLDS` (`[key, name]` in protocol order), `mcgillRotation(athletes, circuitMode)`; `STATION_VIEWS.mcgill`. The McGill section is written as `{ flexorSec, extensorSec, sideRightSec, sideLeftSec, skippedBackPain }`; the window's `mcgillDate` is set (once) to the academy date of the first hold saved, so Task 15 can flag a block run more than 14 days after the circuit.
+- Consumes: the station-view contract (Task 13); `StationHarness`, `stationAthlete`, `MODE` (Task 14); `CAP_SECONDS`, `round`, `holdLabel`, `mcgillScores` (Task 1); `MCGILL_WINDOW_DAYS`, `daysBetween`, `shortDate`, `toISODate` (Task 2); `TrialInput` (Task 11); `LETTERS` (Task 12); `AssessmentWave`'s `initialStation` prop (Task 13).
+- Produces: `HoldTimer({ label, value, onCommit, disabled })` and `TICK_MS`; `McGillStation` view, `EMPTY_MCGILL`, `HOLDS` (`[key, name]` in protocol order), `mcgillRotation(athletes, circuitMode)`; `STATION_VIEWS.mcgill`. The McGill section is written as `{ flexorSec, extensorSec, sideRightSec, sideLeftSec, skippedBackPain }`; the window's `mcgillDate` is set (once) to the academy date of the first hold saved, so Task 17 can flag a block run more than 14 days after the circuit.
 
 - [ ] **Step 1: Write the failing tests**
 
@@ -9103,7 +9669,7 @@ Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 
 ---
 
-### Task 15: Coach results view
+### Task 17: Coach results view
 
 **Files:**
 - Create: `frontend/src/portal/data/assessmentResults.js`
@@ -9116,8 +9682,8 @@ Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 - Test: `frontend/src/portal/data/assessmentResults.test.js`, `frontend/src/portal/screens/AssessmentResults.test.js`, `frontend/src/portal/AssessmentRoutes.test.js` (mocks and appended tests), `frontend/src/portal/screens/AthleteDetail.test.js` (append)
 
 **Interfaces:**
-- Consumes: every scorer in `data/assessmentScoring.js` (Task 1); `withDefaults`, `modeDifferences` (Task 2); `KIND_LABEL`, `MIN_GAP_DAYS`, `GOLF_WINDOW_DAYS`, `MCGILL_WINDOW_DAYS`, `CONSENT_LABEL`, `consentStatus`, `daysBetween`, `inResearch`, `shortDate` (Task 2); `assessmentAccess` (Task 3); `saveWindowFields` (Task 5); `useAthleteAssessments(athleteId)` returning `{ athlete, profile, windows, settings }` (Task 6); `AssessmentFrame`, `useLayoutClass` (Task 9); `AssessmentsEntryCard` (Task 10); `useViewer`, `RequireAssessment` (Task 10); `AssessmentWave`'s navigation state `station` (Task 11).
-- Produces: `buildResults({ athleteId, athlete, profile, windows, settings })` returning `{ athleteId, name, sex, firstTestDate, consent, coefficientsVerified, windows: WindowResult[] }` newest first, where `WindowResult = { id, kind, kindLabel, circuitDate, status, protocolVersion, weeksOfExposure, wave, scores, growth, maturity: { age, offset, category, label, note, sittingFrom, missing }, previousDate, markers: { clubhead, cmj, hop, medball, grip, parallax } | null, flags: [{ code, text }], notTested, mcgillDue, inResearch, window }`; `windowScores(w)`; `TABLE_ROWS` (`{ label, value(r), marker? }`); `ratioCell(ratio)`; `MARKER_TEXT`, `MODE_LABEL`, `UNVERIFIED_NOTE`. Flag codes: `growth`, `sitting-stale`, `gct`, `fps-directional`, `golf-late`, `mcgill-late`, `too-soon`, `first-retest`, `cross-version`, `mode-differs`. The screen `AssessmentResults({ bare, athleteId, viewer, fallbackName, onBack, onRunMcgill })`; the route `/portal/assessments/athlete/:athleteId` (every coach, ops, owner); `AthleteDetail`'s `onOpenAssessments(name)`. Task 16's golf screen and the family summary (B) build on `buildResults`.
+- Consumes: every scorer in `data/assessmentScoring.js` (Task 1); `withDefaults`, `modeDifferences`, `ENTRY_KEYS` (Task 2); `addDaysISO`, `academyDateISO` (`data/calendar.js`); `KIND_LABEL`, `MIN_GAP_DAYS`, `GOLF_WINDOW_DAYS`, `MCGILL_WINDOW_DAYS`, `CONSENT_LABEL`, `consentStatus`, `daysBetween`, `inResearch`, `shortDate` (Task 2); `assessmentAccess` (Task 3); `saveWindowFields` (Task 5); `useAthleteAssessments(athleteId)` returning `{ athlete, profile, windows, settings }` (Task 6); `AssessmentFrame`, `useLayoutClass` (Task 11); `AssessmentsEntryCard` (Task 12); `useViewer`, `RequireAssessment` (Task 12); `AssessmentWave`'s navigation state `station` (Task 13).
+- Produces: `buildResults({ athleteId, athlete, profile, windows, settings, today? })` returning `{ athleteId, name, sex, firstTestDate, consent, coefficientsVerified, windows: WindowResult[] }` newest first, where `WindowResult = { id, kind, kindLabel, circuitDate, status, protocolVersion, weeksOfExposure, wave, scores, growth, maturity: { age, offset, category, label, note, sittingFrom, missing }, previousDate, markers: { clubhead, cmj, hop, medball, grip, parallax } | null, flags: [{ code, text }], notTested, mcgillDue, missing: string[] (what an open window still lacks, with its due date), openDays: number|null (days since the circuit date while open, given `today`), inResearch, window }`; `windowScores(w)`; `TABLE_ROWS` (`{ label, value(r), marker? }`); `ratioCell(ratio)`; `MARKER_TEXT`, `MODE_LABEL`, `UNVERIFIED_NOTE`. Flag codes: `growth`, `sitting-stale`, `gct`, `fps-directional`, `golf-late`, `mcgill-late`, `too-soon`, `first-retest`, `cross-version`, `mode-differs` (markers off), `entry-differs` (another 10/5 or RSImod entry mode: only the 10/5 marker goes off). The screen `AssessmentResults({ bare, athleteId, viewer, fallbackName, onBack, onRunMcgill, today = academyDateISO() })`; `WindowCard` asks before completing an open window that still lacks clubhead speed or McGill; the route `/portal/assessments/athlete/:athleteId` (every coach, ops, owner); `AthleteDetail`'s `onOpenAssessments(name)`. Task 18's golf screen and the family summary (B) build on `buildResults`.
 
 - [ ] **Step 1: Write the failing tests**
 
@@ -9188,6 +9754,27 @@ test('another protocol version or circuit mode switches the markers off and says
     'Protocol v1.2.1 vs v1.2 on Nov 3: change markers are off.',
     'Circuit mode differs from Nov 3 (trial counts, grip rest): change markers are off.',
   ]));
+});
+
+test('another 10/5 or RSImod entry mode is flagged; only the 10/5 marker goes off', () => {
+  const v = win({ ...mid, circuitMode: { ...MODE, hopEntry: 'per-hop', rsiModEntry: 'computed' } });
+  const [m] = results([baseline, v]).windows;
+  expect(m.markers).toEqual({ clubhead: 'gain', cmj: 'within', hop: null, medball: 'within', grip: 'gain', parallax: null });
+  expect(m.flags.filter((f) => f.code === 'entry-differs').map((f) => f.text)).toEqual([
+    '10/5 entered hop by hop here and as the per-set summary on Nov 3: the 10/5 marker is off.',
+    'CMJ RSImod computed from height and time to take-off here and typed from Smart2Move on Nov 3: RSImod is not compared like for like.',
+  ]);
+  expect(m.flags.map((f) => f.code)).not.toContain('mode-differs');
+});
+
+test('what an open window still lacks, with its due date, and how long it has been open', () => {
+  const [m] = results([baseline, win({ ...mid, golf: null })], { today: '2027-01-12' }).windows;
+  expect(m.missing).toEqual(['Clubhead speed not entered (due by Jan 12)']);
+  expect(m.openDays).toBe(7);
+  const end = win({ ...baseline, id: '2026-27-end', kind: 'end', status: 'open', circuitDate: '2027-02-16', golf: null, mcgill: null, circuitMode: { ...MODE, golfTiming: 'same-day' } });
+  expect(results([end], { today: '2027-02-16' }).windows[0].missing).toEqual(['Clubhead speed not entered (due on Feb 16)', 'McGill not entered (due by Mar 2)']);
+  expect(results([win({ ...end, notTested: { golf: 'absent', mcgill: 'pain' } })]).windows[0].missing).toEqual([]);
+  expect(results([baseline]).windows[0]).toMatchObject({ missing: [], openDays: null });
 });
 
 test('a new ball or method switches the med ball marker off', () => {
@@ -9304,7 +9891,7 @@ const end = win({
   grip: { right: [27.0], left: [24.0] },
 });
 
-const screen = (props = {}) => renderScreen(<AssessmentResults bare athleteId="seed-ava" viewer={PHIL} onBack={() => {}} onRunMcgill={() => {}} {...props} />);
+const screen = (props = {}) => renderScreen(<AssessmentResults bare athleteId="seed-ava" viewer={PHIL} today="2027-02-20" onBack={() => {}} onRunMcgill={() => {}} {...props} />);
 
 beforeEach(() => {
   mockData = {
@@ -9345,12 +9932,26 @@ test('every trial, with the coach-only values, on request', async () => {
   await r.unmount();
 });
 
-test('staff mark a window complete and run the McGill block it is missing', async () => {
+test('an open window says how long it has been open and what is still missing', async () => {
+  const r = await screen();
+  expect(r.text()).toContain('Open since Feb 16 (4 days)');
+  expect(r.text()).toContain('Clubhead speed not entered (due by Feb 23)');
+  expect(r.text()).toContain('McGill not entered (due by Mar 2)');
+  await r.unmount();
+});
+
+test('staff mark a window complete, after a warning for what is still missing, and run the McGill block it lacks', async () => {
   const runs = [];
   const r = await screen({ onRunMcgill: (waveId) => runs.push(waveId) });
   await r.click('Run McGill block');
   expect(runs).toEqual(['wave-2027-02-16-x']);
   await r.click('Mark window complete');
+  expect(mockSaves).toEqual([]);
+  expect(r.text()).toContain('Golf coaches can only enter clubhead speed and Parallax on an open window.');
+  await r.click('Keep open');
+  expect(mockSaves).toEqual([]);
+  await r.click('Mark window complete');
+  await r.click('Complete anyway');
   expect(mockSaves).toEqual([{ athleteId: 'seed-ava', windowId: '2026-27-end', fields: { status: 'complete' } }]);
   expect(r.button('Mark window complete')).toBeNull();
   await r.unmount();
@@ -9360,6 +9961,7 @@ test('a status save that fails says so and leaves the window open', async () => 
   mockSaveFails = true;
   const r = await screen();
   await r.click('Mark window complete');
+  await r.click('Complete anyway');
   expect(r.text()).toContain('The window was not marked complete. Check the connection and try again.');
   expect(r.button('Mark window complete')).not.toBeNull();
   await r.unmount();
@@ -9501,7 +10103,9 @@ Create `frontend/src/portal/data/assessmentResults.js`:
  * maturity offset or why there is none, the change markers against the
  * previous window, and the flags. A window run under another protocol
  * version or circuit mode than the one before it has its markers switched
- * off and says why - never silently compared (spec 2, decision 9).
+ * off and says why - never silently compared (spec 2, decision 9); one
+ * entered under another 10/5 or RSImod entry mode is flagged, and the 10/5
+ * marker (the one an entry mode feeds) goes off.
  * Thresholds and coefficients come from the current settings: the
  * thresholds are provisional and Phil edits them in one table (spec 6).
  */
@@ -9509,12 +10113,18 @@ import {
   GCT_FLAG_MS, GROWTH_FLAG_CM, MATURITY_LABEL, anthroFinals, changeMarker, clubheadScores, cmjScores, decimalAge, gripScores, growthCm,
   hopScores, maturityCategory, maturityOffset, mcgillScores, medballScores,
 } from './assessmentScoring';
-import { modeDifferences, withDefaults } from './assessmentSettings';
+import { ENTRY_KEYS, modeDifferences, withDefaults } from './assessmentSettings';
 import { GOLF_WINDOW_DAYS, KIND_LABEL, MCGILL_WINDOW_DAYS, MIN_GAP_DAYS, consentStatus, daysBetween, inResearch, shortDate } from './assessmentWindows';
+import { addDaysISO } from './calendar';
 
 export const UNVERIFIED_NOTE = 'estimate, coefficients unverified';
 export const MODE_LABEL = { trialCounts: 'trial counts', gripRestSec: 'grip rest', stations: 'stations on', mcgillMode: 'McGill mode', medballSide: 'med ball side', golfTiming: 'golf timing' };
 export const MARKER_TEXT = { gain: 'Up', within: 'No change', drop: 'Down - check maturity and readiness' };
+const ENTRY_TEXT = {
+  hopEntry: { summary: 'as the per-set summary', 'per-hop': 'hop by hop' },
+  rsiModEntry: { typed: 'typed from Smart2Move', computed: 'computed from height and time to take-off' },
+};
+const entryOf = (key, mode) => ENTRY_TEXT[key][mode?.[key]] ?? 'another way';
 const MARKER_TESTS = ['clubhead', 'cmj', 'hop', 'medball', 'grip', 'parallax'];
 
 const isNum = (v) => typeof v === 'number' && Number.isFinite(v);
@@ -9620,13 +10230,41 @@ function flagsOf({ w, scores, prev, index, growth, maturity }) {
       add('cross-version', `Protocol ${w.protocolVersion} vs ${prev.protocolVersion} on ${shortDate(prev.circuitDate)}: change markers are off.`);
     }
     const diffs = modeDifferences(prev.circuitMode, w.circuitMode);
-    if (diffs.length) add('mode-differs', `Circuit mode differs from ${shortDate(prev.circuitDate)} (${diffs.map((k) => MODE_LABEL[k]).join(', ')}): change markers are off.`);
+    const procedure = diffs.filter((k) => !ENTRY_KEYS.includes(k));
+    const on = shortDate(prev.circuitDate);
+    if (procedure.length) add('mode-differs', `Circuit mode differs from ${on} (${procedure.map((k) => MODE_LABEL[k]).join(', ')}): change markers are off.`);
+    if (diffs.includes('hopEntry')) {
+      add('entry-differs', `10/5 entered ${entryOf('hopEntry', w.circuitMode)} here and ${entryOf('hopEntry', prev.circuitMode)} on ${on}: the 10/5 marker is off.`);
+    }
+    if (diffs.includes('rsiModEntry')) {
+      add('entry-differs', `CMJ RSImod ${entryOf('rsiModEntry', w.circuitMode)} here and ${entryOf('rsiModEntry', prev.circuitMode)} on ${on}: RSImod is not compared like for like.`);
+    }
   }
   return flags;
 }
 
-/** One athlete's results, newest window first (spec 5). `athlete` is null when the viewer may not read the record. */
-export function buildResults({ athleteId, athlete, profile, windows, settings }) {
+/**
+ * What an open window still lacks, each with its due date (spec 4.1: golf
+ * within 7 days of the circuit, or the same day when the circuit says so;
+ * McGill within 14). Golf coaches write only an open window, so completing
+ * one with clubhead speed missing ends their entry: the card asks first.
+ */
+function missingOf(w, scores, mcgillDue) {
+  const out = [];
+  if (scores.golf.best == null && !w.notTested?.golf) {
+    const due = w.circuitMode?.golfTiming === 'same-day' ? `on ${shortDate(w.circuitDate)}` : `by ${shortDate(addDaysISO(w.circuitDate, GOLF_WINDOW_DAYS))}`;
+    out.push(`Clubhead speed not entered (due ${due})`);
+  }
+  if (mcgillDue) out.push(`McGill not entered (due by ${shortDate(addDaysISO(w.circuitDate, MCGILL_WINDOW_DAYS))})`);
+  return out;
+}
+
+/**
+ * One athlete's results, newest window first (spec 5). `athlete` is null
+ * when the viewer may not read the record; `today` (the academy date) dates
+ * how long an open window has been open.
+ */
+export function buildResults({ athleteId, athlete, profile, windows, settings, today = null }) {
   const s = withDefaults(settings);
   const all = [...(windows || [])].filter(Boolean).sort(byDate);
   const sex = profile?.sex ?? null;
@@ -9638,7 +10276,10 @@ export function buildResults({ athleteId, athlete, profile, windows, settings })
     const prior = latestBefore(earlier, (p) => anthroFinals(p.anthro).standing);
     const growth = prior && scores.anthro.standing != null ? { cm: growthCm(scores.anthro.standing, prior.value), date: prior.date } : null;
     const maturity = maturityOf({ athlete, sex, w, anthro: scores.anthro, earlier, coefficients: s.coefficients });
-    const comparable = Boolean(prev) && (prev.protocolVersion ?? null) === (w.protocolVersion ?? null) && modeDifferences(prev.circuitMode, w.circuitMode).length === 0;
+    const diffs = prev ? modeDifferences(prev.circuitMode, w.circuitMode) : [];
+    const comparable = Boolean(prev) && (prev.protocolVersion ?? null) === (w.protocolVersion ?? null) && diffs.every((k) => ENTRY_KEYS.includes(k));
+    const markers = comparable ? markersOf(scores, windowScores(prev), s.thresholds) : null;
+    const mcgillDue = w.kind !== 'mid' && !w.mcgill && !w.notTested?.mcgill && w.circuitMode?.stations?.mcgill !== false;
     return {
       id: w.id,
       kind: w.kind,
@@ -9652,10 +10293,12 @@ export function buildResults({ athleteId, athlete, profile, windows, settings })
       growth,
       maturity,
       previousDate: prev ? prev.circuitDate : null,
-      markers: comparable ? markersOf(scores, windowScores(prev), s.thresholds) : null,
+      markers: markers && diffs.includes('hopEntry') ? { ...markers, hop: null } : markers,
       flags: flagsOf({ w, scores, prev, index, growth, maturity }),
       notTested: w.notTested || {},
-      mcgillDue: w.kind !== 'mid' && !w.mcgill && !w.notTested?.mcgill && w.circuitMode?.stations?.mcgill !== false,
+      mcgillDue,
+      missing: missingOf(w, scores, mcgillDue),
+      openDays: w.status === 'open' && today ? daysBetween(w.circuitDate, today) : null,
       inResearch: inResearch(research, w.circuitDate),
       window: w,
     };
@@ -9766,11 +10409,21 @@ function Trials({ w }) {
  * One window on the results screen (spec 5): kind and date, protocol,
  * weeks of exposure and research, the maturity offset or why it is
  * missing, each score with its change marker, the flags, what was not
- * tested, and every trial on request. Staff mark it complete (or reopen
- * it) and run a McGill block the window is missing.
+ * tested, and every trial on request. An open window says since when and
+ * what it still lacks (clubhead speed, McGill) with the due date. Staff mark
+ * it complete (or reopen it) and run a McGill block the window is missing;
+ * completing one that still lacks something asks first, because golf
+ * coaches can only enter on an open window.
  */
 export default function WindowCard({ result: r, status, staff, busy, failed, onStatus, onRunMcgill }) {
   const [showTrials, setShowTrials] = useState(false);
+  const [confirming, setConfirming] = useState(false);
+  const missing = status === 'open' ? r.missing ?? [] : [];
+  const toggleStatus = () => {
+    if (status !== 'open') onStatus('open');
+    else if (missing.length) setConfirming(true);
+    else onStatus('complete');
+  };
   const title = `${r.kindLabel} · ${shortDate(r.circuitDate)}`;
   const notTested = Object.entries(r.notTested).map(([k, v]) => `${SECTION_LABEL[k] ?? k} (${REASON_LABEL[v] ?? v})`);
   return (
@@ -9784,6 +10437,14 @@ export default function WindowCard({ result: r, status, staff, busy, failed, onS
       <Body size={12} style={{ marginTop: 4 }}>
         {join([`Protocol ${r.protocolVersion ?? '?'}`, r.weeksOfExposure != null ? `${r.weeksOfExposure} weeks of exposure` : null, r.inResearch ? 'in research' : 'not in research'])}
       </Body>
+      {status === 'open' && r.openDays != null && r.openDays >= 0 ? (
+        <Body size={12} style={{ marginTop: 4 }}>Open since {shortDate(r.circuitDate)} ({r.openDays} {r.openDays === 1 ? 'day' : 'days'})</Body>
+      ) : null}
+      {missing.length ? (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 2, marginTop: 6 }}>
+          {missing.map((m) => <Body key={m} size={12} tone={color.secondary}>{m}</Body>)}
+        </div>
+      ) : null}
       <Body size={13} style={{ marginTop: 10 }}>
         {r.maturity.offset != null
           ? `Maturity offset ${r.maturity.offset} · ${r.maturity.label}${r.maturity.note ? ` (${r.maturity.note})` : ''}`
@@ -9819,11 +10480,24 @@ export default function WindowCard({ result: r, status, staff, busy, failed, onS
         ) : null}
         {staff ? (
           <Button variant={status === 'open' ? 'secondary' : 'outline'} height={40} loading={busy} style={{ width: 'auto', padding: '0 16px', boxShadow: 'none' }}
-            onClick={() => onStatus(status === 'open' ? 'complete' : 'open')}>
+            onClick={toggleStatus}>
             {status === 'open' ? 'Mark window complete' : 'Reopen window'}
           </Button>
         ) : null}
       </div>
+      {confirming && status === 'open' ? (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginTop: 12 }}>
+          <Body size={12}>
+            Complete this window with {missing.length === 1 ? 'this' : 'these'} still missing? Golf coaches can only enter clubhead speed and Parallax on an open window.
+          </Body>
+          <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+            <Button variant="secondary" height={40} style={{ width: 'auto', padding: '0 16px', boxShadow: 'none' }} onClick={() => { setConfirming(false); onStatus('complete'); }}>
+              Complete anyway
+            </Button>
+            <Button variant="outline" height={40} style={{ width: 'auto', padding: '0 16px', boxShadow: 'none' }} onClick={() => setConfirming(false)}>Keep open</Button>
+          </div>
+        </div>
+      ) : null}
     </Card>
   );
 }
@@ -9886,6 +10560,7 @@ import { saveWindowFields } from '../hooks/assessmentsLive';
 import { assessmentAccess } from '../data/assessmentAccess';
 import { buildResults } from '../data/assessmentResults';
 import { CONSENT_LABEL, shortDate } from '../data/assessmentWindows';
+import { academyDateISO } from '../data/calendar';
 
 const SEX_LABEL = { male: 'Male', female: 'Female' };
 
@@ -9898,14 +10573,14 @@ const SEX_LABEL = { male: 'Male', female: 'Female' };
  * a golf coach outside their sessions; the results still show, under the
  * name the list passed.
  */
-export default function AssessmentResults({ bare = false, athleteId, viewer, fallbackName = null, onBack, onRunMcgill }) {
+export default function AssessmentResults({ bare = false, athleteId, viewer, fallbackName = null, onBack, onRunMcgill, today = academyDateISO() }) {
   const layout = useLayoutClass();
   const { data, loading, error } = useAthleteAssessments(athleteId);
   const staff = assessmentAccess(viewer) === 'staff';
   const [status, setStatus] = useState({});
   const [busy, setBusy] = useState(null);
   const [failed, setFailed] = useState(null);
-  const results = useMemo(() => (data ? buildResults({ athleteId, ...data }) : null), [athleteId, data]);
+  const results = useMemo(() => (data ? buildResults({ athleteId, ...data, today }) : null), [athleteId, data, today]);
   const name = results?.name ?? fallbackName ?? 'Athlete';
 
   const setWindowStatus = async (windowId, next) => {
@@ -10138,14 +10813,15 @@ git commit -m "feat(assessments): coach results view with markers and flags
 Every window newest first: scores from the trials, the maturity offset
 or what is missing, change markers switched off across versions and
 modes, the protocol's flags, every trial on request, the desktop table,
-and staff actions to complete a window or run its McGill block.
+and staff actions to complete a window (asking first while clubhead speed
+or McGill is missing) or run its McGill block.
 
 Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 ```
 
 ---
 
-### Task 16: Golf-session clubhead speed and Parallax entry
+### Task 18: Golf-session clubhead speed and Parallax entry
 
 **Files:**
 - Create: `frontend/src/portal/screens/AssessmentGolf.js`
@@ -10156,8 +10832,8 @@ Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 - Test: `frontend/src/portal/screens/AssessmentGolf.test.js`, `frontend/src/portal/screens/Roster.clubhead.test.js`, `frontend/src/portal/screens/Roster.reserved.test.js` (one mock), `frontend/src/portal/AssessmentRoutes.test.js` (one mock, appended tests)
 
 **Interfaces:**
-- Consumes: `useAthleteAssessments` (Task 6) and `useOpenAssessmentWindows()` returning `{ data: { byAthlete: { [athleteId]: { windowId, kind, circuitDate, golfDate, circuitMode } } } }` (Task 6); `saveSection`, `saveWindowFields` (Task 5); `useSaveTracker` (Task 9); `TrialInput`, `TextEntry`, `FieldRow`, `SaveState` (Tasks 9 and 11); `clubheadScores` (Task 1); `KIND_LABEL`, `ENTRY_WINDOW_DAYS`, `GOLF_WINDOW_DAYS`, `daysBetween`, `shortDate`, `toISODate` (Task 2); `RequireAssessment` (Task 10).
-- Produces: `AssessmentGolf({ bare, athleteId, fallbackName, onBack })`, `CLUBHEAD_CUE`, `EMPTY_GOLF`, `swingDateProblem(date, today)`; `ClubheadChip({ entry, name, onOpen })`; `SessionAttendance`'s `onOpenClubhead(athleteId, name)`; the route `/portal/assessments/golf/:athleteId` (reader level: every coach). Golf is written as `{ speeds: [mph x clubheadMax], driver, parallaxComposite, fps }` with the window's `golfDate` - the two writes firestore.rules lets any coach make on an open window.
+- Consumes: `useAthleteAssessments` (Task 6) and `useOpenAssessmentWindows({ enabled })` returning `{ data: { byAthlete: { [athleteId]: { windowId, kind, circuitDate, golfDate, circuitMode } } } }` (Task 6); `saveSection`, `saveWindowFields` (Task 5); `useSaveTracker` (Task 11); `TrialInput`, `TextEntry`, `FieldRow`, `SaveState` (Tasks 11 and 13); `clubheadScores` (Task 1); `KIND_LABEL`, `ENTRY_WINDOW_DAYS`, `GOLF_WINDOW_DAYS`, `daysBetween`, `shortDate`, `toISODate` (Task 2); `RequireAssessment` (Task 12).
+- Produces: `AssessmentGolf({ bare, athleteId, fallbackName, onBack })`, `CLUBHEAD_CUE`, `EMPTY_GOLF`, `swingDateProblem(date, today)`; `ClubheadChip({ entry, name, onOpen })`; `SessionAttendance`'s `onOpenClubhead(athleteId, name)` (passed only to a viewer `assessmentAccess` admits, so a mental account without the permission never sends the refused windows read); the route `/portal/assessments/golf/:athleteId` (reader level: every coach). Golf is written as `{ speeds: [mph x clubheadMax], driver, parallaxComposite, fps }` with the window's `golfDate` - the two writes firestore.rules lets any coach make on an open window.
 
 - [ ] **Step 1: Write the failing tests**
 
@@ -10609,8 +11285,9 @@ with:
   const liveAttendance = useSessionAttendance(sessionId);
   const live = isLive() && sessionId != null;
   // Assessments (2026-10-14 spec 5): which athletes have an open window, for
-  // the golf coach's "Clubhead speed" entry on a training session.
-  const openWindows = useOpenAssessmentWindows();
+  // the golf coach's "Clubhead speed" entry on a training session. Read only
+  // when the route gave the entry (a viewer the rules let read windows).
+  const openWindows = useOpenAssessmentWindows({ enabled: Boolean(onOpenClubhead) });
 ```
 
 then replace:
@@ -10711,7 +11388,7 @@ with:
       sessionId={state?.sessionId ?? undefined}
       block={state?.block ?? undefined}
       role={role}
-      onOpenClubhead={(athleteId, name) => navigate(`/portal/assessments/golf/${athleteId}`, { state: { name } })}
+      onOpenClubhead={!live || assessmentAccess(user) ? (athleteId, name) => navigate(`/portal/assessments/golf/${athleteId}`, { state: { name } }) : undefined}
     />
 ```
 
@@ -10770,19 +11447,19 @@ Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 
 ---
 
-### Task 17: Protocol settings screen and the version sheet
+### Task 19: Protocol settings screen and the version sheet
 
 **Files:**
 - Create: `frontend/src/portal/screens/AssessmentSettings.js`
 - Create: `frontend/src/portal/components/assessments/VersionSheet.js`
-- Modify: `frontend/src/portal/data/assessmentInput.js` (two ranges for the settings form)
+- Modify: `frontend/src/portal/data/assessmentInput.js` (four ranges for the settings form; a signed entry for the Moore coefficients)
 - Modify: `frontend/src/portal/AssessmentRoutes.js` (loader, `AssessmentSettingsRoute`)
 - Modify: `frontend/src/portal/PortalRoutes.js` (import; the settings route)
-- Test: `frontend/src/portal/screens/AssessmentSettings.test.js`, `frontend/src/portal/AssessmentRoutes.test.js` (one mock, appended test)
+- Test: `frontend/src/portal/screens/AssessmentSettings.test.js`, `frontend/src/portal/data/assessmentInput.test.js` (appended test), `frontend/src/portal/AssessmentRoutes.test.js` (one mock, appended test)
 
 **Interfaces:**
-- Consumes: `useAssessmentSettings()` returning `{ data: { settings, stored } }` (Task 6); `saveAssessmentSettings(settings)` (Task 5, refuses a label that is not `vN.N[.N]`, bumps `'assessmentSettings'`); `withDefaults`, `procedureChanged`, `nextPatch`, `validVersionLabel`, `TRIAL_LIMITS` (Task 2); `canEditAssessmentSettings`, `assessmentAccess` (Task 3); `Choice`, `TrialInput` (Task 9); `AssessmentFrame`, `useLayoutClass` (Task 9); `RequireAssessment` (Task 10). `AssessmentList`'s `onOpenSettings` already navigates to `/portal/assessments/settings` (Task 10).
-- Produces: `AssessmentSettings({ bare, viewer, onBack })`; `VersionSheet({ current, saving, error, onSave(label), onClose })` and `versionProblem(label, current)`; `RANGES.restSec` (0-120 s) and `RANGES.thresholdPct` (0-50 %); the route `/portal/assessments/settings` (staff level; editing for the owner and Phil only, as firestore.rules allows).
+- Consumes: `useAssessmentSettings()` returning `{ data: { settings, stored } }` (Task 6); `saveAssessmentSettings(settings)` (Task 5, refuses a label that is not `vN.N[.N]`, bumps `'assessmentSettings'`); `withDefaults`, `procedureChanged`, `nextPatch`, `validVersionLabel`, `TRIAL_LIMITS` (Task 2); `canEditAssessmentSettings`, `assessmentAccess` (Task 3); `Choice`, `TrialInput` (Task 11); `AssessmentFrame`, `useLayoutClass` (Task 11); `RequireAssessment` (Task 12). `AssessmentList`'s `onOpenSettings` already navigates to `/portal/assessments/settings` (Task 12).
+- Produces: `AssessmentSettings({ bare, viewer, onBack })`; `VersionSheet({ current, saving, error, onSave(label), onClose })` and `versionProblem(label, current)`; `RANGES.restSec` (0-120 s), `RANGES.thresholdPct` (0-50 %), `RANGES.coefficientA` (-20 to 0) and `RANGES.coefficientB` (0-0.1) - the ranges firestore.rules checks on `assessmentSettings` (Task 4); `parseTrial` takes a leading minus only for a range that goes below 0; the Moore a and b per sex are editable (spec 4.6: Phil checks them against the paper); the route `/portal/assessments/settings` (staff level; editing for the owner and Phil only, as firestore.rules allows).
 
 - [ ] **Step 1: Write the failing tests**
 
@@ -10876,6 +11553,27 @@ test('entry modes, thresholds and the coefficient check are not procedure: they 
   await r.unmount();
 });
 
+test('the Moore coefficients are editable (Phil checks them against the paper) and save under the same version', async () => {
+  const r = await screen();
+  expect(field(r, 'Boys coefficient a').value).toBe('-8.128741');
+  await type(r, 'Boys coefficient a', '-8.1287');
+  await type(r, 'Girls coefficient b', '0.0042');
+  await r.click('Save settings');
+  expect(r.text()).not.toContain('This changes the procedure.');
+  expect(mockSaves[0].protocolVersion).toBe('v1.2');
+  expect(mockSaves[0].coefficients).toEqual({ ...DEFAULT_SETTINGS.coefficients, boys: { a: -8.1287, b: 0.0070346 }, girls: { a: -7.709133, b: 0.0042 } });
+  await r.unmount();
+});
+
+test('a blank or out-of-range coefficient keeps Save off', async () => {
+  const r = await screen();
+  await type(r, 'Girls coefficient a', '-25');
+  expect(r.text()).toContain('Coefficient a is -20 to 0');
+  await type(r, 'Girls coefficient a', '');
+  expect(r.button('Save settings').disabled).toBe(true);
+  await r.unmount();
+});
+
 test('the shortest grip rest may not be longer than the longest', async () => {
   const r = await screen();
   await type(r, 'Grip rest shortest (s)', '25');
@@ -10937,10 +11635,23 @@ test('settings open for staff; a coach without the permission goes home', async 
 });
 ```
 
+Append to `frontend/src/portal/data/assessmentInput.test.js`:
+
+```js
+test('a Moore coefficient may be negative; every other entry still refuses a sign', () => {
+  expect(parseTrial('-8.128741', 'coefficientA')).toEqual({ ok: true, value: -8.128741 });
+  expect(parseTrial('0.0070346', 'coefficientB')).toEqual({ ok: true, value: 0.0070346 });
+  expect(parseTrial('-21', 'coefficientA')).toEqual({ ok: false, error: 'Coefficient a is -20 to 0' });
+  expect(parseTrial('0.2', 'coefficientB')).toEqual({ ok: false, error: 'Coefficient b is 0-0.1' });
+  expect(parseTrial('-3', 'grip')).toEqual({ ok: false, error: 'Numbers only, like 32.5' });
+  expect(rangeLabel('coefficientA')).toBe('-20 to 0');
+});
+```
+
 - [ ] **Step 2: Run the tests to verify they fail**
 
-Run: `cd frontend && CI=true npx react-scripts test --watchAll=false src/portal/screens/AssessmentSettings.test.js src/portal/AssessmentRoutes.test.js`
-Expected: FAIL - "Cannot find module './AssessmentSettings'" and the settings route renders nothing.
+Run: `cd frontend && CI=true npx react-scripts test --watchAll=false src/portal/screens/AssessmentSettings.test.js src/portal/data/assessmentInput.test.js src/portal/AssessmentRoutes.test.js`
+Expected: FAIL - "Cannot find module './AssessmentSettings'", the settings route renders nothing, and "-8.128741" is refused as "Numbers only, like 32.5".
 
 - [ ] **Step 3: Write minimal implementation**
 
@@ -10955,10 +11666,55 @@ with:
 
 ```js
   otherSportHours: { lo: 0, hi: 40, unit: 'h', name: 'Other sport hours' },
-  // The settings form (spec 4.6): grip rest as firestore.rules holds it, and the change-marker thresholds.
+  // The settings form (spec 4.6): grip rest, the change-marker thresholds and the Moore (2015)
+  // coefficients, as firestore.rules checks them on assessmentSettings.
   restSec: { lo: 0, hi: 120, unit: 's', name: 'Rest' },
   thresholdPct: { lo: 0, hi: 50, unit: '%', name: 'Threshold' },
+  coefficientA: { lo: -20, hi: 0, unit: '', name: 'Coefficient a' },
+  coefficientB: { lo: 0, hi: 0.1, unit: '', name: 'Coefficient b' },
 };
+```
+
+then replace:
+
+```js
+  return r ? `${r.lo}-${r.hi}${r.unit ? ` ${r.unit}` : ''}` : '';
+```
+
+with:
+
+```js
+  return r ? `${r.lo}${r.lo < 0 ? ' to ' : '-'}${r.hi}${r.unit ? ` ${r.unit}` : ''}` : '';
+```
+
+then replace:
+
+```js
+const NUMBER = /^(\d+(\.\d+)?|\.\d+)$/;
+```
+
+with:
+
+```js
+const NUMBER = /^(\d+(\.\d+)?|\.\d+)$/;
+/** A range below 0 (the Moore coefficient a) takes a leading minus; nothing else does. */
+const SIGNED = /^-?(\d+(\.\d+)?|\.\d+)$/;
+```
+
+then replace:
+
+```js
+  if (!NUMBER.test(normalized)) return { ok: false, error: 'Numbers only, like 32.5' };
+  const value = Number(normalized);
+  const r = RANGES[rangeKey];
+```
+
+with:
+
+```js
+  const r = RANGES[rangeKey];
+  if (!(r && r.lo < 0 ? SIGNED : NUMBER).test(normalized)) return { ok: false, error: 'Numbers only, like 32.5' };
+  const value = Number(normalized);
 ```
 
 Create `frontend/src/portal/components/assessments/VersionSheet.js`:
@@ -11050,8 +11806,8 @@ function NumberSelect({ label, value, min, max, disabled, onChange }) {
  * 4.6). Phil and the owner edit; other assessment staff read. Saving a
  * change to the procedure (trial counts, grip rest, stations, McGill mode,
  * med ball side, golf timing, wave size) asks for a new protocol version
- * label; entry modes, waves per session, the coefficient check and the
- * thresholds save under the same label. Every window keeps the settings it
+ * label; entry modes, waves per session, the Moore coefficients and their
+ * check, and the thresholds save under the same label. Every window keeps the settings it
  * ran under, so nothing here rewrites a result already taken.
  * Readiness & intake is always on: the pain check comes first.
  */
@@ -11076,7 +11832,8 @@ export default function AssessmentSettings({ bare = false, viewer, onBack }) {
   const setIn = (key, patch) => set({ [key]: { ...draft[key], ...patch } });
   const rest = draft?.gripRestSec ?? {};
   const restProblem = rest.min != null && rest.max != null && rest.min > rest.max ? "The shortest rest can't be longer than the longest." : null;
-  const incomplete = draft ? rest.min == null || rest.max == null : true;
+  const coefficients = draft ? [draft.coefficients.boys.a, draft.coefficients.boys.b, draft.coefficients.girls.a, draft.coefficients.girls.b] : [];
+  const incomplete = draft ? rest.min == null || rest.max == null || coefficients.some((v) => v == null) : true;
   const dirty = Boolean(draft && base) && JSON.stringify(draft) !== JSON.stringify(base);
 
   const save = async (protocolVersion) => {
@@ -11163,8 +11920,18 @@ export default function AssessmentSettings({ bare = false, viewer, onBack }) {
             <Card large>
               <SectionLabel style={{ marginBottom: 10 }}>Maturity and change markers</SectionLabel>
               <Body size={12}>
-                Moore (2015): boys {draft.coefficients.boys.a} + {draft.coefficients.boys.b} x (age x sitting height); girls {draft.coefficients.girls.a} + {draft.coefficients.girls.b} x (age x standing height).
+                Moore (2015) maturity offset: a + b x (age x sitting height) for boys, a + b x (age x standing height) for girls. Check them against the paper.
               </Body>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 10, marginTop: 10 }}>
+                {[['boys', 'Boys'], ['girls', 'Girls']].map(([sex, label]) => (
+                  <FieldRow key={sex} label={`${label} (a, b)`}>
+                    <TrialInput label={`${label} coefficient a`} value={draft.coefficients[sex].a ?? null} rangeKey="coefficientA" width={120} disabled={!canEdit}
+                      onCommit={(v) => setIn('coefficients', { [sex]: { ...draft.coefficients[sex], a: v } })} />
+                    <TrialInput label={`${label} coefficient b`} value={draft.coefficients[sex].b ?? null} rangeKey="coefficientB" width={120} disabled={!canEdit}
+                      onCommit={(v) => setIn('coefficients', { [sex]: { ...draft.coefficients[sex], b: v } })} />
+                  </FieldRow>
+                ))}
+              </div>
               <div style={{ marginTop: 10 }}>
                 <Choice label="Maturity coefficients" value={draft.coefficients.verified === true} options={[[false, 'Unverified'], [true, 'Checked against the paper']]} disabled={!canEdit}
                   onChange={(v) => setIn('coefficients', { verified: v })} />
@@ -11273,19 +12040,20 @@ Expected: no errors, no warnings.
 - [ ] **Step 5: Commit**
 
 ```bash
-git add frontend/src/portal/screens/AssessmentSettings.js frontend/src/portal/screens/AssessmentSettings.test.js frontend/src/portal/components/assessments/VersionSheet.js frontend/src/portal/data/assessmentInput.js frontend/src/portal/AssessmentRoutes.js frontend/src/portal/AssessmentRoutes.test.js frontend/src/portal/PortalRoutes.js
+git add frontend/src/portal/screens/AssessmentSettings.js frontend/src/portal/screens/AssessmentSettings.test.js frontend/src/portal/components/assessments/VersionSheet.js frontend/src/portal/data/assessmentInput.js frontend/src/portal/data/assessmentInput.test.js frontend/src/portal/AssessmentRoutes.js frontend/src/portal/AssessmentRoutes.test.js frontend/src/portal/PortalRoutes.js
 git commit -m "feat(assessments): protocol settings with version labels
 
 Phil and the owner edit trial counts, grip rest, stations, McGill mode,
-med ball side, golf timing, wave size, entry modes, the coefficient check
-and the thresholds; a procedure change asks for the next version label.
+med ball side, golf timing, wave size, entry modes, the Moore coefficients
+and their check, and the thresholds; a procedure change asks for the next
+version label.
 
 Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 ```
 
 ---
 
-### Task 18: createFamily stores the consents and each athlete's research answer
+### Task 20: createFamily stores the consents and each athlete's research answer
 
 **Files:**
 - Modify: `functions/portal/family-validate.js` (`normalizeResearch`; `normalizeAthlete` carries `research`; export)
@@ -11295,7 +12063,7 @@ Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 
 **Interfaces:**
 - Consumes: `lib.ageAt(dobISO, todayISO)`, `lib.todayISO(now)`; `fake-firestore.js`'s `fakeDb(docs)` (transactions buffer writes; a doc ref's `.collection()` is not modelled, so the consents test sends no medical note).
-- Produces: the createFamily payload's athlete entries accept `research: { value: boolean, assent: boolean | null }` (absent = not asked); `normalizeResearch(raw, { dob, todayISO })` returning `{ value, assent } | null` and refusing anything else with reason `research-invalid`; every athlete createFamily writes carries `consents: { dataCollection, videoCapture, mediaRelease, research: { value, assent, recordedAt, recordedBy } | null, signature: { name, date } }` (spec 4.3). Under 18 the value is true only with the assent ticked too; 18+ the assent is null. addAthletes (link mode, no consent step) writes no `consents`: those athletes get the one-time confirm (Task 20). Task 19 sends `research` from sign-up; Task 20's rules branch writes `consents.research` with the same shape.
+- Produces: the createFamily payload's athlete entries accept `research: { value: boolean, assent: boolean | null }` (absent = not asked); `normalizeResearch(raw, { dob, todayISO })` returning `{ value, assent } | null` and refusing anything else with reason `research-invalid`; every athlete createFamily writes carries `consents: { dataCollection, videoCapture, mediaRelease, research: { value, assent, recordedAt, recordedBy } | null, signature: { name, date } }` (spec 4.3). Under 18 the value is true only with the assent ticked too; 18+ the assent is null. addAthletes (link mode, no consent step) writes no `consents`: those athletes get the one-time confirm (Task 23). Task 21 sends `research` from sign-up; Task 22's rules branch writes `consents.research` with the same shape.
 
 - [ ] **Step 1: Write the failing tests**
 
@@ -11688,7 +12456,7 @@ Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 
 ---
 
-### Task 19: Research opt-in at sign-up
+### Task 21: Research opt-in at sign-up
 
 **Files:**
 - Create: `frontend/src/portal/data/researchConsent.js`
@@ -11703,8 +12471,8 @@ Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 - Test: `frontend/src/portal/data/researchConsent.test.js`, `frontend/src/portal/components/ResearchSheet.test.js`, `frontend/src/portal/screens/RegistrationSteps.test.js` (one edit, appended tests), `frontend/src/portal/data/signup.test.js` (one edit, appended test), `frontend/src/portal/screens/Registration.test.js` (one edit, appended test), `frontend/src/portal/screens/Registration.off.test.js` (one edit)
 
 **Interfaces:**
-- Consumes: the createFamily contract of Task 18 (`athletes[i].research = { value, assent }`, re-normalized on the server); `isAdultOnDate(dob, todayISO)` in `data/signup.js`; `Tick` in `components/Primitives.js`.
-- Produces: `data/researchConsent.js` - `firstName(name)`, `researchLabel(name)`, `researchLine(name)`, `assentLabel(name)`, `RESEARCH_SELF_LABEL`, `RESEARCH_SELF_LINE`, `researchSheet(name, self)` (`[{ heading, lines }]`), `RESEARCH_CONFIRM_TITLE`, `confirmBody(name)`, `RESEARCH_SAVE_LABEL`, `RESEARCH_CONTACT`, `researchAnswer({ ticked, assent, minor })` returning `{ value, assent }` (the same rule as the server's `normalizeResearch`); `components/Checkbox.js` default export `Checkbox({ checked, onChange, label })` (still re-exported by `RegistrationConsent.js` for `RegistrationFacility.js`); `ResearchChoice({ name, self, minor, ticked, assent, onChange({ ticked, assent }), onReadMore })`; `ResearchSheet({ name, self, onClose })`; `ConsentStep`'s new optional props `athletes`, `todayISO`, `onResearch(key, { research, researchAssent })`, `onOpenResearch({ name, self })`; `newAthleteEntry()` gains `research: false, researchAssent: false`; `buildCreateFamilyPayload(form, { contract, todayISO })`. Task 20 reuses `researchConsent.js`, `ResearchChoice` and `ResearchSheet`.
+- Consumes: the createFamily contract of Task 20 (`athletes[i].research = { value, assent }`, re-normalized on the server); `isAdultOnDate(dob, todayISO)` in `data/signup.js`; `Tick` in `components/Primitives.js`.
+- Produces: `data/researchConsent.js` - `firstName(name)`, `researchLabel(name)`, `researchLine(name)`, `assentLabel(name)`, `RESEARCH_SELF_LABEL`, `researchSheet(name)` (`[{ heading, lines }]`), `RESEARCH_CONFIRM_TITLE`, `confirmBody(name)`, `RESEARCH_SAVE_LABEL`, `RESEARCH_CONTACT`, `researchAnswer({ ticked, assent, minor })` returning `{ value, assent }` (the same rule as the server's `normalizeResearch`); `components/Checkbox.js` default export `Checkbox({ checked, onChange, label })` (still re-exported by `RegistrationConsent.js` for `RegistrationFacility.js`); `ResearchChoice({ name, self, minor, ticked, assent, onChange({ ticked, assent }), onReadMore })`; `ResearchSheet({ name, onClose })`; `ConsentStep`'s new optional props `athletes`, `todayISO`, `onResearch(key, { research, researchAssent })`, `onOpenResearch({ name, self })`; `newAthleteEntry()` gains `research: false, researchAssent: false`. Only approved copy (spec 7, owner 2026-10-15) is used: an 18+ athlete on their own login gets the approved first-person checkbox, and the approved line under it and Read more sheet with their own first name (the second-person drafts wait for the owner, Task 26 Step 1); `buildCreateFamilyPayload(form, { contract, todayISO })`. Task 23 reuses `researchConsent.js`, `ResearchChoice` and `ResearchSheet`.
 
 - [ ] **Step 1: Write the failing tests**
 
@@ -11712,7 +12480,7 @@ Create `frontend/src/portal/data/researchConsent.test.js`:
 
 ```js
 import {
-  RESEARCH_SELF_LABEL, RESEARCH_SELF_LINE, assentLabel, confirmBody, firstName, researchAnswer, researchLabel, researchLine, researchSheet,
+  RESEARCH_SELF_LABEL, assentLabel, confirmBody, firstName, researchAnswer, researchLabel, researchLine, researchSheet,
 } from './researchConsent';
 
 test('the approved copy (owner, 2026-10-15), with the first name', () => {
@@ -11721,20 +12489,21 @@ test('the approved copy (owner, 2026-10-15), with the first name', () => {
   expect(researchLine('Jordan')).toBe("Saying no changes nothing about Jordan's coaching or testing.");
   expect(assentLabel('Jordan')).toBe("I've talked about this with Jordan, and they agree too.");
   expect(RESEARCH_SELF_LABEL).toBe('Research (optional): my results may be used in research.');
-  expect(RESEARCH_SELF_LINE).toBe('Saying no changes nothing about your coaching or testing.');
+  // Nothing beyond the approved copy: the second-person drafts wait for the owner (plan Task 26 Step 1).
+  const copy = require('./researchConsent');
+  expect(copy.RESEARCH_SELF_LINE).toBeUndefined();
+  expect(copy.confirmSelfBody).toBeUndefined();
   expect(confirmBody('Jordan')).toBe("This season Phil Herder's assessment program measures each athlete's strength, power and growth. We'd like to include Jordan's results in RYP's research, with names removed. It's optional and changes nothing about their coaching.");
 });
 
-test('the Read more sheet: three sections, the athlete named; the self variant in the second person', () => {
+test('the Read more sheet: three sections, the athlete named (an 18+ member reads it with their own name)', () => {
   const sheet = researchSheet('Jordan');
   expect(sheet.map((s) => s.heading)).toEqual(['What it covers', 'How it is used', 'Your choice']);
   expect(sheet[0].lines[0]).toContain("With your permission we include Jordan's results in that research");
   expect(sheet[1].lines[0]).toBe('Names, contact details, dates of birth and anything else that identifies a person are removed first. Findings may be published or shared with research partners only in that form. Video and photos are never used under this consent.');
   expect(sheet[2].lines[0]).toContain('If you say no, Jordan is tested and coached exactly the same way, and their results are used only to coach them.');
   expect(sheet[2].lines[0]).toContain('results from before a "yes" are never added later.');
-  const self = researchSheet('Sam', true);
-  expect(self[0].lines[0]).toContain('we include your results in that research');
-  expect(self[2].lines[0]).toContain('If you say no, you are tested and coached exactly the same way, and your results are used only to coach you.');
+  expect(researchSheet('Sam')[0].lines[0]).toContain("With your permission we include Sam's results in that research");
 });
 
 test('yes under 18 needs both boxes; 18+ answer alone and have no assent', () => {
@@ -11762,10 +12531,6 @@ test('the Read more sheet reads the approved sections and closes', async () => {
   await r.click('Close');
   expect(closed).toEqual([1]);
   await r.unmount();
-  const self = await renderScreen(<ResearchSheet name="Sam" self onClose={() => {}} />);
-  expect(self.text()).toContain('we include your results in that research');
-  expect(self.text()).not.toContain("Sam's");
-  await self.unmount();
 });
 ```
 
@@ -11835,7 +12600,7 @@ test('research (spec 7): one opt-in per athlete; under 18 the assent box appears
 test('research: an 18+ athlete signing for themselves answers in the first person, with no assent box', async () => {
   const r = await renderScreen(<ResearchHarness mode="athlete" athletes={[{ ...newAthleteEntry(), key: 'k1', name: 'Sam Reyes', dob: '2000-01-01' }]} />);
   expect(r.text()).toContain('Research (optional): my results may be used in research.');
-  expect(r.text()).toContain('Saying no changes nothing about your coaching or testing.');
+  expect(r.text()).toContain("Saying no changes nothing about Sam's coaching or testing.");
   await r.click('Research (optional): my results may be used in research.');
   expect(r.container.querySelectorAll('[role="checkbox"][aria-label^="I\'ve talked"]')).toHaveLength(0);
   await r.click('Read more about research');
@@ -11937,10 +12702,11 @@ Create `frontend/src/portal/data/researchConsent.js`:
 ```js
 /**
  * The research opt-in (assessments spec 7) - PURE. The wording is the
- * owner-approved copy of 2026-10-15, verbatim; `name` is the athlete's
- * first name. The spec words the 18+ checkbox only; the self variants of
- * the line under it and of the Read more sheet are this file's rewording
- * of the approved copy into the second person.
+ * owner-approved copy of 2026-10-15, verbatim, and nothing else; `name` is
+ * the athlete's first name. The spec words the 18+ checkbox only, so an 18+
+ * member on their own login gets that checkbox and the approved line and
+ * Read more sheet with their own first name. Second-person rewordings are
+ * the owner's to approve first (plan Task 26 Step 1).
  *
  * The rule, the same one functions/portal/family-validate.js
  * normalizeResearch applies: ticked = yes, unticked = no, both recorded; an
@@ -11949,7 +12715,6 @@ Create `frontend/src/portal/data/researchConsent.js`:
  */
 export const RESEARCH_CONTACT = 'makel@rypgolf.com';
 export const RESEARCH_SELF_LABEL = 'Research (optional): my results may be used in research.';
-export const RESEARCH_SELF_LINE = 'Saying no changes nothing about your coaching or testing.';
 export const RESEARCH_CONFIRM_TITLE = 'One quick question about research';
 export const RESEARCH_SAVE_LABEL = 'Save my answer';
 
@@ -11965,15 +12730,12 @@ export const confirmBody = (name) =>
   `This season Phil Herder's assessment program measures each athlete's strength, power and growth. We'd like to include ${name}'s results in RYP's research, with names removed. It's optional and changes nothing about their coaching.`;
 
 /** The "Read more" sheet, section by section. */
-export function researchSheet(name, self = false) {
-  const whose = self ? 'your' : `${name}'s`;
-  const choice = self
-    ? 'If you say no, you are tested and coached exactly the same way, and your results are used only to coach you.'
-    : `If you say no, ${name} is tested and coached exactly the same way, and their results are used only to coach them.`;
+export function researchSheet(name) {
+  const choice = `If you say no, ${name} is tested and coached exactly the same way, and their results are used only to coach them.`;
   return [
     {
       heading: 'What it covers',
-      lines: [`RYP Academy and the RYP Golf Research Institute study how junior golfers develop. With your permission we include ${whose} results in that research: the physical assessment (strength, jump, throw and trunk tests, height and growth measures), clubhead speed and swing-sequencing numbers, attendance, and the training details you tell us about.`],
+      lines: [`RYP Academy and the RYP Golf Research Institute study how junior golfers develop. With your permission we include ${name}'s results in that research: the physical assessment (strength, jump, throw and trunk tests, height and growth measures), clubhead speed and swing-sequencing numbers, attendance, and the training details you tell us about.`],
     },
     {
       heading: 'How it is used',
@@ -12036,13 +12798,14 @@ import React from 'react';
 import { color, font } from '../tokens';
 import Checkbox from './Checkbox';
 import { Body } from './Primitives';
-import { RESEARCH_SELF_LABEL, RESEARCH_SELF_LINE, assentLabel, researchLabel, researchLine } from '../data/researchConsent';
+import { RESEARCH_SELF_LABEL, assentLabel, researchLabel, researchLine } from '../data/researchConsent';
 
 /**
  * One athlete's research opt-in (assessments spec 7): ticked = yes,
  * unticked = no. Under 18 the assent box shows once the first is ticked,
  * and unticking the first clears it. An 18+ athlete with their own login
- * (`self`) answers for themselves. Used by sign-up's consent step and the
+ * (`self`) answers for themselves: the approved first-person checkbox, and
+ * the approved line under it with their own first name. Used by sign-up's consent step and the
  * one-time confirm.
  */
 export default function ResearchChoice({ name, self = false, minor = true, ticked, assent, onChange, onReadMore }) {
@@ -12052,7 +12815,7 @@ export default function ResearchChoice({ name, self = false, minor = true, ticke
       <Checkbox checked={ticked} label={label} onChange={(v) => onChange({ ticked: v, assent: v ? assent : false })} />
       <div style={{ flex: 1, minWidth: 0 }}>
         <div style={{ font: `600 14px ${font.body}`, color: color.text }}>{label}</div>
-        <Body size={12} style={{ marginTop: 6 }}>{self ? RESEARCH_SELF_LINE : researchLine(name)}</Body>
+        <Body size={12} style={{ marginTop: 6 }}>{researchLine(name)}</Body>
         {!self && minor && ticked ? (
           <div style={{ display: 'flex', gap: 13, marginTop: 12 }}>
             <Checkbox checked={assent} label={assentLabel(name)} onChange={(v) => onChange({ ticked, assent: v })} />
@@ -12084,8 +12847,8 @@ import Button from './Button';
 import { Body, ScreenTitle } from './Primitives';
 import { researchSheet } from '../data/researchConsent';
 
-/** The research "Read more" sheet (assessments spec 7), the approved copy section by section. */
-export default function ResearchSheet({ name, self = false, onClose }) {
+/** The research "Read more" sheet (assessments spec 7), the approved copy section by section; `name` is the athlete's first name. */
+export default function ResearchSheet({ name, onClose }) {
   return (
     <div onClick={onClose} style={{ position: 'absolute', inset: 0, background: tint.overlay, display: 'flex', alignItems: 'flex-end', zIndex: 5 }}>
       <div
@@ -12093,7 +12856,7 @@ export default function ResearchSheet({ name, self = false, onClose }) {
         style={{ width: '100%', maxHeight: '80%', overflowY: 'auto', background: color.surface, borderTop: `1px solid ${color.border}`, borderRadius: `${radius.cardLarge} ${radius.cardLarge} 0 0`, padding: '20px 22px 26px' }}
       >
         <ScreenTitle size={19}>Research</ScreenTitle>
-        {researchSheet(name, self).map((section) => (
+        {researchSheet(name).map((section) => (
           <div key={section.heading} style={{ marginTop: 14 }}>
             <div style={{ font: `600 12px ${font.body}`, color: color.text }}>{section.heading}</div>
             {section.lines.map((line) => <Body key={line} size={12} style={{ marginTop: 6 }}>{line}</Body>)}
@@ -12420,7 +13183,7 @@ with:
 
 ```js
       {infoSheet ? <ConsentInfoSheet id={infoSheet} mode={form.mode} onClose={() => setInfoSheet(null)} /> : null}
-      {researchSheet ? <ResearchSheet name={researchSheet.name} self={researchSheet.self} onClose={() => setResearchSheet(null)} /> : null}
+      {researchSheet ? <ResearchSheet name={researchSheet.name} onClose={() => setResearchSheet(null)} /> : null}
 ```
 
 - [ ] **Step 4: Run the tests to verify they pass**
@@ -12446,24 +13209,237 @@ Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 
 ---
 
-### Task 20: One-time research confirm for existing families, and the owner's recorded change
+### Task 22: Research consent rules - the one-time answer and the owner's recorded change
+
+The rules half of the one-time research confirm (spec 4.3, 7): the household's parent, or the 18+ member who created their own household, records `consents.research` once; the owner records a later change with the earlier answer kept on the history. Task 23 builds the screens on this contract. A parent may answer for an 18+ athlete in their household (assent null) until the owner rules otherwise (Task 26 Step 1).
+
+**Files:**
+- Modify: `firestore.rules` (the research branch on `athletes/{athleteId}`)
+- Create: `scripts/rules-probes/research.mjs`
+- Modify: `scripts/verify-rules.mjs` (import and run `taskResearch`)
+- Test: `scripts/verify-rules.mjs` (emulator, both passes)
+
+**Interfaces:**
+- Consumes: the athlete doc's `consents.research` written by createFamily (Task 20); `verify-rules.mjs` exports `updateAs`, `seed`, `del`, `expect`, `token`, `t`, `uid`; Task 9's runPass line `await taskAssessments(); await taskDiagnosticsReadOnly();`.
+- Produces: rules - the household's parent, or the 18+ member who created their own household, sets `consents.research` once (that key only, while none is recorded), `{ value, assent, recordedAt: <server>, recordedBy: <caller> }`; the owner records a change, `{ value, assent, recordedAt: <server>, recordedBy: <owner>, history: [...earlier history, the answer it replaces] }`; a yes under 18 needs the assent, 18+ the assent is null. `scripts/rules-probes/research.mjs` exports `taskResearch()`.
+
+- [ ] **Step 1: Write the failing probe**
+
+Create `scripts/rules-probes/research.mjs`:
+
+```js
+/**
+ * Research consent (assessments spec 4.3, 7): the one-time confirm - the
+ * household's parent, or the 18+ member who created their own household,
+ * sets consents.research once, that key only, dated by the server and
+ * signed by the caller; a yes under 18 needs the assent - and the owner's
+ * recorded change, the earlier answer kept on the history. Run by
+ * scripts/verify-rules.mjs in both passes; it seeds and removes
+ * everything it touches.
+ */
+import { del, expect, seed, t, token, uid, updateAs } from '../verify-rules.mjs';
+
+const KID = 'ath-research-kid';
+const ADULT_CHILD = 'ath-research-adult';
+const SELF = 'ath-research-self';
+const SELF_HH = 'hh-research-self';
+const users = { owner: 'owner-research-probe', self: 'research-self-probe', kid: 'research-kid-probe' };
+const tok = (u) => token(u, { email: `${u}@example.com`, email_verified: true });
+const kidBody = (extra = {}) => ({ name: 'Research Kid', householdId: 'hh', dob: '2012-04-10', contractMinutes: null, coachId: null, packageId: 't-6', ...extra });
+const selfBody = { name: 'Self Member', householdId: SELF_HH, dob: '2000-01-01', contractMinutes: null, coachId: null, packageId: 't-6' };
+/** The write hooks/researchConsent.js makes: consents.research, its recordedAt the server's time. */
+const answer = (auth, id, research, serverTime = ['consents.research.recordedAt']) =>
+  updateAs(auth, 'athletes', id, { consents: { research } }, ['consents.research'], serverTime);
+
+export async function taskResearch() {
+  console.log('Research consent: the one-time confirm (parent, 18+ self), that key only, assent under 18; the owner records a change');
+  const owner = tok(users.owner);
+  const self = tok(users.self);
+  const kid = tok(users.kid);
+  const reset = (extra = {}) => seed('athletes', KID, kidBody(extra));
+  try {
+    await seed('users', users.owner, { role: 'owner' });
+    await seed('users', users.self, { role: 'athlete', athleteId: SELF, householdId: SELF_HH });
+    await seed('users', users.kid, { role: 'athlete', athleteId: KID, householdId: 'hh' });
+    await seed('households', SELF_HH, { name: 'Self family', createdBy: users.self });
+    await seed('athletes', SELF, selfBody);
+    await seed('athletes', ADULT_CHILD, kidBody({ name: 'Adult Child', dob: '2000-01-01' }));
+
+    await reset();
+    expect('under 18, a yes without the assent is refused', await answer(t.parent, KID, { value: true, assent: false, recordedBy: uid.parent }), 403);
+    expect('the parent records yes with the assent', await answer(t.parent, KID, { value: true, assent: true, recordedBy: uid.parent }), 200);
+    expect('a second answer from the parent is refused', await answer(t.parent, KID, { value: false, assent: false, recordedBy: uid.parent }), 403);
+    await reset({ consents: { dataCollection: true, videoCapture: true, mediaRelease: false, research: null, signature: { name: 'Dana', date: '2026-10-01' } } });
+    expect('a sign-up record with research null takes the answer', await answer(t.parent, KID, { value: false, assent: false, recordedBy: uid.parent }), 200);
+    await reset();
+    expect('under 18 the assent is a yes or a no, never left out', await answer(t.parent, KID, { value: false, recordedBy: uid.parent }), 403);
+    expect('another household cannot answer', await answer(t.other, KID, { value: false, assent: false, recordedBy: uid.other }), 403);
+    expect("the child's own login cannot answer", await answer(kid, KID, { value: false, assent: false, recordedBy: users.kid }), 403);
+    expect('a coach cannot answer', await answer(t.coach, KID, { value: false, assent: false, recordedBy: uid.coach }), 403);
+    expect('the answer is signed by the caller', await answer(t.parent, KID, { value: false, assent: false, recordedBy: 'someone-else' }), 403);
+    // A minute back: a client "now" can land in the same millisecond as request.time on a local emulator.
+    expect('the answer is dated by the server', await answer(t.parent, KID, { value: false, assent: false, recordedBy: uid.parent, recordedAt: new Date(Date.now() - 60000) }, []), 403);
+    expect('a first answer carries no history', await answer(t.parent, KID, { value: false, assent: false, recordedBy: uid.parent, history: [] }), 403);
+    expect('no other consent rides along', await updateAs(t.parent, 'athletes', KID,
+      { consents: { mediaRelease: true, research: { value: false, assent: false, recordedBy: uid.parent } } },
+      ['consents.mediaRelease', 'consents.research'], ['consents.research.recordedAt']), 403);
+    expect('no other field rides along', await updateAs(t.parent, 'athletes', KID,
+      { name: 'Renamed', consents: { research: { value: false, assent: false, recordedBy: uid.parent } } },
+      ['name', 'consents.research'], ['consents.research.recordedAt']), 403);
+    expect('an 18+ athlete in the family: yes, no assent', await answer(t.parent, ADULT_CHILD, { value: true, assent: null, recordedBy: uid.parent }), 200);
+    expect('18+: an assent is refused', await answer(self, SELF, { value: true, assent: true, recordedBy: users.self }), 403);
+    expect('the 18+ member records their own answer', await answer(self, SELF, { value: true, assent: null, recordedBy: users.self }), 200);
+
+    const earlier = { value: true, assent: true, recordedAt: new Date('2026-10-15T15:00:00Z'), recordedBy: uid.parent };
+    await reset({ consents: { research: earlier } });
+    expect('the parent cannot change a recorded answer', await answer(t.parent, KID, { value: false, assent: false, recordedBy: uid.parent }), 403);
+    expect('the owner must keep the earlier answer', await answer(owner, KID, { value: false, assent: false, recordedBy: users.owner, history: [] }), 403);
+    expect('the owner records a change, the earlier answer on its history', await answer(owner, KID, { value: false, assent: false, recordedBy: users.owner, history: [earlier] }), 200);
+  } finally {
+    for (const id of [KID, ADULT_CHILD, SELF]) await del('athletes', id);
+    await del('households', SELF_HH);
+    for (const u of Object.values(users)) await del('users', u);
+  }
+}
+```
+
+In `scripts/verify-rules.mjs`, replace:
+
+```js
+import { taskAssessments, taskDiagnosticsReadOnly } from './rules-probes/assessments.mjs';
+```
+
+with:
+
+```js
+import { taskAssessments, taskDiagnosticsReadOnly } from './rules-probes/assessments.mjs';
+import { taskResearch } from './rules-probes/research.mjs';
+```
+
+then replace:
+
+```js
+    await taskAssessments(); await taskDiagnosticsReadOnly();
+```
+
+with:
+
+```js
+    await taskAssessments(); await taskDiagnosticsReadOnly(); await taskResearch();
+```
+
+- [ ] **Step 2: Run the probe to verify it fails**
+
+Run: `npx firebase-tools emulators:exec --only firestore --project rypacad "node --env-file=scripts/emulator.env scripts/verify-rules.mjs"`
+Expected: FAIL - every "records ... answer" case answers 403 (no branch yet).
+
+- [ ] **Step 3: The research branch**
+
+In `firestore.rules`, replace:
+
+```
+      allow update: if signedIn() && pendingPackageUpdateOk() && (
+        (me().role == 'parent' && resource.data.householdId == me().householdId)
+        || (me().role == 'athlete' && me().athleteId == athleteId
+            && get(/databases/$(database)/documents/households/$(resource.data.householdId)).data.createdBy == request.auth.uid)
+      );
+```
+
+with:
+
+```
+      allow update: if signedIn() && pendingPackageUpdateOk() && (
+        (me().role == 'parent' && resource.data.householdId == me().householdId)
+        || (me().role == 'athlete' && me().athleteId == athleteId
+            && get(/databases/$(database)/documents/households/$(resource.data.householdId)).data.createdBy == request.auth.uid)
+      );
+
+      // ---- research consent (assessments spec 4.3, 7) -------------------
+      // The one-time confirm: the household's parent, or the 18+ member who
+      // created their own household (the same test as the package switch
+      // above), records consents.research once - that key only, while none
+      // is recorded, dated by the server and signed by the caller. The
+      // owner records a later change (the family emails it), the earlier
+      // answer moved onto the history, so every window keeps the answer it
+      // ran under. Under 18 a yes needs the assent; 18+ the assent is null.
+      function adultRecord() {
+        let dob = resource.data.get('dob', null);
+        return dob is string && dob.matches('[0-9]{4}-[0-9]{2}-[0-9]{2}')
+          && timestamp.date(int(dob.split('-')[0]) + 18, int(dob.split('-')[1]), int(dob.split('-')[2])) <= request.time;
+      }
+      function researchOnlyChange() {
+        return request.resource.data.diff(resource.data).affectedKeys().hasOnly(['consents'])
+          && request.resource.data.consents.diff(resource.data.get('consents', {})).affectedKeys().hasOnly(['research']);
+      }
+      function researchAnswerOk(r, adult) {
+        return r is map
+          && r.keys().hasOnly(['value', 'assent', 'recordedAt', 'recordedBy', 'history'])
+          && r.value is bool
+          && r.recordedAt == request.time
+          && r.recordedBy == request.auth.uid
+          && (adult ? r.get('assent', null) == null
+            : (r.get('assent', null) is bool && (r.value == false || r.assent == true)));
+      }
+      function researchFirstOk(adult) {
+        let r = request.resource.data.consents.research;
+        return researchOnlyChange()
+          && resource.data.get('consents', {}).get('research', null) == null
+          && researchAnswerOk(r, adult)
+          && !r.keys().hasAny(['history']);
+      }
+      function researchChangeOk() {
+        let prev = resource.data.get('consents', {}).get('research', null);
+        let r = request.resource.data.consents.research;
+        return researchOnlyChange()
+          && researchAnswerOk(r, adultRecord())
+          && r.get('history', []) == (prev == null ? [] : prev.get('history', []).concat([{
+            'value': prev.get('value', null), 'assent': prev.get('assent', null),
+            'recordedAt': prev.get('recordedAt', null), 'recordedBy': prev.get('recordedBy', null)}]));
+      }
+      allow update: if signedIn() && (
+        (me().role == 'parent' && resource.data.householdId == me().householdId && researchFirstOk(adultRecord()))
+        || (me().role == 'athlete' && me().athleteId == athleteId
+            && get(/databases/$(database)/documents/households/$(resource.data.householdId)).data.createdBy == request.auth.uid
+            && researchFirstOk(true))
+        || (me().role == 'owner' && researchChangeOk())
+      );
+```
+
+- [ ] **Step 4: Run the probe to verify it passes**
+
+Run: `npx firebase-tools emulators:exec --only firestore --project rypacad "node --env-file=scripts/emulator.env scripts/verify-rules.mjs"`
+Expected: every line PASS, ending `ALL PASS (both passes)`.
+
+- [ ] **Step 5: Commit**
+
+```bash
+git add firestore.rules scripts/rules-probes/research.mjs scripts/verify-rules.mjs
+git commit -m "feat(rules): research consent - the one-time answer and the owner's change
+
+The parent (or the 18+ member who made their own household) sets
+consents.research once, that key only, dated by the server; a yes under
+18 needs the assent; the owner records a later change with the earlier
+answer kept on the history.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
+```
+
+---
+
+### Task 23: One-time research confirm for existing families, and the owner's recorded change
 
 **Files:**
 - Create: `frontend/src/portal/hooks/researchConsent.js`
 - Create: `frontend/src/portal/components/ResearchConfirmGate.js`
 - Create: `frontend/src/portal/components/assessments/ResearchLine.js`
-- Create: `scripts/rules-probes/research.mjs`
-- Modify: `firestore.rules` (the research branch on `athletes/{athleteId}`)
-- Modify: `scripts/verify-rules.mjs` (import and run `taskResearch`)
-- Modify: `frontend/src/portal/data/researchConsent.js` (`confirmSelfBody`)
 - Modify: `frontend/src/portal/data/assessmentWindows.js` (`inResearch` reads the history)
 - Modify: `frontend/src/portal/screens/AssessmentResults.js` (the research line)
 - Modify: `frontend/src/portal/PortalRoutes.js` (the gate around the family and athlete homes)
-- Test: `frontend/src/portal/hooks/researchConsent.test.js`, `frontend/src/portal/components/ResearchConfirmGate.test.js`, `frontend/src/portal/components/assessments/ResearchLine.test.js`, `frontend/src/portal/data/researchConsent.test.js` (append), `frontend/src/portal/data/assessmentWindows.test.js` (append), `frontend/src/portal/screens/AssessmentResults.test.js` (one edit), `frontend/src/portal/PortalRoutes.test.js` and `frontend/src/portal/AssessmentRoutes.test.js` (one mock each)
+- Test: `frontend/src/portal/hooks/researchConsent.test.js`, `frontend/src/portal/components/ResearchConfirmGate.test.js`, `frontend/src/portal/components/assessments/ResearchLine.test.js`, `frontend/src/portal/data/assessmentWindows.test.js` (append), `frontend/src/portal/screens/AssessmentResults.test.js` (one edit), `frontend/src/portal/PortalRoutes.test.js` and `frontend/src/portal/AssessmentRoutes.test.js` (one mock each)
 
 **Interfaces:**
-- Consumes: `researchAnswer`, `firstName`, `confirmBody`, `RESEARCH_CONFIRM_TITLE`, `RESEARCH_SAVE_LABEL` (Task 19); `ResearchChoice`, `ResearchSheet` (Task 19); `joinNames`, `isAdultOnDate` (`data/signup.js`); `fetchAthlete`, `fetchHousehold`, `fetchHouseholdAthletes`, `requireUser`, `wrap`, `isLive` (`hooks/live.js`); `ASSESSMENTS_KEY` (Task 5); `useAuthSession`; `toISODate`, `shortDate` (Task 2); the athlete doc's `consents.research` written by createFamily (Task 18); `verify-rules.mjs` exports `updateAs`, `seed`, `del`, `expect`, `token`, `t`, `uid`.
-- Produces: `hooks/researchConsent.js` - `RESEARCH_KEY = 'research'`, `pendingResearch({ user, athletes, household, todayISO })` returning `[{ id, name, self, minor }]`, `saveResearchConsent({ athleteId, answer })` (writes `consents.research = { value, assent, recordedAt: serverTimestamp(), recordedBy }`), `recordResearchChange({ athleteId, answer, current })` (the owner; the earlier answer appended to `history`), `useResearchConfirm(user)` returning `{ data: { pending } }`; `ResearchConfirmGate({ children })`; `ResearchLine({ athleteId, research, minor, canChange })` and `researchStatus(research)`; `confirmSelfBody`; `inResearch(research, circuitDate)` now answers from the answer in force on the circuit date (history included). Rules: the household's parent, or the 18+ member who created their own household, sets `consents.research` once (that key only, while none is recorded); the owner records a change with the earlier answer moved to `history`; a yes under 18 needs the assent, 18+ the assent is null.
+- Consumes: `researchAnswer`, `firstName`, `confirmBody`, `RESEARCH_CONFIRM_TITLE`, `RESEARCH_SAVE_LABEL` (Task 21); `ResearchChoice`, `ResearchSheet` (Task 21); `joinNames`, `isAdultOnDate` (`data/signup.js`); `fetchAthlete`, `fetchHousehold`, `fetchHouseholdAthletes`, `requireUser`, `wrap`, `isLive` (`hooks/live.js`); `ASSESSMENTS_KEY` (Task 5); `useAuthSession`; `toISODate`, `shortDate` (Task 2); the research rules of Task 22 (the write shapes below are that contract); `AssessmentResults`'s `today` prop (Task 17).
+- Produces: `hooks/researchConsent.js` - `RESEARCH_KEY = 'research'`, `pendingResearch({ user, athletes, household, todayISO })` returning `[{ id, name, self, minor }]`, `saveResearchConsent({ athleteId, answer })` (writes `consents.research = { value, assent, recordedAt: serverTimestamp(), recordedBy }`), `recordResearchChange({ athleteId, answer, current })` (the owner; the earlier answer appended to `history`), `useResearchConfirm(user)` returning `{ data: { pending } }`; `ResearchConfirmGate({ children })` (the approved title, body and checkboxes; an 18+ member reads `confirmBody` with their own first name); `ResearchLine({ athleteId, research, minor, canChange })` and `researchStatus(research)`; `inResearch(research, circuitDate)` now answers from the answer in force on the circuit date (history included).
 
 - [ ] **Step 1: Write the failing tests**
 
@@ -12551,7 +13527,7 @@ Create `frontend/src/portal/components/ResearchConfirmGate.test.js`:
 import React from 'react';
 import { renderScreen } from '../screens/testRender';
 import ResearchConfirmGate from './ResearchConfirmGate';
-import { confirmBody, confirmSelfBody } from '../data/researchConsent';
+import { confirmBody } from '../data/researchConsent';
 
 let mockUser;
 let mockPending;
@@ -12626,11 +13602,11 @@ test('Review Focus 5: a refused save says so, retries only what failed, and offe
   await reopened.unmount();
 });
 
-test('an 18+ member answers for themselves', async () => {
+test('an 18+ member answers for themselves, in the approved words with their own name', async () => {
   mockUser = { uid: 'self-1', role: 'athlete', athleteId: 's1', householdId: 'hs' };
   mockPending = [{ id: 's1', name: 'Sam Reyes', self: true, minor: false }];
   const r = await gate();
-  expect(r.text()).toContain(confirmSelfBody);
+  expect(r.text()).toContain(confirmBody('Sam'));
   await r.click('Research (optional): my results may be used in research.');
   await r.click('Save my answer');
   expect(mockSaves).toEqual([{ athleteId: 's1', answer: { value: true, assent: null } }]);
@@ -12707,15 +13683,6 @@ test('a failed change says so and keeps the editor open', async () => {
 });
 ```
 
-Append to `frontend/src/portal/data/researchConsent.test.js`:
-
-```js
-test('the one-time confirm for an 18+ member, in the second person', () => {
-  const { confirmSelfBody } = require('./researchConsent');
-  expect(confirmSelfBody).toBe("This season Phil Herder's assessment program measures each athlete's strength, power and growth. We'd like to include your results in RYP's research, with names removed. It's optional and changes nothing about your coaching.");
-});
-```
-
 Append to `frontend/src/portal/data/assessmentWindows.test.js`:
 
 ```js
@@ -12770,203 +13737,12 @@ jest.mock('./hooks/live', () => ({ ...jest.requireActual('./hooks/live'), isLive
 jest.mock('./hooks/researchConsent', () => ({ useResearchConfirm: () => ({ data: { pending: [] }, loading: false, error: null }), saveResearchConsent: async () => ({}) }));
 ```
 
-Create `scripts/rules-probes/research.mjs`:
-
-```js
-/**
- * Research consent (assessments spec 4.3, 7): the one-time confirm - the
- * household's parent, or the 18+ member who created their own household,
- * sets consents.research once, that key only, dated by the server and
- * signed by the caller; a yes under 18 needs the assent - and the owner's
- * recorded change, the earlier answer kept on the history. Run by
- * scripts/verify-rules.mjs in both passes; it seeds and removes
- * everything it touches.
- */
-import { del, expect, seed, t, token, uid, updateAs } from '../verify-rules.mjs';
-
-const KID = 'ath-research-kid';
-const ADULT_CHILD = 'ath-research-adult';
-const SELF = 'ath-research-self';
-const SELF_HH = 'hh-research-self';
-const users = { owner: 'owner-research-probe', self: 'research-self-probe', kid: 'research-kid-probe' };
-const tok = (u) => token(u, { email: `${u}@example.com`, email_verified: true });
-const kidBody = (extra = {}) => ({ name: 'Research Kid', householdId: 'hh', dob: '2012-04-10', contractMinutes: null, coachId: null, packageId: 't-6', ...extra });
-const selfBody = { name: 'Self Member', householdId: SELF_HH, dob: '2000-01-01', contractMinutes: null, coachId: null, packageId: 't-6' };
-/** The write hooks/researchConsent.js makes: consents.research, its recordedAt the server's time. */
-const answer = (auth, id, research, serverTime = ['consents.research.recordedAt']) =>
-  updateAs(auth, 'athletes', id, { consents: { research } }, ['consents.research'], serverTime);
-
-export async function taskResearch() {
-  console.log('Research consent: the one-time confirm (parent, 18+ self), that key only, assent under 18; the owner records a change');
-  const owner = tok(users.owner);
-  const self = tok(users.self);
-  const kid = tok(users.kid);
-  const reset = (extra = {}) => seed('athletes', KID, kidBody(extra));
-  try {
-    await seed('users', users.owner, { role: 'owner' });
-    await seed('users', users.self, { role: 'athlete', athleteId: SELF, householdId: SELF_HH });
-    await seed('users', users.kid, { role: 'athlete', athleteId: KID, householdId: 'hh' });
-    await seed('households', SELF_HH, { name: 'Self family', createdBy: users.self });
-    await seed('athletes', SELF, selfBody);
-    await seed('athletes', ADULT_CHILD, kidBody({ name: 'Adult Child', dob: '2000-01-01' }));
-
-    await reset();
-    expect('under 18, a yes without the assent is refused', await answer(t.parent, KID, { value: true, assent: false, recordedBy: uid.parent }), 403);
-    expect('the parent records yes with the assent', await answer(t.parent, KID, { value: true, assent: true, recordedBy: uid.parent }), 200);
-    expect('a second answer from the parent is refused', await answer(t.parent, KID, { value: false, assent: false, recordedBy: uid.parent }), 403);
-    await reset({ consents: { dataCollection: true, videoCapture: true, mediaRelease: false, research: null, signature: { name: 'Dana', date: '2026-10-01' } } });
-    expect('a sign-up record with research null takes the answer', await answer(t.parent, KID, { value: false, assent: false, recordedBy: uid.parent }), 200);
-    await reset();
-    expect('under 18 the assent is a yes or a no, never left out', await answer(t.parent, KID, { value: false, recordedBy: uid.parent }), 403);
-    expect('another household cannot answer', await answer(t.other, KID, { value: false, assent: false, recordedBy: uid.other }), 403);
-    expect("the child's own login cannot answer", await answer(kid, KID, { value: false, assent: false, recordedBy: users.kid }), 403);
-    expect('a coach cannot answer', await answer(t.coach, KID, { value: false, assent: false, recordedBy: uid.coach }), 403);
-    expect('the answer is signed by the caller', await answer(t.parent, KID, { value: false, assent: false, recordedBy: 'someone-else' }), 403);
-    expect('the answer is dated by the server', await answer(t.parent, KID, { value: false, assent: false, recordedBy: uid.parent, recordedAt: new Date() }, []), 403);
-    expect('a first answer carries no history', await answer(t.parent, KID, { value: false, assent: false, recordedBy: uid.parent, history: [] }), 403);
-    expect('no other consent rides along', await updateAs(t.parent, 'athletes', KID,
-      { consents: { mediaRelease: true, research: { value: false, assent: false, recordedBy: uid.parent } } },
-      ['consents.mediaRelease', 'consents.research'], ['consents.research.recordedAt']), 403);
-    expect('no other field rides along', await updateAs(t.parent, 'athletes', KID,
-      { name: 'Renamed', consents: { research: { value: false, assent: false, recordedBy: uid.parent } } },
-      ['name', 'consents.research'], ['consents.research.recordedAt']), 403);
-    expect('an 18+ athlete in the family: yes, no assent', await answer(t.parent, ADULT_CHILD, { value: true, assent: null, recordedBy: uid.parent }), 200);
-    expect('18+: an assent is refused', await answer(self, SELF, { value: true, assent: true, recordedBy: users.self }), 403);
-    expect('the 18+ member records their own answer', await answer(self, SELF, { value: true, assent: null, recordedBy: users.self }), 200);
-
-    const earlier = { value: true, assent: true, recordedAt: new Date('2026-10-15T15:00:00Z'), recordedBy: uid.parent };
-    await reset({ consents: { research: earlier } });
-    expect('the parent cannot change a recorded answer', await answer(t.parent, KID, { value: false, assent: false, recordedBy: uid.parent }), 403);
-    expect('the owner must keep the earlier answer', await answer(owner, KID, { value: false, assent: false, recordedBy: users.owner, history: [] }), 403);
-    expect('the owner records a change, the earlier answer on its history', await answer(owner, KID, { value: false, assent: false, recordedBy: users.owner, history: [earlier] }), 200);
-  } finally {
-    for (const id of [KID, ADULT_CHILD, SELF]) await del('athletes', id);
-    await del('households', SELF_HH);
-    for (const u of Object.values(users)) await del('users', u);
-  }
-}
-```
-
-In `scripts/verify-rules.mjs`, replace:
-
-```js
-import { taskAssessments, taskDiagnosticsGone } from './rules-probes/assessments.mjs';
-```
-
-with:
-
-```js
-import { taskAssessments, taskDiagnosticsGone } from './rules-probes/assessments.mjs';
-import { taskResearch } from './rules-probes/research.mjs';
-```
-
-then replace:
-
-```js
-    await taskAssessments(); await taskDiagnosticsGone();
-```
-
-with:
-
-```js
-    await taskAssessments(); await taskDiagnosticsGone(); await taskResearch();
-```
-
 - [ ] **Step 2: Run the tests to verify they fail**
 
-Run: `cd frontend && CI=true npx react-scripts test --watchAll=false src/portal/hooks/researchConsent.test.js src/portal/components/ResearchConfirmGate.test.js src/portal/components/assessments/ResearchLine.test.js src/portal/data/researchConsent.test.js src/portal/data/assessmentWindows.test.js src/portal/screens/AssessmentResults.test.js`
-Expected: FAIL - "Cannot find module './researchConsent'" (hooks), "Cannot find module './ResearchConfirmGate'", "Cannot find module './ResearchLine'", `confirmSelfBody` undefined, the history case of `inResearch`, and the results screen's research line.
-
-Run: `npx firebase-tools emulators:exec --only firestore --project rypacad "node --env-file=scripts/emulator.env scripts/verify-rules.mjs"`
-Expected: FAIL - every "records ... answer" case answers 403 (no branch yet).
+Run: `cd frontend && CI=true npx react-scripts test --watchAll=false src/portal/hooks/researchConsent.test.js src/portal/components/ResearchConfirmGate.test.js src/portal/components/assessments/ResearchLine.test.js src/portal/data/assessmentWindows.test.js src/portal/screens/AssessmentResults.test.js`
+Expected: FAIL - "Cannot find module './researchConsent'" (hooks), "Cannot find module './ResearchConfirmGate'", "Cannot find module './ResearchLine'", the history case of `inResearch`, and the results screen's research line.
 
 - [ ] **Step 3: Write minimal implementation**
-
-In `firestore.rules`, replace:
-
-```
-      allow update: if signedIn() && pendingPackageUpdateOk() && (
-        (me().role == 'parent' && resource.data.householdId == me().householdId)
-        || (me().role == 'athlete' && me().athleteId == athleteId
-            && get(/databases/$(database)/documents/households/$(resource.data.householdId)).data.createdBy == request.auth.uid)
-      );
-```
-
-with:
-
-```
-      allow update: if signedIn() && pendingPackageUpdateOk() && (
-        (me().role == 'parent' && resource.data.householdId == me().householdId)
-        || (me().role == 'athlete' && me().athleteId == athleteId
-            && get(/databases/$(database)/documents/households/$(resource.data.householdId)).data.createdBy == request.auth.uid)
-      );
-
-      // ---- research consent (assessments spec 4.3, 7) -------------------
-      // The one-time confirm: the household's parent, or the 18+ member who
-      // created their own household (the same test as the package switch
-      // above), records consents.research once - that key only, while none
-      // is recorded, dated by the server and signed by the caller. The
-      // owner records a later change (the family emails it), the earlier
-      // answer moved onto the history, so every window keeps the answer it
-      // ran under. Under 18 a yes needs the assent; 18+ the assent is null.
-      function adultRecord() {
-        let dob = resource.data.get('dob', null);
-        return dob is string && dob.matches('[0-9]{4}-[0-9]{2}-[0-9]{2}')
-          && timestamp.date(int(dob.split('-')[0]) + 18, int(dob.split('-')[1]), int(dob.split('-')[2])) <= request.time;
-      }
-      function researchOnlyChange() {
-        return request.resource.data.diff(resource.data).affectedKeys().hasOnly(['consents'])
-          && request.resource.data.consents.diff(resource.data.get('consents', {})).affectedKeys().hasOnly(['research']);
-      }
-      function researchAnswerOk(r, adult) {
-        return r is map
-          && r.keys().hasOnly(['value', 'assent', 'recordedAt', 'recordedBy', 'history'])
-          && r.value is bool
-          && r.recordedAt == request.time
-          && r.recordedBy == request.auth.uid
-          && (adult ? r.get('assent', null) == null
-            : (r.get('assent', null) is bool && (r.value == false || r.assent == true)));
-      }
-      function researchFirstOk(adult) {
-        let r = request.resource.data.consents.research;
-        return researchOnlyChange()
-          && resource.data.get('consents', {}).get('research', null) == null
-          && researchAnswerOk(r, adult)
-          && !r.keys().hasAny(['history']);
-      }
-      function researchChangeOk() {
-        let prev = resource.data.get('consents', {}).get('research', null);
-        let r = request.resource.data.consents.research;
-        return researchOnlyChange()
-          && researchAnswerOk(r, adultRecord())
-          && r.get('history', []) == (prev == null ? [] : prev.get('history', []).concat([{
-            'value': prev.get('value', null), 'assent': prev.get('assent', null),
-            'recordedAt': prev.get('recordedAt', null), 'recordedBy': prev.get('recordedBy', null)}]));
-      }
-      allow update: if signedIn() && (
-        (me().role == 'parent' && resource.data.householdId == me().householdId && researchFirstOk(adultRecord()))
-        || (me().role == 'athlete' && me().athleteId == athleteId
-            && get(/databases/$(database)/documents/households/$(resource.data.householdId)).data.createdBy == request.auth.uid
-            && researchFirstOk(true))
-        || (me().role == 'owner' && researchChangeOk())
-      );
-```
-
-In `frontend/src/portal/data/researchConsent.js`, replace:
-
-```js
-/** The "Read more" sheet, section by section. */
-```
-
-with:
-
-```js
-/** The one-time confirm for an 18+ member answering for themselves: confirmBody's rewording into the second person. */
-export const confirmSelfBody =
-  "This season Phil Herder's assessment program measures each athlete's strength, power and growth. We'd like to include your results in RYP's research, with names removed. It's optional and changes nothing about your coaching.";
-
-/** The "Read more" sheet, section by section. */
-```
 
 In `frontend/src/portal/data/assessmentWindows.js`, replace:
 
@@ -13111,7 +13887,7 @@ import { Body, Card, ErrorNotice, ScreenTitle } from './Primitives';
 import useAuthSession from '../hooks/useAuthSession';
 import { isLive } from '../hooks/live';
 import { saveResearchConsent, useResearchConfirm } from '../hooks/researchConsent';
-import { RESEARCH_CONFIRM_TITLE, RESEARCH_SAVE_LABEL, confirmBody, confirmSelfBody, firstName, researchAnswer } from '../data/researchConsent';
+import { RESEARCH_CONFIRM_TITLE, RESEARCH_SAVE_LABEL, confirmBody, firstName, researchAnswer } from '../data/researchConsent';
 import { joinNames } from '../data/signup';
 
 /** Users who chose "Skip for now" after a failed save, until the page loads again (the next sign-in). */
@@ -13148,7 +13924,6 @@ function ResearchConfirm({ pending, onDone, onSkip }) {
   const [saving, setSaving] = useState(false);
   const [failed, setFailed] = useState(false);
   const [sheet, setSheet] = useState(null);
-  const self = pending.length === 1 && pending[0].self;
 
   const save = async () => {
     setSaving(true);
@@ -13179,7 +13954,7 @@ function ResearchConfirm({ pending, onDone, onSkip }) {
       }
     >
       <div style={{ padding: '0 22px 24px', display: 'flex', flexDirection: 'column', gap: 12, position: 'relative' }}>
-        <Body size={13}>{self ? confirmSelfBody : confirmBody(joinNames(pending.map((p) => firstName(p.name))))}</Body>
+        <Body size={13}>{confirmBody(joinNames(pending.map((p) => firstName(p.name))))}</Body>
         {pending.map((p) => {
           const name = firstName(p.name);
           return (
@@ -13191,7 +13966,7 @@ function ResearchConfirm({ pending, onDone, onSkip }) {
                 ticked={answers[p.id].ticked}
                 assent={answers[p.id].assent}
                 onChange={(next) => setAnswers((all) => ({ ...all, [p.id]: next }))}
-                onReadMore={() => setSheet({ name, self: p.self })}
+                onReadMore={() => setSheet({ name })}
               />
               {saved.includes(p.id) ? <Body size={11} tone={color.primary} style={{ marginTop: 8 }}>Saved</Body> : null}
             </Card>
@@ -13203,7 +13978,7 @@ function ResearchConfirm({ pending, onDone, onSkip }) {
           </ErrorNotice>
         ) : null}
       </div>
-      {sheet ? <ResearchSheet name={sheet.name} self={sheet.self} onClose={() => setSheet(null)} /> : null}
+      {sheet ? <ResearchSheet name={sheet.name} onClose={() => setSheet(null)} /> : null}
     </PhoneFrame>
   );
 }
@@ -13317,7 +14092,6 @@ with:
 
 ```js
 import { shortDate } from '../data/assessmentWindows';
-import { academyDateISO } from '../data/calendar';
 import { isAdultOnDate } from '../data/signup';
 ```
 
@@ -13349,7 +14123,7 @@ with:
 ```js
       {about ? <Body size={12} style={{ marginTop: 3 }}>{about}</Body> : null}
       {athlete ? (
-        <ResearchLine athleteId={athleteId} research={athlete.consents?.research ?? null} minor={!isAdultOnDate(athlete.dob, academyDateISO())}
+        <ResearchLine athleteId={athleteId} research={athlete.consents?.research ?? null} minor={!isAdultOnDate(athlete.dob, today)}
           canChange={viewer?.role === 'owner'} />
       ) : null}
 ```
@@ -13424,29 +14198,26 @@ with:
 Run: `cd frontend && CI=true npx react-scripts test --watchAll=false src/portal/hooks/researchConsent.test.js src/portal/components/ResearchConfirmGate.test.js src/portal/components/assessments/ResearchLine.test.js src/portal/data/researchConsent.test.js src/portal/data/assessmentWindows.test.js src/portal/screens/AssessmentResults.test.js src/portal/PortalRoutes src/portal/AssessmentRoutes.test.js`
 Expected: PASS.
 
-Run: `npx firebase-tools emulators:exec --only firestore --project rypacad "node --env-file=scripts/emulator.env scripts/verify-rules.mjs"`
-Expected: every line PASS, ending `ALL PASS (both passes)`.
-
 Run: `cd frontend && npx eslint src/portal`
 Expected: no errors, no warnings.
 
 - [ ] **Step 5: Commit**
 
 ```bash
-git add firestore.rules scripts/rules-probes/research.mjs scripts/verify-rules.mjs frontend/src/portal/hooks/researchConsent.js frontend/src/portal/hooks/researchConsent.test.js frontend/src/portal/components/ResearchConfirmGate.js frontend/src/portal/components/ResearchConfirmGate.test.js frontend/src/portal/components/assessments/ResearchLine.js frontend/src/portal/components/assessments/ResearchLine.test.js frontend/src/portal/data/researchConsent.js frontend/src/portal/data/researchConsent.test.js frontend/src/portal/data/assessmentWindows.js frontend/src/portal/data/assessmentWindows.test.js frontend/src/portal/screens/AssessmentResults.js frontend/src/portal/screens/AssessmentResults.test.js frontend/src/portal/PortalRoutes.js frontend/src/portal/PortalRoutes.test.js frontend/src/portal/AssessmentRoutes.test.js
+git add frontend/src/portal/hooks/researchConsent.js frontend/src/portal/hooks/researchConsent.test.js frontend/src/portal/components/ResearchConfirmGate.js frontend/src/portal/components/ResearchConfirmGate.test.js frontend/src/portal/components/assessments/ResearchLine.js frontend/src/portal/components/assessments/ResearchLine.test.js frontend/src/portal/data/assessmentWindows.js frontend/src/portal/data/assessmentWindows.test.js frontend/src/portal/screens/AssessmentResults.js frontend/src/portal/screens/AssessmentResults.test.js frontend/src/portal/PortalRoutes.js frontend/src/portal/PortalRoutes.test.js frontend/src/portal/AssessmentRoutes.test.js
 git commit -m "feat(consent): one-time research confirm and the owner's recorded change
 
 Families with an athlete not answered see the approved question once
-before their home; the rules let the parent (or the 18+ member) set
-consents.research once, and the owner record a later change with the
-earlier answer kept, so every window keeps the answer it ran under.
+before their home, never trapped behind it; the results screen shows the
+answer in force and its history, and the owner records a change the
+family asks for, so every window keeps the answer it ran under.
 
 Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 ```
 
 ---
 
-### Task 21: Emulator fixtures, the data model, and the end-to-end wave on the emulator
+### Task 24: Emulator fixtures, the data model, and the end-to-end wave on the emulator
 
 **Files:**
 - Create: `scripts/lib/assessment-fixtures.mjs`
@@ -13455,8 +14226,8 @@ Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 - Modify: `docs/portal/DATA-MODEL.md` (id rows; the assessments section)
 
 **Interfaces:**
-- Consumes: the bundled `circuitModeOf`, `DEFAULT_SETTINGS`, `PROTOCOL_VERSION` (`data/assessmentSettings.js`) and `seasonOf` (`data/assessmentWindows.js`) through `scripts/lib/bundle-frontend.mjs`; the window, profile and consents shapes of Tasks 4, 18 and 20.
-- Produces: `assessmentFixtures({ todayISO, mode, seasonOf, athletes, protocolVersion, coachUid, guardianUid, signatureName })` returning `{ consents: { [athleteId]: consentsMap }, collections: { 'athletes/<id>/assessments': Map, 'athletes/<id>/assessmentProfile': Map } }`, `STORIES` (`tested | due | declined | unanswered`), `addDaysISO(iso, n)`; Task 22's staging seed reuses all three. The emulator gets: jordan tested at baseline 63 days back (mid-season eligible), reese research no (baseline due), nico not answered (the list cannot add him; Dana's one-time confirm asks), sage-parker research yes (baseline due).
+- Consumes: the bundled `circuitModeOf`, `DEFAULT_SETTINGS`, `PROTOCOL_VERSION` (`data/assessmentSettings.js`) and `seasonOf` (`data/assessmentWindows.js`) through `scripts/lib/bundle-frontend.mjs`; the window, profile and consents shapes of Tasks 4, 20 and 22.
+- Produces: `assessmentFixtures({ todayISO, mode, seasonOf, athletes, protocolVersion, coachUid, guardianUid, signatureName })` returning `{ consents: { [athleteId]: consentsMap }, collections: { 'athletes/<id>/assessments': Map, 'athletes/<id>/assessmentProfile': Map } }`, `STORIES` (`tested | due | declined | unanswered`), `addDaysISO(iso, n)`; Task 25's staging seed reuses all three. The emulator gets: jordan tested at baseline 63 days back (mid-season eligible), reese research no (baseline due), nico not answered (the list cannot add him; Dana's one-time confirm asks), sage-parker research yes (baseline due).
 
 - [ ] **Step 1: Write the failing test**
 
@@ -13783,7 +14554,7 @@ Phil Herder's Physical Performance Assessment protocol v1.2 replaces Diagnostic 
 | `protocolVersion` | string | `v1.2`; results under another version are flagged and never compared. |
 | `circuitMode` | map | The settings snapshot the window ran under (`circuitModeOf`): trial counts, grip rest, stations, McGill mode, med ball side, golf timing, wave size, hop and RSImod entry, coefficient set. |
 | `status` | string | `open \| complete`. |
-| `circuitDate`, `golfDate`, `mcgillDate` | `YYYY-MM-DD` \| null | Coach-set, within 14 days of entry (rules `recentDate`). Golf is due within 7 days of the circuit; McGill may be its own block within 14. The first golf or McGill save dates it. |
+| `circuitDate`, `golfDate`, `mcgillDate` | `YYYY-MM-DD` \| null | Coach-set, within 14 days of entry (rules `recentDate`); `season` is the circuit date's August-July season. An open window older than 14 days is marked complete, never moved into a new wave. Golf is due within 7 days of the circuit; McGill may be its own block within 14. The first golf or McGill save dates it. |
 | `weeksOfExposure` | int | Weeks from the profile's `firstTestDate` to `circuitDate`. |
 | `wave` | map | `{ id, position 1-4, coachUid }`. |
 | `readiness`, `log`, `anthro`, `grip`, `cmj`, `hop`, `medball`, `mcgill`, `golf`, `notTested` | map | One section each, shapes and ranges in the spec (4.1, 4.4) and `data/assessmentInput.js`. A 10/5 set is `{ rsiBest5, gctMs }` or every hop as `{ hopRsi: [<=10], hopGctMs: [<=10] }` (shape-checked by the rules, range-checked by the client). CMJ holds at most 3 scored trials. |
@@ -13794,7 +14565,7 @@ Access: owner, ops, Phil (`specialistId 'phil'`) and assessor staff read and wri
 
 ### `athletes/{athleteId}/assessmentProfile/current`
 
-`{ athleteId, sex 'male' | 'female' | null, firstTestDate, medballMassKg 2 | 3 | 4, medballMethod 'speed' | 'distance', dominantHand, gripDevice, handlePosition, driver, season, updatedAt, updatedBy }`. Within a season the med ball method and mass never change once set and the first-test date never moves (Phil: "block mixing"); the owner may correct a mistake. Staff write; staff and coaches read.
+`{ athleteId, sex 'male' | 'female' | null, firstTestDate, medballMassKg 2 | 3 | 4, medballMethod 'speed' | 'distance', dominantHand, gripDevice, handlePosition, driver, season, updatedAt, updatedBy }`. Within a season the med ball method and mass never change once set, the first-test date never moves, and `season` only moves forward (Phil: "block mixing"); a window's med ball must be entered under a profile of its own season; the owner may correct a mistake. Staff write; staff and coaches read.
 
 ### `assessmentSettings/current`
 
@@ -13855,18 +14626,21 @@ Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 
 ---
 
-### Task 22: The staging-safe seed and the "Test copy" marker
+### Task 25: The staging-safe seed and the "Test copy" marker
 
 **Files:**
 - Create: `scripts/seed-staging-assessments.mjs`
 - Create: `scripts/test/seed-staging-assessments.test.mjs`
 - Create: `frontend/src/portal/components/TestCopyRibbon.js`
+- Create: `frontend/src/testCopyGuard.js` (the test copy refuses to start against any project but staging)
+- Modify: `frontend/src/firebase.js` (the guard runs before Firebase is initialized)
 - Modify: `frontend/src/portal/PortalRoutes.js` (render the marker)
-- Test: `frontend/src/portal/components/TestCopyRibbon.test.js`
+- Modify: `.firebaserc` (a `staging` alias for `ryp-academy-app`)
+- Test: `frontend/src/portal/components/TestCopyRibbon.test.js`, `frontend/src/testCopyGuard.test.js`
 
 **Interfaces:**
-- Consumes: `assessmentFixtures` (Task 21); `fsFields` (`scripts/lib/firestore-rest.mjs`, pure encoding only - its `PROJECT_ID`, `docName` and `commit` are production-bound and are never imported here); `prodAccessToken` (`scripts/lib/prod-auth.mjs`, the owner's firebase-tools login, called only on `--yes`); `bundleFrontend`.
-- Produces: `scripts/seed-staging-assessments.mjs` exporting `STAGING_PROJECT = 'ryp-academy-app'`, `PRODUCTION_PROJECT = 'rypacad'`, `HOUSEHOLD_ID`, `TEST_ATHLETES`, `assertStagingTarget(project)`, `parseArgs(argv)`, `planStaging({ todayISO, mode, seasonOf, protocolVersion, ownerUid, philUid, assessorUid })` returning `[{ path, data }]`, `main({ argv, fetchImpl, getToken, loadPortal, log, todayISO })`. Flags: `--dry-run` (offline: no token, no network), `--yes` (the owner's write), `--wipe-assessments` (with `--yes`: deletes the test athletes' windows and profiles and `assessmentSettings/current` first), `--owner-uid`, `--phil-uid`, `--assessor-uid` (staff role docs on staging), `--project` (anything but `ryp-academy-app` is refused). `TestCopyRibbon` (shown when `REACT_APP_TEST_COPY=true`; a red warning instead if that build points at `rypacad`). Task 23's owner steps run these.
+- Consumes: `assessmentFixtures` (Task 24); `fsFields` (`scripts/lib/firestore-rest.mjs`, pure encoding only - its `PROJECT_ID`, `docName` and `commit` are production-bound and are never imported here); `prodAccessToken` (`scripts/lib/prod-auth.mjs`, the owner's firebase-tools login, called only on `--yes`); `bundleFrontend`.
+- Produces: `scripts/seed-staging-assessments.mjs` exporting `STAGING_PROJECT = 'ryp-academy-app'`, `PRODUCTION_PROJECT = 'rypacad'`, `HOUSEHOLD_ID`, `TEST_ATHLETES`, `assertStagingTarget(project)`, `parseArgs(argv)`, `planStaging({ todayISO, mode, seasonOf, protocolVersion, ownerUid, philUid, assessorUid })` returning `[{ path, data }]`, `main({ argv, fetchImpl, getToken, loadPortal, log, todayISO })`. Flags: `--dry-run` (offline: no token, no network), `--yes` (the owner's write), `--wipe-assessments` (with `--yes`: deletes the test athletes' windows and profiles and `assessmentSettings/current` first), `--owner-uid`, `--phil-uid`, `--assessor-uid` (staff role docs on staging), `--project` (anything but `ryp-academy-app` is refused). `TestCopyRibbon` (shown when `REACT_APP_TEST_COPY=true`); `frontend/src/testCopyGuard.js` exporting `TEST_COPY_PROJECT = 'ryp-academy-app'` and `assertTestCopyTarget(env)` (throws when `REACT_APP_TEST_COPY === 'true'` and `REACT_APP_FIREBASE_PROJECT_ID` is anything but `ryp-academy-app`, naming `rypacad` as the LIVE database), called by `firebase.js` before `initializeApp`, so a test-copy build pointed at production never starts; the `.firebaserc` alias `staging` (`--project staging` is `ryp-academy-app`). Task 26's owner steps run these.
 
 - [ ] **Step 1: Write the failing tests**
 
@@ -13992,12 +14766,27 @@ test('the test copy says so on every screen', async () => {
   await r.unmount();
 });
 
-test('a test copy built against the live database is called out', async () => {
-  process.env.REACT_APP_TEST_COPY = 'true';
-  process.env.REACT_APP_FIREBASE_PROJECT_ID = 'rypacad';
-  const r = await renderScreen(<TestCopyRibbon />);
-  expect(r.text()).toBe('Misconfigured: this test copy points at the LIVE database');
-  await r.unmount();
+```
+
+Create `frontend/src/testCopyGuard.test.js`:
+
+```js
+import { TEST_COPY_PROJECT, assertTestCopyTarget } from './testCopyGuard';
+
+test('the live portal (no test-copy flag) starts as it always has', () => {
+  expect(() => assertTestCopyTarget({ REACT_APP_FIREBASE_PROJECT_ID: 'rypacad' })).not.toThrow();
+  expect(() => assertTestCopyTarget({})).not.toThrow();
+});
+
+test('the test copy starts against the staging project', () => {
+  expect(TEST_COPY_PROJECT).toBe('ryp-academy-app');
+  expect(() => assertTestCopyTarget({ REACT_APP_TEST_COPY: 'true', REACT_APP_FIREBASE_PROJECT_ID: 'ryp-academy-app' })).not.toThrow();
+});
+
+test('a test copy built against the live database, or any other project, refuses to start', () => {
+  expect(() => assertTestCopyTarget({ REACT_APP_TEST_COPY: 'true', REACT_APP_FIREBASE_PROJECT_ID: 'rypacad' })).toThrow(/the LIVE database/);
+  expect(() => assertTestCopyTarget({ REACT_APP_TEST_COPY: 'true', REACT_APP_FIREBASE_PROJECT_ID: 'some-other-project' })).toThrow(/not ryp-academy-app/);
+  expect(() => assertTestCopyTarget({ REACT_APP_TEST_COPY: 'true' })).toThrow(/not ryp-academy-app/);
 });
 ```
 
@@ -14006,8 +14795,8 @@ test('a test copy built against the live database is called out', async () => {
 Run: `node --test scripts/test/*.test.mjs`
 Expected: FAIL - "Cannot find module ... scripts/seed-staging-assessments.mjs".
 
-Run: `cd frontend && CI=true npx react-scripts test --watchAll=false src/portal/components/TestCopyRibbon.test.js`
-Expected: FAIL - "Cannot find module './TestCopyRibbon'".
+Run: `cd frontend && CI=true npx react-scripts test --watchAll=false src/portal/components/TestCopyRibbon.test.js src/testCopyGuard.test.js`
+Expected: FAIL - "Cannot find module './TestCopyRibbon'" and "Cannot find module './testCopyGuard'".
 
 - [ ] **Step 3: Write minimal implementation**
 
@@ -14189,26 +14978,93 @@ import { color, font, radius } from '../tokens';
  * The staging test copy's marker (assessments spec 9): a build with
  * REACT_APP_TEST_COPY=true (the separate Railway service Phil uses for the
  * dry run) says "Test copy" on every screen, so nobody mistakes it for the
- * live portal. If that build was pointed at the live project by mistake it
- * says so in red instead. The live portal never sets the variable.
+ * live portal. A test-copy build pointed at any project but staging never
+ * gets this far: frontend/src/testCopyGuard.js stops it before Firebase
+ * starts. The live portal never sets the variable.
  */
 export default function TestCopyRibbon() {
   if (process.env.REACT_APP_TEST_COPY !== 'true') return null;
-  const live = process.env.REACT_APP_FIREBASE_PROJECT_ID === 'rypacad';
   return (
     <div
       role="status"
       style={{
         position: 'fixed', top: 6, right: 6, zIndex: 1000, pointerEvents: 'none',
         padding: '3px 10px', borderRadius: radius.pill,
-        background: live ? color.error : color.secondary, color: live ? '#fff' : '#000',
+        background: color.secondary, color: '#000',
         font: `700 10px ${font.body}`, letterSpacing: '.08em', textTransform: 'uppercase',
       }}
     >
-      {live ? 'Misconfigured: this test copy points at the LIVE database' : 'Test copy · fake athletes'}
+      Test copy · fake athletes
     </div>
   );
 }
+```
+
+Create `frontend/src/testCopyGuard.js`:
+
+```js
+/**
+ * The staging test copy's guard (assessments spec 9): a build with
+ * REACT_APP_TEST_COPY=true is Phil's rehearsal portal and must point at the
+ * staging project. Any other project - above all the live one, rypacad -
+ * refuses to start, before Firebase is initialized (firebase.js calls this
+ * first), so a rehearsal wave can never be written beside real families.
+ * `env` is process.env, which CRA fills at build time.
+ */
+export const TEST_COPY_PROJECT = 'ryp-academy-app';
+
+export function assertTestCopyTarget(env) {
+  if (env.REACT_APP_TEST_COPY !== 'true') return;
+  const project = env.REACT_APP_FIREBASE_PROJECT_ID;
+  if (project === TEST_COPY_PROJECT) return;
+  throw new Error(
+    `Refusing to start: this is the test copy (REACT_APP_TEST_COPY=true) but REACT_APP_FIREBASE_PROJECT_ID is "${project ?? ''}", not ${TEST_COPY_PROJECT}${project === 'rypacad' ? ' - that is the LIVE database' : ''}. Fix the test copy service's variables and redeploy.`
+  );
+}
+```
+
+In `frontend/src/firebase.js`, replace:
+
+```js
+import { connectFunctionsEmulator, getFunctions } from 'firebase/functions';
+```
+
+with:
+
+```js
+import { connectFunctionsEmulator, getFunctions } from 'firebase/functions';
+import { assertTestCopyTarget } from './testCopyGuard';
+```
+
+then replace:
+
+```js
+// Initialize Firebase
+let app;
+```
+
+with:
+
+```js
+// Assessments spec 9: the staging test copy never starts against any
+// project but staging (testCopyGuard.js) - checked before Firebase starts.
+assertTestCopyTarget(process.env);
+
+// Initialize Firebase
+let app;
+```
+
+In `.firebaserc`, replace:
+
+```json
+    "default": "rypacad"
+```
+
+with:
+
+```json
+    "default": "rypacad",
+    "staging": "ryp-academy-app"
 ```
 
 In `frontend/src/portal/PortalRoutes.js`, replace:
@@ -14273,35 +15129,57 @@ Expected: `Staging test copy (ryp-academy-app): 13 docs`, the paths (one househo
 Run: `node scripts/seed-staging-assessments.mjs --dry-run --project rypacad`
 Expected: exit 1, "Refusing: rypacad is PRODUCTION. This script only writes the staging test copy (ryp-academy-app)."
 
-Run: `cd frontend && CI=true npx react-scripts test --watchAll=false src/portal/components/TestCopyRibbon.test.js src/portal/PortalRoutes src/portal/AssessmentRoutes.test.js`
+Run: `cd frontend && CI=true npx react-scripts test --watchAll=false src/portal/components/TestCopyRibbon.test.js src/testCopyGuard.test.js src/portal/PortalRoutes src/portal/AssessmentRoutes.test.js`
 Expected: PASS.
+
+Run: `cd frontend && npm run build`
+Expected: "Compiled successfully." (the live build sets no REACT_APP_TEST_COPY, so the guard passes).
+
+Run: `node -e "console.log(JSON.parse(require('fs').readFileSync('.firebaserc', 'utf8')).projects)"`
+Expected: `{ default: 'rypacad', staging: 'ryp-academy-app' }` (the default stays production; the test copy is always named).
 
 - [ ] **Step 5: Commit**
 
 ```bash
-git add scripts/seed-staging-assessments.mjs scripts/test/seed-staging-assessments.test.mjs frontend/src/portal/components/TestCopyRibbon.js frontend/src/portal/components/TestCopyRibbon.test.js frontend/src/portal/PortalRoutes.js
+git add scripts/seed-staging-assessments.mjs scripts/test/seed-staging-assessments.test.mjs frontend/src/portal/components/TestCopyRibbon.js frontend/src/portal/components/TestCopyRibbon.test.js frontend/src/testCopyGuard.js frontend/src/testCopyGuard.test.js frontend/src/firebase.js frontend/src/portal/PortalRoutes.js .firebaserc
 git commit -m "chore(staging): fake-athlete seed for the test copy, and its marker
 
 A seed that can only write ryp-academy-app (production refused by name,
 offline dry run, owner-run --yes, optional wipe of what the dry run
-typed), and a Test copy badge on a build with REACT_APP_TEST_COPY.
+typed), a Test copy badge on a build with REACT_APP_TEST_COPY, a test copy
+that refuses to start against any project but staging, and a staging
+alias so no rules deploy for it falls through to production.
 
 Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 ```
 
 ---
 
-### Task 23: Owner-run steps - the staging test copy for Phil, then production
+### Task 26: Owner-run steps - rulings, the staging test copy for Phil, then production
 
-Every step below is the **owner's** to run (pushes, deploys, Firebase console, Railway, and the staging seed's `--yes`). The implementing agent prepares, runs the gates, and hands the commands over in its final message; it never pushes, deploys or writes to a hosted project itself.
+Every step below is the **owner's** (or Phil's) to run (rulings, pushes, deploys, Firebase console, Railway, and the staging seed's `--yes`). The implementing agent prepares, runs the gates, and hands the commands over in its final message; it never pushes, deploys or writes to a hosted project itself.
 
-**Files:** none changed. Branch `assessments/v1.2` in `C:\Users\Mac\Desktop\rypacadapp\wt-assessments`; the main checkout is `C:\Users\Mac\Desktop\rypacadapp\rypacad` (`develop`; `main` is production and deploys on push).
+**Files:** none changed here (a ruling that changes code goes on `assessments/v1.2` as its own commit, with its tests, before Step 8). Branch `assessments/v1.2` in `C:\Users\Mac\Desktop\rypacadapp\wt-assessments`; the main checkout is `C:\Users\Mac\Desktop\rypacadapp\rypacad` (`develop`; `main` is production and deploys on push).
 
 **Interfaces:**
-- Consumes: everything in Tasks 1-22; `scripts/seed-staging-assessments.mjs` (Task 22); `firestore.rules` (Tasks 4, 7, 20); `functions/portal/family.js` (Task 18); `REACT_APP_TEST_COPY` (Task 22).
-- Produces: a separate test copy of the portal on the staging Firebase project `ryp-academy-app` with fake athletes, served by its own Railway service from the branch; then the production rollout in the order functions, portal, rules.
+- Consumes: everything in Tasks 1-25; `scripts/seed-staging-assessments.mjs` (Task 25); `firestore.rules` (Tasks 4, 9, 22); `functions/portal/family.js` (Task 20); `REACT_APP_TEST_COPY`, `frontend/src/testCopyGuard.js` and the `.firebaserc` alias `staging` (Task 25).
+- Produces: the owner's and Phil's rulings on what the plan could only default; a separate test copy of the portal on the staging Firebase project `ryp-academy-app` with fake athletes, served by its own Railway service from the branch; then the production rollout in the spec 10 order: functions, rules, portal. Task 27 follows once the portal is live.
 
-- [ ] **Step 1: Every gate green on the branch (agent)**
+- [ ] **Step 1: Rulings before the merge (owner and Phil)**
+
+The plan implements a default for each; the agent lists them in its final message, and the answers are needed before Step 8 (the dry run in Step 7 is the place to try them):
+
+1. **Phil - a pain stop at any station.** The plan ends every later station for that athlete after a pain stop anywhere in the circuit (protocol Section 2: do not test an athlete who reports current pain); "Undo not tested" at that station opens them again. If Phil rules that a pain stop ends only that station, `painStopBefore` in `components/assessments/StationShell.js` returns null for every station after intake, and `StationShell.test.js` says so.
+2. **Phil - late joiners and the season end.** With the season ending Feb 27 (`SEASON_BOUNDS.end`), a baseline after Nov 7 leaves no room for mid-season and end of season 8 weeks apart, so those athletes default to end of season (mid-season still selectable on the start-wave sheet). The protocol's cover says end of season is in March: confirm that the academy's end-of-season window is the last weeks before Feb 27.
+3. **Owner - the 18+ wording.** The approved copy words only the 18+ checkbox ("Research (optional): my results may be used in research."), so an 18+ member on their own login reads the approved line, Read more sheet and one-time confirm with their own first name ("Saying no changes nothing about Sam's coaching or testing."). Drafts in the second person, for approval or rewording:
+   - line under the checkbox: "Saying no changes nothing about your coaching or testing."
+   - Read more, *What it covers*: "... With your permission we include your results in that research: ..."; *Your choice*: "If you say no, you are tested and coached exactly the same way, and your results are used only to coach you."
+   - one-time confirm body: "This season Phil Herder's assessment program measures each athlete's strength, power and growth. We'd like to include your results in RYP's research, with names removed. It's optional and changes nothing about your coaching."
+   If approved, they go in `data/researchConsent.js` beside the approved copy and are used where `self` is true (`ResearchChoice`, `ResearchSheet`, `ResearchConfirmGate`), with tests pinning each string.
+4. **Owner - a parent answering for an 18+ athlete in their household.** Sign-up and the rules let the parent answer research for an athlete aged 18 or over with no agreement from that athlete (assent null); the spec covers only 18+ athletes on their own login. The alternatives: the parent ticks the assent box for every athlete they answer for, whatever the age (sign-up, `normalizeResearch` and the rules branch change together), or only the athlete answers (then an 18+ athlete with no login stays "not answered" and cannot join a wave).
+5. **Owner - who deletes raw assessments.** The spec's table gives owner and ops delete; its bullet says owner only. The plan implements owner only (`firestore.rules` and the probes "Phil cannot delete a window", "ops cannot delete a window"). If ops may delete too, that is one rules line and the ops probe flips to 200.
+
+- [ ] **Step 2: Every gate green on the branch (agent)**
 
 Run each from `C:\Users\Mac\Desktop\rypacadapp\wt-assessments`:
 
@@ -14326,32 +15204,34 @@ Expected: `ALL PASS (both passes)`.
 Run: `node scripts/seed-firestore.mjs --dry-run && node scripts/seed-staging-assessments.mjs --dry-run`
 Expected: both end with their "nothing written" line.
 
-- [ ] **Step 2: Staging project ready (owner, Firebase console, work account)**
+- [ ] **Step 3: Staging project ready, and empty (owner, Firebase console, work account)**
 
 In the Firebase console for `ryp-academy-app`:
 1. Firestore Database: if there is no `(default)` database, create one in Native mode, in the same location as `rypacad`.
 2. Authentication > Sign-in method: enable Google (and Email/Password if Phil signs in with a password on the live portal).
-3. Project settings > Your apps: if there is no web app, add one; keep its config values (apiKey, authDomain, projectId `ryp-academy-app`, storageBucket, messagingSenderId, appId) for Step 4.
+3. Project settings > Your apps: if there is no web app, add one; keep its config values (apiKey, authDomain, projectId `ryp-academy-app`, storageBucket, messagingSenderId, appId) for Step 5.
 
-Expected: Firestore shows an empty `(default)` database; Google sign-in is enabled.
+Expected: Firestore shows an empty `(default)` database (no collections); Authentication > Users lists nobody; Google sign-in is enabled.
 
-- [ ] **Step 3: Rules on staging, and the branch on GitHub (owner)**
+**Hard stop - anything already there.** The project was in use until 2026-09-17, and the assessments list reads every athlete doc in the project, so anything left would show on Phil's tablet beside the fake athletes. If Firestore holds any collection, or Authentication lists any user, stop and clear it first: export what must be kept, delete every collection and every user, and re-check that both are empty before Step 4.
 
-Run: `cd C:\Users\Mac\Desktop\rypacadapp\wt-assessments && npx firebase-tools deploy --only firestore:rules --project ryp-academy-app`
-Expected: "rules file firestore.rules compiled successfully", "Deploy complete!". Only staging's rules change.
+- [ ] **Step 4: Rules on staging, and the branch on GitHub (owner)**
+
+Run: `cd C:\Users\Mac\Desktop\rypacadapp\wt-assessments && npx firebase-tools deploy --only firestore:rules --project staging`
+Expected: "=== Deploying to 'ryp-academy-app'...", "rules file firestore.rules compiled successfully", "Deploy complete!". Only staging's rules change. Never drop `--project staging`: `.firebaserc`'s default is `rypacad`, so without it this would put the new rules on production ahead of the functions. If the first line names `rypacad`, stop and tell the agent.
 
 Run: `cd C:\Users\Mac\Desktop\rypacadapp\wt-assessments && git push origin assessments/v1.2`
 Expected: the branch on GitHub (no deploy: Railway's production service builds `main` only).
 
-- [ ] **Step 4: The test copy's Railway service (owner, Railway dashboard)**
+- [ ] **Step 5: The test copy's Railway service (owner, Railway dashboard)**
 
 1. New service from the same GitHub repo, branch `assessments/v1.2`, with the production portal service's root directory, build and start commands copied exactly.
-2. Variables: the six `REACT_APP_FIREBASE_*` values from Step 2's staging web app (never the `rypacad` ones), `REACT_APP_PORTAL_LIVE_DATA=true`, `REACT_APP_TEST_COPY=true`, `REACT_APP_CONTRACT_ENABLED` as production has it. Leave `REACT_APP_STRIPE_PUBLISHABLE_KEY` unset (no payments on the test copy). CRA bakes `REACT_APP_*` at build, so set them before the first deploy, or redeploy after.
+2. Variables: the six `REACT_APP_FIREBASE_*` values from Step 3's staging web app (never the `rypacad` ones), `REACT_APP_PORTAL_LIVE_DATA=true`, `REACT_APP_TEST_COPY=true`, `REACT_APP_CONTRACT_ENABLED` as production has it. Leave `REACT_APP_STRIPE_PUBLISHABLE_KEY` unset (no payments on the test copy). CRA bakes `REACT_APP_*` at build, so set them before the first deploy, or redeploy after.
 3. Generate a Railway domain for the service, then add that domain to `ryp-academy-app` > Authentication > Settings > Authorized domains.
 
-Expected: the domain serves the portal with a yellow "TEST COPY · FAKE ATHLETES" badge at the top right. A red "MISCONFIGURED" badge means the build has the production project id: fix the variables before anyone signs in.
+Expected: the domain serves the portal with a yellow "TEST COPY · FAKE ATHLETES" badge at the top right. A blank page whose browser console reads "Refusing to start: this is the test copy ..." means `REACT_APP_FIREBASE_PROJECT_ID` is not `ryp-academy-app` (with `rypacad`, the message names the LIVE database): the build never started Firebase; fix the variables and redeploy before anyone signs in.
 
-- [ ] **Step 5: Staff on the test copy, and the fake athletes (owner)**
+- [ ] **Step 6: Staff on the test copy, and the fake athletes (owner)**
 
 1. The owner and Phil each open the test copy once and sign in (they land on "not set up"). The data-collection coach does too, if they will rehearse.
 2. Copy each person's User UID from `ryp-academy-app` > Authentication > Users.
@@ -14363,47 +15243,319 @@ Expected: `Staging test copy (ryp-academy-app): 15 docs` and the list, `[dry-run
 Run: `cd C:\Users\Mac\Desktop\rypacadapp\wt-assessments && node scripts/seed-staging-assessments.mjs --yes --owner-uid <ownerUid> --phil-uid <philUid>`
 Expected: `Written: 15 docs to ryp-academy-app.` Add `--assessor-uid <dataCoachUid>` for the data-collection coach (16 docs).
 
-- [ ] **Step 6: Phil's dry run on his tablet (Phil, with the owner)**
+- [ ] **Step 7: Phil's dry run on his tablet (Phil, with the owner)**
 
-On the test copy: Phil's Assessments tab lists Ava and Ben "Mid-season eligible", Cal, Dev, Eli, Fay and Gus "Baseline due" (Gus said no to research), and Hal "Waiting on the family's research answer". Phil runs a timed wave of four (Cal, Dev, Eli, Fay), every station, on the tablet, then opens results. What he checks against the equipment (spec 11): what Smart2Move shows per CMJ and per 10/5 set (settings: RSImod typed or computed, 10/5 per set or every hop), the radar on the med ball, Parallax frame rate and composite scale, McGill inside the wave or as its own block, and the wave timing. Golf entry has no roster on staging (no sessions): open `/portal/assessments/golf/test-cal`. Settings changes made here stay on the test copy.
+On the test copy: Phil's Assessments tab lists Ava and Ben "Mid-season eligible", Cal, Dev, Eli, Fay and Gus "Baseline due" (Gus said no to research), and Hal "Waiting on the family's research answer". Phil runs a timed wave of four (Cal, Dev, Eli, Fay), every station, on the tablet, then opens results. What he checks against the equipment (spec 11): what Smart2Move shows per CMJ and per 10/5 set (settings: RSImod typed or computed, 10/5 per set or every hop), the radar on the med ball, Parallax frame rate and composite scale, McGill inside the wave or as its own block, and the wave timing; and Step 1's pain stop. Golf entry has no roster on staging (no sessions): open `/portal/assessments/golf/test-cal`. Settings changes made here stay on the test copy.
 
 To reset for another rehearsal:
 
 Run: `cd C:\Users\Mac\Desktop\rypacadapp\wt-assessments && node scripts/seed-staging-assessments.mjs --yes --wipe-assessments --owner-uid <ownerUid> --phil-uid <philUid>`
 Expected: `Wiped N assessment docs on ryp-academy-app.` then `Written: 15 docs to ryp-academy-app.`
 
-Code changes from the dry run go on `assessments/v1.2` (re-run Step 1, owner pushes the branch; the test copy redeploys).
+Code changes from the dry run or from Step 1's rulings go on `assessments/v1.2` (re-run Step 2, owner pushes the branch; the test copy redeploys).
 
-- [ ] **Step 7: Production - merge and gates (agent, then owner approval)**
+- [ ] **Step 8: Production - merge and gates (agent, then owner approval)**
 
-After Phil's sign-off and the owner's go:
+After Phil's sign-off, every Step 1 ruling answered, and the owner's go:
 
 Run: `cd C:\Users\Mac\Desktop\rypacadapp\rypacad && git checkout develop && git merge --no-ff assessments/v1.2`
-Expected: a merge commit on `develop`, no conflicts (if `develop` moved, resolve and re-run Step 1's gates in the main checkout).
+Expected: a merge commit on `develop`, no conflicts (if `develop` moved, resolve and re-run Step 2's gates in the main checkout).
 
-Re-run every Step 1 command in `C:\Users\Mac\Desktop\rypacadapp\rypacad`. Expected: the same results.
+Re-run every Step 2 command in `C:\Users\Mac\Desktop\rypacadapp\rypacad`. Expected: the same results.
 
 Before going live, check the dependencies (spec 10): the data-collection coach has a staff login; golf coaches have logins. Without the staff-audit fix for coach athlete reads, a golf coach's clubhead screen and results show the name from the roster and "the athlete record could not be read" for maturity; entry still works.
 
-- [ ] **Step 8: Production - functions, then portal, then rules, back to back (owner)**
+- [ ] **Step 9: Production - functions, then rules, then portal, back to back (owner)**
 
-The order differs from the spec's (functions, rules, portal) on purpose: the live bundle still reads `athletes/{id}/diagnostics` on athlete detail, which the new rules refuse, so rules before the portal would put an error card on family screens; the new portal tolerates the old rules for the few minutes between (the admin "Baseline due" rows wait for the rules; a family's research answer that fails offers "Skip for now"; the Assessments screens load once the rules land). Production holds 0 diagnostics docs (checked 2026-10-14), so nothing is lost.
+The spec 10 order, with no broken window: the rules keep the diagnostics reads (read-only, Task 9), so the live bundle - whose athlete home and admin dashboard read diagnostics beside everything else - keeps loading between the rules deploy and the portal push, and every read the new portal makes is granted by the time it is live. Production holds 0 diagnostics docs (checked 2026-10-14), so nothing is lost.
 
 Run: `cd C:\Users\Mac\Desktop\rypacadapp\rypacad && npx firebase-tools deploy --only functions:createFamily,functions:addAthletes,functions:claimInvite --project rypacad`
-Expected: "Deploy complete!" for the three functions (createFamily now stores consents and research answers).
+Expected: "Deploy complete!" for the three functions (createFamily now stores consents and research answers; the live bundle's sign-up sends none and is unaffected).
+
+Run: `cd C:\Users\Mac\Desktop\rypacadapp\rypacad && npx firebase-tools deploy --only firestore:rules --project rypacad`
+Expected: "Deploy complete!". The live portal still loads every screen.
 
 Run: `cd C:\Users\Mac\Desktop\rypacadapp\rypacad && git push origin develop:main`
 Expected: Railway builds and deploys the portal; wait for the deploy to finish.
 
-Run: `cd C:\Users\Mac\Desktop\rypacadapp\rypacad && npx firebase-tools deploy --only firestore:rules --project rypacad`
-Expected: "Deploy complete!". Run it as soon as the portal deploy is live.
+Then Task 27 removes the diagnostics read rules.
 
-- [ ] **Step 9: Production checks (owner)**
+- [ ] **Step 10: Production checks (owner)**
 
 1. Owner: Admin shows the Assessments card; Assessments lists every academy athlete with "Research: not answered" until families answer; Staff & Roles shows the Assessments switch on coach and mental rows - switch it on for the data-collection coach.
 2. Phil: his tab bar shows Assessments (no Capture); Settings shows protocol v1.2 defaults ("nothing has been saved yet").
 3. A family sign-in (the owner's own test household, never a real family's account): "One quick question about research" appears once; after Save my answer the home opens and it does not ask again.
 4. No assessment data exists until Phil's first wave on Nov 3; no purge or backfill of real families' records is part of this release.
 
-If the portal must be rolled back: the owner reverts the merge on `develop` (`git revert -m 1 <mergeCommit>`), deploys the reverted rules first (`cd C:\Users\Mac\Desktop\rypacadapp\rypacad && npx firebase-tools deploy --only firestore:rules --project rypacad`; the new portal still live tolerates them), then pushes `develop:main`. The functions can stay: the old bundle never sends a research answer and ignores the stored consents.
+If the portal must be rolled back: the owner reverts the merge on `develop` (`git revert -m 1 <mergeCommit>`), pushes `develop:main` first (the old bundle runs on the new rules: the diagnostics reads are still granted), then deploys the reverted rules (`cd C:\Users\Mac\Desktop\rypacadapp\rypacad && npx firebase-tools deploy --only firestore:rules --project rypacad`). The functions can stay: the old bundle never sends a research answer and ignores the stored consents.
 
+---
+
+### Task 27: After the portal is live - remove the diagnostics read rules
+
+The follow-up Task 9 left for after the release (spec 8, spec 10 order): once the new portal is live no bundle reads diagnostics, so the read-only grants go. **Start only after the owner confirms Task 26 Step 8 is done and the new portal is live.** Work on a new branch from `develop` in the main checkout (`assessments/v1.2` is merged by then): a commit on `develop` before the release would deploy these rules too early.
+
+**Files:**
+- Modify: `firestore.rules` (the read-only per-athlete diagnostics match ~394-430; the diagnostics collection-group read ~477-510; one comment ~1590)
+- Modify: `scripts/rules-probes/assessments.mjs` (`taskDiagnosticsReadOnly` becomes `taskDiagnosticsGone`), `scripts/verify-rules.mjs` (import, runPass)
+- Modify: `docs/portal/DATA-MODEL.md` (the "removed 2026-10-14" note)
+- Test: `scripts/verify-rules.mjs` (emulator, both passes)
+
+**Interfaces:**
+- Consumes: `taskDiagnosticsReadOnly`, `groupListAs`, `tok`, `uids`, `ATH` in `scripts/rules-probes/assessments.mjs` (Tasks 4, 9); the read-only diagnostics rules of Task 9.
+- Produces: `taskDiagnosticsGone()`; no diagnostics grant left in `firestore.rules`.
+
+- [ ] **Step 1: The branch**
+
+Run: `cd C:\Users\Mac\Desktop\rypacadapp\rypacad && git checkout develop && git checkout -b assessments/diagnostics-rules`
+Expected: "Switched to a new branch 'assessments/diagnostics-rules'".
+
+- [ ] **Step 2: Write the failing probe**
+
+In `scripts/rules-probes/assessments.mjs`, replace:
+
+```js
+// Assessments spec 8: Diagnostic Capture is gone (production held 0 docs on 2026-10-14). Its rules stay
+// read-only for this release - a portal bundle from before it reads diagnostics beside everything else
+// while the rules deploy first - and plan Task 27 removes the reads after the portal is live.
+export async function taskDiagnosticsReadOnly() {
+  console.log('Diagnostics: read-only for this release (Diagnostic Capture removed)');
+  const owner = tok(uids.owner);
+  await seed('users', uids.owner, { role: 'owner' });
+  await seed('athletes', ATH, { name: 'Probe Athlete', householdId: 'hh', dob: '2012-04-10', contractMinutes: null, coachId: 'coach-probe', packageId: 't-6' });
+  await seed(`athletes/${ATH}/diagnostics`, 'old-1', { athleteId: ATH, capturedBy: 'coach-probe', status: 'published', values: {}, notes: null });
+  try {
+    for (const [who, auth] of [['the owner', owner], ['ops', t.ops], ['the assigned coach', t.coach]]) {
+      expect(`${who}: a capture still reads (an old bundle keeps loading)`, await call('GET', `/athletes/${ATH}/diagnostics/old-1`, null, auth).then(status), 200);
+    }
+    expect('the owner: the collection-group list still reads', await groupListAs(owner, 'diagnostics'), 200);
+    expect('the assigned coach: a new capture refused', await createAs(t.coach, `athletes/${ATH}/diagnostics`, 'new-1',
+      { athleteId: ATH, capturedBy: 'coach-probe', status: 'draft', values: {}, notes: null }, ['capturedAt', 'updatedAt']), 403);
+  } finally {
+    await del(`athletes/${ATH}/diagnostics`, 'old-1');
+    await del(`athletes/${ATH}/diagnostics`, 'new-1');
+    await del('athletes', ATH);
+    await del('users', uids.owner);
+  }
+}
+```
+
+with:
+
+```js
+// Assessments spec 8: Diagnostic Capture is gone, and every diagnostics grant with it (production held 0 docs on 2026-10-14).
+export async function taskDiagnosticsGone() {
+  console.log('Diagnostics: no client reads or writes any more (Diagnostic Capture removed)');
+  const owner = tok(uids.owner);
+  await seed('users', uids.owner, { role: 'owner' });
+  await seed('athletes', ATH, { name: 'Probe Athlete', householdId: 'hh', dob: '2012-04-10', contractMinutes: null, coachId: 'coach-probe', packageId: 't-6' });
+  await seed(`athletes/${ATH}/diagnostics`, 'old-1', { athleteId: ATH, capturedBy: 'coach-probe', status: 'published', values: {}, notes: null });
+  try {
+    for (const [who, auth] of [['the owner', owner], ['ops', t.ops], ['the assigned coach', t.coach], ['the parent', t.parent]]) {
+      expect(`${who}: diagnostics read refused`, await call('GET', `/athletes/${ATH}/diagnostics/old-1`, null, auth).then(status), 403);
+    }
+    expect('the owner: diagnostics collection-group list refused', await groupListAs(owner, 'diagnostics'), 403);
+    expect('the assigned coach: a new capture refused', await createAs(t.coach, `athletes/${ATH}/diagnostics`, 'new-1',
+      { athleteId: ATH, capturedBy: 'coach-probe', status: 'draft', values: {}, notes: null }, ['capturedAt', 'updatedAt']), 403);
+  } finally {
+    await del(`athletes/${ATH}/diagnostics`, 'old-1');
+    await del('athletes', ATH);
+    await del('users', uids.owner);
+  }
+}
+```
+
+In `scripts/verify-rules.mjs`, replace:
+
+```js
+import { taskAssessments, taskDiagnosticsReadOnly } from './rules-probes/assessments.mjs';
+```
+
+with:
+
+```js
+import { taskAssessments, taskDiagnosticsGone } from './rules-probes/assessments.mjs';
+```
+
+and replace:
+
+```js
+    await taskAssessments(); await taskDiagnosticsReadOnly(); await taskResearch();
+```
+
+with:
+
+```js
+    await taskAssessments(); await taskDiagnosticsGone(); await taskResearch();
+```
+
+Run: `npx firebase-tools emulators:exec --only firestore --project rypacad "node --env-file=scripts/emulator.env scripts/verify-rules.mjs"`
+Expected: FAIL - `the owner: diagnostics read refused -> 200 (wanted 403)` and the other read lines.
+
+- [ ] **Step 3: Remove the diagnostics rules and the data-model note**
+
+In `firestore.rules`, delete the read-only per-athlete diagnostics match:
+
+In `firestore.rules`, replace:
+
+```
+
+      // ---- athletes/{id}/diagnostics/{captureId} -----------------------
+      // READ-ONLY since 2026-10-14: Diagnostic Capture was removed
+      // (assessments spec 8; production held 0 docs) and no client writes
+      // a capture any more. The read grant stays for this release only: a
+      // portal bundle from before it reads diagnostics on the athlete home
+      // and the admin dashboard beside everything else, and the rules
+      // deploy ahead of the portal (spec 10). The follow-up after the
+      // portal is live (assessments plan Task 27) removes this block and
+      // the collection-group read below.
+      // Sprint 10 (contract v1.8, C "Diagnostics persistence"). Shape:
+      // { athleteId, capturedBy (uid), capturedAt, updatedAt,
+      //   status: 'draft'|'published', values: map, notes: string|null }.
+      // Writers: the assigned coach, any specialist (me().get('specialistId',
+      // null) != null — Sprint 9's null-safe pattern, reused verbatim), or
+      // mental/ops/owner — the SAME set that already writes tournamentResults
+      // and reads athletes academy-wide. Readers: the athlete's own user and
+      // the household parent see PUBLISHED captures only (never a draft mid-
+      // capture); staff (the same writer set) see everything, drafts
+      // included, so a coach can resume their own in-progress capture.
+      //
+      // No null-resource read branch is needed here (unlike bookings/
+      // contractLogs' `{athleteId}_{date}`-style deterministic-id probes):
+      // captureId is an auto-id, never guessed by a client transaction —
+      // saveDraft's upsert finds an existing open draft via a QUERY
+      // (hooks/live.js), not a get() on a constructed id, so `resource` is
+      // never null for a write this rule evaluates.
+      match /diagnostics/{captureId} {
+        function diagnosticStaffOk() {
+          return me().role in ['mental', 'ops', 'owner']
+            || (me().role == 'coach' && athleteData(athleteId).coachId == request.auth.uid)
+            || me().get('specialistId', null) != null;
+        }
+        allow read: if signedIn() && (
+          diagnosticStaffOk()
+          || (me().role == 'athlete' && me().athleteId == athleteId && resource.data.status == 'published')
+          || (me().role == 'parent'
+              && athleteData(athleteId).householdId == me().householdId
+              && resource.data.status == 'published')
+        );
+      }
+
+      // ---- athletes/{id}/private/medical -------------------------------
+```
+
+with:
+
+```
+      // ---- athletes/{id}/private/medical -------------------------------
+```
+
+then, in `firestore.rules`, replace:
+
+```
+    // ---- diagnostics collection-group read ------------------------------
+    // Read-only until assessments plan Task 27 removes it with the
+    // per-athlete diagnostics match (Diagnostic Capture removed 2026-10-14).
+    // Sprint 10 (contract v1.8, C + D): the Admin "athletes with no
+    // published diagnostic" list is one collectionGroup('diagnostics')
+    // query rather than an N-athlete fan-out, and Firestore requires a
+    // rule matched via the {path=**} recursive wildcard for a
+    // collection-group query to be allowed at all (the nested
+    // /athletes/{athleteId}/diagnostics/{captureId} rule above governs
+    // normal per-athlete reads/writes but does NOT, by itself, license a
+    // cross-athlete group query).
+    //
+    // Deliberately narrower than a literal reading of the pin's "coach/
+    // mental/ops/owner/specialists" list: mental/ops/owner and any
+    // specialist are academy-wide by the SAME precedent as the athletes
+    // matrix's v1.7.1 specialist widening, so they read unconditionally.
+    // A plain coach does NOT get an unconditional academy-wide grant here —
+    // that would let a group query return every OTHER coach's assigned
+    // athletes' diagnostics too, which is exactly the cross-family leak this
+    // file's own non-negotiable ("assigned athletes only, by assignment,
+    // never by role") exists to prevent. Instead a coach's read is proven
+    // per-document the same way the bookings/contractLogs coach clauses
+    // already do it: athleteData(resource.data.athleteId).coachId == caller,
+    // which the diagnostics shape guarantees resource.data.athleteId always
+    // carries. Flagged in the routing report as a deliberate tightening
+    // beyond the pin's literal wording, not an oversight.
+    match /{path=**}/diagnostics/{captureId} {
+      allow read: if signedIn() && (
+        me().role in ['mental', 'ops', 'owner']
+        || me().get('specialistId', null) != null
+        || (me().role == 'coach' && athleteData(resource.data.athleteId).coachId == request.auth.uid)
+      );
+    }
+
+    // ---- assessments collection-group reads (2026-10-14) ---------------
+```
+
+with:
+
+```
+    // ---- assessments collection-group reads (2026-10-14) ---------------
+```
+
+then replace:
+
+```
+      // verified against the emulator for exactly this shape - the coach-
+      // roster and diagnostics collection-group clauses elsewhere in this
+      // file). ops/owner read academy-wide - the same staff-sees-everything
+      // precedent bookings/athletes/diagnostics/contractLogs all already
+      // grant, extended here so a support call can see a family's grace
+```
+
+with:
+
+```
+      // verified against the emulator for exactly this shape - the coach-
+      // roster clauses elsewhere in this file). ops/owner read academy-wide -
+      // the same staff-sees-everything precedent bookings/athletes/
+      // contractLogs all already grant, extended here so a support call can
+      // see a family's grace
+```
+
+In `docs/portal/DATA-MODEL.md`, replace:
+
+```
+### `athletes/{athleteId}/diagnostics/{captureId}` (removed 2026-10-14)
+
+Diagnostic Capture was removed with the assessments release (assessments spec 8; production held 0 docs on 2026-10-14). The portal no longer reads or writes a capture. `firestore.rules` keeps a read-only grant (per athlete and collection group) so a bundle from before the release keeps loading while the rules deploy first; the follow-up after the portal is live (assessments plan Task 27) removes it and this note.
+
+### `staffInvites/{id}` (contract v1.8, Sprint 10)
+```
+
+with:
+
+```
+### `staffInvites/{id}` (contract v1.8, Sprint 10)
+```
+
+- [ ] **Step 4: Run the probe to verify it passes**
+
+Run: `npx firebase-tools emulators:exec --only firestore --project rypacad "node --env-file=scripts/emulator.env scripts/verify-rules.mjs"`
+Expected: `ALL PASS (both passes)`, including every `Diagnostics:` line.
+
+Run: `git grep -n "diagnostics" -- firestore.rules`
+Expected: no output.
+
+- [ ] **Step 5: Commit, then the owner deploys the rules**
+
+```bash
+git add firestore.rules scripts/rules-probes/assessments.mjs scripts/verify-rules.mjs docs/portal/DATA-MODEL.md
+git commit -m "chore(rules): remove the diagnostics read grants
+
+The assessments portal is live and no bundle reads diagnostics any more;
+the read-only grants kept for the release go (production held 0 docs).
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
+```
+
+Hand the owner (in the final message; the agent never pushes or deploys):
+
+Run: `cd C:\Users\Mac\Desktop\rypacadapp\rypacad && git checkout develop && git merge --no-ff assessments/diagnostics-rules && npx firebase-tools deploy --only firestore:rules --project rypacad`
+Expected: "Deploy complete!". The athlete home and the admin dashboard still load (the new portal never reads diagnostics).
+
+Run: `cd C:\Users\Mac\Desktop\rypacadapp\rypacad && git push origin develop:main`
+Expected: Railway redeploys the same portal (no portal change in this commit).
