@@ -15836,3 +15836,13 @@ Expected: "Deploy complete!". The athlete home and the admin dashboard still loa
 
 Run: `cd C:\Users\Mac\Desktop\rypacadapp\rypacad && git push origin develop && git push origin develop:main`
 Expected: staging, then production (the second push deploys it), rebuild the same portal: this commit changes no portal code.
+
+---
+
+## Addenda from the final plan check (2026-10-15) — apply during the named tasks
+
+1. **Task 25 — the Households card count.** `frontend/src/portal/components/HouseholdsCard.js` (count at ~line 59, fed by `liveHouseholdsDirectory` in `frontend/src/portal/hooks/billing.js` ~line 246) must also leave `test: true` households out of "Households · N", or label the row "Test" and exclude it from N. Add a test in `HouseholdsCard.test.js` that a directory with one test household and two real ones shows "Households · 2". This is what Task 27 Step 9 checks ("leaves the test family out of every count").
+2. **Task 25 — the membership export.** In `scripts/export-memberships.mjs`, skip households with `test === true` when building rows, and add a `scripts/test/export-memberships.test.mjs` case with one test and one real household asserting only the real one is exported. Otherwise reword the File Structure and DATA-MODEL lines that claim exports skip test households.
+3. **Task 27 Step 4 — the post-deploy check.** Check a family home with an existing real-family login the owner can use (e.g. the owner's own parent test login if one exists, otherwise skip the family-home check), not the test family, which is only created in Step 6.
+4. **Task 27 Steps 1, 4 and 8 — Feedback rides along.** `develop` already carries the Feedback button (`8aa0228`, `47aac2f`, deny-only `feedbackLimits` rules). The Step 4 rules deploy and the Step 8 `develop:main` push include it; it stays hidden in production until `REACT_APP_FEEDBACK=true` is set there. Step 3's `grep "^-\s*allow "` only catches deleted allow lines; the full two-pass rules probe in Step 3 is the real guard against a narrowed rule.
+5. **Task 26 nit.** Default the signature date with the Chicago date helper the repo uses (`lib.todayISO()`-style Chicago date), not `new Date().toISOString()`.
