@@ -7,8 +7,10 @@ import { callSubmitFeedback } from '../hooks/callables';
 import { captureScreenshot } from '../hooks/feedbackCapture';
 import {
   FEEDBACK_GAP,
+  FEEDBACK_SPACE_ATTR,
   FEEDBACK_UI_ATTR,
   cleanPage,
+  feedbackEnabled,
   feedbackPayload,
   measureLayout,
   shouldShowFeedback,
@@ -23,6 +25,22 @@ export const THANKS = 'Thanks - sent to the RYP team.';
 const THANKS_MS = 4000;
 const UI = { [FEEDBACK_UI_ATTR]: '' };
 const PRINT_CSS = `@media print { [${FEEDBACK_UI_ATTR}] { display: none !important; } }`;
+// The button's bottom edge is FEEDBACK_GAP over a pinned footer's top (the
+// scroll area's bottom), or FEEDBACK_GAP + 4 over the safe area with none.
+const SPACE_OVER_FOOTER = `${TOUCH_MIN + 2 * FEEDBACK_GAP}px`;
+const SPACE_OVER_EDGE = `calc(${TOUCH_MIN + 2 * FEEDBACK_GAP + 4}px + env(safe-area-inset-bottom, 0px))`;
+
+/**
+ * The style rule that sizes every top-level frame's FeedbackSpace
+ * (PhoneFrame.js) while the button shows: the button's height and a gap on
+ * each side, so a screen's last row can scroll clear of it (UX review
+ * 2026-10-15). It mounts and unmounts with the button, so a screen without
+ * the button keeps no extra room. Screen media only: printing has no button.
+ */
+export function feedbackSpaceCss(footerClearance) {
+  const height = footerClearance > 0 ? SPACE_OVER_FOOTER : SPACE_OVER_EDGE;
+  return `@media screen { [${FEEDBACK_SPACE_ATTR}] { height: ${height}; } }`;
+}
 // Inside the phone column on a wide screen (PhoneFrame centres it at
 // BARE_MAX_WIDTH), at the viewport's edge on a phone.
 const RIGHT = `max(${FEEDBACK_GAP}px, calc((100vw - ${BARE_MAX_WIDTH}px) / 2 + ${FEEDBACK_GAP}px))`;
@@ -125,7 +143,7 @@ function FeedbackControl({ pathname, search }) {
 
   return (
     <>
-      <style {...UI}>{PRINT_CSS}</style>
+      <style {...UI}>{`${PRINT_CSS}\n${feedbackSpaceCss(layout.bottom)}`}</style>
       {phase !== 'open' && !hidden ? (
         <button
           {...UI}
@@ -195,7 +213,9 @@ function FeedbackControl({ pathname, search }) {
  * docs/portal/plans/2026-10-15-feedback/00-spec.md), mounted ONCE in
  * PortalRoutes, beside the routes. Every signed-in, provisioned role gets
  * it on every screen except sign-in, sign-up and not-provisioned; seed
- * mode (the review harness) never does.
+ * mode (the review harness) never does. Nobody does until
+ * REACT_APP_FEEDBACK=true (hooks/feedback.js feedbackEnabled): the switch
+ * stays off until the function and its Slack settings are live.
  *
  * It renders into <body>, outside #root, so the screenshot - a picture of
  * #root - can never contain it, and a fixed position that no screen's
@@ -210,6 +230,6 @@ export default function FeedbackButton() {
   const live = isLive();
   const { user, provisioned, loading } = useAuthSession(live ? undefined : { variant: 'idle' });
   const { pathname, search } = useLocation();
-  if (!shouldShowFeedback({ live, loading, user, provisioned, pathname })) return null;
+  if (!shouldShowFeedback({ enabled: feedbackEnabled(), live, loading, user, provisioned, pathname })) return null;
   return createPortal(<FeedbackControl pathname={pathname} search={search} />, document.body);
 }

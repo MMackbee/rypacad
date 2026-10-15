@@ -1,7 +1,8 @@
 import React, { act } from 'react';
 import { createRoot } from 'react-dom/client';
 import { MemoryRouter } from 'react-router-dom';
-import FeedbackButton, { THANKS } from './FeedbackButton';
+import FeedbackButton, { THANKS, feedbackSpaceCss } from './FeedbackButton';
+import PhoneFrame, { FrameEmbedContext } from './PhoneFrame';
 import { NOTE_LABEL, NO_SHOT } from './FeedbackSheet';
 import { captureScreenshot } from '../hooks/feedbackCapture';
 import { callSubmitFeedback } from '../hooks/callables';
@@ -21,13 +22,14 @@ jest.mock('../hooks/callables', () => ({ callSubmitFeedback: jest.fn() }));
 const SHOT = { dataUrl: 'data:image/jpeg;base64,/9j/AAAA', width: 1170, height: 2532 };
 const tick = () => act(async () => { await new Promise((resolve) => { setTimeout(resolve, 30); }); });
 
-async function mount(path = '/portal/family') {
+async function mount(path = '/portal/family', screen = null) {
   const container = document.createElement('div');
   document.body.appendChild(container);
   const root = createRoot(container);
   await act(async () => {
     root.render(
       <MemoryRouter initialEntries={[path]}>
+        {screen}
         <FeedbackButton />
       </MemoryRouter>
     );
@@ -60,6 +62,7 @@ async function mount(path = '/portal/family') {
 }
 
 beforeEach(() => {
+  process.env.REACT_APP_FEEDBACK = 'true';
   captureScreenshot.mockReset();
   callSubmitFeedback.mockReset();
   captureScreenshot.mockResolvedValue(SHOT);
@@ -67,6 +70,8 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  delete process.env.REACT_APP_FEEDBACK;
+  document.getElementById('root')?.remove();
   mockLive.value = true;
   mockSession.value = { user: { uid: 'u1', role: 'parent' }, provisioned: true, loading: false };
   document.body.querySelectorAll('[data-portal-frame-footer], [data-portal-overlay]').forEach((el) => el.remove());
@@ -83,6 +88,14 @@ describe('who sees the button', () => {
     expect(r.feedback().hasAttribute('data-feedback-ui')).toBe(true);
     await r.unmount();
     expect(r.feedback()).toBeNull();
+  });
+
+  test('nobody while its switch (REACT_APP_FEEDBACK) is off', async () => {
+    delete process.env.REACT_APP_FEEDBACK;
+    const r = await mount('/portal/family');
+    expect(r.feedback()).toBeNull();
+    expect(document.body.querySelector('style[data-feedback-ui]')).toBeNull();
+    await r.unmount();
   });
 
   test.each([
@@ -132,6 +145,57 @@ describe('where it sits', () => {
     const r2 = await mount();
     expect(r2.feedback().style.bottom).toBe('162px');
     await r2.unmount();
+  });
+
+  const styleText = () => [...document.body.querySelectorAll('style[data-feedback-ui]')].map((s) => s.textContent).join('');
+
+  test("keeps room at the end of the screen's scroll, so the last row scrolls clear of it", async () => {
+    // The UX review's case: the coach roster's last athlete, IN/OUT at the right edge, above the tab bar.
+    const r = await mount('/portal/roster', (
+      <PhoneFrame bare footer={<nav>tabs</nav>}>
+        <div>last athlete IN OUT</div>
+      </PhoneFrame>
+    ));
+    const space = document.body.querySelector('[data-portal-feedback-space]');
+    expect(space).not.toBeNull();
+    // The last thing in the scroll area, after the screen's own content.
+    expect(space.previousElementSibling.textContent).toBe('last athlete IN OUT');
+    expect(space.getAttribute('aria-hidden')).toBe('true');
+    // jsdom lays nothing out, so the footer is placed by hand: the button rides 12px over it and the room is
+    // the button's 44px plus 12px on each side.
+    const footer = document.body.querySelector('[data-portal-frame-footer]');
+    footer.getBoundingClientRect = () => ({ top: window.innerHeight - 78, bottom: window.innerHeight, height: 78 });
+    await act(async () => { footer.appendChild(document.createElement('span')); });
+    await tick();
+    expect(r.feedback().style.bottom).toBe('90px');
+    expect(styleText()).toContain('@media screen { [data-portal-feedback-space] { height: 68px; } }');
+    await r.unmount();
+    // Gone with the button: a screen without it keeps no extra room.
+    expect(styleText()).toBe('');
+  });
+
+  test('the room with no footer clears the safe area too', () => {
+    expect(feedbackSpaceCss(0)).toBe(
+      '@media screen { [data-portal-feedback-space] { height: calc(72px + env(safe-area-inset-bottom, 0px)); } }'
+    );
+    expect(feedbackSpaceCss(78)).toContain('height: 68px;');
+  });
+
+  test("an embedded screen (the walkthrough) leaves the room and the footer mark to its host's frame", async () => {
+    const r = await mount('/portal/welcome', (
+      <PhoneFrame bare footer={<button type="button">Continue</button>}>
+        <FrameEmbedContext.Provider value="fill">
+          <PhoneFrame bare footer={<nav>inner tabs</nav>}>
+            <div>practice screen</div>
+          </PhoneFrame>
+        </FrameEmbedContext.Provider>
+      </PhoneFrame>
+    ));
+    const footers = document.body.querySelectorAll('[data-portal-frame-footer]');
+    expect(footers).toHaveLength(1);
+    expect(footers[0].textContent).toBe('Continue');
+    expect(document.body.querySelectorAll('[data-portal-feedback-space]')).toHaveLength(1);
+    await r.unmount();
   });
 
   test("steps aside while one of the screen's own sheets is open, and comes back", async () => {
@@ -230,11 +294,43 @@ describe('the panel', () => {
     expect(callSubmitFeedback).not.toHaveBeenCalled();
     await r.unmount();
   });
+
+  test('with a note typed, Escape and a tap on the dimmed page keep it - only Cancel throws the note away', async () => {
+    const r = await mount();
+    await r.click(r.feedback());
+    await r.type('Half a thought');
+    await r.key('Escape');
+    expect(r.dialog()).not.toBeNull();
+    expect(r.note().value).toBe('Half a thought');
+    // A tap on the dimmed page: focus would drop to <body>; it goes back into the panel instead.
+    document.activeElement.blur();
+    await r.click(r.dialog().parentElement);
+    expect(r.dialog()).not.toBeNull();
+    expect(r.dialog().contains(document.activeElement)).toBe(true);
+    await r.click(r.byText('Cancel'));
+    expect(r.dialog()).toBeNull();
+    expect(callSubmitFeedback).not.toHaveBeenCalled();
+    await r.unmount();
+  });
+
+  test('the page behind is inert while the panel is open', async () => {
+    const page = document.createElement('div');
+    page.id = 'root';
+    document.body.appendChild(page);
+    const r = await mount();
+    expect(page.hasAttribute('inert')).toBe(false);
+    await r.click(r.feedback());
+    expect(page.hasAttribute('inert')).toBe(true);
+    await r.click(r.byText('Cancel'));
+    expect(page.hasAttribute('inert')).toBe(false);
+    expect(document.activeElement).toBe(r.feedback());
+    await r.unmount();
+  });
 });
 
 describe('what it sends', () => {
   test('with the screenshot: the image, the note, the page and the device - never who the sender is', async () => {
-    const r = await mount('/portal/billing?paid=1&session_id=cs_1&token=abc');
+    const r = await mount('/portal/billing?paid=1&session_id=cs_1&cs=cs_2&token=abc');
     await r.click(r.feedback());
     await r.type('  The Pay button spun forever.  ');
     await r.click(r.byText('Send'));
@@ -242,7 +338,7 @@ describe('what it sends', () => {
     const payload = callSubmitFeedback.mock.calls[0][0];
     expect(payload).toEqual({
       note: 'The Pay button spun forever.',
-      page: '/portal/billing?paid=1&session_id=cs_1',
+      page: '/portal/billing?paid=1',
       viewport: expect.stringMatching(/^\d+x\d+/),
       userAgent: expect.any(String),
       appVersion: 'dev',

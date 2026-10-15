@@ -1,5 +1,6 @@
 import React, { createContext, useContext } from 'react';
 import { color, font, glow, radius } from '../tokens';
+import { FEEDBACK_SPACE_ATTR, FRAME_FOOTER_ATTR } from '../hooks/feedback';
 
 /**
  * Global chrome — 390pt x 812px. Content area scrolls; header and bottom tab
@@ -128,11 +129,34 @@ export default function PhoneFrame({
         }}
       >
         {children}
+        {embed ? null : <FeedbackSpace />}
       </div>
-      {/* data-portal-frame-footer: the Feedback button (FeedbackButton.js) sits above this, whatever it holds. */}
-      {footer ? <div data-portal-frame-footer="" style={{ flex: 'none' }}>{footer}</div> : null}
+      {footer ? <div {...footerMark(embed)} style={{ flex: 'none' }}>{footer}</div> : null}
     </div>
   );
+}
+
+/**
+ * The Feedback button (FeedbackButton.js) floats above the footer of the
+ * screen's outermost frame, so only that frame marks its footer and keeps
+ * room for the button. An embedded frame (the walkthrough's real screens)
+ * sits inside a host frame that already does both: its own footer is not
+ * pinned to the screen's bottom, and the host's room keeps the button clear
+ * of it.
+ */
+function footerMark(embed) {
+  return embed ? {} : { [FRAME_FOOTER_ATTR]: '' };
+}
+
+/**
+ * The room at the end of the scroll area that lets the last row scroll
+ * clear of the Feedback button (UX review 2026-10-15: the last athlete's
+ * IN/OUT on the coach roster sat under it). No height of its own: the
+ * button's style rule sizes it while the button shows, and nothing else
+ * ever does.
+ */
+function FeedbackSpace() {
+  return <div aria-hidden="true" {...{ [FEEDBACK_SPACE_ATTR]: '' }} style={{ flex: 'none' }} />;
 }
 
 /** Time at left, placeholder glyphs at right. Cosmetic — review harness only. */

@@ -312,6 +312,18 @@ describe('/portal/admin/scholarships is the owner alone (2026-10-01)', () => {
 
 describe('the Feedback button (2026-10-15): mounted once beside the routes', () => {
   const buttons = () => document.body.querySelectorAll('button[aria-label="Send feedback"]');
+  beforeEach(() => { process.env.REACT_APP_FEEDBACK = 'true'; });
+  afterEach(() => { delete process.env.REACT_APP_FEEDBACK; });
+
+  test('none for anybody while its switch is off', async () => {
+    delete process.env.REACT_APP_FEEDBACK;
+    mockLive.value = true;
+    mockUser.value = { uid: 'u2', role: 'parent' };
+    const r = await mount('/portal/family');
+    expect(r.container.textContent).toBe('FAMILY HOME');
+    expect(buttons()).toHaveLength(0);
+    await r.unmount();
+  });
 
   test('a signed-in account gets exactly one, outside the screen it sits over', async () => {
     mockLive.value = true;

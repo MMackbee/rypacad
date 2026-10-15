@@ -3,6 +3,7 @@ import {
   appVersionOf,
   canSendFeedback,
   cleanPage,
+  feedbackEnabled,
   feedbackPayload,
   measureLayout,
   sendErrorMessage,
@@ -12,9 +13,26 @@ import {
 
 /* The Feedback button's plain helpers (2026-10-15). */
 
-const signedIn = { live: true, loading: false, user: { uid: 'u1', role: 'coach' }, provisioned: true };
+const signedIn = { enabled: true, live: true, loading: false, user: { uid: 'u1', role: 'coach' }, provisioned: true };
+
+describe('feedbackEnabled: off until REACT_APP_FEEDBACK is exactly true, read at call time', () => {
+  afterEach(() => { delete process.env.REACT_APP_FEEDBACK; });
+  test('off by default and for anything but true', () => {
+    delete process.env.REACT_APP_FEEDBACK;
+    expect(feedbackEnabled()).toBe(false);
+    for (const v of ['', '1', 'TRUE', 'yes', 'false']) {
+      process.env.REACT_APP_FEEDBACK = v;
+      expect(feedbackEnabled()).toBe(false);
+    }
+    process.env.REACT_APP_FEEDBACK = 'true';
+    expect(feedbackEnabled()).toBe(true);
+  });
+});
 
 describe('shouldShowFeedback', () => {
+  test('nowhere while the switch is off', () => {
+    expect(shouldShowFeedback({ ...signedIn, enabled: false, pathname: '/portal/family' })).toBe(false);
+  });
   test('every signed-in, provisioned screen', () => {
     for (const pathname of ['/portal/family', '/portal/home', '/portal/admin/scholarships', '/portal/athlete/a1', '/portal/register', '/portal/welcome']) {
       expect(shouldShowFeedback({ ...signedIn, pathname })).toBe(true);
@@ -37,6 +55,10 @@ describe('cleanPage', () => {
       .toBe('/portal/signin?mode=verifyEmail&lang=en');
     expect(cleanPage('/portal/family', '')).toBe('/portal/family');
     expect(cleanPage('', '')).toBe('/');
+  });
+  test('the Stripe Checkout Session id the dashboards read after a payment is dropped', () => {
+    expect(cleanPage('/portal/family', '?paid=a1&cs=cs_live_1')).toBe('/portal/family?paid=a1');
+    expect(cleanPage('/portal/billing', '?session_id=cs_test_1&tab=2')).toBe('/portal/billing?tab=2');
   });
   test('300 characters at most', () => {
     expect(cleanPage(`/portal/${'a'.repeat(400)}`, '')).toHaveLength(300);
@@ -99,6 +121,14 @@ describe('measureLayout', () => {
       el({ top: 0, bottom: 0, height: 0 })]), win).bottom).toBe(78);
     expect(measureLayout(doc([el({ top: 100, bottom: 800, height: 700 })]), win).bottom).toBe(480);
     expect(measureLayout(doc([]), win)).toEqual({ bottom: 0, covered: false });
+  });
+  test('only a footer pinned to the bottom of the screen counts, not one scrolled into the middle', () => {
+    expect(measureLayout(doc([el({ top: 300, bottom: 378, height: 78 })]), win).bottom).toBe(0);
+    expect(measureLayout(doc([el({ top: 300, bottom: 378, height: 78 }), el({ top: 722, bottom: 800, height: 78 })]), win).bottom)
+      .toBe(78);
+    // Sub-pixel dvh rounding, and a frame a little taller than the viewport (no dvh support).
+    expect(measureLayout(doc([el({ top: 721.5, bottom: 799.5, height: 78 })]), win).bottom).toBe(79);
+    expect(measureLayout(doc([el({ top: 760, bottom: 838, height: 78 })]), win).bottom).toBe(40);
   });
   test('covered while a sheet is open', () => {
     expect(measureLayout(doc([], true), win).covered).toBe(true);

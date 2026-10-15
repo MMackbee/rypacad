@@ -40,9 +40,11 @@ function trapFocus(e, container) {
  * it. "Include screenshot" starts on; turned off, the preview dims and
  * nothing of it is sent. Send needs a note or an included screenshot.
  * Like CancelSheet it never closes itself on failure: the error shows
- * under the note and Send tries again. A tap on the dimmed page closes it
- * only while the note is empty, so a stray tap never throws away what was
- * typed.
+ * under the note and Send tries again. A tap on the dimmed page and Escape
+ * close it only while the note is empty, so a stray tap or a habit key
+ * never throws away what was typed; Cancel always closes. While it is open
+ * the page behind (#root) is inert, and a tap on the dimmed page puts focus
+ * back in the panel, so Tab and Escape keep working.
  *
  * @param {{dataUrl: string, width: number, height: number} | null} shot
  * @param {() => void} onClose  Cancel, Escape, or the overlay tap.
@@ -64,9 +66,25 @@ export default function FeedbackSheet({ shot, onClose, onSend, onSent }) {
     if (dialogRef.current) dialogRef.current.focus();
   }, []);
 
+  // The page behind can take neither focus nor taps while the panel is open.
+  useEffect(() => {
+    const root = document.getElementById('root');
+    if (!root || root.hasAttribute('inert')) return undefined;
+    root.setAttribute('inert', '');
+    return () => root.removeAttribute('inert');
+  }, []);
+
   const ready = canSendFeedback(note, includeShot, shot);
   const dismiss = () => {
     if (!sending) onClose();
+  };
+  // The dimmed page and Escape: close only while nothing is typed.
+  const softDismiss = () => {
+    if (note.trim()) {
+      if (dialogRef.current) dialogRef.current.focus();
+    } else {
+      dismiss();
+    }
   };
 
   const handleSend = async () => {
@@ -86,7 +104,7 @@ export default function FeedbackSheet({ shot, onClose, onSend, onSent }) {
   const onKeyDown = (e) => {
     if (e.key === 'Escape') {
       e.stopPropagation();
-      dismiss();
+      softDismiss();
     } else if (e.key === 'Tab') {
       trapFocus(e, dialogRef.current);
     }
@@ -95,7 +113,7 @@ export default function FeedbackSheet({ shot, onClose, onSend, onSent }) {
   return (
     <div
       {...UI}
-      onClick={note.trim() ? undefined : dismiss}
+      onClick={softDismiss}
       style={{
         position: 'fixed',
         inset: 0,

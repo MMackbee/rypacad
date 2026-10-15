@@ -168,6 +168,17 @@ test('a users doc with no email falls back to the verified token', async () => {
       /from Unknown \(coach, token@example\.com\)/);
 });
 
+test('the token\'s name claim is never the sender\'s name', async () => {
+  // Any user can set their own Auth display name from the browser.
+  const auth = {uid: 'u-dana',
+    token: {email: 'token@example.com', name: 'The Owner'}};
+  const r = await send(NOTE, {auth,
+    docs: {'users/u-dana': {role: 'parent', email: 'dana@example.com'}}});
+  const text = form(r.calls[0]).text;
+  assert.match(text, /from Unknown \(parent, dana@example\.com\)/);
+  assert.equal(text.includes('The Owner'), false);
+});
+
 test('an account with no users doc is refused', async () => {
   const r = await send(NOTE, {docs: {}});
   assert.equal(r.error.code, 'permission-denied');
@@ -213,7 +224,7 @@ test('the page keeps path and query, never a fragment or a secret',
     async () => {
       const page = '/portal/signin?mode=verifyEmail&oobCode=SECRET1&' +
           'apiKey=SECRET2&Token=SECRET3&code=SECRET4&session=SECRET5&' +
-          'tab=2#access_token=SECRET6';
+          'cs=SECRET7&Session_Id=SECRET8&tab=2#access_token=SECRET6';
       const r = await send({note: 'hi', page});
       const text = form(r.calls[0]).text;
       assert.match(text,
@@ -221,6 +232,9 @@ test('the page keeps path and query, never a fragment or a secret',
       assert.equal(/SECRET/.test(text), false);
       assert.equal(feedback.cleanPage('https://portal.rypacademy.com/portal/' +
           'billing?paid=1#x'), '/portal/billing?paid=1');
+      // The dashboards' return from Stripe Checkout (checkout.js).
+      assert.equal(feedback.cleanPage('/portal/family?paid=a1&cs=cs_live_1'),
+          '/portal/family?paid=a1');
       assert.equal(feedback.cleanPage(''), '');
     });
 
@@ -278,6 +292,34 @@ test('rate limit: ten an hour, the eleventh refused, room again an hour ' +
   assert.equal(docs['feedbackLimits/u-dana'].sentAtMs.includes(
       NOW.getTime()), false);
 });
+
+test('rate limit: parallel sends that commit out of clock order still ' +
+    'count (review 2026-10-15)', async () => {
+  // Each request reads its clock before the users read, so a request with
+  // an earlier clock can commit after one with a later clock.
+  const docs = {'users/u-dana': Object.assign({}, USER)};
+  for (let i = 0; i < feedback.RATE_LIMIT; i += 1) {
+    const at = new Date(NOW.getTime() + (feedback.RATE_LIMIT - i) * 1000);
+    const r = await send({note: `n${i}`}, {docs, now: at});
+    assert.equal(r.error, null, `send ${i + 1}`);
+  }
+  assert.equal(docs['feedbackLimits/u-dana'].sentAtMs.length, 10);
+  const eleventh = await send({note: 'one more'}, {docs, now: NOW});
+  assert.equal(eleventh.error.code, 'resource-exhausted');
+  assert.equal(eleventh.calls.length, 0);
+});
+
+test('a refused send gives back its own slot, never a later one',
+    async () => {
+      const later = NOW.getTime() + 5000;
+      const docs = {'users/u-dana': Object.assign({}, USER),
+        'feedbackLimits/u-dana': {sentAtMs: [later], updatedAtMs: later}};
+      const slack = fakeSlack({answers: {'chat.postMessage':
+          {ok: false, error: 'not_in_channel'}}});
+      const r = await send(NOTE, {docs, slack, now: NOW});
+      assert.equal(r.error.code, 'unavailable');
+      assert.deepEqual(docs['feedbackLimits/u-dana'].sentAtMs, [later]);
+    });
 
 test('Slack ok:false is unavailable, logs the code, never the token, and ' +
     'gives the slot back', async () => {

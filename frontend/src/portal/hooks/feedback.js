@@ -18,8 +18,11 @@ export const FEEDBACK_PAGE_MAX = 300;
  */
 const HIDDEN_SEGMENTS = new Set(['', 'signin', 'signup', 'not-provisioned']);
 
-/** Query parameters whose values never leave the address bar (the server drops them too). */
-const SECRET_PARAMS = ['token', 'code', 'oobcode', 'apikey', 'session'];
+/**
+ * Query parameters whose values never leave the address bar (the server drops them too).
+ * `cs` is the Stripe Checkout Session id the dashboards read after a payment; `session_id` is Stripe's usual name.
+ */
+const SECRET_PARAMS = ['token', 'code', 'oobcode', 'apikey', 'session', 'cs', 'session_id'];
 
 /**
  * The PhoneFrame footer wrapper (a tab bar or a pinned CTA) and every
@@ -30,13 +33,32 @@ export const FRAME_FOOTER_ATTR = 'data-portal-frame-footer';
 export const OVERLAY_ATTR = 'data-portal-overlay';
 /** The Feedback button, its panel and its toast: never in a screenshot, never printed. */
 export const FEEDBACK_UI_ATTR = 'data-feedback-ui';
+/**
+ * The empty block at the end of every top-level PhoneFrame's scroll area.
+ * It has no height until the button shows; then the button's own style
+ * rule gives it the button's height plus a gap above and below, so the last
+ * row of any screen can scroll clear of the button.
+ */
+export const FEEDBACK_SPACE_ATTR = 'data-portal-feedback-space';
 
 /** Gap between the button and whatever it sits above, in px. */
 export const FEEDBACK_GAP = 12;
 
-/** True when the signed-in, provisioned session is on a screen that gets the button. */
-export function shouldShowFeedback({ live, loading, user, provisioned, pathname }) {
-  if (!live || loading || !user || !provisioned) return false;
+/**
+ * The button's switch (2026-10-15 review): off until submitFeedback, its
+ * Slack secret and its channel are live (RUNBOOK-SPRINT-20.md section 11),
+ * so a frontend push never shows families a button that cannot send. Only
+ * the exact value true shows it; REACT_APP_FEEDBACK=true in Railway (CRA
+ * bakes env at build time, so the change rebuilds the site). Read at call
+ * time, like data/contractFlag.js, so a test can flip process.env.
+ */
+export function feedbackEnabled() {
+  return process.env.REACT_APP_FEEDBACK === 'true';
+}
+
+/** True when the switch is on and a signed-in, provisioned session is on a screen that gets the button. */
+export function shouldShowFeedback({ enabled, live, loading, user, provisioned, pathname }) {
+  if (!enabled || !live || loading || !user || !provisioned) return false;
   const segment = String(pathname || '').split('/')[2] || '';
   return !HIDDEN_SEGMENTS.has(segment);
 }
@@ -112,19 +134,26 @@ export function sendErrorMessage(err) {
   return /\s/.test(m) && !m.includes('submitFeedback') ? m : SEND_FAILED;
 }
 
+/** How far a pinned footer's bottom edge may sit above the viewport's bottom edge (sub-pixel dvh rounding), in px. */
+const PINNED_SLACK = 2;
+
 /**
  * Where the button goes, read from the page as it is laid out now:
  * `bottom` is how far above the viewport's bottom edge the topmost visible
  * frame footer starts (0 with none; capped at 60% of the viewport so an
  * in-flow footer cannot push the button off the top), and `covered` is
- * whether a bottom sheet is open.
+ * whether a bottom sheet is open. Only a footer pinned to the bottom of the
+ * screen counts - one whose bottom edge reaches the viewport's - so a tab
+ * bar scrolled into the middle of the screen (the walkthrough's stacked
+ * screens) never lifts the button, however the page was scrolled when it
+ * was measured.
  */
 export function measureLayout(doc = document, win = window) {
   const vh = win.innerHeight || 0;
   let clearance = 0;
   doc.querySelectorAll(`[${FRAME_FOOTER_ATTR}]`).forEach((el) => {
     const r = el.getBoundingClientRect();
-    if (!(r.height > 0) || r.top >= vh || r.bottom <= 0) return;
+    if (!(r.height > 0) || r.top >= vh || r.bottom < vh - PINNED_SLACK) return;
     clearance = Math.max(clearance, vh - r.top);
   });
   return {

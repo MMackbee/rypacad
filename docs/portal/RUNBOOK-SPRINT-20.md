@@ -573,9 +573,22 @@ screenshot to a private Slack channel through `submitFeedback` (spec:
 `docs/portal/plans/2026-10-15-feedback/00-spec.md`). Until both settings
 below exist the panel answers "Feedback is not set up yet."
 
-**Do 11.1-11.3 before the next functions deploy of ANY kind once this code
-is merged.** `submitFeedback` declares `SLACK_FEEDBACK_TOKEN`, and a
-declared secret that does not exist fails the whole deploy (section 9).
+The button has a switch: nobody sees it until the site is built with
+`REACT_APP_FEEDBACK=true` (11.5). Until then a `git push origin
+develop:main` ships the code with the button hidden, so other fixes can go
+out at any time.
+
+**Order - each step blocks the next:**
+
+1. 11.1-11.3 (Slack app, channel, secret) **BEFORE `feedback/slack` is
+   merged into `develop`.** `submitFeedback` declares
+   `SLACK_FEEDBACK_TOKEN`, and a declared secret that does not exist fails
+   the whole functions deploy (section 9) - including unrelated fixes such
+   as the Oct 24 token-expiry reminder. If Slack is not ready yet, create
+   the secret with a placeholder value now (11.3) and set the real token
+   later; deploys then work, and the switch keeps the button hidden.
+2. Merge, then 11.4 (function, rules, frontend push - button still hidden).
+3. 11.5 (turn the switch on) and 11.6 (smoke).
 
 ### 11.1 The Slack app
 
@@ -617,13 +630,18 @@ Check (prints a count only):
 grep -c "^SLACK_FEEDBACK_TOKEN=" functions/.env   # must print 0
 ```
 
+Without the real token yet (step 1 of the order above), run the same
+`secrets:set` and type `placeholder` at the prompt. Then set the real token
+before 11.5, and redeploy `functions:submitFeedback` (11.4) so the function
+binds it.
+
 ### 11.4 Deploy - functions, then rules, then the frontend
 
 ```bash
 cd functions && npm run lint && cd ..
 npx firebase-tools deploy --only functions:submitFeedback --project rypacad
 npx firebase-tools deploy --only firestore:rules --project rypacad
-git push origin develop:main   # the frontend: Railway rebuilds the site
+git push origin develop:main   # the frontend: Railway rebuilds the site, button still hidden
 ```
 
 Expected: `submitFeedback` created (17 functions in all from now on). The
@@ -632,13 +650,24 @@ was already denied - so it can ride with the next rules deploy if one is
 due. The function goes first: a button whose function is not deployed
 fails every send.
 
-### 11.5 Smoke
+### 11.5 Turn the button on
+
+Only after 11.4, with the REAL token set: Railway -> the portal service ->
+**Variables** -> add `REACT_APP_FEEDBACK` = `true` (only the exact value
+`true` shows it). Railway rebuilds the site; the button appears for every
+signed-in account once the build is live. To hide it again, delete the
+variable (or set it to anything else); Railway rebuilds without it.
+Nothing else changes either way.
+
+### 11.6 Smoke
 
 1. Sign in to the portal (any account), open any screen, tap **Feedback**,
    type "test", **Send**. Expect "Thanks - sent to the RYP team." and a post
    in the channel: "Portal feedback from <name> (<role>, <email>)", the
    page, the device and the screenshot.
 2. Again with **Include screenshot** off: a text-only post.
+3. If either fails, the table below says why; if it cannot be fixed at
+   once, turn the button off (11.5) while you sort it out.
 
 | Panel says | Cause | Fix |
 |---|---|---|
@@ -652,3 +681,19 @@ rypacad`. They never contain the token or the image.
 Rotating the token: set the secret again (11.3), then `npx firebase-tools
 deploy --only functions:submitFeedback --project rypacad` - a function binds
 a secret's version at deploy time.
+
+### 11.7 Worktrees and the emulator
+
+An empty or missing local secret makes the functions emulator read the
+REAL one from Secret Manager, and this one posts to the real channel. In
+every worktree (existing ones included) and in the main checkout's emulator
+setup:
+
+- put `SLACK_FEEDBACK_TOKEN=xoxb-placeholder-not-a-real-token` in
+  `functions/.secret.local` and `functions/.env.local`;
+- leave `SLACK_FEEDBACK_CHANNEL` OUT of the `.env` copied into a worktree,
+  so the function stops at "Feedback is not set up yet." before any Slack
+  call.
+
+To see the button in a local build, set `REACT_APP_FEEDBACK=true` in that
+checkout's `frontend/.env.local`.

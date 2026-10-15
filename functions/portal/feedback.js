@@ -12,13 +12,16 @@
  *
  * Who sent it comes from `users/{uid}` (displayName, role, email), never
  * from the payload. `page` keeps the path and query only: anything after
- * '#' and any query value named token / code / oobCode / apiKey / session
- * is dropped before it is posted anywhere.
+ * '#' and any query value named token / code / oobCode / apiKey / session,
+ * or a Stripe Checkout Session id (`cs`, the portal's own name for it, and
+ * `session_id`), is dropped before it is posted anywhere.
  *
  * Rate limit: 10 per account per rolling hour, kept in
  * `feedbackLimits/{uid}` ({sentAtMs: number[], updatedAtMs}) inside a
  * transaction. Admin SDK only; firestore.rules closes the collection to
- * every client. A send Slack refuses gives its slot back.
+ * every client. A send Slack refuses gives its slot back. Sends that run
+ * in parallel read their clocks and commit in different orders, so an
+ * entry stamped later than this request's own clock still counts.
  *
  * Slack: the bot token is the Secret Manager secret SLACK_FEEDBACK_TOKEN
  * (chat:write, files:write), the channel id the plain setting
@@ -46,8 +49,13 @@ const MAX_IMAGE_BYTES = 2 * 1024 * 1024;
 const MAX_DIMENSION = 10000;
 const RATE_LIMIT = 10;
 const RATE_WINDOW_MS = 60 * 60 * 1000;
-/** Query parameters whose values never leave the browser's address bar. */
-const SECRET_PARAMS = ['token', 'code', 'oobcode', 'apikey', 'session'];
+/**
+ * Query parameters whose values never leave the browser's address bar,
+ * lower-cased. `cs` is the Checkout Session id the dashboards read after a
+ * payment (checkout.js success_url); `session_id` is Stripe's usual name.
+ */
+const SECRET_PARAMS = ['token', 'code', 'oobcode', 'apikey', 'session',
+  'cs', 'session_id'];
 const DATA_URL_RE = /^data:image\/(jpeg|png);base64,([A-Za-z0-9+/]+={0,2})$/;
 const SIGNATURES = {
   jpeg: [0xff, 0xd8, 0xff],
@@ -200,8 +208,10 @@ function slackConfig(env) {
 }
 
 /**
- * Who is sending, from the server's own records: the users doc, then the
- * verified ID token's claims. Never the payload.
+ * Who is sending, from the server's own records: the users doc, never the
+ * payload. Only the email falls back to the verified ID token (the
+ * account's sign-in address); the token's `name` claim is not used, since
+ * any user can set it from the browser.
  * @param {!Object} store An admin Firestore.
  * @param {!Object} auth The callable's `context.auth`.
  * @return {!Promise<{name: string, role: string, email: string}>} The
@@ -217,21 +227,25 @@ async function senderOf(store, auth) {
   const u = snap.data() || {};
   const claims = auth.token || {};
   return {
-    name: clip(u.displayName, 120) || clip(claims.name, 120) || 'Unknown',
+    name: clip(u.displayName, 120) || 'Unknown',
     role: clip(u.role, 40) || 'no role',
     email: clip(u.email, 200) || clip(claims.email, 200) || 'no email',
   };
 }
 
 /**
+ * The sends that still count against the limit. No upper bound: a request
+ * that read the clock earlier can commit after one that read it later, and
+ * dropping that later entry would hand its slot back (review 2026-10-15 -
+ * parallel sends got around the limit).
  * @param {?Object} data A feedbackLimits doc's data.
  * @param {number} nowMs The clock.
- * @return {!Array<number>} Its sends inside the last hour.
+ * @return {!Array<number>} Its sends inside the last hour, or later.
  */
 function recentSends(data, nowMs) {
   const sent = data && Array.isArray(data.sentAtMs) ? data.sentAtMs : [];
   return sent.filter((t) => typeof t === 'number' &&
-      t > nowMs - RATE_WINDOW_MS && t <= nowMs);
+      t > nowMs - RATE_WINDOW_MS);
 }
 
 /**

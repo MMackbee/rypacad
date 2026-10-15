@@ -31,3 +31,17 @@ test('without dvh support it keeps the 100vh floor it had before', () => {
   expect(renderBareFrame(false)).toContain('min-height:100vh');
   expect(renderBareFrame(undefined)).toContain('min-height:100vh');
 });
+/**
+ * The Feedback button's room (2026-10-15): an empty block at the end of the
+ * scroll area with no height of its own - the button's style rule sizes it
+ * while the button shows - and the footer marked for the button to ride
+ * over.
+ */
+test('the scroll area ends in the Feedback room, which has no height of its own', () => {
+  const React = require('react');
+  const { renderToStaticMarkup } = require('react-dom/server');
+  const PhoneFrame = require('./PhoneFrame').default;
+  const html = renderToStaticMarkup(React.createElement(PhoneFrame, { bare: true, footer: 'tabs' }, 'content'));
+  expect(html).toContain('content<div aria-hidden="true" data-portal-feedback-space="" style="flex:none"></div>');
+  expect(html).toContain('<div data-portal-frame-footer="" style="flex:none">tabs</div>');
+});
