@@ -157,7 +157,7 @@ All from the protocol (Sections 3-5). **Phil to confirm** items are marked.
   under 18, research is "yes" only when both the parent's box and the assent box are ticked.
 - The research paragraph moves out of the Data collection sheet (it was an opt-out there) into this
   separate opt-in choice.
-- Wording (draft 2026-10-15, owner to approve; `{name}` is the athlete's first name):
+- Wording (approved by the owner 2026-10-15; `{name}` is the athlete's first name):
   - Checkbox: **Research (optional): {name}'s results may be used in research.**
     Line under it: "Saying no changes nothing about {name}'s coaching or testing."
   - Assent checkbox (under 18, shown once the first is ticked): **I've talked about this with
