@@ -5,6 +5,7 @@ import {
   checkActionCode,
   confirmPasswordReset,
   onAuthStateChanged,
+  signOut,
   verifyPasswordResetCode,
 } from 'firebase/auth';
 import { auth } from '../../firebase';
@@ -102,6 +103,24 @@ async function refreshSignedInUser() {
   }
 }
 
+/**
+ * A password reset or an email recovery ends that login's sessions: Firebase
+ * revokes its refresh tokens, but a session in this browser stays cached
+ * until its next token refresh fails (within the hour), and until then the
+ * sign-in page sends it straight home. So this browser is signed out before
+ * the page says "Sign in" - whichever login was signed in here, since the
+ * next step is the sign-in form either way. Never fatal: the change has
+ * already worked, and at worst the old session ends at its next refresh.
+ */
+async function endStaleSession() {
+  try {
+    await authReady();
+    if (auth.currentUser) await signOut(auth);
+  } catch (err) {
+    // See above.
+  }
+}
+
 /** Runs the link's step and resolves to the next view. Never rejects. */
 async function runAction(mode, oobCode) {
   try {
@@ -116,6 +135,7 @@ async function runAction(mode, oobCode) {
     // recoverEmail: read the address being restored before the code is spent.
     const info = await checkActionCode(auth, oobCode);
     await applyActionCode(auth, oobCode);
+    await endStaleSession();
     return { kind: 'recovered', email: (info && info.data && info.data.email) || null };
   } catch (err) {
     return { kind: 'failed', code: (err && err.code) || null };
@@ -127,13 +147,16 @@ const FAILURES = {
   'auth/invalid-action-code': { title: 'This link no longer works', body: 'It has already been used, or it was not copied in full.' },
   'auth/user-disabled': { title: 'This login is turned off', body: 'Contact RYP Academy and we will sort it out.', final: true },
   'auth/user-not-found': { title: 'Login not found', body: 'We could not find the login this link is for. Contact RYP Academy for help.', final: true },
-  'auth/network-request-failed': { title: 'No connection', body: 'Check your connection, then try again.', retry: true },
+  'auth/network-request-failed': { title: 'No connection', body: 'Check your connection, then try again.' },
+  'auth/too-many-requests': { title: 'Too many attempts', body: 'Wait a few minutes, then try again.' },
 };
-const FAILED = { title: 'Something went wrong', body: 'This link did not work.' };
+// Anything else is most likely passing (a server hiccup) and the code is unspent.
+const FAILED = { title: 'Something went wrong', body: 'Try again in a moment. If it still does not work, contact RYP Academy.' };
 
 /** How to get a working link, after one failed. */
 const NEXT_STEP = {
-  verifyEmail: `To get a new link, sign in and tap ${RESEND}.`,
+  // Resend sits on the verify card: at pay time for a parent, straight after sign-in for a student.
+  verifyEmail: `To get a new link, sign in and tap ${RESEND} where it asks you to verify your email.`,
   // The portal has no change-email screen; these links come from the academy.
   verifyAndChangeEmail: 'Sign in with your current email. To change it, contact RYP Academy.',
   resetPassword: 'To get a new link, go to sign in, enter your email and tap Forgot password.',
@@ -151,7 +174,10 @@ function viewCopy(view, mode) {
     case 'loading':
       return { title: 'Checking your link', body: 'One moment.' };
     case 'invalid':
-      return { title: 'This link is not complete', body: 'Open the link in your email again. If it still does not work, sign in to get a new one.' };
+      // The mode survives without a code: then say how to get that kind of link.
+      return mode
+        ? { title: 'This link is not complete', body: 'Open the link in your email again.', note: NEXT_STEP[mode] }
+        : { title: 'This link is not complete', body: 'Open the link in your email again. If it still does not work, sign in to get a new one.' };
     case 'verified':
       return VERIFIED[mode] || VERIFIED.verifyEmail;
     case 'reset':
@@ -166,11 +192,15 @@ function viewCopy(view, mode) {
       };
     default: {
       const failure = FAILURES[view.code] || FAILED;
+      const deadLink = LINK_FAILURES.includes(view.code);
+      // A used verify link has done its job: the email is verified.
+      const usedVerify = view.code === 'auth/invalid-action-code' && mode === 'verifyEmail';
       return {
         title: failure.title,
-        body: failure.body,
-        note: failure.final || failure.retry ? null : NEXT_STEP[mode] || null,
-        retry: Boolean(failure.retry),
+        body: usedVerify ? 'If you already opened it, your email is verified - just sign in.' : failure.body,
+        note: deadLink && !failure.final ? NEXT_STEP[mode] || null : null,
+        // Anything but a dead link is worth a second try: the code is unspent.
+        retry: !deadLink,
         failed: true,
       };
     }
@@ -230,7 +260,8 @@ export default function AuthAction({ bare = false }) {
   }, [view]);
 
   const copy = viewCopy(view, link.mode);
-  const announcement = `${copy.title}. ${[copy.body, copy.note].filter(Boolean).join(' ')}`;
+  // The focused heading reads the title; the live region adds the rest, so nothing is read twice.
+  const announcement = [copy.body, copy.note].filter(Boolean).join(' ');
   const goSignIn = () => navigate(SIGN_IN_PATH, { replace: true });
   const retry = () => {
     setView({ kind: 'loading' });
@@ -268,7 +299,7 @@ export default function AuthAction({ bare = false }) {
       <div style={{ padding: '0 24px 24px', display: 'flex', flexDirection: 'column', flex: 1 }}>
         <BrandHeader />
 
-        {/* Every state change is read out; the heading also takes focus. */}
+        {/* Every state change is read out: the heading takes focus, this region reads the body. */}
         <div role="status" aria-live="polite" aria-atomic="true" style={SR_ONLY}>
           {announcement}
         </div>
@@ -323,11 +354,13 @@ function StateMark({ view, failed }) {
 /**
  * New password + confirm. Checked here first (6 characters, the same floor
  * as Create login, and the two match) so a typo never spends the code; a
- * link that fails on save moves the page to its failed state.
+ * link that fails on save moves the page to its failed state. Once saved,
+ * this browser is signed out (endStaleSession) before "Password changed".
  */
 function ResetForm({ oobCode, onDone, onLinkFailed }) {
   const [password, setPassword] = useState('');
   const [confirm, setConfirm] = useState('');
+  const [show, setShow] = useState(false);
   const [errors, setErrors] = useState({});
   const [failure, setFailure] = useState(null);
   const [saving, setSaving] = useState(false);
@@ -343,6 +376,7 @@ function ResetForm({ oobCode, onDone, onLinkFailed }) {
     setSaving(true);
     try {
       await confirmPasswordReset(auth, oobCode, password);
+      await endStaleSession();
       onDone();
     } catch (err) {
       const code = err && err.code;
@@ -361,19 +395,41 @@ function ResetForm({ oobCode, onDone, onLinkFailed }) {
       <div
         style={{ display: 'flex', flexDirection: 'column', gap: 14 }}
         onKeyDown={(e) => {
-          if (e.key === 'Enter') submit();
+          // From a field only: Enter on Show/Hide toggles, it does not save.
+          if (e.key === 'Enter' && e.target.tagName === 'INPUT') submit();
         }}
       >
         <Field
           label="New password"
-          type="password"
+          type={show ? 'text' : 'password'}
+          autoComplete="new-password"
           value={password}
           onChange={setPassword}
           dimmed={saving}
           error={errors.password}
           hint={`At least ${MIN_PASSWORD} characters.`}
+          trailing={
+            password ? (
+              // SignIn's toggle; one switch shows or hides both fields.
+              <button
+                type="button"
+                onClick={() => setShow((v) => !v)}
+                style={{ background: 'none', border: 'none', padding: 0, font: `500 13px ${font.body}`, color: color.primary, cursor: 'pointer' }}
+              >
+                {show ? 'Hide' : 'Show'}
+              </button>
+            ) : null
+          }
         />
-        <Field label="Confirm password" type="password" value={confirm} onChange={setConfirm} dimmed={saving} error={errors.confirm} />
+        <Field
+          label="Confirm password"
+          type={show ? 'text' : 'password'}
+          autoComplete="new-password"
+          value={confirm}
+          onChange={setConfirm}
+          dimmed={saving}
+          error={errors.confirm}
+        />
       </div>
       {failure ? (
         <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>

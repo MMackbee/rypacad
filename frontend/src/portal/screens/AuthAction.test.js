@@ -4,6 +4,7 @@ import {
   checkActionCode,
   confirmPasswordReset,
   onAuthStateChanged,
+  signOut,
   verifyPasswordResetCode,
 } from 'firebase/auth';
 import { auth } from '../../firebase';
@@ -17,6 +18,7 @@ jest.mock('firebase/auth', () => ({
   checkActionCode: jest.fn(),
   confirmPasswordReset: jest.fn(),
   onAuthStateChanged: jest.fn(),
+  signOut: jest.fn(),
   verifyPasswordResetCode: jest.fn(),
 }));
 // The portal's own initialised auth: the only auth this page may use.
@@ -38,7 +40,18 @@ const fbError = (code) => Object.assign(new Error(code), { code });
 const settle = () => act(async () => { await new Promise((resolve) => setTimeout(resolve, 0)); });
 const heading = (r) => r.container.querySelector('h1');
 const status = (r) => r.container.querySelector('[role="status"]').textContent;
-const firebaseMocks = [applyActionCode, checkActionCode, confirmPasswordReset, onAuthStateChanged, verifyPasswordResetCode];
+const firebaseMocks = [applyActionCode, checkActionCode, confirmPasswordReset, onAuthStateChanged, signOut, verifyPasswordResetCode];
+const pressEnter = (el) => act(async () => { el.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true })); });
+// A session this browser still holds for the login the link is for.
+const signedIn = () => ({ reload: jest.fn(async () => {}), getIdToken: jest.fn(async () => 'token') });
+// signOut held open until released, to prove what renders before it ends.
+function heldSignOut() {
+  const held = {};
+  signOut.mockImplementation(() => new Promise((resolve) => {
+    held.release = () => { auth.currentUser = null; resolve(); };
+  }));
+  return held;
+}
 
 async function open(query, element = <AuthAction bare />) {
   const r = await renderScreen(element, { path: link(query) });
@@ -57,6 +70,7 @@ beforeEach(() => {
   checkActionCode.mockResolvedValue({ operation: 'RECOVER_EMAIL', data: { email: 'dana@email.com', previousEmail: 'someone@else.example' } });
   verifyPasswordResetCode.mockResolvedValue('dana@email.com');
   confirmPasswordReset.mockResolvedValue(undefined);
+  signOut.mockImplementation(async () => { auth.currentUser = null; });
 });
 
 afterEach(() => {
@@ -71,7 +85,10 @@ describe('verifyEmail', () => {
     expect(r.container.querySelectorAll('h1')).toHaveLength(1);
     expect(heading(r).textContent).toBe('Email verified');
     expect(document.activeElement).toBe(heading(r));
-    expect(status(r)).toContain('Email verified.');
+    // The focused heading reads the title; the live region only the body (not twice).
+    expect(status(r)).toBe('Thanks - your email is confirmed.');
+    // Verifying ends no session.
+    expect(signOut).not.toHaveBeenCalled();
     // No continueUrl: Continue goes to sign-in.
     await r.click('Continue');
     expect(r.location().pathname).toBe(SIGN_IN_PATH);
@@ -120,8 +137,9 @@ describe('verifyEmail', () => {
     applyActionCode.mockRejectedValue(fbError('auth/expired-action-code'));
     const r = await open({ mode: 'verifyEmail', oobCode: 'old-code' });
     expect(heading(r).textContent).toBe('This link has expired');
-    expect(r.text()).toContain(`To get a new link, sign in and tap ${RESEND}.`);
-    expect(status(r)).toContain('This link has expired.');
+    expect(r.text()).toContain(`To get a new link, sign in and tap ${RESEND} where it asks you to verify your email.`);
+    expect(status(r)).toContain('Links in these emails only work for a limited time.');
+    expect(status(r)).toContain(`tap ${RESEND}`);
     expect(document.activeElement).toBe(heading(r));
     expect(r.button('Try again')).toBeNull();
     await r.click('Go to sign in');
@@ -129,27 +147,41 @@ describe('verifyEmail', () => {
     await r.unmount();
   });
 
-  test('used, disabled, missing and unknown failures each get their own message', async () => {
+  test('used, disabled, missing, throttled and unknown failures each get their own message', async () => {
+    // [code, title, Resend hint, Try again]: only a dead link sends the family
+    // off for a new one; a passing error keeps the (unspent) code with Try again.
     const cases = [
-      ['auth/invalid-action-code', 'This link no longer works', true],
-      ['auth/user-disabled', 'This login is turned off', false],
-      ['auth/user-not-found', 'Login not found', false],
-      ['auth/internal-error', 'Something went wrong', true],
+      ['auth/invalid-action-code', 'This link no longer works', true, false],
+      ['auth/user-disabled', 'This login is turned off', false, false],
+      ['auth/user-not-found', 'Login not found', false, false],
+      ['auth/too-many-requests', 'Too many attempts', false, true],
+      ['auth/internal-error', 'Something went wrong', false, true],
     ];
-    for (const [code, title, resendHint] of cases) {
+    for (const [code, title, resendHint, retry] of cases) {
       applyActionCode.mockRejectedValue(fbError(code));
       const r = await open({ mode: 'verifyEmail', oobCode: `c-${code}` });
       expect(heading(r).textContent).toBe(title);
       expect(r.text().includes(`tap ${RESEND}`)).toBe(resendHint);
+      expect(r.button('Try again') !== null).toBe(retry);
       expect(r.button('Go to sign in')).not.toBeNull();
       await r.unmount();
     }
   });
 
-  test('no connection offers Try again, which runs the link again', async () => {
+  test('a used verify link says the email is verified, so signing in is enough', async () => {
+    applyActionCode.mockRejectedValue(fbError('auth/invalid-action-code'));
+    const r = await open({ mode: 'verifyEmail', oobCode: 'used-code' });
+    expect(heading(r).textContent).toBe('This link no longer works');
+    expect(r.text()).toContain('If you already opened it, your email is verified - just sign in.');
+    expect(r.text()).not.toContain('It has already been used');
+    await r.unmount();
+  });
+
+  test('no connection offers Try again, which runs the link again (once, under React.StrictMode)', async () => {
     applyActionCode.mockReset();
     applyActionCode.mockRejectedValueOnce(fbError('auth/network-request-failed')).mockResolvedValueOnce(undefined);
-    const r = await open({ mode: 'verifyEmail', oobCode: 'code-5' });
+    const r = await open({ mode: 'verifyEmail', oobCode: 'code-5' }, <React.StrictMode><AuthAction bare /></React.StrictMode>);
+    expect(applyActionCode).toHaveBeenCalledTimes(1);
     expect(heading(r).textContent).toBe('No connection');
     expect(r.button('Go to sign in')).not.toBeNull();
     await r.click('Try again');
@@ -212,8 +244,12 @@ describe('resetPassword', () => {
     expect(verifyPasswordResetCode).toHaveBeenCalledWith(auth, 'reset-1');
     expect(heading(r).textContent).toBe('Choose a new password');
     expect(r.text()).toContain('For dana@email.com.');
-    expect(r.container.querySelector('[aria-label="New password"]').type).toBe('password');
-    expect(r.container.querySelector('[aria-label="Confirm password"]').type).toBe('password');
+    for (const label of ['New password', 'Confirm password']) {
+      const input = r.container.querySelector(`[aria-label="${label}"]`);
+      expect(input.type).toBe('password');
+      // Password managers offer to generate and save, not fill in the old one.
+      expect(input.getAttribute('autocomplete')).toBe('new-password');
+    }
 
     await r.fill('New password', 'abc');
     await r.fill('Confirm password', 'abc');
@@ -235,8 +271,67 @@ describe('resetPassword', () => {
     expect(confirmPasswordReset).toHaveBeenCalledWith(auth, 'reset-1', 'correct-horse');
     expect(heading(r).textContent).toBe('Password changed');
     expect(document.activeElement).toBe(heading(r));
+    // Nobody was signed in here, so there is nothing to end.
+    expect(signOut).not.toHaveBeenCalled();
     await r.click('Sign in');
     expect(r.location().pathname).toBe(SIGN_IN_PATH);
+    await r.unmount();
+  });
+
+  test('signed in on this browser: the revoked session is signed out before "Password changed"', async () => {
+    // Firebase revokes the login's refresh tokens on reset; a session cached
+    // here would bounce Sign in straight home and then die at its next refresh.
+    auth.currentUser = signedIn();
+    const held = heldSignOut();
+    const r = await open({ mode: 'resetPassword', oobCode: 'reset-6' });
+    await r.fill('New password', 'correct-horse');
+    await r.fill('Confirm password', 'correct-horse');
+    await r.click('Save password');
+    await settle();
+    expect(confirmPasswordReset).toHaveBeenCalledTimes(1);
+    expect(signOut).toHaveBeenCalledTimes(1);
+    expect(signOut).toHaveBeenCalledWith(auth);
+    expect(heading(r).textContent).not.toBe('Password changed');
+    await act(async () => { held.release(); });
+    await settle();
+    expect(auth.currentUser).toBeNull();
+    expect(heading(r).textContent).toBe('Password changed');
+    await r.click('Sign in');
+    expect(r.location().pathname).toBe(SIGN_IN_PATH);
+    await r.unmount();
+  });
+
+  test('a sign-out that fails still shows the password as changed', async () => {
+    auth.currentUser = signedIn();
+    signOut.mockRejectedValue(fbError('auth/internal-error'));
+    const r = await open({ mode: 'resetPassword', oobCode: 'reset-7' });
+    await r.fill('New password', 'correct-horse');
+    await r.fill('Confirm password', 'correct-horse');
+    await r.click('Save password');
+    await settle();
+    expect(heading(r).textContent).toBe('Password changed');
+    await r.unmount();
+  });
+
+  test('Enter in a field saves; Show reveals both fields and Enter on it does not save', async () => {
+    const r = await open({ mode: 'resetPassword', oobCode: 'reset-8' });
+    const input = (label) => r.container.querySelector(`[aria-label="${label}"]`);
+    expect(r.button('Show')).toBeNull();
+    await r.fill('New password', 'correct-horse');
+    await r.fill('Confirm password', 'correct-horse');
+    await r.click('Show');
+    expect(input('New password').type).toBe('text');
+    expect(input('Confirm password').type).toBe('text');
+    await pressEnter(r.button('Hide'));
+    expect(confirmPasswordReset).not.toHaveBeenCalled();
+    await r.click('Hide');
+    expect(input('New password').type).toBe('password');
+    expect(input('Confirm password').type).toBe('password');
+    await pressEnter(input('Confirm password'));
+    await settle();
+    expect(confirmPasswordReset).toHaveBeenCalledTimes(1);
+    expect(confirmPasswordReset).toHaveBeenCalledWith(auth, 'reset-8', 'correct-horse');
+    expect(heading(r).textContent).toBe('Password changed');
     await r.unmount();
   });
 
@@ -297,8 +392,33 @@ describe('recoverEmail', () => {
     expect(r.text()).toContain('Your sign-in email is back to dana@email.com.');
     expect(r.text()).toContain('change your password too');
     expect(r.text()).not.toContain('someone@else.example');
+    expect(signOut).not.toHaveBeenCalled();
     await r.click('Sign in');
     expect(r.location().pathname).toBe(SIGN_IN_PATH);
+    await r.unmount();
+  });
+
+  test('signed in on this browser: signed out before "Email restored"', async () => {
+    auth.currentUser = signedIn();
+    const held = heldSignOut();
+    const r = await open({ mode: 'recoverEmail', oobCode: 'rec-3' });
+    expect(applyActionCode).toHaveBeenCalledWith(auth, 'rec-3');
+    expect(signOut).toHaveBeenCalledWith(auth);
+    expect(heading(r).textContent).toBe('Checking your link');
+    await act(async () => { held.release(); });
+    await settle();
+    expect(heading(r).textContent).toBe('Email restored');
+    await r.unmount();
+  });
+
+  test('a code that checks out but fails to apply is a failure, not "Email restored"', async () => {
+    applyActionCode.mockRejectedValue(fbError('auth/internal-error'));
+    const r = await open({ mode: 'recoverEmail', oobCode: 'rec-4' });
+    expect(checkActionCode).toHaveBeenCalledWith(auth, 'rec-4');
+    expect(heading(r).textContent).toBe('Something went wrong');
+    expect(r.text()).not.toContain('Email restored');
+    expect(r.button('Try again')).not.toBeNull();
+    expect(signOut).not.toHaveBeenCalled();
     await r.unmount();
   });
 
@@ -324,6 +444,14 @@ describe('a link that is not complete', () => {
       await r.unmount();
     }
   });
+
+  test('a reset link without its code says how to get a new reset link, not "sign in"', async () => {
+    const r = await open({ mode: 'resetPassword' });
+    expect(heading(r).textContent).toBe('This link is not complete');
+    expect(r.text()).toContain('enter your email and tap Forgot password');
+    expect(r.text()).not.toContain('sign in to get a new one');
+    await r.unmount();
+  });
 });
 
 describe('the address bar and the old key', () => {
@@ -347,23 +475,25 @@ describe('the address bar and the old key', () => {
   });
 
   test('the apiKey in the link is never passed to Firebase or shown', async () => {
-    auth.currentUser = { reload: jest.fn(async () => {}), getIdToken: jest.fn(async () => 'token') };
+    const user = signedIn();
     const screens = [];
     for (const mode of ['verifyEmail', 'resetPassword', 'recoverEmail']) {
+      // recoverEmail signs this browser out; each link starts signed in.
+      auth.currentUser = user;
       const r = await open({ mode, oobCode: `k-${mode}`, apiKey: OLD_KEY, continueUrl: 'http://localhost/portal/signin' });
       screens.push(r.text());
       await r.unmount();
     }
-    const everyCall = firebaseMocks.flatMap((mock) => mock.mock.calls).concat(auth.currentUser.reload.mock.calls, auth.currentUser.getIdToken.mock.calls);
+    const everyCall = firebaseMocks.flatMap((mock) => mock.mock.calls).concat(user.reload.mock.calls, user.getIdToken.mock.calls);
     expect(everyCall.length).toBeGreaterThan(0);
     for (const args of everyCall) {
       for (const arg of args) {
         expect(arg === auth || typeof arg === 'function' || !JSON.stringify(arg ?? null).includes(OLD_KEY)).toBe(true);
       }
     }
-    // Every call that takes an auth gets the portal's own instance.
+    // Every call that takes an auth gets the portal's own instance. Which key
+    // that instance carries is a property of src/firebase.js, not testable here.
     for (const mock of firebaseMocks) for (const args of mock.mock.calls) expect(args[0]).toBe(auth);
-    expect(Object.values(auth).some((v) => typeof v === 'string' && v.includes(OLD_KEY))).toBe(false);
     for (const text of screens) expect(text).not.toContain(OLD_KEY);
   });
 });

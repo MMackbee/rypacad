@@ -15,6 +15,7 @@ export default function Field({
   hint,
   dimmed = false,
   type = 'text',
+  autoComplete,
   trailing,
   onChange,
   onBlur,
@@ -53,6 +54,9 @@ export default function Field({
         <input
           aria-label={label}
           type={type}
+          // Optional: e.g. "new-password", so password managers offer to
+          // generate and save rather than fill in the old one. Unset = no attribute.
+          autoComplete={autoComplete}
           value={value ?? ''}
           placeholder={placeholder}
           disabled={dimmed}
