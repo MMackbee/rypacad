@@ -39,6 +39,7 @@ jest.mock('./screens/AdminScholarships', () => {
 jest.mock('./screens/CoachDashboard', () => ({ __esModule: true, default: () => 'COACH HOME' }));
 jest.mock('./screens/SpecialistDay', () => ({ __esModule: true, default: () => 'MY SESSIONS' }));
 jest.mock('./screens/CommitmentContract', () => ({ __esModule: true, default: () => 'CONTRACT' }));
+jest.mock('./screens/AuthAction', () => ({ __esModule: true, default: () => 'AUTH ACTION' }));
 jest.mock('./screens/AthleteDashboard', () => ({ __esModule: true, default: () => 'ATHLETE HOME' }));
 jest.mock('./screens/ParentDashboard', () => ({ __esModule: true, default: () => 'FAMILY HOME' }));
 jest.mock('./screens/Billing', () => ({ __esModule: true, default: ({ role }) => `BILLING as ${role}` }));
@@ -101,6 +102,26 @@ test('an unknown portal path lands on the index (K18)', async () => {
   expect(r.pathname()).toBe('/portal');
   expect(r.container.textContent).toContain('HARNESS');
   await r.unmount();
+});
+
+// Firebase Auth's email links land here (custom action URL, 2026-10-22).
+test('/portal/auth/action renders signed out, signed in and mid-resolve - no guard sends it away', async () => {
+  mockLive.value = true;
+  const path = '/portal/auth/action?mode=verifyEmail&oobCode=c1&continueUrl=x';
+  const cases = [
+    [null, false],
+    [null, true],
+    [{ uid: 'u-p', role: 'parent', householdId: 'hh' }, false],
+    [{ uid: 'u-a', role: 'athlete', athleteId: 'a1' }, true],
+  ];
+  for (const [user, deferred] of cases) {
+    mockUser.value = user;
+    mockDeferred.value = deferred;
+    const r = await mount(path);
+    expect(r.pathname()).toBe('/portal/auth/action');
+    expect(r.container.textContent).toBe('AUTH ACTION');
+    await r.unmount();
+  }
 });
 
 describe('/portal/contract (Commitment Contract hidden, owner ruling 2026-09-30)', () => {

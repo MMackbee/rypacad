@@ -6,6 +6,7 @@ import { isLive } from './hooks/live';
 import { contractEnabled } from './data/contractFlag';
 import SignIn, { LANDING_BY_ROLE } from './screens/SignIn';
 import SignUp from './screens/SignUp';
+import AuthAction from './screens/AuthAction';
 import NotProvisioned from './screens/NotProvisioned';
 import Registration from './screens/Registration';
 // Sprint 9 pin (specialist 1-on-1 booking) - the frontend lane builds this
@@ -19,8 +20,9 @@ import { bump } from './hooks/invalidate';
 
 /*
  * Code splitting (2026-09-29): every screen used to ship in one 1.2 MB
- * bundle. The first-visit path stays eager - SignIn, SignUp, Registration,
- * NotProvisioned and the two home dashboards - and everything behind it
+ * bundle. The first-visit path stays eager - SignIn, SignUp, AuthAction (the
+ * email-link page), Registration, NotProvisioned and the two home
+ * dashboards - and everything behind it
  * loads as its own chunk when first routed to. RequireRole renders nothing
  * while the session resolves, so a null Suspense fallback shows no flash.
  * Named exports go through a `.then` that re-exports them as `default`.
@@ -677,6 +679,10 @@ export default function PortalRoutes() {
         element={<SignIn bare onStartEnrollment={go('/portal/signup')} />}
       />
       <Route path="signup" element={<SignUp bare onSignIn={go('/portal/signin')} />} />
+      {/* Firebase Auth's email links (verify, password reset, email recovery)
+          land here - the templates' custom action URL (2026-10-22). Public
+          and unguarded: the link works signed in or out, on any device. */}
+      <Route path="auth/action" element={<AuthAction bare />} />
       <Route path="register" element={<RegistrationRoute />} />
       {/* Onboarding walkthrough (Sprint 3) — frontend lane's one route line, per the PM exception in TEAM.md. */}
       <Route path="welcome" element={<OnboardingWelcomeRoute />} />
