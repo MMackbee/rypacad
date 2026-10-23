@@ -29,6 +29,33 @@ const notify = require('./notify');
 const EXPIRY_LEAD_DAYS = 7;
 
 /**
+ * The season's first day (frontend/src/portal/data/season.js
+ * SEASON_BOUNDS.start). A token period that ends before it is pre-season:
+ * nobody holds tokens yet, so there is nothing to warn about (owner,
+ * 2026-10-23 - the Oct 24 run would otherwise have told every token family
+ * their tokens expire Oct 31).
+ */
+const SEASON_START = '2026-11-03';
+
+/**
+ * Whether an athlete gets a "tokens expiring" notice for this period: only
+ * a period that reaches into the season, and only an athlete who is paid up
+ * (the same gate that lets them book - lib.membershipAllowsBooking), so an
+ * unpaid, lapsed or past-due family is never told to spend tokens it cannot
+ * use (owner, 2026-10-23).
+ * @param {{household: ?Object, athlete: ?Object,
+ *     period: ?{periodEnd: string}}} args The athlete's documents and the
+ *     period being warned about.
+ * @return {boolean} True when the notice applies.
+ */
+function tokenReminderApplies({household, athlete, period}) {
+  if (!period || !period.periodEnd || period.periodEnd < SEASON_START) {
+    return false;
+  }
+  return lib.membershipAllowsBooking(household, athlete);
+}
+
+/**
  * `'YYYY-MM-DD'` plus N days, on the UTC-noon arithmetic `lib` uses so no
  * DST edge can move a calendar date.
  * @param {string} dateISO `'YYYY-MM-DD'`.
@@ -185,6 +212,8 @@ async function remindTokenExpiry(store, clock, summary) {
     // Exactly EXPIRY_LEAD_DAYS days out - never a range, so a family is
     // warned once.
     if (period.periodEnd !== clock.target) continue;
+    // Pre-season periods and unpaid athletes get no notice.
+    if (!tokenReminderApplies({household, athlete, period})) continue;
     const pkg = await packages(athlete.packageId);
     // Elite (`tokens: null`) is unlimited and has nothing to expire; an
     // athlete on no known package has nothing to warn about either.
@@ -298,8 +327,10 @@ async function runTokenExpiryReminders(args) {
 
 module.exports = {
   EXPIRY_LEAD_DAYS,
+  SEASON_START,
   addDays,
   graceNoticeKey,
   runSessionReminders,
   runTokenExpiryReminders,
+  tokenReminderApplies,
 };
