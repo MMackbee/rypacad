@@ -173,6 +173,7 @@
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { bundleFrontend, fwdPath } from './lib/bundle-frontend.mjs';
+import { assessmentFixtures } from './lib/assessment-fixtures.mjs';
 
 const DRY_RUN = process.argv.includes('--dry-run');
 const PROJECT_ID = 'rypacad';
@@ -236,6 +237,10 @@ function loadPortalData() {
     // the NotificationPreferences screen renders; bundled like everything
     // else here rather than retyped, so a category add/remove can't drift.
     `export { NOTIFICATION_CATEGORIES } from '${fwdPath(path.join(dataDir, 'parent.js'))}';`,
+    // Assessments (2026-10-14): the circuit-mode snapshot and the season rule
+    // the fixtures need, bundled like everything else rather than retyped.
+    `export { DEFAULT_SETTINGS, PROTOCOL_VERSION, circuitModeOf } from '${fwdPath(path.join(dataDir, 'assessmentSettings.js'))}';`,
+    `export { seasonOf } from '${fwdPath(path.join(dataDir, 'assessmentWindows.js'))}';`,
   ], { tmpPrefix: 'ryp-seed-' });
 }
 
@@ -629,6 +634,29 @@ function buildDocs(portal) {
     contractMinutes: null,
     coachId: null,
   });
+
+  // Assessments (2026-10-14 spec): jordan tested at baseline nine weeks ago
+  // (mid-season eligible), reese said no to research (baseline due), nico's
+  // family has not answered (the list cannot add him, and Dana's one-time
+  // confirm asks at sign-in), sage-parker said yes (baseline due). Every doc
+  // comes from scripts/lib/assessment-fixtures.mjs; the consents land on the
+  // athlete docs, the windows and profiles in their subcollections.
+  const assessment = assessmentFixtures({
+    todayISO: isoDate(new Date()),
+    mode: portal.circuitModeOf(portal.DEFAULT_SETTINGS),
+    seasonOf: portal.seasonOf,
+    protocolVersion: portal.PROTOCOL_VERSION,
+    coachUid: 'phil',
+    guardianUid: 'parent-dana',
+    signatureName: 'Dana Whitfield',
+    athletes: [
+      { id: 'jordan', story: 'tested', sex: 'female' },
+      { id: 'reese', story: 'declined' },
+      { id: 'nico', story: 'unanswered' },
+      { id: parkerAthleteId, story: 'due' },
+    ],
+  });
+  for (const [id, consents] of Object.entries(assessment.consents)) athletes.get(id).consents = consents;
 
   // bookings — REAL bookings for the three Whitfield athletes against real
   // seeded session ids (contract v1.4, docs/portal/TEAM.md "Sprint 6 pins"),
@@ -1467,6 +1495,7 @@ function buildDocs(portal) {
     stripeEvents,
     calendlyEvents,
     notifications,
+    ...assessment.collections,
   };
 }
 
@@ -1740,6 +1769,18 @@ async function main() {
     const b = collections.bookings.get('reese_cal-seedevt0001');
     console.log(`  sessions/cal-seedevt0001: date=${s.date} time=${s.time} bookable=${s.bookable} source=${s.source} booked=${s.booked}/${s.capacity}`);
     console.log(`  bookings/reese_cal-seedevt0001: status=${b.status} source=${b.source} flag=${b.flag} periodKey=${b.periodKey}`);
+  }
+
+  console.log('\nAssessments (2026-10-14): research answers, windows, profiles:');
+  for (const [id, doc] of collections.athletes) {
+    const r = doc.consents?.research;
+    if (doc.consents) console.log(`  athletes/${id}: research=${r ? (r.value ? 'yes' : 'no') : 'not answered'}`);
+  }
+  for (const [name, docs] of Object.entries(collections)) {
+    if (!/\/assessments$|\/assessmentProfile$/.test(name)) continue;
+    for (const [id, doc] of docs) {
+      console.log(`  ${name}/${id}: ${doc.kind ? `${doc.status} ${doc.kind} circuit ${doc.circuitDate}` : `sex=${doc.sex} firstTestDate=${doc.firstTestDate}`}`);
+    }
   }
 
   if (DRY_RUN) {

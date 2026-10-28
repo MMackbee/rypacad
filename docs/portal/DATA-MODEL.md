@@ -34,6 +34,9 @@ serves.
 | `calendlyEvents` | `{inviteeUuid}_{event}` | **Contract v3.0.1 (Sprint 20).** `calendlyWebhook`'s idempotency ledger, the `stripeEvents` pattern with a composed id (Calendly has no event id; the invitee uri's uuid + `invitee.created \| invitee.canceled` is unique per delivery). Seed: `seedinv0001_invitee.created`. |
 | `scholarshipApplications` | first 32 hex chars of `sha256(season \| email \| athlete name, lower-cased \| dob)` | **2026-10-01.** One application per family + athlete + season, enforced by the keyspace: `submitScholarship` computes the id from the answers, so a family sending the form again lands on the same doc. Not guessable from outside and never shown. No seed. See [below](#scholarshipapplicationsid-owner-2026-10-01). |
 | `scholarshipMeta` | the UTC day, `YYYY-MM-DD` | **2026-10-01.** `submitScholarship`'s daily counter, one doc per day. No seed. |
+| `athletes/{athleteId}/assessments` | `{season}-{kind}` (`2026-27-baseline`) | **2026-10-14 (assessments).** One window per athlete per test window, enforced by the keyspace: a wave cannot open a second baseline in a season. See [below](#assessments-2026-10-14). |
+| `athletes/{athleteId}/assessmentProfile` | `current` | **2026-10-14.** One profile per athlete: sex, first-test date, the season's med ball. |
+| `assessmentSettings` | `current` | **2026-10-14.** The one protocol settings doc; absent == the v1.2 defaults in `data/assessmentSettings.js`. |
 | `feedbackLimits` | the sender's Firebase Auth uid | **2026-10-15.** `submitFeedback`'s rate limit, one doc per account that has sent feedback. No seed. See [below](#feedbacklimitsuid-2026-10-15). |
 | `sessions` (Calendly) | `cal-<eventUuid>` | **Contract v3.0.1 (Sprint 20).** Written only by `calendlyWebhook`; never date-prefixed (the id is Calendly's event uuid, so a reschedule that moves the date keeps the doc), never carries tournament results, and invisible to the sync's reap (`gcalEventId: null`, so `planSync` files it under `seededUntouched`). |
 
@@ -2131,3 +2134,39 @@ The seed script:
     session/waitlist trio, `households.membership` + `stripeEvents`) listing
     every new doc by id, alongside the generic per-collection sample dump
     every collection already gets.
+
+## Assessments (2026-10-14)
+
+Phil Herder's Physical Performance Assessment protocol v1.2 replaces Diagnostic Capture (spec: `docs/portal/plans/2026-10-14-assessments/00-spec.md`; plan: `01-plan.md` beside it). Scores are never stored: every screen computes them from the trials (`frontend/src/portal/data/assessmentScoring.js`, `assessmentResults.js`). Writes are client writes validated by `firestore.rules` (`scripts/rules-probes/assessments.mjs`, `research.mjs`); one section per write, so each request checks only that section's trials and stays inside the rules' per-request expression cap.
+
+### `athletes/{athleteId}/assessments/{season}-{kind}`
+
+| Field | Type | Notes |
+|---|---|---|
+| `athleteId`, `season`, `kind` | string | `kind` is `baseline \| mid \| end`; the doc id is `{season}-{kind}`. |
+| `protocolVersion` | string | `v1.2`; results under another version are flagged and never compared. |
+| `circuitMode` | map | The settings snapshot the window ran under (`circuitModeOf`): trial counts, grip rest, stations, McGill mode, med ball side, golf timing, wave size, hop and RSImod entry, coefficient set. |
+| `status` | string | `open \| complete`. |
+| `circuitDate`, `golfDate`, `mcgillDate` | `YYYY-MM-DD` \| null | Coach-set, within 14 days of entry (rules `recentDate`); `season` is the circuit date's August-July season. An open window older than 14 days is marked complete, never moved into a new wave. Golf is due within 7 days of the circuit; McGill may be its own block within 14. The first golf or McGill save dates it. |
+| `weeksOfExposure` | int | Weeks from the profile's `firstTestDate` to `circuitDate`. |
+| `wave` | map | `{ id, position 1-4, coachUid }`. |
+| `readiness`, `log`, `anthro`, `grip`, `cmj`, `hop`, `medball`, `mcgill`, `golf`, `notTested` | map | One section each, shapes and ranges in the spec (4.1, 4.4) and `data/assessmentInput.js`. A 10/5 set is `{ rsiBest5, gctMs }` or every hop as `{ hopRsi: [<=10], hopGctMs: [<=10] }` (shape-checked by the rules, range-checked by the client). CMJ holds at most 3 scored trials. |
+| `enteredBy` | map | `{ [section]: uid }`, the writer of each section. |
+| `createdAt`, `updatedAt` | timestamp | Server time. |
+
+Access: owner, ops, Phil (`specialistId 'phil'`) and assessor staff read and write every section; every other coach reads, and writes the golf section and `golfDate` of an open window; families never read raw windows; delete is owner only. Collection-group reads (`collectionGroup('assessments')`) carry the same read rule and need no composite index (no filter, no order).
+
+### `athletes/{athleteId}/assessmentProfile/current`
+
+`{ athleteId, sex 'male' | 'female' | null, firstTestDate, medballMassKg 2 | 3 | 4, medballMethod 'speed' | 'distance', dominantHand, gripDevice, handlePosition, driver, season, updatedAt, updatedBy }`. Within a season the med ball method and mass never change once set, the first-test date never moves, and `season` only moves forward (Phil: "block mixing"); a window's med ball must be entered under a profile of its own season; the owner may correct a mistake. Staff write; staff and coaches read.
+
+### `assessmentSettings/current`
+
+The protocol's procedure as settings (spec 4.6): `protocolVersion`, `trialCounts`, `gripRestSec`, `stations`, `mcgillMode`, `medballSide`, `golfTiming`, `waveSize`, `wavesPerSession`, `hopEntry`, `rsiModEntry`, `coefficients` (Moore 2015, `verified`), `thresholds`, `updatedAt`, `updatedBy`. Every key is written on each save. The owner and Phil write; staff read. A procedure change saves under a new version label.
+
+### New fields on existing docs
+
+- `users.assessor` (boolean, absent == false): the Assessments permission for a coach or mental account. Only the owner sets it (Staff & Roles); it shows the Assessments tab and admits the account to every assessment write.
+- `athletes.consents` (map, absent on athletes created before 2026-10-14): `{ dataCollection, videoCapture, mediaRelease, research, signature: { name, date } }`, written by `createFamily`. `research` is `{ value, assent, recordedAt, recordedBy, history? }` or null: under 18 a yes needs the assent; 18+ the assent is null. The household's parent (or the 18+ member who created their own household) may set it once when none is recorded (the one-time confirm); the owner records a later change, the earlier answer appended to `history`. A window counts for research only under the answer in force on its `circuitDate`.
+
+Seed (`scripts/seed-firestore.mjs`, fixtures in `scripts/lib/assessment-fixtures.mjs`): jordan has a complete baseline 63 days back (mid-season eligible) and research yes; reese research no; nico not answered (the list cannot add him and Dana is asked at sign-in); sage-parker research yes. No `assessmentSettings` doc is seeded, so the defaults path runs.
