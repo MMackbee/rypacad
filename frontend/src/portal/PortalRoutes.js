@@ -17,6 +17,7 @@ import ParentDashboard from './screens/ParentDashboard';
 import AthleteDashboard from './screens/AthleteDashboard';
 import FeedbackButton from './components/FeedbackButton';
 import { bump } from './hooks/invalidate';
+import { AssessmentListRoute, RequireAssessment, loadAssessmentList } from './AssessmentRoutes';
 
 /*
  * Code splitting (2026-09-29): every screen used to ship in one 1.2 MB
@@ -104,12 +105,13 @@ const CURRENT_ROUTE_CHUNKS = {
   attendance: [loadRoster],
   admin: [loadAdmin],
   staff: [loadStaff],
+  assessments: [loadAssessmentList],
 };
 const NEXT_ROUTE_CHUNKS = {
   family: [loadBook, loadCoaching, loadBilling, loadAthleteDetail, loadReservations, loadSettings, loadTour],
   home: [loadBook, loadMySchedule, loadContract, loadMembership, loadCoaching, loadSeason, loadSettings, loadTour],
   coach: [loadRoster, loadAthleteDetail, loadTour],
-  'my-sessions': [loadRoster],
+  'my-sessions': [loadRoster, loadAssessmentList],
   admin: [loadAdminSignups, loadBilling, loadAthleteDetail, loadStaff],
 };
 const NEXT_WARM_DELAY_MS = 2500;
@@ -412,6 +414,7 @@ function AdminRoute({ onOpenAthlete, onSignOut }) {
       onOpenHousehold={(id) => navigate(`/portal/admin/households/${id}`)}
       onOpenSignups={() => navigate('/portal/admin/signups')}
       onOpenScholarships={owner ? () => navigate('/portal/admin/scholarships') : undefined}
+      onOpenAssessments={() => navigate('/portal/assessments')}
       onSignOut={onSignOut}
     />
   );
@@ -900,6 +903,19 @@ export default function PortalRoutes() {
           </RequireRole>
         }
       />
+      {/* Assessments (2026-10-14 spec 5): the list - Phil, assessor staff,
+          ops and owner (AssessmentRoutes.js). */}
+      <Route
+        path="assessments"
+        element={
+          <RequireRole roles={['coach', 'mental', 'ops', 'owner']}>
+            <RequireAssessment level="staff" landingFor={landingFor}>
+              <AssessmentListRoute />
+            </RequireAssessment>
+          </RequireRole>
+        }
+      />
+
       {/* Staff — admin admits every staff role's read surface; Staff & Roles
           is owner-only. */}
       <Route
