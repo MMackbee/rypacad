@@ -345,52 +345,6 @@ export const ROSTER = [
   { id: 'r6', name: 'S. Bergstrom', meta: 'Age 13 · 6th month' },
 ];
 
-/** Screen 14. Four numeric sections plus the video capture. */
-export const DIAGNOSTIC_ATHLETE = {
-  name: 'A. Nguyen',
-  meta: 'Diagnostic Protocol · Feb 18 · age 12',
-};
-
-export const DIAGNOSTIC_SECTIONS = [
-  {
-    id: 'launch',
-    title: 'Launch monitor',
-    fields: [
-      { id: 'clubhead', label: 'Clubhead speed', unit: 'mph' },
-      { id: 'ball', label: 'Ball speed', unit: 'mph' },
-      { id: 'smash', label: 'Smash factor', unit: '' },
-      { id: 'carry7i', label: 'Carry 7i', unit: 'yd' },
-    ],
-  },
-  {
-    id: 'mobility',
-    title: 'Mobility & stability',
-    fields: [
-      { id: 'hip', label: 'Hip rotation', unit: '°' },
-      { id: 'shoulder', label: 'Shoulder rotation', unit: '°' },
-      { id: 'balance', label: 'Single-leg balance', unit: 'sec' },
-    ],
-  },
-  {
-    id: 'shortgame',
-    title: 'Short game',
-    fields: [
-      { id: 'd30', label: '30 yd dispersion', unit: 'ft' },
-      { id: 'd50', label: '50 yd dispersion', unit: 'ft' },
-      { id: 'd70', label: '70 yd dispersion', unit: 'ft' },
-    ],
-  },
-  {
-    id: 'putting',
-    title: 'Putting',
-    fields: [
-      { id: 'p3', label: '3 ft made', unit: '/10' },
-      { id: 'p6', label: '6 ft made', unit: '/10' },
-      { id: 'p10', label: '10 ft start line', unit: '%' },
-    ],
-  },
-];
-
 /**
  * One live grace token for the harness (contract v2.1, Sprint 13 pin E) —
  * reese (HOUSEHOLD's second child) holds a bonus token from a session the

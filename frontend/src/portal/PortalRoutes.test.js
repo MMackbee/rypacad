@@ -371,3 +371,12 @@ describe('the Feedback button (2026-10-15): mounted once beside the routes', () 
     await seed.unmount();
   });
 });
+
+test("a coach's old Capture link lands on their own home (Diagnostic Capture is gone)", async () => {
+  mockLive.value = true;
+  mockUser.value = { uid: 'c1', role: 'coach' };
+  const r = await mount('/portal/capture');
+  expect(r.pathname()).toBe('/portal/coach');
+  expect(r.container.textContent).toBe('COACH HOME');
+  await r.unmount();
+});

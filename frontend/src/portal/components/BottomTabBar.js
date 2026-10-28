@@ -63,7 +63,6 @@ export const TABS = {
   coach: [
     { key: 'today', label: 'Today', icon: 'today', route: '/portal/coach' },
     { key: 'roster', label: 'Roster', icon: 'list', route: '/portal/roster' },
-    { key: 'capture', label: 'Capture', icon: 'camera', route: '/portal/capture' },
   ],
   /**
    * Sprint 10 pin F (TEAM.md, "STAFF NAVIGATION"): a coach WITH specialistId
@@ -77,7 +76,6 @@ export const TABS = {
     // and a specialist coach is nobody's assigned golf coach, so that tab
     // would always be empty for him. Tour replaces it.
     { key: 'sessions', label: 'Sessions', icon: 'today', route: '/portal/my-sessions' },
-    { key: 'capture', label: 'Capture', icon: 'camera', route: '/portal/capture' },
     { key: 'tour', label: 'Tour', icon: 'trophy', route: '/portal/tour' },
   ],
   /**

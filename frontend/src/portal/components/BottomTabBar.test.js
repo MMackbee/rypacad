@@ -57,6 +57,15 @@ test('selfManaged never changes a parent or staff bar', async () => {
   expect(labels(parent)).toEqual(['Home', 'Reservations', 'Billing', 'Tour', 'Settings']);
   await parent.unmount();
   const coach = await renderScreen(<BottomTabBar role="coach" selfManaged />);
-  expect(labels(coach)).toEqual(['Today', 'Roster', 'Capture']);
+  expect(labels(coach)).toEqual(['Today', 'Roster']);
   await coach.unmount();
+});
+
+test('Diagnostic Capture is gone: no Capture tab for a coach or for Phil (assessments spec 8)', async () => {
+  const coach = await renderScreen(<BottomTabBar role="coach" />);
+  expect(labels(coach)).toEqual(['Today', 'Roster']);
+  await coach.unmount();
+  const phil = await renderScreen(<BottomTabBar role="coach" specialistId="phil" />);
+  expect(labels(phil)).not.toContain('Capture');
+  await phil.unmount();
 });

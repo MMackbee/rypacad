@@ -144,9 +144,9 @@ export default function AthleteDashboard({
           renderRowExtra={changeLink}
         />
         <ChangePackageSheet athlete={changeFor} self onClose={() => setChangeFor(null)} />
-        {/* Live: shown until a published diagnostic exists (contract v1.8 C);
-            seed: the demo 'new' variant. */}
-        {variant === 'new' || data?.diagnosticCaptured === false ? <StartHere onBook={onBook} /> : null}
+        {/* The harness's 'new' variant only: the live gate was the diagnostics
+            read, removed with Diagnostic Capture (assessments spec 8). */}
+        {variant === 'new' ? <StartHere onBook={onBook} /> : null}
         {variant === 'new' ? <OnboardingChecklist items={onboarding} /> : null}
         {variant === 'new' ? (
           <MediaPlaceholder height={126} caption="WELCOME VIDEO — Luke, 60 sec — what the first week looks like" />

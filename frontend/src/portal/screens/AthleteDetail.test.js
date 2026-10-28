@@ -12,7 +12,6 @@ jest.mock('../hooks', () => ({
     : mockDetail),
   // No useHousehold mock on purpose (perf wave B): the back label comes off
   // useAthleteDetail's householdName, and a stray second load would crash here.
-  useDiagnostic: () => ({ data: null, loading: false, error: null }),
   useAthleteTier: () => ({ setTier: async () => {} }),
   useAssignPackages: () => ({ assign: async () => {} }),
   useHouseholdSettings: () => ({ saving: false }),

@@ -39,7 +39,6 @@ const loadBook = () => import('./screens/BookSession');
 const loadCoaching = () => import('./screens/SpecialistBooking');
 const loadCoachDashboard = () => import('./screens/CoachDashboard');
 const loadRoster = () => import('./screens/Roster');
-const loadCapture = () => import('./screens/DiagnosticCapture');
 const loadSeason = () => import('./screens/SeasonSchedule');
 const loadContract = () => import('./screens/CommitmentContract');
 const loadAthleteDetail = () => import('./screens/AthleteDetail');
@@ -63,7 +62,6 @@ const SpecialistBooking = lazy(loadCoaching);
 const CoachDashboard = lazy(loadCoachDashboard);
 const Roster = lazy(loadRoster);
 const SessionAttendance = named(loadRoster, 'SessionAttendance');
-const CaptureFlow = named(loadCapture, 'CaptureFlow');
 const SeasonSchedule = lazy(loadSeason);
 const CommitmentContract = lazy(loadContract);
 const AthleteDetail = lazy(loadAthleteDetail);
@@ -104,14 +102,13 @@ const CURRENT_ROUTE_CHUNKS = {
   coach: [loadCoachDashboard],
   roster: [loadRoster],
   attendance: [loadRoster],
-  capture: [loadCapture],
   admin: [loadAdmin],
   staff: [loadStaff],
 };
 const NEXT_ROUTE_CHUNKS = {
   family: [loadBook, loadCoaching, loadBilling, loadAthleteDetail, loadReservations, loadSettings, loadTour],
   home: [loadBook, loadMySchedule, loadContract, loadMembership, loadCoaching, loadSeason, loadSettings, loadTour],
-  coach: [loadRoster, loadCapture, loadAthleteDetail, loadTour],
+  coach: [loadRoster, loadAthleteDetail, loadTour],
   'my-sessions': [loadRoster],
   admin: [loadAdminSignups, loadBilling, loadAthleteDetail, loadStaff],
 };
@@ -903,16 +900,6 @@ export default function PortalRoutes() {
           </RequireRole>
         }
       />
-      <Route
-        path="capture"
-        element={
-          <RequireRole roles={['coach']}>
-            {/* Roster-first: pick the kid, then capture (owner's flow). */}
-            <CaptureFlow bare onCancel={go('/portal/coach')} />
-          </RequireRole>
-        }
-      />
-
       {/* Staff — admin admits every staff role's read surface; Staff & Roles
           is owner-only. */}
       <Route

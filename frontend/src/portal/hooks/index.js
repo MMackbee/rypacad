@@ -47,7 +47,6 @@ import {
   fetchAllAthletes,
   fetchAllHouseholds,
   fetchAthlete,
-  fetchAthleteDiagnostics,
   fetchAthletesByIds,
   fetchBookings,
   fetchBookingsBySession,
@@ -71,7 +70,6 @@ import {
   fetchTournamentResults,
   fetchTournamentResultsForSession,
   isLive,
-  saveDiagnosticCapture,
   saveNotificationPrefs,
   saveMyPhone,
   saveTournamentResults,
@@ -105,8 +103,6 @@ import {
   COACH_BLOCKS_CONCURRENT,
   ATTENTION_LIST,
   COACH_OUTSTANDING,
-  DIAGNOSTIC_ATHLETE,
-  DIAGNOSTIC_SECTIONS,
   HOUSEHOLD,
   BILLING_ISSUE,
   TODAY,
@@ -156,9 +152,6 @@ import {
   ATHLETE,
   CODE_OF_GRIT,
   ONBOARDING,
-  DNA_MODULES,
-  DNA_STATES,
-  DNA_SUMMARY,
   CONTRACT_TIERS,
 } from '../data/athlete';
 import {
@@ -2742,85 +2735,6 @@ function blockRange(time) {
 }
 
 /**
- * Live payload for useDiagnostic(athleteId) (contract v1.8, C) — the
- * athlete's latest PUBLISHED capture (or null, "no capture yet"), their
- * single open DRAFT (or null), and the section/field catalogue every
- * capture's `values` are keyed against. Caller access (assigned coach /
- * specialist / mental / ops / owner see both; athlete/parent see published
- * only, draft always null for them) is firestore.rules' job, not this
- * function's — it fetches both lists and lets a caller who cannot read
- * drafts simply get an empty one back from fetchAthleteDiagnostics rather
- * than branching on role here.
- */
-async function liveDiagnostic(athleteId) {
-  // TWO queries, not one over every status (PM integration browser pass):
-  // a parent's read rule is published-only, and Firestore denies a LIST
-  // wholesale when any document could fail the rule — so the single
-  // all-statuses query errored for every parent and their kid's detail
-  // read "No capture yet" despite two published captures. The published
-  // query is provable for every reader; the draft query is only provable
-  // for staff, so a denial there means "no draft for you", not a failure.
-  const published = await fetchAthleteDiagnostics(athleteId, { publishedOnly: true });
-  let draft = null;
-  try {
-    const drafts = await fetchAthleteDiagnostics(athleteId, { draftOnly: true });
-    draft = drafts[0] ?? null;
-  } catch (err) {
-    if (err?.code !== ERR.PERMISSION) throw err;
-  }
-  return { latest: published[0] ?? null, draft, sections: DIAGNOSTIC_SECTIONS };
-}
-
-/**
- * GET /athletes/:id/diagnostics (14) — contract v1.8, C. PINNED SHAPE
- * (supersedes the prior no-arg, seed-only version): { data: { latest
- * (published capture | null), draft (open draft | null), sections },
- * loading, error, saveDraft(values, notes), publish(values, notes) }.
- *
- * DEVIATION FLAGGED: the old signature took no athleteId and returned
- * { athlete, sections } with no latest/draft/save actions at all — this is
- * a breaking payload shape change, called out per this lane's "changing a
- * payload shape requires stating it in the report" rule. DiagnosticCapture
- * (frontend lane's, in parallel) must be updated to call
- * useDiagnostic(athleteId) and read data.latest/data.draft instead of
- * data.athlete.
- *
- * Seed mode keeps DIAGNOSTIC_ATHLETE's synthetic capture as `latest` (never
- * a draft — the harness demonstrates the capture FORM against
- * DIAGNOSTIC_SECTIONS, not a resume-a-draft state) so the harness's
- * existing states keep rendering; saveDraft/publish are local no-op echoes
- * there, matching every other write action's seed posture in this file.
- */
-export function useDiagnostic(athleteId) {
-  const live = isLive() && athleteId != null;
-  const diagnosticsGen = useInvalidation('diagnostics');
-
-  const state = useSeedResource(
-    live
-      ? null
-      : {
-          latest: { athlete: DIAGNOSTIC_ATHLETE, values: {}, notes: null },
-          draft: null,
-          sections: DIAGNOSTIC_SECTIONS,
-        },
-    live
-      ? { source: () => liveDiagnostic(athleteId), deps: ['diagnostic', athleteId, diagnosticsGen] }
-      : undefined
-  );
-
-  const saveDraft = async (values, notes = null) => {
-    if (!live) return { athleteId, status: 'draft', simulated: true };
-    return saveDiagnosticCapture(athleteId, { values, notes, publish: false });
-  };
-  const publish = async (values, notes = null) => {
-    if (!live) return { athleteId, status: 'published', simulated: true };
-    return saveDiagnosticCapture(athleteId, { values, notes, publish: true });
-  };
-
-  return { ...state, saveDraft, publish };
-}
-
-/**
  * Badge/line/hint for a contract month built from real logs (Sprint 6, QA
  * #3/#4) — the live counterpart to contractFor()'s per-demo-variant copy
  * below. Shared by liveAthleteDashboard's mini card and liveContract's full
@@ -2919,10 +2833,9 @@ async function liveAthleteDashboard(today) {
 
   // Sprint 20 (load time): the reads that follow the context are
   // independent of each other - one round trip, not four.
-  const [nextSessions, logs, published, tokens] = await Promise.all([
+  const [nextSessions, logs, tokens] = await Promise.all([
     upcoming.length ? fetchSessionsByIds([upcoming[0].sessionId]) : Promise.resolve([]),
     contractMinutes != null ? fetchContractLogs(ctx.athlete.id) : Promise.resolve(null),
-    fetchAthleteDiagnostics(ctx.athlete.id, { publishedOnly: true }),
     homeTokens(ctx.athlete, ctx.pkg, ctx.bookings, normalizeAnchorDay(ctx.household?.periodAnchorDay), today),
   ]);
 
@@ -2951,9 +2864,6 @@ async function liveAthleteDashboard(today) {
     };
   }
 
-  // `published` (contract v1.8 C): whether a published diagnostic exists
-  // yet - the home screen's "Start here" card keys off it in live mode
-  // instead of the demo-only `variant === 'new'` flag.
   return {
     athlete: {
       // Firestore stores one `name` field (no first/full split) - both keys
@@ -2970,7 +2880,6 @@ async function liveAthleteDashboard(today) {
     contract,
     // No demo "new athlete" onboarding checklist concept in live mode.
     onboarding: null,
-    diagnosticCaptured: published.length > 0,
     codeOfGrit: CODE_OF_GRIT,
   };
 }
@@ -3029,22 +2938,6 @@ export function useAthleteDashboard({ variant = 'populated', today = todayISO(),
           }
         : undefined)
   );
-}
-
-/**
- * GET /athletes/:id/diagnostics (06).
- *
- * Returns raw captured measurements and nothing else. No score, grade, letter
- * or percentile is derived anywhere in this path — the Blueprint measures an
- * athlete against their own future progress, not a model swing, and a rating
- * computed here would leak onto the screen.
- */
-export function usePracticeDNA({ variant = 'complete' } = {}) {
-  const captured = DNA_STATES[variant] ?? DNA_STATES.complete;
-  return useSeedResource({
-    summary: DNA_SUMMARY[variant] ?? DNA_SUMMARY.complete,
-    modules: DNA_MODULES.map((m) => ({ ...m, captured: captured.includes(m.id) })),
-  });
 }
 
 /** GET + POST /athletes/:id/commitment-contract (07). */
