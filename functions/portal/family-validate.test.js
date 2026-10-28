@@ -38,7 +38,7 @@ test('happy path normalizes: trims, lower-cases child email, nulls', () => {
   // The current live payload has no facilityRequested: not asked.
   assert.deepEqual(p.athletes[0], {name: 'Jordan', dob: '2012-06-17',
     packageId: 't-12', contractMinutes: 45, handicap: 12,
-    loginEmail: 'jordan@email.com', facilityRequested: false});
+    loginEmail: 'jordan@email.com', facilityRequested: false, research: null});
   assert.deepEqual(p.athletes[1].loginEmail, null);
   assert.deepEqual([p.emergencyContact, p.medical, p.signatureName],
       [null, 'Peanut allergy', 'Dana Whitfield']);
@@ -203,5 +203,16 @@ test('storedEmergencyContact reads any household value without throwing',
         assert.equal(s(junk), null, JSON.stringify(junk));
       }
     });
+
+test('research: last in the entry order, refused unless booleans', () => {
+  refuses(Object.assign(base(), {athletes: [kid({research: 'yes'})]}),
+      'research-invalid');
+  // An earlier refusal still wins.
+  refuses(Object.assign(base(), {athletes: [kid({facilityRequested: 'yes',
+    research: 'yes'})]}), 'facility-requested-invalid');
+  const p = v.validateFamilyPayload(Object.assign(base(), {athletes:
+    [kid({research: {value: true, assent: true}})]}), {todayISO: TODAY});
+  assert.deepEqual(p.athletes[0].research, {value: true, assent: true});
+});
 
 run();
