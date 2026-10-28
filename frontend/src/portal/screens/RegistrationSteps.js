@@ -418,6 +418,7 @@ export function PackageStep({ athletes, onUpdate, showErrors, mode = 'parent', f
 export function SubmittingOverlay({ mode = 'signup' }) {
   return (
     <div
+      data-portal-overlay=""
       style={{
         position: 'absolute',
         inset: 0,

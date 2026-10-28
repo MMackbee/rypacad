@@ -75,6 +75,7 @@ function Sheet({ athlete, self, onClose }) {
 
   return (
     <div
+      data-portal-overlay=""
       onClick={saving ? undefined : onClose}
       style={{ position: 'absolute', inset: 0, background: tint.overlay, display: 'flex', alignItems: 'flex-end' }}
     >

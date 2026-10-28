@@ -35,6 +35,7 @@ serves.
 | `calendlyEvents` | `{inviteeUuid}_{event}` | **Contract v3.0.1 (Sprint 20).** `calendlyWebhook`'s idempotency ledger, the `stripeEvents` pattern with a composed id (Calendly has no event id; the invitee uri's uuid + `invitee.created \| invitee.canceled` is unique per delivery). Seed: `seedinv0001_invitee.created`. |
 | `scholarshipApplications` | first 32 hex chars of `sha256(season \| email \| athlete name, lower-cased \| dob)` | **2026-10-01.** One application per family + athlete + season, enforced by the keyspace: `submitScholarship` computes the id from the answers, so a family sending the form again lands on the same doc. Not guessable from outside and never shown. No seed. See [below](#scholarshipapplicationsid-owner-2026-10-01). |
 | `scholarshipMeta` | the UTC day, `YYYY-MM-DD` | **2026-10-01.** `submitScholarship`'s daily counter, one doc per day. No seed. |
+| `feedbackLimits` | the sender's Firebase Auth uid | **2026-10-15.** `submitFeedback`'s rate limit, one doc per account that has sent feedback. No seed. See [below](#feedbacklimitsuid-2026-10-15). |
 | `sessions` (Calendly) | `cal-<eventUuid>` | **Contract v3.0.1 (Sprint 20).** Written only by `calendlyWebhook`; never date-prefixed (the id is Calendly's event uuid, so a reschedule that moves the date keeps the doc), never carries tournament results, and invisible to the sync's reap (`gcalEventId: null`, so `planSync` files it under `seededUntouched`). |
 
 ## Collections
@@ -1001,6 +1002,10 @@ Query: the owner's screen reads the whole collection in one unfiltered `getDocs`
 ### `scholarshipMeta/{YYYY-MM-DD}` (2026-10-01)
 
 `submitScholarship`'s daily cap: `{ count: number }`, one doc per UTC day, read and written by the function alone (Admin SDK). The function refuses new applications for the day once `count` reaches 100, which protects the director's inbox. **Closed to every client, the owner included** - `firestore.rules` names the collection with `allow read, write: if false`, the `stripeEvents` pattern. No screen reads it.
+
+### `feedbackLimits/{uid}` (2026-10-15)
+
+`submitFeedback`'s rate limit (the portal's Feedback button, `functions/portal/feedback.js`; spec `docs/portal/plans/2026-10-15-feedback/00-spec.md`): `{ sentAtMs: number[], updatedAtMs: number }`, doc id the sender's uid. `sentAtMs` holds the epoch ms of that account's sends in the last rolling hour - at most 10; the function drops older entries each time it writes, and refuses the 11th send with `resource-exhausted`. A send Slack refuses takes its entry back out. Read and written by the function alone (Admin SDK, inside a transaction). **Closed to every client, the sender and the owner included** - a sender that could write its own doc could reset its own limit - `firestore.rules` names the collection with `allow read, write: if false`, the `scholarshipMeta` pattern. No screen reads it. The feedback itself is not stored in Firestore: it goes to Slack and nowhere else. Rules probe: `scripts/verify-rules.mjs` `taskFeedback`.
 
 ### Billing rows (derived, no new collection)
 

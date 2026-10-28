@@ -695,6 +695,35 @@ export async function taskScholarship() {
   for (const [c, d] of [[col, id], [col, 'app-new'], ['scholarshipMeta', day], ['scholarshipMeta', '2026-10-03'], ...[...Object.values(owners), specialistUid].map((u) => ['users', u])]) await del(c, d);
 }
 
+// 2026-10-15 (the portal's Feedback button): feedbackLimits/{uid} is submitFeedback's rate limit, Admin SDK only. No
+// client reads, lists, creates, updates or deletes it - not the sender on its OWN doc (it could reset its limit),
+// not ops, not the owner, not a signed-out caller. No clock or gate in any answer; it removes everything it seeds.
+export async function taskFeedback() {
+  console.log('Feedback: feedbackLimits closed to every client, the sender on its own doc included');
+  const col = 'feedbackLimits';
+  const ownerUid = 'owner-fb-probe';
+  await seed('users', ownerUid, { role: 'owner' });
+  const owner = token(ownerUid, { email: 'owner-fb@example.com', email_verified: true });
+  const sent = [1792078860000, 1792078920000];
+  await seed(col, uid.parent, { sentAtMs: sent, updatedAtMs: sent[1] });
+  const get = (auth, d = uid.parent) => call('GET', `/${col}/${d}`, null, auth).then((r) => r.status);
+  expect('sender: read of its own doc refused', await get(t.parent), 403);
+  expect('sender: list refused', await listAs(t.parent, col, {}), 403);
+  expect('sender: reset of its own limit refused', await updateAs(t.parent, col, uid.parent, { sentAtMs: [] }), 403);
+  expect('sender: delete of its own doc refused', await commitAs(t.parent, [{ delete: docName(col, uid.parent) }]), 403);
+  expect('athlete login: create of its own doc refused', await createAs(t.athlete, col, uid.athlete, { sentAtMs: [], updatedAtMs: 0 }, []), 403);
+  expect('ops: read refused', await get(t.ops), 403);
+  expect('owner: read refused', await get(owner), 403);
+  expect('owner: list refused', await listAs(owner, col, {}), 403);
+  expect('owner: update refused', await updateAs(owner, col, uid.parent, { sentAtMs: [] }), 403);
+  const anon = await fetch(`${BASE}/${col}/${uid.parent}`);
+  await anon.text().catch(() => null);
+  expect('signed out: read refused', anon.status, 403);
+  expect('the doc is untouched', (await call('GET', `/${col}/${uid.parent}`, null, 'owner')).body?.fields?.sentAtMs?.arrayValue?.values?.length, 2);
+  expect('and no doc was created for the athlete login', (await call('GET', `/${col}/${uid.athlete}`, null, 'owner')).status, 404);
+  for (const [c, d] of [[col, uid.parent], [col, uid.athlete], ['users', ownerUid]]) await del(c, d);
+}
+
 // Owner ruling 2026-10-02: "the Tuesday at 3 pm session is supposed to be reserved for under 5 handicaps so 5-0 and
 // any + handicaps". A session carrying an int maxHandicap takes a family's booking, re-book or waitlist join only from
 // an athlete whose stored handicap is an int at or under it (rules: reservedOk); no handicap on file is refused. A
@@ -931,7 +960,8 @@ async function runPass(label) {
   await setup();
   try {
     await task4(); await task5(); await taskContract(); await taskWindow(); await taskRepeat(); await taskPackageChange(); await taskSeriesCancel();
-    await taskSeats(); await taskPast(); await taskWaitlist(); await taskSingle(); await taskScholarship(); await taskReserved(); await taskReissue();
+    await taskSeats(); await taskPast(); await taskWaitlist(); await taskSingle(); await taskScholarship(); await taskFeedback(); await taskReserved();
+    await taskReissue();
   } finally { await teardown(); }
 }
 

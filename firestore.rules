@@ -1941,6 +1941,18 @@ service cloud.firestore {
       allow read, write: if false;
     }
 
+    // ---- feedbackLimits ---------------------------------------------------
+    // 2026-10-15. submitFeedback's rate limit (functions/portal/feedback.js):
+    // { sentAtMs: number[], updatedAtMs }, doc id the sender's uid - at most
+    // ten sends per rolling hour. Read and written by the function alone
+    // (Admin SDK, in a transaction). Closed to every client, the sender and
+    // the owner included: a client that could write its own doc could reset
+    // its own limit. Like scholarshipMeta above, this grants nothing
+    // deny-by-default did not already refuse; it names the collection.
+    match /feedbackLimits/{uid} {
+      allow read, write: if false;
+    }
+
     // No catch-all. Everything not matched above is denied.
   }
 }

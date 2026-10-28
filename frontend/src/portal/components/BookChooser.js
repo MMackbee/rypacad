@@ -102,6 +102,7 @@ export function BookChooserSheet({ open, athleteName, unlimited = false, onPick,
   if (!open) return null;
   return (
     <div
+      data-portal-overlay=""
       onClick={onClose}
       style={{ position: 'absolute', inset: 0, background: tint.overlay, display: 'flex', alignItems: 'flex-end' }}
     >

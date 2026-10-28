@@ -665,6 +665,7 @@ function DetailSheet({
   const slotTokensSpent = tokens ? !tokens.unlimited && tokens.left === 0 && !hasGrace : false;
   return (
     <div
+      data-portal-overlay=""
       onClick={saving ? undefined : onClose}
       style={{
         position: 'absolute',

@@ -169,6 +169,7 @@ export function ConsentInfoSheet({ id, mode, onClose }) {
 
   return (
     <div
+      data-portal-overlay=""
       onClick={onClose}
       style={{ position: 'absolute', inset: 0, background: tint.overlay, display: 'flex', alignItems: 'flex-end' }}
     >

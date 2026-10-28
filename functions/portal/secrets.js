@@ -18,7 +18,15 @@ const STRIPE_WEBHOOK_SECRETS = [
 const CHECKOUT_SECRETS = ['STRIPE_SECRET_KEY'];
 /** @const {!Array<string>} */
 const CALENDLY_SECRETS = ['CALENDLY_WEBHOOK_SIGNING_KEY'];
+/**
+ * The portal's Feedback button (2026-10-15, `feedback.js`): a Slack bot
+ * token with chat:write and files:write. It must exist in Secret Manager
+ * before ANY functions deploy that includes submitFeedback.
+ * @const {!Array<string>}
+ */
+const FEEDBACK_SECRETS = ['SLACK_FEEDBACK_TOKEN'];
 
 module.exports = {
-  CALENDLY_SECRETS, CHECKOUT_SECRETS, MAIL_SECRETS, STRIPE_WEBHOOK_SECRETS,
+  CALENDLY_SECRETS, CHECKOUT_SECRETS, FEEDBACK_SECRETS, MAIL_SECRETS,
+  STRIPE_WEBHOOK_SECRETS,
 };

@@ -1,8 +1,9 @@
 /* Static check: functions/index.js exports exactly the 13 launch functions
  * plus waitlistPositions (waitlist hardening, 2026-10-01) and
- * onSingleTokenSpent (single token, 2026-09-30) and submitScholarship
- * (the website's form, 2026-10-01), and each declares the secrets
- * contract 6.4 binds (spec 8). No emulator:
+ * onSingleTokenSpent (single token, 2026-09-30), submitScholarship
+ * (the website's form, 2026-10-01) and submitFeedback (the portal's
+ * Feedback button, 2026-10-15) - 17 in all - and each declares the
+ * secrets contract 6.4 binds (spec 8). No emulator:
  * it requires index.js in-process and reads each function's __endpoint.
  *   cd functions && node test/check-exports.js */
 'use strict';
@@ -29,12 +30,13 @@ const EXPECTED = {
   waitlistPositions: [],
   onSingleTokenSpent: MAIL,
   submitScholarship: MAIL,
+  submitFeedback: ['SLACK_FEEDBACK_TOKEN'],
 };
 
 assert.deepEqual(Object.keys(index).sort(), Object.keys(EXPECTED).sort(),
-    'the 13 launch functions, waitlistPositions, onSingleTokenSpent and ' +
-    'submitScholarship, ' +
-    'nothing else');
+    'the 13 launch functions, waitlistPositions, onSingleTokenSpent, ' +
+    'submitScholarship and submitFeedback, nothing else');
+assert.equal(Object.keys(EXPECTED).length, 17, '17 functions');
 for (const [name, secrets] of Object.entries(EXPECTED)) {
   const ep = index[name].__endpoint || {};
   const got = (ep.secretEnvironmentVariables || []).map((s) => s.key);
