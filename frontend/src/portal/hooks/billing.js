@@ -21,6 +21,7 @@ import { billingStatusOf, facilityRequestState } from '../data/billingCopy';
 import { foldBeforeFirstPeriod, hubMemberFor, positionPeriodFor, statusFor } from '../data/billingHub';
 import { addDaysISO, todayISO } from '../data/calendar';
 import { householdFacility } from '../data/facility';
+import { isTestHousehold } from '../data/testFamily';
 import { normalizeAnchorDay, packageById, periodFor } from '../data/packages';
 import { GRACE_TOKEN, HOUSEHOLD, PAST_DUE_MEMBERSHIP, PERIOD_ANCHOR_DAY } from '../data/seed';
 import { bump, useInvalidation } from './invalidate';
@@ -242,7 +243,11 @@ async function liveMyTokens(today) {
   };
 }
 
-/** Every household with its standing and athletes, for the staff directory. */
+/**
+ * Every household with its standing and athletes, for the staff directory.
+ * The staging test family stays listed by name (`test: true`, data/testFamily.js)
+ * so staff can open it; HouseholdsCard labels it and leaves it out of the count.
+ */
 async function liveHouseholdsDirectory() {
   const [households, athletes] = await Promise.all([fetchAllHouseholds(), fetchAllAthletes()]);
   const byHousehold = new Map();
@@ -256,6 +261,7 @@ async function liveHouseholdsDirectory() {
       id: h.id,
       name: h.name ?? null,
       status: h.membership?.status ?? 'active',
+      test: isTestHousehold(h),
       athletes: (byHousehold.get(h.id) ?? []).sort((x, y) => String(x.name).localeCompare(String(y.name))),
     }))
     .sort((x, y) => String(x.name ?? x.id).localeCompare(String(y.name ?? y.id)));

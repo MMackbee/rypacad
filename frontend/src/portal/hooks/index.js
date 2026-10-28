@@ -97,6 +97,7 @@ import useScholarships from './scholarships';
 // assessment windows, the module that replaced the diagnostics reads.
 import { ASSESSMENTS_KEY, fetchAllAssessmentWindows } from './assessmentsLive';
 import { seasonOf } from '../data/assessmentWindows';
+import { withoutTestFamilies } from '../data/testFamily';
 import {
   COACH,
   COACH_BLOCKS,
@@ -3556,7 +3557,7 @@ async function liveAdminDashboard(today) {
 
   // The assessment windows read may fail on its own (rules that do not
   // grant it yet): that drops the "Baseline due" rows, never the dashboard.
-  const [athletes, sessionsThisWeek, pending, noshowBookings, contractLogs, windows, households] =
+  const [allAthletes, sessionsThisWeek, pending, noshowBookings, contractLogs, windows, allHouseholds] =
     await Promise.all([
       fetchAllAthletes(),
       fetchSessionsInRange(weekStart, weekEnd),
@@ -3566,6 +3567,10 @@ async function liveAdminDashboard(today) {
       fetchAllAssessmentWindows().catch(() => null),
       fetchAllHouseholds(),
     ]);
+  // Owner 2026-10-15: staging shares this database, so the test family
+  // (test: true, data/testFamily.js) is left out of every count and list
+  // below. It never books, so no booking or contract log names it.
+  const { households, athletes } = withoutTestFamilies({ households: allHouseholds, athletes: allAthletes });
 
   // Contract v2.1, pin H: membership status counts + who's lapsed - absent
   // == active, the same default every other membership read in this app

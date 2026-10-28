@@ -106,3 +106,28 @@ test('the staff list carries the Assessments permission (absent is off)', async 
   expect(h.result.current.data.staff.map((s) => [s.name, s.assessor])).toEqual([['Data Coach', true], ['Golf Coach', false]]);
   await h.unmount();
 });
+
+test('the test family (test: true) is left out of the dashboard: counts, the lapsed list, Baseline due and enrollment (owner, 2026-10-15)', async () => {
+  calendar.todayISO.mockReturnValue('2026-11-10');
+  live.isLive.mockReturnValue(true);
+  live.fetchAllAthletes.mockResolvedValue([
+    ...ATHLETES.map((a) => ({ ...a, householdId: 'whitfield' })),
+    { id: 'ryp-test-ava', name: 'Ava Test', householdId: 'ryp-test-family', test: true, contractMinutes: null, packageId: null },
+    { id: 'ryp-test-max', name: 'Max Test', householdId: 'ryp-test-family', contractMinutes: null, packageId: 't-6' },
+  ]);
+  live.fetchAllHouseholds.mockResolvedValue([
+    { id: 'whitfield', name: 'Whitfield family' },
+    { id: 'ryp-test-family', name: 'RYP Test Family', test: true, membership: { status: 'lapsed' } },
+  ]);
+  for (const f of [live.fetchContractLogsSince, live.fetchNoShowBookingsSince, live.fetchPendingEnrollmentRequests, live.fetchSessionsInRange]) {
+    f.mockResolvedValue([]);
+  }
+  adapter.fetchAllAssessmentWindows.mockResolvedValue([]);
+  const h = await mountHook(() => useAdminDashboard());
+  const { metrics, membership, outstanding, enrollment } = h.result.current.data;
+  expect(metrics.enrolled).toBe(2);
+  expect(membership).toEqual({ active: 1, pastDue: 0, lapsed: 0, pending: 0, lapsedHouseholds: [] });
+  expect(outstanding.map((r) => r.id)).toEqual(['baseline-a1', 'baseline-a2']);
+  expect(enrollment).toEqual([{ id: 't-6', name: expect.any(String), athletes: 2 }]);
+  await h.unmount();
+});
