@@ -15,6 +15,8 @@ export const loadAssessmentWave = () => import('./screens/AssessmentWave');
 const AssessmentWave = lazy(loadAssessmentWave);
 export const loadAssessmentResults = () => import('./screens/AssessmentResults');
 const AssessmentResults = lazy(loadAssessmentResults);
+export const loadAssessmentGolf = () => import('./screens/AssessmentGolf');
+const AssessmentGolf = lazy(loadAssessmentGolf);
 
 /** The signed-in user; in seed mode (the review scaffold), Phil. */
 export function useViewer() {
@@ -85,4 +87,13 @@ export function AssessmentResultsRoute() {
       onRunMcgill={(waveId) => navigate(`/portal/assessments/wave/${waveId}`, { state: { station: 'mcgill' } })}
     />
   );
+}
+
+/** /portal/assessments/golf/:athleteId - every coach, from the session roster; navigation state `name` is the roster's name for the athlete. */
+export function AssessmentGolfRoute() {
+  const { athleteId } = useParams();
+  const { state } = useLocation();
+  const navigate = useNavigate();
+  const canGoBack = (window.history.state?.idx ?? 0) > 0;
+  return <AssessmentGolf bare athleteId={athleteId} fallbackName={state?.name ?? null} onBack={() => (canGoBack ? navigate(-1) : navigate('/portal'))} />;
 }

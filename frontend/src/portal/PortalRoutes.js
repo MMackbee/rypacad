@@ -17,7 +17,7 @@ import ParentDashboard from './screens/ParentDashboard';
 import AthleteDashboard from './screens/AthleteDashboard';
 import FeedbackButton from './components/FeedbackButton';
 import { bump } from './hooks/invalidate';
-import { AssessmentListRoute, AssessmentResultsRoute, AssessmentWaveRoute, RequireAssessment, loadAssessmentList } from './AssessmentRoutes';
+import { AssessmentGolfRoute, AssessmentListRoute, AssessmentResultsRoute, AssessmentWaveRoute, RequireAssessment, loadAssessmentList } from './AssessmentRoutes';
 import { assessmentAccess } from './data/assessmentAccess';
 
 /*
@@ -573,6 +573,7 @@ function SessionAttendanceRoute({ onBack }) {
       sessionId={state?.sessionId ?? undefined}
       block={state?.block ?? undefined}
       role={role}
+      onOpenClubhead={!live || assessmentAccess(user) ? (athleteId, name) => navigate(`/portal/assessments/golf/${athleteId}`, { state: { name } }) : undefined}
     />
   );
 }
@@ -933,6 +934,16 @@ export default function PortalRoutes() {
           <RequireRole roles={['coach', 'mental', 'ops', 'owner']}>
             <RequireAssessment level="reader" landingFor={landingFor}>
               <AssessmentResultsRoute />
+            </RequireAssessment>
+          </RequireRole>
+        }
+      />
+      <Route
+        path="assessments/golf/:athleteId"
+        element={
+          <RequireRole roles={['coach', 'mental', 'ops', 'owner']}>
+            <RequireAssessment level="reader" landingFor={landingFor}>
+              <AssessmentGolfRoute />
             </RequireAssessment>
           </RequireRole>
         }

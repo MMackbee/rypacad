@@ -19,6 +19,7 @@ jest.mock('./screens/AssessmentList', () => {
   return { __esModule: true, default: ({ viewer, onBack }) => createElement('button', { type: 'button', onClick: onBack }, `LIST as ${viewer.role}${onBack ? ' with back' : ''}`) };
 });
 jest.mock('./screens/AssessmentWave', () => ({ __esModule: true, default: ({ waveId, initialStation }) => `WAVE ${waveId} at ${initialStation ?? 'start'}` }));
+jest.mock('./screens/AssessmentGolf', () => ({ __esModule: true, default: ({ athleteId, fallbackName }) => `GOLF ${athleteId} ${fallbackName ?? ''}`.trim() }));
 jest.mock('./screens/AssessmentResults', () => {
   const { createElement } = require('react');
   return { __esModule: true, default: ({ athleteId, fallbackName, onRunMcgill }) => createElement('button', { type: 'button', onClick: () => onRunMcgill('wave-2026-11-03-abc') }, `RESULTS ${athleteId} ${fallbackName ?? ''}`.trim()) };
@@ -136,4 +137,17 @@ test('athlete detail links coaches and staff to the results, with the name; pare
     expect(p.text()).toBe('DETAIL');
     await p.unmount();
   }
+});
+
+test('every coach reaches clubhead entry; families go home', async () => {
+  for (const user of [{ uid: 'c', role: 'coach' }, { uid: 'p', role: 'coach', specialistId: 'phil' }]) {
+    mockUser.value = user;
+    const r = await mount('/portal/assessments/golf/seed-dev');
+    expect(r.text()).toBe('GOLF seed-dev');
+    await r.unmount();
+  }
+  mockUser.value = { uid: 'k', role: 'athlete', athleteId: 'seed-dev' };
+  const a = await mount('/portal/assessments/golf/seed-dev');
+  expect(a.pathname()).toBe('/portal/home');
+  await a.unmount();
 });
