@@ -136,13 +136,6 @@
  *                  not-yet-a-family account to route to. Two athletes: one
  *                  with a dob and a chosen tier, one with neither. All three
  *                  consents true.
- *   diagnostics — two `athletes/jordan/diagnostics` captures (contract v1.8,
- *                  Sprint 10 pin C): an older PUBLISHED one with a value for
- *                  every DIAGNOSTIC_SECTIONS field id, and a newer DRAFT with
- *                  just a couple of fields filled in — both `capturedBy:
- *                  'coach-luke'`. Field ids are read straight off
- *                  DIAGNOSTIC_SECTIONS in seed.js and enumerated in
- *                  DATA-MODEL.md, never retyped independently.
  *   loginInvites / calendlyEvents — Sprint 20: one open child-login invite (reese) and one Calendly-sourced Yannick session + booking + ledger row (see the cal- block below).
  *   staffInvites — ONE pending invite (contract v1.8, Sprint 10 pin E) at a
  *                  clearly-fake address (`invite-test@example.com`), role
@@ -982,68 +975,6 @@ function buildDocs(portal) {
     });
   }
 
-  // athletes/jordan/diagnostics (contract v1.8, Sprint 10 pin C) — two
-  // captures keyed by the same DIAGNOSTIC_SECTIONS field ids the Diagnostic
-  // Capture screen renders (read straight off seed.js, enumerated in
-  // DATA-MODEL.md so the key list can't drift from what this script writes):
-  //   published-1 — the older, COMPLETE capture: every one of the 13 field
-  //     ids across all four sections has a value, status 'published', so the
-  //     parent/athlete PUBLISHED-only read and the AthleteDetail "Progress
-  //     summary" replacement (pin C) both have something real to render.
-  //   draft-1 — the newer, IN-PROGRESS capture: only the launch monitor's
-  //     first two fields are filled in, status 'draft' — a parent/athlete
-  //     read must never see this one; only staff/coach/specialist reads do.
-  // Both capturedBy coach-luke, jordan's assigned coach.
-  const diagCapturedAtPublished = new Date();
-  diagCapturedAtPublished.setDate(diagCapturedAtPublished.getDate() - 30);
-  diagCapturedAtPublished.setHours(16, 0, 0, 0);
-  const diagCapturedAtDraft = new Date();
-  diagCapturedAtDraft.setDate(diagCapturedAtDraft.getDate() - 2);
-  diagCapturedAtDraft.setHours(16, 30, 0, 0);
-  const jordanDiagnostics = new Map([
-    [
-      'published-1',
-      {
-        athleteId: 'jordan',
-        capturedBy: coachUid,
-        capturedAt: diagCapturedAtPublished,
-        updatedAt: diagCapturedAtPublished,
-        status: 'published',
-        // Every DIAGNOSTIC_SECTIONS field id (13, across launch/mobility/
-        // shortgame/putting) — see DATA-MODEL.md for the enumerated list.
-        values: {
-          clubhead: 88,
-          ball: 118,
-          smash: 1.34,
-          carry7i: 145,
-          hip: 42,
-          shoulder: 85,
-          balance: 22,
-          d30: 6,
-          d50: 9,
-          d70: 13,
-          p3: 9,
-          p6: 6,
-          p10: 55,
-        },
-        notes: 'Full capture, all four sections — clean session, no equipment issues.',
-      },
-    ],
-    [
-      'draft-1',
-      {
-        athleteId: 'jordan',
-        capturedBy: coachUid,
-        capturedAt: diagCapturedAtDraft,
-        updatedAt: diagCapturedAtDraft,
-        status: 'draft',
-        // Only a couple of fields — an in-progress capture, on purpose.
-        values: { clubhead: 90, ball: 121 },
-        notes: null,
-      },
-    ],
-  ]);
-
   // contractLogs — Jordan's practice history for the last ~2 weeks (contract
   // v1.3, TEAM.md Sprint 5 pins): variable minutes, some at/above the
   // 45-min tier and some below, plus a couple of skipped days (no doc at
@@ -1528,7 +1459,6 @@ function buildDocs(portal) {
     contractLogs,
     tournamentResults,
     enrollmentRequests,
-    'athletes/jordan/diagnostics': jordanDiagnostics,
     staffInvites,
     loginInvites,
     tokenPeriods,
@@ -1682,14 +1612,6 @@ async function main() {
     );
     doc.athletes.forEach((a, i) =>
       console.log(`    athletes[${i}]: name=${a.name} dob=${a.dob} packageId=${a.packageId} contractMinutes=${a.contractMinutes}`)
-    );
-  }
-
-  console.log('\nathletes/jordan/diagnostics (contract v1.8):');
-  for (const [id, doc] of collections['athletes/jordan/diagnostics']) {
-    console.log(
-      `  athletes/jordan/diagnostics/${id}: status=${doc.status} capturedBy=${doc.capturedBy}` +
-        ` fields=${Object.keys(doc.values).length}/13 notes=${JSON.stringify(doc.notes)}`
     );
   }
 

@@ -24,7 +24,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { fsFields, fsValue, localEmulatorHost, LOCAL_HOSTS } from './lib/firestore-rest.mjs';
-import { taskAssessments } from './rules-probes/assessments.mjs';
+import { taskAssessments, taskDiagnosticsKept } from './rules-probes/assessments.mjs';
 
 let HOST = localEmulatorHost({ required: true });
 const PROJECT = 'demo-rules-probe';
@@ -963,7 +963,7 @@ async function runPass(label) {
     await task4(); await task5(); await taskContract(); await taskWindow(); await taskRepeat(); await taskPackageChange(); await taskSeriesCancel();
     await taskSeats(); await taskPast(); await taskWaitlist(); await taskSingle(); await taskScholarship(); await taskFeedback(); await taskReserved();
     await taskReissue();
-    await taskAssessments();
+    await taskAssessments(); await taskDiagnosticsKept();
   } finally { await teardown(); }
 }
 

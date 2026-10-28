@@ -227,3 +227,28 @@ export async function taskAssessments() {
     await cleanup();
   }
 }
+
+// Assessments spec 8: Diagnostic Capture is gone from the new portal (production held 0 docs on 2026-10-14), but its
+// rules stay exactly as they are for this release: the rules reach production before the live portal (main) is
+// updated - staging shares production's backend (plan Task 27) - and main's athlete home and admin dashboard read
+// diagnostics while its Capture tab saves them. Plan Task 28 removes every diagnostics grant after the release.
+export async function taskDiagnosticsKept() {
+  console.log('Diagnostics: unchanged for this release (the live portal still reads and saves captures)');
+  const owner = tok(uids.owner);
+  await seed('users', uids.owner, { role: 'owner' });
+  await seed('athletes', ATH, { name: 'Probe Athlete', householdId: 'hh', dob: '2012-04-10', contractMinutes: null, coachId: 'coach-probe', packageId: 't-6' });
+  await seed(`athletes/${ATH}/diagnostics`, 'old-1', { athleteId: ATH, capturedBy: 'coach-probe', status: 'published', values: {}, notes: null });
+  try {
+    for (const [who, auth] of [['the owner', owner], ['ops', t.ops], ['the assigned coach', t.coach]]) {
+      expect(`${who}: a capture still reads (the live portal keeps loading)`, await call('GET', `/athletes/${ATH}/diagnostics/old-1`, null, auth).then(status), 200);
+    }
+    expect('the owner: the collection-group list still reads', await groupListAs(owner, 'diagnostics'), 200);
+    expect('the assigned coach: a new capture still saves (the live Capture tab)', await createAs(t.coach, `athletes/${ATH}/diagnostics`, 'new-1',
+      { athleteId: ATH, capturedBy: 'coach-probe', status: 'draft', values: {}, notes: null }, ['capturedAt', 'updatedAt']), 200);
+  } finally {
+    await del(`athletes/${ATH}/diagnostics`, 'old-1');
+    await del(`athletes/${ATH}/diagnostics`, 'new-1');
+    await del('athletes', ATH);
+    await del('users', uids.owner);
+  }
+}

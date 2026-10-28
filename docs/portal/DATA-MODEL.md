@@ -25,7 +25,6 @@ serves.
 | `contractLogs` | `{athleteId}_{date}` | Pinned by contract v1: one log per athlete per day, duplicate-proof by construction. |
 | `tournamentResults` | `{sessionId}_{athleteId}` | **Contract v1.5, id scheme unchanged by v1.6.** One result per athlete per tournament, enforced by the keyspace itself — the same pattern as `bookings` and `contractLogs`. Corrections overwrite via update; there is no delete in v1. |
 | `enrollmentRequests` | the guardian's Firebase Auth uid | **Contract v1.8, Sprint 10.** Same rationale as `users`: the caller-identity check in rules (`request.auth.uid == uid`) is a plain equality against the doc id, no `get()` needed. Seed uses a readable slug (`parent-new`) like every other uid-keyed doc in the emulator. |
-| `athletes/{athleteId}/diagnostics` | auto id | **Contract v1.8, Sprint 10.** A capture history, not a keyspace-enforced singleton — an athlete gets many captures over time, so there is no natural deterministic key the way `bookings`/`contractLogs`/`tournamentResults` have one. Seed uses readable slugs (`published-1`, `draft-1`) in the same "readable over random, the emulator mints no real auto-ids anyway" spirit as the `users` row above. |
 | `staffInvites` | auto id | **Contract v1.8, Sprint 10.** Not a keyspace-enforced collection either — many invites can exist over time, including two for the same email (a re-invite after one lapses). Seed uses a readable slug (`invite-1`). |
 | `tokenPeriods` | `{athleteId}_{periodKey}` | **Contract v2.1, Part 2 (Sprint 13) — BUILT.** One issuance doc per athlete per period, keyspace-enforced like `bookings`/`contractLogs`. Seed uses one real doc (`tokenPeriods/jordan_<currentPeriodKey>`); see [below](#tokenperiods-contract-v21-part-2). |
 | `graceTokens` | auto id | **Contract v2.1, Part 2 — BUILT.** Many grace tokens can exist over an athlete's history (one per minting event), no natural deterministic key. Seed uses a readable slug (`grace-1`), the same "emulator mints no real auto-ids" convention as `staffInvites`/diagnostics ids above; the sweep script (`scripts/sweep-waitlist.mjs`) mints its own with a `sweep-<sessionId>-<athleteId>-<n>` slug for the same reason. See [below](#gracetokens-contract-v21-part-2). |
@@ -810,70 +809,9 @@ what a non-staff caller can do — **self-role-change by a non-owner stays
 denied**, exactly as before; an owner/ops account approving a request is
 setting up *someone else's* account, never elevating its own.
 
-### `athletes/{athleteId}/diagnostics/{captureId}` (contract v1.8, Sprint 10)
+### `athletes/{athleteId}/diagnostics/{captureId}` (removed 2026-10-14)
 
-Diagnostic capture persistence — the second silent data-loss path the scan
-flagged (TEAM.md pin C): a coach filling out the Diagnostic Capture screen
-had nothing backing it, so every capture vanished on refresh. Doc id is an
-auto id (no natural key — an athlete accumulates a capture history over
-time, the same shape as a photo or note log, not a one-per-day or
-one-per-session record like `contractLogs`/`bookings`).
-
-| Field | Type | Notes |
-|---|---|---|
-| `athleteId` | string | Matches the parent path segment — carried on the doc too so a collection-group read (below) doesn't need to parse the path to know whose capture it is. |
-| `capturedBy` | string | uid of the staff account that took the capture. |
-| `capturedAt` | timestamp | |
-| `updatedAt` | timestamp | |
-| `status` | string | `draft \| published`. A capture starts as a draft and is explicitly published — see the save/publish split below. |
-| `values` | map | `{ <fieldId>: number \| string \| null }`, keyed by the **existing `DIAGNOSTIC_SECTIONS` field ids** in `frontend/src/portal/data/seed.js` (the same catalogue the Diagnostic Capture screen renders its input rows from — never a second, independently-typed field list; the full enumerated key list is just below). A draft's `values` map holds only the fields entered so far; a published capture is expected to hold all of them, though the schema does not itself enforce completeness (a coach can publish a partial capture — the UI, not the rules, is where "are you sure" lives). |
-| `notes` | string \| null | Free-text, coach-entered. |
-
-That is the complete shape — six keys, `values` doing the heavy lifting.
-
-**The `values` key list**, enumerated by reading `DIAGNOSTIC_SECTIONS` in
-`seed.js` directly rather than retyped independently — thirteen field ids
-across four sections:
-
-| Section | Field ids |
-|---|---|
-| `launch` (Launch monitor) | `clubhead`, `ball`, `smash`, `carry7i` |
-| `mobility` (Mobility & stability) | `hip`, `shoulder`, `balance` |
-| `shortgame` (Short game) | `d30`, `d50`, `d70` |
-| `putting` (Putting) | `p3`, `p6`, `p10` |
-
-If a future sprint adds or renames a `DIAGNOSTIC_SECTIONS` field, this table
-goes stale until updated — it is a documentation mirror of `seed.js`, not a
-second source of truth the rules or the hook read from.
-
-**Rules** (routing lane implements): create/update by the assigned coach
-(`athleteData(athleteId).coachId == uid`), any specialist
-(`me().get('specialistId', null) != null`), or mental/ops/owner. Read: the
-athlete's own user and the household parent see **published only**
-(`resource.data.status == 'published'`) — a draft is a coach's working copy,
-never a family-facing document; staff see all (draft and published), the
-same "coach/specialist/mental/ops/owner" set as write.
-
-**Collection-group read** (routing lane implements; named here since it is
-the reason this document defines an `athleteId` field at all): a `match
-/{path=**}/diagnostics/{id}` rule allowing read for coach/mental/ops/owner/
-specialists turns "which athletes have no diagnostic yet" from an
-N-athletes-worth-of-reads admin problem into **one query** —
-`collectionGroup('diagnostics')` with no filter, read once, then diffed
-client-side against the full `athletes` list. See
-[Indexes](#indexes) below for why this specific read needs no index.
-
-**Hooks** (routing lane owns): `useDiagnostic(athleteId)` live ->
-`{ data: { latest (published capture \| null), draft (open draft \| null),
-sections }, saveDraft(values, notes), publish(values, notes) }`.
-`saveDraft` **upserts the athlete's single open draft** — a coach saving
-twice before publishing updates the same doc, not a second one; `publish`
-flips the open draft's `status` to `'published'`. A **second** publish (a
-follow-up capture weeks later) creates a **new** doc rather than overwriting
-the published one — history is the collection, exactly like
-`tournamentResults`' "no delete, corrections are same-id updates" precedent
-does NOT apply here: a diagnostic capture is a point-in-time record, and a
-newer capture is a new fact, not a correction of the old one.
+Diagnostic Capture was removed with the assessments release (assessments spec 8; production held 0 docs on 2026-10-14). The new portal no longer reads or writes a capture. `firestore.rules` keeps every diagnostics grant (reads and writes, per athlete and collection group) for this release: the rules reach production before the live portal is updated (staging shares production's backend), and the portal on `main` still reads and saves captures. The follow-up after the release (assessments plan Task 28) removes them and this note.
 
 ### `staffInvites/{id}` (contract v1.8, Sprint 10)
 
@@ -1359,18 +1297,6 @@ above:
   range filter on one field, with or without an `orderBy` on that same
   field — composite-free for the same reason the month-session-grid and
   season-standings range reads are, above.
-- **Athletes with no published diagnostic** — the `diagnostics`
-  [collection-group read](#athletesathleteiddiagnosticscaptureid-contract-v18-sprint-10)
-  minus the full `athletes` list, both already covered: the collection-group
-  read carries **no filter at all** (`collectionGroup('diagnostics').get()`,
-  filtered to `status == 'published'` client-side, same "filter in memory
-  because the collection is small" call this schema already makes for
-  `bookings`' cycle-usage `status` and `tournamentResults`' read-time
-  position), so there is nothing for an index to serve — a genuinely
-  unfiltered collection-group read needs no more of an index than a plain
-  collection `.get()` does. The `athletes` half rides the same unfiltered
-  read as the first bullet above.
-
 Two more v1.8 reads, both single equality filters on one field — automatic
 single-field index, no composite, same reasoning as every other
 single-equality-filter case in this file:
@@ -2057,11 +1983,6 @@ The seed script:
   exists (the sanity output prints `exists=false` for it, so the invariant
   is checked every run, not just asserted in a comment). Two athletes, one
   with a dob and tier, one with neither; all three consents true.
-- seeds two `athletes/jordan/diagnostics` captures (contract v1.8, pin C):
-  an older `published-1` with a value for **every** `DIAGNOSTIC_SECTIONS`
-  field id (13, enumerated [above](#athletesathleteiddiagnosticscaptureid-contract-v18-sprint-10)),
-  and a newer `draft-1` with just the launch monitor's first two fields —
-  both `capturedBy: 'coach-luke'`.
 - seeds ONE pending `staffInvites` doc (contract v1.8, pin E) at a
   clearly-fake address (`invite-test@example.com`, role coach,
   `specialistId: null`) — never a real person's email. There is no

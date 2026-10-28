@@ -488,6 +488,14 @@ service cloud.firestore {
       );
 
       // ---- athletes/{id}/diagnostics/{captureId} -----------------------
+      // KEPT FOR THIS RELEASE ONLY (2026-10-14): Diagnostic Capture is gone
+      // from the portal (assessments spec 8; production held 0 docs), but
+      // these rules reach production before the live portal is updated
+      // (staging shares production's backend, assessments plan Task 27),
+      // and the portal on main still reads diagnostics on the athlete home
+      // and the admin dashboard and saves them from its Capture tab. The
+      // follow-up after the release (assessments plan Task 28) removes this
+      // block and the collection-group read below.
       // Sprint 10 (contract v1.8, C "Diagnostics persistence"). Shape:
       // { athleteId, capturedBy (uid), capturedAt, updatedAt,
       //   status: 'draft'|'published', values: map, notes: string|null }.
@@ -864,6 +872,9 @@ service cloud.firestore {
     }
 
     // ---- diagnostics collection-group read ------------------------------
+    // Kept for this release only, like the per-athlete match above; plan
+    // Task 28 removes both after the release (Diagnostic Capture removed
+    // 2026-10-14; the portal on main still reads this).
     // Sprint 10 (contract v1.8, C + D): the Admin "athletes with no
     // published diagnostic" list is one collectionGroup('diagnostics')
     // query rather than an N-athlete fan-out, and Firestore requires a
