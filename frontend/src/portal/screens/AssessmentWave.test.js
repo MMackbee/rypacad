@@ -177,3 +177,11 @@ test('a pain stop at intake: the athlete is offered no anthropometrics or grip (
   expect(field(r, 'Ava Moreno grip right 1')).toBeNull();
   await r.unmount();
 });
+
+test('the wave offers CMJ then 10/5, and the med ball, in order', async () => {
+  const r = await wave();
+  expect(r.button('4 CMJ, then 10/5')).not.toBeNull();
+  await r.click('5 Med ball');
+  expect(r.text()).toContain('Push the ground and throw it through the wall.');
+  await r.unmount();
+});
