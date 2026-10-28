@@ -13,6 +13,8 @@ export const loadAssessmentList = () => import('./screens/AssessmentList');
 const AssessmentList = lazy(loadAssessmentList);
 export const loadAssessmentWave = () => import('./screens/AssessmentWave');
 const AssessmentWave = lazy(loadAssessmentWave);
+export const loadAssessmentResults = () => import('./screens/AssessmentResults');
+const AssessmentResults = lazy(loadAssessmentResults);
 
 /** The signed-in user; in seed mode (the review scaffold), Phil. */
 export function useViewer() {
@@ -59,4 +61,28 @@ export function AssessmentWaveRoute() {
   const { state } = useLocation();
   const navigate = useNavigate();
   return <AssessmentWave bare waveId={waveId} initialStation={state?.station ?? null} onBack={() => navigate('/portal/assessments')} />;
+}
+
+/**
+ * /portal/assessments/athlete/:athleteId - every coach, ops and owner
+ * (reader level). Navigation state `name` is the athlete's name from the
+ * list or athlete detail, shown when the record itself is not readable.
+ * "Run McGill block" reopens the window's wave on its McGill station.
+ */
+export function AssessmentResultsRoute() {
+  const { athleteId } = useParams();
+  const { state } = useLocation();
+  const navigate = useNavigate();
+  const { viewer } = useViewer();
+  const canGoBack = (window.history.state?.idx ?? 0) > 0;
+  return (
+    <AssessmentResults
+      bare
+      athleteId={athleteId}
+      viewer={viewer}
+      fallbackName={state?.name ?? null}
+      onBack={() => (canGoBack ? navigate(-1) : navigate('/portal'))}
+      onRunMcgill={(waveId) => navigate(`/portal/assessments/wave/${waveId}`, { state: { station: 'mcgill' } })}
+    />
+  );
 }

@@ -19,6 +19,14 @@ jest.mock('./screens/AssessmentList', () => {
   return { __esModule: true, default: ({ viewer, onBack }) => createElement('button', { type: 'button', onClick: onBack }, `LIST as ${viewer.role}${onBack ? ' with back' : ''}`) };
 });
 jest.mock('./screens/AssessmentWave', () => ({ __esModule: true, default: ({ waveId, initialStation }) => `WAVE ${waveId} at ${initialStation ?? 'start'}` }));
+jest.mock('./screens/AssessmentResults', () => {
+  const { createElement } = require('react');
+  return { __esModule: true, default: ({ athleteId, fallbackName, onRunMcgill }) => createElement('button', { type: 'button', onClick: () => onRunMcgill('wave-2026-11-03-abc') }, `RESULTS ${athleteId} ${fallbackName ?? ''}`.trim()) };
+});
+jest.mock('./screens/AthleteDetail', () => {
+  const { createElement } = require('react');
+  return { __esModule: true, default: ({ onOpenAssessments }) => createElement('button', { type: 'button', onClick: () => onOpenAssessments('Ava Moreno') }, onOpenAssessments ? 'DETAIL with assessments' : 'DETAIL') };
+});
 jest.mock('./hooks/live', () => ({ ...jest.requireActual('./hooks/live'), isLive: () => mockLive.value }));
 jest.mock('./hooks/useAuthSession', () => ({
   ...jest.requireActual('./hooks/useAuthSession'),
@@ -90,4 +98,42 @@ test('a wave opens for staff; a coach without the permission goes home', async (
   const c = await mount('/portal/assessments/wave/wave-2026-11-03-abc');
   expect(c.pathname()).toBe('/portal/coach');
   await c.unmount();
+});
+
+test("every coach, ops and the owner read an athlete's results; families go home", async () => {
+  for (const user of [{ uid: 'c', role: 'coach' }, { uid: 'p', role: 'coach', specialistId: 'phil' }, { uid: 'o', role: 'ops' }, { uid: 'w', role: 'owner' }]) {
+    mockUser.value = user;
+    const r = await mount('/portal/assessments/athlete/seed-ava');
+    expect(r.text()).toBe('RESULTS seed-ava');
+    await r.unmount();
+  }
+  mockUser.value = { uid: 'p', role: 'parent', householdId: 'h' };
+  const f = await mount('/portal/assessments/athlete/seed-ava');
+  expect(f.pathname()).toBe('/portal/family');
+  await f.unmount();
+});
+
+test('"Run McGill block" reopens the wave on the McGill station', async () => {
+  mockUser.value = { uid: 'p', role: 'coach', specialistId: 'phil' };
+  const r = await mount('/portal/assessments/athlete/seed-ava');
+  await r.click();
+  expect(r.pathname()).toBe('/portal/assessments/wave/wave-2026-11-03-abc');
+  expect(r.text()).toBe('WAVE wave-2026-11-03-abc at mcgill');
+  await r.unmount();
+});
+
+test('athlete detail links coaches and staff to the results, with the name; parents and Yannick get no link', async () => {
+  mockUser.value = { uid: 'c', role: 'coach' };
+  const r = await mount('/portal/athlete/seed-ava');
+  expect(r.text()).toBe('DETAIL with assessments');
+  await r.click();
+  expect(r.pathname()).toBe('/portal/assessments/athlete/seed-ava');
+  expect(r.text()).toBe('RESULTS seed-ava Ava Moreno');
+  await r.unmount();
+  for (const user of [{ uid: 'p', role: 'parent', householdId: 'h' }, { uid: 'y', role: 'mental', specialistId: 'mental' }]) {
+    mockUser.value = user;
+    const p = await mount('/portal/athlete/seed-ava');
+    expect(p.text()).toBe('DETAIL');
+    await p.unmount();
+  }
 });

@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { color, font, radius } from '../tokens';
 import * as hooks from '../hooks';
+import AssessmentsEntryCard from '../components/AssessmentsEntryCard';
 import AthleteMembershipCard from '../components/AthleteMembershipCard';
 import BottomTabBar from '../components/BottomTabBar';
 import Button from '../components/Button';
@@ -44,7 +45,7 @@ const TIER_MINUTES = [20, 45, 90];
  *   AthleteDetailRoute (PortalRoutes.js is not this lane's to edit — see the
  *   sprint report) now that Sprint 10 pin I already routes coach here too.
  */
-export default function AthleteDetail({ variant = 'populated', bare = false, athleteId, noTier, role = 'parent', backLabel, onBack }) {
+export default function AthleteDetail({ variant = 'populated', bare = false, athleteId, noTier, role = 'parent', backLabel, onBack, onOpenAssessments }) {
   // athleteId comes from the route (/portal/athlete/:athleteId) — dropping it
   // here was QA re-sweep #1: the hook's by-id fetch was fixed but never
   // received an id, so every child rendered as the seed athlete.
@@ -117,6 +118,15 @@ export default function AthleteDetail({ variant = 'populated', bare = false, ath
         <AthleteMembershipCard athleteId={athleteId} athlete={athlete} role={role} />
         {/* The handicap on file, ops and owner only: a reserved block is booked on it. */}
         <HandicapCard athleteId={athleteId} athlete={athlete} role={role} />
+        {/* Assessments (2026-10-14 spec 5): coaches, Phil, ops and owner open
+            this athlete's results; the route passes the handler only to them. */}
+        {onOpenAssessments ? (
+          <AssessmentsEntryCard
+            body="Every physical assessment window for this athlete: scores, flags and every trial."
+            label="Open results"
+            onOpen={() => onOpenAssessments(athlete?.name ?? null)}
+          />
+        ) : null}
         {/* Sprint 20 (spec 3.2): the child-login state. Rendered only when the
             payload carries loginEmail (legacy athletes have neither field). */}
         {athlete && 'loginEmail' in athlete ? (

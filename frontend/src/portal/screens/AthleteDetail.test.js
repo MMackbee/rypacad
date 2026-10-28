@@ -168,3 +168,16 @@ test('Scheduled sessions: a handicap-reserved block carries the tag, an open one
     await r.unmount();
   }
 });
+
+test('staff and coaches get an Assessments card that opens the results with the name; parents do not', async () => {
+  const athlete = { name: 'Jordan', subline: 'Age 14', contractMinutes: 45, packageId: 't-12', loginEmail: null, login: { state: 'none', claimedAt: null } };
+  mockDetail = { data: { athlete, history: [], checklist: [], hasEnoughData: false }, loading: false, error: null };
+  const opened = [];
+  const coach = await renderScreen(<AthleteDetail bare athleteId="a1" role="coach" backLabel="Roster" onBack={() => {}} onOpenAssessments={(name) => opened.push(name)} />);
+  await coach.click('Open results');
+  expect(opened).toEqual(['Jordan']);
+  await coach.unmount();
+  const parent = await renderScreen(<AthleteDetail bare athleteId="a1" role="parent" />);
+  expect(parent.button('Open results')).toBeNull();
+  await parent.unmount();
+});

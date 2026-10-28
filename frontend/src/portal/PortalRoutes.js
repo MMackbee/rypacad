@@ -17,7 +17,8 @@ import ParentDashboard from './screens/ParentDashboard';
 import AthleteDashboard from './screens/AthleteDashboard';
 import FeedbackButton from './components/FeedbackButton';
 import { bump } from './hooks/invalidate';
-import { AssessmentListRoute, AssessmentWaveRoute, RequireAssessment, loadAssessmentList } from './AssessmentRoutes';
+import { AssessmentListRoute, AssessmentResultsRoute, AssessmentWaveRoute, RequireAssessment, loadAssessmentList } from './AssessmentRoutes';
+import { assessmentAccess } from './data/assessmentAccess';
 
 /*
  * Code splitting (2026-09-29): every screen used to ship in one 1.2 MB
@@ -281,6 +282,7 @@ function AthleteDetailRoute() {
       role={role}
       backLabel={backLabel}
       onBack={() => navigate(back)}
+      onOpenAssessments={assessmentAccess(user) ? (name) => navigate(`/portal/assessments/athlete/${athleteId}`, { state: { name } }) : undefined}
     />
   );
 }
@@ -921,6 +923,16 @@ export default function PortalRoutes() {
           <RequireRole roles={['coach', 'mental', 'ops', 'owner']}>
             <RequireAssessment level="staff" landingFor={landingFor}>
               <AssessmentWaveRoute />
+            </RequireAssessment>
+          </RequireRole>
+        }
+      />
+      <Route
+        path="assessments/athlete/:athleteId"
+        element={
+          <RequireRole roles={['coach', 'mental', 'ops', 'owner']}>
+            <RequireAssessment level="reader" landingFor={landingFor}>
+              <AssessmentResultsRoute />
             </RequireAssessment>
           </RequireRole>
         }
