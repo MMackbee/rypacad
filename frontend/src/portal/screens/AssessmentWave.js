@@ -10,6 +10,7 @@ import AnthroStation from '../components/assessments/AnthroStation';
 import GripStation, { gripRotation } from '../components/assessments/GripStation';
 import JumpStation, { jumpRotation } from '../components/assessments/JumpStation';
 import MedballStation, { medballRotation } from '../components/assessments/MedballStation';
+import McGillStation, { mcgillRotation } from '../components/assessments/McGillStation';
 import { BackLink, Body, ErrorNotice, ScreenTitle } from '../components/Primitives';
 import { useWave } from '../hooks/assessments';
 import { saveAssessmentProfile, saveSection, saveWindowFields } from '../hooks/assessmentsLive';
@@ -27,6 +28,7 @@ export const STATION_VIEWS = {
   grip: { View: GripStation, rotation: gripRotation },
   jump: { View: JumpStation, rotation: jumpRotation },
   medball: { View: MedballStation, rotation: medballRotation },
+  mcgill: { View: McGillStation, rotation: mcgillRotation },
 };
 
 /** The save tracker's key for a kept entry: athleteId:section, athleteId:profile or athleteId:fields. */

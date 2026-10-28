@@ -185,3 +185,19 @@ test('the wave offers CMJ then 10/5, and the med ball, in order', async () => {
   expect(r.text()).toContain('Push the ground and throw it through the wall.');
   await r.unmount();
 });
+
+test('McGill is the sixth and last station of a baseline wave; a block run later opens on it', async () => {
+  const r = await wave({ initialStation: 'mcgill' });
+  expect(r.button('6 McGill').getAttribute('aria-pressed')).toBe('true');
+  expect(r.text()).toContain('Stop every hold at 300 s.');
+  expect(r.button('Finish wave')).not.toBeNull();
+  await r.unmount();
+});
+
+test('a wave of mid-season athletes has no McGill', async () => {
+  mockWave = { ...mockWave, athletes: [athlete('a', 'Ava Moreno', 1, { kind: 'mid' })] };
+  const r = await wave();
+  expect(r.button('6 McGill')).toBeNull();
+  expect(r.button('5 Med ball')).not.toBeNull();
+  await r.unmount();
+});
