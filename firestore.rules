@@ -487,6 +487,56 @@ service cloud.firestore {
             && get(/databases/$(database)/documents/households/$(resource.data.householdId)).data.createdBy == request.auth.uid)
       );
 
+      // ---- research consent (assessments spec 4.3, 7) -------------------
+      // The one-time confirm: the household's parent, or the 18+ member who
+      // created their own household (the same test as the package switch
+      // above), records consents.research once - that key only, while none
+      // is recorded, dated by the server and signed by the caller. The
+      // owner records a later change (the family emails it), the earlier
+      // answer moved onto the history, so every window keeps the answer it
+      // ran under. Under 18 a yes needs the assent; 18+ the assent is null.
+      function adultRecord() {
+        let dob = resource.data.get('dob', null);
+        return dob is string && dob.matches('[0-9]{4}-[0-9]{2}-[0-9]{2}')
+          && timestamp.date(int(dob.split('-')[0]) + 18, int(dob.split('-')[1]), int(dob.split('-')[2])) <= request.time;
+      }
+      function researchOnlyChange() {
+        return request.resource.data.diff(resource.data).affectedKeys().hasOnly(['consents'])
+          && request.resource.data.consents.diff(resource.data.get('consents', {})).affectedKeys().hasOnly(['research']);
+      }
+      function researchAnswerOk(r, adult) {
+        return r is map
+          && r.keys().hasOnly(['value', 'assent', 'recordedAt', 'recordedBy', 'history'])
+          && r.value is bool
+          && r.recordedAt == request.time
+          && r.recordedBy == request.auth.uid
+          && (adult ? r.get('assent', null) == null
+            : (r.get('assent', null) is bool && (r.value == false || r.assent == true)));
+      }
+      function researchFirstOk(adult) {
+        let r = request.resource.data.consents.research;
+        return researchOnlyChange()
+          && resource.data.get('consents', {}).get('research', null) == null
+          && researchAnswerOk(r, adult)
+          && !r.keys().hasAny(['history']);
+      }
+      function researchChangeOk() {
+        let prev = resource.data.get('consents', {}).get('research', null);
+        let r = request.resource.data.consents.research;
+        return researchOnlyChange()
+          && researchAnswerOk(r, adultRecord())
+          && r.get('history', []) == (prev == null ? [] : prev.get('history', []).concat([{
+            'value': prev.get('value', null), 'assent': prev.get('assent', null),
+            'recordedAt': prev.get('recordedAt', null), 'recordedBy': prev.get('recordedBy', null)}]));
+      }
+      allow update: if signedIn() && (
+        (me().role == 'parent' && resource.data.householdId == me().householdId && researchFirstOk(adultRecord()))
+        || (me().role == 'athlete' && me().athleteId == athleteId
+            && get(/databases/$(database)/documents/households/$(resource.data.householdId)).data.createdBy == request.auth.uid
+            && researchFirstOk(true))
+        || (me().role == 'owner' && researchChangeOk())
+      );
+
       // ---- athletes/{id}/diagnostics/{captureId} -----------------------
       // KEPT FOR THIS RELEASE ONLY (2026-10-14): Diagnostic Capture is gone
       // from the portal (assessments spec 8; production held 0 docs), but
