@@ -15,6 +15,7 @@ import {
 } from '../data/signup';
 import useFamilyAthletes from '../hooks/familyAthletes';
 import { AthleteStep, ConsentStep, ConsentInfoSheet, ContactStep, ContractStep, PackageStep, SubmittingOverlay, WhoStep } from './RegistrationSteps';
+import ResearchSheet from '../components/ResearchSheet';
 import RegistrationSuccess from './RegistrationSuccess';
 
 /**
@@ -166,6 +167,8 @@ export default function Registration({ variant, bare = false, mode = 'signup', a
   const patch = (p) => setForm((f) => ({ ...f, ...p }));
   const setContact = (fn) => setForm((f) => ({ ...f, contact: typeof fn === 'function' ? fn(f.contact) : fn }));
   const setConsents = (fn) => setForm((f) => ({ ...f, consents: typeof fn === 'function' ? fn(f.consents) : fn }));
+  // The research "Read more" sheet: { name, self } or null (assessments spec 7).
+  const [researchSheet, setResearchSheet] = useState(null);
   const setEmergency = (p) => setForm((f) => ({ ...f, emergencyContact: { ...toEmergencyForm(f.emergencyContact), ...p } }));
   // A refused login email (the function's child-email-* reasons: pending,
   // already a login, the guardian's own) is stale once that login changes, so
@@ -244,7 +247,7 @@ export default function Registration({ variant, bare = false, mode = 'signup', a
     try {
       const res = mode === 'link'
         ? await callAddAthletes(buildAddAthletesPayload(form, { contract: withContract }))
-        : await callCreateFamily(buildCreateFamilyPayload(form, { contract: withContract }));
+        : await callCreateFamily(buildCreateFamilyPayload(form, { contract: withContract, todayISO: today }));
       setResult(res);
       setPhase('success');
     } catch (err) {
@@ -324,11 +327,12 @@ export default function Registration({ variant, bare = false, mode = 'signup', a
         {stepId === 'consent' ? (
           <ConsentStep mode={form.mode} consents={form.consents} onChange={setConsents} signatureName={form.signatureName}
             onSignatureChange={(v) => patch({ signatureName: v })} onOpenInfo={setInfoSheet} showErrors={showErrors}
-            facilityRequired={facilityRequired} />
+            facilityRequired={facilityRequired} athletes={form.athletes} todayISO={today} onResearch={updateAthlete} onOpenResearch={setResearchSheet} />
         ) : null}
       </div>
       {phase === 'submitting' ? <SubmittingOverlay mode={mode} /> : null}
       {infoSheet ? <ConsentInfoSheet id={infoSheet} mode={form.mode} onClose={() => setInfoSheet(null)} /> : null}
+      {researchSheet ? <ResearchSheet name={researchSheet.name} onClose={() => setResearchSheet(null)} /> : null}
     </PhoneFrame>
   );
 }

@@ -9,6 +9,7 @@
 import { ALL_PACKAGES, ELITE, packageById } from './packages';
 import { contractEnabled } from './contractFlag';
 import { householdFacility } from './facility';
+import { researchAnswer } from './researchConsent';
 
 export const EMAIL_RE = /^\S+@\S+\.\S+$/;
 export const TIER_MINUTES = [20, 45, 90];
@@ -30,6 +31,8 @@ export function newAthleteEntry() {
   seq += 1;
   return {
     key: `new-${seq}`, name: '', dob: '', packageId: null, contractMinutes: null, contractPicked: false, handicap: '', ownLogin: false, loginEmail: '',
+    // Assessments spec 7: the research opt-in and, under 18, the assent box.
+    research: false, researchAssent: false,
   };
 }
 
@@ -205,9 +208,14 @@ function athleteBodies(form, contract) {
   return form.athletes.map((a, i) => athleteBody(a, contract, i === holder));
 }
 
-/** Contract 1.2 request body. Athlete mode: no relationship, no child login (the caller IS the login). */
-export function buildCreateFamilyPayload(form, { contract = contractEnabled() } = {}) {
+/**
+ * Contract 1.2 request body. Athlete mode: no relationship, no child login
+ * (the caller IS the login). Each athlete carries its research answer
+ * (assessments spec 7), under 18 by `todayISO`; createFamily re-checks it.
+ */
+export function buildCreateFamilyPayload(form, { contract = contractEnabled(), todayISO } = {}) {
   const parent = form.mode === 'parent';
+  const researchOf = (a) => researchAnswer({ ticked: a.research === true, assent: a.researchAssent === true, minor: parent && !isAdultOnDate(a.dob, todayISO) });
   return {
     mode: form.mode,
     contact: {
@@ -216,7 +224,7 @@ export function buildCreateFamilyPayload(form, { contract = contractEnabled() } 
       phone: form.contact.phone.trim(),
       relationship: parent ? form.contact.relationship || null : null,
     },
-    athletes: athleteBodies(form, contract).map((a) => (parent ? a : { ...a, loginEmail: null })),
+    athletes: athleteBodies(form, contract).map((a, i) => ({ ...(parent ? a : { ...a, loginEmail: null }), research: researchOf(form.athletes[i]) })),
     emergencyContact: emergencyBody(form.emergencyContact),
     medical: form.medical.trim() || null,
     consents: {
