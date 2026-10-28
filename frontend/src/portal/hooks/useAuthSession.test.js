@@ -18,6 +18,7 @@ import { onAuthStateChanged } from 'firebase/auth';
 import * as live from './live';
 import { ERR } from './live';
 import useAuthSession, { claimStateOf, createLoginError, resendError, resolveSelfManaged, useSelfManaged, verifyContinueUrl } from './useAuthSession';
+import { useAssessorTab } from './assessorTab';
 
 describe('claimStateOf', () => {
   test('the four contract states pass through; anything else is error', () => {
@@ -128,6 +129,38 @@ describe('self-managed athlete', () => {
     await act(async () => { emit({ uid: 'u-child', email: 'kid@example.com', emailVerified: true }); await new Promise((r) => setTimeout(r, 0)); });
     expect(seen.session.user).toMatchObject({ uid: 'u-child', role: 'athlete', selfManaged: false });
     expect(seen.tabBar).toBe(false);
+    await act(async () => root.unmount());
+  });
+});
+
+describe('the Assessments permission (assessments spec 3, 5)', () => {
+  test('user.assessor comes from the users doc; the tab flag is on for assessor staff and Phil, off for a plain coach and on sign-out', async () => {
+    let emit = null;
+    onAuthStateChanged.mockImplementation((_auth, cb) => { emit = cb; return () => {}; });
+    const seen = {};
+    function Probe() {
+      seen.session = useAuthSession();
+      seen.tab = useAssessorTab();
+      return null;
+    }
+    const root = createRoot(document.createElement('div'));
+    await act(async () => { root.render(<Probe />); });
+    const signIn = async (profile) => {
+      live.fetchCurrentUser.mockResolvedValue(profile);
+      await act(async () => { emit({ uid: profile.uid, email: `${profile.uid}@example.com`, emailVerified: true }); await new Promise((r) => setTimeout(r, 0)); });
+    };
+    await signIn({ uid: 'u-data', role: 'coach', assessor: true });
+    expect(seen.session.user).toMatchObject({ role: 'coach', assessor: true });
+    expect(seen.tab).toBe(true);
+    await signIn({ uid: 'u-golf', role: 'coach' });
+    expect(seen.session.user.assessor).toBe(false);
+    expect(seen.tab).toBe(false);
+    await signIn({ uid: 'u-phil', role: 'coach', specialistId: 'phil' });
+    expect(seen.tab).toBe(true);
+    await signIn({ uid: 'u-parent', role: 'parent', householdId: 'hh', assessor: true });
+    expect(seen.tab).toBe(false);
+    await act(async () => { emit(null); });
+    expect(seen.tab).toBe(false);
     await act(async () => root.unmount());
   });
 });

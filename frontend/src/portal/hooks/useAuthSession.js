@@ -11,6 +11,8 @@ import {
 import { auth, provider } from '../../firebase';
 import { ERR, LiveDataError, fetchCurrentUser, fetchHousehold } from './live';
 import { callClaimInvite } from './callables';
+import { publishAssessorTab } from './assessorTab';
+import { showsAssessmentsTab } from '../data/assessmentAccess';
 
 // Every screen and guard mounts its own useAuthSession, and each one's
 // NOT_FOUND emission used to fire claimInvite: the first call claimed, the
@@ -73,7 +75,7 @@ export function useSelfManaged() {
  * Real mode (no `variant` passed) returns the shape pinned in
  * docs/portal/TEAM.md, "Sprint 4 pins":
  *
- *   { user: { uid, email, role, athleteId, householdId, specialistId, emailVerified, selfManaged } | null,
+ *   { user: { uid, email, role, athleteId, householdId, specialistId, assessor, emailVerified, selfManaged } | null,
  *     provisioned: boolean, loading, error, signIn(), signInWithEmail(), signOut(),
  *     requestPasswordReset(),
  *     // Sprint 20 (spec 2.1, 3.2; contract 4.1):
@@ -121,6 +123,8 @@ function toUser(profile, fbUser, selfManaged = false) {
     athleteId: profile.athleteId != null ? profile.athleteId : null,
     householdId: profile.householdId != null ? profile.householdId : null,
     specialistId: profile.specialistId != null ? profile.specialistId : null,
+    // 2026-10-14 (assessments spec 3): the owner's Assessments permission.
+    assessor: profile.assessor === true,
     // Sprint 20 (spec 4.2): paying and claiming need a verified email.
     emailVerified: Boolean(fbUser && fbUser.emailVerified),
     selfManaged: selfManaged === true,
@@ -129,7 +133,7 @@ function toUser(profile, fbUser, selfManaged = false) {
 
 /** The signed-in-but-unprovisioned user (no users/{uid} doc yet). */
 function unprovisionedUser(fbUser) {
-  return { uid: fbUser.uid, email: fbUser.email != null ? fbUser.email : null, role: null, athleteId: null, householdId: null, emailVerified: Boolean(fbUser.emailVerified), selfManaged: false };
+  return { uid: fbUser.uid, email: fbUser.email != null ? fbUser.email : null, role: null, athleteId: null, householdId: null, assessor: false, emailVerified: Boolean(fbUser.emailVerified), selfManaged: false };
 }
 
 /** claimInvite's `state` (contract 1.4), or 'error' for anything else. */
@@ -216,11 +220,14 @@ export default function useAuthSession({ variant } = {}) {
       const selfManaged = await resolveSelfManaged(profile);
       if (seq !== seqRef.current) return 'stale';
       publishSelfManaged(selfManaged);
-      setSession({ user: toUser(profile, fbUser, selfManaged), provisioned: true, loading: false, error: null });
+      const user = toUser(profile, fbUser, selfManaged);
+      publishAssessorTab(showsAssessmentsTab(user));
+      setSession({ user, provisioned: true, loading: false, error: null });
       return 'provisioned';
     } catch (err) {
       if (seq !== seqRef.current) return 'stale';
       publishSelfManaged(false);
+      publishAssessorTab(false);
       if (err instanceof LiveDataError && err.code === ERR.NOT_FOUND) {
         // Exactly the unprovisioned case: a real account with no users/{uid}
         // doc yet. Defined state, not an error.
@@ -241,6 +248,7 @@ export default function useAuthSession({ variant } = {}) {
       const seq = ++seqRef.current;
       if (!fbUser) {
         publishSelfManaged(false);
+        publishAssessorTab(false);
         setSession(SIGNED_OUT);
         setClaimState('idle');
         return;
@@ -263,7 +271,7 @@ export default function useAuthSession({ variant } = {}) {
   /** Re-run the users/{uid} read under the current sequence (spec 2.2: `provisioned` flips without a reload). */
   const refresh = useCallback(async () => {
     const fbUser = auth.currentUser;
-    if (!fbUser) { publishSelfManaged(false); setSession(SIGNED_OUT); return; }
+    if (!fbUser) { publishSelfManaged(false); publishAssessorTab(false); setSession(SIGNED_OUT); return; }
     try { await fbUser.reload(); } catch (err) { /* offline reload: the cached user still resolves */ }
     setSession((s) => ({ ...s, loading: true }));
     await resolveProfile(seqRef.current, fbUser);

@@ -3,6 +3,10 @@ import { useNavigate } from 'react-router-dom';
 import { color, font, tint } from '../tokens';
 import { contractEnabled } from '../data/contractFlag';
 import { useSelfManaged } from '../hooks/useAuthSession';
+import { useAssessorTab } from '../hooks/assessorTab';
+
+/** Assessments (spec 5): Phil and assessor staff only - see `assessments` below. */
+const ASSESSMENTS_TAB = { key: 'assessments', label: 'Assessments', icon: 'chart', route: '/portal/assessments' };
 
 /**
  * Bottom tab bar. Four items per role, carried forward from the 2025 build's
@@ -63,6 +67,7 @@ export const TABS = {
   coach: [
     { key: 'today', label: 'Today', icon: 'today', route: '/portal/coach' },
     { key: 'roster', label: 'Roster', icon: 'list', route: '/portal/roster' },
+    ASSESSMENTS_TAB,
   ],
   /**
    * Sprint 10 pin F (TEAM.md, "STAFF NAVIGATION"): a coach WITH specialistId
@@ -76,6 +81,7 @@ export const TABS = {
     // and a specialist coach is nobody's assigned golf coach, so that tab
     // would always be empty for him. Tour replaces it.
     { key: 'sessions', label: 'Sessions', icon: 'today', route: '/portal/my-sessions' },
+    ASSESSMENTS_TAB,
     { key: 'tour', label: 'Tour', icon: 'trophy', route: '/portal/tour' },
   ],
   /**
@@ -98,6 +104,7 @@ export const TABS = {
   ],
   mental: [
     { key: 'sessions', label: 'Sessions', icon: 'today', route: '/portal/my-sessions' },
+    ASSESSMENTS_TAB,
     { key: 'tour', label: 'Tour', icon: 'trophy', route: '/portal/tour' },
   ],
 };
@@ -110,13 +117,19 @@ export const TABS = {
  * @param {boolean} [selfManaged]  With `role === 'athlete'`: the self-managed
  *   set (Billing, Settings). Defaults to the signed-in session's
  *   user.selfManaged (useSelfManaged), so no athlete screen threads it.
+ * @param {boolean} [assessments]  The Assessments tab on the coach, Phil and
+ *   mental sets. Defaults to the signed-in session's flag (useAssessorTab:
+ *   Phil, or the owner's Assessments permission); Phil's specialistId always
+ *   shows it. No other role's set has the tab.
  */
-export default function BottomTabBar({ role = 'athlete', active, onChange, specialistId, selfManaged }) {
+export default function BottomTabBar({ role = 'athlete', active, onChange, specialistId, selfManaged, assessments }) {
   const sessionSelfManaged = useSelfManaged();
+  const sessionAssessor = useAssessorTab();
   const payer = role === 'athlete' && (selfManaged ?? sessionSelfManaged) === true;
+  const showAssessments = (assessments ?? sessionAssessor) === true || specialistId === 'phil';
   const set = role === 'coach' && specialistId ? TABS.coachSpecialist : payer ? TABS.athleteSelfManaged : TABS[role] || TABS.athlete;
   // The Contract tab goes while the contract is hidden (owner, 2026-09-30).
-  const items = contractEnabled() ? set : set.filter((tab) => tab.key !== 'contract');
+  const items = set.filter((tab) => (contractEnabled() || tab.key !== 'contract') && (tab.key !== 'assessments' || showAssessments));
   const navigate = useNavigate();
 
   const select = (tab) => {

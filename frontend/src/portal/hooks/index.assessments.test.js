@@ -20,6 +20,8 @@ jest.mock('./live', () => ({
   fetchNoShowBookingsSince: jest.fn(),
   fetchPendingEnrollmentRequests: jest.fn(),
   fetchSessionsInRange: jest.fn(),
+  fetchStaffUsers: jest.fn(),
+  fetchPendingStaffInvites: jest.fn(),
 }));
 jest.mock('./assessmentsLive', () => ({ ...jest.requireActual('./assessmentsLive'), __esModule: true, fetchAllAssessmentWindows: jest.fn() }));
 jest.mock('../data/calendar', () => {
@@ -32,7 +34,7 @@ import { createRoot } from 'react-dom/client';
 import * as live from './live';
 import * as adapter from './assessmentsLive';
 import * as calendar from '../data/calendar';
-import { deriveWhoNeedsCall, useAdminDashboard } from './index';
+import { deriveWhoNeedsCall, useAdminDashboard, useStaff } from './index';
 
 const settle = () => act(async () => { await new Promise((r) => setTimeout(r, 0)); });
 async function mountHook(useHook) {
@@ -94,4 +96,13 @@ describe('the admin dashboard', () => {
     expect(h.result.current.data.metrics.enrolled).toBe(2);
     await h.unmount();
   });
+});
+
+test('the staff list carries the Assessments permission (absent is off)', async () => {
+  live.isLive.mockReturnValue(true);
+  live.fetchStaffUsers.mockResolvedValue([{ id: 'u1', displayName: 'Data Coach', role: 'coach', assessor: true }, { id: 'u2', displayName: 'Golf Coach', role: 'coach' }]);
+  live.fetchPendingStaffInvites.mockResolvedValue([]);
+  const h = await mountHook(() => useStaff());
+  expect(h.result.current.data.staff.map((s) => [s.name, s.assessor])).toEqual([['Data Coach', true], ['Golf Coach', false]]);
+  await h.unmount();
 });

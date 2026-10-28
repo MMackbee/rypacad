@@ -3794,6 +3794,8 @@ async function liveStaff() {
         name: u.displayName ?? u.email ?? u.id,
         role: u.role ?? null,
         specialistId: u.specialistId ?? null,
+        // 2026-10-14 (assessments spec 3): absent is off.
+        assessor: u.assessor === true,
         mfa: null,
         note: null,
       }))

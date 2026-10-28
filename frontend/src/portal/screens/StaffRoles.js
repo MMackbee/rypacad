@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { color, font, radius } from '../tokens';
 import AthleteRow from '../components/AthleteRow';
+import AssessorToggle from '../components/AssessorToggle';
 import BottomTabBar from '../components/BottomTabBar';
 import Button from '../components/Button';
 import Field, { SelectField } from '../components/Field';
@@ -105,6 +106,8 @@ export default function StaffRoles({ variant = 'populated', bare = false, onBack
                   </StatusBadge>
                 }
               />
+              {/* 2026-10-14 (assessments spec 3): coaches and mental only. */}
+              {member.role === 'coach' || member.role === 'mental' ? <AssessorToggle member={member} /> : null}
               {member.note ? (
                 <div
                   style={{
