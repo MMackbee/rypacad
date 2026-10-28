@@ -155,3 +155,25 @@ test('an unknown wave says so', async () => {
   expect(r.text()).toContain('This wave was not found.');
   await r.unmount();
 });
+
+test('the wave offers anthropometrics and grip after intake, with the grip rotation', async () => {
+  const r = await wave();
+  expect(r.button('2 Anthropometrics')).not.toBeNull();
+  await r.click('3 Grip');
+  expect(r.text()).toContain('Squeeze as hard as you can. Go, go, go, relax.');
+  expect(r.text()).toContain('Dynamometer 1: A right, A left, B right, B left');
+  await r.unmount();
+});
+
+test('a pain stop at intake: the athlete is offered no anthropometrics or grip (safety)', async () => {
+  const r = await wave();
+  await r.click('Ava Moreno: pain, stop');
+  expect(r.text()).toContain('Stopped for pain.');
+  await r.click('2 Anthropometrics');
+  expect(field(r, 'Ava Moreno standing height 1')).toBeNull();
+  expect(field(r, 'Ben Ortiz standing height 1')).not.toBeNull();
+  expect(r.text()).toContain('Not tested at readiness (Pain). Retest within 7 days.');
+  await r.click('3 Grip');
+  expect(field(r, 'Ava Moreno grip right 1')).toBeNull();
+  await r.unmount();
+});

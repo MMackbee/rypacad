@@ -6,6 +6,8 @@ import CancelSheet from '../components/CancelSheet';
 import StationShell from '../components/assessments/StationShell';
 import EquipmentCard, { useEquipment } from '../components/assessments/EquipmentCard';
 import IntakeStation from '../components/assessments/IntakeStation';
+import AnthroStation from '../components/assessments/AnthroStation';
+import GripStation, { gripRotation } from '../components/assessments/GripStation';
 import { BackLink, Body, ErrorNotice, ScreenTitle } from '../components/Primitives';
 import { useWave } from '../hooks/assessments';
 import { saveAssessmentProfile, saveSection, saveWindowFields } from '../hooks/assessmentsLive';
@@ -19,6 +21,8 @@ import { shortDate } from '../data/assessmentWindows';
  */
 export const STATION_VIEWS = {
   intake: { View: IntakeStation },
+  anthro: { View: AnthroStation },
+  grip: { View: GripStation, rotation: gripRotation },
 };
 
 /** The save tracker's key for a kept entry: athleteId:section, athleteId:profile or athleteId:fields. */
