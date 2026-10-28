@@ -33,15 +33,23 @@ export const RANGES = {
   hoursSinceHard: { lo: 0, hi: 336, unit: 'h', name: 'Hours since a hard session' },
   sessions: { lo: 0, hi: 200, unit: '', name: 'RYP sessions' },
   otherSportHours: { lo: 0, hi: 40, unit: 'h', name: 'Other sport hours' },
+  // The settings form (spec 4.6): grip rest, the change-marker thresholds and the Moore (2015)
+  // coefficients, as firestore.rules checks them on assessmentSettings.
+  restSec: { lo: 0, hi: 120, unit: 's', name: 'Rest' },
+  thresholdPct: { lo: 0, hi: 50, unit: '%', name: 'Threshold' },
+  coefficientA: { lo: -20, hi: 0, unit: '', name: 'Coefficient a' },
+  coefficientB: { lo: 0, hi: 0.1, unit: '', name: 'Coefficient b' },
 };
 
 /** "0-100 kg". */
 export function rangeLabel(rangeKey) {
   const r = RANGES[rangeKey];
-  return r ? `${r.lo}-${r.hi}${r.unit ? ` ${r.unit}` : ''}` : '';
+  return r ? `${r.lo}${r.lo < 0 ? ' to ' : '-'}${r.hi}${r.unit ? ` ${r.unit}` : ''}` : '';
 }
 
 const NUMBER = /^(\d+(\.\d+)?|\.\d+)$/;
+/** A range below 0 (the Moore coefficient a) takes a leading minus; nothing else does. */
+const SIGNED = /^-?(\d+(\.\d+)?|\.\d+)$/;
 
 /**
  * A typed trial: blank is null (clears the trial); a comma decimal is a
@@ -52,9 +60,9 @@ export function parseTrial(text, rangeKey) {
   const raw = String(text ?? '').trim();
   if (raw === '') return { ok: true, value: null };
   const normalized = raw.includes(',') && !raw.includes('.') ? raw.replace(',', '.') : raw;
-  if (!NUMBER.test(normalized)) return { ok: false, error: 'Numbers only, like 32.5' };
-  const value = Number(normalized);
   const r = RANGES[rangeKey];
+  if (!(r && r.lo < 0 ? SIGNED : NUMBER).test(normalized)) return { ok: false, error: 'Numbers only, like 32.5' };
+  const value = Number(normalized);
   if (r && (value < r.lo || value > r.hi)) return { ok: false, error: `${r.name} is ${rangeLabel(rangeKey)}` };
   return { ok: true, value };
 }

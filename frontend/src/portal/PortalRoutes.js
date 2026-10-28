@@ -17,7 +17,9 @@ import ParentDashboard from './screens/ParentDashboard';
 import AthleteDashboard from './screens/AthleteDashboard';
 import FeedbackButton from './components/FeedbackButton';
 import { bump } from './hooks/invalidate';
-import { AssessmentGolfRoute, AssessmentListRoute, AssessmentResultsRoute, AssessmentWaveRoute, RequireAssessment, loadAssessmentList } from './AssessmentRoutes';
+import {
+  AssessmentGolfRoute, AssessmentListRoute, AssessmentResultsRoute, AssessmentSettingsRoute, AssessmentWaveRoute, RequireAssessment, loadAssessmentList,
+} from './AssessmentRoutes';
 import { assessmentAccess } from './data/assessmentAccess';
 
 /*
@@ -944,6 +946,16 @@ export default function PortalRoutes() {
           <RequireRole roles={['coach', 'mental', 'ops', 'owner']}>
             <RequireAssessment level="reader" landingFor={landingFor}>
               <AssessmentGolfRoute />
+            </RequireAssessment>
+          </RequireRole>
+        }
+      />
+      <Route
+        path="assessments/settings"
+        element={
+          <RequireRole roles={['coach', 'mental', 'ops', 'owner']}>
+            <RequireAssessment level="staff" landingFor={landingFor}>
+              <AssessmentSettingsRoute />
             </RequireAssessment>
           </RequireRole>
         }

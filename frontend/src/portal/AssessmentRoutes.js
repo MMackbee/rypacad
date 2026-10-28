@@ -17,6 +17,8 @@ export const loadAssessmentResults = () => import('./screens/AssessmentResults')
 const AssessmentResults = lazy(loadAssessmentResults);
 export const loadAssessmentGolf = () => import('./screens/AssessmentGolf');
 const AssessmentGolf = lazy(loadAssessmentGolf);
+export const loadAssessmentSettings = () => import('./screens/AssessmentSettings');
+const AssessmentSettings = lazy(loadAssessmentSettings);
 
 /** The signed-in user; in seed mode (the review scaffold), Phil. */
 export function useViewer() {
@@ -96,4 +98,11 @@ export function AssessmentGolfRoute() {
   const navigate = useNavigate();
   const canGoBack = (window.history.state?.idx ?? 0) > 0;
   return <AssessmentGolf bare athleteId={athleteId} fallbackName={state?.name ?? null} onBack={() => (canGoBack ? navigate(-1) : navigate('/portal'))} />;
+}
+
+/** /portal/assessments/settings - assessment staff read; the screen lets only Phil and the owner edit (spec 4.6). */
+export function AssessmentSettingsRoute() {
+  const { viewer } = useViewer();
+  const navigate = useNavigate();
+  return <AssessmentSettings bare viewer={viewer} onBack={() => navigate('/portal/assessments')} />;
 }

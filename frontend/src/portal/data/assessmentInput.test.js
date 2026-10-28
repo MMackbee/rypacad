@@ -65,3 +65,12 @@ describe('fixed-length trial lists', () => {
     expect(setAt([1, 2, 3], 0, 9, 2)).toEqual([9, 2, 3]);
   });
 });
+
+test('a Moore coefficient may be negative; every other entry still refuses a sign', () => {
+  expect(parseTrial('-8.128741', 'coefficientA')).toEqual({ ok: true, value: -8.128741 });
+  expect(parseTrial('0.0070346', 'coefficientB')).toEqual({ ok: true, value: 0.0070346 });
+  expect(parseTrial('-21', 'coefficientA')).toEqual({ ok: false, error: 'Coefficient a is -20 to 0' });
+  expect(parseTrial('0.2', 'coefficientB')).toEqual({ ok: false, error: 'Coefficient b is 0-0.1' });
+  expect(parseTrial('-3', 'grip')).toEqual({ ok: false, error: 'Numbers only, like 32.5' });
+  expect(rangeLabel('coefficientA')).toBe('-20 to 0');
+});
