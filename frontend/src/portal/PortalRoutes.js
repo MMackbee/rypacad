@@ -17,7 +17,7 @@ import ParentDashboard from './screens/ParentDashboard';
 import AthleteDashboard from './screens/AthleteDashboard';
 import FeedbackButton from './components/FeedbackButton';
 import { bump } from './hooks/invalidate';
-import { AssessmentListRoute, RequireAssessment, loadAssessmentList } from './AssessmentRoutes';
+import { AssessmentListRoute, AssessmentWaveRoute, RequireAssessment, loadAssessmentList } from './AssessmentRoutes';
 
 /*
  * Code splitting (2026-09-29): every screen used to ship in one 1.2 MB
@@ -911,6 +911,16 @@ export default function PortalRoutes() {
           <RequireRole roles={['coach', 'mental', 'ops', 'owner']}>
             <RequireAssessment level="staff" landingFor={landingFor}>
               <AssessmentListRoute />
+            </RequireAssessment>
+          </RequireRole>
+        }
+      />
+      <Route
+        path="assessments/wave/:waveId"
+        element={
+          <RequireRole roles={['coach', 'mental', 'ops', 'owner']}>
+            <RequireAssessment level="staff" landingFor={landingFor}>
+              <AssessmentWaveRoute />
             </RequireAssessment>
           </RequireRole>
         }

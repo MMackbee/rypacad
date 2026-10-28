@@ -18,6 +18,7 @@ jest.mock('./screens/AssessmentList', () => {
   const { createElement } = require('react');
   return { __esModule: true, default: ({ viewer, onBack }) => createElement('button', { type: 'button', onClick: onBack }, `LIST as ${viewer.role}${onBack ? ' with back' : ''}`) };
 });
+jest.mock('./screens/AssessmentWave', () => ({ __esModule: true, default: ({ waveId, initialStation }) => `WAVE ${waveId} at ${initialStation ?? 'start'}` }));
 jest.mock('./hooks/live', () => ({ ...jest.requireActual('./hooks/live'), isLive: () => mockLive.value }));
 jest.mock('./hooks/useAuthSession', () => ({
   ...jest.requireActual('./hooks/useAuthSession'),
@@ -78,4 +79,15 @@ test("the owner's Admin card opens the list, and its back link returns to Admin"
   await r.click();
   expect(r.pathname()).toBe('/portal/admin');
   await r.unmount();
+});
+
+test('a wave opens for staff; a coach without the permission goes home', async () => {
+  mockUser.value = { uid: 'p', role: 'coach', specialistId: 'phil' };
+  const r = await mount('/portal/assessments/wave/wave-2026-11-03-abc');
+  expect(r.text()).toBe('WAVE wave-2026-11-03-abc at start');
+  await r.unmount();
+  mockUser.value = { uid: 'c', role: 'coach' };
+  const c = await mount('/portal/assessments/wave/wave-2026-11-03-abc');
+  expect(c.pathname()).toBe('/portal/coach');
+  await c.unmount();
 });

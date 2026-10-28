@@ -1,5 +1,5 @@
 import React, { lazy } from 'react';
-import { Navigate, useNavigate } from 'react-router-dom';
+import { Navigate, useLocation, useNavigate, useParams } from 'react-router-dom';
 import useAuthSession from './hooks/useAuthSession';
 import { isLive } from './hooks/live';
 import { SEED_VIEWER, assessmentAccess } from './data/assessmentAccess';
@@ -11,6 +11,8 @@ import { SEED_VIEWER, assessmentAccess } from './data/assessmentAccess';
  */
 export const loadAssessmentList = () => import('./screens/AssessmentList');
 const AssessmentList = lazy(loadAssessmentList);
+export const loadAssessmentWave = () => import('./screens/AssessmentWave');
+const AssessmentWave = lazy(loadAssessmentWave);
 
 /** The signed-in user; in seed mode (the review scaffold), Phil. */
 export function useViewer() {
@@ -49,4 +51,12 @@ export function AssessmentListRoute() {
       onBack={fromAdmin ? () => navigate('/portal/admin') : undefined}
     />
   );
+}
+
+/** /portal/assessments/wave/:waveId - navigation state `station` reopens one station (a McGill block run later). */
+export function AssessmentWaveRoute() {
+  const { waveId } = useParams();
+  const { state } = useLocation();
+  const navigate = useNavigate();
+  return <AssessmentWave bare waveId={waveId} initialStation={state?.station ?? null} onBack={() => navigate('/portal/assessments')} />;
 }
