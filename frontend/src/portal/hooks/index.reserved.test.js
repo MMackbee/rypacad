@@ -17,7 +17,6 @@ jest.mock('./live', () => ({
   __esModule: true,
   isLive: jest.fn(),
   fetchAllAthletes: jest.fn(),
-  fetchAllDiagnostics: jest.fn(),
   fetchAllHouseholds: jest.fn(),
   fetchAthlete: jest.fn(),
   fetchBookings: jest.fn(),
@@ -42,6 +41,7 @@ jest.mock('./waitlist', () => ({
   fetchWaitlistPositions: jest.fn(),
 }));
 jest.mock('./grace', () => ({ ...jest.requireActual('./grace'), __esModule: true, fetchTokenPeriod: jest.fn() }));
+jest.mock('./assessmentsLive', () => ({ ...jest.requireActual('./assessmentsLive'), __esModule: true, fetchAllAssessmentWindows: jest.fn() }));
 jest.mock('../data/calendar', () => {
   const actual = jest.requireActual('../data/calendar');
   return { ...actual, __esModule: true, todayISO: jest.fn(() => actual.todayISO()) };
@@ -53,6 +53,7 @@ import * as hooks from './index';
 import * as live from './live';
 import * as waitlist from './waitlist';
 import * as grace from './grace';
+import * as adapter from './assessmentsLive';
 import * as calendar from '../data/calendar';
 import { reservedEligible, reservedTag } from '../data/reserved';
 
@@ -214,7 +215,7 @@ describe('staff surfaces that list sessions', () => {
   test("the admin dashboard: this week's reserved blocks are named beside the block fill, off the same week read", async () => {
     asStaff('owner');
     for (const fetch of [live.fetchAllAthletes, live.fetchPendingEnrollmentRequests, live.fetchNoShowBookingsSince,
-      live.fetchContractLogsSince, live.fetchAllDiagnostics, live.fetchAllHouseholds]) fetch.mockResolvedValue([]);
+      live.fetchContractLogsSince, adapter.fetchAllAssessmentWindows, live.fetchAllHouseholds]) fetch.mockResolvedValue([]);
     live.fetchSessionsInRange.mockResolvedValue([
       session('2026-11-10-0', '2026-11-10', '3:00 PM', { maxHandicap: 5, booked: 4 }),
       session('2026-11-10-1', '2026-11-10', '4:00 PM', { booked: 10 }),

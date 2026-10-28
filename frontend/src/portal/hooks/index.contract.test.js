@@ -127,7 +127,7 @@ describe('deriveWhoNeedsCall uses the buffer and the window', () => {
     { id: 'a3', name: 'Nico', contractMinutes: null },
   ];
   const who = (today, contractLogs = []) =>
-    deriveWhoNeedsCall({ athletes, pendingCount: 0, noshowBookings: [], contractLogs, publishedDiagnosticAthleteIds: [], today })
+    deriveWhoNeedsCall({ athletes, pendingCount: 0, noshowBookings: [], contractLogs, baselineAthleteIds: [], today })
       .contractBehind;
 
   test('nobody before the season or inside the buffer', () => {

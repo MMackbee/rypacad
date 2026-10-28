@@ -45,7 +45,6 @@ import {
   declineEnrollmentRequest,
   deleteContractLog,
   fetchAllAthletes,
-  fetchAllDiagnostics,
   fetchAllHouseholds,
   fetchAthlete,
   fetchAthleteDiagnostics,
@@ -96,6 +95,10 @@ import useRecentNotices from './notices';
 import usePush from './push';
 import useSignups, { fetchLoginInvite } from './signups';
 import useScholarships from './scholarships';
+// 2026-10-14 (assessments spec 8): the admin "Baseline due" row reads the
+// assessment windows, the module that replaced the diagnostics reads.
+import { ASSESSMENTS_KEY, fetchAllAssessmentWindows } from './assessmentsLive';
+import { seasonOf } from '../data/assessmentWindows';
 import {
   COACH,
   COACH_BLOCKS,
@@ -3574,7 +3577,7 @@ function mondayOfWeek(todayIso) {
  * @param {number} args.pendingCount - pending enrollmentRequests count.
  * @param {Array} args.noshowBookings - bookings with status 'noshow', date >= monthStart.
  * @param {Array} args.contractLogs - contractLogs with date >= monthStart, every athlete.
- * @param {Array} args.publishedDiagnosticAthleteIds - athleteIds with >=1 published diagnostic.
+ * @param {Array|null} args.baselineAthleteIds - athleteIds with a baseline assessment window this season (any status); null when the windows could not be read, which lists nobody.
  * @param {string} args.today - ISO 'yyyy-MM-dd'.
  */
 export function deriveWhoNeedsCall({
@@ -3582,7 +3585,7 @@ export function deriveWhoNeedsCall({
   pendingCount,
   noshowBookings,
   contractLogs,
-  publishedDiagnosticAthleteIds,
+  baselineAthleteIds,
   today,
 }) {
   const nameById = new Map(athletes.map((a) => [a.id, a.name ?? null]));
@@ -3615,16 +3618,19 @@ export function deriveWhoNeedsCall({
   }
   contractBehind.sort((a, b) => b.missed - a.missed);
 
-  const publishedSet = new Set(publishedDiagnosticAthleteIds ?? []);
-  const missingDiagnostic = athletes
-    .filter((a) => !publishedSet.has(a.id))
-    .map((a) => ({ athleteId: a.id, name: a.name ?? null }));
+  // Assessments spec 8: "Baseline due" replaces "Diagnostic not entered" -
+  // an athlete with no baseline window is due one. Unknown (null) lists
+  // nobody rather than every athlete.
+  const tested = new Set(baselineAthleteIds ?? []);
+  const baselineDue = baselineAthleteIds == null
+    ? []
+    : athletes.filter((a) => !tested.has(a.id)).map((a) => ({ athleteId: a.id, name: a.name ?? null }));
 
   return {
     pendingEnrollment: { count: pendingCount },
     noshows,
     contractBehind,
-    missingDiagnostic,
+    baselineDue,
   };
 }
 
@@ -3655,14 +3661,16 @@ async function liveAdminDashboard(today) {
   const weekStart = mondayOfWeek(today);
   const weekEnd = addDaysISO(weekStart, 6);
 
-  const [athletes, sessionsThisWeek, pending, noshowBookings, contractLogs, diagnostics, households] =
+  // The assessment windows read may fail on its own (rules that do not
+  // grant it yet): that drops the "Baseline due" rows, never the dashboard.
+  const [athletes, sessionsThisWeek, pending, noshowBookings, contractLogs, windows, households] =
     await Promise.all([
       fetchAllAthletes(),
       fetchSessionsInRange(weekStart, weekEnd),
       fetchPendingEnrollmentRequests(),
       fetchNoShowBookingsSince(monthStart),
       fetchContractLogsSince(monthStart),
-      fetchAllDiagnostics(),
+      fetchAllAssessmentWindows().catch(() => null),
       fetchAllHouseholds(),
     ]);
 
@@ -3683,15 +3691,15 @@ async function liveAdminDashboard(today) {
   // Sprint 20 (spec 4.4/7): athletes still on checkout - an ATHLETE count beside the household counts, so the dashboard agrees with the sign-ups report.
   membership.pending = athletes.filter((a) => billingStatusOf(a) === 'pending').length;
 
-  const publishedDiagnosticAthleteIds = diagnostics
-    .filter((d) => d.status === 'published')
-    .map((d) => d.athleteId);
+  // This season's baselines only (the list's rule, data/assessmentWindows.js dueStatus): last season's do not count.
+  const season = seasonOf(today);
+  const baselineAthleteIds = windows == null ? null : windows.filter((w) => w.kind === 'baseline' && w.season === season).map((w) => w.athleteId);
   const who = deriveWhoNeedsCall({
     athletes,
     pendingCount: pending.length,
     noshowBookings,
     contractLogs,
-    publishedDiagnosticAthleteIds,
+    baselineAthleteIds,
     today,
   });
 
@@ -3732,14 +3740,14 @@ async function liveAdminDashboard(today) {
       packageIds: null,
     });
   }
-  for (const d of who.missingDiagnostic) {
+  for (const d of who.baselineDue) {
     outstanding.push({
-      id: `diagnostic-${d.athleteId}`,
-      kind: 'diagnostic',
+      id: `baseline-${d.athleteId}`,
+      kind: 'baseline',
       athleteId: d.athleteId,
       who: d.name ?? d.athleteId,
-      why: 'Diagnostic not entered',
-      tag: 'Onboarding',
+      why: 'Baseline due',
+      tag: 'Assessment',
       tone: 'yellow',
       packageIds: null,
     });
@@ -3833,7 +3841,7 @@ export function useAdminDashboard({ variant = 'populated' } = {}) {
   const athletesGen = useInvalidation('athletes');
   const bookingsGen = useInvalidation('bookings');
   const contractLogsGen = useInvalidation('contractLogs');
-  const diagnosticsGen = useInvalidation('diagnostics');
+  const assessmentsGen = useInvalidation(ASSESSMENTS_KEY);
   const enrollmentGen = useInvalidation('enrollmentRequests');
   const householdsGen = useInvalidation('households');
 
@@ -3867,7 +3875,7 @@ export function useAdminDashboard({ variant = 'populated' } = {}) {
             athletesGen,
             bookingsGen,
             contractLogsGen,
-            diagnosticsGen,
+            assessmentsGen,
             enrollmentGen,
             householdsGen,
           ],

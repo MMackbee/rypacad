@@ -322,7 +322,7 @@ export const ATTENTION_LIST = [
 ];
 
 export const COACH_OUTSTANDING = [
-  { id: 'o1', label: 'Diagnostic not entered', detail: '2 athletes' },
+  { id: 'o1', label: 'Baseline due', detail: '2 athletes' },
   { id: 'o2', label: 'Attendance not closed', detail: '1 block' },
 ];
 

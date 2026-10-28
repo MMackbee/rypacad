@@ -15,7 +15,6 @@
 
 import {
   collection,
-  collectionGroup,
   deleteDoc,
   deleteField,
   doc,
@@ -1961,25 +1960,6 @@ export async function fetchContractLogsSince(dateISO) {
     return snap.docs.map((d) => ({ id: d.id, ...d.data() }));
   } catch (err) {
     throw wrap(err, 'fetchContractLogsSince');
-  }
-}
-
-/**
- * Every diagnostics capture academy-wide, via the collectionGroup read
- * firestore.rules' `/{path=**}/diagnostics/{captureId}` match grants
- * (contract v1.8, C + D). Unfiltered and sorted/filtered client-side
- * (status === 'published' for the "no diagnostic yet" list) rather than a
- * `where('status', ...)` server-side filter, so this needs no
- * collection-group-scoped index at all — the routing lane's own
- * "index-free where reasonably possible" preference, since collection-group
- * equality indexes are NOT automatic the way single-collection ones are.
- */
-export async function fetchAllDiagnostics() {
-  try {
-    const snap = await getDocs(collectionGroup(db, 'diagnostics'));
-    return snap.docs.map((d) => ({ id: d.id, ...d.data() }));
-  } catch (err) {
-    throw wrap(err, 'fetchAllDiagnostics');
   }
 }
 
