@@ -108,3 +108,13 @@ describe('circuit dates and wave ids', () => {
     expect(newWaveId('2026-11-03')).toMatch(/^wave-2026-11-03-[a-z0-9]{1,5}$/);
   });
 });
+
+test('research counts by the answer in force on the circuit date: a later no keeps the yes before it', () => {
+  const changed = { value: false, assent: false, recordedAt: '2026-11-10T15:00:00Z', history: [{ value: true, assent: true, recordedAt: '2026-10-15T15:00:00Z' }] };
+  expect(inResearch(changed, '2026-11-03')).toBe(true);
+  expect(inResearch(changed, '2026-11-20')).toBe(false);
+  expect(inResearch(changed, '2026-10-01')).toBe(false);
+  const later = { value: true, assent: true, recordedAt: '2026-12-01T15:00:00Z', history: [{ value: false, assent: false, recordedAt: '2026-10-15T15:00:00Z' }] };
+  expect(inResearch(later, '2026-11-03')).toBe(false);
+  expect(inResearch(later, '2026-12-01')).toBe(true);
+});

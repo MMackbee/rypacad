@@ -49,6 +49,8 @@ jest.mock('./screens/NotificationPreferences', () => ({
   default: ({ role }) => { mockSettingsRoles.push(role); return `SETTINGS as ${role}`; },
 }));
 jest.mock('./hooks/live', () => ({ ...jest.requireActual('./hooks/live'), isLive: () => mockLive.value }));
+// The one-time research confirm wraps the family and athlete homes; nothing is pending here.
+jest.mock('./hooks/researchConsent', () => ({ useResearchConfirm: () => ({ data: { pending: [] }, loading: false, error: null }), saveResearchConsent: async () => ({}) }));
 jest.mock('./hooks/useAuthSession', () => {
   const { useEffect, useState } = require('react');
   return {

@@ -21,6 +21,7 @@ import {
   AssessmentGolfRoute, AssessmentListRoute, AssessmentResultsRoute, AssessmentSettingsRoute, AssessmentWaveRoute, RequireAssessment, loadAssessmentList,
 } from './AssessmentRoutes';
 import { assessmentAccess } from './data/assessmentAccess';
+import ResearchConfirmGate from './components/ResearchConfirmGate';
 
 /*
  * Code splitting (2026-09-29): every screen used to ship in one 1.2 MB
@@ -710,12 +711,15 @@ export default function PortalRoutes() {
         path="home"
         element={
           <RequireRole roles={['athlete']}>
-            <AthleteDashboard
-              bare
-              onLog={go('/portal/contract')}
-              onBook={go('/portal/book')}
-              onSignOut={onSignOut}
-            />
+            {/* Assessments spec 7: the one-time research confirm, the 18+ member's own. */}
+            <ResearchConfirmGate>
+              <AthleteDashboard
+                bare
+                onLog={go('/portal/contract')}
+                onBook={go('/portal/book')}
+                onSignOut={onSignOut}
+              />
+            </ResearchConfirmGate>
           </RequireRole>
         }
       />
@@ -791,11 +795,14 @@ export default function PortalRoutes() {
         path="family"
         element={
           <RequireRole roles={['parent']}>
-            <ParentDashboard
-              bare
-              onOpenAthlete={openAthlete}
-              onSignOut={onSignOut}
-            />
+            {/* Assessments spec 7: the one-time research confirm before the family home. */}
+            <ResearchConfirmGate>
+              <ParentDashboard
+                bare
+                onOpenAthlete={openAthlete}
+                onSignOut={onSignOut}
+              />
+            </ResearchConfirmGate>
           </RequireRole>
         }
       />

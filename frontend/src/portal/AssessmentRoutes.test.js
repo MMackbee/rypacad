@@ -30,6 +30,7 @@ jest.mock('./screens/AthleteDetail', () => {
   return { __esModule: true, default: ({ onOpenAssessments }) => createElement('button', { type: 'button', onClick: () => onOpenAssessments('Ava Moreno') }, onOpenAssessments ? 'DETAIL with assessments' : 'DETAIL') };
 });
 jest.mock('./hooks/live', () => ({ ...jest.requireActual('./hooks/live'), isLive: () => mockLive.value }));
+jest.mock('./hooks/researchConsent', () => ({ useResearchConfirm: () => ({ data: { pending: [] }, loading: false, error: null }), saveResearchConsent: async () => ({}) }));
 jest.mock('./hooks/useAuthSession', () => ({
   ...jest.requireActual('./hooks/useAuthSession'),
   __esModule: true,

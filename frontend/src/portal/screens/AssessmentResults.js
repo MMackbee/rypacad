@@ -2,12 +2,14 @@ import React, { useMemo, useState } from 'react';
 import AssessmentFrame, { useLayoutClass } from '../components/AssessmentFrame';
 import WindowCard from '../components/assessments/WindowCard';
 import ResultsTable from '../components/assessments/ResultsTable';
+import ResearchLine from '../components/assessments/ResearchLine';
 import { BackLink, Body, ErrorNotice, ScreenTitle } from '../components/Primitives';
 import { useAthleteAssessments } from '../hooks/assessments';
 import { saveWindowFields } from '../hooks/assessmentsLive';
 import { assessmentAccess } from '../data/assessmentAccess';
 import { buildResults } from '../data/assessmentResults';
-import { CONSENT_LABEL, shortDate } from '../data/assessmentWindows';
+import { shortDate } from '../data/assessmentWindows';
+import { isAdultOnDate } from '../data/signup';
 import { academyDateISO } from '../data/calendar';
 
 const SEX_LABEL = { male: 'Male', female: 'Female' };
@@ -45,13 +47,18 @@ export default function AssessmentResults({ bare = false, athleteId, viewer, fal
   };
 
   const about = results
-    ? [CONSENT_LABEL[results.consent], results.firstTestDate ? `First test ${shortDate(results.firstTestDate)}` : null, SEX_LABEL[results.sex] ?? null].filter(Boolean).join(' · ')
+    ? [results.firstTestDate ? `First test ${shortDate(results.firstTestDate)}` : null, SEX_LABEL[results.sex] ?? null].filter(Boolean).join(' · ')
     : null;
+  const athlete = data?.athlete ?? null;
   const header = (
     <div style={{ padding: '4px 22px 12px' }}>
       <BackLink onClick={onBack}>‹ Back</BackLink>
       <ScreenTitle size={21} style={{ marginTop: 8 }}>{name}</ScreenTitle>
       {about ? <Body size={12} style={{ marginTop: 3 }}>{about}</Body> : null}
+      {athlete ? (
+        <ResearchLine athleteId={athleteId} research={athlete.consents?.research ?? null} minor={!isAdultOnDate(athlete.dob, today)}
+          canChange={viewer?.role === 'owner'} />
+      ) : null}
     </div>
   );
 

@@ -56,7 +56,8 @@ test('every window newest first, with maturity, scores, markers and flags', asyn
   const r = await screen();
   const text = r.text();
   expect(text).toContain('Ava Moreno');
-  expect(text).toContain('Research: yes · First test Nov 3 · Female');
+  expect(text).toContain('First test Nov 3 · Female');
+  expect(text).toContain('Research: yes since Oct 15');
   expect(text.indexOf('End of season · Feb 16')).toBeLessThan(text.indexOf('Baseline · Nov 3'));
   expect(text).toContain('Protocol v1.2 · 15 weeks of exposure · in research');
   expect(text).toContain('Maturity offset');

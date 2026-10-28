@@ -146,8 +146,19 @@ export function researchCountsFrom(research) {
   return research && research.value === true ? toISODate(research.recordedAt) : null;
 }
 
-/** Whether a window's results may be used in research (spec 4.3). */
+/**
+ * Whether a window's results may be used in research (spec 4.3): the
+ * answer in force on its circuit date - the current one, or one the
+ * owner's recorded change moved onto `history`. A yes never reaches back
+ * before its own date, and a later no leaves the windows before it as
+ * they were.
+ */
 export function inResearch(research, circuitDate) {
-  const from = researchCountsFrom(research);
-  return Boolean(from && circuitDate && circuitDate >= from);
+  if (!research || !circuitDate) return false;
+  const answers = [...(Array.isArray(research.history) ? research.history : []), research]
+    .map((r) => ({ value: r?.value === true, from: toISODate(r?.recordedAt) }))
+    .filter((r) => r.from)
+    .sort((a, b) => a.from.localeCompare(b.from));
+  const inForce = answers.filter((r) => r.from <= circuitDate).pop();
+  return Boolean(inForce && inForce.value);
 }
