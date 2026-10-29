@@ -176,6 +176,51 @@ test('a failed Checked in write puts the row back and rejects, so the screen can
   await r.unmount();
 });
 
+/** Two quick taps on Jordan's row (check, then uncheck) with both writes held; returns their settlers. */
+async function twoTaps(r, out) {
+  const writes = [];
+  mockMental.setCheckin.mockImplementation(() => new Promise((resolve, reject) => { writes.push({ resolve, reject }); }));
+  const taps = [];
+  await r.act(() => { taps.push(out.current.setCheckin({ athleteId: 'jordan', checkedIn: true }).catch(() => 'refused')); });
+  await r.act(() => { taps.push(out.current.setCheckin({ athleteId: 'jordan', checkedIn: false }).catch(() => 'refused')); });
+  expect(ids(out.current.rows.due)).toEqual(['jordan', 'reese']);
+  const refuse = (i) => r.act(async () => { writes[i].reject(Object.assign(new Error('denied'), { code: 'permission-denied' })); await taps[i]; });
+  const land = (i, checkedIn) => r.act(async () => { writes[i].resolve({ id: 'jordan_2026-11-09', checkedIn }); await taps[i]; });
+  return { refuse, land };
+}
+
+test('two quick taps on one row, both refused: the row shows what was read, not the first tap', async () => {
+  const { r, out } = await mountBoard();
+  await r.flush();
+  const { refuse } = await twoTaps(r, out);
+  await refuse(0);
+  await refuse(1);
+  expect(ids(out.current.rows.due)).toEqual(['jordan', 'reese']);
+  expect(ids(out.current.rows.checkedIn)).toEqual([]);
+  await r.unmount();
+});
+
+test('two quick taps on one row, the first lands and the second is refused: the row shows the first', async () => {
+  const { r, out } = await mountBoard();
+  await r.flush();
+  const { refuse, land } = await twoTaps(r, out);
+  await land(0, true);
+  await refuse(1);
+  expect(ids(out.current.rows.checkedIn)).toEqual(['jordan']);
+  await r.unmount();
+});
+
+test('the second tap refused before the first write lands (session gone): the row ends on the write that landed', async () => {
+  const { r, out } = await mountBoard();
+  await r.flush();
+  const { refuse, land } = await twoTaps(r, out);
+  await refuse(1);
+  expect(ids(out.current.rows.checkedIn)).toEqual([]); // nothing has landed yet
+  await land(0, true);
+  expect(ids(out.current.rows.checkedIn)).toEqual(['jordan']);
+  await r.unmount();
+});
+
 /* ---------------------------------------------------------- One athlete -- */
 
 function mountAthlete(athleteId) {

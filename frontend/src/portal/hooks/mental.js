@@ -273,7 +273,8 @@ function withOwn(checkins, own) {
  *
  * A Checked in tap is optimistic: the row moves at once (the tap's own
  * check-in is applied over what was read), the write runs, and a failed
- * write puts the row back and rejects. The board never re-reads on its own
+ * write puts the row back to what the server holds (the read, or the last
+ * write of this board that landed) and rejects. The board never re-reads on its own
  * toggle (CHECKINS_KEY is not in its deps), so the list never blanks to
  * skeletons and the scroll stays where Yannick is. Seed mode keeps the
  * toggle local.
@@ -295,8 +296,16 @@ export function useContractBoard(weekStartISO) {
 
   const [own, setOwn] = useState({});
   const ownRef = useRef(own);
-  const tokens = useRef({});
+  // Per check-in id: what the server holds (`server`: the read, or the last
+  // write that landed), the latest tap, and whether that tap was refused.
+  const flights = useRef({});
   const putOwn = useCallback((next) => { ownRef.current = next; setOwn(next); }, []);
+  const showServer = useCallback((id, server) => {
+    const next = { ...ownRef.current };
+    if (server.had) next[id] = server.doc;
+    else delete next[id]; // back to what was read
+    putOwn(next);
+  }, [putOwn]);
 
   const inputs = state.data;
   const rows = useMemo(() => (inputs
@@ -308,25 +317,34 @@ export function useContractBoard(weekStartISO) {
 
   const setCheckin = useCallback(async ({ athleteId, checkedIn }) => {
     const id = `${athleteId}_${weekStartISO}`;
-    const had = Object.prototype.hasOwnProperty.call(ownRef.current, id);
-    const before = ownRef.current[id];
-    const token = {};
-    tokens.current[id] = token;
     const now = checkedIn ? { id, athleteId, weekStart: weekStartISO, checkedIn: true, by: 'mental', at: today } : null;
+    if (!live) {
+      putOwn({ ...ownRef.current, [id]: now });
+      return { id, checkedIn: Boolean(checkedIn) };
+    }
+    // The first tap on a row records what is on screen, which is what the server holds.
+    const f = flights.current[id] || (flights.current[id] = {
+      server: { had: Object.prototype.hasOwnProperty.call(ownRef.current, id), doc: ownRef.current[id] },
+    });
+    const token = {};
+    f.latest = token;
+    f.refused = false;
     putOwn({ ...ownRef.current, [id]: now });
-    if (!live) return { id, checkedIn: Boolean(checkedIn) };
     try {
-      return await writeCheckin({ athleteId, weekStartISO, checkedIn });
+      const out = await writeCheckin({ athleteId, weekStartISO, checkedIn });
+      f.server = { had: true, doc: now };
+      if (f.refused) showServer(id, f.server); // the latest tap was refused before this write landed
+      return out;
     } catch (err) {
-      if (tokens.current[id] === token) { // otherwise a later tap on the same row owns it now
-        const next = { ...ownRef.current };
-        if (had) next[id] = before;
-        else delete next[id];
-        putOwn(next);
+      // A refused write shows what the server holds, never an earlier tap's
+      // optimistic row; a refused earlier tap leaves the latest tap's row alone.
+      if (f.latest === token) {
+        f.refused = true;
+        showServer(id, f.server);
       }
       throw err;
     }
-  }, [live, weekStartISO, today, putOwn]);
+  }, [live, weekStartISO, today, putOwn, showServer]);
 
   return { rows, config: inputs?.config ?? null, setCheckin, loading: state.loading, error: state.error };
 }
