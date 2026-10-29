@@ -8,7 +8,7 @@
  * it touches; the only clock it reads is today's (recentDate's dates, and the
  * season a window dated today belongs to).
  */
-import { BASE, call, createAs, del, expect, listAs, seed, t, token, updateAs } from '../verify-rules.mjs';
+import { BASE, bookAs, call, createAs, del, expect, listAs, seed, t, token, uid, updateAs } from '../verify-rules.mjs';
 
 const dayOut = (n) => new Date(Date.now() + n * 86400000).toISOString().slice(0, 10);
 /** The August-July season of a date ('2026-27'), as the rules tie a window's season to its circuit date. */
@@ -235,8 +235,35 @@ export async function taskAssessments() {
     expect('nobody gives it to themselves', await updateAs(toggle, 'users', uids.toggle, { assessor: false }), 403);
     expect('ops cannot create a staff account that has it', await createAs(t.ops, 'users', 'new-staff-probe', { role: 'coach', assessor: true }, []), 403);
     expect('ops still creates a staff account without it', await createAs(t.ops, 'users', 'new-staff-probe', { role: 'coach' }, []), 200);
+
+    await taskTestFamilyNeverBooks();
   } finally {
     await cleanup();
+  }
+}
+
+/**
+ * Review Focus 7: the production test family never books or waitlists (review 2026-10-28). Its athletes are seeded as
+ * scripts/provision-test-family.mjs writes them - test: true, no package, no billing key (which alone reads as paid,
+ * and the rules count no period tokens) - against a control athlete that differs only by the flag. Re-booking runs
+ * the same athleteBillingOk. Uses the sessions and the parent verify-rules setup() seeds; removes what it adds.
+ */
+async function taskTestFamilyNeverBooks() {
+  const athlete = (test) => ({ name: 'Ava Test', householdId: 'hh', dob: '2012-05-14', contractMinutes: null, coachId: null, packageId: null, ...(test ? { test: true } : {}) });
+  const booking = (athleteId) => ({ athleteId, sessionId: 's1', date: dayOut(5), type: 'training', periodKey: '2026-11-01',
+    status: 'confirmed', householdId: 'hh', createdBy: uid.parent, chargedFrom: 'period' });
+  const entry = (athleteId) => ({ sessionId: 's-full', athleteId, householdId: 'hh', date: dayOut(5), periodKey: '2026-11-01', createdBy: uid.parent });
+  try {
+    await seed('athletes', 'ath-test-probe', athlete(true));
+    await seed('athletes', 'ath-test-control', athlete(false));
+    expect('the test family cannot book a session', await bookAs(t.parent, 'ath-test-probe_s1', booking('ath-test-probe')), 403);
+    expect('the test family cannot join a waitlist', await createAs(t.parent, 'waitlist', 's-full_ath-test-probe', entry('ath-test-probe'), ['joinedAt']), 403);
+    expect('control: the same athlete without the flag books', await bookAs(t.parent, 'ath-test-control_s1', booking('ath-test-control')), 200);
+    expect('control: and joins a waitlist', await createAs(t.parent, 'waitlist', 's-full_ath-test-control', entry('ath-test-control'), ['joinedAt']), 200);
+  } finally {
+    for (const id of ['ath-test-probe_s1', 'ath-test-control_s1']) await del('bookings', id);
+    for (const id of ['s-full_ath-test-probe', 's-full_ath-test-control']) await del('waitlist', id);
+    for (const id of ['ath-test-probe', 'ath-test-control']) await del('athletes', id);
   }
 }
 

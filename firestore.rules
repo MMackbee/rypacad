@@ -56,11 +56,17 @@ service cloud.firestore {
     // payment-pending until the new package is paid (lib.js
     // membershipAllowsBooking is the server half). Covers booking create,
     // re-book and waitlist create.
+    // Assessments (review 2026-10-28): an athlete of the production test
+    // family (test: true, scripts/provision-test-family.mjs) never books,
+    // re-books or joins a waitlist - its seat would be a real family's -
+    // whatever tokens or grace an ops action gives it. No real athlete has
+    // the key, so nothing changes for them.
     function athleteBillingOk(a) {
-      return !('billing' in a)
-        || (a.billing.status == 'active'
-            && !(a.billing.get('oneTime', false) == true
-                 && a.get('packageId', null) != 'single'));
+      return a.get('test', false) != true
+        && (!('billing' in a)
+          || (a.billing.status == 'active'
+              && !(a.billing.get('oneTime', false) == true
+                   && a.get('packageId', null) != 'single')));
     }
 
     // Sprint 20 (spec 5): booking opens 07:00 America/Chicago on 2026-10-10
