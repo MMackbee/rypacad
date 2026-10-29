@@ -8,7 +8,10 @@ import NoteEditor from '../components/mental/NoteEditor';
  * the hooks report it. hooks/mental.test.js covers seed mode.
  */
 const mockLive = { fetchAthlete: jest.fn(), fetchAllAthletes: jest.fn(), fetchAllHouseholds: jest.fn() };
-const mockMental = { fetchMentalEntries: jest.fn(), saveMentalEntry: jest.fn() };
+const mockMental = {
+  fetchMentalEntries: jest.fn(), saveMentalEntry: jest.fn(),
+  fetchContractLogsBetween: jest.fn(), fetchCheckinsForAthletes: jest.fn(), fetchContractConfig: jest.fn(), setCheckin: jest.fn(),
+};
 jest.mock('../../firebase', () => ({ auth: { currentUser: null }, db: {} }));
 jest.mock('firebase/firestore', () => ({}));
 jest.mock('./live', () => ({
@@ -22,10 +25,14 @@ jest.mock('./mentalLive', () => ({
   ...jest.requireActual('./mentalLive'),
   fetchMentalEntries: (...a) => mockMental.fetchMentalEntries(...a),
   saveMentalEntry: (...a) => mockMental.saveMentalEntry(...a),
+  fetchContractLogsBetween: (...a) => mockMental.fetchContractLogsBetween(...a),
+  fetchCheckinsForAthletes: (...a) => mockMental.fetchCheckinsForAthletes(...a),
+  fetchContractConfig: (...a) => mockMental.fetchContractConfig(...a),
+  setCheckin: (...a) => mockMental.setCheckin(...a),
 }));
 jest.mock('../data/calendar', () => ({ ...jest.requireActual('../data/calendar'), academyDateISO: () => '2026-11-11' }));
 // eslint-disable-next-line import/first
-import { useMentalNote } from './mental';
+import { useContractBoard, useMentalNote } from './mental';
 
 const STORED = { id: 'intake', athleteId: 'jordan', kind: 'intake', sessionId: null, sessionDate: null, body: 'Stored.', createdAtMs: 1, updatedAtMs: 2 };
 
@@ -98,5 +105,68 @@ test('a failed save reads error, and the next save clears it', async () => {
   await r.act(() => out.current.save('Stored. Offline line.'));
   expect(out.current.saveState).toBe('saved');
   expect(mockMental.saveMentalEntry).toHaveBeenCalledTimes(2);
+  await r.unmount();
+});
+
+/* ------------------------------------------------------- Contract board -- */
+
+const BOARD_ATHLETES = [
+  { id: 'jordan', name: 'Jordan', dob: '2012-06-17', householdId: 'w' },
+  { id: 'reese', name: 'Reese', dob: '2014-03-02', householdId: 'w' },
+];
+
+function mountBoard() {
+  mockLive.fetchAllAthletes.mockResolvedValue(BOARD_ATHLETES);
+  mockLive.fetchAllHouseholds.mockResolvedValue([{ id: 'w', name: 'Whitfield family' }]);
+  mockMental.fetchContractLogsBetween.mockResolvedValue({});
+  mockMental.fetchCheckinsForAthletes.mockResolvedValue([]);
+  mockMental.fetchContractConfig.mockResolvedValue({ enabled: true, enabledAt: '2026-10-01' });
+  const out = { current: null, loadingSeen: [] };
+  const useBoard = () => {
+    const b = useContractBoard('2026-11-09');
+    out.loadingSeen.push(b.loading);
+    return b;
+  };
+  return renderScreen(<HookProbe out={out} use={useBoard} />, { path: '/x' }).then((r) => ({ r, out }));
+}
+const ids = (list) => (list || []).map((row) => row.athleteId);
+
+test('a Checked in tap moves the row at once and never blanks or re-reads the board', async () => {
+  let finishWrite;
+  mockMental.setCheckin.mockImplementation(() => new Promise((res) => { finishWrite = res; }));
+  const { r, out } = await mountBoard();
+  await r.flush();
+  expect(ids(out.current.rows.due)).toEqual(['jordan', 'reese']);
+  expect(mockLive.fetchAllAthletes).toHaveBeenCalledTimes(1);
+  out.loadingSeen.length = 0;
+  let write;
+  await r.act(() => { write = out.current.setCheckin({ athleteId: 'reese', checkedIn: true }); });
+  // Optimistic: moved before the write resolves, and the rows stayed on screen.
+  expect(ids(out.current.rows.due)).toEqual(['jordan']);
+  expect(ids(out.current.rows.checkedIn)).toEqual(['reese']);
+  expect(out.current.rows.checkedIn[0]).toMatchObject({ checkedInThisWeek: true, lastCheckin: '2026-11-11', daysSince: 0 });
+  await r.act(async () => { finishWrite({ id: 'reese_2026-11-09', checkedIn: true }); await write; });
+  expect(mockMental.setCheckin).toHaveBeenCalledWith({ athleteId: 'reese', weekStartISO: '2026-11-09', checkedIn: true });
+  expect(ids(out.current.rows.checkedIn)).toEqual(['reese']);
+  expect(out.loadingSeen).not.toContain(true);
+  expect(out.current.rows).not.toBeNull();
+  expect(mockLive.fetchAllAthletes).toHaveBeenCalledTimes(1);
+  // Unchecking is as quick: the row goes back to Due.
+  mockMental.setCheckin.mockResolvedValue({ id: 'reese_2026-11-09', checkedIn: false });
+  await r.act(() => out.current.setCheckin({ athleteId: 'reese', checkedIn: false }));
+  expect(ids(out.current.rows.due)).toEqual(['jordan', 'reese']);
+  expect(out.loadingSeen).not.toContain(true);
+  await r.unmount();
+});
+
+test('a failed Checked in write puts the row back and rejects, so the screen can say so', async () => {
+  mockMental.setCheckin.mockRejectedValue(Object.assign(new Error('offline'), { code: 'unavailable' }));
+  const { r, out } = await mountBoard();
+  await r.flush();
+  let failed = null;
+  await r.act(() => out.current.setCheckin({ athleteId: 'jordan', checkedIn: true }).catch((e) => { failed = e; }));
+  expect(failed).not.toBeNull();
+  expect(ids(out.current.rows.due)).toEqual(['jordan', 'reese']);
+  expect(ids(out.current.rows.checkedIn)).toEqual([]);
   await r.unmount();
 });

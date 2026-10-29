@@ -8,7 +8,7 @@
  * firestore.rules refuses the notes reads to every other role. "Today" is
  * the academy's America/Chicago date, never the device's.
  */
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { fetchAllAthletes, fetchAllHouseholds, fetchAthlete, isLive } from './live';
 import { useInvalidation } from './invalidate';
 import useSeedResource from './useSeedResource';
@@ -235,7 +235,8 @@ export function useMentalNote({ athleteId, entryId, sessionDate = null, athleteN
 
 /* ------------------------------------------------------- Contract board -- */
 
-async function liveBoard(weekStartISO, today) {
+/** What the board is computed from; the rows are derived in the hook so a toggle never re-reads. */
+async function liveBoardInputs(weekStartISO) {
   const [athletes, households, logsByAthlete, checkins, config] = await Promise.all([
     fetchAllAthletes(),
     fetchAllHouseholds(),
@@ -243,42 +244,81 @@ async function liveBoard(weekStartISO, today) {
     fetchCheckinsForAthletes(null),
     fetchContractConfig(),
   ]);
-  return { rows: boardRows({ athletes, households, logsByAthlete, checkins, today, enabledAt: config.enabledAt, weekStartISO }), config };
+  return { athletes, households, logsByAthlete, checkins, config };
+}
+
+const checkinId = (c) => c.id ?? `${c.athleteId}_${c.weekStart}`;
+
+/** The check-ins as read, with this board's own toggles on top (id -> doc, or null for unchecked). */
+function withOwn(checkins, own) {
+  const ownIds = Object.keys(own);
+  if (ownIds.length === 0) return checkins || [];
+  const rest = (checkins || []).filter((c) => !(checkinId(c) in own));
+  return [...rest, ...ownIds.map((id) => own[id]).filter(Boolean)];
 }
 
 /**
  * The board for the week starting `weekStartISO`: `{ rows: { due, thisWeek,
  * checkedIn } | null, config, setCheckin({ athleteId, checkedIn }), loading,
  * error }`. The households feed boardRows' on-contract gate, the same one
- * the Monday email applies (Review Focus 4). Live, setCheckin writes and its
- * bump re-reads the board; seed, it moves the row locally.
+ * the Monday email applies (Review Focus 4).
+ *
+ * A Checked in tap is optimistic: the row moves at once (the tap's own
+ * check-in is applied over what was read), the write runs, and a failed
+ * write puts the row back and rejects. The board never re-reads on its own
+ * toggle (CHECKINS_KEY is not in its deps), so the list never blanks to
+ * skeletons and the scroll stays where Yannick is. Seed mode keeps the
+ * toggle local.
  */
 export function useContractBoard(weekStartISO) {
   const live = isLive();
   const today = academyDateISO();
   const logsGen = useInvalidation('contractLogs');
-  const checkinsGen = useInvalidation(CHECKINS_KEY);
   const athletesGen = useInvalidation('athletes');
-  const [seedCheckins, setSeedCheckins] = useState(() => (live ? [] : mentalFixtures(today).checkins));
   let seed = null;
   if (!live) {
     const f = mentalFixtures(today);
-    seed = { rows: boardRows({ ...f, checkins: seedCheckins, today, enabledAt: f.config.enabledAt, weekStartISO }), config: f.config };
+    seed = { athletes: f.athletes, households: f.households, logsByAthlete: f.logsByAthlete, checkins: f.checkins, config: f.config };
   }
   const state = useSeedResource(
     seed,
-    live ? { source: () => liveBoard(weekStartISO, today), deps: ['contract-board', weekStartISO, today, logsGen, checkinsGen, athletesGen] } : undefined
+    live ? { source: () => liveBoardInputs(weekStartISO), deps: ['contract-board', weekStartISO, today, logsGen, athletesGen] } : undefined
   );
 
-  const setCheckin = useCallback(async ({ athleteId, checkedIn }) => {
-    if (live) return writeCheckin({ athleteId, weekStartISO, checkedIn });
-    const id = `${athleteId}_${weekStartISO}`;
-    setSeedCheckins((list) => {
-      const rest = list.filter((c) => c.id !== id);
-      return checkedIn ? [...rest, { id, athleteId, weekStart: weekStartISO, checkedIn: true, by: 'mental', at: today }] : rest;
-    });
-    return { id, checkedIn: Boolean(checkedIn) };
-  }, [live, weekStartISO, today]);
+  const [own, setOwn] = useState({});
+  const ownRef = useRef(own);
+  const tokens = useRef({});
+  const putOwn = useCallback((next) => { ownRef.current = next; setOwn(next); }, []);
 
-  return { rows: state.data?.rows ?? null, config: state.data?.config ?? null, setCheckin, loading: state.loading, error: state.error };
+  const inputs = state.data;
+  const rows = useMemo(() => (inputs
+    ? boardRows({
+      athletes: inputs.athletes, households: inputs.households, logsByAthlete: inputs.logsByAthlete,
+      checkins: withOwn(inputs.checkins, own), today, enabledAt: inputs.config?.enabledAt ?? null, weekStartISO,
+    })
+    : null), [inputs, own, today, weekStartISO]);
+
+  const setCheckin = useCallback(async ({ athleteId, checkedIn }) => {
+    const id = `${athleteId}_${weekStartISO}`;
+    const had = Object.prototype.hasOwnProperty.call(ownRef.current, id);
+    const before = ownRef.current[id];
+    const token = {};
+    tokens.current[id] = token;
+    const now = checkedIn ? { id, athleteId, weekStart: weekStartISO, checkedIn: true, by: 'mental', at: today } : null;
+    putOwn({ ...ownRef.current, [id]: now });
+    if (!live) return { id, checkedIn: Boolean(checkedIn) };
+    try {
+      return await writeCheckin({ athleteId, weekStartISO, checkedIn });
+    } catch (err) {
+      if (tokens.current[id] === token) { // otherwise a later tap on the same row owns it now
+        const next = { ...ownRef.current };
+        if (had) next[id] = before;
+        else delete next[id];
+        putOwn(next);
+      }
+      throw err;
+    }
+  }, [live, weekStartISO, today, putOwn]);
+
+  return { rows, config: inputs?.config ?? null, setCheckin, loading: state.loading, error: state.error };
 }
