@@ -144,6 +144,7 @@
  *                  DIAGNOSTIC_SECTIONS in seed.js and enumerated in
  *                  DATA-MODEL.md, never retyped independently.
  *   loginInvites / calendlyEvents — Sprint 20: one open child-login invite (reese) and one Calendly-sourced Yannick session + booking + ledger row (see the cal- block below).
+ *   mentalNotes / contractCheckins / config — mental tools (2026-10-28): two past attended Calendly 1:1s for jordan with an intake and two session notes, two check-ins, config/contract on, nico's 10-minute logs (see the "Mental tools" blocks below).
  *   staffInvites — ONE pending invite (contract v1.8, Sprint 10 pin E) at a
  *                  clearly-fake address (`invite-test@example.com`), role
  *                  coach, specialistId null — provision-family.mjs is what
@@ -238,7 +239,10 @@ function loadPortalData() {
     // ELITE_TIERS/poolFor (below the banner) are gone from this bundle —
     // nothing here reads them anymore.
     `export { ALL_PACKAGES, periodFor } from '${fwdPath(path.join(dataDir, 'packages.js'))}';`,
-    `export { HOUSEHOLD, COACH } from '${fwdPath(path.join(dataDir, 'seed.js'))}';`,
+    `export { HOUSEHOLD, COACH, mentalFixtures } from '${fwdPath(path.join(dataDir, 'seed.js'))}';`,
+    // Mental tools (2026-10-28): the Monday week math, so the emulator's
+    // check-ins and nico's logs sit on the same weeks the board computes.
+    `export { addDays, weekStartFor } from '${fwdPath(path.join(dataDir, 'contractRule.js'))}';`,
     // contract v1.8, Sprint 10 pin G — the notification-category catalogue
     // the NotificationPreferences screen renders; bundled like everything
     // else here rather than retyped, so a category add/remove can't drift.
@@ -528,8 +532,11 @@ function buildDocs(portal) {
     ],
   ]);
 
-  // athletes — from seed.js HOUSEHOLD. contractMinutes is parsed from the
-  // scaffold's ageLine ("45 min tier"), not retyped. The seed data has
+  // athletes — from seed.js HOUSEHOLD. contractMinutes was parsed from the
+  // scaffold's ageLine ("45 min tier"); since 2026-10-28 that line shows the
+  // derived requirement ("20 min a day"), so the stored values are kept here
+  // as they were seeded before: jordan 45 (a legacy tier, left alone), reese
+  // 20, nico null (stamped from the contract screen). The seed data has
   // exactly one coach account (coach-luke), so all three Whitfield athletes
   // are assigned to him — Sprint 5 turns the coach roster into a real
   // "athletes where coachId == uid" query (TEAM.md), and a roster of one
@@ -572,16 +579,16 @@ function buildDocs(portal) {
   // the limit, over it, and none on file. Same values as data/seed.js.
   const WHITFIELD_HANDICAPS = { jordan: 4, reese: 27, nico: null };
   const WHITFIELD_LOGIN_EMAILS = { jordan: null, reese: 'reese.whitfield@example.com', nico: null };
+  const WHITFIELD_CONTRACT_MINUTES = { jordan: 45, reese: 20, nico: null };
   const coachUid = 'coach-luke';
   const athletes = new Map();
   for (const child of HOUSEHOLD.children) {
-    const minutes = child.ageLine && child.ageLine.match(/(\d+)\s*min tier/);
     athletes.set(child.id, {
       name: `${child.name} Whitfield`,
       dob: WHITFIELD_DOBS[child.id] ?? null,
       householdId,
       packageId: WHITFIELD_PACKAGE_IDS[child.id],
-      contractMinutes: minutes ? Number(minutes[1]) : null,
+      contractMinutes: WHITFIELD_CONTRACT_MINUTES[child.id] ?? null,
       coachId: coachUid,
       handicap: WHITFIELD_HANDICAPS[child.id] ?? null,
       loginEmail: WHITFIELD_LOGIN_EMAILS[child.id] ?? null,
@@ -863,6 +870,54 @@ function buildDocs(portal) {
     flag: null, // clean; 'over-cap' | 'over-cadence' | 'membership-inactive' | 'before-open' when the webhook flags
     createdAt: bookingCreatedAt,
   });
+  // Mental tools (2026-10-28): TWO PAST Calendly-sourced Yannick sessions for
+  // jordan, 14 and 5 days before the run date at 6:00 PM, both attended, so
+  // the athlete page lists 1:1s with notes (mentalNotes below). Same session
+  // and booking shapes as cal-seedevt0001 / reese_cal-seedevt0001.
+  const pastMentalRunDate = new Date();
+  const pastMentalSessions = [];
+  for (const [uuid, daysBack] of [['seedpast0001', 14], ['seedpast0002', 5]]) {
+    const d = new Date(pastMentalRunDate);
+    d.setDate(d.getDate() - daysBack);
+    const date = isoDate(d);
+    const sessionId = `cal-${uuid}`;
+    const eventUri = `https://api.calendly.com/scheduled_events/${uuid}`;
+    sessions.set(sessionId, {
+      date,
+      time: '6:00 PM',
+      type: 'mental',
+      label: 'Mental game session',
+      capacity: 1,
+      booked: 1,
+      status: 'scheduled',
+      durationMinutes: 30,
+      bookable: false,
+      coachId: null,
+      special: false,
+      source: 'calendly',
+      calendlyEventUri: eventUri,
+      gcalEventId: null,
+      coachNote: null,
+    });
+    bookings.set(`jordan_${sessionId}`, {
+      athleteId: 'jordan',
+      sessionId,
+      householdId,
+      date,
+      type: 'mental',
+      status: 'attended',
+      periodKey: periodFor(date, WHITFIELD_ANCHOR_DAY).periodKey,
+      chargedFrom: 'period',
+      graceTokenId: null,
+      attendee: 'athlete',
+      createdBy: 'system',
+      source: 'calendly',
+      calendlyInviteeUri: `${eventUri}/invitees/${uuid.replace('past', 'inv')}`,
+      flag: null,
+      createdAt: bookingCreatedAt,
+    });
+    pastMentalSessions.push({ sessionId, date });
+  }
   const calendlyEvents = new Map([
     [
       `${CAL_INVITEE_UUID}_invitee.created`,
@@ -1081,6 +1136,72 @@ function buildDocs(portal) {
     });
   }
 
+  // Mental tools (2026-10-28): the contract board, notes and check-ins.
+  // Weeks are the board's own (contractRule.js weekStartFor/addDays, bundled
+  // above), so the check-ins and nico's logs land on the weeks it shows.
+  const runISO = isoDate(today);
+  const thisMonday = portal.weekStartFor(runISO);
+  const lastMonday = portal.addDays(thisMonday, -7);
+  const eveningOf = (iso, hours, minutes) => {
+    const [y, m, d] = iso.split('-').map(Number);
+    return new Date(y, m - 1, d, hours, minutes, 0, 0);
+  };
+  // nico (9, so 10 minutes a day): logged by his parent on every weekday of
+  // last week and of this week up to yesterday, each at the requirement.
+  // Offsets from this Monday: last week's Mon-Fri, then this week's Mon-Fri.
+  for (const offset of [-7, -6, -5, -4, -3, 0, 1, 2, 3, 4]) {
+    const dateStr = portal.addDays(thisMonday, offset);
+    if (dateStr >= runISO) continue; // this week only up to yesterday
+    contractLogs.set(`nico_${dateStr}`, {
+      athleteId: 'nico',
+      date: dateStr,
+      minutes: 10,
+      contractMinutes: 10,
+      createdBy: 'parent-dana',
+      createdAt: eveningOf(dateStr, 19, 30),
+    });
+  }
+  // mentalNotes/jordan/entries: an intake note and one note per past 1:1,
+  // bodies from data/seed.js mentalFixtures (bundled, never retyped), written
+  // by Yannick on the evening of the session they belong to.
+  const mentalFx = portal.mentalFixtures(runISO);
+  const fxBody = (id) => {
+    const entry = mentalFx.entries.find((e) => e.id === id);
+    if (!entry) throw new Error(`data/seed.js mentalFixtures has no '${id}' entry - update the mental notes seed.`);
+    return entry.body;
+  };
+  const [pastMental1, pastMental2] = pastMentalSessions;
+  const noteDoc = (kind, session, body) => {
+    const at = eveningOf(session.date, 19, 0);
+    return {
+      athleteId: 'jordan',
+      kind,
+      sessionId: kind === 'session' ? session.sessionId : null,
+      sessionDate: kind === 'session' ? session.date : null,
+      body,
+      createdBy: 'mental',
+      updatedBy: 'mental',
+      createdAt: at,
+      updatedAt: at,
+    };
+  };
+  const mentalEntries = new Map([
+    ['intake', noteDoc('intake', pastMental1, fxBody('intake'))],
+    [pastMental1.sessionId, noteDoc('session', pastMental1, fxBody('cal-seed-a'))],
+    [pastMental2.sessionId, noteDoc('session', pastMental2, fxBody('cal-seed-b'))],
+  ]);
+  // contractCheckins: jordan checked in this week (today), nico last week
+  // (that Wednesday evening). Unchecking is a delete, so only true is stored.
+  const contractCheckins = new Map([
+    [`jordan_${thisMonday}`, { athleteId: 'jordan', weekStart: thisMonday, checkedIn: true, by: 'mental', at: new Date(today) }],
+    [`nico_${lastMonday}`, { athleteId: 'nico', weekStart: lastMonday, checkedIn: true, by: 'mental', at: eveningOf(portal.addDays(lastMonday, 2), 19, 0) }],
+  ]);
+  // config/contract: the server-readable switch (set-contract-flag.mjs in
+  // production), on in the emulator since 14 days before the run date.
+  const contractEnabledAt = new Date(today);
+  contractEnabledAt.setDate(contractEnabledAt.getDate() - 14);
+  const config = new Map([['contract', { enabled: true, enabledAt: isoDate(contractEnabledAt) }]]);
+
   // users — one per portal role, ALL SIX (the QA test-account suite,
   // TEAM.md "QA testing": window.__rypTestAuth.signInAs(<doc id>) signs in
   // as any of these against the auth emulator). In production these doc ids
@@ -1109,7 +1230,8 @@ function buildDocs(portal) {
     ['athlete-jordan', { role: 'athlete', athleteId: 'jordan', householdId, staff: false, specialistId: null, displayName: 'Jordan Whitfield', email: null, notificationPrefs: null }],
     [coachUid, { role: 'coach', athleteId: null, householdId: null, staff: true, specialistId: null, displayName: COACH.name, email: null, notificationPrefs: null }],
     ['owner', { role: 'owner', athleteId: null, householdId: null, staff: true, specialistId: null, displayName: null, email: null, notificationPrefs: null }],
-    ['mental', { role: 'mental', athleteId: null, householdId: null, staff: true, specialistId: 'mental', displayName: 'Yannick', email: null, notificationPrefs: null }],
+    // 2026-10-28: Yannick's address, the recipient of mentalCheckinReminders.
+    ['mental', { role: 'mental', athleteId: null, householdId: null, staff: true, specialistId: 'mental', displayName: 'Yannick', email: 'yannick@example.com', notificationPrefs: null }],
     ['ops', { role: 'ops', athleteId: null, householdId: null, staff: true, specialistId: null, displayName: 'Ops', email: null, notificationPrefs: null }],
     // Sprint 16: the Parker guardian, so the past_due Billing hub is reachable in QA.
     ['parent-sam', { role: 'parent', athleteId: null, householdId: parkerHouseholdId, staff: false, specialistId: null, displayName: 'Sam Parker', email: 'sam.parker@example.com', notificationPrefs: null }],
@@ -1537,6 +1659,9 @@ function buildDocs(portal) {
     stripeEvents,
     calendlyEvents,
     notifications,
+    'mentalNotes/jordan/entries': mentalEntries,
+    contractCheckins,
+    config,
   };
 }
 
@@ -1818,6 +1943,21 @@ async function main() {
     const b = collections.bookings.get('reese_cal-seedevt0001');
     console.log(`  sessions/cal-seedevt0001: date=${s.date} time=${s.time} bookable=${s.bookable} source=${s.source} booked=${s.booked}/${s.capacity}`);
     console.log(`  bookings/reese_cal-seedevt0001: status=${b.status} source=${b.source} flag=${b.flag} periodKey=${b.periodKey}`);
+  }
+
+  console.log('\nMental tools (2026-10-28): notes, check-ins, config/contract, nico logs:');
+  {
+    const notes = collections['mentalNotes/jordan/entries'];
+    const cfg = collections.config.get('contract');
+    console.log(
+      `  mental notes: ${notes.size}, check-ins: ${collections.contractCheckins.size}, ` +
+        `config/contract: ${cfg.enabled ? 'enabled' : 'off'} (enabledAt ${cfg.enabledAt})`
+    );
+    for (const [id, doc] of notes) console.log(`  mentalNotes/jordan/entries/${id}: kind=${doc.kind} sessionDate=${doc.sessionDate} chars=${doc.body.length}`);
+    for (const [id, doc] of collections.contractCheckins) console.log(`  contractCheckins/${id}: weekStart=${doc.weekStart} at=${doc.at.toISOString()}`);
+    const nicoLogs = [...collections.contractLogs.keys()].filter((k) => k.startsWith('nico_'));
+    console.log(`  contractLogs nico: ${nicoLogs.length} weekday logs at 10 min (${nicoLogs[0] ?? 'none'} .. ${nicoLogs[nicoLogs.length - 1] ?? 'none'})`);
+    console.log(`  users/mental: email=${collections.users.get('mental').email}`);
   }
 
   if (DRY_RUN) {

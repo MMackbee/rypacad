@@ -43,11 +43,16 @@ import OnboardingFlow from './screens/OnboardingFlow';
 import TourStandings from './screens/TourStandings';
 import SpecialistBooking from './screens/SpecialistBooking';
 import SpecialistDay from './screens/SpecialistDay';
+import MentalAthletes from './screens/MentalAthletes';
+import MentalAthlete from './screens/MentalAthlete';
+import MentalNote from './screens/MentalNote';
+import MentalContract from './screens/MentalContract';
 import Membership from './screens/Membership';
 import Reservations from './screens/Reservations';
 
 import { ALL_PACKAGES, ELITE, TOKEN_PACKAGES } from './data/packages';
-import { addDaysISO, todayISO } from './data/calendar';
+import { academyDateISO, addDaysISO, todayISO } from './data/calendar';
+import { mentalFixtures } from './data/seed';
 
 /**
  * Sprint 12 (TEAM.md "Sprint 12 pins — the token model", contract v2.0):
@@ -94,6 +99,10 @@ const ADMIN_MEMBERSHIP_FIXTURE = {
  *
  * Development only - this is not a portal route a member ever reaches.
  */
+
+/** The fixture 1:1 the MN 'Session note' state opens (mentalFixtures cal-seed-b). */
+const MENTAL_SESSION_DATE =
+  mentalFixtures(academyDateISO()).sessions.find((s) => s.id === 'cal-seed-b')?.date ?? null;
 
 /** Every screen with the exact state list the handoff specifies for it. */
 export const SCREEN_STATES = [
@@ -185,7 +194,11 @@ export const SCREEN_STATES = [
              // mental see the same facts read-only, parent (the default
              // above) sees nothing here (their own view is Membership.js).
              ['populated', 'Ops · membership editor', { role: 'ops' }],
-             ['populated', 'Coach · membership read-only', { role: 'coach' }]] },
+             ['populated', 'Coach · membership read-only', { role: 'coach' }],
+             // 2026-10-28 (mental tools, spec 4.3): parents log for their
+             // kids. The contract card renders only with
+             // REACT_APP_CONTRACT_ENABLED=true in the build.
+             ['populated', 'Parent · contract on', { role: 'parent' }]] },
   // Sprint 16 (contract v2.4): the Billing hub - tokens left per athlete
   // from the same derivation the booking gate runs, plus the membership's
   // Stripe standing. The retry/restricted states read households.membership.
@@ -315,6 +328,30 @@ export const SCREEN_STATES = [
       ['default', 'Yannick · mental', { specialistId: 'mental', role: 'mental' }],
       ['default', 'Phil · coach set', { specialistId: 'phil' }],
       ['default', 'Ops · switcher', { canSwitch: true, role: 'ops' }],
+    ] },
+  /*
+   * Mental tools (2026-10-28, docs/portal/plans/2026-10-28-mental-tools):
+   * Yannick's Athletes tab, an athlete page, a note and the contract board.
+   * No `variant` prop - each reads mentalFixtures (data/seed.js) through
+   * hooks/mental.js, so a state varies only the athlete, the note or who is
+   * looking (the owner sees the board without the toggles).
+   */
+  { id: 'MA', title: 'Mental Athletes', Screen: MentalAthletes, role: 'mental',
+    states: [['default', 'Yannick · athletes']] },
+  { id: 'MP', title: 'Mental Athlete', Screen: MentalAthlete, role: 'mental',
+    states: [
+      ['default', 'Jordan · intake and 1:1s', { athleteId: 'jordan' }],
+      ['default', 'Nico · 10 min a day', { athleteId: 'nico' }],
+    ] },
+  { id: 'MN', title: 'Mental Note', Screen: MentalNote, role: 'mental',
+    states: [
+      ['default', 'Intake note', { athleteId: 'jordan', entryId: 'intake' }],
+      ['default', 'Session note', { athleteId: 'jordan', entryId: 'cal-seed-b', sessionDate: MENTAL_SESSION_DATE }],
+    ] },
+  { id: 'MC', title: 'Mental Contract', Screen: MentalContract, role: 'mental · ops/owner',
+    states: [
+      ['default', 'Yannick · toggles', { role: 'mental' }],
+      ['default', 'Owner · read-only', { role: 'owner' }],
     ] },
   /*
    * Membership (Sprint 11 pin D, TEAM.md, contract v1.9) — the retired
