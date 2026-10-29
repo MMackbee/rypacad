@@ -1,0 +1,55 @@
+import { NOTE_MAX, athleteNoteSummary, groupEntries, kindOf, mentalAthleteRows, noteEntryId } from './mentalNotes';
+
+const ms = (iso) => Date.UTC(...iso.split('-').map((n, i) => (i === 1 ? Number(n) - 1 : Number(n))), 15);
+
+describe('note ids (spec 4.1)', () => {
+  test('intake, the session id, or free-<random>', () => {
+    expect(noteEntryId({ kind: 'intake' })).toBe('intake');
+    expect(noteEntryId({ kind: 'session', sessionId: 'cal-9f2a' })).toBe('cal-9f2a');
+    expect(noteEntryId({ kind: 'free', random: 'k3x9' })).toBe('free-k3x9');
+    expect(kindOf('intake')).toBe('intake');
+    expect(kindOf('free-k3x9')).toBe('free');
+    expect(kindOf('cal-9f2a')).toBe('session');
+    expect(kindOf('2026-11-10-s1')).toBe('session');
+    expect(NOTE_MAX).toBe(8000);
+  });
+});
+
+describe('summary and grouping', () => {
+  const entries = [
+    { id: 'cal-b', athleteId: 'jordan', kind: 'session', sessionId: 'cal-b', sessionDate: '2026-11-05', body: 'b', updatedAtMs: ms('2026-11-05') },
+    { id: 'intake', athleteId: 'jordan', kind: 'intake', sessionId: null, sessionDate: null, body: 'i', updatedAtMs: ms('2026-11-03') },
+    { id: 'free-1', athleteId: 'jordan', kind: 'free', sessionId: null, sessionDate: null, body: 'f', updatedAtMs: ms('2026-11-04') },
+    { id: 'cal-a', athleteId: 'jordan', kind: 'session', sessionId: 'cal-a', sessionDate: '2026-11-10', body: 'a', updatedAtMs: ms('2026-11-10') },
+  ];
+  test('athleteNoteSummary: has an intake, latest note date', () => {
+    expect(athleteNoteSummary(entries)).toEqual({ hasIntake: true, latestNoteDate: '2026-11-10' });
+    expect(athleteNoteSummary([entries[0]])).toEqual({ hasIntake: false, latestNoteDate: '2026-11-05' });
+    expect(athleteNoteSummary([])).toEqual({ hasIntake: false, latestNoteDate: null });
+  });
+  test('groupEntries: intake, sessions newest first, free newest first', () => {
+    const g = groupEntries(entries);
+    expect(g.intake.id).toBe('intake');
+    expect(g.sessions.map((e) => e.id)).toEqual(['cal-a', 'cal-b']);
+    expect(g.free.map((e) => e.id)).toEqual(['free-1']);
+    expect(groupEntries([]).intake).toBeNull();
+  });
+});
+
+describe('mentalAthleteRows (Athletes list, spec 5.1)', () => {
+  const athletes = [{ id: 'reese', name: 'Reese Whitfield', dob: '2014-03-02' }, { id: 'jordan', name: 'Jordan Whitfield', dob: '2012-06-17' }];
+  const bookings = [
+    { id: 'jordan_cal-a', athleteId: 'jordan', sessionId: 'cal-a', date: '2026-11-10', type: 'mental', status: 'confirmed' },
+    { id: 'jordan_cal-b', athleteId: 'jordan', sessionId: 'cal-b', date: '2026-11-05', type: 'mental', status: 'attended' },
+    { id: 'jordan_cal-c', athleteId: 'jordan', sessionId: 'cal-c', date: '2026-11-17', type: 'mental', status: 'confirmed' },
+    { id: 'jordan_cal-x', athleteId: 'jordan', sessionId: 'cal-x', date: '2026-11-12', type: 'mental', status: 'cancelled' },
+    { id: 'reese_s1', athleteId: 'reese', sessionId: 's1', date: '2026-11-11', type: 'training', status: 'confirmed' },
+  ];
+  const entries = [{ id: 'intake', athleteId: 'jordan', kind: 'intake', updatedAtMs: ms('2026-11-03') }];
+  test('rows by name with next and last 1:1 and the note facts', () => {
+    expect(mentalAthleteRows({ athletes, bookings, entries, today: '2026-11-11' })).toEqual([
+      { athleteId: 'jordan', name: 'Jordan Whitfield', age: 14, nextSession: '2026-11-17', lastSession: '2026-11-10', hasIntake: true, latestNoteDate: '2026-11-03' },
+      { athleteId: 'reese', name: 'Reese Whitfield', age: 12, nextSession: null, lastSession: null, hasIntake: false, latestNoteDate: null },
+    ]);
+  });
+});
