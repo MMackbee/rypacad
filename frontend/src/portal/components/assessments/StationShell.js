@@ -6,11 +6,13 @@ import NotTestedSheet from './NotTestedSheet';
 import { LETTERS } from './StartWaveSheet';
 import { Body, Card, SectionLabel } from '../Primitives';
 import { NOT_TESTED_REASONS, STATIONS } from '../../data/assessmentSettings';
+import { mcgillEntered } from '../../data/assessmentResults';
 
 const REASON_LABEL = Object.fromEntries(NOT_TESTED_REASONS);
 const RANK = { error: 3, slow: 2, saving: 1, saved: 0 };
-// Saves other than a station's own sections that belong to it: intake asks sex (the profile), McGill dates its block.
-const OWN_EXTRA = { intake: ['profile'], mcgill: ['fields'] };
+// Saves other than a station's own sections that belong to it: intake asks sex (the profile) and low back pain now
+// (the McGill section), McGill dates its block.
+const OWN_EXTRA = { intake: ['profile', 'mcgill'], mcgill: ['fields'] };
 
 /**
  * The earlier station, in the fixed order, where this athlete was stopped
@@ -91,8 +93,11 @@ function AthleteCard({ athlete, station, entries, onRetry, onNotTested, onAsk, r
   // The badge is this station's saves in any state (its not-tested mark only while it shows here). The athlete's one
   // profile entry (sex at intake, then the dominant hand and the med ball) and a not-tested mark made elsewhere show
   // only while not on the server, so 'Saved' never stands for values this station has not had (review 2026-10-28).
-  const own = [...station.sections, ...(OWN_EXTRA[station.id] || []), ...(reason ? ['notTested'] : [])];
-  const tracked = [...station.sections, 'notTested', 'profile', 'fields']
+  // The McGill section is intake's back-pain answer until a hold is timed or it is skipped (mcgillEntered).
+  const extra = OWN_EXTRA[station.id] || [];
+  const sections = station.id === 'mcgill' && !mcgillEntered(w.mcgill) ? station.sections.filter((s) => s !== 'mcgill') : station.sections;
+  const own = [...sections, ...extra, ...(reason ? ['notTested'] : [])];
+  const tracked = [...new Set([...station.sections, ...extra, 'notTested', 'profile', 'fields'])]
     .filter((s) => { const e = entries[`${athlete.athleteId}:${s}`]; return e && (own.includes(s) || e.state !== 'saved'); })
     .map((s) => `${athlete.athleteId}:${s}`);
   const worstKey = tracked.sort((x, y) => RANK[entries[y].state] - RANK[entries[x].state])[0];

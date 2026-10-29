@@ -60,3 +60,32 @@ test("the per-athlete badge is this station's saves; a profile or not-tested sav
   expect(marked.text()).toContain('Saved');
   await marked.unmount();
 });
+
+test("intake's back-pain answer is intake's save; at McGill the section is that station's only once a hold is timed", async () => {
+  const retried = [];
+  const at = (id, entries, w = {}) => renderScreen(
+    <StationShell station={station(id)} athletes={[athlete(w)]} layout="tablet" order={null} entries={entries} onRetry={(k) => retried.push(k)} onNotTested={() => {}} renderAthlete={() => 'STATION INPUTS'} />
+  );
+  const saved = { state: 'saved', message: null };
+  const failed = { state: 'error', message: "Didn't save." };
+  const noPain = { mcgill: { skippedBackPain: false } };
+
+  const intake = await at('intake', { 'a:mcgill': saved }, noPain);
+  expect(intake.text()).toContain('Saved');
+  await intake.unmount();
+  const intakeFailed = await at('intake', { 'a:mcgill': failed }, noPain);
+  expect(intakeFailed.text()).toContain("Didn't save.");
+  await intakeFailed.click('Try again');
+  expect(retried).toEqual(['a:mcgill']);
+  await intakeFailed.unmount();
+
+  const beforeHold = await at('mcgill', { 'a:mcgill': saved }, noPain);
+  expect(beforeHold.text()).not.toContain('Saved');
+  await beforeHold.unmount();
+  const stillFailing = await at('mcgill', { 'a:mcgill': failed }, noPain);
+  expect(stillFailing.text()).toContain("Didn't save.");
+  await stillFailing.unmount();
+  const timed = await at('mcgill', { 'a:mcgill': saved }, { mcgill: { skippedBackPain: false, flexorSec: 92 } });
+  expect(timed.text()).toContain('Saved');
+  await timed.unmount();
+});
