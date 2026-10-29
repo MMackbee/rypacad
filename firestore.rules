@@ -977,57 +977,65 @@ service cloud.firestore {
     // thresholdPct, coefficientA, coefficientB): a threshold is 0-50 % or
     // null (no marker), each Moore coefficient a number, the coefficient
     // check and every station switch a bool, grip rest shortest <= longest.
+    // Written for Firestore's 1000-expression cap (review 2026-10-28): the
+    // client saves the whole doc (9 stations, 6 thresholds), which the
+    // earlier key-by-key form refused for cost alone. Each map goes to its
+    // own function once, a key list with hasOnly plus size() stands for
+    // hasAll, and the int ranges are `in` lists (a JS integer is always
+    // stored as an int). scripts/rules-probes/assessments.mjs sends that
+    // whole doc. Stations and thresholds may still be partial.
     match /assessmentSettings/{docId} {
-      function countOk(c, key, lo, hi) {
-        return c.get(key, null) is int && c[key] >= lo && c[key] <= hi;
+      function countsOk(c) {
+        return c is map
+          && c.keys().hasOnly(['grip', 'cmjPractice', 'cmjScored', 'hopPractice', 'hopScored', 'medballPractice', 'medballScored', 'clubheadWarmup', 'clubheadMax'])
+          && c.size() == 9
+          && c.values().hasOnly([0, 1, 2, 3, 4, 5, 6, 7, 8])
+          && c.grip >= 1 && c.grip <= 5 && c.cmjPractice <= 3 && c.cmjScored >= 1 && c.cmjScored <= 3
+          && c.hopPractice <= 2 && c.hopScored >= 1 && c.hopScored <= 4
+          && c.medballPractice <= 3 && c.medballScored >= 1 && c.medballScored <= 5
+          && c.clubheadWarmup <= 5 && c.clubheadMax >= 1;
       }
-      function thresholdOk(t, key) {
-        return t.get(key, null) == null || inRange(t[key], 0, 50);
-      }
-      function stationOk(s, key) {
-        return s.get(key, true) is bool;
+      function restOk(r) {
+        return r is map && r.keys().hasOnly(['min', 'max']) && r.size() == 2
+          && r.min is number && r.max is number && r.min >= 0 && r.max <= 120 && r.min <= r.max;
       }
       function coefficientOk(c) {
-        return c is map && c.keys().hasOnly(['a', 'b'])
-          && inRange(c.get('a', null), -20, 0) && inRange(c.get('b', null), 0, 0.1);
+        return c is map && c.keys().hasOnly(['a', 'b']) && c.size() == 2
+          && c.a is number && c.a >= -20 && c.a <= 0 && c.b is number && c.b >= 0 && c.b <= 0.1;
+      }
+      function coefficientsOk(k) {
+        return k is map && k.keys().hasOnly(['set', 'verified', 'boys', 'girls']) && k.size() == 4
+          && k.set is string && k.set.size() <= 40 && k.verified is bool
+          && coefficientOk(k.boys) && coefficientOk(k.girls);
+      }
+      function thresholdOk(v) {
+        return v == null || (v is number && v >= 0 && v <= 50);
+      }
+      function thresholdsOk(t) {
+        return t is map && t.keys().hasOnly(['clubhead', 'cmj', 'hop', 'medball', 'grip', 'parallax'])
+          && thresholdOk(t.get('clubhead', null)) && thresholdOk(t.get('cmj', null)) && thresholdOk(t.get('hop', null))
+          && thresholdOk(t.get('medball', null)) && thresholdOk(t.get('grip', null)) && thresholdOk(t.get('parallax', null));
       }
       function settingsOk() {
         let d = request.resource.data;
-        let c = d.get('trialCounts', {});
         return docId == 'current'
           && d.keys().hasOnly(['protocolVersion', 'trialCounts', 'gripRestSec', 'stations', 'mcgillMode', 'medballSide', 'golfTiming', 'waveSize', 'wavesPerSession', 'hopEntry', 'rsiModEntry', 'coefficients', 'thresholds', 'updatedAt', 'updatedBy'])
-          && d.keys().hasAll(['protocolVersion', 'trialCounts', 'gripRestSec', 'stations', 'mcgillMode', 'medballSide', 'golfTiming', 'waveSize', 'wavesPerSession', 'hopEntry', 'rsiModEntry', 'coefficients', 'thresholds', 'updatedAt', 'updatedBy'])
+          && d.keys().size() == 15
           && d.protocolVersion is string && d.protocolVersion.matches('v[0-9]+[.][0-9]+([.][0-9]+)?')
-          && c is map
-          && c.keys().hasOnly(['grip', 'cmjPractice', 'cmjScored', 'hopPractice', 'hopScored', 'medballPractice', 'medballScored', 'clubheadWarmup', 'clubheadMax'])
-          && countOk(c, 'grip', 1, 5) && countOk(c, 'cmjPractice', 0, 3) && countOk(c, 'cmjScored', 1, 3)
-          && countOk(c, 'hopPractice', 0, 2) && countOk(c, 'hopScored', 1, 4)
-          && countOk(c, 'medballPractice', 0, 3) && countOk(c, 'medballScored', 1, 5)
-          && countOk(c, 'clubheadWarmup', 0, 5) && countOk(c, 'clubheadMax', 1, 8)
-          && d.gripRestSec is map && d.gripRestSec.keys().hasOnly(['min', 'max'])
-          && inRange(d.gripRestSec.get('min', null), 0, 120) && inRange(d.gripRestSec.get('max', null), 0, 120)
-          && d.gripRestSec.min <= d.gripRestSec.max
+          && countsOk(d.trialCounts)
+          && restOk(d.gripRestSec)
           && d.stations is map
           && d.stations.keys().hasOnly(['intake', 'anthro', 'grip', 'cmj', 'hop', 'medball', 'mcgill', 'segments', 'keiser'])
-          && stationOk(d.stations, 'intake') && stationOk(d.stations, 'anthro') && stationOk(d.stations, 'grip')
-          && stationOk(d.stations, 'cmj') && stationOk(d.stations, 'hop') && stationOk(d.stations, 'medball')
-          && stationOk(d.stations, 'mcgill') && stationOk(d.stations, 'segments') && stationOk(d.stations, 'keiser')
+          && d.stations.values().hasOnly([true, false])
           && d.mcgillMode in ['wave', 'separate']
           && d.medballSide in ['trail', 'dominant']
           && d.golfTiming in ['same-day', 'within-7']
-          && d.waveSize is int && d.waveSize >= 1 && d.waveSize <= 4
-          && d.wavesPerSession is int && d.wavesPerSession >= 1 && d.wavesPerSession <= 10
+          && d.waveSize in [1, 2, 3, 4]
+          && d.wavesPerSession in [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
           && d.hopEntry in ['summary', 'per-hop']
           && d.rsiModEntry in ['typed', 'computed']
-          && d.coefficients is map
-          && d.coefficients.keys().hasOnly(['set', 'verified', 'boys', 'girls'])
-          && d.coefficients.get('set', null) is string && d.coefficients.set.size() <= 40
-          && d.coefficients.get('verified', null) is bool
-          && coefficientOk(d.coefficients.get('boys', null)) && coefficientOk(d.coefficients.get('girls', null))
-          && d.thresholds is map
-          && d.thresholds.keys().hasOnly(['clubhead', 'cmj', 'hop', 'medball', 'grip', 'parallax'])
-          && thresholdOk(d.thresholds, 'clubhead') && thresholdOk(d.thresholds, 'cmj') && thresholdOk(d.thresholds, 'hop')
-          && thresholdOk(d.thresholds, 'medball') && thresholdOk(d.thresholds, 'grip') && thresholdOk(d.thresholds, 'parallax')
+          && coefficientsOk(d.coefficients)
+          && thresholdsOk(d.thresholds)
           && d.updatedAt == request.time
           && d.updatedBy == request.auth.uid;
       }

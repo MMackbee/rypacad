@@ -10,7 +10,7 @@ jest.mock('../hooks/assessments', () => ({ useAssessmentSettings: () => ({ data:
 jest.mock('../hooks/assessmentsLive', () => ({
   saveAssessmentSettings: async (s) => {
     mockSaves.push(s);
-    if (mockSaveFails) throw new Error('offline');
+    if (mockSaveFails) throw mockSaveFails === 'refused' ? Object.assign(new Error('refused'), { code: 'permission-denied' }) : new Error('offline');
     return { protocolVersion: s.protocolVersion };
   },
 }));
@@ -124,6 +124,17 @@ test('a failed save says so and keeps the change', async () => {
   expect(r.text()).toContain('The settings were not saved. Check the connection and try again.');
   expect(r.button('10/5 entry: Every hop').getAttribute('aria-pressed')).toBe('true');
   expect(r.button('Save settings').disabled).toBe(false);
+  await r.unmount();
+});
+
+test('a save the rules refuse says the server refused it, not the connection', async () => {
+  mockSaveFails = 'refused';
+  const r = await screen();
+  await r.click('10/5 entry: Every hop');
+  await r.click('Save settings');
+  expect(r.text()).toContain('The settings were not saved: the server refused them. Your changes are still here; tell the owner.');
+  expect(r.text()).not.toContain('Check the connection');
+  expect(r.button('10/5 entry: Every hop').getAttribute('aria-pressed')).toBe('true');
   await r.unmount();
 });
 

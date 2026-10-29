@@ -9,6 +9,7 @@ import VersionSheet from '../components/assessments/VersionSheet';
 import { BackLink, Body, Card, ErrorNotice, ScreenTitle, SectionLabel } from '../components/Primitives';
 import { useAssessmentSettings } from '../hooks/assessments';
 import { saveAssessmentSettings } from '../hooks/assessmentsLive';
+import { ERR } from '../hooks/live';
 import { canEditAssessmentSettings } from '../data/assessmentAccess';
 import { PROTOCOL_VERSION, TRIAL_LIMITS, procedureChanged, withDefaults } from '../data/assessmentSettings';
 
@@ -76,7 +77,10 @@ export default function AssessmentSettings({ bare = false, viewer, onBack }) {
       setAsking(false);
       setSavedAs(protocolVersion);
     } catch (err) {
-      setSaveError('The settings were not saved. Check the connection and try again.');
+      // A refusal is the rules, not the connection: saying 'check the connection' sends Phil the wrong way (review 2026-10-28).
+      setSaveError(err?.code === ERR.PERMISSION
+        ? 'The settings were not saved: the server refused them. Your changes are still here; tell the owner.'
+        : 'The settings were not saved. Check the connection and try again.');
     } finally {
       setSaving(false);
     }

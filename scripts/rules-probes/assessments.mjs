@@ -39,12 +39,16 @@ async function groupListAs(auth, collectionId) {
 
 const windowBody = (over = {}) => ({ athleteId: ATH, season: SEASON, kind: 'baseline', protocolVersion: 'v1.2', circuitMode: { waveSize: 4 }, status: 'open',
   circuitDate: dayOut(0), golfDate: null, mcgillDate: null, weeksOfExposure: 0, wave: { id: 'wave-probe', position: 1, coachUid: uids.phil }, enteredBy: {}, ...over });
+// The whole doc hooks/assessmentsLive.js saveAssessmentSettings writes (data/assessmentSettings.js DEFAULT_SETTINGS):
+// every station and every threshold, so the probe meets the expression cap the real save meets (review 2026-10-28).
 const settingsBody = (over = {}) => ({ protocolVersion: 'v1.2',
   trialCounts: { grip: 3, cmjPractice: 1, cmjScored: 2, hopPractice: 1, hopScored: 2, medballPractice: 1, medballScored: 3, clubheadWarmup: 3, clubheadMax: 5 },
-  gripRestSec: { min: 15, max: 20 }, stations: { intake: true, mcgill: true }, mcgillMode: 'wave', medballSide: 'trail', golfTiming: 'within-7', waveSize: 4,
+  gripRestSec: { min: 15, max: 20 },
+  stations: { intake: true, anthro: true, grip: true, cmj: true, hop: true, medball: true, mcgill: true, segments: false, keiser: false },
+  mcgillMode: 'wave', medballSide: 'trail', golfTiming: 'within-7', waveSize: 4,
   wavesPerSession: 5, hopEntry: 'summary', rsiModEntry: 'typed',
   coefficients: { set: 'moore-2015', verified: false, boys: { a: -8.128741, b: 0.0070346 }, girls: { a: -7.709133, b: 0.0042232 } },
-  thresholds: { clubhead: 2, parallax: null }, updatedBy: uids.phil, ...over });
+  thresholds: { clubhead: 2, cmj: 5, hop: 8, medball: 5, grip: 5, parallax: null }, updatedBy: uids.phil, ...over });
 
 /** A section write as hooks/assessmentsLive.js saveSection sends it: the section, enteredBy.<section>, updatedAt server time. */
 const section = (auth, by, name, value, id = W, extraMarks = []) => updateAs(auth, COL, id, { [name]: value, enteredBy: { [name]: by, ...Object.fromEntries(extraMarks.map((m) => [m, by])) } },
@@ -198,7 +202,15 @@ export async function taskAssessments() {
     expect('Phil writes the settings', await createAs(phil, 'assessmentSettings', 'current', settingsBody(), ['updatedAt']), 200);
     const ownerSettings = (over) => { const body = settingsBody({ updatedBy: uids.owner, ...over }); return updateAs(owner, 'assessmentSettings', 'current', body, Object.keys(body), ['updatedAt']); };
     expect('the owner writes the settings', await ownerSettings({ protocolVersion: 'v1.2.1' }), 200);
+    expect('every threshold a number, Parallax too', await ownerSettings({ thresholds: { clubhead: 50, cmj: 0, hop: 8.5, medball: 5, grip: 5, parallax: 3 } }), 200);
+    expect('a partial station list still saves', await ownerSettings({ stations: { intake: true, mcgill: true } }), 200);
     expect('a wave of five refused', await ownerSettings({ waveSize: 5 }), 403);
+    expect('eleven waves per session refused', await ownerSettings({ wavesPerSession: 11 }), 403);
+    expect('a trial count that is not a whole number refused', await ownerSettings({ trialCounts: { ...settingsBody().trialCounts, grip: 2.5 } }), 403);
+    const noClubheadMax = Object.fromEntries(Object.entries(settingsBody().trialCounts).filter(([k]) => k !== 'clubheadMax'));
+    expect('a missing trial count refused', await ownerSettings({ trialCounts: noClubheadMax }), 403);
+    expect('a trial count left empty refused', await ownerSettings({ trialCounts: { ...noClubheadMax, clubheadMax: null } }), 403);
+    expect('a station outside the list refused', await ownerSettings({ stations: { ...settingsBody().stations, sprint: true } }), 403);
     expect('six grip trials refused', await ownerSettings({ trialCounts: { ...settingsBody().trialCounts, grip: 6 } }), 403);
     expect('four scored CMJs refused', await ownerSettings({ trialCounts: { ...settingsBody().trialCounts, cmjScored: 4 } }), 403);
     expect('a version label without the v refused', await ownerSettings({ protocolVersion: '1.2.2' }), 403);
