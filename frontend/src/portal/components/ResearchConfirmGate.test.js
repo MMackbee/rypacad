@@ -2,6 +2,7 @@ import React, { act } from 'react';
 import { renderScreen } from '../screens/testRender';
 import ResearchConfirmGate from './ResearchConfirmGate';
 import { confirmBody } from '../data/researchConsent';
+import { clearResearchSkips } from '../hooks/researchSkip';
 
 let mockUser;
 let mockPending;
@@ -79,6 +80,13 @@ test('Review Focus 5: a refused save says so, retries only what failed, and offe
   const reopened = await gate();
   expect(reopened.text()).toContain('FAMILY HOME');
   await reopened.unmount();
+
+  // Signing out (useAuthSession clears the skips on the signed-out emission) and back in, same tab: asked again.
+  clearResearchSkips();
+  const nextSignIn = await gate();
+  expect(nextSignIn.text()).toContain('One quick question about research');
+  expect(nextSignIn.text()).not.toContain('FAMILY HOME');
+  await nextSignIn.unmount();
 });
 
 test('Review Focus 5: a save the server never acknowledges (offline) offers Skip for now after 8 s; the write may still land', async () => {

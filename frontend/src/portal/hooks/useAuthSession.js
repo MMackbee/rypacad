@@ -12,6 +12,7 @@ import { auth, provider } from '../../firebase';
 import { ERR, LiveDataError, fetchCurrentUser, fetchHousehold } from './live';
 import { callClaimInvite } from './callables';
 import { publishAssessorTab } from './assessorTab';
+import { clearResearchSkips } from './researchSkip';
 import { showsAssessmentsTab } from '../data/assessmentAccess';
 
 // Every screen and guard mounts its own useAuthSession, and each one's
@@ -249,6 +250,7 @@ export default function useAuthSession({ variant } = {}) {
       if (!fbUser) {
         publishSelfManaged(false);
         publishAssessorTab(false);
+        clearResearchSkips(); // "Skip for now" lasts until sign-out (Review Focus 5)
         setSession(SIGNED_OUT);
         setClaimState('idle');
         return;
@@ -271,7 +273,7 @@ export default function useAuthSession({ variant } = {}) {
   /** Re-run the users/{uid} read under the current sequence (spec 2.2: `provisioned` flips without a reload). */
   const refresh = useCallback(async () => {
     const fbUser = auth.currentUser;
-    if (!fbUser) { publishSelfManaged(false); publishAssessorTab(false); setSession(SIGNED_OUT); return; }
+    if (!fbUser) { publishSelfManaged(false); publishAssessorTab(false); clearResearchSkips(); setSession(SIGNED_OUT); return; }
     try { await fbUser.reload(); } catch (err) { /* offline reload: the cached user still resolves */ }
     setSession((s) => ({ ...s, loading: true }));
     await resolveProfile(seqRef.current, fbUser);

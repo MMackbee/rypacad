@@ -19,6 +19,7 @@ import * as live from './live';
 import { ERR } from './live';
 import useAuthSession, { claimStateOf, createLoginError, resendError, resolveSelfManaged, useSelfManaged, verifyContinueUrl } from './useAuthSession';
 import { useAssessorTab } from './assessorTab';
+import { researchConfirmSkipped, skipResearchConfirm } from './researchSkip';
 
 describe('claimStateOf', () => {
   test('the four contract states pass through; anything else is error', () => {
@@ -163,4 +164,19 @@ describe('the Assessments permission (assessments spec 3, 5)', () => {
     expect(seen.tab).toBe(false);
     await act(async () => root.unmount());
   });
+});
+
+test('Skip for now on the research confirm ends with the session: sign-out clears it (Review Focus 5)', async () => {
+  let emit = null;
+  onAuthStateChanged.mockImplementation((_auth, cb) => { emit = cb; return () => {}; });
+  live.fetchCurrentUser.mockResolvedValue({ uid: 'u-skip', role: 'parent', householdId: 'hh-skip' });
+  function Probe() { useAuthSession(); return null; }
+  const root = createRoot(document.createElement('div'));
+  await act(async () => { root.render(<Probe />); });
+  await act(async () => { emit({ uid: 'u-skip', email: 'dana@example.com', emailVerified: true }); await new Promise((r) => setTimeout(r, 0)); });
+  skipResearchConfirm('u-skip');
+  expect(researchConfirmSkipped('u-skip')).toBe(true);
+  await act(async () => { emit(null); });
+  expect(researchConfirmSkipped('u-skip')).toBe(false);
+  await act(async () => root.unmount());
 });

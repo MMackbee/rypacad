@@ -9,11 +9,9 @@ import useAuthSession from '../hooks/useAuthSession';
 import { isLive } from '../hooks/live';
 import { saveResearchConsent, useResearchConfirm } from '../hooks/researchConsent';
 import { SLOW_SAVE_MS } from '../hooks/assessmentSaves';
+import { researchConfirmSkipped, skipResearchConfirm } from '../hooks/researchSkip';
 import { RESEARCH_CONFIRM_TITLE, RESEARCH_SAVE_LABEL, confirmBody, firstName, researchAnswer } from '../data/researchConsent';
 import { joinNames } from '../data/signup';
-
-/** Users who chose "Skip for now" after a failed save, until the page loads again (the next sign-in). */
-const skipped = new Set();
 
 /**
  * The one-time research confirm (assessments spec 7): a family whose
@@ -33,12 +31,12 @@ export default function ResearchConfirmGate({ children }) {
   const [done, setDone] = useState(false);
   const [, setSkipTick] = useState(0);
   const pending = data?.pending ?? [];
-  if (!live || !user || done || skipped.has(user.uid) || pending.length === 0) return children;
+  if (!live || !user || done || researchConfirmSkipped(user.uid) || pending.length === 0) return children;
   return (
     <ResearchConfirm
       pending={pending}
       onDone={() => setDone(true)}
-      onSkip={() => { skipped.add(user.uid); setSkipTick((n) => n + 1); }}
+      onSkip={() => { skipResearchConfirm(user.uid); setSkipTick((n) => n + 1); }}
     />
   );
 }
