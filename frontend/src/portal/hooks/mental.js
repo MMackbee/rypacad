@@ -9,7 +9,7 @@
  * the academy's America/Chicago date, never the device's.
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { fetchAllAthletes, fetchAllHouseholds, fetchAthlete, isLive } from './live';
+import { ERR, fetchAllAthletes, fetchAllHouseholds, fetchAthlete, isLive } from './live';
 import { useInvalidation } from './invalidate';
 import useSeedResource from './useSeedResource';
 import {
@@ -82,23 +82,31 @@ function seedMentalAthlete(athleteId, today) {
   });
 }
 
+/** The athlete doc, or null when there is none (a mistyped or stale link); other failures still throw. */
+const athleteOrNull = (athleteId) => fetchAthlete(athleteId).catch((err) => {
+  if (err && err.code === ERR.NOT_FOUND) return null;
+  throw err;
+});
+
 async function liveMentalAthlete(athleteId, today) {
   const week = weekStartFor(today);
   const [athlete, bookings, entries, logs, checkins] = await Promise.all([
-    fetchAthlete(athleteId),
+    athleteOrNull(athleteId),
     fetchMentalBookings(athleteId),
     fetchMentalEntries(athleteId),
     fetchContractLogsBetween({ athleteIds: [athleteId], fromISO: week, toISO: addDays(week, 6) }),
     fetchCheckinsForAthletes([athleteId]),
   ]);
+  if (!athlete) return null;
   const contact = await fetchHouseholdContact(athlete.householdId);
   return athletePayload({ athlete, contact, bookings, entries, logsByDate: logs[athleteId], checkins, today });
 }
 
 /**
  * `{ data: { athlete, contact, sessions, notes, contract } | null, loading,
- * error }` for one athlete's page; sessions newest first. Seed mode answers
- * null data for an id that is not a fixture athlete.
+ * error }` for one athlete's page; sessions newest first. An id with no
+ * athlete (not a fixture athlete in seed mode, no athletes doc live) answers
+ * null data, which the screen shows as not found.
  */
 export function useMentalAthlete(athleteId) {
   const live = isLive();

@@ -11,6 +11,7 @@ const mockLive = { fetchAthlete: jest.fn(), fetchAllAthletes: jest.fn(), fetchAl
 const mockMental = {
   fetchMentalEntries: jest.fn(), saveMentalEntry: jest.fn(),
   fetchContractLogsBetween: jest.fn(), fetchCheckinsForAthletes: jest.fn(), fetchContractConfig: jest.fn(), setCheckin: jest.fn(),
+  fetchMentalBookings: jest.fn(), fetchHouseholdContact: jest.fn(),
 };
 jest.mock('../../firebase', () => ({ auth: { currentUser: null }, db: {} }));
 jest.mock('firebase/firestore', () => ({}));
@@ -29,10 +30,14 @@ jest.mock('./mentalLive', () => ({
   fetchCheckinsForAthletes: (...a) => mockMental.fetchCheckinsForAthletes(...a),
   fetchContractConfig: (...a) => mockMental.fetchContractConfig(...a),
   setCheckin: (...a) => mockMental.setCheckin(...a),
+  fetchMentalBookings: (...a) => mockMental.fetchMentalBookings(...a),
+  fetchHouseholdContact: (...a) => mockMental.fetchHouseholdContact(...a),
 }));
 jest.mock('../data/calendar', () => ({ ...jest.requireActual('../data/calendar'), academyDateISO: () => '2026-11-11' }));
 // eslint-disable-next-line import/first
-import { useContractBoard, useMentalNote } from './mental';
+import { useContractBoard, useMentalAthlete, useMentalNote } from './mental';
+// eslint-disable-next-line import/first
+import { ERR, LiveDataError } from './live';
 
 const STORED = { id: 'intake', athleteId: 'jordan', kind: 'intake', sessionId: null, sessionDate: null, body: 'Stored.', createdAtMs: 1, updatedAtMs: 2 };
 
@@ -168,5 +173,34 @@ test('a failed Checked in write puts the row back and rejects, so the screen can
   expect(failed).not.toBeNull();
   expect(ids(out.current.rows.due)).toEqual(['jordan', 'reese']);
   expect(ids(out.current.rows.checkedIn)).toEqual([]);
+  await r.unmount();
+});
+
+/* ---------------------------------------------------------- One athlete -- */
+
+function mountAthlete(athleteId) {
+  mockMental.fetchMentalBookings.mockResolvedValue([]);
+  mockMental.fetchMentalEntries.mockResolvedValue([]);
+  mockMental.fetchContractLogsBetween.mockResolvedValue({});
+  mockMental.fetchCheckinsForAthletes.mockResolvedValue([]);
+  mockMental.fetchHouseholdContact.mockResolvedValue(null);
+  const out = { current: null };
+  return renderScreen(<HookProbe out={out} use={() => useMentalAthlete(athleteId)} />, { path: '/x' }).then((r) => ({ r, out }));
+}
+
+test('a mistyped or stale athlete id is not found (null data), not a load error', async () => {
+  mockLive.fetchAthlete.mockRejectedValue(new LiveDataError(ERR.NOT_FOUND, 'No athletes/does-not-exist doc.'));
+  const { r, out } = await mountAthlete('does-not-exist');
+  await r.flush();
+  expect(out.current).toMatchObject({ data: null, loading: false, error: null });
+  await r.unmount();
+});
+
+test('any other athlete read failure is still an error', async () => {
+  mockLive.fetchAthlete.mockRejectedValue(new LiveDataError(ERR.UNAVAILABLE, 'offline'));
+  const { r, out } = await mountAthlete('jordan');
+  await r.flush();
+  expect(out.current.data).toBeNull();
+  expect(out.current.error).toMatchObject({ code: ERR.UNAVAILABLE });
   await r.unmount();
 });
