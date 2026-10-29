@@ -56,3 +56,47 @@ test('browser Back with no blur: the text typed since the last tick still reache
     athleteId: 'jordan', entryId: 'intake', kind: 'intake', body: 'Stored. Typed just before Back.',
   }));
 });
+
+function HookProbe({ use, out }) {
+  out.current = use();
+  return null;
+}
+
+test('a slow save reads saving, then slow after 8 s, then saved with a time (SLOW_SAVE_MS)', async () => {
+  jest.useFakeTimers();
+  try {
+    let resolveSave;
+    mockMental.saveMentalEntry.mockImplementation(() => new Promise((res) => { resolveSave = res; }));
+    const out = { current: null };
+    const r = await renderScreen(<HookProbe out={out} use={() => useMentalNote({ athleteId: 'jordan', entryId: 'intake' })} />, { path: '/x' });
+    await r.flush();
+    expect(out.current.loading).toBe(false);
+    let done;
+    await r.act(() => { done = out.current.save('Stored. A slow line.'); });
+    expect(out.current.saveState).toBe('saving');
+    await r.act(() => { jest.advanceTimersByTime(7999); });
+    expect(out.current.saveState).toBe('saving');
+    await r.act(() => { jest.advanceTimersByTime(1); });
+    expect(out.current.saveState).toBe('slow');
+    await r.act(async () => { resolveSave(); await done; });
+    expect(out.current.saveState).toBe('saved');
+    expect(typeof out.current.savedAt).toBe('number');
+    expect(out.current.entry.body).toBe('Stored. A slow line.');
+    await r.unmount();
+  } finally {
+    jest.useRealTimers();
+  }
+});
+
+test('a failed save reads error, and the next save clears it', async () => {
+  mockMental.saveMentalEntry.mockRejectedValueOnce(Object.assign(new Error('offline'), { code: 'unavailable' }));
+  const out = { current: null };
+  const r = await renderScreen(<HookProbe out={out} use={() => useMentalNote({ athleteId: 'jordan', entryId: 'intake' })} />, { path: '/x' });
+  await r.flush();
+  await r.act(() => out.current.save('Stored. Offline line.'));
+  expect(out.current.saveState).toBe('error');
+  await r.act(() => out.current.save('Stored. Offline line.'));
+  expect(out.current.saveState).toBe('saved');
+  expect(mockMental.saveMentalEntry).toHaveBeenCalledTimes(2);
+  await r.unmount();
+});
