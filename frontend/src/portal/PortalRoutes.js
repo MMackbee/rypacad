@@ -55,6 +55,8 @@ const loadAdminScholarships = () => import('./screens/AdminScholarships');
 const loadStaff = () => import('./screens/StaffRoles');
 const loadTour = () => import('./screens/TourStandings');
 const loadSpecialistDay = () => import('./screens/SpecialistDay');
+// Yannick's tools (2026-10-28, spec 5): one /portal/mental segment, four screens.
+const loadMentalAthletes = () => import('./screens/MentalAthletes');
 
 const OnboardingWelcomeRoute = named(loadOnboarding, 'OnboardingWelcomeRoute');
 const MySchedule = lazy(loadMySchedule);
@@ -77,6 +79,7 @@ const AdminScholarships = lazy(loadAdminScholarships);
 const StaffRoles = lazy(loadStaff);
 const TourStandings = lazy(loadTour);
 const SpecialistDay = lazy(loadSpecialistDay);
+const MentalAthletes = lazy(loadMentalAthletes);
 
 /*
  * Chunk warm-up (live mode only), keyed on the segment after /portal/.
@@ -92,6 +95,7 @@ const CURRENT_ROUTE_CHUNKS = {
   book: [loadBook],
   coaching: [loadCoaching],
   'my-sessions': [loadSpecialistDay],
+  mental: [loadMentalAthletes],
   contract: [loadContract],
   season: [loadSeason],
   athlete: [loadAthleteDetail],
@@ -494,6 +498,12 @@ function SpecialistDayRoute({ onSignOut }) {
   );
 }
 
+/** Yannick's athlete list (2026-10-28, spec 5.1): a row opens that athlete's page. */
+function MentalAthletesRoute({ onSignOut }) {
+  const navigate = useNavigate();
+  return <MentalAthletes bare onSignOut={onSignOut} onOpenAthlete={(id) => navigate(`/portal/mental/${id}`)} />;
+}
+
 /**
  * The Tour is the one route every role reaches, but TourStandings renders a
  * role-appropriate bottom tab bar (athlete and parent have one; staff roles
@@ -755,6 +765,14 @@ export default function PortalRoutes() {
           </RequireRole>
         }
       />
+      {/* Yannick's tools (2026-10-28, spec 5): his athletes, one athlete's
+          page and its private notes are role mental only; the contract board
+          also admits ops and owner, read-only (by URL, no tab). The static
+          mental/contract is declared before mental/:athleteId. */}
+      <Route path="mental" element={<RequireRole roles={['mental']}><MentalAthletesRoute onSignOut={onSignOut} /></RequireRole>} />
+      <Route path="mental/contract" element={<RequireRole roles={['mental', 'ops', 'owner']}>{null}</RequireRole>} />
+      <Route path="mental/:athleteId/notes/:entryId" element={<RequireRole roles={['mental']}>{null}</RequireRole>} />
+      <Route path="mental/:athleteId" element={<RequireRole roles={['mental']}>{null}</RequireRole>} />
       {/* Hidden until closer to launch (owner, 2026-09-30): a stale link
           goes through the index, which lands the account on its own home. */}
       <Route

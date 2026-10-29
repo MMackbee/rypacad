@@ -1,6 +1,6 @@
 import React from 'react';
 import { renderScreen } from '../screens/testRender';
-import BottomTabBar from './BottomTabBar';
+import BottomTabBar, { TABS } from './BottomTabBar';
 
 /*
  * Owner report (Mike S6 2026-09-30): the 18+ athlete who signed up for
@@ -59,4 +59,13 @@ test('selfManaged never changes a parent or staff bar', async () => {
   const coach = await renderScreen(<BottomTabBar role="coach" selfManaged />);
   expect(labels(coach)).toEqual(['Today', 'Roster', 'Capture']);
   await coach.unmount();
+});
+
+test('mental: Sessions, Athletes, Contract (key mental-contract) and Tour, with the contract switch off', async () => {
+  delete process.env.REACT_APP_CONTRACT_ENABLED;
+  const r = await renderScreen(<BottomTabBar role="mental" active="athletes" />, { path: '/portal/mental' });
+  expect(['Sessions', 'Athletes', 'Contract', 'Tour'].every((l) => r.text().includes(l))).toBe(true);
+  expect(TABS.mental.map((t) => t.key)).toEqual(['sessions', 'athletes', 'mental-contract', 'tour']);
+  expect(TABS.mental.find((t) => t.key === 'mental-contract').route).toBe('/portal/mental/contract');
+  r.unmount();
 });
