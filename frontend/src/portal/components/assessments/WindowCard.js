@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import { color, font, radius } from '../../tokens';
 import Button from '../Button';
 import { Body, Card, ErrorNotice, SectionLabel } from '../Primitives';
-import { MARKER_TEXT, TABLE_ROWS } from '../../data/assessmentResults';
+import { MARKER_TEXT, TABLE_ROWS, mcgillEntered } from '../../data/assessmentResults';
 import { holdLabel } from '../../data/assessmentScoring';
 import { NOT_TESTED_REASONS } from '../../data/assessmentSettings';
 import { shortDate } from '../../data/assessmentWindows';
@@ -41,7 +41,7 @@ function Trials({ w }) {
       : `Set ${i + 1}: RSI ${s.rsiBest5 ?? '-'} · contact ${s.gctMs ?? '-'} ms`);
   });
   if (w.medball) lines.push(join([`Throws ${list(w.medball.throws)} ${w.medball.method === 'distance' ? 'm' : 'mph'}`, w.medball.massKg ? `${w.medball.massKg} kg` : null, w.medball.side ? `${w.medball.side} side` : null]));
-  if (w.mcgill) {
+  if (mcgillEntered(w.mcgill)) {
     lines.push(w.mcgill.skippedBackPain ? 'McGill skipped: back pain'
       : `Flexor ${holdLabel(w.mcgill.flexorSec)} · extensor ${holdLabel(w.mcgill.extensorSec)} · right side ${holdLabel(w.mcgill.sideRightSec)} · left side ${holdLabel(w.mcgill.sideLeftSec)}`);
   }

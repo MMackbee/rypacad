@@ -31,6 +31,13 @@ const MARKER_TESTS = ['clubhead', 'cmj', 'hop', 'medball', 'grip', 'parallax'];
 
 const isNum = (v) => typeof v === 'number' && Number.isFinite(v);
 const byDate = (a, b) => (a.circuitDate || '').localeCompare(b.circuitDate || '');
+const MCGILL_HOLDS = ['flexorSec', 'extensorSec', 'sideRightSec', 'sideLeftSec'];
+/**
+ * McGill is entered once a hold is timed or it is skipped for back pain. The
+ * section alone says nothing: intake writes it with the back-pain answer
+ * ("low back pain now: No") before any hold (review 2026-10-28).
+ */
+export const mcgillEntered = (m) => Boolean(m) && (m.skippedBackPain === true || MCGILL_HOLDS.some((k) => isNum(m[k])));
 
 /** Every score one window's trials give (spec 6), under the entry modes it ran with. */
 export function windowScores(w) {
@@ -181,7 +188,7 @@ export function buildResults({ athleteId, athlete, profile, windows, settings, t
     const diffs = prev ? modeDifferences(prev.circuitMode, w.circuitMode) : [];
     const comparable = Boolean(prev) && (prev.protocolVersion ?? null) === (w.protocolVersion ?? null) && diffs.every((k) => ENTRY_KEYS.includes(k));
     const markers = comparable ? markersOf(scores, windowScores(prev), s.thresholds) : null;
-    const mcgillDue = w.kind !== 'mid' && !w.mcgill && !w.notTested?.mcgill && w.circuitMode?.stations?.mcgill !== false;
+    const mcgillDue = w.kind !== 'mid' && !mcgillEntered(w.mcgill) && !w.notTested?.mcgill && w.circuitMode?.stations?.mcgill !== false;
     return {
       id: w.id,
       kind: w.kind,

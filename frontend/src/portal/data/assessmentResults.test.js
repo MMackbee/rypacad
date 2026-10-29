@@ -85,6 +85,17 @@ test('what an open window still lacks, with its due date, and how long it has be
   expect(results([baseline]).windows[0]).toMatchObject({ missing: [], openDays: null });
 });
 
+test('the intake back-pain answer alone is not McGill entered: due until a hold is timed or it is skipped for pain', () => {
+  const end = win({ ...baseline, id: '2026-27-end', kind: 'end', status: 'open', circuitDate: '2027-02-16', mcgill: { skippedBackPain: false } });
+  const [e] = results([end]).windows;
+  expect(e.mcgillDue).toBe(true);
+  expect(e.missing).toEqual(['McGill not entered (due by Mar 2)']);
+  const held = results([win({ ...end, mcgill: { skippedBackPain: false, flexorSec: 45, extensorSec: null, sideRightSec: null, sideLeftSec: null } })]).windows[0];
+  expect(held).toMatchObject({ mcgillDue: false, missing: [] });
+  const skipped = results([win({ ...end, mcgill: { skippedBackPain: true } })]).windows[0];
+  expect(skipped).toMatchObject({ mcgillDue: false, missing: [] });
+});
+
 test('a new ball or method switches the med ball marker off', () => {
   const [m] = results([baseline, win({ ...mid, medball: { massKg: 4, side: 'trail', method: 'speed', throws: [26] } })]).windows;
   expect(m.markers.medball).toBeNull();
