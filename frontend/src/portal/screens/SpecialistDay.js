@@ -3,6 +3,7 @@ import { color, font, radius } from '../tokens';
 import BottomTabBar from '../components/BottomTabBar';
 import PhoneFrame from '../components/PhoneFrame';
 import SessionCard from '../components/SessionCard';
+import SessionNoteChip from '../components/mental/SessionNoteChip';
 import { CapacityPill } from '../components/StatusBadge';
 import { Body, ScreenTitle, SectionLabel, SignOutButton } from '../components/Primitives';
 import { useSpecialistSessions } from '../hooks';
@@ -37,6 +38,10 @@ import { SPECIALISTS, rosterNameFor } from '../data/specialists';
  *   Ignored when `specialistId === 'phil'` (Phil is a coach account, so the
  *   footer uses the coach-with-specialistId variant instead).
  * @param {() => void} [onSignOut]
+ * @param {(note: {athleteId, sessionId, sessionDate, athleteName}) => void} [onOpenNote]
+ *   2026-10-28 (spec 5.5): Yannick's own mental rows get a Note chip that
+ *   opens that session's private note for its first athlete. Role 'mental'
+ *   on the mental calendar only - never Phil, never an ops/owner switcher.
  */
 export default function SpecialistDay({
   bare = false,
@@ -45,8 +50,17 @@ export default function SpecialistDay({
   role,
   onOpenSession,
   onSignOut,
+  onOpenNote,
 }) {
   const [activeId, setActiveId] = useState(specialistId ?? SPECIALISTS[0].id);
+  const showNote = activeId === 'mental' && role === 'mental' && typeof onOpenNote === 'function';
+  const noteChip = (s) =>
+    showNote && s.athletes[0] ? (
+      <SessionNoteChip
+        hasNote={false}
+        onClick={() => onOpenNote({ athleteId: s.athletes[0].athleteId, sessionId: s.sessionId, sessionDate: s.date, athleteName: s.athletes[0].name })}
+      />
+    ) : undefined;
   const specialist = SPECIALISTS.find((s) => s.id === activeId) ?? SPECIALISTS[0];
   const { data, loading, error } = useSpecialistSessions(activeId);
   // Memoized so the day-grouping memo below keys off real data changes,
@@ -136,7 +150,7 @@ export default function SpecialistDay({
               Today
             </SectionLabel>
             {todayGroup.sessions.map((s) => (
-              <TodaySessionCard key={s.sessionId} session={s} specialist={specialist} onOpenSession={onOpenSession} />
+              <TodaySessionCard key={s.sessionId} session={s} specialist={specialist} onOpenSession={onOpenSession} action={noteChip(s)} />
             ))}
           </div>
         ) : null}
@@ -183,6 +197,7 @@ export default function SpecialistDay({
                         : `${s.booked} booked`
                     }
                     onClick={onOpenSession ? () => onOpenSession({ ...s, type: activeId }) : undefined}
+                    action={noteChip(s)}
                     trailing={
                       <CapacityPill state={s.booked >= s.capacity ? 'full' : 'available'}>
                         {s.booked}/{s.capacity}
@@ -205,7 +220,7 @@ export default function SpecialistDay({
  * `live` variant (green border) so today's real work stands out above the
  * rest of the rolling window.
  */
-function TodaySessionCard({ session, specialist, onOpenSession }) {
+function TodaySessionCard({ session, specialist, onOpenSession, action }) {
   const [time, meridiem] = (session.time || '').split(' ');
   const names = session.athletes.map(rosterNameFor).filter(Boolean);
   return (
@@ -223,6 +238,7 @@ function TodaySessionCard({ session, specialist, onOpenSession }) {
           : `${session.booked} booked`
       }
       onClick={onOpenSession ? () => onOpenSession({ ...session, type: specialist.id }) : undefined}
+      action={action}
       trailing={
         <CapacityPill state={session.booked >= session.capacity ? 'full' : 'available'}>
           {session.booked}/{session.capacity}

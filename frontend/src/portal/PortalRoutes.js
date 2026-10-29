@@ -57,6 +57,8 @@ const loadTour = () => import('./screens/TourStandings');
 const loadSpecialistDay = () => import('./screens/SpecialistDay');
 // Yannick's tools (2026-10-28, spec 5): one /portal/mental segment, four screens.
 const loadMentalAthletes = () => import('./screens/MentalAthletes');
+const loadMentalAthlete = () => import('./screens/MentalAthlete');
+const loadMentalNote = () => import('./screens/MentalNote');
 
 const OnboardingWelcomeRoute = named(loadOnboarding, 'OnboardingWelcomeRoute');
 const MySchedule = lazy(loadMySchedule);
@@ -80,6 +82,8 @@ const StaffRoles = lazy(loadStaff);
 const TourStandings = lazy(loadTour);
 const SpecialistDay = lazy(loadSpecialistDay);
 const MentalAthletes = lazy(loadMentalAthletes);
+const MentalAthlete = lazy(loadMentalAthlete);
+const MentalNote = lazy(loadMentalNote);
 
 /*
  * Chunk warm-up (live mode only), keyed on the segment after /portal/.
@@ -95,7 +99,7 @@ const CURRENT_ROUTE_CHUNKS = {
   book: [loadBook],
   coaching: [loadCoaching],
   'my-sessions': [loadSpecialistDay],
-  mental: [loadMentalAthletes],
+  mental: [loadMentalAthletes, loadMentalAthlete, loadMentalNote],
   contract: [loadContract],
   season: [loadSeason],
   athlete: [loadAthleteDetail],
@@ -478,6 +482,9 @@ function SpecialistDayRoute({ onSignOut }) {
       specialistId={specialistId ?? undefined}
       canSwitch={canSwitch}
       onSignOut={onSignOut}
+      onOpenNote={({ athleteId, sessionId, sessionDate, athleteName }) =>
+        navigate(`/portal/mental/${athleteId}/notes/${sessionId}`, { state: { sessionDate, athleteName } })
+      }
       onOpenSession={(s) =>
         navigate('/portal/attendance', {
           state: {
@@ -502,6 +509,47 @@ function SpecialistDayRoute({ onSignOut }) {
 function MentalAthletesRoute({ onSignOut }) {
   const navigate = useNavigate();
   return <MentalAthletes bare onSignOut={onSignOut} onOpenAthlete={(id) => navigate(`/portal/mental/${id}`)} />;
+}
+
+/**
+ * One athlete's page (spec 5.2). A note opens with its session date and the
+ * athlete's name as navigation state, so the note page says whose it is.
+ */
+function MentalAthleteRoute({ onSignOut }) {
+  const { athleteId } = useParams();
+  const navigate = useNavigate();
+  return (
+    <MentalAthlete
+      bare
+      athleteId={athleteId}
+      onSignOut={onSignOut}
+      onBack={() => navigate('/portal/mental')}
+      onOpenNote={({ entryId, sessionDate, athleteName }) =>
+        navigate(`/portal/mental/${athleteId}/notes/${entryId}`, { state: { sessionDate, athleteName } })
+      }
+    />
+  );
+}
+
+/**
+ * One private note (spec 5.3), keyed by the route params. The session date
+ * and the name ride in navigation state; a refresh or deep link has neither
+ * and the screen's hook looks the name up.
+ */
+function MentalNoteRoute() {
+  const { athleteId, entryId } = useParams();
+  const state = useLocation().state;
+  const navigate = useNavigate();
+  return (
+    <MentalNote
+      bare
+      athleteId={athleteId}
+      entryId={entryId}
+      sessionDate={state?.sessionDate ?? null}
+      athleteName={state?.athleteName ?? null}
+      onBack={() => navigate(`/portal/mental/${athleteId}`)}
+    />
+  );
 }
 
 /**
@@ -771,8 +819,8 @@ export default function PortalRoutes() {
           mental/contract is declared before mental/:athleteId. */}
       <Route path="mental" element={<RequireRole roles={['mental']}><MentalAthletesRoute onSignOut={onSignOut} /></RequireRole>} />
       <Route path="mental/contract" element={<RequireRole roles={['mental', 'ops', 'owner']}>{null}</RequireRole>} />
-      <Route path="mental/:athleteId/notes/:entryId" element={<RequireRole roles={['mental']}>{null}</RequireRole>} />
-      <Route path="mental/:athleteId" element={<RequireRole roles={['mental']}>{null}</RequireRole>} />
+      <Route path="mental/:athleteId/notes/:entryId" element={<RequireRole roles={['mental']}><MentalNoteRoute /></RequireRole>} />
+      <Route path="mental/:athleteId" element={<RequireRole roles={['mental']}><MentalAthleteRoute onSignOut={onSignOut} /></RequireRole>} />
       {/* Hidden until closer to launch (owner, 2026-09-30): a stale link
           goes through the index, which lands the account on its own home. */}
       <Route
