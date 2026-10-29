@@ -37,3 +37,26 @@ test('a pain stop at a station ends the later ones for that athlete; the station
   expect(before.text()).toContain('STATION INPUTS');
   await before.unmount();
 });
+
+test("the per-athlete badge is this station's saves; a profile or not-tested save made elsewhere shows only while it is not on the server", async () => {
+  const at = (id, entries, w = {}) => renderScreen(
+    <StationShell station={station(id)} athletes={[athlete(w)]} layout="tablet" order={null} entries={entries} onRetry={() => {}} onNotTested={() => {}} renderAthlete={() => 'STATION INPUTS'} />
+  );
+  const saved = { state: 'saved', message: null };
+  const elsewhere = { 'a:profile': saved, 'a:notTested': saved, 'a:fields': saved };
+  const grip = await at('grip', elsewhere);
+  expect(grip.text()).not.toContain('Saved');
+  await grip.unmount();
+  const typed = await at('grip', { ...elsewhere, 'a:grip': saved });
+  expect(typed.text()).toContain('Saved');
+  await typed.unmount();
+  const intake = await at('intake', { 'a:profile': saved });
+  expect(intake.text()).toContain('Saved');
+  await intake.unmount();
+  const failed = await at('grip', { 'a:profile': { state: 'error', message: 'Not saved.' } });
+  expect(failed.text()).toContain('Not saved.');
+  await failed.unmount();
+  const marked = await at('grip', { 'a:notTested': saved }, { notTested: { grip: 'ill' } });
+  expect(marked.text()).toContain('Saved');
+  await marked.unmount();
+});
