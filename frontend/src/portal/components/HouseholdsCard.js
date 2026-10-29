@@ -10,15 +10,19 @@ import { useHouseholdsDirectory } from '../hooks/billing';
  * opening the staff view of that household's Billing hub — the same page
  * the parent sees, so a support call and the parent's screen never
  * disagree. Standing comes from households.membership (absent == active).
+ * The staging test family (`test: true`, data/testFamily.js; owner
+ * 2026-10-15) stays listed so staff can open it, labelled Test, and is left
+ * out of "Households · N".
  */
 const STANDING = {
   active: { tone: 'green', label: 'Active' },
   past_due: { tone: 'yellow', label: 'Past due' },
   lapsed: { tone: 'red', label: 'Lapsed' },
 };
+const TEST_BADGE = { tone: 'muted', label: 'Test' };
 
 function Row({ household, last, onOpen }) {
-  const standing = STANDING[household.status] || STANDING.active;
+  const standing = household.test ? TEST_BADGE : STANDING[household.status] || STANDING.active;
   const kids = household.athletes.length
     ? household.athletes.map((a) => `${a.name}${a.packageName ? ` · ${a.packageName}` : ''}`).join(', ')
     : 'No athletes linked';
@@ -54,9 +58,10 @@ function Row({ household, last, onOpen }) {
 export default function HouseholdsCard({ onOpenHousehold }) {
   const { data, loading, error } = useHouseholdsDirectory();
   const rows = data ?? [];
+  const count = rows.filter((h) => !h.test).length;
   return (
     <Card large>
-      <SectionLabel style={{ marginBottom: 6 }}>Households · {loading ? '…' : rows.length}</SectionLabel>
+      <SectionLabel style={{ marginBottom: 6 }}>Households · {loading ? '…' : count}</SectionLabel>
       {error ? (
         <Body size={12} tone={color.error}>
           Households didn't load. Check your connection and try again.

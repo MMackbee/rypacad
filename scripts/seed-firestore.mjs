@@ -136,13 +136,6 @@
  *                  not-yet-a-family account to route to. Two athletes: one
  *                  with a dob and a chosen tier, one with neither. All three
  *                  consents true.
- *   diagnostics — two `athletes/jordan/diagnostics` captures (contract v1.8,
- *                  Sprint 10 pin C): an older PUBLISHED one with a value for
- *                  every DIAGNOSTIC_SECTIONS field id, and a newer DRAFT with
- *                  just a couple of fields filled in — both `capturedBy:
- *                  'coach-luke'`. Field ids are read straight off
- *                  DIAGNOSTIC_SECTIONS in seed.js and enumerated in
- *                  DATA-MODEL.md, never retyped independently.
  *   loginInvites / calendlyEvents — Sprint 20: one open child-login invite (reese) and one Calendly-sourced Yannick session + booking + ledger row (see the cal- block below).
  *   staffInvites — ONE pending invite (contract v1.8, Sprint 10 pin E) at a
  *                  clearly-fake address (`invite-test@example.com`), role
@@ -180,6 +173,7 @@
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { bundleFrontend, fwdPath } from './lib/bundle-frontend.mjs';
+import { assessmentFixtures } from './lib/assessment-fixtures.mjs';
 
 const DRY_RUN = process.argv.includes('--dry-run');
 const PROJECT_ID = 'rypacad';
@@ -243,6 +237,10 @@ function loadPortalData() {
     // the NotificationPreferences screen renders; bundled like everything
     // else here rather than retyped, so a category add/remove can't drift.
     `export { NOTIFICATION_CATEGORIES } from '${fwdPath(path.join(dataDir, 'parent.js'))}';`,
+    // Assessments (2026-10-14): the circuit-mode snapshot and the season rule
+    // the fixtures need, bundled like everything else rather than retyped.
+    `export { DEFAULT_SETTINGS, PROTOCOL_VERSION, circuitModeOf } from '${fwdPath(path.join(dataDir, 'assessmentSettings.js'))}';`,
+    `export { seasonOf } from '${fwdPath(path.join(dataDir, 'assessmentWindows.js'))}';`,
   ], { tmpPrefix: 'ryp-seed-' });
 }
 
@@ -637,6 +635,29 @@ function buildDocs(portal) {
     coachId: null,
   });
 
+  // Assessments (2026-10-14 spec): jordan tested at baseline nine weeks ago
+  // (mid-season eligible), reese said no to research (baseline due), nico's
+  // family has not answered (the list cannot add him, and Dana's one-time
+  // confirm asks at sign-in), sage-parker said yes (baseline due). Every doc
+  // comes from scripts/lib/assessment-fixtures.mjs; the consents land on the
+  // athlete docs, the windows and profiles in their subcollections.
+  const assessment = assessmentFixtures({
+    todayISO: isoDate(new Date()),
+    mode: portal.circuitModeOf(portal.DEFAULT_SETTINGS),
+    seasonOf: portal.seasonOf,
+    protocolVersion: portal.PROTOCOL_VERSION,
+    coachUid: 'phil',
+    guardianUid: 'parent-dana',
+    signatureName: 'Dana Whitfield',
+    athletes: [
+      { id: 'jordan', story: 'tested', sex: 'female' },
+      { id: 'reese', story: 'declined' },
+      { id: 'nico', story: 'unanswered' },
+      { id: parkerAthleteId, story: 'due' },
+    ],
+  });
+  for (const [id, consents] of Object.entries(assessment.consents)) athletes.get(id).consents = consents;
+
   // bookings — REAL bookings for the three Whitfield athletes against real
   // seeded session ids (contract v1.4, docs/portal/TEAM.md "Sprint 6 pins"),
   // so the live-wired dashboards (My Schedule, the parent household view, the
@@ -981,68 +1002,6 @@ function buildDocs(portal) {
       createdAt: resultsCreatedAt,
     });
   }
-
-  // athletes/jordan/diagnostics (contract v1.8, Sprint 10 pin C) — two
-  // captures keyed by the same DIAGNOSTIC_SECTIONS field ids the Diagnostic
-  // Capture screen renders (read straight off seed.js, enumerated in
-  // DATA-MODEL.md so the key list can't drift from what this script writes):
-  //   published-1 — the older, COMPLETE capture: every one of the 13 field
-  //     ids across all four sections has a value, status 'published', so the
-  //     parent/athlete PUBLISHED-only read and the AthleteDetail "Progress
-  //     summary" replacement (pin C) both have something real to render.
-  //   draft-1 — the newer, IN-PROGRESS capture: only the launch monitor's
-  //     first two fields are filled in, status 'draft' — a parent/athlete
-  //     read must never see this one; only staff/coach/specialist reads do.
-  // Both capturedBy coach-luke, jordan's assigned coach.
-  const diagCapturedAtPublished = new Date();
-  diagCapturedAtPublished.setDate(diagCapturedAtPublished.getDate() - 30);
-  diagCapturedAtPublished.setHours(16, 0, 0, 0);
-  const diagCapturedAtDraft = new Date();
-  diagCapturedAtDraft.setDate(diagCapturedAtDraft.getDate() - 2);
-  diagCapturedAtDraft.setHours(16, 30, 0, 0);
-  const jordanDiagnostics = new Map([
-    [
-      'published-1',
-      {
-        athleteId: 'jordan',
-        capturedBy: coachUid,
-        capturedAt: diagCapturedAtPublished,
-        updatedAt: diagCapturedAtPublished,
-        status: 'published',
-        // Every DIAGNOSTIC_SECTIONS field id (13, across launch/mobility/
-        // shortgame/putting) — see DATA-MODEL.md for the enumerated list.
-        values: {
-          clubhead: 88,
-          ball: 118,
-          smash: 1.34,
-          carry7i: 145,
-          hip: 42,
-          shoulder: 85,
-          balance: 22,
-          d30: 6,
-          d50: 9,
-          d70: 13,
-          p3: 9,
-          p6: 6,
-          p10: 55,
-        },
-        notes: 'Full capture, all four sections — clean session, no equipment issues.',
-      },
-    ],
-    [
-      'draft-1',
-      {
-        athleteId: 'jordan',
-        capturedBy: coachUid,
-        capturedAt: diagCapturedAtDraft,
-        updatedAt: diagCapturedAtDraft,
-        status: 'draft',
-        // Only a couple of fields — an in-progress capture, on purpose.
-        values: { clubhead: 90, ball: 121 },
-        notes: null,
-      },
-    ],
-  ]);
 
   // contractLogs — Jordan's practice history for the last ~2 weeks (contract
   // v1.3, TEAM.md Sprint 5 pins): variable minutes, some at/above the
@@ -1528,7 +1487,6 @@ function buildDocs(portal) {
     contractLogs,
     tournamentResults,
     enrollmentRequests,
-    'athletes/jordan/diagnostics': jordanDiagnostics,
     staffInvites,
     loginInvites,
     tokenPeriods,
@@ -1537,6 +1495,7 @@ function buildDocs(portal) {
     stripeEvents,
     calendlyEvents,
     notifications,
+    ...assessment.collections,
   };
 }
 
@@ -1685,14 +1644,6 @@ async function main() {
     );
   }
 
-  console.log('\nathletes/jordan/diagnostics (contract v1.8):');
-  for (const [id, doc] of collections['athletes/jordan/diagnostics']) {
-    console.log(
-      `  athletes/jordan/diagnostics/${id}: status=${doc.status} capturedBy=${doc.capturedBy}` +
-        ` fields=${Object.keys(doc.values).length}/13 notes=${JSON.stringify(doc.notes)}`
-    );
-  }
-
   console.log('\nstaffInvites (contract v1.8):');
   for (const [id, doc] of collections.staffInvites) {
     console.log(`  staffInvites/${id}: email=${doc.email} role=${doc.role} specialistId=${doc.specialistId} status=${doc.status}`);
@@ -1818,6 +1769,18 @@ async function main() {
     const b = collections.bookings.get('reese_cal-seedevt0001');
     console.log(`  sessions/cal-seedevt0001: date=${s.date} time=${s.time} bookable=${s.bookable} source=${s.source} booked=${s.booked}/${s.capacity}`);
     console.log(`  bookings/reese_cal-seedevt0001: status=${b.status} source=${b.source} flag=${b.flag} periodKey=${b.periodKey}`);
+  }
+
+  console.log('\nAssessments (2026-10-14): research answers, windows, profiles:');
+  for (const [id, doc] of collections.athletes) {
+    const r = doc.consents?.research;
+    if (doc.consents) console.log(`  athletes/${id}: research=${r ? (r.value ? 'yes' : 'no') : 'not answered'}`);
+  }
+  for (const [name, docs] of Object.entries(collections)) {
+    if (!/\/assessments$|\/assessmentProfile$/.test(name)) continue;
+    for (const [id, doc] of docs) {
+      console.log(`  ${name}/${id}: ${doc.kind ? `${doc.status} ${doc.kind} circuit ${doc.circuitDate}` : `sex=${doc.sex} firstTestDate=${doc.firstTestDate}`}`);
+    }
   }
 
   if (DRY_RUN) {

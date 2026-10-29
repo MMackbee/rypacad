@@ -74,3 +74,14 @@ describe('handicap-reserved blocks on Block fill', () => {
     expect(drawn[0]).toBe(drawn[1]);
   });
 });
+
+test('the Assessments card opens the assessments screen; it is hidden without a destination', async () => {
+  const opened = [];
+  const r = await renderScreen(<AdminDashboard bare role="owner" onOpenAssessments={() => opened.push(1)} />);
+  await r.click('Open assessments');
+  expect(opened).toEqual([1]);
+  await r.unmount();
+  const none = await renderScreen(<AdminDashboard bare role="owner" />);
+  expect(none.button('Open assessments')).toBeNull();
+  await none.unmount();
+});

@@ -67,9 +67,36 @@ function realDate(iso) {
 }
 
 /**
+ * The research opt-in for one athlete (assessments spec 7): `{value,
+ * assent}`. Absent is null - not asked (a tab on the bundle from before the
+ * question), so the one-time confirm asks at the next sign-in. Under 18 it
+ * is yes only when the assent box is ticked too; 18+ answer for themselves
+ * and the assent is null. Anything but booleans is refused.
+ * @param {*} raw The entry's `research`.
+ * @param {{dob: string, todayISO: string}} opts The athlete's date of birth
+ *     and Chicago today.
+ * @return {?{value: boolean, assent: ?boolean}} The answer, or null.
+ */
+function normalizeResearch(raw, opts) {
+  if (raw === undefined || raw === null) return null;
+  const okAssent = (x) => x === undefined || x === null ||
+      typeof x === 'boolean';
+  if (typeof raw !== 'object' || Array.isArray(raw) ||
+      typeof raw.value !== 'boolean' || !okAssent(raw.assent)) {
+    throw new ValidationError('research-invalid',
+        'Answer the research question: tick the box or leave it unticked.');
+  }
+  const age = lib.ageAt(opts.dob, opts.todayISO);
+  const minor = age === null || age < ADULT_AGE;
+  if (!minor) return {value: raw.value, assent: null};
+  const assent = raw.value === true && raw.assent === true;
+  return {value: assent, assent};
+}
+
+/**
  * One athlete entry, normalized. Order: athlete-name-required, dob-invalid,
  * unknown-package, contract-tier, handicap-range, child-email-invalid,
- * child-email-is-guardian, facility-requested-invalid.
+ * child-email-is-guardian, facility-requested-invalid, research-invalid.
  * @param {*} a The raw entry.
  * @param {{todayISO: string, guardianEmail: string, mode: string}} opts
  *     Chicago today, the guardian's email (lower-cased) and the mode.
@@ -124,8 +151,10 @@ function normalizeAthlete(a, opts) {
     throw new ValidationError('facility-requested-invalid',
         'Tick facility access or leave it unticked.');
   }
+  const research = normalizeResearch(e.research, {dob,
+    todayISO: opts.todayISO});
   return {name, dob, packageId: e.packageId, contractMinutes: minutes,
-    handicap, loginEmail, facilityRequested};
+    handicap, loginEmail, facilityRequested, research};
 }
 
 /**
@@ -284,5 +313,6 @@ function validateAddAthletesPayload(data, opts) {
 module.exports = {
   ADULT_AGE, EMAIL_RE, PACKAGE_IDS, PHONE_MAX, TIER_MINUTES, ValidationError,
   lower, normalizeAthlete, normalizeAthletes, normalizeEmergencyContact,
-  storedEmergencyContact, validateAddAthletesPayload, validateFamilyPayload,
+  normalizeResearch, storedEmergencyContact, validateAddAthletesPayload,
+  validateFamilyPayload,
 };

@@ -56,11 +56,17 @@ service cloud.firestore {
     // payment-pending until the new package is paid (lib.js
     // membershipAllowsBooking is the server half). Covers booking create,
     // re-book and waitlist create.
+    // Assessments (review 2026-10-28): an athlete of the production test
+    // family (test: true, scripts/provision-test-family.mjs) never books,
+    // re-books or joins a waitlist - its seat would be a real family's -
+    // whatever tokens or grace an ops action gives it. No real athlete has
+    // the key, so nothing changes for them.
     function athleteBillingOk(a) {
-      return !('billing' in a)
-        || (a.billing.status == 'active'
-            && !(a.billing.get('oneTime', false) == true
-                 && a.get('packageId', null) != 'single'));
+      return a.get('test', false) != true
+        && (!('billing' in a)
+          || (a.billing.status == 'active'
+              && !(a.billing.get('oneTime', false) == true
+                   && a.get('packageId', null) != 'single')));
     }
 
     // Sprint 20 (spec 5): booking opens 07:00 America/Chicago on 2026-10-10
@@ -164,6 +170,88 @@ service cloud.firestore {
         || (a.get('handicap', null) is int && a.handicap <= s.maxHandicap);
     }
 
+    // ---- assessments helpers (2026-10-14, Phil's protocol v1.2) ---------
+    // docs/portal/plans/2026-10-14-assessments/00-spec.md, Section 3. Raw
+    // assessment data is staff-only. assessStaff(): the owner and ops, Phil
+    // (specialistId 'phil') and any coach or mental account the owner gave
+    // the Assessments permission (users.assessor == true) - read and write
+    // every section. assessReader(): those, plus every other coach, who
+    // reads everything and writes the golf section only. Families never read
+    // raw data. data/assessmentAccess.js is the client half.
+    function assessStaff() {
+      return me().role in ['ops', 'owner']
+        || me().get('specialistId', null) == 'phil'
+        || (me().role in ['coach', 'mental'] && me().get('assessor', false) == true);
+    }
+    function assessReader() {
+      return assessStaff() || me().role == 'coach';
+    }
+    // Spec 4.4 ranges - the same table as data/assessmentInput.js RANGES.
+    // The list checks are written out index by index, with no nested calls:
+    // Firestore caps the expressions one request may evaluate, and a
+    // section's trials are checked on every write of that section.
+    function inRange(v, lo, hi) {
+      return v is number && v >= lo && v <= hi;
+    }
+    function optNum(v, lo, hi) {
+      return v == null || (v is number && v >= lo && v <= hi);
+    }
+    function optText(v, max) {
+      return v == null || (v is string && v.size() <= max);
+    }
+    function optOneOf(v, values) {
+      return v == null || v in values;
+    }
+    // Up to N trials, each a number in range or null (not typed yet).
+    function trials3(l, lo, hi) {
+      return l is list && l.size() <= 3
+        && (l.size() < 1 || optNum(l[0], lo, hi))
+        && (l.size() < 2 || optNum(l[1], lo, hi))
+        && (l.size() < 3 || optNum(l[2], lo, hi));
+    }
+    function trials5(l, lo, hi) {
+      return l is list && l.size() <= 5
+        && (l.size() < 1 || optNum(l[0], lo, hi))
+        && (l.size() < 2 || optNum(l[1], lo, hi))
+        && (l.size() < 3 || optNum(l[2], lo, hi))
+        && (l.size() < 4 || optNum(l[3], lo, hi))
+        && (l.size() < 5 || optNum(l[4], lo, hi));
+    }
+    function trials8(l, lo, hi) {
+      return l is list && l.size() <= 8
+        && (l.size() < 1 || optNum(l[0], lo, hi))
+        && (l.size() < 2 || optNum(l[1], lo, hi))
+        && (l.size() < 3 || optNum(l[2], lo, hi))
+        && (l.size() < 4 || optNum(l[3], lo, hi))
+        && (l.size() < 5 || optNum(l[4], lo, hi))
+        && (l.size() < 6 || optNum(l[5], lo, hi))
+        && (l.size() < 7 || optNum(l[6], lo, hi))
+        && (l.size() < 8 || optNum(l[7], lo, hi));
+    }
+    function isoDate(s) {
+      return s is string && s.matches('[0-9]{4}-[0-9]{2}-[0-9]{2}');
+    }
+    // Spec 4.1: a coach-set date is within 14 days of entry and never ahead
+    // of today. timestamp.date() is midnight UTC; an academy (Chicago) date
+    // is never ahead of the UTC date, and 16 days back covers 14 Chicago
+    // days plus the time zone. An invalid date (2026-02-30) errors and is
+    // refused. data/assessmentWindows.js circuitDateProblem is exact.
+    function recentDate(s) {
+      let p = s.split('-');
+      let day = timestamp.date(int(p[0]), int(p[1]), int(p[2]));
+      return day > request.time - duration.value(16, 'd')
+        && day < request.time + duration.value(1, 'd');
+    }
+    // The August-July season a 'YYYY-MM-DD' date falls in ('2026-27' for
+    // 2026-11-03; data/assessmentWindows.js seasonOf): a window's season is
+    // its circuit date's.
+    function seasonOk(season, date) {
+      let p = date.split('-');
+      let start = int(p[1]) >= 8 ? int(p[0]) : int(p[0]) - 1;
+      let s = season.split('-');
+      return s.size() == 2 && int(s[0]) == start && int(s[1]) == (start + 1) % 100;
+    }
+
     // ---- users ---------------------------------------------------------
     // Matrix: "users self-read" (+ owner → all). Sprint 10 (contract v1.8,
     // "make it real"): ops now reads the full users collection too (E,
@@ -199,8 +287,18 @@ service cloud.firestore {
       allow read: if signedIn()
         && (request.auth.uid == userId || me().role in ['ops', 'owner']);
 
+      // 2026-10-14 (assessments spec 3): users.assessor - the Assessments
+      // permission - is the owner's to give (Staff & Roles). A bool; no other
+      // staff write may set or change it, and the member self-write below
+      // never names it.
+      function assessorOk(touched) {
+        return request.resource.data.get('assessor', false) is bool
+          && (me().role == 'owner' || !touched);
+      }
+
       allow create: if signedIn() && me().role in ['ops', 'owner']
-        && (me().role == 'owner' || request.resource.data.role != 'owner');
+        && (me().role == 'owner' || request.resource.data.role != 'owner')
+        && assessorOk(request.resource.data.keys().hasAny(['assessor']));
 
       allow update: if signedIn() && (
         (
@@ -211,6 +309,7 @@ service cloud.firestore {
             && me().role != 'owner'
             && request.resource.data.diff(resource.data).affectedKeys().hasAny(['role'])
           )
+          && assessorOk(request.resource.data.diff(resource.data).affectedKeys().hasAny(['assessor']))
         )
         || (
           // Member self-writes: notificationPrefs (v1.8), the self-service
@@ -249,6 +348,9 @@ service cloud.firestore {
         || (me().role == 'coach' && resource.data.coachId == request.auth.uid)
         || me().role in ['mental', 'ops', 'owner']
         || me().get('specialistId', null) != null
+        // 2026-10-14 (assessments spec 3, 5): a coach with the Assessments
+        // permission lists every academy athlete to start a wave.
+        || (me().role == 'coach' && me().get('assessor', false) == true)
       );
 
       // Sprint 10 (contract v1.8, A "Enrollment"): the FIRST client write on
@@ -391,7 +493,71 @@ service cloud.firestore {
             && get(/databases/$(database)/documents/households/$(resource.data.householdId)).data.createdBy == request.auth.uid)
       );
 
+      // ---- research consent (assessments spec 4.3, 7) -------------------
+      // The one-time confirm: the household's parent, or the 18+ member who
+      // created their own household (the same test as the package switch
+      // above), records consents.research once - that key only, while none
+      // is recorded, dated by the server and signed by the caller. The
+      // owner records a later change (the family emails it), the earlier
+      // answer moved onto the history, so every window keeps the answer it
+      // ran under. Under 18 a yes needs the assent; 18+ the assent is null.
+      // The 18th birthday is the 1st of the month plus (day - 1) days, never
+      // timestamp.date(year, 2, 29): 18 years after a leap year is a common
+      // year, where that date errors and refused every answer for a Feb 29
+      // birthday (review 2026-10-28). It lands on Mar 1, the day
+      // data/signup.js isAdultOnDate and functions lib.ageAt count 18 from.
+      function adultRecord() {
+        let dob = resource.data.get('dob', null);
+        return dob is string && dob.matches('[0-9]{4}-[0-9]{2}-[0-9]{2}')
+          && timestamp.date(int(dob.split('-')[0]) + 18, int(dob.split('-')[1]), 1)
+            + duration.value(int(dob.split('-')[2]) - 1, 'd') <= request.time;
+      }
+      function researchOnlyChange() {
+        return request.resource.data.diff(resource.data).affectedKeys().hasOnly(['consents'])
+          && request.resource.data.consents.diff(resource.data.get('consents', {})).affectedKeys().hasOnly(['research']);
+      }
+      function researchAnswerOk(r, adult) {
+        return r is map
+          && r.keys().hasOnly(['value', 'assent', 'recordedAt', 'recordedBy', 'history'])
+          && r.value is bool
+          && r.recordedAt == request.time
+          && r.recordedBy == request.auth.uid
+          && (adult ? r.get('assent', null) == null
+            : (r.get('assent', null) is bool && (r.value == false || r.assent == true)));
+      }
+      function researchFirstOk(adult) {
+        let r = request.resource.data.consents.research;
+        return researchOnlyChange()
+          && resource.data.get('consents', {}).get('research', null) == null
+          && researchAnswerOk(r, adult)
+          && !r.keys().hasAny(['history']);
+      }
+      function researchChangeOk() {
+        let prev = resource.data.get('consents', {}).get('research', null);
+        let r = request.resource.data.consents.research;
+        return researchOnlyChange()
+          && researchAnswerOk(r, adultRecord())
+          && r.get('history', []) == (prev == null ? [] : prev.get('history', []).concat([{
+            'value': prev.get('value', null), 'assent': prev.get('assent', null),
+            'recordedAt': prev.get('recordedAt', null), 'recordedBy': prev.get('recordedBy', null)}]));
+      }
+      allow update: if signedIn() && (
+        (me().role == 'parent' && resource.data.householdId == me().householdId && researchFirstOk(adultRecord()))
+        || (me().role == 'athlete' && me().athleteId == athleteId
+            && get(/databases/$(database)/documents/households/$(resource.data.householdId)).data.createdBy == request.auth.uid
+            && researchFirstOk(true))
+        || (me().role == 'owner' && researchChangeOk())
+      );
+
       // ---- athletes/{id}/diagnostics/{captureId} -----------------------
+      // KEPT FOR THIS RELEASE ONLY (2026-10-14): Diagnostic Capture is gone
+      // from the portal (assessments spec 8; production held 0 docs), but
+      // these rules reach production before the live portal is updated
+      // (staging shares production's backend, assessments plan Task 27),
+      // and the portal on main still reads diagnostics on the athlete home
+      // and the admin dashboard and saves them from its Capture tab. The
+      // follow-up after the release (assessments plan Task 28) removes this
+      // block and the collection-group read below.
       // Sprint 10 (contract v1.8, C "Diagnostics persistence"). Shape:
       // { athleteId, capturedBy (uid), capturedAt, updatedAt,
       //   status: 'draft'|'published', values: map, notes: string|null }.
@@ -472,9 +638,305 @@ service cloud.firestore {
         // update/delete from any client, still unreadable by ops/parents.
         allow create: if signedIn() && me().role in ['ops', 'owner'];
       }
+
+      // ---- athletes/{id}/assessments/{windowId} ------------------------
+      // 2026-10-14 (assessments spec 4.1). One doc per athlete per test
+      // window, id '{season}-{kind}' ('2026-27-baseline'). assessStaff()
+      // reads and writes every section; any other coach reads and writes the
+      // golf section of an OPEN window (golf coaches enter clubhead speed and
+      // Parallax from their own logins). Families never read it. Writes are
+      // client writes (hooks/assessmentsLive.js), so this block is the
+      // boundary:
+      //   - create: a window opens at the start of a wave - fixed shape,
+      //     status 'open', no entries marked, server times;
+      //   - update: ONE section per write (saveSection), with
+      //     enteredBy[section] == the writer and no other mark moved; or the
+      //     window's own fields (status, dates, weeks, wave) with no section
+      //     and no mark; updatedAt is always the server time; athleteId,
+      //     season, kind, protocolVersion, circuitMode and createdAt never
+      //     change. One section per write keeps each request inside
+      //     Firestore's per-request expression cap: only that section's
+      //     trials are checked;
+      //   - every value in range (spec 4.4);
+      //   - the med ball method and mass are fixed for the season once the
+      //     profile holds them (Phil: "block mixing");
+      //   - delete: the owner only.
+      // No score is ever stored here: scores are computed from these trials
+      // (data/assessmentScoring.js).
+      match /assessments/{windowId} {
+        function waveOk(w) {
+          return w is map && w.keys().hasOnly(['id', 'position', 'coachUid'])
+            && w.id is string && w.id.size() > 0 && w.id.size() <= 48
+            && w.position is int && w.position >= 1 && w.position <= 4
+            && w.coachUid == request.auth.uid;
+        }
+        function weeksOk(d) {
+          return d.get('weeksOfExposure', null) == null
+            || (d.weeksOfExposure is int && d.weeksOfExposure >= 0 && d.weeksOfExposure <= 520);
+        }
+        function readinessOk(r) {
+          return r is map
+            && r.keys().hasOnly(['status', 'reason', 'hoursSinceHardSession', 'golfToday', 'notes'])
+            && optOneOf(r.get('status', null), ['pass', 'not-tested'])
+            && optOneOf(r.get('reason', null), ['absent', 'ill', 'pain', 'injury', 'equipment'])
+            && optNum(r.get('hoursSinceHardSession', null), 0, 336)
+            && (r.get('golfToday', null) == null || r.golfToday is bool)
+            && optText(r.get('notes', null), 500);
+        }
+        function logOk(l) {
+          return l is map
+            && l.keys().hasOnly(['location', 'externalContent', 'weeklyHours', 'rypSessionsSincePrior', 'golfVolume', 'competitiveLevel', 'otherSport', 'otherSportHours'])
+            && optOneOf(l.get('location', null), ['ryp', 'external', 'none'])
+            && optOneOf(l.get('externalContent', null), ['machines', 'bodyweight', 'class'])
+            && optNum(l.get('weeklyHours', null), 0, 60)
+            && optNum(l.get('rypSessionsSincePrior', null), 0, 200)
+            && optText(l.get('golfVolume', null), 80)
+            && optText(l.get('competitiveLevel', null), 80)
+            && optText(l.get('otherSport', null), 40)
+            && optNum(l.get('otherSportHours', null), 0, 40);
+        }
+        function anthroOk(a) {
+          return a is map
+            && a.keys().hasOnly(['standing', 'mass', 'boxHeight', 'sittingRaw', 'arm', 'hand'])
+            && trials3(a.get('standing', []), 90, 215)
+            && trials3(a.get('mass', []), 15, 160)
+            && optNum(a.get('boxHeight', null), 20, 80)
+            && trials3(a.get('sittingRaw', []), 40, 140)
+            && trials3(a.get('arm', []), 40, 110)
+            && trials3(a.get('hand', []), 10, 25);
+        }
+        function gripOk(g) {
+          return g is map
+            && g.keys().hasOnly(['right', 'left', 'deviceRight', 'deviceLeft', 'handlePosition', 'dominant'])
+            && trials5(g.get('right', []), 0, 100)
+            && trials5(g.get('left', []), 0, 100)
+            && optText(g.get('deviceRight', null), 40)
+            && optText(g.get('deviceLeft', null), 40)
+            && optText(g.get('handlePosition', null), 40)
+            && optOneOf(g.get('dominant', null), ['right', 'left']);
+        }
+        function cmjTrialOk(t) {
+          return t == null || (t is map
+            && t.keys().hasOnly(['heightCm', 'rsiMod', 'timeToTakeoffMs', 'peakPowerW', 'peakPowerWkg', 'asymmetryPct'])
+            && optNum(t.get('heightCm', null), 0, 90)
+            && optNum(t.get('rsiMod', null), 0, 2)
+            && optNum(t.get('timeToTakeoffMs', null), 100, 2000)
+            && optNum(t.get('peakPowerW', null), 0, 8000)
+            && optNum(t.get('peakPowerWkg', null), 0, 100)
+            && optNum(t.get('asymmetryPct', null), 0, 60));
+        }
+        function cmjOk(c) {
+          let l = c.get('trials', []);
+          return c is map
+            && c.keys().hasOnly(['trials', 'software', 'samplingHz'])
+            && l is list && l.size() <= 3
+            && (l.size() < 1 || cmjTrialOk(l[0]))
+            && (l.size() < 2 || cmjTrialOk(l[1]))
+            && (l.size() < 3 || cmjTrialOk(l[2]))
+            && optText(c.get('software', null), 40)
+            && optNum(c.get('samplingHz', null), 1, 5000);
+        }
+        // A 10/5 set is Smart2Move's per-set summary { rsiBest5, gctMs }, or
+        // every hop as two parallel lists { hopRsi, hopGctMs } (the hopEntry
+        // setting) - never both. Every-hop values are checked for shape
+        // here, not type or range: two sets of twenty values each are past
+        // what one request may evaluate (measured on the emulator: a value-
+        // by-value type check passes one set and refuses a second for cost
+        // alone). data/assessmentInput.js holds their ranges (rsi 0-5,
+        // gctMs 80-600) and never sends a value outside them, and
+        // data/assessmentScoring.js hopSet scores numbers only.
+        function hopSetOk(s) {
+          return s == null || (s is map && (
+            (s.keys().hasOnly(['rsiBest5', 'gctMs'])
+              && optNum(s.get('rsiBest5', null), 0, 5)
+              && optNum(s.get('gctMs', null), 80, 600))
+            || (s.keys().hasOnly(['hopRsi', 'hopGctMs'])
+              && s.get('hopRsi', []) is list && s.get('hopRsi', []).size() <= 10
+              && s.get('hopGctMs', []) is list && s.get('hopGctMs', []).size() <= 10)));
+        }
+        function hopOk(h) {
+          let l = h.get('sets', []);
+          return h is map && h.keys().hasOnly(['sets'])
+            && l is list && l.size() <= 4
+            && (l.size() < 1 || hopSetOk(l[0]))
+            && (l.size() < 2 || hopSetOk(l[1]))
+            && (l.size() < 3 || hopSetOk(l[2]))
+            && (l.size() < 4 || hopSetOk(l[3]));
+        }
+        // The profile holds the season's method and mass, so a med ball
+        // write needs the profile to be in the window's own season (a
+        // profile moved to another season would otherwise switch the lock
+        // off) and then matches it. The owner may correct.
+        function medballMatches(p, m) {
+          return (p.get('season', null) == null || p.season == request.resource.data.season)
+            && (p.get('medballMethod', null) == null || p.medballMethod == m.method)
+            && (p.get('medballMassKg', null) == null || m.get('massKg', null) == null || p.medballMassKg == m.massKg);
+        }
+        function medballLockOk(m) {
+          let path = /databases/$(database)/documents/athletes/$(athleteId)/assessmentProfile/current;
+          return !exists(path) || me().role == 'owner' || medballMatches(get(path).data, m);
+        }
+        function medballOk(m) {
+          return m is map
+            && m.keys().hasOnly(['massKg', 'side', 'method', 'throws'])
+            && optOneOf(m.get('massKg', null), [2, 3, 4])
+            && optOneOf(m.get('side', null), ['trail', 'dominant'])
+            && m.get('method', null) in ['speed', 'distance']
+            && (m.method == 'speed' ? trials5(m.get('throws', []), 0, 60) : trials5(m.get('throws', []), 0, 25))
+            && medballLockOk(m);
+        }
+        function mcgillOk(m) {
+          return m is map
+            && m.keys().hasOnly(['flexorSec', 'extensorSec', 'sideRightSec', 'sideLeftSec', 'skippedBackPain'])
+            && optNum(m.get('flexorSec', null), 0, 300)
+            && optNum(m.get('extensorSec', null), 0, 300)
+            && optNum(m.get('sideRightSec', null), 0, 300)
+            && optNum(m.get('sideLeftSec', null), 0, 300)
+            && (m.get('skippedBackPain', null) == null || m.skippedBackPain is bool);
+        }
+        function golfOk(g) {
+          return g is map
+            && g.keys().hasOnly(['speeds', 'driver', 'parallaxComposite', 'fps'])
+            && trials8(g.get('speeds', []), 30, 140)
+            && optText(g.get('driver', null), 40)
+            && optNum(g.get('parallaxComposite', null), 0, 100)
+            && optNum(g.get('fps', null), 30, 1000);
+        }
+        function notTestedOk(n) {
+          let codes = ['absent', 'ill', 'pain', 'injury', 'equipment'];
+          return n is map
+            && n.keys().hasOnly(['readiness', 'anthro', 'grip', 'cmj', 'hop', 'medball', 'mcgill', 'golf'])
+            && optOneOf(n.get('readiness', null), codes) && optOneOf(n.get('anthro', null), codes)
+            && optOneOf(n.get('grip', null), codes) && optOneOf(n.get('cmj', null), codes)
+            && optOneOf(n.get('hop', null), codes) && optOneOf(n.get('medball', null), codes)
+            && optOneOf(n.get('mcgill', null), codes) && optOneOf(n.get('golf', null), codes);
+        }
+        // One section written, marked as the writer's, no other mark moved.
+        function sectionWrite(d, changed, marks, s) {
+          return changed.hasOnly([s, 'enteredBy', 'updatedAt'])
+            && marks.hasOnly([s])
+            && d.enteredBy.get(s, null) == request.auth.uid;
+        }
+        // The window's own fields: no section and no mark. Moving a window
+        // into a wave or to another circuit date needs its stored circuit
+        // date to be recent too: a window left open past the entry window
+        // is completed, never re-waved over its trials.
+        function fieldsWrite(d, changed, marks) {
+          return changed.hasOnly(['status', 'circuitDate', 'golfDate', 'mcgillDate', 'weeksOfExposure', 'wave', 'updatedAt'])
+            && marks.size() == 0
+            && d.status in ['open', 'complete']
+            && (!changed.hasAny(['wave', 'circuitDate']) || (isoDate(resource.data.circuitDate) && recentDate(resource.data.circuitDate)))
+            && (!changed.hasAny(['circuitDate']) || (isoDate(d.circuitDate) && recentDate(d.circuitDate) && seasonOk(d.season, d.circuitDate)))
+            && (!changed.hasAny(['golfDate']) || d.golfDate == null || (isoDate(d.golfDate) && recentDate(d.golfDate)))
+            && (!changed.hasAny(['mcgillDate']) || d.mcgillDate == null || (isoDate(d.mcgillDate) && recentDate(d.mcgillDate)))
+            && (!changed.hasAny(['weeksOfExposure']) || weeksOk(d))
+            && (!changed.hasAny(['wave']) || waveOk(d.wave));
+        }
+        function windowCreateOk() {
+          let d = request.resource.data;
+          return d.keys().hasOnly(['athleteId', 'season', 'kind', 'protocolVersion', 'circuitMode', 'status', 'circuitDate', 'golfDate', 'mcgillDate', 'weeksOfExposure', 'wave', 'enteredBy', 'createdAt', 'updatedAt'])
+            && d.keys().hasAll(['athleteId', 'season', 'kind', 'protocolVersion', 'circuitMode', 'status', 'circuitDate', 'wave', 'enteredBy', 'createdAt', 'updatedAt'])
+            && d.athleteId == athleteId
+            && d.season is string && d.season.matches('[0-9]{4}-[0-9]{2}')
+            && d.kind in ['baseline', 'mid', 'end']
+            && windowId == d.season + '-' + d.kind
+            && d.protocolVersion is string && d.protocolVersion.size() <= 16 && d.protocolVersion.matches('v[0-9]+[.][0-9]+([.][0-9]+)?')
+            && d.circuitMode is map
+            && d.circuitMode.keys().hasOnly(['trialCounts', 'gripRestSec', 'stations', 'mcgillMode', 'medballSide', 'golfTiming', 'waveSize', 'hopEntry', 'rsiModEntry', 'coefficientSet', 'coefficientsVerified'])
+            && d.status == 'open'
+            && isoDate(d.circuitDate) && recentDate(d.circuitDate) && seasonOk(d.season, d.circuitDate)
+            && d.get('golfDate', null) == null && d.get('mcgillDate', null) == null
+            && weeksOk(d)
+            && waveOk(d.wave)
+            && d.enteredBy is map && d.enteredBy.size() == 0
+            && d.createdAt == request.time && d.updatedAt == request.time;
+        }
+        function staffUpdateOk() {
+          let d = request.resource.data;
+          let changed = d.diff(resource.data).affectedKeys();
+          let marks = d.enteredBy.diff(resource.data.enteredBy).affectedKeys();
+          return d.updatedAt == request.time
+            && (fieldsWrite(d, changed, marks)
+              || (sectionWrite(d, changed, marks, 'readiness') && readinessOk(d.readiness))
+              || (sectionWrite(d, changed, marks, 'log') && logOk(d.log))
+              || (sectionWrite(d, changed, marks, 'anthro') && anthroOk(d.anthro))
+              || (sectionWrite(d, changed, marks, 'grip') && gripOk(d.grip))
+              || (sectionWrite(d, changed, marks, 'cmj') && cmjOk(d.cmj))
+              || (sectionWrite(d, changed, marks, 'hop') && hopOk(d.hop))
+              || (sectionWrite(d, changed, marks, 'medball') && medballOk(d.medball))
+              || (sectionWrite(d, changed, marks, 'mcgill') && mcgillOk(d.mcgill))
+              || (sectionWrite(d, changed, marks, 'golf') && golfOk(d.golf))
+              || (sectionWrite(d, changed, marks, 'notTested') && notTestedOk(d.notTested)));
+        }
+        // Any coach: the golf section, or the golf date, of an open window.
+        function golfUpdateOk() {
+          let d = request.resource.data;
+          let changed = d.diff(resource.data).affectedKeys();
+          let marks = d.enteredBy.diff(resource.data.enteredBy).affectedKeys();
+          return resource.data.status == 'open'
+            && d.updatedAt == request.time
+            && ((sectionWrite(d, changed, marks, 'golf') && golfOk(d.golf))
+              || (changed.hasOnly(['golfDate', 'updatedAt']) && (d.golfDate == null || (isoDate(d.golfDate) && recentDate(d.golfDate)))));
+        }
+        allow read: if signedIn() && assessReader();
+        allow create: if signedIn() && assessStaff() && windowCreateOk();
+        allow update: if signedIn() && (
+          (assessStaff() && staffUpdateOk())
+          || (me().role == 'coach' && golfUpdateOk())
+        );
+        allow delete: if signedIn() && me().role == 'owner';
+      }
+
+      // ---- athletes/{id}/assessmentProfile/current ----------------------
+      // 2026-10-14 (assessments spec 4.2): sex (entered by the coach at
+      // intake), the first-test date that anchors the rolling baseline, the
+      // season's med ball mass and method, device and handle position. Staff
+      // only, like the windows.
+      match /assessmentProfile/{docId} {
+        function profileOk() {
+          let d = request.resource.data;
+          return docId == 'current'
+            && d.keys().hasOnly(['athleteId', 'sex', 'firstTestDate', 'medballMassKg', 'medballMethod', 'dominantHand', 'gripDevice', 'handlePosition', 'driver', 'season', 'updatedAt', 'updatedBy'])
+            && d.athleteId == athleteId
+            && optOneOf(d.get('sex', null), ['male', 'female'])
+            && (d.get('firstTestDate', null) == null || isoDate(d.firstTestDate))
+            && optOneOf(d.get('medballMassKg', null), [2, 3, 4])
+            && optOneOf(d.get('medballMethod', null), ['speed', 'distance'])
+            && optOneOf(d.get('dominantHand', null), ['right', 'left'])
+            && optText(d.get('gripDevice', null), 40)
+            && optText(d.get('handlePosition', null), 40)
+            && optText(d.get('driver', null), 40)
+            && (d.get('season', null) == null || (d.season is string && d.season.matches('[0-9]{4}-[0-9]{2}')))
+            && d.updatedAt == request.time
+            && d.updatedBy == request.auth.uid;
+        }
+        // Phil: "block mixing" - within a season the med ball method and
+        // mass never change once set, and the first-test date never moves.
+        // The season only moves forward ('2026-27' -> '2027-28'): moving it
+        // back, or to an old one, would switch the lock off. The owner may
+        // correct a mistake.
+        function profileLockOk() {
+          let before = resource.data;
+          let after = request.resource.data;
+          let was = before.get('season', null);
+          let now = after.get('season', null);
+          return (before.get('firstTestDate', null) == null || after.get('firstTestDate', null) == before.firstTestDate)
+            && (was == now
+              ? ((before.get('medballMethod', null) == null || after.get('medballMethod', null) == before.medballMethod)
+                && (before.get('medballMassKg', null) == null || after.get('medballMassKg', null) == before.medballMassKg))
+              : (was == null || (now is string && now > was)));
+        }
+        allow read: if signedIn() && assessReader();
+        allow create: if signedIn() && assessStaff() && profileOk();
+        allow update: if signedIn() && assessStaff() && profileOk() && (me().role == 'owner' || profileLockOk());
+        allow delete: if signedIn() && me().role == 'owner';
+      }
     }
 
     // ---- diagnostics collection-group read ------------------------------
+    // Kept for this release only, like the per-athlete match above; plan
+    // Task 28 removes both after the release (Diagnostic Capture removed
+    // 2026-10-14; the portal on main still reads this).
     // Sprint 10 (contract v1.8, C + D): the Admin "athletes with no
     // published diagnostic" list is one collectionGroup('diagnostics')
     // query rather than an N-athlete fan-out, and Firestore requires a
@@ -504,6 +966,95 @@ service cloud.firestore {
         || me().get('specialistId', null) != null
         || (me().role == 'coach' && athleteData(resource.data.athleteId).coachId == request.auth.uid)
       );
+    }
+
+    // ---- assessments collection-group reads (2026-10-14) ---------------
+    // The list, the wave and the admin "Baseline due" row read every window
+    // (and every profile) in one unfiltered collectionGroup query - no index
+    // needed. The condition never reads the document, so the list is
+    // provable for exactly the assessReader() set the per-doc rules allow.
+    match /{path=**}/assessments/{windowId} {
+      allow read: if signedIn() && assessReader();
+    }
+    match /{path=**}/assessmentProfile/{docId} {
+      allow read: if signedIn() && assessReader();
+    }
+
+    // ---- assessmentSettings/current (2026-10-14, spec 4.6) --------------
+    // Procedure details are settings, not code: Phil (specialistId 'phil')
+    // and the owner edit them; every staff role reads them. Trial counts are
+    // capped where the window rules stop checking (data/assessmentSettings.js
+    // TRIAL_LIMITS); the version label is 'v1.2' or 'v1.2.1'. Every value
+    // the scoring reads is checked too (data/assessmentInput.js RANGES
+    // thresholdPct, coefficientA, coefficientB): a threshold is 0-50 % or
+    // null (no marker), each Moore coefficient a number, the coefficient
+    // check and every station switch a bool, grip rest shortest <= longest.
+    // Written for Firestore's 1000-expression cap (review 2026-10-28): the
+    // client saves the whole doc (9 stations, 6 thresholds), which the
+    // earlier key-by-key form refused for cost alone. Each map goes to its
+    // own function once, a key list with hasOnly plus size() stands for
+    // hasAll, and the int ranges are `in` lists (a JS integer is always
+    // stored as an int). scripts/rules-probes/assessments.mjs sends that
+    // whole doc. Stations and thresholds may still be partial.
+    match /assessmentSettings/{docId} {
+      function countsOk(c) {
+        return c is map
+          && c.keys().hasOnly(['grip', 'cmjPractice', 'cmjScored', 'hopPractice', 'hopScored', 'medballPractice', 'medballScored', 'clubheadWarmup', 'clubheadMax'])
+          && c.size() == 9
+          && c.values().hasOnly([0, 1, 2, 3, 4, 5, 6, 7, 8])
+          && c.grip >= 1 && c.grip <= 5 && c.cmjPractice <= 3 && c.cmjScored >= 1 && c.cmjScored <= 3
+          && c.hopPractice <= 2 && c.hopScored >= 1 && c.hopScored <= 4
+          && c.medballPractice <= 3 && c.medballScored >= 1 && c.medballScored <= 5
+          && c.clubheadWarmup <= 5 && c.clubheadMax >= 1;
+      }
+      function restOk(r) {
+        return r is map && r.keys().hasOnly(['min', 'max']) && r.size() == 2
+          && r.min is number && r.max is number && r.min >= 0 && r.max <= 120 && r.min <= r.max;
+      }
+      function coefficientOk(c) {
+        return c is map && c.keys().hasOnly(['a', 'b']) && c.size() == 2
+          && c.a is number && c.a >= -20 && c.a <= 0 && c.b is number && c.b >= 0 && c.b <= 0.1;
+      }
+      function coefficientsOk(k) {
+        return k is map && k.keys().hasOnly(['set', 'verified', 'boys', 'girls']) && k.size() == 4
+          && k.set is string && k.set.size() <= 40 && k.verified is bool
+          && coefficientOk(k.boys) && coefficientOk(k.girls);
+      }
+      function thresholdOk(v) {
+        return v == null || (v is number && v >= 0 && v <= 50);
+      }
+      function thresholdsOk(t) {
+        return t is map && t.keys().hasOnly(['clubhead', 'cmj', 'hop', 'medball', 'grip', 'parallax'])
+          && thresholdOk(t.get('clubhead', null)) && thresholdOk(t.get('cmj', null)) && thresholdOk(t.get('hop', null))
+          && thresholdOk(t.get('medball', null)) && thresholdOk(t.get('grip', null)) && thresholdOk(t.get('parallax', null));
+      }
+      function settingsOk() {
+        let d = request.resource.data;
+        return docId == 'current'
+          && d.keys().hasOnly(['protocolVersion', 'trialCounts', 'gripRestSec', 'stations', 'mcgillMode', 'medballSide', 'golfTiming', 'waveSize', 'wavesPerSession', 'hopEntry', 'rsiModEntry', 'coefficients', 'thresholds', 'updatedAt', 'updatedBy'])
+          && d.keys().size() == 15
+          && d.protocolVersion is string && d.protocolVersion.matches('v[0-9]+[.][0-9]+([.][0-9]+)?')
+          && countsOk(d.trialCounts)
+          && restOk(d.gripRestSec)
+          && d.stations is map
+          && d.stations.keys().hasOnly(['intake', 'anthro', 'grip', 'cmj', 'hop', 'medball', 'mcgill', 'segments', 'keiser'])
+          && d.stations.values().hasOnly([true, false])
+          && d.mcgillMode in ['wave', 'separate']
+          && d.medballSide in ['trail', 'dominant']
+          && d.golfTiming in ['same-day', 'within-7']
+          && d.waveSize in [1, 2, 3, 4]
+          && d.wavesPerSession in [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
+          && d.hopEntry in ['summary', 'per-hop']
+          && d.rsiModEntry in ['typed', 'computed']
+          && coefficientsOk(d.coefficients)
+          && thresholdsOk(d.thresholds)
+          && d.updatedAt == request.time
+          && d.updatedBy == request.auth.uid;
+      }
+      allow read: if signedIn() && me().role in ['coach', 'mental', 'ops', 'owner'];
+      allow create, update: if signedIn()
+        && (me().role == 'owner' || me().get('specialistId', null) == 'phil')
+        && settingsOk();
     }
 
     // ---- sessions ------------------------------------------------------

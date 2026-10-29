@@ -81,8 +81,8 @@ describe('payloads (contract 1.2 / 1.3)', () => {
       mode: 'parent',
       contact: { name: 'Dana Whitfield', email: 'dana@email.com', phone: '(612) 555-0148', relationship: 'Mother' },
       athletes: [
-        { name: 'Jordan', dob: '2012-06-17', packageId: 't-12', contractMinutes: 45, handicap: 12, loginEmail: 'jordan@email.com', facilityRequested: false },
-        { name: 'Reese', dob: '2014-03-02', packageId: 't-6', contractMinutes: null, handicap: null, loginEmail: null, facilityRequested: false },
+        { name: 'Jordan', dob: '2012-06-17', packageId: 't-12', contractMinutes: 45, handicap: 12, loginEmail: 'jordan@email.com', facilityRequested: false, research: { value: false, assent: false } },
+        { name: 'Reese', dob: '2014-03-02', packageId: 't-6', contractMinutes: null, handicap: null, loginEmail: null, facilityRequested: false, research: { value: false, assent: false } },
       ],
       emergencyContact: null,
       medical: 'Peanut allergy',
@@ -266,5 +266,23 @@ describe('Commitment Contract hidden (owner ruling 2026-09-30)', () => {
     process.env.REACT_APP_CONTRACT_ENABLED = 'true';
     expect(buildAddAthletesPayload(form).athletes.map((a) => a.contractMinutes)).toEqual([45, 95]);
     expect(validateAthleteEntry(entry({ contractMinutes: 95 }), { todayISO: today }).contractMinutes).toBe('Pick 20, 45 or 90 minutes.');
+  });
+});
+
+describe('research per athlete (assessments spec 7)', () => {
+  const base = {
+    mode: 'parent', contact: { name: 'Dana Whitfield', email: 'dana@email.com', phone: '(612) 555-0148', relationship: 'Mother' },
+    emergencyContact: '', medical: '', consents: { dataCollection: true, videoCapture: true, mediaRelease: false, facilityAccess: false }, signatureName: 'Dana Whitfield',
+  };
+  test('under 18 yes needs the assent; an 18+ athlete and the athlete login answer alone; addAthletes sends none', () => {
+    const minor = entry({ research: true, researchAssent: true });
+    const noAssent = entry({ name: 'Reese', research: true, researchAssent: false });
+    const adult = entry({ name: 'Sam', dob: '2007-01-01', research: true });
+    const body = buildCreateFamilyPayload({ ...base, athletes: [minor, noAssent, adult] }, { todayISO: '2026-10-15' });
+    expect(body.athletes.map((a) => a.research)).toEqual([{ value: true, assent: true }, { value: false, assent: false }, { value: true, assent: null }]);
+    const self = buildCreateFamilyPayload({ ...base, mode: 'athlete', athletes: [entry({ dob: '2000-01-01', research: true })] }, { todayISO: '2026-10-15' });
+    expect(self.athletes[0].research).toEqual({ value: true, assent: null });
+    expect(buildAddAthletesPayload({ ...base, athletes: [minor] }).athletes[0]).not.toHaveProperty('research');
+    expect(newAthleteEntry()).toMatchObject({ research: false, researchAssent: false });
   });
 });

@@ -49,6 +49,8 @@ jest.mock('./screens/NotificationPreferences', () => ({
   default: ({ role }) => { mockSettingsRoles.push(role); return `SETTINGS as ${role}`; },
 }));
 jest.mock('./hooks/live', () => ({ ...jest.requireActual('./hooks/live'), isLive: () => mockLive.value }));
+// The one-time research confirm wraps the family and athlete homes; nothing is pending here.
+jest.mock('./hooks/researchConsent', () => ({ useResearchConfirm: () => ({ data: { pending: [] }, loading: false, error: null }), saveResearchConsent: async () => ({}) }));
 jest.mock('./hooks/useAuthSession', () => {
   const { useEffect, useState } = require('react');
   return {
@@ -370,4 +372,13 @@ describe('the Feedback button (2026-10-15): mounted once beside the routes', () 
     expect(buttons()).toHaveLength(0);
     await seed.unmount();
   });
+});
+
+test("a coach's old Capture link lands on their own home (Diagnostic Capture is gone)", async () => {
+  mockLive.value = true;
+  mockUser.value = { uid: 'c1', role: 'coach' };
+  const r = await mount('/portal/capture');
+  expect(r.pathname()).toBe('/portal/coach');
+  expect(r.container.textContent).toBe('COACH HOME');
+  await r.unmount();
 });

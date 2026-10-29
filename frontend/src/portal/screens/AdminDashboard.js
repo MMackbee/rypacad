@@ -9,6 +9,7 @@ import StatusBadge from '../components/StatusBadge';
 import { Body, Card, ScreenTitle, SectionLabel, SignOutButton } from '../components/Primitives';
 import HouseholdsCard from '../components/HouseholdsCard';
 import ScholarshipsCard from '../components/ScholarshipsCard';
+import AssessmentsEntryCard from '../components/AssessmentsEntryCard';
 import { ReservedBlocks } from '../components/Reserved';
 import { useAdminDashboard } from '../hooks';
 import { contractEnabled } from '../data/contractFlag';
@@ -91,6 +92,7 @@ export default function AdminDashboard({
   onOpenHousehold,
   onOpenSignups,
   onOpenScholarships,
+  onOpenAssessments,
   demoMembership,
 }) {
   const { data } = useAdminDashboard();
@@ -153,6 +155,8 @@ export default function AdminDashboard({
       <div style={{ padding: '0 22px 24px', display: 'flex', flexDirection: 'column', gap: 12 }}>
         <OutstandingCard items={outstanding} onOpenAthlete={onOpenAthlete} />
         <SignupsCard onOpenSignups={onOpenSignups} />
+        {/* 2026-10-14 (assessments spec 5): owners and ops reach the assessments from here. */}
+        {onOpenAssessments ? <AssessmentsEntryCard onOpen={onOpenAssessments} /> : null}
         {/* Owner only (2026-10-01): mounting the card is the read, which the
             rules refuse to ops. */}
         {role === 'owner' && onOpenScholarships ? <ScholarshipsCard onOpen={onOpenScholarships} /> : null}

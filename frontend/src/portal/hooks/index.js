@@ -45,10 +45,8 @@ import {
   declineEnrollmentRequest,
   deleteContractLog,
   fetchAllAthletes,
-  fetchAllDiagnostics,
   fetchAllHouseholds,
   fetchAthlete,
-  fetchAthleteDiagnostics,
   fetchAthletesByIds,
   fetchBookings,
   fetchBookingsBySession,
@@ -72,7 +70,6 @@ import {
   fetchTournamentResults,
   fetchTournamentResultsForSession,
   isLive,
-  saveDiagnosticCapture,
   saveNotificationPrefs,
   saveMyPhone,
   saveTournamentResults,
@@ -96,14 +93,17 @@ import useRecentNotices from './notices';
 import usePush from './push';
 import useSignups, { fetchLoginInvite } from './signups';
 import useScholarships from './scholarships';
+// 2026-10-14 (assessments spec 8): the admin "Baseline due" row reads the
+// assessment windows, the module that replaced the diagnostics reads.
+import { ASSESSMENTS_KEY, fetchAllAssessmentWindows } from './assessmentsLive';
+import { seasonOf } from '../data/assessmentWindows';
+import { withoutTestFamilies } from '../data/testFamily';
 import {
   COACH,
   COACH_BLOCKS,
   COACH_BLOCKS_CONCURRENT,
   ATTENTION_LIST,
   COACH_OUTSTANDING,
-  DIAGNOSTIC_ATHLETE,
-  DIAGNOSTIC_SECTIONS,
   HOUSEHOLD,
   BILLING_ISSUE,
   TODAY,
@@ -153,9 +153,6 @@ import {
   ATHLETE,
   CODE_OF_GRIT,
   ONBOARDING,
-  DNA_MODULES,
-  DNA_STATES,
-  DNA_SUMMARY,
   CONTRACT_TIERS,
 } from '../data/athlete';
 import {
@@ -2739,85 +2736,6 @@ function blockRange(time) {
 }
 
 /**
- * Live payload for useDiagnostic(athleteId) (contract v1.8, C) — the
- * athlete's latest PUBLISHED capture (or null, "no capture yet"), their
- * single open DRAFT (or null), and the section/field catalogue every
- * capture's `values` are keyed against. Caller access (assigned coach /
- * specialist / mental / ops / owner see both; athlete/parent see published
- * only, draft always null for them) is firestore.rules' job, not this
- * function's — it fetches both lists and lets a caller who cannot read
- * drafts simply get an empty one back from fetchAthleteDiagnostics rather
- * than branching on role here.
- */
-async function liveDiagnostic(athleteId) {
-  // TWO queries, not one over every status (PM integration browser pass):
-  // a parent's read rule is published-only, and Firestore denies a LIST
-  // wholesale when any document could fail the rule — so the single
-  // all-statuses query errored for every parent and their kid's detail
-  // read "No capture yet" despite two published captures. The published
-  // query is provable for every reader; the draft query is only provable
-  // for staff, so a denial there means "no draft for you", not a failure.
-  const published = await fetchAthleteDiagnostics(athleteId, { publishedOnly: true });
-  let draft = null;
-  try {
-    const drafts = await fetchAthleteDiagnostics(athleteId, { draftOnly: true });
-    draft = drafts[0] ?? null;
-  } catch (err) {
-    if (err?.code !== ERR.PERMISSION) throw err;
-  }
-  return { latest: published[0] ?? null, draft, sections: DIAGNOSTIC_SECTIONS };
-}
-
-/**
- * GET /athletes/:id/diagnostics (14) — contract v1.8, C. PINNED SHAPE
- * (supersedes the prior no-arg, seed-only version): { data: { latest
- * (published capture | null), draft (open draft | null), sections },
- * loading, error, saveDraft(values, notes), publish(values, notes) }.
- *
- * DEVIATION FLAGGED: the old signature took no athleteId and returned
- * { athlete, sections } with no latest/draft/save actions at all — this is
- * a breaking payload shape change, called out per this lane's "changing a
- * payload shape requires stating it in the report" rule. DiagnosticCapture
- * (frontend lane's, in parallel) must be updated to call
- * useDiagnostic(athleteId) and read data.latest/data.draft instead of
- * data.athlete.
- *
- * Seed mode keeps DIAGNOSTIC_ATHLETE's synthetic capture as `latest` (never
- * a draft — the harness demonstrates the capture FORM against
- * DIAGNOSTIC_SECTIONS, not a resume-a-draft state) so the harness's
- * existing states keep rendering; saveDraft/publish are local no-op echoes
- * there, matching every other write action's seed posture in this file.
- */
-export function useDiagnostic(athleteId) {
-  const live = isLive() && athleteId != null;
-  const diagnosticsGen = useInvalidation('diagnostics');
-
-  const state = useSeedResource(
-    live
-      ? null
-      : {
-          latest: { athlete: DIAGNOSTIC_ATHLETE, values: {}, notes: null },
-          draft: null,
-          sections: DIAGNOSTIC_SECTIONS,
-        },
-    live
-      ? { source: () => liveDiagnostic(athleteId), deps: ['diagnostic', athleteId, diagnosticsGen] }
-      : undefined
-  );
-
-  const saveDraft = async (values, notes = null) => {
-    if (!live) return { athleteId, status: 'draft', simulated: true };
-    return saveDiagnosticCapture(athleteId, { values, notes, publish: false });
-  };
-  const publish = async (values, notes = null) => {
-    if (!live) return { athleteId, status: 'published', simulated: true };
-    return saveDiagnosticCapture(athleteId, { values, notes, publish: true });
-  };
-
-  return { ...state, saveDraft, publish };
-}
-
-/**
  * Badge/line/hint for a contract month built from real logs (Sprint 6, QA
  * #3/#4) — the live counterpart to contractFor()'s per-demo-variant copy
  * below. Shared by liveAthleteDashboard's mini card and liveContract's full
@@ -2916,10 +2834,9 @@ async function liveAthleteDashboard(today) {
 
   // Sprint 20 (load time): the reads that follow the context are
   // independent of each other - one round trip, not four.
-  const [nextSessions, logs, published, tokens] = await Promise.all([
+  const [nextSessions, logs, tokens] = await Promise.all([
     upcoming.length ? fetchSessionsByIds([upcoming[0].sessionId]) : Promise.resolve([]),
     contractMinutes != null ? fetchContractLogs(ctx.athlete.id) : Promise.resolve(null),
-    fetchAthleteDiagnostics(ctx.athlete.id, { publishedOnly: true }),
     homeTokens(ctx.athlete, ctx.pkg, ctx.bookings, normalizeAnchorDay(ctx.household?.periodAnchorDay), today),
   ]);
 
@@ -2948,9 +2865,6 @@ async function liveAthleteDashboard(today) {
     };
   }
 
-  // `published` (contract v1.8 C): whether a published diagnostic exists
-  // yet - the home screen's "Start here" card keys off it in live mode
-  // instead of the demo-only `variant === 'new'` flag.
   return {
     athlete: {
       // Firestore stores one `name` field (no first/full split) - both keys
@@ -2967,7 +2881,6 @@ async function liveAthleteDashboard(today) {
     contract,
     // No demo "new athlete" onboarding checklist concept in live mode.
     onboarding: null,
-    diagnosticCaptured: published.length > 0,
     codeOfGrit: CODE_OF_GRIT,
   };
 }
@@ -3026,22 +2939,6 @@ export function useAthleteDashboard({ variant = 'populated', today = todayISO(),
           }
         : undefined)
   );
-}
-
-/**
- * GET /athletes/:id/diagnostics (06).
- *
- * Returns raw captured measurements and nothing else. No score, grade, letter
- * or percentile is derived anywhere in this path — the Blueprint measures an
- * athlete against their own future progress, not a model swing, and a rating
- * computed here would leak onto the screen.
- */
-export function usePracticeDNA({ variant = 'complete' } = {}) {
-  const captured = DNA_STATES[variant] ?? DNA_STATES.complete;
-  return useSeedResource({
-    summary: DNA_SUMMARY[variant] ?? DNA_SUMMARY.complete,
-    modules: DNA_MODULES.map((m) => ({ ...m, captured: captured.includes(m.id) })),
-  });
 }
 
 /** GET + POST /athletes/:id/commitment-contract (07). */
@@ -3574,7 +3471,7 @@ function mondayOfWeek(todayIso) {
  * @param {number} args.pendingCount - pending enrollmentRequests count.
  * @param {Array} args.noshowBookings - bookings with status 'noshow', date >= monthStart.
  * @param {Array} args.contractLogs - contractLogs with date >= monthStart, every athlete.
- * @param {Array} args.publishedDiagnosticAthleteIds - athleteIds with >=1 published diagnostic.
+ * @param {Array|null} args.baselineAthleteIds - athleteIds with a baseline assessment window this season (any status); null when the windows could not be read, which lists nobody.
  * @param {string} args.today - ISO 'yyyy-MM-dd'.
  */
 export function deriveWhoNeedsCall({
@@ -3582,7 +3479,7 @@ export function deriveWhoNeedsCall({
   pendingCount,
   noshowBookings,
   contractLogs,
-  publishedDiagnosticAthleteIds,
+  baselineAthleteIds,
   today,
 }) {
   const nameById = new Map(athletes.map((a) => [a.id, a.name ?? null]));
@@ -3615,16 +3512,19 @@ export function deriveWhoNeedsCall({
   }
   contractBehind.sort((a, b) => b.missed - a.missed);
 
-  const publishedSet = new Set(publishedDiagnosticAthleteIds ?? []);
-  const missingDiagnostic = athletes
-    .filter((a) => !publishedSet.has(a.id))
-    .map((a) => ({ athleteId: a.id, name: a.name ?? null }));
+  // Assessments spec 8: "Baseline due" replaces "Diagnostic not entered" -
+  // an athlete with no baseline window is due one. Unknown (null) lists
+  // nobody rather than every athlete.
+  const tested = new Set(baselineAthleteIds ?? []);
+  const baselineDue = baselineAthleteIds == null
+    ? []
+    : athletes.filter((a) => !tested.has(a.id)).map((a) => ({ athleteId: a.id, name: a.name ?? null }));
 
   return {
     pendingEnrollment: { count: pendingCount },
     noshows,
     contractBehind,
-    missingDiagnostic,
+    baselineDue,
   };
 }
 
@@ -3655,16 +3555,22 @@ async function liveAdminDashboard(today) {
   const weekStart = mondayOfWeek(today);
   const weekEnd = addDaysISO(weekStart, 6);
 
-  const [athletes, sessionsThisWeek, pending, noshowBookings, contractLogs, diagnostics, households] =
+  // The assessment windows read may fail on its own (rules that do not
+  // grant it yet): that drops the "Baseline due" rows, never the dashboard.
+  const [allAthletes, sessionsThisWeek, pending, noshowBookings, contractLogs, windows, allHouseholds] =
     await Promise.all([
       fetchAllAthletes(),
       fetchSessionsInRange(weekStart, weekEnd),
       fetchPendingEnrollmentRequests(),
       fetchNoShowBookingsSince(monthStart),
       fetchContractLogsSince(monthStart),
-      fetchAllDiagnostics(),
+      fetchAllAssessmentWindows().catch(() => null),
       fetchAllHouseholds(),
     ]);
+  // Owner 2026-10-15: staging shares this database, so the test family
+  // (test: true, data/testFamily.js) is left out of every count and list
+  // below. It never books, so no booking or contract log names it.
+  const { households, athletes } = withoutTestFamilies({ households: allHouseholds, athletes: allAthletes });
 
   // Contract v2.1, pin H: membership status counts + who's lapsed - absent
   // == active, the same default every other membership read in this app
@@ -3683,15 +3589,15 @@ async function liveAdminDashboard(today) {
   // Sprint 20 (spec 4.4/7): athletes still on checkout - an ATHLETE count beside the household counts, so the dashboard agrees with the sign-ups report.
   membership.pending = athletes.filter((a) => billingStatusOf(a) === 'pending').length;
 
-  const publishedDiagnosticAthleteIds = diagnostics
-    .filter((d) => d.status === 'published')
-    .map((d) => d.athleteId);
+  // This season's baselines only (the list's rule, data/assessmentWindows.js dueStatus): last season's do not count.
+  const season = seasonOf(today);
+  const baselineAthleteIds = windows == null ? null : windows.filter((w) => w.kind === 'baseline' && w.season === season).map((w) => w.athleteId);
   const who = deriveWhoNeedsCall({
     athletes,
     pendingCount: pending.length,
     noshowBookings,
     contractLogs,
-    publishedDiagnosticAthleteIds,
+    baselineAthleteIds,
     today,
   });
 
@@ -3732,14 +3638,14 @@ async function liveAdminDashboard(today) {
       packageIds: null,
     });
   }
-  for (const d of who.missingDiagnostic) {
+  for (const d of who.baselineDue) {
     outstanding.push({
-      id: `diagnostic-${d.athleteId}`,
-      kind: 'diagnostic',
+      id: `baseline-${d.athleteId}`,
+      kind: 'baseline',
       athleteId: d.athleteId,
       who: d.name ?? d.athleteId,
-      why: 'Diagnostic not entered',
-      tag: 'Onboarding',
+      why: 'Baseline due',
+      tag: 'Assessment',
       tone: 'yellow',
       packageIds: null,
     });
@@ -3833,7 +3739,7 @@ export function useAdminDashboard({ variant = 'populated' } = {}) {
   const athletesGen = useInvalidation('athletes');
   const bookingsGen = useInvalidation('bookings');
   const contractLogsGen = useInvalidation('contractLogs');
-  const diagnosticsGen = useInvalidation('diagnostics');
+  const assessmentsGen = useInvalidation(ASSESSMENTS_KEY);
   const enrollmentGen = useInvalidation('enrollmentRequests');
   const householdsGen = useInvalidation('households');
 
@@ -3867,7 +3773,7 @@ export function useAdminDashboard({ variant = 'populated' } = {}) {
             athletesGen,
             bookingsGen,
             contractLogsGen,
-            diagnosticsGen,
+            assessmentsGen,
             enrollmentGen,
             householdsGen,
           ],
@@ -3893,6 +3799,8 @@ async function liveStaff() {
         name: u.displayName ?? u.email ?? u.id,
         role: u.role ?? null,
         specialistId: u.specialistId ?? null,
+        // 2026-10-14 (assessments spec 3): absent is off.
+        assessor: u.assessor === true,
         mfa: null,
         note: null,
       }))

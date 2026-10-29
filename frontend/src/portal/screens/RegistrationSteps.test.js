@@ -340,13 +340,11 @@ test('the consent sheets show the full media terms and facility rules', async ()
     expect(r.text().indexOf(first)).toBeGreaterThan(-1);
     await r.unmount();
   }
-  // The data sheet keeps its access matrix, says what research use covers
-  // (owner 2026-10-01), and gains nothing it should not.
+  // The data sheet keeps its access matrix; research use left it for its own
+  // opt-in (assessments spec 7, owner 2026-10-15) and gains nothing it should not.
   const d = await renderScreen(<ConsentInfoSheet id="dataCollection" onClose={() => {}} />);
   expect(d.text()).toContain('Owner/Director');
-  expect(d.text()).toContain('Training and performance numbers may also be used in research, with names removed.');
-  expect(d.text()).toContain('Research use');
-  for (const line of CONSENT_TERMS.dataCollection[0].lines) expect(d.text()).toContain(line);
+  expect(d.text()).not.toMatch(/research/i);
   expect(d.text()).not.toContain('Who may enter');
   await d.unmount();
 });
@@ -415,4 +413,62 @@ test('every adult rewording still matches a guardian line, so editing one cannot
     expect(guardian).toContain(from);
     expect(to).not.toMatch(GUARDIAN_WORDING);
   }
+});
+
+function ResearchHarness({ mode = 'parent', athletes: initial }) {
+  const [athletes, setAthletes] = React.useState(initial);
+  const [opened, setOpened] = React.useState(null);
+  return (
+    <>
+      <ConsentStep mode={mode} consents={{ dataCollection: true, videoCapture: true }} onChange={() => {}} signatureName="" onSignatureChange={() => {}}
+        onOpenInfo={() => {}} showErrors={false} athletes={athletes} todayISO="2026-10-15" onOpenResearch={setOpened}
+        onResearch={(key, p) => setAthletes((all) => all.map((a) => (a.key === key ? { ...a, ...p } : a)))} />
+      <output>{JSON.stringify(athletes.map((a) => [a.research, a.researchAssent]))}{opened ? ` read ${opened.name} ${opened.self}` : ''}</output>
+    </>
+  );
+}
+
+test('research (spec 7): one opt-in per athlete; under 18 the assent box appears once ticked', async () => {
+  const r = await renderScreen(<ResearchHarness athletes={[
+    { ...newAthleteEntry(), key: 'k1', name: 'Jordan Whitfield', dob: '2012-06-17' },
+    { ...newAthleteEntry(), key: 'k2', name: 'Sam Lee', dob: '2007-01-01' },
+  ]} />);
+  const state = () => r.container.querySelector('output').textContent;
+  expect(r.text()).toContain("Research (optional): Jordan's results may be used in research.");
+  expect(r.text()).toContain("Saying no changes nothing about Jordan's coaching or testing.");
+  expect(r.button("I've talked about this with Jordan, and they agree too.")).toBeNull();
+  await r.click("Research (optional): Jordan's results may be used in research.");
+  await r.click("I've talked about this with Jordan, and they agree too.");
+  expect(state()).toBe('[[true,true],[false,false]]');
+  await r.click("Research (optional): Sam's results may be used in research.");
+  expect(r.button("I've talked about this with Sam, and they agree too.")).toBeNull();
+  await r.click("Research (optional): Jordan's results may be used in research.");
+  expect(state()).toBe('[[false,false],[true,false]]');
+  await r.click('Read more about research for Jordan');
+  expect(state()).toContain('read Jordan false');
+  await r.unmount();
+});
+
+test('a parent adding an 18+ athlete is not told every athlete is a minor', async () => {
+  const mixed = await renderScreen(<ResearchHarness athletes={[
+    { ...newAthleteEntry(), key: 'k1', name: 'Casey Lee', dob: '2014-05-05' },
+    { ...newAthleteEntry(), key: 'k2', name: 'Robin Lee', dob: '2005-01-01' },
+  ]} />);
+  expect(mixed.text()).not.toContain('Each athlete is a minor.');
+  expect(mixed.text()).toContain('Each of these is a separate decision');
+  await mixed.unmount();
+  const minors = await renderScreen(<ResearchHarness athletes={[{ ...newAthleteEntry(), key: 'k1', name: 'Casey Lee', dob: '2014-05-05' }]} />);
+  expect(minors.text()).toContain('Each athlete is a minor.');
+  await minors.unmount();
+});
+
+test('research: an 18+ athlete signing for themselves answers in the first person, with no assent box', async () => {
+  const r = await renderScreen(<ResearchHarness mode="athlete" athletes={[{ ...newAthleteEntry(), key: 'k1', name: 'Sam Reyes', dob: '2000-01-01' }]} />);
+  expect(r.text()).toContain('Research (optional): my results may be used in research.');
+  expect(r.text()).toContain("Saying no changes nothing about Sam's coaching or testing.");
+  await r.click('Research (optional): my results may be used in research.');
+  expect(r.container.querySelectorAll('[role="checkbox"][aria-label^="I\'ve talked"]')).toHaveLength(0);
+  await r.click('Read more about research');
+  expect(r.container.querySelector('output').textContent).toBe('[[true,false]] read Sam true');
+  await r.unmount();
 });

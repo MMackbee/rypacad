@@ -276,7 +276,7 @@ test('the contract is its own step: explained, per athlete, and it needs an answ
   expect(r.text()).toContain('Step 6 of 6');
   await r.click('Sign and submit');
   // The draft predates the facility add-on: it restores unticked and sends false.
-  expect(mockCalls[0][1].athletes[0]).toEqual({ name: 'Jordan', dob: '2012-06-17', packageId: 't-12', contractMinutes: 45, handicap: null, loginEmail: null, facilityRequested: false });
+  expect(mockCalls[0][1].athletes[0]).toEqual({ name: 'Jordan', dob: '2012-06-17', packageId: 't-12', contractMinutes: 45, handicap: null, loginEmail: null, facilityRequested: false, research: { value: false, assent: false } });
   await r.unmount();
   window.sessionStorage.clear();
 });
@@ -508,5 +508,18 @@ test('link mode sends the contact the parent typed', async () => {
     athletes: [{ name: 'Reese', contractMinutes: 20 }],
     emergencyContact: { name: 'Gran', phone: '(612) 555-0122', relationship: null },
   });
+  await r.unmount();
+});
+
+test('research (spec 7): the consent step asks per athlete, and createFamily gets the answer', async () => {
+  const r = await renderScreen(<Registration bare mode="signup" account={{ email: 'dana@email.com', emailVerified: false }} onRefresh={async () => {}} />);
+  await fillParentToConsent(r);
+  await r.click('Read more about research for Jordan');
+  expect(r.text()).toContain('What it covers');
+  await r.click('Close');
+  await r.click("Research (optional): Jordan's results may be used in research.");
+  await r.click("I've talked about this with Jordan, and they agree too.");
+  await r.click('Sign and submit');
+  expect(mockCalls[0][1].athletes[0].research).toEqual({ value: true, assent: true });
   await r.unmount();
 });

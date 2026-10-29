@@ -75,6 +75,18 @@ function todayISO() {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 }
 
+/**
+ * The households the export writes a row for: every household but a test
+ * household (`test: true` - the staging test family, made by
+ * scripts/provision-test-family.mjs; owner 2026-10-15: staging shares the
+ * production database, and every staff count and report leaves it out, the
+ * frontend's data/testFamily.js rule). Its athletes go with it (rows are per
+ * household). Pure.
+ */
+export function householdsToExport(households) {
+  return households.filter((h) => h?.test !== true);
+}
+
 function loadPortalData() {
   return bundleFrontend(repoRoot, [
     `export { ALL_PACKAGES, packageById, periodFor, tokensFor, normalizeAnchorDay } from '${fwdPath(path.join(dataDir, 'packages.js'))}';`,
@@ -135,7 +147,9 @@ async function main() {
 
   const { packageById, periodFor, tokensFor } = loadPortalData();
 
-  const households = await queryCollection(target, { from: [{ collectionId: 'households' }] });
+  const everyHousehold = await queryCollection(target, { from: [{ collectionId: 'households' }] });
+  const households = householdsToExport(everyHousehold);
+  const testHouseholds = everyHousehold.length - households.length;
   const allAthletes = await queryCollection(target, { from: [{ collectionId: 'athletes' }] });
   const athletesByHousehold = new Map();
   for (const a of allAthletes) {
@@ -229,10 +243,14 @@ async function main() {
   }
 
   console.log(lines.join('\n'));
-  console.error(`# ${households.length} household(s) exported.`);
+  console.error(`# ${households.length} household(s) exported${testHouseholds ? `; ${testHouseholds} test household(s) left out` : ''}.`);
 }
 
-main().catch((err) => {
-  console.error(err.message || err);
-  process.exit(1);
-});
+// Run only as a script, so the test can import householdsToExport without a target.
+const invokedDirectly = process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url);
+if (invokedDirectly) {
+  main().catch((err) => {
+    console.error(err.message || err);
+    process.exit(1);
+  });
+}
