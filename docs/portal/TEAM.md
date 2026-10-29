@@ -234,7 +234,10 @@ emulators (auth :9099, Firestore :8080) and exposes
 `window.__rypTestAuth.signInAs(uid)` / `.signOut()` — sign-in via UNSIGNED
 custom tokens the auth emulator accepts, so no passwords exist anywhere in
 the QA flow, and none of it can ship: the hook and emulator connection are
-compiled out unless the env var is set at build time.
+compiled out unless the env var is set at build time. A worktree with its
+own emulators (`--config firebase.<lane>.json`) points its QA server at
+them with `REACT_APP_AUTH_EMULATOR_PORT`, `REACT_APP_FIRESTORE_EMULATOR_PORT`
+and `REACT_APP_FUNCTIONS_EMULATOR_PORT` (defaults 9099 / 8080 / 5001).
 
 Test-account suite (users/ doc ids in the seed, one per role):
 `athlete-jordan` (Whitfield household, g-8-3), `parent-dana`,

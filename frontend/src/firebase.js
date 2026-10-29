@@ -78,11 +78,21 @@ export const functions = getFunctions(app, 'us-central1');
  * — no passwords exist anywhere in this flow). The hook and the emulator
  * connection are dead code unless the variable is set at build time, so
  * nothing here can reach the production build or production Firebase.
+ *
+ * The ports default to firebase.json's (auth 9099, Firestore 8080,
+ * functions 5001). A worktree running its own isolated emulators
+ * (`--config firebase.<lane>.json`) sets REACT_APP_AUTH_EMULATOR_PORT,
+ * REACT_APP_FIRESTORE_EMULATOR_PORT and REACT_APP_FUNCTIONS_EMULATOR_PORT
+ * so its QA server never talks to the shared instance.
  */
+const emulatorPort = (value, fallback) => {
+  const n = Number(value);
+  return Number.isInteger(n) && n > 0 && n < 65536 ? n : fallback;
+};
 if (process.env.REACT_APP_USE_EMULATORS === 'true') {
-  connectAuthEmulator(auth, 'http://127.0.0.1:9099', { disableWarnings: true });
-  connectFirestoreEmulator(db, '127.0.0.1', 8080);
-  connectFunctionsEmulator(functions, '127.0.0.1', 5001); // firebase.json emulators.functions.port
+  connectAuthEmulator(auth, `http://127.0.0.1:${emulatorPort(process.env.REACT_APP_AUTH_EMULATOR_PORT, 9099)}`, { disableWarnings: true });
+  connectFirestoreEmulator(db, '127.0.0.1', emulatorPort(process.env.REACT_APP_FIRESTORE_EMULATOR_PORT, 8080));
+  connectFunctionsEmulator(functions, '127.0.0.1', emulatorPort(process.env.REACT_APP_FUNCTIONS_EMULATOR_PORT, 5001));
 
   const b64url = (obj) =>
     btoa(JSON.stringify(obj)).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
