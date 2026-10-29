@@ -30,6 +30,14 @@ test('a row with the toggle fires onToggle once per tap', async () => {
   r.unmount();
 });
 
+test('a past week row names that week and the one before, not this week and last week', async () => {
+  const r = await renderScreen(<BoardRow row={row} weekLabel="Week of Oct 19" priorLabel="Week before" />, { path: '/x' });
+  expect(r.text()).toContain('Week of Oct 19 2/5');
+  expect(r.text()).toContain('Week before 5/5 · Last check-in Nov 4');
+  expect(r.text()).not.toMatch(/This week|Last week/);
+  await r.unmount();
+});
+
 test('read-only row: no toggle; a due row says how many days', async () => {
   const r = await renderScreen(<BoardRow row={{ ...row, lastCheckin: null, daysSince: 22 }} canToggle={false} />, { path: '/x' });
   expect(r.button('Checked in · Nico Whitfield')).toBeNull();

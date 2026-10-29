@@ -15,6 +15,12 @@ const GROUPS = [
   { key: 'thisWeek', label: 'This week', empty: 'Everyone is checked in' },
   { key: 'checkedIn', label: 'Checked in this week', empty: 'No check-ins yet this week' },
 ];
+// A past week is named as that week; Due is always counted from today, so it says so.
+const PAST_GROUPS = [
+  { key: 'due', label: 'Due for a check-in, as of today', empty: 'No one is due' },
+  { key: 'thisWeek', label: 'Not checked in that week', empty: 'Everyone was checked in that week' },
+  { key: 'checkedIn', label: 'Checked in that week', empty: 'No check-ins that week' },
+];
 
 const arrow = (disabled) => ({
   width: 44,
@@ -32,7 +38,9 @@ const arrow = (disabled) => ({
  * The Commitment Contract board (2026-10-28, spec 5.4): who logged their
  * minutes, week by week, in three groups - due for a check-in (14 days, the
  * Monday email's list), this week, and checked in this week - with a
- * per-week Checked in switch for Yannick. Owner and ops reach it by URL and
+ * per-week Checked in switch for Yannick. A past week names its groups and
+ * rows as that week (never "this week"); Due is always as of today, and
+ * says so there. Owner and ops reach it by URL and
  * read it without the switch. Never behind the family contract switch; a
  * banner says when families are not logging yet. "Today" is the academy's
  * America/Chicago date.
@@ -45,6 +53,9 @@ export default function MentalContract({ bare = false, role = 'mental', onSignOu
   const { rows, config, setCheckin, loading, error } = useContractBoard(week);
   const canToggle = role === 'mental';
   const atCurrent = week >= current;
+  const groups = atCurrent ? GROUPS : PAST_GROUPS;
+  const weekLabel = atCurrent ? 'This week' : `Week of ${format(parseISO(week), 'MMM d')}`;
+  const priorLabel = atCurrent ? 'Last week' : 'Week before';
 
   const toggle = (row) => {
     setWriteFailed(false);
@@ -100,7 +111,7 @@ export default function MentalContract({ bare = false, role = 'mental', onSignOu
         ) : error ? (
           <ErrorNotice title="The board didn't load" />
         ) : (
-          GROUPS.map((g) => {
+          groups.map((g) => {
             const list = rows?.[g.key] ?? [];
             return (
               <section key={g.key}>
@@ -112,7 +123,9 @@ export default function MentalContract({ bare = false, role = 'mental', onSignOu
                     <Body size={12} tone={color.textTertiary}>{g.empty}</Body>
                   </div>
                 ) : (
-                  list.map((row) => <BoardRow key={row.athleteId} row={row} canToggle={canToggle} onToggle={() => toggle(row)} />)
+                  list.map((row) => (
+                    <BoardRow key={row.athleteId} row={row} canToggle={canToggle} onToggle={() => toggle(row)} weekLabel={weekLabel} priorLabel={priorLabel} />
+                  ))
                 )}
               </section>
             );

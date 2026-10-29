@@ -42,8 +42,27 @@ test('the week switcher goes back and the empty groups say so', async () => {
   await r.flush();
   expect(r.text()).toContain('Week of Nov 2');
   expect(r.text()).toContain('No one is due');
-  expect(r.text()).toContain('No check-ins yet this week');
+  expect(r.text()).toContain('No check-ins that week');
   expect(r.button('Next week').disabled).toBe(false);
+  r.unmount();
+});
+
+test('a past week is labelled as that week, never as this week; Due says it is as of today', async () => {
+  const r = await renderScreen(<MentalContract bare role="mental" />, { path: '/portal/mental/contract' });
+  await r.click('Previous week');
+  await r.flush();
+  const text = r.text();
+  expect(text).toContain('Due for a check-in, as of today · 0');
+  expect(text).toContain('Not checked in that week · 1');
+  expect(text).toContain('Checked in that week · 0');
+  expect(text).toContain('Week of Nov 2 5/5');
+  expect(text).toContain('Week before 0/5');
+  expect(text).not.toMatch(/This week|Last week|this week/);
+  await r.click('Next week');
+  await r.flush();
+  expect(r.text()).toContain('This week · 1');
+  expect(r.text()).toContain('This week 2/5');
+  expect(r.text()).toContain('Last week 0/5');
   r.unmount();
 });
 

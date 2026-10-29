@@ -12,12 +12,14 @@ import { WEEKDAY_COUNT } from '../../data/contractRule';
  * (data/contractBoard.js): name and requirement; this week's count and its
  * seven dots; last week and the last check-in, with the day count once it
  * is past the 14-day mark. The Checked in switch only when `canToggle`
- * (role mental; owner and ops read).
+ * (role mental; owner and ops read). `weekLabel` and `priorLabel` name the
+ * displayed week and the one before it: 'This week' and 'Last week' only
+ * when the board shows the current week (MentalContract passes the rest).
  */
-export default function BoardRow({ row, canToggle = false, onToggle, style }) {
+export default function BoardRow({ row, canToggle = false, onToggle, style, weekLabel = 'This week', priorLabel = 'Last week' }) {
   const head = [row.age != null ? `Age ${row.age}` : null, `${row.required} min`].filter(Boolean).join(' · ');
   const history = [
-    `Last week ${row.lastWeek?.metDays ?? 0}/${WEEKDAY_COUNT}`,
+    `${priorLabel} ${row.lastWeek?.metDays ?? 0}/${WEEKDAY_COUNT}`,
     row.lastCheckin ? `Last check-in ${format(parseISO(row.lastCheckin), 'MMM d')}` : 'Never checked in',
     row.daysSince != null && row.daysSince > OVERDUE_DAYS ? `${row.daysSince} days` : null,
   ].filter(Boolean).join(' · ');
@@ -33,7 +35,7 @@ export default function BoardRow({ row, canToggle = false, onToggle, style }) {
         </div>
         <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginTop: 6 }}>
           <span style={{ font: `500 12px ${font.body}`, color: color.textSecondary }}>
-            This week {row.thisWeek?.metDays ?? 0}/{WEEKDAY_COUNT}
+            {weekLabel} {row.thisWeek?.metDays ?? 0}/{WEEKDAY_COUNT}
           </span>
           <WeekDots days={row.thisWeek?.days ?? []} />
         </div>
