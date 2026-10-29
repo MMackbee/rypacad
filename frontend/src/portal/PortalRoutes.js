@@ -59,6 +59,7 @@ const loadSpecialistDay = () => import('./screens/SpecialistDay');
 const loadMentalAthletes = () => import('./screens/MentalAthletes');
 const loadMentalAthlete = () => import('./screens/MentalAthlete');
 const loadMentalNote = () => import('./screens/MentalNote');
+const loadMentalContract = () => import('./screens/MentalContract');
 
 const OnboardingWelcomeRoute = named(loadOnboarding, 'OnboardingWelcomeRoute');
 const MySchedule = lazy(loadMySchedule);
@@ -84,6 +85,7 @@ const SpecialistDay = lazy(loadSpecialistDay);
 const MentalAthletes = lazy(loadMentalAthletes);
 const MentalAthlete = lazy(loadMentalAthlete);
 const MentalNote = lazy(loadMentalNote);
+const MentalContract = lazy(loadMentalContract);
 
 /*
  * Chunk warm-up (live mode only), keyed on the segment after /portal/.
@@ -99,7 +101,7 @@ const CURRENT_ROUTE_CHUNKS = {
   book: [loadBook],
   coaching: [loadCoaching],
   'my-sessions': [loadSpecialistDay],
-  mental: [loadMentalAthletes, loadMentalAthlete, loadMentalNote],
+  mental: [loadMentalAthletes, loadMentalAthlete, loadMentalNote, loadMentalContract],
   contract: [loadContract],
   season: [loadSeason],
   athlete: [loadAthleteDetail],
@@ -553,6 +555,22 @@ function MentalNoteRoute() {
 }
 
 /**
+ * The contract board (spec 5.4): mental, ops and owner; the Checked in
+ * switch is Yannick's alone. Waits for this route's OWN auth subscription,
+ * like SpecialistDayRoute: it starts loading after RequireRole's has
+ * finished, and a role read off a still-null user would show an owner the
+ * switches for a frame (a tap then is a contractCheckins 403). Live, the
+ * role is never defaulted to 'mental'.
+ */
+function MentalContractRoute({ onSignOut }) {
+  const live = isLive();
+  const { user, loading } = useAuthSession(live ? undefined : { variant: 'idle' });
+  if (live && loading) return null;
+  const role = live ? (user?.role ?? null) : 'mental';
+  return <MentalContract bare role={role} onSignOut={onSignOut} />;
+}
+
+/**
  * The Tour is the one route every role reaches, but TourStandings renders a
  * role-appropriate bottom tab bar (athlete and parent have one; staff roles
  * do not) — so the signed-in role has to reach it as a prop. Resolved from
@@ -818,7 +836,7 @@ export default function PortalRoutes() {
           also admits ops and owner, read-only (by URL, no tab). The static
           mental/contract is declared before mental/:athleteId. */}
       <Route path="mental" element={<RequireRole roles={['mental']}><MentalAthletesRoute onSignOut={onSignOut} /></RequireRole>} />
-      <Route path="mental/contract" element={<RequireRole roles={['mental', 'ops', 'owner']}>{null}</RequireRole>} />
+      <Route path="mental/contract" element={<RequireRole roles={['mental', 'ops', 'owner']}><MentalContractRoute onSignOut={onSignOut} /></RequireRole>} />
       <Route path="mental/:athleteId/notes/:entryId" element={<RequireRole roles={['mental']}><MentalNoteRoute /></RequireRole>} />
       <Route path="mental/:athleteId" element={<RequireRole roles={['mental']}><MentalAthleteRoute onSignOut={onSignOut} /></RequireRole>} />
       {/* Hidden until closer to launch (owner, 2026-09-30): a stale link
