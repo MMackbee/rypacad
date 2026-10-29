@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { color } from '../tokens';
 import Button from './Button';
 import PhoneFrame from './PhoneFrame';
@@ -13,6 +13,8 @@ import { researchConfirmSkipped, skipResearchConfirm } from '../hooks/researchSk
 import { RESEARCH_CONFIRM_TITLE, RESEARCH_SAVE_LABEL, confirmBody, firstName, researchAnswer } from '../data/researchConsent';
 import { joinNames } from '../data/signup';
 
+const NONE = [];
+
 /**
  * The one-time research confirm (assessments spec 7): a family whose
  * athletes have no research answer recorded sees the same checkboxes once,
@@ -23,6 +25,11 @@ import { joinNames } from '../data/signup';
  * the server has not acknowledged in 8 s (offline: the write neither lands
  * nor fails) says so and offers "Skip for now" too, the save still running
  * (review 2026-10-28).
+ *
+ * Each save that lands refreshes the list (bump), and the list reads again
+ * while the sheet saves the next athlete: the sheet keeps the list it opened
+ * with until Save finishes or Skip is pressed, so a refetch never closes it,
+ * clears a ticked answer or lets a second write go out (review 2026-10-28).
  */
 export default function ResearchConfirmGate({ children }) {
   const live = isLive();
@@ -30,13 +37,20 @@ export default function ResearchConfirmGate({ children }) {
   const { data } = useResearchConfirm(live ? user : null);
   const [done, setDone] = useState(false);
   const [, setSkipTick] = useState(0);
-  const pending = data?.pending ?? [];
-  if (!live || !user || done || researchConfirmSkipped(user.uid) || pending.length === 0) return children;
+  const [held, setHeld] = useState(null);
+  const uid = user?.uid ?? null;
+  const pending = held && held.uid === uid ? held.pending : data?.pending ?? NONE;
+  const open = live && Boolean(user) && !done && !researchConfirmSkipped(uid) && pending.length > 0;
+  useEffect(() => {
+    if (open && held?.pending !== pending) setHeld({ uid, pending });
+    else if (!uid && held) setHeld(null);
+  }, [open, uid, pending, held]);
+  if (!open) return children;
   return (
     <ResearchConfirm
       pending={pending}
-      onDone={() => setDone(true)}
-      onSkip={() => { skipResearchConfirm(user.uid); setSkipTick((n) => n + 1); }}
+      onDone={() => { setHeld(null); setDone(true); }}
+      onSkip={() => { skipResearchConfirm(uid); setHeld(null); setSkipTick((n) => n + 1); }}
     />
   );
 }
