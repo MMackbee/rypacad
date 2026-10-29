@@ -60,6 +60,17 @@ export async function taskResearch() {
     expect('18+: an assent is refused', await answer(self, SELF, { value: true, assent: true, recordedBy: users.self }), 403);
     expect('the 18+ member records their own answer', await answer(self, SELF, { value: true, assent: null, recordedBy: users.self }), 200);
 
+    // A Feb 29 birthday (review 2026-10-28): 18 years on is a common year, so the 18th birthday is Mar 1.
+    await reset({ dob: '2012-02-29' });
+    expect('Feb 29, under 18: a yes needs the assent', await answer(t.parent, KID, { value: true, assent: null, recordedBy: uid.parent }), 403);
+    expect('Feb 29, under 18: the parent records yes with the assent', await answer(t.parent, KID, { value: true, assent: true, recordedBy: uid.parent }), 200);
+    await reset({ dob: '2008-02-29' });
+    expect('Feb 29, 18+: an assent is refused', await answer(t.parent, KID, { value: true, assent: true, recordedBy: uid.parent }), 403);
+    expect('Feb 29, 18+: the parent records yes, no assent', await answer(t.parent, KID, { value: true, assent: null, recordedBy: uid.parent }), 200);
+    await reset({ dob: '2012-02-29', consents: { research: { value: true, assent: true, recordedAt: new Date('2026-10-15T15:00:00Z'), recordedBy: uid.parent } } });
+    expect('Feb 29: the owner records a change', await answer(owner, KID, { value: false, assent: false, recordedBy: users.owner,
+      history: [{ value: true, assent: true, recordedAt: new Date('2026-10-15T15:00:00Z'), recordedBy: uid.parent }] }), 200);
+
     const earlier = { value: true, assent: true, recordedAt: new Date('2026-10-15T15:00:00Z'), recordedBy: uid.parent };
     await reset({ consents: { research: earlier } });
     expect('the parent cannot change a recorded answer', await answer(t.parent, KID, { value: false, assent: false, recordedBy: uid.parent }), 403);

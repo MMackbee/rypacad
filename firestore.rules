@@ -495,10 +495,16 @@ service cloud.firestore {
       // owner records a later change (the family emails it), the earlier
       // answer moved onto the history, so every window keeps the answer it
       // ran under. Under 18 a yes needs the assent; 18+ the assent is null.
+      // The 18th birthday is the 1st of the month plus (day - 1) days, never
+      // timestamp.date(year, 2, 29): 18 years after a leap year is a common
+      // year, where that date errors and refused every answer for a Feb 29
+      // birthday (review 2026-10-28). It lands on Mar 1, the day
+      // data/signup.js isAdultOnDate and functions lib.ageAt count 18 from.
       function adultRecord() {
         let dob = resource.data.get('dob', null);
         return dob is string && dob.matches('[0-9]{4}-[0-9]{2}-[0-9]{2}')
-          && timestamp.date(int(dob.split('-')[0]) + 18, int(dob.split('-')[1]), int(dob.split('-')[2])) <= request.time;
+          && timestamp.date(int(dob.split('-')[0]) + 18, int(dob.split('-')[1]), 1)
+            + duration.value(int(dob.split('-')[2]) - 1, 'd') <= request.time;
       }
       function researchOnlyChange() {
         return request.resource.data.diff(resource.data).affectedKeys().hasOnly(['consents'])
