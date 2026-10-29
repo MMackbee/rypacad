@@ -37,7 +37,13 @@ export async function fetchAllMentalEntries() {
   } catch (err) { throw wrap(err, 'fetchAllMentalEntries'); }
 }
 
-export async function saveMentalEntry({ athleteId, entryId, kind, sessionId = null, sessionDate = null, body }) {
+/**
+ * Creates the note or updates it, in one transaction. `mayCreate()` is asked
+ * on every attempt (the SDK re-runs the function when the note changed under
+ * it); when it says no and the note is gone, the save is refused NOT_FOUND
+ * rather than recreating a note a confirmed delete just removed.
+ */
+export async function saveMentalEntry({ athleteId, entryId, kind, sessionId = null, sessionDate = null, body, mayCreate = () => true }) {
   if (!athleteId || !entryId) throw new LiveDataError(ERR.INVALID, 'saveMentalEntry: athleteId and entryId are required.');
   if (typeof body !== 'string' || body.length > NOTE_MAX) throw new LiveDataError(ERR.INVALID, `saveMentalEntry: body must be a string of at most ${NOTE_MAX} characters.`);
   const user = requireUser();
@@ -49,6 +55,8 @@ export async function saveMentalEntry({ athleteId, entryId, kind, sessionId = nu
         tx.update(ref, { body, sessionDate, updatedBy: user.uid, updatedAt: serverTimestamp() });
         return false;
       }
+      // A LiveDataError is not a FirebaseError, so the SDK does not retry it.
+      if (!mayCreate()) throw new LiveDataError(ERR.NOT_FOUND, `saveMentalEntry: mentalNotes/${athleteId}/entries/${entryId} was deleted.`);
       tx.set(ref, { athleteId, kind, sessionId, sessionDate, body, createdBy: user.uid, updatedBy: user.uid, createdAt: serverTimestamp(), updatedAt: serverTimestamp() });
       return true;
     });

@@ -9,7 +9,7 @@ import NoteEditor from '../components/mental/NoteEditor';
  */
 const mockLive = { fetchAthlete: jest.fn(), fetchAllAthletes: jest.fn(), fetchAllHouseholds: jest.fn() };
 const mockMental = {
-  fetchMentalEntries: jest.fn(), saveMentalEntry: jest.fn(),
+  fetchMentalEntries: jest.fn(), saveMentalEntry: jest.fn(), deleteMentalEntry: jest.fn(),
   fetchContractLogsBetween: jest.fn(), fetchCheckinsForAthletes: jest.fn(), fetchContractConfig: jest.fn(), setCheckin: jest.fn(),
   fetchMentalBookings: jest.fn(), fetchHouseholdContact: jest.fn(),
 };
@@ -26,6 +26,7 @@ jest.mock('./mentalLive', () => ({
   ...jest.requireActual('./mentalLive'),
   fetchMentalEntries: (...a) => mockMental.fetchMentalEntries(...a),
   saveMentalEntry: (...a) => mockMental.saveMentalEntry(...a),
+  deleteMentalEntry: (...a) => mockMental.deleteMentalEntry(...a),
   fetchContractLogsBetween: (...a) => mockMental.fetchContractLogsBetween(...a),
   fetchCheckinsForAthletes: (...a) => mockMental.fetchCheckinsForAthletes(...a),
   fetchContractConfig: (...a) => mockMental.fetchContractConfig(...a),
@@ -110,6 +111,41 @@ test('a failed save reads error, and the next save clears it', async () => {
   await r.act(() => out.current.save('Stored. Offline line.'));
   expect(out.current.saveState).toBe('saved');
   expect(mockMental.saveMentalEntry).toHaveBeenCalledTimes(2);
+  await r.unmount();
+});
+
+test('a confirmed delete while an autosave is in flight: that save may no longer create the note', async () => {
+  const pending = [];
+  mockMental.saveMentalEntry.mockImplementation(() => new Promise((resolve, reject) => { pending.push({ resolve, reject }); }));
+  mockMental.deleteMentalEntry.mockResolvedValue({ id: 'intake' });
+  const out = { current: null };
+  const r = await renderScreen(<HookProbe out={out} use={() => useMentalNote({ athleteId: 'jordan', entryId: 'intake' })} />, { path: '/x' });
+  await r.flush();
+  let tick;
+  await r.act(() => { tick = out.current.save('Stored. Typed before Delete.'); });
+  const { mayCreate } = mockMental.saveMentalEntry.mock.calls[0][0];
+  expect(mayCreate()).toBe(true);
+  await r.act(() => out.current.remove());
+  expect(mayCreate()).toBe(false); // the transaction's retry after the delete is refused, not a create
+  await r.act(async () => { pending[0].reject(new LiveDataError(ERR.NOT_FOUND, 'deleted')); await tick; });
+  expect(out.current).toMatchObject({ entry: null, saveState: 'idle' });
+  // Typing after the delete is a new note: that save may create it.
+  await r.act(() => { out.current.save('A new note.'); });
+  expect(mockMental.saveMentalEntry.mock.calls[1][0].mayCreate()).toBe(true);
+  await r.unmount();
+});
+
+test('a delete that fails gives the in-flight save its create back', async () => {
+  mockMental.saveMentalEntry.mockImplementation(() => new Promise(() => {}));
+  mockMental.deleteMentalEntry.mockRejectedValue(new LiveDataError(ERR.UNAVAILABLE, 'offline'));
+  const out = { current: null };
+  const r = await renderScreen(<HookProbe out={out} use={() => useMentalNote({ athleteId: 'jordan', entryId: 'intake' })} />, { path: '/x' });
+  await r.flush();
+  await r.act(() => { out.current.save('Stored. More.'); });
+  let failed = null;
+  await r.act(() => out.current.remove().catch((e) => { failed = e; }));
+  expect(failed).toMatchObject({ code: ERR.UNAVAILABLE });
+  expect(mockMental.saveMentalEntry.mock.calls[0][0].mayCreate()).toBe(true);
   await r.unmount();
 });
 

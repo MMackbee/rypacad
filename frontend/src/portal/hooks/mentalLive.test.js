@@ -47,6 +47,24 @@ test('saveMentalEntry creates with createdBy/createdAt once, then updates body, 
   expect(tx.update).toHaveBeenCalledWith({ path: 'mentalNotes/jordan/entries/cal-a' }, { body: 'Second.', sessionDate: '2026-11-10', updatedBy: 'mental', updatedAt: 'NOW' });
 });
 
+test('saveMentalEntry asks mayCreate on every attempt and never recreates a note a delete removed under it', async () => {
+  const tx = { get: jest.fn(), set: jest.fn(), update: jest.fn() };
+  let allowed = true;
+  // The SDK re-runs the function when the note changed under it: the first
+  // attempt read the note, the confirmed delete landed, the retry finds none.
+  runTransaction.mockImplementation(async (db, fn) => {
+    tx.get.mockResolvedValueOnce({ exists: () => true });
+    await fn(tx);
+    allowed = false;
+    tx.get.mockResolvedValueOnce({ exists: () => false });
+    return fn(tx);
+  });
+  await expect(saveMentalEntry({ athleteId: 'jordan', entryId: 'intake', kind: 'intake', body: 'Typed.', mayCreate: () => allowed }))
+    .rejects.toMatchObject({ code: ERR.NOT_FOUND });
+  expect(tx.update).toHaveBeenCalledTimes(1);
+  expect(tx.set).not.toHaveBeenCalled();
+});
+
 test('saveMentalEntry refuses a body over 8000 characters before any write', async () => {
   await expect(saveMentalEntry({ athleteId: 'jordan', entryId: 'intake', kind: 'intake', sessionId: null, sessionDate: null, body: 'x'.repeat(8001) })).rejects.toMatchObject({ code: ERR.INVALID });
   expect(runTransaction).not.toHaveBeenCalled();

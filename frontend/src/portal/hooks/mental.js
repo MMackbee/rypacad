@@ -130,7 +130,9 @@ export function useMentalAthlete(athleteId) {
  * 'idle'. `save(body)` never rejects (the editor reads saveState: saving ->
  * saved, 'slow' after SLOW_SAVE_MS, 'error' on failure, which the editor
  * retries on its next tick); `remove()` rejects when the delete
- * fails, so the screen stays on the note. `athleteName` is the argument, or
+ * fails, so the screen stays on the note. A save already running when the
+ * delete starts may update the note but never create it again (its
+ * transaction re-runs after the delete lands). `athleteName` is the argument, or
  * the athlete's name resolved once per athleteId (a refresh or a deep link).
  */
 export function useMentalNote({ athleteId, entryId, sessionDate = null, athleteName = null }) {
@@ -145,6 +147,8 @@ export function useMentalNote({ athleteId, entryId, sessionDate = null, athleteN
   const entryRef = useRef(null);
   const noteGen = useRef(0); // moves when (athleteId, entryId) changes: an older save no longer lands
   const saveSeq = useRef(0); // moves on every save: only the latest one reports its state
+  // The delete under way: every save of note `gen` up to `seq` started before it and may not create.
+  const deleting = useRef(null);
 
   const putEntry = useCallback((next) => { entryRef.current = next; setEntry(next); }, []);
 
@@ -211,8 +215,10 @@ export function useMentalNote({ athleteId, entryId, sessionDate = null, athleteN
     const sessionId = kind === 'session' ? entryId : null;
     // A deep link has no sessionDate; keep the one the note already has.
     const date = sessionDate ?? entryRef.current?.sessionDate ?? null;
+    // Asked on each transaction attempt: a retry after a confirmed delete never recreates the note.
+    const mayCreate = () => !(deleting.current && deleting.current.gen === gen && seq <= deleting.current.seq);
     try {
-      if (live) await saveMentalEntry({ athleteId, entryId, kind, sessionId, sessionDate: date, body });
+      if (live) await saveMentalEntry({ athleteId, entryId, kind, sessionId, sessionDate: date, body, mayCreate });
       if (!current()) return;
       const now = Date.now();
       putEntry({ ...(entryRef.current || { id: entryId, athleteId, kind, sessionId, createdAtMs: now }), body, sessionDate: date, updatedAtMs: now });
@@ -229,7 +235,14 @@ export function useMentalNote({ athleteId, entryId, sessionDate = null, athleteN
 
   const remove = useCallback(async () => {
     const gen = noteGen.current;
-    if (live) await deleteMentalEntry({ athleteId, entryId });
+    const mark = { gen, seq: saveSeq.current }; // set before the delete goes out
+    deleting.current = mark;
+    try {
+      if (live) await deleteMentalEntry({ athleteId, entryId });
+    } catch (err) {
+      if (deleting.current === mark) deleting.current = null; // not deleted: a running save may create again
+      throw err;
+    }
     if (!mounted.current || noteGen.current !== gen) return;
     saveSeq.current += 1;
     putEntry(null);
