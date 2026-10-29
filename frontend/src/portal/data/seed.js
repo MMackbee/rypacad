@@ -31,6 +31,7 @@ import { TOKEN_PACKAGES, periodFor, tokensFor } from './packages';
 // below. See the DEPRECATED block near the bottom of this file and
 // packages.js's own DEPRECATED banner, which these two names read from.
 import { addDaysISO, longDayLabel, todayISO } from './calendar';
+import { addDays as addContractDays, weekStartFor } from './contractRule';
 
 /** The real current date, formatted for screen headers. */
 export const TODAY = longDayLabel(todayISO());
@@ -201,6 +202,7 @@ export const HOUSEHOLD = {
       // Owner-supplied dob 2012-06-17 (2026-09-10) — 14 now and at season
       // start, bracket 14+. Kept in sync with scripts/seed-firestore.mjs.
       age: 14,
+      dob: '2012-06-17',
       ageLine: 'Age 14 · 45 min tier',
       standing: { tone: 'green', label: 'On track' },
       next: { type: 'training', when: 'Mon 4:00 PM', meta: 'Training block' },
@@ -223,6 +225,7 @@ export const HOUSEHOLD = {
       name: 'Reese',
       // Owner-supplied dob 2014-03-02 — 12 now and at season start, 11-13.
       age: 12,
+      dob: '2014-03-02',
       ageLine: 'Age 12 · 20 min tier',
       standing: { tone: 'yellow', label: 'Behind' },
       next: { type: 'tournament', when: 'Sat 10:30 AM', meta: 'Tour event' },
@@ -239,6 +242,7 @@ export const HOUSEHOLD = {
       id: 'nico',
       name: 'Nico',
       age: 9,
+      dob: '2017-09-09',
       ageLine: 'Age 9 · new Feb 8',
       standing: { tone: 'neutral', label: 'New', dashed: true },
       next: { type: 'training', when: 'Mon 5:00 PM', meta: 'Training block' },
@@ -442,4 +446,49 @@ export const CODE_OF_GRIT = [
   'Train Smart',
   'Support Each Other & Enjoy the Journey',
 ];
+
+/* ---------------------------------------------------------------- mental -- */
+
+/**
+ * Yannick's screens in seed mode (spec 5): two athletes, three mental
+ * sessions, one intake and two session notes, two weeks of logs and
+ * check-ins. Dates are relative to `today` so the board always has a
+ * current week. Pure data; the hooks in hooks/mental.js read it when
+ * isLive() is false.
+ */
+export function mentalFixtures(today) {
+  const week = weekStartFor(today);
+  const day = (n) => addContractDays(week, n);
+  const athletes = [
+    { id: 'jordan', name: 'Jordan Whitfield', dob: '2012-06-17', householdId: 'whitfield' },
+    { id: 'nico', name: 'Nico Whitfield', dob: '2017-09-09', householdId: 'whitfield' },
+  ];
+  const sessions = [
+    { id: 'cal-seed-a', date: day(-9), time: '4:00 PM', type: 'mental', status: 'scheduled', durationMinutes: 30 },
+    { id: 'cal-seed-b', date: day(-2), time: '4:30 PM', type: 'mental', status: 'scheduled', durationMinutes: 30 },
+    { id: 'cal-seed-c', date: day(8), time: '5:00 PM', type: 'mental', status: 'scheduled', durationMinutes: 30 },
+  ];
+  const bookings = sessions.map((s, i) => ({
+    id: `jordan_${s.id}`, athleteId: 'jordan', sessionId: s.id, date: s.date, type: 'mental', status: i < 2 ? 'attended' : 'confirmed', attendee: 'athlete',
+  }));
+  const at = (iso) => Date.UTC(...iso.split('-').map((n, i) => (i === 1 ? Number(n) - 1 : Number(n))), 22);
+  const entries = [
+    { id: 'intake', athleteId: 'jordan', kind: 'intake', sessionId: null, sessionDate: null, body: 'Intake: wants to stop replaying bad holes. Sleeps fine. Pre-shot routine exists but is skipped under pressure.', createdAtMs: at(day(-9)), updatedAtMs: at(day(-9)) },
+    { id: 'cal-seed-a', athleteId: 'jordan', kind: 'session', sessionId: 'cal-seed-a', sessionDate: day(-9), body: 'Session 1: breathing count before each shot. Homework: three holes with the routine on every shot.', createdAtMs: at(day(-9)), updatedAtMs: at(day(-9)) },
+    { id: 'cal-seed-b', athleteId: 'jordan', kind: 'session', sessionId: 'cal-seed-b', sessionDate: day(-2), body: 'Session 2: kept the routine on 14 of 18. Next: the first tee.', createdAtMs: at(day(-2)), updatedAtMs: at(day(-2)) },
+  ];
+  const logsByAthlete = {
+    jordan: { [day(0)]: 20, [day(1)]: 30, [day(3)]: 25, [day(4)]: 20, [day(-7)]: 20, [day(-6)]: 20, [day(-5)]: 20, [day(-4)]: 20, [day(-3)]: 20 },
+    nico: { [day(0)]: 10, [day(1)]: 10, [day(2)]: 5, [day(-7)]: 10, [day(-6)]: 10, [day(-5)]: 10, [day(-4)]: 10, [day(-3)]: 10 },
+  };
+  const checkins = [
+    { id: `jordan_${week}`, athleteId: 'jordan', weekStart: week, checkedIn: true, by: 'mental', at: day(1) },
+    { id: `nico_${day(-7)}`, athleteId: 'nico', weekStart: day(-7), checkedIn: true, by: 'mental', at: day(-5) },
+  ];
+  return {
+    athletes, sessions, bookings, entries, logsByAthlete, checkins,
+    config: { enabled: true, enabledAt: day(-14) },
+    households: { whitfield: { name: 'Whitfield family', guardian: { name: 'Dana', email: 'dana@email.com', phone: null } } },
+  };
+}
 

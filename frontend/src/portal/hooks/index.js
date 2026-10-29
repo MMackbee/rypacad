@@ -217,6 +217,9 @@ export { default as useOnboardingStatus } from './onboarding';
 // 2026-10-01: useScholarships is the OWNER's read of scholarshipApplications;
 // only an owner's screen may mount it (hooks/scholarships.js).
 export { coachingFor, useIssueTokens, usePush, useRecentNotices, useScholarships, useSignups, useWaitlist };
+// 2026-10-28: Yannick's tools (hooks/mental.js, hooks/mentalLive.js); role
+// 'mental' screens only - the notes reads are refused for every other role.
+export { useContractBoard, useMentalAthlete, useMentalAthletes, useMentalNote } from './mental';
 
 /**
  * Harness demo states (contract v1.1): every data-bearing hook accepts
