@@ -29,8 +29,9 @@ jest.mock('firebase/firestore', () => ({
     });
   }),
 }));
-// The wave's slow-save threshold, shortened so a save that never settles shows within the test.
-jest.mock('../hooks/assessmentSaves', () => ({ SLOW_SAVE_MS: 30 }));
+// The wave's slow-save threshold, shortened so a save that never settles shows within the test,
+// but long enough that a stalled CPU cannot fire it between a landed save and the next assertion.
+jest.mock('../hooks/assessmentSaves', () => ({ SLOW_SAVE_MS: 200 }));
 jest.mock('../hooks/live', () => ({ ...jest.requireActual('../hooks/live'), isLive: () => true }));
 jest.mock('../hooks/useAuthSession', () => ({ __esModule: true, default: () => ({ user: mockUser, loading: false }) }));
 
@@ -140,7 +141,7 @@ test('a1 lands and a2 never settles: after the slow-save threshold Skip for now 
   expect(homeRenders).toBe(0);
   expect(r.button('Skip for now')).toBeNull();
 
-  await act(async () => { await new Promise((resolve) => setTimeout(resolve, 60)); });
+  await act(async () => { await new Promise((resolve) => setTimeout(resolve, 300)); });
   await r.flush();
   expect(homeRenders).toBe(0);
   expect(r.text()).toContain('Your answer is not saved yet. Check the connection, or skip for now: we will ask again the next time you sign in.');
