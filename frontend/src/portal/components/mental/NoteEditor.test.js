@@ -32,8 +32,31 @@ test('text typed after a save stays in the textarea when new props arrive', asyn
   await r.fill('Note', 'A B');
   await r.rerender(<NoteEditor initialBody="A" saveState="saved" savedAt={Date.now()} onSave={onSave} />);
   expect(r.container.querySelector('textarea').value).toBe('A B');
+  // ' B' was typed after the save went out: the line never says Saved over unsent text.
+  expect(r.text()).toContain('Not saved yet');
+  expect(r.text()).not.toContain('Saved ·');
+  await r.act(() => { jest.advanceTimersByTime(10000); });
+  expect(onSave).toHaveBeenLastCalledWith('A B');
+  await r.rerender(<NoteEditor initialBody="A" saveState="saved" savedAt={Date.now()} onSave={onSave} />);
   expect(r.text()).toContain('Saved · 10:42');
-  r.unmount();
+  await r.unmount();
+});
+
+test('a stored note opens as Saved; typing flips the line to Not saved yet until the next save', async () => {
+  const savedAt = new Date('2026-11-11T09:05:00').getTime();
+  const r = await renderScreen(<NoteEditor initialBody="Kept." saveState="saved" savedAt={savedAt} onSave={jest.fn()} />, { path: '/x' });
+  expect(r.text()).toContain('Saved · 9:05');
+  await r.fill('Note', 'Kept. More.');
+  expect(r.text()).toContain('Not saved yet');
+  await r.fill('Note', 'Kept.');
+  expect(r.text()).toContain('Saved · 9:05');
+  await r.unmount();
+});
+
+test('a save from an earlier day shows its date', async () => {
+  const r = await renderScreen(<SaveState state="saved" savedAt={new Date('2026-11-03T19:00:00').getTime()} />, { path: '/x' });
+  expect(r.text()).toContain('Saved · Nov 3, 19:00');
+  await r.unmount();
 });
 
 test('leaving without a blur saves what was typed (browser Back, a swipe, the app going to the background)', async () => {

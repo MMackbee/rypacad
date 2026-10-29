@@ -46,7 +46,9 @@ test('browser Back with no blur: the text typed since the last tick still reache
   const r = await renderScreen(<NoteProbe />, { path: '/portal/mental/jordan/notes/intake' });
   await r.flush();
   expect(r.container.querySelector('textarea').value).toBe('Stored.');
+  expect(r.text()).toContain('Saved ·'); // a stored note opens as saved, not "Not saved yet"
   await r.fill('Note', 'Stored. Typed just before Back.');
+  expect(r.text()).toContain('Not saved yet');
   expect(mockMental.saveMentalEntry).not.toHaveBeenCalled();
   await r.unmount();
   expect(mockMental.saveMentalEntry).toHaveBeenCalledTimes(1);

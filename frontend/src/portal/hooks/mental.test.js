@@ -56,6 +56,16 @@ test('seed mode: useMentalNote saves locally and reports saved with a time', asy
   h.unmount();
 });
 
+test('seed mode: a stored note opens as saved, with its last update time', async () => {
+  const h = mountHook(() => useMentalNote({ athleteId: 'jordan', entryId: 'intake' }));
+  await settle(h);
+  expect(h.out.current.entry.id).toBe('intake');
+  expect(h.out.current.saveState).toBe('saved');
+  expect(h.out.current.savedAt).toBe(h.out.current.entry.updatedAtMs);
+  expect(typeof h.out.current.savedAt).toBe('number');
+  h.unmount();
+});
+
 test('seed mode: the board groups the fixtures and a local check-in moves the row', async () => {
   const h = mountHook(() => useContractBoard('2026-11-09'));
   await settle(h);

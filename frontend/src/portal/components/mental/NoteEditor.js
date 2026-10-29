@@ -21,6 +21,9 @@ import { NOTE_MAX } from '../../data/mentalNotes';
  * (`saveState` 'error'): then the next tick sends the same text again.
  * After a confirmed delete nothing is flushed, so the note is not
  * recreated; a keystroke after a failed delete re-arms saving.
+ *
+ * The save line never says Saved over unsent text: while the text differs
+ * from what was last sent, a 'saved' or 'idle' state reads 'Not saved yet'.
  * Delete confirms inline, no window.confirm.
  */
 export default function NoteEditor({
@@ -33,6 +36,7 @@ export default function NoteEditor({
   autosaveMs = 10000,
 }) {
   const [body, setBody] = useState(initialBody);
+  const [sent, setSent] = useState(initialBody); // the last body handed to onSave, for the save line
   const [dirty, setDirty] = useState(false);
   const [confirming, setConfirming] = useState(false);
   const bodyRef = useRef(initialBody);
@@ -45,6 +49,7 @@ export default function NoteEditor({
   const commit = useCallback(() => {
     if (deleted.current || bodyRef.current === last.current) return;
     last.current = bodyRef.current;
+    setSent(bodyRef.current);
     if (onSaveRef.current) onSaveRef.current(bodyRef.current);
   }, []);
 
@@ -80,6 +85,7 @@ export default function NoteEditor({
     if (!dirty) setDirty(true);
   };
 
+  const shownState = (saveState === 'saved' || saveState === 'idle') && body !== sent ? 'idle' : saveState;
   const left = NOTE_MAX - body.length;
 
   return (
@@ -105,7 +111,7 @@ export default function NoteEditor({
       />
       <div style={{ display: 'flex', alignItems: 'baseline', gap: 12 }}>
         <div style={{ flex: 1, minWidth: 0 }}>
-          <SaveState state={saveState} savedAt={savedAt} />
+          <SaveState state={shownState} savedAt={savedAt} />
         </div>
         {left < 500 ? (
           <Body size={11} tone={color.textTertiary} style={{ flex: 'none' }}>

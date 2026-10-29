@@ -117,9 +117,11 @@ export function useMentalAthlete(athleteId) {
 /**
  * One note and its autosave state. The note is read once per
  * (athleteId, entryId) and never re-read on invalidation: the editor owns
- * the text and a save must never blank it (Review Focus 5). `save(body)`
- * never rejects (the editor reads saveState: saving -> saved, 'slow' after
- * SLOW_SAVE_MS, 'error' on failure); `remove()` rejects when the delete
+ * the text and a save must never blank it (Review Focus 5). A stored note
+ * opens with saveState 'saved' and savedAt its updatedAtMs; a new one
+ * 'idle'. `save(body)` never rejects (the editor reads saveState: saving ->
+ * saved, 'slow' after SLOW_SAVE_MS, 'error' on failure, which the editor
+ * retries on its next tick); `remove()` rejects when the delete
  * fails, so the screen stays on the note. `athleteName` is the argument, or
  * the athlete's name resolved once per athleteId (a refresh or a deep link).
  */
@@ -151,17 +153,22 @@ export function useMentalNote({ athleteId, entryId, sessionDate = null, athleteN
     setError(null);
     setSaveState('idle');
     setSavedAt(null);
-    if (!live) {
-      putEntry(mentalFixtures(academyDateISO()).entries.find((e) => e.athleteId === athleteId && e.id === entryId) || null);
+    // A stored note opens as saved, at its last update; a new one as idle.
+    const loaded = (found) => {
+      putEntry(found);
+      setSaveState(found ? 'saved' : 'idle');
+      setSavedAt(found?.updatedAtMs ?? null);
       setLoading(false);
+    };
+    if (!live) {
+      loaded(mentalFixtures(academyDateISO()).entries.find((e) => e.athleteId === athleteId && e.id === entryId) || null);
       return undefined;
     }
     setLoading(true);
     fetchMentalEntries(athleteId)
       .then((rows) => {
         if (!alive) return;
-        putEntry(rows.find((e) => e.id === entryId) || null);
-        setLoading(false);
+        loaded(rows.find((e) => e.id === entryId) || null);
       })
       .catch((err) => {
         if (!alive) return;

@@ -1,5 +1,5 @@
 import React from 'react';
-import { format } from 'date-fns';
+import { format, isSameDay } from 'date-fns';
 import { color } from '../../tokens';
 import { Body } from '../Primitives';
 
@@ -7,14 +7,16 @@ import { Body } from '../Primitives';
  * The note editor's one save line (spec 5.3). `state` comes from
  * useMentalNote through the editor: idle | saving | saved | slow (still
  * saving after SLOW_SAVE_MS) | error. A failed save says so plainly and
- * keeps the text; the editor sends it again on its next autosave tick.
+ * keeps the text; the editor sends it again on its next autosave tick. A
+ * save from an earlier day (a stored note reopened) shows its date.
  */
 export default function SaveState({ state, savedAt }) {
   let text;
   let tone = color.textTertiary;
   if (state === 'saving') text = 'Saving…';
-  else if (state === 'saved') text = savedAt ? `Saved · ${format(savedAt, 'H:mm')}` : 'Saved';
-  else if (state === 'slow') {
+  else if (state === 'saved') {
+    text = savedAt ? `Saved · ${format(savedAt, isSameDay(savedAt, Date.now()) ? 'H:mm' : 'MMM d, H:mm')}` : 'Saved';
+  } else if (state === 'slow') {
     text = 'Not saved yet — still trying';
     tone = color.errorMid;
   } else if (state === 'error') {
