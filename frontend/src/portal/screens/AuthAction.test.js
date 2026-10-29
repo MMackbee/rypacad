@@ -230,7 +230,7 @@ describe('continueUrl', () => {
       'http://localhost/portal/../admin',
       '//evil.example/portal/home',
       '/portal/home',
-      'javascript:alert(1)',
+      'javascript:alert(1)', // eslint-disable-line no-script-url -- the unsafe input under test
       'not a url',
     ]) {
       expect(safeContinuePath(unsafe)).toBe(SIGN_IN_PATH);

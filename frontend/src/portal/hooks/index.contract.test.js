@@ -1,7 +1,8 @@
 /**
  * Contract lane (2026-09-30): the Behind buffer and the contract window as
- * the live loaders apply them (contract-buffer.md), the contractStart stamp
- * on a no-tier -> tier start, and K31's per-channel notification lock. Kept
+ * the live loaders apply them (contract-buffer.md), the one-time stamp of
+ * the derived requirement and contractStart (owner's rule, 2026-10-28), the
+ * per-date log snapshot, and K31's per-channel notification lock. Kept
  * beside index.test.js with its own mock list so the lanes merge cleanly.
  */
 jest.mock('../../firebase', () => ({ __esModule: true, default: {}, auth: { currentUser: null }, db: {}, functions: {}, storage: {} }));
@@ -15,6 +16,7 @@ jest.mock('./live', () => ({
   ...jest.requireActual('./live'),
   __esModule: true,
   isLive: jest.fn(),
+  createContractLog: jest.fn(),
   fetchAthlete: jest.fn(),
   fetchBookings: jest.fn(),
   fetchContractLogs: jest.fn(),
@@ -37,10 +39,10 @@ import {
   deriveWhoNeedsCall,
   liveContractState,
   useAthleteDashboard,
-  useAthleteTier,
   useContract,
   useHousehold,
   useNotificationPrefs,
+  usePracticeLog,
 } from './index';
 import * as live from './live';
 import * as calendar from '../data/calendar';
@@ -134,12 +136,17 @@ describe('deriveWhoNeedsCall uses the buffer and the window', () => {
     expect(who('2026-11-10')).toEqual([]);
   });
   test('listed from the 6th missed weekday; a late entry takes them off again', () => {
-    // Reese's contract starts Dec 15: November is outside her window.
-    expect(who('2026-11-11')).toEqual([{ athleteId: 'a1', name: 'Jordan', missed: 6, daysLeft: 14 }]);
-    expect(who('2026-11-11', logsFor('a1', ['2026-11-04']))).toEqual([]);
+    // Reese's contract starts Dec 15: November is outside her window. Nico
+    // has no stored tier, but the owner's rule (2026-10-28) applies to
+    // everyone: he is judged against the derived requirement too.
+    expect(who('2026-11-11')).toEqual([
+      { athleteId: 'a1', name: 'Jordan', missed: 6, daysLeft: 14 },
+      { athleteId: 'a3', name: 'Nico', missed: 6, daysLeft: 14 },
+    ]);
+    expect(who('2026-11-11', logsFor('a1', ['2026-11-04']))).toEqual([{ athleteId: 'a3', name: 'Nico', missed: 6, daysLeft: 14 }]);
   });
   test('a mid-season contractStart is not behind the day after it starts', () => {
-    expect(who('2026-12-16').map((r) => r.athleteId)).toEqual(['a1']);
+    expect(who('2026-12-16').map((r) => r.athleteId)).toEqual(['a1', 'a3']);
   });
 });
 
@@ -203,24 +210,42 @@ describe('live loaders', () => {
     await h.unmount();
   });
 
-  test('setTier stamps contractStart only on a start', async () => {
-    live.setContractTier.mockResolvedValue({});
-    const tier = await mountHook(() => useAthleteTier());
-    await tier.result.current.setTier('a1', 45, { start: true });
-    await tier.result.current.setTier('a1', 90);
-    expect(live.setContractTier.mock.calls).toEqual([
-      [{ athleteId: 'a1', minutes: 45, start: true }],
-      [{ athleteId: 'a1', minutes: 90, start: false }],
-    ]);
-    await tier.unmount();
+  test('ensureContractStart stamps the derived requirement and contractStart once, for the self path and a named athlete', async () => {
+    live.isLive.mockReturnValue(true);
+    live.fetchCurrentUser.mockResolvedValue({ uid: 'u-j', role: 'athlete', athleteId: 'jordan' });
+    live.fetchAthlete.mockImplementation(async (id) => ({
+      id, name: id, dob: id === 'nico' ? '2017-09-09' : '2012-06-17', contractMinutes: id === 'reese' ? 45 : null,
+    }));
+    live.fetchContractLogs.mockResolvedValue([]);
+    live.setContractTier.mockResolvedValue({ ok: true });
+    const self = await mountHook(() => useContract({ today: '2026-11-11' }));
+    expect(self.result.current.data.tierMinutes).toBe(20);
+    expect(self.result.current.data.needsStart).toBe(true);
+    await act(async () => { await self.result.current.ensureContractStart(); });
+    expect(live.setContractTier).toHaveBeenCalledWith({ athleteId: 'jordan', minutes: 20, start: true });
+    const kid = await mountHook(() => useContract({ today: '2026-11-11', athleteId: 'nico' }));
+    expect(kid.result.current.data.tierMinutes).toBe(10);
+    await act(async () => { await kid.result.current.ensureContractStart(); });
+    expect(live.setContractTier).toHaveBeenCalledWith({ athleteId: 'nico', minutes: 10, start: true });
+    const stamped = await mountHook(() => useContract({ today: '2026-11-11', athleteId: 'reese' }));
+    expect(stamped.result.current.data.tierMinutes).toBe(20);
+    expect(stamped.result.current.data.needsStart).toBe(false);
+    expect(await stamped.result.current.ensureContractStart()).toEqual({ athleteId: 'reese', skipped: true });
+    expect(live.setContractTier).toHaveBeenCalledTimes(2);
+    await self.unmount(); await kid.unmount(); await stamped.unmount();
+  });
 
-    calendar.todayISO.mockReturnValue('2026-10-20');
-    live.fetchCurrentUser.mockResolvedValue({ uid: 'u1', athleteId: 'a2' });
-    live.fetchAthlete.mockResolvedValue({ id: 'a2', contractMinutes: null });
-    const own = await mountHook(() => useContract());
-    await own.result.current.setTier(20, { start: true });
-    expect(live.setContractTier).toHaveBeenLastCalledWith({ athleteId: 'a2', minutes: 20, start: true });
-    await own.unmount();
+  test('logPractice snapshots the requirement for the logged date, for a named athlete too', async () => {
+    live.isLive.mockReturnValue(true);
+    live.fetchAthlete.mockResolvedValue({ id: 'nico', dob: '2014-11-18', contractMinutes: null });
+    live.fetchContractLogs.mockResolvedValue([]);
+    live.createContractLog.mockResolvedValue({});
+    const h = await mountHook(() => usePracticeLog({ today: '2026-11-20', athleteId: 'nico' }));
+    await act(async () => { await h.result.current.logPractice({ minutes: 15, date: '2026-11-17' }); });
+    expect(live.createContractLog).toHaveBeenLastCalledWith({ athleteId: 'nico', date: '2026-11-17', minutes: 15, contractMinutes: 10 });
+    await act(async () => { await h.result.current.logPractice({ minutes: 15 }); });
+    expect(live.createContractLog).toHaveBeenLastCalledWith({ athleteId: 'nico', date: '2026-11-20', minutes: 15, contractMinutes: 20 });
+    await h.unmount();
   });
 
   test('useNotificationPrefs: billing email reads locked on, billing push reads what was saved (K31)', async () => {

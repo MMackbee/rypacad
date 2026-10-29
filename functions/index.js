@@ -27,6 +27,7 @@
  *   sessionReminders       daily 17:00 America/Chicago
  *   tokenExpiryReminders   daily 09:00 America/Chicago
  *   sweepWaitlist          daily 06:00 America/Chicago (Sprint 17, v2.5)
+ *   mentalCheckinReminders Monday 08:00 America/Chicago (mental, 2026-10-28)
  *
  * Waitlist hardening (owner rulings 2026-10-01) adds one callable,
  * waitlistPositions (portal/waitlist-positions.js), and widens
@@ -87,6 +88,8 @@ const notices = require('./portal/notices');
 const {shouldNoticeBookingCreated, shouldNoticeMemberCancel} =
     require('./portal/notify-gates');
 const jobs = require('./portal/jobs');
+const lib = require('./portal/lib');
+const contractCheckins = require('./portal/contract-checkins');
 const sweep = require('./portal/sweep');
 const {stripeWebhook} = require('./portal/stripe');
 const {onSessionBookedDecrease} = require('./portal/promotion');
@@ -388,6 +391,27 @@ exports.tokenExpiryReminders = functions
         await jobs.runTokenExpiryReminders({now: new Date(), db});
       } catch (err) {
         console.error('tokenExpiryReminders error:', err);
+      }
+      return null;
+    });
+
+/**
+ * Yannick's check-in reminder (2026-10-28): Monday 08:00 America/Chicago,
+ * one email to the role-'mental' user naming every athlete overdue for a
+ * check-in; nothing while config/contract.enabled is false.
+ */
+exports.mentalCheckinReminders = functions
+    .runWith({secrets: MAIL_SECRETS})
+    .pubsub
+    .schedule('0 8 * * 1')
+    .timeZone('America/Chicago')
+    .onRun(async () => {
+      try {
+        const out = await contractCheckins.remindMentalCheckins({
+          db, today: lib.todayISO(new Date())});
+        console.log('mentalCheckinReminders:', JSON.stringify(out));
+      } catch (err) {
+        console.error('mentalCheckinReminders error:', err);
       }
       return null;
     });

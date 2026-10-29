@@ -38,6 +38,14 @@ test('a start writes the tier and contractStart together', async () => {
   expect(updateDoc).toHaveBeenCalledWith('athletes/a1', { contractMinutes: 45, contractStart: '2026-11-02' });
 });
 
+test('the accepted values are 10, 20, 45, 90 or null (owner, 2026-10-28: 10 under 12)', async () => {
+  await expect(setContractTier({ athleteId: 'a', minutes: 10 })).resolves.toEqual({ athleteId: 'a', contractMinutes: 10 });
+  expect(updateDoc).toHaveBeenLastCalledWith('athletes/a', { contractMinutes: 10 });
+  await expect(setContractTier({ athleteId: 'a', minutes: 15 }))
+    .rejects.toThrow('setContractTier: minutes must be 10, 20, 45, 90 or null.');
+  expect(updateDoc).toHaveBeenCalledTimes(1);
+});
+
 test('a tier change, or clearing the tier, leaves contractStart alone', async () => {
   await setContractTier({ athleteId: 'a1', minutes: 90 });
   expect(updateDoc).toHaveBeenLastCalledWith('athletes/a1', { contractMinutes: 90 });

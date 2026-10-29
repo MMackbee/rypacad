@@ -12,7 +12,8 @@ jest.mock('../hooks', () => ({
     : mockDetail),
   // No useHousehold mock on purpose (perf wave B): the back label comes off
   // useAthleteDetail's householdName, and a stray second load would crash here.
-  useAthleteTier: () => ({ setTier: async () => {} }),
+  // The parent's contract card (ParentContractCard), still loading here.
+  useParentContract: () => ({ month: null, loading: true, error: null, logPractice: jest.fn(), removeLog: jest.fn(), ensureContractStart: jest.fn(), loggedToday: false, todayMinutes: 0, required: 20 }),
   useAssignPackages: () => ({ assign: async () => {} }),
   useHouseholdSettings: () => ({ saving: false }),
   useIssueTokens: () => ({ issue: async () => {} }),
@@ -44,7 +45,7 @@ test("a parent's back link names the athlete's household; staff keep their own l
 
 describe('Commitment Contract hidden (owner ruling 2026-09-30)', () => {
   const athlete = {
-    name: 'Jordan', subline: 'Enrolled Nov 3 · 45 min tier · 12 tokens package', contractMinutes: null, packageId: 't-12',
+    name: 'Jordan', subline: 'Enrolled Nov 3 · 20 min a day · 12 tokens package', contractMinutes: null, packageId: 't-12',
     householdName: 'Whitfield family', attendance: '94%', attendanceLabel: 'attendance since Nov', board: '3 of 4', boardLabel: 'months on the Board',
   };
   const full = { data: { athlete, history: [{ month: 'Nov', pct: 96 }], checklist: [], hasEnoughData: true }, loading: false, error: null };
@@ -65,7 +66,7 @@ describe('Commitment Contract hidden (owner ruling 2026-09-30)', () => {
       expect(r.text()).not.toContain('Start a contract');
       expect(r.text()).not.toContain('Commitment Contract');
       expect(r.text()).toContain('Enrolled Nov 3 · 12 tokens package');
-      expect(r.text()).not.toContain('min tier');
+      expect(r.text()).not.toContain('min a day');
       expect(r.text()).toContain('attendance since Nov');
       expect(r.text()).not.toContain('months on the Board');
       expect(r.text()).not.toContain('Contract history');
@@ -80,19 +81,12 @@ describe('Commitment Contract hidden (owner ruling 2026-09-30)', () => {
     }
   });
 
-  test("off: the harness's noTier still forces the Start card", async () => {
-    mockDetail = full;
-    const r = await renderScreen(<AthleteDetail bare athleteId="a1" role="parent" noTier />);
-    expect(r.text()).toContain('Start a contract');
-    await r.unmount();
-  });
-
-  test('on: everything is back, unchanged', async () => {
+  test('on: everything is back; the subline names the rule and there is no Start card (owner, 2026-10-28)', async () => {
     process.env.REACT_APP_CONTRACT_ENABLED = 'true';
     mockDetail = full;
     const r = await renderScreen(<AthleteDetail bare athleteId="a1" role="parent" onBack={() => {}} />);
-    expect(r.text()).toContain('Start a contract');
-    expect(r.text()).toContain('Enrolled Nov 3 · 45 min tier · 12 tokens package');
+    expect(r.text()).not.toContain('Start a contract');
+    expect(r.text()).toContain('Enrolled Nov 3 · 20 min a day · 12 tokens package');
     expect(r.text()).toContain('months on the Board');
     expect(r.text()).toContain('Contract history');
     await r.unmount();
@@ -167,6 +161,23 @@ test('Scheduled sessions: a handicap-reserved block carries the tag, an open one
     expect(r.text()).toContain('Training blockWednesday, Nov 18 · 4:00 PMConfirmed');
     await r.unmount();
   }
+});
+
+test('a parent sees the contract card only with the switch on; staff never do', async () => {
+  // Its own detail, not the last test's: no checklist row or history to say "contract".
+  mockDetail = { data: { athlete: { name: 'Nico', subline: 'Age 9', contractMinutes: null, packageId: 't-6', householdId: 'h1' }, history: [], checklist: [], hasEnoughData: false }, loading: false, error: null };
+  delete process.env.REACT_APP_CONTRACT_ENABLED;
+  const off = await renderScreen(<AthleteDetail bare athleteId="nico" role="parent" />, { path: '/portal/athlete/nico' });
+  expect(off.text()).not.toContain('Commitment Contract');
+  await off.unmount();
+  process.env.REACT_APP_CONTRACT_ENABLED = 'true';
+  const on = await renderScreen(<AthleteDetail bare athleteId="nico" role="parent" />, { path: '/portal/athlete/nico' });
+  expect(on.text()).toContain('Commitment Contract');
+  await on.unmount();
+  const ops = await renderScreen(<AthleteDetail bare athleteId="nico" role="ops" />, { path: '/portal/athlete/nico' });
+  expect(ops.text()).not.toContain('Commitment Contract');
+  await ops.unmount();
+  delete process.env.REACT_APP_CONTRACT_ENABLED;
 });
 
 test('staff and coaches get an Assessments card that opens the results with the name; parents do not', async () => {

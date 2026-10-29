@@ -241,7 +241,7 @@ function ContractLine({ contractMinutes, target = 'athlete', onOpen }) {
         cursor: 'pointer',
       }}
     >
-      <span>{contractMinutes != null ? `${contractMinutes} min contract tier` : 'No contract tier yet'} · View {target}</span>
+      <span>{contractMinutes != null ? `${contractMinutes} min a day` : 'Commitment Contract'} · View {target}</span>
       <span aria-hidden="true" style={{ color: color.textTertiary }}>
         ›
       </span>

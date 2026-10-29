@@ -1,7 +1,7 @@
 import React from 'react';
 import { format, parseISO } from 'date-fns';
 import { renderScreen } from './testRender';
-import { AthleteStep, ConsentInfoSheet, ConsentStep, ContractStep, PackageStep, WhoStep } from './RegistrationSteps';
+import { AthleteStep, ConsentInfoSheet, ConsentStep, PackageStep, WhoStep } from './RegistrationSteps';
 import { CONSENT_TERMS, SELF_WORDING } from '../data/consentTerms';
 import { CONSENTS } from '../data/seed';
 import { emptyEmergencyContact, newAthleteEntry } from '../data/signup';
@@ -266,65 +266,6 @@ test('the package step no longer carries the contract tier', async () => {
   const r = await renderScreen(<PackageStep athletes={[{ ...newAthleteEntry(), name: 'Nico' }]} onUpdate={() => {}} showErrors />);
   expect(r.text()).not.toContain('Commitment Contract');
   expect(r.text()).not.toContain('min / day');
-  await r.unmount();
-});
-
-function ContractHarness({ athletes: initial, mode = 'parent', showErrors = false, todayISO = '2026-10-01' }) {
-  const [athletes, setAthletes] = React.useState(initial);
-  const onUpdate = (key, patch) => setAthletes((prev) => prev.map((a) => (a.key === key ? { ...a, ...patch } : a)));
-  return <ContractStep mode={mode} athletes={athletes} onUpdate={onUpdate} showErrors={showErrors} todayISO={todayISO} />;
-}
-
-test('contract step, parent copy: how it works, counted from the season start, Behind after 5 missed weekdays', async () => {
-  expect(format(parseISO(SEASON_BOUNDS.start), 'EEE, MMM d')).toBe('Tue, Nov 3');
-  const r = await renderScreen(<ContractHarness athletes={[{ ...newAthleteEntry(), name: 'Nico' }]} />);
-  expect(r.text()).toContain("You shouldn't have to nag about practice. That's our job, and the Commitment Contract is how we do it.");
-  expect(r.text()).toContain('Each athlete picks a daily goal: 20, 45 or 90 minutes, Monday to Friday. Weekends are off.');
-  expect(r.text()).toContain("It counts from Tue, Nov 3, or from the day it's picked if that's later.");
-  expect(r.text()).toContain('Missed a day? They can log it late that month. They only show as Behind after more than 5 missed weekdays in a month.');
-  expect(r.text()).toContain("It's a promise, not a payment.");
-  expect(r.text()).toContain("Best chosen together. It's their promise to keep.");
-  expect(r.text()).toContain('The standard commitment. Most athletes pick this.');
-  expect(r.text()).not.toContain('flag 05');
-  await r.unmount();
-  const inSeason = await renderScreen(<ContractHarness athletes={[{ ...newAthleteEntry(), name: 'Nico' }]} todayISO="2026-12-15" />);
-  expect(inSeason.text()).toContain("It counts from the day it's picked.");
-  await inSeason.unmount();
-});
-
-test('contract step, athlete copy: their own promise, no login warning', async () => {
-  const r = await renderScreen(<ContractHarness mode="athlete" athletes={[{ ...newAthleteEntry(), name: 'Sam' }]} showErrors />);
-  expect(r.text()).toContain('The Commitment Contract is your promise to put the work in. We hold you to it.');
-  expect(r.text()).toContain('Pick your daily goal');
-  expect(r.text()).toContain("It counts from Tue, Nov 3, or from the day you pick it if that's later.");
-  expect(r.text()).not.toContain('Best chosen together');
-  expect(r.container.querySelector('[data-field-error]').textContent).toBe('Pick your daily goal, or tap Not yet.');
-  await r.click('45 min a day for Sam');
-  expect(r.text()).not.toContain('own login');
-  await r.click('Not yet for Sam');
-  expect(r.text()).toContain('No contract for now. Start one any time from your Contract tab.');
-  await r.unmount();
-});
-
-test('contract step, two athletes: each their own pick, Not yet is an answer, the missing are named', async () => {
-  const nico = { ...newAthleteEntry(), name: 'Nico', ownLogin: true, loginEmail: 'nico@email.com' };
-  const reese = { ...newAthleteEntry(), name: 'Reese' };
-  const r = await renderScreen(<ContractHarness athletes={[nico, reese, { ...newAthleteEntry(), name: '' }]} showErrors />);
-  expect(r.container.querySelector('[data-field-error]').textContent).toBe('Pick a daily goal for Nico, Reese and Athlete 3, or tap Not yet.');
-  await r.click('45 min a day for Nico');
-  expect(r.button('45 min a day for Nico').getAttribute('aria-checked')).toBe('true');
-  expect(r.button('45 min a day for Reese').getAttribute('aria-checked')).toBe('false');
-  await r.click('45 min a day for Nico'); // no tap-again-to-clear
-  expect(r.button('45 min a day for Nico').getAttribute('aria-checked')).toBe('true');
-  await r.click('Not yet for Reese');
-  expect(r.text()).toContain("No contract for now. Start one any time from Reese's card on your family page.");
-  expect(r.container.querySelector('[data-field-error]').textContent).toBe('Pick a daily goal for Athlete 3, or tap Not yet.');
-  await r.click('20 min a day for Athlete 3');
-  expect(r.container.querySelector('[data-field-error]')).toBeNull();
-  // Only the athlete's own login can log: warn for a child the parent's account runs.
-  expect(r.text()).toContain('Athlete 3 logs minutes from their own login. Go back to Athletes and turn on Own login.');
-  expect(r.text()).not.toContain('Nico logs minutes');
-  expect(r.text()).not.toContain('Reese logs minutes');
   await r.unmount();
 });
 

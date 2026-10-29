@@ -59,6 +59,11 @@ const loadAdminScholarships = () => import('./screens/AdminScholarships');
 const loadStaff = () => import('./screens/StaffRoles');
 const loadTour = () => import('./screens/TourStandings');
 const loadSpecialistDay = () => import('./screens/SpecialistDay');
+// Yannick's tools (2026-10-28, spec 5): one /portal/mental segment, four screens.
+const loadMentalAthletes = () => import('./screens/MentalAthletes');
+const loadMentalAthlete = () => import('./screens/MentalAthlete');
+const loadMentalNote = () => import('./screens/MentalNote');
+const loadMentalContract = () => import('./screens/MentalContract');
 
 const OnboardingWelcomeRoute = named(loadOnboarding, 'OnboardingWelcomeRoute');
 const MySchedule = lazy(loadMySchedule);
@@ -80,6 +85,10 @@ const AdminScholarships = lazy(loadAdminScholarships);
 const StaffRoles = lazy(loadStaff);
 const TourStandings = lazy(loadTour);
 const SpecialistDay = lazy(loadSpecialistDay);
+const MentalAthletes = lazy(loadMentalAthletes);
+const MentalAthlete = lazy(loadMentalAthlete);
+const MentalNote = lazy(loadMentalNote);
+const MentalContract = lazy(loadMentalContract);
 
 /*
  * Chunk warm-up (live mode only), keyed on the segment after /portal/.
@@ -95,6 +104,7 @@ const CURRENT_ROUTE_CHUNKS = {
   book: [loadBook],
   coaching: [loadCoaching],
   'my-sessions': [loadSpecialistDay],
+  mental: [loadMentalAthletes, loadMentalAthlete, loadMentalNote, loadMentalContract],
   contract: [loadContract],
   season: [loadSeason],
   athlete: [loadAthleteDetail],
@@ -479,6 +489,9 @@ function SpecialistDayRoute({ onSignOut }) {
       specialistId={specialistId ?? undefined}
       canSwitch={canSwitch}
       onSignOut={onSignOut}
+      onOpenNote={({ athleteId, sessionId, sessionDate, athleteName }) =>
+        navigate(`/portal/mental/${athleteId}/notes/${sessionId}`, { state: { sessionDate, athleteName } })
+      }
       onOpenSession={(s) =>
         navigate('/portal/attendance', {
           state: {
@@ -499,10 +512,73 @@ function SpecialistDayRoute({ onSignOut }) {
   );
 }
 
+/** Yannick's athlete list (2026-10-28, spec 5.1): a row opens that athlete's page. */
+function MentalAthletesRoute({ onSignOut }) {
+  const navigate = useNavigate();
+  return <MentalAthletes bare onSignOut={onSignOut} onOpenAthlete={(id) => navigate(`/portal/mental/${id}`)} />;
+}
+
 /**
- * The Tour is the one route every role reaches, but TourStandings renders a
- * role-appropriate bottom tab bar (athlete and parent have one; staff roles
- * do not) — so the signed-in role has to reach it as a prop. Resolved from
+ * One athlete's page (spec 5.2). A note opens with its session date and the
+ * athlete's name as navigation state, so the note page says whose it is.
+ */
+function MentalAthleteRoute({ onSignOut }) {
+  const { athleteId } = useParams();
+  const navigate = useNavigate();
+  return (
+    <MentalAthlete
+      bare
+      athleteId={athleteId}
+      onSignOut={onSignOut}
+      onBack={() => navigate('/portal/mental')}
+      onOpenNote={({ entryId, sessionDate, athleteName }) =>
+        navigate(`/portal/mental/${athleteId}/notes/${entryId}`, { state: { sessionDate, athleteName } })
+      }
+    />
+  );
+}
+
+/**
+ * One private note (spec 5.3), keyed by the route params. The session date
+ * and the name ride in navigation state; a refresh or deep link has neither
+ * and the screen's hook looks the name up.
+ */
+function MentalNoteRoute() {
+  const { athleteId, entryId } = useParams();
+  const state = useLocation().state;
+  const navigate = useNavigate();
+  return (
+    <MentalNote
+      bare
+      athleteId={athleteId}
+      entryId={entryId}
+      sessionDate={state?.sessionDate ?? null}
+      athleteName={state?.athleteName ?? null}
+      onBack={() => navigate(`/portal/mental/${athleteId}`)}
+    />
+  );
+}
+
+/**
+ * The contract board (spec 5.4): mental, ops and owner; the Checked in
+ * switch is Yannick's alone. Waits for this route's OWN auth subscription,
+ * like SpecialistDayRoute: it starts loading after RequireRole's has
+ * finished, and a role read off a still-null user would show an owner the
+ * switches for a frame (a tap then is a contractCheckins 403). Live, the
+ * role is never defaulted to 'mental'.
+ */
+function MentalContractRoute({ onSignOut }) {
+  const live = isLive();
+  const { user, loading } = useAuthSession(live ? undefined : { variant: 'idle' });
+  if (live && loading) return null;
+  const role = live ? (user?.role ?? null) : 'mental';
+  return <MentalContract bare role={role} onSignOut={onSignOut} />;
+}
+
+/**
+ * The Tour is the one route every role reaches, and TourStandings renders
+ * that role's own bottom tab bar (Phil's through his specialistId) — so the
+ * signed-in role has to reach it as a prop. Resolved from
  * the live session exactly the way BookSessionRoute above does it; seed mode
  * stays the athlete default the harness already exercises.
  */
@@ -514,7 +590,8 @@ function TourRoute({ onSignOut }) {
   // selects their bracket and unlocks the "Your results" history card;
   // every other role browses brackets with no personal view.
   const athleteId = live && user?.role === 'athlete' ? user?.athleteId ?? undefined : undefined;
-  return <TourStandings bare role={role} athleteId={athleteId} onSignOut={onSignOut} />;
+  const specialistId = (live && user?.specialistId) || undefined;
+  return <TourStandings bare role={role} athleteId={athleteId} specialistId={specialistId} onSignOut={onSignOut} />;
 }
 
 /**
@@ -764,6 +841,14 @@ export default function PortalRoutes() {
           </RequireRole>
         }
       />
+      {/* Yannick's tools (2026-10-28, spec 5): his athletes, one athlete's
+          page and its private notes are role mental only; the contract board
+          also admits ops and owner, read-only (by URL, no tab). The static
+          mental/contract is declared before mental/:athleteId. */}
+      <Route path="mental" element={<RequireRole roles={['mental']}><MentalAthletesRoute onSignOut={onSignOut} /></RequireRole>} />
+      <Route path="mental/contract" element={<RequireRole roles={['mental', 'ops', 'owner']}><MentalContractRoute onSignOut={onSignOut} /></RequireRole>} />
+      <Route path="mental/:athleteId/notes/:entryId" element={<RequireRole roles={['mental']}><MentalNoteRoute /></RequireRole>} />
+      <Route path="mental/:athleteId" element={<RequireRole roles={['mental']}><MentalAthleteRoute onSignOut={onSignOut} /></RequireRole>} />
       {/* Hidden until closer to launch (owner, 2026-09-30): a stale link
           goes through the index, which lands the account on its own home. */}
       <Route

@@ -7,7 +7,7 @@
 
 export const ATHLETE_DETAIL = {
   name: 'Jordan Whitfield',
-  subline: 'Enrolled Nov 3 · 45 min tier · 12 tokens package',
+  subline: 'Enrolled Nov 3 · 20 min a day · 12 tokens package',
   // Sprint 11 (contract v1.9, E): the package pointer the membership editor
   // preselects from; matches the emulator seed's jordan. `fitnessPackageId`
   // is DROPPED (contract v2.0, Sprint 12 pin A: the field is retired).

@@ -74,3 +74,14 @@ test('without a window the builder scores the whole month, as before', () => {
   expect(m.dayStates['2026-11-02']).toBe('missed');
   expect(m).toMatchObject({ missed: 7, behind: true, notStarted: false, ended: false, startISO: null });
 });
+
+test('a per-day requirement: a 12th birthday mid-month leaves the earlier 10-minute days logged', () => {
+  const required = (iso) => (iso < '2026-11-18' ? 10 : 20);
+  const minutesByDate = new Map([['2026-11-16', 10], ['2026-11-17', 10], ['2026-11-18', 10], ['2026-11-19', 20]]);
+  const m = buildContractMonthFromLogs({ today: '2026-11-20', minutesByDate, contractMinutes: required, startISO: '2026-11-16', endISO: '2027-02-27' });
+  expect(m.dayStates['2026-11-16']).toBe('logged');
+  expect(m.dayStates['2026-11-17']).toBe('logged');
+  expect(m.dayStates['2026-11-18']).toBe('missed');
+  expect(m.dayStates['2026-11-19']).toBe('logged');
+  expect(buildContractMonthFromLogs({ today: '2026-11-20', minutesByDate, contractMinutes: 20, startISO: '2026-11-16', endISO: '2027-02-27' }).dayStates['2026-11-16']).toBe('missed');
+});

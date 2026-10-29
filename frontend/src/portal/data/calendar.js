@@ -227,8 +227,9 @@ export const BEHIND_BUFFER_DAYS = 5;
  * @param {object} opts
  * @param {string} opts.today
  * @param {Map<string, number>} opts.minutesByDate  date -> minutes logged.
- * @param {number} opts.contractMinutes  the athlete's tier; callers must not
- *   call this with a null tier — there is no contract to grid.
+ * @param {number|function(string): number} opts.contractMinutes  the minutes
+ *   a day must reach: one number, or a function of the 'yyyy-MM-dd' day
+ *   (contractRule.js contractMinutesFor, the owner's rule of 2026-10-28).
  * @param {string|null} [opts.startISO]  first contract day, 'yyyy-MM-dd'.
  * @param {string|null} [opts.endISO]    last contract day, 'yyyy-MM-dd'.
  */
@@ -238,7 +239,10 @@ export function buildContractMonthFromLogs({ today, minutesByDate, contractMinut
 
   const dayStates = {};
   const tally = { contractDays: 0, dueSoFar: 0, logged: 0, missed: 0, daysLeft: 0 };
-  const fulfilled = (iso) => (minutesByDate.get(iso) || 0) >= contractMinutes;
+  // A number, or (owner's rule, 2026-10-28) the requirement for each day, so
+  // a 12th birthday mid-month never re-judges the days before it.
+  const need = typeof contractMinutes === 'function' ? contractMinutes : () => contractMinutes;
+  const fulfilled = (iso) => (minutesByDate.get(iso) || 0) >= need(iso);
   const outside = (iso) => Boolean((startISO && iso < startISO) || (endISO && iso > endISO));
 
   for (const d of days) {

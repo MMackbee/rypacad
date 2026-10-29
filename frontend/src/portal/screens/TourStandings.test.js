@@ -61,6 +61,29 @@ test('staff see the board without the family explainer', async () => {
   await r.unmount();
 });
 
+// QA 2026-10-29: the staff bars have a Tour tab, so the Tour keeps that bar (no dead end).
+const tabsOf = (r) => [...r.container.querySelectorAll('nav button')].map((b) => b.textContent);
+const currentTab = (r) => r.container.querySelector('nav [aria-current="page"]')?.textContent ?? null;
+
+test.each([
+  ['mental', undefined, ['Sessions', 'Athletes', 'Contract', 'Tour']],
+  ['ops', undefined, ['Admin', 'Sessions', 'Tour']],
+  ['owner', undefined, ['Admin', 'Sessions', 'Staff', 'Tour']],
+  ['coach', 'phil', ['Sessions', 'Assessments', 'Tour']],
+])('the %s login keeps its own tab bar on the Tour, with Tour current', async (role, specialistId, tabs) => {
+  const r = await renderScreen(<TourStandings bare role={role} specialistId={specialistId} />);
+  expect(tabsOf(r)).toEqual(tabs);
+  expect(currentTab(r)).toBe('Tour');
+  await r.unmount();
+});
+
+test('a coach, whose bar has no Tour tab, still gets the bar back to Today', async () => {
+  const r = await renderScreen(<TourStandings bare role="coach" />);
+  expect(tabsOf(r)).toEqual(['Today', 'Roster']);
+  expect(currentTab(r)).toBeNull();
+  await r.unmount();
+});
+
 test('an unnamed event reads "Tour event"; a label typed in the calendar stays as typed', async () => {
   const row = (sessionId, date, athleteId, score) => ({ sessionId, date, athleteId, score, bracket: '14+', name: athleteId });
   const derived = deriveTourStandings(

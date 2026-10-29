@@ -17,6 +17,7 @@ export default function NumericField({ label, value, unit, onChange, style }) {
       </div>
       <input
         inputMode="decimal"
+        aria-label={label}
         value={value ?? ''}
         onChange={(e) => onChange && onChange(e.target.value)}
         style={{

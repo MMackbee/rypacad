@@ -19,13 +19,13 @@ import { FacilityAddOn } from './RegistrationFacility';
  * Registration.js so each file stays under 500 lines. Pure presentation over
  * the form state Registration.js owns; every validation message comes from
  * data/signup.js so the function's re-check and the form agree. The consent
- * step and its sheet live in RegistrationConsent.js, the Commitment
- * Contract step in RegistrationContract.js and the package step's facility
- * add-on in RegistrationFacility.js (same 500-line rule); all are
+ * step and its sheet live in RegistrationConsent.js and the package step's
+ * facility add-on in RegistrationFacility.js (same 500-line rule); both are
  * re-exported here so Registration.js imports every step from one place.
+ * There is no contract step (owner's rule, 2026-10-28: the requirement is
+ * derived from age, nothing to pick).
  */
 export { ConsentInfoSheet, ConsentStep } from './RegistrationConsent';
-export { ContractStep } from './RegistrationContract';
 export { FacilityAddOn };
 
 /** Step 1 (spec 2.1): parent or guardian, or the adult athlete signing up for themselves. */
@@ -302,8 +302,8 @@ function EmergencyContactCard({ mode, linkMode, value, onChange, showErrors }) {
  * seed/live hook to wrap. Renders the four token packages (t-6…t-16) plus
  * Elite, which REPLACES a token pick rather than stacking — same one-of-N
  * rule PackageStep (below) uses. The contract tier (20/45/90, spec 9) moved
- * to its own step, ContractStep (owner feedback 2026-09-30): under these
- * tabs it often landed on the wrong child.
+ * to its own step (owner feedback 2026-09-30) and that step is gone since
+ * the owner's rule (2026-10-28): the requirement is derived from age.
  *
  * Until single tokens go on sale (owner ruling 2026-10-01: when booking
  * opens, Sat, Oct 10 at 7 AM - data/singleToken.js saleOpen, the booking-open

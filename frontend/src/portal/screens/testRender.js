@@ -14,15 +14,18 @@ export async function renderScreen(element, { path = '/' } = {}) {
   document.body.appendChild(container);
   const root = createRoot(container);
   const loc = { current: null };
+  // The same tree every time, so a rerender keeps the router (and its
+  // location) and gives the screen new props instead of remounting it.
+  const tree = (el) => (
+    <MemoryRouter initialEntries={[path]}>
+      <LocationSpy onChange={(l) => { loc.current = l; }} />
+      <Routes>
+        <Route path="*" element={el} />
+      </Routes>
+    </MemoryRouter>
+  );
   await act(async () => {
-    root.render(
-      <MemoryRouter initialEntries={[path]}>
-        <LocationSpy onChange={(l) => { loc.current = l; }} />
-        <Routes>
-          <Route path="*" element={element} />
-        </Routes>
-      </MemoryRouter>
-    );
+    root.render(tree(element));
   });
   // A real <button> by its visible text, or ANY button-like element by its
   // aria-label: Toggle (role="switch", no text), PackageCard and the
@@ -55,6 +58,10 @@ export async function renderScreen(element, { path = '/' } = {}) {
       });
     },
     flush: () => act(async () => {}),
+    /** Re-renders the same root with a new element (new props, same mounted tree). */
+    rerender: async (el) => { await act(async () => { root.render(tree(el)); }); },
+    /** Runs `fn` inside React's act, e.g. advancing fake timers. */
+    act: async (fn) => { await act(async () => { await fn(); }); },
     location: () => loc.current,
     unmount: async () => { await act(async () => { root.unmount(); }); container.remove(); },
   };

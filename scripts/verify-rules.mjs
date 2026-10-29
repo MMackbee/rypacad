@@ -82,6 +82,25 @@ async function listAs(auth, col, filters) {
   const err = Array.isArray(body) ? body.find((r) => r && r.error)?.error : body?.error;
   return err ? err.code : res.status;
 }
+// A collection-group query as a real user (allDescendants), for the {path=**}/entries rule.
+async function groupListAs(auth, collectionId) {
+  const res = await fetch(`${BASE}:runQuery`, { method: 'POST', headers: { 'content-type': 'application/json', authorization: `Bearer ${auth}` },
+    body: JSON.stringify({ structuredQuery: { from: [{ collectionId, allDescendants: true }] } }) });
+  const body = await res.json().catch(() => null);
+  const err = Array.isArray(body) ? body.find((r) => r && r.error)?.error : body?.error;
+  return err ? err.code : res.status;
+}
+// A list of ONE document's subcollection as a real user. runQuery goes to the parent document
+// (`.../documents/mentalNotes/ath-mental:runQuery`, from: [{ collectionId: 'entries' }]): a collectionId is a
+// single path segment, so listAs with a slash in it is a 400 from the emulator, never the 200 or 403 a probe wants.
+async function listUnderAs(auth, parentPath, collectionId, filters = {}) {
+  const where = { compositeFilter: { op: 'AND', filters: Object.entries(filters).map(([fieldPath, v]) => ({ fieldFilter: { field: { fieldPath }, op: 'EQUAL', value: fsValue(v) } })) } };
+  const res = await fetch(`${BASE}/${parentPath}:runQuery`, { method: 'POST', headers: { 'content-type': 'application/json', authorization: `Bearer ${auth}` },
+    body: JSON.stringify({ structuredQuery: { from: [{ collectionId }], ...(Object.keys(filters).length ? { where } : {}) } }) });
+  const body = await res.json().catch(() => null);
+  const err = Array.isArray(body) ? body.find((r) => r && r.error)?.error : body?.error;
+  return err ? err.code : res.status;
+}
 // Session dates sit a few days out, so the past-session clause (rules: sessionDayNotOver) never decides a case that is
 // not about it. taskWindow keeps its fixed December dates: the Nov 1 anchor it probes is a fixed date too.
 const dayOut = (n) => new Date(Date.now() + n * 86400000).toISOString().slice(0, 10);
@@ -957,6 +976,83 @@ async function taskReissue() {
   await del('tokenPeriods', id);
 }
 
+export async function taskMental() {
+  console.log('Mental tools: mentalNotes (role mental only), contractCheckins, config/contract, parent contract logs, contractMinutes 10, households read for mental');
+  const staff = { mental: 'mental-probe', owner: 'owner-probe', phil: 'phil-probe' };
+  await seed('users', staff.mental, { role: 'mental', specialistId: 'mental' });
+  await seed('users', staff.owner, { role: 'owner' });
+  await seed('users', staff.phil, { role: 'coach', specialistId: 'phil' });
+  const mental = token(staff.mental, { email: 'mental@example.com', email_verified: true });
+  const owner = token(staff.owner, { email: 'owner@example.com', email_verified: true });
+  const phil = token(staff.phil, { email: 'phil@example.com', email_verified: true });
+  await seed('athletes', 'ath-mental', { name: 'Probe Mental', householdId: 'hh', contractMinutes: null, coachId: null, dob: '2015-01-01' });
+  const notes = 'mentalNotes/ath-mental/entries';
+  const note = { athleteId: 'ath-mental', kind: 'session', sessionId: 'cal-probe', sessionDate: '2026-11-10', body: 'Private.', createdBy: staff.mental, updatedBy: staff.mental };
+  const others = [['owner', owner], ['ops', t.ops], ['coach', t.coach], ['phil', phil], ['parent', t.parent], ['athlete', t.athlete]];
+
+  // Notes: Yannick writes, reads, lists, group-queries, edits and deletes; nobody else gets anything.
+  expect('mental creates a session note', await createAs(mental, notes, 'cal-probe', note, ['createdAt', 'updatedAt']), 200);
+  expect('mental creates with a wrong athleteId', await createAs(mental, notes, 'cal-other', { ...note, athleteId: 'ath-active' }, ['createdAt', 'updatedAt']), 403);
+  expect('mental creates a body over 8000', await createAs(mental, notes, 'free-big', { ...note, kind: 'free', sessionId: null, sessionDate: null, body: 'x'.repeat(8001) }, ['createdAt', 'updatedAt']), 403);
+  expect('mental creates with another createdBy', await createAs(mental, notes, 'free-by', { ...note, kind: 'free', sessionId: null, sessionDate: null, createdBy: 'someone' }, ['createdAt', 'updatedAt']), 403);
+  expect('mental reads the note', (await call('GET', `/${notes}/cal-probe`, null, mental)).status, 200);
+  expect('mental lists the athlete notes', await listUnderAs(mental, 'mentalNotes/ath-mental', 'entries'), 200);
+  expect('mental queries the entries collection group', await groupListAs(mental, 'entries'), 200);
+  expect('mental edits the body', await updateAs(mental, notes, 'cal-probe', { body: 'Edited.', updatedBy: staff.mental }, ['body', 'updatedBy', 'updatedAt'], ['updatedAt']), 200);
+  expect('mental cannot move the note to another athlete', await updateAs(mental, notes, 'cal-probe', { athleteId: 'ath-active', updatedBy: staff.mental }, ['athleteId', 'updatedBy', 'updatedAt'], ['updatedAt']), 403);
+  for (const [who, auth] of others) {
+    expect(`${who} reads a note`, (await call('GET', `/${notes}/cal-probe`, null, auth)).status, 403);
+    expect(`${who} lists notes`, await listUnderAs(auth, 'mentalNotes/ath-mental', 'entries'), 403);
+    expect(`${who} queries the entries group`, await groupListAs(auth, 'entries'), 403);
+    expect(`${who} creates a note`, await createAs(auth, notes, `free-${who}`, { ...note, kind: 'free', sessionId: null, sessionDate: null, createdBy: uid[who] || staff[who], updatedBy: uid[who] || staff[who] }, ['createdAt', 'updatedAt']), 403);
+    expect(`${who} deletes a note`, (await call('DELETE', `/${notes}/cal-probe`, null, auth)).status, 403);
+  }
+  expect('mental deletes the note', (await call('DELETE', `/${notes}/cal-probe`, null, mental)).status, 200);
+
+  // Check-ins: id pinned to athleteId_weekStart, checkedIn true only, mental writes, owner/ops read, parent nothing.
+  const checkin = { athleteId: 'ath-mental', weekStart: '2026-11-09', checkedIn: true, by: staff.mental };
+  expect('mental checks an athlete in', await createAs(mental, 'contractCheckins', 'ath-mental_2026-11-09', checkin, ['at']), 200);
+  expect('mental check-in with a mismatched id', await createAs(mental, 'contractCheckins', 'ath-mental_2026-11-10', checkin, ['at']), 403);
+  expect('mental check-in with checkedIn false', await createAs(mental, 'contractCheckins', 'ath-mental_2026-11-02', { ...checkin, weekStart: '2026-11-02', checkedIn: false }, ['at']), 403);
+  expect('owner reads a check-in', (await call('GET', '/contractCheckins/ath-mental_2026-11-09', null, owner)).status, 200);
+  expect('ops lists check-ins', await listAs(t.ops, 'contractCheckins', { weekStart: '2026-11-09' }), 200);
+  expect('owner cannot write a check-in', await createAs(owner, 'contractCheckins', 'ath-mental_2026-11-16', { ...checkin, weekStart: '2026-11-16', by: staff.owner }, ['at']), 403);
+  expect('parent cannot read check-ins', (await call('GET', '/contractCheckins/ath-mental_2026-11-09', null, t.parent)).status, 403);
+  expect('coach cannot read check-ins', await listAs(t.coach, 'contractCheckins', {}), 403);
+  expect('mental unchecks (delete)', (await call('DELETE', '/contractCheckins/ath-mental_2026-11-09', null, mental)).status, 200);
+
+  // config/contract: owner writes; staff read; families do not.
+  const cfg = (auth, fields) => call('PATCH', '/config/contract', { fields: fsFields(fields) }, auth).then((r) => r.status);
+  expect('owner writes config/contract', await cfg(owner, { enabled: true, enabledAt: '2026-11-10' }), 200);
+  expect('owner writes an off switch', await cfg(owner, { enabled: false, enabledAt: null }), 200);
+  expect('ops cannot write config/contract', await cfg(t.ops, { enabled: true, enabledAt: '2026-11-10' }), 403);
+  expect('owner cannot write an extra field', await cfg(owner, { enabled: true, enabledAt: '2026-11-10', note: 'x' }), 403);
+  expect('mental reads config/contract', (await call('GET', '/config/contract', null, mental)).status, 200);
+  expect('coach reads config/contract', (await call('GET', '/config/contract', null, t.coach)).status, 200);
+  expect('parent cannot read config/contract', (await call('GET', '/config/contract', null, t.parent)).status, 403);
+
+  // Parent logs for their own kid (spec 4.3): the transaction's read of a missing doc, the create, the delete; another household is refused.
+  const log = { athleteId: 'ath-mental', date: '2026-11-09', minutes: 20, contractMinutes: 10, createdBy: uid.parent };
+  expect('parent reads a missing own-household log (404, not 403)', (await call('GET', '/contractLogs/ath-mental_2026-11-09', null, t.parent)).status, 404);
+  expect('parent logs for an own-household kid', await createAs(t.parent, 'contractLogs', 'ath-mental_2026-11-09', log), 200);
+  expect('parent re-logs the same day (update)', await updateAs(t.parent, 'contractLogs', 'ath-mental_2026-11-09', { ...log, minutes: 35 }, undefined, ['createdAt']), 200);
+  expect('another household parent cannot log for the kid', await createAs(t.other, 'contractLogs', 'ath-mental_2026-11-10', { ...log, date: '2026-11-10', createdBy: uid.other }), 403);
+  expect('another household parent cannot read the missing log', (await call('GET', '/contractLogs/ath-mental_2026-11-10', null, t.other)).status, 403);
+  expect('parent deletes the log', (await call('DELETE', '/contractLogs/ath-mental_2026-11-09', null, t.parent)).status, 200);
+
+  // contractMinutes 10 (spec 4.3) and the household read for mental (spec 3).
+  const tier = (auth, id, fields) => call('PATCH', `/athletes/${id}?${Object.keys(fields).map((k) => `updateMask.fieldPaths=${k}`).join('&')}`, { fields: fsFields(fields) }, auth).then((r) => r.status);
+  expect('parent stamps 10 with contractStart', await tier(t.parent, 'ath-mental', { contractMinutes: 10, contractStart: '2026-11-03' }), 200);
+  expect('parent cannot stamp 15', await tier(t.parent, 'ath-mental', { contractMinutes: 15 }), 403);
+  expect('mental reads a household', (await call('GET', '/households/hh', null, mental)).status, 200);
+  expect('mental lists households (the board\'s on-contract gate reads them all)', await listAs(mental, 'households', {}), 200);
+  expect('coach still cannot read a household', (await call('GET', '/households/hh', null, t.coach)).status, 403);
+
+  await del('config', 'contract');
+  await del('athletes', 'ath-mental');
+  for (const u of Object.values(staff)) await del('users', u);
+}
+
 async function runPass(label) {
   console.log(`\n=== ${label} ===`);
   await setup();
@@ -965,6 +1061,7 @@ async function runPass(label) {
     await taskSeats(); await taskPast(); await taskWaitlist(); await taskSingle(); await taskScholarship(); await taskFeedback(); await taskReserved();
     await taskReissue();
     await taskAssessments(); await taskDiagnosticsKept(); await taskResearch();
+    await taskMental();
   } finally { await teardown(); }
 }
 

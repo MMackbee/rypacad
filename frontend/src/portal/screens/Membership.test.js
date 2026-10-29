@@ -41,8 +41,8 @@ test('access the athlete\'s own record shows is said, with its source', async ()
   await elite.unmount();
 });
 
-test('the contract tier line shows only with the Commitment Contract on (owner ruling 2026-09-30)', async () => {
-  const member = { athleteId: 'a1', name: 'Jordan', package: { kind: 'tokens', name: '12 tokens' }, tokens: { left: 12 }, coaching: null, contractMinutes: 45, facilityAccess: false, billing: { status: 'active', facility: null } };
+test('the contract line (the requirement, owner 2026-10-28) shows only with the Commitment Contract on (owner ruling 2026-09-30)', async () => {
+  const member = { athleteId: 'a1', name: 'Jordan', package: { kind: 'tokens', name: '12 tokens' }, tokens: { left: 12 }, coaching: null, contractMinutes: 20, facilityAccess: false, billing: { status: 'active', facility: null } };
   mockMine = { loading: false, error: null, data: { member, status: { status: 'active', paused: false, pendingAthletes: [] } } };
   const off = await renderScreen(<Membership bare />);
   expect(off.text()).not.toMatch(/contract/i);
@@ -50,7 +50,7 @@ test('the contract tier line shows only with the Commitment Contract on (owner r
   process.env.REACT_APP_CONTRACT_ENABLED = 'true';
   try {
     const on = await renderScreen(<Membership bare />);
-    await on.click('45 min contract tier · View contract›');
+    await on.click('20 min a day · View contract›');
     expect(on.location().pathname).toBe('/portal/contract');
     await on.unmount();
   } finally {

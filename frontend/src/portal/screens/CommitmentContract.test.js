@@ -45,7 +45,7 @@ jest.mock('../hooks', () => ({
     },
     loading: false,
     error: null,
-    setTier: async () => ({}),
+    ensureContractStart: async () => ({}),
   }),
   usePracticeLog: () => ({
     data: { loggedToday: false, todayMinutes: 0 },

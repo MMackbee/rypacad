@@ -1,6 +1,6 @@
 import React from 'react';
 import { renderScreen } from '../screens/testRender';
-import BottomTabBar from './BottomTabBar';
+import BottomTabBar, { TABS } from './BottomTabBar';
 
 /*
  * Owner report (Mike S6 2026-09-30): the 18+ athlete who signed up for
@@ -62,6 +62,16 @@ test('selfManaged never changes a parent or staff bar', async () => {
   await coach.unmount();
 });
 
+test('mental: Sessions, Athletes, Contract (key mental-contract) and Tour, with the contract switch off', async () => {
+  delete process.env.REACT_APP_CONTRACT_ENABLED;
+  const r = await renderScreen(<BottomTabBar role="mental" active="athletes" />, { path: '/portal/mental' });
+  expect(['Sessions', 'Athletes', 'Contract', 'Tour'].every((l) => r.text().includes(l))).toBe(true);
+  expect(TABS.mental.map((t) => t.key)).toEqual(['sessions', 'athletes', 'mental-contract', 'assessments', 'tour']);
+  expect(labels(r)).toEqual(['Sessions', 'Athletes', 'Contract', 'Tour']);
+  expect(TABS.mental.find((t) => t.key === 'mental-contract').route).toBe('/portal/mental/contract');
+  r.unmount();
+});
+
 test('Diagnostic Capture is gone: no Capture tab for a coach or for Phil (assessments spec 8)', async () => {
   const coach = await renderScreen(<BottomTabBar role="coach" />);
   expect(labels(coach)).toEqual(['Today', 'Roster']);
@@ -93,8 +103,11 @@ test('Assessments: for Phil and for staff the owner gave the permission; never a
   expect(labels(plain)).toEqual(['Today', 'Roster']);
   await plain.unmount();
   const mental = await renderScreen(<BottomTabBar role="mental" />);
-  expect(labels(mental)).toEqual(['Sessions', 'Tour']);
+  expect(labels(mental)).toEqual(['Sessions', 'Athletes', 'Contract', 'Tour']);
   await mental.unmount();
+  const mentalAssessor = await renderScreen(<BottomTabBar role="mental" assessments />);
+  expect(labels(mentalAssessor)).toEqual(['Sessions', 'Athletes', 'Contract', 'Assessments', 'Tour']);
+  await mentalAssessor.unmount();
   const owner = await renderScreen(<BottomTabBar role="owner" assessments />);
   expect(labels(owner)).not.toContain('Assessments');
   await owner.unmount();
