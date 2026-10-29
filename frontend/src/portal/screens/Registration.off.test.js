@@ -77,12 +77,18 @@ async function signUpInFiveSteps() {
   window.sessionStorage.clear();
 }
 
-test('sign-up is 5 steps with no contract anywhere, and sends contractMinutes null, flag off or on', async () => {
+// One walk per test (flag off, flag on), each with headroom: two five-step walks in
+// one test ran past jest's 5 s budget in the full CI run, and the timed-out walk's
+// late createFamily landed in the next test's mockCalls.
+test('flag off: sign-up is 5 steps with no contract anywhere, and sends contractMinutes null', async () => {
   await signUpInFiveSteps();
   const consent = await renderScreen(<Registration bare variant="consent" />);
   expect(consent.text()).toContain('Step 5 of 5');
   expect(consent.text()).toContain('Consent and waiver');
   await consent.unmount();
+}, 15000);
+
+test('flag on: still 5 steps with no contract anywhere, and contractMinutes null (owner rule 2026-10-28)', async () => {
   process.env.REACT_APP_CONTRACT_ENABLED = 'true';
   try {
     await signUpInFiveSteps();
@@ -92,7 +98,7 @@ test('sign-up is 5 steps with no contract anywhere, and sends contractMinutes nu
   } finally {
     delete process.env.REACT_APP_CONTRACT_ENABLED;
   }
-});
+}, 15000);
 
 test('an 18+ athlete signing for themselves reads the consents and sheets about themselves; the payload is unchanged', async () => {
   const r = await renderScreen(<Registration bare mode="signup" account={{ email: 'sam@email.com' }} onRefresh={async () => {}} />);
