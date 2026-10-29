@@ -144,7 +144,7 @@
  *                  DIAGNOSTIC_SECTIONS in seed.js and enumerated in
  *                  DATA-MODEL.md, never retyped independently.
  *   loginInvites / calendlyEvents — Sprint 20: one open child-login invite (reese) and one Calendly-sourced Yannick session + booking + ledger row (see the cal- block below).
- *   mentalNotes / contractCheckins / config — mental tools (2026-10-28): two past attended Calendly 1:1s for jordan with an intake and two session notes, two check-ins, config/contract on, nico's 10-minute logs (see the "Mental tools" blocks below).
+ *   mentalNotes / contractCheckins / config — mental tools (2026-10-28): two past attended Calendly 1:1s for jordan with an intake and two session notes, two check-ins, config/contract on since 21 days back (reese is due for a check-in), nico's 10-minute logs (see the "Mental tools" blocks below).
  *   staffInvites — ONE pending invite (contract v1.8, Sprint 10 pin E) at a
  *                  clearly-fake address (`invite-test@example.com`), role
  *                  coach, specialistId null — provision-family.mjs is what
@@ -1197,9 +1197,13 @@ function buildDocs(portal) {
     [`nico_${lastMonday}`, { athleteId: 'nico', weekStart: lastMonday, checkedIn: true, by: 'mental', at: eveningOf(portal.addDays(lastMonday, 2), 19, 0) }],
   ]);
   // config/contract: the server-readable switch (set-contract-flag.mjs in
-  // production), on in the emulator since 14 days before the run date.
+  // production), on in the emulator since 21 days before the run date, so
+  // the board's "Due for a check-in" group is not empty: reese (on the
+  // contract, never checked in) is past the 14-day mark (daysSince 21 > 14).
+  // nico, the 10-minute kid, is off the board on purpose (billing pending,
+  // the PAYMENT-PENDING case); his athlete page shows the 10-minute rule.
   const contractEnabledAt = new Date(today);
-  contractEnabledAt.setDate(contractEnabledAt.getDate() - 14);
+  contractEnabledAt.setDate(contractEnabledAt.getDate() - 21);
   const config = new Map([['contract', { enabled: true, enabledAt: isoDate(contractEnabledAt) }]]);
 
   // users — one per portal role, ALL SIX (the QA test-account suite,
