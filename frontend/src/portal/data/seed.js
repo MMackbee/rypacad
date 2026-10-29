@@ -203,7 +203,7 @@ export const HOUSEHOLD = {
       // start, bracket 14+. Kept in sync with scripts/seed-firestore.mjs.
       age: 14,
       dob: '2012-06-17',
-      ageLine: 'Age 14 · 45 min tier',
+      ageLine: 'Age 14 · 20 min a day',
       standing: { tone: 'green', label: 'On track' },
       next: { type: 'training', when: 'Mon 4:00 PM', meta: 'Training block' },
       contract: 92,
@@ -226,7 +226,7 @@ export const HOUSEHOLD = {
       // Owner-supplied dob 2014-03-02 — 12 now and at season start, 11-13.
       age: 12,
       dob: '2014-03-02',
-      ageLine: 'Age 12 · 20 min tier',
+      ageLine: 'Age 12 · 20 min a day',
       standing: { tone: 'yellow', label: 'Behind' },
       next: { type: 'tournament', when: 'Sat 10:30 AM', meta: 'Tour event' },
       contract: 54,
@@ -344,7 +344,7 @@ export const ROSTER = [
   { id: 'r1', name: 'A. Nguyen', meta: 'Age 12 · 4th month' },
   { id: 'r2', name: 'M. Okonkwo', meta: '3 no-shows this month' },
   { id: 'r3', name: 'R. Sandoval', meta: 'Age 14 · contract behind' },
-  { id: 'r4', name: 'J. Whitfield', meta: 'Age 14 · 45 min tier' },
+  { id: 'r4', name: 'J. Whitfield', meta: 'Age 14 · 20 min a day' },
   { id: 'r5', name: 'T. Alvarez', meta: 'Age 12 · 2nd month' },
   { id: 'r6', name: 'S. Bergstrom', meta: 'Age 13 · 6th month' },
 ];

@@ -14,8 +14,8 @@ export function contractEnabled() {
   return process.env.REACT_APP_CONTRACT_ENABLED === 'true';
 }
 
-/** One part of a " · " line that is contract copy: "45 min tier", "contract behind". */
-const CONTRACT_PART = /\bmin tier$|\bcontract\b/i;
+/** One part of a " · " line that is contract copy: "45 min tier", "20 min a day", "contract behind". */
+const CONTRACT_PART = /\bmin tier$|\bmin a day$|\bcontract\b/i;
 
 /**
  * A " · "-joined subline as shown: unchanged while the contract is on; with

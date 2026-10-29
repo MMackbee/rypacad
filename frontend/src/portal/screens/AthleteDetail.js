@@ -1,15 +1,13 @@
-import React, { useState } from 'react';
+import React from 'react';
 import { color, font, radius } from '../tokens';
 import * as hooks from '../hooks';
 import AthleteMembershipCard from '../components/AthleteMembershipCard';
 import BottomTabBar from '../components/BottomTabBar';
-import Button from '../components/Button';
 import HandicapCard from '../components/HandicapCard';
 import { Avatar } from '../components/MediaPlaceholder';
 import PhoneFrame from '../components/PhoneFrame';
 import ProgressMeter, { meterColor } from '../components/ProgressMeter';
 import { ReservedChip } from '../components/Reserved';
-import SavedToast from '../components/SavedToast';
 import { BackLink, Body, Card, ScreenTitle, SectionLabel, Tick } from '../components/Primitives';
 import { useAthleteDetail } from '../hooks';
 import { loginStatusLine } from '../data/billingCopy';
@@ -38,9 +36,6 @@ function useLatestDiagnostic(athleteId) {
   };
 }
 
-/** The pinned contract tier set (contract v1.8 §B) - not invented. */
-const TIER_MINUTES = [20, 45, 90];
-
 /**
  * 09 · Athlete Detail - parent view of one linked athlete.
  * States: Populated, Limited data.
@@ -53,9 +48,6 @@ const TIER_MINUTES = [20, 45, 90];
  * deliberate.
  *
  * @param {'populated'|'limited'} variant
- * @param {boolean} [noTier]  Sprint 10 pin B, harness/PM override: force the
- *   "Start a contract" card on regardless of the subline heuristic below -
- *   see that card's own doc comment for why a real signal doesn't exist yet.
  * @param {'parent'|'athlete'|'coach'|'mental'|'ops'|'owner'} [role]
  *   Sprint 11 pin E (TEAM.md): gates the new Membership card — ops/owner get
  *   the editable package pickers, coach/mental see the same facts read-only,
@@ -66,7 +58,7 @@ const TIER_MINUTES = [20, 45, 90];
  *   AthleteDetailRoute (PortalRoutes.js is not this lane's to edit — see the
  *   sprint report) now that Sprint 10 pin I already routes coach here too.
  */
-export default function AthleteDetail({ variant = 'populated', bare = false, athleteId, noTier, role = 'parent', backLabel, onBack }) {
+export default function AthleteDetail({ variant = 'populated', bare = false, athleteId, role = 'parent', backLabel, onBack }) {
   // athleteId comes from the route (/portal/athlete/:athleteId) — dropping it
   // here was QA re-sweep #1: the hook's by-id fetch was fixed but never
   // received an id, so every child rendered as the seed athlete.
@@ -88,28 +80,10 @@ export default function AthleteDetail({ variant = 'populated', bare = false, ath
   // came from instead, since they have no household to name.
   const householdName = backLabel ?? (athlete?.householdName || 'Family');
 
-  /**
-   * Sprint 10 pin B: whether this kid has no contract tier yet. useAthleteDetail's
-   * payload carries no explicit contractMinutes/tier field to check directly
-   * (confirmed: neither the seed ATHLETE_DETAIL nor the live payload in
-   * hooks/index.js expose one) - only a human-readable `subline` that
-   * INCLUDES "N min tier" when a tier is set. Absent a real boolean, this
-   * falls back to parsing that string, which is fragile and flagged loudly
-   * in the sprint report as a real data-shape gap for routing to close
-   * (expose athlete.contractMinutes, or a `hasTier` boolean, from
-   * useAthleteDetail). The `noTier` prop lets a caller (or the harness)
-   * override the heuristic outright once/while that gap exists.
-   */
-  // useAthleteDetail's live payload now carries `contractMinutes` (routing
-  // lane, v1.8 B); the subline regex only remains as the seed-mode fallback.
-  const hasNoTier =
-    noTier ??
-    (athlete && 'contractMinutes' in athlete
-      ? athlete.contractMinutes == null
-      : Boolean(athlete) && !/min tier/i.test(athlete?.subline || ''));
   // Hidden contract (owner, 2026-09-30), for parents and staff alike: no
-  // Start card (the harness's `noTier` still forces it), no tier in the
-  // subline, no Board stat, no contract history or checklist row.
+  // requirement in the subline, no Board stat, no contract history or
+  // checklist row. There is no Start card at all since the owner's rule
+  // (2026-10-28): the requirement is derived, nothing to pick.
   const showContract = contractEnabled();
 
   return (
@@ -147,8 +121,6 @@ export default function AthleteDetail({ variant = 'populated', bare = false, ath
             <Body size={12}>{loginStatusLine(athlete)}</Body>
           </Card>
         ) : null}
-
-        {hasNoTier && (showContract || noTier) ? <StartContractCard athleteId={athleteId} athleteName={athlete?.name} /> : null}
 
         {data?.hasEnoughData ? (
           <>
@@ -341,110 +313,6 @@ function ReflectionCard() {
         </Body>
       </div>
     </div>
-  );
-}
-
-/**
- * Sprint 10 pin B (contract v1.8 §B): a parent's move for a kid with no
- * contract tier yet. FALLBACK FLAG: `useContract` (hooks/index.js) resolves
- * the SIGNED-IN user's OWN athlete record (liveAthleteIdentity throws for a
- * parent, who has no athleteId of their own) - it has no path to "set the
- * tier for THIS athleteId" for any caller, parent or staff, in this
- * worktree. That is a different gap than a missing export, but the same
- * shape of problem, so it gets the same treatment: `setTier` below is a
- * local, athleteId-scoped no-op echo rather than a mis-wired call into the
- * wrong identity. Flagged loudly in the sprint report - routing needs an
- * athleteId-aware tier-set mutation for the parent/staff case.
- */
-function StartContractCard({ athleteId, athleteName }) {
-  const [selected, setSelected] = useState(null);
-  const [saving, setSaving] = useState(false);
-  const [saved, setSaved] = useState(false);
-  const [error, setError] = useState(null);
-
-  // The athleteId-aware tier write the routing seam now provides
-  // (useAthleteTier, PM integration) — the household parent's own path.
-  const tier = hooks.useAthleteTier();
-  // Only shown for a no-tier athlete, so this is always a start: the write
-  // stamps athletes.contractStart (contract-buffer Phase 2).
-  const setTier = (minutes) => tier.setTier(athleteId, minutes, { start: true });
-
-  const handleStart = async () => {
-    if (!selected) return;
-    setSaving(true);
-    setError(null);
-    try {
-      const result = await setTier(selected);
-      // Review 2026-09-30: a start whose date the rules refused (deploy lag)
-      // counts from the season start; say so rather than claim today.
-      setSaved(result?.contractStartDropped ? 'season' : true);
-    } catch (err) {
-      setError(
-        err && typeof err.message === 'string' && err.message
-          ? err.message
-          : 'The contract could not be started. Try again.'
-      );
-    } finally {
-      setSaving(false);
-    }
-  };
-
-  if (saved) {
-    return <SavedToast message={saved === 'season' ? `Contract started — ${selected} min / day, counted from the season start` : `Contract started — ${selected} min / day`} />;
-  }
-
-  return (
-    <Card tone="yellow" large>
-      <SectionLabel tone={color.secondary} style={{ marginBottom: 8 }}>
-        Start a contract
-      </SectionLabel>
-      <Body size={12} style={{ marginBottom: 12 }}>
-        {athleteName || 'This athlete'} doesn't have a Commitment Contract tier yet. Pick a daily
-        minimum to get started — your coach countersigns at the next block.
-      </Body>
-      <div style={{ display: 'flex', gap: 8 }}>
-        {TIER_MINUTES.map((m) => {
-          const on = selected === m;
-          return (
-            <button
-              key={m}
-              type="button"
-              aria-pressed={on}
-              onClick={() => setSelected(on ? null : m)}
-              style={{
-                flex: 1,
-                height: 50,
-                borderRadius: radius.card,
-                border: `1px solid ${on ? color.primary : color.border}`,
-                background: on ? 'rgba(0,175,81,.12)' : color.surface,
-                display: 'flex',
-                flexDirection: 'column',
-                alignItems: 'center',
-                justifyContent: 'center',
-                cursor: 'pointer',
-              }}
-            >
-              <span style={{ font: `700 16px ${font.head}`, color: on ? color.primary : color.text }}>{m}</span>
-              <span style={{ font: `400 9px ${font.body}`, color: color.textTertiary }}>min/day</span>
-            </button>
-          );
-        })}
-      </div>
-      {error ? (
-        <Body size={12} tone={color.error} style={{ marginTop: 10 }}>
-          {error}
-        </Body>
-      ) : null}
-      <Button
-        height={44}
-        disabled={!selected}
-        loading={saving}
-        onClick={handleStart}
-        style={{ marginTop: 13 }}
-      >
-        {selected ? `Start the ${selected} min contract` : 'Select a tier to continue'}
-      </Button>
-    </Card>
   );
 }
 

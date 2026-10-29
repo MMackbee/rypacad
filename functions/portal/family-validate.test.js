@@ -77,6 +77,12 @@ test('every refusal, in the contract order', () => {
       'unknown-package');
   refuses(Object.assign(base(), {athletes: [kid({contractMinutes: 95})]}),
       'contract-tier');
+  // The owner's rule (2026-10-28): 10 under 12 is a stored value now.
+  assert.equal(v.validateFamilyPayload(Object.assign(base(),
+      {athletes: [kid({contractMinutes: 10})]}), {todayISO: TODAY})
+      .athletes[0].contractMinutes, 10);
+  refuses(Object.assign(base(), {athletes: [kid({contractMinutes: 15})]}),
+      'contract-tier');
   refuses(Object.assign(base(), {athletes: [kid({handicap: 55})]}),
       'handicap-range');
   refuses(Object.assign(base(), {athletes: [kid({handicap: 12.5})]}),

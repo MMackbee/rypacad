@@ -1,4 +1,4 @@
-import React, { act } from 'react';
+import React from 'react';
 import { renderScreen } from './testRender';
 import CommitmentContract from './CommitmentContract';
 
@@ -6,13 +6,14 @@ import CommitmentContract from './CommitmentContract';
  * Live mode renders <CommitmentContract bare /> with the default variant, so
  * the hook's state.kind has to drive the hero (contract-buffer ruling,
  * 2026-09-30): a red hero under a live Behind pill, and just the line before
- * the contract starts. NoContract's start stamps contractStart ({ start: true }).
+ * the contract starts. No tier picker (owner, 2026-10-28): the header shows
+ * the derived requirement and a first open stamps the contract once.
  */
 
 let mockData;
-let mockSetTier;
+let mockEnsure;
 jest.mock('../hooks', () => ({
-  useContract: () => ({ data: mockData, loading: false, error: null, setTier: mockSetTier }),
+  useContract: () => ({ data: mockData, loading: false, error: null, ensureContractStart: mockEnsure }),
   usePracticeLog: () => ({
     data: { loggedToday: false, todayMinutes: 0 },
     totalMinutes: 0,
@@ -30,11 +31,15 @@ const contract = (state, stats) => ({
   stats: { logged: 0, contractDays: 20, dueSoFar: 6, missed: 6, daysLeft: 14, streak: 0, minutes: 0, ...stats },
   state,
   caption: 'Weekends are not contract days.',
-  tiers: [],
+  needsStart: false,
 });
 
 beforeEach(() => {
-  mockSetTier = jest.fn(async () => ({}));
+  mockEnsure = jest.fn(async () => ({}));
+  mockData = {
+    ...contract({ kind: 'ontrack', badge: { tone: 'green', label: 'On track' }, line: '2 of 2 days due so far.', hint: 'One tap.' }, { logged: 2, dueSoFar: 2, missed: 0 }),
+    needsStart: false,
+  };
   jest.useFakeTimers('modern');
   jest.setSystemTime(new Date('2026-11-11T15:00:00'));
 });
@@ -90,13 +95,19 @@ test("kind 'notStarted': no pill, the start line, no '0 of 0 contract days'", as
   await r.unmount();
 });
 
-test('NoContract: starting a tier asks the hook to stamp contractStart', async () => {
-  mockData = { ...contract(null), tierMinutes: null, tiers: [{ minutes: 45, description: 'The standard.' }] };
-  const r = await renderScreen(<CommitmentContract bare />);
-  const tier = r.container.querySelector('[role="button"][aria-pressed]');
-  await act(async () => { tier.click(); });
-  await r.click('Start the 45 min contract');
-  expect(mockSetTier).toHaveBeenCalledWith(45, { start: true });
-  expect(r.text()).toContain('Contract started');
+test('the header shows the derived requirement and never a picker', async () => {
+  mockData = { ...mockData, tierMinutes: 10, needsStart: false };
+  const r = await renderScreen(<CommitmentContract bare />, { path: '/portal/contract' });
+  expect(r.text()).toContain('10 min a day');
+  expect(r.text()).not.toMatch(/Pick your daily investment|Start the \d+ min contract/);
+  await r.unmount();
+});
+
+test('a first open stamps the contract once', async () => {
+  mockEnsure.mockClear();
+  mockData = { ...mockData, needsStart: true };
+  const r = await renderScreen(<CommitmentContract bare />, { path: '/portal/contract' });
+  await r.flush();
+  expect(mockEnsure).toHaveBeenCalledTimes(1);
   await r.unmount();
 });

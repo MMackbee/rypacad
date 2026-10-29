@@ -27,6 +27,7 @@ test('hideContractParts drops the contract parts of a line only while the contra
   expect(hideContractParts('Age 12 · 4th month')).toBe('Age 12 · 4th month');
   expect(hideContractParts('Enrolled Nov 3 · 45 min tier · 12 tokens package')).toBe('Enrolled Nov 3 · 12 tokens package');
   expect(hideContractParts('90 min tier')).toBeNull();
+  expect(hideContractParts('Age 9 · 10 min a day')).toBe('Age 9');
   expect(hideContractParts('Age 9 · new Feb 8')).toBe('Age 9 · new Feb 8');
   expect(hideContractParts(null)).toBeNull();
   expect(hideContractParts(undefined)).toBeNull();

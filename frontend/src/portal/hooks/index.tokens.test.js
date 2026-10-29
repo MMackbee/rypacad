@@ -18,6 +18,7 @@ jest.mock('./live', () => ({
   isLive: jest.fn(),
   fetchAthlete: jest.fn(),
   fetchBookings: jest.fn(),
+  fetchContractLogs: jest.fn(),
   fetchCurrentUser: jest.fn(),
   fetchGraceTokensByAthlete: jest.fn(),
   fetchHousehold: jest.fn(),
@@ -71,6 +72,9 @@ const nov = { id: 'a1_nov', sessionId: 'nov', date: '2026-11-03', periodKey: '20
 
 beforeEach(() => {
   live.isLive.mockReturnValue(true);
+  // Every child card reads its contract logs (the owner's rule, 2026-10-28:
+  // no stored tier gates the card). None here.
+  live.fetchContractLogs.mockResolvedValue([]);
 });
 
 test('the family card: November\'s grant marked "starts", an unpaid child marked unpaid, Elite untouched', async () => {

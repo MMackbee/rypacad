@@ -10,7 +10,7 @@ jest.mock('../components/TokenMeter', () => ({ __esModule: true, default: ({ mem
 jest.mock('../hooks/billing', () => ({ __esModule: true, default: () => mockHub, useBillingHub: () => mockHub, usePaymentConfirmation: () => ({ state: 'idle' }), STRIPE_PORTAL_URL: 'https://billing.stripe.test/p/x' }));
 
 beforeEach(() => {
-  const m = (id, name, billing) => ({ athleteId: id, name, package: { id: 't-6', name: '6 tokens', kind: 'tokens', windowDays: 30, price: 299 }, tokens: { left: 6 }, coaching: null, contractMinutes: null, facilityAccess: false, billing });
+  const m = (id, name, billing) => ({ athleteId: id, name, package: { id: 't-6', name: '6 tokens', kind: 'tokens', windowDays: 30, price: 299 }, tokens: { left: 6 }, coaching: null, contractMinutes: 20, facilityAccess: false, billing });
   mockHub = { loading: false, error: null, data: {
     household: { id: 'h1', name: 'Whitfield family', anchorDay: 1, membership: null, stripeCustomerId: 'cus_1' }, portalUrl: 'https://billing.stripe.test/p/x',
     members: [m('a1', 'Jordan', { status: 'active', facility: null }), m('a2', 'Reese', { status: 'pending', facility: null })],
@@ -127,14 +127,14 @@ test('staff view never pays', async () => {
   await r.unmount();
 });
 
-test('the contract tier line shows only with the Commitment Contract on (owner ruling 2026-09-30)', async () => {
+test('the contract line (the requirement, owner 2026-10-28) shows only with the Commitment Contract on (owner ruling 2026-09-30)', async () => {
   const off = await renderScreen(<Billing bare />);
   expect(off.text()).not.toMatch(/contract/i);
   await off.unmount();
   process.env.REACT_APP_CONTRACT_ENABLED = 'true';
   try {
     const on = await renderScreen(<Billing bare />);
-    expect(on.button('No contract tier yet · View athlete›')).not.toBeNull();
+    expect(on.button('20 min a day · View athlete›')).not.toBeNull();
     await on.unmount();
   } finally {
     delete process.env.REACT_APP_CONTRACT_ENABLED;
@@ -178,7 +178,7 @@ describe('the self-managed athlete (role athlete, one-member household)', () => 
     process.env.REACT_APP_CONTRACT_ENABLED = 'true';
     try {
       const r = await renderScreen(<Billing bare role="athlete" />);
-      await r.click('No contract tier yet · View contract›');
+      await r.click('20 min a day · View contract›');
       expect(r.location().pathname).toBe('/portal/contract');
       await r.unmount();
     } finally {

@@ -46,9 +46,6 @@ async function onPackageStep(form) {
 }
 async function toConsent(r) {
   await r.click('Continue');
-  await r.click('Not yet for Jordan');
-  await r.click('Not yet for Reese');
-  await r.click('Continue');
 }
 
 test('two athletes: the tick is made once, from either tab, and sent on ONE athlete - the first on a token package', async () => {
@@ -140,8 +137,6 @@ describe('link mode: the family already there decides whether the tick is offere
     mockFamily = [{ id: 'reese', householdId: 'h1', packageId: 't-6', billing: { status: 'active' } }];
     const r = await onLinkPackageStep();
     await r.click(TICK);
-    await r.click('Continue');
-    await r.click('Not yet for Nico');
     await r.click('Add athlete');
     expect(mockCalls[0][0]).toBe('addAthletes');
     expect(mockCalls[0][1].athletes.map((a) => a.facilityRequested)).toEqual([true]);

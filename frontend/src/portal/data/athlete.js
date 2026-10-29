@@ -28,7 +28,7 @@ export const CODE_OF_GRIT = [
 export const ONBOARDING = [
   { id: 'enroll', label: 'Enrollment complete', state: 'done' },
   { id: 'diagnostic', label: 'Diagnostic not booked', state: 'next' },
-  { id: 'contract', label: 'Commitment Contract tier', state: 'todo' },
+  { id: 'contract', label: 'Commitment Contract', state: 'todo' },
   { id: 'block', label: 'First training block', state: 'todo' },
 ];
 
@@ -146,23 +146,3 @@ export const DNA_SUMMARY = {
     body: 'Diagnostic Protocol booked for Feb 27. Everything on this screen fills in from it.',
   },
 };
-
-/* ---------------------------------------------------------------- 07 ----- */
-
-/** Read by the athlete's Contract screen and the sign-up contract step, so the two describe a tier the same way. */
-export const CONTRACT_TIERS = [
-  { minutes: 20, description: 'A focused daily habit. Enough to keep improving all season.' },
-  { minutes: 45, description: 'The standard commitment. Most athletes pick this.' },
-  {
-    // 90, not 95 (owner ruling, 2026-09-22): the academy's own commitment copy
-    // offers 20 / 45 / 90, and the portal was the only place saying 95 - it
-    // came from the original handoff's "two sessions in a day". An athlete
-    // whose record already holds 95 keeps it (the rules still accept the old
-    // value) and simply has no matching card until they pick again.
-    minutes: 90,
-    description: 'For athletes chasing a college roster spot. Can be split across the day.',
-  },
-];
-
-
-

@@ -2,16 +2,14 @@
  * Sign-up form rules (Sprint 20, spec 2.1/2.2) - PURE. The function
  * re-checks everything; this is the client's first pass so the form can say
  * what is wrong before the round trip. Payload shapes are contract 1.2/1.3.
- * While the Commitment Contract is hidden (contractFlag.js) the contract
- * fields are ignored: not validated, and sent as null. `contract` overrides
- * the flag (the harness's contract step); it defaults to it at call time.
+ * No contract at sign-up (owner's rule, 2026-10-28): the requirement is
+ * derived from age (contractRule.js), so every athlete is sent with
+ * contractMinutes null and the contract screen stamps it on first open.
  */
 import { ALL_PACKAGES, ELITE, packageById } from './packages';
-import { contractEnabled } from './contractFlag';
 import { householdFacility } from './facility';
 
 export const EMAIL_RE = /^\S+@\S+\.\S+$/;
-export const TIER_MINUTES = [20, 45, 90];
 export const ADULT_AGE = 18;
 export const HANDICAP_MIN = 0;
 export const HANDICAP_MAX = 54;
@@ -25,11 +23,10 @@ export const ADULT_REQUIRED = 'Student sign-up is 18+. A parent or guardian need
 const DOB_REQUIRED = 'Date of birth is required — it determines U13 vs U18 eligibility.';
 
 let seq = 0;
-/** `contractPicked` is form-only (never sent): it tells "Not yet" apart from no answer. */
 export function newAthleteEntry() {
   seq += 1;
   return {
-    key: `new-${seq}`, name: '', dob: '', packageId: null, contractMinutes: null, contractPicked: false, handicap: '', ownLogin: false, loginEmail: '',
+    key: `new-${seq}`, name: '', dob: '', packageId: null, handicap: '', ownLogin: false, loginEmail: '',
   };
 }
 
@@ -99,11 +96,6 @@ export const FACILITY_WAIVER_FOOTNOTE = 'Needed for the facility access you pick
 export const FACILITY_WAIVER_REQUIRED =
   'Tick the facility access waiver to keep the add-on, or untick facility access on the package step.';
 
-/** The contract step is answered by a goal (20/45/90) or by "Not yet"; a stale 95 is not an answer. */
-export function contractAnswered(a) {
-  return TIER_MINUTES.includes(a.contractMinutes) || (a.contractPicked === true && a.contractMinutes == null);
-}
-
 /** 'Nico', 'Nico and Reese', 'Nico, Reese and Sam'. */
 export function joinNames(names) {
   return names.length > 1 ? `${names.slice(0, -1).join(', ')} and ${names[names.length - 1]}` : names[0] || '';
@@ -164,7 +156,7 @@ export function normalizeHandicap(raw) {
 
 const lower = (s) => (s || '').trim().toLowerCase();
 
-export function validateAthleteEntry(a, { todayISO, guardianEmail = '', siblings = [], mode = 'parent', contract = contractEnabled() } = {}) {
+export function validateAthleteEntry(a, { todayISO, guardianEmail = '', siblings = [], mode = 'parent' } = {}) {
   const errors = {};
   if (!a.name || a.name.trim() === '') errors.name = 'Athlete name is required.';
   const age = ageOnDate(a.dob, todayISO);
@@ -172,7 +164,6 @@ export function validateAthleteEntry(a, { todayISO, guardianEmail = '', siblings
   else if (a.dob > todayISO) errors.dob = 'That date is in the future - check the year.';
   else if (mode === 'athlete' && age < ADULT_AGE) errors.dob = ADULT_REQUIRED;
   if (a.packageId != null && !ALL_PACKAGES.some((p) => p.id === a.packageId)) errors.packageId = 'Pick a package from the list.';
-  if (contract && a.contractMinutes != null && !TIER_MINUTES.includes(a.contractMinutes)) errors.contractMinutes = 'Pick 20, 45 or 90 minutes.';
   if (normalizeHandicap(a.handicap) === undefined) errors.handicap = HANDICAP_RANGE_ERROR;
   // Own login is a parent-mode choice (the adult athlete IS the login); a
   // toggle left on before switching to athlete mode is ignored, as the
@@ -186,13 +177,14 @@ export function validateAthleteEntry(a, { todayISO, guardianEmail = '', siblings
   return errors;
 }
 
-function athleteBody(a, contract, facilityRequested) {
+function athleteBody(a, facilityRequested) {
   return {
     name: a.name.trim(),
     dob: a.dob,
     packageId: a.packageId,
-    // Hidden: null for everyone, even a goal a restored draft still holds.
-    contractMinutes: contract ? a.contractMinutes ?? null : null,
+    // Null for everyone, even a goal a restored draft still holds: the
+    // requirement is derived, and stamped from the contract screen.
+    contractMinutes: null,
     handicap: normalizeHandicap(a.handicap) ?? null,
     loginEmail: a.ownLogin && a.loginEmail ? lower(a.loginEmail) : null,
     facilityRequested,
@@ -200,13 +192,13 @@ function athleteBody(a, contract, facilityRequested) {
 }
 
 /** Every athlete's body; the family facility tick rides on exactly one of them (facilityHolderIndex). */
-function athleteBodies(form, contract) {
+function athleteBodies(form) {
   const holder = facilityHolderIndex(form);
-  return form.athletes.map((a, i) => athleteBody(a, contract, i === holder));
+  return form.athletes.map((a, i) => athleteBody(a, i === holder));
 }
 
 /** Contract 1.2 request body. Athlete mode: no relationship, no child login (the caller IS the login). */
-export function buildCreateFamilyPayload(form, { contract = contractEnabled() } = {}) {
+export function buildCreateFamilyPayload(form) {
   const parent = form.mode === 'parent';
   return {
     mode: form.mode,
@@ -216,7 +208,7 @@ export function buildCreateFamilyPayload(form, { contract = contractEnabled() } 
       phone: form.contact.phone.trim(),
       relationship: parent ? form.contact.relationship || null : null,
     },
-    athletes: athleteBodies(form, contract).map((a) => (parent ? a : { ...a, loginEmail: null })),
+    athletes: athleteBodies(form).map((a) => (parent ? a : { ...a, loginEmail: null })),
     emergencyContact: emergencyBody(form.emergencyContact),
     medical: form.medical.trim() || null,
     consents: {
@@ -230,9 +222,9 @@ export function buildCreateFamilyPayload(form, { contract = contractEnabled() } 
 }
 
 /** Contract 1.3 request body (Settings' "Link another athlete"). A null contact means "use the household's". */
-export function buildAddAthletesPayload(form, { contract = contractEnabled() } = {}) {
+export function buildAddAthletesPayload(form) {
   return {
-    athletes: athleteBodies(form, contract),
+    athletes: athleteBodies(form),
     emergencyContact: emergencyBody(form.emergencyContact),
     medical: form.medical.trim() || null,
   };

@@ -12,8 +12,12 @@ const lib = require('./lib');
 /** `ALL_PACKAGES` ids (frontend data/packages.js). @const {!Array<string>} */
 const PACKAGE_IDS = ['t-4', 't-6', 't-8', 't-12', 't-16', 'elite',
   'single'];
-/** The tiers the client accepts (`live.js:1451`). @const {!Array<number>} */
-const TIER_MINUTES = [20, 45, 90];
+/**
+ * The stored values the client accepts (`live.js` setContractTier): 10 is
+ * the owner's under-12 rule (2026-10-28); sign-up itself sends null.
+ * @const {!Array<number>}
+ */
+const TIER_MINUTES = [10, 20, 45, 90];
 /** `Registration.js:66`. @const {!RegExp} */
 const EMAIL_RE = /^\S+@\S+\.\S+$/;
 const DOB_RE = /^\d{4}-\d{2}-\d{2}$/;
@@ -95,7 +99,7 @@ function normalizeAthlete(a, opts) {
   const minutes = e.contractMinutes === undefined ? null : e.contractMinutes;
   if (minutes !== null && !TIER_MINUTES.includes(minutes)) {
     throw new ValidationError('contract-tier',
-        'Pick 20, 45 or 90 minutes, or none.');
+        'Pick 10, 20, 45 or 90 minutes, or none.');
   }
   const handicap = e.handicap === undefined ? null : e.handicap;
   if (handicap !== null && !(Number.isInteger(handicap) &&

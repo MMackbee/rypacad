@@ -1,5 +1,5 @@
 import {
-  ageOnDate, buildAddAthletesPayload, buildCreateFamilyPayload, contractAnswered, emptyEmergencyContact, facilityHolderIndex, facilityOptionFor,
+  ageOnDate, buildAddAthletesPayload, buildCreateFamilyPayload, emptyEmergencyContact, facilityHolderIndex, facilityOptionFor,
   facilityWaiverRequired, familyFacilityOption, isAdultOnDate, joinNames, newAthleteEntry, normalizeHandicap, restoredFacilityTick, toEmergencyForm,
   validateAthleteEntry, validateEmergencyContact, wantsFacility,
 } from './signup';
@@ -7,7 +7,7 @@ import {
 const today = '2026-10-01';
 const entry = (over) => ({ ...newAthleteEntry(), name: 'Jordan', dob: '2012-06-17', packageId: 't-12', ...over });
 
-// Contract ON unless a test says otherwise; the last describe covers it hidden.
+// Contract ON unless a test says otherwise; the last describe covers it off too.
 beforeEach(() => { process.env.REACT_APP_CONTRACT_ENABLED = 'true'; });
 afterEach(() => { delete process.env.REACT_APP_CONTRACT_ENABLED; });
 
@@ -81,7 +81,7 @@ describe('payloads (contract 1.2 / 1.3)', () => {
       mode: 'parent',
       contact: { name: 'Dana Whitfield', email: 'dana@email.com', phone: '(612) 555-0148', relationship: 'Mother' },
       athletes: [
-        { name: 'Jordan', dob: '2012-06-17', packageId: 't-12', contractMinutes: 45, handicap: 12, loginEmail: 'jordan@email.com', facilityRequested: false },
+        { name: 'Jordan', dob: '2012-06-17', packageId: 't-12', contractMinutes: null, handicap: 12, loginEmail: 'jordan@email.com', facilityRequested: false },
         { name: 'Reese', dob: '2014-03-02', packageId: 't-6', contractMinutes: null, handicap: null, loginEmail: null, facilityRequested: false },
       ],
       emergencyContact: null,
@@ -126,7 +126,7 @@ describe('payloads (contract 1.2 / 1.3)', () => {
     expect(buildCreateFamilyPayload({ ...form, emergencyContact: emptyEmergencyContact() }).emergencyContact).toBeNull();
     expect(buildAddAthletesPayload({ ...form, emergencyContact: { name: ' ', phone: '', relationship: ' ' } }).emergencyContact).toBeNull();
   });
-  test('contractPicked stays in the form; the payload never carries it', () => {
+  test("an old draft's contract answer (contractPicked) is never sent", () => {
     const picked = entry({ contractMinutes: null, contractPicked: true });
     const body = buildCreateFamilyPayload({ ...form, athletes: [picked] });
     expect(body.athletes[0]).not.toHaveProperty('contractPicked');
@@ -220,18 +220,7 @@ describe('facility add-on (owner request, Mike 2026-09-30; a FAMILY add-on, owne
   });
 });
 
-describe('contract step', () => {
-  test('a new entry has not answered yet', () => {
-    expect(newAthleteEntry().contractPicked).toBe(false);
-    expect(contractAnswered(newAthleteEntry())).toBe(false);
-  });
-  test('a goal or "Not yet" answers it; a stale 95 does not', () => {
-    expect(contractAnswered(entry({ contractMinutes: 45 }))).toBe(true);
-    expect(contractAnswered(entry({ contractMinutes: 45, contractPicked: undefined }))).toBe(true); // an old draft's pick
-    expect(contractAnswered(entry({ contractMinutes: null, contractPicked: true }))).toBe(true);
-    expect(contractAnswered(entry({ contractMinutes: 95 }))).toBe(false);
-    expect(contractAnswered(entry({ contractMinutes: 95, contractPicked: true }))).toBe(false);
-  });
+describe('names', () => {
   test('joinNames', () => {
     expect(joinNames([])).toBe('');
     expect(joinNames(['Nico'])).toBe('Nico');
@@ -240,8 +229,10 @@ describe('contract step', () => {
   });
 });
 
-describe('Commitment Contract hidden (owner ruling 2026-09-30)', () => {
-  beforeEach(() => { delete process.env.REACT_APP_CONTRACT_ENABLED; });
+// Owner's rule (2026-10-28): no tier picker at sign-up. The contract step is
+// gone, flag on or off; every athlete is sent with contractMinutes null and the
+// contract screen stamps the derived requirement on first open.
+describe('no contract at sign-up (owner, 2026-10-28)', () => {
   const form = {
     mode: 'parent',
     contact: { name: 'Dana', email: 'dana@email.com', phone: '(612) 555-0148', relationship: '' },
@@ -250,21 +241,21 @@ describe('Commitment Contract hidden (owner ruling 2026-09-30)', () => {
     consents: { dataCollection: true, videoCapture: true, mediaRelease: false, facilityAccess: false },
     signatureName: 'Dana',
   };
-  test('off: every athlete is sent with contractMinutes null, whatever the form holds', () => {
+  test('a new entry carries no contract fields', () => {
+    expect(newAthleteEntry()).not.toHaveProperty('contractMinutes');
+    expect(newAthleteEntry()).not.toHaveProperty('contractPicked');
+  });
+  test('every athlete is sent with contractMinutes null, flag on or off, whatever an old draft holds', () => {
+    expect(buildCreateFamilyPayload(form).athletes[0].contractMinutes).toBeNull();
+    expect(buildCreateFamilyPayload(form).athletes.map((a) => a.contractMinutes)).toEqual([null, null]);
+    expect(buildAddAthletesPayload(form).athletes.map((a) => a.contractMinutes)).toEqual([null, null]);
+    delete process.env.REACT_APP_CONTRACT_ENABLED;
     expect(buildCreateFamilyPayload(form).athletes.map((a) => a.contractMinutes)).toEqual([null, null]);
     expect(buildAddAthletesPayload(form).athletes.map((a) => a.contractMinutes)).toEqual([null, null]);
   });
-  test('off: a stale contract value is not a validation error', () => {
+  test('a stale contract value is never a validation error', () => {
     expect(validateAthleteEntry(entry({ contractMinutes: 95 }), { todayISO: today })).toEqual({});
-  });
-  test('the explicit override wins over the flag (the harness contract step)', () => {
-    expect(buildCreateFamilyPayload(form, { contract: true }).athletes[0].contractMinutes).toBe(45);
-    expect(validateAthleteEntry(entry({ contractMinutes: 95 }), { todayISO: today, contract: true }).contractMinutes)
-      .toBe('Pick 20, 45 or 90 minutes.');
-  });
-  test('on: the goal is sent and a stale 95 is refused, as before', () => {
-    process.env.REACT_APP_CONTRACT_ENABLED = 'true';
-    expect(buildAddAthletesPayload(form).athletes.map((a) => a.contractMinutes)).toEqual([45, 95]);
-    expect(validateAthleteEntry(entry({ contractMinutes: 95 }), { todayISO: today }).contractMinutes).toBe('Pick 20, 45 or 90 minutes.');
+    delete process.env.REACT_APP_CONTRACT_ENABLED;
+    expect(validateAthleteEntry(entry({ contractMinutes: 95 }), { todayISO: today })).toEqual({});
   });
 });

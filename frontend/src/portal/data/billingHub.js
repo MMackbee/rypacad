@@ -15,6 +15,7 @@ import { addDaysISO, BOOKING_OPENS_LABEL, bookingOpen, longDayLabel } from './ca
 import { ELITE, normalizeAnchorDay, periodFallback, periodFor, SINGLE_TOKEN, tokensFor } from './packages';
 import { billingStatusOf } from './billingCopy';
 import { contractEnabled } from './contractFlag';
+import { contractMinutesFor } from './contractRule';
 import { isSingleTokenId, saleOpen, SINGLE_NOT_OPEN_LINE } from './singleToken';
 
 /**
@@ -264,7 +265,8 @@ export function hubMemberFor(args) {
         noShows: spent.filter((r) => r.status === 'noshow').length,
       }
       : null,
-    contractMinutes: athlete.contractMinutes ?? null,
+    // The requirement today (owner's rule, 2026-10-28), never the stored tier.
+    contractMinutes: contractMinutesFor(athlete, today),
     // v2.0.1 (Sprint 18): the $300 add-on, a line item on the Plan card.
     facilityAccess: Boolean(athlete.facilityAccess),
     // Sprint 20 (spec 4.5): the signed waiver (`{ signedAt, byUid } | null`

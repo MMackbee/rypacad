@@ -1667,10 +1667,12 @@ export function chicagoDateISO(now = new Date()) {
  * Set (or clear) an athlete's Commitment Contract tier (contract v1.8, B) —
  * the athlete's own user or the household parent, enforced by
  * firestore.rules' contractMinutesUpdateOk(), not here. `minutes` must be
- * one of the three real tiers or null (no tier / "not started").
+ * 10, 20, 45, 90 or null (owner's rule, 2026-10-28: 20 a day, 10 under 12;
+ * 45 and 90 stay valid for athletes who already hold them).
  *
  * `start` (contract-buffer Phase 2): the caller is moving a no-tier athlete
- * onto a tier (NoContract, StartContractCard), so the write also stamps
+ * onto the contract (useContract's ensureContractStart, the one-time stamp
+ * of the derived requirement on first open), so the write also stamps
  * athletes.contractStart with today's Chicago date - the contract window
  * opens there and earlier weekdays of the month never count as missed.
  * Changing an existing tier passes no `start` and leaves contractStart alone.
@@ -1683,8 +1685,8 @@ export function chicagoDateISO(now = new Date()) {
  */
 export async function setContractTier({ athleteId, minutes, start = false }) {
   if (!athleteId) throw new LiveDataError(ERR.INVALID, 'setContractTier: athleteId is required.');
-  if (minutes != null && ![20, 45, 90].includes(minutes)) {
-    throw new LiveDataError(ERR.INVALID, 'setContractTier: minutes must be 20, 45, 90 or null.');
+  if (minutes != null && ![10, 20, 45, 90].includes(minutes)) {
+    throw new LiveDataError(ERR.INVALID, 'setContractTier: minutes must be 10, 20, 45, 90 or null.');
   }
   requireUser();
   const ref = doc(db, 'athletes', athleteId);

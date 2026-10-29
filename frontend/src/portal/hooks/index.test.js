@@ -150,6 +150,8 @@ describe('live loaders (perf wave B)', () => {
       board: '—',
       boardLabel: 'months on the Board — not tracked live yet',
       contractMinutes: 45,
+      // The contract rule (2026-10-28) derives the requirement from the dob.
+      dob: null,
       packageId: 't-12',
       billingStatus: 'active', // absent billing == active
       facilityAccess: false,

@@ -1,14 +1,13 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { color, font, glow, radius, tint } from '../tokens';
 import BottomTabBar from '../components/BottomTabBar';
 import Button from '../components/Button';
-import NumericField from '../components/NumericField';
 import PhoneFrame from '../components/PhoneFrame';
 import { DayGridLegend } from '../components/DayGridCell';
 import { RangeCalendarCard } from '../components/CalendarCard';
 import { Body, ErrorNotice, ScreenTitle, Tick } from '../components/Primitives';
-import SavedToast from '../components/SavedToast';
 import SkeletonCard from '../components/Skeleton';
+import { DaySheet, LogSheet } from '../components/ContractSheets';
 import { useContract, usePracticeLog } from '../hooks';
 // todayISO is a pure calendar helper, not response data — like poolFor in
 // BookSession, the helpers stay importable; data travels through the hook seam.
@@ -16,7 +15,9 @@ import { monthBounds, todayISO } from '../data/calendar';
 
 /**
  * 07 · Commitment Contract - athlete. ⭐
- * States: On track, Behind, Month complete, No contract selected.
+ * States: On track, Behind, Month complete. No tier picker (owner's rule,
+ * 2026-10-28): the header shows the derived requirement ("20 min a day",
+ * 10 under 12) and the first open stamps it once (ensureContractStart).
  *
  * The most-used screen in the app, and the one the handoff singles out for
  * extra attention. The shape follows from that: Log Today is pinned to the
@@ -31,7 +32,7 @@ import { monthBounds, todayISO } from '../data/calendar';
  * inches apart and would both be green. The rule is that solid green fill means
  * tap - so the meter is a bar, not a button, and only the CTA is filled.
  *
- * @param {'ontrack'|'behind'|'complete'|'none'} variant
+ * @param {'ontrack'|'behind'|'complete'} variant
  * @param {boolean} [practice]
  *   Onboarding practice mode (docs/portal/TEAM.md, "Onboarding program v1").
  *   "Log today" logs locally: today's cell flips to logged and the hero count
@@ -41,6 +42,9 @@ import { monthBounds, todayISO } from '../data/calendar';
  * @param {(entry) => void} [onLogged]
  *   Practice mode only: fires once when the practice day is logged —
  *   `{ iso }`. The onboarding step's completion signal.
+ * @param {string|null} [athleteId]
+ *   null (default) is the signed-in athlete's own contract; an id is that
+ *   athlete's (spec 4.3, parents log for their kids) - passed to both hooks.
  */
 export default function CommitmentContract({
   variant = 'ontrack',
@@ -48,8 +52,9 @@ export default function CommitmentContract({
   practice = false,
   onLog,
   onLogged,
+  athleteId = null,
 }) {
-  const contractHook = useContract({ variant, practice });
+  const contractHook = useContract({ variant, practice, athleteId });
   const { data, loading, error } = contractHook;
   const [sheetDay, setSheetDay] = useState(null);
   // The practice log lives here and nowhere else — component state is the
@@ -63,20 +68,18 @@ export default function CommitmentContract({
   // truth (code review 2026-09-04, findings 3 and 4).
   const [logSheetDate, setLogSheetDate] = useState(null);
 
-  const practiceLog = usePracticeLog({ practice });
+  const practiceLog = usePracticeLog({ practice, athleteId });
 
-  /**
-   * Sprint 10 pin B (TEAM.md, contract v1.8 §B): "CommitmentContract renders
-   * NoContract (never crashes) whenever data.tierMinutes is null in live
-   * mode." The demo variant='none' branch already existed for the harness;
-   * a real live athlete with no contractMinutes on file reaches this screen
-   * with the routing wrapper's default variant ('ontrack') and would
-   * otherwise fall through to HeroCard/the grid with tierMinutes undefined.
-   * Checked only once data has actually loaded - a still-loading or errored
-   * fetch must not be misread as "no contract".
-   */
-  const noContract = variant === 'none' || (!loading && !error && data && data.tierMinutes == null);
-  if (noContract) return <NoContract bare={bare} data={data} setTier={contractHook.setTier} />;
+  // The owner's rule (2026-10-28; spec 4.3): no tier picker. The first open
+  // stamps the derived requirement and contractStart, once per mount (a
+  // failed stamp clears the guard; the next open of the screen tries
+  // again). Never in practice mode: the walkthrough writes nothing.
+  const stamped = useRef(false);
+  useEffect(() => {
+    if (practice || !data?.needsStart || stamped.current) return;
+    stamped.current = true;
+    Promise.resolve(contractHook.ensureContractStart?.()).catch(() => { stamped.current = false; });
+  }, [data?.needsStart]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // The screen predates the hook's live branch, which made data async — every
   // render below assumed it synchronously; rendering through with data still
@@ -145,7 +148,7 @@ export default function CommitmentContract({
               {data?.month?.label}
             </div>
             <ScreenTitle size={24} style={{ marginTop: 3 }}>
-              {data?.tierMinutes} min tier
+              {data?.tierMinutes} min a day
             </ScreenTitle>
           </div>
           <StatusPill badge={state?.badge} />
@@ -451,377 +454,5 @@ function ContractFooter({
       </div>
       <BottomTabBar role="athlete" active="contract" />
     </>
-  );
-}
-
-/** Read-only grid: a past day opens this rather than toggling in place. */
-/** '2026-08-14' -> 'August 14', via the platform, not hand math. */
-function sheetTitle(iso) {
-  const [y, m, d] = iso.split('-').map(Number);
-  return new Date(y, m - 1, d).toLocaleDateString('en-US', { month: 'long', day: 'numeric' });
-}
-
-function DaySheet({ day, onClose, onAddLate, onRemove }) {
-  const [removing, setRemoving] = useState(false);
-  const [removeError, setRemoveError] = useState(null);
-  const logged = day.state === 'logged';
-  // A day that hasn't happened cannot take a "late" entry — the rules would
-  // technically accept the write (any date is loggable), but logging future
-  // practice is a fiction this sheet won't offer.
-  const future = day.iso > todayISO();
-  const interactive = logged ? Boolean(onRemove) : Boolean(onAddLate) && !future;
-
-  const handleAction = async () => {
-    if (!interactive) return onClose();
-    if (!logged) return onAddLate(day.iso);
-    setRemoving(true);
-    setRemoveError(null);
-    try {
-      await onRemove(day.iso);
-      onClose();
-    } catch (err) {
-      setRemoving(false);
-      setRemoveError(
-        err && typeof err.message === 'string' && err.message
-          ? err.message
-          : 'The entry could not be removed. Try again.'
-      );
-    }
-  };
-
-  return (
-    <div
-      data-portal-overlay=""
-      onClick={removing ? undefined : onClose}
-      style={{
-        position: 'absolute',
-        inset: 0,
-        background: tint.overlay,
-        display: 'flex',
-        alignItems: 'flex-end',
-      }}
-    >
-      <div
-        onClick={(e) => e.stopPropagation()}
-        style={{
-          width: '100%',
-          background: color.surface,
-          borderTop: `1px solid ${color.border}`,
-          borderRadius: `${radius.cardLarge} ${radius.cardLarge} 0 0`,
-          padding: '20px 22px 26px',
-        }}
-      >
-        <ScreenTitle size={19}>{sheetTitle(day.iso)}</ScreenTitle>
-        <Body size={12} style={{ marginTop: 8 }}>
-          {logged
-            ? 'Logged. Tap below to remove this entry if it was recorded by mistake.'
-            : future
-            ? 'This day has not happened yet — log it once it has.'
-            : 'Not logged. A late entry is allowed until the month closes.'}
-        </Body>
-        {removeError ? (
-          <Body size={12} tone={color.error} style={{ marginTop: 10 }}>
-            {removeError}
-          </Body>
-        ) : null}
-        <Button
-          variant={logged ? 'outline' : future ? 'outline' : 'primary'}
-          height={50}
-          loading={removing}
-          onClick={handleAction}
-          style={{ marginTop: 16, boxShadow: 'none' }}
-        >
-          {logged ? 'Remove entry' : future ? 'Close' : 'Add late entry'}
-        </Button>
-      </div>
-    </div>
-  );
-}
-
-/**
- * Sprint 5 pin: variable practice logging. The contract tier is a minimum,
- * not a unit — this sheet captures the real minutes practiced, two ways: a
- * running timer (no typing) or a manual entry (for a session already run
- * elsewhere). Whichever mode is showing when Save is tapped is what gets
- * logged; switching modes does not combine them.
- */
-function LogSheet({ contractMinutes, forDate, onClose, onSave }) {
-  // A late entry (forDate in the past) is a session already run elsewhere —
-  // the running timer makes no sense for it, so the sheet opens straight in
-  // manual mode and the mode toggle is hidden.
-  const late = Boolean(forDate) && forDate !== todayISO();
-  const [mode, setMode] = useState(late ? 'manual' : 'timer');
-  const [running, setRunning] = useState(false);
-  const [elapsedSec, setElapsedSec] = useState(0);
-  const [manualMinutes, setManualMinutes] = useState('');
-
-  useEffect(() => {
-    if (!running) return undefined;
-    const id = setInterval(() => setElapsedSec((s) => s + 1), 1000);
-    return () => clearInterval(id);
-  }, [running]);
-
-  const timerMinutes = Math.floor(elapsedSec / 60);
-  const mm = String(timerMinutes).padStart(2, '0');
-  const ss = String(elapsedSec % 60).padStart(2, '0');
-
-  const manualValue = Math.max(0, Math.round(Number(manualMinutes) || 0));
-  const minutesToSave = mode === 'timer' ? timerMinutes : manualValue;
-  const canSave = minutesToSave > 0;
-
-  return (
-    <div
-      data-portal-overlay=""
-      onClick={onClose}
-      style={{
-        position: 'absolute',
-        inset: 0,
-        background: tint.overlay,
-        display: 'flex',
-        alignItems: 'flex-end',
-      }}
-    >
-      <div
-        onClick={(e) => e.stopPropagation()}
-        style={{
-          width: '100%',
-          background: color.surface,
-          borderTop: `1px solid ${color.border}`,
-          borderRadius: `${radius.cardLarge} ${radius.cardLarge} 0 0`,
-          padding: '20px 22px 26px',
-        }}
-      >
-        <ScreenTitle size={19}>{late ? `Log practice · ${sheetTitle(forDate)}` : 'Log practice'}</ScreenTitle>
-        <Body size={12} style={{ marginTop: 8 }}>
-          {contractMinutes
-            ? `${contractMinutes} min is the contract minimum, not a unit — log the real time practiced.`
-            : 'Log the real time practiced.'}
-        </Body>
-
-        <div
-          style={{
-            display: late ? 'none' : 'flex',
-            marginTop: 16,
-            background: color.dimmed,
-            border: `1px solid ${color.border}`,
-            borderRadius: radius.control,
-            padding: 3,
-          }}
-        >
-          {[['timer', 'Timer'], ['manual', 'Enter minutes']].map(([key, label]) => {
-            const on = key === mode;
-            return (
-              <button
-                key={key}
-                type="button"
-                onClick={() => setMode(key)}
-                style={{
-                  flex: 1,
-                  height: 36,
-                  border: 'none',
-                  borderRadius: radius.pill,
-                  background: on ? color.primary : 'transparent',
-                  font: `${on ? 600 : 500} 13px ${font.body}`,
-                  color: on ? '#000' : color.textTertiary,
-                  cursor: 'pointer',
-                }}
-              >
-                {label}
-              </button>
-            );
-          })}
-        </div>
-
-        {mode === 'timer' ? (
-          <div style={{ textAlign: 'center', marginTop: 22 }}>
-            <div style={{ font: `700 44px ${font.head}`, color: color.text, letterSpacing: '.04em' }}>
-              {mm}:{ss}
-            </div>
-            <Button
-              variant={running ? 'dangerOutline' : 'primary'}
-              height={50}
-              style={{ marginTop: 16, boxShadow: 'none' }}
-              onClick={() => setRunning((r) => !r)}
-            >
-              {running ? 'Stop' : elapsedSec > 0 ? 'Resume' : 'Start'}
-            </Button>
-          </div>
-        ) : (
-          <div style={{ marginTop: 18 }}>
-            <NumericField
-              label="Minutes practiced"
-              unit="min"
-              value={manualMinutes}
-              onChange={setManualMinutes}
-            />
-          </div>
-        )}
-
-        <Button height={54} disabled={!canSave} style={{ marginTop: 22 }} onClick={() => onSave(minutesToSave)}>
-          {canSave ? `Save · ${minutesToSave} min` : 'Save'}
-        </Button>
-      </div>
-    </div>
-  );
-}
-
-/**
- * Sprint 10 pin B (contract v1.8 §B): the tier picker's CTA is wired for
- * real. FALLBACK FLAG: `useContract` has no `setTier(minutes)` export in
- * this worktree yet (confirmed via grep of hooks/index.js) - unlike
- * AthleteDetail's parent-facing card, this IS the signed-in athlete setting
- * their OWN tier, so the identity resolution useContract already does is
- * the right one; only the action itself is missing. Defaults to a local
- * no-op echo (resolves successfully, persists nothing) until routing adds
- * it - flagged in the sprint report.
- */
-function NoContract({ bare, data, setTier }) {
-  const [selected, setSelected] = useState(null);
-  const [saving, setSaving] = useState(false);
-  const [saved, setSaved] = useState(false);
-  const [error, setError] = useState(null);
-  const commit = setTier || (async (minutes) => ({ contractMinutes: minutes, simulated: true }));
-
-  const handleStart = async () => {
-    if (!selected) return;
-    setSaving(true);
-    setError(null);
-    try {
-      // No tier -> a tier: the contract starts today (athletes.contractStart).
-      await commit(selected, { start: true });
-      setSaved(true);
-    } catch (err) {
-      setError(
-        err && typeof err.message === 'string' && err.message
-          ? err.message
-          : 'The contract could not be started. Try again.'
-      );
-    } finally {
-      setSaving(false);
-    }
-  };
-
-  return (
-    <PhoneFrame
-      bare={bare}
-      footer={
-        <>
-          <div style={{ borderTop: `1px solid ${color.frameRule}`, padding: '13px 22px 14px' }}>
-            {error ? (
-              <Body size={12} tone={color.error} style={{ marginBottom: 10, textAlign: 'center' }}>
-                {error}
-              </Body>
-            ) : null}
-            <Button
-              height={56}
-              disabled={!selected || saved}
-              loading={saving}
-              onClick={handleStart}
-              style={{ borderRadius: 10 }}
-            >
-              {saved
-                ? 'Contract started'
-                : selected
-                ? `Start the ${selected} min contract`
-                : 'Select a tier to continue'}
-            </Button>
-          </div>
-          <BottomTabBar role="athlete" active="contract" />
-        </>
-      }
-    >
-      <div style={{ padding: '20px 22px 24px', display: 'flex', flexDirection: 'column', gap: 13 }}>
-        <ScreenTitle size={24}>Pick your daily investment</ScreenTitle>
-        {saved ? (
-          <SavedToast message={`Contract started — ${selected} min / day`} />
-        ) : (
-          <Body size={13}>
-            Five days a week, every week. Complete the month and you go on the Commitment Board.
-          </Body>
-        )}
-
-        {(data?.tiers ?? []).map((tier) => (
-          <TierChoice
-            key={tier.minutes}
-            tier={tier}
-            selected={selected === tier.minutes}
-            onSelect={() => !saved && setSelected(tier.minutes)}
-          />
-        ))}
-
-        <Body size={11} tone={color.textTertiary}>
-          Both a physical and a digital signature are required. Your coach countersigns at your next
-          block.
-        </Body>
-      </div>
-    </PhoneFrame>
-  );
-}
-
-function TierChoice({ tier, selected, onSelect }) {
-  return (
-    <div
-      role="button"
-      tabIndex={0}
-      aria-pressed={selected}
-      onClick={onSelect}
-      onKeyDown={(e) => {
-        if (e.key === 'Enter' || e.key === ' ') {
-          e.preventDefault();
-          onSelect();
-        }
-      }}
-      style={{
-        background: color.surface,
-        border: `1px solid ${selected ? color.primary : color.border}`,
-        borderRadius: radius.cardLarge,
-        padding: 17,
-        display: 'flex',
-        gap: 13,
-        cursor: 'pointer',
-      }}
-    >
-      <span
-        aria-hidden="true"
-        style={{
-          width: 26,
-          height: 26,
-          flex: 'none',
-          marginTop: 2,
-          borderRadius: '50%',
-          border: `1.5px solid ${selected ? color.primary : color.faintText}`,
-          background: selected ? color.primary : 'transparent',
-          display: 'grid',
-          placeItems: 'center',
-        }}
-      >
-        {selected ? (
-          <span style={{ width: 10, height: 10, borderRadius: '50%', background: '#000' }} />
-        ) : null}
-      </span>
-
-      <div style={{ flex: 1, minWidth: 0 }}>
-        <div style={{ display: 'flex', alignItems: 'baseline', gap: 8 }}>
-          <span style={{ font: `700 30px ${font.head}`, color: color.text }}>{tier.minutes}</span>
-          <span style={{ font: `500 14px ${font.body}`, color: color.textSecondary }}>min / day</span>
-        </div>
-        <Body size={12} style={{ marginTop: 6 }}>
-          {tier.description}
-        </Body>
-        {tier.footnote ? (
-          <div
-            style={{
-              font: `500 10px ${font.body}`,
-              letterSpacing: '.06em',
-              textTransform: 'uppercase',
-              color: color.secondary,
-              marginTop: 9,
-            }}
-          >
-            {tier.footnote}
-          </div>
-        ) : null}
-      </div>
-    </div>
   );
 }

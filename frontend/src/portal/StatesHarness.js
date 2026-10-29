@@ -100,8 +100,8 @@ export const SCREEN_STATES = [
   { id: '01', title: 'Sign In', Screen: SignIn, role: 'public',
     states: [['idle', 'Default'], ['loading', 'Loading'], ['invalid', 'Invalid'], ['locked', 'Locked']] },
   { id: '02', title: 'Registration', Screen: Registration, role: 'public',
-    states: [['guardian', '1 Guardian'], ['athlete', '2 Athlete · error'], ['tier', '3 Package'], ['contract', '4 Contract'],
-             ['consent', '5 Consent'], ['submitting', 'Submitting'], ['success', 'Success']] },
+    states: [['guardian', '1 Guardian'], ['athlete', '2 Athlete · error'], ['tier', '3 Package'],
+             ['consent', '4 Consent'], ['submitting', 'Submitting'], ['success', 'Success']] },
   { id: '03', title: 'Athlete Dashboard', Screen: AthleteDashboard, role: 'athlete',
     states: [['populated', 'Populated'], ['new', 'New athlete'], ['empty', 'No sessions']] },
   { id: '04', title: 'My Schedule', Screen: MySchedule, role: 'athlete',
@@ -169,8 +169,7 @@ export const SCREEN_STATES = [
   { id: '06', title: 'Practice DNA', Screen: PracticeDNA, role: 'athlete',
     states: [['complete', 'Complete'], ['partial', 'Partial'], ['pending', 'Pending']] },
   { id: '07', title: 'Commitment Contract', Screen: CommitmentContract, role: 'athlete',
-    states: [['ontrack', 'On track'], ['behind', 'Behind'], ['complete', 'Month complete'],
-             ['none', 'No contract']] },
+    states: [['ontrack', 'On track'], ['behind', 'Behind'], ['complete', 'Month complete']] },
   { id: '08', title: 'Parent Dashboard', Screen: ParentDashboard, role: 'parent',
     // onBookFor/onBookCoaching are no-ops here purely so the Book-for-kid
     // chip (Sprint 7 pin) and the new "Book 1-on-1 coaching" footer button
@@ -181,11 +180,6 @@ export const SCREEN_STATES = [
              ['payment', 'Payment issue', { onBookFor: () => {}, onBookCoaching: () => {} }]] },
   { id: '09', title: 'Athlete Detail', Screen: AthleteDetail, role: 'parent + staff',
     states: [['populated', 'Populated'], ['limited', 'Limited data'],
-             // Sprint 10 pin B (TEAM.md): the "Start a contract" card for a
-             // kid with no tier yet - `noTier` overrides the (fragile,
-             // flagged) subline heuristic so this state is reviewable
-             // regardless of what the seed subline happens to say.
-             ['populated', 'No contract tier', { noTier: true }],
              // Sprint 11 pin E (TEAM.md, contract v1.9): the new Membership
              // card - ops/owner get the editable package pickers, coach/
              // mental see the same facts read-only, parent (the default

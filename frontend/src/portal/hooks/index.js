@@ -156,8 +156,10 @@ import {
   DNA_MODULES,
   DNA_STATES,
   DNA_SUMMARY,
-  CONTRACT_TIERS,
 } from '../data/athlete';
+// The owner's contract rule (2026-10-28): 20 min a day, 10 under 12, derived
+// per date - every family surface reads the requirement from here.
+import { contractMinutesFor } from '../data/contractRule';
 import {
   addDaysISO,
   ageFromDob,
@@ -358,6 +360,17 @@ async function liveAthleteIdentity() {
   }
   const athlete = await fetchAthlete(profile.athleteId);
   return { profile, athlete };
+}
+
+/**
+ * The contract hooks' athlete (owner, 2026-10-28; spec 4.3): an explicit
+ * athleteId is the parent path (AthleteDetail, a kid without a login of
+ * their own) and reads that athlete doc; null keeps the signed-in athlete's
+ * own path above.
+ */
+async function liveAthleteFor(athleteId) {
+  if (athleteId) return { athlete: await fetchAthlete(athleteId) };
+  return liveAthleteIdentity();
 }
 
 // `packageById` (data/packages.js) is now imported directly - ONE catalogue
@@ -1652,12 +1665,13 @@ async function liveChildCard(a, today, anchorDay) {
   // go out together - one round trip instead of four in a row per child.
   // Parent context: the compound filter is what makes the bookings read
   // provable under the rules (see fetchBookings).
-  const contractMinutes = a.contractMinutes ?? null;
+  // The owner's rule (2026-10-28): every child is on the contract, judged
+  // day by day against contractMinutesFor - no stored tier gates the card.
   const loginEmail = a.loginEmail ?? null;
   const [pkg, bookings, logs, invite] = await Promise.all([
     a.packageId ? fetchPackage(a.packageId) : Promise.resolve(null),
     fetchBookings(a.id, { householdId: a.householdId }),
-    contractMinutes != null ? fetchContractLogs(a.id) : Promise.resolve(null),
+    fetchContractLogs(a.id),
     loginEmail ? fetchLoginInvite(loginEmail) : Promise.resolve(null),
   ]);
   const active = bookings.filter((b) => b.status !== 'cancelled');
@@ -1675,20 +1689,18 @@ async function liveChildCard(a, today, anchorDay) {
     }
   }
 
-  let standing = null;
-  let contract = null;
-  if (contractMinutes != null) {
-    const minutesByDate = new Map(logs.map((l) => [l.date, l.minutes || 0]));
-    const m = buildContractMonthFromLogs({ today, minutesByDate, contractMinutes, ...contractWindowFor(a) });
-    // Nothing due yet (before the start, or the month's first weekday) is
-    // "—", not a grey 0%; no badge at all outside the contract window.
-    contract = m.dueSoFar ? Math.round((m.logged / m.dueSoFar) * 100) : null;
-    standing = m.behind
-      ? { tone: 'yellow', label: 'Behind' }
-      : m.notStarted || m.ended
-      ? null
-      : { tone: 'green', label: 'On track' };
-  }
+  const minutesByDate = new Map(logs.map((l) => [l.date, l.minutes || 0]));
+  const m = buildContractMonthFromLogs({
+    today, minutesByDate, contractMinutes: (iso) => contractMinutesFor(a, iso), ...contractWindowFor(a),
+  });
+  // Nothing due yet (before the start, or the month's first weekday) is
+  // "—", not a grey 0%; no badge at all outside the contract window.
+  const contract = m.dueSoFar ? Math.round((m.logged / m.dueSoFar) * 100) : null;
+  const standing = m.behind
+    ? { tone: 'yellow', label: 'Behind' }
+    : m.notStarted || m.ended
+    ? null
+    : { tone: 'green', label: 'On track' };
 
   const age = ageFromDob(a.dob ?? null);
   // Sprint 20 (spec 3.2): the child's own login for the parent home's
@@ -1698,7 +1710,7 @@ async function liveChildCard(a, today, anchorDay) {
   // Composed once here (review 2026-09-30): the contract part is dropped at
   // the source while the contract is hidden, so no screen scrubs it.
   const ageLine = hideContractParts(
-    [age != null ? `Age ${age}` : null, contractMinutes != null ? `${contractMinutes} min tier` : null]
+    [age != null ? `Age ${age}` : null, `${contractMinutesFor(a, today)} min a day`]
       .filter(Boolean)
       .join(' · ') || null
   );
@@ -1759,9 +1771,8 @@ export function useHousehold({ variant = 'three', practice = false } = {}) {
   const today = todayISO();
   // Post-write invalidation seam (Sprint 6 pin): a booking or a contract log
   // can change a child's card - re-run after either bumps. Sprint 10:
-  // 'athletes' too - AthleteDetail's parent-facing tier picker (contract
-  // v1.8, B) writes contractMinutes, which liveChildCard's `contract` field
-  // reads.
+  // 'athletes' too - the contract's one-time stamp (ensureContractStart,
+  // 2026-10-28) writes contractStart, which opens the child's window.
   const bookingsGen = useInvalidation('bookings');
   const contractLogsGen = useInvalidation('contractLogs');
   const athletesGen = useInvalidation('athletes');
@@ -1927,14 +1938,11 @@ function seedChildById(athleteId) {
 }
 
 /**
- * Raw contract-tier minutes per seed child - HOUSEHOLD.children only carries
- * the derived `ageLine` copy ("45 min tier") and a completion percentage,
- * not the raw number this hook's caller-shape wants. Extracted here rather
- * than invented: these are the SAME three values ageLine already states in
- * prose (nico stays null on purpose, same as his live seed - "no tier"
- * needs a real exercisable case).
+ * The contract requirement per seed child under the owner's rule
+ * (2026-10-28: 20 min a day, 10 under 12) - contractMinutesFor on the seed
+ * dobs: Jordan 14 and Reese 12 are 20, Nico 9 is 10.
  */
-const SEED_CONTRACT_MINUTES = { jordan: 45, reese: 20, nico: null };
+const SEED_CONTRACT_MINUTES = { jordan: 20, reese: 20, nico: 10 };
 
 /**
  * Believable non-zero token usage for the seed demo, this period - mirrors
@@ -1994,7 +2002,7 @@ function seedMemberEntry(child, today) {
       : null,
     tokens: seedMemberTokens(child, today),
     coaching: coachingFor(seedMemberBookingRows(child, today), today, pkg),
-    contractMinutes: SEED_CONTRACT_MINUTES[child.id] ?? null,
+    contractMinutes: SEED_CONTRACT_MINUTES[child.id] ?? contractMinutesFor(child, today),
     periodEnd: periodFor(today, PERIOD_ANCHOR_DAY).periodEnd,
   };
 }
@@ -2060,7 +2068,8 @@ async function liveMemberEntry(a, today, anchorDay) {
       graceTokens
     ),
     coaching: coachingFor(bookings, today, pkg),
-    contractMinutes: a.contractMinutes ?? null,
+    // The requirement today (owner's rule, 2026-10-28), never the stored tier.
+    contractMinutes: contractMinutesFor(a, today),
     periodEnd: periodFor(today, anchorDay).periodEnd,
   };
 }
@@ -2160,7 +2169,7 @@ export function useMembership() {
  * the one-shot updateDoc + bump('athletes'). `saving`/`error` are hook-owned
  * state (AthleteDetail's membership editor reads them directly for its Save
  * button, rather than each caller re-deriving the same try/finally). Seed
- * mode is a local echo, same discipline as useAthleteTier/useNotificationPrefs.
+ * mode is a local echo, same discipline as useNotificationPrefs.
  */
 export function useAssignPackages() {
   const live = isLive();
@@ -2677,13 +2686,15 @@ export function useCoachRoster() {
   const liveCoachRoster = async () => {
     const profile = await fetchCurrentUser();
     const athletes = await fetchCoachAthletes(profile.uid);
+    const today = todayISO();
     return athletes
       .slice()
       .sort((a, b) => (a.name || '').localeCompare(b.name || ''))
       .map((a) => ({
         id: a.id,
         name: a.name,
-        meta: hideContractParts(a.contractMinutes != null ? `${a.contractMinutes} min tier` : null),
+        // The owner's rule (2026-10-28): the requirement today, for everyone.
+        meta: hideContractParts(`${contractMinutesFor(a, today)} min a day`),
       }));
   };
 
@@ -2915,13 +2926,12 @@ async function liveAthleteDashboard(today) {
   const ctx = await liveAthleteContext();
   const active = ctx.bookings.filter((b) => b.status !== 'cancelled');
   const upcoming = active.filter((b) => b.date >= today).sort(byDateThenId);
-  const contractMinutes = ctx.athlete.contractMinutes ?? null;
 
   // Sprint 20 (load time): the reads that follow the context are
   // independent of each other - one round trip, not four.
   const [nextSessions, logs, published, tokens] = await Promise.all([
     upcoming.length ? fetchSessionsByIds([upcoming[0].sessionId]) : Promise.resolve([]),
-    contractMinutes != null ? fetchContractLogs(ctx.athlete.id) : Promise.resolve(null),
+    fetchContractLogs(ctx.athlete.id),
     fetchAthleteDiagnostics(ctx.athlete.id, { publishedOnly: true }),
     homeTokens(ctx.athlete, ctx.pkg, ctx.bookings, normalizeAnchorDay(ctx.household?.periodAnchorDay), today),
   ]);
@@ -2933,23 +2943,24 @@ async function liveAthleteDashboard(today) {
     nextSession = s ? displaySession(s, today) : null;
   }
 
-  let contract = null;
-  if (contractMinutes != null) {
-    const minutesByDate = new Map(logs.map((l) => [l.date, l.minutes || 0]));
-    const m = buildContractMonthFromLogs({ today, minutesByDate, contractMinutes, ...contractWindowFor(ctx.athlete) });
-    const state = liveContractState(m);
-    contract = {
-      logged: m.logged,
-      total: m.dueSoFar,
-      month: m.month,
-      pct: m.dueSoFar ? Math.round((m.logged / m.dueSoFar) * 100) : 0,
-      line: state.line,
-      // The card's badge is the Contract screen's own pill (K33: it was a
-      // hard-coded "On track" that contradicted a Behind contract).
-      badge: state.badge,
-      kind: state.kind,
-    };
-  }
+  // The owner's rule (2026-10-28): the card is always built, each day judged
+  // against that day's requirement (contractMinutesFor).
+  const minutesByDate = new Map(logs.map((l) => [l.date, l.minutes || 0]));
+  const m = buildContractMonthFromLogs({
+    today, minutesByDate, contractMinutes: (iso) => contractMinutesFor(ctx.athlete, iso), ...contractWindowFor(ctx.athlete),
+  });
+  const state = liveContractState(m);
+  const contract = {
+    logged: m.logged,
+    total: m.dueSoFar,
+    month: m.month,
+    pct: m.dueSoFar ? Math.round((m.logged / m.dueSoFar) * 100) : 0,
+    line: state.line,
+    // The card's badge is the Contract screen's own pill (K33: it was a
+    // hard-coded "On track" that contradicted a Behind contract).
+    badge: state.badge,
+    kind: state.kind,
+  };
 
   // `published` (contract v1.8 C): whether a published diagnostic exists
   // yet - the home screen's "Start here" card keys off it in live mode
@@ -2982,8 +2993,8 @@ export function useAthleteDashboard({ variant = 'populated', today = todayISO(),
   const live = !practice && isLive();
   // Post-write invalidation seam (Sprint 6 pin): a booking or a contract log
   // write changes this card - re-run after either bumps. Sprint 10:
-  // 'athletes' too - setTier() (useContract, contract v1.8 B) changes
-  // whether this card has a contract summary at all.
+  // 'athletes' too - the contract's one-time stamp (useContract's
+  // ensureContractStart) writes contractStart, which opens the window.
   const bookingsGen = useInvalidation('bookings');
   const contractLogsGen = useInvalidation('contractLogs');
   const athletesGen = useInvalidation('athletes');
@@ -3065,7 +3076,7 @@ function contractFor(variant, today) {
     today,
     missedDates,
     completeAll: variant === 'complete',
-    minutesPerDay: 45,
+    minutesPerDay: 20, // the owner's rule (2026-10-28): 20 min a day
   });
 
   const state = {
@@ -3110,26 +3121,24 @@ function contractFor(variant, today) {
   };
 }
 
-/** Shape returned when there is no contract month to show — no tier, or the 'none' demo variant. */
-const NO_CONTRACT_MONTH = { month: null, dayStates: {}, stats: null, state: null, caption: null };
-
 /**
  * Live payload for useContract (Sprint 6, QA #4): dayStates/stats built from
  * real contractLogs via buildContractMonthFromLogs, consistent with
- * usePracticeLog's own live totals (both read fetchContractLogs for the
- * signed-in athlete). A null contractMinutes tier means there is no contract
- * to grid — NO_CONTRACT_MONTH, the same empty shape the seed 'none' variant
- * already produces, rather than inventing a tier.
+ * usePracticeLog's own live totals (both read fetchContractLogs for the same
+ * athlete). The owner's rule (2026-10-28; spec 4.3): no tier picker - every
+ * athlete is on the contract, each day judged against contractMinutesFor on
+ * that day (a 12th birthday mid-month leaves earlier days alone).
+ * `tierMinutes` and `required` are the requirement today (the screen's copy
+ * reads `tierMinutes`); `needsStart` is true while the stored contractMinutes
+ * is null, i.e. the one-time stamp (ensureContractStart) has not run yet.
+ * `athleteId` null is the signed-in athlete; a string is the parent path.
  */
-async function liveContract(today) {
-  const { athlete } = await liveAthleteIdentity();
-  const contractMinutes = athlete.contractMinutes ?? null;
-  if (contractMinutes == null) {
-    return { ...NO_CONTRACT_MONTH, tiers: CONTRACT_TIERS, tierMinutes: null };
-  }
+async function liveContract(today, athleteId) {
+  const { athlete } = await liveAthleteFor(athleteId);
+  const required = (iso) => contractMinutesFor(athlete, iso);
   const logs = await fetchContractLogs(athlete.id);
   const minutesByDate = new Map(logs.map((l) => [l.date, l.minutes || 0]));
-  const m = buildContractMonthFromLogs({ today, minutesByDate, contractMinutes, ...contractWindowFor(athlete) });
+  const m = buildContractMonthFromLogs({ today, minutesByDate, contractMinutes: required, ...contractWindowFor(athlete) });
   return {
     month: { label: m.label, name: m.month, start: m.start },
     dayStates: m.dayStates,
@@ -3146,12 +3155,13 @@ async function liveContract(today) {
     // Sprint 5 ruling: closures are schedule facts, not practice facts, and no
     // longer excuse a contract day.
     caption: 'Weekends are not contract days.',
-    tiers: CONTRACT_TIERS,
-    tierMinutes: contractMinutes,
+    tierMinutes: required(today),
+    required: required(today),
+    needsStart: athlete.contractMinutes == null,
   };
 }
 
-export function useContract({ variant = 'ontrack', today = todayISO(), practice = false } = {}) {
+export function useContract({ variant = 'ontrack', today = todayISO(), practice = false, athleteId = null } = {}) {
   // Practice pins the seed branch (onboarding invariant — the third hook to
   // need this pin; QA 2026-09-08: the walkthrough's log step showed
   // "CONTRACT DIDN'T LOAD" because this fetched live while signed out).
@@ -3159,60 +3169,36 @@ export function useContract({ variant = 'ontrack', today = todayISO(), practice 
   // Post-write invalidation seam (Sprint 6 pin): re-run after any
   // contractLogs write, not just one made through this hook instance.
   const contractLogsGen = useInvalidation('contractLogs');
-  // Sprint 10 (contract v1.8, B): setTier() below writes athletes.
-  // contractMinutes - without this subscription a NoContract screen that
-  // just called setTier would keep rendering NO_CONTRACT_MONTH until an
-  // unrelated bookings/contractLogs write happened to bump something else,
-  // exactly the "post-write refresh" defect class Sprint 6 was cut to fix.
+  // 'athletes' too: ensureContractStart below writes contractMinutes and
+  // contractStart, which flips needsStart and opens the contract window -
+  // the same "post-write refresh" defect class Sprint 6 was cut to fix.
   const athletesGen = useInvalidation('athletes');
 
-  const built = variant === 'none' ? null : contractFor(variant, today);
   const state = useSeedResource(
+    live ? null : { ...contractFor(variant, today), tierMinutes: 20, required: 20, needsStart: false },
     live
-      ? null
-      : {
-          ...(built ?? NO_CONTRACT_MONTH),
-          tiers: CONTRACT_TIERS,
-          tierMinutes: 45,
-        },
-    live
-      ? { source: () => liveContract(today), deps: ['contract', today, contractLogsGen, athletesGen] }
+      ? { source: () => liveContract(today, athleteId), deps: ['contract', today, athleteId, contractLogsGen, athletesGen] }
       : undefined
   );
 
   /**
-   * Start (or change, or clear) the signed-in athlete's Commitment Contract
-   * tier (contract v1.8, B) — wires the NoContract tier picker's "Start the
-   * N min contract" CTA. Seed mode is a local no-op echo, matching every
-   * other write action's seed posture in this file (createBooking et al.).
-   * `{ start: true }` (NoContract's no-tier -> tier flow only) also stamps
-   * athletes.contractStart; changing an existing tier never does.
+   * The one-time stamp (owner's rule, 2026-10-28; spec 4.3): the first open
+   * of the contract writes the derived requirement into contractMinutes and
+   * today into contractStart (setContractTier's `start`), only while the
+   * stored contractMinutes is null - the rules allow contractStart on that
+   * transition alone. A stored value (a legacy 45 or 90, or an earlier
+   * stamp) is left alone: `{ athleteId, skipped: true }`. The athlete is
+   * re-read so a stamp from another tab is never written twice. Seed and
+   * practice mode persist nothing.
    */
-  const setTier = async (minutes, { start = false } = {}) => {
-    if (!live) return { contractMinutes: minutes, simulated: true };
-    const { athlete } = await liveAthleteIdentity();
-    return setContractTier({ athleteId: athlete.id, minutes, start });
+  const ensureContractStart = async () => {
+    if (!live) return { simulated: true };
+    const { athlete } = await liveAthleteFor(athleteId);
+    if (athlete.contractMinutes != null) return { athleteId: athlete.id, skipped: true };
+    return setContractTier({ athleteId: athlete.id, minutes: contractMinutesFor(athlete, today), start: true });
   };
 
-  return { ...state, setTier };
-}
-
-/**
- * Set a contract tier for a NAMED athlete (contract v1.8, B) — the parent's
- * "Start a contract" card on AthleteDetail, for a kid with no login of
- * their own. useContract's setTier is self-only by construction (it resolves
- * the signed-in athlete); this is the household-parent path, and the rules'
- * contractMinutesUpdateOk() decides who may write it. Seed: local echo.
- * `{ start: true }` (StartContractCard, a no-tier athlete) also stamps
- * athletes.contractStart, exactly as useContract's setTier does.
- */
-export function useAthleteTier() {
-  const live = isLive();
-  const setTier = async (athleteId, minutes, { start = false } = {}) => {
-    if (!live) return { athleteId, contractMinutes: minutes, simulated: true };
-    return setContractTier({ athleteId, minutes, start });
-  };
-  return { setTier };
+  return { ...state, ensureContractStart };
 }
 
 /**
@@ -3221,8 +3207,8 @@ export function useAthleteTier() {
  * same pattern deriveTokens() uses for bookings: no stored counter to
  * drift, no composite index to provision.
  */
-async function livePracticeLog(today) {
-  const { athlete } = await liveAthleteIdentity();
+async function livePracticeLog(today, athleteId) {
+  const { athlete } = await liveAthleteFor(athleteId);
   const logs = await fetchContractLogs(athlete.id);
   const cycleStart = `${today.slice(0, 7)}-01`;
   const cycleLogs = logs.filter((l) => l.date >= cycleStart && l.date <= today);
@@ -3233,7 +3219,8 @@ async function livePracticeLog(today) {
     // this (a morning session plus an evening session is one day's total) —
     // the original replace-on-relog silently discarded earlier practice.
     todayMinutes: logs.find((l) => l.date === today)?.minutes ?? 0,
-    contractMinutes: athlete.contractMinutes ?? null,
+    // The requirement today (owner's rule, 2026-10-28), never the stored tier.
+    contractMinutes: contractMinutesFor(athlete, today),
   };
 }
 
@@ -3243,9 +3230,11 @@ async function livePracticeLog(today) {
  * the Commitment Contract screen has today. Additive to the {data, loading,
  * error} contract: `logPractice({ minutes })` writes one contractLogs doc
  * (id `{athleteId}_{date}`) via live.js's createContractLog, snapshotting
- * `contractMinutes` off the athlete doc at log time so a later tier change
- * cannot rewrite history. Fulfilled = minutes >= contractMinutes - extra
- * minutes never bank extra days.
+ * `contractMinutes` = contractMinutesFor(athlete, that date) (the owner's
+ * rule, 2026-10-28) so a birthday or a later rule change cannot rewrite
+ * history. Fulfilled = minutes >= contractMinutes - extra minutes never bank
+ * extra days. `athleteId` null logs for the signed-in athlete; a string
+ * logs for that athlete (a parent for their kid; rules: logParentOwns).
  *
  * Seed mode keeps the logged entry in this hook's own component state - the
  * same simulation the contract screen already does for onboarding practice,
@@ -3258,14 +3247,14 @@ async function livePracticeLog(today) {
  * this hook (and useContract, and useAthleteDashboard's contract card) all
  * re-run together, not just whichever one made the write.
  */
-export function usePracticeLog({ today = todayISO(), practice = false } = {}) {
+export function usePracticeLog({ today = todayISO(), practice = false, athleteId = null } = {}) {
   // Practice pins the seed branch (onboarding invariant): no live query, and
   // logPractice stays a local no-op-persist — never a contractLogs write.
   const live = !practice && isLive();
   const [seedEntry, setSeedEntry] = useState(null); // { date, minutes } | null
   const contractLogsGen = useInvalidation('contractLogs');
 
-  const SEED_CONTRACT_MINUTES = 45; // matches the seed athlete's tier (ATHLETE, HOUSEHOLD's Jordan)
+  const SEED_CONTRACT_MINUTES = 20; // the owner's rule for the seed athlete (Jordan, 14)
   const seedLoggedToday = Boolean(seedEntry && seedEntry.date === today);
   const seedValue = {
     totalMinutes: seedLoggedToday ? seedEntry.minutes : 0,
@@ -3279,7 +3268,7 @@ export function usePracticeLog({ today = todayISO(), practice = false } = {}) {
   const state = useSeedResource(
     live ? null : seedValue,
     live
-      ? { source: () => livePracticeLog(today), deps: ['practice-log', today, contractLogsGen] }
+      ? { source: () => livePracticeLog(today, athleteId), deps: ['practice-log', today, athleteId, contractLogsGen] }
       : undefined
   );
 
@@ -3307,7 +3296,7 @@ export function usePracticeLog({ today = todayISO(), practice = false } = {}) {
       setSeedEntry(entry);
       return entry;
     }
-    const { athlete } = await liveAthleteIdentity();
+    const { athlete } = await liveAthleteFor(athleteId);
     // createContractLog bumps the 'contractLogs' generation itself on
     // success - this hook's own subscription above picks that up and
     // re-runs, so there is nothing to bump here directly.
@@ -3315,7 +3304,7 @@ export function usePracticeLog({ today = todayISO(), practice = false } = {}) {
       athleteId: athlete.id,
       date: target,
       minutes,
-      contractMinutes: athlete.contractMinutes ?? null,
+      contractMinutes: contractMinutesFor(athlete, target),
     });
   };
 
@@ -3330,7 +3319,7 @@ export function usePracticeLog({ today = todayISO(), practice = false } = {}) {
       if (seedEntry?.date === date) setSeedEntry(null);
       return { date };
     }
-    const { athlete } = await liveAthleteIdentity();
+    const { athlete } = await liveAthleteFor(athleteId);
     return deleteContractLog({ athleteId: athlete.id, date });
   };
 
@@ -3367,16 +3356,17 @@ async function liveAthleteDetail(athleteId) {
     fetchBookings(athleteId, viewer.role === 'parent' ? { householdId: viewer.householdId } : {}),
     loginEmail ? fetchLoginInvite(loginEmail) : null,
   ]);
+  const today = todayISO();
+  // The owner's rule (2026-10-28): the requirement today, for every athlete.
   const subline = hideContractParts(
     [
-      athlete.contractMinutes != null ? `${athlete.contractMinutes} min tier` : null,
+      `${contractMinutesFor(athlete, today)} min a day`,
       pkg ? `${pkg.name} package` : null,
     ]
       .filter(Boolean)
       .join(' · ') || null
   );
 
-  const today = todayISO();
   const active = bookings.filter((b) => b.status !== 'cancelled' && b.date >= today);
   active.sort(byDateThenId);
   const sessionsById = new Map(
@@ -3405,10 +3395,10 @@ async function liveAthleteDetail(athleteId) {
       attendanceLabel: 'attendance — not tracked live yet',
       board: '—',
       boardLabel: 'months on the Board — not tracked live yet',
-      // Sprint 10 (contract v1.8, B): additive field so AthleteDetail's
-      // parent-facing "Start a contract" tier picker card knows whether to
-      // render (null = no tier yet, matches NoContract's own convention).
+      // The stored value (null until the contract's one-time stamp); the
+      // requirement itself is contractMinutesFor(athlete, date) on the dob.
       contractMinutes: athlete.contractMinutes ?? null,
+      dob: athlete.dob ?? null,
       // Sprint 11 (contract v1.9, E): the package pointer the AthleteDetail
       // membership editor preselects from - additive, the same way
       // contractMinutes was added above. `fitnessPackageId` is DROPPED
@@ -3456,11 +3446,9 @@ async function liveAthleteDetail(athleteId) {
 export function useAthleteDetail({ athleteId, variant = 'populated' } = {}) {
   const live = isLive() && athleteId != null;
   const full = variant === 'populated';
-  // Sprint 10 (contract v1.8, B): the parent-facing "Start a contract" tier
-  // picker on this screen writes athletes.contractMinutes via useContract's
-  // setTier() (called with THIS athleteId, not the caller's own) - without
-  // this subscription the screen would keep showing NoContract after a
-  // successful pick until an unrelated write happened to bump something.
+  // An athletes write (the package editor, the handicap edit, the
+  // contract's one-time stamp) re-runs this read, so the screen never keeps
+  // showing the old facts until an unrelated write bumps something.
   const athletesGen = useInvalidation('athletes');
   const seedValue = {
     // householdName: the back link's label (AthleteDetail reads it here now,
@@ -3606,10 +3594,13 @@ export function deriveWhoNeedsCall({
   }
   const contractBehind = [];
   for (const a of athletes) {
-    if (a.contractMinutes == null) continue;
+    // The owner's rule (2026-10-28): everyone is on the contract, each day
+    // judged against that day's requirement - no stored tier to skip on.
     const logs = logsByAthlete.get(a.id) ?? [];
     const minutesByDate = new Map(logs.map((l) => [l.date, l.minutes || 0]));
-    const m = buildContractMonthFromLogs({ today, minutesByDate, contractMinutes: a.contractMinutes, ...contractWindowFor(a) });
+    const m = buildContractMonthFromLogs({
+      today, minutesByDate, contractMinutes: (iso) => contractMinutesFor(a, iso), ...contractWindowFor(a),
+    });
     // Staff get the families' definition (contract-buffer ruling): Behind
     // is more than BEHIND_BUFFER_DAYS missed inside the contract window.
     if (m.behind) {

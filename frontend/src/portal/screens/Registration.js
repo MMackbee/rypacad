@@ -6,15 +6,14 @@ import { BackLink, Banner, Body, ScreenTitle } from '../components/Primitives';
 import * as callables from '../hooks/callables';
 import { verifySentNote } from '../data/authCopy';
 import { todayISO } from '../data/calendar';
-import { contractEnabled } from '../data/contractFlag';
 import { SINGLE_TOKEN } from '../data/packages';
 import { saleOpen } from '../data/singleToken';
 import {
-  EMAIL_RE, buildAddAthletesPayload, buildCreateFamilyPayload, contractAnswered, emptyEmergencyContact, facilityWaiverRequired,
+  EMAIL_RE, buildAddAthletesPayload, buildCreateFamilyPayload, emptyEmergencyContact, facilityWaiverRequired,
   newAthleteEntry, restoredFacilityTick, toEmergencyForm, validateAthleteEntry, validateEmergencyContact,
 } from '../data/signup';
 import useFamilyAthletes from '../hooks/familyAthletes';
-import { AthleteStep, ConsentStep, ConsentInfoSheet, ContactStep, ContractStep, PackageStep, SubmittingOverlay, WhoStep } from './RegistrationSteps';
+import { AthleteStep, ConsentStep, ConsentInfoSheet, ContactStep, PackageStep, SubmittingOverlay, WhoStep } from './RegistrationSteps';
 import RegistrationSuccess from './RegistrationSuccess';
 
 /**
@@ -35,12 +34,9 @@ const callAddAthletes = callables.callAddAthletes || notWired('addAthletes');
 
 /**
  * 02 · Registration (Sprint 20, spec 2.1) - signed-in, instant. Two modes:
- * 'signup' (who-are-you -> contact -> athletes -> package -> contract ->
- * consent -> createFamily) and 'link' (a provisioned parent adding athletes:
- * athletes -> package -> contract -> addAthletes). The Commitment Contract
- * is its own step since owner feedback 2026-09-30; drafts saved before it
- * keep their step numbers, so an old consent-step draft reopens on the
- * contract step with its consents kept. No approval queue: the callable
+ * 'signup' (who-are-you -> contact -> athletes -> package -> consent ->
+ * createFamily) and 'link' (a provisioned parent adding athletes: athletes
+ * -> package -> addAthletes). No approval queue: the callable
  * writes the family in one transaction and `onRefresh` (useAuthSession().refresh) flips
  * `provisioned` without a reload - but only when the family LEAVES the
  * Success receipt (`finish`), never on submit: RegistrationRoute redirects
@@ -50,22 +46,22 @@ const callAddAthletes = callables.callAddAthletes || notWired('addAthletes');
  * from SignUp's navigation state) shows the verification note on step 1, since
  * a new login now lands here without stopping on SignUp's card.
  *
- * Hidden contract (owner ruling 2026-09-30, data/contractFlag.js): with the
- * flag off the contract step does not exist - sign-up is 5 steps, link mode
- * 2 - and every athlete is sent with contractMinutes null. A draft saved on
- * the 6-step layout reopens clamped to the last step; its contract answers
- * are ignored. The harness's `contract` variant forces the step on.
+ * No contract step (owner's rule, 2026-10-28): the requirement is derived
+ * from age (20 min a day, 10 under 12), so there is nothing to pick - sign-up
+ * is 5 steps and link mode 2, with the contract flag on or off, and every
+ * athlete is sent with contractMinutes null (the contract screen stamps it
+ * on first open). A draft saved on the old 6-step layout reopens clamped to
+ * the last step; its contract answers are ignored.
  */
 const STEPS = {
   signup: [['who', 'Who are you'], ['contact', 'Contact'], ['athletes', 'Athletes'], ['package', 'Choose a package'],
-    ['contract', 'Commitment Contract'], ['consent', 'Consent and waiver']],
-  link: [['athletes', 'Athletes'], ['package', 'Choose a package'], ['contract', 'Commitment Contract']],
+    ['consent', 'Consent and waiver']],
+  link: [['athletes', 'Athletes'], ['package', 'Choose a package']],
 };
-const stepsFor = (mode, contract) =>
-  (STEPS[mode] || STEPS.signup).filter(([id]) => contract || id !== 'contract');
-/** Harness deep links, by step id so they survive the contract step coming and going. */
+const stepsFor = (mode) => STEPS[mode] || STEPS.signup;
+/** Harness deep links, by step id. */
 const VARIANT_STEP = {
-  guardian: 'contact', athlete: 'athletes', tier: 'package', contract: 'contract', consent: 'consent', submitting: 'consent', success: 'consent',
+  guardian: 'contact', athlete: 'athletes', tier: 'package', consent: 'consent', submitting: 'consent', success: 'consent',
 };
 
 /**
@@ -109,8 +105,7 @@ function writeDraft(key, value) {
 
 export default function Registration({ variant, bare = false, mode = 'signup', account = null, verifySent = null, onRefresh, onBack, onFinish }) {
   const demo = variant != null;
-  const withContract = contractEnabled() || variant === 'contract';
-  const steps = stepsFor(mode, withContract);
+  const steps = stepsFor(mode);
   const today = todayISO();
   const key = demo ? null : draftKey(mode, account);
   const [draft] = useState(() => readDraft(key));
@@ -192,7 +187,7 @@ export default function Registration({ variant, bare = false, mode = 'signup', a
     && verifySent.email.toLowerCase() === account.email.toLowerCase();
   const note = ownNote ? verifySentNote(verifySent) : null;
   const athleteErrors = form.athletes.map((a) =>
-    validateAthleteEntry(a, { todayISO: today, guardianEmail: form.contact.email, siblings: form.athletes, mode: form.mode || 'parent', contract: withContract })
+    validateAthleteEntry(a, { todayISO: today, guardianEmail: form.contact.email, siblings: form.athletes, mode: form.mode || 'parent' })
   );
   const emergencyOk = Object.keys(validateEmergencyContact(form.emergencyContact)).length === 0;
   // A family that kept the facility add-on makes its waiver required.
@@ -208,7 +203,6 @@ export default function Registration({ variant, bare = false, mode = 'signup', a
     // (owner ruling 2026-10-01: from the booking-open gate, by the clock).
     package: form.athletes.every((a) => a.packageId != null) && athleteErrors.every((e) => !e.packageId)
       && form.athletes.every((a) => a.packageId !== SINGLE_TOKEN.id || saleOpen()),
-    contract: form.athletes.every(contractAnswered),
     consent: form.consents.dataCollection && form.consents.videoCapture && form.signatureName.trim() !== ''
       && (!facilityRequired || form.consents.facilityAccess === true),
   }[stepId];
@@ -243,8 +237,8 @@ export default function Registration({ variant, bare = false, mode = 'signup', a
     setPhase('submitting');
     try {
       const res = mode === 'link'
-        ? await callAddAthletes(buildAddAthletesPayload(form, { contract: withContract }))
-        : await callCreateFamily(buildCreateFamilyPayload(form, { contract: withContract }));
+        ? await callAddAthletes(buildAddAthletesPayload(form))
+        : await callCreateFamily(buildCreateFamilyPayload(form));
       setResult(res);
       setPhase('success');
     } catch (err) {
@@ -317,9 +311,6 @@ export default function Registration({ variant, bare = false, mode = 'signup', a
         {stepId === 'package' ? (
           <PackageStep athletes={form.athletes} onUpdate={updateAthlete} showErrors={showErrors} mode={form.mode || 'parent'}
             facility={form.facilityRequested === true} onFacility={(v) => patch({ facilityRequested: v })} household={household} />
-        ) : null}
-        {stepId === 'contract' ? (
-          <ContractStep mode={form.mode || 'parent'} athletes={form.athletes} onUpdate={updateAthlete} showErrors={showErrors} todayISO={today} />
         ) : null}
         {stepId === 'consent' ? (
           <ConsentStep mode={form.mode} consents={form.consents} onChange={setConsents} signatureName={form.signatureName}
