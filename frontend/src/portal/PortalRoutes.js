@@ -576,9 +576,9 @@ function MentalContractRoute({ onSignOut }) {
 }
 
 /**
- * The Tour is the one route every role reaches, but TourStandings renders a
- * role-appropriate bottom tab bar (athlete and parent have one; staff roles
- * do not) — so the signed-in role has to reach it as a prop. Resolved from
+ * The Tour is the one route every role reaches, and TourStandings renders
+ * that role's own bottom tab bar (Phil's through his specialistId) — so the
+ * signed-in role has to reach it as a prop. Resolved from
  * the live session exactly the way BookSessionRoute above does it; seed mode
  * stays the athlete default the harness already exercises.
  */
@@ -590,7 +590,8 @@ function TourRoute({ onSignOut }) {
   // selects their bracket and unlocks the "Your results" history card;
   // every other role browses brackets with no personal view.
   const athleteId = live && user?.role === 'athlete' ? user?.athleteId ?? undefined : undefined;
-  return <TourStandings bare role={role} athleteId={athleteId} onSignOut={onSignOut} />;
+  const specialistId = (live && user?.specialistId) || undefined;
+  return <TourStandings bare role={role} athleteId={athleteId} specialistId={specialistId} onSignOut={onSignOut} />;
 }
 
 /**

@@ -39,9 +39,8 @@ function ordinal(n) {
 /**
  * RYP Tour — season standings for the weekend tournament leaderboard
  * (Sprint 7 pin, TEAM.md). Route /portal/tour, athlete tab bar's retired DNA
- * slot, parent tab bar in place of the removed Billing tab. Also reachable
- * by coach/ops/owner/mental (no bottom tab bar for those roles today — see
- * AdminDashboard/StaffRoles, neither of which renders one).
+ * slot, parent tab bar in place of the removed Billing tab. Staff keep their
+ * own tab bar here too (Phil's set via `specialistId`), so it is no dead end.
  *
  * Sprint 8 pin (TEAM.md, contract v1.6): the leaderboard now splits into age
  * brackets. Pinned hook: useTourStandings() -> { data: { brackets: [{ id,
@@ -74,7 +73,7 @@ function ordinal(n) {
  * @param {'populated'|'empty'|'loading'|'error'} variant  Harness-only demo
  *   gating - see above.
  * @param {'athlete'|'parent'|'coach'|'ops'|'owner'|'mental'} [role]
- *   Which bottom tab bar to render (only athlete and parent have one); also
+ *   Which bottom tab bar to render (`specialistId`: Phil's coach set); also
  *   gates the athlete-only own-bracket default and "Your results" card.
  * @param {string} [athleteId]  The signed-in athlete's id (athlete role
  *   only) - used to default-select their own bracket and to filter their
@@ -86,6 +85,7 @@ export default function TourStandings({
   variant = 'populated',
   role = 'athlete',
   athleteId,
+  specialistId,
   bare = false,
   practice = false,
   onSignOut,
@@ -156,7 +156,7 @@ export default function TourStandings({
           <SignOutButton onSignOut={onSignOut} />
         </div>
       }
-      footer={role === 'athlete' || role === 'parent' ? <BottomTabBar role={role} active="tour" /> : null}
+      footer={<BottomTabBar role={role} specialistId={specialistId} active="tour" />}
     >
       {loading ? (
         <TourSkeleton />
