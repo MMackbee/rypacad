@@ -38,13 +38,15 @@ export function ConsentStep({
 
   const set = (id, v) => onChange((prev) => ({ ...prev, [id]: v }));
   const footnoteOf = (consent) => (facilityRequired && consent.id === 'facilityAccess' ? FACILITY_WAIVER_FOOTNOTE : consent.footnote);
+  // A parent may add an 18+ athlete: then "Each athlete is a minor." is not true (review 2026-10-28).
+  const anAdult = mode !== 'athlete' && athletes.some((a) => isAdultOnDate(a.dob, todayISO));
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 13 }}>
       <Body size={13}>
         {mode === 'athlete'
           ? 'You are signing for yourself. Each of these is a separate decision — none is bundled into the others.'
-          : 'Each athlete is a minor. Each of these is a separate decision — none is bundled into the others.'}
+          : `${anAdult ? '' : 'Each athlete is a minor. '}Each of these is a separate decision — none is bundled into the others.`}
       </Body>
 
       {/*

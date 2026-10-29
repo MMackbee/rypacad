@@ -449,6 +449,19 @@ test('research (spec 7): one opt-in per athlete; under 18 the assent box appears
   await r.unmount();
 });
 
+test('a parent adding an 18+ athlete is not told every athlete is a minor', async () => {
+  const mixed = await renderScreen(<ResearchHarness athletes={[
+    { ...newAthleteEntry(), key: 'k1', name: 'Casey Lee', dob: '2014-05-05' },
+    { ...newAthleteEntry(), key: 'k2', name: 'Robin Lee', dob: '2005-01-01' },
+  ]} />);
+  expect(mixed.text()).not.toContain('Each athlete is a minor.');
+  expect(mixed.text()).toContain('Each of these is a separate decision');
+  await mixed.unmount();
+  const minors = await renderScreen(<ResearchHarness athletes={[{ ...newAthleteEntry(), key: 'k1', name: 'Casey Lee', dob: '2014-05-05' }]} />);
+  expect(minors.text()).toContain('Each athlete is a minor.');
+  await minors.unmount();
+});
+
 test('research: an 18+ athlete signing for themselves answers in the first person, with no assent box', async () => {
   const r = await renderScreen(<ResearchHarness mode="athlete" athletes={[{ ...newAthleteEntry(), key: 'k1', name: 'Sam Reyes', dob: '2000-01-01' }]} />);
   expect(r.text()).toContain('Research (optional): my results may be used in research.');
