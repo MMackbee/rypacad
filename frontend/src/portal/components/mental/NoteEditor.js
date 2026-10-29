@@ -12,10 +12,16 @@ import { NOTE_MAX } from '../../data/mentalNotes';
  * replaces what is being typed (Review Focus 5). The screen keys this
  * component on the note's route params, never on the loaded entry.
  *
- * Saves on blur when the text changed, and every `autosaveMs` while dirty
- * (one interval, started on the first edit). `onSave` is never called with
- * the body it was last called with. Delete confirms inline, no
- * window.confirm.
+ * Saves on blur when the text changed, every `autosaveMs` while dirty (one
+ * interval, started on the first edit), when the page goes to the
+ * background (pagehide, visibilitychange) and on unmount: browser or
+ * hardware Back unmounts the page without a blur reaching React, and the
+ * typing since the last tick must not be lost. `onSave` is never called
+ * with the body it was last called with, except after a failed save
+ * (`saveState` 'error'): then the next tick sends the same text again.
+ * After a confirmed delete nothing is flushed, so the note is not
+ * recreated; a keystroke after a failed delete re-arms saving.
+ * Delete confirms inline, no window.confirm.
  */
 export default function NoteEditor({
   initialBody = '',
@@ -30,13 +36,14 @@ export default function NoteEditor({
   const [dirty, setDirty] = useState(false);
   const [confirming, setConfirming] = useState(false);
   const bodyRef = useRef(initialBody);
-  const last = useRef(initialBody);
+  const last = useRef(initialBody); // null after a failed save: the next commit resends
+  const deleted = useRef(false);
   const onSaveRef = useRef(onSave);
   useEffect(() => { onSaveRef.current = onSave; });
 
-  // Refs only, so the one interval below always commits the current text.
+  // Refs only, so the interval and the unmount flush always commit the current text.
   const commit = useCallback(() => {
-    if (bodyRef.current === last.current) return;
+    if (deleted.current || bodyRef.current === last.current) return;
     last.current = bodyRef.current;
     if (onSaveRef.current) onSaveRef.current(bodyRef.current);
   }, []);
@@ -47,9 +54,28 @@ export default function NoteEditor({
     return () => clearInterval(id);
   }, [dirty, autosaveMs, commit]);
 
+  // A failed save is retried by the next tick (or blur, or leaving) without a keystroke.
+  useEffect(() => {
+    if (saveState === 'error') last.current = null;
+  }, [saveState]);
+
+  // Leaving without a blur: the app going to the background, the tab closing, and
+  // (the cleanup) browser or hardware Back unmounting the page.
+  useEffect(() => {
+    const onVisibility = () => { if (document.visibilityState === 'hidden') commit(); };
+    window.addEventListener('pagehide', commit);
+    document.addEventListener('visibilitychange', onVisibility);
+    return () => {
+      window.removeEventListener('pagehide', commit);
+      document.removeEventListener('visibilitychange', onVisibility);
+      commit();
+    };
+  }, [commit]);
+
   const change = (e) => {
     const next = e.target.value;
     bodyRef.current = next;
+    deleted.current = false;
     setBody(next);
     if (!dirty) setDirty(true);
   };
@@ -95,7 +121,7 @@ export default function NoteEditor({
               variant="danger"
               height={44}
               style={{ width: 'auto', font: `600 14px ${font.body}` }}
-              onClick={() => { setConfirming(false); onDelete(); }}
+              onClick={() => { setConfirming(false); deleted.current = true; onDelete(); }}
             >
               Yes, delete
             </Button>

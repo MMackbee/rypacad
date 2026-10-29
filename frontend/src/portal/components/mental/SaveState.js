@@ -5,9 +5,9 @@ import { Body } from '../Primitives';
 
 /**
  * The note editor's one save line (spec 5.3). `state` comes from
- * useMentalNote: idle | saving | saved | slow (still saving after
- * SLOW_SAVE_MS) | error. A failed save says so plainly and keeps the text;
- * the editor retries on the next change.
+ * useMentalNote through the editor: idle | saving | saved | slow (still
+ * saving after SLOW_SAVE_MS) | error. A failed save says so plainly and
+ * keeps the text; the editor sends it again on its next autosave tick.
  */
 export default function SaveState({ state, savedAt }) {
   let text;
@@ -18,7 +18,7 @@ export default function SaveState({ state, savedAt }) {
     text = 'Not saved yet — still trying';
     tone = color.errorMid;
   } else if (state === 'error') {
-    text = 'Not saved. Check your connection and keep typing; it retries on the next change.';
+    text = 'Not saved. Check your connection; it keeps trying while this page is open.';
     tone = color.errorMid;
   } else text = 'Not saved yet';
   return (
