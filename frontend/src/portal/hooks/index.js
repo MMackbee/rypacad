@@ -222,6 +222,10 @@ export { coachingFor, useIssueTokens, usePush, useRecentNotices, useScholarships
 // 2026-10-28: Yannick's tools (hooks/mental.js, hooks/mentalLive.js); role
 // 'mental' screens only - the notes reads are refused for every other role.
 export { useContractBoard, useMentalAthlete, useMentalAthletes, useMentalNote } from './mental';
+// 2026-10-28: the parent's contract card for one child (spec 4.3). The module
+// imports useContract/usePracticeLog from this file; the cycle is safe
+// because every use sits inside a hook body, never at import time.
+export { useParentContract } from './parentContract';
 
 /**
  * Harness demo states (contract v1.1): every data-bearing hook accepts

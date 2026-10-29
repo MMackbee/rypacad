@@ -13,6 +13,8 @@ jest.mock('../hooks', () => ({
   // No useHousehold mock on purpose (perf wave B): the back label comes off
   // useAthleteDetail's householdName, and a stray second load would crash here.
   useDiagnostic: () => ({ data: null, loading: false, error: null }),
+  // The parent's contract card (ParentContractCard), still loading here.
+  useParentContract: () => ({ month: null, loading: true, error: null, logPractice: jest.fn(), removeLog: jest.fn(), ensureContractStart: jest.fn(), loggedToday: false, todayMinutes: 0, required: 20 }),
   useAssignPackages: () => ({ assign: async () => {} }),
   useHouseholdSettings: () => ({ saving: false }),
   useIssueTokens: () => ({ issue: async () => {} }),
@@ -160,4 +162,21 @@ test('Scheduled sessions: a handicap-reserved block carries the tag, an open one
     expect(r.text()).toContain('Training blockWednesday, Nov 18 · 4:00 PMConfirmed');
     await r.unmount();
   }
+});
+
+test('a parent sees the contract card only with the switch on; staff never do', async () => {
+  // Its own detail, not the last test's: no checklist row or history to say "contract".
+  mockDetail = { data: { athlete: { name: 'Nico', subline: 'Age 9', contractMinutes: null, packageId: 't-6', householdId: 'h1' }, history: [], checklist: [], hasEnoughData: false }, loading: false, error: null };
+  delete process.env.REACT_APP_CONTRACT_ENABLED;
+  const off = await renderScreen(<AthleteDetail bare athleteId="nico" role="parent" />, { path: '/portal/athlete/nico' });
+  expect(off.text()).not.toContain('Commitment Contract');
+  await off.unmount();
+  process.env.REACT_APP_CONTRACT_ENABLED = 'true';
+  const on = await renderScreen(<AthleteDetail bare athleteId="nico" role="parent" />, { path: '/portal/athlete/nico' });
+  expect(on.text()).toContain('Commitment Contract');
+  await on.unmount();
+  const ops = await renderScreen(<AthleteDetail bare athleteId="nico" role="ops" />, { path: '/portal/athlete/nico' });
+  expect(ops.text()).not.toContain('Commitment Contract');
+  await ops.unmount();
+  delete process.env.REACT_APP_CONTRACT_ENABLED;
 });

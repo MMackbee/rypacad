@@ -5,6 +5,7 @@ import AthleteMembershipCard from '../components/AthleteMembershipCard';
 import BottomTabBar from '../components/BottomTabBar';
 import HandicapCard from '../components/HandicapCard';
 import { Avatar } from '../components/MediaPlaceholder';
+import ParentContractCard from '../components/ParentContractCard';
 import PhoneFrame from '../components/PhoneFrame';
 import ProgressMeter, { meterColor } from '../components/ProgressMeter';
 import { ReservedChip } from '../components/Reserved';
@@ -121,6 +122,9 @@ export default function AthleteDetail({ variant = 'populated', bare = false, ath
             <Body size={12}>{loginStatusLine(athlete)}</Body>
           </Card>
         ) : null}
+        {/* Parents log for their kids (owner, 2026-10-28; spec 4.3): the
+            child's month calendar and Log today sheet, behind the switch. */}
+        {role === 'parent' && showContract ? <ParentContractCard athleteId={athleteId} athleteName={athlete?.name} /> : null}
 
         {data?.hasEnoughData ? (
           <>
