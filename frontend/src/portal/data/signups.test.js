@@ -93,3 +93,17 @@ test('a single-token buyer moved to t-6 reads pending and makes the row unpaid (
   const onSingle = athletes.map((a) => (a.id === 'a3' ? { ...a, billing: { status: 'active', oneTime: true } } : a));
   expect(buildSignupRows({ households, athletes: onSingle, invites, now }).rows.find((r) => r.householdId === 'h2').athletes[0].billing).toBe('active');
 });
+
+test('a test household (test: true) is never a sign-up row, and its athletes make no duplicate flag (owner, 2026-10-15)', () => {
+  const real = { id: 'kim', name: 'Kim family', signup: { at: new Date('2026-10-01T09:00:00'), mode: 'parent' }, guardian: { name: 'Pat Kim', email: 'pat@x.com', phone: '1' } };
+  const testFamily = { id: 'ryp-test-family', name: 'RYP Test Family', test: true, signup: { at: new Date('2026-10-02T09:00:00'), mode: 'parent' }, guardian: { name: 'RYP Test Parent', email: 'makel+testparent@rypgolf.com', phone: null } };
+  const kids = [
+    { id: 'k1', householdId: 'kim', name: 'Ava Kim', dob: '2012-05-14', packageId: 't-6', billing: { status: 'pending' } },
+    // Same name and birthday as a real child: still no duplicate flag, the test family is not a family.
+    { id: 'ryp-test-ava', householdId: 'ryp-test-family', test: true, name: 'Ava Kim', dob: '2012-05-14', packageId: null },
+  ];
+  const { rows, counts } = buildSignupRows({ households: [testFamily, real], athletes: kids, now });
+  expect(rows.map((r) => r.householdId)).toEqual(['kim']);
+  expect(rows[0].flags).toEqual([]);
+  expect(counts).toEqual({ all: 1, unpaid: 1, flagged: 0, unresolved: 0 });
+});

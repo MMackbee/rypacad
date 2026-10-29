@@ -9,6 +9,8 @@ import StatusBadge from '../components/StatusBadge';
 import TypeChip from '../components/TypeChip';
 import AgeGroupChip from '../components/AgeGroupChip';
 import { ReservedChip } from '../components/Reserved';
+import ClubheadChip from '../components/assessments/ClubheadChip';
+import { useOpenAssessmentWindows } from '../hooks/assessments';
 import { BackLink, Body, Card, ScreenTitle, SectionLabel, SignOutButton, Tick } from '../components/Primitives';
 import useRoster from '../hooks/useRoster';
 import * as hooks from '../hooks';
@@ -228,7 +230,7 @@ export default function Roster({ bare = false, onSignOut, onOpenAthlete }) {
  * @param {'coach'|'ops'|'owner'} [role]  Who is viewing - "Cancel session"
  *   only renders for ops/owner.
  */
-export function SessionAttendance({ variant = 'pre', bare = false, onBack, sessionId, blockIndex, block, role = 'coach' }) {
+export function SessionAttendance({ variant = 'pre', bare = false, onBack, sessionId, blockIndex, block, role = 'coach', onOpenClubhead }) {
   const { roster: demoRoster, marks: demoMarks, mark: demoMark, counts: demoCounts, sessionState: demoState } =
     useRoster({ variant });
   // Seed header: the generated season narrowed by blockIndex. Live header:
@@ -257,6 +259,10 @@ export function SessionAttendance({ variant = 'pre', bare = false, onBack, sessi
   // only used when `live` below is true.
   const liveAttendance = useSessionAttendance(sessionId);
   const live = isLive() && sessionId != null;
+  // Assessments (2026-10-14 spec 5): which athletes have an open window, for
+  // the golf coach's "Clubhead speed" entry on a training session. Read only
+  // when the route gave the entry (a viewer the rules let read windows).
+  const openWindows = useOpenAssessmentWindows({ enabled: Boolean(onOpenClubhead) });
 
   // Tournament results (Sprint 7 pin, TEAM.md), always called (rules of
   // hooks) - only read/written once the coach opens the results view below.
@@ -604,7 +610,11 @@ export function SessionAttendance({ variant = 'pre', bare = false, onBack, sessi
                     />
                   )
                 }
-              />
+              >
+                {session?.type === 'training' && onOpenClubhead ? (
+                  <ClubheadChip entry={openWindows.data?.byAthlete?.[athlete.id]} name={athlete.name} onOpen={() => onOpenClubhead(athlete.id, athlete.name)} />
+                ) : null}
+              </AthleteRow>
               {/* Optional reason, indented to align under the name. Never a
                   required field - a required note is how attendance stops
                   getting marked at all. Tap the chip to add or edit; the

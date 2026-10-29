@@ -1,6 +1,6 @@
 import React from 'react';
 import { color, font, radius } from '../tokens';
-import * as hooks from '../hooks';
+import AssessmentsEntryCard from '../components/AssessmentsEntryCard';
 import AthleteMembershipCard from '../components/AthleteMembershipCard';
 import BottomTabBar from '../components/BottomTabBar';
 import HandicapCard from '../components/HandicapCard';
@@ -14,28 +14,6 @@ import { useAthleteDetail } from '../hooks';
 import { loginStatusLine } from '../data/billingCopy';
 import { contractEnabled } from '../data/contractFlag';
 import { reservedTag } from '../data/reserved';
-
-/**
- * Sprint 10 pin C: same fallback rationale as DiagnosticCapture.js's own
- * useDiagnosticState - useDiagnostic() in this worktree takes no argument
- * and returns { athlete, sections }, not the pinned { latest, draft,
- * sections }. Called with the pinned athleteId argument regardless (the old
- * implementation just ignores it); `latest` defaults to null (honest "no
- * capture yet") until routing lands the real shape.
- */
-function useLatestDiagnostic(athleteId) {
-  const state = hooks.useDiagnostic(athleteId);
-  // `sections` is the field catalogue the capture's `values` are keyed
-  // against — it lives BESIDE `latest` in the hook payload, not inside it
-  // (PM integration browser pass: the card read latest.sections, which a
-  // capture doc never carries, so it rendered "No capture yet" forever).
-  return {
-    latest: state.data?.latest ?? null,
-    sections: state.data?.sections ?? [],
-    loading: state.loading,
-    error: state.error,
-  };
-}
 
 /**
  * 09 · Athlete Detail - parent view of one linked athlete.
@@ -59,13 +37,12 @@ function useLatestDiagnostic(athleteId) {
  *   AthleteDetailRoute (PortalRoutes.js is not this lane's to edit — see the
  *   sprint report) now that Sprint 10 pin I already routes coach here too.
  */
-export default function AthleteDetail({ variant = 'populated', bare = false, athleteId, role = 'parent', backLabel, onBack }) {
+export default function AthleteDetail({ variant = 'populated', bare = false, athleteId, role = 'parent', backLabel, onBack, onOpenAssessments }) {
   // athleteId comes from the route (/portal/athlete/:athleteId) — dropping it
   // here was QA re-sweep #1: the hook's by-id fetch was fixed but never
   // received an id, so every child rendered as the seed athlete.
   const { data } = useAthleteDetail({ variant, athleteId });
   const athlete = data?.athlete;
-  const diagnostic = useLatestDiagnostic(athleteId);
   /**
    * Sprint 11 pin H (quick win): the back link used to read the hardcoded
    * seed string "Whitfield family" regardless of whose record this actually
@@ -115,6 +92,15 @@ export default function AthleteDetail({ variant = 'populated', bare = false, ath
         <AthleteMembershipCard athleteId={athleteId} athlete={athlete} role={role} />
         {/* The handicap on file, ops and owner only: a reserved block is booked on it. */}
         <HandicapCard athleteId={athleteId} athlete={athlete} role={role} />
+        {/* Assessments (2026-10-14 spec 5): coaches, Phil, ops and owner open
+            this athlete's results; the route passes the handler only to them. */}
+        {onOpenAssessments ? (
+          <AssessmentsEntryCard
+            body="Every physical assessment window for this athlete: scores, flags and every trial."
+            label="Open results"
+            onOpen={() => onOpenAssessments(athlete?.name ?? null)}
+          />
+        ) : null}
         {/* Sprint 20 (spec 3.2): the child-login state. Rendered only when the
             payload carries loginEmail (legacy athletes have neither field). */}
         {athlete && 'loginEmail' in athlete ? (
@@ -131,7 +117,6 @@ export default function AthleteDetail({ variant = 'populated', bare = false, ath
             <StatGrid athlete={athlete} board={showContract} />
             {data.upcoming ? <UpcomingSessions upcoming={data.upcoming} /> : null}
             {showContract ? <ContractHistory history={data.history} /> : null}
-            <ProgressSummary latest={diagnostic.latest} sections={diagnostic.sections} />
           </>
         ) : (
           <LimitedData checklist={(data?.checklist ?? []).filter((item) => showContract || item.id !== 'contract')} contract={showContract} />
@@ -210,70 +195,6 @@ function ContractHistory({ history }) {
         A low month can reflect an academy closure — closure days are excluded from the
         denominator, so they never count against attendance.
       </Body>
-    </Card>
-  );
-}
-
-/**
- * Sprint 10 pin C: the scan found this card shipping developer commentary
- * ("arrives here in a later phase") straight to a parent. It now shows the
- * latest PUBLISHED diagnostic capture's real values, grouped by section
- * exactly as they were entered, or the honest empty state when there is
- * none - never a promise about a future phase.
- */
-function ProgressSummary({ latest, sections: catalogue = [] }) {
-  // A capture doc is { values: { <fieldId>: number|string }, ... }; the
-  // display groups those values by the catalogue's sections and shows only
-  // the sections/fields the coach actually entered (an indoor capture
-  // never fills the outdoor sections, and a blank row is not a result).
-  const values = latest?.values ?? null;
-  const sections = values
-    ? catalogue
-        .map((s) => ({
-          id: s.id,
-          title: s.title,
-          fields: (s.fields ?? [])
-            .filter((f) => values[f.id] !== undefined && values[f.id] !== null && values[f.id] !== '')
-            .map((f) => ({ id: f.id, label: f.label, unit: f.unit, value: values[f.id] })),
-        }))
-        .filter((s) => s.fields.length > 0)
-    : [];
-  return (
-    <Card large>
-      <SectionLabel style={{ marginBottom: 13 }}>Diagnostic capture</SectionLabel>
-      {sections.length === 0 ? (
-        <Body size={12}>No capture yet — the coach records this at a session.</Body>
-      ) : (
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
-          {sections.map((section) => (
-            <div key={section.id ?? section.title}>
-              <div style={{ font: `600 12px ${font.body}`, color: color.text, marginBottom: 6 }}>
-                {section.title}
-              </div>
-              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 14 }}>
-                {(section.fields ?? []).map((f) => (
-                  <div key={f.id ?? f.label} style={{ minWidth: 70 }}>
-                    <div
-                      style={{
-                        font: `400 9px ${font.body}`,
-                        textTransform: 'uppercase',
-                        letterSpacing: '.08em',
-                        color: color.textTertiary,
-                      }}
-                    >
-                      {f.label}
-                    </div>
-                    <div style={{ font: `600 15px ${font.body}`, color: color.text, marginTop: 2 }}>
-                      {f.value ?? '—'}
-                      {f.unit ? <span style={{ font: `400 11px ${font.body}` }}> {f.unit}</span> : null}
-                    </div>
-                  </div>
-                ))}
-              </div>
-            </div>
-          ))}
-        </div>
-      )}
     </Card>
   );
 }

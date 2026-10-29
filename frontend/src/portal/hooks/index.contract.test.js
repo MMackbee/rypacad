@@ -18,7 +18,6 @@ jest.mock('./live', () => ({
   isLive: jest.fn(),
   createContractLog: jest.fn(),
   fetchAthlete: jest.fn(),
-  fetchAthleteDiagnostics: jest.fn(),
   fetchBookings: jest.fn(),
   fetchContractLogs: jest.fn(),
   fetchCurrentUser: jest.fn(),
@@ -129,7 +128,7 @@ describe('deriveWhoNeedsCall uses the buffer and the window', () => {
     { id: 'a3', name: 'Nico', contractMinutes: null },
   ];
   const who = (today, contractLogs = []) =>
-    deriveWhoNeedsCall({ athletes, pendingCount: 0, noshowBookings: [], contractLogs, publishedDiagnosticAthleteIds: [], today })
+    deriveWhoNeedsCall({ athletes, pendingCount: 0, noshowBookings: [], contractLogs, baselineAthleteIds: [], today })
       .contractBehind;
 
   test('nobody before the season or inside the buffer', () => {
@@ -201,7 +200,6 @@ describe('live loaders', () => {
     live.fetchAthlete.mockResolvedValue({ id: 'a1', name: 'Jordan', contractMinutes: 45, packageId: null, householdId: null });
     live.fetchBookings.mockResolvedValue([]);
     live.fetchContractLogs.mockResolvedValue([]);
-    live.fetchAthleteDiagnostics.mockResolvedValue([]);
     const h = await mountHook(() => useAthleteDashboard());
     expect(h.result.current.data.contract).toMatchObject({
       kind: 'behind',

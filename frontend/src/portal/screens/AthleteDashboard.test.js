@@ -10,6 +10,7 @@ import AthleteDashboard from './AthleteDashboard';
 
 let mockContract;
 let mockOnboarding = null;
+let mockOldCaptureFlag = true;
 let mockMine = { data: null, loading: false, error: null };
 jest.mock('../hooks/packageChange', () => ({ useChangePackage: () => ({ change: async () => ({}) }) }));
 let mockTokens = null;
@@ -31,7 +32,7 @@ jest.mock('../hooks', () => ({
       nextSession: null,
       contract: mockContract,
       onboarding: mockOnboarding,
-      diagnosticCaptured: true,
+      diagnosticCaptured: mockOldCaptureFlag,
     },
   }),
 }));
@@ -232,4 +233,13 @@ describe('Commitment Contract hidden (owner ruling 2026-09-30)', () => {
     expect(n.text()).not.toContain('Commitment Contract');
     await n.unmount();
   });
+});
+
+test('the old "Book your Diagnostic" card never shows from live data (assessments spec 8)', async () => {
+  mockContract = null;
+  mockOldCaptureFlag = false;
+  const r = await renderScreen(<AthleteDashboard bare />);
+  expect(r.text()).not.toContain('Book your Diagnostic');
+  await r.unmount();
+  mockOldCaptureFlag = true;
 });

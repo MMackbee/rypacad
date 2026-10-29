@@ -8,6 +8,7 @@
 import { differenceInYears, format, parseISO } from 'date-fns';
 import { packageById } from './packages';
 import { billingStatusOf } from './billingCopy';
+import { withoutTestFamilies } from './testFamily';
 
 /** An open invite older than this is 'invited-stale' - ops fixes the email (spec 3.2, 7). */
 export const STALE_INVITE_DAYS = 7;
@@ -61,8 +62,13 @@ function loginFor(athlete, invite, now) {
  * (`signup` present; legacy provisioned households are not sign-ups), in
  * the input order (hooks/signups.js queries `signup.at desc`). Returns
  * `{ rows, counts: { all, unpaid, flagged, unresolved }, unresolved }` (D9).
+ * A test household (`test: true`, data/testFamily.js) is never a row, and
+ * its athletes never make a duplicate-child flag.
  */
-export function buildSignupRows({ households = [], athletes = [], invites = [], flaggedBookings = [], calendlyEvents = [], now = new Date() }) {
+export function buildSignupRows({ households: allHouseholds = [], athletes: allAthletes = [], invites = [], flaggedBookings = [], calendlyEvents = [], now = new Date() }) {
+  // Owner 2026-10-15: staging shares the production database, so the test
+  // family sits beside real ones; the report leaves it out.
+  const { households, athletes } = withoutTestFamilies({ households: allHouseholds, athletes: allAthletes });
   const today = format(now, 'yyyy-MM-dd');
   const inviteByAthlete = new Map(invites.map((i) => [i.athleteId, i]));
   const byHousehold = new Map();

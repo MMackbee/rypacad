@@ -17,6 +17,11 @@ import ParentDashboard from './screens/ParentDashboard';
 import AthleteDashboard from './screens/AthleteDashboard';
 import FeedbackButton from './components/FeedbackButton';
 import { bump } from './hooks/invalidate';
+import {
+  AssessmentGolfRoute, AssessmentListRoute, AssessmentResultsRoute, AssessmentSettingsRoute, AssessmentWaveRoute, RequireAssessment, loadAssessmentList,
+} from './AssessmentRoutes';
+import { assessmentAccess } from './data/assessmentAccess';
+import ResearchConfirmGate from './components/ResearchConfirmGate';
 
 /*
  * Code splitting (2026-09-29): every screen used to ship in one 1.2 MB
@@ -39,7 +44,6 @@ const loadBook = () => import('./screens/BookSession');
 const loadCoaching = () => import('./screens/SpecialistBooking');
 const loadCoachDashboard = () => import('./screens/CoachDashboard');
 const loadRoster = () => import('./screens/Roster');
-const loadCapture = () => import('./screens/DiagnosticCapture');
 const loadSeason = () => import('./screens/SeasonSchedule');
 const loadContract = () => import('./screens/CommitmentContract');
 const loadAthleteDetail = () => import('./screens/AthleteDetail');
@@ -68,7 +72,6 @@ const SpecialistBooking = lazy(loadCoaching);
 const CoachDashboard = lazy(loadCoachDashboard);
 const Roster = lazy(loadRoster);
 const SessionAttendance = named(loadRoster, 'SessionAttendance');
-const CaptureFlow = named(loadCapture, 'CaptureFlow');
 const SeasonSchedule = lazy(loadSeason);
 const CommitmentContract = lazy(loadContract);
 const AthleteDetail = lazy(loadAthleteDetail);
@@ -114,15 +117,15 @@ const CURRENT_ROUTE_CHUNKS = {
   coach: [loadCoachDashboard],
   roster: [loadRoster],
   attendance: [loadRoster],
-  capture: [loadCapture],
   admin: [loadAdmin],
   staff: [loadStaff],
+  assessments: [loadAssessmentList],
 };
 const NEXT_ROUTE_CHUNKS = {
   family: [loadBook, loadCoaching, loadBilling, loadAthleteDetail, loadReservations, loadSettings, loadTour],
   home: [loadBook, loadMySchedule, loadContract, loadMembership, loadCoaching, loadSeason, loadSettings, loadTour],
-  coach: [loadRoster, loadCapture, loadAthleteDetail, loadTour],
-  'my-sessions': [loadRoster],
+  coach: [loadRoster, loadAthleteDetail, loadTour],
+  'my-sessions': [loadRoster, loadAssessmentList],
   admin: [loadAdminSignups, loadBilling, loadAthleteDetail, loadStaff],
 };
 const NEXT_WARM_DELAY_MS = 2500;
@@ -292,6 +295,7 @@ function AthleteDetailRoute() {
       role={role}
       backLabel={backLabel}
       onBack={() => navigate(back)}
+      onOpenAssessments={assessmentAccess(user) ? (name) => navigate(`/portal/assessments/athlete/${athleteId}`, { state: { name } }) : undefined}
     />
   );
 }
@@ -425,6 +429,7 @@ function AdminRoute({ onOpenAthlete, onSignOut }) {
       onOpenHousehold={(id) => navigate(`/portal/admin/households/${id}`)}
       onOpenSignups={() => navigate('/portal/admin/signups')}
       onOpenScholarships={owner ? () => navigate('/portal/admin/scholarships') : undefined}
+      onOpenAssessments={() => navigate('/portal/assessments')}
       onSignOut={onSignOut}
     />
   );
@@ -647,6 +652,7 @@ function SessionAttendanceRoute({ onBack }) {
       sessionId={state?.sessionId ?? undefined}
       block={state?.block ?? undefined}
       role={role}
+      onOpenClubhead={!live || assessmentAccess(user) ? (athleteId, name) => navigate(`/portal/assessments/golf/${athleteId}`, { state: { name } }) : undefined}
     />
   );
 }
@@ -781,12 +787,15 @@ export default function PortalRoutes() {
         path="home"
         element={
           <RequireRole roles={['athlete']}>
-            <AthleteDashboard
-              bare
-              onLog={go('/portal/contract')}
-              onBook={go('/portal/book')}
-              onSignOut={onSignOut}
-            />
+            {/* Assessments spec 7: the one-time research confirm, the 18+ member's own. */}
+            <ResearchConfirmGate>
+              <AthleteDashboard
+                bare
+                onLog={go('/portal/contract')}
+                onBook={go('/portal/book')}
+                onSignOut={onSignOut}
+              />
+            </ResearchConfirmGate>
           </RequireRole>
         }
       />
@@ -870,11 +879,14 @@ export default function PortalRoutes() {
         path="family"
         element={
           <RequireRole roles={['parent']}>
-            <ParentDashboard
-              bare
-              onOpenAthlete={openAthlete}
-              onSignOut={onSignOut}
-            />
+            {/* Assessments spec 7: the one-time research confirm before the family home. */}
+            <ResearchConfirmGate>
+              <ParentDashboard
+                bare
+                onOpenAthlete={openAthlete}
+                onSignOut={onSignOut}
+              />
+            </ResearchConfirmGate>
           </RequireRole>
         }
       />
@@ -987,12 +999,55 @@ export default function PortalRoutes() {
           </RequireRole>
         }
       />
+      {/* Assessments (2026-10-14 spec 5): the list - Phil, assessor staff,
+          ops and owner (AssessmentRoutes.js). */}
       <Route
-        path="capture"
+        path="assessments"
         element={
-          <RequireRole roles={['coach']}>
-            {/* Roster-first: pick the kid, then capture (owner's flow). */}
-            <CaptureFlow bare onCancel={go('/portal/coach')} />
+          <RequireRole roles={['coach', 'mental', 'ops', 'owner']}>
+            <RequireAssessment level="staff" landingFor={landingFor}>
+              <AssessmentListRoute />
+            </RequireAssessment>
+          </RequireRole>
+        }
+      />
+      <Route
+        path="assessments/wave/:waveId"
+        element={
+          <RequireRole roles={['coach', 'mental', 'ops', 'owner']}>
+            <RequireAssessment level="staff" landingFor={landingFor}>
+              <AssessmentWaveRoute />
+            </RequireAssessment>
+          </RequireRole>
+        }
+      />
+      <Route
+        path="assessments/athlete/:athleteId"
+        element={
+          <RequireRole roles={['coach', 'mental', 'ops', 'owner']}>
+            <RequireAssessment level="reader" landingFor={landingFor}>
+              <AssessmentResultsRoute />
+            </RequireAssessment>
+          </RequireRole>
+        }
+      />
+      <Route
+        path="assessments/golf/:athleteId"
+        element={
+          <RequireRole roles={['coach', 'mental', 'ops', 'owner']}>
+            <RequireAssessment level="reader" landingFor={landingFor}>
+              <AssessmentGolfRoute />
+            </RequireAssessment>
+          </RequireRole>
+        }
+      />
+      <Route
+        path="assessments/settings"
+        element={
+          <RequireRole roles={['coach', 'mental', 'ops', 'owner']}>
+            <RequireAssessment level="staff" landingFor={landingFor}>
+              <AssessmentSettingsRoute />
+            </RequireAssessment>
           </RequireRole>
         }
       />

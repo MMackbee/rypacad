@@ -53,7 +53,7 @@ export const CONSENTS = [
     id: 'dataCollection',
     title: 'Data collection',
     body:
-      'Name, date of birth, guardian contact, emergency and medical info, and training records. Collected only where a feature needs it. Training and performance numbers may also be used in research, with names removed.',
+      'Name, date of birth, guardian contact, emergency and medical info, and training records. Collected only where a feature needs it.',
     link: 'Read what is stored',
     checked: true,
   },
@@ -326,7 +326,7 @@ export const ATTENTION_LIST = [
 ];
 
 export const COACH_OUTSTANDING = [
-  { id: 'o1', label: 'Diagnostic not entered', detail: '2 athletes' },
+  { id: 'o1', label: 'Baseline due', detail: '2 athletes' },
   { id: 'o2', label: 'Attendance not closed', detail: '1 block' },
 ];
 
@@ -347,52 +347,6 @@ export const ROSTER = [
   { id: 'r4', name: 'J. Whitfield', meta: 'Age 14 · 20 min a day' },
   { id: 'r5', name: 'T. Alvarez', meta: 'Age 12 · 2nd month' },
   { id: 'r6', name: 'S. Bergstrom', meta: 'Age 13 · 6th month' },
-];
-
-/** Screen 14. Four numeric sections plus the video capture. */
-export const DIAGNOSTIC_ATHLETE = {
-  name: 'A. Nguyen',
-  meta: 'Diagnostic Protocol · Feb 18 · age 12',
-};
-
-export const DIAGNOSTIC_SECTIONS = [
-  {
-    id: 'launch',
-    title: 'Launch monitor',
-    fields: [
-      { id: 'clubhead', label: 'Clubhead speed', unit: 'mph' },
-      { id: 'ball', label: 'Ball speed', unit: 'mph' },
-      { id: 'smash', label: 'Smash factor', unit: '' },
-      { id: 'carry7i', label: 'Carry 7i', unit: 'yd' },
-    ],
-  },
-  {
-    id: 'mobility',
-    title: 'Mobility & stability',
-    fields: [
-      { id: 'hip', label: 'Hip rotation', unit: '°' },
-      { id: 'shoulder', label: 'Shoulder rotation', unit: '°' },
-      { id: 'balance', label: 'Single-leg balance', unit: 'sec' },
-    ],
-  },
-  {
-    id: 'shortgame',
-    title: 'Short game',
-    fields: [
-      { id: 'd30', label: '30 yd dispersion', unit: 'ft' },
-      { id: 'd50', label: '50 yd dispersion', unit: 'ft' },
-      { id: 'd70', label: '70 yd dispersion', unit: 'ft' },
-    ],
-  },
-  {
-    id: 'putting',
-    title: 'Putting',
-    fields: [
-      { id: 'p3', label: '3 ft made', unit: '/10' },
-      { id: 'p6', label: '6 ft made', unit: '/10' },
-      { id: 'p10', label: '10 ft start line', unit: '%' },
-    ],
-  },
 ];
 
 /**

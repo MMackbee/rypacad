@@ -68,7 +68,7 @@ async function signUpInFiveSteps() {
   await r.click('Sign and submit');
   expect(mockCalls).toHaveLength(1);
   expect(mockCalls[0][1].athletes).toEqual([
-    { name: 'Jordan', dob: '2012-06-17', packageId: 't-12', contractMinutes: null, facilityRequested: false, handicap: null, loginEmail: null },
+    { name: 'Jordan', dob: '2012-06-17', packageId: 't-12', contractMinutes: null, facilityRequested: false, handicap: null, loginEmail: null, research: { value: false, assent: false } },
   ]);
   // The receipt and its "What happens next" say nothing about a contract.
   expect(r.text()).toContain("You're in");

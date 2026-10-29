@@ -8,6 +8,7 @@
  */
 import { ALL_PACKAGES, ELITE, packageById } from './packages';
 import { householdFacility } from './facility';
+import { researchAnswer } from './researchConsent';
 
 export const EMAIL_RE = /^\S+@\S+\.\S+$/;
 export const ADULT_AGE = 18;
@@ -27,6 +28,8 @@ export function newAthleteEntry() {
   seq += 1;
   return {
     key: `new-${seq}`, name: '', dob: '', packageId: null, handicap: '', ownLogin: false, loginEmail: '',
+    // Assessments spec 7: the research opt-in and, under 18, the assent box.
+    research: false, researchAssent: false,
   };
 }
 
@@ -197,9 +200,14 @@ function athleteBodies(form) {
   return form.athletes.map((a, i) => athleteBody(a, i === holder));
 }
 
-/** Contract 1.2 request body. Athlete mode: no relationship, no child login (the caller IS the login). */
-export function buildCreateFamilyPayload(form) {
+/**
+ * Contract 1.2 request body. Athlete mode: no relationship, no child login
+ * (the caller IS the login). Each athlete carries its research answer
+ * (assessments spec 7), under 18 by `todayISO`; createFamily re-checks it.
+ */
+export function buildCreateFamilyPayload(form, { todayISO } = {}) {
   const parent = form.mode === 'parent';
+  const researchOf = (a) => researchAnswer({ ticked: a.research === true, assent: a.researchAssent === true, minor: parent && !isAdultOnDate(a.dob, todayISO) });
   return {
     mode: form.mode,
     contact: {
@@ -208,7 +216,7 @@ export function buildCreateFamilyPayload(form) {
       phone: form.contact.phone.trim(),
       relationship: parent ? form.contact.relationship || null : null,
     },
-    athletes: athleteBodies(form).map((a) => (parent ? a : { ...a, loginEmail: null })),
+    athletes: athleteBodies(form).map((a, i) => ({ ...(parent ? a : { ...a, loginEmail: null }), research: researchOf(form.athletes[i]) })),
     emergencyContact: emergencyBody(form.emergencyContact),
     medical: form.medical.trim() || null,
     consents: {

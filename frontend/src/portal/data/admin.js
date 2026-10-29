@@ -19,7 +19,7 @@ export const OUTSTANDING = [
   { id: 'o2', who: 'M. Okonkwo', why: '3 no-shows this month', tag: 'Attendance', tone: 'red', packageIds: ['t-12'] },
   // `kind` as the live rows carry it: the screen drops 'contract' rows while the contract is hidden.
   { id: 'o3', kind: 'contract', who: 'R. Sandoval', why: 'Contract at 54% with 6 days left', tag: 'Contract', tone: 'yellow', packageIds: ['t-6'] },
-  { id: 'o4', who: '2 athletes', why: 'Diagnostic not entered since enrollment', tag: 'Onboarding', tone: 'yellow', packageIds: ['t-6'] },
+  { id: 'o4', who: '2 athletes', why: 'Baseline due', tag: 'Assessment', tone: 'yellow', packageIds: ['t-6'] },
 ];
 
 export const ADMIN_METRICS = {

@@ -12,7 +12,6 @@ jest.mock('../hooks', () => ({
     : mockDetail),
   // No useHousehold mock on purpose (perf wave B): the back label comes off
   // useAthleteDetail's householdName, and a stray second load would crash here.
-  useDiagnostic: () => ({ data: null, loading: false, error: null }),
   // The parent's contract card (ParentContractCard), still loading here.
   useParentContract: () => ({ month: null, loading: true, error: null, logPractice: jest.fn(), removeLog: jest.fn(), ensureContractStart: jest.fn(), loggedToday: false, todayMinutes: 0, required: 20 }),
   useAssignPackages: () => ({ assign: async () => {} }),
@@ -179,4 +178,17 @@ test('a parent sees the contract card only with the switch on; staff never do', 
   expect(ops.text()).not.toContain('Commitment Contract');
   await ops.unmount();
   delete process.env.REACT_APP_CONTRACT_ENABLED;
+});
+
+test('staff and coaches get an Assessments card that opens the results with the name; parents do not', async () => {
+  const athlete = { name: 'Jordan', subline: 'Age 14', contractMinutes: 45, packageId: 't-12', loginEmail: null, login: { state: 'none', claimedAt: null } };
+  mockDetail = { data: { athlete, history: [], checklist: [], hasEnoughData: false }, loading: false, error: null };
+  const opened = [];
+  const coach = await renderScreen(<AthleteDetail bare athleteId="a1" role="coach" backLabel="Roster" onBack={() => {}} onOpenAssessments={(name) => opened.push(name)} />);
+  await coach.click('Open results');
+  expect(opened).toEqual(['Jordan']);
+  await coach.unmount();
+  const parent = await renderScreen(<AthleteDetail bare athleteId="a1" role="parent" />);
+  expect(parent.button('Open results')).toBeNull();
+  await parent.unmount();
 });

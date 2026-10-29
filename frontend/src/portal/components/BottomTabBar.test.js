@@ -9,6 +9,7 @@ import BottomTabBar, { TABS } from './BottomTabBar';
  */
 let mockSessionSelfManaged = false;
 jest.mock('../hooks/useAuthSession', () => ({ __esModule: true, useSelfManaged: () => mockSessionSelfManaged }));
+import { publishAssessorTab } from '../hooks/assessorTab';
 
 const labels = (r) => [...r.container.querySelectorAll('nav button')].map((b) => b.textContent);
 
@@ -57,7 +58,7 @@ test('selfManaged never changes a parent or staff bar', async () => {
   expect(labels(parent)).toEqual(['Home', 'Reservations', 'Billing', 'Tour', 'Settings']);
   await parent.unmount();
   const coach = await renderScreen(<BottomTabBar role="coach" selfManaged />);
-  expect(labels(coach)).toEqual(['Today', 'Roster', 'Capture']);
+  expect(labels(coach)).toEqual(['Today', 'Roster']);
   await coach.unmount();
 });
 
@@ -65,7 +66,49 @@ test('mental: Sessions, Athletes, Contract (key mental-contract) and Tour, with 
   delete process.env.REACT_APP_CONTRACT_ENABLED;
   const r = await renderScreen(<BottomTabBar role="mental" active="athletes" />, { path: '/portal/mental' });
   expect(['Sessions', 'Athletes', 'Contract', 'Tour'].every((l) => r.text().includes(l))).toBe(true);
-  expect(TABS.mental.map((t) => t.key)).toEqual(['sessions', 'athletes', 'mental-contract', 'tour']);
+  expect(TABS.mental.map((t) => t.key)).toEqual(['sessions', 'athletes', 'mental-contract', 'assessments', 'tour']);
+  expect(labels(r)).toEqual(['Sessions', 'Athletes', 'Contract', 'Tour']);
   expect(TABS.mental.find((t) => t.key === 'mental-contract').route).toBe('/portal/mental/contract');
   r.unmount();
+});
+
+test('Diagnostic Capture is gone: no Capture tab for a coach or for Phil (assessments spec 8)', async () => {
+  const coach = await renderScreen(<BottomTabBar role="coach" />);
+  expect(labels(coach)).toEqual(['Today', 'Roster']);
+  await coach.unmount();
+  const phil = await renderScreen(<BottomTabBar role="coach" specialistId="phil" />);
+  expect(labels(phil)).not.toContain('Capture');
+  await phil.unmount();
+});
+
+test('Assessments: for Phil and for staff the owner gave the permission; never a plain coach (assessments spec 5)', async () => {
+  const phil = await renderScreen(<BottomTabBar role="coach" specialistId="phil" active="assessments" />);
+  expect(labels(phil)).toEqual(['Sessions', 'Assessments', 'Tour']);
+  expect(phil.button('Assessments').getAttribute('aria-current')).toBe('page');
+  await phil.click('Assessments');
+  expect(phil.location().pathname).toBe('/portal/assessments');
+  await phil.unmount();
+  const assessor = await renderScreen(<BottomTabBar role="coach" assessments />);
+  expect(labels(assessor)).toEqual(['Today', 'Roster', 'Assessments']);
+  await assessor.unmount();
+  publishAssessorTab(true);
+  try {
+    const fromSession = await renderScreen(<BottomTabBar role="coach" />);
+    expect(labels(fromSession)).toEqual(['Today', 'Roster', 'Assessments']);
+    await fromSession.unmount();
+  } finally {
+    publishAssessorTab(false);
+  }
+  const plain = await renderScreen(<BottomTabBar role="coach" />);
+  expect(labels(plain)).toEqual(['Today', 'Roster']);
+  await plain.unmount();
+  const mental = await renderScreen(<BottomTabBar role="mental" />);
+  expect(labels(mental)).toEqual(['Sessions', 'Athletes', 'Contract', 'Tour']);
+  await mental.unmount();
+  const mentalAssessor = await renderScreen(<BottomTabBar role="mental" assessments />);
+  expect(labels(mentalAssessor)).toEqual(['Sessions', 'Athletes', 'Contract', 'Assessments', 'Tour']);
+  await mentalAssessor.unmount();
+  const owner = await renderScreen(<BottomTabBar role="owner" assessments />);
+  expect(labels(owner)).not.toContain('Assessments');
+  await owner.unmount();
 });

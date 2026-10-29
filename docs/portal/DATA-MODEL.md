@@ -25,7 +25,6 @@ serves.
 | `contractLogs` | `{athleteId}_{date}` | Pinned by contract v1: one log per athlete per day, duplicate-proof by construction. |
 | `tournamentResults` | `{sessionId}_{athleteId}` | **Contract v1.5, id scheme unchanged by v1.6.** One result per athlete per tournament, enforced by the keyspace itself — the same pattern as `bookings` and `contractLogs`. Corrections overwrite via update; there is no delete in v1. |
 | `enrollmentRequests` | the guardian's Firebase Auth uid | **Contract v1.8, Sprint 10.** Same rationale as `users`: the caller-identity check in rules (`request.auth.uid == uid`) is a plain equality against the doc id, no `get()` needed. Seed uses a readable slug (`parent-new`) like every other uid-keyed doc in the emulator. |
-| `athletes/{athleteId}/diagnostics` | auto id | **Contract v1.8, Sprint 10.** A capture history, not a keyspace-enforced singleton — an athlete gets many captures over time, so there is no natural deterministic key the way `bookings`/`contractLogs`/`tournamentResults` have one. Seed uses readable slugs (`published-1`, `draft-1`) in the same "readable over random, the emulator mints no real auto-ids anyway" spirit as the `users` row above. |
 | `staffInvites` | auto id | **Contract v1.8, Sprint 10.** Not a keyspace-enforced collection either — many invites can exist over time, including two for the same email (a re-invite after one lapses). Seed uses a readable slug (`invite-1`). |
 | `tokenPeriods` | `{athleteId}_{periodKey}` | **Contract v2.1, Part 2 (Sprint 13) — BUILT.** One issuance doc per athlete per period, keyspace-enforced like `bookings`/`contractLogs`. Seed uses one real doc (`tokenPeriods/jordan_<currentPeriodKey>`); see [below](#tokenperiods-contract-v21-part-2). |
 | `graceTokens` | auto id | **Contract v2.1, Part 2 — BUILT.** Many grace tokens can exist over an athlete's history (one per minting event), no natural deterministic key. Seed uses a readable slug (`grace-1`), the same "emulator mints no real auto-ids" convention as `staffInvites`/diagnostics ids above; the sweep script (`scripts/sweep-waitlist.mjs`) mints its own with a `sweep-<sessionId>-<athleteId>-<n>` slug for the same reason. See [below](#gracetokens-contract-v21-part-2). |
@@ -35,6 +34,9 @@ serves.
 | `calendlyEvents` | `{inviteeUuid}_{event}` | **Contract v3.0.1 (Sprint 20).** `calendlyWebhook`'s idempotency ledger, the `stripeEvents` pattern with a composed id (Calendly has no event id; the invitee uri's uuid + `invitee.created \| invitee.canceled` is unique per delivery). Seed: `seedinv0001_invitee.created`. |
 | `scholarshipApplications` | first 32 hex chars of `sha256(season \| email \| athlete name, lower-cased \| dob)` | **2026-10-01.** One application per family + athlete + season, enforced by the keyspace: `submitScholarship` computes the id from the answers, so a family sending the form again lands on the same doc. Not guessable from outside and never shown. No seed. See [below](#scholarshipapplicationsid-owner-2026-10-01). |
 | `scholarshipMeta` | the UTC day, `YYYY-MM-DD` | **2026-10-01.** `submitScholarship`'s daily counter, one doc per day. No seed. |
+| `athletes/{athleteId}/assessments` | `{season}-{kind}` (`2026-27-baseline`) | **2026-10-14 (assessments).** One window per athlete per test window, enforced by the keyspace: a wave cannot open a second baseline in a season. See [below](#assessments-2026-10-14). |
+| `athletes/{athleteId}/assessmentProfile` | `current` | **2026-10-14.** One profile per athlete: sex, first-test date, the season's med ball. |
+| `assessmentSettings` | `current` | **2026-10-14.** The one protocol settings doc; absent == the v1.2 defaults in `data/assessmentSettings.js`. |
 | `feedbackLimits` | the sender's Firebase Auth uid | **2026-10-15.** `submitFeedback`'s rate limit, one doc per account that has sent feedback. No seed. See [below](#feedbacklimitsuid-2026-10-15). |
 | `mentalNotes/{athleteId}/entries` | `intake`, the session id (`cal-<uuid>` or any `sessions` id), or `free-` + 8 base-36 characters | **2026-10-28 (mental tools).** One intake note and one note per 1:1 per athlete by construction; free notes get a random id. The parent doc `mentalNotes/{athleteId}` is never written. Seed: `mentalNotes/jordan/entries/{intake, cal-seedpast0001, cal-seedpast0002}`. See [below](#mentalnotesathleteidentriesentryid-2026-10-28). |
 | `contractCheckins` | `{athleteId}_{weekStart}` (`weekStart` = the Monday, `YYYY-MM-DD`) | **2026-10-28.** One check-in per athlete per contract week, enforced by the keyspace and pinned by the rules (`checkinId == athleteId + '_' + weekStart`). Seed: `jordan_<this Monday>`, `nico_<last Monday>`. See [below](#contractcheckinsathleteid_weekstart-2026-10-28). |
@@ -813,70 +815,9 @@ what a non-staff caller can do — **self-role-change by a non-owner stays
 denied**, exactly as before; an owner/ops account approving a request is
 setting up *someone else's* account, never elevating its own.
 
-### `athletes/{athleteId}/diagnostics/{captureId}` (contract v1.8, Sprint 10)
+### `athletes/{athleteId}/diagnostics/{captureId}` (removed 2026-10-14)
 
-Diagnostic capture persistence — the second silent data-loss path the scan
-flagged (TEAM.md pin C): a coach filling out the Diagnostic Capture screen
-had nothing backing it, so every capture vanished on refresh. Doc id is an
-auto id (no natural key — an athlete accumulates a capture history over
-time, the same shape as a photo or note log, not a one-per-day or
-one-per-session record like `contractLogs`/`bookings`).
-
-| Field | Type | Notes |
-|---|---|---|
-| `athleteId` | string | Matches the parent path segment — carried on the doc too so a collection-group read (below) doesn't need to parse the path to know whose capture it is. |
-| `capturedBy` | string | uid of the staff account that took the capture. |
-| `capturedAt` | timestamp | |
-| `updatedAt` | timestamp | |
-| `status` | string | `draft \| published`. A capture starts as a draft and is explicitly published — see the save/publish split below. |
-| `values` | map | `{ <fieldId>: number \| string \| null }`, keyed by the **existing `DIAGNOSTIC_SECTIONS` field ids** in `frontend/src/portal/data/seed.js` (the same catalogue the Diagnostic Capture screen renders its input rows from — never a second, independently-typed field list; the full enumerated key list is just below). A draft's `values` map holds only the fields entered so far; a published capture is expected to hold all of them, though the schema does not itself enforce completeness (a coach can publish a partial capture — the UI, not the rules, is where "are you sure" lives). |
-| `notes` | string \| null | Free-text, coach-entered. |
-
-That is the complete shape — six keys, `values` doing the heavy lifting.
-
-**The `values` key list**, enumerated by reading `DIAGNOSTIC_SECTIONS` in
-`seed.js` directly rather than retyped independently — thirteen field ids
-across four sections:
-
-| Section | Field ids |
-|---|---|
-| `launch` (Launch monitor) | `clubhead`, `ball`, `smash`, `carry7i` |
-| `mobility` (Mobility & stability) | `hip`, `shoulder`, `balance` |
-| `shortgame` (Short game) | `d30`, `d50`, `d70` |
-| `putting` (Putting) | `p3`, `p6`, `p10` |
-
-If a future sprint adds or renames a `DIAGNOSTIC_SECTIONS` field, this table
-goes stale until updated — it is a documentation mirror of `seed.js`, not a
-second source of truth the rules or the hook read from.
-
-**Rules** (routing lane implements): create/update by the assigned coach
-(`athleteData(athleteId).coachId == uid`), any specialist
-(`me().get('specialistId', null) != null`), or mental/ops/owner. Read: the
-athlete's own user and the household parent see **published only**
-(`resource.data.status == 'published'`) — a draft is a coach's working copy,
-never a family-facing document; staff see all (draft and published), the
-same "coach/specialist/mental/ops/owner" set as write.
-
-**Collection-group read** (routing lane implements; named here since it is
-the reason this document defines an `athleteId` field at all): a `match
-/{path=**}/diagnostics/{id}` rule allowing read for coach/mental/ops/owner/
-specialists turns "which athletes have no diagnostic yet" from an
-N-athletes-worth-of-reads admin problem into **one query** —
-`collectionGroup('diagnostics')` with no filter, read once, then diffed
-client-side against the full `athletes` list. See
-[Indexes](#indexes) below for why this specific read needs no index.
-
-**Hooks** (routing lane owns): `useDiagnostic(athleteId)` live ->
-`{ data: { latest (published capture \| null), draft (open draft \| null),
-sections }, saveDraft(values, notes), publish(values, notes) }`.
-`saveDraft` **upserts the athlete's single open draft** — a coach saving
-twice before publishing updates the same doc, not a second one; `publish`
-flips the open draft's `status` to `'published'`. A **second** publish (a
-follow-up capture weeks later) creates a **new** doc rather than overwriting
-the published one — history is the collection, exactly like
-`tournamentResults`' "no delete, corrections are same-id updates" precedent
-does NOT apply here: a diagnostic capture is a point-in-time record, and a
-newer capture is a new fact, not a correction of the old one.
+Diagnostic Capture was removed with the assessments release (assessments spec 8; production held 0 docs on 2026-10-14). The new portal no longer reads or writes a capture. `firestore.rules` keeps every diagnostics grant (reads and writes, per athlete and collection group) for this release: the rules reach production before the live portal is updated (staging shares production's backend), and the portal on `main` still reads and saves captures. The follow-up after the release (assessments plan Task 28) removes them and this note.
 
 ### `staffInvites/{id}` (contract v1.8, Sprint 10)
 
@@ -1396,18 +1337,6 @@ above:
   range filter on one field, with or without an `orderBy` on that same
   field — composite-free for the same reason the month-session-grid and
   season-standings range reads are, above.
-- **Athletes with no published diagnostic** — the `diagnostics`
-  [collection-group read](#athletesathleteiddiagnosticscaptureid-contract-v18-sprint-10)
-  minus the full `athletes` list, both already covered: the collection-group
-  read carries **no filter at all** (`collectionGroup('diagnostics').get()`,
-  filtered to `status == 'published'` client-side, same "filter in memory
-  because the collection is small" call this schema already makes for
-  `bookings`' cycle-usage `status` and `tournamentResults`' read-time
-  position), so there is nothing for an index to serve — a genuinely
-  unfiltered collection-group read needs no more of an index than a plain
-  collection `.get()` does. The `athletes` half rides the same unfiltered
-  read as the first bullet above.
-
 Two more v1.8 reads, both single equality filters on one field — automatic
 single-field index, no composite, same reasoning as every other
 single-equality-filter case in this file:
@@ -2094,11 +2023,6 @@ The seed script:
   exists (the sanity output prints `exists=false` for it, so the invariant
   is checked every run, not just asserted in a comment). Two athletes, one
   with a dob and tier, one with neither; all three consents true.
-- seeds two `athletes/jordan/diagnostics` captures (contract v1.8, pin C):
-  an older `published-1` with a value for **every** `DIAGNOSTIC_SECTIONS`
-  field id (13, enumerated [above](#athletesathleteiddiagnosticscaptureid-contract-v18-sprint-10)),
-  and a newer `draft-1` with just the launch monitor's first two fields —
-  both `capturedBy: 'coach-luke'`.
 - seeds ONE pending `staffInvites` doc (contract v1.8, pin E) at a
   clearly-fake address (`invite-test@example.com`, role coach,
   `specialistId: null`) — never a real person's email. There is no
@@ -2247,3 +2171,47 @@ The seed script:
     session/waitlist trio, `households.membership` + `stripeEvents`) listing
     every new doc by id, alongside the generic per-collection sample dump
     every collection already gets.
+
+## Assessments (2026-10-14)
+
+Phil Herder's Physical Performance Assessment protocol v1.2 replaces Diagnostic Capture (spec: `docs/portal/plans/2026-10-14-assessments/00-spec.md`; plan: `01-plan.md` beside it). Scores are never stored: every screen computes them from the trials (`frontend/src/portal/data/assessmentScoring.js`, `assessmentResults.js`). Writes are client writes validated by `firestore.rules` (`scripts/rules-probes/assessments.mjs`, `research.mjs`); one section per write, so each request checks only that section's trials and stays inside the rules' per-request expression cap.
+
+### `athletes/{athleteId}/assessments/{season}-{kind}`
+
+| Field | Type | Notes |
+|---|---|---|
+| `athleteId`, `season`, `kind` | string | `kind` is `baseline \| mid \| end`; the doc id is `{season}-{kind}`. |
+| `protocolVersion` | string | `v1.2`; results under another version are flagged and never compared. |
+| `circuitMode` | map | The settings snapshot the window ran under (`circuitModeOf`): trial counts, grip rest, stations, McGill mode, med ball side, golf timing, wave size, hop and RSImod entry, coefficient set. |
+| `status` | string | `open \| complete`. |
+| `circuitDate`, `golfDate`, `mcgillDate` | `YYYY-MM-DD` \| null | Coach-set, within 14 days of entry (rules `recentDate`); `season` is the circuit date's August-July season. An open window older than 14 days is marked complete, never moved into a new wave. Golf is due within 7 days of the circuit; McGill may be its own block within 14. The first golf or McGill save dates it. |
+| `weeksOfExposure` | int | Weeks from the profile's `firstTestDate` to `circuitDate`. |
+| `wave` | map | `{ id, position 1-4, coachUid }`. |
+| `readiness`, `log`, `anthro`, `grip`, `cmj`, `hop`, `medball`, `mcgill`, `golf`, `notTested` | map | One section each, shapes and ranges in the spec (4.1, 4.4) and `data/assessmentInput.js`. A 10/5 set is `{ rsiBest5, gctMs }` or every hop as `{ hopRsi: [<=10], hopGctMs: [<=10] }` (shape-checked by the rules, range-checked by the client). CMJ holds at most 3 scored trials. |
+| `enteredBy` | map | `{ [section]: uid }`, the writer of each section. |
+| `createdAt`, `updatedAt` | timestamp | Server time. |
+
+Access: owner, ops, Phil (`specialistId 'phil'`) and assessor staff read and write every section; every other coach reads, and writes the golf section and `golfDate` of an open window; families never read raw windows; delete is owner only. Collection-group reads (`collectionGroup('assessments')`) carry the same read rule and need no composite index (no filter, no order).
+
+### `athletes/{athleteId}/assessmentProfile/current`
+
+`{ athleteId, sex 'male' | 'female' | null, firstTestDate, medballMassKg 2 | 3 | 4, medballMethod 'speed' | 'distance', dominantHand, gripDevice, handlePosition, driver, season, updatedAt, updatedBy }`. Within a season the med ball method and mass never change once set, the first-test date never moves, and `season` only moves forward (Phil: "block mixing"); a window's med ball must be entered under a profile of its own season; the owner may correct a mistake. Staff write; staff and coaches read.
+
+### `assessmentSettings/current`
+
+The protocol's procedure as settings (spec 4.6): `protocolVersion`, `trialCounts`, `gripRestSec`, `stations`, `mcgillMode`, `medballSide`, `golfTiming`, `waveSize`, `wavesPerSession`, `hopEntry`, `rsiModEntry`, `coefficients` (Moore 2015, `verified`), `thresholds`, `updatedAt`, `updatedBy`. Every key is written on each save. The owner and Phil write; staff read. A procedure change saves under a new version label.
+
+### New fields on existing docs
+
+- `users.assessor` (boolean, absent == false): the Assessments permission for a coach or mental account. Only the owner sets it (Staff & Roles); it shows the Assessments tab and admits the account to every assessment write.
+- `athletes.consents` (map, absent on athletes created before 2026-10-14): `{ dataCollection, videoCapture, mediaRelease, research, signature: { name, date } }`, written by `createFamily`. `research` is `{ value, assent, recordedAt, recordedBy, history? }` or null: under 18 a yes needs the assent; 18+ the assent is null. The household's parent (or the 18+ member who created their own household) may set it once when none is recorded (the one-time confirm); the owner records a later change, the earlier answer appended to `history`. A window counts for research only under the answer in force on its `circuitDate`.
+
+Seed (`scripts/seed-firestore.mjs`, fixtures in `scripts/lib/assessment-fixtures.mjs`): jordan has a complete baseline 63 days back (mid-season eligible) and research yes; reese research no; nico not answered (the list cannot add him and Dana is asked at sign-in); sage-parker research yes. No `assessmentSettings` doc is seeded, so the defaults path runs.
+
+## Test households (2026-10-15)
+
+Staging - the Railway "Staging" environment, https://rypacad.ryptest.com, built from `develop` - runs on the production Firebase project, so the one test family the owner and Phil test with sits beside real families (owner, 2026-10-15: no separate staging database).
+
+- `households.test` and `athletes.test` (boolean, absent == false): `true` only on the test family - `households/ryp-test-family` "RYP Test Family" and its athletes `ryp-test-ava` (under 18) and `ryp-test-max` (18+) - written by the owner-run `scripts/provision-test-family.mjs` (`--dry-run`, then `--yes`). No client writes either field.
+- Every staff count and report leaves `test: true` households and their athletes out (`frontend/src/portal/data/testFamily.js`): the admin dashboard (enrolled, membership counts, lapsed households, outstanding rows, enrollment by package, and the Households card's "Households · N") and the sign-ups report. The membership export (`scripts/export-memberships.mjs`) skips them, and an ad-hoc export made for the owner (a past-families list) skips them too. Working lists (the assessments list, the staff households directory on the Households card, where the row is labelled Test) show the test family by name. The Commitment Contract board and the Monday check-in email (mental tools, 2026-10-28: `onContract` in `frontend/src/portal/data/contractBoard.js`, `functions/portal/contract-checkins.js`) leave `test: true` households out too; Yannick's Athletes list still shows everyone.
+- The test family has no package, no billing and no Stripe ids, and never books, waitlists or pays: sessions and Stripe are live on staging. The rules hold the booking half: `firestore.rules` athleteBillingOk refuses a booking, re-book or waitlist join for any `athletes.test == true` (a missing `billing` alone reads as paid). Its research answers start unanswered (the parent answers the one-time confirm at staging); `--reset` deletes its athletes' assessment windows and profiles and clears those answers, for another rehearsal.

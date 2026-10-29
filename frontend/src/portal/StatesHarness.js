@@ -30,9 +30,7 @@ import BookSession from './screens/BookSession';
 import ParentDashboard from './screens/ParentDashboard';
 import CoachDashboard from './screens/CoachDashboard';
 import Roster, { SessionAttendance } from './screens/Roster';
-import DiagnosticCapture from './screens/DiagnosticCapture';
 import AthleteDashboard from './screens/AthleteDashboard';
-import PracticeDNA from './screens/PracticeDNA';
 import CommitmentContract from './screens/CommitmentContract';
 import AthleteDetail from './screens/AthleteDetail';
 import Billing from './screens/Billing';
@@ -175,8 +173,6 @@ export const SCREEN_STATES = [
                demoForceFull: true,
                demoSelectedDate: addDaysISO(todayISO(), 3),
              }]] },
-  { id: '06', title: 'Practice DNA', Screen: PracticeDNA, role: 'athlete',
-    states: [['complete', 'Complete'], ['partial', 'Partial'], ['pending', 'Pending']] },
   { id: '07', title: 'Commitment Contract', Screen: CommitmentContract, role: 'athlete',
     states: [['ontrack', 'On track'], ['behind', 'Behind'], ['complete', 'Month complete']] },
   { id: '08', title: 'Parent Dashboard', Screen: ParentDashboard, role: 'parent',
@@ -245,9 +241,6 @@ export const SCREEN_STATES = [
    */
   { id: '13R', title: 'Roster (coach)', Screen: Roster, role: 'coach',
     states: [['default', 'Populated']] },
-  { id: '14', title: 'Diagnostic Capture', Screen: DiagnosticCapture, role: 'coach',
-    states: [['empty', 'Empty'], ['uploading', 'Uploading'], ['partial', 'Partial'],
-             ['complete', 'Complete']] },
   { id: '15', title: 'Admin Dashboard', Screen: AdminDashboard, role: 'ops admin',
     // 'ops' previews the Sprint 10 pin F tab set (Admin/Sessions/Tour, no
     // Staff) alongside the default owner set the other two states show.
@@ -733,7 +726,6 @@ function ComponentGallery() {
           <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
             <SavedToast />
             <SavedToast message="Draft saved" />
-            <SavedToast message="Published to Practice DNA" />
           </div>
         </Spec>
 

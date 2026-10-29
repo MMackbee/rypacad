@@ -75,9 +75,12 @@ const NO_FACILITY_ADD_ON = ['elite', 'single'];
  * @param {string} uid The caller (signs the facility waiver).
  * @param {boolean} facilityConsent `consents.facilityAccess`.
  * @param {string} todayISO Chicago today, `'YYYY-MM-DD'`.
+ * @param {?Object=} consents createFamily's consents and signature (see
+ *     consentsDoc); absent for addAthletes, which has no consent step.
  * @return {!Object} The document body.
  */
-function athleteDoc(a, householdId, uid, facilityConsent, todayISO) {
+function athleteDoc(a, householdId, uid, facilityConsent, todayISO,
+    consents) {
   const doc = {
     name: a.name, dob: a.dob, householdId, packageId: a.packageId,
     contractMinutes: a.contractMinutes, coachId: null, facilityAccess: false,
@@ -95,7 +98,32 @@ function athleteDoc(a, householdId, uid, facilityConsent, todayISO) {
     updatedAt: now(),
   };
   if (a.contractMinutes !== null) doc.contractStart = todayISO;
+  if (consents) doc.consents = consentsDoc(consents, a.research, uid);
   return doc;
+}
+
+/**
+ * `athletes/{id}.consents` (assessments spec 4.3): what the consent step
+ * asked, stored instead of discarded - the household and staff read it.
+ * The research answer is per athlete, dated and signed by the caller; a
+ * window's results count for research only from that date on.
+ * @param {{dataCollection: boolean, videoCapture: boolean,
+ *     mediaRelease: boolean, signature: {name: string, date: string}}}
+ *     consents The validated consents and the signature.
+ * @param {?{value: boolean, assent: ?boolean}} research The athlete's
+ *     answer, or null when not asked.
+ * @param {string} uid The caller.
+ * @return {!Object} The consents map.
+ */
+function consentsDoc(consents, research, uid) {
+  return {
+    dataCollection: consents.dataCollection === true,
+    videoCapture: consents.videoCapture === true,
+    mediaRelease: consents.mediaRelease === true,
+    research: research ? {value: research.value, assent: research.assent,
+      recordedAt: now(), recordedBy: uid} : null,
+    signature: consents.signature,
+  };
 }
 
 /**
@@ -170,7 +198,7 @@ async function refuseOpenInvites(tx, store, athletes) {
  * @param {{store: !Object, householdId: string, uid: string,
  *     athletes: !Array<!Object>, emergencyContact: ?Object,
  *     medical: ?string, facilityConsent: boolean,
- *     todayISO: string}} args The writes.
+ *     todayISO: string, consents: (?Object|undefined)}} args The writes.
  * @return {!Array<string>} The new athlete ids, in payload order.
  */
 function writeAthletes(tx, args) {
@@ -179,7 +207,7 @@ function writeAthletes(tx, args) {
   for (const a of args.athletes) {
     const ref = args.store.collection('athletes').doc();
     tx.set(ref, athleteDoc(a, args.householdId, args.uid,
-        args.facilityConsent, args.todayISO));
+        args.facilityConsent, args.todayISO, args.consents || null));
     if (med) tx.set(ref.collection('private').doc('medical'), med);
     if (a.loginEmail) {
       tx.set(args.store.collection('loginInvites').doc(a.loginEmail), {
@@ -258,7 +286,8 @@ async function createFamilyHandler(data, context, deps) {
         uid, athletes: facility.oneFacilityRequest(p.athletes),
         emergencyContact: p.emergencyContact,
         medical: p.medical, facilityConsent: p.consents.facilityAccess,
-        todayISO});
+        todayISO, consents: Object.assign({}, p.consents,
+            {signature: {name: p.signatureName, date: todayISO}})});
       tx.set(userRef, userDocFor(p, hhRef.id, athleteIds));
       return {householdId: hhRef.id, athleteIds};
     });
@@ -380,6 +409,6 @@ const claimInvite = functions.runWith({secrets: []}).https.onCall(
 
 module.exports = {
   addAthletes, addAthletesHandler, athleteDoc, claimInvite,
-  claimInviteHandler, createFamily, createFamilyHandler, householdNameFor,
-  medicalDoc, userDocFor,
+  claimInviteHandler, consentsDoc, createFamily, createFamilyHandler,
+  householdNameFor, medicalDoc, userDocFor,
 };

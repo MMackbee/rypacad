@@ -2,10 +2,16 @@ import React from 'react';
 import { color, font, radius, tint } from '../tokens';
 import Button from '../components/Button';
 import Field from '../components/Field';
-import { Body, Card, ScreenTitle, Tick } from '../components/Primitives';
+import Checkbox from '../components/Checkbox';
+import ResearchChoice from '../components/ResearchChoice';
+import { Body, Card, ScreenTitle } from '../components/Primitives';
 import { useEnrollmentForm } from '../hooks';
 import { CONSENT_TERMS, consentWording } from '../data/consentTerms';
-import { FACILITY_WAIVER_FOOTNOTE, FACILITY_WAIVER_REQUIRED } from '../data/signup';
+import { firstName } from '../data/researchConsent';
+import { FACILITY_WAIVER_FOOTNOTE, FACILITY_WAIVER_REQUIRED, isAdultOnDate } from '../data/signup';
+
+// The tick moved to components/Checkbox.js; RegistrationFacility.js still imports it from here.
+export { default as Checkbox } from '../components/Checkbox';
 
 /**
  * Registration's consent step, its info sheet and the checkbox (Sprint 20,
@@ -19,20 +25,28 @@ import { FACILITY_WAIVER_FOOTNOTE, FACILITY_WAIVER_REQUIRED } from '../data/sign
  * `facilityRequired` (an athlete kept the facility add-on on the package
  * step, owner 2026-09-30) makes the optional facility waiver required: its
  * footnote says why, and the error says how to get past it either way.
+ * Research (assessments spec 7) is its own opt-in, one per athlete, below
+ * the consents: shown when the caller passes `onResearch` (sign-up), with
+ * `athletes` and `todayISO` deciding who is under 18.
  */
-export function ConsentStep({ mode, consents, onChange, signatureName, onSignatureChange, onOpenInfo, showErrors, facilityRequired = false }) {
+export function ConsentStep({
+  mode, consents, onChange, signatureName, onSignatureChange, onOpenInfo, showErrors, facilityRequired = false,
+  athletes = [], todayISO, onResearch, onOpenResearch,
+}) {
   const { data } = useEnrollmentForm();
   const list = data?.consents ?? [];
 
   const set = (id, v) => onChange((prev) => ({ ...prev, [id]: v }));
   const footnoteOf = (consent) => (facilityRequired && consent.id === 'facilityAccess' ? FACILITY_WAIVER_FOOTNOTE : consent.footnote);
+  // A parent may add an 18+ athlete: then "Each athlete is a minor." is not true (review 2026-10-28).
+  const anAdult = mode !== 'athlete' && athletes.some((a) => isAdultOnDate(a.dob, todayISO));
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 13 }}>
       <Body size={13}>
         {mode === 'athlete'
           ? 'You are signing for yourself. Each of these is a separate decision — none is bundled into the others.'
-          : 'Each athlete is a minor. Each of these is a separate decision — none is bundled into the others.'}
+          : `${anAdult ? '' : 'Each athlete is a minor. '}Each of these is a separate decision — none is bundled into the others.`}
       </Body>
 
       {/*
@@ -85,6 +99,29 @@ export function ConsentStep({ mode, consents, onChange, signatureName, onSignatu
           </div>
         </Card>
       ))}
+
+      {onResearch ? (
+        <Card large>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 18 }}>
+            {(mode === 'athlete' ? athletes.slice(0, 1) : athletes).map((a) => {
+              const self = mode === 'athlete';
+              const name = firstName(a.name);
+              return (
+                <ResearchChoice
+                  key={a.key}
+                  name={name}
+                  self={self}
+                  minor={!self && !isAdultOnDate(a.dob, todayISO)}
+                  ticked={a.research === true}
+                  assent={a.researchAssent === true}
+                  onChange={({ ticked, assent }) => onResearch(a.key, { research: ticked, researchAssent: assent })}
+                  onReadMore={onOpenResearch ? () => onOpenResearch({ name, self }) : undefined}
+                />
+              );
+            })}
+          </div>
+        </Card>
+      ) : null}
 
       {showErrors && !(consents.dataCollection && consents.videoCapture) ? (
         <div data-field-error>
@@ -204,32 +241,5 @@ export function ConsentInfoSheet({ id, mode, onClose }) {
         </Button>
       </div>
     </div>
-  );
-}
-
-/** The round tick the consent cards use; the package step's facility add-on (RegistrationFacility.js) reuses it. */
-export function Checkbox({ checked, onChange, label }) {
-  return (
-    <button
-      type="button"
-      role="checkbox"
-      aria-checked={Boolean(checked)}
-      aria-label={label}
-      onClick={() => onChange(!checked)}
-      style={{
-        width: 26,
-        height: 26,
-        flex: 'none',
-        borderRadius: radius.pill,
-        background: checked ? color.primary : 'transparent',
-        border: checked ? 'none' : `1.5px solid ${color.faintText}`,
-        display: 'grid',
-        placeItems: 'center',
-        cursor: 'pointer',
-        padding: 0,
-      }}
-    >
-      {checked ? <Tick size={11} /> : null}
-    </button>
   );
 }

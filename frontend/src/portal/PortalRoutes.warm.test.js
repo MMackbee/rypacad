@@ -31,7 +31,6 @@ jest.mock('./screens/BookSession', () => mockScreen('BookSession'));
 jest.mock('./screens/SpecialistBooking', () => mockScreen('SpecialistBooking'));
 jest.mock('./screens/CoachDashboard', () => mockScreen('CoachDashboard'));
 jest.mock('./screens/Roster', () => ({ ...mockScreen('Roster'), SessionAttendance: () => null }));
-jest.mock('./screens/DiagnosticCapture', () => ({ ...mockScreen('DiagnosticCapture'), CaptureFlow: () => null }));
 jest.mock('./screens/SeasonSchedule', () => mockScreen('SeasonSchedule'));
 jest.mock('./screens/CommitmentContract', () => mockScreen('CommitmentContract'));
 jest.mock('./screens/AthleteDetail', () => mockScreen('AthleteDetail'));
