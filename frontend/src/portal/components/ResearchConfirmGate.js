@@ -8,6 +8,7 @@ import { Body, Card, ErrorNotice, ScreenTitle } from './Primitives';
 import useAuthSession from '../hooks/useAuthSession';
 import { isLive } from '../hooks/live';
 import { saveResearchConsent, useResearchConfirm } from '../hooks/researchConsent';
+import { SLOW_SAVE_MS } from '../hooks/assessmentSaves';
 import { RESEARCH_CONFIRM_TITLE, RESEARCH_SAVE_LABEL, confirmBody, firstName, researchAnswer } from '../data/researchConsent';
 import { joinNames } from '../data/signup';
 
@@ -20,7 +21,10 @@ const skipped = new Set();
  * before their home, and "Save my answer" records them (unticked saves as
  * no). Never a trap (Review Focus 5): a read that fails or is still loading
  * shows the home; a refused save says so, retries only what failed, and
- * offers "Skip for now" - the question returns at the next sign-in.
+ * offers "Skip for now" - the question returns at the next sign-in. A save
+ * the server has not acknowledged in 8 s (offline: the write neither lands
+ * nor fails) says so and offers "Skip for now" too, the save still running
+ * (review 2026-10-28).
  */
 export default function ResearchConfirmGate({ children }) {
   const live = isLive();
@@ -44,11 +48,14 @@ function ResearchConfirm({ pending, onDone, onSkip }) {
   const [saved, setSaved] = useState([]);
   const [saving, setSaving] = useState(false);
   const [failed, setFailed] = useState(false);
+  const [slow, setSlow] = useState(false);
   const [sheet, setSheet] = useState(null);
 
   const save = async () => {
     setSaving(true);
     setFailed(false);
+    setSlow(false);
+    const timer = setTimeout(() => setSlow(true), SLOW_SAVE_MS);
     const now = [...saved];
     for (const p of pending.filter((x) => !saved.includes(x.id))) {
       try {
@@ -58,6 +65,8 @@ function ResearchConfirm({ pending, onDone, onSkip }) {
         setFailed(true);
       }
     }
+    clearTimeout(timer);
+    setSlow(false);
     setSaved(now);
     setSaving(false);
     if (now.length === pending.length) onDone();
@@ -70,7 +79,7 @@ function ResearchConfirm({ pending, onDone, onSkip }) {
       footer={
         <div style={{ borderTop: `1px solid ${color.frameRule}`, padding: '12px 22px 18px', display: 'flex', flexDirection: 'column', gap: 10 }}>
           <Button height={52} loading={saving} onClick={save}>{RESEARCH_SAVE_LABEL}</Button>
-          {failed ? <Button variant="outline" height={46} disabled={saving} style={{ boxShadow: 'none' }} onClick={onSkip}>Skip for now</Button> : null}
+          {failed || slow ? <Button variant="outline" height={46} disabled={saving && !slow} style={{ boxShadow: 'none' }} onClick={onSkip}>Skip for now</Button> : null}
         </div>
       }
     >
@@ -96,6 +105,10 @@ function ResearchConfirm({ pending, onDone, onSkip }) {
         {failed ? (
           <ErrorNotice title="Not saved">
             Your answer was not saved. Check the connection and try again, or skip for now: we will ask again the next time you sign in.
+          </ErrorNotice>
+        ) : slow ? (
+          <ErrorNotice title="Not saved yet">
+            Your answer is not saved yet. Check the connection, or skip for now: we will ask again the next time you sign in.
           </ErrorNotice>
         ) : null}
       </div>
