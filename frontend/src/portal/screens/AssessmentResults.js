@@ -50,13 +50,15 @@ export default function AssessmentResults({ bare = false, athleteId, viewer, fal
     ? [results.firstTestDate ? `First test ${shortDate(results.firstTestDate)}` : null, SEX_LABEL[results.sex] ?? null].filter(Boolean).join(' · ')
     : null;
   const athlete = data?.athlete ?? null;
+  // firestore.rules adultRecord() counts 18 on the UTC date (timestamp.date): the answer's shape must use the same date.
+  const minor = athlete ? !isAdultOnDate(athlete.dob, new Date().toISOString().slice(0, 10)) : false;
   const header = (
     <div style={{ padding: '4px 22px 12px' }}>
       <BackLink onClick={onBack}>‹ Back</BackLink>
       <ScreenTitle size={21} style={{ marginTop: 8 }}>{name}</ScreenTitle>
       {about ? <Body size={12} style={{ marginTop: 3 }}>{about}</Body> : null}
       {athlete ? (
-        <ResearchLine athleteId={athleteId} research={athlete.consents?.research ?? null} minor={!isAdultOnDate(athlete.dob, today)}
+        <ResearchLine athleteId={athleteId} research={athlete.consents?.research ?? null} minor={minor}
           canChange={viewer?.role === 'owner'} />
       ) : null}
     </div>

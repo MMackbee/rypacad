@@ -7,7 +7,14 @@ let mockData;
 let mockError;
 let mockSaves;
 let mockSaveFails;
+let mockChanges;
 jest.mock('../hooks/assessments', () => ({ useAthleteAssessments: () => ({ data: mockData, loading: false, error: mockError }) }));
+jest.mock('../hooks/researchConsent', () => ({
+  recordResearchChange: async (args) => {
+    mockChanges.push(args);
+    return { athleteId: args.athleteId };
+  },
+}));
 jest.mock('../hooks/assessmentsLive', () => ({
   saveWindowFields: async (args) => {
     mockSaves.push(args);
@@ -48,6 +55,7 @@ beforeEach(() => {
   mockError = null;
   mockSaves = [];
   mockSaveFails = false;
+  mockChanges = [];
   window.innerWidth = 1024;
 });
 afterEach(() => { window.innerWidth = 1024; });
@@ -150,4 +158,22 @@ test('a failed load and an athlete never tested both say so', async () => {
   const e = await screen();
   expect(e.text()).toContain('No assessments yet.');
   await e.unmount();
+});
+
+test("the owner's change on the 18th birthday by the UTC date, still the day before in Chicago, goes in the 18+ shape the rules expect", async () => {
+  // 01:00 UTC on Oct 29 is 8 PM Oct 28 in Chicago; firestore.rules adultRecord() counts 18 from midnight UTC.
+  jest.useFakeTimers();
+  jest.setSystemTime(new Date('2026-10-29T01:00:00Z'));
+  try {
+    mockData = { ...mockData, athlete: { id: 'seed-ava', name: 'Ava Moreno', dob: '2008-10-29', consents: { research: null } }, windows: [] };
+    const r = await screen({ viewer: { uid: 'owner1', role: 'owner' }, today: undefined });
+    await r.click('Record a change');
+    await r.click('Research answer: Yes');
+    expect(r.button('Athlete assent: Given')).toBeNull();
+    await r.click('Save change');
+    expect(mockChanges).toEqual([{ athleteId: 'seed-ava', answer: { value: true, assent: null }, current: null }]);
+    await r.unmount();
+  } finally {
+    jest.useRealTimers();
+  }
 });

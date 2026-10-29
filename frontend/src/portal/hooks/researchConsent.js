@@ -12,7 +12,6 @@ import { ERR, LiveDataError, fetchAthlete, fetchHousehold, fetchHouseholdAthlete
 import { bump, useInvalidation } from './invalidate';
 import useSeedResource from './useSeedResource';
 import { ASSESSMENTS_KEY } from './assessmentsLive';
-import { academyDateISO } from '../data/calendar';
 import { isAdultOnDate } from '../data/signup';
 
 export const RESEARCH_KEY = 'research';
@@ -82,7 +81,8 @@ export function useResearchConfirm(user) {
     live
       ? {
           source: async () => {
-            const todayISO = academyDateISO();
+            // firestore.rules adultRecord() counts 18 on the UTC date (timestamp.date): who is a minor here must use the same date.
+            const todayISO = new Date().toISOString().slice(0, 10);
             if (user.role === 'parent') return { pending: pendingResearch({ user, athletes: await fetchHouseholdAthletes(user.householdId), household: null, todayISO }) };
             const [athlete, household] = await Promise.all([fetchAthlete(user.athleteId), fetchHousehold(user.householdId)]);
             return { pending: pendingResearch({ user, athletes: [athlete], household, todayISO }) };

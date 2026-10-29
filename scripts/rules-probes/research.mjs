@@ -71,6 +71,17 @@ export async function taskResearch() {
     expect('Feb 29: the owner records a change', await answer(owner, KID, { value: false, assent: false, recordedBy: users.owner,
       history: [{ value: true, assent: true, recordedAt: new Date('2026-10-15T15:00:00Z'), recordedBy: uid.parent }] }), 200);
 
+    // The 18th birthday counts from midnight UTC (timestamp.date), and the portal decides the answer's shape on the UTC
+    // date to match (hooks/researchConsent.js, screens/AssessmentResults.js; review 2026-10-28).
+    const eighteenYearsBefore = (iso) => `${Number(iso.slice(0, 4)) - 18}${iso.slice(4)}`;
+    const todayUTC = new Date().toISOString().slice(0, 10);
+    const tomorrowUTC = new Date(Date.now() + 86400000).toISOString().slice(0, 10);
+    await reset({ dob: eighteenYearsBefore(todayUTC) });
+    expect('18 today by the UTC date: an assent is refused', await answer(t.parent, KID, { value: true, assent: true, recordedBy: uid.parent }), 403);
+    expect('18 today by the UTC date: the parent records yes, no assent', await answer(t.parent, KID, { value: true, assent: null, recordedBy: uid.parent }), 200);
+    await reset({ dob: eighteenYearsBefore(tomorrowUTC) });
+    expect('18 tomorrow by the UTC date: the parent records yes with the assent', await answer(t.parent, KID, { value: true, assent: true, recordedBy: uid.parent }), 200);
+
     const earlier = { value: true, assent: true, recordedAt: new Date('2026-10-15T15:00:00Z'), recordedBy: uid.parent };
     await reset({ consents: { research: earlier } });
     expect('the parent cannot change a recorded answer', await answer(t.parent, KID, { value: false, assent: false, recordedBy: uid.parent }), 403);

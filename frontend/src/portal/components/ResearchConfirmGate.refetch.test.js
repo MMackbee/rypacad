@@ -155,3 +155,22 @@ test('a1 lands and a2 never settles: after the slow-save threshold Skip for now 
   expect(writesFor('a2')).toBe(1);
   await r.unmount();
 });
+
+test('the 18th birthday by the UTC date, still the day before in Chicago: the answer goes in the 18+ shape the rules expect', async () => {
+  // 01:00 UTC on Oct 29 is 8 PM Oct 28 in Chicago; firestore.rules adultRecord() counts 18 from midnight UTC.
+  jest.useFakeTimers();
+  jest.setSystemTime(new Date('2026-10-29T01:00:00Z'));
+  try {
+    mockAthletes = { a1: { name: 'Jordan Whitfield', householdId: 'hh', dob: '2008-10-29', consents: { research: null } } };
+    const r = await gate();
+    await r.click(JORDAN);
+    expect(r.checked(JORDAN_ASSENT)).toBeNull();
+    await r.click('Save my answer');
+    await r.land('a1');
+    expect(mockAthletes.a1.consents.research).toMatchObject({ value: true, assent: null });
+    expect(r.text()).toContain('FAMILY HOME');
+    await r.unmount();
+  } finally {
+    jest.useRealTimers();
+  }
+});
