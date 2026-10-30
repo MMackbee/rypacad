@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { format, parseISO } from 'date-fns';
 import { color, font, radius } from '../../tokens';
 import { Body } from '../Primitives';
@@ -19,14 +19,24 @@ const textButton = {
 
 /**
  * The check-in note composer under a row (Yannick, 2026-10-30: "prompt
- * with a note for the check in"). Opens with the stored note, if any;
- * Save hands the text up and stays open until the parent closes it (a
- * failed save keeps the words on screen); Skip closes without saving.
+ * with a note for the check in"). Seeds its draft from the stored note ONCE,
+ * when it opens (the parent mounts it per open), never again: the row's
+ * note changes twice around a refused save (optimistic, then back) and the
+ * typed words must survive that. Save hands the text up and stays open
+ * until the parent closes it; Skip closes without saving. On open it
+ * brings itself into view and takes focus, so the prompt is seen even when
+ * the row sits off-screen.
  */
 function NoteComposer({ name, note, onSave, onClose }) {
   const [draft, setDraft] = useState(note || '');
   const [saving, setSaving] = useState(false);
-  useEffect(() => { setDraft(note || ''); }, [note]);
+  const field = useRef(null);
+  useEffect(() => {
+    const el = field.current;
+    if (!el) return;
+    if (typeof el.scrollIntoView === 'function') el.scrollIntoView({ block: 'nearest' });
+    el.focus({ preventScroll: true });
+  }, []);
   const save = async () => {
     setSaving(true);
     try { await onSave(draft); } finally { setSaving(false); }
@@ -34,6 +44,7 @@ function NoteComposer({ name, note, onSave, onClose }) {
   return (
     <div style={{ marginTop: 8, display: 'flex', flexDirection: 'column', gap: 8 }}>
       <textarea
+        ref={field}
         aria-label={`Check-in note · ${name}`}
         value={draft}
         maxLength={CHECKIN_NOTE_MAX}

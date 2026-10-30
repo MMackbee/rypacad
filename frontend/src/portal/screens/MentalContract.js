@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useMemo, useState } from 'react';
 import { format, parseISO } from 'date-fns';
 import { color, font, radius } from '../tokens';
 import BottomTabBar from '../components/BottomTabBar';
@@ -42,17 +42,40 @@ const arrow = (disabled) => ({
 });
 
 /**
+ * The groups as shown: a row whose note prompt is open stays where it was
+ * ticked (its group and place) until the prompt closes, so the prompt opens
+ * under Yannick's thumb and not two screens down under "Checked in". Rows
+ * come from boardRows; `open` maps athleteId -> { group, index } for every
+ * open prompt. A pinned athlete who is no longer checked in (unticked, or
+ * the tick was refused) is simply not moved.
+ */
+function pinOpenRows(rows, open) {
+  const lists = { due: [...rows.due], thisWeek: [...rows.thisWeek], checkedIn: [...rows.checkedIn] };
+  for (const [athleteId, pin] of Object.entries(open)) {
+    if (!pin || pin.group === 'checkedIn' || !lists[pin.group]) continue;
+    const i = lists.checkedIn.findIndex((r) => r.athleteId === athleteId);
+    if (i < 0) continue;
+    const [row] = lists.checkedIn.splice(i, 1);
+    const target = lists[pin.group];
+    target.splice(Math.min(pin.index, target.length), 0, row);
+  }
+  return lists;
+}
+
+/**
  * The Commitment Contract board (2026-10-28, spec 5.4): who logged their
  * minutes, week by week, in three groups - due for a check-in (14 days, the
  * Monday email's list), this week, and checked in this week - with a
- * per-week Checked in tick for Yannick that opens a note prompt (Yannick's
- * staging notes, 2026-10-30). Each row also says where the athlete is at
- * the academy that week, so the switcher goes back week by week and up to
- * WEEKS_AHEAD weeks forward; a future week is read-only. A past week names
- * its groups and rows as that week (never "this week"); Due is always as
- * of today, and says so there. Owner and ops reach it by URL and read it
- * without the tick. Never behind the family contract switch; a banner says
- * when families are not logging yet. "Today" is the academy's
+ * per-week Checked in tick for Yannick that opens a note prompt under the
+ * row (Yannick's staging notes, 2026-10-30). Each row's prompt is its own:
+ * ticking a second athlete leaves the first prompt open, and a row keeps
+ * its place while its prompt is open. Each row also says where the athlete
+ * is at the academy that week, so the switcher goes back week by week and
+ * up to WEEKS_AHEAD weeks forward; a future week is read-only. A past week
+ * names its groups and rows as that week (never "this week"); Due is
+ * always as of today, and says so there. Owner and ops reach it by URL and
+ * read it without the tick. Never behind the family contract switch; a
+ * banner says when families are not logging yet. "Today" is the academy's
  * America/Chicago date.
  */
 export default function MentalContract({ bare = false, role = 'mental', onSignOut }) {
@@ -61,7 +84,7 @@ export default function MentalContract({ bare = false, role = 'mental', onSignOu
   const last = addDays(current, 7 * WEEKS_AHEAD);
   const [week, setWeek] = useState(current);
   const [failed, setFailed] = useState(null); // 'checkin' | 'note' | null
-  const [noteFor, setNoteFor] = useState(null); // athleteId whose note composer is open
+  const [open, setOpen] = useState({}); // athleteId -> { group, index }: an open note prompt, and where its row stays
   const { rows, config, setCheckin, setCheckinNote, loading, error } = useContractBoard(week);
   const atCurrent = week === current;
   const isFuture = week > current;
@@ -69,16 +92,25 @@ export default function MentalContract({ bare = false, role = 'mental', onSignOu
   const groups = atCurrent ? GROUPS : isFuture ? FUTURE_GROUPS : PAST_GROUPS;
   const weekLabel = atCurrent ? 'This week' : `Week of ${format(parseISO(week), 'MMM d')}`;
   const priorLabel = atCurrent ? 'Last week' : 'Week before';
+  const shown = useMemo(() => (rows ? pinOpenRows(rows, open) : null), [rows, open]);
 
-  const goTo = (w) => { setNoteFor(null); setFailed(null); setWeek(w); };
+  const openNote = (athleteId, group, index) => setOpen((o) => ({ ...o, [athleteId]: { group, index } }));
+  const closeNote = (athleteId) => setOpen((o) => {
+    if (!(athleteId in o)) return o;
+    const next = { ...o };
+    delete next[athleteId];
+    return next;
+  });
+  const goTo = (w) => { setOpen({}); setFailed(null); setWeek(w); };
 
-  const toggle = (row) => {
+  const toggle = (row, group, index) => {
     setFailed(null);
     const checkedIn = !row.checkedInThisWeek;
-    setNoteFor(checkedIn ? row.athleteId : (noteFor === row.athleteId ? null : noteFor));
+    if (checkedIn) openNote(row.athleteId, group, index);
+    else closeNote(row.athleteId);
     Promise.resolve(setCheckin({ athleteId: row.athleteId, checkedIn })).catch(() => {
       setFailed('checkin');
-      setNoteFor((open) => (open === row.athleteId ? null : open));
+      closeNote(row.athleteId);
     });
   };
 
@@ -86,7 +118,7 @@ export default function MentalContract({ bare = false, role = 'mental', onSignOu
     setFailed(null);
     try {
       await setCheckinNote({ athleteId: row.athleteId, note: text });
-      setNoteFor((open) => (open === row.athleteId ? null : open));
+      closeNote(row.athleteId);
     } catch (e) {
       setFailed('note');
     }
@@ -111,7 +143,7 @@ export default function MentalContract({ bare = false, role = 'mental', onSignOu
             </button>
             <div style={{ flex: 1, textAlign: 'center', font: `600 14px ${font.body}`, color: color.text }}>
               Week of {format(parseISO(week), 'MMM d')}
-              {atCurrent ? '' : isFuture ? ' · ahead' : ''}
+              {isFuture ? ' · ahead' : ''}
             </div>
             <button
               type="button"
@@ -146,7 +178,7 @@ export default function MentalContract({ bare = false, role = 'mental', onSignOu
           <ErrorNotice title="The board didn't load" />
         ) : (
           groups.map((g) => {
-            const list = rows?.[g.key] ?? [];
+            const list = shown?.[g.key] ?? [];
             return (
               <section key={g.key}>
                 <SectionLabel tone={g.key === 'due' && list.length ? color.errorMid : undefined} style={{ marginBottom: 4 }}>
@@ -157,18 +189,18 @@ export default function MentalContract({ bare = false, role = 'mental', onSignOu
                     <Body size={12} tone={color.textTertiary}>{g.empty}</Body>
                   </div>
                 ) : (
-                  list.map((row) => (
+                  list.map((row, index) => (
                     <BoardRow
                       key={row.athleteId}
                       row={row}
                       canToggle={canToggle}
-                      onToggle={() => toggle(row)}
+                      onToggle={() => toggle(row, g.key, index)}
                       weekLabel={weekLabel}
                       priorLabel={priorLabel}
-                      noteOpen={noteFor === row.athleteId && Boolean(row.checkedInThisWeek)}
+                      noteOpen={Boolean(open[row.athleteId]) && Boolean(row.checkedInThisWeek)}
                       onSaveNote={(text) => saveNote(row, text)}
-                      onCloseNote={() => setNoteFor((open) => (open === row.athleteId ? null : open))}
-                      onEditNote={() => setNoteFor(row.athleteId)}
+                      onCloseNote={() => closeNote(row.athleteId)}
+                      onEditNote={() => openNote(row.athleteId, g.key, index)}
                     />
                   ))
                 )}

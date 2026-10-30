@@ -2,7 +2,12 @@ import React from 'react';
 import { renderScreen } from './testRender';
 
 let mockBoard;
-let nicoChecked = false;
+// What the mocked hook "holds", flipped by the mocked writes the way the real
+// hook's optimistic row is: ticks per athlete, notes per athlete.
+let checked;
+let notes;
+let holdNotes;
+let heldNote;
 const mockSetCheckin = jest.fn();
 const mockSetCheckinNote = jest.fn();
 jest.mock('../hooks', () => ({
@@ -16,36 +21,47 @@ const r0 = (id, name, metDays, extra = {}) => ({
   athleteId: id, name, age: 12, required: 20, familyName: null, thisWeek: { metDays, days: [] }, lastWeek: { metDays: 0, days: [] },
   lastCheckin: null, checkedInThisWeek: false, note: null, visits: [], daysSince: null, ...extra,
 });
-const mockBoardDefault = () => ({ config: { enabled: true, enabledAt: '2026-11-03' }, rows: { due: [], thisWeek: [r0('nico', 'Nico', 2)], checkedIn: [] } });
 const field = (r, label) => r.container.querySelector(`[aria-label="${label}"]`);
+const screen = () => <MentalContract bare role="mental" />;
 
 beforeEach(() => {
-  nicoChecked = false;
+  checked = { nico: false, reese: false };
+  notes = { jordan: 'Spoke Monday.', nico: null, reese: null };
+  holdNotes = false;
+  heldNote = null;
   mockSetCheckin.mockReset();
   mockSetCheckinNote.mockReset();
-  // The tick's write flips what the next render reads, the way the real hook's optimistic row does.
   mockSetCheckin.mockImplementation(async ({ athleteId, checkedIn }) => {
-    if (athleteId === 'nico') nicoChecked = checkedIn;
+    if (athleteId in checked) checked[athleteId] = checkedIn;
     return { id: `${athleteId}_2026-11-09`, checkedIn };
   });
-  mockSetCheckinNote.mockResolvedValue({ id: 'nico_2026-11-09', note: 'x' });
+  mockSetCheckinNote.mockImplementation(({ athleteId, note }) => {
+    const prev = notes[athleteId];
+    notes[athleteId] = note.trim() || null;
+    const done = { id: `${athleteId}_2026-11-09`, note: notes[athleteId] };
+    if (!holdNotes) return Promise.resolve(done);
+    return new Promise((resolve, reject) => {
+      heldNote = { resolve: () => resolve(done), reject: (e) => { notes[athleteId] = prev; reject(e); } };
+    });
+  });
   mockBoard = (week) => ({
     config: { enabled: true, enabledAt: '2026-11-03' },
     rows: week === '2026-11-09'
       ? {
-        due: [{ ...r0('reese', 'Reese', 0), daysSince: 22 }],
-        thisWeek: nicoChecked ? [] : [r0('nico', 'Nico', 2, { visits: [{ date: '2026-11-10', dow: 'Tue', time: '4:00 PM', type: 'training' }] })],
+        due: checked.reese ? [] : [{ ...r0('reese', 'Reese', 0), daysSince: 22 }],
+        thisWeek: checked.nico ? [] : [r0('nico', 'Nico', 2, { visits: [{ date: '2026-11-10', dow: 'Tue', time: '4:00 PM', type: 'training' }] })],
         checkedIn: [
-          { ...r0('jordan', 'Jordan', 4), checkedInThisWeek: true, note: 'Spoke Monday.' },
-          ...(nicoChecked ? [{ ...r0('nico', 'Nico', 2), checkedInThisWeek: true }] : []),
+          { ...r0('jordan', 'Jordan', 4), checkedInThisWeek: true, note: notes.jordan },
+          ...(checked.nico ? [{ ...r0('nico', 'Nico', 2), checkedInThisWeek: true, note: notes.nico }] : []),
+          ...(checked.reese ? [{ ...r0('reese', 'Reese', 0), checkedInThisWeek: true, note: notes.reese }] : []),
         ],
       }
       : { due: [], thisWeek: [r0('jordan', 'Jordan', 5)], checkedIn: [] },
   });
 });
 
-test('three groups with counts, the tick box, the visits line; a tick writes and opens the note prompt, Save writes the note', async () => {
-  const r = await renderScreen(<MentalContract bare role="mental" />, { path: '/portal/mental/contract' });
+test('three groups, the tick box and the visits line; a tick keeps the row in place with the note prompt under it; Save writes the note and the row moves', async () => {
+  const r = await renderScreen(screen(), { path: '/portal/mental/contract' });
   expect(r.text()).toContain('Week of Nov 9');
   expect(r.text()).toContain('Due for a check-in · 1');
   expect(r.text()).toContain('This week · 1');
@@ -58,14 +74,22 @@ test('three groups with counts, the tick box, the visits line; a tick writes and
   await r.click('Checked in · Nico');
   await r.flush();
   expect(mockSetCheckin).toHaveBeenCalledWith({ athleteId: 'nico', checkedIn: true });
-  expect(r.text()).toContain('Checked in this week · 2');
+  // Ticked and prompted, but still where his thumb is: the row has not moved yet.
+  expect(r.text()).toContain('This week · 1');
+  expect(r.text()).toContain('Checked in this week · 1');
   expect(r.button('Checked in · Nico').getAttribute('aria-checked')).toBe('true');
-  expect(field(r, 'Check-in note · Nico')).not.toBeNull();
+  const box = field(r, 'Check-in note · Nico');
+  expect(box).not.toBeNull();
+  expect(document.activeElement).toBe(box);
+  expect(r.container.querySelector('section:nth-of-type(2) [aria-label="Check-in note · Nico"]')).not.toBeNull();
   await r.fill('Check-in note · Nico', '  Quick word at pickup. ');
   await r.click('Save note · Nico');
   await r.flush();
   expect(mockSetCheckinNote).toHaveBeenCalledWith({ athleteId: 'nico', note: '  Quick word at pickup. ' });
   expect(field(r, 'Check-in note · Nico')).toBeNull();
+  expect(r.text()).toContain('This week · 0');
+  expect(r.text()).toContain('Checked in this week · 2');
+  expect(r.text()).toContain('Note: Quick word at pickup.');
   // Jordan's stored note shows with an Edit; unticking writes false.
   expect(r.text()).toContain('Note: Spoke Monday.');
   expect(r.button('Edit note · Jordan')).not.toBeNull();
@@ -74,25 +98,59 @@ test('three groups with counts, the tick box, the visits line; a tick writes and
   r.unmount();
 });
 
-test('Edit reopens a stored note; a failed save says so and keeps the words; Skip closes without a write', async () => {
-  mockSetCheckinNote.mockRejectedValueOnce(Object.assign(new Error('offline'), { code: 'unavailable' }));
-  const r = await renderScreen(<MentalContract bare role="mental" />, { path: '/portal/mental/contract' });
+test("each row's prompt is its own: a second tick leaves the first open, un-ticking closes its own, Skip releases the row", async () => {
+  const r = await renderScreen(screen(), { path: '/portal/mental/contract' });
+  await r.click('Checked in · Nico');
+  await r.flush();
+  await r.click('Checked in · Reese');
+  await r.flush();
+  expect(field(r, 'Check-in note · Nico')).not.toBeNull();
+  expect(field(r, 'Check-in note · Reese')).not.toBeNull();
+  expect(r.text()).toContain('Due for a check-in · 1'); // Reese stays put while her prompt is open
+  expect(r.text()).toContain('This week · 1');
+  expect(r.text()).toContain('Checked in this week · 1');
+  await r.click('Checked in · Nico'); // un-tick: his prompt goes, Reese's stays
+  await r.flush();
+  expect(mockSetCheckin).toHaveBeenLastCalledWith({ athleteId: 'nico', checkedIn: false });
+  expect(field(r, 'Check-in note · Nico')).toBeNull();
+  expect((r.text().match(/Note:/g) || []).length).toBe(1); // Jordan's stored note only; nothing for Nico
+  expect(field(r, 'Check-in note · Reese')).not.toBeNull();
+  await r.click('Skip note · Reese');
+  await r.flush();
+  expect(mockSetCheckinNote).not.toHaveBeenCalled();
+  expect(field(r, 'Check-in note · Reese')).toBeNull();
+  expect(r.text()).toContain('Due for a check-in · 0');
+  expect(r.text()).toContain('Checked in this week · 2');
+  r.unmount();
+});
+
+test('Edit reopens a stored note; a failed save says so and keeps the typed words through the optimistic flip and back; Skip closes without a write', async () => {
+  holdNotes = true;
+  const r = await renderScreen(screen(), { path: '/portal/mental/contract' });
   await r.click('Edit note · Jordan');
   expect(field(r, 'Check-in note · Jordan').value).toBe('Spoke Monday.');
+  expect(document.activeElement).toBe(field(r, 'Check-in note · Jordan'));
   await r.fill('Check-in note · Jordan', 'Spoke Monday, again Tuesday.');
   await r.click('Save note · Jordan');
+  // The hook's optimistic row now carries the new note (a render with it), then the write is refused and the row goes back.
+  await r.rerender(screen());
+  expect(notes.jordan).toBe('Spoke Monday, again Tuesday.');
+  expect(field(r, 'Check-in note · Jordan').value).toBe('Spoke Monday, again Tuesday.');
+  await r.act(async () => { heldNote.reject(Object.assign(new Error('offline'), { code: 'unavailable' })); });
   await r.flush();
+  expect(notes.jordan).toBe('Spoke Monday.');
   expect(r.text()).toContain("That note didn't save");
   expect(field(r, 'Check-in note · Jordan').value).toBe('Spoke Monday, again Tuesday.');
   await r.click('Skip note · Jordan');
   expect(field(r, 'Check-in note · Jordan')).toBeNull();
+  expect(r.text()).toContain('Note: Spoke Monday.');
   expect(mockSetCheckinNote).toHaveBeenCalledTimes(1);
   r.unmount();
 });
 
 test('a failed tick says so and does not leave a note prompt open', async () => {
   mockSetCheckin.mockRejectedValueOnce(Object.assign(new Error('offline'), { code: 'unavailable' }));
-  const r = await renderScreen(<MentalContract bare role="mental" />, { path: '/portal/mental/contract' });
+  const r = await renderScreen(screen(), { path: '/portal/mental/contract' });
   await r.click('Checked in · Nico');
   await r.flush();
   expect(r.text()).toContain("That check-in didn't save");
@@ -100,8 +158,11 @@ test('a failed tick says so and does not leave a note prompt open', async () => 
   r.unmount();
 });
 
-test('the week switcher goes back and the empty groups say so', async () => {
-  const r = await renderScreen(<MentalContract bare role="mental" />, { path: '/portal/mental/contract' });
+test('the week switcher goes back, closes any open prompt, and the empty groups say so', async () => {
+  const r = await renderScreen(screen(), { path: '/portal/mental/contract' });
+  await r.click('Checked in · Nico');
+  await r.flush();
+  expect(field(r, 'Check-in note · Nico')).not.toBeNull();
   await r.click('Previous week');
   await r.flush();
   expect(r.text()).toContain('Week of Nov 2');
@@ -109,11 +170,12 @@ test('the week switcher goes back and the empty groups say so', async () => {
   expect(r.text()).toContain('No check-ins that week');
   expect(r.button('Next week').disabled).toBe(false);
   expect(r.button('Checked in · Jordan')).not.toBeNull(); // a past week can still be ticked
+  expect(r.container.querySelector('textarea')).toBeNull();
   r.unmount();
 });
 
 test('a past week is labelled as that week, never as this week; Due says it is as of today', async () => {
-  const r = await renderScreen(<MentalContract bare role="mental" />, { path: '/portal/mental/contract' });
+  const r = await renderScreen(screen(), { path: '/portal/mental/contract' });
   await r.click('Previous week');
   await r.flush();
   const text = r.text();
@@ -132,7 +194,7 @@ test('a past week is labelled as that week, never as this week; Due says it is a
 });
 
 test('the switcher goes ahead up to four weeks: read-only, named as that week, and it says it is ahead', async () => {
-  const r = await renderScreen(<MentalContract bare role="mental" />, { path: '/portal/mental/contract' });
+  const r = await renderScreen(screen(), { path: '/portal/mental/contract' });
   await r.click('Next week');
   await r.flush();
   expect(r.text()).toContain('Week of Nov 16 · ahead');
@@ -154,7 +216,6 @@ test('the switcher goes ahead up to four weeks: read-only, named as that week, a
 
 test('owner and ops see the board without the tick or Edit, notes included; the off switch shows a banner', async () => {
   mockBoard = () => ({
-    ...mockBoardDefault(),
     config: { enabled: false, enabledAt: null },
     rows: { due: [], thisWeek: [], checkedIn: [{ ...r0('jordan', 'Jordan', 4), checkedInThisWeek: true, note: 'Spoke Monday.' }] },
   });

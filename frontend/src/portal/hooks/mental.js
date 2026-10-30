@@ -348,9 +348,9 @@ export function useContractBoard(weekStartISO) {
     f.latest = token;
     f.refused = false;
     putOwn({ ...ownRef.current, [id]: now });
+    const pending = writeCheckin({ athleteId, weekStartISO, checkedIn });
+    f.pending = pending; // a note typed before this lands waits for it (setCheckinNote)
     try {
-      const pending = writeCheckin({ athleteId, weekStartISO, checkedIn });
-      f.pending = pending; // a note typed before this lands waits for it (setCheckinNote)
       const out = await pending;
       f.server = { had: true, doc: now };
       if (f.refused) showServer(id, f.server); // the latest tap was refused before this write landed
@@ -363,6 +363,8 @@ export function useContractBoard(weekStartISO) {
         showServer(id, f.server);
       }
       throw err;
+    } finally {
+      if (f.pending === pending) f.pending = null; // a settled write is nothing to wait for
     }
   }, [live, weekStartISO, today, putOwn, showServer]);
 
@@ -378,19 +380,28 @@ export function useContractBoard(weekStartISO) {
   const setCheckinNote = useCallback(async ({ athleteId, note }) => {
     const id = `${athleteId}_${weekStartISO}`;
     const text = typeof note === 'string' && note.trim() ? note.trim() : null;
-    const current = Object.prototype.hasOwnProperty.call(ownRef.current, id)
-      ? ownRef.current[id]
-      : (inputs?.checkins || []).find((c) => checkinId(c) === id && c.checkedIn === true) || null;
+    const hasOwn = () => Object.prototype.hasOwnProperty.call(ownRef.current, id);
+    const shown = () => (hasOwn() ? ownRef.current[id] : (inputs?.checkins || []).find((c) => checkinId(c) === id && c.checkedIn === true) || null);
+    const current = shown();
     if (!current) throw new LiveDataError(ERR.NOT_FOUND, 'setCheckinNote: that week has no check-in to note.');
+    // Like the first tap, the first note on a row records what is on screen as
+    // what the server holds, BEFORE the optimistic note goes on - so a later
+    // refused tap never puts an unconfirmed note back on the row.
+    const f = flights.current[id] || (flights.current[id] = { server: { had: hasOwn(), doc: ownRef.current[id] } });
     const before = current;
     const after = { ...current, id, note: text };
     putOwn({ ...ownRef.current, [id]: after });
     if (!live) return { id, note: text };
     try {
-      const f = flights.current[id];
-      if (f && f.pending) await f.pending;
+      // The tick's own write must land first (the doc must exist for the update);
+      // if that write failed, the row already went back and the note goes with it.
+      if (f.pending) await f.pending.catch(() => {});
+      const live_ = shown();
+      if (!live_ || live_.checkedIn !== true) return { id, note: null, dropped: true }; // unticked while we waited
       const out = await writeCheckinNote({ athleteId, weekStartISO, note: text });
-      if (flights.current[id]) flights.current[id].server = { had: true, doc: after };
+      const landed = { ...live_, id, note: text }; // the note onto whatever the row holds now, not the pre-wait doc
+      putOwn({ ...ownRef.current, [id]: landed });
+      f.server = { had: true, doc: landed };
       return out;
     } catch (err) {
       if (ownRef.current[id] === after) putOwn({ ...ownRef.current, [id]: before });

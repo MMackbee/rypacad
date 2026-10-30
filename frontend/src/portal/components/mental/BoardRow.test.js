@@ -90,8 +90,13 @@ test('a stored note shows with Edit for Yannick; the open composer starts from i
   expect(onEditNote).toHaveBeenCalledTimes(1);
   await r.rerender(<BoardRow row={checked} canToggle noteOpen onEditNote={onEditNote} onSaveNote={onSaveNote} onCloseNote={onCloseNote} />);
   expect(field(r, 'Check-in note · Nico Whitfield').value).toBe('Spoke Monday.');
+  expect(document.activeElement).toBe(field(r, 'Check-in note · Nico Whitfield')); // the prompt takes focus when it opens
   expect(r.text()).not.toContain('Note: Spoke Monday.'); // the composer replaces the line while open
   await r.fill('Check-in note · Nico Whitfield', 'Spoke Monday and Thursday.');
+  // The row's note changes under an open composer (the hook's optimistic note, then the refused write putting the old one back): the draft stays.
+  await r.rerender(<BoardRow row={{ ...checked, note: 'Spoke Monday and Thursday.' }} canToggle noteOpen onEditNote={onEditNote} onSaveNote={onSaveNote} onCloseNote={onCloseNote} />);
+  await r.rerender(<BoardRow row={checked} canToggle noteOpen onEditNote={onEditNote} onSaveNote={onSaveNote} onCloseNote={onCloseNote} />);
+  expect(field(r, 'Check-in note · Nico Whitfield').value).toBe('Spoke Monday and Thursday.');
   await r.click('Save note · Nico Whitfield');
   await r.flush();
   expect(onSaveNote).toHaveBeenCalledWith('Spoke Monday and Thursday.');

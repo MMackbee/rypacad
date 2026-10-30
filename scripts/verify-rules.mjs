@@ -1020,6 +1020,11 @@ export async function taskMental() {
   expect('mental note over 500 characters', await updateAs(mental, 'contractCheckins', 'ath-mental_2026-11-09', { note: 'x'.repeat(501) }, ['note'], []), 403);
   expect('mental note that is not text', await updateAs(mental, 'contractCheckins', 'ath-mental_2026-11-09', { note: 7 }, ['note'], []), 403);
   expect('owner cannot add a note', await updateAs(owner, 'contractCheckins', 'ath-mental_2026-11-09', { note: 'Owner note' }, ['note'], []), 403);
+  expect('mental note of exactly 500 characters', await updateAs(mental, 'contractCheckins', 'ath-mental_2026-11-09', { note: 'x'.repeat(500) }, ['note'], []), 200);
+  // The unchanged client re-ticks an existing week (setDoc without merge): every field replaced, `at` re-stamped, no note - the additive claim.
+  expect('old client re-ticks an existing check-in (at re-stamped, note dropped)', await updateAs(mental, 'contractCheckins', 'ath-mental_2026-11-09', checkin, ['athleteId', 'weekStart', 'checkedIn', 'by', 'note'], ['at']), 200);
+  expect('mental cannot move at to another time', await updateAs(mental, 'contractCheckins', 'ath-mental_2026-11-09', { at: new Date('2020-01-01T00:00:00Z') }, ['at'], []), 403);
+  expect('mental cannot create with a literal at', await createAs(mental, 'contractCheckins', 'ath-mental_2026-12-07', { ...checkin, weekStart: '2026-12-07', at: new Date('2026-12-07T15:00:00Z') }, []), 403);
   expect('mental checks in with a note', await createAs(mental, 'contractCheckins', 'ath-mental_2026-11-30', { ...checkin, weekStart: '2026-11-30', note: 'Spoke with mum at pickup.' }, ['at']), 200);
   expect('mental deletes the noted check-in', (await call('DELETE', '/contractCheckins/ath-mental_2026-11-30', null, mental)).status, 200);
   expect('owner reads a check-in', (await call('GET', '/contractCheckins/ath-mental_2026-11-09', null, owner)).status, 200);

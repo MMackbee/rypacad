@@ -17,6 +17,28 @@ develop 053caad. The design it extends is
 | 6.1 | "should be able to skip to future weeks?" | Yes, now that a week shows who is coming in: the forward arrow goes up to four weeks ahead (`WEEKS_AHEAD`). A future week is read-only (no tick), its header says "· ahead", and its groups read "Due for a check-in, as of today", "That week", "Checked in that week" (empty: "Check-ins open when the week starts"). | `screens/MentalContract.js`, `data/contractBoard.js` |
 | 3.1 | "One Addie and one Addie Schinka. Two Brooks of different ages. Lucas and a Lucas Rossow. Sebastian (no last name)." | Six production athletes carry a first name only (Brooks Erickson, Brooks Krebsbach, Sebastian Rocha, Lucas Rollwagen, Addie Loney, and "Jenna" of the "Jenna family"). The data is the owner's to fix; until then Yannick's list and the board show the family name beside a first-name-only athlete ("Erickson family · Age 10 · …"). Full names are left alone. | `data/athleteLabel.js` (`familyHint`), `data/mentalNotes.js` (`familyName` on list rows), `screens/MentalAthletes.js`, `components/mental/BoardRow.js` |
 
+### Behaviour settled by the review (wf_1bd74a2f-6e9, 12 findings, all fixed)
+
+- The note prompt opens under the row where it was ticked: a ticked row keeps
+  its group and place while its prompt is open (`pinOpenRows` in
+  `screens/MentalContract.js`) and moves to "Checked in" when the prompt
+  closes. The prompt takes focus and scrolls itself into view.
+- Each row's prompt is its own: ticking a second athlete leaves the first
+  prompt open; un-ticking a row closes only that row's prompt; switching weeks
+  closes them all.
+- The composer seeds its draft once, when it opens. A refused save keeps the
+  typed words on screen under "That note didn't save…".
+- The hook waits for the row's own tick write before writing the note, then
+  re-checks the row: a note typed on a tick that was refused, or on a row
+  un-ticked while waiting, is dropped without a write (`{ dropped: true }`,
+  no second banner). A settled tick write is cleared, so a refused un-tick
+  never blocks a later note save. The first note on a row snapshots the
+  on-screen state before the optimistic note, so a later refused tap never
+  puts an unconfirmed note back.
+- Rules probes also pin: the unchanged client re-ticking an existing week
+  (full replace, `at` re-stamped) passes; a forged `at` on update or create is
+  refused; a 500-character note passes and 501 is refused.
+
 ## Notes that are not changes
 
 - **1.3** "Nothing on the board yet, the RYP Tour starts with the first Tour
