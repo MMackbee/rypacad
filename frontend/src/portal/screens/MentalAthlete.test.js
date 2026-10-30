@@ -46,5 +46,14 @@ test('no contact and never checked in', async () => {
   const r = await renderScreen(<MentalAthlete bare athleteId="jordan" />, { path: '/portal/mental/jordan' });
   expect(r.text()).not.toContain('Whitfield family');
   expect(r.text()).toContain('Never checked in');
+  expect(r.text()).not.toContain('Note:');
+  r.unmount();
+});
+
+test("the last check-in's note shows under the contract line", async () => {
+  mockData = { ...mockData, contract: { ...mockData.contract, lastCheckinNote: 'Wants to work on first-tee nerves.' } };
+  const r = await renderScreen(<MentalAthlete bare athleteId="jordan" />, { path: '/portal/mental/jordan' });
+  expect(r.text()).toContain('Last check-in Nov 10');
+  expect(r.text()).toContain('Note: Wants to work on first-tee nerves.');
   r.unmount();
 });

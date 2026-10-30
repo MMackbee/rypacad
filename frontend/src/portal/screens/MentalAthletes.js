@@ -8,17 +8,22 @@ import PhoneFrame from '../components/PhoneFrame';
 import SkeletonCard from '../components/Skeleton';
 import { Body, Card, ErrorNotice, ScreenTitle, SectionLabel, SignOutButton } from '../components/Primitives';
 import { useMentalAthletes } from '../hooks';
+import { familyHint } from '../data/athleteLabel';
 
 const day = (iso) => format(parseISO(iso), 'MMM d');
 
-/** `Age 14 · Next 1:1 Nov 17`, `Age 14 · Last 1:1 Nov 10` or `Age 9 · No 1:1 yet`; no age part without a dob. */
+/**
+ * `Age 14 · Next 1:1 Nov 17`, `Age 14 · Last 1:1 Nov 10` or `Age 9 · No 1:1
+ * yet`; no age part without a dob. A first-name-only athlete gets the family
+ * name first (`Erickson family · Age 10 · …`) so two "Brooks" tell apart.
+ */
 function metaFor(row) {
   const session = row.nextSession
     ? `Next 1:1 ${day(row.nextSession)}`
     : row.lastSession
     ? `Last 1:1 ${day(row.lastSession)}`
     : 'No 1:1 yet';
-  return [row.age != null ? `Age ${row.age}` : null, session].filter(Boolean).join(' · ');
+  return [familyHint(row.name, row.familyName), row.age != null ? `Age ${row.age}` : null, session].filter(Boolean).join(' · ');
 }
 
 /**

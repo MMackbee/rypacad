@@ -7,10 +7,11 @@ import NoteEditor from '../components/mental/NoteEditor';
  * adapters: what reaches the database when Yannick leaves a note, and how
  * the hooks report it. hooks/mental.test.js covers seed mode.
  */
-const mockLive = { fetchAthlete: jest.fn(), fetchAllAthletes: jest.fn(), fetchAllHouseholds: jest.fn() };
+const mockLive = { fetchAthlete: jest.fn(), fetchAllAthletes: jest.fn(), fetchAllHouseholds: jest.fn(), fetchSessionsInRange: jest.fn() };
 const mockMental = {
   fetchMentalEntries: jest.fn(), saveMentalEntry: jest.fn(), deleteMentalEntry: jest.fn(),
   fetchContractLogsBetween: jest.fn(), fetchCheckinsForAthletes: jest.fn(), fetchContractConfig: jest.fn(), setCheckin: jest.fn(),
+  setCheckinNote: jest.fn(), fetchBookingsBetween: jest.fn(),
   fetchMentalBookings: jest.fn(), fetchHouseholdContact: jest.fn(),
 };
 jest.mock('../../firebase', () => ({ auth: { currentUser: null }, db: {} }));
@@ -21,6 +22,7 @@ jest.mock('./live', () => ({
   fetchAthlete: (...a) => mockLive.fetchAthlete(...a),
   fetchAllAthletes: (...a) => mockLive.fetchAllAthletes(...a),
   fetchAllHouseholds: (...a) => mockLive.fetchAllHouseholds(...a),
+  fetchSessionsInRange: (...a) => mockLive.fetchSessionsInRange(...a),
 }));
 jest.mock('./mentalLive', () => ({
   ...jest.requireActual('./mentalLive'),
@@ -31,6 +33,8 @@ jest.mock('./mentalLive', () => ({
   fetchCheckinsForAthletes: (...a) => mockMental.fetchCheckinsForAthletes(...a),
   fetchContractConfig: (...a) => mockMental.fetchContractConfig(...a),
   setCheckin: (...a) => mockMental.setCheckin(...a),
+  setCheckinNote: (...a) => mockMental.setCheckinNote(...a),
+  fetchBookingsBetween: (...a) => mockMental.fetchBookingsBetween(...a),
   fetchMentalBookings: (...a) => mockMental.fetchMentalBookings(...a),
   fetchHouseholdContact: (...a) => mockMental.fetchHouseholdContact(...a),
 }));
@@ -156,15 +160,17 @@ const BOARD_ATHLETES = [
   { id: 'reese', name: 'Reese', dob: '2014-03-02', householdId: 'w' },
 ];
 
-function mountBoard() {
+function mountBoard({ checkins = [], week = '2026-11-09' } = {}) {
   mockLive.fetchAllAthletes.mockResolvedValue(BOARD_ATHLETES);
   mockLive.fetchAllHouseholds.mockResolvedValue([{ id: 'w', name: 'Whitfield family' }]);
   mockMental.fetchContractLogsBetween.mockResolvedValue({});
-  mockMental.fetchCheckinsForAthletes.mockResolvedValue([]);
+  mockMental.fetchCheckinsForAthletes.mockResolvedValue(checkins);
   mockMental.fetchContractConfig.mockResolvedValue({ enabled: true, enabledAt: '2026-10-01' });
+  mockMental.fetchBookingsBetween.mockResolvedValue([{ id: 'jordan_s-tue', athleteId: 'jordan', sessionId: 's-tue', date: '2026-11-10', type: 'training', status: 'confirmed' }]);
+  mockLive.fetchSessionsInRange.mockResolvedValue([{ id: 's-tue', date: '2026-11-10', time: '4:00 PM', type: 'training', status: 'scheduled' }]);
   const out = { current: null, loadingSeen: [] };
   const useBoard = () => {
-    const b = useContractBoard('2026-11-09');
+    const b = useContractBoard(week);
     out.loadingSeen.push(b.loading);
     return b;
   };
@@ -209,6 +215,118 @@ test('a failed Checked in write puts the row back and rejects, so the screen can
   expect(failed).not.toBeNull();
   expect(ids(out.current.rows.due)).toEqual(['jordan', 'reese']);
   expect(ids(out.current.rows.checkedIn)).toEqual([]);
+  await r.unmount();
+});
+
+test('the board reads the week\'s bookings and sessions once and shows them as visits, with the family name', async () => {
+  const { r, out } = await mountBoard();
+  await r.flush();
+  expect(mockMental.fetchBookingsBetween).toHaveBeenCalledTimes(1);
+  expect(mockMental.fetchBookingsBetween).toHaveBeenCalledWith({ fromISO: '2026-11-09', toISO: '2026-11-15' });
+  expect(mockLive.fetchSessionsInRange).toHaveBeenCalledWith('2026-11-09', '2026-11-15');
+  const all = [...out.current.rows.due, ...out.current.rows.thisWeek, ...out.current.rows.checkedIn];
+  expect(all.find((x) => x.athleteId === 'jordan').visits).toEqual([{ date: '2026-11-10', dow: 'Tue', time: '4:00 PM', type: 'training' }]);
+  expect(all.find((x) => x.athleteId === 'reese').visits).toEqual([]);
+  expect(all.map((x) => x.familyName)).toEqual(['Whitfield family', 'Whitfield family']);
+  await r.unmount();
+});
+
+test('a note typed before the tick lands waits for it and shows at once; a refused note puts the old one back; no check-in, no note', async () => {
+  let finishWrite;
+  mockMental.setCheckin.mockImplementation(() => new Promise((res) => { finishWrite = res; }));
+  mockMental.setCheckinNote.mockResolvedValue({ id: 'reese_2026-11-09', note: 'First tee.' });
+  const { r, out } = await mountBoard();
+  await r.flush();
+  let write;
+  await r.act(() => { write = out.current.setCheckin({ athleteId: 'reese', checkedIn: true }); });
+  let noteWrite;
+  await r.act(() => { noteWrite = out.current.setCheckinNote({ athleteId: 'reese', note: '  First tee.  ' }); });
+  expect(out.current.rows.checkedIn[0]).toMatchObject({ athleteId: 'reese', checkedInThisWeek: true, note: 'First tee.' });
+  expect(mockMental.setCheckinNote).not.toHaveBeenCalled(); // the tick's own write has not landed yet
+  await r.act(async () => { finishWrite({ id: 'reese_2026-11-09', checkedIn: true }); await write; await noteWrite; });
+  expect(mockMental.setCheckinNote).toHaveBeenCalledWith({ athleteId: 'reese', weekStartISO: '2026-11-09', note: 'First tee.' });
+  expect(out.current.rows.checkedIn[0].note).toBe('First tee.');
+  expect(mockLive.fetchAllAthletes).toHaveBeenCalledTimes(1); // no re-read for the note either
+  // A refused note keeps the note that was there.
+  mockMental.setCheckinNote.mockRejectedValue(Object.assign(new Error('offline'), { code: 'unavailable' }));
+  let failed = null;
+  await r.act(() => out.current.setCheckinNote({ athleteId: 'reese', note: 'Changed.' }).catch((e) => { failed = e; }));
+  expect(failed).not.toBeNull();
+  expect(out.current.rows.checkedIn[0].note).toBe('First tee.');
+  // A note for a row that is not checked in that week is refused without a write.
+  mockMental.setCheckinNote.mockClear();
+  await expect(out.current.setCheckinNote({ athleteId: 'jordan', note: 'x' })).rejects.toMatchObject({ code: ERR.NOT_FOUND });
+  expect(mockMental.setCheckinNote).not.toHaveBeenCalled();
+  await r.unmount();
+});
+
+test('a note typed on a tick that is then refused is dropped quietly, without a write; the row goes back to what was read', async () => {
+  let refuseTick;
+  mockMental.setCheckin.mockImplementation(() => new Promise((res, rej) => { refuseTick = rej; }));
+  const { r, out } = await mountBoard();
+  await r.flush();
+  let tick;
+  await r.act(() => { tick = out.current.setCheckin({ athleteId: 'reese', checkedIn: true }).catch((e) => e); });
+  let note;
+  await r.act(() => { note = out.current.setCheckinNote({ athleteId: 'reese', note: 'Typed fast.' }); });
+  expect(out.current.rows.checkedIn[0]).toMatchObject({ athleteId: 'reese', note: 'Typed fast.' });
+  let outcome;
+  await r.act(async () => { refuseTick(Object.assign(new Error('denied'), { code: 'permission-denied' })); await tick; outcome = await note; });
+  expect(outcome).toMatchObject({ dropped: true, note: null });
+  expect(mockMental.setCheckinNote).not.toHaveBeenCalled();
+  expect(ids(out.current.rows.due)).toEqual(['jordan', 'reese']);
+  expect(ids(out.current.rows.checkedIn)).toEqual([]);
+  await r.unmount();
+});
+
+const READ_REESE = [{ id: 'reese_2026-11-09', athleteId: 'reese', weekStart: '2026-11-09', checkedIn: true, by: 'mental', at: '2026-11-10', note: 'Spoke Monday.' }];
+
+test('a refused un-tick does not poison later note saves on that row', async () => {
+  mockMental.setCheckin.mockRejectedValue(Object.assign(new Error('offline'), { code: 'unavailable' }));
+  mockMental.setCheckinNote.mockResolvedValue({ id: 'reese_2026-11-09', note: 'Edited.' });
+  const { r, out } = await mountBoard({ checkins: READ_REESE });
+  await r.flush();
+  expect(out.current.rows.checkedIn[0]).toMatchObject({ athleteId: 'reese', note: 'Spoke Monday.' });
+  await r.act(() => out.current.setCheckin({ athleteId: 'reese', checkedIn: false }).catch(() => {}));
+  expect(out.current.rows.checkedIn[0]).toMatchObject({ athleteId: 'reese', note: 'Spoke Monday.' }); // the refused delete put the read back
+  await r.act(() => out.current.setCheckinNote({ athleteId: 'reese', note: 'Edited.' }));
+  expect(mockMental.setCheckinNote).toHaveBeenCalledWith({ athleteId: 'reese', weekStartISO: '2026-11-09', note: 'Edited.' });
+  expect(out.current.rows.checkedIn[0].note).toBe('Edited.');
+  await r.unmount();
+});
+
+test('a note on a past week goes to that week\'s check-in', async () => {
+  mockMental.setCheckinNote.mockResolvedValue({ id: 'jordan_2026-11-02', note: 'Edited.' });
+  const { r, out } = await mountBoard({
+    week: '2026-11-02',
+    checkins: [{ id: 'jordan_2026-11-02', athleteId: 'jordan', weekStart: '2026-11-02', checkedIn: true, by: 'mental', at: '2026-11-04', note: 'Older.' }],
+  });
+  await r.flush();
+  expect(mockMental.fetchBookingsBetween).toHaveBeenCalledWith({ fromISO: '2026-11-02', toISO: '2026-11-08' });
+  expect(out.current.rows.checkedIn[0]).toMatchObject({ athleteId: 'jordan', note: 'Older.' });
+  await r.act(() => out.current.setCheckinNote({ athleteId: 'jordan', note: 'Edited.' }));
+  expect(mockMental.setCheckinNote).toHaveBeenCalledWith({ athleteId: 'jordan', weekStartISO: '2026-11-02', note: 'Edited.' });
+  expect(out.current.rows.checkedIn[0].note).toBe('Edited.');
+  expect(mockLive.fetchAllAthletes).toHaveBeenCalledTimes(1);
+  await r.unmount();
+});
+
+test('a refused note then a refused un-tick leaves the row on what was read, never on the unconfirmed note', async () => {
+  let refuseNote;
+  let refuseTick;
+  mockMental.setCheckinNote.mockImplementation(() => new Promise((res, rej) => { refuseNote = rej; }));
+  mockMental.setCheckin.mockImplementation(() => new Promise((res, rej) => { refuseTick = rej; }));
+  const { r, out } = await mountBoard({ checkins: READ_REESE });
+  await r.flush();
+  let note;
+  await r.act(() => { note = out.current.setCheckinNote({ athleteId: 'reese', note: 'Unconfirmed.' }).catch((e) => e); });
+  expect(out.current.rows.checkedIn[0].note).toBe('Unconfirmed.');
+  let tick;
+  await r.act(() => { tick = out.current.setCheckin({ athleteId: 'reese', checkedIn: false }).catch((e) => e); });
+  expect(ids(out.current.rows.checkedIn)).toEqual([]);
+  await r.act(async () => { refuseNote(Object.assign(new Error('offline'), { code: 'unavailable' })); await note; });
+  await r.act(async () => { refuseTick(Object.assign(new Error('offline'), { code: 'unavailable' })); await tick; });
+  expect(out.current.rows.checkedIn[0]).toMatchObject({ athleteId: 'reese', checkedInThisWeek: true, note: 'Spoke Monday.' });
   await r.unmount();
 });
 

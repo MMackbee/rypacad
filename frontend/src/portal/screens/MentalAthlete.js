@@ -150,6 +150,9 @@ function AthleteCards({ data, required, open }) {
             contract?.lastCheckin ? `Last check-in ${day(contract.lastCheckin)}` : 'Never checked in',
           ].filter(Boolean).join(' · ')}
         </Body>
+        {contract?.lastCheckinNote ? (
+          <Body size={11} tone={color.textTertiary} style={{ marginTop: 4, overflowWrap: 'anywhere' }}>Note: {contract.lastCheckinNote}</Body>
+        ) : null}
       </Card>
     </>
   );

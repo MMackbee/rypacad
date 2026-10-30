@@ -9,17 +9,17 @@
  * the academy's America/Chicago date, never the device's.
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { ERR, fetchAllAthletes, fetchAllHouseholds, fetchAthlete, isLive } from './live';
+import { ERR, LiveDataError, fetchAllAthletes, fetchAllHouseholds, fetchAthlete, fetchSessionsInRange, isLive } from './live';
 import { useInvalidation } from './invalidate';
 import useSeedResource from './useSeedResource';
 import {
-  CHECKINS_KEY, MENTAL_NOTES_KEY, deleteMentalEntry, fetchAllMentalBookings, fetchAllMentalEntries, fetchCheckinsForAthletes,
+  CHECKINS_KEY, MENTAL_NOTES_KEY, deleteMentalEntry, fetchAllMentalBookings, fetchAllMentalEntries, fetchBookingsBetween, fetchCheckinsForAthletes,
   fetchContractConfig, fetchContractLogsBetween, fetchHouseholdContact, fetchMentalBookings, fetchMentalEntries,
-  householdContact, saveMentalEntry, setCheckin as writeCheckin,
+  householdContact, saveMentalEntry, setCheckin as writeCheckin, setCheckinNote as writeCheckinNote,
 } from './mentalLive';
 import { mentalFixtures } from '../data/seed';
 import { addDays, ageOn, contractMinutesFor, weekStartFor, weekSummary } from '../data/contractRule';
-import { boardRows, lastCheckinFor } from '../data/contractBoard';
+import { boardRows, latestCheckin, visitsByAthlete } from '../data/contractBoard';
 import { groupEntries, kindOf, mentalAthleteRows } from '../data/mentalNotes';
 import { academyDateISO } from '../data/calendar';
 
@@ -29,8 +29,8 @@ export const SLOW_SAVE_MS = 8000;
 /* ------------------------------------------------------------ Athletes -- */
 
 function liveMentalAthletes(today) {
-  return Promise.all([fetchAllAthletes(), fetchAllMentalBookings(), fetchAllMentalEntries()])
-    .then(([athletes, bookings, entries]) => mentalAthleteRows({ athletes, bookings, entries, today }));
+  return Promise.all([fetchAllAthletes(), fetchAllHouseholds(), fetchAllMentalBookings(), fetchAllMentalEntries()])
+    .then(([athletes, households, bookings, entries]) => mentalAthleteRows({ athletes, households, bookings, entries, today }));
 }
 
 /** `{ data: Row[] | null, loading, error }`, rows from mentalAthleteRows (data/mentalNotes.js). */
@@ -60,7 +60,8 @@ function athletePayload({ athlete, contact, bookings, entries, logsByDate, check
     notes: groupEntries(entries),
     contract: {
       thisWeek: weekSummary({ logsByDate, weekStartISO: weekStartFor(today), required: (d) => contractMinutesFor(athlete, d) }),
-      lastCheckin: lastCheckinFor(athlete.id, checkins),
+      lastCheckin: latestCheckin(athlete.id, checkins)?.date ?? null,
+      lastCheckinNote: latestCheckin(athlete.id, checkins)?.note ?? null,
       required,
     },
   };
@@ -258,14 +259,17 @@ export function useMentalNote({ athleteId, entryId, sessionDate = null, athleteN
 
 /** What the board is computed from; the rows are derived in the hook so a toggle never re-reads. */
 async function liveBoardInputs(weekStartISO) {
-  const [athletes, households, logsByAthlete, checkins, config] = await Promise.all([
+  const weekEnd = addDays(weekStartISO, 6);
+  const [athletes, households, logsByAthlete, checkins, config, bookings, sessions] = await Promise.all([
     fetchAllAthletes(),
     fetchAllHouseholds(),
-    fetchContractLogsBetween({ fromISO: addDays(weekStartISO, -7), toISO: addDays(weekStartISO, 6) }),
+    fetchContractLogsBetween({ fromISO: addDays(weekStartISO, -7), toISO: weekEnd }),
     fetchCheckinsForAthletes(null),
     fetchContractConfig(),
+    fetchBookingsBetween({ fromISO: weekStartISO, toISO: weekEnd }),
+    fetchSessionsInRange(weekStartISO, weekEnd),
   ]);
-  return { athletes, households, logsByAthlete, checkins, config };
+  return { athletes, households, logsByAthlete, checkins, config, bookings, sessions };
 }
 
 const checkinId = (c) => c.id ?? `${c.athleteId}_${c.weekStart}`;
@@ -300,7 +304,7 @@ export function useContractBoard(weekStartISO) {
   let seed = null;
   if (!live) {
     const f = mentalFixtures(today);
-    seed = { athletes: f.athletes, households: f.households, logsByAthlete: f.logsByAthlete, checkins: f.checkins, config: f.config };
+    seed = { athletes: f.athletes, households: f.households, logsByAthlete: f.logsByAthlete, checkins: f.checkins, config: f.config, bookings: f.bookings, sessions: f.sessions };
   }
   const state = useSeedResource(
     seed,
@@ -325,6 +329,7 @@ export function useContractBoard(weekStartISO) {
     ? boardRows({
       athletes: inputs.athletes, households: inputs.households, logsByAthlete: inputs.logsByAthlete,
       checkins: withOwn(inputs.checkins, own), today, enabledAt: inputs.config?.enabledAt ?? null, weekStartISO,
+      visits: visitsByAthlete({ bookings: inputs.bookings, sessions: inputs.sessions, weekStartISO }),
     })
     : null), [inputs, own, today, weekStartISO]);
 
@@ -343,8 +348,10 @@ export function useContractBoard(weekStartISO) {
     f.latest = token;
     f.refused = false;
     putOwn({ ...ownRef.current, [id]: now });
+    const pending = writeCheckin({ athleteId, weekStartISO, checkedIn });
+    f.pending = pending; // a note typed before this lands waits for it (setCheckinNote)
     try {
-      const out = await writeCheckin({ athleteId, weekStartISO, checkedIn });
+      const out = await pending;
       f.server = { had: true, doc: now };
       if (f.refused) showServer(id, f.server); // the latest tap was refused before this write landed
       return out;
@@ -356,8 +363,51 @@ export function useContractBoard(weekStartISO) {
         showServer(id, f.server);
       }
       throw err;
+    } finally {
+      if (f.pending === pending) f.pending = null; // a settled write is nothing to wait for
     }
   }, [live, weekStartISO, today, putOwn, showServer]);
 
-  return { rows, config: inputs?.config ?? null, setCheckin, loading: state.loading, error: state.error };
+  /**
+   * The note on the displayed week's check-in for `athleteId` (Yannick,
+   * 2026-10-30). Optimistic like the tick: the row shows the note at once; a
+   * failed write puts the previous note back and rejects. Waits for the
+   * tick's own write when that is still in flight (the doc must exist for
+   * the partial update), and fails the way that write failed. A blank note
+   * removes the stored one. Rejects NOT_FOUND when the row is not checked
+   * in that week.
+   */
+  const setCheckinNote = useCallback(async ({ athleteId, note }) => {
+    const id = `${athleteId}_${weekStartISO}`;
+    const text = typeof note === 'string' && note.trim() ? note.trim() : null;
+    const hasOwn = () => Object.prototype.hasOwnProperty.call(ownRef.current, id);
+    const shown = () => (hasOwn() ? ownRef.current[id] : (inputs?.checkins || []).find((c) => checkinId(c) === id && c.checkedIn === true) || null);
+    const current = shown();
+    if (!current) throw new LiveDataError(ERR.NOT_FOUND, 'setCheckinNote: that week has no check-in to note.');
+    // Like the first tap, the first note on a row records what is on screen as
+    // what the server holds, BEFORE the optimistic note goes on - so a later
+    // refused tap never puts an unconfirmed note back on the row.
+    const f = flights.current[id] || (flights.current[id] = { server: { had: hasOwn(), doc: ownRef.current[id] } });
+    const before = current;
+    const after = { ...current, id, note: text };
+    putOwn({ ...ownRef.current, [id]: after });
+    if (!live) return { id, note: text };
+    try {
+      // The tick's own write must land first (the doc must exist for the update);
+      // if that write failed, the row already went back and the note goes with it.
+      if (f.pending) await f.pending.catch(() => {});
+      const live_ = shown();
+      if (!live_ || live_.checkedIn !== true) return { id, note: null, dropped: true }; // unticked while we waited
+      const out = await writeCheckinNote({ athleteId, weekStartISO, note: text });
+      const landed = { ...live_, id, note: text }; // the note onto whatever the row holds now, not the pre-wait doc
+      putOwn({ ...ownRef.current, [id]: landed });
+      f.server = { had: true, doc: landed };
+      return out;
+    } catch (err) {
+      if (ownRef.current[id] === after) putOwn({ ...ownRef.current, [id]: before });
+      throw err;
+    }
+  }, [live, weekStartISO, inputs, putOwn]);
+
+  return { rows, config: inputs?.config ?? null, setCheckin, setCheckinNote, loading: state.loading, error: state.error };
 }

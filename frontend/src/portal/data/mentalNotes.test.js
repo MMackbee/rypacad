@@ -48,8 +48,15 @@ describe('mentalAthleteRows (Athletes list, spec 5.1)', () => {
   const entries = [{ id: 'intake', athleteId: 'jordan', kind: 'intake', updatedAtMs: ms('2026-11-03') }];
   test('rows by name with next and last 1:1 and the note facts', () => {
     expect(mentalAthleteRows({ athletes, bookings, entries, today: '2026-11-11' })).toEqual([
-      { athleteId: 'jordan', name: 'Jordan Whitfield', age: 14, nextSession: '2026-11-17', lastSession: '2026-11-10', hasIntake: true, latestNoteDate: '2026-11-03' },
-      { athleteId: 'reese', name: 'Reese Whitfield', age: 12, nextSession: null, lastSession: null, hasIntake: false, latestNoteDate: null },
+      { athleteId: 'jordan', name: 'Jordan Whitfield', age: 14, familyName: null, nextSession: '2026-11-17', lastSession: '2026-11-10', hasIntake: true, latestNoteDate: '2026-11-03' },
+      { athleteId: 'reese', name: 'Reese Whitfield', age: 12, familyName: null, nextSession: null, lastSession: null, hasIntake: false, latestNoteDate: null },
     ]);
+  });
+  test('households give each row its family name, as an array or an id map; an unknown household is null', () => {
+    const withHomes = athletes.map((a) => ({ ...a, householdId: a.id === 'jordan' ? 'w' : 'gone' }));
+    const asArray = mentalAthleteRows({ athletes: withHomes, households: [{ id: 'w', name: 'Whitfield family' }], bookings, entries, today: '2026-11-11' });
+    expect(asArray.map((r) => [r.athleteId, r.familyName])).toEqual([['jordan', 'Whitfield family'], ['reese', null]]);
+    const asMap = mentalAthleteRows({ athletes: withHomes, households: { w: { id: 'w', name: 'Whitfield family' } }, bookings, entries, today: '2026-11-11' });
+    expect(asMap.map((r) => r.familyName)).toEqual(['Whitfield family', null]);
   });
 });
