@@ -2,37 +2,101 @@ import React from 'react';
 import { renderScreen } from './testRender';
 
 let mockBoard;
+let nicoChecked = false;
 const mockSetCheckin = jest.fn();
+const mockSetCheckinNote = jest.fn();
 jest.mock('../hooks', () => ({
-  useContractBoard: (weekStartISO) => ({ ...mockBoard(weekStartISO), setCheckin: mockSetCheckin, loading: false, error: null }),
+  useContractBoard: (weekStartISO) => ({ ...mockBoard(weekStartISO), setCheckin: mockSetCheckin, setCheckinNote: mockSetCheckinNote, loading: false, error: null }),
   useSelfManaged: () => false,
 }));
 jest.mock('../data/calendar', () => ({ ...jest.requireActual('../data/calendar'), academyDateISO: () => '2026-11-11' }));
 import MentalContract from './MentalContract';
 
-const r0 = (id, name, metDays) => ({ athleteId: id, name, age: 12, required: 20, thisWeek: { metDays, days: [] }, lastWeek: { metDays: 0, days: [] }, lastCheckin: null, checkedInThisWeek: false, daysSince: null });
+const r0 = (id, name, metDays, extra = {}) => ({
+  athleteId: id, name, age: 12, required: 20, familyName: null, thisWeek: { metDays, days: [] }, lastWeek: { metDays: 0, days: [] },
+  lastCheckin: null, checkedInThisWeek: false, note: null, visits: [], daysSince: null, ...extra,
+});
 const mockBoardDefault = () => ({ config: { enabled: true, enabledAt: '2026-11-03' }, rows: { due: [], thisWeek: [r0('nico', 'Nico', 2)], checkedIn: [] } });
+const field = (r, label) => r.container.querySelector(`[aria-label="${label}"]`);
 
 beforeEach(() => {
+  nicoChecked = false;
+  mockSetCheckin.mockReset();
+  mockSetCheckinNote.mockReset();
+  // The tick's write flips what the next render reads, the way the real hook's optimistic row does.
+  mockSetCheckin.mockImplementation(async ({ athleteId, checkedIn }) => {
+    if (athleteId === 'nico') nicoChecked = checkedIn;
+    return { id: `${athleteId}_2026-11-09`, checkedIn };
+  });
+  mockSetCheckinNote.mockResolvedValue({ id: 'nico_2026-11-09', note: 'x' });
   mockBoard = (week) => ({
     config: { enabled: true, enabledAt: '2026-11-03' },
     rows: week === '2026-11-09'
-      ? { due: [{ ...r0('reese', 'Reese', 0), daysSince: 22 }], thisWeek: [r0('nico', 'Nico', 2)], checkedIn: [{ ...r0('jordan', 'Jordan', 4), checkedInThisWeek: true }] }
+      ? {
+        due: [{ ...r0('reese', 'Reese', 0), daysSince: 22 }],
+        thisWeek: nicoChecked ? [] : [r0('nico', 'Nico', 2, { visits: [{ date: '2026-11-10', dow: 'Tue', time: '4:00 PM', type: 'training' }] })],
+        checkedIn: [
+          { ...r0('jordan', 'Jordan', 4), checkedInThisWeek: true, note: 'Spoke Monday.' },
+          ...(nicoChecked ? [{ ...r0('nico', 'Nico', 2), checkedInThisWeek: true }] : []),
+        ],
+      }
       : { due: [], thisWeek: [r0('jordan', 'Jordan', 5)], checkedIn: [] },
   });
 });
 
-test('three groups with counts, the current week, the toggle writes', async () => {
+test('three groups with counts, the tick box, the visits line; a tick writes and opens the note prompt, Save writes the note', async () => {
   const r = await renderScreen(<MentalContract bare role="mental" />, { path: '/portal/mental/contract' });
   expect(r.text()).toContain('Week of Nov 9');
   expect(r.text()).toContain('Due for a check-in · 1');
   expect(r.text()).toContain('This week · 1');
   expect(r.text()).toContain('Checked in this week · 1');
-  expect(r.button('Next week').disabled).toBe(true);
+  expect(r.text()).toContain('At RYP: Tue 4:00 PM');
+  const tick = r.button('Checked in · Nico');
+  expect(tick.getAttribute('role')).toBe('checkbox');
+  expect(tick.getAttribute('aria-checked')).toBe('false');
+  expect(field(r, 'Check-in note · Nico')).toBeNull();
   await r.click('Checked in · Nico');
+  await r.flush();
   expect(mockSetCheckin).toHaveBeenCalledWith({ athleteId: 'nico', checkedIn: true });
+  expect(r.text()).toContain('Checked in this week · 2');
+  expect(r.button('Checked in · Nico').getAttribute('aria-checked')).toBe('true');
+  expect(field(r, 'Check-in note · Nico')).not.toBeNull();
+  await r.fill('Check-in note · Nico', '  Quick word at pickup. ');
+  await r.click('Save note · Nico');
+  await r.flush();
+  expect(mockSetCheckinNote).toHaveBeenCalledWith({ athleteId: 'nico', note: '  Quick word at pickup. ' });
+  expect(field(r, 'Check-in note · Nico')).toBeNull();
+  // Jordan's stored note shows with an Edit; unticking writes false.
+  expect(r.text()).toContain('Note: Spoke Monday.');
+  expect(r.button('Edit note · Jordan')).not.toBeNull();
   await r.click('Checked in · Jordan');
   expect(mockSetCheckin).toHaveBeenCalledWith({ athleteId: 'jordan', checkedIn: false });
+  r.unmount();
+});
+
+test('Edit reopens a stored note; a failed save says so and keeps the words; Skip closes without a write', async () => {
+  mockSetCheckinNote.mockRejectedValueOnce(Object.assign(new Error('offline'), { code: 'unavailable' }));
+  const r = await renderScreen(<MentalContract bare role="mental" />, { path: '/portal/mental/contract' });
+  await r.click('Edit note · Jordan');
+  expect(field(r, 'Check-in note · Jordan').value).toBe('Spoke Monday.');
+  await r.fill('Check-in note · Jordan', 'Spoke Monday, again Tuesday.');
+  await r.click('Save note · Jordan');
+  await r.flush();
+  expect(r.text()).toContain("That note didn't save");
+  expect(field(r, 'Check-in note · Jordan').value).toBe('Spoke Monday, again Tuesday.');
+  await r.click('Skip note · Jordan');
+  expect(field(r, 'Check-in note · Jordan')).toBeNull();
+  expect(mockSetCheckinNote).toHaveBeenCalledTimes(1);
+  r.unmount();
+});
+
+test('a failed tick says so and does not leave a note prompt open', async () => {
+  mockSetCheckin.mockRejectedValueOnce(Object.assign(new Error('offline'), { code: 'unavailable' }));
+  const r = await renderScreen(<MentalContract bare role="mental" />, { path: '/portal/mental/contract' });
+  await r.click('Checked in · Nico');
+  await r.flush();
+  expect(r.text()).toContain("That check-in didn't save");
+  expect(field(r, 'Check-in note · Nico')).toBeNull();
   r.unmount();
 });
 
@@ -44,6 +108,7 @@ test('the week switcher goes back and the empty groups say so', async () => {
   expect(r.text()).toContain('No one is due');
   expect(r.text()).toContain('No check-ins that week');
   expect(r.button('Next week').disabled).toBe(false);
+  expect(r.button('Checked in · Jordan')).not.toBeNull(); // a past week can still be ticked
   r.unmount();
 });
 
@@ -66,10 +131,37 @@ test('a past week is labelled as that week, never as this week; Due says it is a
   r.unmount();
 });
 
-test('owner and ops see the board without toggles; the off switch shows a banner', async () => {
-  mockBoard = () => ({ ...mockBoardDefault(), config: { enabled: false, enabledAt: null } });
+test('the switcher goes ahead up to four weeks: read-only, named as that week, and it says it is ahead', async () => {
+  const r = await renderScreen(<MentalContract bare role="mental" />, { path: '/portal/mental/contract' });
+  await r.click('Next week');
+  await r.flush();
+  expect(r.text()).toContain('Week of Nov 16 · ahead');
+  expect(r.text()).toContain('That week · 1');
+  expect(r.text()).toContain('Check-ins open when the week starts');
+  expect(r.text()).toContain('Week of Nov 16 5/5');
+  expect(r.button('Checked in · Jordan')).toBeNull();
+  for (let i = 0; i < 3; i += 1) {
+    await r.click('Next week');
+    await r.flush();
+  }
+  expect(r.text()).toContain('Week of Dec 7');
+  expect(r.button('Next week').disabled).toBe(true);
+  await r.click('Previous week');
+  await r.flush();
+  expect(r.button('Next week').disabled).toBe(false);
+  r.unmount();
+});
+
+test('owner and ops see the board without the tick or Edit, notes included; the off switch shows a banner', async () => {
+  mockBoard = () => ({
+    ...mockBoardDefault(),
+    config: { enabled: false, enabledAt: null },
+    rows: { due: [], thisWeek: [], checkedIn: [{ ...r0('jordan', 'Jordan', 4), checkedInThisWeek: true, note: 'Spoke Monday.' }] },
+  });
   const r = await renderScreen(<MentalContract bare role="owner" />, { path: '/portal/mental/contract' });
-  expect(r.button('Checked in · Nico')).toBeNull();
+  expect(r.button('Checked in · Jordan')).toBeNull();
+  expect(r.text()).toContain('Note: Spoke Monday.');
+  expect(r.button('Edit note · Jordan')).toBeNull();
   expect(r.text()).toContain('The contract switch is off');
   r.unmount();
 });

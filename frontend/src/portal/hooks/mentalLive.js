@@ -6,11 +6,12 @@
  * check-ins and bookings reads are single-field equality, the logs read
  * is a single-field date range.
  */
-import { collection, collectionGroup, deleteDoc, doc, getDoc, getDocs, query, runTransaction, serverTimestamp, setDoc, where } from 'firebase/firestore';
+import { collection, collectionGroup, deleteDoc, deleteField, doc, getDoc, getDocs, query, runTransaction, serverTimestamp, setDoc, updateDoc, where } from 'firebase/firestore';
 import { db } from '../../firebase';
 import { ERR, LiveDataError, fetchBookings, fetchSessionsByIds, requireUser, wrap } from './live';
 import { bump } from './invalidate';
 import { NOTE_MAX } from '../data/mentalNotes';
+import { CHECKIN_NOTE_MAX } from '../data/contractBoard';
 
 export const MENTAL_NOTES_KEY = 'mentalNotes';
 export const CHECKINS_KEY = 'contractCheckins';
@@ -100,6 +101,37 @@ export async function setCheckin({ athleteId, weekStartISO, checkedIn }) {
     bump(CHECKINS_KEY);
     return { id: `${athleteId}_${weekStartISO}`, checkedIn: Boolean(checkedIn) };
   } catch (err) { throw wrap(err, 'setCheckin'); }
+}
+
+/**
+ * The note on an existing check-in (Yannick, 2026-10-30: the tick prompts
+ * for what was said). A partial update, so `at` (when the check-in
+ * happened) is untouched; a blank note removes the field. Refuses a note
+ * over CHECKIN_NOTE_MAX before any write. Resolves `{ id, note }` with the
+ * note as stored (null when removed).
+ */
+export async function setCheckinNote({ athleteId, weekStartISO, note }) {
+  requireUser();
+  const text = typeof note === 'string' ? note.trim() : '';
+  if (text.length > CHECKIN_NOTE_MAX) throw new LiveDataError(ERR.INVALID, `setCheckinNote: a note holds at most ${CHECKIN_NOTE_MAX} characters.`);
+  const id = `${athleteId}_${weekStartISO}`;
+  try {
+    await updateDoc(doc(db, 'contractCheckins', id), { note: text ? text : deleteField() });
+    bump(CHECKINS_KEY);
+    return { id, note: text || null };
+  } catch (err) { throw wrap(err, 'setCheckinNote'); }
+}
+
+/**
+ * Every booking dated from `fromISO` to `toISO` inclusive, any athlete, any
+ * type, as stored (the board's visits, data/contractBoard.js visitsByAthlete).
+ * A single-field date range, provable for the staff read clause.
+ */
+export async function fetchBookingsBetween({ fromISO, toISO }) {
+  try {
+    const snap = await getDocs(query(collection(db, 'bookings'), where('date', '>=', fromISO), where('date', '<=', toISO)));
+    return snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+  } catch (err) { throw wrap(err, 'fetchBookingsBetween'); }
 }
 
 export async function fetchContractLogsBetween({ athleteIds = null, fromISO, toISO }) {

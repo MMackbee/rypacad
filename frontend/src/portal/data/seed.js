@@ -417,14 +417,29 @@ export function mentalFixtures(today) {
     { id: 'jordan', name: 'Jordan Whitfield', dob: '2012-06-17', householdId: 'whitfield' },
     { id: 'nico', name: 'Nico Whitfield', dob: '2017-09-09', householdId: 'whitfield' },
   ];
-  const sessions = [
+  const oneOnOnes = [
     { id: 'cal-seed-a', date: day(-9), time: '4:00 PM', type: 'mental', status: 'scheduled', durationMinutes: 30 },
     { id: 'cal-seed-b', date: day(-2), time: '4:30 PM', type: 'mental', status: 'scheduled', durationMinutes: 30 },
     { id: 'cal-seed-c', date: day(8), time: '5:00 PM', type: 'mental', status: 'scheduled', durationMinutes: 30 },
   ];
-  const bookings = sessions.map((s, i) => ({
-    id: `jordan_${s.id}`, athleteId: 'jordan', sessionId: s.id, date: s.date, type: 'mental', status: i < 2 ? 'attended' : 'confirmed', attendee: 'athlete',
-  }));
+  // This week at the academy (the board's "At RYP" line): Jordan trains Tuesday and plays
+  // the Saturday Tour event; Nico trains Thursday; a cancelled Friday booking stays off the line.
+  const academy = [
+    { id: 'tr-seed-tue', date: day(1), time: '4:00 PM', type: 'training', status: 'scheduled' },
+    { id: 'tr-seed-thu', date: day(3), time: '5:30 PM', type: 'training', status: 'scheduled' },
+    { id: 'tr-seed-fri', date: day(4), time: '4:00 PM', type: 'training', status: 'scheduled' },
+    { id: 'tour-seed-sat', date: day(5), time: '9:00 AM', type: 'tournament', status: 'scheduled' },
+  ];
+  const sessions = [...oneOnOnes, ...academy];
+  const bookings = [
+    ...oneOnOnes.map((s, i) => ({
+      id: `jordan_${s.id}`, athleteId: 'jordan', sessionId: s.id, date: s.date, type: 'mental', status: i < 2 ? 'attended' : 'confirmed', attendee: 'athlete',
+    })),
+    { id: 'jordan_tr-seed-tue', athleteId: 'jordan', sessionId: 'tr-seed-tue', date: day(1), type: 'training', status: 'confirmed' },
+    { id: 'jordan_tour-seed-sat', athleteId: 'jordan', sessionId: 'tour-seed-sat', date: day(5), type: 'tournament', status: 'confirmed' },
+    { id: 'nico_tr-seed-thu', athleteId: 'nico', sessionId: 'tr-seed-thu', date: day(3), type: 'training', status: 'confirmed' },
+    { id: 'nico_tr-seed-fri', athleteId: 'nico', sessionId: 'tr-seed-fri', date: day(4), type: 'training', status: 'cancelled' },
+  ];
   const at = (iso) => Date.UTC(...iso.split('-').map((n, i) => (i === 1 ? Number(n) - 1 : Number(n))), 22);
   const entries = [
     { id: 'intake', athleteId: 'jordan', kind: 'intake', sessionId: null, sessionDate: null, body: 'Intake: wants to stop replaying bad holes. Sleeps fine. Pre-shot routine exists but is skipped under pressure.', createdAtMs: at(day(-9)), updatedAtMs: at(day(-9)) },
@@ -437,7 +452,7 @@ export function mentalFixtures(today) {
   };
   const checkins = [
     { id: `jordan_${week}`, athleteId: 'jordan', weekStart: week, checkedIn: true, by: 'mental', at: day(1) },
-    { id: `nico_${day(-7)}`, athleteId: 'nico', weekStart: day(-7), checkedIn: true, by: 'mental', at: day(-5) },
+    { id: `nico_${day(-7)}`, athleteId: 'nico', weekStart: day(-7), checkedIn: true, by: 'mental', at: day(-5), note: 'Caught him after Thursday practice: wants to work on first-tee nerves.' },
   ];
   return {
     athletes, sessions, bookings, entries, logsByAthlete, checkins,

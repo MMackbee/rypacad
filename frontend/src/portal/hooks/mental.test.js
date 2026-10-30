@@ -76,3 +76,30 @@ test('seed mode: the board groups the fixtures and a local check-in moves the ro
   expect(h.out.current.rows.checkedIn.map((r) => r.athleteId)).toEqual(['jordan', 'nico']);
   h.unmount();
 });
+
+test('seed mode: rows carry that week\'s visits, the family name and the note; a local note sticks to the row', async () => {
+  const h = mountHook(() => useContractBoard('2026-11-09'));
+  await settle(h);
+  const jordan = h.out.current.rows.checkedIn[0];
+  expect(jordan.visits.map((v) => `${v.dow} ${v.time} ${v.type}`)).toEqual(['Tue 4:00 PM training', 'Sat 9:00 AM tournament']);
+  expect(jordan.familyName).toBe('Whitfield family');
+  expect(jordan.note).toBeNull();
+  const nico = h.out.current.rows.thisWeek[0];
+  expect(nico.visits.map((v) => v.dow)).toEqual(['Thu']); // the cancelled Friday booking is left out
+  expect(nico.note).toBeNull(); // last week's note is not this week's
+  await expect(h.out.current.setCheckinNote({ athleteId: 'nico', note: 'Too early.' })).rejects.toMatchObject({ code: 'not-found' });
+  await act(async () => { await h.out.current.setCheckin({ athleteId: 'nico', checkedIn: true }); });
+  await act(async () => { await h.out.current.setCheckinNote({ athleteId: 'nico', note: '  Quick word at pickup. ' }); });
+  expect(h.out.current.rows.checkedIn.find((r) => r.athleteId === 'nico').note).toBe('Quick word at pickup.');
+  await act(async () => { await h.out.current.setCheckinNote({ athleteId: 'nico', note: '   ' }); });
+  expect(h.out.current.rows.checkedIn.find((r) => r.athleteId === 'nico').note).toBeNull();
+  h.unmount();
+});
+
+test('seed mode: last week\'s check-in note reaches the athlete page', async () => {
+  const h = mountHook(() => useMentalAthlete('nico'));
+  await settle(h);
+  expect(h.out.current.data.contract.lastCheckin).toBe('2026-11-04');
+  expect(h.out.current.data.contract.lastCheckinNote).toBe('Caught him after Thursday practice: wants to work on first-tee nerves.');
+  h.unmount();
+});

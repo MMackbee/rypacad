@@ -16,6 +16,18 @@ beforeEach(() => {
   ];
 });
 
+test('a first-name-only athlete shows the family name first; a full name does not', async () => {
+  mockRows = [
+    { athleteId: 'brooks', name: 'Brooks', age: 10, familyName: 'Erickson family', nextSession: null, lastSession: null, hasIntake: false, latestNoteDate: null },
+    { athleteId: 'jordan', name: 'Jordan Whitfield', age: 14, familyName: 'Whitfield family', nextSession: '2026-11-17', lastSession: null, hasIntake: true, latestNoteDate: null },
+  ];
+  const r = await renderScreen(<MentalAthletes bare />, { path: '/portal/mental' });
+  expect(r.text()).toContain('Erickson family · Age 10 · No 1:1 yet');
+  expect(r.text()).toContain('Age 14 · Next 1:1 Nov 17');
+  expect(r.text()).not.toContain('Whitfield family');
+  r.unmount();
+});
+
 test('every athlete, with age, next or last 1:1, intake and latest note', async () => {
   const onOpenAthlete = jest.fn();
   const r = await renderScreen(<MentalAthletes bare onOpenAthlete={onOpenAthlete} />, { path: '/portal/mental' });

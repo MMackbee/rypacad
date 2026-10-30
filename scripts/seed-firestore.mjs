@@ -1153,7 +1153,9 @@ function buildDocs(portal) {
   // (that Wednesday evening). Unchecking is a delete, so only true is stored.
   const contractCheckins = new Map([
     [`jordan_${thisMonday}`, { athleteId: 'jordan', weekStart: thisMonday, checkedIn: true, by: 'mental', at: new Date(today) }],
-    [`nico_${lastMonday}`, { athleteId: 'nico', weekStart: lastMonday, checkedIn: true, by: 'mental', at: eveningOf(portal.addDays(lastMonday, 2), 19, 0) }],
+    [`nico_${lastMonday}`, { athleteId: 'nico', weekStart: lastMonday, checkedIn: true, by: 'mental', at: eveningOf(portal.addDays(lastMonday, 2), 19, 0),
+      // 2026-10-30: the optional check-in note (rules: a string of at most 500 characters).
+      note: 'Caught him after Wednesday practice: wants to work on first-tee nerves.' }],
   ]);
   // config/contract: the server-readable switch (set-contract-flag.mjs in
   // production), on in the emulator since 21 days before the run date, so

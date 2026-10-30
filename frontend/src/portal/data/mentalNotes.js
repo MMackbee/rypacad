@@ -37,14 +37,21 @@ export function groupEntries(entries) {
   };
 }
 
-export function mentalAthleteRows({ athletes, bookings, entries, today }) {
+/**
+ * The Athletes list rows, A to Z. `households` (an array or an id -> doc
+ * map, optional) gives each row its `familyName`, which the screen shows
+ * beside a first-name-only athlete (data/athleteLabel.js).
+ */
+export function mentalAthleteRows({ athletes, households, bookings, entries, today }) {
   const live = (bookings || []).filter((b) => b.type === 'mental' && b.status !== 'cancelled');
+  const byHousehold = Array.isArray(households) ? Object.fromEntries(households.map((h) => [h.id, h])) : households || {};
   return (athletes || [])
     .map((a) => {
       const mine = live.filter((b) => b.athleteId === a.id).map((b) => b.date).filter(Boolean).sort();
       const summary = athleteNoteSummary((entries || []).filter((e) => e.athleteId === a.id));
       return {
         athleteId: a.id, name: a.name, age: ageOn(a.dob ?? null, today),
+        familyName: byHousehold[a.householdId]?.name ?? null,
         nextSession: mine.find((d) => d >= today) || null,
         lastSession: mine.filter((d) => d < today).pop() || null,
         ...summary,
