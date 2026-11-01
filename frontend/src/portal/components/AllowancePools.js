@@ -1,4 +1,5 @@
 import React from 'react';
+import { format, parseISO } from 'date-fns';
 import { color, font, radius } from '../tokens';
 import { longDayLabel } from '../data/calendar';
 import { tokenStartLabel } from '../data/billingCopy';
@@ -113,6 +114,32 @@ export default function AllowancePools({ tokens, compact = false, style }) {
           <div style={{ width: `${pct}%`, height: '100%', background: tone, borderRadius: 3 }} />
         </div>
       )}
+      <NextPeriodLine tokens={tokens} />
+    </div>
+  );
+}
+
+/**
+ * "December: 7 of 8 left" under the meter (incident 2026-11-01: with the
+ * period at zero and "Tokens reset Dec 1" beside it, families read December
+ * as closed). Reads `tokens.nextPeriod` (hooks/index.js
+ * tokensWithNextPeriod); nothing without a counted next period, and nothing
+ * while the current grant is unpaid. Exported for the booking banner's
+ * tests; the meter above renders it itself.
+ */
+export function nextPeriodLabel(nextPeriod) {
+  if (!nextPeriod || nextPeriod.granted == null || nextPeriod.left == null || !nextPeriod.periodKey) return null;
+  const when = nextPeriod.periodKey.endsWith('-01') ? format(parseISO(nextPeriod.periodKey), 'MMMM') : `From ${format(parseISO(nextPeriod.periodKey), 'MMM d')}`;
+  return `${when}: ${nextPeriod.left} of ${nextPeriod.granted} left`;
+}
+
+export function NextPeriodLine({ tokens, style }) {
+  if (!tokens || tokens.unlimited || tokens.perPurchase || tokens.unpaid) return null;
+  const label = nextPeriodLabel(tokens.nextPeriod);
+  if (!label) return null;
+  return (
+    <div data-next-period={tokens.nextPeriod.periodKey} style={{ marginTop: 6, font: `600 11px ${font.body}`, color: tokens.nextPeriod.left === 0 ? color.error : color.textSecondary, ...style }}>
+      {label}
     </div>
   );
 }

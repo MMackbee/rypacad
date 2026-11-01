@@ -193,6 +193,32 @@ test('Book a Session as an athlete: November before Nov 1, the current period fr
   await inSeason.unmount();
 });
 
+test("Book a Session as an athlete on Nov 1 (incident 2026-11-01): the next period's own count rides along, the issued grant first", async () => {
+  live.fetchCurrentUser.mockResolvedValue({ uid: 'u1', athleteId: 'a1', email: 'jordan@email.com' });
+  live.fetchAthlete.mockResolvedValue({ id: 'a1', householdId: 'h1', packageId: 't-16' });
+  const dec = { id: 'a1_dec', sessionId: 'dec', date: '2026-12-01', periodKey: '2026-12-01', status: 'confirmed', type: 'training' };
+  live.fetchBookings.mockResolvedValue([nov, dec]);
+  live.fetchPackage.mockResolvedValue(T16);
+  live.fetchHousehold.mockResolvedValue({ id: 'h1', periodAnchorDay: 1 });
+  live.fetchSessionsInRange.mockResolvedValue([]);
+  waitlist.fetchWaitlistByAthlete.mockResolvedValue([{ id: 'w1', sessionId: 'x', periodKey: '2026-12-01' }]);
+  // November's grant was issued (an ops add); December's not yet - the package's own.
+  grace.fetchTokenPeriod.mockImplementation(async (athleteId, periodKey) => (periodKey === '2026-11-01' ? { id: 'a1_2026-11-01', granted: 17 } : null));
+  const a = await mountHook(() => useBooking({ today: '2026-11-01' }));
+  expect(a.result.current.error).toBeNull();
+  expect(a.result.current.data.tokens).toMatchObject({ granted: 17, used: 1, reserved: 0, left: 16 });
+  expect(a.result.current.data.tokens.nextPeriod).toEqual({ periodKey: '2026-12-01', periodEnd: '2026-12-31', booked: 1, reserved: 1, granted: 16, left: 14 });
+  expect(grace.fetchTokenPeriod).toHaveBeenCalledWith('a1', '2026-12-01');
+  await a.unmount();
+
+  // Once December's doc is issued, that grant counts.
+  grace.fetchTokenPeriod.mockImplementation(async (athleteId, periodKey) => (periodKey === '2026-12-01' ? { id: 'a1_2026-12-01', granted: 9 } : null));
+  const b = await mountHook(() => useBooking({ today: '2026-11-01' }));
+  expect(b.result.current.data.tokens).toMatchObject({ granted: 16, used: 1, left: 15 });
+  expect(b.result.current.data.tokens.nextPeriod).toMatchObject({ granted: 9, booked: 1, reserved: 1, left: 7 });
+  await b.unmount();
+});
+
 test('an unpaid athlete booking before the season: marked unpaid on the booking screen too', async () => {
   live.fetchCurrentUser.mockResolvedValue({ uid: 'u1', athleteId: 'a1', email: 'jordan@email.com' });
   live.fetchAthlete.mockResolvedValue({ id: 'a1', householdId: 'h1', packageId: 't-16', billing: { status: 'lapsed' } });

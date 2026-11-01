@@ -37,7 +37,7 @@ import { leaveWaitlist } from '../hooks/waitlist';
 // elsewhere in this file stays importable (data/calendar.js's own header
 // comment: "both data modes call it").
 import BookingOpensBanner from '../components/BookingOpensBanner';
-import { windowDaysFor } from '../data/packages';
+import { positionForDate, windowDaysFor } from '../data/packages';
 import { SEASON_BOUNDS, capacityFor, dayLabel } from '../data/season';
 import { DEFAULT_DURATION_MINUTES } from '../data/schedule';
 import { tourEventExplainer } from '../data/tour';
@@ -601,8 +601,12 @@ function DaySessionList({
           // has no tokens left (and no grace token standing in) to spend.
           // A bonus token stands in only for a session on or before its
           // expiry - the booking check's own rule (live.js selectGraceToken).
-          const hasGrace = (tokens?.grace ?? []).some((g) => !g.expiresAt || g.expiresAt >= session.date);
-          const tokensSpent = tokens ? !tokens.unlimited && tokens.left === 0 && !hasGrace : false;
+          // 2026-11-01: a next-period session is judged by THAT period's count
+          // (data/packages.js positionForDate), as the booking check does - a
+          // family who spent November still books December.
+          const rowTokens = positionForDate(tokens, session.date);
+          const hasGrace = (rowTokens?.grace ?? []).some((g) => !g.expiresAt || g.expiresAt >= session.date);
+          const tokensSpent = rowTokens ? !rowTokens.unlimited && rowTokens.left === 0 && !hasGrace : false;
           const pending = reserving === session.id;
           // Contract v2.0 pin J: the Saturday adult block is display-only -
           // adults pay at the front desk; it is never a junior booking.
@@ -637,7 +641,7 @@ function DaySessionList({
               ruleHeight={36}
               onClick={tappable ? () => onSelect(session) : undefined}
               // A bonus token that expires before this session is not what it spends.
-              spendNote={displayOnly || started || waiting || notTheirs ? null : <SpendNote tokens={tokens && !hasGrace ? { ...tokens, grace: [] } : tokens} />}
+              spendNote={displayOnly || started || waiting || notTheirs ? null : <SpendNote tokens={rowTokens && !hasGrace ? { ...rowTokens, grace: [] } : rowTokens} />}
               action={
                 waiting ? (
                   <OnWaitlist

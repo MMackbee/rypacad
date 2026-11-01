@@ -37,7 +37,7 @@ import { seedSpecialistDays, useBooking, useHouseholdAthletes, useMembership, us
 import { leaveWaitlist } from '../hooks/waitlist';
 import { waitlistClosed } from '../data/sessionStart';
 import { SPECIALISTS, repeatsWeekly } from '../data/specialists';
-import { windowDaysFor } from '../data/packages';
+import { positionForDate, windowDaysFor } from '../data/packages';
 import { graceSpendLabel, isSingleTokenId } from '../data/singleToken';
 // Pure calendar/season helpers per the seam rule already established in
 // BookSession.js/CommitmentContract.js/TourStandings.js - data still travels
@@ -247,13 +247,22 @@ export default function SpecialistBooking({
   const tokens = slotsState.data?.tokens ?? null;
   const capReached =
     demoCapReached != null ? demoCapReached : specialistId === 'mental' && Boolean(slotsState.data?.capReached);
-  const hasGrace = (tokens?.grace?.length ?? 0) > 0;
-  const tokensSpent = tokens ? !tokens.unlimited && tokens.left === 0 && !hasGrace : false;
+  // 2026-11-01: judged per DATE - a next-period day reads that period's own
+  // count (data/packages.js positionForDate), as the booking check does, so
+  // a family who spent this period still books next month's slot. With no
+  // date (nothing selected yet) the current period's position stands in.
+  // Any grace token keeps the list open here, as before; the sheet judges a
+  // bonus token's expiry per time itself (DetailSheet's slotTokensSpent).
+  const tokensSpentOn = (date) => {
+    const t = positionForDate(tokens, date);
+    const hasGrace = (t?.grace?.length ?? 0) > 0;
+    return t ? !t.unlimited && t.left === 0 && !hasGrace : false;
+  };
   // Sprint 20 (spec 5, D16): the hook computes bookingOpen(Date.now(), pkg)
   // (contract 4.3); absent (routing Task 10 not merged yet) reads as open so
   // the in-app list never locks on a missing field - the rules still refuse.
   const gateOpen = slotsState.data?.bookingOpen ?? true;
-  const blocked = tokensSpent || capReached || !gateOpen;
+  const blockedOn = (date) => tokensSpentOn(date) || capReached || !gateOpen;
   // Sprint 20 (spec 6.1): Yannick books through Calendly when the hook says so
   // (SPECIALISTS.mental.bookingMode === 'calendly' AND a URL is configured);
   // anything else - Phil, the seed, an emulator with no URL - keeps the slot
@@ -283,7 +292,7 @@ export default function SpecialistBooking({
   // is refused as 'full', and the sheet then offers the waitlist.
   const confirmReserve = (slot, { joinWaitlist = false } = {}) => {
     if (reserving) return;
-    if (disabledForNoAthlete || blocked) return;
+    if (disabledForNoAthlete || blockedOn(slot.date)) return;
     setFailure(null);
     setFailureReason(null);
     setReserving(slot.sessionId);
@@ -469,7 +478,7 @@ export default function SpecialistBooking({
                     <SlotList
                       day={selectedDay}
                       specialist={specialist}
-                      disabled={disabledForNoAthlete || blocked}
+                      disabled={disabledForNoAthlete || blockedOn(selectedDate)}
                       reserving={reserving}
                       onSelect={(slot, date) => {
                         setFailure(null);
@@ -490,11 +499,11 @@ export default function SpecialistBooking({
         <DetailSheet
           specialist={specialist}
           slot={sheetSlot}
-          tokens={tokens}
+          tokens={positionForDate(tokens, sheetSlot.date)}
           saving={reserving === sheetSlot.sessionId}
           failure={failure}
           failureReason={failureReason}
-          disabled={disabledForNoAthlete || blocked}
+          disabled={disabledForNoAthlete || blockedOn(sheetSlot.date)}
           capReached={capReached}
           onClose={() => {
             if (reserving) return;

@@ -262,6 +262,36 @@ export function periodFallback(pkg) {
 }
 
 /**
+ * The position a session on `dateISO` is judged by (incident 2026-11-01:
+ * families who had spent November saw every December session greyed and
+ * read it as "no December tokens"). A date inside the NEXT period reads
+ * that period's own count - `tokens.nextPeriod` (hooks/index.js
+ * tokensWithNextPeriod: its grant from an issued doc else the package, its
+ * bookings, its waitlist holds) - never the current period's zero, which is
+ * what the booking check itself does (live.js createBooking charges the
+ * session date's period). Elite and the single token pass through (nothing
+ * per period to count), as does a position without a next-period count and
+ * a date outside the next period. The current grace tokens ride along: a
+ * bonus or bought token can cover a next-period date too, and each surface
+ * judges them by expiry as before. `judgedPeriodKey` says which period the
+ * numbers describe.
+ */
+export function positionForDate(tokens, dateISO) {
+  if (!tokens || tokens.unlimited || tokens.perPurchase || !tokens.nextPeriod || !dateISO) return tokens;
+  const np = tokens.nextPeriod;
+  if (np.granted == null || np.left == null || !np.periodKey) return tokens;
+  if (dateISO < np.periodKey || (np.periodEnd && dateISO > np.periodEnd)) return tokens;
+  return {
+    ...tokens,
+    granted: np.granted,
+    used: np.booked ?? 0,
+    reserved: np.reserved ?? 0,
+    left: np.left,
+    judgedPeriodKey: np.periodKey,
+  };
+}
+
+/**
  * One athlete's token position in one period (pin B) - derived, never a
  * stored counter:
  *   granted    periodFallback(pkg); Part 2 passes the period's tokenPeriods

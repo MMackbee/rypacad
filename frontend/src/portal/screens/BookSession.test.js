@@ -117,6 +117,57 @@ test('at 07:00 Chicago on Oct 10 the banner is gone and a tap reserves', async (
   await r.unmount();
 });
 
+test('Nov 1 with November spent (incident 2026-11-01): November is greyed, a December block is bookable and says what it spends, the banner counts December', async () => {
+  jest.setSystemTime(new Date('2026-11-01T16:00:00Z')); // Sun Nov 1, 10 AM Chicago - the window reaches Dec 1
+  mockPackage = { id: 't-8', kind: 'tokens', windowDays: 30 };
+  mockTokens = {
+    granted: 9, used: 9, reserved: 0, left: 0, unlimited: false, perPurchase: false, grace: [],
+    nextPeriod: { periodKey: '2026-12-01', periodEnd: '2026-12-31', booked: 1, reserved: 0, granted: 8, left: 7 },
+  };
+  const nov = { ...session, id: 'nov', date: '2026-11-03' };
+  const dec = { ...session, id: 'dec', date: '2026-12-01' };
+  mockMonths = { '2026-11-01': [{ date: '2026-11-03', sessions: [nov] }], '2026-12-01': [{ date: '2026-12-01', sessions: [dec] }] };
+  mockFirstSlot = '2026-11-03';
+
+  const n = await renderScreen(<BookSession bare demoSelectedDate="2026-11-03" />);
+  expect(n.text()).toContain('No tokens left this period');
+  expect(n.text()).toContain('December: 7 of 8 left');
+  expect(sessionCard(n).style.cursor).toBe('default');
+  expect(n.text()).toContain('No tokens left');
+  await act(async () => { sessionCard(n).click(); });
+  expect(mockBooked).toEqual([]);
+  await n.unmount();
+
+  mockFirstSlot = '2026-12-01'; // the month view opens on the first slot's month
+  const d = await renderScreen(<BookSession bare demoSelectedDate="2026-12-01" />);
+  const card = sessionCard(d);
+  expect(card).not.toBeNull();
+  expect(card.style.cursor).toBe('pointer');
+  expect(d.text()).toContain('December: 7 of 8 left');
+  expect(d.text()).toContain('Spends 1 token · 7 left');
+  expect(card.textContent).not.toContain('No tokens left');
+  await act(async () => { card.click(); });
+  expect(mockBooked).toEqual(['dec']);
+  await d.unmount();
+});
+
+test('Nov 1 with December spent too (eight advance bookings): the December block reads No tokens left and is inert', async () => {
+  jest.setSystemTime(new Date('2026-11-01T16:00:00Z'));
+  mockPackage = { id: 't-8', kind: 'tokens', windowDays: 30 };
+  mockTokens = {
+    granted: 8, used: 8, reserved: 0, left: 0, unlimited: false, perPurchase: false, grace: [],
+    nextPeriod: { periodKey: '2026-12-01', periodEnd: '2026-12-31', booked: 8, reserved: 0, granted: 8, left: 0 },
+  };
+  mockMonths = { '2026-12-01': [{ date: '2026-12-01', sessions: [{ ...session, id: 'dec', date: '2026-12-01' }] }] };
+  mockFirstSlot = '2026-12-01';
+  const d = await renderScreen(<BookSession bare demoSelectedDate="2026-12-01" />);
+  expect(d.text()).toContain('December: 0 of 8 left');
+  expect(sessionCard(d).style.cursor).toBe('default');
+  await act(async () => { sessionCard(d).click(); });
+  expect(mockBooked).toEqual([]);
+  await d.unmount();
+});
+
 test('Elite books before the gate (the paid package, spec 4.3)', async () => {
   jest.setSystemTime(BEFORE);
   mockPackage = { id: 'elite', kind: 'elite', windowDays: 45 };
