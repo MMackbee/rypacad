@@ -41,6 +41,62 @@ beforeEach(() => {
   } };
 });
 
+describe('a period at zero with next month open (incident 2026-11-01)', () => {
+  const slotOn = (date, dayLabel) => ({ date, dayLabel, slots: [{ sessionId: `s-${date}`, time: '4:00 PM', open: true, capacity: 1, booked: 0, durationMinutes: 45 }] });
+  const slotCard = (r) => [...r.container.querySelectorAll('div')].find((el) => el.textContent.startsWith('4:00') && el.textContent.includes('Phil')) || null;
+  const spent = {
+    granted: 9, used: 9, reserved: 0, left: 0, unlimited: false, perPurchase: false, grace: [],
+    nextPeriod: { periodKey: '2026-12-01', periodEnd: '2026-12-31', booked: 1, reserved: 0, granted: 8, left: 7 },
+  };
+  beforeEach(() => {
+    jest.useFakeTimers('modern');
+    jest.setSystemTime(new Date('2026-11-01T16:00:00Z')); // Sun Nov 1, 10 AM Chicago: the window reaches Dec 1
+    mockMembers = [{ athleteId: 'a1', package: { id: 't-8', kind: 'tokens', windowDays: 30 } }];
+  });
+  afterEach(() => { jest.useRealTimers(); });
+
+  test("a December day is judged by December: the slot is tappable and Reserve is enabled", async () => {
+    mockSlots.data = { ...mockSlots.data, bookingMode: 'in-app', calendlyUrl: null, bookingOpen: true, tokens: spent, days: [slotOn('2026-12-01', 'Tue, Dec 1')] };
+    const r = await renderScreen(<SpecialistBooking bare initialSpecialist="phil" />);
+    const card = slotCard(r);
+    expect(card).not.toBeNull();
+    expect(card.style.cursor).toBe('pointer');
+    await act(async () => { card.click(); });
+    expect(r.button('Reserve')).not.toBeNull();
+    expect(r.button('Reserve').disabled).toBe(false);
+    expect(r.text()).toContain('Spends 1 token · 7 left');
+    await r.unmount();
+  });
+
+  test('a November day on the same position stays inert, and the summary says what December holds', async () => {
+    mockSlots.data = { ...mockSlots.data, bookingMode: 'in-app', calendlyUrl: null, bookingOpen: true, tokens: spent, days: [slotOn('2026-11-02', 'Mon, Nov 2')] };
+    const r = await renderScreen(<SpecialistBooking bare initialSpecialist="phil" />);
+    const card = slotCard(r);
+    expect(card).not.toBeNull();
+    expect(card.style.cursor).not.toBe('pointer');
+    expect(r.text()).toContain('No tokens left');
+    expect(r.text()).toContain('December: 7 of 8 left');
+    await r.unmount();
+  });
+
+  test("Yannick via Calendly: the button stays when only December has tokens, and the panel says to pick a December time", async () => {
+    mockSlots.data = { ...mockSlots.data, bookingMode: 'calendly', calendlyUrl: 'https://calendly.com/ryp/mental', bookingOpen: true, tokens: spent, days: [] };
+    const r = await renderScreen(<SpecialistBooking bare initialSpecialist="mental" />);
+    expect(r.button('Book with Yannick')).not.toBeNull();
+    expect(r.text()).not.toContain('Not yet');
+    expect(r.text()).toContain("This period's tokens are used. Pick a time in December");
+    expect(r.text()).toContain('December: 7 of 8 left');
+    await r.unmount();
+
+    // December spent too: the gate closes as before.
+    mockSlots.data = { ...mockSlots.data, tokens: { ...spent, nextPeriod: { ...spent.nextPeriod, booked: 8, used: 8, left: 0 } } };
+    const closed = await renderScreen(<SpecialistBooking bare initialSpecialist="mental" />);
+    expect(closed.button('Book with Yannick')).toBeNull();
+    expect(closed.text()).toContain('No tokens left this period.');
+    await closed.unmount();
+  });
+});
+
 test('Book with Yannick opens the prefilled link in a new tab, with the note', async () => {
   const opened = [];
   window.open = (url, target, features) => { opened.push([url, target, features]); return null; };

@@ -1,6 +1,6 @@
 import React from 'react';
 import { renderScreen } from '../screens/testRender';
-import AllowancePools, { GraceLine, SpendNote } from './AllowancePools';
+import AllowancePools, { GraceLine, NextPeriodLine, SpendNote, nextPeriodLabel } from './AllowancePools';
 
 const bought = { id: 'single_a', expiresAt: '2027-02-27', reason: 'single-purchase', sourceSessionId: null };
 const bonus = { id: 'g1', expiresAt: '2026-11-20', reason: 'session-cancelled', sourceSessionId: '2026-11-11-0' };
@@ -13,6 +13,29 @@ const text = async (el) => {
   await r.unmount();
   return t;
 };
+
+describe('the next period under the meter (incident 2026-11-01: December read as closed)', () => {
+  const next = { periodKey: '2026-12-01', periodEnd: '2026-12-31', booked: 1, reserved: 0, granted: 8, left: 7 };
+
+  test('the label: the month for a 1st-of-month anchor, else the start date; nothing without a count', () => {
+    expect(nextPeriodLabel(next)).toBe('December: 7 of 8 left');
+    expect(nextPeriodLabel({ ...next, periodKey: '2026-11-10', periodEnd: '2026-12-09' })).toBe('From Nov 10: 7 of 8 left');
+    expect(nextPeriodLabel({ periodKey: '2026-12-01', booked: 0 })).toBeNull(); // an older shape without the count
+    expect(nextPeriodLabel(null)).toBeNull();
+  });
+
+  test('the line shows on the full meter beside a period at zero; never for Elite, the single token, an unpaid grant or the compact line', async () => {
+    const full = await text(<AllowancePools tokens={monthly({ left: 0, used: 6, nextPeriod: next })} />);
+    expect(full).toContain('None left');
+    expect(full).toContain('December: 7 of 8 left');
+    expect(await text(<AllowancePools tokens={monthly({ nextPeriod: next })} compact />)).toBe('6 tokens left');
+    expect(await text(<NextPeriodLine tokens={{ unlimited: true, grace: [], nextPeriod: next }} />)).toBe('');
+    expect(await text(<NextPeriodLine tokens={single({ nextPeriod: next })} />)).toBe('');
+    expect(await text(<NextPeriodLine tokens={monthly({ unpaid: true, nextPeriod: next })} />)).toBe('');
+    expect(await text(<NextPeriodLine tokens={monthly()} />)).toBe('');
+    expect(await text(<NextPeriodLine tokens={monthly({ nextPeriod: { ...next, left: 0, booked: 8 } })} />)).toBe('December: 0 of 8 left');
+  });
+});
 
 describe('the single token (owner ruling 2026-09-29/30)', () => {
   test('the meter delegates to the session-token count - never "0 left" for a paid family', async () => {

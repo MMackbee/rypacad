@@ -164,16 +164,29 @@ function tokenRows(n) {
  * The athlete's token position — one pool, not two. 4 used mirrors the old
  * two-pool demo's total spend exactly (3 training + 1 tournament).
  */
-export const TOKENS = tokensFor(null, ATHLETE_PACKAGE, tokenRows(4), [], [], PERIOD.periodKey, {
+/**
+ * The next period's own count beside a seed position (2026-11-01), the
+ * shape hooks/index.js tokensWithNextPeriod builds live: nothing booked
+ * there yet, the package's full grant left. Book a Session's harness states
+ * then judge a next-period session by it, as production does.
+ */
+function withNextPeriod(position) {
+  const next = periodFor(addDaysISO(PERIOD.periodEnd, 1), PERIOD_ANCHOR_DAY);
+  const granted = ATHLETE_PACKAGE.tokens;
+  return { ...position, nextPeriod: { periodKey: next.periodKey, periodEnd: next.periodEnd, booked: 0, reserved: 0, granted, left: granted } };
+}
+
+export const TOKENS = withNextPeriod(tokensFor(null, ATHLETE_PACKAGE, tokenRows(4), [], [], PERIOD.periodKey, {
   today: todayISO(),
-});
+}));
 
 /**
  * Same package, every token spent — the "nothing left" demo state the old
  * two independent pool-exhaustion states (ALLOWANCE_NO_TOURNAMENTS/
- * ALLOWANCE_NO_TRAINING) both collapse into under one pool.
+ * ALLOWANCE_NO_TRAINING) both collapse into under one pool. Next period
+ * still open, as live: the exhausted state greys this period only.
  */
-export const TOKENS_EXHAUSTED = tokensFor(
+export const TOKENS_EXHAUSTED = withNextPeriod(tokensFor(
   null,
   ATHLETE_PACKAGE,
   tokenRows(ATHLETE_PACKAGE.tokens),
@@ -181,7 +194,7 @@ export const TOKENS_EXHAUSTED = tokensFor(
   [],
   PERIOD.periodKey,
   { today: todayISO() }
-);
+));
 
 export const BOOKING_CONFIRMATION = {
   name: 'Training block',

@@ -6,7 +6,7 @@
  */
 import {
   ALL_PACKAGES, ELITE, PRICES_RELEASED, SIBLING_DISCOUNT_NOTE, SIBLING_DISCOUNT_PCT, SINGLE_TOKEN, TOKEN_PACKAGES,
-  memberSessionRate, normalizeAnchorDay, periodFallback, periodFor, siblingDiscountApplies, siblingPlan, tokensFor, windowDaysFor,
+  memberSessionRate, normalizeAnchorDay, periodFallback, periodFor, positionForDate, siblingDiscountApplies, siblingPlan, tokensFor, windowDaysFor,
 } from './packages';
 import { SEASON_BOUNDS } from './season';
 
@@ -117,6 +117,55 @@ describe('tokensFor', () => {
 // Owner rulings 2026-09-29/30: the single token is a one-time purchase, one
 // graceTokens doc `single_{cs}` per paid checkout. Mirrors the single-token
 // cases in functions/portal/lib.test.js (change one, change both).
+describe('positionForDate (incident 2026-11-01: a next-period session judged by its own period)', () => {
+  const next = { periodKey: '2026-12-01', periodEnd: '2026-12-31', booked: 2, used: 1, reserved: 1, granted: 8, left: 6 };
+  const spent = { granted: 9, used: 9, reserved: 0, left: 0, unlimited: false, perPurchase: false, grace: [{ id: 'g1', expiresAt: '2026-12-05' }], startsOn: null, unpaid: false, nextPeriod: next };
+
+  test('a December date reads December: its grant, spend (not the bonus-charged booking), holds and left; the grace tokens ride along', () => {
+    const dec = positionForDate(spent, '2026-12-03');
+    expect(dec).toMatchObject({ granted: 8, used: 1, reserved: 1, left: 6, judgedPeriodKey: '2026-12-01', unlimited: false, perPurchase: false });
+    expect(dec.grace).toBe(spent.grace);
+    expect(dec.nextPeriod).toBe(next);
+    expect(positionForDate(spent, '2026-12-01').left).toBe(6);
+    expect(positionForDate(spent, '2026-12-31').left).toBe(6);
+    // An older next-period shape without `used` falls back to booked.
+    expect(positionForDate({ ...spent, nextPeriod: { ...next, used: undefined } }, '2026-12-03').used).toBe(2);
+  });
+
+  test('the single token: judged by the next period only when ops issued it a grant there (a comp doc)', () => {
+    const single = { ...spent, perPurchase: true, granted: 0, used: 0, nextPeriod: { ...next, booked: 0, used: 0, reserved: 0, granted: 0, left: 0 } };
+    expect(positionForDate(single, '2026-12-03')).toBe(single);
+    const comped = { ...single, nextPeriod: { ...next, booked: 0, used: 0, reserved: 0, granted: 1, left: 1 } };
+    expect(positionForDate(comped, '2026-12-03')).toMatchObject({ granted: 1, left: 1, judgedPeriodKey: '2026-12-01', perPurchase: true });
+  });
+
+  test('a current-period date, a date past the next period and a missing date read the position as given', () => {
+    expect(positionForDate(spent, '2026-11-03')).toBe(spent);
+    expect(positionForDate(spent, '2027-01-02')).toBe(spent);
+    expect(positionForDate(spent, null)).toBe(spent);
+    expect(positionForDate(spent, undefined)).toBe(spent);
+  });
+
+  test('Elite, a position without a counted next period, and nothing pass through', () => {
+    const elite = { unlimited: true, grace: [], nextPeriod: next };
+    expect(positionForDate(elite, '2026-12-03')).toBe(elite);
+    const older = { ...spent, nextPeriod: { periodKey: '2026-12-01', booked: 1 } };
+    expect(positionForDate(older, '2026-12-03')).toBe(older);
+    const none = { ...spent, nextPeriod: undefined };
+    expect(positionForDate(none, '2026-12-03')).toBe(none);
+    expect(positionForDate(null, '2026-12-03')).toBeNull();
+    expect(positionForDate(undefined, '2026-12-03')).toBeUndefined();
+  });
+
+  test('an anchor other than the 1st: the next period runs anchor to anchor', () => {
+    const mid = { ...spent, nextPeriod: { ...next, periodKey: '2026-11-10', periodEnd: '2026-12-09' } };
+    expect(positionForDate(mid, '2026-11-09')).toBe(mid);
+    expect(positionForDate(mid, '2026-11-10').judgedPeriodKey).toBe('2026-11-10');
+    expect(positionForDate(mid, '2026-12-09').judgedPeriodKey).toBe('2026-11-10');
+    expect(positionForDate(mid, '2026-12-10')).toBe(mid);
+  });
+});
+
 describe('tokensFor: the single token', () => {
   const KEY = '2026-09-01';
   const today = '2026-09-16';

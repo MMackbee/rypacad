@@ -132,6 +132,7 @@ import {
   TOKEN_PACKAGES,
   normalizeAnchorDay,
   packageById,
+  periodFallback,
   periodFor,
   tokensFor,
   windowDaysFor,
@@ -419,11 +420,30 @@ function tokensWithNextPeriod(pkg, bookings, anchorDay, today, opts = {}) {
   const position = deriveTokens(pkg, bookings, anchorDay, today, opts);
   if (!position) return null;
   const { periodEnd } = positionPeriodFor(today, anchorDay);
-  const nextPeriodKey = periodFor(addDaysISO(periodEnd, 1), anchorDay).periodKey;
+  const next = periodFor(addDaysISO(periodEnd, 1), anchorDay);
+  const nextPeriodKey = next.periodKey;
   const booked = (bookings || []).filter(
     (b) => b && b.status !== 'cancelled' && b.periodKey === nextPeriodKey
   ).length;
-  return { ...position, nextPeriod: { periodKey: nextPeriodKey, booked } };
+  // 2026-11-01: the next period's own count beside its booked total, so a
+  // booking surface can judge a next-period session by it (data/packages.js
+  // positionForDate) exactly as the booking check does - its grant is the
+  // issued doc when one exists (opts.nextTokenPeriod), else the package's
+  // own (periodFallback), less its bookings and its waitlist holds. Elite
+  // and the single token count nothing per period: null, as `left` is.
+  // `used` is the period's SPEND, as tokensFor/assertPeriodTokensLeft count
+  // it: a grace-charged booking (graceTokenId set) never spends a period
+  // token. `booked` stays the advance-booking total (pin N).
+  const used = (bookings || []).filter(
+    (b) => b && b.status !== 'cancelled' && b.periodKey === nextPeriodKey && !b.graceTokenId
+  ).length;
+  const reserved = (opts.waitlist || []).filter((w) => w && w.periodKey === nextPeriodKey).length;
+  // The single token's per-period grant is an issued doc or nothing
+  // (periodFallback gives it 0), exactly as tokensFor reads the current period.
+  const perPeriod = Boolean(pkg) && pkg.tokens !== null;
+  const granted = perPeriod ? opts.nextTokenPeriod?.granted ?? periodFallback(pkg) : null;
+  const left = perPeriod ? Math.max(0, granted - used - reserved) : null;
+  return { ...position, nextPeriod: { periodKey: nextPeriodKey, periodEnd: next.periodEnd, booked, used, reserved, granted, left } };
 }
 
 /**
@@ -437,8 +457,10 @@ function tokensWithNextPeriod(pkg, bookings, anchorDay, today, opts = {}) {
 export async function liveTokens(athlete, pkg, bookings, anchorDay, today) {
   if (!pkg) return null;
   const inputs = await fetchTokenInputs(athlete.id, athlete.householdId, anchorDay, today);
+  // With the next period's count (2026-11-01), so the read fetchTokenInputs
+  // makes for it is used and every meter can say what next month holds.
   return withGraceReasons(
-    deriveTokens(pkg, bookings, anchorDay, today, { ...inputs, billingStatus: billingStatusOf(athlete) }),
+    tokensWithNextPeriod(pkg, bookings, anchorDay, today, { ...inputs, billingStatus: billingStatusOf(athlete) }),
     inputs.graceTokens
   );
 }
@@ -519,12 +541,17 @@ function byDateThenId(a, b) {
  * for a parent, as the rule needs.
  */
 async function fetchTokenInputs(athleteId, householdId, anchorDay, today) {
-  const [graceTokens, waitlist, tokenPeriod] = await Promise.all([
+  const { periodKey, periodEnd } = positionPeriodFor(today, anchorDay);
+  const [graceTokens, waitlist, tokenPeriod, nextTokenPeriod] = await Promise.all([
     fetchGraceTokensByAthlete(athleteId),
     fetchWaitlistByAthlete(athleteId, { householdId }),
-    fetchTokenPeriod(athleteId, positionPeriodFor(today, anchorDay).periodKey),
+    fetchTokenPeriod(athleteId, periodKey),
+    // The next period's issued grant, when ops or Stripe already wrote one
+    // (2026-11-01: the booking surfaces judge a next-period session by that
+    // period's own count, so they read what the booking check reads).
+    fetchTokenPeriod(athleteId, periodFor(addDaysISO(periodEnd, 1), anchorDay).periodKey),
   ]);
-  return { graceTokens, waitlist, tokenPeriod };
+  return { graceTokens, waitlist, tokenPeriod, nextTokenPeriod };
 }
 
 /**
@@ -758,8 +785,10 @@ async function liveBooking(today, { withSlots = true } = {}) {
     // tokens counted (fetchTokenInputs) - a single athlete's purchased
     // tokens among them.
     const inputs = await fetchTokenInputs(athlete.id, athlete.householdId, anchorDay, today);
+    // With the next period's count (2026-11-01): an athlete's own Book a
+    // Session judges a next-period session by that period, as a parent's does.
     tokens = withGraceReasons(
-      deriveTokens(pkg, bookings, anchorDay, today, { ...inputs, billingStatus: billingStatusOf(athlete) }),
+      tokensWithNextPeriod(pkg, bookings, anchorDay, today, { ...inputs, billingStatus: billingStatusOf(athlete) }),
       inputs.graceTokens
     );
     identity = { role: 'athlete', athleteId: athlete.id, householdId: athlete.householdId };
@@ -1840,8 +1869,10 @@ async function liveHouseholdAthletes(today) {
         // 2026-10-02: Book a Session judges each child against a reserved
         // block on this (data/reserved.js); null == none on file.
         handicap: handicapOf(a),
+        // With the next period's count (2026-11-01): a parent's Book a Session
+        // reads this row, and judges a next-period session by that period.
         tokens: withGraceReasons(
-          deriveTokens(pkg, bookings, anchorDay, today, { ...inputs, billingStatus: billingStatusOf(a) }),
+          tokensWithNextPeriod(pkg, bookings, anchorDay, today, { ...inputs, billingStatus: billingStatusOf(a) }),
           inputs.graceTokens
         ),
       };
@@ -2016,8 +2047,8 @@ function seedMemberEntry(child, today) {
  */
 async function liveMemberEntry(a, today, anchorDay) {
   // The grant read is the first (prepaid) period's before the season.
-  const { periodKey } = positionPeriodFor(today, anchorDay);
-  const [pkg, bookings, graceTokens, waitlistEntries, tokenPeriod] = await Promise.all([
+  const { periodKey, periodEnd } = positionPeriodFor(today, anchorDay);
+  const [pkg, bookings, graceTokens, waitlistEntries, tokenPeriod, nextTokenPeriod] = await Promise.all([
     a.packageId ? fetchPackage(a.packageId) : null,
     fetchBookings(a.id, { householdId: a.householdId }),
     fetchGraceTokensByAthlete(a.id),
@@ -2027,6 +2058,8 @@ async function liveMemberEntry(a, today, anchorDay) {
     // query, no index". Absent (no doc issued yet) resolves to null, which
     // tokensFor treats as "the package's own grant" (pin C's own words).
     fetchTokenPeriod(a.id, periodKey),
+    // And the next period's, when one was issued (2026-11-01, see fetchTokenInputs).
+    fetchTokenPeriod(a.id, periodFor(addDaysISO(periodEnd, 1), anchorDay).periodKey),
   ]);
   // Price comes from the STATIC catalogue (packageById), never the Firestore
   // doc's own `price` field - policy: no dollar amounts in Firestore (same
@@ -2065,7 +2098,7 @@ async function liveMemberEntry(a, today, anchorDay) {
     // the `reason` field the hook seam wants that tokensFor's own output
     // does not carry.
     tokens: withGraceReasons(
-      tokensWithNextPeriod(pkg, bookings, anchorDay, today, { graceTokens, waitlist: waitlistEntries, tokenPeriod }),
+      tokensWithNextPeriod(pkg, bookings, anchorDay, today, { graceTokens, waitlist: waitlistEntries, tokenPeriod, nextTokenPeriod }),
       graceTokens
     ),
     coaching: coachingFor(bookings, today, pkg),

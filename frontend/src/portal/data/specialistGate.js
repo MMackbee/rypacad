@@ -5,7 +5,14 @@ export function calendlyBlockReason({ billingStatus, bookingOpen, tokens, capRea
   if (billing !== 'active') return 'membership-inactive';
   if (!bookingOpen) return 'booking-not-open';
   if (capReached) return 'cap-reached';
-  if (tokens && !tokens.unlimited && tokens.left === 0 && !(tokens.grace && tokens.grace.length)) return tokens.perPurchase ? 'no-session-token' : 'no-tokens-left';
+  if (tokens && !tokens.unlimited && tokens.left === 0 && !(tokens.grace && tokens.grace.length)) {
+    // 2026-11-01: this period spent but the next one has tokens - Calendly
+    // takes any date, and the webhook charges the slot's own period (and
+    // flags, never refuses, an overage), so the button stays; the panel says
+    // which period has tokens (CalendlyPanel's next-period line).
+    if (tokens.nextPeriod && tokens.nextPeriod.left > 0) return null;
+    return tokens.perPurchase ? 'no-session-token' : 'no-tokens-left';
+  }
   return null;
 }
 
