@@ -429,7 +429,7 @@ export default function SpecialistBooking({
             <div style={{ padding: '0 22px' }}>
               <EntitlementSummary
                 specialistId={specialistId}
-                tokens={tokens}
+                tokens={positionForDate(tokens, selectedDate)}
                 capReached={capReached}
                 onSeeMembership={() => navigate('/portal/membership')}
               />

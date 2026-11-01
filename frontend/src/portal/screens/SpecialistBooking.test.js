@@ -68,13 +68,32 @@ describe('a period at zero with next month open (incident 2026-11-01)', () => {
     await r.unmount();
   });
 
-  test('a November day on the same position stays inert', async () => {
+  test('a November day on the same position stays inert, and the summary says what December holds', async () => {
     mockSlots.data = { ...mockSlots.data, bookingMode: 'in-app', calendlyUrl: null, bookingOpen: true, tokens: spent, days: [slotOn('2026-11-02', 'Mon, Nov 2')] };
     const r = await renderScreen(<SpecialistBooking bare initialSpecialist="phil" />);
     const card = slotCard(r);
     expect(card).not.toBeNull();
     expect(card.style.cursor).not.toBe('pointer');
+    expect(r.text()).toContain('No tokens left');
+    expect(r.text()).toContain('December: 7 of 8 left');
     await r.unmount();
+  });
+
+  test("Yannick via Calendly: the button stays when only December has tokens, and the panel says to pick a December time", async () => {
+    mockSlots.data = { ...mockSlots.data, bookingMode: 'calendly', calendlyUrl: 'https://calendly.com/ryp/mental', bookingOpen: true, tokens: spent, days: [] };
+    const r = await renderScreen(<SpecialistBooking bare initialSpecialist="mental" />);
+    expect(r.button('Book with Yannick')).not.toBeNull();
+    expect(r.text()).not.toContain('Not yet');
+    expect(r.text()).toContain("This period's tokens are used. Pick a time in December");
+    expect(r.text()).toContain('December: 7 of 8 left');
+    await r.unmount();
+
+    // December spent too: the gate closes as before.
+    mockSlots.data = { ...mockSlots.data, tokens: { ...spent, nextPeriod: { ...spent.nextPeriod, booked: 8, used: 8, left: 0 } } };
+    const closed = await renderScreen(<SpecialistBooking bare initialSpecialist="mental" />);
+    expect(closed.button('Book with Yannick')).toBeNull();
+    expect(closed.text()).toContain('No tokens left this period.');
+    await closed.unmount();
   });
 });
 

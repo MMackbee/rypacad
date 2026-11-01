@@ -277,14 +277,18 @@ export function periodFallback(pkg) {
  * numbers describe.
  */
 export function positionForDate(tokens, dateISO) {
-  if (!tokens || tokens.unlimited || tokens.perPurchase || !tokens.nextPeriod || !dateISO) return tokens;
+  if (!tokens || tokens.unlimited || !tokens.nextPeriod || !dateISO) return tokens;
   const np = tokens.nextPeriod;
   if (np.granted == null || np.left == null || !np.periodKey) return tokens;
+  // The single token has no period grant unless ops issued one (a comp doc):
+  // only then does the next period have anything of its own to judge by.
+  if (tokens.perPurchase && !(np.granted > 0)) return tokens;
   if (dateISO < np.periodKey || (np.periodEnd && dateISO > np.periodEnd)) return tokens;
   return {
     ...tokens,
     granted: np.granted,
-    used: np.booked ?? 0,
+    // The period's spend (grace-charged bookings never count), as tokensFor's `used`.
+    used: np.used ?? np.booked ?? 0,
     reserved: np.reserved ?? 0,
     left: np.left,
     judgedPeriodKey: np.periodKey,

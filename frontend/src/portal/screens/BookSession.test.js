@@ -168,6 +168,32 @@ test('Nov 1 with December spent too (eight advance bookings): the December block
   await d.unmount();
 });
 
+test("a parent on Nov 1 with the child's November spent: the child's row carries December, so the December block books and the banner counts it", async () => {
+  jest.setSystemTime(new Date('2026-11-01T16:00:00Z'));
+  mockPackage = { id: 't-8', kind: 'tokens', windowDays: 30 };
+  mockTokens = null; // the parent flow never reads useBooking's tokens
+  mockHousehold = [{
+    id: 'a1', name: 'Thomas', billingStatus: 'active', handicap: null,
+    tokens: {
+      granted: 9, used: 9, reserved: 0, left: 0, unlimited: false, perPurchase: false, grace: [],
+      nextPeriod: { periodKey: '2026-12-01', periodEnd: '2026-12-31', booked: 1, used: 1, reserved: 0, granted: 8, left: 7 },
+    },
+  }];
+  mockMonths = { '2026-12-01': [{ date: '2026-12-01', sessions: [{ ...session, id: 'dec', date: '2026-12-01' }] }] };
+  mockFirstSlot = '2026-12-01';
+  const r = await renderScreen(<BookSession bare role="parent" demoSelectedDate="2026-12-01" />);
+  expect(r.text()).toContain('No tokens left this period');
+  expect(r.text()).toContain('December: 7 of 8 left');
+  const card = sessionCard(r);
+  expect(card).not.toBeNull();
+  expect(card.style.cursor).toBe('pointer');
+  expect(r.text()).toContain('Spends 1 token · 7 left');
+  await act(async () => { card.click(); });
+  expect(mockBooked).toEqual(['dec']);
+  expect(mockBookCalls[0][1]).toMatchObject({ athleteId: 'a1' });
+  await r.unmount();
+});
+
 test('Elite books before the gate (the paid package, spec 4.3)', async () => {
   jest.setSystemTime(BEFORE);
   mockPackage = { id: 'elite', kind: 'elite', windowDays: 45 };

@@ -46,7 +46,7 @@ jest.mock('../data/calendar', () => {
 
 import { act } from 'react';
 import { createRoot } from 'react-dom/client';
-import { useBooking, useHousehold, useHouseholdReservations, useSchedule } from './index';
+import { useBooking, useHousehold, useHouseholdAthletes, useHouseholdReservations, useSchedule } from './index';
 import * as live from './live';
 import * as grace from './grace';
 import * as waitlist from './waitlist';
@@ -207,7 +207,7 @@ test("Book a Session as an athlete on Nov 1 (incident 2026-11-01): the next peri
   const a = await mountHook(() => useBooking({ today: '2026-11-01' }));
   expect(a.result.current.error).toBeNull();
   expect(a.result.current.data.tokens).toMatchObject({ granted: 17, used: 1, reserved: 0, left: 16 });
-  expect(a.result.current.data.tokens.nextPeriod).toEqual({ periodKey: '2026-12-01', periodEnd: '2026-12-31', booked: 1, reserved: 1, granted: 16, left: 14 });
+  expect(a.result.current.data.tokens.nextPeriod).toEqual({ periodKey: '2026-12-01', periodEnd: '2026-12-31', booked: 1, used: 1, reserved: 1, granted: 16, left: 14 });
   expect(grace.fetchTokenPeriod).toHaveBeenCalledWith('a1', '2026-12-01');
   await a.unmount();
 
@@ -217,6 +217,31 @@ test("Book a Session as an athlete on Nov 1 (incident 2026-11-01): the next peri
   expect(b.result.current.data.tokens).toMatchObject({ granted: 16, used: 1, left: 15 });
   expect(b.result.current.data.tokens.nextPeriod).toMatchObject({ granted: 9, booked: 1, reserved: 1, left: 7 });
   await b.unmount();
+});
+
+test("a parent's Book a Session rows (useHouseholdAthletes) on Nov 1: the next period's count, with a grace-charged December booking not counted as a spend", async () => {
+  calendar.todayISO.mockReturnValue('2026-11-01');
+  live.fetchCurrentUser.mockResolvedValue({ uid: 'p1', householdId: 'h1' });
+  live.fetchHousehold.mockResolvedValue({ id: 'h1', name: 'Kirchoff family', periodAnchorDay: 1 });
+  live.fetchHouseholdAthletes.mockResolvedValue([{ id: 'a1', name: 'Thomas', householdId: 'h1', packageId: 't-16', billing: { status: 'active' } }]);
+  live.fetchPackage.mockResolvedValue(T16);
+  const novs = Array.from({ length: 16 }, (_, i) => ({ id: `a1_n${i}`, sessionId: `n${i}`, date: '2026-11-03', periodKey: '2026-11-01', status: 'confirmed', type: 'training' }));
+  const dec = { id: 'a1_dec', sessionId: 'dec', date: '2026-12-01', periodKey: '2026-12-01', status: 'confirmed', type: 'training' };
+  const decOnBonus = { id: 'a1_dec2', sessionId: 'dec2', date: '2026-12-03', periodKey: '2026-12-01', status: 'confirmed', type: 'training', graceTokenId: 'g1' };
+  live.fetchBookings.mockResolvedValue([...novs, dec, decOnBonus]);
+  live.fetchGraceTokensByAthlete.mockResolvedValue([]);
+  waitlist.fetchWaitlistByAthlete.mockResolvedValue([]);
+  grace.fetchTokenPeriod.mockImplementation(async (athleteId, periodKey) => (periodKey === '2026-11-01' ? { id: 'a1_2026-11-01', granted: 17 } : null));
+
+  const h = await mountHook(() => useHouseholdAthletes());
+  expect(h.result.current.error ?? null).toBeNull();
+  const [thomas] = h.result.current.data;
+  expect(thomas.tokens).toMatchObject({ granted: 17, used: 16, left: 1 });
+  // booked counts both December bookings; used (the spend) leaves the bonus-charged one out, as the booking check does.
+  expect(thomas.tokens.nextPeriod).toEqual({ periodKey: '2026-12-01', periodEnd: '2026-12-31', booked: 2, used: 1, reserved: 0, granted: 16, left: 15 });
+  expect(grace.fetchTokenPeriod).toHaveBeenCalledWith('a1', '2026-12-01');
+  expect(waitlist.fetchWaitlistByAthlete).toHaveBeenCalledWith('a1', { householdId: 'h1' });
+  await h.unmount();
 });
 
 test('an unpaid athlete booking before the season: marked unpaid on the booking screen too', async () => {

@@ -118,16 +118,25 @@ describe('tokensFor', () => {
 // graceTokens doc `single_{cs}` per paid checkout. Mirrors the single-token
 // cases in functions/portal/lib.test.js (change one, change both).
 describe('positionForDate (incident 2026-11-01: a next-period session judged by its own period)', () => {
-  const next = { periodKey: '2026-12-01', periodEnd: '2026-12-31', booked: 1, reserved: 1, granted: 8, left: 6 };
+  const next = { periodKey: '2026-12-01', periodEnd: '2026-12-31', booked: 2, used: 1, reserved: 1, granted: 8, left: 6 };
   const spent = { granted: 9, used: 9, reserved: 0, left: 0, unlimited: false, perPurchase: false, grace: [{ id: 'g1', expiresAt: '2026-12-05' }], startsOn: null, unpaid: false, nextPeriod: next };
 
-  test('a December date reads December: its grant, bookings, holds and left; the grace tokens ride along', () => {
+  test('a December date reads December: its grant, spend (not the bonus-charged booking), holds and left; the grace tokens ride along', () => {
     const dec = positionForDate(spent, '2026-12-03');
     expect(dec).toMatchObject({ granted: 8, used: 1, reserved: 1, left: 6, judgedPeriodKey: '2026-12-01', unlimited: false, perPurchase: false });
     expect(dec.grace).toBe(spent.grace);
     expect(dec.nextPeriod).toBe(next);
     expect(positionForDate(spent, '2026-12-01').left).toBe(6);
     expect(positionForDate(spent, '2026-12-31').left).toBe(6);
+    // An older next-period shape without `used` falls back to booked.
+    expect(positionForDate({ ...spent, nextPeriod: { ...next, used: undefined } }, '2026-12-03').used).toBe(2);
+  });
+
+  test('the single token: judged by the next period only when ops issued it a grant there (a comp doc)', () => {
+    const single = { ...spent, perPurchase: true, granted: 0, used: 0, nextPeriod: { ...next, booked: 0, used: 0, reserved: 0, granted: 0, left: 0 } };
+    expect(positionForDate(single, '2026-12-03')).toBe(single);
+    const comped = { ...single, nextPeriod: { ...next, booked: 0, used: 0, reserved: 0, granted: 1, left: 1 } };
+    expect(positionForDate(comped, '2026-12-03')).toMatchObject({ granted: 1, left: 1, judgedPeriodKey: '2026-12-01', perPurchase: true });
   });
 
   test('a current-period date, a date past the next period and a missing date read the position as given', () => {
@@ -137,11 +146,9 @@ describe('positionForDate (incident 2026-11-01: a next-period session judged by 
     expect(positionForDate(spent, undefined)).toBe(spent);
   });
 
-  test('Elite, the single token, a position without a counted next period, and nothing pass through', () => {
+  test('Elite, a position without a counted next period, and nothing pass through', () => {
     const elite = { unlimited: true, grace: [], nextPeriod: next };
     expect(positionForDate(elite, '2026-12-03')).toBe(elite);
-    const single = { ...spent, perPurchase: true };
-    expect(positionForDate(single, '2026-12-03')).toBe(single);
     const older = { ...spent, nextPeriod: { periodKey: '2026-12-01', booked: 1 } };
     expect(positionForDate(older, '2026-12-03')).toBe(older);
     const none = { ...spent, nextPeriod: undefined };

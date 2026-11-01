@@ -431,11 +431,19 @@ function tokensWithNextPeriod(pkg, bookings, anchorDay, today, opts = {}) {
   // issued doc when one exists (opts.nextTokenPeriod), else the package's
   // own (periodFallback), less its bookings and its waitlist holds. Elite
   // and the single token count nothing per period: null, as `left` is.
+  // `used` is the period's SPEND, as tokensFor/assertPeriodTokensLeft count
+  // it: a grace-charged booking (graceTokenId set) never spends a period
+  // token. `booked` stays the advance-booking total (pin N).
+  const used = (bookings || []).filter(
+    (b) => b && b.status !== 'cancelled' && b.periodKey === nextPeriodKey && !b.graceTokenId
+  ).length;
   const reserved = (opts.waitlist || []).filter((w) => w && w.periodKey === nextPeriodKey).length;
-  const perPeriod = Boolean(pkg) && pkg.tokens !== null && pkg.kind !== 'single';
+  // The single token's per-period grant is an issued doc or nothing
+  // (periodFallback gives it 0), exactly as tokensFor reads the current period.
+  const perPeriod = Boolean(pkg) && pkg.tokens !== null;
   const granted = perPeriod ? opts.nextTokenPeriod?.granted ?? periodFallback(pkg) : null;
-  const left = perPeriod ? Math.max(0, granted - booked - reserved) : null;
-  return { ...position, nextPeriod: { periodKey: nextPeriodKey, periodEnd: next.periodEnd, booked, reserved, granted, left } };
+  const left = perPeriod ? Math.max(0, granted - used - reserved) : null;
+  return { ...position, nextPeriod: { periodKey: nextPeriodKey, periodEnd: next.periodEnd, booked, used, reserved, granted, left } };
 }
 
 /**
@@ -449,8 +457,10 @@ function tokensWithNextPeriod(pkg, bookings, anchorDay, today, opts = {}) {
 export async function liveTokens(athlete, pkg, bookings, anchorDay, today) {
   if (!pkg) return null;
   const inputs = await fetchTokenInputs(athlete.id, athlete.householdId, anchorDay, today);
+  // With the next period's count (2026-11-01), so the read fetchTokenInputs
+  // makes for it is used and every meter can say what next month holds.
   return withGraceReasons(
-    deriveTokens(pkg, bookings, anchorDay, today, { ...inputs, billingStatus: billingStatusOf(athlete) }),
+    tokensWithNextPeriod(pkg, bookings, anchorDay, today, { ...inputs, billingStatus: billingStatusOf(athlete) }),
     inputs.graceTokens
   );
 }
@@ -1859,8 +1869,10 @@ async function liveHouseholdAthletes(today) {
         // 2026-10-02: Book a Session judges each child against a reserved
         // block on this (data/reserved.js); null == none on file.
         handicap: handicapOf(a),
+        // With the next period's count (2026-11-01): a parent's Book a Session
+        // reads this row, and judges a next-period session by that period.
         tokens: withGraceReasons(
-          deriveTokens(pkg, bookings, anchorDay, today, { ...inputs, billingStatus: billingStatusOf(a) }),
+          tokensWithNextPeriod(pkg, bookings, anchorDay, today, { ...inputs, billingStatus: billingStatusOf(a) }),
           inputs.graceTokens
         ),
       };

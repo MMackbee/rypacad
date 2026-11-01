@@ -127,9 +127,16 @@ export default function AllowancePools({ tokens, compact = false, style }) {
  * while the current grant is unpaid. Exported for the booking banner's
  * tests; the meter above renders it itself.
  */
+/** How the next period is named: its month for a 1st-of-month anchor ("December"), else its start day ("Nov 10"). */
+export function nextPeriodName(nextPeriod) {
+  if (!nextPeriod || !nextPeriod.periodKey) return null;
+  return nextPeriod.periodKey.endsWith('-01') ? format(parseISO(nextPeriod.periodKey), 'MMMM') : format(parseISO(nextPeriod.periodKey), 'MMM d');
+}
+
 export function nextPeriodLabel(nextPeriod) {
   if (!nextPeriod || nextPeriod.granted == null || nextPeriod.left == null || !nextPeriod.periodKey) return null;
-  const when = nextPeriod.periodKey.endsWith('-01') ? format(parseISO(nextPeriod.periodKey), 'MMMM') : `From ${format(parseISO(nextPeriod.periodKey), 'MMM d')}`;
+  const name = nextPeriodName(nextPeriod);
+  const when = nextPeriod.periodKey.endsWith('-01') ? name : `From ${name}`;
   return `${when}: ${nextPeriod.left} of ${nextPeriod.granted} left`;
 }
 

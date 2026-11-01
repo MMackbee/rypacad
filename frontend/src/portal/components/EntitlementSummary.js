@@ -1,6 +1,6 @@
 import React from 'react';
 import { color, font } from '../tokens';
-import { SpendNote } from './AllowancePools';
+import { NextPeriodLine, SpendNote } from './AllowancePools';
 import { Banner } from './Primitives';
 
 /**
@@ -56,6 +56,8 @@ export default function EntitlementSummary({ specialistId, tokens, capReached, o
           {tokens.reserved} held on a waitlist
         </div>
       ) : null}
+      {/* 2026-11-01: what next month holds, so "No tokens left" never reads as "December is closed". */}
+      <NextPeriodLine tokens={tokens} />
     </>
   );
 }
