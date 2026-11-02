@@ -67,9 +67,9 @@ test('coachingFor judges the given month, defaulting to today\'s', () => {
 });
 
 test('seed mental slots are the three 30-minute Yannick times; Phil slots are 45', () => {
-  const mentalDay = seedSpecialistDays('mental', '2026-10-06', 30).find((d) => d.slots.length); // Tue
+  const mentalDay = seedSpecialistDays('mental', '2026-10-06', 1).find((d) => d.slots.length); // Tue
   expect(mentalDay.slots.map((s) => [s.time, s.durationMinutes])).toEqual([['4:00 PM', 30], ['4:30 PM', 30], ['5:00 PM', 30]]);
-  const philDay = seedSpecialistDays('phil', '2026-10-05', 30).find((d) => d.slots.length); // Mon
+  const philDay = seedSpecialistDays('phil', '2026-10-05', 1).find((d) => d.slots.length); // Mon
   expect(philDay.slots.every((s) => s.durationMinutes === 45)).toBe(true);
 });
 
@@ -275,8 +275,10 @@ describe('live loaders (perf wave B)', () => {
   });
 
   describe('bookRecurring: the window, every single-booking check, a reason per week (repeat report 2026-09-30)', () => {
+    // The window is whole calendar months (owner ruling 2026-11-02): Elite
+    // reaches the end of the month after next, so on Oct 1 it reaches Dec 31.
     const OCT_1 = new Date('2026-10-01T17:00:00Z'); // noon Chicago
-    const ELITE_PKG = { id: 'elite', kind: 'elite', tokens: null, windowDays: 45 };
+    const ELITE_PKG = { id: 'elite', kind: 'elite', tokens: null };
     const tuesday = (date) => ({ id: `t_${date}`, date, time: '4:00 PM', type: 'training', status: 'scheduled', capacity: 8, booked: 0 });
     /** Every Tuesday 4 PM block in [from, to] - the range query's answer. */
     const tuesdaysIn = async (from, to) => {
@@ -308,14 +310,15 @@ describe('live loaders (perf wave B)', () => {
     }
     afterEach(() => { jest.useRealTimers(); });
 
-    test('Elite on Oct 1: the fetch and the repeat reach Dec 16; every week goes through createBooking without skipCapCheck', async () => {
+    test('Elite on Oct 1: the fetch reaches Dec 31; a repeat through Dec 16 sends every week through createBooking without skipCapCheck', async () => {
       const h = await mountAthlete();
-      expect(live.fetchSessionsInRange).toHaveBeenCalledWith('2026-10-01', '2026-12-16');
+      expect(live.fetchSessionsInRange).toHaveBeenCalledWith('2026-10-01', '2026-12-31');
       const out = await repeat(h, '2026-11-03', '2026-12-16');
-      expect(out.windowEnd).toBe('2026-12-16');
+      expect(out.windowEnd).toBe('2026-12-31');
       expect(out.booked.map((b) => b.date)).toEqual(['2026-11-10', '2026-11-17', '2026-11-24', '2026-12-01', '2026-12-08', '2026-12-15']);
       expect(out.skipped).toEqual([]);
-      expect(out.next).toEqual({ date: '2026-12-22', opensOn: '2026-11-07' });
+      // The first Tuesday past Dec 31 is Jan 5; for Elite a January date opens on Nov 1.
+      expect(out.next).toEqual({ date: '2027-01-05', opensOn: '2026-11-01' });
       // The repeat's own range read (the one bump after the loop re-runs the window fetch too).
       expect(live.fetchSessionsInRange).toHaveBeenCalledWith('2026-11-10', '2026-12-16');
       expect(live.createBooking).toHaveBeenCalledTimes(6);
@@ -324,41 +327,45 @@ describe('live loaders (perf wave B)', () => {
       await h.unmount();
     });
 
-    test('a Dec 15 booking on Oct 1 attempts nothing, even asked for the season, and names the next week', async () => {
-      const h = await mountAthlete();
+    test('a Jan 26 booking on Nov 2 (Elite reaches Jan 31) attempts nothing, even asked for the season, and names the next week', async () => {
+      const h = await mountAthlete(ELITE_PKG, new Date('2026-11-02T13:00:00Z'));
       live.fetchSessionsInRange.mockClear();
-      expect(await repeat(h, '2026-12-15', '2027-02-27')).toEqual({
-        booked: [], skipped: [], windowEnd: '2026-12-16', next: { date: '2026-12-22', opensOn: '2026-11-07' },
+      // Feb 2 is February's first Tuesday: for Elite it opens on Dec 1.
+      expect(await repeat(h, '2027-01-26', '2027-02-27')).toEqual({
+        booked: [], skipped: [], windowEnd: '2027-01-31', next: { date: '2027-02-02', opensOn: '2026-12-01' },
       });
       expect(live.createBooking).not.toHaveBeenCalled();
       expect(live.fetchSessionsInRange).not.toHaveBeenCalled();
       await h.unmount();
     });
 
-    test('after Nov 1 the window rolls at 7 AM Chicago (13:00Z in CST)', async () => {
-      const h = await mountAthlete(ELITE_PKG, new Date('2026-11-10T12:59:00Z'));
-      const early = await repeat(h, '2026-12-15', '2026-12-31');
-      expect(early.windowEnd).toBe('2026-12-24');
-      expect(early.booked.map((b) => b.date)).toEqual(['2026-12-22']);
-      // Dec 29 is the Christmas break (a 10:30 tournament, no 4 PM block): the next week is Jan 5.
-      expect(early.next).toEqual({ date: '2027-01-05', opensOn: '2026-11-21' });
-      jest.setSystemTime(new Date('2026-11-10T13:00:00Z'));
-      expect((await repeat(h, '2026-12-15', '2026-12-31')).windowEnd).toBe('2026-12-25');
+    test('on the 1st the window rolls a month at 7 AM Chicago (13:00Z in CST), not at midnight', async () => {
+      // 6:59 AM on Dec 1: the window still counts from Nov 30, so Elite reaches Jan 31.
+      const h = await mountAthlete(ELITE_PKG, new Date('2026-12-01T12:59:00Z'));
+      const early = await repeat(h, '2027-01-19', '2027-02-27');
+      expect(early.windowEnd).toBe('2027-01-31');
+      expect(early.booked.map((b) => b.date)).toEqual(['2027-01-26']);
+      // Feb 2 is the first Tuesday past the window; for Elite a February date opens on Dec 1.
+      expect(early.next).toEqual({ date: '2027-02-02', opensOn: '2026-12-01' });
+      // 7:00 AM: December is the counted month, so Elite now reaches Feb 28.
+      jest.setSystemTime(new Date('2026-12-01T13:00:00Z'));
+      expect((await repeat(h, '2027-01-19', '2027-02-27')).windowEnd).toBe('2027-02-28');
       await h.unmount();
     });
 
-    test('a Wednesday on Oct 1: next steps over the Dec 23 and Dec 30 closures to Jan 6', async () => {
+    test('a Friday on Oct 1: next steps over the Jan 1 closure to Jan 8', async () => {
       const h = await mountAthlete();
-      // Every Wednesday 4 PM block but Thanksgiving's (Nov 25 is closed).
+      // Every Friday 4 PM block but the Thanksgiving break's (Nov 27 is closed).
       live.fetchSessionsInRange.mockImplementation(async (from, to) => {
         const out = [];
-        for (let d = from; d <= to; d = addDaysISO(d, 1)) if (parseISO(d).getDay() === 3 && d !== '2026-11-25') out.push(tuesday(d));
+        for (let d = from; d <= to; d = addDaysISO(d, 1)) if (parseISO(d).getDay() === 5 && d !== '2026-11-27') out.push(tuesday(d));
         return out;
       });
-      const out = await repeat(h, '2026-11-04', '2026-12-16');
-      expect(out.booked.map((b) => b.date)).toEqual(['2026-11-11', '2026-11-18', '2026-12-02', '2026-12-09', '2026-12-16']);
-      expect(out.skipped).toEqual([{ date: '2026-11-25', reason: 'no session' }]);
-      expect(out.next).toEqual({ date: '2027-01-06', opensOn: '2026-11-22' });
+      const out = await repeat(h, '2026-11-06', '2026-12-18');
+      expect(out.booked.map((b) => b.date)).toEqual(['2026-11-13', '2026-11-20', '2026-12-04', '2026-12-11', '2026-12-18']);
+      expect(out.skipped).toEqual([{ date: '2026-11-27', reason: 'no session' }]);
+      // The first Friday past Dec 31 is Jan 1, the Christmas break's last Friday: the next running week is Jan 8.
+      expect(out.next).toEqual({ date: '2027-01-08', opensOn: '2026-11-01' });
       await h.unmount();
     });
 
@@ -368,7 +375,7 @@ describe('live loaders (perf wave B)', () => {
         .mockRejectedValueOnce(refusal('one-per-day', "Elite includes one training block a day, and there's already one booked that day."))
         .mockRejectedValueOnce(refusal('no-tokens-left', "This period's tokens are already fully booked (12 of 12)."))
         .mockRejectedValueOnce(refusal(null, 'Missing or insufficient permissions.', live.ERR.PERMISSION))
-        .mockRejectedValueOnce(refusal('outside-window', 'That date opens for booking at 7 AM on 2026-10-17.'))
+        .mockRejectedValueOnce(refusal('outside-window', 'That date opens for booking at 7 AM on 2026-10-01.'))
         .mockRejectedValueOnce(refusal(null, 'This athlete already has this session booked.'))
         .mockRejectedValueOnce(refusal('full', 'This session just filled.'));
       const out = await repeat(h, '2026-11-03', '2026-12-16');
@@ -377,7 +384,8 @@ describe('live loaders (perf wave B)', () => {
         { date: '2026-11-10', reason: 'one per day' },
         { date: '2026-11-17', reason: 'period limit' },
         { date: '2026-11-24', reason: 'error', message: 'Missing or insufficient permissions.' },
-        { date: '2026-12-01', reason: 'not open yet', opensOn: '2026-10-17' },
+        // The skip's opensOn is the hook's own (the 1st of the month two before December's, for Elite), not the message's.
+        { date: '2026-12-01', reason: 'not open yet', opensOn: '2026-10-01' },
         { date: '2026-12-08', reason: 'already booked' },
         { date: '2026-12-15', reason: 'full' },
       ]);

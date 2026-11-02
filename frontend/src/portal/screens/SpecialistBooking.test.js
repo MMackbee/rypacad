@@ -50,8 +50,8 @@ describe('a period at zero with next month open (incident 2026-11-01)', () => {
   };
   beforeEach(() => {
     jest.useFakeTimers('modern');
-    jest.setSystemTime(new Date('2026-11-01T16:00:00Z')); // Sun Nov 1, 10 AM Chicago: the window reaches Dec 1
-    mockMembers = [{ athleteId: 'a1', package: { id: 't-8', kind: 'tokens', windowDays: 30 } }];
+    jest.setSystemTime(new Date('2026-11-01T16:00:00Z')); // Sun Nov 1, 10 AM Chicago: a token window reaches Dec 31
+    mockMembers = [{ athleteId: 'a1', package: { id: 't-8', kind: 'tokens' } }];
   });
   afterEach(() => { jest.useRealTimers(); });
 
@@ -126,8 +126,9 @@ test('gated copy replaces the button', async () => {
 });
 
 test('no Calendly url: the in-app slot list with real durations', async () => {
-  // Two days out: inside the 30-day window whatever today is (a fixed date
-  // past the window renders LockedDayNotice, not the slot list).
+  // Two days out: inside the window whatever today is - it reaches at least
+  // the end of this month (a fixed date past the window renders
+  // LockedDayNotice, not the slot list).
   mockSlots.data = { ...mockSlots.data, bookingMode: 'in-app', calendlyUrl: null,
     days: [{ date: addDaysISO(todayISO(), 2), dayLabel: 'Wed, Nov 4', slots: [{ sessionId: 's1', time: '4:00 PM', open: true, capacity: 1, booked: 0, durationMinutes: 30 }] }] };
   const r = await renderScreen(<SpecialistBooking bare initialSpecialist="mental" />);
@@ -161,7 +162,7 @@ test('in-app branch after the gate: no banner, a tap opens the sheet with Reserv
   await r.unmount();
 });
 
-describe('the window counts from Nov 1 until then (owner ruling 2026-09-30; UX review #8)', () => {
+describe('the window is whole calendar months: through next month, two months ahead for Elite (owner ruling 2026-11-02)', () => {
   const slotOn = (date, dayLabel) => ({ date, dayLabel, slots: [{ sessionId: `s-${date}`, time: '4:00 PM', open: true, capacity: 1, booked: 0, durationMinutes: 30 }] });
   const slotCard = (r) => [...r.container.querySelectorAll('div')].find((el) => el.textContent.startsWith('4:00') && el.textContent.includes('Mental')) || null;
   beforeEach(() => {
@@ -170,20 +171,20 @@ describe('the window counts from Nov 1 until then (owner ruling 2026-09-30; UX r
   });
   afterEach(() => { jest.useRealTimers(); });
 
-  test('a token package before the gate: Dec 2 is past Nov 1 + 30 and names Monday, Nov 2, not Oct 10', async () => {
+  test('a token package before the gate: on Oct 1 the window ends Nov 30, so Dec 2 names Sunday, Nov 1, not Oct 10', async () => {
     mockSlots.data = { ...mockSlots.data, bookingMode: 'in-app', calendlyUrl: null, bookingOpen: false,
       days: [slotOn('2026-12-02', 'Wed, Dec 2')] };
     const r = await renderScreen(<SpecialistBooking bare initialSpecialist="mental" />);
     expect(r.text()).toContain('Not open for this day yet');
-    expect(r.text()).toContain('Booking for Wednesday, Dec 2 opens 7 AM on Monday, Nov 2.');
+    expect(r.text()).toContain('Booking for Wednesday, Dec 2 opens 7 AM on Sunday, Nov 1.');
     expect(r.text()).not.toContain('Booking for Wednesday, Dec 2 opens Sat, Oct 10');
     await r.unmount();
   });
 
-  test('an Elite member books Dec 16 and sees Dec 17 locked', async () => {
-    mockMembers = [{ athleteId: 'a1', package: { id: 'elite', kind: 'elite', windowDays: 45 } }];
+  test('an Elite member books Dec 31, the end of the month after next, and sees Jan 1 locked until Nov 1', async () => {
+    mockMembers = [{ athleteId: 'a1', package: { id: 'elite', kind: 'elite' } }];
     mockSlots.data = { ...mockSlots.data, bookingMode: 'in-app', calendlyUrl: null, bookingOpen: true,
-      days: [slotOn('2026-12-16', 'Wed, Dec 16'), slotOn('2026-12-17', 'Thu, Dec 17')] };
+      days: [slotOn('2026-12-31', 'Thu, Dec 31'), slotOn('2027-01-01', 'Fri, Jan 1')] };
     const r = await renderScreen(<SpecialistBooking bare initialSpecialist="mental" />);
     expect(r.text()).not.toContain('Not open for this day yet');
     const card = slotCard(r);
@@ -191,13 +192,14 @@ describe('the window counts from Nov 1 until then (owner ruling 2026-09-30; UX r
     await act(async () => { card.click(); });
     await r.click('Reserve');
     await r.flush();
-    expect(mockBooked).toEqual([{ id: 's-2026-12-16', date: '2026-12-16', type: 'mental' }]);
+    expect(mockBooked).toEqual([{ id: 's-2026-12-31', date: '2026-12-31', type: 'mental' }]);
     await r.unmount();
 
     const l = await renderScreen(<SpecialistBooking bare initialSpecialist="mental" />);
-    // Month is the default: tap the day's cell in the grid.
-    await act(async () => { l.container.querySelector('td[data-date="2026-12-17"]').click(); });
-    expect(l.text()).toContain('Booking for Thursday, Dec 17 opens 7 AM on Monday, Nov 2.');
+    // Month is the default, on December: step to January and tap the day's cell in the grid.
+    await l.click('Next month');
+    await act(async () => { l.container.querySelector('td[data-date="2027-01-01"]').click(); });
+    expect(l.text()).toContain('Booking for Friday, Jan 1 opens 7 AM on Sunday, Nov 1.');
     expect(slotCard(l)).toBeNull();
     await l.unmount();
   });
@@ -680,7 +682,7 @@ describe('waitlist hardening on the Phil screen', () => {
 
   describe('Elite reads no token wording', () => {
     beforeEach(() => {
-      mockMembers = [{ athleteId: 'a1', name: 'Jordan', package: { id: 'elite', kind: 'elite', windowDays: 45 } }];
+      mockMembers = [{ athleteId: 'a1', name: 'Jordan', package: { id: 'elite', kind: 'elite' } }];
       mockSlots.data.tokens = { unlimited: true, left: null, grace: [] };
     });
 
@@ -713,7 +715,7 @@ describe('waitlist hardening on the Phil screen', () => {
       expect(elite.text()).not.toMatch(/token/i);
       await elite.unmount();
 
-      mockMembers = [{ athleteId: 'a1', name: 'Jordan', package: { id: 't-12', kind: 'tokens', windowDays: 30 } }];
+      mockMembers = [{ athleteId: 'a1', name: 'Jordan', package: { id: 't-12', kind: 'tokens' } }];
       const member = await renderScreen(<SpecialistBooking bare />);
       expect(member.text()).toContain('Sessions with Phil and Yannick use a token, same as any other session.');
       await member.unmount();

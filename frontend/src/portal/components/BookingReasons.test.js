@@ -67,28 +67,33 @@ describe('a handicap-reserved block (owner ruling 2026-10-02)', () => {
   });
 });
 
-describe('LockedDayNotice and the Oct 10 gate (UX review #8)', () => {
+describe('LockedDayNotice and the Oct 10 gate (UX review #8; whole-month window, owner ruling 2026-11-02)', () => {
   const notice = async (props) => {
     const r = await renderScreen(<LockedDayNotice {...props} />);
     const text = r.text();
     await r.unmount();
     return text;
   };
-  test('a token package before the gate: Nov 3 says Oct 10, not Oct 4', async () => {
-    const text = await notice({ date: '2026-11-03', windowDays: 30, gateOpen: false });
+  test('a token package before the gate: Nov 3 says Oct 10, not Oct 1', async () => {
+    const text = await notice({ date: '2026-11-03', windowMonths: 1, gateOpen: false });
     expect(text).toContain('Not open for this day yet');
     expect(text).toContain('Booking for Tuesday, Nov 3 opens Sat, Oct 10 at 7 AM.');
-    expect(text).not.toContain('Oct 4');
+    expect(text).not.toContain('Thursday, Oct 1');
   });
-  test('a window that opens after the gate keeps its own date', async () => {
-    expect(await notice({ date: '2026-11-20', windowDays: 30, gateOpen: false })).toContain('Booking for Friday, Nov 20 opens 7 AM on Wednesday, Oct 21.');
-    // Opening on the gate day itself reads the same date either way.
-    expect(await notice({ date: '2026-11-09', windowDays: 30, gateOpen: false })).toContain('Booking for Monday, Nov 9 opens 7 AM on Saturday, Oct 10.');
+  test('a month that opens after the gate keeps its own 1st', async () => {
+    expect(await notice({ date: '2026-12-02', windowMonths: 1, gateOpen: false })).toContain('Booking for Wednesday, Dec 2 opens 7 AM on Sunday, Nov 1.');
+    // The month boundary: November's last day still opens Oct 1 (so the gate's copy); December's first day opens Nov 1.
+    expect(await notice({ date: '2026-11-30', windowMonths: 1, gateOpen: false })).toContain('Booking for Monday, Nov 30 opens Sat, Oct 10 at 7 AM.');
+    expect(await notice({ date: '2026-12-01', windowMonths: 1, gateOpen: false })).toContain('Booking for Tuesday, Dec 1 opens 7 AM on Sunday, Nov 1.');
   });
-  test('Elite (gate open) and every package after the gate are unchanged', async () => {
-    expect(await notice({ date: '2026-11-20', windowDays: 45, gateOpen: true })).toContain('Booking for Friday, Nov 20 opens 7 AM on Tuesday, Oct 6.');
-    expect(await notice({ date: '2026-11-03', windowDays: 30, gateOpen: true })).toContain('Booking for Tuesday, Nov 3 opens 7 AM on Sunday, Oct 4.');
-    // No gateOpen passed reads as open (the pre-existing behaviour).
-    expect(await notice({ date: '2026-11-03', windowDays: 30 })).toContain('opens 7 AM on Sunday, Oct 4.');
+  test('Elite (gate open) and every package after the gate name the 1st their window reaches back to', async () => {
+    expect(await notice({ date: '2026-11-20', windowMonths: 2, gateOpen: true })).toContain('Booking for Friday, Nov 20 opens 7 AM on Tuesday, Sep 1.');
+    // Two months back for Elite, one for a token package: the same February day opens Dec 1 or Jan 1.
+    expect(await notice({ date: '2027-02-10', windowMonths: 2, gateOpen: true })).toContain('Booking for Wednesday, Feb 10 opens 7 AM on Tuesday, Dec 1.');
+    expect(await notice({ date: '2027-02-10', windowMonths: 1, gateOpen: true })).toContain('Booking for Wednesday, Feb 10 opens 7 AM on Friday, Jan 1.');
+    expect(await notice({ date: '2026-11-03', windowMonths: 1, gateOpen: true })).toContain('Booking for Tuesday, Nov 3 opens 7 AM on Thursday, Oct 1.');
+    // No gateOpen passed reads as open (the pre-existing behaviour); no windowMonths passed reads as one month.
+    expect(await notice({ date: '2026-11-03', windowMonths: 1 })).toContain('opens 7 AM on Thursday, Oct 1.');
+    expect(await notice({ date: '2027-01-07' })).toContain('Booking for Thursday, Jan 7 opens 7 AM on Tuesday, Dec 1.');
   });
 });

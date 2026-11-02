@@ -97,23 +97,23 @@ This is the whole of the old rollover policy, generalized: one month of life, on
 
 ## 5. Booking windows
 
-Rolling, per membership:
+Whole calendar months, per package kind (**owner ruling 2026-11-02**; replaces the 30 / 45-day roll):
 
 | | Window |
 |---|---|
-| Token packages | 30 days (**Sprint 20 ruling 0.5; was 32**) |
-| Elite | 45 days |
+| Token packages and the single token | through the end of NEXT month (1 month) |
+| Elite | through the end of the month after next (2 months) |
 
-**The window rolls at 07:00 America/Chicago**, not midnight.
+**A further month opens at 07:00 America/Chicago on the 1st**, not at midnight.
 
 ```
 localNow      = now in America/Chicago
-anchorDate    = localNow.time >= 07:00 ? localNow.date : localNow.date - 1
-openThrough   = anchorDate + membership.windowDays
+countedDate   = localNow.time >= 07:00 ? localNow.date : localNow.date - 1
+openThrough   = last day of (countedDate.month + windowMonths)
 bookable iff  localDate(session.startsAt) <= openThrough
 ```
 
-So at 07:00 on Jan 10 a token holder sees through Feb 9; Elite sees through Feb 24. At 06:59 on Jan 10, one day less. Same rule for both; only `windowDays` differs.
+So on Nov 2 a token holder sees through Dec 31 and Elite through Jan 31; from 07:00 on Dec 1 they see through Jan 31 and Feb 28 (the season ends Feb 27). At 06:59 on Dec 1, still December only. The window is read off the package kind (`windowMonthsFor`), never a stored field: `windowDays` is retired.
 
 ---
 
@@ -201,7 +201,7 @@ Elite no-shows have no token to forfeit; the existing no-show tracker is the con
 
 ```
 memberships/{athleteId}
-  packageId, elite: bool, windowDays: 30 | 45
+  packageId, elite: bool            (the window follows the kind: 1 month, Elite 2 - section 5)
   status: 'active' | 'past_due' | 'lapsed'
   stripeCustomerId, stripeSubscriptionId
   currentPeriodStart, currentPeriodEnd
@@ -280,7 +280,7 @@ Error codes the UI already distinguishes: `session-full`, `allowance-spent`, `no
 | `invoice.payment_failed` | `freeze` — `past_due`. Idempotent across retries |
 | `invoice.payment_failed` with `next_payment_attempt == null` | `revoke` — `lapsed` |
 | `customer.subscription.deleted` | `revoke` |
-| `customer.subscription.updated` (package change) | update `packageId`/`windowDays`; takes effect at next issuance |
+| `customer.subscription.updated` (package change) | update `packageId` (the window follows it); takes effect at next issuance |
 
 Every handler is idempotent on `event.id` — Stripe redelivers.
 

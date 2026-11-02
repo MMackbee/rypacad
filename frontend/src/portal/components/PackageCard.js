@@ -1,6 +1,6 @@
 import React from 'react';
 import { color, font, glow, radius, tint } from '../tokens';
-import { PRICES_RELEASED } from '../data/packages';
+import { PRICES_RELEASED, windowCopyFor } from '../data/packages';
 import { SINGLE_EXPIRES_LABEL } from '../data/singleToken';
 
 /**
@@ -138,12 +138,14 @@ export default function PackageCard({
  * (SEASON_BOUNDS.end, Sat 2027-02-27) - bought once, never per period.
  */
 function entitlementLine(pkg, showPrices) {
-  if (pkg.kind === 'elite') return `Unlimited · 24/7 access · book up to ${pkg.windowDays} days ahead`;
+  // The window reads off the package kind (owner ruling 2026-11-02): Elite
+  // books two months ahead, every token package through next month.
+  if (pkg.kind === 'elite') return `Unlimited · 24/7 access · books ${windowCopyFor(pkg)}`;
   if (pkg.kind === 'single') return `1 session · good through ${SINGLE_EXPIRES_LABEL}`;
   if (pkg.tokens == null) return null;
-  if (pkg.tokens === 1) return `1 token · books ${pkg.windowDays} days out`;
+  if (pkg.tokens === 1) return `1 token · books ${windowCopyFor(pkg)}`;
   // The per-token rate is a price: withheld with the rest (v2.0.1).
-  if (!showPrices) return `${pkg.tokens} tokens a month · books ${pkg.windowDays} days out`;
+  if (!showPrices) return `${pkg.tokens} tokens a month · books ${windowCopyFor(pkg)}`;
   const rate = pkg.price / pkg.tokens;
   return `${pkg.tokens} tokens a month · $${rate.toFixed(2)} a token`;
 }

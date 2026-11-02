@@ -6,7 +6,7 @@
  */
 import {
   ALL_PACKAGES, ELITE, PRICES_RELEASED, SIBLING_DISCOUNT_NOTE, SIBLING_DISCOUNT_PCT, SINGLE_TOKEN, TOKEN_PACKAGES,
-  memberSessionRate, normalizeAnchorDay, periodFallback, periodFor, positionForDate, siblingDiscountApplies, siblingPlan, tokensFor, windowDaysFor,
+  memberSessionRate, normalizeAnchorDay, periodFallback, periodFor, positionForDate, siblingDiscountApplies, siblingPlan, tokensFor, windowCopyFor, windowMonthsFor,
 } from './packages';
 import { SEASON_BOUNDS } from './season';
 
@@ -214,11 +214,22 @@ describe('tokensFor: the single token', () => {
 });
 
 describe('the catalogue after Sprint 20', () => {
-  test('token packages and single roll a 30-day window; Elite keeps 45', () => {
-    expect(TOKEN_PACKAGES.map((p) => p.windowDays)).toEqual([30, 30, 30, 30, 30]);
-    expect(SINGLE_TOKEN.windowDays).toBe(30);
-    expect(ELITE.windowDays).toBe(45);
-    expect(windowDaysFor(null)).toBe(30);
+  test('token packages and the single token book through next month; Elite two months ahead (owner ruling 2026-11-02)', () => {
+    expect(TOKEN_PACKAGES.map(windowMonthsFor)).toEqual([1, 1, 1, 1, 1]);
+    expect(windowMonthsFor(SINGLE_TOKEN)).toBe(1);
+    expect(windowMonthsFor(ELITE)).toBe(2);
+    expect(windowMonthsFor(null)).toBe(1);
+    expect(windowMonthsFor(undefined)).toBe(1);
+    // Read off the kind (an id alone will do for an older member shape), never a stored field: the retired
+    // `windowDays` on a packages/{id} doc changes nothing, and no catalogue entry carries it any more.
+    expect(windowMonthsFor({ id: 'elite' })).toBe(2);
+    expect(windowMonthsFor({ id: 't-6', kind: 'tokens', windowDays: 45 })).toBe(1);
+    expect(windowMonthsFor({ id: 'elite', kind: 'elite', windowDays: 30 })).toBe(2);
+    for (const p of ALL_PACKAGES) expect(p).not.toHaveProperty('windowDays');
+    expect(windowCopyFor(ELITE)).toBe('two months ahead');
+    expect(windowCopyFor(T12)).toBe('through next month');
+    expect(windowCopyFor(SINGLE_TOKEN)).toBe('through next month');
+    expect(windowCopyFor(null)).toBe('through next month');
   });
   test('prices are released and the catalogue carries no Stripe ids', () => {
     expect(PRICES_RELEASED).toBe(true);

@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * Write Stripe price ids (and the 30-day window) onto packages/{id}.
+ * Write Stripe price ids onto packages/{id}.
  *
  *   node scripts/write-packages.mjs --mode test --dry-run            # plan (emulator, or no target)
  *   npm run packages:emulator -- --mode test --yes                   # write the emulator
@@ -12,15 +12,16 @@
  * functions/config/stripe-catalogue.json ({ test: {...}, live: {...} }, price ids
  * are public) - it lives under functions/ because `firebase deploy` packages
  * only that folder and functions/portal/catalogue.js reads the same file.
- * Each write is packages/{id} with updateMask ['stripePriceId', 'windowDays']
- * and nothing else: never households (provision-family.mjs full-replaces
- * those), never a create (a missing packages doc is a refusal, so a partial
- * doc can never appear) - unless --create-missing is passed: then a package
- * the seam has and Firestore lacks (t-8, added 2026-10-07) is created whole
- * from ALL_PACKAGES plus its price id, with an exists:false precondition so a
- * create can never overwrite a doc. windowDays comes from the seam (ALL_PACKAGES) and is
- * asserted against the ruling (token 30 / elite 45) so the script cannot run
- * before the routing lane's packages.js change is merged.
+ * Each write is packages/{id} with updateMask ['stripePriceId'] and nothing
+ * else: never households (provision-family.mjs full-replaces those), never a
+ * create (a missing packages doc is a refusal, so a partial doc can never
+ * appear) - unless --create-missing is passed: then a package the seam has
+ * and Firestore lacks (t-8, added 2026-10-07) is created whole from
+ * ALL_PACKAGES plus its price id, with an exists:false precondition so a
+ * create can never overwrite a doc. The booking window is no longer a doc
+ * field (owner ruling 2026-11-02, data/packages.js windowMonthsFor reads the
+ * package kind): a `windowDays` still sitting on a production doc is left
+ * alone and ignored by the app.
  *
  * Production auth is scripts/lib/prod-auth.mjs (the CLI login), the same
  * mechanism every sanctioned writer uses; a prod write needs --yes.
@@ -40,9 +41,7 @@ export const CATALOGUE_PATH = path.join(repoRoot, 'functions', 'config', 'stripe
 export const FACILITY_KEY = 'facility-access';
 export const CATALOGUE_KEYS = ['t-4', 't-6', 't-8', 't-12', 't-16', 'elite', 'single', FACILITY_KEY];
 export const PRICE_ID_RE = /^price_[A-Za-z0-9]{8,}$/;
-// Spec 5 / interfaces 3.2: the ruling the seam must already state.
-export const EXPECTED_WINDOW = { tokens: 30, single: 30, elite: 45 };
-const MASK = ['stripePriceId', 'windowDays'];
+const MASK = ['stripePriceId'];
 
 export function parseArgs(argv) {
   const has = (f) => argv.includes(f);
@@ -75,9 +74,7 @@ export function planPackageWrites(catalogue, mode, packages) {
     if (!pkg) { problems.push(`${mode}.${key}: not an ALL_PACKAGES id`); continue; }
     if (priceId === null || priceId === undefined) { problems.push(`${mode}.${key}: price id missing (null) - paste it into the catalogue first`); continue; }
     if (typeof priceId !== 'string' || !PRICE_ID_RE.test(priceId)) { problems.push(`${mode}.${key}: ${JSON.stringify(priceId)} is not a Stripe price id`); continue; }
-    const expected = EXPECTED_WINDOW[pkg.kind];
-    if (pkg.windowDays !== expected) { problems.push(`${key}: packages.js windowDays is ${pkg.windowDays}, expected ${expected} (merge the routing lane's packages.js first)`); continue; }
-    plan.push({ id: key, stripePriceId: priceId, windowDays: pkg.windowDays });
+    plan.push({ id: key, stripePriceId: priceId });
   }
   for (const p of packages) if (!(p.id in map)) problems.push(`${mode} catalogue has no entry for package "${p.id}"`);
   return { plan: problems.length ? [] : plan, problems };

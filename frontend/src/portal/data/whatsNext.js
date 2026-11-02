@@ -7,8 +7,8 @@
  * email is off.
  */
 import { format, parseISO } from 'date-fns';
-import { BOOKING_OPENS_LABEL, bookingOpen, openThrough, windowAnchored } from './calendar';
-import { packageById, windowDaysFor } from './packages';
+import { BOOKING_OPENS_LABEL, bookingOpen, openThrough } from './calendar';
+import { packageById, windowMonthsFor } from './packages';
 import { SEASON_BOUNDS } from './season';
 
 export const WHATS_NEXT_TITLE = "What's next";
@@ -52,12 +52,9 @@ export function whatsNextFor({ packageId, product = null, athlete = null, self =
   let book = null;
   // Elite books at once; tokens from Oct 10 (the banner's own gate).
   if (bookingOpen(now, pkg)) {
-    // While the window counts from Nov 1 (owner ruling 2026-09-30), "up to
-    // N days ahead" undersells it - name the last bookable day instead.
-    const days = windowDaysFor(pkg);
-    const reach = windowAnchored(new Date(now))
-      ? `through ${format(parseISO(openThrough(new Date(now), days)), 'EEE, MMM d')}`
-      : `up to ${days} days ahead`;
+    // The window ends on a month's last day (owner ruling 2026-11-02), so
+    // name that day rather than a count.
+    const reach = `through ${format(parseISO(openThrough(new Date(now), windowMonthsFor(pkg))), 'EEE, MMM d')}`;
     lines.push(`${self ? 'You' : name} can book now - training, Tour events and Phil, ${reach}.`);
     book = self ? 'Book your first session' : `Book ${first ?? 'your athlete'}'s first session`;
   } else {

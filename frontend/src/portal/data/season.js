@@ -148,10 +148,30 @@ const CLOSED = new Set(HOLIDAY_CLOSURES_2026_27);
  */
 export function firstRunningWeek(iso, time, type = 'training') {
   for (let d = iso; d <= SEASON_BOUNDS.end; d = addDaysISO(d, 7)) {
-    if (!CLOSED.has(d)) return d;
-    if ((SEASON_BY_DATE.get(d) ?? []).some((s) => s.time === time && s.type === type)) return d;
+    if (weekRuns(d, time, type)) return d;
   }
   return null;
+}
+
+/**
+ * The last week of a weekly slot, from `iso` through `untilISO` (clamped to
+ * the season's end), that the season actually runs - the date a repeat can
+ * really reach when the booking window ends inside a closure (a window that
+ * ends Dec 31 holds nothing past Dec 22: the Dec 23 - Jan 3 break). Same
+ * dated-extra rule as firstRunningWeek. null when no week in the range runs.
+ */
+export function lastRunningWeek(iso, untilISO, time, type = 'training') {
+  const last = untilISO < SEASON_BOUNDS.end ? untilISO : SEASON_BOUNDS.end;
+  let found = null;
+  for (let d = iso; d <= last; d = addDaysISO(d, 7)) {
+    if (weekRuns(d, time, type)) found = d;
+  }
+  return found;
+}
+
+/** A date runs for a slot unless it is closed with no dated extra of that time and type. */
+function weekRuns(d, time, type) {
+  return !CLOSED.has(d) || (SEASON_BY_DATE.get(d) ?? []).some((s) => s.time === time && s.type === type);
 }
 
 /**

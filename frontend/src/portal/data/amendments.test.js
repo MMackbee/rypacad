@@ -3,7 +3,7 @@
  * down as tests: the catalogue, the withheld prices, Elite's frequency caps,
  * the per-package mental cadence, capacity 14 and the reserved Tue/Thu slot.
  */
-import { ALL_PACKAGES, ELITE, FACILITY_ACCESS, PRICES_RELEASED, TOKEN_PACKAGES, eliteDailyCapHit, packageById } from './packages';
+import { ALL_PACKAGES, ELITE, FACILITY_ACCESS, PRICES_RELEASED, TOKEN_PACKAGES, eliteDailyCapHit, packageById, windowMonthsFor } from './packages';
 import { MENTAL_MONTHLY_CAP, PARENT_ATTENDING_NOTE, SPECIALIST_MONTHLY_CAP, attendeeNoteFor, mentalCapFor, rosterNameFor } from './specialists';
 import { CAPACITY, CAPACITY_BY_TYPE, WEEKDAY_BLOCKS, capacityForType, generateSeason } from './schedule';
 
@@ -21,7 +21,10 @@ describe('the catalogue (v2.0.1)', () => {
   });
 
   test('Elite is $999 all-in with facility access included; the add-on is $300', () => {
-    expect(ELITE).toMatchObject({ price: 999, pending: false, tokens: null, access247: true, windowDays: 45 });
+    expect(ELITE).toMatchObject({ price: 999, pending: false, tokens: null, access247: true });
+    // The window follows the kind (owner ruling 2026-11-02): two months ahead, no stored day count.
+    expect(windowMonthsFor(ELITE)).toBe(2);
+    expect(ELITE).not.toHaveProperty('windowDays');
     expect(FACILITY_ACCESS).toMatchObject({ price: 300 });
   });
 

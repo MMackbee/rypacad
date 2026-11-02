@@ -118,15 +118,16 @@ export function cancelReasonCopy(reason, { unlimited = false, singleToken = fals
 const GATE_ISO = academyDateISO(new Date(BOOKING_OPENS_AT));
 
 /**
- * Pin D: a day past the booking window renders locked, not just empty.
+ * Pin D: a day past the booking window renders locked, not just empty. The
+ * day it opens is the 1st of a month at 7 AM (owner ruling 2026-11-02:
+ * windowOpensOn, `windowMonths` months before the session's own month).
  * UX review #8: while the Oct 10 gate is shut (`gateOpen` false: a token
  * package before 07:00 Oct 10), a day whose window would open BEFORE the gate
- * says the gate's date - "session date minus the window" told families
- * Nov 3 opens Sunday, Oct 4. Display only; the server gate is unchanged.
+ * says the gate's date instead. Display only; the server gate is unchanged.
  * Titled per day so it doesn't repeat the screen's own "Not open yet".
  */
-export function LockedDayNotice({ date, windowDays, gateOpen = true }) {
-  const opens = windowOpensOn(date, windowDays);
+export function LockedDayNotice({ date, windowMonths = 1, gateOpen = true }) {
+  const opens = windowOpensOn(date, windowMonths);
   return (
     <Banner tone="neutral" title="Not open for this day yet">
       {!gateOpen && opens < GATE_ISO

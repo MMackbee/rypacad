@@ -234,7 +234,6 @@ export function hubMemberFor(args) {
           tokens: pkg.tokens ?? null,
           price: pkg.price ?? null,
           pending: pkg.pending ?? false,
-          windowDays: pkg.windowDays ?? null,
           access247: Boolean(pkg.access247),
         }
       : null,

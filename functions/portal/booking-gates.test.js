@@ -7,8 +7,8 @@ const assert = require('node:assert/strict');
 const {test, run} = require('./tiny');
 const gates = require('./booking-gates');
 
-const ELITE = {kind: 'elite', tokens: null, windowDays: 45};
-const T12 = {kind: 'tokens', tokens: 12, windowDays: 30};
+const ELITE = {kind: 'elite', tokens: null};
+const T12 = {kind: 'tokens', tokens: 12};
 const b = (type, date, status = 'confirmed') => ({type, date, status});
 const DAY = '2026-09-20';
 
@@ -34,24 +34,32 @@ test('eliteDailyCapHit: only Elite, never a mental session', () => {
       [b('training', DAY)]), false);
 });
 
-test('windowDaysFor: the package\'s own window, 30 without one', () => {
-  assert.equal(gates.windowDaysFor(ELITE), 45);
-  assert.equal(gates.windowDaysFor({kind: 'tokens'}), 30);
-  assert.equal(gates.windowDaysFor(null), 30);
+test('windowMonthsFor: two months for Elite, one for everyone else ' +
+    '(owner ruling 2026-11-02)', () => {
+  assert.equal(gates.windowMonthsFor(ELITE), 2);
+  assert.equal(gates.windowMonthsFor({id: 'elite'}), 2);
+  assert.equal(gates.windowMonthsFor(T12), 1);
+  assert.equal(gates.windowMonthsFor({kind: 'single', tokens: 1}), 1);
+  assert.equal(gates.windowMonthsFor(null), 1);
+  // A production doc may still carry the retired field; it changes nothing.
+  assert.equal(gates.windowMonthsFor({kind: 'tokens', windowDays: 45}), 1);
+  assert.equal(gates.windowMonthsFor({kind: 'elite', windowDays: 30}), 2);
 });
 
-test('openThrough: anchored at Nov 1, then rolls at 7 AM Chicago', () => {
-  for (const [iso, days, last] of [
-    ['2026-09-30T17:00:00Z', 45, '2026-12-16'],
-    ['2026-09-30T17:00:00Z', 30, '2026-12-01'],
-    ['2026-10-10T12:00:00Z', 30, '2026-12-01'],
-    ['2026-11-01T12:59:00Z', 45, '2026-12-16'],
-    ['2026-11-02T12:59:00Z', 45, '2026-12-16'],
-    ['2026-11-02T13:00:00Z', 45, '2026-12-17'],
-    ['2026-11-10T13:00:00Z', 30, '2026-12-10'],
-    ['2026-11-10T12:59:00Z', 30, '2026-12-09'],
+test('openThrough: the end of the month N ahead, a further month opening ' +
+    'at 7 AM Chicago on the 1st', () => {
+  for (const [iso, months, last] of [
+    ['2026-11-02T13:00:00Z', 1, '2026-12-31'],
+    ['2026-11-02T13:00:00Z', 2, '2027-01-31'],
+    ['2026-11-30T23:00:00Z', 1, '2026-12-31'], // Nov 30, 5 PM Chicago
+    ['2026-12-01T12:59:00Z', 1, '2026-12-31'], // Dec 1, 6:59 AM: yesterday
+    ['2026-12-01T13:00:00Z', 1, '2027-01-31'], // Dec 1, 7 AM: January opens
+    ['2026-12-01T13:00:00Z', 2, '2027-02-28'],
+    ['2026-10-01T17:00:00Z', 1, '2026-11-30'],
+    ['2026-10-01T17:00:00Z', 2, '2026-12-31'],
+    ['2027-01-15T18:00:00Z', 2, '2027-03-31'],
   ]) {
-    assert.equal(gates.openThrough(new Date(iso), days), last, iso);
+    assert.equal(gates.openThrough(new Date(iso), months), last, iso);
   }
 });
 

@@ -10,7 +10,7 @@ jest.mock('../components/TokenMeter', () => ({ __esModule: true, default: ({ mem
 jest.mock('../hooks/billing', () => ({ __esModule: true, default: () => mockHub, useBillingHub: () => mockHub, usePaymentConfirmation: () => ({ state: 'idle' }), STRIPE_PORTAL_URL: 'https://billing.stripe.test/p/x' }));
 
 beforeEach(() => {
-  const m = (id, name, billing) => ({ athleteId: id, name, package: { id: 't-6', name: '6 tokens', kind: 'tokens', windowDays: 30, price: 299 }, tokens: { left: 6 }, coaching: null, contractMinutes: 20, facilityAccess: false, billing });
+  const m = (id, name, billing) => ({ athleteId: id, name, package: { id: 't-6', name: '6 tokens', kind: 'tokens', price: 299 }, tokens: { left: 6 }, coaching: null, contractMinutes: 20, facilityAccess: false, billing });
   mockHub = { loading: false, error: null, data: {
     household: { id: 'h1', name: 'Whitfield family', anchorDay: 1, membership: null, stripeCustomerId: 'cus_1' }, portalUrl: 'https://billing.stripe.test/p/x',
     members: [m('a1', 'Jordan', { status: 'active', facility: null }), m('a2', 'Reese', { status: 'pending', facility: null })],
@@ -36,7 +36,7 @@ test('pending hero pays, plan and connection copy, facility offer for the paid a
 
 describe('family facility access (owner ruling 2026-09-30)', () => {
   const paid = { status: 'active', facility: null };
-  const elite = { id: 'elite', name: 'Elite', kind: 'elite', windowDays: 45, price: 999 };
+  const elite = { id: 'elite', name: 'Elite', kind: 'elite', price: 999 };
 
   test('offered once when both athletes are paid, on the first', async () => {
     mockHub.data.members[1] = { ...mockHub.data.members[1], billing: paid };
@@ -62,8 +62,8 @@ describe('family facility access (owner ruling 2026-09-30)', () => {
     const r = await renderScreen(<Billing bare />);
     expect(r.text().split('Included with Elite for your family')).toHaveLength(2);
     expect(r.text()).not.toContain(ADD_FAMILY);
-    expect(r.text()).toContain('6 tokens a month · books 30 days out · facility access: Elite');
-    expect(r.text()).toContain('Elite · unlimited · books 45 days out · facility access: Elite');
+    expect(r.text()).toContain('6 tokens a month · books through next month · facility access: Elite');
+    expect(r.text()).toContain('Elite · unlimited · books two months ahead · facility access: Elite');
     await r.unmount();
   });
 
@@ -83,18 +83,18 @@ describe('family facility access (owner ruling 2026-09-30)', () => {
 });
 
 test('a mixed household keeps the monthly plan copy and footer', async () => {
-  mockHub.data.members[1] = { ...mockHub.data.members[1], package: { id: 'single', name: 'Single token', kind: 'single', windowDays: 30, price: 65 } };
+  mockHub.data.members[1] = { ...mockHub.data.members[1], package: { id: 'single', name: 'Single token', kind: 'single', price: 65 } };
   const r = await renderScreen(<Billing bare />);
   // Bills monthly, and says so the way the package cards do (UX #5: never 'a period').
-  expect(r.text()).toContain('6 tokens a month · books 30 days out');
+  expect(r.text()).toContain('6 tokens a month · books through next month');
   expect(r.text()).not.toContain('a period');
-  expect(r.text()).toContain('Single token · one-time · books 30 days out · One-time $65 per session token');
+  expect(r.text()).toContain('Single token · one-time · books through next month · One-time $65 per session token');
   expect(r.text()).toContain('Billed monthly on the 1st. Tokens reset the same day.');
   await r.unmount();
 });
 
 test('an all-single household reads one-time and has no monthly footer', async () => {
-  const single = { id: 'single', name: 'Single token', kind: 'single', windowDays: 30, price: 65 };
+  const single = { id: 'single', name: 'Single token', kind: 'single', price: 65 };
   mockHub.data.members = mockHub.data.members.map((m) => ({ ...m, package: single }));
   mockHub.data.status = { status: 'active', tone: 'default', badge: { tone: 'green', label: 'Active' }, title: 'Membership active',
     body: 'Session tokens are one-time payments - nothing bills monthly.', ladder: null, ladderAt: null, cta: null, paused: false };
@@ -109,7 +109,7 @@ test('an all-single household reads one-time and has no monthly footer', async (
 
 // Tester Mike 2026-09-30: no talk of tokens for Elite members.
 test('a household of Elite athletes only: billed monthly, and nothing about tokens resetting', async () => {
-  const elite = { id: 'elite', name: 'Elite', kind: 'elite', windowDays: 45, price: 999 };
+  const elite = { id: 'elite', name: 'Elite', kind: 'elite', price: 999 };
   mockHub.data.members = mockHub.data.members.map((m) => ({ ...m, package: elite, tokens: { unlimited: true }, billing: { status: 'active', facility: null } }));
   mockHub.data.status = { status: 'active', tone: 'default', badge: { tone: 'green', label: 'Active' }, title: 'Membership active',
     body: 'Billed monthly on the 1st. Nothing needs attention.', ladder: null, ladderAt: null, cta: null, paused: false, pendingAthletes: [] };
@@ -160,7 +160,7 @@ describe('the self-managed athlete (role athlete, one-member household)', () => 
     expect(r.text()).not.toMatch(/family facility/i);
     expect(r.text()).toContain('Your card and invoices are managed in Stripe.');
     expect(r.button('Manage billing in Stripe')).not.toBeNull();
-    expect(r.text()).toContain('6 tokens a month · books 30 days out');
+    expect(r.text()).toContain('6 tokens a month · books through next month');
     expect(r.text()).not.toContain('No linked athletes');
     expect(tabs(r)).toEqual(['Home', 'Schedule', 'Billing', 'Tour', 'Settings']);
     expect(r.button('Billing').getAttribute('aria-current')).toBe('page');
@@ -199,7 +199,7 @@ test('a failed load says the membership did not load, with no token wording', as
 describe('the single token (rulings 2026-09-29/30, on sale from the booking-open gate 2026-10-01)', () => {
   const GATE = Date.parse('2026-10-10T12:00:00Z'); // BOOKING_OPENS_AT: Sat, Oct 10 at 7 AM Chicago
   const WHEN = 'Single tokens are available from Sat, Oct 10 at 7 AM.';
-  const single = { id: 'single', name: 'Single token', kind: 'single', windowDays: 30, price: 65 };
+  const single = { id: 'single', name: 'Single token', kind: 'single', price: 65 };
   beforeEach(() => {
     jest.spyOn(Date, 'now').mockReturnValue(GATE);
     mockHub.data.members = mockHub.data.members.map((m) => ({ ...m, package: single }));

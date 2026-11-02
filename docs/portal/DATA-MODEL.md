@@ -143,7 +143,7 @@ TEAM.md Sprint 12 pin).
 | `tokens` | number \| null | Tokens granted per billing period. **`null` means unlimited — Elite only** (`packages/elite`). No package at all (an athlete with no `packageId`) means zero tokens, never unlimited — `tokensFor()`'s own explicit rule. |
 | `price` | number | Per-period price. **In the schema per contract v1 but never written by the seed script** (no dollar amounts in seed data, policy — unchanged). `provision-family.mjs` DOES write it (production is the one place a real price reaches Firestore, the v1.1 rule). |
 | `pending` | boolean | **New, contract v2.0.** `true` on every package whose price the owner hasn't confirmed yet (all four token packages, plus `single`; `elite`'s `$1,000` is the owner's own stated figure, not pending). The UI may render "pending" beside a pending price. **Stripped from every seeded doc** (seed-firestore.mjs) alongside `price` — a seed with no real prices has no business asserting they're settled either — but kept on the production write (provisioner), same reasoning as `price` itself. |
-| `windowDays` | number | Rolling booking-window length (contract v2.0 pin D): `30` for every token package and `single` (**Sprint 20 ruling 0.5; was 32**), `45` for `elite`. Replaces the old flat `SPECIALIST_BOOKING_WINDOW_DAYS` — every session type now uses the athlete's OWN package window, not a specialist-specific one. See [Periods, tokens and booking windows](#periods-tokens-and-booking-windows-contract-v20-sprint-12-part-1) below. **Sprint 20:** also written by `write-packages.mjs` (30 / 45) so production docs match the seam without a full `provision-family.mjs` catalogue run. |
+| `windowDays` | number | **Retired 2026-11-02 (owner ruling: whole-month booking windows).** Production docs written before then still carry `30` / `45`; the app never reads it — the window follows `kind` (`windowMonthsFor`: 1 month for every token package and `single`, 2 for `elite`). `write-packages.mjs` no longer writes it and the seed no longer carries it. See [Periods, tokens and booking windows](#periods-tokens-and-booking-windows-contract-v20-sprint-12-part-1) below. |
 | `access247` | boolean | **Elite only** (absent on every other package — Elite is the only package with this key at all, not merely the only one where it is `true`). The 24/7 facility-access differentiator (pin L). 24/7 paperwork (waiver, age rule, door credentials, insurance) is outside the app. |
 | `stripePriceId` | string \| null | **New, contract v2.1 (Sprint 13 pin H).** Maps a Stripe Price to this package, so `customer.subscription.updated` (a package change) can resolve the new price to a `packageId`. **Sprint 20: populated.** Written ONLY by `scripts/write-packages.mjs --prod --mode test|live` from `functions/config/stripe-catalogue.json` (the one source, both modes; `facility-access` has no packages doc). `data/packages.js` never carries it and the seed writes `null` explicitly. Absent == null. |
 
@@ -1449,16 +1449,23 @@ promoted) HOLDS one purchased token, latest-expiring first; `held` counts
 those entries (so it can exceed the tokens actually trimmed after an
 over-join). Monthly `reserved` is unchanged.
 
-**Booking windows (pin D).** `SPECIALIST_BOOKING_WINDOW_DAYS` (the old flat
+**Booking windows (pin D; owner ruling 2026-11-02).** `SPECIALIST_BOOKING_WINDOW_DAYS` (the old flat
 specialist-only window) is gone from the booking-gate path — every session
-type now uses the athlete's own package window: `windowDaysFor(pkg)` → `30` (**Sprint 20 ruling 0.5, was 32**)
-for every token package and `single`, `45` for `elite`. The window **rolls
-at 07:00 America/Chicago**, not midnight: `anchor = localNow.hour >= 7 ?
-localToday : localToday - 1; openThrough = anchor + windowDays; bookable iff
-session.date <= openThrough`. Pure `openThrough(now, windowDays)` /
-`windowOpensOn(sessionDateISO, windowDays)` in
-`frontend/src/portal/data/calendar.js` (both already on the PM seam this
-sprint's worktrees share). `assertWithinMonthlyCap` in `live.js` (routing
+type uses the athlete's own package window, now **whole calendar months off
+the package kind**: `windowMonthsFor(pkg)` → `1` for every token package and
+`single` (book through the end of NEXT month), `2` for `elite` (through the
+end of the month after next). A further month opens at **07:00
+America/Chicago on the 1st**, not midnight: `counted = localNow.hour >= 7 ?
+localToday : localToday - 1; openThrough = last day of (counted's month +
+windowMonths); bookable iff session.date <= openThrough`. So on Nov 2 a token
+family reaches Dec 31 and Elite Jan 31; from 7 AM on Dec 1 they reach Jan 31
+and Feb 28. Pure `openThrough(now, windowMonths)` /
+`windowOpensOn(sessionDateISO, windowMonths)` (the 1st of the month the date
+opens on) in `frontend/src/portal/data/calendar.js`; `firestore.rules
+withinOuterBookingBound()` carries the same month arithmetic off
+`request.time - 13h` (07:00 CST = 13:00Z). The Nov 1 launch anchor
+(`BOOKING_WINDOW_ANCHOR`, a 30/45-day count) is gone with the day-count
+window. `assertWithinMonthlyCap` in `live.js` (routing
 lane) becomes `assertWithinPeriodCap`: reads the athlete, its package, the
 period's bookings (+ waitlist/grace/`tokenPeriods` in Part 2) inside the
 transaction; skips when `pkg.tokens === null`; typed reasons

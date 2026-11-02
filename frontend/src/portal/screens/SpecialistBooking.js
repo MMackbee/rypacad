@@ -37,7 +37,7 @@ import { seedSpecialistDays, useBooking, useHouseholdAthletes, useMembership, us
 import { leaveWaitlist } from '../hooks/waitlist';
 import { waitlistClosed } from '../data/sessionStart';
 import { SPECIALISTS, repeatsWeekly } from '../data/specialists';
-import { positionForDate, windowDaysFor } from '../data/packages';
+import { positionForDate, windowMonthsFor } from '../data/packages';
 import { graceSpendLabel, isSingleTokenId } from '../data/singleToken';
 // Pure calendar/season helpers per the seam rule already established in
 // BookSession.js/CommitmentContract.js/TourStandings.js - data still travels
@@ -231,8 +231,8 @@ export default function SpecialistBooking({
   const selfMember = isParent
     ? membershipMembers.find((m) => m.athleteId === selectedAthleteId) ?? null
     : membershipMembers[0] ?? null;
-  const windowDays = windowDaysFor(selfMember?.package ?? null);
-  const openThroughDate = openThrough(new Date(), windowDays);
+  const windowMonths = windowMonthsFor(selfMember?.package ?? null);
+  const openThroughDate = openThrough(new Date(), windowMonths);
 
   // Reservation rides BookSession's own seam (routing's ruling: no booking
   // action lives on the slots hook): useBooking's book() with the tapped
@@ -319,7 +319,7 @@ export default function SpecialistBooking({
           athleteName,
           // The window as it stood at the tap: the booking's own bump reloads
           // useMembership, so the confirmation renders with none in hand.
-          repeatWindow: { end: openThroughDate, days: windowDays, elite: selfMember?.package?.kind === 'elite' },
+          repeatWindow: { end: openThroughDate, months: windowMonths, elite: selfMember?.package?.kind === 'elite' },
           waitlisted: result && result.status === 'waitlisted',
           position: result && result.position != null ? result.position : null,
         });
@@ -343,7 +343,7 @@ export default function SpecialistBooking({
       booking.bookingFor && !booked.waitlisted && !booked.tokens?.perPurchase && repeatsWeekly(booked.specialist.id)
         ? {
             windowEnd: booked.repeatWindow?.end ?? openThroughDate,
-            windowDays: booked.repeatWindow?.days ?? windowDays,
+            windowMonths: booked.repeatWindow?.months ?? windowMonths,
             elite: booked.repeatWindow?.elite ?? false,
             onRepeat: (untilISO) =>
               booking.bookRecurring(
@@ -471,7 +471,7 @@ export default function SpecialistBooking({
                 </div>
                 {selectedDateLocked ? (
                   <div style={{ padding: '0 22px' }}>
-                    <LockedDayNotice date={selectedDate} windowDays={windowDays} gateOpen={gateOpen} />
+                    <LockedDayNotice date={selectedDate} windowMonths={windowMonths} gateOpen={gateOpen} />
                   </div>
                 ) : (
                   <div style={{ padding: '0 22px', display: 'flex', flexDirection: 'column', gap: 9 }}>
@@ -936,7 +936,7 @@ function Confirmed({ bare, booked, repeat, onBack }) {
                 time={booked.time}
                 type={booked.specialist.id}
                 windowEnd={repeat.windowEnd}
-                windowDays={repeat.windowDays}
+                windowMonths={repeat.windowMonths}
                 elite={repeat.elite}
                 onRepeat={repeat.onRepeat}
               />

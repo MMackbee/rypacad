@@ -112,6 +112,8 @@ describe('hubMemberFor', () => {
     expect(elite.lastPeriod.granted).toBeNull();
     expect(elite.expiryNudge).toBeNull();
     expect(elite.package).toMatchObject({ kind: 'elite', access247: true });
+    // The window reads off the kind (owner ruling 2026-11-02): the member shape carries no day count.
+    expect(elite.package).not.toHaveProperty('windowDays');
     const none = hubMemberFor({ ...fixture(), pkg: null });
     expect(none.tokens).toMatchObject({ granted: 0, left: 0, used: 3 });
     expect(none.package).toBeNull();
@@ -480,7 +482,7 @@ describe('before the season: the first (prepaid) period (tester report 2026-09-3
 });
 
 describe('the single token (owner rulings 2026-09-29/30)', () => {
-  const single = { id: 'single', name: 'Single token', kind: 'single', tokens: 1, price: 65, windowDays: 30 };
+  const single = { id: 'single', name: 'Single token', kind: 'single', tokens: 1, price: 65 };
   const T6 = TOKEN_PACKAGES.find((p) => p.id === 't-6');
 
   test('a one-time buyer moved to t-6 is pending, carries oneTime, and so reaches pendingOf', () => {

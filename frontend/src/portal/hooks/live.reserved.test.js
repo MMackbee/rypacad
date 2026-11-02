@@ -73,9 +73,9 @@ beforeEach(() => {
       sage: { name: 'Sage Parker', householdId: 'h1', packageId: 'elite' },
     },
     packages: {
-      elite: { name: 'Elite', kind: 'elite', tokens: null, windowDays: 45 },
-      't-6': { name: '6 tokens', kind: 'tokens', tokens: 6, windowDays: 30 },
-      single: { name: 'Single token', kind: 'single', tokens: 1, windowDays: 30 },
+      elite: { name: 'Elite', kind: 'elite', tokens: null },
+      't-6': { name: '6 tokens', kind: 'tokens', tokens: 6 },
+      single: { name: 'Single token', kind: 'single', tokens: 1 },
     },
     sessions: {},
     bookings: {},

@@ -445,8 +445,9 @@ function buildDocs(portal) {
   // before writing — no dollar amounts, and no invented-price markers,
   // anywhere in seed data (the v1.1 "price stripped" rule, extended to
   // `pending` by this sprint). id becomes the doc id rather than a
-  // duplicated field. `kind`/`tokens`/`windowDays`/`access247` (elite only)
-  // flow straight through from the seam, never hand-copied.
+  // duplicated field. `kind`/`tokens`/`access247` (elite only) flow straight
+  // through from the seam, never hand-copied (`windowDays` is retired: the
+  // window reads off `kind`, data/packages.js windowMonthsFor).
   const packages = new Map();
   // Sprint 20 (spec 4.1): price ids never come from the seam - even if one
   // ever appears there it is stripped, and the doc states null explicitly.

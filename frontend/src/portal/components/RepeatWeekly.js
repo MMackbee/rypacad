@@ -3,8 +3,8 @@ import { format, parseISO } from 'date-fns';
 import { color, font } from '../tokens';
 import Button from './Button';
 import { Body, Card, SectionLabel } from './Primitives';
-import { addDaysISO, windowAnchored, windowOpensOn } from '../data/calendar';
-import { SEASON_BOUNDS, firstRunningWeek } from '../data/season';
+import { addDaysISO, windowOpensOn } from '../data/calendar';
+import { firstRunningWeek, lastRunningWeek } from '../data/season';
 
 /**
  * "Repeat weekly" on Book a Session's Slot reserved screen (rewritten
@@ -21,11 +21,11 @@ import { SEASON_BOUNDS, firstRunningWeek } from '../data/season';
  * @param {string} time        Its start, '4:00 PM'.
  * @param {string} type        Its session type ('training', 'phil'): tells a holiday extra from a closure, and words the skipped weeks.
  * @param {string} windowEnd   The last bookable date for THIS athlete's package (openThrough).
- * @param {number} windowDays  That package's window, for the "N days ahead" line.
+ * @param {number} windowMonths  That package's window in months (windowMonthsFor), for the reach line and the day a locked week opens.
  * @param {boolean} elite      Elite spends no token, so no token line.
  * @param {(untilISO) => Promise} onRepeat  useBooking().bookRecurring for the booked slot.
  */
-export default function RepeatWeekly({ date, time, type, windowEnd, windowDays, elite, onRepeat }) {
+export default function RepeatWeekly({ date, time, type, windowEnd, windowMonths = 1, elite, onRepeat }) {
   // null (offer), 'working', or bookRecurring's result.
   const [repeat, setRepeat] = useState(null);
   // The next week this slot actually runs: a closure (the Dec 23 - Jan 3
@@ -34,7 +34,10 @@ export default function RepeatWeekly({ date, time, type, windowEnd, windowDays, 
   // The season's last running week has nothing to repeat into.
   if (!nextWeek) return null;
   const weekday = format(parseISO(date), 'EEEE');
-  const until = windowEnd < SEASON_BOUNDS.end ? windowEnd : SEASON_BOUNDS.end;
+  // The last week the repeat can really hold: the window's end (or the
+  // season's) stepped back over closures, so a window ending Dec 31 reads
+  // "through Tue, Dec 22", not a date in the Christmas break (review 2026-11-02).
+  const until = lastRunningWeek(nextWeek, windowEnd, time, type) ?? nextWeek;
 
   const run = async () => {
     setRepeat('working');
@@ -55,19 +58,17 @@ export default function RepeatWeekly({ date, time, type, windowEnd, windowDays, 
       ) : nextWeek > windowEnd ? (
         <Body size={12}>
           Next {weekday} ({shortDay(nextWeek)}) opens for booking at 7 AM on{' '}
-          {shortDay(windowOpensOn(nextWeek, windowDays))}.
+          {shortDay(windowOpensOn(nextWeek, windowMonths))}.
         </Body>
       ) : (
         <>
           {/* Owner 2026-09-30: the window is the no-show control, so say
-              plainly what it holds and when the rest opens. While the Nov 1
-              anchor sets the window, nothing opens day by day until Nov 2. */}
+              plainly what it holds and when the rest opens. Owner 2026-11-02:
+              the window is whole months, so the rest opens on the 1st. */}
           <Body size={12} style={{ marginBottom: 12 }}>
             Hold {weekday} at {time} every week through {shortDay(until)}, the furthest you can book
-            today ({windowDays} days ahead).{' '}
-            {windowAnchored()
-              ? 'Weeks after that open from Nov 2, one day at a time at 7 AM; come back then to extend.'
-              : 'A new week opens every morning at 7 AM; come back to extend.'}
+            today ({windowMonths === 2 ? 'two months ahead' : 'through next month'}). A further month
+            opens at 7 AM on the 1st; come back then to extend.
             {elite ? '' : " Each week spends a token from that week's period."}
           </Body>
           <Button variant="outline" height={46} style={{ boxShadow: 'none' }} onClick={run}>

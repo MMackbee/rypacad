@@ -130,7 +130,7 @@ async function loadCandidate(reader, store, entry, ctx) {
   }
   if (!pkg) return fail('no-package');
   if (session.date >
-      gates.openThrough(ctx.now, gates.windowDaysFor(pkg))) {
+      gates.openThrough(ctx.now, gates.windowMonthsFor(pkg))) {
     return fail('outside-window');
   }
 

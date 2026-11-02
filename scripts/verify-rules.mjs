@@ -102,7 +102,7 @@ async function listUnderAs(auth, parentPath, collectionId, filters = {}) {
   return err ? err.code : res.status;
 }
 // Session dates sit a few days out, so the past-session clause (rules: sessionDayNotOver) never decides a case that is
-// not about it. taskWindow keeps its fixed December dates: the Nov 1 anchor it probes is a fixed date too.
+// not about it. taskWindow derives its own dates from the clock: the bound it probes is a month boundary.
 const dayOut = (n) => new Date(Date.now() + n * 86400000).toISOString().slice(0, 10);
 const [DAY1, DAY2] = [dayOut(5), dayOut(6)];
 /** One `commit` write: an update of `mask` (default: the given fields) plus REQUEST_TIME transforms. */
@@ -313,29 +313,36 @@ export async function taskContract() {
   await del('athletes', 'ath-contract-new');
 }
 
-// Owner ruling 2026-09-30: every window counts from Nov 1 until then, so the
-// outer bound reaches Nov 1 + 46 days (Dec 17) whatever today is. Dec 18 stays
-// refused until the clock-based ceiling (today + 46 days) passes it on Nov 2.
+// Owner ruling 2026-11-02: a token family books through the END of next
+// month, Elite through the end of the month after next, and a further month
+// opens at 07:00 America/Chicago on the 1st. The rules read the month off
+// request.time shifted back 13 hours (07:00 CST = 13:00Z), so this probe
+// derives its dates the same way: the last day of the window's final month
+// is admitted, the first day of the month after it refused, for each package.
 export async function taskWindow() {
-  const dec18Open = Date.now() + 46 * 86400000 >= Date.UTC(2026, 11, 18);
-  console.log('Window: the Nov 1 anchor on the outer booking bound' + (dec18Open ? ' (Nov 2 or later)' : ' (before Nov 2)'));
-  for (const [id, date] of [['s-dec16', '2026-12-16'], ['s-dec18', '2026-12-18']]) {
-    await seed('sessions', id, { date, time: '4:00 PM', type: 'training', capacity: 15, booked: 0, status: 'scheduled' });
+  const rolled = new Date(Date.now() - 13 * 3600000);
+  const base = rolled.getUTCFullYear() * 12 + rolled.getUTCMonth(); // this month's index
+  const iso = (y, m0, d) => new Date(Date.UTC(y, m0, d)).toISOString().slice(0, 10);
+  const lastOf = (i) => iso(Math.floor(i / 12), (i % 12) + 1, 0); // day 0 of the next month
+  const firstOf = (i) => iso(Math.floor(i / 12), i % 12, 1);
+  const cases = [
+    ['tok-in', 'ath-active', lastOf(base + 1), beforeGate ? 403 : 200, 'token athlete books the last day of next month'],
+    ['tok-out', 'ath-active', firstOf(base + 2), 403, 'token athlete refused the 1st of the month after'],
+    ['elite-in', 'ath-elite', lastOf(base + 2), 200, 'Elite books the last day of the month after next'],
+    ['elite-out', 'ath-elite', firstOf(base + 3), 403, 'Elite refused the 1st of the month after that'],
+  ];
+  console.log(`Window: whole calendar months on the outer booking bound (counting from ${iso(Math.floor(base / 12), base % 12, 1).slice(0, 7)})`);
+  for (const [key, , date] of cases) {
+    await seed('sessions', `s-win-${key}`, { date, time: '4:00 PM', type: 'training', capacity: 15, booked: 0, status: 'scheduled' });
   }
-  const elite = (sessionId, date) => ({ ...booking('ath-elite'), sessionId, date, periodKey: '2026-12-01', chargedFrom: 'elite' });
-  expect('booking: Elite books Dec 16 (Nov 1 + 45)', await bookAs(t.parent, 'ath-elite_s-dec16', elite('s-dec16', '2026-12-16')), 200);
-  expect('booking: Dec 18 past the anchored bound', await bookAs(t.parent, 'ath-elite_s-dec18', elite('s-dec18', '2026-12-18')), dec18Open ? 200 : 403);
-  // Review 2026-09-30: the anchored ceiling follows the package. A token
-  // athlete reaches Dec 1 (Nov 1 + 30, one day of slack) - once the Oct 10
-  // gate is open - and Dec 3 stays refused until today + 46 days passes it.
-  await seed('sessions', 's-dec1', { date: '2026-12-01', time: '4:00 PM', type: 'training', capacity: 15, booked: 0, status: 'scheduled' });
-  await seed('sessions', 's-dec3', { date: '2026-12-03', time: '4:00 PM', type: 'training', capacity: 15, booked: 0, status: 'scheduled' });
-  const tokens = (sessionId, date) => ({ ...booking('ath-active'), sessionId, date, periodKey: '2026-12-01' });
-  const dec3Open = Date.now() + 46 * 86400000 >= Date.UTC(2026, 11, 3);
-  expect('booking: token athlete books Dec 1 (Nov 1 + 30)', await bookAs(t.parent, 'ath-active_s-dec1', tokens('s-dec1', '2026-12-01')), beforeGate ? 403 : 200);
-  expect('booking: token athlete Dec 3 past the anchored token bound', await bookAs(t.parent, 'ath-active_s-dec3', tokens('s-dec3', '2026-12-03')), dec3Open && !beforeGate ? 200 : 403);
-  for (const [c, id] of [['bookings', 'ath-elite_s-dec16'], ['bookings', 'ath-elite_s-dec18'], ['bookings', 'ath-active_s-dec1'], ['bookings', 'ath-active_s-dec3'],
-    ['sessions', 's-dec16'], ['sessions', 's-dec18'], ['sessions', 's-dec1'], ['sessions', 's-dec3']]) await del(c, id);
+  for (const [key, athleteId, date, want, label] of cases) {
+    const body = { ...booking(athleteId), sessionId: `s-win-${key}`, date, periodKey: `${date.slice(0, 7)}-01`, ...(athleteId === 'ath-elite' ? { chargedFrom: 'elite' } : {}) };
+    expect(`booking: ${label} (${date})`, await bookAs(t.parent, `${athleteId}_s-win-${key}`, body), want);
+  }
+  for (const [key, athleteId] of cases) {
+    await del('bookings', `${athleteId}_s-win-${key}`);
+    await del('sessions', `s-win-${key}`);
+  }
 }
 
 // Owner report 2026-09-30: Repeat weekly's copies carry createdVia 'repeat'

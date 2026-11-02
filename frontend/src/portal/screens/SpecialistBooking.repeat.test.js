@@ -35,8 +35,9 @@ jest.mock('../data/calendly', () => ({
   CALENDLY_NOTE: '',
 })); // not `virtual` (the file exists): see Registration.test.js
 
-const ELITE = { id: 'elite', kind: 'elite', windowDays: 45 };
-// Thursday Nov 5 at 4:00 PM: inside every package's window on Oct 1.
+const ELITE = { id: 'elite', kind: 'elite' };
+// Thursday Nov 5 at 4:00 PM: inside every package's window on Oct 1 (a token
+// package reaches Mon, Nov 30; Elite reaches Thu, Dec 31).
 const thursday = (capacity) => ({
   date: '2026-11-05', dayLabel: 'Thu, Nov 5',
   slots: [{ sessionId: 's-1105', time: '4:00 PM', open: true, capacity, booked: 0, durationMinutes: capacity > 1 ? 45 : 30 }],
@@ -79,66 +80,70 @@ test('a Phil confirmation offers the repeat through the window; the tap sends th
       { date: '2026-11-26', reason: 'no session' },
       { date: '2026-12-03', reason: 'full' },
     ],
-    windowEnd: '2026-12-16',
-    next: { date: '2026-12-17', opensOn: '2026-11-02' },
+    windowEnd: '2026-12-31',
+    // The first Thursday past Dec 31 that runs (the Dec 23 - Jan 3 break stepped over); it opens on the 1st.
+    next: { date: '2027-01-07', opensOn: '2026-11-01' },
   }));
   const r = await reserve('phil');
   expect(mockBooked).toEqual([{ id: 's-1105', date: '2026-11-05', type: 'phil' }]);
   expect(r.text()).toContain('Reservation confirmed');
   expect(r.text()).toContain('Repeat weekly');
+  // The window ends Dec 31, inside the Christmas break: the last Thursday
+  // that runs is Dec 17, and that is the date the offer names and sends.
   expect(r.text()).toContain(
-    'Hold Thursday at 4:00 PM every week through Wed, Dec 16, the furthest you can book today (45 days ahead). Weeks after that open from Nov 2, one day at a time at 7 AM; come back then to extend.'
+    'Hold Thursday at 4:00 PM every week through Thu, Dec 17, the furthest you can book today (two months ahead). A further month opens at 7 AM on the 1st; come back then to extend.'
   );
   expect(r.text()).not.toContain('spends a token');
-  await r.click('Repeat every Thursday through Wed, Dec 16');
+  await r.click('Repeat every Thursday through Thu, Dec 17');
   await r.flush();
   expect(mockBookRecurring).toHaveBeenCalledTimes(1);
   expect(mockBookRecurring).toHaveBeenCalledWith(
     { date: '2026-11-05', time: '4:00 PM', type: 'phil' },
-    { athleteId: undefined, untilISO: '2026-12-16' }
+    { athleteId: undefined, untilISO: '2026-12-17' }
   );
   expect(r.text()).toContain('2 more weeks booked');
   expect(r.text()).toContain("Nov 19: there's already a Performance with Phil session booked that day (Elite includes one a day).");
   expect(r.text()).toContain('Nov 26: no Performance with Phil session at that time.');
   expect(r.text()).toContain('Dec 3: full.');
-  expect(r.text()).toContain('Thu, Dec 17 opens 7 AM on Mon, Nov 2');
+  expect(r.text()).toContain('Thu, Jan 7 opens 7 AM on Sun, Nov 1');
   await r.unmount();
 });
 
 // Review 2026-09-30: the single booking's own bump reloads useMembership, so
 // the confirmation renders with no membership in hand. The card keeps the
-// window the family tapped Reserve with, not the 30-day token fallback.
-test('membership reloading behind the confirmation: an Elite card keeps its 45-day window and sends it', async () => {
+// window the family tapped Reserve with, not the one-month token fallback.
+test('membership reloading behind the confirmation: an Elite card keeps its two-month window and sends it', async () => {
   mockMembershipReloads = true;
   const r = await reserve('phil');
   expect(mockBooked).toHaveLength(1);
   expect(r.text()).toContain('Reservation confirmed');
-  expect(r.text()).toContain('Hold Thursday at 4:00 PM every week through Wed, Dec 16, the furthest you can book today (45 days ahead).');
-  expect(r.text()).not.toContain('30 days ahead');
+  expect(r.text()).toContain('Hold Thursday at 4:00 PM every week through Thu, Dec 17, the furthest you can book today (two months ahead).');
+  expect(r.text()).not.toContain('through next month');
   expect(r.text()).not.toContain('spends a token');
-  expect(r.button('Repeat every Thursday through Tue, Dec 1')).toBeNull();
-  await r.click('Repeat every Thursday through Wed, Dec 16');
+  expect(r.button('Repeat every Thursday through Thu, Nov 19')).toBeNull();
+  await r.click('Repeat every Thursday through Thu, Dec 17');
   await r.flush();
   expect(mockBookRecurring).toHaveBeenCalledWith(
     { date: '2026-11-05', time: '4:00 PM', type: 'phil' },
-    { athleteId: undefined, untilISO: '2026-12-16' }
+    { athleteId: undefined, untilISO: '2026-12-17' }
   );
   await r.unmount();
 });
 
-test('a parent booking for a token child: the child is named, the window is 30 days, the token line shows', async () => {
+test('a parent booking for a token child: the child is named, the window is through next month, the token line shows', async () => {
   mockBookingFor = 'parent';
   mockHouseholdAthletes = [{ id: 'a1', name: 'Jordan' }, { id: 'a2', name: 'Ava' }];
-  mockMembers = [{ athleteId: 'a1', package: ELITE }, { athleteId: 'a2', package: { id: 't-12', kind: 'tokens', windowDays: 30 } }];
+  mockMembers = [{ athleteId: 'a1', package: ELITE }, { athleteId: 'a2', package: { id: 't-12', kind: 'tokens' } }];
   mockSlots.data.tokens = { left: 5, unlimited: false, grace: [] };
   const r = await reserve('phil', { role: 'parent', initialAthleteId: 'a2' });
-  expect(r.text()).toContain('Hold Thursday at 4:00 PM every week through Tue, Dec 1, the furthest you can book today (30 days ahead).');
+  // A token window ends Nov 30; Nov 26 is Thanksgiving, so the last Thursday that runs is Nov 19.
+  expect(r.text()).toContain('Hold Thursday at 4:00 PM every week through Thu, Nov 19, the furthest you can book today (through next month).');
   expect(r.text()).toContain("Each week spends a token from that week's period.");
-  await r.click('Repeat every Thursday through Tue, Dec 1');
+  await r.click('Repeat every Thursday through Thu, Nov 19');
   await r.flush();
   expect(mockBookRecurring).toHaveBeenCalledWith(
     { date: '2026-11-05', time: '4:00 PM', type: 'phil' },
-    { athleteId: 'a2', untilISO: '2026-12-01' }
+    { athleteId: 'a2', untilISO: '2026-11-19' }
   );
   await r.unmount();
 });

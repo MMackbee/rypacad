@@ -3,10 +3,12 @@
  * server-side writers (owner ruling 2026-10-01: a waitlist promotion may
  * never produce a booking a normal tap would refuse).
  *
- * CHANGE ONE, CHANGE BOTH. `eliteDailyCapHit` and `windowDaysFor` mirror
- * `frontend/src/portal/data/packages.js`; `openThrough` and its two
- * constants mirror `frontend/src/portal/data/calendar.js`. Those files are
- * ESM and CRA-only, so Cloud Functions cannot import them (see lib.js).
+ * CHANGE ONE, CHANGE BOTH. `eliteDailyCapHit` and `windowMonthsFor` mirror
+ * `frontend/src/portal/data/packages.js`; `openThrough` mirrors
+ * `frontend/src/portal/data/calendar.js` (owner ruling 2026-11-02: whole
+ * calendar months, a further month opening at 07:00 America/Chicago on the
+ * 1st). Those files are ESM and CRA-only, so Cloud Functions cannot import
+ * them (see lib.js).
  */
 
 'use strict';
@@ -15,8 +17,6 @@ const lib = require('./lib');
 
 /** The window rolls at 07:00 America/Chicago, not midnight. */
 const WINDOW_ROLL_HOUR = 7;
-/** Until this date the window counts from it, not from today. */
-const BOOKING_WINDOW_ANCHOR = '2026-11-01';
 /** The session types Elite may hold one of per day. */
 const DAILY_CAP_TYPES = ['training', 'tournament', 'phil'];
 
@@ -42,12 +42,28 @@ function eliteDailyCapHit(pkg, type, date, bookings) {
 }
 
 /**
- * The booking window in days: the package's own, 30 without one.
+ * The booking window in whole calendar months (owner ruling 2026-11-02):
+ * through the end of NEXT month for a token package or the single token,
+ * the month after next for Elite. Read off the package kind, never the
+ * retired `windowDays` field a production doc may still carry.
  * @param {?Object} pkg A `packages/{id}` body.
- * @return {number} Days.
+ * @return {number} Months: 1 or 2.
  */
-function windowDaysFor(pkg) {
-  return pkg && Number.isInteger(pkg.windowDays) ? pkg.windowDays : 30;
+function windowMonthsFor(pkg) {
+  return pkg && (pkg.kind || pkg.id) === 'elite' ? 2 : 1;
+}
+
+/**
+ * The last day of the month `monthsAhead` months after the one holding
+ * `dateISO` (day 0 of the month after that is its last day).
+ * @param {string} dateISO `'YYYY-MM-DD'`.
+ * @param {number} monthsAhead Whole months forward.
+ * @return {string} `'YYYY-MM-DD'`.
+ */
+function endOfMonth(dateISO, monthsAhead) {
+  const [y, m] = String(dateISO).split('-').map(Number);
+  return new Date(Date.UTC(y, m - 1 + monthsAhead + 1, 0, 12))
+      .toISOString().slice(0, 10);
 }
 
 /**
@@ -62,26 +78,26 @@ function addDays(dateISO, days) {
 }
 
 /**
- * The last session date bookable right now for a window of this length.
+ * The last session date bookable right now: the end of the month
+ * `windowMonths` months past the month the window counts from (today in
+ * Chicago from 7 AM, else yesterday). On Nov 2 a token family reaches
+ * Dec 31 and Elite Jan 31; from 7 AM on Dec 1, Jan 31 and Feb 28.
  * @param {!Date} now Any instant.
- * @param {number} windowDays The window, in days.
+ * @param {number} windowMonths The window, in whole months.
  * @return {string} `'YYYY-MM-DD'`.
  */
-function openThrough(now, windowDays) {
+function openThrough(now, windowMonths) {
   const date = lib.chicagoDate(now);
   const part = chicagoHour.formatToParts(now).find((p) => p.type === 'hour');
   // Some engines print midnight as "24" under hour12: false.
   const hour = Number(part && part.value) % 24;
   const rolled = hour >= WINDOW_ROLL_HOUR ? date : addDays(date, -1);
-  const anchor = rolled < BOOKING_WINDOW_ANCHOR ?
-      BOOKING_WINDOW_ANCHOR : rolled;
-  return addDays(anchor, windowDays);
+  return endOfMonth(rolled, windowMonths);
 }
 
 module.exports = {
-  BOOKING_WINDOW_ANCHOR,
   DAILY_CAP_TYPES,
   eliteDailyCapHit,
   openThrough,
-  windowDaysFor,
+  windowMonthsFor,
 };
