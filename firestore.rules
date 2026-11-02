@@ -1502,6 +1502,14 @@ service cloud.firestore {
         && me().role == 'coach'
         && athleteData(resource.data.athleteId).coachId == request.auth.uid
         && attendanceUpdateOk();
+      // Owner ruling 2026-11-02: every coach marks attendance on a GOLF block
+      // (training, Tour event) - there is no coach assignment system, so the
+      // branch above never fires in production. Fitness (phil) and mental
+      // performance (mental) stay with their specialist (the branch below).
+      allow update: if signedIn()
+        && me().role == 'coach'
+        && resource.data.type in ['training', 'tournament']
+        && attendanceUpdateOk();
 
       // v1.7.1 (owner: specialists get "access to the back end of the
       // booked session side"): a SPECIALIST — any account whose users doc
