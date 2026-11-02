@@ -14,7 +14,7 @@ import TokenMeter from '../components/TokenMeter';
 import { BackLink, Body, Card, ErrorNotice, ScreenTitle, SectionLabel } from '../components/Primitives';
 import { ordinal, statusFor } from '../data/billingHub';
 import { facilitySourceLabel, householdFacility } from '../data/facility';
-import { FACILITY_ACCESS } from '../data/packages';
+import { FACILITY_ACCESS, windowCopyFor } from '../data/packages';
 import { CONNECTED_LINE, PAY_NOW, PENDING_PLAN_LINE, SINGLE_PLAN_LINE } from '../data/billingCopy';
 import { contractEnabled } from '../data/contractFlag';
 import { householdOnHold, saleOpen, SINGLE_NOT_OPEN_LINE } from '../data/singleToken';
@@ -286,7 +286,7 @@ function PlanCard({ household, members, showPrices = false, self = false }) {
                   : m.package.kind === 'single'
                     ? `${m.package.name} · one-time`
                     : `${m.package.name} a month`}
-              {m.package?.windowDays ? ` · books ${m.package.windowDays} days out` : ''}
+              {m.package ? ` · books ${windowCopyFor(m.package)}` : ''}
               {facilitySource ? ` · facility access: ${facilitySource}` : ''}
               {m.billing?.status === 'pending' || m.billing?.status === 'lapsed'
                 ? ` · ${m.package?.kind === 'single' ? SINGLE_PLAN_LINE : PENDING_PLAN_LINE}`

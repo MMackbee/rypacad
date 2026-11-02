@@ -1358,32 +1358,26 @@ service cloud.firestore {
       }
 
       // Hard OUTER bound on how far out a booking may reach (contract v2.0,
-      // pin D) — a genuine server-side gate, not the client's own window
-      // display: no package this catalogue can ever carry books further
-      // than Elite's 45-day window, so 46 days is a fixed ceiling nothing
-      // legitimate ever needs to cross, independent of any per-package
-      // windowDays math (which stays client-derived, same accepted-gap
-      // class as the token cap). Expressible with no substring() — `split()`
-      // on the date string (already used elsewhere in this file, e.g.
-      // nullReadOk's bookingId.split('_')) plus the rules language's
-      // `int()` conversion and `timestamp.date()`/`duration.value()`
-      // constructors, verified against the emulator (routing report).
-      // Owner ruling 2026-09-30: until Nov 1 every window counts from Nov 1
-      // (Elite through Dec 16), so the ceiling is the later of today and
-      // 2026-11-01 plus the same 46 days - the SAME date as data/calendar.js
-      // BOOKING_WINDOW_ANCHOR, one day of slack kept (Dec 17). Package-
-      // agnostic, no extra read; a no-op once request.time passes Nov 1.
-      // Retire with the Oct 10 gate (#26).
-      // Review 2026-09-30: the anchored ceiling follows the package - Elite
-      // 45 days (Dec 16), everyone else 30 (Dec 1) - each with the same one
-      // day of slack, so a token family cannot book December on the server
-      // before the client would let them. athleteData() is a cached get.
+      // pin D) - a genuine server-side gate, not the client's own window
+      // display. Owner ruling 2026-11-02: a token family books through the
+      // END of next month, Elite through the end of the month after next,
+      // and a further month opens at 07:00 America/Chicago on the 1st
+      // (data/calendar.js openThrough, data/packages.js windowMonthsFor).
+      // The month is read off request.time shifted back 13 hours: 07:00
+      // CST is 13:00Z, so the shifted clock enters a new month at the very
+      // instant the client's window rolls (CST holds for the whole Nov-Feb
+      // season). The session date must fall before the 1st of the month
+      // after the window's last month; `m` is that month's 1-based number,
+      // carried into the next year when it passes 12 (at most 15 here).
+      // No substring(): split() + int() + timestamp.date(), as
+      // sessionDayNotOver does. athleteData() is a cached get.
       function withinOuterBookingBound() {
         let parts = request.resource.data.date.split('-');
         let sessionDate = timestamp.date(int(parts[0]), int(parts[1]), int(parts[2]));
-        let anchoredDays = athleteData(request.resource.data.athleteId).get('packageId', null) == 'elite' ? 46 : 31;
-        return sessionDate <= request.time + duration.value(46, 'd')
-          || sessionDate <= timestamp.date(2026, 11, 1) + duration.value(anchoredDays, 'd');
+        let months = athleteData(request.resource.data.athleteId).get('packageId', null) == 'elite' ? 2 : 1;
+        let rolled = request.time - duration.value(13, 'h');
+        let m = rolled.month() + months + 1;
+        return sessionDate < (m > 12 ? timestamp.date(rolled.year() + 1, m - 12, 1) : timestamp.date(rolled.year(), m, 1));
       }
 
       // createdBy == request.auth.uid (in shape), caller is the athlete's own

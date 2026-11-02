@@ -135,7 +135,7 @@ import {
   periodFallback,
   periodFor,
   tokensFor,
-  windowDaysFor,
+  windowMonthsFor,
 } from '../data/packages';
 import { billingStatusOf } from '../data/billingCopy';
 import { isSingleTokenId } from '../data/singleToken';
@@ -711,13 +711,15 @@ async function liveBookingIdentity() {
 }
 
 /**
- * The widest booking window any package offers right now (Elite's 45 days,
- * contract v2.0 pin L) - the safe fetch bound for a caller whose specific
- * package is not yet known (a parent who has not picked a child). Computed
- * from the catalogue rather than hardcoded so a future window change here
- * needs no second edit.
+ * The widest booking window any package offers right now (Elite's two
+ * months, owner ruling 2026-11-02) - the safe fetch bound for a caller whose
+ * specific package is not yet known (a parent who has not picked a child).
+ * Computed from the catalogue rather than hardcoded so a future window
+ * change here needs no second edit.
  */
-const MAX_WINDOW_DAYS = Math.max(...TOKEN_PACKAGES.map(windowDaysFor), windowDaysFor(ELITE), windowDaysFor(SINGLE_TOKEN));
+const MAX_WINDOW_MONTHS = Math.max(...TOKEN_PACKAGES.map(windowMonthsFor), windowMonthsFor(ELITE), windowMonthsFor(SINGLE_TOKEN));
+/** Seed mode's stand-in for a month of session days (upcomingDates counts dates, not days). */
+const SEED_DATES_PER_MONTH = 30;
 
 /**
  * Live payload for useBooking, plus the identity the book() action needs.
@@ -731,10 +733,10 @@ const MAX_WINDOW_DAYS = Math.max(...TOKEN_PACKAGES.map(windowDaysFor), windowDay
  * from useHouseholdAthletes(), which already returns it per athlete.
  *
  * Contract v2.0 pin D: the fetch window is no longer a fixed 7 days - it is
- * openThrough(now, windowDaysFor(pkg)), the athlete's own package window
- * (30 days, 45 for Elite). A parent caller has no specific child's package
+ * openThrough(now, windowMonthsFor(pkg)), the athlete's own package window
+ * (through next month; two months for Elite). A parent caller has no specific child's package
  * yet, so the fetch uses the WIDEST window any package offers (MAX_WINDOW_
- * DAYS, currently Elite's 45) - a superset that never under-fetches what a
+ * MONTHS, currently Elite's two) - a superset that never under-fetches what a
  * child chosen afterward might need; per-day locking past THAT child's own,
  * narrower window is the screen's job once a child is picked (it already
  * has each child's packageId via useHouseholdAthletes).
@@ -765,7 +767,7 @@ async function liveBooking(today, { withSlots = true } = {}) {
     };
   }
 
-  let windowDays = MAX_WINDOW_DAYS;
+  let windowMonths = MAX_WINDOW_MONTHS;
   let tokens = null;
   let identity;
   if (who.role === 'athlete') {
@@ -780,7 +782,7 @@ async function liveBooking(today, { withSlots = true } = {}) {
       athlete.householdId ? fetchHousehold(athlete.householdId) : null,
     ]);
     const anchorDay = normalizeAnchorDay(household?.periodAnchorDay);
-    windowDays = windowDaysFor(pkg);
+    windowMonths = windowMonthsFor(pkg);
     // The position the booking check enforces: waitlist holds and bonus
     // tokens counted (fetchTokenInputs) - a single athlete's purchased
     // tokens among them.
@@ -801,7 +803,7 @@ async function liveBooking(today, { withSlots = true } = {}) {
   // two-pool allowance math when that existed, and still does not belong
   // on this list under the token model either (SpecialistBooking is the
   // one place a specialist slot is offered).
-  const sessions = (await fetchSessionsInRange(today, openThrough(new Date(), windowDays))).filter(
+  const sessions = (await fetchSessionsInRange(today, openThrough(new Date(), windowMonths))).filter(
     (s) => isGroupBookable(s)
   );
   sessions.sort(byDateThenId);
@@ -986,10 +988,10 @@ export function useBooking({ variant = 'open', today = todayISO(), practice = fa
   const [identity, setIdentity] = useState(null);
 
   // Contract v2.0 pin D: the fixed "next 7 days" is retired - the seed
-  // athlete's own package window (windowDaysFor, data/packages.js) is the
-  // count of distinct session-bearing dates upcomingDates gathers, the seed
-  // analog of the live fetch's openThrough() bound.
-  const dates = upcomingDates(SEASON, today, windowDaysFor(ATHLETE_PACKAGE)).map(datePill);
+  // athlete's own package window (windowMonthsFor, data/packages.js), a
+  // month as thirty session-bearing dates, is the count upcomingDates
+  // gathers, the seed analog of the live fetch's openThrough() bound.
+  const dates = upcomingDates(SEASON, today, SEED_DATES_PER_MONTH * windowMonthsFor(ATHLETE_PACKAGE)).map(datePill);
 
   const slots = dates.flatMap((d) =>
     (SEASON_BY_DATE.get(d.iso) ?? []).map((s) => ({
@@ -1253,11 +1255,11 @@ export function useMonthSessions(monthISO, { practice = false } = {}) {
  * convention, new letter) purely for shape parity with live mode - nothing
  * here is ever written anywhere.
  *
- * `windowDays` (contract v2.0 pin D, replaces the fixed
+ * `windowMonths` (contract v2.0 pin D, replaces the fixed
  * SPECIALIST_BOOKING_WINDOW_DAYS): the viewing athlete's own package window
- * via windowDaysFor - defaults to 32 (windowDaysFor's own no-package
- * fallback) so existing callers that still pass only (specialistId, today)
- * (e.g. SpecialistBooking.js's practice-mode branch) keep working.
+ * via windowMonthsFor - defaults to one month (the no-package window) so
+ * existing callers that still pass only (specialistId, today) (e.g.
+ * SpecialistBooking.js's practice-mode branch) keep working.
  */
 const PHIL_WEEKDAYS = new Set([1, 3, 5]); // Mon, Wed, Fri (Date#getUTCDay)
 const MENTAL_WEEKDAYS = new Set([2, 4]); // Tue, Thu
@@ -1266,7 +1268,7 @@ const PHIL_TIMES = ['3:00 PM', '3:45 PM'];
 // 5:00 PM - the same three times seed-firestore.mjs writes.
 const MENTAL_TIMES = ['4:00 PM', '4:30 PM', '5:00 PM'];
 
-export function seedSpecialistDays(specialistId, today, windowDays = 30) {
+export function seedSpecialistDays(specialistId, today, windowMonths = 1) {
   const onMental = specialistId === 'mental';
   const weekdays = onMental ? MENTAL_WEEKDAYS : PHIL_WEEKDAYS;
   const times = onMental ? MENTAL_TIMES : PHIL_TIMES;
@@ -1275,7 +1277,7 @@ export function seedSpecialistDays(specialistId, today, windowDays = 30) {
   // partial fill so the "spots left" treatment is reviewable in seed mode.
   const capacity = SPECIALISTS.find((s) => s.id === specialistId)?.capacity ?? 1;
   const durationMinutes = SPECIALISTS.find((s) => s.id === specialistId)?.durationMinutes ?? DEFAULT_DURATION_MINUTES;
-  const toDate = openThrough(new Date(), windowDays);
+  const toDate = openThrough(new Date(), windowMonths);
 
   const days = [];
   let i = 0;
@@ -1313,9 +1315,10 @@ export function seedSpecialistDays(specialistId, today, windowDays = 30) {
  * InRange's result alone cannot guarantee (a day with zero specialist
  * sessions produces zero rows, not an empty-array placeholder).
  *
- * `windowDays` (contract v2.0 pin D): openThrough(now, windowDays) replaces
- * the fixed SPECIALIST_BOOKING_WINDOW_DAYS - the caller (liveSpecialistSlots
- * below) resolves it from the viewing athlete's own package.
+ * `windowMonths` (contract v2.0 pin D): openThrough(now, windowMonths)
+ * replaces the fixed SPECIALIST_BOOKING_WINDOW_DAYS - the caller
+ * (liveSpecialistSlots below) resolves it from the viewing athlete's own
+ * package.
  *
  * Each day also carries `mark` ('tournament' | 'closed' | null, the booking
  * calendars' day marks) - judged on EVERY session the one read returned,
@@ -1323,8 +1326,8 @@ export function seedSpecialistDays(specialistId, today, windowDays = 30) {
  * MARKS_LOOKAHEAD_DAYS past the window for the marks' sync horizon only; the
  * days (and so the slots) still stop at toDate.
  */
-async function liveSpecialistDays(specialistId, today, windowDays) {
-  const toDate = openThrough(new Date(), windowDays);
+async function liveSpecialistDays(specialistId, today, windowMonths) {
+  const toDate = openThrough(new Date(), windowMonths);
   const sessions = await fetchSessionsInRange(today, addDaysISO(toDate, MARKS_LOOKAHEAD_DAYS));
 
   const byDate = new Map();
@@ -1404,7 +1407,7 @@ async function resolveSpecialistAthleteId(athleteIdOverride) {
  * optional-override shape elsewhere in this file).
  *
  * When no athlete resolves yet (a parent with no child chosen), the days
- * list still needs to render - MAX_WINDOW_DAYS is the same safe superset
+ * list still needs to render - MAX_WINDOW_MONTHS is the same safe superset
  * liveBooking uses for exactly this case, and `tokens` is null (same
  * "nothing to show before a pick" posture useBooking's own `tokens: null`
  * already has).
@@ -1414,7 +1417,7 @@ async function liveSpecialistSlots(specialistId, athleteIdOverride, today) {
   const athleteId = await resolveSpecialistAthleteId(athleteIdOverride);
   if (!athleteId) {
     return {
-      days: await liveSpecialistDays(specialistId, today, MAX_WINDOW_DAYS),
+      days: await liveSpecialistDays(specialistId, today, MAX_WINDOW_MONTHS),
       tokens: null, capReached: false,
       bookingMode: 'in-app', calendlyUrl: null, billingStatus: 'active',
       bookingOpen: bookingOpen(Date.now(), null), athlete: null, guardian: null, householdId: null,
@@ -1427,9 +1430,9 @@ async function liveSpecialistSlots(specialistId, athleteIdOverride, today) {
     athlete.householdId ? fetchHousehold(athlete.householdId) : Promise.resolve(null),
   ]);
   const anchorDay = normalizeAnchorDay(household?.periodAnchorDay);
-  const windowDays = windowDaysFor(pkg);
+  const windowMonths = windowMonthsFor(pkg);
   const [rawDays, inputs] = await Promise.all([
-    liveSpecialistDays(specialistId, today, windowDays),
+    liveSpecialistDays(specialistId, today, windowMonths),
     fetchTokenInputs(athleteId, athlete.householdId, anchorDay, today),
   ]);
   // The sessions this athlete already waits for, each with its place when
@@ -1494,7 +1497,7 @@ function seedSpecialistAthlete(athleteId) {
  * GET /specialists/:id/slots (Sprint 9 pin, contract v1.7; window and
  * entitlement rewritten Sprint 12, contract v2.0 pins D/N) — one
  * specialist's bookable slots over the athlete's own package window
- * (data/packages.js#windowDaysFor via openThrough, replacing the fixed
+ * (data/packages.js#windowMonthsFor via openThrough, replacing the fixed
  * SPECIALIST_BOOKING_WINDOW_DAYS), the Life-Time-style booking screen's day
  * strip + slot list. `specialistId` is 'phil' | 'mental' (SPECIALISTS' own
  * ids, which double as the sessions.type value). Booking a slot goes
@@ -1533,7 +1536,7 @@ export function useSpecialistSlots(specialistId, { athleteId } = {}) {
       ? null
       : {
           days: specialistId
-            ? seedMarkedSpecialistDays(specialistId, seedSpecialistDays(specialistId, today, windowDaysFor(ATHLETE_PACKAGE))).map((d) => ({
+            ? seedMarkedSpecialistDays(specialistId, seedSpecialistDays(specialistId, today, windowMonthsFor(ATHLETE_PACKAGE))).map((d) => ({
                 ...d,
                 capReached: seedSpecialistCapReached(specialistId, athleteId, today, d.date.slice(0, 7)),
               }))
@@ -1568,11 +1571,11 @@ export function useSpecialistSlots(specialistId, { athleteId } = {}) {
  * STAFF operational view, not a member booking surface - it is not any one
  * athlete's own window (contract v2.0 pin D retired the flat
  * SPECIALIST_BOOKING_WINDOW_DAYS this used to read), so it uses
- * MAX_WINDOW_DAYS, the widest window any package offers, ensuring Phil/
+ * MAX_WINDOW_MONTHS, the widest window any package offers, ensuring Phil/
  * Yannick always see everything any athlete could possibly have booked.
  */
 function seedSpecialistDaySessions(specialistId, today) {
-  return seedSpecialistDays(specialistId, today, MAX_WINDOW_DAYS)
+  return seedSpecialistDays(specialistId, today, MAX_WINDOW_MONTHS)
     .flatMap((d) =>
       d.slots.map((s) => ({
         sessionId: s.sessionId,
@@ -1595,11 +1598,11 @@ function seedSpecialistDaySessions(specialistId, today) {
  * sessions, each joined to its live roster (non-cancelled bookings ->
  * athlete names via the per-id join; a name the caller cannot read renders
  * as a count, not a crash). Powers the "My sessions" day view (Sprint 9
- * amendment v1.7.1: specialist-side access). MAX_WINDOW_DAYS, not any one
+ * amendment v1.7.1: specialist-side access). MAX_WINDOW_MONTHS, not any one
  * athlete's own window - see seedSpecialistDaySessions' comment above.
  */
 async function liveSpecialistSessions(specialistId, today) {
-  const toDate = openThrough(new Date(), MAX_WINDOW_DAYS);
+  const toDate = openThrough(new Date(), MAX_WINDOW_MONTHS);
   const sessions = await fetchSessionsInRange(today, toDate);
   const mine = sessions
     .filter((s) => s.type === specialistId && s.status !== 'cancelled')
@@ -2030,7 +2033,7 @@ function seedMemberEntry(child, today) {
     billingStatus: child.billingStatus ?? 'active',
     handicap: handicapOf(child),
     package: pkg
-      ? { id: pkg.id, name: pkg.name, price: pkg.price ?? null, pending: pkg.pending ?? false, tokens: pkg.tokens ?? null, windowDays: pkg.windowDays ?? null, kind: pkg.kind ?? null }
+      ? { id: pkg.id, name: pkg.name, price: pkg.price ?? null, pending: pkg.pending ?? false, tokens: pkg.tokens ?? null, kind: pkg.kind ?? null }
       : null,
     tokens: seedMemberTokens(child, today),
     coaching: coachingFor(seedMemberBookingRows(child, today), today, pkg),
@@ -2088,7 +2091,6 @@ async function liveMemberEntry(a, today, anchorDay) {
           // Seeds strip price and pending; both are catalogue facts, read from it.
           pending: packageById(pkg.id)?.pending ?? false,
           tokens: pkg.tokens ?? null,
-          windowDays: pkg.windowDays ?? null,
           kind: pkg.kind ?? null,
         }
       : null,

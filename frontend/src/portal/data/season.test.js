@@ -4,7 +4,7 @@
  * sits right past the Nov 1-anchored Elite window (Dec 16), so stepping over
  * it is the normal case, not a corner.
  */
-import { firstRunningWeek } from './season';
+import { firstRunningWeek, lastRunningWeek } from './season';
 
 describe('firstRunningWeek: the next week a weekly slot actually runs', () => {
   test('an open date is its own answer', () => {
@@ -27,5 +27,25 @@ describe('firstRunningWeek: the next week a weekly slot actually runs', () => {
   test("null past the season's last day (Sat, Feb 27)", () => {
     expect(firstRunningWeek('2027-02-27', '9:00 AM')).toBe('2027-02-27');
     expect(firstRunningWeek('2027-03-02', '4:00 PM')).toBeNull();
+  });
+});
+
+// Review 2026-11-02: a whole-month window ends inside the Christmas break, so
+// the repeat offer names the last week that runs, not the window's last day.
+describe('lastRunningWeek: the last week a weekly slot runs inside a window', () => {
+  test('a window ending Dec 31 reaches the last open Tuesday, Dec 22', () => {
+    expect(lastRunningWeek('2026-11-10', '2026-12-31', '4:00 PM', 'training')).toBe('2026-12-22');
+    // Thursdays: Dec 24 and Dec 31 are closed, so Dec 17.
+    expect(lastRunningWeek('2026-11-12', '2026-12-31', '4:00 PM', 'phil')).toBe('2026-12-17');
+  });
+
+  test('a window ending Nov 30 stops short of Thanksgiving Thursday', () => {
+    expect(lastRunningWeek('2026-11-12', '2026-11-30', '4:00 PM', 'phil')).toBe('2026-11-19');
+  });
+
+  test('clamps to the season end, counts a dated extra, and is null when no week runs', () => {
+    expect(lastRunningWeek('2027-02-06', '2027-03-31', '9:00 AM', 'training')).toBe('2027-02-27');
+    expect(lastRunningWeek('2026-12-29', '2026-12-31', '10:30 AM', 'tournament')).toBe('2026-12-29');
+    expect(lastRunningWeek('2026-12-24', '2026-12-31', '4:00 PM', 'phil')).toBeNull();
   });
 });

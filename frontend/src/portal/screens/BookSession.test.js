@@ -70,7 +70,7 @@ beforeEach(() => {
   mockBookCalls = [];
   mockHousehold = [];
   mockLeave = async () => ({});
-  mockPackage = { id: 't-12', kind: 'tokens', windowDays: 30 };
+  mockPackage = { id: 't-12', kind: 'tokens' };
   mockFirstSlot = '2026-10-12';
   mockMonths = { '2026-10-01': [{ date: '2026-10-12', sessions: [session] }] };
   mockBookingFor = null;
@@ -118,8 +118,8 @@ test('at 07:00 Chicago on Oct 10 the banner is gone and a tap reserves', async (
 });
 
 test('Nov 1 with November spent (incident 2026-11-01): November is greyed, a December block is bookable and says what it spends, the banner counts December', async () => {
-  jest.setSystemTime(new Date('2026-11-01T16:00:00Z')); // Sun Nov 1, 10 AM Chicago - the window reaches Dec 1
-  mockPackage = { id: 't-8', kind: 'tokens', windowDays: 30 };
+  jest.setSystemTime(new Date('2026-11-01T16:00:00Z')); // Sun Nov 1, 10 AM Chicago - a token window reaches Dec 31
+  mockPackage = { id: 't-8', kind: 'tokens' };
   mockTokens = {
     granted: 9, used: 9, reserved: 0, left: 0, unlimited: false, perPurchase: false, grace: [],
     nextPeriod: { periodKey: '2026-12-01', periodEnd: '2026-12-31', booked: 1, reserved: 0, granted: 8, left: 7 },
@@ -153,7 +153,7 @@ test('Nov 1 with November spent (incident 2026-11-01): November is greyed, a Dec
 
 test('Nov 1 with December spent too (eight advance bookings): the December block reads No tokens left and is inert', async () => {
   jest.setSystemTime(new Date('2026-11-01T16:00:00Z'));
-  mockPackage = { id: 't-8', kind: 'tokens', windowDays: 30 };
+  mockPackage = { id: 't-8', kind: 'tokens' };
   mockTokens = {
     granted: 8, used: 8, reserved: 0, left: 0, unlimited: false, perPurchase: false, grace: [],
     nextPeriod: { periodKey: '2026-12-01', periodEnd: '2026-12-31', booked: 8, reserved: 0, granted: 8, left: 0 },
@@ -170,7 +170,7 @@ test('Nov 1 with December spent too (eight advance bookings): the December block
 
 test("a parent on Nov 1 with the child's November spent: the child's row carries December, so the December block books and the banner counts it", async () => {
   jest.setSystemTime(new Date('2026-11-01T16:00:00Z'));
-  mockPackage = { id: 't-8', kind: 'tokens', windowDays: 30 };
+  mockPackage = { id: 't-8', kind: 'tokens' };
   mockTokens = null; // the parent flow never reads useBooking's tokens
   mockHousehold = [{
     id: 'a1', name: 'Thomas', billingStatus: 'active', handicap: null,
@@ -196,7 +196,7 @@ test("a parent on Nov 1 with the child's November spent: the child's row carries
 
 test('Elite books before the gate (the paid package, spec 4.3)', async () => {
   jest.setSystemTime(BEFORE);
-  mockPackage = { id: 'elite', kind: 'elite', windowDays: 45 };
+  mockPackage = { id: 'elite', kind: 'elite' };
   const r = await renderScreen(<BookSession bare demoSelectedDate="2026-10-12" />);
   expect(r.text()).not.toContain('Booking opens Sat, Oct 10 at 7 AM');
   expect(sessionCard(r).style.cursor).toBe('pointer');
@@ -220,7 +220,7 @@ describe('the cancel line on the confirmation card (tester 2026-09-30: Elite has
     await r.unmount();
   });
   test('an Elite (unlimited) athlete is not told about a token', async () => {
-    mockPackage = { id: 'elite', kind: 'elite', windowDays: 45 };
+    mockPackage = { id: 'elite', kind: 'elite' };
     mockTokens = { unlimited: true, grace: [] };
     const r = await reserve();
     expect(r.text()).toContain('Included with Elite');
@@ -238,17 +238,23 @@ describe('the cancel line on the confirmation card (tester 2026-09-30: Elite has
   });
 });
 
-describe('the window counts from Nov 1 until then (owner ruling 2026-09-30; UX review #8)', () => {
+// Owner ruling 2026-11-02: whole calendar months, not a rolling day count. On
+// Oct 1 a token package reaches Nov 30 and Elite Dec 31; a locked day opens at
+// 7 AM on the 1st of the month one (two) months before its own. The mocked
+// month data stands in for the schedule, so the boundary days below (Dec 31,
+// Jan 1) carry sessions here even though the real calendar closes them.
+describe('the window is whole calendar months (owner ruling 2026-11-02; UX review #8)', () => {
   const EMAIL_DAY = new Date('2026-10-01T17:00:00Z');
   const on = (id, date) => ({ date, sessions: [{ ...session, id, date }] });
   beforeEach(() => {
     mockMonths = {
       '2026-11-01': [on('s-nov3', '2026-11-03')],
-      '2026-12-01': [on('s-dec2', '2026-12-02'), on('s-dec16', '2026-12-16'), on('s-dec17', '2026-12-17')],
+      '2026-12-01': [on('s-dec2', '2026-12-02'), on('s-dec31', '2026-12-31')],
+      '2027-01-01': [on('s-jan1', '2027-01-01')],
     };
     mockFirstSlot = '2026-11-03';
   });
-  test('a token package before Oct 10: Nov 3 is inside the window, inert behind the gate banner', async () => {
+  test('a token package before Oct 10: Nov 3 is inside the window (through Nov 30), inert behind the gate banner', async () => {
     jest.setSystemTime(EMAIL_DAY);
     const r = await renderScreen(<BookSession bare demoSelectedDate="2026-11-03" />);
     expect(r.text()).toContain('Booking opens Sat, Oct 10 at 7 AM');
@@ -259,32 +265,32 @@ describe('the window counts from Nov 1 until then (owner ruling 2026-09-30; UX r
     expect(mockBooked).toEqual([]);
     await r.unmount();
   });
-  test('a token package: Dec 2 is past Nov 1 + 30 and names the day it opens, not Oct 10', async () => {
+  test('a token package: Dec 2 is past the end of next month and names the day it opens (the 1st), not Oct 10', async () => {
     jest.setSystemTime(EMAIL_DAY);
     const r = await renderScreen(<BookSession bare demoSelectedDate="2026-12-02" />);
     expect(r.text()).toContain('Not open for this day yet');
-    expect(r.text()).toContain('Booking for Wednesday, Dec 2 opens 7 AM on Monday, Nov 2.');
+    expect(r.text()).toContain('Booking for Wednesday, Dec 2 opens 7 AM on Sunday, Nov 1.');
     await r.unmount();
   });
-  test('Elite on Oct 1 reserves Dec 16 (Nov 1 + 45)', async () => {
+  test('Elite on Oct 1 reserves Dec 31 (the last day of the month two ahead)', async () => {
     jest.setSystemTime(EMAIL_DAY);
-    mockPackage = { id: 'elite', kind: 'elite', windowDays: 45 };
-    mockFirstSlot = '2026-12-16';
-    const r = await renderScreen(<BookSession bare demoSelectedDate="2026-12-16" />);
+    mockPackage = { id: 'elite', kind: 'elite' };
+    mockFirstSlot = '2026-12-31';
+    const r = await renderScreen(<BookSession bare demoSelectedDate="2026-12-31" />);
     expect(r.text()).not.toContain('Not open for this day yet');
     const card = sessionCard(r);
     expect(card.style.cursor).toBe('pointer');
     await act(async () => { card.click(); });
-    expect(mockBooked).toEqual(['s-dec16']);
+    expect(mockBooked).toEqual(['s-dec31']);
     expect(r.text()).toContain('Slot reserved');
     await r.unmount();
   });
-  test('Elite on Oct 1: Dec 17 is locked until 7 AM on Monday, Nov 2', async () => {
+  test('Elite on Oct 1: Jan 1 is locked until 7 AM on Sunday, Nov 1', async () => {
     jest.setSystemTime(EMAIL_DAY);
-    mockPackage = { id: 'elite', kind: 'elite', windowDays: 45 };
-    mockFirstSlot = '2026-12-16';
-    const r = await renderScreen(<BookSession bare demoSelectedDate="2026-12-17" />);
-    expect(r.text()).toContain('Booking for Thursday, Dec 17 opens 7 AM on Monday, Nov 2.');
+    mockPackage = { id: 'elite', kind: 'elite' };
+    mockFirstSlot = '2026-12-31';
+    const r = await renderScreen(<BookSession bare demoSelectedDate="2027-01-01" />);
+    expect(r.text()).toContain('Booking for Friday, Jan 1 opens 7 AM on Sunday, Nov 1.');
     expect(sessionCard(r)).toBeNull();
     await r.unmount();
   });
@@ -304,7 +310,7 @@ describe('Repeat weekly in live mode (repeat report 2026-09-30)', () => {
   const heading = (r, text) => [...r.container.querySelectorAll('div')].find((el) => el.textContent === text) || null;
   beforeEach(() => {
     mockBookingFor = 'athlete';
-    mockPackage = { id: 'elite', kind: 'elite', windowDays: 45 };
+    mockPackage = { id: 'elite', kind: 'elite' };
     mockMonths = {
       '2026-11-01': [on('s-nov3', '2026-11-03')],
       '2026-12-01': [on('s-dec15', '2026-12-15')],
@@ -312,38 +318,44 @@ describe('Repeat weekly in live mode (repeat report 2026-09-30)', () => {
     mockFirstSlot = '2026-11-03';
   });
 
-  test('Elite on Oct 1: one button through Dec 16; the tap sends the raw slot and the window end', async () => {
+  // Owner ruling 2026-11-02: on Oct 1 Elite's window reaches Dec 31 (two whole
+  // months ahead), and the week past it opens at 7 AM on the 1st - Nov 1 for a
+  // January week. The offer names the last Tuesday that RUNS inside the
+  // window - Dec 22, since Dec 29 sits in the Christmas break.
+  test('Elite on Oct 1: one button through Dec 22; the tap sends the raw slot and that last running week', async () => {
     jest.setSystemTime(OCT_1);
     mockBookRecurring = jest.fn(async () => ({
       booked: ['2026-11-10', '2026-11-17', '2026-12-01', '2026-12-08', '2026-12-15'].map((date) => ({ date, id: `t_${date}` })),
       skipped: [{ date: '2026-11-24', reason: 'no session' }],
-      windowEnd: '2026-12-16',
-      next: { date: '2026-12-22', opensOn: '2026-11-07' },
+      windowEnd: '2026-12-31',
+      next: { date: '2027-01-05', opensOn: '2026-11-01' },
     }));
     const r = await reserve('2026-11-03');
     expect(r.text()).toContain('Repeat weekly');
     expect(r.text()).toContain(
-      'Hold Tuesday at 4:00 PM every week through Wed, Dec 16, the furthest you can book today (45 days ahead). Weeks after that open from Nov 2, one day at a time at 7 AM; come back then to extend.'
+      'Hold Tuesday at 4:00 PM every week through Tue, Dec 22, the furthest you can book today (two months ahead). A further month opens at 7 AM on the 1st; come back then to extend.'
     );
     expect(r.text()).not.toContain('spends a token');
     expect(r.button('Next 4 weeks')).toBeNull();
-    await r.click('Repeat every Tuesday through Wed, Dec 16');
+    await r.click('Repeat every Tuesday through Tue, Dec 22');
     await r.flush();
     expect(mockBookRecurring).toHaveBeenCalledTimes(1);
     expect(mockBookRecurring).toHaveBeenCalledWith(
       expect.objectContaining({ id: 's-nov3', date: '2026-11-03', time: '4:00 PM', type: 'training' }),
-      { athleteId: undefined, untilISO: '2026-12-16' }
+      { athleteId: undefined, untilISO: '2026-12-22' }
     );
     expect(heading(r, '5 more weeks booked').style.color).toBe(GREEN);
     expect(r.text()).toContain('Nov 24: no session that day.');
-    expect(r.text()).toContain('Tue, Dec 22 opens 7 AM on Sat, Nov 7 - come back to add it.');
+    expect(r.text()).toContain('Tue, Jan 5 opens 7 AM on Sun, Nov 1 - come back to add it.');
     expect(r.text()).not.toContain('tokens reset');
     await r.unmount();
   });
 
-  test('a token package: the token line, through Dec 1; nothing booked reads neutral, one line per reason', async () => {
-    jest.setSystemTime(new Date('2026-10-12T17:00:00Z'));
-    mockPackage = { id: 't-12', kind: 'tokens', windowDays: 30 };
+  // Nov 2 at 7 AM Chicago: a token package reaches Dec 31 (through next month);
+  // the January week past it opens at 7 AM on Dec 1.
+  test('a token package: the token line, through Dec 31; nothing booked reads neutral, one line per reason', async () => {
+    jest.setSystemTime(new Date('2026-11-02T13:00:00Z'));
+    mockPackage = { id: 't-12', kind: 'tokens' };
     mockBookRecurring = jest.fn(async () => ({
       booked: [],
       skipped: [
@@ -352,14 +364,16 @@ describe('Repeat weekly in live mode (repeat report 2026-09-30)', () => {
         { date: '2026-11-24', reason: 'full' },
         { date: '2026-12-01', reason: 'error', message: 'Missing or insufficient permissions.' },
       ],
-      windowEnd: '2026-12-01',
-      next: { date: '2026-12-08', opensOn: '2026-11-08' },
+      windowEnd: '2026-12-31',
+      next: { date: '2027-01-05', opensOn: '2026-12-01' },
     }));
     const r = await reserve('2026-11-03');
-    expect(r.text()).toContain("Each week spends a token from that week's period.");
-    await r.click('Repeat every Tuesday through Tue, Dec 1');
+    expect(r.text()).toContain(
+      "Hold Tuesday at 4:00 PM every week through Tue, Dec 22, the furthest you can book today (through next month). A further month opens at 7 AM on the 1st; come back then to extend. Each week spends a token from that week's period."
+    );
+    await r.click('Repeat every Tuesday through Tue, Dec 22');
     await r.flush();
-    expect(mockBookRecurring.mock.calls[0][1]).toEqual({ athleteId: undefined, untilISO: '2026-12-01' });
+    expect(mockBookRecurring.mock.calls[0][1]).toEqual({ athleteId: undefined, untilISO: '2026-12-22' });
     const none = heading(r, 'No extra weeks booked');
     expect(none).not.toBeNull();
     expect(none.style.color).not.toBe(GREEN); // neutral, never the green of a win
@@ -367,16 +381,19 @@ describe('Repeat weekly in live mode (repeat report 2026-09-30)', () => {
     expect(r.text()).toContain("Nov 10, Nov 17: no tokens left in that week's period.");
     expect(r.text()).toContain('Nov 24: full.');
     expect(r.text()).toContain("Dec 1: didn't go through - Missing or insufficient permissions.");
-    expect(r.text()).toContain('Tue, Dec 8 opens 7 AM on Sun, Nov 8 - come back to add it.');
+    expect(r.text()).toContain('Tue, Jan 5 opens 7 AM on Tue, Dec 1 - come back to add it.');
     expect(r.text()).not.toContain('tokens reset');
     await r.unmount();
   });
 
-  test('Elite on Oct 1 booking Dec 15: no week left in the window - the opens line, no button', async () => {
-    jest.setSystemTime(OCT_1);
-    mockFirstSlot = '2026-12-15';
-    const r = await reserve('2026-12-15');
-    expect(r.text()).toContain('Next Tuesday (Tue, Dec 22) opens for booking at 7 AM on Sat, Nov 7.');
+  // Nov 2 at 7 AM Chicago: Elite reaches Jan 31. The Tuesday after Jan 26 is
+  // Feb 2 - a running week, just past the window - and it opens on Dec 1.
+  test('Elite on Nov 2 booking Jan 26: no week left in the window - the opens line, no button', async () => {
+    jest.setSystemTime(new Date('2026-11-02T13:00:00Z'));
+    mockMonths['2027-01-01'] = [on('s-jan26', '2027-01-26')];
+    mockFirstSlot = '2027-01-26';
+    const r = await reserve('2027-01-26');
+    expect(r.text()).toContain('Next Tuesday (Tue, Feb 2) opens for booking at 7 AM on Tue, Dec 1.');
     expect([...r.container.querySelectorAll('button')].some((b) => b.textContent.startsWith('Repeat every'))).toBe(false);
     expect(mockBookRecurring).not.toHaveBeenCalled();
     await r.unmount();
@@ -387,7 +404,7 @@ describe('Repeat weekly in live mode (repeat report 2026-09-30)', () => {
     mockMonths['2026-12-01'] = [on('s-dec16', '2026-12-16')];
     mockFirstSlot = '2026-12-16';
     const r = await reserve('2026-12-16');
-    expect(r.text()).toContain('Next Wednesday (Wed, Jan 6) opens for booking at 7 AM on Sun, Nov 22.');
+    expect(r.text()).toContain('Next Wednesday (Wed, Jan 6) opens for booking at 7 AM on Sun, Nov 1.');
     expect(r.text()).not.toContain('Dec 23');
     expect(mockBookRecurring).not.toHaveBeenCalled();
     await r.unmount();
@@ -403,20 +420,20 @@ describe('Repeat weekly in live mode (repeat report 2026-09-30)', () => {
         { date: '2026-11-10', reason: 'handicap-reserved', message: LINE },
         { date: '2026-11-17', reason: 'handicap-reserved', message: LINE },
       ],
-      windowEnd: '2026-12-16',
+      windowEnd: '2026-12-31',
       next: null,
     }));
     const r = await reserve('2026-11-03');
-    await r.click('Repeat every Tuesday through Wed, Dec 16');
+    await r.click('Repeat every Tuesday through Tue, Dec 22');
     await r.flush();
     expect(r.text()).toContain('1 more week booked');
     expect(r.text()).toContain(`Nov 10, Nov 17: ${LINE}`);
     expect(r.text()).not.toContain("didn't go through");
     await r.unmount();
     // A skip that carries no line of its own still names the reason.
-    mockBookRecurring = jest.fn(async () => ({ booked: [], skipped: [{ date: '2026-11-10', reason: 'handicap-reserved' }], windowEnd: '2026-12-16', next: null }));
+    mockBookRecurring = jest.fn(async () => ({ booked: [], skipped: [{ date: '2026-11-10', reason: 'handicap-reserved' }], windowEnd: '2026-12-31', next: null }));
     const bare = await reserve('2026-11-03');
-    await bare.click('Repeat every Tuesday through Wed, Dec 16');
+    await bare.click('Repeat every Tuesday through Tue, Dec 22');
     await bare.flush();
     expect(bare.text()).toContain('Nov 10: reserved for lower handicaps.');
     expect(bare.text()).not.toContain("didn't go through");
@@ -429,7 +446,7 @@ describe('Repeat weekly in live mode (repeat report 2026-09-30)', () => {
       throw new Error("This household's membership is not active right now — new bookings are paused until it's resolved.");
     });
     const r = await reserve('2026-11-03');
-    await r.click('Repeat every Tuesday through Wed, Dec 16');
+    await r.click('Repeat every Tuesday through Tue, Dec 22');
     await r.flush();
     expect(r.text()).toContain("This household's membership is not active right now");
     expect(r.text()).not.toContain('more week');
@@ -605,8 +622,8 @@ describe('Month/Week toggle (owner request 2026-09-30)', () => {
   test('pre-season (onboarding practice): Week opens on the first bookable week', async () => {
     window.localStorage.setItem(KEY, 'week');
     jest.setSystemTime(new Date('2026-09-30T17:00:00Z'));
-    // A window that reaches Nov 3 from Sep 30, so the tap lands on the list.
-    mockPackage = { id: 't-12', kind: 'tokens', windowDays: 45 };
+    // Practice never locks a day (its window is the season's end), so the tap
+    // lands on the list even though a token window from Sep 30 stops at Oct 31.
     mockFirstSlot = '2026-11-03';
     mockMonths = { '2026-11-01': [{ date: '2026-11-03', sessions: [{ ...session, id: 's3', date: '2026-11-03' }] }] };
     const onConfirmed = jest.fn();
@@ -802,7 +819,7 @@ describe('waitlist hardening', () => {
 
   describe('Elite reads no token wording on the waitlist', () => {
     beforeEach(() => {
-      mockPackage = { id: 'elite', kind: 'elite', windowDays: 45 };
+      mockPackage = { id: 'elite', kind: 'elite' };
       mockTokens = { unlimited: true, grace: [] };
       mockMonths['2026-11-01'][2].sessions = [block('s17', '2026-11-17', '4:00 PM', { booked: 6 })];
     });
@@ -856,7 +873,7 @@ describe('waitlist hardening', () => {
 });
 
 describe('the single token (owner rulings 2026-09-29/30)', () => {
-  const SINGLE = { id: 'single', kind: 'single', windowDays: 30 };
+  const SINGLE = { id: 'single', kind: 'single' };
   const bought = { id: 'single_cs_1', expiresAt: '2027-02-27', reason: 'single-purchase', sourceSessionId: null };
   const singleTokens = (grace) => ({ granted: 0, used: 0, reserved: 0, left: 0, unlimited: false, perPurchase: true, held: 0, grace });
   const ASK = 'Ask a parent or guardian to buy a session token.';
@@ -996,7 +1013,7 @@ describe('the single token (owner rulings 2026-09-29/30)', () => {
     expect(monthly.text()).toContain('Your tokens this period');
     expect(monthly.text()).not.toContain(ASK);
     await monthly.unmount();
-    mockPackage = { id: 'elite', kind: 'elite', windowDays: 45 };
+    mockPackage = { id: 'elite', kind: 'elite' };
     mockTokens = { unlimited: true, grace: [] };
     const elite = await renderScreen(<BookSession bare demoSelectedDate="2026-10-12" />);
     expect(elite.text()).not.toContain(ASK);
@@ -1054,7 +1071,7 @@ describe('the single token (owner rulings 2026-09-29/30)', () => {
 // monthly member runs out - the red "No tokens left this period" banner -
 // the meters' own offer (data/singleToken.js extraSessionOffer).
 describe('the extra session where a member runs out (owner 2026-10-10)', () => {
-  const T8 = { ...TOKEN_PACKAGES.find((p) => p.id === 't-8'), windowDays: 30 };
+  const T8 = TOKEN_PACKAGES.find((p) => p.id === 't-8');
   const PAID = { status: 'active', subscribed: true };
   const OUT = { granted: 8, used: 8, reserved: 0, left: 0, unlimited: false, grace: [] };
   const LINE = '$48.63 - your 8-token rate. Good through Sat, Feb 27, 2027.';
@@ -1250,7 +1267,7 @@ describe('a handicap-reserved block', () => {
   });
 
   test('Elite reads the line with no token wording', async () => {
-    mockPackage = { id: 'elite', kind: 'elite', windowDays: 45 };
+    mockPackage = { id: 'elite', kind: 'elite' };
     mockTokens = { unlimited: true, grace: [] };
     mockHandicap = null;
     const r = await show();

@@ -12,7 +12,7 @@
  * as Yannick sessions as well"); the only thing still specific to a
  * specialist type is Yannick's monthly cadence (SPECIALIST_MONTHLY_CAP.mental,
  * below) and the booking window, which now comes from the athlete's own
- * PACKAGE (data/packages.js#windowDaysFor) rather than a fixed rolling
+ * PACKAGE (data/packages.js#windowMonthsFor) rather than a fixed rolling
  * count this file used to own (SPECIALIST_BOOKING_WINDOW_DAYS is deleted —
  * see hooks/index.js#useSpecialistSlots). The booking transaction
  * (hooks/live.js#createBooking), parent book-for-kid, My Schedule

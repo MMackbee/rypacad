@@ -78,7 +78,7 @@ async function mountHook(useHook) {
   return { result, unmount: () => act(async () => root.unmount()) };
 }
 
-const T6 = { id: 't-6', name: '6 tokens', kind: 'tokens', tokens: 6, windowDays: 30 };
+const T6 = { id: 't-6', name: '6 tokens', kind: 'tokens', tokens: 6 };
 const session = (id, date, time, over = {}) => ({ id, date, time, type: 'training', status: 'scheduled', capacity: 14, booked: 3, ...over });
 // Tuesday Nov 17: the reserved 3 PM block, Phil's 3 PM fitness session beside it, and the open 4 PM block.
 const TUESDAY = [

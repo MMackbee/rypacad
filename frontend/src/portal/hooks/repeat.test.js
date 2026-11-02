@@ -47,7 +47,7 @@ import { ERR } from './live';
 let mockStore;
 let mockBeforeTx;
 
-const OCT_1 = new Date('2026-10-01T17:00:00Z'); // noon Chicago: every window counts from Nov 1
+const OCT_1 = new Date('2026-10-01T17:00:00Z'); // noon Chicago: a token family books through Nov 30, Elite through Dec 31
 const ATHLETE = { role: 'athlete', athleteId: 'a1', householdId: 'h1' };
 const PARENT = { role: 'parent', householdId: 'h1' };
 
@@ -81,8 +81,8 @@ beforeEach(() => {
       a2: { name: 'Ava', householdId: 'h1', packageId: 't-2' },
     },
     packages: {
-      elite: { name: 'Elite', kind: 'elite', tokens: null, windowDays: 45 },
-      't-2': { name: '2 tokens', kind: 'tokens', tokens: 2, windowDays: 30 },
+      elite: { name: 'Elite', kind: 'elite', tokens: null },
+      't-2': { name: '2 tokens', kind: 'tokens', tokens: 2 },
     },
     sessions: {},
     bookings: {},
@@ -107,8 +107,8 @@ test('a Phil repeat books only Phil sessions, and a training repeat only trainin
   hold('a1', 'p-1105');
   hold('a1', 't-1105');
 
-  const out = await repeatWeekly(ATHLETE, phil, { untilISO: '2026-12-16' });
-  expect(out.windowEnd).toBe('2026-12-16');
+  const out = await repeatWeekly(ATHLETE, phil, { untilISO: '2026-12-31' });
+  expect(out.windowEnd).toBe('2026-12-31');
   expect(out.booked).toEqual([
     { date: '2026-11-12', id: 'p-1112' },
     { date: '2026-11-19', id: 'p-1119' },
@@ -118,7 +118,8 @@ test('a Phil repeat books only Phil sessions, and a training repeat only trainin
     { date: '2026-11-26', reason: 'no session' },
     { date: '2026-12-03', reason: 'no session' },
   ]);
-  expect(out.next).toEqual({ date: '2026-12-17', opensOn: '2026-11-02' });
+  // The first Thursday past the window that the season runs (the Christmas break is stepped over) opens on the 1st.
+  expect(out.next).toEqual({ date: '2027-01-07', opensOn: '2026-11-01' });
   expect(written()).toEqual(['a1_p-1112', 'a1_p-1119', 'a1_p-1210']);
   // The written shape is the single booking's, marked as a repeat copy.
   expect(mockStore.bookings['a1_p-1112']).toMatchObject({
@@ -129,7 +130,7 @@ test('a Phil repeat books only Phil sessions, and a training repeat only trainin
   expect(mockStore.sessions['t-1112'].booked).toBe(0);
 
   // The reverse: the training block's repeat never lands on Phil's (or Yannick's) session.
-  const back = await repeatWeekly(ATHLETE, block, { untilISO: '2026-12-16' });
+  const back = await repeatWeekly(ATHLETE, block, { untilISO: '2026-12-31' });
   expect(dates(back.booked)).toEqual(['2026-11-12', '2026-11-19', '2026-12-03', '2026-12-10']);
   expect(back.booked.map((b) => b.id)).toEqual(['t-1112', 't-1119', 't-1203', 't-1210']);
   expect(back.skipped).toEqual([{ date: '2026-11-26', reason: 'no session' }]);
@@ -148,7 +149,7 @@ test('Elite with another Phil session already booked that date: that week is ski
   hold('a1', 'p-1119-early');
 
   // A parent booking for their child - the same path, the child named.
-  const out = await repeatWeekly(PARENT, phil, { athleteId: 'a1', untilISO: '2026-12-16' });
+  const out = await repeatWeekly(PARENT, phil, { athleteId: 'a1', untilISO: '2026-12-31' });
   expect(dates(out.booked)).toEqual(['2026-11-12', '2026-12-10']);
   expect(out.skipped).toEqual([
     { date: '2026-11-19', reason: 'one per day' },
@@ -180,24 +181,30 @@ test('a week that fills between the schedule read and its write is skipped as fu
 });
 
 test("a token package: each week spends from the period its session falls in, and stops at that package's window", async () => {
-  // Nov 10, noon Chicago: past Nov 1, so the 30-day window rolls - through Dec 10.
+  // Nov 10, noon Chicago: a token family books through the end of next month - Dec 31; Jan 7 opens at 7 AM on Dec 1.
   jest.setSystemTime(new Date('2026-11-10T18:00:00Z'));
   session('t-1111', 'training', '2026-11-11');
   const phil = session('p-1112', 'phil', '2026-11-12');
   for (const d of ['1119', '1203', '1210', '1217']) session(`p-${d}`, 'phil', `2026-${d.slice(0, 2)}-${d.slice(2)}`);
+  session('p-0107', 'phil', '2027-01-07');
   // November's two tokens are both spent; December's are untouched.
   hold('a2', 't-1111');
   hold('a2', 'p-1112');
 
   const out = await repeatWeekly({ role: 'athlete', athleteId: 'a2', householdId: 'h1' }, phil, { untilISO: '2027-02-27' });
-  expect(out.windowEnd).toBe('2026-12-10');
+  expect(out.windowEnd).toBe('2026-12-31');
   expect(dates(out.booked)).toEqual(['2026-12-03', '2026-12-10']);
+  // Dec 17 is inside the window now, and is judged by December's tokens; Jan 7 is past it and never read.
   expect(out.skipped).toEqual([
     { date: '2026-11-19', reason: 'period limit' },
     { date: '2026-11-26', reason: 'no session' },
+    { date: '2026-12-17', reason: 'period limit' },
   ]);
+  expect(out.next).toEqual({ date: '2027-01-07', opensOn: '2026-12-01' });
   expect(mockStore.bookings['a2_p-1203']).toMatchObject({ type: 'phil', periodKey: '2026-12-01', chargedFrom: 'period', createdVia: 'repeat' });
   expect(mockStore.bookings['a2_p-1217']).toBeUndefined();
+  expect(mockStore.bookings['a2_p-0107']).toBeUndefined();
+  expect(mockStore.sessions['p-0107'].booked).toBe(0);
 });
 
 test("Yannick's sessions never repeat: a 'mental' slot is refused before anything is read or written", async () => {
@@ -206,7 +213,7 @@ test("Yannick's sessions never repeat: a 'mental' slot is refused before anythin
   hold('a1', 'm-1105');
 
   let caught = null;
-  await repeatWeekly(ATHLETE, yannick, { untilISO: '2026-12-16' }).catch((e) => { caught = e; });
+  await repeatWeekly(ATHLETE, yannick, { untilISO: '2026-12-31' }).catch((e) => { caught = e; });
   expect(caught?.code).toBe(ERR.INVALID);
   expect(written()).toEqual([]);
   expect(mockStore.sessions['m-1112'].booked).toBe(0);

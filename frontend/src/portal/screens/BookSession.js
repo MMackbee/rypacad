@@ -37,7 +37,7 @@ import { leaveWaitlist } from '../hooks/waitlist';
 // elsewhere in this file stays importable (data/calendar.js's own header
 // comment: "both data modes call it").
 import BookingOpensBanner from '../components/BookingOpensBanner';
-import { positionForDate, windowDaysFor } from '../data/packages';
+import { positionForDate, windowMonthsFor } from '../data/packages';
 import { SEASON_BOUNDS, capacityFor, dayLabel } from '../data/season';
 import { DEFAULT_DURATION_MINUTES } from '../data/schedule';
 import { tourEventExplainer } from '../data/tour';
@@ -171,7 +171,7 @@ export default function BookSession({
 
   // Sprint 12 (contract v2.0, pin B/D): useMembership() is the pinned source
   // for a member's `package`/`tokens` shape - used here for the booking
-  // window (package.windowDays) and, for the athlete flow, the tokens
+  // window (windowMonthsFor off the package kind) and, for the athlete flow, the tokens
   // banner/spend notes. The parent flow keeps reading tokens off
   // useHouseholdAthletes() (renamed alongside every other allowance->tokens
   // field in this sprint - see the sprint report) since it already carries
@@ -183,7 +183,7 @@ export default function BookSession({
   const selfMember = isParent
     ? membershipMembers.find((m) => m.athleteId === selectedAthleteId) ?? null
     : membershipMembers[0] ?? null;
-  const windowDays = windowDaysFor(selfMember?.package ?? null);
+  const windowMonths = windowMonthsFor(selfMember?.package ?? null);
   // A session token is bought by an adult (owner ruling 2026-10-01): on an
   // athlete's own login the Buy button shows only to the self-managed 18+
   // athlete, or one whose date of birth says 18 or older; anyone younger
@@ -192,7 +192,7 @@ export default function BookSession({
   const askGuardian = !isParent && !ownLoginMayBuy({ selfManaged, dob: selfMember?.dob, todayISO: todayISO() });
   // Onboarding practice books seed data: no day is ever locked there, or the
   // walkthrough's booking step cannot be finished (Mike, 2026-09-30).
-  const openThroughDate = practice ? SEASON_BOUNDS.end : openThrough(new Date(), windowDays);
+  const openThroughDate = practice ? SEASON_BOUNDS.end : openThrough(new Date(), windowMonths);
   // Sprint 20 (spec 5, D16): the Oct 10 gate, proactively. Elite - the PAID
   // package, since the webhook corrects packageId to the paid price (spec
   // 4.3) - books at once; everyone else sees the schedule with Reserve inert
@@ -418,7 +418,7 @@ export default function BookSession({
         onRepeat={booked.waitlisted || tokens?.perPurchase ? undefined : handleRepeat}
         // The repeat reaches exactly as far as this athlete's window (the
         // selected child's, for a parent) - the same date that locks days.
-        repeatWindow={{ end: openThroughDate, days: windowDays, elite: selfMember?.package?.kind === 'elite' }}
+        repeatWindow={{ end: openThroughDate, months: windowMonths, elite: selfMember?.package?.kind === 'elite' }}
         onBack={() => setBooked(null)}
       />
     );
@@ -499,7 +499,7 @@ export default function BookSession({
 
             {selectedDate && selectedDateLocked ? (
               <div style={{ padding: '0 22px' }}>
-                <LockedDayNotice date={selectedDate} windowDays={windowDays} gateOpen={gateOpen} />
+                <LockedDayNotice date={selectedDate} windowMonths={windowMonths} gateOpen={gateOpen} />
               </div>
             ) : selectedDate ? (
               <div style={{ padding: '0 22px', display: 'flex', flexDirection: 'column', gap: 10 }}>
@@ -1011,7 +1011,7 @@ function Confirmed({ bare, confirmation, onRepeat, repeatWindow, onBack }) {
             time={`${c.time} ${c.meridiem}`}
             type={c.type}
             windowEnd={repeatWindow.end}
-            windowDays={repeatWindow.days}
+            windowMonths={repeatWindow.months}
             elite={repeatWindow.elite}
             onRepeat={onRepeat}
           />

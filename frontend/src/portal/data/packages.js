@@ -39,21 +39,25 @@
 // t-8 added 2026-10-07 (owner, from family feedback): 8 tokens at $389.
 // t-4 added 2026-10-10 (owner): 4 tokens at $219.
 // The prices are NOT released to parents: see PRICES_RELEASED below.
+// The booking window is not a field (owner ruling 2026-11-02): it follows the
+// package's kind - see windowMonthsFor below. `windowDays` is retired; a
+// packages/{id} doc still carrying it changes nothing.
 export const TOKEN_PACKAGES = [
-  { id: 't-4',  name: '4 tokens',  kind: 'tokens', tokens: 4,  price: 219, pending: false, windowDays: 30 },
-  { id: 't-6',  name: '6 tokens',  kind: 'tokens', tokens: 6,  price: 299, pending: false, windowDays: 30 },
-  { id: 't-8',  name: '8 tokens',  kind: 'tokens', tokens: 8,  price: 389, pending: false, windowDays: 30 },
-  { id: 't-12', name: '12 tokens', kind: 'tokens', tokens: 12, price: 569, pending: false, windowDays: 30 },
-  { id: 't-16', name: '16 tokens', kind: 'tokens', tokens: 16, price: 719, pending: false, windowDays: 30 },
+  { id: 't-4',  name: '4 tokens',  kind: 'tokens', tokens: 4,  price: 219, pending: false },
+  { id: 't-6',  name: '6 tokens',  kind: 'tokens', tokens: 6,  price: 299, pending: false },
+  { id: 't-8',  name: '8 tokens',  kind: 'tokens', tokens: 8,  price: 389, pending: false },
+  { id: 't-12', name: '12 tokens', kind: 'tokens', tokens: 12, price: 569, pending: false },
+  { id: 't-16', name: '16 tokens', kind: 'tokens', tokens: 16, price: 719, pending: false },
 ];
 
 /**
  * Elite (pin L): unlimited (tokens: null), 24/7 access as an attribute of
- * the one Elite package (no 24/7 tier), a 45-day window, no countdown
- * anywhere. The $1,000 is the owner's stated figure, not pending.
+ * the one Elite package (no 24/7 tier), a two-month booking window
+ * (windowMonthsFor), no countdown anywhere. The $1,000 is the owner's stated
+ * figure, not pending.
  */
 export const ELITE = {
-  id: 'elite', name: 'Elite', kind: 'elite', tokens: null, price: 999, pending: false, windowDays: 45, access247: true,
+  id: 'elite', name: 'Elite', kind: 'elite', tokens: null, price: 999, pending: false, access247: true,
 };
 
 /**
@@ -63,7 +67,7 @@ export const ELITE = {
  * gives this package 0 period tokens whatever `tokens` says. `tokens: 1`
  * stays because the Firestore packages/single doc carries it.
  */
-export const SINGLE_TOKEN = { id: 'single', name: 'Single token', kind: 'single', tokens: 1, price: 65, pending: false, windowDays: 30 };
+export const SINGLE_TOKEN = { id: 'single', name: 'Single token', kind: 'single', tokens: 1, price: 65, pending: false };
 
 /*
  * Whether the single token is on sale is decided by the clock, never by a
@@ -210,9 +214,21 @@ export function packageById(id) {
   return ALL_PACKAGES.find((p) => p.id === id) ?? null;
 }
 
-/** Booking window in days (pin D): the package's own, 30 when there is no package. */
-export function windowDaysFor(pkg) {
-  return pkg && Number.isInteger(pkg.windowDays) ? pkg.windowDays : 30;
+/**
+ * Booking window in whole calendar months (pin D; owner ruling 2026-11-02):
+ * a token package and the single token book through the end of NEXT month,
+ * Elite through the end of the month after next, and a further month opens
+ * at 7 AM on the 1st (data/calendar.js openThrough). Read off the package's
+ * KIND, never a stored field, so a packages/{id} doc that still carries the
+ * retired `windowDays` cannot change it; no package reads as one month.
+ */
+export function windowMonthsFor(pkg) {
+  return (pkg?.kind ?? pkg?.id) === 'elite' ? 2 : 1;
+}
+
+/** The window in words for package copy: "through next month" or "two months ahead". */
+export function windowCopyFor(pkg) {
+  return windowMonthsFor(pkg) === 2 ? 'two months ahead' : 'through next month';
 }
 
 const ANCHOR_MIN = 1;

@@ -70,8 +70,8 @@ async function mountHook(useHook) {
   return { result, unmount: () => act(async () => root.unmount()) };
 }
 
-const T6 = { id: 't-6', name: '6 tokens', kind: 'tokens', tokens: 6, windowDays: 30 };
-const ELITE_PKG = { id: 'elite', name: 'Elite', kind: 'elite', tokens: null, windowDays: 45 };
+const T6 = { id: 't-6', name: '6 tokens', kind: 'tokens', tokens: 6 };
+const ELITE_PKG = { id: 'elite', name: 'Elite', kind: 'elite', tokens: null };
 const booked = (n) =>
   Array.from({ length: n }, (_, i) => ({
     id: `ava_b${i}`, athleteId: 'ava', sessionId: `b${i}`, date: '2026-11-0' + (i + 2), periodKey: '2026-11-01', status: 'confirmed', type: 'training',

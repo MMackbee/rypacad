@@ -4,14 +4,16 @@ import { spawnSync } from 'node:child_process';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
-  parseArgs, loadCatalogue, planPackageWrites, createDoc, CATALOGUE_PATH, CATALOGUE_KEYS, PRICE_ID_RE,
+  parseArgs, loadCatalogue, planPackageWrites, createDoc, diffLine, CATALOGUE_PATH, CATALOGUE_KEYS, PRICE_ID_RE,
 } from '../write-packages.mjs';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
+// The seam shape since the owner ruling of 2026-11-02: the booking window follows
+// the package kind (data/packages.js windowMonthsFor) and is no longer a field.
 const PACKAGES = [
-  { id: 't-6', kind: 'tokens', windowDays: 30 }, { id: 't-12', kind: 'tokens', windowDays: 30 },
-  { id: 't-16', kind: 'tokens', windowDays: 30 }, { id: 'elite', kind: 'elite', windowDays: 45 },
-  { id: 'single', kind: 'single', windowDays: 30 },
+  { id: 't-6', kind: 'tokens' }, { id: 't-12', kind: 'tokens' },
+  { id: 't-16', kind: 'tokens' }, { id: 'elite', kind: 'elite' },
+  { id: 'single', kind: 'single' },
 ];
 const filled = (mode) => ({
   test: {}, live: {},
@@ -41,12 +43,12 @@ test('the committed catalogue has exactly the sixteen keys; test ids present, li
   assert.throws(() => loadCatalogue(path.join(here, 'no-such-file.json')));
 });
 
-test('planPackageWrites: one row per package, facility-access skipped, window from the seam', () => {
+test('planPackageWrites: one row per package, facility-access skipped, the price id and nothing else', () => {
   const { plan, problems } = planPackageWrites(filled('test'), 'test', PACKAGES);
   assert.deepEqual(problems, []);
   assert.deepEqual(plan.map((p) => p.id), ['t-6', 't-12', 't-16', 'elite', 'single']);
-  assert.deepEqual(plan.find((p) => p.id === 'elite'), { id: 'elite', stripePriceId: 'price_1Sample0elite', windowDays: 45 });
-  assert.equal(plan.find((p) => p.id === 't-6').windowDays, 30);
+  assert.deepEqual(plan.find((p) => p.id === 'elite'), { id: 'elite', stripePriceId: 'price_1Sample0elite' });
+  assert.deepEqual(plan.find((p) => p.id === 't-6'), { id: 't-6', stripePriceId: 'price_1Sample0000t6' });
 });
 
 test('planPackageWrites: a null or malformed id is a problem, never a write', () => {
@@ -59,24 +61,32 @@ test('planPackageWrites: a null or malformed id is a problem, never a write', ()
   assert.match(problems.join('\n'), /live\.single: .*not a Stripe price id/);
 });
 
-test('planPackageWrites: refuses a seam still on window 32 (routing lane not merged)', () => {
+test('planPackageWrites never emits a windowDays key, even from a seam entry still carrying one; diffLine prints only stripePriceId', () => {
+  // The window is no longer a doc field (owner ruling 2026-11-02): a stray
+  // windowDays on the seam or on the target doc is neither checked nor written.
   const stale = PACKAGES.map((p) => (p.id === 't-6' ? { ...p, windowDays: 32 } : p));
   const { plan, problems } = planPackageWrites(filled('test'), 'test', stale);
-  assert.equal(plan.length, 0);
-  assert.match(problems.join('\n'), /t-6: packages\.js windowDays is 32, expected 30/);
+  assert.deepEqual(problems, []);
+  assert.equal(plan.length, 5);
+  for (const row of plan) assert.deepEqual(Object.keys(row), ['id', 'stripePriceId'], `${row.id}: only the masked field`);
+  const row = plan.find((p) => p.id === 't-6');
+  assert.equal(diffLine('t-6', undefined, row), 'packages/t-6: stripePriceId (unread) -> price_1Sample0000t6');
+  assert.equal(diffLine('t-6', { stripePriceId: 'price_1Sample0000t6', windowDays: 32 }, row),
+    'packages/t-6: stripePriceId price_1Sample0000t6 -> price_1Sample0000t6 (unchanged)');
+  assert.equal(diffLine('t-6', { windowDays: 32 }, row), 'packages/t-6: stripePriceId null -> price_1Sample0000t6');
 });
 
-test('dry run with no target prints the plan against an unread target and writes nothing', (t) => {
+test('dry run with no target prints the plan against an unread target and writes nothing', () => {
   const env = { ...process.env };
   delete env.FIRESTORE_EMULATOR_HOST;
   const r = spawnSync(process.execPath,
     [path.join(here, '..', 'write-packages.mjs'), '--mode', 'test', '--dry-run',
       '--catalogue', path.join(here, '..', 'fixtures', 'stripe-catalogue-sample.json')],
     { cwd: path.join(here, '..', '..'), encoding: 'utf8', env });
-  if (/windowDays is 32/.test(r.stderr)) return t.skip('routing lane packages.js (window 30) not merged yet');
   assert.equal(r.status, 0, r.stderr);
-  assert.match(r.stdout, /packages\/t-6: stripePriceId \(unread\) -> price_1Sample0000t6, windowDays \(unread\) -> 30/);
-  assert.match(r.stdout, /packages\/elite: .*windowDays \(unread\) -> 45/);
+  assert.match(r.stdout, /packages\/t-6: stripePriceId \(unread\) -> price_1Sample0000t6$/m);
+  assert.match(r.stdout, /packages\/elite: stripePriceId \(unread\) -> price_1Sample0elite$/m);
+  assert.doesNotMatch(r.stdout, /windowDays/, 'the real seam bundles without a window field and the plan never prints one');
   assert.match(r.stdout, /\[dry-run\] nothing written/);
 });
 
@@ -89,6 +99,6 @@ test('a null live block aborts before any target is touched (the sample fixture 
 });
 
 test('createDoc: the whole seam package plus its price id, no undefined fields', () => {
-  const doc = createDoc({ id: 't-8', name: '8 tokens', kind: 'tokens', tokens: 8, price: 389, pending: false, windowDays: 30, access247: undefined }, 'price_1Sample0000t8');
-  assert.deepEqual(doc, { name: '8 tokens', kind: 'tokens', tokens: 8, price: 389, pending: false, windowDays: 30, stripePriceId: 'price_1Sample0000t8' });
+  const doc = createDoc({ id: 't-8', name: '8 tokens', kind: 'tokens', tokens: 8, price: 389, pending: false, access247: undefined }, 'price_1Sample0000t8');
+  assert.deepEqual(doc, { name: '8 tokens', kind: 'tokens', tokens: 8, price: 389, pending: false, stripePriceId: 'price_1Sample0000t8' });
 });

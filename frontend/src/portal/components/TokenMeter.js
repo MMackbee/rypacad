@@ -7,6 +7,7 @@ import PayButton from './PayButton';
 import { SessionTokenHero } from './SessionTokens';
 import { Body, Card, SectionLabel } from './Primitives';
 import { longDayLabel } from '../data/calendar';
+import { windowCopyFor } from '../data/packages';
 import { firstPeriodLine, PAY_TO_START } from '../data/billingCopy';
 import {
   availableCount,
@@ -266,7 +267,7 @@ export default function TokenMeter({ member, defaultOpen = false, showPrices = f
         <Body size={12} tone={color.textSecondary} style={{ marginTop: 4 }}>
           {pkg.name}
           {pkg.access247 ? ' · 24/7 access' : ''}
-          {pkg.windowDays ? ` · books ${pkg.windowDays} days out` : ''}
+          {` · books ${windowCopyFor(pkg)}`}
         </Body>
         {member.attendance && member.attendance.booked ? (
           <Body size={12} tone={color.textSecondary} style={{ marginTop: 6 }}>

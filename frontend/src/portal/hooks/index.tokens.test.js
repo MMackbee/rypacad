@@ -66,8 +66,8 @@ async function mountHook(useHook) {
   return { result, unmount: () => act(async () => root.unmount()) };
 }
 
-const T16 = { id: 't-16', name: '16 tokens', kind: 'tokens', tokens: 16, windowDays: 30 };
-const ELITE_PKG = { id: 'elite', name: 'Elite', kind: 'elite', tokens: null, windowDays: 45 };
+const T16 = { id: 't-16', name: '16 tokens', kind: 'tokens', tokens: 16 };
+const ELITE_PKG = { id: 'elite', name: 'Elite', kind: 'elite', tokens: null };
 const nov = { id: 'a1_nov', sessionId: 'nov', date: '2026-11-03', periodKey: '2026-11-01', status: 'confirmed', type: 'training' };
 
 beforeEach(() => {
@@ -107,7 +107,7 @@ test('the family card: November\'s grant marked "starts", an unpaid child marked
 // live as well; an Elite one never.
 test('the family card: a single-token child shows the tokens they bought, less one a waitlist spot holds', async () => {
   calendar.todayISO.mockReturnValue('2026-11-20');
-  const SINGLE_PKG = { id: 'single', name: 'Single token', kind: 'single', tokens: 1, windowDays: 30 };
+  const SINGLE_PKG = { id: 'single', name: 'Single token', kind: 'single', tokens: 1 };
   const bought = (id) => ({ id, athleteId: 'a2', expiresAt: '2027-02-27', reason: 'single-purchase' });
   live.fetchCurrentUser.mockResolvedValue({ uid: 'p1', householdId: 'h1' });
   live.fetchHousehold.mockResolvedValue({ id: 'h1', name: 'Whitfield family', periodAnchorDay: 1 });

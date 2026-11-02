@@ -334,12 +334,16 @@ export function pickDueDates({ today, count, spread = 1 }) {
 }
 
 /* ------------------------------------------------------------------------- *
- * Booking window (Sprint 12 pin D, contract section 5). The window ROLLS AT
- * 07:00 America/Chicago, not midnight: before 7 AM the anchor is still
- * yesterday. Until BOOKING_WINDOW_ANCHOR (below) the count starts there, not
- * today. Pure; the routing lane's createBooking gate and every day strip
- * read it, and BookSession/SpecialistBooking render days past it as locked
- * with "opens 7 AM on <date>" (windowOpensOn).
+ * Booking window (Sprint 12 pin D, contract section 5; owner ruling
+ * 2026-11-02): a family books through the END of a calendar month - the
+ * month after this one for every token package and the single token, the
+ * month after next for Elite (data/packages.js windowMonthsFor) - and a
+ * further month opens at 07:00 America/Chicago on the 1st, not at midnight:
+ * before 7 AM the date the window counts from is still yesterday. Pure; the
+ * routing lane's createBooking gate and every day strip read it, and
+ * BookSession/SpecialistBooking render days past it as locked with "opens
+ * 7 AM on <the 1st>" (windowOpensOn). firestore.rules
+ * withinOuterBookingBound() carries the same month arithmetic.
  * ------------------------------------------------------------------------- */
 
 const ACADEMY_TZ = 'America/Chicago';
@@ -385,25 +389,40 @@ function rolledWindowDate(now) {
   return hour >= WINDOW_ROLL_HOUR ? date : addDaysISO(date, -1);
 }
 
-/** The last session date bookable right now for a package with this window. */
-export function openThrough(now = new Date(), windowDays = 30) {
-  const rolled = rolledWindowDate(now);
-  const anchor = rolled < BOOKING_WINDOW_ANCHOR ? BOOKING_WINDOW_ANCHOR : rolled;
-  return addDaysISO(anchor, windowDays);
+/** 'yyyy-MM-dd' for a UTC calendar triple; day 0 is the previous month's last day. */
+function monthISO(year, monthIndex, day) {
+  return new Date(Date.UTC(year, monthIndex, day)).toISOString().slice(0, 10);
 }
 
-/** True while the launch anchor, not today, sets the window's last day. */
-export function windowAnchored(now = new Date()) {
-  return rolledWindowDate(now) < BOOKING_WINDOW_ANCHOR;
+/** The last day of the month `monthsAhead` months after the one holding `iso`. */
+function endOfMonthISO(iso, monthsAhead) {
+  const [y, m] = iso.split('-').map(Number);
+  return monthISO(y, m - 1 + monthsAhead + 1, 0);
+}
+
+/** The first day of the month `monthsBack` months before the one holding `iso`. */
+function startOfMonthISO(iso, monthsBack) {
+  const [y, m] = iso.split('-').map(Number);
+  return monthISO(y, m - 1 - monthsBack, 1);
 }
 
 /**
- * The local date on which a session date first enters the window (at 7 AM).
- * Still right while anchored: a locked date is past anchor + N, so date - N
- * falls after the anchor (Dec 17 at 45 days opens Monday, Nov 2).
+ * The last session date bookable right now: the end of the month
+ * `windowMonths` months past the month the window counts from (today from
+ * 7 AM Chicago, else yesterday). On Nov 2 a token family reaches Dec 31 and
+ * Elite Jan 31; from 7 AM on Dec 1 they reach Jan 31 and Feb 28.
  */
-export function windowOpensOn(sessionDateISO, windowDays = 30) {
-  return addDaysISO(sessionDateISO, -windowDays);
+export function openThrough(now = new Date(), windowMonths = 1) {
+  return endOfMonthISO(rolledWindowDate(now), windowMonths);
+}
+
+/**
+ * The local date on which a session date first enters the window (at 7 AM):
+ * the 1st of the month `windowMonths` months before the session's own
+ * (Jan 7 opens Dec 1 for a token family, Nov 1 for Elite).
+ */
+export function windowOpensOn(sessionDateISO, windowMonths = 1) {
+  return startOfMonthISO(sessionDateISO, windowMonths);
 }
 
 /* ------------------------------------------------------------------------- *
@@ -416,10 +435,6 @@ export function windowOpensOn(sessionDateISO, windowDays = 30) {
  * ------------------------------------------------------------------------- */
 export const BOOKING_OPENS_AT = 1791633600000; // 2026-10-10T12:00:00Z = 07:00 America/Chicago
 export const BOOKING_OPENS_LABEL = 'Sat, Oct 10 at 7 AM';
-/** Owner ruling 2026-09-30: until Nov 1 the window counts from Nov 1, not today
- * (Elite Dec 16, tokens Dec 1), rolling daily after. firestore.rules
- * withinOuterBookingBound() carries the same date. A no-op after Nov 1. */
-export const BOOKING_WINDOW_ANCHOR = '2026-11-01';
 export function bookingOpen(now = Date.now(), pkg = null) {
   const t = now instanceof Date ? now.getTime() : Number(now);
   return pkg?.kind === 'elite' || t >= BOOKING_OPENS_AT;

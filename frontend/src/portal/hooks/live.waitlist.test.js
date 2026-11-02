@@ -82,8 +82,8 @@ beforeEach(() => {
       eli: { name: 'Eli', householdId: 'h1', packageId: 'elite' },
     },
     packages: {
-      elite: { name: 'Elite', kind: 'elite', tokens: null, windowDays: 45 },
-      't-2': { name: '2 tokens', kind: 'tokens', tokens: 2, windowDays: 30 },
+      elite: { name: 'Elite', kind: 'elite', tokens: null },
+      't-2': { name: '2 tokens', kind: 'tokens', tokens: 2 },
     },
     sessions: {},
     bookings: {},

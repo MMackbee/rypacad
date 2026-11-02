@@ -10,7 +10,7 @@ import {
   fetchPackage,
   fetchSessionsInRange,
 } from './live';
-import { windowDaysFor } from '../data/packages';
+import { windowMonthsFor } from '../data/packages';
 import { addDaysISO, openThrough, windowOpensOn } from '../data/calendar';
 import { firstRunningWeek } from '../data/season';
 import { isSpecialistType, repeatsWeekly } from '../data/specialists';
@@ -97,8 +97,8 @@ export default async function repeatWeekly(identity, slot, { athleteId, untilISO
   // booking window as the loop's outer bound.
   assertAthleteBillingActive(athlete);
   assertBookingOpen(pkg);
-  const windowDays = windowDaysFor(pkg);
-  const windowEnd = openThrough(new Date(), windowDays);
+  const windowMonths = windowMonthsFor(pkg);
+  const windowEnd = openThrough(new Date(), windowMonths);
   // Sessions already held are named 'already booked' up front, rather than
   // tripping Elite's one-a-day or a token count inside createBooking first.
   const have = new Set(
@@ -129,12 +129,12 @@ export default async function repeatWeekly(identity, slot, { athleteId, untilISO
   // weeks past the end of the schedule are not real skips worth reporting.
   const endDate = lastSessionDate && lastSessionDate < lastDate ? lastSessionDate : lastDate;
   // The first week past the window that the season runs (never a closure:
-  // the Christmas break sits right past the Dec 16 window): nothing holds
+  // the Christmas break sits right past a December window): nothing holds
   // it, so the screen says when it opens instead. null past the season.
   let pastWindow = firstDate;
   while (pastWindow <= windowEnd) pastWindow = addDaysISO(pastWindow, 7);
   const nextDate = firstRunningWeek(pastWindow, slot.time, slot.type);
-  const next = nextDate ? { date: nextDate, opensOn: windowOpensOn(nextDate, windowDays) } : null;
+  const next = nextDate ? { date: nextDate, opensOn: windowOpensOn(nextDate, windowMonths) } : null;
 
   const booked = [];
   const skipped = [];
@@ -189,7 +189,7 @@ export default async function repeatWeekly(identity, slot, { athleteId, untilISO
         skipped.push({
           date,
           reason,
-          ...(reason === 'not open yet' ? { opensOn: windowOpensOn(date, windowDays) } : {}),
+          ...(reason === 'not open yet' ? { opensOn: windowOpensOn(date, windowMonths) } : {}),
           ...(reason === 'error' || reason === HANDICAP_RESERVED ? { message: err?.message || null } : {}),
         });
       }

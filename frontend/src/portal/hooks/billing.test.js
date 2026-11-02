@@ -163,7 +163,7 @@ test('noMonthlyTokensOf: true only when every member is Elite or on the single t
 // tokens and session tokens never reset.
 test('the live hub of an Elite and a single-token athlete promises no token start or reset', async () => {
   const PACKAGES = {
-    elite: { id: 'elite', name: 'Elite', kind: 'elite', tokens: null, windowDays: 45 },
+    elite: { id: 'elite', name: 'Elite', kind: 'elite', tokens: null },
     single: { id: 'single', name: 'Single token', kind: 'single', tokens: 0 },
     't-6': { id: 't-6', name: '6 tokens', kind: 'tokens', tokens: 6 },
   };
@@ -206,7 +206,7 @@ test('Membership, Elite, before the season: November with its bookings, December
   live.fetchCurrentUser.mockResolvedValue({ uid: 'u1', athleteId: 'a1' });
   live.fetchAthlete.mockResolvedValue({ id: 'a1', name: 'Jordan', householdId: 'h1', packageId: 'elite' });
   live.fetchHousehold.mockResolvedValue({ id: 'h1', name: 'Whitfield family', periodAnchorDay: 1 });
-  live.fetchPackage.mockResolvedValue({ id: 'elite', name: 'Elite', kind: 'elite', tokens: null, windowDays: 45 });
+  live.fetchPackage.mockResolvedValue({ id: 'elite', name: 'Elite', kind: 'elite', tokens: null });
   live.fetchBookings.mockResolvedValue([
     { id: 'a1_n1', sessionId: 'n1', date: '2026-11-03', periodKey: '2026-11-01', status: 'confirmed', type: 'training' },
     { id: 'a1_n2', sessionId: 'n2', date: '2026-11-10', periodKey: '2026-11-01', status: 'confirmed', type: 'training' },

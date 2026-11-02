@@ -33,7 +33,7 @@ import {
 } from 'firebase/firestore';
 import { auth, db } from '../../firebase';
 import { bump } from './invalidate';
-import { eliteDailyCapHit, normalizeAnchorDay, periodFallback, periodFor, windowDaysFor } from '../data/packages';
+import { eliteDailyCapHit, normalizeAnchorDay, periodFallback, periodFor, windowMonthsFor } from '../data/packages';
 import { CHANGEABLE_PACKAGE_IDS } from '../data/packageChange';
 import { BOOKING_OPENS_LABEL, academyDateISO, bookingOpen, openThrough, todayISO, windowOpensOn } from '../data/calendar';
 import { SPECIALISTS, mentalCapFor } from '../data/specialists';
@@ -626,15 +626,16 @@ export function assertReservedEligible(session, athlete) {
  * not bookable regardless of how it would be charged. Split out of the old
  * assertWithinPeriodCap (Sprint 12) so createBooking (below) can run it
  * unconditionally while the token-pool checks that follow it branch on
- * chargedFrom. `now` is injectable for tests, like assertBookingOpen's;
- * openThrough carries the Nov 1 launch anchor.
+ * chargedFrom. `now` is injectable for tests, like assertBookingOpen's. The
+ * window is whole calendar months off the package kind (owner ruling
+ * 2026-11-02, windowMonthsFor): a refused date opens on the 1st of a month.
  */
 export function assertWithinBookingWindow(pkg, date, now = new Date()) {
-  const windowDays = windowDaysFor(pkg);
-  if (date > openThrough(now, windowDays)) {
+  const windowMonths = windowMonthsFor(pkg);
+  if (date > openThrough(now, windowMonths)) {
     throw new LiveDataError(
       ERR.INVALID,
-      `That date opens for booking at 7 AM on ${windowOpensOn(date, windowDays)}.`,
+      `That date opens for booking at 7 AM on ${windowOpensOn(date, windowMonths)}.`,
       null,
       'outside-window'
     );

@@ -25,7 +25,7 @@ jest.mock('firebase/firestore', () => ({
 const mockDocs = {
   'households/h1': { name: 'Whitfield family', periodAnchorDay: 1 },
   'athletes/a1': { name: 'Jordan', householdId: 'h1', packageId: 'elite' },
-  'packages/elite': { name: 'Elite', kind: 'elite', tokens: null, windowDays: 45 },
+  'packages/elite': { name: 'Elite', kind: 'elite', tokens: null },
   'sessions/s1': { date: '2026-11-10', time: '4:00 PM', type: 'training', capacity: 8, booked: 0, status: 'scheduled' },
 };
 const mockWrites = [];
@@ -137,17 +137,31 @@ describe('createBooking stamps createdVia only when asked (owner report 2026-09-
   });
 });
 
-describe('assertWithinBookingWindow counts from Nov 1 until then (owner ruling 2026-09-30)', () => {
-  const OCT_1 = new Date('2026-10-01T17:00:00Z');
-  test('Elite on Oct 1 books through Dec 16; Dec 17 is outside-window and names Nov 2', () => {
-    expect(reasonOf(() => assertWithinBookingWindow(ELITE, '2026-12-16', OCT_1))).toBeNull();
-    expect(reasonOf(() => assertWithinBookingWindow(ELITE, '2026-12-17', OCT_1)))
-      .toEqual([ERR.INVALID, 'outside-window', 'That date opens for booking at 7 AM on 2026-11-02.']);
+describe('assertWithinBookingWindow books through whole calendar months (owner ruling 2026-11-02)', () => {
+  const OCT_1 = new Date('2026-10-01T17:00:00Z'); // noon Chicago
+  const t12 = TOKEN_PACKAGES.find((p) => p.id === 't-12');
+  test('Elite on Oct 1 books through Dec 31; Jan 1 is outside-window and opens Nov 1', () => {
+    expect(reasonOf(() => assertWithinBookingWindow(ELITE, '2026-12-31', OCT_1))).toBeNull();
+    expect(reasonOf(() => assertWithinBookingWindow(ELITE, '2027-01-01', OCT_1)))
+      .toEqual([ERR.INVALID, 'outside-window', 'That date opens for booking at 7 AM on 2026-11-01.']);
   });
-  test('a token package reaches Dec 1', () => {
-    const t12 = TOKEN_PACKAGES.find((p) => p.id === 't-12');
-    expect(reasonOf(() => assertWithinBookingWindow(t12, '2026-12-01', OCT_1))).toBeNull();
-    expect(reasonOf(() => assertWithinBookingWindow(t12, '2026-12-02', OCT_1))[1]).toBe('outside-window');
+  test('a token package reaches Nov 30; Dec 1 is outside-window and opens Nov 1 (so is no package at all)', () => {
+    expect(reasonOf(() => assertWithinBookingWindow(t12, '2026-11-30', OCT_1))).toBeNull();
+    expect(reasonOf(() => assertWithinBookingWindow(t12, '2026-12-01', OCT_1)))
+      .toEqual([ERR.INVALID, 'outside-window', 'That date opens for booking at 7 AM on 2026-11-01.']);
+    expect(reasonOf(() => assertWithinBookingWindow(null, '2026-12-01', OCT_1))[1]).toBe('outside-window');
+  });
+  test('a further month opens at 7 AM Chicago on the 1st, not at midnight', () => {
+    const before = new Date('2026-12-01T12:59:00Z'); // 6:59 AM Chicago: the window still counts from Nov 30
+    const after = new Date('2026-12-01T13:00:00Z'); // 7:00 AM Chicago
+    expect(reasonOf(() => assertWithinBookingWindow(t12, '2026-12-31', before))).toBeNull();
+    expect(reasonOf(() => assertWithinBookingWindow(t12, '2027-01-07', before)))
+      .toEqual([ERR.INVALID, 'outside-window', 'That date opens for booking at 7 AM on 2026-12-01.']);
+    expect(reasonOf(() => assertWithinBookingWindow(t12, '2027-01-31', after))).toBeNull();
+    expect(reasonOf(() => assertWithinBookingWindow(t12, '2027-02-01', after))[1]).toBe('outside-window');
+    expect(reasonOf(() => assertWithinBookingWindow(ELITE, '2027-02-28', after))).toBeNull();
+    expect(reasonOf(() => assertWithinBookingWindow(ELITE, '2027-03-01', after)))
+      .toEqual([ERR.INVALID, 'outside-window', 'That date opens for booking at 7 AM on 2027-01-01.']);
   });
 });
 
@@ -182,7 +196,7 @@ describe('createBooking for a single-token athlete', () => {
     mockWrites.length = 0;
     mockUpdates.length = 0;
     mockDocs['athletes/a2'] = { name: 'Ava', householdId: 'h1', packageId: 'single', billing: { status: 'active', oneTime: true } };
-    mockDocs['packages/single'] = { name: 'Single token', kind: 'single', tokens: 1, windowDays: 30 };
+    mockDocs['packages/single'] = { name: 'Single token', kind: 'single', tokens: 1 };
     mockRows.graceTokens = [token('single_cs_1')];
   });
   afterEach(() => {

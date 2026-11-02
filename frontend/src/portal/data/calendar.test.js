@@ -1,14 +1,13 @@
 /**
- * The Oct 10 gate (Sprint 20, spec 5) and the 30-day window defaults - the
- * constants every banner, gate and rules clause agree on.
+ * The Oct 10 gate (Sprint 20, spec 5) and the whole-month booking window
+ * (owner ruling 2026-11-02) - the constants every banner, gate and rules
+ * clause agree on.
  */
 import {
   BOOKING_OPENS_AT,
   BOOKING_OPENS_LABEL,
-  BOOKING_WINDOW_ANCHOR,
   bookingOpen,
   openThrough,
-  windowAnchored,
   windowOpensOn,
 } from './calendar';
 
@@ -37,45 +36,32 @@ describe('bookingOpen', () => {
   });
 });
 
-describe('window defaults are 30 days', () => {
-  test('windowOpensOn defaults to 30', () => {
-    expect(windowOpensOn('2026-11-09')).toBe('2026-10-10');
+describe('the window is whole calendar months, a further month opening at 7 AM Chicago on the 1st (owner ruling 2026-11-02)', () => {
+  test('defaults to one month, counted from today after 7 AM Chicago and from yesterday before it', () => {
+    // 2026-11-10 13:00Z is 07:00 CST: November counts, so through Dec 31. A
+    // minute earlier Nov 9 counts - still November, still Dec 31.
+    expect(openThrough(new Date('2026-11-10T13:00:00Z'))).toBe('2026-12-31');
+    expect(openThrough(new Date('2026-11-10T12:59:00Z'))).toBe('2026-12-31');
+    expect(windowOpensOn('2026-12-02')).toBe('2026-11-01');
   });
-  test('openThrough defaults to 30 (anchor rolls at 7 AM Chicago)', () => {
-    // Before Nov 1 the window counts from Nov 1: Oct 10 either side of 7 AM
-    // reaches Dec 1. After it, 2026-11-10 13:00Z is 07:00 CST -> Nov 10 + 30.
-    expect(openThrough(new Date(BOOKING_OPENS_AT))).toBe('2026-12-01');
-    expect(openThrough(new Date(BOOKING_OPENS_AT - 60000))).toBe('2026-12-01');
-    expect(openThrough(new Date('2026-11-10T13:00:00Z'))).toBe('2026-12-10');
-    expect(openThrough(new Date('2026-11-10T12:59:00Z'))).toBe('2026-12-09');
-  });
-});
-
-describe('the window is anchored at Nov 1 until then (owner ruling 2026-09-30)', () => {
-  test('the anchor is Nov 1 2026', () => {
-    expect(BOOKING_WINDOW_ANCHOR).toBe('2026-11-01');
-  });
-  // Checked against date-fns in America/Chicago across the Nov 1 DST change
-  // (07:00 is 12:00Z before it, 13:00Z after).
+  // Checked in America/Chicago (CST, UTC-6, for the whole Nov-Feb season).
   test.each([
-    ['2026-09-30T17:00:00Z', 45, '2026-12-16'],
-    ['2026-09-30T17:00:00Z', 30, '2026-12-01'],
-    ['2026-10-10T12:00:00Z', 30, '2026-12-01'],
-    ['2026-11-01T12:59:00Z', 45, '2026-12-16'],
-    ['2026-11-02T12:59:00Z', 45, '2026-12-16'],
-    ['2026-11-02T13:00:00Z', 45, '2026-12-17'],
-    ['2026-11-10T13:00:00Z', 30, '2026-12-10'],
-  ])('at %s a %i-day window reaches %s', (iso, days, last) => {
-    expect(openThrough(new Date(iso), days)).toBe(last);
+    ['2026-11-02T13:00:00Z', 1, '2026-12-31'], // a token family on Nov 2: all of December
+    ['2026-11-02T13:00:00Z', 2, '2027-01-31'], // Elite on Nov 2: all of January too
+    ['2026-11-30T23:00:00Z', 1, '2026-12-31'], // Nov 30, 5 PM Chicago: still November
+    ['2026-12-01T12:59:00Z', 1, '2026-12-31'], // Dec 1, 6:59 AM Chicago: yesterday counts
+    ['2026-12-01T13:00:00Z', 1, '2027-01-31'], // Dec 1, 7 AM Chicago: January opens
+    ['2026-12-01T13:00:00Z', 2, '2027-02-28'], // Elite on Dec 1: all of February
+    ['2026-10-01T17:00:00Z', 1, '2026-11-30'],
+    ['2026-10-01T17:00:00Z', 2, '2026-12-31'],
+    ['2027-01-15T18:00:00Z', 2, '2027-03-31'],
+  ])('at %s a %i-month window reaches %s', (iso, months, last) => {
+    expect(openThrough(new Date(iso), months)).toBe(last);
   });
-  test('windowAnchored holds until 07:00 Chicago on Nov 1, then rolls daily', () => {
-    expect(windowAnchored(new Date('2026-09-30T17:00:00Z'))).toBe(true);
-    expect(windowAnchored(new Date('2026-11-01T12:59:00Z'))).toBe(true);
-    expect(windowAnchored(new Date('2026-11-01T13:00:00Z'))).toBe(false);
-    expect(windowAnchored(new Date('2026-11-10T13:00:00Z'))).toBe(false);
-  });
-  test('a locked day still names the day it opens', () => {
-    expect(windowOpensOn('2026-12-17', 45)).toBe('2026-11-02');
-    expect(windowOpensOn('2026-12-02', 30)).toBe('2026-11-02');
+  test('a locked day opens on the 1st of a month, the window length back', () => {
+    expect(windowOpensOn('2027-01-07', 1)).toBe('2026-12-01');
+    expect(windowOpensOn('2027-01-07', 2)).toBe('2026-11-01');
+    expect(windowOpensOn('2027-02-27', 2)).toBe('2026-12-01');
+    expect(windowOpensOn('2026-12-31', 1)).toBe('2026-11-01');
   });
 });

@@ -136,7 +136,7 @@ test('the single token card reads one-time, good through the season end; monthly
 
 test('prices read per month, Elite reads how far ahead it books, and tokens are explained under the label', async () => {
   const r = await renderScreen(<PackageStep athletes={[{ ...newAthleteEntry(), name: 'Nico' }]} onUpdate={() => {}} showErrors={false} />);
-  expect(r.button('Elite').textContent).toContain('Unlimited · 24/7 access · book up to 45 days ahead');
+  expect(r.button('Elite').textContent).toContain('Unlimited · 24/7 access · books two months ahead');
   expect(r.button('Elite').textContent).toContain('$999/ month');
   expect(r.text()).toContain("Package — Nico1 token = 1 session: a training block, a Tour event, a Performance with Phil session, or a session with Yannick. Tokens refresh on the 1st of each month; unused tokens don't carry over. Elite is unlimited.");
   await r.unmount();

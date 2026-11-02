@@ -42,8 +42,8 @@ const booking = (athleteId, sessionId, over) => ({
 function world(...extra) {
   sent.length = 0;
   return Object.assign({
-    'packages/t-12': {kind: 'tokens', tokens: 12, windowDays: 30},
-    'packages/elite': {kind: 'elite', tokens: null, windowDays: 45},
+    'packages/t-12': {kind: 'tokens', tokens: 12},
+    'packages/elite': {kind: 'elite', tokens: null},
     'households/hart': {periodAnchorDay: 1},
     'households/lopez': {periodAnchorDay: 1},
     'households/reyes': {periodAnchorDay: 1},
@@ -228,9 +228,10 @@ test('no tokens left, and a date outside the booking window', async () => {
   assert.deepEqual(bodies('waitlist-removed'), ['Kai was next on the ' +
       `waitlist for ${BLOCK} but could not be booked: no tokens are left ` +
       'for that period.']);
-  // Dec 20 is past the 30-day window on Nov 10 (it ends Dec 10).
-  const far = world(entry('s1', 'kai', 'reyes', 0, {date: '2026-12-20'}),
-      {'sessions/s1': session({date: '2026-12-20', capacity: 3})});
+  // A token family on Nov 10 reaches the end of December (owner ruling
+  // 2026-11-02: whole calendar months); Jan 20 is past that window.
+  const far = world(entry('s1', 'kai', 'reyes', 0, {date: '2027-01-20'}),
+      {'sessions/s1': session({date: '2027-01-20', capacity: 3})});
   const r = await promotion.promoteOneSeat('s1', clock(NOW), fakeDb(far));
   assert.deepEqual(r.dropped.map((d) => d.reason), ['outside-window']);
   assert.equal('bookings/kai_s1' in far, false);

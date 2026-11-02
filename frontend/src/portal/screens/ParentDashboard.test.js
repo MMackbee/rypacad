@@ -182,8 +182,8 @@ describe("What's next under Payment received (owner decision 2026-09-30)", () =>
   test('Elite: book now, and the button opens the book-for-kid chooser for that athlete', async () => {
     mockConfirm = { state: 'confirmed', billingStatus: 'active', packageId: 'elite' };
     const r = await renderScreen(<ParentDashboard bare />, { path: '/portal/family?paid=a2' });
-    // Date.now() is pinned to Oct 5 above: the window counts from Nov 1.
-    expect(r.text()).toContain('Reese can book now - training, Tour events and Phil, through Wed, Dec 16.');
+    // Date.now() is pinned to Oct 5 above: Elite reaches the end of the month after next (owner ruling 2026-11-02).
+    expect(r.text()).toContain('Reese can book now - training, Tour events and Phil, through Thu, Dec 31.');
     expect(r.text()).not.toContain('sign in at');
     expect(r.text()).not.toContain('Book for Reese');
     await r.click("Book Reese's first session");

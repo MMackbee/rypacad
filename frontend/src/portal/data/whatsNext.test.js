@@ -26,22 +26,22 @@ test('token package before Oct 10: opens, season start, unclaimed login - three 
   }
 });
 
-test('elite: book now through Dec 16 (Nov 1 + 45), a primary book button - before Oct 10 too', () => {
+test('elite: book now through Dec 31 (October counts, two months ahead), a primary book button - before Oct 10 too', () => {
   expect(whatsNextFor({ packageId: 'elite', athlete: REESE, host: HOST, now: BEFORE_OPEN })).toEqual({
     title: "What's next",
-    lines: ['Reese can book now - training, Tour events and Phil, through Wed, Dec 16.'],
+    lines: ['Reese can book now - training, Tour events and Phil, through Thu, Dec 31.'],
     book: "Book Reese's first session",
     season: false,
   });
   expect(whatsNextFor({ packageId: 'elite', athlete: JORDAN, host: HOST, now: BEFORE_OPEN }).lines).toEqual([
-    'Jordan can book now - training, Tour events and Phil, through Wed, Dec 16.',
+    'Jordan can book now - training, Tour events and Phil, through Thu, Dec 31.',
     'Jordan can sign in at rypacad.ryptest.com/portal/signin with jordan@email.com.',
   ]);
 });
 
-test('elite in season: the window rolls, so the copy goes back to 45 days ahead', () => {
+test('elite in season: Nov 10 reaches the end of January, named by its last day (owner ruling 2026-11-02)', () => {
   expect(whatsNextFor({ packageId: 'elite', athlete: REESE, now: IN_SEASON }).lines).toEqual([
-    'Reese can book now - training, Tour events and Phil, up to 45 days ahead.',
+    'Reese can book now - training, Tour events and Phil, through Sun, Jan 31.',
   ]);
 });
 
@@ -73,22 +73,33 @@ test('the sign-in line only for an own login that is sent and unclaimed', () => 
 test("the athlete's own home says you, and never shows the login line", () => {
   expect(whatsNextFor({ packageId: 'elite', athlete: JORDAN, self: true, host: HOST, now: BEFORE_OPEN })).toEqual({
     title: "What's next",
-    lines: ['You can book now - training, Tour events and Phil, through Wed, Dec 16.'],
+    lines: ['You can book now - training, Tour events and Phil, through Thu, Dec 31.'],
     book: 'Book your first session',
     season: false,
   });
   expect(whatsNextFor({ packageId: 't-12', athlete: JORDAN, self: true, host: HOST, now: BEFORE_OPEN }).lines).toHaveLength(2);
 });
 
-test('the clock: tokens can book once Oct 10 passes (through Dec 1 until Nov 1); the season line goes once sessions start', () => {
+test('the clock: tokens can book once Oct 10 passes (through Nov 30 in October, Dec 31 in November); the season line goes once sessions start', () => {
   expect(whatsNextFor({ packageId: 't-12', athlete: REESE, now: AFTER_OPEN })).toEqual({
     title: "What's next",
-    lines: ['Reese can book now - training, Tour events and Phil, through Tue, Dec 1.', 'Sessions start Tue, Nov 3.'],
+    lines: ['Reese can book now - training, Tour events and Phil, through Mon, Nov 30.', 'Sessions start Tue, Nov 3.'],
     book: "Book Reese's first session",
     season: true,
   });
   expect(whatsNextFor({ packageId: 't-12', athlete: REESE, now: IN_SEASON }).lines).toEqual([
-    'Reese can book now - training, Tour events and Phil, up to 30 days ahead.',
+    'Reese can book now - training, Tour events and Phil, through Thu, Dec 31.',
+  ]);
+  // A further month opens at 7 AM Chicago on the 1st: at 6:59 AM on Dec 1 November still counts, at 7 AM December does.
+  const DEC_1 = Date.parse('2026-12-01T13:00:00Z');
+  expect(whatsNextFor({ packageId: 't-12', athlete: REESE, now: DEC_1 - 60000 }).lines).toEqual([
+    'Reese can book now - training, Tour events and Phil, through Thu, Dec 31.',
+  ]);
+  expect(whatsNextFor({ packageId: 't-12', athlete: REESE, now: DEC_1 }).lines).toEqual([
+    'Reese can book now - training, Tour events and Phil, through Sun, Jan 31.',
+  ]);
+  expect(whatsNextFor({ packageId: 'elite', athlete: REESE, now: DEC_1 }).lines).toEqual([
+    'Reese can book now - training, Tour events and Phil, through Sun, Feb 28.',
   ]);
 });
 
@@ -101,7 +112,7 @@ test('the family facility add-on ticked at sign-up and not yet paid adds one lin
     FAMILY,
   ]);
   expect(whatsNextFor({ packageId: 't-6', athlete: REESE, facilityDue: true, now: IN_SEASON }).lines).toEqual([
-    'Reese can book now - training, Tour events and Phil, up to 30 days ahead.',
+    'Reese can book now - training, Tour events and Phil, through Thu, Dec 31.',
     FAMILY,
   ]);
   // The athlete's own home is their home page. It is still the family's add-on on a child's login, as the pending

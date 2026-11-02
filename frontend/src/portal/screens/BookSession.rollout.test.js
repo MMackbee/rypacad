@@ -62,7 +62,7 @@ const TODAY = '2026-11-12';
 const TAG = 'Handicap 5 or better';
 const LINE = 'Reserved for handicaps of 5 or better.';
 
-const T6 = { id: 't-6', name: '6 tokens', kind: 'tokens', tokens: 6, windowDays: 30 };
+const T6 = { id: 't-6', name: '6 tokens', kind: 'tokens', tokens: 6 };
 const session = (id, time, over = {}) => ({ id, date: '2026-11-17', time, type: 'training', status: 'scheduled', capacity: 14, booked: 3, ...over });
 // Tuesday Nov 17 as production holds it today: no session carries maxHandicap.
 const UNSTAMPED = [
