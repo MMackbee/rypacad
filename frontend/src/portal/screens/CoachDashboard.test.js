@@ -60,6 +60,22 @@ afterEach(() => {
   jest.useRealTimers();
 });
 
+test('an owner opens the same day view with their own tab bar and no Students tab; a coach keeps all three (owner ruling 2026-11-02)', async () => {
+  mockBlocks = [{ id: 'b1', blockIndex: 0, sessionId: 'nov4-4pm', date: '2026-11-04', time: '4:00 PM', type: 'training', name: 'Training block', meta: '3 of 8 booked', status: 'upcoming', expected: 3 }];
+  const owner = await renderScreen(<CoachDashboard bare role="owner" />);
+  const tabs = (r) => [...r.container.querySelectorAll('nav button')].map((b) => b.textContent);
+  expect(tabs(owner)).toEqual(['Admin', 'Today', 'Sessions', 'Staff', 'Tour']);
+  expect(owner.button('Students')).toBeNull();
+  expect(owner.button('Overview')).not.toBeNull();
+  expect(owner.text()).toContain('Training block');
+  await owner.unmount();
+  const coach = await renderScreen(<CoachDashboard bare />);
+  expect(tabs(coach)).toEqual(['Today', 'Roster']);
+  expect(coach.button('Students')).not.toBeNull();
+  await coach.unmount();
+  mockBlocks = [];
+});
+
 test('Month is the default, and a day then a session opens that roster', async () => {
   const onOpenRoster = jest.fn();
   const r = await openSessions(onOpenRoster);

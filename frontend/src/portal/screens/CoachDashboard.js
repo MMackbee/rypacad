@@ -51,10 +51,17 @@ function formatCoachDate(raw) {
   return raw.replace(ISO_RE, (iso) => longDayLabel(iso));
 }
 
-export default function CoachDashboard({ variant = 'today', bare = false, onOpenRoster, onOpenAthlete, onSignOut }) {
+/**
+ * `role` (2026-11-02): owners and ops open this screen too, to see the day's
+ * golf blocks and who is booked in each. They carry the tab bar of their own
+ * role, and no Students tab: that list is a coach's assigned athletes, and
+ * nobody is assigned to an owner.
+ */
+export default function CoachDashboard({ variant = 'today', bare = false, role = 'coach', onOpenRoster, onOpenAthlete, onSignOut }) {
   const { data } = useCoachDay({ variant });
   const [tab, setTab] = useState('overview');
   const roster = useCoachRoster();
+  const students = role === 'coach';
 
   const blocks = data?.blocks ?? [];
   const none = blocks.length === 0;
@@ -82,15 +89,15 @@ export default function CoachDashboard({ variant = 'today', bare = false, onOpen
               <StatusBadge tone={countPill.tone}>{countPill.label}</StatusBadge>
             </div>
           </div>
-          <TabStrip value={tab} onChange={setTab} />
+          <TabStrip value={tab} onChange={setTab} students={students} />
         </div>
       }
-      footer={<BottomTabBar role="coach" active="today" />}
+      footer={<BottomTabBar role={role} active="today" />}
     >
       <div style={{ padding: '0 22px 24px', display: 'flex', flexDirection: 'column', gap: 12 }}>
         {tab === 'overview' ? (
           <OverviewTab data={data} blocks={blocks} none={none} onOpenRoster={onOpenRoster} />
-        ) : tab === 'students' ? (
+        ) : tab === 'students' && students ? (
           <StudentsTab athletes={roster.data ?? []} loading={roster.loading} onOpenAthlete={onOpenAthlete} />
         ) : (
           <SessionsTab
@@ -290,10 +297,10 @@ function SessionsTab({ firstSessionDate, onOpenRoster }) {
 }
 
 /** Carried forward from the 2025 build's coach dashboard IA. */
-function TabStrip({ value, onChange }) {
+function TabStrip({ value, onChange, students = true }) {
   const tabs = [
     ['overview', 'Overview'],
-    ['students', 'Students'],
+    ...(students ? [['students', 'Students']] : []),
     ['sessions', 'Sessions'],
   ];
 

@@ -382,3 +382,18 @@ test("a coach's old Capture link lands on their own home (Diagnostic Capture is 
   expect(r.container.textContent).toBe('COACH HOME');
   await r.unmount();
 });
+
+test('the golf day view opens for owners and ops too; a specialist is sent to their own sessions (owner ruling 2026-11-02)', async () => {
+  mockLive.value = true;
+  for (const role of ['owner', 'ops']) {
+    mockUser.value = { uid: `u-${role}`, role };
+    const r = await mount('/portal/coach');
+    expect(r.pathname()).toBe('/portal/coach');
+    expect(r.container.textContent).toBe('COACH HOME');
+    await r.unmount();
+  }
+  mockUser.value = { uid: 'y', role: 'mental', specialistId: 'mental' };
+  const y = await mount('/portal/coach');
+  expect(y.pathname()).toBe('/portal/my-sessions');
+  await y.unmount();
+});
