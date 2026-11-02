@@ -18,6 +18,19 @@ afterEach(() => {
   delete process.env.REACT_APP_CONTRACT_ENABLED;
 });
 
+test('owners and ops get a Today tab for the golf day, beside the specialists\' Sessions (owner ruling 2026-11-02)', async () => {
+  const owner = await renderScreen(<BottomTabBar role="owner" active="today" />);
+  expect(labels(owner)).toEqual(['Admin', 'Today', 'Sessions', 'Staff', 'Tour']);
+  expect(owner.button('Today').getAttribute('aria-current')).toBe('page');
+  await owner.unmount();
+  const ops = await renderScreen(<BottomTabBar role="ops" active="admin" />);
+  expect(labels(ops)).toEqual(['Admin', 'Today', 'Sessions', 'Tour']);
+  await ops.unmount();
+  const coach = await renderScreen(<BottomTabBar role="coach" active="today" />);
+  expect(labels(coach)).toEqual(['Today', 'Roster']);
+  await coach.unmount();
+});
+
 test("a child's athlete bar has no Billing or Settings", async () => {
   const r = await renderScreen(<BottomTabBar role="athlete" active="home" />);
   expect(labels(r)).toEqual(['Home', 'Schedule', 'Tour']);

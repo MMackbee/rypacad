@@ -91,14 +91,18 @@ export const TABS = {
    * specialist switcher there per that screen's `canSwitch`), Staff (owner
    * only, StaffRoles), and Tour (every role already gets this one).
    */
+  // Owner ruling 2026-11-02: owners and ops see the day's golf blocks and who
+  // is booked in each (the coach's Today), beside the specialists' Sessions.
   owner: [
     { key: 'admin', label: 'Admin', icon: 'admin', route: '/portal/admin' },
+    { key: 'today', label: 'Today', icon: 'calendar', route: '/portal/coach' },
     { key: 'sessions', label: 'Sessions', icon: 'today', route: '/portal/my-sessions' },
     { key: 'staff', label: 'Staff', icon: 'people', route: '/portal/staff' },
     { key: 'tour', label: 'Tour', icon: 'trophy', route: '/portal/tour' },
   ],
   ops: [
     { key: 'admin', label: 'Admin', icon: 'admin', route: '/portal/admin' },
+    { key: 'today', label: 'Today', icon: 'calendar', route: '/portal/coach' },
     { key: 'sessions', label: 'Sessions', icon: 'today', route: '/portal/my-sessions' },
     { key: 'tour', label: 'Tour', icon: 'trophy', route: '/portal/tour' },
   ],

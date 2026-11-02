@@ -1072,10 +1072,13 @@ async function taskAttendance() {
   console.log('Attendance: any coach on a golf block; Phil and Yannick on their own sessions only');
   const philUid = 'att-phil-probe';
   const mentalUid = 'att-mental-probe';
+  const ownerUid = 'att-owner-probe';
   await seed('users', philUid, { role: 'coach', specialistId: 'phil' });
   await seed('users', mentalUid, { role: 'mental', specialistId: 'mental' });
+  await seed('users', ownerUid, { role: 'owner' });
   const tPhil = token(philUid, { email: 'phil-att@example.com', email_verified: true });
   const tMental = token(mentalUid, { email: 'mental-att@example.com', email_verified: true });
+  const tOwner = token(ownerUid, { email: 'owner-att@example.com', email_verified: true });
   const row = (sessionId, type) => ({ athleteId: 'ath-active', sessionId, date: '2026-11-10', type, periodKey: '2026-11-01', status: 'confirmed',
     householdId: 'hh', createdBy: uid.parent, createdAt: new Date(), chargedFrom: 'period' });
   const ids = { training: 'ath-active_att-train', tournament: 'ath-active_att-tour', phil: 'ath-active_att-phil', mental: 'ath-active_att-mental' };
@@ -1096,12 +1099,16 @@ async function taskAttendance() {
   expect('Phil, a coach, marks a golf block too', await mark(tPhil, ids.training, 'attended'), 200);
   expect('Yannick marks his own session', await mark(tMental, ids.mental, 'attended'), 200);
   expect('Yannick cannot mark a golf block', await mark(tMental, ids.tournament, 'attended'), 403);
+  expect('an owner marks a golf block (Makel and Luke coach on the floor)', await mark(tOwner, ids.tournament, 'noshow', { noshowReason: 'Late' }), 200);
+  expect('an owner cannot mark a Phil session', await mark(tOwner, ids.phil, 'confirmed'), 403);
+  expect('an owner cannot mark a Yannick session', await mark(tOwner, ids.mental, 'confirmed'), 403);
   expect('ops cannot mark attendance', await mark(t.ops, ids.training, 'confirmed'), 403);
   expect('a parent cannot mark attendance', await mark(t.parent, ids.training, 'confirmed'), 403);
   expect('an athlete cannot mark attendance', await mark(t.athlete, ids.training, 'confirmed'), 403);
   for (const id of Object.values(ids)) await del('bookings', id);
   await del('users', philUid);
   await del('users', mentalUid);
+  await del('users', ownerUid);
 }
 
 async function runPass(label) {

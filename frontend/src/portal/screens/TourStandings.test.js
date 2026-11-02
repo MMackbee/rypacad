@@ -67,8 +67,8 @@ const currentTab = (r) => r.container.querySelector('nav [aria-current="page"]')
 
 test.each([
   ['mental', undefined, ['Sessions', 'Athletes', 'Contract', 'Tour']],
-  ['ops', undefined, ['Admin', 'Sessions', 'Tour']],
-  ['owner', undefined, ['Admin', 'Sessions', 'Staff', 'Tour']],
+  ['ops', undefined, ['Admin', 'Today', 'Sessions', 'Tour']],
+  ['owner', undefined, ['Admin', 'Today', 'Sessions', 'Staff', 'Tour']],
   ['coach', 'phil', ['Sessions', 'Assessments', 'Tour']],
 ])('the %s login keeps its own tab bar on the Tour, with Tour current', async (role, specialistId, tabs) => {
   const r = await renderScreen(<TourStandings bare role={role} specialistId={specialistId} />);

@@ -1504,10 +1504,12 @@ service cloud.firestore {
         && attendanceUpdateOk();
       // Owner ruling 2026-11-02: every coach marks attendance on a GOLF block
       // (training, Tour event) - there is no coach assignment system, so the
-      // branch above never fires in production. Fitness (phil) and mental
-      // performance (mental) stay with their specialist (the branch below).
+      // branch above never fires in production. Owners coach on the floor too
+      // (Makel opens Tue/Wed, Luke takes the Tue 3 PM block), so they mark the
+      // same blocks. Fitness (phil) and mental performance (mental) stay with
+      // their specialist (the branch below); ops never mark.
       allow update: if signedIn()
-        && me().role == 'coach'
+        && me().role in ['coach', 'owner']
         && resource.data.type in ['training', 'tournament']
         && attendanceUpdateOk();
 

@@ -602,9 +602,14 @@ function TourRoute({ onSignOut }) {
  */
 function CoachDashboardRoute({ onSignOut, onOpenAthlete }) {
   const navigate = useNavigate();
+  const live = isLive();
+  const { user } = useAuthSession(live ? undefined : { variant: 'idle' });
+  // The screen carries the caller's own tab bar (owner, ops or coach).
+  const role = live ? user?.role ?? 'coach' : 'coach';
   return (
     <CoachDashboard
       bare
+      role={role}
       onSignOut={onSignOut}
       onOpenAthlete={onOpenAthlete}
       onOpenRoster={(block) =>
@@ -974,10 +979,12 @@ export default function PortalRoutes() {
       {/* Coach. A block's "Start session" opens the IN/OUT attendance flow
           (SessionAttendance, handoff screen 13); the bottom tab's Roster is
           the full assigned-athlete list — two different jobs, two routes. */}
+      {/* 2026-11-02 (owner ruling): owners and ops open the day's golf blocks and who is
+          booked in each; they carry their own tab bar and no Students tab (CoachDashboard). */}
       <Route
         path="coach"
         element={
-          <RequireRole roles={['coach']}>
+          <RequireRole roles={['coach', 'ops', 'owner']}>
             <CoachDashboardRoute onSignOut={onSignOut} onOpenAthlete={openAthlete} />
           </RequireRole>
         }
