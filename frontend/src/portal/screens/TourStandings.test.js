@@ -66,10 +66,11 @@ const tabsOf = (r) => [...r.container.querySelectorAll('nav button')].map((b) =>
 const currentTab = (r) => r.container.querySelector('nav [aria-current="page"]')?.textContent ?? null;
 
 test.each([
-  ['mental', undefined, ['Sessions', 'Athletes', 'Contract', 'Tour']],
+  // 2026-11-03 (owner ruling): Phil's and Yannick's sets gained Today, the golf day view.
+  ['mental', undefined, ['Sessions', 'Today', 'Athletes', 'Contract', 'Tour']],
   ['ops', undefined, ['Admin', 'Today', 'Sessions', 'Tour']],
   ['owner', undefined, ['Admin', 'Today', 'Sessions', 'Staff', 'Tour']],
-  ['coach', 'phil', ['Sessions', 'Assessments', 'Tour']],
+  ['coach', 'phil', ['Sessions', 'Today', 'Assessments', 'Tour']],
 ])('the %s login keeps its own tab bar on the Tour, with Tour current', async (role, specialistId, tabs) => {
   const r = await renderScreen(<TourStandings bare role={role} specialistId={specialistId} />);
   expect(tabsOf(r)).toEqual(tabs);

@@ -56,12 +56,17 @@ function formatCoachDate(raw) {
  * golf blocks and who is booked in each. They carry the tab bar of their own
  * role, and no Students tab: that list is a coach's assigned athletes, and
  * nobody is assigned to an owner.
+ *
+ * `specialistId` (owner, 2026-11-03): Phil (a coach account with a
+ * specialistId) and Yannick (role mental) open it too. Phil's id picks his
+ * own tab set, and neither gets Students - a specialist is nobody's
+ * assigned golf coach.
  */
-export default function CoachDashboard({ variant = 'today', bare = false, role = 'coach', onOpenRoster, onOpenAthlete, onSignOut }) {
+export default function CoachDashboard({ variant = 'today', bare = false, role = 'coach', specialistId, onOpenRoster, onOpenAthlete, onSignOut }) {
   const { data } = useCoachDay({ variant });
   const [tab, setTab] = useState('overview');
   const roster = useCoachRoster();
-  const students = role === 'coach';
+  const students = role === 'coach' && !specialistId;
 
   const blocks = data?.blocks ?? [];
   const none = blocks.length === 0;
@@ -92,7 +97,7 @@ export default function CoachDashboard({ variant = 'today', bare = false, role =
           <TabStrip value={tab} onChange={setTab} students={students} />
         </div>
       }
-      footer={<BottomTabBar role={role} active="today" />}
+      footer={<BottomTabBar role={role} specialistId={specialistId} active="today" />}
     >
       <div style={{ padding: '0 22px 24px', display: 'flex', flexDirection: 'column', gap: 12 }}>
         {tab === 'overview' ? (

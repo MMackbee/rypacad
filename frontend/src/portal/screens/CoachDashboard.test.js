@@ -76,6 +76,23 @@ test('an owner opens the same day view with their own tab bar and no Students ta
   mockBlocks = [];
 });
 
+test('Phil and Yannick open the golf day with their own tab bars and no Students tab (owner ruling 2026-11-03)', async () => {
+  mockBlocks = [{ id: 'b1', blockIndex: 0, sessionId: 'nov4-4pm', date: '2026-11-04', time: '4:00 PM', type: 'training', name: 'Training block', meta: '3 of 8 booked', status: 'upcoming', expected: 3 }];
+  const tabs = (r) => [...r.container.querySelectorAll('nav button')].map((b) => b.textContent);
+  const phil = await renderScreen(<CoachDashboard bare role="coach" specialistId="phil" />);
+  expect(tabs(phil)).toEqual(['Sessions', 'Today', 'Assessments', 'Tour']);
+  expect(phil.button('Students')).toBeNull();
+  expect(phil.button('Overview')).not.toBeNull();
+  expect(phil.text()).toContain('Training block');
+  await phil.unmount();
+  const yannick = await renderScreen(<CoachDashboard bare role="mental" />);
+  expect(tabs(yannick)).toEqual(['Sessions', 'Today', 'Athletes', 'Contract', 'Tour']);
+  expect(yannick.button('Students')).toBeNull();
+  expect(yannick.text()).toContain('Training block');
+  await yannick.unmount();
+  mockBlocks = [];
+});
+
 test('Month is the default, and a day then a session opens that roster', async () => {
   const onOpenRoster = jest.fn();
   const r = await openSessions(onOpenRoster);

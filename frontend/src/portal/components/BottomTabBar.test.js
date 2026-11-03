@@ -75,14 +75,34 @@ test('selfManaged never changes a parent or staff bar', async () => {
   await coach.unmount();
 });
 
-test('mental: Sessions, Athletes, Contract (key mental-contract) and Tour, with the contract switch off', async () => {
+test('mental: Sessions, Today, Athletes, Contract (key mental-contract) and Tour, with the contract switch off', async () => {
   delete process.env.REACT_APP_CONTRACT_ENABLED;
   const r = await renderScreen(<BottomTabBar role="mental" active="athletes" />, { path: '/portal/mental' });
   expect(['Sessions', 'Athletes', 'Contract', 'Tour'].every((l) => r.text().includes(l))).toBe(true);
-  expect(TABS.mental.map((t) => t.key)).toEqual(['sessions', 'athletes', 'mental-contract', 'assessments', 'tour']);
-  expect(labels(r)).toEqual(['Sessions', 'Athletes', 'Contract', 'Tour']);
+  expect(TABS.mental.map((t) => t.key)).toEqual(['sessions', 'today', 'athletes', 'mental-contract', 'assessments', 'tour']);
+  expect(labels(r)).toEqual(['Sessions', 'Today', 'Athletes', 'Contract', 'Tour']);
   expect(TABS.mental.find((t) => t.key === 'mental-contract').route).toBe('/portal/mental/contract');
   r.unmount();
+});
+
+test('Phil and Yannick get a Today tab for the golf day, beside the Sessions they land on (owner ruling 2026-11-03)', async () => {
+  const phil = await renderScreen(<BottomTabBar role="coach" specialistId="phil" active="today" />, { path: '/portal/coach' });
+  expect(labels(phil)).toEqual(['Sessions', 'Today', 'Assessments', 'Tour']);
+  expect(phil.button('Today').getAttribute('aria-current')).toBe('page');
+  await phil.click('Sessions');
+  expect(phil.location().pathname).toBe('/portal/my-sessions');
+  await phil.unmount();
+  const yannick = await renderScreen(<BottomTabBar role="mental" active="sessions" />, { path: '/portal/my-sessions' });
+  expect(labels(yannick)).toEqual(['Sessions', 'Today', 'Athletes', 'Contract', 'Tour']);
+  expect(yannick.button('Sessions').getAttribute('aria-current')).toBe('page');
+  await yannick.click('Today');
+  expect(yannick.location().pathname).toBe('/portal/coach');
+  await yannick.unmount();
+  // Each set still leads with its landing screen (landingFor); Today is the same tab in both.
+  expect(TABS.coachSpecialist[0].key).toBe('sessions');
+  expect(TABS.mental[0].key).toBe('sessions');
+  expect(TABS.coachSpecialist[1]).toEqual(TABS.mental[1]);
+  expect(TABS.mental[1]).toEqual({ key: 'today', label: 'Today', icon: 'calendar', route: '/portal/coach' });
 });
 
 test('Diagnostic Capture is gone: no Capture tab for a coach or for Phil (assessments spec 8)', async () => {
@@ -96,7 +116,7 @@ test('Diagnostic Capture is gone: no Capture tab for a coach or for Phil (assess
 
 test('Assessments: for Phil and for staff the owner gave the permission; never a plain coach (assessments spec 5)', async () => {
   const phil = await renderScreen(<BottomTabBar role="coach" specialistId="phil" active="assessments" />);
-  expect(labels(phil)).toEqual(['Sessions', 'Assessments', 'Tour']);
+  expect(labels(phil)).toEqual(['Sessions', 'Today', 'Assessments', 'Tour']);
   expect(phil.button('Assessments').getAttribute('aria-current')).toBe('page');
   await phil.click('Assessments');
   expect(phil.location().pathname).toBe('/portal/assessments');
@@ -116,10 +136,10 @@ test('Assessments: for Phil and for staff the owner gave the permission; never a
   expect(labels(plain)).toEqual(['Today', 'Roster']);
   await plain.unmount();
   const mental = await renderScreen(<BottomTabBar role="mental" />);
-  expect(labels(mental)).toEqual(['Sessions', 'Athletes', 'Contract', 'Tour']);
+  expect(labels(mental)).toEqual(['Sessions', 'Today', 'Athletes', 'Contract', 'Tour']);
   await mental.unmount();
   const mentalAssessor = await renderScreen(<BottomTabBar role="mental" assessments />);
-  expect(labels(mentalAssessor)).toEqual(['Sessions', 'Athletes', 'Contract', 'Assessments', 'Tour']);
+  expect(labels(mentalAssessor)).toEqual(['Sessions', 'Today', 'Athletes', 'Contract', 'Assessments', 'Tour']);
   await mentalAssessor.unmount();
   const owner = await renderScreen(<BottomTabBar role="owner" assessments />);
   expect(labels(owner)).not.toContain('Assessments');

@@ -162,3 +162,26 @@ export function rosterNameFor(row) {
   if (!row || !row.name) return null;
   return row.attendee === 'parent' ? `${row.name} (parent)` : row.name;
 }
+
+/**
+ * Who may mark attendance on a session, as firestore.rules decides it (the
+ * bookings attendance branches, owner ruling 2026-11-02): a coach or owner on
+ * a golf block (training, tournament), a specialist on the sessions whose
+ * type is their own users.specialistId (Yannick's 'mental', Phil's 'phil'),
+ * ops never. The attendance screen renders read-only for everyone else
+ * (owner ruling 2026-11-03: Phil and Yannick open the golf day's rosters).
+ * An unknown type is read as a golf block, so a coach's own tap is never
+ * withheld by a missing field; a refused write still fails in the rules. The
+ * rules' assigned-coach branch (athletes.coachId) is not mirrored: no athlete
+ * carries one, so it never fires.
+ * @param {{role: ?string, specialistId: ?string, type: ?string}} viewer
+ * @return {boolean} true when this viewer only looks.
+ */
+export function attendanceReadOnlyFor({ role, specialistId = null, type = null }) {
+  const golf = type == null || type === 'training' || type === 'tournament';
+  const own = specialistId != null && type === specialistId;
+  if (role === 'coach') return !golf && !own;
+  if (role === 'owner') return !golf;
+  if (role === 'mental') return !own;
+  return true;
+}

@@ -77,10 +77,16 @@ export const TABS = {
    * every existing `<BottomTabBar role="coach" .../>` call site is untouched.
    */
   coachSpecialist: [
+    // Sessions stays first: it is where Phil lands (landingFor in PortalRoutes).
+    { key: 'sessions', label: 'Sessions', icon: 'today', route: '/portal/my-sessions' },
+    // Owner ruling 2026-11-03: Phil sees the day's golf blocks and who is
+    // booked in each (the coach's Today, /portal/coach) beside his own
+    // Sessions. The rules already let a coach read every roster and mark
+    // golf attendance.
+    { key: 'today', label: 'Today', icon: 'calendar', route: '/portal/coach' },
     // No Roster tab for Phil (PM integration): rosters are assignment-based
     // and a specialist coach is nobody's assigned golf coach, so that tab
     // would always be empty for him. Tour replaces it.
-    { key: 'sessions', label: 'Sessions', icon: 'today', route: '/portal/my-sessions' },
     ASSESSMENTS_TAB,
     { key: 'tour', label: 'Tour', icon: 'trophy', route: '/portal/tour' },
   ],
@@ -107,7 +113,12 @@ export const TABS = {
     { key: 'tour', label: 'Tour', icon: 'trophy', route: '/portal/tour' },
   ],
   mental: [
+    // Sessions stays first: it is where Yannick lands (landingFor in PortalRoutes).
     { key: 'sessions', label: 'Sessions', icon: 'today', route: '/portal/my-sessions' },
+    // Owner ruling 2026-11-03: Yannick sees the day's golf blocks and who is
+    // booked in each too. A golf roster opens read-only for him: the rules
+    // let a mental account mark attendance on its own sessions only.
+    { key: 'today', label: 'Today', icon: 'calendar', route: '/portal/coach' },
     // 2026-10-28 (spec 5): Yannick's athletes and his contract board. The
     // board's key is NOT 'contract' - that key is hidden while the family
     // switch is off, and the board is not behind it.
