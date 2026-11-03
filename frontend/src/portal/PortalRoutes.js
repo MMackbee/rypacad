@@ -21,6 +21,7 @@ import {
   AssessmentGolfRoute, AssessmentListRoute, AssessmentResultsRoute, AssessmentSettingsRoute, AssessmentWaveRoute, RequireAssessment, loadAssessmentList,
 } from './AssessmentRoutes';
 import { assessmentAccess } from './data/assessmentAccess';
+import { attendanceReadOnlyFor } from './data/specialists';
 import ResearchConfirmGate from './components/ResearchConfirmGate';
 
 /*
@@ -603,13 +604,20 @@ function TourRoute({ onSignOut }) {
 function CoachDashboardRoute({ onSignOut, onOpenAthlete }) {
   const navigate = useNavigate();
   const live = isLive();
-  const { user } = useAuthSession(live ? undefined : { variant: 'idle' });
-  // The screen carries the caller's own tab bar (owner, ops or coach).
+  const { user, loading } = useAuthSession(live ? undefined : { variant: 'idle' });
+  // Every hook instance starts {user: null, loading: true}: wait, or the first
+  // paint is the plain coach's bar (SpecialistDayRoute does the same).
+  if (live && loading) return null;
+  // The screen carries the caller's own tab bar (owner, ops or coach - and,
+  // 2026-11-03, Phil's and Yannick's: the specialists see the golf day too;
+  // Phil's specialistId picks his tab set and drops the Students tab).
   const role = live ? user?.role ?? 'coach' : 'coach';
+  const specialistId = (live && user?.specialistId) || undefined;
   return (
     <CoachDashboard
       bare
       role={role}
+      specialistId={specialistId}
       onSignOut={onSignOut}
       onOpenAthlete={onOpenAthlete}
       onOpenRoster={(block) =>
@@ -644,12 +652,20 @@ function SessionAttendanceRoute({ onBack }) {
   // Sprint 13 pin E: "Cancel session" is ops/owner-only, so the screen needs
   // the signed-in role (the coach default keeps every existing caller as is).
   const live = isLive();
-  const { user } = useAuthSession(live ? undefined : { variant: 'idle' });
+  const { user, loading } = useAuthSession(live ? undefined : { variant: 'idle' });
+  // Wait for this route's own session: with user still null the roster would
+  // first paint as a coach's (IN/OUT live) and flip to read-only a beat later.
+  if (live && loading) return null;
   const role = live ? user?.role ?? 'coach' : 'coach';
   // v1.7.1: a specialist arrives from /portal/my-sessions and must return
   // there, not to the golf coach's dashboard — the caller says so via
   // navigation state; the coach flow's fixed back target is unchanged.
   const back = state?.backTo ? () => navigate(state.backTo) : onBack;
+  // 2026-11-03 (owner ruling): Phil and Yannick open the golf day's rosters
+  // from Today. A roster the rules would not let this viewer mark (a mental
+  // account on anything but its own sessions; ops, who never mark) renders
+  // read-only instead of refusing every tap. Seed mode marks locally.
+  const readOnly = live && attendanceReadOnlyFor({ role, specialistId: user?.specialistId ?? null, type: state?.block?.type ?? null });
   return (
     <SessionAttendance
       bare
@@ -658,6 +674,7 @@ function SessionAttendanceRoute({ onBack }) {
       sessionId={state?.sessionId ?? undefined}
       block={state?.block ?? undefined}
       role={role}
+      readOnly={readOnly}
       onOpenClubhead={!live || assessmentAccess(user) ? (athleteId, name) => navigate(`/portal/assessments/golf/${athleteId}`, { state: { name } }) : undefined}
     />
   );
@@ -980,11 +997,12 @@ export default function PortalRoutes() {
           (SessionAttendance, handoff screen 13); the bottom tab's Roster is
           the full assigned-athlete list — two different jobs, two routes. */}
       {/* 2026-11-02 (owner ruling): owners and ops open the day's golf blocks and who is
-          booked in each; they carry their own tab bar and no Students tab (CoachDashboard). */}
+          booked in each; they carry their own tab bar and no Students tab (CoachDashboard).
+          2026-11-03 (owner ruling): Yannick (mental) too, and Phil through his own tab set. */}
       <Route
         path="coach"
         element={
-          <RequireRole roles={['coach', 'ops', 'owner']}>
+          <RequireRole roles={['coach', 'mental', 'ops', 'owner']}>
             <CoachDashboardRoute onSignOut={onSignOut} onOpenAthlete={openAthlete} />
           </RequireRole>
         }

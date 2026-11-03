@@ -227,10 +227,20 @@ export default function Roster({ bare = false, onSignOut, onOpenAthlete }) {
  * @param {'pre'|'progress'|'complete'|'noshow'} variant
  * @param {string} [sessionId]   Real Firestore session id - live mode only.
  * @param {number} [blockIndex]  Which of today's blocks (0-based) - seed mode.
- * @param {'coach'|'ops'|'owner'} [role]  Who is viewing - "Cancel session"
- *   only renders for ops/owner.
+ * @param {'coach'|'ops'|'owner'|'mental'} [role]  Who is viewing - "Cancel
+ *   session" only renders for ops/owner.
+ * @param {boolean} [readOnly]  2026-11-03 (owner ruling): a viewer the rules
+ *   would not let mark this session (Yannick on a golf block; ops anywhere;
+ *   the owner on a specialist's session) sees the roster and each row's mark
+ *   as a badge - no IN/OUT buttons, no Start session / Close block, a saved
+ *   no-show reason as plain text. What the rules DO grant such a viewer
+ *   stays: the session note (coachNoteUpdateOk admits coach, mental, ops and
+ *   owner, so the footer goes straight to "Add a session note"), Tour
+ *   results on a Tour block (tournamentResults admits the same set), and
+ *   "Cancel session" by `role`. The route decides it with
+ *   attendanceReadOnlyFor (data/specialists.js).
  */
-export function SessionAttendance({ variant = 'pre', bare = false, onBack, sessionId, blockIndex, block, role = 'coach', onOpenClubhead }) {
+export function SessionAttendance({ variant = 'pre', bare = false, onBack, sessionId, blockIndex, block, role = 'coach', readOnly = false, onOpenClubhead }) {
   const { roster: demoRoster, marks: demoMarks, mark: demoMark, counts: demoCounts, sessionState: demoState } =
     useRoster({ variant });
   // Seed header: the generated season narrowed by blockIndex. Live header:
@@ -473,6 +483,7 @@ export function SessionAttendance({ variant = 'pre', bare = false, onBack, sessi
           <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 14 }}>
             <BackLink onClick={onBack}>‹ Today</BackLink>
             <div style={{ flex: 1 }} />
+            {readOnly ? <StatusBadge tone="muted">View only</StatusBadge> : null}
             <StatusBadge tone={statusPill.tone}>{statusPill.label}</StatusBadge>
           </div>
 
@@ -507,9 +518,11 @@ export function SessionAttendance({ variant = 'pre', bare = false, onBack, sessi
       }
       footer={sessionCancelled ? null : (
         <RosterFooter
-          sessionState={sessionState}
+          // Read-only: no Start / Close, only the note CTA the rules grant.
+          sessionState={readOnly ? 'completed' : sessionState}
           unmarked={counts.unmarked}
-          completed={completed}
+          completed={completed || readOnly}
+          readOnly={readOnly}
           hasNote={Boolean(sessionNote)}
           onStart={() => setLocalStatus('progress')}
           onClose={() => setLocalStatus('completed')}
@@ -533,7 +546,7 @@ export function SessionAttendance({ variant = 'pre', bare = false, onBack, sessi
           record (seed/demo), same split every other attendance write on
           this screen already follows.
         */}
-        {completed ? (
+        {completed || readOnly ? (
           <div style={{ marginBottom: 16 }}>
             {editingNote ? (
               <Card large>
@@ -591,6 +604,10 @@ export function SessionAttendance({ variant = 'pre', bare = false, onBack, sessi
         {roster.map((athlete, i) => {
           const value = marks[athlete.id] ?? null;
           const noShow = value === 'out';
+          // The reason block below carries the row's rule and spacing when it
+          // renders: the coach's chip always, a read-only viewer's text only
+          // when a reason was saved.
+          const showReason = noShow && (!readOnly || Boolean(reasonFor(athlete.id)));
 
           return (
             <div key={athlete.id}>
@@ -599,10 +616,14 @@ export function SessionAttendance({ variant = 'pre', bare = false, onBack, sessi
                 meta={athlete.meta}
                 avatarSize={42}
                 nameSize={16}
-                divider={i < roster.length - 1 && !noShow}
+                divider={i < roster.length - 1 && !showReason}
                 trailing={
                   sessionCancelled ? (
                     <StatusBadge tone="muted">Cancelled</StatusBadge>
+                  ) : readOnly ? (
+                    <StatusBadge tone={value === 'in' ? 'green' : value === 'out' ? 'red' : 'muted'}>
+                      {value === 'in' ? 'In' : value === 'out' ? 'Out' : 'Unmarked'}
+                    </StatusBadge>
                   ) : (
                     <AttendanceControls
                       value={value}
@@ -619,7 +640,7 @@ export function SessionAttendance({ variant = 'pre', bare = false, onBack, sessi
                   required field - a required note is how attendance stops
                   getting marked at all. Tap the chip to add or edit; the
                   saved text shows in place of the prompt. */}
-              {noShow ? (
+              {showReason ? (
                 <div
                   style={{
                     marginLeft: 54,
@@ -638,6 +659,8 @@ export function SessionAttendance({ variant = 'pre', bare = false, onBack, sessi
                       saving={savingReason}
                       error={reasonError}
                     />
+                  ) : readOnly ? (
+                    <span style={{ font: `500 11px ${font.body}`, color: color.error }}>{reasonFor(athlete.id)}</span>
                   ) : (
                     <NoteChip
                       noShow
@@ -973,10 +996,12 @@ function CounterRow({ counts, started }) {
   );
 }
 
-function RosterFooter({ sessionState, unmarked, completed, hasNote, onStart, onClose, onAddNote }) {
-  const hint = completed
-    ? 'No-shows are reported to Phil, not the coach chain.'
-    : 'Tap a green or red button again to clear it.';
+function RosterFooter({ sessionState, unmarked, completed, readOnly = false, hasNote, onStart, onClose, onAddNote }) {
+  const hint = readOnly
+    ? 'Attendance is marked by the coach. A session note is open to you.'
+    : completed
+      ? 'No-shows are reported to Phil, not the coach chain.'
+      : 'Tap a green or red button again to clear it.';
 
   let cta;
   if (sessionState === 'pre') {

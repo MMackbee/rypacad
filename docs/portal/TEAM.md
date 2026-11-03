@@ -861,7 +861,8 @@ F. STAFF NAVIGATION — BottomTabBar gains staff tab sets (frontend lane
    BottomTabBar takes an optional specialistId to pick the Phil variant.
    Every staff screen renders the bar AND a SignOutButton (the scan found
    Staff & Roles and the Newsletter with neither). Newsletter leaves
-   every tab set (parked).
+   every tab set (parked). (Today joined both specialist sets on
+   2026-11-03: see "Phil and Yannick on the golf day" at the end.)
 
 G. NOTIFICATION PREFS PERSIST — users.notificationPrefs (map of
    category -> { email: bool, sms: bool }, shape from the existing
@@ -3524,3 +3525,36 @@ Open items (none blocks the harness run):
   (develop's text); the coupon is 20% (`SIBLING20`). Not touched here.
 - The cancel receipt (`notices.bookingCancelled`) says "The token is back in
   this period." to an Elite athlete too (develop's copy, not touched here).
+
+## Phil and Yannick on the golf day (owner ruling 2026-11-03)
+
+The owner, launch morning: "we need to get phil and Yannick views on the
+golf training sessions." Branch `staff/golf-day`, frontend only - no rules
+or functions change (the rules already let a coach read every roster and a
+mental account read bookings and athletes).
+
+What the owner asked for:
+- Phil's tab set and the mental set gain Today (/portal/coach, the coach's
+  golf day: today's golf blocks and who is booked in each); the route
+  admits mental. CoachDashboard renders the caller's own bar (Phil's
+  through his specialistId) and no Students tab for a specialist.
+
+The lane's calls (not rulings; change on the owner's word):
+- Today sits SECOND in both sets, after the Sessions tab each specialist
+  lands on (landingFor), so every staff set still leads with its landing
+  screen.
+- A roster the rules would not let the viewer mark opens READ-ONLY rather
+  than refusing each tap: `attendanceReadOnlyFor` (data/specialists.js)
+  mirrors the bookings attendance branches from the viewer's role,
+  specialistId and the session type - Yannick on a golf block, ops
+  anywhere, the owner on a Phil or Yannick session. Read-only means marks
+  as badges (In / Out / Unmarked, the counters' names), no IN/OUT, no Start
+  session / Close block, a saved no-show reason as plain text. What the
+  rules DO grant such a viewer stays: the session note (coachNoteUpdateOk
+  admits coach, mental, ops and owner - the footer goes straight to Add /
+  Edit session note), Tour results on a Tour block (tournamentResults
+  admits the same set), and Cancel session for ops and owner.
+- Both routes (CoachDashboardRoute, SessionAttendanceRoute) now wait for
+  their own useAuthSession before reading the role, as SpecialistDayRoute
+  does: the first paint was the plain coach's bar / a writable roster for
+  one users-doc read.

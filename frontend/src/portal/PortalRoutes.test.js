@@ -11,6 +11,8 @@ const mockDeferred = { value: false };
 const mockSettingsRoles = [];
 // Every render of the Admin dashboard: which role, and whether it was handed the scholarships destination.
 const mockAdminRenders = [];
+// Every render of the attendance roster: the role and read-only flag the route handed it.
+const mockRosterRenders = [];
 jest.mock('./StatesHarness', () => ({ __esModule: true, default: () => 'HARNESS' }));
 jest.mock('./screens/AdminDashboard', () => {
   const { createElement } = require('react');
@@ -36,7 +38,12 @@ jest.mock('./screens/AdminScholarships', () => {
   };
 });
 // The staff homes a refused role is sent to: stand-ins, so no real screen runs its live reads here.
-jest.mock('./screens/CoachDashboard', () => ({ __esModule: true, default: () => 'COACH HOME' }));
+jest.mock('./screens/CoachDashboard', () => ({ __esModule: true, default: ({ role, specialistId }) => `COACH HOME as ${role}${specialistId ? '/' + specialistId : ''}` }));
+jest.mock('./screens/Roster', () => ({
+  __esModule: true,
+  default: () => 'ROSTER',
+  SessionAttendance: ({ role, readOnly }) => { mockRosterRenders.push({ role, readOnly }); return `ATTENDANCE as ${role}${readOnly ? ' (view only)' : ''}`; },
+}));
 jest.mock('./screens/SpecialistDay', () => ({ __esModule: true, default: () => 'MY SESSIONS' }));
 jest.mock('./screens/CommitmentContract', () => ({ __esModule: true, default: () => 'CONTRACT' }));
 jest.mock('./screens/AuthAction', () => ({ __esModule: true, default: () => 'AUTH ACTION' }));
@@ -96,6 +103,7 @@ afterEach(() => {
   mockDeferred.value = false;
   mockSettingsRoles.length = 0;
   mockAdminRenders.length = 0;
+  mockRosterRenders.length = 0;
   delete process.env.REACT_APP_CONTRACT_ENABLED;
 });
 
@@ -282,7 +290,7 @@ describe('/portal/admin/scholarships is the owner alone (2026-10-01)', () => {
     mockLive.value = true;
     const refused = [
       [{ role: 'ops' }, '/portal/admin', 'ADMIN as ops'],
-      [{ role: 'coach' }, '/portal/coach', 'COACH HOME'],
+      [{ role: 'coach' }, '/portal/coach', 'COACH HOME as coach'],
       [{ role: 'mental', specialistId: 'mental' }, '/portal/my-sessions', 'MY SESSIONS'],
       [{ role: 'parent', householdId: 'hh' }, '/portal/family', 'FAMILY HOME'],
       [{ role: 'athlete', athleteId: 'a1' }, '/portal/home', 'ATHLETE HOME'],
@@ -379,21 +387,56 @@ test("a coach's old Capture link lands on their own home (Diagnostic Capture is 
   mockUser.value = { uid: 'c1', role: 'coach' };
   const r = await mount('/portal/capture');
   expect(r.pathname()).toBe('/portal/coach');
-  expect(r.container.textContent).toBe('COACH HOME');
+  expect(r.container.textContent).toBe('COACH HOME as coach');
   await r.unmount();
 });
 
-test('the golf day view opens for owners and ops too; a specialist is sent to their own sessions (owner ruling 2026-11-02)', async () => {
+test('the golf day view opens for owners, ops, and both specialists (owner rulings 2026-11-02 and 2026-11-03)', async () => {
   mockLive.value = true;
-  for (const role of ['owner', 'ops']) {
-    mockUser.value = { uid: `u-${role}`, role };
+  // Each viewer's own role (and Phil's specialistId) reaches the screen, so it renders their bar.
+  const viewers = [
+    [{ uid: 'u-owner', role: 'owner' }, 'COACH HOME as owner'],
+    [{ uid: 'u-ops', role: 'ops' }, 'COACH HOME as ops'],
+    [{ uid: 'y', role: 'mental', specialistId: 'mental' }, 'COACH HOME as mental/mental'],
+    [{ uid: 'p', role: 'coach', specialistId: 'phil' }, 'COACH HOME as coach/phil'],
+  ];
+  for (const [user, home] of viewers) {
+    mockUser.value = user;
     const r = await mount('/portal/coach');
     expect(r.pathname()).toBe('/portal/coach');
-    expect(r.container.textContent).toBe('COACH HOME');
+    expect(r.container.textContent).toBe(home);
     await r.unmount();
   }
+  // A specialist still lands on their own sessions after sign-in.
   mockUser.value = { uid: 'y', role: 'mental', specialistId: 'mental' };
-  const y = await mount('/portal/coach');
+  const y = await mount('/portal');
   expect(y.pathname()).toBe('/portal/my-sessions');
   await y.unmount();
+});
+
+test('a roster opens read-only exactly where the rules would refuse the viewer, and never paints writable first (owner ruling 2026-11-03)', async () => {
+  mockLive.value = true;
+  // A fresh live session: the route's own useAuthSession starts unresolved.
+  mockDeferred.value = true;
+  const cases = [
+    [{ uid: 'y', role: 'mental', specialistId: 'mental' }, 'training', true],
+    [{ uid: 'y', role: 'mental', specialistId: 'mental' }, 'mental', false],
+    [{ uid: 'p', role: 'coach', specialistId: 'phil' }, 'training', false],
+    [{ uid: 'p', role: 'coach', specialistId: 'phil' }, 'phil', false],
+    [{ uid: 'p', role: 'coach', specialistId: 'phil' }, 'mental', true],
+    [{ uid: 'u-ops', role: 'ops' }, 'training', true],
+    [{ uid: 'u-own', role: 'owner' }, 'tournament', false],
+    [{ uid: 'u-own', role: 'owner' }, 'phil', true],
+  ];
+  for (const [user, type, readOnly] of cases) {
+    mockUser.value = user;
+    mockRosterRenders.length = 0;
+    const r = await mount({ pathname: '/portal/attendance', state: { sessionId: 's1', block: { date: '2026-11-03', time: '5:00 PM', type, name: null, meta: null } } });
+    expect(r.pathname()).toBe('/portal/attendance');
+    expect(r.container.textContent).toBe(`ATTENDANCE as ${user.role}${readOnly ? ' (view only)' : ''}`);
+    // No render of the roster ran off the unresolved session (role 'coach', writable).
+    expect(mockRosterRenders.length).toBeGreaterThan(0);
+    expect([...new Set(mockRosterRenders.map((x) => `${x.role}:${x.readOnly}`))]).toEqual([`${user.role}:${readOnly}`]);
+    await r.unmount();
+  }
 });
