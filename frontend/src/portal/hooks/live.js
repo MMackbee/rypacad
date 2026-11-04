@@ -1218,9 +1218,10 @@ export async function deleteContractLog({ athleteId, date }) {
  * reads too (get()-indirection keyed off a field the query does NOT filter
  * on is the well-established "join" pattern for row-level list security), so
  * no new rules grant was needed; verified against the emulator (routing
- * report). A side effect worth knowing: on a block shared across coaches,
- * each coach's roster silently shows only their own assigned athletes,
- * consistent with "coach → assigned athletes only, by assignment not role."
+ * report). 2026-11-04: the bookings read rule's coach branch is BY ROLE
+ * (any coach reads any roster) and a coach reads each athlete profile by
+ * id (athletes `allow get`) - the assignment join described above never
+ * matched, since no athlete carries a coachId.
  *
  * Query: sessionId == AND status in [...] rides the existing
  * (sessionId ASC, status ASC) composite (firestore.indexes.json) — no new

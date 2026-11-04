@@ -16,6 +16,8 @@ import useRoster from '../hooks/useRoster';
 import * as hooks from '../hooks';
 import { useCoachRoster, useSession } from '../hooks';
 import { isLive } from '../hooks/live';
+import { bump } from '../hooks/invalidate';
+import RosterLoadNotice from '../components/RosterLoadNotice';
 import { ageGroupFor } from '../data/schedule';
 import { attendeeNoteFor } from '../data/specialists';
 import { DEFAULT_DURATION_MINUTES } from '../data/schedule';
@@ -132,6 +134,10 @@ export default function Roster({ bare = false, onSignOut, onOpenAthlete }) {
           <Card large>
             <Body size={12}>Loading your roster…</Body>
           </Card>
+        ) : rosterState.error ? (
+          // A list that failed to load says so (review 2026-11-04) - never
+          // "nobody is assigned", a fact this screen did not verify.
+          <RosterLoadNotice error={rosterState.error} />
         ) : athletes.length ? (
           <Card large>
             <SectionLabel style={{ marginBottom: 6 }}>Your athletes · {athletes.length}</SectionLabel>
@@ -163,8 +169,10 @@ export default function Roster({ bare = false, onSignOut, onOpenAthlete }) {
             }}
           >
             <ScreenTitle size={17}>No assigned athletes</ScreenTitle>
+            {/* 2026-11-04: nobody is assigned to anyone yet, and this tab is
+                named Roster - say where today's kids are. */}
             <Body size={12} style={{ marginTop: 8 }}>
-              Athletes assigned to you will show up here.
+              Nobody is assigned to you yet. Today's blocks, and who is booked in each, are on the Today tab.
             </Body>
           </div>
         )}
@@ -172,6 +180,9 @@ export default function Roster({ bare = false, onSignOut, onOpenAthlete }) {
     </PhoneFrame>
   );
 }
+
+// No rows yet: one shared empty list, so the memo keyed on it stays stable.
+const NO_ROWS = [];
 
 /**
  * 13 · Session Roster & Attendance - coach.
@@ -269,6 +280,14 @@ export function SessionAttendance({ variant = 'pre', bare = false, onBack, sessi
   // only used when `live` below is true.
   const liveAttendance = useSessionAttendance(sessionId);
   const live = isLive() && sessionId != null;
+  // Keep the last good rows while a refetch is in flight (review 2026-11-04):
+  // every mark() bumps 'bookings' and useSeedResource blanks `data` on each
+  // reload, so the roster vanished and the counters read 0 on every IN/OUT
+  // tap. The loading line shows on the first load only.
+  const lastRows = useRef(null);
+  if (liveAttendance.data) lastRows.current = liveAttendance.data;
+  const rows = liveAttendance.data ?? lastRows.current ?? NO_ROWS;
+  const firstLoad = live && liveAttendance.loading && !lastRows.current;
   // Assessments (2026-10-14 spec 5): which athletes have an open window, for
   // the golf coach's "Clubhead speed" entry on a training session. Read only
   // when the route gave the entry (a viewer the rules let read windows).
@@ -280,16 +299,17 @@ export function SessionAttendance({ variant = 'pre', bare = false, onBack, sessi
   const [view, setView] = useState('attendance'); // 'attendance' | 'results'
 
   const bookingByAthlete = useMemo(() => {
-    if (!liveAttendance.data) return new Map();
-    return new Map(liveAttendance.data.map((r) => [r.athleteId, r.bookingId]));
-  }, [liveAttendance.data]);
+    return new Map(rows.map((r) => [r.athleteId, r.bookingId]));
+  }, [rows]);
 
   // bookings.status -> the roster's three-state mark (Sprint 6 pin: IN ->
   // 'attended', OUT -> 'noshow', clearing a mark -> 'confirmed'/unmarked).
   const roster = live
-    ? (liveAttendance.data ?? []).map((r) => ({
+    ? rows.map((r) => ({
         id: r.athleteId,
-        name: r.name,
+        // A booking whose athlete could not be read keeps its row
+        // (hooks/index.js liveSessionAttendance) - marks still work on it.
+        name: r.name ?? 'Name unavailable',
         // Contract v2.1: a Yannick 1:1 the family sent a parent to is still
         // the athlete's row (their token paid for it) - the meta says who
         // is actually in the room.
@@ -298,7 +318,7 @@ export function SessionAttendance({ variant = 'pre', bare = false, onBack, sessi
     : demoRoster;
   const marks = live
     ? Object.fromEntries(
-        (liveAttendance.data ?? [])
+        rows
           .map((r) => [r.athleteId, r.status === 'attended' ? 'in' : r.status === 'noshow' ? 'out' : null])
           .filter(([, v]) => v != null)
       )
@@ -433,7 +453,7 @@ export function SessionAttendance({ variant = 'pre', bare = false, onBack, sessi
   // sessionId - the states gallery): the demo roster's own unmarked count is
   // the closest analog, so the confirm sheet previews a believable number.
   const cancellableCount = live
-    ? (liveAttendance.data ?? []).filter((r) => r.status === 'confirmed').length
+    ? rows.filter((r) => r.status === 'confirmed').length
     : counts.unmarked;
   const [cancelSheetOpen, setCancelSheetOpen] = useState(false);
   const [localCancelled, setLocalCancelled] = useState(false);
@@ -588,8 +608,10 @@ export function SessionAttendance({ variant = 'pre', bare = false, onBack, sessi
         {/* Sprint 7 pin (TEAM.md): "Enter Tour results" on a TOURNAMENT session
             only - the block/type info the screen already receives. Never
             time-gated, same as attendance's Start session - a coach may
-            legitimately enter or correct results at any point. */}
-        {session?.type === 'tournament' ? (
+            legitimately enter or correct results at any point. Hidden while
+            the roster is on its first load or failed to load (review
+            2026-11-04): the score sheet would open empty with no word why. */}
+        {session?.type === 'tournament' && !(firstLoad || (live && liveAttendance.error)) ? (
           <div style={{ marginBottom: 16 }}>
             <Button
               variant="secondary"
@@ -600,6 +622,17 @@ export function SessionAttendance({ variant = 'pre', bare = false, onBack, sessi
               {tournamentResults.data?.results?.length ? 'Edit Tour results' : 'Enter Tour results'}
             </Button>
           </div>
+        ) : null}
+        {/* A roster still on its first load, or one that could not load,
+            says so (2026-11-04): the counters read 0 either way, and a coach
+            must not take that for an empty block. A cancelled session's own
+            card already explains an empty list, so no second notice there. */}
+        {firstLoad ? (
+          <Body size={12} style={{ textAlign: 'center', marginBottom: 16 }}>
+            Loading the roster…
+          </Body>
+        ) : live && liveAttendance.error && !sessionCancelled ? (
+          <RosterLoadNotice error={liveAttendance.error} onRetry={() => bump('bookings')} style={{ marginBottom: 16 }} />
         ) : null}
         {roster.map((athlete, i) => {
           const value = marks[athlete.id] ?? null;

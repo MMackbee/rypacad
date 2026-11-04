@@ -15,7 +15,8 @@ rules_version = '2';
 //
 // Assumption (flagged in the routing report): athletes/{id}.coachId and
 // sessions.coachId store the coach's auth uid, so "assigned coach" is
-// resource.data.coachId == request.auth.uid.
+// resource.data.coachId == request.auth.uid. 2026-11-04: a coach also reads
+// ANY athlete profile by id (athletes `allow get` below); lists stay by coachId.
 //
 // NOTE for the deploy gate (PM/user only — agents never deploy): this file
 // replaces the legacy dev-permissive rules, including the `/{document=**}`
@@ -331,11 +332,33 @@ service cloud.firestore {
 
     // ---- athletes ------------------------------------------------------
     // Matrix: "athlete → own records; parent → linked athletes; coach →
-    // assigned athletes only (coachId match, never just role); mental →
+    // any profile by id, lists of assigned athletes only (2026-11-04; the
+    // coachId match was the whole coach grant before that); mental →
     // academy-wide reads; ops → enrollment/completion; owner → all".
     // List queries must carry the matching equality filter (parent:
     // householdId ==, coach: coachId ==) or the query is denied wholesale.
     match /athletes/{athleteId} {
+      // 2026-11-04 (day 2 of the season, Jenn Huber's report): no athlete
+      // carries a coachId - there is no assignment system - so the coach
+      // clause in the read rule below never let a swing coach read one
+      // profile, and every roster a coach opened emptied (the attendance
+      // screen's per-booking name join). Any coach reads an athlete's
+      // profile BY ID, the way the bookings match already lets any coach
+      // read any roster ("coach reads like staff"). A LIST stays on the
+      // read rule below: a plain coach lists only assigned athletes (the
+      // Students tab), never the academy. private/medical is not widened.
+      // What rides along with the name on a profile get (the ruling the
+      // owner is accepting, review 2026-11-04): dob, loginEmail, packageId
+      // / pendingPackage, contractMinutes / contractStart, handicap, the
+      // facilityAccess fields, billing (status, Stripe customer /
+      // subscription / checkout ids) and consents, signature included.
+      // And since any coach lists any session's bookings by role, bookings
+      // -> athleteIds -> gets reaches every booked athlete: the LIST guard
+      // bounds nothing a coach cannot get one by one. The narrowing, if
+      // wanted later: denormalize athleteName onto bookings and have the
+      // roster join (hooks/index.js liveSessionAttendance) read that.
+      allow get: if signedIn() && me().role == 'coach';
+
       // v1.7.1: a specialist (users.specialistId — Yannick, Phil) teaches
       // sessions any academy athlete can book, so they read athlete
       // profiles academy-wide like mental does — their roster and
@@ -954,7 +977,8 @@ service cloud.firestore {
     // that would let a group query return every OTHER coach's assigned
     // athletes' diagnostics too, which is exactly the cross-family leak this
     // file's own non-negotiable ("assigned athletes only, by assignment,
-    // never by role") exists to prevent. Instead a coach's read is proven
+    // never by role" - a profile GET is open to any coach since 2026-11-04;
+    // this group query is not) exists to prevent. Instead a coach's read is proven
     // per-document the same way the bookings/contractLogs coach clauses
     // already do it: athleteData(resource.data.athleteId).coachId == caller,
     // which the diagnostics shape guarantees resource.data.athleteId always

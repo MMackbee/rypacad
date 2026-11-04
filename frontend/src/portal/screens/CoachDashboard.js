@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { color, font, glow, radius } from '../tokens';
 import AthleteRow from '../components/AthleteRow';
+import RosterLoadNotice from '../components/RosterLoadNotice';
 import BottomTabBar from '../components/BottomTabBar';
 import Button from '../components/Button';
 import { SessionsCalendarCard } from '../components/CalendarCard';
@@ -24,10 +25,10 @@ import { reservedTag } from '../data/reserved';
  * 12 · Coach Dashboard - coach.
  * States: Sessions today, Multiple concurrent blocks, No sessions today.
  *
- * Access rule: every query is filtered by coach *assignment*, not just by role.
- * A coach sees only their own assigned athletes - no cross-family or
- * cross-coach visibility. The hook shape reflects that; the server must enforce
- * it.
+ * Access rule: the Students list is filtered by coach *assignment* (coachId
+ * ==, and nobody is assigned yet); since 2026-11-04 a coach reads any day's
+ * blocks, their bookings and each booked athlete's profile by id (the Today
+ * tab's rosters). The server enforces both.
  *
  * Sprint 5 pin: Overview / Students / Sessions are three genuinely different
  * views rather than the same block list under three tab labels - today at a
@@ -103,7 +104,7 @@ export default function CoachDashboard({ variant = 'today', bare = false, role =
         {tab === 'overview' ? (
           <OverviewTab data={data} blocks={blocks} none={none} onOpenRoster={onOpenRoster} />
         ) : tab === 'students' && students ? (
-          <StudentsTab athletes={roster.data ?? []} loading={roster.loading} onOpenAthlete={onOpenAthlete} />
+          <StudentsTab athletes={roster.data ?? []} loading={roster.loading} error={roster.error} onOpenAthlete={onOpenAthlete} />
         ) : (
           <SessionsTab
             // Live blocks carry real sessionIds; seed blocks don't, so the
@@ -159,7 +160,7 @@ function QuickCounts({ blocks, attention }) {
 }
 
 /** The coach's full assigned roster - every athlete, not one session's attendance. */
-function StudentsTab({ athletes, loading, onOpenAthlete }) {
+function StudentsTab({ athletes, loading, error, onOpenAthlete }) {
   if (loading) {
     return (
       <Card large>
@@ -167,6 +168,9 @@ function StudentsTab({ athletes, loading, onOpenAthlete }) {
       </Card>
     );
   }
+  // A list that failed to load says so (review 2026-11-04) - never "nobody
+  // is assigned", a fact this screen did not verify.
+  if (error) return <RosterLoadNotice error={error} />;
   if (!athletes.length) {
     return (
       <div
@@ -179,7 +183,7 @@ function StudentsTab({ athletes, loading, onOpenAthlete }) {
       >
         <ScreenTitle size={17}>No assigned athletes</ScreenTitle>
         <Body size={12} style={{ marginTop: 8 }}>
-          Athletes assigned to you will show up here.
+          Nobody is assigned to you yet. Today's blocks, and who is booked in each, are on the Overview tab.
         </Body>
       </div>
     );

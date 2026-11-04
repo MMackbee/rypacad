@@ -1,6 +1,6 @@
 import React from 'react';
 import { renderScreen } from './testRender';
-import { SessionAttendance } from './Roster';
+import Roster, { SessionAttendance } from './Roster';
 import { attendanceReadOnlyFor } from '../data/specialists';
 
 // Owner ruling 2026-11-03: Phil and Yannick see the golf day. A roster the
@@ -10,24 +10,29 @@ import { attendanceReadOnlyFor } from '../data/specialists';
 // Cancel session by role.
 let mockLive;
 let mockNote;
+let mockError;
+let mockLoading;
+let mockRows;
+let mockStatus;
+let mockCoachError;
 const mockWrites = { note: [] };
 jest.mock('../hooks', () => ({
-  useCoachRoster: () => ({ data: [], loading: false }),
+  useCoachRoster: () => ({ data: mockCoachError ? null : [], loading: false, error: mockCoachError ?? null }),
   useSession: () => ({ data: { type: 'training', blockLabel: 'Block 1 of 3', name: 'Training block', meta: '3:00-4:00 PM', startsIn: 'Starts in 12 min' } }),
   useSessionAttendance: () => ({
-    data: [
+    data: mockError || mockLoading ? null : mockRows ?? [
       { bookingId: 'b1', athleteId: 'a1', name: 'Jordan Whitfield', status: 'confirmed' },
       { bookingId: 'b2', athleteId: 'a2', name: 'Avery Nguyen', status: 'noshow', noshowReason: 'Sick, parent texted' },
       { bookingId: 'b3', athleteId: 'a3', name: 'Sam Ortiz', status: 'attended' },
     ],
-    loading: false,
-    error: null,
+    loading: Boolean(mockLoading),
+    error: mockError ?? null,
     mark: () => {},
     setReason: async () => {},
     setSessionNote: async (sessionId, note) => { mockWrites.note.push([sessionId, note]); },
     cancelSession: async () => {},
     sessionNote: mockNote,
-    sessionStatus: 'scheduled',
+    sessionStatus: mockStatus,
     sessionMaxHandicap: null,
   }),
   genericSessionName: () => 'Training block',
@@ -49,8 +54,19 @@ const noteEditor = (r) => r.container.querySelector('input[placeholder^="e.g. Ra
 beforeEach(() => {
   mockLive = true;
   mockNote = 'Cones set up for Thursday';
+  mockError = null;
+  mockLoading = false;
+  mockRows = null;
+  mockStatus = 'scheduled';
+  mockCoachError = null;
   mockWrites.note.length = 0;
 });
+// The three counters, in document order, as "0 In 0 Out 0 Unmarked".
+const counters = (r) => {
+  const m = r.text().match(/(\d+)\s*In\s*(\d+)\s*Out\s*(\d+)\s*Unmarked/);
+  return m ? `${m[1]} In ${m[2]} Out ${m[3]} Unmarked` : '';
+};
+const PERMISSION = () => Object.assign(new Error('fetchAthlete: Missing or insufficient permissions.'), { code: 'permission-denied' });
 
 test('read-only (Yannick on a golf block): every row shows its mark as a badge; no IN/OUT, no Start session; the saved reason is text', async () => {
   const r = await roster({ readOnly: true, role: 'mental' });
@@ -136,4 +152,105 @@ test('who marks what follows the rules: coach and owner on golf, a specialist on
   expect(ro('ops', 'training')).toBe(true);
   expect(ro('ops', 'mental')).toBe(true);
   expect(ro(null, 'training')).toBe(true);
+});
+
+test("a roster the rules refuse (a swing coach, 2026-11-04) says so instead of reading as an empty block: names the owner, no retry", async () => {
+  mockError = PERMISSION();
+  const r = await roster({});
+  const text = r.text();
+  expect(text).toContain("The roster didn't load");
+  expect(text).toContain("Your account can't read athletes, so this roster can't load. Tell the owner to check your access.");
+  expect(counters(r)).toBe('0 In 0 Out 0 Unmarked');
+  expect(controls(r)).toBe(0);
+  expect(r.button('Try again')).toBeNull();
+  await r.unmount();
+});
+
+test('any other load failure is the titled notice with a Try again, never an empty block', async () => {
+  mockError = new Error('fetchBookingsBySession: network');
+  const r = await roster({});
+  const text = r.text();
+  expect(text).toContain("The roster didn't load");
+  expect(text).toContain('Check your connection and try again.');
+  expect(text).not.toContain("Your account can't read athletes");
+  expect(r.button('Try again')).not.toBeNull();
+  await r.click('Try again');
+  expect(counters(r)).toBe('0 In 0 Out 0 Unmarked');
+  await r.unmount();
+});
+
+test('the first load says so: a loading line, no rows, no controls', async () => {
+  mockLoading = true;
+  const r = await roster({});
+  expect(r.text()).toContain('Loading the roster…');
+  expect(r.text()).not.toContain('Jordan Whitfield');
+  expect(controls(r)).toBe(0);
+  await r.unmount();
+});
+
+test('a refetch after a mark keeps the rows in place: no loading line, the controls stay', async () => {
+  const r = await roster({});
+  expect(controls(r)).toBe(6);
+  mockLoading = true; // the hook blanks data while it re-reads after a mark
+  await r.rerender(<SessionAttendance bare sessionId="2026-11-03-5" block={block} onBack={() => {}} />);
+  expect(controls(r)).toBe(6);
+  expect(r.text()).toContain('Jordan Whitfield');
+  expect(r.text()).not.toContain('Loading the roster…');
+  await r.unmount();
+});
+
+test('seed/demo mode (not live) never shows the loading line or the load notice', async () => {
+  mockLive = false;
+  mockError = PERMISSION();
+  const r = await roster({});
+  expect(r.text()).not.toContain('Loading the roster…');
+  expect(r.text()).not.toContain("roster didn't load");
+  expect(r.text()).not.toContain("Your account can't read athletes");
+  await r.unmount();
+});
+
+test('a booking whose athlete could not be read keeps its row as Name unavailable, with its controls', async () => {
+  mockRows = [
+    { bookingId: 'b1', athleteId: 'a1', name: 'Jordan Whitfield', status: 'confirmed' },
+    { bookingId: 'b4', athleteId: 'a4', name: null, status: 'confirmed' },
+  ];
+  const r = await roster({});
+  expect(r.text()).toContain('Name unavailable');
+  expect(controls(r)).toBe(4);
+  expect(counters(r)).toBe('0 In 0 Out 2 Unmarked');
+  await r.unmount();
+});
+
+test('a cancelled session whose roster failed to load shows the cancelled card alone', async () => {
+  mockStatus = 'cancelled';
+  mockError = new Error('fetchBookingsBySession: network');
+  const r = await roster({});
+  expect(r.text()).toContain('This session was cancelled');
+  expect(r.text()).not.toContain("roster didn't load");
+  await r.unmount();
+});
+
+test('a Tour block hides Enter Tour results while the roster is on its first load or failed, and shows it once loaded', async () => {
+  const tour = { ...block, type: 'tournament', name: 'RYP Tour' };
+  mockLoading = true;
+  const loading = await roster({ block: tour });
+  expect(loading.button('Enter Tour results')).toBeNull();
+  await loading.unmount();
+  mockLoading = false;
+  mockError = new Error('fetchBookingsBySession: network');
+  const failed = await roster({ block: tour });
+  expect(failed.button('Enter Tour results')).toBeNull();
+  await failed.unmount();
+  mockError = null;
+  const loaded = await roster({ block: tour });
+  expect(loaded.button('Enter Tour results')).not.toBeNull();
+  await loaded.unmount();
+});
+
+test("the bottom-tab Roster says when the assigned list failed to load, never 'nobody is assigned'", async () => {
+  mockCoachError = PERMISSION();
+  const r = await renderScreen(<Roster bare />);
+  expect(r.text()).toContain("Your account can't read athletes, so this roster can't load.");
+  expect(r.text()).not.toContain('No assigned athletes');
+  await r.unmount();
 });

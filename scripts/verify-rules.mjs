@@ -1113,6 +1113,16 @@ async function taskAttendance() {
   expect('ops cannot mark attendance', await mark(t.ops, ids.training, 'confirmed'), 403);
   expect('a parent cannot mark attendance', await mark(t.parent, ids.training, 'confirmed'), 403);
   expect('an athlete cannot mark attendance', await mark(t.athlete, ids.training, 'confirmed'), 403);
+  // 2026-11-04 (Jenn Huber's report): a roster's names are per-athlete gets
+  // and no athlete carries a coachId - any coach reads a profile by id,
+  // never a list of the academy, never the medical sheet.
+  const getAs = (auth, path) => call('GET', path, null, auth).then((r) => r.status);
+  expect('a coach reads an athlete profile by id (coachId null)', await getAs(t.coach, '/athletes/ath-active'), 200);
+  expect('a coach reads one from another household too', await getAs(t.coach, '/athletes/ath-other'), 200);
+  expect('a coach still cannot list every athlete', await listAs(t.coach, 'athletes', {}), 403);
+  expect("a coach still cannot read an athlete's medical sheet", await getAs(t.coach, '/athletes/ath-active/private/medical'), 403);
+  expect('a login with no role reads no athlete', await getAs(t.stranger, '/athletes/ath-active'), 403);
+  expect('a parent in another household reads no athlete', await getAs(t.other, '/athletes/ath-active'), 403);
   for (const id of Object.values(ids)) await del('bookings', id);
   await del('users', philUid);
   await del('users', mentalUid);
