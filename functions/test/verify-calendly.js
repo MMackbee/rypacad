@@ -100,6 +100,16 @@ async function seed() {
   // Rook: a household whose guardian email has NO users doc (2026-11-04 fallback).
   set('households', 'rook', {name: 'Rook family', periodAnchorDay: 1, guardian: {name: 'Rhea Rook', email: 'rhea@example.test', phone: null}});
   set('athletes', 'rae', {name: 'Rae Rook', householdId: 'rook', packageId: 't-6'});
+  // Review 2026-11-04: emails stored as the family typed them (mixed case), and staff logins with no family.
+  set('households', 'stone', {name: 'Stone family', periodAnchorDay: 1, guardian: {name: 'Jo Stone', email: 'Jo.Stone@Example.test', phone: null}});
+  set('athletes', 'tia', {name: 'Tia Stone', householdId: 'stone', packageId: 't-6'});
+  set('users', 'u-jo', {role: 'parent', householdId: 'stone', email: 'Jo.Stone@Example.test'});
+  set('households', 'vale', {name: 'Vale family', periodAnchorDay: 1, guardian: {name: 'Tess Vale', email: 'Tess.Vale@Example.test', phone: null}});
+  set('athletes', 'ivy', {name: 'Ivy Vale', householdId: 'vale', packageId: 't-6'});
+  set('users', 'u-ops', {role: 'ops', email: 'ops@example.test', athleteId: null, householdId: null});
+  set('households', 'hart', {name: 'Hart family', periodAnchorDay: 1, guardian: {name: 'Cal Hart', email: 'coach.hart@example.test', phone: null}});
+  set('athletes', 'hal', {name: 'Hal Hart', householdId: 'hart', packageId: 't-6'});
+  set('users', 'u-hart', {role: 'coach', email: 'coach.hart@example.test', athleteId: null, householdId: null});
   set('packages', 't-6', {name: '6 tokens', kind: 'tokens', tokens: 6, windowDays: 30});
   set('packages', 't-12', {name: '12 tokens', kind: 'tokens', tokens: 12, windowDays: 30});
   set('packages', 'elite', {name: 'Elite', kind: 'elite', tokens: null, windowDays: 45, access247: true});
@@ -200,6 +210,22 @@ async function main() {
   check('no users doc, the guardian email on the household -> its only kid', [r.outcome, (await get('calendlyEvents', `${INV(17)}_invitee.created`)).via, await exists('bookings', `rae_${EVT(17)}`)], ['applied', 'household', true]);
   r = await run(variant('invitee-created', 18, {utm: 'femi', email: 'nina@example.test', athleteName: 'Lena', parentEmail: '', start: '2026-12-07T22:00:00Z'}));
   check("a forwarded link books the booker's own kid, never the link's", [r.outcome, await exists('bookings', `lena_${EVT(18)}`), await exists('bookings', `femi_${EVT(18)}`), (await get('calendlyEvents', `${INV(18)}_invitee.created`)).via], ['applied', true, false, 'household-name']);
+
+  log('\nSTEP E3  review 2026-11-04: emails stored in mixed case are matched as typed; a staff login never stops the search');
+  const via = async (n) => (await get('calendlyEvents', `${INV(n)}_invitee.created`)).via;
+  r = await run(variant('invitee-created', 19, {utm: null, email: 'Jo.Stone@Example.test', parentEmail: '', athleteName: '', start: '2026-12-08T22:00:00Z'}));
+  check('invitee email exactly as the users doc stores it (mixed case) -> the only kid', [r.outcome, await via(19), await exists('bookings', `tia_${EVT(19)}`)], ['applied', 'household', true]);
+  check('the ledger keeps the email lower-cased', (await get('calendlyEvents', `${INV(19)}_invitee.created`)).invitee.email, 'jo.stone@example.test');
+  r = await run(variant('invitee-created', 20, {utm: 'tia', email: 'Jo.Stone@Example.test', parentEmail: 'Jo.Stone@Example.test', athleteName: 'Tia Stone', start: '2027-01-05T22:00:00Z'}));
+  check("that family's own portal link (utm_content) is owned", [r.outcome, await via(20), await exists('bookings', `tia_${EVT(20)}`)], ['applied', 'utm', true]);
+  r = await run(variant('invitee-created', 21, {utm: null, email: 'grandma@example.test', parentEmail: 'Jo.Stone@Example.test', athleteName: '', start: '2027-02-02T22:00:00Z'}));
+  check('a mixed-case "Parent email" answer', [r.outcome, await via(21), await exists('bookings', `tia_${EVT(21)}`)], ['applied', 'household', true]);
+  r = await run(variant('invitee-created', 22, {utm: null, email: 'Tess.Vale@Example.test', parentEmail: '', athleteName: '', start: '2026-12-08T23:00:00Z'}));
+  check('no users doc, a mixed-case guardian email as stored -> its only kid', [r.outcome, await via(22), await exists('bookings', `ivy_${EVT(22)}`)], ['applied', 'household', true]);
+  r = await run(variant('invitee-created', 23, {utm: null, email: 'ops@example.test', parentEmail: 'kemi@example.test', athleteName: '', start: '2027-01-12T22:00:00Z'}));
+  check('a staff login as the invitee + a family\'s "Parent email" answer -> that family', [r.outcome, await via(23), await exists('bookings', `femi_${EVT(23)}`)], ['applied', 'household', true]);
+  r = await run(variant('invitee-created', 24, {utm: null, email: 'coach.hart@example.test', parentEmail: '', athleteName: '', start: '2026-12-09T22:00:00Z'}));
+  check('a staff login that is also a household guardian email -> that household', [r.outcome, await via(24), await exists('bookings', `hal_${EVT(24)}`)], ['applied', 'household', true]);
 
   log('\nSTEP F  resolved by email through a parent account, attendee parent');
   r = await run(variant('invitee-created', 5, {utm: null, email: 'Kemi@Example.test', attendee: 'Parent', start: '2026-10-20T21:00:00Z'}));

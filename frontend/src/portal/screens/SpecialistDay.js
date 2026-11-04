@@ -17,6 +17,14 @@ import { SPECIALISTS, rosterNameFor } from '../data/specialists';
  */
 export const UNMATCHED_META = 'Booked on Calendly · not matched to a family yet';
 
+/**
+ * What a held row says when tapped (review 2026-11-04): it has no roster, so
+ * it never opens the attendance screen.
+ */
+export const UNMATCHED_HELP =
+  'This time was booked on Calendly, but the academy has not matched it to a family yet, so no one is on the roster. ' +
+  'The name shows up here once the academy links the booking, and the time frees up if the family cancels on Calendly.';
+
 /** The row's second line: who is in it, or why nobody shows. */
 function sessionMeta(s, names) {
   if (s.unresolved) return UNMATCHED_META;
@@ -77,6 +85,14 @@ export default function SpecialistDay({
       />
     ) : undefined;
   const specialist = SPECIALISTS.find((s) => s.id === activeId) ?? SPECIALISTS[0];
+  // Review 2026-11-04: a held row toggles its explanation instead of opening
+  // an empty attendance screen; every other row opens attendance as before.
+  const [heldOpen, setHeldOpen] = useState(null);
+  const rowClick = (s, type) => {
+    if (s.unresolved) return () => setHeldOpen((id) => (id === s.sessionId ? null : s.sessionId));
+    return onOpenSession ? () => onOpenSession({ ...s, type }) : undefined;
+  };
+  const heldNote = (s) => (s.unresolved && heldOpen === s.sessionId ? UNMATCHED_HELP : undefined);
   const { data, loading, error } = useSpecialistSessions(activeId);
   // Memoized so the day-grouping memo below keys off real data changes,
   // not a fresh [] minted every render (CRA exhaustive-deps).
@@ -165,7 +181,7 @@ export default function SpecialistDay({
               Today
             </SectionLabel>
             {todayGroup.sessions.map((s) => (
-              <TodaySessionCard key={s.sessionId} session={s} specialist={specialist} onOpenSession={onOpenSession} action={noteChip(s)} />
+              <TodaySessionCard key={s.sessionId} session={s} specialist={specialist} onClick={rowClick(s, specialist.id)} footnote={heldNote(s)} action={noteChip(s)} />
             ))}
           </div>
         ) : null}
@@ -205,7 +221,8 @@ export default function SpecialistDay({
                     type={activeId}
                     name={specialist.sessionNoun}
                     meta={sessionMeta(s, names)}
-                    onClick={onOpenSession ? () => onOpenSession({ ...s, type: activeId }) : undefined}
+                    onClick={rowClick(s, activeId)}
+                    footnote={heldNote(s)}
                     action={noteChip(s)}
                     trailing={
                       <CapacityPill state={s.booked >= s.capacity ? 'full' : 'available'}>
@@ -229,7 +246,7 @@ export default function SpecialistDay({
  * `live` variant (green border) so today's real work stands out above the
  * rest of the rolling window.
  */
-function TodaySessionCard({ session, specialist, onOpenSession, action }) {
+function TodaySessionCard({ session, specialist, onClick, footnote, action }) {
   const [time, meridiem] = (session.time || '').split(' ');
   const names = session.athletes.map(rosterNameFor).filter(Boolean);
   return (
@@ -240,7 +257,8 @@ function TodaySessionCard({ session, specialist, onOpenSession, action }) {
       variant="live"
       name={specialist.sessionNoun}
       meta={sessionMeta(session, names)}
-      onClick={onOpenSession ? () => onOpenSession({ ...session, type: specialist.id }) : undefined}
+      onClick={onClick}
+      footnote={footnote}
       action={action}
       trailing={
         <CapacityPill state={session.booked >= session.capacity ? 'full' : 'available'}>

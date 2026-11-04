@@ -9,7 +9,11 @@
  * webhook with the family's own login email and the athlete id, so the
  * booking, the token spend and the session are written exactly as a portal
  * booking would have been. The old ledger row is deleted first (it held
- * nothing else), so the replay is not a `duplicate`.
+ * nothing else), so the replay is not a `duplicate`; it is put back only if
+ * nothing replaced it. The login email is the household's parent users doc
+ * email exactly as stored (else its guardian email as stored): the webhook
+ * looks emails up as typed, then lower-cased. A booking whose held slot was
+ * already released is refused.
  *
  *   node scripts/calendly-unmatched.mjs --prod --list
  *   node scripts/calendly-unmatched.mjs --prod --link <inviteeUuid> --athlete <athleteId> \
@@ -28,7 +32,7 @@
 
 import crypto from 'node:crypto';
 import { spawnSync } from 'node:child_process';
-import { resolveTarget, queryCollection, getDoc, docName, commit, fsFields } from './lib/firestore-rest.mjs';
+import { resolveTarget, queryCollection, getDoc, docName, commit, fsFields, eqFilter } from './lib/firestore-rest.mjs';
 
 const args = process.argv.slice(2);
 const flag = (name) => args.includes(name);
@@ -137,11 +141,23 @@ async function main() {
   if (!row) die(`no ledger row calendlyEvents/${ledgerId}.`);
   if (row.outcome !== 'unresolved') die(`that booking is '${row.outcome}', not unresolved; nothing to link.`);
   if (await getDoc(target, 'calendlyEvents', `${inviteeUuid}_invitee.canceled`)) die('that booking was cancelled on Calendly; nothing to link.');
+  // Review 2026-11-04: a released hold (cancelled or rescheduled on Calendly, or cancelled in the app) is not linked.
+  const heldId = uuidOf(row.eventUri) ? `cal-${uuidOf(row.eventUri)}` : null;
+  const held = heldId ? await getDoc(target, 'sessions', heldId) : null;
+  if (held && held.status === 'cancelled') die(`sessions/${heldId} was already released (cancelled or rescheduled on Calendly, or cancelled in the app); nothing to link. If the family still has this booking on Calendly, paste this output to Claude.`);
   const athlete = await getDoc(target, 'athletes', athleteId);
   if (!athlete) die(`no athletes/${athleteId}.`);
   const household = athlete.householdId ? await getDoc(target, 'households', athlete.householdId) : null;
-  const email = household && household.guardian && household.guardian.email ? String(household.guardian.email).trim().toLowerCase() : null;
-  if (!email) die(`athlete ${athleteId} has no household guardian email; the webhook could not own the booking.`);
+  // The family's login exactly as stored (review 2026-11-04): users.email and guardian.email keep the case the
+  // family typed, and the webhook tries the email as sent before lower case. The parent users doc first (the one
+  // matching the guardian email when there are two), else the guardian email.
+  const guardianEmail = household && household.guardian && household.guardian.email ? String(household.guardian.email).trim() : null;
+  const parents = athlete.householdId
+    ? (await queryCollection(target, { from: [{ collectionId: 'users' }], where: eqFilter('householdId', athlete.householdId), limit: 20 })).filter((u) => u.role === 'parent' && u.email)
+    : [];
+  const parent = parents.find((u) => guardianEmail && String(u.email).trim().toLowerCase() === guardianEmail.toLowerCase()) || parents[0] || null;
+  const email = parent ? String(parent.email).trim() : guardianEmail;
+  if (!email) die(`athlete ${athleteId} has no parent login or household guardian email; the webhook could not own the booking.`);
 
   let start = row.slot && row.slot.startTime ? row.slot.startTime : null;
   let end = row.slot && row.slot.endTime ? row.slot.endTime : null;
@@ -215,8 +231,26 @@ async function main() {
   } else if (ok && out.outcome === 'unresolved') {
     console.log(`\nNOT LINKED: the webhook still could not place it (reason on the new ledger row: run --list). Paste this output to Claude.`);
   } else {
-    await commit(target, [restoreRow]);
-    console.log(`\nNOT LINKED: the webhook answered '${out.outcome || (res ? res.status : 'nothing')}'. The ledger row was put back unchanged; nothing else changed. Paste this output to Claude.`);
+    // Review 2026-11-04: the webhook commits before it answers, so a lost answer (or a 'duplicate') can hide a
+    // booking that landed. Put the old row back only if no new row is there, with a precondition so a row
+    // written meanwhile is never overwritten.
+    let current = null;
+    try { current = await getDoc(target, 'calendlyEvents', ledgerId); } catch (err) { console.log(`  (could not re-read calendlyEvents/${ledgerId}: ${String(err.message).slice(0, 160)})`); }
+    let restored = false;
+    if (!current) {
+      try {
+        await commit(target, [{ ...restoreRow, currentDocument: { exists: false } }]);
+        restored = true;
+      } catch (err) { console.log(`  (old row not put back: ${String(err.message).slice(0, 160)})`); }
+    }
+    const answered = out.outcome || (res ? res.status : 'nothing');
+    if (restored) {
+      console.log(`\nNOT LINKED: the webhook answered '${answered}'. The ledger row was put back unchanged; nothing else changed. Paste this output to Claude.`);
+    } else if (current) {
+      console.log(`\nCHECK: the webhook answered '${answered}', but the booking reached it: calendlyEvents/${ledgerId} now says '${current.outcome}'. The old row was left alone. Do not run --link again; run --list and paste this output to Claude.`);
+    } else {
+      console.log(`\nCHECK: the webhook answered '${answered}' and the old ledger row could not be put back (see above). Do not run --link again; run --list and paste this output to Claude.`);
+    }
   }
 }
 
