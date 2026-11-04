@@ -284,12 +284,17 @@ export default function BookSession({
     setLeaveFailure(null);
     setReserving(session.id);
     const mine = attempt.current;
+    const forId = isParent ? selectedAthleteId : null;
     const opts = { ...(isParent ? { athleteId: selectedAthleteId } : {}), ...(joinWaitlist ? { joinWaitlist: true } : {}) };
     Promise.resolve()
       .then(() => reserve(session, Object.keys(opts).length ? opts : undefined))
       .then((result) => {
         if (!live.current) return;
         setReserving(null);
+        // The parent switched child mid-flight: the write was the tapped
+        // child's, so the confirmation - its notes, its Repeat weekly - goes
+        // back to them first (review 2026-11-04). A success is never dropped.
+        if (forId && attempt.current !== mine) setSelectedAthleteId(forId);
         // Pin F: book() now resolves { status: 'waitlisted' } for a full
         // session instead of rejecting 'full' — same `booked` state either way.
         finalizeBooked(session, result?.status === 'waitlisted', result?.position ?? null, result?.chargedFrom ?? null, result?.graceTokenId ?? null);
@@ -327,9 +332,11 @@ export default function BookSession({
     if (leavingId || !athleteId) return;
     setLeaveFailure(null);
     setLeavingId(session.id);
+    const mine = attempt.current;
     leaveWaitlist({ sessionId: session.id, athleteId })
       .catch((err) => {
-        if (live.current) setLeaveFailure(leaveFailureCopy(err, athleteName));
+        // The day or child changed mid-flight: the banner would be about the old one.
+        if (live.current && attempt.current === mine) setLeaveFailure(leaveFailureCopy(err, athleteName));
       })
       .then(() => {
         if (live.current) setLeavingId(null);

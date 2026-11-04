@@ -168,6 +168,8 @@ describe('a paid monthly member: Buy an extra session', () => {
     const r = await renderScreen(<Billing bare />);
     expect(extraButtons(r, 'ava')).toEqual([]);
     expect(r.text()).toContain('December: 1 of 12 left');
+    // The open evidence beneath it adds up to the same count.
+    expect(r.text()).toContain('12 tokens · 11 already booked · 1 on a bonus token');
     await r.unmount();
   });
 

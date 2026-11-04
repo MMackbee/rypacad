@@ -114,6 +114,11 @@ function Chip({ tone, children }) {
 
 function Evidence({ member }) {
   const { spent, reserved, nextPeriod, lastPeriod, tokens } = member;
+  // The next period's spend as the meter's "<Month>: N of G left" counts it
+  // (period-charged rows) and the rows a bonus token paid for, apart - so the
+  // two lines on one card add up (review 2026-11-04).
+  const nextUsed = nextPeriod ? nextPeriod.used ?? nextPeriod.booked ?? 0 : 0;
+  const nextBonus = nextPeriod ? (nextPeriod.booked ?? 0) - nextUsed : 0;
   const rows = [...spent, ...reserved];
   return (
     <div style={{ marginTop: 12, borderTop: `1px solid ${color.ruleSoft}`, paddingTop: 6 }}>
@@ -140,7 +145,8 @@ function Evidence({ member }) {
         <Body size={11} tone={color.textTertiary} style={{ marginTop: 10 }}>
           Next period from {longDayLabel(nextPeriod.start)}:{' '}
           {tokens.unlimited ? 'unlimited' : `${nextPeriod.granted} token${nextPeriod.granted === 1 ? '' : 's'}`}
-          {nextPeriod.booked ? ` · ${nextPeriod.booked} already booked` : ''}
+          {nextUsed ? ` · ${nextUsed} already booked` : ''}
+          {nextBonus ? ` · ${nextBonus} on a bonus token` : ''}
           {nextPeriod.reserved ? ` · ${nextPeriod.reserved} on a waitlist` : ''}
         </Body>
       )}

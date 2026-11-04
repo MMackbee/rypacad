@@ -838,6 +838,39 @@ describe('waitlist hardening', () => {
     await r.unmount();
   });
 
+  test('a refusal that lands after the athlete tapped another day paints nothing under the new day', async () => {
+    let reject;
+    mockBook = () => new Promise((_, rej) => { reject = rej; });
+    const r = await renderScreen(<BookSession bare demoSelectedDate="2026-11-17" />);
+    await tap(cardAt(r, '4:00'));
+    await tap(td(r, '2026-11-12'));
+    expect(cardAt(r, '6:00')).not.toBeNull();
+    await act(async () => { reject(refusal('full', 'This session is full.')); });
+    expect(r.text()).not.toContain("Booking didn't go through");
+    await r.unmount();
+  });
+
+  test('a booking that lands after the parent switched child confirms as the tapped child: the screen goes back to them, and Repeat weekly books them', async () => {
+    mockBookingFor = 'parent';
+    mockHousehold = [
+      { id: 'k1', name: 'Ava', tokens: { left: 3, unlimited: false, grace: [] } },
+      { id: 'k2', name: 'Nico', tokens: { left: 3, unlimited: false, grace: [] } },
+    ];
+    let resolve;
+    mockBook = () => new Promise((res) => { resolve = res; });
+    const r = await renderScreen(<BookSession bare role="parent" demoSelectedDate="2026-11-17" />);
+    await tap(cardAt(r, '4:00'));
+    await r.click('Nico');
+    await act(async () => { resolve({ status: 'confirmed', chargedFrom: 'period' }); });
+    expect(mockBookCalls).toEqual([['s17', { athleteId: 'k1' }]]);
+    expect(r.text()).toContain('Repeat weekly');
+    const repeat = [...r.container.querySelectorAll('button')].find((b) => b.textContent.startsWith('Repeat every'));
+    await tap(repeat);
+    await r.flush();
+    expect(mockBookRecurring).toHaveBeenCalledWith(expect.objectContaining({ id: 's17' }), expect.objectContaining({ athleteId: 'k1' }));
+    await r.unmount();
+  });
+
   describe('already waiting', () => {
     beforeEach(() => {
       mockMonths['2026-11-01'][2].sessions = [block('s17', '2026-11-17', '4:00 PM', { booked: 6, waitlisted: true, waitlistPosition: 2, waitlistBy: { a1: 2 } })];
@@ -870,6 +903,18 @@ describe('waitlist hardening', () => {
       const r = await renderScreen(<BookSession bare demoSelectedDate="2026-11-17" />);
       await r.click('Leave waitlist');
       expect(r.text()).toContain('Jordan was just booked into this session.');
+      await r.unmount();
+    });
+
+    test('a leave refusal that lands after the athlete switched day paints nothing under the new day', async () => {
+      let reject;
+      mockLeave = () => new Promise((_, rej) => { reject = rej; });
+      const r = await renderScreen(<BookSession bare demoSelectedDate="2026-11-17" />);
+      await r.click('Leave waitlist');
+      await tap(td(r, '2026-11-12'));
+      expect(cardAt(r, '6:00')).not.toBeNull();
+      await act(async () => { reject(refusal('promoted', 'This athlete was just booked into this session.')); });
+      expect(r.text()).not.toContain('Jordan was just booked into this session.');
       await r.unmount();
     });
 
