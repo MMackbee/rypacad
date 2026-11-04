@@ -57,8 +57,8 @@ const single = require('./single');
 const stripeSingle = require('./stripe-single');
 const {STRIPE_WEBHOOK_SECRETS} = require('./secrets');
 
-const {applyLapsed, applyLegacy, applyPastDue, invoicePeriod,
-  membershipPatch} = legacy;
+const {applyLapsed, applyLegacy, applyPastDue, initialStatus,
+  invoicePeriod, membershipPatch} = legacy;
 
 /**
  * Single-token outcomes ops reviews by hand (RUNBOOK): logged as errors.
@@ -161,7 +161,13 @@ async function applyAthleteSubscriptionUpdated(tx, event, hh, athlete,
   if (product === 'tier') {
     // D10: only the tier subscription speaks for households.membership;
     // the add-on's status and period stay on athletes.facilityBilling.
+    // 2026-11-03: when this event lands before invoice.paid, the map it
+    // writes has no `status` - the rules' freeze read. Give it the one the
+    // subscription says, once; the invoice events own every transition
+    // after that. The same rule as the legacy applySubscriptionUpdated.
+    const membershipNow = (hh.data && hh.data.membership) || {};
     tx.update(hh.ref, membershipPatch({
+      status: membershipNow.status ? undefined : initialStatus(sub.status),
       stripeSubscriptionStatus: sub.status || null,
       currentPeriodStart: period.start, currentPeriodEnd: period.end,
       lastEventId: event.id,
@@ -459,6 +465,7 @@ const stripeWebhook = functions.runWith({secrets: STRIPE_WEBHOOK_SECRETS})
     });
 
 module.exports = {
+  applyAthleteSubscriptionUpdated,
   customerIdOf,
   handleEvent,
   invoicePeriod,

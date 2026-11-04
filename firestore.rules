@@ -1319,9 +1319,13 @@ service cloud.firestore {
       // the household, null-safe (membership absent == active, same
       // absent-as-default pattern athletes.packageId/households.
       // periodAnchorDay already use throughout this file).
+      // A membership map WITHOUT a status key reads as active too (2026-11-03:
+      // the legacy subscription webhook wrote one, and reading the missing key
+      // errored, so every booking by that family was refused). The same
+      // null-safe read in rebookHouseholdOk and waitlistHouseholdOk.
       function bookingHouseholdOk() {
         let h = get(/databases/$(database)/documents/households/$(request.resource.data.householdId)).data;
-        return !(h.get('membership', null) != null && h.membership.status in ['past_due', 'lapsed']);
+        return !(h.get('membership', null) != null && h.membership.get('status', null) in ['past_due', 'lapsed']);
       }
 
       // Sprint 20 (spec 4.4 + 5): the athlete doc this create already read
@@ -1608,7 +1612,7 @@ service cloud.firestore {
       }
       function rebookHouseholdOk(before) {
         let h = get(/databases/$(database)/documents/households/$(before.householdId)).data;
-        return !(h.get('membership', null) != null && h.membership.status in ['past_due', 'lapsed']);
+        return !(h.get('membership', null) != null && h.membership.get('status', null) in ['past_due', 'lapsed']);
       }
       function rebookChargeOk(before, after, diffKeys) {
         let a = athleteData(before.athleteId);
@@ -2304,7 +2308,7 @@ service cloud.firestore {
       // null-safe, denying past_due/lapsed.
       function waitlistHouseholdOk() {
         let h = get(/databases/$(database)/documents/households/$(request.resource.data.householdId)).data;
-        return !(h.get('membership', null) != null && h.membership.status in ['past_due', 'lapsed']);
+        return !(h.get('membership', null) != null && h.membership.get('status', null) in ['past_due', 'lapsed']);
       }
 
       // Sprint 20 (spec 4.4 + 5): identical to bookings' bookingAthleteOk.

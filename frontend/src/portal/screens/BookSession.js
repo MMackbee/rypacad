@@ -9,7 +9,7 @@ import SessionCard from '../components/SessionCard';
 import { AgeGroupLegend } from '../components/AgeGroupChip';
 import SkeletonCard, { SkeletonBar } from '../components/Skeleton';
 import { CapacityPill } from '../components/StatusBadge';
-import AllowancePools, { GraceLine, SpendNote } from '../components/AllowancePools';
+import AllowancePools, { GraceLine, SpendNote, nextPeriodMonthName, nextPeriodName, nextPeriodOpen, spentTitle } from '../components/AllowancePools';
 import PayButton from '../components/PayButton';
 import { SessionTokenPools } from '../components/SessionTokens';
 import { ExtraSessionBuy } from '../components/TokenMeter';
@@ -45,6 +45,7 @@ import { bookingOpen, openThrough, parseTimeToMinutes, todayISO } from '../data/
 import { lockPastDays, sessionStarted, waitlistClosed } from '../data/sessionStart';
 import { reservedEligible, reservedRefusal, reservedTag } from '../data/reserved';
 import { buildMonthDayMaps, useMonthNavState } from '../components/MonthCalendar';
+import { monthsApart } from '../data/calendarViews';
 import RepeatWeekly from '../components/RepeatWeekly';
 
 /** Sessions arrive raw (numeric capacity/booked) from useMonthSessions;
@@ -362,6 +363,15 @@ export default function BookSession({
   // (contract v2.0): ONE pool now - `tokens`, not `allowance` (renamed
   // alongside useMembership's own shape, per the sprint report).
   const tokens = isParent ? selectedAthlete?.tokens : data?.tokens;
+  // 2026-11-03: the banner's "See December ›" turns the calendar to the next
+  // period's month, counted in whole months from the one shown, and drops the
+  // tapped day as the card's own arrows do (its empty sheet would otherwise
+  // sit under the new month); nothing to offer once that month is on screen.
+  const nextOpen = nextPeriodOpen(tokens);
+  const nextMonthISO = nextOpen ? `${nextOpen.periodKey.slice(0, 7)}-01` : null;
+  const showNextMonth = nextMonthISO && nextMonthISO !== monthISO
+    ? () => { setSelectedDate(null); changeMonth(monthsApart(monthISO, nextMonthISO)); }
+    : null;
   // Owner 2026-10-10: out of tokens, a paid monthly token member is offered
   // one more session at their package's rate - the meters' own rule
   // (data/singleToken.js extraSessionOffer) over the member row's package
@@ -470,6 +480,7 @@ export default function BookSession({
                 billingStatus={isParent ? selectedAthlete?.billingStatus : selfMember?.billingStatus}
                 askGuardian={askGuardian}
                 extraOffer={extraOffer}
+                onShowNext={showNextMonth}
               />
               {data?.seasonNote ? (
                 <Banner tone="green" title="Season">
@@ -774,7 +785,7 @@ function AthleteSelector({ athletes, loading, selectedId, onSelect }) {
  * monthly member with nothing left carries `extraOffer` (the extra session
  * at their package's rate, data/singleToken.js extraSessionOffer).
  */
-function TokensBanner({ tokens, athleteId, billingStatus, askGuardian = false, extraOffer = null }) {
+function TokensBanner({ tokens, athleteId, billingStatus, askGuardian = false, extraOffer = null, onShowNext = null }) {
   if (!tokens) return null;
   if (tokens.unlimited) {
     return (
@@ -813,10 +824,35 @@ function TokensBanner({ tokens, athleteId, billingStatus, askGuardian = false, e
 
   const hasGrace = (tokens.grace?.length ?? 0) > 0;
   const spent = tokens.left === 0 && !hasGrace;
+  // 2026-11-03 (the Wolffs): this period spent with next month's tokens in
+  // hand is not "out" - the red title read as nothing to book, the December
+  // count sitting under it. Neutral, named by the period that is used, with
+  // the month that is open one tap away.
+  const next = nextPeriodOpen(tokens);
+  const title = next ? spentTitle(next, tokens.reserved) : spent ? 'No tokens left this period' : 'Your tokens this period';
 
   return (
-    <Banner tone={spent ? 'red' : 'neutral'} title={spent ? 'No tokens left this period' : 'Your tokens this period'}>
+    <Banner tone={spent && !next ? 'red' : 'neutral'} title={title}>
       <AllowancePools tokens={tokens} style={{ margin: '4px 0 6px' }} />
+      {next ? (
+        <Body size={12} style={{ marginTop: 6 }}>
+          {next.periodKey.endsWith('-01')
+            ? `Book ${nextPeriodName(next)} sessions with ${nextPeriodName(next)} tokens.`
+            : `Sessions from ${nextPeriodName(next)} spend that period's tokens.`}
+          {onShowNext ? (
+            <>
+              {' '}
+              <button
+                type="button"
+                onClick={onShowNext}
+                style={{ background: 'none', border: 'none', padding: 0, font: `600 12px ${font.body}`, color: color.primary, cursor: 'pointer' }}
+              >
+                See {nextPeriodMonthName(next)} ›
+              </button>
+            </>
+          ) : null}
+        </Body>
+      ) : null}
       {hasGrace ? <GraceLine tokens={tokens} /> : null}
       {/* Owner 2026-10-10: where a member runs out, the extra session at their rate. */}
       <ExtraSessionBuy athleteId={athleteId} offer={extraOffer} />

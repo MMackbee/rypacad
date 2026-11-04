@@ -1,5 +1,5 @@
 import React from 'react';
-import { format, parseISO } from 'date-fns';
+import { format, parseISO, subMonths } from 'date-fns';
 import { color, font, radius } from '../tokens';
 import { longDayLabel } from '../data/calendar';
 import { tokenStartLabel } from '../data/billingCopy';
@@ -37,9 +37,13 @@ function graceExtra(grace) {
   return ` + ${n} ${word}${n === 1 ? '' : 's'}`;
 }
 
-/** Exhausted reads as a stop, matching the handoff's red "limit reached" tone. */
-function toneFor(left) {
-  if (left === 0) return color.error;
+/**
+ * Exhausted reads as a stop, matching the handoff's red "limit reached" tone
+ * - unless next month's tokens are in hand (2026-11-03, the Wolffs): then the
+ * zero is amber, like the last token, not a red stop above a December count.
+ */
+function toneFor(left, nextOpen = null) {
+  if (left === 0) return nextOpen ? color.secondary : color.error;
   if (left === 1) return color.secondary;
   return color.primary;
 }
@@ -64,7 +68,7 @@ export default function AllowancePools({ tokens, compact = false, style }) {
 
   if (tokens.perPurchase) return <SessionTokenPools tokens={tokens} compact={compact} style={style} />;
 
-  const tone = toneFor(tokens.left);
+  const tone = toneFor(tokens.left, nextPeriodOpen(tokens));
   // Unpaid or before the first period (tester report 2026-09-30): "Pay to
   // start" / "Tokens start Nov 1" stand in for the count of left tokens.
   const startLabel = tokenStartLabel(tokens);
@@ -79,6 +83,8 @@ export default function AllowancePools({ tokens, compact = false, style }) {
         <span style={{ font: `600 12px ${font.body}`, color: tone }}>{tokens.left}</span> token
         {tokens.left === 1 ? '' : 's'} left
         {graceExtra(tokens.grace)}
+        {/* 2026-11-03: a spent period with next month in hand says so on the card too. */}
+        {nextPeriodOpen(tokens) ? ` · ${nextPeriodLabel(tokens.nextPeriod)}` : ''}
       </span>
     );
   }
@@ -138,6 +144,40 @@ export function nextPeriodLabel(nextPeriod) {
   const name = nextPeriodName(nextPeriod);
   const when = nextPeriod.periodKey.endsWith('-01') ? name : `From ${name}`;
   return `${when}: ${nextPeriod.left} of ${nextPeriod.granted} left`;
+}
+
+/**
+ * The next period when this one is spent and it still has tokens to book
+ * with (2026-11-03, the Wolffs: November at zero with "December: 6 of 6
+ * left" under a red "No tokens left" - read as nothing to book). Null for
+ * Elite, the single token, an unpaid grant, a grace token in hand (it
+ * spends first), a period with tokens, or a next period that is spent too.
+ */
+export function nextPeriodOpen(tokens) {
+  if (!tokens || tokens.unlimited || tokens.perPurchase || tokens.unpaid) return null;
+  if (tokens.left !== 0 || (tokens.grace?.length ?? 0) > 0) return null;
+  const np = tokens.nextPeriod;
+  return np && np.periodKey && np.left > 0 ? np : null;
+}
+
+/** The month the next period's calendar page shows ("December"), whatever day it starts. */
+export function nextPeriodMonthName(nextPeriod) {
+  if (!nextPeriod || !nextPeriod.periodKey) return null;
+  return format(parseISO(nextPeriod.periodKey), 'MMMM');
+}
+
+/**
+ * "November tokens used": the spent period, named by its month for a
+ * 1st-of-month anchor. With tokens held on a waitlist (`reserved`) the period
+ * is spoken for rather than used up, so "No November tokens left" - the
+ * meter beneath says how many are held.
+ */
+export function spentTitle(nextPeriod, reserved = 0) {
+  if (!nextPeriod || !nextPeriod.periodKey) return null;
+  const monthly = nextPeriod.periodKey.endsWith('-01');
+  const month = monthly ? format(subMonths(parseISO(nextPeriod.periodKey), 1), 'MMMM') : null;
+  if (reserved > 0) return monthly ? `No ${month} tokens left` : 'No tokens left this period';
+  return monthly ? `${month} tokens used` : "This period's tokens used";
 }
 
 export function NextPeriodLine({ tokens, style }) {
@@ -217,6 +257,9 @@ export function SpendNote({ tokens, style }) {
 
   const hasGrace = (tokens.grace?.length ?? 0) > 0;
   if (tokens.left === 0 && !hasGrace) {
+    // 2026-11-03: spent, with next month's tokens in hand, is not "out".
+    const next = nextPeriodOpen(tokens);
+    if (next) return <SpendBadge tone={color.secondary} style={style}>{spentTitle(next, tokens.reserved)}</SpendBadge>;
     return <SpendBadge tone={color.error} style={style}>{tokens.perPurchase ? 'No session token' : 'No tokens left'}</SpendBadge>;
   }
   // The soonest-expiring grace token is the one spent: a bought single

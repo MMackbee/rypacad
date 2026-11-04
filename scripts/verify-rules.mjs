@@ -26,6 +26,7 @@ import { fileURLToPath } from 'node:url';
 import { fsFields, fsValue, localEmulatorHost, LOCAL_HOSTS } from './lib/firestore-rest.mjs';
 import { taskAssessments, taskDiagnosticsKept } from './rules-probes/assessments.mjs';
 import { taskResearch } from './rules-probes/research.mjs';
+import { taskMembershipShape } from './rules-probes/membership-shape.mjs';
 
 let HOST = localEmulatorHost({ required: true });
 const PROJECT = 'demo-rules-probe';
@@ -1125,13 +1126,13 @@ async function runPass(label) {
     await task4(); await task5(); await taskContract(); await taskWindow(); await taskRepeat(); await taskPackageChange(); await taskSeriesCancel();
     await taskSeats(); await taskPast(); await taskWaitlist(); await taskSingle(); await taskScholarship(); await taskFeedback(); await taskReserved();
     await taskReissue();
-    await taskAssessments(); await taskDiagnosticsKept(); await taskResearch();
+    await taskAssessments(); await taskDiagnosticsKept(); await taskResearch(); await taskMembershipShape();
     await taskMental();
     await taskAttendance();
   } finally { await teardown(); }
 }
 
-export { setup, teardown, seed, del, call, createAs, updateAs, commitAs, bookAs, listAs, expect, token, t, uid, BASE, loadRules, postGateCopy };
+export { setup, teardown, seed, del, call, createAs, updateAs, commitAs, bookAs, listAs, expect, token, t, uid, BASE, loadRules, postGateCopy, patchWrite, seatWrite, beforeGate };
 if (process.argv[1] && process.argv[1].endsWith('verify-rules.mjs')) {
   const realRules = readFileSync(fileURLToPath(new URL('../firestore.rules', import.meta.url)), 'utf8');
   const postGateRules = postGateCopy(realRules);

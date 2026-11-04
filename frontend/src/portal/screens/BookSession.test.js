@@ -130,12 +130,23 @@ test('Nov 1 with November spent (incident 2026-11-01): November is greyed, a Dec
   mockFirstSlot = '2026-11-03';
 
   const n = await renderScreen(<BookSession bare demoSelectedDate="2026-11-03" />);
-  expect(n.text()).toContain('No tokens left this period');
+  // 2026-11-03 (the Wolffs): spent, with December in hand, is not "out" - the banner names the month used and the one open.
+  expect(n.text()).toContain('November tokens used');
+  expect(n.text()).not.toContain('No tokens left this period');
   expect(n.text()).toContain('December: 7 of 8 left');
+  expect(n.text()).toContain('Book December sessions with December tokens.');
   expect(sessionCard(n).style.cursor).toBe('default');
-  expect(n.text()).toContain('No tokens left');
+  expect(sessionCard(n).textContent).toContain('No tokens');
+  expect(sessionCard(n).textContent).toContain('November tokens used');
   await act(async () => { sessionCard(n).click(); });
   expect(mockBooked).toEqual([]);
+  // "See December ›" turns the calendar to December in place; on December's page the offer is gone.
+  expect(n.text()).toContain('November 2026');
+  await n.click('See December ›');
+  expect(n.text()).toContain('December 2026');
+  expect(n.button('See December ›')).toBeNull();
+  // The tapped November day is dropped with the turn (review 2026-11-03): its empty sheet does not sit under December.
+  expect(n.text()).not.toContain('No sessions are scheduled yet.');
   await n.unmount();
 
   mockFirstSlot = '2026-12-01'; // the month view opens on the first slot's month
@@ -182,7 +193,9 @@ test("a parent on Nov 1 with the child's November spent: the child's row carries
   mockMonths = { '2026-12-01': [{ date: '2026-12-01', sessions: [{ ...session, id: 'dec', date: '2026-12-01' }] }] };
   mockFirstSlot = '2026-12-01';
   const r = await renderScreen(<BookSession bare role="parent" demoSelectedDate="2026-12-01" />);
-  expect(r.text()).toContain('No tokens left this period');
+  expect(r.text()).toContain('November tokens used');
+  expect(r.text()).not.toContain('No tokens left this period');
+  expect(r.button('See December ›')).toBeNull(); // December is the page already
   expect(r.text()).toContain('December: 7 of 8 left');
   const card = sessionCard(r);
   expect(card).not.toBeNull();
