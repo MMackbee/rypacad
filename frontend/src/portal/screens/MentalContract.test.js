@@ -226,3 +226,86 @@ test('owner and ops see the board without the tick or Edit, notes included; the 
   expect(r.text()).toContain('The contract switch is off');
   r.unmount();
 });
+
+test('the search box narrows every group by name and the counts follow; Clear restores the board', async () => {
+  const r = await renderScreen(screen(), { path: '/portal/mental/contract' });
+  expect(r.button('Clear search')).toBeNull();
+  await r.fill('Search athletes', 'ni');
+  expect(r.text()).toContain('Due for a check-in · 0');
+  expect(r.text()).toContain('This week · 1');
+  expect(r.text()).toContain('Checked in this week · 0');
+  expect(r.text()).toContain('Nico');
+  expect(r.text()).not.toContain('Reese');
+  expect(r.text()).not.toContain('Jordan');
+  expect(r.text()).toContain('No one is due'); // the group empties still read as before
+  await r.fill('Search athletes', 'whitfield');
+  expect(r.text()).toContain('No one on the board matches “whitfield”.');
+  expect(r.text()).not.toContain('Due for a check-in');
+  await r.click('Clear search');
+  expect(field(r, 'Search athletes').value).toBe('');
+  expect(r.button('Clear search')).toBeNull();
+  expect(r.text()).toContain('Due for a check-in · 1');
+  expect(r.text()).toContain('This week · 1');
+  expect(r.text()).toContain('Checked in this week · 1');
+  r.unmount();
+});
+
+test('the family name shown beside a first-name-only athlete matches too, and every word typed must match', async () => {
+  const base = mockBoard;
+  mockBoard = (week) => {
+    const b = base(week);
+    return { ...b, rows: { ...b.rows, due: b.rows.due.map((row) => ({ ...row, familyName: 'Okafor' })) } };
+  };
+  const r = await renderScreen(screen(), { path: '/portal/mental/contract' });
+  expect(r.text()).toContain('Okafor · Age 12');
+  await r.fill('Search athletes', 'oka');
+  expect(r.text()).toContain('Due for a check-in · 1');
+  expect(r.text()).toContain('This week · 0');
+  expect(r.text()).toContain('Reese');
+  expect(r.text()).not.toContain('Nico');
+  await r.fill('Search athletes', 'Reese OKA');
+  expect(r.text()).toContain('Due for a check-in · 1');
+  await r.fill('Search athletes', 'okafor nico');
+  expect(r.text()).toContain('No one on the board matches “okafor nico”.');
+  r.unmount();
+});
+
+test('the query survives a week switch', async () => {
+  const r = await renderScreen(screen(), { path: '/portal/mental/contract' });
+  await r.fill('Search athletes', 'jor');
+  expect(r.text()).toContain('Checked in this week · 1');
+  expect(r.text()).toContain('This week · 0');
+  await r.click('Previous week');
+  await r.flush();
+  expect(r.text()).toContain('Week of Nov 2');
+  expect(field(r, 'Search athletes').value).toBe('jor');
+  expect(r.text()).toContain('Not checked in that week · 1');
+  expect(r.text()).toContain('Jordan');
+  await r.click('Next week');
+  await r.flush();
+  expect(field(r, 'Search athletes').value).toBe('jor');
+  expect(r.text()).toContain('Checked in this week · 1');
+  expect(r.text()).not.toContain('Reese');
+  r.unmount();
+});
+
+test('a row with its note prompt open keeps its place under a search, and comes back where it was when the search clears', async () => {
+  const r = await renderScreen(screen(), { path: '/portal/mental/contract' });
+  await r.click('Checked in · Nico');
+  await r.flush();
+  expect(r.container.querySelector('section:nth-of-type(2) [aria-label="Check-in note · Nico"]')).not.toBeNull();
+  await r.fill('Search athletes', 'nic');
+  // Pinned first, then filtered: Nico stays in This week with his prompt, not moved to Checked in.
+  expect(r.text()).toContain('This week · 1');
+  expect(r.text()).toContain('Checked in this week · 0');
+  expect(r.container.querySelector('section:nth-of-type(2) [aria-label="Check-in note · Nico"]')).not.toBeNull();
+  await r.fill('Search athletes', 'jor');
+  expect(field(r, 'Check-in note · Nico')).toBeNull();
+  expect(r.text()).toContain('Checked in this week · 1');
+  expect(r.text()).toContain('This week · 0');
+  await r.click('Clear search');
+  expect(r.container.querySelector('section:nth-of-type(2) [aria-label="Check-in note · Nico"]')).not.toBeNull();
+  expect(r.text()).toContain('This week · 1');
+  expect(mockSetCheckin).toHaveBeenCalledTimes(1);
+  r.unmount();
+});

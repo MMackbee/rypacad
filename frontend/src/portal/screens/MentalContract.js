@@ -8,7 +8,7 @@ import BoardRow from '../components/mental/BoardRow';
 import { Banner, Body, ErrorNotice, ScreenTitle, SectionLabel, SignOutButton } from '../components/Primitives';
 import { useContractBoard } from '../hooks';
 import { addDays, weekStartFor } from '../data/contractRule';
-import { WEEKS_AHEAD } from '../data/contractBoard';
+import { WEEKS_AHEAD, searchRows } from '../data/contractBoard';
 import { academyDateISO } from '../data/calendar';
 
 const GROUPS = [
@@ -28,6 +28,34 @@ const FUTURE_GROUPS = [
   { key: 'thisWeek', label: 'That week', empty: 'No one is on the contract' },
   { key: 'checkedIn', label: 'Checked in that week', empty: 'Check-ins open when the week starts' },
 ];
+
+// The search box under the week switcher (Yannick, 2026-11-04: "search kids").
+const searchField = {
+  width: '100%',
+  boxSizing: 'border-box',
+  height: 44,
+  padding: '0 44px 0 12px',
+  border: `1px solid ${color.controlBorder}`,
+  borderRadius: radius.control,
+  background: color.surface,
+  font: `400 14px ${font.body}`,
+  color: color.text,
+  WebkitAppearance: 'none',
+  appearance: 'none',
+};
+const clearButton = {
+  position: 'absolute',
+  top: 4,
+  right: 4,
+  width: 36,
+  height: 36,
+  border: 'none',
+  borderRadius: radius.control,
+  background: 'transparent',
+  font: `400 20px ${font.body}`,
+  color: color.textSecondary,
+  cursor: 'pointer',
+};
 
 const arrow = (disabled) => ({
   width: 44,
@@ -76,7 +104,11 @@ function pinOpenRows(rows, open) {
  * always as of today, and says so there. Owner and ops reach it by URL and
  * read it without the tick. Never behind the family contract switch; a
  * banner says when families are not logging yet. "Today" is the academy's
- * America/Chicago date.
+ * America/Chicago date. A search box under the week switcher (Yannick,
+ * 2026-11-04: "search kids") narrows every group to the athletes whose name
+ * or family name starts with what was typed: it filters AFTER the open-prompt
+ * pinning, so a row with its prompt open keeps its place; the query stays
+ * through week switches; a search that leaves no one says so in one line.
  */
 export default function MentalContract({ bare = false, role = 'mental', onSignOut }) {
   const today = academyDateISO();
@@ -85,6 +117,7 @@ export default function MentalContract({ bare = false, role = 'mental', onSignOu
   const [week, setWeek] = useState(current);
   const [failed, setFailed] = useState(null); // 'checkin' | 'note' | null
   const [open, setOpen] = useState({}); // athleteId -> { group, index }: an open note prompt, and where its row stays
+  const [query, setQuery] = useState('');
   const { rows, config, setCheckin, setCheckinNote, loading, error } = useContractBoard(week);
   const atCurrent = week === current;
   const isFuture = week > current;
@@ -92,7 +125,8 @@ export default function MentalContract({ bare = false, role = 'mental', onSignOu
   const groups = atCurrent ? GROUPS : isFuture ? FUTURE_GROUPS : PAST_GROUPS;
   const weekLabel = atCurrent ? 'This week' : `Week of ${format(parseISO(week), 'MMM d')}`;
   const priorLabel = atCurrent ? 'Last week' : 'Week before';
-  const shown = useMemo(() => (rows ? pinOpenRows(rows, open) : null), [rows, open]);
+  const shown = useMemo(() => (rows ? searchRows(pinOpenRows(rows, open), query) : null), [rows, open, query]);
+  const noMatch = Boolean(query.trim()) && Boolean(shown) && !shown.due.length && !shown.thisWeek.length && !shown.checkedIn.length;
 
   const openNote = (athleteId, group, index) => setOpen((o) => ({ ...o, [athleteId]: { group, index } }));
   const closeNote = (athleteId) => setOpen((o) => {
@@ -155,6 +189,21 @@ export default function MentalContract({ bare = false, role = 'mental', onSignOu
               ›
             </button>
           </div>
+          <div style={{ position: 'relative', marginTop: 10 }}>
+            <input
+              type="search"
+              aria-label="Search athletes"
+              placeholder="Search by name"
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+              style={searchField}
+            />
+            {query ? (
+              <button type="button" aria-label="Clear search" onClick={() => setQuery('')} style={clearButton}>
+                ×
+              </button>
+            ) : null}
+          </div>
         </div>
       }
       footer={role === 'mental' ? <BottomTabBar role={role} active="mental-contract" /> : <BottomTabBar role={role} />}
@@ -176,6 +225,10 @@ export default function MentalContract({ bare = false, role = 'mental', onSignOu
           </>
         ) : error ? (
           <ErrorNotice title="The board didn't load" />
+        ) : noMatch ? (
+          <div style={{ border: `1px dashed ${color.border}`, borderRadius: radius.card, padding: '12px 14px' }}>
+            <Body size={12} tone={color.textTertiary}>No one on the board matches “{query.trim()}”.</Body>
+          </div>
         ) : (
           groups.map((g) => {
             const list = shown?.[g.key] ?? [];

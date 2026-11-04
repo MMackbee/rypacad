@@ -1,4 +1,4 @@
-import { OVERDUE_DAYS, boardRows, dateOf, lastCheckinFor, onContract, overdueCheckins } from './contractBoard';
+import { OVERDUE_DAYS, boardRows, dateOf, lastCheckinFor, matchesRow, onContract, overdueCheckins, searchRows } from './contractBoard';
 
 const ath = (id, name, dob, extra = {}) => ({ id, name, dob, ...extra });
 
@@ -127,5 +127,44 @@ describe('boardRows (spec 5.4)', () => {
     expect(past.checkedIn.map((r) => r.athleteId).sort()).toEqual(['nico', 'sage']);
     expect(past.checkedIn[0].thisWeek.days[0].date).toBe('2026-11-02');
     expect(past.thisWeek.map((r) => r.athleteId)).toEqual(['jordan']);
+  });
+});
+
+describe('searchRows (Yannick, 2026-11-04: search kids on the board)', () => {
+  const row = (athleteId, name, familyName = null) => ({ athleteId, name, familyName });
+  const rows = {
+    due: [row('reese', 'Reese', 'Okafor')],
+    thisWeek: [row('nico', 'Nico Whitfield'), row('jose', 'José Álvarez')],
+    checkedIn: [row('jordan', 'Jordan Whitfield')],
+  };
+  const ids = (g) => g.map((r) => r.athleteId);
+
+  test('a blank query returns the same rows object; null rows stay null', () => {
+    expect(searchRows(rows, '')).toBe(rows);
+    expect(searchRows(rows, '   ')).toBe(rows);
+    expect(searchRows(rows, undefined)).toBe(rows);
+    expect(searchRows(null, 'x')).toBeNull();
+  });
+  test('a first name, a surname and a prefix all match by word start, in every group', () => {
+    expect(ids(searchRows(rows, 'ni').thisWeek)).toEqual(['nico']);
+    expect(searchRows(rows, 'ni').due).toEqual([]);
+    const whit = searchRows(rows, 'whit');
+    expect([ids(whit.due), ids(whit.thisWeek), ids(whit.checkedIn)]).toEqual([[], ['nico'], ['jordan']]);
+    expect(matchesRow(row('x', 'Jordan Whitfield'), 'ordan')).toBe(false); // word start, not substring
+  });
+  test('the family name beside a first-name-only athlete matches too', () => {
+    expect(ids(searchRows(rows, 'oka').due)).toEqual(['reese']);
+    expect(ids(searchRows(rows, 'reese okafor').due)).toEqual(['reese']);
+    expect(matchesRow(row('x', 'Reese', null), 'oka')).toBe(false);
+  });
+  test('every word typed must match; case and accents never matter', () => {
+    expect(ids(searchRows(rows, 'jordan whit').checkedIn)).toEqual(['jordan']);
+    expect(searchRows(rows, 'jordan nico').checkedIn).toEqual([]);
+    expect(ids(searchRows(rows, 'JOSE alv').thisWeek)).toEqual(['jose']);
+    expect(ids(searchRows(rows, 'josé').thisWeek)).toEqual(['jose']);
+    expect(matchesRow(row('x', '  Nico   Whitfield '), 'nico whitfield')).toBe(true);
+  });
+  test('no match empties all three groups', () => {
+    expect(searchRows(rows, 'zz')).toEqual({ due: [], thisWeek: [], checkedIn: [] });
   });
 });

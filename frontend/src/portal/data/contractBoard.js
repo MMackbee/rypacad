@@ -109,6 +109,33 @@ export function visitText(visits) {
     .join(' · ');
 }
 
+/* ------------------------------------------------------------ Search -- */
+
+/** What a search compares: lower-cased, accents stripped, whitespace collapsed. */
+const searchKey = (s) => String(s ?? '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().trim().replace(/\s+/g, ' ');
+
+/**
+ * True when every word typed starts some word of the athlete's name or
+ * family name (Yannick, 2026-11-04: "search kids" on the board). Case and
+ * accents never matter; a blank query matches everyone.
+ */
+export function matchesRow(row, query) {
+  const words = searchKey(query).split(' ').filter(Boolean);
+  if (!words.length) return true;
+  const haystack = searchKey(`${row?.name ?? ''} ${row?.familyName ?? ''}`).split(' ').filter(Boolean);
+  return words.every((w) => haystack.some((h) => h.startsWith(w)));
+}
+
+/** The board's three groups with only the rows matching `query`; a blank query returns `rows` itself. */
+export function searchRows(rows, query) {
+  if (!rows || !searchKey(query)) return rows;
+  return {
+    due: rows.due.filter((r) => matchesRow(r, query)),
+    thisWeek: rows.thisWeek.filter((r) => matchesRow(r, query)),
+    checkedIn: rows.checkedIn.filter((r) => matchesRow(r, query)),
+  };
+}
+
 const later = (a, b) => (a && b ? (a > b ? a : b) : a || b || null);
 const byName = (a, b) => String(a.name || '').localeCompare(String(b.name || ''));
 
