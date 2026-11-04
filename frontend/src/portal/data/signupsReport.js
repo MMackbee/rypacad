@@ -62,9 +62,25 @@ export function flagLabel(f) {
   return `Booking ${f.flag} · ${f.date}`;
 }
 
-/** One line per unmatched Calendly event (useSignups().data.unresolved) - the same shape flagLabel renders inside a row. */
+/**
+ * One line per unmatched Calendly event (useSignups().data.unresolved) - the
+ * same shape flagLabel renders inside a row, then (2026-11-04) who booked
+ * and when, from the ledger's `invitee` and `slot` where the webhook kept
+ * them: "Calendly unresolved · 2026-11-05 · Addie Schinka · Thursday, Nov 5
+ * 7:00 PM · booked by Jo Schinka, jo@example.com".
+ */
 export function unresolvedLabel(e) {
-  return flagLabel({ kind: 'calendly', id: e.id, outcome: e.outcome, receivedAt: e.receivedAt });
+  const base = flagLabel({ kind: 'calendly', id: e.id, outcome: e.outcome, receivedAt: e.receivedAt });
+  const inv = e.invitee || null;
+  const slot = e.slot || null;
+  const athlete = inv ? inv.athleteName || null : null;
+  const booker = inv ? [inv.name && inv.name !== athlete ? inv.name : null, inv.email].filter(Boolean).join(', ') : '';
+  return [
+    base,
+    athlete,
+    slot && slot.date ? `${longDayLabel(slot.date)}${slot.time ? ` ${slot.time}` : ''}` : null,
+    booker ? `booked by ${booker}` : null,
+  ].filter(Boolean).join(' · ');
 }
 
 export function signedUpLabel(iso) {

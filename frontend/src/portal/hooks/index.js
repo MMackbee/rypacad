@@ -1631,13 +1631,19 @@ async function liveSpecialistSessions(specialistId, today) {
       const active = bookings.filter((b) => b.status !== 'cancelled');
       const athletes = await fetchAthletesByIds(active.map((b) => b.athleteId));
       const nameById = new Map(athletes.map((a) => [a.id, a.name]));
+      // 2026-11-04: a Calendly booking the webhook could not place is HELD
+      // as a session with no booking (functions/portal/calendly.js,
+      // `unresolved: true`) - Yannick's time is taken, so it counts as booked
+      // and the row says so until the academy links it.
+      const unresolved = active.length === 0 && s.unresolved === true;
       return {
         sessionId: s.id,
         date: s.date,
         dayLabel: dayLabel(s.date, today),
         time: s.time,
-        booked: active.length,
+        booked: unresolved ? 1 : active.length,
         capacity: s.capacity ?? 1,
+        unresolved,
         type: s.type,
         durationMinutes: s.durationMinutes ?? (SPECIALIST_BY_ID.get(s.type)?.durationMinutes ?? DEFAULT_DURATION_MINUTES),
         athletes: active.map((b) => ({

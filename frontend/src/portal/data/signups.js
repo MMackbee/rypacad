@@ -127,7 +127,12 @@ export function buildSignupRows({ households: allHouseholds = [], athletes: allA
     });
   // An unresolved Calendly booking has no household to hang off; it is its
   // own list (AdminSignups: "Unmatched Calendly bookings", inside Flagged).
-  const unresolved = calendlyEvents.filter((e) => e.outcome === 'unresolved' && !e.householdId).map((e) => ({ id: e.id, outcome: e.outcome, receivedAt: stamp(e.receivedAt) }));
+  // 2026-11-04: the ledger now says who booked and when (invitee, slot) so
+  // the owner can link the booking; older rows carry neither.
+  const unresolved = calendlyEvents.filter((e) => e.outcome === 'unresolved' && !e.householdId).map((e) => ({
+    id: e.id, outcome: e.outcome, receivedAt: stamp(e.receivedAt),
+    invitee: e.invitee ?? null, slot: e.slot ?? null, reason: e.reason ?? null,
+  }));
   return {
     rows,
     counts: { all: rows.length, unpaid: rows.filter((r) => r.unpaid).length, flagged: rows.filter((r) => r.flagged).length, unresolved: unresolved.length },

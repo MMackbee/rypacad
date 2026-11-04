@@ -10,6 +10,21 @@ import { useSpecialistSessions } from '../hooks';
 import { SPECIALISTS, rosterNameFor } from '../data/specialists';
 
 /**
+ * 2026-11-04: a Calendly booking the webhook could not match to a family
+ * (hooks/index.js liveSpecialistSessions `unresolved`). The slot is taken;
+ * the owner links it from the sign-ups report's "Unmatched Calendly
+ * bookings" (scripts/calendly-unmatched.mjs).
+ */
+export const UNMATCHED_META = 'Booked on Calendly · not matched to a family yet';
+
+/** The row's second line: who is in it, or why nobody shows. */
+function sessionMeta(s, names) {
+  if (s.unresolved) return UNMATCHED_META;
+  if (s.booked === 0) return 'No one booked yet';
+  return names.length ? names.join(', ') : `${s.booked} booked`;
+}
+
+/**
  * My Sessions - the specialist's own day view (Sprint 9 amendment v1.7.1,
  * TEAM.md: "provision Yannick and Phils account seperately to have access to
  * the back end of the booked session side"). The signed-in specialist sees
@@ -189,13 +204,7 @@ export default function SpecialistDay({
                     meridiem={meridiem}
                     type={activeId}
                     name={specialist.sessionNoun}
-                    meta={
-                      s.booked === 0
-                        ? 'No one booked yet'
-                        : names.length
-                        ? names.join(', ')
-                        : `${s.booked} booked`
-                    }
+                    meta={sessionMeta(s, names)}
                     onClick={onOpenSession ? () => onOpenSession({ ...s, type: activeId }) : undefined}
                     action={noteChip(s)}
                     trailing={
@@ -230,13 +239,7 @@ function TodaySessionCard({ session, specialist, onOpenSession, action }) {
       type={specialist.id}
       variant="live"
       name={specialist.sessionNoun}
-      meta={
-        session.booked === 0
-          ? 'No one booked yet'
-          : names.length
-          ? names.join(', ')
-          : `${session.booked} booked`
-      }
+      meta={sessionMeta(session, names)}
       onClick={onOpenSession ? () => onOpenSession({ ...session, type: specialist.id }) : undefined}
       action={action}
       trailing={

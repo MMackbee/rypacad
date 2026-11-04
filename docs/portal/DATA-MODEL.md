@@ -176,6 +176,7 @@ cases.
 | `source` | string \| absent | **Sprint 20.** `'calendly'` on `cal-` docs written by `calendlyWebhook`; absent == `'portal'`/sync. |
 | `calendlyEventUri` | string \| absent | Sprint 20, `cal-` docs only. |
 | `bookable` (Calendly) | boolean | `false` on every `cal-` doc so `liveSpecialistDays` never offers a freed Calendly slot in-app; absent == true (`hooks/index.js:260`). |
+| `unresolved` (Calendly) | boolean \| absent | **2026-11-04 (owner: Calendly bookings missing from the app).** `true` on a `cal-` doc the webhook wrote for a booking it could not match to a family: HELD (booked 1/1, display-only), no `bookings` doc, no token spent. Yannick's Sessions row reads "Booked on Calendly · not matched to a family yet"; the owner links it with `scripts/calendly-unmatched.mjs` (the webhook then rewrites the doc without the flag) or it is released (`cancelled`, booked 0) by the booking's own cancel or reschedule. |
 
 ### Specialist 1-on-1 sessions: phil and mental (contract v1.7, Sprint 9)
 
@@ -888,7 +889,7 @@ Backs "own login?" at sign-up and the claim on first sign-in (SPRINT-20-LAUNCH.m
 
 ### `calendlyEvents/{inviteeUuid}_{event}` (contract v3.0.1, Sprint 20)
 
-`calendlyWebhook`'s idempotency ledger (6.2), written in the same transaction as its effect; a repeat is `duplicate`. Admin-only (`ops`/`owner` read); the report lists `outcome == 'unresolved'` rows as "Unmatched Calendly bookings".
+`calendlyWebhook`'s idempotency ledger (6.2), written in the same transaction as its effect; a repeat is `duplicate`. Admin-only (`ops`/`owner` read); the report lists `outcome == 'unresolved'` rows as "Unmatched Calendly bookings", since 2026-11-04 with who booked and when (`invitee`, `slot`) so the owner can link them (`scripts/calendly-unmatched.mjs --list` / `--link`). The family is found by login under the invitee email, the "Parent email" answer or the household's guardian email; a parent of several kids is matched to the kid the "Athlete name" answer names (`functions/portal/calendly-resolve.js`).
 
 | Field | Type | Notes |
 |---|---|---|
@@ -896,7 +897,10 @@ Backs "own login?" at sign-up and the claim on first sign-in (SPRINT-20-LAUNCH.m
 | `inviteeUri`, `eventUri` | string | Calendly resource uris. |
 | `athleteId`, `householdId` | string \| null | Null when `unresolved` or `malformed`. |
 | `receivedAt` | timestamp | |
-| `outcome` | string | `applied \| duplicate \| unresolved \| already-cancelled \| rescheduled \| not-found \| malformed`. **`malformed` (PM ruling D8):** a verified body with no invitee uri or unparseable start/end times - nothing else can be keyed, so the row is written under the best id available and no session/booking is touched; HTTP 200. `ignored` (an event type the subscription never sends) is RETURNED to the caller only, never written. `duplicate` is likewise never written (the existing row is the guard). |
+| `outcome` | string | `applied \| duplicate \| unresolved \| already-cancelled \| rescheduled \| not-found \| applied-unmatched \| malformed`. **2026-11-04:** an `unresolved` created event still writes `sessions/cal-<uuid>` with `unresolved: true` (held, no booking); `applied-unmatched` is the cancel (or the old half of a reschedule, reported as `rescheduled`) that released such a session. **`malformed` (PM ruling D8):** a verified body with no invitee uri or unparseable start/end times - nothing else can be keyed, so the row is written under the best id available and no session/booking is touched; HTTP 200. `ignored` (an event type the subscription never sends) is RETURNED to the caller only, never written. `duplicate` is likewise never written (the existing row is the guard). |
+| `invitee` | map \| absent | **2026-11-04.** `{ name, email, athleteName, parentEmail }` as typed on Calendly (emails lower-cased; null for what was not given), both events. Absent on rows written before. |
+| `slot` | map \| null \| absent | **2026-11-04.** `{ date, time, durationMinutes, startTime, endTime }` of the scheduled event (Chicago date and time, UTC instants), both events; null when the times do not parse. |
+| `via`, `reason` | string \| null | **2026-11-04.** How the athlete was found - `utm \| athlete-login \| household \| household-name` - or why not - `no-login \| utm-not-owned \| no-athlete \| ambiguous-household`; null on canceled rows and on rows written before. Audit fields; nothing branches on them. |
 | `flag` | string \| null | **PM ruling D8.** The booking's flag as written on `applied`: `'over-cap' \| 'over-cadence' \| 'membership-inactive' \| 'before-open' \| null` (clean); null on every non-`applied` outcome. Denormalized so the report reads flags from one collection scan. Precedence when several apply: `membership-inactive` > `before-open` > `over-cadence` > `over-cap`. |
 
 ### `scholarshipApplications/{id}` (owner, 2026-10-01)

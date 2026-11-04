@@ -13,6 +13,17 @@ test('the Flagged count folds in unmatched Calendly bookings (D16)', () => {
   expect(flaggedCount({ all: 3, unpaid: 1, flagged: 1 })).toBe(1);
   expect(flaggedCount(null)).toBe(0);
   expect(unresolvedLabel({ id: 'ev-1', outcome: 'unresolved', receivedAt: '2026-11-05T10:00' })).toBe('Calendly unresolved · 2026-11-05');
+  // 2026-11-04: the ledger's invitee + slot, when the webhook kept them.
+  expect(unresolvedLabel({
+    id: 'ev-2', outcome: 'unresolved', receivedAt: '2026-11-05T10:00',
+    invitee: { name: 'Jo Schinka', email: 'jo@example.com', athleteName: 'Addie Schinka', parentEmail: null },
+    slot: { date: '2026-11-05', time: '7:00 PM', durationMinutes: 45 },
+  })).toBe('Calendly unresolved · 2026-11-05 · Addie Schinka · Thursday, Nov 5 7:00 PM · booked by Jo Schinka, jo@example.com');
+  // The athlete booked under their own name: no repeated name.
+  expect(unresolvedLabel({
+    id: 'ev-3', outcome: 'unresolved', receivedAt: '2026-11-05T10:00',
+    invitee: { name: 'Addie Schinka', email: 'addie@example.com', athleteName: 'Addie Schinka', parentEmail: null }, slot: null,
+  })).toBe('Calendly unresolved · 2026-11-05 · Addie Schinka · booked by addie@example.com');
 });
 test('row lines (spec 7)', () => {
   const a = { name: 'Jordan', age: 14, packageName: '12 tokens', handicap: 12, billing: 'pending', facility: null, login: 'invited-stale', loginEmail: 'j@email.com', loginClaimedAt: null };
