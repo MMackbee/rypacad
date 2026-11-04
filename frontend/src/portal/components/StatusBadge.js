@@ -57,13 +57,16 @@ export default function StatusBadge({ tone = 'neutral', dashed = false, children
  * available, because tapping it books the slot — which is exactly the
  * distinction flag 02 asks the build to hold.
  *
- * @param {'available'|'full'|'capped'} state
+ * @param {'available'|'full'|'capped'|'booked'} state
  */
 export function CapacityPill({ state, children }) {
   const styles = {
     available: { background: color.primary, color: '#000', border: `1px solid ${color.primary}` },
     full: { background: tint.red, color: color.error, border: `1px solid ${tint.redBorder}` },
     capped: { background: 'transparent', color: color.mutedText, border: `1px solid ${color.ruleFaint}` },
+    // Owner 2026-11-04: a block the athlete already holds - green like a
+    // tappable card's pill, outlined rather than filled, since it is not a tap.
+    booked: { background: tint.green, color: color.primary, border: `1px solid ${color.primary}` },
   }[state] || {};
 
   return (

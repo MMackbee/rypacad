@@ -19,6 +19,8 @@ let mockMarks;
 // The booking athlete's token position and the hook's confirmation payload.
 let mockTokens;
 let mockConfirmation;
+// The sessions the booking athlete already holds (owner 2026-11-04: the card says "Booked").
+let mockBookedIds;
 // Month-aware: each monthISO gets its own days (and day marks); October is the default.
 const mockMonth = (m) => ({ data: { days: mockMonths[m] ?? [], dayMarks: mockMarks[m] ?? {} }, loading: false, error: null });
 // Waitlist hardening: what book() answers (default: booked), the options each
@@ -42,7 +44,7 @@ let mockBilling;
 let mockMembershipHousehold;
 jest.mock('../hooks', () => ({
   useBooking: () => ({
-    data: { slots: [{ date: mockFirstSlot }], tokens: mockTokens, confirmation: mockConfirmation, seasonNote: null },
+    data: { slots: [{ date: mockFirstSlot }], tokens: mockTokens, confirmation: mockConfirmation, seasonNote: null, bookedSessionIds: mockBookedIds },
     loading: false, error: null,
     book: async (s, opts) => { mockBooked.push(s.id); mockBookCalls.push([s.id, opts]); return mockBook ? mockBook(s, opts) : {}; },
     bookRecurring: (...args) => mockBookRecurring(...args),
@@ -78,6 +80,7 @@ beforeEach(() => {
   mockMarks = {};
   mockTokens = { left: 6, unlimited: false, grace: [] };
   mockConfirmation = { email: null, note: 'See you there.' };
+  mockBookedIds = [];
   mockBillingStatus = 'active';
   mockDob = null;
   mockHandicap = null;
@@ -751,6 +754,62 @@ describe('waitlist hardening', () => {
     await r.unmount();
   });
 
+  // Owner 2026-11-04 (the Wolff walkthrough): a block the athlete already
+  // holds looked like any other row, and a second tap read "tap the session
+  // to try again"; the refusal banner then stuck across month turns.
+  test('a block the athlete already holds: "Booked", inert, no spend note, and a line pointing at the schedule', async () => {
+    mockBookedIds = ['s17'];
+    const r = await renderScreen(<BookSession bare demoSelectedDate="2026-11-17" />);
+    const card = cardAt(r, '4:00');
+    expect(card.textContent).toContain('Booked');
+    expect(card.textContent).not.toContain('Spends 1 token');
+    expect(card.style.cursor).toBe('default');
+    expect(r.text()).toContain('Jordan is booked in. Cancel it from Schedule if plans change.');
+    await tap(card);
+    expect(mockBooked).toEqual([]);
+    expect(r.text()).not.toContain("Booking didn't go through");
+    await r.unmount();
+  });
+
+  test("a parent: the chosen child's own bookings mark the block, a sibling's do not", async () => {
+    mockHousehold = [
+      { id: 'k1', name: 'Ava', tokens: { left: 3, unlimited: false, grace: [] }, bookedSessionIds: ['s17'] },
+      { id: 'k2', name: 'Nico', tokens: { left: 3, unlimited: false, grace: [] }, bookedSessionIds: [] },
+    ];
+    const r = await renderScreen(<BookSession bare role="parent" demoSelectedDate="2026-11-17" />);
+    expect(cardAt(r, '4:00').textContent).toContain('Booked');
+    expect(r.text()).toContain('Ava is booked in. Cancel it from Reservations if plans change.');
+    await r.click('Nico');
+    expect(cardAt(r, '4:00').textContent).not.toContain('Booked');
+    expect(cardAt(r, '4:00').style.cursor).toBe('pointer');
+    await r.unmount();
+  });
+
+  test('the write refusing a block already held (a screen loaded before the booking) says so, with no "try again"', async () => {
+    mockBook = async () => { throw refusal('already-booked', 'This athlete already has this session booked.'); };
+    const r = await renderScreen(<BookSession bare demoSelectedDate="2026-11-17" />);
+    await tap(cardAt(r, '4:00'));
+    expect(r.text()).toContain('This athlete already has this session booked. Nothing was reserved.');
+    expect(r.text()).not.toContain('tap the session to try again');
+    await r.unmount();
+  });
+
+  test("a refusal's banner goes with the day or the child it was about - it no longer sticks across a switch", async () => {
+    mockHousehold = [
+      { id: 'k1', name: 'Ava', tokens: { left: 3, unlimited: false, grace: [] } },
+      { id: 'k2', name: 'Nico', tokens: { left: 3, unlimited: false, grace: [] } },
+    ];
+    mockBook = async () => { throw new Error('The network dropped.'); };
+    const r = await renderScreen(<BookSession bare role="parent" demoSelectedDate="2026-11-17" />);
+    await tap(cardAt(r, '4:00'));
+    expect(r.text()).toContain("Booking didn't go through");
+    await r.click('Nico');
+    expect(r.text()).not.toContain("Booking didn't go through");
+    await r.click('Ava');
+    expect(r.text()).not.toContain("Booking didn't go through");
+    await r.unmount();
+  });
+
   describe('already waiting', () => {
     beforeEach(() => {
       mockMonths['2026-11-01'][2].sessions = [block('s17', '2026-11-17', '4:00 PM', { booked: 6, waitlisted: true, waitlistPosition: 2, waitlistBy: { a1: 2 } })];
@@ -1116,6 +1175,24 @@ describe('the extra session where a member runs out (owner 2026-10-10)', () => {
       expect(r.text()).not.toContain(LINE);
       await r.unmount();
     }
+  });
+
+  test('not while next month has tokens (owner 2026-11-04): no offer under the neutral "November tokens used" banner; back once December is spent too', async () => {
+    jest.setSystemTime(new Date('2026-11-04T16:00:00Z'));
+    const next = { periodKey: '2026-12-01', periodEnd: '2026-12-31', booked: 0, reserved: 0, granted: 8, left: 8 };
+    mockTokens = { ...OUT, nextPeriod: next };
+    mockMonths = { '2026-11-01': [{ date: '2026-11-10', sessions: [{ ...session, id: 'nov', date: '2026-11-10' }] }] };
+    mockFirstSlot = '2026-11-10';
+    const r = await renderScreen(<BookSession bare demoSelectedDate="2026-11-10" />);
+    expect(r.text()).toContain('November tokens used');
+    expect(extraButtons(r)).toEqual([]);
+    expect(r.text()).not.toContain(LINE);
+    await r.unmount();
+    mockTokens = { ...OUT, nextPeriod: { ...next, booked: 8, left: 0 } };
+    const both = await renderScreen(<BookSession bare demoSelectedDate="2026-11-10" />);
+    expect(both.text()).toContain('No tokens left this period');
+    expect(extraButtons(both)).toEqual([BUY]);
+    await both.unmount();
   });
 
   test('an under-18 athlete on their own login reads who buys it', async () => {

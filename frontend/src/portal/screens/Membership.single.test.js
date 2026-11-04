@@ -154,8 +154,10 @@ describe('a paid monthly member on their own login: the extra session', () => {
   const ASK_EXTRA = 'Ask a parent or guardian to buy an extra session.';
   const LINE = '$47.42 - your 12-token rate. Good through Sat, Feb 27, 2027.';
   const booked = (n) => Array.from({ length: n }, (_, i) => ({ id: `ava_b${i}`, athleteId: 'ava', status: 'confirmed', periodKey: '2026-11-01', date: '2026-11-20', sessionId: `s-${i}`, type: 'training' }));
-  const paid = ({ dob, membership = null, used = 12 }) => {
-    const member = hubMemberFor({ athlete: { id: 'ava', name: 'Ava', packageId: 't-12', billing: { status: 'active', subscriptionId: 'sub_ava' }, ...(dob ? { dob } : {}) }, pkg: T12, anchorDay: 1, today, bookings: booked(used), waitlist: [], graceTokens: [] });
+  // December's too (owner 2026-11-04): the offer waits until next month is spent as well.
+  const bookedNext = (n) => Array.from({ length: n }, (_, i) => ({ id: `ava_n${i}`, athleteId: 'ava', status: 'confirmed', periodKey: '2026-12-01', date: '2026-12-04', sessionId: `d-${i}`, type: 'training' }));
+  const paid = ({ dob, membership = null, used = 12, nextUsed = 12 }) => {
+    const member = hubMemberFor({ athlete: { id: 'ava', name: 'Ava', packageId: 't-12', billing: { status: 'active', subscriptionId: 'sub_ava' }, ...(dob ? { dob } : {}) }, pkg: T12, anchorDay: 1, today, bookings: [...booked(used), ...bookedNext(nextUsed)], waitlist: [], graceTokens: [] });
     return { loading: false, error: null, data: { household: { id: 'h1', membership }, member, status: statusFor(membership, { anchorDay: 1 }), facilityPending: [] } };
   };
   const extraButtons = (r) => [...r.container.querySelectorAll('button')].map((b) => b.textContent).filter((t) => t.endsWith('|ava|extra'));
@@ -180,6 +182,15 @@ describe('a paid monthly member on their own login: the extra session', () => {
     const adult = await renderScreen(<Membership bare />);
     expect(extraButtons(adult)).toEqual([`${EXTRA}|ava|extra`]);
     await adult.unmount();
+  });
+
+  test('not while December has tokens (owner 2026-11-04): the meter names December, and offers nothing', async () => {
+    mockMine = paid({ dob: ADULT, nextUsed: 0 });
+    const r = await renderScreen(<Membership bare />);
+    expect(extraButtons(r)).toEqual([]);
+    expect(r.text()).not.toContain(LINE);
+    expect(r.text()).toContain('December: 12 of 12 left');
+    await r.unmount();
   });
 
   test('tokens still left this period: neither the button nor the line', async () => {

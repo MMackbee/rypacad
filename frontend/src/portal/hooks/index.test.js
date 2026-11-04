@@ -202,6 +202,7 @@ describe('live loaders (perf wave B)', () => {
       slots: [],
       tokens: null,
       seasonNote: null,
+      bookedSessionIds: [],
       confirmation: { ...BOOKING_CONFIRMATION, email: 'jordan@email.com' },
     });
     expect(h.result.current.bookingFor).toBe('athlete');

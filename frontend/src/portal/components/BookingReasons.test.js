@@ -97,3 +97,10 @@ describe('LockedDayNotice and the Oct 10 gate (UX review #8; whole-month window,
     expect(await notice({ date: '2027-01-07' })).toContain('Booking for Thursday, Jan 7 opens 7 AM on Tuesday, Dec 1.');
   });
 });
+
+describe('a session the athlete already holds (owner 2026-11-04)', () => {
+  test('plain words, and no "try again" - a second tap cannot change it', () => {
+    expect(reasonCopy('already-booked')).toBe('This athlete already has this session booked.');
+    expect(canRetry('already-booked')).toBe(false);
+  });
+});

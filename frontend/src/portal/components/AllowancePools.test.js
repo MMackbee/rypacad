@@ -1,6 +1,6 @@
 import React from 'react';
 import { renderScreen } from '../screens/testRender';
-import AllowancePools, { GraceLine, NextPeriodLine, SpendNote, nextPeriodLabel, nextPeriodOpen, spentTitle } from './AllowancePools';
+import AllowancePools, { GraceLine, NextPeriodLine, SpendNote, nextPeriodLabel, nextPeriodOpen, nextPeriodSuffix, spentTitle } from './AllowancePools';
 
 const bought = { id: 'single_a', expiresAt: '2027-02-27', reason: 'single-purchase', sourceSessionId: null };
 const bonus = { id: 'g1', expiresAt: '2026-11-20', reason: 'session-cancelled', sourceSessionId: '2026-11-11-0' };
@@ -115,5 +115,16 @@ describe('monthly and Elite rendering is unchanged', () => {
     expect(await text(<SpendNote tokens={monthly({ grace: [bonus] })} />)).toBe('Uses a bonus token');
     expect(await text(<SpendNote tokens={monthly({ left: 0 })} />)).toBe('No tokens left');
     expect(await text(<SpendNote tokens={monthly()} />)).toBe('Spends 1 token · 6 left');
+  });
+
+  test('December spent too (owner 2026-11-04): the card keeps the December count, in the red stop - a bare "0 tokens left" read as no December at all', async () => {
+    const next = { periodKey: '2026-12-01', periodEnd: '2026-12-31', booked: 8, reserved: 0, granted: 8, left: 0 };
+    expect(await text(<AllowancePools tokens={monthly({ left: 0, used: 6, nextPeriod: next })} compact />)).toBe('0 tokens left · December: 0 of 8 left');
+    expect(nextPeriodSuffix(monthly({ left: 0, used: 6, nextPeriod: next }))).toBe(' · December: 0 of 8 left');
+    // Only once this period is spent, and only with a counted next period; never on an unpaid grant.
+    expect(nextPeriodSuffix(monthly({ left: 2, used: 4, nextPeriod: next }))).toBe('');
+    expect(nextPeriodSuffix(monthly({ left: 0, used: 6 }))).toBe('');
+    expect(nextPeriodSuffix(monthly({ left: 0, used: 6, unpaid: true, nextPeriod: next }))).toBe('');
+    expect(nextPeriodSuffix(null)).toBe('');
   });
 });

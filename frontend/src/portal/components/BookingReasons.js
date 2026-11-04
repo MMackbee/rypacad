@@ -48,12 +48,16 @@ export function reasonCopy(reason) {
   // loaded before the block was reserved let the tap through.
   if (reason === 'handicap-reserved') return 'This session is reserved for lower handicaps.';
   if (reason === 'membership-inactive') return "This membership isn't active right now.";
+  // Owner 2026-11-04: a block the athlete already holds reads "Booked" on the
+  // card and is inert; this is the write's own refusal when a screen loaded
+  // before the booking let the tap through. A second tap changes nothing.
+  if (reason === 'already-booked') return 'This athlete already has this session booked.';
   return null;
 }
 
 /** False for the refusals a second tap on the same session cannot change. */
 export function canRetry(reason) {
-  return !['full', 'session-past', 'waitlist-closed', 'no-waitlist', 'handicap-reserved'].includes(reason);
+  return !['full', 'session-past', 'waitlist-closed', 'no-waitlist', 'handicap-reserved', 'already-booked'].includes(reason);
 }
 
 /** The non-cancellable Calendly row's action copy (MySchedule, Reservations). */

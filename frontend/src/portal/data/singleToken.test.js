@@ -11,6 +11,7 @@ import {
   graceSpendLabel,
   heldLine,
   isSingleTokenId,
+  nextPeriodPosition,
   ownLoginMayBuy,
   packageSwitchWarning,
   saleOpen,
@@ -250,6 +251,22 @@ describe('the extra session: the line, and when the meter offers it', () => {
     expect(outOfTokens({ ...OUT, perPurchase: true })).toBe(false);
     expect(outOfTokens({ ...OUT, left: undefined })).toBe(false);
     expect(outOfTokens(null)).toBe(false);
+  });
+
+  test('not while next month has tokens to book with (owner 2026-11-04): a bought token would spend on the first next-month booking, under a banner that says December is open', () => {
+    const next = { periodKey: '2026-12-01', periodEnd: '2026-12-31', booked: 1, reserved: 0, granted: 8, left: 7 };
+    expect(extraSessionOffer(member(T('t-8'), PAID, { ...OUT, nextPeriod: next }), { now: OPEN })).toBeNull();
+    expect(extraSessionOffer(member(T('t-8'), PAID, { ...OUT, nextPeriod: { ...next, booked: 8, left: 0 } }), { now: OPEN })?.state).toBe('buy');
+    // The Billing hub's row carries the next period beside the tokens (hubMemberFor: granted, booked, reserved - no left).
+    const hubRow = (nextPeriod) => ({ ...member(T('t-8')), nextPeriod });
+    expect(extraSessionOffer(hubRow({ periodKey: '2026-12-01', start: '2026-12-01', end: '2026-12-31', granted: 8, booked: 2, reserved: 1 }), { now: OPEN })).toBeNull();
+    expect(extraSessionOffer(hubRow({ periodKey: '2026-12-01', start: '2026-12-01', end: '2026-12-31', granted: 8, booked: 8, reserved: 0 }), { now: OPEN })?.state).toBe('buy');
+    expect(nextPeriodPosition(hubRow({ periodKey: '2026-12-01', start: '2026-12-01', end: '2026-12-31', granted: 8, booked: 2, reserved: 1 }))).toEqual({ periodKey: '2026-12-01', periodEnd: '2026-12-31', granted: 8, left: 5 });
+    // Elite's hub row grants null: no position, no offer either way.
+    expect(nextPeriodPosition(hubRow({ periodKey: '2026-12-01', granted: null, booked: 0, reserved: 0 }))).toBeNull();
+    expect(nextPeriodPosition(member(T('t-8'), PAID, { ...OUT, nextPeriod: next }))).toBe(next);
+    expect(nextPeriodPosition(member(T('t-8')))).toBeNull();
+    expect(nextPeriodPosition(null)).toBeNull();
   });
 
   test('the return line names the extra session token and its expiry', () => {

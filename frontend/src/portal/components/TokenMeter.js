@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import { format, parseISO } from 'date-fns';
 import { color, font, radius } from '../tokens';
 import StatusBadge from './StatusBadge';
-import { GraceLine } from './AllowancePools';
+import { GraceLine, NextPeriodLine } from './AllowancePools';
 import PayButton from './PayButton';
 import { SessionTokenHero } from './SessionTokens';
 import { Body, Card, SectionLabel } from './Primitives';
@@ -14,6 +14,7 @@ import {
   BUY_EXTRA_LABEL,
   BUY_SINGLE_LABEL,
   extraSessionOffer,
+  nextPeriodPosition,
   saleOpen,
   SINGLE_ASK_GUARDIAN_LINE,
   SINGLE_NOT_OPEN_LINE,
@@ -36,8 +37,13 @@ import {
  * (ExtraSessionBuy; owner, 2026-10-10).
  */
 
-function toneFor(left) {
-  if (left === 0) return color.error;
+/**
+ * Exhausted is the red stop - unless next month's tokens are in hand (owner
+ * 2026-11-04, as AllowancePools reads it): then amber, like the last token,
+ * not a red zero under "Tokens reset Dec 1" that read as December closed.
+ */
+function toneFor(left, nextOpen = false) {
+  if (left === 0) return nextOpen ? color.secondary : color.error;
   if (left === 1) return color.secondary;
   return color.primary;
 }
@@ -297,7 +303,13 @@ export default function TokenMeter({ member, defaultOpen = false, showPrices = f
     );
   }
 
-  const tone = toneFor(tokens.left);
+  // The next period beside this one (owner 2026-11-04: "December: 6 of 6
+  // left" on Billing too - the only December count a parent could find here
+  // sat inside the collapsed evidence). Not before the season, when the
+  // first period is the whole story.
+  const next = period.preSeason ? null : nextPeriodPosition(member);
+  const nextOpen = tokens.left === 0 && tokens.grace.length === 0 && Boolean(next && next.left > 0);
+  const tone = toneFor(tokens.left, nextOpen);
   const granted = tokens.granted || 0;
   const usedPct = granted ? Math.min(100, (tokens.used / granted) * 100) : 0;
   const reservedPct = granted ? Math.min(100 - usedPct, (tokens.reserved / granted) * 100) : 0;
@@ -336,6 +348,7 @@ export default function TokenMeter({ member, defaultOpen = false, showPrices = f
             {bonus ? <Chip tone={color.secondary}>Bonus {bonus}</Chip> : null}
           </div>
           <GraceLine tokens={tokens} />
+          {next ? <NextPeriodLine tokens={{ ...tokens, nextPeriod: next }} style={{ marginTop: 8 }} /> : null}
         </>
       )}
 

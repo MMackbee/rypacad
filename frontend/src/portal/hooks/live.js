@@ -924,7 +924,9 @@ export async function createBooking(
       // create, message unchanged.
       const isRebook = bookingSnap.exists() && bookingSnap.data().status === 'cancelled';
       if (bookingSnap.exists() && !isRebook) {
-        throw new LiveDataError(ERR.INVALID, 'This athlete already has this session booked.');
+        // Typed (owner 2026-11-04) so the screens drop "tap the session to
+        // try again" - a second tap cannot change it (BookingReasons canRetry).
+        throw new LiveDataError(ERR.INVALID, 'This athlete already has this session booked.', null, 'already-booked');
       }
 
       const s = sessionSnap.data();

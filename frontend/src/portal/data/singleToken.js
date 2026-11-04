@@ -165,6 +165,27 @@ export function outOfTokens(tokens) {
 }
 
 /**
+ * The next period as the meters count it - `{ periodKey, periodEnd, granted,
+ * left }` - from either shape a member row carries: a token position that
+ * already has it (hooks/index.js tokensWithNextPeriod, the booking screens),
+ * or the Billing hub's own `nextPeriod` beside the tokens (data/billingHub.js
+ * hubMemberFor: granted, booked, reserved - no left). Null without a counted
+ * one (Elite's hub grant is null).
+ */
+export function nextPeriodPosition(member) {
+  const own = member?.tokens?.nextPeriod;
+  if (own && own.periodKey && own.left != null) return own;
+  const hub = member?.nextPeriod;
+  if (!hub || !hub.periodKey || hub.granted == null) return null;
+  return {
+    periodKey: hub.periodKey,
+    periodEnd: hub.end ?? null,
+    granted: hub.granted,
+    left: Math.max(0, hub.granted - (hub.booked ?? 0) - (hub.reserved ?? 0)),
+  };
+}
+
+/**
  * What a monthly token meter offers for an extra session, or null for
  * nothing at all:
  *   { state: 'buy', line }  the rate line and the Buy button
@@ -174,10 +195,13 @@ export function outOfTokens(tokens) {
  * monthly subscription - active, not a one-time block, a subscription on
  * file (`billing.subscribed`) - in a household not on hold, once single
  * tokens are on sale (saleOpen), and once nothing is left to book with
- * (outOfTokens - see the note above). A failing card is fixed in Stripe
- * first. The billing and household rules are functions/portal/extra.js
- * athleteRefusal and householdRefusal, which refuse anything else - CHANGE
- * ONE, CHANGE BOTH. The tokens rule is the screens' alone.
+ * (outOfTokens - see the note above) - next month's tokens included (owner
+ * 2026-11-04: with December in hand the offer sat under a banner saying
+ * December is open, and the bought token would spend on the first December
+ * booking). A failing card is fixed in Stripe first. The billing and
+ * household rules are functions/portal/extra.js athleteRefusal and
+ * householdRefusal, which refuse anything else - CHANGE ONE, CHANGE BOTH.
+ * The tokens rule is the screens' alone.
  * @param {object} member `{ package, billing, tokens }` - a hub member
  *   (data/billingHub.js hubMemberFor) or a useMembership row.
  * @param {{askGuardian?: boolean, onHold?: boolean, now?: number}} [opts]
@@ -189,6 +213,7 @@ export function extraSessionOffer(member, { askGuardian = false, onHold = false,
   if (!billing || billing.status !== 'active' || billing.oneTime === true || billing.subscribed !== true) return null;
   if (onHold || !saleOpen(now)) return null;
   if (!outOfTokens(member?.tokens)) return null;
+  if ((nextPeriodPosition(member)?.left ?? 0) > 0) return null;
   return askGuardian ? { state: 'ask', line: EXTRA_ASK_GUARDIAN_LINE } : { state: 'buy', line };
 }
 

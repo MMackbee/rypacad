@@ -4,6 +4,7 @@ import TokenMeter from './TokenMeter';
 import { ELITE, SINGLE_TOKEN, TOKEN_PACKAGES } from '../data/packages';
 import { hubMemberFor } from '../data/billingHub';
 import { BOOKING_OPENS_AT, longDayLabel } from '../data/calendar';
+import { color } from '../tokens';
 
 jest.mock('./PayButton', () => ({ __esModule: true, default: ({ athleteId, product, label, variant }) => <button type="button">{label}|{athleteId}|{product}|{variant}</button> }));
 
@@ -315,9 +316,16 @@ describe('a paid monthly member: an extra session at their rate', () => {
   const PAID = { status: 'active', subscriptionId: 'sub_ava' };
   // Every token of the period booked: the meter reads 0 left.
   const spentAll = (pkg) => Array.from({ length: pkg.tokens ?? 0 }, (_, i) => booking(`b${i}`));
-  const monthly = ({ pkg = T8, billing = PAID, bookings = spentAll(pkg), graceTokens = [] } = {}) =>
+  // And next month's too (owner 2026-11-04): only then is nothing left to book with.
+  const spentNext = (pkg) => Array.from({ length: pkg.tokens ?? 0 }, (_, i) => booking(`n${i}`, { periodKey: '2026-12-01', date: '2026-12-04' }));
+  const monthly = ({ pkg = T8, billing = PAID, bookings = [...spentAll(pkg), ...spentNext(pkg)], graceTokens = [] } = {}) =>
     hubMemberFor({ athlete: { ...athlete, packageId: pkg.id, billing }, pkg, anchorDay: 1, today, bookings, waitlist: [], graceTokens });
   const extraButtons = (r) => [...r.container.querySelectorAll('button')].map((b) => b.textContent).filter((t) => t.startsWith(EXTRA));
+  // jsdom drops the size from the `font` shorthand, so the big number is the
+  // first toned span that is only digits.
+  const bigNumber = (r) => [...r.container.querySelectorAll('span')].find((el) => el.style.color && /^[0-9]+$/.test(el.textContent));
+  // jsdom reads a hex inline color back as rgb().
+  const rgb = (hex) => `rgb(${[1, 3, 5].map((i) => parseInt(hex.slice(i, i + 2), 16)).join(', ')})`;
 
   beforeEach(() => { jest.spyOn(Date, 'now').mockReturnValue(BOOKING_OPENS_AT); });
   afterEach(() => { jest.restoreAllMocks(); });
@@ -330,7 +338,31 @@ describe('a paid monthly member: an extra session at their rate', () => {
     expect(r.text().split(LINE)).toHaveLength(2);
     expect(extraButtons(r)).toEqual([`${EXTRA}|ava|extra|primary`]);
     expect(r.text()).not.toContain('Buy a session token');
+    // December spent too: named, in the red stop (owner 2026-11-04: parents want the December count on every meter).
+    expect(r.text()).toContain('December: 0 of 8 left');
+    expect(bigNumber(r).style.color).toBe(rgb(color.error));
     await r.unmount();
+  });
+
+  test('not while December has tokens (owner 2026-11-04): the meter names December beside an amber zero, and offers nothing', async () => {
+    const r = await renderScreen(<TokenMeter member={monthly({ bookings: spentAll(T8) })} buy />);
+    expect(r.text()).toContain('0of 8 left');
+    expect(r.text()).toContain('December: 8 of 8 left');
+    expect(bigNumber(r).style.color).toBe(rgb(color.secondary));
+    expect(extraButtons(r)).toEqual([]);
+    expect(r.text()).not.toContain(LINE);
+    await r.unmount();
+    // Two December bookings and a waitlist hold in hand: counted off the hub row's own next period.
+    const some = monthly({ bookings: [...spentAll(T8), booking('n0', { periodKey: '2026-12-01', date: '2026-12-04' }), booking('n1', { periodKey: '2026-12-01', date: '2026-12-07' })] });
+    const two = await renderScreen(<TokenMeter member={{ ...some, nextPeriod: { ...some.nextPeriod, reserved: 1 } }} buy />);
+    expect(two.text()).toContain('December: 5 of 8 left');
+    expect(extraButtons(two)).toEqual([]);
+    await two.unmount();
+    // Tokens left this period: the December line still shows, in the quiet tone.
+    const open = await renderScreen(<TokenMeter member={monthly({ bookings: [booking('b0')] })} buy />);
+    expect(open.text()).toContain('7of 8 left');
+    expect(open.text()).toContain('December: 8 of 8 left');
+    await open.unmount();
   });
 
   test('every package names its own rate', async () => {

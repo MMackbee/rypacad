@@ -83,8 +83,10 @@ export default function AllowancePools({ tokens, compact = false, style }) {
         <span style={{ font: `600 12px ${font.body}`, color: tone }}>{tokens.left}</span> token
         {tokens.left === 1 ? '' : 's'} left
         {graceExtra(tokens.grace)}
-        {/* 2026-11-03: a spent period with next month in hand says so on the card too. */}
-        {nextPeriodOpen(tokens) ? ` · ${nextPeriodLabel(tokens.nextPeriod)}` : ''}
+        {/* 2026-11-03: a spent period with next month in hand says so on the
+            card too; 2026-11-04 (owner): and once next month is spent as well -
+            a bare "0 tokens left" read as no December at all. */}
+        {nextPeriodSuffix(tokens)}
       </span>
     );
   }
@@ -158,6 +160,20 @@ export function nextPeriodOpen(tokens) {
   if (tokens.left !== 0 || (tokens.grace?.length ?? 0) > 0) return null;
   const np = tokens.nextPeriod;
   return np && np.periodKey && np.left > 0 ? np : null;
+}
+
+/**
+ * The compact line's " · December: 1 of 6 left" once this period is spent
+ * and a next period is counted - at any count, zero included (owner
+ * 2026-11-04: the card dropped December exactly when a parent most wanted
+ * it, and the Book screen beside it still said "December: 0 of 6 left").
+ * Nothing with tokens still left here, for Elite, the single token, an
+ * unpaid grant, or without a counted next period.
+ */
+export function nextPeriodSuffix(tokens) {
+  if (!tokens || tokens.unlimited || tokens.perPurchase || tokens.unpaid || tokens.left !== 0) return '';
+  const label = nextPeriodLabel(tokens.nextPeriod);
+  return label ? ` · ${label}` : '';
 }
 
 /** The month the next period's calendar page shows ("December"), whatever day it starts. */
