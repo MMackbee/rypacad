@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from 'react';
+import React, { useMemo, useRef, useState } from 'react';
 import { format, parseISO } from 'date-fns';
 import { color, font, radius } from '../tokens';
 import BottomTabBar from '../components/BottomTabBar';
@@ -8,7 +8,7 @@ import BoardRow from '../components/mental/BoardRow';
 import { Banner, Body, ErrorNotice, ScreenTitle, SectionLabel, SignOutButton } from '../components/Primitives';
 import { useContractBoard } from '../hooks';
 import { addDays, weekStartFor } from '../data/contractRule';
-import { WEEKS_AHEAD, searchRows } from '../data/contractBoard';
+import { WEEKS_AHEAD, isSearching, searchRows } from '../data/contractBoard';
 import { academyDateISO } from '../data/calendar';
 
 const GROUPS = [
@@ -38,17 +38,18 @@ const searchField = {
   border: `1px solid ${color.controlBorder}`,
   borderRadius: radius.control,
   background: color.surface,
-  font: `400 14px ${font.body}`,
+  font: `400 16px ${font.body}`, // 16px: iOS Safari zooms the page into any input under 16px and leaves it zoomed
   color: color.text,
   WebkitAppearance: 'none',
   appearance: 'none',
 };
+// The full 44px touch target, over the field's 44px right padding.
 const clearButton = {
   position: 'absolute',
-  top: 4,
-  right: 4,
-  width: 36,
-  height: 36,
+  top: 0,
+  right: 0,
+  width: 44,
+  height: 44,
   border: 'none',
   borderRadius: radius.control,
   background: 'transparent',
@@ -90,6 +91,9 @@ function pinOpenRows(rows, open) {
   return lists;
 }
 
+/** True when this row's note prompt is open: it is in `open` and still checked in. */
+const promptOpen = (open, row) => Boolean(open[row.athleteId]) && Boolean(row.checkedInThisWeek);
+
 /**
  * The Commitment Contract board (2026-10-28, spec 5.4): who logged their
  * minutes, week by week, in three groups - due for a check-in (14 days, the
@@ -107,8 +111,11 @@ function pinOpenRows(rows, open) {
  * America/Chicago date. A search box under the week switcher (Yannick,
  * 2026-11-04: "search kids") narrows every group to the athletes whose name
  * or family name starts with what was typed: it filters AFTER the open-prompt
- * pinning, so a row with its prompt open keeps its place; the query stays
- * through week switches; a search that leaves no one says so in one line.
+ * pinning and never hides a row with its prompt open, so that row keeps its
+ * place and its typed note; a row's place is always taken in the whole
+ * group, never the searched list; the query stays through week switches; a
+ * search that leaves no one says so in one line, and a group it empties
+ * speaks of the search, not the board.
  */
 export default function MentalContract({ bare = false, role = 'mental', onSignOut }) {
   const today = academyDateISO();
@@ -118,6 +125,7 @@ export default function MentalContract({ bare = false, role = 'mental', onSignOu
   const [failed, setFailed] = useState(null); // 'checkin' | 'note' | null
   const [open, setOpen] = useState({}); // athleteId -> { group, index }: an open note prompt, and where its row stays
   const [query, setQuery] = useState('');
+  const searchInput = useRef(null);
   const { rows, config, setCheckin, setCheckinNote, loading, error } = useContractBoard(week);
   const atCurrent = week === current;
   const isFuture = week > current;
@@ -125,10 +133,20 @@ export default function MentalContract({ bare = false, role = 'mental', onSignOu
   const groups = atCurrent ? GROUPS : isFuture ? FUTURE_GROUPS : PAST_GROUPS;
   const weekLabel = atCurrent ? 'This week' : `Week of ${format(parseISO(week), 'MMM d')}`;
   const priorLabel = atCurrent ? 'Last week' : 'Week before';
-  const shown = useMemo(() => (rows ? searchRows(pinOpenRows(rows, open), query) : null), [rows, open, query]);
-  const noMatch = Boolean(query.trim()) && Boolean(shown) && !shown.due.length && !shown.thisWeek.length && !shown.checkedIn.length;
+  const pinned = useMemo(() => (rows ? pinOpenRows(rows, open) : null), [rows, open]);
+  const searching = isSearching(query);
+  const shown = useMemo(() => {
+    if (!pinned) return null;
+    const keep = new Set(Object.values(pinned).flat().filter((r) => promptOpen(open, r)).map((r) => r.athleteId));
+    return searchRows(pinned, query, keep);
+  }, [pinned, open, query]);
+  const noMatch = searching && Boolean(shown) && !shown.due.length && !shown.thisWeek.length && !shown.checkedIn.length;
 
-  const openNote = (athleteId, group, index) => setOpen((o) => ({ ...o, [athleteId]: { group, index } }));
+  // A row's place while its prompt is open is its place in the whole group, not in the searched list.
+  const openNote = (athleteId, group) => {
+    const index = Math.max(0, (pinned?.[group] ?? []).findIndex((r) => r.athleteId === athleteId));
+    setOpen((o) => ({ ...o, [athleteId]: { group, index } }));
+  };
   const closeNote = (athleteId) => setOpen((o) => {
     if (!(athleteId in o)) return o;
     const next = { ...o };
@@ -137,10 +155,10 @@ export default function MentalContract({ bare = false, role = 'mental', onSignOu
   });
   const goTo = (w) => { setOpen({}); setFailed(null); setWeek(w); };
 
-  const toggle = (row, group, index) => {
+  const toggle = (row, group) => {
     setFailed(null);
     const checkedIn = !row.checkedInThisWeek;
-    if (checkedIn) openNote(row.athleteId, group, index);
+    if (checkedIn) openNote(row.athleteId, group);
     else closeNote(row.athleteId);
     Promise.resolve(setCheckin({ athleteId: row.athleteId, checkedIn })).catch(() => {
       setFailed('checkin');
@@ -191,7 +209,10 @@ export default function MentalContract({ bare = false, role = 'mental', onSignOu
           </div>
           <div style={{ position: 'relative', marginTop: 10 }}>
             <input
-              type="search"
+              ref={searchInput}
+              type="text"
+              inputMode="search"
+              enterKeyHint="search"
               aria-label="Search athletes"
               placeholder="Search by name"
               value={query}
@@ -199,7 +220,15 @@ export default function MentalContract({ bare = false, role = 'mental', onSignOu
               style={searchField}
             />
             {query ? (
-              <button type="button" aria-label="Clear search" onClick={() => setQuery('')} style={clearButton}>
+              <button
+                type="button"
+                aria-label="Clear search"
+                onClick={() => {
+                  setQuery('');
+                  searchInput.current?.focus();
+                }}
+                style={clearButton}
+              >
                 ×
               </button>
             ) : null}
@@ -239,21 +268,23 @@ export default function MentalContract({ bare = false, role = 'mental', onSignOu
                 </SectionLabel>
                 {list.length === 0 ? (
                   <div style={{ border: `1px dashed ${color.border}`, borderRadius: radius.card, padding: '12px 14px', marginTop: 6 }}>
-                    <Body size={12} tone={color.textTertiary}>{g.empty}</Body>
+                    <Body size={12} tone={color.textTertiary}>
+                      {searching ? `No one in this group matches “${query.trim()}”.` : g.empty}
+                    </Body>
                   </div>
                 ) : (
-                  list.map((row, index) => (
+                  list.map((row) => (
                     <BoardRow
                       key={row.athleteId}
                       row={row}
                       canToggle={canToggle}
-                      onToggle={() => toggle(row, g.key, index)}
+                      onToggle={() => toggle(row, g.key)}
                       weekLabel={weekLabel}
                       priorLabel={priorLabel}
-                      noteOpen={Boolean(open[row.athleteId]) && Boolean(row.checkedInThisWeek)}
+                      noteOpen={promptOpen(open, row)}
                       onSaveNote={(text) => saveNote(row, text)}
                       onCloseNote={() => closeNote(row.athleteId)}
-                      onEditNote={() => openNote(row.athleteId, g.key, index)}
+                      onEditNote={() => openNote(row.athleteId, g.key)}
                     />
                   ))
                 )}

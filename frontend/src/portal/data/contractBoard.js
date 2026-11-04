@@ -113,26 +113,44 @@ export function visitText(visits) {
 
 /** What a search compares: lower-cased, accents stripped, whitespace collapsed. */
 const searchKey = (s) => String(s ?? '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().trim().replace(/\s+/g, ' ');
+/** Apostrophes (straight or curly, as an iPhone types them) and hyphens inside a name: O'Brien, O'Keefe, Smith-Jones. */
+const JOINER = /['\u2018\u2019\u02bc\u2010\u2011-]+/g;
+/** The words typed, each without its apostrophes and hyphens ("o'brien" and "obrien" are one search, curly or straight). */
+const queryWords = (query) => searchKey(query).split(' ').map((w) => w.replace(JOINER, '')).filter(Boolean);
+
+/** True when `query` narrows the board: it has a word to match (blank, or punctuation alone, does not). */
+export const isSearching = (query) => queryWords(query).length > 0;
 
 /**
  * True when every word typed starts some word of the athlete's name or
  * family name (Yannick, 2026-11-04: "search kids" on the board). Case and
- * accents never matter; a blank query matches everyone.
+ * accents never matter; a blank query matches everyone. A name joined by an
+ * apostrophe or a hyphen counts whole and by each part: "brien", "obrien"
+ * and "o'brien" all find O'Brien, and "jones" finds Smith-Jones.
  */
 export function matchesRow(row, query) {
-  const words = searchKey(query).split(' ').filter(Boolean);
+  const words = queryWords(query);
   if (!words.length) return true;
-  const haystack = searchKey(`${row?.name ?? ''} ${row?.familyName ?? ''}`).split(' ').filter(Boolean);
+  const haystack = searchKey(`${row?.name ?? ''} ${row?.familyName ?? ''}`)
+    .split(' ')
+    .flatMap((h) => [h.replace(JOINER, ''), ...h.split(JOINER)])
+    .filter(Boolean);
   return words.every((w) => haystack.some((h) => h.startsWith(w)));
 }
 
-/** The board's three groups with only the rows matching `query`; a blank query returns `rows` itself. */
-export function searchRows(rows, query) {
-  if (!rows || !searchKey(query)) return rows;
+/**
+ * The board's three groups with only the rows matching `query`; a blank
+ * query returns `rows` itself. A row whose athleteId is in `keep` (a Set)
+ * stays whatever the query: the board keeps a row with its note prompt
+ * open, so a typed note is never lost to a search.
+ */
+export function searchRows(rows, query, keep) {
+  if (!rows || !isSearching(query)) return rows;
+  const shows = (r) => Boolean(keep?.has(r.athleteId)) || matchesRow(r, query);
   return {
-    due: rows.due.filter((r) => matchesRow(r, query)),
-    thisWeek: rows.thisWeek.filter((r) => matchesRow(r, query)),
-    checkedIn: rows.checkedIn.filter((r) => matchesRow(r, query)),
+    due: rows.due.filter(shows),
+    thisWeek: rows.thisWeek.filter(shows),
+    checkedIn: rows.checkedIn.filter(shows),
   };
 }
 

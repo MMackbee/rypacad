@@ -1,4 +1,4 @@
-import { OVERDUE_DAYS, boardRows, dateOf, lastCheckinFor, matchesRow, onContract, overdueCheckins, searchRows } from './contractBoard';
+import { OVERDUE_DAYS, boardRows, dateOf, isSearching, lastCheckinFor, matchesRow, onContract, overdueCheckins, searchRows } from './contractBoard';
 
 const ath = (id, name, dob, extra = {}) => ({ id, name, dob, ...extra });
 
@@ -166,5 +166,35 @@ describe('searchRows (Yannick, 2026-11-04: search kids on the board)', () => {
   });
   test('no match empties all three groups', () => {
     expect(searchRows(rows, 'zz')).toEqual({ due: [], thisWeek: [], checkedIn: [] });
+  });
+  test('a name joined by an apostrophe or a hyphen matches whole and by each part, straight or curly apostrophe', () => {
+    const smith = row('x', 'Mary-Kate', 'Smith-Jones family');
+    expect(matchesRow(smith, 'jones')).toBe(true);
+    expect(matchesRow(smith, 'kate')).toBe(true);
+    expect(matchesRow(smith, 'smith-jones')).toBe(true);
+    expect(matchesRow(smith, 'smithjo')).toBe(true);
+    expect(matchesRow(smith, 'kate smith')).toBe(true);
+    const okeefe = row('y', 'Liam', "O'Keefe family");
+    expect(matchesRow(okeefe, 'keefe')).toBe(true);
+    expect(matchesRow(okeefe, 'okeefe')).toBe(true);
+    expect(matchesRow(okeefe, "o'kee")).toBe(true);
+    expect(matchesRow(okeefe, 'O’Keefe')).toBe(true); // an iPhone types the curly one
+    expect(matchesRow(row('z', 'Liam', 'O’Brien family'), "o'brien")).toBe(true);
+    expect(matchesRow(row('z', 'Liam', 'O’Brien family'), 'brien')).toBe(true);
+    expect(matchesRow(okeefe, 'eefe')).toBe(false); // still word starts, not substrings
+    expect(matchesRow(smith, 'ones')).toBe(false);
+  });
+  test('blank or punctuation alone is not a search', () => {
+    expect(isSearching('')).toBe(false);
+    expect(isSearching('  - ')).toBe(false);
+    expect(isSearching("'")).toBe(false);
+    expect(isSearching(' ni ')).toBe(true);
+    expect(searchRows(rows, '-')).toBe(rows);
+  });
+  test('a row in keep stays whatever the query; keep never adds to a blank query', () => {
+    const kept = searchRows(rows, 'jor', new Set(['nico']));
+    expect([ids(kept.due), ids(kept.thisWeek), ids(kept.checkedIn)]).toEqual([[], ['nico'], ['jordan']]);
+    expect(searchRows(rows, 'zz', new Set(['reese'])).due.map((r) => r.athleteId)).toEqual(['reese']);
+    expect(searchRows(rows, '', new Set(['nico']))).toBe(rows);
   });
 });
