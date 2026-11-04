@@ -260,22 +260,30 @@ test('a booking whose athlete could not be read keeps its row as Name unavailabl
   await r.unmount();
 });
 
-test('Tour results saved from a roster with an unreadable athlete store that name as null, never the on-screen label (review 2026-11-04)', async () => {
+test('Tour results saved from a roster with an unreadable athlete keep the saved name, else store null, never the on-screen label (review 2026-11-04)', async () => {
   const tour = { ...block, type: 'tournament', name: 'RYP Tour' };
   mockRows = [
     { bookingId: 'b1', athleteId: 'a1', name: 'Jordan Whitfield', status: 'attended' },
     { bookingId: 'b4', athleteId: 'a4', name: null, status: 'attended' },
+    { bookingId: 'b5', athleteId: 'a5', name: null, status: 'attended' },
   ];
-  // Scores already saved: reopening the sheet to correct one re-saves every row.
-  mockResults = { results: [{ athleteId: 'a1', score: 72 }, { athleteId: 'a4', score: 80 }] };
+  // Scores already saved: reopening the sheet to correct one re-saves every
+  // row. a4's saved result carries its name; a5 has no saved result yet.
+  mockResults = { results: [{ athleteId: 'a1', score: 72 }, { athleteId: 'a4', name: 'Avery Nguyen', score: 80 }] };
   const r = await roster({ block: tour });
   await r.click('Edit Tour results');
   expect(r.text()).toContain('Name unavailable');
+  const a5Score = r.container.querySelectorAll('input[inputmode="numeric"]')[2];
+  await r.act(() => {
+    Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value').set.call(a5Score, '85');
+    a5Score.dispatchEvent(new Event('input', { bubbles: true }));
+  });
   await r.click('Save scores');
   expect(mockWrites.results).toHaveLength(1);
   expect(mockWrites.results[0].map((e) => [e.athleteId, e.name, e.score])).toEqual([
     ['a1', 'Jordan Whitfield', 72],
-    ['a4', null, 80],
+    ['a4', 'Avery Nguyen', 80],
+    ['a5', null, 85],
   ]);
   await r.unmount();
 });

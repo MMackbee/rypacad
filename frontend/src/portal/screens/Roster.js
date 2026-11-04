@@ -817,12 +817,15 @@ function ResultsEntry({ bare, session, roster, resultsState, onBack }) {
     try {
       // Each entry carries the athlete's display name off this very roster
       // (contract v1.5.1, unchanged by v1.6) plus its bracket snapshot -
-      // null when useAthleteBrackets hasn't resolved one.
+      // null when useAthleteBrackets hasn't resolved one. A row this roster
+      // could not read keeps the name already saved on its result (the save
+      // rewrites every row, and that snapshot is how other families see it).
       const nameById = new Map(roster.map((a) => [a.id, a.name]));
+      const savedName = new Map((resultsState.data?.results ?? []).map((r) => [r.athleteId, r.name]));
       const entries = roster
         .map((a) => ({
           athleteId: a.id,
-          name: nameById.get(a.id) ?? null,
+          name: nameById.get(a.id) ?? savedName.get(a.id) ?? null,
           bracket: bracketByAthlete[a.id] ?? null,
           score: validScore(a.id),
         }))
