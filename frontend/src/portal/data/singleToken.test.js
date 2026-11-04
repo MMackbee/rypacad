@@ -262,6 +262,9 @@ describe('the extra session: the line, and when the meter offers it', () => {
     expect(extraSessionOffer(hubRow({ periodKey: '2026-12-01', start: '2026-12-01', end: '2026-12-31', granted: 8, booked: 2, reserved: 1 }), { now: OPEN })).toBeNull();
     expect(extraSessionOffer(hubRow({ periodKey: '2026-12-01', start: '2026-12-01', end: '2026-12-31', granted: 8, booked: 8, reserved: 0 }), { now: OPEN })?.state).toBe('buy');
     expect(nextPeriodPosition(hubRow({ periodKey: '2026-12-01', start: '2026-12-01', end: '2026-12-31', granted: 8, booked: 2, reserved: 1 }))).toEqual({ periodKey: '2026-12-01', periodEnd: '2026-12-31', granted: 8, left: 5 });
+    // The hub row's own `used` (period-charged spend) is the count; `booked` includes grace-charged rows (review 2026-11-04).
+    expect(nextPeriodPosition(hubRow({ periodKey: '2026-12-01', start: '2026-12-01', end: '2026-12-31', granted: 8, booked: 3, used: 2, reserved: 1 }))).toEqual({ periodKey: '2026-12-01', periodEnd: '2026-12-31', granted: 8, left: 5 });
+    expect(extraSessionOffer(hubRow({ periodKey: '2026-12-01', start: '2026-12-01', end: '2026-12-31', granted: 8, booked: 8, used: 7, reserved: 0 }), { now: OPEN })).toBeNull();
     // Elite's hub row grants null: no position, no offer either way.
     expect(nextPeriodPosition(hubRow({ periodKey: '2026-12-01', granted: null, booked: 0, reserved: 0 }))).toBeNull();
     expect(nextPeriodPosition(member(T('t-8'), PAID, { ...OUT, nextPeriod: next }))).toBe(next);

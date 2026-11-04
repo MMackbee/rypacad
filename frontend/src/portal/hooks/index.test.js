@@ -275,6 +275,23 @@ describe('live loaders (perf wave B)', () => {
     await h.unmount();
   });
 
+  test('useBooking() in February, the last period: the position carries no next period (review 2026-11-04)', async () => {
+    live.fetchCurrentUser.mockResolvedValue({ uid: 'u1', athleteId: 'a1', email: 'jordan@email.com' });
+    live.fetchAthlete.mockResolvedValue({ id: 'a1', householdId: 'h1', packageId: 't-12' });
+    live.fetchBookings.mockResolvedValue([]);
+    live.fetchPackage.mockResolvedValue({ id: 't-12', name: '12 tokens', kind: 'tokens', tokens: 12 });
+    live.fetchHousehold.mockResolvedValue({ id: 'h1', periodAnchorDay: 1 });
+    live.fetchSessionsInRange.mockResolvedValue([]);
+
+    const h = await mountHook(() => useBooking({ today: '2027-02-10' }));
+    await settle();
+    expect(h.result.current.error).toBeNull();
+    expect(h.result.current.data.tokens).toMatchObject({ granted: 12, left: 12 });
+    // No March to count: every reader of nextPeriod takes null as "none".
+    expect(h.result.current.data.tokens.nextPeriod).toBeNull();
+    await h.unmount();
+  });
+
   describe('bookRecurring: the window, every single-booking check, a reason per week (repeat report 2026-09-30)', () => {
     // The window is whole calendar months (owner ruling 2026-11-02): Elite
     // reaches the end of the month after next, so on Oct 1 it reaches Dec 31.

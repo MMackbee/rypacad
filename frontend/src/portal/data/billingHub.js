@@ -15,6 +15,7 @@ import { addDaysISO, BOOKING_OPENS_LABEL, bookingOpen, longDayLabel } from './ca
 import { ELITE, normalizeAnchorDay, periodFallback, periodFor, SINGLE_TOKEN, tokensFor } from './packages';
 import { billingStatusOf } from './billingCopy';
 import { contractEnabled } from './contractFlag';
+import { afterSeasonEnd } from './season';
 import { contractMinutesFor } from './contractRule';
 import { isSingleTokenId, saleOpen, SINGLE_NOT_OPEN_LINE } from './singleToken';
 
@@ -156,7 +157,7 @@ export function periodRows({ bookings, waitlist, periodKey, sessionsById = {} })
  *   prevTokenPeriod, sessionsById, anchorDay, today}} args
  */
 export function hubMemberFor(args) {
-  const { athlete, pkg, graceTokens = [], tokenPeriod = null, prevTokenPeriod = null } = args;
+  const { athlete, pkg, graceTokens = [], tokenPeriod = null, prevTokenPeriod = null, nextTokenPeriod = null } = args;
   const sessionsById = args.sessionsById || {};
   const anchorDay = normalizeAnchorDay(args.anchorDay);
   const today = args.today;
@@ -194,9 +195,12 @@ export function hubMemberFor(args) {
   // names these rows (SessionTokens.js singleUsesOf); only a single athlete
   // carries the list.
   const singleUses = tokens.perPurchase ? [...spent, ...nextRows.spent].filter((r) => r.viaSingle) : null;
-  // periodFallback: the single token grants no period token (ruling
-  // 2026-09-29/30), so its next period reads 0, never pkg.tokens.
-  const nextGranted = unlimited ? null : pkg ? periodFallback(pkg) : 0;
+  // The next period's grant is its issued doc when one exists (an ops comp,
+  // Stripe's doc on the 1st), else the package's own - exactly as
+  // hooks/index.js tokensWithNextPeriod reads it for the booking screens
+  // (review 2026-11-04). periodFallback: the single token grants no period
+  // token (ruling 2026-09-29/30), so its next period reads 0, never pkg.tokens.
+  const nextGranted = unlimited ? null : pkg ? nextTokenPeriod?.granted ?? periodFallback(pkg) : 0;
 
   const lastUsed = (bookings || []).filter(
     (b) => b && b.status !== 'cancelled' && b.periodKey === prevPeriod.periodKey && !b.graceTokenId
@@ -242,14 +246,21 @@ export function hubMemberFor(args) {
     spent,
     reserved,
     ...(singleUses ? { singleUses } : {}),
-    nextPeriod: {
-      periodKey: nextPeriod.periodKey,
-      start: nextPeriod.periodKey,
-      end: nextPeriod.periodEnd,
-      granted: nextGranted,
-      booked: nextRows.spent.length,
-      reserved: nextRows.reserved.length,
-    },
+    // Null after the season's last period (data/season.js afterSeasonEnd):
+    // there is no March to count. `used` is the period's SPEND as the token
+    // rule counts it - a grace-charged booking spends no period token -
+    // while `booked` stays the advance-booking total (contract v2.0 pin N).
+    nextPeriod: afterSeasonEnd(nextPeriod.periodKey)
+      ? null
+      : {
+          periodKey: nextPeriod.periodKey,
+          start: nextPeriod.periodKey,
+          end: nextPeriod.periodEnd,
+          granted: nextGranted,
+          booked: nextRows.spent.length,
+          used: nextRows.spent.filter((r) => !r.viaGrace).length,
+          reserved: nextRows.reserved.length,
+        },
     lastPeriod,
     expiryNudge,
     // Elite has no countdown, so "how much did we use it" is the only honest

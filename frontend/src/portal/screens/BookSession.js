@@ -234,7 +234,12 @@ export default function BookSession({
   // They are about one day's card for one athlete: both go when either
   // changes (owner 2026-11-04: a refusal's red banner stuck across month
   // turns and day taps until the next successful tap).
+  // The attempt a refusal belongs to: a day or athlete change retires the
+  // one in flight, so its refusal, landing after the switch, paints nothing
+  // under the new day or child (review 2026-11-04).
+  const attempt = useRef(0);
   useEffect(() => {
+    attempt.current += 1;
     setFailure(null);
     setLeaveFailure(null);
   }, [selectedDate, selectedAthleteId]);
@@ -278,6 +283,7 @@ export default function BookSession({
     setFailure(null);
     setLeaveFailure(null);
     setReserving(session.id);
+    const mine = attempt.current;
     const opts = { ...(isParent ? { athleteId: selectedAthleteId } : {}), ...(joinWaitlist ? { joinWaitlist: true } : {}) };
     Promise.resolve()
       .then(() => reserve(session, Object.keys(opts).length ? opts : undefined))
@@ -291,6 +297,8 @@ export default function BookSession({
       .catch((err) => {
         if (!live.current) return;
         setReserving(null);
+        // The day or child changed mid-flight: the banner would be about the old one.
+        if (attempt.current !== mine) return;
         // err.reason: 'no-tokens-left' | 'outside-window' | 'cap-reached' |
         // 'full' | 'membership-inactive' | 'already-booked' — drives
         // reasonCopy() below; falls back to err.message for anything else.
@@ -601,7 +609,12 @@ function DaySessionList({
 }) {
   // Owner 2026-11-04: a block this athlete already holds says so and offers
   // nothing - a second tap used to reach the write's refusal.
-  const heldNote = `${athleteName ?? 'This athlete'} is booked in. Cancel it from ${scheduleName} if plans change.`;
+  const heldName = athleteName ?? 'This athlete';
+  const heldNote = `${heldName} is booked in. Cancel it from ${scheduleName} if plans change.`;
+  // From the session's own day the schedule screens offer no Cancel (their
+  // `cancellable` is date > today) and show this line instead - the same
+  // from-the-day-on rule as waitlistClosed.
+  const heldSameDayNote = `${heldName} is booked in. Same-day cancellations aren't available in the app — contact the front desk.`;
   return (
     <>
       <div style={{ font: `600 13px ${font.body}`, color: color.text, padding: '2px 0 2px' }}>
@@ -639,7 +652,8 @@ function DaySessionList({
           const displayOnly = session.bookable === false;
           // R2: a session that has started is shown, never offered.
           const started = checkStarted && !displayOnly && sessionStarted(session);
-          const held = !displayOnly && bookedSessionIds.includes(session.id);
+          // Started wins: a held block that has begun reads Started, as before.
+          const held = !displayOnly && !started && bookedSessionIds.includes(session.id);
           // Already on this waitlist: say so and offer Leave, never Join again.
           const waiting = displayOnly || started || held ? null : waitingOn(session, athleteId);
           // A handicap-reserved block (owner ruling 2026-10-02) is offered
@@ -700,7 +714,7 @@ function DaySessionList({
                 displayOnly
                   ? 'Adult block — booked and paid at the front desk, not through the portal.'
                   : held
-                  ? heldNote
+                  ? (checkStarted && waitlistClosed(session) ? heldSameDayNote : heldNote)
                   : refusal
                   ? refusal
                   : tokensSpent && !isFull && !started && !waiting && !notTheirs

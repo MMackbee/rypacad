@@ -70,7 +70,7 @@ describe('hubMemberFor', () => {
   test('the period and its dates', () => {
     const m = hubMemberFor(fixture());
     expect(m.period).toMatchObject({ periodKey: '2026-12-01', start: '2026-12-01', end: '2026-12-31', resetsOn: '2027-01-01', daysLeft: 15, preSeason: false });
-    expect(m.nextPeriod).toMatchObject({ periodKey: '2027-01-01', start: '2027-01-01', end: '2027-01-31', granted: 12, booked: 1, reserved: 1 });
+    expect(m.nextPeriod).toMatchObject({ periodKey: '2027-01-01', start: '2027-01-01', end: '2027-01-31', granted: 12, booked: 1, used: 1, reserved: 1 });
     expect(m.lastPeriod).toMatchObject({ periodKey: '2026-11-01', end: '2026-11-30', granted: 12, used: 2 });
     expect(m.tokens).toMatchObject({ startsOn: null, unpaid: false });
   });
@@ -94,6 +94,23 @@ describe('hubMemberFor', () => {
     const m = hubMemberFor({ ...fixture(), tokenPeriod: { granted: 14 }, prevTokenPeriod: { granted: 6 } });
     expect(m.tokens).toMatchObject({ granted: 14, left: 10 });
     expect(m.lastPeriod).toMatchObject({ granted: 6, used: 2 });
+  });
+
+  // Review 2026-11-04: Billing's next period must count exactly as the
+  // booking screens' (hooks/index.js tokensWithNextPeriod) - an issued doc's
+  // grant, and only period-charged spend - or the two disagree on "December:
+  // N of 12 left" and on whether an extra session is offered.
+  test('the next period: an issued grant wins, a grace-charged booking is booked but not spent, and none exists after the season', () => {
+    const m = hubMemberFor({
+      ...fixture(),
+      nextTokenPeriod: { granted: 8 },
+      bookings: [...fixture().bookings, b('ng', { date: '2027-01-08', periodKey: '2027-01-01', graceTokenId: 'grace-spent' })],
+    });
+    expect(m.nextPeriod).toMatchObject({ periodKey: '2027-01-01', granted: 8, booked: 2, used: 1, reserved: 1 });
+    // February is the season's last period: there is no March to count.
+    const feb = hubMemberFor({ ...fixture(), today: '2027-02-10' });
+    expect(feb.period).toMatchObject({ start: '2027-02-01', end: '2027-02-28' });
+    expect(feb.nextPeriod).toBeNull();
   });
 
   test('the expiry nudge appears inside the last week of a period with tokens left', () => {

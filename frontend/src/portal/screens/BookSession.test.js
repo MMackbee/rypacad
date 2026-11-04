@@ -771,6 +771,17 @@ describe('waitlist hardening', () => {
     await r.unmount();
   });
 
+  test("today's held block that has already started reads Started, not Booked; one still to come says same-day cancels go through the front desk", async () => {
+    mockBookedIds = ['started', 'later'];
+    const r = await renderScreen(<BookSession bare demoSelectedDate="2026-11-12" />);
+    expect(cardAt(r, '4:00').textContent).toContain('Started');
+    expect(cardAt(r, '4:00').textContent).not.toContain('Booked');
+    expect(cardAt(r, '6:00').textContent).toContain('Booked');
+    expect(r.text()).toContain("Jordan is booked in. Same-day cancellations aren't available in the app — contact the front desk.");
+    expect(r.text()).not.toContain('Cancel it from Schedule');
+    await r.unmount();
+  });
+
   test("a parent: the chosen child's own bookings mark the block, a sibling's do not", async () => {
     mockHousehold = [
       { id: 'k1', name: 'Ava', tokens: { left: 3, unlimited: false, grace: [] }, bookedSessionIds: ['s17'] },
@@ -807,6 +818,23 @@ describe('waitlist hardening', () => {
     expect(r.text()).not.toContain("Booking didn't go through");
     await r.click('Ava');
     expect(r.text()).not.toContain("Booking didn't go through");
+    await r.unmount();
+  });
+
+  test('a refusal that lands after the parent switched child paints nothing under the new child', async () => {
+    mockHousehold = [
+      { id: 'k1', name: 'Ava', tokens: { left: 3, unlimited: false, grace: [] } },
+      { id: 'k2', name: 'Nico', tokens: { left: 3, unlimited: false, grace: [] } },
+    ];
+    let reject;
+    mockBook = () => new Promise((_, rej) => { reject = rej; });
+    const r = await renderScreen(<BookSession bare role="parent" demoSelectedDate="2026-11-17" />);
+    await tap(cardAt(r, '4:00'));
+    await r.click('Nico');
+    await act(async () => { reject(refusal('no-tokens-left', 'No tokens left this period.')); });
+    expect(r.text()).not.toContain("Booking didn't go through");
+    // The cards un-grey all the same: the attempt is over.
+    expect(cardAt(r, '4:00').style.cursor).toBe('pointer');
     await r.unmount();
   });
 

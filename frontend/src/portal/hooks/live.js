@@ -1019,6 +1019,13 @@ export async function createBooking(
       bump('sessions');
       bump('athletes');
     }
+    // Nothing was written. An already-booked refusal means this screen loaded
+    // before the booking landed (the athlete's own phone, a sibling's tab):
+    // the bump reloads the row's bookedSessionIds so the card redraws as
+    // Booked, inert (owner 2026-11-04), as the 'full' refusal redraws "1 left".
+    if (err?.reason === 'already-booked' && !silent) {
+      bump('bookings');
+    }
     throw wrap(err, 'createBooking');
   }
 }

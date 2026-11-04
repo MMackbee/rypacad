@@ -122,13 +122,15 @@ describe('a paid monthly member: Buy an extra session', () => {
   const EXTRA = 'Buy an extra session';
   // `used` of the period's tokens booked, and `nextUsed` of December's (owner
   // 2026-11-04: the offer waits until next month is spent too); all by default.
-  const paidMember = (id, name, pkg = T12, used = pkg.tokens, nextUsed = pkg.tokens) =>
+  const paidMember = (id, name, pkg = T12, used = pkg.tokens, nextUsed = pkg.tokens, nextGrace = 0) =>
     hubMemberFor({
       athlete: { id, name, dob: '2012-06-17', packageId: pkg.id, billing: { status: 'active', subscriptionId: `sub_${id}` } },
       pkg, anchorDay: 1, today, waitlist: [], graceTokens: [],
       bookings: [
         ...Array.from({ length: used }, (_, i) => ({ id: `${id}_b${i}`, athleteId: id, status: 'confirmed', periodKey: '2026-11-01', date: '2026-11-20', sessionId: `s-${i}`, type: 'training' })),
         ...Array.from({ length: nextUsed }, (_, i) => ({ id: `${id}_n${i}`, athleteId: id, status: 'confirmed', periodKey: '2026-12-01', date: '2026-12-04', sessionId: `d-${i}`, type: 'training' })),
+        // Paid with a bonus token: booked in December, no December token spent.
+        ...Array.from({ length: nextGrace }, (_, i) => ({ id: `${id}_g${i}`, athleteId: id, status: 'confirmed', periodKey: '2026-12-01', date: '2026-12-06', sessionId: `g-${i}`, graceTokenId: `${id}_g${i}`, type: 'training' })),
       ],
     });
   const extraButtons = (r, id) => [...r.container.querySelectorAll('button')].map((b) => b.textContent).filter((t) => t.endsWith(`|${id}|extra`));
@@ -158,6 +160,14 @@ describe('a paid monthly member: Buy an extra session', () => {
     expect(extraButtons(r, 'ava')).toEqual([]);
     expect(r.text()).not.toContain('12-token rate');
     expect(r.text()).toContain('December: 10 of 12 left');
+    await r.unmount();
+  });
+
+  test('a December booking paid with a bonus token spends no December token: the count and the offer read the period spend (review 2026-11-04)', async () => {
+    mockHub = hubOf([paidMember('ava', 'Ava', T12, 12, 11, 1)]);
+    const r = await renderScreen(<Billing bare />);
+    expect(extraButtons(r, 'ava')).toEqual([]);
+    expect(r.text()).toContain('December: 1 of 12 left');
     await r.unmount();
   });
 

@@ -344,6 +344,20 @@ describe('a paid monthly member: an extra session at their rate', () => {
     await r.unmount();
   });
 
+  test('February is the last period (review 2026-11-04): no March line, the red stop, and the offer stands', async () => {
+    const feb = hubMemberFor({
+      athlete: { ...athlete, packageId: T8.id, billing: PAID }, pkg: T8, anchorDay: 1, today: '2027-02-10', waitlist: [], graceTokens: [],
+      bookings: Array.from({ length: 8 }, (_, i) => booking(`f${i}`, { periodKey: '2027-02-01', date: '2027-02-12' })),
+    });
+    const r = await renderScreen(<TokenMeter member={feb} buy defaultOpen />);
+    expect(r.text()).toContain('0of 8 left');
+    expect(r.text()).not.toContain('March');
+    expect(r.text()).not.toContain('Next period from');
+    expect(bigNumber(r).style.color).toBe(rgb(color.error));
+    expect(extraButtons(r)).toHaveLength(1);
+    await r.unmount();
+  });
+
   test('not while December has tokens (owner 2026-11-04): the meter names December beside an amber zero, and offers nothing', async () => {
     const r = await renderScreen(<TokenMeter member={monthly({ bookings: spentAll(T8) })} buy />);
     expect(r.text()).toContain('0of 8 left');

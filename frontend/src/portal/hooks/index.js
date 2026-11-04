@@ -143,6 +143,7 @@ import {
   SEASON,
   SEASON_BOUNDS,
   SEASON_BY_DATE,
+  afterSeasonEnd,
   capacityFor,
   datePill,
   dayLabel,
@@ -421,6 +422,9 @@ function tokensWithNextPeriod(pkg, bookings, anchorDay, today, opts = {}) {
   if (!position) return null;
   const { periodEnd } = positionPeriodFor(today, anchorDay);
   const next = periodFor(addDaysISO(periodEnd, 1), anchorDay);
+  // The season's last period has no next (data/season.js afterSeasonEnd):
+  // every reader of nextPeriod takes null as "none counted".
+  if (afterSeasonEnd(next.periodKey)) return { ...position, nextPeriod: null };
   const nextPeriodKey = next.periodKey;
   const booked = (bookings || []).filter(
     (b) => b && b.status !== 'cancelled' && b.periodKey === nextPeriodKey

@@ -169,8 +169,9 @@ export function outOfTokens(tokens) {
  * left }` - from either shape a member row carries: a token position that
  * already has it (hooks/index.js tokensWithNextPeriod, the booking screens),
  * or the Billing hub's own `nextPeriod` beside the tokens (data/billingHub.js
- * hubMemberFor: granted, booked, reserved - no left). Null without a counted
- * one (Elite's hub grant is null).
+ * hubMemberFor: granted, used, booked, reserved - no left; `used` is the
+ * period-charged spend, `booked` counts grace-charged rows too). Null without
+ * a counted one (Elite's hub grant is null; nothing after the season).
  */
 export function nextPeriodPosition(member) {
   const own = member?.tokens?.nextPeriod;
@@ -181,7 +182,7 @@ export function nextPeriodPosition(member) {
     periodKey: hub.periodKey,
     periodEnd: hub.end ?? null,
     granted: hub.granted,
-    left: Math.max(0, hub.granted - (hub.booked ?? 0) - (hub.reserved ?? 0)),
+    left: Math.max(0, hub.granted - (hub.used ?? hub.booked ?? 0) - (hub.reserved ?? 0)),
   };
 }
 

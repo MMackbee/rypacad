@@ -125,8 +125,9 @@ function Evidence({ member }) {
         </Body>
       )}
       {/* A single athlete's tokens are bought, never granted per period: no
-          grant line, only what is already booked past this period's end. */}
-      {tokens.perPurchase ? (
+          grant line, only what is already booked past this period's end.
+          No line at all after the season's last period (nextPeriod null). */}
+      {!nextPeriod ? null : tokens.perPurchase ? (
         nextPeriod.booked || nextPeriod.reserved ? (
           <Body size={11} tone={color.textTertiary} style={{ marginTop: 10 }}>
             From {longDayLabel(nextPeriod.start)}:{' '}
