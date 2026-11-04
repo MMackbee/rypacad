@@ -55,7 +55,7 @@ test('rows, columns and counts', () => {
   expect(h2.flags).toEqual([{ kind: 'booking', id: 'a3_cal-1', flag: 'before-open', date: '2026-10-08' }]);
   expect(h2).toMatchObject({ unpaid: false, flagged: true });
   expect(counts).toEqual({ all: 2, unpaid: 1, flagged: 1, unresolved: 1 });
-  expect(unresolved).toEqual([{ id: 'ev-1', outcome: 'unresolved', receivedAt: '2026-10-04T12:00' }]);
+  expect(unresolved).toEqual([{ id: 'ev-1', outcome: 'unresolved', receivedAt: '2026-10-04T12:00', invitee: null, slot: null, reason: null }]);
 });
 
 test('an open invite younger than 7 days is invited; orphaned reads none; a loginEmail with no invite reads invited', () => {

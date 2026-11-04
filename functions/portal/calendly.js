@@ -14,6 +14,16 @@
  * (`lib.graceSpendQueries`); a single athlete's waitlist holds never block
  * a real Calendly session; and a flagged booking by a per-purchase athlete
  * still spends the grace token `chargeFor` picked, keeping its flag.
+ *
+ * Unmatched bookings (owner, 2026-11-04, after seven October bookings the
+ * webhook could not place): the family's login is looked for under the
+ * invitee email, the "Parent email" answer and the household's guardian
+ * email; a parent of several kids is matched to the kid the "Athlete name"
+ * answer names. A booking that still resolves to nobody is HELD as
+ * `sessions/cal-<uuid>` with `unresolved: true` (no booking, no token), so
+ * Yannick's list shows it and the ledger row carries who booked (`invitee`,
+ * `slot`, `reason`) for the academy to link it with
+ * scripts/calendly-unmatched.mjs; its cancellation releases the session.
  */
 'use strict';
 
@@ -23,6 +33,9 @@ const {FieldValue} = require('firebase-admin/firestore');
 const lib = require('./lib');
 const {verifyCalendlySignature} = require('./calendly-verify');
 const {CALENDLY_SECRETS} = require('./secrets');
+const resolve = require('./calendly-resolve');
+
+const {docOf, inviteeOf, resolveAthlete} = resolve;
 
 /**
  * Yannick's per-athlete monthly cadence. CHANGE ONE, CHANGE BOTH with
@@ -79,7 +92,8 @@ function attendeeOf(qa) {
  * The session slot a created invitee describes.
  * @param {!Object} p `body.payload`.
  * @return {?{id: string, eventUri: string, date: string, time: string,
- *     durationMinutes: number}} Null when the times do not parse.
+ *     durationMinutes: number, startTime: string, endTime: string}} Null
+ *     when the times do not parse.
  */
 function slotOf(p) {
   const ev = p.scheduled_event || {};
@@ -94,70 +108,68 @@ function slotOf(p) {
     id: `cal-${uuid}`, eventUri,
     date: lib.chicagoDate(start), time: lib.chicagoTime(start),
     durationMinutes: Math.round((end.getTime() - start.getTime()) / 60000),
+    startTime: start.toISOString(), endTime: end.toISOString(),
   };
 }
 
 /**
- * One document from a snapshot.
- * @param {!Object} snap A DocumentSnapshot.
- * @return {?{id: string, data: !Object, ref: !Object}} Or null.
- */
-function docOf(snap) {
-  return snap.exists ? {id: snap.id, data: snap.data() || {}, ref: snap.ref} :
-      null;
-}
-
-/**
- * The one `users` doc carrying this email (exact, then lower-cased), or
- * null when none or more than one.
- * @param {!Object} tx The transaction.
- * @param {!Object} store Firestore.
- * @param {string} email The invitee email.
- * @return {!Promise<?Object>} The users doc body.
- */
-async function userByEmail(tx, store, email) {
-  const users = store.collection('users');
-  let snap = await tx.get(users.where('email', '==', email).limit(2));
-  if (snap.empty && email !== email.toLowerCase()) {
-    snap = await tx.get(
-        users.where('email', '==', email.toLowerCase()).limit(2));
-  }
-  return snap.size === 1 ? snap.docs[0].data() || {} : null;
-}
-
-/**
- * Resolve the athlete (spec 6.2 step 1): `utm_content` -> athletes/{id},
- * accepted only when the invitee email OWNS that athlete (it is the
- * athlete's login, or an account in the same household); else the invitee
- * email through `users` (an athlete account directly, a parent account ->
- * the household's only athlete). Anything else -> null. An edited or
- * forwarded link therefore never spends another family's token.
- * @param {!Object} tx The transaction.
- * @param {!Object} store Firestore.
+ * The slot as the ledger keeps it (2026-11-04), for either event.
  * @param {!Object} p `body.payload`.
- * @return {!Promise<?{id: string, data: !Object, ref: !Object}>} Athlete.
+ * @return {?{date: string, time: string, durationMinutes: number,
+ *     startTime: string, endTime: string}} Null when there is no slot.
  */
-async function resolveAthlete(tx, store, p) {
-  const email = String(p.email || '').trim();
-  const lower = email.toLowerCase();
-  const u = email ? await userByEmail(tx, store, email) : null;
-  const utm = p.tracking && p.tracking.utm_content;
-  if (utm) {
-    const a = docOf(await tx.get(
-        store.collection('athletes').doc(String(utm))));
-    const owns = a && lower && (
-      String(a.data.loginEmail || '').toLowerCase() === lower ||
-        (u && u.householdId && u.householdId === a.data.householdId));
-    if (owns) return a;
-  }
-  if (!u) return null;
-  if (u.athleteId) {
-    return docOf(await tx.get(store.collection('athletes').doc(u.athleteId)));
-  }
-  if (!u.householdId) return null;
-  const kids = await tx.get(store.collection('athletes')
-      .where('householdId', '==', u.householdId).limit(2));
-  return kids.size === 1 ? docOf(kids.docs[0]) : null;
+function slotLedger(p) {
+  const s = slotOf(p);
+  return s ? {date: s.date, time: s.time, durationMinutes: s.durationMinutes,
+    startTime: s.startTime, endTime: s.endTime} : null;
+}
+
+/**
+ * The display-only session a Calendly slot becomes (capacity 1, held).
+ * @param {!Object} slot slotOf's row.
+ * @return {!Object} The `sessions/cal-<uuid>` body.
+ */
+function sessionDoc(slot) {
+  return {
+    date: slot.date, time: slot.time, type: TYPE, label: LABEL,
+    capacity: 1, booked: 1, status: 'scheduled',
+    durationMinutes: slot.durationMinutes, bookable: false, coachId: null,
+    special: false, source: 'calendly', calendlyEventUri: slot.eventUri,
+    gcalEventId: null, coachNote: null,
+  };
+}
+
+/**
+ * Release a Calendly session: seat freed, cancelled.
+ * @param {!Object} tx The transaction.
+ * @param {!Object} store Firestore.
+ * @param {string} sessionId The `cal-<uuid>` id.
+ */
+function releaseSession(tx, store, sessionId) {
+  tx.update(store.collection('sessions').doc(sessionId),
+      {booked: 0, status: 'cancelled'});
+}
+
+/**
+ * The session still held for an earlier UNRESOLVED invitee (its
+ * cancellation, or the old half of its reschedule), through that
+ * invitee's created-ledger row; null when there is none to release.
+ * @param {!Object} tx The transaction.
+ * @param {!Object} store Firestore.
+ * @param {?string} inviteeUri The invitee uri of the earlier booking.
+ * @return {!Promise<?{id: string, data: !Object, ref: !Object}>} Session.
+ */
+async function unresolvedSessionOf(tx, store, inviteeUri) {
+  const uuid = uuidOf(inviteeUri);
+  if (!uuid) return null;
+  const row = docOf(await tx.get(store.collection('calendlyEvents')
+      .doc(`${uuid}_invitee.created`)));
+  const eventUuid = row && row.data.outcome === 'unresolved' ?
+      uuidOf(row.data.eventUri) : null;
+  const s = eventUuid ? docOf(await tx.get(
+      store.collection('sessions').doc(`cal-${eventUuid}`))) : null;
+  return s && s.data.unresolved === true && s.data.status !== 'cancelled' ?
+      s : null;
 }
 
 /**
@@ -172,10 +184,7 @@ function cancelBooking(tx, store, booking) {
     status: 'cancelled', cancelledBy: 'calendly', cancelReason: 'member',
     cancelledAt: now(),
   });
-  if (booking.data.sessionId) {
-    tx.update(store.collection('sessions').doc(booking.data.sessionId),
-        {booked: 0, status: 'cancelled'});
-  }
+  if (booking.data.sessionId) releaseSession(tx, store, booking.data.sessionId);
 }
 
 /**
@@ -189,15 +198,24 @@ function cancelBooking(tx, store, booking) {
 async function applyCreated(tx, c) {
   const {store, nowDate, p} = c;
   const slot = slotOf(p);
-  const athlete = slot ? await resolveAthlete(tx, store, p) : null;
+  const found = slot ? await resolveAthlete(tx, store, p) :
+      {athlete: null, via: null, reason: null};
+  const athlete = found.athlete;
+  const oldHeld = p.old_invitee ?
+      await unresolvedSessionOf(tx, store, p.old_invitee) : null;
+  const ledgerRow = (more) => Object.assign(c.ledger.row,
+      {via: found.via, reason: found.reason}, more);
   if (!slot) {
-    tx.set(c.ledger.ref, Object.assign(c.ledger.row, {outcome: 'malformed'}));
+    tx.set(c.ledger.ref, ledgerRow({outcome: 'malformed'}));
     return {outcome: 'malformed', flag: null};
   }
   if (!athlete) {
-    tx.set(c.ledger.ref, Object.assign(c.ledger.row,
-        {outcome: 'unresolved'}));
-    return {outcome: 'unresolved', flag: null};
+    // Held, not refused (2026-11-04): Yannick's time is taken either way.
+    if (oldHeld) releaseSession(tx, store, oldHeld.id);
+    tx.set(store.collection('sessions').doc(slot.id),
+        Object.assign(sessionDoc(slot), {unresolved: true}));
+    tx.set(c.ledger.ref, ledgerRow({outcome: 'unresolved'}));
+    return {outcome: 'unresolved', flag: null, reason: found.reason};
   }
   const householdId = athlete.data.householdId || null;
   const hhSnap = householdId ? await tx.get(
@@ -264,13 +282,8 @@ async function applyCreated(tx, c) {
   const paid = !flag || (position.perPurchase &&
       charge.chargedFrom === 'grace');
   for (const b of old) cancelBooking(tx, store, {id: b.id, data: b});
-  tx.set(store.collection('sessions').doc(slot.id), {
-    date: slot.date, time: slot.time, type: TYPE, label: LABEL,
-    capacity: 1, booked: 1, status: 'scheduled',
-    durationMinutes: slot.durationMinutes, bookable: false, coachId: null,
-    special: false, source: 'calendly', calendlyEventUri: slot.eventUri,
-    gcalEventId: null, coachNote: null,
-  });
+  if (oldHeld) releaseSession(tx, store, oldHeld.id);
+  tx.set(store.collection('sessions').doc(slot.id), sessionDoc(slot));
   tx.set(store.collection('bookings').doc(lib.bookingId(athlete.id, slot.id)),
       {
         athleteId: athlete.id, sessionId: slot.id, householdId,
@@ -282,10 +295,10 @@ async function applyCreated(tx, c) {
         createdBy: 'system', source: 'calendly',
         calendlyInviteeUri: p.uri || null, flag, createdAt: now(),
       });
-  const outcome = old.length > 0 ? 'rescheduled' : 'applied';
-  tx.set(c.ledger.ref, Object.assign(c.ledger.row,
+  const outcome = old.length > 0 || oldHeld ? 'rescheduled' : 'applied';
+  tx.set(c.ledger.ref, ledgerRow(
       {athleteId: athlete.id, householdId, outcome, flag}));
-  return {outcome, flag};
+  return {outcome, flag, via: found.via};
 }
 
 /**
@@ -299,12 +312,17 @@ async function applyCanceled(tx, c) {
   const snap = await tx.get(store.collection('bookings')
       .where('calendlyInviteeUri', '==', String(p.uri || '')).limit(1));
   const booking = snap.empty ? null : docOf(snap.docs[0]);
+  const held = booking ? null : await unresolvedSessionOf(tx, store, p.uri);
   let outcome = 'not-found';
   if (booking && booking.data.status === 'cancelled') {
     outcome = 'already-cancelled';
   } else if (booking) {
     cancelBooking(tx, store, booking);
     outcome = 'applied';
+  } else if (held) {
+    // 2026-11-04: the held unmatched session goes with its booking.
+    releaseSession(tx, store, held.id);
+    outcome = 'applied-unmatched';
   }
   tx.set(c.ledger.ref, Object.assign(c.ledger.row, {
     athleteId: booking ? booking.data.athleteId || null : null,
@@ -333,7 +351,8 @@ async function handleCalendlyEvent(body, deps) {
     ref: store.collection('calendlyEvents').doc(`${inviteeUuid}_${b.event}`),
     row: {event: b.event, inviteeUri: p.uri, eventUri: p.event || null,
       athleteId: null, householdId: null, receivedAt: now(), outcome: null,
-      flag: null},
+      flag: null, invitee: inviteeOf(p), slot: slotLedger(p), via: null,
+      reason: null},
   };
   const result = await store.runTransaction(async (tx) => {
     if ((await tx.get(ledger.ref)).exists) {
@@ -344,8 +363,10 @@ async function handleCalendlyEvent(body, deps) {
         applyCanceled(tx, c);
   });
   console.log(`calendly ${b.event} ${inviteeUuid} -> ${result.outcome}` +
-      `${result.flag ? ' flag=' + result.flag : ''}`);
-  return result;
+      `${result.flag ? ' flag=' + result.flag : ''}` +
+      `${result.via ? ' via=' + result.via : ''}` +
+      `${result.reason ? ' reason=' + result.reason : ''}`);
+  return {outcome: result.outcome, flag: result.flag || null};
 }
 
 /**
@@ -387,5 +408,6 @@ const calendlyWebhook = functions.runWith({secrets: CALENDLY_SECRETS})
 
 module.exports = {
   MENTAL_MONTHLY_CAP, attendeeOf, calendlyWebhook, handleCalendlyEvent,
-  mentalCapFor, slotOf, uuidOf,
+  inviteeOf, kidByName: resolve.kidByName, mentalCapFor,
+  nameKey: resolve.nameKey, slotOf, uuidOf,
 };

@@ -60,8 +60,13 @@ function variant(name, n, over) {
     p.scheduled_event.end_time = new Date(Date.parse(o.start) + 30 * 60000).toISOString();
   }
   if (o.attendee) p.questions_and_answers[1].answer = o.attendee;
+  if ('athleteName' in o) p.questions_and_answers[0].answer = o.athleteName;
+  if ('parentEmail' in o) p.questions_and_answers[2].answer = o.parentEmail;
+  if (o.old) p.old_invitee = o.old;
   return body;
 }
+/** The invitee uri variant n carries (for old_invitee). */
+const INV_URI = (n) => `https://api.calendly.com/scheduled_events/e0a1c3d5-7b9f-4a2c-8e6d-${String(n).padStart(12, '0')}/invitees/${INV(n)}`;
 const EVT = (n) => `cal-e0a1c3d5-7b9f-4a2c-8e6d-${String(n).padStart(12, '0')}`;
 const INV = (n) => `1a2b3c4d-5e6f-4a7b-8c9d-${String(n).padStart(12, '0')}`;
 const CLOCK = new Date('2026-10-14T15:00:00Z');
@@ -92,6 +97,9 @@ async function seed() {
   set('athletes', 'max', {name: 'Max', householdId: 'novak', packageId: 'elite', billing: {status: 'pending'}});
   set('athletes', 'femi', {name: 'Femi', householdId: 'oyelaran', packageId: 't-12'});
   set('athletes', 'sol', {name: 'Sol', householdId: 'quist', packageId: 'single'});
+  // Rook: a household whose guardian email has NO users doc (2026-11-04 fallback).
+  set('households', 'rook', {name: 'Rook family', periodAnchorDay: 1, guardian: {name: 'Rhea Rook', email: 'rhea@example.test', phone: null}});
+  set('athletes', 'rae', {name: 'Rae Rook', householdId: 'rook', packageId: 't-6'});
   set('packages', 't-6', {name: '6 tokens', kind: 'tokens', tokens: 6, windowDays: 30});
   set('packages', 't-12', {name: '12 tokens', kind: 'tokens', tokens: 12, windowDays: 30});
   set('packages', 'elite', {name: 'Elite', kind: 'elite', tokens: null, windowDays: 45, access247: true});
@@ -127,6 +135,9 @@ async function main() {
   check('ledger', [l.event, l.inviteeUri === b.calendlyInviteeUri, l.eventUri, l.athleteId, l.householdId, l.outcome, l.flag, !!l.receivedAt],
       ['invitee.created', true, s.calendlyEventUri, 'lena', 'novak', 'applied', null, true]);
   check('token position: one spent, 5 left', [(await position('lena', 't-6', '2026-10-01')).used, (await position('lena', 't-6', '2026-10-01')).left], [1, 5]);
+  check('ledger detail (2026-11-04): how, who booked, the slot', [l.via, l.reason, l.invitee, l.slot],
+      ['utm', null, {name: 'Lena Novak', email: 'nina@example.test', athleteName: 'Lena Novak', parentEmail: 'nina@example.test'},
+        {date: '2026-10-14', time: '4:00 PM', durationMinutes: 30, startTime: '2026-10-14T21:00:00.000Z', endTime: '2026-10-14T21:30:00.000Z'}]);
 
   log('\nSTEP B  duplicate delivery');
   r = await run(fixture('invitee-created'));
@@ -156,12 +167,39 @@ async function main() {
   r = await run(variant('invitee-canceled', 99));
   check('unknown invitee -> not-found', r, {outcome: 'not-found', flag: null});
 
-  log('\nSTEP E  unresolved: no utm_content, unknown email');
-  r = await run(variant('invitee-created', 3, {utm: null, email: 'stranger@example.test'}));
+  log('\nSTEP E  unresolved (2026-11-04): held as a session, never refused; released by its cancel or reschedule');
+  const nobody = {utm: null, email: 'stranger@example.test', parentEmail: '', athleteName: 'Nobody Known'};
+  r = await run(variant('invitee-created', 3, nobody));
   check('outcome', r, {outcome: 'unresolved', flag: null});
-  check('ledger row, no session', [(await get('calendlyEvents', `${INV(3)}_invitee.created`)).outcome, await exists('sessions', EVT(3))], ['unresolved', false]);
-  r = await run(variant('invitee-created', 4, {utm: null, email: 'nina@example.test'}));
-  check('two-athlete household by email is ambiguous -> unresolved', r.outcome, 'unresolved');
+  const l3 = await get('calendlyEvents', `${INV(3)}_invitee.created`);
+  check('ledger: why, who booked, the slot', [l3.outcome, l3.reason, l3.via, l3.invitee, l3.slot && l3.slot.date, l3.slot && l3.slot.time],
+      ['unresolved', 'no-login', null, {name: 'Lena Novak', email: 'stranger@example.test', athleteName: 'Nobody Known', parentEmail: null}, '2026-10-14', '4:00 PM']);
+  const h3 = await get('sessions', EVT(3));
+  check('session held: unresolved, 1/1, display-only, no booking, no token', [h3.unresolved, h3.booked, h3.capacity, h3.status, h3.bookable, h3.source, h3.type, h3.label,
+    (await db.collection('bookings').where('sessionId', '==', EVT(3)).get()).size, (await position('lena', 't-6', '2026-10-01')).left],
+  [true, 1, 1, 'scheduled', false, 'calendly', 'mental', 'Mental game session', 0, 6]);
+  r = await run(variant('invitee-created', 4, {utm: null, email: 'nina@example.test', parentEmail: '', athleteName: ''}));
+  check('parent of two, no athlete name -> unresolved, ambiguous, held', [r.outcome, (await get('calendlyEvents', `${INV(4)}_invitee.created`)).reason, (await get('sessions', EVT(4))).unresolved], ['unresolved', 'ambiguous-household', true]);
+  r = await run(variant('invitee-canceled', 4));
+  check('cancelling a held booking releases its session', [r, (await get('sessions', EVT(4))).status, (await get('sessions', EVT(4))).booked, (await get('calendlyEvents', `${INV(4)}_invitee.canceled`)).outcome],
+      [{outcome: 'applied-unmatched', flag: null}, 'cancelled', 0, 'applied-unmatched']);
+  r = await run(variant('invitee-canceled', 4));
+  check('its redelivery is a duplicate', r, {outcome: 'duplicate', flag: null});
+  r = await run(variant('invitee-created', 13, {...nobody, start: '2026-11-09T22:00:00Z'}));
+  check('a second held booking', [r.outcome, (await get('sessions', EVT(13))).unresolved], ['unresolved', true]);
+  r = await run(variant('invitee-created', 14, {utm: 'lena', start: '2026-11-10T22:00:00Z', old: INV_URI(13)}));
+  check('rescheduling a held booking into a resolved one releases the old session', [r, (await get('sessions', EVT(13))).status, (await get('sessions', EVT(13))).booked, (await get('bookings', `lena_${EVT(14)}`)).status, (await get('sessions', EVT(14))).unresolved],
+      [{outcome: 'rescheduled', flag: null}, 'cancelled', 0, 'confirmed', undefined]);
+
+  log('\nSTEP E2  resolved (2026-11-04) through the "Parent email" answer, the athlete-name answer, the guardian email');
+  r = await run(variant('invitee-created', 15, {utm: null, email: 'dad@example.test', parentEmail: 'kemi@example.test', athleteName: '', start: '2026-12-02T22:00:00Z'}));
+  check("stranger invitee email + a parent-email answer -> the household's only kid", [r.outcome, await exists('bookings', `femi_${EVT(15)}`), (await get('calendlyEvents', `${INV(15)}_invitee.created`)).via], ['applied', true, 'household']);
+  r = await run(variant('invitee-created', 16, {utm: null, email: 'nina@example.test', athleteName: 'max', parentEmail: '', start: '2026-12-03T22:00:00Z'}));
+  check('parent of two + athlete name -> that kid (billing pending keeps its flag)', [r, (await get('calendlyEvents', `${INV(16)}_invitee.created`)).via, await exists('bookings', `max_${EVT(16)}`)], [{outcome: 'applied', flag: 'membership-inactive'}, 'household-name', true]);
+  r = await run(variant('invitee-created', 17, {utm: null, email: 'Rhea@Example.test', parentEmail: '', athleteName: '', start: '2026-12-04T22:00:00Z'}));
+  check('no users doc, the guardian email on the household -> its only kid', [r.outcome, (await get('calendlyEvents', `${INV(17)}_invitee.created`)).via, await exists('bookings', `rae_${EVT(17)}`)], ['applied', 'household', true]);
+  r = await run(variant('invitee-created', 18, {utm: 'femi', email: 'nina@example.test', athleteName: 'Lena', parentEmail: '', start: '2026-12-07T22:00:00Z'}));
+  check("a forwarded link books the booker's own kid, never the link's", [r.outcome, await exists('bookings', `lena_${EVT(18)}`), await exists('bookings', `femi_${EVT(18)}`), (await get('calendlyEvents', `${INV(18)}_invitee.created`)).via], ['applied', true, false, 'household-name']);
 
   log('\nSTEP F  resolved by email through a parent account, attendee parent');
   r = await run(variant('invitee-created', 5, {utm: null, email: 'Kemi@Example.test', attendee: 'Parent', start: '2026-10-20T21:00:00Z'}));
@@ -184,12 +222,13 @@ async function main() {
   check('received before Oct 10 07:00 for t-6 -> before-open', r, {outcome: 'applied', flag: 'before-open'});
   r = await run(variant('invitee-created', 10, {utm: 'femi', email: 'kemi@example.test', start: '2026-11-03T22:00:00Z'}), new Date('2026-10-09T12:00:00Z'));
   check('November slot: periodKey 2026-11-01 (CST, 4:00 PM)', [r.flag, (await get('bookings', `femi_${EVT(10)}`)).periodKey, (await get('sessions', EVT(10))).time], ['before-open', '2026-11-01', '4:00 PM']);
-  r = await run(variant('invitee-created', 12, {utm: 'femi', email: 'stranger@example.test', start: '2026-10-24T21:00:00Z'}));
-  check('utm_content the invitee does not own -> unresolved, nothing booked on femi (review 2026-09-28)', [r.outcome, await exists('bookings', `femi_${EVT(12)}`)], ['unresolved', false]);
+  r = await run(variant('invitee-created', 12, {utm: 'femi', email: 'stranger@example.test', parentEmail: '', athleteName: '', start: '2026-10-24T21:00:00Z'}));
+  check('utm_content the invitee does not own -> unresolved, nothing booked on femi (review 2026-09-28)', [r.outcome, (await get('calendlyEvents', `${INV(12)}_invitee.created`)).reason, await exists('bookings', `femi_${EVT(12)}`)], ['unresolved', 'utm-not-owned', false]);
   check('ignored event type', await run({event: 'routing_form_submission.created', payload: {uri: 'x'}}), {outcome: 'ignored', flag: null});
   check('malformed (no invitee uri)', await run({event: 'invitee.created', payload: {}}), {outcome: 'malformed', flag: null});
 
   log('\nSTEP H  HTTP contract on the emulator (400 signature / 200 always)');
+  const ledgerBefore = (await db.collection('calendlyEvents').get()).size;
   if (!KEY) {
     failures++; log('    FAIL  CALENDLY_WEBHOOK_SIGNING_KEY is not set - run with node --env-file=.env.local');
   } else {
@@ -201,8 +240,8 @@ async function main() {
     check('signed duplicate -> 200 duplicate', [dup.status, dup.body.outcome], [200, 'duplicate']);
     const fresh = await postSigned(variant('invitee-created', 11, {utm: 'lena', start: '2026-10-28T21:00:00Z'}));
     check('signed fresh -> 200 applied (flag depends on the real clock)', [fresh.status, fresh.body.outcome], [200, 'applied']);
-    // 15 rows: A(1) + C(2) + D(2) + E(2) + F(2) + G(5) + H(1); ignored/malformed/duplicate write none.
-    check('no ledger row from the unsigned or stale posts', (await db.collection('calendlyEvents').get()).size, 15);
+    // Only the signed fresh post writes a row; ignored/malformed/duplicate and the refused posts write none.
+    check('no ledger row from the unsigned or stale posts', (await db.collection('calendlyEvents').get()).size, ledgerBefore + 1);
   }
 
   log(`\n=== ${failures === 0 ? 'ALL CHECKS PASSED' : failures + ' CHECK(S) FAILED'} ===`);
