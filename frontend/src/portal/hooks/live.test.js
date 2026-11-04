@@ -6,6 +6,7 @@
  */
 jest.mock('../../firebase', () => ({ auth: { currentUser: null }, db: {} }));
 // Plain functions, not jest.fn(): CRA's resetMocks would clear them before every test.
+jest.mock('./invalidate', () => ({ bump: jest.fn() }));
 jest.mock('firebase/firestore', () => ({
   collection: (_db, name) => ({ path: name }),
   doc: (_db, col, id) => ({ path: `${col}/${id}` }),
@@ -42,6 +43,7 @@ function mockQuery(name) {
 }
 
 import { auth } from '../../firebase';
+import { bump } from './invalidate';
 import { ERR, assertAthleteBillingActive, assertBookingOpen, assertPeriodTokensLeft, createBooking, rebookPatch } from './live';
 import { BOOKING_OPENS_AT } from '../data/calendar';
 import { assertWithinBookingWindow } from './live';
@@ -186,6 +188,35 @@ describe('assertPeriodTokensLeft for the single token', () => {
 // each spend one purchased token and move sessions.booked by exactly one in
 // the same commit (firestore.rules seatTakenInCommit); a token another
 // waitlist spot holds is never spent; nothing books before the Oct 10 gate.
+describe('createBooking refusing a block the athlete already holds (owner 2026-11-04)', () => {
+  const args = { athleteId: 'a1', sessionId: 's1', date: '2026-11-10', type: 'training', householdId: 'h1' };
+  beforeEach(() => {
+    jest.useFakeTimers('modern');
+    jest.setSystemTime(new Date('2026-11-04T17:00:00Z'));
+    auth.currentUser = { uid: 'p1' };
+    mockWrites.length = 0;
+    mockUpdates.length = 0;
+    bump.mockClear();
+    mockDocs['bookings/a1_s1'] = { athleteId: 'a1', sessionId: 's1', status: 'confirmed', periodKey: '2026-11-01' };
+  });
+  afterEach(() => {
+    jest.useRealTimers();
+    auth.currentUser = null;
+    delete mockDocs['bookings/a1_s1'];
+  });
+
+  test("typed 'already-booked', nothing written, and a bookings bump so a stale screen redraws the card as Booked", async () => {
+    await expect(createBooking(args)).rejects.toMatchObject({ reason: 'already-booked', message: 'This athlete already has this session booked.' });
+    expect(mockWrites).toEqual([]);
+    expect(mockUpdates).toEqual([]);
+    expect(bump).toHaveBeenCalledWith('bookings');
+    // A repeat's silent attempt leaves the screens alone, as its neighbours do.
+    bump.mockClear();
+    await expect(createBooking(args, { silent: true })).rejects.toMatchObject({ reason: 'already-booked' });
+    expect(bump).not.toHaveBeenCalled();
+  });
+});
+
 describe('createBooking for a single-token athlete', () => {
   const args = { athleteId: 'a2', sessionId: 's1', date: '2026-11-10', type: 'training', householdId: 'h1' };
   const token = (id) => ({ id, athleteId: 'a2', expiresAt: '2027-02-27', reason: 'single-purchase' });

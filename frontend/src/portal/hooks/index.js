@@ -143,6 +143,7 @@ import {
   SEASON,
   SEASON_BOUNDS,
   SEASON_BY_DATE,
+  afterSeasonEnd,
   capacityFor,
   datePill,
   dayLabel,
@@ -421,6 +422,9 @@ function tokensWithNextPeriod(pkg, bookings, anchorDay, today, opts = {}) {
   if (!position) return null;
   const { periodEnd } = positionPeriodFor(today, anchorDay);
   const next = periodFor(addDaysISO(periodEnd, 1), anchorDay);
+  // The season's last period has no next (data/season.js afterSeasonEnd):
+  // every reader of nextPeriod takes null as "none counted".
+  if (afterSeasonEnd(next.periodKey)) return { ...position, nextPeriod: null };
   const nextPeriodKey = next.periodKey;
   const booked = (bookings || []).filter(
     (b) => b && b.status !== 'cancelled' && b.periodKey === nextPeriodKey
@@ -746,6 +750,13 @@ const SEED_DATES_PER_MONTH = 30;
  * read, no package/bookings/household chain - the same `identity` book()
  * reads, and an empty payload in the same shape.
  */
+/**
+ * The sessions an athlete holds a live booking on (anything not cancelled):
+ * Book a Session marks those cards "Booked" (owner 2026-11-04 - they looked
+ * like any other row, and a second tap reached the write's refusal).
+ */
+const heldSessionIds = (bookings) => (bookings || []).filter((b) => b && b.status !== 'cancelled' && b.sessionId).map((b) => b.sessionId);
+
 async function liveBooking(today, { withSlots = true } = {}) {
   const who = await liveBookingIdentity();
   if (!withSlots) {
@@ -762,6 +773,7 @@ async function liveBooking(today, { withSlots = true } = {}) {
       slots: [],
       tokens: null,
       seasonNote: null,
+      bookedSessionIds: [],
       confirmation: { ...BOOKING_CONFIRMATION, email: who.profile.email },
       identity,
     };
@@ -769,6 +781,7 @@ async function liveBooking(today, { withSlots = true } = {}) {
 
   let windowMonths = MAX_WINDOW_MONTHS;
   let tokens = null;
+  let bookedSessionIds = [];
   let identity;
   if (who.role === 'athlete') {
     // Independent reads in parallel (perf wave B), same pattern as
@@ -793,6 +806,7 @@ async function liveBooking(today, { withSlots = true } = {}) {
       tokensWithNextPeriod(pkg, bookings, anchorDay, today, { ...inputs, billingStatus: billingStatusOf(athlete) }),
       inputs.graceTokens
     );
+    bookedSessionIds = heldSessionIds(bookings);
     identity = { role: 'athlete', athleteId: athlete.id, householdId: athlete.householdId };
   } else {
     identity = { role: 'parent', householdId: who.profile.householdId };
@@ -826,6 +840,9 @@ async function liveBooking(today, { withSlots = true } = {}) {
     slots,
     tokens,
     seasonNote,
+    // An athlete's own held sessions; a parent's come per child from
+    // useHouseholdAthletes, which Book a Session reads for that flow.
+    bookedSessionIds,
     // Same shape as the seed confirmation; the email is the real account's,
     // and name/when are filled by the screen from the booked slot.
     confirmation: { ...BOOKING_CONFIRMATION, email: who.profile.email },
@@ -1034,7 +1051,7 @@ export function useBooking({ variant = 'open', today = todayISO(), practice = fa
 
   const demo = demoOpts(variant, "Open blocks didn't load.");
   const state = useSeedResource(
-    demo || live ? null : { dates, slots, tokens, seasonNote, confirmation: BOOKING_CONFIRMATION },
+    demo || live ? null : { dates, slots, tokens, seasonNote, bookedSessionIds: [], confirmation: BOOKING_CONFIRMATION },
     demo ??
       (live
         ? {
@@ -1872,6 +1889,8 @@ async function liveHouseholdAthletes(today) {
         // 2026-10-02: Book a Session judges each child against a reserved
         // block on this (data/reserved.js); null == none on file.
         handicap: handicapOf(a),
+        // The sessions this child already holds: Book a Session marks them.
+        bookedSessionIds: heldSessionIds(bookings),
         // With the next period's count (2026-11-01): a parent's Book a Session
         // reads this row, and judges a next-period session by that period.
         tokens: withGraceReasons(
@@ -1907,6 +1926,7 @@ export function useHouseholdAthletes() {
     packageName: packageById(c.packageId)?.name ?? null,
     billingStatus: c.billingStatus ?? 'active',
     handicap: handicapOf(c),
+    bookedSessionIds: c.bookedSessionIds ?? [],
     tokens: c.tokens,
   }));
   return useSeedResource(

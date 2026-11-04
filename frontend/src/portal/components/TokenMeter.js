@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import { format, parseISO } from 'date-fns';
 import { color, font, radius } from '../tokens';
 import StatusBadge from './StatusBadge';
-import { GraceLine } from './AllowancePools';
+import { GraceLine, NextPeriodLine } from './AllowancePools';
 import PayButton from './PayButton';
 import { SessionTokenHero } from './SessionTokens';
 import { Body, Card, SectionLabel } from './Primitives';
@@ -14,6 +14,7 @@ import {
   BUY_EXTRA_LABEL,
   BUY_SINGLE_LABEL,
   extraSessionOffer,
+  nextPeriodPosition,
   saleOpen,
   SINGLE_ASK_GUARDIAN_LINE,
   SINGLE_NOT_OPEN_LINE,
@@ -36,8 +37,13 @@ import {
  * (ExtraSessionBuy; owner, 2026-10-10).
  */
 
-function toneFor(left) {
-  if (left === 0) return color.error;
+/**
+ * Exhausted is the red stop - unless next month's tokens are in hand (owner
+ * 2026-11-04, as AllowancePools reads it): then amber, like the last token,
+ * not a red zero under "Tokens reset Dec 1" that read as December closed.
+ */
+function toneFor(left, nextOpen = false) {
+  if (left === 0) return nextOpen ? color.secondary : color.error;
   if (left === 1) return color.secondary;
   return color.primary;
 }
@@ -108,6 +114,11 @@ function Chip({ tone, children }) {
 
 function Evidence({ member }) {
   const { spent, reserved, nextPeriod, lastPeriod, tokens } = member;
+  // The next period's spend as the meter's "<Month>: N of G left" counts it
+  // (period-charged rows) and the rows a bonus token paid for, apart - so the
+  // two lines on one card add up (review 2026-11-04).
+  const nextUsed = nextPeriod ? nextPeriod.used ?? nextPeriod.booked ?? 0 : 0;
+  const nextBonus = nextPeriod ? (nextPeriod.booked ?? 0) - nextUsed : 0;
   const rows = [...spent, ...reserved];
   return (
     <div style={{ marginTop: 12, borderTop: `1px solid ${color.ruleSoft}`, paddingTop: 6 }}>
@@ -119,8 +130,9 @@ function Evidence({ member }) {
         </Body>
       )}
       {/* A single athlete's tokens are bought, never granted per period: no
-          grant line, only what is already booked past this period's end. */}
-      {tokens.perPurchase ? (
+          grant line, only what is already booked past this period's end.
+          No line at all after the season's last period (nextPeriod null). */}
+      {!nextPeriod ? null : tokens.perPurchase ? (
         nextPeriod.booked || nextPeriod.reserved ? (
           <Body size={11} tone={color.textTertiary} style={{ marginTop: 10 }}>
             From {longDayLabel(nextPeriod.start)}:{' '}
@@ -133,7 +145,8 @@ function Evidence({ member }) {
         <Body size={11} tone={color.textTertiary} style={{ marginTop: 10 }}>
           Next period from {longDayLabel(nextPeriod.start)}:{' '}
           {tokens.unlimited ? 'unlimited' : `${nextPeriod.granted} token${nextPeriod.granted === 1 ? '' : 's'}`}
-          {nextPeriod.booked ? ` · ${nextPeriod.booked} already booked` : ''}
+          {nextUsed ? ` · ${nextUsed} already booked` : ''}
+          {nextBonus ? ` · ${nextBonus} on a bonus token` : ''}
           {nextPeriod.reserved ? ` · ${nextPeriod.reserved} on a waitlist` : ''}
         </Body>
       )}
@@ -297,7 +310,13 @@ export default function TokenMeter({ member, defaultOpen = false, showPrices = f
     );
   }
 
-  const tone = toneFor(tokens.left);
+  // The next period beside this one (owner 2026-11-04: "December: 6 of 6
+  // left" on Billing too - the only December count a parent could find here
+  // sat inside the collapsed evidence). Not before the season, when the
+  // first period is the whole story.
+  const next = period.preSeason ? null : nextPeriodPosition(member);
+  const nextOpen = tokens.left === 0 && tokens.grace.length === 0 && Boolean(next && next.left > 0);
+  const tone = toneFor(tokens.left, nextOpen);
   const granted = tokens.granted || 0;
   const usedPct = granted ? Math.min(100, (tokens.used / granted) * 100) : 0;
   const reservedPct = granted ? Math.min(100 - usedPct, (tokens.reserved / granted) * 100) : 0;
@@ -336,6 +355,7 @@ export default function TokenMeter({ member, defaultOpen = false, showPrices = f
             {bonus ? <Chip tone={color.secondary}>Bonus {bonus}</Chip> : null}
           </div>
           <GraceLine tokens={tokens} />
+          {next ? <NextPeriodLine tokens={{ ...tokens, nextPeriod: next }} style={{ marginTop: 8 }} /> : null}
         </>
       )}
 

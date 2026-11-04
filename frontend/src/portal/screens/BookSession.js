@@ -48,6 +48,9 @@ import { buildMonthDayMaps, useMonthNavState } from '../components/MonthCalendar
 import { monthsApart } from '../data/calendarViews';
 import RepeatWeekly from '../components/RepeatWeekly';
 
+/** A stable empty list for the held-session ids when a flow carries none. */
+const NONE_HELD = [];
+
 /** Sessions arrive raw (numeric capacity/booked) from useMonthSessions;
     useBooking's slots carry a pre-formatted capacity object. Accept both. */
 function formatCapacity(session) {
@@ -228,8 +231,16 @@ export default function BookSession({
   // the month, and a row the athlete was promoted off no longer has the card.
   const [leavingId, setLeavingId] = useState(null);
   const [leaveFailure, setLeaveFailure] = useState(null);
-  // It is about one day's card for one athlete: it goes when either changes.
+  // They are about one day's card for one athlete: both go when either
+  // changes (owner 2026-11-04: a refusal's red banner stuck across month
+  // turns and day taps until the next successful tap).
+  // The attempt a refusal belongs to: a day or athlete change retires the
+  // one in flight, so its refusal, landing after the switch, paints nothing
+  // under the new day or child (review 2026-11-04).
+  const attempt = useRef(0);
   useEffect(() => {
+    attempt.current += 1;
+    setFailure(null);
     setLeaveFailure(null);
   }, [selectedDate, selectedAthleteId]);
 
@@ -272,12 +283,18 @@ export default function BookSession({
     setFailure(null);
     setLeaveFailure(null);
     setReserving(session.id);
+    const mine = attempt.current;
+    const forId = isParent ? selectedAthleteId : null;
     const opts = { ...(isParent ? { athleteId: selectedAthleteId } : {}), ...(joinWaitlist ? { joinWaitlist: true } : {}) };
     Promise.resolve()
       .then(() => reserve(session, Object.keys(opts).length ? opts : undefined))
       .then((result) => {
         if (!live.current) return;
         setReserving(null);
+        // The parent switched child mid-flight: the write was the tapped
+        // child's, so the confirmation - its notes, its Repeat weekly - goes
+        // back to them first (review 2026-11-04). A success is never dropped.
+        if (forId && attempt.current !== mine) setSelectedAthleteId(forId);
         // Pin F: book() now resolves { status: 'waitlisted' } for a full
         // session instead of rejecting 'full' — same `booked` state either way.
         finalizeBooked(session, result?.status === 'waitlisted', result?.position ?? null, result?.chargedFrom ?? null, result?.graceTokenId ?? null);
@@ -285,9 +302,11 @@ export default function BookSession({
       .catch((err) => {
         if (!live.current) return;
         setReserving(null);
+        // The day or child changed mid-flight: the banner would be about the old one.
+        if (attempt.current !== mine) return;
         // err.reason: 'no-tokens-left' | 'outside-window' | 'cap-reached' |
-        // 'full' | 'membership-inactive' — drives reasonCopy() below; falls
-        // back to err.message for anything else.
+        // 'full' | 'membership-inactive' | 'already-booked' — drives
+        // reasonCopy() below; falls back to err.message for anything else.
         setFailure({
           sessionId: session.id,
           reason: err && err.reason ? err.reason : null,
@@ -313,9 +332,11 @@ export default function BookSession({
     if (leavingId || !athleteId) return;
     setLeaveFailure(null);
     setLeavingId(session.id);
+    const mine = attempt.current;
     leaveWaitlist({ sessionId: session.id, athleteId })
       .catch((err) => {
-        if (live.current) setLeaveFailure(leaveFailureCopy(err, athleteName));
+        // The day or child changed mid-flight: the banner would be about the old one.
+        if (live.current && attempt.current === mine) setLeaveFailure(leaveFailureCopy(err, athleteName));
       })
       .then(() => {
         if (live.current) setLeavingId(null);
@@ -551,6 +572,10 @@ export default function BookSession({
                   checkStarted={!practice}
                   leavingId={leavingId}
                   onLeave={leaveFromCard}
+                  // Owner 2026-11-04: the cards this athlete already holds
+                  // read "Booked" and point at the screen they cancel from.
+                  bookedSessionIds={(isParent ? selectedAthlete?.bookedSessionIds : data?.bookedSessionIds) ?? NONE_HELD}
+                  scheduleName={isParent ? 'Reservations' : 'Schedule'}
                 />
               </div>
             ) : null}
@@ -586,7 +611,17 @@ function DaySessionList({
   checkStarted = false,
   leavingId = null,
   onLeave,
+  bookedSessionIds = NONE_HELD,
+  scheduleName = 'Reservations',
 }) {
+  // Owner 2026-11-04: a block this athlete already holds says so and offers
+  // nothing - a second tap used to reach the write's refusal.
+  const heldName = athleteName ?? 'This athlete';
+  const heldNote = `${heldName} is booked in. Cancel it from ${scheduleName} if plans change.`;
+  // From the session's own day the schedule screens offer no Cancel (their
+  // `cancellable` is date > today) and show this line instead - the same
+  // from-the-day-on rule as waitlistClosed.
+  const heldSameDayNote = `${heldName} is booked in. Same-day cancellations aren't available in the app — contact the front desk.`;
   return (
     <>
       <div style={{ font: `600 13px ${font.body}`, color: color.text, padding: '2px 0 2px' }}>
@@ -624,19 +659,21 @@ function DaySessionList({
           const displayOnly = session.bookable === false;
           // R2: a session that has started is shown, never offered.
           const started = checkStarted && !displayOnly && sessionStarted(session);
+          // Started wins: a held block that has begun reads Started, as before.
+          const held = !displayOnly && !started && bookedSessionIds.includes(session.id);
           // Already on this waitlist: say so and offer Leave, never Join again.
-          const waiting = displayOnly || started ? null : waitingOn(session, athleteId);
+          const waiting = displayOnly || started || held ? null : waitingOn(session, athleteId);
           // A handicap-reserved block (owner ruling 2026-10-02) is offered
           // only to an athlete at or under its limit: no Reserve, no Join
           // waitlist, and one line saying why once their row is known. A row
           // that failed to load (handicapUnread) holds nothing back here.
           const notTheirs = !displayOnly && !handicapUnread && !reservedEligible(session, athlete);
-          const refusal = notTheirs && athlete && !started && !waiting ? reservedRefusal(session, athlete) : null;
+          const refusal = notTheirs && athlete && !started && !waiting && !held ? reservedRefusal(session, athlete) : null;
           // R3: nobody is promoted on the day, so today's waitlist takes nobody new.
-          const canWaitlist = isFull && !tokensSpent && !displayOnly && !started && !waiting && !notTheirs && !(checkStarted && waitlistClosed(session));
+          const canWaitlist = isFull && !tokensSpent && !displayOnly && !started && !waiting && !notTheirs && !held && !(checkStarted && waitlistClosed(session));
           // A full card is never directly tappable - only its JoinWaitlistButton
           // is, so a tap can't double-fire book() via bubbling.
-          const tappable = !displayOnly && !tokensSpent && !reserving && !disabled && !isFull && !started && !waiting && !notTheirs;
+          const tappable = !displayOnly && !tokensSpent && !reserving && !disabled && !isFull && !started && !waiting && !notTheirs && !held;
 
           return (
             <SessionCard
@@ -647,12 +684,12 @@ function DaySessionList({
               ageGroup={session.ageGroup}
               reserved={reservedTag(session)}
               name={displayNameFor(session)}
-              variant={isFull || tokensSpent || displayOnly || started || waiting || notTheirs ? 'full' : 'default'}
+              variant={held ? 'default' : isFull || tokensSpent || displayOnly || started || waiting || notTheirs ? 'full' : 'default'}
               gutter={54}
               ruleHeight={36}
               onClick={tappable ? () => onSelect(session) : undefined}
               // A bonus token that expires before this session is not what it spends.
-              spendNote={displayOnly || started || waiting || notTheirs ? null : <SpendNote tokens={rowTokens && !hasGrace ? { ...rowTokens, grace: [] } : rowTokens} />}
+              spendNote={displayOnly || started || waiting || notTheirs || held ? null : <SpendNote tokens={rowTokens && !hasGrace ? { ...rowTokens, grace: [] } : rowTokens} />}
               action={
                 waiting ? (
                   <OnWaitlist
@@ -676,13 +713,15 @@ function DaySessionList({
                 ) : null
               }
               trailing={
-                <CapacityPill state={displayOnly || started || waiting ? 'full' : notTheirs ? 'capped' : isFull ? 'full' : tokensSpent ? 'capped' : cap.state}>
-                  {displayOnly ? 'Front desk' : started ? 'Started' : waiting ? 'Waitlisted' : notTheirs ? 'Reserved' : isFull ? 'Full' : tokensSpent ? 'No tokens' : cap.label}
+                <CapacityPill state={displayOnly ? 'full' : held ? 'booked' : started || waiting ? 'full' : notTheirs ? 'capped' : isFull ? 'full' : tokensSpent ? 'capped' : cap.state}>
+                  {displayOnly ? 'Front desk' : held ? 'Booked' : started ? 'Started' : waiting ? 'Waitlisted' : notTheirs ? 'Reserved' : isFull ? 'Full' : tokensSpent ? 'No tokens' : cap.label}
                 </CapacityPill>
               }
               footnote={
                 displayOnly
                   ? 'Adult block — booked and paid at the front desk, not through the portal.'
+                  : held
+                  ? (checkStarted && waitlistClosed(session) ? heldSameDayNote : heldNote)
                   : refusal
                   ? refusal
                   : tokensSpent && !isFull && !started && !waiting && !notTheirs

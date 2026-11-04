@@ -924,7 +924,9 @@ export async function createBooking(
       // create, message unchanged.
       const isRebook = bookingSnap.exists() && bookingSnap.data().status === 'cancelled';
       if (bookingSnap.exists() && !isRebook) {
-        throw new LiveDataError(ERR.INVALID, 'This athlete already has this session booked.');
+        // Typed (owner 2026-11-04) so the screens drop "tap the session to
+        // try again" - a second tap cannot change it (BookingReasons canRetry).
+        throw new LiveDataError(ERR.INVALID, 'This athlete already has this session booked.', null, 'already-booked');
       }
 
       const s = sessionSnap.data();
@@ -1016,6 +1018,13 @@ export async function createBooking(
     if (err?.reason === HANDICAP_RESERVED && !silent) {
       bump('sessions');
       bump('athletes');
+    }
+    // Nothing was written. An already-booked refusal means this screen loaded
+    // before the booking landed (the athlete's own phone, a sibling's tab):
+    // the bump reloads the row's bookedSessionIds so the card redraws as
+    // Booked, inert (owner 2026-11-04), as the 'full' refusal redraws "1 left".
+    if (err?.reason === 'already-booked' && !silent) {
+      bump('bookings');
     }
     throw wrap(err, 'createBooking');
   }

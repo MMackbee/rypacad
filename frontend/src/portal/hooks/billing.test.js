@@ -127,7 +127,9 @@ test('the live hub counts and labels an October booking under November (review 2
   ]);
   live.fetchGraceTokensByAthlete.mockResolvedValue([]);
   live.fetchSessionsByIds.mockResolvedValue([{ id: 'phil-1024', date: '2026-10-24', type: 'phil', label: 'Performance with Phil', time: '4:00' }]);
-  grace.fetchTokenPeriod.mockResolvedValue(null);
+  // An ops comp for December (review 2026-11-04): the hub's next period reads
+  // the issued doc's grant, as the booking screens do.
+  grace.fetchTokenPeriod.mockImplementation(async (_id, key) => (key === '2026-12-01' ? { granted: 9 } : null));
   waitlist.fetchWaitlistByAthlete.mockResolvedValue([]);
 
   const result = { current: null };
@@ -141,6 +143,8 @@ test('the live hub counts and labels an October booking under November (review 2
   expect(result.current.error).toBeNull();
   const [jordan] = result.current.data.members;
   expect(jordan.tokens).toMatchObject({ granted: 16, used: 1, left: 15, startsOn: '2026-11-01' });
+  expect(grace.fetchTokenPeriod).toHaveBeenCalledWith('a1', '2026-12-01');
+  expect(jordan.nextPeriod).toMatchObject({ start: '2026-12-01', granted: 9, booked: 0, used: 0, reserved: 0 });
   expect(live.fetchSessionsByIds).toHaveBeenCalledWith(['phil-1024']);
   expect(jordan.spent).toEqual([expect.objectContaining({ id: 'a1_phil', label: 'Performance with Phil', time: '4:00' })]);
   // The add-on ticked at sign-up (no billing doc == active membership): ready to pay.

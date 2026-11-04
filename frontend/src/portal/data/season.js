@@ -73,6 +73,17 @@ export const HOLIDAY_TOURNAMENTS_2026_27 = [
 export const SEASON_BOUNDS = { start: '2026-11-03', end: '2027-02-27' };
 
 /**
+ * True for a day after the season's last (SEASON_BOUNDS.end). A token period
+ * starting there holds nothing to book with - no sessions exist - so no
+ * surface counts it as a "next period" (review 2026-11-04: February is the
+ * last period, and March was being read as "March: 6 of 6 left", hiding the
+ * extra-session offer for the whole of February).
+ */
+export function afterSeasonEnd(dateISO) {
+  return Boolean(dateISO) && dateISO > SEASON_BOUNDS.end;
+}
+
+/**
  * @param {object} [opts]
  * @param {string[]} [opts.closures]  Defaults to the provisional calendar above.
  * @param {Array} [opts.extras]       Defaults to the holiday tournaments above.

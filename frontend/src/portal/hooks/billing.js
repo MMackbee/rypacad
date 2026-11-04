@@ -97,15 +97,19 @@ async function liveMember(athlete, anchorDay, today) {
   // read is the prepaid November doc (Elite never has one).
   const period = positionPeriodFor(today, anchorDay);
   const prevKey = periodFor(addDaysISO(period.periodKey, -1), anchorDay).periodKey;
-  const [pkg, bookings, graceTokens, waitlist, tokenPeriod, prevTokenPeriod] = await Promise.all([
+  const nextKey = periodFor(addDaysISO(period.periodEnd, 1), anchorDay).periodKey;
+  const [pkg, bookings, graceTokens, waitlist, tokenPeriod, prevTokenPeriod, nextTokenPeriod] = await Promise.all([
     athlete.packageId ? fetchPackage(athlete.packageId) : null,
     fetchBookings(athlete.id, { householdId: athlete.householdId }),
     fetchGraceTokensByAthlete(athlete.id),
     fetchWaitlistByAthlete(athlete.id, { householdId: athlete.householdId }), // the filter a parent's read is provable on
     fetchTokenPeriod(athlete.id, period.periodKey),
     fetchTokenPeriod(athlete.id, prevKey),
+    // The next period's issued grant (an ops comp, Stripe's doc on the 1st),
+    // as the booking screens read it (hooks/index.js fetchTokenInputs) -
+    // review 2026-11-04: Billing's December count must match theirs.
+    fetchTokenPeriod(athlete.id, nextKey),
   ]);
-  const nextKey = periodFor(addDaysISO(period.periodEnd, 1), anchorDay).periodKey;
   // Only the rows the hub lists need their session (label, time): this
   // period's and next period's live bookings and waitlist entries.
   // Folded as the hub reads them, so an October row listed under the first
@@ -124,6 +128,7 @@ async function liveMember(athlete, anchorDay, today) {
     graceTokens,
     tokenPeriod,
     prevTokenPeriod,
+    nextTokenPeriod,
     sessionsById,
     anchorDay,
     today,
