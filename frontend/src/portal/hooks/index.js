@@ -3911,26 +3911,26 @@ export function useStaff({ variant = 'populated' } = {}) {
 
 /**
  * Live payload for useSessionAttendance — every active booking for one
- * session, joined to the athlete's name. Read authorization is the EXISTING
- * bookings-read rule's coach clause (athleteData(resource.data.athleteId)
- * .coachId == caller) — Firestore evaluates that per candidate document for
- * list/query reads too (a get() keyed off a field the query does not itself
- * filter on is the standard "join" pattern for row-level list security), so
- * no new rules grant was needed for this hook; verified against the emulator
- * (routing report). One consequence worth knowing: on a block shared across
- * coaches, each coach's roster silently shows only their own assigned
- * athletes — consistent with "coach → assigned athletes only, by assignment,
- * never by role," not a bug.
+ * session, joined to the athlete's name. 2026-11-04 (Jenn Huber's empty
+ * roster): a coach reads the bookings list BY ROLE (bookings read rule) and
+ * each athlete profile BY ID (athletes `allow get` for role coach) - the
+ * assignment clause (coachId == caller) an earlier note here described
+ * never matched, since no athlete carries a coachId, and it emptied every
+ * coach's roster. Lists of athletes still need the coachId filter.
  *
- * Per-athlete name lookups use fetchAthlete() (a single-document read,
- * already coach-readable under the same assignment rule) rather than a
- * batched by-id list query, which would need its own, unbuilt list-query
- * grant on `athletes` for the coach role.
+ * Per-athlete name lookups are single-document reads, settled one by one:
+ * a booking whose athlete cannot be read (a removed record, one refused or
+ * timed-out get) keeps its row with name null instead of failing the whole
+ * roster. When EVERY get is refused the refusal is thrown as-is, so the
+ * screen can say the account lacks access rather than show nameless rows.
  */
 async function liveSessionAttendance(sessionId) {
   const bookings = await fetchBookingsBySession(sessionId);
-  const athletes = await Promise.all(bookings.map((b) => fetchAthlete(b.athleteId)));
-  const nameById = new Map(athletes.map((a) => [a.id, a.name]));
+  const ids = [...new Set(bookings.map((b) => b.athleteId).filter(Boolean))];
+  const settled = await Promise.allSettled(ids.map((id) => fetchAthlete(id)));
+  const refused = settled.filter((s) => s.status === 'rejected' && s.reason?.code === ERR.PERMISSION);
+  if (ids.length && refused.length === settled.length) throw refused[0].reason;
+  const nameById = new Map(settled.filter((s) => s.status === 'fulfilled').map((s) => [s.value.id, s.value.name]));
   return bookings
     .map((b) => ({
       bookingId: b.id,

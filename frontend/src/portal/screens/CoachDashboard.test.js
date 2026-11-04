@@ -15,10 +15,11 @@ const mockMonth = (m) => {
 };
 let mockAttention = [];
 let mockStudents = [];
+let mockRosterError = null;
 jest.mock('../hooks', () => ({
   useCoachDay: () => ({ data: { coach: { name: 'Coach', date: '2026-11-04' }, blocks: mockBlocks, attention: mockAttention } }),
   // The real roster hook drops the contract part of meta while the contract is hidden; the mock does the same.
-  useCoachRoster: () => ({ data: mockStudents.map((s) => ({ ...s, meta: jest.requireActual('../data/contractFlag').hideContractParts(s.meta) })), loading: false }),
+  useCoachRoster: () => ({ data: mockRosterError ? null : mockStudents.map((s) => ({ ...s, meta: jest.requireActual('../data/contractFlag').hideContractParts(s.meta) })), loading: false, error: mockRosterError }),
   useMonthSessions: (m) => mockMonth(m),
 }));
 
@@ -53,6 +54,7 @@ async function openSessions(onOpenRoster) {
 beforeEach(() => {
   try { window.localStorage.clear(); } catch (e) { /* storage unavailable */ }
   mockRequested = [];
+  mockRosterError = null;
   jest.useFakeTimers('modern');
   jest.setSystemTime(new Date('2026-11-04T15:00:00'));
 });
@@ -250,4 +252,14 @@ describe('a handicap-reserved block', () => {
     expect(r.text()).not.toContain('Handicap');
     await r.unmount();
   });
+});
+
+test("the Students tab says when the assigned list failed to load, never 'nobody is assigned' (review 2026-11-04)", async () => {
+  mockRosterError = Object.assign(new Error('fetchCoachAthletes: Missing or insufficient permissions.'), { code: 'permission-denied' });
+  const r = await renderScreen(<CoachDashboard bare />);
+  await r.click('Students');
+  expect(r.text()).toContain("Your account can't read athletes, so this roster can't load. Tell the owner to check your access.");
+  expect(r.text()).not.toContain('No assigned athletes');
+  expect(r.button('Try again')).toBeNull();
+  await r.unmount();
 });
