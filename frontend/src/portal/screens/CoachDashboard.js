@@ -179,7 +179,7 @@ function StudentsTab({ athletes, loading, onOpenAthlete }) {
       >
         <ScreenTitle size={17}>No assigned athletes</ScreenTitle>
         <Body size={12} style={{ marginTop: 8 }}>
-          Athletes assigned to you will show up here.
+          Nobody is assigned to you yet. Today's blocks, and who is booked in each, are on the Overview tab.
         </Body>
       </div>
     );

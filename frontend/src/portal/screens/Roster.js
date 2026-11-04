@@ -15,7 +15,7 @@ import { BackLink, Body, Card, ScreenTitle, SectionLabel, SignOutButton, Tick } 
 import useRoster from '../hooks/useRoster';
 import * as hooks from '../hooks';
 import { useCoachRoster, useSession } from '../hooks';
-import { isLive } from '../hooks/live';
+import { ERR, isLive } from '../hooks/live';
 import { ageGroupFor } from '../data/schedule';
 import { attendeeNoteFor } from '../data/specialists';
 import { DEFAULT_DURATION_MINUTES } from '../data/schedule';
@@ -57,6 +57,20 @@ function realStartsIn(block) {
  * merge, this fallback stops being used automatically - nothing here needs
  * to change.
  */
+/**
+ * Why a live roster could not load, in words a coach can act on
+ * (2026-11-04, Jenn Huber's report: a roster the rules refused rendered as
+ * 0 in / 0 out / 0 unmarked under "3 of 14 booked", with nothing to say). A
+ * permission refusal is the academy's to fix - the login's access - never
+ * the coach's.
+ */
+export function rosterLoadCopy(err) {
+  if (err?.code === ERR.PERMISSION) {
+    return "This login can't read athlete profiles, so the roster can't load. Ask the academy to check the login's access.";
+  }
+  return "The roster didn't load. Check the connection and try again.";
+}
+
 function useSessionAttendanceFallback() {
   return { data: null, loading: false, error: null, mark: () => {} };
 }
@@ -163,8 +177,10 @@ export default function Roster({ bare = false, onSignOut, onOpenAthlete }) {
             }}
           >
             <ScreenTitle size={17}>No assigned athletes</ScreenTitle>
+            {/* 2026-11-04: nobody is assigned to anyone yet, and this tab is
+                named Roster - say where today's kids are. */}
             <Body size={12} style={{ marginTop: 8 }}>
-              Athletes assigned to you will show up here.
+              Nobody is assigned to you yet. Today's blocks, and who is booked in each, are on the Today tab.
             </Body>
           </div>
         )}
@@ -600,6 +616,18 @@ export function SessionAttendance({ variant = 'pre', bare = false, onBack, sessi
               {tournamentResults.data?.results?.length ? 'Edit Tour results' : 'Enter Tour results'}
             </Button>
           </div>
+        ) : null}
+        {/* A roster the hook is still loading, or could not load, says so
+            (2026-11-04): the counters read 0 either way, and a coach must
+            not take that for an empty block. */}
+        {live && liveAttendance.loading ? (
+          <Body size={12} style={{ textAlign: 'center', marginBottom: 16 }}>
+            Loading who is booked in…
+          </Body>
+        ) : live && liveAttendance.error ? (
+          <Card tone="red" large style={{ marginBottom: 16 }}>
+            <Body size={12}>{rosterLoadCopy(liveAttendance.error)}</Body>
+          </Card>
         ) : null}
         {roster.map((athlete, i) => {
           const value = marks[athlete.id] ?? null;

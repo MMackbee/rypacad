@@ -336,6 +336,17 @@ service cloud.firestore {
     // List queries must carry the matching equality filter (parent:
     // householdId ==, coach: coachId ==) or the query is denied wholesale.
     match /athletes/{athleteId} {
+      // 2026-11-04 (day 2 of the season, Jenn Huber's report): no athlete
+      // carries a coachId - there is no assignment system - so the coach
+      // clause in the read rule below never let a swing coach read one
+      // profile, and every roster a coach opened emptied (the attendance
+      // screen's per-booking name join). Any coach reads an athlete's
+      // profile BY ID, the way the bookings match already lets any coach
+      // read any roster ("coach reads like staff"). A LIST stays on the
+      // read rule below: a plain coach lists only assigned athletes (the
+      // Students tab), never the academy. private/medical is not widened.
+      allow get: if signedIn() && me().role == 'coach';
+
       // v1.7.1: a specialist (users.specialistId — Yannick, Phil) teaches
       // sessions any academy athlete can book, so they read athlete
       // profiles academy-wide like mental does — their roster and

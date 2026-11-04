@@ -75,7 +75,7 @@ contradictions are not.
 
 Access matrix (routing implements in rules; the handoff's table is the spec):
 athlete → own records; parent → linked athletes, reflection **summaries only**;
-coach → assigned athletes only; mental → academy-wide reads, all logged;
+coach → any athlete's profile by id, lists of assigned athletes only (2026-11-04: no athlete carries a coachId, and a coach's roster needs every booked kid's name); mental → academy-wide reads, all logged;
 ops → completion/billing/enrollment, no coaching or mental writes; owner → all.
 
 ## Onboarding program v1 (pinned for Sprint 3)

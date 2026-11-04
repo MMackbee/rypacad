@@ -10,18 +10,19 @@ import { attendanceReadOnlyFor } from '../data/specialists';
 // Cancel session by role.
 let mockLive;
 let mockNote;
+let mockError;
 const mockWrites = { note: [] };
 jest.mock('../hooks', () => ({
   useCoachRoster: () => ({ data: [], loading: false }),
   useSession: () => ({ data: { type: 'training', blockLabel: 'Block 1 of 3', name: 'Training block', meta: '3:00-4:00 PM', startsIn: 'Starts in 12 min' } }),
   useSessionAttendance: () => ({
-    data: [
+    data: mockError ? null : [
       { bookingId: 'b1', athleteId: 'a1', name: 'Jordan Whitfield', status: 'confirmed' },
       { bookingId: 'b2', athleteId: 'a2', name: 'Avery Nguyen', status: 'noshow', noshowReason: 'Sick, parent texted' },
       { bookingId: 'b3', athleteId: 'a3', name: 'Sam Ortiz', status: 'attended' },
     ],
     loading: false,
-    error: null,
+    error: mockError,
     mark: () => {},
     setReason: async () => {},
     setSessionNote: async (sessionId, note) => { mockWrites.note.push([sessionId, note]); },
@@ -49,6 +50,7 @@ const noteEditor = (r) => r.container.querySelector('input[placeholder^="e.g. Ra
 beforeEach(() => {
   mockLive = true;
   mockNote = 'Cones set up for Thursday';
+  mockError = null;
   mockWrites.note.length = 0;
 });
 
@@ -136,4 +138,21 @@ test('who marks what follows the rules: coach and owner on golf, a specialist on
   expect(ro('ops', 'training')).toBe(true);
   expect(ro('ops', 'mental')).toBe(true);
   expect(ro(null, 'training')).toBe(true);
+});
+
+test("a roster the rules refuse (a swing coach, 2026-11-04) says so instead of reading as an empty block", async () => {
+  mockError = Object.assign(new Error('fetchAthlete: Missing or insufficient permissions.'), { code: 'permission-denied' });
+  const r = await roster({});
+  const text = r.text();
+  expect(text).toContain("This login can't read athlete profiles, so the roster can't load.");
+  expect(text).not.toContain('Jordan Whitfield');
+  expect(controls(r)).toBe(0);
+  await r.unmount();
+});
+
+test('any other load failure reads as a plain line, never an empty block', async () => {
+  mockError = new Error('fetchBookingsBySession: network');
+  const r = await roster({});
+  expect(r.text()).toContain("The roster didn't load. Check the connection and try again.");
+  await r.unmount();
 });
