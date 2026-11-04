@@ -74,7 +74,9 @@ describe('a period at zero with next month open (incident 2026-11-01)', () => {
     const card = slotCard(r);
     expect(card).not.toBeNull();
     expect(card.style.cursor).not.toBe('pointer');
-    expect(r.text()).toContain('No tokens left');
+    // 2026-11-03 (the Wolffs): with December in hand the summary names the spent month, not a red 'No tokens left'.
+    expect(r.text()).toContain('November tokens used');
+    expect(r.text()).not.toContain('No tokens left');
     expect(r.text()).toContain('December: 7 of 8 left');
     await r.unmount();
   });

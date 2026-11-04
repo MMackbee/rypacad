@@ -1,6 +1,6 @@
 import React from 'react';
 import { renderScreen } from '../screens/testRender';
-import AllowancePools, { GraceLine, NextPeriodLine, SpendNote, nextPeriodLabel } from './AllowancePools';
+import AllowancePools, { GraceLine, NextPeriodLine, SpendNote, nextPeriodLabel, nextPeriodOpen, spentTitle } from './AllowancePools';
 
 const bought = { id: 'single_a', expiresAt: '2027-02-27', reason: 'single-purchase', sourceSessionId: null };
 const bonus = { id: 'g1', expiresAt: '2026-11-20', reason: 'session-cancelled', sourceSessionId: '2026-11-11-0' };
@@ -34,6 +34,39 @@ describe('the next period under the meter (incident 2026-11-01: December read as
     expect(await text(<NextPeriodLine tokens={monthly({ unpaid: true, nextPeriod: next })} />)).toBe('');
     expect(await text(<NextPeriodLine tokens={monthly()} />)).toBe('');
     expect(await text(<NextPeriodLine tokens={monthly({ nextPeriod: { ...next, left: 0, booked: 8 } })} />)).toBe('December: 0 of 8 left');
+  });
+
+  test('spent with next month in hand (2026-11-03, the Wolffs): the note and the compact line name next month, never "No tokens left"', async () => {
+    const spent = monthly({ left: 0, used: 6, nextPeriod: next });
+    expect(nextPeriodOpen(spent)).toBe(next);
+    expect(spentTitle(next)).toBe('November tokens used');
+    expect(spentTitle({ ...next, periodKey: '2026-12-10', periodEnd: '2027-01-09' })).toBe("This period's tokens used");
+    expect(await text(<SpendNote tokens={spent} />)).toBe('November tokens used');
+    // Two tokens held on a waitlist: spoken for, not used - the title says so, still neutral.
+    const held = monthly({ left: 0, used: 4, reserved: 2, nextPeriod: next });
+    expect(nextPeriodOpen(held)).toBe(next);
+    expect(spentTitle(next, 2)).toBe('No November tokens left');
+    expect(spentTitle({ ...next, periodKey: '2026-12-10' }, 2)).toBe('No tokens left this period');
+    expect(await text(<SpendNote tokens={held} />)).toBe('No November tokens left');
+    // The full meter's "None left" is amber (the last-token tone), not the red stop, while December is open.
+    const countColor = async (tokens) => {
+      const r = await renderScreen(<AllowancePools tokens={tokens} />);
+      const span = [...r.container.querySelectorAll('span')].find((s) => ['None left', '1 left'].includes(s.textContent));
+      const c = span.style.color;
+      await r.unmount();
+      return c;
+    };
+    const amber = await countColor(monthly({ left: 1, used: 5 }));
+    expect(await countColor(spent)).toBe(amber);
+    expect(await countColor(monthly({ left: 0, used: 6 }))).not.toBe(amber);
+    expect(await text(<AllowancePools tokens={spent} compact />)).toBe('0 tokens left · December: 7 of 8 left');
+    // December spent too, no count at all, or an unpaid grant: the red note as before; a bonus token in hand spends first.
+    for (const t of [monthly({ left: 0, used: 6, nextPeriod: { ...next, left: 0, booked: 8 } }), monthly({ left: 0, used: 6 }), monthly({ left: 0, used: 6, unpaid: true, nextPeriod: next })]) {
+      expect(nextPeriodOpen(t)).toBeNull();
+      expect(await text(<SpendNote tokens={t} />)).toBe('No tokens left');
+    }
+    expect(nextPeriodOpen(monthly({ left: 0, used: 6, grace: [bonus], nextPeriod: next }))).toBeNull();
+    expect(await text(<AllowancePools tokens={monthly({ left: 0, used: 6 })} compact />)).toBe('0 tokens left');
   });
 });
 

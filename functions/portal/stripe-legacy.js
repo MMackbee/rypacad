@@ -201,6 +201,22 @@ function applyLapsed(tx, event, hh, subStatus) {
 }
 
 /**
+ * The booking-freeze state a Stripe subscription status starts a household
+ * at: active/trialing book; anything else leaves `membership.status` unset,
+ * which reads as active everywhere (the rules, index.js membershipStatus).
+ * Review 2026-11-03: never past_due or lapsed from here - a freeze belongs
+ * to the invoice events (applyPastDue / applyLapsed carry the revoke
+ * follow-up and the notice onHouseholdMembership sends; a bare status flip
+ * would email "bookings were released" with nothing released).
+ * @param {?string} subStatus Stripe's `subscription.status`.
+ * @return {(string|undefined)} 'active' | undefined.
+ */
+function initialStatus(subStatus) {
+  if (subStatus === 'active' || subStatus === 'trialing') return 'active';
+  return undefined;
+}
+
+/**
  * `customer.subscription.updated` — remap the household's athletes when the
  * subscription's price maps to a different package.
  *
@@ -220,7 +236,13 @@ async function applySubscriptionUpdated(tx, event, hh) {
   const priceId = (items[0] && items[0].price && items[0].price.id) ||
       (sub.plan && sub.plan.id) || null;
   const period = resolve.periodOf(sub);
+  const current = (hh.data && hh.data.membership) || {};
   const membership = membershipPatch({
+    // 2026-11-03: a household this event reached first (a linked legacy
+    // subscription) got a membership map with no `status`, and the rules'
+    // freeze read refused every booking. Write the freeze state once, when
+    // none exists; the invoice events own every transition after that.
+    status: current.status ? undefined : initialStatus(sub.status),
     stripeSubscriptionStatus: sub.status || null,
     currentPeriodStart: period.start,
     currentPeriodEnd: period.end,
@@ -298,6 +320,7 @@ module.exports = {
   applyLegacy,
   applyPastDue,
   applySubscriptionUpdated,
+  initialStatus,
   invoicePeriod,
   membershipPatch,
 };

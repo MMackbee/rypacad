@@ -3,6 +3,9 @@ const assert = require('node:assert/strict');
 const admin = require('firebase-admin');
 const {test, run} = require('./tiny');
 const legacy = require('./stripe-legacy');
+// The per-athlete webhook path shares membershipPatch and, since the
+// review of 2026-11-03, the initial-status rule.
+const stripe = require('./stripe');
 
 // stripe-legacy resolves admin.firestore() lazily; an own property shadows
 // the namespace getter so no Firebase app is needed.
@@ -44,6 +47,10 @@ function recorder() {
 
 const secs = (y, m, d) => Date.UTC(y, m - 1, d, 12) / 1000;
 const hh = {id: 'h1', ref: {path: 'households/h1'}, data: {}};
+// The 2026-10-21 shape: the period fields written, no status.
+const legacyMap = () => Object.assign({}, hh, {data: {membership: {
+  stripeSubscriptionStatus: 'active', currentPeriodStart: '2026-10-21',
+  currentPeriodEnd: '2026-11-21', lastEventId: 'evt_x'}}});
 const PACKAGES = {
   't-6': {kind: 'tokens', tokens: 6, stripePriceId: 'price_t6'},
   't-12': {kind: 'tokens', tokens: 12, stripePriceId: 'price_t12'},
@@ -133,5 +140,76 @@ test('applySubscriptionUpdated: only billing athletes differ -> no-change',
       assert.equal(writes.some((w) => w.path.startsWith('athletes/')), false);
       assert.deepEqual(writes.map((w) => w.path), ['households/h1']);
     });
+
+test('applySubscriptionUpdated: a household with no membership.status gets ' +
+    'one from the subscription (2026-11-03: the rules refused every ' +
+    'booking by a family whose map had none)', async () => {
+  DATA = {athletes: ATHLETES, packages: PACKAGES};
+  // The 2026-10-21 shape (a map with the period fields and no status) and
+  // a household with no map at all: both get one.
+  for (const household of [legacyMap(), hh]) {
+    const {tx, writes} = recorder();
+    await legacy.applySubscriptionUpdated(tx, subUpdated('price_t6'),
+        household);
+    const h = writes.find((w) => w.path === 'households/h1').data;
+    assert.deepEqual([h['membership.status'],
+      h['membership.stripeSubscriptionStatus']], ['active', 'active']);
+  }
+});
+
+test('applySubscriptionUpdated: an existing membership.status is left to ' +
+    'the invoice events', async () => {
+  DATA = {athletes: ATHLETES, packages: PACKAGES};
+  const {tx, writes} = recorder();
+  const frozen = Object.assign({}, hh,
+      {data: {membership: {status: 'past_due'}}});
+  await legacy.applySubscriptionUpdated(tx, subUpdated('price_t6'), frozen);
+  const h = writes.find((w) => w.path === 'households/h1').data;
+  assert.equal('membership.status' in h, false);
+  assert.equal(h['membership.stripeSubscriptionStatus'], 'active');
+});
+
+test('applySubscriptionUpdated: only an active subscription starts the map; ' +
+    'past_due, canceled and incomplete leave status unset (a freeze is the ' +
+    'invoice events\', with their revoke and notice)', async () => {
+  DATA = {athletes: ATHLETES, packages: PACKAGES};
+  for (const [status, wanted] of [['trialing', 'active'],
+    ['past_due', undefined], ['canceled', undefined],
+    ['incomplete', undefined]]) {
+    const {tx, writes} = recorder();
+    const ev = subUpdated('price_t6');
+    ev.data.object.status = status;
+    await legacy.applySubscriptionUpdated(tx, ev, hh);
+    const h = writes.find((w) => w.path === 'households/h1').data;
+    assert.equal(h['membership.status'], wanted, status);
+  }
+});
+
+test('stripe.js applyAthleteSubscriptionUpdated: the tier map gets the same ' +
+    'initial status, once (review 2026-11-03: this path wrote the incident ' +
+    'shape when the update landed before invoice.paid)', async () => {
+  DATA = {athletes: ATHLETES, packages: PACKAGES};
+  const athlete = {householdId: 'h1', packageId: 't-6',
+    billing: {status: 'pending', subscriptionId: 'sub_mon'}};
+  const athleteRef = {path: 'athletes/mon'};
+  const frozen = Object.assign({}, hh,
+      {data: {membership: {status: 'past_due'}}});
+  for (const [household, wanted] of [[legacyMap(), 'active'],
+    [hh, 'active'], [frozen, undefined]]) {
+    const {tx, writes} = recorder();
+    // An unmapped price: the membership write happens before the package
+    // comparison, which then reports no-change.
+    const out = await stripe.applyAthleteSubscriptionUpdated(tx,
+        subUpdated('price_unmapped'), household, athlete, athleteRef, 'tier');
+    assert.equal(out.outcome, 'no-change');
+    const h = writes.find((w) => w.path === 'households/h1').data;
+    assert.equal(h['membership.status'], wanted);
+    assert.equal(h['membership.stripeSubscriptionStatus'], 'active');
+    assert.equal('membership.status' in h, wanted !== undefined);
+  }
+  // The add-on never speaks for the household map.
+  const {writes} = recorder();
+  assert.equal(writes.some((w) => w.path === 'households/h1'), false);
+});
 
 run();
