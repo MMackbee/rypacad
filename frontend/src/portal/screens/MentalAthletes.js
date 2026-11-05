@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { format, parseISO } from 'date-fns';
-import { color, font, radius } from '../tokens';
+import { color, font, radius, tint } from '../tokens';
 import AthleteRow from '../components/AthleteRow';
 import BottomTabBar from '../components/BottomTabBar';
 import Field from '../components/Field';
@@ -9,6 +9,7 @@ import SkeletonCard from '../components/Skeleton';
 import { Body, Card, ErrorNotice, ScreenTitle, SectionLabel, SignOutButton } from '../components/Primitives';
 import { useMentalAthletes } from '../hooks';
 import { familyHint } from '../data/athleteLabel';
+import { STAFF_STATUS_LABEL } from '../data/mentalConsent';
 
 const day = (iso) => format(parseISO(iso), 'MMM d');
 
@@ -34,14 +35,32 @@ function metaFor(row) {
  * Each row is wrapped in a role="button" div named by the athlete: the
  * AthleteRow itself is a plain div whose text runs name, meta and trailing
  * together, so the wrapper is what a screen reader (and the tests) reach.
+ *
+ * Consent (2026-10-30 spec 5): each row says Signed / Not signed / Needs 18+
+ * / No date of birth under its intake line (nothing when the consent read
+ * failed); the rows with a 1:1 ahead and no signature come first under
+ * "Needs consent before a session", and the Needs consent chip shows only
+ * them.
  */
 export default function MentalAthletes({ bare = false, onOpenAthlete, onSignOut }) {
   const { data, loading, error } = useMentalAthletes();
   const [q, setQ] = useState('');
+  const [onlyNeeds, setOnlyNeeds] = useState(false);
   const needle = q.trim().toLowerCase();
   const all = data ?? [];
-  const rows = all.filter((r) => String(r.name || '').toLowerCase().includes(needle));
+  const found = all.filter((r) => String(r.name || '').toLowerCase().includes(needle));
+  const needing = found.filter((r) => r.needsConsent);
+  const rest = onlyNeeds ? [] : found.filter((r) => !r.needsConsent);
+  const rows = [...needing, ...rest];
+  const anyNeeds = all.some((r) => r.needsConsent);
   const open = (id) => onOpenAthlete && onOpenAthlete(id);
+  const list = (group) => (
+    <Card large>
+      <div style={{ display: 'flex', flexDirection: 'column' }}>
+        {group.map((row, i) => <MentalAthleteRow key={row.athleteId} row={row} divider={i < group.length - 1} open={open} />)}
+      </div>
+    </Card>
+  );
 
   return (
     <PhoneFrame
@@ -61,6 +80,9 @@ export default function MentalAthletes({ bare = false, onOpenAthlete, onSignOut 
     >
       <div style={{ padding: '0 22px 24px', display: 'flex', flexDirection: 'column', gap: 12 }}>
         <Field label="Search athletes" value={q} placeholder="Name" onChange={setQ} />
+        {anyNeeds || onlyNeeds ? (
+          <button type="button" aria-pressed={onlyNeeds} onClick={() => setOnlyNeeds((v) => !v)} style={chip(onlyNeeds)}>Needs consent</button>
+        ) : null}
         {loading ? (
           <>
             <SkeletonCard large height={72} />
@@ -77,52 +99,69 @@ export default function MentalAthletes({ bare = false, onOpenAthlete, onSignOut 
               textAlign: 'center',
             }}
           >
-            <Body size={12}>{needle ? `No athlete matches "${q.trim()}"` : 'No athletes yet.'}</Body>
+            <Body size={12}>{needle ? `No athlete matches "${q.trim()}"` : onlyNeeds ? 'Nobody needs consent before a session.' : 'No athletes yet.'}</Body>
           </div>
         ) : (
-          <Card large>
-            <div style={{ display: 'flex', flexDirection: 'column' }}>
-              {rows.map((row, i) => (
-                <div
-                  key={row.athleteId}
-                  role="button"
-                  tabIndex={0}
-                  aria-label={row.name}
-                  onClick={() => open(row.athleteId)}
-                  onKeyDown={(e) => {
-                    if (e.key === 'Enter' || e.key === ' ') {
-                      e.preventDefault();
-                      open(row.athleteId);
-                    }
-                  }}
-                  style={{ cursor: 'pointer' }}
-                >
-                  <AthleteRow
-                    name={row.name}
-                    meta={metaFor(row)}
-                    avatarSize={42}
-                    nameSize={16}
-                    divider={i < rows.length - 1}
-                    trailing={
-                      row.hasIntake ? (
-                        <Body size={11} tone={color.primary} style={{ font: `600 11px ${font.body}` }}>Intake</Body>
-                      ) : (
-                        <Body size={11} tone={color.textTertiary}>No intake</Body>
-                      )
-                    }
-                  >
-                    {row.latestNoteDate ? (
-                      <Body size={11} tone={color.textTertiary} style={{ marginTop: 2 }}>
-                        Note {day(row.latestNoteDate)}
-                      </Body>
-                    ) : null}
-                  </AthleteRow>
-                </div>
-              ))}
-            </div>
-          </Card>
+          <>
+            {needing.length ? <SectionLabel tone={color.secondary}>Needs consent before a session</SectionLabel> : null}
+            {needing.length ? list(needing) : null}
+            {needing.length && rest.length ? <SectionLabel style={{ marginTop: 4 }}>Everyone else</SectionLabel> : null}
+            {rest.length ? list(rest) : null}
+          </>
         )}
       </div>
     </PhoneFrame>
+  );
+}
+
+const chip = (on) => ({
+  alignSelf: 'flex-start', minHeight: 36, padding: '0 14px', borderRadius: radius.pill, cursor: 'pointer',
+  border: `1px solid ${on ? color.secondary : color.border}`, background: on ? tint.yellow : 'transparent',
+  font: `600 12px ${font.body}`, color: on ? color.secondary : color.textSecondary,
+});
+
+/** One athlete, a tap target named by the athlete; the trailing column is the intake and the consent status. */
+function MentalAthleteRow({ row, divider, open }) {
+  const consent = row.consentStatus ? STAFF_STATUS_LABEL[row.consentStatus] : null;
+  return (
+    <div
+      role="button"
+      tabIndex={0}
+      aria-label={row.name}
+      onClick={() => open(row.athleteId)}
+      onKeyDown={(e) => {
+        if (e.key === 'Enter' || e.key === ' ') {
+          e.preventDefault();
+          open(row.athleteId);
+        }
+      }}
+      style={{ cursor: 'pointer' }}
+    >
+      <AthleteRow
+        name={row.name}
+        meta={metaFor(row)}
+        avatarSize={42}
+        nameSize={16}
+        divider={divider}
+        trailing={
+          <div style={{ textAlign: 'right' }}>
+            {row.hasIntake ? (
+              <Body size={11} tone={color.primary} style={{ font: `600 11px ${font.body}` }}>Intake</Body>
+            ) : (
+              <Body size={11} tone={color.textTertiary}>No intake</Body>
+            )}
+            {consent ? (
+              <Body size={11} tone={row.consentStatus === 'signed' ? color.textTertiary : color.secondary} style={{ marginTop: 2 }}>{consent}</Body>
+            ) : null}
+          </div>
+        }
+      >
+        {row.latestNoteDate ? (
+          <Body size={11} tone={color.textTertiary} style={{ marginTop: 2 }}>
+            Note {day(row.latestNoteDate)}
+          </Body>
+        ) : null}
+      </AthleteRow>
+    </div>
   );
 }

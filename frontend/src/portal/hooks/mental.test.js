@@ -105,3 +105,26 @@ test('seed mode: last week\'s check-in note reaches the athlete page', async () 
   expect(h.out.current.data.contract.lastCheckinNote).toBe('Caught him after Thursday practice: wants to work on first-tee nerves.');
   h.unmount();
 });
+
+test("seed mode: consent on Yannick's rows - Reese needs it before the 1:1 a week out", async () => {
+  const h = mountHook(() => useMentalAthletes());
+  await settle(h);
+  expect(h.out.current.data.map((r) => [r.athleteId, r.consentStatus, r.needsConsent])).toEqual([
+    ['jordan', 'signed', false], ['nico', 'unsigned', false], ['quinn', 'signed', false], ['reese', 'unsigned', true],
+  ]);
+  h.unmount();
+});
+
+test("seed mode: an 18+ athlete's page shows the login email and the consent's emergency contact, never the guardian", async () => {
+  const q = mountHook(() => useMentalAthlete('quinn'));
+  await settle(q);
+  expect(q.out.current.data.contact).toEqual({ familyName: 'Parker family', guardianName: null, email: null, phone: null, emergency: { name: 'Sam Parker', phone: 'test-phone', relationship: 'parent' } });
+  expect(q.out.current.data.consent.summary.status).toBe('signed');
+  expect(q.out.current.data.consent.unavailable).toBe(false);
+  q.unmount();
+  const j = mountHook(() => useMentalAthlete('jordan'));
+  await settle(j);
+  expect(j.out.current.data.contact).toEqual({ familyName: 'Whitfield family', guardianName: 'Dana', email: 'dana@email.com', phone: null });
+  expect(j.out.current.data.consent.summary.label).toBe('Complete');
+  j.unmount();
+});

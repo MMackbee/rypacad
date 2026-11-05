@@ -6,6 +6,8 @@ jest.mock('../hooks', () => ({
   useMentalAthlete: () => ({ data: mockData, loading: false, error: null }),
   useSelfManaged: () => false,
 }));
+// The Consent card's three actions (plan Task 14), never reached here.
+jest.mock('../hooks/mentalConsent', () => ({ countersignConsent: jest.fn(), withdrawRecording: jest.fn(), sendConsentReminder: jest.fn() }));
 import MentalAthlete from './MentalAthlete';
 
 beforeEach(() => {
@@ -56,4 +58,38 @@ test("the last check-in's note shows under the contract line", async () => {
   expect(r.text()).toContain('Last check-in Nov 10');
   expect(r.text()).toContain('Note: Wants to work on first-tee nerves.');
   r.unmount();
+});
+
+describe('the Consent card on the athlete page (plan Task 14)', () => {
+  const summary = { status: 'unsigned', label: 'Not signed', summary: null, recording: 'Recording: no', canCountersign: false, canRemind: true, canWithdraw: false, audience: 'household' };
+
+  test('the Consent card sits between Intake and Sessions', async () => {
+    mockData = { ...mockData, consent: { record: null, summary, unavailable: false } };
+    const r = await renderScreen(<MentalAthlete bare athleteId="jordan" />, { path: '/portal/mental/jordan' });
+    const text = r.text();
+    expect(text.indexOf('Intake')).toBeLessThan(text.indexOf('Consent'));
+    expect(text.indexOf('Consent')).toBeLessThan(text.indexOf('Sessions'));
+    expect(text).toContain('Send a reminder');
+    r.unmount();
+  });
+
+  test("an 18+ athlete's contact line shows the login email and the emergency contact, not the guardian", async () => {
+    mockData = {
+      ...mockData,
+      athlete: { ...mockData.athlete, id: 'quinn', name: 'Quinn Parker', age: 20 },
+      contact: { familyName: 'Parker family', guardianName: null, email: 'quinn@example.com', phone: null, emergency: { name: 'Sam Parker', phone: 'test-phone', relationship: 'parent' } },
+      consent: { record: null, summary: { ...summary, status: 'signed', label: 'Signed', summary: 'Signed Oct 30 by Quinn Parker (athlete, 18+)', canRemind: false, audience: 'athlete' }, unavailable: false },
+    };
+    const r = await renderScreen(<MentalAthlete bare athleteId="quinn" />, { path: '/portal/mental/quinn' });
+    expect(r.text()).toContain('Parker family · quinn@example.com');
+    expect(r.text()).toContain('Emergency: Sam Parker, test-phone (parent)');
+    expect(r.text()).not.toContain('dana@email.com');
+    r.unmount();
+  });
+
+  test('no consent in the payload (an older hook): no card', async () => {
+    const r = await renderScreen(<MentalAthlete bare athleteId="jordan" />, { path: '/portal/mental/jordan' });
+    expect(r.text()).not.toContain('Send a reminder');
+    r.unmount();
+  });
 });

@@ -6,6 +6,7 @@ import Button from '../components/Button';
 import PhoneFrame from '../components/PhoneFrame';
 import SkeletonCard from '../components/Skeleton';
 import ContactLine from '../components/mental/ContactLine';
+import ConsentCard from '../components/consent/ConsentCard';
 import SessionNoteChip from '../components/mental/SessionNoteChip';
 import { BackLink, Body, Card, ErrorNotice, ScreenTitle, SectionLabel, SignOutButton } from '../components/Primitives';
 import { useMentalAthlete } from '../hooks';
@@ -65,6 +66,7 @@ export default function MentalAthlete({ bare = false, athleteId, onBack, onOpenN
                 {[athlete.age != null ? `Age ${athlete.age}` : null, required != null ? `${required} min a day` : null].filter(Boolean).join(' · ')}
               </Body>
               <ContactLine contact={data.contact} style={{ marginTop: 4 }} />
+              {data.contact?.emergency ? <Body size={12} style={{ marginTop: 2 }}>{emergencyLine(data.contact.emergency)}</Body> : null}
             </div>
           ) : null}
         </div>
@@ -91,6 +93,11 @@ export default function MentalAthlete({ bare = false, athleteId, onBack, onOpenN
   );
 }
 
+/** An 18+ athlete's emergency contact from the consent: `Emergency: Sam Parker, test-phone (parent)`. */
+function emergencyLine(ec) {
+  return `Emergency: ${ec.name}${ec.phone ? `, ${ec.phone}` : ''}${ec.relationship ? ` (${ec.relationship})` : ''}`;
+}
+
 function AthleteCards({ data, required, open }) {
   const { notes, sessions, contract } = data;
   const intake = notes?.intake ?? null;
@@ -106,6 +113,14 @@ function AthleteCards({ data, required, open }) {
           {intake ? 'Open intake note' : 'Write intake note'}
         </Button>
       </Card>
+
+      {/* Yannick's consent (2026-10-30 spec 5), between Intake and Sessions. */}
+      <ConsentCard
+        athleteId={data.athlete.id}
+        firstName={String(data.athlete.name || '').trim().split(/\s+/)[0]}
+        familyLabel={data.contact?.guardianName ?? null}
+        consent={data.consent}
+      />
 
       <Card large>
         <SectionLabel style={{ marginBottom: 2 }}>Sessions</SectionLabel>

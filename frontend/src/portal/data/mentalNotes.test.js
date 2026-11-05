@@ -48,8 +48,10 @@ describe('mentalAthleteRows (Athletes list, spec 5.1)', () => {
   const entries = [{ id: 'intake', athleteId: 'jordan', kind: 'intake', updatedAtMs: ms('2026-11-03') }];
   test('rows by name with next and last 1:1 and the note facts', () => {
     expect(mentalAthleteRows({ athletes, bookings, entries, today: '2026-11-11' })).toEqual([
-      { athleteId: 'jordan', name: 'Jordan Whitfield', age: 14, familyName: null, nextSession: '2026-11-17', lastSession: '2026-11-10', hasIntake: true, latestNoteDate: '2026-11-03' },
-      { athleteId: 'reese', name: 'Reese Whitfield', age: 12, familyName: null, nextSession: null, lastSession: null, hasIntake: false, latestNoteDate: null },
+      { athleteId: 'jordan', name: 'Jordan Whitfield', age: 14, familyName: null, nextSession: '2026-11-17', lastSession: '2026-11-10', hasIntake: true, latestNoteDate: '2026-11-03',
+        consentStatus: 'unsigned', needsConsent: true },
+      { athleteId: 'reese', name: 'Reese Whitfield', age: 12, familyName: null, nextSession: null, lastSession: null, hasIntake: false, latestNoteDate: null,
+        consentStatus: 'unsigned', needsConsent: false },
     ]);
   });
   test('households give each row its family name, as an array or an id map; an unknown household is null', () => {
@@ -58,5 +60,28 @@ describe('mentalAthleteRows (Athletes list, spec 5.1)', () => {
     expect(asArray.map((r) => [r.athleteId, r.familyName])).toEqual([['jordan', 'Whitfield family'], ['reese', null]]);
     const asMap = mentalAthleteRows({ athletes: withHomes, households: { w: { id: 'w', name: 'Whitfield family' } }, bookings, entries, today: '2026-11-11' });
     expect(asMap.map((r) => r.familyName)).toEqual(['Whitfield family', null]);
+  });
+});
+
+describe('mentalAthleteRows: consent (plan Task 14)', () => {
+  const ava = { id: 'ava', name: 'Ava Test', dob: '2012-05-14' };
+  const jo = { id: 'jo', name: 'Jo Test', dob: '2012-05-14' };
+  test("consent on Yannick's rows: from bookings only, never a held session", () => {
+    const rows = mentalAthleteRows({ athletes: [ava, jo], households: {}, entries: [], today: '2026-11-05', utcToday: '2026-11-05',
+      bookings: [{ athleteId: 'ava', type: 'mental', status: 'confirmed', date: '2026-11-12' }],
+      records: { jo: { adult: false, adultSignature: null } } });
+    expect(rows.map((r) => [r.athleteId, r.consentStatus, r.needsConsent])).toEqual([['ava', 'unsigned', true], ['jo', 'signed', false]]);
+    // a held session (sessions/cal-x, unresolved) is not an input at all: the function takes bookings, and a booking with no athleteId matches nobody
+    expect(mentalAthleteRows({ athletes: [ava], households: {}, entries: [], today: '2026-11-05', utcToday: '2026-11-05',
+      bookings: [{ athleteId: null, type: 'mental', status: 'confirmed', date: '2026-11-12' }] })[0].needsConsent).toBe(false);
+    expect(mentalAthleteRows({ athletes: [ava], households: {}, entries: [], today: '2026-11-05', utcToday: '2026-11-05', records: null,
+      bookings: [{ athleteId: 'ava', type: 'mental', status: 'confirmed', date: '2026-11-12' }] })[0]).toMatchObject({ consentStatus: null, needsConsent: false });
+  });
+  test('no dob and needs 18+ both need consent before a 1:1; ages count on the UTC date', () => {
+    const rows = mentalAthleteRows({ athletes: [{ id: 'n', name: 'N Test', dob: null }, { id: 'm', name: 'M Test', dob: '2008-11-06' }],
+      households: {}, entries: [], today: '2026-11-05', utcToday: '2026-11-06',
+      bookings: [{ athleteId: 'n', type: 'mental', status: 'confirmed', date: '2026-11-12' }, { athleteId: 'm', type: 'mental', status: 'confirmed', date: '2026-11-12' }],
+      records: { m: { adult: false, adultSignature: null } } });
+    expect(rows.map((r) => [r.athleteId, r.consentStatus, r.needsConsent])).toEqual([['m', 'needs-adult', true], ['n', 'no-dob', true]]);
   });
 });
