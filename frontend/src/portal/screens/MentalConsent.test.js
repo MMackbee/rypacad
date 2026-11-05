@@ -88,6 +88,20 @@ test('a minor login withdraws its recording answer from the list, which never au
   await after.unmount();
 });
 
+test('the Stop recording sheet: named by its question, Keep it first with the focus, Escape closes it', async () => {
+  mockRows = [row({ viewer: 'athlete', status: 'signed', record: minorRecord })];
+  const r = await renderScreen(<MentalConsent bare autoOpen={false} />);
+  await r.click('Stop recording my sessions');
+  const dialog = r.container.querySelector('[role="dialog"]');
+  expect(document.getElementById(dialog.getAttribute('aria-labelledby')).textContent).toContain('Stop recording?');
+  expect([...dialog.querySelectorAll('button')].map((b) => b.textContent)).toEqual(['Keep it', 'Yes, stop recording']);
+  expect(document.activeElement.textContent).toBe('Keep it');
+  await r.act(() => { document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' })); });
+  expect(r.container.querySelector('[role="dialog"]')).toBeNull();
+  expect(mockWithdraw).not.toHaveBeenCalled();
+  await r.unmount();
+});
+
 test('a refused withdrawal keeps the sheet open and says so', async () => {
   mockRows = [row({ viewer: 'athlete', status: 'signed', record: minorRecord })];
   mockWithdraw.mockRejectedValueOnce(new Error('permission-denied'));

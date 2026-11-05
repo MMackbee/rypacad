@@ -91,6 +91,14 @@ describe("consent on Yannick's list (plan Task 14)", () => {
     r.unmount();
   });
 
+  test("screen readers hear each row's consent status with its name", async () => {
+    const r = await renderScreen(<MentalAthletes bare />, { path: '/portal/mental' });
+    const reese = r.container.querySelector('[role="button"][aria-label="Reese Whitfield"]');
+    expect(document.getElementById(reese.getAttribute('aria-describedby')).textContent).toBe('Not signed');
+    expect(r.container.querySelector('[role="button"][aria-label="Zed Test"]').getAttribute('aria-describedby')).toBeNull();
+    r.unmount();
+  });
+
   test('nobody needing consent: no label, the list as before', async () => {
     mockRows = mockRows.map((x) => ({ ...x, needsConsent: false }));
     const r = await renderScreen(<MentalAthletes bare />, { path: '/portal/mental' });

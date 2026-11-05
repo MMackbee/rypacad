@@ -195,9 +195,11 @@ function lineFor(row) {
     }
     if (row.status !== 'signed') return { text: 'Your parent signs this', action: null };
     const rec = row.record;
-    const both = rec.choices?.audio === true && rec.assent?.audio === true;
-    const withdraw = !isAdultRecord(rec) && rec.assent?.audio === true;
-    return { text: `Signed ${date} · Your parent manages this · Recording: ${both ? 'yes' : 'no'}`, action: withdraw ? 'withdraw' : null };
+    const ownYes = rec.assent?.audio === true;
+    const withdraw = !isAdultRecord(rec) && ownYes;
+    // The athlete's own yes still stands (and can be withdrawn) when the parent said no; say whose no it is.
+    const recording = rec.choices?.audio === true && ownYes ? 'yes' : withdraw ? 'no (your parent said no)' : 'no';
+    return { text: `Signed ${date} · Your parent manages this · Recording: ${recording}`, action: withdraw ? 'withdraw' : null };
   }
   if (row.status === 'no-dob') return { text: `Add ${first}'s date of birth first`, action: null };
   if (row.status === 'signed') {
@@ -220,9 +222,11 @@ export function familyLine(row) {
   return { text: line, action, label: LABEL[action] ?? null, href: hrefFor(action, row.athleteId) };
 }
 
-/** The family home's card: the first athlete the viewer can sign for with a confirmed 1:1 ahead; else null. */
+/** The family home's card: the athlete the viewer can sign for whose confirmed 1:1 comes soonest (ties by name); else null. */
 export function homeCardFor(rows) {
-  for (const row of rows || []) {
+  const last = '9999-12-31';
+  const soonest = [...(rows || [])].sort((a, b) => (a?.nextMental?.date ?? last).localeCompare(b?.nextMental?.date ?? last));
+  for (const row of soonest) {
     if (!row?.nextMental?.date || row.status === 'signed') continue;
     const { action } = lineFor(row);
     if (SIGNABLE.has(action)) {

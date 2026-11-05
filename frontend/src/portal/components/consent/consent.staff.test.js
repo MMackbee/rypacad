@@ -134,6 +134,72 @@ test('an athlete now 18 with a minor-era record: the paper re-sign is section 11
   await r.unmount();
 });
 
+const MAX = { id: 'max', name: 'Max Test', dob: '2007-03-02', householdId: 'hh' };
+
+test('section 11 is never offered for an athlete under 18, nor on a correction of a withdrawn record', async () => {
+  mockStaffData = { athlete: MAX, record: null, summary: unsigned };
+  const adult = await renderScreen(<StaffConsentDetail athleteId="max" role="ops" />);
+  await adult.click('Record a paper signature');
+  expect(adult.button('Section 11').disabled).toBe(false);
+  await adult.unmount();
+
+  mockStaffData = { athlete: AVA, record: null, summary: unsigned };
+  const minor = await renderScreen(<StaffConsentDetail athleteId="ava" role="ops" />);
+  await minor.click('Record a paper signature');
+  expect(minor.button('Section 11').disabled).toBe(true);
+  expect(minor.text()).toContain('Ava is under 18, so the form is section 10.');
+  await minor.unmount();
+
+  // An 18-year-old's minor-era paper record, withdrawn: the correction stays section 10 (the re-sign is the 18+ path).
+  mockStaffData = { athlete: MAX, record: { ...paperRecord, athleteId: 'max', assent: { ...paperRecord.assent, withdrawnBy: 'u-mental' } }, summary: signedSummary };
+  const withdrawn = await renderScreen(<StaffConsentDetail athleteId="max" role="owner" />);
+  await withdrawn.click('Correct the paper record');
+  expect(withdrawn.button('Section 11').disabled).toBe(true);
+  expect(withdrawn.text()).toContain('Max withdrew the recording answer, so this record stays section 10.');
+  await withdrawn.unmount();
+});
+
+test('the paper sheet names what the rules would refuse instead of failing on Save', async () => {
+  mockStaffData = { athlete: MAX, record: null, summary: unsigned };
+  const r = await renderScreen(<StaffConsentDetail athleteId="max" role="ops" />);
+  await r.click('Record a paper signature');
+  await r.fill('Date signed', '2026-10-28'); await r.click('Section 11'); await r.fill("Signer's name", 'Max Test');
+  expect(r.button('Save').disabled).toBe(false);
+  await r.fill('Version', 'v2');
+  expect(r.button('Version is a date, like 2026-10-30').disabled).toBe(true);
+  await r.fill('Version', '2026-10-30');
+  await r.fill('Emergency contact name', 'Lee Test');
+  expect(r.button('Emergency contact needs a name and a mobile, or neither').disabled).toBe(true);
+  await r.fill('Emergency contact mobile', 'test-phone');
+  await r.click('Parent sessions: yes');
+  expect(r.button('Add the parent/guardian name').disabled).toBe(true);
+  await r.fill('Parent/guardian name', 'Dana Test');
+  await r.click('Save');
+  expect(mockRecordPaper).toHaveBeenCalledWith(expect.objectContaining({ version: '2026-10-30', choices: expect.objectContaining({ parentSessions: true, parentName: 'Dana Test',
+    emergencyContact: { name: 'Lee Test', phone: 'test-phone', relationship: null } }) }));
+  await r.unmount();
+});
+
+test('a paper entry that lost a race with a portal signature keeps the sheet and says nothing was recorded', async () => {
+  mockRecordPaper.mockResolvedValueOnce({ status: 'already', record: paperRecord });
+  const r = await renderScreen(<StaffConsentDetail athleteId="ava" role="ops" />);
+  await r.click('Record a paper signature');
+  await r.fill('Date signed', '2026-10-28'); await r.click('Section 10');
+  await r.fill("Signer's name", 'Dana Whitfield'); await r.fill("Athlete's name", 'Ava');
+  await r.click('Save');
+  expect(r.text()).toContain('Already signed, so nothing was recorded. The card shows the record on file.');
+  expect(r.button('Save')).not.toBeNull();
+  await r.unmount();
+});
+
+test("a paper record re-signed at 18 is not corrected here: its section 11 answers are the athlete's", async () => {
+  const adultSignature = { signedAt: SIGNED_AT, signedBy: 'u-ops', name: 'Max Test', version: '2026-10-30', method: 'paper' };
+  mockStaffData = { athlete: MAX, record: { ...paperRecord, athleteId: 'max', adultSignature }, summary: signedSummary };
+  const r = await renderScreen(<StaffConsentDetail athleteId="max" role="owner" />);
+  expect(r.button('Correct the paper record')).toBeNull();
+  await r.unmount();
+});
+
 test('ConsentDetailCard reads only what the role may read, and survives the role resolving late', async () => {
   for (const role of ['coach', 'mental']) {
     const r = await renderScreen(<ConsentDetailCard athleteId="ava" role={role} />);

@@ -286,7 +286,8 @@ test('change, adult: recording needs the typed confirmation; location alone does
   const r = await renderScreen(<MentalConsentFlow bare athleteId="max" change />);
   expect(field(r, 'Max types their name to confirm')).toBeNull();
   await r.click('I do not consent');
-  expect(r.button('Save').disabled).toBe(true);
+  // Save waits for the typed name, and the pinned button says so (the field can sit below the fold).
+  expect(r.button('Max types their name to confirm').disabled).toBe(true);
   await r.fill('Max types their name to confirm', 'Max Test');
   await r.click('Save');
   expect(mockFlow.change).toHaveBeenCalledWith({ choices: expect.objectContaining({ audio: false, parentSessions: true }), adultConfirmName: 'Max Test' });
@@ -298,6 +299,44 @@ test('change, adult: recording needs the typed confirmation; location alone does
   expect(mockFlow.change).toHaveBeenCalledTimes(1);
   expect(mockFlow.change.mock.calls[0][0]).toEqual({ choices: expect.objectContaining({ location: 'A' }) });
   await loc.unmount();
+});
+
+test('change: a paper record with no location, and a driving answer now owed, say why Save waits; the hand-over waits too', async () => {
+  const paper = { ...minorRecord, method: 'paper', choices: { ...minorRecord.choices, location: null } };
+  mockFlow = flow({ status: 'signed', record: paper, branch: 'minor', drivingAsked: true, athlete: { ...AVA, dob: '2010-02-01' } });
+  const r = await renderScreen(<MentalConsentFlow bare athleteId="ava" change />);
+  expect(r.button('Choose a location').disabled).toBe(true);
+  expect(r.button("Change Ava's own answer").disabled).toBe(true);
+  await r.click('Online (Option C)');
+  expect(r.button('Answer the driving question').disabled).toBe(true);
+  await r.click('No');
+  expect(r.button('Save').disabled).toBe(false);
+  expect(r.button("Change Ava's own answer").disabled).toBe(false);
+  await r.unmount();
+});
+
+test("change on an 18+ athlete's own login asks them to type their own name", async () => {
+  mockFlow = flow({ viewer: 'athlete', status: 'signed', record: adultRecord, branch: 'adult', athlete: MAX, selfManaged: true });
+  const r = await renderScreen(<MentalConsentFlow bare athleteId="max" change />);
+  await r.click('I do not consent');
+  expect(field(r, 'Max types their name to confirm')).toBeNull();
+  expect(r.button('Type your name to confirm').disabled).toBe(true);
+  await r.fill('Type your name to confirm', 'Max Test'); await r.click('Save');
+  expect(mockFlow.change).toHaveBeenCalledWith({ choices: expect.objectContaining({ audio: false }), adultConfirmName: 'Max Test' });
+  await r.unmount();
+});
+
+test('screen readers: a one-answer question is a named radio group; a new step takes the focus; the step count is announced', async () => {
+  mockFlow = flow({ branch: 'minor' });
+  const r = await renderScreen(<MentalConsentFlow bare athleteId="ava" />);
+  expect(r.container.querySelector('[aria-live="polite"]').textContent).toBe('Step 1 of 5');
+  await r.click('Same as parent'); await r.click('Continue');
+  expect(document.activeElement.textContent).toBe('The agreement');
+  reach(); await r.click('Continue');
+  expect(r.container.querySelector('[aria-live="polite"]').textContent).toBe('Step 3 of 5');
+  const group = r.container.querySelector('[role="radiogroup"][aria-label="Audio recording of athlete sessions"]');
+  expect([...group.querySelectorAll('[role="radio"]')].map((b) => b.getAttribute('aria-label'))).toEqual(['I/We consent', 'I/We do not consent']);
+  await r.unmount();
 });
 
 test("change: a refused save keeps the form; a claimed adult's parent cannot change anything", async () => {

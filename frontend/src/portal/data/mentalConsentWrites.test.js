@@ -123,4 +123,11 @@ describe('paperCorrection', () => {
     expect(paperCorrection({ current: open, uid: 'u-owner', signedAt: 'S2', adult: true, signerName: 'Ava Test', choices: {}, stamp: 'NOW' }))
       .toMatchObject({ adult: true, assent: null, signer: { role: 'athlete', name: 'Ava Test' }, choices: { parentSessions: false } });
   });
+  test('a withdrawn record stays section 10 with the stored assent, whatever the correction asks (the rules refuse section 11 there)', () => {
+    const u = paperCorrection({ current: stored, uid: 'u-owner', signedAt: 'S2', adult: true, signerName: 'Dana Whitfield', choices: {}, stamp: 'NOW' });
+    expect(u.adult).toBe(false);
+    expect(u.assent).toBe(stored.assent);
+    expect(u.signer).toEqual({ role: 'parent', name: 'Dana Whitfield' });
+    expect(u.choices).toMatchObject({ parentSessions: null, parentName: null });
+  });
 });

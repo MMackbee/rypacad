@@ -101,6 +101,19 @@ test('Recording withdrawn (a minor, assent yes): the sheet, then the one-way wri
   await r.unmount();
 });
 
+test("Yannick's withdrawal sheet: Cancel first with the focus; Escape closes it", async () => {
+  const r = await renderScreen(card(consent({ canWithdraw: true })));
+  await r.click('Recording withdrawn');
+  const dialog = r.container.querySelector('[role="dialog"]');
+  expect(document.getElementById(dialog.getAttribute('aria-labelledby')).textContent).toContain('Record that Ava withdrew');
+  expect([...dialog.querySelectorAll('button')].map((b) => b.textContent)).toEqual(['Cancel', 'Record it']);
+  expect(document.activeElement.textContent).toBe('Cancel');
+  await r.act(() => { document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' })); });
+  expect(r.container.querySelector('[role="dialog"]')).toBeNull();
+  expect(mockWithdraw).not.toHaveBeenCalled();
+  await r.unmount();
+});
+
 test('needs 18+: the recording line says so, and a reminder can go', async () => {
   const r = await renderScreen(card(consent({ status: 'needs-adult', label: 'Needs 18+', recording: 'Recording: needs 18+ signature', canRemind: true,
     summary: 'Signed Oct 30 by Dana Whitfield (parent) · Ava agreed · Recording: needs 18+ signature · Version 2026-10-30' })));

@@ -118,14 +118,15 @@ async function liveInputs(now) {
   return { ...base, viewer: null, householdId: null, athletes: [], records: [], bookings: [], claimed: {} };
 }
 
-/** This device's draft state per unsigned athlete; a draft from before the athlete turned 18 is cleared as it is read. */
+/**
+ * This device's draft state per unsigned athlete. Read only: a draft from before the athlete turned 18,
+ * or an expired one, is cleared by the flow as it reads it (flowPayload), so the flow can say why it starts over.
+ */
 function draftStatesFor(inputs, nowMs) {
   const out = {};
   for (const a of inputs.athletes) {
     if (inputs.records.some((r) => idOf(r) === a.id)) continue;
-    const state = draftState(readDraft(inputs.uid, a.id), { version: CONSENT_VERSION, adultNow: isAdultOnDate(a.dob, inputs.utcToday), nowMs });
-    if (state === 'adult-changed') clearDraft(inputs.uid, a.id);
-    out[a.id] = state;
+    out[a.id] = draftState(readDraft(inputs.uid, a.id), { version: CONSENT_VERSION, adultNow: isAdultOnDate(a.dob, inputs.utcToday), nowMs });
   }
   return out;
 }
@@ -186,7 +187,8 @@ function flowPayload({ inputs, athlete, household, nowMs, demoNoRecord = false }
   } else {
     draft = readDraft(uid, athlete.id);
     ds = draftState(draft, { version: CONSENT_VERSION, adultNow: isAdultOnDate(athlete.dob, facts.utcToday), nowMs });
-    if (ds === 'adult-changed') clearDraft(uid, athlete.id);
+    // Read once: the flow says why it starts over, and the family line stops offering "Start again".
+    if (ds === 'adult-changed' || ds === 'expired') clearDraft(uid, athlete.id);
     if (ds !== 'fresh' && ds !== 'version-changed') draft = null;
   }
   const rows = rowsOf(demoNoRecord ? { ...inputs, records: inputs.records.filter((r) => r !== stored) } : inputs, draftStatesFor(inputs, nowMs));

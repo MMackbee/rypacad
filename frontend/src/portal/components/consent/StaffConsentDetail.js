@@ -7,14 +7,18 @@ import { useStaffConsent } from '../../hooks/mentalConsentStaff';
 import { isLive } from '../../hooks/live';
 
 const SAVE_FAILED = "This couldn't be saved. Check your connection and try again.";
+const ALREADY = 'Already signed, so nothing was recorded. The card shows the record on file.';
 const outline = { boxShadow: 'none', font: `600 14px ${font.body}` };
 
 /**
  * Yannick's consent on the athlete admin card, for ops and the owner (spec
  * 5, plan Task 15): the status line and "Record a paper signature" (no
  * record yet, or the section 11 re-sign of an athlete now 18), and for the
- * owner alone on a paper record "Correct the paper record". A portal record
- * is never edited here (that is an Admin SDK job). `demoPaperOpen` opens the
+ * owner alone on a paper record not yet re-signed at 18 "Correct the paper
+ * record". A portal record, or a re-signed one (its section 11 answers are
+ * the athlete's), is never edited here (that is an Admin SDK job). A paper
+ * entry that loses a race with a portal signature keeps the sheet open and
+ * says nothing was recorded. `demoPaperOpen` opens the
  * paper sheet at mount (the review harness's; live mode ignores it).
  */
 export default function StaffConsentDetail({ athleteId, role, demoPaperOpen = false }) {
@@ -34,13 +38,17 @@ export default function StaffConsentDetail({ athleteId, role, demoPaperOpen = fa
   if (!data) return null;
   const { athlete, record, summary } = data;
   const canRecord = !record || summary.status === 'needs-adult';
-  const canCorrect = role === 'owner' && record?.method === 'paper';
+  const canCorrect = role === 'owner' && record?.method === 'paper' && !record.adultSignature;
   const close = () => { setSheet(null); setSaveError(null); };
   const save = async (input) => {
     setSaving(true);
     setSaveError(null);
     try {
-      await (sheet === 'correct' ? correctPaper(input) : recordPaper(input));
+      const res = await (sheet === 'correct' ? correctPaper(input) : recordPaper(input));
+      if (res?.status === 'already') {
+        setSaveError(ALREADY);
+        return;
+      }
       setSheet(null);
     } catch (err) {
       setSaveError(SAVE_FAILED);

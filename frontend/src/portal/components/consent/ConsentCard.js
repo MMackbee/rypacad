@@ -112,6 +112,7 @@ export default function ConsentCard({ athleteId, firstName, familyLabel = null, 
         <ConfirmSheet
           text={`Record that ${firstName} withdrew the recording answer? Recording stops until the family changes it.`}
           confirmLabel="Record it"
+          cancelFirst
           busy={busy}
           error={sheetError}
           onConfirm={withdraw}

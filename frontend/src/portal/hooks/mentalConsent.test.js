@@ -220,6 +220,40 @@ describe('live mode', () => {
     h.unmount();
   });
 
+  test('a draft from before the athlete turned 18 survives the family rows; the flow reads it once, says so, and clears it', async () => {
+    mockApi.fetchLoginInvite.mockResolvedValue(null); // Max signs on the parent's phone
+    const key = 'ryp.mentalConsent.u-dana.max';
+    window.localStorage.setItem(key, JSON.stringify({ v: 1, version: '2026-10-30', savedAt: Date.now(), choices: { location: 'B', audio: true }, parentName: 'Dana Test' }));
+    const fam = mountHook(() => useFamilyConsents());
+    await settle(fam);
+    expect(fam.out.current.data.byId.max.draft).toBeNull();
+    expect(window.localStorage.getItem(key)).not.toBeNull();
+    fam.unmount();
+    const h = mountHook(() => useConsentFlow('max'));
+    await settle(h);
+    expect(h.out.current.data).toMatchObject({ branch: 'adult-handover', draftState: 'adult-changed', draft: null });
+    expect(window.localStorage.getItem(key)).toBeNull();
+    h.unmount();
+  });
+
+  test('an expired draft is cleared when the flow opens, so the family line stops saying so', async () => {
+    const key = 'ryp.mentalConsent.u-dana.ava';
+    window.localStorage.setItem(key, JSON.stringify({ v: 1, version: '2026-10-30', savedAt: Date.now() - 8 * 86400000, choices: { location: 'B' }, parentName: 'Dana Test' }));
+    const fam = mountHook(() => useFamilyConsents());
+    await settle(fam);
+    expect(fam.out.current.data.byId.ava.draft).toBe('expired');
+    fam.unmount();
+    const h = mountHook(() => useConsentFlow('ava'));
+    await settle(h);
+    expect(h.out.current.data).toMatchObject({ draftState: 'expired', draft: null });
+    expect(window.localStorage.getItem(key)).toBeNull();
+    h.unmount();
+    const again = mountHook(() => useFamilyConsents());
+    await settle(again);
+    expect(again.out.current.data.byId.ava.draft).toBeNull();
+    again.unmount();
+  });
+
   test('the reminder is the callable', async () => {
     await expect(sendConsentReminder('ava')).resolves.toEqual({ status: 'sent' });
     expect(mockApi.callRequestMentalConsent).toHaveBeenCalledWith({ athleteId: 'ava' });

@@ -38,22 +38,22 @@ function Section({ label, children }) {
   );
 }
 
-/** A Checkbox with its words beside it; the whole row is the tap target. */
-export function TickRow({ label, checked, onChange }) {
+/** A Checkbox with its words beside it; the whole row is the tap target. `role` 'radio' inside an AnswerPair. */
+export function TickRow({ label, checked, onChange, role }) {
   return (
     <label style={{ display: 'flex', alignItems: 'center', gap: 12, minHeight: 44, cursor: 'pointer' }}>
-      <Checkbox checked={checked} onChange={onChange} label={label} />
+      <Checkbox checked={checked} onChange={onChange} label={label} role={role} />
       <span style={{ font: `500 14px/1.4 ${font.body}`, color: color.text }}>{label}</span>
     </label>
   );
 }
 
-/** Two ticks that answer one question: `value` true, false or null (not answered). */
-function AnswerPair({ value, yes, no, onPick }) {
+/** Two ticks that answer one question: `value` true, false or null (not answered); a radio group named by `question`. */
+function AnswerPair({ question, value, yes, no, onPick }) {
   return (
-    <div style={stack(2)}>
-      <TickRow label={yes} checked={value === true} onChange={() => onPick(true)} />
-      <TickRow label={no} checked={value === false} onChange={() => onPick(false)} />
+    <div role="radiogroup" aria-label={question} style={stack(2)}>
+      <TickRow role="radio" label={yes} checked={value === true} onChange={() => onPick(true)} />
+      <TickRow role="radio" label={no} checked={value === false} onChange={() => onPick(false)} />
     </div>
   );
 }
@@ -182,6 +182,7 @@ export function ChoicesForm({ state, set, adult, drivingAsked, title = 'Your cho
       <Section label={adult ? 'Audio recording of my sessions' : 'Audio recording of athlete sessions'}>
         {adult ? <Body size={12}>Never parent/guardian sessions.</Body> : null}
         <AnswerPair
+          question={adult ? 'Audio recording of my sessions' : 'Audio recording of athlete sessions'}
           value={c.audio}
           yes={adult ? 'I consent' : 'I/We consent'}
           no={adult ? 'I do not consent' : 'I/We do not consent'}
@@ -192,7 +193,7 @@ export function ChoicesForm({ state, set, adult, drivingAsked, title = 'Your cho
       {adult ? (
         <Section label="Parent and joint sessions">
           <Body size={13} tone={color.text}>{PARENT_SESSIONS_LABEL}</Body>
-          <AnswerPair value={c.parentSessions} yes="I give permission" no="I do not give permission" onPick={(v) => set('choices.parentSessions', v)} />
+          <AnswerPair question="Parent and joint sessions" value={c.parentSessions} yes="I give permission" no="I do not give permission" onPick={(v) => set('choices.parentSessions', v)} />
           {c.parentSessions ? <Field label="Parent/guardian name" value={c.parentName} onChange={(v) => set('choices.parentName', v)} /> : null}
         </Section>
       ) : null}
@@ -267,7 +268,7 @@ export function AssentStep({ state, set, firstName, under13, answerOnly = false 
         </Card>
       )}
       <Section label="Audio recording of my sessions">
-        <AnswerPair value={a.audio} yes="I agree" no="I do not agree" onPick={(v) => set('assent.audio', v)} />
+        <AnswerPair question="Audio recording of my sessions" value={a.audio} yes="I agree" no="I do not agree" onPick={(v) => set('assent.audio', v)} />
       </Section>
       <Card large>
         {answerOnly ? null : (

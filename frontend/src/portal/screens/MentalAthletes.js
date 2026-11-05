@@ -120,14 +120,16 @@ const chip = (on) => ({
   font: `600 12px ${font.body}`, color: on ? color.secondary : color.textSecondary,
 });
 
-/** One athlete, a tap target named by the athlete; the trailing column is the intake and the consent status. */
+/** One athlete, a tap target named by the athlete and described by its consent status; the trailing column is the intake and the consent status. */
 function MentalAthleteRow({ row, divider, open }) {
   const consent = row.consentStatus ? STAFF_STATUS_LABEL[row.consentStatus] : null;
+  const consentId = consent ? `consent-${row.athleteId}` : undefined;
   return (
     <div
       role="button"
       tabIndex={0}
       aria-label={row.name}
+      aria-describedby={consentId}
       onClick={() => open(row.athleteId)}
       onKeyDown={(e) => {
         if (e.key === 'Enter' || e.key === ' ') {
@@ -151,7 +153,9 @@ function MentalAthleteRow({ row, divider, open }) {
               <Body size={11} tone={color.textTertiary}>No intake</Body>
             )}
             {consent ? (
-              <Body size={11} tone={row.consentStatus === 'signed' ? color.textTertiary : color.secondary} style={{ marginTop: 2 }}>{consent}</Body>
+              <div id={consentId}>
+                <Body size={11} tone={row.consentStatus === 'signed' ? color.textTertiary : color.secondary} style={{ marginTop: 2 }}>{consent}</Body>
+              </div>
             ) : null}
           </div>
         }

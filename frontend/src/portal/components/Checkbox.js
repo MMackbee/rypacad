@@ -2,12 +2,12 @@ import React from 'react';
 import { color, radius } from '../tokens';
 import { Tick } from './Primitives';
 
-/** The round tick: the consent cards, the facility add-on (RegistrationFacility.js) and the research opt-in. */
-export default function Checkbox({ checked, onChange, label }) {
+/** The round tick: the consent cards, the facility add-on (RegistrationFacility.js) and the research opt-in. `role` 'radio' for one of a pair that answers one question. */
+export default function Checkbox({ checked, onChange, label, role = 'checkbox' }) {
   return (
     <button
       type="button"
-      role="checkbox"
+      role={role}
       aria-checked={Boolean(checked)}
       aria-label={label}
       onClick={() => onChange(!checked)}

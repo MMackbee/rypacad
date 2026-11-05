@@ -16,7 +16,7 @@ export default function ConsentBookingLine({ line }) {
           <button
             type="button"
             onClick={() => navigate(line.href)}
-            style={{ background: 'none', border: 'none', padding: '12px 4px', margin: '-12px -4px', font: `600 11px ${font.body}`, color: color.primary, cursor: 'pointer' }}
+            style={{ background: 'none', border: 'none', padding: '16px 6px', margin: '-16px -6px', font: `600 11px ${font.body}`, color: color.primary, cursor: 'pointer' }}
           >
             {rest.join(' · ')}
           </button>

@@ -113,6 +113,8 @@ test.each([
   ['athlete (minor), signed, both audios yes', row({ viewer: 'athlete', ...signedMinor }), 'Signed Oct 30 · Your parent manages this · Recording: yes', 'Stop recording'],
   ['athlete (minor), signed, assent.audio false', row({ viewer: 'athlete', status: 'signed', record: minorRecord({ assent: { ...minorRecord().assent, audio: false } }) }),
     'Signed Oct 30 · Your parent manages this · Recording: no', null],
+  ['athlete (minor), signed, the parent said no and the own answer is yes', row({ viewer: 'athlete', status: 'signed', record: minorRecord({ choices: { ...minorRecord().choices, audio: false } }) }),
+    'Signed Oct 30 · Your parent manages this · Recording: no (your parent said no)', 'Stop recording'],
   ['athlete 18+, unsigned', maxRow({ viewer: 'athlete', claimedLogin: true }), 'Not signed', 'Sign now'],
   ['athlete 18+, needs-adult', maxRow({ viewer: 'athlete', claimedLogin: true, status: 'needs-adult', record: minorRecord() }), 'Needs your 18+ signature', 'Sign now'],
   ['athlete 18+, signed', maxRow({ viewer: 'athlete', claimedLogin: true, status: 'signed', record: adultRecord() }), 'Signed Oct 30', 'Change choices'],
@@ -149,6 +151,13 @@ test('homeCardFor: the first signable athlete with a confirmed 1:1 ahead', () =>
     athleteId: 'max', text: "Sign Yannick's consent for Max before the session on Thu, Nov 12", href: '/portal/consent/mental/max' });
   expect(homeCardFor([needsAdultMax({ claimedLogin: true, nextMental: { date: '2026-11-12' } })])).toBeNull();
   expect(homeCardFor(undefined)).toBeNull();
+});
+
+test('homeCardFor: the soonest 1:1 wins, not the first name', () => {
+  const ava = row({ nextMental: { date: '2026-11-26', attendee: 'athlete' } });
+  const zed = row({ athleteId: 'zed', name: 'Zed Test', firstName: 'Zed', nextMental: { date: '2026-11-06', attendee: 'athlete' } });
+  expect(homeCardFor([ava, zed]).athleteId).toBe('zed');
+  expect(homeCardFor([zed, ava]).athleteId).toBe('zed');
 });
 
 test('bookingLineFor', () => {

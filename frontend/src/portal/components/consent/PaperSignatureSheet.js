@@ -3,8 +3,9 @@ import { color, font, radius, tint } from '../../tokens';
 import Button from '../Button';
 import Field from '../Field';
 import { Body, ScreenTitle, SectionLabel } from '../Primitives';
-import { CONSENT_VERSION, LOCATION_SHORT, msOf, paperDateToStamp } from '../../data/mentalConsent';
+import { CONSENT_VERSION, LOCATION_SHORT, msOf, paperDateToStamp, utcTodayISO } from '../../data/mentalConsent';
 import { academyClock, academyDateISO } from '../../data/calendar';
+import { isAdultOnDate } from '../../data/signup';
 
 const FIRST_DATE = '2026-01-01';
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
@@ -50,11 +51,18 @@ function initial({ mode, record, resign }) {
   };
 }
 
-/** The button's reason while the form cannot be saved (null: plain Save, disabled). */
-function check(v) {
+/**
+ * The button's reason while the form cannot be saved (null: plain Save, disabled). Each refusal is one
+ * firestore.rules would make: the version is a date, the emergency contact has a name and a mobile or
+ * neither, section 11's parent sessions yes names the parent, and section 11 needs an athlete of 18+.
+ */
+function check(v, elevenBlocked) {
   const today = academyDateISO();
   if (!DATE_RE.test(v.date) || v.date < FIRST_DATE || v.date > today || !paperDateToStamp(v.date)) return { ok: false, reason: 'Use the date on the paper form' };
-  if (!v.section || !v.signerName.trim() || (v.section === '10' && !v.assentName.trim())) return { ok: false, reason: null };
+  if (!v.section || (v.section === '11' && elevenBlocked) || !v.signerName.trim() || (v.section === '10' && !v.assentName.trim())) return { ok: false, reason: null };
+  if (!DATE_RE.test(v.version.trim() || CONSENT_VERSION)) return { ok: false, reason: 'Version is a date, like 2026-10-30' };
+  if (Boolean(orNull(v.ecName)) !== Boolean(orNull(v.ecPhone))) return { ok: false, reason: 'Emergency contact needs a name and a mobile, or neither' };
+  if (v.section === '11' && v.parentSessions === true && !orNull(v.parentName)) return { ok: false, reason: 'Add the parent/guardian name' };
   return { ok: true, reason: null };
 }
 
@@ -65,9 +73,11 @@ function check(v) {
  * answer, or 11), the version, the signer and the choices as far as the
  * paper shows them - blanks are null. `mode 'correct'` (owner only, a paper
  * record) starts from the record; a withdrawn recording answer cannot be
- * turned back on here. A new record on an athlete's minor-era record is the
- * section 11 re-sign. `onSave(input)`, `input = { signedAt, section,
- * version, signerName, assentName, assentAudio, choices }`.
+ * turned back on here, and a withdrawn record stays section 10. Section 11
+ * is never offered for an athlete under 18 today (UTC). A new record on an
+ * athlete's minor-era record is the section 11 re-sign. `onSave(input)`,
+ * `input = { signedAt, section, version, signerName, assentName,
+ * assentAudio, choices }`.
  */
 export default function PaperSignatureSheet({ open, athlete, record = null, mode = 'record', onSave, onClose, saving = false, error = null }) {
   const resign = mode === 'record' && Boolean(record);
@@ -78,8 +88,12 @@ export default function PaperSignatureSheet({ open, athlete, record = null, mode
   const adult = v.section === '11';
   const minorSection = v.section === '10';
   const withdrawn = Boolean(record?.assent?.withdrawnBy);
-  const { ok, reason } = check(v);
   const first = String(athlete?.name || '').trim().split(/\s+/)[0] || 'the athlete';
+  const under18 = typeof athlete?.dob === 'string' && DATE_RE.test(athlete.dob) && !isAdultOnDate(athlete.dob, utcTodayISO());
+  const keepTen = mode === 'correct' && withdrawn;
+  const elevenBlocked = under18 || keepTen;
+  const elevenNote = under18 ? `${first} is under 18, so the form is section 10.` : keepTen ? `${first} withdrew the recording answer, so this record stays section 10.` : null;
+  const { ok, reason } = check(v, elevenBlocked);
 
   const save = () => onSave({
     signedAt: paperDateToStamp(v.date), section: v.section, version: v.version.trim() || CONSENT_VERSION, signerName: v.signerName.trim(),
@@ -98,10 +112,13 @@ export default function PaperSignatureSheet({ open, athlete, record = null, mode
         <Body size={12}>Type what the paper form shows; leave out what it does not.</Body>
         <Field label="Date signed" type="date" value={v.date} onChange={set('date')} />
         {resign ? <Body size={12}>{`${first} is 18 now: this records section 11, the 18+ signature.`}</Body> : (
-          <div style={row}>
-            <Pick label="Section 10" on={v.section === '10'} onClick={() => set('section')('10')} />
-            <Pick label="Section 11" on={v.section === '11'} onClick={() => set('section')('11')} />
-          </div>
+          <>
+            <div style={row}>
+              <Pick label="Section 10" on={v.section === '10'} onClick={() => set('section')('10')} />
+              <Pick label="Section 11" on={v.section === '11'} disabled={elevenBlocked} onClick={() => set('section')('11')} />
+            </div>
+            {elevenNote ? <Body size={11}>{elevenNote}</Body> : null}
+          </>
         )}
         <Field label="Version" value={v.version} onChange={set('version')} hint="The version printed on the form." />
         <Field label="Signer's name" value={v.signerName} onChange={set('signerName')} hint={adult ? "The athlete's name, 18 or older." : "The parent's name as written."} />

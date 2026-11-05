@@ -118,10 +118,15 @@ function correctedAssent(stored, input, signedAt) {
   return { name, audio, at: signedAt, readAloud: stored?.readAloud ?? false, withdrawnBy: null };
 }
 
-/** The owner's correction of a paper record (dates, names, section, version); the old values go to history. */
+/**
+ * The owner's correction of a paper record (dates, names, section, version); the old values go to history.
+ * A withdrawn record stays section 10 with its stored assent (firestore.rules mcPaperCorrection): section 11
+ * would drop the assent, and a later correction could then write a fresh one.
+ */
 export function paperCorrection({
-  current, uid, signedAt = current.signedAt, version = current.version, adult = current.adult === true, signerName = current.signer?.name, choices, assent, stamp,
+  current, uid, signedAt = current.signedAt, version = current.version, adult: asked = current.adult === true, signerName = current.signer?.name, choices, assent, stamp,
 }) {
+  const adult = current.assent?.withdrawnBy ? false : asked;
   return {
     signedAt,
     signer: { role: adult ? 'athlete' : 'parent', name: clean(signerName, NAME_MAX) },

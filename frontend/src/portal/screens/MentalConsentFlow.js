@@ -25,7 +25,7 @@ function Frame({ bare, onBack, progress, footer, children }) {
   const header = (
     <div style={{ padding: '14px 20px 6px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', minHeight: 44 }}>
       {onBack ? <BackLink onClick={onBack}>Back</BackLink> : <span />}
-      {progress ? <span style={progressStyle}>{progress}</span> : null}
+      {progress ? <span aria-live="polite" style={progressStyle}>{progress}</span> : null}
     </div>
   );
   return (
@@ -59,11 +59,22 @@ function SignFlow({ bare, data, sign, saveDraft, exit, onDone, onBack }) {
   const [failed, setFailed] = useState(false);
   const [result, setResult] = useState(data.status === 'signed' ? { status: 'already', record: data.record } : null);
   const top = useRef(null);
+  const shown = useRef(false);
   const set = (path, value) => dispatch({ type: 'set', path, value });
   const adult = isAdultBranch(state.branch);
 
   useEffect(() => {
     top.current?.scrollIntoView?.({ block: 'start' });
+    // A new step (or the Done screen) takes the focus at its title, so a screen reader starts there; not on the first render.
+    if (!shown.current) {
+      shown.current = true;
+      return;
+    }
+    const title = top.current?.parentElement?.querySelector('h1');
+    if (title) {
+      title.setAttribute('tabindex', '-1');
+      title.focus({ preventScroll: true });
+    }
   }, [state.step, result]);
 
   if (result) {
@@ -183,6 +194,23 @@ function changeState(data, mode) {
 }
 
 /**
+ * Why Change choices cannot save yet, as the pinned button says it (null: plain Save), top to bottom. A paper
+ * record may have no location, and an athlete who turned 16 after signing now owes the driving answer; the
+ * rules need both on every family change (canContinue's 'choices' check, which has no words of its own).
+ */
+function changeMissing({ state, adult, contactReason, needsConfirm, confirmName, confirmLabel }) {
+  const c = state.choices;
+  if (c.location == null) return 'Choose a location';
+  if (!adult && state.drivingAsked && typeof c.driving !== 'boolean') return 'Answer the driving question';
+  if (typeof c.audio !== 'boolean') return 'Answer the recording question';
+  if (adult && typeof c.parentSessions !== 'boolean') return 'Answer the parent sessions question';
+  if (adult && c.parentSessions && !String(c.parentName || '').trim()) return 'Add the parent/guardian name';
+  if (contactReason) return contactReason;
+  if (needsConfirm && !confirmName.trim()) return confirmLabel;
+  return null;
+}
+
+/**
  * Change choices (spec 4.3, plan Task 12): the choices alone, prefilled;
  * the signature is never re-done. An adult record's recording, contact or
  * parent-session change needs the athlete's typed name; a minor's own
@@ -204,9 +232,12 @@ function ChangeChoices({ bare, data, mode, change, exit, onDone, onBack }) {
 
   const contactCheck = canContinue({ ...state, step: 'who' });
   const choicesCheck = canContinue({ ...state, step: 'choices' });
-  let ok = contactCheck.ok && choicesCheck.ok && (!needsConfirm || confirmName.trim() !== '');
+  // The hand-over hides the parent's form, so it waits for the form to be complete.
+  const ready = contactCheck.ok && choicesCheck.ok;
+  let ok = ready && (!needsConfirm || confirmName.trim() !== '');
   if (athletePart) ok = ok && typeof state.assent.audio === 'boolean' && state.assent.name.trim() !== '';
-  const reason = contactCheck.reason ?? choicesCheck.reason;
+  const confirmLabel = data.viewer === 'athlete' ? 'Type your name to confirm' : `${first} types their name to confirm`;
+  const reason = changeMissing({ state, adult, contactReason: contactCheck.reason, needsConfirm, confirmName, confirmLabel });
 
   const save = async () => {
     const edits = { choices };
@@ -246,14 +277,17 @@ function ChangeChoices({ bare, data, mode, change, exit, onDone, onBack }) {
           <ContactFields contact={state.contact} set={set} minor={!adult} />
           {needsConfirm ? (
             <Field
-              label={`${first} types their name to confirm`}
+              label={confirmLabel}
               value={confirmName}
               onChange={(v) => setConfirmName(v.slice(0, 120))}
               hint="Recording, the emergency contact and parent sessions are the athlete's own decisions."
             />
           ) : null}
           {mode === 'minor' && data.viewer === 'parent' ? (
-            <Button variant="outline" height={48} onClick={() => setAthletePart(true)} style={{ boxShadow: 'none' }}>{`Change ${first}'s own answer`}</Button>
+            <>
+              <Button variant="outline" height={48} disabled={!ready} onClick={() => setAthletePart(true)} style={{ boxShadow: 'none' }}>{`Change ${first}'s own answer`}</Button>
+              {ready ? null : <Body size={12}>{`Finish the choices above before handing the phone to ${first}.`}</Body>}
+            </>
           ) : null}
           <Body size={12}>The signature stays as it is; the old choices are kept in the record's history.</Body>
         </>

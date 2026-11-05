@@ -94,6 +94,7 @@ export default function MentalConsent({ bare = false, autoOpen = true, onOpen, d
           text="Stop recording? Yannick won't record your sessions until your parent changes it with you."
           confirmLabel="Yes, stop recording"
           cancelLabel="Keep it"
+          cancelFirst
           busy={withdrawing.busy}
           error={withdrawing.error}
           onConfirm={confirmWithdraw}
