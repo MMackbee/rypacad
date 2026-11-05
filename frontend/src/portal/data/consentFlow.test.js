@@ -96,7 +96,7 @@ test('assent: the answer, the tick and a name (soft-checked)', () => {
   expect(canContinue(go(at(minor(), 'assent'), set('assent.audio', true), set('assent.name', 'Ava'))).ok).toBe(false);
   expect(nameMatches('ava test', 'Ava')).toBe(true);
   expect(nameMatches('Bob', 'Ava')).toBe(false);
-  expect(nameMatches('Zoë', 'Zoe')).toBe(true);
+  expect(nameMatches('\u00c1va', 'Ava')).toBe(true); // accents ignored
   expect(nameMatches('', 'Ava')).toBe(false);
 });
 
