@@ -14,7 +14,7 @@ import { academyDateISO } from '../data/calendar';
 
 const CONSENT_TONE = { yes: 'green', no: 'muted', unanswered: 'yellow' };
 /** Shown under an athlete whose family has not answered the research question. */
-export const UNANSWERED_NOTE = 'No research answer yet: results from a test before a yes stay out of research';
+export const UNANSWERED_NOTE = "Tests before a family's yes stay out of research";
 const COLUMNS = '44px 2fr 1.4fr 1.6fr 1fr';
 
 /**
@@ -128,8 +128,9 @@ function Row({ row, layout, staff, selected, full, onToggle, onOpen }) {
   const consent = <StatusBadge tone={CONSENT_TONE[row.consent]}>{CONSENT_LABEL[row.consent]}</StatusBadge>;
   const dueText = <span style={{ font: `500 12px ${font.body}`, color: row.due.kind ? color.secondary : color.textTertiary }}>{row.due.label}{since ? ` · since ${shortDate(since)}` : ''}</span>;
   const lastText = <span style={{ font: `400 12px ${font.body}`, color: color.textTertiary }}>{last}</span>;
-  const select = staff ? <SelectBox checked={selected} disabled={disabled} label={`Select ${row.name}`} onClick={() => onToggle(row)} /> : <span />;
-  const note = row.consent === 'unanswered' ? <Body size={11} tone={color.secondary}>{UNANSWERED_NOTE}</Body> : null;
+  const noteId = row.consent === 'unanswered' ? `research-note-${row.athleteId}` : null;
+  const select = staff ? <SelectBox checked={selected} disabled={disabled} label={`Select ${row.name}`} describedBy={noteId} onClick={() => onToggle(row)} /> : <span />;
+  const note = noteId ? <Body size={11} tone={color.secondary}><span id={noteId}>{UNANSWERED_NOTE}</span></Body> : null;
   if (layout === 'phone') {
     return (
       <div style={{ display: 'flex', gap: 12, padding: '11px 0', borderBottom: `1px solid ${color.rowRule}` }}>
@@ -153,13 +154,14 @@ function Row({ row, layout, staff, selected, full, onToggle, onOpen }) {
   );
 }
 
-function SelectBox({ checked, disabled, label, onClick }) {
+function SelectBox({ checked, disabled, label, describedBy = null, onClick }) {
   return (
     <button
       type="button"
       role="checkbox"
       aria-checked={checked}
       aria-label={label}
+      aria-describedby={describedBy || undefined}
       disabled={disabled}
       onClick={onClick}
       style={{ width: 44, height: 44, flex: 'none', border: 'none', background: 'transparent', padding: 0, display: 'grid', placeItems: 'center', cursor: disabled ? 'default' : 'pointer', opacity: disabled && !checked ? 0.35 : 1 }}

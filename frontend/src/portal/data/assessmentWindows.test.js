@@ -110,6 +110,25 @@ describe('circuit dates and wave ids', () => {
   });
 });
 
+test('a window created before the yes stays out even when a retest moves its circuit date (review 2026-11-05)', () => {
+  const yes = { value: true, assent: true, recordedAt: '2026-11-06T15:00:00Z' };
+  // First test Nov 5 while unanswered; yes on Nov 6; retest wave on Nov 9 moves circuitDate.
+  expect(inResearch(yes, '2026-11-09', '2026-11-05T21:00:00Z')).toBe(false);
+  // Same day: a 4 PM test, a yes at 8 PM (Chicago) - the date rule alone would count it.
+  const evening = { value: true, assent: true, recordedAt: '2026-11-06T02:00:00Z' };
+  expect(inResearch(evening, '2026-11-05')).toBe(true);
+  expect(inResearch(evening, '2026-11-05', '2026-11-05T22:00:00Z')).toBe(false);
+  // Created after the yes: counts.
+  expect(inResearch(yes, '2026-11-09', '2026-11-09T21:00:00Z')).toBe(true);
+  expect(inResearch(yes, '2026-11-09', { toDate: () => new Date('2026-11-09T21:00:00Z') })).toBe(true);
+  // A no in force at creation keeps it out even after a later yes.
+  const flipped = { value: true, assent: true, recordedAt: '2026-11-07T15:00:00Z', history: [{ value: false, assent: false, recordedAt: '2026-10-15T15:00:00Z' }] };
+  expect(inResearch(flipped, '2026-11-09', '2026-11-05T21:00:00Z')).toBe(false);
+  // An unreadable createdAt falls back to the date rule.
+  expect(inResearch(yes, '2026-11-09', null)).toBe(true);
+  expect(inResearch(yes, '2026-11-09', 'not a date')).toBe(true);
+});
+
 test('research counts by the answer in force on the circuit date: a later no keeps the yes before it', () => {
   const changed = { value: false, assent: false, recordedAt: '2026-11-10T15:00:00Z', history: [{ value: true, assent: true, recordedAt: '2026-10-15T15:00:00Z' }] };
   expect(inResearch(changed, '2026-11-03')).toBe(true);

@@ -208,7 +208,7 @@ export function buildResults({ athleteId, athlete, profile, windows, settings, t
       mcgillDue,
       missing: missingOf(w, scores, mcgillDue),
       openDays: w.status === 'open' && today ? daysBetween(w.circuitDate, today) : null,
-      inResearch: inResearch(research, w.circuitDate),
+      inResearch: inResearch(research, w.circuitDate, w.createdAt ?? null),
       window: w,
     };
   });

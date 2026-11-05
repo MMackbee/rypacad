@@ -645,7 +645,7 @@ function buildDocs(portal) {
 
   // Assessments (2026-10-14 spec): jordan tested at baseline nine weeks ago
   // (mid-season eligible), reese said no to research (baseline due), nico's
-  // family has not answered (the list cannot add him, and Dana's one-time
+  // family has not answered (the list can add him, out of research, and Dana's one-time
   // confirm asks at sign-in), sage-parker said yes (baseline due). Every doc
   // comes from scripts/lib/assessment-fixtures.mjs; the consents land on the
   // athlete docs, the windows and profiles in their subcollections.
