@@ -43,6 +43,9 @@ test('own login asks for a child email, shows the U13 helper, rejects the guardi
 test('the medical box is 16px so iPhones do not zoom in on focus', async () => {
   const r = await renderScreen(<Harness athlete={{ name: 'Nico', dob: '2017-05-05' }} />);
   expect(r.container.querySelector('textarea').style.fontSize).toBe('16px');
+  // Owner 2026-11-05: says who really reads it (rules private/medical), not 'live sessions only'.
+  expect(r.text()).toContain("Seen only by the academy director, the mental performance coach and the athlete's assigned coach.");
+  expect(r.text()).not.toMatch(/live sessions only|Not shown in admin views/);
   await r.unmount();
 });
 
