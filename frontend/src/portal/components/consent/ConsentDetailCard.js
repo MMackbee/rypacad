@@ -1,6 +1,7 @@
 import React from 'react';
 import { Card } from '../Primitives';
 import ConsentLine from './ConsentLine';
+import StaffConsentDetail from './StaffConsentDetail';
 import { useFamilyConsents } from '../../hooks/mentalConsent';
 
 /** The parent's view on the athlete page: the row's line, from the household's own read. */
@@ -20,10 +21,12 @@ function FamilyConsentDetail({ athleteId }) {
  * switch that calls no hook itself, so a role that resolves after the first
  * render remounts the right branch instead of changing the hook order.
  * Parent -> the family line; ops and owner -> the staff status and paper
- * signatures (Task 15); every other role (coach, mental) -> nothing.
+ * signatures (StaffConsentDetail); every other role (coach, mental) ->
+ * nothing.
  * `demoPaperOpen` is the review harness's (seed only).
  */
-export default function ConsentDetailCard({ athleteId, role }) {
+export default function ConsentDetailCard({ athleteId, role, demoPaperOpen = false }) {
   if (role === 'parent') return <FamilyConsentDetail key="parent" athleteId={athleteId} />;
+  if (role === 'ops' || role === 'owner') return <StaffConsentDetail key="staff" athleteId={athleteId} role={role} demoPaperOpen={demoPaperOpen} />;
   return null;
 }

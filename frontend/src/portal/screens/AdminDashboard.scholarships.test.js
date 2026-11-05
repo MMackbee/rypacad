@@ -16,6 +16,7 @@ jest.mock('../hooks', () => ({
   useScholarships: () => { mockScholarshipReads += 1; return mockScholarships; },
 }));
 jest.mock('../hooks/billing', () => ({ useHouseholdsDirectory: () => ({ data: [], loading: false, error: null }) }));
+jest.mock('../hooks/mentalConsentStaff', () => ({ useConsentTracker: () => ({ data: [], loading: false, error: null }) }));
 
 beforeEach(() => {
   mockScholarshipReads = 0;
