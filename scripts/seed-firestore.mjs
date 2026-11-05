@@ -138,6 +138,7 @@
  *                  consents true.
  *   loginInvites / calendlyEvents — Sprint 20: one open child-login invite (reese) and one Calendly-sourced Yannick session + booking + ledger row (see the cal- block below).
  *   mentalNotes / contractCheckins / config — mental tools (2026-10-28): two past attended Calendly 1:1s for jordan with an intake and two session notes, two check-ins, config/contract on since 21 days back (reese is due for a check-in), nico's 10-minute logs (see the "Mental tools" blocks below).
+ *   mentalConsents / config — mental consent (2026-10-30, scripts/lib/consent-fixtures.mjs): jordan signed as a minor and countersigned, the new 18+ athlete quinn-parker signed section 11 on parent-sam's phone, reese and nico unsigned, config/mentalConsent off.
  *   staffInvites — ONE pending invite (contract v1.8, Sprint 10 pin E) at a
  *                  clearly-fake address (`invite-test@example.com`), role
  *                  coach, specialistId null — provision-family.mjs is what
@@ -175,6 +176,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { bundleFrontend, fwdPath } from './lib/bundle-frontend.mjs';
 import { assessmentFixtures } from './lib/assessment-fixtures.mjs';
+import { consentFixtures } from './lib/consent-fixtures.mjs';
 
 const DRY_RUN = process.argv.includes('--dry-run');
 const PROJECT_ID = 'rypacad';
@@ -1167,6 +1169,11 @@ function buildDocs(portal) {
   const contractEnabledAt = new Date(today);
   contractEnabledAt.setDate(contractEnabledAt.getDate() - 21);
   const config = new Map([['contract', { enabled: true, enabledAt: isoDate(contractEnabledAt) }]]);
+  // Mental consent (2026-10-30): jordan's minor record and the 18+ Parker
+  // sibling quinn-parker's section 11 record, config/mentalConsent off.
+  const consent = consentFixtures({ now: today });
+  for (const [id, doc] of consent.athletes) athletes.set(id, doc);
+  config.set(...consent.config);
 
   // users — one per portal role, ALL SIX (the QA test-account suite,
   // TEAM.md "QA testing": window.__rypTestAuth.signInAs(<doc id>) signs in
@@ -1627,6 +1634,7 @@ function buildDocs(portal) {
     'mentalNotes/jordan/entries': mentalEntries,
     contractCheckins,
     config,
+    mentalConsents: consent.mentalConsents,
     ...assessment.collections,
   };
 }
@@ -1916,6 +1924,18 @@ async function main() {
     const nicoLogs = [...collections.contractLogs.keys()].filter((k) => k.startsWith('nico_'));
     console.log(`  contractLogs nico: ${nicoLogs.length} weekday logs at 10 min (${nicoLogs[0] ?? 'none'} .. ${nicoLogs[nicoLogs.length - 1] ?? 'none'})`);
     console.log(`  users/mental: email=${collections.users.get('mental').email}`);
+  }
+
+  {
+    const mc = collections.mentalConsents;
+    const j = mc.get('jordan');
+    const q = mc.get('quinn-parker');
+    const signed = (r) => (r ? `signed (${r.adult ? '18+' : 'minor'}${r.countersign ? ', countersigned' : ''})` : 'unsigned');
+    const unsigned = ['reese', 'nico'].filter((id) => !mc.has(id)).join(' and ');
+    console.log(
+      `\nMental consent: jordan ${signed(j)}, quinn-parker ${signed(q)}, ${unsigned} unsigned; ` +
+        `notices ${collections.config.get('mentalConsent')?.notices ? 'on' : 'off'}`
+    );
   }
 
   console.log('\nAssessments (2026-10-14): research answers, windows, profiles:');
