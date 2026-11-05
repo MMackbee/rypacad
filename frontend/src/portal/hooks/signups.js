@@ -73,11 +73,34 @@ export async function fetchUnresolvedCalendlyEvents() {
   }
 }
 
+/**
+ * Review 2026-11-04: the cancel rows. An unmatched booking's created row
+ * stays 'unresolved' after the family cancels or moves it on Calendly; its
+ * `<inviteeUuid>_invitee.canceled` row is what takes it off the report.
+ */
+export async function fetchCanceledCalendlyEvents() {
+  try {
+    return rowsOf(await getDocs(query(collection(db, 'calendlyEvents'), where('event', '==', 'invitee.canceled'))));
+  } catch (err) {
+    throw wrap(err, 'fetchCanceledCalendlyEvents');
+  }
+}
+
+/** The held unmatched sessions (`unresolved: true`): one released in the app, or by a move, leaves the report too. */
+export async function fetchHeldCalendlySessions() {
+  try {
+    return rowsOf(await getDocs(query(collection(db, 'sessions'), where('unresolved', '==', true))));
+  } catch (err) {
+    throw wrap(err, 'fetchHeldCalendlySessions');
+  }
+}
+
 async function liveSignups() {
-  const [households, athletes, invites, flaggedBookings, calendlyEvents] = await Promise.all([
-    fetchSignupHouseholds(), fetchAllAthletes(), fetchLoginInvites(), fetchFlaggedBookings(), fetchUnresolvedCalendlyEvents(),
+  const [households, athletes, invites, flaggedBookings, calendlyEvents, calendlyCanceled, heldSessions] = await Promise.all([
+    fetchSignupHouseholds(), fetchAllAthletes(), fetchLoginInvites(), fetchFlaggedBookings(), fetchUnresolvedCalendlyEvents(), fetchCanceledCalendlyEvents(),
+    fetchHeldCalendlySessions(),
   ]);
-  return buildSignupRows({ households, athletes, invites, flaggedBookings, calendlyEvents, now: new Date() });
+  return buildSignupRows({ households, athletes, invites, flaggedBookings, calendlyEvents, calendlyCanceled, heldSessions, now: new Date() });
 }
 
 const EMPTY = { rows: [], counts: { all: 0, unpaid: 0, flagged: 0, unresolved: 0 }, unresolved: [] };

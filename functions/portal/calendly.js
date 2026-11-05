@@ -24,6 +24,13 @@
  * Yannick's list shows it and the ledger row carries who booked (`invitee`,
  * `slot`, `reason`) for the academy to link it with
  * scripts/calendly-unmatched.mjs; its cancellation releases the session.
+ *
+ * Other event types (owner ruling 2026-11-04: "that link is just for ryp
+ * sessions"): the subscription is user-scoped, so Yannick's private
+ * clients' event types and the website's free 15-minute info call arrive
+ * too. Only the RYP 1:1 (calendly-resolve.js isRypOneOnOne) looks up a
+ * family, books, holds or spends a token; another type is ledgered as
+ * `other-event` with its event name, type uri and time, never who booked.
  */
 'use strict';
 
@@ -35,7 +42,7 @@ const {verifyCalendlySignature} = require('./calendly-verify');
 const {CALENDLY_SECRETS} = require('./secrets');
 const resolve = require('./calendly-resolve');
 
-const {docOf, inviteeOf, resolveAthlete} = resolve;
+const {docOf, inviteeOf, isRypOneOnOne, resolveAthlete} = resolve;
 
 /**
  * Yannick's per-athlete monthly cadence. CHANGE ONE, CHANGE BOTH with
@@ -188,14 +195,40 @@ function cancelBooking(tx, store, booking) {
 }
 
 /**
- * `invitee.created` (spec 6.2 steps 1-4) inside the transaction. Every read
- * happens before the first write.
+ * `invitee.created` for another of Yannick's event types (owner ruling
+ * 2026-11-04: a private meeting, the info call): no family lookup, no
+ * session, no booking, no token. When it is the new half of a reschedule,
+ * the earlier half's booking or hold (the RYP 1:1, or a hold written before
+ * the rule) is still freed.
  * @param {!Object} tx The transaction.
- * @param {{store: !Object, nowDate: !Date, p: !Object, ledger: !Object}} c
- *     The call: Firestore, the clock, the payload, the ledger base row.
+ * @param {{store: !Object, p: !Object, ledger: !Object}} c The call.
+ * @return {!Promise<{outcome: string, flag: ?string}>} What was written.
+ */
+async function applyOther(tx, c) {
+  const {store, p} = c;
+  const oldHeld = p.old_invitee ?
+      await unresolvedSessionOf(tx, store, p.old_invitee) : null;
+  const old = p.old_invitee ? lib.rows(await tx.get(store
+      .collection('bookings')
+      .where('calendlyInviteeUri', '==', String(p.old_invitee))))
+      .filter((b) => b.status !== 'cancelled') : [];
+  for (const b of old) cancelBooking(tx, store, {id: b.id, data: b});
+  if (oldHeld) releaseSession(tx, store, oldHeld.id);
+  tx.set(c.ledger.ref, Object.assign(c.ledger.row, {outcome: 'other-event'}));
+  return {outcome: 'other-event', flag: null};
+}
+
+/**
+ * `invitee.created` (spec 6.2 steps 1-4) inside the transaction. Every read
+ * happens before the first write. Another event type goes to applyOther.
+ * @param {!Object} tx The transaction.
+ * @param {{store: !Object, nowDate: !Date, p: !Object, ledger: !Object,
+ *     other: boolean}} c The call: Firestore, the clock, the payload, the
+ *     ledger base row, whether it is another event type.
  * @return {!Promise<{outcome: string, flag: ?string}>} What was written.
  */
 async function applyCreated(tx, c) {
+  if (c.other) return applyOther(tx, c);
   const {store, nowDate, p} = c;
   const slot = slotOf(p);
   const found = slot ? await resolveAthlete(tx, store, p) :
@@ -303,8 +336,12 @@ async function applyCreated(tx, c) {
 
 /**
  * `invitee.canceled` (spec 6.2, last paragraph) inside the transaction.
+ * Another event type's cancel (owner ruling 2026-11-04) still frees a
+ * booking or hold written for its invitee before the rule existed;
+ * otherwise it is `other-event` and changes nothing.
  * @param {!Object} tx The transaction.
- * @param {{store: !Object, p: !Object, ledger: !Object}} c The call.
+ * @param {{store: !Object, p: !Object, ledger: !Object, other: boolean}} c
+ *     The call.
  * @return {!Promise<{outcome: string, flag: ?string}>} What was written.
  */
 async function applyCanceled(tx, c) {
@@ -323,12 +360,13 @@ async function applyCanceled(tx, c) {
     // 2026-11-04: the held unmatched session goes with its booking.
     releaseSession(tx, store, held.id);
     outcome = 'applied-unmatched';
+  } else if (c.other) {
+    outcome = 'other-event'; // owner ruling 2026-11-04: it held nothing
   }
-  tx.set(c.ledger.ref, Object.assign(c.ledger.row, {
-    athleteId: booking ? booking.data.athleteId || null : null,
-    householdId: booking ? booking.data.householdId || null : null,
-    outcome,
-  }));
+  tx.set(c.ledger.ref, Object.assign(c.ledger.row, booking ? {
+    athleteId: booking.data.athleteId || null,
+    householdId: booking.data.householdId || null,
+  } : {}, {outcome}));
   return {outcome, flag: null};
 }
 
@@ -347,18 +385,26 @@ async function handleCalendlyEvent(body, deps) {
   if (!EVENTS.includes(b.event)) return {outcome: 'ignored', flag: null};
   const inviteeUuid = uuidOf(p.uri);
   if (!inviteeUuid) return {outcome: 'malformed', flag: null};
+  // Owner ruling 2026-11-04: only the RYP 1:1 books, holds or keeps who
+  // booked. Every row names its event type, so the owner can later pin the
+  // RYP 1:1 by its uri; another type's row keeps nothing else.
+  const other = !isRypOneOnOne(p);
+  const ev = p.scheduled_event || {};
+  const base = {event: b.event, inviteeUri: p.uri, eventUri: p.event || null,
+    receivedAt: now(), outcome: null, slot: slotLedger(p),
+    eventName: ev.name ? String(ev.name) : null,
+    eventTypeUri: ev.event_type ? String(ev.event_type) : null};
   const ledger = {
     ref: store.collection('calendlyEvents').doc(`${inviteeUuid}_${b.event}`),
-    row: {event: b.event, inviteeUri: p.uri, eventUri: p.event || null,
-      athleteId: null, householdId: null, receivedAt: now(), outcome: null,
-      flag: null, invitee: inviteeOf(p), slot: slotLedger(p), via: null,
-      reason: null},
+    row: other ? Object.assign(base, {invitee: null}) : Object.assign(base, {
+      athleteId: null, householdId: null, flag: null, invitee: inviteeOf(p),
+      via: null, reason: null}),
   };
   const result = await store.runTransaction(async (tx) => {
     if ((await tx.get(ledger.ref)).exists) {
       return {outcome: 'duplicate', flag: null};
     }
-    const c = {store, nowDate, p, ledger};
+    const c = {store, nowDate, p, ledger, other};
     return b.event === 'invitee.created' ? applyCreated(tx, c) :
         applyCanceled(tx, c);
   });

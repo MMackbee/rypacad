@@ -63,11 +63,19 @@ function variant(name, n, over) {
   if ('athleteName' in o) p.questions_and_answers[0].answer = o.athleteName;
   if ('parentEmail' in o) p.questions_and_answers[2].answer = o.parentEmail;
   if (o.old) p.old_invitee = o.old;
+  // Owner ruling 2026-11-04: the event type's name (null drops it) and uri, the link's utm_source, a length other
+  // than 30 minutes, and the booking form's questions (another event type has its own form, no "Athlete name").
+  if ('name' in o) { if (o.name == null) delete p.scheduled_event.name; else p.scheduled_event.name = o.name; }
+  if (o.typeUri) p.scheduled_event.event_type = o.typeUri;
+  if ('source' in o) p.tracking.utm_source = o.source;
+  if (o.minutes) p.scheduled_event.end_time = new Date(Date.parse(p.scheduled_event.start_time) + o.minutes * 60000).toISOString();
+  if (o.qa) p.questions_and_answers = o.qa;
   return body;
 }
 /** The invitee uri variant n carries (for old_invitee). */
 const INV_URI = (n) => `https://api.calendly.com/scheduled_events/e0a1c3d5-7b9f-4a2c-8e6d-${String(n).padStart(12, '0')}/invitees/${INV(n)}`;
 const EVT = (n) => `cal-e0a1c3d5-7b9f-4a2c-8e6d-${String(n).padStart(12, '0')}`;
+const EVENT_URI = (n) => `https://api.calendly.com/scheduled_events/e0a1c3d5-7b9f-4a2c-8e6d-${String(n).padStart(12, '0')}`;
 const INV = (n) => `1a2b3c4d-5e6f-4a7b-8c9d-${String(n).padStart(12, '0')}`;
 const CLOCK = new Date('2026-10-14T15:00:00Z');
 const run = (body, now) => calendly.handleCalendlyEvent(body, {db, now: now || CLOCK});
@@ -100,6 +108,16 @@ async function seed() {
   // Rook: a household whose guardian email has NO users doc (2026-11-04 fallback).
   set('households', 'rook', {name: 'Rook family', periodAnchorDay: 1, guardian: {name: 'Rhea Rook', email: 'rhea@example.test', phone: null}});
   set('athletes', 'rae', {name: 'Rae Rook', householdId: 'rook', packageId: 't-6'});
+  // Review 2026-11-04: emails stored as the family typed them (mixed case), and staff logins with no family.
+  set('households', 'stone', {name: 'Stone family', periodAnchorDay: 1, guardian: {name: 'Jo Stone', email: 'Jo.Stone@Example.test', phone: null}});
+  set('athletes', 'tia', {name: 'Tia Stone', householdId: 'stone', packageId: 't-6'});
+  set('users', 'u-jo', {role: 'parent', householdId: 'stone', email: 'Jo.Stone@Example.test'});
+  set('households', 'vale', {name: 'Vale family', periodAnchorDay: 1, guardian: {name: 'Tess Vale', email: 'Tess.Vale@Example.test', phone: null}});
+  set('athletes', 'ivy', {name: 'Ivy Vale', householdId: 'vale', packageId: 't-6'});
+  set('users', 'u-ops', {role: 'ops', email: 'ops@example.test', athleteId: null, householdId: null});
+  set('households', 'hart', {name: 'Hart family', periodAnchorDay: 1, guardian: {name: 'Cal Hart', email: 'coach.hart@example.test', phone: null}});
+  set('athletes', 'hal', {name: 'Hal Hart', householdId: 'hart', packageId: 't-6'});
+  set('users', 'u-hart', {role: 'coach', email: 'coach.hart@example.test', athleteId: null, householdId: null});
   set('packages', 't-6', {name: '6 tokens', kind: 'tokens', tokens: 6, windowDays: 30});
   set('packages', 't-12', {name: '12 tokens', kind: 'tokens', tokens: 12, windowDays: 30});
   set('packages', 'elite', {name: 'Elite', kind: 'elite', tokens: null, windowDays: 45, access247: true});
@@ -201,6 +219,22 @@ async function main() {
   r = await run(variant('invitee-created', 18, {utm: 'femi', email: 'nina@example.test', athleteName: 'Lena', parentEmail: '', start: '2026-12-07T22:00:00Z'}));
   check("a forwarded link books the booker's own kid, never the link's", [r.outcome, await exists('bookings', `lena_${EVT(18)}`), await exists('bookings', `femi_${EVT(18)}`), (await get('calendlyEvents', `${INV(18)}_invitee.created`)).via], ['applied', true, false, 'household-name']);
 
+  log('\nSTEP E3  review 2026-11-04: emails stored in mixed case are matched as typed; a staff login never stops the search');
+  const via = async (n) => (await get('calendlyEvents', `${INV(n)}_invitee.created`)).via;
+  r = await run(variant('invitee-created', 19, {utm: null, email: 'Jo.Stone@Example.test', parentEmail: '', athleteName: '', start: '2026-12-08T22:00:00Z'}));
+  check('invitee email exactly as the users doc stores it (mixed case) -> the only kid', [r.outcome, await via(19), await exists('bookings', `tia_${EVT(19)}`)], ['applied', 'household', true]);
+  check('the ledger keeps the email lower-cased', (await get('calendlyEvents', `${INV(19)}_invitee.created`)).invitee.email, 'jo.stone@example.test');
+  r = await run(variant('invitee-created', 20, {utm: 'tia', email: 'Jo.Stone@Example.test', parentEmail: 'Jo.Stone@Example.test', athleteName: 'Tia Stone', start: '2027-01-05T22:00:00Z'}));
+  check("that family's own portal link (utm_content) is owned", [r.outcome, await via(20), await exists('bookings', `tia_${EVT(20)}`)], ['applied', 'utm', true]);
+  r = await run(variant('invitee-created', 21, {utm: null, email: 'grandma@example.test', parentEmail: 'Jo.Stone@Example.test', athleteName: '', start: '2027-02-02T22:00:00Z'}));
+  check('a mixed-case "Parent email" answer', [r.outcome, await via(21), await exists('bookings', `tia_${EVT(21)}`)], ['applied', 'household', true]);
+  r = await run(variant('invitee-created', 22, {utm: null, email: 'Tess.Vale@Example.test', parentEmail: '', athleteName: '', start: '2026-12-08T23:00:00Z'}));
+  check('no users doc, a mixed-case guardian email as stored -> its only kid', [r.outcome, await via(22), await exists('bookings', `ivy_${EVT(22)}`)], ['applied', 'household', true]);
+  r = await run(variant('invitee-created', 23, {utm: null, email: 'ops@example.test', parentEmail: 'kemi@example.test', athleteName: '', start: '2027-01-12T22:00:00Z'}));
+  check('a staff login as the invitee + a family\'s "Parent email" answer -> that family', [r.outcome, await via(23), await exists('bookings', `femi_${EVT(23)}`)], ['applied', 'household', true]);
+  r = await run(variant('invitee-created', 24, {utm: null, email: 'coach.hart@example.test', parentEmail: '', athleteName: '', start: '2026-12-09T22:00:00Z'}));
+  check('a staff login that is also a household guardian email -> that household', [r.outcome, await via(24), await exists('bookings', `hal_${EVT(24)}`)], ['applied', 'household', true]);
+
   log('\nSTEP F  resolved by email through a parent account, attendee parent');
   r = await run(variant('invitee-created', 5, {utm: null, email: 'Kemi@Example.test', attendee: 'Parent', start: '2026-10-20T21:00:00Z'}));
   check('outcome', r, {outcome: 'applied', flag: null});
@@ -226,6 +260,110 @@ async function main() {
   check('utm_content the invitee does not own -> unresolved, nothing booked on femi (review 2026-09-28)', [r.outcome, (await get('calendlyEvents', `${INV(12)}_invitee.created`)).reason, await exists('bookings', `femi_${EVT(12)}`)], ['unresolved', 'utm-not-owned', false]);
   check('ignored event type', await run({event: 'routing_form_submission.created', payload: {uri: 'x'}}), {outcome: 'ignored', flag: null});
   check('malformed (no invitee uri)', await run({event: 'invitee.created', payload: {}}), {outcome: 'malformed', flag: null});
+
+  log("\nSTEP I  owner ruling 2026-11-04: only the RYP 1:1 books, holds or keeps who booked; Yannick's other event types are other-event");
+  const {inviteeOf, isRypOneOnOne} = require('../portal/calendly-resolve.js');
+  const RYP_TYPE = 'https://api.calendly.com/event_types/7d8e9f0a-1b2c-4d3e-9f4a-5b6c7d8e9f0a';
+  const OTHER_TYPE = 'https://api.calendly.com/event_types/0f1e2d3c-4b5a-4968-8776-655443322110';
+  // Another event type: its own form (no "Athlete name" question), Yannick's own link (no portal utm_source).
+  const OTHER_QA = [{question: 'Anything I should know before we talk?', answer: 'Thinking about joining', position: 0}];
+  // Yannick's live RYP 1:1 form (Calendly booking page, read 2026-11-04, review of 6f6bf91): one required combined
+  // question plus optional notes. The fixtures keep the planned three-question form (SPRINT-20-LAUNCH.md), whose
+  // "Parent email" answer the lookup still reads should Yannick add that question.
+  const LIVE_QA = [{question: "What is the athlete's name, and who is attending?", answer: 'Addie Schinka, parent', position: 0},
+    {question: 'Please share anything that will help prepare for our meeting.', answer: '', position: 1}];
+  const other = (name, minutes) => ({utm: null, source: null, name, minutes, typeUri: OTHER_TYPE, qa: OTHER_QA});
+  // An other-event row keeps only these fields (no who-booked, no family).
+  const OTHER_KEYS = ['event', 'eventName', 'eventTypeUri', 'eventUri', 'invitee', 'inviteeUri', 'outcome', 'receivedAt', 'slot'];
+  const sizes = async () => [(await db.collection('sessions').get()).size, (await db.collection('bookings').get()).size];
+  const ledgerOf = (n, ev) => get('calendlyEvents', `${INV(n)}_invitee.${ev || 'created'}`);
+  const P = (name, source, qa) => ({scheduled_event: {name}, tracking: {utm_source: source}, questions_and_answers: qa});
+  check('the rule in process: portal or link-script source, a "Mental Game" name, the "Athlete name" question (and the live form\'s combined one), no name -> RYP; else not (the live notes question alone is not enough)',
+      [isRypOneOnOne(P('RYP Academy - Mental Game 1:1', null, [])), isRypOneOnOne(P('mental game check-in', null, [])),
+        isRypOneOnOne(P('Something Else', 'ryp-portal', [])), isRypOneOnOne(P('Something Else', 'ryp-link-script', [])),
+        isRypOneOnOne(P('Something Else', null, [{question: 'Athlete name'}])), isRypOneOnOne(P('Something Else', null, LIVE_QA)),
+        isRypOneOnOne(P('', null, [])), isRypOneOnOne({}),
+        isRypOneOnOne(P('15 Minute Info Call', null, OTHER_QA)), isRypOneOnOne(P('Private Session', 'google', null)), isRypOneOnOne(P('Mental health chat', null, [])),
+        isRypOneOnOne(P('Something Else', null, [LIVE_QA[1]]))],
+      [true, true, true, true, true, true, true, true, false, false, false, false]);
+  check('the live form\'s one answer is read as the athlete name (kept whole) and as who is attending; it has no "Parent email"',
+      [inviteeOf({email: 'Addie.Mom@example.test', questions_and_answers: LIVE_QA}), calendly.attendeeOf(LIVE_QA),
+        calendly.attendeeOf([{...LIVE_QA[0], answer: 'Addie Schinka'}])],
+      [{name: null, email: 'addie.mom@example.test', athleteName: 'Addie Schinka, parent', parentEmail: null}, 'parent', 'athlete']);
+
+  r = await run(variant('invitee-created', 31, {...other('15 Minute Info Call', 15), email: 'prospect@example.test', start: '2027-03-02T22:00:00Z'}));
+  const l31 = await ledgerOf(31);
+  check("the website's info call by a stranger -> other-event: no session, ledger keeps no who-booked, names the event type",
+      [r, await exists('sessions', EVT(31)), l31.outcome, l31.invitee, l31.eventName, l31.eventTypeUri, l31.slot && l31.slot.durationMinutes, Object.keys(l31).sort()],
+      [{outcome: 'other-event', flag: null}, false, 'other-event', null, '15 Minute Info Call', OTHER_TYPE, 15, OTHER_KEYS]);
+  const before31 = await sizes();
+  r = await run(variant('invitee-canceled', 31, {...other('15 Minute Info Call', 15), start: '2027-03-02T22:00:00Z'}));
+  const c31 = await ledgerOf(31, 'canceled');
+  check('its cancel -> other-event, nothing changed, no who-booked', [r, c31.outcome, c31.invitee, c31.eventName, c31.eventTypeUri, Object.keys(c31).sort(), await sizes()],
+      [{outcome: 'other-event', flag: null}, 'other-event', null, '15 Minute Info Call', OTHER_TYPE, OTHER_KEYS, before31]);
+
+  const femiUsed = async (month) => (await position('femi', 't-12', month)).used;
+  const used0 = await femiUsed('2027-03-01');
+  r = await run(variant('invitee-created', 32, {...other('Private Session', 50), email: 'kemi@example.test', start: '2027-03-03T22:00:00Z'}));
+  const l32 = await ledgerOf(32);
+  check("a private meeting booked with an RYP family's login -> other-event: no booking, no token spent, no session, no who-booked",
+      [r, (await db.collection('bookings').where('calendlyInviteeUri', '==', INV_URI(32)).get()).size, await femiUsed('2027-03-01') - used0,
+        await exists('sessions', EVT(32)), l32.invitee, l32.householdId, l32.eventName, l32.slot.durationMinutes],
+      [{outcome: 'other-event', flag: null}, 0, 0, false, null, undefined, 'Private Session', 50]);
+
+  r = await run(variant('invitee-created', 33, {utm: 'femi', source: 'ryp-portal', name: 'Something Else', qa: [], email: 'kemi@example.test', start: '2027-04-06T21:00:00Z'}));
+  check('a renamed RYP event (no "Athlete name" question either) booked through the portal link -> booked as usual',
+      [r, (await get('bookings', `femi_${EVT(33)}`)).status, (await get('sessions', EVT(33))).unresolved, await femiUsed('2027-04-01'), (await ledgerOf(33)).eventName, (await ledgerOf(33)).via],
+      [{outcome: 'applied', flag: null}, 'confirmed', undefined, 1, 'Something Else', 'utm']);
+  r = await run(variant('invitee-created', 34, {...nobody, source: null, name: 'Coaching Call', typeUri: OTHER_TYPE, start: '2027-03-05T22:00:00Z'}));
+  const l34 = await ledgerOf(34);
+  check('the RYP form ("Athlete name" question) under another name, no portal link -> RYP: held, who booked kept',
+      [r.outcome, (await get('sessions', EVT(34))).unresolved, l34.invitee && l34.invitee.athleteName, l34.eventName, l34.eventTypeUri],
+      ['unresolved', true, 'Nobody Known', 'Coaching Call', OTHER_TYPE]);
+  r = await run(variant('invitee-created', 35, {...nobody, source: null, name: null, qa: [], start: '2027-03-08T22:00:00Z'}));
+  const l35 = await ledgerOf(35);
+  check('a scheduled_event with no name (legacy or malformed), no form, no portal link -> fails open as RYP: held',
+      [r.outcome, (await get('sessions', EVT(35))).unresolved, l35.eventName, l35.invitee && l35.invitee.email], ['unresolved', true, null, 'stranger@example.test']);
+  const rypRows = [await ledgerOf(1), await ledgerOf(2, 'canceled')];
+  check('RYP rows (created and canceled) name the event type and keep who booked',
+      rypRows.map((x) => [x.eventName, x.eventTypeUri, !!x.invitee]), [['RYP Academy - Mental Game 1:1', RYP_TYPE, true], ['RYP Academy - Mental Game 1:1', RYP_TYPE, true]]);
+
+  log('  reschedules across event types: the RYP half books or holds, the other half frees what the earlier half held');
+  r = await run(variant('invitee-created', 36, {...other('Private Session', 50), email: 'stranger@example.test', start: '2027-03-09T22:00:00Z', old: INV_URI(35)}));
+  check('a held RYP booking moved into another type: the hold is freed, nothing new held',
+      [r.outcome, (await get('sessions', EVT(35))).status, (await get('sessions', EVT(35))).booked, await exists('sessions', EVT(36)), (await ledgerOf(36)).invitee],
+      ['other-event', 'cancelled', 0, false, null]);
+  r = await run(variant('invitee-canceled', 35, {...nobody, source: null, name: null, qa: [], start: '2027-03-08T22:00:00Z'}));
+  check('... its old half arriving after -> not-found, nothing else touched', r.outcome, 'not-found');
+  const r37 = await run(variant('invitee-created', 37, {utm: 'femi', email: 'kemi@example.test', start: '2027-03-10T22:00:00Z'}));
+  r = await run(variant('invitee-created', 38, {...other('Private Session', 50), email: 'kemi@example.test', start: '2027-03-11T22:00:00Z', old: INV_URI(37)}));
+  check('a booked RYP session moved into another type: its booking is cancelled and the token freed, nothing new booked',
+      [r37.outcome, r.outcome, (await get('bookings', `femi_${EVT(37)}`)).status, (await get('sessions', EVT(37))).status, await femiUsed('2027-03-01') - used0, await exists('bookings', `femi_${EVT(38)}`)],
+      ['applied', 'other-event', 'cancelled', 'cancelled', 0, false]);
+  r = await run(variant('invitee-canceled', 37, {utm: 'femi', start: '2027-03-10T22:00:00Z'}));
+  check('... its old half arriving after -> already-cancelled', r.outcome, 'already-cancelled');
+  r = await run(variant('invitee-created', 39, {...other('15 Minute Info Call', 15), email: 'kemi@example.test', start: '2027-05-04T21:00:00Z'}));
+  const r40 = await run(variant('invitee-created', 40, {utm: 'femi', email: 'kemi@example.test', start: '2027-05-11T21:00:00Z', old: INV_URI(39)}));
+  check('an info call moved into the RYP 1:1: the RYP half books as usual', [r.outcome, r40, (await get('bookings', `femi_${EVT(40)}`)).status, await femiUsed('2027-05-01')],
+      ['other-event', {outcome: 'applied', flag: null}, 'confirmed', 1]);
+  r = await run(variant('invitee-canceled', 39, {...other('15 Minute Info Call', 15), start: '2027-05-04T21:00:00Z'}));
+  check('... the info call half arriving after -> other-event, the RYP booking untouched', [r.outcome, (await get('bookings', `femi_${EVT(40)}`)).status], ['other-event', 'confirmed']);
+
+  log('  written before the rule existed: another type held as unmatched, or booked on a family');
+  await db.collection('calendlyEvents').doc(`${INV(41)}_invitee.created`).set({event: 'invitee.created', inviteeUri: INV_URI(41), eventUri: EVENT_URI(41), outcome: 'unresolved', householdId: null, receivedAt: TS(Date.now())});
+  await db.collection('sessions').doc(EVT(41)).set({date: '2027-03-16', time: '4:00 PM', type: 'mental', capacity: 1, booked: 1, status: 'scheduled', unresolved: true, source: 'calendly', calendlyEventUri: EVENT_URI(41)});
+  r = await run(variant('invitee-canceled', 41, {...other('15 Minute Info Call', 15), start: '2027-03-16T21:00:00Z'}));
+  check('an info call held before the rule: its cancel still frees the hold', [r.outcome, (await get('sessions', EVT(41))).status, (await get('sessions', EVT(41))).booked, (await ledgerOf(41, 'canceled')).invitee],
+      ['applied-unmatched', 'cancelled', 0, null]);
+  await db.collection('sessions').doc(EVT(42)).set({date: '2027-03-17', time: '4:00 PM', type: 'mental', capacity: 1, booked: 1, status: 'scheduled', source: 'calendly', calendlyEventUri: EVENT_URI(42)});
+  await db.collection('bookings').doc(`femi_${EVT(42)}`).set({athleteId: 'femi', sessionId: EVT(42), householdId: 'oyelaran', date: '2027-03-17', type: 'mental', status: 'confirmed',
+    periodKey: '2027-03-01', chargedFrom: 'period', graceTokenId: null, attendee: 'athlete', createdBy: 'system', source: 'calendly', calendlyInviteeUri: INV_URI(42), flag: null, createdAt: TS(Date.now())});
+  const used42 = await femiUsed('2027-03-01');
+  r = await run(variant('invitee-canceled', 42, {...other('Private Session', 50), start: '2027-03-17T21:00:00Z'}));
+  const c42 = await ledgerOf(42, 'canceled');
+  check('a private session booked on a family before the rule: its cancel still cancels the booking and frees the token',
+      [r.outcome, (await get('bookings', `femi_${EVT(42)}`)).status, (await get('sessions', EVT(42))).status, used42 - await femiUsed('2027-03-01'), c42.householdId, c42.invitee, c42.eventName],
+      ['applied', 'cancelled', 'cancelled', 1, 'oyelaran', null, 'Private Session']);
 
   log('\nSTEP H  HTTP contract on the emulator (400 signature / 200 always)');
   const ledgerBefore = (await db.collection('calendlyEvents').get()).size;

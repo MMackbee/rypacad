@@ -55,7 +55,38 @@ test('rows, columns and counts', () => {
   expect(h2.flags).toEqual([{ kind: 'booking', id: 'a3_cal-1', flag: 'before-open', date: '2026-10-08' }]);
   expect(h2).toMatchObject({ unpaid: false, flagged: true });
   expect(counts).toEqual({ all: 2, unpaid: 1, flagged: 1, unresolved: 1 });
-  expect(unresolved).toEqual([{ id: 'ev-1', outcome: 'unresolved', receivedAt: '2026-10-04T12:00', invitee: null, slot: null, reason: null }]);
+  expect(unresolved).toEqual([{ id: 'ev-1', outcome: 'unresolved', receivedAt: '2026-10-04T12:00', invitee: null, slot: null, reason: null, eventName: null }]);
+});
+
+test('review 2026-11-04: an unmatched booking cancelled or moved on Calendly, or whose held time was released, leaves the list; another event type is never on it', () => {
+  // The created row keeps outcome 'unresolved' for good; the cancel row beside it, or the released session, says it is gone.
+  const ev = (id) => `https://api.calendly.com/scheduled_events/${id}`;
+  const events = [
+    { id: 'inv-held_invitee.created', outcome: 'unresolved', householdId: null, receivedAt: new Date('2026-11-04T10:00:00'), eventUri: ev('ev-held'),
+      slot: { date: '2026-11-10', time: '4:00 PM', durationMinutes: 30 }, eventName: 'RYP Academy - Mental Game 1:1' },
+    { id: 'inv-gone_invitee.created', outcome: 'unresolved', householdId: null, receivedAt: new Date('2026-11-04T11:00:00'), eventUri: ev('ev-gone'),
+      slot: { date: '2026-10-14', time: '4:00 PM', durationMinutes: 30 }, eventName: 'RYP Academy - Mental Game 1:1' },
+    // Released in the app, or freed by a move whose cancel half has not arrived: no cancel row, the session says so.
+    { id: 'inv-freed_invitee.created', outcome: 'unresolved', householdId: null, receivedAt: new Date('2026-11-04T12:00:00'), eventUri: ev('ev-freed'),
+      slot: { date: '2026-11-12', time: '4:00 PM', durationMinutes: 30 }, eventName: 'RYP Academy - Mental Game 1:1' },
+    // Owner ruling 2026-11-04: another of Yannick's event types (the website's info call) is never an unmatched line.
+    { id: 'inv-info_invitee.created', outcome: 'other-event', receivedAt: new Date('2026-11-04T13:00:00'), eventUri: ev('ev-info'), invitee: null,
+      slot: { date: '2026-11-13', time: '4:00 PM', durationMinutes: 15 }, eventName: '15 Minute Info Call' },
+  ];
+  const calendlyCanceled = [
+    { id: 'inv-gone_invitee.canceled', event: 'invitee.canceled', outcome: 'applied-unmatched', householdId: null },
+    // A matched family's cancel: never a household flag, never an unmatched line.
+    { id: 'inv-kim_invitee.canceled', event: 'invitee.canceled', outcome: 'applied', householdId: 'h1' },
+  ];
+  const heldSessions = [
+    { id: 'cal-ev-held', unresolved: true, status: 'scheduled', booked: 1 },
+    { id: 'cal-ev-freed', unresolved: true, status: 'cancelled', booked: 0 },
+  ];
+  const { rows, counts, unresolved } = buildSignupRows({ households, athletes, invites, calendlyEvents: events, calendlyCanceled, heldSessions, now });
+  expect(unresolved.map((e) => e.id)).toEqual(['inv-held_invitee.created']);
+  expect(unresolved[0]).toMatchObject({ eventName: 'RYP Academy - Mental Game 1:1', slot: { durationMinutes: 30 } });
+  expect(counts.unresolved).toBe(1);
+  expect(rows.find((r) => r.householdId === 'h1').flags).toEqual([]);
 });
 
 test('an open invite younger than 7 days is invited; orphaned reads none; a loginEmail with no invite reads invited', () => {

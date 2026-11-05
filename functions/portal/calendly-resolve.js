@@ -1,9 +1,12 @@
 /**
  * Who a Calendly booking is for (calendlyWebhook, spec 6.2 step 1; widened
- * 2026-11-04): the family by login (invitee email, "Parent email" answer,
- * guardian email), the athlete by ownership of `utm_content` or by the
- * household's only kid / the "Athlete name" answer. Transaction reads only;
- * nothing here writes. Kept apart from calendly.js so each stays readable.
+ * 2026-11-04): the family by a family `users` doc (invitee email, "Parent
+ * email" answer), else by a household's guardian email; the athlete by
+ * ownership of `utm_content` or by the household's only kid / the "Athlete
+ * name" answer; and whether the booking is the RYP 1:1 at all
+ * (isRypOneOnOne, owner ruling 2026-11-04). Transaction reads only; nothing
+ * here writes. Kept apart from calendly.js so each stays readable, and free
+ * of requires: scripts/calendly-unmatched.mjs loads isRypOneOnOne from here.
  */
 'use strict';
 
@@ -17,22 +20,40 @@ function docOf(snap) {
       null;
 }
 
+/** The "Parent email" question, however Yannick words it. */
+const PARENT_EMAIL = /parent.*e-?mail|e-?mail.*parent/i;
+
 /**
- * The one `users` doc carrying this email (exact, then lower-cased), or
- * null when none or more than one.
+ * The docs of `col` whose `field` holds this email: exactly as typed
+ * first, then lower-cased. users.email and households.guardian.email are
+ * stored as the family typed them, some in mixed case (review 2026-11-04).
+ * @param {!Object} tx The transaction.
+ * @param {!Object} col A collection reference.
+ * @param {string} field The email field.
+ * @param {string} email The email, trimmed, in the case it was typed.
+ * @return {!Promise<!Object>} The QuerySnapshot (at most 2 docs).
+ */
+async function byEmail(tx, col, field, email) {
+  let snap = await tx.get(col.where(field, '==', email).limit(2));
+  if (snap.empty && email !== email.toLowerCase()) {
+    snap = await tx.get(col.where(field, '==', email.toLowerCase()).limit(2));
+  }
+  return snap;
+}
+
+/**
+ * The one FAMILY `users` doc carrying this email, or null when none, more
+ * than one, or a staff doc (no athleteId and no householdId): a staff login
+ * must not stop the search (review 2026-11-04).
  * @param {!Object} tx The transaction.
  * @param {!Object} store Firestore.
- * @param {string} email The invitee email.
+ * @param {string} email The email as typed.
  * @return {!Promise<?Object>} The users doc body.
  */
 async function userByEmail(tx, store, email) {
-  const users = store.collection('users');
-  let snap = await tx.get(users.where('email', '==', email).limit(2));
-  if (snap.empty && email !== email.toLowerCase()) {
-    snap = await tx.get(
-        users.where('email', '==', email.toLowerCase()).limit(2));
-  }
-  return snap.size === 1 ? snap.docs[0].data() || {} : null;
+  const snap = await byEmail(tx, store.collection('users'), 'email', email);
+  const u = snap.size === 1 ? snap.docs[0].data() || {} : null;
+  return u && (u.athleteId || u.householdId) ? u : null;
 }
 
 /**
@@ -57,8 +78,44 @@ function nameKey(s) {
 }
 
 /**
+ * utm_source of the portal's own Calendly link
+ * (frontend/src/portal/data/calendly.js) and of the link script's replay
+ * (scripts/calendly-unmatched.mjs).
+ */
+const RYP_SOURCES = ['ryp-portal', 'ryp-link-script'];
+/** The RYP 1:1 form's "Athlete name" question. */
+const ATHLETE_NAME = /athlete.*name|name.*athlete/i;
+
+/**
+ * Whether a payload is the RYP 1:1 (event type "RYP Academy - Mental Game
+ * 1:1", calendly.com/yannickartigolle2022-u/ryp-academy-mental-game-1on1),
+ * the only one of Yannick's Calendly event types that may book, hold a
+ * session, spend a token or keep who booked. Owner ruling 2026-11-04: "not
+ * his entire calendly account no but that link is just for ryp sessions";
+ * his subscription is user-scoped, so his private clients' event types and
+ * the website's free 15-minute info call arrive too. The RYP 1:1 is a
+ * payload with ANY of: the portal's or the link script's utm_source; an
+ * event name containing "Mental Game" (any case); the RYP form's "Athlete
+ * name" question; no event name at all (a legacy or malformed payload fails
+ * open, as before). Anything else is another event type.
+ * @param {?Object} p `body.payload` (both events carry `scheduled_event`).
+ * @return {boolean} True for the RYP 1:1.
+ */
+function isRypOneOnOne(p) {
+  const x = p || {};
+  const name = String((x.scheduled_event || {}).name || '').trim();
+  const source = String((x.tracking || {}).utm_source || '');
+  if (RYP_SOURCES.includes(source) || !name) return true;
+  const qa = Array.isArray(x.questions_and_answers) ?
+      x.questions_and_answers : [];
+  return /mental\s+game/i.test(name) ||
+      qa.some((q) => ATHLETE_NAME.test(String(q && q.question || '')));
+}
+
+/**
  * Who booked, as typed on Calendly (2026-11-04): kept on the ledger so an
- * unresolved row can be matched to a family by hand. Emails lower-cased.
+ * unresolved row can be matched to a family by hand. Emails lower-cased
+ * here only; the lookups use them as typed (resolveAthlete).
  * @param {!Object} p `body.payload`.
  * @return {{name: ?string, email: ?string, athleteName: ?string,
  *     parentEmail: ?string}} Nulls for what was not given.
@@ -66,11 +123,10 @@ function nameKey(s) {
 function inviteeOf(p) {
   const qa = p.questions_and_answers;
   const email = String(p.email || '').trim().toLowerCase();
-  const parent = answerOf(qa, /parent.*e-?mail|e-?mail.*parent/i)
-      .toLowerCase();
+  const parent = answerOf(qa, PARENT_EMAIL).toLowerCase();
   return {
     name: String(p.name || '').trim() || null, email: email || null,
-    athleteName: answerOf(qa, /athlete.*name|name.*athlete/i) || null,
+    athleteName: answerOf(qa, ATHLETE_NAME) || null,
     parentEmail: parent || null,
   };
 }
@@ -96,8 +152,9 @@ function kidByName(kids, athleteName) {
 
 /**
  * Resolve the athlete (spec 6.2 step 1; widened 2026-11-04). The family is
- * found by login: the invitee email or the "Parent email" answer as a
- * `users` doc, else as a household's guardian email. `utm_content` ->
+ * found by the invitee email or the "Parent email" answer as a family
+ * `users` doc (a staff one does not count), else as a household's guardian
+ * email; each is tried as typed, then lower-cased. `utm_content` ->
  * athletes/{id} is accepted only when that family OWNS the athlete (its
  * login, or the same household), so an edited or forwarded link never
  * spends another family's token. Without it: an athlete login is its
@@ -114,17 +171,19 @@ function kidByName(kids, athleteName) {
  */
 async function resolveAthlete(tx, store, p) {
   const inv = inviteeOf(p);
-  const emails = [inv.email, inv.parentEmail]
+  // As typed (review 2026-11-04): the stored emails keep the family's case.
+  const typed = [String(p.email || '').trim(),
+    answerOf(p.questions_and_answers, PARENT_EMAIL)]
       .filter((e, i, all) => e && all.indexOf(e) === i);
+  const emails = typed.map((e) => e.toLowerCase());
   let u = null;
-  for (const email of emails) {
-    u = await userByEmail(tx, store, email);
-    if (u) break;
+  for (let i = 0; !u && i < typed.length; i++) {
+    u = await userByEmail(tx, store, typed[i]);
   }
   let householdId = u ? u.householdId || null : null;
-  for (let i = 0; !u && !householdId && i < emails.length; i++) {
-    const hh = await tx.get(store.collection('households')
-        .where('guardian.email', '==', emails[i]).limit(2));
+  for (let i = 0; !householdId && i < typed.length; i++) {
+    const hh = await byEmail(tx, store.collection('households'),
+        'guardian.email', typed[i]);
     if (hh.size === 1) householdId = hh.docs[0].id;
   }
   const utm = p.tracking && p.tracking.utm_content;
@@ -156,4 +215,6 @@ async function resolveAthlete(tx, store, p) {
     reason: kids.length ? 'ambiguous-household' : 'no-athlete'};
 }
 
-module.exports = {docOf, inviteeOf, kidByName, nameKey, resolveAthlete};
+module.exports = {
+  docOf, inviteeOf, isRypOneOnOne, kidByName, nameKey, resolveAthlete,
+};
