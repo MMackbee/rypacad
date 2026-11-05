@@ -135,6 +135,10 @@ Routes: `/portal/assessments` (list), `/portal/assessments/wave/:waveId` (circui
 - **List**: every academy athlete with consent status (yes / no / not answered) and what is due:
   "Baseline due" (never tested), "Mid-season eligible" (8+ weeks since baseline), "End of season",
   last test date. Select up to four, **Start wave**. An athlete with consent not answered cannot be added.
+  *Amended 2026-11-05 (owner, after Phil could not test families who had not answered): a not-answered
+  athlete CAN be added. Testing rests on the data-collection consent given at sign-up; the research
+  answer only decides research use, and a window with no answer on its circuit date stays out of
+  research even after a later yes (4.3). The row says so.*
 - **Wave (fixed station order)**: 1 Readiness & intake (pain check, log, sex at first test) ·
   2 Anthropometrics · 3 Grip (rotation A-R, A-L, B-R, B-L, three rounds) · 4 CMJ then 10/5 ·
   5 Med ball · 6 McGill (baseline/end only, or "run later as a separate block"). Each station shows

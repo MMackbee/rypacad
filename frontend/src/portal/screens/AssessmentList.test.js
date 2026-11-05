@@ -53,10 +53,15 @@ test('every athlete with research consent, what is due and the last test (spec 5
   await r.unmount();
 });
 
-test('not answered cannot be added; a "no" can; up to four; not due cannot', async () => {
+test('not answered can be added, with the out-of-research line; a "no" can; up to four; not due cannot', async () => {
   const r = await list();
-  expect(r.button('Select Cal Duarte').disabled).toBe(true);
-  expect(r.text()).toContain("Waiting on the family's research answer");
+  expect(r.button('Select Cal Duarte').disabled).toBe(false);
+  expect(r.text()).toContain('No research answer yet: results from a test before a yes stay out of research');
+  expect(r.text()).not.toContain("Waiting on the family's research answer");
+  await r.click('Select Cal Duarte');
+  expect(checked(r, 'Cal Duarte')).toBe('true');
+  await r.click('Select Cal Duarte');
+  expect(checked(r, 'Cal Duarte')).toBe('false');
   expect(r.button('Select Gus Lee').disabled).toBe(true);
   for (const name of ['Ben Ortiz', 'Ava Moreno', 'Dev Patel', 'Eli Brooks']) await r.click(`Select ${name}`);
   expect(checked(r, 'Ben Ortiz')).toBe('true');

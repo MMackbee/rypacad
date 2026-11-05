@@ -113,9 +113,15 @@ export function consentStatus(athlete) {
   return r.value ? 'yes' : 'no';
 }
 
-/** Why a list row cannot join a wave, or null when it can (spec 5: not answered cannot be added). */
+/**
+ * Why a list row cannot join a wave, or null when it can: only "not due".
+ * The research answer never blocks testing (owner 2026-11-05, Phil could not
+ * test families who had not answered): testing rests on the data-collection
+ * consent every family gives at sign-up, research is optional, and a window
+ * with no answer on its circuit date stays out of research (inResearch),
+ * even if the family says yes later.
+ */
 export function waveBlock(row) {
-  if (row.consent === 'unanswered') return "Waiting on the family's research answer";
   if (!row.due.kind) return row.due.label;
   return null;
 }

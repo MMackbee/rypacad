@@ -72,9 +72,10 @@ describe('research consent and who can join a wave', () => {
     expect(consentStatus({ consents: { research: { value: 'yes' } } })).toBe('unanswered');
     expect(consentStatus(null)).toBe('unanswered');
   });
-  test('not answered cannot be added; not due says why; a "no" can still be tested', () => {
+  test('the research answer never blocks a wave (owner 2026-11-05); not due says why', () => {
     const due = dueStatus([], '2026-11-03');
-    expect(waveBlock({ consent: 'unanswered', due })).toBe("Waiting on the family's research answer");
+    expect(waveBlock({ consent: 'unanswered', due })).toBeNull();
+    expect(waveBlock({ consent: 'unanswered', due: dueStatus([win('baseline', '2026-11-03')], '2026-11-10') })).toBe('Mid-season from Dec 29');
     expect(waveBlock({ consent: 'no', due })).toBeNull();
     expect(waveBlock({ consent: 'yes', due: dueStatus([win('baseline', '2026-11-03')], '2026-11-10') })).toBe('Mid-season from Dec 29');
   });

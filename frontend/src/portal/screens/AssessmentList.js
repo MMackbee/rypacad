@@ -13,6 +13,8 @@ import { withDefaults } from '../data/assessmentSettings';
 import { academyDateISO } from '../data/calendar';
 
 const CONSENT_TONE = { yes: 'green', no: 'muted', unanswered: 'yellow' };
+/** Shown under an athlete whose family has not answered the research question. */
+export const UNANSWERED_NOTE = 'No research answer yet: results from a test before a yes stay out of research';
 const COLUMNS = '44px 2fr 1.4fr 1.6fr 1fr';
 
 /**
@@ -21,9 +23,10 @@ const COLUMNS = '44px 2fr 1.4fr 1.6fr 1fr';
  * "Mid-season eligible", "End of season", in progress and since when, or
  * "Open since Nov 3: mark it complete" past the 14-day entry window) and the
  * last test.
- * Staff pick up to the wave size (four) and start a wave; an athlete whose
- * research answer is not recorded cannot be added, and nor can one who is
- * not due. Phone: one column; tablet and desktop: a table.
+ * Staff pick up to the wave size (four) and start a wave; an athlete who is
+ * not due cannot be added. One whose family has not answered the research
+ * question can (owner 2026-11-05), with a line saying the results stay out
+ * of research. Phone: one column; tablet and desktop: a table.
  */
 export default function AssessmentList({ bare = false, viewer, onOpenWave, onOpenAthlete, onOpenSettings, onBack }) {
   const layout = useLayoutClass();
@@ -126,7 +129,7 @@ function Row({ row, layout, staff, selected, full, onToggle, onOpen }) {
   const dueText = <span style={{ font: `500 12px ${font.body}`, color: row.due.kind ? color.secondary : color.textTertiary }}>{row.due.label}{since ? ` · since ${shortDate(since)}` : ''}</span>;
   const lastText = <span style={{ font: `400 12px ${font.body}`, color: color.textTertiary }}>{last}</span>;
   const select = staff ? <SelectBox checked={selected} disabled={disabled} label={`Select ${row.name}`} onClick={() => onToggle(row)} /> : <span />;
-  const note = row.consent === 'unanswered' ? <Body size={11} tone={color.secondary}>{block}</Body> : null;
+  const note = row.consent === 'unanswered' ? <Body size={11} tone={color.secondary}>{UNANSWERED_NOTE}</Body> : null;
   if (layout === 'phone') {
     return (
       <div style={{ display: 'flex', gap: 12, padding: '11px 0', borderBottom: `1px solid ${color.rowRule}` }}>
