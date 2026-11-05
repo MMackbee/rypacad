@@ -227,11 +227,16 @@ export async function main(argv = process.argv.slice(2), { nowMs = Date.now() } 
     console.error(`Not written: ${e.message}\nIf a child's doc changed since it was read, run it again (dry run first).`);
     return 1;
   }
-  const after = { id: householdId, ...(await getDoc(target, 'households', householdId)) };
-  const bad = [];
-  for (const r of rows) if (!compedOk(await getDoc(target, 'athletes', r.athlete.id), after)) bad.push(r.athlete.name);
-  if (bad.length) { console.error(`Written, but ${namesOf(bad)} ${bad.length > 1 ? 'do' : 'does'} not read back as comped. Check it.\n${SEASON_END}`); return 1; }
   const names = rows.map((r) => r.athlete.name);
+  const bad = [];
+  try {
+    const after = { id: householdId, ...(await getDoc(target, 'households', householdId)) };
+    for (const r of rows) if (!compedOk(await getDoc(target, 'athletes', r.athlete.id), after)) bad.push(r.athlete.name);
+  } catch (e) {
+    console.error(`Written: ${namesOf(names)} ${names.length > 1 ? 'are' : 'is'} comped (one commit, all or nothing), but the read-back failed: ${e.message}\nRun it again with --dry-run to check; it should say ${names.length > 1 ? 'each one is' : names[0] + ' is'} already comped.\n${SEASON_END}`);
+    return 1;
+  }
+  if (bad.length) { console.error(`Written, but ${namesOf(bad)} ${bad.length > 1 ? 'do' : 'does'} not read back as comped. Check it.\n${SEASON_END}`); return 1; }
   console.log(`Comped. ${namesOf(names)} ${names.length > 1 ? 'are' : 'is'} on Elite with nothing billed and can book now. Nothing changed in Stripe.\n${SEASON_END}`);
   return 0;
 }

@@ -134,7 +134,7 @@ test('compedOk: comped Elite that books; not a frozen family or a subscribed one
 
 // Against a real Firestore emulator; skipped unless one is running, e.g.
 //   npx firebase-tools emulators:exec --only firestore --project rypacad "node --test scripts/test/comp-membership.test.mjs"
-test('against the emulator: dry run writes nothing, --yes comps only billing, a re-run and any refusal write nothing', { skip: !process.env.FIRESTORE_EMULATOR_HOST }, async () => {
+test('against the emulator: dry run writes nothing, --yes comps only billing, a re-run and any refusal write nothing, a failed read-back says it was written', { skip: !process.env.FIRESTORE_EMULATOR_HOST }, async () => {
   const t = await resolveTarget({ prod: false });
   const stamp = String(process.hrtime.bigint());
   const kid = (name, hh, over = {}) => ({
@@ -148,7 +148,7 @@ test('against the emulator: dry run writes nothing, --yes comps only billing, a 
     { update: { name: docName('households', `hh-${key}-${stamp}`), fields: fsFields({ name, stripeCustomerId: null, stripeCustomerIds: [], signup: { source: 'self', mode: 'parent' } }) } },
     { update: { name: docName('users', `u-${key}-${stamp}`), fields: fsFields({ role: 'parent', householdId: `hh-${key}-${stamp}`, email: `${key}-${stamp}@example.test` }) } },
   ];
-  const ids = { abigail: `abigail-${stamp}`, grant: `grant-${stamp}`, control: `control-${stamp}`, ava: `ava-${stamp}`, ben: `ben-${stamp}`, cy: `cy-${stamp}`, dee: `dee-${stamp}` };
+  const ids = { abigail: `abigail-${stamp}`, grant: `grant-${stamp}`, control: `control-${stamp}`, ava: `ava-${stamp}`, ben: `ben-${stamp}`, cy: `cy-${stamp}`, dee: `dee-${stamp}`, eve: `eve-${stamp}`, finn: `finn-${stamp}` };
   await commit(t, [
     { update: { name: docName('packages', 'elite'), fields: fsFields({ name: 'Elite', kind: 'elite', tokens: null }) } },
     { update: { name: docName('packages', 't-8'), fields: fsFields({ name: '8 sessions', kind: 'tokens', tokens: 8 }) } },
@@ -163,6 +163,9 @@ test('against the emulator: dry run writes nothing, --yes comps only billing, a 
     ...family('open', 'Open family'),
     { update: { name: docName('athletes', ids.cy), fields: fsFields(kid('Cy Open', `hh-open-${stamp}`)) } },
     { update: { name: docName('athletes', ids.dee), fields: fsFields(kid('Dee Open', `hh-open-${stamp}`, { pendingCheckout: { tier: { sessionId: 'cs_test_open', priceId: 'price_elite', discount: 'none', createdAt: new Date(NOW).toISOString() } } })) } },
+    ...family('blip', 'Blip family'),
+    { update: { name: docName('athletes', ids.eve), fields: fsFields(kid('Eve Blip', `hh-blip-${stamp}`)) } },
+    { update: { name: docName('athletes', ids.finn), fields: fsFields(kid('Finn Blip', `hh-blip-${stamp}`)) } },
   ]);
   const read = async (id) => getDoc(t, 'athletes', id);
   const run = (key, names, mode) => main(['--email', `${key}-${stamp}@example.test`, ...names.flatMap((n) => ['--athlete', n]), mode], { nowMs: NOW });
@@ -207,4 +210,27 @@ test('against the emulator: dry run writes nothing, --yes comps only billing, a 
   assert.equal(await run('open', ['Cy', 'Dee'], '--yes'), 1); // Dee's checkout can still be paid
   assert.deepEqual(await read(ids.cy), open.cy);
   assert.deepEqual(await read(ids.dee), open.dee);
+
+  // The commit lands, then every read fails (a 503): it says both were written, with the season-end line.
+  const realFetch = globalThis.fetch, realError = console.error, errors = [];
+  let committed = false;
+  globalThis.fetch = async (url, opts = {}) => {
+    if (committed && (opts.method ?? 'GET') === 'GET') return new Response('{"error":"unavailable"}', { status: 503 });
+    const res = await realFetch(url, opts);
+    if (String(url).endsWith(':commit') && res.ok) committed = true;
+    return res;
+  };
+  console.error = (...a) => errors.push(a.join(' '));
+  let code;
+  try { code = await run('blip', ['Eve', 'Finn'], '--yes'); } finally { globalThis.fetch = realFetch; console.error = realError; }
+  assert.equal(committed, true);
+  assert.equal(code, 1);
+  assert.match(errors.join('\n'), /^Written: Eve Blip and Finn Blip are comped \(one commit, all or nothing\), but the read-back failed: Get households\/.* failed \(503\)/);
+  assert.match(errors.join('\n'), /Run it again with --dry-run to check; it should say each one is already comped\.\nNothing ends this comp automatically: add it to the season-end list\.$/);
+  for (const id of [ids.eve, ids.finn]) {
+    const a = await read(id);
+    assert.equal(a.billing.status, 'active');
+    assert.equal(a.billing.comp, true);
+  }
+  assert.equal(await run('blip', ['Eve', 'Finn'], '--dry-run'), 1); // already comped
 });
