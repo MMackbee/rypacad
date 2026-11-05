@@ -10,6 +10,7 @@ jest.mock('../hooks', () => ({
   useSignups: () => ({ loading: false, error: null, data: { counts: { all: 2, unpaid: 1, flagged: 0, unresolved: 1 }, unresolved: [{ id: 'c9', outcome: 'unresolved', receivedAt: '2026-11-06T09:00' }], rows: [] } }),
 }));
 jest.mock('../hooks/billing', () => ({ useHouseholdsDirectory: () => ({ data: [], loading: false, error: null }) }));
+jest.mock('../hooks/mentalConsentStaff', () => ({ useConsentTracker: () => ({ data: [], loading: false, error: null }) }));
 
 test('the Sign-ups card replaces the enrollment queue; Pending is a stat; unmatched bookings count as flagged', async () => {
   const opened = [];

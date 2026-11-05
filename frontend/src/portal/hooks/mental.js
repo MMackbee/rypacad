@@ -17,31 +17,43 @@ import {
   fetchContractConfig, fetchContractLogsBetween, fetchHouseholdContact, fetchMentalBookings, fetchMentalEntries,
   householdContact, saveMentalEntry, setCheckin as writeCheckin, setCheckinNote as writeCheckinNote,
 } from './mentalLive';
+import { MENTAL_CONSENT_KEY, fetchAllConsents, fetchConsent } from './mentalConsentLive';
+import { seedConsentRecordMap } from './mentalConsent';
+import { consentSeedPaperRecord } from '../data/consentSeed';
 import { mentalFixtures } from '../data/seed';
 import { addDays, ageOn, contractMinutesFor, weekStartFor, weekSummary } from '../data/contractRule';
 import { boardRows, latestCheckin, visitsByAthlete } from '../data/contractBoard';
 import { groupEntries, kindOf, mentalAthleteRows } from '../data/mentalNotes';
 import { academyDateISO } from '../data/calendar';
+import { staffConsentSummary, utcTodayISO } from '../data/mentalConsent';
+import { isAdultOnDate } from '../data/signup';
 
 /** A save still running after this long shows "still trying" (the assessments tracker's value). */
 export const SLOW_SAVE_MS = 8000;
 
 /* ------------------------------------------------------------ Athletes -- */
 
-function liveMentalAthletes(today) {
-  return Promise.all([fetchAllAthletes(), fetchAllHouseholds(), fetchAllMentalBookings(), fetchAllMentalEntries()])
-    .then(([athletes, households, bookings, entries]) => mentalAthleteRows({ athletes, households, bookings, entries, today }));
+// Consent never blanks Yannick's screens: a refused read is null on the list (no consent line) and undefined on the page (unavailable).
+const byAthleteId = (list) => Object.fromEntries(list.map((r) => [r.athleteId ?? r.id, r]));
+
+function liveMentalAthletes(today, utcToday) {
+  return Promise.all([fetchAllAthletes(), fetchAllHouseholds(), fetchAllMentalBookings(), fetchAllMentalEntries(), fetchAllConsents().catch(() => null)])
+    .then(([athletes, households, bookings, entries, consents]) =>
+      mentalAthleteRows({ athletes, households, bookings, entries, today, utcToday, records: consents ? byAthleteId(consents) : null }));
 }
 
-/** `{ data: Row[] | null, loading, error }`, rows from mentalAthleteRows (data/mentalNotes.js). */
+/** `{ data: Row[] | null, loading, error }`, rows from mentalAthleteRows (data/mentalNotes.js), with each athlete's consent status. */
 export function useMentalAthletes() {
   const live = isLive();
-  const today = academyDateISO();
+  const now = new Date();
+  const today = academyDateISO(now);
+  const utcToday = utcTodayISO(now);
   const notesGen = useInvalidation(MENTAL_NOTES_KEY);
   const bookingsGen = useInvalidation('bookings');
+  const consentsGen = useInvalidation(MENTAL_CONSENT_KEY);
   return useSeedResource(
-    live ? null : mentalAthleteRows({ ...mentalFixtures(today), today }),
-    live ? { source: () => liveMentalAthletes(today), deps: ['mental-athletes', today, notesGen, bookingsGen] } : undefined
+    live ? null : mentalAthleteRows({ ...mentalFixtures(today), today, utcToday, records: seedConsentRecordMap() }),
+    live ? { source: () => liveMentalAthletes(today, utcToday), deps: ['mental-athletes', today, notesGen, bookingsGen, consentsGen] } : undefined
   );
 }
 
@@ -49,13 +61,33 @@ export function useMentalAthletes() {
 
 const byDateDesc = (a, b) => String(b.date).localeCompare(String(a.date));
 
+/**
+ * The consent card's payload and the contact line it changes: an athlete
+ * 18+ on the UTC date with a record or a login email is reached directly -
+ * their login email and the consent's emergency contact, never the guardian
+ * (spec 5). `record` undefined means the consent read failed.
+ */
+function consentParts({ athlete, contact, record, utcToday }) {
+  const unavailable = record === undefined;
+  const rec = record ?? null;
+  const consent = { record: rec, summary: unavailable ? null : staffConsentSummary({ athlete, record: rec, utcToday }), unavailable };
+  if (!isAdultOnDate(athlete.dob, utcToday) || !(rec || athlete.loginEmail)) return { consent, contact };
+  const ec = rec?.choices?.emergencyContact;
+  return {
+    consent,
+    contact: { familyName: contact?.familyName ?? null, guardianName: null, email: athlete.loginEmail ?? null, phone: null, emergency: ec?.name ? ec : null },
+  };
+}
+
 /** The athlete page's payload, one shape for seed and live. `bookings` are fetchMentalBookings rows. */
-function athletePayload({ athlete, contact, bookings, entries, logsByDate, checkins, today }) {
+function athletePayload({ athlete, contact: householdContactLine, bookings, entries, logsByDate, checkins, today, utcToday, record }) {
   const required = contractMinutesFor(athlete, today);
   const noteIds = new Set(entries.map((e) => e.id));
+  const { consent, contact } = consentParts({ athlete, contact: householdContactLine, record, utcToday });
   return {
     athlete: { id: athlete.id, name: athlete.name ?? null, age: ageOn(athlete.dob ?? null, today), dob: athlete.dob ?? null, householdId: athlete.householdId ?? null, required },
     contact,
+    consent,
     sessions: bookings.map((b) => ({ sessionId: b.sessionId, date: b.date, time: b.time, status: b.status, attendee: b.attendee, hasNote: noteIds.has(b.sessionId) })),
     notes: groupEntries(entries),
     contract: {
@@ -67,7 +99,7 @@ function athletePayload({ athlete, contact, bookings, entries, logsByDate, check
   };
 }
 
-function seedMentalAthlete(athleteId, today) {
+function seedMentalAthlete(athleteId, today, utcToday, demoRecord = null) {
   const f = mentalFixtures(today);
   const athlete = f.athletes.find((a) => a.id === athleteId);
   if (!athlete) return null;
@@ -80,6 +112,7 @@ function seedMentalAthlete(athleteId, today) {
   return athletePayload({
     athlete, contact: household ? householdContact(household) : null, bookings,
     entries: f.entries.filter((e) => e.athleteId === athleteId), logsByDate: f.logsByAthlete[athleteId], checkins: f.checkins, today,
+    utcToday, record: demoRecord === 'paper' ? consentSeedPaperRecord(athleteId) : seedConsentRecordMap()[athleteId] ?? null,
   });
 }
 
@@ -89,35 +122,42 @@ const athleteOrNull = (athleteId) => fetchAthlete(athleteId).catch((err) => {
   throw err;
 });
 
-async function liveMentalAthlete(athleteId, today) {
+async function liveMentalAthlete(athleteId, today, utcToday) {
   const week = weekStartFor(today);
-  const [athlete, bookings, entries, logs, checkins] = await Promise.all([
+  const [athlete, bookings, entries, logs, checkins, record] = await Promise.all([
     athleteOrNull(athleteId),
     fetchMentalBookings(athleteId),
     fetchMentalEntries(athleteId),
     fetchContractLogsBetween({ athleteIds: [athleteId], fromISO: week, toISO: addDays(week, 6) }),
     fetchCheckinsForAthletes([athleteId]),
+    fetchConsent(athleteId).catch(() => undefined),
   ]);
   if (!athlete) return null;
   const contact = await fetchHouseholdContact(athlete.householdId);
-  return athletePayload({ athlete, contact, bookings, entries, logsByDate: logs[athleteId], checkins, today });
+  return athletePayload({ athlete, contact, bookings, entries, logsByDate: logs[athleteId], checkins, today, utcToday, record });
 }
 
 /**
- * `{ data: { athlete, contact, sessions, notes, contract } | null, loading,
- * error }` for one athlete's page; sessions newest first. An id with no
- * athlete (not a fixture athlete in seed mode, no athletes doc live) answers
- * null data, which the screen shows as not found.
+ * `{ data: { athlete, contact, consent, sessions, notes, contract } | null,
+ * loading, error }` for one athlete's page; sessions newest first;
+ * `consent = { record, summary, unavailable }`. An id with no athlete (not a
+ * fixture athlete in seed mode, no athletes doc live) answers null data,
+ * which the screen shows as not found. `demoUtcToday` (ages on another UTC
+ * date) and `demoRecord: 'paper'` are the review harness's: the seed branch
+ * alone reads them.
  */
-export function useMentalAthlete(athleteId) {
+export function useMentalAthlete(athleteId, { demoUtcToday = null, demoRecord = null } = {}) {
   const live = isLive();
-  const today = academyDateISO();
+  const now = new Date();
+  const today = academyDateISO(now);
+  const utcToday = utcTodayISO(now);
   const notesGen = useInvalidation(MENTAL_NOTES_KEY);
   const logsGen = useInvalidation('contractLogs');
   const checkinsGen = useInvalidation(CHECKINS_KEY);
+  const consentsGen = useInvalidation(MENTAL_CONSENT_KEY);
   return useSeedResource(
-    live ? null : seedMentalAthlete(athleteId, today),
-    live ? { source: () => liveMentalAthlete(athleteId, today), deps: ['mental-athlete', athleteId, today, notesGen, logsGen, checkinsGen] } : undefined
+    live ? null : seedMentalAthlete(athleteId, today, demoUtcToday ?? utcToday, demoRecord),
+    live ? { source: () => liveMentalAthlete(athleteId, today, utcToday), deps: ['mental-athlete', athleteId, today, notesGen, logsGen, checkinsGen, consentsGen] } : undefined
   );
 }
 

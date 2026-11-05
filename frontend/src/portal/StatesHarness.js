@@ -47,6 +47,8 @@ import MentalNote from './screens/MentalNote';
 import MentalContract from './screens/MentalContract';
 import Membership from './screens/Membership';
 import Reservations from './screens/Reservations';
+import MentalConsent from './screens/MentalConsent';
+import MentalConsentFlow from './screens/MentalConsentFlow';
 
 import { ALL_PACKAGES, ELITE, TOKEN_PACKAGES } from './data/packages';
 import { academyDateISO, addDaysISO, todayISO } from './data/calendar';
@@ -194,7 +196,9 @@ export const SCREEN_STATES = [
              // 2026-10-28 (mental tools, spec 4.3): parents log for their
              // kids. The contract card renders only with
              // REACT_APP_CONTRACT_ENABLED=true in the build.
-             ['populated', 'Parent · contract on', { role: 'parent' }]] },
+             ['populated', 'Parent · contract on', { role: 'parent' }],
+             // Yannick's consent (2026-10-30): ops types in a paper form.
+             ['populated', 'Ops · paper signature', { athleteId: 'nico', role: 'ops', demoPaperOpen: true }]] },
   // Sprint 16 (contract v2.4): the Billing hub - tokens left per athlete
   // from the same derivation the booking gate runs, plus the membership's
   // Stripe standing. The retry/restricted states read households.membership.
@@ -335,7 +339,27 @@ export const SCREEN_STATES = [
     states: [
       ['default', 'Jordan · intake and 1:1s', { athleteId: 'jordan' }],
       ['default', 'Nico · 10 min a day', { athleteId: 'nico' }],
+      // Yannick's Consent card (2026-10-30 consent plan Task 16), one per status.
+      ['default', 'Reese · consent needed', { athleteId: 'reese' }],
+      ['default', 'Quinn · 18+ signed', { athleteId: 'quinn' }],
+      ['default', 'Jordan · needs 18+', { athleteId: 'jordan', demoUtcToday: '2030-07-01' }],
+      ['default', 'Nico · paper, not transcribed', { athleteId: 'nico', demoRecord: 'paper' }],
     ] },
+  /*
+   * Yannick's consent form (2026-10-30, docs/portal/plans/2026-10-30-mental-
+   * consent): the family's flow and list on the seed. demoViewer and
+   * demoNoRecord show Quinn (18+, signed in the seed) unsigned, on Quinn's
+   * own login or handed the parent's phone; demoDraft marks Reese waiting.
+   */
+  { id: 'CF', title: 'Mental consent flow', Screen: MentalConsentFlow, role: 'parent · athlete',
+    states: [
+      ['default', 'Reese · minor, step 1', { athleteId: 'reese' }],
+      ['default', 'Quinn · 18+ on their own login', { athleteId: 'quinn', demoViewer: 'athlete', demoNoRecord: true }],
+      ['default', '18+ hand-over on the parent phone', { athleteId: 'quinn', demoViewer: 'parent', demoNoRecord: true }],
+      ['default', 'Change choices', { athleteId: 'jordan', change: true }],
+    ] },
+  { id: 'CL', title: 'Mental consent list', Screen: MentalConsent, role: 'parent · athlete',
+    states: [['default', 'Whitfield family · Reese waiting', { demoDraft: 'reese' }]] },
   { id: 'MN', title: 'Mental Note', Screen: MentalNote, role: 'mental',
     states: [
       ['default', 'Intake note', { athleteId: 'jordan', entryId: 'intake' }],

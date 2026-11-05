@@ -1,6 +1,10 @@
 import React from 'react';
 import { renderScreen } from './testRender';
 import MySchedule from './MySchedule';
+// Mental consent (plan Task 13): no consent rows unless a case sets them.
+let mockConsents;
+jest.mock('../hooks/mentalConsent', () => ({ useFamilyConsents: () => mockConsents }));
+beforeEach(() => { mockConsents = { data: null, loading: false, error: null }; });
 
 const row = (over) => ({ id: 's1', sessionId: 's1', date: '2026-11-10', dayLabel: 'Tue, Nov 10', isToday: false, time: '4:00', meridiem: 'PM', type: 'mental', name: 'Mental game session · Yannick', meta: '30 min', status: 'confirmed', bookingId: 'b1', cancellable: true, source: 'portal', ...over });
 let mockRows;
@@ -175,4 +179,22 @@ describe('cancelling a booking that repeats on later weeks', () => {
     expect(r.button('Keep it')).not.toBeNull();
     await r.unmount();
   });
+});
+
+/** A consent FamilyRow (plan Task 8) for the mocked hook. */
+const consentRow = (athleteId, over = {}) => ({ athleteId, name: 'Reese Whitfield', firstName: 'Reese', viewer: 'parent', status: 'unsigned', record: null, adultToday: false,
+  claimedLogin: false, drivingUnanswered: false, nextMental: null, draft: null, ...over });
+
+test("mental consent: a minor login's 1:1 says its parent signs; a signed athlete's says nothing", async () => {
+  mockRows = [row()];
+  mockConsents = { data: { viewer: 'athlete', rows: [consentRow('a1', { viewer: 'athlete' })], byId: {} }, loading: false, error: null };
+  const r = await renderScreen(<MySchedule bare />);
+  expect(r.text()).toContain('Consent needed · Your parent signs this');
+  await r.unmount();
+  const signedAt = new Date('2026-10-30T17:00:00Z');
+  const record = { adult: false, adultSignature: null, signedAt, signer: { role: 'parent', name: 'Dana Whitfield' }, assent: { audio: true }, choices: { audio: true } };
+  mockConsents = { data: { viewer: 'athlete', rows: [consentRow('a1', { viewer: 'athlete', status: 'signed', record })], byId: {} }, loading: false, error: null };
+  const signed = await renderScreen(<MySchedule bare />);
+  expect(signed.text()).not.toContain('Consent needed');
+  await signed.unmount();
 });

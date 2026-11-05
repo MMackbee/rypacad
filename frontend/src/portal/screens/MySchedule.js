@@ -14,6 +14,8 @@ import AllowancePools, { GraceLine } from '../components/AllowancePools';
 import SkeletonCard, { SkeletonBar, SkeletonSessionCard } from '../components/Skeleton';
 import { Banner, Body, Card, ErrorNotice, ScreenTitle, SectionLabel } from '../components/Primitives';
 import { useSchedule } from '../hooks';
+import { useFamilyConsents } from '../hooks/mentalConsent';
+import { consentBookingFootnote } from '../components/consent/ConsentBookingLine';
 import { leaveWaitlist } from '../hooks/waitlist';
 import { cancelSeries, laterWeeks } from '../hooks/cancelSeries';
 // Pure calendar helper, not response data - same seam rule BookSession and
@@ -62,6 +64,7 @@ export default function MySchedule({
 }) {
   const scheduleState = useSchedule({ variant });
   const { data, loading, error } = scheduleState;
+  const consents = useFamilyConsents({ as: 'athlete' }); // "Consent needed" under an unsigned 1:1
   const [tab, setTab] = useState('upcoming');
   // The upcoming item currently in the confirm sheet ('keep it' / 'cancel
   // reservation'), or null when the sheet is closed. `later` is its later
@@ -182,6 +185,7 @@ export default function MySchedule({
             tokens={tokens}
             days={days}
             onBook={onBook}
+            consent={consents.data?.rows?.[0]}
             onCancelRequest={(s) => setCancelTarget({ ...s, later: laterWeeks(s, sessions) })}
             onLeaveWaitlist={handleLeaveWaitlist}
             leavingId={leavingId}
@@ -203,7 +207,7 @@ export default function MySchedule({
   );
 }
 
-function ScheduleBody({ past, sessions, cancelled, tokens, days, onBook, onCancelRequest, onLeaveWaitlist, leavingId }) {
+function ScheduleBody({ past, sessions, cancelled, tokens, days, consent, onBook, onCancelRequest, onLeaveWaitlist, leavingId }) {
   return (
     <>
         {/*
@@ -293,7 +297,7 @@ function ScheduleBody({ past, sessions, cancelled, tokens, days, onBook, onCance
                   name={s.name}
                   meta={attendeeNoteFor(s) ?? s.meta}
                   variant={rowCancelled ? 'cancelled' : s.isToday ? 'live' : 'default'}
-                  footnote={rowCancelled ? cancelReasonCopy(s.cancelReason, { unlimited: Boolean(tokens?.unlimited), singleToken: s.singleToken }) : null}
+                  footnote={rowCancelled ? cancelReasonCopy(s.cancelReason, { unlimited: Boolean(tokens?.unlimited), singleToken: s.singleToken }) : consentBookingFootnote({ item: s, row: consent, past })}
                   trailing={
                     waitlisted ? (
                       <StatusBadge tone="yellow">Waitlisted</StatusBadge>

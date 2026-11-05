@@ -1,6 +1,10 @@
 import React from 'react';
 import { renderScreen } from './testRender';
 import AthleteDashboard from './AthleteDashboard';
+// Mental consent (plan Task 13): no consent rows unless a case sets them.
+let mockConsents;
+jest.mock('../hooks/mentalConsent', () => ({ useFamilyConsents: () => mockConsents }));
+beforeEach(() => { mockConsents = { data: null, loading: false, error: null }; });
 
 /**
  * K33: the home screen's Commitment Contract card shows the hook's badge -

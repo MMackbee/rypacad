@@ -8,6 +8,7 @@ import PhoneFrame from '../components/PhoneFrame';
 import StatusBadge from '../components/StatusBadge';
 import { Body, Card, ScreenTitle, SectionLabel, SignOutButton } from '../components/Primitives';
 import HouseholdsCard from '../components/HouseholdsCard';
+import ConsentTrackerCard from '../components/consent/ConsentTrackerCard';
 import ScholarshipsCard from '../components/ScholarshipsCard';
 import AssessmentsEntryCard from '../components/AssessmentsEntryCard';
 import { ReservedBlocks } from '../components/Reserved';
@@ -165,6 +166,7 @@ export default function AdminDashboard({
         {/* Sprint 17 (contract v2.5): every household -> its staff billing
             view. Hidden when the route supplies no destination (harness). */}
         {onOpenHousehold ? <HouseholdsCard onOpenHousehold={onOpenHousehold} /> : null}
+        {onOpenAthlete ? <ConsentTrackerCard onOpenAthlete={onOpenAthlete} /> : null}
         <EnrollmentCard rows={enrollmentRows} highlight={filtered ? active.id : null} />
         <BlockFillCard bars={data?.blockFill ?? []} reserved={data?.reservedBlocks ?? []} filtered={filtered} />
         {/* Billing card: hidden in live mode per the pin - there was never

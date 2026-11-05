@@ -62,6 +62,13 @@ export const callWaitlistPositions = callable('waitlistPositions');
  * team's Slack. Built by hooks/feedback.js#feedbackPayload.
  */
 export const callSubmitFeedback = callable('submitFeedback');
+/**
+ * `{ athleteId }` -> `{ status: 'sent' | 'duplicate' }`: Yannick's "Send a
+ * reminder" to sign the mental consent (functions/portal/mental-consent-request.js).
+ * A refusal's `reason`: 'not-mental', 'no-athlete', 'disabled', 'no-household',
+ * 'test-household', 'already-signed', 'no-dob' or 'send-failed'.
+ */
+export const callRequestMentalConsent = callable('requestMentalConsent');
 const claimInvite = callable('claimInvite');
 /** `{ state, householdId, athleteId }` - ids only on 'claimed' (D7); never throws for an expected state (contract 1.4). */
 export const callClaimInvite = () => claimInvite({});
