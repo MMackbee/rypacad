@@ -206,7 +206,7 @@ export function savesHere(state) {
   return SAVE_STEP[state.branch] === state.step;
 }
 
-const firstFolded = (s) => str(s).normalize('NFD').replace(/[̀-ͯ]/g, '').trim().toLowerCase().split(/\s+/)[0] || '';
+const firstFolded = (s) => str(s).normalize('NFD').replace(/[\u0300-\u036f]/g, '').trim().toLowerCase().split(/\s+/)[0] || '';
 
 /** The athlete's typed name against their first name (first word, case and accents ignored); a mismatch warns, never blocks. */
 export function nameMatches(typed, firstName) {
