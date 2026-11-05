@@ -2744,6 +2744,9 @@ export function useCoachDay({ variant = 'today' } = {}) {
  */
 export function useCoachRoster() {
   const live = isLive();
+  // Try again after a failed load (review 2026-11-04): nothing else re-reads
+  // this list while the screen stays mounted, so the retry is a local count.
+  const [attempt, setAttempt] = useState(0);
 
   const liveCoachRoster = async () => {
     const profile = await fetchCurrentUser();
@@ -2760,10 +2763,11 @@ export function useCoachRoster() {
       }));
   };
 
-  return useSeedResource(
+  const state = useSeedResource(
     live ? null : ROSTER.map((r) => ({ ...r, meta: hideContractParts(r.meta) })),
-    live ? { source: liveCoachRoster, deps: ['coach-roster'] } : undefined
+    live ? { source: liveCoachRoster, deps: ['coach-roster', attempt] } : undefined
   );
+  return { ...state, retry: () => setAttempt((n) => n + 1) };
 }
 
 /**
@@ -3927,15 +3931,20 @@ export function useStaff({ variant = 'populated' } = {}) {
  * Per-athlete name lookups are single-document reads, settled one by one:
  * a booking whose athlete cannot be read (a removed record, one refused or
  * timed-out get) keeps its row with name null instead of failing the whole
- * roster. When EVERY get is refused the refusal is thrown as-is, so the
- * screen can say the account lacks access rather than show nameless rows.
+ * roster. When EVERY get fails the roster fails (review 2026-11-04): a
+ * refusal is thrown first, so the screen says the account lacks access;
+ * any other failure gets the retryable notice. Removed records alone
+ * (not-found) are not a load failure - a retry cannot bring them back - so
+ * those rows stay, markable.
  */
 async function liveSessionAttendance(sessionId) {
   const bookings = await fetchBookingsBySession(sessionId);
   const ids = [...new Set(bookings.map((b) => b.athleteId).filter(Boolean))];
   const settled = await Promise.allSettled(ids.map((id) => fetchAthlete(id)));
-  const refused = settled.filter((s) => s.status === 'rejected' && s.reason?.code === ERR.PERMISSION);
-  if (ids.length && refused.length === settled.length) throw refused[0].reason;
+  const failed = settled.filter((s) => s.status === 'rejected' && s.reason?.code !== ERR.NOT_FOUND);
+  if (failed.length && settled.every((s) => s.status === 'rejected')) {
+    throw (failed.find((s) => s.reason?.code === ERR.PERMISSION) ?? failed[0]).reason;
+  }
   const nameById = new Map(settled.filter((s) => s.status === 'fulfilled').map((s) => [s.value.id, s.value.name]));
   return bookings
     .map((b) => ({
@@ -4013,7 +4022,7 @@ export function useSessionAttendance(sessionId) {
   // small resource — the rows above are pinned as a bare array.
   const sessionsGen = useInvalidation('sessions');
   const noteState = useSeedResource(
-    live && sessionId ? null : { coachNote: null, status: 'scheduled', maxHandicap: null },
+    live && sessionId ? null : { coachNote: null, status: 'scheduled', maxHandicap: null, unresolved: false },
     live && sessionId
       ? {
           source: async () => {
@@ -4023,7 +4032,9 @@ export function useSessionAttendance(sessionId) {
             // 'scheduled', never a crash on an older/generator-seeded doc.
             // 2026-10-02: the same read carries the session's handicap limit
             // (null on an open session), for the roster's reserved tag.
-            return { coachNote: s?.coachNote ?? null, status: s?.status ?? 'scheduled', maxHandicap: handicapLimitOf(s) };
+            // 2026-11-04: `unresolved` (absent == false) marks a slot held
+            // for a Calendly booking not matched to a family yet.
+            return { coachNote: s?.coachNote ?? null, status: s?.status ?? 'scheduled', maxHandicap: handicapLimitOf(s), unresolved: s?.unresolved === true };
           },
           deps: ['session-note', sessionId, sessionsGen],
         }
@@ -4053,6 +4064,7 @@ export function useSessionAttendance(sessionId) {
     sessionNote: noteState.data?.coachNote ?? null,
     sessionStatus: noteState.data?.status ?? 'scheduled',
     sessionMaxHandicap: noteState.data?.maxHandicap ?? null,
+    sessionUnresolved: noteState.data?.unresolved === true,
     cancelSession: doCancelSession,
   };
 }

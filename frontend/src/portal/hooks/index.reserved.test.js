@@ -21,6 +21,7 @@ jest.mock('./live', () => ({
   fetchAthlete: jest.fn(),
   fetchBookings: jest.fn(),
   fetchBookingsBySession: jest.fn(),
+  fetchCoachAthletes: jest.fn(),
   fetchContractLogsSince: jest.fn(),
   fetchCurrentUser: jest.fn(),
   fetchGraceTokensByAthlete: jest.fn(),
@@ -57,7 +58,7 @@ import * as adapter from './assessmentsLive';
 import * as calendar from '../data/calendar';
 import { reservedEligible, reservedTag } from '../data/reserved';
 
-const { useAdminDashboard, useBooking, useCoachDay, useHouseholdAthletes, useMembership, useMonthSessions, useSessionAttendance } = hooks;
+const { useAdminDashboard, useBooking, useCoachDay, useCoachRoster, useHouseholdAthletes, useMembership, useMonthSessions, useSessionAttendance } = hooks;
 
 // Thu Nov 12 2026, 4:30 PM in Chicago.
 const NOW = new Date('2026-11-12T22:30:00Z');
@@ -229,6 +230,83 @@ describe('staff surfaces that list sessions', () => {
     ]);
     expect(h.result.current.data.blockFill.find((b) => b.day === 'Tue')).toEqual({ day: 'Tue', pct: 50 });
     expect(live.fetchSessionsInRange).toHaveBeenCalledTimes(1);
+    await h.unmount();
+  });
+});
+
+// Review 2026-11-04 (the coach athlete-read fix): the roster's name join,
+// the Calendly hold flag on the session read, and the assigned list's retry.
+describe("the coach's rosters", () => {
+  const fail = (code) => new live.LiveDataError(code, `fetchAthlete: ${code}`);
+  const attendance = async (byId) => {
+    asStaff('coach');
+    live.fetchBookingsBySession.mockResolvedValue([
+      { id: 'b1', athleteId: 'jordan', status: 'confirmed' },
+      { id: 'b2', athleteId: 'reese', status: 'confirmed' },
+    ]);
+    live.fetchAthlete.mockImplementation(async (id) => {
+      if (byId[id] instanceof Error) throw byId[id];
+      return byId[id];
+    });
+    return mountHook(() => useSessionAttendance('2026-11-17-2'));
+  };
+
+  test('every athlete get refused: the refusal, so the screen names the owner', async () => {
+    const h = await attendance({ jordan: fail(live.ERR.PERMISSION), reese: fail(live.ERR.PERMISSION) });
+    expect(h.result.current.data).toBeNull();
+    expect(h.result.current.error.code).toBe('permission-denied');
+    await h.unmount();
+  });
+
+  test('every athlete get failed for another reason: a retryable error, never a sheet of nameless rows', async () => {
+    const offline = await attendance({ jordan: fail(live.ERR.UNAVAILABLE), reese: fail(live.ERR.UNAVAILABLE) });
+    expect(offline.result.current.data).toBeNull();
+    expect(offline.result.current.error.code).toBe('unavailable');
+    await offline.unmount();
+    // A removed record beside a failed get is still a failed load.
+    const mixed = await attendance({ jordan: fail(live.ERR.NOT_FOUND), reese: fail(live.ERR.UNAVAILABLE) });
+    expect(mixed.result.current.error.code).toBe('unavailable');
+    await mixed.unmount();
+  });
+
+  test('one get failed: that booking keeps its row with name null, the rest load', async () => {
+    const h = await attendance({ jordan: FAMILY[0], reese: fail(live.ERR.UNAVAILABLE) });
+    expect(h.result.current.error).toBeNull();
+    expect(h.result.current.data.map((r) => [r.bookingId, r.name])).toEqual([['b2', null], ['b1', 'Jordan Whitfield']]);
+    await h.unmount();
+  });
+
+  test('removed athlete records alone are not a load failure (a retry cannot bring them back): the rows stay', async () => {
+    const h = await attendance({ jordan: fail(live.ERR.NOT_FOUND), reese: fail(live.ERR.NOT_FOUND) });
+    expect(h.result.current.error).toBeNull();
+    expect(h.result.current.data.map((r) => [r.bookingId, r.name])).toEqual([['b1', null], ['b2', null]]);
+    await h.unmount();
+  });
+
+  test('a slot held for an unmatched Calendly booking reads as unresolved; any other session, a missing doc or a value that is not true does not', async () => {
+    asStaff('owner');
+    live.fetchBookingsBySession.mockResolvedValue([]);
+    const cal = (over) => session('cal-1', '2026-11-17', '7:00 PM', { type: 'mental', booked: 1, capacity: 1, bookable: false, ...over });
+    for (const [docs, expected] of [[[cal({ unresolved: true })], true], [[cal({})], false], [[cal({ unresolved: 'true' })], false], [[], false]]) {
+      live.fetchSessionsByIds.mockResolvedValue(docs);
+      const h = await mountHook(() => useSessionAttendance('cal-1'));
+      expect(h.result.current.sessionUnresolved).toBe(expected);
+      await h.unmount();
+    }
+  });
+
+  test("the coach's assigned list: retry re-reads it after a failed load", async () => {
+    asStaff('coach');
+    live.fetchCoachAthletes
+      .mockRejectedValueOnce(new live.LiveDataError(live.ERR.UNAVAILABLE, 'fetchCoachAthletes: offline'))
+      .mockResolvedValue([{ id: 'jordan', name: 'Jordan Whitfield' }]);
+    const h = await mountHook(() => useCoachRoster());
+    expect(h.result.current.error.code).toBe('unavailable');
+    await act(async () => { h.result.current.retry(); });
+    await flush();
+    expect(h.result.current.error).toBeNull();
+    expect(h.result.current.data.map((a) => a.name)).toEqual(['Jordan Whitfield']);
+    expect(live.fetchCoachAthletes).toHaveBeenCalledTimes(2);
     await h.unmount();
   });
 });

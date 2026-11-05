@@ -137,7 +137,7 @@ export default function Roster({ bare = false, onSignOut, onOpenAthlete }) {
         ) : rosterState.error ? (
           // A list that failed to load says so (review 2026-11-04) - never
           // "nobody is assigned", a fact this screen did not verify.
-          <RosterLoadNotice error={rosterState.error} />
+          <RosterLoadNotice error={rosterState.error} onRetry={rosterState.retry} />
         ) : athletes.length ? (
           <Card large>
             <SectionLabel style={{ marginBottom: 6 }}>Your athletes · {athletes.length}</SectionLabel>
@@ -183,6 +183,9 @@ export default function Roster({ bare = false, onSignOut, onOpenAthlete }) {
 
 // No rows yet: one shared empty list, so the memo keyed on it stays stable.
 const NO_ROWS = [];
+// An unreadable athlete's row keeps name null (a Tour results save then stores
+// null and the standings look the name up); this label is screen-only.
+const shownName = (athlete) => athlete.name ?? 'Name unavailable';
 
 /**
  * 13 · Session Roster & Attendance - coach.
@@ -309,7 +312,7 @@ export function SessionAttendance({ variant = 'pre', bare = false, onBack, sessi
         id: r.athleteId,
         // A booking whose athlete could not be read keeps its row
         // (hooks/index.js liveSessionAttendance) - marks still work on it.
-        name: r.name ?? 'Name unavailable',
+        name: r.name ?? null,
         // Contract v2.1: a Yannick 1:1 the family sent a parent to is still
         // the athlete's row (their token paid for it) - the meta says who
         // is actually in the room.
@@ -352,7 +355,8 @@ export function SessionAttendance({ variant = 'pre', bare = false, onBack, sessi
   const reasonFor = (athleteId) => {
     if (localReasons[athleteId] !== undefined) return localReasons[athleteId];
     if (!live) return null;
-    const row = (liveAttendance.data ?? []).find((r) => r.athleteId === athleteId);
+    // The rows on screen: a saved reason outlives a refetch (review 2026-11-04).
+    const row = rows.find((r) => r.athleteId === athleteId);
     return row?.noshowReason ?? null;
   };
   const startReason = (athleteId) => {
@@ -465,7 +469,10 @@ export function SessionAttendance({ variant = 'pre', bare = false, onBack, sessi
   // Single token (ruling 2026-09-29/30): a session the calendar sync cancelled
   // can still hold confirmed bookings - 'Cancel remaining bookings' finishes it.
   const remainingOnly = liveAttendance.sessionStatus === 'cancelled' && cancellableCount > 0 && !localCancelled;
-  const canCancelSession = (role === 'ops' || role === 'owner') && (!sessionCancelled || remainingOnly);
+  // A slot held for a Calendly booking not matched to a family (sessions.unresolved,
+  // 2026-11-04): that booking still stands on Calendly, so no Cancel session.
+  const held = liveAttendance.sessionUnresolved === true && !sessionCancelled;
+  const canCancelSession = (role === 'ops' || role === 'owner') && (!sessionCancelled || remainingOnly) && !held;
   const cancelCopy = `This cancels ${cancellableCount} confirmed booking${cancellableCount === 1 ? '' : 's'}. Monthly members get a bonus token; session-token holders get their token back. This cannot be undone.`;
 
   const statusPill = sessionCancelled
@@ -524,6 +531,11 @@ export function SessionAttendance({ variant = 'pre', bare = false, onBack, sessi
 
           <CounterRow counts={counts} started={started} />
 
+          {held ? (
+            <Body size={12} style={{ marginTop: 12 }}>
+              This slot is held for a Calendly booking that isn't matched to a family yet.
+            </Body>
+          ) : null}
           {canCancelSession ? (
             <Button
               variant="dangerOutline"
@@ -645,7 +657,7 @@ export function SessionAttendance({ variant = 'pre', bare = false, onBack, sessi
           return (
             <div key={athlete.id}>
               <AthleteRow
-                name={athlete.name}
+                name={shownName(athlete)}
                 meta={athlete.meta}
                 avatarSize={42}
                 nameSize={16}
@@ -666,7 +678,7 @@ export function SessionAttendance({ variant = 'pre', bare = false, onBack, sessi
                 }
               >
                 {session?.type === 'training' && onOpenClubhead ? (
-                  <ClubheadChip entry={openWindows.data?.byAthlete?.[athlete.id]} name={athlete.name} onOpen={() => onOpenClubhead(athlete.id, athlete.name)} />
+                  <ClubheadChip entry={openWindows.data?.byAthlete?.[athlete.id]} name={shownName(athlete)} onOpen={() => onOpenClubhead(athlete.id, athlete.name)} />
                 ) : null}
               </AthleteRow>
               {/* Optional reason, indented to align under the name. Never a
@@ -758,6 +770,14 @@ function ResultsEntry({ bare, session, roster, resultsState, onBack }) {
   const seededRef = useRef(false);
   const [saveState, setSaveState] = useState('idle'); // 'idle' | 'saving' | 'saved'
   const [saveError, setSaveError] = useState(null);
+  // Every name this sheet has seen on a saved result or sent in a save,
+  // kept where a re-read cannot blank it (review 2026-11-04): a save bumps
+  // 'tournamentResults', and the results data reads null while that re-read
+  // runs or after it fails, with this sheet still open.
+  const savedNamesRef = useRef(new Map());
+  (resultsState.data?.results ?? []).forEach((r) => {
+    if (typeof r.name === 'string' && r.name) savedNamesRef.current.set(r.athleteId, r.name);
+  });
 
   const athleteIds = useMemo(() => roster.map((a) => a.id), [roster]);
   const bracketsState = useAthleteBrackets(athleteIds);
@@ -805,17 +825,25 @@ function ResultsEntry({ bare, session, roster, resultsState, onBack }) {
     try {
       // Each entry carries the athlete's display name off this very roster
       // (contract v1.5.1, unchanged by v1.6) plus its bracket snapshot -
-      // null when useAthleteBrackets hasn't resolved one.
+      // null when useAthleteBrackets hasn't resolved one. A row this roster
+      // could not read keeps the name already saved on its result (the save
+      // rewrites every row, and that snapshot is how other families see it),
+      // taken from savedNamesRef so a second save while the results re-read
+      // is in flight or failed still sends it.
       const nameById = new Map(roster.map((a) => [a.id, a.name]));
+      const savedName = savedNamesRef.current;
       const entries = roster
         .map((a) => ({
           athleteId: a.id,
-          name: nameById.get(a.id) ?? null,
+          name: nameById.get(a.id) ?? savedName.get(a.id) ?? null,
           bracket: bracketByAthlete[a.id] ?? null,
           score: validScore(a.id),
         }))
         .filter((e) => e.score != null);
       await resultsState.saveResults(entries);
+      entries.forEach((e) => {
+        if (typeof e.name === 'string' && e.name) savedNamesRef.current.set(e.athleteId, e.name);
+      });
       setSaveState('saved');
     } catch (err) {
       setSaveState('idle');
@@ -868,7 +896,7 @@ function ResultsEntry({ bare, session, roster, resultsState, onBack }) {
         {roster.map((athlete, i) => (
           <AthleteRow
             key={athlete.id}
-            name={athlete.name}
+            name={shownName(athlete)}
             meta={athlete.meta}
             avatarSize={42}
             nameSize={16}

@@ -2,6 +2,7 @@ import React from 'react';
 import { renderScreen } from './testRender';
 import Roster, { SessionAttendance } from './Roster';
 import { attendanceReadOnlyFor } from '../data/specialists';
+import * as invalidate from '../hooks/invalidate';
 
 // Owner ruling 2026-11-03: Phil and Yannick see the golf day. A roster the
 // rules would not let the viewer mark renders read-only - the marks as
@@ -15,9 +16,11 @@ let mockLoading;
 let mockRows;
 let mockStatus;
 let mockCoachError;
-const mockWrites = { note: [] };
+let mockUnresolved;
+let mockResults;
+const mockWrites = { note: [], results: [], coachRetries: 0 };
 jest.mock('../hooks', () => ({
-  useCoachRoster: () => ({ data: mockCoachError ? null : [], loading: false, error: mockCoachError ?? null }),
+  useCoachRoster: () => ({ data: mockCoachError ? null : [], loading: false, error: mockCoachError ?? null, retry: () => { mockWrites.coachRetries += 1; } }),
   useSession: () => ({ data: { type: 'training', blockLabel: 'Block 1 of 3', name: 'Training block', meta: '3:00-4:00 PM', startsIn: 'Starts in 12 min' } }),
   useSessionAttendance: () => ({
     data: mockError || mockLoading ? null : mockRows ?? [
@@ -34,7 +37,9 @@ jest.mock('../hooks', () => ({
     sessionNote: mockNote,
     sessionStatus: mockStatus,
     sessionMaxHandicap: null,
+    sessionUnresolved: mockUnresolved,
   }),
+  useTournamentResults: () => ({ data: mockResults, loading: false, error: null, saveResults: async (entries) => { mockWrites.results.push(entries); } }),
   genericSessionName: () => 'Training block',
 }));
 jest.mock('../hooks/live', () => ({ ...jest.requireActual('../hooks/live'), __esModule: true, isLive: () => mockLive }));
@@ -59,7 +64,11 @@ beforeEach(() => {
   mockRows = null;
   mockStatus = 'scheduled';
   mockCoachError = null;
+  mockUnresolved = false;
+  mockResults = null;
   mockWrites.note.length = 0;
+  mockWrites.results.length = 0;
+  mockWrites.coachRetries = 0;
 });
 // The three counters, in document order, as "0 In 0 Out 0 Unmarked".
 const counters = (r) => {
@@ -174,7 +183,11 @@ test('any other load failure is the titled notice with a Try again, never an emp
   expect(text).toContain('Check your connection and try again.');
   expect(text).not.toContain("Your account can't read athletes");
   expect(r.button('Try again')).not.toBeNull();
+  // Try again re-reads the roster: useSessionAttendance re-runs on a 'bookings' bump.
+  const bump = jest.spyOn(invalidate, 'bump');
   await r.click('Try again');
+  expect(bump).toHaveBeenCalledWith('bookings');
+  bump.mockRestore();
   expect(counters(r)).toBe('0 In 0 Out 0 Unmarked');
   await r.unmount();
 });
@@ -199,6 +212,32 @@ test('a refetch after a mark keeps the rows in place: no loading line, the contr
   await r.unmount();
 });
 
+test('a saved no-show reason stays on its row while the roster re-reads or after the re-read fails, and the editor opens with it (review 2026-11-04)', async () => {
+  const again = (r, props = {}) => r.rerender(<SessionAttendance bare sessionId="2026-11-03-5" block={block} onBack={() => {}} {...props} />);
+  const r = await roster({});
+  expect(r.button('Sick, parent texted · edit')).not.toBeNull();
+  mockLoading = true; // the hook blanks data while it re-reads after a mark
+  await again(r);
+  expect(r.button('Sick, parent texted · edit')).not.toBeNull();
+  expect(r.text()).not.toContain('+ Add a reason (optional)');
+  mockLoading = false;
+  mockError = new Error('fetchBookingsBySession: network'); // the re-read failed
+  await again(r);
+  expect(r.text()).toContain("The roster didn't load");
+  expect(r.button('Sick, parent texted · edit')).not.toBeNull();
+  await r.click('Sick, parent texted · edit');
+  expect(r.container.querySelector('input[placeholder^="e.g. Sick"]').value).toBe('Sick, parent texted');
+  await r.unmount();
+
+  // A read-only viewer keeps the reason line too.
+  mockError = null;
+  const ro = await roster({ readOnly: true, role: 'mental' });
+  mockLoading = true;
+  await again(ro, { readOnly: true, role: 'mental' });
+  expect(ro.text()).toContain('Sick, parent texted');
+  await ro.unmount();
+});
+
 test('seed/demo mode (not live) never shows the loading line or the load notice', async () => {
   mockLive = false;
   mockError = PERMISSION();
@@ -218,6 +257,109 @@ test('a booking whose athlete could not be read keeps its row as Name unavailabl
   expect(r.text()).toContain('Name unavailable');
   expect(controls(r)).toBe(4);
   expect(counters(r)).toBe('0 In 0 Out 2 Unmarked');
+  await r.unmount();
+});
+
+test('Tour results saved from a roster with an unreadable athlete keep the saved name, else store null, never the on-screen label (review 2026-11-04)', async () => {
+  const tour = { ...block, type: 'tournament', name: 'RYP Tour' };
+  mockRows = [
+    { bookingId: 'b1', athleteId: 'a1', name: 'Jordan Whitfield', status: 'attended' },
+    { bookingId: 'b4', athleteId: 'a4', name: null, status: 'attended' },
+    { bookingId: 'b5', athleteId: 'a5', name: null, status: 'attended' },
+  ];
+  // Scores already saved: reopening the sheet to correct one re-saves every
+  // row. a4's saved result carries its name; a5 has no saved result yet.
+  mockResults = { results: [{ athleteId: 'a1', score: 72 }, { athleteId: 'a4', name: 'Avery Nguyen', score: 80 }] };
+  const r = await roster({ block: tour });
+  await r.click('Edit Tour results');
+  expect(r.text()).toContain('Name unavailable');
+  const a5Score = r.container.querySelectorAll('input[inputmode="numeric"]')[2];
+  await r.act(() => {
+    Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value').set.call(a5Score, '85');
+    a5Score.dispatchEvent(new Event('input', { bubbles: true }));
+  });
+  await r.click('Save scores');
+  expect(mockWrites.results).toHaveLength(1);
+  expect(mockWrites.results[0].map((e) => [e.athleteId, e.name, e.score])).toEqual([
+    ['a1', 'Jordan Whitfield', 72],
+    ['a4', 'Avery Nguyen', 80],
+    ['a5', null, 85],
+  ]);
+  await r.unmount();
+});
+
+// Types a strokes count into the score sheet's nth field.
+const typeScore = async (r, index, value) => {
+  const field = r.container.querySelectorAll('input[inputmode="numeric"]')[index];
+  await r.act(() => {
+    Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value').set.call(field, value);
+    field.dispatchEvent(new Event('input', { bubbles: true }));
+  });
+};
+
+test('a second Tour results save while the results re-read is in flight or failed still sends the saved name (review 2026-11-04)', async () => {
+  const tour = { ...block, type: 'tournament', name: 'RYP Tour' };
+  mockRows = [
+    { bookingId: 'b1', athleteId: 'a1', name: 'Jordan Whitfield', status: 'attended' },
+    { bookingId: 'b4', athleteId: 'a4', name: null, status: 'attended' },
+  ];
+  mockResults = { results: [{ athleteId: 'a1', name: 'Jordan Whitfield', score: 72 }, { athleteId: 'a4', name: 'Avery Nguyen', score: 80 }] };
+  // A fresh element each render, so rerender reaches the screen.
+  const view = () => <SessionAttendance bare sessionId="2026-11-03-5" block={tour} onBack={() => {}} />;
+  const r = await renderScreen(view());
+  await r.click('Edit Tour results');
+  await r.click('Save scores');
+  expect(mockWrites.results[0].map((e) => [e.athleteId, e.name, e.score])).toEqual([
+    ['a1', 'Jordan Whitfield', 72],
+    ['a4', 'Avery Nguyen', 80],
+  ]);
+  // The save's own re-read blanks the results (in flight, or failed).
+  mockResults = null;
+  await r.rerender(view());
+  expect(r.text()).toContain('Name unavailable');
+  await typeScore(r, 1, '81');
+  await r.click('Save scores');
+  expect(mockWrites.results).toHaveLength(2);
+  expect(mockWrites.results[1].map((e) => [e.athleteId, e.name, e.score])).toEqual([
+    ['a1', 'Jordan Whitfield', 72],
+    ['a4', 'Avery Nguyen', 81],
+  ]);
+  await r.unmount();
+});
+
+test('a name sent in a Tour results save is kept for the next save when the roster then loses it and the results re-read failed (review 2026-11-04)', async () => {
+  const tour = { ...block, type: 'tournament', name: 'RYP Tour' };
+  mockRows = [
+    { bookingId: 'b1', athleteId: 'a1', name: 'Jordan Whitfield', status: 'attended' },
+    { bookingId: 'b4', athleteId: 'a4', name: 'Avery Nguyen', status: 'attended' },
+  ];
+  // First entry for this event: nothing saved yet.
+  mockResults = null;
+  // A fresh element each render, so rerender reaches the screen.
+  const view = () => <SessionAttendance bare sessionId="2026-11-03-5" block={tour} onBack={() => {}} />;
+  const r = await renderScreen(view());
+  await r.click('Enter Tour results');
+  await typeScore(r, 0, '72');
+  await typeScore(r, 1, '80');
+  await r.click('Save scores');
+  expect(mockWrites.results[0].map((e) => [e.athleteId, e.name, e.score])).toEqual([
+    ['a1', 'Jordan Whitfield', 72],
+    ['a4', 'Avery Nguyen', 80],
+  ]);
+  // The roster re-read could not read a4 this time, and the results re-read failed.
+  mockRows = [
+    { bookingId: 'b1', athleteId: 'a1', name: 'Jordan Whitfield', status: 'attended' },
+    { bookingId: 'b4', athleteId: 'a4', name: null, status: 'attended' },
+  ];
+  await r.rerender(view());
+  expect(r.text()).toContain('Name unavailable');
+  await typeScore(r, 1, '81');
+  await r.click('Save scores');
+  expect(mockWrites.results).toHaveLength(2);
+  expect(mockWrites.results[1].map((e) => [e.athleteId, e.name, e.score])).toEqual([
+    ['a1', 'Jordan Whitfield', 72],
+    ['a4', 'Avery Nguyen', 81],
+  ]);
   await r.unmount();
 });
 
@@ -247,10 +389,35 @@ test('a Tour block hides Enter Tour results while the roster is on its first loa
   await loaded.unmount();
 });
 
+test('a slot held for a Calendly booking not matched to a family: no Cancel session, one plain line instead (review 2026-11-04)', async () => {
+  mockRows = [];
+  mockUnresolved = true;
+  const held = await roster({ readOnly: true, role: 'owner' });
+  expect(held.button('Cancel session')).toBeNull();
+  expect(held.text()).toContain("This slot is held for a Calendly booking that isn't matched to a family yet.");
+  await held.unmount();
+  // Absent on every other session: Cancel session as before.
+  mockUnresolved = undefined;
+  const open = await roster({ readOnly: true, role: 'owner' });
+  expect(open.button('Cancel session')).not.toBeNull();
+  expect(open.text()).not.toContain('held for a Calendly booking');
+  await open.unmount();
+});
+
 test("the bottom-tab Roster says when the assigned list failed to load, never 'nobody is assigned'", async () => {
   mockCoachError = PERMISSION();
   const r = await renderScreen(<Roster bare />);
   expect(r.text()).toContain("Your account can't read athletes, so this roster can't load.");
   expect(r.text()).not.toContain('No assigned athletes');
+  expect(r.button('Try again')).toBeNull();
+  await r.unmount();
+});
+
+test('the bottom-tab Roster offers Try again when the list failed for any other reason, and it re-reads the list (review 2026-11-04)', async () => {
+  mockCoachError = new Error('fetchCoachAthletes: network');
+  const r = await renderScreen(<Roster bare />);
+  expect(r.text()).toContain('Check your connection and try again.');
+  await r.click('Try again');
+  expect(mockWrites.coachRetries).toBe(1);
   await r.unmount();
 });

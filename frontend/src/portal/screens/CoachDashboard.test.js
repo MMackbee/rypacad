@@ -16,10 +16,11 @@ const mockMonth = (m) => {
 let mockAttention = [];
 let mockStudents = [];
 let mockRosterError = null;
+let mockRosterRetries = 0;
 jest.mock('../hooks', () => ({
   useCoachDay: () => ({ data: { coach: { name: 'Coach', date: '2026-11-04' }, blocks: mockBlocks, attention: mockAttention } }),
   // The real roster hook drops the contract part of meta while the contract is hidden; the mock does the same.
-  useCoachRoster: () => ({ data: mockRosterError ? null : mockStudents.map((s) => ({ ...s, meta: jest.requireActual('../data/contractFlag').hideContractParts(s.meta) })), loading: false, error: mockRosterError }),
+  useCoachRoster: () => ({ data: mockRosterError ? null : mockStudents.map((s) => ({ ...s, meta: jest.requireActual('../data/contractFlag').hideContractParts(s.meta) })), loading: false, error: mockRosterError, retry: () => { mockRosterRetries += 1; } }),
   useMonthSessions: (m) => mockMonth(m),
 }));
 
@@ -55,6 +56,7 @@ beforeEach(() => {
   try { window.localStorage.clear(); } catch (e) { /* storage unavailable */ }
   mockRequested = [];
   mockRosterError = null;
+  mockRosterRetries = 0;
   jest.useFakeTimers('modern');
   jest.setSystemTime(new Date('2026-11-04T15:00:00'));
 });
@@ -261,5 +263,15 @@ test("the Students tab says when the assigned list failed to load, never 'nobody
   expect(r.text()).toContain("Your account can't read athletes, so this roster can't load. Tell the owner to check your access.");
   expect(r.text()).not.toContain('No assigned athletes');
   expect(r.button('Try again')).toBeNull();
+  await r.unmount();
+});
+
+test('the Students tab offers Try again when the list failed for any other reason, and it re-reads the list (review 2026-11-04)', async () => {
+  mockRosterError = Object.assign(new Error('fetchCurrentUser: offline'), { code: 'unavailable' });
+  const r = await renderScreen(<CoachDashboard bare />);
+  await r.click('Students');
+  expect(r.text()).toContain('Check your connection and try again.');
+  await r.click('Try again');
+  expect(mockRosterRetries).toBe(1);
   await r.unmount();
 });

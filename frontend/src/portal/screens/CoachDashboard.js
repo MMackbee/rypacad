@@ -104,7 +104,7 @@ export default function CoachDashboard({ variant = 'today', bare = false, role =
         {tab === 'overview' ? (
           <OverviewTab data={data} blocks={blocks} none={none} onOpenRoster={onOpenRoster} />
         ) : tab === 'students' && students ? (
-          <StudentsTab athletes={roster.data ?? []} loading={roster.loading} error={roster.error} onOpenAthlete={onOpenAthlete} />
+          <StudentsTab athletes={roster.data ?? []} loading={roster.loading} error={roster.error} onRetry={roster.retry} onOpenAthlete={onOpenAthlete} />
         ) : (
           <SessionsTab
             // Live blocks carry real sessionIds; seed blocks don't, so the
@@ -160,7 +160,7 @@ function QuickCounts({ blocks, attention }) {
 }
 
 /** The coach's full assigned roster - every athlete, not one session's attendance. */
-function StudentsTab({ athletes, loading, error, onOpenAthlete }) {
+function StudentsTab({ athletes, loading, error, onRetry, onOpenAthlete }) {
   if (loading) {
     return (
       <Card large>
@@ -170,7 +170,7 @@ function StudentsTab({ athletes, loading, error, onOpenAthlete }) {
   }
   // A list that failed to load says so (review 2026-11-04) - never "nobody
   // is assigned", a fact this screen did not verify.
-  if (error) return <RosterLoadNotice error={error} />;
+  if (error) return <RosterLoadNotice error={error} onRetry={onRetry} />;
   if (!athletes.length) {
     return (
       <div
