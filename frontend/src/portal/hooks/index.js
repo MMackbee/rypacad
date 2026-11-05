@@ -221,6 +221,8 @@ export { coachingFor, useIssueTokens, usePush, useRecentNotices, useScholarships
 // 2026-10-28: Yannick's tools (hooks/mental.js, hooks/mentalLive.js); role
 // 'mental' screens only - the notes reads are refused for every other role.
 export { useContractBoard, useMentalAthlete, useMentalAthletes, useMentalNote } from './mental';
+export { countersignConsent, sendConsentReminder, useConsentFlow, useFamilyConsents, withdrawRecording } from './mentalConsent';
+export { useConsentTracker, useStaffConsent } from './mentalConsentStaff';
 // 2026-10-28: the parent's contract card for one child (spec 4.3). The module
 // imports useContract/usePracticeLog from this file; the cycle is safe
 // because every use sits inside a hook body, never at import time.

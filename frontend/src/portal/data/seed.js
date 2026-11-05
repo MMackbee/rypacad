@@ -419,9 +419,10 @@ export const CODE_OF_GRIT = [
 /**
  * Yannick's screens in seed mode (spec 5): two athletes, three mental
  * sessions, one intake and two session notes, two weeks of logs and
- * check-ins. Dates are relative to `today` so the board always has a
- * current week. Pure data; the hooks in hooks/mental.js read it when
- * isLive() is false.
+ * check-ins; for mental consent, Reese (a 1:1 a week out, unsigned) and
+ * Quinn (18+, the Parker family). Dates are relative to `today` so the
+ * board always has a current week. Pure data; the hooks in hooks/mental.js
+ * and hooks/mentalConsent.js read it when isLive() is false.
  */
 export function mentalFixtures(today) {
   const week = weekStartFor(today);
@@ -429,6 +430,8 @@ export function mentalFixtures(today) {
   const athletes = [
     { id: 'jordan', name: 'Jordan Whitfield', dob: '2012-06-17', householdId: 'whitfield' },
     { id: 'nico', name: 'Nico Whitfield', dob: '2017-09-09', householdId: 'whitfield' },
+    { id: 'reese', name: 'Reese Whitfield', dob: '2014-03-02', householdId: 'whitfield' },
+    { id: 'quinn', name: 'Quinn Parker', dob: '2006-08-20', householdId: 'parker' },
   ];
   const oneOnOnes = [
     { id: 'cal-seed-a', date: day(-9), time: '4:00 PM', type: 'mental', status: 'scheduled', durationMinutes: 30 },
@@ -443,11 +446,13 @@ export function mentalFixtures(today) {
     { id: 'tr-seed-fri', date: day(4), time: '4:00 PM', type: 'training', status: 'scheduled' },
     { id: 'tour-seed-sat', date: day(5), time: '9:00 AM', type: 'tournament', status: 'scheduled' },
   ];
-  const sessions = [...oneOnOnes, ...academy];
+  const reeseFirst = { id: 'cal-seed-d', date: addContractDays(today, 7), time: '4:30 PM', type: 'mental', status: 'scheduled', durationMinutes: 30 };
+  const sessions = [...oneOnOnes, reeseFirst, ...academy];
   const bookings = [
     ...oneOnOnes.map((s, i) => ({
       id: `jordan_${s.id}`, athleteId: 'jordan', sessionId: s.id, date: s.date, type: 'mental', status: i < 2 ? 'attended' : 'confirmed', attendee: 'athlete',
     })),
+    { id: 'reese_cal-seed-d', athleteId: 'reese', sessionId: 'cal-seed-d', date: reeseFirst.date, type: 'mental', status: 'confirmed', attendee: 'athlete' },
     { id: 'jordan_tr-seed-tue', athleteId: 'jordan', sessionId: 'tr-seed-tue', date: day(1), type: 'training', status: 'confirmed' },
     { id: 'jordan_tour-seed-sat', athleteId: 'jordan', sessionId: 'tour-seed-sat', date: day(5), type: 'tournament', status: 'confirmed' },
     { id: 'nico_tr-seed-thu', athleteId: 'nico', sessionId: 'tr-seed-thu', date: day(3), type: 'training', status: 'confirmed' },
@@ -470,7 +475,10 @@ export function mentalFixtures(today) {
   return {
     athletes, sessions, bookings, entries, logsByAthlete, checkins,
     config: { enabled: true, enabledAt: day(-14) },
-    households: { whitfield: { name: 'Whitfield family', guardian: { name: 'Dana', email: 'dana@email.com', phone: null } } },
+    households: {
+      whitfield: { name: 'Whitfield family', guardian: { name: 'Dana', email: 'dana@email.com', phone: null } },
+      parker: { name: 'Parker family', guardian: { name: 'Sam Parker', email: 'sam.parker@example.com', phone: null } },
+    },
   };
 }
 

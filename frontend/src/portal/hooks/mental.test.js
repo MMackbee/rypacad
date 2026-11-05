@@ -17,12 +17,12 @@ function mountHook(useHook) {
 }
 const settle = async (h) => { await h.render(); await act(async () => { await new Promise((r) => setTimeout(r, 0)); }); };
 
-test('seed mode: the Athletes list shows Jordan and Nico with the fixture facts', async () => {
+test('seed mode: the Athletes list shows Jordan, Nico, Quinn and Reese with the fixture facts', async () => {
   const h = mountHook(() => useMentalAthletes());
   await settle(h);
   expect(h.out.current.loading).toBe(false);
   expect(h.out.current.data.map((r) => [r.athleteId, r.age, r.hasIntake, r.nextSession != null, r.lastSession != null])).toEqual([
-    ['jordan', 14, true, true, true], ['nico', 9, false, false, false],
+    ['jordan', 14, true, true, true], ['nico', 9, false, false, false], ['quinn', 20, false, false, false], ['reese', 12, false, true, false],
   ]);
   h.unmount();
 });
@@ -72,6 +72,8 @@ test('seed mode: the board groups the fixtures and a local check-in moves the ro
   expect(h.out.current.config).toEqual({ enabled: true, enabledAt: '2026-10-26' });
   expect(h.out.current.rows.checkedIn.map((r) => r.athleteId)).toEqual(['jordan']);
   expect(h.out.current.rows.thisWeek.map((r) => r.athleteId)).toEqual(['nico']);
+  // No check-in yet, 16 days since enabledAt: past OVERDUE_DAYS.
+  expect(h.out.current.rows.due.map((r) => r.athleteId)).toEqual(['quinn', 'reese']);
   await act(async () => { await h.out.current.setCheckin({ athleteId: 'nico', checkedIn: true }); });
   expect(h.out.current.rows.checkedIn.map((r) => r.athleteId)).toEqual(['jordan', 'nico']);
   h.unmount();
