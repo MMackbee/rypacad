@@ -92,8 +92,13 @@ const {fakeDb} = require('./fake-firestore');
 const notify = require('./notify');
 const sent = [];
 const seen = new Set();
+// Kinds whose send fails the way sendNotice reports it: no throw, sent false.
+const failKinds = new Set();
 notify.sendNotice = async (args) => {
   const id = `${args.kind}_${args.subjectKey}`;
+  if (failKinds.has(args.kind)) {
+    return {id, duplicate: false, sent: false, error: 'boom'};
+  }
   if (seen.has(id)) return {id, duplicate: true, sent: false};
   seen.add(id);
   sent.push(args);
@@ -103,6 +108,7 @@ notify.sendNotice = async (args) => {
 function resetSent() {
   sent.length = 0;
   seen.clear();
+  failKinds.clear();
 }
 const pick = (o, keys) => Object.fromEntries(keys.map((k) => [k, o[k]]));
 const consentBase = () => ({
@@ -162,6 +168,18 @@ test('runSessionReminders: a consent failure never costs a family its ' +
   const r = await jobs.runSessionReminders({now: EVENING, db});
   assert.deepEqual(pick(r, ['sent', 'consent', 'consentError']),
       {sent: 1, consent: 0, consentError: 2});
+  assert.deepEqual(sent.map((s) => s.kind), ['reminder-24h']);
+});
+
+test('runSessionReminders: a consent ask that could not be sent counts as ' +
+    'an error, not sent; the family\'s reminder still goes', async () => {
+  resetSent();
+  failKinds.add('consent-reminder');
+  const r = await jobs.runSessionReminders({now: EVENING,
+    db: fakeDb(reminderDocs())});
+  assert.deepEqual(pick(r, ['sent', 'consent', 'consentDuplicate',
+    'consentError']), {sent: 1, consent: 0, consentDuplicate: 0,
+    consentError: 1});
   assert.deepEqual(sent.map((s) => s.kind), ['reminder-24h']);
 });
 

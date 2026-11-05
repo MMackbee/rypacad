@@ -113,13 +113,23 @@ async function askFor(args) {
 }
 
 /**
- * Send one consent notice and map the answer.
+ * Send one consent notice and map the answer. sendNotice does not throw
+ * when it cannot resolve the recipients or record the ledger row; it
+ * answers `{duplicate: false, sent: false, error}`. That is a failure, not
+ * a send: it rejects, so the job counts it in `consentError` and the
+ * trigger logs it.
  * @param {!Object} args The `sendNotice` arguments.
- * @return {!Promise<string>} 'duplicate' or 'sent'.
+ * @return {!Promise<string>} 'duplicate' or 'sent'; rejects when nothing
+ *     was sent.
  */
 async function send(args) {
   const res = await notify.sendNotice(args);
-  return res && res.duplicate ? 'duplicate' : 'sent';
+  if (res && res.duplicate) return 'duplicate';
+  if (!res || !res.sent) {
+    throw new Error('consent notice not sent: ' +
+        ((res && res.error) || 'unknown'));
+  }
+  return 'sent';
 }
 
 /**
@@ -130,7 +140,8 @@ async function send(args) {
  * booking. Keyed `consent:<athleteId>:<date>`: two 1:1s on one day ask once.
  * @param {{booking: ?Object, bookingId: string, store: !Object,
  *     now: !Date}} args The new booking.
- * @return {!Promise<string>} 'sent' | 'duplicate' | 'skipped'.
+ * @return {!Promise<string>} 'sent' | 'duplicate' | 'skipped'; rejects
+ *     when the ask could not be sent.
  */
 async function onMentalBookingCreated(args) {
   const {booking, bookingId, store, now} = args;
@@ -170,7 +181,8 @@ async function onMentalBookingCreated(args) {
  *     households: !Function, records: !Function}}} args The booking, the
  *     switch as the job read it, the clock and `(id) => Promise<?Object>`
  *     readers for athletes, households and consent records.
- * @return {!Promise<string>} 'sent' | 'duplicate' | 'skipped'.
+ * @return {!Promise<string>} 'sent' | 'duplicate' | 'skipped'; rejects
+ *     when the reminder could not be sent.
  */
 async function remindConsentFor(args) {
   const {booking, bookingId, store, config, now, readers} = args;
@@ -209,7 +221,8 @@ async function remindConsentFor(args) {
  * @param {{params: {athleteId: string}}} context The trigger context.
  * @param {{db: (!Object|undefined), now: (!Date|undefined)}=} deps
  *     Injectable Firestore and clock.
- * @return {!Promise<string>} 'sent' | 'duplicate' | 'skipped'.
+ * @return {!Promise<string>} 'sent' | 'duplicate' | 'skipped'; rejects
+ *     when the receipt could not be sent (onMentalConsentSigned logs it).
  */
 async function onConsentSignedHandler(snap, context, deps) {
   const d = deps || {};

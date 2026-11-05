@@ -182,6 +182,17 @@ test('the ledger row exists', async () => {
   forced = null;
 });
 
+test('a send that could not be recorded rejects; it is never "sent"',
+    async () => {
+      reset();
+      // sendNotice answers this, without throwing, when it cannot resolve
+      // the recipients or write the ledger row.
+      forced = {duplicate: false, sent: false, error: 'boom'};
+      await assert.rejects(MC.onMentalBookingCreated({booking: cal(),
+        bookingId: 'ava_cal-1', store: fakeDb(base()), now: NOW}), /boom/);
+      forced = null;
+    });
+
 // The consent-signed receipt (Task 5).
 const snapOf = (record) => ({id: 'ava', data: () => record});
 const ctxAva = {params: {athleteId: 'ava'}};
