@@ -25,6 +25,12 @@
  * map or absent category == the category's default. `billing` email is
  * LOCKED ON - a transactional payment notice always reaches at least email -
  * while billing push follows the saved preference like every other channel.
+ * Two schedule KINDS are email-locked too (LOCKED_EMAIL_KINDS, mental
+ * consent 2026-11-05): 'consent-needed' and 'consent-reminder' always email,
+ * while every other session email, and their push, follow the saved
+ * Sessions choice. The Settings screen says so in a footnote on the Sessions
+ * category (`data/parent.js`), not with `lockedChannels`, which would lock
+ * every session email.
  */
 
 'use strict';
@@ -54,7 +60,18 @@ const LINKS = {
   'tokens-expiring': '/portal/billing',
   'grace-expiring': '/portal/billing',
   'membership': '/portal/billing',
+  'consent-needed': '/portal/consent/mental',
+  'consent-reminder': '/portal/consent/mental',
+  'consent-signed': '/portal/consent/mental',
 };
+
+/**
+ * Kinds whose email always sends, whatever the category's saved email
+ * choice (mental consent 2026-11-05: Yannick cannot hold a 1:1 without the
+ * signature). Their push follows the saved preference.
+ * @const {!Array<string>}
+ */
+const LOCKED_EMAIL_KINDS = ['consent-needed', 'consent-reminder'];
 
 /**
  * Firestore, resolved lazily so this module can be required before
@@ -185,9 +202,13 @@ async function resolveRecipients(args) {
  * @param {?Object} prefs `users.notificationPrefs`, possibly null.
  * @param {string} category The notice's category.
  * @param {string} channel 'email' or 'push'.
+ * @param {?string=} kind The notice's kind; a call without it behaves as
+ *     before the per-kind lock.
  * @return {boolean} True when the channel may send.
  */
-function channelAllowed(prefs, category, channel) {
+function channelAllowed(prefs, category, channel, kind = null) {
+  // The two consent asks always email (LOCKED_EMAIL_KINDS).
+  if (channel === 'email' && LOCKED_EMAIL_KINDS.includes(kind)) return true;
   // Transactional and locked in the UI: a billing email always sends.
   if (category === 'billing' && channel === 'email') return true;
   const defaults = CATEGORY_DEFAULTS[category] || {email: true, push: false};
@@ -202,18 +223,19 @@ function channelAllowed(prefs, category, channel) {
  * value that still needs a provider call.
  * @param {!Object} recipient A resolved recipient.
  * @param {string} category The notice's category.
+ * @param {?string=} kind The notice's kind (the per-kind email lock).
  * @return {{uid: string, recipient: !Object, email: string, push: string}}
  *     The plan.
  */
-function planFor(recipient, category) {
+function planFor(recipient, category, kind = null) {
   let mail = 'skipped';
-  if (!channelAllowed(recipient.prefs, category, 'email')) {
+  if (!channelAllowed(recipient.prefs, category, 'email', kind)) {
     mail = 'off';
   } else if (recipient.email) {
     mail = 'attempt';
   }
   let device = 'off';
-  if (channelAllowed(recipient.prefs, category, 'push')) {
+  if (channelAllowed(recipient.prefs, category, 'push', kind)) {
     device = recipient.tokens.length > 0 ? 'attempt' : 'no-device';
   }
   return {uid: recipient.uid, recipient, email: mail, push: device};
@@ -305,7 +327,7 @@ async function sendNotice(args) {
   let plans = [];
   try {
     const recipients = await resolveRecipients(args);
-    plans = recipients.map((r) => planFor(r, args.category));
+    plans = recipients.map((r) => planFor(r, args.category, args.kind));
     const claimed = await db().runTransaction(async (tx) => {
       const snap = await tx.get(ref);
       if (snap.exists) return false;
@@ -353,6 +375,7 @@ async function sendNotice(args) {
 module.exports = {
   CATEGORY_DEFAULTS,
   LINKS,
+  LOCKED_EMAIL_KINDS,
   channelAllowed,
   courierEventId: email.courierEventId,
   getUserProfile,
