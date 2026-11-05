@@ -13,7 +13,14 @@
  * nothing replaced it. The login email is the household's parent users doc
  * email exactly as stored (else its guardian email as stored): the webhook
  * looks emails up as typed, then lower-cased. A booking whose held slot was
- * already released is refused.
+ * already released is refused, and so is one that is not the RYP 1:1
+ * (owner ruling 2026-11-04: Yannick's Calendly also hosts his private
+ * clients' meetings and the website's free 15-minute info call). The
+ * webhook's own rule (functions/portal/calendly-resolve.js isRypOneOnOne)
+ * decides: the webhook writes those as 'other-event', which --list leaves
+ * out and --link refuses; with CALENDLY_TOKEN the event is read from
+ * Calendly and refused when it is not the RYP 1:1; without one, a row from
+ * before the rule (no eventName) prints a warning to check it in Calendly.
  *
  *   node scripts/calendly-unmatched.mjs --prod --list
  *   node scripts/calendly-unmatched.mjs --prod --link <inviteeUuid> --athlete <athleteId> \
@@ -32,7 +39,11 @@
 
 import crypto from 'node:crypto';
 import { spawnSync } from 'node:child_process';
+import { createRequire } from 'node:module';
 import { resolveTarget, queryCollection, getDoc, docName, commit, fsFields, eqFilter } from './lib/firestore-rest.mjs';
+
+// The webhook's own rule (owner ruling 2026-11-04), so the script and the webhook never disagree.
+const { isRypOneOnOne } = createRequire(import.meta.url)('../functions/portal/calendly-resolve.js');
 
 const args = process.argv.slice(2);
 const flag = (name) => args.includes(name);
@@ -68,7 +79,7 @@ async function cal(path) {
   return json;
 }
 
-/** The event's times and its invitee as Calendly has them, or null without a token. */
+/** The event's times, name and type and its invitee (form answers, utm) as Calendly has them, or null without a token. */
 async function fromCalendly(row) {
   if (!TOKEN) return null;
   const eventUuid = uuidOf(row.eventUri);
@@ -78,14 +89,23 @@ async function fromCalendly(row) {
   const answer = (re) => ((inv.questions_and_answers || []).find((q) => re.test(String(q.question || ''))) || {}).answer || null;
   return {
     startTime: ev.start_time || null, endTime: ev.end_time || null, status: ev.status || null,
+    eventName: ev.name || null, eventTypeUri: ev.event_type || null,
     inviteeStatus: inv.status || null, name: inv.name || null, email: inv.email ? String(inv.email).toLowerCase() : null,
     athleteName: answer(/athlete.*name|name.*athlete/i), parentEmail: answer(/parent.*e-?mail|e-?mail.*parent/i),
+    questions: inv.questions_and_answers || [], tracking: inv.tracking || {},
   };
+}
+
+/** What Calendly says, shaped as the webhook payload isRypOneOnOne reads (event name, form questions, utm_source). */
+function calendlyPayload(x) {
+  return { scheduled_event: { name: x.eventName }, questions_and_answers: x.questions, tracking: x.tracking };
 }
 
 async function listRows(target) {
   const rows = await queryCollection(target, { from: [{ collectionId: 'calendlyEvents' }], limit: 3000 });
   const byId = new Map(rows.map((r) => [r.id, r]));
+  // Owner ruling 2026-11-04: Yannick's other event types are never listed, only counted.
+  const others = rows.filter((r) => r.event === 'invitee.created' && r.outcome === 'other-event').length;
   const created = rows.filter((r) => r.event === 'invitee.created' && r.outcome === 'unresolved');
   created.sort((a, b) => String(iso(a.receivedAt)).localeCompare(String(iso(b.receivedAt))));
   const out = [];
@@ -96,7 +116,16 @@ async function listRows(target) {
     const session = eventUuid ? await getDoc(target, 'sessions', `cal-${eventUuid}`) : null;
     out.push({ row: r, inviteeUuid, eventUuid, canceled, session });
   }
-  return out;
+  return { entries: out, others };
+}
+
+/** `30 min "RYP Academy - Mental Game 1:1"`: from the row (since the rule) or Calendly; '' when neither is known. */
+function kindOf(row, extra, start, end) {
+  const x = extra || {};
+  const slot = row.slot || {};
+  const min = Math.round((Date.parse(end || slot.endTime || x.endTime) - Date.parse(start || slot.startTime || x.startTime)) / 60000);
+  const name = row.eventName || x.eventName || null;
+  return [min > 0 ? `${min} min` : null, name ? `"${name}"` : null].filter(Boolean).join(' ');
 }
 
 function describe(e, extra) {
@@ -105,8 +134,14 @@ function describe(e, extra) {
   const slot = r.slot || null;
   const when = slot ? `${slot.date} ${slot.time}` : extra && extra.startTime ? `${chicago(extra.startTime)} (Calendly)` : '(time not stored: see Calendly, or pass --start)';
   const who = [inv.athleteName ? `athlete "${inv.athleteName}"` : null, inv.name ? `by ${inv.name}` : null, inv.email || null, inv.parentEmail && inv.parentEmail !== inv.email ? `parent ${inv.parentEmail}` : null].filter(Boolean).join(' ');
-  const state = e.canceled ? 'cancelled on Calendly' : !e.session ? 'no session doc (row from before 2026-11-04)' : e.session.status === 'cancelled' ? 'session released' : e.session.unresolved ? 'held, unmatched' : 'session is booked';
-  return `  ${String(iso(r.receivedAt) || '(no time)').slice(0, 16)}  invitee ${e.inviteeUuid}\n      ${when}  ${who || '(who booked: not stored)'}  reason=${r.reason || '-'}  [${state}]`;
+  // Owner ruling 2026-11-04: the event's length and name; a row from before the rule does not say which event it was.
+  const named = r.eventName || (extra && extra.eventName);
+  const kind = [kindOf(r, extra), named ? null : '(event type not stored: check in Calendly that it is the Mental Game 1:1)'].filter(Boolean).join(' ');
+  const notRyp = extra && !isRypOneOnOne(calendlyPayload(extra));
+  const state = notRyp ? 'Calendly says this is NOT the RYP Mental Game 1:1: do not link' : e.canceled ? 'cancelled on Calendly' : !e.session ? 'no session doc (row from before 2026-11-04)' : e.session.status === 'cancelled' ? 'session released' : e.session.unresolved ? 'held, unmatched' : 'session is booked';
+  // Who booked another of Yannick's meetings is not shown (owner ruling 2026-11-04).
+  const shown = notRyp ? '(who booked: not shown, not the RYP 1:1)' : who || '(who booked: not stored)';
+  return `  ${String(iso(r.receivedAt) || '(no time)').slice(0, 16)}  invitee ${e.inviteeUuid}\n      ${when}  ${kind}  ${shown}  reason=${r.reason || '-'}  [${state}]`;
 }
 
 async function main() {
@@ -114,13 +149,13 @@ async function main() {
   console.log(`Target: ${target.label}; webhook: ${HOOK}; Calendly API: ${TOKEN ? 'token set' : 'no token'}\n`);
 
   if (flag('--list')) {
-    const all = await listRows(target);
+    const { entries: all, others } = await listRows(target);
     const open = all.filter((e) => !e.canceled && !(e.session && e.session.status === 'cancelled'));
     const done = all.filter((e) => !open.includes(e));
     console.log(`Unmatched Calendly bookings still open: ${open.length}`);
     for (const e of open) {
       let extra = null;
-      if (!e.row.slot || !e.row.invitee) {
+      if (!e.row.slot || !e.row.invitee || !e.row.eventName) {
         try { extra = await fromCalendly(e.row); } catch (err) { console.log(`  (Calendly lookup failed: ${err.message})`); }
       }
       console.log(describe(e, extra));
@@ -129,6 +164,7 @@ async function main() {
       console.log(`\nAlready cancelled or released (nothing to do): ${done.length}`);
       for (const e of done) console.log(describe(e, null));
     }
+    if (others) console.log(`\nLeft out: ${others} booking(s) of Yannick's other Calendly event types (not the RYP Mental Game 1:1); they book and hold nothing and keep no names.`);
     console.log('\nTo link one: node scripts/calendly-unmatched.mjs' + (PROD ? ' --prod' : '') + ' --link <inviteeUuid> --athlete <athleteId> [--start <ISO with offset> --minutes <n>] [--attendee parent] (then --yes)');
     return;
   }
@@ -139,6 +175,7 @@ async function main() {
   const ledgerId = `${inviteeUuid}_invitee.created`;
   const row = await getDoc(target, 'calendlyEvents', ledgerId);
   if (!row) die(`no ledger row calendlyEvents/${ledgerId}.`);
+  if (row.outcome === 'other-event') die(`that booking is another of Yannick's Calendly event types (${row.eventName ? `"${row.eventName}"` : 'name not stored'}), not the RYP Mental Game 1:1; nothing to link.`);
   if (row.outcome !== 'unresolved') die(`that booking is '${row.outcome}', not unresolved; nothing to link.`);
   if (await getDoc(target, 'calendlyEvents', `${inviteeUuid}_invitee.canceled`)) die('that booking was cancelled on Calendly; nothing to link.');
   // Review 2026-11-04: a released hold (cancelled or rescheduled on Calendly, or cancelled in the app) is not linked.
@@ -162,9 +199,11 @@ async function main() {
   let start = row.slot && row.slot.startTime ? row.slot.startTime : null;
   let end = row.slot && row.slot.endTime ? row.slot.endTime : null;
   let extra = null;
-  if (!start) {
-    try { extra = await fromCalendly(row); } catch (err) { console.log(`(Calendly lookup failed: ${err.message})`); }
-    if (extra && extra.startTime) { start = extra.startTime; end = extra.endTime; }
+  if (TOKEN) {
+    // Owner ruling 2026-11-04: with a token, Calendly says which event this is, and only the RYP 1:1 is linked.
+    try { extra = await fromCalendly(row); } catch (err) { die(`could not read the booking from Calendly (${err.message}). Fix CALENDLY_TOKEN, or unset it and check in Calendly yourself that this is the Mental Game 1:1.`); }
+    if (!isRypOneOnOne(calendlyPayload(extra))) die(`Calendly says this booking is ${kindOf(row, extra) || 'another event type'}, not the RYP Mental Game 1:1 (the website's info call or a private meeting); nothing to link.`);
+    if (!start && extra.startTime) { start = extra.startTime; end = extra.endTime; }
   }
   if (opt('--start')) {
     const s = new Date(opt('--start'));
@@ -176,6 +215,10 @@ async function main() {
   }
   if (!start || !end) die('no slot time: pass --start <ISO with offset> --minutes <n>, or set CALENDLY_TOKEN.');
   if (extra && extra.status && extra.status !== 'active') die(`Calendly says the event is '${extra.status}'; nothing to link.`);
+  // A row the webhook wrote under the rule says which event it was (and 'unresolved' means the rule called it the
+  // RYP 1:1); an older one does not, and linking an info call or a private meeting would spend a family token.
+  const eventName = row.eventName || (extra && extra.eventName) || null;
+  const unchecked = !TOKEN && !row.eventName;
   const inv = row.invitee || extra || {};
   const attendee = opt('--attendee') === 'parent' ? 'A parent' : 'The athlete';
   const payload = {
@@ -183,7 +226,10 @@ async function main() {
     payload: {
       uri: row.inviteeUri, event: row.eventUri, email, name: inv.name || (household.guardian && household.guardian.name) || athlete.name,
       status: 'active', rescheduled: false, old_invitee: null, new_invitee: null, timezone: 'America/Chicago',
-      scheduled_event: { uri: row.eventUri, start_time: start, end_time: end, status: 'active', name: 'RYP Academy - Mental Game 1:1' },
+      scheduled_event: {
+        uri: row.eventUri, start_time: start, end_time: end, status: 'active', name: eventName || 'RYP Academy - Mental Game 1:1',
+        event_type: row.eventTypeUri || (extra && extra.eventTypeUri) || null,
+      },
       questions_and_answers: [
         { question: 'Athlete name', answer: athlete.name, position: 0 },
         { question: 'Who is attending?', answer: attendee, position: 1 },
@@ -195,8 +241,10 @@ async function main() {
 
   console.log(`Link invitee ${inviteeUuid} (booked ${iso(row.receivedAt)}) to ${athlete.name} (${athleteId}, ${household.name || athlete.householdId})`);
   console.log(`  slot: ${chicago(start)} to ${chicago(end)} (${Math.round((Date.parse(end) - Date.parse(start)) / 60000)} min), attendee: ${attendee}`);
+  console.log(`  event type: ${eventName ? `"${eventName}"${extra ? ' (Calendly says it is the RYP 1:1)' : ''}` : '(not stored: a row from before Nov 4)'}`);
   console.log(`  booked on Calendly as: ${[inv.athleteName ? `athlete "${inv.athleteName}"` : null, inv.name || null, inv.email || null].filter(Boolean).join(', ') || '(not stored)'}`);
   console.log(`  will: delete calendlyEvents/${ledgerId}, then POST the booking, signed, to ${HOOK} as the family's login ${email.replace(/^(..).*@/, '$1…@')}`);
+  if (unchecked) console.log("WARNING: this row does not say which Calendly event it was. Check in Yannick's Calendly that it is the RYP Mental Game 1:1, not the website's info call or a private meeting, before you link it.");
   if (!YES) { console.log('\nDry run: nothing written or sent. Add --yes to link it.'); return; }
 
   let key = process.env.CALENDLY_WEBHOOK_SIGNING_KEY || null;

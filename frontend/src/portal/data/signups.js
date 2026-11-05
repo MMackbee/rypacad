@@ -65,7 +65,7 @@ function loginFor(athlete, invite, now) {
  * A test household (`test: true`, data/testFamily.js) is never a row, and
  * its athletes never make a duplicate-child flag.
  */
-export function buildSignupRows({ households: allHouseholds = [], athletes: allAthletes = [], invites = [], flaggedBookings = [], calendlyEvents = [], now = new Date() }) {
+export function buildSignupRows({ households: allHouseholds = [], athletes: allAthletes = [], invites = [], flaggedBookings = [], calendlyEvents = [], calendlyCanceled = [], heldSessions = [], now = new Date() }) {
   // Owner 2026-10-15: staging shares the production database, so the test
   // family sits beside real ones; the report leaves it out.
   const { households, athletes } = withoutTestFamilies({ households: allHouseholds, athletes: allAthletes });
@@ -128,11 +128,24 @@ export function buildSignupRows({ households: allHouseholds = [], athletes: allA
   // An unresolved Calendly booking has no household to hang off; it is its
   // own list (AdminSignups: "Unmatched Calendly bookings", inside Flagged).
   // 2026-11-04: the ledger now says who booked and when (invitee, slot) so
-  // the owner can link the booking; older rows carry neither.
-  const unresolved = calendlyEvents.filter((e) => e.outcome === 'unresolved' && !e.householdId).map((e) => ({
-    id: e.id, outcome: e.outcome, receivedAt: stamp(e.receivedAt),
-    invitee: e.invitee ?? null, slot: e.slot ?? null, reason: e.reason ?? null,
-  }));
+  // the owner can link the booking; older rows carry neither. Review
+  // 2026-11-04: the created row stays 'unresolved' after the family cancels
+  // or moves the booking on Calendly, so one with a cancel row
+  // (`<inviteeUuid>_invitee.canceled`), or whose held `cal-<eventUuid>`
+  // session was released (cancelled in the app, or freed by the move), is
+  // left out: nothing is held or to link (the link script's list agrees).
+  // Owner ruling 2026-11-04: Yannick's other Calendly event types are
+  // 'other-event' rows (no who-booked), never 'unresolved', so never listed.
+  const cancelledOnCalendly = new Set(calendlyCanceled.map((e) => e.id));
+  const released = new Set(heldSessions.filter((s) => s.status === 'cancelled').map((s) => s.id));
+  const gone = (e) => cancelledOnCalendly.has(String(e.id).replace(/_invitee\.created$/, '_invitee.canceled')) ||
+    released.has(`cal-${String(e.eventUri ?? '').split('/').pop()}`);
+  const unresolved = calendlyEvents
+    .filter((e) => e.outcome === 'unresolved' && !e.householdId && !gone(e))
+    .map((e) => ({
+      id: e.id, outcome: e.outcome, receivedAt: stamp(e.receivedAt),
+      invitee: e.invitee ?? null, slot: e.slot ?? null, reason: e.reason ?? null, eventName: e.eventName ?? null,
+    }));
   return {
     rows,
     counts: { all: rows.length, unpaid: rows.filter((r) => r.unpaid).length, flagged: rows.filter((r) => r.flagged).length, unresolved: unresolved.length },

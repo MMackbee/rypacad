@@ -81,15 +81,19 @@ export default function AdminSignups({ bare = false, role = 'owner', onBack, onO
 /**
  * D16: unmatched Calendly bookings - no household row exists, so they sit in
  * their own card. Review 2026-11-04: the copy follows the held-slot flow.
+ * Owner ruling 2026-11-04: only the RYP Mental Game 1:1 is listed; Yannick's
+ * other Calendly meetings are 'other-event' rows, never read here.
  */
 function UnmatchedCard({ events }) {
   return (
     <Card tone="red" large>
       <SectionLabel tone={color.error} style={{ marginBottom: 6 }}>Unmatched Calendly bookings · {events.length}</SectionLabel>
       <Body size={12} style={{ marginBottom: 8 }}>
-        Calendly bookings with Yannick that the app could not match to a family, so no athlete is booked and no token was used.
-        Since Nov 4 each one holds its time on Yannick's list, so no one else can take it. The owner links each one to its family with
-        the link script (scripts/calendly-unmatched.mjs), or the held time frees itself when the family cancels on Calendly.
+        Mental Game 1:1 bookings on Yannick's Calendly that the app could not match to a family, so no athlete is booked and no
+        token was used. Since Nov 4 each one holds its time on Yannick's list until the owner links it to its family with the link
+        script (scripts/calendly-unmatched.mjs). A booking the family cancels or moves on Calendly frees its time and leaves this
+        list. Since Nov 4 Yannick's other Calendly meetings, such as the website's free info call, are left off. A line from
+        before Nov 4 kept no details and may be one of them: check it in Calendly before linking it.
       </Body>
       {events.map((e) => <Body key={e.id} size={12} tone={color.error}>{unresolvedLabel(e)}</Body>)}
     </Card>

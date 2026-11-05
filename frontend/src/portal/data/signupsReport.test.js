@@ -20,15 +20,21 @@ test('the Flagged count folds in unmatched Calendly bookings (D16)', () => {
     id: 'ev-2', outcome: 'unresolved', receivedAt: '2026-10-20T09:15', reason: 'no-login',
     invitee: { name: 'Jo Schinka', email: 'jo@example.com', athleteName: 'Addie Schinka', parentEmail: null },
     slot: { date: '2026-11-05', time: '7:00 PM', durationMinutes: 45 },
-  })).toBe('Addie Schinka · session Thursday, Nov 5 7:00 PM · booked Tuesday, Oct 20 by Jo Schinka, jo@example.com · no account with this email');
+  })).toBe('Addie Schinka · session Thursday, Nov 5 7:00 PM, 45 min · booked Tuesday, Oct 20 by Jo Schinka, jo@example.com · no account with this email');
+  // Review 2026-11-04: the length and the Calendly event name tell the 1:1 from another of Yannick's event types.
+  expect(unresolvedLabel({
+    id: 'ev-4', outcome: 'unresolved', receivedAt: '2026-11-04T10:00', reason: 'no-login', eventName: 'RYP Academy - Mental Game 1:1',
+    invitee: { name: 'Jo Schinka', email: 'jo@example.com', athleteName: 'Addie Schinka', parentEmail: null },
+    slot: { date: '2026-11-05', time: '7:00 PM', durationMinutes: 30 },
+  })).toBe('Addie Schinka · session Thursday, Nov 5 7:00 PM, 30 min (RYP Academy - Mental Game 1:1) · booked Wednesday, Nov 4 by Jo Schinka, jo@example.com · no account with this email');
   // The athlete booked under their own name: no repeated name.
   const addie = (reason) => unresolvedLabel({
     id: 'ev-3', outcome: 'unresolved', receivedAt: '2026-11-02T10:00', reason,
     invitee: { name: 'Addie Schinka', email: 'addie@example.com', athleteName: 'Addie Schinka', parentEmail: null },
     slot: { date: '2026-11-05', time: '7:00 PM', durationMinutes: 45 },
   });
-  expect(addie(null)).toBe('Addie Schinka · session Thursday, Nov 5 7:00 PM · booked Monday, Nov 2 by addie@example.com');
-  expect(addie('ambiguous-household')).toBe('Addie Schinka · session Thursday, Nov 5 7:00 PM · booked Monday, Nov 2 by addie@example.com · family found, but not which athlete');
+  expect(addie(null)).toBe('Addie Schinka · session Thursday, Nov 5 7:00 PM, 45 min · booked Monday, Nov 2 by addie@example.com');
+  expect(addie('ambiguous-household')).toBe('Addie Schinka · session Thursday, Nov 5 7:00 PM, 45 min · booked Monday, Nov 2 by addie@example.com · family found, but not which athlete');
   expect(addie('no-athlete').endsWith(' · family found, but it has no athletes')).toBe(true);
   expect(addie('utm-not-owned').endsWith(" · booked from an athlete's link this email is not linked to")).toBe(true);
 });

@@ -78,19 +78,23 @@ const UNMATCHED_REASON = {
  * the ledger's `invitee` and `slot` (2026-11-04), the athlete named on
  * Calendly, the session time, when and by whom it was booked, and why it did
  * not match - both dates labelled, the reason in plain words (review
- * 2026-11-04): "Addie Schinka · session Thursday, Nov 5 7:00 PM · booked
- * Tuesday, Oct 20 by Jo Schinka, jo@example.com · no account with this
- * email". Rows from before 2026-11-04 kept no time and hold nothing.
+ * 2026-11-04): "Addie Schinka · session Thursday, Nov 5 7:00 PM, 30 min
+ * (RYP Academy - Mental Game 1:1) · booked Tuesday, Oct 20 by Jo Schinka,
+ * jo@example.com · no account with this email". The length and the
+ * Calendly event name (review 2026-11-04) tell the 1:1 from another of
+ * Yannick's event types. Rows from before 2026-11-04 kept no time and hold
+ * nothing.
  */
 export function unresolvedLabel(e) {
   const inv = e.invitee || null;
   const slot = e.slot || null;
+  const kind = `${slot && slot.durationMinutes ? `, ${slot.durationMinutes} min` : ''}${e.eventName ? ` (${e.eventName})` : ''}`;
   const athlete = inv ? inv.athleteName || null : null;
   const booker = inv ? [inv.name && inv.name !== athlete ? inv.name : null, inv.email].filter(Boolean).join(', ') : '';
   const day = e.receivedAt ? String(e.receivedAt).slice(0, 10) : null;
   return [
     athlete,
-    slot && slot.date ? `session ${longDayLabel(slot.date)}${slot.time ? ` ${slot.time}` : ''}` : 'session time not kept, not held: see Calendly',
+    slot && slot.date ? `session ${longDayLabel(slot.date)}${slot.time ? ` ${slot.time}` : ''}${kind}` : 'session time not kept, not held: see Calendly',
     day || booker ? ['booked', day ? longDayLabel(day) : null, booker ? `by ${booker}` : null].filter(Boolean).join(' ') : null,
     UNMATCHED_REASON[e.reason] || null,
   ].filter(Boolean).join(' · ');

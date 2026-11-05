@@ -3,8 +3,10 @@
  * 2026-11-04): the family by a family `users` doc (invitee email, "Parent
  * email" answer), else by a household's guardian email; the athlete by
  * ownership of `utm_content` or by the household's only kid / the "Athlete
- * name" answer. Transaction reads only; nothing here writes. Kept apart from
- * calendly.js so each stays readable.
+ * name" answer; and whether the booking is the RYP 1:1 at all
+ * (isRypOneOnOne, owner ruling 2026-11-04). Transaction reads only; nothing
+ * here writes. Kept apart from calendly.js so each stays readable, and free
+ * of requires: scripts/calendly-unmatched.mjs loads isRypOneOnOne from here.
  */
 'use strict';
 
@@ -76,6 +78,41 @@ function nameKey(s) {
 }
 
 /**
+ * utm_source of the portal's own Calendly link
+ * (frontend/src/portal/data/calendly.js) and of the link script's replay
+ * (scripts/calendly-unmatched.mjs).
+ */
+const RYP_SOURCES = ['ryp-portal', 'ryp-link-script'];
+/** The RYP 1:1 form's "Athlete name" question. */
+const ATHLETE_NAME = /athlete.*name|name.*athlete/i;
+
+/**
+ * Whether a payload is the RYP 1:1 (event type "RYP Academy - Mental Game
+ * 1:1", calendly.com/yannickartigolle2022-u/ryp-academy-mental-game-1on1),
+ * the only one of Yannick's Calendly event types that may book, hold a
+ * session, spend a token or keep who booked. Owner ruling 2026-11-04: "not
+ * his entire calendly account no but that link is just for ryp sessions";
+ * his subscription is user-scoped, so his private clients' event types and
+ * the website's free 15-minute info call arrive too. The RYP 1:1 is a
+ * payload with ANY of: the portal's or the link script's utm_source; an
+ * event name containing "Mental Game" (any case); the RYP form's "Athlete
+ * name" question; no event name at all (a legacy or malformed payload fails
+ * open, as before). Anything else is another event type.
+ * @param {?Object} p `body.payload` (both events carry `scheduled_event`).
+ * @return {boolean} True for the RYP 1:1.
+ */
+function isRypOneOnOne(p) {
+  const x = p || {};
+  const name = String((x.scheduled_event || {}).name || '').trim();
+  const source = String((x.tracking || {}).utm_source || '');
+  if (RYP_SOURCES.includes(source) || !name) return true;
+  const qa = Array.isArray(x.questions_and_answers) ?
+      x.questions_and_answers : [];
+  return /mental\s+game/i.test(name) ||
+      qa.some((q) => ATHLETE_NAME.test(String(q && q.question || '')));
+}
+
+/**
  * Who booked, as typed on Calendly (2026-11-04): kept on the ledger so an
  * unresolved row can be matched to a family by hand. Emails lower-cased
  * here only; the lookups use them as typed (resolveAthlete).
@@ -89,7 +126,7 @@ function inviteeOf(p) {
   const parent = answerOf(qa, PARENT_EMAIL).toLowerCase();
   return {
     name: String(p.name || '').trim() || null, email: email || null,
-    athleteName: answerOf(qa, /athlete.*name|name.*athlete/i) || null,
+    athleteName: answerOf(qa, ATHLETE_NAME) || null,
     parentEmail: parent || null,
   };
 }
@@ -178,4 +215,6 @@ async function resolveAthlete(tx, store, p) {
     reason: kids.length ? 'ambiguous-household' : 'no-athlete'};
 }
 
-module.exports = {docOf, inviteeOf, kidByName, nameKey, resolveAthlete};
+module.exports = {
+  docOf, inviteeOf, isRypOneOnOne, kidByName, nameKey, resolveAthlete,
+};
