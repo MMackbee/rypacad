@@ -148,7 +148,7 @@ export function ConsentStep({
         <Body size={11} tone={color.textTertiary} style={{ marginTop: 9 }}>
           {mode === 'athlete'
             ? 'Typing your name signs the consents you ticked above. Re-confirmed each year.'
-            : 'Typing your name signs the consents you ticked above, for every athlete listed. Re-confirmed each year.'}
+            : 'Typing your name signs the consents you ticked above, for every athlete listed and any you add to your family later. Re-confirmed each year.'}
         </Body>
       </Card>
     </div>
@@ -178,7 +178,10 @@ const CONSENT_INFO = {
           {[
             ['Athlete', 'Own records only'],
             ['Parent/Guardian', 'Linked athletes only. Reflection access is summary-level only.'],
-            ['Coach', "Their own assigned athletes' attendance and logs only."],
+            // Owner 2026-11-05: the row says what the rules really allow (any coach GETs any
+            // athlete doc and reads every roster, Tour result and assessment; medical and
+            // practice logs stay with the assigned coach; households and mental notes never).
+            ['Coach', "Every athlete's profile (name, date of birth, handicap, package and payment status), session rosters, Tour results and physical assessment results. Medical info and practice logs only for their own assigned athletes. Never family contact details or mental-game notes."],
             ['Mental Performance Coach', 'Mental-game notes academy-wide, every access logged.'],
             ['Ops Admin', 'Fitness completion, billing status, enrollment — no coaching or mental-game writes.'],
             ['Owner/Director', 'Full access including staff management and audit logs.'],

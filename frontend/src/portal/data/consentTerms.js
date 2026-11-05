@@ -110,8 +110,8 @@ export const CONSENT_TERMS = {
  * a guardian line and its entry here too - a test fails if a key goes stale.
  */
 export const SELF_WORDING = {
-  'Name, date of birth, guardian contact, emergency and medical info, and training records. Collected only where a feature needs it.':
-    'Your name, date of birth, contact details, emergency and medical info, and training records. Collected only where a feature needs it.',
+  'Name, date of birth, guardian contact, emergency and medical info, and training records, including physical assessment results (body measurements, strength, jump, throw and trunk tests, clubhead speed). Collected only where a feature needs it.':
+    'Your name, date of birth, contact details, emergency and medical info, and training records, including physical assessment results (body measurements, strength, jump, throw and trunk tests, clubhead speed). Collected only where a feature needs it.',
   'Multi-angle swing video at the Diagnostic and during training blocks, used for coaching review and benchmarked against your athlete’s own progress.':
     'Multi-angle swing video at the Diagnostic and during training blocks, used for coaching review and benchmarked against your own progress.',
   'Permission to use photos or video of your athlete in RYP marketing. Declining does not affect enrollment or training.':

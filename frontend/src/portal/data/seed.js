@@ -53,7 +53,7 @@ export const CONSENTS = [
     id: 'dataCollection',
     title: 'Data collection',
     body:
-      'Name, date of birth, guardian contact, emergency and medical info, and training records. Collected only where a feature needs it.',
+      'Name, date of birth, guardian contact, emergency and medical info, and training records, including physical assessment results (body measurements, strength, jump, throw and trunk tests, clubhead speed). Collected only where a feature needs it.',
     link: 'Read what is stored',
     checked: true,
   },

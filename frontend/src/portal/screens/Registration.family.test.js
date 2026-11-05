@@ -133,6 +133,13 @@ describe('link mode: the family already there decides whether the tick is offere
     await asked.unmount();
   });
 
+  test('link mode says the sign-up consents cover the athlete being added (owner 2026-11-05)', async () => {
+    mockFamily = [{ id: 'reese', householdId: 'h1', packageId: 't-6', billing: { status: 'active' } }];
+    const r = await onLinkPackageStep();
+    expect(r.text()).toContain('The consents you signed when your family joined cover every athlete you add.');
+    await r.unmount();
+  });
+
   test('a family with neither: the tick, sent on the new athlete', async () => {
     mockFamily = [{ id: 'reese', householdId: 'h1', packageId: 't-6', billing: { status: 'active' } }];
     const r = await onLinkPackageStep();

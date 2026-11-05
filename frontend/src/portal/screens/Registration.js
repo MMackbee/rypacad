@@ -60,6 +60,8 @@ const STEPS = {
   link: [['athletes', 'Athletes'], ['package', 'Choose a package']],
 };
 const stepsFor = (mode) => STEPS[mode] || STEPS.signup;
+/** Link mode has no consent step: the consents signed at sign-up cover the family (owner 2026-11-05). */
+export const LINK_CONSENT_NOTE = 'The consents you signed when your family joined cover every athlete you add.';
 /** Harness deep links, by step id. */
 const VARIANT_STEP = {
   guardian: 'contact', athlete: 'athletes', tier: 'package', consent: 'consent', submitting: 'consent', success: 'consent',
@@ -315,6 +317,8 @@ export default function Registration({ variant, bare = false, mode = 'signup', a
           <PackageStep athletes={form.athletes} onUpdate={updateAthlete} showErrors={showErrors} mode={form.mode || 'parent'}
             facility={form.facilityRequested === true} onFacility={(v) => patch({ facilityRequested: v })} household={household} />
         ) : null}
+        {/* Owner 2026-11-05: the family's sign-up signature covers athletes added later. */}
+        {stepId === 'package' && mode === 'link' ? <Body size={12} tone={color.secondary} style={{ marginTop: 16 }}>{LINK_CONSENT_NOTE}</Body> : null}
         {stepId === 'consent' ? (
           <ConsentStep mode={form.mode} consents={form.consents} onChange={setConsents} signatureName={form.signatureName}
             onSignatureChange={(v) => patch({ signatureName: v })} onOpenInfo={setInfoSheet} showErrors={showErrors}
