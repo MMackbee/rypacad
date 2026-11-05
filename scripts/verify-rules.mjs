@@ -27,6 +27,7 @@ import { fsFields, fsValue, localEmulatorHost, LOCAL_HOSTS } from './lib/firesto
 import { taskAssessments, taskDiagnosticsKept } from './rules-probes/assessments.mjs';
 import { taskResearch } from './rules-probes/research.mjs';
 import { taskMembershipShape } from './rules-probes/membership-shape.mjs';
+import { taskHidden } from './rules-probes/hidden.mjs';
 
 let HOST = localEmulatorHost({ required: true });
 const PROJECT = 'demo-rules-probe';
@@ -1145,6 +1146,7 @@ async function runPass(label) {
     await taskAssessments(); await taskDiagnosticsKept(); await taskResearch(); await taskMembershipShape();
     await taskMental();
     await taskAttendance();
+    await taskHidden();
   } finally { await teardown(); }
 }
 

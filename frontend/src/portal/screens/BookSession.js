@@ -46,7 +46,7 @@ import { lockPastDays, sessionStarted, waitlistClosed } from '../data/sessionSta
 import { reservedEligible, reservedRefusal, reservedTag } from '../data/reserved';
 import { buildMonthDayMaps, useMonthNavState } from '../components/MonthCalendar';
 import { monthsApart } from '../data/calendarViews';
-import RepeatWeekly from '../components/RepeatWeekly';
+import RepeatWeekly, { offeredWeeks } from '../components/RepeatWeekly';
 
 /** A stable empty list for the held-session ids when a flow carries none. */
 const NONE_HELD = [];
@@ -363,6 +363,10 @@ export default function BookSession({
       chargedFrom,
       // The grace token it spent, if any: a bought single token's id says so.
       graceTokenId,
+      // Owner 2026-11-05: the weeks of this slot the slots read offers (a
+      // hidden session is not on it), for Repeat weekly - taken at the tap,
+      // as the booking's own bump reloads that read.
+      offered: offeredWeeks(data?.slots, session),
     });
   };
 
@@ -449,7 +453,7 @@ export default function BookSession({
         onRepeat={booked.waitlisted || tokens?.perPurchase ? undefined : handleRepeat}
         // The repeat reaches exactly as far as this athlete's window (the
         // selected child's, for a parent) - the same date that locks days.
-        repeatWindow={{ end: openThroughDate, months: windowMonths, elite: selfMember?.package?.kind === 'elite' }}
+        repeatWindow={{ end: openThroughDate, months: windowMonths, elite: selfMember?.package?.kind === 'elite', offered: booked.offered }}
         onBack={() => setBooked(null)}
       />
     );
@@ -1088,6 +1092,7 @@ function Confirmed({ bare, confirmation, onRepeat, repeatWindow, onBack }) {
             windowEnd={repeatWindow.end}
             windowMonths={repeatWindow.months}
             elite={repeatWindow.elite}
+            offeredDates={repeatWindow.offered}
             onRepeat={onRepeat}
           />
         ) : null}

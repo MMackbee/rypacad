@@ -1147,7 +1147,17 @@ service cloud.firestore {
           // 2026-11-05 (training cap 14 -> 12): the capacity bound guards a
           // +1 only. A block left above a lowered capacity keeps its bookings,
           // and each of those families can still cancel (14 -> 13 under 12).
-          && (after.booked == before.booked - 1 || after.booked <= before.capacity);
+          && (after.booked == before.booked - 1 || after.booked <= before.capacity)
+          // 2026-11-05 (owner: the empty Mon/Wed 6 PM blocks "sort of hidden
+          // for now"): a session with hidden == true takes no + 1. A family's
+          // booking create and its re-book each move this count + 1 in their
+          // own commit (seatTakenInCommit), so refusing the + 1 here refuses
+          // both, with no extra document read. A - 1 (a cancel) always lands,
+          // so a seat held on a hidden block can still be given back. Absent
+          // or false == not hidden. No client writes hidden/hiddenAt/hiddenBy:
+          // this branch and the two below admit only booked, coachNote and
+          // status; scripts/hide-sessions.mjs sets them (Admin REST).
+          && (after.booked == before.booked - 1 || before.get('hidden', false) != true);
       }
 
       // 2026-10-01 (waitlist audit): WHO may move the count. It used to be
@@ -2327,7 +2337,10 @@ service cloud.firestore {
         return s.date == request.resource.data.date
           && s.booked >= s.capacity
           && s.get('status', 'scheduled') == 'scheduled'
-          && s.get('type', null) != 'mental';
+          && s.get('type', null) != 'mental'
+          // 2026-11-05: never a hidden session (scripts/hide-sessions.mjs) -
+          // its seats are not offered, so there is no seat to wait for.
+          && s.get('hidden', false) != true;
       }
 
       // The freeze (contract v2.1, pin H), identical in shape to bookings'
