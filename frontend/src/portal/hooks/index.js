@@ -201,6 +201,7 @@ import { MARKS_LOOKAHEAD_DAYS, dayMarksFor, monthGridBounds } from '../data/cale
 import { foldBeforeFirstPeriod, positionPeriodFor, tierBillingOf, withTokenStart } from '../data/billingHub';
 import { sessionStarted } from '../data/sessionStart';
 import { handicapLimitOf, handicapOf } from '../data/reserved';
+import { isHiddenSession } from '../data/hiddenSessions';
 
 // 2026-10-02: the academy's handicap edit (hooks/handicap.js), on this seam
 // like every other staff write a screen reaches.
@@ -1179,7 +1180,10 @@ async function liveMonthSessions(monthISO, today) {
   // from the full read, before the group filter - no second query. The
   // lookahead rows stop there: the calendar itself still gets only the grid.
   const dayMarks = dayMarksFor(all, start, end);
-  const sessions = all.filter((s) => s.date <= end && !isSpecialistType(s.type));
+  // 2026-11-05: a hidden session is no row (data/hiddenSessions.js); the marks
+  // above still count it, so a day of hidden blocks alone reads as nothing to
+  // book, never "Academy closed".
+  const sessions = all.filter((s) => s.date <= end && !isSpecialistType(s.type) && !isHiddenSession(s));
   sessions.sort(byDateThenId);
   const days = groupSessionsByDate(sessions, today);
 
@@ -1351,7 +1355,7 @@ async function liveSpecialistDays(specialistId, today, windowMonths) {
   for (const s of sessions) {
     // `bookable: false` is another family's Calendly appointment with
     // Yannick (functions/portal/calendly.js) - never a slot to offer.
-    if (s.type !== specialistId || s.status === 'cancelled' || s.bookable === false) continue;
+    if (s.type !== specialistId || s.status === 'cancelled' || s.bookable === false || isHiddenSession(s)) continue;
     const list = byDate.get(s.date);
     if (list) list.push(s);
     else byDate.set(s.date, [s]);
@@ -1622,7 +1626,7 @@ async function liveSpecialistSessions(specialistId, today) {
   const toDate = openThrough(new Date(), MAX_WINDOW_MONTHS);
   const sessions = await fetchSessionsInRange(today, toDate);
   const mine = sessions
-    .filter((s) => s.type === specialistId && s.status !== 'cancelled')
+    .filter((s) => s.type === specialistId && s.status !== 'cancelled' && !isHiddenSession(s))
     .sort(byDateThenId);
 
   const withRosters = await Promise.all(

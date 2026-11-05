@@ -15,6 +15,7 @@ import { addDaysISO, openThrough, windowOpensOn } from '../data/calendar';
 import { firstRunningWeek } from '../data/season';
 import { isSpecialistType, repeatsWeekly } from '../data/specialists';
 import { HANDICAP_RESERVED, reservedEligible, reservedRefusal } from '../data/reserved';
+import { SESSION_HIDDEN, isHiddenSession } from '../data/hiddenSessions';
 
 /**
  * Repeat weekly, out of hooks/index.js (review 2026-09-30: the file was far
@@ -28,9 +29,11 @@ import { HANDICAP_RESERVED, reservedEligible, reservedRefusal } from '../data/re
  * recurrence, coach-day and admin-fill paths may count. Specialist slots
  * live on their own surfaces, and the seed-only adult block (pin J) is
  * display-only - it appears on the month calendar and nowhere else.
+ * A hidden session (owner 2026-11-05, data/hiddenSessions.js) is not
+ * offered, so none of those paths counts it either.
  */
 export function isGroupBookable(s) {
-  return !isSpecialistType(s.type) && s.bookable !== false;
+  return !isSpecialistType(s.type) && s.bookable !== false && !isHiddenSession(s);
 }
 
 /**
@@ -50,6 +53,9 @@ const REPEAT_SKIP_REASON = new Map([
   // athlete (the limit was stamped after the schedule was read). The skip
   // keeps the typed reason as its own name, with the line that says why.
   [HANDICAP_RESERVED, HANDICAP_RESERVED],
+  // 2026-11-05: that week's session was hidden after the schedule was read -
+  // a week with no session to offer, as a hidden week read up front is.
+  [SESSION_HIDDEN, 'no session'],
 ]);
 const REPEAT_STOP_REASONS = new Set(['membership-inactive', 'billing-pending', 'booking-not-open']);
 
@@ -112,7 +118,8 @@ export default async function repeatWeekly(identity, slot, { athleteId, untilISO
   const firstDate = addDaysISO(slot.date, 7);
   const lastDate = untilISO < windowEnd ? untilISO : windowEnd;
   // The slot's own lane: the group flow for a block, Phil's sessions for his.
-  const inLane = isSpecialistType(slot.type) ? (s) => s.type === slot.type : isGroupBookable;
+  // A hidden week (data/hiddenSessions.js) is left out, so it reads 'no session'.
+  const inLane = isSpecialistType(slot.type) ? (s) => s.type === slot.type && !isHiddenSession(s) : isGroupBookable;
   const sessionsByDate = new Map();
   let lastSessionDate = null;
   if (firstDate <= lastDate) {
@@ -133,7 +140,7 @@ export default async function repeatWeekly(identity, slot, { athleteId, untilISO
   // it, so the screen says when it opens instead. null past the season.
   let pastWindow = firstDate;
   while (pastWindow <= windowEnd) pastWindow = addDaysISO(pastWindow, 7);
-  const nextDate = firstRunningWeek(pastWindow, slot.time, slot.type);
+  const nextDate = await firstOfferedWeek(pastWindow, slot);
   const next = nextDate ? { date: nextDate, opensOn: windowOpensOn(nextDate, windowMonths) } : null;
 
   const booked = [];
@@ -202,4 +209,24 @@ export default async function repeatWeekly(identity, slot, { athleteId, untilISO
     }
   }
   return { booked, skipped, windowEnd, next };
+}
+
+/**
+ * firstRunningWeek, stepping over a week whose session at this time and type
+ * is hidden (owner 2026-11-05, data/hiddenSessions.js): a hidden week is not
+ * one to come back for. One day's read per candidate week - usually one - and
+ * a week with no session doc at all is judged as before. A failed read keeps
+ * that week (the old answer): it costs the step-over, never the repeat.
+ */
+async function firstOfferedWeek(fromISO, slot) {
+  for (let date = firstRunningWeek(fromISO, slot.time, slot.type); date; date = firstRunningWeek(addDaysISO(date, 7), slot.time, slot.type)) {
+    let onDay;
+    try {
+      onDay = ((await fetchSessionsInRange(date, date)) ?? []).filter((s) => s.time === slot.time && s.type === slot.type);
+    } catch {
+      return date;
+    }
+    if (!onDay.length || !onDay.every(isHiddenSession)) return date;
+  }
+  return null;
 }
