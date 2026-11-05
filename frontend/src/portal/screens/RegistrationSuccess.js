@@ -9,6 +9,7 @@ import { CONFIRMING, PAY_NOW, facilityName } from '../data/billingCopy';
 import { BOOKING_OPENS_LABEL, bookingOpen } from '../data/calendar';
 import { FACILITY_ACCESS, packageById, PRICES_RELEASED, SIBLING_DISCOUNT_NOTE, SIBLING_ORDER_NOTE, siblingPartialNote, siblingPlan } from '../data/packages';
 import { facilityHolderIndex } from '../data/signup';
+import { shortDate } from '../data/assessmentWindows';
 import { saleOpen, SINGLE_NOT_OPEN_LINE } from '../data/singleToken';
 import useFamilyAthletes from '../hooks/familyAthletes';
 
@@ -36,6 +37,14 @@ function pricedMonthly(pkg) {
   return Boolean(pkg) && pkg.kind !== 'single' && Number.isFinite(pkg.price) && PRICES_RELEASED;
 }
 
+/** "Abigail and Grant are on a complimentary membership through Feb 27: nothing to pay." */
+export function compedLine(compedRows, until) {
+  const names = compedRows.map((r) => r.name.trim().split(/\s+/)[0]);
+  const list = names.length < 2 ? names.join('') : `${names.slice(0, -1).join(', ')} and ${names[names.length - 1]}`;
+  const through = typeof until === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(until) ? ` through ${shortDate(until)}` : '';
+  return `${list} ${names.length > 1 ? 'are' : 'is'} on a complimentary membership${through}: nothing to pay.`;
+}
+
 /**
  * "You're in" (Sprint 20, spec 2.1 Success): the receipt, one Pay button per
  * athlete (createCheckoutSession), what happens next, and the role's home.
@@ -48,7 +57,14 @@ function pricedMonthly(pkg) {
  */
 export default function RegistrationSuccess({ bare = false, mode = 'signup', form, result, account, onFinish }) {
   const athleteMode = form.mode === 'athlete';
-  const rows = form.athletes.map((a, i) => ({ ...a, athleteId: result?.athleteIds?.[i] ?? null, pkg: packageById(a.packageId) }));
+  // Owner 2026-11-05: athletes an owner comp grant made free at sign-up
+  // (functions/portal/comp-grant.js) have nothing to pay - no Pay button.
+  const compedIds = new Set(Array.isArray(result?.comped) ? result.comped : []);
+  const allRows = form.athletes.map((a, i) => ({ ...a, athleteId: result?.athleteIds?.[i] ?? null, pkg: packageById(a.packageId) }))
+    .map((r) => ({ ...r, comped: r.athleteId != null && compedIds.has(r.athleteId) }));
+  const compedRows = allRows.filter((r) => r.comped);
+  const rows = allRows.filter((r) => !r.comped);
+  const compLine = compedRows.length ? compedLine(compedRows, result?.compUntil) : null;
   // Link mode reads the family once, the new athletes included (the callable
   // committed them before it returned): the sibling discount counts the whole
   // family (checkout.js siblingEligible), and addAthletes keeps a facility
@@ -84,18 +100,21 @@ export default function RegistrationSuccess({ bare = false, mode = 'signup', for
   const payTerms = priced.length === 0 ? null
     : `Today you pay ${priced.length === 1 ? `$${priced[0].pkg.price}` : 'the amount on each button'} for November, then monthly from Dec 1. ` +
       "Stripe's page calls the plan a free trial until Dec 1 because November is paid today as a separate line.";
-  const anyToken = rows.some((r) => r.pkg && r.pkg.kind !== 'elite');
+  const anyToken = allRows.some((r) => r.pkg && r.pkg.kind !== 'elite');
   const anyElite = rows.some((r) => r.pkg && r.pkg.kind === 'elite');
-  const logins = rows.filter((r) => r.loginEmail && r.ownLogin);
+  const compedElite = compedRows.some((r) => r.pkg && r.pkg.kind === 'elite');
+  const nothingToPay = rows.length === 0 && compedRows.length > 0;
+  const logins = allRows.filter((r) => r.loginEmail && r.ownLogin);
   const home = athleteMode ? '/portal/home' : '/portal/family';
   const page = athleteMode ? 'home page' : 'family page';
   const next = [
     ...(anyToken && !bookingOpen(Date.now()) ? [`Booking opens ${BOOKING_OPENS_LABEL} for token packages.`] : []),
+    ...(compedElite ? ['Elite books right away.'] : []),
     ...(anyElite ? ['Elite books right away once paid.'] : []),
     // UX review P-09: Stripe returns to the family page (home for an
     // athlete), not here, and this screen is gone after the next tap.
-    `After you pay, Stripe sends you to your ${page}. It shows "${CONFIRMING}" for up to two minutes.` +
-      (!athleteMode && rows.length > 1 ? ` Paying for more than one athlete? The others wait there, each with its own ${PAY_NOW} button.` : ''),
+    ...(rows.length ? [`After you pay, Stripe sends you to your ${page}. It shows "${CONFIRMING}" for up to two minutes.` +
+      (!athleteMode && rows.length > 1 ? ` Paying for more than one athlete? The others wait there, each with its own ${PAY_NOW} button.` : '')] : []),
     ...logins.map((r) => `${r.name.trim()} signs in at ${window.location.host}/portal/signin with ${r.loginEmail.trim().toLowerCase()}. ` +
       `If that email is a Google account, Continue with Google is quickest. Otherwise: tap ${STUDENT_LOGIN_CTA}, open the email from ${VERIFY_EMAIL_SENDER}, then tap ${VERIFIED}.`),
     `There's no welcome email. Your ${page} always shows what's paid and what's left to do.`,
@@ -115,8 +134,17 @@ export default function RegistrationSuccess({ bare = false, mode = 'signup', for
         </div>
         <div style={{ textAlign: 'center' }}>
           <ScreenTitle size={26}>You're in</ScreenTitle>
-          <Body size={13} style={{ marginTop: 10 }}>{mode === 'link' ? 'Added to your family. Pay to start booking.' : 'Your account is ready. Pay to start booking.'}</Body>
+          <Body size={13} style={{ marginTop: 10 }}>{mode === 'link'
+            ? (nothingToPay ? 'Added to your family. Nothing to pay.' : 'Added to your family. Pay to start booking.')
+            : (nothingToPay ? 'Your account is ready. Nothing to pay.' : 'Your account is ready. Pay to start booking.')}</Body>
         </div>
+        {compLine ? (
+          <Card large style={{ width: '100%' }}>
+            <SectionLabel style={{ marginBottom: 12 }}>Complimentary</SectionLabel>
+            <Body size={12}>{compLine}</Body>
+          </Card>
+        ) : null}
+        {rows.length ? (
         <Card large style={{ width: '100%' }}>
           <SectionLabel style={{ marginBottom: 12 }}>Pay</SectionLabel>
           {payTerms ? <Body size={12} style={{ marginBottom: 12 }}>{payTerms}</Body> : null}
@@ -137,6 +165,7 @@ export default function RegistrationSuccess({ bare = false, mode = 'signup', for
             {facilityLine ? <Body size={12}>{facilityLine}</Body> : null}
           </div>
         </Card>
+        ) : null}
         <Card large style={{ width: '100%' }}>
           <SectionLabel style={{ marginBottom: 14 }}>What happens next</SectionLabel>
           <div style={{ display: 'flex', flexDirection: 'column', gap: 13 }}>

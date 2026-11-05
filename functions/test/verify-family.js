@@ -13,6 +13,7 @@ process.env.GCLOUD_PROJECT = 'rypacad';
 
 const admin = require('firebase-admin');
 const family = require('../portal/family.js');
+const lib = require('../portal/lib.js');
 
 admin.initializeApp({projectId: 'rypacad'});
 const db = admin.firestore();
@@ -41,7 +42,7 @@ async function exists(col, id) {
   return (await db.collection(col).doc(id).get()).exists;
 }
 async function wipe() {
-  for (const c of ['households', 'athletes', 'packages', 'users', 'loginInvites']) {
+  for (const c of ['households', 'athletes', 'packages', 'users', 'loginInvites', 'compGrants']) {
     const snap = await db.collection(c).get();
     await Promise.all(snap.docs.map((d) => d.ref.delete()));
   }
@@ -87,6 +88,7 @@ async function main() {
   log('STEP 1  createFamily happy path (parent, two athletes, one child login)');
   const r1 = await family.createFamilyHandler(payload(), ctx('u-nina', 'nina@example.test'), deps);
   check('athleteIds count', r1.athleteIds.length, 2);
+  check('no grant: nothing comped', [r1.comped, r1.compUntil], [[], null]);
   const hh = await get('households', r1.householdId);
   check('household', [hh.name, hh.guardian, hh.stripeCustomerId, hh.stripeSubscriptionId, hh.stripeCustomerIds, hh.createdBy, hh.emergencyContact, hh.signup.by, hh.signup.source, hh.signup.mode, !!hh.signup.at],
       ['Novak family', {name: 'Nina Novak', email: 'nina@example.test', phone: '+15550199', relationship: 'Mother'}, null, null, [], 'u-nina', {name: 'Uncle Bo', phone: '+15550100', relationship: 'Uncle'}, 'u-nina', 'self', 'parent', true]);
@@ -175,6 +177,38 @@ async function main() {
   check('orphaned invite stays none afterwards', (await family.claimInviteHandler({}, ctx('u-g', 'ghost@example.test', true), deps)).state, 'none');
   await refused('no-email (emulator custom token)', family.claimInviteHandler({}, {auth: {uid: 'u-anon', token: {}}}, deps), 'failed-precondition', 'no-email');
   await refused('signed-out', family.claimInviteHandler({}, {}, deps), 'unauthenticated', 'signed-out');
+
+  log('\nSTEP 6  comp grants (owner 2026-11-05): an owner-set grant comps athletes at sign-up');
+  const grant = (email, over) => db.collection('compGrants').doc(email).set(Object.assign({email, uid: null, until: '2027-02-27', note: 'Owner comp test', packages: null, revoked: false}, over));
+  const fam = (uid, email, kids) => family.createFamilyHandler(payload({contact: {name: 'Pat Olly', email, phone: '+15550124', relationship: 'Father'}, athletes: kids}), ctx(uid, email, false), deps);
+  const COMPED = ['active', false, null, null, null, null, true, '2027-02-27', 'Owner comp test', 'comp-grant', true];
+  const billingOf = (a) => [a.billing.status, a.billing.oneTime, a.billing.customerId, a.billing.subscriptionId, a.billing.priceId, a.billing.checkoutSessionId, a.billing.comp, a.billing.compUntil, a.billing.compNote, a.billing.linkedBy, !!a.billing.updatedAt];
+  await grant('olly@example.test', {uid: 'u-olly'});
+  const r6 = await fam('u-olly', 'Olly@Example.test', [kid({name: 'Abby Olly', packageId: 'elite'}), kid({name: 'Gus Olly', dob: '2014-04-04', packageId: 'elite'})]);
+  check('both comped, until returned', [r6.comped, r6.compUntil], [r6.athleteIds, '2027-02-27']);
+  const abby = await get('athletes', r6.athleteIds[0]);
+  const gus = await get('athletes', r6.athleteIds[1]);
+  check('abby billing comped (comp-membership shape, linkedBy comp-grant)', billingOf(abby), COMPED);
+  check('gus billing comped', billingOf(gus), COMPED);
+  const ollyHh = await get('households', r6.householdId);
+  check('both can book (lib.membershipAllowsBooking), household untouched', [lib.membershipAllowsBooking(ollyHh, abby), lib.membershipAllowsBooking(ollyHh, gus), ollyHh.stripeCustomerId, 'membership' in ollyHh], [true, true, null, false]);
+  check('the grant itself is not changed by use', (await get('compGrants', 'olly@example.test')).until, '2027-02-27');
+  const r6b = await family.addAthletesHandler({athletes: [kid({name: 'Cal Olly', dob: '2016-01-01', packageId: 't-6'})], medical: null}, ctx('u-olly', 'olly@example.test'), deps);
+  check('addAthletes: a token package is comped too', [r6b.comped, r6b.compUntil, billingOf(await get('athletes', r6b.athleteIds[0]))], [r6b.athleteIds, '2027-02-27', COMPED]);
+  const r6c = await family.addAthletesHandler({athletes: [kid({name: 'Dot Olly', dob: '2016-02-02', packageId: 'single'})], medical: null}, ctx('u-olly', 'olly@example.test'), deps);
+  check('the single token is never comped', [r6c.comped, r6c.compUntil, (await get('athletes', r6c.athleteIds[0])).billing.status], [[], null, 'pending']);
+  await grant('mis@example.test', {uid: 'u-other'});
+  const r6d = await fam('u-mis', 'mis@example.test', [kid({name: 'Mo Mis', packageId: 'elite'})]);
+  check('a grant for another login comps nothing', [r6d.comped, (await get('athletes', r6d.athleteIds[0])).billing.status], [[], 'pending']);
+  await grant('old@example.test', {until: '2026-09-30'});
+  const r6e = await fam('u-old', 'old@example.test', [kid({name: 'Ola Old', packageId: 'elite'})]);
+  check('an expired grant comps nothing', [r6e.comped, (await get('athletes', r6e.athleteIds[0])).billing.status], [[], 'pending']);
+  await grant('rev@example.test', {revoked: true});
+  const r6f = await fam('u-rev', 'rev@example.test', [kid({name: 'Rae Rev', packageId: 'elite'})]);
+  check('a revoked grant comps nothing', [r6f.comped, (await get('athletes', r6f.athleteIds[0])).billing.status], [[], 'pending']);
+  await grant('lim@example.test', {packages: ['elite']});
+  const r6g = await fam('u-lim', 'lim@example.test', [kid({name: 'Lu Lim', packageId: 'elite'}), kid({name: 'Lo Lim', dob: '2014-04-04', packageId: 't-6'})]);
+  check('a grant naming Elite comps the Elite athlete only', [r6g.comped, (await get('athletes', r6g.athleteIds[1])).billing.status], [[r6g.athleteIds[0]], 'pending']);
 
   log(`\n=== ${failures === 0 ? 'ALL CHECKS PASSED' : failures + ' CHECK(S) FAILED'} ===`);
   process.exitCode = failures === 0 ? 0 : 1;

@@ -48,6 +48,23 @@ test('one pay button per athlete, the next steps, child-login instructions, no w
   await r.unmount();
 });
 
+test('an owner comp grant: comped athletes get no Pay button and the receipt says so (owner 2026-11-05)', async () => {
+  const both = form({ athletes: [{ ...newAthleteEntry(), name: 'Abigail Ollhoff', dob: '2012-06-17', packageId: 'elite' }, { ...newAthleteEntry(), name: 'Grant Ollhoff', dob: '2014-03-02', packageId: 'elite' }] });
+  const all = await renderScreen(<RegistrationSuccess bare mode="signup" form={both} result={{ householdId: 'h1', athleteIds: ['a1', 'a2'], comped: ['a1', 'a2'], compUntil: '2027-02-27' }} account={{ email: 'nate@email.com', emailVerified: false }} onFinish={() => {}} />);
+  expect(all.text()).toContain('Your account is ready. Nothing to pay.');
+  expect(all.text()).toContain('Abigail and Grant are on a complimentary membership through Feb 27: nothing to pay.');
+  expect(all.text()).toContain('Elite books right away.');
+  expect(all.text()).not.toMatch(/Pay \$|Pay for|then tap Pay|After you pay|once paid/);
+  expect(all.container.querySelectorAll('button').length).toBe(1); // only "Go to your family"
+  await all.unmount();
+  const some = await renderScreen(<RegistrationSuccess bare mode="link" form={form()} result={{ householdId: 'h1', athleteIds: ['a1', 'a2'], comped: ['a2'], compUntil: '2027-02-27' }} account={{ email: 'dana@email.com' }} onFinish={() => {}} />);
+  expect(some.text()).toContain('Added to your family. Pay to start booking.');
+  expect(some.text()).toContain('Reese is on a complimentary membership through Feb 27: nothing to pay.');
+  expect(some.button("Pay $569 for Jordan's 12 tokens|a1")).not.toBeNull();
+  expect(some.text()).not.toContain("Reese's Elite|a2");
+  await some.unmount();
+});
+
 test('before Nov 1 the receipt names the amount due today and says monthly from Dec 1, never when billing ends (UX P-07)', async () => {
   const one = form({ athletes: [{ ...newAthleteEntry(), name: 'Jordan Whitfield', dob: '2012-06-17', packageId: 't-6' }] });
   const r = await renderScreen(<RegistrationSuccess bare mode="signup" form={one} result={{ householdId: 'h1', athleteIds: ['a1'] }} account={{ email: 'dana@email.com' }} onFinish={() => {}} />);
