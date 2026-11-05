@@ -28,8 +28,12 @@
 
 'use strict';
 
+const functions = require('firebase-functions/v1');
+const admin = require('firebase-admin');
 const notify = require('./notify');
-const {consentNeeded, consentReminder} = require('./consent-notices');
+const {MAIL_SECRETS} = require('./secrets');
+const {consentNeeded, consentReminder, consentSigned} =
+    require('./consent-notices');
 const {shouldNoticeConsentNeeded} = require('./notify-gates');
 const {consentStatusFor, isAdultOn, utcToday} =
     require('./mental-consent-status');
@@ -197,10 +201,67 @@ async function remindConsentFor(args) {
   });
 }
 
+/**
+ * The receipt: a family signed in the portal (`method: 'portal'`). A paper
+ * record sends nothing; the switch is not consulted. Keyed on the athlete,
+ * so a record is receipted once.
+ * @param {!Object} snap The created `mentalConsents/{athleteId}` snapshot.
+ * @param {{params: {athleteId: string}}} context The trigger context.
+ * @param {{db: (!Object|undefined), now: (!Date|undefined)}=} deps
+ *     Injectable Firestore and clock.
+ * @return {!Promise<string>} 'sent' | 'duplicate' | 'skipped'.
+ */
+async function onConsentSignedHandler(snap, context, deps) {
+  const d = deps || {};
+  const store = d.db || admin.firestore();
+  const now = d.now instanceof Date ? d.now : new Date();
+  const record = (snap && snap.data && snap.data()) || {};
+  if (record.method !== 'portal') return 'skipped';
+  const athleteId = (context && context.params && context.params.athleteId) ||
+      (snap && snap.id);
+  const athlete = await bodyOf(store, 'athletes', athleteId);
+  const householdId = record.householdId ||
+      (athlete && athlete.householdId) || null;
+  if (!householdId) return 'skipped';
+  const household = await bodyOf(store, 'households', householdId);
+  const audience = await consentAudience({store, athleteId, athlete,
+    household, householdId, now});
+  const copy = consentSigned({athlete, adultRecord: record.adult === true,
+    toAthlete: audience.toAthlete});
+  return send({
+    kind: 'consent-signed',
+    category: 'schedule',
+    householdId: audience.householdId,
+    athleteId: audience.athleteId,
+    subjectKey: athleteId,
+    title: copy.title,
+    body: copy.body,
+  });
+}
+
+/**
+ * `mentalConsents/{athleteId}` onCreate: the signed receipt. Never throws -
+ * the family's signature is already saved.
+ */
+const onMentalConsentSigned = functions
+    .runWith({secrets: MAIL_SECRETS})
+    .firestore
+    .document('mentalConsents/{athleteId}')
+    .onCreate(async (snap, context) => {
+      try {
+        await onConsentSignedHandler(snap, context);
+      } catch (err) {
+        console.error('onMentalConsentSigned error:', err);
+      }
+      return null;
+    });
+
 module.exports = {
   bodyOf,
   consentAudience,
+  onConsentSignedHandler,
   onMentalBookingCreated,
+  onMentalConsentSigned,
   readConsentConfig,
   remindConsentFor,
 };

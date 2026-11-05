@@ -182,4 +182,52 @@ test('the ledger row exists', async () => {
   forced = null;
 });
 
+// The consent-signed receipt (Task 5).
+const snapOf = (record) => ({id: 'ava', data: () => record});
+const ctxAva = {params: {athleteId: 'ava'}};
+
+test('receipt: a portal minor record -> consent-signed to the parents, ' +
+    'keyed on the athlete', async () => {
+  reset();
+  assert.equal(await MC.onConsentSignedHandler(
+      snapOf({method: 'portal', adult: false, householdId: 'hh'}), ctxAva,
+      {db: fakeDb(base()), now: NOW}), 'sent');
+  assert.deepEqual(pick(sent[0], ['kind', 'category', 'householdId',
+    'athleteId', 'subjectKey']), {kind: 'consent-signed',
+    category: 'schedule', householdId: 'hh', athleteId: null,
+    subjectKey: 'ava'});
+  assert.ok(sent[0].body.includes('card in the portal.'));
+});
+
+test('receipt: paper sends nothing; the switch is not consulted',
+    async () => {
+      reset();
+      const off = Object.assign(base(),
+          {'config/mentalConsent': {notices: false}});
+      assert.equal(await MC.onConsentSignedHandler(
+          snapOf({method: 'paper', adult: false}), ctxAva,
+          {db: fakeDb(off), now: NOW}), 'skipped');
+      assert.equal(await MC.onConsentSignedHandler(
+          snapOf({method: 'portal', adult: false}), ctxAva,
+          {db: fakeDb(off), now: NOW}), 'sent');
+    });
+
+test('receipt: an 18+ signature on a claimed login goes to that login',
+    async () => {
+      reset();
+      const docs = Object.assign(base(), {
+        'athletes/max': {name: 'Max Test', dob: '2007-03-02',
+          householdId: 'hh', loginEmail: 'max@example.com'},
+        'loginInvites/max@example.com': {status: 'claimed'},
+      });
+      assert.equal(await MC.onConsentSignedHandler(
+          {id: 'max', data: () => ({method: 'portal', adult: true})},
+          {params: {athleteId: 'max'}}, {db: fakeDb(docs), now: NOW}),
+      'sent');
+      assert.deepEqual(pick(sent[0], ['householdId', 'athleteId', 'title',
+        'subjectKey']), {householdId: null, athleteId: 'max',
+        title: 'Your mental performance consent is signed',
+        subjectKey: 'max'});
+    });
+
 run();
