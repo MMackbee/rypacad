@@ -90,6 +90,7 @@ const {shouldNoticeBookingCreated, shouldNoticeMemberCancel} =
 const jobs = require('./portal/jobs');
 const lib = require('./portal/lib');
 const contractCheckins = require('./portal/contract-checkins');
+const mentalConsent = require('./portal/mental-consent');
 const sweep = require('./portal/sweep');
 const {stripeWebhook} = require('./portal/stripe');
 const {onSessionBookedDecrease} = require('./portal/promotion');
@@ -208,6 +209,14 @@ exports.onBookingCreated = functions
     .document('bookings/{bookingId}')
     .onCreate(async (snap, context) => {
       const booking = snap.data() || {};
+      // Mental consent (2026-11-05): its own gate, BEFORE the
+      // booking-confirmed gate, which skips every Calendly booking.
+      try {
+        await mentalConsent.onMentalBookingCreated({booking,
+          bookingId: context.params.bookingId, store: db, now: new Date()});
+      } catch (err) {
+        console.error('onBookingCreated consent error:', err);
+      }
       if (!shouldNoticeBookingCreated(booking)) return null;
       try {
         const [session, athlete] = await Promise.all([

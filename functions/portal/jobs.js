@@ -17,6 +17,7 @@
 
 const admin = require('firebase-admin');
 const lib = require('./lib');
+const mentalConsent = require('./mental-consent');
 const notices = require('./notices');
 const notify = require('./notify');
 
@@ -111,12 +112,33 @@ function context(args) {
 }
 
 /**
+ * The switch for the consent branch, read once per run. A failed read
+ * counts as off: the family reminders still go.
+ * @param {!Object} store An admin `Firestore`.
+ * @return {!Promise<{notices: boolean, enabledAt: ?string}>} The switch.
+ */
+async function consentSwitch(store) {
+  try {
+    return await mentalConsent.readConsentConfig(store);
+  } catch (err) {
+    console.error('consent config read failed:', err);
+    return {notices: false, enabledAt: null};
+  }
+}
+
+/**
  * Daily 17:00 America/Chicago: one `reminder-24h` notice per confirmed
  * booking dated tomorrow. Rides the `bookings (status, date)` composite.
+ *
+ * Mental consent (2026-11-05): a 1:1 with Yannick whose athlete has not
+ * signed also gets a `consent-reminder`, decided BEFORE the Calendly skip
+ * and contained in its own try/catch, so a consent failure never costs
+ * another family its reminder.
  * @param {{now: (?Date|undefined), db: (?Object|undefined)}=} args The fixed
  *     clock and Firestore.
  * @return {!Promise<{date: string, considered: number, sent: number,
- *     duplicate: number}>} A summary.
+ *     duplicate: number, skipped: number, consent: number,
+ *     consentDuplicate: number, consentError: number}>} A summary.
  */
 async function runSessionReminders(args) {
   const {now, store} = context(args);
@@ -126,11 +148,26 @@ async function runSessionReminders(args) {
       .where('date', '==', date)
       .get();
   const summary = {date, considered: snap.size, sent: 0, duplicate: 0,
-    skipped: 0};
+    skipped: 0, consent: 0, consentDuplicate: 0, consentError: 0};
   const sessions = cachedReader(store, 'sessions');
   const athletes = cachedReader(store, 'athletes');
+  const households = cachedReader(store, 'households');
+  const records = cachedReader(store, 'mentalConsents');
+  const consentConfig = await consentSwitch(store);
   for (const doc of snap.docs) {
     const booking = doc.data() || {};
+    if (booking.type === 'mental' && consentConfig.notices === true) {
+      try {
+        const res = await mentalConsent.remindConsentFor({booking,
+          bookingId: doc.id, store, config: consentConfig, now,
+          readers: {athletes, households, records}});
+        if (res === 'sent') summary.consent += 1;
+        else if (res === 'duplicate') summary.consentDuplicate += 1;
+      } catch (err) {
+        summary.consentError += 1;
+        console.error('consent reminder error:', doc.id, err);
+      }
+    }
     // Calendly sends its own reminders for Yannick (spec 6.2 step 5).
     if (booking.source === 'calendly') {
       summary.skipped += 1;
@@ -154,7 +191,10 @@ async function runSessionReminders(args) {
     else summary.sent += 1;
   }
   console.log(`runSessionReminders ${date}: considered=${summary.considered} ` +
-      `sent=${summary.sent} duplicate=${summary.duplicate}`);
+      `sent=${summary.sent} duplicate=${summary.duplicate} ` +
+      `consent=${summary.consent} ` +
+      `consentDuplicate=${summary.consentDuplicate} ` +
+      `consentError=${summary.consentError}`);
   return summary;
 }
 
