@@ -104,6 +104,9 @@ export function ContactStep({ mode, contact, onChange, showErrors }) {
  * mobile and relationship (owner, 2026-09-30), and `onEmergencyContact`
  * takes a partial update.
  */
+/** Who can read the medical box (firestore.rules private/medical). */
+export const MEDICAL_VISIBILITY = "Seen only by the academy director, the mental performance coach and the athlete's assigned coach.";
+
 export function AthleteStep({
   mode,
   linkMode = false,
@@ -253,7 +256,8 @@ export function AthleteStep({
           }}
         />
         <Body size={11} tone={color.textTertiary} style={{ marginTop: 9 }}>
-          Visible to on-site coaching staff during live sessions only. Not shown in admin views.
+          {/* Owner 2026-11-05: what the rules allow (athletes/{id}/private/medical: owner, mental, the assigned coach). */}
+          {MEDICAL_VISIBILITY}
         </Body>
       </Card>
     </div>
