@@ -61,7 +61,7 @@ const STEPS = {
 };
 const stepsFor = (mode) => STEPS[mode] || STEPS.signup;
 /** Link mode has no consent step: the consents signed at sign-up cover the family (owner 2026-11-05). */
-export const LINK_CONSENT_NOTE = 'The consents you signed when your family joined cover every athlete you add.';
+export const LINK_CONSENT_NOTE = 'The data-collection, video and media choices you signed when your family joined cover this athlete too. The research question is asked separately.';
 /** Harness deep links, by step id. */
 const VARIANT_STEP = {
   guardian: 'contact', athlete: 'athletes', tier: 'package', consent: 'consent', submitting: 'consent', success: 'consent',

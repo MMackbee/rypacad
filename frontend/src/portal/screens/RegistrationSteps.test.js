@@ -98,8 +98,9 @@ test('consent copy switches to the adult variant', async () => {
 test('the signature line claims only the consents ticked above, no injury waiver', async () => {
   const props = { consents: { dataCollection: true, videoCapture: true }, onChange: () => {}, signatureName: '', onSignatureChange: () => {}, onOpenInfo: () => {}, showErrors: false };
   const p = await renderScreen(<ConsentStep mode="parent" {...props} />);
-  expect(p.text()).toContain('Typing your name signs the consents you ticked above, for every athlete listed and any you add to your family later. Re-confirmed each year.');
-  expect(p.text()).not.toContain('injury');
+  expect(p.text()).toContain('Typing your name signs the consents you ticked above, for every athlete listed. Data collection, video and media also cover any athlete you add later. Re-confirmed each year.');
+  // The data list names 'a pain and injury check' (data collected); no line waives injury liability.
+  expect(p.text()).not.toMatch(/injury waiver|waive[sd]? (any )?(claims?|liability)|release .*injur/i);
   await p.unmount();
   const a = await renderScreen(<ConsentStep mode="athlete" {...props} />);
   expect(a.text()).toContain('Typing your name signs the consents you ticked above. Re-confirmed each year.');
@@ -286,8 +287,12 @@ test('the consent sheets show the full media terms and facility rules', async ()
   const d = await renderScreen(<ConsentInfoSheet id="dataCollection" onClose={() => {}} />);
   expect(d.text()).toContain('Owner/Director');
   // Owner 2026-11-05: the coach row matches the rules, and the body names the assessments.
-  expect(d.text()).toContain("Every athlete's profile (name, date of birth, handicap, package and payment status), session rosters, Tour results and physical assessment results.");
-  expect(d.text()).toContain('Medical info and practice logs only for their own assigned athletes. Never family contact details or mental-game notes.');
+  expect(d.text()).toContain("Every athlete's profile (name, date of birth, handicap, package, billing status and payment-account ids, the athlete's own login email, and the family's consent answers and signature)");
+  expect(d.text()).toContain("Never the guardian's email, phone or address, or mental-game notes.");
+  // The other rows say only what the rules allow (accuracy review 2026-11-05).
+  for (const gone of ['every access logged', 'audit logs', 'Reflection access', 'Own records only', 'no coaching or mental-game writes']) expect(d.text()).not.toContain(gone);
+  expect(d.text()).toContain('Mental-game notes (no other role can read them)');
+  expect(d.text()).toContain('Everything above except mental-game notes, plus staff management.');
   expect(d.text()).not.toContain("Their own assigned athletes' attendance and logs only.");
   expect(d.text()).not.toMatch(/research/i);
   expect(d.text()).not.toContain('Who may enter');
@@ -301,7 +306,7 @@ const GUARDIAN_WORDING = /your athlete|that athlete|an athlete’s|named athlete
 test('consent rows: the adult athlete reads them about themselves; the guardian rows are unchanged', async () => {
   const props = { consents: { dataCollection: true, videoCapture: true }, onChange: () => {}, signatureName: '', onSignatureChange: () => {}, onOpenInfo: () => {}, showErrors: false };
   const a = await renderScreen(<ConsentStep mode="athlete" {...props} />);
-  expect(a.text()).toContain('Your name, date of birth, contact details, emergency and medical info, and training records, including physical assessment results (body measurements, strength, jump, throw and trunk tests, clubhead speed).');
+  expect(a.text()).toContain('Your name, date of birth, contact details, emergency and medical info, and training records, including physical assessment results (height, weight and body measurements, a pain and injury check, training history, strength, jump, throw and trunk tests, clubhead speed and Parallax swing score, and a growth-maturity estimate).');
   expect(a.text()).toContain('benchmarked against your own progress.');
   expect(a.text()).toContain('Permission to use photos or video of you in RYP marketing.');
   expect(a.text()).toContain('Signing as the athlete, you accept the facility rules for yourself.');

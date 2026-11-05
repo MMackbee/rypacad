@@ -148,7 +148,7 @@ export function ConsentStep({
         <Body size={11} tone={color.textTertiary} style={{ marginTop: 9 }}>
           {mode === 'athlete'
             ? 'Typing your name signs the consents you ticked above. Re-confirmed each year.'
-            : 'Typing your name signs the consents you ticked above, for every athlete listed and any you add to your family later. Re-confirmed each year.'}
+            : 'Typing your name signs the consents you ticked above, for every athlete listed. Data collection, video and media also cover any athlete you add later. Re-confirmed each year.'}
         </Body>
       </Card>
     </div>
@@ -176,15 +176,15 @@ const CONSENT_INFO = {
         </Body>
         <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginTop: 10 }}>
           {[
-            ['Athlete', 'Own records only'],
-            ['Parent/Guardian', 'Linked athletes only. Reflection access is summary-level only.'],
+            ['Athlete', 'Own records, plus the shared session schedule and Tour results every member sees.'],
+            ['Parent/Guardian', "Their own family's athletes, plus the shared session schedule and Tour results every member sees. No access to mental-game notes."],
             // Owner 2026-11-05: the row says what the rules really allow (any coach GETs any
             // athlete doc and reads every roster, Tour result and assessment; medical and
             // practice logs stay with the assigned coach; households and mental notes never).
-            ['Coach', "Every athlete's profile (name, date of birth, handicap, package and payment status), session rosters, Tour results and physical assessment results. Medical info and practice logs only for their own assigned athletes. Never family contact details or mental-game notes."],
-            ['Mental Performance Coach', 'Mental-game notes academy-wide, every access logged.'],
-            ['Ops Admin', 'Fitness completion, billing status, enrollment — no coaching or mental-game writes.'],
-            ['Owner/Director', 'Full access including staff management and audit logs.'],
+            ['Coach', "Every athlete's profile (name, date of birth, handicap, package, billing status and payment-account ids, the athlete's own login email, and the family's consent answers and signature), session rosters and waitlists, Tour results, and physical assessment results, including the pain and injury check. Medical info and practice logs only for their own assigned athletes. Never the guardian's email, phone or address, or mental-game notes."],
+            ['Mental Performance Coach', "Mental-game notes (no other role can read them), plus every athlete's profile, practice logs, medical info and family contact details."],
+            ['Ops Admin', "Every athlete's profile, family contact details, billing status, enrollment and practice logs; enters assessments, Tour results and session notes. No medical info or mental-game notes."],
+            ['Owner/Director', 'Everything above except mental-game notes, plus staff management.'],
           ].map(([role, access]) => (
             <div key={role}>
               <div style={{ font: `600 12px ${font.body}`, color: color.text }}>{role}</div>

@@ -136,7 +136,7 @@ describe('link mode: the family already there decides whether the tick is offere
   test('link mode says the sign-up consents cover the athlete being added (owner 2026-11-05)', async () => {
     mockFamily = [{ id: 'reese', householdId: 'h1', packageId: 't-6', billing: { status: 'active' } }];
     const r = await onLinkPackageStep();
-    expect(r.text()).toContain('The consents you signed when your family joined cover every athlete you add.');
+    expect(r.text()).toContain('The data-collection, video and media choices you signed when your family joined cover this athlete too. The research question is asked separately.');
     await r.unmount();
   });
 
