@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { parseArgs, matchSessions, missingIds, decide, buildWrite, main } from '../hide-sessions.mjs';
+import { parseArgs, matchSessions, missingIds, decide, buildWrite, failureNote, main } from '../hide-sessions.mjs';
 import { resolveTarget, commit, docName, fsFields, getDoc } from '../lib/firestore-rest.mjs';
 import { planSync, planWrites } from '../sync-calendar-sessions.mjs';
 
@@ -98,6 +98,21 @@ test('buildWrite: masked to hidden, hiddenAt and hiddenBy, under the read update
   assert.throws(() => buildWrite({ id: 'x', mode: 'hide', updateTime: null }), /updateTime/);
 });
 
+test('failureNote: a changed session only on FAILED_PRECONDITION; any other failure as itself, on one line', () => {
+  // commit() (scripts/lib/firestore-rest.mjs) throws the status and Firestore's pretty-printed body.
+  const body = (code, status, message) => `{\n  "error": {\n    "code": ${code},\n    "message": "${message}",\n    "status": "${status}"\n  }\n}\n`;
+  const stale = `Commit against the emulator failed (400): ${body(400, 'FAILED_PRECONDITION', 'the stored version does not match the required base version')}`;
+  assert.equal(failureNote('2026-11-11-7', stale), '2026-11-11-7: not written; it changed since it was read - run again, dry run first');
+  const denied = `Commit against production failed (401): ${body(401, 'UNAUTHENTICATED', 'Request had invalid authentication credentials.')}`;
+  const line = failureNote('2026-11-11-7', denied);
+  assert.doesNotMatch(line, /changed since/);
+  assert.match(line, /^2026-11-11-7: not written \(Commit against production failed \(401\): \{ "error": \{ "code": 401, "message": "Request had invalid authentication credentials\.", "status": "UNAUTHENTICATED" \} \}\) - run again/);
+  assert.doesNotMatch(line, /\n/);
+  assert.equal(failureNote('x', 'fetch failed'), 'x: not written (fetch failed) - run again, dry run first');
+  assert.equal(failureNote('x', undefined), 'x: not written (no error text) - run again, dry run first');
+  assert.ok(failureNote('x', 'y'.repeat(500)).length < 260);
+});
+
 // Against a real Firestore emulator; skipped unless one is running, e.g.
 //   npx firebase-tools emulators:exec --only firestore --project rypacad --config firebase.functions-lane.json "node --test scripts/test/hide-sessions.test.mjs"
 test('against the emulator: dry run writes nothing; --yes hides only the empty ones; refusals untouched; read-back; --show clears; the sync keeps it', { skip: !process.env.FIRESTORE_EMULATOR_HOST }, async () => {
@@ -133,6 +148,11 @@ test('against the emulator: dry run writes nothing; --yes hides only the empty o
     assert.deepEqual([hidden.hidden, hidden.hiddenBy, typeof hidden.hiddenAt, hidden.booked, hidden.time], [true, 'hide-sessions', 'string', 0, '6:00 PM']);
     for (const id of ['2030-03-06-7', '2030-03-11-7', '2030-03-13-7', '2030-03-05-7', '2030-03-04-6', '2030-03-04-x']) assert.equal(await hiddenOf(id), null, id);
     assert.equal((await getDoc(t, 'sessions', '2030-03-06-7')).booked, 3);
+
+    // A write under a stale updateTime is refused as FAILED_PRECONDITION, which failureNote calls a changed session.
+    const stale = await commit(t, [buildWrite({ id: '2030-03-04-7', mode: 'show', updateTime: '2000-01-01T00:00:00Z' })]).then(() => 'committed', (e) => e.message);
+    assert.match(failureNote('2030-03-04-7', stale), /: not written; it changed since it was read/);
+    assert.equal(await hiddenOf('2030-03-04-7'), true);
 
     // A second run: already hidden, nothing written, still 0.
     assert.equal(await run('--hide', '--yes'), 0);

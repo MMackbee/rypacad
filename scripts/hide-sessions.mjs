@@ -7,7 +7,10 @@
  * rejected). A hidden session stays in Firestore and on the calendar; the
  * app leaves it out of every list a family books from, and firestore.rules
  * refuses a booking, a re-book and a waitlist join on it (a cancel still
- * lands). --show brings it back exactly as it was.
+ * lands). --show brings it back exactly as it was. The athlete Season
+ * calendar (frontend screens/SeasonSchedule.js) renders the Google Calendar
+ * itself and still shows the event; only the Firestore-driven booking lists
+ * hide it. scripts/comp-booking.mjs refuses a hidden session.
  *
  *   node scripts/hide-sessions.mjs --prod --hide --days Mon,Wed --time "6:00 PM" --dry-run
  *   node scripts/hide-sessions.mjs --prod --hide --days Mon,Wed --time "6:00 PM" \
@@ -166,6 +169,18 @@ export function buildWrite({ id, mode, updateTime }) {
   };
 }
 
+/**
+ * Pure: the line for a write that did not land. Only Firestore's own
+ * FAILED_PRECONDITION (the updateTime guard) means the session changed since
+ * it was read; anything else - an expired login, a network error - is shown
+ * as itself, on one line.
+ */
+export function failureNote(id, message) {
+  const text = String(message ?? '').replace(/\s+/g, ' ').trim();
+  if (/FAILED_PRECONDITION/.test(text)) return `${id}: not written; it changed since it was read - run again, dry run first`;
+  return `${id}: not written (${text.slice(0, 200) || 'no error text'}) - run again, dry run first`;
+}
+
 /** One read of a doc and its updateTime together, so the precondition guards the values checked. */
 async function readWithTime(target, collection, id) {
   const res = await fetch(`${target.base}/projects/${PROJECT_ID}/databases/(default)/documents/${collection}/${encodeURIComponent(id)}`, { headers: { Authorization: target.auth } });
@@ -219,7 +234,7 @@ export async function main(argv = process.argv.slice(2), { today = chicagoToday(
       await commit(target, [buildWrite({ id: r.session.id, mode: args.mode, updateTime: r.updateTime })]);
       written.push(r.session.id);
     } catch (e) {
-      failed.push(`${r.session.id}: not written (${e.message.split('\n')[0]}); it changed since it was read - run again, dry run first`);
+      failed.push(failureNote(r.session.id, e.message));
     }
   }
   for (const id of written) {

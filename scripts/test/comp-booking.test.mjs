@@ -35,7 +35,7 @@ test('pickSession: matches type and time, lists the day when it misses', () => {
   assert.match(pickSession(s, { date: 'd', time: '6:00 PM', type: 'training' }).error, /No training session at 6:00 PM.*4:00 PM phil/);
 });
 
-test('refusal: unpaid only, and never a cancelled, past, full, reserved or held seat', () => {
+test('refusal: unpaid only, and never a cancelled, hidden, past, full, reserved or held seat', () => {
   const ath = { name: 'Madison', billing: { status: 'pending' }, handicap: 12 };
   const ses = { date: '2026-11-25', booked: 1, capacity: 14 };
   const today = '2026-10-20';
@@ -43,6 +43,9 @@ test('refusal: unpaid only, and never a cancelled, past, full, reserved or held 
   assert.match(refusal({ athlete: { ...ath, billing: { status: 'active' } }, session: ses, existing: null, today }), /not unpaid/);
   assert.match(refusal({ athlete: { ...ath, billing: undefined }, session: ses, existing: null, today }), /not unpaid/);
   assert.match(refusal({ athlete: ath, session: { ...ses, status: 'cancelled' }, existing: null, today }), /cancelled/);
+  // 2026-11-05: a session scripts/hide-sessions.mjs hid; hidden: false (or absent) is not hidden.
+  assert.match(refusal({ athlete: ath, session: { ...ses, hidden: true }, existing: null, today }), /hidden from families.*--show/);
+  assert.equal(refusal({ athlete: ath, session: { ...ses, hidden: false }, existing: null, today }), null);
   assert.match(refusal({ athlete: ath, session: ses, existing: null, today: '2026-11-26' }), /day is over/);
   assert.match(refusal({ athlete: ath, session: { ...ses, booked: 14 }, existing: null, today }), /full/);
   assert.match(refusal({ athlete: ath, session: { ...ses, maxHandicap: 5 }, existing: null, today }), /reserved/);
