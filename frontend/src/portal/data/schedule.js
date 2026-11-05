@@ -148,7 +148,7 @@ const SATURDAY_ADULT_BLOCK = {
  * `session.capacity` as a plain number either way, so this flattening needs
  * no change on that side.
  */
-export const CAPACITY_BY_TYPE = { training: 14, tournament: 25 };
+export const CAPACITY_BY_TYPE = { training: 12, tournament: 25 }; // training 12: owner 2026-11-05
 
 /** The training number, kept under its old name for callers that want one default. */
 export const CAPACITY = CAPACITY_BY_TYPE.training;

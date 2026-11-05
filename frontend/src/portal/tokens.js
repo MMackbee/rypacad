@@ -141,10 +141,10 @@ export const BLOCKS = ['3:00 PM', '4:00 PM', '5:00 PM'];
  * The real locked weekly schedule (Sprint 12 pin J, owner ruling
  * 2026-09-15; amendment v2.0.3, 2026-09-22: a fourth weekday block — Mon/Wed
  * gain 6 PM, Tue/Thu gain 7 PM): 60-minute blocks. Mon/Wed 3-7 PM, Tue/Thu
- * 4-8 PM, Fri 3-5 PM, Sat 9 AM-2 PM. Tue/Thu 3 PM stays RESERVED for the
- * invite-only group (v2.0.2) and is not listed, so the sentence this drives
- * never offers a family a block it cannot book — it used to say "Tue/Thu 3-7
- * PM", which included that reserved hour. (9 AM training + four more 60-min
+ * 3-8 PM, Fri 3-6 PM, Sat 9 AM-2 PM. 2026-11-05 (owner): Tue/Thu 3 PM and
+ * Fri 5 PM are listed - the calendar has run them all season (Tue 3 PM was
+ * handicap-reserved until that day, Thu 3 PM always open), and leaving them
+ * out of this sentence hid them from families. (9 AM training + four more 60-min
  * Saturday blocks — the 2-4 PM
  * college/Elite Am/Mid Am pair is adult, in-person Stripe, not bookable in
  * the app, so it is not listed here). Production sessions come from the
@@ -156,10 +156,10 @@ const HOUR = (start) => ({ start, minutes: 60 });
 
 export const WEEKLY_SCHEDULE = {
   Monday: [15, 16, 17, 18].map(HOUR),
-  Tuesday: [16, 17, 18, 19].map(HOUR),
+  Tuesday: [15, 16, 17, 18, 19].map(HOUR),
   Wednesday: [15, 16, 17, 18].map(HOUR),
-  Thursday: [16, 17, 18, 19].map(HOUR),
-  Friday: [15, 16].map(HOUR),
+  Thursday: [15, 16, 17, 18, 19].map(HOUR),
+  Friday: [15, 16, 17].map(HOUR),
   // Saturday is the one day whose blocks are not all an hour (owner ruling,
   // 2026-09-22): 9 AM training, then 10-12 tournament and 12-2 training as
   // single two-hour events. Written with real lengths so the sentence below

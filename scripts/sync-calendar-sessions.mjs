@@ -85,8 +85,9 @@ const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..'
 
 // Capacity per block. training/tournament are replicated from
 // frontend/src/portal/data/schedule.js (export const CAPACITY_BY_TYPE = {
-// training: 14, tournament: 25 } — owner's ruling of 2026-09-18: training 14,
-// RYP Tour tournaments 25; was a flat 15, then a flat 14) — replicated
+// training: 12, tournament: 25 } — owner's ruling of 2026-11-05: training 12
+// "to spread out the traffic" (was 14 from 2026-09-18, a flat 15 before);
+// RYP Tour tournaments 25) — replicated
 // with this source note rather than bundling the module for one constant. If
 // schedule.js changes CAPACITY, change this too; capacity is a SYNCED field
 // (SYNCED_FIELDS below), so a re-run propagates a changed number to existing
@@ -101,7 +102,7 @@ const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..'
 // data/specialists.js's SPECIALISTS capacity (change one, change both).
 // Yannick's capacity-1 sessions are written by calendlyWebhook, not this
 // script (Sprint 20).
-const CAPACITY = { training: 14, tournament: 25, phil: 6 };
+const CAPACITY = { training: 12, tournament: 25, phil: 6 };
 
 // A session runs an hour unless its calendar event says otherwise. Mirrors
 // DEFAULT_DURATION_MINUTES in frontend/src/portal/data/schedule.js: Saturday's
@@ -164,9 +165,13 @@ const GENERIC_TITLE = /^(?:training|tournament)(?:\s+(?:block|session))?$/i;
 // 90 days (DEFAULT_WINDOW_DAYS): after adding or changing a row, run once
 // with --to the last day of the season (2027-02-27) so no later block is
 // left open to everyone.
-export const RESERVED_RULES = [
-  { weekday: 2, time: '3:00 PM', type: 'training', maxHandicap: 5 },
-];
+// OPENED 2026-11-05 (Luke on Nov 3: "let's just open it up. Not seeing us
+// getting enough scratch players"; owner Nov 5): the table is empty, so a run
+// removes maxHandicap from every Tuesday 3 PM in its window. The retired row is
+// kept below for the tests and for a later season; to reserve again, put it
+// back in the table and run with --to the last day of the season.
+export const TUESDAY_HANDICAP_RULE = Object.freeze({ weekday: 2, time: '3:00 PM', type: 'training', maxHandicap: 5 });
+export const RESERVED_RULES = [];
 
 /**
  * The handicap limit for one session ({ date, time, type }), or null when no

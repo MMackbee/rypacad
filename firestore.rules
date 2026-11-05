@@ -1144,7 +1144,10 @@ service cloud.firestore {
           && after.booked is int
           && (after.booked == before.booked + 1 || after.booked == before.booked - 1)
           && after.booked >= 0
-          && after.booked <= before.capacity;
+          // 2026-11-05 (training cap 14 -> 12): the capacity bound guards a
+          // +1 only. A block left above a lowered capacity keeps its bookings,
+          // and each of those families can still cancel (14 -> 13 under 12).
+          && (after.booked == before.booked - 1 || after.booked <= before.capacity);
       }
 
       // 2026-10-01 (waitlist audit): WHO may move the count. It used to be
