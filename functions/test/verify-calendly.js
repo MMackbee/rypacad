@@ -262,23 +262,34 @@ async function main() {
   check('malformed (no invitee uri)', await run({event: 'invitee.created', payload: {}}), {outcome: 'malformed', flag: null});
 
   log("\nSTEP I  owner ruling 2026-11-04: only the RYP 1:1 books, holds or keeps who booked; Yannick's other event types are other-event");
-  const {isRypOneOnOne} = require('../portal/calendly-resolve.js');
+  const {inviteeOf, isRypOneOnOne} = require('../portal/calendly-resolve.js');
   const RYP_TYPE = 'https://api.calendly.com/event_types/7d8e9f0a-1b2c-4d3e-9f4a-5b6c7d8e9f0a';
   const OTHER_TYPE = 'https://api.calendly.com/event_types/0f1e2d3c-4b5a-4968-8776-655443322110';
   // Another event type: its own form (no "Athlete name" question), Yannick's own link (no portal utm_source).
   const OTHER_QA = [{question: 'Anything I should know before we talk?', answer: 'Thinking about joining', position: 0}];
+  // Yannick's live RYP 1:1 form (Calendly booking page, read 2026-11-04, review of 6f6bf91): one required combined
+  // question plus optional notes. The fixtures keep the planned three-question form (SPRINT-20-LAUNCH.md), whose
+  // "Parent email" answer the lookup still reads should Yannick add that question.
+  const LIVE_QA = [{question: "What is the athlete's name, and who is attending?", answer: 'Addie Schinka, parent', position: 0},
+    {question: 'Please share anything that will help prepare for our meeting.', answer: '', position: 1}];
   const other = (name, minutes) => ({utm: null, source: null, name, minutes, typeUri: OTHER_TYPE, qa: OTHER_QA});
   // An other-event row keeps only these fields (no who-booked, no family).
   const OTHER_KEYS = ['event', 'eventName', 'eventTypeUri', 'eventUri', 'invitee', 'inviteeUri', 'outcome', 'receivedAt', 'slot'];
   const sizes = async () => [(await db.collection('sessions').get()).size, (await db.collection('bookings').get()).size];
   const ledgerOf = (n, ev) => get('calendlyEvents', `${INV(n)}_invitee.${ev || 'created'}`);
   const P = (name, source, qa) => ({scheduled_event: {name}, tracking: {utm_source: source}, questions_and_answers: qa});
-  check('the rule in process: portal or link-script source, a "Mental Game" name, the "Athlete name" question, no name -> RYP; else not',
+  check('the rule in process: portal or link-script source, a "Mental Game" name, the "Athlete name" question (and the live form\'s combined one), no name -> RYP; else not (the live notes question alone is not enough)',
       [isRypOneOnOne(P('RYP Academy - Mental Game 1:1', null, [])), isRypOneOnOne(P('mental game check-in', null, [])),
         isRypOneOnOne(P('Something Else', 'ryp-portal', [])), isRypOneOnOne(P('Something Else', 'ryp-link-script', [])),
-        isRypOneOnOne(P('Something Else', null, [{question: 'Athlete name'}])), isRypOneOnOne(P('', null, [])), isRypOneOnOne({}),
-        isRypOneOnOne(P('15 Minute Info Call', null, OTHER_QA)), isRypOneOnOne(P('Private Session', 'google', null)), isRypOneOnOne(P('Mental health chat', null, []))],
-      [true, true, true, true, true, true, true, false, false, false]);
+        isRypOneOnOne(P('Something Else', null, [{question: 'Athlete name'}])), isRypOneOnOne(P('Something Else', null, LIVE_QA)),
+        isRypOneOnOne(P('', null, [])), isRypOneOnOne({}),
+        isRypOneOnOne(P('15 Minute Info Call', null, OTHER_QA)), isRypOneOnOne(P('Private Session', 'google', null)), isRypOneOnOne(P('Mental health chat', null, [])),
+        isRypOneOnOne(P('Something Else', null, [LIVE_QA[1]]))],
+      [true, true, true, true, true, true, true, true, false, false, false, false]);
+  check('the live form\'s one answer is read as the athlete name (kept whole) and as who is attending; it has no "Parent email"',
+      [inviteeOf({email: 'Addie.Mom@example.test', questions_and_answers: LIVE_QA}), calendly.attendeeOf(LIVE_QA),
+        calendly.attendeeOf([{...LIVE_QA[0], answer: 'Addie Schinka'}])],
+      [{name: null, email: 'addie.mom@example.test', athleteName: 'Addie Schinka, parent', parentEmail: null}, 'parent', 'athlete']);
 
   r = await run(variant('invitee-created', 31, {...other('15 Minute Info Call', 15), email: 'prospect@example.test', start: '2027-03-02T22:00:00Z'}));
   const l31 = await ledgerOf(31);
