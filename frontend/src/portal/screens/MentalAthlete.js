@@ -39,9 +39,10 @@ const ROW = { display: 'flex', alignItems: 'center', gap: 10, padding: '10px 0',
  * other notes and this week's contract. Role 'mental' only; the notes are
  * readable by nobody else (firestore.rules mentalNotes). Every note it
  * opens carries the athlete's name, so the note page says whose it is.
+ * `demoUtcToday` and `demoRecord` are the review harness's (seed only).
  */
-export default function MentalAthlete({ bare = false, athleteId, onBack, onOpenNote, onSignOut }) {
-  const { data, loading, error } = useMentalAthlete(athleteId);
+export default function MentalAthlete({ bare = false, athleteId, onBack, onOpenNote, onSignOut, demoUtcToday = null, demoRecord = null }) {
+  const { data, loading, error } = useMentalAthlete(athleteId, { demoUtcToday, demoRecord });
   const athlete = data?.athlete ?? null;
   const open = (entryId, sessionDate = null) => {
     if (onOpenNote && athlete) onOpenNote({ entryId, sessionDate, athleteName: athlete.name });

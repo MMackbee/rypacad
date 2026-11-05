@@ -128,3 +128,15 @@ test("seed mode: an 18+ athlete's page shows the login email and the consent's e
   expect(j.out.current.data.consent.summary.label).toBe('Complete');
   j.unmount();
 });
+
+test("seed mode, the review harness only: Jordan on a later UTC date needs the 18+ signature; Nico on paper, not transcribed", async () => {
+  const j = mountHook(() => useMentalAthlete('jordan', { demoUtcToday: '2030-07-01' }));
+  await settle(j);
+  expect(j.out.current.data.consent.summary.status).toBe('needs-adult');
+  j.unmount();
+  const n = mountHook(() => useMentalAthlete('nico', { demoRecord: 'paper' }));
+  await settle(n);
+  expect(n.out.current.data.consent.summary.summary).toContain('Location: not transcribed');
+  expect(n.out.current.data.consent.summary.summary).toContain('Signed on paper');
+  n.unmount();
+});

@@ -19,6 +19,7 @@ import {
 } from './mentalLive';
 import { MENTAL_CONSENT_KEY, fetchAllConsents, fetchConsent } from './mentalConsentLive';
 import { seedConsentRecordMap } from './mentalConsent';
+import { consentSeedPaperRecord } from '../data/consentSeed';
 import { mentalFixtures } from '../data/seed';
 import { addDays, ageOn, contractMinutesFor, weekStartFor, weekSummary } from '../data/contractRule';
 import { boardRows, latestCheckin, visitsByAthlete } from '../data/contractBoard';
@@ -98,7 +99,7 @@ function athletePayload({ athlete, contact: householdContactLine, bookings, entr
   };
 }
 
-function seedMentalAthlete(athleteId, today, utcToday) {
+function seedMentalAthlete(athleteId, today, utcToday, demoRecord = null) {
   const f = mentalFixtures(today);
   const athlete = f.athletes.find((a) => a.id === athleteId);
   if (!athlete) return null;
@@ -111,7 +112,7 @@ function seedMentalAthlete(athleteId, today, utcToday) {
   return athletePayload({
     athlete, contact: household ? householdContact(household) : null, bookings,
     entries: f.entries.filter((e) => e.athleteId === athleteId), logsByDate: f.logsByAthlete[athleteId], checkins: f.checkins, today,
-    utcToday, record: seedConsentRecordMap()[athleteId] ?? null,
+    utcToday, record: demoRecord === 'paper' ? consentSeedPaperRecord(athleteId) : seedConsentRecordMap()[athleteId] ?? null,
   });
 }
 
@@ -141,9 +142,11 @@ async function liveMentalAthlete(athleteId, today, utcToday) {
  * loading, error }` for one athlete's page; sessions newest first;
  * `consent = { record, summary, unavailable }`. An id with no athlete (not a
  * fixture athlete in seed mode, no athletes doc live) answers null data,
- * which the screen shows as not found.
+ * which the screen shows as not found. `demoUtcToday` (ages on another UTC
+ * date) and `demoRecord: 'paper'` are the review harness's: the seed branch
+ * alone reads them.
  */
-export function useMentalAthlete(athleteId) {
+export function useMentalAthlete(athleteId, { demoUtcToday = null, demoRecord = null } = {}) {
   const live = isLive();
   const now = new Date();
   const today = academyDateISO(now);
@@ -153,7 +156,7 @@ export function useMentalAthlete(athleteId) {
   const checkinsGen = useInvalidation(CHECKINS_KEY);
   const consentsGen = useInvalidation(MENTAL_CONSENT_KEY);
   return useSeedResource(
-    live ? null : seedMentalAthlete(athleteId, today, utcToday),
+    live ? null : seedMentalAthlete(athleteId, today, demoUtcToday ?? utcToday, demoRecord),
     live ? { source: () => liveMentalAthlete(athleteId, today, utcToday), deps: ['mental-athlete', athleteId, today, notesGen, logsGen, checkinsGen, consentsGen] } : undefined
   );
 }
