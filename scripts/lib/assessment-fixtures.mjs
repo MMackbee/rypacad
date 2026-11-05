@@ -15,8 +15,9 @@
  *                due" instead.)
  *   due        - research yes (recorded 10 days back), never tested.
  *   declined   - research no: tested and coached the same, baseline due.
- *   unanswered - consents with no research answer: the list cannot add
- *                them, and the family's one-time confirm asks.
+ *   unanswered - consents with no research answer: the list can add them
+ *                (owner 2026-11-05) with a line that their tests stay out
+ *                of research, and the family's one-time confirm asks.
  */
 export const STORIES = ['tested', 'due', 'declined', 'unanswered'];
 

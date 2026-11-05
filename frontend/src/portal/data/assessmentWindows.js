@@ -113,9 +113,15 @@ export function consentStatus(athlete) {
   return r.value ? 'yes' : 'no';
 }
 
-/** Why a list row cannot join a wave, or null when it can (spec 5: not answered cannot be added). */
+/**
+ * Why a list row cannot join a wave, or null when it can: only "not due".
+ * The research answer never blocks testing (owner 2026-11-05, Phil could not
+ * test families who had not answered): testing rests on the data-collection
+ * consent every family gives at sign-up, research is optional, and a window
+ * with no answer on its circuit date stays out of research (inResearch),
+ * even if the family says yes later.
+ */
 export function waveBlock(row) {
-  if (row.consent === 'unanswered') return "Waiting on the family's research answer";
   if (!row.due.kind) return row.due.label;
   return null;
 }
@@ -146,19 +152,39 @@ export function researchCountsFrom(research) {
   return research && research.value === true ? toISODate(research.recordedAt) : null;
 }
 
+/** A Firestore Timestamp, Date, ms or ISO string as epoch ms, or null. */
+function toMs(value) {
+  if (value == null) return null;
+  const date = typeof value.toDate === 'function' ? value.toDate() : new Date(value);
+  const ms = date.getTime();
+  return Number.isNaN(ms) ? null : ms;
+}
+
 /**
  * Whether a window's results may be used in research (spec 4.3): the
  * answer in force on its circuit date - the current one, or one the
  * owner's recorded change moved onto `history`. A yes never reaches back
  * before its own date, and a later no leaves the windows before it as
  * they were.
+ *
+ * `createdAt` (the window's own, which no update may change) must ALSO fall
+ * under a yes, compared to the instant (review 2026-11-05): a retest wave
+ * moves an open window's circuitDate forward and keeps its trials, so a yes
+ * recorded between the first test and the retest would otherwise pull the
+ * earlier trials in; it also keeps a yes given at 8 PM off a 4 PM test.
+ * Without a readable createdAt (seed and older fixtures) the date rule alone
+ * decides.
  */
-export function inResearch(research, circuitDate) {
+export function inResearch(research, circuitDate, createdAt = null) {
   if (!research || !circuitDate) return false;
   const answers = [...(Array.isArray(research.history) ? research.history : []), research]
-    .map((r) => ({ value: r?.value === true, from: toISODate(r?.recordedAt) }))
+    .map((r) => ({ value: r?.value === true, from: toISODate(r?.recordedAt), at: toMs(r?.recordedAt) }))
     .filter((r) => r.from)
-    .sort((a, b) => a.from.localeCompare(b.from));
+    .sort((a, b) => a.at - b.at);
   const inForce = answers.filter((r) => r.from <= circuitDate).pop();
-  return Boolean(inForce && inForce.value);
+  if (!inForce || !inForce.value) return false;
+  const created = toMs(createdAt);
+  if (created == null) return true;
+  const atCreate = answers.filter((r) => r.at <= created).pop();
+  return Boolean(atCreate && atCreate.value);
 }
