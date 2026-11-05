@@ -51,6 +51,9 @@
  *        bookings is never deleted: families are told, not ghosted.
  *   - generator-seeded sessions (gcalEventId null) not adopted by id are left
  *     untouched and counted.
+ *   - hidden sessions (scripts/hide-sessions.mjs, 2026-11-05): this script
+ *     never writes hidden/hiddenAt/hiddenBy - the masked patch leaves them -
+ *     and a hidden session whose id would change is patched in place.
  *
  * Production guard: without --prod, writes require FIRESTORE_EMULATOR_HOST
  * pointing at a local host, or the script exits (same posture as
@@ -603,13 +606,19 @@ function planSync(desired, existing, resultSessionIds = new Set()) {
 
     if (matchId !== id) {
       // The instance moved (date or day-order changed) so its pinned id changed.
-      if ((cur.booked ?? 0) === 0 && !resultSessionIds.has(matchId)) {
+      // A hidden session (scripts/hide-sessions.mjs, 2026-11-05) stays put too:
+      // a move is a delete plus a full-doc create, which would drop the flag
+      // this script never writes.
+      const keptForData = (cur.booked ?? 0) > 0 || resultSessionIds.has(matchId);
+      if (!keptForData && cur.hidden !== true) {
         moves.push({ from: matchId, to: id, doc, cur });
       } else {
         // Never orphan bookings — or tournament results (contract v1.5.1) —
         // by moving the doc; patch in place and flag it.
         plan.updates.push({ id: matchId, doc, keptId: true, limit: limitChange(cur, doc) });
-        plan.conflicts.push(`sessions/${matchId} has ${cur.booked ?? 0} booking(s)${resultSessionIds.has(matchId) ? ' and tournament results' : ''} but its event now maps to ${id}; patched in place — id no longer encodes day-order.`);
+        plan.conflicts.push(keptForData
+          ? `sessions/${matchId} has ${cur.booked ?? 0} booking(s)${resultSessionIds.has(matchId) ? ' and tournament results' : ''} but its event now maps to ${id}; patched in place — id no longer encodes day-order.`
+          : `sessions/${matchId} is hidden but its event now maps to ${id}; patched in place so it stays hidden — id no longer encodes day-order.`);
       }
       continue;
     }
