@@ -770,6 +770,14 @@ function ResultsEntry({ bare, session, roster, resultsState, onBack }) {
   const seededRef = useRef(false);
   const [saveState, setSaveState] = useState('idle'); // 'idle' | 'saving' | 'saved'
   const [saveError, setSaveError] = useState(null);
+  // Every name this sheet has seen on a saved result or sent in a save,
+  // kept where a re-read cannot blank it (review 2026-11-04): a save bumps
+  // 'tournamentResults', and the results data reads null while that re-read
+  // runs or after it fails, with this sheet still open.
+  const savedNamesRef = useRef(new Map());
+  (resultsState.data?.results ?? []).forEach((r) => {
+    if (typeof r.name === 'string' && r.name) savedNamesRef.current.set(r.athleteId, r.name);
+  });
 
   const athleteIds = useMemo(() => roster.map((a) => a.id), [roster]);
   const bracketsState = useAthleteBrackets(athleteIds);
@@ -819,9 +827,11 @@ function ResultsEntry({ bare, session, roster, resultsState, onBack }) {
       // (contract v1.5.1, unchanged by v1.6) plus its bracket snapshot -
       // null when useAthleteBrackets hasn't resolved one. A row this roster
       // could not read keeps the name already saved on its result (the save
-      // rewrites every row, and that snapshot is how other families see it).
+      // rewrites every row, and that snapshot is how other families see it),
+      // taken from savedNamesRef so a second save while the results re-read
+      // is in flight or failed still sends it.
       const nameById = new Map(roster.map((a) => [a.id, a.name]));
-      const savedName = new Map((resultsState.data?.results ?? []).map((r) => [r.athleteId, r.name]));
+      const savedName = savedNamesRef.current;
       const entries = roster
         .map((a) => ({
           athleteId: a.id,
@@ -831,6 +841,9 @@ function ResultsEntry({ bare, session, roster, resultsState, onBack }) {
         }))
         .filter((e) => e.score != null);
       await resultsState.saveResults(entries);
+      entries.forEach((e) => {
+        if (typeof e.name === 'string' && e.name) savedNamesRef.current.set(e.athleteId, e.name);
+      });
       setSaveState('saved');
     } catch (err) {
       setSaveState('idle');

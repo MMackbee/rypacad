@@ -288,6 +288,81 @@ test('Tour results saved from a roster with an unreadable athlete keep the saved
   await r.unmount();
 });
 
+// Types a strokes count into the score sheet's nth field.
+const typeScore = async (r, index, value) => {
+  const field = r.container.querySelectorAll('input[inputmode="numeric"]')[index];
+  await r.act(() => {
+    Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value').set.call(field, value);
+    field.dispatchEvent(new Event('input', { bubbles: true }));
+  });
+};
+
+test('a second Tour results save while the results re-read is in flight or failed still sends the saved name (review 2026-11-04)', async () => {
+  const tour = { ...block, type: 'tournament', name: 'RYP Tour' };
+  mockRows = [
+    { bookingId: 'b1', athleteId: 'a1', name: 'Jordan Whitfield', status: 'attended' },
+    { bookingId: 'b4', athleteId: 'a4', name: null, status: 'attended' },
+  ];
+  mockResults = { results: [{ athleteId: 'a1', name: 'Jordan Whitfield', score: 72 }, { athleteId: 'a4', name: 'Avery Nguyen', score: 80 }] };
+  // A fresh element each render, so rerender reaches the screen.
+  const view = () => <SessionAttendance bare sessionId="2026-11-03-5" block={tour} onBack={() => {}} />;
+  const r = await renderScreen(view());
+  await r.click('Edit Tour results');
+  await r.click('Save scores');
+  expect(mockWrites.results[0].map((e) => [e.athleteId, e.name, e.score])).toEqual([
+    ['a1', 'Jordan Whitfield', 72],
+    ['a4', 'Avery Nguyen', 80],
+  ]);
+  // The save's own re-read blanks the results (in flight, or failed).
+  mockResults = null;
+  await r.rerender(view());
+  expect(r.text()).toContain('Name unavailable');
+  await typeScore(r, 1, '81');
+  await r.click('Save scores');
+  expect(mockWrites.results).toHaveLength(2);
+  expect(mockWrites.results[1].map((e) => [e.athleteId, e.name, e.score])).toEqual([
+    ['a1', 'Jordan Whitfield', 72],
+    ['a4', 'Avery Nguyen', 81],
+  ]);
+  await r.unmount();
+});
+
+test('a name sent in a Tour results save is kept for the next save when the roster then loses it and the results re-read failed (review 2026-11-04)', async () => {
+  const tour = { ...block, type: 'tournament', name: 'RYP Tour' };
+  mockRows = [
+    { bookingId: 'b1', athleteId: 'a1', name: 'Jordan Whitfield', status: 'attended' },
+    { bookingId: 'b4', athleteId: 'a4', name: 'Avery Nguyen', status: 'attended' },
+  ];
+  // First entry for this event: nothing saved yet.
+  mockResults = null;
+  // A fresh element each render, so rerender reaches the screen.
+  const view = () => <SessionAttendance bare sessionId="2026-11-03-5" block={tour} onBack={() => {}} />;
+  const r = await renderScreen(view());
+  await r.click('Enter Tour results');
+  await typeScore(r, 0, '72');
+  await typeScore(r, 1, '80');
+  await r.click('Save scores');
+  expect(mockWrites.results[0].map((e) => [e.athleteId, e.name, e.score])).toEqual([
+    ['a1', 'Jordan Whitfield', 72],
+    ['a4', 'Avery Nguyen', 80],
+  ]);
+  // The roster re-read could not read a4 this time, and the results re-read failed.
+  mockRows = [
+    { bookingId: 'b1', athleteId: 'a1', name: 'Jordan Whitfield', status: 'attended' },
+    { bookingId: 'b4', athleteId: 'a4', name: null, status: 'attended' },
+  ];
+  await r.rerender(view());
+  expect(r.text()).toContain('Name unavailable');
+  await typeScore(r, 1, '81');
+  await r.click('Save scores');
+  expect(mockWrites.results).toHaveLength(2);
+  expect(mockWrites.results[1].map((e) => [e.athleteId, e.name, e.score])).toEqual([
+    ['a1', 'Jordan Whitfield', 72],
+    ['a4', 'Avery Nguyen', 81],
+  ]);
+  await r.unmount();
+});
+
 test('a cancelled session whose roster failed to load shows the cancelled card alone', async () => {
   mockStatus = 'cancelled';
   mockError = new Error('fetchBookingsBySession: network');
