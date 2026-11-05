@@ -13,6 +13,7 @@
 import { addMonths, format, parseISO, startOfWeek } from 'date-fns';
 import { addDaysISO, monthBounds } from './calendar';
 import { SEASON_BOUNDS } from './season';
+import { isHiddenSession } from './hiddenSessions';
 
 /** The one localStorage key holding the viewer's Month/Week choice. */
 export const CALENDAR_VIEW_KEY = 'ryp.calendarView';
@@ -178,7 +179,10 @@ export const MARKS_LOOKAHEAD_DAYS = 7;
  * sessions a hook already read for [from, to] - EVERY type, not only the
  * calendar's own. No closures collection and no sync change: the owner puts
  * no 'Closed' events on the calendar, so an empty in-season day IS a closure.
- *  - 'tournament': the date has a scheduled (not cancelled) tournament.
+ *  - 'tournament': the date has a scheduled (not cancelled) tournament that
+ *    is not hidden (owner 2026-11-05, data/hiddenSessions.js: a hidden one
+ *    is on no list, so its day is no yellow day; it still counts as a
+ *    session below, so the day reads as nothing to book, never closed).
  *  - 'closed': the date is inside SEASON_BOUNDS and [from, to] (so a day
  *    nobody read is never called closed) and has no scheduled session of ANY
  *    type - training, tournament, phil or mental. Never before Nov 3 or
@@ -205,7 +209,7 @@ export function dayMarksFor(sessions, fromISO, toISO, season = SEASON_BOUNDS) {
     if (s.date > horizon) horizon = s.date;
     if (s.status === 'cancelled') continue;
     busy.add(s.date);
-    if (s.type === 'tournament' && s.date >= fromISO && s.date <= toISO) out[s.date] = 'tournament';
+    if (s.type === 'tournament' && !isHiddenSession(s) && s.date >= fromISO && s.date <= toISO) out[s.date] = 'tournament';
   }
   const from = fromISO > season.start ? fromISO : season.start;
   const to = [toISO, season.end, horizon].sort()[0]; // the earliest; '' for an empty read

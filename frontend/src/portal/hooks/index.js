@@ -1626,7 +1626,9 @@ async function liveSpecialistSessions(specialistId, today) {
   const toDate = openThrough(new Date(), MAX_WINDOW_MONTHS);
   const sessions = await fetchSessionsInRange(today, toDate);
   const mine = sessions
-    .filter((s) => s.type === specialistId && s.status !== 'cancelled' && !isHiddenSession(s))
+    // 2026-11-05: a hidden session is left out unless a seat is counted on it
+    // (as on the coach's day), so its roster still opens.
+    .filter((s) => s.type === specialistId && s.status !== 'cancelled' && (!isHiddenSession(s) || Number(s.booked ?? 0) > 0))
     .sort(byDateThenId);
 
   const withRosters = await Promise.all(
@@ -2683,8 +2685,12 @@ export function useCoachDay({ variant = 'today' } = {}) {
     // Group flow only (surface-scan follow-through, PM integration): Phil's
     // and Yannick's slots are not the golf coach's blocks — without this
     // filter Luke's Today overview listed Phil's sessions as his own.
+    // 2026-11-05: a hidden block (data/hiddenSessions.js) is left out unless a
+    // seat is counted on it - an Admin write the hide script never saw - so
+    // the coach still sees who is coming and opens its roster. The rest of
+    // the group lane is isGroupBookable's (repeat.js).
     const upcoming = (await fetchSessions(today, 1)).filter(
-      (s) => s.status !== 'cancelled' && isGroupBookable(s)
+      (s) => s.status !== 'cancelled' && !isSpecialistType(s.type) && s.bookable !== false && (!isHiddenSession(s) || Number(s.booked ?? 0) > 0)
     );
     const dayISO = upcoming[0]?.date ?? today;
     const sessions = upcoming.filter((s) => s.date === dayISO);

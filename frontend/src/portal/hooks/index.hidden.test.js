@@ -4,10 +4,11 @@
  * hidden === true (scripts/hide-sessions.mjs) is left out of every list a
  * family books from - Book a Session's slots and month calendar, Phil's
  * slots - and out of the staff lists that share those reads (the coach's
- * day and month, the admin block fill, a specialist's own day). A booking
- * that already sits on a hidden block still shows on the family's schedule:
- * those rows are joined by id. Kept beside index.test.js with its own mock
- * list so the lanes merge cleanly.
+ * day and month, the admin block fill, a specialist's own day); the
+ * coach's day and a specialist's own day keep one that holds a seat. A
+ * booking that already sits on a hidden block still shows on the family's
+ * schedule: those rows are joined by id. Kept beside index.test.js with its
+ * own mock list so the lanes merge cleanly.
  */
 jest.mock('../../firebase', () => ({ __esModule: true, default: {}, auth: { currentUser: null }, db: {}, functions: {}, storage: {} }));
 jest.mock('firebase/firestore', () => ({}));
@@ -210,6 +211,22 @@ describe('staff lists that share those reads leave a hidden block out too', () =
     expect(admin.result.current.data.blockFill.find((b) => b.day === 'Wed')).toEqual({ day: 'Wed', pct: 50 });
     expect(admin.result.current.data.metrics.fill).toBe('50%');
     await admin.unmount();
+  });
+
+  test("the coach's day and a specialist's own day keep a hidden session that holds a seat, so its roster still opens", async () => {
+    asStaff('coach');
+    live.fetchSessions.mockResolvedValue([WEEK[0], { ...WEEK[1], booked: 1 }]);
+    const day = await mountHook(() => useCoachDay());
+    expect(day.result.current.error).toBeNull();
+    expect(day.result.current.data.blocks.map((b) => b.sessionId)).toEqual(['2026-11-11-6', '2026-11-11-7']);
+    await day.unmount();
+
+    asStaff('coach', { specialistId: 'phil' });
+    live.fetchSessionsInRange.mockResolvedValue([WEEK[3], { ...WEEK[4], booked: 1 }]);
+    const mine = await mountHook(() => useSpecialistSessions('phil'));
+    expect(mine.result.current.error).toBeNull();
+    expect(mine.result.current.data.sessions.map((s) => s.sessionId)).toEqual(['2026-11-18-6', '2026-11-18-7']);
+    await mine.unmount();
   });
 
   test("a specialist's own day", async () => {

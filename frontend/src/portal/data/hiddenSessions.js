@@ -10,14 +10,16 @@
  * sync never writes it and keeps it.
  *
  * Hidden means not offered: every list a family books from leaves the
- * session out (hooks/repeat.js isGroupBookable - the group flow, the
- * coach's day and the admin block fill - plus the month calendar, Phil's
- * slots and a specialist's own day in hooks/index.js), Repeat weekly steps
- * over its week as "no session", and createBooking refuses it with
- * SESSION_HIDDEN. A booking that already sits on a hidden session is
- * joined by id and shows as usual. firestore.rules is the server half: no
- * + 1 on its seat count (a booking or a re-book) and no waitlist join; a
- * cancel always lands.
+ * session out (hooks/repeat.js isGroupBookable - the group flow and the
+ * admin block fill - plus the month calendar and its day marks and Phil's
+ * slots in hooks/index.js and data/calendarViews.js), the Repeat weekly
+ * card offers only the weeks the live read holds (components/RepeatWeekly.js)
+ * and the repeat steps over a hidden week as "no session", and createBooking
+ * refuses it with SESSION_HIDDEN. The coach's day and a specialist's own day
+ * leave out a hidden session too, unless a seat is counted on it. A booking
+ * that already sits on a hidden session is joined by id and shows as usual.
+ * firestore.rules is the server half: no + 1 on its seat count (a booking or
+ * a re-book) and no waitlist join; a cancel always lands.
  */
 
 /** The typed rejection reason createBooking carries for a hidden session. */

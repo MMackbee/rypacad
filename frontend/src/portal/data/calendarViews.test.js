@@ -156,6 +156,15 @@ describe('dayMarksFor (owner data rule 2026-09-30)', () => {
     expect(marks).toEqual({ '2026-11-26': 'closed', '2026-11-27': 'tournament', '2026-11-28': 'closed' });
   });
 
+  test('a hidden Tour event (2026-11-05) paints no yellow day, yet keeps its day from reading closed', () => {
+    const marks = dayMarksFor([{ ...s('2026-11-07', 'tournament'), hidden: true }, s('2026-11-14', 'tournament'), lookahead('2026-11-16')], '2026-11-06', '2026-11-14');
+    expect(marks['2026-11-07']).toBeUndefined();
+    expect(marks['2026-11-14']).toBe('tournament');
+    expect(marks['2026-11-06']).toBe('closed');
+    // hidden: false is not hidden.
+    expect(dayMarksFor([{ ...s('2026-11-07', 'tournament'), hidden: false }], '2026-11-07', '2026-11-07')).toEqual({ '2026-11-07': 'tournament' });
+  });
+
   test('never closed before Nov 3 or after Feb 27, or outside the range read', () => {
     const pre = dayMarksFor([lookahead('2026-11-05')], '2026-10-26', '2026-11-04');
     expect(Object.keys(pre)).toEqual(['2026-11-03', '2026-11-04']);
