@@ -230,6 +230,13 @@ test('owner and ops see the board without the tick or Edit, notes included; the 
 test('the search box narrows every group by name and the counts follow; Clear restores the board', async () => {
   const r = await renderScreen(screen(), { path: '/portal/mental/contract' });
   expect(r.button('Clear search')).toBeNull();
+  // A plain text field with the phone's Search key (no browser x beside our Clear), 16px so an iPhone does not zoom in.
+  const box = field(r, 'Search athletes');
+  expect(box.getAttribute('type')).toBe('text');
+  expect(box.getAttribute('inputmode')).toBe('search');
+  expect(box.getAttribute('enterkeyhint')).toBe('search');
+  expect(box.getAttribute('placeholder')).toBe('Search by name');
+  expect(box.style.fontSize).toBe('16px');
   await r.fill('Search athletes', 'ni');
   expect(r.text()).toContain('Due for a check-in · 0');
   expect(r.text()).toContain('This week · 1');
@@ -237,12 +244,18 @@ test('the search box narrows every group by name and the counts follow; Clear re
   expect(r.text()).toContain('Nico');
   expect(r.text()).not.toContain('Reese');
   expect(r.text()).not.toContain('Jordan');
-  expect(r.text()).toContain('No one is due'); // the group empties still read as before
+  // A group the search empties speaks of the search, never of the board: Reese is still due, Jordan still checked in.
+  expect(r.text()).not.toContain('No one is due');
+  expect(r.text()).not.toContain('No check-ins yet this week');
+  expect((r.text().match(/No one in this group matches “ni”\./g) || []).length).toBe(2);
+  const clear = r.button('Clear search');
+  expect([clear.style.width, clear.style.height]).toEqual(['44px', '44px']);
   await r.fill('Search athletes', 'whitfield');
   expect(r.text()).toContain('No one on the board matches “whitfield”.');
   expect(r.text()).not.toContain('Due for a check-in');
   await r.click('Clear search');
   expect(field(r, 'Search athletes').value).toBe('');
+  expect(document.activeElement).toBe(field(r, 'Search athletes')); // ready for the next name
   expect(r.button('Clear search')).toBeNull();
   expect(r.text()).toContain('Due for a check-in · 1');
   expect(r.text()).toContain('This week · 1');
@@ -289,23 +302,59 @@ test('the query survives a week switch', async () => {
   r.unmount();
 });
 
-test('a row with its note prompt open keeps its place under a search, and comes back where it was when the search clears', async () => {
+test('a row with its note prompt open keeps its place and its typed note under any search, and is where it was when the search clears', async () => {
   const r = await renderScreen(screen(), { path: '/portal/mental/contract' });
+  const nicoNote = () => r.container.querySelector('section:nth-of-type(2) [aria-label="Check-in note · Nico"]');
   await r.click('Checked in · Nico');
   await r.flush();
-  expect(r.container.querySelector('section:nth-of-type(2) [aria-label="Check-in note · Nico"]')).not.toBeNull();
+  expect(nicoNote()).not.toBeNull();
+  await r.fill('Check-in note · Nico', 'Talked about the range.');
   await r.fill('Search athletes', 'nic');
   // Pinned first, then filtered: Nico stays in This week with his prompt, not moved to Checked in.
   expect(r.text()).toContain('This week · 1');
   expect(r.text()).toContain('Checked in this week · 0');
-  expect(r.container.querySelector('section:nth-of-type(2) [aria-label="Check-in note · Nico"]')).not.toBeNull();
+  expect(nicoNote().value).toBe('Talked about the range.');
+  // A search that leaves him out still keeps his open prompt, typed note and all.
   await r.fill('Search athletes', 'jor');
-  expect(field(r, 'Check-in note · Nico')).toBeNull();
+  expect(nicoNote().value).toBe('Talked about the range.');
+  expect(r.text()).toContain('This week · 1');
   expect(r.text()).toContain('Checked in this week · 1');
-  expect(r.text()).toContain('This week · 0');
+  expect(r.text()).not.toContain('Reese');
+  await r.fill('Search athletes', 'whitfield');
+  expect(r.text()).not.toContain('No one on the board matches');
+  expect(nicoNote().value).toBe('Talked about the range.');
   await r.click('Clear search');
-  expect(r.container.querySelector('section:nth-of-type(2) [aria-label="Check-in note · Nico"]')).not.toBeNull();
+  expect(nicoNote().value).toBe('Talked about the range.');
   expect(r.text()).toContain('This week · 1');
   expect(mockSetCheckin).toHaveBeenCalledTimes(1);
+  expect(mockSetCheckinNote).not.toHaveBeenCalled();
+  r.unmount();
+});
+
+test('a tick made under a search keeps the row in its place in the whole group, during the search and after Clear', async () => {
+  checked = { amir: false, nico: false, nina: false };
+  const all = [r0('amir', 'Amir', 0), r0('nico', 'Nico', 1), r0('nina', 'Nina', 2)];
+  mockBoard = () => ({
+    config: { enabled: true, enabledAt: '2026-11-03' },
+    rows: {
+      due: [],
+      thisWeek: all.filter((a) => !checked[a.athleteId]),
+      checkedIn: all.filter((a) => checked[a.athleteId]).map((a) => ({ ...a, checkedInThisWeek: true })),
+    },
+  });
+  const r = await renderScreen(screen(), { path: '/portal/mental/contract' });
+  const thisWeek = () => [...r.container.querySelectorAll('section:nth-of-type(2) [role="checkbox"]')]
+    .map((b) => b.getAttribute('aria-label').replace('Checked in · ', ''));
+  expect(thisWeek()).toEqual(['Amir', 'Nico', 'Nina']);
+  await r.fill('Search athletes', 'ni');
+  expect(thisWeek()).toEqual(['Nico', 'Nina']);
+  await r.click('Checked in · Nina');
+  await r.flush();
+  expect(mockSetCheckin).toHaveBeenCalledWith({ athleteId: 'nina', checkedIn: true });
+  expect(checked.nina).toBe(true);
+  expect(field(r, 'Check-in note · Nina')).not.toBeNull();
+  expect(thisWeek()).toEqual(['Nico', 'Nina']); // she does not jump above Nico
+  await r.click('Clear search');
+  expect(thisWeek()).toEqual(['Amir', 'Nico', 'Nina']); // nor to the top of the group
   r.unmount();
 });
