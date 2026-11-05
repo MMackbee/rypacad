@@ -58,9 +58,8 @@ describe('the weekly hours sentence', () => {
   });
 
   test('the weekdays read from their own first and last block', () => {
-    expect(WEEKLY_SCHEDULE_LABEL).toContain('Mon/Wed 3-7 PM');
-    expect(WEEKLY_SCHEDULE_LABEL).toContain('Tue/Thu 4-8 PM');
-    expect(WEEKLY_SCHEDULE_LABEL).toContain('Fri 3-5 PM');
+    // 2026-11-05: Tue/Thu 3 PM and Fri 5 PM listed (the calendar runs them; the line hid them).
+    expect(WEEKLY_SCHEDULE_LABEL).toBe('Mon/Wed 3-7 PM, Tue/Thu 3-8 PM, Fri 3-6 PM, Sat 9 AM-2 PM');
   });
 
   test('every day is a list of blocks with real lengths', () => {

@@ -495,6 +495,12 @@ export async function taskSeats() {
   expect('athlete login re-books its own booking with the count', await flip({ status: 'confirmed' }, t.eliteLogin, 1), 200);
   expect('athlete login booking with no count write refused', await createAs(t.eliteLogin, 'bookings', 'ath-elite_s-seat2', row('s-seat2', 'eliteLogin')), 403);
   expect('athlete login books: booking and count + 1 in one commit', await bookAs(t.eliteLogin, 'ath-elite_s-seat2', row('s-seat2', 'eliteLogin')), 200);
+  // 2026-11-05: a block left above a lowered capacity (14 booked, cap 12) - its families can still cancel; nobody books in.
+  await seed('sessions', 's-over', { date: DAY1, time: '5:00 PM', type: 'training', capacity: 2, booked: 3, status: 'scheduled' });
+  await seed('bookings', 'ath-elite_s-over', { ...row('s-over'), status: 'confirmed', createdAt: new Date() });
+  expect('parent cancels from a block above its capacity (3 of 2 -> 2): status and count - 1', await commitAs(t.parent, [patchWrite('bookings', 'ath-elite_s-over', cancelled('parent')), await seatWrite('s-over', -1)]), 200);
+  expect('re-book onto that block, now at its capacity (2 of 2 -> 3), refused', await commitAs(t.parent, [patchWrite('bookings', 'ath-elite_s-over', { status: 'confirmed' }), await seatWrite('s-over', 1)]), 403);
+  await del('bookings', 'ath-elite_s-over'); await del('sessions', 's-over');
   // The count alone (s-seat reads 2 of 3 here, so one step either way is a legal value and only WHO and WHY decide).
   expect('bare count - 1 from an athlete login refused', await bare(t.eliteLogin, -1), 403);
   expect('bare count + 1 from an athlete login refused', await bare(t.eliteLogin, 1), 403);
