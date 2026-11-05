@@ -13,6 +13,7 @@ const functions = require('firebase-functions/v1');
 const admin = require('firebase-admin');
 // Modular import on purpose - see the note in portal/stripe.js:28-31.
 const {FieldValue} = require('firebase-admin/firestore');
+const compGrant = require('./comp-grant');
 const facility = require('./facility');
 const lib = require('./lib');
 const validate = require('./family-validate');
@@ -198,16 +199,27 @@ async function refuseOpenInvites(tx, store, athletes) {
  * @param {{store: !Object, householdId: string, uid: string,
  *     athletes: !Array<!Object>, emergencyContact: ?Object,
  *     medical: ?string, facilityConsent: boolean,
- *     todayISO: string, consents: (?Object|undefined)}} args The writes.
- * @return {!Array<string>} The new athlete ids, in payload order.
+ *     todayISO: string, consents: (?Object|undefined),
+ *     grant: (?Object|undefined)}} args The writes. `grant` is the
+ *     caller's live comp grant (comp-grant.js), or null.
+ * @return {{ids: !Array<string>, comped: !Array<string>}} The new athlete
+ *     ids in payload order, and those the grant comped.
  */
 function writeAthletes(tx, args) {
   const ids = [];
+  const comped = [];
   const med = medicalDoc(args.emergencyContact, args.medical);
   for (const a of args.athletes) {
     const ref = args.store.collection('athletes').doc();
-    tx.set(ref, athleteDoc(a, args.householdId, args.uid,
-        args.facilityConsent, args.todayISO, args.consents || null));
+    const doc = athleteDoc(a, args.householdId, args.uid,
+        args.facilityConsent, args.todayISO, args.consents || null);
+    // Owner 2026-11-05: an owner-set grant comps the athlete here, so the
+    // family never sees a Pay step and nobody runs a script afterwards.
+    if (compGrant.covers(args.grant || null, a.packageId)) {
+      doc.billing = compGrant.compBilling(args.grant, now());
+      comped.push(ref.id);
+    }
+    tx.set(ref, doc);
     if (med) tx.set(ref.collection('private').doc('medical'), med);
     if (a.loginEmail) {
       tx.set(args.store.collection('loginInvites').doc(a.loginEmail), {
@@ -219,7 +231,7 @@ function writeAthletes(tx, args) {
     }
     ids.push(ref.id);
   }
-  return ids;
+  return {ids, comped};
 }
 
 /**
@@ -244,7 +256,10 @@ function toHttpsError(err) {
  * @param {!Object} context The callable context.
  * @param {{db: (!Object|undefined), now: (Date|undefined)}=} deps
  *     Injectable Firestore and clock (the harness).
- * @return {!Promise<{householdId: string, athleteIds: !Array<string>}>}
+ * @return {!Promise<{householdId: string, athleteIds: !Array<string>,
+ *     comped: !Array<string>, compUntil: ?string}>} `comped`: the athletes
+ *     an owner-set grant made free (comp-grant.js), so the receipt shows no
+ *     Pay step for them.
  */
 async function createFamilyHandler(data, context, deps) {
   const d = deps || {};
@@ -270,6 +285,9 @@ async function createFamilyHandler(data, context, deps) {
     return await store.runTransaction(async (tx) => {
       if ((await tx.get(userRef)).exists) throw provisioned;
       await refuseOpenInvites(tx, store, p.athletes);
+      const grant = await compGrant.readGrant(tx, store, {uid,
+        email: callerEmail, emailVerified: token.email_verified === true,
+        todayISO});
       // ---- reads done ----
       const hhRef = store.collection('households').doc();
       tx.set(hhRef, {
@@ -282,14 +300,16 @@ async function createFamilyHandler(data, context, deps) {
         createdBy: uid,
         emergencyContact: p.emergencyContact,
       });
-      const athleteIds = writeAthletes(tx, {store, householdId: hhRef.id,
+      const written = writeAthletes(tx, {store, householdId: hhRef.id,
         uid, athletes: facility.oneFacilityRequest(p.athletes),
         emergencyContact: p.emergencyContact,
         medical: p.medical, facilityConsent: p.consents.facilityAccess,
         todayISO, consents: Object.assign({}, p.consents,
-            {signature: {name: p.signatureName, date: todayISO}})});
-      tx.set(userRef, userDocFor(p, hhRef.id, athleteIds));
-      return {householdId: hhRef.id, athleteIds};
+            {signature: {name: p.signatureName, date: todayISO}}), grant});
+      tx.set(userRef, userDocFor(p, hhRef.id, written.ids));
+      return {householdId: hhRef.id, athleteIds: written.ids,
+        comped: written.comped,
+        compUntil: written.comped.length ? grant.until : null};
     });
   } catch (err) {
     throw toHttpsError(err);
@@ -305,12 +325,13 @@ async function createFamilyHandler(data, context, deps) {
  * @param {*} data The request body.
  * @param {!Object} context The callable context.
  * @param {{db: (!Object|undefined), now: (Date|undefined)}=} deps Injectable.
- * @return {!Promise<{householdId: string, athleteIds: !Array<string>}>}
+ * @return {!Promise<{householdId: string, athleteIds: !Array<string>,
+ *     comped: !Array<string>, compUntil: ?string}>} As createFamily.
  */
 async function addAthletesHandler(data, context, deps) {
   const d = deps || {};
   const store = d.db || db();
-  const {uid} = requireAuth(context);
+  const {uid, token} = requireAuth(context);
   const todayISO = lib.todayISO(d.now);
   try {
     const meSnap = await store.collection('users').doc(uid).get();
@@ -331,11 +352,18 @@ async function addAthletesHandler(data, context, deps) {
           .where('householdId', '==', hhRef.id));
       const athletes = facility.oneFacilityRequest(p.athletes,
           here.docs.map((doc) => doc.data()));
-      const athleteIds = writeAthletes(tx, {store, householdId: hhRef.id,
+      const grant = await compGrant.readGrant(tx, store, {uid,
+        email: validate.lower(token && token.email),
+        emailVerified: Boolean(token) && token.email_verified === true,
+        todayISO});
+      // ---- reads done ----
+      const written = writeAthletes(tx, {store, householdId: hhRef.id,
         uid, athletes, emergencyContact: p.emergencyContact ||
         validate.storedEmergencyContact(hh.emergencyContact),
-        medical: p.medical, facilityConsent: false, todayISO});
-      return {householdId: hhRef.id, athleteIds};
+        medical: p.medical, facilityConsent: false, todayISO, grant});
+      return {householdId: hhRef.id, athleteIds: written.ids,
+        comped: written.comped,
+        compUntil: written.comped.length ? grant.until : null};
     });
   } catch (err) {
     throw toHttpsError(err);
