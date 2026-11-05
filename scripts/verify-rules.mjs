@@ -26,6 +26,7 @@ import { fileURLToPath } from 'node:url';
 import { fsFields, fsValue, localEmulatorHost, LOCAL_HOSTS } from './lib/firestore-rest.mjs';
 import { taskAssessments, taskDiagnosticsKept } from './rules-probes/assessments.mjs';
 import { taskResearch } from './rules-probes/research.mjs';
+import { taskMentalConsent } from './rules-probes/mental-consent.mjs';
 import { taskMembershipShape } from './rules-probes/membership-shape.mjs';
 
 let HOST = localEmulatorHost({ required: true });
@@ -1138,6 +1139,7 @@ async function runPass(label) {
     await taskReissue();
     await taskAssessments(); await taskDiagnosticsKept(); await taskResearch(); await taskMembershipShape();
     await taskMental();
+    await taskMentalConsent();
     await taskAttendance();
   } finally { await teardown(); }
 }

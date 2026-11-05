@@ -50,6 +50,22 @@ service cloud.firestore {
       return get(/databases/$(database)/documents/athletes/$(athleteId)).data;
     }
 
+    // Mental consent (spec 6.2): 18 from UTC midnight of the 18th birthday, Feb-29-safe
+    // (the research branch's adultRecord() arithmetic over any athlete doc).
+    function adultOn(a) {
+      let dob = a.get('dob', null);
+      return dob is string && dob.matches('[0-9]{4}-[0-9]{2}-[0-9]{2}')
+        && timestamp.date(int(dob.split('-')[0]) + 18, int(dob.split('-')[1]), 1)
+          + duration.value(int(dob.split('-')[2]) - 1, 'd') <= request.time;
+    }
+    // claimInvite marks loginInvites/{loginEmail} 'claimed'; nothing on the athlete doc says so.
+    function athleteLoginClaimed(a) {
+      let email = a.get('loginEmail', null);
+      return email is string && email.size() > 0
+        && exists(/databases/$(database)/documents/loginInvites/$(email))
+        && get(/databases/$(database)/documents/loginInvites/$(email)).data.get('status', null) == 'claimed';
+    }
+
     // Sprint 20 (spec 4.4): per-athlete paid status gates booking. Absent
     // `billing` == active (every athlete provisioned before this sprint).
     // Single token (owner rulings 2026-09-29/30): a one-time purchase sets
@@ -1836,6 +1852,233 @@ service cloud.firestore {
       allow update: if signedIn() && me().role == 'mental' && checkinShapeOk()
         && (request.resource.data.at == request.time || request.resource.data.at == resource.data.at);
       allow delete: if signedIn() && me().role == 'mental';
+    }
+
+    // ---- mentalConsents --------------------------------------------------
+    // Mental performance consent (spec docs/portal/plans/2026-10-30-mental-consent/
+    // 00-spec.md 6.2, plan Task 1): one document per athlete, kept off the
+    // coach-readable athlete doc. The household's parent signs a minor's
+    // record with the athlete's assent typed on the same phone; an 18+
+    // athlete signs their own section 11 (their login, or the parent's phone
+    // when they have no claimed login - a claimed login refuses the parent
+    // every create and update, a minor-era record included). ops/owner
+    // record a paper form and the owner corrects it; Yannick (mental)
+    // countersigns and records a withdrawal of the recording answer; a
+    // minor-era record is re-signed at 18. Every update appends the record's
+    // own earlier values to `history`. Nobody deletes. Additive: nothing
+    // outside this block and the two helpers above changes. Probed in
+    // scripts/rules-probes/mental-consent.mjs (both verify-rules passes).
+    match /mentalConsents/{athleteId} {
+      function mcAthlete() {
+        return athleteData(athleteId);
+      }
+      function mcName(n) {
+        return n is string && n.size() >= 1 && n.size() <= 120;
+      }
+      function mcVersion(v) {
+        return v is string && v.matches('[0-9]{4}-[0-9]{2}-[0-9]{2}');
+      }
+      function mcPast(t) {
+        return t is timestamp && t <= request.time && t >= timestamp.date(2026, 1, 1);
+      }
+      function mcDobOk(a) {
+        return a.get('dob', null) is string && a.dob.matches('[0-9]{4}-[0-9]{2}-[0-9]{2}');
+      }
+      // An adult record: section 11 signed at first, or re-signed at 18.
+      function mcAdultRec(r) {
+        return r.adult == true || r.adultSignature != null;
+      }
+      function mcSelf() {
+        return me().role == 'athlete' && me().athleteId == athleteId;
+      }
+      function mcChanged() {
+        return request.resource.data.diff(resource.data).affectedKeys();
+      }
+      // The client resends the stored array and appends the stored values
+      // (the research concat form); a rebuilt copy of either is refused.
+      function mcHistory(entry) {
+        return request.resource.data.history == resource.data.get('history', []).concat([entry]);
+      }
+      // { name, phone, relationship }: both name and phone, or (not
+      // required: a minor's "Same as parent", or paper) both null.
+      function mcContact(c, required) {
+        return c is map
+          && c.keys().hasOnly(['name', 'phone', 'relationship'])
+          && c.keys().hasAll(['name', 'phone', 'relationship'])
+          && ((mcName(c.name) && c.phone is string && c.phone.size() >= 1 && c.phone.size() <= 40)
+            || (!required && c.name == null && c.phone == null))
+          && (c.relationship == null || (c.relationship is string && c.relationship.size() <= 60));
+      }
+      function mcChoices(c, adult, paper) {
+        let k = ['location', 'audio', 'driving', 'emergencyContact', 'parentSessions', 'parentName', 'updatedAt', 'updatedBy'];
+        return c is map && c.keys().hasOnly(k) && c.keys().hasAll(k)
+          && (c.location in ['A', 'B', 'C', 'any'] || (paper && c.location == null))
+          && c.audio is bool
+          && c.updatedAt == request.time
+          && c.updatedBy == request.auth.uid
+          && (adult
+            ? (c.driving == null && c.parentSessions is bool
+              && (c.parentSessions ? (mcName(c.parentName)) : (c.parentName == null))
+              && mcContact(c.emergencyContact, !paper))
+            : ((c.driving == null || c.driving is bool)
+              && c.parentSessions == null && c.parentName == null
+              && mcContact(c.emergencyContact, false)));
+      }
+      function mcAssent(s, at) {
+        let k = ['name', 'audio', 'at', 'readAloud', 'withdrawnBy'];
+        return s is map && s.keys().hasOnly(k) && s.keys().hasAll(k)
+          && mcName(s.name) && s.audio is bool && s.readAloud is bool
+          && s.at == at && s.withdrawnBy == null;
+      }
+      function mcSigner(s, adult) {
+        return s is map && s.keys().hasOnly(['role', 'name']) && s.keys().hasAll(['role', 'name'])
+          && mcName(s.name) && s.role == (adult ? ('athlete') : ('parent'));
+      }
+      function mcCreateCommon(d) {
+        let k = ['athleteId', 'householdId', 'version', 'method', 'signedAt', 'signedBy', 'signer', 'adult',
+          'assent', 'choices', 'adultConfirm', 'adultSignature', 'countersign', 'history'];
+        return d.keys().hasOnly(k) && d.keys().hasAll(k)
+          && d.athleteId == athleteId
+          && d.householdId == mcAthlete().householdId
+          && mcVersion(d.version)
+          && d.signedBy == request.auth.uid
+          && d.adult is bool
+          && mcSigner(d.signer, d.adult)
+          && d.countersign == null && d.adultSignature == null && d.adultConfirm == null
+          && d.history == [];
+      }
+      // The portal signature: the server's time, `adult` == 18+ on today's
+      // UTC date, and no portal record for an athlete without a valid dob.
+      function mcPortalCreate(d) {
+        return mcCreateCommon(d)
+          && mcDobOk(mcAthlete())
+          && d.method == 'portal'
+          && d.signedAt == request.time
+          && d.adult == adultOn(mcAthlete())
+          && mcChoices(d.choices, d.adult, false)
+          && (d.adult ? (d.assent == null) : (mcAssent(d.assent, request.time)));
+      }
+      // A paper form: the date on the form (Chicago midnight), in the past
+      // and on or after 2026-01-01; `adult` as ops read it off the form.
+      function mcPaperCreate(d) {
+        return mcCreateCommon(d)
+          && d.method == 'paper'
+          && mcPast(d.signedAt)
+          && mcChoices(d.choices, d.adult, true)
+          && (d.adult ? (d.assent == null) : (mcAssent(d.assent, d.signedAt)));
+      }
+      // The household's parent, refused on an adult athlete with a claimed login.
+      function mcParentOf(hh, adult) {
+        return me().role == 'parent' && me().householdId == hh
+          && !(adult && athleteLoginClaimed(mcAthlete()));
+      }
+      function mcAdultConfirm(c) {
+        return c is map && c.keys().hasOnly(['name', 'at']) && c.keys().hasAll(['name', 'at'])
+          && mcName(c.name) && c.at == request.time;
+      }
+      function mcAdultFieldsChanged(n, o) {
+        return n.audio != o.audio || n.emergencyContact != o.emergencyContact
+          || n.parentSessions != o.parentSessions || n.parentName != o.parentName;
+      }
+      // The parent's hand-the-phone change of a minor's recording answer,
+      // while the athlete is under 18 (a withdrawal can be put back here).
+      function mcAssentChange(s, r) {
+        let k = ['name', 'audio', 'at', 'readAloud', 'withdrawnBy'];
+        return me().role == 'parent'
+          && r.adult == false && r.adultSignature == null && r.assent != null
+          && !adultOn(mcAthlete())
+          && s is map && s.keys().hasOnly(k) && s.keys().hasAll(k)
+          && s.name == r.assent.name && s.readAloud == r.assent.readAloud
+          && s.audio is bool && s.at == request.time && s.withdrawnBy == null;
+      }
+      // Change choices (spec 4.3). An adult record's change to the section
+      // 11 fields carries the athlete's typed confirmation; location alone
+      // does not.
+      function mcFamilyChange() {
+        let d = request.resource.data;
+        let r = resource.data;
+        let changed = mcChanged();
+        return changed.hasOnly(['choices', 'history', 'assent', 'adultConfirm'])
+          && mcChoices(d.choices, mcAdultRec(r), false)
+          && mcHistory({'choices': r.choices, 'assent': r.assent, 'adultConfirm': r.adultConfirm})
+          && (!changed.hasAny(['adultConfirm']) || mcAdultConfirm(d.adultConfirm))
+          && (!(mcAdultRec(r) && mcAdultFieldsChanged(d.choices, r.choices)) || mcAdultConfirm(d.adultConfirm))
+          && (!changed.hasAny(['assent']) || mcAssentChange(d.assent, r));
+      }
+      // The recording answer withdrawn (true -> false only) on a minor-era
+      // record, stamped by whoever withdrew it.
+      function mcWithdrawal() {
+        let d = request.resource.data;
+        let r = resource.data;
+        let k = ['name', 'audio', 'at', 'readAloud', 'withdrawnBy'];
+        return mcChanged().hasOnly(['assent', 'history'])
+          && !mcAdultRec(r)
+          && r.assent != null && r.assent.audio == true
+          && d.assent is map && d.assent.keys().hasOnly(k) && d.assent.keys().hasAll(k)
+          && d.assent.audio == false
+          && d.assent.at == request.time
+          && d.assent.withdrawnBy == request.auth.uid
+          && d.assent.name == r.assent.name && d.assent.readAloud == r.assent.readAloud
+          && mcHistory({'choices': r.choices, 'assent': r.assent});
+      }
+      // The section 11 re-sign of a minor-era record once the athlete is 18:
+      // the portal's at the server's time, paper's at the form's date.
+      function mcResign(paper) {
+        let d = request.resource.data;
+        let r = resource.data;
+        let s = d.adultSignature;
+        let k = ['signedAt', 'signedBy', 'name', 'version', 'method'];
+        return mcChanged().hasOnly(['adultSignature', 'choices', 'history', 'countersign'])
+          && r.adult == false && r.adultSignature == null && adultOn(mcAthlete())
+          && s is map && s.keys().hasOnly(k) && s.keys().hasAll(k)
+          && s.signedBy == request.auth.uid
+          && mcName(s.name)
+          && mcVersion(s.version)
+          && s.method == (paper ? ('paper') : ('portal'))
+          && (paper ? (mcPast(s.signedAt)) : (s.signedAt == request.time))
+          && mcChoices(d.choices, true, paper)
+          && d.countersign == null
+          && mcHistory({'choices': r.choices, 'assent': r.assent, 'countersign': r.countersign});
+      }
+      // The owner's correction of a paper record. A withdrawal is never
+      // undone: a withdrawn assent is kept as stored.
+      function mcPaperCorrection() {
+        let d = request.resource.data;
+        let r = resource.data;
+        return r.method == 'paper'
+          && mcChanged().hasOnly(['signedAt', 'signer', 'adult', 'assent', 'version', 'choices', 'history', 'signedBy'])
+          && d.signedBy == request.auth.uid
+          && mcPast(d.signedAt)
+          && mcVersion(d.version)
+          && d.adult is bool
+          && mcSigner(d.signer, d.adult)
+          && mcChoices(d.choices, d.adult, true)
+          && (d.adult
+            ? (d.assent == null)
+            : ((r.assent != null && d.assent == r.assent)
+              || ((r.assent == null || r.assent.get('withdrawnBy', null) == null) && mcAssent(d.assent, d.signedAt))))
+          && mcHistory({'choices': r.choices, 'assent': r.assent, 'signedAt': r.signedAt, 'signer': r.signer,
+            'adult': r.adult, 'version': r.version, 'signedBy': r.signedBy});
+      }
+      allow read: if signedIn() && (
+        (me().role == 'parent' && me().householdId == resource.data.householdId)
+        || mcSelf() || me().role in ['mental', 'ops', 'owner']);
+      allow create: if signedIn() && mcPortalCreate(request.resource.data) && (
+        mcParentOf(request.resource.data.householdId, request.resource.data.adult)
+        || (mcSelf() && adultOn(mcAthlete())));
+      allow create: if signedIn() && me().role in ['ops', 'owner'] && mcPaperCreate(request.resource.data);
+      allow update: if signedIn() && mcFamilyChange() && (
+        mcParentOf(resource.data.householdId, mcAdultRec(resource.data) || adultOn(mcAthlete()))
+        || (mcSelf() && mcAdultRec(resource.data)));
+      allow update: if signedIn() && mcWithdrawal() && (mcSelf() || me().role == 'mental');
+      allow update: if signedIn() && (
+        (mcResign(false) && (mcParentOf(resource.data.householdId, true) || mcSelf()))
+        || (mcResign(true) && me().role in ['ops', 'owner']));
+      allow update: if signedIn() && me().role == 'mental'
+        && mcChanged().hasOnly(['countersign']) && resource.data.countersign == null
+        && request.resource.data.countersign == { 'at': request.time, 'by': request.auth.uid };
+      allow update: if signedIn() && me().role == 'owner' && mcPaperCorrection();
+      allow delete: if false;
     }
 
     // config/contract (spec 6): the server-readable mirror of
