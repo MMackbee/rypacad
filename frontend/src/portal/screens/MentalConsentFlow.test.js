@@ -240,3 +240,80 @@ test('Done offers the next athlete to sign for', async () => {
   expect(onDone).toHaveBeenLastCalledWith({ to: '/portal/consent/mental', state: { from: 'flow' } });
   await r.unmount();
 });
+
+/* ---------------------------------------------- Change choices (Task 12) -- */
+
+const minorRecord = {
+  id: 'ava', athleteId: 'ava', adult: false, adultSignature: null, method: 'portal', version: '2026-10-30', signedAt: new Date('2026-10-30T17:00:00Z'),
+  signer: { role: 'parent', name: 'Dana Test' }, assent: { name: 'Ava', audio: false, at: new Date('2026-10-30T17:00:00Z'), readAloud: false, withdrawnBy: null },
+  choices: { location: 'B', audio: true, driving: null, emergencyContact: { name: null, phone: null, relationship: null }, parentSessions: null, parentName: null },
+  adultConfirm: null, countersign: null, history: [],
+};
+const adultRecord = {
+  id: 'max', athleteId: 'max', adult: true, adultSignature: null, method: 'portal', version: '2026-10-30', signedAt: new Date('2026-10-30T17:00:00Z'),
+  signer: { role: 'athlete', name: 'Max Test' }, assent: null,
+  choices: { location: 'C', audio: true, driving: null, emergencyContact: { name: 'Lee Test', phone: 'test-phone', relationship: 'aunt' }, parentSessions: true, parentName: 'Dana Test' },
+  adultConfirm: null, countersign: null, history: [],
+};
+
+test("change, minor: Save sends the choices only; the history is the hook's job", async () => {
+  mockFlow = flow({ status: 'signed', record: minorRecord, branch: 'minor' });
+  const onDone = jest.fn();
+  const r = await renderScreen(<MentalConsentFlow bare athleteId="ava" change onDone={onDone} />);
+  expect(r.text()).toContain('Change choices');
+  expect(r.button('Eden Prairie conference room (Option B)').getAttribute('aria-pressed')).toBe('true');
+  await r.click('Online (Option C)'); await r.click('Save');
+  expect(mockFlow.change).toHaveBeenCalledWith({ choices: expect.objectContaining({ location: 'C' }) });
+  expect(mockFlow.sign).not.toHaveBeenCalled();
+  expect(onDone).toHaveBeenCalledWith({ to: '/portal/family', state: null });
+  await r.unmount();
+});
+
+test("change, minor: Ava's own answer needs the hand-over and her name", async () => {
+  mockFlow = flow({ status: 'signed', record: minorRecord, branch: 'minor' });
+  const r = await renderScreen(<MentalConsentFlow bare athleteId="ava" change />);
+  await r.click("Change Ava's own answer");
+  expect(r.text()).toContain('Hand the phone to Ava');
+  expect(r.button('Online (Option C)')).toBeNull(); // the parent's answers are out of reach
+  expect(r.button('Save').disabled).toBe(true);
+  await r.click('I agree'); await r.fill("Ava's name", 'Ava'); await r.click('Save');
+  expect(mockFlow.change).toHaveBeenCalledWith({ choices: expect.any(Object), assentAudio: true });
+  await r.unmount();
+});
+
+test('change, adult: recording needs the typed confirmation; location alone does not', async () => {
+  mockFlow = flow({ status: 'signed', record: adultRecord, branch: 'adult-handover', athlete: MAX });
+  const r = await renderScreen(<MentalConsentFlow bare athleteId="max" change />);
+  expect(field(r, 'Max types their name to confirm')).toBeNull();
+  await r.click('I do not consent');
+  expect(r.button('Save').disabled).toBe(true);
+  await r.fill('Max types their name to confirm', 'Max Test');
+  await r.click('Save');
+  expect(mockFlow.change).toHaveBeenCalledWith({ choices: expect.objectContaining({ audio: false, parentSessions: true }), adultConfirmName: 'Max Test' });
+  await r.unmount();
+
+  mockFlow = flow({ status: 'signed', record: adultRecord, branch: 'adult-handover', athlete: MAX });
+  const loc = await renderScreen(<MentalConsentFlow bare athleteId="max" change />);
+  await loc.click('Academy quiet area (Option A)'); await loc.click('Save');
+  expect(mockFlow.change).toHaveBeenCalledTimes(1);
+  expect(mockFlow.change.mock.calls[0][0]).toEqual({ choices: expect.objectContaining({ location: 'A' }) });
+  await loc.unmount();
+});
+
+test("change: a refused save keeps the form; a claimed adult's parent cannot change anything", async () => {
+  mockFlow = flow({ status: 'signed', record: minorRecord, branch: 'minor' });
+  mockFlow.change = jest.fn(async () => { throw new Error('permission-denied'); });
+  const onDone = jest.fn();
+  const r = await renderScreen(<MentalConsentFlow bare athleteId="ava" change onDone={onDone} />);
+  await r.click('Online (Option C)'); await r.click('Save');
+  expect(r.text()).toContain("This couldn't be saved. Check your connection and try again.");
+  expect(r.button('Online (Option C)').getAttribute('aria-pressed')).toBe('true');
+  expect(onDone).not.toHaveBeenCalled();
+  await r.unmount();
+
+  mockFlow = flow({ status: 'signed', record: adultRecord, branch: 'adult-elsewhere', athlete: MAX });
+  const claimed = await renderScreen(<MentalConsentFlow bare athleteId="max" change />);
+  expect(claimed.button('Save')).toBeNull();
+  expect(claimed.text()).toContain('Already signed by Max Test on Oct 30');
+  await claimed.unmount();
+});

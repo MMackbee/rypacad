@@ -64,3 +64,36 @@ test('two rows: both names with their lines; tapping one opens it; the footer na
   expect(r.text()).toContain('Questions? Contact Yannick at yannick@rypgolf.com.');
   await r.unmount();
 });
+
+test('a minor login withdraws its recording answer from the list, which never auto-opens for it', async () => {
+  mockRows = [row({ viewer: 'athlete', status: 'signed', record: { ...minorRecord, assent: { ...minorRecord.assent, audio: true } } })];
+  const onOpen = jest.fn();
+  const r = await renderScreen(<MentalConsent bare autoOpen onOpen={onOpen} />, { path: '/portal/consent/mental?withdraw=1' });
+  expect(onOpen).not.toHaveBeenCalled();
+  expect(r.text()).toContain('Signed Oct 30 · Your parent manages this · Recording: yes');
+  await r.click('Stop recording my sessions');
+  expect(r.text()).toContain("Stop recording? Yannick won't record your sessions until your parent changes it with you.");
+  await r.click('Keep it');
+  expect(mockWithdraw).not.toHaveBeenCalled();
+  await r.click('Stop recording my sessions'); await r.click('Yes, stop recording');
+  expect(mockWithdraw).toHaveBeenCalledWith('jordan');
+  expect(r.button('Yes, stop recording')).toBeNull();
+  await r.unmount();
+
+  // Withdrawn: the button is gone and the line says so.
+  mockRows = [row({ viewer: 'athlete', status: 'signed', record: { ...minorRecord, assent: { ...minorRecord.assent, audio: false, withdrawnBy: 'u-jordan' } } })];
+  const after = await renderScreen(<MentalConsent bare autoOpen={false} onOpen={onOpen} />);
+  expect(after.button('Stop recording my sessions')).toBeNull();
+  expect(after.text()).toContain('Signed Oct 30 · Your parent manages this · Recording: no');
+  await after.unmount();
+});
+
+test('a refused withdrawal keeps the sheet open and says so', async () => {
+  mockRows = [row({ viewer: 'athlete', status: 'signed', record: minorRecord })];
+  mockWithdraw.mockRejectedValueOnce(new Error('permission-denied'));
+  const r = await renderScreen(<MentalConsent bare autoOpen={false} />);
+  await r.click('Stop recording my sessions'); await r.click('Yes, stop recording');
+  expect(r.text()).toContain("This couldn't be saved. Check your connection and try again.");
+  expect(r.button('Yes, stop recording')).not.toBeNull();
+  await r.unmount();
+});
