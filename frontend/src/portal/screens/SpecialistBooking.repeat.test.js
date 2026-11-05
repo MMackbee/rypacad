@@ -38,10 +38,14 @@ jest.mock('../data/calendly', () => ({
 const ELITE = { id: 'elite', kind: 'elite' };
 // Thursday Nov 5 at 4:00 PM: inside every package's window on Oct 1 (a token
 // package reaches Mon, Nov 30; Elite reaches Thu, Dec 31).
-const thursday = (capacity) => ({
-  date: '2026-11-05', dayLabel: 'Thu, Nov 5',
-  slots: [{ sessionId: 's-1105', time: '4:00 PM', open: true, capacity, booked: 0, durationMinutes: capacity > 1 ? 45 : 30 }],
+const thursday = (capacity, date = '2026-11-05') => ({
+  date, dayLabel: date === '2026-11-05' ? 'Thu, Nov 5' : `Thu, ${date}`,
+  slots: [{ sessionId: `s-${date.slice(5, 7)}${date.slice(8)}`, time: '4:00 PM', open: true, capacity, booked: 0, durationMinutes: capacity > 1 ? 45 : 30 }],
 });
+// The slots read the card takes its weeks from (owner 2026-11-05): every
+// Thursday at 4 PM the season runs through Dec 31 - Nov 26 is Thanksgiving,
+// Dec 24 and Dec 31 the break.
+const THURSDAYS = ['2026-11-05', '2026-11-12', '2026-11-19', '2026-12-03', '2026-12-10', '2026-12-17'];
 /** Tap the 4:00 PM slot through Reserve to the confirmation. */
 async function reserve(specialistId, props = {}) {
   const r = await renderScreen(<SpecialistBooking bare initialSpecialist={specialistId} {...props} />);
@@ -65,7 +69,7 @@ beforeEach(() => {
   mockMembershipReloads = false;
   mockMembers = [{ athleteId: 'a1', package: ELITE }];
   mockSlots = { loading: false, error: null, data: {
-    days: [thursday(6)], tokens: { left: null, unlimited: true, grace: [] }, capReached: false,
+    days: THURSDAYS.map((date) => thursday(6, date)), tokens: { left: null, unlimited: true, grace: [] }, capReached: false,
     bookingMode: 'in-app', calendlyUrl: null, billingStatus: 'active', bookingOpen: true,
     athlete: { id: 'a1', name: 'Jordan', loginEmail: null }, guardian: { name: 'Dana', email: 'dana@email.com' }, householdId: 'h1',
   } };
@@ -146,6 +150,30 @@ test('a parent booking for a token child: the child is named, the window is thro
     { athleteId: 'a2', untilISO: '2026-11-19' }
   );
   await r.unmount();
+});
+
+// Owner 2026-11-05: a hidden Phil session is on no slots read, so the card
+// offers only the weeks the read holds.
+test('a hidden week is neither offered nor the reach; with every later week hidden, no card', async () => {
+  // Dec 3 on are hidden: not on the read.
+  mockSlots.data.days = ['2026-11-05', '2026-11-12', '2026-11-19'].map((date) => thursday(6, date));
+  const r = await reserve('phil');
+  expect(r.text()).toContain('Hold Thursday at 4:00 PM every week through Thu, Nov 19, the furthest you can book today (two months ahead).');
+  expect(r.text()).not.toContain('Dec 17');
+  await r.click('Repeat every Thursday through Thu, Nov 19');
+  await r.flush();
+  expect(mockBookRecurring).toHaveBeenCalledWith(
+    { date: '2026-11-05', time: '4:00 PM', type: 'phil' },
+    { athleteId: undefined, untilISO: '2026-11-19' }
+  );
+  await r.unmount();
+
+  // Every later week hidden: no card, rather than an offer that books nothing.
+  mockSlots.data.days = [thursday(6)];
+  const none = await reserve('phil');
+  expect(none.text()).toContain('Reservation confirmed');
+  expect(none.text()).not.toContain('Repeat weekly');
+  await none.unmount();
 });
 
 test('no offer on a Yannick confirmation', async () => {

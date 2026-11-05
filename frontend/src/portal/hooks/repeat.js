@@ -12,7 +12,7 @@ import {
 } from './live';
 import { windowMonthsFor } from '../data/packages';
 import { addDaysISO, openThrough, windowOpensOn } from '../data/calendar';
-import { firstRunningWeek } from '../data/season';
+import { SEASON_BOUNDS, firstRunningWeek } from '../data/season';
 import { isSpecialistType, repeatsWeekly } from '../data/specialists';
 import { HANDICAP_RESERVED, reservedEligible, reservedRefusal } from '../data/reserved';
 import { SESSION_HIDDEN, isHiddenSession } from '../data/hiddenSessions';
@@ -117,6 +117,13 @@ export default async function repeatWeekly(identity, slot, { athleteId, untilISO
   // one query per week was ~25 serial round-trips (finding 8a).
   const firstDate = addDaysISO(slot.date, 7);
   const lastDate = untilISO < windowEnd ? untilISO : windowEnd;
+  // The first week past the window that the season runs (never a closure:
+  // the Christmas break sits right past a December window) and that is not
+  // hidden: nothing holds it, so the screen says when it opens instead. null
+  // past the season. Its one read runs beside the weeks' read below, not after it.
+  let pastWindow = firstDate;
+  while (pastWindow <= windowEnd) pastWindow = addDaysISO(pastWindow, 7);
+  const nextRead = firstOfferedWeek(pastWindow, slot);
   // The slot's own lane: the group flow for a block, Phil's sessions for his.
   // A hidden week (data/hiddenSessions.js) is left out, so it reads 'no session'.
   const inLane = isSpecialistType(slot.type) ? (s) => s.type === slot.type && !isHiddenSession(s) : isGroupBookable;
@@ -135,12 +142,7 @@ export default async function repeatWeekly(identity, slot, { athleteId, untilISO
   // Stop at the last scheduled session rather than the requested end date:
   // weeks past the end of the schedule are not real skips worth reporting.
   const endDate = lastSessionDate && lastSessionDate < lastDate ? lastSessionDate : lastDate;
-  // The first week past the window that the season runs (never a closure:
-  // the Christmas break sits right past a December window): nothing holds
-  // it, so the screen says when it opens instead. null past the season.
-  let pastWindow = firstDate;
-  while (pastWindow <= windowEnd) pastWindow = addDaysISO(pastWindow, 7);
-  const nextDate = await firstOfferedWeek(pastWindow, slot);
+  const nextDate = await nextRead;
   const next = nextDate ? { date: nextDate, opensOn: windowOpensOn(nextDate, windowMonths) } : null;
 
   const booked = [];
@@ -214,18 +216,23 @@ export default async function repeatWeekly(identity, slot, { athleteId, untilISO
 /**
  * firstRunningWeek, stepping over a week whose session at this time and type
  * is hidden (owner 2026-11-05, data/hiddenSessions.js): a hidden week is not
- * one to come back for. One day's read per candidate week - usually one - and
- * a week with no session doc at all is judged as before. A failed read keeps
- * that week (the old answer): it costs the step-over, never the repeat.
+ * one to come back for. ONE range read, from the first candidate week to the
+ * season's end, stepped through locally however many weeks are hidden (a
+ * read per week was the serial pattern finding 8a removed). A week with no
+ * session doc at all is judged as before. A failed read keeps the first
+ * candidate (the old answer): it costs the step-over, never the repeat.
  */
 async function firstOfferedWeek(fromISO, slot) {
-  for (let date = firstRunningWeek(fromISO, slot.time, slot.type); date; date = firstRunningWeek(addDaysISO(date, 7), slot.time, slot.type)) {
-    let onDay;
-    try {
-      onDay = ((await fetchSessionsInRange(date, date)) ?? []).filter((s) => s.time === slot.time && s.type === slot.type);
-    } catch {
-      return date;
-    }
+  const start = firstRunningWeek(fromISO, slot.time, slot.type);
+  if (!start) return null;
+  let ahead;
+  try {
+    ahead = ((await fetchSessionsInRange(start, SEASON_BOUNDS.end)) ?? []).filter((s) => s.time === slot.time && s.type === slot.type);
+  } catch {
+    return start;
+  }
+  for (let date = start; date; date = firstRunningWeek(addDaysISO(date, 7), slot.time, slot.type)) {
+    const onDay = ahead.filter((s) => s.date === date);
     if (!onDay.length || !onDay.every(isHiddenSession)) return date;
   }
   return null;

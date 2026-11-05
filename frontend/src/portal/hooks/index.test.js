@@ -353,8 +353,8 @@ describe('live loaders (perf wave B)', () => {
         booked: [], skipped: [], windowEnd: '2027-01-31', next: { date: '2027-02-02', opensOn: '2026-12-01' },
       });
       expect(live.createBooking).not.toHaveBeenCalled();
-      // No week is read for booking; the one read is the week it names, one day, to step over a hidden one (2026-11-05).
-      expect(live.fetchSessionsInRange.mock.calls).toEqual([['2027-02-02', '2027-02-02']]);
+      // No week is read for booking; the one read runs from the week it names to the season's end, to step over hidden ones (2026-11-05).
+      expect(live.fetchSessionsInRange.mock.calls).toEqual([['2027-02-02', '2027-02-27']]);
       await h.unmount();
     });
 

@@ -23,6 +23,7 @@ jest.mock('firebase/firestore', () => {
     orderBy: () => null,
     query: (ref, ...clauses) => ({ col: ref.col, clauses: clauses.filter(Boolean) }),
     getDocs: async (q) => {
+      if (q.col === 'sessions') mockSessionReads.push(q.clauses.filter((c) => c.field === 'date').map((c) => c.value));
       const docs = Object.keys(mockStore[q.col] ?? {})
         .map((id) => snap({ col: q.col, id }))
         .filter((d) => q.clauses.every((c) => OPS[c.op](d.data()[c.field], c.value)));
@@ -50,6 +51,8 @@ import { HIDDEN_SESSION_LINE, SESSION_HIDDEN } from '../data/hiddenSessions';
 
 let mockStore;
 let mockBeforeTx;
+// Every sessions query the code under test sends, as [from, to].
+let mockSessionReads;
 
 const NOV_5 = new Date('2026-11-05T16:00:00Z'); // 10 AM Chicago: a token family books through Dec 31, Elite through Jan 31
 const ATHLETE = { role: 'athlete', athleteId: 'a1', householdId: 'h1' };
@@ -73,6 +76,7 @@ beforeEach(() => {
   jest.setSystemTime(NOV_5);
   auth.currentUser = { uid: 'u1' };
   mockBeforeTx = null;
+  mockSessionReads = [];
   mockStore = {
     households: { h1: { name: 'Whitfield family', periodAnchorDay: 1 } },
     athletes: { a1: { name: 'Jordan', householdId: 'h1', packageId: 'elite' } },
@@ -140,11 +144,35 @@ test('the week to come back for is never a hidden one: it steps to the next week
 
   // Feb 1 and Feb 8 hidden: Feb 15 is Presidents' Day (a closure, stepped over as before), so Feb 22.
   for (const id of ['m-0201', 'm-0208']) Object.assign(mockStore.sessions[id], HIDDEN);
+  mockSessionReads = [];
   expect((await repeatWeekly(ATHLETE, slot, { untilISO: '2026-11-09' })).next.date).toBe('2027-02-22');
+  // However many weeks are hidden, ONE read from the first candidate to the season's end (no week is booked here).
+  expect(mockSessionReads).toEqual([['2027-02-01', '2027-02-27']]);
 
   // Every later week hidden: nothing to come back for.
   Object.assign(mockStore.sessions['m-0222'], HIDDEN);
   expect((await repeatWeekly(ATHLETE, slot, { untilISO: '2026-11-09' })).next).toBeNull();
+});
+
+test('a failed read of the weeks ahead keeps the first week past the window, as before, and still books', async () => {
+  const slot = monday('m-1109', '2026-11-09');
+  monday('m-1116', '2026-11-16');
+  hold('m-1109');
+  monday('m-0201', '2027-02-01', HIDDEN);
+  // Only the read past the window fails; the weeks' own read is answered.
+  const firestore = jest.requireMock('firebase/firestore');
+  const original = firestore.getDocs;
+  firestore.getDocs = async (q) => {
+    if (q.col === 'sessions' && q.clauses.some((c) => c.field === 'date' && c.op === '<=' && c.value === '2027-02-27')) throw new Error('unavailable');
+    return original(q);
+  };
+  try {
+    const out = await repeatWeekly(ATHLETE, slot, { untilISO: '2026-11-16' });
+    expect(out.booked).toEqual([{ date: '2026-11-16', id: 'm-1116' }]);
+    expect(out.next.date).toBe('2027-02-01');
+  } finally {
+    firestore.getDocs = original;
+  }
 });
 
 test('createBooking refuses a hidden session with a typed reason and writes nothing', async () => {
