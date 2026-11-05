@@ -1,6 +1,10 @@
 import React, { act } from 'react';
 import { renderScreen } from './testRender';
 import ParentDashboard from './ParentDashboard';
+// Mental consent (plan Task 13): no consent rows unless a case sets them.
+let mockConsents;
+jest.mock('../hooks/mentalConsent', () => ({ useFamilyConsents: () => mockConsents }));
+beforeEach(() => { mockConsents = { data: null, loading: false, error: null }; });
 
 let mockHub; let mockConfirm;
 const mockChange = jest.fn(async (athleteId, packageId) => ({ athleteId, packageId }));
@@ -328,4 +332,24 @@ describe('the family facility add-on ticked at sign-up (owner request, Mike 2026
       clock.mockRestore();
     }
   });
+});
+
+/** A consent FamilyRow (plan Task 8) for the mocked hook. */
+const consentRow = (athleteId, over = {}) => ({ athleteId, name: 'Reese Whitfield', firstName: 'Reese', viewer: 'parent', status: 'unsigned', record: null, adultToday: false,
+  claimedLogin: false, drivingUnanswered: false, nextMental: null, draft: null, ...over });
+
+test("mental consent: the home card above the athletes and the line on the athlete's card", async () => {
+  const reese = consentRow('a2', { nextMental: { date: '2026-11-12', attendee: 'athlete' } });
+  mockConsents = { data: { viewer: 'parent', rows: [reese], byId: { a2: reese } }, loading: false, error: null };
+  const r = await renderScreen(<ParentDashboard bare />, { path: '/portal/family' });
+  expect(r.text()).toContain("Sign Yannick's consent for Reese before the session on Thu, Nov 12");
+  expect(r.text()).toContain('Mental performance consent · Not signed');
+  await r.unmount();
+});
+
+test('mental consent: nothing while the consent rows are not loaded', async () => {
+  const r = await renderScreen(<ParentDashboard bare />, { path: '/portal/family' });
+  expect(r.text()).not.toContain('Mental performance consent');
+  expect(r.text()).not.toContain("Yannick's consent");
+  await r.unmount();
 });

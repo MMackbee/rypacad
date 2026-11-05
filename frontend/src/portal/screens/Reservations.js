@@ -1,6 +1,8 @@
 import React, { useState } from 'react';
 import { color, font } from '../tokens';
 import { useHouseholdReservations } from '../hooks';
+import { useFamilyConsents } from '../hooks/mentalConsent';
+import { consentBookingFootnote } from '../components/consent/ConsentBookingLine';
 import { leaveWaitlist } from '../hooks/waitlist';
 import { cancelSeries, laterWeeks } from '../hooks/cancelSeries';
 import { formatDuration } from '../data/calendar';
@@ -47,6 +49,7 @@ import { Banner, Body, ErrorNotice, ScreenTitle } from '../components/Primitives
 
 export default function Reservations({ variant = 'populated', bare = false, onBook, onRetry, demoMembers }) {
   const hookState = useHouseholdReservations();
+  const consents = useFamilyConsents(); // "Consent needed" under an unsigned athlete's 1:1
   const [tab, setTab] = useState('upcoming');
   const [cancelTarget, setCancelTarget] = useState(null);
   // Mirrors MySchedule's leave-waitlist state; the write bumps bookings, so
@@ -109,6 +112,7 @@ export default function Reservations({ variant = 'populated', bare = false, onBo
               <MemberList
                 items={tab === 'past' ? member.past : member.upcoming}
                 past={tab === 'past'}
+                consent={consents.data?.byId?.[member.athleteId]}
                 onBook={onBook}
                 // `later`: this member's later weeks of the same session
                 // (hooks/cancelSeries.js), fixed when the sheet opens.
@@ -141,7 +145,7 @@ export default function Reservations({ variant = 'populated', bare = false, onBo
   );
 }
 
-function MemberList({ items, past, onBook, onCancelRequest, onLeaveWaitlist, leavingId, name = null, unlimited = false }) {
+function MemberList({ items, past, consent, onBook, onCancelRequest, onLeaveWaitlist, leavingId, name = null, unlimited = false }) {
   if (!items || items.length === 0) {
     return (
       <Body size={12} tone={color.textTertiary} style={{ padding: '4px 2px' }}>
@@ -200,7 +204,7 @@ function MemberList({ items, past, onBook, onCancelRequest, onLeaveWaitlist, lea
             name={item.name}
             meta={metaParts.join(' · ')}
             variant={rowCancelled ? 'cancelled' : item.isToday ? 'live' : 'default'}
-            footnote={rowCancelled ? cancelReasonCopy(item.cancelReason, { unlimited, singleToken: item.singleToken }) : null}
+            footnote={rowCancelled ? cancelReasonCopy(item.cancelReason, { unlimited, singleToken: item.singleToken }) : consentBookingFootnote({ item, row: consent, past })}
             trailing={
               waitlisted ? (
                 <StatusBadge tone="yellow">Waitlisted</StatusBadge>

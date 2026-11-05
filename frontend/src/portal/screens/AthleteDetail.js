@@ -6,6 +6,7 @@ import BottomTabBar from '../components/BottomTabBar';
 import HandicapCard from '../components/HandicapCard';
 import { Avatar } from '../components/MediaPlaceholder';
 import ParentContractCard from '../components/ParentContractCard';
+import ConsentDetailCard from '../components/consent/ConsentDetailCard';
 import PhoneFrame from '../components/PhoneFrame';
 import ProgressMeter, { meterColor } from '../components/ProgressMeter';
 import { ReservedChip } from '../components/Reserved';
@@ -37,7 +38,7 @@ import { reservedTag } from '../data/reserved';
  *   AthleteDetailRoute (PortalRoutes.js is not this lane's to edit — see the
  *   sprint report) now that Sprint 10 pin I already routes coach here too.
  */
-export default function AthleteDetail({ variant = 'populated', bare = false, athleteId, role = 'parent', backLabel, onBack, onOpenAssessments }) {
+export default function AthleteDetail({ variant = 'populated', bare = false, athleteId, role = 'parent', backLabel, onBack, onOpenAssessments, demoPaperOpen = false }) {
   // athleteId comes from the route (/portal/athlete/:athleteId) — dropping it
   // here was QA re-sweep #1: the hook's by-id fetch was fixed but never
   // received an id, so every child rendered as the seed athlete.
@@ -108,6 +109,8 @@ export default function AthleteDetail({ variant = 'populated', bare = false, ath
             <Body size={12}>{loginStatusLine(athlete)}</Body>
           </Card>
         ) : null}
+        {/* Yannick's consent (2026-10-30): the parent's line; ops and owner the status and paper signatures. */}
+        <ConsentDetailCard athleteId={athleteId} role={role} demoPaperOpen={demoPaperOpen} />
         {/* Parents log for their kids (owner, 2026-10-28; spec 4.3): the
             child's month calendar and Log today sheet, behind the switch. */}
         {role === 'parent' && showContract ? <ParentContractCard athleteId={athleteId} athleteName={athlete?.name} /> : null}

@@ -155,15 +155,18 @@ async function liveFamilyConsents() {
   return familyPayload(await liveInputs(now), now.getTime());
 }
 
-/** `{ data: { viewer, rows: FamilyRow[], byId } | null, loading, error }`; `as` picks the seed viewer ('parent' | 'athlete'). */
-export function useFamilyConsents({ as = 'parent', demoDraft = null } = {}) {
-  const live = isLive();
+/**
+ * `{ data: { viewer, rows: FamilyRow[], byId } | null, loading, error }`; `as` picks the seed viewer ('parent' | 'athlete').
+ * `practice` (the onboarding walkthrough's homes) reads nothing and answers no rows: no live read, and no line out to a real flow.
+ */
+export function useFamilyConsents({ as = 'parent', demoDraft = null, practice = false } = {}) {
+  const live = !practice && isLive();
   const now = new Date();
   const today = academyDateISO(now);
   const consentsGen = useInvalidation(MENTAL_CONSENT_KEY);
   const bookingsGen = useInvalidation('bookings');
   return useSeedResource(
-    live ? null : seedFamilyConsents({ as, today, utcToday: utcTodayISO(now), demoDraft }),
+    live || practice ? null : seedFamilyConsents({ as, today, utcToday: utcTodayISO(now), demoDraft }),
     live ? { source: liveFamilyConsents, deps: ['family-consents', as, today, consentsGen, bookingsGen] } : undefined
   );
 }

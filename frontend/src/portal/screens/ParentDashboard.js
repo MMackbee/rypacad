@@ -19,6 +19,9 @@ import AllowancePools from '../components/AllowancePools';
 import SkeletonCard, { SkeletonBar } from '../components/Skeleton';
 import { AlertGlyph, Body, Card, ErrorNotice, ScreenTitle } from '../components/Primitives';
 import { useHousehold } from '../hooks';
+import { useFamilyConsents } from '../hooks/mentalConsent';
+import ConsentHomeCard from '../components/consent/ConsentHomeCard';
+import ConsentLine from '../components/consent/ConsentLine';
 import { ALL_PACKAGES, siblingDiscountApplies, siblingPlan } from '../data/packages';
 import { contractEnabled } from '../data/contractFlag';
 
@@ -79,6 +82,7 @@ export default function ParentDashboard({
   onRetry,
 }) {
   const { data, loading, error } = useHousehold({ variant, practice });
+  const consents = useFamilyConsents({ practice }); // Yannick's consent: the home card and each card's line
   const children = data?.children ?? [];
   const billing = data?.billing;
   const flagged = billing?.status === 'failed';
@@ -189,10 +193,12 @@ export default function ParentDashboard({
           <PaymentBanner billing={flagged ? billing : bannerFor(membershipStatus)} onOpen={() => navigate('/portal/billing')} />
         ) : null}
 
+        <ConsentHomeCard rows={consents.data?.rows} />
         {children.map((child) => (
           <ChildCard
             key={child.id}
             child={child}
+            consent={consents.data?.byId?.[child.id]}
             onHold={onHold}
             billingStatus={billingById.get(child.id) ?? 'active'}
             onOpen={onOpenAthlete ? () => onOpenAthlete(child.id) : undefined}
@@ -314,7 +320,7 @@ function PaymentBanner({ billing, onOpen }) {
  */
 const CONTRACT_STANDINGS = ['On track', 'Behind'];
 
-function ChildCard({ child, onHold, billingStatus, onOpen, onBookFor, onOpenMembership }) {
+function ChildCard({ child, consent, onHold, billingStatus, onOpen, onBookFor, onOpenMembership }) {
   const showContract = contractEnabled();
   const childStanding = showContract || !CONTRACT_STANDINGS.includes(child.standing?.label) ? child.standing : null;
   const standing = onHold ? { tone: 'red', label: 'On hold' } : billingBadge(billingStatus) ?? childStanding;
@@ -456,6 +462,7 @@ function ChildCard({ child, onHold, billingStatus, onOpen, onBookFor, onOpenMemb
           Book a session
         </Button>
       ) : null}
+      {consent ? <ConsentLine row={consent} style={{ marginTop: 13 }} /> : null}
     </Card>
   );
 }

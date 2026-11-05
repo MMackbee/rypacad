@@ -156,6 +156,16 @@ describe('live mode', () => {
     h.unmount();
   });
 
+  test('the onboarding walkthrough (practice) reads nothing and has no rows, on live data too', async () => {
+    for (const as of ['parent', 'athlete']) {
+      const h = mountHook(() => useFamilyConsents({ as, practice: true }));
+      await settle(h);
+      expect(h.out.current).toMatchObject({ data: null, loading: false, error: null });
+      h.unmount();
+    }
+    expect(mockApi.fetchCurrentUser).not.toHaveBeenCalled();
+  });
+
   test('a parent signs a minor: the portal record goes to createConsent; the re-read is the household query', async () => {
     const h = mountHook(() => useConsentFlow('ava'));
     await settle(h);

@@ -5,6 +5,7 @@ import PendingBanner from '../components/PendingBanner';
 import ChangePackageSheet, { ChangePackageLink } from '../components/ChangePackageSheet';
 import PaymentConfirming from '../components/PaymentConfirming';
 import WalkthroughOffer from '../components/WalkthroughOffer';
+import ConsentAthleteHomeLine from '../components/consent/ConsentAthleteHomeLine';
 import { useMyTokens } from '../hooks/billing';
 import { useSelfManaged } from '../hooks/useAuthSession';
 import AllowancePools, { GraceLine } from '../components/AllowancePools';
@@ -164,6 +165,7 @@ export default function AthleteDashboard({
           // this space.
           <NoSessions onBook={onBook} unlimited={Boolean(athlete?.tokens?.unlimited)} />
         ) : null}
+        <ConsentAthleteHomeLine practice={practice} />
 
         {/*
           The contract card shows in the empty state too. Daily minutes are
