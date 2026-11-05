@@ -200,6 +200,7 @@ function flowPayload({ inputs, athlete, household, nowMs, demoNoRecord = false }
     record, status: facts.status, branch: facts.branch, drivingAsked: facts.drivingAsked, under13: facts.under13,
     draft, draftState: ds,
     nextAthleteId: next?.athleteId ?? null,
+    nextName: next?.firstName ?? null,
     listCount: rows.length,
   };
 }
