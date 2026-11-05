@@ -15,10 +15,16 @@
  * The two jobs are called directly with a FIXED now (scheduled functions never
  * fire in the emulator); the expiry job's clock is chosen so the household's
  * anchor day puts the period end exactly EXPIRY_LEAD_DAYS out (and a second household
- * exactly 4, the negative case). */
+ * exactly 4, the negative case).
+ *
+ * STEP 8 (mental consent, 2026-11-05) replays the consent asks: the booking
+ * trigger, the per-kind email lock, the switch and the day-before job. A lane
+ * worktree points the harness at its own emulator with FIRESTORE_EMULATOR_HOST
+ * and VERIFY_FUNCTIONS_ORIGIN (`node --env-file=<lane env> ...`); unset, it
+ * keeps the functions-lane ports above. */
 'use strict';
 
-process.env.FIRESTORE_EMULATOR_HOST = '127.0.0.1:8082';
+process.env.FIRESTORE_EMULATOR_HOST = process.env.FIRESTORE_EMULATOR_HOST || '127.0.0.1:8082';
 process.env.GCLOUD_PROJECT = 'rypacad';
 // The jobs run in THIS process; push must take the emulator branch here too.
 process.env.FUNCTIONS_EMULATOR = 'true';
@@ -29,9 +35,10 @@ const lib = require('../portal/lib.js');
 const jobs = require('../portal/jobs.js');
 const notices = require('../portal/notices.js');
 const push = require('../portal/push.js');
+const consentNotices = require('../portal/consent-notices.js');
 
 const SECRET = 'whsec_functionslane_emulator_only_not_a_real_secret';
-const URL = 'http://127.0.0.1:5001/rypacad/us-central1/stripeWebhook';
+const URL = `${process.env.VERIFY_FUNCTIONS_ORIGIN || 'http://127.0.0.1:5001'}/rypacad/us-central1/stripeWebhook`;
 const stripe = new Stripe('sk_test_harness');
 
 admin.initializeApp({projectId: 'rypacad'});
@@ -81,7 +88,7 @@ async function post(event) {
 async function wipe() {
   for (const c of ['households', 'athletes', 'packages', 'sessions', 'bookings',
     'waitlist', 'graceTokens', 'tokenPeriods', 'stripeEvents', 'users',
-    'notifications']) {
+    'notifications', 'config', 'mentalConsents']) {
     const snap = await db.collection(c).get();
     await Promise.all(snap.docs.map((d) => d.ref.delete()));
   }
@@ -165,10 +172,11 @@ async function seed() {
   set('households', 'lopez', {name: 'Lopez family', periodAnchorDay: ANCHOR_4});
   set('households', 'kerr', {name: 'Kerr family', periodAnchorDay: 1, stripeCustomerId: 'cus_kerr_notify'});
 
-  set('athletes', 'teddy', {name: 'Teddy', householdId: 'hart', packageId: 't-6'});
+  // A dob on the three athletes STEP 8 books with Yannick (all minors).
+  set('athletes', 'teddy', {name: 'Teddy', householdId: 'hart', packageId: 't-6', dob: '2012-05-14'});
   set('athletes', 'zia', {name: 'Zia', householdId: 'hart', packageId: 'elite'});
-  set('athletes', 'wren', {name: 'Wren', householdId: 'lopez', packageId: 't-6'});
-  set('athletes', 'nell', {name: 'Nell', householdId: 'lopez', packageId: 't-6'});
+  set('athletes', 'wren', {name: 'Wren', householdId: 'lopez', packageId: 't-6', dob: '2013-01-01'});
+  set('athletes', 'nell', {name: 'Nell', householdId: 'lopez', packageId: 't-6', dob: '2013-01-01'});
   set('athletes', 'kip', {name: 'Kip', householdId: 'kerr', packageId: 't-6'});
 
   set('packages', 't-6', {name: '6 tokens', kind: 'tokens', tokens: 6, windowDays: 32});
@@ -403,6 +411,38 @@ async function main() {
   await waitFor(async () => (await db.collection('notifications').where('kind', '==', 'membership').where('householdId', '==', 'kerr').get()).size === 1, 'kerr membership notice');
   const kerrM = (await db.collection('notifications').where('kind', '==', 'membership').where('householdId', '==', 'kerr').get()).docs[0];
   check('the lapse also flips membership -> its own notice', kerrM.data().body, 'Membership lapsed — upcoming bookings were released.');
+
+  // ---------------------------------------------------------------- STEP 8
+  log('\nSTEP 8  mental consent: the booking trigger, the email lock, the switch, the day-before job');
+  await db.collection('config').doc('mentalConsent').set({notices: true, enabledAt: today});
+  const mental = (athleteId, sessionId, date, householdId, extra = {}) => db.collection('bookings')
+      .doc(`${athleteId}_${sessionId}`).set(Object.assign({athleteId, sessionId, type: 'mental',
+        status: 'confirmed', date, createdBy: 'system', source: 'calendly', householdId}, extra));
+  await mental('teddy', 'cal-c1', plus2, 'hart', {attendee: 'athlete'});
+  const C8 = `consent-needed_consent:teddy:${plus2}`;
+  await waitFor(async () => !!(await get('notifications', C8)), 'consent-needed ledger row');
+  const l8 = await ledger(C8);
+  check('kind/category/householdId/athleteId/subjectKey', l8 && [l8.kind, l8.category, l8.householdId, l8.athleteId, l8.subjectKey],
+      ['consent-needed', 'schedule', 'hart', null, `consent:teddy:${plus2}`]);
+  check('parents only (u-teddy, the athlete login, is never addressed)', l8 && l8.to,
+      ['u-pat:skipped/off', 'u-robin:skipped/no-device']);
+  check('body', l8 && l8.body, consentNotices.consentNeeded({athlete: {name: 'Teddy'}, date: plus2,
+    attendee: 'athlete', status: 'unsigned', toAthlete: false}).body);
+  check('NO booking-confirmed for the Calendly booking (the Calendly skip still holds)',
+      await exists('notifications', 'booking-confirmed_teddy_cal-c1'), false);
+  await mental('teddy', 'cal-c2', plus2, 'hart', {attendee: 'athlete'});
+  await settle(1500);
+  check('a second 1:1 the same day asks once: consent-needed count still 1', await countKind('consent-needed'), 1);
+  await mental('wren', 'cal-c3', tomorrow, 'lopez');
+  r = await jobs.runSessionReminders({now: NOW, db});
+  check('job summary [consent, consentDuplicate, consentError]', [r.consent, r.consentDuplicate, r.consentError], [1, 0, 0]);
+  const l8r = await ledger(`consent-reminder_consent-reminder:wren:${tomorrow}`);
+  check('consent-reminder recipients (u-sam has schedule email off: the lock)', l8r && l8r.to, ['u-sam:skipped/no-device']);
+  check('NO reminder-24h for the Calendly 1:1', await exists('notifications', 'reminder-24h_wren_cal-c3'), false);
+  await db.collection('config').doc('mentalConsent').set({notices: false, enabledAt: today});
+  await mental('nell', 'cal-c4', plus2, 'lopez');
+  await settle(1500);
+  check('the switch off: no consent-needed for nell', await exists('notifications', `consent-needed_consent:nell:${plus2}`), false);
 
   log(`\n=== ${failures === 0 ? 'ALL CHECKS PASSED' : failures + ' CHECK(S) FAILED'} ===`);
   process.exitCode = failures === 0 ? 0 : 1;
