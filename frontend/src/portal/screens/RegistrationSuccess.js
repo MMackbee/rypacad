@@ -73,9 +73,13 @@ export default function RegistrationSuccess({ bare = false, mode = 'signup', for
   // The athlete the family facility add-on bills on, or -1. Sign-up: the
   // form's own rule, which createFamily shares. Link mode: what addAthletes
   // stored, so the line shows only once the family read confirms it.
+  // Sign-up: the holder's index is into ALL the form's athletes; a comped
+  // holder gets no line (review 2026-11-05: indexing `rows` named the wrong
+  // child, or crashed, once comped rows were left out).
+  const holderAt = mode === 'link' ? -1 : facilityHolderIndex(form);
   const facilityAt = mode === 'link'
     ? rows.findIndex((r) => r.athleteId != null && (family || []).some((a) => a.id === r.athleteId && a.facilityRequested === true))
-    : facilityHolderIndex(form);
+    : holderAt < 0 || allRows[holderAt].comped ? -1 : rows.indexOf(allRows[holderAt]);
   const facilityLine = facilityAt < 0 ? null
     : facilityReceiptLine({ self: athleteMode, holder: rows.length > 1 ? rows[facilityAt].name.trim().split(/\s+/)[0] : null });
   // The receipt's own athletes are never paid yet, so on their own they can

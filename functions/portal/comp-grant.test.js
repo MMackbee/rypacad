@@ -42,14 +42,22 @@ test('no grant, no email, revoked, expired, bad date or another uid: null',
       assert.equal(await read(at({uid: 'u-someone-else'}), {}), null);
     });
 
-test('the last day still counts; no uid on the grant matches by email',
+test('the last day still counts; no uid on the grant needs a verified email',
     async () => {
       const last = await read({'compGrants/nate@example.test':
         grantDoc({until: TODAY})}, {});
       assert.equal(last.until, TODAY);
-      const noUid = await read({'compGrants/nate@example.test':
-        grantDoc({uid: null})}, {uid: 'u-new-login'});
-      assert.equal(noUid.email, 'nate@example.test');
+      const at = {'compGrants/nate@example.test': grantDoc({uid: null})};
+      const verified = await read(at, {uid: 'u-new-login',
+        emailVerified: true});
+      assert.equal(verified.email, 'nate@example.test');
+      assert.equal(await read(at, {uid: 'u-new-login', emailVerified: false}),
+          null);
+      assert.equal(await read(at, {uid: 'u-new-login'}), null);
+      // A bound grant does not need a verified email (Nathan's is not).
+      const bound = await read({'compGrants/nate@example.test': grantDoc()},
+          {emailVerified: false});
+      assert.equal(bound.email, 'nate@example.test');
     });
 
 test('covers every monthly package by default, never the single token',

@@ -99,10 +99,15 @@ export function grantWrite({ args, uid, existing }) {
       currentDocument: { updateTime: existing.updateTime },
     };
   }
+  const fields = grantFields(args, uid);
+  if (existing?.updateTime) {
+    // Replace only the grant's own fields: createdAt and any revokedAt stay as a record.
+    return { update: { name, fields: fsFields(fields) }, updateMask: { fieldPaths: Object.keys(fields) }, currentDocument: { updateTime: existing.updateTime } };
+  }
   return {
-    update: { name, fields: fsFields(grantFields(args, uid)) },
+    update: { name, fields: fsFields(fields) },
     updateTransforms: [{ fieldPath: 'createdAt', setToServerValue: 'REQUEST_TIME' }],
-    currentDocument: existing?.updateTime ? { updateTime: existing.updateTime } : { exists: false },
+    currentDocument: { exists: false },
   };
 }
 
@@ -129,15 +134,17 @@ export async function main(argv = process.argv.slice(2), { nowMs = Date.now(), l
     if (authT.error) { console.error(authT.error); return 1; }
     login = await lookup(authT, args.email);
   }
-  console.log(`  login     ${login ? `${login.localId} (email ${login.emailVerified ? 'verified' : 'not verified'})` : 'none yet: the grant matches the email when they sign up'}`);
+  console.log(`  login     ${login ? `${login.localId} (email ${login.emailVerified ? 'verified' : 'not verified'}): the grant is bound to this login` : 'none yet: the grant then applies only to a login with this email VERIFIED; better to run this after they create the login'}`);
   const existing = await readWithTime(target, 'compGrants', args.email);
   const g = existing.data;
   console.log(`  grant     ${g ? `until ${g.until}, ${g.revoked ? 'REVOKED' : 'live'}, packages ${g.packages ? g.packages.join(', ') : 'any monthly'}, login ${g.uid || 'any with this email'}` : 'none yet'}`);
   if (args.revoke && (!g || g.revoked)) { console.error('There is no live grant to revoke. Nothing written.'); return 1; }
 
   // A family that already signed up: its unpaid Elite athletes are comped now (comp-membership's checks).
+  // The login's own users doc first (sign-up stores the contact email as typed), then any by email.
+  const own = login?.localId ? await getDoc(target, 'users', login.localId) : null;
   const users = await queryCollection(target, { from: [{ collectionId: 'users' }], where: eqFilter('email', args.email) });
-  const householdIds = [...new Set(users.map((u) => u.householdId).filter(Boolean))];
+  const householdIds = [...new Set([own?.householdId, ...users.map((u) => u.householdId)].filter(Boolean))];
   if (householdIds.length > 1) { console.error(`${args.email} belongs to more than one family (${householdIds.join(', ')}). Check the users docs first.`); return 1; }
   const rows = [];
   if (householdIds.length && !args.revoke) {
@@ -157,7 +164,7 @@ export async function main(argv = process.argv.slice(2), { nowMs = Date.now(), l
     console.log('  family    not signed up yet: the grant applies when they do');
   }
   console.log(args.revoke ? '  change    revoke: later sign-ups are no longer comped; athletes already comped stay comped'
-    : `  change    ${g ? 'replace' : 'create'} grant: until ${args.until}, packages ${args.packages ? args.packages.join(', ') : 'any monthly package (never the single token)'}, note "${args.note}"`);
+    : `  change    ${g ? (g.revoked ? 'RE-ENABLE the revoked grant' : 'replace grant') : 'create grant'}: until ${args.until}, packages ${args.packages ? args.packages.join(', ') : 'any monthly package (never the single token)'}, note "${args.note}"`);
   if (args.dryRun) { console.log(`Run again with --yes instead of --dry-run to write it.${args.revoke ? '' : `\n${SEASON_END}`}`); return 0; }
 
   try {

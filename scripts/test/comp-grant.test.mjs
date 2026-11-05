@@ -48,6 +48,8 @@ test('grantWrite: create must not exist, replace and revoke need the read update
   assert.equal(create.update.fields.revoked.booleanValue, false);
   const replace = grantWrite({ args, uid: 'u1', existing: { data: {}, updateTime: 't1' } });
   assert.deepEqual(replace.currentDocument, { updateTime: 't1' });
+  assert.deepEqual(replace.updateMask.fieldPaths.sort(), ['createdBy', 'email', 'note', 'packages', 'revoked', 'uid', 'until']);
+  assert.equal(replace.updateTransforms, undefined); // createdAt and revokedAt are kept
   const revoke = grantWrite({ args: p([...BASE, '--revoke', '--yes']), existing: { data: {}, updateTime: 't2' } });
   assert.deepEqual(revoke.updateMask, { fieldPaths: ['revoked'] });
   assert.deepEqual(revoke.currentDocument, { updateTime: 't2' });

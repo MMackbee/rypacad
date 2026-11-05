@@ -18,7 +18,9 @@
  *
  * A grant is live when it is not revoked, `until` (Chicago 'YYYY-MM-DD') is
  * today or later, and its `uid` - when the login existed at grant time - is
- * the caller's.
+ * the caller's. A grant with no uid (written before the login existed) needs
+ * the caller's email verified, so nobody else can take it by signing up
+ * with that address first (review 2026-11-05).
  */
 'use strict';
 
@@ -31,7 +33,8 @@ const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
  * the transaction's first write.
  * @param {!Object} tx The transaction.
  * @param {!Object} store Firestore.
- * @param {{uid: string, email: ?string, todayISO: string}} who The caller.
+ * @param {{uid: string, email: ?string, emailVerified: (boolean|undefined),
+ *     todayISO: string}} who The caller (token.email, token.email_verified).
  * @return {!Promise<?{email: string, until: string, note: ?string,
  *     packages: ?Array<string>}>} The grant, or null.
  */
@@ -43,7 +46,13 @@ async function readGrant(tx, store, who) {
   if (!snap.exists) return null;
   const g = snap.data() || {};
   if (g.revoked === true) return null;
-  if (g.uid && g.uid !== who.uid) return null;
+  if (g.uid && g.uid !== who.uid) {
+    // A recreated login: the owner re-runs scripts/comp-grant.mjs to rebind.
+    console.warn(`comp grant for ${email} is bound to another login; ` +
+        'not applied');
+    return null;
+  }
+  if (!g.uid && who.emailVerified !== true) return null;
   if (typeof g.until !== 'string' || !DATE_RE.test(g.until) ||
       g.until < who.todayISO) {
     return null;

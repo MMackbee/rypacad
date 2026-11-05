@@ -285,8 +285,9 @@ async function createFamilyHandler(data, context, deps) {
     return await store.runTransaction(async (tx) => {
       if ((await tx.get(userRef)).exists) throw provisioned;
       await refuseOpenInvites(tx, store, p.athletes);
-      const grant = await compGrant.readGrant(tx, store,
-          {uid, email: callerEmail, todayISO});
+      const grant = await compGrant.readGrant(tx, store, {uid,
+        email: callerEmail, emailVerified: token.email_verified === true,
+        todayISO});
       // ---- reads done ----
       const hhRef = store.collection('households').doc();
       tx.set(hhRef, {
@@ -352,7 +353,8 @@ async function addAthletesHandler(data, context, deps) {
       const athletes = facility.oneFacilityRequest(p.athletes,
           here.docs.map((doc) => doc.data()));
       const grant = await compGrant.readGrant(tx, store, {uid,
-        email: validate.lower(token && token.email) || validate.lower(me.email),
+        email: validate.lower(token && token.email),
+        emailVerified: Boolean(token) && token.email_verified === true,
         todayISO});
       // ---- reads done ----
       const written = writeAthletes(tx, {store, householdId: hhRef.id,

@@ -206,7 +206,12 @@ async function main() {
   await grant('rev@example.test', {revoked: true});
   const r6f = await fam('u-rev', 'rev@example.test', [kid({name: 'Rae Rev', packageId: 'elite'})]);
   check('a revoked grant comps nothing', [r6f.comped, (await get('athletes', r6f.athleteIds[0])).billing.status], [[], 'pending']);
-  await grant('lim@example.test', {packages: ['elite']});
+  await grant('free@example.test');
+  const r6h = await fam('u-free', 'free@example.test', [kid({name: 'Fay Free', packageId: 'elite'})]);
+  check('a grant with no login bound: an unverified email comps nothing', [r6h.comped, (await get('athletes', r6h.athleteIds[0])).billing.status], [[], 'pending']);
+  const r6i = await family.createFamilyHandler(payload({contact: {name: 'Vi Free', email: 'free@example.test', phone: '+15550125', relationship: 'Mother'}, athletes: [kid({name: 'Vi Free', packageId: 'elite'})]}), ctx('u-free2', 'free@example.test', true), deps);
+  check('a grant with no login bound: a verified email comps', [r6i.comped.length, (await get('athletes', r6i.athleteIds[0])).billing.linkedBy], [1, 'comp-grant']);
+  await grant('lim@example.test', {uid: 'u-lim', packages: ['elite']});
   const r6g = await fam('u-lim', 'lim@example.test', [kid({name: 'Lu Lim', packageId: 'elite'}), kid({name: 'Lo Lim', dob: '2014-04-04', packageId: 't-6'})]);
   check('a grant naming Elite comps the Elite athlete only', [r6g.comped, (await get('athletes', r6g.athleteIds[1])).billing.status], [[r6g.athleteIds[0]], 'pending']);
 

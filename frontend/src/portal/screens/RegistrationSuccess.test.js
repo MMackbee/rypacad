@@ -65,6 +65,17 @@ test('an owner comp grant: comped athletes get no Pay button and the receipt say
   await some.unmount();
 });
 
+test('a comped facility holder next to unpaid athletes: no facility line, no crash (review 2026-11-05)', async () => {
+  const three = form({
+    facilityRequested: true,
+    athletes: [{ ...newAthleteEntry(), name: 'Ann One', dob: '2012-06-17', packageId: 'single' }, { ...newAthleteEntry(), name: 'Bo Two', dob: '2013-06-17', packageId: 'single' }, { ...newAthleteEntry(), name: 'Cy Three', dob: '2014-06-17', packageId: 't-6' }],
+  });
+  const r = await renderScreen(<RegistrationSuccess bare mode="signup" form={three} result={{ householdId: 'h1', athleteIds: ['a1', 'a2', 'a3'], comped: ['a3'], compUntil: '2027-02-27' }} account={{ email: 'dana@email.com' }} onFinish={() => {}} />);
+  expect(r.text()).toContain('Cy is on a complimentary membership through Feb 27: nothing to pay.');
+  expect(r.text()).not.toMatch(/facility access/i);
+  await r.unmount();
+});
+
 test('before Nov 1 the receipt names the amount due today and says monthly from Dec 1, never when billing ends (UX P-07)', async () => {
   const one = form({ athletes: [{ ...newAthleteEntry(), name: 'Jordan Whitfield', dob: '2012-06-17', packageId: 't-6' }] });
   const r = await renderScreen(<RegistrationSuccess bare mode="signup" form={one} result={{ householdId: 'h1', athleteIds: ['a1'] }} account={{ email: 'dana@email.com' }} onFinish={() => {}} />);
