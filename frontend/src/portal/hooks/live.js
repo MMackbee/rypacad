@@ -40,6 +40,7 @@ import { SPECIALISTS, mentalCapFor } from '../data/specialists';
 import { SESSION_STARTED_COPY, sessionStarted, waitlistClosed } from '../data/sessionStart';
 import { billingStatusOf } from '../data/billingCopy';
 import { HANDICAP_RESERVED, handicapLimitOf, handicapValueOk, reservedRefusal } from '../data/reserved';
+import { HIDDEN_SESSION_LINE, SESSION_HIDDEN, isHiddenSession } from '../data/hiddenSessions';
 import { HANDICAP_RANGE_ERROR } from '../data/signup';
 
 /** id -> catalogue entry, for the specialist-cap error copy below. */
@@ -937,6 +938,9 @@ export async function createBooking(
       if ((s.status ?? 'scheduled') === 'cancelled') {
         throw new LiveDataError(ERR.INVALID, 'This session was cancelled by the academy.');
       }
+      // 2026-11-05: a hidden session is not offered (data/hiddenSessions.js) -
+      // a screen loaded before it was hidden. The rules refuse its seat too.
+      if (isHiddenSession(s)) throw new LiveDataError(ERR.INVALID, HIDDEN_SESSION_LINE, null, SESSION_HIDDEN);
       if (s.date !== date || s.type !== type) {
         throw new LiveDataError(
           ERR.INVALID,
@@ -1026,6 +1030,8 @@ export async function createBooking(
     if (err?.reason === 'already-booked' && !silent) {
       bump('bookings');
     }
+    // Nothing was written: the bump redraws the lists without the hidden session.
+    if (err?.reason === SESSION_HIDDEN && !silent) bump('sessions');
     throw wrap(err, 'createBooking');
   }
 }
