@@ -159,6 +159,18 @@ test('section 11 is never offered for an athlete under 18, nor on a correction o
   await withdrawn.unmount();
 });
 
+test('a section 11 on paper must be dated on or after the 18th birthday (2026-11-05)', async () => {
+  const turned = { id: 'tia', name: 'Tia Test', dob: '2008-11-03', householdId: 'hh' }; // 18 on Nov 3
+  mockStaffData = { athlete: turned, record: null, summary: unsigned };
+  const r = await renderScreen(<StaffConsentDetail athleteId="tia" role="ops" />);
+  await r.click('Record a paper signature');
+  await r.fill('Date signed', '2026-11-02'); await r.click('Section 11'); await r.fill("Signer's name", 'Tia Test');
+  expect(r.button('Section 11 must be dated on or after the 18th birthday').disabled).toBe(true);
+  await r.fill('Date signed', '2026-11-03');
+  expect(r.button('Save').disabled).toBe(false);
+  await r.unmount();
+});
+
 test('the paper sheet names what the rules would refuse instead of failing on Save', async () => {
   mockStaffData = { athlete: MAX, record: null, summary: unsigned };
   const r = await renderScreen(<StaffConsentDetail athleteId="max" role="ops" />);

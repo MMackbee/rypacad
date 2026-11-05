@@ -56,9 +56,11 @@ function initial({ mode, record, resign }) {
  * firestore.rules would make: the version is a date, the emergency contact has a name and a mobile or
  * neither, section 11's parent sessions yes names the parent, and section 11 needs an athlete of 18+.
  */
-function check(v, elevenBlocked) {
+function check(v, elevenBlocked, dob = null) {
   const today = academyDateISO();
   if (!DATE_RE.test(v.date) || v.date < FIRST_DATE || v.date > today || !paperDateToStamp(v.date)) return { ok: false, reason: 'Use the date on the paper form' };
+  // Section 11 is the athlete's own 18+ signature on the date written on the form (rules mcPaperAdultOk / mcResign).
+  if (v.section === '11' && typeof dob === 'string' && DATE_RE.test(dob) && !isAdultOnDate(dob, v.date)) return { ok: false, reason: 'Section 11 must be dated on or after the 18th birthday' };
   if (!v.section || (v.section === '11' && elevenBlocked) || !v.signerName.trim() || (v.section === '10' && !v.assentName.trim())) return { ok: false, reason: null };
   if (!DATE_RE.test(v.version.trim() || CONSENT_VERSION)) return { ok: false, reason: 'Version is a date, like 2026-10-30' };
   if (Boolean(orNull(v.ecName)) !== Boolean(orNull(v.ecPhone))) return { ok: false, reason: 'Emergency contact needs a name and a mobile, or neither' };
@@ -93,7 +95,7 @@ export default function PaperSignatureSheet({ open, athlete, record = null, mode
   const keepTen = mode === 'correct' && withdrawn;
   const elevenBlocked = under18 || keepTen;
   const elevenNote = under18 ? `${first} is under 18, so the form is section 10.` : keepTen ? `${first} withdrew the recording answer, so this record stays section 10.` : null;
-  const { ok, reason } = check(v, elevenBlocked);
+  const { ok, reason } = check(v, elevenBlocked, athlete?.dob ?? null);
 
   const save = () => onSave({
     signedAt: paperDateToStamp(v.date), section: v.section, version: v.version.trim() || CONSENT_VERSION, signerName: v.signerName.trim(),

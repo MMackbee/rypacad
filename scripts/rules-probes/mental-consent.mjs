@@ -75,6 +75,8 @@ const ADULT_TIMES = ['signedAt', 'choices.updatedAt'];
 // Paper: the date on the form at Chicago midnight (paperDateToStamp('2026-10-28')); only choices.updatedAt is the server's.
 const PAPER_AT = new Date('2026-10-28T05:00:00Z');
 const PAPER_TIMES = ['choices.updatedAt'];
+/** Chicago midnight (CST) of an athlete's 18th birthday: the first date a section 11 form may carry. */
+const bdayPaperAt = (id) => { const [y, m, d] = ATHLETES[id].dob.split('-').map(Number); return new Date(Date.UTC(y + 18, m - 1, d, 6)); };
 const paperMinor = (id, by, signedAt = PAPER_AT) => ({ ...base(id, by, OTHER_HH), method: 'paper', signedAt, signer: { role: 'parent', name: 'Dana Probe' },
   adult: false, assent: { name: 'Ava Probe', audio: true, at: signedAt, readAloud: false, withdrawnBy: null }, choices: minorChoices(by, { location: null }) });
 /** A paper section 11 (the athlete signed, 18+): no assent, the adult choices as far as the paper shows. */
@@ -227,6 +229,7 @@ export async function taskMentalConsent() {
     // Section 11 is the athlete's own signature at 18+: never for an athlete under 18 today (UTC).
     expect('mc-ops paper section 11 for mc-other-kid (14)', await create(tk.ops, 'mc-other-kid', paperAdult('mc-other-kid', U.ops), PAPER_TIMES), 403);
     expect('mc-ops paper section 11 for mc-almost (18 tomorrow)', await create(tk.ops, 'mc-almost', paperAdult('mc-almost', U.ops, HH), PAPER_TIMES), 403);
+    expect('mc-ops paper section 11 for mc-bday (18 today) dated 2026-10-28, while still 17', await create(tk.ops, 'mc-bday', paperAdult('mc-bday', U.ops, HH), PAPER_TIMES), 403);
     expect('mc-ops creates paper minor for mc-other-kid (signedAt and assent.at 2026-10-28T05:00:00Z, assent.audio true, location null)',
       await create(tk.ops, 'mc-other-kid', paperMinor('mc-other-kid', U.ops), PAPER_TIMES), 200);
     expect('mc-owner corrects mc-other-kid (14, not withdrawn) to section 11',
@@ -280,12 +283,15 @@ export async function taskMentalConsent() {
     expect('a second re-sign on mc-turned', await resign(tk.parent, U.parent, 'mc-turned'), 403);
     expect('parent section 11 re-sign of mc-turned-claimed', await resign(tk.parent, U.parent, 'mc-turned-claimed'), 403);
     expect('mc-turned-login section 11 re-sign of its own record', await resign(tk.turned, U.turned, 'mc-turned-claimed'), 200);
-    const paperResign = (auth, by, signedAt = new Date('2026-11-01T05:00:00Z')) =>
+    expect('mc-ops paper re-sign of mc-turned2 dated the day before the 18th birthday',
+      await resign(tk.ops, U.ops, 'mc-turned2', { method: 'paper', signedAt: new Date(bdayPaperAt('mc-turned2').getTime() - 86400000),
+        choices: adultChoices(U.ops, { location: null, emergencyContact: SAME }) }), 403);
+    const paperResign = (auth, by, signedAt = bdayPaperAt('mc-turned2')) =>
       resign(auth, by, 'mc-turned2', { method: 'paper', signedAt, choices: adultChoices(by, { location: null, emergencyContact: SAME }) });
     expect('mc-ops paper re-sign of mc-turned2 with adultSignature.signedAt tomorrow', await paperResign(tk.ops, U.ops, tomorrow), 403);
     expect('mc-mental sends mc-turned2 the paper-shaped re-sign', await paperResign(tk.mental, U.mental), 403);
     expect('parent sends mc-turned2 the paper-shaped re-sign', await paperResign(tk.parent, U.parent), 403);
-    expect("mc-ops paper re-sign of mc-turned2 (signedAt 2026-11-01T05:00:00Z, method 'paper', location null, contact both null)",
+    expect("mc-ops paper re-sign of mc-turned2 (signedAt the 18th birthday at Chicago midnight, method 'paper', location null, contact both null)",
       await paperResign(tk.ops, U.ops), 200);
     expect('mc-mental withdraws on mc-turned2 after its re-sign (assent.audio still true)', await withdraw(tk.mental, 'mc-turned2', U.mental), 403);
 
@@ -305,8 +311,10 @@ export async function taskMentalConsent() {
     expect('mc-owner corrects the withdrawn mc-paper-turned (18) to section 11, assent null (a withdrawal is never undone)',
       await correct(tk.owner, U.owner, 'mc-paper-turned', { signedAt: corrected, section11: true }), 403);
     expect('mc-ops paper re-sign of the withdrawn mc-paper-turned (section 11 at 18 keeps the stored assent)',
-      await resign(tk.ops, U.ops, 'mc-paper-turned', { method: 'paper', signedAt: new Date('2026-11-01T05:00:00Z'),
+      await resign(tk.ops, U.ops, 'mc-paper-turned', { method: 'paper', signedAt: bdayPaperAt('mc-paper-turned'),
         choices: adultChoices(U.ops, { location: null, emergencyContact: SAME }) }), 200);
+    expect('mc-owner corrects the re-signed mc-paper-turned (adultSignature set: never corrected here)',
+      await correct(tk.owner, U.owner, 'mc-paper-turned', { signedAt: corrected }), 403);
     expect('mc-owner corrects mc-paper-adult (19, section 11) signedAt only', await correct(tk.owner, U.owner, 'mc-paper-adult', { signedAt: corrected }), 200);
     expect('mc-ops corrects it', await correct(tk.ops, U.ops, 'mc-other-kid', { signedAt: corrected }), 403);
     expect('mc-owner "corrects" mc-kid (a portal record)', await correct(tk.owner, U.owner, 'mc-kid', { signedAt: corrected }), 403);

@@ -53,10 +53,14 @@ service cloud.firestore {
     // Mental consent (spec 6.2): 18 from UTC midnight of the 18th birthday, Feb-29-safe
     // (the research branch's adultRecord() arithmetic over any athlete doc).
     function adultOn(a) {
+      return adultAt(a, request.time);
+    }
+    // The same 18th birthday against a given instant (a paper form's date, 2026-11-05).
+    function adultAt(a, t) {
       let dob = a.get('dob', null);
-      return dob is string && dob.matches('[0-9]{4}-[0-9]{2}-[0-9]{2}')
+      return dob is string && dob.matches('[0-9]{4}-[0-9]{2}-[0-9]{2}') && t is timestamp
         && timestamp.date(int(dob.split('-')[0]) + 18, int(dob.split('-')[1]), 1)
-          + duration.value(int(dob.split('-')[2]) - 1, 'd') <= request.time;
+          + duration.value(int(dob.split('-')[2]) - 1, 'd') <= t;
     }
     // claimInvite marks loginInvites/{loginEmail} 'claimed'; nothing on the athlete doc says so.
     function athleteLoginClaimed(a) {
@@ -1958,10 +1962,11 @@ service cloud.firestore {
           && mcChoices(d.choices, d.adult, false)
           && (d.adult ? (d.assent == null) : (mcAssent(d.assent, request.time)));
       }
-      // Section 11 on paper is the athlete's own 18+ signature: never for an
-      // athlete under 18 today (UTC). An athlete with no dob stays recordable.
+      // Section 11 on paper is the athlete's own 18+ signature: the athlete
+      // was 18 on the date written on the form (2026-11-05: a section 11
+      // signed at 17 and entered later is refused). No dob stays recordable.
       function mcPaperAdultOk(d) {
-        return d.adult == false || !mcDobOk(mcAthlete()) || adultOn(mcAthlete());
+        return d.adult == false || !mcDobOk(mcAthlete()) || adultAt(mcAthlete(), d.signedAt);
       }
       // A paper form: the date on the form (Chicago midnight), in the past
       // and on or after 2026-01-01; `adult` as ops read it off the form.
@@ -2041,7 +2046,7 @@ service cloud.firestore {
           && mcName(s.name)
           && mcVersion(s.version)
           && s.method == (paper ? ('paper') : ('portal'))
-          && (paper ? (mcPast(s.signedAt)) : (s.signedAt == request.time))
+          && (paper ? (mcPast(s.signedAt) && adultAt(mcAthlete(), s.signedAt)) : (s.signedAt == request.time))
           && mcChoices(d.choices, true, paper)
           && d.countersign == null
           && mcHistory({'choices': r.choices, 'assent': r.assent, 'countersign': r.countersign});
@@ -2054,7 +2059,9 @@ service cloud.firestore {
       function mcPaperCorrection() {
         let d = request.resource.data;
         let r = resource.data;
-        return r.method == 'paper'
+        // A record re-signed at 18 (adultSignature) is never corrected here:
+        // its section 11 answers are the athlete's (2026-11-05).
+        return r.method == 'paper' && r.get('adultSignature', null) == null
           && mcChanged().hasOnly(['signedAt', 'signer', 'adult', 'assent', 'version', 'choices', 'history', 'signedBy'])
           && d.signedBy == request.auth.uid
           && mcPast(d.signedAt)
