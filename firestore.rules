@@ -1958,12 +1958,18 @@ service cloud.firestore {
           && mcChoices(d.choices, d.adult, false)
           && (d.adult ? (d.assent == null) : (mcAssent(d.assent, request.time)));
       }
+      // Section 11 on paper is the athlete's own 18+ signature: never for an
+      // athlete under 18 today (UTC). An athlete with no dob stays recordable.
+      function mcPaperAdultOk(d) {
+        return d.adult == false || !mcDobOk(mcAthlete()) || adultOn(mcAthlete());
+      }
       // A paper form: the date on the form (Chicago midnight), in the past
       // and on or after 2026-01-01; `adult` as ops read it off the form.
       function mcPaperCreate(d) {
         return mcCreateCommon(d)
           && d.method == 'paper'
           && mcPast(d.signedAt)
+          && mcPaperAdultOk(d)
           && mcChoices(d.choices, d.adult, true)
           && (d.adult ? (d.assent == null) : (mcAssent(d.assent, d.signedAt)));
       }
@@ -2041,7 +2047,10 @@ service cloud.firestore {
           && mcHistory({'choices': r.choices, 'assent': r.assent, 'countersign': r.countersign});
       }
       // The owner's correction of a paper record. A withdrawal is never
-      // undone: a withdrawn assent is kept as stored.
+      // undone: a withdrawn assent is kept as stored, and the record stays
+      // section 10 (section 11 would drop the assent, and a later correction
+      // could then write a fresh one). An 18+ athlete's section 11 on such a
+      // record is the paper re-sign, which keeps the assent.
       function mcPaperCorrection() {
         let d = request.resource.data;
         let r = resource.data;
@@ -2051,12 +2060,14 @@ service cloud.firestore {
           && mcPast(d.signedAt)
           && mcVersion(d.version)
           && d.adult is bool
+          && mcPaperAdultOk(d)
           && mcSigner(d.signer, d.adult)
           && mcChoices(d.choices, d.adult, true)
-          && (d.adult
-            ? (d.assent == null)
-            : ((r.assent != null && d.assent == r.assent)
-              || ((r.assent == null || r.assent.get('withdrawnBy', null) == null) && mcAssent(d.assent, d.signedAt))))
+          && ((r.assent != null && r.assent.get('withdrawnBy', null) != null)
+            ? (d.adult == false && d.assent == r.assent)
+            : (d.adult
+              ? (d.assent == null)
+              : ((r.assent != null && d.assent == r.assent) || mcAssent(d.assent, d.signedAt))))
           && mcHistory({'choices': r.choices, 'assent': r.assent, 'signedAt': r.signedAt, 'signer': r.signer,
             'adult': r.adult, 'version': r.version, 'signedBy': r.signedBy});
       }

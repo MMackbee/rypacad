@@ -48,6 +48,8 @@ const ATHLETES = {
   'mc-turned-claimed': { dob: minus(18, 1), loginEmail: 'mc-turned@example.com' },
   'mc-nodob': { dob: null },
   'mc-other-kid': { dob: minus(14, 0), householdId: OTHER_HH },
+  'mc-paper-adult': { dob: minus(19, 0), householdId: OTHER_HH },
+  'mc-paper-turned': { dob: minus(18, 1), householdId: OTHER_HH },
 };
 // claimInvite marks the invite 'claimed' (rules: athleteLoginClaimed); mc-open's is still open.
 const INVITES = { 'mc-kid@example.com': ['mc-kid', 'claimed'], 'mc-adult@example.com': ['mc-adult', 'claimed'],
@@ -75,6 +77,9 @@ const PAPER_AT = new Date('2026-10-28T05:00:00Z');
 const PAPER_TIMES = ['choices.updatedAt'];
 const paperMinor = (id, by, signedAt = PAPER_AT) => ({ ...base(id, by, OTHER_HH), method: 'paper', signedAt, signer: { role: 'parent', name: 'Dana Probe' },
   adult: false, assent: { name: 'Ava Probe', audio: true, at: signedAt, readAloud: false, withdrawnBy: null }, choices: minorChoices(by, { location: null }) });
+/** A paper section 11 (the athlete signed, 18+): no assent, the adult choices as far as the paper shows. */
+const paperAdult = (id, by, householdId = OTHER_HH) => ({ ...base(id, by, householdId), method: 'paper', signedAt: PAPER_AT,
+  signer: { role: 'athlete', name: 'Max Probe' }, adult: true, assent: null, choices: adultChoices(by, { location: null }) });
 // A minor-era portal record signed before the athlete turned 18, written with the owner bypass.
 const PAST = new Date('2026-10-20T15:00:00Z');
 const signedEarlier = (id, audio, countersign) => ({ ...minor(id, U.parent, { signedAt: PAST, countersign }),
@@ -136,12 +141,16 @@ async function resign(auth, by, id, { method = 'portal', signedAt, choices = adu
     serverTime: [...(signedAt ? [] : ['adultSignature.signedAt']), 'choices.updatedAt'] });
 }
 const countersign = (auth, id, by) => writeAs(auth, id, { countersign: fsValue({ by }) }, { mask: ['countersign'], exists: true, serverTime: ['countersign.at'] });
-/** The owner's paper correction: the form's fields restated, choices always resent (restamped unless `staleStamp`). */
-async function correct(auth, by, id, { signedAt, assent, staleStamp = false }) {
+/**
+ * The owner's paper correction: the form's fields restated, choices always resent (restamped unless `staleStamp`).
+ * `section11` corrects the form to section 11: adult true, the athlete as signer, no assent, the adult choices.
+ */
+async function correct(auth, by, id, { signedAt, assent, staleStamp = false, section11 = false }) {
   const cur = await current(id);
-  const choices = mapWith(cur.choices, { updatedBy: by }, staleStamp ? null : 'updatedAt');
-  const fields = { signedAt: fsValue(signedAt), signer: cur.signer, adult: cur.adult, version: cur.version, signedBy: fsValue(by),
-    assent: assent ? fsValue(assent) : cur.assent, choices,
+  const choices = section11 ? fsValue(adultChoices(by, { location: null })) : mapWith(cur.choices, { updatedBy: by }, staleStamp ? null : 'updatedAt');
+  const fields = { signedAt: fsValue(signedAt), signer: section11 ? fsValue({ role: 'athlete', name: 'Max Probe' }) : cur.signer,
+    adult: section11 ? fsValue(true) : cur.adult, version: cur.version, signedBy: fsValue(by),
+    assent: section11 ? fsValue(null) : assent ? fsValue(assent) : cur.assent, choices,
     history: historyWith(cur, ['choices', 'assent', 'signedAt', 'signer', 'adult', 'version', 'signedBy']) };
   return writeAs(auth, id, fields, { mask: Object.keys(fields), exists: true, serverTime: staleStamp ? [] : ['choices.updatedAt'] });
 }
@@ -215,8 +224,16 @@ export async function taskMentalConsent() {
       await create(tk.ops, 'mc-other-kid', paperMinor('mc-other-kid', U.ops, new Date('2025-12-31T06:00:00Z')), PAPER_TIMES), 403);
     expect("mc-other (mc-other-kid's own parent) creates paper", await create(tk.other, 'mc-other-kid', paperMinor('mc-other-kid', U.other), PAPER_TIMES), 403);
     expect('mc-mental creates paper for mc-other-kid', await create(tk.mental, 'mc-other-kid', paperMinor('mc-other-kid', U.mental), PAPER_TIMES), 403);
+    // Section 11 is the athlete's own signature at 18+: never for an athlete under 18 today (UTC).
+    expect('mc-ops paper section 11 for mc-other-kid (14)', await create(tk.ops, 'mc-other-kid', paperAdult('mc-other-kid', U.ops), PAPER_TIMES), 403);
+    expect('mc-ops paper section 11 for mc-almost (18 tomorrow)', await create(tk.ops, 'mc-almost', paperAdult('mc-almost', U.ops, HH), PAPER_TIMES), 403);
     expect('mc-ops creates paper minor for mc-other-kid (signedAt and assent.at 2026-10-28T05:00:00Z, assent.audio true, location null)',
       await create(tk.ops, 'mc-other-kid', paperMinor('mc-other-kid', U.ops), PAPER_TIMES), 200);
+    expect('mc-owner corrects mc-other-kid (14, not withdrawn) to section 11',
+      await correct(tk.owner, U.owner, 'mc-other-kid', { signedAt: PAPER_AT, section11: true }), 403);
+    expect('mc-ops paper section 11 for mc-paper-adult (19)', await create(tk.ops, 'mc-paper-adult', paperAdult('mc-paper-adult', U.ops), PAPER_TIMES), 200);
+    expect('mc-ops paper section 10 for mc-paper-turned (18 now; the form signed while a minor)',
+      await create(tk.ops, 'mc-paper-turned', paperMinor('mc-paper-turned', U.ops), PAPER_TIMES), 200);
 
     // Updates.
     expect("parent changes mc-kid's location to 'C' (history: the stored choices, assent, adultConfirm)",
@@ -244,6 +261,7 @@ export async function taskMentalConsent() {
     expect("parent puts mc-turned's assent.audio back to true (18 now)",
       await family(tk.parent, U.parent, 'mc-turned', { assent: { audio: true, withdrawnBy: null } }), 403);
     expect('mc-mental withdraws on mc-other-kid (paper)', await withdraw(tk.mental, 'mc-other-kid', U.mental), 200);
+    expect('mc-mental withdraws on mc-paper-turned (paper, 18 now)', await withdraw(tk.mental, 'mc-paper-turned', U.mental), 200);
     expect("parent changes mc-handover's location only, no adultConfirm", await family(tk.parent, U.parent, 'mc-handover', { choices: { location: 'C' } }), 200);
     const flip = { parentSessions: false, parentName: null };
     expect('parent flips mc-handover parentSessions without adultConfirm', await family(tk.parent, U.parent, 'mc-handover', { choices: flip }), 403);
@@ -284,6 +302,12 @@ export async function taskMentalConsent() {
     expect('mc-owner corrects again resending the stored choices.updatedAt', await correct(tk.owner, U.owner, 'mc-other-kid', { signedAt: corrected, staleStamp: true }), 403);
     expect('mc-owner corrects with assent { audio true, withdrawnBy null, at: signedAt } (a withdrawal is never undone)',
       await correct(tk.owner, U.owner, 'mc-other-kid', { signedAt: corrected, assent: { name: 'Ava Probe', audio: true, at: corrected, readAloud: false, withdrawnBy: null } }), 403);
+    expect('mc-owner corrects the withdrawn mc-paper-turned (18) to section 11, assent null (a withdrawal is never undone)',
+      await correct(tk.owner, U.owner, 'mc-paper-turned', { signedAt: corrected, section11: true }), 403);
+    expect('mc-ops paper re-sign of the withdrawn mc-paper-turned (section 11 at 18 keeps the stored assent)',
+      await resign(tk.ops, U.ops, 'mc-paper-turned', { method: 'paper', signedAt: new Date('2026-11-01T05:00:00Z'),
+        choices: adultChoices(U.ops, { location: null, emergencyContact: SAME }) }), 200);
+    expect('mc-owner corrects mc-paper-adult (19, section 11) signedAt only', await correct(tk.owner, U.owner, 'mc-paper-adult', { signedAt: corrected }), 200);
     expect('mc-ops corrects it', await correct(tk.ops, U.ops, 'mc-other-kid', { signedAt: corrected }), 403);
     expect('mc-owner "corrects" mc-kid (a portal record)', await correct(tk.owner, U.owner, 'mc-kid', { signedAt: corrected }), 403);
 
