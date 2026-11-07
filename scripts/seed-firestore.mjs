@@ -78,7 +78,7 @@
  *   athletes    — the three Whitfield athletes with their (now token)
  *                  packageIds and, as of contract v1.6 (Sprint 8: age
  *                  brackets), the OWNER-SUPPLIED dobs (2026-09-10), landing
- *                  the three kids in three different brackets as of
+ *                  the kids in their Tour age groups as of
  *                  SEASON_BOUNDS.start — see WHITFIELD_DOBS below. PLUS the
  *                  new `parker` household's one Elite athlete (v2.0).
  *   users       — one parent, one athlete, one coach, one owner
@@ -250,9 +250,9 @@ function loadPortalData() {
 
 // ---------------------------------------------------------------------------
 // Age brackets (contract v1.6, TEAM.md "Sprint 8 pins" — coaches enter
-// scores, standings split by age). Mirrors the BRACKETS table pinned for
-// `frontend/src/portal/data/tour.js` (data-routing lane owns that file and
-// lands `bracketFor()` there separately, in its own worktree). Duplicated
+// scores, standings split by age; the groups since the owner's rulings of
+// 2026-11-06). Mirrors the BRACKETS table in
+// `frontend/src/portal/data/tourBrackets.js` (bracketFor() lives there). Duplicated
 // here in plain JS, dependency-free, on purpose: this script does not bundle
 // tour.js and must not assume a sibling lane's in-flight work has landed —
 // if the pinned thresholds ever change, both copies need the edit (flagged
@@ -261,8 +261,8 @@ function loadPortalData() {
 
 const BRACKETS = [
   { id: '10U', min: 0, max: 10 },
-  { id: '11-13', min: 11, max: 13 },
-  { id: '14+', min: 14, max: 999 },
+  { id: '11-14', min: 11, max: 14 },
+  { id: '15-18', min: 15, max: 999 },
 ];
 
 /** Whole years old as of `asOfISO` ('YYYY-MM-DD'), plain date math (no
@@ -279,8 +279,8 @@ function ageAsOf(dobISO, asOfISO) {
  * for tournament results (contract v1.6: age is computed as of season start,
  * never the write date, so no kid changes brackets mid-season). No dob ->
  * null; read paths group null under the 'open' bracket display-side, but the
- * stored field itself is only ever one of the three ids or null, matching
- * the rules shape. */
+ * stored field itself is only ever one of the three age ids or null, matching
+ * the rules shape (which also takes 'coaches' for a coach's own entry). */
 function bracketForDob(dobISO, asOfISO) {
   if (!dobISO) return null;
   const age = ageAsOf(dobISO, asOfISO);
@@ -543,13 +543,13 @@ function buildDocs(portal) {
   // does.
   //
   // dob (contract v1.6 + v1.6.1 amendment, TEAM.md): the OWNER-SUPPLIED
-  // birthdays (2026-09-10), not invented — they land the three kids in
-  // three different brackets as of SEASON_BOUNDS.start (2026-11-03), the
-  // date bracket assignment always uses. seed.js's ageLine copy was trued
+  // birthdays (2026-09-10), not invented — they land the kids in their
+  // Tour age groups as of SEASON_BOUNDS.start (2026-11-03), the date bracket
+  // assignment always uses (since 2026-11-06 jordan and reese share 11-14). seed.js's ageLine copy was trued
   // up to match at the same integration pass.
   const WHITFIELD_DOBS = {
-    jordan: '2012-06-17', // 14 at season start -> bracket 14+
-    reese: '2014-03-02', // 12 at season start -> bracket 11-13
+    jordan: '2012-06-17', // 14 at season start -> bracket 11-14
+    reese: '2014-03-02', // 12 at season start -> bracket 11-14
     nico: '2017-09-09', // 9 at season start -> bracket 10U
   };
   // packageId (contract v2.0, pin A) — seed.js's HOUSEHOLD still carries the
@@ -991,11 +991,11 @@ function buildDocs(portal) {
   // `name` snapshot: the standings read never needs a cross-family athletes
   // join.
   //
-  // The three Whitfields land in three DIFFERENT brackets (jordan 14+, reese
-  // 11-13, nico 10U — see WHITFIELD_DOBS above), so each is the lone seeded
-  // entrant in their own bracket for both events: the DERIVED position is
-  // trivially 1st for all six docs (see the sanity output in main(), which
-  // computes and prints it). That is the correct behavior of the
+  // Since the 2026-11-06 groups jordan and reese share 11-14 and nico is
+  // 10U (see WHITFIELD_DOBS above), so the two older kids meet head to head
+  // and nico is the lone 10U entrant (see the sanity output in main(), which
+  // computes and prints each derived position). Before then each Whitfield
+  // was alone in a bracket and every derived position was 1st. That is the correct behavior of the
   // derivation, not a mistake — a real season fills in ~20 more kids per
   // bracket that this two-tournament demo seed does not invent. The STROKES
   // themselves still encode the old (pre-bracket) story — lower score =

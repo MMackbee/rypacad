@@ -42,6 +42,7 @@ import { billingStatusOf } from '../data/billingCopy';
 import { HANDICAP_RESERVED, handicapLimitOf, handicapValueOk, reservedRefusal } from '../data/reserved';
 import { HIDDEN_SESSION_LINE, SESSION_HIDDEN, isHiddenSession } from '../data/hiddenSessions';
 import { HANDICAP_RANGE_ERROR } from '../data/signup';
+import { isSavableTourEntry } from '../data/tourBrackets';
 
 /** id -> catalogue entry, for the specialist-cap error copy below. */
 const SPECIALIST_BY_ID = new Map(SPECIALISTS.map((s) => [s.id, s]));
@@ -1355,7 +1356,9 @@ export async function fetchTournamentResultsForSession(sessionId) {
  * here. One setDoc PER ENTRY (a create for a new athlete result, an
  * overwrite for a correction — contract v1.5: "no delete in v1, corrections
  * overwrite via update"), each carrying the pinned shape exactly: sessionId,
- * athleteId, name, bracket, date, score, createdBy, createdAt. POSITION IS
+ * athleteId, name, bracket, date, score, createdBy, createdAt, plus
+ * `gender` ('boys' | 'girls') when the entry has one (2026-11-06; omitted
+ * when null, so a 10 & under or Open save is the same eight keys). POSITION IS
  * NO LONGER STORED — it derives at read time from score within each
  * (sessionId, bracket) group (data/tour.js's deriveTourStandings). Doc id is
  * `{sessionId}_{athleteId}`, mirroring bookings/contractLogs — one result
@@ -1380,8 +1383,11 @@ export async function fetchTournamentResultsForSession(sessionId) {
  *
  * Entries are validated up front, before any write starts, so a bad entry
  * anywhere in the list never leaves a partial save in flight: every entry
- * needs an athleteId and an int score in [18, 200] (strokes); name/bracket,
- * when present, must be strings (null is fine — never required).
+ * needs an athleteId and an int score in [18, 200] (strokes); name a string
+ * or null; bracket a current Tour id ('10U', '11-14', '15-18', 'coaches') or
+ * null, never a legacy one; gender 'boys', 'girls' or null; and a 'coach_'
+ * athleteId exactly when the bracket is 'coaches' - the rules' own checks
+ * (data/tourBrackets.js isSavableTourEntry).
  *
  * ONE bump('tournamentResults') after every entry lands, not per entry (the
  * refetch-storm lesson, mirroring createBooking's bulk `silent` pattern) —
@@ -1396,28 +1402,25 @@ export async function saveTournamentResults(sessionId, date, entries) {
     );
   }
   for (const entry of entries) {
-    const scoreOk =
-      entry && Number.isInteger(entry.score) && entry.score >= 18 && entry.score <= 200;
-    const nameOk = !entry || entry.name == null || typeof entry.name === 'string';
-    const bracketOk = !entry || entry.bracket == null || typeof entry.bracket === 'string';
-    if (!entry || !entry.athleteId || !scoreOk || !nameOk || !bracketOk) {
+    if (!isSavableTourEntry(entry)) {
       throw new LiveDataError(
         ERR.INVALID,
-        'saveTournamentResults: every entry needs an athleteId and an int score between 18 ' +
-          'and 200 (name/bracket, if present, must be strings).'
+        'saveTournamentResults: every entry needs an athleteId, an int score between 18 and 200, ' +
+          'a Tour bracket or null, and a gender of boys, girls or null (coach ids with the coaches bracket only).'
       );
     }
   }
   const user = requireUser();
   try {
     await Promise.all(
-      entries.map(({ athleteId, score, name, bracket }) => {
+      entries.map(({ athleteId, score, name, bracket, gender }) => {
         const id = `${sessionId}_${athleteId}`;
         return setDoc(doc(db, 'tournamentResults', id), {
           sessionId,
           athleteId,
           name: typeof name === 'string' && name ? name : null,
           bracket: typeof bracket === 'string' && bracket ? bracket : null,
+          ...(gender === 'boys' || gender === 'girls' ? { gender } : {}),
           date,
           score,
           createdBy: user.uid,

@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useRef, useState } from 'react';
+import React, { useMemo, useRef, useState } from 'react';
 import { color, font, radius } from '../tokens';
 import AthleteRow, { AttendanceControls } from '../components/AthleteRow';
 import BottomTabBar from '../components/BottomTabBar';
@@ -11,13 +11,14 @@ import AgeGroupChip from '../components/AgeGroupChip';
 import { ReservedChip } from '../components/Reserved';
 import ClubheadChip from '../components/assessments/ClubheadChip';
 import { useOpenAssessmentWindows } from '../hooks/assessments';
-import { BackLink, Body, Card, ScreenTitle, SectionLabel, SignOutButton, Tick } from '../components/Primitives';
+import { BackLink, Body, Card, ScreenTitle, SectionLabel, SignOutButton } from '../components/Primitives';
 import useRoster from '../hooks/useRoster';
 import * as hooks from '../hooks';
 import { useCoachRoster, useSession } from '../hooks';
 import { isLive } from '../hooks/live';
 import { bump } from '../hooks/invalidate';
 import RosterLoadNotice from '../components/RosterLoadNotice';
+import TourScoreSheet from './TourScoreSheet';
 import { ageGroupFor } from '../data/schedule';
 import { attendeeNoteFor } from '../data/specialists';
 import { DEFAULT_DURATION_MINUTES } from '../data/schedule';
@@ -81,24 +82,6 @@ function useTournamentResultsFallback() {
   return { data: null, loading: false, error: null, saveResults: async () => {} };
 }
 const useTournamentResults = hooks.useTournamentResults || useTournamentResultsFallback;
-
-/**
- * NEW hook for Sprint 8 (TEAM.md "Hook seam", contract v1.6):
- * `useAthleteBrackets(athleteIds)` -> { data: { [athleteId]: bracketId |
- * null }, loading, error } - resolves each rostered athlete's age bracket
- * (computed from dob as of season start) for the score-entry screen's
- * per-row chip. Same parallel-lane situation as the two hooks above, but
- * this export does not exist AT ALL in this worktree yet (confirmed: no
- * `useAthleteBrackets` in hooks/index.js) - the routing lane is building it
- * against v1.6 in a parallel worktree. The fallback is the exact inert
- * shape the pin specifies - `{}` and never fetches - so every row's chip
- * reads "Open" (unknown bracket) until the real hook lands; nothing here
- * needs to change once it does.
- */
-function useAthleteBracketsFallback() {
-  return { data: {}, loading: false, error: null };
-}
-const useAthleteBrackets = hooks.useAthleteBrackets || useAthleteBracketsFallback;
 
 /**
  * Roster - coach. The coach's full assigned roster, not one session's
@@ -489,10 +472,11 @@ export function SessionAttendance({ variant = 'pre', bare = false, onBack, sessi
   // Sprint 7 pin (TEAM.md): results entry for a TOURNAMENT session, opened
   // in place (same local-view-state pattern StaffScreen in PortalRoutes.js
   // already uses for its add-mode). The attendance flow above is untouched
-  // for every other session type - this is the only branch point.
+  // for every other session type - this is the only branch point. The
+  // sheet itself (age groups, Boys/Girls, coaches) is ./TourScoreSheet.js.
   if (view === 'results') {
     return (
-      <ResultsEntry
+      <TourScoreSheet
         bare={bare}
         session={session}
         roster={roster}
@@ -735,263 +719,6 @@ export function SessionAttendance({ variant = 'pre', bare = false, onBack, sessi
         />
       ) : null}
     </PhoneFrame>
-  );
-}
-
-/**
- * Results entry becomes SCORE entry (Sprint 8 pin, TEAM.md, contract v1.6):
- * a coach types each rostered athlete's strokes (18..200) instead of
- * tapping a finishing order - the derive-don't-store rule now covers
- * position too (data/tour.js's deriveTourStandings computes position from
- * score at read time, grouped by bracket). This screen never computes or
- * displays a position; it only collects scores.
- *
- * Each row also shows the athlete's age bracket as a small status chip
- * (contract v1.6: a write-time snapshot of the athlete's dob-derived
- * bracket) via the NEW `useAthleteBrackets(athleteIds)` hook (TEAM.md's
- * pinned seam, stubbed above - see its fallback comment). An athlete whose
- * bracket cannot be resolved reads "Open" - the pin's own fallback label
- * for the 'open' group, not an invented value.
- *
- * Pre-fills from `resultsState.data?.results` (each row now carries
- * `score`, not `position`) the first time real existing results arrive -
- * same seeded-once guard as before, so a background refresh cannot clobber
- * a coach's in-progress edit. An athlete with no entered (or out-of-range)
- * score is simply left out of the save, never coerced to 0 or clamped -
- * "no score yet" and "scored zero" are different facts.
- *
- * Local `scores` (athleteId -> raw input string) drives the UI in both seed
- * and live mode - only the Save call is mode-specific (the hook's
- * `saveResults` is a real write live, an inert no-op via the fallback
- * otherwise), matching this screen's existing attendance flow.
- */
-function ResultsEntry({ bare, session, roster, resultsState, onBack }) {
-  const [scores, setScores] = useState({}); // { [athleteId]: rawInputString }
-  const seededRef = useRef(false);
-  const [saveState, setSaveState] = useState('idle'); // 'idle' | 'saving' | 'saved'
-  const [saveError, setSaveError] = useState(null);
-  // Every name this sheet has seen on a saved result or sent in a save,
-  // kept where a re-read cannot blank it (review 2026-11-04): a save bumps
-  // 'tournamentResults', and the results data reads null while that re-read
-  // runs or after it fails, with this sheet still open.
-  const savedNamesRef = useRef(new Map());
-  (resultsState.data?.results ?? []).forEach((r) => {
-    if (typeof r.name === 'string' && r.name) savedNamesRef.current.set(r.athleteId, r.name);
-  });
-
-  const athleteIds = useMemo(() => roster.map((a) => a.id), [roster]);
-  const bracketsState = useAthleteBrackets(athleteIds);
-  const bracketByAthlete = bracketsState.data ?? {};
-
-  // Pre-fill once, the first time real existing results arrive - never
-  // re-seeds after that, so a background refresh cannot clobber a coach's
-  // in-progress edit. `data.results` is the hook's pinned v1.6 envelope,
-  // each row now carrying `score` rather than `position`.
-  useEffect(() => {
-    const rows = resultsState.data?.results;
-    if (seededRef.current || !rows) return;
-    seededRef.current = true;
-    const seeded = {};
-    rows.forEach((r) => {
-      if (r.score != null) seeded[r.athleteId] = String(r.score);
-    });
-    setScores(seeded);
-  }, [resultsState.data]);
-
-  const setScore = (athleteId, raw) => {
-    if (saveState === 'saving') return;
-    // Digits only, capped at 3 characters - the pin's max (200) is 3 digits.
-    const cleaned = raw.replace(/[^0-9]/g, '').slice(0, 3);
-    setScores((prev) => ({ ...prev, [athleteId]: cleaned }));
-    setSaveState('idle');
-  };
-
-  // Only a real, in-range strokes count is "entered" - 18..200 per the pin.
-  // Empty or out-of-range input is treated exactly like "no score yet":
-  // left out of both the count and the save, never coerced or clamped.
-  const validScore = (athleteId) => {
-    const raw = scores[athleteId];
-    if (raw === undefined || raw === '') return null;
-    const n = Number(raw);
-    return Number.isInteger(n) && n >= 18 && n <= 200 ? n : null;
-  };
-
-  const enteredCount = roster.filter((a) => validScore(a.id) != null).length;
-  const allScored = roster.length > 0 && enteredCount >= roster.length;
-
-  const handleSave = async () => {
-    setSaveState('saving');
-    setSaveError(null);
-    try {
-      // Each entry carries the athlete's display name off this very roster
-      // (contract v1.5.1, unchanged by v1.6) plus its bracket snapshot -
-      // null when useAthleteBrackets hasn't resolved one. A row this roster
-      // could not read keeps the name already saved on its result (the save
-      // rewrites every row, and that snapshot is how other families see it),
-      // taken from savedNamesRef so a second save while the results re-read
-      // is in flight or failed still sends it.
-      const nameById = new Map(roster.map((a) => [a.id, a.name]));
-      const savedName = savedNamesRef.current;
-      const entries = roster
-        .map((a) => ({
-          athleteId: a.id,
-          name: nameById.get(a.id) ?? savedName.get(a.id) ?? null,
-          bracket: bracketByAthlete[a.id] ?? null,
-          score: validScore(a.id),
-        }))
-        .filter((e) => e.score != null);
-      await resultsState.saveResults(entries);
-      entries.forEach((e) => {
-        if (typeof e.name === 'string' && e.name) savedNamesRef.current.set(e.athleteId, e.name);
-      });
-      setSaveState('saved');
-    } catch (err) {
-      setSaveState('idle');
-      setSaveError(err && typeof err.message === 'string' && err.message ? err.message : null);
-    }
-  };
-
-  return (
-    <PhoneFrame
-      bare={bare}
-      header={
-        <div style={{ padding: '4px 22px 14px', background: color.bg }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 10 }}>
-            <BackLink onClick={onBack}>‹ Attendance</BackLink>
-          </div>
-          <ScreenTitle size={21}>Enter scores</ScreenTitle>
-          <div style={{ font: `400 12px ${font.body}`, color: color.textSecondary, marginTop: 5 }}>
-            {session?.name}
-            {session?.meta ? ` · ${session.meta}` : ''}
-          </div>
-          <Body size={12} style={{ marginTop: 10 }}>
-            {allScored
-              ? 'Every athlete has a score.'
-              : "Enter each athlete's strokes. Tour standings are calculated automatically."}
-          </Body>
-        </div>
-      }
-      footer={
-        <div style={{ borderTop: `1px solid ${color.frameRule}`, padding: '14px 22px 22px', background: color.bg }}>
-          {saveError ? (
-            <Body size={12} tone={color.error} style={{ marginBottom: 10 }}>
-              {saveError} Nothing was saved — tap Save scores to try again.
-            </Body>
-          ) : null}
-          {saveState === 'saved' ? <SavedNotice /> : null}
-          <Button
-            variant="pinned"
-            height={56}
-            loading={saveState === 'saving'}
-            disabled={!enteredCount}
-            onClick={handleSave}
-            style={saveState === 'saved' ? { marginTop: 10 } : null}
-          >
-            {saveState === 'saving' ? 'Saving scores' : 'Save scores'}
-          </Button>
-        </div>
-      }
-    >
-      <div style={{ padding: '0 22px 20px' }}>
-        {roster.map((athlete, i) => (
-          <AthleteRow
-            key={athlete.id}
-            name={shownName(athlete)}
-            meta={athlete.meta}
-            avatarSize={42}
-            nameSize={16}
-            divider={i < roster.length - 1}
-            trailing={
-              <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-                <BracketChip bracket={bracketByAthlete[athlete.id] ?? null} />
-                <ScoreField
-                  value={scores[athlete.id] ?? ''}
-                  onChange={(v) => setScore(athlete.id, v)}
-                  disabled={saveState === 'saving'}
-                />
-              </div>
-            }
-          />
-        ))}
-      </div>
-    </PhoneFrame>
-  );
-}
-
-/**
- * Age-bracket chip (Sprint 8 pin, TEAM.md, contract v1.6) - a status, not a
- * control, so per flag 02 (StatusBadge.js) it's the outline/tint treatment,
- * never a solid fill. Shows the bracket id verbatim ('10U' / '11-13' /
- * '14+') to match the owner's own naming; an athlete with no resolvable
- * bracket (no dob on file, or the stubbed hook above) reads "Open" - the
- * pin's own fallback label for the 'open' group, not an invented value.
- */
-function BracketChip({ bracket }) {
-  return <StatusBadge tone="neutral">{bracket || 'Open'}</StatusBadge>;
-}
-
-/**
- * Strokes input - same visual idiom as NumericField's input (screen 14,
- * Diagnostic Capture): track fill, 1px border, 8px radius, right-aligned
- * 600-weight figures. Purpose-built rather than reusing NumericField
- * directly because NumericField's layout is a left label + right unit
- * column built for a stacked list of metrics under one athlete, not one
- * compact field sitting in an AthleteRow's trailing slot beside a
- * BracketChip.
- */
-function ScoreField({ value, onChange, disabled }) {
-  return (
-    <input
-      inputMode="numeric"
-      value={value}
-      disabled={disabled}
-      placeholder="—"
-      onChange={(e) => onChange(e.target.value)}
-      style={{
-        width: 64,
-        height: 44,
-        background: color.track,
-        border: `1px solid ${color.border}`,
-        borderRadius: radius.input,
-        font: `600 15px ${font.body}`,
-        color: disabled ? color.mutedText : color.text,
-        textAlign: 'right',
-        padding: '0 10px',
-        outline: 'none',
-      }}
-    />
-  );
-}
-
-/** Same green-toast idiom as NotificationPreferences' SavedToast. */
-function SavedNotice() {
-  return (
-    <div
-      style={{
-        background: 'rgba(0,175,81,.1)',
-        border: `1px solid ${color.primary}`,
-        borderRadius: 10,
-        padding: '11px 14px',
-        display: 'flex',
-        alignItems: 'center',
-        gap: 10,
-      }}
-    >
-      <span
-        style={{
-          width: 18,
-          height: 18,
-          borderRadius: '50%',
-          background: color.primary,
-          display: 'grid',
-          placeItems: 'center',
-          flex: 'none',
-        }}
-      >
-        <Tick size={9} />
-      </span>
-      <span style={{ font: `500 13px ${font.body}`, color: color.primary }}>Scores saved</span>
-    </div>
   );
 }
 
