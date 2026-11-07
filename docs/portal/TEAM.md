@@ -530,6 +530,56 @@ worktree TEAM.md copies predate this note):
   seed shows three one-kid brackets (expected; the harness TOUR_SEED
   carries the multi-kid bracket contrast).
 
+## Sprint 8 amendment 2026-11-06 — Tour leaderboards, gender, coaches, flat points
+
+Owner's rulings the evening before the first Tour event (Sat Nov 7). The
+Sprint 8 and v1.6.1 notes above stay as the history; where they disagree,
+this note wins. Scores can be entered after the day: standings derive at
+read time.
+- FORMATS: 10 & under play 9 holes (10-year-olds Junior tee, 9 and under
+  Par3 tee); everyone 11 and up plays 18 on their own tee; coaches play 18
+  and compete too.
+- AGE GROUPS (tournamentResults.bracket, age on SEASON_BOUNDS.start):
+  '10U' 0-10, '11-14' 11-14, '15-18' 15 and up, 'coaches' a coach entry,
+  null Open. Rules ADD '11-14', '15-18', 'coaches' and keep accepting the
+  Sprint 8 '10U', '11-13', '14+' (staging and production share the
+  database; an old cached client may save one). Nothing else is accepted
+  (a first pass the same evening was never deployed; its ids are refused).
+- GENDER: optional result field 'boys' | 'girls' | null; tourShapeOk keeps
+  hasAll of the eight keys, hasOnly adds 'gender'. The score sheet requires
+  Boys/Girls for every athlete 11 and up before the row saves (a row
+  missing it is named on the sheet, never dropped silently), pre-filled
+  from the athlete's most recent saved result with a gender; 10 & under
+  and Open are not asked.
+- COACHES: "Add a coach" per event (name with quick picks of coaches from
+  earlier Tour results, Men/Women stored as boys/girls, score). Doc is an
+  ordinary result: athleteId 'coach_' + slug of the name, bracket
+  'coaches', name as typed. Rules: bracket 'coaches' exactly when the
+  athleteId is 'coach_[a-z0-9-]+'.
+- POINTS (owner: "make the point distribution such that you're not so
+  penalized for missing one"; "don't drop scores, that will get
+  confusing"): per Saturday, per leaderboard: 10, 9, 8, 7, 6, 5, 4, 3, 2
+  for 1st-9th, 1 for every other score; ties share the place and its
+  points; NO dropped weeks (TOUR_DROP_RATE and `counting` removed); a
+  season total is every Saturday summed.
+- LEADERBOARDS (data/tourBoards.js, derived at read time, one result on
+  every board it belongs to): Overall (11-14 + 15-18), Boys, Girls, 10 &
+  under, 11–14, 15–18, each age by gender, Coaches (and Men / Women), Open,
+  then any legacy id under its old label (not in Overall/Boys/Girls). A
+  result with no gender counts on Overall and its age board only.
+- SCREEN: TourStandings shows ONE leaderboard picked by an Age filter
+  (11–18 overall default / 10 & under / 11–14 / 15–18 / Coaches, Open only
+  when someone has no dob) and a Gender filter (All / Boys / Girls; All /
+  Men / Women for Coaches; hidden for a one-board age). A family lands on
+  the first Age filter that ranks them. Weekly events and "Your results"
+  follow the filters.
+- SHAPE: deriveTourStandings -> { boards: [{ id, label, standings }],
+  events: [{ date, label, results: [{ athleteId, name, bracket, gender,
+  board, score, position, points }], boards: { [boardId]: [...] } }] }.
+  Seed demo moved to data/tourSeed.js.
+- DEPLOY ORDER: rules first (a new id or a gender key is refused by the
+  old rules), then the frontend.
+
 ## Sprint 9 pins — specialist 1-on-1s (Phil & Yannick), Lifetime-style booking, cancellation (2026-09-11)
 
 Owner's direction: sessions with Yannick (mental game) and Phil

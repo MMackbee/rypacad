@@ -683,17 +683,19 @@ is a field-shape change, not a migration.
 | Field | Type | Notes |
 |---|---|---|
 | `sessionId` | string | Into `sessions/` — must be a `type: 'tournament'` session. Matches the id prefix. |
-| `athleteId` | string | Into `athletes/`. Matches the id suffix. |
+| `athleteId` | string | Into `athletes/`. Matches the id suffix. **Coach entries (2026-11-06):** `'coach_' + slug`, the slug being the coach's name lowercased with accents dropped and every other run of characters one hyphen (`'Pat Lee'` -> `coach_pat-lee`, `data/tourSheet.js` `coachIdFor`). A coach id is not an athlete doc; the score sheet's quick picks reuse earlier coaches' ids so a season total stays one row. The rules require `coach_[a-z0-9-]+` exactly when `bracket == 'coaches'`. |
 | `name` | string \| null | **Contract v1.5.1, unchanged by v1.6.** The athlete's display name, snapshotted at write time from the roster the staff member entering results is already reading. Pure display denormalization — the academy-public standings show every name to every role *without* widening the `athletes` read matrix. Read paths prefer this and fall back to a per-id athlete join only for pre-amendment docs. |
-| `bracket` | string \| null | **Contract v1.6 (Sprint 8).** One of `'10U' \| '11-13' \| '14+'`, or `null`. A **write-time snapshot** — computed from `athletes/{athleteId}.dob` **as of `SEASON_BOUNDS.start`** (never the write date, and never read live at standings time) at the moment the result is entered, exactly the same rationale and mechanics as the `name` snapshot above: bracketing a result never needs a cross-family `athletes` read, so the "cross-family reads impossible" invariant from the v1.5.1 amendment holds for age too. The three buckets (`data/tour.js`'s `BRACKETS`, routing lane): `10U` = age 0-10, `11-13` = age 11-13, `14+` = age 14-999, age computed on the day the season opens so nobody changes brackets mid-season. An athlete with **no `dob` at write time** gets `bracket: null`, grouped under the display-only **'Open'** bucket at read time — nothing breaks, nothing is guessed. Like `name`, a bracket already written to a doc is never rewritten retroactively; once provisioning sets a real `dob`, only *results entered after that* pick up the real bracket. |
+| `bracket` | string \| null | **Owner rulings 2026-11-06 (replacing the Sprint 8 ids below):** one of `'10U'` (ages 0-10, 9 holes), `'11-14'` (11-14, 18 holes), `'15-18'` (15 and up, 18 holes; an adult lands here too) or `'coaches'` (a coach entry), or `null` (no dob: the Open board). The Sprint 8 ids `'11-13'` and `'14+'` stay accepted by the rules (additive: staging and production share the database and an old cached client may save one) but this app never writes them; they show on boards of their own under their old labels. **Contract v1.6 (Sprint 8), as it was:** one of `'10U' \| '11-13' \| '14+'`, or `null`. A **write-time snapshot** — computed from `athletes/{athleteId}.dob` **as of `SEASON_BOUNDS.start`** (never the write date, and never read live at standings time) at the moment the result is entered, exactly the same rationale and mechanics as the `name` snapshot above: bracketing a result never needs a cross-family `athletes` read, so the "cross-family reads impossible" invariant from the v1.5.1 amendment holds for age too. The three buckets (`data/tour.js`'s `BRACKETS`, routing lane): `10U` = age 0-10, `11-13` = age 11-13, `14+` = age 14-999, age computed on the day the season opens so nobody changes brackets mid-season. An athlete with **no `dob` at write time** gets `bracket: null`, grouped under the display-only **'Open'** bucket at read time — nothing breaks, nothing is guessed. Like `name`, a bracket already written to a doc is never rewritten retroactively; once provisioning sets a real `dob`, only *results entered after that* pick up the real bracket. |
+| `gender` | string \| null \| absent | **Owner rulings 2026-11-06.** `'boys'` or `'girls'` (a coach's Men / Women is stored the same), `null`, or absent - the one optional key. The score sheet asks for it for every athlete 11 and up and every coach before the row saves, pre-filled from that athlete's most recent saved result that has one (any date), so it is picked once per kid per season; 10 & under and Open rows save without it. A write-time snapshot like `name` and `bracket`. A result with no gender counts on Overall and its age board, never on a gender board. |
 | `date` | string | `YYYY-MM-DD`. **Must equal the referenced session's own `date`** — read off `sessions/{sessionId}.date` at write time (never typed independently), so the two can never disagree. |
 | `score` | number | **Contract v1.6 (Sprint 8).** Integer, strokes, `18..200`. Replaces `position` — see below for how a finishing place is recovered from this without ever storing one. |
 | `createdBy` | string | uid of the staff account (coach or ops/owner) that entered the result. |
 | `createdAt` | timestamp | Server write time. |
 
-That is the complete shape — **exactly these eight keys**, nothing else
-(the rules' `tourShapeOk()` checks `hasOnly` as well as `hasAll`, per the
-Sprint 7 pin this inherits).
+That is the complete shape — **exactly these eight keys, plus the optional
+`gender`** (2026-11-06), nothing else (the rules' `tourShapeOk()` checks
+`hasAll` of the eight and `hasOnly` of the nine, per the Sprint 7 pin this
+inherits).
 
 **Position derives at read time, per (date, bracket) group — an event is a
 DATE** (contract v1.6.1, TEAM.md Sprint 8 amendment, owner's ruling: "the
@@ -708,22 +710,27 @@ next score is 3rd, not 2nd). Docs stay per-session and the entry UX stays
 per-block — the merge is pure derivation. If an athlete somehow holds
 results in two blocks of the same date, their **lowest round counts** for
 that week (never summed — everyone else played one round) and the week
-counts once. The drop-week rule's `eventsHeld` counts distinct **dates**.
-Points then come from that per-bracket position via `TOUR_POINTS` exactly
-as they came from the old stored `position` — the table and
-`pointsForPosition()` in `frontend/src/portal/data/tour.js` did not change,
-only what feeds them did. A week with only one entrant in a bracket derives
-that entrant as 1st in it, same as any group of one always would; the seed
-data below is exactly this case for two events, by construction (three
-seeded results, three different brackets).
+counts once. Points then come from that position via `TOUR_POINTS`
+(`frontend/src/portal/data/tour.js` `pointsForPosition()`). **Since the
+owner's rulings of 2026-11-06** the place is taken on every LEADERBOARD a
+result belongs to (`data/tourBoards.js`: Overall = 11-14 + 15-18; Boys /
+Girls = the same with that gender; 10 & under; 11-14 and 15-18; each of
+those by gender; Coaches, and Coaches by Men / Women; Open = no bracket; a
+legacy id on its own board, outside Overall), and the table is flat: 1st 10,
+2nd 9, 3rd 8, 4th 7, 5th 6, 6th 5, 7th 4, 8th 3, 9th 2, and every other
+player with a score that Saturday 1. Ties share the place and its points
+(1, 2, 2, 4 earns 10, 9, 9, 7). The 25-deep 100/88/78... table and the
+drop-week rule are gone. A week with only one entrant on a board derives
+that entrant as 1st on it, same as any group of one always would (the
+emulator seed's lone 10 & under Whitfield is this case).
 
 **Points are still never stored — score is the only numeric fact in
 Firestore.** Everything downstream of it (position, points, standings) is
 computed at **read** time, in the hook that derives standings, and never
 written back to a document — the same derive-don't-store discipline that
 already covered `position` in v1.5 now covers `score`, one layer further
-back. If the owner retunes `TOUR_POINTS`, the bracket boundaries, or the
-drop-week rate, that change **retroactively rescores the entire season** the
+back. If the owner retunes `TOUR_POINTS`, the age groups, or the boards,
+that change **retroactively rescores the entire season** the
 next time standings are read, instead of requiring a migration over every
 past result. Storing a `position` or `points` field on this document would
 freeze every past tournament's scoring to whatever the rules said on the day
@@ -731,26 +738,30 @@ it was entered — exactly the drift this schema avoids everywhere else
 (`sessions.booked` aside, a display counter with its own single-writer
 transaction, not a derived value with a policy knob behind it).
 
-**Standings derivation** (read-time, no stored aggregate) is now computed
-**per bracket**: within one bracket's set of athletes, sum each athlete's
-points (from their per-tournament bracket-scoped position, above) across the
-season window, rank descending by that sum, and **let ties share a rank**
+**Standings derivation** (read-time, no stored aggregate) is computed
+**per leaderboard** (2026-11-06; per bracket before): within one board's
+set of players, sum each player's points (from their per-Saturday place on
+that board, above) over **every Saturday of the season — no week is
+dropped**, rank descending by that sum, and **let ties share a rank**
 (two athletes tied for a bracket's lead are both "1st", the next distinct
 total is "3rd", not "2nd" — competition ranking, not dense ranking, same
 rule as before, just scoped narrower). "Events played" alongside each row is
-still simply the count of that athlete's `tournamentResults` docs in the
-window — no separate counter. An athlete never appears in two brackets: a
-`bracket` value is fixed per document at write time, and one athlete's dob
-does not change between one tournament and the next within a season, so
-every doc for a given athlete carries the same bracket all season (barring a
-coach correcting a bad entry). Only non-empty brackets are shown, in
-`BRACKETS` order, with `'open'` last.
+still simply the count of that athlete's Saturdays on the board — no
+separate counter. One result counts on several boards (an 11-14 girl is on
+Overall, Girls, 11-14 and 11-14 Girls), but an athlete never changes age
+group: a `bracket` value is fixed per document at write time from the dob
+on the season start. Only non-empty boards are returned, in the
+`data/tourBoards.js` order; the Tour tab shows one at a time, picked by an
+Age filter x a Gender filter.
 
 **Rules** (data-routing lane implements; noted here so the shape they
 enforce is on the record): create/update restricted to `coach` and staff
 roles (`ops`, `owner`, `mental` per the existing staff set, unchanged);
 shape-checked — id must equal `{sessionId}_{athleteId}`, `score` an integer
-in `18..200`, `bracket` one of `'10U' \| '11-13' \| '14+'` or `null`, `date`
+in `18..200`, `bracket` one of `'10U' \| '11-14' \| '15-18' \| 'coaches'` or the
+legacy `'11-13' \| '14+'` or `null` (2026-11-06; the Sprint 8 list was
+`'10U' \| '11-13' \| '14+'`), `gender` absent, `null`, `'boys'` or `'girls'`,
+`bracket == 'coaches'` exactly when `athleteId` matches `coach_[a-z0-9-]+`, `date`
 must match the referenced session's `date` (the Sprint 7 hotfix's `matches()`
 pair, not `substring()` — rules strings still have no `substring()`);
 readable by any signed-in portal user (standings are public inside the

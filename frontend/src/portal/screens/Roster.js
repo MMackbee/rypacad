@@ -473,7 +473,7 @@ export function SessionAttendance({ variant = 'pre', bare = false, onBack, sessi
   // in place (same local-view-state pattern StaffScreen in PortalRoutes.js
   // already uses for its add-mode). The attendance flow above is untouched
   // for every other session type - this is the only branch point. The
-  // sheet itself (age groups, Boys/Girls at 15 & up) is ./TourScoreSheet.js.
+  // sheet itself (age groups, Boys/Girls, coaches) is ./TourScoreSheet.js.
   if (view === 'results') {
     return (
       <TourScoreSheet

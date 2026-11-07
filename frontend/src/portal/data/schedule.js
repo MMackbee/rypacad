@@ -48,7 +48,7 @@ const WEEKDAY_KEY_BY_DAY_INDEX = { 1: 'Mon', 2: 'Tue', 3: 'Wed', 4: 'Thu', 5: 'F
  * A hint for families choosing a block, nothing more: booking is NOT age-gated
  * anywhere, any athlete may book any block, and nothing here touches what a
  * booking costs (the keystone holds - a token is a token). It is also separate
- * from the RYP Tour's brackets (11 & under / 12–14 / 15 & up Boys and Girls, data/tour.js),
+ * from the RYP Tour's age groups (10 & under / 11–14 / 15–18, data/tourBrackets.js),
  * which score competition and are derived from a date of birth; these two
  * groupings answer different questions and are deliberately not shared.
  */

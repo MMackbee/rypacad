@@ -1,88 +1,87 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { color, font, radius, tint } from '../tokens';
+import { color, font } from '../tokens';
 import AthleteRow from '../components/AthleteRow';
 import Button from '../components/Button';
 import PhoneFrame from '../components/PhoneFrame';
 import StatusBadge from '../components/StatusBadge';
-import { BackLink, Body, ScreenTitle, Tick } from '../components/Primitives';
+import { BackLink, Body, ScreenTitle } from '../components/Primitives';
+import CoachSection from '../components/tour/CoachSection';
+import { GenderPicker, PartlySavedNotice, SavedNotice, ScoreField } from '../components/tour/SheetParts';
 import * as hooks from '../hooks';
-import { bracketLabel } from '../data/tour';
-import { DIVISIONS, buildScoreEntries, divisionOf, needsDivision } from '../data/tourDivisions';
+import { COACH_BRACKET, bracketLabel, isCoachId, needsGender } from '../data/tourBrackets';
+import { buildScoreEntries, pendingLines } from '../data/tourSheet';
 
 /*
  * Same namespace-import seam Roster.js uses for its hooks: a test or harness
- * that mocks ../hooks without these exports gets the inert shape ({} and
- * never fetches), so every chip reads "Open" and nothing pre-fills.
+ * that mocks ../hooks without these exports gets the inert shape (nothing,
+ * and never fetches), so every chip reads "Open" and nothing pre-fills.
  */
 const NONE = {};
+const NO_HISTORY = { genderById: NONE, coaches: [] };
 function useNothingFallback() {
-  return { data: NONE, loading: false, error: null };
+  return { data: null, loading: false, error: null };
 }
 const useAthleteBrackets = hooks.useAthleteBrackets || useNothingFallback;
-const usePriorTourDivisions = hooks.usePriorTourDivisions || useNothingFallback;
+const useTourSheetHistory = hooks.useTourSheetHistory || useNothingFallback;
 
 const shownName = (athlete) => athlete.name ?? 'Name unavailable';
-
-/** ['A'] -> 'A'; ['A', 'B'] -> 'A and B'; ['A', 'B', 'C'] -> 'A, B and C'. */
-function nameList(names) {
-  return names.length <= 1 ? names.join('') : `${names.slice(0, -1).join(', ')} and ${names[names.length - 1]}`;
-}
+const without = (obj, key) => Object.fromEntries(Object.entries(obj).filter(([k]) => k !== key));
 
 /**
  * The Tour score sheet - "Enter Tour results" on a Tour event's roster
- * (Sprint 8 pin, contract v1.6; moved out of Roster.js on 2026-11-06, when
- * Boys/Girls made it grow). A coach types each rostered athlete's strokes
- * (18..200). Position, points and standings derive downstream
- * (data/tour.js deriveTourStandings); this sheet never computes or shows a
- * position.
+ * (Sprint 8 pin; owner rulings 2026-11-06). A coach types each player's
+ * strokes (18..200); places, points and standings derive downstream
+ * (data/tour.js deriveTourStandings) and this sheet never shows one.
  *
- * Age groups (owner ruling 2026-11-06): each row's chip reads the athlete's
- * group on SEASON_BOUNDS.start - 11 & under, 12–14, 15 & up, or Open with no
- * dob on file - from useAthleteBrackets. Boys and girls rank separately
- * only at 15 & up, and the portal holds no boy/girl fact a coach can read,
- * so every 15 & up row carries a required Boys / Girls pick. A scored row
- * without one is NOT saved and never lands in Open: the footer names each
- * such athlete before the save, the other rows still save, and the result
- * line names who was left out and why. The pick pre-fills from this event's
- * own saved result, else the athlete's most recent saved '15+B' / '15+G'
- * result from any date (usePriorTourDivisions), so a scorer picks once per
- * kid per season; a tap on this sheet always wins. Save waits while the age
- * groups load, and stays off if they failed: every row would land in Open.
+ * Each row's chip is the player's age group on SEASON_BOUNDS.start (10 &
+ * under, 11–14, 15–18, or Open with no dob on file) from useAthleteBrackets.
+ * Everyone 11 and up needs Boys or Girls before their row saves; 10 & under
+ * and Open rows are not asked (gender null). A scored row still missing it,
+ * or holding a strokes count outside 18..200, is NOT saved and never
+ * silently dropped: the footer names each one before the save, the other
+ * rows still save, and the notice after says how many landed and who is
+ * still waiting. The pick pre-fills - a tap on this sheet first, then this
+ * event's own saved result, then the player's most recent saved result with
+ * a gender from any date (useTourSheetHistory) - so it is picked once per
+ * kid per season.
  *
- * Scores pre-fill once, the first time real results arrive - a background
- * refresh cannot clobber an edit in progress. A row with no entered (or
- * out-of-range) score is left out of the save, never coerced to 0 - "no
- * score yet" and "scored zero" are different facts. Local state drives the
- * UI in seed and live mode alike; only `resultsState.saveResults` differs
- * (a real write live, a no-op otherwise).
+ * Coaches (./components/tour/CoachSection.js) play 18 holes and are added
+ * per event; a coach row needs Men or Women the same way. Saved coach rows
+ * for this event load back in.
+ *
+ * Scores and coach rows pre-fill once, the first time real results arrive -
+ * a background refresh cannot clobber an edit in progress. Save waits while
+ * the age groups load, and stays off if they failed (every row would land
+ * in Open). Local state drives the UI in seed and live mode alike; only
+ * `resultsState.saveResults` differs (a real write live, a no-op otherwise).
  */
 export default function TourScoreSheet({ bare, session, roster, resultsState, onBack }) {
-  const [scores, setScores] = useState({}); // { [athleteId]: rawInputString }
-  const [picked, setPicked] = useState({}); // { [athleteId]: 'B' | 'G' }, tapped on this sheet
+  const [scores, setScores] = useState({}); // { [athleteId]: raw input }, players and coaches
+  const [picked, setPicked] = useState({}); // { [athleteId]: 'boys' | 'girls' }, tapped on this sheet
+  const [coaches, setCoaches] = useState([]); // [{ athleteId, name, saved }]
   const seededRef = useRef(false);
   const [saveState, setSaveState] = useState('idle'); // 'idle' | 'saving' | 'saved'
   const [saveError, setSaveError] = useState(null);
-  // The last good save: how many rows landed, and the names it left out for want of Boys/Girls.
-  const [lastSave, setLastSave] = useState({ saved: 0, notSaved: [] });
-  // Every name and Boys/Girls this sheet has seen on a saved result or sent
-  // in a save, kept where a re-read cannot blank it (review 2026-11-04): a
-  // save bumps 'tournamentResults', and the results data reads null while
-  // that re-read runs or after it fails, with this sheet still open.
+  const [lastSave, setLastSave] = useState({ saved: 0, lines: [] });
+  // Every name and gender this sheet has seen on a saved result or sent in a
+  // save, kept where a re-read cannot blank it (review 2026-11-04): a save
+  // bumps 'tournamentResults', and the results read null while that re-read
+  // runs or after it fails, with this sheet still open.
   const savedNamesRef = useRef(new Map());
-  const savedDivisionRef = useRef(new Map());
+  const savedGenderRef = useRef(new Map());
   (resultsState.data?.results ?? []).forEach((r) => {
     if (typeof r.name === 'string' && r.name) savedNamesRef.current.set(r.athleteId, r.name);
-    const d = divisionOf(r.bracket);
-    if (d) savedDivisionRef.current.set(r.athleteId, d);
+    if (r.gender === 'boys' || r.gender === 'girls') savedGenderRef.current.set(r.athleteId, r.gender);
   });
 
   const athleteIds = useMemo(() => roster.map((a) => a.id), [roster]);
   const bracketsState = useAthleteBrackets(athleteIds);
   const groupByAthlete = bracketsState.data ?? NONE;
-  const priorState = usePriorTourDivisions(athleteIds);
-  // A pre-fill read that failed is no pre-fill: the scorer picks by hand.
-  const priorRef = useRef(NONE);
-  if (priorState.data) priorRef.current = priorState.data;
+  const historyState = useTourSheetHistory();
+  // A history read that failed is no pre-fill: the scorer picks by hand.
+  const historyRef = useRef(NO_HISTORY);
+  if (historyState.data) historyRef.current = historyState.data;
+  const history = historyRef.current;
 
   useEffect(() => {
     const rows = resultsState.data?.results;
@@ -92,64 +91,84 @@ export default function TourScoreSheet({ bare, session, roster, resultsState, on
     rows.forEach((r) => {
       if (r.score != null) seeded[r.athleteId] = String(r.score);
     });
-    setScores(seeded);
+    setScores((prev) => ({ ...seeded, ...prev }));
+    const savedCoaches = rows
+      .filter((r) => isCoachId(r.athleteId))
+      .map((r) => ({ athleteId: r.athleteId, name: r.name || r.athleteId, saved: true }));
+    setCoaches((prev) => [...savedCoaches, ...prev.filter((c) => !savedCoaches.some((s) => s.athleteId === c.athleteId))]);
   }, [resultsState.data]);
 
+  const busy = saveState === 'saving';
+  const touch = () => setSaveState((s) => (s === 'saving' ? s : 'idle'));
+  const setScore = (id, raw) => {
+    if (busy) return;
+    setScores((prev) => ({ ...prev, [id]: raw }));
+    touch();
+  };
+  const pick = (id, gender) => {
+    if (busy) return;
+    setPicked((prev) => ({ ...prev, [id]: gender }));
+    touch();
+  };
+  const genderOf = (id) => picked[id] ?? savedGenderRef.current.get(id) ?? history.genderById?.[id] ?? null;
   const groupOf = (id) => groupByAthlete[id] ?? null;
-  const divisionFor = (id) => picked[id] ?? savedDivisionRef.current.get(id) ?? priorRef.current[id] ?? null;
 
-  const setScore = (athleteId, raw) => {
-    if (saveState === 'saving') return;
-    // Digits only, capped at 3 characters - the pin's max (200) is 3 digits.
-    const cleaned = raw.replace(/[^0-9]/g, '').slice(0, 3);
-    setScores((prev) => ({ ...prev, [athleteId]: cleaned }));
-    setSaveState('idle');
+  const addCoach = ({ athleteId, name }) => {
+    setCoaches((prev) => [...prev, { athleteId, name, saved: false }]);
+    touch();
+  };
+  const removeCoach = (athleteId) => {
+    setCoaches((prev) => prev.filter((c) => c.athleteId !== athleteId || c.saved));
+    setScores((prev) => without(prev, athleteId));
+    setPicked((prev) => without(prev, athleteId));
   };
 
-  const pick = (athleteId, division) => {
-    if (saveState === 'saving') return;
-    setPicked((prev) => ({ ...prev, [athleteId]: division }));
-    setSaveState('idle');
-  };
-
-  // Only a real, in-range strokes count is "entered" - 18..200 per the pin.
-  const validScore = (athleteId) => {
-    const raw = scores[athleteId];
-    if (raw === undefined || raw === '') return null;
-    const n = Number(raw);
-    return Number.isInteger(n) && n >= 18 && n <= 200 ? n : null;
-  };
-
-  // Each row carries the name off this very roster (contract v1.5.1); a row
-  // the roster could not read keeps the name already saved on its result.
-  const rows = roster.map((a) => ({
-    athleteId: a.id,
-    name: a.name ?? savedNamesRef.current.get(a.id) ?? null,
-    label: shownName(a),
-    group: groupOf(a.id),
-    division: divisionFor(a.id),
-    score: validScore(a.id),
-  }));
-  const { entries, needsDivision: blocked } = buildScoreEntries(rows);
-  const enteredCount = rows.filter((r) => r.score != null).length;
-  const allScored = roster.length > 0 && enteredCount >= roster.length;
-  const anySplit = rows.some((r) => needsDivision(r.group));
+  // Each player row carries the name off this very roster (contract
+  // v1.5.1); a row the roster could not read keeps the name already saved.
+  const rows = [
+    ...roster.map((a) => ({
+      athleteId: a.id,
+      name: a.name ?? savedNamesRef.current.get(a.id) ?? null,
+      label: shownName(a),
+      bracket: groupOf(a.id),
+      gender: genderOf(a.id),
+      raw: scores[a.id],
+    })),
+    ...coaches.map((c) => ({
+      athleteId: c.athleteId,
+      name: c.name,
+      label: c.name,
+      bracket: COACH_BRACKET,
+      gender: genderOf(c.athleteId),
+      raw: scores[c.athleteId],
+      coach: true,
+    })),
+  ];
+  const built = buildScoreEntries(rows);
+  const pending = pendingLines(built);
+  const blocked = new Set([...built.missingGender, ...built.badScore].map((b) => b.athleteId)).size;
+  const scoredPlayers = roster.filter((a) => scores[a.id]).length;
+  const allScored = roster.length > 0 && scoredPlayers >= roster.length;
+  const anyAsked = roster.some((a) => needsGender(groupOf(a.id)));
   const groupsLoading = Boolean(bracketsState.loading);
   const groupsFailed = Boolean(bracketsState.error);
+  const onSheet = new Set(coaches.map((c) => c.athleteId));
+  const quickPicks = (history.coaches ?? []).filter((c) => !onSheet.has(c.athleteId));
 
   const handleSave = async () => {
+    const { entries } = built;
     if (!entries.length) return;
-    const leftOut = blocked.map((b) => b.label);
+    const left = pending;
     setSaveState('saving');
     setSaveError(null);
     try {
       await resultsState.saveResults(entries);
       entries.forEach((e) => {
         if (typeof e.name === 'string' && e.name) savedNamesRef.current.set(e.athleteId, e.name);
-        const d = divisionOf(e.bracket);
-        if (d) savedDivisionRef.current.set(e.athleteId, d);
+        if (e.gender) savedGenderRef.current.set(e.athleteId, e.gender);
       });
-      setLastSave({ saved: entries.length, notSaved: leftOut });
+      setCoaches((prev) => prev.map((c) => (entries.some((e) => e.athleteId === c.athleteId) ? { ...c, saved: true } : c)));
+      setLastSave({ saved: entries.length, lines: left });
       setSaveState('saved');
     } catch (err) {
       setSaveState('idle');
@@ -172,12 +191,12 @@ export default function TourScoreSheet({ bare, session, roster, resultsState, on
           </div>
           <Body size={12} style={{ marginTop: 10 }}>
             {allScored
-              ? 'Every athlete has a score.'
-              : "Enter each athlete's strokes. Tour standings are calculated automatically."}
+              ? 'Every player has a score.'
+              : "Enter each player's strokes: 10 & under play 9 holes, everyone 11 and up plays 18. Tour standings are calculated automatically."}
           </Body>
-          {anySplit ? (
+          {anyAsked ? (
             <Body size={12} style={{ marginTop: 6 }}>
-              Boys and girls are ranked separately at 15 & up: choose Boys or Girls for each of those athletes.
+              Choose Boys or Girls for every player 11 and up: the leaderboards rank boys and girls too.
             </Body>
           ) : null}
         </div>
@@ -190,15 +209,14 @@ export default function TourScoreSheet({ bare, session, roster, resultsState, on
             </Body>
           ) : null}
           {saveState === 'saved' ? (
-            lastSave.notSaved.length ? (
-              <PartlySavedNotice saved={lastSave.saved} names={lastSave.notSaved} />
+            lastSave.lines.length ? (
+              <PartlySavedNotice saved={lastSave.saved} lines={lastSave.lines} />
             ) : (
               <SavedNotice />
             )
-          ) : blocked.length ? (
+          ) : pending.length ? (
             <Body size={12} tone={color.secondary} style={{ marginBottom: 10 }}>
-              Choose Boys or Girls for {nameList(blocked.map((b) => b.label))}.{' '}
-              {blocked.length === 1 ? 'That score is' : 'Those scores are'} not saved until you do.
+              {pending.join(' ')} {blocked === 1 ? 'That score is' : 'Those scores are'} not saved until you do.
             </Body>
           ) : null}
           {groupsLoading ? (
@@ -213,12 +231,12 @@ export default function TourScoreSheet({ bare, session, roster, resultsState, on
           <Button
             variant="pinned"
             height={56}
-            loading={saveState === 'saving'}
-            disabled={!entries.length || groupsLoading || groupsFailed}
+            loading={busy}
+            disabled={!built.entries.length || groupsLoading || groupsFailed}
             onClick={handleSave}
             style={saveState === 'saved' ? { marginTop: 10 } : null}
           >
-            {saveState === 'saving' ? 'Saving scores' : 'Save scores'}
+            {busy ? 'Saving scores' : 'Save scores'}
           </Button>
         </div>
       }
@@ -238,145 +256,32 @@ export default function TourScoreSheet({ bare, session, roster, resultsState, on
                 <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
                   <StatusBadge tone="neutral">{bracketLabel(group)}</StatusBadge>
                   <ScoreField
+                    label={`Strokes for ${shownName(athlete)}`}
                     value={scores[athlete.id] ?? ''}
                     onChange={(v) => setScore(athlete.id, v)}
-                    disabled={saveState === 'saving'}
+                    disabled={busy}
                   />
                 </div>
               }
             >
-              {needsDivision(group) ? (
-                <DivisionPicker
-                  name={shownName(athlete)}
-                  value={divisionFor(athlete.id)}
-                  onChange={(d) => pick(athlete.id, d)}
-                  disabled={saveState === 'saving'}
-                />
+              {needsGender(group) ? (
+                <GenderPicker name={shownName(athlete)} value={genderOf(athlete.id)} onChange={(g) => pick(athlete.id, g)} disabled={busy} />
               ) : null}
             </AthleteRow>
           );
         })}
+        <CoachSection
+          coaches={coaches}
+          quickPicks={quickPicks}
+          scores={scores}
+          genderOf={genderOf}
+          onScore={setScore}
+          onGender={pick}
+          onAdd={addCoach}
+          onRemove={removeCoach}
+          disabled={busy}
+        />
       </div>
     </PhoneFrame>
-  );
-}
-
-/**
- * Boys / Girls for one athlete 15 & up - a real control, so the chosen side
- * takes the solid "tappable" fill (flag 02, StatusBadge.js); an unpicked row
- * says so in caution yellow beside the two buttons.
- */
-function DivisionPicker({ name, value, onChange, disabled }) {
-  return (
-    <div role="group" aria-label={`Boys or Girls for ${name}`} style={{ display: 'flex', alignItems: 'center', gap: 6, marginTop: 6 }}>
-      {DIVISIONS.map((d) => {
-        const on = value === d.id;
-        return (
-          <button
-            key={d.id}
-            type="button"
-            aria-pressed={on}
-            disabled={disabled}
-            onClick={() => onChange(d.id)}
-            style={{
-              height: 40,
-              minWidth: 64,
-              padding: '0 12px',
-              borderRadius: radius.control,
-              border: `1.5px solid ${on ? color.primary : color.controlBorder}`,
-              background: on ? color.primary : 'transparent',
-              color: on ? '#000' : color.textSecondary,
-              font: `600 12px ${font.body}`,
-              cursor: disabled ? 'default' : 'pointer',
-            }}
-          >
-            {d.label}
-          </button>
-        );
-      })}
-      {value ? null : <span style={{ font: `500 11px ${font.body}`, color: color.secondary }}>Choose one</span>}
-    </div>
-  );
-}
-
-/**
- * Strokes input - same visual idiom as NumericField's input (screen 14):
- * track fill, 1px border, 8px radius, right-aligned 600-weight figures.
- * Purpose-built because NumericField's label + unit layout is for a stacked
- * list of metrics, not one compact field in an AthleteRow's trailing slot.
- */
-function ScoreField({ value, onChange, disabled }) {
-  return (
-    <input
-      inputMode="numeric"
-      value={value}
-      disabled={disabled}
-      placeholder="—"
-      onChange={(e) => onChange(e.target.value)}
-      style={{
-        width: 64,
-        height: 44,
-        background: color.track,
-        border: `1px solid ${color.border}`,
-        borderRadius: radius.input,
-        font: `600 15px ${font.body}`,
-        color: disabled ? color.mutedText : color.text,
-        textAlign: 'right',
-        padding: '0 10px',
-        outline: 'none',
-      }}
-    />
-  );
-}
-
-/** Same green-toast idiom as NotificationPreferences' SavedToast. */
-function SavedNotice() {
-  return (
-    <div
-      style={{
-        background: 'rgba(0,175,81,.1)',
-        border: `1px solid ${color.primary}`,
-        borderRadius: 10,
-        padding: '11px 14px',
-        display: 'flex',
-        alignItems: 'center',
-        gap: 10,
-      }}
-    >
-      <span
-        style={{
-          width: 18,
-          height: 18,
-          borderRadius: '50%',
-          background: color.primary,
-          display: 'grid',
-          placeItems: 'center',
-          flex: 'none',
-        }}
-      >
-        <Tick size={9} />
-      </span>
-      <span style={{ font: `500 13px ${font.body}`, color: color.primary }}>Scores saved</span>
-    </div>
-  );
-}
-
-/** A save that left rows out: what landed, who did not, and why - caution yellow, never the green toast. */
-function PartlySavedNotice({ saved, names }) {
-  return (
-    <div
-      role="status"
-      style={{
-        background: tint.yellow,
-        border: `1px solid ${tint.yellowBorder}`,
-        borderRadius: 10,
-        padding: '11px 14px',
-        font: `500 13px/1.45 ${font.body}`,
-        color: color.secondary,
-      }}
-    >
-      {saved === 1 ? '1 score saved.' : `${saved} scores saved.`} Not saved: {nameList(names)}. Choose Boys or Girls,
-      then tap Save scores again.
-    </div>
   );
 }
