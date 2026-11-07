@@ -76,6 +76,11 @@ export function needsGender(bracket) {
   return bracket === '11-14' || bracket === '15-18' || bracket === COACH_BRACKET;
 }
 
+/** A kid's age group as this app writes it: a current id or null (Open) - never a legacy id, never 'coaches'. */
+export function isSavableAgeGroup(bracket) {
+  return bracket == null || BRACKETS.some((b) => b.id === bracket);
+}
+
 /**
  * One entry as saveTournamentResults may write it: an athleteId, an int
  * score in 18..200, a string-or-null name, a current bracket or null (never

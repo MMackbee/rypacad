@@ -555,7 +555,7 @@ read time.
   earlier Tour results, Men/Women stored as boys/girls, score). Doc is an
   ordinary result: athleteId 'coach_' + slug of the name, bracket
   'coaches', name as typed. Rules: bracket 'coaches' exactly when the
-  athleteId is 'coach_[a-z0-9-]+'.
+  athleteId starts 'coach_', and a coach athleteId is 'coach_[a-z0-9-]+'.
 - POINTS (owner: "make the point distribution such that you're not so
   penalized for missing one"; "don't drop scores, that will get
   confusing"): per Saturday, per leaderboard: 10, 9, 8, 7, 6, 5, 4, 3, 2
@@ -579,6 +579,13 @@ read time.
   Seed demo moved to data/tourSeed.js.
 - DEPLOY ORDER: rules first (a new id or a gender key is refused by the
   old rules), then the frontend.
+- REVIEW FIXES (same evening): a player whose athlete doc did not load on
+  the score sheet is never saved as Open - the row keeps this event's saved
+  age group, or reads "Not loaded" and waits, named (useAthleteBrackets
+  now returns `unread`); coach slugs spell ß/ø/ł/đ/æ/œ in a-z and add a
+  short hash for a name in another script; the rules' coach_ prefix test
+  is '(?s)coach_.*' (RE2's '.' skips a newline); a Gender tap pins the
+  standings' Age filter as an Age tap does.
 
 ## Sprint 9 pins — specialist 1-on-1s (Phil & Yannick), Lifetime-style booking, cancellation (2026-09-11)
 

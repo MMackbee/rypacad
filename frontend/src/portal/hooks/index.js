@@ -193,6 +193,7 @@ import {
 } from '../data/admin';
 import { bracketFor, deriveTourStandings, isCoachId } from '../data/tour';
 import { TOUR_SEED } from '../data/tourSeed';
+import { unreadIds } from '../data/tourSheet';
 import { SPECIALISTS, isSpecialistType, mentalCapFor } from '../data/specialists';
 import { calendlyUrlFor } from '../data/calendly';
 import { loginStateFor } from '../data/signups';
@@ -4251,9 +4252,12 @@ export function useTournamentResults(sessionId) {
  * Live: fetchAthletesByIds — the coach calling this already has the read
  * access an athlete-by-id join needs for their own roster (assigned coach /
  * staff clauses on the athletes matrix), same access this screen's roster
- * fetch itself relies on. An id the caller cannot read is silently dropped
- * (fetchAthletesByIds' own Promise.allSettled behavior) rather than failing
- * the whole map.
+ * fetch itself relies on. An id the caller cannot read (or with no athlete
+ * doc) is dropped from the map (fetchAthletesByIds' own Promise.allSettled
+ * behavior) rather than failing the whole map, and listed in `unread`
+ * beside `data` instead (review 2026-11-06): an athlete read with no dob is
+ * null in the map, one never read is absent from it, and the score sheet
+ * must not file the second as Open.
  *
  * Seed mode never fetches — `data` is `{}` synchronously, matching the pin
  * ("Seed mode: {} and never fetches"); the score-entry harness state does
@@ -4283,10 +4287,11 @@ export function useAthleteBrackets(athleteIds) {
     return out;
   };
 
-  return useSeedResource(
+  const state = useSeedResource(
     shouldFetch ? null : {},
     shouldFetch ? { source: liveAthleteBrackets, deps: ['athlete-brackets', idsKey] } : undefined
   );
+  return { ...state, unread: shouldFetch ? unreadIds(ids, state.data) : [] };
 }
 
 // The score sheet's Boys/Girls pre-fill and coach quick picks (owner rulings

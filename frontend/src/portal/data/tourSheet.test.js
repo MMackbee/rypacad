@@ -14,6 +14,7 @@ import {
   parseStrokes,
   pendingLines,
   priorGenders,
+  unreadIds,
 } from './tourSheet';
 
 test('who is asked for a gender: everyone 11 and up and coaches, never 10 & under or Open', () => {
@@ -28,10 +29,28 @@ test.each([
   ['  pat   LEE ', 'coach_pat-lee'],
   ['Ana-María O’Neil', 'coach_ana-maria-o-neil'],
   ['Coach Sam 2', 'coach_coach-sam-2'],
+  // Latin letters NFD does not split (review 2026-11-06): one person, one id.
+  ['Søren Berg', 'coach_soren-berg'],
+  ['Sören Berg', 'coach_soren-berg'],
+  ['Straße', 'coach_strasse'],
+  ['ŁUKASZ ØBY', 'coach_lukasz-oby'],
+  ['Æsa Đorđe', 'coach_aesa-dorde'],
   ['!!!', null],
   ['', null],
 ])('coach %p -> id %p', (name, id) => {
   expect(coachIdFor(name)).toBe(id);
+});
+
+test('a name in another script still gets an id the rules accept: a short hash, stable, never shared', () => {
+  const coach = (athleteId) => ({ athleteId, name: 'x', bracket: 'coaches', gender: 'boys', score: 76 });
+  const han = coachIdFor('李雷');
+  expect(han).toMatch(/^coach_[a-z0-9]+$/);
+  expect(coachIdFor('  李雷 ')).toBe(han);
+  expect(coachIdFor('王芳')).not.toBe(han);
+  const mixed = coachIdFor('李雷 Li');
+  expect(mixed).toMatch(/^coach_li-[a-z0-9]+$/);
+  expect(coachIdFor('王芳 Li')).not.toBe(mixed);
+  for (const id of [han, mixed, coachIdFor('Straße'), coachIdFor('Søren Berg')]) expect(isSavableTourEntry(coach(id))).toBe(true);
 });
 
 test('a typed coach name is tidied before it is stored', () => {
@@ -110,6 +129,27 @@ test('the save: 11 and up need a gender, 10 & under and Open never send one, a b
     'Check the score for typo and both: strokes are 18 to 200.',
   ]);
   expect(out.entries.every(isSavableTourEntry)).toBe(true);
+});
+
+test('unread: the ids asked for that the age-group read did not return - no dob (null) is not one', () => {
+  expect(unreadIds(['a', 'b', 'c', 'b', ''], { a: '11-14', b: null })).toEqual(['c']);
+  expect(unreadIds(['a'], { a: '10U' })).toEqual([]);
+  expect(unreadIds(['a'], null)).toEqual([]);
+});
+
+test('a scored row whose age group is unknown waits, named; it is never saved as Open', () => {
+  const out = buildScoreEntries([
+    r('known', '10U', null, '44'),
+    r('lost', null, null, '81', { groupUnknown: true }),
+    r('lostTypo', null, null, '9', { groupUnknown: true }),
+    r('lostBlank', null, null, '', { groupUnknown: true }),
+  ]);
+  expect(out.entries).toEqual([{ athleteId: 'known', name: 'known', bracket: '10U', gender: null, score: 44 }]);
+  expect(out.noGroup).toEqual([{ athleteId: 'lost', label: 'lost' }, { athleteId: 'lostTypo', label: 'lostTypo' }]);
+  expect(pendingLines(out)).toEqual([
+    'Reopen the score sheet so the age group loads for lost and lostTypo.',
+    'Check the score for lostTypo: strokes are 18 to 200.',
+  ]);
 });
 
 test('nothing pending reads no lines; names list like a sentence', () => {

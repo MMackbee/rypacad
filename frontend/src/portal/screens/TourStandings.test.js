@@ -183,6 +183,27 @@ test('an athlete or parent lands on the age that includes them; a tap then stick
   await r.unmount();
 });
 
+// Review 2026-11-06: the landing follows the data only until the viewer taps a filter - either one.
+test('a landing that arrives late moves an untouched board, but not one the viewer picked a gender on', async () => {
+  season(FIELD);
+  mockViewerIds = [];
+  let r = await renderScreen(<TourStandings bare role="parent" />);
+  expect(on(r, 'Age')).toEqual(['11–18 overall']);
+  mockViewerIds = ['Eli Fox'];
+  await r.rerender(<TourStandings bare role="parent" />);
+  expect(on(r, 'Age')).toEqual(['10 & under']);
+  await r.unmount();
+  mockViewerIds = [];
+  r = await renderScreen(<TourStandings bare role="parent" />);
+  await tap(r, 'Gender', 'Girls');
+  mockViewerIds = ['Eli Fox'];
+  await r.rerender(<TourStandings bare role="parent" />);
+  expect(on(r, 'Age')).toEqual(['11–18 overall']);
+  expect(on(r, 'Gender')).toEqual(['Girls']);
+  expect(r.text()).toContain('Girls · 2');
+  await r.unmount();
+});
+
 test('"Your results" reads the selected board, else their own age board', async () => {
   season(FIELD);
   mockViewerIds = ['Ava Green'];

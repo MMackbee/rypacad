@@ -683,7 +683,7 @@ is a field-shape change, not a migration.
 | Field | Type | Notes |
 |---|---|---|
 | `sessionId` | string | Into `sessions/` — must be a `type: 'tournament'` session. Matches the id prefix. |
-| `athleteId` | string | Into `athletes/`. Matches the id suffix. **Coach entries (2026-11-06):** `'coach_' + slug`, the slug being the coach's name lowercased with accents dropped and every other run of characters one hyphen (`'Pat Lee'` -> `coach_pat-lee`, `data/tourSheet.js` `coachIdFor`). A coach id is not an athlete doc; the score sheet's quick picks reuse earlier coaches' ids so a season total stays one row. The rules require `coach_[a-z0-9-]+` exactly when `bracket == 'coaches'`. |
+| `athleteId` | string | Into `athletes/`. Matches the id suffix. **Coach entries (2026-11-06):** `'coach_' + slug`, the slug being the coach's name lowercased with accents dropped (ß -> ss, ø -> o, ł -> l, æ -> ae and the like too) and every other run of characters one hyphen (`'Pat Lee'` -> `coach_pat-lee`, `data/tourSheet.js` `coachIdFor`); a name with a letter or digit that has no a-z / 0-9 spelling (another script) gets a short hash of the whole name on the end, so it still has a valid id and two such names never share one. A coach id is not an athlete doc; the score sheet's quick picks reuse earlier coaches' ids so a season total stays one row. The rules require `coach_[a-z0-9-]+` exactly when `bracket == 'coaches'`. |
 | `name` | string \| null | **Contract v1.5.1, unchanged by v1.6.** The athlete's display name, snapshotted at write time from the roster the staff member entering results is already reading. Pure display denormalization — the academy-public standings show every name to every role *without* widening the `athletes` read matrix. Read paths prefer this and fall back to a per-id athlete join only for pre-amendment docs. |
 | `bracket` | string \| null | **Owner rulings 2026-11-06 (replacing the Sprint 8 ids below):** one of `'10U'` (ages 0-10, 9 holes), `'11-14'` (11-14, 18 holes), `'15-18'` (15 and up, 18 holes; an adult lands here too) or `'coaches'` (a coach entry), or `null` (no dob: the Open board). The Sprint 8 ids `'11-13'` and `'14+'` stay accepted by the rules (additive: staging and production share the database and an old cached client may save one) but this app never writes them; they show on boards of their own under their old labels. **Contract v1.6 (Sprint 8), as it was:** one of `'10U' \| '11-13' \| '14+'`, or `null`. A **write-time snapshot** — computed from `athletes/{athleteId}.dob` **as of `SEASON_BOUNDS.start`** (never the write date, and never read live at standings time) at the moment the result is entered, exactly the same rationale and mechanics as the `name` snapshot above: bracketing a result never needs a cross-family `athletes` read, so the "cross-family reads impossible" invariant from the v1.5.1 amendment holds for age too. The three buckets (`data/tour.js`'s `BRACKETS`, routing lane): `10U` = age 0-10, `11-13` = age 11-13, `14+` = age 14-999, age computed on the day the season opens so nobody changes brackets mid-season. An athlete with **no `dob` at write time** gets `bracket: null`, grouped under the display-only **'Open'** bucket at read time — nothing breaks, nothing is guessed. Like `name`, a bracket already written to a doc is never rewritten retroactively; once provisioning sets a real `dob`, only *results entered after that* pick up the real bracket. |
 | `gender` | string \| null \| absent | **Owner rulings 2026-11-06.** `'boys'` or `'girls'` (a coach's Men / Women is stored the same), `null`, or absent - the one optional key. The score sheet asks for it for every athlete 11 and up and every coach before the row saves, pre-filled from that athlete's most recent saved result that has one (any date), so it is picked once per kid per season; 10 & under and Open rows save without it. A write-time snapshot like `name` and `bracket`. A result with no gender counts on Overall and its age board, never on a gender board. |
@@ -761,7 +761,9 @@ shape-checked — id must equal `{sessionId}_{athleteId}`, `score` an integer
 in `18..200`, `bracket` one of `'10U' \| '11-14' \| '15-18' \| 'coaches'` or the
 legacy `'11-13' \| '14+'` or `null` (2026-11-06; the Sprint 8 list was
 `'10U' \| '11-13' \| '14+'`), `gender` absent, `null`, `'boys'` or `'girls'`,
-`bracket == 'coaches'` exactly when `athleteId` matches `coach_[a-z0-9-]+`, `date`
+`bracket == 'coaches'` exactly when `athleteId` starts `coach_` (tested as
+`(?s)coach_.*`: RE2's `.` skips a newline, review 2026-11-06), and a coach
+`athleteId` must match `coach_[a-z0-9-]+`, `date`
 must match the referenced session's `date` (the Sprint 7 hotfix's `matches()`
 pair, not `substring()` — rules strings still have no `substring()`);
 readable by any signed-in portal user (standings are public inside the
@@ -2017,9 +2019,11 @@ The seed script:
   maintains live, so `booked` and the `bookings` collection agree from the
   first seed rather than only after a QA pass exercises real bookings;
 - seeds `athletes` with the OWNER-SUPPLIED dobs for the three Whitfield
-  kids (contract v1.6 + the v1.6.1 amendment, 2026-09-10 — not invented),
-  landing them in three different age brackets as of `SEASON_BOUNDS.start`
-  — see `WHITFIELD_DOBS` in the script for the exact values.
+  kids (contract v1.6 + the v1.6.1 amendment, 2026-09-10 — not invented).
+  As of `SEASON_BOUNDS.start`, under the 2026-11-06 age groups, jordan and
+  reese both land in `11-14` (so the two older kids meet head to head) and
+  nico in `10U`; under the Sprint 8 groups they were three different
+  brackets — see `WHITFIELD_DOBS` in the script for the exact values.
 - seeds `tournamentResults` (contract v1.6) for two real generated Saturday
   tournament sessions, referenced by id and validated against `buildSeason()`
   the same way the bookings above are — a stale session id throws instead of

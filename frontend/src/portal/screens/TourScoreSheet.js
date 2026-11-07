@@ -8,7 +8,7 @@ import { BackLink, Body, ScreenTitle } from '../components/Primitives';
 import CoachSection from '../components/tour/CoachSection';
 import { GenderPicker, PartlySavedNotice, SavedNotice, ScoreField } from '../components/tour/SheetParts';
 import * as hooks from '../hooks';
-import { COACH_BRACKET, bracketLabel, isCoachId, needsGender } from '../data/tourBrackets';
+import { COACH_BRACKET, bracketLabel, isCoachId, isSavableAgeGroup, needsGender } from '../data/tourBrackets';
 import { buildScoreEntries, pendingLines } from '../data/tourSheet';
 
 /*
@@ -51,9 +51,14 @@ const without = (obj, key) => Object.fromEntries(Object.entries(obj).filter(([k]
  *
  * Scores and coach rows pre-fill once, the first time real results arrive -
  * a background refresh cannot clobber an edit in progress. Save waits while
- * the age groups load, and stays off if they failed (every row would land
- * in Open). Local state drives the UI in seed and live mode alike; only
- * `resultsState.saveResults` differs (a real write live, a no-op otherwise).
+ * the age groups load, and stays off if the read failed outright (every row
+ * would land in Open). A player the read did not return (no athlete doc, or
+ * one this scorer cannot read: useAthleteBrackets' `unread`) is not "no
+ * dob" (review 2026-11-06): the row keeps this event's saved age group when
+ * it has one, and otherwise reads "Not loaded" and waits, named, like a
+ * missing Boys/Girls - never saved as Open. Local state drives the UI in
+ * seed and live mode alike; only `resultsState.saveResults` differs (a real
+ * write live, a no-op otherwise).
  */
 export default function TourScoreSheet({ bare, session, roster, resultsState, onBack }) {
   const [scores, setScores] = useState({}); // { [athleteId]: raw input }, players and coaches
@@ -69,9 +74,11 @@ export default function TourScoreSheet({ bare, session, roster, resultsState, on
   // runs or after it fails, with this sheet still open.
   const savedNamesRef = useRef(new Map());
   const savedGenderRef = useRef(new Map());
+  const savedGroupRef = useRef(new Map()); // this event's saved age group, for a player the read below misses
   (resultsState.data?.results ?? []).forEach((r) => {
     if (typeof r.name === 'string' && r.name) savedNamesRef.current.set(r.athleteId, r.name);
     if (r.gender === 'boys' || r.gender === 'girls') savedGenderRef.current.set(r.athleteId, r.gender);
+    if (!isCoachId(r.athleteId) && isSavableAgeGroup(r.bracket)) savedGroupRef.current.set(r.athleteId, r.bracket ?? null);
   });
 
   const athleteIds = useMemo(() => roster.map((a) => a.id), [roster]);
@@ -111,7 +118,11 @@ export default function TourScoreSheet({ bare, session, roster, resultsState, on
     touch();
   };
   const genderOf = (id) => picked[id] ?? savedGenderRef.current.get(id) ?? history.genderById?.[id] ?? null;
-  const groupOf = (id) => groupByAthlete[id] ?? null;
+  // Not read is not "no dob" (review 2026-11-06): fall back to this event's
+  // saved age group, else the group is unknown and the row waits.
+  const unread = new Set(bracketsState.unread ?? []);
+  const groupKnown = (id) => !unread.has(id) || savedGroupRef.current.has(id);
+  const groupOf = (id) => (unread.has(id) ? savedGroupRef.current.get(id) ?? null : groupByAthlete[id] ?? null);
 
   const addCoach = ({ athleteId, name }) => {
     setCoaches((prev) => [...prev, { athleteId, name, saved: false }]);
@@ -131,6 +142,7 @@ export default function TourScoreSheet({ bare, session, roster, resultsState, on
       name: a.name ?? savedNamesRef.current.get(a.id) ?? null,
       label: shownName(a),
       bracket: groupOf(a.id),
+      groupUnknown: !groupKnown(a.id),
       gender: genderOf(a.id),
       raw: scores[a.id],
     })),
@@ -146,7 +158,7 @@ export default function TourScoreSheet({ bare, session, roster, resultsState, on
   ];
   const built = buildScoreEntries(rows);
   const pending = pendingLines(built);
-  const blocked = new Set([...built.missingGender, ...built.badScore].map((b) => b.athleteId)).size;
+  const blocked = new Set([...built.missingGender, ...built.badScore, ...built.noGroup].map((b) => b.athleteId)).size;
   const scoredPlayers = roster.filter((a) => scores[a.id]).length;
   const allScored = roster.length > 0 && scoredPlayers >= roster.length;
   const anyAsked = roster.some((a) => needsGender(groupOf(a.id)));
@@ -166,6 +178,7 @@ export default function TourScoreSheet({ bare, session, roster, resultsState, on
       entries.forEach((e) => {
         if (typeof e.name === 'string' && e.name) savedNamesRef.current.set(e.athleteId, e.name);
         if (e.gender) savedGenderRef.current.set(e.athleteId, e.gender);
+        if (!isCoachId(e.athleteId)) savedGroupRef.current.set(e.athleteId, e.bracket ?? null);
       });
       setCoaches((prev) => prev.map((c) => (entries.some((e) => e.athleteId === c.athleteId) ? { ...c, saved: true } : c)));
       setLastSave({ saved: entries.length, lines: left });
@@ -254,7 +267,7 @@ export default function TourScoreSheet({ bare, session, roster, resultsState, on
               divider={i < roster.length - 1}
               trailing={
                 <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-                  <StatusBadge tone="neutral">{bracketLabel(group)}</StatusBadge>
+                  <StatusBadge tone="neutral">{groupKnown(athlete.id) ? bracketLabel(group) : 'Not loaded'}</StatusBadge>
                   <ScoreField
                     label={`Strokes for ${shownName(athlete)}`}
                     value={scores[athlete.id] ?? ''}

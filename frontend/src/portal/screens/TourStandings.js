@@ -79,9 +79,16 @@ export default function TourStandings({
 
   const ages = useMemo(() => ageFiltersFor(boards.map((b) => b.id)), [boards]);
   const landing = defaultAgeFor(boards, viewerIds);
-  const [tapped, setTapped] = useState(null); // the viewer's own Age pick, once they make one
+  const [tapped, setTapped] = useState(null); // the Age the viewer pinned by tapping either filter
   const [gender, setGender] = useState('all');
   const age = tapped && ages.some((a) => a.id === tapped) ? tapped : landing;
+  // A Gender tap pins the age on screen too (review 2026-11-06): a landing
+  // that arrives later (the viewer's ids, a refetch) must not move a board
+  // the viewer picked.
+  const pickGender = (g) => {
+    setTapped(age);
+    setGender(g);
+  };
   const genders = genderFiltersFor(age);
   const boardId = boardIdFor(age, genders ? gender : 'all');
   const board = boards.find((b) => b.id === boardId) ?? null;
@@ -121,7 +128,7 @@ export default function TourStandings({
       ) : (
         <div style={{ padding: '0 22px 24px', display: 'flex', flexDirection: 'column', gap: 14 }}>
           {explainer}
-          <TourFilters ages={ages} age={age} onAge={setTapped} genders={genders} gender={gender} onGender={setGender} />
+          <TourFilters ages={ages} age={age} onAge={setTapped} genders={genders} gender={gender} onGender={pickGender} />
           {board ? <StandingsCard label={board.label} standings={board.standings} /> : <NoBoardResults label={boardLabel(boardId)} />}
           {boardEvents.length ? <RecentTourEvents events={boardEvents} boardId={boardId} /> : null}
           {role === 'athlete' && athleteId ? <YourResults events={events} athleteId={athleteId} boardId={boardId} /> : null}

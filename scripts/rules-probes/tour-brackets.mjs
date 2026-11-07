@@ -6,12 +6,13 @@
  * cached old app may still save one); any other id is refused, the
  * never-deployed ids of the same evening's first pass included.
  * gender is absent, null, 'boys' or 'girls'. bracket 'coaches' exactly when
- * the athleteId starts 'coach_' (and then a lowercase slug). The eight keys
+ * the athleteId starts 'coach_' (and then a lowercase slug), a newline in the
+ * id included (RE2's '.' skips one, so the rules test '(?s)coach_.*'). The eight keys
  * stay required, and nothing but gender joins them. Written as a coach, the
  * role that enters Tour scores. Run by scripts/verify-rules.mjs in both
  * passes; it seeds and removes everything it touches.
  */
-import { commitAs, createAs, del, expect, patchWrite, t, uid } from '../verify-rules.mjs';
+import { call, commitAs, createAs, expect, patchWrite, t, uid } from '../verify-rules.mjs';
 
 const SESSION = '2026-11-07-1';
 const DATE = '2026-11-07';
@@ -56,6 +57,11 @@ export async function taskTourBrackets() {
     expect('a coach id in 11-14 refused', await create(track('coach_in-kids'), '11-14'), 403);
     expect('a coach id with no bracket (Open) refused', await create(track('coach_open'), null), 403);
     expect('a coach id in a legacy bracket refused', await create(track('coach_legacy'), '14+'), 403);
+    // Review 2026-11-06: a newline in the id cannot hide the coach_ prefix.
+    expect('a coach_ id with a newline in 11-14 refused', await create(track('coach_x\ny'), '11-14'), 403);
+    expect('a coach_ id with a newline in Open refused', await create(track('coach_q\nz'), null), 403);
+    expect('a coach_ id with a newline in a legacy bracket refused', await create(track('coach_r\nz'), '14+'), 403);
+    expect('a coach_ id with a newline in coaches refused (not a slug)', await create(track('coach_s\nz'), 'coaches'), 403);
     expect('a coach id with capitals refused', await create(track('coach_Pat'), 'coaches'), 403);
     expect('a coach id with a space refused', await create(track('coach_pat lee'), 'coaches'), 403);
     expect("a bare 'coach_' refused", await create(track('coach_'), 'coaches'), 403);
@@ -78,6 +84,7 @@ export async function taskTourBrackets() {
     expect('a parent saving a result refused', await create(track('tr-parent'), '11-14', { createdBy: uid.parent }, t.parent), 403);
     expect('an athlete saving a coach result refused', await create(track('coach_by-athlete'), 'coaches', { createdBy: uid.athlete }, t.athlete), 403);
   } finally {
-    for (const id of touched) await del('tournamentResults', docId(id));
+    // Encoded: a fetch URL silently drops a raw newline (every other id reaches the same doc as before).
+    for (const id of touched) await call('DELETE', `/tournamentResults/${encodeURIComponent(docId(id))}`, null, 'owner');
   }
 }

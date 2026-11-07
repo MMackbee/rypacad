@@ -1982,7 +1982,10 @@ service cloud.firestore {
       // phone with the old app cached may still save one. A coach entry and
       // a kid's can never be confused: bracket 'coaches' exactly when the
       // athleteId starts 'coach_' (and then it is 'coach_' + a lowercase
-      // letters/digits/hyphens slug of the name). `gender` (2026-11-06) is
+      // letters/digits/hyphens slug of the name). The prefix test is
+      // '(?s)coach_.*': matches() is RE2, where '.' skips a newline, so a
+      // plain 'coach_.*' would let a 'coach_' id holding one be filed as a
+      // kid (review 2026-11-06). `gender` (2026-11-06) is
       // the one optional key: absent, null, 'boys' or 'girls' (a coach's
       // Men/Women is stored the same). `date` must equal
       // the payload's own sessionId's leading YYYY-MM-DD: sessions are
@@ -2008,7 +2011,7 @@ service cloud.firestore {
           && (d.name is string || d.name == null)
           && (d.bracket in ['10U', '11-14', '15-18', 'coaches', '11-13', '14+'] || d.bracket == null)
           && (d.get('gender', null) == null || d.get('gender', null) in ['boys', 'girls'])
-          && ((d.bracket == 'coaches') == d.athleteId.matches('coach_.*'))
+          && ((d.bracket == 'coaches') == d.athleteId.matches('(?s)coach_.*'))
           && (d.bracket != 'coaches' || d.athleteId.matches('coach_[a-z0-9-]+'))
           && d.date is string
           && d.date.matches('[0-9]{4}-[0-9]{2}-[0-9]{2}')

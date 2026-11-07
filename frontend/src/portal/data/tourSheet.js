@@ -18,20 +18,42 @@ export function cleanCoachName(raw) {
   return String(raw ?? '').replace(/\s+/g, ' ').trim().slice(0, 60);
 }
 
+// Latin letters NFD does not split into a base letter and an accent (review
+// 2026-11-06): without these "Søren" and "Sören" would get different ids,
+// and "Straße" would lose its ß.
+const LATIN_EXTRAS = { ß: 'ss', æ: 'ae', œ: 'oe', ø: 'o', ł: 'l', đ: 'd', ð: 'd', þ: 'th', ħ: 'h', ı: 'i' };
+const LATIN_EXTRA_RE = /[ßæœøłđðþħı]/g;
+
+/** FNV-1a over the name's UTF-16 units, in base 36: short, and the same on every client. */
+function nameHash(s) {
+  let h = 0x811c9dc5;
+  for (let i = 0; i < s.length; i += 1) {
+    h ^= s.charCodeAt(i);
+    h = Math.imul(h, 0x01000193);
+  }
+  return (h >>> 0).toString(36);
+}
+
 /**
  * A coach name -> the stable athleteId of their results: 'coach_' + the
- * name lowercased, accents dropped, every run of other characters one
- * hyphen ("Coach Ana-María O'Neil" -> 'coach_coach-ana-maria-o-neil').
- * null when the name has no letter or digit to slug.
+ * name lowercased, accents dropped (ß -> ss, ø -> o, ł -> l, æ -> ae and
+ * the like too), every run of other characters one hyphen ("Coach Ana-Maria
+ * O'Neil" -> 'coach_coach-ana-maria-o-neil'). A name with a letter or digit
+ * that has no a-z / 0-9 spelling (another script, alone or beside Latin
+ * letters) gets a short hash of the whole tidied name on the end, so it
+ * still has an id the rules accept and two such names never share one.
+ * null when the name has no letter or digit at all.
  */
 export function coachIdFor(name) {
-  const slug = cleanCoachName(name)
+  const tidy = cleanCoachName(name).toLowerCase().normalize('NFC');
+  const latin = tidy
+    .replace(LATIN_EXTRA_RE, (ch) => LATIN_EXTRAS[ch])
     .normalize('NFD')
-    .replace(/[̀-ͯ]/g, '')
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, '-')
-    .replace(/^-+|-+$/g, '');
-  return slug ? `${COACH_ID_PREFIX}${slug}` : null;
+    .replace(/[̀-ͯ]/g, '');
+  const slug = latin.replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '');
+  const lossy = /[\p{L}\p{N}]/u.test(latin.replace(/[a-z0-9]/g, ''));
+  if (!lossy) return slug ? `${COACH_ID_PREFIX}${slug}` : null;
+  return `${COACH_ID_PREFIX}${slug ? `${slug}-` : ''}${nameHash(tidy)}`;
 }
 
 /** A typed strokes count -> { score } when it is a whole number 18..200, { empty } or { bad } otherwise. */
@@ -83,14 +105,32 @@ export function coachQuickPicks(results) {
 }
 
 /**
- * The save, split three ways. `rows` = [{ athleteId, name, label, bracket,
- * gender, raw, coach }] in sheet order: `raw` the typed strokes, `label` the
- * name the sheet shows, `bracket` the age group (or 'coaches').
- * -> { entries, missingGender, badScore }
+ * The ids an age-group read asked for that did not come back: no athlete
+ * doc, or one this scorer cannot read (hooks/live.js fetchAthletesByIds
+ * drops both). Not the same as no dob - a player read with no dob is in
+ * `brackets` as null (review 2026-11-06). [] until something has been read.
+ */
+export function unreadIds(ids, brackets) {
+  if (!brackets) return [];
+  const has = (id) => Object.prototype.hasOwnProperty.call(brackets, id);
+  return [...new Set((ids || []).filter(Boolean))].filter((id) => !has(id));
+}
+
+/**
+ * The save, split four ways. `rows` = [{ athleteId, name, label, bracket,
+ * gender, raw, coach, groupUnknown }] in sheet order: `raw` the typed
+ * strokes, `label` the name the sheet shows, `bracket` the age group (or
+ * 'coaches'), `groupUnknown` true when the sheet could not learn the age
+ * group at all. -> { entries, missingGender, badScore, noGroup }
  *   entries        [{ athleteId, name, bracket, gender, score }] - what saves
  *   missingGender  [{ athleteId, label, coach }] - scored, 11+ or a coach,
  *                  no Boys/Girls (Men/Women): NOT saved, and the sheet names them
  *   badScore       [{ athleteId, label }] - typed, but not 18..200: NOT saved
+ *   noGroup        [{ athleteId, label }] - scored, but `groupUnknown`: the
+ *                  age-group read did not return this player and this event
+ *                  has no saved group for them. NOT saved: filing them as
+ *                  Open would take them off every board they belong on
+ *                  (review 2026-11-06)
  * A row with nothing typed is in no list: no score is not a result. Gender
  * goes out only where the sheet asks for it; a 10 & under or Open row saves
  * gender null.
@@ -99,17 +139,19 @@ export function buildScoreEntries(rows) {
   const entries = [];
   const missingGender = [];
   const badScore = [];
+  const noGroup = [];
   for (const r of rows || []) {
     const parsed = parseStrokes(r.raw);
     if (parsed.empty) continue;
     const asks = needsGender(r.bracket ?? null);
     const gender = asks && isGender(r.gender) ? r.gender : null;
+    if (r.groupUnknown) noGroup.push({ athleteId: r.athleteId, label: r.label });
     if (parsed.bad) badScore.push({ athleteId: r.athleteId, label: r.label });
     if (asks && !gender) missingGender.push({ athleteId: r.athleteId, label: r.label, coach: Boolean(r.coach) });
-    if (parsed.bad || (asks && !gender)) continue;
+    if (r.groupUnknown || parsed.bad || (asks && !gender)) continue;
     entries.push({ athleteId: r.athleteId, name: r.name ?? null, bracket: r.bracket ?? null, gender, score: parsed.score });
   }
-  return { entries, missingGender, badScore };
+  return { entries, missingGender, badScore, noGroup };
 }
 
 /** ['A'] -> 'A'; ['A', 'B'] -> 'A and B'; ['A', 'B', 'C'] -> 'A, B and C'. */
@@ -122,8 +164,9 @@ export function nameList(names) {
  * [] when nothing does. Shown above Save scores before a save, and repeated
  * in the notice after one.
  */
-export function pendingLines({ missingGender = [], badScore = [] }) {
+export function pendingLines({ missingGender = [], badScore = [], noGroup = [] }) {
   const lines = [];
+  if (noGroup.length) lines.push(`Reopen the score sheet so the age group loads for ${nameList(noGroup.map((m) => m.label))}.`);
   const kids = missingGender.filter((m) => !m.coach).map((m) => m.label);
   const coaches = missingGender.filter((m) => m.coach).map((m) => m.label);
   if (kids.length) lines.push(`Choose Boys or Girls for ${nameList(kids)}.`);

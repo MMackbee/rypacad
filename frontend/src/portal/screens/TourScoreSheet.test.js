@@ -27,6 +27,8 @@ let mockResults;
 let mockGroups;
 let mockGroupsLoading;
 let mockHistory;
+// useAthleteBrackets' `unread`: ids the read did not return (no doc, or no read access).
+let mockUnread;
 const mockWrites = { results: [] };
 jest.mock('../hooks', () => ({
   useCoachRoster: () => ({ data: [], loading: false, error: null, retry: () => {} }),
@@ -45,7 +47,7 @@ jest.mock('../hooks', () => ({
     sessionUnresolved: false,
   }),
   useTournamentResults: () => ({ data: mockResults, loading: false, error: null, saveResults: async (entries) => { mockWrites.results.push(entries); } }),
-  useAthleteBrackets: () => ({ data: mockGroupsLoading ? null : mockGroups, loading: Boolean(mockGroupsLoading), error: null }),
+  useAthleteBrackets: () => ({ data: mockGroupsLoading ? null : mockGroups, loading: Boolean(mockGroupsLoading), error: null, unread: mockUnread }),
   useTourSheetHistory: () => ({ data: mockHistory, loading: false, error: null }),
   genericSessionName: () => 'Tour event',
 }));
@@ -55,9 +57,10 @@ jest.mock('../hooks/assessments', () => ({ useOpenAssessmentWindows: () => ({ da
 const tour = { date: '2026-11-07', time: '10:00 AM', type: 'tournament', name: 'RYP Tour', meta: null };
 const rosterOf = (ids) => ids.map((id, i) => ({ bookingId: `b${i}`, athleteId: id, name: NAMES[id], status: 'attended' }));
 
-async function openSheet(ids, { results = null, history = { genderById: {}, coaches: [] } } = {}) {
+async function openSheet(ids, { results = null, history = { genderById: {}, coaches: [] }, unread = [] } = {}) {
   mockRows = rosterOf(ids);
-  mockGroups = groupsFor(ids);
+  mockGroups = groupsFor(ids.filter((id) => !unread.includes(id)));
+  mockUnread = unread;
   mockResults = results;
   mockHistory = history;
   const r = await renderScreen(<SessionAttendance bare sessionId="2026-11-07-1" block={tour} onBack={() => {}} />);
@@ -213,6 +216,37 @@ test('a name with nothing to slug is not added', async () => {
   await r.click('Add a coach');
   expect(r.text()).toContain('Type the coach’s name first.');
   expect(r.text()).not.toContain('not saved yet');
+  await r.unmount();
+});
+
+// Review 2026-11-06: a failed athlete read is not "no dob" - never filed as Open.
+test('a player the age-group read did not return reads "Not loaded", is named, and is not saved', async () => {
+  const r = await openSheet(['ivy', 'theo'], { unread: ['theo'] });
+  expect(chips(r).slice(0, 2)).toEqual(['10 & under', 'Not loaded']);
+  expect(pickerOf(r, 'Theo Brandt')).toBeNull();
+  await typeScore(r, 'Ivy Marsh', '45');
+  await typeScore(r, 'Theo Brandt', '84');
+  expect(r.text()).toContain('Reopen the score sheet so the age group loads for Theo Brandt. That score is not saved until you do.');
+  await r.click('Save scores');
+  expect(saved()).toEqual([['ivy', '10U', null, 45]]);
+  expect(r.text()).toContain('1 score saved. Not saved yet: Reopen the score sheet so the age group loads for Theo Brandt. Then tap Save scores again.');
+  await r.unmount();
+});
+
+test("a re-save keeps this event's saved age group and gender for a player the read missed; a saved legacy id does not count", async () => {
+  const results = {
+    results: [
+      { athleteId: 'maya', name: 'Maya Quill', bracket: '11-14', gender: 'girls', score: 80, position: 1 },
+      { athleteId: 'owen', name: 'Owen Pike', bracket: '14+', gender: null, score: 77, position: 1 },
+    ],
+  };
+  const r = await openSheet(['maya', 'owen', 'ivy'], { results, unread: ['maya', 'owen'] });
+  expect(chips(r).slice(0, 3)).toEqual(['11–14', 'Not loaded', '10 & under']);
+  expect(pressed(r, 'Maya Quill')).toEqual(['Girls']);
+  await typeScore(r, 'Ivy Marsh', '44');
+  expect(r.text()).toContain('Reopen the score sheet so the age group loads for Owen Pike.');
+  await r.click('Save scores');
+  expect(saved()).toEqual([['maya', '11-14', 'girls', 80], ['ivy', '10U', null, 44]]);
   await r.unmount();
 });
 
