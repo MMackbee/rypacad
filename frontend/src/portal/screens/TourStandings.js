@@ -444,9 +444,9 @@ function RecentTournaments({ events, bracketId }) {
  * `event.results` carries every bracket's rows, already sorted bracket order
  * then position (TEAM.md, contract v1.6) - filtering to one bracket id
  * preserves that ascending position order, so no re-sort is needed here. A
- * row's `bracket` is the raw write-time snapshot ('10U'|'11-13'|'14+'|null);
- * null groups under the 'open' bracket id, matching how the standings side
- * groups it.
+ * row's `bracket` is the raw write-time snapshot ('11U'|'12-14'|'15+B'|
+ * '15+G'|null since 2026-11-06, or a legacy '10U'|'11-13'|'14+'); null groups
+ * under the 'open' bracket id, matching how the standings side groups it.
  */
 function EventCard({ event, bracketId }) {
   const podium = (event.results ?? []).filter((r) => (r.bracket ?? 'open') === bracketId).slice(0, 3);

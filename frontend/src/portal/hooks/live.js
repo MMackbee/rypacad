@@ -42,6 +42,7 @@ import { billingStatusOf } from '../data/billingCopy';
 import { HANDICAP_RESERVED, handicapLimitOf, handicapValueOk, reservedRefusal } from '../data/reserved';
 import { HIDDEN_SESSION_LINE, SESSION_HIDDEN, isHiddenSession } from '../data/hiddenSessions';
 import { HANDICAP_RANGE_ERROR } from '../data/signup';
+import { isStorableBracket } from '../data/tourDivisions';
 
 /** id -> catalogue entry, for the specialist-cap error copy below. */
 const SPECIALIST_BY_ID = new Map(SPECIALISTS.map((s) => [s.id, s]));
@@ -1380,8 +1381,11 @@ export async function fetchTournamentResultsForSession(sessionId) {
  *
  * Entries are validated up front, before any write starts, so a bad entry
  * anywhere in the list never leaves a partial save in flight: every entry
- * needs an athleteId and an int score in [18, 200] (strokes); name/bracket,
- * when present, must be strings (null is fine — never required).
+ * needs an athleteId and an int score in [18, 200] (strokes); name, when
+ * present, must be a string; bracket must be a current Tour bracket id or
+ * null (data/tourDivisions.js isStorableBracket, 2026-11-06) - never a bare
+ * '15+' with no Boys/Girls, never a legacy or invented id. Null is fine for
+ * both — never required.
  *
  * ONE bump('tournamentResults') after every entry lands, not per entry (the
  * refetch-storm lesson, mirroring createBooking's bulk `silent` pattern) —
@@ -1399,12 +1403,13 @@ export async function saveTournamentResults(sessionId, date, entries) {
     const scoreOk =
       entry && Number.isInteger(entry.score) && entry.score >= 18 && entry.score <= 200;
     const nameOk = !entry || entry.name == null || typeof entry.name === 'string';
-    const bracketOk = !entry || entry.bracket == null || typeof entry.bracket === 'string';
+    const bracketOk = !entry || entry.bracket == null || isStorableBracket(entry.bracket);
     if (!entry || !entry.athleteId || !scoreOk || !nameOk || !bracketOk) {
       throw new LiveDataError(
         ERR.INVALID,
         'saveTournamentResults: every entry needs an athleteId and an int score between 18 ' +
-          'and 200 (name/bracket, if present, must be strings).'
+          'and 200 (name, if present, must be a string; bracket must be a Tour bracket or null, ' +
+          'and 15 & up needs Boys or Girls).'
       );
     }
   }

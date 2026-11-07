@@ -213,7 +213,7 @@ export const HOUSEHOLD = {
       id: 'jordan',
       name: 'Jordan',
       // Owner-supplied dob 2012-06-17 (2026-09-10) — 14 now and at season
-      // start, bracket 14+. Kept in sync with scripts/seed-firestore.mjs.
+      // start, bracket 12-14. Kept in sync with scripts/seed-firestore.mjs.
       age: 14,
       dob: '2012-06-17',
       ageLine: 'Age 14 · 20 min a day',
@@ -236,7 +236,7 @@ export const HOUSEHOLD = {
     {
       id: 'reese',
       name: 'Reese',
-      // Owner-supplied dob 2014-03-02 — 12 now and at season start, 11-13.
+      // Owner-supplied dob 2014-03-02 — 12 now and at season start, 12-14.
       age: 12,
       dob: '2014-03-02',
       ageLine: 'Age 12 · 20 min a day',

@@ -28,6 +28,7 @@ import { taskAssessments, taskDiagnosticsKept } from './rules-probes/assessments
 import { taskResearch } from './rules-probes/research.mjs';
 import { taskMembershipShape } from './rules-probes/membership-shape.mjs';
 import { taskHidden } from './rules-probes/hidden.mjs';
+import { taskTourBrackets } from './rules-probes/tour-brackets.mjs';
 
 let HOST = localEmulatorHost({ required: true });
 const PROJECT = 'demo-rules-probe';
@@ -1147,6 +1148,7 @@ async function runPass(label) {
     await taskMental();
     await taskAttendance();
     await taskHidden();
+    await taskTourBrackets();
   } finally { await teardown(); }
 }
 

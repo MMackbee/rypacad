@@ -32,7 +32,7 @@ test.each([['an Elite family', true], ['a family still loading', null]])('%s rea
 
 test('the explainer is the owner\'s wording, one copy', () => {
   expect(TOUR_EVENT_EXPLAINER).toBe(
-    "A Tour event is the academy's Saturday tournament. Coaches record every score, you are ranked in your age bracket (10 & under, 11-13, 14 & up), and points count toward the season standings on the Tour tab. One token per event."
+    "A Tour event is the academy's Saturday tournament. Coaches record every score, you are ranked in your age bracket (11 & under, 12–14 and 15 & up, with boys and girls ranked separately at 15 & up), and points count toward the season standings on the Tour tab. One token per event."
   );
 });
 
@@ -86,7 +86,7 @@ test('a coach, whose bar has no Tour tab, still gets the bar back to Today', asy
 });
 
 test('an unnamed event reads "Tour event"; a label typed in the calendar stays as typed', async () => {
-  const row = (sessionId, date, athleteId, score) => ({ sessionId, date, athleteId, score, bracket: '14+', name: athleteId });
+  const row = (sessionId, date, athleteId, score) => ({ sessionId, date, athleteId, score, bracket: '12-14', name: athleteId });
   const derived = deriveTourStandings(
     [row('s1', '2026-11-07', 'Jordan', 39), row('s2', '2026-12-28', 'Jordan', 41)],
     { labelById: { s2: 'Holiday Tournament' } }
@@ -96,5 +96,29 @@ test('an unnamed event reads "Tour event"; a label typed in the calendar stays a
   const r = await renderScreen(<TourStandings bare role="coach" />);
   expect(r.text()).toContain('Saturday, Nov 7Tour event');
   expect(r.text()).toContain('Holiday Tournament');
+  await r.unmount();
+});
+
+// Owner ruling 2026-11-06: the new groups first, a legacy id after them under its old label, Open last.
+test('the bracket chips read the 2026-11-06 groups in order, then a legacy bracket, then Open', async () => {
+  const row = (athleteId, bracket, score) => ({ sessionId: '2026-11-07-1', date: '2026-11-07', athleteId, score, bracket, name: athleteId });
+  mockStandings = {
+    data: deriveTourStandings([
+      row('Kai', null, 50), row('Lu', '14+', 44), row('Wren Calloway', '15+G', 41), row('Jasper Quint', '15+B', 39), row('Oz', '12-14', 40), row('Pia', '11U', 46),
+    ]),
+    loading: false,
+    error: null,
+  };
+  const r = await renderScreen(<TourStandings bare role="coach" />);
+  const chips = [...r.container.querySelectorAll('button')].map((b) => b.textContent)
+    .filter((t) => ['11 & under', '12–14', '15 & up Boys', '15 & up Girls', '14 & up', 'Open'].includes(t));
+  expect(chips).toEqual(['11 & under', '12–14', '15 & up Boys', '15 & up Girls', '14 & up', 'Open']);
+  // Boys and girls 15 & up each have their own winner.
+  await r.click('15 & up Girls');
+  expect(r.text()).toContain('Wren Calloway');
+  expect(r.text()).not.toContain('Jasper Quint');
+  await r.click('15 & up Boys');
+  expect(r.text()).toContain('Jasper Quint');
+  expect(r.text()).not.toContain('Wren Calloway');
   await r.unmount();
 });

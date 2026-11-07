@@ -1972,9 +1972,15 @@ service cloud.firestore {
       // show every name and group by bracket without widening the athletes
       // read matrix (the full athlete doc carries dob/householdId/
       // contractMinutes; these carry name/bracket alone). `bracket` is
-      // restricted to the three real bracket ids or null (an unset/unknown
-      // dob) — never a caller-invented string, so an unrecognized bracket
-      // can never silently form its own leaderboard group. `date` must equal
+      // restricted to the real bracket ids or null (an unset/unknown dob) —
+      // never a caller-invented string, so an unrecognized bracket can never
+      // silently form its own leaderboard group. Owner ruling 2026-11-06:
+      // the brackets are '11U', '12-14', '15+B' and '15+G' (boys and girls
+      // ranked apart at 15 & up). The change is ADDITIVE: the Sprint 8 ids
+      // '10U', '11-13', '14+' stay accepted, because staging and production
+      // share this database and a phone with the old app cached may still
+      // save one. A bare '15+' (an athlete 15 & up with no Boys/Girls pick)
+      // is refused like any other id not on the list. `date` must equal
       // the payload's own sessionId's leading YYYY-MM-DD: sessions are
       // always generated as `YYYY-MM-DD-<block>` (docs/portal/TEAM.md "Data
       // contract v1"), so this ties the result to its tournament's actual
@@ -1995,7 +2001,7 @@ service cloud.firestore {
           && d.sessionId is string
           && d.athleteId is string
           && (d.name is string || d.name == null)
-          && (d.bracket in ['10U', '11-13', '14+'] || d.bracket == null)
+          && (d.bracket in ['11U', '12-14', '15+B', '15+G', '10U', '11-13', '14+'] || d.bracket == null)
           && d.date is string
           && d.date.matches('[0-9]{4}-[0-9]{2}-[0-9]{2}')
           && d.sessionId.matches(d.date + '-.*')

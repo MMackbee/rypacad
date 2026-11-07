@@ -4254,6 +4254,11 @@ export function useTournamentResults(sessionId) {
  * ("Seed mode: {} and never fetches"); the score-entry harness state does
  * not need real brackets to render its chips.
  *
+ * Since the 2026-11-06 groups an athlete 15 & up comes back as '15+' - the
+ * age group, not yet a bracket. The score sheet (screens/TourScoreSheet.js)
+ * adds the scorer's Boys/Girls pick to make it '15+B' / '15+G'
+ * (data/tourDivisions.js resolveBracket); a bare '15+' is never written.
+ *
  * `athleteIds` is an array whose identity can change every render (a new
  * literal built from the roster each time) — useSeedResource's `deps` must
  * be a stable, comparable key, so this joins the de-duped, sorted ids into
@@ -4282,3 +4287,7 @@ export function useAthleteBrackets(athleteIds) {
     shouldFetch ? { source: liveAthleteBrackets, deps: ['athlete-brackets', idsKey] } : undefined
   );
 }
+
+// The score sheet's Boys/Girls pre-fill (owner ruling 2026-11-06), in its
+// own module because this file is long enough.
+export { usePriorTourDivisions } from './tourDivisions';

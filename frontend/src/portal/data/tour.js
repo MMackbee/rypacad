@@ -1,7 +1,9 @@
 /**
  * RYP Tour — the weekend-tournament leaderboard, now split into age
  * brackets (Sprint 8 pins, docs/portal/TEAM.md "Sprint 8 pins — scores, age
- * brackets, player history" + contract v1.6, superseding v1.5.1).
+ * brackets, player history" + contract v1.6, superseding v1.5.1). The
+ * brackets themselves were replaced on 2026-11-06 (owner ruling: 11 & under,
+ * 12–14, and 15 & up with boys and girls ranked apart) - see BRACKETS.
  *
  * Coaches enter raw SCORES (strokes) per athlete, not a tap-in-order
  * finishing position. POSITION IS DERIVED, NEVER STORED: within one
@@ -41,7 +43,7 @@ import { addDaysISO, lastSaturdayOnOrBefore, todayISO } from './calendar';
  * shows it on a day with a Tour event, the Tour tab to a parent or athlete.
  */
 const TOUR_EVENT_BASE =
-  "A Tour event is the academy's Saturday tournament. Coaches record every score, you are ranked in your age bracket (10 & under, 11-13, 14 & up), and points count toward the season standings on the Tour tab.";
+  "A Tour event is the academy's Saturday tournament. Coaches record every score, you are ranked in your age bracket (11 & under, 12–14 and 15 & up, with boys and girls ranked separately at 15 & up), and points count toward the season standings on the Tour tab.";
 export const TOUR_EVENT_EXPLAINER = `${TOUR_EVENT_BASE} One token per event.`;
 
 /**
@@ -110,34 +112,76 @@ export function pointsForPosition(position) {
 }
 
 /**
- * Age brackets (Sprint 8 pin, owner: "8-10, 11-13, 13+" — implemented as
- * 10U / 11-13 / 14+ because a 13-year-old cannot live in two brackets and
- * under-8s need a home, so 10U's floor is 0). Order here IS display order —
- * deriveTourStandings emits brackets in this order, 'open' last.
+ * The Tour's brackets (owner ruling 2026-11-06, the night before the first
+ * Tour event; replaces Sprint 8's 10U / 11-13 / 14+). 11 & under and 12–14
+ * rank boys and girls together; at 15 & up boys and girls rank separately,
+ * so that age group is two brackets. Order here IS display order -
+ * deriveTourStandings emits these first, then any LEGACY_BRACKETS, then
+ * 'open' last. Ages live in AGE_GROUPS below.
  */
 export const BRACKETS = [
-  { id: '10U', label: '10 & under', min: 0, max: 10 },
-  { id: '11-13', label: '11–13', min: 11, max: 13 },
-  { id: '14+', label: '14 & up', min: 14, max: 999 },
+  { id: '11U', label: '11 & under' },
+  { id: '12-14', label: '12–14' },
+  { id: '15+B', label: '15 & up Boys', division: 'B' },
+  { id: '15+G', label: '15 & up Girls', division: 'G' },
 ];
 
-const BRACKET_ORDER = [...BRACKETS.map((b) => b.id), 'open'];
-const BRACKET_LABEL_BY_ID = new Map(BRACKETS.map((b) => [b.id, b.label]));
+/**
+ * The Sprint 8 brackets (2026-09-10 to 2026-11-06). No production result
+ * carries one, but the rules still accept them: staging and production share
+ * one database, and a phone with the old app cached may still save one. So
+ * standings list them after the current brackets, under their old labels,
+ * instead of dropping the rows. This app never writes them.
+ */
+export const LEGACY_BRACKETS = [
+  { id: '10U', label: '10 & under' },
+  { id: '11-13', label: '11–13' },
+  { id: '14+', label: '14 & up' },
+];
+
+/**
+ * The one age group split by Boys/Girls. NOT a bracket and never stored: the
+ * score sheet turns it into '15+B' or '15+G' from the scorer's pick
+ * (data/tourDivisions.js resolveBracket), and the rules refuse a bare '15+'.
+ */
+export const SPLIT_AGE_GROUP = '15+';
+
+// Whole years on SEASON_BOUNDS.start. 11U's floor is 0 so the youngest kids have a home.
+const AGE_GROUPS = [
+  { id: '11U', min: 0, max: 11 },
+  { id: '12-14', min: 12, max: 14 },
+  { id: SPLIT_AGE_GROUP, min: 15, max: 999 },
+];
+
+const BRACKET_ORDER = [...BRACKETS, ...LEGACY_BRACKETS].map((b) => b.id);
+const LABEL_BY_ID = new Map([
+  ...[...BRACKETS, ...LEGACY_BRACKETS].map((b) => [b.id, b.label]),
+  [SPLIT_AGE_GROUP, '15 & up'],
+  ['open', 'Open'],
+]);
+
+/** A bracket or age-group id -> its label. null and 'open' read "Open"; an id no table knows reads as itself. */
+export function bracketLabel(id) {
+  if (id == null) return 'Open';
+  return LABEL_BY_ID.get(id) ?? id;
+}
 
 /**
  * Athlete dob ('yyyy-MM-dd', or null — never invented, per DATA-MODEL.md) ->
- * bracket id, or null when there is no dob to compute one from. `asOfISO` is
- * the fixed date age is measured against — the pinned caller
- * (SEASON_BOUNDS.start) so no kid changes brackets mid-season no matter when
- * a coach enters a score. A null result is not an error case: every read
- * path below groups a null/unset bracket under 'open' ("Open") so a missing
- * dob never blocks a save or a standings row.
+ * age group id: '11U' or '12-14' (each already a bracket), SPLIT_AGE_GROUP
+ * '15+' (a bracket only once Boys/Girls is picked), or null when there is no
+ * dob to compute one from. `asOfISO` is the fixed date age is measured
+ * against — the pinned caller (SEASON_BOUNDS.start) so no kid changes
+ * brackets mid-season no matter when a coach enters a score. A null result
+ * is not an error case: every read path below groups a null/unset bracket
+ * under 'open' ("Open") so a missing dob never blocks a save or a standings
+ * row.
  */
 export function bracketFor(dob, asOfISO) {
   if (!dob || !asOfISO) return null;
   const age = differenceInYears(parseISO(asOfISO), parseISO(dob));
-  const bracket = BRACKETS.find((b) => age >= b.min && age <= b.max);
-  return bracket ? bracket.id : null;
+  const group = AGE_GROUPS.find((g) => age >= g.min && age <= g.max);
+  return group ? group.id : null;
 }
 
 /**
@@ -178,8 +222,9 @@ export function bracketFor(dob, asOfISO) {
  * drops are in effect — `eventsHeld` is academy-wide (every bracket
  * combined), not per bracket.
  *
- * Only non-empty brackets appear in the output, in BRACKETS order, with
- * 'open' last.
+ * Only non-empty brackets appear in the output: BRACKETS order, then
+ * LEGACY_BRACKETS, then any id neither table knows (the rules refuse one;
+ * kept so no row can vanish), 'open' last.
  */
 export function deriveTourStandings(results, { nameById = new Map(), labelById = new Map() } = {}) {
   const nameOf = (id) => (nameById.get ? nameById.get(id) : nameById[id]) ?? null;
@@ -255,8 +300,12 @@ export function deriveTourStandings(results, { nameById = new Map(), labelById =
     bmap.set(r.athleteId, cur);
   }
 
+  const known = new Set(BRACKET_ORDER);
+  const unknown = [...byBracket.keys()].filter((id) => id !== 'open' && !known.has(id)).sort();
+  const order = [...BRACKET_ORDER, ...unknown, 'open'];
+
   const brackets = [];
-  for (const id of BRACKET_ORDER) {
+  for (const id of order) {
     const bmap = byBracket.get(id);
     if (!bmap || bmap.size === 0) continue; // only non-empty brackets appear
 
@@ -287,7 +336,7 @@ export function deriveTourStandings(results, { nameById = new Map(), labelById =
       });
     });
 
-    brackets.push({ id, label: id === 'open' ? 'Open' : BRACKET_LABEL_BY_ID.get(id) ?? id, standings });
+    brackets.push({ id, label: bracketLabel(id), standings });
   }
 
   // Events, one per DATE (v1.6.1), most recent first; each event's results
@@ -296,7 +345,7 @@ export function deriveTourStandings(results, { nameById = new Map(), labelById =
   // whole weekly event), else the plain 'Tour event' fallback.
   const rawLabelOf = (sessionId) =>
     (labelById.get ? labelById.get(sessionId) : labelById[sessionId]) || null;
-  const bracketRank = new Map(BRACKET_ORDER.map((id, i) => [id, i]));
+  const bracketRank = new Map(order.map((id, i) => [id, i]));
   const byDate = new Map();
   for (const r of derivedRows) {
     let ev = byDate.get(r.date);
@@ -315,8 +364,8 @@ export function deriveTourStandings(results, { nameById = new Map(), labelById =
       results: ev.rows
         .slice()
         .sort((a, b) => {
-          const ra = bracketRank.get(a.groupBracket) ?? BRACKET_ORDER.length;
-          const rb = bracketRank.get(b.groupBracket) ?? BRACKET_ORDER.length;
+          const ra = bracketRank.get(a.groupBracket) ?? order.length;
+          const rb = bracketRank.get(b.groupBracket) ?? order.length;
           return ra !== rb ? ra - rb : a.position - b.position;
         })
         .map((r) => ({
@@ -341,14 +390,16 @@ export function deriveTourStandings(results, { nameById = new Map(), labelById =
  * HOUSEHOLD already tells his story as "New Feb 8," so his first tournament
  * being the most recent one is consistent with that, not a new fact.
  *
- * Sprint 8: each kid also gets a bracket (10U / 11-13 / 14+, spread across
- * all three so every bracket in the demo is non-empty) and a believable
- * 9-hole-ish strokes score per event, rather than a hand-typed finishing
- * position — deriveTourStandings computes position/points/standings from
- * these exactly like the live path does. Scores are chosen so each bracket's
- * DERIVED order tells the same relative story the old academy-wide
- * positions did (e.g. bergstrom edges jordan for the best 14+ season, with
- * jordan taking one head-to-head week — the same rivalry the old seed had).
+ * Sprint 8: each kid also gets a bracket and a believable 9-hole-ish
+ * strokes score per event, rather than a hand-typed finishing position —
+ * deriveTourStandings computes position/points/standings from these exactly
+ * like the live path does. Since the 2026-11-06 groups the cast fills 11 &
+ * under and 12–14 only: no seed kid is 15 or older, so the demo shows no
+ * Boys/Girls bracket rather than invent a kid for one. Scores are chosen so
+ * each bracket's DERIVED order tells the same relative story the old
+ * academy-wide positions did (e.g. bergstrom edges jordan for the best 12–14
+ * season, with jordan taking one head-to-head week — the same rivalry the
+ * old seed had).
  *
  * Three past Saturdays (real tournament block time slot, per HOUSEHOLD's
  * "Sat 10:30 AM" tournament entries), computed off today rather than
@@ -385,44 +436,42 @@ const TOUR_SEED_LABELS = {
 // does as more families' tournament weekends line up.
 //
 // Bracket assignments are NOT invented where a fact exists (PM integration,
-// v1.6.1): the Whitfields follow the OWNER-SUPPLIED dobs (2026-09-10 —
-// jordan 2012-06-17 is 14 at season start -> 14+, reese 2014-03-02 is 12 ->
-// 11-13, nico 2017-09-09 is 9 -> 10U; the same values
-// scripts/seed-firestore.mjs writes), and the five roster kids follow
-// seed.js ROSTER's own age metas: nguyen "Age 12" and alvarez "Age 12" ->
-// 11-13; sandoval "Age 14" -> 14+; bergstrom "Age 13" today crosses to 14
-// by the Nov 2 season start (the same birthday-window device jordan's copy
-// used) -> 14+. Okonkwo's meta states no age, so he takes 10U — the one
+// v1.6.1, re-applied to the 2026-11-06 groups): the Whitfields follow the
+// OWNER-SUPPLIED dobs (2026-09-10 — jordan 2012-06-17 is 14 at season start
+// and reese 2014-03-02 is 12 -> 12-14, nico 2017-09-09 is 9 -> 11U; the
+// same values scripts/seed-firestore.mjs writes), and the five roster kids
+// follow seed.js ROSTER's own age metas: nguyen and alvarez "Age 12",
+// sandoval "Age 14", bergstrom "Age 13" today and 14 by the season start ->
+// all 12-14. Okonkwo's meta states no age, so he takes 11U — the one
 // unconstrained assignment, made to keep the youngest bracket populated.
-// Final spread: 10U -> nico, okonkwo; 11-13 -> reese, nguyen, alvarez;
-// 14+ -> jordan, bergstrom, sandoval.
+// Final spread: 11U -> nico, okonkwo; 12-14 -> the other six.
 const TOUR_SEED_RESULTS = [
   // EVENT_3 - oldest, 6 finishers, no Nico yet.
-  [`${EVENT_3}-1`, EVENT_3, 'bergstrom', '14+', 39],
-  [`${EVENT_3}-1`, EVENT_3, 'jordan', '14+', 41],
-  [`${EVENT_3}-1`, EVENT_3, 'nguyen', '11-13', 45],
-  [`${EVENT_3}-1`, EVENT_3, 'sandoval', '14+', 50],
-  [`${EVENT_3}-1`, EVENT_3, 'alvarez', '11-13', 44],
-  [`${EVENT_3}-1`, EVENT_3, 'okonkwo', '10U', 47],
+  [`${EVENT_3}-1`, EVENT_3, 'bergstrom', '12-14', 39],
+  [`${EVENT_3}-1`, EVENT_3, 'jordan', '12-14', 41],
+  [`${EVENT_3}-1`, EVENT_3, 'nguyen', '12-14', 45],
+  [`${EVENT_3}-1`, EVENT_3, 'sandoval', '12-14', 50],
+  [`${EVENT_3}-1`, EVENT_3, 'alvarez', '12-14', 44],
+  [`${EVENT_3}-1`, EVENT_3, 'okonkwo', '11U', 47],
   // EVENT_2 - 7 finishers, still no Nico. Jordan's 37 beats bergstrom's 38
-  // head-to-head in 14+ — preserving the week the old seed had him winning.
-  [`${EVENT_2}-1`, EVENT_2, 'jordan', '14+', 37],
-  [`${EVENT_2}-1`, EVENT_2, 'bergstrom', '14+', 38],
-  [`${EVENT_2}-1`, EVENT_2, 'okonkwo', '10U', 42],
-  [`${EVENT_2}-1`, EVENT_2, 'nguyen', '11-13', 43],
-  [`${EVENT_2}-1`, EVENT_2, 'reese', '11-13', 46],
-  [`${EVENT_2}-1`, EVENT_2, 'alvarez', '11-13', 48],
-  [`${EVENT_2}-1`, EVENT_2, 'sandoval', '14+', 49],
-  // EVENT_1 - most recent, all 8, Nico's first tournament (2nd in 10U
+  // head-to-head in 12-14 — preserving the week the old seed had him winning.
+  [`${EVENT_2}-1`, EVENT_2, 'jordan', '12-14', 37],
+  [`${EVENT_2}-1`, EVENT_2, 'bergstrom', '12-14', 38],
+  [`${EVENT_2}-1`, EVENT_2, 'okonkwo', '11U', 42],
+  [`${EVENT_2}-1`, EVENT_2, 'nguyen', '12-14', 43],
+  [`${EVENT_2}-1`, EVENT_2, 'reese', '12-14', 46],
+  [`${EVENT_2}-1`, EVENT_2, 'alvarez', '12-14', 48],
+  [`${EVENT_2}-1`, EVENT_2, 'sandoval', '12-14', 49],
+  // EVENT_1 - most recent, all 8, Nico's first tournament (2nd in 11U
   // behind okonkwo's 46 — a believable debut, same as his old 5th).
-  [`${EVENT_1}-1`, EVENT_1, 'bergstrom', '14+', 36],
-  [`${EVENT_1}-1`, EVENT_1, 'jordan', '14+', 39],
-  [`${EVENT_1}-1`, EVENT_1, 'reese', '11-13', 41],
-  [`${EVENT_1}-1`, EVENT_1, 'nguyen', '11-13', 43],
-  [`${EVENT_1}-1`, EVENT_1, 'nico', '10U', 47],
-  [`${EVENT_1}-1`, EVENT_1, 'sandoval', '14+', 50],
-  [`${EVENT_1}-1`, EVENT_1, 'okonkwo', '10U', 46],
-  [`${EVENT_1}-1`, EVENT_1, 'alvarez', '11-13', 49],
+  [`${EVENT_1}-1`, EVENT_1, 'bergstrom', '12-14', 36],
+  [`${EVENT_1}-1`, EVENT_1, 'jordan', '12-14', 39],
+  [`${EVENT_1}-1`, EVENT_1, 'reese', '12-14', 41],
+  [`${EVENT_1}-1`, EVENT_1, 'nguyen', '12-14', 43],
+  [`${EVENT_1}-1`, EVENT_1, 'nico', '11U', 47],
+  [`${EVENT_1}-1`, EVENT_1, 'sandoval', '12-14', 50],
+  [`${EVENT_1}-1`, EVENT_1, 'okonkwo', '11U', 46],
+  [`${EVENT_1}-1`, EVENT_1, 'alvarez', '12-14', 49],
 ].map(([sessionId, date, athleteId, bracket, score]) => ({ sessionId, date, athleteId, bracket, score }));
 
 /** The seed fallback for useTourStandings — computed, not hand-summed. */
