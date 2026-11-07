@@ -89,6 +89,13 @@ export default function TourStandings({
     setTapped(age);
     setGender(g);
   };
+  // Gender carries between the kids' groups (Girls on 11–14 stays Girls on
+  // 15–18) but resets to All when the Age crosses to or from Coaches, so
+  // Girls never turns into an empty Coaches · Women board (2026-11-07).
+  const pickAge = (next) => {
+    if ((next === 'coaches') !== (age === 'coaches')) setGender('all');
+    setTapped(next);
+  };
   const genders = genderFiltersFor(age);
   const boardId = boardIdFor(age, genders ? gender : 'all');
   const board = boards.find((b) => b.id === boardId) ?? null;
@@ -128,7 +135,7 @@ export default function TourStandings({
       ) : (
         <div style={{ padding: '0 22px 24px', display: 'flex', flexDirection: 'column', gap: 14 }}>
           {explainer}
-          <TourFilters ages={ages} age={age} onAge={setTapped} genders={genders} gender={gender} onGender={pickGender} />
+          <TourFilters ages={ages} age={age} onAge={pickAge} genders={genders} gender={gender} onGender={pickGender} />
           {board ? <StandingsCard label={board.label} standings={board.standings} /> : <NoBoardResults label={boardLabel(boardId)} />}
           {boardEvents.length ? <RecentTourEvents events={boardEvents} boardId={boardId} /> : null}
           {role === 'athlete' && athleteId ? <YourResults events={events} athleteId={athleteId} boardId={boardId} /> : null}

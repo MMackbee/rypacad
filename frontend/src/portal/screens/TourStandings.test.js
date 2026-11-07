@@ -130,9 +130,20 @@ test('one leaderboard, Overall by default; every Age x Gender pick shows its boa
   expect(standingNames(r)).toEqual(['Eli Fox']);
   await tap(r, 'Age', 'Coaches');
   expect(chipLabels(r, 'Gender')).toEqual(['All', 'Men', 'Women']);
+  // Crossing into Coaches resets Gender to All: Girls never becomes an empty Women board.
+  expect(on(r, 'Gender')).toEqual(['All']);
+  expect(r.text()).toContain('Coaches · 2');
+  await tap(r, 'Gender', 'Women');
   expect(r.text()).toContain('Coaches · Women · 1');
   await tap(r, 'Gender', 'Men');
   expect(standingNames(r)).toEqual(['coach_gus']);
+  // ...and crossing back out resets it again.
+  await tap(r, 'Age', '15–18');
+  expect(on(r, 'Gender')).toEqual(['All']);
+  // Between the kids' groups the choice carries.
+  await tap(r, 'Gender', 'Girls');
+  await tap(r, 'Age', '11–14');
+  expect(on(r, 'Gender')).toEqual(['Girls']);
   await r.unmount();
 });
 

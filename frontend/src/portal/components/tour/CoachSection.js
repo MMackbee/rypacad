@@ -1,7 +1,6 @@
 import React, { useState } from 'react';
 import { color, font, radius } from '../../tokens';
 import AthleteRow from '../AthleteRow';
-import StatusBadge from '../StatusBadge';
 import { Body, SectionLabel } from '../Primitives';
 import { GenderPicker, ScoreField } from './SheetParts';
 import { cleanCoachName, coachIdFor } from '../../data/tourSheet';
@@ -57,8 +56,10 @@ export default function CoachSection({ coaches, quickPicks, scores, genderOf, on
           nameSize={16}
           divider={i < coaches.length - 1}
           trailing={
+            // No "Coaches" badge here (2026-11-07): the section label already says
+            // Coaches, and on a 375px phone the badge squeezed the name column
+            // until Men and Women stacked.
             <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-              <StatusBadge tone="neutral">Coaches</StatusBadge>
               <ScoreField
                 label={`Strokes for ${c.name}`}
                 value={scores[c.athleteId] ?? ''}
