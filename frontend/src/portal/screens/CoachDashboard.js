@@ -273,7 +273,6 @@ function SessionsTab({ firstSessionDate, onOpenRoster }) {
                 time={time}
                 meridiem={meridiem}
                 type={session.type}
-                ageGroup={session.ageGroup}
                 // A handicap-reserved block carries the tag families see.
                 reserved={reservedTag(session)}
                 name={session.name}
@@ -400,7 +399,6 @@ function BlockCard({ block, blockIndex, onOpenRoster }) {
       time={time}
       meridiem={meridiem}
       type={block.type}
-      ageGroup={block.ageGroup}
       reserved={reservedTag(block)}
       name={block.name}
       meta={block.meta}
