@@ -223,6 +223,10 @@ turn into bonus tokens, and the two now mint the same document id.
 
 ## Sprint 19 - suggested age groups (2026-09-22)
 
+> **Suggested age groups removed 2026-11-09, owner.** Items 2-4 no longer apply. Item 1 is about
+> the fourth weekday block's calendar edit, which is separate from the age groups; its mention of
+> age hints is history. The text below is kept as the record.
+
 1. **The Google Calendar has not been updated.** The owner ruled the weekday pattern is now Mon/Wed
    3-6 PM and Tue/Thu 4-7 PM, and said the calendar edit is still to come. Production sessions come
    from that calendar, so until the owner edits it and runs

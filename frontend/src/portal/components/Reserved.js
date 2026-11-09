@@ -14,8 +14,8 @@ import { reservedTag } from '../data/reserved';
  * "Handicap 5 or better" beside the type chip, in that chip's size. A
  * status, never a control: an outline tint (StatusBadge), not a fill.
  *
- * @param {string|null} tag  reservedTag(session) - callers pass it, as they
- *   pass the age group, so the card never guesses from a split time.
+ * @param {string|null} tag  reservedTag(session) - callers pass it, so the
+ *   card never guesses from a split time.
  */
 export function ReservedChip({ tag, style }) {
   if (!tag) return null;
