@@ -1,6 +1,11 @@
 import React from 'react';
 import { renderScreen } from './testRender';
 import AthleteDetail from './AthleteDetail';
+// Mental consent (plan Task 13): no consent rows unless a case sets them.
+let mockConsents;
+jest.mock('../hooks/mentalConsent', () => ({ useFamilyConsents: () => mockConsents }));
+beforeEach(() => { mockConsents = { data: null, loading: false, error: null }; });
+jest.mock('../hooks/mentalConsentStaff', () => ({ useStaffConsent: () => ({ data: null, loading: false, error: null }) }));
 
 let mockDetail;
 // The staff handicap edit's write (hooks/handicap.js), as the screen reaches it.

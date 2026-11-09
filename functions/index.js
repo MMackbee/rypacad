@@ -41,6 +41,13 @@
  * The portal's Feedback button calls submitFeedback (portal/feedback.js,
  * 2026-10-15): signed-in, rate-limited, posted to a private Slack channel.
  *
+ * Mental performance consent (2026-11-05, portal/mental-consent.js and
+ * portal/mental-consent-request.js) asks at the top of onBookingCreated and
+ * in sessionReminders, and adds two functions:
+ *
+ *   requestMentalConsent   callable, Yannick's "Send a reminder"
+ *   onMentalConsentSigned  mentalConsents onCreate, the signed receipt
+ *
  * The 2025 `onBookingCreateNotifyChild` is DELETED with them: it read
  * `parentId` / `userId` / `childId`, fields no v1+ booking has ever carried,
  * so it could never fire. `booking-revoked` is NOT a trigger - portal/
@@ -90,6 +97,7 @@ const {shouldNoticeBookingCreated, shouldNoticeMemberCancel} =
 const jobs = require('./portal/jobs');
 const lib = require('./portal/lib');
 const contractCheckins = require('./portal/contract-checkins');
+const mentalConsent = require('./portal/mental-consent');
 const sweep = require('./portal/sweep');
 const {stripeWebhook} = require('./portal/stripe');
 const {onSessionBookedDecrease} = require('./portal/promotion');
@@ -102,6 +110,7 @@ const single = require('./portal/single');
 const {onSingleTokenSpent} = require('./portal/single-guard');
 const {submitScholarship} = require('./portal/scholarship');
 const {submitFeedback} = require('./portal/feedback');
+const {requestMentalConsent} = require('./portal/mental-consent-request');
 
 // ==========================================================================
 // PORTAL SERVER-SIDE WRITERS (Sprint 13, contract v2.1)
@@ -138,6 +147,10 @@ exports.submitScholarship = submitScholarship;
 // posts a note and a screenshot to a private Slack channel. It binds
 // SLACK_FEEDBACK_TOKEN, which must exist before any functions deploy.
 exports.submitFeedback = submitFeedback;
+// Mental performance consent (2026-11-05): Yannick's reminder callable and
+// the receipt for a portal signature. Both send mail.
+exports.requestMentalConsent = requestMentalConsent;
+exports.onMentalConsentSigned = mentalConsent.onMentalConsentSigned;
 
 // ==========================================================================
 // NOTIFICATION TRIGGERS (Sprint 14, contract v2.2)
@@ -208,6 +221,14 @@ exports.onBookingCreated = functions
     .document('bookings/{bookingId}')
     .onCreate(async (snap, context) => {
       const booking = snap.data() || {};
+      // Mental consent (2026-11-05): its own gate, BEFORE the
+      // booking-confirmed gate, which skips every Calendly booking.
+      try {
+        await mentalConsent.onMentalBookingCreated({booking,
+          bookingId: context.params.bookingId, store: db, now: new Date()});
+      } catch (err) {
+        console.error('onBookingCreated consent error:', err);
+      }
       if (!shouldNoticeBookingCreated(booking)) return null;
       try {
         const [session, athlete] = await Promise.all([

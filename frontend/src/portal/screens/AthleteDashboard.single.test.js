@@ -3,6 +3,10 @@ import { renderScreen } from './testRender';
 import AthleteDashboard from './AthleteDashboard';
 import { statusFor } from '../data/billingHub';
 import { BOOKING_OPENS_AT } from '../data/calendar';
+// Mental consent (plan Task 13): no consent rows unless a case sets them.
+let mockConsents;
+jest.mock('../hooks/mentalConsent', () => ({ useFamilyConsents: () => mockConsents }));
+beforeEach(() => { mockConsents = { data: null, loading: false, error: null }; });
 
 /**
  * Owner ruling 2026-10-01 ("not unless the child is 18+"): on the athlete's

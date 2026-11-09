@@ -1,5 +1,5 @@
 import React, { Suspense, lazy, useEffect, useState } from 'react';
-import { Navigate, Route, Routes, useLocation, useNavigate, useParams } from 'react-router-dom';
+import { Navigate, Route, Routes, useLocation, useNavigate, useParams, useSearchParams } from 'react-router-dom';
 
 import useAuthSession from './hooks/useAuthSession';
 import { isLive } from './hooks/live';
@@ -65,6 +65,9 @@ const loadMentalAthletes = () => import('./screens/MentalAthletes');
 const loadMentalAthlete = () => import('./screens/MentalAthlete');
 const loadMentalNote = () => import('./screens/MentalNote');
 const loadMentalContract = () => import('./screens/MentalContract');
+// Yannick's consent (2026-10-30 plan Task 11): the family's list and one athlete's flow.
+const loadConsentList = () => import('./screens/MentalConsent');
+const loadConsentFlow = () => import('./screens/MentalConsentFlow');
 
 const OnboardingWelcomeRoute = named(loadOnboarding, 'OnboardingWelcomeRoute');
 const MySchedule = lazy(loadMySchedule);
@@ -90,6 +93,8 @@ const MentalAthletes = lazy(loadMentalAthletes);
 const MentalAthlete = lazy(loadMentalAthlete);
 const MentalNote = lazy(loadMentalNote);
 const MentalContract = lazy(loadMentalContract);
+const MentalConsent = lazy(loadConsentList);
+const MentalConsentFlow = lazy(loadConsentFlow);
 
 /*
  * Chunk warm-up (live mode only), keyed on the segment after /portal/.
@@ -106,6 +111,7 @@ const CURRENT_ROUTE_CHUNKS = {
   coaching: [loadCoaching],
   'my-sessions': [loadSpecialistDay],
   mental: [loadMentalAthletes, loadMentalAthlete, loadMentalNote, loadMentalContract],
+  consent: [loadConsentList, loadConsentFlow],
   contract: [loadContract],
   season: [loadSeason],
   athlete: [loadAthleteDetail],
@@ -577,6 +583,34 @@ function MentalContractRoute({ onSignOut }) {
 }
 
 /**
+ * Yannick's consent, the family's list (plan Task 11): it goes straight into
+ * a one-athlete household's flow, except back from the flow (state from
+ * 'flow') and for a minor login's ?withdraw=1.
+ */
+function MentalConsentListRoute() {
+  const location = useLocation();
+  const [searchParams] = useSearchParams();
+  const navigate = useNavigate();
+  return (
+    <MentalConsent
+      bare
+      autoOpen={location.state?.from !== 'flow' && !searchParams.has('withdraw')}
+      onOpen={(id, opts) => navigate(`/portal/consent/mental/${id}`, opts)}
+    />
+  );
+}
+
+/** One athlete's consent flow; ?change=1 opens Change choices. Done and Back leave by consentExit. */
+function MentalConsentFlowRoute() {
+  const { athleteId } = useParams();
+  const [searchParams] = useSearchParams();
+  const navigate = useNavigate();
+  const change = searchParams.get('change') === '1';
+  const leave = (exit) => navigate(exit.to, { state: exit.state });
+  return <MentalConsentFlow key={`${athleteId}:${change}`} bare athleteId={athleteId} change={change} onDone={leave} onBack={leave} />;
+}
+
+/**
  * The Tour is the one route every role reaches, and TourStandings renders
  * that role's own bottom tab bar (Phil's through his specialistId) — so the
  * signed-in role has to reach it as a prop. Resolved from
@@ -871,6 +905,9 @@ export default function PortalRoutes() {
       <Route path="mental/contract" element={<RequireRole roles={['mental', 'ops', 'owner']}><MentalContractRoute onSignOut={onSignOut} /></RequireRole>} />
       <Route path="mental/:athleteId/notes/:entryId" element={<RequireRole roles={['mental']}><MentalNoteRoute /></RequireRole>} />
       <Route path="mental/:athleteId" element={<RequireRole roles={['mental']}><MentalAthleteRoute onSignOut={onSignOut} /></RequireRole>} />
+      {/* Yannick's consent form (2026-10-30): signed by a parent or an athlete login; coaches see nothing of it. */}
+      <Route path="consent/mental" element={<RequireRole roles={['parent', 'athlete']}><MentalConsentListRoute /></RequireRole>} />
+      <Route path="consent/mental/:athleteId" element={<RequireRole roles={['parent', 'athlete']}><MentalConsentFlowRoute /></RequireRole>} />
       {/* Hidden until closer to launch (owner, 2026-09-30): a stale link
           goes through the index, which lands the account on its own home. */}
       <Route

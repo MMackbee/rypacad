@@ -5,6 +5,7 @@
  */
 import { ageOn } from './contractRule';
 import { dateOf } from './contractBoard';
+import { consentStatusFor } from './mentalConsent';
 
 export const NOTE_MAX = 8000;
 export const NOTE_KINDS = ['intake', 'session', 'free'];
@@ -40,21 +41,29 @@ export function groupEntries(entries) {
 /**
  * The Athletes list rows, A to Z. `households` (an array or an id -> doc
  * map, optional) gives each row its `familyName`, which the screen shows
- * beside a first-name-only athlete (data/athleteLabel.js).
+ * beside a first-name-only athlete (data/athleteLabel.js). `records` (the
+ * mentalConsents by athlete id) gives each row its `consentStatus` on the
+ * UTC date `utcToday` and `needsConsent` (not signed, with a 1:1 ahead);
+ * `records === null` (the read failed) leaves both off. Consent starts from
+ * bookings only, so a held Calendly session never asks for it.
  */
-export function mentalAthleteRows({ athletes, households, bookings, entries, today }) {
+export function mentalAthleteRows({ athletes, households, bookings, entries, today, records = {}, utcToday = today }) {
   const live = (bookings || []).filter((b) => b.type === 'mental' && b.status !== 'cancelled');
   const byHousehold = Array.isArray(households) ? Object.fromEntries(households.map((h) => [h.id, h])) : households || {};
   return (athletes || [])
     .map((a) => {
       const mine = live.filter((b) => b.athleteId === a.id).map((b) => b.date).filter(Boolean).sort();
       const summary = athleteNoteSummary((entries || []).filter((e) => e.athleteId === a.id));
+      const nextSession = mine.find((d) => d >= today) || null;
+      const consentStatus = records === null ? null : consentStatusFor(a, records[a.id] ?? null, utcToday);
       return {
         athleteId: a.id, name: a.name, age: ageOn(a.dob ?? null, today),
         familyName: byHousehold[a.householdId]?.name ?? null,
-        nextSession: mine.find((d) => d >= today) || null,
+        nextSession,
         lastSession: mine.filter((d) => d < today).pop() || null,
         ...summary,
+        consentStatus,
+        needsConsent: consentStatus != null && consentStatus !== 'signed' && nextSession != null,
       };
     })
     .sort((x, y) => String(x.name || '').localeCompare(String(y.name || '')));

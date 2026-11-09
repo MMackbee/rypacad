@@ -41,7 +41,8 @@ serves.
 | `feedbackLimits` | the sender's Firebase Auth uid | **2026-10-15.** `submitFeedback`'s rate limit, one doc per account that has sent feedback. No seed. See [below](#feedbacklimitsuid-2026-10-15). |
 | `mentalNotes/{athleteId}/entries` | `intake`, the session id (`cal-<uuid>` or any `sessions` id), or `free-` + 8 base-36 characters | **2026-10-28 (mental tools).** One intake note and one note per 1:1 per athlete by construction; free notes get a random id. The parent doc `mentalNotes/{athleteId}` is never written. Seed: `mentalNotes/jordan/entries/{intake, cal-seedpast0001, cal-seedpast0002}`. See [below](#mentalnotesathleteidentriesentryid-2026-10-28). |
 | `contractCheckins` | `{athleteId}_{weekStart}` (`weekStart` = the Monday, `YYYY-MM-DD`) | **2026-10-28.** One check-in per athlete per contract week, enforced by the keyspace and pinned by the rules (`checkinId == athleteId + '_' + weekStart`). Seed: `jordan_<this Monday>`, `nico_<last Monday>`. See [below](#contractcheckinsathleteid_weekstart-2026-10-28). |
-| `config` | fixed name: `contract` | **2026-10-28.** Server-readable switches; `contract` is the only doc the rules let anyone write. Seed: `config/contract` on. See [below](#configcontract-2026-10-28). |
+| `mentalConsents` | the athlete id | **2026-10-30 (mental consent).** One consent record per athlete by construction; absent == never signed, and nobody deletes. Seed: `jordan`, `quinn-parker`. See [below](#mentalconsentsathleteid-2026-10-30). |
+| `config` | fixed names: `contract`, `mentalConsent` | **2026-10-28.** Server-readable switches; `contract` is the only doc the rules let anyone write (`mentalConsent`, 2026-10-30, is written by its script alone). Seed: `config/contract` on, `config/mentalConsent` off. See [below](#configcontract-2026-10-28) and [`config/mentalConsent`](#configmentalconsent-2026-10-30). |
 | `sessions` (Calendly) | `cal-<eventUuid>` | **Contract v3.0.1 (Sprint 20).** Written only by `calendlyWebhook`; never date-prefixed (the id is Calendly's event uuid, so a reschedule that moves the date keeps the doc), never carries tournament results, and invisible to the sync's reap (`gcalEventId: null`, so `planSync` files it under `seededUntouched`). |
 
 ## Collections
@@ -1011,6 +1012,65 @@ Query: the board reads one week (`weekStart ==`) and the whole collection for "L
 
 The server-readable contract switch (spec 6): `{ enabled: bool, enabledAt: 'YYYY-MM-DD' | null }`. The family-facing switch is still `REACT_APP_CONTRACT_ENABLED` at build time; this doc is what the server can see. **Writer: the owner** (rules: `docId == 'contract'`, only those two keys, `enabled` a bool, `enabledAt` a string or null), in practice through `scripts/set-contract-flag.mjs` (`--on | --off`, `--dry-run | --yes`; the owner runs `--prod`). `--on` stamps today (America/Chicago) as `enabledAt` unless the doc is already on with a date, which it keeps - `enabledAt` is the overdue clock for every athlete never checked in, so a re-run must not move it; `--off` writes `enabledAt: null`. **Readers: `coach`, `mental`, `ops`, `owner` and any account with a `specialistId`.** `mentalCheckinReminders` (Monday 08:00 America/Chicago) sends nothing while `enabled` is not `true`; the contract board shows "The contract switch is off" when it is `false`. Absent == off. Seed: on, `enabledAt` 14 days before the run date. Rules probe: `scripts/verify-rules.mjs` `taskMental`.
 
+### `mentalConsents/{athleteId}` (2026-10-30)
+
+Yannick's "Ryp Academy Mental Performance Program — Informed Consent & Service Agreement", signed in the portal once per athlete (spec `docs/portal/plans/2026-10-30-mental-consent/00-spec.md` 6, plan `01-plan.md` and the form text `01-consent-form-FINAL.txt` beside it): under 18 the household's parent signs §10 with the athlete's §9 assent typed on the same phone; at 18 or over the athlete signs §11. One document per athlete in its own top-level collection, not a key on `athletes/{id}` (which coaches can read), so the emergency contact and the family's choices stay off coach-readable documents. **Absent == never signed. Nobody deletes** (`allow delete: if false`).
+
+| Field | Type | Notes |
+|---|---|---|
+| `athleteId` | string | Equals the path. |
+| `householdId` | string | The athlete doc's `householdId`, pinned by the rules from `athletes/{athleteId}` (never from the body alone); the key a parent reads by. |
+| `version` | string | The form version signed, `YYYY-MM-DD` (`CONSENT_VERSION = '2026-10-30'` in `frontend/src/portal/data/mentalConsent.js`); format-checked only. A record with any other version still counts as signed (spec 7). |
+| `method` | `'portal' \| 'paper'` | `paper`: ops or the owner transcribe a signed paper form. |
+| `signedAt` | timestamp | Portal: server time. Paper: Chicago midnight of the date on the form (`2026-10-28` → `2026-10-28T05:00:00Z`), not in the future and on or after 2026-01-01. |
+| `signedBy` | uid | The account that recorded it: the parent, the athlete's own login, or ops/owner for paper. |
+| `signer` | map | `{ role: 'parent' \| 'athlete', name }`, the typed legal name; `role` is `'athlete'` iff `adult`. |
+| `adult` | bool | True when §11 was signed (18 or older on the UTC date; the rules check it against the dob with `adultOn`). |
+| `assent` | map \| null | Minor: `{ name, audio: bool, at, readAloud: bool, withdrawnBy: uid \| null }` (the athlete types their own name; `readAloud` is offered under 13; `at` equals `signedAt`). Adult: null. |
+| `choices` | map | `{ location: 'A' \| 'B' \| 'C' \| 'any', audio: bool, driving: bool \| null, emergencyContact: { name, phone, relationship }, parentSessions: bool \| null, parentName: string \| null, updatedAt, updatedBy }` (A the academy's quiet area, B Eden Prairie, C online, `any` session by session). Minor: `parentSessions` and `parentName` null, `driving` bool or null (asked at 16 and over). Adult: `driving` null, `parentSessions` bool, `parentName` a name iff `parentSessions`, the emergency name and phone required. Paper: `location` may be null. A minor's `emergencyContact` of all nulls means "Same as parent". Every write that touches `choices` restamps `updatedAt` (server time) and `updatedBy` (the caller). |
+| `adultConfirm` | map \| null | `{ name, at }`: the adult athlete's typed confirmation (server time) of the latest change to `audio`, `emergencyContact`, `parentSessions` or `parentName`; a location-only change needs none. |
+| `adultSignature` | map \| null | `{ signedAt, signedBy, name, version, method: 'portal' \| 'paper' }`: the §11 re-sign of a minor-era record once the athlete is 18 (portal: server time; paper: the form's date, recorded by ops or the owner). The re-sign re-answers `choices` in the adult shape and resets `countersign` to null; `assent` stays as it was. |
+| `countersign` | map \| null | `{ at, by }`: Yannick's one-tap acknowledgement (role `mental`, once, server time). Nothing is incomplete without it. |
+| `history` | array | Earlier values, oldest first (below). |
+
+Lengths: every typed name (the signer's, the assent's, `parentName`, `adultConfirm`, `adultSignature`, the emergency contact's) is 1..120 characters, the phone 1..40, the relationship at most 60.
+
+**Status** (`consentStatusFor(athlete, record, utcTodayISO)` in `frontend/src/portal/data/mentalConsent.js`, mirrored in `functions/portal/mental-consent-status.js` under CHANGE ONE, CHANGE BOTH; both run the shared table `functions/test/fixtures/consent-status-cases.json`): no valid dob → `no-dob`; no record → `unsigned`; `adult === true` or an `adultSignature` → `signed`; signed as a minor and 18 or older on today's UTC date → `needs-adult`; otherwise `signed`. A paper record counts. Recording allowed == `signed` and (adult record ? `choices.audio` : `choices.audio && assent.audio`). Ages (18, 16, 13) are counted on the UTC date, like the rules; booking dates and every date shown to a person are America/Chicago dates.
+
+**Who reads.** The household's parent, only through `where('householdId', '==', householdId)` (the read rule tests `resource.data.householdId`, so a parent's get of a record that does not exist yet is refused, not "not found"); the athlete's own login, by a get of its own id (missing reads as null); roles `mental`, `ops` and `owner` (the collection unfiltered). Coaches, Phil included, read none of it.
+
+**Who writes.** Every update is a client transaction that reads the record first.
+- Portal create (a plain `setDoc`; `signedAt`, `assent.at` and `choices.updatedAt` are server time; refused for an athlete without a valid dob): the household's parent for a minor, and for an 18+ athlete with no claimed login (the parent hands the phone to the athlete: `signer.role 'athlete'`); the athlete's own login at 18 or over.
+- Paper create: ops or the owner (`signedBy` the caller).
+- Choices change: the parent (a minor-era record, or an adult record with no claimed login) or the adult athlete's own login. A minor's `assent.audio` goes back to true only through the parent's hand-the-phone change while the athlete is under 18.
+- Recording withdrawal: on a minor-era record without an `adultSignature`, `assent.audio` true → false only, by the athlete's own login or role `mental`, stamped `withdrawnBy`; never back to true here, and a paper correction never undoes it.
+- 18+ re-sign (`adultSignature`): the parent (hand-the-phone, no claimed login) or the athlete's own login; ops or the owner for a paper re-sign.
+- Countersign: role `mental`, once.
+- Paper correction: the owner alone, on paper records only (`signedBy` becomes the owner).
+
+**History entries.** The updates append the snapshot's own stored objects, so the rules can prove `history == old history + [the old values]`: a choices change appends `{ choices, assent, adultConfirm }`; a withdrawal `{ choices, assent }`; the 18+ re-sign `{ choices, assent, countersign }`; a paper correction `{ choices, assent, signedAt, signer, adult, version, signedBy }`. The countersign appends nothing.
+
+**The claimed-login test** (one test everywhere: the rules' `athleteLoginClaimed`, the parent's screen, the server's audience): `loginInvites/{athlete.loginEmail}.status == 'claimed'`. Nothing on the athlete doc says "claimed"; a provisioned athlete login with no invite counts as unclaimed. The server also counts the 18+ member who created their own household (the household's `createdBy` uid has a `users` doc with this `athleteId`). Once an 18+ athlete has a claimed login, the parent's account is refused every create and update on that athlete's record, a minor-era (`needs-adult`) one included.
+
+**Notices** (`functions/portal/mental-consent.js`, `mental-consent-request.js`, copy in `consent-notices.js`), category `schedule`, the push opening `/portal/consent/mental`; ledger ids follow `notifications/{kind}_{subjectKey}`:
+
+| Kind | Sent by | Ledger id |
+|---|---|---|
+| `consent-needed` | `onBookingCreated`, for a confirmed `mental` booking dated today or later (Chicago) | `consent-needed_consent:<athleteId>:<booking.date>` |
+| `consent-needed` | `requestMentalConsent`, Yannick's "Send a reminder" | `consent-needed_consent:<athleteId>:asked-<Chicago today>` |
+| `consent-reminder` | `sessionReminders`, the day before a confirmed `mental` booking | `consent-reminder_consent-reminder:<athleteId>:<date>` |
+| `consent-signed` | `onMentalConsentSigned`, on a portal create (never for paper) | `consent-signed_<athleteId>` |
+
+Email is locked on for `consent-needed` and `consent-reminder` (`channelAllowed`'s optional fourth argument, the kind); push, and the receipt's email, follow the `schedule` preference. Audience: a minor, or an 18+ athlete with no claimed login → `householdId` set and `athleteId: null` (the household's parents only; the row never shows in a child login's Recent notices); an 18+ athlete with a claimed login → `householdId: null`, `athleteId` set (that login only). The three asks send nothing while `config/mentalConsent.notices` is not true, when the household doc is missing, when the status is `signed` or `no-dob`, or for a test family (below); the two automatic ones also need `type 'mental'`, `status 'confirmed'`, an `athleteId` and a date on or after today (Chicago), so a held Calendly session (no booking) never asks. The callable answers `{ status: 'sent' | 'duplicate' }` (a duplicate is any `consent-needed` row for the athlete created today, found by the `subjectKey` range `consent:<athleteId>:` to `consent:<athleteId>;`) and refuses with `details.reason` `not-mental`, `no-athlete`, `disabled`, `no-household`, `test-household`, `already-signed`, `no-dob` or `send-failed`. The receipt is not gated.
+
+**Test families.** The asks skip an athlete when `household.test === true` **or** `athlete.test === true` (the Monday check-in email reads the household mark, the rules read the athlete mark; `scripts/mark-test-household.mjs` sets both). Test athletes still show on Yannick's list and can sign on staging.
+
+Query: a parent's one equality (`householdId`), an athlete login's get by id, staff unfiltered, the functions by id; no `firestore.indexes.json` change. Seed (`scripts/lib/consent-fixtures.mjs`): `jordan` signed as a minor by `parent-dana` nine days back and countersigned by `mental` the next day; the new 18+ athlete `quinn-parker` (a Parker sibling, dob 2006-08-20, so `sage-parker`'s fixtures do not move) signed §11 by hand-the-phone on `parent-sam` three days back, not countersigned; `reese` (the seeded Calendly 1:1) and `nico` unsigned. Rules probe: `scripts/rules-probes/mental-consent.mjs` `taskMentalConsent`.
+
+### `config/mentalConsent` (2026-10-30)
+
+The switch for the automatic consent notices: `{ notices: bool, enabledAt: 'YYYY-MM-DD' | null }`. Absent == off. While `notices` is not `true` the booking ask, the day-before reminder and Yannick's "Send a reminder" (refused `disabled`) send nothing; the `consent-signed` receipt and the rules are not gated. **Writer: `scripts/set-mental-consent-flag.mjs` only** (a clone of `set-contract-flag.mjs`: `--on | --off`, `--dry-run | --yes`; the owner runs `--prod --on --yes` right after `develop:main`); the `config` write rule admits `contract` alone, so no client writes it. `--on` stamps today (America/Chicago) as `enabledAt` unless the doc is already on with a date, which it keeps; `--off` writes `enabledAt: null`. **Readers:** the existing `config` read rule (`coach`, `mental`, `ops`, `owner` and any account with a `specialistId`) and the functions (Admin SDK). Seed: off (`{ notices: false, enabledAt: null }`).
+
 ### Billing rows (derived, no new collection)
 
 Sprint 5 adds a per-child billing list to the parent surface. It is **not** a
@@ -1809,6 +1869,9 @@ already backs another live booking (id
 `grace-expiring` for purchased tokens is keyed per athlete and expiry date
 (`grace-expiring_{athleteId}_single_{expiresAt}`), one notice however many
 tokens expire together.
+**Mental consent (2026-10-30):** three more `schedule` kinds, `consent-needed`,
+`consent-reminder` and `consent-signed`; their ledger ids, audience and gates
+are under [`mentalConsents`](#mentalconsentsathleteid-2026-10-30).
 Titles and bodies are stored as sent, so the in-app list re-renders nothing
 from the underlying booking or session. Copy (`functions/portal/notices.js`)
 names the athlete by the first word of `athletes.name` — there is no
@@ -2250,3 +2313,4 @@ Staging - the Railway "Staging" environment, https://rypacad.ryptest.com, built 
 - `households.test` and `athletes.test` (boolean, absent == false): `true` only on the test family - `households/ryp-test-family` "RYP Test Family" and its athletes `ryp-test-ava` (under 18) and `ryp-test-max` (18+) - written by the owner-run `scripts/provision-test-family.mjs` (`--dry-run`, then `--yes`). No client writes either field.
 - Every staff count and report leaves `test: true` households and their athletes out (`frontend/src/portal/data/testFamily.js`): the admin dashboard (enrolled, membership counts, lapsed households, outstanding rows, enrollment by package, and the Households card's "Households · N") and the sign-ups report. The membership export (`scripts/export-memberships.mjs`) skips them, and an ad-hoc export made for the owner (a past-families list) skips them too. Working lists (the assessments list, the staff households directory on the Households card, where the row is labelled Test) show the test family by name. The Commitment Contract board and the Monday check-in email (mental tools, 2026-10-28: `onContract` in `frontend/src/portal/data/contractBoard.js`, `functions/portal/contract-checkins.js`) leave `test: true` households out too; Yannick's Athletes list still shows everyone.
 - The test family has no package, no billing and no Stripe ids, and never books, waitlists or pays: sessions and Stripe are live on staging. The rules hold the booking half: `firestore.rules` athleteBillingOk refuses a booking, re-book or waitlist join for any `athletes.test == true` (a missing `billing` alone reads as paid). Its research answers start unanswered (the parent answers the one-time confirm at staging); `--reset` deletes its athletes' assessment windows and profiles and clears those answers, for another rehearsal.
+- The mental consent asks (2026-10-30: the booking ask, the day-before reminder, Yannick's "Send a reminder") skip an athlete when `households.test` or `athletes.test` is true; test athletes still sign on staging. See [`mentalConsents`](#mentalconsentsathleteid-2026-10-30).

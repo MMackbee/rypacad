@@ -1,6 +1,10 @@
 import React, { act } from 'react';
 import { renderScreen } from './testRender';
 import Reservations from './Reservations';
+// Mental consent (plan Task 13): no consent rows unless a case sets them.
+let mockConsents;
+jest.mock('../hooks/mentalConsent', () => ({ useFamilyConsents: () => mockConsents }));
+beforeEach(() => { mockConsents = { data: null, loading: false, error: null }; });
 
 const row = (over) => ({
   id: 's1', sessionId: 's1', bookingId: 'b1', date: '2026-11-10', dayLabel: 'Tue, Nov 10', isToday: false,
@@ -157,4 +161,20 @@ describe('cancelling a booking that repeats on later weeks', () => {
     expect(r.button('Cancel just this one')).toBeNull();
     await r.unmount();
   });
+});
+
+/** A consent FamilyRow (plan Task 8) for the mocked hook. */
+const consentRow = (athleteId, over = {}) => ({ athleteId, name: 'Reese Whitfield', firstName: 'Reese', viewer: 'parent', status: 'unsigned', record: null, adultToday: false,
+  claimedLogin: false, drivingUnanswered: false, nextMental: null, draft: null, ...over });
+
+test("mental consent: an unsigned athlete's 1:1 says Consent needed; a golf row does not", async () => {
+  mockConsents = { data: { viewer: 'parent', rows: [], byId: { a1: consentRow('a1') } }, loading: false, error: null };
+  mockRows = [row()];
+  const r = await renderScreen(<Reservations bare />);
+  expect(r.text()).toContain('Consent needed · Sign');
+  await r.unmount();
+  mockRows = [row({ type: 'training', name: 'Training block' })];
+  const golf = await renderScreen(<Reservations bare />);
+  expect(golf.text()).not.toContain('Consent needed');
+  await golf.unmount();
 });

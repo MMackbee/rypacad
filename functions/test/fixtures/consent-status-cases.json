@@ -1,0 +1,171 @@
+[
+  {
+    "label": "no dob, no record",
+    "athlete": {
+      "dob": null
+    },
+    "record": null,
+    "utcToday": "2026-11-05",
+    "want": "no-dob"
+  },
+  {
+    "label": "malformed dob",
+    "athlete": {
+      "dob": "June 2010"
+    },
+    "record": null,
+    "utcToday": "2026-11-05",
+    "want": "no-dob"
+  },
+  {
+    "label": "no dob even with a record",
+    "athlete": {
+      "dob": null
+    },
+    "record": {
+      "adult": false,
+      "method": "portal",
+      "version": "2026-10-30",
+      "adultSignature": null
+    },
+    "utcToday": "2026-11-05",
+    "want": "no-dob"
+  },
+  {
+    "label": "minor, no record",
+    "athlete": {
+      "dob": "2012-05-14"
+    },
+    "record": null,
+    "utcToday": "2026-11-05",
+    "want": "unsigned"
+  },
+  {
+    "label": "minor, signed",
+    "athlete": {
+      "dob": "2012-05-14"
+    },
+    "record": {
+      "adult": false,
+      "method": "portal",
+      "version": "2026-10-30",
+      "adultSignature": null
+    },
+    "utcToday": "2026-11-05",
+    "want": "signed"
+  },
+  {
+    "label": "signed as a minor, 18 today (UTC)",
+    "athlete": {
+      "dob": "2008-11-05"
+    },
+    "record": {
+      "adult": false,
+      "method": "portal",
+      "version": "2026-10-30",
+      "adultSignature": null
+    },
+    "utcToday": "2026-11-05",
+    "want": "needs-adult"
+  },
+  {
+    "label": "signed as a minor, 18 tomorrow",
+    "athlete": {
+      "dob": "2008-11-06"
+    },
+    "record": {
+      "adult": false,
+      "method": "portal",
+      "version": "2026-10-30",
+      "adultSignature": null
+    },
+    "utcToday": "2026-11-05",
+    "want": "signed"
+  },
+  {
+    "label": "Feb 29 birthday is 18 on Mar 1",
+    "athlete": {
+      "dob": "2008-02-29"
+    },
+    "record": {
+      "adult": false,
+      "method": "portal",
+      "version": "2026-10-30",
+      "adultSignature": null
+    },
+    "utcToday": "2026-03-01",
+    "want": "needs-adult"
+  },
+  {
+    "label": "Feb 29 birthday is not 18 on Feb 28",
+    "athlete": {
+      "dob": "2008-02-29"
+    },
+    "record": {
+      "adult": false,
+      "method": "portal",
+      "version": "2026-10-30",
+      "adultSignature": null
+    },
+    "utcToday": "2026-02-28",
+    "want": "signed"
+  },
+  {
+    "label": "adult record",
+    "athlete": {
+      "dob": "2007-03-02"
+    },
+    "record": {
+      "adult": true,
+      "method": "portal",
+      "version": "2026-10-30",
+      "adultSignature": null
+    },
+    "utcToday": "2026-11-05",
+    "want": "signed"
+  },
+  {
+    "label": "re-signed after 18",
+    "athlete": {
+      "dob": "2008-11-05"
+    },
+    "record": {
+      "adult": false,
+      "method": "portal",
+      "version": "2026-10-30",
+      "adultSignature": {
+        "name": "Max"
+      }
+    },
+    "utcToday": "2026-11-05",
+    "want": "signed"
+  },
+  {
+    "label": "paper counts",
+    "athlete": {
+      "dob": "2012-05-14"
+    },
+    "record": {
+      "adult": false,
+      "method": "paper",
+      "version": "2026-10-30",
+      "adultSignature": null
+    },
+    "utcToday": "2026-11-05",
+    "want": "signed"
+  },
+  {
+    "label": "an older version still counts",
+    "athlete": {
+      "dob": "2012-05-14"
+    },
+    "record": {
+      "adult": false,
+      "method": "portal",
+      "version": "2026-09-01",
+      "adultSignature": null
+    },
+    "utcToday": "2026-11-05",
+    "want": "signed"
+  }
+]

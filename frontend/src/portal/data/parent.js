@@ -68,6 +68,8 @@ export const NOTIFICATION_CATEGORIES = [
     description: 'Confirmations, reminders, waitlist spots, cancellations',
     email: true,
     push: true,
+    // The per-kind email lock (functions channelAllowed's 4th argument), not lockedChannels: that would lock every session email.
+    footnote: "Yannick's consent requests always go by email; push is your choice.",
   },
   {
     id: 'progress',

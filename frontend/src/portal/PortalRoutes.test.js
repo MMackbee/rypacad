@@ -45,6 +45,7 @@ jest.mock('./screens/Roster', () => ({
   SessionAttendance: ({ role, readOnly }) => { mockRosterRenders.push({ role, readOnly }); return `ATTENDANCE as ${role}${readOnly ? ' (view only)' : ''}`; },
 }));
 jest.mock('./screens/SpecialistDay', () => ({ __esModule: true, default: () => 'MY SESSIONS' }));
+jest.mock('./screens/MentalConsentFlow', () => ({ __esModule: true, default: ({ athleteId, change }) => `CONSENT FLOW ${athleteId}${change ? ' (change)' : ''}` }));
 jest.mock('./screens/CommitmentContract', () => ({ __esModule: true, default: () => 'CONTRACT' }));
 jest.mock('./screens/AuthAction', () => ({ __esModule: true, default: () => 'AUTH ACTION' }));
 jest.mock('./screens/AthleteDashboard', () => ({ __esModule: true, default: () => 'ATHLETE HOME' }));
@@ -439,4 +440,25 @@ test('a roster opens read-only exactly where the rules would refuse the viewer, 
     expect([...new Set(mockRosterRenders.map((x) => `${x.role}:${x.readOnly}`))]).toEqual([`${user.role}:${readOnly}`]);
     await r.unmount();
   }
+});
+
+// Mental consent (2026-10-30 plan Task 11): a parent and an athlete login reach the flow; a coach sees nothing of consent.
+test('/portal/consent/mental/:athleteId renders for parent and athlete and redirects a coach', async () => {
+  mockLive.value = true;
+  for (const user of [{ uid: 'u-p', role: 'parent', householdId: 'hh' }, { uid: 'u-a', role: 'athlete', athleteId: 'ava' }]) {
+    mockUser.value = user;
+    const r = await mount('/portal/consent/mental/ava');
+    expect(r.pathname()).toBe('/portal/consent/mental/ava');
+    expect(r.container.textContent).toBe('CONSENT FLOW ava');
+    await r.unmount();
+  }
+  mockUser.value = { uid: 'u-p', role: 'parent', householdId: 'hh' };
+  const change = await mount('/portal/consent/mental/ava?change=1');
+  expect(change.container.textContent).toBe('CONSENT FLOW ava (change)');
+  await change.unmount();
+  mockUser.value = { uid: 'c1', role: 'coach' };
+  const coach = await mount('/portal/consent/mental/ava');
+  expect(coach.pathname()).toBe('/portal/coach');
+  expect(coach.container.textContent).toBe('COACH HOME as coach');
+  await coach.unmount();
 });
