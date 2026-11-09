@@ -138,5 +138,6 @@ test("seed mode, the review harness only: Jordan on a later UTC date needs the 1
   await settle(n);
   expect(n.out.current.data.consent.summary.summary).toContain('Location: not transcribed');
   expect(n.out.current.data.consent.summary.summary).toContain('Signed on paper');
+  expect(n.out.current.data.consent.summary.summary).toContain('Emergency contact: not transcribed');
   n.unmount();
 });

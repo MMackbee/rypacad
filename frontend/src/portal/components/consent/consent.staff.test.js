@@ -148,6 +148,10 @@ test('section 11 is never offered for an athlete under 18, nor on a correction o
   await minor.click('Record a paper signature');
   expect(minor.button('Section 11').disabled).toBe(true);
   expect(minor.text()).toContain('Ava is under 18, so the form is section 10.');
+  // Section 10 starts chosen for a minor, so its fields show without a tap.
+  expect(minor.button('Section 10').getAttribute('aria-pressed')).toBe('true');
+  expect(minor.container.querySelector("[aria-label=\"Athlete's name\"]")).not.toBeNull();
+  expect(minor.button('Driving: yes')).not.toBeNull();
   await minor.unmount();
 
   // An 18-year-old's minor-era paper record, withdrawn: the correction stays section 10 (the re-sign is the 18+ path).

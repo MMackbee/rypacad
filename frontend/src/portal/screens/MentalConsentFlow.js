@@ -82,7 +82,7 @@ function SignFlow({ bare, data, sign, saveDraft, exit, onDone, onBack }) {
     return (
       <Frame bare={bare}>
         <div ref={top} />
-        <DoneScreen firstName={first} viewer={data.viewer} result={result} todayISO={academyDateISO()} nextName={data.nextName} onNext={next} onDone={() => onDone?.(exit)} />
+        <DoneScreen firstName={first} viewer={data.viewer} adult={adult} result={result} todayISO={academyDateISO()} nextName={data.nextName} onNext={next} onDone={() => onDone?.(exit)} />
       </Frame>
     );
   }

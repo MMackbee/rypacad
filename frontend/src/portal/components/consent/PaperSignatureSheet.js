@@ -32,8 +32,11 @@ function Pick({ label, on, onClick, disabled = false }) {
 }
 const row = { display: 'flex', flexWrap: 'wrap', gap: 8 };
 
-/** The form's starting values: the record's own for a correction, blank for a new paper record (a re-sign is section 11). */
-function initial({ mode, record, resign }) {
+/**
+ * The form's starting values: the record's own for a correction, blank for a new paper record. A re-sign is
+ * section 11; an athlete under 18 today can only be section 10, so it starts chosen with its fields showing.
+ */
+function initial({ mode, record, resign, under18 }) {
   if (mode === 'correct' && record) {
     const c = record.choices || {};
     const ec = c.emergencyContact || {};
@@ -46,7 +49,7 @@ function initial({ mode, record, resign }) {
     };
   }
   return {
-    date: '', section: resign ? '11' : null, version: CONSENT_VERSION, signerName: '', assentName: '', assentAudio: null,
+    date: '', section: resign ? '11' : under18 ? '10' : null, version: CONSENT_VERSION, signerName: '', assentName: '', assentAudio: null,
     location: null, audio: null, driving: null, parentSessions: null, parentName: '', ecName: '', ecPhone: '', ecRel: '',
   };
 }
@@ -83,7 +86,8 @@ function check(v, elevenBlocked, dob = null) {
  */
 export default function PaperSignatureSheet({ open, athlete, record = null, mode = 'record', onSave, onClose, saving = false, error = null }) {
   const resign = mode === 'record' && Boolean(record);
-  const [v, setV] = useState(() => initial({ mode, record, resign }));
+  const under18 = typeof athlete?.dob === 'string' && DATE_RE.test(athlete.dob) && !isAdultOnDate(athlete.dob, utcTodayISO());
+  const [v, setV] = useState(() => initial({ mode, record, resign, under18 }));
   if (!open) return null;
   const set = (key) => (value) => setV((s) => ({ ...s, [key]: value }));
   const toggle = (key, value) => () => setV((s) => ({ ...s, [key]: s[key] === value ? null : value }));
@@ -91,7 +95,6 @@ export default function PaperSignatureSheet({ open, athlete, record = null, mode
   const minorSection = v.section === '10';
   const withdrawn = Boolean(record?.assent?.withdrawnBy);
   const first = String(athlete?.name || '').trim().split(/\s+/)[0] || 'the athlete';
-  const under18 = typeof athlete?.dob === 'string' && DATE_RE.test(athlete.dob) && !isAdultOnDate(athlete.dob, utcTodayISO());
   const keepTen = mode === 'correct' && withdrawn;
   const elevenBlocked = under18 || keepTen;
   const elevenNote = under18 ? `${first} is under 18, so the form is section 10.` : keepTen ? `${first} withdrew the recording answer, so this record stays section 10.` : null;

@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import { color, font } from '../tokens';
 import BottomTabBar from '../components/BottomTabBar';
 import Button from '../components/Button';
@@ -48,22 +48,36 @@ function ConsentRow({ row, onOpen, navigate, onWithdraw }) {
  * athlete this login sees, with its status line; a household with one
  * athlete goes straight into that athlete's flow (`onOpen(id, { replace:
  * true })`) unless `autoOpen` is off (back from the flow, or `?withdraw=1`)
- * or the row's action is the athlete's own withdrawal. `demoDraft` is the
- * review harness's (seed only).
+ * or the row's action is the athlete's own withdrawal. `?withdraw=1` (the
+ * athlete home's "Stop recording") opens the Stop recording sheet at once,
+ * one tap instead of two, and is dropped from the URL as it is used.
+ * `demoDraft` is the review harness's (seed only).
  */
 export default function MentalConsent({ bare = false, autoOpen = true, onOpen, demoDraft = null }) {
   const navigate = useNavigate();
+  const [searchParams, setSearchParams] = useSearchParams();
+  // Came for the withdrawal: never auto-open the flow on this visit, even once the param is gone.
+  const withdrawVisit = useRef(searchParams.has('withdraw'));
   const { data, loading, error } = useFamilyConsents({ demoDraft });
   const rows = data?.rows ?? null;
   const opened = useRef(false);
   const [withdrawing, setWithdrawing] = useState(null); // { athleteId, busy, error } while the sheet is open
 
   useEffect(() => {
-    if (opened.current || !autoOpen || !rows || rows.length !== 1) return;
+    if (opened.current || !autoOpen || withdrawVisit.current || !rows || rows.length !== 1) return;
     if (familyLine(rows[0]).action === 'withdraw') return;
     opened.current = true;
     onOpen?.(rows[0].athleteId, { replace: true });
   }, [autoOpen, rows, onOpen]);
+
+  useEffect(() => {
+    if (!rows || !searchParams.has('withdraw')) return;
+    const own = rows.find((r) => familyLine(r).action === 'withdraw');
+    if (own) setWithdrawing({ athleteId: own.athleteId, busy: false, error: null });
+    const rest = new URLSearchParams(searchParams);
+    rest.delete('withdraw');
+    setSearchParams(rest, { replace: true });
+  }, [rows, searchParams, setSearchParams]);
 
   const viewer = data?.viewer === 'athlete' ? 'athlete' : 'parent';
   const confirmWithdraw = async () => {

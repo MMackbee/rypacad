@@ -292,8 +292,12 @@ export function AssentStep({ state, set, firstName, under13, answerOnly = false 
   );
 }
 
-/** After the save, or opened on a record already there: what was recorded, and where to go next. */
-export function DoneScreen({ firstName, viewer, result, todayISO, nextName, onNext, onDone }) {
+/**
+ * After the save, or opened on a record already there: what was recorded, and where to go next. `adult`: a
+ * section 11 record signed on the parent's phone, whose recording, contact and parent-session answers change
+ * only with the athlete's typed name (spec 4.3), so the copy says so.
+ */
+export function DoneScreen({ firstName, viewer, adult = false, result, todayISO, nextName, onNext, onDone }) {
   const rec = result?.status === 'already' ? result.record : null;
   const who = rec?.adultSignature?.name ?? rec?.signer?.name;
   const when = shortDate(rec?.adultSignature?.signedAt ?? rec?.signedAt);
@@ -307,7 +311,9 @@ export function DoneScreen({ firstName, viewer, result, todayISO, nextName, onNe
             ? `Already signed${who ? ` by ${who}` : ''}${when ? ` on ${when}` : ''}. Nothing more to do here.`
             : own
               ? `Signed · ${monthDayLabel(todayISO)}. Yannick will see this before your session. You can change the recording or location choice any time from your home screen.`
-              : `Signed · ${monthDayLabel(todayISO)}. Yannick will see this before ${firstName}'s session. You can change the recording or location choice any time from ${firstName}'s card.`}
+              : adult
+                ? `Signed · ${monthDayLabel(todayISO)}. Yannick will see this before ${firstName}'s session. You can change the location any time from ${firstName}'s card; changing the recording, emergency contact or parent sessions needs ${firstName} to type their name to confirm.`
+                : `Signed · ${monthDayLabel(todayISO)}. Yannick will see this before ${firstName}'s session. You can change the recording or location choice any time from ${firstName}'s card.`}
         </Body>
       </Card>
       {nextName && onNext ? <Button variant="outline" height={48} onClick={onNext}>{`Next: sign for ${nextName}`}</Button> : null}

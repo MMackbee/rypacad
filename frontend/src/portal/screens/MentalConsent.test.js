@@ -71,9 +71,11 @@ test('a minor login withdraws its recording answer from the list, which never au
   const r = await renderScreen(<MentalConsent bare autoOpen onOpen={onOpen} />, { path: '/portal/consent/mental?withdraw=1' });
   expect(onOpen).not.toHaveBeenCalled();
   expect(r.text()).toContain('Signed Oct 30 · Your parent manages this · Recording: yes');
-  await r.click('Stop recording my sessions');
+  // ?withdraw=1 (the home's "Stop recording") opens the sheet at once - one tap, not two - and is used up.
   expect(r.text()).toContain("Stop recording? Yannick won't record your sessions until your parent changes it with you.");
+  expect(r.location().search).toBe('');
   await r.click('Keep it');
+  expect(r.button('Yes, stop recording')).toBeNull();
   expect(mockWithdraw).not.toHaveBeenCalled();
   await r.click('Stop recording my sessions'); await r.click('Yes, stop recording');
   expect(mockWithdraw).toHaveBeenCalledWith('jordan');
@@ -86,6 +88,16 @@ test('a minor login withdraws its recording answer from the list, which never au
   expect(after.button('Stop recording my sessions')).toBeNull();
   expect(after.text()).toContain('Signed Oct 30 · Your parent manages this · Recording: no');
   await after.unmount();
+});
+
+test('?withdraw=1 with nothing left to withdraw: no sheet, no flow, and the param is dropped', async () => {
+  mockRows = [row({ viewer: 'athlete', status: 'signed', record: { ...minorRecord, assent: { ...minorRecord.assent, audio: false, withdrawnBy: 'u-jordan' } } })];
+  const onOpen = jest.fn();
+  const r = await renderScreen(<MentalConsent bare autoOpen onOpen={onOpen} />, { path: '/portal/consent/mental?withdraw=1' });
+  expect(r.container.querySelector('[role="dialog"]')).toBeNull();
+  expect(r.location().search).toBe('');
+  expect(onOpen).not.toHaveBeenCalled();
+  await r.unmount();
 });
 
 test('the Stop recording sheet: named by its question, Keep it first with the focus, Escape closes it', async () => {

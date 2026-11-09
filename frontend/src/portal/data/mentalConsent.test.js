@@ -118,6 +118,11 @@ test.each([
   ['athlete 18+, unsigned', maxRow({ viewer: 'athlete', claimedLogin: true }), 'Not signed', 'Sign now'],
   ['athlete 18+, needs-adult', maxRow({ viewer: 'athlete', claimedLogin: true, status: 'needs-adult', record: minorRecord() }), 'Needs your 18+ signature', 'Sign now'],
   ['athlete 18+, signed', maxRow({ viewer: 'athlete', claimedLogin: true, status: 'signed', record: adultRecord() }), 'Signed Oct 30', 'Change choices'],
+  ['parent, signed on paper', row({ status: 'signed', record: minorRecord({ method: 'paper' }) }), 'Signed on paper Oct 30 by Dana', 'Change choices'],
+  ['athlete (minor), signed on paper', row({ viewer: 'athlete', status: 'signed', record: minorRecord({ method: 'paper' }) }),
+    'Signed on paper Oct 30 · Your parent manages this · Recording: yes', 'Stop recording'],
+  ['parent, re-signed 18+ on paper, claimed', maxRow({ status: 'signed', claimedLogin: true,
+    record: minorRecord({ adultSignature: { signedAt: SIGNED_AT, name: 'Max Test', method: 'paper' } }) }), 'Signed on paper Oct 30 · Max manages this', null],
 ])('familyLine: %s', (label, r, text, button) => {
   const line = familyLine(r);
   expect([line.text, line.label]).toEqual([text, button]);
@@ -252,11 +257,16 @@ describe('staffConsentSummary', () => {
   test('a paper record, as far as the paper shows', () => {
     const paper = signed({ method: 'paper', signedAt: paperDateToStamp('2026-10-28'), signedBy: 'u-ops', countersign: null,
       assent: { ...minorRecord().assent, at: paperDateToStamp('2026-10-28') },
-      choices: { ...minorRecord().choices, location: null, audio: false, updatedAt: new Date('2026-11-02T15:00:00Z') }, history: [] });
+      choices: { ...minorRecord().choices, location: null, audio: false, updatedAt: new Date('2026-11-02T15:00:00Z'), updatedBy: 'u-ops' }, history: [] });
     const s = sum(paper);
     expect(s.summary.startsWith('Signed on paper Oct 28 by Dana Whitfield (parent) · recorded Nov 2')).toBe(true);
     expect(s.summary).toContain('Location: not transcribed');
     expect(s.summary).toContain('Recording: no');
+    // The paper form has no "same as parent" box: a blank contact typed from paper is not transcribed...
+    expect(s.summary).toContain('Emergency contact: not transcribed');
+    expect(s.summary).not.toContain('same as parent');
+    // ...until the family's own Change choices answers "same as parent".
+    expect(sum({ ...paper, choices: { ...paper.choices, updatedBy: 'u-dana' } }).summary).toContain('Emergency contact: same as parent');
     const corrected = { ...paper, choices: { ...paper.choices, updatedAt: new Date('2026-11-04T15:00:00Z') }, history: [{ choices: paper.choices }] };
     expect(sum(corrected).summary).toContain('recorded Nov 2');
   });

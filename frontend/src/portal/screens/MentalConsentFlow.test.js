@@ -200,7 +200,9 @@ test("adult on the parent's phone: the hand-over comes before the agreement; it 
   await r.click('Done');
   expect(mockFlow.sign).toHaveBeenCalledTimes(1);
   expect(mockFlow.sign.mock.calls[0][0]).toMatchObject({ branch: 'adult-handover', signature: { agreed: true, name: 'Max Test' }, choices: { location: 'C', audio: true, parentSessions: true } });
-  expect(r.text()).toContain('Signed · Nov 5.');
+  expect(r.text()).toContain("Signed · Nov 5. Yannick will see this before Max's session. You can change the location any time from Max's card; "
+    + 'changing the recording, emergency contact or parent sessions needs Max to type their name to confirm.');
+  expect(r.text()).not.toContain('You can change the recording or location choice any time');
   await r.unmount();
 });
 

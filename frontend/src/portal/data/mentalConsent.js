@@ -176,21 +176,24 @@ function hrefFor(action, athleteId) {
   return action ? `${FLOW}/${athleteId}` : null;
 }
 
-/** When and by whom, as the lines show it: the 18+ re-sign when there is one. */
+/** When, by whom and whether on paper, as the lines show it: the 18+ re-sign when there is one. */
 function signedParts(record) {
   const s = record?.adultSignature;
-  return s ? { date: shortDate(s.signedAt), by: firstWord(s.name) } : { date: shortDate(record?.signedAt), by: firstWord(record?.signer?.name) };
+  const { date, by, paper } = s
+    ? { date: shortDate(s.signedAt), by: firstWord(s.name), paper: s.method === 'paper' }
+    : { date: shortDate(record?.signedAt), by: firstWord(record?.signer?.name), paper: record?.method === 'paper' };
+  return { by, signed: `Signed ${paper ? 'on paper ' : ''}${date}` };
 }
 
 /** The line's text and action; `reason` is what a booking row says instead of "Sign". */
 function lineFor(row) {
   const first = row.firstName;
   const own = `${first} signs this on their own login`;
-  const { date, by } = signedParts(row.record);
+  const { signed, by } = signedParts(row.record);
   if (row.viewer === 'athlete') {
     if (row.status === 'no-dob') return { text: 'Add your date of birth first', action: null };
     if (row.adultToday) {
-      if (row.status === 'signed') return { text: `Signed ${date}`, action: 'change' };
+      if (row.status === 'signed') return { text: signed, action: 'change' };
       return { text: row.status === 'needs-adult' ? 'Needs your 18+ signature' : 'Not signed', action: 'sign' };
     }
     if (row.status !== 'signed') return { text: 'Your parent signs this', action: null };
@@ -199,12 +202,12 @@ function lineFor(row) {
     const withdraw = !isAdultRecord(rec) && ownYes;
     // The athlete's own yes still stands (and can be withdrawn) when the parent said no; say whose no it is.
     const recording = rec.choices?.audio === true && ownYes ? 'yes' : withdraw ? 'no (your parent said no)' : 'no';
-    return { text: `Signed ${date} · Your parent manages this · Recording: ${recording}`, action: withdraw ? 'withdraw' : null };
+    return { text: `${signed} · Your parent manages this · Recording: ${recording}`, action: withdraw ? 'withdraw' : null };
   }
   if (row.status === 'no-dob') return { text: `Add ${first}'s date of birth first`, action: null };
   if (row.status === 'signed') {
-    if (isAdultRecord(row.record) && row.claimedLogin) return { text: `Signed ${date} · ${first} manages this`, action: null };
-    return { text: `Signed ${date} by ${by}${row.drivingUnanswered ? ' · Driving permission not answered' : ''}`, action: 'change' };
+    if (isAdultRecord(row.record) && row.claimedLogin) return { text: `${signed} · ${first} manages this`, action: null };
+    return { text: `${signed} by ${by}${row.drivingUnanswered ? ' · Driving permission not answered' : ''}`, action: 'change' };
   }
   if (row.status === 'needs-adult') {
     const needs = `Needs ${first}'s 18+ signature`;
@@ -273,9 +276,13 @@ function recordedAt(record) {
   return times.length ? Math.min(...times) : null;
 }
 
-function contactPart(c, adultRec) {
+/**
+ * A blank contact: "same as parent" is a minor's portal answer. The paper form has no such box, so a blank
+ * typed in from paper (the choices still the recorder's own) is "not transcribed", as is an adult's.
+ */
+function contactPart(c, adultRec, fromPaper) {
   const ec = c.emergencyContact;
-  if (!ec?.name) return `Emergency contact: ${adultRec ? 'not transcribed' : 'same as parent'}`;
+  if (!ec?.name) return `Emergency contact: ${adultRec || fromPaper ? 'not transcribed' : 'same as parent'}`;
   return `Emergency contact: ${ec.name}${ec.phone ? `, ${ec.phone}` : ''}${ec.relationship ? ` (${ec.relationship})` : ''}`;
 }
 
@@ -300,7 +307,7 @@ function summaryOf({ athlete, record, utcToday, first, recording }) {
   if (typeof c.driving === 'boolean') parts.push(`Driving: ${c.driving ? 'yes' : 'no'}`);
   else if (!adultRec && drivingAsked(athlete, utcToday)) parts.push('Driving: not answered');
   if (adultRec) parts.push(`Parent sessions: ${c.parentSessions ? `yes${c.parentName ? ` (${c.parentName})` : ''}` : 'no'}`);
-  parts.push(contactPart(c, adultRec));
+  parts.push(contactPart(c, adultRec, record.method === 'paper' && (c.updatedBy == null || c.updatedBy === record.signedBy)));
   parts.push(`Version ${s?.version ?? record.version}`);
   if (record.countersign) parts.push(`Countersigned ${shortDate(record.countersign.at)}`);
   return parts.join(' · ');
