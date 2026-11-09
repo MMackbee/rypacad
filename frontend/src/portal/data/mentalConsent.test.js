@@ -11,7 +11,7 @@ import {
   homeCardFor, isAdultRecord, msOf, needsConsentBeforeSession, paperDateToStamp, recordingAllowed, shortDate, signerFor, staffConsentSummary,
   trackerRows, utcTodayISO,
 } from './mentalConsent';
-import { normalizeChoices } from './mentalConsentWrites';
+import { choicesUpdate, normalizeChoices, paperCorrection } from './mentalConsentWrites';
 
 const CASES = JSON.parse(fs.readFileSync(path.resolve(__dirname, '../../../../functions/test/fixtures/consent-status-cases.json'), 'utf8'));
 const D = '2026-11-05';
@@ -269,6 +269,20 @@ describe('staffConsentSummary', () => {
     expect(sum({ ...paper, choices: { ...paper.choices, updatedBy: 'u-dana' } }).summary).toContain('Emergency contact: same as parent');
     const corrected = { ...paper, choices: { ...paper.choices, updatedAt: new Date('2026-11-04T15:00:00Z') }, history: [{ choices: paper.choices }] };
     expect(sum(corrected).summary).toContain('recorded Nov 2');
+  });
+  test("a family's answer to a paper record survives the owner correcting the record later", () => {
+    const blank = { name: null, phone: null, relationship: null };
+    const paper = signed({ method: 'paper', signedAt: paperDateToStamp('2026-10-28'), signedBy: 'u-ops', countersign: null,
+      assent: { ...minorRecord().assent, at: paperDateToStamp('2026-10-28') },
+      choices: { ...minorRecord().choices, location: null, emergencyContact: blank, updatedBy: 'u-ops' }, history: [] });
+    const answered = { ...paper, ...choicesUpdate({ current: paper, uid: 'u-dana', choices: { ...paper.choices, emergencyContact: blank }, stamp: new Date('2026-11-03T15:00:00Z') }) };
+    expect(sum(answered).summary).toContain('Emergency contact: same as parent');
+    const fixed = { ...answered, ...paperCorrection({ current: answered, uid: 'u-owner', signedAt: paperDateToStamp('2026-10-27'), stamp: new Date('2026-11-04T15:00:00Z') }) };
+    expect([fixed.signedBy, fixed.choices.updatedBy]).toEqual(['u-owner', 'u-owner']);
+    expect(sum(fixed).summary).toContain('Emergency contact: same as parent');
+    // A paper record only the academy ever wrote stays "not transcribed" through a correction.
+    const fixedUnanswered = { ...paper, ...paperCorrection({ current: paper, uid: 'u-owner', stamp: new Date('2026-11-04T15:00:00Z') }) };
+    expect(sum(fixedUnanswered).summary).toContain('Emergency contact: not transcribed');
   });
   test('not signed, no date of birth, and who a reminder reaches', () => {
     expect(sum(null)).toMatchObject({ label: 'Not signed', summary: null, canRemind: true });

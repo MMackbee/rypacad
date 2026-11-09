@@ -286,6 +286,21 @@ function contactPart(c, adultRec, fromPaper) {
   return `Emergency contact: ${ec.name}${ec.phone ? `, ${ec.phone}` : ''}${ec.relationship ? ` (${ec.relationship})` : ''}`;
 }
 
+/**
+ * Whether a paper record's choices are still only what the academy typed from the paper form: every
+ * stored choices map, current and in history, was written by one of the record's paper recorders (the
+ * current signedBy or an earlier one kept in history). A family's Change choices stamps the parent's
+ * uid and stays in history, so an owner correction afterwards, which restamps both to the owner, does
+ * not turn the family's "same as parent" back into "not transcribed" (review 2026-11-09).
+ */
+function choicesFromPaperOnly(record) {
+  if (record.method !== 'paper') return false;
+  const history = Array.isArray(record.history) ? record.history : [];
+  const recorders = new Set([record.signedBy, ...history.map((h) => h?.signedBy)].filter(Boolean));
+  return [record.choices, ...history.map((h) => h?.choices)]
+    .every((ch) => !ch || ch.updatedBy == null || recorders.has(ch.updatedBy));
+}
+
 function summaryOf({ athlete, record, utcToday, first, recording }) {
   const adultRec = isAdultRecord(record);
   const c = record.choices || {};
@@ -307,7 +322,7 @@ function summaryOf({ athlete, record, utcToday, first, recording }) {
   if (typeof c.driving === 'boolean') parts.push(`Driving: ${c.driving ? 'yes' : 'no'}`);
   else if (!adultRec && drivingAsked(athlete, utcToday)) parts.push('Driving: not answered');
   if (adultRec) parts.push(`Parent sessions: ${c.parentSessions ? `yes${c.parentName ? ` (${c.parentName})` : ''}` : 'no'}`);
-  parts.push(contactPart(c, adultRec, record.method === 'paper' && (c.updatedBy == null || c.updatedBy === record.signedBy)));
+  parts.push(contactPart(c, adultRec, choicesFromPaperOnly(record)));
   parts.push(`Version ${s?.version ?? record.version}`);
   if (record.countersign) parts.push(`Countersigned ${shortDate(record.countersign.at)}`);
   return parts.join(' · ');
