@@ -289,7 +289,6 @@ function ScheduleBody({ past, sessions, cancelled, tokens, days, onBook, onCance
                   time={s.time}
                   meridiem={s.meridiem}
                   type={rowCancelled ? 'cancelled' : s.type}
-                  ageGroup={rowCancelled ? null : s.ageGroup}
                   name={s.name}
                   meta={attendeeNoteFor(s) ?? s.meta}
                   variant={rowCancelled ? 'cancelled' : s.isToday ? 'live' : 'default'}

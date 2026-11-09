@@ -1,6 +1,5 @@
 import React from 'react';
 import { color, font, glow, radius, tint } from '../tokens';
-import AgeGroupChip from './AgeGroupChip';
 import { ReservedChip } from './Reserved';
 import TypeChip from './TypeChip';
 
@@ -42,11 +41,6 @@ const VARIANTS = {
  * @param {React.ReactNode} spendNote Which allowance pool this slot spends (05).
  *                                    Sits under the meta line so the cost is
  *                                    visible before the athlete commits.
- * @param {object} ageGroup  The suggested age group from `ageGroupFor(session)`
- *                           (data/schedule.js), or null. Callers pass it rather
- *                           than the card deriving it: the card is given a time
- *                           already split from its date, and a hint that guessed
- *                           its own weekday would be wrong somewhere.
  * @param {string} reserved  The handicap-reserved tag from `reservedTag(session)`
  *                           (data/reserved.js), or null on an open block.
  */
@@ -63,7 +57,6 @@ export default function SessionCard({
   footnote,
   action,
   spendNote,
-  ageGroup = null,
   reserved = null,
   gutter = 52,
   ruleHeight = 36,
@@ -114,7 +107,6 @@ export default function SessionCard({
         <div style={{ flex: 1, minWidth: 0 }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 5, marginBottom: 6, flexWrap: 'wrap' }}>
             <TypeChip type={type} />
-            <AgeGroupChip group={ageGroup} />
             <ReservedChip tag={reserved} />
           </div>
           <div

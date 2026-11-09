@@ -3169,6 +3169,12 @@ Confirmed defects, most serious first (full evidence with each claim is in the v
 
 ## Suggested age groups on training blocks (owner ruling, 2026-09-22)
 
+> **Removed 2026-11-09, owner.** The owner asked to take the age groups off the portal's session
+> bookings. The chip, the legend, `ageGroupFor` / `AGE_GROUP_BY_DAY` / `AGE_GROUPS`,
+> `components/AgeGroupChip.js` and the `ageOlder` / `ageYounger` tokens are gone from every session
+> view, coach screens included. What follows is the history. The RYP Tour's age groups are separate
+> and unaffected.
+
 Owner: each weekday block gets a colour-coded age hint, and the weekday pattern gains a fourth
 block. Mon/Wed 3 PM and 5 PM are 13 & up, 4 PM and 6 PM under 13; Tue/Thu 4 PM and 6 PM are 13 & up,
 5 PM and 7 PM under 13. Recorded as amendment v2.0.3 in SPRINT-12-PINS.md.

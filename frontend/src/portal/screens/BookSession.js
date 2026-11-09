@@ -6,7 +6,6 @@ import Button from '../components/Button';
 import PhoneFrame from '../components/PhoneFrame';
 import { SessionsCalendarCard } from '../components/CalendarCard';
 import SessionCard from '../components/SessionCard';
-import { AgeGroupLegend } from '../components/AgeGroupChip';
 import SkeletonCard, { SkeletonBar } from '../components/Skeleton';
 import { CapacityPill } from '../components/StatusBadge';
 import AllowancePools, { GraceLine, SpendNote, nextPeriodMonthName, nextPeriodName, nextPeriodOpen, spentTitle } from '../components/AllowancePools';
@@ -631,10 +630,6 @@ function DaySessionList({
       <div style={{ font: `600 13px ${font.body}`, color: color.text, padding: '2px 0 2px' }}>
         {dayLabel(iso, todayISO())}
       </div>
-      {/* The key sits with the blocks it explains, so a family reads it while
-          choosing rather than hunting for it. Only when the day actually has a
-          suggestion - Fridays, Saturdays and tournament-only days show none. */}
-      {sessions.some((s) => s.ageGroup) ? <AgeGroupLegend style={{ margin: '2px 0 8px' }} /> : null}
       {/* What a Tour event is, on the day a family first meets one to book. */}
       {sessions.some((s) => s.type === 'tournament') ? <Body size={12}>{tourEventExplainer(tokens?.unlimited)}</Body> : null}
       {sessions.length === 0 ? (
@@ -685,7 +680,6 @@ function DaySessionList({
               time={time}
               meridiem={meridiem}
               type={session.type}
-              ageGroup={session.ageGroup}
               reserved={reservedTag(session)}
               name={displayNameFor(session)}
               variant={held ? 'default' : isFull || tokensSpent || displayOnly || started || waiting || notTheirs ? 'full' : 'default'}

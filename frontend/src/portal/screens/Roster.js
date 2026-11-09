@@ -7,7 +7,6 @@ import CancelSheet from '../components/CancelSheet';
 import PhoneFrame from '../components/PhoneFrame';
 import StatusBadge from '../components/StatusBadge';
 import TypeChip from '../components/TypeChip';
-import AgeGroupChip from '../components/AgeGroupChip';
 import { ReservedChip } from '../components/Reserved';
 import ClubheadChip from '../components/assessments/ClubheadChip';
 import { useOpenAssessmentWindows } from '../hooks/assessments';
@@ -19,7 +18,6 @@ import { isLive } from '../hooks/live';
 import { bump } from '../hooks/invalidate';
 import RosterLoadNotice from '../components/RosterLoadNotice';
 import TourScoreSheet from './TourScoreSheet';
-import { ageGroupFor } from '../data/schedule';
 import { attendeeNoteFor } from '../data/specialists';
 import { DEFAULT_DURATION_MINUTES } from '../data/schedule';
 // Pure calendar/season helpers per the seam rule - data still travels
@@ -256,8 +254,6 @@ export function SessionAttendance({ variant = 'pre', bare = false, onBack, sessi
         // 'Training block' (the old binary fallback did exactly that).
         name: block.name || hooks.genericSessionName(block.type),
         meta: [block.time, block.meta].filter(Boolean).join(' · '),
-        // The suggested age group of the block the coach is about to run.
-        ageGroup: ageGroupFor({ date: block.date, time: block.time, type: block.type }),
         startsIn: realStartsIn(block),
       }
     : seedSession;
@@ -500,7 +496,6 @@ export function SessionAttendance({ variant = 'pre', bare = false, onBack, sessi
 
           <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
             <TypeChip type={session?.type} />
-            <AgeGroupChip group={session?.ageGroup} />
             {/* A handicap-reserved block: the limit is the hook's own read of the session. */}
             <ReservedChip tag={reservedTag({ maxHandicap: liveAttendance.sessionMaxHandicap })} />
             <span style={{ font: `400 11px ${font.body}`, color: color.textTertiary }}>

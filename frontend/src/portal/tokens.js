@@ -34,19 +34,6 @@ export const color = {
   textSecondary: '#CCCCCC',
   textTertiary: '#888888',
 
-  /**
-   * Suggested age groups (owner, 2026-09-22). Two hues that mean nothing else
-   * in this app: green is "tappable / on track", yellow is caution, red is
-   * error and amber #FA9931 is the payment retry ladder, so an age hint gets
-   * its own space rather than borrowing a meaning. Both are legible small on
-   * both grounds - blue 6.85:1 on the card surface and 8.3:1 on the page,
-   * lavender 7.8:1 and 9.4:1. Colour is never the only signal: the chip always
-   * carries "13+" or "U13", which is what a red-green colour-blind viewer (and
-   * anyone glancing at a phone in sunlight) actually reads.
-   */
-  ageOlder: '#5AA9E6',
-  ageYounger: '#C79BF2',
-
   // Supporting values, used consistently across the artboards.
   track: '#111111',       // meter tracks, inset fields
   dimmed: '#141414',      // disabled / closed surfaces
@@ -81,13 +68,6 @@ export const tint = {
    * black frame to keep the black label and spinner legible.
    */
   greenLoading: 'rgba(0,175,81,.45)',
-
-  /** Age-group chips (2026-09-22): a wash, never a solid fill - a solid fill
-   *  reads as "tap me", and an age hint is not a control. */
-  ageOlder: 'rgba(90,169,230,.13)',
-  ageOlderBorder: 'rgba(90,169,230,.45)',
-  ageYounger: 'rgba(199,155,242,.13)',
-  ageYoungerBorder: 'rgba(199,155,242,.45)',
 };
 
 export const font = {
