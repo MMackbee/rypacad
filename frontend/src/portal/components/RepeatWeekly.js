@@ -23,21 +23,17 @@ import { firstRunningWeek, lastRunningWeek } from '../data/season';
  * @param {string} windowEnd   The last bookable date for THIS athlete's package (openThrough).
  * @param {number} windowMonths  That package's window in months (windowMonthsFor), for the reach line and the day a locked week opens.
  * @param {boolean} elite      Elite spends no token, so no token line.
+ * @param {string[]} [offeredDates]  The dates the screen's live read offers this slot on (offeredWeeks below; a hidden session is on no such read). Given, the card offers only those weeks; absent, the static season.
  * @param {(untilISO) => Promise} onRepeat  useBooking().bookRecurring for the booked slot.
  */
-export default function RepeatWeekly({ date, time, type, windowEnd, windowMonths = 1, elite, onRepeat }) {
+export default function RepeatWeekly({ date, time, type, windowEnd, windowMonths = 1, elite, offeredDates, onRepeat }) {
   // null (offer), 'working', or bookRecurring's result.
   const [repeat, setRepeat] = useState(null);
-  // The next week this slot actually runs: a closure (the Dec 23 - Jan 3
-  // break) is neither offered nor named as the week to come back for.
-  const nextWeek = firstRunningWeek(addDaysISO(date, 7), time, type);
-  // The season's last running week has nothing to repeat into.
-  if (!nextWeek) return null;
+  const weeks = repeatWeeks({ date, time, type, windowEnd, offeredDates });
+  // The season's last running week, or no offered week left, has nothing to repeat into.
+  if (!weeks) return null;
+  const { nextWeek, until } = weeks;
   const weekday = format(parseISO(date), 'EEEE');
-  // The last week the repeat can really hold: the window's end (or the
-  // season's) stepped back over closures, so a window ending Dec 31 reads
-  // "through Tue, Dec 22", not a date in the Christmas break (review 2026-11-02).
-  const until = lastRunningWeek(nextWeek, windowEnd, time, type) ?? nextWeek;
 
   const run = async () => {
     setRepeat('working');
@@ -78,6 +74,47 @@ export default function RepeatWeekly({ date, time, type, windowEnd, windowMonths
       )}
     </Card>
   );
+}
+
+/**
+ * The dates a screen's live read offers the booked slot on (same type and
+ * full time), for the card's offeredDates (owner 2026-11-05: a hidden
+ * session is on no such read, data/hiddenSessions.js). undefined when the
+ * read does not hold the booked session itself: it is then not the read the
+ * booking came from (an older one), and the card keeps the static season.
+ *
+ * @param {Array<{id, date, time, type}>} rows  The read's rows, `time` the full '6:00 PM'.
+ * @param {{id, time, type}} slot               The booked session.
+ */
+export function offeredWeeks(rows, slot) {
+  if (!Array.isArray(rows) || !slot || !rows.some((r) => r.id === slot.id)) return undefined;
+  return rows.filter((r) => r.type === slot.type && r.time === slot.time).map((r) => r.date);
+}
+
+/**
+ * The week the card names next and the last week it offers, or null for no
+ * card. The static season: the next week this slot runs (a closure - the
+ * Dec 23 - Jan 3 break - is neither offered nor named as the week to come
+ * back for) and the last one the window holds, stepped back over closures,
+ * so a window ending Dec 31 reads "through Tue, Dec 22", not a date in the
+ * Christmas break (review 2026-11-02). With offeredDates (owner 2026-11-05)
+ * the weeks inside the window are only the ones the live read offers, so a
+ * hidden week is neither offered nor the reach, and none left means no card
+ * rather than an offer that books nothing. The "opens" line for the week
+ * just past the window stays the static season's: no read reaches past it.
+ */
+export function repeatWeeks({ date, time, type, windowEnd, offeredDates }) {
+  const nextWeek = firstRunningWeek(addDaysISO(date, 7), time, type);
+  if (!nextWeek) return null;
+  if (nextWeek > windowEnd || !offeredDates) {
+    return { nextWeek, until: lastRunningWeek(nextWeek, windowEnd, time, type) ?? nextWeek };
+  }
+  const offered = new Set(offeredDates);
+  const weeks = [];
+  for (let week = addDaysISO(date, 7); week <= windowEnd; week = addDaysISO(week, 7)) {
+    if (offered.has(week)) weeks.push(week);
+  }
+  return weeks.length ? { nextWeek: weeks[0], until: weeks[weeks.length - 1] } : null;
 }
 
 /** '2026-12-16' -> 'Wed, Dec 16'. */

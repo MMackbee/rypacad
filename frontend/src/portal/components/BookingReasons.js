@@ -3,6 +3,7 @@ import { color, font } from '../tokens';
 import { Banner } from './Primitives';
 import { BOOKING_OPENS_AT, BOOKING_OPENS_LABEL, academyDateISO, longDayLabel, nextMonthFirstShort, todayISO, windowOpensOn } from '../data/calendar';
 import { SESSION_STARTED_COPY } from '../data/sessionStart';
+import { HIDDEN_SESSION_LINE, SESSION_HIDDEN } from '../data/hiddenSessions';
 
 /**
  * Shared booking-rejection/lock/cancellation copy (Sprint 12 pin, contract
@@ -52,12 +53,15 @@ export function reasonCopy(reason) {
   // card and is inert; this is the write's own refusal when a screen loaded
   // before the booking let the tap through. A second tap changes nothing.
   if (reason === 'already-booked') return 'This athlete already has this session booked.';
+  // Owner 2026-11-05: a hidden session (data/hiddenSessions.js) is on no
+  // list; this is the write's refusal from a screen loaded before it was hidden.
+  if (reason === SESSION_HIDDEN) return HIDDEN_SESSION_LINE;
   return null;
 }
 
 /** False for the refusals a second tap on the same session cannot change. */
 export function canRetry(reason) {
-  return !['full', 'session-past', 'waitlist-closed', 'no-waitlist', 'handicap-reserved', 'already-booked'].includes(reason);
+  return !['full', 'session-past', 'waitlist-closed', 'no-waitlist', 'handicap-reserved', 'already-booked', SESSION_HIDDEN].includes(reason);
 }
 
 /** The non-cancellable Calendly row's action copy (MySchedule, Reservations). */

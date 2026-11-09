@@ -5,8 +5,13 @@ import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
-  PHIL_LABEL, RESERVED_RULES, SYNCED_FIELDS, mapEvents, planReport, planSync, planWrites, reservedLimitFor,
+  PHIL_LABEL, RESERVED_RULES, SYNCED_FIELDS, TUESDAY_HANDICAP_RULE, mapEvents, planReport, planSync, planWrites, reservedLimitFor,
 } from '../sync-calendar-sessions.mjs';
+import { pathToFileURL } from 'node:url';
+
+// Tuesday 3 PM OPENED 2026-11-05 (RESERVED_RULES is empty). The mechanism is
+// still here for a later season, so these tests pass the retired rule in.
+const TUE = [TUESDAY_HANDICAP_RULE];
 
 // Handicap-reserved sessions (owner, 2026-10-02): the Tuesday 3:00 PM training
 // block is reserved for a handicap of 5 or better. The sync stamps
@@ -44,25 +49,27 @@ function existingWithoutLimit(desired, booked = {}) {
   return existing;
 }
 
-test('RESERVED_RULES is the one table: Tuesday, 3:00 PM, training, handicap 5', () => {
-  assert.deepEqual(RESERVED_RULES, [{ weekday: 2, time: '3:00 PM', type: 'training', maxHandicap: 5 }]);
+test('RESERVED_RULES is empty: Tuesday 3 PM is open to everyone (owner 2026-11-05); the retired rule is kept', () => {
+  assert.deepEqual(RESERVED_RULES, []);
+  assert.deepEqual({ ...TUESDAY_HANDICAP_RULE }, { weekday: 2, time: '3:00 PM', type: 'training', maxHandicap: 5 });
+  assert.equal(reservedLimitFor({ date: '2026-11-10', time: '3:00 PM', type: 'training' }), null);
 });
 
 test('reservedLimitFor: every Tuesday 3:00 PM training block of the season, and nothing else', () => {
   // Tuesdays either side of both clock changes (Nov 1 2026, Mar 14 2027).
   for (const date of ['2026-10-27', '2026-11-03', '2026-12-29', '2027-02-23', '2027-03-16']) {
-    assert.equal(reservedLimitFor({ date, time: '3:00 PM', type: 'training' }), 5, date);
+    assert.equal(reservedLimitFor({ date, time: '3:00 PM', type: 'training' }, TUE), 5, date);
   }
   for (const date of ['2026-11-01', '2026-11-02', '2026-11-04', '2026-11-05', '2026-11-06', '2026-11-07']) {
-    assert.equal(reservedLimitFor({ date, time: '3:00 PM', type: 'training' }), null, date);
+    assert.equal(reservedLimitFor({ date, time: '3:00 PM', type: 'training' }, TUE), null, date);
   }
   // The 3 PM fitness session with Phil that runs at the same time is not reserved.
-  assert.equal(reservedLimitFor({ date: '2026-11-03', time: '3:00 PM', type: 'phil' }), null);
-  assert.equal(reservedLimitFor({ date: '2026-11-03', time: '3:00 PM', type: 'tournament' }), null);
-  assert.equal(reservedLimitFor({ date: '2026-11-03', time: '4:00 PM', type: 'training' }), null);
-  assert.equal(reservedLimitFor({ date: '2026-11-03', time: '3:30 PM', type: 'training' }), null);
-  assert.equal(reservedLimitFor({ date: 'Tuesday', time: '3:00 PM', type: 'training' }), null);
-  assert.equal(reservedLimitFor({ time: '3:00 PM', type: 'training' }), null);
+  assert.equal(reservedLimitFor({ date: '2026-11-03', time: '3:00 PM', type: 'phil' }, TUE), null);
+  assert.equal(reservedLimitFor({ date: '2026-11-03', time: '3:00 PM', type: 'tournament' }, TUE), null);
+  assert.equal(reservedLimitFor({ date: '2026-11-03', time: '4:00 PM', type: 'training' }, TUE), null);
+  assert.equal(reservedLimitFor({ date: '2026-11-03', time: '3:30 PM', type: 'training' }, TUE), null);
+  assert.equal(reservedLimitFor({ date: 'Tuesday', time: '3:00 PM', type: 'training' }, TUE), null);
+  assert.equal(reservedLimitFor({ time: '3:00 PM', type: 'training' }, TUE), null);
 });
 
 test('reservedLimitFor reads the table it is given: another row, or none', () => {
@@ -72,30 +79,36 @@ test('reservedLimitFor reads the table it is given: another row, or none', () =>
   assert.equal(reservedLimitFor({ date: '2026-11-03', time: '3:00 PM', type: 'training' }, []), null);
 });
 
-test('the dry run stamps maxHandicap 5 on the Tuesday 3 PM training blocks only', () => {
+test('the dry run stamps nothing now that Tuesday 3 PM is open (owner 2026-11-05)', () => {
   const r = dryRun();
   assert.equal(r.status, 0, r.stderr);
   assert.match(r.stdout, /Window 2026-11-02\.\.2026-11-14: 7 bookable/);
-  assert.deepEqual(stamped(r.stdout), RESERVED_IDS.map((id) => `${id}=5`));
-  // Phil's 3 PM session on the same Tuesday, and every other block, carry no such field.
-  assert.match(r.stdout, /session 2026-11-03-1: \{[^\n]*"time":"3:00 PM"[^\n]*"type":"phil"[^\n]*"gcalEventId":"res-tue-1103-1500-phil"\}/);
+  assert.deepEqual(stamped(r.stdout), []);
   assert.equal((r.stdout.match(/^ {2}session /gm) || []).length, 7);
-  assert.match(r.stdout, /Handicap-reserved in window: 2 session\(s\) - 2026-11-03-0 3:00 PM \(5 or better\), 2026-11-10-0 3:00 PM \(5 or better\)/);
-  // Against an empty target a reserved session is created with the field, an open one without it.
-  assert.match(r.stdout, /create {2}sessions\/2026-11-03-0 \{[^\n]*"maxHandicap":5\}/);
-  assert.match(r.stdout, /create {2}sessions\/2026-11-04-0 \{[^\n]*"gcalEventId":"res-wed-1104-1500"\}/);
+  assert.doesNotMatch(r.stdout, /Handicap-reserved in window/);
+  // Against an empty target the Tuesday 3 PM block is created like any other, at the training capacity (12).
+  assert.match(r.stdout, /create {2}sessions\/2026-11-03-0 \{[^\n]*"capacity":12[^\n]*"gcalEventId":"res-tue-1103-1500"\}/);
+  assert.doesNotMatch(r.stdout, /"maxHandicap"/);
 });
 
 test("the weekday is the session's calendar date: no drift in a time zone far east or far west", () => {
+  const script = pathToFileURL(path.join(repoRoot, 'scripts', 'sync-calendar-sessions.mjs')).href;
+  const code = `import { mapEvents, TUESDAY_HANDICAP_RULE } from '${script}';
+    import { readFileSync } from 'node:fs';
+    const items = JSON.parse(readFileSync(${JSON.stringify(path.join(repoRoot, FIXTURE))}, 'utf8')).items;
+    const s = mapEvents(items, '${FROM}', '${TO}', [TUESDAY_HANDICAP_RULE]).sessions;
+    console.log(JSON.stringify([...s].filter(([, d]) => d.maxHandicap != null).map(([id, d]) => id + '=' + d.maxHandicap)));`;
   for (const tz of ['Pacific/Kiritimati', 'Pacific/Pago_Pago', 'America/Chicago', 'UTC']) {
-    const r = dryRun(tz);
+    const env = { ...process.env, TZ: tz };
+    delete env.FIRESTORE_EMULATOR_HOST;
+    const r = spawnSync(process.execPath, ['--input-type=module', '-e', code], { cwd: repoRoot, encoding: 'utf8', env });
     assert.equal(r.status, 0, `${tz}: ${r.stderr}`);
-    assert.deepEqual(stamped(r.stdout), RESERVED_IDS.map((id) => `${id}=5`), tz);
+    assert.deepEqual(JSON.parse(r.stdout.trim().split('\n').pop()), RESERVED_IDS.map((id) => `${id}=5`), tz);
   }
 });
 
 test('first run on existing sessions: exactly the reserved sessions are updates, every other session is unchanged', () => {
-  const { sessions: desired } = mapEvents(items, FROM, TO);
+  const { sessions: desired } = mapEvents(items, FROM, TO, TUE);
   const existing = existingWithoutLimit(desired, { '2026-11-03-0': 6, '2026-11-03-2': 9 });
   const plan = planSync(desired, existing);
   assert.deepEqual(plan.updates.map((u) => [u.id, u.limit]), RESERVED_IDS.map((id) => [id, 'set']));
@@ -115,7 +128,7 @@ test('first run on existing sessions: exactly the reserved sessions are updates,
 });
 
 test('the plan as printed before a production run: the two reserved sessions are named, every other session is only counted', () => {
-  const { sessions: desired } = mapEvents(items, FROM, TO);
+  const { sessions: desired } = mapEvents(items, FROM, TO, TUE);
   const existing = existingWithoutLimit(desired, { '2026-11-03-0': 6, '2026-11-03-2': 9 });
   const plan = planSync(desired, existing);
   const lines = planReport(plan, desired, existing);
@@ -154,7 +167,7 @@ test('an absent field, an explicit null and "no rule" are the same thing: nothin
 });
 
 test('a second run after the stamp is in sync: nothing to write', () => {
-  const { sessions: desired } = mapEvents(items, FROM, TO);
+  const { sessions: desired } = mapEvents(items, FROM, TO, TUE);
   const existing = new Map([...desired].map(([id, doc]) => [id, { ...doc, booked: 3 }]));
   const plan = planSync(desired, existing);
   assert.deepEqual(plan.updates, []);
@@ -163,7 +176,7 @@ test('a second run after the stamp is in sync: nothing to write', () => {
 });
 
 test('emptying the table removes the field from the sessions that carry it, and touches no other', () => {
-  const stampedNow = mapEvents(items, FROM, TO).sessions;
+  const stampedNow = mapEvents(items, FROM, TO, TUE).sessions;
   const existing = new Map([...stampedNow].map(([id, doc]) => [id, { ...doc, booked: 2 }]));
   const { sessions: desired } = mapEvents(items, FROM, TO, []);
   assert.ok([...desired.values()].every((doc) => !('maxHandicap' in doc)));
@@ -179,7 +192,7 @@ test('emptying the table removes the field from the sessions that carry it, and 
 });
 
 test('a changed limit is an update of the reserved sessions alone', () => {
-  const existing = new Map([...mapEvents(items, FROM, TO).sessions].map(([id, doc]) => [id, { ...doc, booked: 0 }]));
+  const existing = new Map([...mapEvents(items, FROM, TO, TUE).sessions].map(([id, doc]) => [id, { ...doc, booked: 0 }]));
   const { sessions: desired } = mapEvents(items, FROM, TO, [{ weekday: 2, time: '3:00 PM', type: 'training', maxHandicap: 8 }]);
   const plan = planSync(desired, existing);
   assert.deepEqual(plan.updates.map((u) => [u.id, u.limit]), RESERVED_IDS.map((id) => [id, 'set']));
@@ -187,7 +200,7 @@ test('a changed limit is an update of the reserved sessions alone', () => {
 });
 
 test('a booked session patched in place under its old id still takes the limit; an open one keeps the plain patch', () => {
-  const { sessions: desired } = mapEvents(items, FROM, TO);
+  const { sessions: desired } = mapEvents(items, FROM, TO, TUE);
   const existing = existingWithoutLimit(desired, { '2026-11-10-0': 4 });
   // Nov 10's reserved block sits under another id (its day-order changed) and holds four bookings.
   existing.set('2026-11-10-9', existing.get('2026-11-10-0'));
@@ -203,7 +216,7 @@ test('a booked session patched in place under its old id still takes the limit; 
 });
 
 test('every Phil session is named "Performance with Phil", whatever its calendar title (owner, 2026-10-12)', () => {
-  const sessions = [...mapEvents(items, FROM, TO).sessions.values()];
+  const sessions = [...mapEvents(items, FROM, TO, TUE).sessions.values()];
   const phil = sessions.filter((s) => s.type === 'phil');
   assert.ok(phil.length > 0);
   for (const s of phil) assert.equal(s.label, PHIL_LABEL);

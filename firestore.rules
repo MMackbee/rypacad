@@ -1164,7 +1164,20 @@ service cloud.firestore {
           && after.booked is int
           && (after.booked == before.booked + 1 || after.booked == before.booked - 1)
           && after.booked >= 0
-          && after.booked <= before.capacity;
+          // 2026-11-05 (training cap 14 -> 12): the capacity bound guards a
+          // +1 only. A block left above a lowered capacity keeps its bookings,
+          // and each of those families can still cancel (14 -> 13 under 12).
+          && (after.booked == before.booked - 1 || after.booked <= before.capacity)
+          // 2026-11-05 (owner: the empty Mon/Wed 6 PM blocks "sort of hidden
+          // for now"): a session with hidden == true takes no + 1. A family's
+          // booking create and its re-book each move this count + 1 in their
+          // own commit (seatTakenInCommit), so refusing the + 1 here refuses
+          // both, with no extra document read. A - 1 (a cancel) always lands,
+          // so a seat held on a hidden block can still be given back. Absent
+          // or false == not hidden. No client writes hidden/hiddenAt/hiddenBy:
+          // this branch and the two below admit only booked, coachNote and
+          // status; scripts/hide-sessions.mjs sets them (Admin REST).
+          && (after.booked == before.booked - 1 || before.get('hidden', false) != true);
       }
 
       // 2026-10-01 (waitlist audit): WHO may move the count. It used to be
@@ -2220,9 +2233,22 @@ service cloud.firestore {
       // show every name and group by bracket without widening the athletes
       // read matrix (the full athlete doc carries dob/householdId/
       // contractMinutes; these carry name/bracket alone). `bracket` is
-      // restricted to the three real bracket ids or null (an unset/unknown
-      // dob) — never a caller-invented string, so an unrecognized bracket
-      // can never silently form its own leaderboard group. `date` must equal
+      // restricted to the real ids or null (an unset/unknown dob) — never a
+      // caller-invented string, so an unrecognized bracket can never
+      // silently form its own leaderboard group. Owner rulings 2026-11-06:
+      // the age groups are '10U' (9 holes), '11-14' and '15-18' (18 holes),
+      // and 'coaches' is a coach's own entry. The change is ADDITIVE: the
+      // Sprint 8 ids '11-13' and '14+' stay accepted ('10U' continues as
+      // is), because staging and production share this database and a
+      // phone with the old app cached may still save one. A coach entry and
+      // a kid's can never be confused: bracket 'coaches' exactly when the
+      // athleteId starts 'coach_' (and then it is 'coach_' + a lowercase
+      // letters/digits/hyphens slug of the name). The prefix test is
+      // '(?s)coach_.*': matches() is RE2, where '.' skips a newline, so a
+      // plain 'coach_.*' would let a 'coach_' id holding one be filed as a
+      // kid (review 2026-11-06). `gender` (2026-11-06) is
+      // the one optional key: absent, null, 'boys' or 'girls' (a coach's
+      // Men/Women is stored the same). `date` must equal
       // the payload's own sessionId's leading YYYY-MM-DD: sessions are
       // always generated as `YYYY-MM-DD-<block>` (docs/portal/TEAM.md "Data
       // contract v1"), so this ties the result to its tournament's actual
@@ -2233,17 +2259,21 @@ service cloud.firestore {
       // pass — never reintroduced here), so the prefix check is a matches()
       // pair instead: date is pinned to a literal YYYY-MM-DD first — digits
       // and hyphens only, so it is regex-inert — and sessionId must then
-      // start with exactly that date. `score` is strokes for a 9-hole round:
-      // an int in [18, 200], matching the client-side validation in
-      // hooks/live.js's saveTournamentResults.
+      // start with exactly that date. `score` is strokes for one round (9
+      // holes at 10 & under, 18 for everyone else): an int in [18, 200],
+      // matching the client-side validation in hooks/live.js's
+      // saveTournamentResults (data/tourBrackets.js isSavableTourEntry).
       function tourShapeOk() {
         let d = request.resource.data;
         return d.keys().hasAll(['sessionId', 'athleteId', 'name', 'bracket', 'date', 'score', 'createdBy', 'createdAt'])
-          && d.keys().hasOnly(['sessionId', 'athleteId', 'name', 'bracket', 'date', 'score', 'createdBy', 'createdAt'])
+          && d.keys().hasOnly(['sessionId', 'athleteId', 'name', 'bracket', 'date', 'score', 'createdBy', 'createdAt', 'gender'])
           && d.sessionId is string
           && d.athleteId is string
           && (d.name is string || d.name == null)
-          && (d.bracket in ['10U', '11-13', '14+'] || d.bracket == null)
+          && (d.bracket in ['10U', '11-14', '15-18', 'coaches', '11-13', '14+'] || d.bracket == null)
+          && (d.get('gender', null) == null || d.get('gender', null) in ['boys', 'girls'])
+          && ((d.bracket == 'coaches') == d.athleteId.matches('(?s)coach_.*'))
+          && (d.bracket != 'coaches' || d.athleteId.matches('coach_[a-z0-9-]+'))
           && d.date is string
           && d.date.matches('[0-9]{4}-[0-9]{2}-[0-9]{2}')
           && d.sessionId.matches(d.date + '-.*')
@@ -2585,7 +2615,10 @@ service cloud.firestore {
         return s.date == request.resource.data.date
           && s.booked >= s.capacity
           && s.get('status', 'scheduled') == 'scheduled'
-          && s.get('type', null) != 'mental';
+          && s.get('type', null) != 'mental'
+          // 2026-11-05: never a hidden session (scripts/hide-sessions.mjs) -
+          // its seats are not offered, so there is no seat to wait for.
+          && s.get('hidden', false) != true;
       }
 
       // The freeze (contract v2.1, pin H), identical in shape to bookings'

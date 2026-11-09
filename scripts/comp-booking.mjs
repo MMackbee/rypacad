@@ -18,8 +18,9 @@
  *
  * Refuses unless the athlete is unpaid (billing 'pending'): a paid member
  * books with their own tokens, and an extra one is a re-issued tokenPeriod.
- * Also refuses a cancelled, full or past session, a handicap-reserved one the
- * athlete does not qualify for, and a seat the athlete already holds.
+ * Also refuses a cancelled, hidden (scripts/hide-sessions.mjs), full or past
+ * session, a handicap-reserved one the athlete does not qualify for, and a
+ * seat the athlete already holds.
  * Production auth is scripts/lib/prod-auth.mjs; the emulator without --prod.
  */
 
@@ -78,6 +79,10 @@ export function pickSession(sessions, { date, time, type }) {
 export function refusal({ athlete, session, existing, today }) {
   if (athlete.billing?.status !== 'pending') return `${athlete.name} is not unpaid (billing ${athlete.billing?.status ?? 'missing'}); a paid member books with their own tokens.`;
   if (session.status === 'cancelled') return 'That session is cancelled.';
+  // 2026-11-05: a hidden session is off the schedule for now - no family is
+  // offered it and the staff month lists leave it out (frontend
+  // data/hiddenSessions.js) - so a comp is not held on one.
+  if (session.hidden === true) return 'That session is hidden from families (scripts/hide-sessions.mjs); run hide-sessions --show for it first.';
   if (session.date < today) return 'That session\'s day is over.';
   if (Number(session.booked || 0) >= Number(session.capacity || 0)) return `That session is full (${session.booked ?? 0}/${session.capacity ?? 0}).`;
   if (Number.isInteger(session.maxHandicap) && !(Number.isInteger(athlete.handicap) && athlete.handicap <= session.maxHandicap)) {

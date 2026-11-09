@@ -21,6 +21,10 @@ let mockTokens;
 let mockConfirmation;
 // The sessions the booking athlete already holds (owner 2026-11-04: the card says "Booked").
 let mockBookedIds;
+// useBooking's live slot rows (owner 2026-11-05: hidden sessions are not on
+// them); unset, the one first-slot row, which holds no booked session, so
+// Repeat weekly keeps the static season.
+let mockSlotRows;
 // Month-aware: each monthISO gets its own days (and day marks); October is the default.
 const mockMonth = (m) => ({ data: { days: mockMonths[m] ?? [], dayMarks: mockMarks[m] ?? {} }, loading: false, error: null });
 // Waitlist hardening: what book() answers (default: booked), the options each
@@ -44,7 +48,7 @@ let mockBilling;
 let mockMembershipHousehold;
 jest.mock('../hooks', () => ({
   useBooking: () => ({
-    data: { slots: [{ date: mockFirstSlot }], tokens: mockTokens, confirmation: mockConfirmation, seasonNote: null, bookedSessionIds: mockBookedIds },
+    data: { slots: mockSlotRows ?? [{ date: mockFirstSlot }], tokens: mockTokens, confirmation: mockConfirmation, seasonNote: null, bookedSessionIds: mockBookedIds },
     loading: false, error: null,
     book: async (s, opts) => { mockBooked.push(s.id); mockBookCalls.push([s.id, opts]); return mockBook ? mockBook(s, opts) : {}; },
     bookRecurring: (...args) => mockBookRecurring(...args),
@@ -81,6 +85,7 @@ beforeEach(() => {
   mockTokens = { left: 6, unlimited: false, grace: [] };
   mockConfirmation = { email: null, note: 'See you there.' };
   mockBookedIds = [];
+  mockSlotRows = undefined;
   mockBillingStatus = 'active';
   mockDob = null;
   mockHandicap = null;
@@ -467,6 +472,30 @@ describe('Repeat weekly in live mode (repeat report 2026-09-30)', () => {
     expect(r.text()).toContain("This household's membership is not active right now");
     expect(r.text()).not.toContain('more week');
     await r.unmount();
+  });
+
+  // Owner 2026-11-05: a hidden block is on no live read (data/hiddenSessions.js),
+  // so the card offers, and reaches through, only the weeks the slots read holds.
+  test('the live slots read decides the weeks: a hidden week is neither offered nor the reach, and none left means no card', async () => {
+    jest.setSystemTime(OCT_1);
+    const tue = (date) => ({ ...session, id: `t-${date}`, date });
+    mockMonths['2026-11-01'] = [{ date: '2026-11-03', sessions: [tue('2026-11-03')] }];
+    // Elite reaches Dec 31; Nov 24 on are hidden, so off the read. A Wednesday at 4 PM is not this slot's week.
+    mockSlotRows = [tue('2026-11-03'), tue('2026-11-10'), tue('2026-11-17'), { ...session, id: 'w-1118', date: '2026-11-18' }];
+    const r = await reserve('2026-11-03');
+    expect(r.text()).toContain('Hold Tuesday at 4:00 PM every week through Tue, Nov 17, the furthest you can book today (two months ahead).');
+    expect(r.text()).not.toContain('Dec 22');
+    await r.click('Repeat every Tuesday through Tue, Nov 17');
+    await r.flush();
+    expect(mockBookRecurring.mock.calls[0][1]).toEqual({ athleteId: undefined, untilISO: '2026-11-17' });
+    await r.unmount();
+
+    // Every later week hidden: no card, rather than an offer that books nothing.
+    mockSlotRows = [tue('2026-11-03')];
+    const none = await reserve('2026-11-03');
+    expect(none.text()).not.toContain('Repeat weekly');
+    expect([...none.container.querySelectorAll('button')].some((b) => b.textContent.startsWith('Repeat every'))).toBe(false);
+    await none.unmount();
   });
 
   test('no repeat offer outside live mode (bookingFor null)', async () => {

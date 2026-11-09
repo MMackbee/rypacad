@@ -196,11 +196,11 @@ describe('the sessions stamped: the reserved block is tagged for everyone and ju
     await tap(cardAt(r, '3:00'));
     expect(live.createBooking).not.toHaveBeenCalled();
 
-    // The open 4 PM block beside it is untouched for every child: its own age-group chip, no tag, no line.
+    // The open 4 PM block beside it is untouched for every child: no tag, no line.
     const open = [];
     for (const child of FAMILY) {
       await pick(r, child.name);
-      expect(cardAt(r, '4:00').textContent).toBe('4:00PMTraining13+Training blockSpends 1 token · 6 left11 left');
+      expect(cardAt(r, '4:00').textContent).toBe('4:00PMTrainingTraining blockSpends 1 token · 6 left11 left');
       expect(cardAt(r, '4:00').style.cursor).toBe('pointer');
       open.push(cardAt(r, '4:00').outerHTML);
     }

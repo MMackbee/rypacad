@@ -514,6 +514,9 @@ single knob, same as today) unless the owner prefers the flat fallback.
 
 ## Sprint 12 amendment v2.0.3 — a fourth weekday block, and suggested age groups (2026-09-22)
 
+> **Suggested age groups removed 2026-11-09, owner** (the fourth weekday block stays). The age-group
+> chip and legend are gone from every session view; the text below is the history.
+
 Owner, direct: the weekday pattern gains a block — **Mon/Wed 3, 4, 5, 6 PM; Tue/Thu 4, 5, 6, 7 PM**
 (Tue/Thu 3 PM stays reserved, v2.0.2; Fri 3, 4 PM and Saturday unchanged) — and each weekday
 block carries a **suggested age group**:

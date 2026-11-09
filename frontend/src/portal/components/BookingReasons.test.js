@@ -1,6 +1,7 @@
 import React from 'react';
 import { renderScreen } from '../screens/testRender';
 import { CALENDLY_MANAGED_COPY, LockedDayNotice, canRetry, cancelReasonCopy, reasonCopy } from './BookingReasons';
+import { HIDDEN_SESSION_LINE, SESSION_HIDDEN } from '../data/hiddenSessions';
 
 describe('Sprint 20 booking reasons (contract 3.6)', () => {
   test('billing pending', () => {
@@ -64,6 +65,13 @@ describe('a handicap-reserved block (owner ruling 2026-10-02)', () => {
   test('the refusal reads plainly, and a second tap cannot change it', () => {
     expect(reasonCopy('handicap-reserved')).toBe('This session is reserved for lower handicaps.');
     expect(canRetry('handicap-reserved')).toBe(false);
+  });
+});
+
+describe('a hidden session (owner 2026-11-05)', () => {
+  test('the refusal reads plainly, and a second tap cannot change it', () => {
+    expect(reasonCopy(SESSION_HIDDEN)).toBe(HIDDEN_SESSION_LINE);
+    expect(canRetry(SESSION_HIDDEN)).toBe(false);
   });
 });
 

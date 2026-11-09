@@ -150,7 +150,7 @@ import {
   resolveBooking,
   upcomingDates,
 } from '../data/season';
-import { DEFAULT_DURATION_MINUTES, ageGroupFor } from '../data/schedule';
+import { DEFAULT_DURATION_MINUTES } from '../data/schedule';
 import {
   ATHLETE,
   CODE_OF_GRIT,
@@ -191,7 +191,9 @@ import {
   AUDIT_NOTE,
   SCREENING_NOTE,
 } from '../data/admin';
-import { TOUR_SEED, bracketFor, deriveTourStandings } from '../data/tour';
+import { bracketFor, deriveTourStandings, isCoachId } from '../data/tour';
+import { TOUR_SEED } from '../data/tourSeed';
+import { unreadIds } from '../data/tourSheet';
 import { SPECIALISTS, isSpecialistType, mentalCapFor } from '../data/specialists';
 import { calendlyUrlFor } from '../data/calendly';
 import { loginStateFor } from '../data/signups';
@@ -201,6 +203,7 @@ import { MARKS_LOOKAHEAD_DAYS, dayMarksFor, monthGridBounds } from '../data/cale
 import { foldBeforeFirstPeriod, positionPeriodFor, tierBillingOf, withTokenStart } from '../data/billingHub';
 import { sessionStarted } from '../data/sessionStart';
 import { handicapLimitOf, handicapOf } from '../data/reserved';
+import { isHiddenSession } from '../data/hiddenSessions';
 
 // 2026-10-02: the academy's handicap edit (hooks/handicap.js), on this seam
 // like every other staff write a screen reaches.
@@ -289,13 +292,6 @@ function displaySession(s, today) {
     // - the Friday overflow block concept is gone from the locked weekly
     // schedule; the generator no longer produces the field at all).
     meta: s.special ? 'Holiday event · open to Tour competitors' : null,
-    // Suggested age group (owner, 2026-09-22), derived HERE rather than in a
-    // screen: this is the last place that holds the session's own date next
-    // to its full time string ("4:00 PM"). Below, `time` and `meridiem` are
-    // split into two fields, and a caller that rejoined them would be one
-    // stale meridiem away from labelling a morning block as an afternoon one.
-    // null for tournaments, specialist sessions and any unmapped block.
-    ageGroup: ageGroupFor(s),
     // How long the session actually runs. Absent on a session doc written
     // before the field existed, and on every weekday block, which is why the
     // fallback is the 60-minute default rather than a guess per screen.
@@ -1181,7 +1177,10 @@ async function liveMonthSessions(monthISO, today) {
   // from the full read, before the group filter - no second query. The
   // lookahead rows stop there: the calendar itself still gets only the grid.
   const dayMarks = dayMarksFor(all, start, end);
-  const sessions = all.filter((s) => s.date <= end && !isSpecialistType(s.type));
+  // 2026-11-05: a hidden session is no row (data/hiddenSessions.js); the marks
+  // above still count it, so a day of hidden blocks alone reads as nothing to
+  // book, never "Academy closed".
+  const sessions = all.filter((s) => s.date <= end && !isSpecialistType(s.type) && !isHiddenSession(s));
   sessions.sort(byDateThenId);
   const days = groupSessionsByDate(sessions, today);
 
@@ -1353,7 +1352,7 @@ async function liveSpecialistDays(specialistId, today, windowMonths) {
   for (const s of sessions) {
     // `bookable: false` is another family's Calendly appointment with
     // Yannick (functions/portal/calendly.js) - never a slot to offer.
-    if (s.type !== specialistId || s.status === 'cancelled' || s.bookable === false) continue;
+    if (s.type !== specialistId || s.status === 'cancelled' || s.bookable === false || isHiddenSession(s)) continue;
     const list = byDate.get(s.date);
     if (list) list.push(s);
     else byDate.set(s.date, [s]);
@@ -1624,7 +1623,9 @@ async function liveSpecialistSessions(specialistId, today) {
   const toDate = openThrough(new Date(), MAX_WINDOW_MONTHS);
   const sessions = await fetchSessionsInRange(today, toDate);
   const mine = sessions
-    .filter((s) => s.type === specialistId && s.status !== 'cancelled')
+    // 2026-11-05: a hidden session is left out unless a seat is counted on it
+    // (as on the coach's day), so its roster still opens.
+    .filter((s) => s.type === specialistId && s.status !== 'cancelled' && (!isHiddenSession(s) || Number(s.booked ?? 0) > 0))
     .sort(byDateThenId);
 
   const withRosters = await Promise.all(
@@ -2681,8 +2682,12 @@ export function useCoachDay({ variant = 'today' } = {}) {
     // Group flow only (surface-scan follow-through, PM integration): Phil's
     // and Yannick's slots are not the golf coach's blocks — without this
     // filter Luke's Today overview listed Phil's sessions as his own.
+    // 2026-11-05: a hidden block (data/hiddenSessions.js) is left out unless a
+    // seat is counted on it - an Admin write the hide script never saw - so
+    // the coach still sees who is coming and opens its roster. The rest of
+    // the group lane is isGroupBookable's (repeat.js).
     const upcoming = (await fetchSessions(today, 1)).filter(
-      (s) => s.status !== 'cancelled' && isGroupBookable(s)
+      (s) => s.status !== 'cancelled' && !isSpecialistType(s.type) && s.bookable !== false && (!isHiddenSession(s) || Number(s.booked ?? 0) > 0)
     );
     const dayISO = upcoming[0]?.date ?? today;
     const sessions = upcoming.filter((s) => s.date === dayISO);
@@ -2708,10 +2713,6 @@ export function useCoachDay({ variant = 'today' } = {}) {
             name: s.label || genericSessionName(s.type),
             meta: `${s.booked ?? 0} of ${s.capacity ?? '—'} booked`,
             status,
-            // The coach's day rows carry no `date` of their own (the day's ISO
-            // lives in `coach.date` as prose), so the group is resolved here,
-            // where the raw session still has both halves.
-            ageGroup: ageGroupFor(s),
             durationMinutes: runs,
             // 2026-10-02: a reserved block's handicap limit, so the coach's
             // day and the roster it opens carry the same tag families see.
@@ -4092,14 +4093,16 @@ export function useSessionAttendance(sessionId) {
  * ./live.js for why a batched `in` query is unsafe), where an id the
  * caller cannot read still resolves to name: null rather than failing the
  * screen. Session labels (fetchSessionsByIds) have no such limit —
- * sessions are readable by any signed-in user unconditionally. `bracket` is
- * read straight off each doc (also a write-time snapshot, contract v1.6) —
- * no join needed for it at all.
+ * sessions are readable by any signed-in user unconditionally. `bracket` and
+ * `gender` are read straight off each doc (write-time snapshots, contract
+ * v1.6 and 2026-11-06) — no join needed for either. A coach entry
+ * ('coach_<slug>', 2026-11-06) is never an athlete: it always carries its
+ * own name and is never joined.
  */
 async function liveTourStandings() {
   const raw = await fetchTournamentResults();
   const results = raw.filter((r) => Number.isInteger(r.score));
-  const athleteIds = [...new Set(results.filter((r) => r.name == null).map((r) => r.athleteId))];
+  const athleteIds = [...new Set(results.filter((r) => r.name == null && !isCoachId(r.athleteId)).map((r) => r.athleteId))];
   const sessionIds = [...new Set(results.map((r) => r.sessionId))];
   const [athletes, sessions] = await Promise.all([
     fetchAthletesByIds(athleteIds),
@@ -4111,25 +4114,25 @@ async function liveTourStandings() {
 }
 
 /**
- * GET /tour/standings (Sprint 8 pin, contract v1.6, supersedes v1.5.1) —
- * pinned shape: { data: { brackets: [{ id, label, standings: [{ athleteId,
- *   name, rank, points, events, wins }] }], events: [{ date, label,
- *   results: [{ athleteId, name, bracket, score, position }] }] (v1.6.1:
- *   an event is a DATE — all of one Saturday's blocks merged into one
- *   weekly field, see deriveTourStandings),
- *   counting: { eventsHeld, counted, drops } }, loading, error }. `counting`
- * (owner's drop-week rule, 2026-09-10) says how many of the season's weeks
- * sum into each bracket's `points` — see data/tour.js's TOUR_DROP_RATE.
- * Position is derived from `score`, never stored — see deriveTourStandings.
+ * GET /tour/standings (Sprint 8 pin; leaderboards per the owner's rulings
+ * of 2026-11-06) — shape: { data: { boards: [{ id, label, standings:
+ *   [{ athleteId, name, rank, points, events, wins }] }], events: [{ date,
+ *   label, results: [{ athleteId, name, bracket, gender, board, score,
+ *   position, points }], boards: { [boardId]: [{ athleteId, name, score,
+ *   position, points }] } }] }, loading, error }. An event is a DATE
+ * (v1.6.1: all of one Saturday's blocks merged into one weekly field); a
+ * result counts on every board it belongs to (data/tourBoards.js), and a
+ * season total is every Saturday's points summed, no dropped weeks. Place
+ * and points derive from `score`, never stored — see deriveTourStandings.
  *
  * Academy-wide and readable by every role (contract v1.5: "standings are
  * academy-public") — unlike every other hook in this file there is no role
  * branching on the read side; the only asymmetry is the name-resolution
  * limit documented on liveTourStandings above.
  *
- * Seed: TOUR_SEED (data/tour.js) — a believable demo season with all three
- * brackets populated, always full regardless of role. Live: subscribes to
- * the 'tournamentResults' invalidation generation, so a coach/staff
+ * Seed: TOUR_SEED (data/tourSeed.js) — a believable demo season on the
+ * 10 & under, 11–14 and gender boards, always full regardless of role.
+ * Live: subscribes to the 'tournamentResults' invalidation generation, so a coach/staff
  * saveResults() anywhere refreshes every mounted standings screen (the
  * Sprint 6 post-write-refresh pattern).
  */
@@ -4145,8 +4148,9 @@ export function useTourStandings() {
 
 /**
  * Live payload for useTournamentResults(sessionId) — one tournament's
- * existing results, position included. Reuses deriveTourStandings itself
- * (data/tour.js) rather than re-deriving position/ranking a second way: the
+ * existing results (gender and coach entries included), position included.
+ * Reuses deriveTourStandings itself (data/tour.js) rather than re-deriving
+ * position/ranking a second way: the
  * results for a single sessionId are exactly one `events[]` entry, so
  * running them through the same function useTourStandings uses guarantees
  * identical math (and the same bracket-order-then-position sort the pinned
@@ -4178,9 +4182,10 @@ async function liveTournamentResults(sessionId) {
 /**
  * GET /tournaments/:sessionId/results + result entry (Sprint 8 pin,
  * contract v1.6, supersedes v1.5) — pinned shape: { data: { results:
- * [{ athleteId, name, bracket, score, position }] }, loading, error,
- * saveResults(entries) } where entries = [{ athleteId, name, bracket,
- * score }] (name/bracket: write-time snapshots, see saveTournamentResults;
+ * [{ athleteId, name, bracket, gender, board, score, position, points }] },
+ * loading, error, saveResults(entries) } where entries = [{ athleteId, name,
+ * bracket, gender, score }] (name/bracket/gender: write-time snapshots, see
+ * saveTournamentResults;
  * `position` in the read shape is DERIVED, never part of what the caller
  * sends). Coach/mental/ops/owner-only write surface (enforced in
  * firestore.rules, not here), sessionId-scoped, live-only - same "no
@@ -4238,13 +4243,17 @@ export function useTournamentResults(sessionId) {
  * Live: fetchAthletesByIds — the coach calling this already has the read
  * access an athlete-by-id join needs for their own roster (assigned coach /
  * staff clauses on the athletes matrix), same access this screen's roster
- * fetch itself relies on. An id the caller cannot read is silently dropped
- * (fetchAthletesByIds' own Promise.allSettled behavior) rather than failing
- * the whole map.
+ * fetch itself relies on. An id the caller cannot read (or with no athlete
+ * doc) is dropped from the map (fetchAthletesByIds' own Promise.allSettled
+ * behavior) rather than failing the whole map, and listed in `unread`
+ * beside `data` instead (review 2026-11-06): an athlete read with no dob is
+ * null in the map, one never read is absent from it, and the score sheet
+ * must not file the second as Open.
  *
  * Seed mode never fetches — `data` is `{}` synchronously, matching the pin
  * ("Seed mode: {} and never fetches"); the score-entry harness state does
- * not need real brackets to render its chips.
+ * not need real brackets to render its chips. The ids since 2026-11-06:
+ * '10U', '11-14', '15-18' (data/tourBrackets.js).
  *
  * `athleteIds` is an array whose identity can change every render (a new
  * literal built from the roster each time) — useSeedResource's `deps` must
@@ -4269,8 +4278,13 @@ export function useAthleteBrackets(athleteIds) {
     return out;
   };
 
-  return useSeedResource(
+  const state = useSeedResource(
     shouldFetch ? null : {},
     shouldFetch ? { source: liveAthleteBrackets, deps: ['athlete-brackets', idsKey] } : undefined
   );
+  return { ...state, unread: shouldFetch ? unreadIds(ids, state.data) : [] };
 }
+
+// The score sheet's Boys/Girls pre-fill and coach quick picks (owner rulings
+// 2026-11-06), in their own module because this file is long enough.
+export { useTourSheetHistory } from './tourSheet';

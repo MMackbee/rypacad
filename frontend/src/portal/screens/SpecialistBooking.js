@@ -18,7 +18,7 @@ import CalendlyPanel from '../components/CalendlyPanel';
 import { RangeCalendarCard } from '../components/CalendarCard';
 import EntitlementSummary from '../components/EntitlementSummary';
 import PhoneFrame from '../components/PhoneFrame';
-import RepeatWeekly from '../components/RepeatWeekly';
+import RepeatWeekly, { offeredWeeks } from '../components/RepeatWeekly';
 import SessionCard from '../components/SessionCard';
 import { CapacityPill } from '../components/StatusBadge';
 import { Avatar } from '../components/MediaPlaceholder';
@@ -319,7 +319,17 @@ export default function SpecialistBooking({
           athleteName,
           // The window as it stood at the tap: the booking's own bump reloads
           // useMembership, so the confirmation renders with none in hand.
-          repeatWindow: { end: openThroughDate, months: windowMonths, elite: selfMember?.package?.kind === 'elite' },
+          // Owner 2026-11-05: with the weeks of this slot the slots read
+          // offers (a hidden session is not on it), for Repeat weekly.
+          repeatWindow: {
+            end: openThroughDate,
+            months: windowMonths,
+            elite: selfMember?.package?.kind === 'elite',
+            offered: offeredWeeks(
+              days.flatMap((d) => d.slots.map((s) => ({ id: s.sessionId, date: d.date, time: s.time, type: specialist.id }))),
+              { id: slot.sessionId, time: slot.time, type: specialist.id }
+            ),
+          },
           waitlisted: result && result.status === 'waitlisted',
           position: result && result.position != null ? result.position : null,
         });
@@ -345,6 +355,7 @@ export default function SpecialistBooking({
             windowEnd: booked.repeatWindow?.end ?? openThroughDate,
             windowMonths: booked.repeatWindow?.months ?? windowMonths,
             elite: booked.repeatWindow?.elite ?? false,
+            offeredDates: booked.repeatWindow?.offered,
             onRepeat: (untilISO) =>
               booking.bookRecurring(
                 { date: booked.date, time: booked.time, type: booked.specialist.id },
@@ -938,6 +949,7 @@ function Confirmed({ bare, booked, repeat, onBack }) {
                 windowEnd={repeat.windowEnd}
                 windowMonths={repeat.windowMonths}
                 elite={repeat.elite}
+                offeredDates={repeat.offeredDates}
                 onRepeat={repeat.onRepeat}
               />
             ) : null}

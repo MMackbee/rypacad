@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useMemo, useState } from 'react';
 import { color, font, radius, tint } from '../tokens';
 import BottomTabBar from '../components/BottomTabBar';
 import MediaPlaceholder from '../components/MediaPlaceholder';
@@ -6,80 +6,45 @@ import PhoneFrame from '../components/PhoneFrame';
 import StatusBadge from '../components/StatusBadge';
 import SkeletonCard, { SkeletonBar } from '../components/Skeleton';
 import { Body, Card, ErrorNotice, ScreenTitle, SectionLabel, SignOutButton } from '../components/Primitives';
+import TourFilters from '../components/tour/TourFilters';
+import YourResults from '../components/tour/YourResults';
 import { longDayLabel } from '../data/calendar';
-// Pure derived-scoring helper per the seam rule - data still travels through
-// the hook below; this is the same "single knob" pointsForPosition() every
-// standings/points display in the app must go through rather than
-// re-deriving its own table (data/tour.js TOUR_POINTS).
-import { pointsForPosition, tourEventExplainer } from '../data/tour';
+import { TOUR_POINTS_RULE, tourEventExplainer } from '../data/tour';
+import { ageFiltersFor, boardIdFor, boardLabel, defaultAgeFor, genderFiltersFor } from '../data/tourBoards';
 import useAllElite from '../hooks/elite';
+import { useTourViewerIds } from '../hooks/tourViewer';
 import * as hooks from '../hooks';
 
 /**
- * The routing lane is adding `useTourStandings()` to hooks/index.js in
- * parallel against the Sprint 7 pin (TEAM.md, "Hook seam") - it does not
- * exist in this worktree yet. A namespace import (`* as hooks` above) plus
- * this fallback keeps the hook call below unconditional (rules of hooks) and
- * keeps this screen buildable today, matching the exact pattern Roster.js
- * already uses for useSessionAttendance. Once routing's export lands and the
- * branches merge, this fallback stops being used automatically.
+ * Namespace import plus an inert fallback, the pattern Roster.js uses: a
+ * test or harness that mocks ../hooks without useTourStandings still renders.
  */
 function useTourStandingsFallback() {
   return { data: null, loading: false, error: null };
 }
 const useTourStandings = hooks.useTourStandings || useTourStandingsFallback;
 
-/** 1 -> '1st', 2 -> '2nd', 3 -> '3rd', 4 -> '4th', 11 -> '11th', ... */
-function ordinal(n) {
-  const suffixes = ['th', 'st', 'nd', 'rd'];
-  const v = n % 100;
-  return `${n}${suffixes[(v - 20) % 10] || suffixes[v] || suffixes[0]}`;
-}
-
 /**
- * RYP Tour — season standings for the weekend tournament leaderboard
- * (Sprint 7 pin, TEAM.md). Route /portal/tour, athlete tab bar's retired DNA
- * slot, parent tab bar in place of the removed Billing tab. Staff keep their
- * own tab bar here too (Phil's set via `specialistId`), so it is no dead end.
+ * RYP Tour — season standings (Sprint 7 pin; route /portal/tour). Athletes
+ * and parents reach it from their tab bar; staff keep their own bar here
+ * (Phil's set via `specialistId`), so it is no dead end.
  *
- * Sprint 8 pin (TEAM.md, contract v1.6): the leaderboard now splits into age
- * brackets. Pinned hook: useTourStandings() -> { data: { brackets: [{ id,
- * label, standings: [{ athleteId, name, rank, points, events, wins }] }],
- * events: [{ date, label, results: [{ athleteId, name, bracket,
- * score, position }] }], counting: { eventsHeld, counted, drops } }, loading,
- * error }. Only non-empty brackets are ever returned, in BRACKETS order with
- * 'open' last (data/tour.js) - this screen still filters defensively so a
- * change on that guarantee can never surface an empty selector chip. Unlike
- * every other hook in this file it takes no options - there is no demoOpts
- * variant to request loading/error from the hook itself, so this screen's
- * `variant` prop drives the harness states locally instead (the same
- * third-element-props escape hatch StatesHarness already uses for behavior a
- * bare variant can't express). `variant='populated'` (the default, and the
- * only variant a live route ever passes) is a pure pass-through of the real
- * hook result.
+ * ONE leaderboard at a time, picked by two filters (owner ruling 2026-11-06):
+ * Age (11–18 overall, the default / 10 & under / 11–14 / 15–18 / Coaches,
+ * plus Open only when someone has no dob, and any legacy board) and Gender
+ * (All / Boys / Girls; All / Men / Women for Coaches; hidden for a one-board
+ * age). Each combination is exactly one board of useTourStandings'
+ * { boards, events } (data/tourBoards.js boardIdFor), and the standings and
+ * the recent events below both follow it. An athlete or parent lands on the
+ * first Age filter whose board ranks them or their household (Gender All):
+ * an 11-18 kid stays on Overall, a 10 & under kid opens on 10 & under. The
+ * landing follows the data until the viewer taps a filter.
  *
- * No invented data: every name, score and point total is exactly what the
- * hook returns. Rank ties are the hook's own math (TEAM.md: "ties share a
- * rank") - this screen renders `standing.rank` verbatim, never recomputing
- * it. An event with no real label reads "Tour event", same fallback
- * every other screen uses for an unnamed session.
- *
- * `athleteId` (Sprint 8 pin) is new and optional, defaulting to undefined -
- * PortalRoutes.js (routing lane) does not thread it through this sprint, so
- * both behaviors it powers degrade gracefully with it absent: the athlete
- * default-bracket selection falls back to the first bracket, and the "Your
- * results" card simply does not render. See the sprint report.
- *
- * @param {'populated'|'empty'|'loading'|'error'} variant  Harness-only demo
- *   gating - see above.
- * @param {'athlete'|'parent'|'coach'|'ops'|'owner'|'mental'} [role]
- *   Which bottom tab bar to render (`specialistId`: Phil's coach set); also
- *   gates the athlete-only own-bracket default and "Your results" card.
- * @param {string} [athleteId]  The signed-in athlete's id (athlete role
- *   only) - used to default-select their own bracket and to filter their
- *   personal results log. Undefined renders both features off.
- * @param {() => void} [onSignOut]  Hidden when not supplied (harness/demo).
- * @param {() => void} [onRetry]  Re-fetch after a load failure.
+ * No invented data: every name, score and point total is the hook's own, and
+ * ranks render verbatim (ties share a rank). An event with no label reads
+ * "Tour event". `variant` drives the harness states locally ('populated',
+ * the default and the only one a live route passes, is a pass-through).
+ * `athleteId` (athlete role) unlocks "Your results".
  */
 export default function TourStandings({
   variant = 'populated',
@@ -95,6 +60,7 @@ export default function TourStandings({
   const family = role === 'athlete' || role === 'parent';
   // `practice` (the onboarding walkthrough) reads nothing of the member's own.
   const allElite = useAllElite({ enabled: family && !practice });
+  const viewerIds = useTourViewerIds({ role, athleteId, enabled: family && !practice });
 
   const loading = variant === 'loading' || (variant === 'populated' && hookState.loading);
   const error =
@@ -103,42 +69,37 @@ export default function TourStandings({
       : variant === 'populated'
       ? hookState.error
       : null;
-  // Memoized so the harness's 'empty' variant doesn't mint a fresh object
-  // every render and thrash the brackets memo below (CRA exhaustive-deps).
   const data = useMemo(
-    () =>
-      variant === 'empty' ? { brackets: [], events: [] } : variant === 'populated' ? hookState.data : null,
+    () => (variant === 'empty' ? { boards: [], events: [] } : variant === 'populated' ? hookState.data : null),
     [variant, hookState.data]
   );
-
-  // Only non-empty brackets ever reach the selector - see the hook's own
-  // contract above; filtering again here is a defensive no-op against it,
-  // never a second source of truth.
-  const brackets = useMemo(() => (data?.brackets ?? []).filter((b) => (b.standings?.length ?? 0) > 0), [data]);
+  const boards = useMemo(() => (data?.boards ?? []).filter((b) => (b.standings?.length ?? 0) > 0), [data]);
   const events = data?.events ?? [];
-  const isEmpty = !loading && !error && brackets.length === 0 && events.length === 0;
+  const isEmpty = !loading && !error && boards.length === 0 && events.length === 0;
 
-  // Selection is local state (Sprint 8 pin) - once set it survives a data
-  // refresh (the effect below leaves a still-valid selection alone). Default:
-  // the athlete's own bracket when the viewer is an athlete who appears in
-  // exactly one bracket's standings; the first bracket otherwise, including
-  // every non-athlete role and any athlete whose `athleteId` is absent
-  // (PortalRoutes.js's TourRoute threads it through since the Sprint 8
-  // integration pass; the harness never passes one).
-  const [selectedBracketId, setSelectedBracketId] = useState(null);
-  useEffect(() => {
-    if (!brackets.length) return;
-    if (selectedBracketId && brackets.some((b) => b.id === selectedBracketId)) return;
-    let defaultId = brackets[0].id;
-    if (role === 'athlete' && athleteId) {
-      const owning = brackets.filter((b) => b.standings.some((s) => s.athleteId === athleteId));
-      if (owning.length === 1) defaultId = owning[0].id;
-    }
-    setSelectedBracketId(defaultId);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [brackets, role, athleteId]);
-
-  const selected = brackets.find((b) => b.id === selectedBracketId) ?? brackets[0] ?? null;
+  const ages = useMemo(() => ageFiltersFor(boards.map((b) => b.id)), [boards]);
+  const landing = defaultAgeFor(boards, viewerIds);
+  const [tapped, setTapped] = useState(null); // the Age the viewer pinned by tapping either filter
+  const [gender, setGender] = useState('all');
+  const age = tapped && ages.some((a) => a.id === tapped) ? tapped : landing;
+  // A Gender tap pins the age on screen too (review 2026-11-06): a landing
+  // that arrives later (the viewer's ids, a refetch) must not move a board
+  // the viewer picked.
+  const pickGender = (g) => {
+    setTapped(age);
+    setGender(g);
+  };
+  // Gender carries between the kids' groups (Girls on 11–14 stays Girls on
+  // 15–18) but resets to All when the Age crosses to or from Coaches, so
+  // Girls never turns into an empty Coaches · Women board (2026-11-07).
+  const pickAge = (next) => {
+    if ((next === 'coaches') !== (age === 'coaches')) setGender('all');
+    setTapped(next);
+  };
+  const genders = genderFiltersFor(age);
+  const boardId = boardIdFor(age, genders ? gender : 'all');
+  const board = boards.find((b) => b.id === boardId) ?? null;
+  const boardEvents = events.filter((e) => (e.boards?.[boardId]?.length ?? 0) > 0);
   // Families only: what a Tour event is, above the board it feeds. Its token
   // sentence shows once a token athlete is known to be reading (allElite
   // false) - never to an Elite family, nor while that is still loading.
@@ -174,18 +135,10 @@ export default function TourStandings({
       ) : (
         <div style={{ padding: '0 22px 24px', display: 'flex', flexDirection: 'column', gap: 14 }}>
           {explainer}
-          {brackets.length ? (
-            <BracketSelector brackets={brackets} selectedId={selected?.id} onSelect={setSelectedBracketId} />
-          ) : null}
-          {selected ? (
-            selected.standings.length ? (
-              <StandingsCard standings={selected.standings} counting={data?.counting} />
-            ) : (
-              <NoBracketResults />
-            )
-          ) : null}
-          {events.length && selected ? <RecentTournaments events={events} bracketId={selected.id} /> : null}
-          {role === 'athlete' && athleteId ? <YourResults events={events} athleteId={athleteId} /> : null}
+          <TourFilters ages={ages} age={age} onAge={pickAge} genders={genders} gender={gender} onGender={pickGender} />
+          {board ? <StandingsCard label={board.label} standings={board.standings} /> : <NoBoardResults label={boardLabel(boardId)} />}
+          {boardEvents.length ? <RecentTourEvents events={boardEvents} boardId={boardId} /> : null}
+          {role === 'athlete' && athleteId ? <YourResults events={events} athleteId={athleteId} boardId={boardId} /> : null}
         </div>
       )}
     </PhoneFrame>
@@ -194,7 +147,7 @@ export default function TourStandings({
 
 /**
  * The loading layout in the loaded layout's geometry: a few standings rows,
- * then a recent-tournament card. No spinner - see components/Skeleton.js.
+ * then a recent-event card. No spinner - see components/Skeleton.js.
  */
 function TourSkeleton() {
   return (
@@ -242,15 +195,8 @@ function EmptyTour() {
   );
 }
 
-/**
- * Defensive-only (Sprint 8 pin): brackets reaching this screen are always
- * non-empty by construction (see the hook's own contract and this screen's
- * own filter above), so in practice `selected.standings` is never empty.
- * Kept as a real state rather than a silent blank list purely because the
- * pin calls it out by name - "update the empty state only if the bracket
- * filter needs one ('No results in this bracket yet')".
- */
-function NoBracketResults() {
+/** A filter combination nobody has a score on yet (15–18 Girls before anyone plays, say). */
+function NoBoardResults({ label }) {
   return (
     <div
       style={{
@@ -260,72 +206,20 @@ function NoBracketResults() {
         textAlign: 'center',
       }}
     >
-      <Body size={12}>No results in this bracket yet.</Body>
+      <Body size={12}>No scores on the {label} leaderboard yet.</Body>
     </div>
   );
 }
 
-/**
- * Age-bracket selector chips (Sprint 8 pin, TEAM.md, contract v1.6) - one
- * per non-empty bracket, in the hook's own order (BRACKETS order, 'open'
- * last). This is a real control the viewer taps to switch which bracket the
- * standings/podiums/results below describe, so per flag 02 (StatusBadge.js)
- * the active chip carries the solid-fill "tappable" treatment - the same
- * selected/unselected idiom MySchedule's Segmented control and
- * AdminDashboard's tier filter already use - rather than StatusBadge's
- * outline/tint (reserved for status, not a control).
- */
-function BracketSelector({ brackets, selectedId, onSelect }) {
-  return (
-    <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-      {brackets.map((b) => {
-        const active = b.id === selectedId;
-        return (
-          <button
-            key={b.id}
-            type="button"
-            onClick={() => onSelect(b.id)}
-            style={{
-              height: 44,
-              padding: '0 16px',
-              borderRadius: radius.pill,
-              border: `1px solid ${active ? color.primary : color.border}`,
-              background: active ? color.primary : 'transparent',
-              color: active ? '#000' : color.textSecondary,
-              font: `600 13px ${font.body}`,
-              cursor: 'pointer',
-            }}
-          >
-            {b.label || b.id}
-          </button>
-        );
-      })}
-    </div>
-  );
-}
-
-function StandingsCard({ standings, counting }) {
-  // Drop-week transparency (data/tour.js TOUR_DROP_RATE): once drops are in
-  // effect, say so — a parent comparing points-per-event against the total
-  // would otherwise read the dropped weeks as a math error. Silent until the
-  // season has run long enough to earn a drop. `counting` stays global
-  // across brackets (TEAM.md: "eventsHeld stays global") even though the
-  // standings list itself is now the selected bracket's.
-  const showDrops = counting != null && counting.drops > 0;
+function StandingsCard({ label, standings }) {
   return (
     <Card large>
-      <SectionLabel style={{ marginBottom: showDrops ? 4 : 12 }}>
-        Standings · {standings.length}
+      <SectionLabel style={{ marginBottom: 4 }}>
+        {label} · {standings.length}
       </SectionLabel>
-      {showDrops ? (
-        <Body size={11} tone={color.textTertiary} style={{ marginBottom: 12 }}>
-          Best {counting.counted} of {counting.eventsHeld} Saturdays count —{' '}
-          {counting.drops === 1
-            ? 'everyone drops their lowest week'
-            : `everyone drops their ${counting.drops} lowest weeks`}
-          , so a missed Saturday never ends a season.
-        </Body>
-      ) : null}
+      <Body size={11} tone={color.textTertiary} style={{ marginBottom: 12 }}>
+        {TOUR_POINTS_RULE}
+      </Body>
       <div style={{ display: 'flex', flexDirection: 'column' }}>
         {standings.map((s, i) => (
           <StandingsRow key={s.athleteId} standing={s} divider={i < standings.length - 1} />
@@ -335,13 +229,11 @@ function StandingsCard({ standings, counting }) {
   );
 }
 
-/** Rank 1 is visually celebrated with a tint + border, never a solid fill -
- * a solid green fill is reserved for tappable controls (flag 02, StatusBadge.js);
- * a leaderboard row is a status, not a button. */
+/** Rank 1 is celebrated with a tint + border, never a solid fill - a solid
+ * green fill is reserved for tappable controls (flag 02, StatusBadge.js). */
 function StandingsRow({ standing, divider }) {
   const { name, rank, points, events, wins } = standing;
   const celebrated = rank === 1;
-
   return (
     <div
       style={{
@@ -424,46 +316,34 @@ function RankBadge({ rank, celebrated, size = 34 }) {
   );
 }
 
-function RecentTournaments({ events, bracketId }) {
+function RecentTourEvents({ events, boardId }) {
   return (
     <div>
       <SectionLabel style={{ marginBottom: 10 }}>Recent Tour events</SectionLabel>
       <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-        {/* v1.6.1: an event is a DATE (all of one Saturday's blocks merged),
-            so the date is the identity. */}
+        {/* v1.6.1: an event is a DATE (all of one Saturday's blocks merged). */}
         {events.map((e) => (
-          <EventCard key={e.date} event={e} bracketId={bracketId} />
+          <EventCard key={e.date} event={e} boardId={boardId} />
         ))}
       </div>
     </div>
   );
 }
 
-/**
- * One event's card, podium narrowed to the selected bracket (Sprint 8 pin).
- * `event.results` carries every bracket's rows, already sorted bracket order
- * then position (TEAM.md, contract v1.6) - filtering to one bracket id
- * preserves that ascending position order, so no re-sort is needed here. A
- * row's `bracket` is the raw write-time snapshot ('10U'|'11-13'|'14+'|null);
- * null groups under the 'open' bracket id, matching how the standings side
- * groups it.
- */
-function EventCard({ event, bracketId }) {
-  const podium = (event.results ?? []).filter((r) => (r.bracket ?? 'open') === bracketId).slice(0, 3);
+/** One Saturday on the selected board: its top three by derived place, with scores and points. */
+function EventCard({ event, boardId }) {
+  const podium = (event.boards?.[boardId] ?? []).slice(0, 3);
   return (
     <Card>
-      <div style={{ font: `400 11px ${font.body}`, color: color.textTertiary }}>
-        {longDayLabel(event.date)}
-      </div>
+      <div style={{ font: `400 11px ${font.body}`, color: color.textTertiary }}>{longDayLabel(event.date)}</div>
       <div style={{ font: `700 15px ${font.head}`, color: color.text, marginTop: 3 }}>
-        {/* No invented session names — the same "Tour event" fallback
-            every other screen uses for an unlabeled session (TEAM.md). */}
+        {/* No invented session names — the same "Tour event" fallback every other screen uses. */}
         {event.label || 'Tour event'}
       </div>
       {podium.length ? (
         <div style={{ display: 'flex', gap: 10, marginTop: 12 }}>
           {podium.map((p) => (
-            <PodiumSpot key={p.position} podium={p} />
+            <PodiumSpot key={p.athleteId} podium={p} />
           ))}
         </div>
       ) : null}
@@ -471,8 +351,7 @@ function EventCard({ event, bracketId }) {
   );
 }
 
-/** Podium spot, now with the score (Sprint 8 pin) - strokes, exactly what
- * the coach entered, never invented or recomputed. */
+/** Podium spot - strokes exactly as the coach entered them, and the points that place earned. */
 function PodiumSpot({ podium }) {
   return (
     <div style={{ flex: 1, minWidth: 0, textAlign: 'center' }}>
@@ -491,73 +370,7 @@ function PodiumSpot({ podium }) {
         {podium.name}
       </div>
       <div style={{ font: `600 10px ${font.body}`, color: color.textTertiary, marginTop: 2 }}>
-        {podium.score ?? '—'}
-      </div>
-    </div>
-  );
-}
-
-/**
- * "Your results" (Sprint 8 pin, TEAM.md, contract v1.6) - athlete-only,
- * needs no new hook: `events[].results` already carries every bracket's
- * rows, so this is a pure client-side filter by `athleteId`. `events` is
- * already sorted date desc (the hook's own contract) and this only removes
- * rows, so the result stays most-recent-first with no extra sort. Renders
- * nothing when the athlete has no results yet, or (per the component doc
- * comment) when `athleteId` was never supplied.
- */
-function YourResults({ events, athleteId }) {
-  const rows = events.flatMap((e) =>
-    (e.results ?? [])
-      .filter((r) => r.athleteId === athleteId)
-      .map((r) => ({ ...r, date: e.date }))
-  );
-  if (!rows.length) return null;
-  return (
-    <Card large>
-      <SectionLabel style={{ marginBottom: 12 }}>Your results</SectionLabel>
-      <div style={{ display: 'flex', flexDirection: 'column' }}>
-        {/* One row per Saturday per athlete (v1.6.1 weekly merge), so the
-            date is a unique key. */}
-        {rows.map((r, i) => (
-          <YourResultRow key={r.date} row={r} divider={i < rows.length - 1} />
-        ))}
-      </div>
-    </Card>
-  );
-}
-
-function YourResultRow({ row, divider }) {
-  return (
-    <div
-      style={{
-        display: 'flex',
-        alignItems: 'center',
-        justifyContent: 'space-between',
-        gap: 12,
-        padding: '11px 0',
-        borderBottom: divider ? `1px solid ${color.rowRule}` : 'none',
-      }}
-    >
-      <div style={{ flex: 1, minWidth: 0 }}>
-        <div style={{ font: `600 14px ${font.body}`, color: color.text }}>{longDayLabel(row.date)}</div>
-        <div style={{ font: `400 11px ${font.body}`, color: color.textTertiary, marginTop: 3 }}>
-          {row.score} strokes · {ordinal(row.position)} in bracket
-        </div>
-      </div>
-      <div style={{ flex: 'none', textAlign: 'right' }}>
-        <div style={{ font: `700 16px ${font.head}`, color: color.text }}>{pointsForPosition(row.position)}</div>
-        <div
-          style={{
-            font: `400 9px ${font.body}`,
-            textTransform: 'uppercase',
-            letterSpacing: '.08em',
-            color: color.textTertiary,
-            marginTop: 2,
-          }}
-        >
-          pts
-        </div>
+        {podium.score ?? '—'} · {podium.points} pts
       </div>
     </div>
   );

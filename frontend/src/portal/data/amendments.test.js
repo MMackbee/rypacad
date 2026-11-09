@@ -70,19 +70,19 @@ describe('the mental cadence is per package (v2.0.1)', () => {
 });
 
 describe('the schedule (v2.0.2)', () => {
-  test('capacity is per type: training 14, tournament 25 (owner, 2026-09-18)', () => {
-    expect(CAPACITY_BY_TYPE).toEqual({ training: 14, tournament: 25 });
-    expect(CAPACITY).toBe(14);
+  test('capacity is per type: training 12 (owner, 2026-11-05; 14 from 2026-09-18), tournament 25', () => {
+    expect(CAPACITY_BY_TYPE).toEqual({ training: 12, tournament: 25 });
+    expect(CAPACITY).toBe(12);
     expect(capacityForType('tournament')).toBe(25);
-    expect(capacityForType('training')).toBe(14);
-    expect(capacityForType('adult')).toBe(14);
+    expect(capacityForType('training')).toBe(12);
+    expect(capacityForType('adult')).toBe(12);
   });
 
   test('the generated season carries each session type\'s own capacity', () => {
     // Mon 2026-09-21 .. Sun 2026-09-27: weekday training blocks and a Saturday.
     const week = generateSeason({ start: '2026-09-21', end: '2026-09-27' });
     const byType = (t) => [...new Set(week.filter((s) => s.type === t).map((s) => s.capacity))];
-    expect(byType('training')).toEqual([14]);
+    expect(byType('training')).toEqual([12]);
     expect(byType('tournament')).toEqual([25]);
     // A holiday extra follows its type too, unless it names its own number.
     const extras = generateSeason({
