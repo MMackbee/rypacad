@@ -22,6 +22,7 @@ import {
 } from './AssessmentRoutes';
 import { assessmentAccess } from './data/assessmentAccess';
 import { attendanceReadOnlyFor } from './data/specialists';
+import { CombineRoute, loadCombine } from './CombineRoutes';
 import ResearchConfirmGate from './components/ResearchConfirmGate';
 
 /*
@@ -127,6 +128,7 @@ const CURRENT_ROUTE_CHUNKS = {
   admin: [loadAdmin],
   staff: [loadStaff],
   assessments: [loadAssessmentList],
+  combine: [loadCombine],
 };
 const NEXT_ROUTE_CHUNKS = {
   family: [loadBook, loadCoaching, loadBilling, loadAthleteDetail, loadReservations, loadSettings, loadTour],
@@ -710,6 +712,8 @@ function SessionAttendanceRoute({ onBack }) {
       role={role}
       readOnly={readOnly}
       onOpenClubhead={!live || assessmentAccess(user) ? (athleteId, name) => navigate(`/portal/assessments/golf/${athleteId}`, { state: { name } }) : undefined}
+      showIntake
+      onOpenCombine={(athleteId, name) => navigate(`/portal/combine/${athleteId}`, { state: { name } })}
     />
   );
 }
@@ -908,6 +912,9 @@ export default function PortalRoutes() {
       {/* Yannick's consent form (2026-10-30): signed by a parent or an athlete login; coaches see nothing of it. */}
       <Route path="consent/mental" element={<RequireRole roles={['parent', 'athlete']}><MentalConsentListRoute /></RequireRole>} />
       <Route path="consent/mental/:athleteId" element={<RequireRole roles={['parent', 'athlete']}><MentalConsentFlowRoute /></RequireRole>} />
+      {/* Combine scores (2026-11-11 spec 4): an athlete's own; one athlete's for parents and staff. */}
+      <Route path="combine" element={<RequireRole roles={['athlete']}><CombineRoute /></RequireRole>} />
+      <Route path="combine/:athleteId" element={<RequireRole roles={['parent', 'coach', 'mental', 'ops', 'owner']}><CombineRoute /></RequireRole>} />
       {/* Hidden until closer to launch (owner, 2026-09-30): a stale link
           goes through the index, which lands the account on its own home. */}
       <Route
