@@ -99,7 +99,7 @@ export default function CombineDistanceBlock({ distance, best, latest, canEnter,
           </Button>
         </div>
       ) : null}
-      {error ? <Body size={12} tone={color.error} style={{ marginTop: 8 }}>{error.text}</Body> : null}
+      {error ? <div role="alert"><Body size={12} tone={color.error} style={{ marginTop: 8 }}>{error.text}</Body></div> : null}
     </Card>
   );
 }

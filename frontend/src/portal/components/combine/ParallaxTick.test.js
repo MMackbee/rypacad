@@ -141,6 +141,15 @@ test('a failed tick says so', async () => {
   await r.unmount();
 });
 
+test('a failed tick is announced to screen readers (role="alert")', async () => {
+  const onTick = jest.fn(async () => { throw new Error('offline'); });
+  const r = await tick({ onTick });
+  expect(r.container.querySelector('[role="alert"]')).toBeNull();
+  await r.click(LABEL);
+  expect(r.container.querySelector('[role="alert"]').textContent).toBe('Not saved. Tap to try again.');
+  await r.unmount();
+});
+
 test('read-only shows the state, disabled', async () => {
   const open = await tick({ canTick: false });
   expect(checkbox(open).disabled).toBe(true);

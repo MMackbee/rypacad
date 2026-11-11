@@ -136,7 +136,7 @@ export default function ParallaxTick({ name, milestone, viewer, canTick, onTick,
           </button>
         </div>
       ) : null}
-      {problem ? <Body size={11} tone={color.error}>{problem}</Body> : null}
+      {problem ? <div role="alert"><Body size={11} tone={color.error}>{problem}</Body></div> : null}
     </div>
   );
 }

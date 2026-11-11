@@ -89,7 +89,7 @@ export default function CombineHistory({ rows, best, viewer, onDelete }) {
                 </div>
               </div>
             ) : null}
-            {failed === row.id ? <Body size={12} tone={color.error} style={{ marginTop: 6 }}>{COMBINE_DELETE_ERROR}</Body> : null}
+            {failed === row.id ? <div role="alert"><Body size={12} tone={color.error} style={{ marginTop: 6 }}>{COMBINE_DELETE_ERROR}</Body></div> : null}
           </div>
         );
       })}

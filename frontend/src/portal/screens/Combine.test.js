@@ -178,6 +178,24 @@ test('a failed delete says so', async () => {
   await r.unmount();
 });
 
+test('errors are announced to screen readers (role="alert")', async () => {
+  mockState.save.mockRejectedValue(new Error('offline'));
+  mockState.remove.mockRejectedValue(new Error('offline'));
+  const alerts = (r) => [...r.container.querySelectorAll('[role="alert"]')].map((el) => el.textContent);
+  const r = await screen();
+  expect(alerts(r)).toEqual([]);
+  await r.fill('Under 100 yd score', '1001');
+  await r.click('Save Under 100 yd');
+  expect(alerts(r)).toEqual([SCORE_ERROR]);
+  await r.fill('Under 125 yd score', '700');
+  await r.click('Save Under 125 yd');
+  expect(alerts(r)).toContain(COMBINE_SAVE_ERROR);
+  await r.click('Delete 640 · Under 100 yd · Nov 1');
+  await r.click('Delete this score');
+  expect(alerts(r)).toContain(COMBINE_DELETE_ERROR);
+  await r.unmount();
+});
+
 test('ops reads only', async () => {
   mockState.data = viewOf({ uid: 'u-ops', role: 'ops' }, false);
   const r = await screen();
