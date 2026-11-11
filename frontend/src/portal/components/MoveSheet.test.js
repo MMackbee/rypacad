@@ -110,6 +110,20 @@ test('the new session just filled: back to the list, reloaded, nothing moved (Re
   await r.unmount();
 });
 
+test('a refusal line goes when another session is picked; Keep it shows the list without it', async () => {
+  mockMove = async () => { throw refusal('full', 'That session just filled.'); };
+  const r = await mount();
+  await r.click('Thu, Nov 12 4:00 PM');
+  await r.click('Move');
+  expect(r.text()).toContain('This session just filled. Nothing was changed.');
+  await r.click('Thu, Nov 12 4:00 PM');
+  expect(r.text()).not.toContain('Nothing was changed.');
+  await r.click('Keep it');
+  expect(r.text()).toContain('Thu, Nov 12');
+  expect(r.text()).not.toContain('Nothing was changed.');
+  await r.unmount();
+});
+
 test('the booking has started: the line and Close (Review Focus 4)', async () => {
   mockMove = async () => { throw refusal('already-started'); };
   const r = await mount();
@@ -148,7 +162,7 @@ test('no answer from the server: check the list, both lists refresh, only Close'
   await r.click('Thu, Nov 12 4:00 PM');
   await r.click('Move');
   expect(r.text()).toContain("We couldn't confirm the move. Check your list before trying again.");
-  expect(mockBumps).toEqual(['bookings', 'sessions']);
+  expect(mockBumps).toEqual(['bookings', 'sessions', 'waitlist']);
   expect([...r.container.querySelectorAll('button')].map((b) => b.textContent.trim())).toEqual(['Close']);
   await r.unmount();
 });
@@ -174,6 +188,8 @@ test('moveRefusalCopy: its own lines, then the booking copy, then the message', 
   expect(moveRefusalCopy({ reason: 'session-past' })).toBe('That session has already started.');
   expect(moveRefusalCopy({ reason: 'already-started' })).toBe('This session has already started.');
   expect(moveRefusalCopy({ reason: 'full' })).toBe('This session just filled.');
+  // The new session's period, which may not be this one (late November into December).
+  expect(moveRefusalCopy({ reason: 'no-tokens-left' })).toBe('No tokens left for that period.');
   expect(moveRefusalCopy({ reason: 'something-new', message: 'Plain words.' })).toBe('Plain words.');
   expect(moveRefusalCopy({})).toBe("The move didn't go through.");
 });

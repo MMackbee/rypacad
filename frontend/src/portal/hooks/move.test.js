@@ -167,10 +167,10 @@ describe('loadMoveOptions', () => {
 });
 
 describe('moveBooking', () => {
-  test('one call to the callable, then the lists refresh', async () => {
+  test('one call to the callable, then the lists refresh (the waitlist too: a move drops a place held on the new session)', async () => {
     const out = await moveBooking({ bookingId: 'b1', toSessionId: 's2' });
     expect(mockCalls.callMoveBooking).toEqual([[{ bookingId: 'b1', toSessionId: 's2' }]]);
-    expect(mockBumps).toEqual(['bookings', 'sessions']);
+    expect(mockBumps).toEqual(['bookings', 'sessions', 'waitlist']);
     expect(out).toMatchObject({ bookingId: 'jordan_s2', movedFrom: 'b1' });
   });
 

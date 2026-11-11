@@ -48,6 +48,7 @@ const OWN_COPY = {
   'session-cancelled': 'The academy cancelled that session.',
   'display-only': "That session isn't booked through the portal.",
   'session-past': 'That session has already started.',
+  'no-tokens-left': 'No tokens left for that period.',
   'booking-missing': 'This booking no longer exists.',
   'not-yours': "This booking isn't on your account.",
 };
@@ -103,6 +104,7 @@ export default function MoveSheet({ row, name, onClose, onMoved }) {
       if (!reason) {
         bump('bookings');
         bump('sessions');
+        bump('waitlist');
         setFinal(UNCONFIRMED_COPY);
       } else if (BOOKING_REFUSALS.has(reason)) {
         if (reason === 'not-confirmed' || reason === 'booking-missing') bump('bookings');
@@ -115,6 +117,12 @@ export default function MoveSheet({ row, name, onClose, onMoved }) {
     }
     busy.current = false;
     setMoving(false);
+  };
+
+  // A refusal line belongs to the session it was about: picking another clears it.
+  const pick = (option) => {
+    setNotice(null);
+    setPicked(option);
   };
 
   const close = (
@@ -170,11 +178,11 @@ export default function MoveSheet({ row, name, onClose, onMoved }) {
                     role="button"
                     tabIndex={0}
                     aria-label={`${day.label} ${option.fullTime}`}
-                    onClick={() => setPicked(option)}
+                    onClick={() => pick(option)}
                     onKeyDown={(e) => {
                       if (e.key === 'Enter' || e.key === ' ') {
                         e.preventDefault();
-                        setPicked(option);
+                        pick(option);
                       }
                     }}
                     style={{ cursor: 'pointer' }}

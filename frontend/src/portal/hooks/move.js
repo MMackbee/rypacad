@@ -118,13 +118,16 @@ export function useMoveOptions(row, reloadKey = 0) {
 
 /**
  * Move the booking (plan C2). Seed mode echoes and calls nothing; live mode
- * calls the callable once and then refreshes every list that shows bookings
- * or seats. A refusal rejects with the callable's typed error (`reason`).
+ * calls the callable once and then refreshes every list that shows bookings,
+ * seats or waitlist places (the move drops the athlete's place on the new
+ * session, Decided 7). A refusal rejects with the callable's typed error
+ * (`reason`).
  */
 export async function moveBooking({ bookingId, toSessionId }) {
   if (!isLive()) return { bookingId, toSessionId, simulated: true };
   const result = await callMoveBooking({ bookingId, toSessionId });
   bump('bookings');
   bump('sessions');
+  bump('waitlist');
   return result;
 }
