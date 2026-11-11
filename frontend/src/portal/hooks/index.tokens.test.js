@@ -219,6 +219,32 @@ test("Book a Session as an athlete on Nov 1 (incident 2026-11-01): the next peri
   await b.unmount();
 });
 
+test('a comp in the next period spends none of its tokens (spec 2026-11-11 §5: free wherever it moves)', async () => {
+  live.fetchCurrentUser.mockResolvedValue({ uid: 'u1', athleteId: 'a1', email: 'jordan@email.com' });
+  live.fetchAthlete.mockResolvedValue({ id: 'a1', householdId: 'h1', packageId: 't-16' });
+  const dec = { id: 'a1_dec', sessionId: 'dec', date: '2026-12-01', periodKey: '2026-12-01', status: 'confirmed', type: 'training' };
+  const decComp = { id: 'a1_decc', sessionId: 'decc', date: '2026-12-03', periodKey: '2026-12-01', status: 'confirmed', type: 'training', comp: true, chargedFrom: 'period' };
+  live.fetchPackage.mockResolvedValue(T16);
+  live.fetchHousehold.mockResolvedValue({ id: 'h1', periodAnchorDay: 1 });
+  live.fetchSessionsInRange.mockResolvedValue([]);
+  waitlist.fetchWaitlistByAthlete.mockResolvedValue([]);
+  grace.fetchTokenPeriod.mockResolvedValue(null);
+
+  live.fetchBookings.mockResolvedValue([nov, dec]);
+  const without = await mountHook(() => useBooking({ today: '2026-11-01' }));
+  expect(without.result.current.error).toBeNull();
+  const before = without.result.current.data.tokens.nextPeriod;
+  await without.unmount();
+
+  live.fetchBookings.mockResolvedValue([nov, dec, decComp]);
+  const withComp = await mountHook(() => useBooking({ today: '2026-11-01' }));
+  expect(withComp.result.current.error).toBeNull();
+  const after = withComp.result.current.data.tokens.nextPeriod;
+  expect([after.used, after.left]).toEqual([before.used, before.left]);
+  expect([before.used, before.left]).toEqual([1, 15]);
+  await withComp.unmount();
+});
+
 test("a parent's Book a Session rows (useHouseholdAthletes) on Nov 1: the next period's count, with a grace-charged December booking not counted as a spend", async () => {
   calendar.todayISO.mockReturnValue('2026-11-01');
   live.fetchCurrentUser.mockResolvedValue({ uid: 'p1', householdId: 'h1' });

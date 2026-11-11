@@ -43,6 +43,7 @@ import { HANDICAP_RESERVED, handicapLimitOf, handicapValueOk, reservedRefusal } 
 import { HIDDEN_SESSION_LINE, SESSION_HIDDEN, isHiddenSession } from '../data/hiddenSessions';
 import { HANDICAP_RANGE_ERROR } from '../data/signup';
 import { isSavableTourEntry } from '../data/tourBrackets';
+import { ALREADY_CHANGED_COPY, MENTAL_DAY_OF_COPY, cancelFields, cancelReasonOf, rebookClears } from '../data/bookingChanges';
 
 /** id -> catalogue entry, for the specialist-cap error copy below. */
 const SPECIALIST_BY_ID = new Map(SPECIALISTS.map((s) => [s.id, s]));
@@ -717,7 +718,7 @@ export function assertPeriodTokensLeft(pkg, bookings, periodKey, issuedGrant, wa
     // the single token - ruling 2026-09-29/30) is the fallback.
     const granted = pkg ? issuedGrant ?? periodFallback(pkg) : 0;
     const used = (bookings || []).filter(
-      (b) => b.status !== 'cancelled' && b.periodKey === periodKey && !b.graceTokenId
+      (b) => b.status !== 'cancelled' && b.periodKey === periodKey && !b.graceTokenId && b.comp !== true
     ).length;
     const reserved = (waitlist || []).filter((w) => w && w.periodKey === periodKey).length;
     if (used + reserved >= granted && pkg?.kind === 'single') {
@@ -765,10 +766,10 @@ const SESSION_FULL = Symbol('session-full');
  * rebookedAt == request.time, so a stale client can never re-attach a spent
  * single token. `graceTokenId` is always written (null when none) so a
  * token the booking held before its cancel is released. Pure; `stamp` is
- * serverTimestamp() in the transaction below.
+ * serverTimestamp() in the transaction below; `clears` (rebookClears) last.
  */
-export function rebookPatch(chargedFrom, graceTokenId, stamp) {
-  return { status: 'confirmed', chargedFrom, graceTokenId: graceTokenId ?? null, rebookedAt: stamp };
+export function rebookPatch(chargedFrom, graceTokenId, stamp, clears = {}) {
+  return { status: 'confirmed', chargedFrom, graceTokenId: graceTokenId ?? null, rebookedAt: stamp, ...clears };
 }
 
 export async function createBooking(
@@ -973,7 +974,7 @@ export async function createBooking(
         // diff, and the rule would reject it. The charge decided above is
         // written, and rebookedAt stamps it (the double-spend guard orders
         // a token's bookings by it).
-        tx.update(bookingRef, rebookPatch(chargedFrom, graceTokenId, serverTimestamp()));
+        tx.update(bookingRef, rebookPatch(chargedFrom, graceTokenId, serverTimestamp(), rebookClears(bookingSnap.data(), deleteField)));
       } else {
         tx.set(bookingRef, booking);
       }
@@ -1051,22 +1052,25 @@ export async function createBooking(
  * report). Mirrors createBooking's error-code discipline throughout
  * (LiveDataError codes, wrap()).
  *
- * Client-side cancel-window gating (My Schedule: cancellable until the day
- * before; day-of shows a "contact the academy" line instead of the button)
- * is the CALLER's job — this function performs no date check itself,
- * matching the rules' own accepted gap for v1.
+ * The cancel window (spec 2026-11-11 §4): until the session starts, a portal
+ * 1:1 until the day before - re-checked inside the transaction (a list left
+ * open across the start); the rules check the start on server time. A
+ * `reason` (cancelReasonOf) adds cancelCategory, cancelNote and cancelledAt.
  *
  * Cancel a series (2026-09-30, hooks/cancelSeries.js): each week is this
  * same call with cancelledVia 'series' - the one marker the rules admit, so
  * onBookingCancelled sends no notice per week - and `silent`, so the caller
  * bumps once after its loop (as createBooking does for bookRecurring).
  */
-export async function cancelBooking({ bookingId, cancelledVia = null, silent = false }) {
+export async function cancelBooking({ bookingId, cancelledVia = null, silent = false, reason = null }) {
   if (!bookingId) {
     throw new LiveDataError(ERR.INVALID, 'cancelBooking: bookingId is required.');
   }
+  const why = reason == null ? null : cancelReasonOf(reason);
+  if (reason != null && !why) throw new LiveDataError(ERR.INVALID, 'Pick a reason.', null, 'bad-reason');
   const user = requireUser();
   const bookingRef = doc(db, 'bookings', bookingId);
+  let sessionDate = null;
   try {
     await runTransaction(db, async (tx) => {
       // All reads before any write — Firestore transaction requirement.
@@ -1078,7 +1082,9 @@ export async function cancelBooking({ bookingId, cancelledVia = null, silent = f
       if (booking.status !== 'confirmed') {
         throw new LiveDataError(
           ERR.INVALID,
-          `Only a confirmed booking can be cancelled (this one is ${booking.status}).`
+          ALREADY_CHANGED_COPY,
+          null,
+          'not-confirmed'
         );
       }
       // Sprint 20 (spec 6.1): a Calendly-sourced booking is cancelled from
@@ -1091,7 +1097,13 @@ export async function cancelBooking({ bookingId, cancelledVia = null, silent = f
       if (!sessionSnap.exists()) {
         throw new LiveDataError(ERR.NOT_FOUND, 'That session no longer exists.');
       }
-      const booked = sessionSnap.data().booked ?? 0;
+      const session = sessionSnap.data();
+      sessionDate = session.date ?? null;
+      if ((booking.type ?? session.type) === 'mental' && session.date <= academyDateISO()) {
+        throw new LiveDataError(ERR.INVALID, MENTAL_DAY_OF_COPY, null, 'mental-day-of');
+      }
+      assertSessionNotStarted(session);
+      const booked = session.booked ?? 0;
 
       // Contract v2.1, pin G: a member's own cancel is now traceable —
       // cancelledBy the caller's own uid, cancelReason pinned to 'member'.
@@ -1107,7 +1119,7 @@ export async function cancelBooking({ bookingId, cancelledVia = null, silent = f
       // carry from an earlier series cancel, so its own notice still goes
       // (no field, no diff: the write is unchanged for every other row).
       const via = cancelledVia === 'series' ? 'series' : deleteField();
-      tx.update(bookingRef, { status: 'cancelled', cancelledBy: user.uid, cancelReason: 'member', cancelledVia: via });
+      tx.update(bookingRef, { status: 'cancelled', cancelledBy: user.uid, cancelReason: 'member', cancelledVia: via, ...cancelFields(why, { del: deleteField, stamp: serverTimestamp }) });
       tx.update(sessionRef, { booked: Math.max(0, booked - 1) });
     });
     // Post-write invalidation seam (Sprint 6 pin): both collections changed,
@@ -1118,6 +1130,10 @@ export async function cancelBooking({ bookingId, cancelledVia = null, silent = f
     }
     return { id: bookingId, status: 'cancelled' };
   } catch (err) {
+    // A phone clock behind the server: the rules refused today's session as started.
+    if (!(err instanceof LiveDataError) && err?.code === 'permission-denied' && sessionDate === academyDateISO()) {
+      throw new LiveDataError(ERR.INVALID, SESSION_STARTED_COPY, err, 'session-past');
+    }
     throw wrap(err, 'cancelBooking');
   }
 }

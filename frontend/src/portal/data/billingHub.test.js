@@ -83,11 +83,32 @@ describe('hubMemberFor', () => {
       ['c', '2026-12-22', 'Training block', 'confirmed', false],
       ['g', '2026-12-25', 'Fall Scramble', 'confirmed', true],
     ]);
-    expect(m.spent.filter((r) => !r.viaGrace)).toHaveLength(m.tokens.used);
+    expect(m.spent.filter((r) => !r.viaGrace && !r.viaComp)).toHaveLength(m.tokens.used);
     expect(m.reserved.map((r) => [r.id, r.date, r.time, r.status])).toEqual([
       ['2026-12-28-0_jordan', '2026-12-28', '3:00 PM', 'waitlisted'],
     ]);
     expect(m.reserved).toHaveLength(m.tokens.reserved);
+  });
+
+  test('a comp spends no token in any period, and the evidence says so (spec 2026-11-11 §5)', () => {
+    const comp = (id, over) => b(id, { comp: true, chargedFrom: 'period', ...over });
+    const base = hubMemberFor(fixture());
+    const m = hubMemberFor({
+      ...fixture(),
+      bookings: [
+        ...fixture().bookings,
+        comp('cc', { date: '2026-12-18' }),
+        comp('cn', { date: '2027-01-06', periodKey: '2027-01-01' }),
+        comp('cl', { date: '2026-11-20', periodKey: '2026-11-01' }),
+      ],
+    });
+    expect(m.tokens.used).toBe(base.tokens.used);
+    expect(m.tokens.left).toBe(base.tokens.left);
+    expect(m.nextPeriod.used).toBe(base.nextPeriod.used);
+    expect(m.lastPeriod.used).toBe(base.lastPeriod.used);
+    expect(m.spent.find((r) => r.id === 'cc')).toMatchObject({ viaComp: true, viaGrace: false });
+    expect(m.spent.find((r) => r.id === 'a')).toMatchObject({ viaComp: false });
+    expect(m.spent.filter((r) => !r.viaGrace && !r.viaComp)).toHaveLength(m.tokens.used);
   });
 
   test('an issued grant flows through to granted and last period', () => {

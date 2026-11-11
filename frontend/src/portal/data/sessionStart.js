@@ -29,6 +29,28 @@ export function sessionStarted(session, now = new Date()) {
 }
 
 /**
+ * A screen row's session (`time` '4:00' + `meridiem` 'PM', as displaySession
+ * splits it) back into { date, time: '4:00 PM' } for sessionStarted. A row
+ * with no meridiem keeps its time text as it is ('TBA' reads as no time).
+ */
+export function rowSession(row) {
+  const time = row?.meridiem ? `${row.time} ${row.meridiem}` : row?.time;
+  return { date: row?.date, time };
+}
+
+/**
+ * Whether a family may still cancel on this session's day (spec 2026-11-11
+ * §4): any session through its own day - the start time itself is judged by
+ * sessionStarted (BookingRowActions hides Cancel once it starts, and
+ * cancelBooking and the rules refuse it) - except a portal 1:1 with Yannick,
+ * which keeps the day-before rule (his consent form promises 24 hours).
+ */
+export function cancelDayOpen(session, todayISO) {
+  if (!session || !session.date) return false;
+  return session.type === 'mental' ? session.date > todayISO : session.date >= todayISO;
+}
+
+/**
  * No same-day promotion (owner ruling R3): nobody is booked off a waitlist
  * on the day of the session, so from that day on a waitlist place can never
  * turn into a booking and is not offered.

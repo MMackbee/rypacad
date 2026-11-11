@@ -129,6 +129,39 @@ describe('cancelSeries - one after another through the single cancel', () => {
     expect(mockBumps).toEqual(['bookings', 'sessions']);
   });
 
+  test('one reason goes on every week (spec 2026-11-11 §4); without one the opts are as before', async () => {
+    const calls = [];
+    const reason = { category: 'school', note: null };
+    await cancelSeries(series, async (bookingId, opts) => {
+      calls.push([bookingId, opts]);
+    }, reason);
+    expect(calls).toEqual([
+      ['b1', { cancelledVia: 'series', silent: true, reason: { category: 'school', note: null } }],
+      ['b2', { cancelledVia: 'series', silent: true, reason: { category: 'school', note: null } }],
+      ['b3', { cancelledVia: 'series', silent: true, reason: { category: 'school', note: null } }],
+    ]);
+    const bare = [];
+    await cancelSeries(series, async (bookingId, opts) => {
+      bare.push(opts);
+    });
+    expect(bare[0]).toEqual({ cancelledVia: 'series', silent: true });
+    expect(bare[0]).not.toHaveProperty('reason');
+  });
+
+  test('a week that has already started is listed and the run carries on', async () => {
+    const calls = [];
+    const out = await cancelSeries(series, async (bookingId) => {
+      calls.push(bookingId);
+      if (bookingId === 'b1') {
+        throw Object.assign(new Error('This session has already started.'), { code: 'invalid-argument', reason: 'session-past' });
+      }
+    }, { category: 'sick', note: null });
+    expect(calls).toEqual(['b1', 'b2', 'b3']);
+    expect(out.failed).toEqual([{ bookingId: 'b1', date: '2026-11-10', message: 'This session has already started.' }]);
+    expect(ids(out.cancelled)).toEqual(['b2', 'b3']);
+    expect(out.stopped).toBeNull();
+  });
+
   test('a failure of one booking is collected and the run continues', async () => {
     const out = await cancelSeries(series, async (bookingId) => {
       if (bookingId === 'b2') throw failWith('not-found', 'This booking no longer exists.');

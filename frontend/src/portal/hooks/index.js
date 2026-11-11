@@ -138,7 +138,7 @@ import {
   windowMonthsFor,
 } from '../data/packages';
 import { billingStatusOf } from '../data/billingCopy';
-import { isSingleTokenId } from '../data/singleToken';
+import { householdOnHold, isSingleTokenId } from '../data/singleToken';
 import {
   SEASON,
   SEASON_BOUNDS,
@@ -201,7 +201,8 @@ import { hideContractParts } from '../data/contractFlag';
 import repeatWeekly, { isGroupBookable } from './repeat';
 import { MARKS_LOOKAHEAD_DAYS, dayMarksFor, monthGridBounds } from '../data/calendarViews';
 import { foldBeforeFirstPeriod, positionPeriodFor, tierBillingOf, withTokenStart } from '../data/billingHub';
-import { sessionStarted } from '../data/sessionStart';
+import { cancelDayOpen, sessionStarted } from '../data/sessionStart';
+import { isFreeComp } from '../data/bookingChanges';
 import { handicapLimitOf, handicapOf } from '../data/reserved';
 import { isHiddenSession } from '../data/hiddenSessions';
 
@@ -437,7 +438,7 @@ function tokensWithNextPeriod(pkg, bookings, anchorDay, today, opts = {}) {
   // it: a grace-charged booking (graceTokenId set) never spends a period
   // token. `booked` stays the advance-booking total (pin N).
   const used = (bookings || []).filter(
-    (b) => b && b.status !== 'cancelled' && b.periodKey === nextPeriodKey && !b.graceTokenId
+    (b) => b && b.status !== 'cancelled' && b.periodKey === nextPeriodKey && !b.graceTokenId && b.comp !== true
   ).length;
   const reserved = (opts.waitlist || []).filter((w) => w && w.periodKey === nextPeriodKey).length;
   // The single token's per-period grant is an issued doc or nothing
@@ -650,14 +651,15 @@ async function liveSchedule(today) {
           : null,
       // Sprint 9 pin: cancel(bookingId) below needs the real booking id
       // (never the session id displaySession already carries as `id`),
-      // and `cancellable` is the exact pinned formula - status
-      // 'confirmed' AND still in the future. Past items compute false
+      // and `cancellable` is status 'confirmed', not Calendly, and cancelDayOpen
+      // (its own day too; BookingRowActions hides Cancel at the start). Past items compute false
       // here for free (their date is always < today).
       bookingId: b.id,
       status: b.status,
       source,
-      cancellable: b.status === 'confirmed' && b.date > today && source !== 'calendly',
+      cancellable: b.status === 'confirmed' && source !== 'calendly' && cancelDayOpen(s, today),
       singleToken: isSingleTokenId(b.graceTokenId),
+      comp: isFreeComp(b), graceTokenId: b.graceTokenId ?? null,
       // Contract v2.1, pin G: present on a cancelled row only - absent
       // (null) on every other status, never invented.
       cancelReason: b.cancelReason ?? null,
@@ -690,6 +692,7 @@ async function liveSchedule(today) {
       deriveTokens(ctx.pkg, ctx.bookings, anchorDay, today, { graceTokens, waitlist: waitlistEntries, tokenPeriod, billingStatus: billingStatusOf(ctx.athlete) }),
       graceTokens
     ),
+    onHold: householdOnHold(ctx.household) || billingStatusOf(ctx.athlete) !== 'active',
   };
 }
 
@@ -906,11 +909,12 @@ export function useSchedule({ variant = 'upcoming', today = todayISO(), practice
           // modes. Every BOOKED_UPCOMING/BOOKED_PAST reference is a
           // confirmed booking by construction (there is no seed concept of
           // attended/no-show/cancelled bookings yet), so `status` is fixed
-          // and `cancellable` reduces to the same date check the live
+          // and `cancellable` reduces to the same cancelDayOpen check the live
           // branch runs.
           bookingId: seedBookingId(s.id),
           status: 'confirmed',
-          cancellable: s.date > today,
+          cancellable: cancelDayOpen(s, today),
+          comp: false, graceTokenId: null,
           // Contract v2.1, pin G: shape parity with the live branch's
           // resolve() - always present, null on every seed row (the demo
           // has no cancelled-booking story for the seed athlete; nico's
@@ -2364,8 +2368,9 @@ function reservationRow(s, b, today, instructor, anchorDay, currentPeriodKey) {
         : null,
     bookingId: b.bookingId,
     status: b.status,
-    cancellable: b.status === 'confirmed' && s.date > today && source !== 'calendly',
+    cancellable: b.status === 'confirmed' && source !== 'calendly' && cancelDayOpen(s, today),
     singleToken: isSingleTokenId(b.graceTokenId),
+    comp: isFreeComp(b), graceTokenId: b.graceTokenId ?? null,
     // Contract v2.1, pin G: present on a cancelled row only.
     cancelReason: b.cancelReason ?? null,
     cancelledBy: b.cancelledBy ?? null,
@@ -2415,7 +2420,7 @@ async function liveHouseholdReservations(today) {
 
   // `unlimited`: an Elite athlete's rows carry no token wording (Reservations.js).
   const byAthlete = new Map(
-    athletes.map((a) => [a.id, { athleteId: a.id, name: a.name, unlimited: packageById(a.packageId)?.tokens === null, upcoming: [], past: [] }])
+    athletes.map((a) => [a.id, { athleteId: a.id, name: a.name, unlimited: packageById(a.packageId)?.tokens === null, onHold: householdOnHold(household) || billingStatusOf(a) !== 'active', upcoming: [], past: [] }])
   );
   for (const b of bookings) {
     const s = sessionsById.get(b.sessionId);
@@ -2423,7 +2428,7 @@ async function liveHouseholdReservations(today) {
     if (!s || !bucket) continue; // dropped, same null-resolve rule as useSchedule/liveSchedule above
     const row = reservationRow(
       s,
-      { bookingId: b.id, status: b.status, athleteId: b.athleteId, cancelReason: b.cancelReason, cancelledBy: b.cancelledBy, source: b.source, graceTokenId: b.graceTokenId },
+      { bookingId: b.id, status: b.status, athleteId: b.athleteId, cancelReason: b.cancelReason, cancelledBy: b.cancelledBy, source: b.source, graceTokenId: b.graceTokenId, comp: b.comp, chargedFrom: b.chargedFrom },
       today,
       null,
       anchorDay,
