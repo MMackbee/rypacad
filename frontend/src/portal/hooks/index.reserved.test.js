@@ -197,6 +197,18 @@ describe('staff surfaces that list sessions', () => {
     await h.unmount();
   });
 
+  test("the coach's day: each block carries its session's date, whatever the id looks like (QA 2026-11-11)", async () => {
+    asStaff('coach');
+    live.fetchSessions.mockResolvedValue(TUESDAY.map((s, i) => ({ ...s, id: `qa-${i}` })));
+    const h = await mountHook(() => useCoachDay());
+    expect(h.result.current.data.blocks.map((b) => [b.sessionId, b.date])).toEqual([
+      ['qa-0', '2026-11-17'],
+      ['qa-2', '2026-11-17'],
+      ['qa-3', '2026-11-17'],
+    ]);
+    await h.unmount();
+  });
+
   test("the roster: the session's limit rides the read that already fetches its note and status", async () => {
     asStaff('coach');
     live.fetchBookingsBySession.mockResolvedValue([]);

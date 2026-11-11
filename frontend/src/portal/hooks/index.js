@@ -2713,6 +2713,8 @@ export function useCoachDay({ variant = 'today' } = {}) {
           return {
             id: s.id,
             sessionId: s.id,
+            // The coach's Sessions tab opens on this month (an id is not a date).
+            date: s.date,
             time: s.time,
             type: s.type,
             name: s.label || genericSessionName(s.type),
