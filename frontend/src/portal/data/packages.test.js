@@ -72,6 +72,12 @@ describe('tokensFor', () => {
     expect(t.grace).toEqual([]);
   });
 
+  test('a comp never counts as a period spend (spec 2026-11-11 §5: free wherever it moves)', () => {
+    const bookings = [booking({ id: 'b1' }), booking({ id: 'c1', comp: true, chargedFrom: 'period' })];
+    const t = tokensFor(null, T12, bookings, [], [], KEY, { today });
+    expect(t).toMatchObject({ used: 1, left: 11 });
+  });
+
   test('waitlist entries in the period reserve tokens', () => {
     const waitlist = [
       { id: 'w1', periodKey: KEY },

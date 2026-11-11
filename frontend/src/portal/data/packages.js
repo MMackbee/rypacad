@@ -317,6 +317,7 @@ export function positionForDate(tokens, dateISO) {
  *   granted    periodFallback(pkg); Part 2 passes the period's tokenPeriods
  *              doc as opts.tokenPeriod and its granted wins (absent == grant)
  *   used       non-cancelled bookings carrying this periodKey and no graceTokenId
+ *              (nor a comp: free wherever it moves, spec 2026-11-11)
  *   reserved   waitlist entries carrying this periodKey
  *   grace      unconsumed, unexpired grace tokens, soonest expiry first
  *              (consumed == some non-cancelled booking, or opts.graceSpends
@@ -336,8 +337,8 @@ export function tokensFor(athlete, pkg, bookings, waitlist, graceTokens, periodK
   const notCancelled = (b) => b && b.status !== 'cancelled';
   const live = (bookings || []).filter(notCancelled);
   // A grace-charged booking (graceTokenId set) is a second life for a token
-  // the Academy could not honor - it never counts as a period spend.
-  const used = live.filter((b) => b.periodKey === periodKey && !b.graceTokenId).length;
+  // the Academy could not honor - it never counts as a period spend, nor a comp.
+  const used = live.filter((b) => b.periodKey === periodKey && !b.graceTokenId && b.comp !== true).length;
   const reserved = (waitlist || []).filter((w) => w && w.periodKey === periodKey).length;
   const spends = live.concat((opts.graceSpends || []).filter(notCancelled));
   const consumed = new Set(spends.map((b) => b.graceTokenId).filter(Boolean));

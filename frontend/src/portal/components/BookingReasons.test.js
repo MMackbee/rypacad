@@ -37,6 +37,10 @@ describe('the single token (owner ruling 2026-09-29/30)', () => {
     expect(cancelReasonCopy('member', { singleToken: true })).toBeNull();
     expect(cancelReasonCopy('lapsed')).toBe('Cancelled — membership lapsed.');
   });
+  test("the family's own moved-away row says where it went (spec 2026-11-11 §5)", () => {
+    expect(cancelReasonCopy('moved')).toBe('Moved to another session.');
+    expect(cancelReasonCopy('moved', { unlimited: true })).toBe('Moved to another session.');
+  });
   test('Elite reads no token wording, whatever the row was paid with', () => {
     expect(cancelReasonCopy('session-cancelled', { unlimited: true, singleToken: true })).toBe('Cancelled by the academy.');
     expect(cancelReasonCopy('double-spend', { unlimited: true, singleToken: true })).toBe('Cancelled by the academy.');

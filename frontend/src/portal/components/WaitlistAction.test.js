@@ -21,16 +21,16 @@ describe('copy', () => {
     expect(waitlistStatusCopy(undefined)).toBe('On the waitlist');
   });
 
-  test('what happens when a spot opens: booked automatically, one token used, cancel until the day before', () => {
+  test('what happens when a spot opens: booked automatically, one token used, cancel or move any time before it starts', () => {
     expect(waitlistPromiseCopy({ name: 'Ava' })).toBe(
-      'If a spot opens, Ava is booked automatically and one token is used. You can cancel until the day before.'
+      'If a spot opens, Ava is booked automatically and one token is used. You can cancel or move it any time before it starts.'
     );
     expect(waitlistPromiseCopy({ name: 'Eli', unlimited: true })).toBe(
-      'If a spot opens, Eli is booked automatically. You can cancel until the day before.'
+      'If a spot opens, Eli is booked automatically. You can cancel or move it any time before it starts.'
     );
     // An athlete's own screen, where no name is in hand.
     expect(waitlistPromiseCopy({})).toBe(
-      'If a spot opens, you are booked automatically and one token is used. You can cancel until the day before.'
+      'If a spot opens, you are booked automatically and one token is used. You can cancel or move it any time before it starts.'
     );
     expect(waitlistPromiseCopy({ unlimited: true })).not.toMatch(/token/i);
   });
@@ -93,7 +93,7 @@ describe('components', () => {
   test('the waitlisted confirmation says what happens, not "you\'ll be notified"', async () => {
     const r = await renderScreen(<WaitlistedConfirmationBody name="Training block" when="Tue, Nov 17 · 4:00" position={null} athleteName="Ava" />);
     expect(r.text()).toContain('On the waitlist');
-    expect(r.text()).toContain('If a spot opens, Ava is booked automatically and one token is used. You can cancel until the day before.');
+    expect(r.text()).toContain('If a spot opens, Ava is booked automatically and one token is used. You can cancel or move it any time before it starts.');
     expect(r.text()).not.toMatch(/notif/i);
     await r.unmount();
 

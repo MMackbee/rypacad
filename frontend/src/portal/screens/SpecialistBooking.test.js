@@ -537,7 +537,7 @@ describe('waitlist hardening on the Phil screen', () => {
     mockBook = async () => ({ status: 'waitlisted', position: 1 });
     const r = await renderScreen(<SpecialistBooking bare initialSpecialist="phil" />);
     await tap(card(r, '3:00'));
-    expect(r.text()).toContain('This time is full. If a spot opens, Jordan is booked automatically and one token is used. You can cancel until the day before.');
+    expect(r.text()).toContain('This time is full. If a spot opens, Jordan is booked automatically and one token is used. You can cancel or move it any time before it starts.');
     expect(r.text()).not.toMatch(/notif/i);
     await r.click('Join waitlist · reserves one token');
     await r.flush();
@@ -692,7 +692,7 @@ describe('waitlist hardening on the Phil screen', () => {
       mockBook = async () => ({ status: 'waitlisted', position: 3 });
       const r = await renderScreen(<SpecialistBooking bare initialSpecialist="phil" />);
       await tap(card(r, '3:00'));
-      expect(r.text()).toContain('This time is full. If a spot opens, Jordan is booked automatically. You can cancel until the day before.');
+      expect(r.text()).toContain('This time is full. If a spot opens, Jordan is booked automatically. You can cancel or move it any time before it starts.');
       expect(r.text()).not.toMatch(/token/i);
       await r.click('Join waitlist');
       await r.flush();

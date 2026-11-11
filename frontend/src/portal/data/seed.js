@@ -200,9 +200,9 @@ export const BOOKING_CONFIRMATION = {
   name: 'Training block',
   when: 'Tue Nov 3 · 4:00 PM',
   email: 'dana@email.com',
-  note: 'Cancel until the day before the session to keep your token.',
+  note: 'Plans change? Cancel or move it in the app any time before it starts. The token comes back.',
   // Elite is unlimited - there is no token to keep (tester, 2026-09-30).
-  noteUnlimited: 'Cancel until the day before the session.',
+  noteUnlimited: 'Plans change? Cancel or move it in the app any time before it starts.',
 };
 
 /** Screen 08. Fixed-height cards regardless of how much data a child has. */

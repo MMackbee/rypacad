@@ -269,8 +269,8 @@ describe('live loaders (perf wave B)', () => {
     expect(h.result.current.data).toMatchObject({ dates: [], slots: [], seasonNote: null });
     // Both cancel lines ride the live payload; the screen picks by the booking athlete's tokens.
     expect(h.result.current.data.confirmation).toMatchObject({
-      note: 'Cancel until the day before the session to keep your token.',
-      noteUnlimited: 'Cancel until the day before the session.',
+      note: 'Plans change? Cancel or move it in the app any time before it starts. The token comes back.',
+      noteUnlimited: 'Plans change? Cancel or move it in the app any time before it starts.',
     });
     await h.unmount();
   });

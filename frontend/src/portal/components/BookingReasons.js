@@ -106,9 +106,11 @@ export function SeeMembershipLink({ onClick, style }) {
  * `singleToken` (the row was paid with a bought single token, ruling
  * 2026-09-29/30): an academy cancel returns that token instead of adding a
  * bonus; 'double-spend' is the server guard releasing a second booking made
- * with a token another booking already used.
+ * with a token another booking already used. 'moved' is the family's own
+ * Move (spec 2026-11-11 §5): the row it left says so.
  */
 export function cancelReasonCopy(reason, { unlimited = false, singleToken = false } = {}) {
+  if (reason === 'moved') return 'Moved to another session.';
   if (reason === 'session-cancelled') {
     if (unlimited) return 'Cancelled by the academy.';
     if (singleToken) return 'Cancelled by the academy - your session token was returned.';

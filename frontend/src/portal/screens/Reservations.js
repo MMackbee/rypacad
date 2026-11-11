@@ -10,8 +10,10 @@ import { waitlistClosed } from '../data/sessionStart';
 import { attendeeNoteFor } from '../data/specialists';
 import BottomTabBar from '../components/BottomTabBar';
 import Button from '../components/Button';
-import CancelSheet from '../components/CancelSheet';
-import { CALENDLY_MANAGED_COPY, cancelReasonCopy } from '../components/BookingReasons';
+import MemberCancelSheet from '../components/MemberCancelSheet';
+import MoveSheet from '../components/MoveSheet';
+import BookingRowActions from '../components/BookingRowActions';
+import { cancelReasonCopy } from '../components/BookingReasons';
 import { leaveFailureCopy, OnWaitlist } from '../components/WaitlistAction';
 import MediaPlaceholder from '../components/MediaPlaceholder';
 import MemberSection from '../components/MemberSection';
@@ -29,9 +31,10 @@ import { Banner, Body, ErrorNotice, ScreenTitle } from '../components/Primitives
  * reference: one family-grouped view, a section per household member, in
  * household order, each with Upcoming/Past tabs and date-block rows (date ·
  * time · duration · instructor · type chip). "Cancel reservation" reuses
- * MySchedule's own confirm-sheet pattern (components/CancelSheet.js) and the
- * exact same cancellable rule (confirmed && date > today). No waitlist state
- * this sprint.
+ * MySchedule's own confirm sheet (components/MemberCancelSheet.js: it asks
+ * why) and the same row actions (components/BookingRowActions.js): Cancel
+ * until the session starts, a portal 1:1 up to the day before (spec
+ * 2026-11-11 §4).
  *
  * `variant` is harness-only: every live route passes the default
  * 'populated', a pure pass-through of useHouseholdReservations() (seed or
@@ -52,6 +55,8 @@ export default function Reservations({ variant = 'populated', bare = false, onBo
   const consents = useFamilyConsents(); // "Consent needed" under an unsigned athlete's 1:1
   const [tab, setTab] = useState('upcoming');
   const [cancelTarget, setCancelTarget] = useState(null);
+  // The row in the Move sheet (spec 2026-11-11 §5), with its athlete's name.
+  const [moveTarget, setMoveTarget] = useState(null);
   // Mirrors MySchedule's leave-waitlist state; the write bumps bookings, so
   // the household list refreshes through its own seam.
   const [leavingId, setLeavingId] = useState(null);
@@ -119,12 +124,14 @@ export default function Reservations({ variant = 'populated', bare = false, onBo
                 onCancelRequest={(item) =>
                   setCancelTarget({ ...item, athleteName: member.name, later: laterWeeks(item, member.upcoming) })
                 }
+                onMoveRequest={(item) => setMoveTarget({ ...item, athleteName: member.name })}
                 onLeaveWaitlist={(item) => handleLeaveWaitlist({ ...item, athleteId: member.athleteId }, member.name)}
                 leavingId={leavingId}
                 // Whose rows these are: the waitlist copy names the athlete,
                 // and an Elite athlete's rows carry no token wording.
                 name={member.name}
                 unlimited={Boolean(member.unlimited)}
+                onHold={Boolean(member.onHold)}
               />
             </MemberSection>
           ))
@@ -132,20 +139,24 @@ export default function Reservations({ variant = 'populated', bare = false, onBo
       </div>
 
       {cancelTarget ? (
-        <CancelSheet
+        <MemberCancelSheet
           summary={`${cancelTarget.athleteName} · ${cancelTarget.dayLabel} · ${cancelTarget.time} ${cancelTarget.meridiem} · ${cancelTarget.name}`}
+          name={cancelTarget.athleteName}
           onClose={() => setCancelTarget(null)}
-          onConfirm={() => cancel(cancelTarget.bookingId)}
+          onConfirm={(reason) => cancel(cancelTarget.bookingId, { reason })}
           laterWeeks={cancelTarget.later}
-          onConfirmSeries={() => cancelSeries([cancelTarget, ...cancelTarget.later], cancel)}
+          onConfirmSeries={(reason) => cancelSeries([cancelTarget, ...cancelTarget.later], cancel, reason)}
           onCancelled={() => setCancelTarget(null)}
         />
+      ) : null}
+      {moveTarget ? (
+        <MoveSheet row={moveTarget} name={moveTarget.athleteName} onClose={() => setMoveTarget(null)} onMoved={() => setMoveTarget(null)} />
       ) : null}
     </PhoneFrame>
   );
 }
 
-function MemberList({ items, past, consent, onBook, onCancelRequest, onLeaveWaitlist, leavingId, name = null, unlimited = false }) {
+function MemberList({ items, past, consent, onBook, onCancelRequest, onMoveRequest, onLeaveWaitlist, leavingId, name = null, unlimited = false, onHold = false }) {
   if (!items || items.length === 0) {
     return (
       <Body size={12} tone={color.textTertiary} style={{ padding: '4px 2px' }}>
@@ -182,7 +193,6 @@ function MemberList({ items, past, consent, onBook, onCancelRequest, onLeaveWait
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 9 }}>
       {items.map((item) => {
-        const dayOf = !past && item.isToday;
         // Sprint 13 (contract v2.1, pin F/G): a waitlisted or system-
         // cancelled item can ride the same upcoming/past arrays (once
         // routing's hook update lands) — see MySchedule.js's own comment.
@@ -227,22 +237,9 @@ function MemberList({ items, past, consent, onBook, onCancelRequest, onLeaveWait
                   leaving={leavingId != null && leavingId === (item.bookingId ?? `${item.athleteId}_${item.id}`)}
                   onLeave={() => onLeaveWaitlist(item)}
                 />
-              ) : item.source === 'calendly' ? (
-                <Body size={11} tone={color.textTertiary}>{CALENDLY_MANAGED_COPY}</Body>
-              ) : dayOf ? (
-                <Body size={11} tone={color.textTertiary}>
-                  Same-day cancellations aren't available in the app — contact the front desk.
-                </Body>
-              ) : item.cancellable && item.bookingId ? (
-                <Button
-                  variant="dangerOutline"
-                  height={44}
-                  style={{ boxShadow: 'none' }}
-                  onClick={() => onCancelRequest(item)}
-                >
-                  Cancel reservation
-                </Button>
-              ) : null
+              ) : (
+                <BookingRowActions row={item} onHold={onHold} onCancel={() => onCancelRequest(item)} onMove={() => onMoveRequest(item)} />
+              )
             }
           />
         );

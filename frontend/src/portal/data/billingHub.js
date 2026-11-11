@@ -106,10 +106,11 @@ export function sessionLabel(session, fallbackType) {
 
 /**
  * Bookings and waitlist entries of one period as list rows, oldest first.
- * A booking row says how it was paid (`viaGrace`), so the list's count of
- * period-charged rows is exactly `tokens.used` and the grace-charged rows
- * are exactly the consumed bonus tokens. `viaSingle` marks the grace rows
- * paid with a purchased single token (`single_{cs}`, ruling 2026-09-29/30).
+ * A booking row says how it was paid (`viaGrace`, `viaComp`), so the list's
+ * count of period-charged rows (neither) is exactly `tokens.used` - a comp
+ * spends nothing, nor a grace-charged row - and the grace-charged rows are
+ * exactly the consumed bonus tokens. `viaSingle` marks the grace rows paid
+ * with a purchased single token (`single_{cs}`, ruling 2026-09-29/30).
  */
 export function periodRows({ bookings, waitlist, periodKey, sessionsById = {} }) {
   const byDate = (a, b) => (a.date === b.date ? String(a.id).localeCompare(String(b.id)) : a.date < b.date ? -1 : 1);
@@ -127,6 +128,7 @@ export function periodRows({ bookings, waitlist, periodKey, sessionsById = {} })
         status: b.status || 'confirmed',
         viaGrace: Boolean(b.graceTokenId),
         viaSingle: isSingleTokenId(b.graceTokenId),
+        viaComp: b.comp === true,
       };
     })
     .sort(byDate);
@@ -203,7 +205,7 @@ export function hubMemberFor(args) {
   const nextGranted = unlimited ? null : pkg ? nextTokenPeriod?.granted ?? periodFallback(pkg) : 0;
 
   const lastUsed = (bookings || []).filter(
-    (b) => b && b.status !== 'cancelled' && b.periodKey === prevPeriod.periodKey && !b.graceTokenId
+    (b) => b && b.status !== 'cancelled' && b.periodKey === prevPeriod.periodKey && !b.graceTokenId && b.comp !== true
   ).length;
   // No "Last period" before the season's first one - nothing was granted
   // then (tester report 2026-09-30: "Aug 1 - Aug 31" for a new member).
@@ -248,8 +250,8 @@ export function hubMemberFor(args) {
     ...(singleUses ? { singleUses } : {}),
     // Null after the season's last period (data/season.js afterSeasonEnd):
     // there is no March to count. `used` is the period's SPEND as the token
-    // rule counts it - a grace-charged booking spends no period token -
-    // while `booked` stays the advance-booking total (contract v2.0 pin N).
+    // rule counts it - a grace-charged booking spends no period token, nor a
+    // comp - while `booked` stays the advance-booking total (contract v2.0 pin N).
     nextPeriod: afterSeasonEnd(nextPeriod.periodKey)
       ? null
       : {
@@ -258,7 +260,7 @@ export function hubMemberFor(args) {
           end: nextPeriod.periodEnd,
           granted: nextGranted,
           booked: nextRows.spent.length,
-          used: nextRows.spent.filter((r) => !r.viaGrace).length,
+          used: nextRows.spent.filter((r) => !r.viaGrace && !r.viaComp).length,
           reserved: nextRows.reserved.length,
         },
     lastPeriod,

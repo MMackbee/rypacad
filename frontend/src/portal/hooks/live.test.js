@@ -15,6 +15,7 @@ jest.mock('firebase/firestore', () => ({
   getDocs: async (ref) => mockQuery(ref.path),
   getDoc: async (ref) => mockSnap(ref.path),
   serverTimestamp: () => 'SERVER_TS',
+  deleteField: () => 'DELETE_FIELD',
   runTransaction: async (_db, fn) =>
     fn({
       get: async (ref) => mockSnap(ref.path),
@@ -79,6 +80,12 @@ describe('rebookPatch', () => {
     expect(rebookPatch('elite', undefined, stamp)).toEqual({ status: 'confirmed', chargedFrom: 'elite', graceTokenId: null, rebookedAt: stamp });
     expect(Object.keys(rebookPatch('period', null, stamp)).sort()).toEqual(['chargedFrom', 'graceTokenId', 'rebookedAt', 'status']);
   });
+  test('the clears a cancelled row needs ride last (spec 2026-11-11: no old reason, no comp on a re-booked row)', () => {
+    const stamp = { sentinel: 'serverTimestamp' };
+    expect(rebookPatch('period', null, stamp, { cancelCategory: 'X', comp: 'X' })).toEqual({
+      status: 'confirmed', chargedFrom: 'period', graceTokenId: null, rebookedAt: stamp, cancelCategory: 'X', comp: 'X',
+    });
+  });
 });
 
 describe('assertBookingOpen', () => {
@@ -100,6 +107,10 @@ describe('assertPeriodTokensLeft names the period it means', () => {
   test('next period (borrowed tokens, spec 5)', () => {
     expect(reasonOf(() => assertPeriodTokensLeft(t6, spent('2026-12-01'), '2026-12-01', undefined, [], '2026-11-01')))
       .toEqual([ERR.INVALID, 'no-tokens-left', "Next period's tokens are already fully booked (6 of 6)."]);
+  });
+  test('a comp row never spends a period token (spec 2026-11-11 §5)', () => {
+    const rows = [...spent('2026-11-01').slice(0, 5), { id: 'c1', status: 'confirmed', periodKey: '2026-11-01', comp: true, chargedFrom: 'period' }];
+    expect(reasonOf(() => assertPeriodTokensLeft(t6, rows, '2026-11-01', undefined, [], '2026-11-01'))).toBeNull();
   });
   test('a waitlist hold is named; Elite never throws', () => {
     expect(reasonOf(() => assertPeriodTokensLeft(t6, spent('2026-11-01').slice(0, 5), '2026-11-01', undefined, [{ periodKey: '2026-11-01' }], '2026-11-01'))[2])
@@ -261,6 +272,31 @@ describe('createBooking for a single-token athlete', () => {
       { path: 'bookings/a2_s1', data: { status: 'confirmed', chargedFrom: 'grace', graceTokenId: 'single_cs_2', rebookedAt: 'SERVER_TS' } },
       { path: 'sessions/s1', data: { booked: 1 } },
     ]);
+  });
+
+  test('a re-book removes an old reason and comp from the row it re-confirms', async () => {
+    mockDocs['bookings/a2_s1'] = {
+      athleteId: 'a2', sessionId: 's1', status: 'cancelled', chargedFrom: 'grace', graceTokenId: 'single_cs_1',
+      cancelCategory: 'sick', cancelledAt: 'T0', comp: true,
+    };
+    mockRows.graceTokens = [token('single_cs_1'), token('single_cs_2')];
+    mockRows.bookings = [
+      { id: 'a2_s1', athleteId: 'a2', sessionId: 's1', status: 'cancelled', graceTokenId: 'single_cs_1', periodKey: '2026-11-01', date: '2026-11-10' },
+      { id: 'a2_s9', athleteId: 'a2', sessionId: 's9', status: 'confirmed', graceTokenId: 'single_cs_1', periodKey: '2026-11-01', date: '2026-11-12' },
+    ];
+    await createBooking(args, { silent: true });
+    expect(mockWrites).toEqual([]);
+    expect(mockUpdates).toEqual([
+      {
+        path: 'bookings/a2_s1',
+        data: {
+          status: 'confirmed', chargedFrom: 'grace', graceTokenId: 'single_cs_2', rebookedAt: 'SERVER_TS',
+          cancelCategory: 'DELETE_FIELD', cancelledAt: 'DELETE_FIELD', comp: 'DELETE_FIELD',
+        },
+      },
+      { path: 'sessions/s1', data: { booked: 1 } },
+    ]);
+    expect(mockUpdates[0].data).not.toHaveProperty('cancelNote');
   });
 
   test('a token held by another waitlist spot is not spent, and nothing is written', async () => {
