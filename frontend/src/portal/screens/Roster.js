@@ -4,6 +4,7 @@ import AthleteRow, { AttendanceControls } from '../components/AthleteRow';
 import BottomTabBar from '../components/BottomTabBar';
 import Button from '../components/Button';
 import CancelSheet from '../components/CancelSheet';
+import CancelledRows from '../components/CancelledRows';
 import PhoneFrame from '../components/PhoneFrame';
 import StatusBadge from '../components/StatusBadge';
 import TypeChip from '../components/TypeChip';
@@ -13,6 +14,7 @@ import TrainingRowExtras from '../components/combine/TrainingRowExtras';
 import { useOpenAssessmentWindows } from '../hooks/assessments';
 import { useParallaxIntakes } from '../hooks/parallax';
 import { useSessionLocalStatus } from '../hooks/sessionLocalStatus';
+import { markOrRecheck } from '../hooks/cancelledBookings';
 import { BackLink, Body, Card, ScreenTitle, SectionLabel, SignOutButton } from '../components/Primitives';
 import useRoster from '../hooks/useRoster';
 import * as hooks from '../hooks';
@@ -28,6 +30,7 @@ import { DEFAULT_DURATION_MINUTES } from '../data/schedule';
 import { parseTimeToMinutes, todayISO } from '../data/calendar';
 import { dayLabel } from '../data/season';
 import { reservedTag } from '../data/reserved';
+import { staleMarkLine } from '../data/bookingChanges';
 // Row metas lose "45 min tier" / "contract behind" while the contract is hidden (owner, 2026-09-30).
 
 /**
@@ -319,11 +322,14 @@ export function SessionAttendance({ variant = 'pre', bare = false, onBack, sessi
         unmarked: roster.filter((a) => marks[a.id] == null).length,
       }
     : demoCounts;
+  const [staleLine, setStaleLine] = useState(null); // spec 2026-11-11 §6: IN/OUT on a kid who just cancelled says so
   const mark = live
     ? (athleteId, next) => {
         const bookingId = bookingByAthlete.get(athleteId);
         if (!bookingId) return;
-        liveAttendance.mark(bookingId, next === 'in' ? 'attended' : next === 'out' ? 'noshow' : 'confirmed');
+        setStaleLine(null);
+        markOrRecheck(liveAttendance.mark, bookingId, next === 'in' ? 'attended' : next === 'out' ? 'noshow' : 'confirmed')
+          .then((stale) => stale && setStaleLine(staleMarkLine(rows.find((r) => r.athleteId === athleteId)?.name ?? null)));
       }
     : demoMark;
 
@@ -632,6 +638,7 @@ export function SessionAttendance({ variant = 'pre', bare = false, onBack, sessi
         ) : live && liveAttendance.error && !sessionCancelled ? (
           <RosterLoadNotice error={liveAttendance.error} onRetry={() => bump('bookings')} style={{ marginBottom: 16 }} />
         ) : null}
+        {staleLine ? <div role="status" style={{ marginBottom: 12 }}><Body size={12}>{staleLine}</Body></div> : null}
         {roster.map((athlete, i) => {
           const value = marks[athlete.id] ?? null;
           const noShow = value === 'out';
@@ -707,6 +714,7 @@ export function SessionAttendance({ variant = 'pre', bare = false, onBack, sessi
             </div>
           );
         })}
+        {live && !sessionCancelled ? <CancelledRows sessionId={sessionId} /> : null}
       </div>
 
       {cancelSheetOpen ? (

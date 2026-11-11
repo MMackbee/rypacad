@@ -53,6 +53,7 @@ jest.mock('../hooks', () => ({
 }));
 jest.mock('../hooks/live', () => ({ ...jest.requireActual('../hooks/live'), __esModule: true, isLive: () => true }));
 jest.mock('../hooks/assessments', () => ({ useOpenAssessmentWindows: () => ({ data: null, loading: false, error: null }) }));
+jest.mock('../hooks/cancelledBookings', () => ({ useCancelledBookings: () => ({ data: [], loading: false, error: null }), markOrRecheck: async (mark, id, status) => { await mark(id, status); return false; } }));
 
 const tour = { date: '2026-11-07', time: '10:00 AM', type: 'tournament', name: 'RYP Tour', meta: null };
 const rosterOf = (ids) => ids.map((id, i) => ({ bookingId: `b${i}`, athleteId: id, name: NAMES[id], status: 'attended' }));
