@@ -186,6 +186,16 @@ test('an owner with no name on file', async () => {
   await second.unmount();
 });
 
+test('the next account on the same device reads the ticks afresh', async () => {
+  const first = await mountHook(on(['a1']));
+  await first.unmount();
+  live.fetchCurrentUser.mockResolvedValue({ uid: 'u-sam', role: 'coach', displayName: 'Sam Lee' });
+  const second = await mountHook(on(['a1']));
+  expect(adapter.fetchIntake).toHaveBeenCalledTimes(2);
+  expect(second.result.current.data.viewer.uid).toBe('u-sam');
+  await second.unmount();
+});
+
 test('a failed read is not cached', async () => {
   adapter.fetchIntake.mockRejectedValue(new LiveDataError(ERR.PERMISSION, 'no'));
   const first = await mountHook(on(['a1']));

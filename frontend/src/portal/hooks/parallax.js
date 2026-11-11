@@ -5,7 +5,8 @@
  * lifetime, so the next block's roster costs no read for athletes already
  * seen. An entry read more than INTAKE_UNDO_MS ago is read again on the next
  * mount, so an owner's clear reaches other coaches' open screens within ten
- * minutes (plan, Decided here 15). A failed read is never cached.
+ * minutes (plan, Decided here 15). A failed read is never cached, and the
+ * next account on the same device starts from an empty cache (2026-11-11 review).
  *
  * Never imports hooks/index.js or hooks/useAuthSession.js (screen tests mock
  * both partially): the viewer comes from live.js fetchCurrentUser.
@@ -23,6 +24,8 @@ import { INTAKE_UNDO_MS, intakeByName, intakeDoc } from '../data/combine';
 
 /** athleteId -> { milestone: milestone|null, readAt: ms }: successful reads and this app's own writes only. */
 const cache = new Map();
+/** The account the cache was filled for. */
+let cacheUid = null;
 
 export const SEED_INTAKE_VIEWER = { uid: 'coach-luke', role: 'coach', byName: 'Luke' };
 const SEED_AT = new Date('2026-11-03T22:15:00Z');
@@ -33,6 +36,7 @@ let seed = freshSeed();
 /** Empties the live cache and puts the seed ticks back (tests). */
 export function clearIntakeCache() {
   cache.clear();
+  cacheUid = null;
   seed = freshSeed();
 }
 
@@ -40,6 +44,10 @@ const isFresh = (entry, now) => Boolean(entry) && now - entry.readAt <= INTAKE_U
 
 async function loadIntakes(ids) {
   const user = await fetchCurrentUser();
+  if (user.uid !== cacheUid) {
+    cache.clear();
+    cacheUid = user.uid;
+  }
   const now = Date.now();
   await Promise.all(ids.filter((id) => !isFresh(cache.get(id), now)).map(async (id) => {
     const milestone = await fetchIntake(id);
