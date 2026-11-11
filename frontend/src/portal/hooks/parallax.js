@@ -103,7 +103,20 @@ export function useParallaxIntakes(athleteIds, { enabled = false } = {}) {
       show(athleteId, null);
       return;
     }
-    await deleteIntake(athleteId);
+    try {
+      await deleteIntake(athleteId);
+    } catch (err) {
+      // A refusal may mean the tick is already gone (the owner cleared it on
+      // another device while this screen or the cache still showed it): read
+      // it again. Gone is what undo wanted; a tick still there shows as
+      // stored and the refusal stands (2026-11-11 review).
+      if (err?.code !== ERR.PERMISSION) throw err;
+      const stored = await fetchIntake(athleteId).catch(() => undefined);
+      if (stored === undefined) throw err;
+      remember(athleteId, stored);
+      if (stored) throw err;
+      return;
+    }
     remember(athleteId, null);
   };
 

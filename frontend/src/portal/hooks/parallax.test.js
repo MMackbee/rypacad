@@ -134,6 +134,46 @@ test('undo clears', async () => {
   await again.unmount();
 });
 
+// The owner cleared the tick on another device while this screen (or the
+// cache) still showed it: the delete meets no doc and the rules refuse it.
+test('an undo refused because the tick is already gone clears it here', async () => {
+  adapter.deleteIntake.mockRejectedValue(new LiveDataError(ERR.PERMISSION, 'no doc'));
+  const { result, unmount } = await mountHook(on(['a1']));
+  expect(result.current.data.byAthlete.a1).toEqual(M);
+  adapter.fetchIntake.mockResolvedValue(null);
+  await act(async () => { await result.current.undo('a1'); });
+  expect(adapter.fetchIntake).toHaveBeenCalledTimes(2);
+  expect(result.current.data.byAthlete.a1).toBeNull();
+  await unmount();
+  const again = await mountHook(on(['a1']));
+  expect(again.result.current.data.byAthlete.a1).toBeNull();
+  expect(adapter.fetchIntake).toHaveBeenCalledTimes(2);
+  await again.unmount();
+});
+
+test('an undo refused while a tick is there rejects and shows the tick as stored', async () => {
+  adapter.deleteIntake.mockRejectedValue(new LiveDataError(ERR.PERMISSION, 'late'));
+  const { result, unmount } = await mountHook(on(['a1']));
+  const theirs = { ...M, by: 'u-sam', byName: 'Sam' };
+  adapter.fetchIntake.mockResolvedValue(theirs);
+  await act(async () => {
+    await expect(result.current.undo('a1')).rejects.toMatchObject({ code: ERR.PERMISSION });
+  });
+  expect(result.current.data.byAthlete.a1).toEqual(theirs);
+  await unmount();
+});
+
+test('an undo that fails for another reason rejects without a re-read', async () => {
+  adapter.deleteIntake.mockRejectedValue(new LiveDataError(ERR.UNAVAILABLE, 'offline'));
+  const { result, unmount } = await mountHook(on(['a1']));
+  await act(async () => {
+    await expect(result.current.undo('a1')).rejects.toMatchObject({ code: ERR.UNAVAILABLE });
+  });
+  expect(adapter.fetchIntake).toHaveBeenCalledTimes(1);
+  expect(result.current.data.byAthlete.a1).toEqual(M);
+  await unmount();
+});
+
 test('an owner with no name on file', async () => {
   live.fetchCurrentUser.mockResolvedValue({ uid: 'owner', role: 'owner', displayName: null });
   const first = await mountHook(on(['a1']));
