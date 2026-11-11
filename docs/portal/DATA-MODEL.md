@@ -37,6 +37,8 @@ serves.
 | `compGrants` | the parent's login email, lower-cased | **2026-11-05 (owner, the Ollhoff family).** An owner-set complimentary membership applied at sign-up: `{ email, uid (the login at grant time, or null), until (Chicago `YYYY-MM-DD`), note, packages (null = every monthly package; never `single`), revoked, createdAt, createdBy: 'comp-grant' (+ revokedAt) }`. Written only by `scripts/comp-grant.mjs` (Admin REST; the owner runs `--yes`). No rules match the path, so no client reads or writes it. `createFamily` and `addAthletes` read it in their transaction (`functions/portal/comp-grant.js`): a covered athlete is created with the comp-membership billing map (`status: active`, Stripe ids null, `comp: true`, `compUntil`, `compNote`) but `linkedBy: 'comp-grant'`, and the callable returns `comped` + `compUntil` so the receipt shows no Pay button. Nothing ends a comp: `compUntil` is a record; the season-end work ends it. |
 | `athletes/{athleteId}/assessments` | `{season}-{kind}` (`2026-27-baseline`) | **2026-10-14 (assessments).** One window per athlete per test window, enforced by the keyspace: a wave cannot open a second baseline in a season. See [below](#assessments-2026-10-14). |
 | `athletes/{athleteId}/assessmentProfile` | `current` | **2026-10-14.** One profile per athlete: sex, first-test date, the season's med ball. |
+| `athletes/{athleteId}/milestones` | `parallaxIntake` | **2026-11-11.** Parallax intake swings, once per athlete by construction (create-only). See [below](#athletesathleteidmilestonesparallaxintake-2026-11-11). |
+| `athletes/{athleteId}/combineScores` | auto id | **2026-11-11.** Every combine attempt, kept; never updated. See [below](#athletesathleteidcombinescoresautoid-2026-11-11). |
 | `assessmentSettings` | `current` | **2026-10-14.** The one protocol settings doc; absent == the v1.2 defaults in `data/assessmentSettings.js`. |
 | `feedbackLimits` | the sender's Firebase Auth uid | **2026-10-15.** `submitFeedback`'s rate limit, one doc per account that has sent feedback. No seed. See [below](#feedbacklimitsuid-2026-10-15). |
 | `mentalNotes/{athleteId}/entries` | `intake`, the session id (`cal-<uuid>` or any `sessions` id), or `free-` + 8 base-36 characters | **2026-10-28 (mental tools).** One intake note and one note per 1:1 per athlete by construction; free notes get a random id. The parent doc `mentalNotes/{athleteId}` is never written. Seed: `mentalNotes/jordan/entries/{intake, cal-seedpast0001, cal-seedpast0002}`. See [below](#mentalnotesathleteidentriesentryid-2026-10-28). |
@@ -1070,6 +1072,47 @@ Query: a parent's one equality (`householdId`), an athlete login's get by id, st
 ### `config/mentalConsent` (2026-10-30)
 
 The switch for the automatic consent notices: `{ notices: bool, enabledAt: 'YYYY-MM-DD' | null }`. Absent == off. While `notices` is not `true` the booking ask, the day-before reminder and Yannick's "Send a reminder" (refused `disabled`) send nothing; the `consent-signed` receipt and the rules are not gated. **Writer: `scripts/set-mental-consent-flag.mjs` only** (a clone of `set-contract-flag.mjs`: `--on | --off`, `--dry-run | --yes`; the owner runs `--prod --on --yes` right after `develop:main`); the `config` write rule admits `contract` alone, so no client writes it. `--on` stamps today (America/Chicago) as `enabledAt` unless the doc is already on with a date, which it keeps; `--off` writes `enabledAt: null`. **Readers:** the existing `config` read rule (`coach`, `mental`, `ops`, `owner` and any account with a `specialistId`) and the functions (Admin SDK). Seed: off (`{ notices: false, enabledAt: null }`).
+
+### `athletes/{athleteId}/milestones/parallaxIntake` (2026-11-11)
+
+Parallax intake swings (spec `docs/portal/plans/2026-11-11-parallax-combine/00-spec.md` 3, plan `01-plan.md` beside it): the one-time onboarding step where an athlete records a set of swings on Parallax. One fixed doc id per athlete, so "once" is enforced by create-only: the doc present == done, absent == not done. Unrelated to Phil's Parallax composite score in the assessments. Not a field on `athletes/{id}`: families read that doc and coaches have no write branch on it.
+
+| Field | Type | Notes |
+|---|---|---|
+| `athleteId` | string | Equals the path. |
+| `at` | timestamp | Server time of the tick. |
+| `by` | uid | The caller, pinned by the rules: the authoritative "who ticked it". |
+| `byName` | string | 1..40 characters. Only a display label the writer supplies ("done Nov 12 · Luke"; `data/combine.js` `intakeByName`: the first name from the users doc, else from the Auth profile, else "Owner" or "Coach"); staff-only and not checked against any name. |
+
+Exactly these four keys.
+
+**Who writes.** Create: role `coach` (Phil included) or `owner`, only when the doc is absent. Update: never; a second tick lands on the existing doc as an update and is refused (the client shows the existing tick). Delete: the owner any time; `by` while `request.time < at + 10 min` (a mis-tap undo).
+
+**Who reads.** Roles `coach`, `mental`, `ops`, `owner`, and any account with a `specialistId`. Families (parents, athlete logins) read none of it.
+
+Reads: one `getDoc` per attendance row on golf training sessions (`hooks/parallaxLive.js`), cached per athlete id; no query, no `firestore.indexes.json` change. No seed. Rules probe: `scripts/rules-probes/combine.mjs` `taskCombine`.
+
+### `athletes/{athleteId}/combineScores/{autoId}` (2026-11-11)
+
+Combine scores (spec 4): every attempt at one of the four combine distances, scored 0 to 1000 and kept with its date so progress shows. Auto ids, so a coach's and an athlete's entries on the same day are both kept.
+
+| Field | Type | Notes |
+|---|---|---|
+| `athleteId` | string | Equals the path. |
+| `distance` | `'u100' \| 'u125' \| 'u150' \| 'u180'` | Under 100, 125, 150 and 180 yd (`data/combine.js` `COMBINE_DISTANCES`). |
+| `score` | int | A whole number, 0..1000. |
+| `date` | string | `YYYY-MM-DD`, a real date not ahead of today and at most 60 days back (Chicago; `combineDateProblem` is exact). The rules see UTC only: they accept a date whose UTC midnight has passed and that is less than 62 days old, so in the Chicago evening they would also take the next day's date or one 61 days back; the client never sends either. |
+| `enteredBy` | uid | The caller, pinned by the rules. |
+| `enteredRole` | `'coach' \| 'owner' \| 'athlete' \| 'parent'` | Equals the writer's `users.role`, pinned by the rules; shown as "Coach", "Owner", "Athlete", "Parent". |
+| `createdAt` | timestamp | Server time. |
+
+Exactly these seven keys.
+
+**Who writes.** Create: role `coach` (Phil included) or `owner` for any athlete; the athlete's own login (`users.athleteId` equals the path); a parent of the athlete's household (the parent's `householdId`, a string, equals the athlete doc's), including for a child with no login of their own. Ops and `mental` enter nothing. Update: never (a wrong score is deleted and re-entered). Delete: `enteredBy` any time, and the owner.
+
+**Who reads.** The athlete's own login, a parent of the household, roles `coach`, `mental`, `ops`, `owner`, and any account with a `specialistId`.
+
+Never named `entries` or `assessments` (the `{path=**}` collection-group rules would widen reads). Reads: one unfiltered `getDocs` per athlete (`hooks/combineLive.js`), sorted and summarised on the client (`sortScores`, `combineSummary`), so no index and no `firestore.indexes.json` change. No seed. Rules probe: `scripts/rules-probes/combine.mjs` `taskCombine`.
 
 ### Billing rows (derived, no new collection)
 

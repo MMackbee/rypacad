@@ -30,6 +30,7 @@ import { taskMentalConsent } from './rules-probes/mental-consent.mjs';
 import { taskMembershipShape } from './rules-probes/membership-shape.mjs';
 import { taskHidden } from './rules-probes/hidden.mjs';
 import { taskTourBrackets } from './rules-probes/tour-brackets.mjs';
+import { taskCombine } from './rules-probes/combine.mjs';
 
 let HOST = localEmulatorHost({ required: true });
 const PROJECT = 'demo-rules-probe';
@@ -1151,10 +1152,11 @@ async function runPass(label) {
     await taskAttendance();
     await taskHidden();
     await taskTourBrackets();
+    await taskCombine();
   } finally { await teardown(); }
 }
 
-export { setup, teardown, seed, del, call, createAs, updateAs, commitAs, bookAs, listAs, expect, token, t, uid, BASE, loadRules, postGateCopy, patchWrite, seatWrite, beforeGate };
+export { setup, teardown, seed, del, call, createAs, updateAs, commitAs, bookAs, listAs, listUnderAs, groupListAs, expect, token, t, uid, BASE, loadRules, postGateCopy, patchWrite, seatWrite, beforeGate };
 if (process.argv[1] && process.argv[1].endsWith('verify-rules.mjs')) {
   const realRules = readFileSync(fileURLToPath(new URL('../firestore.rules', import.meta.url)), 'utf8');
   const postGateRules = postGateCopy(realRules);

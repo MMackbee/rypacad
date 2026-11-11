@@ -9,7 +9,10 @@ import StatusBadge from '../components/StatusBadge';
 import TypeChip from '../components/TypeChip';
 import { ReservedChip } from '../components/Reserved';
 import ClubheadChip from '../components/assessments/ClubheadChip';
+import TrainingRowExtras from '../components/combine/TrainingRowExtras';
 import { useOpenAssessmentWindows } from '../hooks/assessments';
+import { useParallaxIntakes } from '../hooks/parallax';
+import { useSessionLocalStatus } from '../hooks/sessionLocalStatus';
 import { BackLink, Body, Card, ScreenTitle, SectionLabel, SignOutButton } from '../components/Primitives';
 import useRoster from '../hooks/useRoster';
 import * as hooks from '../hooks';
@@ -224,6 +227,8 @@ const shownName = (athlete) => athlete.name ?? 'Name unavailable';
  * @param {number} [blockIndex]  Which of today's blocks (0-based) - seed mode.
  * @param {'coach'|'ops'|'owner'|'mental'} [role]  Who is viewing - "Cancel
  *   session" only renders for ops/owner.
+ * @param {boolean} [showIntake]  2026-11-11: training rows show the Parallax intake swings tick (one read per row athlete).
+ * @param {function} [onOpenCombine]  (athleteId, name) => void - the row's Combine button; hidden when read-only.
  * @param {boolean} [readOnly]  2026-11-03 (owner ruling): a viewer the rules
  *   would not let mark this session (Yannick on a golf block; ops anywhere;
  *   the owner on a specialist's session) sees the roster and each row's mark
@@ -235,7 +240,7 @@ const shownName = (athlete) => athlete.name ?? 'Name unavailable';
  *   "Cancel session" by `role`. The route decides it with
  *   attendanceReadOnlyFor (data/specialists.js).
  */
-export function SessionAttendance({ variant = 'pre', bare = false, onBack, sessionId, blockIndex, block, role = 'coach', readOnly = false, onOpenClubhead }) {
+export function SessionAttendance({ variant = 'pre', bare = false, onBack, sessionId, blockIndex, block, role = 'coach', readOnly = false, onOpenClubhead, onOpenCombine, showIntake = false }) {
   const { roster: demoRoster, marks: demoMarks, mark: demoMark, counts: demoCounts, sessionState: demoState } =
     useRoster({ variant });
   // Seed header: the generated season narrowed by blockIndex. Live header:
@@ -298,6 +303,8 @@ export function SessionAttendance({ variant = 'pre', bare = false, onBack, sessi
         meta: attendeeNoteFor(r),
       }))
     : demoRoster;
+  const demoInLive = isLive() && !live; // a typed /portal/attendance URL: its demo rows read and write no real athlete (2026-11-11 review)
+  const intakes = useParallaxIntakes(roster.map((a) => a.id), { enabled: showIntake && !demoInLive && session?.type === 'training' && liveAttendance.sessionStatus !== 'cancelled' });
   const marks = live
     ? Object.fromEntries(
         rows
@@ -369,7 +376,7 @@ export function SessionAttendance({ variant = 'pre', bare = false, onBack, sessi
   // until this fires. Live mode has no persisted "session in progress" concept
   // yet (only the attendance marks persist, per the Sprint 6 pin), so it
   // starts 'pre' the same way and is driven by the same local override.
-  const [localStatus, setLocalStatus] = useState(null);
+  const [localStatus, setLocalStatus] = useSessionLocalStatus(sessionId); // kept per session across a trip to Combine (2026-11-11)
   const sessionState = localStatus ?? (live ? 'pre' : demoState);
 
   const started = sessionState !== 'pre';
@@ -658,6 +665,9 @@ export function SessionAttendance({ variant = 'pre', bare = false, onBack, sessi
               >
                 {session?.type === 'training' && onOpenClubhead ? (
                   <ClubheadChip entry={openWindows.data?.byAthlete?.[athlete.id]} name={shownName(athlete)} onOpen={() => onOpenClubhead(athlete.id, athlete.name)} />
+                ) : null}
+                {session?.type === 'training' && !sessionCancelled ? (
+                  <TrainingRowExtras athleteId={athlete.id} name={shownName(athlete)} combineName={athlete.name ?? null} intakes={showIntake ? intakes : null} role={role} readOnly={readOnly} onOpenCombine={demoInLive ? undefined : onOpenCombine} />
                 ) : null}
               </AthleteRow>
               {/* Optional reason, indented to align under the name. Never a
