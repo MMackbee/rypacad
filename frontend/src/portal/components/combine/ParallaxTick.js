@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { color, font, radius } from '../../tokens';
+import { TOUCH_MIN, color, font, radius } from '../../tokens';
 import { Body, Tick } from '../Primitives';
 import { ERR } from '../../hooks/live';
 import {
@@ -7,7 +7,7 @@ import {
 } from '../../data/combine';
 
 const pill = (tone) => ({
-  minHeight: 36,
+  minHeight: TOUCH_MIN,
   padding: '0 14px',
   borderRadius: radius.pill,
   border: `1px solid ${tone}`,
@@ -79,7 +79,7 @@ export default function ParallaxTick({ name, milestone, viewer, canTick, onTick,
         disabled={!enabled}
         onClick={onClick}
         style={{
-          minHeight: 44,
+          minHeight: TOUCH_MIN,
           display: 'flex',
           alignItems: 'center',
           gap: 10,

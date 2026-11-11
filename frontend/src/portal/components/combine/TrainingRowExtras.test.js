@@ -77,6 +77,12 @@ test('a failed read says so on the row', async () => {
   await r.unmount();
 });
 
+test("the Combine button is 44 px tall (TOUCH_MIN), like the row's IN/OUT", async () => {
+  const r = await extras({ intakes: null, onOpenCombine: jest.fn() });
+  expect(r.button('Combine: Jordan Whitfield').style.minHeight).toBe('44px');
+  await r.unmount();
+});
+
 test('an unreadable athlete opens Combine with no name', async () => {
   const onOpenCombine = jest.fn();
   const r = await extras({ intakes: null, name: 'Name unavailable', combineName: null, onOpenCombine });

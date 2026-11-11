@@ -106,6 +106,14 @@ test('the owner clears with a confirm (Review Focus 5)', async () => {
   await r.unmount();
 });
 
+test("the owner's Clear and Keep are 44 px tall (TOUCH_MIN), like the tick", async () => {
+  const r = await tick({ milestone: M, viewer: OWNER, now: () => T + 86400000 });
+  await r.click(LABEL);
+  expect(r.button('Clear Parallax intake swings: Jordan Whitfield').style.minHeight).toBe('44px');
+  expect(r.button('Keep').style.minHeight).toBe('44px');
+  await r.unmount();
+});
+
 test('a late undo says why (Review Focus 5)', async () => {
   const onUndo = jest.fn(async () => { throw Object.assign(new Error('no'), { code: ERR.PERMISSION }); });
   const r = await tick({ milestone: M, onUndo });

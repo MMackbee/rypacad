@@ -1,10 +1,11 @@
 import React from 'react';
-import { color, font, radius } from '../../tokens';
+import { TOUCH_MIN, color, font, radius } from '../../tokens';
 
 /**
  * The coach's way in to an athlete's Combine screen from a training
  * session's attendance row (spec 4, entry points). A pill like
- * assessments/ClubheadChip.js; the tap stays on the button.
+ * assessments/ClubheadChip.js, but at the 44 px touch floor like the row's
+ * IN/OUT (2026-11-11 review); the tap stays on the button.
  */
 export default function CombineButton({ name, onOpen }) {
   return (
@@ -13,7 +14,7 @@ export default function CombineButton({ name, onOpen }) {
       aria-label={`Combine: ${name}`}
       onClick={(e) => { e.stopPropagation(); onOpen(); }}
       style={{
-        minHeight: 36,
+        minHeight: TOUCH_MIN,
         padding: '0 12px',
         borderRadius: radius.pill,
         border: `1px solid ${color.primary}`,
