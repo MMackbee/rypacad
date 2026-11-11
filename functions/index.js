@@ -35,6 +35,9 @@
  * answers a raised capacity, an un-cancel and an academy cancel. A waitlist
  * never mints a bonus token.
  *
+ *   moveBooking            callable, portal/move.js (booking changes,
+ *                          2026-11-11): a family moves a booking in one step
+ *
  * The marketing site's scholarship form posts to submitScholarship
  * (portal/scholarship.js, 2026-10-01): public, origin-checked, validated.
  *
@@ -111,6 +114,7 @@ const {onSingleTokenSpent} = require('./portal/single-guard');
 const {submitScholarship} = require('./portal/scholarship');
 const {submitFeedback} = require('./portal/feedback');
 const {requestMentalConsent} = require('./portal/mental-consent-request');
+const {moveBooking} = require('./portal/move');
 
 // ==========================================================================
 // PORTAL SERVER-SIDE WRITERS (Sprint 13, contract v2.1)
@@ -125,6 +129,8 @@ exports.onSessionBookedDecrease = onSessionBookedDecrease;
 exports.waitlistPositions = waitlistPositions;
 // Single token (rulings 2026-09-29/30): one live booking per purchased token.
 exports.onSingleTokenSpent = onSingleTokenSpent;
+// A family moves a booking in one transaction (2026-11-11, portal/move.js).
+exports.moveBooking = moveBooking;
 
 // ==========================================================================
 // SPRINT 20 LAUNCH (contract v3.0.1): instant sign-up, child-login claim,
