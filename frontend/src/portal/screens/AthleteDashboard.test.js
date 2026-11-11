@@ -247,3 +247,12 @@ test('the old "Book your Diagnostic" card never shows from live data (assessment
   await r.unmount();
   mockOldCaptureFlag = true;
 });
+
+test('the athlete home links to their combine scores', async () => {
+  mockContract = null;
+  const r = await renderScreen(<AthleteDashboard bare />);
+  expect(r.button('Combine ›')).not.toBeNull();
+  await r.click('Combine ›');
+  expect(r.location().pathname).toBe('/portal/combine');
+  await r.unmount();
+});
