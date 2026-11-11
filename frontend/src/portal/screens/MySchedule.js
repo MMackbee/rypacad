@@ -3,6 +3,7 @@ import { color, font, radius, WEEKLY_SCHEDULE_LABEL } from '../tokens';
 import BottomTabBar from '../components/BottomTabBar';
 import Button from '../components/Button';
 import MemberCancelSheet from '../components/MemberCancelSheet';
+import MoveSheet from '../components/MoveSheet';
 import BookingRowActions from '../components/BookingRowActions';
 import { cancelReasonCopy } from '../components/BookingReasons';
 import { leaveFailureCopy, OnWaitlist } from '../components/WaitlistAction';
@@ -72,6 +73,8 @@ export default function MySchedule({
   // weeks (hooks/cancelSeries.js), fixed when the sheet opens: the list
   // reloads under the sheet once a cancel lands.
   const [cancelTarget, setCancelTarget] = useState(null);
+  // The row in the Move sheet (spec 2026-11-11 §5), or null.
+  const [moveTarget, setMoveTarget] = useState(null);
   // Which waitlisted bookingId is mid-leave, for LeaveWaitlistButton's own
   // loading state (no confirm sheet - leaving costs nothing already spent).
   const [leavingId, setLeavingId] = useState(null);
@@ -188,6 +191,7 @@ export default function MySchedule({
             onBook={onBook}
             consent={consents.data?.rows?.[0]}
             onCancelRequest={(s) => setCancelTarget({ ...s, later: laterWeeks(s, sessions) })}
+            onMoveRequest={setMoveTarget}
             onLeaveWaitlist={handleLeaveWaitlist}
             leavingId={leavingId}
             onHold={Boolean(data?.onHold)}
@@ -205,11 +209,12 @@ export default function MySchedule({
           onCancelled={() => setCancelTarget(null)}
         />
       ) : null}
+      {moveTarget ? <MoveSheet row={moveTarget} onClose={() => setMoveTarget(null)} onMoved={() => setMoveTarget(null)} /> : null}
     </PhoneFrame>
   );
 }
 
-function ScheduleBody({ past, sessions, cancelled, tokens, days, consent, onBook, onCancelRequest, onLeaveWaitlist, leavingId, onHold = false }) {
+function ScheduleBody({ past, sessions, cancelled, tokens, days, consent, onBook, onCancelRequest, onMoveRequest, onLeaveWaitlist, leavingId, onHold = false }) {
   return (
     <>
         {/*
@@ -317,7 +322,7 @@ function ScheduleBody({ past, sessions, cancelled, tokens, days, consent, onBook
                         onLeave={() => onLeaveWaitlist(s)}
                       />
                     ) : (
-                      <BookingRowActions row={s} onHold={onHold} onCancel={() => onCancelRequest(s)} />
+                      <BookingRowActions row={s} onHold={onHold} onCancel={() => onCancelRequest(s)} onMove={() => onMoveRequest(s)} />
                     )
                   }
                 />
