@@ -1053,7 +1053,7 @@ export async function createBooking(
  * (LiveDataError codes, wrap()).
  *
  * The cancel window (spec 2026-11-11 §4): until the session starts, a portal
- * 1:1 until the day before - re-checked inside the transaction (a list left
+ * 1:1 up to the day before - re-checked inside the transaction (a list left
  * open across the start); the rules check the start on server time. A
  * `reason` (cancelReasonOf) adds cancelCategory, cancelNote and cancelledAt.
  *

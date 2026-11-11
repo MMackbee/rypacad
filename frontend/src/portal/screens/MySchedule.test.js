@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { act } from 'react';
 import { renderScreen } from './testRender';
 import MySchedule from './MySchedule';
 // Mental consent (plan Task 13): no consent rows unless a case sets them.
@@ -18,6 +18,22 @@ beforeEach(() => {
   mockTokens = null;
   mockLeave = async () => {};
 });
+// Noon Mon Nov 9 in Chicago for every test (the rows are dated Nov 10-24);
+// a describe that needs another time sets its own.
+beforeEach(() => {
+  jest.useFakeTimers('modern');
+  jest.setSystemTime(new Date('2026-11-09T18:00:00Z'));
+});
+afterEach(() => {
+  jest.useRealTimers();
+});
+
+/** A button inside the open sheet (the row and the sheet both say "Cancel reservation"). */
+async function sheetButton(r, label) {
+  const b = [...r.container.querySelectorAll('[data-portal-overlay] button')].find((el) => el.textContent.trim() === label);
+  if (!b) throw new Error(`no sheet button "${label}"`);
+  await act(async () => { b.click(); });
+}
 
 // Audit 2026-09-30: what the waitlisted row says, and a refused leave.
 describe('a waitlisted row', () => {
@@ -29,7 +45,7 @@ describe('a waitlisted row', () => {
     mockRows = [waiting()];
     const r = await renderScreen(<MySchedule bare />);
     expect(r.text()).toContain('On the waitlist - #2 in line');
-    expect(r.text()).toContain('If a spot opens, you are booked automatically and one token is used. You can cancel until the day before.');
+    expect(r.text()).toContain('If a spot opens, you are booked automatically and one token is used. You can cancel or move it any time before it starts.');
     expect(r.text()).not.toMatch(/notif/i);
     await r.click('Leave waitlist');
     expect(left).toEqual([{ sessionId: 's9', athleteId: 'a1' }]);
@@ -97,7 +113,7 @@ describe('a waitlisted row', () => {
     const r = await renderScreen(<MySchedule bare />);
     expect(r.text()).toContain('Your package');
     expect(r.text()).toContain('Elite · unlimited');
-    expect(r.text()).toContain('If a spot opens, you are booked automatically. You can cancel until the day before.');
+    expect(r.text()).toContain('If a spot opens, you are booked automatically. You can cancel or move it any time before it starts.');
     expect(r.text()).toContain('Cancelled by the academy.');
     expect(r.text()).not.toMatch(/token/i);
     await r.unmount();
@@ -134,6 +150,33 @@ test('a Calendly row says to cancel from the email; a portal row keeps Cancel', 
   await r.unmount();
 });
 
+// Spec 2026-11-11 §4: cancel right up to the start, with a reason.
+test('a same-day row before its start offers Cancel; one that has started says so', async () => {
+  mockRows = [
+    row({ id: 's0', sessionId: 's0', bookingId: 'b0', date: '2026-11-09', dayLabel: 'Today', isToday: true, time: '9:00', meridiem: 'AM', type: 'training', name: 'Training block' }),
+    row({ id: 's1', sessionId: 's1', bookingId: 'b1', date: '2026-11-09', dayLabel: 'Today', isToday: true, time: '4:00', type: 'training', name: 'Training block' }),
+  ];
+  const r = await renderScreen(<MySchedule bare />);
+  expect([...r.container.querySelectorAll('button')].filter((b) => b.textContent.trim() === 'Cancel reservation')).toHaveLength(1);
+  expect(r.text()).toContain('This session has already started.');
+  expect(r.text()).not.toContain('Same-day');
+  await r.unmount();
+});
+
+test("the cancel asks why (an athlete's own login: you) and sends the reason", async () => {
+  mockCancels.length = 0;
+  mockRows = [row({ type: 'training', name: 'Training block' })];
+  const r = await renderScreen(<MySchedule bare />);
+  await r.click('Cancel reservation');
+  expect(r.text()).toContain("Why can't you make it?");
+  await sheetButton(r, 'Cancel reservation');
+  expect(mockCancels).toEqual([]);
+  await r.click('Sick');
+  await sheetButton(r, 'Cancel reservation');
+  expect(mockCancels).toEqual([['b1', { reason: { category: 'sick', note: null } }]]);
+  await r.unmount();
+});
+
 // Tester Mike 2026-09-30: cancel just this one, or this and the later weeks.
 describe('cancelling a booking that repeats on later weeks', () => {
   const weekly = (bookingId, date, dayLabel, over) => row({ id: `s-${bookingId}`, sessionId: `s-${bookingId}`, bookingId, date, dayLabel, type: 'training', name: 'Training block', ...over });
@@ -152,8 +195,9 @@ describe('cancelling a booking that repeats on later weeks', () => {
     await r.click('Cancel reservation'); // the first row: Tue, Nov 10
     expect(r.text()).toContain('Also booked at the same time on 2 later weeks, through Tue, Nov 24.');
     expect(r.button('Cancel just this one')).not.toBeNull();
+    await r.click('Sick');
     await r.click('Cancel this and 2 later weeks');
-    expect(mockCancels).toEqual(['b1', 'b2', 'b3'].map((id) => [id, { cancelledVia: 'series', silent: true }]));
+    expect(mockCancels).toEqual(['b1', 'b2', 'b3'].map((id) => [id, { cancelledVia: 'series', silent: true, reason: { category: 'sick', note: null } }]));
     expect(r.text()).toContain('3 reservations cancelled');
     await r.click('Done');
     expect(r.button('Done')).toBeNull();
@@ -163,8 +207,9 @@ describe('cancelling a booking that repeats on later weeks', () => {
   test('"Cancel just this one" cancels that booking alone, as a single cancel', async () => {
     const r = await renderScreen(<MySchedule bare />);
     await r.click('Cancel reservation');
+    await r.click('Sick');
     await r.click('Cancel just this one');
-    expect(mockCancels).toEqual([['b1']]);
+    expect(mockCancels).toEqual([['b1', { reason: { category: 'sick', note: null } }]]);
     expect(r.button('Cancel just this one')).toBeNull();
     await r.unmount();
   });

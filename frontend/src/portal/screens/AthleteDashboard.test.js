@@ -150,7 +150,7 @@ test('the empty state and the package card: token wording for a token athlete, n
   mockContract = null;
   mockTokens = { granted: 6, used: 1, reserved: 0, left: 5, unlimited: false, grace: [], startsOn: null, unpaid: false };
   const member = await renderScreen(<AthleteDashboard bare />);
-  expect(member.text()).toContain('Nothing is on your schedule right now - book any open block. Cancelling with notice keeps your token.');
+  expect(member.text()).toContain('Nothing is on your schedule right now - book any open block. Cancel any time before a session starts and the token comes back.');
   expect(member.text()).toContain('Tokens this period');
   await member.unmount();
 

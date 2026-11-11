@@ -2,8 +2,9 @@ import React, { useState } from 'react';
 import { color, font, radius, WEEKLY_SCHEDULE_LABEL } from '../tokens';
 import BottomTabBar from '../components/BottomTabBar';
 import Button from '../components/Button';
-import CancelSheet from '../components/CancelSheet';
-import { CALENDLY_MANAGED_COPY, cancelReasonCopy } from '../components/BookingReasons';
+import MemberCancelSheet from '../components/MemberCancelSheet';
+import BookingRowActions from '../components/BookingRowActions';
+import { cancelReasonCopy } from '../components/BookingReasons';
 import { leaveFailureCopy, OnWaitlist } from '../components/WaitlistAction';
 import MediaPlaceholder from '../components/MediaPlaceholder';
 import PhoneFrame from '../components/PhoneFrame';
@@ -33,10 +34,10 @@ import { attendeeNoteFor } from '../data/specialists';
  * session (the type chip picks up 'phil'/'mental' from TypeChip.js, and the
  * name is whatever the hook's displaySession already formatted - "<sessionNoun>
  * · <name>" for an unlabeled specialist session - this screen renders it
- * verbatim, never re-derives it). Every cancellable upcoming item now gets a
- * "Cancel reservation" affordance behind a confirm sheet; a day-of item shows
- * the call-the-academy line instead, since the pinned `cancellable` rule
- * (status 'confirmed' && date > today) already excludes today by itself.
+ * verbatim, never re-derives it). Every cancellable upcoming item gets
+ * "Cancel reservation" (components/BookingRowActions.js) behind a confirm
+ * sheet that asks why (components/MemberCancelSheet.js), until the session
+ * starts - a portal 1:1 up to the day before (spec 2026-11-11 §4).
  *
  * @param {'upcoming'|'empty'|'cancelled'} variant
  * @param {() => void} [onRetry]  Re-fetch after a load failure.
@@ -189,17 +190,18 @@ export default function MySchedule({
             onCancelRequest={(s) => setCancelTarget({ ...s, later: laterWeeks(s, sessions) })}
             onLeaveWaitlist={handleLeaveWaitlist}
             leavingId={leavingId}
+            onHold={Boolean(data?.onHold)}
           />
         )}
       </div>
 
       {cancelTarget ? (
-        <CancelSheet
+        <MemberCancelSheet
           summary={`${cancelTarget.dayLabel} · ${cancelTarget.time} ${cancelTarget.meridiem} · ${cancelTarget.name}`}
           onClose={() => setCancelTarget(null)}
-          onConfirm={() => cancel(cancelTarget.bookingId)}
+          onConfirm={(reason) => cancel(cancelTarget.bookingId, { reason })}
           laterWeeks={cancelTarget.later}
-          onConfirmSeries={() => cancelSeries([cancelTarget, ...cancelTarget.later], cancel)}
+          onConfirmSeries={(reason) => cancelSeries([cancelTarget, ...cancelTarget.later], cancel, reason)}
           onCancelled={() => setCancelTarget(null)}
         />
       ) : null}
@@ -207,7 +209,7 @@ export default function MySchedule({
   );
 }
 
-function ScheduleBody({ past, sessions, cancelled, tokens, days, consent, onBook, onCancelRequest, onLeaveWaitlist, leavingId }) {
+function ScheduleBody({ past, sessions, cancelled, tokens, days, consent, onBook, onCancelRequest, onLeaveWaitlist, leavingId, onHold = false }) {
   return (
     <>
         {/*
@@ -274,12 +276,6 @@ function ScheduleBody({ past, sessions, cancelled, tokens, days, consent, onBook
               {day.label}
             </SectionLabel>
             {day.items.map((s) => {
-              // Sprint 9 pin (TEAM.md): the pinned cancellable rule (status
-              // 'confirmed' && date > today) already excludes a day-of item -
-              // this screen shows the honest reason (call the front desk)
-              // rather than silently rendering nothing where a control might
-              // otherwise be.
-              const dayOf = !past && s.isToday;
               // Sprint 13 (contract v2.1, pin F/G): a waitlisted or a
               // system-cancelled item can now ride the same sessions/past
               // arrays (once routing's hook update lands) - both get their
@@ -320,23 +316,9 @@ function ScheduleBody({ past, sessions, cancelled, tokens, days, consent, onBook
                         leaving={leavingId != null && leavingId === (s.bookingId ?? s.id)}
                         onLeave={() => onLeaveWaitlist(s)}
                       />
-                    ) : s.source === 'calendly' ? (
-                      <Body size={11} tone={color.textTertiary}>{CALENDLY_MANAGED_COPY}</Body>
-                    ) : dayOf ? (
-                      <Body size={11} tone={color.textTertiary}>
-                        Same-day cancellations aren't available in the app — contact the front
-                        desk.
-                      </Body>
-                    ) : s.cancellable && s.bookingId ? (
-                      <Button
-                        variant="dangerOutline"
-                        height={44}
-                        style={{ boxShadow: 'none' }}
-                        onClick={() => onCancelRequest(s)}
-                      >
-                        Cancel reservation
-                      </Button>
-                    ) : null
+                    ) : (
+                      <BookingRowActions row={s} onHold={onHold} onCancel={() => onCancelRequest(s)} />
+                    )
                   }
                 />
               );

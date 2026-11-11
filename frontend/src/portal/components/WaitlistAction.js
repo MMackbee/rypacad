@@ -26,14 +26,14 @@ import { Body, Card, ScreenTitle, Tick } from './Primitives';
 export function waitlistPromiseCopy({ name = null, unlimited = false } = {}) {
   const who = name ? `${name} is` : 'you are';
   return unlimited
-    ? `If a spot opens, ${who} booked automatically. You can cancel until the day before.`
-    : `If a spot opens, ${who} booked automatically and one token is used. You can cancel until the day before.`;
+    ? `If a spot opens, ${who} booked automatically. You can cancel or move it any time before it starts.`
+    : `If a spot opens, ${who} booked automatically and one token is used. You can cancel or move it any time before it starts.`;
 }
 
 /**
  * A place still held on the day of the session (owner ruling R3: nobody is
- * promoted on the day, they could not cancel) - it will not turn into a
- * booking, and the copy must not say it might.
+ * promoted on the day) - it will not turn into a booking, and the copy must
+ * not say it might.
  */
 export function waitlistClosedCopy({ unlimited = false } = {}) {
   return unlimited
