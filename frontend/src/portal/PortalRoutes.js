@@ -131,10 +131,10 @@ const CURRENT_ROUTE_CHUNKS = {
   combine: [loadCombine],
 };
 const NEXT_ROUTE_CHUNKS = {
-  family: [loadBook, loadCoaching, loadBilling, loadAthleteDetail, loadReservations, loadSettings, loadTour],
-  home: [loadBook, loadMySchedule, loadContract, loadMembership, loadCoaching, loadSeason, loadSettings, loadTour],
-  coach: [loadRoster, loadAthleteDetail, loadTour],
-  'my-sessions': [loadRoster, loadAssessmentList],
+  family: [loadBook, loadCoaching, loadBilling, loadAthleteDetail, loadReservations, loadSettings, loadTour, loadCombine],
+  home: [loadBook, loadMySchedule, loadContract, loadMembership, loadCoaching, loadSeason, loadSettings, loadTour, loadCombine],
+  coach: [loadRoster, loadAthleteDetail, loadTour, loadCombine],
+  'my-sessions': [loadRoster, loadAssessmentList, loadCombine],
   admin: [loadAdminSignups, loadBilling, loadAthleteDetail, loadStaff],
 };
 const NEXT_WARM_DELAY_MS = 2500;
