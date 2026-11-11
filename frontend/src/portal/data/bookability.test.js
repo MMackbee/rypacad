@@ -102,6 +102,20 @@ describe('positionWithFreed (the booking being moved counts as given back)', () 
     expect(positionWithFreed(spent, from({ periodKey: '2026-10-15' }), '2026-11-14', 15).left).toBe(1);
   });
 
+  test('the freed next-period token survives a second reading of the date (cardFacts judges it again)', () => {
+    const withNext = { left: 4, grace: [], unlimited: false, nextPeriod: { periodKey: '2026-12-01', periodEnd: '2026-12-31', granted: 6, used: 6, reserved: 0, left: 0 } };
+    const freed = positionWithFreed(withNext, from({ periodKey: '2026-12-01' }), '2026-12-05', 1);
+    expect(cardFacts(session({ date: '2026-12-05' }), { tokens: freed, now: NOW })).toMatchObject({ tokensSpent: false, rowTokens: expect.objectContaining({ left: 1 }) });
+  });
+
+  test('a date past the next period is unknown here (null), except for the single token, judged by its own tokens', () => {
+    const withNext = { left: 0, grace: [], unlimited: false, nextPeriod: { periodKey: '2026-11-15', periodEnd: '2026-12-14', granted: 6, used: 0, reserved: 0, left: 6 } };
+    expect(positionWithFreed(withNext, from({ periodKey: '2026-10-15' }), '2026-12-20', 15)).toBeNull();
+    expect(positionWithFreed(withNext, from({ periodKey: '2026-10-15' }), '2026-12-14', 15).left).toBe(6);
+    const single = { ...withNext, perPurchase: true };
+    expect(positionWithFreed(single, from({ periodKey: '2026-10-15' }), '2026-12-20', 15)).toEqual(single);
+  });
+
   test('a next-period target is judged by that period before the freed token is added', () => {
     const withNext = { left: 4, grace: [], unlimited: false, nextPeriod: { periodKey: '2026-12-01', periodEnd: '2026-12-31', granted: 6, used: 6, reserved: 0, left: 0 } };
     expect(positionWithFreed(withNext, from({ periodKey: '2026-12-01' }), '2026-12-05', 1).left).toBe(1);
@@ -164,6 +178,17 @@ describe('moveTargetOpen', () => {
   test('Elite moves 4 PM to 6 PM on the same day (its own row is left out of one-per-day)', () => {
     const sixPm = session({ id: 's3', date: '2026-11-12', time: '6:00 PM' });
     expect(moveTargetOpen(sixPm, ctx({ pkg: { kind: 'elite', tokens: null }, tokens: { unlimited: true, left: null, grace: [] } }))).toBe(true);
+  });
+
+  test('a next-period booking moves inside a fully booked next period (its own token counts as given back)', () => {
+    const from = { id: 's8', bookingId: 'jordan_s8', date: '2026-12-08', type: 'training', periodKey: '2026-12-01', comp: false, graceTokenId: null };
+    expect(moveTargetOpen(session({ date: '2026-12-10' }), ctx({ from, tokens: decSpent }))).toBe(true);
+  });
+
+  test('anchor 15: a date past the next period has no count here, so it is offered and the server judges it', () => {
+    const tokens = { left: 0, grace: [], unlimited: false, nextPeriod: { periodKey: '2026-11-15', periodEnd: '2026-12-14', granted: 6, used: 0, reserved: 0, left: 6 } };
+    const from = { id: 's1', bookingId: 'jordan_s1', date: '2026-11-13', type: 'training', periodKey: '2026-10-15', comp: false, graceTokenId: null };
+    expect(moveTargetOpen(session({ date: '2026-12-20' }), ctx({ from, tokens, anchorDay: 15 }))).toBe(true);
   });
 
   test('a comp ignores spent tokens', () => {

@@ -55,15 +55,23 @@ export function cardFacts(
  * single token it holds comes back while it is still valid on the new date;
  * a period token comes back only inside its own period (the household's
  * anchor period, not the calendar month); a comp never spent anything.
+ *
+ * A date past the next period (a household anchored after the 1st, late in
+ * its window) has no count on this screen: null, so the picker offers it and
+ * the server judges it - the single token excepted, whose tokens carry their
+ * own expiry. A changed position is returned already judged for `dateISO`
+ * (no `nextPeriod`), so cardFacts reading it again keeps the freed token.
  */
 export function positionWithFreed(tokens, from, dateISO, anchorDay) {
+  const np = tokens?.nextPeriod;
+  if (tokens && !tokens.unlimited && !tokens.perPurchase && np?.periodEnd && dateISO > np.periodEnd) return null;
   const pos = positionForDate(tokens, dateISO);
   if (!pos || pos.unlimited || !from || from.comp) return pos;
   if (from.graceTokenId) {
     if (from.graceExpiresAt && from.graceExpiresAt < dateISO) return pos;
-    return { ...pos, grace: [...(pos.grace ?? []), { id: from.graceTokenId, expiresAt: from.graceExpiresAt ?? null }] };
+    return { ...pos, nextPeriod: null, grace: [...(pos.grace ?? []), { id: from.graceTokenId, expiresAt: from.graceExpiresAt ?? null }] };
   }
-  if (from.periodKey === periodFor(dateISO, anchorDay).periodKey) return { ...pos, left: (pos.left ?? 0) + 1 };
+  if (from.periodKey === periodFor(dateISO, anchorDay).periodKey) return { ...pos, nextPeriod: null, left: (pos.left ?? 0) + 1 };
   return pos;
 }
 
