@@ -146,6 +146,47 @@ describe('live mode', () => {
     await h.unmount();
   });
 
+  // This screen's own writes show before the reload their bump starts lands
+  // (2026-11-11 review): the kept view used to show a deleted row, with a
+  // Delete the rules then refused, and the old Latest after a save.
+  test("this screen's delete leaves the view before the reload lands", async () => {
+    const h = await mountHook(() => useCombine('jordan'));
+    adapter.fetchCombineScores.mockImplementation(() => new Promise(() => {}));
+    await act(async () => {
+      await h.result.current.remove('d');
+      bump('combineScores');
+    });
+    await settle();
+    expect(h.result.current.loading).toBe(true);
+    expect(h.result.current.data.rows.map((r) => r.id)).toEqual(['e', 'c', 'b', 'a']);
+    expect(h.result.current.data.summary.u100.latest.id).toBe('c');
+    await h.unmount();
+  });
+
+  test("this screen's save joins the view before the reload lands, once", async () => {
+    const h = await mountHook(() => useCombine('jordan'));
+    let release;
+    adapter.fetchCombineScores.mockImplementationOnce(() => new Promise((r) => { release = r; }));
+    await act(async () => {
+      await h.result.current.save({ distance: 'u125', score: 700, date: '2026-11-10' });
+      bump('combineScores');
+    });
+    await settle();
+    expect(h.result.current.loading).toBe(true);
+    const mine = h.result.current.data.rows.find((r) => r.id === 'new-1');
+    expect(mine).toMatchObject({ athleteId: 'jordan', distance: 'u125', score: 700, date: '2026-11-10', enteredBy: 'u-dana', enteredRole: 'parent' });
+    expect(mine.createdAt instanceof Date).toBe(true);
+    expect(h.result.current.data.summary.u125.latest.id).toBe('new-1');
+    await act(async () => { release([...ROWS, { ...mine, createdAt: at('2026-11-11T22:00:00Z') }]); });
+    await settle();
+    expect(h.result.current.data.rows.filter((r) => r.id === 'new-1')).toHaveLength(1);
+    // Once a loaded view carries it, the row follows the store: deleted elsewhere, it goes.
+    await act(async () => { bump('combineScores'); });
+    await settle();
+    expect(h.result.current.data.rows.some((r) => r.id === 'new-1')).toBe(false);
+    await h.unmount();
+  });
+
   test("a different athlete never shows another athlete's view", async () => {
     let id = 'jordan';
     const h = await mountHook(() => useCombine(id));

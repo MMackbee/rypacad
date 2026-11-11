@@ -13,8 +13,13 @@
  * same athlete while it runs (Review Focus 2): useSeedResource blanks `data`
  * on every reload, and a screen that unmounted its blocks for that would
  * lose what was typed in the others.
+ *
+ * This screen's own writes show at once (2026-11-11 review): until the
+ * reload lands, the kept view showed a deleted row (with a Delete the rules
+ * then refused) and the old Latest after a save. Ids are never reused, so a
+ * deleted id stays hidden; a saved row stands in until a loaded view has it.
  */
-import { useCallback, useMemo, useRef } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { ERR, LiveDataError, fetchAthlete, fetchCurrentUser, isLive } from './live';
 import { bump, useInvalidation } from './invalidate';
 import useSeedResource from './useSeedResource';
@@ -98,6 +103,18 @@ async function liveView(athleteId) {
   return viewOf({ athleteId, name: athlete?.name ?? null, viewer: { uid: user.uid, role: user.role ?? null }, rows, today: academyDateISO(new Date()) });
 }
 
+/** No writes of this screen yet, for one athlete. */
+const noOwnWrites = (athleteId) => ({ athleteId, added: [], removed: [] });
+const ownFor = (own, athleteId) => (own.athleteId === athleteId ? own : noOwnWrites(athleteId));
+
+/** The view with this screen's own saves and deletes laid over it. */
+function withOwnWrites(view, own) {
+  if (!view || own.athleteId !== view.athlete.id || (!own.added.length && !own.removed.length)) return view;
+  const rows = view.rows.filter((r) => !own.removed.includes(r.id));
+  for (const a of own.added) if (!own.removed.includes(a.id) && !rows.some((r) => r.id === a.id)) rows.push(a);
+  return viewOf({ athleteId: view.athlete.id, name: view.athlete.name, viewer: view.viewer, rows, today: view.today });
+}
+
 const withName = (view, fallbackName) => (
   view && view.athlete.name == null && fallbackName ? { ...view, athlete: { ...view.athlete, name: fallbackName } } : view
 );
@@ -122,7 +139,17 @@ export function useCombine(athleteId, { fallbackName = null } = {}) {
   const fresh = state.data && state.data.athlete.id === athleteId ? state.data : null;
   if (fresh) last.current = fresh;
   const kept = !fresh && state.loading && last.current?.athlete.id === athleteId ? last.current : null;
-  const view = fresh ?? kept;
+  const [own, setOwn] = useState(() => noOwnWrites(athleteId));
+  // A saved row a loaded view carries follows the store from then on.
+  useEffect(() => {
+    if (!fresh) return;
+    setOwn((o) => {
+      const added = o.added.filter((a) => !fresh.rows.some((r) => r.id === a.id));
+      return added.length === o.added.length ? o : { ...o, added };
+    });
+  }, [fresh, own]);
+  const loaded = fresh ?? kept;
+  const view = useMemo(() => withOwnWrites(loaded, own), [loaded, own]);
   const data = useMemo(() => withName(view, fallbackName), [view, fallbackName]);
 
   const save = useCallback(async ({ distance, score, date }) => {
@@ -136,13 +163,27 @@ export function useCombine(athleteId, { fallbackName = null } = {}) {
     } catch (err) {
       throw new LiveDataError(ERR.INVALID, `useCombine: ${err.message}`, err);
     }
-    if (live) await createCombineScore(athleteId, body);
-    else seedCreate(athleteId, body, view.today);
+    if (!live) {
+      seedCreate(athleteId, body, view.today);
+      return;
+    }
+    const id = await createCombineScore(athleteId, body);
+    setOwn((o) => {
+      const b = ownFor(o, athleteId);
+      return { ...b, added: [...b.added, { ...body, id, createdAt: new Date() }] };
+    });
   }, [view, live, athleteId]);
 
   const remove = useCallback(async (scoreId) => {
-    if (live) await deleteCombineScore(athleteId, scoreId);
-    else seedDelete(athleteId, scoreId, view?.today ?? academyDateISO(new Date()));
+    if (!live) {
+      seedDelete(athleteId, scoreId, view?.today ?? academyDateISO(new Date()));
+      return;
+    }
+    await deleteCombineScore(athleteId, scoreId);
+    setOwn((o) => {
+      const b = ownFor(o, athleteId);
+      return { ...b, removed: [...b.removed, scoreId] };
+    });
   }, [view, live, athleteId]);
 
   return { data, loading: state.loading, error: state.error, save, remove };
