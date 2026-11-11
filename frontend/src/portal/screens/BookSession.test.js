@@ -793,21 +793,21 @@ describe('waitlist hardening', () => {
     expect(card.textContent).toContain('Booked');
     expect(card.textContent).not.toContain('Spends 1 token');
     expect(card.style.cursor).toBe('default');
-    expect(r.text()).toContain('Jordan is booked in. Cancel it from Schedule if plans change.');
+    expect(r.text()).toContain('Jordan is booked in. Cancel or move it from My Schedule if plans change.');
     await tap(card);
     expect(mockBooked).toEqual([]);
     expect(r.text()).not.toContain("Booking didn't go through");
     await r.unmount();
   });
 
-  test("today's held block that has already started reads Started, not Booked; one still to come says same-day cancels go through the front desk", async () => {
+  test("today's held block that has already started reads Started, not Booked; one still to come can be cancelled or moved", async () => {
     mockBookedIds = ['started', 'later'];
     const r = await renderScreen(<BookSession bare demoSelectedDate="2026-11-12" />);
     expect(cardAt(r, '4:00').textContent).toContain('Started');
     expect(cardAt(r, '4:00').textContent).not.toContain('Booked');
     expect(cardAt(r, '6:00').textContent).toContain('Booked');
-    expect(r.text()).toContain("Jordan is booked in. Same-day cancellations aren't available in the app — contact the front desk.");
-    expect(r.text()).not.toContain('Cancel it from Schedule');
+    expect(r.text()).toContain('Jordan is booked in. Cancel or move it from My Schedule if plans change.');
+    expect(r.text()).not.toContain('Same-day');
     await r.unmount();
   });
 
@@ -818,7 +818,7 @@ describe('waitlist hardening', () => {
     ];
     const r = await renderScreen(<BookSession bare role="parent" demoSelectedDate="2026-11-17" />);
     expect(cardAt(r, '4:00').textContent).toContain('Booked');
-    expect(r.text()).toContain('Ava is booked in. Cancel it from Reservations if plans change.');
+    expect(r.text()).toContain('Ava is booked in. Cancel or move it from Reservations if plans change.');
     await r.click('Nico');
     expect(cardAt(r, '4:00').textContent).not.toContain('Booked');
     expect(cardAt(r, '4:00').style.cursor).toBe('pointer');
