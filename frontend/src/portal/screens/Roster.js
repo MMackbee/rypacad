@@ -638,7 +638,7 @@ export function SessionAttendance({ variant = 'pre', bare = false, onBack, sessi
         ) : live && liveAttendance.error && !sessionCancelled ? (
           <RosterLoadNotice error={liveAttendance.error} onRetry={() => bump('bookings')} style={{ marginBottom: 16 }} />
         ) : null}
-        {staleLine ? <div role="status" style={{ marginBottom: 12 }}><Body size={12}>{staleLine}</Body></div> : null}
+        {staleLine ? <div role="status" style={{ position: 'sticky', top: 0, zIndex: 1, background: color.bg, padding: '8px 0', marginBottom: 4 }}><Body size={12}>{staleLine}</Body></div> : null}
         {roster.map((athlete, i) => {
           const value = marks[athlete.id] ?? null;
           const noShow = value === 'out';

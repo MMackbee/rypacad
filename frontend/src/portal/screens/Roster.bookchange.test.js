@@ -136,8 +136,11 @@ test('IN on a kid who just cancelled: "<name> cancelled - list updated."', async
   expect(mockMarks).toEqual([['b1', 'attended']]);
   expect(status(r)).not.toBeNull();
   expect(status(r).textContent).toBe('Jordan Whitfield cancelled - list updated.');
-  // Above the roster rows.
+  // Above the roster rows, and pinned to the top of the scrolling list, so a
+  // coach scrolled down to the kid they tapped still sees it.
   expect(r.text().indexOf('cancelled - list updated.')).toBeLessThan(r.text().indexOf('Avery Nguyen'));
+  expect([status(r).style.position, status(r).style.top]).toEqual(['sticky', '0px']);
+  expect(status(r).style.background).not.toBe('');
   // The next mark that lands clears it.
   mockRefused = [];
   await tap(r, 'OUT', 0);
