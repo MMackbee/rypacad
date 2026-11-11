@@ -73,6 +73,13 @@ describe('chooser and ready (the reason picker, spec 2026-11-11 §4)', () => {
     await r.unmount();
   });
 
+  test('the panel scrolls inside the frame, so a tall sheet (series, Other and a note, an error) keeps its title reachable', async () => {
+    const r = await mount({ chooser: <p>pick</p> });
+    const panel = r.container.querySelector('[data-portal-overlay]').firstChild;
+    expect([panel.style.maxHeight, panel.style.overflowY]).toEqual(['85%', 'auto']);
+    await r.unmount();
+  });
+
   test('not ready: the confirm does nothing', async () => {
     const r = await mount({ ready: false });
     await r.click('Cancel reservation');

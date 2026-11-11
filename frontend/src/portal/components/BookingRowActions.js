@@ -34,7 +34,9 @@ const LINES = { calendly: CALENDLY_MANAGED_COPY, started: SESSION_STARTED_COPY, 
 
 /**
  * The row's action slot: a plain line, or "Cancel reservation" and (when the
- * screen passes `onMove` and the row may move) "Move" side by side.
+ * screen passes `onMove` and the row may move) "Move" side by side. Move is as
+ * wide as its label and Cancel takes the rest, so at 375px "Cancel
+ * reservation" stays on one line (two equal halves wrapped it).
  *
  * @param {object} row  A useSchedule / useHouseholdReservations row.
  * @param {boolean} [onHold]  The account is on hold (no Move on an ordinary booking).
@@ -57,7 +59,7 @@ export default function BookingRowActions({ row, onHold = false, onCancel, onMov
         Cancel reservation
       </Button>
       {actions.move && onMove ? (
-        <Button variant="outline" height={44} style={{ flex: 1, boxShadow: 'none' }} onClick={onMove}>
+        <Button variant="outline" height={44} style={{ flex: 'none', width: 'auto', boxShadow: 'none' }} onClick={onMove}>
           Move
         </Button>
       ) : null}

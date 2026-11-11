@@ -169,6 +169,10 @@ export default function CancelSheet({
         onClick={(e) => e.stopPropagation()}
         style={{
           width: '100%',
+          // Scrolls inside the frame (as MoveSheet does): a series note, the
+          // reason chips, Other's note and an error outgrow a small phone.
+          maxHeight: '85%',
+          overflowY: 'auto',
           background: color.surface,
           borderTop: `1px solid ${color.border}`,
           borderRadius: `${radius.cardLarge} ${radius.cardLarge} 0 0`,

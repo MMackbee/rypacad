@@ -9,7 +9,8 @@ import { cancelReasonOf } from '../data/bookingChanges';
  * needs a note), and a series is asked once: the same reason goes on every
  * week. Reservations (parents, with the athlete's name) and My Schedule (an
  * athlete's own login, no name) both use it; Roster and AdminScholarships
- * keep the plain CancelSheet.
+ * keep the plain CancelSheet. While a cancel runs the picker is off, so the
+ * reason being sent cannot change under it (and a failure leaves it as sent).
  *
  * @param {React.ReactNode} summary  The session restated, as CancelSheet.
  * @param {?string} name  The athlete's name, or none for their own login.
@@ -21,16 +22,25 @@ import { cancelReasonOf } from '../data/bookingChanges';
  */
 export default function MemberCancelSheet({ summary, name, laterWeeks, onClose, onConfirm, onConfirmSeries, onCancelled }) {
   const [value, setValue] = useState({ category: null, note: '' });
+  const [busy, setBusy] = useState(false);
   const reason = cancelReasonOf(value);
+  const run = async (send) => {
+    setBusy(true);
+    try {
+      return await send(reason);
+    } finally {
+      setBusy(false);
+    }
+  };
   return (
     <CancelSheet
       summary={summary}
       laterWeeks={laterWeeks}
-      chooser={<CancelReasonPicker name={name} value={value} onChange={setValue} />}
+      chooser={<CancelReasonPicker name={name} value={value} onChange={setValue} disabled={busy} />}
       ready={reason != null}
       onClose={onClose}
-      onConfirm={() => onConfirm(reason)}
-      onConfirmSeries={onConfirmSeries ? () => onConfirmSeries(reason) : undefined}
+      onConfirm={() => run(onConfirm)}
+      onConfirmSeries={onConfirmSeries ? () => run(onConfirmSeries) : undefined}
       onCancelled={onCancelled}
     />
   );

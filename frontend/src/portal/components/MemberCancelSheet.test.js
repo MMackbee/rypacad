@@ -79,6 +79,21 @@ test("an athlete's own login is asked about themselves", async () => {
   await r.unmount();
 });
 
+test('while the cancel runs the reason cannot change; after a failure it can again', async () => {
+  let fail;
+  const r = await mount({ onConfirm: () => new Promise((resolve, reject) => { fail = reject; }) });
+  await r.click('Other');
+  await r.fill('A few words', 'dentist');
+  await r.click('Cancel reservation');
+  expect(r.button('Sick').disabled).toBe(true);
+  expect(r.container.querySelector('textarea').disabled).toBe(true);
+  await r.act(async () => { fail(new Error('No connection.')); });
+  expect(r.text()).toContain('No connection.');
+  expect(r.button('Sick').disabled).toBe(false);
+  expect(r.container.querySelector('textarea').disabled).toBe(false);
+  await r.unmount();
+});
+
 test('Keep it closes and cancels nothing', async () => {
   const r = await mount();
   await r.click('Sick');

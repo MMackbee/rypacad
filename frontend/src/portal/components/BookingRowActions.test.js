@@ -63,6 +63,14 @@ describe('BookingRowActions', () => {
     await r.unmount();
   });
 
+  test('Move sizes to its label and Cancel takes the rest, so "Cancel reservation" keeps one line on a phone', async () => {
+    const r = await renderScreen(<BookingRowActions row={base} onCancel={() => {}} onMove={() => {}} />);
+    const [cancel, move] = [r.button('Cancel reservation'), r.button('Move')];
+    expect([move.style.flexGrow, move.style.width]).toEqual(['0', 'auto']);
+    expect(cancel.style.flexGrow).toBe('1');
+    await r.unmount();
+  });
+
   test('without onMove there is no Move', async () => {
     const r = await mount({});
     expect(r.button('Cancel reservation')).not.toBeNull();
