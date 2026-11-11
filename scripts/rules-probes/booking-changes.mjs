@@ -12,10 +12,12 @@
  * SDK. Paid Elite rows (ath-elite, household hh), so both passes answer
  * alike. The before-start cases sit 90 minutes either side of now on today's
  * Chicago date, so between 22:30 and 01:30 Chicago the task records a FAIL
- * and runs nothing. Every 403 has a 200 twin that differs only in the field
- * or time under test (most often the next write on the same row). Run by
- * scripts/verify-rules.mjs in both passes; it seeds and removes everything it
- * touches.
+ * and runs nothing; that same window makes today's '12:30 AM' always started
+ * and '11:45 PM' always still to come, which pins the 12-hour wrap and both
+ * halves of the day on every run. Every 403 has a 200 twin that differs only
+ * in the field or time under test (most often the next write on the same
+ * row). Run by scripts/verify-rules.mjs in both passes; it seeds and removes
+ * everything it touches.
  */
 import { bookAs, call, commitAs, del, expect, listAs, patchWrite, seatWrite, seed, t, uid, updateAs } from '../verify-rules.mjs';
 
@@ -82,6 +84,13 @@ export async function taskBookingChanges() {
     s = await slot('started-old', past);
     expect("booking-changes: the old app's cancel (no new field) of one that started 90 min ago refused",
       await cancel(t.parent, s, member(uid.parent), ['status', 'cancelledBy', 'cancelReason', 'cancelledVia'], []), 403);
+    s = await slot('soon-old', soon);
+    expect("booking-changes: the old app's cancel of one today that starts in 90 min",
+      await cancel(t.parent, s, member(uid.parent), ['status', 'cancelledBy', 'cancelReason', 'cancelledVia'], []), 200);
+    s = await slot('am', { date: today, time: '12:30 AM' });
+    expect("booking-changes: a session today at '12:30 AM' (the 12-hour wrap: long started) refused", await cancel(t.parent, s, member(uid.parent)), 403);
+    s = await slot('pm-late', { date: today, time: '11:45 PM' });
+    expect("booking-changes: a session today at '11:45 PM' (still to come)", await cancel(t.parent, s, member(uid.parent)), 200);
     s = await slot('soon-p', soon);
     expect(`booking-changes: parent cancels one that starts in 90 min (${soon.time})`, await cancel(t.parent, s, member(uid.parent)), 200);
     s = await slot('soon-l', soon);
@@ -162,6 +171,20 @@ export async function taskBookingChanges() {
     expect('booking-changes: a re-book that sets cancelledAt by a REQUEST_TIME transform refused',
       await rebook(t.parent, s, CONFIRM, [...Object.keys(CONFIRM), 'cancelCategory', 'cancelNote'], ['rebookedAt', 'cancelledAt']), 403);
     expect('booking-changes: the same re-book removing it', await newRebook(s), 200);
+    // A client never writes a move marker or re-stamps createdAt on a re-book: moveBooking's re-confirm notice
+    // (notify-gates shouldNoticeMoveReconfirm) keys on createdVia 'move' with a changed createdAt.
+    s = await slot('rb-via', ahead, sickCancelled());
+    expect("booking-changes: a re-book that writes createdVia 'move' refused",
+      await rebook(t.parent, s, { ...CONFIRM, createdVia: 'move' }, [...Object.keys(CONFIRM), 'createdVia', ...CLEARS]), 403);
+    expect("booking-changes: the same re-book without createdVia", await newRebook(s), 200);
+    s = await slot('rb-moved', ahead, sickCancelled());
+    expect('booking-changes: a re-book that writes movedTo refused',
+      await rebook(t.parent, s, { ...CONFIRM, movedTo: 'ath-elite_x' }, [...Object.keys(CONFIRM), 'movedTo', ...CLEARS]), 403);
+    expect('booking-changes: the same re-book without movedTo', await newRebook(s), 200);
+    s = await slot('rb-at-move', ahead, { ...sickCancelled(), createdVia: 'move', movedFrom: 'ath-elite_bc-x' });
+    expect('booking-changes: a re-book of a row a move created that re-stamps createdAt (REQUEST_TIME) refused',
+      await rebook(t.parent, s, CONFIRM, [...Object.keys(CONFIRM), ...CLEARS], ['rebookedAt', 'createdAt']), 403);
+    expect('booking-changes: the same re-book leaving createdAt', await newRebook(s), 200);
     s = await slot('rb-comp', ahead, { ...sickCancelled(), comp: true });
     expect('booking-changes: a re-book of a comp row removes comp', await newRebook(s, [...CLEARS, 'comp']), 200);
     expect('booking-changes: and the row carries no comp', carried(await fieldsOf(s), ['comp']), undefined);
