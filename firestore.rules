@@ -122,6 +122,22 @@ service cloud.firestore {
         < timestamp.date(int(parts[0]), int(parts[1]), int(parts[2])) + duration.value(30, 'h');
     }
 
+    // 2026-11-11 (owner: cancel up to the start; spec section 4): a family cancel is refused once the session has
+    // started. sessions.time is display text ('4:00 PM'); parsed here with the season's CST offset (+360 min). A
+    // time that is not 'h:mm AM|PM' passes this check, so sessionDayNotOver (midnight) stays the floor for it.
+    // Lenient by one hour from 2027-03-14 (CDT), never stricter: revisit before any spring session.
+    function sessionNotStarted(s) {
+      let t = s.get('time', '');
+      return !(t is string && t.matches('(1[0-2]|[1-9]):[0-5][0-9] (AM|PM)'))
+        || request.time < sessionStartsAt(s.date, t);
+    }
+    function sessionStartsAt(date, t) {
+      let p = date.split('-');
+      let hm = t.split(' ')[0].split(':');
+      return timestamp.date(int(p[0]), int(p[1]), int(p[2]))
+        + duration.value((int(hm[0]) % 12 + (t.split(' ')[1] == 'PM' ? 12 : 0)) * 60 + int(hm[1]) + 360, 'm');
+    }
+
     // 2026-10-01 (waitlist audit, "the rules do not protect capacity"): a
     // family's booking write and its seat count move in ONE commit or not
     // at all. get() is the session before this commit and getAfter() the
@@ -1686,12 +1702,15 @@ service cloud.firestore {
       // transaction's job client-side and bookedDiffOk()'s job server-side,
       // not this rule's.
       //
-      // The 12-hour-before cancel window (My Schedule copy: "day-of = contact
-      // the academy") is a CLIENT-side gate only. Single token (rulings
-      // 2026-09-29/30): the rule now refuses a member cancel once the
-      // session DAY is over (session date + 30 h UTC, sessionDayNotOver),
-      // for ALL members - a past booking can no longer be cancelled to free
-      // its token. Every client path already cancels only when date > today.
+      // 2026-11-11 (owner: cancel up to the start; plans/2026-11-11-
+      // booking-changes): a family cancels any portal booking until the
+      // session STARTS, and the token comes back (a portal 1:1 with Yannick:
+      // until the day before, a client gate). The rule refuses a member
+      // cancel once the session has started (sessionNotStarted, top of this
+      // file, on the booking's own session) and, under that, once the
+      // session DAY is over (session date + 30 h UTC, sessionDayNotOver;
+      // single token rulings 2026-09-29/30), for ALL members - a past
+      // booking can never be cancelled to free its token.
       // Sprint 13 (contract v2.1, pin G "Cancellation reasons"): the
       // confirmed->cancelled direction REQUIRES cancelledBy (the caller's
       // own uid) and cancelReason ('member' - the ONE value a member may
@@ -1746,6 +1765,20 @@ service cloud.firestore {
       // sessionDayNotOver and seatTakenInCommit, so the session reads are
       // still only paid by a write every earlier clause admits. The cancel
       // arm is untouched: anyone may still cancel what they hold.
+      // 2026-11-11 (spec sections 4 and 8): the cancel arm also admits three
+      // optional fields - cancelCategory (sick, injured, school, family,
+      // other), cancelNote (a string of 1..140, only with 'other') and
+      // cancelledAt (== request.time) - checked by cancelDetailOk, and takes
+      // sessionNotStarted on the booking's own session (the document
+      // seatFreedInCommit reads: no new document access). An older app sends
+      // none of the three and still passes. The re-book arm may REMOVE those
+      // three and comp, never set or change them (removesOnly), so a
+      // re-confirmed row carries no stale reason and a seat the family now
+      // pays for is no longer a free comp. No client writes a move marker:
+      // cancelReason stays 'member', movedTo and movedFrom are in no hasOnly
+      // list, cancelledVia admits only 'series' and createdVia only
+      // 'repeat'; moveBooking (functions/portal/move.js) writes them with the
+      // Admin SDK.
       function rebookGraceOk(g, before) {
         let gd = get(/databases/$(database)/documents/graceTokens/$(g)).data;
         return gd.athleteId == before.athleteId && gd.expiresAt >= before.date;
@@ -1764,24 +1797,39 @@ service cloud.firestore {
           && (!diffKeys.hasAny(['rebookedAt']) || after.rebookedAt == request.time)
           && (a.get('packageId', null) != 'single' || after.get('rebookedAt', null) == request.time);
       }
+      function cancelDetailOk(after, diffKeys) {
+        return (!after.keys().hasAny(['cancelCategory'])
+            || after.cancelCategory in ['sick', 'injured', 'school', 'family', 'other'])
+          && (!after.keys().hasAny(['cancelNote'])
+            || (after.get('cancelCategory', null) == 'other' && after.cancelNote is string
+                && after.cancelNote.size() >= 1 && after.cancelNote.size() <= 140))
+          && (!diffKeys.hasAny(['cancelledAt']) || after.get('cancelledAt', null) == request.time);
+      }
+      function removesOnly(after, diffKeys, k) {
+        return !diffKeys.hasAny([k]) || !after.keys().hasAny([k]);
+      }
       function memberBookingUpdateOk() {
         let before = resource.data;
         let after = request.resource.data;
         let diffKeys = after.diff(before).affectedKeys();
         return (
           (before.status == 'confirmed' && after.status == 'cancelled'
-            && diffKeys.hasOnly(['status', 'cancelledBy', 'cancelReason', 'cancelledVia'])
+            && diffKeys.hasOnly(['status', 'cancelledBy', 'cancelReason', 'cancelledVia', 'cancelCategory', 'cancelNote', 'cancelledAt'])
             && after.cancelledBy == request.auth.uid
             && after.cancelReason == 'member'
             && (!after.keys().hasAny(['cancelledVia']) || after.cancelledVia == 'series')
+            && cancelDetailOk(after, diffKeys)
             // Sprint 20 (spec 6.1): a Calendly-sourced booking is cancelled
             // from Calendly's email, never in-app (the webhook writes the
             // cancel). Absent source == 'portal'.
             && resource.data.get('source', null) != 'calendly'
             && sessionDayNotOver(before.date)
+            && sessionNotStarted(get(/databases/$(database)/documents/sessions/$(before.sessionId)).data)
             && seatFreedInCommit(before.sessionId))
           || (before.status == 'cancelled' && after.status == 'confirmed'
-              && diffKeys.hasOnly(['status', 'chargedFrom', 'graceTokenId', 'rebookedAt'])
+              && diffKeys.hasOnly(['status', 'chargedFrom', 'graceTokenId', 'rebookedAt', 'cancelCategory', 'cancelNote', 'cancelledAt', 'comp'])
+              && removesOnly(after, diffKeys, 'cancelCategory') && removesOnly(after, diffKeys, 'cancelNote')
+              && removesOnly(after, diffKeys, 'cancelledAt') && removesOnly(after, diffKeys, 'comp')
               // Sprint 20 (review 2026-09-29): re-confirming is booking - the
               // same per-athlete billing and Oct 10 gates as a create, and
               // never a Calendly-sourced row. The gets run only on this arm
