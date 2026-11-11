@@ -4,6 +4,7 @@ import AthleteRow, { AttendanceControls } from '../components/AthleteRow';
 import BottomTabBar from '../components/BottomTabBar';
 import Button from '../components/Button';
 import CancelSheet from '../components/CancelSheet';
+import CancelledRows from '../components/CancelledRows';
 import PhoneFrame from '../components/PhoneFrame';
 import StatusBadge from '../components/StatusBadge';
 import TypeChip from '../components/TypeChip';
@@ -707,6 +708,7 @@ export function SessionAttendance({ variant = 'pre', bare = false, onBack, sessi
             </div>
           );
         })}
+        {live && !sessionCancelled ? <CancelledRows sessionId={sessionId} /> : null}
       </div>
 
       {cancelSheetOpen ? (

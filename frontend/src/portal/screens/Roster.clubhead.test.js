@@ -22,6 +22,7 @@ jest.mock('../hooks', () => ({
 }));
 jest.mock('../hooks/live', () => ({ ...jest.requireActual('../hooks/live'), __esModule: true, isLive: () => true }));
 jest.mock('../hooks/assessments', () => ({ useOpenAssessmentWindows: () => ({ data: { byAthlete: mockOpen }, loading: false, error: null }) }));
+jest.mock('../hooks/cancelledBookings', () => ({ useCancelledBookings: () => ({ data: [], loading: false, error: null }), markOrRecheck: async (mark, id, status) => { await mark(id, status); return false; } }));
 
 const block = (type) => ({ date: '2026-11-05', time: '3:00 PM', type, name: type === 'training' ? 'Training block' : 'RYP Tour', meta: '2 of 6 booked' });
 const roster = (type, props = {}) => renderScreen(<SessionAttendance bare sessionId="2026-11-05-0" block={block(type)} onBack={() => {}} {...props} />);
