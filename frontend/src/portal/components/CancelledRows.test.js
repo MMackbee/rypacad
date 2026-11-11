@@ -46,6 +46,27 @@ test('each row shows its name and line, greyed, with nothing to tap', async () =
   await r.unmount();
 });
 
+test('the list is a named group, so a screen reader announces it', async () => {
+  const r = await renderScreen(<CancelledRows sessionId="2026-11-10-0" />);
+  expect(list(r).getAttribute('role')).toBe('group');
+  await r.unmount();
+});
+
+test('a re-read (every IN/OUT tap) keeps the rows on screen; an error or another session does not', async () => {
+  const r = await renderScreen(<CancelledRows sessionId="2026-11-10-0" />);
+  mockState = { data: null, loading: true, error: null };
+  await r.rerender(<CancelledRows sessionId="2026-11-10-0" />);
+  expect(list(r)).not.toBeNull();
+  expect(list(r).textContent).toContain('Cancelled · Sick');
+  await r.rerender(<CancelledRows sessionId="2026-11-11-0" />);
+  expect(list(r)).toBeNull();
+  await r.rerender(<CancelledRows sessionId="2026-11-10-0" />);
+  mockState = { data: null, loading: false, error: new Error('no') };
+  await r.rerender(<CancelledRows sessionId="2026-11-10-0" />);
+  expect(list(r)).toBeNull();
+  await r.unmount();
+});
+
 test('an empty, loading or failed list renders nothing', async () => {
   for (const state of [
     { data: [], loading: false, error: null },
