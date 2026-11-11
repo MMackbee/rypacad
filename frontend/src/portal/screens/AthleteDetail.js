@@ -7,6 +7,7 @@ import HandicapCard from '../components/HandicapCard';
 import { Avatar } from '../components/MediaPlaceholder';
 import ParentContractCard from '../components/ParentContractCard';
 import ConsentDetailCard from '../components/consent/ConsentDetailCard';
+import CombineCard from '../components/combine/CombineCard';
 import PhoneFrame from '../components/PhoneFrame';
 import ProgressMeter, { meterColor } from '../components/ProgressMeter';
 import { ReservedChip } from '../components/Reserved';
@@ -15,6 +16,7 @@ import { useAthleteDetail } from '../hooks';
 import { loginStatusLine } from '../data/billingCopy';
 import { contractEnabled } from '../data/contractFlag';
 import { reservedTag } from '../data/reserved';
+import { SEED_COMBINE_ATHLETE_ID } from '../data/combine';
 
 /**
  * 09 · Athlete Detail - parent view of one linked athlete.
@@ -111,6 +113,7 @@ export default function AthleteDetail({ variant = 'populated', bare = false, ath
         ) : null}
         {/* Yannick's consent (2026-10-30): the parent's line; ops and owner the status and paper signatures. */}
         <ConsentDetailCard athleteId={athleteId} role={role} demoPaperOpen={demoPaperOpen} />
+        <CombineCard athleteId={athleteId ?? SEED_COMBINE_ATHLETE_ID} to={`/portal/combine/${athleteId ?? SEED_COMBINE_ATHLETE_ID}`} />
         {/* Parents log for their kids (owner, 2026-10-28; spec 4.3): the
             child's month calendar and Log today sheet, behind the switch. */}
         {role === 'parent' && showContract ? <ParentContractCard athleteId={athleteId} athleteName={athlete?.name} /> : null}

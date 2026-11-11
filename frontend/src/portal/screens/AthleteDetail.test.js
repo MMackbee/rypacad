@@ -197,3 +197,21 @@ test('staff and coaches get an Assessments card that opens the results with the 
   expect(parent.button('Open results')).toBeNull();
   await parent.unmount();
 });
+
+test("the Combine card opens this athlete's scores", async () => {
+  const athlete = { name: 'Jordan', subline: 'Age 14', contractMinutes: 45, packageId: 't-12', loginEmail: 'jordan@email.com', login: { state: 'invited', claimedAt: null } };
+  mockDetail = { data: { athlete, history: [], checklist: [], hasEnoughData: false }, loading: false, error: null };
+  // Seed mode, the real useCombineCard: the parent, and staff too (spec 4).
+  for (const props of [{ role: 'parent' }, { role: 'ops', backLabel: 'Admin' }, { role: 'coach' }]) {
+    const r = await renderScreen(<AthleteDetail bare athleteId="a1" onBack={() => {}} {...props} />);
+    expect(r.button('Combine ›')).not.toBeNull();
+    await r.click('Combine ›');
+    expect(r.location().pathname).toBe('/portal/combine/a1');
+    await r.unmount();
+  }
+  // The states gallery renders it with no athleteId (Review Focus 6).
+  const gallery = await renderScreen(<AthleteDetail bare role="parent" />);
+  await gallery.click('Combine ›');
+  expect(gallery.location().pathname).toBe('/portal/combine/jordan');
+  await gallery.unmount();
+});
