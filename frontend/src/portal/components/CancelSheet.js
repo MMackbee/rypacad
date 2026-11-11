@@ -14,7 +14,7 @@ export const SETTLE_MS = 500;
  * The "keep it / cancel reservation" bottom sheet — Sprint 9's cancellation
  * pin (TEAM.md, "specialist 1-on-1s"), originally built local to
  * MySchedule.js. Sprint 11 pin F ("Family Reservations") reuses this exact
- * pattern for the same cancellable rule (confirmed && date > today), so it is
+ * pattern for the same cancellable rule (the hooks' `cancellable`), so it is
  * extracted here verbatim rather than duplicated — MySchedule.js now imports
  * it too, so the two screens can never drift on copy or behavior.
  *
@@ -50,6 +50,10 @@ export const SETTLE_MS = 500;
  * before the question has been on screen. Passing neither leaves the sheet
  * as it was.
  *
+ * A family cancel asks why (spec 2026-11-11 §4, MemberCancelSheet.js): the
+ * reason picker rides in as `chooser`, and `ready` stays false - both
+ * confirm buttons off - until a usable reason is picked.
+ *
  * @param {string} title  Defaults to the member-cancel wording.
  * @param {React.ReactNode} summary  The one-line "Tue Nov 4 · 4:00 PM ·
  *   Training block" restatement of what is being cancelled — the caller
@@ -73,6 +77,10 @@ export const SETTLE_MS = 500;
  * @param {Array<{date: string}>} [laterWeeks]  laterWeeks() for this booking.
  * @param {() => Promise<object>} [onConfirmSeries]  Runs cancelSeries() for
  *   the booking and its later weeks; resolves with its result.
+ * @param {React.ReactNode} [chooser]  Shown under the summary and the series
+ *   note (the reason picker).
+ * @param {boolean} [ready]  false turns both confirm buttons off. Defaults
+ *   to true.
  */
 export default function CancelSheet({
   title = 'Cancel this reservation?',
@@ -86,6 +94,8 @@ export default function CancelSheet({
   onConfirm,
   onConfirmSeries,
   onCancelled,
+  chooser = null,
+  ready = true,
 }) {
   // false, or which button is working: 'one' | 'series'.
   const [saving, setSaving] = useState(false);
@@ -98,6 +108,7 @@ export default function CancelSheet({
   const done = result ? seriesSummary(result) : null;
 
   const handleSeries = async () => {
+    if (!ready) return;
     setSaving('series');
     setError(null);
     try {
@@ -120,7 +131,7 @@ export default function CancelSheet({
   const handleCancel = async () => {
     // keepFirst: too soon after opening to be an answer. (A clock set back while the sheet is open is not "too soon".)
     const sinceOpened = Date.now() - openedAt.current;
-    if (keepFirst && sinceOpened >= 0 && sinceOpened < SETTLE_MS) return;
+    if (!ready || (keepFirst && sinceOpened >= 0 && sinceOpened < SETTLE_MS)) return;
     setSaving('one');
     setError(null);
     try {
@@ -158,6 +169,10 @@ export default function CancelSheet({
         onClick={(e) => e.stopPropagation()}
         style={{
           width: '100%',
+          // Scrolls inside the frame (as MoveSheet does): a series note, the
+          // reason chips, Other's note and an error outgrow a small phone.
+          maxHeight: '85%',
+          overflowY: 'auto',
           background: color.surface,
           borderTop: `1px solid ${color.border}`,
           borderRadius: `${radius.cardLarge} ${radius.cardLarge} 0 0`,
@@ -179,6 +194,7 @@ export default function CancelSheet({
             {offer.note}
           </Body>
         ) : null}
+        {done ? null : chooser}
         {error ? (
           <Body size={12} tone={color.error} style={{ marginTop: 10 }}>
             {error}
@@ -197,7 +213,7 @@ export default function CancelSheet({
               variant="dangerOutline"
               height={50}
               loading={saving === 'one'}
-              disabled={saving === 'series'}
+              disabled={saving === 'series' || !ready}
               style={{ boxShadow: 'none' }}
               onClick={handleCancel}
             >
@@ -208,7 +224,7 @@ export default function CancelSheet({
                 variant="dangerOutline"
                 height={50}
                 loading={saving === 'series'}
-                disabled={saving === 'one'}
+                disabled={saving === 'one' || !ready}
                 style={{ boxShadow: 'none' }}
                 onClick={handleSeries}
               >

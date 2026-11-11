@@ -36,26 +36,20 @@ import { leaveWaitlist } from '../hooks/waitlist';
 // elsewhere in this file stays importable (data/calendar.js's own header
 // comment: "both data modes call it").
 import BookingOpensBanner from '../components/BookingOpensBanner';
-import { positionForDate, windowMonthsFor } from '../data/packages';
-import { SEASON_BOUNDS, capacityFor, dayLabel } from '../data/season';
+import { windowMonthsFor } from '../data/packages';
+import { SEASON_BOUNDS, dayLabel } from '../data/season';
+import { cardFacts } from '../data/bookability';
 import { DEFAULT_DURATION_MINUTES } from '../data/schedule';
 import { tourEventExplainer } from '../data/tour';
 import { bookingOpen, openThrough, parseTimeToMinutes, todayISO } from '../data/calendar';
-import { lockPastDays, sessionStarted, waitlistClosed } from '../data/sessionStart';
-import { reservedEligible, reservedRefusal, reservedTag } from '../data/reserved';
+import { lockPastDays, waitlistClosed } from '../data/sessionStart';
+import { reservedRefusal, reservedTag } from '../data/reserved';
 import { buildMonthDayMaps, useMonthNavState } from '../components/MonthCalendar';
 import { monthsApart } from '../data/calendarViews';
 import RepeatWeekly, { offeredWeeks } from '../components/RepeatWeekly';
 
 /** A stable empty list for the held-session ids when a flow carries none. */
 const NONE_HELD = [];
-
-/** Sessions arrive raw (numeric capacity/booked) from useMonthSessions;
-    useBooking's slots carry a pre-formatted capacity object. Accept both. */
-function formatCapacity(session) {
-  if (session.capacity && typeof session.capacity === 'object') return session.capacity;
-  return capacityFor(session);
-}
 
 function displayNameFor(session) {
   return session.label || (session.type === 'tournament' ? 'Tour event' : 'Training block');
@@ -578,7 +572,7 @@ export default function BookSession({
                   // Owner 2026-11-04: the cards this athlete already holds
                   // read "Booked" and point at the screen they cancel from.
                   bookedSessionIds={(isParent ? selectedAthlete?.bookedSessionIds : data?.bookedSessionIds) ?? NONE_HELD}
-                  scheduleName={isParent ? 'Reservations' : 'Schedule'}
+                  scheduleName={isParent ? 'Reservations' : 'My Schedule'}
                 />
               </div>
             ) : null}
@@ -620,11 +614,7 @@ function DaySessionList({
   // Owner 2026-11-04: a block this athlete already holds says so and offers
   // nothing - a second tap used to reach the write's refusal.
   const heldName = athleteName ?? 'This athlete';
-  const heldNote = `${heldName} is booked in. Cancel it from ${scheduleName} if plans change.`;
-  // From the session's own day the schedule screens offer no Cancel (their
-  // `cancellable` is date > today) and show this line instead - the same
-  // from-the-day-on rule as waitlistClosed.
-  const heldSameDayNote = `${heldName} is booked in. Same-day cancellations aren't available in the app — contact the front desk.`;
+  const heldNote = `${heldName} is booked in. Cancel or move it from ${scheduleName} if plans change.`;
   return (
     <>
       <div style={{ font: `600 13px ${font.body}`, color: color.text, padding: '2px 0 2px' }}>
@@ -637,36 +627,22 @@ function DaySessionList({
       ) : (
         sessions.map((session) => {
           const [time, meridiem] = session.time.split(' ');
-          const cap = formatCapacity(session);
-          // `justFilledId`: a plain tap just found this one full - it reads
-          // Full at once, with Join waitlist as its own tap.
-          const isFull = cap.state === 'full' || session.id === justFilledId;
-          // Two independent reasons a session cannot be booked, and they
-          // need different copy: the block itself is full, or the athlete
-          // has no tokens left (and no grace token standing in) to spend.
-          // A bonus token stands in only for a session on or before its
-          // expiry - the booking check's own rule (live.js selectGraceToken).
-          // 2026-11-01: a next-period session is judged by THAT period's count
-          // (data/packages.js positionForDate), as the booking check does - a
-          // family who spent November still books December.
-          const rowTokens = positionForDate(tokens, session.date);
-          const hasGrace = (rowTokens?.grace ?? []).some((g) => !g.expiresAt || g.expiresAt >= session.date);
-          const tokensSpent = rowTokens ? !rowTokens.unlimited && rowTokens.left === 0 && !hasGrace : false;
+          // Full (or just found full by a tap), the period's tokens spent (a
+          // next-period session by that period's count, a bonus token only up
+          // to its expiry), display-only, started (R2), held, or a handicap-
+          // reserved block not theirs: one rule with the Move picker
+          // (data/bookability.js cardFacts).
+          const { cap, isFull, rowTokens, hasGrace, tokensSpent, displayOnly, started, held, notTheirs } = cardFacts(session, {
+            tokens,
+            athlete,
+            handicapUnread,
+            checkStarted,
+            bookedSessionIds,
+            justFilledId,
+          });
           const pending = reserving === session.id;
-          // Contract v2.0 pin J: the Saturday adult block is display-only -
-          // adults pay at the front desk; it is never a junior booking.
-          const displayOnly = session.bookable === false;
-          // R2: a session that has started is shown, never offered.
-          const started = checkStarted && !displayOnly && sessionStarted(session);
-          // Started wins: a held block that has begun reads Started, as before.
-          const held = !displayOnly && !started && bookedSessionIds.includes(session.id);
           // Already on this waitlist: say so and offer Leave, never Join again.
           const waiting = displayOnly || started || held ? null : waitingOn(session, athleteId);
-          // A handicap-reserved block (owner ruling 2026-10-02) is offered
-          // only to an athlete at or under its limit: no Reserve, no Join
-          // waitlist, and one line saying why once their row is known. A row
-          // that failed to load (handicapUnread) holds nothing back here.
-          const notTheirs = !displayOnly && !handicapUnread && !reservedEligible(session, athlete);
           const refusal = notTheirs && athlete && !started && !waiting && !held ? reservedRefusal(session, athlete) : null;
           // R3: nobody is promoted on the day, so today's waitlist takes nobody new.
           const canWaitlist = isFull && !tokensSpent && !displayOnly && !started && !waiting && !notTheirs && !held && !(checkStarted && waitlistClosed(session));
@@ -719,7 +695,7 @@ function DaySessionList({
                 displayOnly
                   ? 'Adult block — booked and paid at the front desk, not through the portal.'
                   : held
-                  ? (checkStarted && waitlistClosed(session) ? heldSameDayNote : heldNote)
+                  ? heldNote
                   : refusal
                   ? refusal
                   : tokensSpent && !isFull && !started && !waiting && !notTheirs

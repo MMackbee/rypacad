@@ -28,7 +28,7 @@ function listDates(rows) {
  * The later weeks of `target` among `rows` (useSchedule's sessions, or one
  * member's `upcoming` from useHouseholdReservations), in date order. Earlier
  * bookings are never part of it. `cancellable` is the hooks' own rule
- * (confirmed, the day before at the latest, not Calendly-managed).
+ * (confirmed, before the session starts, not Calendly-managed).
  */
 export function laterWeeks(target, rows) {
   if (!target || !target.date) return [];
@@ -83,12 +83,14 @@ export const SERIES_STOP_COPY = {
  * onBookingCancelled sends no notice per week, and silent so the lists
  * refresh once at the end rather than after every week. A failure of one
  * booking is collected and the run continues; one that concerns the whole
- * family stops it. Never throws.
+ * family stops it. Never throws. `reason` (the family's one answer, spec
+ * 2026-11-11 §4) goes on every week; without one the opts are as before.
  *
  * Returns { total, cancelled: [{bookingId,date}], failed: [{bookingId,date,
  * message}], stopped: { message, remaining: [{bookingId,date}] } | null }.
  */
-export async function cancelSeries(rows, cancel) {
+export async function cancelSeries(rows, cancel, reason = null) {
+  const opts = reason ? { cancelledVia: 'series', silent: true, reason } : { cancelledVia: 'series', silent: true };
   const cancelled = [];
   const failed = [];
   let stopped = null;
@@ -96,7 +98,7 @@ export async function cancelSeries(rows, cancel) {
   try {
     for (let i = 0; i < rows.length; i += 1) {
       try {
-        await cancel(rows[i].bookingId, { cancelledVia: 'series', silent: true });
+        await cancel(rows[i].bookingId, opts);
         cancelled.push(brief(rows[i]));
       } catch (err) {
         const stop = SERIES_STOP_COPY[err?.code];

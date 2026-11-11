@@ -251,9 +251,10 @@ function tokensPosition(args) {
   const notCancelled = (b) => b && b.status !== 'cancelled';
   const live = (args.bookings || []).filter(notCancelled);
   // A grace-charged booking (graceTokenId set) is a second life for a token
-  // the Academy could not honor — it never counts as a period spend.
-  const used = live.filter(
-      (b) => b.periodKey === periodKey && !b.graceTokenId).length;
+  // the Academy could not honor — it never counts as a period spend, nor
+  // does a comp (2026-11-11: free wherever it moves).
+  const used = live.filter((b) => b.periodKey === periodKey &&
+      !b.graceTokenId && b.comp !== true).length;
   const reserved = (args.waitlist || []).filter(
       (w) => w && w.periodKey === periodKey && !skip.has(w.id)).length;
   const spends = live.concat((args.graceSpends || []).filter(notCancelled));

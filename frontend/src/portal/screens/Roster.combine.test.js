@@ -32,6 +32,7 @@ jest.mock('../hooks', () => ({
 }));
 jest.mock('../hooks/live', () => ({ ...jest.requireActual('../hooks/live'), __esModule: true, isLive: () => mockLive.value }));
 jest.mock('../hooks/assessments', () => ({ useOpenAssessmentWindows: () => ({ data: { byAthlete: {} }, loading: false, error: null }) }));
+jest.mock('../hooks/cancelledBookings', () => ({ useCancelledBookings: () => ({ data: [], loading: false, error: null }), markOrRecheck: async (mark, id, status) => { await mark(id, status); return false; } }));
 jest.mock('../hooks/parallax', () => ({
   __esModule: true,
   useParallaxIntakes: (ids, opts) => {

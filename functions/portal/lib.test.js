@@ -145,6 +145,16 @@ test('tokensPosition: a grace-charged booking is not a period spend', () => {
   assert.equal(p.left, 11);
 });
 
+test('tokensPosition skips a comp row', () => {
+  const p = position({pkg: {kind: 'tokens', tokens: 6}, bookings: [
+    {id: 'a', periodKey: PK, status: 'confirmed'},
+    {id: 'b', periodKey: PK, status: 'confirmed', comp: true,
+      chargedFrom: 'period'},
+  ]});
+  assert.equal(p.used, 1);
+  assert.equal(p.left, 5);
+});
+
 test('tokensPosition: reserved counts waitlist entries in the period', () => {
   const p = position({waitlist: [
     {id: 'w1', periodKey: PK},

@@ -275,3 +275,15 @@ test('the Students tab offers Try again when the list failed for any other reaso
   expect(mockRosterRetries).toBe(1);
   await r.unmount();
 });
+
+test("the Sessions tab opens on the first block's own month, not one read from its session id (QA 2026-11-11)", async () => {
+  // A non-date id used to give the month 'qa-late-01' and an error page.
+  mockBlocks = [{ id: 'qa-later', sessionId: 'qa-later', date: '2026-12-02', time: '6:00 PM', type: 'training', name: 'Training block', meta: '1 of 8 booked', status: 'next' }];
+  try {
+    const r = await openSessions(() => {});
+    expect(navLabel(r)).toBe('December 2026');
+    await r.unmount();
+  } finally {
+    mockBlocks = [];
+  }
+});

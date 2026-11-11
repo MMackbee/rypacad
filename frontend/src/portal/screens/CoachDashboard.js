@@ -107,11 +107,11 @@ export default function CoachDashboard({ variant = 'today', bare = false, role =
           <StudentsTab athletes={roster.data ?? []} loading={roster.loading} error={roster.error} onRetry={roster.retry} onOpenAthlete={onOpenAthlete} />
         ) : (
           <SessionsTab
-            // Live blocks carry real sessionIds; seed blocks don't, so the
-            // demo/harness falls back to the generated season's opening day
-            // (code review 2026-09-04, finding 9a: the seed calendar never
-            // auto-jumped and showed an empty month).
-            firstSessionDate={blocks[0]?.sessionId?.slice(0, 10) ?? SEASON_BOUNDS.start}
+            // Live blocks carry their session's date (an id is not a date: a
+            // QA id crashed this tab, 2026-11-11); seed blocks don't, so the
+            // demo/harness falls back to the season's opening day (code review
+            // 2026-09-04, finding 9a: the seed calendar showed an empty month).
+            firstSessionDate={blocks[0]?.date ?? SEASON_BOUNDS.start}
             onOpenRoster={onOpenRoster}
           />
         )}

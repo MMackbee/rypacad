@@ -30,6 +30,7 @@ import { taskMentalConsent } from './rules-probes/mental-consent.mjs';
 import { taskMembershipShape } from './rules-probes/membership-shape.mjs';
 import { taskHidden } from './rules-probes/hidden.mjs';
 import { taskTourBrackets } from './rules-probes/tour-brackets.mjs';
+import { taskBookingChanges } from './rules-probes/booking-changes.mjs';
 import { taskCombine } from './rules-probes/combine.mjs';
 
 let HOST = localEmulatorHost({ required: true });
@@ -1152,6 +1153,7 @@ async function runPass(label) {
     await taskAttendance();
     await taskHidden();
     await taskTourBrackets();
+    await taskBookingChanges();
     await taskCombine();
   } finally { await teardown(); }
 }

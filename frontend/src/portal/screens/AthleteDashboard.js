@@ -500,7 +500,7 @@ function NoSessions({ onBook, unlimited = false }) {
       <ScreenTitle size={17}>No upcoming sessions</ScreenTitle>
       <Body size={12}>
         Nothing is on your schedule right now - book any open block.
-        {unlimited ? '' : ' Cancelling with notice keeps your token.'}
+        {unlimited ? '' : ' Cancel any time before a session starts and the token comes back.'}
       </Body>
       <Button height={46} onClick={onBook} style={{ marginTop: 4 }}>
         Browse open slots

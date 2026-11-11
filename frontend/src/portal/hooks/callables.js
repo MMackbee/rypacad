@@ -69,6 +69,13 @@ export const callSubmitFeedback = callable('submitFeedback');
  * 'test-household', 'already-signed', 'no-dob' or 'send-failed'.
  */
 export const callRequestMentalConsent = callable('requestMentalConsent');
+/**
+ * `{ bookingId, toSessionId }` -> `{ bookingId, movedFrom, sessionId, periodKey,
+ * chargedFrom, graceTokenId, comp, rebooked }`: a family's Move (spec
+ * 2026-11-11 §5, plan C2), one server transaction. A refusal's `reason` is one
+ * of C2's (components/MoveSheet.js moveRefusalCopy). Through hooks/move.js.
+ */
+export const callMoveBooking = callable('moveBooking');
 const claimInvite = callable('claimInvite');
 /** `{ state, householdId, athleteId }` - ids only on 'claimed' (D7); never throws for an expected state (contract 1.4). */
 export const callClaimInvite = () => claimInvite({});

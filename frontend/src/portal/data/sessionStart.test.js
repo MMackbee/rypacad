@@ -3,7 +3,7 @@
  * the past cannot be booked or waitlisted. Judged on the academy's clock.
  */
 import { academyClock } from './calendar';
-import { dayIsPast, lockPastDays, sessionStarted, waitlistClosed } from './sessionStart';
+import { cancelDayOpen, dayIsPast, lockPastDays, rowSession, sessionStarted, waitlistClosed } from './sessionStart';
 
 // 2026-11-12 16:30 in Chicago (CST, UTC-6).
 const NOW = new Date('2026-11-12T22:30:00Z');
@@ -36,6 +36,18 @@ test('the waitlist is closed from the day of the session (no same-day promotion)
   expect(waitlistClosed({ date: '2026-11-13' }, NOW)).toBe(false);
   expect(waitlistClosed({ date: '2026-11-12' }, NOW)).toBe(true);
   expect(waitlistClosed({ date: '2026-11-10' }, NOW)).toBe(true);
+});
+
+test('rowSession: a row\'s split time and meridiem back into a session time', () => {
+  expect(rowSession({ date: '2026-11-12', time: '4:00', meridiem: 'PM' })).toEqual({ date: '2026-11-12', time: '4:00 PM' });
+  expect(rowSession({ date: '2026-11-12', time: 'TBA' })).toEqual({ date: '2026-11-12', time: 'TBA' });
+});
+
+test('cancelDayOpen: up to the session\'s own day; a 1:1 only up to the day before (spec 2026-11-11 §4)', () => {
+  expect(cancelDayOpen({ date: '2026-11-12', type: 'training' }, '2026-11-12')).toBe(true);
+  expect(cancelDayOpen({ date: '2026-11-11', type: 'training' }, '2026-11-12')).toBe(false);
+  expect(cancelDayOpen({ date: '2026-11-12', type: 'mental' }, '2026-11-12')).toBe(false);
+  expect(cancelDayOpen({ date: '2026-11-13', type: 'mental' }, '2026-11-12')).toBe(true);
 });
 
 test('past days stop being tappable; today and later keep their state', () => {

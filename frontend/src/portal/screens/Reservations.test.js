@@ -5,6 +5,22 @@ import Reservations from './Reservations';
 let mockConsents;
 jest.mock('../hooks/mentalConsent', () => ({ useFamilyConsents: () => mockConsents }));
 beforeEach(() => { mockConsents = { data: null, loading: false, error: null }; });
+// Noon Mon Nov 9 in Chicago for every test (the rows are dated Nov 10-24);
+// a describe that needs another time sets its own.
+beforeEach(() => {
+  jest.useFakeTimers('modern');
+  jest.setSystemTime(new Date('2026-11-09T18:00:00Z'));
+});
+afterEach(() => {
+  jest.useRealTimers();
+});
+
+/** A button inside the open sheet (the row and the sheet both say "Cancel reservation"). */
+async function sheetButton(r, label) {
+  const b = [...r.container.querySelectorAll('[data-portal-overlay] button')].find((el) => el.textContent.trim() === label);
+  if (!b) throw new Error(`no sheet button "${label}"`);
+  await act(async () => { b.click(); });
+}
 
 const row = (over) => ({
   id: 's1', sessionId: 's1', bookingId: 'b1', date: '2026-11-10', dayLabel: 'Tue, Nov 10', isToday: false,
@@ -17,11 +33,22 @@ let mockSiblingRows = [];
 let mockSiblingUnlimited = false;
 let mockLeave = async () => {};
 const mockCancels = [];
+// Whether Jordan's account is on hold (no Move on an ordinary booking), and the moves made.
+let mockOnHold = false;
+const mockMoves = [];
+jest.mock('../hooks/move', () => ({
+  useMoveOptions: () => ({
+    data: { days: [{ iso: '2026-11-12', label: 'Thu, Nov 12', sessions: [{ id: 's2', date: '2026-11-12', time: '4:00', meridiem: 'PM', fullTime: '4:00 PM', type: 'training', name: 'Training block', capacityLabel: '9 left' }] }] },
+    loading: false,
+    error: null,
+  }),
+  moveBooking: async (args) => { mockMoves.push(args); return { bookingId: `a1_${args.toSessionId}` }; },
+}));
 jest.mock('../hooks', () => ({
   useHouseholdReservations: () => ({
     data: {
       members: [
-        { athleteId: 'a1', name: 'Jordan', unlimited: false, upcoming: mockRows, past: [] },
+        { athleteId: 'a1', name: 'Jordan', unlimited: false, onHold: mockOnHold, upcoming: mockRows, past: [] },
         ...(mockSiblingRows.length ? [{ athleteId: 'a2', name: 'Nico', unlimited: mockSiblingUnlimited, upcoming: mockSiblingRows, past: [] }] : []),
       ],
     },
@@ -53,8 +80,8 @@ describe('waitlisted rows', () => {
   test('each child by name; the token child is told a token is used, the Elite child reads no token wording', async () => {
     const r = await renderScreen(<Reservations bare />);
     expect(r.text()).toContain('On the waitlist - #2 in line');
-    expect(r.text()).toContain('If a spot opens, Jordan is booked automatically and one token is used. You can cancel until the day before.');
-    expect(r.text()).toContain('If a spot opens, Nico is booked automatically. You can cancel until the day before.');
+    expect(r.text()).toContain('If a spot opens, Jordan is booked automatically and one token is used. You can cancel or move it any time before it starts.');
+    expect(r.text()).toContain('If a spot opens, Nico is booked automatically. You can cancel or move it any time before it starts.');
     expect(r.text()).toContain('Cancelled by the academy.');
     expect(r.text()).not.toContain('a bonus token was added');
     expect(r.text()).not.toMatch(/notif/i);
@@ -101,6 +128,33 @@ test('a Calendly row says to cancel from the email; a portal row keeps Cancel', 
   await r.unmount();
 });
 
+// Spec 2026-11-11 §4: cancel right up to the start, with a reason.
+test('a same-day row before its start offers Cancel; one that has started says so', async () => {
+  mockRows = [
+    row({ id: 's0', sessionId: 's0', bookingId: 'b0', date: '2026-11-09', dayLabel: 'Today', isToday: true, time: '4:00', type: 'training', name: 'Training block' }),
+    row({ id: 's00', sessionId: 's00', bookingId: 'b00', date: '2026-11-09', dayLabel: 'Today', isToday: true, time: '9:00', meridiem: 'AM', type: 'training', name: 'Training block' }),
+  ];
+  const r = await renderScreen(<Reservations bare />);
+  expect([...r.container.querySelectorAll('button')].filter((b) => b.textContent.trim() === 'Cancel reservation')).toHaveLength(1);
+  expect(r.text()).toContain('This session has already started.');
+  expect(r.text()).not.toContain('Same-day');
+  await r.unmount();
+});
+
+test('the cancel asks why and sends the reason', async () => {
+  mockCancels.length = 0;
+  mockRows = [row({ type: 'training', name: 'Training block' })];
+  const r = await renderScreen(<Reservations bare />);
+  await r.click('Cancel reservation');
+  expect(r.text()).toContain("Why can't Jordan make it?");
+  await sheetButton(r, 'Cancel reservation');
+  expect(mockCancels).toEqual([]);
+  await r.click('Sick');
+  await sheetButton(r, 'Cancel reservation');
+  expect(mockCancels).toEqual([['b1', { reason: { category: 'sick', note: null } }]]);
+  await r.unmount();
+});
+
 test('a row without source (routing Task 11 not merged) behaves as a portal row', async () => {
   mockRows = [row({ source: undefined })];
   const r = await renderScreen(<Reservations bare />);
@@ -134,8 +188,9 @@ describe('cancelling a booking that repeats on later weeks', () => {
     const r = await renderScreen(<Reservations bare />);
     await r.click('Cancel reservation'); // Jordan's first row: Tue, Nov 10
     expect(r.text()).toContain('Also booked at the same time on 2 later weeks, through Tue, Nov 24.');
+    await r.click('Sick');
     await r.click('Cancel this and 2 later weeks');
-    expect(mockCancels).toEqual(['a1_1', 'a1_2', 'a1_3'].map((id) => [id, { cancelledVia: 'series', silent: true }]));
+    expect(mockCancels).toEqual(['a1_1', 'a1_2', 'a1_3'].map((id) => [id, { cancelledVia: 'series', silent: true, reason: { category: 'sick', note: null } }]));
     expect(r.text()).toContain('3 reservations cancelled');
     expect(r.text()).toContain('Cancelled: Nov 10, Nov 17 and Nov 24.');
     await r.click('Done');
@@ -146,8 +201,9 @@ describe('cancelling a booking that repeats on later weeks', () => {
   test('"Cancel just this one" is the single cancel', async () => {
     const r = await renderScreen(<Reservations bare />);
     await r.click('Cancel reservation');
+    await r.click('Sick');
     await r.click('Cancel just this one');
-    expect(mockCancels).toEqual([['a1_1']]);
+    expect(mockCancels).toEqual([['a1_1', { reason: { category: 'sick', note: null } }]]);
     await r.unmount();
   });
 
@@ -159,6 +215,49 @@ describe('cancelling a booking that repeats on later weeks', () => {
     expect(r.text()).toContain('Cancel this reservation?');
     expect(r.text()).not.toContain('later week');
     expect(r.button('Cancel just this one')).toBeNull();
+    await r.unmount();
+  });
+});
+
+// Spec 2026-11-11 §5: Move next to Cancel, until the start.
+describe('Move', () => {
+  const training = (over) => row({ type: 'training', name: 'Training block', ...over });
+  const moveButtons = (r) => [...r.container.querySelectorAll('button')].filter((b) => b.textContent.trim() === 'Move');
+  beforeEach(() => {
+    mockOnHold = false;
+    mockMoves.length = 0;
+  });
+
+  test('a confirmed training row to come offers Move; Calendly, a 1:1, a started one and an account on hold do not', async () => {
+    mockRows = [training()];
+    const open = await renderScreen(<Reservations bare />);
+    expect(moveButtons(open)).toHaveLength(1);
+    await open.unmount();
+    for (const over of [{ source: 'calendly', cancellable: false }, { type: 'mental' }, { date: '2026-11-09', dayLabel: 'Today', isToday: true, time: '9:00', meridiem: 'AM' }]) {
+      mockRows = [training(over)];
+      const r = await renderScreen(<Reservations bare />);
+      expect(moveButtons(r)).toHaveLength(0);
+      await r.unmount();
+    }
+    mockOnHold = true;
+    mockRows = [training(), training({ id: 's3', sessionId: 's3', bookingId: 'b3', date: '2026-11-12', dayLabel: 'Thu, Nov 12', comp: true })];
+    const held = await renderScreen(<Reservations bare />);
+    // Cancel on both; Move only on the free comp.
+    expect([...held.container.querySelectorAll('button')].filter((b) => b.textContent.trim() === 'Cancel reservation')).toHaveLength(2);
+    expect(moveButtons(held)).toHaveLength(1);
+    await held.unmount();
+  });
+
+  test('Move opens the sheet; choosing and moving sends the booking and the session, then closes it', async () => {
+    mockRows = [training()];
+    const r = await renderScreen(<Reservations bare />);
+    await r.click('Move');
+    expect(r.text()).toContain('Move to another Training block');
+    await r.click('Thu, Nov 12 4:00 PM');
+    expect(r.text()).toContain('Move Jordan from Tue Nov 10, 4:00 PM to Thu Nov 12, 4:00 PM?');
+    await sheetButton(r, 'Move');
+    expect(mockMoves).toEqual([{ bookingId: 'b1', toSessionId: 's2' }]);
+    expect(r.text()).not.toContain('Move to another Training block');
     await r.unmount();
   });
 });

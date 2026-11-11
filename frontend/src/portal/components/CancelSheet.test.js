@@ -66,6 +66,41 @@ describe('without a series the dialog is exactly as before', () => {
   });
 });
 
+describe('chooser and ready (the reason picker, spec 2026-11-11 §4)', () => {
+  test('the chooser shows under the summary', async () => {
+    const r = await mount({ chooser: <p>pick</p> });
+    expect(r.text()).toContain('pick');
+    await r.unmount();
+  });
+
+  test('the panel scrolls inside the frame, so a tall sheet (series, Other and a note, an error) keeps its title reachable', async () => {
+    const r = await mount({ chooser: <p>pick</p> });
+    const panel = r.container.querySelector('[data-portal-overlay]').firstChild;
+    expect([panel.style.maxHeight, panel.style.overflowY]).toEqual(['85%', 'auto']);
+    await r.unmount();
+  });
+
+  test('not ready: the confirm does nothing', async () => {
+    const r = await mount({ ready: false });
+    await r.click('Cancel reservation');
+    expect(r.calls.one).toBe(0);
+    expect(r.calls.cancelled).toBe(0);
+    await r.unmount();
+  });
+
+  test('not ready with later weeks: neither confirm does anything', async () => {
+    let runs = 0;
+    const r = await mount({ ready: false, laterWeeks: later, onConfirmSeries: async () => { runs += 1; return {}; } });
+    await r.click('Cancel just this one');
+    await r.click('Cancel this and 3 later weeks');
+    expect(r.calls.one).toBe(0);
+    expect(runs).toBe(0);
+    await r.click('Keep it');
+    expect(r.calls.close).toBe(1);
+    await r.unmount();
+  });
+});
+
 describe('keepFirst and busyLabel (the scholarship delete, 2026-10-01)', () => {
   const labels = { title: 'Delete this application?', confirmLabel: 'Delete for good', keepLabel: 'Keep application' };
   // The clock is the test's: with keepFirst the sheet takes no confirm in its first half second.

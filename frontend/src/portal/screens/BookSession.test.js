@@ -237,7 +237,7 @@ describe('the cancel line on the confirmation card (tester 2026-09-30: Elite has
   test('a token athlete keeps the token sentence', async () => {
     const r = await reserve();
     expect(r.text()).toContain('1 token');
-    expect(r.text()).toContain('Cancel until the day before the session to keep your token.');
+    expect(r.text()).toContain('Plans change? Cancel or move it in the app any time before it starts. The token comes back.');
     await r.unmount();
   });
   test('an Elite (unlimited) athlete is not told about a token', async () => {
@@ -245,8 +245,8 @@ describe('the cancel line on the confirmation card (tester 2026-09-30: Elite has
     mockTokens = { unlimited: true, grace: [] };
     const r = await reserve();
     expect(r.text()).toContain('Included with Elite');
-    expect(r.text()).toContain('Cancel until the day before the session.');
-    expect(r.text()).not.toContain('to keep your token');
+    expect(r.text()).toContain('Plans change? Cancel or move it in the app any time before it starts.');
+    expect(r.text()).not.toContain('The token comes back');
     await r.unmount();
   });
   test('an older payload with no Elite line falls back to the one it has', async () => {
@@ -761,7 +761,7 @@ describe('waitlist hardening', () => {
     expect(mockBookCalls[1]).toEqual(['s17', { joinWaitlist: true }]);
     expect(r.text()).toContain("You're on the waitlist");
     expect(r.text()).toContain('On the waitlist - #2 in line');
-    expect(r.text()).toContain('If a spot opens, Jordan is booked automatically and one token is used. You can cancel until the day before.');
+    expect(r.text()).toContain('If a spot opens, Jordan is booked automatically and one token is used. You can cancel or move it any time before it starts.');
     expect(r.text()).not.toMatch(/notif/i);
     await r.unmount();
   });
@@ -793,21 +793,21 @@ describe('waitlist hardening', () => {
     expect(card.textContent).toContain('Booked');
     expect(card.textContent).not.toContain('Spends 1 token');
     expect(card.style.cursor).toBe('default');
-    expect(r.text()).toContain('Jordan is booked in. Cancel it from Schedule if plans change.');
+    expect(r.text()).toContain('Jordan is booked in. Cancel or move it from My Schedule if plans change.');
     await tap(card);
     expect(mockBooked).toEqual([]);
     expect(r.text()).not.toContain("Booking didn't go through");
     await r.unmount();
   });
 
-  test("today's held block that has already started reads Started, not Booked; one still to come says same-day cancels go through the front desk", async () => {
+  test("today's held block that has already started reads Started, not Booked; one still to come can be cancelled or moved", async () => {
     mockBookedIds = ['started', 'later'];
     const r = await renderScreen(<BookSession bare demoSelectedDate="2026-11-12" />);
     expect(cardAt(r, '4:00').textContent).toContain('Started');
     expect(cardAt(r, '4:00').textContent).not.toContain('Booked');
     expect(cardAt(r, '6:00').textContent).toContain('Booked');
-    expect(r.text()).toContain("Jordan is booked in. Same-day cancellations aren't available in the app — contact the front desk.");
-    expect(r.text()).not.toContain('Cancel it from Schedule');
+    expect(r.text()).toContain('Jordan is booked in. Cancel or move it from My Schedule if plans change.');
+    expect(r.text()).not.toContain('Same-day');
     await r.unmount();
   });
 
@@ -818,7 +818,7 @@ describe('waitlist hardening', () => {
     ];
     const r = await renderScreen(<BookSession bare role="parent" demoSelectedDate="2026-11-17" />);
     expect(cardAt(r, '4:00').textContent).toContain('Booked');
-    expect(r.text()).toContain('Ava is booked in. Cancel it from Reservations if plans change.');
+    expect(r.text()).toContain('Ava is booked in. Cancel or move it from Reservations if plans change.');
     await r.click('Nico');
     expect(cardAt(r, '4:00').textContent).not.toContain('Booked');
     expect(cardAt(r, '4:00').style.cursor).toBe('pointer');
@@ -1005,7 +1005,7 @@ describe('waitlist hardening', () => {
       expect(r.text()).toContain("A Tour event is the academy's Saturday tournament.");
       expect(r.text()).not.toMatch(/token/i);
       await r.click('Join waitlist');
-      expect(r.text()).toContain('If a spot opens, Jordan is booked automatically. You can cancel until the day before.');
+      expect(r.text()).toContain('If a spot opens, Jordan is booked automatically. You can cancel or move it any time before it starts.');
       expect(r.text()).not.toMatch(/token/i);
       await r.unmount();
     });

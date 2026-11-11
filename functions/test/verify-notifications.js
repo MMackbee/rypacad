@@ -287,7 +287,7 @@ async function main() {
   check('kind/category/ids', [l1.kind, l1.category, l1.householdId, l1.athleteId, l1.sessionId, l1.bookingId, l1.subjectKey],
       ['booking-confirmed', 'schedule', 'hart', 'teddy', S_BOOK, `teddy_${S_BOOK}`, `teddy_${S_BOOK}`]);
   check('sentAt + createdAt written', [l1.sentAt, l1.createdAt], [true, true]);
-  check('body (session doc, not booking fields)', l1.body, `Teddy is booked: Training, ${notices.dayLabel(plus2)} at 3:00 PM.`);
+  check('body (session doc, not booking fields)', l1.body, `Teddy is booked: Training, ${notices.dayLabel(plus2)} at 3:00 PM. You can cancel or move it in the app any time before it starts.`);
   check('per-recipient outcomes (pat: push off; robin: no device; teddy: athlete account)', l1.to,
       ['u-pat:skipped/off', 'u-robin:skipped/no-device', 'u-teddy:skipped/skipped']);
 
@@ -304,7 +304,7 @@ async function main() {
   // grace-teddy-old is already spent on a booking in ANOTHER period: the promotion must not spend it again.
   check('promotion charged the period, not the spent bonus token', [(await get('bookings', `teddy_${S_PROMO}`)).chargedFrom, (await get('bookings', `teddy_${S_PROMO}`)).graceTokenId], ['period', null]);
   check('kind/category/subjectKey/bookingId', [l2.kind, l2.category, l2.subjectKey, l2.bookingId], ['promoted', 'schedule', PROMO_KEY, `teddy_${S_PROMO}`]);
-  check('body', l2.body, `A spot opened - Teddy is now booked for Training, ${notices.dayLabel(plus2)} at 3:00 PM. One token was used. You can cancel in the app until the day before.`);
+  check('body', l2.body, `A spot opened - Teddy is now booked for Training, ${notices.dayLabel(plus2)} at 3:00 PM. One token was used. You can cancel or move it in the app any time before it starts.`);
   check('recipients', l2.to, ['u-pat:skipped/off', 'u-robin:skipped/no-device', 'u-teddy:skipped/skipped']);
   await settle(1500);
   check('NO booking-confirmed for the promoted booking', await exists('notifications', `booking-confirmed_teddy_${S_PROMO}`), false);
