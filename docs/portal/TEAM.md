@@ -65,8 +65,7 @@ contradictions are not.
   screen carries a plain-language `message`; SDK errors are wrapped, never
   surfaced verbatim.
 - **Allowance semantics**: `cancelled` bookings never spend; `confirmed`,
-  `attended` and `noshow` spend. The 12-hour late-cancel nuance lands with the
-  cancellation flow and its own rules.
+  `attended` and `noshow` spend. The 12-hour late-cancel nuance lands with the cancellation flow and its own rules. (superseded 2026-11-11: cancel until the session starts - plans/2026-11-11-booking-changes)
 - **Deploy gate**: the v1 rules remove the legacy `/{document=**}` catch-all,
   which cuts the 2025 app's collections off from clients. Rules do not deploy
   until that migration is sequenced, and deploys are the user's call.
@@ -633,8 +632,8 @@ Data contract v1.7:
   booking.status -> 'cancelled' AND sessions.booked - 1 (the exact
   mirror of create's +1, under the session rule's existing booked-diff
   clause — routing verifies/extends it for -1). Client gate: cancellable
-  until the day BEFORE the session (day-of = contact the academy; copy
-  says so); rules allow the transition without the date check in v1
+  until the day BEFORE the session (day-of = contact the academy; copy says so) (superseded 2026-11-11: cancel until the session starts - plans/2026-11-11-booking-changes);
+  rules allow the transition without the date check in v1
   (flagged as an accepted server-side gap). RE-BOOKING a cancelled doc:
   createBooking's transaction treats an existing doc with status
   'cancelled' as the update path (status -> 'confirmed', booked + 1,
@@ -681,7 +680,7 @@ UI (frontend lane) — the Life Time flow, translated:
 - MySchedule: specialist bookings render with the specialist chip/name;
   every cancellable upcoming booking gets 'Cancel reservation' behind a
   confirm step (tap -> sheet: keep / cancel; Lifetime's own pattern);
-  day-of shows the call-the-academy line instead of the button.
+  day-of shows the call-the-academy line instead of the button. (superseded 2026-11-11: cancel until the session starts - plans/2026-11-11-booking-changes)
   Cancelled items use the existing cancelled treatment.
 - TypeChip: 'phil' and 'mental' variants (short labels consistent with
   the chip system).
@@ -1547,7 +1546,7 @@ and the held token is free again. The one minting trigger left is staff
 `tokens-and-billing-contract.md` section 4 and `DATA-MODEL.md` (graceTokens,
 waitlist).
 
-**G. CANCELLATION — unchanged.** Client gate stays "until the day before";
+**G. CANCELLATION — unchanged.** Client gate stays "until the day before" (superseded 2026-11-11: cancel until the session starts - plans/2026-11-11-booking-changes);
 rules' `confirmed <-> cancelled` member branch stays; cancelled bookings
 never count. The Aug 27 contract's 12-hour rule was never built and is
 withdrawn.
@@ -1964,7 +1963,7 @@ Current statement: `tokens-and-billing-contract.md` section 4 and
 'downgrade'). A member's own cancel writes `cancelledBy` = uid and
 `cancelReason: 'member'` (the member confirmed→cancelled rules branch's
 hasOnly grows by exactly these two). Rows render a reason line for the
-system reasons; the client gate stays "until the day before".
+system reasons; the client gate stays "until the day before" (superseded 2026-11-11: cancel until the session starts - plans/2026-11-11-booking-changes).
 
 **H. MEMBERSHIP STATUS + STRIPE.** `households.membership`: `{ status:
 'active' | 'past_due' | 'lapsed', stripeSubscriptionStatus,
@@ -3055,7 +3054,7 @@ a vocabulary table so site words (makeup, Drop-In, class, 12U, "4 of 10
 open") cannot reach a mockup. Two errors of mine were caught before the file
 landed, both by reading the source rather than the summary: the brief said
 cancellation was the contract's 12-hour rule (pin G withdrew it - it is
-"until the day before", and `data/seed.js` says so in copy), and it gave the
+"until the day before" (superseded 2026-11-11: cancel until the session starts - plans/2026-11-11-booking-changes), and `data/seed.js` says so in copy), and it gave the
 Tour brackets as the owner's original "8-10, 11-13, 13+" rather than the
 implemented 10U / 11-13 / 14+ / Open. Section 9 lists real defects the
 restyle should fix rather than reproduce - inputs set `outline: none` and the

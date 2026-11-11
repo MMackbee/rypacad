@@ -4,7 +4,7 @@
 
 **Supersedes**
 
-- `booking-contract.md` § *The billing cycle* and every reference to `pool`, `training`/`tournaments` allowances, or `poolFor`. The callable-only rule, the transaction shape, and the 12-hour cancellation window all carry forward unchanged.
+- `booking-contract.md` § *The billing cycle* and every reference to `pool`, `training`/`tournaments` allowances, or `poolFor`. The callable-only rule, the transaction shape, and the 12-hour cancellation window all carry forward unchanged (the 12-hour window: superseded 2026-11-11 (plans/2026-11-11-booking-changes) - a family cancels until the session starts).
 - `packages.js` in full: `GOLF_PACKAGES`, `FITNESS_PACKAGES`, `ELITE_TIERS`, `DROP_IN`, `makeAllowance`, `poolFor`, `entitlementsFor`, and the `phil`/`mental` specialist pools. There is one pool now.
 - The earlier tournament rollover policy (roll one month / training doesn't roll). Replaced by the grace-token rule in §4.
 
@@ -64,7 +64,7 @@ A new document per period, never a mutation of the old one. History stays answer
 
 **Tokens expire at `periodEnd`. Hard.** `used`, `reserved`, whatever is left — gone. Nothing carries. Lapse needs no voiding step because expiry already does it: a lapsed membership simply gets no next `tokenPeriods` document.
 
-Athlete-side cancellations follow the existing 12-hour rule: ≥12h out, `used--` (the token returns to *this* period and still expires with it); <12h, spent. Your own cancellation gives the token back; it never extends it.
+Athlete-side cancellations follow the existing 12-hour rule: ≥12h out, `used--` (the token returns to *this* period and still expires with it); <12h, spent. Your own cancellation gives the token back; it never extends it. *(superseded 2026-11-11 (plans/2026-11-11-booking-changes): a family cancels until the session starts and the token comes back; a portal 1:1 with Yannick until the day before. The 12-hour rule was never built.)*
 
 ---
 
@@ -80,7 +80,7 @@ A token the Academy couldn't honor gets a second life. One trigger, no others:
 
    In each case the family gets one notice. Elite reserves no token, so an Elite athlete's notice has no token sentence. Grace tokens minted under the old rule before 2026-10-01 stay valid until they expire.
 
-The same ruling fixed three more points of waitlist behavior: a session that has started or is in the past cannot be booked or waitlisted; a family is never auto-booked on the day of the session (it could not cancel), so entries still waiting on the day are closed by the next morning's sweep; and a promotion may never produce a booking a normal tap would refuse (unpaid or lapsed membership, no token for that period, Elite's one-per-type-per-day cap, outside the booking window). One check a normal tap applies is not repeated at promotion: the booking-open date (Oct 10, 2026). It cannot be reached, because the waitlist create rule already refuses a token athlete's join before booking opens, so no such entry exists to promote. If that rule ever changes, the same check must be added to promotion.
+The same ruling fixed three more points of waitlist behavior: a session that has started or is in the past cannot be booked or waitlisted; a family is never auto-booked on the day of the session (owner ruling R3), so entries still waiting on the day are closed by the next morning's sweep; and a promotion may never produce a booking a normal tap would refuse (unpaid or lapsed membership, no token for that period, Elite's one-per-type-per-day cap, outside the booking window). One check a normal tap applies is not repeated at promotion: the booking-open date (Oct 10, 2026). It cannot be reached, because the waitlist create rule already refuses a token athlete's join before booking opens, so no such entry exists to promote. If that rule ever changes, the same check must be added to promotion.
 
 ```
 graceTokens/{auto}
@@ -189,7 +189,7 @@ The promoted athlete gets a notification and an acceptance window (existing wiri
 
 ## 9. Makeups — recommend retiring
 
-The old contract's "unlimited makeup" concept conflicts with hard expiry: a booking that spends no token is a free session, and "unlimited" is the exact thing tokens exist to stop. The 12-hour refund window already *is* the makeup mechanism — cancel in time, keep the token.
+The old contract's "unlimited makeup" concept conflicts with hard expiry: a booking that spends no token is a free session, and "unlimited" is the exact thing tokens exist to stop. The 12-hour refund window already *is* the makeup mechanism — cancel in time, keep the token. *(superseded 2026-11-11 (plans/2026-11-11-booking-changes): "in time" is now until the session starts.)*
 
 **Recommendation:** retire `isMakeup`. If the confirmation copy's promise has to survive, the strict reading only: `makeupFor` references one specific no-show booking, one-for-one, same period, and the makeup still consumes a seat. **Open — needs a call before the confirmation copy is rewritten.**
 

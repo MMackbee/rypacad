@@ -198,7 +198,7 @@ helpers. **Auto-confirm, no acceptance window in v1** (owner: fine).
 Expiry sweep: `scripts/sweep-waitlist.mjs` (daily, run with the export):
 entries with `date < today` → delete + mint grace token.
 
-**G. CANCELLATION — unchanged.** Client gate stays "until the day before";
+**G. CANCELLATION — unchanged.** Client gate stays "until the day before" (superseded 2026-11-11: cancel until the session starts - plans/2026-11-11-booking-changes);
 rules' `confirmed <-> cancelled` member branch stays; cancelled bookings
 never count. The Aug 27 contract's 12-hour rule was never built and is
 withdrawn.
