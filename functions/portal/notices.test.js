@@ -37,7 +37,8 @@ test('Tour naming (2026-09-30): the fallback label, never a typed one',
           {label: 'Fall Tournament'})), 'Fall Tournament');
       const athlete = {name: 'Teddy Hart'};
       assert.equal(notices.bookingConfirmed({athlete, session: tour}).body,
-          'Teddy is booked: Tour event, Sat, Nov 7 at 9:00 AM.');
+          'Teddy is booked: Tour event, Sat, Nov 7 at 9:00 AM. You can ' +
+          'cancel or move it in the app any time before it starts.');
       assert.equal(notices.reminder24h({athlete, session: tour}).body,
           'Reminder: Teddy has Tour event tomorrow at 9:00 AM.');
       assert.equal(notices.sessionCancelled({athlete, session: tour}).body,
@@ -72,11 +73,12 @@ test('promoted: says the athlete is booked, a token was used, how to cancel',
       assert.deepEqual(notices.promoted({athlete: sam, session: block}), {
         title: 'A spot opened up',
         body: `A spot opened - Sam is now booked for ${BLOCK}. One token ` +
-            'was used. You can cancel in the app until the day before.',
+            'was used. You can cancel or move it in the app any time ' +
+            'before it starts.',
       });
       assert.equal(notices.promoted({athlete: sam, session: block,
         elite: true}).body, `A spot opened - Sam is now booked for ${BLOCK}. ` +
-          'You can cancel in the app until the day before.');
+          'You can cancel or move it in the app any time before it starts.');
     });
 
 test('waitlistCancelled: the academy cancelled the session', () => {
@@ -158,6 +160,26 @@ test('bookingCancelled: a single token is back until season end', () => {
     body: 'Teddy\'s booking for Training, Wed, Nov 4 at 3:00 PM was ' +
         'cancelled. The session token is back - good through Sat, Feb 27.',
   });
+});
+
+// Booking changes (2026-11-11): cancel or move until the start, and a comp
+// or Elite receipt never mentions a token.
+test('bookingConfirmed: a 1:1 with Yannick keeps its own terms', () => {
+  const mental = {type: 'mental', date: '2026-11-04', time: '3:00 PM'};
+  for (const booking of [null, {attendee: 'parent'}]) {
+    const body = notices.bookingConfirmed({athlete: TEDDY, session: mental,
+      booking}).body;
+    assert.equal(/cancel/i.test(body), false, body);
+  }
+});
+
+test('bookingCancelled: no token line for a comp or an Elite booking', () => {
+  const plain = 'Teddy\'s booking for Training, Wed, Nov 4 at 3:00 PM was ' +
+      'cancelled.';
+  assert.equal(notices.bookingCancelled({athlete: TEDDY, session: TRAINING,
+    comp: true}).body, plain);
+  assert.equal(notices.bookingCancelled({athlete: TEDDY, session: TRAINING,
+    elite: true}).body, plain);
 });
 
 test('sessionCancelled: old bodies byte-identical; tokenReturned appends',

@@ -30,6 +30,15 @@
 const {SEASON_END} = require('./single');
 
 /**
+ * Booking changes (2026-11-11): a family may cancel or move a booking in
+ * the app until the session starts. Ends `booking-confirmed` (not a 1:1
+ * with Yannick) and `promoted`.
+ * @const {string}
+ */
+const CANCEL_OR_MOVE =
+    ' You can cancel or move it in the app any time before it starts.';
+
+/**
  * Display names for a session with no `label` of its own. The type id stays
  * 'tournament'; families read "Tour event" (owner naming rule, 2026-09-30).
  * @const
@@ -117,25 +126,27 @@ function attendeeNote(booking) {
 }
 
 /**
- * kind `booking-confirmed`.
+ * kind `booking-confirmed`. Ends with the cancel-or-move line, except for a
+ * 1:1 with Yannick (`type: 'mental'`), whose own terms stand.
  * @param {{athlete: ?Object, session: ?Object, booking: (?Object|undefined)}}
  *     args Copy inputs.
  * @return {{title: string, body: string}} The notice.
  */
 function bookingConfirmed(args) {
   const name = firstNameOf(args.athlete);
+  const mental = Boolean(args.session) && args.session.type === 'mental';
   return {
     title: 'Session booked',
     body: `${name} is booked: ${sessionPhrase(args.session)}.` +
-        attendeeNote(args.booking),
+        attendeeNote(args.booking) + (mental ? '' : CANCEL_OR_MOVE),
   };
 }
 
 /**
  * kind `promoted` - a waitlist spot opened and was auto-confirmed. Says what
  * happened: the athlete is booked, a token was used, and it can still be
- * cancelled (owner ruling 2026-10-01). Elite has no tokens, so `elite`
- * drops the token sentence.
+ * cancelled or moved until the start (owner rulings 2026-10-01 and
+ * 2026-11-11). Elite has no tokens, so `elite` drops the token sentence.
  * @param {{athlete: ?Object, session: ?Object, booking: (?Object|undefined),
  *     elite: (boolean|undefined)}} args Copy inputs.
  * @return {{title: string, body: string}} The notice.
@@ -146,8 +157,7 @@ function promoted(args) {
     title: 'A spot opened up',
     body: `A spot opened - ${name} is now booked for ` +
         `${sessionPhrase(args.session)}.` + attendeeNote(args.booking) +
-        (args.elite ? '' : ' One token was used.') +
-        ' You can cancel in the app until the day before.',
+        (args.elite ? '' : ' One token was used.') + CANCEL_OR_MOVE,
   };
 }
 
@@ -158,20 +168,23 @@ function promoted(args) {
  * not news. Says the token came back, because that is the thing a family
  * wants confirmed in writing. A booking paid with a purchased single token
  * (`singleToken`) gets that token back until season end, not "this period".
+ * A free comp (`comp`) or an Elite booking (`elite`, the booking's own
+ * charge) spent no token, so its receipt ends at "was cancelled." (spec
+ * 2026-11-11: comp and Elite copy never mentions a token).
  * @param {{athlete: ?Object, session: ?Object,
- *     singleToken: (boolean|undefined)}} args Copy inputs.
+ *     singleToken: (boolean|undefined), comp: (boolean|undefined),
+ *     elite: (boolean|undefined)}} args Copy inputs.
  * @return {{title: string, body: string}} The notice.
  */
 function bookingCancelled(args) {
   const name = firstNameOf(args.athlete);
+  const lead = `${name}'s booking for ${sessionPhrase(args.session)} was ` +
+      'cancelled.';
+  if (args.comp || args.elite) return {title: 'Booking cancelled', body: lead};
   const back = args.singleToken ?
       `The session token is back - good through ${dayLabel(SEASON_END)}.` :
       'The token is back in this period.';
-  return {
-    title: 'Booking cancelled',
-    body: `${name}'s booking for ${sessionPhrase(args.session)} was ` +
-        `cancelled. ${back}`,
-  };
+  return {title: 'Booking cancelled', body: `${lead} ${back}`};
 }
 
 /**

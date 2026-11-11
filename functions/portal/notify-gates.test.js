@@ -1,8 +1,9 @@
 'use strict';
 const assert = require('node:assert/strict');
 const {test, run} = require('./tiny');
-const {shouldNoticeBookingCreated, shouldNoticeMemberCancel,
-  shouldNoticeConsentNeeded} = require('./notify-gates');
+const {memberCancelKey, shouldNoticeBookingCreated, shouldNoticeMemberCancel,
+  shouldNoticeConsentNeeded, shouldNoticeMoveReconfirm} =
+    require('./notify-gates');
 
 const booking = (over = {}) => Object.assign({athleteId: 'a1',
   sessionId: 's1', status: 'confirmed', createdBy: 'u-parent'}, over);
@@ -64,6 +65,47 @@ test('never a family receipt for another kind of cancel; a missing body ' +
       false);
   assert.equal(shouldNoticeMemberCancel(null), false);
   assert.equal(shouldNoticeMemberCancel(undefined), false);
+});
+
+// Booking changes (2026-11-11): a move is silent on the old row and a
+// confirmation on the new one; every cancel gets its own receipt.
+const ts = (n) => ({toMillis: () => n});
+
+test('a move: the moved-away row gets no receipt; a created row is ' +
+    'confirmed', () => {
+  assert.equal(shouldNoticeMemberCancel({status: 'cancelled',
+    cancelReason: 'moved'}), false);
+  assert.equal(shouldNoticeBookingCreated({status: 'confirmed',
+    createdBy: 'u1', createdVia: 'move'}), true);
+});
+
+test('shouldNoticeMoveReconfirm: a move onto a row cancelled earlier', () => {
+  const before = {status: 'cancelled', createdAt: ts(1)};
+  const after = {status: 'confirmed', createdVia: 'move', createdAt: ts(2)};
+  const withOver = (row, over) => Object.assign({}, row, over);
+  assert.equal(shouldNoticeMoveReconfirm(before, after), true);
+  assert.equal(shouldNoticeMoveReconfirm({status: 'cancelled'}, after), true);
+  // A client re-book of a row that once came from a move keeps createdAt.
+  assert.equal(shouldNoticeMoveReconfirm(before,
+      withOver(after, {createdAt: ts(1)})), false);
+  assert.equal(shouldNoticeMoveReconfirm(before,
+      withOver(after, {createdVia: undefined})), false);
+  assert.equal(shouldNoticeMoveReconfirm(before,
+      withOver(after, {createdAt: null})), false);
+  assert.equal(shouldNoticeMoveReconfirm(
+      withOver(before, {status: 'confirmed'}), after), false);
+  assert.equal(shouldNoticeMoveReconfirm(null, null), false);
+});
+
+test('memberCancelKey: one receipt per cancel', () => {
+  assert.equal(memberCancelKey('b1', {}, {cancelledAt: ts(5)}), 'b1_5');
+  assert.equal(memberCancelKey('b1', {}, {}), 'b1');
+  // An older app's cancel of a row an older re-book left stamped.
+  assert.equal(memberCancelKey('b1', {cancelledAt: ts(5)},
+      {cancelledAt: ts(5)}), 'b1');
+  assert.equal(memberCancelKey('b1', {cancelledAt: ts(5)},
+      {cancelledAt: ts(9)}), 'b1_9');
+  assert.equal(memberCancelKey('b1', null, null), 'b1');
 });
 
 // Mental consent (2026-11-05). 9 AM Chicago; NOW2 is 7 PM Nov 5 in Chicago
