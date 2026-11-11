@@ -19,8 +19,9 @@
  *
  * The callable sends no notice and binds no secret: a created row fires
  * onBookingCreated, and a re-confirmed one (the target row existed
- * cancelled) is noticed by onBookingCancelled's re-confirm branch. A slow
- * mail server can never turn a committed move into a failed call.
+ * cancelled) is noticed by onBookingCancelled's re-confirm branch, which
+ * calls `sendMoveReconfirm` below. A slow mail server can never turn a
+ * committed move into a failed call.
  */
 
 'use strict';
@@ -31,6 +32,8 @@ const admin = require('firebase-admin');
 // survive the Functions emulator's admin stub; the modular export does.
 const {FieldValue} = require('firebase-admin/firestore');
 const lib = require('./lib');
+const notices = require('./notices');
+const notify = require('./notify');
 const {REFUSALS, decideMove} = require('./move-decide');
 
 const {HttpsError} = functions.https;
@@ -220,10 +223,53 @@ async function moveBookingHandler(data, context, deps) {
   });
 }
 
+/**
+ * The 'booking-confirmed' notice for a move onto a row the athlete had
+ * cancelled earlier: onBookingCancelled calls this when
+ * `shouldNoticeMoveReconfirm` holds (portal/notify-gates.js). The key
+ * carries the move's `createdAt`, so the row's earlier
+ * `booking-confirmed_{id}` ledger entry never blocks it and a redelivered
+ * trigger never sends twice. A failure is logged, never thrown.
+ * @param {string} bookingId The booking id.
+ * @param {!Object} booking The booking body after the move.
+ * @param {{db: (!Object|undefined), sendNotice: (!Function|undefined)}=}
+ *     deps The Firestore and the sender, injectable for tests.
+ * @return {!Promise<void>} Resolves once sent, or once a failure is logged.
+ */
+async function sendMoveReconfirm(bookingId, booking, deps) {
+  try {
+    const store = (deps && deps.db) || admin.firestore();
+    const send = (deps && deps.sendNotice) || notify.sendNotice;
+    const body = async (name, id) => {
+      if (!id) return null;
+      const snap = await store.collection(name).doc(id).get();
+      return snap.exists ? snap.data() : null;
+    };
+    const [session, athlete] = await Promise.all([
+      body('sessions', booking.sessionId),
+      body('athletes', booking.athleteId),
+    ]);
+    const copy = notices.bookingConfirmed({athlete, session, booking});
+    await send({
+      kind: 'booking-confirmed',
+      category: 'schedule',
+      householdId: booking.householdId || null,
+      athleteId: booking.athleteId || null,
+      sessionId: booking.sessionId || null,
+      bookingId,
+      subjectKey: `${bookingId}_move_${booking.createdAt.toMillis()}`,
+      title: copy.title,
+      body: copy.body,
+    });
+  } catch (err) {
+    console.error(`move re-confirm notice failed: booking=${bookingId}`, err);
+  }
+}
+
 // Binds no secret: it sends no notice (the booking triggers do).
 // `runWith({secrets: []})` like the other callables so `grep runWith`
 // finds every function (portal/family.js).
 const moveBooking = functions.runWith({secrets: []}).https.onCall(
     (data, context) => moveBookingHandler(data, context));
 
-module.exports = {moveBooking, moveBookingHandler};
+module.exports = {moveBooking, moveBookingHandler, sendMoveReconfirm};

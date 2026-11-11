@@ -95,8 +95,8 @@ const db = admin.firestore();
 
 const notify = require('./portal/notify');
 const notices = require('./portal/notices');
-const {shouldNoticeBookingCreated, shouldNoticeMemberCancel} =
-    require('./portal/notify-gates');
+const {memberCancelKey, shouldNoticeBookingCreated, shouldNoticeMemberCancel,
+  shouldNoticeMoveReconfirm} = require('./portal/notify-gates');
 const jobs = require('./portal/jobs');
 const lib = require('./portal/lib');
 const contractCheckins = require('./portal/contract-checkins');
@@ -114,7 +114,8 @@ const {onSingleTokenSpent} = require('./portal/single-guard');
 const {submitScholarship} = require('./portal/scholarship');
 const {submitFeedback} = require('./portal/feedback');
 const {requestMentalConsent} = require('./portal/mental-consent-request');
-const {moveBooking} = require('./portal/move');
+const {moveBooking, sendMoveReconfirm} = require('./portal/move');
+const {isFreeComp} = require('./portal/move-decide');
 
 // ==========================================================================
 // PORTAL SERVER-SIDE WRITERS (Sprint 13, contract v2.1)
@@ -267,6 +268,7 @@ exports.onBookingCreated = functions
  * 'booking-cancelled' receipt instead; one week of a series cancel
  * (`cancelledVia == 'series'`) sends nothing. A billing revoke is one
  * household notice from portal/revoke.js, not one per booking.
+ * A move onto a row cancelled earlier is confirmed here (portal/move.js).
  */
 exports.onBookingCancelled = functions
     .runWith({secrets: MAIL_SECRETS})
@@ -275,6 +277,12 @@ exports.onBookingCancelled = functions
     .onUpdate(async (change, context) => {
       const before = change.before.data() || {};
       const after = change.after.data() || {};
+      // moveBooking re-confirmed a row cancelled earlier: no create trigger
+      // fires for it, so its booking-confirmed notice goes from here.
+      if (shouldNoticeMoveReconfirm(before, after)) {
+        await sendMoveReconfirm(context.params.bookingId, after);
+        return null;
+      }
       if (before.status !== 'confirmed' || after.status !== 'cancelled') {
         return null;
       }
@@ -298,7 +306,8 @@ exports.onBookingCancelled = functions
             docBody('athletes', after.athleteId),
           ]);
           const copy = notices.bookingCancelled({athlete, session,
-            singleToken: single.isSingleTokenId(after.graceTokenId)});
+            singleToken: single.isSingleTokenId(after.graceTokenId),
+            comp: isFreeComp(after), elite: after.chargedFrom === 'elite'});
           await notify.sendNotice({
             kind: 'booking-cancelled',
             category: 'schedule',
@@ -306,7 +315,9 @@ exports.onBookingCancelled = functions
             athleteId: after.athleteId || null,
             sessionId: after.sessionId || null,
             bookingId: context.params.bookingId,
-            subjectKey: context.params.bookingId,
+            // One receipt per cancel (portal/notify-gates.js).
+            subjectKey: memberCancelKey(context.params.bookingId, before,
+                after),
             title: copy.title,
             body: copy.body,
           });

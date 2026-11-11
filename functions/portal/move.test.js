@@ -6,7 +6,8 @@ const assert = require('node:assert/strict');
 const {FieldValue} = require('firebase-admin/firestore');
 const {test, run} = require('./tiny');
 const {fakeDb} = require('./fake-firestore');
-const {moveBookingHandler} = require('./move');
+const notices = require('./notices');
+const {moveBookingHandler, sendMoveReconfirm} = require('./move');
 
 // Noon in Chicago on Tue, Nov 10 2026.
 const NOW = new Date('2026-11-10T18:00:00Z');
@@ -183,6 +184,42 @@ test('a second call for the same booking is refused and moves nothing',
       await refusedWith(go(), 'failed-precondition', 'not-confirmed');
       assert.deepEqual(
           [docs['sessions/s1'].booked, docs['sessions/s2'].booked], counts);
+    });
+
+const RECONFIRMED = {athleteId: 'sam', sessionId: 's2', householdId: 'hart',
+  status: 'confirmed', createdVia: 'move', createdAt: {toMillis: () => 77}};
+
+test('sendMoveReconfirm: one booking-confirmed notice keyed by the move',
+    async () => {
+      const docs = world();
+      const sent = [];
+      await sendMoveReconfirm('sam_s2', RECONFIRMED, {db: fakeDb(docs),
+        sendNotice: async (n) => {
+          sent.push(n);
+        }});
+      const copy = notices.bookingConfirmed({athlete: docs['athletes/sam'],
+        session: docs['sessions/s2'], booking: RECONFIRMED});
+      assert.deepEqual(sent, [{kind: 'booking-confirmed',
+        category: 'schedule', householdId: 'hart', athleteId: 'sam',
+        sessionId: 's2', bookingId: 'sam_s2', subjectKey: 'sam_s2_move_77',
+        title: copy.title, body: copy.body}]);
+      assert.match(copy.body, /cancel or move it in the app/);
+    });
+
+test('sendMoveReconfirm: a failed send is logged, never thrown',
+    async () => {
+      const logged = [];
+      const error = console.error;
+      console.error = (...a) => logged.push(a.join(' '));
+      try {
+        await sendMoveReconfirm('sam_s2', RECONFIRMED, {db: fakeDb(world()),
+          sendNotice: async () => {
+            throw new Error('mail down');
+          }});
+      } finally {
+        console.error = error;
+      }
+      assert.equal(logged.length, 1);
     });
 
 run();

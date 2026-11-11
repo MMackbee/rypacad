@@ -19,8 +19,8 @@
  *
  * OWNER RULINGS 2026-10-01, all enforced here:
  *   - No same-day promotion: a session dated today or earlier is never
- *     promoted into (the family could not cancel). Entries still waiting
- *     are closed by the next morning's sweep.
+ *     promoted into (owner ruling R3). Entries still waiting are closed by
+ *     the next morning's sweep.
  *   - A candidate who fails a gate is removed from the list AND told why.
  *   - The seat count is the real one: the larger of `sessions.booked` and
  *     the session's non-cancelled bookings. A full session is never
@@ -152,8 +152,8 @@ async function promoteOneSeat(sessionId, clock, store) {
     if (sessionStatus(session) !== 'scheduled') {
       return stop('session-not-scheduled');
     }
-    // No same-day promotion (owner ruling 2026-10-01): from midnight the
-    // family could not cancel. The 06:00 sweep closes what is still waiting.
+    // No same-day promotion (owner ruling R3, 2026-10-01). The 06:00 sweep
+    // closes what is still waiting.
     if (session.date && session.date <= clock.today) {
       return stop('same-day-or-past');
     }

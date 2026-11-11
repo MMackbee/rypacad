@@ -43,6 +43,8 @@ function shouldNoticeBookingCreated(booking) {
  *   just saw one on-screen summary of every week, so a notice per week says
  *   nothing new (tester Mike 2026-09-30). A single cancel carries no
  *   `cancelledVia` and still sends.
+ * - Never a moved-away row (`cancelReason: 'moved'`, portal/move.js): the
+ *   new booking's confirmation is the family's one message for a move.
  * @param {?Object} booking The `bookings/{id}` body AFTER the cancel.
  * @return {boolean} True when the receipt is owed.
  */
@@ -90,5 +92,59 @@ function shouldNoticeConsentNeeded(args) {
   return status === 'unsigned' || status === 'needs-adult';
 }
 
-module.exports = {shouldNoticeBookingCreated, shouldNoticeConsentNeeded,
-  shouldNoticeMemberCancel};
+/**
+ * A Firestore Timestamp's millis: any value with `toMillis()`.
+ * @param {*} value A stored value.
+ * @return {?number} Millis, or null when the value is not a Timestamp.
+ */
+function millisOf(value) {
+  return value && typeof value.toMillis === 'function' ?
+      value.toMillis() : null;
+}
+
+/**
+ * Whether a booking update is moveBooking re-confirming a row the athlete
+ * had cancelled earlier (portal/move.js, booking changes 2026-11-11). No
+ * create trigger fires for it, so the update trigger sends the
+ * 'booking-confirmed' notice instead.
+ *
+ * - Before `cancelled`, after `confirmed`, `createdVia: 'move'`.
+ * - `createdAt` a Timestamp that differs from before's: only moveBooking
+ *   rewrites it, so a client re-book of a row that once came from a move
+ *   (it keeps `createdAt`) is not a move.
+ * @param {?Object} before The `bookings/{id}` body before the update.
+ * @param {?Object} after The body after it.
+ * @return {boolean} True when the move's confirmation is owed.
+ */
+function shouldNoticeMoveReconfirm(before, after) {
+  const b = before || {};
+  const a = after || {};
+  if (b.status !== 'cancelled' || a.status !== 'confirmed') return false;
+  if (a.createdVia !== 'move') return false;
+  const ms = millisOf(a.createdAt);
+  return ms !== null && ms !== millisOf(b.createdAt);
+}
+
+/**
+ * The 'booking-cancelled' receipt's subject key: one receipt per cancel
+ * (booking changes 2026-11-11). The new app stamps every cancel with
+ * `cancelledAt`, so cancel, re-book, cancel again sends a second receipt,
+ * and a redelivered trigger carries the same stamp and sends nothing
+ * twice. An older app's cancel (no new stamp) keys on the booking id, as
+ * every receipt did before.
+ * @param {string} bookingId The booking id.
+ * @param {?Object} before The `bookings/{id}` body before the cancel.
+ * @param {?Object} after The body after it.
+ * @return {string} `{bookingId}_{cancelledAt millis}`, or `bookingId`.
+ */
+function memberCancelKey(bookingId, before, after) {
+  const ms = millisOf((after || {}).cancelledAt);
+  if (ms === null || ms === millisOf((before || {}).cancelledAt)) {
+    return bookingId;
+  }
+  return `${bookingId}_${ms}`;
+}
+
+module.exports = {memberCancelKey, shouldNoticeBookingCreated,
+  shouldNoticeConsentNeeded, shouldNoticeMemberCancel,
+  shouldNoticeMoveReconfirm};

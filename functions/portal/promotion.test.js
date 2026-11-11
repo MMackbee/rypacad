@@ -87,8 +87,8 @@ test('happy path: a cancelled seat books the waiting family', async () => {
   assert.equal(docs['sessions/s1'].booked, 2);
   assert.equal('waitlist/s1_sam' in docs, false);
   assert.deepEqual(bodies('promoted'), [`A spot opened - Sam is now ` +
-      `booked for ${BLOCK}. One token was used. You can cancel in the app ` +
-      'until the day before.']);
+      `booked for ${BLOCK}. One token was used. You can cancel or move it ` +
+      'in the app any time before it starts.']);
   assert.equal(sent.length, 1);
 });
 
@@ -130,8 +130,8 @@ test('Elite one-per-day: the candidate is removed and told, the next ' +
   await cancelSeat(other, 'x1');
   assert.equal(other['bookings/ava_s1'].chargedFrom, 'elite');
   assert.deepEqual(bodies('promoted'), [`A spot opened - Ava is now ` +
-      `booked for ${BLOCK}. You can cancel in the app until the day ` +
-      'before.']);
+      `booked for ${BLOCK}. You can cancel or move it in the app any time ` +
+      'before it starts.']);
 });
 
 test('a failed check removes the entry and tells the family why',
@@ -527,8 +527,8 @@ test('single token: promoted in joining order, the purchased token pays',
       assert.equal('waitlist/s1_sol' in docs, false);
       assert.equal('bookings/sam_s1' in docs, false);
       assert.deepEqual(bodies('promoted'), [`A spot opened - Sol is now ` +
-          `booked for ${BLOCK}. One token was used. You can cancel in the ` +
-          'app until the day before.']);
+          `booked for ${BLOCK}. One token was used. You can cancel or move ` +
+          'it in the app any time before it starts.']);
       // No priority for a bought token: Kai joined first and goes first,
       // where a bonus token would have jumped the line.
       const later = world(SOL, token('cs_1'), entry('s1', 'kai', 'reyes', 0),
