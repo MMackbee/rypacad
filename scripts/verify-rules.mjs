@@ -1156,7 +1156,7 @@ async function runPass(label) {
   } finally { await teardown(); }
 }
 
-export { setup, teardown, seed, del, call, createAs, updateAs, commitAs, bookAs, listAs, listUnderAs, expect, token, t, uid, BASE, loadRules, postGateCopy, patchWrite, seatWrite, beforeGate };
+export { setup, teardown, seed, del, call, createAs, updateAs, commitAs, bookAs, listAs, listUnderAs, groupListAs, expect, token, t, uid, BASE, loadRules, postGateCopy, patchWrite, seatWrite, beforeGate };
 if (process.argv[1] && process.argv[1].endsWith('verify-rules.mjs')) {
   const realRules = readFileSync(fileURLToPath(new URL('../firestore.rules', import.meta.url)), 'utf8');
   const postGateRules = postGateCopy(realRules);

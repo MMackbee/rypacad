@@ -15,7 +15,7 @@
  * Module scope holds constants and arrow helpers only (verify-rules.mjs
  * imports this file before its own body runs).
  */
-import { call, commitAs, createAs, del, expect, listUnderAs, patchWrite, seed, t, token, uid } from '../verify-rules.mjs';
+import { call, commitAs, createAs, del, expect, groupListAs, listUnderAs, patchWrite, seed, t, token, uid } from '../verify-rules.mjs';
 
 const ATHLETES = ['ath-active', 'ath-other', 'ath-absent', 'ath-pending', 'ath-elite', 'ath-elite-pending', 'cb-nohh'];
 const CB_USERS = [
@@ -85,9 +85,14 @@ async function intakeCases(k) {
     expect(`intake: ${who} reads a tick`, await getAs(auth, other), 200);
   }
   expect("intake: the athlete's own household parent reads it refused", await getAs(t.other, other), 403);
-  expect("intake: an athlete login reads its own athlete's tick refused", await getAs(t.athlete, active), 403);
+  // A tick that exists (Phil's on ath-elite): a read of a missing doc is refused by any rule that reads resource.
+  const elite = `${MS('ath-elite')}/${INTAKE}`;
+  expect("intake: an athlete login reads its own athlete's tick refused", await getAs(t.eliteLogin, elite), 403);
+  expect("intake: a parent of the athlete's household reads the tick refused", await getAs(t.parent, elite), 403);
   expect('intake: a stranger reads it refused', await getAs(t.stranger, other), 403);
   expect('intake: the coach gets a tick that does not exist: not found', await getAs(t.coach, `${MS('ath-absent')}/${INTAKE}`), 404);
+  // No {path=**}/milestones match: a collection-group query lists nobody's ticks.
+  expect('intake: the coach queries the milestones collection group refused', await groupListAs(t.coach, 'milestones'), 403);
 
   // The ten-minute window, both sides (a 10 s or 1 m typo in the rule fails the first case).
   const aged = (min) => seed(MS('ath-elite-pending'), INTAKE, { athleteId: 'ath-elite-pending', at: new Date(Date.now() - min * 60000), by: uid.coach, byName: 'Luke' });
@@ -170,6 +175,12 @@ async function scoreCases(k) {
   expect('score: a parent of another household lists refused', await list(t.other), 403);
   expect('score: a stranger lists refused', await list(t.stranger), 403);
   expect("score: an athlete login lists another household's athlete refused", await list(t.athlete, 'ath-other'), 403);
+  // A sibling in the same household (ath-absent holds cb-absent): only a parent reads by household.
+  expect("score: an athlete login lists a sibling's scores refused", await list(t.athlete, 'ath-absent'), 403);
+  expect("score: an athlete login reads a sibling's score refused", await getAs(t.athlete, `${CS('ath-absent')}/cb-absent`), 403);
+  // No {path=**}/combineScores match: a collection-group query lists nobody's scores.
+  expect('score: a parent queries the combineScores collection group refused', await groupListAs(t.parent, 'combineScores'), 403);
+  expect('score: the coach queries the combineScores collection group refused', await groupListAs(t.coach, 'combineScores'), 403);
   expect('score: a parent with no household lists an athlete with none refused', await list(k.nohh, 'cb-nohh'), 403);
 }
 
