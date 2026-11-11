@@ -55,11 +55,13 @@ function refusal(reason) {
 
 /**
  * @param {*} id A request field.
- * @return {boolean} True for a 1..200 character id with no '/'.
+ * @return {boolean} True for a 1..200 character id with no '/' that
+ *     Firestore accepts as a document id (not '.', '..' or '__x__').
  */
 function goodId(id) {
   return typeof id === 'string' && id.length > 0 &&
-      id.length <= MAX_ID_LENGTH && !id.includes('/');
+      id.length <= MAX_ID_LENGTH && !id.includes('/') &&
+      !/^\.\.?$|^__.*__$/.test(id);
 }
 
 /**

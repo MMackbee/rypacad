@@ -162,7 +162,12 @@ test('signed out, bad input, not found, not yours', async () => {
   await refusedWith(call(world(), null), 'unauthenticated', 'signed-out');
   for (const data of [{bookingId: 'a/b', toSessionId: 's2'},
     {bookingId: 'x'.repeat(201), toSessionId: 's2'},
-    {bookingId: 'sam_s1'}, {toSessionId: 's2'}, {}, null]) {
+    {bookingId: 'sam_s1'}, {toSessionId: 's2'}, {}, null,
+    // Ids Firestore itself rejects: '.', '..' and '__x__'.
+    {bookingId: '..', toSessionId: 's2'},
+    {bookingId: 'sam_s1', toSessionId: '.'},
+    {bookingId: '__x__', toSessionId: 's2'},
+    {bookingId: 'sam_s1', toSessionId: '__s2__'}]) {
     await refusedWith(call(world(), 'u-parent', data), 'invalid-argument',
         'bad-request');
   }
