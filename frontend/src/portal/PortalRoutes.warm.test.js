@@ -44,6 +44,7 @@ jest.mock('./screens/AdminScholarships', () => mockScreen('AdminScholarships'));
 jest.mock('./screens/StaffRoles', () => mockScreen('StaffRoles'));
 jest.mock('./screens/TourStandings', () => mockScreen('TourStandings'));
 jest.mock('./screens/SpecialistDay', () => mockScreen('SpecialistDay'));
+jest.mock('./screens/Combine', () => mockScreen('Combine'));
 
 let root;
 let container;
@@ -90,6 +91,16 @@ test('seed mode (jest, the review scaffold) warms nothing', async () => {
   await mount('/portal/family');
   await advance(5000);
   expect([...mockLoaded].filter((n) => n !== 'StatesHarness')).toEqual([]);
+});
+
+// 2026-11-11 review: the attendance row's Combine button fetched its chunk
+// cold, a blank screen on gym Wi-Fi. Runs before any test that warms it.
+test('a coach landing warms the Combine chunk after 2.5 s', async () => {
+  await mount('/portal/coach');
+  await advance(2499);
+  expect(mockLoaded.has('Combine')).toBe(false);
+  await advance(1);
+  expect(mockLoaded.has('Combine')).toBe(true);
 });
 
 test('Save-Data skips the idle warm-up', async () => {
