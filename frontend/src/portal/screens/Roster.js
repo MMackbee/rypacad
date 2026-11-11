@@ -303,7 +303,8 @@ export function SessionAttendance({ variant = 'pre', bare = false, onBack, sessi
         meta: attendeeNoteFor(r),
       }))
     : demoRoster;
-  const intakes = useParallaxIntakes(roster.map((a) => a.id), { enabled: showIntake && session?.type === 'training' && liveAttendance.sessionStatus !== 'cancelled' });
+  const demoInLive = isLive() && !live; // a typed /portal/attendance URL: its demo rows read and write no real athlete (2026-11-11 review)
+  const intakes = useParallaxIntakes(roster.map((a) => a.id), { enabled: showIntake && !demoInLive && session?.type === 'training' && liveAttendance.sessionStatus !== 'cancelled' });
   const marks = live
     ? Object.fromEntries(
         rows
@@ -666,7 +667,7 @@ export function SessionAttendance({ variant = 'pre', bare = false, onBack, sessi
                   <ClubheadChip entry={openWindows.data?.byAthlete?.[athlete.id]} name={shownName(athlete)} onOpen={() => onOpenClubhead(athlete.id, athlete.name)} />
                 ) : null}
                 {session?.type === 'training' && !sessionCancelled ? (
-                  <TrainingRowExtras athleteId={athlete.id} name={shownName(athlete)} combineName={athlete.name ?? null} intakes={showIntake ? intakes : null} role={role} readOnly={readOnly} onOpenCombine={onOpenCombine} />
+                  <TrainingRowExtras athleteId={athlete.id} name={shownName(athlete)} combineName={athlete.name ?? null} intakes={showIntake ? intakes : null} role={role} readOnly={readOnly} onOpenCombine={demoInLive ? undefined : onOpenCombine} />
                 ) : null}
               </AthleteRow>
               {/* Optional reason, indented to align under the name. Never a

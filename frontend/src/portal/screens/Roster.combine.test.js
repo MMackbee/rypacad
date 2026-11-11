@@ -124,6 +124,17 @@ test('a cancelled session shows neither and reads nothing', async () => {
   await r.unmount();
 });
 
+// Live mode with no session id (a typed or bookmarked /portal/attendance)
+// shows the demo rows: nothing on them may read or write real athletes.
+test('live, no session: the demo rows read no ticks and offer no Combine', async () => {
+  const r = await roster('training', { sessionId: undefined, showIntake: true, onOpenCombine: jest.fn() });
+  expect(lastCall().ids).toEqual(['r1', 'r2', 'r3', 'r4', 'r5', 'r6']);
+  expect(lastCall().enabled).toBe(false);
+  expect(checkboxes(r)).toHaveLength(0);
+  expect(combineButtons(r)).toHaveLength(0);
+  await r.unmount();
+});
+
 test('seed: the real hook ticks r1 and r4 (Review Focus 6)', async () => {
   mockLive.value = false;
   mockIntakes = null;
