@@ -1779,6 +1779,11 @@ service cloud.firestore {
       // list, cancelledVia admits only 'series' and createdVia only
       // 'repeat'; moveBooking (functions/portal/move.js) writes them with the
       // Admin SDK.
+      // 2026-11-11 (rules budget check): the two arms sit behind a ternary on
+      // before.status - same truth table (a confirmed row can only take the
+      // cancel arm, any other status only the re-book arm) - so evaluation
+      // stops at the status instead of walking both arms, which kept every
+      // bookings update under the 1000-expression budget in every pass.
       function rebookGraceOk(g, before) {
         let gd = get(/databases/$(database)/documents/graceTokens/$(g)).data;
         return gd.athleteId == before.athleteId && gd.expiresAt >= before.date;
@@ -1813,7 +1818,8 @@ service cloud.firestore {
         let after = request.resource.data;
         let diffKeys = after.diff(before).affectedKeys();
         return (
-          (before.status == 'confirmed' && after.status == 'cancelled'
+          before.status == 'confirmed'
+          ? (after.status == 'cancelled'
             && diffKeys.hasOnly(['status', 'cancelledBy', 'cancelReason', 'cancelledVia', 'cancelCategory', 'cancelNote', 'cancelledAt'])
             && after.cancelledBy == request.auth.uid
             && after.cancelReason == 'member'
@@ -1826,7 +1832,7 @@ service cloud.firestore {
             && sessionDayNotOver(before.date)
             && sessionNotStarted(get(/databases/$(database)/documents/sessions/$(before.sessionId)).data)
             && seatFreedInCommit(before.sessionId))
-          || (before.status == 'cancelled' && after.status == 'confirmed'
+          : (before.status == 'cancelled' && after.status == 'confirmed'
               && diffKeys.hasOnly(['status', 'chargedFrom', 'graceTokenId', 'rebookedAt', 'cancelCategory', 'cancelNote', 'cancelledAt', 'comp'])
               && removesOnly(after, diffKeys, 'cancelCategory') && removesOnly(after, diffKeys, 'cancelNote')
               && removesOnly(after, diffKeys, 'cancelledAt') && removesOnly(after, diffKeys, 'comp')

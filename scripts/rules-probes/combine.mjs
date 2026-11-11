@@ -129,8 +129,9 @@ async function scoreCases(k) {
   expect("score: the coach claiming enteredRole 'owner' refused", await enter(t.coach, score(uid.coach, 'owner')), 403);
   expect("score: the parent claiming enteredRole 'coach' refused", await enter(t.parent, score(uid.parent, 'coach')), 403);
   expect('score: enteredBy another uid refused', await enter(t.coach, score(uid.parent, 'coach')), 403);
+  // A minute back, so the client time can never land on request.time's own millisecond (it did on loopback).
   expect('score: createdAt a client time, no server time, refused',
-    await createAs(t.coach, CS(), `cb-case-${(n += 1)}`, score(uid.coach, 'coach', { createdAt: new Date() }), []), 403);
+    await createAs(t.coach, CS(), `cb-case-${(n += 1)}`, score(uid.coach, 'coach', { createdAt: new Date(Date.now() - 60000) }), []), 403);
 
   for (const d of ['u125', 'u150', 'u180']) expect(`score: distance ${d}`, await enter(t.coach, score(uid.coach, 'coach', { distance: d })), 200);
   for (const d of ['u200', 'U100', '']) expect(`score: distance '${d}' refused`, await enter(t.coach, score(uid.coach, 'coach', { distance: d })), 403);
