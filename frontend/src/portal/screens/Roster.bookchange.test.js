@@ -11,6 +11,10 @@ let mockLive;
 let mockStatus;
 let mockCancelled;
 const mockCancelledCalls = [];
+// S2: the marks sent, the bookings whose mark the rules refuse, and what the recheck finds.
+const mockMarks = [];
+let mockRefused;
+let mockRecheck;
 jest.mock('../hooks', () => ({
   useCoachRoster: () => ({ data: [], loading: false, error: null, retry: () => {} }),
   useSession: () => ({ data: { type: 'training', blockLabel: 'Block 1 of 3', name: 'Training block', meta: '3:00-4:00 PM', startsIn: 'Starts in 12 min' } }),
@@ -22,7 +26,10 @@ jest.mock('../hooks', () => ({
     ],
     loading: false,
     error: null,
-    mark: async () => {},
+    mark: async (bookingId, status) => {
+      mockMarks.push([bookingId, status]);
+      if (mockRefused.includes(bookingId)) throw Object.assign(new Error('updateBookingStatus: Missing or insufficient permissions.'), { code: 'permission-denied' });
+    },
     setReason: async () => {},
     setSessionNote: async () => {},
     cancelSession: async () => {},
@@ -42,7 +49,14 @@ jest.mock('../hooks/cancelledBookings', () => ({
     mockCancelledCalls.push(sessionId);
     return { data: mockCancelled, loading: false, error: null };
   },
-  markOrRecheck: async (mark, id, status) => { await mark(id, status); return false; },
+  markOrRecheck: async (mark, id, status) => {
+    try {
+      await mark(id, status);
+      return false;
+    } catch {
+      return mockRecheck;
+    }
+  },
 }));
 
 const block = { date: '2026-11-03', time: '5:00 PM', type: 'training', name: 'Training block', meta: '3 of 14 booked' };
@@ -64,6 +78,9 @@ beforeEach(() => {
     { bookingId: 'a5_2026-11-03-5', athleteId: 'a5', name: 'Nico Whitfield', line: 'Moved to Thu Nov 12, 4:00 PM' },
   ];
   mockCancelledCalls.length = 0;
+  mockMarks.length = 0;
+  mockRefused = [];
+  mockRecheck = false;
 });
 
 test('a live session: the cancelled and moved rows sit below the athletes, inside the roster gutter, uncounted', async () => {
@@ -101,4 +118,44 @@ test('the seed roster (no live session) reads no greyed rows', async () => {
   expect(greyed(r)).toBeNull();
   expect(mockCancelledCalls).toEqual([]);
   await r.unmount();
+});
+
+// Spec §6: a stale tap on a kid who just cancelled says so instead of failing silently.
+const tap = async (r, label, row) => {
+  const b = [...r.container.querySelectorAll('button[aria-pressed]')].filter((x) => x.textContent === label)[row];
+  await r.act(async () => { b.click(); });
+  await r.flush();
+};
+const status = (r) => r.container.querySelector('[role="status"]');
+
+test('IN on a kid who just cancelled: "<name> cancelled - list updated."', async () => {
+  mockRefused = ['b1'];
+  mockRecheck = true;
+  const r = await roster();
+  await tap(r, 'IN', 0);
+  expect(mockMarks).toEqual([['b1', 'attended']]);
+  expect(status(r)).not.toBeNull();
+  expect(status(r).textContent).toBe('Jordan Whitfield cancelled - list updated.');
+  // Above the roster rows.
+  expect(r.text().indexOf('cancelled - list updated.')).toBeLessThan(r.text().indexOf('Avery Nguyen'));
+  // The next mark that lands clears it.
+  mockRefused = [];
+  await tap(r, 'OUT', 0);
+  expect(mockMarks).toEqual([['b1', 'attended'], ['b1', 'noshow']]);
+  expect(status(r)).toBeNull();
+  await r.unmount();
+});
+
+test('a mark that lands, or a refusal on a booking still there, shows no line', async () => {
+  const r = await roster();
+  await tap(r, 'IN', 0);
+  expect(mockMarks).toEqual([['b1', 'attended']]);
+  expect(status(r)).toBeNull();
+  await r.unmount();
+  mockRefused = ['b1'];
+  mockRecheck = false;
+  const again = await roster();
+  await tap(again, 'IN', 0);
+  expect(status(again)).toBeNull();
+  await again.unmount();
 });

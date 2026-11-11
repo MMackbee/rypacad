@@ -26,9 +26,12 @@ jest.mock('./live', () => ({
 }));
 jest.mock('./invalidate', () => ({ __esModule: true, bump: jest.fn(), useInvalidation: () => 0 }));
 
-import { getDocs } from 'firebase/firestore';
+import { getDoc, getDocs } from 'firebase/firestore';
 import { ERR, fetchAthlete, fetchSessionsByIds } from './live';
-import { fetchCancelledBySession, liveCancelledRows, useCancelledBookings } from './cancelledBookings';
+import { bump } from './invalidate';
+import {
+  bookingIsCancelled, fetchCancelledBySession, liveCancelledRows, markOrRecheck, useCancelledBookings,
+} from './cancelledBookings';
 
 const SESSION = '2026-11-10-0';
 const NAMES = {
@@ -150,4 +153,50 @@ test('the hook: seed mode, or no session, is an empty list and reads nothing', a
   mockLive.value = true;
   expect(await probe(undefined)).toEqual({ data: [], loading: false });
   expect(getDocs).not.toHaveBeenCalled();
+});
+
+// Spec §6: a coach on a stale screen taps IN or OUT on a kid who just
+// cancelled. The rules refuse the mark; the screen re-reads and says so.
+const REFUSED = () => Object.assign(new Error('updateBookingStatus: Missing or insufficient permissions.'), { code: ERR.PERMISSION });
+const stored = (status) => ({ exists: () => true, id: 'jordan_' + SESSION, data: () => ({ athleteId: 'jordan', status }) });
+
+test('bookingIsCancelled reads the one booking; missing or unreadable is false', async () => {
+  getDoc.mockResolvedValueOnce(stored('cancelled'));
+  expect(await bookingIsCancelled('jordan_' + SESSION)).toBe(true);
+  expect(getDoc).toHaveBeenCalledWith({ path: 'bookings/jordan_' + SESSION });
+  getDoc.mockResolvedValueOnce(stored('confirmed'));
+  expect(await bookingIsCancelled('jordan_' + SESSION)).toBe(false);
+  getDoc.mockResolvedValueOnce({ exists: () => false });
+  expect(await bookingIsCancelled('jordan_' + SESSION)).toBe(false);
+  getDoc.mockRejectedValueOnce({ code: 'unavailable' });
+  expect(await bookingIsCancelled('jordan_' + SESSION)).toBe(false);
+});
+
+test('markOrRecheck: a mark that lands is false, with no refresh and no read', async () => {
+  const mark = jest.fn(async () => ({ id: 'b1', status: 'attended' }));
+  expect(await markOrRecheck(mark, 'jordan_' + SESSION, 'attended')).toBe(false);
+  expect(mark).toHaveBeenCalledWith('jordan_' + SESSION, 'attended');
+  expect(bump).not.toHaveBeenCalled();
+  expect(getDoc).not.toHaveBeenCalled();
+});
+
+test('markOrRecheck: refused on a booking now cancelled is true, and the lists refresh', async () => {
+  getDoc.mockResolvedValueOnce(stored('cancelled'));
+  expect(await markOrRecheck(async () => { throw REFUSED(); }, 'jordan_' + SESSION, 'attended')).toBe(true);
+  expect(bump).toHaveBeenCalledWith('bookings');
+  expect(getDoc).toHaveBeenCalledWith({ path: 'bookings/jordan_' + SESSION });
+});
+
+test('markOrRecheck: refused on a booking still confirmed is false (refreshed all the same)', async () => {
+  getDoc.mockResolvedValueOnce(stored('confirmed'));
+  expect(await markOrRecheck(async () => { throw REFUSED(); }, 'jordan_' + SESSION, 'noshow')).toBe(false);
+  expect(bump).toHaveBeenCalledWith('bookings');
+});
+
+test('markOrRecheck: any other failure is false without a read, and it never rejects', async () => {
+  expect(await markOrRecheck(async () => { throw Object.assign(new Error('offline'), { code: ERR.UNAVAILABLE }); }, 'jordan_' + SESSION, 'attended')).toBe(false);
+  expect(getDoc).not.toHaveBeenCalled();
+  expect(bump).toHaveBeenCalledWith('bookings');
+  getDoc.mockRejectedValueOnce({ code: 'unavailable' });
+  expect(await markOrRecheck(() => { throw REFUSED(); }, 'jordan_' + SESSION, 'attended')).toBe(false);
 });

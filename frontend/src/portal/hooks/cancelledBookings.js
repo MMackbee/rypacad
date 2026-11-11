@@ -13,11 +13,15 @@
  *
  * Never imports hooks/index.js (screen tests mock it partially). Live only:
  * seed mode, or no session, is an empty list that reads nothing.
+ *
+ * Task S2: markOrRecheck wraps the roster's IN/OUT so a coach on a stale
+ * screen who marks a kid who just cancelled (the rules refuse a mark on a
+ * cancelled booking) is told so, and every list reading bookings refreshes.
  */
-import { collection, getDocs, query, where } from 'firebase/firestore';
+import { collection, doc, getDoc, getDocs, query, where } from 'firebase/firestore';
 import { db } from '../../firebase';
 import { ERR, LiveDataError, fetchAthlete, fetchSessionsByIds, isLive, wrap } from './live';
-import { useInvalidation } from './invalidate';
+import { bump, useInvalidation } from './invalidate';
 import useSeedResource from './useSeedResource';
 import { coachLine, movedToSessionId } from '../data/bookingChanges';
 
@@ -74,4 +78,32 @@ export function useCancelledBookings(sessionId) {
     live ? null : [],
     live ? { source: () => liveCancelledRows(sessionId), deps: ['cancelled-rows', sessionId, bookingsGen] } : undefined
   );
+}
+
+/** Whether the booking is cancelled now; a missing or unreadable one is false. */
+export async function bookingIsCancelled(bookingId) {
+  if (!bookingId) return false;
+  try {
+    const snap = await getDoc(doc(db, 'bookings', bookingId));
+    return snap.exists() && snap.data().status === 'cancelled';
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Sends one attendance mark. Resolves false when it lands. On a failure the
+ * bookings lists refresh, and a refusal (permission-denied) resolves whether
+ * the booking turned out to be cancelled - the stale tap the screen names.
+ * Any other failure resolves false. Never rejects.
+ */
+export async function markOrRecheck(mark, bookingId, status) {
+  try {
+    await mark(bookingId, status);
+    return false;
+  } catch (err) {
+    bump('bookings');
+    if (err?.code !== ERR.PERMISSION) return false;
+    return bookingIsCancelled(bookingId);
+  }
 }
