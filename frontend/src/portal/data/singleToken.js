@@ -48,6 +48,23 @@ export function tokenDayLabel(iso) {
 /** 'Sat, Feb 27' - how every surface names SINGLE_EXPIRES. */
 export const SINGLE_EXPIRES_LABEL = tokenDayLabel(SINGLE_EXPIRES);
 
+/**
+ * The season's last checkout: 00:00 America/Chicago (CST, -6) on Feb 28,
+ * 2027 - the end of SINGLE_EXPIRES - less the 30 minutes Stripe needs before
+ * a Checkout Session may expire. From then on createCheckoutSession refuses
+ * an extra session 'season-over' (functions/portal/extra.js athleteRefusal),
+ * so no offer stands. The same rule as functions/portal/single.js
+ * seasonCheckoutOpen, SEASON_CUTOFF_MS and CHECKOUT_MIN_MS - CHANGE ONE,
+ * CHANGE BOTH (singleToken.test.js reads that file to hold them together).
+ */
+export const SEASON_CUTOFF_MS = Date.UTC(2027, 1, 28, 6);
+const CHECKOUT_MIN_MS = 30 * 60 * 1000;
+/** @param {number|Date} now Pins the clock in tests. */
+export function seasonCheckoutOpen(now = Date.now()) {
+  const t = now instanceof Date ? now.getTime() : Number(now);
+  return SEASON_CUTOFF_MS - t >= CHECKOUT_MIN_MS;
+}
+
 const TOKEN_PREFIX = 'single_';
 
 /** True for a purchased single token's id (or a booking's graceTokenId). */
@@ -131,6 +148,16 @@ export function singleConfirmedLine(open) {
  * any grace token before the period's own, so an extra bought while tokens
  * are left would be spent first and leave a monthly token to expire at the
  * reset - the family would have paid for nothing.
+ *
+ * The Billing exception (owner 2026-11-11: "lets just put a add tokens
+ * button on the billing page"): a parent with no tokens left in the period
+ * but next month's all open saw no prompt anywhere and did not know where to
+ * buy one. The Billing hub's meter offers Add a token at ANY time
+ * (addTokenOffer: the same billing, household and sale rules, no tokens
+ * rule), in place of the conditional Buy an extra session there. The
+ * charge order is unchanged, so its note (ADD_TOKEN_NOTE) tells the family
+ * an added token is spent on the next booking, before the monthly ones.
+ * Every other surface keeps extraSessionOffer.
  */
 
 /** 'Sat, Feb 27, 2027' - the extra session's line names the year, as its Stripe page does. */
@@ -139,6 +166,10 @@ export const SINGLE_EXPIRES_YEAR_LABEL = format(parseISO(SINGLE_EXPIRES), 'EEE, 
 export const BUY_EXTRA_LABEL = 'Buy an extra session';
 /** Where that button would be on an under-18 athlete's own login (ownLoginMayBuy false). */
 export const EXTRA_ASK_GUARDIAN_LINE = 'Ask a parent or guardian to buy an extra session.';
+/** The Billing hub's button (owner 2026-11-11), on the meter at any time. */
+export const ADD_TOKEN_LABEL = 'Add a token';
+/** Always under the rate line with that button: the charge order (pin E) spends a bought token first. */
+export const ADD_TOKEN_NOTE = 'An added token is spent on the next booking, before monthly tokens.';
 
 /** '$48.63 - your 8-token rate. Good through Sat, Feb 27, 2027.' - null without a member rate. */
 export function extraSessionLine(pkg) {
@@ -187,35 +218,65 @@ export function nextPeriodPosition(member) {
 }
 
 /**
+ * The rules an extra token is sold under at all, shared by extraSessionOffer
+ * and addTokenOffer so the two cannot drift: the rate line for a token
+ * package with a member rate whose billing is a live, PAID monthly
+ * subscription - active, not a one-time block, a subscription on file
+ * (`billing.subscribed`) - in a household not on hold (householdOnHold),
+ * once single tokens are on sale (saleOpen) and until the season's last
+ * checkout (seasonCheckoutOpen); null otherwise. A failing card is fixed in
+ * Stripe first. These are functions/portal/extra.js athleteRefusal and
+ * householdRefusal, which refuse anything else - CHANGE ONE, CHANGE BOTH.
+ * The server has no tokens rule.
+ */
+function memberRateLine(member, onHold, now) {
+  const line = extraSessionLine(member?.package);
+  if (!line) return null;
+  const billing = member?.billing;
+  if (!billing || billing.status !== 'active' || billing.oneTime === true || billing.subscribed !== true) return null;
+  if (onHold || !saleOpen(now) || !seasonCheckoutOpen(now)) return null;
+  return line;
+}
+
+/**
  * What a monthly token meter offers for an extra session, or null for
  * nothing at all:
  *   { state: 'buy', line }  the rate line and the Buy button
  *   { state: 'ask', line }  an under-18 athlete's own login (`askGuardian`):
  *                           who buys it, never the button
- * Only for a token package with a member rate whose billing is a live, PAID
- * monthly subscription - active, not a one-time block, a subscription on
- * file (`billing.subscribed`) - in a household not on hold, once single
- * tokens are on sale (saleOpen), and once nothing is left to book with
+ * Only where memberRateLine sells one, and once nothing is left to book with
  * (outOfTokens - see the note above) - next month's tokens included (owner
  * 2026-11-04: with December in hand the offer sat under a banner saying
  * December is open, and the bought token would spend on the first December
- * booking). A failing card is fixed in Stripe first. The billing and
- * household rules are functions/portal/extra.js athleteRefusal and
- * householdRefusal, which refuse anything else - CHANGE ONE, CHANGE BOTH.
- * The tokens rule is the screens' alone.
+ * booking). The tokens rule is the screens' alone. The Billing hub uses
+ * addTokenOffer instead.
  * @param {object} member `{ package, billing, tokens }` - a hub member
  *   (data/billingHub.js hubMemberFor) or a useMembership row.
  * @param {{askGuardian?: boolean, onHold?: boolean, now?: number}} [opts]
  */
 export function extraSessionOffer(member, { askGuardian = false, onHold = false, now = Date.now() } = {}) {
-  const line = extraSessionLine(member?.package);
+  const line = memberRateLine(member, onHold, now);
   if (!line) return null;
-  const billing = member?.billing;
-  if (!billing || billing.status !== 'active' || billing.oneTime === true || billing.subscribed !== true) return null;
-  if (onHold || !saleOpen(now)) return null;
   if (!outOfTokens(member?.tokens)) return null;
   if ((nextPeriodPosition(member)?.left ?? 0) > 0) return null;
   return askGuardian ? { state: 'ask', line: EXTRA_ASK_GUARDIAN_LINE } : { state: 'buy', line };
+}
+
+/**
+ * The Billing hub's Add a token (owner 2026-11-11 - see the note above), or
+ * null: extraSessionOffer's billing, household and sale rules
+ * (memberRateLine) WITHOUT its two tokens rules, so it is offered whatever
+ * is left this period or next.
+ *   { state: 'buy', line, note }  the rate line, ADD_TOKEN_NOTE, the button
+ *   { state: 'ask', line }        an under-18 athlete's own login
+ *                                 (`askGuardian`): who buys it
+ * @param {object} member A hub member (data/billingHub.js hubMemberFor).
+ * @param {{askGuardian?: boolean, onHold?: boolean, now?: number}} [opts]
+ */
+export function addTokenOffer(member, { askGuardian = false, onHold = false, now = Date.now() } = {}) {
+  const line = memberRateLine(member, onHold, now);
+  if (!line) return null;
+  return askGuardian ? { state: 'ask', line: EXTRA_ASK_GUARDIAN_LINE } : { state: 'buy', line, note: ADD_TOKEN_NOTE };
 }
 
 /**

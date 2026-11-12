@@ -402,6 +402,8 @@ describe('a paid monthly member: an extra session at their rate', () => {
     expect(bonus.text()).toContain('0of 8 left');
     expect(bonus.text()).toContain('Bonus 1');
     expect(bonus.text()).toContain('Session token - good through Sat, Feb 27');
+    // A token in hand is something to book with: amber, not the red stop (review 2026-11-11).
+    expect(bigNumber(bonus).style.color).toBe(rgb(color.secondary));
     expect(extraButtons(bonus)).toEqual([]);
     await bonus.unmount();
     // ...and the under-18 line follows the button.

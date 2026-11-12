@@ -1,4 +1,9 @@
+import fs from 'fs';
+import path from 'path';
 import {
+  ADD_TOKEN_LABEL,
+  ADD_TOKEN_NOTE,
+  addTokenOffer,
   availableCount,
   BUY_EXTRA_LABEL,
   BUY_SINGLE_LABEL,
@@ -15,6 +20,8 @@ import {
   ownLoginMayBuy,
   packageSwitchWarning,
   saleOpen,
+  SEASON_CUTOFF_MS,
+  seasonCheckoutOpen,
   SINGLE_ASK_GUARDIAN_LINE,
   SINGLE_EXPIRES,
   SINGLE_EXPIRES_LABEL,
@@ -275,5 +282,150 @@ describe('the extra session: the line, and when the meter offers it', () => {
   test('the return line names the extra session token and its expiry', () => {
     expect(extraConfirmedLine(true)).toBe('Payment received - your extra session token is ready to book, good through Sat, Feb 27.');
     expect(extraConfirmedLine(false)).toBe('Payment received - your extra session token is ready. Booking opens Sat, Oct 10 at 7 AM.');
+  });
+});
+
+// The Billing page's Add a token (owner 2026-11-11: "lets just put a add
+// tokens button on the billing page"): the extra session's billing, household
+// and sale rules, without its two token rules - offered whatever is left.
+describe('addTokenOffer: the Billing page, at any time', () => {
+  const T = (id) => packages.TOKEN_PACKAGES.find((p) => p.id === id);
+  const T6 = T('t-6');
+  const PAID = { status: 'active', facility: null, subscribed: true };
+  const OUT = { granted: 6, used: 6, reserved: 0, left: 0, unlimited: false, grace: [] };
+  const LEFT = { ...OUT, used: 2, left: 4 };
+  // November all used, December untouched: the parent who phoned saw no prompt anywhere.
+  const DEC_OPEN = { ...OUT, nextPeriod: { periodKey: '2026-12-01', periodEnd: '2026-12-31', granted: 6, left: 6 } };
+  const DEC_SPENT = { ...OUT, nextPeriod: { periodKey: '2026-12-01', periodEnd: '2026-12-31', granted: 6, left: 0 } };
+  const member = (pkg = T6, billing = PAID, tokens = OUT) => ({ athleteId: 'ava', package: pkg, billing, tokens });
+  const OPEN = BOOKING_OPENS_AT;
+  const LINE6 = '$49.83 - your 6-token rate. Good through Sat, Feb 27, 2027.';
+  const NOTE = 'An added token is spent on the next booking, before monthly tokens.';
+  const BUY6 = { state: 'buy', line: LINE6, note: NOTE };
+
+  test('the button and the note, word for word', () => {
+    expect(ADD_TOKEN_LABEL).toBe('Add a token');
+    expect(ADD_TOKEN_NOTE).toBe(NOTE);
+  });
+
+  test('offered with tokens left this period, at the rate line, with the note', () => {
+    expect(addTokenOffer(member(T6, PAID, LEFT), { now: OPEN })).toEqual(BUY6);
+    expect(addTokenOffer(member(T6, PAID, { ...OUT, used: 0, left: 6 }), { now: OPEN })).toEqual(BUY6);
+  });
+
+  test('offered at 0 left with next period fully open - the phoned-in case', () => {
+    expect(addTokenOffer(member(T6, PAID, DEC_OPEN), { now: OPEN })).toEqual(BUY6);
+    // The Billing hub row's own next period (hubMemberFor: granted, booked, reserved).
+    const hubRow = { ...member(T6, PAID, OUT), nextPeriod: { periodKey: '2026-12-01', start: '2026-12-01', end: '2026-12-31', granted: 6, booked: 0, reserved: 0 } };
+    expect(addTokenOffer(hubRow, { now: OPEN })).toEqual(BUY6);
+  });
+
+  test('offered at 0 left this period and next, and with a bonus or bought token in hand', () => {
+    expect(addTokenOffer(member(T6, PAID, OUT), { now: OPEN })).toEqual(BUY6);
+    expect(addTokenOffer(member(T6, PAID, DEC_SPENT), { now: OPEN })).toEqual(BUY6);
+    expect(addTokenOffer(member(T6, PAID, { ...OUT, grace: [bought('single_cs_1')] }), { now: OPEN })).toEqual(BUY6);
+  });
+
+  test('every package with a member rate names its own rate', () => {
+    expect(['t-4', 't-8', 't-12', 't-16'].map((id) => addTokenOffer(member(T(id), PAID, LEFT), { now: OPEN })?.line)).toEqual([
+      '$54.75 - your 4-token rate. Good through Sat, Feb 27, 2027.',
+      '$48.63 - your 8-token rate. Good through Sat, Feb 27, 2027.',
+      '$47.42 - your 12-token rate. Good through Sat, Feb 27, 2027.',
+      '$44.94 - your 16-token rate. Good through Sat, Feb 27, 2027.',
+    ]);
+  });
+
+  test('never for Elite, the single token or no package', () => {
+    for (const pkg of [packages.ELITE, packages.SINGLE_TOKEN, null]) {
+      expect(addTokenOffer(member(pkg, PAID, LEFT), { now: OPEN })).toBeNull();
+      expect(addTokenOffer(member(pkg, PAID, LEFT), { now: OPEN, askGuardian: true })).toBeNull();
+    }
+  });
+
+  test('never unless the billing is a live, paid subscription', () => {
+    for (const billing of [
+      { status: 'pending', facility: null },
+      { status: 'lapsed', facility: null, subscribed: true },
+      { status: 'past_due', facility: null, subscribed: true },
+      { status: 'active', facility: null }, // subscribed false: no subscription on file
+      { status: 'active', facility: null, subscribed: false },
+      { status: 'active', facility: null, oneTime: true, subscribed: true },
+      null,
+    ]) {
+      expect(addTokenOffer(member(T6, billing, LEFT), { now: OPEN })).toBeNull();
+      expect(addTokenOffer(member(T6, billing, OUT), { now: OPEN, askGuardian: true })).toBeNull();
+    }
+  });
+
+  test('never while the household is on hold (past due or lapsed), nor before the sale opens', () => {
+    for (const status of ['past_due', 'lapsed']) {
+      const onHold = householdOnHold({ membership: { status } });
+      expect(onHold).toBe(true);
+      expect(addTokenOffer(member(T6, PAID, LEFT), { now: OPEN, onHold })).toBeNull();
+      expect(addTokenOffer(member(T6, PAID, OUT), { now: OPEN, onHold })).toBeNull();
+    }
+    expect(addTokenOffer(member(T6, PAID, LEFT), { now: OPEN - 1 })).toBeNull();
+    expect(addTokenOffer(member(T6, PAID, OUT), { now: OPEN - 1 })).toBeNull();
+  });
+
+  test("an under-18 athlete's own login reads who buys it, whatever is left", () => {
+    const ask = { state: 'ask', line: 'Ask a parent or guardian to buy an extra session.' };
+    expect(addTokenOffer(member(T6, PAID, LEFT), { now: OPEN, askGuardian: true })).toEqual(ask);
+    expect(addTokenOffer(member(T6, PAID, DEC_OPEN), { now: OPEN, askGuardian: true })).toEqual(ask);
+    expect(addTokenOffer(member(T6, PAID, LEFT), { now: OPEN, askGuardian: true }).line).toBe(EXTRA_ASK_GUARDIAN_LINE);
+  });
+
+  test("extraSessionOffer is unchanged: still only once nothing is left, this period or next, and no note", () => {
+    expect(extraSessionOffer(member(T6, PAID, LEFT), { now: OPEN })).toBeNull();
+    expect(extraSessionOffer(member(T6, PAID, DEC_OPEN), { now: OPEN })).toBeNull();
+    expect(extraSessionOffer(member(T6, PAID, { ...OUT, grace: [bought('single_cs_1')] }), { now: OPEN })).toBeNull();
+    expect(extraSessionOffer(member(T6, PAID, DEC_SPENT), { now: OPEN })).toEqual({ state: 'buy', line: LINE6 });
+    expect(extraSessionOffer(member(T6, PAID, LEFT), { now: OPEN, askGuardian: true })).toBeNull();
+    expect(BUY_EXTRA_LABEL).toBe('Buy an extra session');
+  });
+
+  test('the two offers share their billing, household and sale rules', () => {
+    const shapes = [
+      [T6, PAID, {}],
+      [T6, { status: 'pending' }, {}],
+      [T6, { ...PAID, oneTime: true }, {}],
+      [T6, { status: 'active' }, {}],
+      [packages.ELITE, PAID, {}],
+      [packages.SINGLE_TOKEN, PAID, {}],
+      [T6, PAID, { onHold: true }],
+      [T6, PAID, { now: OPEN - 1 }],
+      // The season's checkout closed (single.js seasonCheckoutOpen).
+      [T6, PAID, { now: SEASON_CUTOFF_MS }],
+    ];
+    for (const [pkg, billing, opts] of shapes) {
+      const extra = extraSessionOffer(member(pkg, billing, DEC_SPENT), { now: OPEN, ...opts });
+      const add = addTokenOffer(member(pkg, billing, DEC_SPENT), { now: OPEN, ...opts });
+      // Null together, or the same offer plus the note.
+      expect(add).toEqual(extra && { ...extra, note: NOTE });
+    }
+  });
+
+  // Review 2026-11-11: with the button on every paid meter, an offer standing
+  // after the season's last checkout would sit on every one, and the server
+  // refuses it 'season-over' (functions/portal/extra.js athleteRefusal).
+  test("neither offer once the season's checkout closes: 30 minutes before Feb 28 begins in Chicago", () => {
+    const LAST = Date.parse('2027-02-28T05:30:00Z'); // 11:30 PM CST, Sat, Feb 27
+    expect(SEASON_CUTOFF_MS).toBe(Date.parse('2027-02-28T06:00:00Z'));
+    expect(seasonCheckoutOpen(LAST)).toBe(true);
+    expect(seasonCheckoutOpen(new Date(LAST))).toBe(true);
+    expect(seasonCheckoutOpen(LAST + 1)).toBe(false);
+    expect(seasonCheckoutOpen(SEASON_CUTOFF_MS)).toBe(false);
+    expect(addTokenOffer(member(T6, PAID, LEFT), { now: LAST })).toEqual(BUY6);
+    expect(addTokenOffer(member(T6, PAID, LEFT), { now: LAST + 1 })).toBeNull();
+    expect(addTokenOffer(member(T6, PAID, LEFT), { now: LAST + 1, askGuardian: true })).toBeNull();
+    expect(extraSessionOffer(member(T6, PAID, DEC_SPENT), { now: LAST })).toEqual({ state: 'buy', line: LINE6 });
+    expect(extraSessionOffer(member(T6, PAID, DEC_SPENT), { now: LAST + 1 })).toBeNull();
+  });
+
+  test("the cutoff is the server's own (functions/portal/single.js) - CHANGE ONE, CHANGE BOTH", () => {
+    const server = fs.readFileSync(path.resolve(__dirname, '../../../../functions/portal/single.js'), 'utf8');
+    expect(server).toContain('const SEASON_CUTOFF_MS = Date.UTC(2027, 1, 28, 6);');
+    expect(server).toContain('const CHECKOUT_MIN_MS = 30 * 60 * 1000;');
+    expect(server).toContain('return SEASON_CUTOFF_MS - nowMs >= CHECKOUT_MIN_MS;');
   });
 });
