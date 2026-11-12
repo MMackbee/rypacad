@@ -10,6 +10,8 @@ import { longDayLabel } from '../data/calendar';
 import { windowCopyFor } from '../data/packages';
 import { firstPeriodLine, PAY_TO_START } from '../data/billingCopy';
 import {
+  ADD_TOKEN_LABEL,
+  addTokenOffer,
   availableCount,
   BUY_EXTRA_LABEL,
   BUY_SINGLE_LABEL,
@@ -34,7 +36,8 @@ import {
  * and, for the payer (`buy`), carries the way to get another (singleBuySlot).
  * A paid monthly token member's meter carries, for the payer, one more
  * session at their package's rate once nothing is left to book with
- * (ExtraSessionBuy; owner, 2026-10-10).
+ * (ExtraSessionBuy; owner, 2026-10-10) - on the Billing hub (`addAnytime`)
+ * at any time, as Add a token (owner 2026-11-11).
  */
 
 /**
@@ -218,9 +221,11 @@ function singleBuySlot(member, askGuardian) {
  * family is on hold, or before single tokens go on sale. An under-18
  * athlete's own login (`state: 'ask'`) reads who buys it instead. Book a
  * Session's out-of-tokens banner renders the same slot. Nothing when there
- * is no offer.
+ * is no offer. The Billing hub's meter passes addTokenOffer's answer and
+ * ADD_TOKEN_LABEL (owner 2026-11-11, at any time): its `note` - that an
+ * added token is spent first - sits under the rate line.
  */
-export function ExtraSessionBuy({ athleteId, offer, style }) {
+export function ExtraSessionBuy({ athleteId, offer, label = BUY_EXTRA_LABEL, style }) {
   if (!offer || !athleteId) return null;
   if (offer.state === 'ask') {
     return (
@@ -234,7 +239,12 @@ export function ExtraSessionBuy({ athleteId, offer, style }) {
       <Body size={12} tone={color.textSecondary}>
         {offer.line}
       </Body>
-      <PayButton athleteId={athleteId} product="extra" label={BUY_EXTRA_LABEL} variant="primary" height={44} style={{ marginTop: 8 }} />
+      {offer.note ? (
+        <Body size={11} tone={color.textTertiary} style={{ marginTop: 4 }}>
+          {offer.note}
+        </Body>
+      ) : null}
+      <PayButton athleteId={athleteId} product="extra" label={label} variant="primary" height={44} style={{ marginTop: 8 }} />
     </div>
   );
 }
@@ -250,8 +260,12 @@ export function ExtraSessionBuy({ athleteId, offer, style }) {
  *   them a parent or guardian buys it, never the button.
  * @param {boolean} [onHold]  The household is past due or lapsed
  *   (singleToken.js householdOnHold): no extra session is offered.
+ * @param {boolean} [addAnytime]  The Billing hub (owner 2026-11-11): with
+ *   `buy`, a paid monthly token member's meter offers Add a token whatever
+ *   is left (singleToken.js addTokenOffer), in place of the out-of-tokens
+ *   Buy an extra session - one button, never both.
  */
-export default function TokenMeter({ member, defaultOpen = false, showPrices = false, buy = false, askGuardian = false, onHold = false }) {
+export default function TokenMeter({ member, defaultOpen = false, showPrices = false, buy = false, askGuardian = false, onHold = false, addAnytime = false }) {
   const [open, setOpen] = useState(defaultOpen);
   const { package: pkg, tokens, period, expiryNudge, spent, reserved } = member;
   // v2.0.1 (Sprint 18): catalogue prices are withheld from parents and
@@ -374,7 +388,13 @@ export default function TokenMeter({ member, defaultOpen = false, showPrices = f
           {expiryNudge.left} {expiryNudge.left === 1 ? 'token expires' : 'tokens expire'} {longDayLabel(expiryNudge.on)} — book before then.
         </Body>
       ) : null}
-      {buy ? <ExtraSessionBuy athleteId={member.athleteId} offer={extraSessionOffer(member, { askGuardian, onHold })} /> : null}
+      {buy ? (
+        <ExtraSessionBuy
+          athleteId={member.athleteId}
+          offer={(addAnytime ? addTokenOffer : extraSessionOffer)(member, { askGuardian, onHold })}
+          label={addAnytime ? ADD_TOKEN_LABEL : BUY_EXTRA_LABEL}
+        />
+      ) : null}
 
       <Toggle open={open} onToggle={() => setOpen((v) => !v)} count={count} />
       {open ? <Evidence member={member} /> : null}
