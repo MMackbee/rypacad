@@ -48,6 +48,23 @@ export function tokenDayLabel(iso) {
 /** 'Sat, Feb 27' - how every surface names SINGLE_EXPIRES. */
 export const SINGLE_EXPIRES_LABEL = tokenDayLabel(SINGLE_EXPIRES);
 
+/**
+ * The season's last checkout: 00:00 America/Chicago (CST, -6) on Feb 28,
+ * 2027 - the end of SINGLE_EXPIRES - less the 30 minutes Stripe needs before
+ * a Checkout Session may expire. From then on createCheckoutSession refuses
+ * an extra session 'season-over' (functions/portal/extra.js athleteRefusal),
+ * so no offer stands. The same rule as functions/portal/single.js
+ * seasonCheckoutOpen, SEASON_CUTOFF_MS and CHECKOUT_MIN_MS - CHANGE ONE,
+ * CHANGE BOTH (singleToken.test.js reads that file to hold them together).
+ */
+export const SEASON_CUTOFF_MS = Date.UTC(2027, 1, 28, 6);
+const CHECKOUT_MIN_MS = 30 * 60 * 1000;
+/** @param {number|Date} now Pins the clock in tests. */
+export function seasonCheckoutOpen(now = Date.now()) {
+  const t = now instanceof Date ? now.getTime() : Number(now);
+  return SEASON_CUTOFF_MS - t >= CHECKOUT_MIN_MS;
+}
+
 const TOKEN_PREFIX = 'single_';
 
 /** True for a purchased single token's id (or a booking's graceTokenId). */
@@ -206,17 +223,18 @@ export function nextPeriodPosition(member) {
  * package with a member rate whose billing is a live, PAID monthly
  * subscription - active, not a one-time block, a subscription on file
  * (`billing.subscribed`) - in a household not on hold (householdOnHold),
- * once single tokens are on sale (saleOpen); null otherwise. A failing card
- * is fixed in Stripe first. These are functions/portal/extra.js
- * athleteRefusal and householdRefusal, which refuse anything else - CHANGE
- * ONE, CHANGE BOTH. The server has no tokens rule.
+ * once single tokens are on sale (saleOpen) and until the season's last
+ * checkout (seasonCheckoutOpen); null otherwise. A failing card is fixed in
+ * Stripe first. These are functions/portal/extra.js athleteRefusal and
+ * householdRefusal, which refuse anything else - CHANGE ONE, CHANGE BOTH.
+ * The server has no tokens rule.
  */
 function memberRateLine(member, onHold, now) {
   const line = extraSessionLine(member?.package);
   if (!line) return null;
   const billing = member?.billing;
   if (!billing || billing.status !== 'active' || billing.oneTime === true || billing.subscribed !== true) return null;
-  if (onHold || !saleOpen(now)) return null;
+  if (onHold || !saleOpen(now) || !seasonCheckoutOpen(now)) return null;
   return line;
 }
 

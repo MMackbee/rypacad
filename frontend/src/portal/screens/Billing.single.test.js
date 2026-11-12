@@ -4,6 +4,7 @@ import Billing from './Billing';
 import { hubMemberFor, statusFor } from '../data/billingHub';
 import { BOOKING_OPENS_AT } from '../data/calendar';
 import { SINGLE_TOKEN, TOKEN_PACKAGES } from '../data/packages';
+import { color } from '../tokens';
 
 /**
  * Owner ruling 2026-10-01 ("drop one"): a single-token athlete whose payment
@@ -13,7 +14,7 @@ import { SINGLE_TOKEN, TOKEN_PACKAGES } from '../data/packages';
  */
 
 let mockHub;
-jest.mock('../components/PayButton', () => ({ __esModule: true, default: ({ athleteId, product, label }) => <button type="button">{label}|{athleteId}|{product}</button> }));
+jest.mock('../components/PayButton', () => ({ __esModule: true, default: ({ athleteId, product, label, variant }) => <button type="button" data-variant={variant}>{label}|{athleteId}|{product}</button> }));
 jest.mock('../hooks/billing', () => ({ __esModule: true, default: () => mockHub, useBillingHub: () => mockHub, usePaymentConfirmation: () => ({ state: 'idle' }), STRIPE_PORTAL_URL: null }));
 
 const BUY = 'Buy a session token - $65';
@@ -128,10 +129,11 @@ describe('a paid monthly member: Add a token, at any time', () => {
   const NOTE = 'An added token is spent on the next booking, before monthly tokens.';
   const RATE12 = '$47.42 - your 12-token rate. Good through Sat, Feb 27, 2027.';
   // `used` of the period's tokens booked, and `nextUsed` of December's; all by default.
-  const paidMember = (id, name, pkg = T12, used = pkg.tokens, nextUsed = pkg.tokens, nextGrace = 0) =>
+  // `graceTokens` on file: a bonus, or a token already added.
+  const paidMember = (id, name, pkg = T12, used = pkg.tokens, nextUsed = pkg.tokens, nextGrace = 0, graceTokens = []) =>
     hubMemberFor({
       athlete: { id, name, dob: '2012-06-17', packageId: pkg.id, billing: { status: 'active', subscriptionId: `sub_${id}` } },
-      pkg, anchorDay: 1, today, waitlist: [], graceTokens: [],
+      pkg, anchorDay: 1, today, waitlist: [], graceTokens,
       bookings: [
         ...Array.from({ length: used }, (_, i) => ({ id: `${id}_b${i}`, athleteId: id, status: 'confirmed', periodKey: '2026-11-01', date: '2026-11-20', sessionId: `s-${i}`, type: 'training' })),
         ...Array.from({ length: nextUsed }, (_, i) => ({ id: `${id}_n${i}`, athleteId: id, status: 'confirmed', periodKey: '2026-12-01', date: '2026-12-04', sessionId: `d-${i}`, type: 'training' })),
@@ -258,5 +260,71 @@ describe('a paid monthly member: Add a token, at any time', () => {
     expect(extraButtons(r, 'ava')).toEqual([]);
     expect(r.text()).not.toContain(NOTE);
     await r.unmount();
+  });
+
+  // Review 2026-11-11: the meter after a purchase, and the button's weight.
+  // jsdom drops the size from the `font` shorthand, so the big number is the
+  // first toned span that is only digits; it reads a hex color back as rgb().
+  const bigNumber = (r) => [...r.container.querySelectorAll('span')].find((el) => el.style.color && /^[0-9]+$/.test(el.textContent));
+  const rgb = (hex) => `rgb(${[1, 3, 5].map((i) => parseInt(hex.slice(i, i + 2), 16)).join(', ')})`;
+  const variants = (r, id) => [...r.container.querySelectorAll('button')].filter((b) => b.textContent.endsWith(`|${id}|extra`)).map((b) => b.dataset.variant);
+  const added = (id) => ({ id, expiresAt: '2027-02-27', reason: 'single-purchase' });
+  // A staff Cancel session mints a bonus good for 30 days: it expires first, so it is spent first.
+  const cancelled = { id: 'bonus_1', expiresAt: '2026-11-30', reason: 'session-cancelled', sourceSessionId: '2026-11-12-0' };
+
+  test('a token added beside a sooner bonus is named on its own line, and counted', async () => {
+    mockHub = hubOf([paidMember('ava', 'Ava', T6, 2, 0, 0, [cancelled, added('single_cs_1')])]);
+    const r = await renderScreen(<Billing bare />);
+    expect(r.text()).toContain('4of 6 left');
+    expect(r.text()).toContain('block was cancelled');
+    expect(r.text()).toContain('Session token - good through Sat, Feb 27');
+    await r.unmount();
+    // A second one: the line counts both.
+    mockHub = hubOf([paidMember('ava', 'Ava', T6, 2, 0, 0, [cancelled, added('single_cs_1'), added('single_cs_2')])]);
+    const two = await renderScreen(<Billing bare />);
+    expect(two.text()).toContain('block was cancelled');
+    expect(two.text()).toContain('2 session tokens - good through Sat, Feb 27');
+    expect(two.text()).not.toContain('Session token - good through');
+    await two.unmount();
+  });
+
+  test('the phoned-in shape after the purchase: the zero stays amber, a token is in hand', async () => {
+    mockHub = hubOf([paidMember('ava', 'Ava', T6, 6, 0)]);
+    const before = await renderScreen(<Billing bare />);
+    expect(bigNumber(before).style.color).toBe(rgb(color.secondary));
+    await before.unmount();
+    mockHub = hubOf([paidMember('ava', 'Ava', T6, 6, 0, 0, [added('single_cs_1')])]);
+    const after = await renderScreen(<Billing bare />);
+    expect(after.text()).toContain('0of 6 left');
+    expect(after.text()).toContain('Session token - good through Sat, Feb 27');
+    expect(after.text()).toContain('December: 6 of 6 left');
+    expect(bigNumber(after).style.color).toBe(rgb(color.secondary));
+    await after.unmount();
+    // December spent too: amber with a token in hand, the red stop with none.
+    mockHub = hubOf([paidMember('ava', 'Ava', T6, 6, 6, 0, [added('single_cs_1')])]);
+    const held = await renderScreen(<Billing bare />);
+    expect(bigNumber(held).style.color).toBe(rgb(color.secondary));
+    await held.unmount();
+    mockHub = hubOf([paidMember('ava', 'Ava', T6)]);
+    const out = await renderScreen(<Billing bare />);
+    expect(bigNumber(out).style.color).toBe(rgb(color.error));
+    await out.unmount();
+  });
+
+  test("primary only with nothing left to book with this period, outline otherwise - as the single token's Buy", async () => {
+    const cases = [
+      [[T6, 6, 0], 'primary'], // the phoned-in shape
+      [[T6, 6, 6], 'primary'], // this period and next spent
+      [[T6, 5, 0], 'outline'], // a token left
+      [[T6, 0, 0], 'outline'], // a fresh period
+      [[T6, 6, 0, 0, [added('single_cs_1')]], 'outline'], // a token already added
+      [[T6, 6, 6, 0, [cancelled]], 'outline'], // a bonus in hand
+    ];
+    for (const [args, variant] of cases) {
+      mockHub = hubOf([paidMember('ava', 'Ava', ...args)]);
+      const r = await renderScreen(<Billing bare />);
+      expect(variants(r, 'ava')).toEqual([variant]);
+      await r.unmount();
+    }
   });
 });

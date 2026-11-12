@@ -1,3 +1,5 @@
+import fs from 'fs';
+import path from 'path';
 import {
   ADD_TOKEN_LABEL,
   ADD_TOKEN_NOTE,
@@ -18,6 +20,8 @@ import {
   ownLoginMayBuy,
   packageSwitchWarning,
   saleOpen,
+  SEASON_CUTOFF_MS,
+  seasonCheckoutOpen,
   SINGLE_ASK_GUARDIAN_LINE,
   SINGLE_EXPIRES,
   SINGLE_EXPIRES_LABEL,
@@ -390,6 +394,8 @@ describe('addTokenOffer: the Billing page, at any time', () => {
       [packages.SINGLE_TOKEN, PAID, {}],
       [T6, PAID, { onHold: true }],
       [T6, PAID, { now: OPEN - 1 }],
+      // The season's checkout closed (single.js seasonCheckoutOpen).
+      [T6, PAID, { now: SEASON_CUTOFF_MS }],
     ];
     for (const [pkg, billing, opts] of shapes) {
       const extra = extraSessionOffer(member(pkg, billing, DEC_SPENT), { now: OPEN, ...opts });
@@ -397,5 +403,29 @@ describe('addTokenOffer: the Billing page, at any time', () => {
       // Null together, or the same offer plus the note.
       expect(add).toEqual(extra && { ...extra, note: NOTE });
     }
+  });
+
+  // Review 2026-11-11: with the button on every paid meter, an offer standing
+  // after the season's last checkout would sit on every one, and the server
+  // refuses it 'season-over' (functions/portal/extra.js athleteRefusal).
+  test("neither offer once the season's checkout closes: 30 minutes before Feb 28 begins in Chicago", () => {
+    const LAST = Date.parse('2027-02-28T05:30:00Z'); // 11:30 PM CST, Sat, Feb 27
+    expect(SEASON_CUTOFF_MS).toBe(Date.parse('2027-02-28T06:00:00Z'));
+    expect(seasonCheckoutOpen(LAST)).toBe(true);
+    expect(seasonCheckoutOpen(new Date(LAST))).toBe(true);
+    expect(seasonCheckoutOpen(LAST + 1)).toBe(false);
+    expect(seasonCheckoutOpen(SEASON_CUTOFF_MS)).toBe(false);
+    expect(addTokenOffer(member(T6, PAID, LEFT), { now: LAST })).toEqual(BUY6);
+    expect(addTokenOffer(member(T6, PAID, LEFT), { now: LAST + 1 })).toBeNull();
+    expect(addTokenOffer(member(T6, PAID, LEFT), { now: LAST + 1, askGuardian: true })).toBeNull();
+    expect(extraSessionOffer(member(T6, PAID, DEC_SPENT), { now: LAST })).toEqual({ state: 'buy', line: LINE6 });
+    expect(extraSessionOffer(member(T6, PAID, DEC_SPENT), { now: LAST + 1 })).toBeNull();
+  });
+
+  test("the cutoff is the server's own (functions/portal/single.js) - CHANGE ONE, CHANGE BOTH", () => {
+    const server = fs.readFileSync(path.resolve(__dirname, '../../../../functions/portal/single.js'), 'utf8');
+    expect(server).toContain('const SEASON_CUTOFF_MS = Date.UTC(2027, 1, 28, 6);');
+    expect(server).toContain('const CHECKOUT_MIN_MS = 30 * 60 * 1000;');
+    expect(server).toContain('return SEASON_CUTOFF_MS - nowMs >= CHECKOUT_MIN_MS;');
   });
 });

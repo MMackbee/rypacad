@@ -17,9 +17,11 @@ import {
   BUY_SINGLE_LABEL,
   extraSessionOffer,
   nextPeriodPosition,
+  outOfTokens,
   saleOpen,
   SINGLE_ASK_GUARDIAN_LINE,
   SINGLE_NOT_OPEN_LINE,
+  tokenDayLabel,
 } from '../data/singleToken';
 
 /**
@@ -41,12 +43,15 @@ import {
  */
 
 /**
- * Exhausted is the red stop - unless next month's tokens are in hand (owner
- * 2026-11-04, as AllowancePools reads it): then amber, like the last token,
- * not a red zero under "Tokens reset Dec 1" that read as December closed.
+ * Exhausted is the red stop - unless there is still something to book with
+ * (`bookable`): next month's tokens in hand (owner 2026-11-04, as
+ * AllowancePools reads it), or a bonus or added token (review 2026-11-11: a
+ * parent who had just added a token saw the zero turn red). Then amber, like
+ * the last token, not a red zero under "Tokens reset Dec 1" that read as
+ * December closed.
  */
-function toneFor(left, nextOpen = false) {
-  if (left === 0) return nextOpen ? color.secondary : color.error;
+function toneFor(left, bookable = false) {
+  if (left === 0) return bookable ? color.secondary : color.error;
   if (left === 1) return color.secondary;
   return color.primary;
 }
@@ -162,6 +167,27 @@ function Evidence({ member }) {
   );
 }
 
+const isBought = (g) => g?.reason === 'single-purchase';
+
+/**
+ * 'Session token - good through Sat, Feb 27' (GraceLine's own words for
+ * one), '2 session tokens - ...' for more: the tokens bought for a monthly
+ * member (an extra session, or Add a token), counted on a line of their own
+ * whatever bonus token is spent before them (review 2026-11-11: behind a
+ * sooner bonus a token just added showed only in the chip, under a button
+ * still offering one). Nothing without one.
+ */
+function BoughtLine({ bought }) {
+  const n = bought.length;
+  if (n === 0) return null;
+  const through = bought[0].expiresAt ? tokenDayLabel(bought[0].expiresAt) : 'the season end';
+  return (
+    <div style={{ font: `400 11px ${font.body}`, color: color.secondary, marginTop: 6 }}>
+      {`${n === 1 ? 'Session token' : `${n} session tokens`} - good through ${through}`}
+    </div>
+  );
+}
+
 function Toggle({ open, onToggle, count }) {
   return (
     <button
@@ -223,9 +249,11 @@ function singleBuySlot(member, askGuardian) {
  * Session's out-of-tokens banner renders the same slot. Nothing when there
  * is no offer. The Billing hub's meter passes addTokenOffer's answer and
  * ADD_TOKEN_LABEL (owner 2026-11-11, at any time): its `note` - that an
- * added token is spent first - sits under the rate line.
+ * added token is spent first - sits under the rate line, and its button is
+ * `variant` 'outline' while something is left to book with this period, as
+ * the single token's Buy is (singleBuySlot; review 2026-11-11).
  */
-export function ExtraSessionBuy({ athleteId, offer, label = BUY_EXTRA_LABEL, style }) {
+export function ExtraSessionBuy({ athleteId, offer, label = BUY_EXTRA_LABEL, variant = 'primary', style }) {
   if (!offer || !athleteId) return null;
   if (offer.state === 'ask') {
     return (
@@ -244,7 +272,7 @@ export function ExtraSessionBuy({ athleteId, offer, label = BUY_EXTRA_LABEL, sty
           {offer.note}
         </Body>
       ) : null}
-      <PayButton athleteId={athleteId} product="extra" label={label} variant="primary" height={44} style={{ marginTop: 8 }} />
+      <PayButton athleteId={athleteId} product="extra" label={label} variant={variant} height={44} style={{ marginTop: 8 }} />
     </div>
   );
 }
@@ -329,12 +357,15 @@ export default function TokenMeter({ member, defaultOpen = false, showPrices = f
   // sat inside the collapsed evidence). Not before the season, when the
   // first period is the whole story.
   const next = period.preSeason ? null : nextPeriodPosition(member);
-  const nextOpen = tokens.left === 0 && tokens.grace.length === 0 && Boolean(next && next.left > 0);
-  const tone = toneFor(tokens.left, nextOpen);
+  // Spent, but a bonus or added token is in hand (spent first, pin E) or next
+  // month's tokens are: not the red stop.
+  const bookable = tokens.left === 0 && (tokens.grace.length > 0 || Boolean(next && next.left > 0));
+  const tone = toneFor(tokens.left, bookable);
   const granted = tokens.granted || 0;
   const usedPct = granted ? Math.min(100, (tokens.used / granted) * 100) : 0;
   const reservedPct = granted ? Math.min(100 - usedPct, (tokens.reserved / granted) * 100) : 0;
   const bonus = tokens.grace.length;
+  const bought = tokens.grace.filter(isBought);
 
   return (
     <Card large>
@@ -368,7 +399,9 @@ export default function TokenMeter({ member, defaultOpen = false, showPrices = f
             {tokens.reserved ? <Chip tone={color.secondary}>Waitlist {tokens.reserved}</Chip> : null}
             {bonus ? <Chip tone={color.secondary}>Bonus {bonus}</Chip> : null}
           </div>
-          <GraceLine tokens={tokens} />
+          {/* The soonest bonus on its own line, bought tokens counted on theirs (BoughtLine). */}
+          <GraceLine tokens={bought.length ? { ...tokens, grace: tokens.grace.filter((g) => !isBought(g)) } : tokens} />
+          <BoughtLine bought={bought} />
           {next ? <NextPeriodLine tokens={{ ...tokens, nextPeriod: next }} style={{ marginTop: 8 }} /> : null}
         </>
       )}
@@ -393,6 +426,7 @@ export default function TokenMeter({ member, defaultOpen = false, showPrices = f
           athleteId={member.athleteId}
           offer={(addAnytime ? addTokenOffer : extraSessionOffer)(member, { askGuardian, onHold })}
           label={addAnytime ? ADD_TOKEN_LABEL : BUY_EXTRA_LABEL}
+          variant={addAnytime && !outOfTokens(tokens) ? 'outline' : 'primary'}
         />
       ) : null}
 
