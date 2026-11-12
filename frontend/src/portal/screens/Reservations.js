@@ -213,7 +213,7 @@ function MemberList({ items, past, consent, onBook, onCancelRequest, onMoveReque
             name={item.name}
             meta={metaParts.join(' · ')}
             variant={rowCancelled ? 'cancelled' : item.isToday ? 'live' : 'default'}
-            footnote={rowCancelled ? cancelReasonCopy(item.cancelReason, { unlimited, singleToken: item.singleToken }) : consentBookingFootnote({ item, row: consent, past })}
+            footnote={rowCancelled ? cancelReasonCopy(item.cancelReason, { unlimited, singleToken: item.singleToken, comp: item.comp === true }) : consentBookingFootnote({ item, row: consent, past })}
             trailing={
               waitlisted ? (
                 <StatusBadge tone="yellow">Waitlisted</StatusBadge>

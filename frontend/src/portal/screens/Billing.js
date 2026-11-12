@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { color, font, radius } from '../tokens';
 import BottomTabBar from '../components/BottomTabBar';
@@ -9,15 +9,17 @@ import PayButton from '../components/PayButton';
 import PhoneFrame from '../components/PhoneFrame';
 import SequenceLadder from '../components/SequenceLadder';
 import SkeletonCard, { SkeletonBar } from '../components/Skeleton';
+import StaffCancelSheet from '../components/StaffCancelSheet';
 import StatusBadge from '../components/StatusBadge';
 import TokenMeter from '../components/TokenMeter';
-import { BackLink, Body, Card, ErrorNotice, ScreenTitle, SectionLabel } from '../components/Primitives';
+import { BackLink, Banner, Body, Card, ErrorNotice, ScreenTitle, SectionLabel } from '../components/Primitives';
 import { ordinal, statusFor } from '../data/billingHub';
 import { facilitySourceLabel, householdFacility } from '../data/facility';
 import { FACILITY_ACCESS, windowCopyFor } from '../data/packages';
 import { CONNECTED_LINE, PAY_NOW, PENDING_PLAN_LINE, SINGLE_PLAN_LINE } from '../data/billingCopy';
 import { contractEnabled } from '../data/contractFlag';
 import { householdOnHold, saleOpen, SINGLE_NOT_OPEN_LINE } from '../data/singleToken';
+import { staffMayCancel } from '../data/staffCancel';
 import useBillingHub from '../hooks/billing';
 
 /**
@@ -38,6 +40,11 @@ import useBillingHub from '../hooks/billing';
  * exists. "Update payment method" opens the Stripe customer portal login
  * link when the academy configured one (REACT_APP_STRIPE_PORTAL_URL);
  * otherwise the hero says to contact the academy.
+ *
+ * Staff cancel (owner approved 2026-11-12): on the staff view the owner or
+ * ops has a Cancel on each Booked or No-show row of a meter's "This period"
+ * list (StaffCancelSheet.js). The cancel reloads the page's data
+ * (hooks/staffCancel.js) and the line saying what happened stays above it.
  *
  * @param {'populated'|'past_due'|'lapsed'|'loading'|'error'|'empty'} variant
  *   Harness-only. Live routes pass nothing.
@@ -72,6 +79,15 @@ export default function Billing({
   const self = !staff && role === 'athlete';
   // A failing card or a lapsed membership: no Add a token on any meter.
   const onHold = householdOnHold(data?.household);
+  // Staff cancel: the tapped row and its athlete while the sheet is open, then the line it left.
+  const [cancelTarget, setCancelTarget] = useState(null);
+  const [cancelLine, setCancelLine] = useState(null);
+  const onCancelRow = staff && staffMayCancel(role)
+    ? (member) => (row) => {
+        setCancelLine(null);
+        setCancelTarget({ row, member });
+      }
+    : null;
 
   return (
     <PhoneFrame
@@ -92,6 +108,12 @@ export default function Billing({
       footer={<BottomTabBar role={staff || self ? role : 'parent'} active={staff ? 'admin' : 'billing'} selfManaged={self || undefined} />}
     >
       <div style={{ padding: '0 22px 24px', display: 'flex', flexDirection: 'column', gap: 18 }}>
+        {/* Above the loading branch: it stays while the page reloads after the cancel. */}
+        {cancelLine ? (
+          <div role="status">
+            <Banner tone="green">{cancelLine}</Banner>
+          </div>
+        ) : null}
         {loading ? (
           <BillingSkeleton />
         ) : error ? (
@@ -125,7 +147,15 @@ export default function Billing({
                       package's rate (owner 2026-10-10) at any time, whatever is left
                       (addAnytime; owner 2026-11-11: "lets just put a add tokens button on
                       the billing page"). */}
-                  <TokenMeter member={member} defaultOpen={members.length === 1} showPrices={staff} buy={!staff} onHold={onHold} addAnytime />
+                  <TokenMeter
+                    member={member}
+                    defaultOpen={members.length === 1}
+                    showPrices={staff}
+                    buy={!staff}
+                    onHold={onHold}
+                    addAnytime
+                    onCancelRow={onCancelRow ? onCancelRow(member) : undefined}
+                  />
                   <CoachingLine coaching={member.coaching} />
                   {contractEnabled() ? (
                     // Athlete detail is a parent/staff route; the athlete's own is the Contract.
@@ -146,6 +176,18 @@ export default function Billing({
           </>
         )}
       </div>
+      {cancelTarget ? (
+        <StaffCancelSheet
+          row={cancelTarget.row}
+          member={cancelTarget.member}
+          members={members}
+          onClose={() => setCancelTarget(null)}
+          onCancelled={(line) => {
+            setCancelTarget(null);
+            setCancelLine(line);
+          }}
+        />
+      ) : null}
     </PhoneFrame>
   );
 }

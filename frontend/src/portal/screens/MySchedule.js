@@ -260,7 +260,7 @@ function ScheduleBody({ past, sessions, cancelled, tokens, days, consent, onBook
               variant="cancelled"
               // Pin G: the system cancellation reasons state plainly what
               // happened; a member's own cancel ('member') has nothing to add.
-              footnote={cancelReasonCopy(cancelled.cancelReason, { unlimited: Boolean(tokens?.unlimited), singleToken: cancelled.singleToken })}
+              footnote={cancelReasonCopy(cancelled.cancelReason, { unlimited: Boolean(tokens?.unlimited), singleToken: cancelled.singleToken, comp: cancelled.comp === true })}
             />
           </div>
         ) : null}
@@ -297,7 +297,7 @@ function ScheduleBody({ past, sessions, cancelled, tokens, days, consent, onBook
                   name={s.name}
                   meta={attendeeNoteFor(s) ?? s.meta}
                   variant={rowCancelled ? 'cancelled' : s.isToday ? 'live' : 'default'}
-                  footnote={rowCancelled ? cancelReasonCopy(s.cancelReason, { unlimited: Boolean(tokens?.unlimited), singleToken: s.singleToken }) : consentBookingFootnote({ item: s, row: consent, past })}
+                  footnote={rowCancelled ? cancelReasonCopy(s.cancelReason, { unlimited: Boolean(tokens?.unlimited), singleToken: s.singleToken, comp: s.comp === true }) : consentBookingFootnote({ item: s, row: consent, past })}
                   trailing={
                     waitlisted ? (
                       <StatusBadge tone="yellow">Waitlisted</StatusBadge>

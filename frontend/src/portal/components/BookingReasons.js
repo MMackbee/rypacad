@@ -107,10 +107,18 @@ export function SeeMembershipLink({ onClick, style }) {
  * 2026-09-29/30): an academy cancel returns that token instead of adding a
  * bonus; 'double-spend' is the server guard releasing a second booking made
  * with a token another booking already used. 'moved' is the family's own
- * Move (spec 2026-11-11 §5): the row it left says so.
+ * Move (spec 2026-11-11 §5): the row it left says so. 'staff' is the owner's
+ * or ops' cancel of one booking from the Billing staff view (owner
+ * 2026-11-12): the token it spent came back - none for Elite, nor for a free
+ * comp (`comp`, data/bookingChanges.js isFreeComp), which spent nothing.
  */
-export function cancelReasonCopy(reason, { unlimited = false, singleToken = false } = {}) {
+export function cancelReasonCopy(reason, { unlimited = false, singleToken = false, comp = false } = {}) {
   if (reason === 'moved') return 'Moved to another session.';
+  if (reason === 'staff') {
+    if (unlimited || comp) return 'Cancelled by the academy.';
+    if (singleToken) return 'Cancelled by the academy - your session token was returned.';
+    return 'Cancelled by the academy - the token was returned.';
+  }
   if (reason === 'session-cancelled') {
     if (unlimited) return 'Cancelled by the academy.';
     if (singleToken) return 'Cancelled by the academy - your session token was returned.';

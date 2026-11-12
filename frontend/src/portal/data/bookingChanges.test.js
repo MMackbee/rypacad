@@ -58,6 +58,12 @@ test('coachLine: a family cancel with its reason, a move with where to, nothing 
   expect(coachLine(c({ cancelReason: 'moved' }), null)).toBe('Moved');
   expect(coachLine({ status: 'confirmed', cancelReason: 'member', cancelCategory: 'sick' })).toBeNull();
 });
+test("coachLine: the academy's cancel of one booking (staff, owner 2026-11-12) reads like the family's", () => {
+  const c = (over) => ({ status: 'cancelled', cancelReason: 'staff', ...over });
+  expect(coachLine(c({ cancelCategory: 'sick' }))).toBe('Cancelled · Sick');
+  expect(coachLine(c({ cancelCategory: 'other', cancelNote: ' dentist ' }))).toBe('Cancelled · Other: dentist');
+  expect(coachLine(c({}))).toBeNull();
+});
 test('movedToSessionId and the stale-tap line', () => {
   expect(movedToSessionId({ athleteId: 'jordan', movedTo: 'jordan_2026-11-12-0' })).toBe('2026-11-12-0');
   expect(movedToSessionId({ athleteId: 'jordan', movedTo: 'nico_2026-11-12-0' })).toBeNull();
