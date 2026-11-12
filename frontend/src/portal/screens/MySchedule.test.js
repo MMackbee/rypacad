@@ -7,12 +7,15 @@ let mockRows;
 let mockTokens = null;
 let mockLeave = async () => {};
 const mockCancels = [];
-jest.mock('../hooks', () => ({ useSchedule: () => ({ data: { sessions: mockRows, past: [], cancelled: null, tokens: mockTokens }, loading: false, error: null, cancel: async (...args) => { mockCancels.push(args); } }) }));
+// What cancel() does after recording the call: resolve by default, or a test's own refusal.
+let mockCancel = async () => {};
+jest.mock('../hooks', () => ({ useSchedule: () => ({ data: { sessions: mockRows, past: [], cancelled: null, tokens: mockTokens }, loading: false, error: null, cancel: async (...args) => { mockCancels.push(args); return mockCancel(...args); } }) }));
 jest.mock('../hooks/waitlist', () => ({ leaveWaitlist: (...args) => mockLeave(...args) }));
 
 beforeEach(() => {
   mockTokens = null;
   mockLeave = async () => {};
+  mockCancel = async () => {};
 });
 
 // Audit 2026-09-30: what the waitlisted row says, and a refused leave.
@@ -173,6 +176,63 @@ describe('cancelling a booking that repeats on later weeks', () => {
     expect(r.text()).not.toContain('later week');
     expect(r.button('Cancel just this one')).toBeNull();
     expect(r.button('Keep it')).not.toBeNull();
+    await r.unmount();
+  });
+});
+
+// 2026-11-04 (the Schmidt email): a refused cancel reached a parent as
+// "cancelBooking: Missing or insufficient permissions.".
+describe('a cancel that does not go through', () => {
+  // live.js wrap()'s shape: the adapter code, the function name before the SDK text.
+  const refusal = (code, message) => Object.assign(new Error(message), { name: 'LiveDataError', code });
+  const RAW = /cancelBooking|permission|insufficient|firebase/i;
+  // The sheet's own "Cancel reservation" sits after the row's button of the same name.
+  const confirm = (r) => r.act(() => {
+    const named = [...r.container.querySelectorAll('button')].filter((b) => b.textContent.trim() === 'Cancel reservation');
+    named[named.length - 1].click();
+  });
+
+  test('a rules denial reads as plain words, and the booking stays with its Cancel button', async () => {
+    mockRows = [row({ type: 'training', name: 'Training block' })];
+    mockCancel = async () => { throw refusal('permission-denied', 'cancelBooking: Missing or insufficient permissions.'); };
+    const r = await renderScreen(<MySchedule bare />);
+    await r.click('Cancel reservation'); // the row's button opens the sheet
+    await confirm(r);
+    expect(r.text()).toContain(
+      "This reservation couldn't be cancelled from the app. Refresh the page and try again. If it still won't cancel, contact the academy and we'll sort it out."
+    );
+    expect(r.text()).not.toMatch(RAW);
+    expect(r.button('Keep it')).not.toBeNull();
+    await r.unmount();
+  });
+
+  test('a lost connection says to check it; a refusal live.js words itself is kept', async () => {
+    mockRows = [row({ type: 'training', name: 'Training block' })];
+    mockCancel = async () => { throw refusal('unavailable', 'cancelBooking: Failed to get document because the client is offline.'); };
+    const r = await renderScreen(<MySchedule bare />);
+    await r.click('Cancel reservation');
+    await confirm(r);
+    expect(r.text()).toContain("We couldn't reach the academy's system. Check your connection and try again.");
+    expect(r.text()).not.toMatch(RAW);
+    mockCancel = async () => { throw refusal('not-found', 'This booking no longer exists.'); };
+    await confirm(r);
+    expect(r.text()).toContain('This booking no longer exists.');
+    expect(r.text()).not.toContain("We couldn't reach");
+    await r.unmount();
+  });
+
+  test('a series week refused with raw text gets a plain reason in the summary', async () => {
+    const weekly = (bookingId, date, dayLabel) => row({ id: `s-${bookingId}`, sessionId: `s-${bookingId}`, bookingId, date, dayLabel, type: 'training', name: 'Training block' });
+    mockRows = [weekly('b1', '2026-11-10', 'Tue, Nov 10'), weekly('b2', '2026-11-17', 'Tue, Nov 17'), weekly('b3', '2026-11-24', 'Tue, Nov 24')];
+    mockCancel = async (id) => {
+      if (id === 'b2') throw refusal('unknown', 'cancelBooking: Transaction failed all retries.');
+    };
+    const r = await renderScreen(<MySchedule bare />);
+    await r.click('Cancel reservation');
+    await r.click('Cancel this and 2 later weeks');
+    expect(r.text()).toContain('2 of 3 reservations cancelled');
+    expect(r.text()).toContain("Nov 17 was not cancelled. Refresh the page and try again, or contact the academy and we'll sort it out.");
+    expect(r.text()).not.toMatch(RAW);
     await r.unmount();
   });
 });

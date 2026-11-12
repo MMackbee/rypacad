@@ -1,6 +1,8 @@
 import React, { act } from 'react';
 import { createRoot } from 'react-dom/client';
 import CancelSheet, { SETTLE_MS } from './CancelSheet';
+import { CANCEL_FAILURE_COPY, staffCancelSessionFailureCopy } from '../data/cancelCopy';
+import { SERIES_STOP_COPY } from '../hooks/cancelSeries';
 
 /**
  * The cancel dialog with and without a series (tester Mike, 2026-09-30):
@@ -39,6 +41,11 @@ const later = [
   { bookingId: 'b4', date: '2026-12-01' },
 ];
 const ok = (dates) => dates.map((date, i) => ({ bookingId: `b${i + 1}`, date }));
+// What live.js's wrap() hands the sheet for a rules denial and a dropped connection.
+const coded = (code, message) => Object.assign(new Error(message), { name: 'LiveDataError', code });
+const DENIED = () => coded('permission-denied', 'cancelBooking: Missing or insufficient permissions.');
+const OFFLINE = () => coded('unavailable', 'cancelBooking: Failed to get document because the client is offline.');
+const RAW = /cancelBooking|permission|insufficient|firebase|offline\./i;
 
 describe('without a series the dialog is exactly as before', () => {
   test('two buttons, and the confirm cancels and closes', async () => {
@@ -62,6 +69,76 @@ describe('without a series the dialog is exactly as before', () => {
     expect(r.text()).toContain('This booking no longer exists.');
     expect(r.calls.cancelled).toBe(0);
     expect(r.labels()).toEqual(['Cancel reservation', 'Keep it']);
+    await r.unmount();
+  });
+
+  // The Schmidt email, 2026-11-04: the raw rules text reached a parent.
+  test('a rules denial is plain words, never the permissions text, and the sheet stays open', async () => {
+    const r = await mount({ onConfirm: async () => { throw DENIED(); } });
+    await r.click('Cancel reservation');
+    expect(r.text()).toContain(
+      "This reservation couldn't be cancelled from the app. Refresh the page and try again. If it still won't cancel, contact the academy and we'll sort it out."
+    );
+    expect(r.text()).not.toMatch(RAW);
+    expect(r.calls.cancelled).toBe(0);
+    expect(r.labels()).toEqual(['Cancel reservation', 'Keep it']);
+    await r.unmount();
+  });
+
+  test('a lost connection says so; a refusal with no words gets the plain generic line', async () => {
+    const r = await mount({ onConfirm: async () => { throw OFFLINE(); } });
+    await r.click('Cancel reservation');
+    expect(r.text()).toContain("We couldn't reach the academy's system. Check your connection and try again.");
+    expect(r.text()).not.toMatch(RAW);
+    await r.unmount();
+    const blank = await mount({ onConfirm: async () => { throw new Error(''); } });
+    await blank.click('Cancel reservation');
+    expect(blank.text()).toContain(CANCEL_FAILURE_COPY.one.other);
+    await blank.unmount();
+  });
+});
+
+// Roster's staff "Cancel session" (2026-11-04): the family line hid the
+// cause and told the academy to contact the academy.
+describe('failureCopy (staff wording)', () => {
+  const staffProps = (onConfirm, remainingOnly = false) => ({
+    title: 'Cancel this session?',
+    confirmLabel: remainingOnly ? 'Cancel bookings' : 'Cancel session',
+    keepLabel: 'Keep session',
+    failureCopy: (err) => staffCancelSessionFailureCopy(err, { remainingOnly }),
+    onConfirm,
+  });
+  const stopped = () => coded('permission-denied', 'cancelSession: Missing or insufficient permissions.');
+
+  test('a staff failure says the session may be half done, that a re-run is safe, and keeps the cause', async () => {
+    let tries = 0;
+    const r = await mount(staffProps(async () => { tries += 1; if (tries === 1) throw stopped(); }));
+    await r.click('Cancel session');
+    expect(r.text()).toContain('This session was not fully cancelled. Some of its bookings may already be.');
+    expect(r.text()).toContain('Tap "Cancel session" again to finish. It skips anything already done, so no booking is cancelled twice and no bonus token is given twice.');
+    expect(r.text()).toContain('What went wrong: cancelSession: Missing or insufficient permissions.');
+    expect(r.text()).not.toContain(CANCEL_FAILURE_COPY.one.permission);
+    // Still open, and the re-run goes through.
+    expect(r.labels()).toEqual(['Cancel session', 'Keep session']);
+    expect(r.calls.cancelled).toBe(0);
+    await r.click('Cancel session');
+    expect(r.calls.cancelled).toBe(1);
+    await r.unmount();
+  });
+
+  test('"Cancel remaining bookings" names its own button; a cause with no words is left out', async () => {
+    const r = await mount(staffProps(async () => { throw new Error(''); }, true));
+    await r.click('Cancel bookings');
+    expect(r.text()).toContain('The remaining bookings were not all cancelled. Some may already be. Tap "Cancel bookings" again to finish.');
+    expect(r.text()).not.toContain('What went wrong');
+    await r.unmount();
+  });
+
+  test('without failureCopy the same failure is the family line', async () => {
+    const r = await mount({ onConfirm: async () => { throw stopped(); } });
+    await r.click('Cancel reservation');
+    expect(r.text()).toContain(CANCEL_FAILURE_COPY.one.permission);
+    expect(r.text()).not.toContain('What went wrong');
     await r.unmount();
   });
 });
@@ -219,7 +296,7 @@ describe('with later weeks the dialog offers the series', () => {
   });
 
   test('refused before anything was cancelled: the choice stays, with a plain message, and the single cancel still works', async () => {
-    const message = 'The whole series could not be cancelled right now. You can still cancel each week on its own.';
+    const message = SERIES_STOP_COPY['permission-denied'];
     const s = series(() => ({ total: 4, cancelled: [], failed: [], stopped: { message, remaining: ok(['2026-11-10']) } }));
     const r = await mount(s.props);
     await r.click('Cancel this and 3 later weeks');
@@ -234,8 +311,37 @@ describe('with later weeks the dialog offers the series', () => {
   test('a run that throws outright also stays open with a message', async () => {
     const r = await mount({ laterWeeks: later, onConfirmSeries: async () => { throw new Error(''); } });
     await r.click('Cancel this and 3 later weeks');
-    expect(r.text()).toContain('The reservations could not be cancelled. Try again.');
+    expect(r.text()).toContain(
+      "The reservations couldn't be cancelled. Refresh the page and try again, or contact the academy if it keeps happening."
+    );
     expect(r.labels()).toEqual(['Cancel just this one', 'Cancel this and 3 later weeks', 'Keep it']);
+    await r.unmount();
+  });
+
+  test('a run that throws a rules denial is plain words for the reservations', async () => {
+    const r = await mount({ laterWeeks: later, onConfirmSeries: async () => { throw DENIED(); } });
+    await r.click('Cancel this and 3 later weeks');
+    expect(r.text()).toContain(CANCEL_FAILURE_COPY.many.permission);
+    expect(r.text()).not.toMatch(RAW);
+    await r.unmount();
+  });
+
+  test("a week that failed with raw text gets a plain reason in the summary; a week's own words stay", async () => {
+    const s = series(() => ({
+      total: 4,
+      cancelled: ok(['2026-11-10', '2026-12-01']),
+      failed: [
+        { bookingId: 'b2', date: '2026-11-17', message: 'cancelBooking: Transaction failed all retries.' },
+        { bookingId: 'b3', date: '2026-11-24', message: 'This booking no longer exists.' },
+      ],
+      stopped: null,
+    }));
+    const r = await mount(s.props);
+    await r.click('Cancel this and 3 later weeks');
+    expect(r.text()).toContain('2 of 4 reservations cancelled');
+    expect(r.text()).toContain("Nov 17 was not cancelled. Refresh the page and try again, or contact the academy and we'll sort it out.");
+    expect(r.text()).toContain('Nov 24 was not cancelled. This booking no longer exists.');
+    expect(r.text()).not.toMatch(RAW);
     await r.unmount();
   });
 });

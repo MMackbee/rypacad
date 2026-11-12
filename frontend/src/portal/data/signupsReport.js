@@ -56,10 +56,18 @@ export function loginLabel(a) {
   return 'Login: none';
 }
 
+/**
+ * Plain words for a booking flag (2026-11-04): 'over-cap' now also comes
+ * from the server's check that a booking went past the month's tokens
+ * (functions/portal/period-guard.js), not only from Calendly. A flag with
+ * no entry here still shows its stored value.
+ */
+const BOOKING_FLAG_WORDS = new Map([['over-cap', "over the month's tokens"]]);
+
 export function flagLabel(f) {
   if (f.kind === 'calendly') return `Calendly ${f.outcome} · ${String(f.receivedAt || '').slice(0, 10)}`;
   if (f.kind === 'duplicate') return `Possible duplicate: ${f.athleteName} is also in another family (${f.otherHouseholdId})`;
-  return `Booking ${f.flag} · ${f.date}`;
+  return `Booking ${BOOKING_FLAG_WORDS.get(f.flag) ?? f.flag} · ${f.date}`;
 }
 
 /**

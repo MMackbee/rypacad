@@ -21,6 +21,7 @@ import {
   weeksBetween,
 } from './calendarViews';
 import * as views from './calendarViews';
+import { addDaysISO } from './calendar';
 
 test('the storage key and view guard', () => {
   expect(CALENDAR_VIEW_KEY).toBe('ryp.calendarView');
@@ -148,7 +149,41 @@ describe('dayMarksFor (owner data rule 2026-09-30)', () => {
       '2026-11-03',
       '2026-11-08'
     );
-    expect(marks).toEqual({ '2026-11-06': 'closed', '2026-11-07': 'closed', '2026-11-08': 'closed' });
+    // Nov 8 is a Sunday: the academy is always shut then, so it is a plain day.
+    expect(marks).toEqual({ '2026-11-06': 'closed', '2026-11-07': 'closed' });
+  });
+
+  // Concern 2026-11-04: every Sunday of the season painted red "Academy closed".
+  // The real calendar (production sessions and the website FAQ, 2026-11-04):
+  // no session on any Sunday; closed only on Thanksgiving (Nov 26), Dec 24-25
+  // and Dec 31-Jan 1. Every other Monday-Saturday has sessions.
+  const CLOSURES = ['2026-11-26', '2026-12-24', '2026-12-25', '2026-12-31', '2027-01-01'];
+  /** The season as it really runs, [from, to]: Monday-Saturday less the closures. */
+  const realSeason = (from, to) => {
+    const read = [];
+    for (let iso = from; iso <= to; iso = addDaysISO(iso, 1)) {
+      const sunday = new Date(`${iso}T00:00:00Z`).getUTCDay() === 0;
+      if (!sunday && !CLOSURES.includes(iso)) read.push(s(iso, 'training'));
+    }
+    return read;
+  };
+
+  test('a Sunday is never closed - not even one beside a closure; the real closures are marked alone', () => {
+    // November's grid, Oct 26 .. Dec 6, read through the lookahead.
+    const nov = monthGridBounds('2026-11-01');
+    const novMarks = dayMarksFor(realSeason('2026-11-03', '2026-12-13'), nov.start, nov.end);
+    expect(novMarks).toEqual({ '2026-11-26': 'closed' });
+    // Nov 29 is the Sunday after Thanksgiving: was red as part of a provisional "break".
+    for (const sunday of ['2026-11-08', '2026-11-15', '2026-11-22', '2026-11-29', '2026-12-06']) expect(novMarks[sunday]).toBeUndefined();
+    // December's grid, Nov 30 .. Jan 3: Dec 27 and Jan 3 sit beside the closures and stay plain.
+    const dec = monthGridBounds('2026-12-01');
+    const decMarks = dayMarksFor(realSeason('2026-11-30', '2027-01-10'), dec.start, dec.end);
+    expect(decMarks).toEqual({ '2026-12-24': 'closed', '2026-12-25': 'closed', '2026-12-31': 'closed', '2027-01-01': 'closed' });
+    expect(decMarks['2026-12-27']).toBeUndefined();
+    expect(decMarks['2027-01-03']).toBeUndefined();
+    // A Sunday with nothing scheduled around it is plain too; the weekdays around it are judged as ever.
+    const bare = dayMarksFor([s('2026-12-19', 'phil'), lookahead('2026-12-28')], '2026-12-19', '2026-12-21');
+    expect(bare).toEqual({ '2026-12-21': 'closed' });
   });
 
   test('a tournament wins over closed (a holiday tournament on a closed day)', () => {
@@ -178,7 +213,7 @@ describe('dayMarksFor (owner data rule 2026-09-30)', () => {
     test('closed stops at the latest date the read holds: a January read synced only to Jan 12', () => {
       // January's grid is Dec 28 .. Jan 31 (plus the lookahead); the 90-day sync reached Jan 12.
       const marks = dayMarksFor([s('2027-01-04', 'training'), s('2027-01-09', 'tournament'), s('2027-01-12', 'training')], '2026-12-28', '2027-01-31');
-      expect(marks['2027-01-10']).toBe('closed'); // a Sunday inside the horizon
+      expect(marks['2027-01-10']).toBeUndefined(); // a Sunday inside the horizon: never closed
       expect(marks['2027-01-11']).toBe('closed');
       expect(marks['2027-01-09']).toBe('tournament');
       expect(marks['2027-01-12']).toBeUndefined();
@@ -191,7 +226,7 @@ describe('dayMarksFor (owner data rule 2026-09-30)', () => {
       expect(marks).toEqual({ '2026-11-13': 'closed', '2026-11-14': 'closed' });
     });
 
-    test("December's grid ends inside the Christmas break: the lookahead's Jan 4 session lets the break be judged", () => {
+    test("December's grid ends past the New Year closures: the lookahead's Jan 4 session lets its last days be judged", () => {
       const grid = monthGridBounds('2026-12-01'); // Nov 30 .. Jan 3
       const read = [s('2026-12-22', 'training'), s('2026-12-28', 'tournament'), s('2026-12-29', 'tournament')];
       const without = dayMarksFor(read, grid.start, grid.end);
@@ -201,7 +236,8 @@ describe('dayMarksFor (owner data rule 2026-09-30)', () => {
       const withLookahead = dayMarksFor([...read, s('2027-01-04', 'training')], grid.start, grid.end);
       expect(withLookahead['2026-12-28']).toBe('tournament');
       expect(withLookahead['2026-12-30']).toBe('closed');
-      expect(withLookahead['2027-01-03']).toBe('closed');
+      expect(withLookahead['2027-01-02']).toBe('closed'); // the grid's last open day, judged
+      expect(withLookahead['2027-01-03']).toBeUndefined(); // a Sunday: never closed
       expect(withLookahead['2027-01-04']).toBeUndefined(); // past the range itself
       expect(MARKS_LOOKAHEAD_DAYS).toBe(7);
     });

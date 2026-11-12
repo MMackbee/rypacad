@@ -1,7 +1,7 @@
 import React from 'react';
 import { format, parseISO, subMonths } from 'date-fns';
 import { color, font, radius } from '../tokens';
-import { longDayLabel } from '../data/calendar';
+import { longDayLabel, windowOpensLabel } from '../data/calendar';
 import { tokenStartLabel } from '../data/billingCopy';
 import { tokenDayLabel } from '../data/singleToken';
 import { SessionTokenPools } from './SessionTokens';
@@ -39,11 +39,12 @@ function graceExtra(grace) {
 
 /**
  * Exhausted reads as a stop, matching the handoff's red "limit reached" tone
- * - unless next month's tokens are in hand (2026-11-03, the Wolffs): then the
- * zero is amber, like the last token, not a red stop above a December count.
+ * - unless next month's tokens are in hand (2026-11-03, the Wolffs;
+ * nextPeriodHeld): then the zero is amber, like the last token, not a red
+ * stop above a December count - at any hour, 7 AM on the 1st included.
  */
-function toneFor(left, nextOpen = null) {
-  if (left === 0) return nextOpen ? color.secondary : color.error;
+function toneFor(left, held = null) {
+  if (left === 0) return held ? color.secondary : color.error;
   if (left === 1) return color.secondary;
   return color.primary;
 }
@@ -68,7 +69,7 @@ export default function AllowancePools({ tokens, compact = false, style }) {
 
   if (tokens.perPurchase) return <SessionTokenPools tokens={tokens} compact={compact} style={style} />;
 
-  const tone = toneFor(tokens.left, nextPeriodOpen(tokens));
+  const tone = toneFor(tokens.left, nextPeriodHeld(tokens));
   // Unpaid or before the first period (tester report 2026-09-30): "Pay to
   // start" / "Tokens start Nov 1" stand in for the count of left tokens.
   const startLabel = tokenStartLabel(tokens);
@@ -141,25 +142,56 @@ export function nextPeriodName(nextPeriod) {
   return nextPeriod.periodKey.endsWith('-01') ? format(parseISO(nextPeriod.periodKey), 'MMMM') : format(parseISO(nextPeriod.periodKey), 'MMM d');
 }
 
-export function nextPeriodLabel(nextPeriod) {
+export function nextPeriodLabel(nextPeriod, now = new Date()) {
   if (!nextPeriod || nextPeriod.granted == null || nextPeriod.left == null || !nextPeriod.periodKey) return null;
   const name = nextPeriodName(nextPeriod);
   const when = nextPeriod.periodKey.endsWith('-01') ? name : `From ${name}`;
-  return `${when}: ${nextPeriod.left} of ${nextPeriod.granted} left`;
+  // Counted but not bookable yet (before 7 AM on the 1st): say when it opens.
+  const opens = nextPeriodOpensAt(nextPeriod, now);
+  return `${when}: ${nextPeriod.left} of ${nextPeriod.granted} left${opens ? ` - opens ${opens}` : ''}`;
+}
+
+/**
+ * When the next period's first day enters the booking window, while it is
+ * still outside it: '7 AM today' from midnight to 7 AM Chicago on the 1st
+ * (2026-11-04: a December-spent family was sent to January then, every
+ * January day still locked); null once it is open. The academy clock, never
+ * the phone's day (calendar.js windowOpensLabel). One month: a token
+ * package's window - Elite and the single token count no next period here.
+ */
+export function nextPeriodOpensAt(nextPeriod, now = new Date()) {
+  if (!nextPeriod || !nextPeriod.periodKey) return null;
+  return windowOpensLabel(nextPeriod.periodKey, now, 1);
 }
 
 /**
  * The next period when this one is spent and it still has tokens to book
  * with (2026-11-03, the Wolffs: November at zero with "December: 6 of 6
- * left" under a red "No tokens left" - read as nothing to book). Null for
- * Elite, the single token, an unpaid grant, a grace token in hand (it
- * spends first), a period with tokens, or a next period that is spent too.
+ * left" under a red "No tokens left" - read as nothing to book). It decides
+ * the TONE and the "November tokens used" title, at any hour: from midnight
+ * to 7 AM on the 1st January is counted but not open yet, and that is no
+ * reason for the red stop (review 2026-11-04). Whether it can be booked now
+ * is nextPeriodOpen's question. Null for Elite, the single token, an unpaid
+ * grant, a grace token in hand (it spends first), a period with tokens, or
+ * a next period that is spent too.
  */
-export function nextPeriodOpen(tokens) {
+export function nextPeriodHeld(tokens) {
   if (!tokens || tokens.unlimited || tokens.perPurchase || tokens.unpaid) return null;
   if (tokens.left !== 0 || (tokens.grace?.length ?? 0) > 0) return null;
   const np = tokens.nextPeriod;
   return np && np.periodKey && np.left > 0 ? np : null;
+}
+
+/**
+ * The held next period (nextPeriodHeld) once it is open for booking: the
+ * academy clock, from 7 AM Chicago on its 1st (nextPeriodOpensAt). Only then
+ * does a surface OFFER it - Book's "See January ›", the Calendly button and
+ * its "Pick a time in January" (2026-11-04: before 7 AM every January day
+ * was still locked). Null until then; the line under the meter says when.
+ */
+export function nextPeriodOpen(tokens, now = new Date()) {
+  const np = nextPeriodHeld(tokens);
+  return np && !nextPeriodOpensAt(np, now) ? np : null;
 }
 
 /**
@@ -273,8 +305,9 @@ export function SpendNote({ tokens, style }) {
 
   const hasGrace = (tokens.grace?.length ?? 0) > 0;
   if (tokens.left === 0 && !hasGrace) {
-    // 2026-11-03: spent, with next month's tokens in hand, is not "out".
-    const next = nextPeriodOpen(tokens);
+    // 2026-11-03: spent, with next month's tokens in hand, is not "out" -
+    // before 7 AM on the 1st as after (review 2026-11-04).
+    const next = nextPeriodHeld(tokens);
     if (next) return <SpendBadge tone={color.secondary} style={style}>{spentTitle(next, tokens.reserved)}</SpendBadge>;
     return <SpendBadge tone={color.error} style={style}>{tokens.perPurchase ? 'No session token' : 'No tokens left'}</SpendBadge>;
   }

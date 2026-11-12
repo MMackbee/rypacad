@@ -503,8 +503,9 @@ describe('live loaders (perf wave B)', () => {
     expect(dayMarks['2026-11-10']).toBeUndefined(); // Yannick only: not closed
     expect(dayMarks['2026-11-11']).toBe('closed'); // its one session was cancelled
     expect(dayMarks['2026-11-12']).toBeUndefined();
-    expect(dayMarks['2026-11-08']).toBe('closed');
-    expect(dayMarks['2026-12-06']).toBe('closed'); // the grid's last day: the lookahead's Dec 7 proves it synced
+    expect(dayMarks['2026-11-08']).toBeUndefined(); // a Sunday: never "Academy closed" (concern 2026-11-04)
+    expect(dayMarks['2026-12-05']).toBe('closed'); // the grid's last open day: the lookahead's Dec 7 proves it synced
+    expect(dayMarks['2026-12-06']).toBeUndefined(); // the grid's last day, a Sunday
     expect(dayMarks['2026-12-07']).toBeUndefined(); // past the grid
     expect(dayMarks['2026-11-02']).toBeUndefined(); // set-up day, before the season
     expect(dayMarks['2026-10-30']).toBeUndefined();
@@ -520,8 +521,10 @@ describe('live loaders (perf wave B)', () => {
     await settle();
     expect(live.fetchSessionsInRange).toHaveBeenLastCalledWith('2026-12-28', '2027-02-07');
     const marks = jan.result.current.data.dayMarks;
-    expect(marks['2027-01-03']).toBe('closed'); // the Christmas break, inside the horizon
-    expect(marks['2027-01-10']).toBe('closed');
+    expect(marks['2027-01-01']).toBe('closed'); // New Year's Day, inside the horizon
+    expect(marks['2027-01-03']).toBeUndefined(); // Sundays are never closed
+    expect(marks['2027-01-10']).toBeUndefined();
+    expect(marks['2027-01-11']).toBe('closed'); // an empty Monday inside the horizon (Jan 12)
     expect(Object.keys(marks).filter((iso) => iso > '2027-01-12')).toEqual([]);
     await jan.unmount();
 
@@ -559,7 +562,7 @@ describe('live loaders (perf wave B)', () => {
       expect(byDate['2026-11-04'].mark).toBeNull();
       expect(byDate['2026-11-07'].mark).toBe('tournament');
       expect(byDate['2026-11-07'].slots).toEqual([]); // the tournament is not Phil's slot
-      expect(byDate['2026-11-08'].mark).toBe('closed');
+      expect(byDate['2026-11-08'].mark).toBeNull(); // a Sunday: never closed
       expect(byDate['2026-11-09'].mark).toBeNull();
       expect(byDate['2026-11-09'].slots.map((x) => x.sessionId)).toEqual(['e']);
       expect(byDate['2026-11-10'].mark).toBe('closed');
@@ -579,12 +582,14 @@ test('seed useMonthSessions: the whole grid, marked from the generated season', 
   expect(days[0].date).toBe('2026-11-03'); // the season's first day
   expect(days[days.length - 1].date).toBe('2026-12-05'); // December's first Saturday, in the grid
   expect(dayMarks['2026-11-07']).toBe('tournament'); // every Saturday runs the 10-12 tournament
-  expect(dayMarks['2026-11-08']).toBe('closed'); // no Sunday blocks
+  expect(dayMarks['2026-11-08']).toBeUndefined(); // no Sunday blocks, and a Sunday is never "Academy closed"
   expect(dayMarks['2026-11-26']).toBe('closed'); // Thanksgiving
   expect(dayMarks['2026-11-27']).toBe('tournament'); // the Post-Thanksgiving tournament wins
   expect(dayMarks['2026-11-03']).toBeUndefined();
   expect(dayMarks['2026-11-02']).toBeUndefined();
-  expect(dayMarks['2026-12-06']).toBe('closed');
+  expect(dayMarks['2026-12-06']).toBeUndefined(); // a Sunday
+  // The seed's provisional list closes Nov 25-29; its Sunday stays plain all the same.
+  expect(dayMarks['2026-11-29']).toBeUndefined();
   await h.unmount();
 });
 

@@ -207,6 +207,26 @@ test("a token package: each week spends from the period its session falls in, an
   expect(mockStore.sessions['p-0107'].booked).toBe(0);
 });
 
+// 2026-11-04: a phone a couple of minutes fast at 6:58 AM on Dec 1 reads its
+// window as reaching January; the rules, on request.time, still refuse it.
+// Each such week is 'not open yet' with the day it opens, never an error.
+test('a phone running fast at 7 AM on the 1st: the weeks the rules refuse are not open yet, never an error', async () => {
+  jest.setSystemTime(new Date('2026-12-01T13:00:30Z')); // the phone reads 7:00:30 AM Chicago; the server is still before 7
+  const phil = session('p-1231', 'phil', '2026-12-31');
+  session('p-0107', 'phil', '2027-01-07');
+  session('p-0114', 'phil', '2027-01-14');
+  hold('a2', 'p-1231');
+  mockBeforeTx = () => { throw Object.assign(new Error('Missing or insufficient permissions.'), { code: 'permission-denied' }); };
+
+  const out = await repeatWeekly({ role: 'athlete', athleteId: 'a2', householdId: 'h1' }, phil, { untilISO: '2027-01-14' });
+  expect(out.booked).toEqual([]);
+  expect(out.skipped).toEqual([
+    { date: '2027-01-07', reason: 'not open yet', opensOn: '2026-12-01' },
+    { date: '2027-01-14', reason: 'not open yet', opensOn: '2026-12-01' },
+  ]);
+  expect(written()).toEqual([]);
+});
+
 test("Yannick's sessions never repeat: a 'mental' slot is refused before anything is read or written", async () => {
   const yannick = session('m-1105', 'mental', '2026-11-05', '4:00 PM', { capacity: 1 });
   session('m-1112', 'mental', '2026-11-12', '4:00 PM', { capacity: 1 });

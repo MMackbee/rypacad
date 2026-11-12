@@ -39,9 +39,16 @@ jest.mock('./waitlist', () => ({
 jest.mock('./grace', () => ({ ...jest.requireActual('./grace'), __esModule: true, fetchTokenPeriod: jest.fn() }));
 // "Today" is pinned per test. The seed modules call todayISO() at import, so
 // the real one answers until resetMocks clears it before the first test.
+// The token period reads the academy's date (academyDateISO, 2026-11-04);
+// beforeEach below keeps it on the pinned "today" unless a test sets it apart.
 jest.mock('../data/calendar', () => {
   const actual = jest.requireActual('../data/calendar');
-  return { ...actual, __esModule: true, todayISO: jest.fn(() => actual.todayISO()) };
+  return {
+    ...actual,
+    __esModule: true,
+    todayISO: jest.fn(() => actual.todayISO()),
+    academyDateISO: jest.fn(() => actual.academyDateISO()),
+  };
 });
 
 import { act } from 'react';
@@ -71,6 +78,8 @@ const ELITE_PKG = { id: 'elite', name: 'Elite', kind: 'elite', tokens: null };
 const nov = { id: 'a1_nov', sessionId: 'nov', date: '2026-11-03', periodKey: '2026-11-01', status: 'confirmed', type: 'training' };
 
 beforeEach(() => {
+  // CRA's resetMocks cleared the pass-through: the academy's day is the pinned one.
+  calendar.academyDateISO.mockImplementation(() => calendar.todayISO());
   live.isLive.mockReturnValue(true);
   // Every child card reads its contract logs (the owner's rule, 2026-10-28:
   // no stored tier gates the card). None here.

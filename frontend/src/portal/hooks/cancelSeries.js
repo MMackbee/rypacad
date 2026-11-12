@@ -65,14 +65,24 @@ export function seriesOffer(later) {
 }
 
 /**
- * Failures that concern the whole family rather than one booking, by the
- * adapter's error code (live.js ERR - strings here so this module never
- * loads Firebase; live.cancel.test.js pins them to ERR). 'permission-denied'
- * is what a series cancel gets while firestore.rules does not yet admit
- * cancelledVia: it stops at the first week with nothing changed.
+ * Failures that stop the run, by the adapter's error code (live.js ERR -
+ * strings here so this module never loads Firebase; live.cancel.test.js
+ * pins them to ERR). A dropped connection or a signed-out tab concerns every
+ * week alike.
+ *
+ * 'permission-denied' no longer means "the rules refuse a series":
+ * firestore.rules memberBookingUpdateOk admits cancelledVia 'series'. A
+ * denial now concerns the ONE booking it was refused for - its session's
+ * seat counter already at 0, so the commit cannot free a seat
+ * (seatFreedInCommit), or the session's day already over (sessionDayNotOver,
+ * a tab left open past the session) - and cancelling that week on its own is
+ * refused the same way, so the line no longer promises it can be. The run
+ * still stops at that week, leaving the later ones as they are, and the
+ * line says so: refresh and try again, or the academy cancels it.
  */
 export const SERIES_STOP_COPY = {
-  'permission-denied': 'The whole series could not be cancelled right now. You can still cancel each week on its own.',
+  'permission-denied':
+    "One week couldn't be cancelled from the app, so the rest were left as they are. Refresh the page and try again, or contact the academy and we'll sort it out.",
   unavailable: 'The connection dropped. Check your connection and try again.',
   unauthenticated: 'You are signed out. Sign in again to cancel.',
 };
@@ -82,8 +92,8 @@ export const SERIES_STOP_COPY = {
  * another through `cancel` - each marked cancelledVia 'series' so
  * onBookingCancelled sends no notice per week, and silent so the lists
  * refresh once at the end rather than after every week. A failure of one
- * booking is collected and the run continues; one that concerns the whole
- * family stops it. Never throws.
+ * booking is collected and the run continues; a code in SERIES_STOP_COPY (a
+ * lost connection, a signed-out tab, a rules denial) stops it. Never throws.
  *
  * Returns { total, cancelled: [{bookingId,date}], failed: [{bookingId,date,
  * message}], stopped: { message, remaining: [{bookingId,date}] } | null }.

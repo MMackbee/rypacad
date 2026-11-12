@@ -8,6 +8,7 @@ import {
   BOOKING_OPENS_LABEL,
   bookingOpen,
   openThrough,
+  windowOpensLabel,
   windowOpensOn,
 } from './calendar';
 
@@ -63,5 +64,24 @@ describe('the window is whole calendar months, a further month opening at 7 AM C
     expect(windowOpensOn('2027-01-07', 2)).toBe('2026-11-01');
     expect(windowOpensOn('2027-02-27', 2)).toBe('2026-12-01');
     expect(windowOpensOn('2026-12-31', 1)).toBe('2026-11-01');
+  });
+});
+
+// 2026-11-04, the Dec 1 device-clock gap: what a line says about a month
+// that is counted but not bookable yet, judged on the academy's clock.
+describe('when a locked date opens, as a line says it', () => {
+  const AT_659 = new Date('2026-12-01T12:59:00Z'); // 6:59 AM Chicago on Dec 1
+  test('"7 AM today" from midnight to 7 AM Chicago on the 1st; null once the date is inside the window', () => {
+    expect(windowOpensLabel('2027-01-01', new Date('2026-12-01T06:00:00Z'))).toBe('7 AM today'); // midnight Chicago
+    expect(windowOpensLabel('2027-01-01', AT_659)).toBe('7 AM today');
+    expect(windowOpensLabel('2027-01-01', new Date('2026-12-01T13:00:00Z'))).toBeNull();
+    expect(windowOpensLabel('2026-12-31', AT_659)).toBeNull();
+  });
+  test("the academy's day, not the phone's: 11:30 PM on Nov 30 in Chicago is already Dec 1 in UTC", () => {
+    expect(windowOpensLabel('2027-01-01', new Date('2026-12-01T05:30:00Z'))).toBe('7 AM on Tuesday, Dec 1');
+  });
+  test("Elite's two-month window opens February at the same 7 AM", () => {
+    expect(windowOpensLabel('2027-02-01', AT_659, 2)).toBe('7 AM today');
+    expect(windowOpensLabel('2027-01-31', AT_659, 2)).toBeNull();
   });
 });

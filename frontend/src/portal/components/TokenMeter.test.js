@@ -460,3 +460,47 @@ describe('a paid monthly member: an extra session at their rate', () => {
     await one.unmount();
   });
 });
+
+// Review 2026-11-04 (round 2): the Billing hero reads the shared next-period
+// helper (AllowancePools nextPeriodHeld), not a check of its own. Dec 1 with
+// December spent: before 7 AM Chicago January is counted beside an amber
+// zero and the line says when it opens; from 7 AM the same, without the wait.
+describe('Dec 1, December spent: January counted before and after 7 AM Chicago', () => {
+  const T8 = TOKEN_PACKAGES.find((p) => p.id === 't-8');
+  const PAID = { status: 'active', subscriptionId: 'sub_ava' };
+  const decSpent = (bookings = []) => hubMemberFor({
+    athlete: { ...athlete, packageId: T8.id, billing: PAID }, pkg: T8, anchorDay: 1, today: '2026-12-01', waitlist: [], graceTokens: [],
+    bookings: [...Array.from({ length: 8 }, (_, i) => booking(`d${i}`, { periodKey: '2026-12-01', date: '2026-12-12' })), ...bookings],
+  });
+  // jsdom drops the size from the `font` shorthand, so the big number is the
+  // first toned span that is only digits; it reads a hex color back as rgb().
+  const bigNumber = (r) => [...r.container.querySelectorAll('span')].find((el) => el.style.color && /^[0-9]+$/.test(el.textContent));
+  const rgb = (hex) => `rgb(${[1, 3, 5].map((i) => parseInt(hex.slice(i, i + 2), 16)).join(', ')})`;
+  beforeEach(() => { jest.useFakeTimers('modern'); });
+  afterEach(() => { jest.useRealTimers(); });
+
+  test.each([
+    ['6:59 AM', 'January: 8 of 8 left - opens 7 AM today', '2026-12-01T12:59:00Z'],
+    ['7:00 AM', 'January: 8 of 8 left', '2026-12-01T13:00:00Z'],
+  ])('at %s an amber zero beside "%s"', async (label, line, iso) => {
+    jest.setSystemTime(new Date(iso));
+    const r = await renderScreen(<TokenMeter member={decSpent()} />);
+    expect(r.text()).toContain('0of 8 left');
+    expect(r.text()).toContain(line);
+    // The wait is said only before 7 AM.
+    expect(r.text().includes('opens 7 AM')).toBe(line.includes('opens'));
+    expect(bigNumber(r).style.color).toBe(rgb(color.secondary));
+    await r.unmount();
+  });
+
+  test('January spent too: the red stop at 6:59 as at 7:00', async () => {
+    const janSpent = Array.from({ length: 8 }, (_, i) => booking(`j${i}`, { periodKey: '2027-01-01', date: '2027-01-12' }));
+    for (const iso of ['2026-12-01T12:59:00Z', '2026-12-01T13:00:00Z']) {
+      jest.setSystemTime(new Date(iso));
+      const r = await renderScreen(<TokenMeter member={decSpent(janSpent)} />);
+      expect(r.text()).toContain('January: 0 of 8 left');
+      expect(bigNumber(r).style.color).toBe(rgb(color.error));
+      await r.unmount();
+    }
+  });
+});

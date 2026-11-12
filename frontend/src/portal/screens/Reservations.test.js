@@ -85,6 +85,33 @@ describe('waitlisted rows', () => {
   });
 });
 
+// Concern 2026-11-04: "Next period" sat beside the red Cancelled chip on a December row.
+describe('the Next period badge', () => {
+  const dec = (over) => row({ id: 'd1', sessionId: 'd1', bookingId: 'a1_d1', date: '2026-12-01', dayLabel: 'Tue, Dec 1', type: 'training', name: 'Training block', nextPeriod: true, ...over });
+
+  test('a confirmed booking in the next period is badged', async () => {
+    mockRows = [dec()];
+    const r = await renderScreen(<Reservations bare />);
+    expect(r.text()).toContain('Next period');
+    await r.unmount();
+  });
+
+  test('a cancelled row in the next period shows Cancelled and no Next period', async () => {
+    mockRows = [dec({ status: 'cancelled', cancellable: false })];
+    const r = await renderScreen(<Reservations bare />);
+    expect(r.text()).toContain('Cancelled');
+    expect(r.text()).not.toContain('Next period');
+    await r.unmount();
+  });
+
+  test.each(['attended', 'noshow'])('an %s row in the next period is not badged either', async (status) => {
+    mockRows = [dec({ status, cancellable: false })];
+    const r = await renderScreen(<Reservations bare />);
+    expect(r.text()).not.toContain('Next period');
+    await r.unmount();
+  });
+});
+
 test('a Calendly row says to cancel from the email; a portal row keeps Cancel', async () => {
   mockRows = [
     row({ source: 'calendly', cancellable: false }),

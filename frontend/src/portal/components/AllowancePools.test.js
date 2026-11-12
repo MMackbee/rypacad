@@ -1,6 +1,6 @@
 import React from 'react';
 import { renderScreen } from '../screens/testRender';
-import AllowancePools, { GraceLine, NextPeriodLine, SpendNote, nextPeriodLabel, nextPeriodOpen, nextPeriodSuffix, spentTitle } from './AllowancePools';
+import AllowancePools, { GraceLine, NextPeriodLine, SpendNote, nextPeriodHeld, nextPeriodLabel, nextPeriodOpen, nextPeriodOpensAt, nextPeriodSuffix, spentTitle } from './AllowancePools';
 
 const bought = { id: 'single_a', expiresAt: '2027-02-27', reason: 'single-purchase', sourceSessionId: null };
 const bonus = { id: 'g1', expiresAt: '2026-11-20', reason: 'session-cancelled', sourceSessionId: '2026-11-11-0' };
@@ -39,6 +39,7 @@ describe('the next period under the meter (incident 2026-11-01: December read as
   test('spent with next month in hand (2026-11-03, the Wolffs): the note and the compact line name next month, never "No tokens left"', async () => {
     const spent = monthly({ left: 0, used: 6, nextPeriod: next });
     expect(nextPeriodOpen(spent)).toBe(next);
+    expect(nextPeriodHeld(spent)).toBe(next);
     expect(spentTitle(next)).toBe('November tokens used');
     expect(spentTitle({ ...next, periodKey: '2026-12-10', periodEnd: '2027-01-09' })).toBe("This period's tokens used");
     expect(await text(<SpendNote tokens={spent} />)).toBe('November tokens used');
@@ -63,10 +64,71 @@ describe('the next period under the meter (incident 2026-11-01: December read as
     // December spent too, no count at all, or an unpaid grant: the red note as before; a bonus token in hand spends first.
     for (const t of [monthly({ left: 0, used: 6, nextPeriod: { ...next, left: 0, booked: 8 } }), monthly({ left: 0, used: 6 }), monthly({ left: 0, used: 6, unpaid: true, nextPeriod: next })]) {
       expect(nextPeriodOpen(t)).toBeNull();
+      expect(nextPeriodHeld(t)).toBeNull();
       expect(await text(<SpendNote tokens={t} />)).toBe('No tokens left');
     }
     expect(nextPeriodOpen(monthly({ left: 0, used: 6, grace: [bonus], nextPeriod: next }))).toBeNull();
+    expect(nextPeriodHeld(monthly({ left: 0, used: 6, grace: [bonus], nextPeriod: next }))).toBeNull();
     expect(await text(<AllowancePools tokens={monthly({ left: 0, used: 6 })} compact />)).toBe('0 tokens left');
+  });
+});
+
+// 2026-11-04, the Dec 1 device-clock gap: from midnight to 7 AM Chicago on
+// Dec 1 a family with December spent was sent to January ("See January",
+// "January: 6 of 6 left") while every January day was still locked.
+// Review 2026-11-04 (round 2): and that fix turned the Book screen red for
+// those seven hours - the alarm the Nov 3 fix removed. Two questions, two
+// helpers: January HAS tokens (nextPeriodHeld: the amber tone and the
+// "December tokens used" title, at any hour) and January is OPEN now
+// (nextPeriodOpen: only then an offer to book a January time).
+describe('next month is offered only once it opens for booking, at 7 AM Chicago on the 1st', () => {
+  const jan = { periodKey: '2027-01-01', periodEnd: '2027-01-31', booked: 0, reserved: 0, granted: 6, left: 6 };
+  const spentDec = monthly({ left: 0, used: 6, nextPeriod: jan });
+  const AT_659 = new Date('2026-12-01T12:59:00Z'); // 6:59 AM Chicago
+  const AT_7 = new Date('2026-12-01T13:00:00Z');
+  const countColor = async (tokens) => {
+    const r = await renderScreen(<AllowancePools tokens={tokens} />);
+    const c = [...r.container.querySelectorAll('span')].find((s) => ['None left', '1 left'].includes(s.textContent)).style.color;
+    await r.unmount();
+    return c;
+  };
+  beforeEach(() => jest.useFakeTimers('modern'));
+  afterEach(() => jest.useRealTimers());
+
+  test('before 7 AM: January is counted, not offered - the line says when it opens; the note and the count stay the December-used amber, never the red stop', async () => {
+    jest.setSystemTime(AT_659);
+    expect(nextPeriodOpen(spentDec)).toBeNull();
+    expect(nextPeriodHeld(spentDec)).toBe(jan);
+    expect(nextPeriodOpensAt(jan)).toBe('7 AM today');
+    expect(nextPeriodLabel(jan)).toBe('January: 6 of 6 left - opens 7 AM today');
+    expect(await text(<SpendNote tokens={spentDec} />)).toBe('December tokens used');
+    expect(await text(<AllowancePools tokens={spentDec} compact />)).toBe('0 tokens left · January: 6 of 6 left - opens 7 AM today');
+    expect(await text(<AllowancePools tokens={spentDec} />)).toContain('January: 6 of 6 left - opens 7 AM today');
+    const amber = await countColor(monthly({ left: 1, used: 5 }));
+    expect(await countColor(spentDec)).toBe(amber);
+    expect(await countColor(monthly({ left: 0, used: 6 }))).not.toBe(amber);
+    // January spent too: the red stop, at any hour.
+    const both = monthly({ left: 0, used: 6, nextPeriod: { ...jan, booked: 6, left: 0 } });
+    expect(nextPeriodHeld(both)).toBeNull();
+    expect(await text(<SpendNote tokens={both} />)).toBe('No tokens left');
+  });
+
+  test('from 7 AM January is open: the same note and count, now with January on offer', async () => {
+    jest.setSystemTime(AT_7);
+    expect(nextPeriodOpen(spentDec)).toBe(jan);
+    expect(nextPeriodHeld(spentDec)).toBe(jan);
+    expect(nextPeriodOpensAt(jan)).toBeNull();
+    expect(nextPeriodLabel(jan)).toBe('January: 6 of 6 left');
+    expect(await text(<SpendNote tokens={spentDec} />)).toBe('December tokens used');
+    expect(await countColor(spentDec)).toBe(await countColor(monthly({ left: 1, used: 5 })));
+  });
+
+  test("the academy's clock decides, and it can be passed in; holding January never depends on it", () => {
+    expect(nextPeriodOpen(spentDec, AT_659)).toBeNull();
+    expect(nextPeriodOpen(spentDec, AT_7)).toBe(jan);
+    expect(nextPeriodHeld(spentDec)).toBe(jan);
+    // 11:30 PM on Nov 30 in Chicago (Dec 1 on a phone further east): January opens at 7 the next morning.
+    expect(nextPeriodLabel(jan, new Date('2026-12-01T05:30:00Z'))).toBe('January: 6 of 6 left - opens 7 AM on Tuesday, Dec 1');
   });
 });
 

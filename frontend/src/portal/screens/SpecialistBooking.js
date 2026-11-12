@@ -2,7 +2,8 @@ import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { color, font, radius, tint } from '../tokens';
 import { SpendNote } from '../components/AllowancePools';
-import { canRetry, capReachedCopy, LockedDayNotice, reasonCopy, SeeMembershipLink } from '../components/BookingReasons';
+import { canRetry, capMonthCopy, capReachedCopy, LockedDayNotice, reasonCopy, SeeMembershipLink } from '../components/BookingReasons';
+import { calendlyReach, cappedMonths } from '../data/specialistGate';
 import {
   JoinWaitlistButton,
   leaveFailureCopy,
@@ -242,11 +243,21 @@ export default function SpecialistBooking({
     booking.book({ id: slot.sessionId, date: slot.date, type: specialistId }, opts);
   const disabledForNoAthlete = isParent && !selectedAthleteId;
 
-  // Pin K: an ordinary token now. `capReached` is the hook's own mental
-  // frequency flag; `demoCapReached` is the harness override.
+  // Pin K: an ordinary token now. K04: Yannick's cadence is judged for each
+  // DATE's own month, as the booking check is (live.js assertMentalCadence;
+  // the Calendly webhook flags the slot's month), so a November booking never
+  // closes December. The hook flags each day with its month's cap; no date
+  // means today's month, and with no day of it in hand (days not loaded) the
+  // hook's top-level flag, which is today's month only. `demoCapReached` is
+  // the harness override.
   const tokens = slotsState.data?.tokens ?? null;
-  const capReached =
-    demoCapReached != null ? demoCapReached : specialistId === 'mental' && Boolean(slotsState.data?.capReached);
+  const thisMonth = todayISO().slice(0, 7);
+  const capReachedOn = (date) => {
+    if (demoCapReached != null) return demoCapReached;
+    const month = date ? date.slice(0, 7) : thisMonth;
+    const day = days.find((d) => d.date.slice(0, 7) === month);
+    return specialistId === 'mental' && Boolean(day ? day.capReached : month === thisMonth && slotsState.data?.capReached);
+  };
   // 2026-11-01: judged per DATE - a next-period day reads that period's own
   // count (data/packages.js positionForDate), as the booking check does, so
   // a family who spent this period still books next month's slot. With no
@@ -262,7 +273,7 @@ export default function SpecialistBooking({
   // (contract 4.3); absent (routing Task 10 not merged yet) reads as open so
   // the in-app list never locks on a missing field - the rules still refuse.
   const gateOpen = slotsState.data?.bookingOpen ?? true;
-  const blockedOn = (date) => tokensSpentOn(date) || capReached || !gateOpen;
+  const blockedOn = (date) => tokensSpentOn(date) || capReachedOn(date) || !gateOpen;
   // Sprint 20 (spec 6.1): Yannick books through Calendly when the hook says so
   // (SPECIALISTS.mental.bookingMode === 'calendly' AND a URL is configured);
   // anything else - Phil, the seed, an emulator with no URL - keeps the slot
@@ -270,6 +281,22 @@ export default function SpecialistBooking({
   // slots payload carries it for both the parent and the athlete caller).
   const calendly = specialistId === 'mental' && slotsState.data?.bookingMode === 'calendly' && Boolean(slotsState.data?.calendlyUrl);
   const householdId = slotsState.data?.householdId ?? null;
+  // Review 2026-11-04: Calendly takes any date, so its panel judges every day
+  // in reach as this list judges one - the month's cap, a token for that
+  // date, inside the season (specialistGate calendlyReach) - and owns the
+  // Calendly guidance (CalendlyPanel). The harness's cap preview keeps
+  // today's month alone.
+  const reach = calendly && demoCapReached == null ? calendlyReach(days, { capReachedOn, tokensSpentOn }) : null;
+  // The booked months in reach, so "opens <1st>" names the 1st after a run of
+  // them (Jan 1 with November AND December booked, never Dec 1).
+  const bookedMonths = demoCapReached != null ? [] : cappedMonths(days, capReachedOn);
+  // The summary speaks for the month in view, by name: the picked day's on
+  // the list, today's on Calendly (nothing is picked there). On the list a
+  // later booked month gets a line of its own; on Calendly a booked month
+  // closes the summary only while no later day in reach is open.
+  const laterMonthCapped = !calendly && Boolean(selectedDate) && selectedDate.slice(0, 7) !== thisMonth && capReachedOn(selectedDate);
+  const summaryCapReached = calendly ? capReachedOn(null) && !(reach && reach.openDay) : capReachedOn(selectedDate) && !laterMonthCapped;
+  const capLine = laterMonthCapped ? capMonthCopy(selectedDate, bookedMonths) : null;
 
   // Who the booking is for: by name for the waitlist copy, by id to leave one.
   const athleteName =
@@ -430,16 +457,20 @@ export default function SpecialistBooking({
               <EntitlementSummary
                 specialistId={specialistId}
                 tokens={positionForDate(tokens, selectedDate)}
-                capReached={capReached}
+                capReached={summaryCapReached}
+                capMonth={thisMonth}
+                bookedMonths={bookedMonths}
                 onSeeMembership={() => navigate('/portal/membership')}
               />
+              {capLine ? <Body size={12} tone={color.secondary} style={{ marginTop: 8 }}>{capLine}</Body> : null}
             </div>
             {calendly ? (
               <div style={{ padding: '0 22px' }}>
                 <CalendlyPanel
                   data={slotsState.data}
                   tokens={tokens}
-                  capReached={capReached}
+                  capReached={summaryCapReached}
+                  reach={reach}
                   attendee={attendee}
                   onAttendee={setAttendee}
                   householdId={householdId}
@@ -504,7 +535,7 @@ export default function SpecialistBooking({
           failure={failure}
           failureReason={failureReason}
           disabled={disabledForNoAthlete || blockedOn(sheetSlot.date)}
-          capReached={capReached}
+          capReached={capReachedOn(sheetSlot.date)}
           onClose={() => {
             if (reserving) return;
             setSheetSlot(null);
@@ -755,13 +786,13 @@ function DetailSheet({
         ) : null}
         {capReached ? (
           <Body size={12} tone={color.secondary} style={{ marginTop: 12 }}>
-            {capReachedCopy()}
+            {capReachedCopy(slot.date)}
           </Body>
         ) : null}
         {failure ? (
           <div style={{ marginTop: 12 }}>
             <Body size={12} tone={color.error}>
-              {reasonCopy(failureReason) ?? failure} Nothing was reserved{canRetry(failureReason) ? ' - try again.' : '.'}
+              {reasonCopy(failureReason, { date: slot.date }) ?? failure} Nothing was reserved{canRetry(failureReason) ? ' - try again.' : '.'}
             </Body>
             {failureReason === 'membership-inactive' ? (
               <SeeMembershipLink onClick={onSeeMembership} style={{ marginTop: 6 }} />

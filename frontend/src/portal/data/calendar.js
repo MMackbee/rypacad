@@ -27,7 +27,11 @@ import {
   startOfMonth,
 } from 'date-fns';
 
-/** Local calendar date as 'yyyy-MM-dd' — the family's wall-clock day. */
+/**
+ * Local calendar date as 'yyyy-MM-dd' — the family's wall-clock day (a
+ * contract log's day). A token period and the booking window follow the
+ * academy's clock instead: academyDateISO and openThrough below.
+ */
 export function todayISO() {
   return format(new Date(), 'yyyy-MM-dd');
 }
@@ -423,6 +427,19 @@ export function openThrough(now = new Date(), windowMonths = 1) {
  */
 export function windowOpensOn(sessionDateISO, windowMonths = 1) {
   return startOfMonthISO(sessionDateISO, windowMonths);
+}
+
+/**
+ * When `dateISO` enters the booking window, as a line says it: null while it
+ * is inside the window, '7 AM today' on the academy's day it opens, else
+ * '7 AM on Tuesday, Dec 1'. The academy clock (openThrough), never the
+ * phone's calendar day (2026-11-04: from midnight to 7 AM on Dec 1 a family
+ * was sent to January while every January day was still locked).
+ */
+export function windowOpensLabel(dateISO, now = new Date(), windowMonths = 1) {
+  if (dateISO <= openThrough(now, windowMonths)) return null;
+  const opens = windowOpensOn(dateISO, windowMonths);
+  return opens === academyDateISO(now) ? '7 AM today' : `7 AM on ${longDayLabel(opens)}`;
 }
 
 /* ------------------------------------------------------------------------- *

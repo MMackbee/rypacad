@@ -3,7 +3,8 @@
  * onSingleTokenSpent (single token, 2026-09-30), submitScholarship
  * (the website's form, 2026-10-01) and submitFeedback (the portal's
  * Feedback button, 2026-10-15) and mentalCheckinReminders (Yannick's
- * Monday reminder, 2026-10-28) - 18 in all - and each declares the
+ * Monday reminder, 2026-10-28) and onPeriodTokenSpent (the token cap
+ * flag, 2026-11-04) - 19 in all - and each declares the
  * secrets contract 6.4 binds (spec 8). No emulator:
  * it requires index.js in-process and reads each function's __endpoint.
  *   cd functions && node test/check-exports.js */
@@ -31,6 +32,7 @@ const EXPECTED = {
   onSessionBookedDecrease: MAIL,
   waitlistPositions: [],
   onSingleTokenSpent: MAIL,
+  onPeriodTokenSpent: [],
   submitScholarship: MAIL,
   submitFeedback: ['SLACK_FEEDBACK_TOKEN'],
 };
@@ -38,8 +40,8 @@ const EXPECTED = {
 assert.deepEqual(Object.keys(index).sort(), Object.keys(EXPECTED).sort(),
     'the 13 launch functions, waitlistPositions, onSingleTokenSpent, ' +
     'submitScholarship, submitFeedback, mentalCheckinReminders, ' +
-    'nothing else');
-assert.equal(Object.keys(EXPECTED).length, 18, '18 functions');
+    'onPeriodTokenSpent, nothing else');
+assert.equal(Object.keys(EXPECTED).length, 19, '19 functions');
 for (const [name, secrets] of Object.entries(EXPECTED)) {
   const ep = index[name].__endpoint || {};
   const got = (ep.secretEnvironmentVariables || []).map((s) => s.key);

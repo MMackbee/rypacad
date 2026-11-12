@@ -1,8 +1,9 @@
 import React from 'react';
 import { color, font } from '../tokens';
 import { Banner } from './Primitives';
-import { BOOKING_OPENS_AT, BOOKING_OPENS_LABEL, academyDateISO, longDayLabel, nextMonthFirstShort, todayISO, windowOpensOn } from '../data/calendar';
+import { BOOKING_OPENS_AT, BOOKING_OPENS_LABEL, academyDateISO, longDayLabel, monthName, nextMonthFirstShort, todayISO, windowOpensOn } from '../data/calendar';
 import { SESSION_STARTED_COPY } from '../data/sessionStart';
+import { afterSeasonEnd, SEASON_BOUNDS } from '../data/season';
 
 /**
  * Shared booking-rejection/lock/cancellation copy (Sprint 12 pin, contract
@@ -17,18 +18,79 @@ import { SESSION_STARTED_COPY } from '../data/sessionStart';
  * cancellation-reason map (pin G) for the same reason.
  */
 
-/** Pin K's exact wording: "next mental game session opens <date>." */
-export function capReachedCopy() {
-  return `Next mental game session opens ${nextMonthFirstShort(todayISO())}.`;
+/** 'yyyy-MM' or 'yyyy-MM-dd' -> a day in that month; nothing -> today. */
+const dayIn = (dateOrMonth) => (dateOrMonth && dateOrMonth.length === 7 ? `${dateOrMonth}-01` : dateOrMonth) || todayISO();
+
+/**
+ * Pin K's exact wording: "next mental game session opens <date>." K04: the
+ * cap is judged for the SESSION's month (live.js assertMentalCadence), so the
+ * date is the 1st after that session's month - a December refusal on Nov 4
+ * says Jan 1, not Dec 1. With no date (the Calendly panel, where nothing is
+ * picked yet) it is the 1st after today's month.
+ */
+export function capReachedCopy(dateOrMonth) {
+  return `Next mental game session opens ${nextMonthFirstShort(dayIn(dateOrMonth))}.`;
 }
 
-/** The typed booking-rejection reasons (routing lane, contract v2.1 §12/pin D/H). */
-export function reasonCopy(reason) {
+/** 'yyyy-MM' -> the next month's 'yyyy-MM'. */
+function nextMonthKey(month) {
+  const [y, m] = month.split('-').map(Number);
+  return m === 12 ? `${y + 1}-01` : `${y}-${String(m + 1).padStart(2, '0')}`;
+}
+
+/** "Saturday, Feb 27" - nothing runs after the season's last day. */
+const SEASON_END_COPY = `The season ends ${longDayLabel(SEASON_BOUNDS.end)}, so there is no later month to book.`;
+
+/**
+ * When the next mental game session can be, with `dateOrMonth`'s cap booked
+ * (review 2026-11-04): the 1st after the LAST month in a row whose cap is
+ * booked too (`bookedMonths`, 'yyyy-MM' - a booked November and December
+ * name Jan 1, never Dec 1); past the season's last month, the season's end
+ * instead of a March with no sessions. No months given: the month after
+ * the given one, as capReachedCopy says.
+ */
+export function capOpensCopy(dateOrMonth, bookedMonths = []) {
+  let last = dayIn(dateOrMonth).slice(0, 7);
+  while (bookedMonths.includes(nextMonthKey(last))) last = nextMonthKey(last);
+  return afterSeasonEnd(`${nextMonthKey(last)}-01`) ? SEASON_END_COPY : capReachedCopy(last);
+}
+
+/**
+ * K04: the cap line for a booked month by name - a later month on the slot
+ * list ("December's mental game cap is booked. Next mental game session
+ * opens Jan 1."), past any run of booked months after it (capOpensCopy).
+ */
+export function capMonthCopy(dateOrMonth, bookedMonths = []) {
+  return `${monthName(dayIn(dateOrMonth))}'s mental game cap is booked. ${capOpensCopy(dateOrMonth, bookedMonths)}`;
+}
+
+/**
+ * Calendly, with today's month booked and a later one open (review
+ * 2026-11-04): the month to pick a time in, and what a time before it would
+ * do - Calendly takes any date. `bookedMonths`: the booked months before
+ * `pick`, in order ("November's and December's ... caps are booked").
+ */
+export function capPickCopy(bookedMonths, pick) {
+  const names = (bookedMonths.length ? bookedMonths : [todayISO()]).map((m) => monthName(dayIn(m)));
+  const pickName = monthName(dayIn(pick));
+  if (names.length === 1) {
+    return `${names[0]}'s mental game cap is booked. Pick a time in ${pickName} - another ${names[0]} time would go over the monthly limit.`;
+  }
+  const owners = names.map((n) => `${n}'s`);
+  const list = `${owners.slice(0, -1).join(', ')} and ${owners[owners.length - 1]}`;
+  return `${list} mental game caps are booked. Pick a time in ${pickName} - an earlier time would go over the monthly limit.`;
+}
+
+/**
+ * The typed booking-rejection reasons (routing lane, contract v2.1 §12/pin D/H).
+ * `opts.date`: the refused session's date, for the reasons that name a month.
+ */
+export function reasonCopy(reason, opts) {
   if (reason === 'no-tokens-left') return 'No tokens left this period.';
   // The single token (ruling 2026-09-29/30): tokens are bought, never reset.
   if (reason === 'no-session-token') return 'No session token left - buy one to book.';
   if (reason === 'outside-window') return "That date isn't open for booking yet.";
-  if (reason === 'cap-reached') return capReachedCopy();
+  if (reason === 'cap-reached') return capReachedCopy(opts && opts.date);
   // v2.0.1 (Sprint 18): Elite's per-day frequency caps.
   if (reason === 'one-per-day') return "Elite includes one training block, one Tour event and one Performance with Phil session a day - there's already one of those booked that day.";
   // Sprint 20 (contract 3.6): the per-athlete paid gate, the Oct 10 gate and

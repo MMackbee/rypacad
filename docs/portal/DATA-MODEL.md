@@ -1759,7 +1759,12 @@ scheduled job finds its own row and sends nothing twice (the `stripeEvents`
 "id is the dedupe key" idea, applied to outbound messages). **Ids as
 built:** `{kind}_{bookingId}` for the per-booking kinds (`booking-confirmed`,
 `promoted`, `session-cancelled`, `reminder-24h`);
-`tokens-expiring_{athleteId}_{periodKey}`; `grace-expiring_{graceTokenId}`;
+`tokens-expiring_{householdId}_{periodKey}` — ONE notice per household and
+period naming every athlete with tokens left (`athleteId` set only when it
+names one), sent on the seventh day with a session counting back from the
+period's last day with a session, read from `sessions` (2026-11-04,
+`functions/portal/jobs.js` `expiryPlan`; one send day, never caught up);
+`grace-expiring_{graceTokenId}`;
 `booking-revoked_{householdId}_{stripeEventId}` — ONE notice per household
 per Stripe event, sent by `functions/portal/revoke.js` after its batch (the
 pin's draft list said per booking; the count is only known there);

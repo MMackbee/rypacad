@@ -35,7 +35,8 @@ test('row lines (spec 7)', () => {
   expect(loginLabel(a)).toBe('Login: invited 7+ days ago (j@email.com)');
   expect(loginLabel({ ...a, login: 'none', loginEmail: null })).toBe('Login: none');
   expect(loginLabel({ ...a, login: 'claimed', loginClaimedAt: '2026-10-02T09:00' })).toMatch(/^Login: claimed .*Oct/);
-  expect(flagLabel({ kind: 'booking', id: 'b1', flag: 'over-cap', date: '2026-11-05' })).toBe('Booking over-cap · 2026-11-05');
+  expect(flagLabel({ kind: 'booking', id: 'b1', flag: 'over-cap', date: '2026-11-05' })).toBe("Booking over the month's tokens · 2026-11-05");
+  expect(flagLabel({ kind: 'booking', id: 'b2', flag: 'over-cadence', date: '2026-11-05' })).toBe('Booking over-cadence · 2026-11-05');
   expect(flagLabel({ kind: 'calendly', id: 'c1', outcome: 'unresolved', receivedAt: '2026-11-05T10:00' })).toBe('Calendly unresolved · 2026-11-05');
   expect(flagLabel({ kind: 'duplicate', id: 'k1~dad', athleteName: 'Riley Lee', otherHouseholdId: 'dad' })).toBe('Possible duplicate: Riley Lee is also in another family (dad)');
   expect(signedUpLabel('2026-10-01T14:05')).toMatch(/Oct/);

@@ -35,10 +35,11 @@ import { auth, db } from '../../firebase';
 import { bump } from './invalidate';
 import { eliteDailyCapHit, normalizeAnchorDay, periodFallback, periodFor, windowMonthsFor } from '../data/packages';
 import { CHANGEABLE_PACKAGE_IDS } from '../data/packageChange';
-import { BOOKING_OPENS_LABEL, academyDateISO, bookingOpen, openThrough, todayISO, windowOpensOn } from '../data/calendar';
+import { BOOKING_OPENS_LABEL, academyDateISO, bookingOpen, openThrough, windowOpensOn } from '../data/calendar';
 import { SPECIALISTS, mentalCapFor } from '../data/specialists';
 import { SESSION_STARTED_COPY, sessionStarted, waitlistClosed } from '../data/sessionStart';
 import { billingStatusOf } from '../data/billingCopy';
+import { notConfirmedCopy } from '../data/cancelCopy';
 import { HANDICAP_RESERVED, handicapLimitOf, handicapValueOk, reservedRefusal } from '../data/reserved';
 import { HANDICAP_RANGE_ERROR } from '../data/signup';
 
@@ -642,6 +643,28 @@ export function assertWithinBookingWindow(pkg, date, now = new Date()) {
   }
 }
 
+/** How far a phone's clock may run ahead of the server's and still be read as the window. */
+export const WINDOW_CLOCK_SKEW_MS = 10 * 60 * 1000;
+
+/**
+ * The window's own refusal for a booking write the rules denied, else null.
+ * assertWithinBookingWindow runs on the phone's clock; firestore.rules
+ * withinOuterBookingBound judges request.time. A phone a couple of minutes
+ * fast at 6:58 AM on the 1st passes the one and is denied by the other, so
+ * a permission-denied on a date outside the window as it stood
+ * WINDOW_CLOCK_SKEW_MS ago is that 'outside-window' refusal, never a bare
+ * permissions error. Any other refusal is left as it is.
+ */
+export function windowRefusalOf(err, pkg, date, now = new Date()) {
+  if (err?.code !== ERR.PERMISSION) return null;
+  try {
+    assertWithinBookingWindow(pkg, date, new Date(now.getTime() - WINDOW_CLOCK_SKEW_MS));
+    return null;
+  } catch (refusal) {
+    return refusal;
+  }
+}
+
 /**
  * Yannick's frequency knob (contract v2.0, pin K; unchanged by Part 2) — the
  * ONE place a cap check is allowed to branch on session type
@@ -799,7 +822,8 @@ export async function createBooking(
   // for every caller, bookRecurring's skipCapCheck instances included.
   assertAthleteBillingActive(athlete);
   assertBookingOpen(pkg);
-  const currentPeriodKey = periodFor(todayISO(), anchorDay).periodKey;
+  // The refusal's "this period" is the academy's, never the phone's day.
+  const currentPeriodKey = periodFor(academyDateISO(), anchorDay).periodKey;
 
   // Charge order (contract v2.1 pin E): Elite -> nothing charged; else the
   // soonest-expiring unconsumed grace token covering this date; else the
@@ -1026,7 +1050,9 @@ export async function createBooking(
     if (err?.reason === 'already-booked' && !silent) {
       bump('bookings');
     }
-    throw wrap(err, 'createBooking');
+    // A denial the window explains is the window's refusal (windowRefusalOf),
+    // for a single tap and a repeat-weekly week alike.
+    throw windowRefusalOf(err, pkg, date) ?? wrap(err, 'createBooking');
   }
 }
 
@@ -1068,11 +1094,12 @@ export async function cancelBooking({ bookingId, cancelledVia = null, silent = f
         throw new LiveDataError(ERR.NOT_FOUND, 'This booking no longer exists.');
       }
       const booking = bookingSnap.data();
+      // A stale tab (2026-11-04): the row was cancelled elsewhere, or the
+      // session has happened and been marked. This line reaches the family
+      // as it is (data/cancelCopy.js), so it is their words by status -
+      // never the raw status value - with its own reason to branch on.
       if (booking.status !== 'confirmed') {
-        throw new LiveDataError(
-          ERR.INVALID,
-          `Only a confirmed booking can be cancelled (this one is ${booking.status}).`
-        );
+        throw new LiveDataError(ERR.INVALID, notConfirmedCopy(booking.status), null, 'not-confirmed');
       }
       // Sprint 20 (spec 6.1): a Calendly-sourced booking is cancelled from
       // Calendly's email; the webhook writes the cancel. Rules refuse it too.

@@ -184,6 +184,11 @@ function MemberList({ items, past, onBook, onCancelRequest, onLeaveWaitlist, lea
         // routing's hook update lands) — see MySchedule.js's own comment.
         const waitlisted = item.status === 'waitlisted';
         const rowCancelled = item.status === 'cancelled';
+        // Only a live booking is badged with its period: a cancelled row
+        // (or an attended / no-show one) holds nothing there (concern
+        // 2026-11-04: "Next period" sat beside the red Cancelled chip). A
+        // row with no status is the harness's confirmed demo row.
+        const nextPeriodBadge = !past && item.nextPeriod && (item.status == null || item.status === 'confirmed');
         const metaParts = [item.dayLabel, formatDuration(item.durationMinutes)].filter(Boolean);
         if (item.instructor) metaParts.push(item.instructor);
         // Contract v2.1: only a Yannick 1:1 can be booked for the parent,
@@ -209,7 +214,7 @@ function MemberList({ items, past, onBook, onCancelRequest, onLeaveWaitlist, lea
               // made in - a future-period booking is a confirmed booking
               // whose period hasn't been reached yet, badged so rather than
               // hidden.
-              !past && item.nextPeriod ? (
+              nextPeriodBadge ? (
                 <StatusBadge tone="neutral">Next period</StatusBadge>
               ) : null
             }

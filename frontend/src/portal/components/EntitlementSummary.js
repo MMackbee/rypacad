@@ -1,7 +1,9 @@
 import React from 'react';
 import { color, font } from '../tokens';
 import { NextPeriodLine, SpendNote } from './AllowancePools';
+import { capOpensCopy } from './BookingReasons';
 import { Banner } from './Primitives';
+import { monthName, todayISO } from '../data/calendar';
 
 /**
  * SpecialistBooking's token/cap summary line (Sprint 12 pin K, TEAM.md
@@ -14,13 +16,19 @@ import { Banner } from './Primitives';
  * blocking state (pin K: "the Sprint 11 'no-fitness-package'/'cap-reached'
  * Phil states are deleted; Yannick's 'cap-reached' stays with copy 'next
  * mental game session opens <date>'").
+ *
+ * Review 2026-11-04: the cap banner names its month (`capMonth`, 'yyyy-MM';
+ * today's when absent) and the 1st the next session can go on, past any run
+ * of booked months (`bookedMonths`, capOpensCopy) - it said "This month's" and
+ * "opens next month" whatever else was booked.
  */
-export default function EntitlementSummary({ specialistId, tokens, capReached, onSeeMembership }) {
+export default function EntitlementSummary({ specialistId, tokens, capReached, capMonth = null, bookedMonths = [], onSeeMembership }) {
   if (specialistId === 'mental' && capReached) {
+    const month = (capMonth || todayISO()).slice(0, 7);
     return (
       <Banner
         tone="yellow"
-        title="This month's mental game cap is booked"
+        title={`${monthName(`${month}-01`)}'s mental game cap is booked`}
         action={
           onSeeMembership ? (
             <button
@@ -40,7 +48,7 @@ export default function EntitlementSummary({ specialistId, tokens, capReached, o
           ) : undefined
         }
       >
-        Next mental game session opens next month.
+        {capOpensCopy(month, bookedMonths)}
       </Banner>
     );
   }

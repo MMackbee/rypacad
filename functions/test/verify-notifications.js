@@ -11,11 +11,12 @@
  * registered device records 'no-device'. That is the point: the pipeline is
  * verifiable with neither provider.
  *
- * Every date is derived from the run's own clock, so this passes on any day.
- * The two jobs are called directly with a FIXED now (scheduled functions never
- * fire in the emulator); the expiry job's clock is chosen so the household's
- * anchor day puts the period end exactly EXPIRY_LEAD_DAYS out (and a second household
- * exactly 4, the negative case). */
+ * Every date is derived from the run's own clock, so this passes on any day of
+ * the season. The two jobs are called directly with a FIXED now (scheduled
+ * functions never fire in the emulator); the expiry job's clock is a day on
+ * which the hart household is due its one tokens-expiring notice by the
+ * session days seeded for it, and lopez was due the day before (the negative
+ * case). */
 'use strict';
 
 process.env.FIRESTORE_EMULATOR_HOST = '127.0.0.1:8082';
@@ -113,27 +114,58 @@ const plus2 = addDays(today, 2);
 const plus3 = addDays(today, 3);
 const graceCancelExpiry = addDays(today, 30);
 
-// The expiry job's fixed clock. LEAD is the job's own constant (7 since the
-// owner's 2026-09-22 ruling, was 3) — read from the job rather than repeated,
-// so changing the lead there cannot leave this harness asserting the old one.
-// We need a day whose day-of-month leaves both dom+LEAD+1 and dom+LEAD+2 as
-// legal anchor days (1..28) LATER in the same month: with anchor
-// == dom+LEAD+1 the period the day falls in ends exactly LEAD days out (the
-// warned case), and with dom+LEAD+2 one day further (the negative case).
+// The expiry job's fixed clock (2026-11-04). LEAD is the job's own constant
+// (7 since the owner's 2026-09-22 ruling, was 3) - read from the job rather
+// than repeated. A period's tokens-expiring notice goes out on the LEAD-th day
+// with a session counting back from the period's last one (jobs.expiryPlan
+// reads the real sessions), so this harness seeds those session days itself:
+// EXP_TODAY - 2 and - 1 (S_EXP_2, S_EXP_1), EXP_TODAY (S_EXP_W) and the
+// LEAD - 1 days after it (S_EXP_DAYS), all inside hart's period, which starts
+// on EXP_TODAY - 2 (ANCHOR_3). Hart's last session day is EXP_LAST and the
+// LEAD-th one back is EXP_TODAY: the warned case. Lopez's period ends the day
+// before EXP_LAST (ANCHOR_4), so its notice day is EXP_TODAY - 1, already gone
+// on EXP_TODAY: the negative case. (The anchor names are from the three-day
+// era; steps 1 and 2 still use them.) Two docs after EXP_LAST in hart's
+// period - a cancelled training and a Calendly 1:1 - must not count, or
+// hart's day would move. The day is found by planning every household on
+// exactly what is seeded: inside the season (the job reads no session after
+// SEASON_END), hart's period clear of the other steps' days (tomorrow ..
+// plus3) so teddy's position there is only what is seeded for it, kerr
+// (anchor 1) due on neither run day, and no bonus token of STEP 3 expiring on
+// a run's target. A day ahead is preferred; late in the season none fits and
+// an earlier one is used - the clock is fixed, so a past day is as good.
 const LEAD = jobs.EXPIRY_LEAD_DAYS;
-function pickExpiryToday(from) {
-  let d = from;
-  for (let i = 0; i < 40; i += 1) {
-    if (dom(d) <= 28 - (LEAD + 2)) return d;
-    d = addDays(d, 1);
-  }
-  return from;
+function expiryClockFits(d) {
+  const first = addDays(d, -2);
+  const last = addDays(d, LEAD - 1);
+  const next = addDays(d, 1);
+  if (first < jobs.SEASON_START || last > jobs.SEASON_END) return false;
+  if (dom(first) > 28 || dom(last) > 28) return false; // legal anchor days
+  if (!(first > plus3 || lib.periodFor(d, dom(first)).periodEnd < tomorrow)) return false;
+  if ([addDays(d, LEAD), addDays(next, LEAD)].includes(graceCancelExpiry)) return false;
+  const days = [tomorrow, plus2, plus3];
+  for (let x = first; x <= last; x = addDays(x, 1)) days.push(x);
+  const due = (day, anchor) => (jobs.expiryPlan(lib.periodFor(day, anchor), days) || {}).sendOn;
+  return due(d, dom(first)) === d && due(next, dom(first)) !== next &&
+      due(d, dom(last)) === addDays(d, -1) && due(next, dom(last)) !== next &&
+      due(d, 1) !== d && due(next, 1) !== next;
 }
-const EXP_TODAY = pickExpiryToday(addDays(today, 60));
-const ANCHOR_3 = dom(addDays(EXP_TODAY, LEAD + 1));
-const ANCHOR_4 = dom(addDays(EXP_TODAY, LEAD + 2));
+function pickExpiryToday() {
+  const fits = [];
+  for (let d = jobs.SEASON_START; d <= jobs.SEASON_END; d = addDays(d, 1)) {
+    if (expiryClockFits(d)) fits.push(d);
+  }
+  const day = fits.find((d) => d > today) || fits[fits.length - 1];
+  if (!day) throw new Error(`no expiry clock fits the season on ${today}`);
+  return day;
+}
+const EXP_TODAY = pickExpiryToday();
+const EXP_LAST = addDays(EXP_TODAY, LEAD - 1);
+const ANCHOR_3 = dom(addDays(EXP_TODAY, -2));
+const ANCHOR_4 = dom(EXP_LAST);
 const EXP_TARGET = addDays(EXP_TODAY, LEAD);
-const EXP_NOW = new Date(Date.UTC(Number(EXP_TODAY.slice(0, 4)), Number(EXP_TODAY.slice(5, 7)) - 1, dom(EXP_TODAY), 18));
+const noonUTC = (iso) => new Date(`${iso}T18:00:00Z`);
+const EXP_NOW = noonUTC(EXP_TODAY);
 const HART_PERIOD = lib.periodFor(EXP_TODAY, ANCHOR_3);
 const LOPEZ_PERIOD = lib.periodFor(EXP_TODAY, ANCHOR_4);
 
@@ -153,6 +185,11 @@ const S_REM_X = `${tomorrow}-n3`;
 const S_EXP_1 = `${addDays(EXP_TODAY, -1)}-n1`;
 const S_EXP_2 = `${addDays(EXP_TODAY, -2)}-n1`;
 const S_EXP_W = `${EXP_TODAY}-n1`;
+// Hart's other session days up to EXP_LAST, and two docs after it that are
+// no token's session day: a cancelled training and a Calendly 1:1.
+const S_EXP_DAYS = Array.from({length: LEAD - 1}, (_, i) => `${addDays(EXP_TODAY, i + 1)}-e1`);
+const S_EXP_X = `${addDays(EXP_LAST, 1)}-x1`;
+const S_EXP_CAL = `cal-harness-${addDays(EXP_LAST, 2)}`;
 
 let seededConfirmed = 0;
 
@@ -199,6 +236,11 @@ async function seed() {
   S(S_EXP_1, addDays(EXP_TODAY, -1), 15, 1);
   S(S_EXP_2, addDays(EXP_TODAY, -2), 15, 1);
   S(S_EXP_W, EXP_TODAY, 1, 1);
+  // A Tour event and a Phil session are session days like training.
+  S_EXP_DAYS.forEach((id, i) => S(id, addDays(EXP_TODAY, i + 1), 15, 0,
+      [{}, {type: 'tournament'}, {type: 'phil'}][i] || {}));
+  S(S_EXP_X, addDays(EXP_LAST, 1), 15, 0, {status: 'cancelled'});
+  S(S_EXP_CAL, addDays(EXP_LAST, 2), 1, 1, {type: 'mental', bookable: false, source: 'calendly'});
 
   const BK = (ath, sid, date, hh, pk, extra = {}) => {
     const body = Object.assign({athleteId: ath, sessionId: sid, householdId: hh, date, type: 'training',
@@ -254,13 +296,18 @@ async function seed() {
 async function main() {
   log(`\n=== Sprint 14 notifications - isolated emulator verification ===`);
   log(`today (America/Chicago) = ${today}   reminder target = ${tomorrow}`);
-  log(`expiry clock = ${EXP_TODAY} (anchors ${ANCHOR_3}/${ANCHOR_4}) -> hart period ends ${HART_PERIOD.periodEnd}, lopez ${LOPEZ_PERIOD.periodEnd}\n`);
+  log(`expiry clock = ${EXP_TODAY}: hart ${HART_PERIOD.periodKey}..${HART_PERIOD.periodEnd} (anchor ${ANCHOR_3}, last session day ${EXP_LAST}), lopez ${LOPEZ_PERIOD.periodKey}..${LOPEZ_PERIOD.periodEnd} (anchor ${ANCHOR_4})\n`);
   await seed();
-  log(`seeded 3 households / 5 athletes / 11 sessions / ${seededConfirmed} confirmed bookings / 2 waitlist entries / 4 grace tokens\n`);
+  log(`seeded 3 households / 5 athletes / ${11 + S_EXP_DAYS.length + 2} sessions / ${seededConfirmed} confirmed bookings / 2 waitlist entries / 4 grace tokens\n`);
 
   log('STEP 0  the clock the time-based steps depend on');
-  check(`hart period ends exactly ${LEAD} days out`, HART_PERIOD.periodEnd, EXP_TARGET);
-  check(`lopez period ends exactly ${LEAD + 1} days out (the negative case)`, LOPEZ_PERIOD.periodEnd, addDays(EXP_TODAY, LEAD + 1));
+  const seededDays = jobs.sessionDays((await db.collection('sessions').get()).docs.map((d) => d.data()));
+  check(`hart is due on the expiry clock (the ${LEAD}th session day back from ${EXP_LAST})`,
+      jobs.expiryPlan(HART_PERIOD, seededDays), {sendOn: EXP_TODAY, lastDay: EXP_LAST});
+  check('lopez was due the day before (the negative case)', jobs.expiryPlan(LOPEZ_PERIOD, seededDays),
+      {sendOn: addDays(EXP_TODAY, -1), lastDay: addDays(EXP_LAST, -1)});
+  check('kerr (anchor 1) is due on neither run day', [EXP_TODAY, addDays(EXP_TODAY, 1)].map((d) =>
+    (jobs.expiryPlan(lib.periodFor(d, 1), seededDays) || {}).sendOn === d), [false, false]);
   check('push: no device -> no-device; unreachable from the emulator -> skipped',
       [(await push.sendPush({uid: 'x', tokens: [], title: 't', body: 'b'})).status, (await push.sendPush({uid: 'x', tokens: ['tok'], title: 't', body: 'b'})).status], ['no-device', 'skipped']);
   await waitFor(async () => (await countKind('booking-confirmed')) === seededConfirmed, 'the seed\'s booking-confirmed notices');
@@ -346,26 +393,33 @@ async function main() {
   check('reminder-24h ledger rows still 2', await countKind('reminder-24h'), 2);
 
   // ---------------------------------------------------------------- STEP 5
-  log(`\nSTEP 5  runTokenExpiryReminders at a fixed clock (${EXP_TODAY}; expiring ${EXP_TARGET})`);
+  log(`\nSTEP 5  runTokenExpiryReminders at a fixed clock (${EXP_TODAY}: hart's notice day, last session day ${EXP_LAST}; bonus tokens expiring ${EXP_TARGET})`);
+  // The day after first: hart's day is gone by then and is never caught up.
+  r = await jobs.runTokenExpiryReminders({now: noonUTC(addDays(EXP_TODAY, 1)), db});
+  check('the day after the notice day sends nothing (one send day, no catch-up)', [r.tokens, r.grace, r.duplicate, r.failed], [0, 0, 0, 0]);
   r = await jobs.runTokenExpiryReminders({now: EXP_NOW, db});
-  check('summary', [r.today, r.target, r.tokens, r.grace, r.duplicate], [EXP_TODAY, EXP_TARGET, 1, 1, 0]);
-  const l5 = await ledger(`tokens-expiring_teddy_${HART_PERIOD.periodKey}`);
-  check('kind/category/ids', [l5.kind, l5.category, l5.householdId, l5.athleteId, l5.subjectKey],
-      ['tokens-expiring', 'billing', 'hart', 'teddy', `teddy_${HART_PERIOD.periodKey}`]);
-  check('body: granted 4 - used 1 (grace-charged booking excluded) - reserved 1', l5.body,
-      `Teddy has 2 tokens left that expire ${notices.dayLabel(EXP_TARGET)}. Book before then.`);
+  check('summary', [r.today, r.target, r.tokens, r.grace, r.duplicate, r.failed], [EXP_TODAY, EXP_TARGET, 1, 1, 0, 0]);
+  const l5 = await ledger(`tokens-expiring_hart_${HART_PERIOD.periodKey}`);
+  check('ONE notice per household: kind/category/ids (teddy is the only athlete named)', [l5.kind, l5.category, l5.householdId, l5.athleteId, l5.subjectKey],
+      ['tokens-expiring', 'billing', 'hart', 'teddy', `hart_${HART_PERIOD.periodKey}`]);
+  check('body: granted 4 - used 1 (grace-charged booking excluded) - reserved 1, and the last session day', l5.body,
+      notices.tokensExpiring({athletes: [{athlete: {name: 'Teddy'}, left: 2}], periodEnd: HART_PERIOD.periodEnd, lastDay: EXP_LAST}).body);
+  check('body as the family reads it', l5.body,
+      `Teddy has 2 tokens left that expire ${notices.dayLabel(HART_PERIOD.periodEnd)}. The last day with sessions before then is ${notices.dayLabel(EXP_LAST)}.`);
   check('BILLING is parents only, and billing email is LOCKED ON for a parent who switched it off', l5.to,
       ['u-pat:skipped/skipped', 'u-robin:skipped/no-device']);
   const l5g = await ledger('grace-expiring_grace-w3');
   check('grace body/category', [l5g.kind, l5g.category, l5g.athleteId, l5g.body],
       ['grace-expiring', 'billing', 'wren', `Wren's bonus token expires ${notices.dayLabel(EXP_TARGET)}.`]);
   check('grace recipients (lopez parent only)', l5g.to, ['u-sam:skipped/no-device']);
-  check('4 days out: no tokens-expiring for wren', await exists('notifications', `tokens-expiring_wren_${LOPEZ_PERIOD.periodKey}`), false);
+  check('lopez was due the day before: no tokens-expiring, no catch-up', await exists('notifications', `tokens-expiring_lopez_${LOPEZ_PERIOD.periodKey}`), false);
+  check('no per-athlete ledger ids (the pre-2026-11-04 key)', [await exists('notifications', `tokens-expiring_teddy_${HART_PERIOD.periodKey}`),
+    await exists('notifications', `tokens-expiring_wren_${LOPEZ_PERIOD.periodKey}`)], [false, false]);
   check('4 days out: no grace-expiring for grace-w4', await exists('notifications', 'grace-expiring_grace-w4'), false);
   check('CONSUMED grace token gets no notice', await exists('notifications', 'grace-expiring_grace-spent'), false);
-  check('Elite (tokens: null) is never warned', await exists('notifications', `tokens-expiring_zia_${HART_PERIOD.periodKey}`), false);
+  check('Elite (tokens: null) is never named', l5.body.includes('Zia'), false);
   r = await jobs.runTokenExpiryReminders({now: EXP_NOW, db});
-  check('IDEMPOTENT re-run at the same clock', [r.tokens, r.grace, r.duplicate], [0, 0, 2]);
+  check('IDEMPOTENT re-run at the same clock', [r.tokens, r.grace, r.duplicate, r.failed], [0, 0, 2, 0]);
   check('ledger rows still 1 + 1', [await countKind('tokens-expiring'), await countKind('grace-expiring')], [1, 1]);
 
   // ---------------------------------------------------------------- STEP 6

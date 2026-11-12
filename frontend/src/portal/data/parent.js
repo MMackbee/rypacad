@@ -117,7 +117,7 @@ export function notificationNoteFor(note, unlimited) {
  */
 export const SEED_NOTICES = [
   {
-    id: 'tokens-expiring_jordan_sample',
+    id: 'tokens-expiring_whitfield_sample',
     kind: 'tokens-expiring',
     category: 'billing',
     householdId: 'whitfield',

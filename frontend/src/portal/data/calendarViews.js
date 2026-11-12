@@ -167,11 +167,17 @@ export function slotDayStates(days, { waitlist = true } = {}) {
 
 /**
  * How far past its own range a marks read looks (review 2026-09-30). Every
- * grid ends on a Sunday (no blocks) and December's ends inside the Christmas
- * break, so without the next week's sessions in hand the read's last days
- * would sit past the horizon below and never be judged.
+ * grid ends on a Sunday (never marked, and no session to extend the horizon)
+ * and December's last days hold the New Year closures, so without the next
+ * week's sessions in hand the read's last days would sit past the horizon
+ * below and never be judged.
  */
 export const MARKS_LOOKAHEAD_DAYS = 7;
+
+/** 'yyyy-MM-dd' is a Sunday - the date's own weekday, whatever the device's zone. */
+function isSundayISO(iso) {
+  return new Date(`${iso}T00:00:00Z`).getUTCDay() === 0;
+}
 
 /**
  * The booking calendars' day marks (owner ruling 2026-09-30), from the
@@ -182,7 +188,13 @@ export const MARKS_LOOKAHEAD_DAYS = 7;
  *  - 'closed': the date is inside SEASON_BOUNDS and [from, to] (so a day
  *    nobody read is never called closed) and has no scheduled session of ANY
  *    type - training, tournament, phil or mental. Never before Nov 3 or
- *    after Feb 27.
+ *    after Feb 27. Never a Sunday (concern 2026-11-04: every Sunday painted
+ *    red beside the real closures): no session runs on any Sunday, so it
+ *    stays a plain day. The academy's real closures - Thanksgiving (Nov 26),
+ *    Dec 24-25 and Dec 31-Jan 1 (the production calendar and the website
+ *    FAQ, checked 2026-11-04) - all fall on weekdays, so no closure needs a
+ *    Sunday to read whole. data/season.js's provisional holiday list is not
+ *    consulted: it is wrong (it closes days that have sessions).
  * A tournament wins over closed, and a day with any session is never closed.
  *
  * Closed also stops at the read's HORIZON - the latest date `sessions` holds
@@ -210,7 +222,8 @@ export function dayMarksFor(sessions, fromISO, toISO, season = SEASON_BOUNDS) {
   const from = fromISO > season.start ? fromISO : season.start;
   const to = [toISO, season.end, horizon].sort()[0]; // the earliest; '' for an empty read
   for (let iso = from; iso <= to; iso = addDaysISO(iso, 1)) {
-    if (!busy.has(iso)) out[iso] = 'closed';
+    if (busy.has(iso) || isSundayISO(iso)) continue;
+    out[iso] = 'closed';
   }
   return out;
 }

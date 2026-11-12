@@ -100,6 +100,7 @@ const {calendlyWebhook} = require('./portal/calendly');
 const {waitlistPositions} = require('./portal/waitlist-positions');
 const single = require('./portal/single');
 const {onSingleTokenSpent} = require('./portal/single-guard');
+const {onPeriodTokenSpent} = require('./portal/period-guard');
 const {submitScholarship} = require('./portal/scholarship');
 const {submitFeedback} = require('./portal/feedback');
 
@@ -116,6 +117,9 @@ exports.onSessionBookedDecrease = onSessionBookedDecrease;
 exports.waitlistPositions = waitlistPositions;
 // Single token (rulings 2026-09-29/30): one live booking per purchased token.
 exports.onSingleTokenSpent = onSingleTokenSpent;
+// Token cap step 1 (2026-11-04): flag, never cancel, a booking that
+// goes past its month's tokens - rules cannot count bookings.
+exports.onPeriodTokenSpent = onPeriodTokenSpent;
 
 // ==========================================================================
 // SPRINT 20 LAUNCH (contract v3.0.1): instant sign-up, child-login claim,
@@ -378,8 +382,12 @@ exports.sessionReminders = functions
     });
 
 /**
- * Daily 09:00 America/Chicago - period tokens and bonus tokens expiring in
- * exactly three days.
+ * Daily 09:00 America/Chicago - the expiry reminders (portal/jobs.js).
+ * Period tokens: ONE notice per household, on the 7th day with a session
+ * counting back from the period's last day with a session, read from the
+ * `sessions` docs - so Sundays and holidays are skipped and the notice
+ * names the last day when it comes before the expiry. One send day per
+ * period, never caught up. Bonus tokens: those expiring in exactly 7 days.
  */
 exports.tokenExpiryReminders = functions
     .runWith({secrets: MAIL_SECRETS})

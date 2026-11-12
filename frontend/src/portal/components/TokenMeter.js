@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import { format, parseISO } from 'date-fns';
 import { color, font, radius } from '../tokens';
 import StatusBadge from './StatusBadge';
-import { GraceLine, NextPeriodLine } from './AllowancePools';
+import { GraceLine, NextPeriodLine, nextPeriodHeld } from './AllowancePools';
 import PayButton from './PayButton';
 import { SessionTokenHero } from './SessionTokens';
 import { Body, Card, SectionLabel } from './Primitives';
@@ -39,11 +39,12 @@ import {
 
 /**
  * Exhausted is the red stop - unless next month's tokens are in hand (owner
- * 2026-11-04, as AllowancePools reads it): then amber, like the last token,
- * not a red zero under "Tokens reset Dec 1" that read as December closed.
+ * 2026-11-04; AllowancePools nextPeriodHeld, the one rule): then amber, like
+ * the last token, not a red zero under "Tokens reset Dec 1" that read as
+ * December closed.
  */
-function toneFor(left, nextOpen = false) {
-  if (left === 0) return nextOpen ? color.secondary : color.error;
+function toneFor(left, held = false) {
+  if (left === 0) return held ? color.secondary : color.error;
   if (left === 1) return color.secondary;
   return color.primary;
 }
@@ -315,8 +316,11 @@ export default function TokenMeter({ member, defaultOpen = false, showPrices = f
   // sat inside the collapsed evidence). Not before the season, when the
   // first period is the whole story.
   const next = period.preSeason ? null : nextPeriodPosition(member);
-  const nextOpen = tokens.left === 0 && tokens.grace.length === 0 && Boolean(next && next.left > 0);
-  const tone = toneFor(tokens.left, nextOpen);
+  // Amber while that period has tokens - the shared rule, at any hour (review
+  // 2026-11-04): before 7 AM on the 1st it is counted, not yet open, and the
+  // line beneath says when it opens.
+  const held = Boolean(nextPeriodHeld({ ...tokens, nextPeriod: next }));
+  const tone = toneFor(tokens.left, held);
   const granted = tokens.granted || 0;
   const usedPct = granted ? Math.min(100, (tokens.used / granted) * 100) : 0;
   const reservedPct = granted ? Math.min(100 - usedPct, (tokens.reserved / granted) * 100) : 0;

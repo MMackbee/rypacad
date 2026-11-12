@@ -2240,7 +2240,8 @@ createdAt DESC)`.
 Deterministic ids (`{kind}_{subject}`): `booking-confirmed_{bookingId}`,
 `promoted_{bookingId}`, `session-cancelled_{bookingId}`,
 `booking-revoked_{bookingId}` (lapsed / downgrade), `reminder-24h_{bookingId}`,
-`tokens-expiring_{athleteId}_{periodKey}`, `grace-expiring_{graceTokenId}`,
+`tokens-expiring_{householdId}_{periodKey}` (one per household since
+2026-11-04), `grace-expiring_{graceTokenId}`,
 `membership_{householdId}_{eventId}`.
 
 ### Kinds (functions lane)
@@ -2252,7 +2253,7 @@ Deterministic ids (`{kind}_{subject}`): `booking-confirmed_{bookingId}`,
 | session-cancelled | schedule | onUpdate `bookings`: confirmed → cancelled with cancelReason 'session-cancelled' | athlete + parents | "<session> on <day> was cancelled by the academy. A bonus token was added to <Name>'s account (expires <date>)." |
 | booking-revoked | billing | onUpdate `bookings`: → cancelled with cancelReason 'lapsed' \| 'downgrade' — ONE notice per household per event (group by cancelledAt minute), not one per booking | parents | "<N> upcoming bookings were released because <reason>. Book again once payment resumes." |
 | reminder-24h | schedule | scheduled daily 17:00 America/Chicago: confirmed bookings dated tomorrow | athlete + parents | "Reminder: <Name> has <session> tomorrow at <time>." |
-| tokens-expiring | billing | scheduled daily 09:00 America/Chicago: athletes on a token package whose current period ends in exactly 3 days with `left > 0` (tokensFor mirror, grace excluded) | parents | "<Name> has <N> tokens left that expire <date>. Book before then." |
+| tokens-expiring | billing | scheduled daily 09:00 America/Chicago: ONE notice per household naming each athlete on a token package with `left > 0` in the current period (tokensFor mirror, grace excluded), sent on the 7th day with a session counting back from the period's last day with a session — read from `sessions`, so Sundays and holidays are skipped; one send day per period, never caught up (2026-11-04, `jobs.expiryPlan`; was: the period ends in exactly 3 days) | parents | "<Name> has <N> tokens left that expire <date>. The last day with sessions before then is <day>." Siblings: "<A> has <N> tokens left and <B> has <M> tokens left. Their tokens expire <date>; the last day with sessions before then is <day>." When that day is the expiry day itself: "… expire <date>. Book before then." |
 | grace-expiring | billing | same job: unconsumed grace tokens expiring in exactly 3 days | parents | "<Name>'s bonus token expires <date>." |
 | membership | billing | onUpdate `households` when `membership.status` changes | parents | past_due: "A payment didn't go through — new bookings are paused until it clears." lapsed: "Membership lapsed — upcoming bookings were released." active after lapsed/past_due: "Payment received — booking is open again." |
 

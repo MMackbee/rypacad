@@ -35,7 +35,9 @@ export const SEASON_FIRST_PERIOD = '2026-11-01';
  * it. Elite reads the same period (owner report 2026-09-30: "Nothing booked
  * in this period yet. Next period from Thursday, Oct 1" over two November
  * bookings) - its first month is November too. From Nov 1 on this is
- * periodFor(today) exactly, for every package.
+ * periodFor(today) exactly, for every package. `today` is the
+ * academy's date (calendar.js academyDateISO), never the phone's: "this
+ * period" turns over when Chicago's day does, as the booking window does.
  */
 export function positionPeriodFor(today, anchorDay) {
   const current = periodFor(today, anchorDay);

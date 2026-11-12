@@ -19,7 +19,7 @@
 import { useEffect, useState } from 'react';
 import { billingStatusOf, facilityRequestState } from '../data/billingCopy';
 import { foldBeforeFirstPeriod, hubMemberFor, positionPeriodFor, statusFor } from '../data/billingHub';
-import { addDaysISO, todayISO } from '../data/calendar';
+import { academyDateISO, addDaysISO } from '../data/calendar';
 import { householdFacility } from '../data/facility';
 import { isTestHousehold } from '../data/testFamily';
 import { normalizeAnchorDay, packageById, periodFor } from '../data/packages';
@@ -350,7 +350,11 @@ function useTokenGens() {
  */
 export default function useBillingHub({ variant = 'populated', householdId = null, practice = false } = {}) {
   const live = !practice && isLive();
-  const today = todayISO();
+  // The academy's day, never the phone's (2026-11-04): every date the hub
+  // reads is the token period's - the meter, daysLeft, "Tokens reset" - so a
+  // phone in another time zone no longer turns the period over at its own
+  // midnight. The coaching month and the contract requirement read it too.
+  const today = academyDateISO();
   const gens = useTokenGens();
   return useSeedResource(
     live ? null : seedBillingHub(today, variant),
@@ -366,7 +370,7 @@ export default function useBillingHub({ variant = 'populated', householdId = nul
  */
 export function useMyTokens({ variant = 'populated', practice = false } = {}) {
   const live = !practice && isLive();
-  const today = todayISO();
+  const today = academyDateISO(); // the academy's day, as useBillingHub
   const gens = useTokenGens();
   return useSeedResource(
     live ? null : seedMyTokens(today, variant),

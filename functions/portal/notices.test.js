@@ -195,6 +195,81 @@ test('graceExpiring: bonus body unchanged; single-purchase variant', () => {
   });
 });
 
+test('tokensExpiring: one token "expires", several "expire"', () => {
+  assert.deepEqual(notices.tokensExpiring({athlete: TEDDY, left: 1,
+    periodEnd: '2026-11-30'}), {
+    title: 'Tokens expiring soon',
+    body: 'Teddy has 1 token left that expires Mon, Nov 30. Book before then.',
+  });
+  assert.equal(notices.tokensExpiring({athlete: TEDDY, left: 3,
+    periodEnd: '2026-11-30'}).body,
+  'Teddy has 3 tokens left that expire Mon, Nov 30. Book before then.');
+});
+
+// jobs.expiryPlan's December 2026 plan on the production calendar: tokens
+// expire Thu, Dec 31; the last day with sessions is Wed, Dec 30.
+const DECEMBER = {periodEnd: '2026-12-31', lastDay: '2026-12-30'};
+
+test('tokensExpiring: one athlete is told the last day with sessions', () => {
+  assert.deepEqual(notices.tokensExpiring(Object.assign(
+      {athletes: [{athlete: {name: 'Ava One'}, left: 6}]}, DECEMBER)), {
+    title: 'Tokens expiring soon',
+    body: 'Ava has 6 tokens left that expire Thu, Dec 31. The last day ' +
+        'with sessions before then is Wed, Dec 30.',
+  });
+  assert.equal(notices.tokensExpiring(Object.assign(
+      {athletes: [{athlete: TEDDY, left: 1}]}, DECEMBER)).body,
+  'Teddy has 1 token left that expires Thu, Dec 31. The last day with ' +
+      'sessions before then is Wed, Dec 30.');
+  // February: the season ends Sat, Feb 27, the day before the expiry.
+  assert.equal(notices.tokensExpiring({athletes: [{athlete: TEDDY, left: 4}],
+    periodEnd: '2027-02-28', lastDay: '2027-02-27'}).body,
+  'Teddy has 4 tokens left that expire Sun, Feb 28. The last day with ' +
+      'sessions before then is Sat, Feb 27.');
+});
+
+test('tokensExpiring: siblings share one body', () => {
+  const athletes = [{athlete: {name: 'Leo Two'}, left: 1},
+    {athlete: {name: 'Maya Two'}, left: 6}];
+  assert.deepEqual(notices.tokensExpiring(
+      Object.assign({athletes}, DECEMBER)), {
+    title: 'Tokens expiring soon',
+    body: 'Leo has 1 token left and Maya has 6 tokens left. Their tokens ' +
+        'expire Thu, Dec 31; the last day with sessions before then is ' +
+        'Wed, Dec 30.',
+  });
+  athletes.push({athlete: {name: 'Ava'}, left: 2});
+  assert.equal(notices.tokensExpiring(Object.assign({athletes}, DECEMBER))
+      .body, 'Leo has 1 token left, Maya has 6 tokens left, and Ava has 2 ' +
+      'tokens left. Their tokens expire Thu, Dec 31; the last day with ' +
+      'sessions before then is Wed, Dec 30.');
+});
+
+test('tokensExpiring: sessions on the expiry day itself - "Book before ' +
+    'then."', () => {
+  assert.equal(notices.tokensExpiring({athletes: [{athlete: TEDDY, left: 4}],
+    periodEnd: '2026-11-30', lastDay: '2026-11-30'}).body,
+  'Teddy has 4 tokens left that expire Mon, Nov 30. Book before then.');
+  assert.equal(notices.tokensExpiring({athletes: [
+    {athlete: {name: 'Leo'}, left: 1}, {athlete: {name: 'Maya'}, left: 6}],
+  periodEnd: '2027-01-04', lastDay: '2027-01-04'}).body,
+  'Leo has 1 token left and Maya has 6 tokens left. Their tokens expire ' +
+      'Mon, Jan 4. Book before then.');
+});
+
+test('tokensExpiring: plain words - never "class" or "tournament"', () => {
+  const one = [{athlete: TEDDY, left: 1}];
+  const two = one.concat([{athlete: {name: 'Leo'}, left: 3}]);
+  for (const athletes of [one, two]) {
+    for (const plan of [DECEMBER, {periodEnd: '2026-11-30'},
+      {periodEnd: '2027-02-28', lastDay: '2027-02-27'}]) {
+      const {title, body} = notices.tokensExpiring(
+          Object.assign({athletes}, plan));
+      assert.doesNotMatch(`${title} ${body}`, /class|tournament/i);
+    }
+  }
+});
+
 test('waitlistExpired: a single athlete reads the same no-mint body', () => {
   // Ruling 2026-10-01: a closed waitlist mints nothing for anyone, so the
   // single token needs no variant - the token it held is free again.

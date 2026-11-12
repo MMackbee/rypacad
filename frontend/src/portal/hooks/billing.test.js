@@ -27,9 +27,16 @@ jest.mock('./live', () => ({
 }));
 jest.mock('./grace', () => ({ ...jest.requireActual('./grace'), __esModule: true, fetchTokenPeriod: jest.fn() }));
 jest.mock('./waitlist', () => ({ ...jest.requireActual('./waitlist'), __esModule: true, fetchWaitlistByAthlete: jest.fn() }));
+// The token period reads the academy's date (academyDateISO, 2026-11-04);
+// beforeEach below keeps it on the pinned "today" unless a test sets it apart.
 jest.mock('../data/calendar', () => {
   const actual = jest.requireActual('../data/calendar');
-  return { ...actual, __esModule: true, todayISO: jest.fn(() => actual.todayISO()) };
+  return {
+    ...actual,
+    __esModule: true,
+    todayISO: jest.fn(() => actual.todayISO()),
+    academyDateISO: jest.fn(() => actual.academyDateISO()),
+  };
 });
 
 import { act } from 'react';
@@ -39,6 +46,11 @@ import * as live from './live';
 import * as grace from './grace';
 import * as waitlist from './waitlist';
 import * as calendar from '../data/calendar';
+
+// CRA's resetMocks cleared the pass-through: the academy's day is the pinned one.
+beforeEach(() => {
+  calendar.academyDateISO.mockImplementation(() => calendar.todayISO());
+});
 
 test('tokensStartOf: the first period start while any member is pre-season (tester report 2026-09-30)', () => {
   const m = (preSeason, start) => ({ period: { preSeason, start } });

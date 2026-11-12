@@ -255,21 +255,49 @@ function reminder24h(args) {
 }
 
 /**
- * kind `tokens-expiring` - the period ends in EXPIRY_LEAD_DAYS days (7
- * since the 2026-09-22 ruling) with tokens left.
- * @param {{athlete: ?Object, left: number, periodEnd: string}} args Copy
- *     inputs.
+ * 'A', 'A and B', 'A, B, and C'.
+ * @param {!Array<string>} parts The phrases.
+ * @return {string} One phrase.
+ */
+function listOf(parts) {
+  if (parts.length < 3) return parts.join(' and ');
+  return `${parts.slice(0, -1).join(', ')}, and ${parts[parts.length - 1]}`;
+}
+
+/**
+ * kind `tokens-expiring` - ONE notice per household and period naming each
+ * athlete with tokens left (2026-11-04), sent seven days with sessions
+ * before the period's last one (jobs.expiryPlan). When that last day with
+ * sessions comes before the expiry - a holiday, a Sunday, the season's end
+ * - the body names it, so nobody counts on a day with no sessions; when it
+ * is the expiry day itself the body just says "Book before then."
+ * `{athlete, left}` in place of `athletes` is one athlete.
+ * @param {{athletes: (!Array<{athlete: ?Object, left: number}>|undefined),
+ *     athlete: (?Object|undefined), left: (number|undefined),
+ *     periodEnd: string, lastDay: (?string|undefined)}} args Copy inputs;
+ *     `lastDay` is jobs.expiryPlan's.
  * @return {{title: string, body: string}} The notice.
  */
 function tokensExpiring(args) {
-  const name = firstNameOf(args.athlete);
-  const left = Number(args.left || 0);
-  const noun = left === 1 ? 'token' : 'tokens';
-  return {
-    title: 'Tokens expiring soon',
-    body: `${name} has ${left} ${noun} left that expire ` +
-        `${dayLabel(args.periodEnd)}. Book before then.`,
-  };
+  const rows = (args.athletes || [{athlete: args.athlete, left: args.left}])
+      .map((r) => ({name: firstNameOf(r.athlete), left: Number(r.left || 0)}));
+  const has = rows.map((r) =>
+    `${r.name} has ${r.left} ${r.left === 1 ? 'token' : 'tokens'} left`);
+  const expires = dayLabel(args.periodEnd);
+  const last = args.lastDay && args.lastDay < args.periodEnd ?
+      dayLabel(args.lastDay) : '';
+  let body;
+  if (rows.length === 1) {
+    const verb = rows[0].left === 1 ? 'expires' : 'expire';
+    body = `${has[0]} that ${verb} ${expires}. ` + (last ?
+        `The last day with sessions before then is ${last}.` :
+        'Book before then.');
+  } else {
+    body = `${listOf(has)}. Their tokens expire ${expires}` + (last ?
+        `; the last day with sessions before then is ${last}.` :
+        '. Book before then.');
+  }
+  return {title: 'Tokens expiring soon', body};
 }
 
 /**

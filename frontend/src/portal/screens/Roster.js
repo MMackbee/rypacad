@@ -4,6 +4,7 @@ import AthleteRow, { AttendanceControls } from '../components/AthleteRow';
 import BottomTabBar from '../components/BottomTabBar';
 import Button from '../components/Button';
 import CancelSheet from '../components/CancelSheet';
+import { staffCancelSessionFailureCopy } from '../data/cancelCopy';
 import PhoneFrame from '../components/PhoneFrame';
 import StatusBadge from '../components/StatusBadge';
 import TypeChip from '../components/TypeChip';
@@ -714,6 +715,8 @@ export function SessionAttendance({ variant = 'pre', bare = false, onBack, sessi
           confirmLabel={remainingOnly ? 'Cancel bookings' : 'Cancel session'}
           keepLabel={remainingOnly ? 'Keep bookings' : 'Keep session'}
           summary={cancelCopy}
+          // Staff words on failure: what may be half done, that a re-run is safe, and the cause.
+          failureCopy={(err) => staffCancelSessionFailureCopy(err, { remainingOnly })}
           onClose={() => setCancelSheetOpen(false)}
           onConfirm={() => cancelSession(sessionId)}
           onCancelled={() => {

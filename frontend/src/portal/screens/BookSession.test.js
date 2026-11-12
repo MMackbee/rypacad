@@ -120,6 +120,27 @@ test('at 07:00 Chicago on Oct 10 the banner is gone and a tap reserves', async (
   await r.unmount();
 });
 
+// Concern 2026-11-04: the When read "Monday, Oct 12 · 4:00" with no AM or PM.
+test.each([
+  ['4:00 PM', 'Monday, Oct 12 · 4:00 PM', '20261012T160000%2F20261012T170000'],
+  ['9:00 AM', 'Monday, Oct 12 · 9:00 AM', '20261012T090000%2F20261012T100000'],
+])('the confirmation says when with its AM or PM (%s), once, and Add to calendar keeps the time', async (time, when, dates) => {
+  jest.setSystemTime(AT_OPEN);
+  mockMonths = { '2026-10-01': [{ date: '2026-10-12', sessions: [{ ...session, time }] }] };
+  const onConfirmed = jest.fn();
+  const open = jest.spyOn(window, 'open').mockImplementation(() => null);
+  const r = await renderScreen(<BookSession bare demoSelectedDate="2026-10-12" onConfirmed={onConfirmed} />);
+  const card = [...r.container.querySelectorAll('div')].find((el) => el.textContent.startsWith(time.split(' ')[0]) && el.textContent.includes('Training block'));
+  await act(async () => { card.click(); });
+  expect(r.text()).toContain('Slot reserved');
+  expect(r.text()).toContain(`When${when}Spends`);
+  expect(r.text()).not.toMatch(/(AM|PM) (AM|PM)/);
+  expect(onConfirmed).toHaveBeenCalledWith({ name: 'Training block', when });
+  await r.click('Add to calendar');
+  expect(open.mock.calls[0][0]).toContain(`dates=${dates}`);
+  await r.unmount();
+});
+
 test('Nov 1 with November spent (incident 2026-11-01): November is greyed, a December block is bookable and says what it spends, the banner counts December', async () => {
   jest.setSystemTime(new Date('2026-11-01T16:00:00Z')); // Sun Nov 1, 10 AM Chicago - a token window reaches Dec 31
   mockPackage = { id: 't-8', kind: 'tokens' };
@@ -590,13 +611,13 @@ describe('Month/Week toggle (owner request 2026-09-30)', () => {
     await r.unmount();
   });
 
-  test('a tournament Saturday and a closed Sunday paint in both views, with the legend and the new caption', async () => {
+  test('a tournament Saturday and a closed weekday paint in both views, with the legend and the new caption', async () => {
     jest.setSystemTime(new Date('2026-11-04T15:00:00Z'));
     mockFirstSlot = '2026-11-05';
     // No label of its own: the generic name is the Tour's (owner naming rule 2026-09-30).
     const tournament = { ...session, id: 't1', date: '2026-11-07', time: '10:30 AM', type: 'tournament', label: null };
     mockMonths = { '2026-11-01': [{ date: '2026-11-05', sessions: [{ ...session, date: '2026-11-05' }] }, { date: '2026-11-07', sessions: [tournament] }] };
-    mockMarks = { '2026-11-01': { '2026-11-07': 'tournament', '2026-11-08': 'closed' } };
+    mockMarks = { '2026-11-01': { '2026-11-07': 'tournament', '2026-11-06': 'closed' } };
     const r = await renderScreen(<BookSession bare />);
     expect(navLabel(r)).toBe('November 2026');
     expect(r.text()).toContain('Green and yellow days have bookable sessions — tap one to see times.');
@@ -605,12 +626,12 @@ describe('Month/Week toggle (owner request 2026-09-30)', () => {
     expect(r.container.querySelector('.ryp-day-mark-legend').textContent).toContain('Academy closed');
     expect(td(r, '2026-11-07').classList.contains('ryp-mark-tournament')).toBe(true);
     expect(td(r, '2026-11-07').getAttribute('role')).toBe('button');
-    expect(td(r, '2026-11-08').classList.contains('ryp-mark-closed')).toBe(true);
-    expect(td(r, '2026-11-08').getAttribute('role')).toBeNull();
+    expect(td(r, '2026-11-06').classList.contains('ryp-mark-closed')).toBe(true);
+    expect(td(r, '2026-11-06').getAttribute('role')).toBeNull();
     await r.click('Week');
     expect(navLabel(r)).toBe('Nov 2 – 8');
-    expect(pill(r, '2026-11-08').tagName).toBe('DIV');
-    expect(pill(r, '2026-11-08').getAttribute('title')).toBe('Academy closed');
+    expect(pill(r, '2026-11-06').tagName).toBe('DIV');
+    expect(pill(r, '2026-11-06').getAttribute('title')).toBe('Academy closed');
     expect(r.container.querySelector('.ryp-day-mark-legend')).not.toBeNull();
     // A training-only day: no Tour explainer.
     await r.click('Thursday, Nov 5');

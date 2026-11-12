@@ -160,6 +160,7 @@ import {
 // per date - every family surface reads the requirement from here.
 import { contractMinutesFor } from '../data/contractRule';
 import {
+  academyDateISO,
   addDaysISO,
   ageFromDob,
   bookingOpen,
@@ -598,8 +599,13 @@ async function resolveWaitlistRows(entries, sessionsById, today, anchorDay, curr
     .filter(Boolean);
 }
 
-/** Live payload for useSchedule - same shape as the seed branch produces. */
-async function liveSchedule(today) {
+/**
+ * Live payload for useSchedule - same shape as the seed branch produces.
+ * `periodToday` is the date the token period is judged on (the academy's,
+ * see useSchedule); `today` keeps the labels, `cancellable` and the
+ * upcoming/past split.
+ */
+async function liveSchedule(today, periodToday = today) {
   const ctx = await liveAthleteContext();
   // Contract v2.1, pin G: cancelled bookings are no longer dropped from the
   // list - they render with cancelledBy/cancelReason (the cancelled row
@@ -608,7 +614,7 @@ async function liveSchedule(today) {
   const anchorDay = normalizeAnchorDay(ctx.household?.periodAnchorDay);
   // The period the token meter reads (November before the season), so a
   // November booking is never "Next period" while the meter spends it.
-  const currentPeriodKey = positionPeriodFor(today, anchorDay).periodKey;
+  const currentPeriodKey = positionPeriodFor(periodToday, anchorDay).periodKey;
 
   const [waitlistEntries, graceTokens, tokenPeriod] = await Promise.all([
     fetchWaitlistByAthlete(ctx.athlete.id),
@@ -689,7 +695,7 @@ async function liveSchedule(today) {
     // Contract v2.1: now derived with the athlete's real grace tokens and
     // waitlist entries (pin B's `reserved`), not the Part 1 empty arrays.
     tokens: withGraceReasons(
-      deriveTokens(ctx.pkg, ctx.bookings, anchorDay, today, { graceTokens, waitlist: waitlistEntries, tokenPeriod, billingStatus: billingStatusOf(ctx.athlete) }),
+      deriveTokens(ctx.pkg, ctx.bookings, anchorDay, periodToday, { graceTokens, waitlist: waitlistEntries, tokenPeriod, billingStatus: billingStatusOf(ctx.athlete) }),
       graceTokens
     ),
   };
@@ -757,7 +763,7 @@ const SEED_DATES_PER_MONTH = 30;
  */
 const heldSessionIds = (bookings) => (bookings || []).filter((b) => b && b.status !== 'cancelled' && b.sessionId).map((b) => b.sessionId);
 
-async function liveBooking(today, { withSlots = true } = {}) {
+async function liveBooking(today, { withSlots = true, periodToday = today } = {}) {
   const who = await liveBookingIdentity();
   if (!withSlots) {
     const identity =
@@ -799,11 +805,11 @@ async function liveBooking(today, { withSlots = true } = {}) {
     // The position the booking check enforces: waitlist holds and bonus
     // tokens counted (fetchTokenInputs) - a single athlete's purchased
     // tokens among them.
-    const inputs = await fetchTokenInputs(athlete.id, athlete.householdId, anchorDay, today);
+    const inputs = await fetchTokenInputs(athlete.id, athlete.householdId, anchorDay, periodToday);
     // With the next period's count (2026-11-01): an athlete's own Book a
     // Session judges a next-period session by that period, as a parent's does.
     tokens = withGraceReasons(
-      tokensWithNextPeriod(pkg, bookings, anchorDay, today, { ...inputs, billingStatus: billingStatusOf(athlete) }),
+      tokensWithNextPeriod(pkg, bookings, anchorDay, periodToday, { ...inputs, billingStatus: billingStatusOf(athlete) }),
       inputs.graceTokens
     );
     bookedSessionIds = heldSessionIds(bookings);
@@ -882,7 +888,13 @@ function seedBookingId(sessionId) {
  * `practice: true` (onboarding) pins this hook to the seed source regardless
  * of the live flag — see the practice-mode invariant in the file header.
  */
-export function useSchedule({ variant = 'upcoming', today = todayISO(), practice = false } = {}) {
+export function useSchedule({ variant = 'upcoming', today: todayArg, practice = false } = {}) {
+  // The phone's day keeps the labels and the upcoming/past split; the
+  // academy's (academyDateISO) decides which token period is "this period",
+  // so a phone in another time zone never turns the period over at its own
+  // midnight. A caller's own `today` sets both.
+  const today = todayArg ?? todayISO();
+  const periodToday = todayArg ?? academyDateISO();
   // Practice short-circuits before isLive(): with practice set, the live
   // source below is unreachable and ./live.js never runs.
   const live = !practice && isLive();
@@ -892,7 +904,7 @@ export function useSchedule({ variant = 'upcoming', today = todayISO(), practice
   // Contract v2.0 pin N: items gain periodKey + nextPeriod, same as the live
   // branch - the seed athlete's own package/anchor stand in for the real
   // household's.
-  const currentPeriodKey = positionPeriodFor(today, PERIOD_ANCHOR_DAY).periodKey;
+  const currentPeriodKey = positionPeriodFor(periodToday, PERIOD_ANCHOR_DAY).periodKey;
 
   const resolve = (refs) =>
     refs
@@ -941,7 +953,7 @@ export function useSchedule({ variant = 'upcoming', today = todayISO(), practice
   const state = useSeedResource(
     demo || live ? null : { sessions, past, cancelled, tokens: TOKENS },
     demo ??
-      (live ? { source: () => liveSchedule(today), deps: ['schedule', today, bookingsGen] } : undefined)
+      (live ? { source: () => liveSchedule(today, periodToday), deps: ['schedule', today, periodToday, bookingsGen] } : undefined)
   );
 
   /**
@@ -993,7 +1005,10 @@ export function useSchedule({ variant = 'upcoming', today = todayISO(), practice
  * picker — the picker's own choices come from the existing
  * useHouseholdAthletes(), not duplicated here.
  */
-export function useBooking({ variant = 'open', today = todayISO(), practice = false, withSlots = true } = {}) {
+export function useBooking({ variant = 'open', today: todayArg, practice = false, withSlots = true } = {}) {
+  // The token period follows the academy's day, the dates and labels the phone's (see useSchedule).
+  const today = todayArg ?? todayISO();
+  const periodToday = todayArg ?? academyDateISO();
   // Practice short-circuits before isLive(): with practice set, the live
   // source below is unreachable, ./live.js never runs, and book() takes the
   // local (seed) branch — a practice booking cannot become a real one.
@@ -1056,11 +1071,11 @@ export function useBooking({ variant = 'open', today = todayISO(), practice = fa
       (live
         ? {
             source: async () => {
-              const { identity: id, ...payload } = await liveBooking(today, { withSlots });
+              const { identity: id, ...payload } = await liveBooking(today, { withSlots, periodToday });
               setIdentity(id);
               return payload;
             },
-            deps: ['booking', today, bookingsGen, sessionsGen, withSlots],
+            deps: ['booking', today, periodToday, bookingsGen, sessionsGen, withSlots],
           }
         : undefined)
   );
@@ -1429,7 +1444,7 @@ async function resolveSpecialistAthleteId(athleteIdOverride) {
  * "nothing to show before a pick" posture useBooking's own `tokens: null`
  * already has).
  */
-async function liveSpecialistSlots(specialistId, athleteIdOverride, today) {
+async function liveSpecialistSlots(specialistId, athleteIdOverride, today, periodToday = today) {
   const specialist = SPECIALIST_BY_ID.get(specialistId);
   const athleteId = await resolveSpecialistAthleteId(athleteIdOverride);
   if (!athleteId) {
@@ -1450,7 +1465,7 @@ async function liveSpecialistSlots(specialistId, athleteIdOverride, today) {
   const windowMonths = windowMonthsFor(pkg);
   const [rawDays, inputs] = await Promise.all([
     liveSpecialistDays(specialistId, today, windowMonths),
-    fetchTokenInputs(athleteId, athlete.householdId, anchorDay, today),
+    fetchTokenInputs(athleteId, athlete.householdId, anchorDay, periodToday),
   ]);
   // The sessions this athlete already waits for, each with its place when
   // the server says one: the sheet shows "On the waitlist", never Join again.
@@ -1467,7 +1482,7 @@ async function liveSpecialistSlots(specialistId, athleteIdOverride, today) {
     ),
   }));
   // The position the booking check enforces (fetchTokenInputs).
-  const tokens = withGraceReasons(tokensWithNextPeriod(pkg, bookings, anchorDay, today, inputs), inputs.graceTokens);
+  const tokens = withGraceReasons(tokensWithNextPeriod(pkg, bookings, anchorDay, periodToday, inputs), inputs.graceTokens);
   const capReached = specialistId === 'mental' && coachingFor(bookings, today, pkg).capReached;
   // Sprint 20 (spec 6.1): Calendly only when the registry says so AND a URL
   // is configured; otherwise the in-app list, so seed/emulator keep working.
@@ -1532,6 +1547,8 @@ function seedSpecialistAthlete(athleteId) {
 export function useSpecialistSlots(specialistId, { athleteId } = {}) {
   const live = isLive();
   const today = todayISO();
+  // The token position's period: the academy's day (see useSchedule).
+  const periodToday = academyDateISO();
   // Post-write invalidation seam (Sprint 6 pin), both collections per the
   // Sprint 9 pin: a booking or a cancel always bumps 'bookings' AND
   // 'sessions' together (createBooking/cancelBooking, live.js) - subscribing
@@ -1558,7 +1575,7 @@ export function useSpecialistSlots(specialistId, { athleteId } = {}) {
                 capReached: seedSpecialistCapReached(specialistId, athleteId, today, d.date.slice(0, 7)),
               }))
             : [],
-          tokens: specialistId ? seedSpecialistTokens(specialistId, athleteId, today) : null,
+          tokens: specialistId ? seedSpecialistTokens(specialistId, athleteId, periodToday) : null,
           capReached: specialistId ? seedSpecialistCapReached(specialistId, athleteId, today) : false,
           // Sprint 20 (contract 4.3, D9): seed is always the in-app list (no
           // Calendly URL in a jest/harness env), paid, open, one seed child of
@@ -1573,8 +1590,8 @@ export function useSpecialistSlots(specialistId, { athleteId } = {}) {
         },
     live && specialistId
       ? {
-          source: () => liveSpecialistSlots(specialistId, athleteId, today),
-          deps: ['specialist-slots', specialistId, athleteId, today, sessionsGen, bookingsGen, athletesGen],
+          source: () => liveSpecialistSlots(specialistId, athleteId, today, periodToday),
+          deps: ['specialist-slots', specialistId, athleteId, today, periodToday, sessionsGen, bookingsGen, athletesGen],
         }
       : undefined
   );
@@ -1716,7 +1733,7 @@ function shortWeekday(iso) {
  * household's periodAnchorDay, resolved once by the caller (liveHousehold)
  * rather than re-fetched per child.
  */
-async function liveChildCard(a, today, anchorDay) {
+async function liveChildCard(a, today, anchorDay, periodToday = today) {
   // Sprint 20 (load time): the four reads that depend only on the athlete doc
   // go out together - one round trip instead of four in a row per child.
   // Parent context: the compound filter is what makes the bookings read
@@ -1786,7 +1803,7 @@ async function liveChildCard(a, today, anchorDay) {
     handicap: handicapOf(a),
     loginEmail,
     login,
-    tokens: await homeTokens(a, pkg, bookings, anchorDay, today),
+    tokens: await homeTokens(a, pkg, bookings, anchorDay, periodToday),
   };
 }
 
@@ -1797,7 +1814,7 @@ async function liveChildCard(a, today, anchorDay) {
  * `status: 'ok'` here is the same documented placeholder useBillingSummary's
  * `status: 'active'` already uses, not a fabricated payment state.
  */
-async function liveHousehold(today) {
+async function liveHousehold(today, periodToday = today) {
   const profile = await fetchCurrentUser();
   if (!profile.householdId) {
     throw new LiveDataError(
@@ -1811,7 +1828,7 @@ async function liveHousehold(today) {
     fetchHouseholdAthletes(profile.householdId),
   ]);
   const anchorDay = normalizeAnchorDay(household.periodAnchorDay);
-  const children = await Promise.all(athletes.map((a) => liveChildCard(a, today, anchorDay)));
+  const children = await Promise.all(athletes.map((a) => liveChildCard(a, today, anchorDay, periodToday)));
   return {
     name: household.name ?? null,
     date: longDayLabel(today),
@@ -1825,6 +1842,8 @@ async function liveHousehold(today) {
 export function useHousehold({ variant = 'three', practice = false } = {}) {
   const live = !practice && isLive();
   const today = todayISO();
+  // Each card's token position: the academy's day (see useSchedule).
+  const periodToday = academyDateISO();
   // Post-write invalidation seam (Sprint 6 pin): a booking or a contract log
   // can change a child's card - re-run after either bumps. Sprint 10:
   // 'athletes' too - the contract's one-time stamp (ensureContractStart,
@@ -1850,8 +1869,8 @@ export function useHousehold({ variant = 'three', practice = false } = {}) {
     demo ??
       (live
         ? {
-            source: () => liveHousehold(today),
-            deps: ['household', today, bookingsGen, contractLogsGen, athletesGen],
+            source: () => liveHousehold(today, periodToday),
+            deps: ['household', today, periodToday, bookingsGen, contractLogsGen, athletesGen],
           }
         : undefined)
   );
@@ -1917,7 +1936,9 @@ async function liveHouseholdAthletes(today) {
  */
 export function useHouseholdAthletes() {
   const live = isLive();
-  const today = todayISO();
+  // The only date read here is the token position's: the academy's day
+  // (see useSchedule), so liveHouseholdAthletes' `today` is that one.
+  const periodToday = academyDateISO();
   // Post-write invalidation seam (Sprint 6 pin): a new booking changes a
   // child's token position - re-run after any bookings write, including one
   // made through useBooking's book() for this same child. Sprint 10:
@@ -1938,7 +1959,7 @@ export function useHouseholdAthletes() {
   return useSeedResource(
     live ? null : seedRows,
     live
-      ? { source: () => liveHouseholdAthletes(today), deps: ['household-athletes', bookingsGen, athletesGen] }
+      ? { source: () => liveHouseholdAthletes(periodToday), deps: ['household-athletes', periodToday, bookingsGen, athletesGen] }
       : undefined
   );
 }
@@ -2050,7 +2071,7 @@ function seedMemberTokens(child, today) {
 
 /** One useMembership member row for a seed child - same field set the live
  * branch (liveMemberEntry below) produces. */
-function seedMemberEntry(child, today) {
+function seedMemberEntry(child, today, periodToday = today) {
   const pkg = packageById(child.packageId);
   return {
     athleteId: child.id,
@@ -2061,10 +2082,10 @@ function seedMemberEntry(child, today) {
     package: pkg
       ? { id: pkg.id, name: pkg.name, price: pkg.price ?? null, pending: pkg.pending ?? false, tokens: pkg.tokens ?? null, kind: pkg.kind ?? null }
       : null,
-    tokens: seedMemberTokens(child, today),
+    tokens: seedMemberTokens(child, periodToday),
     coaching: coachingFor(seedMemberBookingRows(child, today), today, pkg),
     contractMinutes: SEED_CONTRACT_MINUTES[child.id] ?? contractMinutesFor(child, today),
-    periodEnd: periodFor(today, PERIOD_ANCHOR_DAY).periodEnd,
+    periodEnd: periodFor(periodToday, PERIOD_ANCHOR_DAY).periodEnd, // the meter's period, as tokens
   };
 }
 
@@ -2074,9 +2095,10 @@ function seedMemberEntry(child, today) {
  * useBillingSummary already follows) plus the full token position off the
  * athlete's real bookings this period.
  */
-async function liveMemberEntry(a, today, anchorDay) {
-  // The grant read is the first (prepaid) period's before the season.
-  const { periodKey, periodEnd } = positionPeriodFor(today, anchorDay);
+async function liveMemberEntry(a, today, anchorDay, periodToday = today) {
+  // The grant read is the first (prepaid) period's before the season;
+  // `periodToday` is the academy's day (see useSchedule).
+  const { periodKey, periodEnd } = positionPeriodFor(periodToday, anchorDay);
   const [pkg, bookings, graceTokens, waitlistEntries, tokenPeriod, nextTokenPeriod] = await Promise.all([
     a.packageId ? fetchPackage(a.packageId) : null,
     fetchBookings(a.id, { householdId: a.householdId }),
@@ -2126,13 +2148,13 @@ async function liveMemberEntry(a, today, anchorDay) {
     // the `reason` field the hook seam wants that tokensFor's own output
     // does not carry.
     tokens: withGraceReasons(
-      tokensWithNextPeriod(pkg, bookings, anchorDay, today, { graceTokens, waitlist: waitlistEntries, tokenPeriod, nextTokenPeriod }),
+      tokensWithNextPeriod(pkg, bookings, anchorDay, periodToday, { graceTokens, waitlist: waitlistEntries, tokenPeriod, nextTokenPeriod }),
       graceTokens
     ),
     coaching: coachingFor(bookings, today, pkg),
     // The requirement today (owner's rule, 2026-10-28), never the stored tier.
     contractMinutes: contractMinutesFor(a, today),
-    periodEnd: periodFor(today, anchorDay).periodEnd,
+    periodEnd: periodFor(periodToday, anchorDay).periodEnd, // the meter's period, as tokens
   };
 }
 
@@ -2143,13 +2165,13 @@ async function liveMemberEntry(a, today, anchorDay) {
  * for a parent. Whichever role, screens cannot tell (the pinned shape is
  * identical either way).
  */
-async function liveMembership(today) {
+async function liveMembership(today, periodToday = today) {
   const profile = await fetchCurrentUser();
   if (profile.athleteId) {
     const athlete = await fetchAthlete(profile.athleteId);
     const household = athlete.householdId ? await fetchHousehold(athlete.householdId) : null;
     const anchorDay = normalizeAnchorDay(household?.periodAnchorDay);
-    return { household: null, members: [await liveMemberEntry(athlete, today, anchorDay)] };
+    return { household: null, members: [await liveMemberEntry(athlete, today, anchorDay, periodToday)] };
   }
   if (profile.householdId) {
     const [household, athletes] = await Promise.all([
@@ -2157,7 +2179,7 @@ async function liveMembership(today) {
       fetchHouseholdAthletes(profile.householdId),
     ]);
     const anchorDay = normalizeAnchorDay(household.periodAnchorDay);
-    const members = await Promise.all(athletes.map((a) => liveMemberEntry(a, today, anchorDay)));
+    const members = await Promise.all(athletes.map((a) => liveMemberEntry(a, today, anchorDay, periodToday)));
     return {
       household: {
         id: household.id,
@@ -2195,10 +2217,12 @@ async function liveMembership(today) {
 export function useMembership() {
   const live = isLive();
   const today = todayISO();
+  // Tokens and periodEnd: the academy's day (see useSchedule).
+  const periodToday = academyDateISO();
   const bookingsGen = useInvalidation('bookings');
   const athletesGen = useInvalidation('athletes');
 
-  const seedMembers = HOUSEHOLD.children.map((c) => seedMemberEntry(c, today));
+  const seedMembers = HOUSEHOLD.children.map((c) => seedMemberEntry(c, today, periodToday));
 
   return useSeedResource(
     live
@@ -2218,7 +2242,7 @@ export function useMembership() {
           members: seedMembers,
         },
     live
-      ? { source: () => liveMembership(today), deps: ['membership', today, bookingsGen, athletesGen] }
+      ? { source: () => liveMembership(today, periodToday), deps: ['membership', today, periodToday, bookingsGen, athletesGen] }
       : undefined
   );
 }
@@ -2383,7 +2407,7 @@ function reservationRow(s, b, today, instructor, anchorDay, currentPeriodKey) {
  * date) [DATA-MODEL.md index 3, fetchHouseholdBookings], joined to sessions
  * for display facts, grouped per household member into upcoming/past.
  */
-async function liveHouseholdReservations(today) {
+async function liveHouseholdReservations(today, periodToday = today) {
   const profile = await fetchCurrentUser();
   if (!profile.householdId) {
     throw new LiveDataError(
@@ -2398,7 +2422,7 @@ async function liveHouseholdReservations(today) {
     fetchWaitlistByHousehold(profile.householdId),
   ]);
   const anchorDay = normalizeAnchorDay(household.periodAnchorDay);
-  const currentPeriodKey = positionPeriodFor(today, anchorDay).periodKey; // the meter's period, as liveSchedule
+  const currentPeriodKey = positionPeriodFor(periodToday, anchorDay).periodKey; // the meter's period, as liveSchedule
   // Contract v2.1, pin G: cancelled bookings are no longer dropped - every
   // status renders, with cancelReason/cancelledBy on the cancelled ones.
   const sessionsById = new Map(
@@ -2448,8 +2472,8 @@ async function liveHouseholdReservations(today) {
  * branch resolves (never a second, independently invented booking list);
  * nico gets WAITLIST_ENTRY's row (contract v2.1, pin F); reese gets the
  * honest empty state the pin's UI section calls for. */
-function seedReservationMember(child, today) {
-  const currentPeriodKey = positionPeriodFor(today, PERIOD_ANCHOR_DAY).periodKey;
+function seedReservationMember(child, today, periodToday = today) {
+  const currentPeriodKey = positionPeriodFor(periodToday, PERIOD_ANCHOR_DAY).periodKey;
   if (child.id === WAITLIST_ENTRY.athleteId) {
     const s = resolveBooking(WAITLIST_ENTRY.sessionRef);
     const upcoming = s
@@ -2506,17 +2530,19 @@ function seedReservationMember(child, today) {
 export function useHouseholdReservations() {
   const live = isLive();
   const today = todayISO();
+  // "Next period" on a row is judged by the academy's day (see useSchedule).
+  const periodToday = academyDateISO();
   const bookingsGen = useInvalidation('bookings');
 
   const seedMembers = HOUSEHOLD.children.map((c) => ({
-    ...seedReservationMember(c, today),
+    ...seedReservationMember(c, today, periodToday),
     unlimited: packageById(c.packageId)?.tokens === null, // as the live branch
   }));
 
   const state = useSeedResource(
     live ? null : { members: seedMembers },
     live
-      ? { source: () => liveHouseholdReservations(today), deps: ['household-reservations', today, bookingsGen] }
+      ? { source: () => liveHouseholdReservations(today, periodToday), deps: ['household-reservations', today, periodToday, bookingsGen] }
       : undefined
   );
 
@@ -2905,7 +2931,7 @@ function contractWindowFor(a) {
  * session. The contract mini-card reuses buildContractMonthFromLogs, the
  * same builder liveContract() (below) uses for the full screen.
  */
-async function liveAthleteDashboard(today) {
+async function liveAthleteDashboard(today, periodToday = today) {
   const ctx = await liveAthleteContext();
   const active = ctx.bookings.filter((b) => b.status !== 'cancelled');
   const upcoming = active.filter((b) => b.date >= today).sort(byDateThenId);
@@ -2915,7 +2941,7 @@ async function liveAthleteDashboard(today) {
   const [nextSessions, logs, tokens] = await Promise.all([
     upcoming.length ? fetchSessionsByIds([upcoming[0].sessionId]) : Promise.resolve([]),
     fetchContractLogs(ctx.athlete.id),
-    homeTokens(ctx.athlete, ctx.pkg, ctx.bookings, normalizeAnchorDay(ctx.household?.periodAnchorDay), today),
+    homeTokens(ctx.athlete, ctx.pkg, ctx.bookings, normalizeAnchorDay(ctx.household?.periodAnchorDay), periodToday),
   ]);
 
   let nextSession = null;
@@ -2965,7 +2991,10 @@ async function liveAthleteDashboard(today) {
 }
 
 /** GET /athletes/:id + next session + contract summary (03). */
-export function useAthleteDashboard({ variant = 'populated', today = todayISO(), practice = false } = {}) {
+export function useAthleteDashboard({ variant = 'populated', today: todayArg, practice = false } = {}) {
+  // The home meter's period follows the academy's day (see useSchedule).
+  const today = todayArg ?? todayISO();
+  const periodToday = todayArg ?? academyDateISO();
   // Practice pins the seed branch (onboarding invariant; QA 2026-09-08: the
   // walkthrough's dashboard preview errored while signed out).
   const live = !practice && isLive();
@@ -3013,8 +3042,8 @@ export function useAthleteDashboard({ variant = 'populated', today = todayISO(),
     demo ??
       (live
         ? {
-            source: () => liveAthleteDashboard(today),
-            deps: ['athlete-dashboard', today, bookingsGen, contractLogsGen, athletesGen],
+            source: () => liveAthleteDashboard(today, periodToday),
+            deps: ['athlete-dashboard', today, periodToday, bookingsGen, contractLogsGen, athletesGen],
           }
         : undefined)
   );

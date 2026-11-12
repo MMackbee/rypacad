@@ -739,3 +739,206 @@ describe('waitlist hardening on the Phil screen', () => {
     });
   });
 });
+
+describe("Yannick's monthly cap is judged per month (K04, checklist 2026-11-04)", () => {
+  // Wed Nov 4 2026, 10 AM Chicago: a token window reaches Dec 31.
+  const mentalOn = (date, dayLabel, capReached) => ({ date, dayLabel, capReached, slots: [{ sessionId: `m-${date}`, time: '4:00 PM', open: true, capacity: 1, booked: 0, durationMinutes: 30 }] });
+  const emptyOn = (date, capReached) => ({ date, dayLabel: date, capReached, slots: [] });
+  const slotCard = (r) => [...r.container.querySelectorAll('div')].find((el) => el.textContent.startsWith('4:00') && el.textContent.includes('Mental')) || null;
+  const inApp = { bookingMode: 'in-app', calendlyUrl: null, bookingOpen: true };
+  beforeEach(() => {
+    jest.useFakeTimers('modern');
+    jest.setSystemTime(new Date('2026-11-04T16:00:00Z'));
+    mockMembers = [{ athleteId: 'a1', package: { id: 't-8', kind: 'tokens' } }];
+  });
+  afterEach(() => { jest.useRealTimers(); });
+
+  test('one November booking leaves December open: the December time is tappable and books', async () => {
+    mockSlots.data = { ...mockSlots.data, ...inApp, capReached: true,
+      days: [emptyOn('2026-11-04', true), mentalOn('2026-12-01', 'Tue, Dec 1', false)] };
+    const r = await renderScreen(<SpecialistBooking bare initialSpecialist="mental" />);
+    expect(r.text()).not.toContain('mental game cap is booked');
+    expect(r.text()).not.toContain('opens Dec 1');
+    const card = slotCard(r);
+    expect(card.style.cursor).toBe('pointer');
+    await act(async () => { card.click(); });
+    expect(r.button('Reserve').disabled).toBe(false);
+    await r.click('Reserve');
+    await r.flush();
+    expect(mockBooked).toEqual([{ id: 'm-2026-12-01', date: '2026-12-01', type: 'mental' }]);
+    await r.unmount();
+  });
+
+  test('the booked month stays closed under its banner; stepping to December opens it', async () => {
+    mockSlots.data = { ...mockSlots.data, ...inApp, capReached: true,
+      days: [mentalOn('2026-11-10', 'Tue, Nov 10', true), mentalOn('2026-12-01', 'Tue, Dec 1', false)] };
+    const r = await renderScreen(<SpecialistBooking bare initialSpecialist="mental" />);
+    // Review 2026-11-04 (round 2): the banner names its month.
+    expect(r.text()).toContain("November's mental game cap is booked");
+    expect(r.text()).toContain('Next mental game session opens Dec 1.');
+    expect(slotCard(r).style.cursor).not.toBe('pointer');
+    await r.click('Next month');
+    await act(async () => { r.container.querySelector('td[data-date="2026-12-01"]').click(); });
+    expect(r.text()).not.toContain('mental game cap is booked');
+    expect(slotCard(r).style.cursor).toBe('pointer');
+    await r.unmount();
+  });
+
+  test('a booked December is named, opens Jan 1, and leaves November alone', async () => {
+    mockSlots.data = { ...mockSlots.data, ...inApp, capReached: false,
+      days: [emptyOn('2026-11-04', false), mentalOn('2026-12-01', 'Tue, Dec 1', true)] };
+    const r = await renderScreen(<SpecialistBooking bare initialSpecialist="mental" />);
+    expect(slotCard(r).style.cursor).not.toBe('pointer');
+    expect(r.text()).toContain("December's mental game cap is booked. Next mental game session opens Jan 1.");
+    expect(r.text()).not.toContain("November's mental game cap is booked");
+    await r.unmount();
+  });
+
+  test("a December refusal on Nov 4 names Jan 1, the month after the session's", async () => {
+    mockBook = async () => { throw Object.assign(new Error("Yannick's sessions are limited to 1 a month, already booked this month."), { reason: 'cap-reached' }); };
+    mockSlots.data = { ...mockSlots.data, ...inApp, capReached: false,
+      days: [emptyOn('2026-11-04', false), mentalOn('2026-12-01', 'Tue, Dec 1', false)] };
+    const r = await renderScreen(<SpecialistBooking bare initialSpecialist="mental" />);
+    await act(async () => { slotCard(r).click(); });
+    await r.click('Reserve');
+    await r.flush();
+    expect(r.text()).toContain('Next mental game session opens Jan 1. Nothing was reserved');
+    expect(r.text()).not.toContain('opens Dec 1');
+    await r.unmount();
+  });
+
+  test("the gallery's cap preview (demoCapReached) still closes every day under the banner", async () => {
+    mockSlots.data = { ...mockSlots.data, ...inApp, capReached: false,
+      days: [mentalOn('2026-11-10', 'Tue, Nov 10', false), mentalOn('2026-12-01', 'Tue, Dec 1', false)] };
+    const r = await renderScreen(<SpecialistBooking bare initialSpecialist="mental" demoCapReached />);
+    expect(r.text()).toContain("November's mental game cap is booked");
+    expect(slotCard(r).style.cursor).not.toBe('pointer');
+    await r.unmount();
+  });
+
+  test("a picked January the reloaded days don't cover is not judged by November", async () => {
+    // A parent's Elite child picks Jan 5, then the list reloads with a window
+    // ending Dec 31 (another child): today's November flag is not January's.
+    mockMembers = [{ athleteId: 'a1', package: { id: 'elite', kind: 'elite' } }];
+    mockSlots.data = { ...mockSlots.data, ...inApp, capReached: true,
+      days: [emptyOn('2026-11-04', true), mentalOn('2026-12-01', 'Tue, Dec 1', false), mentalOn('2027-01-05', 'Tue, Jan 5', false)] };
+    const r = await renderScreen(<SpecialistBooking bare initialSpecialist="mental" />);
+    await r.click('Next month');
+    await act(async () => { r.container.querySelector('td[data-date="2027-01-05"]').click(); });
+    mockSlots.data = { ...mockSlots.data, days: [emptyOn('2026-11-04', true), mentalOn('2026-12-01', 'Tue, Dec 1', false)] };
+    await r.rerender(<SpecialistBooking bare initialSpecialist="mental" />);
+    expect(r.text()).not.toContain("January's mental game cap is booked");
+    expect(r.text()).not.toContain("November's mental game cap is booked");
+    await r.unmount();
+  });
+
+  test('Calendly: a booked November keeps the button while December is open, and says to pick December', async () => {
+    mockSlots.data = { ...mockSlots.data, bookingMode: 'calendly', calendlyUrl: 'https://calendly.com/ryp/mental', capReached: true,
+      days: [emptyOn('2026-11-04', true), emptyOn('2026-12-01', false)] };
+    const r = await renderScreen(<SpecialistBooking bare initialSpecialist="mental" />);
+    expect(r.button('Book with Yannick')).not.toBeNull();
+    expect(r.text()).not.toContain('Not yet');
+    // Review 2026-11-04 (round 2): and what a November time would do.
+    expect(r.text()).toContain("November's mental game cap is booked. Pick a time in December - another November time would go over the monthly limit.");
+    await r.unmount();
+
+    // December booked too: the gate closes, and both banners name the 1st
+    // after the last booked month - Jan 1, never Dec 1 (review 2026-11-04).
+    mockSlots.data = { ...mockSlots.data, days: [emptyOn('2026-11-04', true), emptyOn('2026-12-01', true)] };
+    const closed = await renderScreen(<SpecialistBooking bare initialSpecialist="mental" />);
+    expect(closed.button('Book with Yannick')).toBeNull();
+    expect(closed.text()).toContain("November's mental game cap is booked");
+    expect(closed.text().split('Next mental game session opens Jan 1.')).toHaveLength(3);
+    expect(closed.text()).not.toContain('opens Dec 1');
+    expect(closed.text()).not.toContain('Pick a time in');
+    await closed.unmount();
+
+    // No days in hand (none loaded): today's month alone, as before.
+    mockSlots.data = { ...mockSlots.data, days: [] };
+    const none = await renderScreen(<SpecialistBooking bare initialSpecialist="mental" />);
+    expect(none.button('Book with Yannick')).toBeNull();
+    await none.unmount();
+  });
+
+  test("Calendly: a booked November with December's tokens spent - no button, and no December time offered (review 2026-11-04)", async () => {
+    const dec = { periodKey: '2026-12-01', periodEnd: '2026-12-31', granted: 8, booked: 8, used: 8, reserved: 0, left: 0 };
+    mockSlots.data = { ...mockSlots.data, bookingMode: 'calendly', calendlyUrl: 'https://calendly.com/ryp/mental', capReached: true,
+      tokens: { granted: 8, used: 5, reserved: 0, left: 3, unlimited: false, perPurchase: false, grace: [], nextPeriod: dec },
+      days: [emptyOn('2026-11-04', true), emptyOn('2026-12-01', false), emptyOn('2026-12-31', false)] };
+    const r = await renderScreen(<SpecialistBooking bare initialSpecialist="mental" />);
+    expect(r.button('Book with Yannick')).toBeNull();
+    expect(r.text()).not.toContain('Pick a time in');
+    expect(r.text()).toContain("November's mental game cap is booked");
+    expect(r.text()).toContain('No December tokens left - a December time would go over your package.');
+    expect(r.text()).toContain('December: 0 of 8 left');
+    await r.unmount();
+  });
+
+  test('Calendly in February: a booked February offers no March - the season ends Feb 27 (review 2026-11-04)', async () => {
+    jest.setSystemTime(new Date('2027-02-10T16:00:00Z'));
+    // The days run to the window's end (Mar 31): the hook does not stop at the season.
+    mockSlots.data = { ...mockSlots.data, bookingMode: 'calendly', calendlyUrl: 'https://calendly.com/ryp/mental', capReached: true,
+      days: [emptyOn('2027-02-10', true), emptyOn('2027-02-27', true), emptyOn('2027-02-28', true), emptyOn('2027-03-01', false), emptyOn('2027-03-31', false)] };
+    const r = await renderScreen(<SpecialistBooking bare initialSpecialist="mental" />);
+    expect(r.button('Book with Yannick')).toBeNull();
+    expect(r.text()).not.toContain('March');
+    expect(r.text()).not.toContain('Mar 1');
+    expect(r.text()).toContain("February's mental game cap is booked");
+    expect(r.text()).toContain('The season ends Saturday, Feb 27, so there is no later month to book.');
+    await r.unmount();
+  });
+});
+
+// Review 2026-11-04 (round 2): the Calendly panel kept its own next-period
+// check, so from midnight to 7 AM on Dec 1 it showed the button and "Pick a
+// time in January" beside "January: 6 of 6 left - opens 7 AM today"; and the
+// summary turned to the red "No tokens left" for those hours.
+describe('Calendly on Dec 1 with December spent: January only from 7 AM Chicago', () => {
+  const jan = { periodKey: '2027-01-01', periodEnd: '2027-01-31', granted: 6, booked: 0, used: 0, reserved: 0, left: 6 };
+  const decSpent = { granted: 6, used: 6, reserved: 0, left: 0, unlimited: false, perPurchase: false, grace: [], nextPeriod: jan };
+  const emptyOn = (date) => ({ date, dayLabel: date, capReached: false, slots: [] });
+  beforeEach(() => {
+    jest.useFakeTimers('modern');
+    mockMembers = [{ athleteId: 'a1', package: { id: 't-6', kind: 'tokens' } }];
+  });
+  afterEach(() => { jest.useRealTimers(); });
+
+  test('6:59 AM: no button and no January time; the panel says when January opens, the summary stays December-used', async () => {
+    jest.setSystemTime(new Date('2026-12-01T12:59:00Z'));
+    // The window still ends Dec 31 (openThrough), so the days stop there.
+    mockSlots.data = { ...mockSlots.data, tokens: decSpent, days: [emptyOn('2026-12-01'), emptyOn('2026-12-31')] };
+    const r = await renderScreen(<SpecialistBooking bare initialSpecialist="mental" />);
+    expect(r.button('Book with Yannick')).toBeNull();
+    expect(r.text()).not.toContain('Pick a time in');
+    expect(r.text()).toContain('December tokens used. January opens for booking at 7 AM today.');
+    expect(r.text()).toContain('January: 6 of 6 left - opens 7 AM today');
+    expect(r.text()).not.toContain('No tokens left');
+    await r.unmount();
+  });
+
+  test('7:00 AM: the button, and the panel says to pick a January time', async () => {
+    jest.setSystemTime(new Date('2026-12-01T13:00:00Z'));
+    mockSlots.data = { ...mockSlots.data, tokens: decSpent, days: [emptyOn('2026-12-01'), emptyOn('2026-12-31'), emptyOn('2027-01-02'), emptyOn('2027-01-31')] };
+    const r = await renderScreen(<SpecialistBooking bare initialSpecialist="mental" />);
+    expect(r.button('Book with Yannick')).not.toBeNull();
+    expect(r.text()).not.toContain('Not yet');
+    expect(r.text()).toContain("This period's tokens are used. Pick a time in January: a time before then would go over your package.");
+    expect(r.text()).toContain('January: 6 of 6 left');
+    expect(r.text()).not.toContain('opens 7 AM');
+    await r.unmount();
+  });
+
+  test('no days in hand: the same clock decides', async () => {
+    mockSlots.data = { ...mockSlots.data, tokens: decSpent, days: [] };
+    jest.setSystemTime(new Date('2026-12-01T12:59:00Z'));
+    const early = await renderScreen(<SpecialistBooking bare initialSpecialist="mental" />);
+    expect(early.button('Book with Yannick')).toBeNull();
+    expect(early.text()).not.toContain('Pick a time in');
+    await early.unmount();
+    jest.setSystemTime(new Date('2026-12-01T13:00:00Z'));
+    const open = await renderScreen(<SpecialistBooking bare initialSpecialist="mental" />);
+    expect(open.button('Book with Yannick')).not.toBeNull();
+    expect(open.text()).toContain('Pick a time in January');
+    await open.unmount();
+  });
+});

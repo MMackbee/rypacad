@@ -62,6 +62,15 @@ function displayNameFor(session) {
   return session.label || (session.type === 'tournament' ? 'Tour event' : 'Training block');
 }
 
+/**
+ * The confirmation's When: "Tuesday, Dec 1 · 4:00 PM". `booked` keeps the
+ * time split for the calendar link and Repeat weekly; the meridiem rejoins
+ * here (concern 2026-11-04: the card read "4:00" with no AM or PM).
+ */
+function whenLabel(booked) {
+  return `${booked.dayLabel} · ${[booked.time, booked.meridiem].filter(Boolean).join(' ')}`;
+}
+
 /** First-of-month ISO, shifted by whole months — day-of-month is always 1. */
 // shiftMonth/MonthNav moved to components/MonthCalendar.js (code review
 // 2026-09-04): shared calendar plumbing lives in components/, not in a
@@ -257,7 +266,7 @@ export default function BookSession({
     if (booked && onConfirmed) {
       onConfirmed({
         name: booked.name,
-        when: `${booked.dayLabel} · ${booked.time}`,
+        when: whenLabel(booked),
       });
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -421,7 +430,7 @@ export default function BookSession({
         bare={bare}
         confirmation={{
           name: booked.name,
-          when: `${booked.dayLabel} · ${booked.time}`,
+          when: whenLabel(booked),
           // The charge the write made, when it said; else the screen's own read.
           spendLabel: chargeLabelFor(booked) ?? spendLabelFor(tokens),
           // Practice mode sends nothing to anyone - the seed guardian email

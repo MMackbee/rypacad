@@ -1,6 +1,6 @@
 import React from 'react';
 import { renderScreen } from '../screens/testRender';
-import { CALENDLY_MANAGED_COPY, LockedDayNotice, canRetry, cancelReasonCopy, reasonCopy } from './BookingReasons';
+import { CALENDLY_MANAGED_COPY, LockedDayNotice, canRetry, cancelReasonCopy, capMonthCopy, capOpensCopy, capPickCopy, capReachedCopy, reasonCopy } from './BookingReasons';
 
 describe('Sprint 20 booking reasons (contract 3.6)', () => {
   test('billing pending', () => {
@@ -95,6 +95,61 @@ describe('LockedDayNotice and the Oct 10 gate (UX review #8; whole-month window,
     // No gateOpen passed reads as open (the pre-existing behaviour); no windowMonths passed reads as one month.
     expect(await notice({ date: '2026-11-03', windowMonths: 1 })).toContain('opens 7 AM on Thursday, Oct 1.');
     expect(await notice({ date: '2027-01-07' })).toContain('Booking for Thursday, Jan 7 opens 7 AM on Tuesday, Dec 1.');
+  });
+});
+
+describe("Yannick's cap copy names the session's month (K04, checklist 2026-11-04)", () => {
+  // Wed Nov 4 2026, 10 AM Chicago.
+  beforeEach(() => {
+    jest.useFakeTimers('modern');
+    jest.setSystemTime(new Date('2026-11-04T16:00:00Z'));
+  });
+  afterEach(() => { jest.useRealTimers(); });
+
+  test('a December session opens Jan 1, by day or by month; no date reads today', () => {
+    expect(capReachedCopy('2026-12-15')).toBe('Next mental game session opens Jan 1.');
+    expect(capReachedCopy('2026-12')).toBe('Next mental game session opens Jan 1.');
+    expect(capReachedCopy()).toBe('Next mental game session opens Dec 1.');
+    expect(capReachedCopy(null)).toBe('Next mental game session opens Dec 1.');
+    // The refusal of a December booking on Nov 4: Dec 1 is the wrong day.
+    expect(reasonCopy('cap-reached', { date: '2026-12-01' })).toBe('Next mental game session opens Jan 1.');
+    expect(reasonCopy('cap-reached')).toBe('Next mental game session opens Dec 1.');
+  });
+
+  test('a later booked month by name, and the month Calendly should be picked in', () => {
+    expect(capMonthCopy('2026-12-01')).toBe("December's mental game cap is booked. Next mental game session opens Jan 1.");
+    // Review 2026-11-04 (round 2): the pick says what a time before then would do.
+    expect(capPickCopy(['2026-11'], '2026-12-01')).toBe("November's mental game cap is booked. Pick a time in December - another November time would go over the monthly limit.");
+  });
+});
+
+// Review 2026-11-04 (round 2): with November AND December booked the copy said
+// "opens Dec 1"; and in February it named March, after the season's last day.
+describe("the cap's next month: past a run of booked months, and never past the season", () => {
+  test('the 1st after the last booked month in a row', () => {
+    expect(capOpensCopy('2026-11', ['2026-11'])).toBe('Next mental game session opens Dec 1.');
+    expect(capOpensCopy('2026-11-04', ['2026-11', '2026-12'])).toBe('Next mental game session opens Jan 1.');
+    // A gap ends the run: a booked January leaves a free December first.
+    expect(capOpensCopy('2026-11', ['2026-11', '2027-01'])).toBe('Next mental game session opens Dec 1.');
+    // Nothing else known: the month after the given one, as capReachedCopy says.
+    expect(capOpensCopy('2026-12-01')).toBe('Next mental game session opens Jan 1.');
+  });
+
+  test('February is the last month: the season end, never "Mar 1"', () => {
+    const END = 'The season ends Saturday, Feb 27, so there is no later month to book.';
+    expect(capOpensCopy('2027-02', ['2027-02'])).toBe(END);
+    expect(capOpensCopy('2027-01', ['2027-01', '2027-02'])).toBe(END);
+    expect(capMonthCopy('2027-02-10', ['2027-02'])).toBe(`February's mental game cap is booked. ${END}`);
+  });
+
+  test('a later booked month by name, past any run after it', () => {
+    expect(capMonthCopy('2026-12-01', ['2026-12'])).toBe("December's mental game cap is booked. Next mental game session opens Jan 1.");
+    expect(capMonthCopy('2026-12-01', ['2026-12', '2027-01'])).toBe("December's mental game cap is booked. Next mental game session opens Feb 1.");
+  });
+
+  test('Calendly: the month to pick, and why not before it', () => {
+    expect(capPickCopy(['2026-11'], '2026-12-15')).toBe("November's mental game cap is booked. Pick a time in December - another November time would go over the monthly limit.");
+    expect(capPickCopy(['2026-11', '2026-12'], '2027-01-04')).toBe("November's and December's mental game caps are booked. Pick a time in January - an earlier time would go over the monthly limit.");
   });
 });
 

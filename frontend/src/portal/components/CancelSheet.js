@@ -3,6 +3,7 @@ import { color, radius, tint } from '../tokens';
 import Button from './Button';
 import { Body, ScreenTitle } from './Primitives';
 import { seriesOffer, seriesSummary } from '../hooks/cancelSeries';
+import { cancelFailureCopy } from '../data/cancelCopy';
 
 /**
  * `keepFirst` only: how long after the sheet opens a confirm tap is still the
@@ -20,7 +21,10 @@ export const SETTLE_MS = 500;
  *
  * Restates the session's own facts so the tap being confirmed is unambiguous,
  * and never closes itself on failure — a failed cancel leaves the booking
- * exactly as it was, sheet open, honest inline error.
+ * exactly as it was, sheet open, honest inline error. Honest, not raw
+ * (2026-11-04): a parent read "cancelBooking: Missing or insufficient
+ * permissions." here, so a raw failure is put in plain words first
+ * (data/cancelCopy.js) - see onConfirm below.
  *
  * Sprint 13 (contract v2.1): Roster.js's staff-only "Cancel session" action
  * (pin E) reuses this same sheet for its confirm step — the copy differs
@@ -28,6 +32,9 @@ export const SETTLE_MS = 500;
  * bookings cancelled, grace tokens minted) but the never-close-on-failure/
  * honest-inline-error behavior is identical, so `title`/`confirmLabel`/
  * `keepLabel` are now overridable rather than duplicating the sheet.
+ * Its failure is staff's own (2026-11-04): Roster passes `failureCopy`, so
+ * staff read the session wording, the underlying message and that a re-run
+ * is safe, never the family line about contacting the academy.
  *
  * Cancel a series (tester Mike, 2026-09-30): when the booking has later
  * weeks (`laterWeeks`, hooks/cancelSeries.js) the sheet offers "Cancel just
@@ -64,9 +71,17 @@ export const SETTLE_MS = 500;
  *   and focused when the sheet opens, and no confirm taken in the sheet's
  *   first half second. Defaults to false: keep last, no focus moved, a
  *   confirm taken at once.
- * @param {() => Promise<any>} onConfirm  Must reject with a human-readable
- *   `.message` on failure — this sheet renders it verbatim, never a generic
- *   "something went wrong".
+ * @param {() => Promise<any>} onConfirm  Rejects on failure. A refusal worded
+ *   for families (live.js's "This booking no longer exists.", a caller's own
+ *   plain Error) is shown as it is, so nothing actionable is hidden; a raw
+ *   one (a rules denial, a lost connection, a signed-out tab, SDK text or
+ *   wrap()'s "cancelBooking: " prefix) is shown in plain words instead -
+ *   cancelFailureCopy, by the error's code first. The same goes for a series
+ *   run and each reason line of its summary.
+ * @param {(err: any) => string} [failureCopy]  The words for a failed
+ *   onConfirm in place of the family wording above - Roster's staff "Cancel
+ *   session" passes data/cancelCopy.js#staffCancelSessionFailureCopy. The
+ *   series path keeps the family wording (only families have series).
  * @param {() => void} onClose  Fires from the keep button and the overlay tap.
  * @param {() => void} onCancelled  Fires after onConfirm resolves, and from
  *   "Done" on the series summary.
@@ -75,6 +90,7 @@ export const SETTLE_MS = 500;
  *   the booking and its later weeks; resolves with its result.
  */
 export default function CancelSheet({
+  failureCopy,
   title = 'Cancel this reservation?',
   summary,
   confirmLabel = 'Cancel reservation',
@@ -95,7 +111,14 @@ export default function CancelSheet({
   // When the sheet opened. Only keepFirst reads it.
   const openedAt = useRef(Date.now());
   const offer = onConfirmSeries ? seriesOffer(laterWeeks) : null;
-  const done = result ? seriesSummary(result) : null;
+  // A summary row keeps only its message, so its reason is put in plain words by the text.
+  const done = result
+    ? seriesSummary({
+        ...result,
+        failed: (result.failed ?? []).map((f) => ({ ...f, message: cancelFailureCopy(f, 'week') })),
+        stopped: result.stopped && { ...result.stopped, message: cancelFailureCopy(result.stopped, 'week') },
+      })
+    : null;
 
   const handleSeries = async () => {
     setSaving('series');
@@ -105,15 +128,11 @@ export default function CancelSheet({
       setSaving(false);
       // Stopped before anything was cancelled: nothing changed, so the choice
       // stays up with the reason, the same as a failed single cancel.
-      if (run.stopped && run.cancelled.length === 0) setError(run.stopped.message);
+      if (run.stopped && run.cancelled.length === 0) setError(cancelFailureCopy(run.stopped, 'many'));
       else setResult(run);
     } catch (err) {
       setSaving(false);
-      setError(
-        err && typeof err.message === 'string' && err.message
-          ? err.message
-          : 'The reservations could not be cancelled. Try again.'
-      );
+      setError(cancelFailureCopy(err, 'many'));
     }
   };
 
@@ -128,11 +147,7 @@ export default function CancelSheet({
       onCancelled();
     } catch (err) {
       setSaving(false);
-      setError(
-        err && typeof err.message === 'string' && err.message
-          ? err.message
-          : 'The reservation could not be cancelled. Try again.'
-      );
+      setError((failureCopy && failureCopy(err)) || cancelFailureCopy(err));
     }
   };
 

@@ -15,12 +15,16 @@ jest.mock('firebase/firestore', () => ({
   getDocs: async (ref) => mockQuery(ref.path),
   getDoc: async (ref) => mockSnap(ref.path),
   serverTimestamp: () => 'SERVER_TS',
-  runTransaction: async (_db, fn) =>
-    fn({
+  // mockDenial.error: the commit fails with it, as when the rules refuse the write.
+  runTransaction: async (_db, fn) => {
+    const out = await fn({
       get: async (ref) => mockSnap(ref.path),
       set: (ref, data) => mockWrites.push({ path: ref.path, data }),
       update: (ref, data) => mockUpdates.push({ path: ref.path, data }),
-    }),
+    });
+    if (mockDenial.error) throw mockDenial.error;
+    return out;
+  },
 }));
 
 const mockDocs = {
@@ -31,6 +35,7 @@ const mockDocs = {
 };
 const mockWrites = [];
 const mockUpdates = [];
+const mockDenial = { error: null };
 // Collection name -> the rows a query on it returns (none unless a test sets them).
 const mockRows = {};
 function mockSnap(path) {
@@ -46,7 +51,7 @@ import { auth } from '../../firebase';
 import { bump } from './invalidate';
 import { ERR, assertAthleteBillingActive, assertBookingOpen, assertPeriodTokensLeft, createBooking, rebookPatch } from './live';
 import { BOOKING_OPENS_AT } from '../data/calendar';
-import { assertWithinBookingWindow } from './live';
+import { WINDOW_CLOCK_SKEW_MS, assertWithinBookingWindow, windowRefusalOf } from './live';
 import { ELITE, TOKEN_PACKAGES } from '../data/packages';
 
 const reasonOf = (fn) => {
@@ -164,6 +169,51 @@ describe('assertWithinBookingWindow books through whole calendar months (owner r
     expect(reasonOf(() => assertWithinBookingWindow(ELITE, '2027-02-28', after))).toBeNull();
     expect(reasonOf(() => assertWithinBookingWindow(ELITE, '2027-03-01', after)))
       .toEqual([ERR.INVALID, 'outside-window', 'That date opens for booking at 7 AM on 2027-01-01.']);
+  });
+});
+
+// 2026-11-04: the window above runs on the phone's clock, the rules on
+// request.time. A phone a couple of minutes fast at 6:58 AM on Dec 1 passes
+// the one and is denied by the other - the family reads the window's own
+// refusal, never a bare permissions error.
+describe("a rules denial just as the window rolls reads as the window's own refusal", () => {
+  const t6 = { id: 't-6', kind: 'tokens', tokens: 6 };
+  const denied = () => Object.assign(new Error('Missing or insufficient permissions.'), { code: 'permission-denied' });
+  const PHONE_FAST = new Date('2026-12-01T13:00:30Z'); // the phone reads 7:00:30 AM Chicago; the server is still before 7
+  const args = { athleteId: 'a3', sessionId: 's3', date: '2027-01-05', type: 'training', householdId: 'h1' };
+  beforeEach(() => {
+    jest.useFakeTimers('modern');
+    jest.setSystemTime(PHONE_FAST);
+    auth.currentUser = { uid: 'p1' };
+    mockDocs['athletes/a3'] = { name: 'Sam', householdId: 'h1', packageId: 't-6' };
+    mockDocs['packages/t-6'] = { name: '6 tokens', kind: 'tokens', tokens: 6 };
+    mockDocs['sessions/s3'] = { date: '2027-01-05', time: '4:00 PM', type: 'training', capacity: 8, booked: 0, status: 'scheduled' };
+    mockDenial.error = denied();
+  });
+  afterEach(() => {
+    jest.useRealTimers();
+    auth.currentUser = null;
+    mockDenial.error = null;
+    delete mockDocs['athletes/a3'];
+    delete mockDocs['packages/t-6'];
+    delete mockDocs['sessions/s3'];
+  });
+
+  test('a January block, tapped or repeated weekly, is refused as outside-window with the day it opens', async () => {
+    const refusal = { code: ERR.INVALID, reason: 'outside-window', message: 'That date opens for booking at 7 AM on 2026-12-01.' };
+    await expect(createBooking(args)).rejects.toMatchObject(refusal);
+    await expect(createBooking(args, { silent: true, createdVia: 'repeat' })).rejects.toMatchObject(refusal);
+  });
+
+  test('ten minutes on the same denial is left as it is; so is any other failure, and a date the window already held', async () => {
+    jest.setSystemTime(new Date(PHONE_FAST.getTime() + WINDOW_CLOCK_SKEW_MS));
+    await expect(createBooking(args)).rejects.toMatchObject({ code: ERR.PERMISSION, reason: null });
+    jest.setSystemTime(PHONE_FAST);
+    mockDenial.error = Object.assign(new Error('offline'), { code: 'unavailable' });
+    await expect(createBooking(args)).rejects.toMatchObject({ code: ERR.UNAVAILABLE, reason: null });
+    expect(windowRefusalOf(denied(), t6, '2027-01-05', PHONE_FAST)).toMatchObject({ reason: 'outside-window' });
+    expect(windowRefusalOf(denied(), t6, '2026-12-31', PHONE_FAST)).toBeNull();
+    expect(windowRefusalOf(new Error('boom'), t6, '2027-01-05', PHONE_FAST)).toBeNull();
   });
 });
 

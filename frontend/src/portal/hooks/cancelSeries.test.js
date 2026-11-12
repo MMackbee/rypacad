@@ -147,7 +147,10 @@ describe('cancelSeries - one after another through the single cancel', () => {
     expect(out.stopped).toBeNull();
   });
 
-  test('the rules refusing the series (frontend ahead of the rules deploy) stops at once: nothing cancelled, nothing refreshed', async () => {
+  // A denial is one booking's (its session counter at 0, or its day over -
+  // firestore.rules admits cancelledVia 'series'), and that week is refused
+  // on its own too: the line no longer promises "cancel each week on its own".
+  test('a denied week stops the run at once: nothing cancelled, nothing refreshed, no promise the week cancels alone', async () => {
     const calls = [];
     const out = await cancelSeries(series, async (bookingId) => {
       calls.push(bookingId);
@@ -157,8 +160,9 @@ describe('cancelSeries - one after another through the single cancel', () => {
     expect(out.cancelled).toEqual([]);
     expect(out.failed).toEqual([]);
     expect(out.stopped.message).toBe(
-      'The whole series could not be cancelled right now. You can still cancel each week on its own.'
+      "One week couldn't be cancelled from the app, so the rest were left as they are. Refresh the page and try again, or contact the academy and we'll sort it out."
     );
+    expect(out.stopped.message).not.toMatch(/on its own/);
     expect(ids(out.stopped.remaining)).toEqual(['b1', 'b2', 'b3']);
     expect(mockBumps).toEqual([]);
   });
