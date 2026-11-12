@@ -3,9 +3,10 @@
  * attendance list (spec 2026-11-11 §6; plan Task S1, contract C5).
  *
  * Which rows, and their words, are data/bookingChanges.js coachLine: a family
- * cancel with a known reason ("Cancelled · Sick", Other with its note) and
- * every moved-away row ("Moved to Thu Nov 12, 4:00 PM"). An older app's
- * cancel (no reason), academy, billing and double-spend cancels stay off.
+ * cancel with a known reason ("Cancelled · Sick", Other with its note), the
+ * owner's or ops' cancel of one booking with its reason (owner 2026-11-12),
+ * and every moved-away row ("Moved to Thu Nov 12, 4:00 PM"). An older app's
+ * cancel (no reason), whole-session, billing and double-spend cancels stay off.
  *
  * One query on the existing (sessionId, status) index - coaches read any
  * booking - then a name per shown row (each read on its own, so one refusal

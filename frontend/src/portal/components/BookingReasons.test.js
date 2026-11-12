@@ -41,6 +41,15 @@ describe('the single token (owner ruling 2026-09-29/30)', () => {
     expect(cancelReasonCopy('moved')).toBe('Moved to another session.');
     expect(cancelReasonCopy('moved', { unlimited: true })).toBe('Moved to another session.');
   });
+  test("the academy's cancel of one booking (staff, owner 2026-11-12) says the token came back", () => {
+    expect(cancelReasonCopy('staff')).toBe('Cancelled by the academy - the token was returned.');
+    expect(cancelReasonCopy('staff', { singleToken: true })).toBe('Cancelled by the academy - your session token was returned.');
+    expect(cancelReasonCopy('staff', { unlimited: true, singleToken: true })).toBe('Cancelled by the academy.');
+    // A free comp spent nothing, so nothing came back.
+    expect(cancelReasonCopy('staff', { comp: true })).toBe('Cancelled by the academy.');
+    // Only the staff cancel reads the comp flag.
+    expect(cancelReasonCopy('session-cancelled', { comp: true })).toBe('Cancelled by the academy - a bonus token was added.');
+  });
   test('Elite reads no token wording, whatever the row was paid with', () => {
     expect(cancelReasonCopy('session-cancelled', { unlimited: true, singleToken: true })).toBe('Cancelled by the academy.');
     expect(cancelReasonCopy('double-spend', { unlimited: true, singleToken: true })).toBe('Cancelled by the academy.');

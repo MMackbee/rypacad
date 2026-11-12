@@ -102,9 +102,10 @@ export function dayTimeLabel(dateISO, time) {
  * The greyed line a coach reads under the attendance list (§6), or null for
  * a row that stays off it: a family cancel with a known reason ("Cancelled ·
  * Sick", Other with its note), or a move ("Moved to Thu Nov 12, 4:00 PM";
- * "Moved" when the new session is not known). An older app's cancel (no
- * reason) and academy or billing cancels show nothing. `movedToSession` is
- * `{ date, time }` or null.
+ * "Moved" when the new session is not known). The owner's or ops' cancel of
+ * one booking ('staff', owner 2026-11-12) carries the family's reasons and
+ * reads the same. An older app's cancel (no reason) and whole-session or
+ * billing cancels show nothing. `movedToSession` is `{ date, time }` or null.
  */
 export function coachLine(booking, movedToSession = null) {
   if (booking?.status !== 'cancelled') return null;
@@ -113,7 +114,7 @@ export function coachLine(booking, movedToSession = null) {
       ? `Moved to ${dayTimeLabel(movedToSession.date, movedToSession.time)}`
       : 'Moved';
   }
-  if (booking.cancelReason !== 'member') return null;
+  if (booking.cancelReason !== 'member' && booking.cancelReason !== 'staff') return null;
   const label = categoryLabel(booking.cancelCategory);
   if (!label) return null;
   const note = booking.cancelCategory === 'other' && typeof booking.cancelNote === 'string'

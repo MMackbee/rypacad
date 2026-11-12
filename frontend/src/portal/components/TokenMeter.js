@@ -23,6 +23,7 @@ import {
   SINGLE_NOT_OPEN_LINE,
   tokenDayLabel,
 } from '../data/singleToken';
+import { firstOf, staffCancellable } from '../data/staffCancel';
 
 /**
  * One athlete's tokens on the Billing hub (contract v2.4, Sprint 16): the
@@ -39,7 +40,9 @@ import {
  * A paid monthly token member's meter carries, for the payer, one more
  * session at their package's rate once nothing is left to book with
  * (ExtraSessionBuy; owner, 2026-10-10) - on the Billing hub (`addAnytime`)
- * at any time, as Add a token (owner 2026-11-11).
+ * at any time, as Add a token (owner 2026-11-11). On the staff view the
+ * owner or ops can cancel a Booked or No-show row (onCancelRow; owner
+ * 2026-11-12, data/staffCancel.js).
  */
 
 /**
@@ -74,7 +77,35 @@ const STATUS_BADGE = {
   waitlisted: { tone: 'yellow', label: 'Waitlist' },
 };
 
-function Row({ row, last }) {
+/**
+ * The staff view's Cancel on one row: small, after the badge, a 44px tap
+ * target, named for the athlete as well as the row - brothers and sisters
+ * on one session would otherwise share a name ("Cancel Jordan's Tue, ...").
+ */
+function RowCancel({ row, first, onCancel }) {
+  return (
+    <button
+      type="button"
+      aria-label={`Cancel ${first ? `${first}'s ` : ''}${shortDay(row.date)}${row.time ? ` ${row.time}` : ''} ${row.label}`}
+      onClick={() => onCancel(row)}
+      style={{
+        height: 44,
+        minWidth: 44,
+        padding: '0 2px 0 6px',
+        background: 'none',
+        border: 'none',
+        font: `600 12px ${font.body}`,
+        color: color.error,
+        cursor: 'pointer',
+        flex: 'none',
+      }}
+    >
+      Cancel
+    </button>
+  );
+}
+
+function Row({ row, last, first, onCancel }) {
   const badge = row.viaSingle
     ? { tone: 'green', label: 'Session token' }
     : row.viaGrace
@@ -98,6 +129,7 @@ function Row({ row, last }) {
         <div style={{ font: `400 11px ${font.body}`, color: color.textTertiary, marginTop: 2 }}>{row.label}</div>
       </div>
       <StatusBadge tone={badge.tone}>{badge.label}</StatusBadge>
+      {onCancel ? <RowCancel row={row} first={first} onCancel={onCancel} /> : null}
     </div>
   );
 }
@@ -120,7 +152,7 @@ function Chip({ tone, children }) {
   );
 }
 
-function Evidence({ member }) {
+function Evidence({ member, onCancelRow }) {
   const { spent, reserved, nextPeriod, lastPeriod, tokens } = member;
   // The next period's spend as the meter's "<Month>: N of G left" counts it
   // (period-charged rows) and the rows a bonus token paid for, apart - so the
@@ -131,7 +163,15 @@ function Evidence({ member }) {
   return (
     <div style={{ marginTop: 12, borderTop: `1px solid ${color.ruleSoft}`, paddingTop: 6 }}>
       {rows.length ? (
-        rows.map((row, i) => <Row key={row.id} row={row} last={i === rows.length - 1} />)
+        rows.map((row, i) => (
+          <Row
+            key={row.id}
+            row={row}
+            last={i === rows.length - 1}
+            first={firstOf(member.name)}
+            onCancel={onCancelRow && staffCancellable(row, { periodStart: member.period?.start ?? null }) ? onCancelRow : null}
+          />
+        ))
       ) : (
         <Body size={11} tone={color.textTertiary} style={{ padding: '8px 0' }}>
           Nothing booked in this period yet.
@@ -292,8 +332,12 @@ export function ExtraSessionBuy({ athleteId, offer, label = BUY_EXTRA_LABEL, var
  *   `buy`, a paid monthly token member's meter offers Add a token whatever
  *   is left (singleToken.js addTokenOffer), in place of the out-of-tokens
  *   Buy an extra session - one button, never both.
+ * @param {(row: object) => void} [onCancelRow]  The staff view, owner or ops
+ *   only (Billing.js): a Cancel after the badge on each "This period" row
+ *   data/staffCancel.js staffCancellable allows, handing over the row.
+ *   Without it nothing changes.
  */
-export default function TokenMeter({ member, defaultOpen = false, showPrices = false, buy = false, askGuardian = false, onHold = false, addAnytime = false }) {
+export default function TokenMeter({ member, defaultOpen = false, showPrices = false, buy = false, askGuardian = false, onHold = false, addAnytime = false, onCancelRow }) {
   const [open, setOpen] = useState(defaultOpen);
   const { package: pkg, tokens, period, expiryNudge, spent, reserved } = member;
   // v2.0.1 (Sprint 18): catalogue prices are withheld from parents and
@@ -338,7 +382,7 @@ export default function TokenMeter({ member, defaultOpen = false, showPrices = f
           </Body>
         ) : null}
         <Toggle open={open} onToggle={() => setOpen((v) => !v)} count={count} />
-        {open ? <Evidence member={member} /> : null}
+        {open ? <Evidence member={member} onCancelRow={onCancelRow} /> : null}
       </Card>
     );
   }
@@ -347,7 +391,7 @@ export default function TokenMeter({ member, defaultOpen = false, showPrices = f
     return (
       <SessionTokenHero member={member} price={price} buySlot={buy ? singleBuySlot(member, askGuardian) : null}>
         <Toggle open={open} onToggle={() => setOpen((v) => !v)} count={count} />
-        {open ? <Evidence member={member} /> : null}
+        {open ? <Evidence member={member} onCancelRow={onCancelRow} /> : null}
       </SessionTokenHero>
     );
   }
@@ -431,7 +475,7 @@ export default function TokenMeter({ member, defaultOpen = false, showPrices = f
       ) : null}
 
       <Toggle open={open} onToggle={() => setOpen((v) => !v)} count={count} />
-      {open ? <Evidence member={member} /> : null}
+      {open ? <Evidence member={member} onCancelRow={onCancelRow} /> : null}
     </Card>
   );
 }

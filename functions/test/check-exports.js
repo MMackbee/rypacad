@@ -5,7 +5,8 @@
  * Feedback button, 2026-10-15) and mentalCheckinReminders (Yannick's
  * Monday reminder, 2026-10-28) and requestMentalConsent and
  * onMentalConsentSigned (mental performance consent, 2026-11-05) and
- * moveBooking (booking changes, 2026-11-11) - 21 in all - and each declares
+ * moveBooking (booking changes, 2026-11-11) and staffCancelBooking (staff
+ * cancel, 2026-11-12) - 22 in all - and each declares
  * the secrets contract 6.4 binds (spec 8). No emulator:
  * it requires index.js in-process and reads each function's __endpoint.
  *   cd functions && node test/check-exports.js */
@@ -38,14 +39,15 @@ const EXPECTED = {
   requestMentalConsent: MAIL,
   onMentalConsentSigned: MAIL,
   moveBooking: [],
+  staffCancelBooking: [],
 };
 
 assert.deepEqual(Object.keys(index).sort(), Object.keys(EXPECTED).sort(),
     'the 13 launch functions, waitlistPositions, onSingleTokenSpent, ' +
     'submitScholarship, submitFeedback, mentalCheckinReminders, ' +
     'requestMentalConsent, onMentalConsentSigned, moveBooking, ' +
-    'nothing else');
-assert.equal(Object.keys(EXPECTED).length, 21, '21 functions');
+    'staffCancelBooking, nothing else');
+assert.equal(Object.keys(EXPECTED).length, 22, '22 functions');
 for (const [name, secrets] of Object.entries(EXPECTED)) {
   const ep = index[name].__endpoint || {};
   const got = (ep.secretEnvironmentVariables || []).map((s) => s.key);

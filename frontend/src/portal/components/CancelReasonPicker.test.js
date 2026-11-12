@@ -37,6 +37,13 @@ test('an athlete\'s own login is asked "you"', async () => {
   await r.unmount();
 });
 
+test('the staff cancel can ask its own question; families keep theirs', async () => {
+  const r = await mount({ name: 'Jordan Whitfield', question: "Why couldn't Jordan make it?" });
+  expect(r.text()).toContain("Why couldn't Jordan make it?");
+  expect(r.text()).not.toContain("Why can't Jordan make it?");
+  await r.unmount();
+});
+
 test('a tap reports the reason', async () => {
   const r = await mount({ name: 'Jordan Whitfield' });
   await r.click('Sick');

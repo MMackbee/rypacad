@@ -76,6 +76,14 @@ export const callRequestMentalConsent = callable('requestMentalConsent');
  * of C2's (components/MoveSheet.js moveRefusalCopy). Through hooks/move.js.
  */
 export const callMoveBooking = callable('moveBooking');
+/**
+ * `{ bookingIds, category, note? }` -> `{ sessionId, cancelled: [{ bookingId,
+ * athleteId, cancelledFrom, tokenBack }] }`: the owner's or ops' cancel on the
+ * Billing staff view (owner approved 2026-11-12), one server transaction for
+ * one athlete's booking and any brothers and sisters on the same session. A
+ * refusal's `reason` is data/staffCancel.js's. Through hooks/staffCancel.js.
+ */
+export const callStaffCancelBooking = callable('staffCancelBooking');
 const claimInvite = callable('claimInvite');
 /** `{ state, householdId, athleteId }` - ids only on 'claimed' (D7); never throws for an expected state (contract 1.4). */
 export const callClaimInvite = () => claimInvite({});

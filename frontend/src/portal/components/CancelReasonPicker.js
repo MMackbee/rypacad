@@ -14,13 +14,16 @@ import { CANCEL_CATEGORIES, CANCEL_NOTE_MAX, CANCEL_NOTE_PLACEHOLDER, cancelQues
  * @param {{ category: ?string, note: string }} value
  * @param {(value: { category: string, note: string }) => void} onChange
  * @param {boolean} [disabled]  While the cancel runs.
+ * @param {string} [question]  Asked instead of cancelQuestion(name): the
+ *   staff cancel (StaffCancelSheet.js) asks "Why couldn't Jordan make it?"
+ *   about a session that has started or passed. Families never pass it.
  */
-export default function CancelReasonPicker({ name, value, onChange, disabled = false }) {
+export default function CancelReasonPicker({ name, value, onChange, disabled = false, question }) {
   const category = value?.category ?? null;
   const note = value?.note ?? '';
   return (
     <div style={{ marginTop: 14 }}>
-      <div style={{ font: `600 13px ${font.body}`, color: color.text, marginBottom: 8 }}>{cancelQuestion(name)}</div>
+      <div style={{ font: `600 13px ${font.body}`, color: color.text, marginBottom: 8 }}>{question || cancelQuestion(name)}</div>
       <div role="group" aria-label="Reason" style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
         {CANCEL_CATEGORIES.map((c) => {
           const on = c.id === category;

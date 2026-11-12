@@ -129,6 +129,13 @@ export function periodRows({ bookings, waitlist, periodKey, sessionsById = {} })
         viaGrace: Boolean(b.graceTokenId),
         viaSingle: isSingleTokenId(b.graceTokenId),
         viaComp: b.comp === true,
+        // What the staff view's Cancel and its sheet read (owner 2026-11-12,
+        // data/staffCancel.js): who, Calendly or not, and how it was paid.
+        athleteId: b.athleteId ?? null,
+        source: b.source ?? null,
+        chargedFrom: b.chargedFrom ?? null,
+        comp: b.comp === true,
+        graceTokenId: b.graceTokenId ?? null,
       };
     })
     .sort(byDate);

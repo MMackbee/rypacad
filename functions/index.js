@@ -37,6 +37,9 @@
  *
  *   moveBooking            callable, portal/move.js (booking changes,
  *                          2026-11-11): a family moves a booking in one step
+ *   staffCancelBooking     callable, portal/staff-cancel.js (2026-11-12):
+ *                          owner or ops cancels a family's bookings on one
+ *                          session from staff Billing; token back, no email
  *
  * The marketing site's scholarship form posts to submitScholarship
  * (portal/scholarship.js, 2026-10-01): public, origin-checked, validated.
@@ -115,6 +118,7 @@ const {submitScholarship} = require('./portal/scholarship');
 const {submitFeedback} = require('./portal/feedback');
 const {requestMentalConsent} = require('./portal/mental-consent-request');
 const {moveBooking, sendMoveReconfirm} = require('./portal/move');
+const {staffCancelBooking} = require('./portal/staff-cancel');
 const {isFreeComp} = require('./portal/move-decide');
 
 // ==========================================================================
@@ -132,6 +136,9 @@ exports.waitlistPositions = waitlistPositions;
 exports.onSingleTokenSpent = onSingleTokenSpent;
 // A family moves a booking in one transaction (2026-11-11, portal/move.js).
 exports.moveBooking = moveBooking;
+// Owner or ops cancels bookings of one family on one session, token back,
+// no email (2026-11-12, portal/staff-cancel.js).
+exports.staffCancelBooking = staffCancelBooking;
 
 // ==========================================================================
 // SPRINT 20 LAUNCH (contract v3.0.1): instant sign-up, child-login claim,
