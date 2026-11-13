@@ -209,6 +209,42 @@ function athleteRefusal(ctx, comp, taken) {
 }
 
 /**
+ * The athlete's token position in a session's period, built as
+ * portal/waitlist-order.js loadCandidate builds it: the period rows plus
+ * the grace spends of any period, deduplicated by id, with one row left
+ * out (a booking being moved counts as given back), and the athlete's
+ * waitlist entry on the session holding no token.
+ * @param {!Object} ctx A `decideMove` or `decideStaffBook` ctx; reads
+ *     `pkg`, `tokenPeriod`, `periodBookings`, `graceSpends`,
+ *     `waitlist`, `graceTokens`, `household.periodAnchorDay` and `now`.
+ * @param {{period: {periodKey: string}, leaveOutId: ?string,
+ *     waitlistEntryId: ?string, sessionDate: string}} args The session's
+ *     period, the row to leave out (null leaves none out), the entry to
+ *     ignore, and the session date (for an entry with no date).
+ * @return {!Object} The `lib.tokensPosition` result.
+ */
+function positionFor(ctx, args) {
+  const {period, leaveOutId, waitlistEntryId, sessionDate} = args;
+  const anchorDay = ctx.household && ctx.household.periodAnchorDay;
+  const kept = (b) => b && (!leaveOutId || b.id !== leaveOutId);
+  const bookings = (ctx.periodBookings || []).filter(kept);
+  const seen = new Set(bookings.map((b) => b.id));
+  const spends = (ctx.graceSpends || []).filter(
+      (b) => kept(b) && !seen.has(b.id));
+  return lib.tokensPosition({
+    pkg: ctx.pkg,
+    tokenPeriod: ctx.tokenPeriod || null,
+    bookings: bookings.concat(spends),
+    waitlist: (ctx.waitlist || []).filter(Boolean).map((w) => ({id: w.id,
+      periodKey: lib.periodFor(w.date || sessionDate, anchorDay).periodKey})),
+    ignoreWaitlistIds: waitlistEntryId ? [waitlistEntryId] : [],
+    graceTokens: ctx.graceTokens || [],
+    periodKey: period.periodKey,
+    today: lib.chicagoDate(ctx.now),
+  });
+}
+
+/**
  * Decide one move.
  * @param {{uid: string, user: ?Object, old: ?Object, oldSession: ?Object,
  *     target: ?Object, targetBooking: ?Object, targetLive: number,
@@ -254,26 +290,14 @@ function decideMove(ctx) {
       graceTokenId: null}, period, taken, waitlistEntryId};
   }
 
-  // As waitlist-order.js loadCandidate builds it: the period rows plus the
-  // grace spends of any period, deduplicated by id, without the old row.
-  const seen = new Set(bookings.map((b) => b.id));
-  const spends = (ctx.graceSpends || []).filter(
-      (b) => notOld(b) && !seen.has(b.id));
-  const position = lib.tokensPosition({
-    pkg,
-    tokenPeriod: ctx.tokenPeriod || null,
-    bookings: bookings.concat(spends),
-    waitlist: waitlist.map((w) => ({id: w.id,
-      periodKey: lib.periodFor(w.date || target.date, anchorDay).periodKey})),
-    ignoreWaitlistIds: waitlistEntryId ? [waitlistEntryId] : [],
-    graceTokens: ctx.graceTokens || [],
-    periodKey: period.periodKey,
-    today: lib.chicagoDate(ctx.now),
-  });
+  // The old row is left out: it counts as given back.
+  const position = positionFor(ctx, {period, leaveOutId: old.id,
+    waitlistEntryId, sessionDate: target.date});
   const charge = moveCharge({old, target, position, period,
     oldPeriodKey: old.periodKey || null});
   if (charge.reason) return refuse(charge.reason);
   return {ok: true, comp, charge, period, taken, waitlistEntryId};
 }
 
-module.exports = {REFUSALS, decideMove, isFreeComp, moveCharge};
+module.exports = {REFUSALS, decideMove, isFreeComp, moveCharge,
+  positionFor};

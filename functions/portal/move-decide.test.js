@@ -4,7 +4,8 @@
 // function over what portal/move.js reads in its transaction.
 const assert = require('node:assert/strict');
 const {test, run} = require('./tiny');
-const {REFUSALS, decideMove, isFreeComp} = require('./move-decide');
+const {REFUSALS, decideMove, isFreeComp, positionFor} =
+    require('./move-decide');
 
 // Noon in Chicago on Tue, Nov 10 2026.
 const NOW = new Date('2026-11-10T18:00:00Z');
@@ -244,6 +245,14 @@ test('a waitlist entry on the target is left out of the count and ' +
     householdId: 'hart', date: '2026-11-13', periodKey: '2026-11-01'};
   assert.deepEqual(decideMove(world(single({waitlist: [entry]}))),
       moved(SINGLE_CHARGE, NOV, {waitlistEntryId: 's2_sam'}));
+});
+
+test('positionFor with leaveOutId null counts every row', () => {
+  const at = (leaveOutId) => positionFor(world({periodBookings: NOV_SIX}),
+      {period: NOV, leaveOutId, waitlistEntryId: null,
+        sessionDate: '2026-11-13'});
+  assert.deepEqual([at(null).used, at(null).left], [6, 0]);
+  assert.deepEqual([at(OLD.id).used, at(OLD.id).left], [5, 1]);
 });
 
 test('REFUSALS covers every reason with C2\'s code', () => {
