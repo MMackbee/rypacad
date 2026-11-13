@@ -170,22 +170,53 @@ async function recipientsForAthlete(athleteId, householdId) {
 }
 
 /**
- * The household's parent accounts only — the audience for every billing
- * kind (a child is not told the card failed).
+ * Who pays for a household - the audience for every billing kind (a child is
+ * not told the card failed): its parent accounts, plus the 18+ member who
+ * signed up for themselves. createFamily mode 'athlete' makes that login the
+ * household's `createdBy` with role 'athlete' and no parent account exists,
+ * so before 2026-11-13 they heard about no billing at all (owner: "fix the
+ * billing emails for adults"). Same test as the portal's self-managed athlete
+ * (frontend hooks/useAuthSession.js resolveSelfManaged) and the rules'
+ * athlete package-change branch. A child's claimed login is never added:
+ * in a parent's household `createdBy` is the parent.
+ * @param {!Object} store An admin `Firestore` (injectable for tests).
+ * @param {?string} householdId The household.
+ * @return {!Promise<!Array<!Object>>} Recipients, de-duplicated by uid.
+ */
+async function householdAudience(store, householdId) {
+  if (!householdId) return [];
+  const [parents, household] = await Promise.all([
+    store.collection('users')
+        .where('householdId', '==', householdId)
+        .where('role', '==', 'parent')
+        .get(),
+    store.collection('households').doc(householdId).get(),
+  ]);
+  const snaps = [parents];
+  const creator = household.exists ? (household.data() || {}).createdBy : null;
+  if (typeof creator === 'string' && creator) {
+    const user = await store.collection('users').doc(creator).get();
+    const data = user.exists ? (user.data() || {}) : {};
+    if (data.role === 'athlete' && data.householdId === householdId) {
+      snaps.push({docs: [user]});
+    }
+  }
+  return mergeRecipients(snaps);
+}
+
+/**
+ * The household's billing audience on the live database.
  * @param {?string} householdId The household.
  * @return {!Promise<!Array<!Object>>} Recipients.
  */
 async function parentsForHousehold(householdId) {
-  if (!householdId) return [];
-  return mergeRecipients([await db().collection('users')
-      .where('householdId', '==', householdId)
-      .where('role', '==', 'parent')
-      .get()]);
+  return householdAudience(db(), householdId);
 }
 
 /**
- * Who hears about one notice: parents alone for billing (and whenever there
- * is no athlete to tell), athlete + parents otherwise.
+ * Who hears about one notice: the household's payers alone for billing (and
+ * whenever there is no athlete to tell) - its parents, or the adult who
+ * signed up for themselves - athlete + parents otherwise.
  * @param {{category: string, athleteId: ?string, householdId: ?string}} args
  *     The notice.
  * @return {!Promise<!Array<!Object>>} Recipients.
@@ -379,6 +410,7 @@ module.exports = {
   channelAllowed,
   courierEventId: email.courierEventId,
   getUserProfile,
+  householdAudience,
   parentsForHousehold,
   profileFor,
   recipientsForAthlete,
