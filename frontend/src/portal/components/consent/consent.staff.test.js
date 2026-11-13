@@ -12,7 +12,7 @@ jest.mock('../../hooks/mentalConsentStaff', () => ({
 }));
 const mockUseFamilyConsents = jest.fn(() => ({ data: null, loading: false, error: null }));
 jest.mock('../../hooks/mentalConsent', () => ({ useFamilyConsents: (...a) => mockUseFamilyConsents(...a) }));
-// "Today" for the paper date check (the MentalContract.test.js precedent).
+// "Today" for the paper date check: a fixed academy date.
 jest.mock('../../data/calendar', () => ({ ...jest.requireActual('../../data/calendar'), academyDateISO: () => '2026-11-05' }));
 import StaffConsentDetail from './StaffConsentDetail';
 import ConsentDetailCard from './ConsentDetailCard';

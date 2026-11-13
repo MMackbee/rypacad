@@ -13,7 +13,6 @@ import { useMentalAthlete } from '../hooks';
 import { PARENT_ATTENDING_NOTE } from '../data/specialists';
 import { dateOf } from '../data/contractBoard';
 import { noteEntryId } from '../data/mentalNotes';
-import { WEEKDAY_COUNT } from '../data/contractRule';
 
 const day = (iso) => format(parseISO(iso), 'MMM d');
 const STATUS = { confirmed: 'Booked', attended: 'Attended', noshow: 'No-show', cancelled: 'Cancelled' };
@@ -35,11 +34,12 @@ const ROW = { display: 'flex', alignItems: 'center', gap: 10, padding: '10px 0',
 
 /**
  * One athlete's page for Yannick (2026-10-28, spec 5.2): who they are and
- * how to reach the family, the intake note, a note per mental 1:1, his
- * other notes and this week's contract. Role 'mental' only; the notes are
- * readable by nobody else (firestore.rules mentalNotes). Every note it
- * opens carries the athlete's name, so the note page says whose it is.
- * `demoUtcToday` and `demoRecord` are the review harness's (seed only).
+ * how to reach the family, the intake note, a note per mental 1:1 and his
+ * other notes. No contract (owner 2026-11-12/13: it runs on a paper
+ * calendar). Role 'mental' only; the notes are readable by nobody else
+ * (firestore.rules mentalNotes). Every note it opens carries the athlete's
+ * name, so the note page says whose it is. `demoUtcToday` and `demoRecord`
+ * are the review harness's (seed only).
  */
 export default function MentalAthlete({ bare = false, athleteId, onBack, onOpenNote, onSignOut, demoUtcToday = null, demoRecord = null }) {
   const { data, loading, error } = useMentalAthlete(athleteId, { demoUtcToday, demoRecord });
@@ -47,7 +47,6 @@ export default function MentalAthlete({ bare = false, athleteId, onBack, onOpenN
   const open = (entryId, sessionDate = null) => {
     if (onOpenNote && athlete) onOpenNote({ entryId, sessionDate, athleteName: athlete.name });
   };
-  const required = athlete?.required ?? data?.contract?.required ?? null;
 
   return (
     <PhoneFrame
@@ -64,7 +63,7 @@ export default function MentalAthlete({ bare = false, athleteId, onBack, onOpenN
             <div style={{ marginTop: 8 }}>
               <ScreenTitle size={22}>{athlete.name}</ScreenTitle>
               <Body size={12} style={{ marginTop: 4 }}>
-                {[athlete.age != null ? `Age ${athlete.age}` : null, required != null ? `${required} min a day` : null].filter(Boolean).join(' · ')}
+                {athlete.age != null ? `Age ${athlete.age}` : null}
               </Body>
               <ContactLine contact={data.contact} style={{ marginTop: 4 }} />
               {data.contact?.emergency ? <Body size={12} style={{ marginTop: 2 }}>{emergencyLine(data.contact.emergency)}</Body> : null}
@@ -87,7 +86,7 @@ export default function MentalAthlete({ bare = false, athleteId, onBack, onOpenN
             <Body size={12}>This athlete was not found.</Body>
           </div>
         ) : (
-          <AthleteCards data={data} required={required} open={open} />
+          <AthleteCards data={data} open={open} />
         )}
       </div>
     </PhoneFrame>
@@ -99,8 +98,8 @@ function emergencyLine(ec) {
   return `Emergency: ${ec.name}${ec.phone ? `, ${ec.phone}` : ''}${ec.relationship ? ` (${ec.relationship})` : ''}`;
 }
 
-function AthleteCards({ data, required, open }) {
-  const { notes, sessions, contract } = data;
+function AthleteCards({ data, open }) {
+  const { notes, sessions } = data;
   const intake = notes?.intake ?? null;
   const free = notes?.free ?? [];
   return (
@@ -155,20 +154,6 @@ function AthleteCards({ data, required, open }) {
         <Button variant="outline" height={44} style={{ marginTop: 10, font: `600 14px ${font.body}` }} onClick={() => open(freeNoteId())}>
           New note
         </Button>
-      </Card>
-
-      <Card large>
-        <SectionLabel style={{ marginBottom: 8 }}>Contract</SectionLabel>
-        <Body size={12}>
-          {[
-            `This week ${contract?.thisWeek?.metDays ?? 0}/${WEEKDAY_COUNT}`,
-            required != null ? `${required} min a day` : null,
-            contract?.lastCheckin ? `Last check-in ${day(contract.lastCheckin)}` : 'Never checked in',
-          ].filter(Boolean).join(' · ')}
-        </Body>
-        {contract?.lastCheckinNote ? (
-          <Body size={11} tone={color.textTertiary} style={{ marginTop: 4, overflowWrap: 'anywhere' }}>Note: {contract.lastCheckinNote}</Body>
-        ) : null}
       </Card>
     </>
   );

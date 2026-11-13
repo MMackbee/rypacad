@@ -6,7 +6,7 @@ jest.mock('../../firebase', () => ({ auth: { currentUser: null }, db: {} }));
 jest.mock('firebase/firestore', () => ({}));
 jest.mock('./live', () => ({ ...jest.requireActual('./live'), isLive: () => false }));
 jest.mock('../data/calendar', () => ({ ...jest.requireActual('../data/calendar'), academyDateISO: () => '2026-11-11' }));
-import { useContractBoard, useMentalAthlete, useMentalAthletes, useMentalNote } from './mental';
+import { useMentalAthlete, useMentalAthletes, useMentalNote } from './mental';
 
 function mountHook(useHook) {
   const out = { current: null };
@@ -27,18 +27,18 @@ test('seed mode: the Athletes list shows Jordan, Nico, Quinn and Reese with the 
   h.unmount();
 });
 
-test('seed mode: the athlete page has the intake, two session notes, three sessions, the contact and the contract summary', async () => {
+test('seed mode: the athlete page has the intake, two session notes, three sessions and the contact, and no contract', async () => {
   const h = mountHook(() => useMentalAthlete('jordan'));
   await settle(h);
   const d = h.out.current.data;
-  expect(d.athlete).toMatchObject({ id: 'jordan', age: 14, required: 20 });
+  expect(d.athlete).toMatchObject({ id: 'jordan', age: 14 });
   expect(d.contact).toEqual({ familyName: 'Whitfield family', guardianName: 'Dana', email: 'dana@email.com', phone: null });
   expect(d.sessions.map((s) => s.hasNote)).toEqual([false, true, true]);
   expect(d.notes.intake.id).toBe('intake');
   expect(d.notes.sessions).toHaveLength(2);
-  expect(d.contract).toMatchObject({ required: 20 });
-  expect(d.contract.thisWeek.metDays).toBe(4);
-  expect(d.contract.lastCheckin).toBe('2026-11-10');
+  // The contract left Yannick's view (owner 2026-11-12/13): the payload carries none of it.
+  expect(d.athlete).not.toHaveProperty('required');
+  expect(d).not.toHaveProperty('contract');
   h.unmount();
 });
 
@@ -63,46 +63,6 @@ test('seed mode: a stored note opens as saved, with its last update time', async
   expect(h.out.current.saveState).toBe('saved');
   expect(h.out.current.savedAt).toBe(h.out.current.entry.updatedAtMs);
   expect(typeof h.out.current.savedAt).toBe('number');
-  h.unmount();
-});
-
-test('seed mode: the board groups the fixtures and a local check-in moves the row', async () => {
-  const h = mountHook(() => useContractBoard('2026-11-09'));
-  await settle(h);
-  expect(h.out.current.config).toEqual({ enabled: true, enabledAt: '2026-10-26' });
-  expect(h.out.current.rows.checkedIn.map((r) => r.athleteId)).toEqual(['jordan']);
-  expect(h.out.current.rows.thisWeek.map((r) => r.athleteId)).toEqual(['nico']);
-  // No check-in yet, 16 days since enabledAt: past OVERDUE_DAYS.
-  expect(h.out.current.rows.due.map((r) => r.athleteId)).toEqual(['quinn', 'reese']);
-  await act(async () => { await h.out.current.setCheckin({ athleteId: 'nico', checkedIn: true }); });
-  expect(h.out.current.rows.checkedIn.map((r) => r.athleteId)).toEqual(['jordan', 'nico']);
-  h.unmount();
-});
-
-test('seed mode: rows carry that week\'s visits, the family name and the note; a local note sticks to the row', async () => {
-  const h = mountHook(() => useContractBoard('2026-11-09'));
-  await settle(h);
-  const jordan = h.out.current.rows.checkedIn[0];
-  expect(jordan.visits.map((v) => `${v.dow} ${v.time} ${v.type}`)).toEqual(['Tue 4:00 PM training', 'Sat 9:00 AM tournament']);
-  expect(jordan.familyName).toBe('Whitfield family');
-  expect(jordan.note).toBeNull();
-  const nico = h.out.current.rows.thisWeek[0];
-  expect(nico.visits.map((v) => v.dow)).toEqual(['Thu']); // the cancelled Friday booking is left out
-  expect(nico.note).toBeNull(); // last week's note is not this week's
-  await expect(h.out.current.setCheckinNote({ athleteId: 'nico', note: 'Too early.' })).rejects.toMatchObject({ code: 'not-found' });
-  await act(async () => { await h.out.current.setCheckin({ athleteId: 'nico', checkedIn: true }); });
-  await act(async () => { await h.out.current.setCheckinNote({ athleteId: 'nico', note: '  Quick word at pickup. ' }); });
-  expect(h.out.current.rows.checkedIn.find((r) => r.athleteId === 'nico').note).toBe('Quick word at pickup.');
-  await act(async () => { await h.out.current.setCheckinNote({ athleteId: 'nico', note: '   ' }); });
-  expect(h.out.current.rows.checkedIn.find((r) => r.athleteId === 'nico').note).toBeNull();
-  h.unmount();
-});
-
-test('seed mode: last week\'s check-in note reaches the athlete page', async () => {
-  const h = mountHook(() => useMentalAthlete('nico'));
-  await settle(h);
-  expect(h.out.current.data.contract.lastCheckin).toBe('2026-11-04');
-  expect(h.out.current.data.contract.lastCheckinNote).toBe('Caught him after Thursday practice: wants to work on first-tee nerves.');
   h.unmount();
 });
 

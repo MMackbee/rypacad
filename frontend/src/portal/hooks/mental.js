@@ -1,28 +1,28 @@
 /**
- * Yannick's hooks (spec 5): the Athletes list, one athlete's page, one note
- * and the contract board. Seed mode (isLive() false) reads
- * mentalFixtures(academyDateISO()) from data/seed.js and echoes writes
- * locally; live mode reads and writes through ./mentalLive and ./live.
+ * Yannick's hooks (spec 5): the Athletes list, one athlete's page and one
+ * note. Seed mode (isLive() false) reads mentalFixtures(academyDateISO())
+ * from data/seed.js and echoes writes locally; live mode reads and writes
+ * through ./mentalLive and ./live. The contract board and the page's
+ * contract reads are gone (owner 2026-11-12/13: the contract runs on a
+ * paper calendar), so a refused contract read can never blank his page.
  *
- * Role 'mental' screens only, except the board (mental, ops, owner):
- * firestore.rules refuses the notes reads to every other role. "Today" is
- * the academy's America/Chicago date, never the device's.
+ * Role 'mental' screens only: firestore.rules refuses the notes reads to
+ * every other role. "Today" is the academy's America/Chicago date, never
+ * the device's.
  */
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { ERR, LiveDataError, fetchAllAthletes, fetchAllHouseholds, fetchAthlete, fetchSessionsInRange, isLive } from './live';
+import { useCallback, useEffect, useRef, useState } from 'react';
+import { ERR, fetchAllAthletes, fetchAllHouseholds, fetchAthlete, isLive } from './live';
 import { useInvalidation } from './invalidate';
 import useSeedResource from './useSeedResource';
 import {
-  CHECKINS_KEY, MENTAL_NOTES_KEY, deleteMentalEntry, fetchAllMentalBookings, fetchAllMentalEntries, fetchBookingsBetween, fetchCheckinsForAthletes,
-  fetchContractConfig, fetchContractLogsBetween, fetchHouseholdContact, fetchMentalBookings, fetchMentalEntries,
-  householdContact, saveMentalEntry, setCheckin as writeCheckin, setCheckinNote as writeCheckinNote,
+  MENTAL_NOTES_KEY, deleteMentalEntry, fetchAllMentalBookings, fetchAllMentalEntries,
+  fetchHouseholdContact, fetchMentalBookings, fetchMentalEntries, householdContact, saveMentalEntry,
 } from './mentalLive';
 import { MENTAL_CONSENT_KEY, fetchAllConsents, fetchConsent } from './mentalConsentLive';
 import { seedConsentRecordMap } from './mentalConsent';
 import { consentSeedPaperRecord } from '../data/consentSeed';
 import { mentalFixtures } from '../data/seed';
-import { addDays, ageOn, contractMinutesFor, weekStartFor, weekSummary } from '../data/contractRule';
-import { boardRows, latestCheckin, visitsByAthlete } from '../data/contractBoard';
+import { ageOn } from '../data/contractRule';
 import { groupEntries, kindOf, mentalAthleteRows } from '../data/mentalNotes';
 import { academyDateISO } from '../data/calendar';
 import { staffConsentSummary, utcTodayISO } from '../data/mentalConsent';
@@ -80,22 +80,15 @@ function consentParts({ athlete, contact, record, utcToday }) {
 }
 
 /** The athlete page's payload, one shape for seed and live. `bookings` are fetchMentalBookings rows. */
-function athletePayload({ athlete, contact: householdContactLine, bookings, entries, logsByDate, checkins, today, utcToday, record }) {
-  const required = contractMinutesFor(athlete, today);
+function athletePayload({ athlete, contact: householdContactLine, bookings, entries, today, utcToday, record }) {
   const noteIds = new Set(entries.map((e) => e.id));
   const { consent, contact } = consentParts({ athlete, contact: householdContactLine, record, utcToday });
   return {
-    athlete: { id: athlete.id, name: athlete.name ?? null, age: ageOn(athlete.dob ?? null, today), dob: athlete.dob ?? null, householdId: athlete.householdId ?? null, required },
+    athlete: { id: athlete.id, name: athlete.name ?? null, age: ageOn(athlete.dob ?? null, today), dob: athlete.dob ?? null, householdId: athlete.householdId ?? null },
     contact,
     consent,
     sessions: bookings.map((b) => ({ sessionId: b.sessionId, date: b.date, time: b.time, status: b.status, attendee: b.attendee, hasNote: noteIds.has(b.sessionId) })),
     notes: groupEntries(entries),
-    contract: {
-      thisWeek: weekSummary({ logsByDate, weekStartISO: weekStartFor(today), required: (d) => contractMinutesFor(athlete, d) }),
-      lastCheckin: latestCheckin(athlete.id, checkins)?.date ?? null,
-      lastCheckinNote: latestCheckin(athlete.id, checkins)?.note ?? null,
-      required,
-    },
   };
 }
 
@@ -111,7 +104,7 @@ function seedMentalAthlete(athleteId, today, utcToday, demoRecord = null) {
     .sort(byDateDesc);
   return athletePayload({
     athlete, contact: household ? householdContact(household) : null, bookings,
-    entries: f.entries.filter((e) => e.athleteId === athleteId), logsByDate: f.logsByAthlete[athleteId], checkins: f.checkins, today,
+    entries: f.entries.filter((e) => e.athleteId === athleteId), today,
     utcToday, record: demoRecord === 'paper' ? consentSeedPaperRecord(athleteId) : seedConsentRecordMap()[athleteId] ?? null,
   });
 }
@@ -123,22 +116,19 @@ const athleteOrNull = (athleteId) => fetchAthlete(athleteId).catch((err) => {
 });
 
 async function liveMentalAthlete(athleteId, today, utcToday) {
-  const week = weekStartFor(today);
-  const [athlete, bookings, entries, logs, checkins, record] = await Promise.all([
+  const [athlete, bookings, entries, record] = await Promise.all([
     athleteOrNull(athleteId),
     fetchMentalBookings(athleteId),
     fetchMentalEntries(athleteId),
-    fetchContractLogsBetween({ athleteIds: [athleteId], fromISO: week, toISO: addDays(week, 6) }),
-    fetchCheckinsForAthletes([athleteId]),
     fetchConsent(athleteId).catch(() => undefined),
   ]);
   if (!athlete) return null;
   const contact = await fetchHouseholdContact(athlete.householdId);
-  return athletePayload({ athlete, contact, bookings, entries, logsByDate: logs[athleteId], checkins, today, utcToday, record });
+  return athletePayload({ athlete, contact, bookings, entries, today, utcToday, record });
 }
 
 /**
- * `{ data: { athlete, contact, consent, sessions, notes, contract } | null,
+ * `{ data: { athlete, contact, consent, sessions, notes } | null,
  * loading, error }` for one athlete's page; sessions newest first;
  * `consent = { record, summary, unavailable }`. An id with no athlete (not a
  * fixture athlete in seed mode, no athletes doc live) answers null data,
@@ -152,12 +142,10 @@ export function useMentalAthlete(athleteId, { demoUtcToday = null, demoRecord = 
   const today = academyDateISO(now);
   const utcToday = utcTodayISO(now);
   const notesGen = useInvalidation(MENTAL_NOTES_KEY);
-  const logsGen = useInvalidation('contractLogs');
-  const checkinsGen = useInvalidation(CHECKINS_KEY);
   const consentsGen = useInvalidation(MENTAL_CONSENT_KEY);
   return useSeedResource(
     live ? null : seedMentalAthlete(athleteId, today, demoUtcToday ?? utcToday, demoRecord),
-    live ? { source: () => liveMentalAthlete(athleteId, today, utcToday), deps: ['mental-athlete', athleteId, today, notesGen, logsGen, checkinsGen, consentsGen] } : undefined
+    live ? { source: () => liveMentalAthlete(athleteId, today, utcToday), deps: ['mental-athlete', athleteId, today, notesGen, consentsGen] } : undefined
   );
 }
 
@@ -293,161 +281,4 @@ export function useMentalNote({ athleteId, entryId, sessionDate = null, athleteN
 
   const name = athleteName ?? (resolved.athleteId === athleteId ? resolved.name : null);
   return { entry, athleteName: name, loading, error, save, remove, saveState, savedAt };
-}
-
-/* ------------------------------------------------------- Contract board -- */
-
-/** What the board is computed from; the rows are derived in the hook so a toggle never re-reads. */
-async function liveBoardInputs(weekStartISO) {
-  const weekEnd = addDays(weekStartISO, 6);
-  const [athletes, households, logsByAthlete, checkins, config, bookings, sessions] = await Promise.all([
-    fetchAllAthletes(),
-    fetchAllHouseholds(),
-    fetchContractLogsBetween({ fromISO: addDays(weekStartISO, -7), toISO: weekEnd }),
-    fetchCheckinsForAthletes(null),
-    fetchContractConfig(),
-    fetchBookingsBetween({ fromISO: weekStartISO, toISO: weekEnd }),
-    fetchSessionsInRange(weekStartISO, weekEnd),
-  ]);
-  return { athletes, households, logsByAthlete, checkins, config, bookings, sessions };
-}
-
-const checkinId = (c) => c.id ?? `${c.athleteId}_${c.weekStart}`;
-
-/** The check-ins as read, with this board's own toggles on top (id -> doc, or null for unchecked). */
-function withOwn(checkins, own) {
-  const ownIds = Object.keys(own);
-  if (ownIds.length === 0) return checkins || [];
-  const rest = (checkins || []).filter((c) => !(checkinId(c) in own));
-  return [...rest, ...ownIds.map((id) => own[id]).filter(Boolean)];
-}
-
-/**
- * The board for the week starting `weekStartISO`: `{ rows: { due, thisWeek,
- * checkedIn } | null, config, setCheckin({ athleteId, checkedIn }), loading,
- * error }`. The households feed boardRows' on-contract gate, the same one
- * the Monday email applies (Review Focus 4).
- *
- * A Checked in tap is optimistic: the row moves at once (the tap's own
- * check-in is applied over what was read), the write runs, and a failed
- * write puts the row back to what the server holds (the read, or the last
- * write of this board that landed) and rejects. The board never re-reads on its own
- * toggle (CHECKINS_KEY is not in its deps), so the list never blanks to
- * skeletons and the scroll stays where Yannick is. Seed mode keeps the
- * toggle local.
- */
-export function useContractBoard(weekStartISO) {
-  const live = isLive();
-  const today = academyDateISO();
-  const logsGen = useInvalidation('contractLogs');
-  const athletesGen = useInvalidation('athletes');
-  let seed = null;
-  if (!live) {
-    const f = mentalFixtures(today);
-    seed = { athletes: f.athletes, households: f.households, logsByAthlete: f.logsByAthlete, checkins: f.checkins, config: f.config, bookings: f.bookings, sessions: f.sessions };
-  }
-  const state = useSeedResource(
-    seed,
-    live ? { source: () => liveBoardInputs(weekStartISO), deps: ['contract-board', weekStartISO, today, logsGen, athletesGen] } : undefined
-  );
-
-  const [own, setOwn] = useState({});
-  const ownRef = useRef(own);
-  // Per check-in id: what the server holds (`server`: the read, or the last
-  // write that landed), the latest tap, and whether that tap was refused.
-  const flights = useRef({});
-  const putOwn = useCallback((next) => { ownRef.current = next; setOwn(next); }, []);
-  const showServer = useCallback((id, server) => {
-    const next = { ...ownRef.current };
-    if (server.had) next[id] = server.doc;
-    else delete next[id]; // back to what was read
-    putOwn(next);
-  }, [putOwn]);
-
-  const inputs = state.data;
-  const rows = useMemo(() => (inputs
-    ? boardRows({
-      athletes: inputs.athletes, households: inputs.households, logsByAthlete: inputs.logsByAthlete,
-      checkins: withOwn(inputs.checkins, own), today, enabledAt: inputs.config?.enabledAt ?? null, weekStartISO,
-      visits: visitsByAthlete({ bookings: inputs.bookings, sessions: inputs.sessions, weekStartISO }),
-    })
-    : null), [inputs, own, today, weekStartISO]);
-
-  const setCheckin = useCallback(async ({ athleteId, checkedIn }) => {
-    const id = `${athleteId}_${weekStartISO}`;
-    const now = checkedIn ? { id, athleteId, weekStart: weekStartISO, checkedIn: true, by: 'mental', at: today } : null;
-    if (!live) {
-      putOwn({ ...ownRef.current, [id]: now });
-      return { id, checkedIn: Boolean(checkedIn) };
-    }
-    // The first tap on a row records what is on screen, which is what the server holds.
-    const f = flights.current[id] || (flights.current[id] = {
-      server: { had: Object.prototype.hasOwnProperty.call(ownRef.current, id), doc: ownRef.current[id] },
-    });
-    const token = {};
-    f.latest = token;
-    f.refused = false;
-    putOwn({ ...ownRef.current, [id]: now });
-    const pending = writeCheckin({ athleteId, weekStartISO, checkedIn });
-    f.pending = pending; // a note typed before this lands waits for it (setCheckinNote)
-    try {
-      const out = await pending;
-      f.server = { had: true, doc: now };
-      if (f.refused) showServer(id, f.server); // the latest tap was refused before this write landed
-      return out;
-    } catch (err) {
-      // A refused write shows what the server holds, never an earlier tap's
-      // optimistic row; a refused earlier tap leaves the latest tap's row alone.
-      if (f.latest === token) {
-        f.refused = true;
-        showServer(id, f.server);
-      }
-      throw err;
-    } finally {
-      if (f.pending === pending) f.pending = null; // a settled write is nothing to wait for
-    }
-  }, [live, weekStartISO, today, putOwn, showServer]);
-
-  /**
-   * The note on the displayed week's check-in for `athleteId` (Yannick,
-   * 2026-10-30). Optimistic like the tick: the row shows the note at once; a
-   * failed write puts the previous note back and rejects. Waits for the
-   * tick's own write when that is still in flight (the doc must exist for
-   * the partial update), and fails the way that write failed. A blank note
-   * removes the stored one. Rejects NOT_FOUND when the row is not checked
-   * in that week.
-   */
-  const setCheckinNote = useCallback(async ({ athleteId, note }) => {
-    const id = `${athleteId}_${weekStartISO}`;
-    const text = typeof note === 'string' && note.trim() ? note.trim() : null;
-    const hasOwn = () => Object.prototype.hasOwnProperty.call(ownRef.current, id);
-    const shown = () => (hasOwn() ? ownRef.current[id] : (inputs?.checkins || []).find((c) => checkinId(c) === id && c.checkedIn === true) || null);
-    const current = shown();
-    if (!current) throw new LiveDataError(ERR.NOT_FOUND, 'setCheckinNote: that week has no check-in to note.');
-    // Like the first tap, the first note on a row records what is on screen as
-    // what the server holds, BEFORE the optimistic note goes on - so a later
-    // refused tap never puts an unconfirmed note back on the row.
-    const f = flights.current[id] || (flights.current[id] = { server: { had: hasOwn(), doc: ownRef.current[id] } });
-    const before = current;
-    const after = { ...current, id, note: text };
-    putOwn({ ...ownRef.current, [id]: after });
-    if (!live) return { id, note: text };
-    try {
-      // The tick's own write must land first (the doc must exist for the update);
-      // if that write failed, the row already went back and the note goes with it.
-      if (f.pending) await f.pending.catch(() => {});
-      const live_ = shown();
-      if (!live_ || live_.checkedIn !== true) return { id, note: null, dropped: true }; // unticked while we waited
-      const out = await writeCheckinNote({ athleteId, weekStartISO, note: text });
-      const landed = { ...live_, id, note: text }; // the note onto whatever the row holds now, not the pre-wait doc
-      putOwn({ ...ownRef.current, [id]: landed });
-      f.server = { had: true, doc: landed };
-      return out;
-    } catch (err) {
-      if (ownRef.current[id] === after) putOwn({ ...ownRef.current, [id]: before });
-      throw err;
-    }
-  }, [live, weekStartISO, inputs, putOwn]);
-
-  return { rows, config: inputs?.config ?? null, setCheckin, setCheckinNote, loading: state.loading, error: state.error };
 }

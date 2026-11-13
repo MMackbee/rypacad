@@ -61,11 +61,10 @@ const loadAdminScholarships = () => import('./screens/AdminScholarships');
 const loadStaff = () => import('./screens/StaffRoles');
 const loadTour = () => import('./screens/TourStandings');
 const loadSpecialistDay = () => import('./screens/SpecialistDay');
-// Yannick's tools (2026-10-28, spec 5): one /portal/mental segment, four screens.
+// Yannick's tools (2026-10-28, spec 5): one /portal/mental segment, three screens.
 const loadMentalAthletes = () => import('./screens/MentalAthletes');
 const loadMentalAthlete = () => import('./screens/MentalAthlete');
 const loadMentalNote = () => import('./screens/MentalNote');
-const loadMentalContract = () => import('./screens/MentalContract');
 // Yannick's consent (2026-10-30 plan Task 11): the family's list and one athlete's flow.
 const loadConsentList = () => import('./screens/MentalConsent');
 const loadConsentFlow = () => import('./screens/MentalConsentFlow');
@@ -93,7 +92,6 @@ const SpecialistDay = lazy(loadSpecialistDay);
 const MentalAthletes = lazy(loadMentalAthletes);
 const MentalAthlete = lazy(loadMentalAthlete);
 const MentalNote = lazy(loadMentalNote);
-const MentalContract = lazy(loadMentalContract);
 const MentalConsent = lazy(loadConsentList);
 const MentalConsentFlow = lazy(loadConsentFlow);
 
@@ -111,7 +109,7 @@ const CURRENT_ROUTE_CHUNKS = {
   book: [loadBook],
   coaching: [loadCoaching],
   'my-sessions': [loadSpecialistDay],
-  mental: [loadMentalAthletes, loadMentalAthlete, loadMentalNote, loadMentalContract],
+  mental: [loadMentalAthletes, loadMentalAthlete, loadMentalNote],
   consent: [loadConsentList, loadConsentFlow],
   contract: [loadContract],
   season: [loadSeason],
@@ -569,22 +567,6 @@ function MentalNoteRoute() {
 }
 
 /**
- * The contract board (spec 5.4): mental, ops and owner; the Checked in
- * switch is Yannick's alone. Waits for this route's OWN auth subscription,
- * like SpecialistDayRoute: it starts loading after RequireRole's has
- * finished, and a role read off a still-null user would show an owner the
- * switches for a frame (a tap then is a contractCheckins 403). Live, the
- * role is never defaulted to 'mental'.
- */
-function MentalContractRoute({ onSignOut }) {
-  const live = isLive();
-  const { user, loading } = useAuthSession(live ? undefined : { variant: 'idle' });
-  if (live && loading) return null;
-  const role = live ? (user?.role ?? null) : 'mental';
-  return <MentalContract bare role={role} onSignOut={onSignOut} />;
-}
-
-/**
  * Yannick's consent, the family's list (plan Task 11): it goes straight into
  * a one-athlete household's flow, except back from the flow (state from
  * 'flow') and for a minor login's ?withdraw=1.
@@ -902,11 +884,13 @@ export default function PortalRoutes() {
         }
       />
       {/* Yannick's tools (2026-10-28, spec 5): his athletes, one athlete's
-          page and its private notes are role mental only; the contract board
-          also admits ops and owner, read-only (by URL, no tab). The static
-          mental/contract is declared before mental/:athleteId. */}
+          page and its private notes are role mental only. The contract board
+          is gone (owner 2026-11-12/13: the contract runs on a paper calendar),
+          so an old mental/contract link goes through the index to the
+          viewer's own home. It is declared before mental/:athleteId and never
+          opens an athlete called "contract". */}
       <Route path="mental" element={<RequireRole roles={['mental']}><MentalAthletesRoute onSignOut={onSignOut} /></RequireRole>} />
-      <Route path="mental/contract" element={<RequireRole roles={['mental', 'ops', 'owner']}><MentalContractRoute onSignOut={onSignOut} /></RequireRole>} />
+      <Route path="mental/contract" element={<Navigate to="/portal" replace />} />
       <Route path="mental/:athleteId/notes/:entryId" element={<RequireRole roles={['mental']}><MentalNoteRoute /></RequireRole>} />
       <Route path="mental/:athleteId" element={<RequireRole roles={['mental']}><MentalAthleteRoute onSignOut={onSignOut} /></RequireRole>} />
       {/* Yannick's consent form (2026-10-30): signed by a parent or an athlete login; coaches see nothing of it. */}

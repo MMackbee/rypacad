@@ -22,7 +22,7 @@ const pill = (tone) => ({
  * one tick per athlete, kept on every later session.
  *
  * role="checkbox" with the round 26 px tick drawn inside a 44 px target (the
- * mental/CheckinToggle.js precedent; Checkbox.js is 26 px with no disabled).
+ * old contract board's check-in toggle; Checkbox.js is 26 px with no disabled).
  * `milestone` undefined renders nothing (or the load error), so a row never
  * reads "not done" before its read lands. Undo is for whoever ticked it,
  * inside ten minutes; the owner clears any tick behind an inline confirm.

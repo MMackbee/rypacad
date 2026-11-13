@@ -3,7 +3,7 @@ import { renderScreen } from './testRender';
 
 let mockFlow;
 jest.mock('../hooks/mentalConsent', () => ({ useConsentFlow: () => mockFlow }));
-// The Done screen shows today's academy date (the MentalContract.test.js precedent).
+// The Done screen shows today's academy date: a fixed one here.
 jest.mock('../data/calendar', () => ({ ...jest.requireActual('../data/calendar'), academyDateISO: () => '2026-11-05' }));
 import MentalConsentFlow from './MentalConsentFlow';
 

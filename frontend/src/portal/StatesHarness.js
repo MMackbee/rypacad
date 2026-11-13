@@ -42,7 +42,6 @@ import SpecialistDay from './screens/SpecialistDay';
 import MentalAthletes from './screens/MentalAthletes';
 import MentalAthlete from './screens/MentalAthlete';
 import MentalNote from './screens/MentalNote';
-import MentalContract from './screens/MentalContract';
 import Membership from './screens/Membership';
 import Reservations from './screens/Reservations';
 import MentalConsent from './screens/MentalConsent';
@@ -326,17 +325,17 @@ export const SCREEN_STATES = [
     ] },
   /*
    * Mental tools (2026-10-28, docs/portal/plans/2026-10-28-mental-tools):
-   * Yannick's Athletes tab, an athlete page, a note and the contract board.
-   * No `variant` prop - each reads mentalFixtures (data/seed.js) through
-   * hooks/mental.js, so a state varies only the athlete, the note or who is
-   * looking (the owner sees the board without the toggles).
+   * Yannick's Athletes tab, an athlete page and a note (the contract board
+   * went 2026-11-13). No `variant` prop - each reads mentalFixtures
+   * (data/seed.js) through hooks/mental.js, so a state varies only the
+   * athlete or the note.
    */
   { id: 'MA', title: 'Mental Athletes', Screen: MentalAthletes, role: 'mental',
     states: [['default', 'Yannick · athletes']] },
   { id: 'MP', title: 'Mental Athlete', Screen: MentalAthlete, role: 'mental',
     states: [
       ['default', 'Jordan · intake and 1:1s', { athleteId: 'jordan' }],
-      ['default', 'Nico · 10 min a day', { athleteId: 'nico' }],
+      ['default', 'Nico · no intake yet', { athleteId: 'nico' }],
       // Yannick's Consent card (2026-10-30 consent plan Task 16), one per status.
       ['default', 'Reese · consent needed', { athleteId: 'reese' }],
       ['default', 'Quinn · 18+ signed', { athleteId: 'quinn' }],
@@ -362,11 +361,6 @@ export const SCREEN_STATES = [
     states: [
       ['default', 'Intake note', { athleteId: 'jordan', entryId: 'intake' }],
       ['default', 'Session note', { athleteId: 'jordan', entryId: 'cal-seed-b', sessionDate: MENTAL_SESSION_DATE }],
-    ] },
-  { id: 'MC', title: 'Mental Contract', Screen: MentalContract, role: 'mental · ops/owner',
-    states: [
-      ['default', 'Yannick · toggles', { role: 'mental' }],
-      ['default', 'Owner · read-only', { role: 'owner' }],
     ] },
   /*
    * Membership (Sprint 11 pin D, TEAM.md, contract v1.9) — the retired

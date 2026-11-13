@@ -67,7 +67,7 @@ const tabsOf = (r) => [...r.container.querySelectorAll('nav button')].map((b) =>
 const currentTab = (r) => r.container.querySelector('nav [aria-current="page"]')?.textContent ?? null;
 
 test.each([
-  ['mental', undefined, ['Sessions', 'Today', 'Athletes', 'Contract', 'Tour']],
+  ['mental', undefined, ['Sessions', 'Today', 'Athletes', 'Tour']],
   ['ops', undefined, ['Admin', 'Today', 'Sessions', 'Tour']],
   ['owner', undefined, ['Admin', 'Today', 'Sessions', 'Staff', 'Tour']],
   ['coach', 'phil', ['Sessions', 'Today', 'Assessments', 'Tour']],
