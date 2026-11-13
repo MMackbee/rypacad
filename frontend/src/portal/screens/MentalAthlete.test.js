@@ -12,25 +12,29 @@ import MentalAthlete from './MentalAthlete';
 
 beforeEach(() => {
   mockData = {
-    athlete: { id: 'jordan', name: 'Jordan Whitfield', age: 14, dob: '2012-06-17', householdId: 'whitfield', required: 20 },
+    athlete: { id: 'jordan', name: 'Jordan Whitfield', age: 14, dob: '2012-06-17', householdId: 'whitfield' },
     contact: { familyName: 'Whitfield family', guardianName: 'Dana', email: 'dana@email.com', phone: '612-555-0100' },
     sessions: [
       { sessionId: 'cal-c', date: '2026-11-17', time: '5:00 PM', status: 'confirmed', attendee: 'athlete', hasNote: false },
       { sessionId: 'cal-b', date: '2026-11-10', time: '4:30 PM', status: 'attended', attendee: 'parent', hasNote: true },
     ],
     notes: { intake: null, sessions: [{ id: 'cal-b', sessionDate: '2026-11-10', updatedAtMs: 1 }], free: [{ id: 'free-k3x9', updatedAtMs: 2, body: 'Call Dana about tee times.' }] },
-    contract: { thisWeek: { metDays: 4, days: [] }, lastCheckin: '2026-11-10', required: 20 },
   };
 });
 
-test('header, contact, intake, sessions with chips, other notes and the contract summary', async () => {
+/** The header line under the name. */
+const ageLine = (r) => [...r.container.querySelectorAll('div')].find((el) => el.children.length === 0 && /^Age /.test(el.textContent))?.textContent ?? null;
+// The contract left Yannick's view (owner 2026-11-12/13): no card, no daily minutes.
+const CONTRACT_TEXT = ['Contract', 'This week', 'Never checked in', 'Last check-in', 'min a day'];
+
+test('header, contact, intake, sessions with chips and other notes; no contract', async () => {
   const onOpenNote = jest.fn();
   const r = await renderScreen(<MentalAthlete bare athleteId="jordan" onOpenNote={onOpenNote} />, { path: '/portal/mental/jordan' });
-  expect(r.text()).toContain('Age 14 · 20 min a day');
+  expect(ageLine(r)).toBe('Age 14');
   expect(r.text()).toContain('Whitfield family · Dana · dana@email.com · 612-555-0100');
   expect(r.container.querySelector('a[href="mailto:dana@email.com"]')).not.toBeNull();
   expect(r.text()).toContain('Nov 10 · 4:30 PM · Attended · Parent attending');
-  expect(r.text()).toContain('This week 4/5 · 20 min a day · Last check-in Nov 10');
+  for (const t of CONTRACT_TEXT) expect(r.text()).not.toContain(t);
   await r.click('Write intake note');
   expect(onOpenNote).toHaveBeenCalledWith({ entryId: 'intake', sessionDate: null, athleteName: 'Jordan Whitfield' });
   await r.click('Edit note');
@@ -43,20 +47,23 @@ test('header, contact, intake, sessions with chips, other notes and the contract
   r.unmount();
 });
 
-test('no contact and never checked in', async () => {
-  mockData = { ...mockData, contact: null, contract: { ...mockData.contract, lastCheckin: null } };
+test('no contact: no contact line', async () => {
+  mockData = { ...mockData, contact: null };
   const r = await renderScreen(<MentalAthlete bare athleteId="jordan" />, { path: '/portal/mental/jordan' });
   expect(r.text()).not.toContain('Whitfield family');
-  expect(r.text()).toContain('Never checked in');
-  expect(r.text()).not.toContain('Note:');
+  expect(ageLine(r)).toBe('Age 14');
   r.unmount();
 });
 
-test("the last check-in's note shows under the contract line", async () => {
-  mockData = { ...mockData, contract: { ...mockData.contract, lastCheckinNote: 'Wants to work on first-tee nerves.' } };
+test('a payload that still carries the old contract fields shows none of them', async () => {
+  mockData = {
+    ...mockData,
+    athlete: { ...mockData.athlete, required: 20 },
+    contract: { thisWeek: { metDays: 4, days: [] }, lastCheckin: '2026-11-10', lastCheckinNote: 'Wants to work on first-tee nerves.', required: 20 },
+  };
   const r = await renderScreen(<MentalAthlete bare athleteId="jordan" />, { path: '/portal/mental/jordan' });
-  expect(r.text()).toContain('Last check-in Nov 10');
-  expect(r.text()).toContain('Note: Wants to work on first-tee nerves.');
+  expect(ageLine(r)).toBe('Age 14');
+  for (const t of [...CONTRACT_TEXT, 'Note:', 'first-tee nerves']) expect(r.text()).not.toContain(t);
   r.unmount();
 });
 

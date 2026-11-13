@@ -119,11 +119,9 @@ export const TABS = {
     // booked in each too. A golf roster opens read-only for him: the rules
     // let a mental account mark attendance on its own sessions only.
     { key: 'today', label: 'Today', icon: 'calendar', route: '/portal/coach' },
-    // 2026-10-28 (spec 5): Yannick's athletes and his contract board. The
-    // board's key is NOT 'contract' - that key is hidden while the family
-    // switch is off, and the board is not behind it.
+    // 2026-10-28 (spec 5): Yannick's athletes. No contract board since
+    // 2026-11-13 (owner: the contract runs on a paper calendar).
     { key: 'athletes', label: 'Athletes', icon: 'people', route: '/portal/mental' },
-    { key: 'mental-contract', label: 'Contract', icon: 'target', route: '/portal/mental/contract' },
     // Assessments only when the owner gave this mental account the permission.
     ASSESSMENTS_TAB,
     { key: 'tour', label: 'Tour', icon: 'trophy', route: '/portal/tour' },

@@ -75,14 +75,18 @@ test('selfManaged never changes a parent or staff bar', async () => {
   await coach.unmount();
 });
 
-test('mental: Sessions, Today, Athletes, Contract (key mental-contract) and Tour, with the contract switch off', async () => {
-  delete process.env.REACT_APP_CONTRACT_ENABLED;
-  const r = await renderScreen(<BottomTabBar role="mental" active="athletes" />, { path: '/portal/mental' });
-  expect(['Sessions', 'Athletes', 'Contract', 'Tour'].every((l) => r.text().includes(l))).toBe(true);
-  expect(TABS.mental.map((t) => t.key)).toEqual(['sessions', 'today', 'athletes', 'mental-contract', 'assessments', 'tour']);
-  expect(labels(r)).toEqual(['Sessions', 'Today', 'Athletes', 'Contract', 'Tour']);
-  expect(TABS.mental.find((t) => t.key === 'mental-contract').route).toBe('/portal/mental/contract');
-  r.unmount();
+test('mental: Sessions, Today, Athletes and Tour; the Contract tab left with the paper calendar (owner 2026-11-12/13)', async () => {
+  // The family switch never brings it back: it gates the key 'contract' alone.
+  for (const on of [false, true]) {
+    if (on) process.env.REACT_APP_CONTRACT_ENABLED = 'true';
+    else delete process.env.REACT_APP_CONTRACT_ENABLED;
+    const r = await renderScreen(<BottomTabBar role="mental" active="athletes" />, { path: '/portal/mental' });
+    expect(labels(r)).toEqual(['Sessions', 'Today', 'Athletes', 'Tour']);
+    await r.unmount();
+  }
+  expect(TABS.mental.map((t) => t.key)).toEqual(['sessions', 'today', 'athletes', 'assessments', 'tour']);
+  expect(TABS.mental.map((t) => t.key)).not.toContain('mental-contract');
+  expect(TABS.mental.some((t) => t.route === '/portal/mental/contract')).toBe(false);
 });
 
 test('Phil and Yannick get a Today tab for the golf day, beside the Sessions they land on (owner ruling 2026-11-03)', async () => {
@@ -93,7 +97,7 @@ test('Phil and Yannick get a Today tab for the golf day, beside the Sessions the
   expect(phil.location().pathname).toBe('/portal/my-sessions');
   await phil.unmount();
   const yannick = await renderScreen(<BottomTabBar role="mental" active="sessions" />, { path: '/portal/my-sessions' });
-  expect(labels(yannick)).toEqual(['Sessions', 'Today', 'Athletes', 'Contract', 'Tour']);
+  expect(labels(yannick)).toEqual(['Sessions', 'Today', 'Athletes', 'Tour']);
   expect(yannick.button('Sessions').getAttribute('aria-current')).toBe('page');
   await yannick.click('Today');
   expect(yannick.location().pathname).toBe('/portal/coach');
@@ -136,10 +140,10 @@ test('Assessments: for Phil and for staff the owner gave the permission; never a
   expect(labels(plain)).toEqual(['Today', 'Roster']);
   await plain.unmount();
   const mental = await renderScreen(<BottomTabBar role="mental" />);
-  expect(labels(mental)).toEqual(['Sessions', 'Today', 'Athletes', 'Contract', 'Tour']);
+  expect(labels(mental)).toEqual(['Sessions', 'Today', 'Athletes', 'Tour']);
   await mental.unmount();
   const mentalAssessor = await renderScreen(<BottomTabBar role="mental" assessments />);
-  expect(labels(mentalAssessor)).toEqual(['Sessions', 'Today', 'Athletes', 'Contract', 'Assessments', 'Tour']);
+  expect(labels(mentalAssessor)).toEqual(['Sessions', 'Today', 'Athletes', 'Assessments', 'Tour']);
   await mentalAssessor.unmount();
   const owner = await renderScreen(<BottomTabBar role="owner" assessments />);
   expect(labels(owner)).not.toContain('Assessments');

@@ -90,7 +90,7 @@ test('Phil and Yannick open the golf day with their own tab bars and no Students
   expect(phil.text()).toContain('Training block');
   await phil.unmount();
   const yannick = await renderScreen(<CoachDashboard bare role="mental" />);
-  expect(tabs(yannick)).toEqual(['Sessions', 'Today', 'Athletes', 'Contract', 'Tour']);
+  expect(tabs(yannick)).toEqual(['Sessions', 'Today', 'Athletes', 'Tour']);
   expect(yannick.button('Students')).toBeNull();
   expect(yannick.text()).toContain('Training block');
   await yannick.unmount();
