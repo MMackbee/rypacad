@@ -123,6 +123,7 @@ const {moveBooking, sendMoveReconfirm} = require('./portal/move');
 const {staffCancelBooking} = require('./portal/staff-cancel');
 const {staffBookSession} = require('./portal/staff-book');
 const {isFreeComp} = require('./portal/move-decide');
+const {sessionStarted} = require('./portal/session-time');
 
 // ==========================================================================
 // PORTAL SERVER-SIDE WRITERS (Sprint 13, contract v2.1)
@@ -254,7 +255,8 @@ exports.onBookingCreated = functions
           docBody('sessions', booking.sessionId),
           docBody('athletes', booking.athleteId),
         ]);
-        const copy = notices.bookingConfirmed({athlete, session, booking});
+        const copy = notices.bookingConfirmed({athlete, session, booking,
+          started: sessionStarted(session, new Date())});
         await notify.sendNotice({
           kind: 'booking-confirmed',
           category: 'schedule',
@@ -289,8 +291,9 @@ exports.onBookingCancelled = functions
     .onUpdate(async (change, context) => {
       const before = change.before.data() || {};
       const after = change.after.data() || {};
-      // moveBooking re-confirmed a row cancelled earlier: no create trigger
-      // fires for it, so its booking-confirmed notice goes from here.
+      // moveBooking or staffBookSession re-confirmed a row cancelled
+      // earlier: no create trigger fires for it, so its booking-confirmed
+      // notice goes from here.
       if (shouldNoticeMoveReconfirm(before, after)) {
         await sendMoveReconfirm(context.params.bookingId, after);
         return null;

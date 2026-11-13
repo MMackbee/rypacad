@@ -173,6 +173,19 @@ test('bookingConfirmed: a 1:1 with Yannick keeps its own terms', () => {
   }
 });
 
+test('bookingConfirmed: a session that already started drops the ' +
+    'before-it-starts sentence', () => {
+  const args = (started) => ({athlete: {name: 'Jordan Whitfield'},
+    session: {type: 'training', date: '2026-11-10', time: '4:00 PM'},
+    started});
+  assert.equal(notices.bookingConfirmed(args(true)).body,
+      'Jordan is booked: Training, Tue, Nov 10 at 4:00 PM.');
+  assert.ok(notices.bookingConfirmed(args(false)).body.endsWith(
+      ' You can cancel or move it in the app any time before it starts.'));
+  assert.equal(notices.bookingConfirmed(args(undefined)).body,
+      notices.bookingConfirmed(args(false)).body);
+});
+
 test('bookingCancelled: no token line for a comp or an Elite booking', () => {
   const plain = 'Teddy\'s booking for Training, Wed, Nov 4 at 3:00 PM was ' +
       'cancelled.';

@@ -103,15 +103,17 @@ function millisOf(value) {
 }
 
 /**
- * Whether a booking update is moveBooking re-confirming a row the athlete
- * had cancelled earlier (portal/move.js, booking changes 2026-11-11). No
- * create trigger fires for it, so the update trigger sends the
+ * Whether a booking update is the server re-confirming a row the athlete
+ * had cancelled earlier: moveBooking (portal/move.js, booking changes
+ * 2026-11-11) or a staff add (portal/staff-book.js, 2026-11-13). No create
+ * trigger fires for it, so the update trigger sends the
  * 'booking-confirmed' notice instead.
  *
- * - Before `cancelled`, after `confirmed`, `createdVia: 'move'`.
- * - `createdAt` a Timestamp that differs from before's: only moveBooking
+ * - Before `cancelled`, after `confirmed`, `createdVia` `'move'` or
+ *   `'staff'`.
+ * - `createdAt` a Timestamp that differs from before's: only the server
  *   rewrites it, so a client re-book of a row that once came from a move
- *   (it keeps `createdAt`) is not a move.
+ *   or from staff (it keeps `createdAt`) stays silent.
  * @param {?Object} before The `bookings/{id}` body before the update.
  * @param {?Object} after The body after it.
  * @return {boolean} True when the move's confirmation is owed.
@@ -120,7 +122,7 @@ function shouldNoticeMoveReconfirm(before, after) {
   const b = before || {};
   const a = after || {};
   if (b.status !== 'cancelled' || a.status !== 'confirmed') return false;
-  if (a.createdVia !== 'move') return false;
+  if (a.createdVia !== 'move' && a.createdVia !== 'staff') return false;
   const ms = millisOf(a.createdAt);
   return ms !== null && ms !== millisOf(b.createdAt);
 }

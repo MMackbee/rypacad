@@ -43,6 +43,7 @@ const {FieldValue} = require('firebase-admin/firestore');
 const lib = require('./lib');
 const notices = require('./notices');
 const notify = require('./notify');
+const {sessionStarted} = require('./session-time');
 const {loadTokenInputs, rowOf} = require('./booking-reads');
 const {REFUSALS, decideMove} = require('./move-decide');
 const {isStaff} = require('./staff-cancel-decide');
@@ -240,22 +241,26 @@ async function moveBookingHandler(data, context, deps) {
 }
 
 /**
- * The 'booking-confirmed' notice for a move onto a row the athlete had
- * cancelled earlier: onBookingCancelled calls this when
+ * The 'booking-confirmed' notice for a move or a staff add onto a row the
+ * athlete had cancelled earlier: onBookingCancelled calls this when
  * `shouldNoticeMoveReconfirm` holds (portal/notify-gates.js). The key
- * carries the move's `createdAt`, so the row's earlier
- * `booking-confirmed_{id}` ledger entry never blocks it and a redelivered
- * trigger never sends twice. A failure is logged, never thrown.
+ * `{id}_{createdVia}_{createdAt ms}` carries the server's new `createdAt`,
+ * so the row's earlier `booking-confirmed_{id}` ledger entry never blocks
+ * it and a redelivered trigger never sends twice. A session that already
+ * started gets no cancel-or-move sentence. A failure is logged, never
+ * thrown.
  * @param {string} bookingId The booking id.
- * @param {!Object} booking The booking body after the move.
- * @param {{db: (!Object|undefined), sendNotice: (!Function|undefined)}=}
- *     deps The Firestore and the sender, injectable for tests.
+ * @param {!Object} booking The booking body after the move or add.
+ * @param {{db: (!Object|undefined), sendNotice: (!Function|undefined),
+ *     now: (!Date|undefined)}=} deps The Firestore, the sender and the
+ *     clock, injectable for tests.
  * @return {!Promise<void>} Resolves once sent, or once a failure is logged.
  */
 async function sendMoveReconfirm(bookingId, booking, deps) {
   try {
     const store = (deps && deps.db) || admin.firestore();
     const send = (deps && deps.sendNotice) || notify.sendNotice;
+    const now = deps && deps.now instanceof Date ? deps.now : new Date();
     const body = async (name, id) => {
       if (!id) return null;
       const snap = await store.collection(name).doc(id).get();
@@ -265,7 +270,8 @@ async function sendMoveReconfirm(bookingId, booking, deps) {
       body('sessions', booking.sessionId),
       body('athletes', booking.athleteId),
     ]);
-    const copy = notices.bookingConfirmed({athlete, session, booking});
+    const copy = notices.bookingConfirmed({athlete, session, booking,
+      started: sessionStarted(session, now)});
     await send({
       kind: 'booking-confirmed',
       category: 'schedule',
@@ -273,7 +279,8 @@ async function sendMoveReconfirm(bookingId, booking, deps) {
       athleteId: booking.athleteId || null,
       sessionId: booking.sessionId || null,
       bookingId,
-      subjectKey: `${bookingId}_move_${booking.createdAt.toMillis()}`,
+      subjectKey: `${bookingId}_${booking.createdVia}_` +
+          `${booking.createdAt.toMillis()}`,
       title: copy.title,
       body: copy.body,
     });

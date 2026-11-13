@@ -201,7 +201,7 @@ test('sendMoveReconfirm: one booking-confirmed notice keyed by the move',
       await sendMoveReconfirm('sam_s2', RECONFIRMED, {db: fakeDb(docs),
         sendNotice: async (n) => {
           sent.push(n);
-        }});
+        }, now: NOW});
       const copy = notices.bookingConfirmed({athlete: docs['athletes/sam'],
         session: docs['sessions/s2'], booking: RECONFIRMED});
       assert.deepEqual(sent, [{kind: 'booking-confirmed',
@@ -210,6 +210,22 @@ test('sendMoveReconfirm: one booking-confirmed notice keyed by the move',
         title: copy.title, body: copy.body}]);
       assert.match(copy.body, /cancel or move it in the app/);
     });
+
+test('sendMoveReconfirm: a staff add is keyed by staff; a started ' +
+    'session drops the before-it-starts sentence', async () => {
+  const sent = [];
+  const send = (booking, now) => sendMoveReconfirm('sam_s2', booking,
+      {db: fakeDb(world()), now, sendNotice: async (n) => {
+        sent.push(n);
+      }});
+  await send(Object.assign({}, RECONFIRMED, {createdVia: 'staff'}), NOW);
+  assert.equal(sent[0].subjectKey, 'sam_s2_staff_77');
+  assert.match(sent[0].body, /cancel or move it in the app/);
+  // Fri Nov 13 4:00 PM has started by noon on Sat Nov 14.
+  await send(RECONFIRMED, new Date('2026-11-14T18:00:00Z'));
+  assert.equal(sent[1].subjectKey, 'sam_s2_move_77');
+  assert.doesNotMatch(sent[1].body, /cancel or move/);
+});
 
 test('sendMoveReconfirm: a failed send is logged, never thrown',
     async () => {
