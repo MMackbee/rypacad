@@ -40,6 +40,8 @@
  *   staffCancelBooking     callable, portal/staff-cancel.js (2026-11-12):
  *                          owner or ops cancels a family's bookings on one
  *                          session from staff Billing; token back, no email
+ *   staffBookSession       callable, portal/staff-book.js (2026-11-13):
+ *                          owner or ops adds an athlete to a session
  *
  * The marketing site's scholarship form posts to submitScholarship
  * (portal/scholarship.js, 2026-10-01): public, origin-checked, validated.
@@ -119,6 +121,7 @@ const {submitFeedback} = require('./portal/feedback');
 const {requestMentalConsent} = require('./portal/mental-consent-request');
 const {moveBooking, sendMoveReconfirm} = require('./portal/move');
 const {staffCancelBooking} = require('./portal/staff-cancel');
+const {staffBookSession} = require('./portal/staff-book');
 const {isFreeComp} = require('./portal/move-decide');
 
 // ==========================================================================
@@ -139,6 +142,8 @@ exports.moveBooking = moveBooking;
 // Owner or ops cancels bookings of one family on one session, token back,
 // no email (2026-11-12, portal/staff-cancel.js).
 exports.staffCancelBooking = staffCancelBooking;
+// Owner or ops adds an athlete to a session (2026-11-13, portal/staff-book.js).
+exports.staffBookSession = staffBookSession;
 
 // ==========================================================================
 // SPRINT 20 LAUNCH (contract v3.0.1): instant sign-up, child-login claim,
