@@ -205,6 +205,7 @@ import { cancelDayOpen, sessionStarted } from '../data/sessionStart';
 import { isFreeComp } from '../data/bookingChanges';
 import { handicapLimitOf, handicapOf } from '../data/reserved';
 import { isHiddenSession } from '../data/hiddenSessions';
+import { FITNESS_WINDOW_DAYS, fitnessRow, orphanFitness } from '../data/orphanFitness';
 
 // 2026-10-02: the academy's handicap edit (hooks/handicap.js), on this seam
 // like every other staff write a screen reaches.
@@ -3628,9 +3629,14 @@ async function liveAdminDashboard(today) {
   const weekStart = mondayOfWeek(today);
   const weekEnd = addDaysISO(weekStart, 6);
 
+  // Owner 2026-11-13: fitness with no golf, read over the next four weeks
+  // (data/orphanFitness.js), hidden and cancelled sessions included.
+  const fitnessTo = addDaysISO(today, FITNESS_WINDOW_DAYS - 1);
+
   // The assessment windows read may fail on its own (rules that do not
   // grant it yet): that drops the "Baseline due" rows, never the dashboard.
-  const [allAthletes, sessionsThisWeek, pending, noshowBookings, contractLogs, windows, allHouseholds] =
+  // The four-week sessions read likewise drops only the fitness rows.
+  const [allAthletes, sessionsThisWeek, pending, noshowBookings, contractLogs, windows, allHouseholds, fitnessSessions] =
     await Promise.all([
       fetchAllAthletes(),
       fetchSessionsInRange(weekStart, weekEnd),
@@ -3639,6 +3645,7 @@ async function liveAdminDashboard(today) {
       fetchContractLogsSince(monthStart),
       fetchAllAssessmentWindows().catch(() => null),
       fetchAllHouseholds(),
+      fetchSessionsInRange(today, fitnessTo).catch(() => null),
     ]);
   // Owner 2026-10-15: staging shares this database, so the test family
   // (test: true, data/testFamily.js) is left out of every count and list
@@ -3698,6 +3705,10 @@ async function liveAdminDashboard(today) {
       tone: 'red',
       packageIds: null,
     });
+  }
+  // After Attendance, as the folded card's summary reads them (OutstandingCard TAG_ORDER).
+  if (fitnessSessions != null) {
+    outstanding.push(...orphanFitness(fitnessSessions, { from: today, to: fitnessTo }).map(fitnessRow));
   }
   for (const c of who.contractBehind) {
     outstanding.push({
@@ -3815,6 +3826,8 @@ export function useAdminDashboard({ variant = 'populated' } = {}) {
   const assessmentsGen = useInvalidation(ASSESSMENTS_KEY);
   const enrollmentGen = useInvalidation('enrollmentRequests');
   const householdsGen = useInvalidation('households');
+  // A session cancelled in the app clears its "Fitness with no golf" row.
+  const sessionsGen = useInvalidation('sessions');
 
   return useSeedResource(
     live
@@ -3849,6 +3862,7 @@ export function useAdminDashboard({ variant = 'populated' } = {}) {
             assessmentsGen,
             enrollmentGen,
             householdsGen,
+            sessionsGen,
           ],
         }
       : undefined
