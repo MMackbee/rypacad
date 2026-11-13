@@ -57,6 +57,7 @@ import * as grace from './grace';
 import * as adapter from './assessmentsLive';
 import * as calendar from '../data/calendar';
 import { reservedEligible, reservedTag } from '../data/reserved';
+import { bump } from './invalidate';
 
 const { useAdminDashboard, useBooking, useCoachDay, useCoachRoster, useHouseholdAthletes, useMembership, useMonthSessions, useSessionAttendance } = hooks;
 
@@ -223,6 +224,29 @@ describe('staff surfaces that list sessions', () => {
     const open = await mountHook(() => useSessionAttendance('2026-11-17-2'));
     expect(open.result.current.sessionMaxHandicap).toBeNull();
     await open.unmount();
+  });
+
+  test("the roster: the session's seat count rides the same read, and a change to sessions re-reads it", async () => {
+    // Walkthrough 2026-11-13: the header kept the count the tap carried.
+    asStaff('owner');
+    live.fetchBookingsBySession.mockResolvedValue([]);
+    live.fetchSessionsByIds.mockResolvedValue([TUESDAY[2]]);
+    const h = await mountHook(() => useSessionAttendance('2026-11-17-2'));
+    expect(h.result.current.sessionBooked).toBe(3);
+    expect(h.result.current.sessionCapacity).toBe(14);
+    live.fetchSessionsByIds.mockResolvedValue([{ ...TUESDAY[2], booked: 4 }]);
+    await act(async () => { bump('sessions'); });
+    await flush();
+    expect(h.result.current.sessionBooked).toBe(4);
+    await h.unmount();
+    // A missing doc, or a count that is not a number: null, never a guess.
+    for (const docs of [[], [{ ...TUESDAY[2], booked: '4', capacity: undefined }]]) {
+      live.fetchSessionsByIds.mockResolvedValue(docs);
+      const gone = await mountHook(() => useSessionAttendance('2026-11-17-2'));
+      expect(gone.result.current.sessionBooked).toBeNull();
+      expect(gone.result.current.sessionCapacity).toBeNull();
+      await gone.unmount();
+    }
   });
 
   test("the admin dashboard: this week's reserved blocks are named beside the block fill, off the same week read", async () => {

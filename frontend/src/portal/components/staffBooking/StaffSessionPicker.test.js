@@ -68,6 +68,19 @@ test('the day: today by default, bounded by the period start and the season end'
   await r.unmount();
 });
 
+test('initialDay: the sheet reopens the picker on the day staff picked, held to the bounds', async () => {
+  const r = await mount({ initialDay: '2026-11-20' });
+  expect(r.day().value).toBe('2026-11-20');
+  expect(mockAsked[0]).toEqual(['2026-11-20', 0]);
+  await r.unmount();
+  const early = await mount({ initialDay: '2026-10-20' });
+  expect(early.day().value).toBe('2026-11-01');
+  await early.unmount();
+  const none = await mount({ initialDay: null });
+  expect(none.day().value).toBe('2026-11-12');
+  await none.unmount();
+});
+
 test('Previous and Next move one day; a day outside the bounds is held to them', async () => {
   const r = await mount();
   await r.click('Next day ›');

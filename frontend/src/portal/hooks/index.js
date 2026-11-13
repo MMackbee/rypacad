@@ -4060,7 +4060,10 @@ export function useSessionAttendance(sessionId) {
             // (null on an open session), for the roster's reserved tag.
             // 2026-11-04: `unresolved` (absent == false) marks a slot held
             // for a Calendly booking not matched to a family yet.
-            return { coachNote: s?.coachNote ?? null, status: s?.status ?? 'scheduled', maxHandicap: handicapLimitOf(s), unresolved: s?.unresolved === true };
+            // 2026-11-13: the seat count, so the header follows a staff add,
+            // move or cancel (each bumps 'sessions'); null when not a number.
+            const count = (n) => (typeof n === 'number' ? n : null);
+            return { coachNote: s?.coachNote ?? null, status: s?.status ?? 'scheduled', maxHandicap: handicapLimitOf(s), unresolved: s?.unresolved === true, booked: count(s?.booked), capacity: count(s?.capacity) };
           },
           deps: ['session-note', sessionId, sessionsGen],
         }
@@ -4091,6 +4094,8 @@ export function useSessionAttendance(sessionId) {
     sessionStatus: noteState.data?.status ?? 'scheduled',
     sessionMaxHandicap: noteState.data?.maxHandicap ?? null,
     sessionUnresolved: noteState.data?.unresolved === true,
+    sessionBooked: noteState.data?.booked ?? null,
+    sessionCapacity: noteState.data?.capacity ?? null,
     cancelSession: doCancelSession,
   };
 }

@@ -248,6 +248,18 @@ const shownName = (athlete) => athlete.name ?? 'Name unavailable';
 export function SessionAttendance({ variant = 'pre', bare = false, onBack, sessionId, blockIndex, block, role = 'coach', readOnly = false, onOpenClubhead, onOpenCombine, showIntake = false }) {
   const { roster: demoRoster, marks: demoMarks, mark: demoMark, counts: demoCounts, sessionState: demoState } =
     useRoster({ variant });
+  // Live attendance rows for a real session, always called (rules of hooks) -
+  // only used when `live` below is true.
+  const liveAttendance = useSessionAttendance(sessionId);
+  const live = isLive() && sessionId != null;
+  // The header's "{booked} of {capacity} booked" from the session doc as it
+  // is now, kept through a re-read: the tap's count went stale after a staff
+  // add, move or cancel (walkthrough 2026-11-13). Only where the tap gave one.
+  const lastCount = useRef(null);
+  if (live && liveAttendance.sessionBooked != null) {
+    lastCount.current = { sessionId, line: `${liveAttendance.sessionBooked} of ${liveAttendance.sessionCapacity ?? '—'} booked` };
+  }
+  const countLine = live && block?.meta && lastCount.current && lastCount.current.sessionId === sessionId ? lastCount.current.line : null;
   // Seed header: the generated season narrowed by blockIndex. Live header:
   // the TAPPED block's real facts, passed through navigation as `block` —
   // useSession reads the seed season at today's date, which pre-season is
@@ -263,15 +275,11 @@ export function SessionAttendance({ variant = 'pre', bare = false, onBack, sessi
         // Yannick session opened from My Sessions must not read as a
         // 'Training block' (the old binary fallback did exactly that).
         name: block.name || hooks.genericSessionName(block.type),
-        meta: [block.time, block.meta].filter(Boolean).join(' · '),
+        meta: [block.time, countLine ?? block.meta].filter(Boolean).join(' · '),
         startsIn: realStartsIn(block),
       }
     : seedSession;
 
-  // Live attendance rows for a real session, always called (rules of hooks) -
-  // only used when `live` below is true.
-  const liveAttendance = useSessionAttendance(sessionId);
-  const live = isLive() && sessionId != null;
   // Keep the last good rows while a refetch is in flight (review 2026-11-04):
   // every mark() bumps 'bookings' and useSeedResource blanks `data` on each
   // reload, so the roster vanished and the counters read 0 on every IN/OUT

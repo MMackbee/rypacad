@@ -82,7 +82,10 @@ describe('the Free switch', () => {
     mockModel = model({ tokens: tokens({ left: 0 }) });
     const r = await mount({ sessionId: 's2' });
     expect(r.text()).toContain('Jordan has no tokens left for this period. Switch on Free to add anyway.');
-    expect(r.button('Add Jordan').disabled).toBe(true);
+    // The spec's "none" row: the confirm reads "Add Jordan free" before the
+    // switch is on too (walkthrough 2026-11-13 read "Add Jordan").
+    expect(r.button('Add Jordan free').disabled).toBe(true);
+    expect(r.button('Add Jordan')).toBeNull();
     await act(async () => { r.toggle().click(); });
     expect(r.text()).toContain('Free - no token used.');
     expect(r.button('Add Jordan free').disabled).toBe(false);
@@ -257,7 +260,7 @@ describe('refusals', () => {
     const r = await mount({ sessionId: 's9' });
     await r.click('Add Jordan');
     expect(r.text()).toContain('Jordan has no tokens left for next period. Switch on Free to add anyway.');
-    expect(r.button('Add Jordan').disabled).toBe(true);
+    expect(r.button('Add Jordan free').disabled).toBe(true);
     await r.unmount();
   });
 });
@@ -274,6 +277,25 @@ test('Back from the confirm returns to the picker; Back with a fixed session clo
   await fixed.click('Back');
   expect(fixed.calls.closed).toBe(1);
   await fixed.unmount();
+});
+
+test('Back and a refusal about the session reopen the picker on the day picked', async () => {
+  // Walkthrough 2026-11-13: the picker went back to today each time, so
+  // staff had to find the day again.
+  mockDay = [{ ...S2, date: '2026-11-20' }];
+  const r = await mount();
+  const day = () => r.container.querySelector('input[type="date"]').value;
+  expect(day()).toBe('2026-11-12');
+  await r.fill('Day', '2026-11-20');
+  await r.pick('s2');
+  await r.click('Back');
+  expect(day()).toBe('2026-11-20');
+  mockBook = async () => { throw refusal('session-cancelled', 'The academy cancelled that session.'); };
+  await r.pick('s2');
+  await r.click('Add Jordan');
+  expect(r.container.querySelector('[role="status"]').textContent).toBe('The academy cancelled that session. Nothing was changed.');
+  expect(day()).toBe('2026-11-20');
+  await r.unmount();
 });
 
 test('Close on the pick step', async () => {

@@ -181,6 +181,20 @@ describe('refusals', () => {
     await r.unmount();
   });
 
+  test('that refusal reopens the picker on the day picked, not today', async () => {
+    // Walkthrough 2026-11-13: it went back to today.
+    mockMove = async () => { throw refusal('session-hidden', 'That session is hidden from the schedule. Show it first, then add.'); };
+    const r = await mount();
+    const day = () => r.container.querySelector('input[type="date"]').value;
+    expect(day()).toBe('2026-11-12');
+    await r.fill('Day', '2026-11-19');
+    await r.pick('s4');
+    await r.click('Move');
+    expect(r.container.querySelector('[role="status"]')).not.toBeNull();
+    expect(day()).toBe('2026-11-19');
+    await r.unmount();
+  });
+
   test('no answer hands over the unconfirmed line', async () => {
     mockMove = async () => { throw refusal(null, "We couldn't confirm the change. Check the list before trying again."); };
     const r = await mount();

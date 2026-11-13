@@ -62,6 +62,7 @@ export default function StaffAddSheet({ athleteId, name = null, session = null, 
   const fixed = Boolean(session || sessionId);
   const [step, setStep] = useState(fixed ? 'confirm' : 'pick');
   const [picked, setPicked] = useState(null);
+  const [pickedDay, setPickedDay] = useState(null); // the picker reopens on it
   const [free, setFree] = useState(false);
   const [asked, setAsked] = useState(null); // the server's full count, after a full refusal
   const [turned, setTurned] = useState(null); // the charge after a no-tokens or not-paid refusal
@@ -99,6 +100,7 @@ export default function StaffAddSheet({ athleteId, name = null, session = null, 
     resetConfirm();
     setNotice(null);
     setPicked(s);
+    setPickedDay(s.date ?? null);
     setStep('confirm');
   };
 
@@ -166,7 +168,7 @@ export default function StaffAddSheet({ athleteId, name = null, session = null, 
       BOOK_A_SESSION,
       <>
         <Line>{model.name}</Line>
-        <StaffSessionPicker model={model} mode="add" onPick={pick} notice={notice} reloadKey={reloadKey} now={clock} />
+        <StaffSessionPicker model={model} mode="add" onPick={pick} notice={notice} reloadKey={reloadKey} initialDay={pickedDay} now={clock} />
       </>
     );
   }
@@ -179,7 +181,7 @@ export default function StaffAddSheet({ athleteId, name = null, session = null, 
   const buttons = (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
       <Button height={50} loading={busy} disabled={blocked} onClick={confirm}>
-        {addConfirmLabel(first, { free: freeOn, full, busy })}
+        {addConfirmLabel(first, { free: freeOn || charge?.kind === 'none', full, busy })}
       </Button>
       <Button variant="outline" height={50} disabled={busy} style={{ boxShadow: 'none' }} onClick={fixed ? onClose : toPicker}>
         {BACK}

@@ -12,6 +12,7 @@ let mockLive;
 let mockStatus;
 let mockUnresolved;
 let mockRows;
+let mockCount;
 jest.mock('../hooks', () => ({
   useCoachRoster: () => ({ data: [], loading: false, error: null, retry: () => {} }),
   useSession: () => ({ data: { type: 'training', blockLabel: 'Block 1 of 3', name: 'Training block', meta: '3:00-4:00 PM', startsIn: 'Starts in 12 min' } }),
@@ -27,6 +28,8 @@ jest.mock('../hooks', () => ({
     sessionStatus: mockStatus,
     sessionMaxHandicap: null,
     sessionUnresolved: mockUnresolved,
+    sessionBooked: mockCount ? mockCount.booked : null,
+    sessionCapacity: mockCount ? mockCount.capacity : null,
   }),
   useTournamentResults: () => ({ data: null, loading: false, error: null, saveResults: async () => {} }),
   genericSessionName: () => 'Training block',
@@ -97,6 +100,7 @@ beforeEach(() => {
   mockStatus = 'scheduled';
   mockUnresolved = false;
   mockRows = ROWS;
+  mockCount = null;
 });
 
 test('Add athlete beside Cancel session for the owner and ops', async () => {
@@ -238,6 +242,35 @@ test('the status line carries the success line', async () => {
   expect(sheet(r)).toBeNull();
   expect(status(r).textContent).toBe('Cancelled · Sick - token back for Jordan.');
   await r.unmount();
+});
+
+test('the header count is the session as it is now, not the count the tap carried', async () => {
+  // Walkthrough 2026-11-13: after a staff add the header still read the
+  // Today tab's count ("1 of 12 booked" with two rows showing). Every staff
+  // change bumps 'sessions', and the hook re-reads the session doc.
+  // A new element each time: React skips a re-render of the same one.
+  const el = () => <SessionAttendance bare sessionId="s2" block={BLOCK} role="owner" onBack={() => {}} />;
+  const r = await roster();
+  // Before the doc is read: the count the tap carried.
+  expect(r.text()).toContain('4:00 PM · 3 of 14 booked');
+  mockCount = { booked: 4, capacity: 14 };
+  await r.rerender(el());
+  expect(r.text()).toContain('4:00 PM · 4 of 14 booked');
+  expect(r.text()).not.toContain('3 of 14 booked');
+  // While the next read is in flight the last count stays.
+  mockCount = null;
+  await r.rerender(el());
+  expect(r.text()).toContain('4:00 PM · 4 of 14 booked');
+  mockCount = { booked: 3, capacity: 14 };
+  await r.rerender(el());
+  expect(r.text()).toContain('4:00 PM · 3 of 14 booked');
+  await r.unmount();
+
+  // A header the tap gave no count (Yannick's and Phil's sessions) gets none.
+  mockCount = { booked: 1, capacity: 1 };
+  const plain = await roster({}, { ...BLOCK, meta: null });
+  expect(plain.text()).not.toContain('booked');
+  await plain.unmount();
 });
 
 test('opening any staff sheet clears the status line', async () => {

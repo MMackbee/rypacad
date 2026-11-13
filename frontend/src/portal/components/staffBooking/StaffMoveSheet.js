@@ -50,6 +50,7 @@ export default function StaffMoveSheet({ row, name = null, onClose, onDone, now 
   const clock = now ?? new Date();
   const athlete = useStaffAthlete(row.athleteId);
   const [target, setTarget] = useState(null);
+  const [pickedDay, setPickedDay] = useState(null); // the picker reopens on it
   const [asked, setAsked] = useState(null); // the server's full count, after a full refusal
   const [notice, setNotice] = useState(null);
   const [reloadKey, setReloadKey] = useState(0);
@@ -67,6 +68,7 @@ export default function StaffMoveSheet({ row, name = null, onClose, onDone, now 
     setNotice(null);
     setAsked(null);
     setTarget(s);
+    setPickedDay(s.date ?? null);
   };
 
   /** What the sheet does with a refusal; true when the sheet is done with. */
@@ -122,7 +124,7 @@ export default function StaffMoveSheet({ row, name = null, onClose, onDone, now 
   if (athlete.error) return sheet(<Line>{athlete.error.code === 'not-found' ? ATHLETE_NOT_ON_FILE : ATHLETES_LOAD_FAILED}</Line>);
   if (!moveModel) return sheet(null);
   if (!target) {
-    return sheet(<StaffSessionPicker model={moveModel} mode="move" fromRow={row} onPick={pick} notice={notice} reloadKey={reloadKey} now={clock} />);
+    return sheet(<StaffSessionPicker model={moveModel} mode="move" fromRow={row} onPick={pick} notice={notice} reloadKey={reloadKey} initialDay={pickedDay} now={clock} />);
   }
 
   const charge = moveChargeLine(moveChargeKind(row, target, model));

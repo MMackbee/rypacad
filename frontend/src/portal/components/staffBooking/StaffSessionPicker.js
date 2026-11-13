@@ -41,8 +41,8 @@ function startMinutes(time) {
  * StaffSheet and put Close in its footer.
  *
  * The day is a native date input ("Day", 44px) from the athlete's current
- * period start to the season's end, today by default, with "‹ Previous
- * day" and "Next day ›". The list is that day's sessions
+ * period start to the season's end, today by default (or `initialDay`),
+ * with "‹ Previous day" and "Next day ›". The list is that day's sessions
  * (useStaffDaySessions, re-read when `reloadKey` changes) the athlete may
  * be added to (staffAddFacts `offer`) or already holds: seats left first,
  * then full, each by start time; the pill "{n} left" or "Full · {taken} of
@@ -53,13 +53,16 @@ function startMinutes(time) {
  *
  * @param {object} model  data/staffAthlete.js staffAthleteModel.
  * @param {(session: object) => void} onPick
+ * @param {?string} [initialDay]  The day to open on: the sheet's last pick,
+ *   so Back and a refusal about the session reopen the picker there, not on
+ *   today (walkthrough 2026-11-13). Null opens on today.
  * @param {Date} [now]  The clock (tests pin it).
  */
-export default function StaffSessionPicker({ model, mode = 'add', fromRow = null, onPick, notice = null, reloadKey = 0, now }) {
+export default function StaffSessionPicker({ model, mode = 'add', fromRow = null, onPick, notice = null, reloadKey = 0, initialDay = null, now }) {
   const clock = now ?? new Date();
   const min = model.period.start;
   const max = SEASON_BOUNDS.end;
-  const [day, setDay] = useState(() => clamp(academyDateISO(clock), min, max));
+  const [day, setDay] = useState(() => clamp(initialDay || academyDateISO(clock), min, max));
   const { data, loading, error } = useStaffDaySessions(day, reloadKey);
   const go = (iso) => setDay(clamp(iso, min, max));
 
