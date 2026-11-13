@@ -47,6 +47,17 @@ export function cancelAria(first, rowLabel = null) {
   return first ? `Cancel ${first}'s booking` : `${CANCEL_LABEL} booking`;
 }
 
+/**
+ * A row's part of its Move and Cancel names: 'Tue, Nov 10 4:00 PM Training
+ * block', or 'Tue, Nov 10 Training block' with no time. The staff Billing
+ * rows (TokenMeterRows.js) and the athlete's screen both pass it, so one
+ * athlete's rows never share a name.
+ */
+export function staffRowLabel(date, time, label) {
+  const day = date ? format(parseISO(date), 'EEE, MMM d') : '';
+  return [day, String(time ?? '').trim(), label].filter(Boolean).join(' ');
+}
+
 /** Shown instead of Book a session for a test athlete or household. */
 export function testAthleteLine(first) {
   return `${first} is a test athlete. Test athletes can't be booked onto real sessions.`;
@@ -372,14 +383,22 @@ const REFUSAL_LINES = {
   'same-session': 'Pick a different session.',
 };
 
+/**
+ * The lines a move reads in its own words where the add's would say "add"
+ * (walkthrough 2026-11-13). Every other line reads the same for both.
+ */
+const MOVE_REFUSAL_LINES = {
+  'session-hidden': 'That session is hidden from the schedule. Show it first, then move.',
+};
+
 const PAYING = new Set(['not-paid', 'membership-inactive']);
 const NO_TOKENS = new Set(['no-tokens-left', 'no-session-token']);
 
 /**
- * A refusal's line in staff words (spec 10.5). Paying and tokens read by
- * `action` ('add' or 'move'). `full` carries the server's count when the
- * error has it (`err.cause.details`). An unknown reason shows the server's
- * own message; no reason at all (no answer) the unconfirmed line.
+ * A refusal's line in staff words (spec 10.5). Paying, tokens and a hidden
+ * session read by `action` ('add' or 'move'). `full` carries the server's
+ * count when the error has it (`err.cause.details`). An unknown reason shows
+ * the server's own message; no reason at all (no answer) the unconfirmed line.
  */
 export function staffRefusalLine(reason, { action, first } = {}, err = null) {
   if (!reason) return STAFF_CHANGE_UNCONFIRMED;
@@ -398,7 +417,7 @@ export function staffRefusalLine(reason, { action, first } = {}, err = null) {
     const d = err?.cause?.details;
     return d && d.taken != null && d.capacity != null ? `That session is full (${d.taken} of ${d.capacity}).` : 'That session is full.';
   }
-  const line = REFUSAL_LINES[reason];
+  const line = (move && MOVE_REFUSAL_LINES[reason]) || REFUSAL_LINES[reason];
   if (typeof line === 'function') return line(first);
   return line ?? (err?.message || STAFF_CHANGE_UNCONFIRMED);
 }

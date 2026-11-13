@@ -1,5 +1,5 @@
 import React, { useRef, useState } from 'react';
-import { color, radius, tint } from '../tokens';
+import { SHEET_Z, color, radius, tint } from '../tokens';
 import Button from './Button';
 import { Body, ScreenTitle } from './Primitives';
 import { seriesOffer, seriesSummary } from '../hooks/cancelSeries';
@@ -160,6 +160,9 @@ export default function CancelSheet({
       style={{
         position: 'absolute',
         inset: 0,
+        // Over everything on the screen, wherever the sheet is mounted (a
+        // staff cancel opens from inside a roster row, above the greyed rows).
+        zIndex: SHEET_Z,
         background: tint.overlay,
         display: 'flex',
         alignItems: 'flex-end',

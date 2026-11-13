@@ -183,7 +183,7 @@ describe('refusals', () => {
 
   test('that refusal reopens the picker on the day picked, not today', async () => {
     // Walkthrough 2026-11-13: it went back to today.
-    mockMove = async () => { throw refusal('session-hidden', 'That session is hidden from the schedule. Show it first, then add.'); };
+    mockMove = async () => { throw refusal('session-hidden', 'That session is hidden from the schedule. Show it first, then move.'); };
     const r = await mount();
     const day = () => r.container.querySelector('input[type="date"]').value;
     expect(day()).toBe('2026-11-12');

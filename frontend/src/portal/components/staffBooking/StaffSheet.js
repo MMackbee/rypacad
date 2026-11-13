@@ -1,5 +1,5 @@
 import React from 'react';
-import { color, radius, tint } from '../../tokens';
+import { SHEET_Z, color, radius, tint } from '../../tokens';
 import { ScreenTitle } from '../Primitives';
 
 /**
@@ -9,6 +9,8 @@ import { ScreenTitle } from '../Primitives';
  * a role="dialog" sheet named by its title, 85% high at most, scrolling
  * inside, with the portal's 22px side gutter and no sideways scroll at
  * 375px. `footer` sits under the content (a Close, or the sheet's buttons).
+ * The overlay is on SHEET_Z (tokens.js), over everything on the screen, so a
+ * sheet mounted inside a roster row still covers the rows after it.
  * Pass no `onClose` while a call runs: the overlay then does nothing.
  *
  * @param {string} title  Shown at the top, and the dialog's name.
@@ -21,7 +23,7 @@ export default function StaffSheet({ title, onClose, children, footer = null }) 
     <div
       data-portal-overlay=""
       onClick={onClose || undefined}
-      style={{ position: 'absolute', inset: 0, background: tint.overlay, display: 'flex', alignItems: 'flex-end' }}
+      style={{ position: 'absolute', inset: 0, zIndex: SHEET_Z, background: tint.overlay, display: 'flex', alignItems: 'flex-end' }}
     >
       <div
         role="dialog"

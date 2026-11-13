@@ -208,3 +208,15 @@ export const placeholder = {
 
 /** Minimum touch target. Attendance IN/OUT is deliberately larger (64x48). */
 export const TOUCH_MIN = 44;
+
+/**
+ * A bottom sheet's overlay (StaffSheet, CancelSheet): above every z-index a
+ * screen uses - the roster's sticky status line is 1, the consent and
+ * research sheets 5 - so a sheet paints over the whole screen and takes
+ * every tap wherever it is mounted (walkthrough 2026-11-13: one opened from a
+ * roster row painted under the greyed "Cancelled or moved" rows after it,
+ * whose opacity gives each its own layer). Below the Feedback button and its
+ * sheet (40, 50), which sit over every screen; the button steps aside while a
+ * sheet is open. components/sheetLayer.test.js pins both sides.
+ */
+export const SHEET_Z = 10;

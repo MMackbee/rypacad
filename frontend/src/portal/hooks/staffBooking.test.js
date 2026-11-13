@@ -173,6 +173,8 @@ describe('the calls', () => {
     mockFail = Object.assign(new Error('raw'), { reason: 'session-hidden', cause: { details: { reason: 'session-hidden' } } });
     const hidden = await staffBookSession({ athleteId: 'jordan', sessionId: 's2' }, { first: 'Jordan' }).catch((e) => e);
     expect(hidden.message).toBe('That session is hidden from the schedule. Show it first, then add.');
+    const hiddenMove = await staffMoveBooking({ bookingId: 'jordan_s1', toSessionId: 's2' }, { first: 'Jordan' }).catch((e) => e);
+    expect(hiddenMove.message).toBe('That session is hidden from the schedule. Show it first, then move.');
 
     mockFail = new Error('network');
     const none = await staffMoveBooking({ bookingId: 'jordan_s1', toSessionId: 's2' }, { first: 'Jordan' }).catch((e) => e);

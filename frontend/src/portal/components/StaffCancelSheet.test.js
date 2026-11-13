@@ -16,6 +16,7 @@ import React from 'react';
 import StaffCancelSheet from './StaffCancelSheet';
 import { renderScreen } from '../screens/testRender';
 import { ALREADY_CHANGED_COPY } from '../data/bookingChanges';
+import { SHEET_Z } from '../tokens';
 
 let mockCalls;
 let mockAnswer;
@@ -191,6 +192,12 @@ test('Keep it closes and sends nothing', async () => {
   await r.click('Keep it');
   expect(r.calls.close).toBe(1);
   expect(mockCalls).toEqual([]);
+  await r.unmount();
+});
+
+test('its overlay paints over the whole screen, greyed roster rows included (SHEET_Z, components/sheetLayer.test.js)', async () => {
+  const r = await mount();
+  expect(r.container.querySelector('[data-portal-overlay]').style.zIndex).toBe(String(SHEET_Z));
   await r.unmount();
 });
 

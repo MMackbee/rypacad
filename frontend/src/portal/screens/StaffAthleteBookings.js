@@ -24,6 +24,7 @@ import {
   athleteSubline,
   groupLabel,
   rowWhen,
+  staffRowLabel,
   testAthleteLine,
   tokenLine,
 } from '../data/staffBookingCopy';
@@ -224,8 +225,9 @@ function inCalendly(row, periodStart) {
 /**
  * One row: "Tue Nov 17 · 4:00 PM", the session, the badge, then Move and
  * Cancel where data/staffBooking.js staffMovable and data/staffCancel.js
- * staffCancellable allow them. One athlete on the screen, so the labels name
- * only the athlete ("Move Jordan").
+ * staffCancellable allow them. Their accessible names carry the row, as on
+ * Billing ("Move Jordan's Tue, Nov 17 4:00 PM Training block"): every row is
+ * the same athlete, so the name alone would repeat down the page.
  */
 function BookingRow({ row, last, first, periodStart, onMove, onCancel }) {
   return (
@@ -247,7 +249,14 @@ function BookingRow({ row, last, first, periodStart, onMove, onCancel }) {
         ) : null}
       </div>
       <StatusBadge tone={BADGE_TONES[row.badge] || 'neutral'}>{row.badge}</StatusBadge>
-      <StaffRowActions row={row} first={first} periodStart={periodStart} onMove={onMove} onCancel={onCancel} />
+      <StaffRowActions
+        row={row}
+        first={first}
+        rowLabel={staffRowLabel(row.date, row.time, row.label)}
+        periodStart={periodStart}
+        onMove={onMove}
+        onCancel={onCancel}
+      />
     </div>
   );
 }

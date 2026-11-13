@@ -6,6 +6,7 @@ import StaffRowActions from './staffBooking/StaffRowActions';
 import { Body } from './Primitives';
 import { longDayLabel } from '../data/calendar';
 import { firstOf } from '../data/staffCancel';
+import { staffRowLabel } from '../data/staffBookingCopy';
 
 /**
  * The evidence under a TokenMeter (components/TokenMeter.js): every session
@@ -65,7 +66,7 @@ export function Row({ row, last, first, periodStart = null, onCancel = null, onM
       <StaffRowActions
         row={row}
         first={first}
-        rowLabel={`${shortDay(row.date)}${row.time ? ` ${row.time}` : ''} ${row.label}`}
+        rowLabel={staffRowLabel(row.date, row.time, row.label)}
         periodStart={periodStart}
         onMove={onMove}
         onCancel={onCancel}

@@ -164,11 +164,13 @@ test('a row: when, the session, the badge', async () => {
   await r.unmount();
 });
 
+/** A row's buttons by their accessible names. */
+const ariaOf = (r, id) => [...r.rowEl(id).querySelectorAll('button')].map((b) => b.getAttribute('aria-label'));
+
 test('actions per row', async () => {
   const r = await mount();
   expect(r.rowButtons('jordan_s2')).toEqual(['Move', 'Cancel']);
-  const labels = [...r.rowEl('jordan_s2').querySelectorAll('button')].map((b) => b.getAttribute('aria-label'));
-  expect(labels).toEqual(['Move Jordan', "Cancel Jordan's booking"]);
+  expect(ariaOf(r, 'jordan_s2')).toEqual(["Move Jordan's Tue, Nov 17 4:00 PM Training block", "Cancel Jordan's Tue, Nov 17 4:00 PM Training block"]);
   // Attended, a 1:1 booked in the portal, and a waitlist place: no actions.
   expect(r.rowButtons('jordan_s1')).toEqual([]);
   expect(r.rowButtons('jordan_s4')).toEqual([]);
@@ -177,6 +179,17 @@ test('actions per row', async () => {
   expect(r.rowButtons('jordan_s3')).toEqual([]);
   expect(r.rowEl('jordan_s3').textContent).toContain('Cancel in Calendly');
   expect(r.rowEl('jordan_s4').textContent).not.toContain('Cancel in Calendly');
+  await r.unmount();
+});
+
+test("each row's buttons are named for the row, so two rows never share a name", async () => {
+  // Walkthrough 2026-11-13: every row read "Move Reese" / "Cancel Reese's booking".
+  mockAthlete = loaded(model({ bookings: [...BOOKINGS, bk('s9')] }));
+  const r = await mount();
+  expect(ariaOf(r, 'jordan_s9')).toEqual(["Move Jordan's Thu, Dec 3 4:00 PM Training block", "Cancel Jordan's Thu, Dec 3 4:00 PM Training block"]);
+  const names = [...r.container.querySelectorAll('[data-staff-row] button')].map((b) => b.getAttribute('aria-label'));
+  expect(names.length).toBe(4);
+  expect(new Set(names).size).toBe(names.length);
   await r.unmount();
 });
 
@@ -222,7 +235,7 @@ test('Book a session opens the add sheet; its line shows', async () => {
 
 test('Move opens the move sheet with the row; its line shows', async () => {
   const r = await mount();
-  const move = r.rowEl('jordan_s2').querySelector('button[aria-label="Move Jordan"]');
+  const move = r.rowEl('jordan_s2').querySelector(`button[aria-label="Move Jordan's Tue, Nov 17 4:00 PM Training block"]`);
   await r.act(async () => { move.click(); });
   expect(r.sheet().getAttribute('data-sheet')).toBe('move');
   expect(r.sheet().getAttribute('data-booking')).toBe('jordan_s2');
@@ -242,7 +255,7 @@ test('Move opens the move sheet with the row; its line shows', async () => {
 test('Cancel opens the cancel sheet with the athlete alone; its line shows', async () => {
   mockAthlete = loaded(model({ bookings: [...BOOKINGS, bk('s9')] }));
   const r = await mount();
-  const cancel = r.rowEl('jordan_s2').querySelector(`button[aria-label="Cancel Jordan's booking"]`);
+  const cancel = r.rowEl('jordan_s2').querySelector(`button[aria-label="Cancel Jordan's Tue, Nov 17 4:00 PM Training block"]`);
   await r.act(async () => { cancel.click(); });
   expect(r.sheet().getAttribute('data-sheet')).toBe('cancel');
   expect(r.sheet().getAttribute('data-booking')).toBe('jordan_s2');

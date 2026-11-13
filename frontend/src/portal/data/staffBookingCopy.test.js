@@ -23,6 +23,13 @@ describe('the C0 words', () => {
     expect(cancelAria(null, 'Tue, Nov 10 Training block')).toBe('Cancel Tue, Nov 10 Training block');
   });
 
+  test("staffRowLabel: the row's part of its Move and Cancel names, as the Billing rows read it", () => {
+    expect(C.staffRowLabel('2026-11-10', '4:00 PM', 'Training block')).toBe('Tue, Nov 10 4:00 PM Training block');
+    expect(C.staffRowLabel('2026-11-10', null, 'Training block')).toBe('Tue, Nov 10 Training block');
+    expect(C.staffRowLabel('2026-11-10', '  ', 'Training block')).toBe('Tue, Nov 10 Training block');
+    expect(moveAria('Jordan', C.staffRowLabel('2026-11-17', '4:00 PM', 'Training block'))).toBe("Move Jordan's Tue, Nov 17 4:00 PM Training block");
+  });
+
   test('the test athlete line', () => {
     expect(testAthleteLine('Jordan')).toBe("Jordan is a test athlete. Test athletes can't be booked onto real sessions.");
   });
@@ -239,6 +246,18 @@ describe('refusals', () => {
       ['same-session', 'Pick a different session.'],
     ];
     for (const [reason, words] of table) expect([reason, line(reason)]).toEqual([reason, words]);
+  });
+
+  test('a move reads as a move: a hidden session says "then move", and no line a move shares with an add says "add"', () => {
+    // Walkthrough 2026-11-13: the move sheet said "Show it first, then add."
+    expect(line('session-hidden', 'add')).toBe('That session is hidden from the schedule. Show it first, then add.');
+    expect(line('session-hidden', 'move')).toBe('That session is hidden from the schedule. Show it first, then move.');
+    const shared = [
+      'signed-out', 'not-staff', 'bad-request', 'athlete-missing', 'booking-missing', 'no-household', 'test-athlete',
+      'session-missing', 'calendly', 'calendly-managed', 'mental-no-move', 'mental', 'session-cancelled', 'session-hidden',
+      'display-only', 'period-over', 'already-booked', 'not-confirmed', 'attended', 'different-type', 'same-session', 'full',
+    ];
+    for (const reason of shared) expect([reason, /\badd/i.test(line(reason, 'move'))]).toEqual([reason, false]);
   });
 
   test('paying and tokens read by action', () => {
