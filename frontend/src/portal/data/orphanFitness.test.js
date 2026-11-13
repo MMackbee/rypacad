@@ -47,8 +47,19 @@ describe('orphanFitness', () => {
   });
 
   test('golf partly gone: one overlapping golf block hidden and another live is not an orphan', () => {
+    // The 11 AM block overlaps the 11 AM fitness hour (11:00-12:00), as the live 10 AM Tour (10:00-12:00) does.
+    // On its own it flags the hour, so the empty results below come from the live Tour alone.
+    expect(reasons([golf('2026-11-28', '11:00 AM', { hidden: true }), phil('2026-11-28', '11:00 AM')]))
+      .toEqual([['2026-11-28', '11:00 AM', 'hidden']]);
+    expect(reasons([golf('2026-11-28', '11:00 AM', { status: 'cancelled' }), phil('2026-11-28', '11:00 AM')]))
+      .toEqual([['2026-11-28', '11:00 AM', 'cancelled']]);
     expect(reasons([
-      golf('2026-11-28', '12:00 PM', { hidden: true }),
+      golf('2026-11-28', '11:00 AM', { hidden: true }),
+      tour('2026-11-28', '10:00 AM'),
+      phil('2026-11-28', '11:00 AM'),
+    ])).toEqual([]);
+    expect(reasons([
+      golf('2026-11-28', '11:00 AM', { status: 'cancelled' }),
       tour('2026-11-28', '10:00 AM'),
       phil('2026-11-28', '11:00 AM'),
     ])).toEqual([]);
