@@ -29,14 +29,20 @@ import { firstOf, staffCancellable } from '../../data/staffCancel';
  * A past session still offers it: the server judges the period.
  * @param {{id: string, date: ?string, time: ?string, type: ?string, label: ?string}} session
  * @param {Array<object>} rows  The roster's rows (confirmed, attended and no-show bookings).
+ * @param {() => void} [onOpen]  Called as the picker opens: the roster clears
+ *   its sticky status line there, which would otherwise paint over the sheet.
  * @param {(line: string) => void} onDone  The success line.
  */
-export function RosterAddAthlete({ role, session, rows, hidden, onDone }) {
+export function RosterAddAthlete({ role, session, rows, hidden, onOpen, onDone }) {
   const [step, setStep] = useState(null); // null | 'pick' | { athleteId, name }
   if (!staffMayBook(role) || hidden) return null;
+  const openPicker = () => {
+    if (onOpen) onOpen();
+    setStep('pick');
+  };
   return (
     <>
-      <Button variant="outline" height={44} style={{ boxShadow: 'none', flex: '1 1 0%' }} onClick={() => setStep('pick')}>
+      <Button variant="outline" height={44} style={{ boxShadow: 'none', flex: '1 1 0%' }} onClick={openPicker}>
         {ADD_ATHLETE}
       </Button>
       {step === 'pick' ? (
@@ -81,14 +87,20 @@ function periodStartOf(row, now) {
  * owns the move and cancel sheets; the cancel sheet's brothers and sisters
  * are the household's own rows on this roster.
  * @param {?object} row  The roster row (liveSessionAttendance, with the staff fields).
+ * @param {() => void} [onOpen]  Called as either sheet opens (the roster
+ *   clears its sticky status line, as for Add athlete).
  * @param {(line: string) => void} onDone  The success line.
  */
-export function RosterRowActions({ role, row, rows, session, sessionCancelled, onDone, now = new Date() }) {
+export function RosterRowActions({ role, row, rows, session, sessionCancelled, onOpen, onDone, now = new Date() }) {
   const [open, setOpen] = useState(null); // null | 'move' | 'cancel'
   if (!row || !staffMayBook(role) || sessionCancelled) return null;
   const staffRow = rosterRowToStaffRow(row, session);
   const periodStart = periodStartOf(row, now);
   const shown = staffMovable(staffRow, { periodStart }) || staffCancellable(staffRow, { periodStart });
+  const openSheet = (which) => {
+    if (onOpen) onOpen();
+    setOpen(which);
+  };
   const finish = (line) => {
     setOpen(null);
     onDone(line);
@@ -101,8 +113,8 @@ export function RosterRowActions({ role, row, rows, session, sessionCancelled, o
             row={staffRow}
             first={firstOf(row.name)}
             periodStart={periodStart}
-            onMove={() => setOpen('move')}
-            onCancel={() => setOpen('cancel')}
+            onMove={() => openSheet('move')}
+            onCancel={() => openSheet('cancel')}
           />
         </div>
       ) : null}

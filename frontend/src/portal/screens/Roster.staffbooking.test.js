@@ -239,3 +239,31 @@ test('the status line carries the success line', async () => {
   expect(status(r).textContent).toBe('Cancelled · Sick - token back for Jordan.');
   await r.unmount();
 });
+
+test('opening any staff sheet clears the status line', async () => {
+  // The line is sticky with z-index 1: left up, it would paint over the next
+  // sheet and take its taps (review 2026-11-13). Billing clears its line the
+  // same way.
+  const r = await roster();
+  await r.click('Move Jordan');
+  await r.click('done');
+  expect(status(r).textContent).toBe('Jordan moved to Thu Nov 19, 4:00 PM.');
+
+  await r.click('Add athlete');
+  expect(sheet(r).getAttribute('data-sheet')).toBe('athlete');
+  expect(status(r)).toBeNull();
+  await r.click('pick');
+  await r.click('done');
+  expect(status(r).textContent).toBe('Casey is booked for Tue Nov 17, 4:00 PM - 1 token used.');
+
+  await r.click('Move Riley');
+  expect(sheet(r).getAttribute('data-sheet')).toBe('move');
+  expect(status(r)).toBeNull();
+  await r.click('done');
+  expect(status(r).textContent).toBe('Jordan moved to Thu Nov 19, 4:00 PM.');
+
+  await r.click("Cancel Riley's booking");
+  expect(sheet(r).getAttribute('data-sheet')).toBe('cancel');
+  expect(status(r)).toBeNull();
+  await r.unmount();
+});

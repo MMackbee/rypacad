@@ -545,7 +545,7 @@ export function SessionAttendance({ variant = 'pre', bare = false, onBack, sessi
                   {remainingOnly ? 'Cancel remaining bookings' : 'Cancel session'}
                 </Button>
               ) : null}
-              <RosterAddAthlete role={role} session={staffSession} rows={rows} hidden={addHidden} onDone={setStaleLine} />
+              <RosterAddAthlete role={role} session={staffSession} rows={rows} hidden={addHidden} onOpen={() => setStaleLine(null)} onDone={setStaleLine} />
             </div>
           ) : null}
         </div>
@@ -687,7 +687,7 @@ export function SessionAttendance({ variant = 'pre', bare = false, onBack, sessi
                   <TrainingRowExtras athleteId={athlete.id} name={shownName(athlete)} combineName={athlete.name ?? null} intakes={showIntake ? intakes : null} role={role} readOnly={readOnly} onOpenCombine={demoInLive ? undefined : onOpenCombine} />
                 ) : null}
                 {live ? (
-                  <RosterRowActions role={role} row={rows.find((r) => r.athleteId === athlete.id)} rows={rows} session={staffSession} sessionCancelled={sessionCancelled} onDone={setStaleLine} />
+                  <RosterRowActions role={role} row={rows.find((r) => r.athleteId === athlete.id)} rows={rows} session={staffSession} sessionCancelled={sessionCancelled} onOpen={() => setStaleLine(null)} onDone={setStaleLine} />
                 ) : null}
               </AthleteRow>
               {/* Optional reason, indented to align under the name. Never a
