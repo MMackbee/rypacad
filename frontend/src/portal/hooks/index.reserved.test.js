@@ -241,7 +241,9 @@ describe('staff surfaces that list sessions', () => {
       { sessionId: '2026-11-10-0', date: '2026-11-10', day: 'Tue', time: '3:00 PM', maxHandicap: 5, booked: 4, capacity: 14 },
     ]);
     expect(h.result.current.data.blockFill.find((b) => b.day === 'Tue')).toEqual({ day: 'Tue', pct: 50 });
-    expect(live.fetchSessionsInRange).toHaveBeenCalledTimes(1);
+    // One week read feeds the block fill and the reserved blocks; the only other read is the
+    // four weeks the "Fitness with no golf" rows look at (owner 2026-11-13).
+    expect(live.fetchSessionsInRange.mock.calls).toEqual([['2026-11-09', '2026-11-15'], ['2026-11-12', '2026-12-09']]);
     await h.unmount();
   });
 });

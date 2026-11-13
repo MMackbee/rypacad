@@ -169,7 +169,7 @@ describe('Outstanding folds (owner 2026-11-13)', () => {
 });
 
 describe('outstandingSummary', () => {
-  test('each tag with rows, in the order Enrollment, Attendance, Contract, Assessment', () => {
+  test('each tag with rows, in the order Enrollment, Attendance, Fitness, Contract, Assessment', () => {
     const row = (tag) => ({ tag });
     expect(outstandingSummary([])).toBe('');
     expect(outstandingSummary(undefined)).toBe('');
@@ -178,11 +178,53 @@ describe('outstandingSummary', () => {
     expect(outstandingSummary([row('Assessment'), row('Contract'), row('Attendance')]))
       .toBe('Attendance 1 · Contract 1 · Assessment 1');
     expect(outstandingSummary([...Array(28)].map(() => row('Assessment')))).toBe('Assessment 28');
+    // Owner 2026-11-13: the "Fitness with no golf" rows read right after Attendance.
+    expect(outstandingSummary([row('Assessment'), row('Fitness'), row('Contract'), row('Fitness'), row('Attendance'), row('Enrollment')]))
+      .toBe('Enrollment 1 · Attendance 1 · Fitness 2 · Contract 1 · Assessment 1');
+    expect(outstandingSummary([row('Assessment'), row('Fitness')])).toBe('Fitness 1 · Assessment 1');
   });
 
-  test('a tag outside the four (the seed\'s Billing) follows them, so the counts still add up', () => {
+  test('a tag outside the five (the seed\'s Billing) follows them, so the counts still add up', () => {
     expect(outstandingSummary([{ tag: 'Billing' }, { tag: 'Assessment' }, { tag: 'Attendance' }]))
       .toBe('Attendance 1 · Assessment 1 · Billing 1');
+    expect(outstandingSummary([{ tag: 'Billing' }, { tag: 'Fitness' }, { tag: 'Assessment' }]))
+      .toBe('Fitness 1 · Assessment 1 · Billing 1');
+  });
+});
+
+// Owner 2026-11-13: "yes add a warning row for fitness no golf". The row names a session, not an
+// athlete, so it is plain text, and its packageIds are null, so every tier filter keeps it.
+describe('the "Fitness with no golf" row (owner 2026-11-13)', () => {
+  const FITNESS_WHO = 'Fitness with no golf · Wed Nov 25, 6:00 PM';
+  const rows = [
+    { id: 'noshow-a1', kind: 'noshow', athleteId: 'a1', who: 'M. Okonkwo', why: '3 no-shows this month', tag: 'Attendance', tone: 'red', packageIds: null },
+    { id: 'fitness-p1', kind: 'fitness', athleteId: null, who: FITNESS_WHO, why: '2 booked · the golf block at this time is hidden', tag: 'Fitness', tone: 'red', packageIds: null },
+    { id: 'baseline-a2', kind: 'baseline', athleteId: 'a2', who: 'Ava Moreno', why: 'Baseline due', tag: 'Assessment', tone: 'yellow', packageIds: ['t-4'] },
+  ];
+  beforeEach(() => { mockOutstanding = rows; window.localStorage.setItem('ryp.admin.outstandingOpen', '1'); });
+  afterEach(() => { mockOutstanding = []; mockEnrollment = []; window.localStorage.clear(); });
+
+  test('owner and ops: counted after Attendance, shown as plain text with its reason', async () => {
+    for (const role of ['owner', 'ops']) {
+      const r = await renderScreen(<AdminDashboard bare role={role} onOpenAthlete={() => {}} />);
+      expect(r.text()).toContain('Outstanding · 3');
+      expect(r.text()).toContain('Attendance 1 · Fitness 1 · Assessment 1');
+      expect(r.text()).toContain(FITNESS_WHO);
+      expect(r.text()).toContain('2 booked · the golf block at this time is hidden');
+      expect(r.text()).toContain('Fitness');
+      expect(r.button(FITNESS_WHO)).toBeNull();
+      expect(r.button('M. Okonkwo')).not.toBeNull();
+      await r.unmount();
+    }
+  });
+
+  test('a tier filter keeps it', async () => {
+    mockEnrollment = [{ id: 't-4', name: '4 tokens', athletes: 1 }, { id: 't-8', name: '8 tokens', athletes: 3 }];
+    const r = await renderScreen(<AdminDashboard bare role="owner" variant="filtered" />);
+    expect(r.text()).toContain('Outstanding · 2');
+    expect(r.text()).toContain('Attendance 1 · Fitness 1');
+    expect(r.text()).toContain(FITNESS_WHO);
+    await r.unmount();
   });
 });
 

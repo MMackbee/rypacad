@@ -8,13 +8,17 @@ import useRememberedOpen from '../hooks/rememberedOpen';
 export const OUTSTANDING_OPEN_KEY = 'ryp.admin.outstandingOpen';
 const ROWS_ID = 'outstanding-rows';
 
-/** The four kinds of row the live dashboard builds, in the order the summary reads them. */
-const TAG_ORDER = ['Enrollment', 'Attendance', 'Contract', 'Assessment'];
+/**
+ * The five kinds of row the live dashboard builds, in the order the summary
+ * reads them. Fitness (owner 2026-11-13: a fitness session with no golf
+ * beside it) follows Attendance.
+ */
+const TAG_ORDER = ['Enrollment', 'Attendance', 'Fitness', 'Contract', 'Assessment'];
 
 /**
  * The folded card's one-line summary: each tag with rows, as `<Tag> <count>`,
  * joined with ' · ' (e.g. "Enrollment 1 · Attendance 4 · Assessment 28").
- * A tag outside the four (the seed's Billing row) follows them in the order
+ * A tag outside the five (the seed's Billing row) follows them in the order
  * first seen, so the counts always add up to the heading's N. '' for no rows.
  */
 export function outstandingSummary(items) {
