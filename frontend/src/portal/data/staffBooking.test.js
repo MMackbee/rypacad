@@ -130,7 +130,7 @@ const DIRECTORY = [
     ],
   },
   { id: 'hh2', name: 'Test family', status: 'active', test: true, athletes: [{ id: 'casey', name: 'Casey Whitfield', packageName: '4 tokens', test: false }] },
-  { id: 'hh3', name: 'Second family', status: 'active', test: false, athletes: [{ id: 'jordan2', name: 'Jordana Lake', packageName: null, test: true }] },
+  { id: 'hh3', name: 'Second family', status: 'active', test: false, athletes: [{ id: 'jordan2', name: 'Jordana Casey', packageName: null, test: true }] },
 ];
 
 describe('searchAthletes', () => {
@@ -144,7 +144,7 @@ describe('searchAthletes', () => {
     expect(searchAthletes(DIRECTORY, 'JOR whit').map((a) => a.athleteId)).toEqual(['jordan']);
     expect(searchAthletes(DIRECTORY, 'whit jor').map((a) => a.athleteId)).toEqual(['jordan']);
     expect(searchAthletes(DIRECTORY, 'ord')).toEqual([]);
-    expect(searchAthletes(DIRECTORY, 'jor lake').map((a) => a.athleteId)).toEqual(['jordan2']);
+    expect(searchAthletes(DIRECTORY, 'jor casey').map((a) => a.athleteId)).toEqual(['jordan2']);
   });
 
   test('sorted by name, at most eight', () => {
