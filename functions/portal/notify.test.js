@@ -61,7 +61,10 @@ test('householdAudience: the self-managed adult hears billing; another ' +
     'households/hh': {name: 'Adult', createdBy: 'self'},
     'users/self': {role: 'athlete', householdId: 'hh', athleteId: 'a1',
       email: 'adult@example.test'},
-    'users/other': {role: 'athlete', householdId: 'hh', athleteId: 'a1'},
+    // Reachable on purpose (email and a device), so only the createdBy test
+    // keeps it out (review wf_2d266ef0-171).
+    'users/other': {role: 'athlete', householdId: 'hh', athleteId: 'a1',
+      email: 'other@example.test', pushTokens: ['device-1']},
   });
   const got = await householdAudience(store, 'hh');
   assert.deepEqual(uids(got), ['self']);
