@@ -8,6 +8,7 @@ import PhoneFrame from '../components/PhoneFrame';
 import StatusBadge from '../components/StatusBadge';
 import { Body, Card, ScreenTitle, SectionLabel, SignOutButton } from '../components/Primitives';
 import HouseholdsCard from '../components/HouseholdsCard';
+import OutstandingCard from '../components/OutstandingCard';
 import ConsentTrackerCard from '../components/consent/ConsentTrackerCard';
 import ScholarshipsCard from '../components/ScholarshipsCard';
 import AssessmentsEntryCard from '../components/AssessmentsEntryCard';
@@ -30,6 +31,9 @@ function useSignupsFallback() {
   };
 }
 const useSignups = hooks.useSignups || useSignupsFallback;
+
+// The Outstanding card's fold summary, re-exported for the screen's tests.
+export { outstandingSummary } from '../components/OutstandingCard';
 
 /**
  * 15 · Admin Dashboard (Ops) - Phil's monthly-check-in-call prep surface.
@@ -154,6 +158,7 @@ export default function AdminDashboard({
       footer={<BottomTabBar role={role} active="admin" />}
     >
       <div style={{ padding: '0 22px 24px', display: 'flex', flexDirection: 'column', gap: 12 }}>
+        {/* Owner 2026-11-13: folds to one remembered line (components/OutstandingCard.js). */}
         <OutstandingCard items={outstanding} onOpenAthlete={onOpenAthlete} />
         <SignupsCard onOpenSignups={onOpenSignups} />
         {/* 2026-10-14 (assessments spec 5): owners and ops reach the assessments from here. */}
@@ -241,77 +246,6 @@ function TierFilter({ active, filtered, onToggle }) {
         }}
       />
     </button>
-  );
-}
-
-/**
- * The named list, first.
- *
- * Sprint 5 pin: athlete names become links to /portal/athlete/:id, where
- * contact info lives. Wired defensively - `item.athleteId` does not exist on
- * the seed rows yet (data/admin.js is the db lane's; OUTSTANDING only carries
- * `who` as free text, and several rows name a household or a group, not one
- * athlete) - so a row renders as a link only once an id is present, and stays
- * plain text otherwise. See the sprint report for the data-lane follow-up.
- */
-function OutstandingCard({ items, onOpenAthlete }) {
-  return (
-    <div
-      style={{
-        background: color.surface,
-        border: `1px solid ${color.error}`,
-        borderRadius: radius.cardLarge,
-        padding: 17,
-      }}
-    >
-      <SectionLabel tone={color.error} style={{ marginBottom: 6 }}>
-        Outstanding · {items.length}
-      </SectionLabel>
-
-      {items.map((item, i) => {
-        const linkable = onOpenAthlete && item.athleteId;
-        return (
-          <div
-            key={item.id}
-            style={{
-              display: 'flex',
-              alignItems: 'flex-start',
-              gap: 12,
-              padding: '13px 0',
-              borderBottom: i < items.length - 1 ? `1px solid ${color.ruleSoft}` : 'none',
-            }}
-          >
-            <div style={{ flex: 1, minWidth: 0 }}>
-              {linkable ? (
-                <button
-                  type="button"
-                  onClick={() => onOpenAthlete(item.athleteId)}
-                  style={{
-                    background: 'none',
-                    border: 'none',
-                    padding: 0,
-                    font: `600 13px ${font.body}`,
-                    color: color.primary,
-                    cursor: 'pointer',
-                    textAlign: 'left',
-                  }}
-                >
-                  {item.who}
-                </button>
-              ) : (
-                <div style={{ font: `600 13px ${font.body}`, color: color.text }}>{item.who}</div>
-              )}
-              <div
-                style={{ font: `400 11px/1.5 ${font.body}`, color: color.textSecondary, marginTop: 3 }}
-              >
-                {item.why}
-              </div>
-            </div>
-            <StatusBadge tone={item.tone}>{item.tag}</StatusBadge>
-          </div>
-        );
-      })}
-    </div>
   );
 }
 
