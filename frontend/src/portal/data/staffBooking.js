@@ -245,7 +245,10 @@ function monthOf(periodKey) {
  * still good on the new day, or a period token inside its own period - by
  * the household's anchor) or `swap` with the two months, `{ kind: 'swap',
  * fromMonth: 'November', toMonth: 'December' }`. The row's period is its
- * own `periodKey`, else its booking's, else its date's.
+ * own `periodKey`, else its booking's, else its date's. Only a row paid from
+ * the period carries by period (the server's `spentPeriod`,
+ * functions/portal/move-decide.js): a bonus or session token that runs out
+ * before the new day never carries, so that move spends a new token.
  */
 export function moveChargeKind(row, target, model) {
   if (row.chargedFrom === 'elite' || model.tokens?.unlimited) return { kind: 'elite' };
@@ -257,6 +260,7 @@ export function moveChargeKind(row, target, model) {
   const booking = (model.bookings || []).find((b) => b && b.id === row.id);
   const fromKey = row.periodKey ?? booking?.periodKey ?? periodFor(row.date, model.anchorDay).periodKey;
   const toKey = periodFor(target.date, model.anchorDay).periodKey;
-  if (fromKey === toKey) return { kind: 'carry' };
+  const spentPeriod = !row.graceTokenId && (row.chargedFrom ?? 'period') === 'period';
+  if (spentPeriod && fromKey === toKey) return { kind: 'carry' };
   return { kind: 'swap', fromMonth: monthOf(fromKey), toMonth: monthOf(toKey) };
 }

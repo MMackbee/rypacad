@@ -200,6 +200,17 @@ describe('moveChargeKind', () => {
     expect(moveChargeKind(row, target('2027-01-14'), open)).toEqual({ kind: 'carry' });
   });
 
+  test('a bonus or session token that runs out before the new day does not carry, even inside its period', () => {
+    // The server (move-decide.js moveCharge) carries a period token only for a
+    // row paid from the period; a row paid with a token that has expired by the
+    // new day spends a new one, so the sheet must not say the token moves.
+    const row = hubRow({ date: '2026-11-17', chargedFrom: 'grace', graceTokenId: 'g-1', viaGrace: true });
+    const m = model({ graceTokens: [{ id: 'g-1', athleteId: 'jordan', expiresAt: '2026-11-20' }] });
+    expect(moveChargeKind(row, target('2026-11-24'), m)).toEqual({ kind: 'swap', fromMonth: 'November', toMonth: 'November' });
+    // A grace row whose token is gone from the model (spent or deleted) is the same.
+    expect(moveChargeKind(row, target('2026-11-19'), model())).toEqual({ kind: 'swap', fromMonth: 'November', toMonth: 'November' });
+  });
+
   test('a period token moves with it inside its period, and swaps across one', () => {
     expect(moveChargeKind(hubRow(), target('2026-11-19'), model())).toEqual({ kind: 'carry' });
     expect(moveChargeKind(hubRow(), target('2026-12-03'), model())).toEqual({ kind: 'swap', fromMonth: 'November', toMonth: 'December' });
