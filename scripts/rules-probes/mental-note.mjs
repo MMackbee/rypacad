@@ -7,7 +7,9 @@
  * to null still works, so one written before the rule can be removed. Every
  * other session takes a note exactly as before (the twin below). Run by
  * scripts/verify-rules.mjs in both passes; it seeds and removes everything it
- * touches.
+ * touches. The booking's free-text no-show reason gets the same treatment on a
+ * 1:1 (families and every coach read bookings); a reason-less no-show still
+ * works.
  */
 import { call, del, expect, seed, t, token, updateAs } from '../verify-rules.mjs';
 
@@ -23,6 +25,11 @@ const SESSIONS = {
     status: 'scheduled', bookable: false, source: 'calendly', coachNote: 'written before the rule' },
   'trn-mnote': { date: DAY, time: '4:00 PM', type: 'training', capacity: 12, booked: 0, status: 'scheduled', coachNote: null },
   'phil-mnote': { date: DAY, time: '4:00 PM', type: 'phil', capacity: 6, booked: 0, status: 'scheduled', coachNote: null },
+};
+// A 1:1 booking and a Phil booking: the no-show reason is refused on the first only.
+const BOOKINGS = {
+  'ath-mnote_cal-mnote': { athleteId: 'ath-mnote', sessionId: 'cal-mnote', date: DAY, type: 'mental', status: 'confirmed', householdId: 'hh', source: 'calendly' },
+  'ath-mnote_phil-mnote': { athleteId: 'ath-mnote', sessionId: 'phil-mnote', date: DAY, type: 'phil', status: 'confirmed', householdId: 'hh', chargedFrom: 'period' },
 };
 const noteOf = async (id) => {
   const res = await call('GET', `/sessions/${id}`, null, t.ops);
@@ -59,7 +66,16 @@ export async function taskMentalNote() {
     expect('ops still writes a note on a golf block', await updateAs(t.ops, 'sessions', 'trn-mnote', { coachNote: 'Short game focus' }), 200);
     expect('Phil still writes a note on his session', await updateAs(phil, 'sessions', 'phil-mnote', { coachNote: 'Bands set up' }), 200);
     expect('the 500-character limit still holds', await updateAs(t.ops, 'sessions', 'trn-mnote', { coachNote: 'x'.repeat(501) }), 403);
+
+    // The booking's no-show reason: family- and coach-readable, so none on a 1:1.
+    for (const [id, body] of Object.entries(BOOKINGS)) await seed('bookings', id, body);
+    expect('Yannick cannot give a 1:1 no-show a written reason', await updateAs(yannick, 'bookings', 'ath-mnote_cal-mnote', { status: 'noshow', noshowReason: 'private' }), 403);
+    expect('Yannick still marks the 1:1 a no-show without one', await updateAs(yannick, 'bookings', 'ath-mnote_cal-mnote', { status: 'noshow' }), 200);
+    expect('nor add one afterwards', await updateAs(yannick, 'bookings', 'ath-mnote_cal-mnote', { noshowReason: 'private' }), 403);
+    expect('and clearing it to null still works', await updateAs(yannick, 'bookings', 'ath-mnote_cal-mnote', { status: 'confirmed', noshowReason: null }), 200);
+    expect('Phil still writes a no-show reason on his booking', await updateAs(phil, 'bookings', 'ath-mnote_phil-mnote', { status: 'noshow', noshowReason: 'Sick' }), 200);
   } finally {
+    for (const id of Object.keys(BOOKINGS)) await del('bookings', id);
     for (const id of Object.keys(SESSIONS)) await del('sessions', id);
     for (const u of [ownerUid, yannickUid, philUid]) await del('users', u);
   }

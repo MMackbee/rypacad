@@ -134,8 +134,30 @@ test('a 1:1 with Yannick: the owner and ops get no session note, and the stored 
     expect(r.text()).not.toContain('Session note');
     expect(r.text()).not.toContain('A session note is open to you');
     expect(r.text()).toContain('Attendance is marked by the coach.');
+    // Avery's saved no-show reason is not shown on a 1:1 either.
+    expect(r.text()).not.toContain('Sick, parent texted');
     await r.unmount();
   }
+});
+
+// Avery's row is a no-show with a saved reason in the mock: on a golf block the
+// coach gets the reason chip ("<reason> · edit"); on a 1:1 there is no chip.
+const reasonChips = (r) => [...r.container.querySelectorAll('button')]
+  .filter((b) => /· edit$|^\+ Add a reason/.test(b.textContent.trim()));
+
+test('a 1:1 with Yannick: a no-show row has no reason chip and the saved reason is not shown', async () => {
+  const r = await roster({ role: 'mental', block: mentalBlock, sessionId: 'cal-reason-check' });
+  await r.click('Start session');
+  expect(reasonChips(r)).toEqual([]);
+  expect(r.text()).not.toContain('Sick, parent texted');
+  await r.unmount();
+});
+
+test('a golf block still shows the no-show reason chip (unchanged)', async () => {
+  const r = await roster({ sessionId: 'golf-reason-check' });
+  await r.click('Start session');
+  expect(r.button('Sick, parent texted · edit')).not.toBeNull();
+  await r.unmount();
 });
 
 test('a 1:1 with Yannick: closing it offers no session note, only the pointer to his private notes', async () => {

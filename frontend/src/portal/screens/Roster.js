@@ -652,7 +652,8 @@ export function SessionAttendance({ variant = 'pre', bare = false, onBack, sessi
           // The reason block below carries the row's rule and spacing when it
           // renders: the coach's chip always, a read-only viewer's text only
           // when a reason was saved.
-          const showReason = noShow && (!readOnly || Boolean(reasonFor(athlete.id)));
+          // No reason on a 1:1 with Yannick (2026-11-13): bookings are family- and coach-readable.
+          const showReason = noShow && notesAllowed && (!readOnly || Boolean(reasonFor(athlete.id)));
 
           return (
             <div key={athlete.id}>

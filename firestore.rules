@@ -1655,7 +1655,11 @@ service cloud.firestore {
           && (
             !after.keys().hasAny(['noshowReason'])
             || after.noshowReason == null
-            || (after.noshowReason is string && after.noshowReason.size() <= 200)
+            // 2026-11-13 (owner): no free-text reason on a 1:1 with Yannick -
+            // the family and every coach read the booking; his notes live in
+            // mentalNotes. Clearing to null still works. Bookings carry type.
+            || (after.noshowReason is string && after.noshowReason.size() <= 200
+                && before.get('type', null) != 'mental')
           );
       }
 
