@@ -1335,11 +1335,18 @@ service cloud.firestore {
       // resource.data.coachId here would silently deny every real coach
       // note. This mirrors that precedent: any coach role, plus any
       // specialist (their own group/1-on-1 blocks), plus mental/ops/owner.
+      // 2026-11-13 (owner): no note on Yannick's 1:1s. Any signed-in user
+      // reads a session doc (families book from it), so a coachNote on a
+      // 'mental' session would not stay private; his notes live in
+      // mentalNotes (his alone). A note string there is refused for every
+      // role; clearing one to null still works, so a note written before
+      // this rule can be removed. Every other type is unchanged.
       function coachNoteUpdateOk() {
         let after = request.resource.data;
         return after.diff(resource.data).affectedKeys().hasOnly(['coachNote'])
           && (after.coachNote == null
-              || (after.coachNote is string && after.coachNote.size() <= 500));
+              || (after.coachNote is string && after.coachNote.size() <= 500
+                  && resource.data.get('type', null) != 'mental'));
       }
       allow update: if signedIn() && coachNoteUpdateOk() && (
         me().role in ['coach', 'mental', 'ops', 'owner']
