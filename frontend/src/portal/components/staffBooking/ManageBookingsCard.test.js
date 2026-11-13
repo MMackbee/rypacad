@@ -71,7 +71,7 @@ test("tapping Jordan opens Jordan's bookings", async () => {
   await r.unmount();
 });
 
-test('test badge: a test athlete shows Test and still opens its screen', async () => {
+test('the Test badge: a test athlete shows it and still opens its screen', async () => {
   const r = await mount();
   await r.focus();
   await r.fill('Find an athlete', 'riley');
