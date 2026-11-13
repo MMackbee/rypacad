@@ -34,6 +34,7 @@ const {FieldValue} = require('firebase-admin/firestore');
 const lib = require('./lib');
 const notices = require('./notices');
 const notify = require('./notify');
+const {loadTokenInputs, rowOf} = require('./booking-reads');
 const {REFUSALS, decideMove} = require('./move-decide');
 
 const {HttpsError} = functions.https;
@@ -62,17 +63,6 @@ function goodId(id) {
   return typeof id === 'string' && id.length > 0 &&
       id.length <= MAX_ID_LENGTH && !id.includes('/') &&
       !/^\.\.?$|^__.*__$/.test(id);
-}
-
-/**
- * One document as `{id, ...data}`, or null when it does not exist.
- * @param {!Object} tx The transaction.
- * @param {!Object} ref A document reference.
- * @return {!Promise<?Object>} The row.
- */
-async function rowOf(tx, ref) {
-  const snap = await tx.get(ref);
-  return snap.exists ? Object.assign({id: snap.id}, snap.data()) : null;
 }
 
 /**
@@ -110,19 +100,11 @@ async function loadMove(tx, store, args) {
   ctx.targetLive = lib.rows(await tx.get(store.collection('bookings')
       .where('sessionId', '==', toSessionId)))
       .filter((b) => b.status !== 'cancelled').length;
-  const period = lib.periodFor(ctx.target.date,
-      ctx.household && ctx.household.periodAnchorDay);
-  ctx.tokenPeriod = await doc('tokenPeriods',
-      lib.tokenPeriodId(athleteId, period.periodKey));
-  ctx.periodBookings = lib.rows(await tx.get(
-      lib.periodBookingsQuery(store, athleteId, period)));
-  ctx.waitlist = lib.rows(await tx.get(store.collection('waitlist')
-      .where('athleteId', '==', athleteId)));
-  ctx.graceTokens = lib.rows(await tx.get(store.collection('graceTokens')
-      .where('athleteId', '==', athleteId)));
-  ctx.graceSpends = await lib.readGraceSpends((q) => tx.get(q),
-      lib.graceSpendQueries(store, ctx.graceTokens, lib.chicagoDate(now)));
-  return ctx;
+  const {tokenPeriod, periodBookings, waitlist, graceTokens, graceSpends} =
+      await loadTokenInputs(tx, store, {athleteId, date: ctx.target.date,
+        anchorDay: ctx.household && ctx.household.periodAnchorDay, now});
+  return Object.assign(ctx, {tokenPeriod, periodBookings, waitlist,
+    graceTokens, graceSpends});
 }
 
 /**
