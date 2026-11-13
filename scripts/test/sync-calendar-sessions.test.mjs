@@ -24,6 +24,14 @@ test('durationMinutes comes from the event end time (regex fix at sync:317)', ()
   assert.match(r.stdout, /session 2026-01-05-0: \{[^\n]*"time":"3:00 PM"[^\n]*"durationMinutes":60/);
 });
 
+test('a Tour event takes at most 20 (owner 2026-11-13; 25 before), training 12, phil 6', () => {
+  const r = dryRun();
+  assert.equal(r.status, 0, r.stderr);
+  assert.match(r.stdout, /session 2026-01-10-0: \{[^\n]*"type":"tournament","capacity":20,/);
+  assert.match(r.stdout, /session 2026-01-05-0: \{[^\n]*"type":"training","capacity":12,/);
+  assert.match(r.stdout, /session 2026-01-08-0: \{[^\n]*"type":"phil","capacity":6,/);
+});
+
 test('Yannick / mental titles are display-only: never a session, counted as skipped', () => {
   const r = dryRun();
   assert.doesNotMatch(r.stdout, /"type":"mental"/);

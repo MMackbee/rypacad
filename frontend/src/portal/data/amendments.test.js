@@ -70,10 +70,10 @@ describe('the mental cadence is per package (v2.0.1)', () => {
 });
 
 describe('the schedule (v2.0.2)', () => {
-  test('capacity is per type: training 12 (owner, 2026-11-05; 14 from 2026-09-18), tournament 25', () => {
-    expect(CAPACITY_BY_TYPE).toEqual({ training: 12, tournament: 25 });
+  test('capacity is per type: training 12 (owner, 2026-11-05; 14 from 2026-09-18), tournament 20 (owner, 2026-11-13; 25 before)', () => {
+    expect(CAPACITY_BY_TYPE).toEqual({ training: 12, tournament: 20 });
     expect(CAPACITY).toBe(12);
-    expect(capacityForType('tournament')).toBe(25);
+    expect(capacityForType('tournament')).toBe(20);
     expect(capacityForType('training')).toBe(12);
     expect(capacityForType('adult')).toBe(12);
   });
@@ -83,13 +83,13 @@ describe('the schedule (v2.0.2)', () => {
     const week = generateSeason({ start: '2026-09-21', end: '2026-09-27' });
     const byType = (t) => [...new Set(week.filter((s) => s.type === t).map((s) => s.capacity))];
     expect(byType('training')).toEqual([12]);
-    expect(byType('tournament')).toEqual([25]);
+    expect(byType('tournament')).toEqual([20]);
     // A holiday extra follows its type too, unless it names its own number.
     const extras = generateSeason({
       start: '2026-11-26', end: '2026-11-26', closures: ['2026-11-26'],
       extras: [{ date: '2026-11-26', time: '9:00 AM', type: 'tournament' }, { date: '2026-11-26', time: '1:00 PM', type: 'tournament', capacity: 40 }],
     });
-    expect(extras.map((s) => s.capacity)).toEqual([25, 40]);
+    expect(extras.map((s) => s.capacity)).toEqual([20, 40]);
     // The flat override still wins when a caller passes one.
     expect(new Set(generateSeason({ start: '2026-09-21', end: '2026-09-27', capacity: 9 }).map((s) => s.capacity))).toEqual(new Set([9]));
   });

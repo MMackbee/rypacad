@@ -88,17 +88,18 @@ const SATURDAY_ADULT_BLOCK = {
  * `session.capacity` as a plain number either way, so this flattening needs
  * no change on that side.
  */
-export const CAPACITY_BY_TYPE = { training: 12, tournament: 25 }; // training 12: owner 2026-11-05
+export const CAPACITY_BY_TYPE = { training: 12, tournament: 20 }; // training 12: owner 2026-11-05; tournament 20: owner 2026-11-13
 
 /** The training number, kept under its old name for callers that want one default. */
 export const CAPACITY = CAPACITY_BY_TYPE.training;
 
 /**
- * A generated session's capacity (owner, 2026-09-18): per TYPE - training 14,
- * tournament (RYP Tour) 25. This is the one place `type` legitimately drives a
- * number: it is a ROOM fact, never a charge, so the token model's keystone
- * ("charging never branches on type") holds. Anything else generated here (the
- * display-only adult block) takes the training number.
+ * A generated session's capacity (owner, 2026-09-18): per TYPE - training 12
+ * (2026-11-05), tournament (RYP Tour) 20 (2026-11-13; 25 before). This is the
+ * one place `type` legitimately drives a number: it is a ROOM fact, never a
+ * charge, so the token model's keystone ("charging never branches on type")
+ * holds. Anything else generated here (the display-only adult block) takes the
+ * training number.
  */
 export function capacityForType(type) {
   return CAPACITY_BY_TYPE[type] ?? CAPACITY_BY_TYPE.training;
