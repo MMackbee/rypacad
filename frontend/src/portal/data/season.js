@@ -220,7 +220,7 @@ export function upcomingDates(sessions, from, count = 7) {
 /**
  * Capacity as the booking list shows it. `session.capacity` is a plain number
  * on every session doc, so this needs no per-type branch - the per-type rule
- * (training 14, tournament 25, owner 2026-09-18) is applied where sessions
+ * (owner 2026-09-18; today training 12 and RYP Tour 20) is applied where sessions
  * are MADE (schedule.js CAPACITY_BY_TYPE, the calendar sync's map), never
  * where they are read.
  */
