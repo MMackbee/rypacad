@@ -8,9 +8,11 @@
  * the rules cannot parse ('TBA', '', lower case) falls back to the day floor.
  * The re-book arm may remove those three and comp, never set or change them.
  * No client writes a move marker (cancelReason 'moved', movedTo, movedFrom,
- * cancelledVia or createdVia 'move'): moveBooking writes those with the Admin
- * SDK. Paid Elite rows (ath-elite, household hh), so both passes answer
- * alike. The before-start cases sit 90 minutes either side of now on today's
+ * cancelledVia or createdVia 'move' or 'staff'): moveBooking and
+ * staffBookSession write those with the Admin SDK, and a family may re-book
+ * a row staff created. Paid Elite rows (ath-elite, household hh), so both
+ * passes answer alike. The before-start cases sit 90 minutes either side of
+ * now on today's
  * Chicago date, so between 22:30 and 01:30 Chicago the task records a FAIL
  * and runs nothing; that same window makes today's '12:30 AM' always started
  * and '11:45 PM' always still to come, which pins the 12-hour wrap and both
@@ -150,6 +152,7 @@ export async function taskBookingChanges() {
     const fresh = row(s, ahead.date);
     delete fresh.createdAt;
     expect("booking-changes: a family create with createdVia 'move' refused", await bookAs(t.parent, bookingId(s), { ...fresh, createdVia: 'move' }), 403);
+    expect("booking-changes: a family create with createdVia 'staff' refused", await bookAs(t.parent, bookingId(s), { ...fresh, createdVia: 'staff' }), 403);
     expect('booking-changes: a family create with movedFrom refused', await bookAs(t.parent, bookingId(s), { ...fresh, movedFrom: 'ath-elite_x' }), 403);
     expect('booking-changes: the same create without a marker', await bookAs(t.parent, bookingId(s), fresh), 200);
 
@@ -185,6 +188,9 @@ export async function taskBookingChanges() {
     expect('booking-changes: a re-book of a row a move created that re-stamps createdAt (REQUEST_TIME) refused',
       await rebook(t.parent, s, CONFIRM, [...Object.keys(CONFIRM), ...CLEARS], ['rebookedAt', 'createdAt']), 403);
     expect('booking-changes: the same re-book leaving createdAt', await newRebook(s), 200);
+    // A row staffBookSession made (createdBy the ops uid) and the family later cancelled: the family may re-book it.
+    s = await slot('rb-staff', ahead, { ...sickCancelled(), createdVia: 'staff', createdBy: uid.ops });
+    expect('booking-changes: a family re-book of a row staff created', await newRebook(s), 200);
     s = await slot('rb-comp', ahead, { ...sickCancelled(), comp: true });
     expect('booking-changes: a re-book of a comp row removes comp', await newRebook(s, [...CLEARS, 'comp']), 200);
     expect('booking-changes: and the row carries no comp', carried(await fieldsOf(s), ['comp']), undefined);
