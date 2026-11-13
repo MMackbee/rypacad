@@ -10,7 +10,7 @@
  * lands). --show brings it back exactly as it was. The athlete Season
  * calendar (frontend screens/SeasonSchedule.js) renders the Google Calendar
  * itself and still shows the event; only the Firestore-driven booking lists
- * hide it. scripts/comp-booking.mjs refuses a hidden session.
+ * hide it. `staffBookSession` refuses a hidden session (`session-hidden`).
  *
  *   node scripts/hide-sessions.mjs --prod --hide --days Mon,Wed --time "6:00 PM" --dry-run
  *   node scripts/hide-sessions.mjs --prod --hide --days Mon,Wed --time "6:00 PM" \

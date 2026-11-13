@@ -36,9 +36,10 @@
  * and firestore.rules refuses a booking, re-book or waitlist join for any
  * test: true athlete (athleteBillingOk), whatever tokens or grace an ops
  * action gives it - a missing billing key alone reads as paid there.
- * Never comp-book a test athlete: scripts/comp-booking.mjs writes with the
- * Admin SDK, past the rules. Research starts unanswered: the parent answers it
- * once at staging, which is how the one-time confirm gets tested. --reset
+ * Never book a test athlete from the panel: `staffBookSession` refuses
+ * `test-athlete`, and no script writes past the rules. Research starts
+ * unanswered: the parent answers it once at staging, which is how the
+ * one-time confirm gets tested. --reset
  * deletes only the test athletes' assessments and assessmentProfile docs and
  * clears their consents.research - never the protocol settings, which
  * staging shares with production.

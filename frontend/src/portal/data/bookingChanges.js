@@ -80,10 +80,11 @@ export function rebookClears(row, del) {
 }
 
 /**
- * A free comp (scripts/comp-booking.mjs): `comp: true`, charged to the period
- * and holding no bonus or single token. It never spends a period token and
- * stays free when moved. A row re-booked with a bonus or single token is an
- * ordinary booking even if an older app left `comp` on it.
+ * A free comp (staff Free add, `functions/portal/staff-book.js`):
+ * `comp: true`, charged to the period and holding no bonus or single token.
+ * It never spends a period token and stays free when moved. A row re-booked
+ * with a bonus or single token is an ordinary booking even if an older app
+ * left `comp` on it.
  * CHANGE ONE, CHANGE BOTH: functions/portal/move-decide.js#isFreeComp.
  */
 export function isFreeComp(booking) {

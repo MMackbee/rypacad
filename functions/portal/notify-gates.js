@@ -64,8 +64,8 @@ function shouldNoticeMemberCancel(booking) {
  *   Calendly webhook writes its bookings as 'system', and they are exactly
  *   the ones that need the ask.
  * - Only while the switch `config/mentalConsent.notices` is true.
- * - Not for a past date: the owner's Calendly re-link and comp-booking
- *   scripts can write a booking for any date (Chicago date, `lib.todayISO`).
+ * - Not for a past date: the owner's Calendly re-link script can write a
+ *   booking for any date (Chicago date, `lib.todayISO`).
  * - Never to a test household or a test athlete, nor when the household
  *   doc is missing.
  * - Only when the athlete is 'unsigned' or 'needs-adult' (18 counted on the
