@@ -206,6 +206,7 @@ import { isFreeComp } from '../data/bookingChanges';
 import { handicapLimitOf, handicapOf } from '../data/reserved';
 import { isHiddenSession } from '../data/hiddenSessions';
 import { FITNESS_WINDOW_DAYS, fitnessRow, orphanFitness } from '../data/orphanFitness';
+import { staffRowFields } from '../data/staffBooking';
 
 // 2026-10-02: the academy's handicap edit (hooks/handicap.js), on this seam
 // like every other staff write a screen reaches.
@@ -3980,6 +3981,7 @@ async function liveSessionAttendance(sessionId) {
       // Coach's optional no-show note (owner's report 2026-09-10) — absent
       // on most bookings, so the row carries an honest null.
       noshowReason: b.noshowReason ?? null,
+      ...staffRowFields(b), // what the roster's staff Move and Cancel sheets read (spec 2026-11-13 10.1)
     }))
     .sort((a, b) => (a.name || '').localeCompare(b.name || ''));
 }

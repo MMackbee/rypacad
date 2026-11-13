@@ -297,6 +297,20 @@ describe("the coach's rosters", () => {
     await h.unmount();
   });
 
+  // Staff booking (plan 04-plan-admin-booking.md Task E3): the booking fields
+  // the roster's Move and Cancel sheets read, off the docs already fetched.
+  test('the roster rows carry what the staff sheets read', async () => {
+    asStaff('owner');
+    const fields = { householdId: 'hh1', source: null, type: 'training', date: '2026-11-17', periodKey: '2026-11-01', chargedFrom: 'period', comp: true, graceTokenId: null };
+    live.fetchBookingsBySession.mockResolvedValue([{ id: 'jordan_s2', athleteId: 'jordan', status: 'confirmed', ...fields }]);
+    live.fetchAthlete.mockResolvedValue(FAMILY[0]);
+    const h = await mountHook(() => useSessionAttendance('s2'));
+    expect(h.result.current.error).toBeNull();
+    expect(h.result.current.data).toHaveLength(1);
+    expect(h.result.current.data[0]).toMatchObject({ bookingId: 'jordan_s2', athleteId: 'jordan', name: 'Jordan Whitfield', ...fields });
+    await h.unmount();
+  });
+
   test('a slot held for an unmatched Calendly booking reads as unresolved; any other session, a missing doc or a value that is not true does not', async () => {
     asStaff('owner');
     live.fetchBookingsBySession.mockResolvedValue([]);
