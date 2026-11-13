@@ -123,6 +123,7 @@ export function periodRows({ bookings, waitlist, periodKey, sessionsById = {} })
         kind: 'booking',
         date: b.date || (session && session.date) || null,
         sessionId: b.sessionId || null,
+        type: b.type ?? (session && session.type) ?? null,
         label: sessionLabel(session, b.type),
         time: (session && session.time) || null,
         status: b.status || 'confirmed',
@@ -236,6 +237,7 @@ export function hubMemberFor(args) {
   return {
     athleteId: athlete.id,
     name: athlete.name,
+    test: athlete.test === true,
     // Their own login reads it: who may buy a session token there
     // (singleToken.js ownLoginMayBuy). null when not on file.
     dob: athlete.dob ?? null,
@@ -254,6 +256,7 @@ export function hubMemberFor(args) {
     tokens,
     spent,
     reserved,
+    nextSpent: nextRows.spent,
     ...(singleUses ? { singleUses } : {}),
     // Null after the season's last period (data/season.js afterSeasonEnd):
     // there is no March to count. `used` is the period's SPEND as the token

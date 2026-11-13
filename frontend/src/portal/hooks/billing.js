@@ -85,7 +85,7 @@ function membershipView(membership) {
 function householdView(household, anchorDay) {
   return {
     id: household.id,
-    name: household.name ?? null,
+    name: household.name ?? null, test: household.test === true,
     anchorDay,
     membership: membershipView(household.membership),
     stripeCustomerId: household.stripeCustomerId ?? null,
@@ -259,7 +259,7 @@ async function liveHouseholdsDirectory() {
   for (const a of athletes) {
     if (!a.householdId) continue;
     if (!byHousehold.has(a.householdId)) byHousehold.set(a.householdId, []);
-    byHousehold.get(a.householdId).push({ id: a.id, name: a.name ?? a.id, packageName: packageById(a.packageId)?.name ?? null });
+    byHousehold.get(a.householdId).push({ id: a.id, name: a.name ?? a.id, packageName: packageById(a.packageId)?.name ?? null, test: a.test === true });
   }
   return households
     .map((h) => ({
@@ -276,7 +276,7 @@ async function liveHouseholdsDirectory() {
  * Practice mode: one sample child's hub row, built from the same view model
  * over booking-shaped rows that reproduce the seeded "used" count.
  */
-function seedMember(child, today, anchorDay) {
+export function seedMember(child, today, anchorDay) {
   const pkg = packageById(child.packageId);
   // The period the meter reads (the first one, before the season).
   const { periodKey } = positionPeriodFor(today, anchorDay);
