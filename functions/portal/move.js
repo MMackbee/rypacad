@@ -2,9 +2,9 @@
  * moveBooking - a family moves one booking to another open session of the
  * same kind in one transaction (spec 2026-11-11 section 5; plan C2).
  *
- *   in   {bookingId: string, toSessionId: string}
+ *   in   {bookingId: string, toSessionId: string, allowFull?: boolean}
  *   out  {bookingId, movedFrom, sessionId, periodKey, chargedFrom,
- *         graceTokenId, comp, rebooked}
+ *         graceTokenId, comp, rebooked, overrides}
  *
  * Two app writes could lose the seat between them (the waitlist takes it),
  * charge twice, trip the single-token guard and send two emails. Here every
@@ -22,6 +22,15 @@
  * cancelled) is noticed by onBookingCancelled's re-confirm branch, which
  * calls `sendMoveReconfirm` below. A slow mail server can never turn a
  * committed move into a failed call.
+ *
+ * Staff mode (2026-11-13, portal/move-staff.js): when the caller's
+ * `users/{uid}.role` is owner or ops - never a request flag - the staff
+ * checks replace the family ones, `allowFull: true` may overfill the
+ * target, the old row also records `cancelledFrom` (what it was), a
+ * `full` refusal carries `{taken, capacity}`, `overrides` names each
+ * family limit skipped, and one log line of ids goes out after the commit.
+ * A family caller's `allowFull` is ignored: its move is exactly as before,
+ * with `overrides: []`.
  */
 
 'use strict';
@@ -34,7 +43,11 @@ const {FieldValue} = require('firebase-admin/firestore');
 const lib = require('./lib');
 const notices = require('./notices');
 const notify = require('./notify');
+const {sessionStarted} = require('./session-time');
+const {loadTokenInputs, rowOf} = require('./booking-reads');
 const {REFUSALS, decideMove} = require('./move-decide');
+const {isStaff} = require('./staff-cancel-decide');
+const {logStaffBooking} = require('./staff-gates');
 
 const {HttpsError} = functions.https;
 
@@ -46,11 +59,13 @@ const STALE_CANCEL_FIELDS = ['cancelCategory', 'cancelNote', 'cancelledVia'];
 /**
  * The typed refusal for one reason.
  * @param {string} reason A key of REFUSALS.
+ * @param {!Object=} details Extra details (a staff `full`'s counts).
  * @return {!HttpsError} The error to throw.
  */
-function refusal(reason) {
+function refusal(reason, details) {
   const r = REFUSALS[reason];
-  return new HttpsError(r.code, r.message, {reason});
+  return new HttpsError(r.code, r.message,
+      Object.assign({reason}, details));
 }
 
 /**
@@ -65,24 +80,15 @@ function goodId(id) {
 }
 
 /**
- * One document as `{id, ...data}`, or null when it does not exist.
- * @param {!Object} tx The transaction.
- * @param {!Object} ref A document reference.
- * @return {!Promise<?Object>} The row.
- */
-async function rowOf(tx, ref) {
-  const snap = await tx.get(ref);
-  return snap.exists ? Object.assign({id: snap.id}, snap.data()) : null;
-}
-
-/**
  * Every read the move needs, in one transaction, before any write.
  * Missing documents are nulls; the decision refuses them.
  * @param {!Object} tx The transaction.
  * @param {!Object} store An admin Firestore.
  * @param {{uid: string, bookingId: string, toSessionId: string,
- *     now: !Date}} args The caller, the request and the clock.
- * @return {!Promise<!Object>} The ctx `decideMove` takes.
+ *     allowFull: boolean, now: !Date}} args The caller, the request and
+ *     the clock.
+ * @return {!Promise<!Object>} The ctx `decideMove` takes. `staff` comes
+ *     from the caller's role; `allowFull` counts only in staff mode.
  */
 async function loadMove(tx, store, args) {
   const {uid, bookingId, toSessionId, now} = args;
@@ -92,6 +98,8 @@ async function loadMove(tx, store, args) {
     targetBooking: null, targetLive: 0, athlete: null, household: null,
     pkg: null, tokenPeriod: null, periodBookings: [], graceSpends: [],
     waitlist: [], graceTokens: []};
+  ctx.staff = isStaff(ctx.user);
+  ctx.allowFull = ctx.staff && args.allowFull === true;
   const old = ctx.old;
   if (!old || !old.athleteId) return Object.assign(ctx, {old: null});
   const athleteId = old.athleteId;
@@ -110,19 +118,11 @@ async function loadMove(tx, store, args) {
   ctx.targetLive = lib.rows(await tx.get(store.collection('bookings')
       .where('sessionId', '==', toSessionId)))
       .filter((b) => b.status !== 'cancelled').length;
-  const period = lib.periodFor(ctx.target.date,
-      ctx.household && ctx.household.periodAnchorDay);
-  ctx.tokenPeriod = await doc('tokenPeriods',
-      lib.tokenPeriodId(athleteId, period.periodKey));
-  ctx.periodBookings = lib.rows(await tx.get(
-      lib.periodBookingsQuery(store, athleteId, period)));
-  ctx.waitlist = lib.rows(await tx.get(store.collection('waitlist')
-      .where('athleteId', '==', athleteId)));
-  ctx.graceTokens = lib.rows(await tx.get(store.collection('graceTokens')
-      .where('athleteId', '==', athleteId)));
-  ctx.graceSpends = await lib.readGraceSpends((q) => tx.get(q),
-      lib.graceSpendQueries(store, ctx.graceTokens, lib.chicagoDate(now)));
-  return ctx;
+  const {tokenPeriod, periodBookings, waitlist, graceTokens, graceSpends} =
+      await loadTokenInputs(tx, store, {athleteId, date: ctx.target.date,
+        anchorDay: ctx.household && ctx.household.periodAnchorDay, now});
+  return Object.assign(ctx, {tokenPeriod, periodBookings, waitlist,
+    graceTokens, graceSpends});
 }
 
 /**
@@ -146,6 +146,8 @@ function writeMove(tx, store, ctx, decision, uid) {
   for (const k of STALE_CANCEL_FIELDS) {
     if (old[k] !== undefined) cancel[k] = FieldValue.delete();
   }
+  // Staff may move a No-show: record what the row was.
+  if (ctx.staff) cancel.cancelledFrom = old.status;
   tx.update(bookings.doc(old.id), cancel);
   tx.update(sessions.doc(oldSession.id),
       {booked: Math.max(0, (Number(oldSession.booked) || 0) - 1)});
@@ -188,7 +190,7 @@ function writeMove(tx, store, ctx, decision, uid) {
 
 /**
  * The callable's body, exported so the unit tests can call it in-process.
- * @param {*} data `{bookingId, toSessionId}`.
+ * @param {*} data `{bookingId, toSessionId, allowFull?}`.
  * @param {!Object} context The callable context.
  * @param {{db: (!Object|undefined), now: (!Date|undefined)}=} deps The
  *     Firestore and the clock, injectable for tests.
@@ -202,46 +204,63 @@ async function moveBookingHandler(data, context, deps) {
   if (!goodId(bookingId) || !goodId(toSessionId)) {
     throw refusal('bad-request');
   }
+  // Anything but true is false, never a bad request: the family's
+  // request behaves exactly as before.
+  const allowFull = Boolean(data && data.allowFull === true);
   const store = (deps && deps.db) || admin.firestore();
   const now = deps && deps.now instanceof Date ? deps.now : new Date();
   const uid = auth.uid;
-  return store.runTransaction(async (tx) => {
-    const ctx = await loadMove(tx, store,
-        {uid, bookingId, toSessionId, now});
-    // ---- every read happens above this line ----
-    const decision = decideMove(ctx);
-    if (!decision.ok) throw refusal(decision.reason);
-    const {newId, rebooked} = writeMove(tx, store, ctx, decision, uid);
-    return {
-      bookingId: newId,
-      movedFrom: ctx.old.id,
-      sessionId: toSessionId,
-      periodKey: decision.period.periodKey,
-      chargedFrom: decision.charge.chargedFrom,
-      graceTokenId: decision.charge.graceTokenId,
-      comp: decision.comp,
-      rebooked,
-    };
-  });
+  const {out, staff, role, athleteId} = await store.runTransaction(
+      async (tx) => {
+        const ctx = await loadMove(tx, store,
+            {uid, bookingId, toSessionId, allowFull, now});
+        // ---- every read happens above this line ----
+        const decision = decideMove(ctx);
+        if (!decision.ok) throw refusal(decision.reason, decision.details);
+        const {newId, rebooked} = writeMove(tx, store, ctx, decision, uid);
+        return {staff: ctx.staff, role: ctx.user && ctx.user.role,
+          athleteId: ctx.old.athleteId, out: {
+            bookingId: newId,
+            movedFrom: ctx.old.id,
+            sessionId: toSessionId,
+            periodKey: decision.period.periodKey,
+            chargedFrom: decision.charge.chargedFrom,
+            graceTokenId: decision.charge.graceTokenId,
+            comp: decision.comp,
+            rebooked,
+            overrides: decision.overrides,
+          }};
+      });
+  // After the commit, never inside it, where a retry would log twice.
+  if (staff) {
+    logStaffBooking({action: 'move', by: uid, role, athleteId,
+      sessionId: toSessionId, chargedFrom: out.chargedFrom, comp: out.comp,
+      overrides: out.overrides});
+  }
+  return out;
 }
 
 /**
- * The 'booking-confirmed' notice for a move onto a row the athlete had
- * cancelled earlier: onBookingCancelled calls this when
+ * The 'booking-confirmed' notice for a move or a staff add onto a row the
+ * athlete had cancelled earlier: onBookingCancelled calls this when
  * `shouldNoticeMoveReconfirm` holds (portal/notify-gates.js). The key
- * carries the move's `createdAt`, so the row's earlier
- * `booking-confirmed_{id}` ledger entry never blocks it and a redelivered
- * trigger never sends twice. A failure is logged, never thrown.
+ * `{id}_{createdVia}_{createdAt ms}` carries the server's new `createdAt`,
+ * so the row's earlier `booking-confirmed_{id}` ledger entry never blocks
+ * it and a redelivered trigger never sends twice. A session that already
+ * started gets no cancel-or-move sentence. A failure is logged, never
+ * thrown.
  * @param {string} bookingId The booking id.
- * @param {!Object} booking The booking body after the move.
- * @param {{db: (!Object|undefined), sendNotice: (!Function|undefined)}=}
- *     deps The Firestore and the sender, injectable for tests.
+ * @param {!Object} booking The booking body after the move or add.
+ * @param {{db: (!Object|undefined), sendNotice: (!Function|undefined),
+ *     now: (!Date|undefined)}=} deps The Firestore, the sender and the
+ *     clock, injectable for tests.
  * @return {!Promise<void>} Resolves once sent, or once a failure is logged.
  */
 async function sendMoveReconfirm(bookingId, booking, deps) {
   try {
     const store = (deps && deps.db) || admin.firestore();
     const send = (deps && deps.sendNotice) || notify.sendNotice;
+    const now = deps && deps.now instanceof Date ? deps.now : new Date();
     const body = async (name, id) => {
       if (!id) return null;
       const snap = await store.collection(name).doc(id).get();
@@ -251,7 +270,8 @@ async function sendMoveReconfirm(bookingId, booking, deps) {
       body('sessions', booking.sessionId),
       body('athletes', booking.athleteId),
     ]);
-    const copy = notices.bookingConfirmed({athlete, session, booking});
+    const copy = notices.bookingConfirmed({athlete, session, booking,
+      started: sessionStarted(session, now)});
     await send({
       kind: 'booking-confirmed',
       category: 'schedule',
@@ -259,7 +279,8 @@ async function sendMoveReconfirm(bookingId, booking, deps) {
       athleteId: booking.athleteId || null,
       sessionId: booking.sessionId || null,
       bookingId,
-      subjectKey: `${bookingId}_move_${booking.createdAt.toMillis()}`,
+      subjectKey: `${bookingId}_${booking.createdVia}_` +
+          `${booking.createdAt.toMillis()}`,
       title: copy.title,
       body: copy.body,
     });

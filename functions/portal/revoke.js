@@ -196,8 +196,9 @@ async function revokeAthlete(hh, athleteId, eventId) {
 
 /**
  * The bookings one athlete holds in each period AFTER the current one,
- * counted exactly as `tokensFor` counts `used`: non-cancelled, and not
- * grace-charged (grace is a second life, never a period spend).
+ * counted exactly as `tokensFor` counts `used`: non-cancelled, not
+ * grace-charged (grace is a second life, never a period spend) and not a
+ * comp (a Free booking never counts as spent, so it is never trimmed).
  * @param {string} athleteId The athlete.
  * @param {string} currentEnd The current period's last day.
  * @param {number} anchorDay The household's anchor.
@@ -211,7 +212,9 @@ async function futurePeriodBookings(athleteId, currentEnd, anchorDay) {
   const byPeriod = new Map();
   for (const doc of snap.docs) {
     const b = doc.data() || {};
-    if (b.status === 'cancelled' || b.graceTokenId) continue;
+    if (b.status === 'cancelled' || b.graceTokenId || b.comp === true) {
+      continue;
+    }
     const key = lib.periodFor(b.date, anchorDay).periodKey;
     if (!byPeriod.has(key)) byPeriod.set(key, []);
     byPeriod.get(key).push(doc);

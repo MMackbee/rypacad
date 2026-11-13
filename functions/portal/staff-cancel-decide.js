@@ -18,7 +18,8 @@
  * is false for those, true otherwise.
  *
  * CHANGE ONE, CHANGE BOTH with the frontend's `staffCancellable` helper:
- * cancellable is a `confirmed` or `noshow` booking Calendly does not own.
+ * cancellable is a `confirmed` or `noshow` booking Calendly does not own
+ * and not a 1:1.
  */
 
 'use strict';
@@ -60,6 +61,7 @@ const REFUSALS = {
     message: 'This booking was already changed.'},
   'attended': {code: PRE, message: 'An attended session can\'t be cancelled.'},
   'calendly': {code: PRE, message: 'Cancel this 1:1 in Calendly.'},
+  'mental': {code: PRE, message: 'Book and change this 1:1 in Calendly.'},
   'period-over': {code: PRE,
     message: 'That billing period has ended.'},
 };
@@ -127,6 +129,8 @@ function bookingRefusal(b, session, anchorDay, today) {
   if (b.status === 'cancelled') return 'already-cancelled';
   if (b.status === 'attended') return 'attended';
   if (b.source === 'calendly') return 'calendly';
+  // A 1:1 booked in the portal (the in-app fallback) is excluded too.
+  if ((b.type || (session && session.type)) === 'mental') return 'mental';
   // Any other status is not a booking staff can cancel here.
   if (!CANCELLABLE.includes(b.status)) return 'already-cancelled';
   // A booking with no date cannot be placed in a period.

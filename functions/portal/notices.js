@@ -127,18 +127,21 @@ function attendeeNote(booking) {
 
 /**
  * kind `booking-confirmed`. Ends with the cancel-or-move line, except for a
- * 1:1 with Yannick (`type: 'mental'`), whose own terms stand.
- * @param {{athlete: ?Object, session: ?Object, booking: (?Object|undefined)}}
- *     args Copy inputs.
+ * 1:1 with Yannick (`type: 'mental'`), whose own terms stand, and for a
+ * session that had already started when the notice went out (a staff add
+ * into today's or an earlier session, 2026-11-13), where the line is false.
+ * @param {{athlete: ?Object, session: ?Object, booking: (?Object|undefined),
+ *     started: (boolean|undefined)}} args Copy inputs.
  * @return {{title: string, body: string}} The notice.
  */
 function bookingConfirmed(args) {
   const name = firstNameOf(args.athlete);
   const mental = Boolean(args.session) && args.session.type === 'mental';
+  const tail = mental || args.started === true ? '' : CANCEL_OR_MOVE;
   return {
     title: 'Session booked',
     body: `${name} is booked: ${sessionPhrase(args.session)}.` +
-        attendeeNote(args.booking) + (mental ? '' : CANCEL_OR_MOVE),
+        attendeeNote(args.booking) + tail,
   };
 }
 

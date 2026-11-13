@@ -40,6 +40,8 @@
  *   staffCancelBooking     callable, portal/staff-cancel.js (2026-11-12):
  *                          owner or ops cancels a family's bookings on one
  *                          session from staff Billing; token back, no email
+ *   staffBookSession       callable, portal/staff-book.js (2026-11-13):
+ *                          owner or ops adds an athlete to a session
  *
  * The marketing site's scholarship form posts to submitScholarship
  * (portal/scholarship.js, 2026-10-01): public, origin-checked, validated.
@@ -119,7 +121,9 @@ const {submitFeedback} = require('./portal/feedback');
 const {requestMentalConsent} = require('./portal/mental-consent-request');
 const {moveBooking, sendMoveReconfirm} = require('./portal/move');
 const {staffCancelBooking} = require('./portal/staff-cancel');
+const {staffBookSession} = require('./portal/staff-book');
 const {isFreeComp} = require('./portal/move-decide');
+const {sessionStarted} = require('./portal/session-time');
 
 // ==========================================================================
 // PORTAL SERVER-SIDE WRITERS (Sprint 13, contract v2.1)
@@ -139,6 +143,8 @@ exports.moveBooking = moveBooking;
 // Owner or ops cancels bookings of one family on one session, token back,
 // no email (2026-11-12, portal/staff-cancel.js).
 exports.staffCancelBooking = staffCancelBooking;
+// Owner or ops adds an athlete to a session (2026-11-13, portal/staff-book.js).
+exports.staffBookSession = staffBookSession;
 
 // ==========================================================================
 // SPRINT 20 LAUNCH (contract v3.0.1): instant sign-up, child-login claim,
@@ -249,7 +255,8 @@ exports.onBookingCreated = functions
           docBody('sessions', booking.sessionId),
           docBody('athletes', booking.athleteId),
         ]);
-        const copy = notices.bookingConfirmed({athlete, session, booking});
+        const copy = notices.bookingConfirmed({athlete, session, booking,
+          started: sessionStarted(session, new Date())});
         await notify.sendNotice({
           kind: 'booking-confirmed',
           category: 'schedule',
@@ -284,8 +291,9 @@ exports.onBookingCancelled = functions
     .onUpdate(async (change, context) => {
       const before = change.before.data() || {};
       const after = change.after.data() || {};
-      // moveBooking re-confirmed a row cancelled earlier: no create trigger
-      // fires for it, so its booking-confirmed notice goes from here.
+      // moveBooking or staffBookSession re-confirmed a row cancelled
+      // earlier: no create trigger fires for it, so its booking-confirmed
+      // notice goes from here.
       if (shouldNoticeMoveReconfirm(before, after)) {
         await sendMoveReconfirm(context.params.bookingId, after);
         return null;

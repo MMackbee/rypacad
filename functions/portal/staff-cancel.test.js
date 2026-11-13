@@ -313,6 +313,33 @@ test('a second call for the same booking is refused and moves no seat',
       assert.equal(docs['sessions/s1'].booked, 3);
     });
 
+test('a portal 1:1 is refused as mental', async () => {
+  const mental = (over) => world(
+      {'sessions/m1': session('2026-11-17', {type: 'mental', booked: 1})},
+      booking('jordan', 'm1', '2026-11-17', over));
+  await refusedClean(mental({type: 'mental'}), 'u-owner', req('jordan_m1'),
+      'failed-precondition', 'mental');
+  // No type on the row: the session's type decides.
+  await refusedClean(mental({type: undefined}), 'u-owner',
+      req('jordan_m1'), 'failed-precondition', 'mental');
+  // A Calendly row is still Calendly's (the order is kept).
+  await refusedClean(mental({type: 'mental', source: 'calendly'}),
+      'u-owner', req('jordan_m1'), 'failed-precondition', 'calendly');
+});
+
+test('a next-period row cancels with the token back', async () => {
+  const docs = world({'sessions/s9': session('2026-12-03', {booked: 1})},
+      booking('jordan', 's9', '2026-12-03', {periodKey: '2026-12-01'}));
+  const used = () => lib.tokensPosition({pkg: docs['packages/t-6'],
+    tokenPeriod: null, bookings: rowsOf(docs, 'jordan'), waitlist: [],
+    graceTokens: [], periodKey: '2026-12-01', today: '2026-11-12'}).used;
+  assert.equal(used(), 1);
+  const out = await call(docs, 'u-owner', req('jordan_s9'));
+  assert.equal(out.cancelled[0].tokenBack, true);
+  assert.equal(used(), 0);
+  assert.equal(docs['sessions/s9'].booked, 0);
+});
+
 // ---- what the triggers do with a 'staff' cancel ----
 
 // The cancel trigger reads through index.js's own admin Firestore: point

@@ -97,6 +97,23 @@ test('shouldNoticeMoveReconfirm: a move onto a row cancelled earlier', () => {
   assert.equal(shouldNoticeMoveReconfirm(null, null), false);
 });
 
+test('shouldNoticeMoveReconfirm: a staff add over a cancelled row ' +
+    '(2026-11-13)', () => {
+  const before = {status: 'cancelled', createdAt: ts(1)};
+  const staff = (createdAt) => ({status: 'confirmed', createdVia: 'staff',
+    createdAt});
+  assert.equal(shouldNoticeMoveReconfirm(before, staff(ts(2))), true);
+  // A family re-book of a row staff made keeps createdAt.
+  assert.equal(shouldNoticeMoveReconfirm(before, staff(ts(1))), false);
+  assert.equal(shouldNoticeMoveReconfirm(before, {status: 'confirmed',
+    createdVia: 'repeat', createdAt: ts(2)}), false);
+  assert.equal(shouldNoticeMoveReconfirm(before, {status: 'confirmed',
+    createdAt: ts(2)}), false);
+  // A new staff row is noticed by the create trigger as any other.
+  assert.equal(shouldNoticeBookingCreated({status: 'confirmed',
+    createdBy: 'u-owner', createdVia: 'staff'}), true);
+});
+
 test('memberCancelKey: one receipt per cancel', () => {
   assert.equal(memberCancelKey('b1', {}, {cancelledAt: ts(5)}), 'b1_5');
   assert.equal(memberCancelKey('b1', {}, {}), 'b1');
