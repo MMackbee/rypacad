@@ -81,7 +81,7 @@ test('a move is four writes: old cancelled as moved, its seat back, the ' +
   assert.equal(docs['sessions/s2'].booked, 2);
   assert.deepEqual(out, {bookingId: 'sam_s2', movedFrom: 'sam_s1',
     sessionId: 's2', periodKey: '2026-11-01', chargedFrom: 'period',
-    graceTokenId: null, comp: false, rebooked: false});
+    graceTokenId: null, comp: false, rebooked: false, overrides: []});
 });
 
 test('a moved-away row loses a stale reason an older app\'s re-book left ' +

@@ -24,6 +24,15 @@
  *
  * A free comp (`isFreeComp`) skips billing, the freeze, the package,
  * booking-open and the charge in any period, and stays free where it goes.
+ *
+ * Staff mode (spec 2026-11-13 section 9.2): when `ctx.staff` (the caller
+ * is the owner or ops, by role) the staff checks of portal/move-staff.js
+ * replace the family ones - no ownership or start check, a No-show moves,
+ * the open billing period bounds both ends (`period-over`), a test
+ * athlete is `test-athlete` - then the same charge, and `full` last unless
+ * `ctx.allowFull`. The window, the handicap block, Elite's one-a-day, a
+ * started target and an allowed overfill come back as `overrides`. The
+ * family result carries `overrides: []`.
  */
 
 'use strict';
@@ -31,6 +40,9 @@
 const lib = require('./lib');
 const gates = require('./booking-gates');
 const {sessionStarted} = require('./session-time');
+const {staffAthleteRefusal, staffOldRefusal, staffTargetRefusal} =
+    require('./move-staff');
+const {capacityOf, staffOverrides, takenOf} = require('./staff-gates');
 
 const PRE = 'failed-precondition';
 
@@ -48,6 +60,7 @@ const REFUSALS = {
     message: 'This booking no longer exists.'},
   'not-yours': {code: 'permission-denied',
     message: 'This booking isn\'t on your account.'},
+  'attended': {code: PRE, message: 'An attended session can\'t be moved.'},
   'not-confirmed': {code: PRE, message: 'This booking was already changed.'},
   'calendly-managed': {code: PRE,
     message: 'Cancel or reschedule from Calendly\'s email'},
@@ -57,6 +70,7 @@ const REFUSALS = {
     message: 'That session isn\'t on the schedule any more.'},
   'already-started': {code: PRE,
     message: 'This session has already started.'},
+  'period-over': {code: PRE, message: 'That billing period has ended.'},
   'different-type': {code: PRE, message: 'Pick a session of the same kind.'},
   'session-cancelled': {code: PRE,
     message: 'The academy cancelled that session.'},
@@ -69,6 +83,8 @@ const REFUSALS = {
     message: 'That date isn\'t open for booking yet.'},
   'already-booked': {code: PRE,
     message: 'This athlete already has this session booked.'},
+  'test-athlete': {code: PRE,
+    message: 'Test athletes can\'t be booked onto real sessions.'},
   'membership-inactive': {code: PRE,
     message: 'This membership isn\'t active right now.'},
   'booking-not-open': {code: PRE, message: 'Booking isn\'t open yet.'},
@@ -245,6 +261,69 @@ function positionFor(ctx, args) {
 }
 
 /**
+ * The athlete's other bookings that period: the booking being moved left
+ * out (for Elite's one-a-day).
+ * @param {!Object} ctx See `decideMove`.
+ * @return {!Array<!Object>} The rows.
+ */
+function otherBookings(ctx) {
+  return (ctx.periodBookings || []).filter((b) => b && b.id !== ctx.old.id);
+}
+
+/**
+ * The target's period, the athlete's waitlist entry on the target, and
+ * what pays for the new seat (C2 (a)-(d)); a free comp stays free.
+ * @param {!Object} ctx See `decideMove`.
+ * @param {boolean} comp Whether the booking is a free comp.
+ * @return {{period: !Object, waitlistEntryId: ?string, charge: !Object}}
+ *     The charge is `{chargedFrom, graceTokenId}` or `{reason}`.
+ */
+function settle(ctx, comp) {
+  const {old, target, household} = ctx;
+  const period = lib.periodFor(target.date,
+      household && household.periodAnchorDay);
+  const entryId = lib.waitlistId(target.id, old.athleteId);
+  const waitlistEntryId = (ctx.waitlist || []).some(
+      (w) => w && w.id === entryId) ? entryId : null;
+  if (comp) {
+    return {period, waitlistEntryId,
+      charge: {chargedFrom: 'period', graceTokenId: null}};
+  }
+  // The old row is left out: it counts as given back.
+  const position = positionFor(ctx, {period, leaveOutId: old.id,
+    waitlistEntryId, sessionDate: target.date});
+  return {period, waitlistEntryId, charge: moveCharge({old, target,
+    position, period, oldPeriodKey: old.periodKey || null})};
+}
+
+/**
+ * Decide one staff move (header, "Staff mode"): the staff checks, the
+ * family charge, then `full` unless `allowFull`.
+ * @param {!Object} ctx See `decideMove`.
+ * @return {!Object} As `decideMove`.
+ */
+function decideStaffMove(ctx) {
+  const early = staffOldRefusal(ctx) || staffTargetRefusal(ctx);
+  if (early) return {ok: false, reason: early};
+  const {old, target, athlete, pkg} = ctx;
+  const comp = isFreeComp(old);
+  const late = staffAthleteRefusal(ctx, comp);
+  if (late) return {ok: false, reason: late};
+  const {period, waitlistEntryId, charge} = settle(ctx, comp);
+  if (charge.reason) return {ok: false, reason: charge.reason};
+  const taken = takenOf(ctx.targetLive, target);
+  const capacity = capacityOf(target);
+  const allowFull = ctx.allowFull === true;
+  // Last on purpose: the overfill question is the final confirm.
+  if (!allowFull && taken >= capacity) {
+    return {ok: false, reason: 'full', details: {taken, capacity}};
+  }
+  return {ok: true, comp, charge, period, taken, waitlistEntryId,
+    overrides: staffOverrides({session: target, athlete, pkg,
+      bookings: otherBookings(ctx), taken, allowFull, now: ctx.now})};
+}
+
+/**
  * Decide one move.
  * @param {{uid: string, user: ?Object, old: ?Object, oldSession: ?Object,
  *     target: ?Object, targetBooking: ?Object, targetLive: number,
@@ -252,51 +331,39 @@ function positionFor(ctx, args) {
  *     tokenPeriod: ?Object, periodBookings: !Array<!Object>,
  *     graceSpends: !Array<!Object>, waitlist: !Array<!Object>,
  *     graceTokens: !Array<!Object>, now: !Date,
- *     toSessionId: (string|undefined)}} ctx Everything portal/move.js
+ *     toSessionId: (string|undefined), staff: (boolean|undefined),
+ *     allowFull: (boolean|undefined)}} ctx Everything portal/move.js
  *     read: the booking (`old`, with its `id`), both sessions (with `id`),
  *     the target's booking row for this athlete, the target's live
  *     bookings count, the athlete, household, package, the target period's
  *     `tokenPeriods` doc and bookings, the grace spends, the athlete's
- *     waitlist and grace tokens, and the clock.
+ *     waitlist and grace tokens, the clock, and staff mode with its
+ *     `allowFull` (both from the caller's role, never the request alone).
  * @return {({ok: boolean, comp: boolean, charge: !Object, period: !Object,
- *     taken: number, waitlistEntryId: ?string}|{ok: boolean,
- *     reason: string})} The move to write, or the refusal.
+ *     taken: number, waitlistEntryId: ?string,
+ *     overrides: !Array<string>}|{ok: boolean, reason: string,
+ *     details: (!Object|undefined)})} The move to write, or the refusal
+ *     (`details` `{taken, capacity}` only with a staff `full`).
  */
 function decideMove(ctx) {
+  if (ctx.staff === true) return decideStaffMove(ctx);
   const refuse = (reason) => ({ok: false, reason});
   const early = oldRefusal(ctx) || targetRefusal(ctx, ctx.pkg);
   if (early) return refuse(early);
-  const {old, target, household, pkg} = ctx;
+  const {old, target, pkg} = ctx;
   const comp = isFreeComp(old);
   const taken = Math.max(Number(ctx.targetLive) || 0,
       Number(target.booked) || 0);
   const late = athleteRefusal(ctx, comp, taken);
   if (late) return refuse(late);
-
-  const anchorDay = household && household.periodAnchorDay;
-  const period = lib.periodFor(target.date, anchorDay);
-  const notOld = (b) => b && b.id !== old.id;
-  const bookings = (ctx.periodBookings || []).filter(notOld);
-  if (gates.eliteDailyCapHit(pkg, target.type, target.date, bookings)) {
+  if (gates.eliteDailyCapHit(pkg, target.type, target.date,
+      otherBookings(ctx))) {
     return refuse('one-per-day');
   }
-  const athleteId = old.athleteId;
-  const entryId = lib.waitlistId(target.id, athleteId);
-  const waitlist = (ctx.waitlist || []).filter(Boolean);
-  const waitlistEntryId = waitlist.some((w) => w.id === entryId) ?
-      entryId : null;
-  if (comp) {
-    return {ok: true, comp, charge: {chargedFrom: 'period',
-      graceTokenId: null}, period, taken, waitlistEntryId};
-  }
-
-  // The old row is left out: it counts as given back.
-  const position = positionFor(ctx, {period, leaveOutId: old.id,
-    waitlistEntryId, sessionDate: target.date});
-  const charge = moveCharge({old, target, position, period,
-    oldPeriodKey: old.periodKey || null});
+  const {period, waitlistEntryId, charge} = settle(ctx, comp);
   if (charge.reason) return refuse(charge.reason);
-  return {ok: true, comp, charge, period, taken, waitlistEntryId};
+  return {ok: true, comp, charge, period, taken, waitlistEntryId,
+    overrides: []};
 }
 
 module.exports = {REFUSALS, decideMove, isFreeComp, moveCharge,

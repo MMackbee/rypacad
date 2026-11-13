@@ -56,7 +56,8 @@ function world(over) {
 }
 const refusal = (over) => decideMove(world(over)).reason;
 const moved = (charge, period, over) => Object.assign({ok: true,
-  comp: false, charge, period, taken: 3, waitlistEntryId: null}, over);
+  comp: false, charge, period, taken: 3, waitlistEntryId: null,
+  overrides: []}, over);
 const PERIOD = {chargedFrom: 'period', graceTokenId: null};
 const NOV = {periodKey: '2026-11-01', periodEnd: '2026-11-30'};
 const DEC = {periodKey: '2026-12-01', periodEnd: '2026-12-31'};
@@ -263,8 +264,12 @@ test('REFUSALS covers every reason with C2\'s code', () => {
     'session-cancelled', 'session-hidden', 'display-only', 'session-past',
     'outside-window', 'already-booked', 'membership-inactive',
     'booking-not-open', 'handicap-reserved', 'full', 'one-per-day',
-    'no-tokens-left', 'no-session-token',
+    'no-tokens-left', 'no-session-token', 'attended', 'period-over',
+    'test-athlete',
   ].sort());
+  for (const r of ['attended', 'period-over', 'test-athlete']) {
+    assert.equal(REFUSALS[r].code, 'failed-precondition', r);
+  }
   assert.deepEqual(['signed-out', 'bad-request', 'booking-missing',
     'not-yours', 'full'].map((r) => REFUSALS[r].code), ['unauthenticated',
     'invalid-argument', 'not-found', 'permission-denied',
