@@ -10,6 +10,8 @@ import PhoneFrame from '../components/PhoneFrame';
 import SequenceLadder from '../components/SequenceLadder';
 import SkeletonCard, { SkeletonBar } from '../components/Skeleton';
 import StaffCancelSheet from '../components/StaffCancelSheet';
+import StaffAddSheet from '../components/staffBooking/StaffAddSheet';
+import StaffMoveSheet from '../components/staffBooking/StaffMoveSheet';
 import StatusBadge from '../components/StatusBadge';
 import TokenMeter from '../components/TokenMeter';
 import { BackLink, Banner, Body, Card, ErrorNotice, ScreenTitle, SectionLabel } from '../components/Primitives';
@@ -19,7 +21,9 @@ import { FACILITY_ACCESS, windowCopyFor } from '../data/packages';
 import { CONNECTED_LINE, PAY_NOW, PENDING_PLAN_LINE, SINGLE_PLAN_LINE } from '../data/billingCopy';
 import { contractEnabled } from '../data/contractFlag';
 import { householdOnHold, saleOpen, SINGLE_NOT_OPEN_LINE } from '../data/singleToken';
-import { staffMayCancel } from '../data/staffCancel';
+import { firstOf, staffMayCancel } from '../data/staffCancel';
+import { staffMayBook } from '../data/staffBooking';
+import { BOOK_A_SESSION, testAthleteLine } from '../data/staffBookingCopy';
 import useBillingHub from '../hooks/billing';
 
 /**
@@ -45,6 +49,14 @@ import useBillingHub from '../hooks/billing';
  * ops has a Cancel on each Booked or No-show row of a meter's "This period"
  * list (StaffCancelSheet.js). The cancel reloads the page's data
  * (hooks/staffCancel.js) and the line saying what happened stays above it.
+ *
+ * Staff booking (owner 2026-11-13, spec 01-spec-admin-booking.md 10.4): the
+ * owner or ops also has Book a session under each meter, whatever the
+ * package state (StaffAddSheet), and Move before each row's Cancel
+ * (StaffMoveSheet), and the meters list the next period's rows. A test
+ * household or athlete reads the test line instead of Book, and its rows
+ * never move (plan decision 6). All three sheets leave their line in the
+ * same place.
  *
  * @param {'populated'|'past_due'|'lapsed'|'loading'|'error'|'empty'} variant
  *   Harness-only. Live routes pass nothing.
@@ -88,6 +100,21 @@ export default function Billing({
         setCancelTarget({ row, member });
       }
     : null;
+  // Staff booking: the member being booked, or the row being moved, while its sheet is open.
+  const mayBook = staff && staffMayBook(role);
+  const [bookTarget, setBookTarget] = useState(null);
+  const [moveTarget, setMoveTarget] = useState(null);
+  const isTest = (member) => data?.household?.test === true || member.test === true;
+  const onMoveRow = mayBook
+    ? (member) => (row) => {
+        setCancelLine(null);
+        setMoveTarget({ row, member });
+      }
+    : null;
+  const onBook = (member) => {
+    setCancelLine(null);
+    setBookTarget(member);
+  };
 
   return (
     <PhoneFrame
@@ -155,7 +182,9 @@ export default function Billing({
                     onHold={onHold}
                     addAnytime
                     onCancelRow={onCancelRow ? onCancelRow(member) : undefined}
+                    onMoveRow={onMoveRow && !isTest(member) ? onMoveRow(member) : undefined}
                   />
+                  {mayBook ? <StaffBookSlot member={member} test={isTest(member)} onBook={onBook} /> : null}
                   <CoachingLine coaching={member.coaching} />
                   {contractEnabled() ? (
                     // Athlete detail is a parent/staff route; the athlete's own is the Contract.
@@ -184,6 +213,28 @@ export default function Billing({
           onClose={() => setCancelTarget(null)}
           onCancelled={(line) => {
             setCancelTarget(null);
+            setCancelLine(line);
+          }}
+        />
+      ) : null}
+      {bookTarget ? (
+        <StaffAddSheet
+          athleteId={bookTarget.athleteId}
+          name={bookTarget.name}
+          onClose={() => setBookTarget(null)}
+          onDone={(line) => {
+            setBookTarget(null);
+            setCancelLine(line);
+          }}
+        />
+      ) : null}
+      {moveTarget ? (
+        <StaffMoveSheet
+          row={moveTarget.row}
+          name={moveTarget.member.name}
+          onClose={() => setMoveTarget(null)}
+          onDone={(line) => {
+            setMoveTarget(null);
             setCancelLine(line);
           }}
         />
@@ -253,6 +304,28 @@ function StatusHero({ status, portalUrl, staff = false }) {
         )
       ) : null}
     </div>
+  );
+}
+
+/**
+ * Under a member's meter on the staff view, owner or ops (spec 10.4): Book a
+ * session whatever the package state - an unpaid athlete gets the Free-only
+ * sheet - named for the athlete so brothers' and sisters' buttons differ for
+ * a screen reader (spec 10.6). A test household or athlete reads why not.
+ */
+function StaffBookSlot({ member, test, onBook }) {
+  const first = firstOf(member.name);
+  if (test) {
+    return (
+      <Body size={12} tone={color.textSecondary} style={{ padding: '0 2px' }}>
+        {testAthleteLine(first)}
+      </Body>
+    );
+  }
+  return (
+    <Button variant="outline" height={44} aria-label={first ? `${BOOK_A_SESSION} for ${first}` : undefined} onClick={() => onBook(member)}>
+      {BOOK_A_SESSION}
+    </Button>
   );
 }
 

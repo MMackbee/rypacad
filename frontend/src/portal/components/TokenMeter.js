@@ -1,11 +1,10 @@
 import React, { useState } from 'react';
-import { format, parseISO } from 'date-fns';
 import { color, font, radius } from '../tokens';
-import StatusBadge from './StatusBadge';
 import { GraceLine, NextPeriodLine } from './AllowancePools';
 import PayButton from './PayButton';
 import { SessionTokenHero } from './SessionTokens';
 import { Body, Card, SectionLabel } from './Primitives';
+import { Evidence } from './TokenMeterRows';
 import { longDayLabel } from '../data/calendar';
 import { windowCopyFor } from '../data/packages';
 import { firstPeriodLine, PAY_TO_START } from '../data/billingCopy';
@@ -23,7 +22,6 @@ import {
   SINGLE_NOT_OPEN_LINE,
   tokenDayLabel,
 } from '../data/singleToken';
-import { firstOf, staffCancellable } from '../data/staffCancel';
 
 /**
  * One athlete's tokens on the Billing hub (contract v2.4, Sprint 16): the
@@ -42,7 +40,9 @@ import { firstOf, staffCancellable } from '../data/staffCancel';
  * (ExtraSessionBuy; owner, 2026-10-10) - on the Billing hub (`addAnytime`)
  * at any time, as Add a token (owner 2026-11-11). On the staff view the
  * owner or ops can cancel a Booked or No-show row (onCancelRow; owner
- * 2026-11-12, data/staffCancel.js).
+ * 2026-11-12, data/staffCancel.js) and move one (onMoveRow; owner
+ * 2026-11-13), and the list adds the next period's rows; the rows and
+ * their actions live in TokenMeterRows.js.
  */
 
 /**
@@ -59,79 +59,11 @@ function toneFor(left, bookable = false) {
   return color.primary;
 }
 
-function shortDay(iso) {
-  return iso ? format(parseISO(iso), 'EEE, MMM d') : '';
-}
-
 function priceLine(pkg) {
   if (!pkg || pkg.price == null) return null;
   // The single token is a one-time purchase, never a per-period price.
   if (pkg.kind === 'single') return `$${pkg.price} per session token${pkg.pending ? ' · pending' : ''}`;
   return `$${pkg.price} / month${pkg.pending ? ' · pending' : ''}`;
-}
-
-const STATUS_BADGE = {
-  attended: { tone: 'green', label: 'Attended' },
-  confirmed: { tone: 'neutral', label: 'Booked' },
-  noshow: { tone: 'red', label: 'No-show' },
-  waitlisted: { tone: 'yellow', label: 'Waitlist' },
-};
-
-/**
- * The staff view's Cancel on one row: small, after the badge, a 44px tap
- * target, named for the athlete as well as the row - brothers and sisters
- * on one session would otherwise share a name ("Cancel Jordan's Tue, ...").
- */
-function RowCancel({ row, first, onCancel }) {
-  return (
-    <button
-      type="button"
-      aria-label={`Cancel ${first ? `${first}'s ` : ''}${shortDay(row.date)}${row.time ? ` ${row.time}` : ''} ${row.label}`}
-      onClick={() => onCancel(row)}
-      style={{
-        height: 44,
-        minWidth: 44,
-        padding: '0 2px 0 6px',
-        background: 'none',
-        border: 'none',
-        font: `600 12px ${font.body}`,
-        color: color.error,
-        cursor: 'pointer',
-        flex: 'none',
-      }}
-    >
-      Cancel
-    </button>
-  );
-}
-
-function Row({ row, last, first, onCancel }) {
-  const badge = row.viaSingle
-    ? { tone: 'green', label: 'Session token' }
-    : row.viaGrace
-    ? { tone: 'yellow', label: 'Bonus token' }
-    : STATUS_BADGE[row.status] || STATUS_BADGE.confirmed;
-  return (
-    <div
-      style={{
-        display: 'flex',
-        alignItems: 'center',
-        gap: 10,
-        padding: '9px 0',
-        borderBottom: last ? 'none' : `1px solid ${color.ruleSoft}`,
-      }}
-    >
-      <div style={{ flex: 1, minWidth: 0 }}>
-        <div style={{ font: `500 12px ${font.body}`, color: color.text }}>
-          {shortDay(row.date)}
-          {row.time ? ` · ${row.time}` : ''}
-        </div>
-        <div style={{ font: `400 11px ${font.body}`, color: color.textTertiary, marginTop: 2 }}>{row.label}</div>
-      </div>
-      <StatusBadge tone={badge.tone}>{badge.label}</StatusBadge>
-      {onCancel ? <RowCancel row={row} first={first} onCancel={onCancel} /> : null}
-    </div>
-  );
 }
 
 function Chip({ tone, children }) {
@@ -149,61 +81,6 @@ function Chip({ tone, children }) {
     >
       {children}
     </span>
-  );
-}
-
-function Evidence({ member, onCancelRow }) {
-  const { spent, reserved, nextPeriod, lastPeriod, tokens } = member;
-  // The next period's spend as the meter's "<Month>: N of G left" counts it
-  // (period-charged rows) and the rows a bonus token paid for, apart - so the
-  // two lines on one card add up (review 2026-11-04).
-  const nextUsed = nextPeriod ? nextPeriod.used ?? nextPeriod.booked ?? 0 : 0;
-  const nextBonus = nextPeriod ? (nextPeriod.booked ?? 0) - nextUsed : 0;
-  const rows = [...spent, ...reserved];
-  return (
-    <div style={{ marginTop: 12, borderTop: `1px solid ${color.ruleSoft}`, paddingTop: 6 }}>
-      {rows.length ? (
-        rows.map((row, i) => (
-          <Row
-            key={row.id}
-            row={row}
-            last={i === rows.length - 1}
-            first={firstOf(member.name)}
-            onCancel={onCancelRow && staffCancellable(row, { periodStart: member.period?.start ?? null }) ? onCancelRow : null}
-          />
-        ))
-      ) : (
-        <Body size={11} tone={color.textTertiary} style={{ padding: '8px 0' }}>
-          Nothing booked in this period yet.
-        </Body>
-      )}
-      {/* A single athlete's tokens are bought, never granted per period: no
-          grant line, only what is already booked past this period's end.
-          No line at all after the season's last period (nextPeriod null). */}
-      {!nextPeriod ? null : tokens.perPurchase ? (
-        nextPeriod.booked || nextPeriod.reserved ? (
-          <Body size={11} tone={color.textTertiary} style={{ marginTop: 10 }}>
-            From {longDayLabel(nextPeriod.start)}:{' '}
-            {[nextPeriod.booked ? `${nextPeriod.booked} booked` : null, nextPeriod.reserved ? `${nextPeriod.reserved} on a waitlist` : null]
-              .filter(Boolean)
-              .join(' · ')}
-          </Body>
-        ) : null
-      ) : (
-        <Body size={11} tone={color.textTertiary} style={{ marginTop: 10 }}>
-          Next period from {longDayLabel(nextPeriod.start)}:{' '}
-          {tokens.unlimited ? 'unlimited' : `${nextPeriod.granted} token${nextPeriod.granted === 1 ? '' : 's'}`}
-          {nextUsed ? ` · ${nextUsed} already booked` : ''}
-          {nextBonus ? ` · ${nextBonus} on a bonus token` : ''}
-          {nextPeriod.reserved ? ` · ${nextPeriod.reserved} on a waitlist` : ''}
-        </Body>
-      )}
-      {lastPeriod && !tokens.unlimited && !tokens.perPurchase ? (
-        <Body size={11} tone={color.textTertiary} style={{ marginTop: 4 }}>
-          Last period ({shortDay(lastPeriod.start)} – {shortDay(lastPeriod.end)}): used {lastPeriod.used} of {lastPeriod.granted}
-        </Body>
-      ) : null}
-    </div>
   );
 }
 
@@ -336,8 +213,12 @@ export function ExtraSessionBuy({ athleteId, offer, label = BUY_EXTRA_LABEL, var
  *   only (Billing.js): a Cancel after the badge on each "This period" row
  *   data/staffCancel.js staffCancellable allows, handing over the row.
  *   Without it nothing changes.
+ * @param {(row: object) => void} [onMoveRow]  The staff view, owner or ops
+ *   only (Billing.js): a Move before that Cancel on each row
+ *   data/staffBooking.js staffMovable allows. With either handler the list
+ *   adds the next period's rows (`member.nextSpent`), with the same actions.
  */
-export default function TokenMeter({ member, defaultOpen = false, showPrices = false, buy = false, askGuardian = false, onHold = false, addAnytime = false, onCancelRow }) {
+export default function TokenMeter({ member, defaultOpen = false, showPrices = false, buy = false, askGuardian = false, onHold = false, addAnytime = false, onCancelRow, onMoveRow }) {
   const [open, setOpen] = useState(defaultOpen);
   const { package: pkg, tokens, period, expiryNudge, spent, reserved } = member;
   // v2.0.1 (Sprint 18): catalogue prices are withheld from parents and
@@ -382,7 +263,7 @@ export default function TokenMeter({ member, defaultOpen = false, showPrices = f
           </Body>
         ) : null}
         <Toggle open={open} onToggle={() => setOpen((v) => !v)} count={count} />
-        {open ? <Evidence member={member} onCancelRow={onCancelRow} /> : null}
+        {open ? <Evidence member={member} onCancelRow={onCancelRow} onMoveRow={onMoveRow} /> : null}
       </Card>
     );
   }
@@ -391,7 +272,7 @@ export default function TokenMeter({ member, defaultOpen = false, showPrices = f
     return (
       <SessionTokenHero member={member} price={price} buySlot={buy ? singleBuySlot(member, askGuardian) : null}>
         <Toggle open={open} onToggle={() => setOpen((v) => !v)} count={count} />
-        {open ? <Evidence member={member} onCancelRow={onCancelRow} /> : null}
+        {open ? <Evidence member={member} onCancelRow={onCancelRow} onMoveRow={onMoveRow} /> : null}
       </SessionTokenHero>
     );
   }
@@ -475,7 +356,7 @@ export default function TokenMeter({ member, defaultOpen = false, showPrices = f
       ) : null}
 
       <Toggle open={open} onToggle={() => setOpen((v) => !v)} count={count} />
-      {open ? <Evidence member={member} onCancelRow={onCancelRow} /> : null}
+      {open ? <Evidence member={member} onCancelRow={onCancelRow} onMoveRow={onMoveRow} /> : null}
     </Card>
   );
 }

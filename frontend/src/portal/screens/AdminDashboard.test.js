@@ -262,3 +262,17 @@ test('the Assessments card opens the assessments screen; it is hidden without a 
   expect(none.button('Open assessments')).toBeNull();
   await none.unmount();
 });
+
+// Staff booking (owner 2026-11-13, spec 01-spec-admin-booking.md 10.2): find any athlete from Admin.
+test('Manage bookings sits right after Outstanding, for owner and ops', async () => {
+  for (const role of ['owner', 'ops']) {
+    const r = await renderScreen(<AdminDashboard bare role={role} />);
+    const text = r.text();
+    const at = text.indexOf('Manage bookings');
+    expect(text.indexOf('Outstanding')).toBeGreaterThanOrEqual(0);
+    expect(at).toBeGreaterThan(text.indexOf('Outstanding'));
+    expect(at).toBeLessThan(text.indexOf('Sign-ups'));
+    expect(text).toContain('Add, move or cancel a session for any athlete.');
+    await r.unmount();
+  }
+});

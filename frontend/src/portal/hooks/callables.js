@@ -84,6 +84,15 @@ export const callMoveBooking = callable('moveBooking');
  * refusal's `reason` is data/staffCancel.js's. Through hooks/staffCancel.js.
  */
 export const callStaffCancelBooking = callable('staffCancelBooking');
+/**
+ * `{ athleteId, sessionId, free?, allowFull? }` -> `{ bookingId, athleteId,
+ * sessionId, periodKey, chargedFrom, graceTokenId, comp, rebooked, booked,
+ * capacity, overrides }`: the owner's or ops' add of one athlete to one
+ * session (owner 2026-11-13), one server transaction. A refusal's `reason`
+ * is data/staffBookingCopy.js's; `full` carries `{ taken, capacity }` in
+ * its details. Through hooks/staffBooking.js.
+ */
+export const callStaffBookSession = callable('staffBookSession');
 const claimInvite = callable('claimInvite');
 /** `{ state, householdId, athleteId }` - ids only on 'claimed' (D7); never throws for an expected state (contract 1.4). */
 export const callClaimInvite = () => claimInvite({});

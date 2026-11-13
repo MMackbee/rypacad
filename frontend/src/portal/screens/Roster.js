@@ -31,6 +31,8 @@ import { parseTimeToMinutes, todayISO } from '../data/calendar';
 import { dayLabel } from '../data/season';
 import { reservedTag } from '../data/reserved';
 import { staleMarkLine } from '../data/bookingChanges';
+import { RosterAddAthlete, RosterRowActions } from '../components/staffBooking/RosterStaffActions';
+import { staffMayBook } from '../data/staffBooking';
 // Row metas lose "45 min tier" / "contract behind" while the contract is hidden (owner, 2026-09-30).
 
 /**
@@ -471,6 +473,9 @@ export function SessionAttendance({ variant = 'pre', bare = false, onBack, sessi
   // 2026-11-04): that booking still stands on Calendly, so no Cancel session.
   const held = liveAttendance.sessionUnresolved === true && !sessionCancelled;
   const canCancelSession = (role === 'ops' || role === 'owner') && (!sessionCancelled || remainingOnly) && !held;
+  // Staff booking (owner 2026-11-13, spec 10.3): Add athlete beside Cancel session, Move and Cancel per row.
+  const staffSession = { id: sessionId, date: block?.date, time: block?.time, type: session?.type, label: session?.name };
+  const addHidden = sessionCancelled || session?.type === 'mental' || held || demoInLive || !live;
   const cancelCopy = `This cancels ${cancellableCount} confirmed booking${cancellableCount === 1 ? '' : 's'}. Monthly members get a bonus token; session-token holders get their token back. This cannot be undone.`;
 
   const statusPill = sessionCancelled
@@ -534,15 +539,20 @@ export function SessionAttendance({ variant = 'pre', bare = false, onBack, sessi
               This slot is held for a Calendly booking that isn't matched to a family yet.
             </Body>
           ) : null}
-          {canCancelSession ? (
-            <Button
-              variant="dangerOutline"
-              height={44}
-              style={{ boxShadow: 'none', marginTop: 12 }}
-              onClick={() => setCancelSheetOpen(true)}
-            >
-              {remainingOnly ? 'Cancel remaining bookings' : 'Cancel session'}
-            </Button>
+          {canCancelSession || (staffMayBook(role) && !addHidden) ? (
+            <div style={{ display: 'flex', gap: 10, marginTop: 12 }}>
+              {canCancelSession ? (
+                <Button
+                  variant="dangerOutline"
+                  height={44}
+                  style={{ boxShadow: 'none', flex: '1 1 0%' }}
+                  onClick={() => setCancelSheetOpen(true)}
+                >
+                  {remainingOnly ? 'Cancel remaining bookings' : 'Cancel session'}
+                </Button>
+              ) : null}
+              <RosterAddAthlete role={role} session={staffSession} rows={rows} hidden={addHidden} onOpen={() => setStaleLine(null)} onDone={setStaleLine} />
+            </div>
           ) : null}
         </div>
       }
@@ -683,6 +693,9 @@ export function SessionAttendance({ variant = 'pre', bare = false, onBack, sessi
                 ) : null}
                 {session?.type === 'training' && !sessionCancelled ? (
                   <TrainingRowExtras athleteId={athlete.id} name={shownName(athlete)} combineName={athlete.name ?? null} intakes={showIntake ? intakes : null} role={role} readOnly={readOnly} onOpenCombine={demoInLive ? undefined : onOpenCombine} />
+                ) : null}
+                {live ? (
+                  <RosterRowActions role={role} row={rows.find((r) => r.athleteId === athlete.id)} rows={rows} session={staffSession} sessionCancelled={sessionCancelled} onOpen={() => setStaleLine(null)} onDone={setStaleLine} />
                 ) : null}
               </AthleteRow>
               {/* Optional reason, indented to align under the name. Never a

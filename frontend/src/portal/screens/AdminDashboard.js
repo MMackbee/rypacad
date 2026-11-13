@@ -9,6 +9,7 @@ import StatusBadge from '../components/StatusBadge';
 import { Body, Card, ScreenTitle, SectionLabel, SignOutButton } from '../components/Primitives';
 import HouseholdsCard from '../components/HouseholdsCard';
 import OutstandingCard from '../components/OutstandingCard';
+import ManageBookingsCard from '../components/staffBooking/ManageBookingsCard';
 import ConsentTrackerCard from '../components/consent/ConsentTrackerCard';
 import ScholarshipsCard from '../components/ScholarshipsCard';
 import AssessmentsEntryCard from '../components/AssessmentsEntryCard';
@@ -160,6 +161,8 @@ export default function AdminDashboard({
       <div style={{ padding: '0 22px 24px', display: 'flex', flexDirection: 'column', gap: 12 }}>
         {/* Owner 2026-11-13: folds to one remembered line (components/OutstandingCard.js). */}
         <OutstandingCard items={outstanding} onOpenAthlete={onOpenAthlete} />
+        {/* Owner 2026-11-13: add, move or cancel any athlete's booking (spec 01-spec-admin-booking.md 10.2). */}
+        <ManageBookingsCard />
         <SignupsCard onOpenSignups={onOpenSignups} />
         {/* 2026-10-14 (assessments spec 5): owners and ops reach the assessments from here. */}
         {onOpenAssessments ? <AssessmentsEntryCard onOpen={onOpenAssessments} /> : null}
