@@ -23,6 +23,7 @@ import {
 import { assessmentAccess } from './data/assessmentAccess';
 import { attendanceReadOnlyFor } from './data/specialists';
 import { CombineRoute, loadCombine } from './CombineRoutes';
+import { StaffAthleteBookingsRoute } from './StaffBookingRoutes';
 import ResearchConfirmGate from './components/ResearchConfirmGate';
 
 /*
@@ -1126,6 +1127,8 @@ export default function PortalRoutes() {
           </RequireRole>
         }
       />
+      {/* Staff booking (2026-11-13): one athlete's bookings, from Admin's Manage bookings card. */}
+      <Route path="admin/athletes/:athleteId/bookings" element={<RequireRole roles={['ops', 'owner']}><StaffAthleteBookingsRoute /></RequireRole>} />
       <Route
         path="admin/signups"
         element={
