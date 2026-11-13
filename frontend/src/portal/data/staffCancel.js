@@ -12,10 +12,11 @@
  *
  * CHANGE ONE, CHANGE BOTH: functions/portal/staff-cancel.js and its decide
  * module functions/portal/staff-cancel-decide.js - the server's own
- * eligibility (bookingRefusal: confirmed or noshow, not Calendly, the billing
- * period not over), its tokenBack (false for a free comp and for chargedFrom
- * 'elite'), its STAFF_ROLES and its refusal reasons (REFUSALS). The server
- * decides; this only keeps the page from offering what it would refuse.
+ * eligibility (bookingRefusal: confirmed or noshow, not Calendly, not a 1:1,
+ * the billing period not over), its tokenBack (false for a free comp and for
+ * chargedFrom 'elite'), its STAFF_ROLES and its refusal reasons (REFUSALS).
+ * The server decides; this only keeps the page from offering what it would
+ * refuse.
  */
 import { ALREADY_CHANGED_COPY, cancelQuestion, categoryLabel, dayTimeLabel, isFreeComp } from './bookingChanges';
 
@@ -40,8 +41,10 @@ export function staffStatusLabel(status) {
 
 /**
  * Whether a billing hub row (data/billingHub.js periodRows) carries Cancel:
- * a booking that is Booked or No-show and not a Calendly 1:1 (those cancel
- * in Calendly). `periodStart`, this period's first day: a row dated before
+ * a booking that is Booked or No-show and not one of Yannick's 1:1s - not
+ * Calendly-sourced and not type 'mental' (a 1:1 booked in the portal, the
+ * in-app fallback): those change in Calendly, and the server refuses both.
+ * `periodStart`, this period's first day: a row dated before
  * it was charged to a period that is over (an October row the hub reads
  * under the first period), which the server refuses. A past session inside
  * this period is the whole point (the no-show), so there is no start check.
@@ -50,6 +53,7 @@ export function staffCancellable(row, { periodStart = null } = {}) {
   if (!row || !row.id || row.kind === 'waitlist') return false;
   if (!STATUS_LABELS[row.status]) return false;
   if (row.source === 'calendly') return false;
+  if (row.type === 'mental') return false;
   if (periodStart && row.date && row.date < periodStart) return false;
   return true;
 }
@@ -63,14 +67,15 @@ export function tokenBackOf(row) {
  * The other members of the household with a cancellable booking on the
  * SAME session as `row`: `[{ athleteId, name, row }]` in the household's
  * order, at most five (one cancel takes six bookings). None when the row has
- * no session (practice mode's sample rows).
+ * no session (practice mode's sample rows). A member's next-period rows
+ * (`nextSpent`) count too: the staff view lists and cancels them.
  */
 export function siblingsFor(row, athleteId, members) {
   if (!row || !row.sessionId) return [];
   const out = [];
   for (const m of members || []) {
     if (!m || m.athleteId === athleteId) continue;
-    const hit = (m.spent || []).find(
+    const hit = [...(m.spent || []), ...(m.nextSpent || [])].find(
       (r) => r && r.sessionId === row.sessionId && staffCancellable(r, { periodStart: m.period?.start ?? null })
     );
     if (hit) out.push({ athleteId: m.athleteId, name: m.name, row: hit });
@@ -154,6 +159,7 @@ const REFUSALS = {
   calendly: 'A Calendly 1:1 is cancelled in Calendly.',
   'period-over': "That booking's billing period is over - nothing was cancelled.",
   mixed: 'Those bookings are not on one session - nothing was cancelled.',
+  mental: "Yannick's 1:1s are booked and changed in Calendly.",
 };
 
 /**

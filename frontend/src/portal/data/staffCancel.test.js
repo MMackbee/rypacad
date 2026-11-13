@@ -71,6 +71,12 @@ describe('staffCancellable', () => {
     expect(staffCancellable(row({ date: '2026-11-01' }), { periodStart: '2026-11-01' })).toBe(true);
     expect(staffCancellable(row({ date: '2026-11-03' }), { periodStart: '2026-11-01' })).toBe(true);
   });
+
+  test("never a 1:1 (type mental), even one booked in the portal rather than Calendly", () => {
+    expect(staffCancellable(row({ type: 'mental' }))).toBe(false);
+    expect(staffCancellable(row({ type: 'mental', status: 'confirmed', source: null }))).toBe(false);
+    expect(staffCancellable(row({ type: 'training' }))).toBe(true);
+  });
 });
 
 test('owner and ops only', () => {
@@ -117,6 +123,17 @@ describe('siblingsFor', () => {
   test('none without a session id (the practice rows), nor without members', () => {
     expect(siblingsFor(row({ sessionId: null }), 'jordan', members.map((m) => ({ ...m, spent: m.spent.map((r) => ({ ...r, sessionId: null })) })))).toEqual([]);
     expect(siblingsFor(jordan, 'jordan', undefined)).toEqual([]);
+  });
+
+  test("a next-period booking on the same session is found through nextSpent (the staff view lists the next period's rows)", () => {
+    const jordanDec = row({ id: 'jordan_s9', sessionId: 's9', date: '2026-12-03', status: 'confirmed' });
+    const rileyDec = row({ id: 'riley_s9', athleteId: 'riley', sessionId: 's9', date: '2026-12-03', status: 'confirmed' });
+    const list = [
+      { ...member('jordan', 'Jordan Whitfield', [jordan]), nextSpent: [jordanDec] },
+      { ...member('riley', 'Riley Whitfield', [row({ id: 'riley_s1', athleteId: 'riley' })]), nextSpent: [rileyDec] },
+      member('casey', 'Casey Whitfield', [row({ id: 'casey_s1', athleteId: 'casey' })]),
+    ];
+    expect(siblingsFor(jordanDec, 'jordan', list)).toEqual([{ athleteId: 'riley', name: 'Riley Whitfield', row: rileyDec }]);
   });
 
   test('at most six bookings in one cancel: the tapped one and five more', () => {
@@ -195,8 +212,11 @@ describe('refusals in plain words', () => {
   test('already cancelled reads as another change', () => {
     expect(staffCancelRefusal('already-cancelled')).toBe(ALREADY_CHANGED_COPY);
   });
+  test("a 1:1 is Yannick's, changed in Calendly (the server's mental refusal, spec 10.5)", () => {
+    expect(staffCancelRefusal('mental', { message: 'raw' })).toBe("Yannick's 1:1s are booked and changed in Calendly.");
+  });
   test("every server reason has its own short line, none of them the server's raw message", () => {
-    const reasons = ['signed-out', 'not-staff', 'bad-request', 'not-found', 'attended', 'calendly', 'period-over', 'mixed'];
+    const reasons = ['signed-out', 'not-staff', 'bad-request', 'not-found', 'attended', 'calendly', 'period-over', 'mixed', 'mental'];
     const lines = reasons.map((r) => staffCancelRefusal(r, { message: 'raw' }));
     for (const line of lines) {
       expect(typeof line).toBe('string');
