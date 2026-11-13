@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { act } from 'react';
 import { renderScreen } from './testRender';
 import Roster, { SessionAttendance } from './Roster';
 import { attendanceReadOnlyFor } from '../data/specialists';
@@ -115,6 +115,73 @@ test('read-only with no note yet: the footer offers "Add a session note" and not
   await r.click('Add a session note');
   expect(noteEditor(r)).not.toBeNull();
   expect(noteEditor(r).value).toBe('');
+  await r.unmount();
+});
+
+// 2026-11-13 (owner): no session note on Yannick's 1:1s. A session doc is
+// readable by every signed-in family, so a note there would not stay private;
+// his notes live on the athlete's page (mentalNotes, his alone).
+const mentalBlock = { date: '2026-11-18', time: '4:30 PM', type: 'mental', name: 'Mental game session', meta: '1 of 1 booked' };
+const closeButton = (r) => [...r.container.querySelectorAll('button')].find((b) => b.textContent.trim().startsWith('Close block'));
+
+test('a 1:1 with Yannick: the owner and ops get no session note, and the stored one is not shown', async () => {
+  for (const role of ['owner', 'ops']) {
+    const r = await roster({ readOnly: true, role, block: mentalBlock, sessionId: `cal-view-${role}` });
+    expect(r.button('Add a session note')).toBeNull();
+    expect(r.button('Edit session note')).toBeNull();
+    expect(r.button('Edit')).toBeNull();
+    expect(r.text()).not.toContain('Cones set up for Thursday');
+    expect(r.text()).not.toContain('Session note');
+    expect(r.text()).not.toContain('A session note is open to you');
+    expect(r.text()).toContain('Attendance is marked by the coach.');
+    // Avery's saved no-show reason is not shown on a 1:1 either.
+    expect(r.text()).not.toContain('Sick, parent texted');
+    await r.unmount();
+  }
+});
+
+// Avery's row is a no-show with a saved reason in the mock: on a golf block the
+// coach gets the reason chip ("<reason> · edit"); on a 1:1 there is no chip.
+const reasonChips = (r) => [...r.container.querySelectorAll('button')]
+  .filter((b) => /· edit$|^\+ Add a reason/.test(b.textContent.trim()));
+
+test('a 1:1 with Yannick: a no-show row has no reason chip and the saved reason is not shown', async () => {
+  const r = await roster({ role: 'mental', block: mentalBlock, sessionId: 'cal-reason-check' });
+  await r.click('Start session');
+  expect(reasonChips(r)).toEqual([]);
+  expect(r.text()).not.toContain('Sick, parent texted');
+  await r.unmount();
+});
+
+test('a golf block still shows the no-show reason chip (unchanged)', async () => {
+  const r = await roster({ sessionId: 'golf-reason-check' });
+  await r.click('Start session');
+  expect(r.button('Sick, parent texted · edit')).not.toBeNull();
+  await r.unmount();
+});
+
+test('a 1:1 with Yannick: closing it offers no session note, only the pointer to his private notes', async () => {
+  mockNote = null;
+  // Own session ids: a closed status is kept per session across mounts (useSessionLocalStatus).
+  const r = await roster({ role: 'mental', block: mentalBlock, sessionId: 'cal-close-check' });
+  await r.click('Start session');
+  const close = closeButton(r);
+  expect(close).toBeTruthy();
+  await act(async () => { close.click(); });
+  expect(r.button('Add a session note')).toBeNull();
+  expect(noteEditor(r)).toBeNull();
+  expect(r.text()).toContain("Keep 1:1 notes on the athlete's page - only you can read them.");
+  expect(r.text()).not.toContain('No-shows are reported to Phil');
+  expect(mockWrites.note).toEqual([]);
+  await r.unmount();
+});
+
+test('a golf block still takes a session note when closed (unchanged)', async () => {
+  mockNote = null;
+  const r = await roster({ sessionId: 'golf-close-check' });
+  await r.click('Start session');
+  await act(async () => { closeButton(r).click(); });
+  expect(r.button('Add a session note')).not.toBeNull();
   await r.unmount();
 });
 

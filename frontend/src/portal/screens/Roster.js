@@ -399,6 +399,12 @@ export function SessionAttendance({ variant = 'pre', bare = false, onBack, sessi
    * component-local record otherwise (this screen has no session-scoped
    * seed data to persist a note against).
    */
+  // 2026-11-13 (owner): no session note on Yannick's 1:1s. A session doc is
+  // readable by every signed-in family (firestore.rules, sessions read), so a
+  // note there would not stay private; his notes live on the athlete's page
+  // (mentalNotes, his alone). firestore.rules coachNoteUpdateOk refuses the
+  // write too, and a note stored before this is never shown here.
+  const notesAllowed = session?.type !== 'mental';
   const setSessionNote = liveAttendance.setSessionNote || (async () => {});
   const [editingNote, setEditingNote] = useState(false);
   const [noteDraft, setNoteDraft] = useState('');
@@ -548,6 +554,7 @@ export function SessionAttendance({ variant = 'pre', bare = false, onBack, sessi
           completed={completed || readOnly}
           readOnly={readOnly}
           hasNote={Boolean(sessionNote)}
+          notesAllowed={notesAllowed}
           onStart={() => setLocalStatus('progress')}
           onClose={() => setLocalStatus('completed')}
           onAddNote={startNote}
@@ -570,7 +577,7 @@ export function SessionAttendance({ variant = 'pre', bare = false, onBack, sessi
           record (seed/demo), same split every other attendance write on
           this screen already follows.
         */}
-        {completed || readOnly ? (
+        {(completed || readOnly) && notesAllowed ? (
           <div style={{ marginBottom: 16 }}>
             {editingNote ? (
               <Card large>
@@ -645,7 +652,8 @@ export function SessionAttendance({ variant = 'pre', bare = false, onBack, sessi
           // The reason block below carries the row's rule and spacing when it
           // renders: the coach's chip always, a read-only viewer's text only
           // when a reason was saved.
-          const showReason = noShow && (!readOnly || Boolean(reasonFor(athlete.id)));
+          // No reason on a 1:1 with Yannick (2026-11-13): bookings are family- and coach-readable.
+          const showReason = noShow && notesAllowed && (!readOnly || Boolean(reasonFor(athlete.id)));
 
           return (
             <div key={athlete.id}>
@@ -797,11 +805,12 @@ function CounterRow({ counts, started }) {
   );
 }
 
-function RosterFooter({ sessionState, unmarked, completed, readOnly = false, hasNote, onStart, onClose, onAddNote }) {
+function RosterFooter({ sessionState, unmarked, completed, readOnly = false, hasNote, notesAllowed = true, onStart, onClose, onAddNote }) {
+  // notesAllowed false: a 1:1 with Yannick (2026-11-13) - no session note.
   const hint = readOnly
-    ? 'Attendance is marked by the coach. A session note is open to you.'
+    ? (notesAllowed ? 'Attendance is marked by the coach. A session note is open to you.' : 'Attendance is marked by the coach.')
     : completed
-      ? 'No-shows are reported to Phil, not the coach chain.'
+      ? (notesAllowed ? 'No-shows are reported to Phil, not the coach chain.' : "Keep 1:1 notes on the athlete's page - only you can read them.")
       : 'Tap a green or red button again to clear it.';
 
   let cta;
@@ -819,11 +828,11 @@ function RosterFooter({ sessionState, unmarked, completed, readOnly = false, has
     // win): the label always said "Add" even when a note already existed
     // and this same button opened it for editing - "Edit" when one is
     // already on file.
-    cta = (
+    cta = notesAllowed ? (
       <Button variant="outline" height={56} onClick={onAddNote} style={{ boxShadow: 'none' }}>
         {hasNote ? 'Edit session note' : 'Add a session note'}
       </Button>
-    );
+    ) : null;
   } else {
     // The gate on unmarked athletes is soft: the button still works and states
     // the count, because a coach may legitimately need to close with a gap.
