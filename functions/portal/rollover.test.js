@@ -293,4 +293,171 @@ test('the rolled-over tokens are spent first, soonest use-by date first',
         sessionDate: '2027-01-05'}).chargedFrom, 'period');
     });
 
+// ---- review 2026-11-15 ----------------------------------------------------
+
+test('rolloverPlan: a booking counts by its DATE, whatever periodKey it ' +
+    'carries', () => {
+  // A household whose anchor moved keeps old keys on its bookings; they
+  // still spent this period's tokens.
+  const stale = (date) => booking(date, {periodKey: '2026-10-14'});
+  const plan = rollover.rolloverPlan(planArgs({bookings: [
+    stale('2026-11-05'), stale('2026-11-12'), booking('2026-11-19'),
+    // Outside the period by date: not this period's spend.
+    booking('2026-12-02', {periodKey: '2026-11-01'}),
+  ]}));
+  assert.equal(plan.count, 3);
+});
+
+const {FieldValue} = require('firebase-admin/firestore');
+const DELETE = FieldValue.delete();
+/**
+ * The stand-in stores a field delete as its sentinel; apply it, so a
+ * second run reads the document the way Firestore would return it.
+ * @param {!Object} docs The documents.
+ */
+function applyDeletes(docs) {
+  for (const body of Object.values(docs)) {
+    for (const k of Object.keys(body)) {
+      if (body[k] instanceof FieldValue && body[k].isEqual(DELETE)) {
+        delete body[k];
+      }
+    }
+  }
+}
+const chargeOf = (docs, id) => {
+  const b = docs[`bookings/${id}`];
+  return [b.chargedFrom, b.graceTokenId || null];
+};
+const T1 = 'rollover_sam_2026-11-01_1';
+const T2 = 'rollover_sam_2026-11-01_2';
+
+test('rolled-over tokens pay first for sessions ALREADY booked in the new ' +
+    'month, earliest first', async () => {
+  // Booked back in November, so charged to December's own tokens.
+  const docs = world({
+    'bookings/sam_s7': booking('2026-12-10'),
+    'bookings/sam_s8': booking('2026-12-17'),
+  });
+  const out = await rollover.runTokenRollover({now: DEC_1, db: fakeDb(docs)});
+  assert.deepEqual(chargeOf(docs, 'sam_s5'), ['grace', T1]);
+  assert.deepEqual(chargeOf(docs, 'sam_s7'), ['grace', T2]);
+  assert.deepEqual(chargeOf(docs, 'sam_s8'), ['period', null]);
+  // November's own bookings are never touched.
+  assert.deepEqual(chargeOf(docs, 'sam_s1'), ['period', null]);
+  assert.equal(out.recharged, 2);
+  // December now has two more of its own tokens left to roll into January.
+  const rows = Object.keys(docs).filter((p) => p.startsWith('bookings/'))
+      .map((p) => Object.assign({id: p.split('/')[1]}, docs[p]));
+  assert.equal(lib.tokensPosition({pkg: pkg6, tokenPeriod: {granted: 6},
+    bookings: rows, waitlist: [], graceTokens: [], periodKey: DEC.periodKey,
+    today: '2026-12-01'}).left, 5);
+});
+
+test('settling is stable: a second run rewrites nothing', async () => {
+  const docs = world({'bookings/sam_s7': booking('2026-12-10')});
+  const db = fakeDb(docs);
+  await rollover.runTokenRollover({now: DEC_1, db});
+  const before = JSON.stringify(docs);
+  const out = await rollover.runTokenRollover({
+    now: new Date('2026-12-02T06:05:00Z'), db});
+  assert.equal(out.recharged, 0);
+  assert.equal(JSON.stringify(docs), before);
+});
+
+test('a rolled-over token freed by a cancel moves to the next booked ' +
+    'session on the next run', async () => {
+  const docs = world({
+    'bookings/sam_s7': booking('2026-12-10'),
+    'bookings/sam_s8': booking('2026-12-17'),
+  });
+  const db = fakeDb(docs);
+  await rollover.runTokenRollover({now: DEC_1, db});
+  docs['bookings/sam_s7'].status = 'cancelled';
+  const out = await rollover.runTokenRollover({
+    now: new Date('2026-12-05T06:05:00Z'), db});
+  assert.deepEqual(chargeOf(docs, 'sam_s8'), ['grace', T2]);
+  assert.equal(out.recharged, 1);
+});
+
+test('only token-paid bookings inside the use-by date are re-charged',
+    async () => {
+      const docs = world({
+        'graceTokens/single_cs_9': {athleteId: 'sam', householdId: 'hart',
+          expiresAt: '2027-02-27', reason: 'single-purchase'},
+        'bookings/sam_s5': booking('2026-12-03', {comp: true}),
+        'bookings/sam_s6': booking('2026-12-04', {status: 'cancelled'}),
+        'bookings/sam_s7': booking('2026-12-05', {chargedFrom: 'grace',
+          graceTokenId: 'single_cs_9'}),
+        'bookings/sam_s8': booking('2026-12-06', {status: 'revoked'}),
+        'bookings/sam_s9': booking('2026-12-07', {chargedFrom: 'elite'}),
+        // Next month: outside the rolled-over tokens' use-by date.
+        'bookings/sam_sa': booking('2027-01-05'),
+        'bookings/sam_sb': booking('2026-12-30'),
+      });
+      const before = ['sam_s5', 'sam_s6', 'sam_s7', 'sam_s8', 'sam_s9',
+        'sam_sa'].map((id) => JSON.stringify(docs[`bookings/${id}`]));
+      const out = await rollover.runTokenRollover({now: DEC_1,
+        db: fakeDb(docs)});
+      assert.deepEqual(['sam_s5', 'sam_s6', 'sam_s7', 'sam_s8', 'sam_s9',
+        'sam_sa'].map((id) => JSON.stringify(docs[`bookings/${id}`])),
+      before);
+      assert.deepEqual(chargeOf(docs, 'sam_sb'), ['grace', T1]);
+      assert.equal(out.recharged, 1);
+    });
+
+test('one rolled-over token on two bookings: the later one is moved to a ' +
+    'free token, or back onto the month\'s own', async () => {
+  const twice = (date) => booking(date, {chargedFrom: 'grace',
+    graceTokenId: T1});
+  const docs = world({
+    'bookings/sam_s5': twice('2026-12-03'),
+    'bookings/sam_s7': twice('2026-12-10'),
+    'bookings/sam_s8': twice('2026-12-17'),
+  });
+  const db = fakeDb(docs);
+  const out = await rollover.runTokenRollover({now: DEC_1, db});
+  assert.deepEqual(chargeOf(docs, 'sam_s5'), ['grace', T1]);
+  assert.deepEqual(chargeOf(docs, 'sam_s7'), ['grace', T2]);
+  // No free token left: this one is a December spend after all.
+  assert.equal(docs['bookings/sam_s8'].chargedFrom, 'period');
+  assert.ok(docs['bookings/sam_s8'].graceTokenId.isEqual(DELETE));
+  assert.equal(out.recharged, 2);
+  applyDeletes(docs);
+  const again = await rollover.runTokenRollover({
+    now: new Date('2026-12-02T06:05:00Z'), db});
+  assert.equal(again.recharged, 0);
+});
+
+test('a family on hold is not settled either', async () => {
+  const docs = world({'bookings/sam_s7': booking('2026-12-10')});
+  const db = fakeDb(docs);
+  await rollover.runTokenRollover({now: DEC_1, db});
+  docs['bookings/sam_s5'].status = 'cancelled';
+  docs['households/hart'].membership.status = 'past_due';
+  const out = await rollover.runTokenRollover({
+    now: new Date('2026-12-05T06:05:00Z'), db});
+  assert.equal(out.recharged, 0);
+  assert.deepEqual(chargeOf(docs, 'sam_s7'), ['grace', T2]);
+});
+
+test('January\'s rolled-over tokens never pay for Feb 28 (after the season)',
+    async () => {
+      const docs = {
+        'packages/t-6': pkg6,
+        'households/hart': {periodAnchorDay: 1,
+          membership: {status: 'active'}},
+        'athletes/sam': Object.assign({name: 'Sam Hart'}, paid),
+        'tokenPeriods/sam_2027-01-01': {athleteId: 'sam',
+          householdId: 'hart', periodKey: '2027-01-01',
+          periodEnd: '2027-01-31', granted: 6, source: 'stripe'},
+        'bookings/sam_f1': booking('2027-02-28'),
+        'bookings/sam_f2': booking('2027-02-27'),
+      };
+      await rollover.runTokenRollover({
+        now: new Date('2027-02-01T06:05:00Z'), db: fakeDb(docs)});
+      assert.deepEqual(chargeOf(docs, 'sam_f1'), ['period', null]);
+      assert.deepEqual(chargeOf(docs, 'sam_f2'),
+          ['grace', 'rollover_sam_2027-01-01_1']);
+    });
+
 run();

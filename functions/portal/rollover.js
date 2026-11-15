@@ -15,6 +15,15 @@
  * its use-by date unchanged; and it never rolls twice, because a grace token
  * simply expires.
  *
+ * SESSIONS BOOKED AHEAD (review 2026-11-15). A booking made before the
+ * tokens existed - a December session booked in November - was charged to
+ * the new period's own tokens. The same nightly run therefore SETTLES: each
+ * free rolled-over token is put on the earliest token-paid booking of the
+ * running period it can pay for (`settlePlan`), which hands that period's
+ * own token back. Without it "spent first" would hold only for a family
+ * that books late. Settling changes `chargedFrom` and `graceTokenId` on
+ * the booking and nothing else, and sends nothing.
+ *
  * The owner's five rulings (2026-11-15):
  *   1. rolled-over tokens are spent first (grace-first, above);
  *   2. a family whose payment failed, who cancelled or never paid gets none
@@ -151,11 +160,19 @@ function rolloverPlan(args) {
   const issued = args.tokenPeriod && args.tokenPeriod.granted;
   if (!Number.isInteger(issued)) return none('not-issued');
   // The period is over: a waitlist entry in it holds nothing any more (the
-  // 06:00 sweep closes it), so only bookings count against the grant.
+  // 06:00 sweep closes it), so only bookings count against the grant. A
+  // booking counts by its DATE, not the `periodKey` it was written with:
+  // the key is client-derived from the household's anchor day at the time,
+  // and an anchor that moved since would leave every old booking uncounted
+  // and roll the whole grant.
+  const period = args.period;
+  const inPeriod = (args.bookings || []).filter((b) => b && (!b.date ||
+      (b.date >= period.periodKey && b.date <= period.periodEnd)));
   const position = lib.tokensPosition({
     pkg: args.pkg,
     tokenPeriod: args.tokenPeriod,
-    bookings: args.bookings || [],
+    bookings: inPeriod.map((b) => (b.date ?
+        Object.assign({}, b, {periodKey: period.periodKey}) : b)),
     waitlist: [],
     graceTokens: [],
     periodKey: args.period.periodKey,
@@ -234,25 +251,125 @@ async function mintMissing(store, a) {
   return created;
 }
 
+const byDateThenId = (a, b) => (a.date === b.date ?
+    String(a.id).localeCompare(String(b.id)) :
+    String(a.date).localeCompare(String(b.date)));
+
 /**
- * Roll one athlete's ended period, if anything rolls.
+ * Which bookings of the running period the rolled-over tokens should be
+ * paying for (ruling 1: they are spent FIRST). Pure.
+ *
+ * A booking made while the tokens did not exist yet - booked ahead, back in
+ * the old period - was charged to the new period's own tokens. Left alone,
+ * a family that books ahead would keep its rolled-over tokens for extra
+ * sessions only and lose them, while a family that books late has them
+ * spent first: the same month, two outcomes. So every free rolled-over
+ * token is put on the earliest token-paid booking it can pay for, which
+ * hands that booking's own-period token back.
+ *
+ * It also untangles a token that ended up on two bookings (two taps at the
+ * same moment - the rules cannot count): the earliest keeps it, the others
+ * take a free token, or go back onto the period.
+ *
+ * @param {{tokens: !Array<{id: string, expiresAt: string}>,
+ *     bookings: !Array<!Object>, period: {periodKey: string}}} args The
+ *     athlete's live rolled-over tokens and their bookings of the running
+ *     period (`{id, ...data}`).
+ * @return {!Array<{bookingId: string, graceTokenId: ?string}>} The changes:
+ *     a token id to charge the booking to, or null for "the period".
+ */
+function settlePlan(args) {
+  const tokens = (args.tokens || []).slice()
+      .sort((a, b) => String(a.id).localeCompare(String(b.id)));
+  const ids = new Set(tokens.map((t) => t.id));
+  const live = (args.bookings || []).filter((b) => b &&
+      b.status !== 'cancelled').sort(byDateThenId);
+  const holder = new Map();
+  const displaced = [];
+  for (const b of live) {
+    if (!ids.has(b.graceTokenId)) continue;
+    if (holder.has(b.graceTokenId)) displaced.push(b);
+    else holder.set(b.graceTokenId, b);
+  }
+  const free = tokens.filter((t) => !holder.has(t.id));
+  const displacedIds = new Set(displaced.map((b) => b.id));
+  const payable = live.filter((b) => displacedIds.has(b.id) ||
+      (b.status !== 'revoked' && !b.graceTokenId && b.comp !== true &&
+      (b.chargedFrom || 'period') === 'period' &&
+      b.date >= args.period.periodKey));
+  const changes = [];
+  const taken = new Set();
+  for (const token of free) {
+    const b = payable.find((x) => !taken.has(x.id) &&
+        x.date <= token.expiresAt);
+    if (!b) continue;
+    taken.add(b.id);
+    changes.push({bookingId: b.id, graceTokenId: token.id});
+  }
+  for (const b of displaced) {
+    if (!taken.has(b.id)) changes.push({bookingId: b.id, graceTokenId: null});
+  }
+  return changes;
+}
+
+/**
+ * Apply `settlePlan` for one athlete, in a transaction so the bookings are
+ * read and rewritten as one. Only `chargedFrom` and `graceTokenId` change -
+ * the two fields a booking made with the token in hand would carry.
+ * @param {!Object} store An admin `Firestore`.
+ * @param {{athleteId: string, period: !Object, current: !Object,
+ *     today: string}} a The ended period, the running one and the day.
+ * @return {!Promise<number>} How many bookings were re-charged.
+ */
+async function settleAthlete(store, a) {
+  return store.runTransaction(async (tx) => {
+    const graceSnap = await tx.get(store.collection('graceTokens')
+        .where('athleteId', '==', a.athleteId));
+    const tokens = lib.rows(graceSnap).filter((g) =>
+      isRolloverTokenId(g.id) && g.sourcePeriodKey === a.period.periodKey &&
+        g.expiresAt && g.expiresAt >= a.today);
+    if (tokens.length === 0) return 0;
+    const bookingSnap = await tx.get(
+        lib.periodBookingsQuery(store, a.athleteId, a.current));
+    const changes = settlePlan({tokens, bookings: lib.rows(bookingSnap),
+      period: a.current});
+    for (const c of changes) {
+      tx.update(store.collection('bookings').doc(c.bookingId),
+          c.graceTokenId ?
+              {chargedFrom: 'grace', graceTokenId: c.graceTokenId} :
+              {chargedFrom: 'period', graceTokenId: FieldValue.delete()});
+    }
+    if (changes.length > 0) {
+      console.log(`runTokenRollover settle ${a.athleteId}: ` +
+          changes.map((c) => `${c.bookingId}->${c.graceTokenId || 'period'}`)
+              .join(' '));
+    }
+    return changes.length;
+  });
+}
+
+/**
+ * Roll one athlete's ended period, if anything rolls, then settle the
+ * rolled-over tokens onto the running period's bookings.
  * @param {!Object} store An admin `Firestore`.
  * @param {{athleteId: string, athlete: !Object, today: string,
  *     households: function(?string): !Promise<?Object>,
  *     packages: function(?string): !Promise<?Object>}} a The athlete.
- * @return {!Promise<number>} How many tokens were created.
+ * @return {!Promise<{created: number, recharged: number}>} Tokens created
+ *     and bookings re-charged.
  */
 async function rollAthlete(store, a) {
+  const nothing = {created: 0, recharged: 0};
   const {athleteId, athlete, today} = a;
   const pkg = await a.packages(athlete.packageId);
-  if (!isMonthlyTokens(pkg)) return 0;
+  if (!isMonthlyTokens(pkg)) return nothing;
   const household = await a.households(athlete.householdId);
   const anchorDay = household && household.periodAnchorDay;
   const period = previousPeriod(today, anchorDay);
   // The cheap refusals first, before any per-athlete read.
   const early = rolloverPlan({athlete, household, pkg, period, anchorDay,
     today, tokenPeriod: {granted: 0}, bookings: []});
-  if (early.skip) return 0;
+  if (early.skip) return nothing;
   const [tpSnap, bookingSnap] = await Promise.all([
     store.collection('tokenPeriods')
         .doc(lib.tokenPeriodId(athleteId, period.periodKey)).get(),
@@ -261,10 +378,13 @@ async function rollAthlete(store, a) {
   const plan = rolloverPlan({athlete, household, pkg, period, anchorDay,
     today, tokenPeriod: tpSnap.exists ? tpSnap.data() : null,
     bookings: lib.rows(bookingSnap)});
-  if (plan.count === 0) return 0;
-  return mintMissing(store, {athleteId,
+  if (plan.skip || plan.count === 0) return nothing;
+  const created = await mintMissing(store, {athleteId,
     householdId: athlete.householdId || null, periodKey: period.periodKey,
     count: plan.count, expiresAt: plan.expiresAt});
+  const recharged = await settleAthlete(store, {athleteId, period,
+    current: lib.periodFor(today, anchorDay), today});
+  return {created, recharged};
 }
 
 /**
@@ -284,7 +404,8 @@ async function runTokenRollover(args) {
   const now = a.now instanceof Date ? a.now : new Date();
   const store = a.db || admin.firestore();
   const today = lib.todayISO(now);
-  const summary = {today, considered: 0, athletes: 0, minted: 0, errors: 0};
+  const summary = {today, considered: 0, athletes: 0, minted: 0,
+    recharged: 0, errors: 0};
   const households = cachedReader(store, 'households');
   const packages = cachedReader(store, 'packages');
   const snap = await store.collection('athletes').get();
@@ -293,12 +414,13 @@ async function runTokenRollover(args) {
     if (!athlete.packageId) continue;
     summary.considered += 1;
     try {
-      const created = await rollAthlete(store, {athleteId: doc.id, athlete,
-        today, households, packages});
+      const {created, recharged} = await rollAthlete(store, {
+        athleteId: doc.id, athlete, today, households, packages});
       if (created > 0) {
         summary.athletes += 1;
         summary.minted += created;
       }
+      summary.recharged += recharged;
     } catch (err) {
       summary.errors += 1;
       console.error('runTokenRollover error:', doc.id, err);
@@ -306,7 +428,7 @@ async function runTokenRollover(args) {
   }
   console.log(`runTokenRollover ${today}: considered=${summary.considered} ` +
       `athletes=${summary.athletes} minted=${summary.minted} ` +
-      `errors=${summary.errors}`);
+      `recharged=${summary.recharged} errors=${summary.errors}`);
   return summary;
 }
 
@@ -320,5 +442,6 @@ module.exports = {
   rolloverTokenDoc,
   rollsUntil,
   runTokenRollover,
+  settlePlan,
   tokenIdFor,
 };

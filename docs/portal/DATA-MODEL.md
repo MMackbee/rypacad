@@ -1776,6 +1776,12 @@ the season end), reason: 'rollover', sourceSessionId: null, sourcePeriodKey,
 createdBy: 'rollover', createdAt }`. The id is the idempotency key (n counts
 from 1), so a re-run mints nothing twice. No client can create one; the
 member read and the booking rules serve it like any other grace token.
+The same job is the one server writer that RE-CHARGES a booking: a free
+rolled-over token is put on the earliest period-charged booking of the
+running period (`bookings.chargedFrom` 'period' -> 'grace', `graceTokenId`
+set), and a token found on two bookings is taken off the later one
+(`graceTokenId` removed, `chargedFrom` 'period' when no free token is
+left). No other booking field changes.
 
 **Purchased single tokens (owner rulings 2026-09-29/30, spec D20).** A
 purchase, never a bonus: beside the staff "Cancel session" trigger and the

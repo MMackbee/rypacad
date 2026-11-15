@@ -70,6 +70,10 @@ A new document per period, never a mutation of the old one. History stays answer
 
 How it is built (`functions/portal/rollover.js`, the daily 00:05 America/Chicago job `tokenRollover`): a period's own count never changes. Once a period has ended, the job mints one `graceTokens/rollover_{athleteId}_{periodKey}_{n}` per unused token (`reason: 'rollover'`, `sourcePeriodKey`, `expiresAt` = the next period's last day). From there it is a grace token like any other (§4), so the charge order in §6, the rules and every server writer are untouched. The job looks at the ended period again on every run, and the ids are deterministic, so a late change is picked up and nothing is minted twice.
 
+**Sessions booked ahead.** A session of the new period that was booked before the period began was charged to the new period's own tokens, because the rolled-over tokens did not exist yet. The same nightly run settles this: each free rolled-over token is put on the earliest token-paid booking of the running period it can pay for (`chargedFrom: 'grace'`, `graceTokenId` = the rollover id), which hands that period's own token back to be used or rolled in its turn. So "spent first" (ruling 1) holds whether a family books ahead or late. Free comps, Elite bookings and bookings paid with a bonus or bought token are left alone, as is anything dated after the tokens' use-by day. If one rolled-over token ends up on two bookings (two taps at once), the earliest keeps it and the other is moved to a free one, or back onto the period. No notice is sent; the meter and the session list show which sessions a rolled-over token paid for.
+
+**Counting.** A booking counts against the ended period by its date, not the `periodKey` it carries. **Waitlists:** a rolled-over token earns no place in the promotion order (§8's "grace holders first" is for tokens the Academy owes, as with a bought token).
+
 The five rulings that go with it (owner, 2026-11-15):
 
 1. **Rolled-over tokens are spent first**, before the new period's tokens (grace-first, soonest expiry first).

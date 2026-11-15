@@ -22,6 +22,7 @@
 
 const lib = require('./lib');
 const gates = require('./booking-gates');
+const {isRolloverTokenId} = require('./rollover');
 
 /** Firestore's limit on the values of one `in` filter. */
 const IN_LIMIT = 30;
@@ -194,6 +195,7 @@ async function loadCandidate(reader, store, entry, ctx) {
  * (reason 'single-purchase', rulings 2026-09-29/30) is bought inventory,
  * not a token the Academy owes a family it already failed once, so it
  * earns no priority: that entry queues by `joinedAt` like a period charge.
+ * The same goes for a rolled-over token (2026-11-15).
  * @param {?Object} charge `lib.chargeFor`'s result.
  * @param {!Array<!Object>} graceRows The athlete's graceTokens rows
  *     (`{id, ...data}`).
@@ -205,6 +207,10 @@ function candidateGraceExpiry(charge, graceRows) {
   const row = (graceRows || []).find(
       (g) => g && g.id === charge.graceTokenId);
   if (row && row.reason === 'single-purchase') return null;
+  // Nor does a rolled-over token (owner ruling 2026-11-15, rollover.js): it
+  // is the family's own unused token, and nearly every monthly family holds
+  // one, so "grace holders first" would reorder every waitlist.
+  if (isRolloverTokenId(charge.graceTokenId)) return null;
   return (row && row.expiresAt) || '9999-12-31';
 }
 

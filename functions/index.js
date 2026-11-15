@@ -481,6 +481,9 @@ exports.mentalCheckinReminders = functions
  * night. A run with nothing new writes nothing. Sends no mail.
  */
 exports.tokenRollover = functions
+    // One athlete at a time, a few reads each: well past the 60 s default
+    // once the academy is full. A run cut short heals on the next one.
+    .runWith({timeoutSeconds: 540})
     .pubsub
     .schedule('5 0 * * *')
     .timeZone('America/Chicago')

@@ -465,6 +465,19 @@ test('candidateGraceExpiry: a purchased single token earns no priority',
           TOKENS), null);
     });
 
+test('candidateGraceExpiry: a rolled-over token earns no priority either',
+    () => {
+      // One-month rollover (2026-11-15): nearly every monthly family holds
+      // one, and it is their own unused token, not one the Academy owes.
+      const rows = TOKENS.concat([{id: 'rollover_ada_2026-11-01_1',
+        reason: 'rollover', expiresAt: '2026-12-31'}]);
+      assert.equal(promotion.candidateGraceExpiry(
+          grace('rollover_ada_2026-11-01_1'), rows), null);
+      // Known by its id even when the row is not in hand.
+      assert.equal(promotion.candidateGraceExpiry(
+          grace('rollover_ada_2026-11-01_2'), TOKENS), null);
+    });
+
 test('candidateGraceExpiry: a bonus token keys on ITS expiry', () => {
   assert.equal(promotion.candidateGraceExpiry(grace('s9_ada_cancelled'),
       TOKENS), '2026-12-01');
