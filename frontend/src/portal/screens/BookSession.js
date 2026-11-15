@@ -24,6 +24,7 @@ import {
   SINGLE_ASK_GUARDIAN_LINE,
   SINGLE_NOT_OPEN_LINE,
 } from '../data/singleToken';
+import { isRolloverTokenId } from '../data/rollover';
 import { PENDING_TITLE } from '../data/billingCopy';
 import { canRetry, LockedDayNotice, reasonCopy, SeeMembershipLink } from '../components/BookingReasons';
 import { JoinWaitlistButton, leaveFailureCopy, OnWaitlist, waitingOn, WaitlistedConfirmationBody } from '../components/WaitlistAction';
@@ -733,6 +734,7 @@ const CHARGE_LABEL = { elite: 'Included with Elite', grace: 'a bonus token', per
 /** A grace charge paid with a bought single token (the write's graceTokenId says so) is a session token, never a bonus. */
 function chargeLabelFor(booked) {
   if (booked.chargedFrom === 'grace' && isSingleTokenId(booked.graceTokenId)) return 'a session token';
+  if (booked.chargedFrom === 'grace' && isRolloverTokenId(booked.graceTokenId)) return 'a rolled-over token';
   return CHARGE_LABEL[booked.chargedFrom];
 }
 

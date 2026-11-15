@@ -316,8 +316,8 @@ function EmergencyContactCard({ mode, linkMode, value, onChange, showErrors }) {
  * any other.
  */
 
-/** What a token is and that it does not carry over (tokens-and-billing-contract.md), before the parent picks 4, 6, 8, 12 or 16. */
-const TOKEN_EXPLAINER = "1 token = 1 session: a training block, a Tour event, a Performance with Phil session, or a session with Yannick. Tokens refresh on the 1st of each month; unused tokens don't carry over. Elite is unlimited.";
+/** What a token is and that an unused one rolls over once (owner ruling 2026-11-15; tokens-and-billing-contract.md section 3), before the parent picks 4, 6, 8, 12 or 16. */
+const TOKEN_EXPLAINER = "1 token = 1 session: a training block, a Tour event, a Performance with Phil session, or a session with Yannick. Tokens refresh on the 1st of each month; unused tokens roll over for one more month, then expire. Elite is unlimited.";
 
 /** Still needs a pick: none yet, one no longer in the catalogue, or the single token before it is on sale. */
 function needsPackage(athlete) {

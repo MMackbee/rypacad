@@ -1767,9 +1767,20 @@ left. `'waitlist-expired'` tokens minted before the ruling stay readable and
 spendable until they expire. See the [`waitlist`](#waitlist-contract-v21-part-2)
 section below.
 
+**Rolled-over tokens (owner ruling 2026-11-15; tokens-and-billing-contract.md
+section 3.1).** `graceTokens/rollover_{athleteId}_{periodKey}_{n}` - one per
+monthly token left unused when period `periodKey` ended, written ONLY by the
+daily `tokenRollover` job (Admin SDK, `functions/portal/rollover.js`):
+`{ athleteId, householdId, expiresAt (the next period's last day, capped at
+the season end), reason: 'rollover', sourceSessionId: null, sourcePeriodKey,
+createdBy: 'rollover', createdAt }`. The id is the idempotency key (n counts
+from 1), so a re-run mints nothing twice. No client can create one; the
+member read and the booking rules serve it like any other grace token.
+
 **Purchased single tokens (owner rulings 2026-09-29/30, spec D20).** A
-purchase, never a bonus: beside the staff "Cancel session" trigger above,
-this is the only other way a `graceTokens` doc comes to exist.
+purchase, never a bonus: beside the staff "Cancel session" trigger and the
+rollover job above, this is the only other way a `graceTokens` doc comes
+to exist.
 `graceTokens/single_{checkoutSessionId}` - one per PAID one-time single
 Checkout Session, written ONLY by `stripeWebhook` (Admin SDK, inside the
 `stripeEvents` ledger transaction, `functions/portal/stripe-single.js`):
@@ -1998,6 +2009,12 @@ already backs another live booking (id
 `grace-expiring` for purchased tokens is keyed per athlete and expiry date
 (`grace-expiring_{athleteId}_single_{expiresAt}`), one notice however many
 tokens expire together.
+**Rollover (2026-11-15):** rolled-over tokens are keyed the same way
+(`grace-expiring_{athleteId}_rollover_{expiresAt}`, one notice with the
+count, only for a family that can book), and an athlete who gets it is not
+also sent that run's `tokens-expiring`. `tokens-expiring` itself now says
+the unused tokens roll over, with the use-by day, for every period but the
+season's last.
 **Mental consent (2026-10-30):** three more `schedule` kinds, `consent-needed`,
 `consent-reminder` and `consent-signed`; their ledger ids, audience and gates
 are under [`mentalConsents`](#mentalconsentsathleteid-2026-10-30).

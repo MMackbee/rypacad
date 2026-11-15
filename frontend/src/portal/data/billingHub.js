@@ -18,6 +18,7 @@ import { contractEnabled } from './contractFlag';
 import { afterSeasonEnd } from './season';
 import { contractMinutesFor } from './contractRule';
 import { isSingleTokenId, saleOpen, SINGLE_NOT_OPEN_LINE } from './singleToken';
+import { isRolloverTokenId, rollsUntil } from './rollover';
 
 /**
  * The season's first token period - functions/portal/prepaid.js carries the
@@ -129,6 +130,8 @@ export function periodRows({ bookings, waitlist, periodKey, sessionsById = {} })
         status: b.status || 'confirmed',
         viaGrace: Boolean(b.graceTokenId),
         viaSingle: isSingleTokenId(b.graceTokenId),
+        // Paid with a rolled-over token (owner ruling 2026-11-15, data/rollover.js).
+        viaRolled: isRolloverTokenId(b.graceTokenId),
         viaComp: b.comp === true,
         // What the staff view's Cancel and its sheet read (owner 2026-11-12,
         // data/staffCancel.js): who, Calendly or not, and how it was paid.
@@ -228,10 +231,14 @@ export function hubMemberFor(args) {
     : null;
 
   const daysLeft = daysBetween(today, period.periodEnd);
-  // Nothing expires before the first period starts or while unpaid.
+  // Nothing expires before the first period starts or while unpaid. One-month
+  // rollover (owner ruling 2026-11-15): `rollsUntil` is the use-by day of the
+  // tokens still unused when this period ends - null when it does not roll
+  // (the season's last period, or a single-token athlete's comp: only a
+  // monthly package rolls), and the nudge then still says "expire".
   const expiryNudge =
     !unlimited && pkg && !period.preSeason && !tokens.unpaid && tokens.left > 0 && daysLeft <= 7
-      ? { left: tokens.left, on: period.periodEnd, days: daysLeft }
+      ? { left: tokens.left, on: period.periodEnd, days: daysLeft, rollsUntil: tokens.perPurchase ? null : rollsUntil(period, anchorDay) }
       : null;
 
   return {

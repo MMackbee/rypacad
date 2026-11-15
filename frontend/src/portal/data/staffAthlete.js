@@ -36,13 +36,14 @@ function span({ periodKey, periodEnd }) {
   return { start: periodKey, end: periodEnd };
 }
 
-/** One row's badge: Waitlist, Attended, No-show, Free, Session token, Bonus token or Booked. */
+/** One row's badge: Waitlist, Attended, No-show, Free, Session token, Rolled over, Bonus token or Booked. */
 function badgeOf(row) {
   if (row.kind === 'waitlist') return 'Waitlist';
   if (row.status === 'attended') return 'Attended';
   if (row.status === 'noshow') return 'No-show';
   if (isFreeComp(row)) return 'Free';
   if (row.viaSingle) return 'Session token';
+  if (row.viaRolled) return 'Rolled over';
   if (row.viaGrace) return 'Bonus token';
   return 'Booked';
 }

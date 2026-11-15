@@ -4,6 +4,7 @@ import { color, font, radius } from '../tokens';
 import { longDayLabel } from '../data/calendar';
 import { tokenStartLabel } from '../data/billingCopy';
 import { tokenDayLabel } from '../data/singleToken';
+import { isRolled, rolledCount, rolledLine } from '../data/rollover';
 import { SessionTokenPools } from './SessionTokens';
 
 /**
@@ -29,12 +30,17 @@ import { SessionTokenPools } from './SessionTokens';
  * 2026-10-10: a parent back from buying an extra session read "0 tokens
  * left" under "ready to book"): ' + 1 session token' when every one was
  * bought (single-purchase), else ' + 2 bonus tokens'. Empty without any.
+ * Rolled-over tokens (owner ruling 2026-11-15, data/rollover.js) are counted
+ * apart, first - they are the ones spent first: ' + 2 rolled over'.
  */
 function graceExtra(grace) {
-  const n = grace?.length ?? 0;
-  if (n === 0) return '';
-  const word = grace.every((g) => g?.reason === 'single-purchase') ? 'session token' : 'bonus token';
-  return ` + ${n} ${word}${n === 1 ? '' : 's'}`;
+  const rolled = rolledCount(grace);
+  const rolledPart = rolled ? ` + ${rolled} rolled over` : '';
+  const rest = (grace || []).filter((g) => !isRolled(g));
+  const n = rest.length;
+  if (n === 0) return rolledPart;
+  const word = rest.every((g) => g?.reason === 'single-purchase') ? 'session token' : 'bonus token';
+  return `${rolledPart} + ${n} ${word}${n === 1 ? '' : 's'}`;
 }
 
 /**
@@ -235,6 +241,15 @@ export function GraceLine({ tokens, style }) {
   // Elite holds no tokens and can spend none: no bonus-token line for them.
   const grace = tokens?.unlimited ? null : tokens?.grace?.[0];
   if (!grace) return null;
+  if (isRolled(grace)) {
+    // Not a bonus: last period's unused tokens (owner ruling 2026-11-15) -
+    // how many, from which month, and the day they are gone.
+    return (
+      <div data-rolled-over={rolledCount(tokens.grace)} style={{ font: `400 11px ${font.body}`, color: color.secondary, marginTop: 6, ...style }}>
+        {rolledLine(tokens.grace)}
+      </div>
+    );
+  }
   if (grace.reason === 'single-purchase') {
     // A single athlete's meter (SessionTokenPools) already says this.
     if (tokens.perPurchase) return null;
@@ -280,7 +295,8 @@ export function SpendNote({ tokens, style }) {
   }
   // The soonest-expiring grace token is the one spent: a bought single
   // token (ruling 2026-09-29/30) or a bonus.
-  const graceNote = tokens.grace?.[0]?.reason === 'single-purchase' ? 'Uses a session token' : 'Uses a bonus token';
+  const first = tokens.grace?.[0];
+  const graceNote = isRolled(first) ? 'Uses a rolled-over token' : first?.reason === 'single-purchase' ? 'Uses a session token' : 'Uses a bonus token';
   return (
     <SpendBadge tone={color.textTertiary} style={style}>
       {hasGrace ? graceNote : `Spends 1 token · ${tokens.left} left`}

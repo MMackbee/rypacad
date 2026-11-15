@@ -15,6 +15,7 @@ import { BOOKING_OPENS_LABEL, bookingOpen } from './calendar';
 import { memberSessionRate, SINGLE_TOKEN } from './packages';
 import { SEASON_BOUNDS } from './season';
 import { isAdultOnDate } from './signup';
+import { isRolled } from './rollover';
 
 /**
  * Whether single tokens are on sale yet (owner ruling 2026-10-01): from the
@@ -121,10 +122,13 @@ export function singleTokenLine(tokens) {
 
 /**
  * What a grace-charged booking spends: the soonest-expiring grace token is
- * the one charged, so it names that one.
+ * the one charged, so it names that one: a rolled-over token (owner ruling
+ * 2026-11-15, data/rollover.js), a bought session token, or a bonus.
  */
 export function graceSpendLabel(tokens) {
-  return tokens?.grace?.[0]?.reason === 'single-purchase' ? 'a session token' : 'a bonus token';
+  const first = tokens?.grace?.[0];
+  if (isRolled(first)) return 'a rolled-over token';
+  return first?.reason === 'single-purchase' ? 'a session token' : 'a bonus token';
 }
 
 /** The ?paid=...&single=1 return once graceTokens/single_{cs} exists. */

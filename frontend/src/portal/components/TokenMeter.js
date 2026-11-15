@@ -22,6 +22,7 @@ import {
   SINGLE_NOT_OPEN_LINE,
   tokenDayLabel,
 } from '../data/singleToken';
+import { isRolled, rolledLine, rollNudgeLine } from '../data/rollover';
 
 /**
  * One athlete's tokens on the Billing hub (contract v2.4, Sprint 16): the
@@ -289,7 +290,10 @@ export default function TokenMeter({ member, defaultOpen = false, showPrices = f
   const granted = tokens.granted || 0;
   const usedPct = granted ? Math.min(100, (tokens.used / granted) * 100) : 0;
   const reservedPct = granted ? Math.min(100 - usedPct, (tokens.reserved / granted) * 100) : 0;
-  const bonus = tokens.grace.length;
+  // Last period's unused tokens (owner ruling 2026-11-15, data/rollover.js):
+  // their own chip and line, never counted as a bonus.
+  const rolled = tokens.grace.filter(isRolled);
+  const bonus = tokens.grace.length - rolled.length;
   const bought = tokens.grace.filter(isBought);
 
   return (
@@ -322,10 +326,16 @@ export default function TokenMeter({ member, defaultOpen = false, showPrices = f
           <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginTop: 10 }}>
             <Chip tone={color.textSecondary}>Used {tokens.used}</Chip>
             {tokens.reserved ? <Chip tone={color.secondary}>Waitlist {tokens.reserved}</Chip> : null}
+            {rolled.length ? <Chip tone={color.secondary}>Rolled over {rolled.length}</Chip> : null}
             {bonus ? <Chip tone={color.secondary}>Bonus {bonus}</Chip> : null}
           </div>
-          {/* The soonest bonus on its own line, bought tokens counted on theirs (BoughtLine). */}
-          <GraceLine tokens={bought.length ? { ...tokens, grace: tokens.grace.filter((g) => !isBought(g)) } : tokens} />
+          {/* Rolled-over tokens on their line, the soonest bonus on its own, bought tokens counted on theirs (BoughtLine). */}
+          {rolled.length ? (
+            <div data-rolled-over={rolled.length} style={{ font: `400 11px ${font.body}`, color: color.secondary, marginTop: 6 }}>
+              {rolledLine(rolled)}
+            </div>
+          ) : null}
+          <GraceLine tokens={bought.length || rolled.length ? { ...tokens, grace: tokens.grace.filter((g) => !isBought(g) && !isRolled(g)) } : tokens} />
           <BoughtLine bought={bought} />
           {next ? <NextPeriodLine tokens={{ ...tokens, nextPeriod: next }} style={{ marginTop: 8 }} /> : null}
         </>
@@ -343,7 +353,9 @@ export default function TokenMeter({ member, defaultOpen = false, showPrices = f
       )}
       {expiryNudge ? (
         <Body size={12} tone={color.secondary} style={{ marginTop: 6 }}>
-          {expiryNudge.left} {expiryNudge.left === 1 ? 'token expires' : 'tokens expire'} {longDayLabel(expiryNudge.on)} — book before then.
+          {/* One-month rollover (owner ruling 2026-11-15): unused tokens roll over once; only the season's last period expires. */}
+          {rollNudgeLine(expiryNudge) ??
+            `${expiryNudge.left} ${expiryNudge.left === 1 ? 'token expires' : 'tokens expire'} ${longDayLabel(expiryNudge.on)} — book before then.`}
         </Body>
       ) : null}
       {buy ? (

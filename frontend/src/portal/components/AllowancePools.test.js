@@ -128,3 +128,28 @@ describe('monthly and Elite rendering is unchanged', () => {
     expect(nextPeriodSuffix(null)).toBe('');
   });
 });
+
+describe('rolled-over tokens (owner ruling 2026-11-15: unused tokens roll over one month)', () => {
+  const rolled = (n) => ({ id: `rollover_a1_2026-11-01_${n}`, expiresAt: '2026-12-31', reason: 'rollover', sourceSessionId: null });
+
+  test('the compact line counts them apart from bonus and bought tokens', async () => {
+    expect(await text(<AllowancePools tokens={monthly({ grace: [rolled(1), rolled(2)] })} compact />)).toBe('6 tokens left + 2 rolled over');
+    expect(await text(<AllowancePools tokens={monthly({ left: 0, used: 6, grace: [rolled(1), bought] })} compact />)).toBe('0 tokens left + 1 rolled over + 1 session token');
+    expect(await text(<AllowancePools tokens={monthly({ grace: [bonus, rolled(1)] })} compact />)).toBe('6 tokens left + 1 rolled over + 1 bonus token');
+  });
+
+  test('the grace line says how many, from which month and the use-by day', async () => {
+    expect(await text(<GraceLine tokens={monthly({ grace: [rolled(1), rolled(2), bought] })} />)).toBe('2 tokens rolled over from November - use by Thu, Dec 31');
+    // Known by the id alone, when no reason was joined on.
+    expect(await text(<GraceLine tokens={monthly({ grace: [{ id: 'rollover_a1_2026-11-01_1', expiresAt: '2026-12-31' }] })} />)).toBe(
+      '1 token rolled over from November - use by Thu, Dec 31'
+    );
+    // A sooner bonus token keeps its own line.
+    expect(await text(<GraceLine tokens={monthly({ grace: [bonus, rolled(1)] })} />)).toContain('Bonus token');
+  });
+
+  test('the spend note: a rolled-over token is spent first, and is named', async () => {
+    expect(await text(<SpendNote tokens={monthly({ grace: [rolled(1)] })} />)).toBe('Uses a rolled-over token');
+    expect(await text(<SpendNote tokens={monthly({ left: 0, used: 6, grace: [rolled(1)] })} />)).toBe('Uses a rolled-over token');
+  });
+});

@@ -39,6 +39,7 @@ import { waitlistClosed } from '../data/sessionStart';
 import { SPECIALISTS, repeatsWeekly } from '../data/specialists';
 import { positionForDate, windowMonthsFor } from '../data/packages';
 import { graceSpendLabel, isSingleTokenId } from '../data/singleToken';
+import { isRolloverTokenId } from '../data/rollover';
 // Pure calendar/season helpers per the seam rule already established in
 // BookSession.js/CommitmentContract.js/TourStandings.js - data still travels
 // through the hook seam below; these are formatting helpers, not response
@@ -974,6 +975,7 @@ const CHARGE_LABEL = { elite: 'nothing - included with Elite', grace: 'a bonus t
 /** A grace charge paid with a bought single token (the write's graceTokenId says so) is a session token, never a bonus. */
 function chargeLabelFor(booked) {
   if (booked.chargedFrom === 'grace' && isSingleTokenId(booked.graceTokenId)) return 'a session token';
+  if (booked.chargedFrom === 'grace' && isRolloverTokenId(booked.graceTokenId)) return 'a rolled-over token';
   return CHARGE_LABEL[booked.chargedFrom];
 }
 

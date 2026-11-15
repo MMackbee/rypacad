@@ -42,6 +42,8 @@ const STATUS_BADGE = {
 export function Row({ row, last, first, periodStart = null, onCancel = null, onMove = null }) {
   const badge = row.viaSingle
     ? { tone: 'green', label: 'Session token' }
+    : row.viaRolled
+    ? { tone: 'yellow', label: 'Rolled over' }
     : row.viaGrace
     ? { tone: 'yellow', label: 'Bonus token' }
     : STATUS_BADGE[row.status] || STATUS_BADGE.confirmed;

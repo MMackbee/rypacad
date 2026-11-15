@@ -20,6 +20,7 @@ const lib = require('./lib');
 const mentalConsent = require('./mental-consent');
 const notices = require('./notices');
 const notify = require('./notify');
+const rollover = require('./rollover');
 
 /**
  * How many days ahead an expiry is warned about. Owner ruling 2026-09-22:
@@ -233,13 +234,21 @@ async function positionFor(store, args) {
 }
 
 /**
- * The `tokens-expiring` half of the expiry job.
+ * The `tokens-expiring` half of the expiry job. One-month rollover (owner
+ * ruling 2026-11-15): when the period's unused tokens roll over
+ * (rollover.rollsUntil) the notice says so and gives the use-by date; only
+ * a period that does not roll (the season's last) still says "expire". An
+ * athlete told in this same run to use rolled-over tokens (`toldToUse`)
+ * gets that notice instead of this one - one email, about the tokens that
+ * are actually about to go.
  * @param {!Object} store An admin `Firestore`.
  * @param {{today: string, target: string, now: !Date}} clock The run.
  * @param {!Object} summary Mutated with the counts.
+ * @param {!Set<string>=} toldToUse Athlete ids remindGraceExpiry warned
+ *     about rolled-over tokens.
  * @return {!Promise<void>} Resolves when every athlete has been considered.
  */
-async function remindTokenExpiry(store, clock, summary) {
+async function remindTokenExpiry(store, clock, summary, toldToUse) {
   const households = cachedReader(store, 'households');
   const packages = cachedReader(store, 'packages');
   const snap = await store.collection('athletes').get();
@@ -255,6 +264,11 @@ async function remindTokenExpiry(store, clock, summary) {
     // Pre-season periods and unpaid athletes get no notice.
     if (!tokenReminderApplies({household, athlete, period})) continue;
     const pkg = await packages(athlete.packageId);
+    // Only a monthly token package rolls (the rollover job's own test): a
+    // single-token athlete's comp still expires with its period.
+    const rollsUntil = rollover.isMonthlyTokens(pkg) ?
+        rollover.rollsUntil(period, anchorDay) : null;
+    if (rollsUntil && toldToUse && toldToUse.has(doc.id)) continue;
     // Elite (`tokens: null`) is unlimited and has nothing to expire; an
     // athlete on no known package has nothing to warn about either.
     if (!pkg || !Number.isFinite(pkg.tokens)) continue;
@@ -270,6 +284,7 @@ async function remindTokenExpiry(store, clock, summary) {
       athlete,
       left: position.left,
       periodEnd: period.periodEnd,
+      rollsUntil,
     });
     const res = await notify.sendNotice({
       kind: 'tokens-expiring',
@@ -290,6 +305,8 @@ async function remindTokenExpiry(store, clock, summary) {
  * its own (the doc id). Purchased single tokens (reason 'single-purchase',
  * rulings 2026-09-29/30) all expire on the season's last day, so an athlete
  * holding several gets ONE notice: the key is the athlete and that day.
+ * Rolled-over tokens (reason 'rollover', owner ruling 2026-11-15) out of one
+ * period share a use-by day the same way, and get one notice too.
  * @param {string} docId The graceTokens doc id.
  * @param {?Object} grace The graceTokens doc body.
  * @return {string} The `sendNotice` subjectKey.
@@ -299,20 +316,28 @@ function graceNoticeKey(docId, grace) {
   if (g.reason === 'single-purchase') {
     return `${g.athleteId}_single_${g.expiresAt}`;
   }
+  if (g.reason === rollover.REASON) {
+    return `${g.athleteId}_rollover_${g.expiresAt}`;
+  }
   return docId;
 }
 
 /**
  * The `grace-expiring` half of the expiry job. Consumption is derived, never
  * stored: a grace token is spent when some non-cancelled booking carries
- * `graceTokenId == id`.
+ * `graceTokenId == id`. Rolled-over tokens (reason 'rollover') are counted
+ * per athlete and told once, "N rolled-over tokens to use by <day>", and
+ * only to a family that can book (lib.membershipAllowsBooking).
  * @param {!Object} store An admin `Firestore`.
  * @param {{today: string, target: string, now: !Date}} clock The run.
  * @param {!Object} summary Mutated with the counts.
- * @return {!Promise<void>} Resolves when every token has been considered.
+ * @return {!Promise<!Set<string>>} The athletes told to use rolled-over
+ *     tokens (a duplicate counts: they were told on an earlier run).
  */
 async function remindGraceExpiry(store, clock, summary) {
   const athletes = cachedReader(store, 'athletes');
+  const households = cachedReader(store, 'households');
+  const rolled = new Map();
   const snap = await store.collection('graceTokens')
       .where('expiresAt', '==', clock.target)
       .get();
@@ -324,6 +349,13 @@ async function remindGraceExpiry(store, clock, summary) {
     const consumed = spentSnap.docs.some(
         (d) => (d.data() || {}).status !== 'cancelled');
     if (consumed) continue;
+    if (grace.reason === rollover.REASON) {
+      const row = rolled.get(grace.athleteId) || {count: 0, docId: doc.id,
+        grace};
+      row.count += 1;
+      rolled.set(grace.athleteId, row);
+      continue;
+    }
     const athlete = await athletes(grace.athleteId);
     const copy = notices.graceExpiring({athlete, expiresAt: grace.expiresAt,
       reason: grace.reason});
@@ -341,11 +373,37 @@ async function remindGraceExpiry(store, clock, summary) {
     if (res.duplicate) summary.duplicate += 1;
     else summary.grace += 1;
   }
+  const toldToUse = new Set();
+  for (const [athleteId, row] of rolled) {
+    const athlete = await athletes(athleteId);
+    const household = await households(
+        row.grace.householdId || (athlete && athlete.householdId));
+    if (!lib.membershipAllowsBooking(household, athlete)) continue;
+    const copy = notices.rolloverExpiring({athlete, count: row.count,
+      expiresAt: row.grace.expiresAt});
+    const res = await notify.sendNotice({
+      kind: 'grace-expiring',
+      category: 'billing',
+      householdId: row.grace.householdId ||
+          (athlete && athlete.householdId) || null,
+      athleteId,
+      sessionId: null,
+      subjectKey: graceNoticeKey(row.docId, row.grace),
+      title: copy.title,
+      body: copy.body,
+    });
+    toldToUse.add(athleteId);
+    if (res.duplicate) summary.duplicate += 1;
+    else summary.grace += 1;
+  }
+  return toldToUse;
 }
 
 /**
- * Daily 09:00 America/Chicago: warn about period tokens and bonus tokens
- * that expire in exactly EXPIRY_LEAD_DAYS days (7).
+ * Daily 09:00 America/Chicago: a week (EXPIRY_LEAD_DAYS) before they go,
+ * warn about bonus and rolled-over tokens, then about the period's own
+ * tokens - which now roll over once (owner ruling 2026-11-15), except in
+ * the season's last period.
  * @param {{now: (?Date|undefined), db: (?Object|undefined)}=} args The fixed
  *     clock and Firestore.
  * @return {!Promise<{today: string, target: string, tokens: number,
@@ -357,8 +415,8 @@ async function runTokenExpiryReminders(args) {
   const clock = {today, target: addDays(today, EXPIRY_LEAD_DAYS), now};
   const summary = {today, target: clock.target, tokens: 0, grace: 0,
     duplicate: 0};
-  await remindTokenExpiry(store, clock, summary);
-  await remindGraceExpiry(store, clock, summary);
+  const toldToUse = await remindGraceExpiry(store, clock, summary);
+  await remindTokenExpiry(store, clock, summary, toldToUse);
   console.log(`runTokenExpiryReminders ${today} (expiring ${clock.target}): ` +
       `tokens=${summary.tokens} grace=${summary.grace} ` +
       `duplicate=${summary.duplicate}`);

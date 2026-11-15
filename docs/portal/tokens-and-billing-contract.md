@@ -62,7 +62,25 @@ A new document per period, never a mutation of the old one. History stays answer
 
 ## 3. Expiry
 
-**Tokens expire at `periodEnd`. Hard.** `used`, `reserved`, whatever is left — gone. Nothing carries. Lapse needs no voiding step because expiry already does it: a lapsed membership simply gets no next `tokenPeriods` document.
+**Tokens expire at `periodEnd`. Hard.** `used`, `reserved`, whatever is left — gone. Nothing carries. Lapse needs no voiding step because expiry already does it: a lapsed membership simply gets no next `tokenPeriods` document. *(superseded 2026-11-15 by §3.1: an unused token rolls over once.)*
+
+### 3.1 One-month rollover (owner ruling 2026-11-15)
+
+**A monthly token left unused when its period ends can be used in the period that follows, and is gone after that.** November's unused tokens are usable through Dec 31, not in January. The owner's words: "lets let them roll over 1 mo."
+
+How it is built (`functions/portal/rollover.js`, the daily 00:05 America/Chicago job `tokenRollover`): a period's own count never changes. Once a period has ended, the job mints one `graceTokens/rollover_{athleteId}_{periodKey}_{n}` per unused token (`reason: 'rollover'`, `sourcePeriodKey`, `expiresAt` = the next period's last day). From there it is a grace token like any other (§4), so the charge order in §6, the rules and every server writer are untouched. The job looks at the ended period again on every run, and the ids are deterministic, so a late change is picked up and nothing is minted twice.
+
+The five rulings that go with it (owner, 2026-11-15):
+
+1. **Rolled-over tokens are spent first**, before the new period's tokens (grace-first, soonest expiry first).
+2. **A family whose payment failed, who cancelled or never paid gets none.** The same test a booking applies (`membershipAllowsBooking`) is applied when the job runs; a card fixed on the 3rd gets its rollover on the 4th.
+3. **Season end:** January's leftovers are good through Sat, Feb 27, 2027. February's end with the season.
+4. **Tokens the Academy issued by hand roll over like paid ones.** What rolls is the period's issued grant (`tokenPeriods.granted`, whoever wrote it) less the period's token-paid bookings. A period with no issued doc never rolls.
+5. **It starts with November 2026's leftovers, on Dec 1.** A period ending before Nov 30, 2026 does not roll.
+
+Not rolled: Elite (no tokens), the single token (already good all season), bought extra tokens (same), bonus tokens (30 days, §4), and a rolled-over token itself - one month, once. A booking paid with a rolled-over token gives it back on cancel with its use-by date unchanged.
+
+What families see: a "N tokens rolled over from November - use by Thu, Dec 31" line and a "Rolled over" chip on the meter; a week before a period ends the `tokens-expiring` notice says unused tokens roll over (it still says "expire" in the season's last period); a week before rolled-over tokens lapse, one `grace-expiring` notice per athlete says how many and by when, and takes the place of that day's `tokens-expiring`.
 
 Athlete-side cancellations follow the existing 12-hour rule: ≥12h out, `used--` (the token returns to *this* period and still expires with it); <12h, spent. Your own cancellation gives the token back; it never extends it. *(superseded 2026-11-11 (plans/2026-11-11-booking-changes): a family cancels until the session starts and the token comes back; a portal 1:1 with Yannick until the day before. The 12-hour rule was never built.)*
 
@@ -91,7 +109,7 @@ graceTokens/{auto}
 
 Grace tokens are spent **first**, soonest-expiry first, before period tokens. They are minted only when the Academy cancels a session on a booked athlete. An athlete whose waitlist closes without a spot, who leaves a waitlist voluntarily, cancels their own booking, or is revoked on lapse gets no grace token.
 
-This is the whole of the old rollover policy, generalized: one month of life, only when it wasn't the family's choice.
+This is the whole of the old rollover policy, generalized: one month of life, only when it wasn't the family's choice. *(2026-11-15: an unused period token now also gets one more month - §3.1. It is minted as a grace token with reason `rollover`, by the server only.)*
 
 ---
 
@@ -318,4 +336,4 @@ A script, not a cloud function — run it with the DB cleanup for the token migr
 1. Prices — awaiting Luke.
 2. Makeup rule — retire, or strict one-for-one. §9.
 3. Acceptance window length on waitlist promotion — config value, suggest 4h.
-4. Fine print (website): tokens are a period entitlement of an active membership and expire at period end; revoked bookings are not reinstated on repayment; grace tokens live 30 days.
+4. Fine print (website): tokens are a period entitlement of an active membership; an unused token rolls over for one more month, then expires (§3.1, 2026-11-15); revoked bookings are not reinstated on repayment; grace tokens live 30 days.

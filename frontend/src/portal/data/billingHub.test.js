@@ -16,7 +16,7 @@ import {
   tierBillingOf,
   withTokenStart,
 } from './billingHub';
-import { ELITE, TOKEN_PACKAGES } from './packages';
+import { ELITE, SINGLE_TOKEN, TOKEN_PACKAGES } from './packages';
 import { longDayLabel } from './calendar';
 
 const T12 = TOKEN_PACKAGES.find((p) => p.id === 't-12');
@@ -137,7 +137,13 @@ describe('hubMemberFor', () => {
   test('the expiry nudge appears inside the last week of a period with tokens left', () => {
     expect(hubMemberFor(fixture()).expiryNudge).toBeNull();
     const late = hubMemberFor({ ...fixture(), today: '2026-12-25' });
-    expect(late.expiryNudge).toEqual({ left: 8, on: '2026-12-31', days: 6 });
+    // One-month rollover (owner ruling 2026-11-15): the nudge carries the use-by day.
+    expect(late.expiryNudge).toEqual({ left: 8, on: '2026-12-31', days: 6, rollsUntil: '2027-01-31' });
+    // Nor does a single-token athlete's comp: the single package never rolls.
+    const comp = hubMemberFor({ ...fixture(), pkg: SINGLE_TOKEN, today: '2026-12-25', bookings: [], waitlist: [], graceTokens: [], tokenPeriod: { granted: 2 } });
+    expect(comp.expiryNudge).toMatchObject({ left: 2, on: '2026-12-31', rollsUntil: null });
+    // The season's last period does not roll.
+    expect(hubMemberFor({ ...fixture(), today: '2027-02-24' }).expiryNudge).toMatchObject({ on: '2027-02-28', rollsUntil: null });
     const spent = hubMemberFor({ ...fixture(), today: '2026-12-25', bookings: Array.from({ length: 12 }, (_, i) => b(`s${i}`)) });
     expect(spent.tokens.left).toBe(0);
     expect(spent.expiryNudge).toBeNull();
@@ -453,7 +459,7 @@ describe('before the season: the first (prepaid) period (tester report 2026-09-3
     const nov = hubMemberFor(pre({ today: '2026-11-25' }));
     expect(nov.period).toMatchObject({ periodKey: '2026-11-01', daysLeft: 5, preSeason: false });
     expect(nov.tokens).toMatchObject({ left: 15, startsOn: null });
-    expect(nov.expiryNudge).toEqual({ left: 15, on: '2026-11-30', days: 5 });
+    expect(nov.expiryNudge).toEqual({ left: 15, on: '2026-11-30', days: 5, rollsUntil: '2026-12-31' });
     expect(nov.lastPeriod).toBeNull();
   });
 

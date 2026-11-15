@@ -89,11 +89,12 @@ test('Elite in season: no first period line', async () => {
   await r.unmount();
 });
 
-test('in season nothing changes: the reset line, the expiry nudge, the last period', async () => {
+test('in season: the reset line, the last week\'s roll-over line (owner ruling 2026-11-15), the last period', async () => {
   const r = await renderScreen(<TokenMeter member={member({ today: '2026-12-26' })} defaultOpen />);
   const text = r.text();
   expect(text).toMatch(/Resets .*Jan 1 · 5 days left in this period/);
-  expect(text).toMatch(/16 tokens expire .*Dec 31/);
+  expect(text).toContain('16 unused tokens roll over on Friday, Jan 1 - use them by Sun, Jan 31.');
+  expect(text).not.toMatch(/expire/);
   expect(text).toContain('Last period (');
   expect(text).not.toContain('First period');
   await r.unmount();
@@ -460,5 +461,56 @@ describe('a paid monthly member: an extra session at their rate', () => {
     expect(extraButtons(one)).toEqual([]);
     expect(one.text()).toContain('Buy a session token - $65');
     await one.unmount();
+  });
+});
+
+describe('one-month rollover (owner ruling 2026-11-15)', () => {
+  const T6 = TOKEN_PACKAGES.find((p) => p.id === 't-6');
+  const rolled = (n) => ({ id: `rollover_a1_2026-11-01_${n}`, expiresAt: '2026-12-31', reason: 'rollover', sourceSessionId: null, sourcePeriodKey: '2026-11-01' });
+  const dec = (over = {}) =>
+    hubMemberFor({ athlete: { id: 'a1', name: 'Jordan' }, pkg: T6, bookings: [], waitlist: [], graceTokens: [], anchorDay: 1, today: '2026-12-02', ...over });
+
+  test('rolled-over tokens get their own chip and line, never "Bonus"', async () => {
+    const r = await renderScreen(<TokenMeter member={dec({ graceTokens: [rolled(1), rolled(2)] })} />);
+    const text = r.text();
+    expect(text).toContain('6of 6 left');
+    expect(text).toContain('Rolled over 2');
+    expect(text).toContain('2 tokens rolled over from November - use by Thu, Dec 31');
+    expect(text).not.toContain('Bonus');
+    await r.unmount();
+  });
+
+  test('beside a bonus and a bought token each keeps its own line', async () => {
+    const graceTokens = [
+      rolled(1),
+      { id: 'g1', expiresAt: '2026-12-20', reason: 'session-cancelled', sourceSessionId: '2026-11-20-0' },
+      { id: 'single_cs_1', expiresAt: '2027-02-27', reason: 'single-purchase' },
+    ];
+    const r = await renderScreen(<TokenMeter member={dec({ graceTokens })} />);
+    const text = r.text();
+    expect(text).toContain('Rolled over 1');
+    expect(text).toContain('Bonus 2'); // the chip counts a bought token too, as before
+    expect(text).toContain('1 token rolled over from November - use by Thu, Dec 31');
+    expect(text).toContain('Bonus token');
+    expect(text).toContain('Session token - good through Sat, Feb 27');
+    await r.unmount();
+  });
+
+  test('a session booked with one reads "Rolled over" in the list', async () => {
+    const bookings = [{ id: 'b1', athleteId: 'a1', sessionId: 's1', date: '2026-12-08', type: 'training', periodKey: '2026-12-01', status: 'confirmed', chargedFrom: 'grace', graceTokenId: 'rollover_a1_2026-11-01_1' }];
+    const r = await renderScreen(<TokenMeter member={dec({ bookings, graceTokens: [rolled(1), rolled(2)] })} defaultOpen />);
+    const text = r.text();
+    expect(text).toContain('6of 6 left'); // December's own tokens are untouched
+    expect(text).toContain('Rolled over 1');
+    expect(text).toContain('Rolled over'); // the row's badge
+    expect(text).not.toContain('Bonus token');
+    await r.unmount();
+  });
+
+  test('the season\'s last period still says expire: February does not roll', async () => {
+    const r = await renderScreen(<TokenMeter member={dec({ today: '2027-02-24' })} />);
+    expect(r.text()).toMatch(/6 tokens expire .*Feb 28/);
+    expect(r.text()).not.toMatch(/roll over/);
+    await r.unmount();
   });
 });

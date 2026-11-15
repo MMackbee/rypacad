@@ -175,8 +175,10 @@ function promoted(args) {
  * charge) spent no token, so its receipt ends at "was cancelled." (spec
  * 2026-11-11: comp and Elite copy never mentions a token).
  * @param {{athlete: ?Object, session: ?Object,
- *     singleToken: (boolean|undefined), comp: (boolean|undefined),
- *     elite: (boolean|undefined)}} args Copy inputs.
+ *     singleToken: (boolean|undefined), rolledToken: (boolean|undefined),
+ *     comp: (boolean|undefined), elite: (boolean|undefined)}} args Copy
+ *     inputs. `rolledToken`: the booking was paid with a rolled-over token
+ *     (owner ruling 2026-11-15), which comes back with the same use-by date.
  * @return {{title: string, body: string}} The notice.
  */
 function bookingCancelled(args) {
@@ -184,9 +186,13 @@ function bookingCancelled(args) {
   const lead = `${name}'s booking for ${sessionPhrase(args.session)} was ` +
       'cancelled.';
   if (args.comp || args.elite) return {title: 'Booking cancelled', body: lead};
-  const back = args.singleToken ?
-      `The session token is back - good through ${dayLabel(SEASON_END)}.` :
-      'The token is back in this period.';
+  let back = 'The token is back in this period.';
+  if (args.singleToken) {
+    back = 'The session token is back - good through ' +
+        `${dayLabel(SEASON_END)}.`;
+  } else if (args.rolledToken) {
+    back = 'The rolled-over token is back - its use-by date has not changed.';
+  }
   return {title: 'Booking cancelled', body: `${lead} ${back}`};
 }
 
@@ -281,10 +287,38 @@ function tokensExpiring(args) {
   const name = firstNameOf(args.athlete);
   const left = Number(args.left || 0);
   const noun = left === 1 ? 'token' : 'tokens';
+  if (args.rollsUntil) {
+    return {
+      title: 'Unused tokens roll over',
+      body: `${name} has ${left} ${noun} left for sessions through ` +
+          `${dayLabel(args.periodEnd)}. Unused tokens roll over for one ` +
+          `more month - use them by ${dayLabel(args.rollsUntil)}.`,
+    };
+  }
   return {
     title: 'Tokens expiring soon',
     body: `${name} has ${left} ${noun} left that expire ` +
         `${dayLabel(args.periodEnd)}. Book before then.`,
+  };
+}
+
+/**
+ * kind `grace-expiring`, rolled-over tokens (owner ruling 2026-11-15): the
+ * tokens left unused last period are in their last week. One notice for
+ * however many the athlete still holds.
+ * @param {{athlete: ?Object, count: number, expiresAt: string}} args Copy
+ *     inputs.
+ * @return {{title: string, body: string}} The notice.
+ */
+function rolloverExpiring(args) {
+  const name = firstNameOf(args.athlete);
+  const count = Number(args.count || 0);
+  const one = count === 1;
+  const what = one ? '1 rolled-over token' : `${count} rolled-over tokens`;
+  return {
+    title: 'Rolled-over tokens expiring',
+    body: `${name} has ${what} to use by ${dayLabel(args.expiresAt)}. ` +
+        `${one ? 'It does' : 'They do'} not roll over again.`,
   };
 }
 
@@ -453,6 +487,7 @@ module.exports = {
   paymentReceived,
   promoted,
   reminder24h,
+  rolloverExpiring,
   sessionCancelled,
   sessionLabel,
   sessionPhrase,

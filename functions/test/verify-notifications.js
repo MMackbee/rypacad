@@ -34,6 +34,7 @@ const Stripe = require('stripe');
 const lib = require('../portal/lib.js');
 const jobs = require('../portal/jobs.js');
 const notices = require('../portal/notices.js');
+const rollover = require('../portal/rollover.js');
 const push = require('../portal/push.js');
 const consentNotices = require('../portal/consent-notices.js');
 
@@ -360,8 +361,12 @@ async function main() {
   const l5 = await ledger(`tokens-expiring_teddy_${HART_PERIOD.periodKey}`);
   check('kind/category/ids', [l5.kind, l5.category, l5.householdId, l5.athleteId, l5.subjectKey],
       ['tokens-expiring', 'billing', 'hart', 'teddy', `teddy_${HART_PERIOD.periodKey}`]);
+  // One-month rollover (2026-11-15): a period ending Nov 30 or later rolls,
+  // and the notice says so; the copy is the job's own for this run's dates.
   check('body: granted 4 - used 1 (grace-charged booking excluded) - reserved 1', l5.body,
-      `Teddy has 2 tokens left that expire ${notices.dayLabel(EXP_TARGET)}. Book before then.`);
+      notices.tokensExpiring({athlete: {name: 'Teddy'}, left: 2, periodEnd: EXP_TARGET,
+        rollsUntil: rollover.rollsUntil(HART_PERIOD, ANCHOR_3)}).body);
+  check('body names 2 tokens', /^Teddy has 2 tokens left /.test(l5.body), true);
   check('BILLING is parents only, and billing email is LOCKED ON for a parent who switched it off', l5.to,
       ['u-pat:skipped/skipped', 'u-robin:skipped/no-device']);
   const l5g = await ledger('grace-expiring_grace-w3');

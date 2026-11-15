@@ -107,6 +107,7 @@ const lib = require('./portal/lib');
 const contractCheckins = require('./portal/contract-checkins');
 const mentalConsent = require('./portal/mental-consent');
 const sweep = require('./portal/sweep');
+const rollover = require('./portal/rollover');
 const {stripeWebhook} = require('./portal/stripe');
 const {onSessionBookedDecrease} = require('./portal/promotion');
 const {MAIL_SECRETS} = require('./portal/secrets');
@@ -322,6 +323,7 @@ exports.onBookingCancelled = functions
           ]);
           const copy = notices.bookingCancelled({athlete, session,
             singleToken: single.isSingleTokenId(after.graceTokenId),
+            rolledToken: rollover.isRolloverTokenId(after.graceTokenId),
             comp: isFreeComp(after), elite: after.chargedFrom === 'elite'});
           await notify.sendNotice({
             kind: 'booking-cancelled',
@@ -465,6 +467,28 @@ exports.mentalCheckinReminders = functions
         console.log('mentalCheckinReminders:', JSON.stringify(out));
       } catch (err) {
         console.error('mentalCheckinReminders error:', err);
+      }
+      return null;
+    });
+
+/**
+ * Daily 00:05 America/Chicago - one-month rollover (owner ruling
+ * 2026-11-15): every paid monthly token athlete gets the tokens left unused
+ * in the period that just ended as rolled-over tokens, good through the
+ * period now running (portal/rollover.js). It runs every day, not only on
+ * the 1st: periods can start on other days, and each run looks at the ended
+ * period again, so a late change or a failed run is picked up the next
+ * night. A run with nothing new writes nothing. Sends no mail.
+ */
+exports.tokenRollover = functions
+    .pubsub
+    .schedule('5 0 * * *')
+    .timeZone('America/Chicago')
+    .onRun(async () => {
+      try {
+        await rollover.runTokenRollover({now: new Date(), db});
+      } catch (err) {
+        console.error('tokenRollover error:', err);
       }
       return null;
     });

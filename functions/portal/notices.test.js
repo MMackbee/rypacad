@@ -213,6 +213,47 @@ test('sessionCancelled: old bodies byte-identical; tokenReturned appends',
       });
     });
 
+// One-month rollover (owner ruling 2026-11-15).
+test('tokensExpiring: the old body without a rollover date', () => {
+  assert.deepEqual(notices.tokensExpiring({athlete: TEDDY, left: 1,
+    periodEnd: '2027-02-28'}), {
+    title: 'Tokens expiring soon',
+    body: 'Teddy has 1 token left that expire Sun, Feb 28. Book before ' +
+        'then.',
+  });
+});
+
+test('tokensExpiring: a period that rolls says so, with the use-by day',
+    () => {
+      assert.deepEqual(notices.tokensExpiring({athlete: TEDDY, left: 1,
+        periodEnd: '2026-11-30', rollsUntil: '2026-12-31'}), {
+        title: 'Unused tokens roll over',
+        body: 'Teddy has 1 token left for sessions through Mon, Nov 30. ' +
+            'Unused tokens roll over for one more month - use them by ' +
+            'Thu, Dec 31.',
+      });
+    });
+
+test('rolloverExpiring: one notice, singular and plural', () => {
+  assert.deepEqual(notices.rolloverExpiring({athlete: TEDDY, count: 1,
+    expiresAt: '2026-12-31'}), {
+    title: 'Rolled-over tokens expiring',
+    body: 'Teddy has 1 rolled-over token to use by Thu, Dec 31. It does ' +
+        'not roll over again.',
+  });
+  assert.equal(notices.rolloverExpiring({athlete: TEDDY, count: 3,
+    expiresAt: '2027-02-27'}).body,
+  'Teddy has 3 rolled-over tokens to use by Sat, Feb 27. They do not ' +
+      'roll over again.');
+});
+
+test('bookingCancelled: a rolled-over token keeps its use-by date', () => {
+  assert.equal(notices.bookingCancelled({athlete: TEDDY, session: TRAINING,
+    rolledToken: true}).body,
+  'Teddy\'s booking for Training, Wed, Nov 4 at 3:00 PM was cancelled. ' +
+      'The rolled-over token is back - its use-by date has not changed.');
+});
+
 test('graceExpiring: bonus body unchanged; single-purchase variant', () => {
   assert.deepEqual(notices.graceExpiring({athlete: TEDDY,
     expiresAt: '2026-11-11'}), {
