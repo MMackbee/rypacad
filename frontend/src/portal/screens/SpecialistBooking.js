@@ -443,6 +443,7 @@ export default function SpecialistBooking({
               <EntitlementSummary
                 specialistId={specialistId}
                 tokens={positionForDate(tokens, selectedDate)}
+                rollAhead={selectedDate && !tokensSpentOn(selectedDate) ? rollAheadFor(tokens, selectedDate) : null}
                 capReached={capReached}
                 onSeeMembership={() => navigate('/portal/membership')}
               />

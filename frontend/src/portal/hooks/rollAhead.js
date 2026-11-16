@@ -16,11 +16,14 @@ import { functions } from '../../firebase';
  * Whether a refused period charge is one the early roll could pay: the
  * period's tokens are all booked ('no-tokens-left'), the session is in a
  * LATER period than today's, the package is a monthly token package, and
- * this is a booking, not a waitlist place (a place holds a period token).
- * The server decides the rest.
+ * this is a single booking the family tapped - not a waitlist place (a
+ * place holds a period token) and not one of Repeat weekly's copies
+ * (`createdVia: 'repeat'`: "each week spends a token from that week's
+ * period", and nobody confirms those one by one). The server decides the
+ * rest.
  */
-export function rollAheadApplies(err, { pkg, periodKey, currentPeriodKey, waitlistIfFull } = {}) {
-  if (!err || err.reason !== 'no-tokens-left' || waitlistIfFull) return false;
+export function rollAheadApplies(err, { pkg, periodKey, currentPeriodKey, waitlistIfFull, createdVia } = {}) {
+  if (!err || err.reason !== 'no-tokens-left' || waitlistIfFull || createdVia === 'repeat') return false;
   if (!pkg || !Number.isFinite(pkg.tokens) || pkg.kind === 'single') return false;
   return Boolean(periodKey && currentPeriodKey && periodKey > currentPeriodKey);
 }

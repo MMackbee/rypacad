@@ -15,7 +15,7 @@ import { Banner } from './Primitives';
  * Phil states are deleted; Yannick's 'cap-reached' stays with copy 'next
  * mental game session opens <date>'").
  */
-export default function EntitlementSummary({ specialistId, tokens, capReached, onSeeMembership }) {
+export default function EntitlementSummary({ specialistId, tokens, capReached, onSeeMembership, rollAhead = null }) {
   if (specialistId === 'mental' && capReached) {
     return (
       <Banner
@@ -48,7 +48,8 @@ export default function EntitlementSummary({ specialistId, tokens, capReached, o
   if (!tokens) return null;
   return (
     <>
-      <SpendNote tokens={tokens} />
+      {/* 2026-11-16: a next-period day this period's leftover token can book (data/rollover.js rollAheadFor). */}
+      <SpendNote tokens={tokens} rollAhead={rollAhead} />
       {/* A token held by a waitlist place is not left to spend - say where it
           went, as Book a Session's banner does (AllowancePools.js). */}
       {!tokens.unlimited && tokens.reserved > 0 ? (

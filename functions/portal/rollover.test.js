@@ -353,6 +353,43 @@ test('rolled-over tokens pay first for sessions ALREADY booked in the new ' +
     today: '2026-12-01'}).left, 5);
 });
 
+test('a token already spent in its own month is not free (rolled early, ' +
+    'then used in November)', async () => {
+  // Sam used 4 of 6; token 1 was rolled early and paid a NOVEMBER session.
+  const docs = world({
+    'graceTokens/rollover_sam_2026-11-01_1': {athleteId: 'sam',
+      householdId: 'hart', expiresAt: '2026-12-31', reason: 'rollover',
+      sourcePeriodKey: '2026-11-01'},
+    'bookings/sam_n9': booking('2026-11-27', {chargedFrom: 'grace',
+      graceTokenId: T1}),
+    'bookings/sam_s7': booking('2026-12-10'),
+  });
+  const out = await rollover.runTokenRollover({now: DEC_1, db: fakeDb(docs)});
+  // Token 1 stays on the November session; only token 2 is free to settle.
+  assert.deepEqual(chargeOf(docs, 'sam_n9'), ['grace', T1]);
+  assert.deepEqual(chargeOf(docs, 'sam_s5'), ['grace', T2]);
+  assert.deepEqual(chargeOf(docs, 'sam_s7'), ['period', null]);
+  assert.equal(out.recharged, 1);
+});
+
+test('settlePlan: a token held in another period displaces a later holder ' +
+    'of the running period, never the other way', () => {
+  const tokens = [{id: T1, expiresAt: '2026-12-31'}];
+  const dec = Object.assign({id: 'd1'}, booking('2026-12-10',
+      {chargedFrom: 'grace', graceTokenId: T1}));
+  const nov = Object.assign({id: 'n1'}, booking('2026-11-27',
+      {chargedFrom: 'grace', graceTokenId: T1}));
+  assert.deepEqual(rollover.settlePlan({tokens, bookings: [dec],
+    spends: [nov, dec], period: DEC}), [{bookingId: 'd1', graceTokenId: null}]);
+  // Cancelled elsewhere: the token is free again.
+  const plain = Object.assign({id: 'd2'}, booking('2026-12-11'));
+  assert.deepEqual(rollover.settlePlan({tokens, bookings: [plain],
+    spends: [Object.assign({}, nov, {status: 'cancelled'})], period: DEC}),
+  [{bookingId: 'd2', graceTokenId: T1}]);
+  assert.deepEqual(rollover.settlePlan({tokens, bookings: [plain],
+    spends: [nov], period: DEC}), []);
+});
+
 test('settling is stable: a second run rewrites nothing', async () => {
   const docs = world({'bookings/sam_s7': booking('2026-12-10')});
   const db = fakeDb(docs);

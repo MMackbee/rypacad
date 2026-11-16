@@ -776,6 +776,31 @@ export function rebookPatch(chargedFrom, graceTokenId, stamp, clears = {}) {
   return { status: 'confirmed', chargedFrom, graceTokenId: graceTokenId ?? null, rebookedAt: stamp, ...clears };
 }
 
+/**
+ * 2026-11-16: before a leftover token is rolled early for a booking
+ * (hooks/rollAhead.js), a cheap look at whether the booking can go through
+ * at all - the session is there, on the schedule, not full, and not already
+ * held. A token rolled for a booking that then fails stays rolled (still
+ * good, but no longer a plain token of its month), so it is not asked for
+ * one that plainly will. The transaction in createBooking still decides; a
+ * failed read here says nothing, so the booking carries on.
+ */
+async function bookingLooksOpen(athleteId, sessionId) {
+  try {
+    const [sessionSnap, bookingSnap] = await Promise.all([
+      getDoc(doc(db, 'sessions', sessionId)),
+      getDoc(doc(db, 'bookings', `${athleteId}_${sessionId}`)),
+    ]);
+    if (!sessionSnap.exists()) return false;
+    const s = sessionSnap.data();
+    if ((s.status ?? 'scheduled') === 'cancelled' || isHiddenSession(s)) return false;
+    if ((s.booked ?? 0) >= (s.capacity ?? 0)) return false;
+    return !(bookingSnap.exists() && bookingSnap.data().status !== 'cancelled');
+  } catch (err) {
+    return true;
+  }
+}
+
 export async function createBooking(
   { athleteId, sessionId, date, type, householdId, attendee },
   { skipCapCheck = false, silent = false, createdVia = null, waitlistIfFull = false } = {}
@@ -856,7 +881,7 @@ export async function createBooking(
         // while this period has one left over. The server rolls it now
         // instead of on the 1st (hooks/rollAhead.js) and this booking spends
         // it as the grace token it is; when it cannot, the refusal stands.
-        const rolled = rollAheadApplies(err, { pkg, periodKey, currentPeriodKey, waitlistIfFull })
+        const rolled = rollAheadApplies(err, { pkg, periodKey, currentPeriodKey, waitlistIfFull, createdVia }) && (await bookingLooksOpen(athleteId, sessionId))
           ? await requestRollAhead({ athleteId, date })
           : null;
         if (!rolled) throw err;

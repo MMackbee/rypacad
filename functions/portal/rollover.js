@@ -284,10 +284,16 @@ const byDateThenId = (a, b) => (a.date === b.date ?
  * same moment - the rules cannot count): the earliest keeps it, the others
  * take a free token, or go back onto the period.
  *
+ * A token rolled EARLY (portal/roll-ahead.js) may already be paying for a
+ * session outside the running period - one in its own month. `spends` are
+ * the bookings of ANY period that hold one of the tokens: such a token is
+ * taken, not free, or it would pay twice.
+ *
  * @param {{tokens: !Array<{id: string, expiresAt: string}>,
- *     bookings: !Array<!Object>, period: {periodKey: string}}} args The
- *     athlete's live rolled-over tokens and their bookings of the running
- *     period (`{id, ...data}`).
+ *     bookings: !Array<!Object>, spends: (!Array<!Object>|undefined),
+ *     period: {periodKey: string}}} args The athlete's live rolled-over
+ *     tokens, their bookings of the running period (`{id, ...data}`) and
+ *     the bookings of any period that spent one of the tokens.
  * @return {!Array<{bookingId: string, graceTokenId: ?string}>} The changes:
  *     a token id to charge the booking to, or null for "the period".
  */
@@ -297,12 +303,17 @@ function settlePlan(args) {
   const ids = new Set(tokens.map((t) => t.id));
   const live = (args.bookings || []).filter((b) => b &&
       b.status !== 'cancelled').sort(byDateThenId);
+  const running = new Set(live.map((b) => b.id));
+  const elsewhere = (args.spends || []).filter((b) => b &&
+      b.status !== 'cancelled' && !running.has(b.id));
   const holder = new Map();
   const displaced = [];
-  for (const b of live) {
+  // Earliest session keeps the token. Only a booking of the running period
+  // is ever moved off it; one in another period is left as it is.
+  for (const b of live.concat(elsewhere).sort(byDateThenId)) {
     if (!ids.has(b.graceTokenId)) continue;
-    if (holder.has(b.graceTokenId)) displaced.push(b);
-    else holder.set(b.graceTokenId, b);
+    if (!holder.has(b.graceTokenId)) holder.set(b.graceTokenId, b);
+    else if (running.has(b.id)) displaced.push(b);
   }
   const free = tokens.filter((t) => !holder.has(t.id));
   const displacedIds = new Set(displaced.map((b) => b.id));
@@ -344,8 +355,11 @@ async function settleAthlete(store, a) {
     if (tokens.length === 0) return 0;
     const bookingSnap = await tx.get(
         lib.periodBookingsQuery(store, a.athleteId, a.current));
+    // Where each token is already spent, in ANY period (2026-11-16).
+    const spends = await lib.readGraceSpends((q) => tx.get(q),
+        lib.graceSpendQueries(store, tokens, a.today));
     const changes = settlePlan({tokens, bookings: lib.rows(bookingSnap),
-      period: a.current});
+      spends, period: a.current});
     for (const c of changes) {
       tx.update(store.collection('bookings').doc(c.bookingId),
           c.graceTokenId ?

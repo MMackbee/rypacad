@@ -118,6 +118,32 @@ describe('createBooking: next month full, this month has a leftover token', () =
     expect(requestRollAhead).not.toHaveBeenCalled();
   });
 
+  test('never asked by Repeat weekly, nor for a session that is full, gone, cancelled or already held', async () => {
+    requestRollAhead.mockResolvedValue({ graceTokenId: TOKEN });
+    const refused = { reason: 'no-tokens-left' };
+    await expect(createBooking(december, { silent: true, createdVia: 'repeat' })).rejects.toMatchObject(refused);
+    mockDocs['sessions/s-dec'] = { ...mockDocs['sessions/s-dec'], booked: 8 };
+    await expect(createBooking(december)).rejects.toMatchObject(refused);
+    mockDocs['sessions/s-dec'] = { ...mockDocs['sessions/s-dec'], booked: 2, status: 'cancelled' };
+    await expect(createBooking(december)).rejects.toMatchObject(refused);
+    mockDocs['sessions/s-dec'] = { ...mockDocs['sessions/s-dec'], status: 'scheduled' };
+    mockDocs['bookings/a1_s-dec'] = { athleteId: 'a1', sessionId: 's-dec', status: 'confirmed' };
+    await expect(createBooking(december)).rejects.toMatchObject(refused);
+    delete mockDocs['sessions/s-dec'];
+    delete mockDocs['bookings/a1_s-dec'];
+    await expect(createBooking(december)).rejects.toMatchObject(refused);
+    expect(requestRollAhead).not.toHaveBeenCalled();
+    expect(mockWrites).toEqual([]);
+  });
+
+  test('a session cancelled by the family earlier can be booked again with the leftover token', async () => {
+    requestRollAhead.mockResolvedValue({ graceTokenId: TOKEN });
+    mockDocs['bookings/a1_s-dec'] = { athleteId: 'a1', sessionId: 's-dec', status: 'cancelled', chargedFrom: 'period' };
+    await createBooking(december);
+    expect(requestRollAhead).toHaveBeenCalledTimes(1);
+    expect(mockUpdates[0]).toMatchObject({ path: 'bookings/a1_s-dec', data: { status: 'confirmed', chargedFrom: 'grace', graceTokenId: TOKEN } });
+  });
+
   test('a token already rolled out of November is not November\'s to spend again', async () => {
     // Rolled early and spent on a December session: November reads 5 used + 1 carried over.
     mockRows.graceTokens = [{ id: TOKEN, athleteId: 'a1', reason: 'rollover', sourcePeriodKey: '2026-11-01', expiresAt: '2026-12-31' }];
@@ -137,6 +163,7 @@ describe('the pure pieces', () => {
     expect(rollAheadApplies(noTokens, next)).toBe(true);
     expect(rollAheadApplies(noTokens, { ...next, periodKey: '2026-11-01' })).toBe(false);
     expect(rollAheadApplies(noTokens, { ...next, waitlistIfFull: true })).toBe(false);
+    expect(rollAheadApplies(noTokens, { ...next, createdVia: 'repeat' })).toBe(false);
     expect(rollAheadApplies({ reason: 'no-session-token' }, next)).toBe(false);
     expect(rollAheadApplies(noTokens, { ...next, pkg: { kind: 'single', tokens: 1 } })).toBe(false);
     expect(rollAheadApplies(noTokens, { ...next, pkg: { kind: 'elite', tokens: null } })).toBe(false);

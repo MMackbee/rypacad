@@ -278,6 +278,18 @@ export function periodFallback(pkg) {
 }
 
 /**
+ * How many tokens of `periodKey` were already turned into rolled-over
+ * tokens before the period ended (2026-11-16, a leftover token used early:
+ * functions/portal/roll-ahead.js). Each has left the period, spent or not,
+ * so it comes off the period's `left`. It only ever matches the running
+ * period - the nightly job mints for a period that is over.
+ * CHANGE ONE, CHANGE BOTH: functions/portal/lib.js tokensPosition.
+ */
+export function rolledAheadCount(graceTokens, periodKey) {
+  return (graceTokens || []).filter((g) => g && g.reason === 'rollover' && g.sourcePeriodKey === periodKey).length;
+}
+
+/**
  * The position a session on `dateISO` is judged by (incident 2026-11-01:
  * families who had spent November saw every December session greyed and
  * read it as "no December tokens"). A date inside the NEXT period reads
@@ -292,18 +304,6 @@ export function periodFallback(pkg) {
  * judges them by expiry as before. `judgedPeriodKey` says which period the
  * numbers describe.
  */
-/**
- * How many tokens of `periodKey` were already turned into rolled-over
- * tokens before the period ended (2026-11-16, a leftover token used early:
- * functions/portal/roll-ahead.js). Each has left the period, spent or not,
- * so it comes off the period's `left`. It only ever matches the running
- * period - the nightly job mints for a period that is over.
- * CHANGE ONE, CHANGE BOTH: functions/portal/lib.js tokensPosition.
- */
-export function rolledAheadCount(graceTokens, periodKey) {
-  return (graceTokens || []).filter((g) => g && g.reason === 'rollover' && g.sourcePeriodKey === periodKey).length;
-}
-
 export function positionForDate(tokens, dateISO) {
   if (!tokens || tokens.unlimited || !tokens.nextPeriod || !dateISO) return tokens;
   const np = tokens.nextPeriod;

@@ -281,6 +281,24 @@ test('Dec 1: a November session cancelled after the early roll still rolls',
           [`graceTokens/${TOKEN_1}`, `graceTokens/${TOKEN_2}`]);
     });
 
+test('Dec 1: an early token spent on a NOVEMBER session is not spent again',
+    async () => {
+      // Rolled for a December session that then fell through; the family
+      // used the token in November instead. 6 sessions in November, 6 paid.
+      const docs = world();
+      await call(docs);
+      Object.assign(docs, booking('1127', '2026-11-27',
+          {chargedFrom: 'grace', graceTokenId: TOKEN_1}));
+      const before = DEC_DAYS.map((d) => docs[`bookings/sam_12${d}`]
+          .chargedFrom);
+      const out = await rollover.runTokenRollover({
+        now: new Date('2026-12-01T06:05:00Z'), db: fakeDb(docs)});
+      assert.deepEqual([out.minted, out.recharged, out.errors], [0, 0, 0]);
+      assert.deepEqual(DEC_DAYS.map((d) => docs[`bookings/sam_12${d}`]
+          .chargedFrom), before);
+      assert.equal(docs['bookings/sam_1127'].graceTokenId, TOKEN_1);
+    });
+
 test('decideRollAhead skips an id that is already taken', () => {
   const ctx = {
     user: {role: 'parent', householdId: 'hart'}, athleteId: 'sam',
