@@ -27,9 +27,9 @@
  * `tokenPeriods` doc is counted at the package's own number, as every
  * screen counts it (owner 2026-11-16: "she clearly has the tokens"), when
  * `rollover.packageCountStands` (third day on, billing active since before
- * the period began), and is put on record in the same transaction. Every
- * read comes first, `decideRollAhead` decides, and a refusal is an
- * HttpsError that writes nothing.
+ * the period began). Nothing is written for that: the token is the only
+ * document created. Every read comes first, `decideRollAhead` decides, and
+ * a refusal is an HttpsError that writes nothing.
  */
 
 'use strict';
@@ -146,9 +146,7 @@ function holds(entries, fallbackDate, anchorDay) {
  *     session's period (`next`).
  * @return {{ok: boolean, reason: (string|undefined),
  *     tokenId: (string|undefined), expiresAt: (string|undefined),
- *     periodKey: (string|undefined), period: (!Object|undefined),
- *     record: (boolean|undefined)}} The token to create, or why not;
- *     `record` when the running period must be put on record with it.
+ *     periodKey: (string|undefined)}} The token to create, or why not.
  */
 function decideRollAhead(ctx) {
   const no = (reason) => ({ok: false, reason});
@@ -170,14 +168,13 @@ function decideRollAhead(ctx) {
   const current = ctx.current || {};
   const issued = current.tokenPeriod && current.tokenPeriod.granted;
   let tokenPeriod = current.tokenPeriod;
-  let record = false;
   if (!Number.isInteger(issued)) {
-    // No record: the package's own count, as the meter shows it.
-    if (!rollover.packageCountStands({athlete, period, today})) {
+    // No record: the package's own count, as the meter shows it. Read
+    // here, written nowhere.
+    if (!rollover.packageCountStands({athlete, household, period, today})) {
       return no('not-issued');
     }
     tokenPeriod = {granted: lib.periodFallback(pkg)};
-    record = true;
   }
   const graceTokens = ctx.graceTokens || [];
 
@@ -220,7 +217,7 @@ function decideRollAhead(ctx) {
     const tokenId = rollover.tokenIdFor(ctx.athleteId, period.periodKey, n);
     if (!taken.has(tokenId)) {
       return {ok: true, tokenId, expiresAt: until,
-        periodKey: period.periodKey, period, record};
+        periodKey: period.periodKey};
     }
   }
   return no('none-left');
@@ -285,13 +282,6 @@ async function rollTokenAheadHandler(data, context, deps) {
     // ---- every read happens above this line ----
     const decision = decideRollAhead(ctx);
     if (!decision.ok) throw refusal(decision.reason);
-    if (decision.record) {
-      tx.create(store.collection('tokenPeriods')
-          .doc(lib.tokenPeriodId(athleteId, decision.periodKey)),
-      rollover.packageRecord({athleteId,
-        householdId: ctx.athlete.householdId, pkg: ctx.pkg,
-        period: decision.period, by: CREATED_BY}));
-    }
     tx.create(store.collection('graceTokens').doc(decision.tokenId),
         Object.assign(rollover.rolloverTokenDoc({
           athleteId,

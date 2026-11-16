@@ -35,34 +35,28 @@
  *      the period's issued grant, whoever wrote it);
  *   5. it starts with November's leftovers on Dec 1 (FIRST_ROLLING_END).
  *
- * Only a period ON RECORD rolls (a `tokenPeriods` doc): the package-count
- * fallback the booking screens use for a period nobody has paid for yet must
- * never mint tokens after the fact - a family that joins or pays in December
- * gets nothing out of November.
- *
- * A RUNNING period without a record (owner 2026-11-16, the Schmidt case:
- * "she clearly has the tokens"). The screens count such a period at the
- * package's own number and let an active family book with it - an athlete
- * on a paused legacy subscription has no `tokenPeriods` doc - so to the
- * family those tokens are real, and nobody should have to issue the month
- * by hand for them to roll. So the same nightly run PUTS THE RUNNING PERIOD
- * ON RECORD at the package's count (`packageRecord`, source 'package') for
- * every monthly token athlete whose membership may book and who has no
- * record - but only when the package count really stands for a paid month
- * (`packageCountStands`): from the period's third day on (by then the 1st's
- * payment has either written the record itself or frozen the membership),
- * and only for an athlete whose billing was ALREADY active before the
- * period began (`memberBefore`). A family that signs up on Nov 29 pays for
- * December - its billing turned active inside November, so November is
- * never recorded - and an athlete with no billing on file gets none either.
- * A test athlete and one with no household are skipped. `rollTokenAhead`
- * applies the same test when it relies on the count. A Stripe payment or an
- * ops Issue overwrites the record as before, and while the record is still
- * the package's ('package'), the nightly run keeps it at the athlete's
- * current package count.
- *
- * Elite holds no tokens and the single token is already good all season, so
- * neither rolls.
+ * A PERIOD WITH NO RECORD (owner 2026-11-16, the Schmidt case: "she clearly
+ * has the tokens"; and no auto-written records - "artifacts"). The screens
+ * count a period that has no `tokenPeriods` doc at the package's own number
+ * and let an active family book with it - an athlete on a paused legacy
+ * subscription never gets a doc - so to the family those tokens are real and
+ * they roll like any others. Nothing is written for it: the package's count
+ * is simply read when the tokens roll. What keeps that from minting a month
+ * nobody was a member for:
+ *   - the athlete's billing must have been active since BEFORE the period
+ *     began (`memberBefore`): a family that signs up on Nov 29 pays for
+ *     December, its billing turned active inside November, and November is
+ *     not theirs; an athlete with no billing on file gets none;
+ *   - a RUNNING period (rollTokenAhead) counts that way only from its third
+ *     day (`fallbackStands`): by then the 1st's payment has either written
+ *     the record or frozen the membership;
+ *   - an ENDED period (this job) counts that way only on the two days after
+ *     it ends (`FALLBACK_ROLL_DAYS`), so a package changed later in the
+ *     month cannot re-count a month that is over;
+ *   - never a test athlete or household, nor an athlete with no household.
+ * A period that HAS a record rolls from the record, whoever wrote it, as
+ * before. Elite holds no tokens and the single token is already good all
+ * season, so neither rolls.
  *
  * `runTokenRollover` is a plain function taking a fixed clock, like the jobs
  * in portal/jobs.js; index.js wraps it in a schedule.
@@ -95,8 +89,11 @@ const DAY_MS = 24 * 60 * 60 * 1000;
  * this many days after it starts (see the header).
  */
 const FALLBACK_AFTER_DAYS = 2;
-/** `tokenPeriods.source` of a record written from the package count. */
-const PACKAGE_SOURCE = 'package';
+/**
+ * An ended period with no record rolls at the package's number only for
+ * this many days after it ends (see the header).
+ */
+const FALLBACK_ROLL_DAYS = 2;
 
 /**
  * @param {string} iso `'YYYY-MM-DD'`.
@@ -120,13 +117,13 @@ function addDays(iso, days) {
 }
 
 /**
- * Whether a RUNNING period that has no `tokenPeriods` doc may be counted at
- * the package's own number: from its third day on.
+ * Whether a RUNNING period is old enough for the package's number to stand
+ * in for a missing record: from its third day on.
  * CHANGE ONE, CHANGE BOTH: frontend/src/portal/data/rollover.js
  * fallbackStands.
  * @param {?{periodKey: string}} period The running period.
  * @param {string} today `'YYYY-MM-DD'` in Chicago.
- * @return {boolean} True when the package count stands in for the record.
+ * @return {boolean} True from the period's third day.
  */
 function fallbackStands(period, today) {
   return Boolean(period && period.periodKey) &&
@@ -139,6 +136,8 @@ function fallbackStands(period, today) {
  * A sign-up, a payment, a failure or a re-start inside the period all move
  * `billing.updatedAt` into it, and each of those either writes the record
  * itself or is not a month the package count can stand for.
+ * CHANGE ONE, CHANGE BOTH: frontend/src/portal/data/rollover.js
+ * memberBefore.
  * @param {?Object} athlete An `athletes/{id}` body.
  * @param {?{periodKey: string}} period The period.
  * @return {boolean} True when billing was active before the period began.
@@ -156,102 +155,46 @@ function memberBefore(athlete, period) {
 }
 
 /**
- * Whether a RUNNING period with no `tokenPeriods` doc is counted at the
- * package's own number for this athlete (see the header): third day on, a
- * member since before the period, a household on file, not a test athlete.
+ * Whether this athlete's period, having no record, is one the package's
+ * number can stand for at all: a member since before it began, a household
+ * on file, no test mark (see the header).
+ * @param {?Object} athlete An `athletes/{id}` body.
+ * @param {?Object} household The athlete's `households/{id}` body.
+ * @param {?{periodKey: string}} period The period.
+ * @return {boolean} True when the package count may be read for it.
+ */
+function packageCountFor(athlete, household, period) {
+  return Boolean(athlete) && athlete.test !== true &&
+      !(household && household.test === true) &&
+      Boolean(athlete.householdId) && memberBefore(athlete, period);
+}
+
+/**
+ * Whether a RUNNING period with no record is counted at the package's own
+ * number for this athlete: `packageCountFor`, from the third day on.
  * CHANGE ONE, CHANGE BOTH: frontend/src/portal/data/rollover.js
  * packageCountStands.
- * @param {{athlete: ?Object, period: ?Object, today: string}} a The
- *     athlete, the running period and the Chicago date.
+ * @param {{athlete: ?Object, household: ?Object, period: ?Object,
+ *     today: string}} a The athlete, the running period and the Chicago
+ *     date.
  * @return {boolean} True when the package count stands in for the record.
  */
 function packageCountStands(a) {
-  const athlete = a.athlete;
-  return Boolean(athlete) && athlete.test !== true &&
-      Boolean(athlete.householdId) && fallbackStands(a.period, a.today) &&
-      memberBefore(athlete, a.period);
+  return fallbackStands(a.period, a.today) &&
+      packageCountFor(a.athlete, a.household, a.period);
 }
 
 /**
- * The `tokenPeriods` body that puts a period on record at the package's own
- * count - the number the screens showed for it all along.
- * @param {{athleteId: string, householdId: ?string, pkg: ?Object,
- *     period: {periodKey: string, periodEnd: string}, by: string}} a The
- *     athlete, the period and who relied on the count.
- * @return {!Object} The document body.
+ * Whether an ENDED period with no record rolls at the package's own number
+ * for this athlete: `packageCountFor`, on the two days after it ends.
+ * @param {{athlete: ?Object, household: ?Object, period: ?Object,
+ *     today: string}} a The athlete, the ended period and the Chicago date.
+ * @return {boolean} True when the package count rolls.
  */
-function packageRecord(a) {
-  return {
-    athleteId: a.athleteId,
-    householdId: a.householdId || null,
-    periodKey: a.period.periodKey,
-    periodEnd: a.period.periodEnd,
-    granted: lib.periodFallback(a.pkg),
-    source: PACKAGE_SOURCE,
-    eventId: null,
-    recordedBy: a.by,
-    createdAt: FieldValue.serverTimestamp(),
-  };
-}
-
-/**
- * Create a document unless it is already there.
- * @param {!Object} ref The document reference.
- * @param {!Object} body The body.
- * @return {!Promise<boolean>} True when it was created.
- */
-async function createOnce(ref, body) {
-  try {
-    await ref.create(body);
-    return true;
-  } catch (err) {
-    // Another run got there first: the document exists, which is the goal.
-    const taken = err && (err.code === ALREADY_EXISTS ||
-        /already exists/i.test(String(err.message)));
-    if (!taken) throw err;
-    return false;
-  }
-}
-
-/**
- * Put the RUNNING period on record at the package's count for one athlete
- * who has no record of it (see the header). Only a period that rolls needs
- * one.
- * @param {!Object} store An admin `Firestore`.
- * @param {{athleteId: string, athlete: !Object, household: ?Object,
- *     pkg: !Object, anchorDay: *, today: string}} a A monthly token
- *     athlete.
- * @return {!Promise<number>} 1 when a record was written, else 0.
- */
-async function recordRunningPeriod(store, a) {
-  if (!lib.membershipAllowsBooking(a.household, a.athlete)) return 0;
-  if (a.household && a.household.test === true) return 0;
-  const period = lib.periodFor(a.today, a.anchorDay);
-  if (!packageCountStands({athlete: a.athlete, period, today: a.today})) {
-    return 0;
-  }
-  if (!rollsUntil(period, a.anchorDay)) return 0;
-  const ref = store.collection('tokenPeriods')
-      .doc(lib.tokenPeriodId(a.athleteId, period.periodKey));
-  const snap = await ref.get();
-  const count = lib.periodFallback(a.pkg);
-  if (snap.exists) {
-    // A record that is still the package's follows the athlete's package:
-    // without one the count always did (a staff package change mid-month).
-    const have = snap.data() || {};
-    if (have.source !== PACKAGE_SOURCE || have.granted === count) return 0;
-    await ref.update({granted: count});
-    console.log(`runTokenRollover re-counted ${a.athleteId} ` +
-        `${period.periodKey}: ${have.granted} -> ${count}`);
-    return 1;
-  }
-  const made = await createOnce(ref, packageRecord({athleteId: a.athleteId,
-    householdId: a.athlete.householdId, pkg: a.pkg, period, by: REASON}));
-  if (made) {
-    console.log(`runTokenRollover recorded ${a.athleteId} ` +
-        `${period.periodKey} at the package count`);
-  }
-  return made ? 1 : 0;
+function packageCountRolls(a) {
+  return Boolean(a.period && a.period.periodEnd) &&
+      a.today <= addDays(a.period.periodEnd, FALLBACK_ROLL_DAYS) &&
+      packageCountFor(a.athlete, a.household, a.period);
 }
 
 /**
@@ -334,7 +277,8 @@ function bookingsOfPeriod(bookings, period) {
  *     tokenPeriod: ?Object, bookings: !Array<!Object>,
  *     period: {periodKey: string, periodEnd: string}, anchorDay: *,
  *     today: string}} args The athlete's documents for the ended period:
- *     its issued `tokenPeriods` doc (null when none) and its bookings.
+ *     its issued `tokenPeriods` doc (null when none - the package's count
+ *     then stands in, when `packageCountRolls`) and its bookings.
  * @return {{count: number, expiresAt: ?string, skip: ?string}} `count`
  *     tokens to hold as `rollover_..._1..count`, good through `expiresAt`;
  *     `skip` names why nothing rolls ('not-monthly' | 'not-active' |
@@ -349,7 +293,12 @@ function rolloverPlan(args) {
   const expiresAt = rollsUntil(args.period, args.anchorDay);
   if (!expiresAt || expiresAt < args.today) return none('no-rollover');
   const issued = args.tokenPeriod && args.tokenPeriod.granted;
-  if (!Number.isInteger(issued)) return none('not-issued');
+  let tokenPeriod = args.tokenPeriod;
+  if (!Number.isInteger(issued)) {
+    // No record: the package's own count, read now and written nowhere.
+    if (!packageCountRolls(args)) return none('not-issued');
+    tokenPeriod = {granted: lib.periodFallback(args.pkg)};
+  }
   // The period is over: a waitlist entry in it holds nothing any more (the
   // 06:00 sweep closes it), so only bookings count against the grant. A
   // booking counts by its DATE, not the `periodKey` it was written with:
@@ -361,7 +310,7 @@ function rolloverPlan(args) {
   // something to take off the count.
   const position = lib.tokensPosition({
     pkg: args.pkg,
-    tokenPeriod: args.tokenPeriod,
+    tokenPeriod,
     bookings: bookingsOfPeriod(args.bookings, args.period),
     waitlist: [],
     graceTokens: [],
@@ -428,7 +377,15 @@ async function mintMissing(store, a) {
   let created = 0;
   for (let i = 0; i < refs.length; i += 1) {
     if (snaps[i].exists) continue;
-    if (await createOnce(refs[i], rolloverTokenDoc(a))) created += 1;
+    try {
+      await refs[i].create(rolloverTokenDoc(a));
+      created += 1;
+    } catch (err) {
+      // Another run got there first: the token exists, which is the goal.
+      const taken = err && (err.code === ALREADY_EXISTS ||
+          /already exists/i.test(String(err.message)));
+      if (!taken) throw err;
+    }
   }
   return created;
 }
@@ -551,26 +508,16 @@ async function settleAthlete(store, a) {
  * @param {{athleteId: string, athlete: !Object, today: string,
  *     households: function(?string): !Promise<?Object>,
  *     packages: function(?string): !Promise<?Object>}} a The athlete.
- * @return {!Promise<{created: number, recharged: number,
- *     recorded: number}>} Tokens created, bookings re-charged, and 1 when
- *     the running period was put on record.
+ * @return {!Promise<{created: number, recharged: number}>} Tokens created
+ *     and bookings re-charged.
  */
 async function rollAthlete(store, a) {
+  const nothing = {created: 0, recharged: 0};
   const {athleteId, athlete, today} = a;
   const pkg = await a.packages(athlete.packageId);
-  if (!isMonthlyTokens(pkg)) return {created: 0, recharged: 0, recorded: 0};
+  if (!isMonthlyTokens(pkg)) return nothing;
   const household = await a.households(athlete.householdId);
   const anchorDay = household && household.periodAnchorDay;
-  // Its own catch: a failed record must not cost the athlete tonight's
-  // rollover and settle.
-  let recorded = 0;
-  try {
-    recorded = await recordRunningPeriod(store, {athleteId, athlete,
-      household, pkg, anchorDay, today});
-  } catch (err) {
-    console.error('runTokenRollover record error:', athleteId, err);
-  }
-  const nothing = {created: 0, recharged: 0, recorded};
   const period = previousPeriod(today, anchorDay);
   // The cheap refusals first, before any per-athlete read.
   const early = rolloverPlan({athlete, household, pkg, period, anchorDay,
@@ -590,7 +537,7 @@ async function rollAthlete(store, a) {
     count: plan.count, expiresAt: plan.expiresAt});
   const recharged = await settleAthlete(store, {athleteId, period,
     current: lib.periodFor(today, anchorDay), today});
-  return {created, recharged, recorded};
+  return {created, recharged};
 }
 
 /**
@@ -611,7 +558,7 @@ async function runTokenRollover(args) {
   const store = a.db || admin.firestore();
   const today = lib.todayISO(now);
   const summary = {today, considered: 0, athletes: 0, minted: 0,
-    recharged: 0, recorded: 0, errors: 0};
+    recharged: 0, errors: 0};
   const households = cachedReader(store, 'households');
   const packages = cachedReader(store, 'packages');
   const snap = await store.collection('athletes').get();
@@ -620,14 +567,13 @@ async function runTokenRollover(args) {
     if (!athlete.packageId) continue;
     summary.considered += 1;
     try {
-      const {created, recharged, recorded} = await rollAthlete(store, {
+      const {created, recharged} = await rollAthlete(store, {
         athleteId: doc.id, athlete, today, households, packages});
       if (created > 0) {
         summary.athletes += 1;
         summary.minted += created;
       }
       summary.recharged += recharged;
-      summary.recorded += recorded;
     } catch (err) {
       summary.errors += 1;
       console.error('runTokenRollover error:', doc.id, err);
@@ -635,8 +581,7 @@ async function runTokenRollover(args) {
   }
   console.log(`runTokenRollover ${today}: considered=${summary.considered} ` +
       `athletes=${summary.athletes} minted=${summary.minted} ` +
-      `recharged=${summary.recharged} recorded=${summary.recorded} ` +
-      `errors=${summary.errors}`);
+      `recharged=${summary.recharged} errors=${summary.errors}`);
   return summary;
 }
 
@@ -647,8 +592,8 @@ module.exports = {
   fallbackStands,
   isMonthlyTokens,
   memberBefore,
+  packageCountRolls,
   packageCountStands,
-  packageRecord,
   isRolloverTokenId,
   previousPeriod,
   rolloverPlan,

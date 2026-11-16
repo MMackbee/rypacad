@@ -173,17 +173,15 @@ test('a spent bonus token does not count as cover', async () => {
 // Owner 2026-11-16: "she clearly has the tokens". Britta had no November
 // record; the meter showed the package's 6 and let her book with them.
 test('no November record: the package count the meter shows is used, and ' +
-    'the month is put on record', async () => {
+    'no record is written for it', async () => {
   const docs = world();
   delete docs['tokenPeriods/sam_2026-11-01'];
   const out = await call(docs);
   assert.equal(out.graceTokenId, TOKEN_1);
-  const record = docs['tokenPeriods/sam_2026-11-01'];
-  assert.deepEqual([record.athleteId, record.householdId, record.periodKey,
-    record.periodEnd, record.granted, record.source, record.eventId,
-    record.recordedBy],
-  ['sam', 'hart', '2026-11-01', '2026-11-30', 6, 'package', null,
-    'roll-ahead']);
+  // The token is the only new document.
+  assert.deepEqual(Object.keys(docs).filter(
+      (p) => p.startsWith('tokenPeriods/')), []);
+  assert.deepEqual(graceIds(docs), [`graceTokens/${TOKEN_1}`]);
   // With the last one rolled, the package count is all spoken for.
   Object.assign(docs, booking('1210', '2026-12-10',
       {chargedFrom: 'grace', graceTokenId: TOKEN_1}));
@@ -213,6 +211,29 @@ test('no record, and the family joined inside the month (Nov 14, or Nov 29 ' +
     householdId: 'hart', packageId: 't-6',
     billing: {status: 'active', updatedAt: '2026-11-14T15:00:00Z'}}}));
   assert.equal(out.graceTokenId, TOKEN_1);
+});
+
+test('no record, used early, then Dec 1: the rest of the package count ' +
+    'rolls and nothing is minted twice', async () => {
+  const docs = world();
+  delete docs['tokenPeriods/sam_2026-11-01'];
+  delete docs['bookings/sam_1103']; // 4 used: two leftover tokens
+  await call(docs);
+  Object.assign(docs, booking('1210', '2026-12-10',
+      {chargedFrom: 'grace', graceTokenId: TOKEN_1}));
+  const out = await rollover.runTokenRollover({
+    now: new Date('2026-12-01T06:05:00Z'), db: fakeDb(docs)});
+  assert.equal(out.minted, 1);
+  assert.deepEqual(graceIds(docs),
+      [`graceTokens/${TOKEN_1}`, `graceTokens/${TOKEN_2}`]);
+  assert.deepEqual(Object.keys(docs).filter(
+      (p) => p.startsWith('tokenPeriods/')), []);
+});
+
+test('no record, a test household: never', async () => {
+  const docs = world({'households/hart': {periodAnchorDay: 1, test: true}});
+  delete docs['tokenPeriods/sam_2026-11-01'];
+  await refusedWith(docs, {}, 'failed-precondition', 'not-issued');
 });
 
 test('no record on the 1st or 2nd of the month: wait for the payment',
