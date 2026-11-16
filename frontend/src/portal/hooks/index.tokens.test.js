@@ -356,3 +356,41 @@ test('Elite before the season: November is this period on My Schedule, December 
   expect(mine.result.current.data.tokens).not.toHaveProperty('startsOn');
   await mine.unmount();
 });
+
+// A leftover token used early (owner 2026-11-16, the Schmidt case): one
+// November token left, all of December's booked. The card's position carries
+// the offer the booking surfaces read (data/rollover.js rollAheadFor) - only
+// when November's tokens are on record.
+test('the family card: a leftover token that can book next month is offered, never off the package fallback', async () => {
+  calendar.todayISO.mockReturnValue('2026-11-16');
+  const T6 = { id: 't-6', name: '6 tokens', kind: 'tokens', tokens: 6 };
+  const row = (date) => ({ id: `a1_${date}`, sessionId: date, date, periodKey: `${date.slice(0, 7)}-01`, status: 'confirmed', type: 'training' });
+  const booked = ['2026-11-03', '2026-11-11', '2026-11-17', '2026-11-18', '2026-11-24',
+    '2026-12-08', '2026-12-09', '2026-12-15', '2026-12-16', '2026-12-22', '2026-12-29'].map(row);
+  live.fetchCurrentUser.mockResolvedValue({ uid: 'p1', householdId: 'h1' });
+  live.fetchHousehold.mockResolvedValue({ id: 'h1', name: 'Schmidt family', periodAnchorDay: 1 });
+  live.fetchHouseholdAthletes.mockResolvedValue([
+    { id: 'a1', name: 'Britta', householdId: 'h1', packageId: 't-6', billing: { status: 'active' } },
+  ]);
+  live.fetchPackage.mockResolvedValue(T6);
+  live.fetchBookings.mockResolvedValue(booked);
+  live.fetchSessionsByIds.mockResolvedValue([]);
+  live.fetchGraceTokensByAthlete.mockResolvedValue([]);
+  waitlist.fetchWaitlistByAthlete.mockResolvedValue([]);
+  grace.fetchTokenPeriod.mockImplementation(async (_id, periodKey) => (periodKey === '2026-11-01' ? { granted: 6 } : null));
+
+  const h = await mountHook(() => useHousehold());
+  expect(h.result.current.error).toBeNull();
+  const [britta] = h.result.current.data.children;
+  expect(britta.tokens).toMatchObject({ granted: 6, used: 5, left: 1, rolledAhead: 0 });
+  expect(britta.tokens.nextPeriod).toMatchObject({ periodKey: '2026-12-01', granted: 6, left: 0 });
+  expect(britta.tokens.rollAhead).toEqual({ count: 1, until: '2026-12-31', fromPeriodKey: '2026-11-01' });
+  await h.unmount();
+
+  // No November record (the package's own count stands in): nothing rolls, so nothing is offered.
+  grace.fetchTokenPeriod.mockResolvedValue(null);
+  const h2 = await mountHook(() => useHousehold());
+  expect(h2.result.current.data.children[0].tokens).toMatchObject({ left: 1 });
+  expect(h2.result.current.data.children[0].tokens).not.toHaveProperty('rollAhead');
+  await h2.unmount();
+});

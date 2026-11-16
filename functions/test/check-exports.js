@@ -7,7 +7,8 @@
  * onMentalConsentSigned (mental performance consent, 2026-11-05) and
  * moveBooking (booking changes, 2026-11-11) and staffCancelBooking (staff
  * cancel, 2026-11-12) and staffBookSession (staff booking tools,
- * 2026-11-13) and tokenRollover (one-month rollover, 2026-11-15) - 24 in
+ * 2026-11-13) and tokenRollover (one-month rollover, 2026-11-15) and
+ * rollTokenAhead (a leftover token used early, 2026-11-16) - 25 in
  * all - and each declares
  * the secrets contract 6.4 binds (spec 8). No emulator:
  * it requires index.js in-process and reads each function's __endpoint.
@@ -44,14 +45,16 @@ const EXPECTED = {
   staffCancelBooking: [],
   staffBookSession: [],
   tokenRollover: [],
+  rollTokenAhead: [],
 };
 
 assert.deepEqual(Object.keys(index).sort(), Object.keys(EXPECTED).sort(),
     'the 13 launch functions, waitlistPositions, onSingleTokenSpent, ' +
     'submitScholarship, submitFeedback, mentalCheckinReminders, ' +
     'requestMentalConsent, onMentalConsentSigned, moveBooking, ' +
-    'staffCancelBooking, staffBookSession, tokenRollover, nothing else');
-assert.equal(Object.keys(EXPECTED).length, 24, '24 functions');
+    'staffCancelBooking, staffBookSession, tokenRollover, ' +
+    'rollTokenAhead, nothing else');
+assert.equal(Object.keys(EXPECTED).length, 25, '25 functions');
 for (const [name, secrets] of Object.entries(EXPECTED)) {
   const ep = index[name].__endpoint || {};
   const got = (ep.secretEnvironmentVariables || []).map((s) => s.key);

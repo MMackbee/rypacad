@@ -188,6 +188,13 @@ async function setup() {
   // ath-elite so the expectation is 200 before AND after the Oct 10 gate.
   await seed('graceTokens', 'grace-probe', { athleteId: 'ath-elite', householdId: 'hh', expiresAt: '2026-12-31', reason: 'session-cancelled',
     sourceSessionId: 's-cancelled', createdBy: uid.ops, createdAt: new Date() });
+  // 2026-11-16 (a leftover token used early, functions/portal/roll-ahead.js):
+  // a token rolled out of November before the month ended, and a December
+  // and a January session to spend it on.
+  await seed('graceTokens', 'rollover_ath-active_2026-11-01_1', { athleteId: 'ath-active', householdId: 'hh', expiresAt: '2026-12-31', reason: 'rollover',
+    sourceSessionId: null, sourcePeriodKey: '2026-11-01', createdBy: 'roll-ahead', requestedBy: uid.parent, createdAt: new Date() });
+  await seed('sessions', 's-dec', { date: '2026-12-10', time: '4:00 PM', type: 'training', capacity: 15, booked: 0, status: 'scheduled' });
+  await seed('sessions', 's-jan', { date: '2027-01-05', time: '4:00 PM', type: 'training', capacity: 15, booked: 0, status: 'scheduled' });
   await setupSingle();
 }
 
@@ -235,18 +242,26 @@ export async function task4() {
   expect('booking: unpaid Elite refused', await bookAs(t.parent, 'ath-elite-pending_s1', booking('ath-elite-pending')), 403);
   expect('booking: parent + grace token stays under the read cap (paid Elite: open before the gate too)',
     await bookAs(t.parent, 'ath-elite_s2', { ...booking('ath-elite'), sessionId: 's2', date: DAY2, chargedFrom: 'grace', graceTokenId: 'grace-probe' }), 200);
+  // A leftover token used early (2026-11-16): the rolled token pays a
+  // December session of its own athlete, never January, never a sibling.
+  const early = (athleteId, sessionId, date) => ({ ...booking(athleteId), sessionId, date, periodKey: `${date.slice(0, 7)}-01`,
+    chargedFrom: 'grace', graceTokenId: 'rollover_ath-active_2026-11-01_1' });
+  expect('booking: a token rolled early is refused past its use-by day', await bookAs(t.parent, 'ath-active_s-jan', early('ath-active', 's-jan', '2027-01-05')), 403);
+  expect('booking: a token rolled early is refused for another athlete', await bookAs(t.parent, 'ath-absent_s-dec', early('ath-absent', 's-dec', '2026-12-10')), 403);
+  expect('booking: a token rolled early pays a next-month session', await bookAs(t.parent, 'ath-active_s-dec', early('ath-active', 's-dec', '2026-12-10')), beforeGate ? 403 : 200);
   expect('waitlist: pending refused', await createAs(t.parent, 'waitlist', 's-full_ath-pending', entry('ath-pending'), ['joinedAt']), 403);
   expect('waitlist: paid Elite allowed', await createAs(t.parent, 'waitlist', 's-full_ath-elite', entry('ath-elite'), ['joinedAt']), 200);
   expect('waitlist: active token athlete', await createAs(t.parent, 'waitlist', 's-full_ath-active', entry('ath-active'), ['joinedAt']), beforeGate ? 403 : 200);
 }
 
 async function teardown() {
-  for (const [c, ids] of Object.entries({ users: Object.values(uid), households: ['hh', 'hh-other', 'hh-frozen'], sessions: ['s1', 's2', 's3', 's-full', 's-past'],
+  for (const [c, ids] of Object.entries({ users: Object.values(uid), households: ['hh', 'hh-other', 'hh-frozen'], sessions: ['s1', 's2', 's3', 's-full', 's-past', 's-dec', 's-jan'],
     athletes: ['ath-active', 'ath-absent', 'ath-pending', 'ath-elite', 'ath-elite-pending', 'ath-other', 'new-1', 'new-2', 'new-3', 'new-4',
       'ath-single', 'ath-single2', 'ath-single-legacy', 'ath-moved', 'ath-frozen'],
     bookings: ['ath-active_s1', 'ath-absent_s1', 'ath-pending_s1', 'ath-elite_s1', 'ath-elite-pending_s1', 'ath-elite_s2', 'ath-pending_s-old',
-      'ath-single_s1', 'ath-single2_s1', 'ath-single-legacy_s1', 'ath-moved_s1', 'ath-elite_s3', 'ath-single_s2', 'ath-single_s3', 'ath-frozen_s2', 'ath-active_s-past'],
-    graceTokens: ['grace-probe', 'single_cs_probe', 'single_cs_other', 'single_cs_void'],
+      'ath-single_s1', 'ath-single2_s1', 'ath-single-legacy_s1', 'ath-moved_s1', 'ath-elite_s3', 'ath-single_s2', 'ath-single_s3', 'ath-frozen_s2', 'ath-active_s-past',
+      'ath-active_s-dec', 'ath-active_s-jan', 'ath-absent_s-dec'],
+    graceTokens: ['grace-probe', 'single_cs_probe', 'single_cs_other', 'single_cs_void', 'rollover_ath-active_2026-11-01_1'],
     tokenPeriods: [`ath-single-legacy_${COMP.key}`, `ath-single-legacy_${COMP_PREV.key}`, `ath-single_${COMP.key}`],
     waitlist: ['s-full_ath-pending', 's-full_ath-elite', 's-full_ath-active', 's-full_ath-moved'] })) for (const id of ids) await del(c, id);
 }

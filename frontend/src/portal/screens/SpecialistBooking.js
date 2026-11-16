@@ -39,7 +39,7 @@ import { waitlistClosed } from '../data/sessionStart';
 import { SPECIALISTS, repeatsWeekly } from '../data/specialists';
 import { positionForDate, windowMonthsFor } from '../data/packages';
 import { graceSpendLabel, isSingleTokenId } from '../data/singleToken';
-import { isRolloverTokenId } from '../data/rollover';
+import { isRolloverTokenId, rollAheadFor } from '../data/rollover';
 // Pure calendar/season helpers per the seam rule already established in
 // BookSession.js/CommitmentContract.js/TourStandings.js - data still travels
 // through the hook seam below; these are formatting helpers, not response
@@ -257,7 +257,8 @@ export default function SpecialistBooking({
   const tokensSpentOn = (date) => {
     const t = positionForDate(tokens, date);
     const hasGrace = (t?.grace?.length ?? 0) > 0;
-    return t ? !t.unlimited && t.left === 0 && !hasGrace : false;
+    // 2026-11-16: this period's leftover token books a next-period day.
+    return t ? !t.unlimited && t.left === 0 && !hasGrace && !rollAheadFor(tokens, date) : false;
   };
   // Sprint 20 (spec 5, D16): the hook computes bookingOpen(Date.now(), pkg)
   // (contract 4.3); absent (routing Task 10 not merged yet) reads as open so
@@ -683,7 +684,11 @@ function DetailSheet({
   // Book a Session's cards do. With none, and the period at zero, this time
   // can be neither reserved nor waited for.
   const hasGrace = (tokens?.grace ?? []).some((g) => !g.expiresAt || g.expiresAt >= slot.date);
-  const slotTokensSpent = tokens ? !tokens.unlimited && tokens.left === 0 && !hasGrace : false;
+  const outOfPeriod = tokens ? !tokens.unlimited && tokens.left === 0 && !hasGrace : false;
+  // 2026-11-16: this period's leftover token pays for a next-period time
+  // (data/rollover.js rollAheadFor); it books a seat, never a waitlist place.
+  const rollAhead = outOfPeriod ? rollAheadFor(tokens, slot.date) : null;
+  const slotTokensSpent = outOfPeriod && !rollAhead;
   return (
     <div
       data-portal-overlay=""
@@ -722,7 +727,7 @@ function DetailSheet({
         {waiting ? null : (
           <div style={{ marginTop: 10 }}>
             {/* A bonus token that expires before this time is not what it spends. */}
-            <SpendNote tokens={tokens && !hasGrace ? { ...tokens, grace: [] } : tokens} />
+            <SpendNote rollAhead={rollAhead} tokens={tokens && !hasGrace ? { ...tokens, grace: [] } : tokens} />
           </div>
         )}
         {specialist.id === 'mental' && onAttendee ? (
@@ -762,7 +767,7 @@ function DetailSheet({
         ) : null}
         {full && !waiting ? (
           <Body size={12} tone={color.secondary} style={{ marginTop: 12 }}>
-            {noWaitlist || slotTokensSpent ? 'This time is full.' : `This time is full. ${waitlistPromiseCopy({ name: athleteName, unlimited })}`}
+            {noWaitlist || slotTokensSpent || rollAhead ? 'This time is full.' : `This time is full. ${waitlistPromiseCopy({ name: athleteName, unlimited })}`}
           </Body>
         ) : null}
         {capReached ? (
@@ -792,7 +797,7 @@ function DetailSheet({
             style={{ marginTop: 14 }}
           />
         ) : slotTokensSpent ? null : full ? (
-          noWaitlist ? null : (
+          noWaitlist || rollAhead ? null : (
             <JoinWaitlistButton unlimited={unlimited} loading={saving} disabled={disabled} height={54} onClick={onJoinWaitlist} style={{ marginTop: 18 }} />
           )
         ) : (

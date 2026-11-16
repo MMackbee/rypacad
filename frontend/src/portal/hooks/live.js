@@ -33,7 +33,8 @@ import {
 } from 'firebase/firestore';
 import { auth, db } from '../../firebase';
 import { bump } from './invalidate';
-import { eliteDailyCapHit, normalizeAnchorDay, periodFallback, periodFor, windowMonthsFor } from '../data/packages';
+import { eliteDailyCapHit, normalizeAnchorDay, periodFallback, periodFor, rolledAheadCount, windowMonthsFor } from '../data/packages';
+import { requestRollAhead, rollAheadApplies } from './rollAhead';
 import { CHANGEABLE_PACKAGE_IDS } from '../data/packageChange';
 import { BOOKING_OPENS_LABEL, academyDateISO, bookingOpen, openThrough, todayISO, windowOpensOn } from '../data/calendar';
 import { SPECIALISTS, mentalCapFor } from '../data/specialists';
@@ -709,9 +710,11 @@ function assertEliteDailyCap(pkg, type, date, bookings) {
  * displays as spent. `waitlist` (Sprint 16, contract v2.4): the athlete's
  * own waitlist entries in this period RESERVE tokens - tokensFor subtracts
  * them from `left`, so the gate does too; otherwise the hub could read
- * "0 left" while a booking still went through.
+ * "0 left" while a booking still went through. `rolledAhead` (2026-11-16):
+ * tokens of this period already rolled out early (packages.js
+ * rolledAheadCount) are not the period's to spend again.
  */
-export function assertPeriodTokensLeft(pkg, bookings, periodKey, issuedGrant, waitlist = [], currentPeriodKey = null) {
+export function assertPeriodTokensLeft(pkg, bookings, periodKey, issuedGrant, waitlist = [], currentPeriodKey = null, rolledAhead = 0) {
   if (!pkg || pkg.tokens !== null) {
     // Contract v2.1 pin C: an issued tokenPeriods doc (Stripe or ops) is the
     // grant when it exists; periodFallback (the package's own tokens, 0 for
@@ -721,7 +724,8 @@ export function assertPeriodTokensLeft(pkg, bookings, periodKey, issuedGrant, wa
       (b) => b.status !== 'cancelled' && b.periodKey === periodKey && !b.graceTokenId && b.comp !== true
     ).length;
     const reserved = (waitlist || []).filter((w) => w && w.periodKey === periodKey).length;
-    if (used + reserved >= granted && pkg?.kind === 'single') {
+    const gone = used + reserved + (rolledAhead || 0);
+    if (gone >= granted && pkg?.kind === 'single') {
       // Reached only with no usable purchased token: buy one, or free one.
       throw new LiveDataError(
         ERR.INVALID,
@@ -732,12 +736,12 @@ export function assertPeriodTokensLeft(pkg, bookings, periodKey, issuedGrant, wa
         'no-session-token'
       );
     }
-    if (used + reserved >= granted) {
+    if (gone >= granted) {
       throw new LiveDataError(
         ERR.INVALID,
         granted === 0
           ? 'This package has no tokens to spend — ask the academy to assign one.'
-          : `${currentPeriodKey && periodKey > currentPeriodKey ? "Next period's" : "This period's"} tokens are already fully booked (${used} of ${granted}${reserved ? `, ${reserved} held on a waitlist` : ''}).`,
+          : `${currentPeriodKey && periodKey > currentPeriodKey ? "Next period's" : "This period's"} tokens are already fully booked (${used} of ${granted}${reserved ? `, ${reserved} held on a waitlist` : ''}${rolledAhead ? `, ${rolledAhead} carried over` : ''}).`,
         null,
         'no-tokens-left'
       );
@@ -845,7 +849,20 @@ export async function createBooking(
       const issued = await getDoc(doc(db, 'tokenPeriods', `${athleteId}_${periodKey}`)).catch(() => null);
       const issuedGrant = issued && issued.exists() ? issued.data().granted : undefined;
       const waitlist = heldBy ?? (await fetchAthleteWaitlist(athleteId, { householdId }));
-      assertPeriodTokensLeft(pkg, bookings, periodKey, issuedGrant, waitlist, currentPeriodKey);
+      try {
+        assertPeriodTokensLeft(pkg, bookings, periodKey, issuedGrant, waitlist, currentPeriodKey, rolledAheadCount(graceTokens, periodKey));
+      } catch (err) {
+        // 2026-11-16 (the Schmidt case): next period's tokens are all booked
+        // while this period has one left over. The server rolls it now
+        // instead of on the 1st (hooks/rollAhead.js) and this booking spends
+        // it as the grace token it is; when it cannot, the refusal stands.
+        const rolled = rollAheadApplies(err, { pkg, periodKey, currentPeriodKey, waitlistIfFull })
+          ? await requestRollAhead({ athleteId, date })
+          : null;
+        if (!rolled) throw err;
+        chargedFrom = 'grace';
+        graceTokenId = rolled.graceTokenId;
+      }
     }
   }
   // The session's own start time, read inside the transaction below - a

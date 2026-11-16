@@ -4,7 +4,7 @@ import { color, font, radius } from '../tokens';
 import { longDayLabel } from '../data/calendar';
 import { tokenStartLabel } from '../data/billingCopy';
 import { tokenDayLabel } from '../data/singleToken';
-import { isRolled, rolledCount, rolledLine } from '../data/rollover';
+import { isRolled, rollAheadLine, rollAheadNote, rolledCount, rolledLine } from '../data/rollover';
 import { SessionTokenPools } from './SessionTokens';
 
 /**
@@ -97,7 +97,9 @@ export default function AllowancePools({ tokens, compact = false, style }) {
     );
   }
 
-  const pct = tokens.granted ? Math.min(100, (tokens.used / tokens.granted) * 100) : 0;
+  // A token rolled out early (2026-11-16) has left the period like a used one.
+  const carried = tokens.rolledAhead || 0;
+  const pct = tokens.granted ? Math.min(100, ((tokens.used + carried) / tokens.granted) * 100) : 0;
 
   return (
     <div style={style}>
@@ -119,7 +121,7 @@ export default function AllowancePools({ tokens, compact = false, style }) {
         {tokens.unpaid ? null : (
           <span style={{ font: `400 11px ${font.body}`, color: color.textTertiary }}>
             {/* A token held by a waitlist place is not left to spend - say where it went. */}
-            {tokens.used} of {tokens.granted} used{tokens.reserved ? `, ${tokens.reserved} held on a waitlist` : ''}
+            {tokens.used} of {tokens.granted} used{carried ? `, ${carried} carried over` : ''}{tokens.reserved ? `, ${tokens.reserved} held on a waitlist` : ''}
           </span>
         )}
       </div>
@@ -206,9 +208,17 @@ export function NextPeriodLine({ tokens, style }) {
   if (!tokens || tokens.unlimited || tokens.perPurchase || tokens.unpaid) return null;
   const label = nextPeriodLabel(tokens.nextPeriod);
   if (!label) return null;
+  // 2026-11-16 (the Schmidt case): next month at zero is not a dead end
+  // while this month has a leftover token that can book it now.
+  const ahead = rollAheadLine(tokens);
   return (
-    <div data-next-period={tokens.nextPeriod.periodKey} style={{ marginTop: 6, font: `600 11px ${font.body}`, color: tokens.nextPeriod.left === 0 ? color.error : color.textSecondary, ...style }}>
+    <div data-next-period={tokens.nextPeriod.periodKey} style={{ marginTop: 6, font: `600 11px ${font.body}`, color: tokens.nextPeriod.left === 0 && !ahead ? color.error : color.textSecondary, ...style }}>
       {label}
+      {ahead ? (
+        <div data-roll-ahead="" style={{ marginTop: 3, font: `400 11px ${font.body}`, color: color.textSecondary }}>
+          {ahead}
+        </div>
+      ) : null}
     </div>
   );
 }
@@ -282,9 +292,11 @@ export function GraceLine({ tokens, style }) {
  * a period token (contract §4), so the note says so rather than claiming a
  * period token is used when it is not.
  */
-export function SpendNote({ tokens, style }) {
+export function SpendNote({ tokens, rollAhead = null, style }) {
   if (!tokens) return null;
   if (tokens.unlimited) return <SpendBadge tone={color.primary} style={style}>Included with Elite</SpendBadge>;
+  // 2026-11-16: a next-period session paid by this period's leftover token.
+  if (rollAhead) return <SpendBadge tone={color.textTertiary} style={style}>{rollAheadNote(rollAhead)}</SpendBadge>;
 
   const hasGrace = (tokens.grace?.length ?? 0) > 0;
   if (tokens.left === 0 && !hasGrace) {

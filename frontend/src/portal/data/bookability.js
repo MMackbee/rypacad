@@ -11,6 +11,7 @@ import { eliteDailyCapHit, periodFor, positionForDate } from './packages';
 import { sessionStarted } from './sessionStart';
 import { reservedEligible } from './reserved';
 import { isHiddenSession } from './hiddenSessions';
+import { rollAheadFor } from './rollover';
 
 /** Sessions arrive raw (numeric capacity/booked) from useMonthSessions;
     useBooking's slots carry a pre-formatted capacity object. Accept both. */
@@ -26,7 +27,13 @@ export function formatCapacity(session) {
  *   rowTokens    the position this session is judged by - a next-period
  *                session by that period's own count (positionForDate)
  *   hasGrace     a bonus or single token covers this date (expiry on or after)
- *   tokensSpent  no period token and no bonus token for it (never Elite)
+ *   rollAhead    2026-11-16: a next-period session whose period is at zero
+ *                while this period has a leftover token that can pay for it
+ *                now (data/rollover.js rollAheadFor); null otherwise, and
+ *                always when `allowRollAhead` is false (the Move picker -
+ *                the server's move has no early roll)
+ *   tokensSpent  no period token, no bonus token and no leftover token for
+ *                it (never Elite)
  *   displayOnly  the Saturday adult block (bookable: false)
  *   started      R2: the session has started (only when `checkStarted`)
  *   held         the athlete already holds it (started wins)
@@ -35,18 +42,20 @@ export function formatCapacity(session) {
  */
 export function cardFacts(
   session,
-  { tokens = null, athlete = null, handicapUnread = false, checkStarted = false, bookedSessionIds = [], justFilledId = null, now = new Date() } = {}
+  { tokens = null, athlete = null, handicapUnread = false, checkStarted = false, bookedSessionIds = [], justFilledId = null, allowRollAhead = true, now = new Date() } = {}
 ) {
   const cap = formatCapacity(session);
   const isFull = cap.state === 'full' || session.id === justFilledId;
   const rowTokens = positionForDate(tokens, session.date);
   const hasGrace = (rowTokens?.grace ?? []).some((g) => !g.expiresAt || g.expiresAt >= session.date);
-  const tokensSpent = rowTokens ? !rowTokens.unlimited && rowTokens.left === 0 && !hasGrace : false;
+  const outOfPeriod = rowTokens ? !rowTokens.unlimited && rowTokens.left === 0 && !hasGrace : false;
+  const rollAhead = outOfPeriod && allowRollAhead ? rollAheadFor(tokens, session.date) : null;
+  const tokensSpent = outOfPeriod && !rollAhead;
   const displayOnly = session.bookable === false;
   const started = checkStarted && !displayOnly && sessionStarted(session, now);
   const held = !displayOnly && !started && bookedSessionIds.includes(session.id);
   const notTheirs = !displayOnly && !handicapUnread && !reservedEligible(session, athlete);
-  return { cap, isFull, rowTokens, hasGrace, tokensSpent, displayOnly, started, held, notTheirs };
+  return { cap, isFull, rowTokens, hasGrace, tokensSpent, rollAhead, displayOnly, started, held, notTheirs };
 }
 
 /**
@@ -96,6 +105,7 @@ export function moveTargetOpen(
     athlete,
     checkStarted: true,
     bookedSessionIds,
+    allowRollAhead: false,
     now,
   });
   if (facts.displayOnly || facts.started || facts.isFull || facts.held || facts.notTheirs || facts.tokensSpent) return false;

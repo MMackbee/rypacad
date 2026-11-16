@@ -292,6 +292,18 @@ export function periodFallback(pkg) {
  * judges them by expiry as before. `judgedPeriodKey` says which period the
  * numbers describe.
  */
+/**
+ * How many tokens of `periodKey` were already turned into rolled-over
+ * tokens before the period ended (2026-11-16, a leftover token used early:
+ * functions/portal/roll-ahead.js). Each has left the period, spent or not,
+ * so it comes off the period's `left`. It only ever matches the running
+ * period - the nightly job mints for a period that is over.
+ * CHANGE ONE, CHANGE BOTH: functions/portal/lib.js tokensPosition.
+ */
+export function rolledAheadCount(graceTokens, periodKey) {
+  return (graceTokens || []).filter((g) => g && g.reason === 'rollover' && g.sourcePeriodKey === periodKey).length;
+}
+
 export function positionForDate(tokens, dateISO) {
   if (!tokens || tokens.unlimited || !tokens.nextPeriod || !dateISO) return tokens;
   const np = tokens.nextPeriod;
@@ -307,6 +319,8 @@ export function positionForDate(tokens, dateISO) {
     used: np.used ?? np.booked ?? 0,
     reserved: np.reserved ?? 0,
     left: np.left,
+    // This period's early rolls (rolledAheadCount) are not the next period's.
+    rolledAhead: 0,
     judgedPeriodKey: np.periodKey,
   };
 }
@@ -351,7 +365,8 @@ export function tokensFor(athlete, pkg, bookings, waitlist, graceTokens, periodK
     .sort((a, b) => String(a.expiresAt).localeCompare(String(b.expiresAt)));
   const grace = sorted.slice(0, Math.max(0, sorted.length - held));
   const granted = unlimited ? null : pkg ? (opts.tokenPeriod?.granted ?? periodFallback(pkg)) : 0;
-  const left = unlimited ? null : Math.max(0, granted - used - reserved);
-  return { granted, used, reserved, grace, left, unlimited, perPurchase, held };
+  const rolledAhead = unlimited ? 0 : rolledAheadCount(graceTokens, periodKey);
+  const left = unlimited ? null : Math.max(0, granted - used - reserved - rolledAhead);
+  return { granted, used, reserved, grace, left, unlimited, perPurchase, held, rolledAhead };
 }
 

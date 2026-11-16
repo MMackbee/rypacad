@@ -238,10 +238,18 @@ function periodFallback(pkg) {
  *     ignoreWaitlistIds: (!Array<string>|undefined)}} args Inputs. All
  *     arrays are the athlete's own documents; filtering by period happens
  *     here so callers can hand over one date-range read.
+ * Rolled ahead (2026-11-16, portal/roll-ahead.js): a token of THIS period
+ * that was already turned into a rolled-over token - a `graceTokens` row
+ * with reason 'rollover' whose `sourcePeriodKey` is this period - has left
+ * the period, spent or not, so it comes off `left`. It only ever matches
+ * the running period: the nightly job mints for a period that has ended,
+ * and rolloverPlan passes no grace tokens.
+ *
  * @return {{granted: ?number, used: number, reserved: number,
  *     grace: !Array<{id: string, expiresAt: ?string}>, left: ?number,
- *     unlimited: boolean, perPurchase: boolean, held: number}} The
- *     position. `held` is the number of waitlist entries holding a token.
+ *     unlimited: boolean, perPurchase: boolean, held: number,
+ *     rolledAhead: number}} The position. `held` is the number of waitlist
+ *     entries holding a token; `rolledAhead` the tokens rolled out early.
  */
 function tokensPosition(args) {
   const pkg = args.pkg || null;
@@ -276,8 +284,13 @@ function tokensPosition(args) {
     const issued = args.tokenPeriod && args.tokenPeriod.granted;
     granted = Number.isInteger(issued) ? issued : periodFallback(pkg);
   }
-  const left = unlimited ? null : Math.max(0, granted - used - reserved);
-  return {granted, used, reserved, grace, left, unlimited, perPurchase, held};
+  const rolledAhead = unlimited ? 0 : (args.graceTokens || []).filter(
+      (g) => g && g.reason === 'rollover' &&
+          g.sourcePeriodKey === periodKey).length;
+  const left = unlimited ? null :
+      Math.max(0, granted - used - reserved - rolledAhead);
+  return {granted, used, reserved, grace, left, unlimited, perPurchase, held,
+    rolledAhead};
 }
 
 /**

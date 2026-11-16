@@ -1776,6 +1776,13 @@ the season end), reason: 'rollover', sourceSessionId: null, sourcePeriodKey,
 createdBy: 'rollover', createdAt }`. The id is the idempotency key (n counts
 from 1), so a re-run mints nothing twice. No client can create one; the
 member read and the booking rules serve it like any other grace token.
+A token may also be rolled BEFORE its period ends, one at a time, by the
+`rollTokenAhead` callable when a family books a next-period session that
+nothing else can pay for (2026-11-16): the same id and shape, with
+`createdBy: 'roll-ahead'` and `requestedBy` (the caller's uid). While its
+source period is still running, every token count takes it off that
+period's `left` (`rolledAhead`: a rollover token whose `sourcePeriodKey`
+is the period counted) - derived, never stored.
 The same job is the one server writer that RE-CHARGES a booking: a free
 rolled-over token is put on the earliest period-charged booking of the
 running period (`bookings.chargedFrom` 'period' -> 'grace', `graceTokenId`

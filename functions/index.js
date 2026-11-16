@@ -37,6 +37,9 @@
  *
  *   moveBooking            callable, portal/move.js (booking changes,
  *                          2026-11-11): a family moves a booking in one step
+ *   rollTokenAhead         callable, portal/roll-ahead.js (2026-11-16): a
+ *                          family books next month with this month's
+ *                          leftover token before the month ends
  *   staffCancelBooking     callable, portal/staff-cancel.js (2026-11-12):
  *                          owner or ops cancels a family's bookings on one
  *                          session from staff Billing; token back, no email
@@ -121,6 +124,7 @@ const {submitScholarship} = require('./portal/scholarship');
 const {submitFeedback} = require('./portal/feedback');
 const {requestMentalConsent} = require('./portal/mental-consent-request');
 const {moveBooking, sendMoveReconfirm} = require('./portal/move');
+const {rollTokenAhead} = require('./portal/roll-ahead');
 const {staffCancelBooking} = require('./portal/staff-cancel');
 const {staffBookSession} = require('./portal/staff-book');
 const {isFreeComp} = require('./portal/move-decide');
@@ -141,6 +145,9 @@ exports.waitlistPositions = waitlistPositions;
 exports.onSingleTokenSpent = onSingleTokenSpent;
 // A family moves a booking in one transaction (2026-11-11, portal/move.js).
 exports.moveBooking = moveBooking;
+// A family uses this month's leftover token on a next-month session before
+// the month ends (2026-11-16, portal/roll-ahead.js).
+exports.rollTokenAhead = rollTokenAhead;
 // Owner or ops cancels bookings of one family on one session, token back,
 // no email (2026-11-12, portal/staff-cancel.js).
 exports.staffCancelBooking = staffCancelBooking;

@@ -138,6 +138,20 @@ function isMonthlyTokens(pkg) {
 }
 
 /**
+ * One period's bookings, picked by DATE and re-keyed to the period, the way
+ * the rollover counts them (see rolloverPlan).
+ * @param {?Array<!Object>} bookings The athlete's booking rows.
+ * @param {{periodKey: string, periodEnd: string}} period The period.
+ * @return {!Array<!Object>} The rows of that period, `periodKey` set to it.
+ */
+function bookingsOfPeriod(bookings, period) {
+  return (bookings || []).filter((b) => b && (!b.date ||
+      (b.date >= period.periodKey && b.date <= period.periodEnd)))
+      .map((b) => (b.date ?
+          Object.assign({}, b, {periodKey: period.periodKey}) : b));
+}
+
+/**
  * How many tokens roll out of one ended period for one athlete. Pure.
  * @param {{athlete: ?Object, household: ?Object, pkg: ?Object,
  *     tokenPeriod: ?Object, bookings: !Array<!Object>,
@@ -165,14 +179,13 @@ function rolloverPlan(args) {
   // the key is client-derived from the household's anchor day at the time,
   // and an anchor that moved since would leave every old booking uncounted
   // and roll the whole grant.
-  const period = args.period;
-  const inPeriod = (args.bookings || []).filter((b) => b && (!b.date ||
-      (b.date >= period.periodKey && b.date <= period.periodEnd)));
+  // No grace tokens are passed: a token rolled out early
+  // (portal/roll-ahead.js) is one of the `1..count` this plan names, not
+  // something to take off the count.
   const position = lib.tokensPosition({
     pkg: args.pkg,
     tokenPeriod: args.tokenPeriod,
-    bookings: inPeriod.map((b) => (b.date ?
-        Object.assign({}, b, {periodKey: period.periodKey}) : b)),
+    bookings: bookingsOfPeriod(args.bookings, args.period),
     waitlist: [],
     graceTokens: [],
     periodKey: args.period.periodKey,
@@ -435,6 +448,7 @@ async function runTokenRollover(args) {
 module.exports = {
   FIRST_ROLLING_END,
   REASON,
+  bookingsOfPeriod,
   isMonthlyTokens,
   isRolloverTokenId,
   previousPeriod,

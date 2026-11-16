@@ -633,7 +633,7 @@ function DaySessionList({
           // to its expiry), display-only, started (R2), held, or a handicap-
           // reserved block not theirs: one rule with the Move picker
           // (data/bookability.js cardFacts).
-          const { cap, isFull, rowTokens, hasGrace, tokensSpent, displayOnly, started, held, notTheirs } = cardFacts(session, {
+          const { cap, isFull, rowTokens, hasGrace, tokensSpent, rollAhead, displayOnly, started, held, notTheirs } = cardFacts(session, {
             tokens,
             athlete,
             handicapUnread,
@@ -646,7 +646,8 @@ function DaySessionList({
           const waiting = displayOnly || started || held ? null : waitingOn(session, athleteId);
           const refusal = notTheirs && athlete && !started && !waiting && !held ? reservedRefusal(session, athlete) : null;
           // R3: nobody is promoted on the day, so today's waitlist takes nobody new.
-          const canWaitlist = isFull && !tokensSpent && !displayOnly && !started && !waiting && !notTheirs && !held && !(checkStarted && waitlistClosed(session));
+          // A leftover token used early (rollAhead) books a seat; it holds no waitlist place.
+          const canWaitlist = isFull && !tokensSpent && !rollAhead && !displayOnly && !started && !waiting && !notTheirs && !held && !(checkStarted && waitlistClosed(session));
           // A full card is never directly tappable - only its JoinWaitlistButton
           // is, so a tap can't double-fire book() via bubbling.
           const tappable = !displayOnly && !tokensSpent && !reserving && !disabled && !isFull && !started && !waiting && !notTheirs && !held;
@@ -664,7 +665,7 @@ function DaySessionList({
               ruleHeight={36}
               onClick={tappable ? () => onSelect(session) : undefined}
               // A bonus token that expires before this session is not what it spends.
-              spendNote={displayOnly || started || waiting || notTheirs || held ? null : <SpendNote tokens={rowTokens && !hasGrace ? { ...rowTokens, grace: [] } : rowTokens} />}
+              spendNote={displayOnly || started || waiting || notTheirs || held ? null : <SpendNote rollAhead={isFull ? null : rollAhead} tokens={rowTokens && !hasGrace ? { ...rowTokens, grace: [] } : rowTokens} />}
               action={
                 waiting ? (
                   <OnWaitlist

@@ -71,6 +71,63 @@ export function rollsUntil(period, anchorDay = 1) {
 }
 
 /**
+ * A leftover token used early (owner 2026-11-16, the Schmidt case): whether
+ * this period's unused tokens can book a NEXT-period session right now,
+ * rather than from the 1st. The server's conditions
+ * (functions/portal/roll-ahead.js), as far as a screen can know them: a
+ * monthly token package, an ISSUED period (a tokenPeriods doc - the package
+ * fallback never rolls), a token left, and a period that rolls at all.
+ * @return {{count: number, until: string, fromPeriodKey: string}|null}
+ */
+export function rollAheadOffer({ pkg, left, period, anchorDay, tokenPeriod } = {}) {
+  if (!pkg || !Number.isFinite(pkg.tokens) || pkg.kind === 'single') return null;
+  if (!Number.isInteger(tokenPeriod?.granted)) return null;
+  if (!(left > 0)) return null;
+  const until = rollsUntil(period, anchorDay);
+  return until ? { count: left, until, fromPeriodKey: period.periodKey } : null;
+}
+
+/**
+ * The offer for one session date, or null: the date is in the next period,
+ * on or before the offer's last day, and the next period has no token of
+ * its own left (otherwise that token pays). `tokens` is the position with
+ * `rollAhead` and `nextPeriod` (hooks/index.js tokensWithNextPeriod).
+ */
+export function rollAheadFor(tokens, dateISO) {
+  const offer = tokens?.rollAhead;
+  const np = tokens?.nextPeriod;
+  if (!offer || !np || !dateISO || np.left !== 0 || !np.periodKey) return null;
+  if (dateISO < np.periodKey || (np.periodEnd && dateISO > np.periodEnd) || dateISO > offer.until) return null;
+  return offer;
+}
+
+const monthOfPeriod = (periodKey) => (periodKey && periodKey.endsWith('-01') ? format(parseISO(periodKey), 'MMMM') : null);
+
+/** A session card's note: 'Uses your leftover November token'. */
+export function rollAheadNote(offer) {
+  if (!offer) return null;
+  const month = monthOfPeriod(offer.fromPeriodKey);
+  return month ? `Uses your leftover ${month} token` : 'Uses a leftover token from this period';
+}
+
+/**
+ * The meter's line under a next period at zero: 'Your leftover November
+ * token can book a December session now.' Null without an offer, or while
+ * the next period still has tokens of its own.
+ */
+export function rollAheadLine(tokens) {
+  const offer = tokens?.rollAhead;
+  const np = tokens?.nextPeriod;
+  if (!offer || !np || np.left !== 0) return null;
+  const from = monthOfPeriod(offer.fromPeriodKey);
+  const to = monthOfPeriod(np.periodKey);
+  const one = offer.count === 1;
+  const have = one ? `Your leftover ${from ? `${from} ` : ''}token` : `Your ${offer.count} leftover ${from ? `${from} ` : ''}tokens`;
+  const book = to ? (one ? `a ${to} session` : `${to} sessions`) : one ? 'a session next period' : 'sessions next period';
+  return `${have} can book ${book} now.`;
+}
+
+/**
  * The meter's line for the rolled-over tokens in hand: '2 tokens rolled over
  * from November - use by Thu, Dec 31'. The month is named for a
  * 1st-of-month period only. Null without one.

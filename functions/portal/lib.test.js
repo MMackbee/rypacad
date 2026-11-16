@@ -125,6 +125,29 @@ test('tokensPosition: an issued tokenPeriods doc wins over the package', () => {
   assert.equal(position({tokenPeriod: {granted: 0}}).left, 0);
 });
 
+test('tokensPosition: a token rolled out early comes off the period', () => {
+  const rolled = (id, sourcePeriodKey) => ({id, reason: 'rollover',
+    sourcePeriodKey, expiresAt: '2026-10-31'});
+  const p = position({tokenPeriod: {granted: 6}, bookings: [
+    {id: 'a', periodKey: PK, status: 'confirmed'},
+    // The early token is spent on a next-month session: still off September.
+    {id: 'n', periodKey: '2026-10-01', status: 'confirmed',
+      graceTokenId: 'rollover_x_2026-09-01_1'},
+  ], graceTokens: [rolled('rollover_x_2026-09-01_1', PK),
+    rolled('rollover_x_2026-09-01_2', PK),
+    // Last month's rolled-over token and a bonus token take nothing off.
+    rolled('rollover_x_2026-08-01_1', '2026-08-01'),
+    {id: 'bonus', reason: 'session-cancelled', expiresAt: '2026-10-01'}]});
+  assert.equal(p.used, 1);
+  assert.equal(p.rolledAhead, 2);
+  assert.equal(p.left, 3);
+  assert.deepEqual(p.grace.map((g) => g.id).sort(), ['bonus',
+    'rollover_x_2026-08-01_1', 'rollover_x_2026-09-01_2']);
+  assert.equal(position({}).rolledAhead, 0);
+  assert.equal(position({tokenPeriod: {granted: 1}, graceTokens: [
+    rolled('r1', PK), rolled('r2', PK)]}).left, 0);
+});
+
 test('tokensPosition: used counts non-cancelled bookings in the period', () => {
   const p = position({bookings: [
     {id: 'a', periodKey: PK, status: 'confirmed'},

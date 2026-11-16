@@ -137,6 +137,7 @@ import {
   tokensFor,
   windowMonthsFor,
 } from '../data/packages';
+import { rollAheadOffer } from '../data/rollover';
 import { billingStatusOf } from '../data/billingCopy';
 import { householdOnHold, isSingleTokenId } from '../data/singleToken';
 import {
@@ -419,9 +420,15 @@ function deriveTokens(pkg, bookings, anchorDay, today, opts = {}) {
  * passes straight through to deriveTokens - see its own comment.
  */
 function tokensWithNextPeriod(pkg, bookings, anchorDay, today, opts = {}) {
-  const position = deriveTokens(pkg, bookings, anchorDay, today, opts);
-  if (!position) return null;
-  const { periodEnd } = positionPeriodFor(today, anchorDay);
+  const derived = deriveTokens(pkg, bookings, anchorDay, today, opts);
+  if (!derived) return null;
+  const current = positionPeriodFor(today, anchorDay);
+  const { periodEnd } = current;
+  // 2026-11-16 (a leftover token used early): what this period can still
+  // hand to a next-period session, when it can (data/rollover.js). Only on
+  // the position when there is one, so every other reader sees no new key.
+  const rollAhead = rollAheadOffer({ pkg, left: derived.unpaid ? 0 : derived.left, period: current, anchorDay, tokenPeriod: opts.tokenPeriod });
+  const position = rollAhead ? { ...derived, rollAhead } : derived;
   const next = periodFor(addDaysISO(periodEnd, 1), anchorDay);
   // The season's last period has no next (data/season.js afterSeasonEnd):
   // every reader of nextPeriod takes null as "none counted".
