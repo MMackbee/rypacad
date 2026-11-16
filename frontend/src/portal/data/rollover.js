@@ -14,7 +14,7 @@
  */
 
 import { format, parseISO } from 'date-fns';
-import { addDaysISO, longDayLabel } from './calendar';
+import { academyDateISO, addDaysISO, longDayLabel } from './calendar';
 import { periodFor } from './packages';
 import { SEASON_BOUNDS } from './season';
 
@@ -75,16 +75,53 @@ export function rollsUntil(period, anchorDay = 1) {
  * this period's unused tokens can book a NEXT-period session right now,
  * rather than from the 1st. The server's conditions
  * (functions/portal/roll-ahead.js), as far as a screen can know them: a
- * monthly token package, an ISSUED period (a tokenPeriods doc - the package
- * fallback never rolls), a token left, and a period that rolls at all.
+ * monthly token package, a token left, and a period that rolls at all. A
+ * period with no tokenPeriods doc counts at the package's own number, as the
+ * meter shows it (owner 2026-11-16: "she clearly has the tokens"), when
+ * packageCountStands: third day on, and billing active since before the
+ * period began (`billing` is the athlete's `billing` map).
  * @return {{count: number, until: string, fromPeriodKey: string}|null}
  */
-export function rollAheadOffer({ pkg, left, period, anchorDay, tokenPeriod } = {}) {
+export function rollAheadOffer({ pkg, left, period, anchorDay, tokenPeriod, today, billing } = {}) {
   if (!pkg || !Number.isFinite(pkg.tokens) || pkg.kind === 'single') return null;
-  if (!Number.isInteger(tokenPeriod?.granted)) return null;
+  if (!Number.isInteger(tokenPeriod?.granted) && !packageCountStands({ period, today, billing })) return null;
   if (!(left > 0)) return null;
   const until = rollsUntil(period, anchorDay);
   return until ? { count: left, until, fromPeriodKey: period.periodKey } : null;
+}
+
+/**
+ * Whether a RUNNING period with no tokenPeriods doc is counted at the
+ * package's own number for the early roll: from its third day, once the
+ * 1st's payment has either written the record or frozen the membership.
+ * CHANGE ONE, CHANGE BOTH: functions/portal/rollover.js fallbackStands.
+ */
+export function fallbackStands(period, today) {
+  return Boolean(period && period.periodKey && today) && today >= addDaysISO(period.periodKey, 2);
+}
+
+/**
+ * Whether the athlete was already a paying member when the period began:
+ * billing active and last changed BEFORE the period's first day (academy
+ * time). A sign-up or a payment inside the period moves it into the period -
+ * and a payment writes the record itself.
+ * CHANGE ONE, CHANGE BOTH: functions/portal/rollover.js memberBefore.
+ */
+export function memberBefore(billing, period) {
+  if (!billing || billing.status !== 'active' || !billing.updatedAt || !period || !period.periodKey) return false;
+  const at = billing.updatedAt;
+  const when = typeof at.toDate === 'function' ? at.toDate() : new Date(at);
+  if (Number.isNaN(when.getTime())) return false;
+  return academyDateISO(when) < period.periodKey;
+}
+
+/**
+ * Whether a running period with no record is counted at the package's own
+ * number for the early roll. The server also needs a household on file and
+ * no test mark (functions/portal/rollover.js packageCountStands).
+ */
+export function packageCountStands({ period, today, billing } = {}) {
+  return fallbackStands(period, today) && memberBefore(billing, period);
 }
 
 /**

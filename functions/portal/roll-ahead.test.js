@@ -39,8 +39,10 @@ function world(...extra) {
     'users/u-other': {role: 'parent', householdId: 'lopez'},
     'users/u-sam': {role: 'athlete', athleteId: 'sam', householdId: 'hart'},
     'users/u-owner': {role: 'owner'},
+    // Billing last changed in October: a member since before November.
     'athletes/sam': {name: 'Sam Hart', householdId: 'hart',
-      packageId: 't-6', billing: {status: 'active'}},
+      packageId: 't-6', billing: {status: 'active',
+        updatedAt: '2026-10-21T20:59:40.870Z'}},
     'households/hart': {periodAnchorDay: 1,
       membership: {status: 'active'}},
     'packages/t-6': {kind: 'tokens', tokens: 6},
@@ -168,11 +170,62 @@ test('a spent bonus token does not count as cover', async () => {
   assert.equal(out.graceTokenId, TOKEN_1);
 });
 
-test('no November record (the package fallback) never rolls', async () => {
+// Owner 2026-11-16: "she clearly has the tokens". Britta had no November
+// record; the meter showed the package's 6 and let her book with them.
+test('no November record: the package count the meter shows is used, and ' +
+    'the month is put on record', async () => {
   const docs = world();
   delete docs['tokenPeriods/sam_2026-11-01'];
-  await refusedWith(docs, {}, 'failed-precondition', 'not-issued');
+  const out = await call(docs);
+  assert.equal(out.graceTokenId, TOKEN_1);
+  const record = docs['tokenPeriods/sam_2026-11-01'];
+  assert.deepEqual([record.athleteId, record.householdId, record.periodKey,
+    record.periodEnd, record.granted, record.source, record.eventId,
+    record.recordedBy],
+  ['sam', 'hart', '2026-11-01', '2026-11-30', 6, 'package', null,
+    'roll-ahead']);
+  // With the last one rolled, the package count is all spoken for.
+  Object.assign(docs, booking('1210', '2026-12-10',
+      {chargedFrom: 'grace', graceTokenId: TOKEN_1}));
+  await refusedWith(docs, {data: {athleteId: 'sam', date: '2026-12-11'}},
+      'failed-precondition', 'none-left');
 });
+
+test('no record and all six of the package booked: nothing to roll',
+    async () => {
+      const docs = world(booking('1125', '2026-11-25'));
+      delete docs['tokenPeriods/sam_2026-11-01'];
+      await refusedWith(docs, {}, 'failed-precondition', 'none-left');
+    });
+
+test('no record, and the family joined inside the month (Nov 14, or Nov 29 ' +
+    'paying for December): the month is not theirs to roll', async () => {
+  for (const updatedAt of ['2026-11-14T15:00:00Z', '2026-11-01T15:00:00Z',
+    undefined]) {
+    const docs = world({'athletes/sam': {name: 'Sam Hart',
+      householdId: 'hart', packageId: 't-6',
+      billing: {status: 'active', updatedAt}}});
+    delete docs['tokenPeriods/sam_2026-11-01'];
+    await refusedWith(docs, {}, 'failed-precondition', 'not-issued');
+  }
+  // With the month on record (they paid for it) the same family is served.
+  const out = await call(world({'athletes/sam': {name: 'Sam Hart',
+    householdId: 'hart', packageId: 't-6',
+    billing: {status: 'active', updatedAt: '2026-11-14T15:00:00Z'}}}));
+  assert.equal(out.graceTokenId, TOKEN_1);
+});
+
+test('no record on the 1st or 2nd of the month: wait for the payment',
+    async () => {
+      const docs = world();
+      delete docs['tokenPeriods/sam_2026-11-01'];
+      for (const day of ['01', '02']) {
+        await refusedWith(docs, {now: new Date(`2026-11-${day}T18:00:00Z`)},
+            'failed-precondition', 'not-issued');
+      }
+      const out = await call(docs, {now: new Date('2026-11-03T18:00:00Z')});
+      assert.equal(out.graceTokenId, TOKEN_1);
+    });
 
 test('who may ask', async () => {
   await refusedWith(world(), {uid: null}, 'unauthenticated', 'signed-out');

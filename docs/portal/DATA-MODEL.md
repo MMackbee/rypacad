@@ -1776,6 +1776,12 @@ the season end), reason: 'rollover', sourceSessionId: null, sourcePeriodKey,
 createdBy: 'rollover', createdAt }`. The id is the idempotency key (n counts
 from 1), so a re-run mints nothing twice. No client can create one; the
 member read and the booking rules serve it like any other grace token.
+A `tokenPeriods` doc may now also carry `source: 'package'` (2026-11-16):
+written by the rollover job (nightly, for the RUNNING period of an active
+monthly token athlete who has no record) or by `rollTokenAhead`, at the
+package's own number, with `recordedBy` ('rollover' | 'roll-ahead') and
+`eventId: null`. Server-written only; Stripe and ops
+overwrite it like any other.
 A token may also be rolled BEFORE its period ends, one at a time, by the
 `rollTokenAhead` callable when a family books a next-period session that
 nothing else can pay for (2026-11-16): the same id and shape, with

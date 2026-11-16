@@ -5,7 +5,7 @@
  * count, the offer, the card rule.
  */
 import { positionForDate, rolledAheadCount, tokensFor } from './packages';
-import { rollAheadFor, rollAheadLine, rollAheadNote, rollAheadOffer } from './rollover';
+import { fallbackStands, memberBefore, packageCountStands, rollAheadFor, rollAheadLine, rollAheadNote, rollAheadOffer } from './rollover';
 import { cardFacts, moveTargetOpen } from './bookability';
 
 const T6 = { id: 't-6', kind: 'tokens', tokens: 6 };
@@ -48,9 +48,32 @@ describe('the offer', () => {
     expect(rollAheadOffer({ ...base, left: 3 }).count).toBe(3);
   });
 
-  test('never without a token left, an issued month, a monthly package or a month that rolls', () => {
+  test('no record for the month (owner 2026-11-16: "she clearly has the tokens"): the package count the meter shows is offered, from the 3rd day', () => {
+    // Billing last changed in October: a member since before November began.
+    const since = { status: 'active', updatedAt: '2026-10-21T20:59:40.870Z' };
+    const noRecord = { ...base, tokenPeriod: null, billing: since };
+    expect(rollAheadOffer({ ...noRecord, today: '2026-11-16' })).toEqual({ count: 1, until: '2026-12-31', fromPeriodKey: '2026-11-01' });
+    // Review 2026-11-16: joined inside the month (Nov 14; or Nov 29, paying for December) - not theirs to roll.
+    expect(rollAheadOffer({ ...noRecord, today: '2026-11-16', billing: { status: 'active', updatedAt: '2026-11-14T15:00:00Z' } })).toBeNull();
+    expect(rollAheadOffer({ ...noRecord, today: '2026-11-30', billing: { status: 'active', updatedAt: '2026-11-29T15:00:00Z' } })).toBeNull();
+    expect(rollAheadOffer({ ...noRecord, today: '2026-11-16', billing: undefined })).toBeNull();
+    expect(rollAheadOffer({ ...noRecord, today: '2026-11-16', billing: { status: 'past_due', updatedAt: since.updatedAt } })).toBeNull();
+    expect(memberBefore({ status: 'active', updatedAt: { toDate: () => new Date(since.updatedAt) } }, NOV)).toBe(true);
+    expect(memberBefore({ status: 'active', updatedAt: '2026-11-01T05:30:00Z' }, NOV)).toBe(false); // 12:30 AM Nov 1 in Chicago
+    expect(memberBefore({ status: 'active', updatedAt: '2026-11-01T04:30:00Z' }, NOV)).toBe(true); // 11:30 PM Oct 31
+    expect(packageCountStands({ period: NOV, today: '2026-11-16', billing: since })).toBe(true);
+    expect(packageCountStands({ period: NOV, today: '2026-11-02', billing: since })).toBe(false);
+    expect(rollAheadOffer({ ...noRecord, today: '2026-11-03' })).not.toBeNull();
+    expect(rollAheadOffer({ ...noRecord, today: '2026-11-02' })).toBeNull();
+    expect(rollAheadOffer({ ...noRecord, today: '2026-11-01' })).toBeNull();
+    expect(rollAheadOffer(noRecord)).toBeNull(); // no clock, no guess
+    expect([fallbackStands(NOV, '2026-11-02'), fallbackStands(NOV, '2026-11-03'), fallbackStands(null, '2026-11-03')]).toEqual([false, true, false]);
+    // A month on record is offered from its first day.
+    expect(rollAheadOffer({ ...base, today: '2026-11-01' })).not.toBeNull();
+  });
+
+  test('never without a token left, a monthly package or a month that rolls', () => {
     expect(rollAheadOffer({ ...base, left: 0 })).toBeNull();
-    expect(rollAheadOffer({ ...base, tokenPeriod: null })).toBeNull();
     expect(rollAheadOffer({ ...base, pkg: { kind: 'elite', tokens: null } })).toBeNull();
     expect(rollAheadOffer({ ...base, pkg: { kind: 'single', tokens: 1 } })).toBeNull();
     expect(rollAheadOffer({ ...base, pkg: null })).toBeNull();

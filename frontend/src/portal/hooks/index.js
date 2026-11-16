@@ -427,7 +427,7 @@ function tokensWithNextPeriod(pkg, bookings, anchorDay, today, opts = {}) {
   // 2026-11-16 (a leftover token used early): what this period can still
   // hand to a next-period session, when it can (data/rollover.js). Only on
   // the position when there is one, so every other reader sees no new key.
-  const rollAhead = rollAheadOffer({ pkg, left: derived.unpaid ? 0 : derived.left, period: current, anchorDay, tokenPeriod: opts.tokenPeriod });
+  const rollAhead = rollAheadOffer({ pkg, left: derived.unpaid ? 0 : derived.left, period: current, anchorDay, tokenPeriod: opts.tokenPeriod, today, billing: opts.billing });
   const position = rollAhead ? { ...derived, rollAhead } : derived;
   const next = periodFor(addDaysISO(periodEnd, 1), anchorDay);
   // The season's last period has no next (data/season.js afterSeasonEnd):
@@ -472,7 +472,7 @@ export async function liveTokens(athlete, pkg, bookings, anchorDay, today) {
   // With the next period's count (2026-11-01), so the read fetchTokenInputs
   // makes for it is used and every meter can say what next month holds.
   return withGraceReasons(
-    tokensWithNextPeriod(pkg, bookings, anchorDay, today, { ...inputs, billingStatus: billingStatusOf(athlete) }),
+    tokensWithNextPeriod(pkg, bookings, anchorDay, today, { ...inputs, billingStatus: billingStatusOf(athlete), billing: athlete.billing }),
     inputs.graceTokens
   );
 }
@@ -813,7 +813,7 @@ async function liveBooking(today, { withSlots = true } = {}) {
     // With the next period's count (2026-11-01): an athlete's own Book a
     // Session judges a next-period session by that period, as a parent's does.
     tokens = withGraceReasons(
-      tokensWithNextPeriod(pkg, bookings, anchorDay, today, { ...inputs, billingStatus: billingStatusOf(athlete) }),
+      tokensWithNextPeriod(pkg, bookings, anchorDay, today, { ...inputs, billingStatus: billingStatusOf(athlete), billing: athlete.billing }),
       inputs.graceTokens
     );
     bookedSessionIds = heldSessionIds(bookings);
@@ -1481,7 +1481,7 @@ async function liveSpecialistSlots(specialistId, athleteIdOverride, today) {
     ),
   }));
   // The position the booking check enforces (fetchTokenInputs).
-  const tokens = withGraceReasons(tokensWithNextPeriod(pkg, bookings, anchorDay, today, inputs), inputs.graceTokens);
+  const tokens = withGraceReasons(tokensWithNextPeriod(pkg, bookings, anchorDay, today, { ...inputs, billing: athlete.billing }), inputs.graceTokens);
   const capReached = specialistId === 'mental' && coachingFor(bookings, today, pkg).capReached;
   // Sprint 20 (spec 6.1): Calendly only when the registry says so AND a URL
   // is configured; otherwise the in-app list, so seed/emulator keep working.
@@ -1916,7 +1916,7 @@ async function liveHouseholdAthletes(today) {
         // With the next period's count (2026-11-01): a parent's Book a Session
         // reads this row, and judges a next-period session by that period.
         tokens: withGraceReasons(
-          tokensWithNextPeriod(pkg, bookings, anchorDay, today, { ...inputs, billingStatus: billingStatusOf(a) }),
+          tokensWithNextPeriod(pkg, bookings, anchorDay, today, { ...inputs, billingStatus: billingStatusOf(a), billing: a.billing }),
           inputs.graceTokens
         ),
       };
@@ -2142,7 +2142,7 @@ async function liveMemberEntry(a, today, anchorDay) {
     // the `reason` field the hook seam wants that tokensFor's own output
     // does not carry.
     tokens: withGraceReasons(
-      tokensWithNextPeriod(pkg, bookings, anchorDay, today, { graceTokens, waitlist: waitlistEntries, tokenPeriod, nextTokenPeriod }),
+      tokensWithNextPeriod(pkg, bookings, anchorDay, today, { graceTokens, waitlist: waitlistEntries, tokenPeriod, nextTokenPeriod, billing: a.billing }),
       graceTokens
     ),
     coaching: coachingFor(bookings, today, pkg),
