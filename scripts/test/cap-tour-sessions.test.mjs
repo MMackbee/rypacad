@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { CAP, parseArgs, planCaps, buildWrite, capLine, failureNote, main } from '../cap-tour-sessions.mjs';
+import { CAP, CAPS, parseArgs, planCaps, buildWrite, capLine, failureNote, main } from '../cap-tour-sessions.mjs';
 import { resolveTarget, commit, docName, fsFields, getDoc } from '../lib/firestore-rest.mjs';
 
 const TODAY = '2026-11-13';
@@ -11,8 +11,8 @@ test('parseArgs: one of --dry-run | --yes; the window defaults to today .. the s
   assert.match(p([]).error, /exactly one of --dry-run or --yes/);
   assert.match(p(['--prod']).error, /exactly one of --dry-run or --yes/);
   assert.match(p(['--dry-run', '--yes']).error, /exactly one of --dry-run or --yes/);
-  assert.deepEqual(p(['--dry-run']), { prod: false, from: TODAY, to: '2027-02-27', dryRun: true, yes: false });
-  assert.deepEqual(p(['--prod', '--yes']), { prod: true, from: TODAY, to: '2027-02-27', dryRun: false, yes: true });
+  assert.deepEqual(p(['--dry-run']), { prod: false, from: TODAY, to: '2027-02-27', dryRun: true, yes: false, type: 'tournament', cap: 20 });
+  assert.deepEqual(p(['--prod', '--yes']), { prod: true, from: TODAY, to: '2027-02-27', dryRun: false, yes: true, type: 'tournament', cap: 20 });
   const win = p(['--from', '2026-11-14', '--to', '2026-12-31', '--dry-run']);
   assert.deepEqual([win.from, win.to], ['2026-11-14', '2026-12-31']);
   assert.match(p(['--from', '2026-12-31', '--to', '2026-11-14', '--dry-run']).error, /--from \(2026-12-31\) is after --to \(2026-11-14\)/);
@@ -71,6 +71,38 @@ test('planCaps: by date then start time; any other number goes to 20 like the sy
   ]);
   assert.equal(planCaps([tour('a', '2026-11-14', '10:00 AM', { booked: 19 })], 18).change[0].over, true);
   assert.deepEqual(planCaps([]), { change: [], same: [] });
+});
+
+test('parseArgs: --type training caps at 12; any other type is refused', () => {
+  assert.deepEqual(CAPS, { tournament: 20, training: 12 });
+  const t = p(['--prod', '--type', 'training', '--dry-run']);
+  assert.deepEqual([t.type, t.cap, t.prod, t.dryRun], ['training', 12, true, true]);
+  const tour20 = p(['--type', 'tournament', '--yes']);
+  assert.deepEqual([tour20.type, tour20.cap], ['tournament', 20]);
+  assert.match(p(['--type', 'phil', '--dry-run']).error, /--type must be one of tournament, training/);
+  assert.match(p(['--type', 'mental', '--dry-run']).error, /--type must be one of tournament, training/);
+  assert.match(p(['--type', 'constructor', '--dry-run']).error, /--type must be one of tournament, training/);
+  assert.match(p(['--type', '--dry-run']).error, /--type needs a value/);
+  assert.match(p(['--type', 'training', '--type', 'training', '--dry-run']).error, /--type may be given only once/);
+});
+
+test('planCaps training: 14 goes to 12; 13 booked is capped and flagged over (everyone kept), 12 booked is not; Tour and phil are never touched', () => {
+  const tr = (id, time, over = {}) => ({ id, date: '2026-11-17', time, durationMinutes: 60, type: 'training', capacity: 14, booked: 0, status: 'scheduled', ...over });
+  const plan = planCaps([
+    tr('2026-11-17-2', '4:00 PM', { booked: 13 }),
+    tr('2026-11-17-1', '3:00 PM', { booked: 12 }),
+    tr('2026-11-17-3', '5:00 PM', { capacity: 12, booked: 2 }),
+    tour('2026-11-21-0', '2026-11-21', '10:00 AM', { booked: 13 }),
+    { id: '2026-11-17-4', date: '2026-11-17', time: '4:00 PM', type: 'phil', capacity: 6, booked: 2 },
+  ], 12, 'training');
+  assert.deepEqual(plan, {
+    change: [
+      { id: '2026-11-17-1', date: '2026-11-17', time: '3:00 PM', from: 14, booked: 12, over: false },
+      { id: '2026-11-17-2', date: '2026-11-17', time: '4:00 PM', from: 14, booked: 13, over: true },
+    ],
+    same: ['2026-11-17-3'],
+  });
+  assert.equal(capLine(plan.change[1], 12), '  2026-11-17 4:00 PM  13/14 -> 12  kept: 13 booked > 12');
 });
 
 test('buildWrite: masked to capacity alone, under the updateTime of the read', () => {
@@ -146,6 +178,42 @@ test('against the emulator: dry run writes nothing; --yes caps only Tour events,
     // A second run: everything already at 20, nothing written, still 0.
     assert.equal(await run('--yes'), 0);
     assert.deepEqual(await Promise.all(ids.map(capOf)), [20, 20, 12, 20, 20, 6, 25]);
+  } finally {
+    await clear();
+  }
+});
+
+// Same emulator, a window of its own (April 2030): the training cap.
+test('against the emulator: --type training caps training at 12 (13 booked kept, a hidden one stays hidden), leaves Tour and phil; a second run writes nothing', { skip: !process.env.FIRESTORE_EMULATOR_HOST }, async () => {
+  const t = await resolveTarget({ prod: false });
+  const W = ['--from', '2030-04-06', '--to', '2030-04-06', '--type', 'training'];
+  const run = (...rest) => main([...W, ...rest], { today: TODAY });
+  const sess = (id, over = {}) => ({ update: { name: docName('sessions', id), fields: fsFields({ date: '2030-04-06', time: '4:00 PM', durationMinutes: 60, type: 'training',
+    capacity: 14, booked: 0, coachId: null, label: null, special: false, overflow: false, status: 'scheduled', gcalEventId: `ev-${id}`, ...over }) } });
+  const ids = ['2030-04-06-0', '2030-04-06-1', '2030-04-06-2', '2030-04-06-3'];
+  const clear = () => commit(t, ids.map((id) => ({ delete: docName('sessions', id) })));
+  await clear();
+  try {
+    await commit(t, [
+      sess('2030-04-06-0', { booked: 13 }), // over: capped, all 13 kept
+      sess('2030-04-06-1', { time: '5:00 PM', booked: 0, hidden: true, hiddenBy: 'hide-sessions' }), // capped, stays hidden
+      sess('2030-04-06-2', { time: '10:00 AM', type: 'tournament', capacity: 20, durationMinutes: 120 }), // Tour: untouched
+      sess('2030-04-06-3', { time: '3:00 PM', type: 'phil', capacity: 6 }), // phil: untouched
+    ]);
+    const capOf = async (id) => (await getDoc(t, 'sessions', id)).capacity;
+
+    assert.equal(await run('--dry-run'), 0);
+    assert.deepEqual(await Promise.all(ids.map(capOf)), [14, 14, 20, 6]);
+
+    assert.equal(await run('--yes'), 0);
+    assert.deepEqual(await Promise.all(ids.map(capOf)), [12, 12, 20, 6]);
+    const over = await getDoc(t, 'sessions', '2030-04-06-0');
+    assert.deepEqual([over.booked, over.status, over.time, over.gcalEventId], [13, 'scheduled', '4:00 PM', 'ev-2030-04-06-0']);
+    const hidden = await getDoc(t, 'sessions', '2030-04-06-1');
+    assert.deepEqual([hidden.hidden, hidden.hiddenBy, hidden.status], [true, 'hide-sessions', 'scheduled']);
+
+    assert.equal(await run('--yes'), 0);
+    assert.deepEqual(await Promise.all(ids.map(capOf)), [12, 12, 20, 6]);
   } finally {
     await clear();
   }

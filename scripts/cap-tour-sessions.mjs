@@ -12,12 +12,18 @@
  *   node scripts/cap-tour-sessions.mjs --prod --dry-run
  *   node scripts/cap-tour-sessions.mjs --prod --yes          (the owner runs this one)
  *   node scripts/cap-tour-sessions.mjs --prod --from 2026-11-14 --to 2026-12-31 --dry-run
+ *   node scripts/cap-tour-sessions.mjs --prod --type training --dry-run
  *
- * Options: --from (default today in Chicago) and --to (default 2027-02-27,
- * the season's last day) bound the session dates.
+ * Options: --type tournament (default) | training picks the sessions and
+ * their cap (CAPS: Tour 20; training 12, owner 2026-11-16 "14 -> 12 kids
+ * per session" - the sync and schedule.js already give a NEW training
+ * session 12, this brings the ones already in Firestore down). --from
+ * (default today in Chicago) and --to (default 2027-02-27, the season's
+ * last day) bound the session dates.
  *
- * What it writes: sessions/{id}.capacity = 20 and nothing else - one masked
- * write per Tour event whose capacity is not already 20, each under the
+ * What it writes: sessions/{id}.capacity = the cap and nothing else - one
+ * masked write per session of the type whose capacity is not already the
+ * cap, each under the
  * updateTime of the read it was planned from, so a booking or a cancel on
  * that event in the meantime fails its batch instead (run again, dry run
  * first). Commits go in batches; each written event is read back. Bookings,
@@ -35,10 +41,13 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { resolveTarget, cmpFilter, andFilter, getDoc, docName, fsFields, fsDecode, commit, PROJECT_ID } from './lib/firestore-rest.mjs';
 
-const USAGE = 'Usage: node scripts/cap-tour-sessions.mjs [--prod] [--from YYYY-MM-DD] [--to YYYY-MM-DD] (--dry-run | --yes)';
+const USAGE = 'Usage: node scripts/cap-tour-sessions.mjs [--prod] [--type tournament|training] [--from YYYY-MM-DD] [--to YYYY-MM-DD] (--dry-run | --yes)';
 export const CAP = 20;
+/** The cap per session type, as the sync's CAPACITY writes it (phil and mental are never capped here). */
+export const CAPS = { tournament: CAP, training: 12 };
 const SEASON_END = '2027-02-27';
 const TOUR = 'tournament';
+const TYPE_LABEL = { tournament: 'Tour event', training: 'training session' };
 // Firestore's commit limit is 500 writes; a whole season of Tour events fits in one.
 const BATCH = 100;
 
@@ -53,17 +62,17 @@ const chicagoToday = () => new Intl.DateTimeFormat('en-CA', { timeZone: 'America
 
 /**
  * Pure (pass `today`, Chicago 'YYYY-MM-DD').
- * @return {{prod, from, to, dryRun, yes} | {error}}
+ * @return {{prod, from, to, dryRun, yes, type, cap} | {error}}
  */
 export function parseArgs(argv, { today = chicagoToday() } = {}) {
-  const out = { prod: false, from: null, to: null, dryRun: false, yes: false };
+  const out = { prod: false, from: null, to: null, dryRun: false, yes: false, type: TOUR, cap: CAP };
   const raw = {};
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
     if (a === '--prod') out.prod = true;
     else if (a === '--dry-run') out.dryRun = true;
     else if (a === '--yes') out.yes = true;
-    else if (a === '--from' || a === '--to') {
+    else if (a === '--from' || a === '--to' || a === '--type') {
       if (a in raw) return { error: `${a} may be given only once.` };
       const v = argv[++i];
       if (v === undefined || v.startsWith('--')) return { error: `${a} needs a value.` };
@@ -73,6 +82,11 @@ export function parseArgs(argv, { today = chicagoToday() } = {}) {
   if (out.dryRun === out.yes) return { error: 'Pass exactly one of --dry-run or --yes.' };
   out.from = raw['--from'] ?? today;
   out.to = raw['--to'] ?? SEASON_END;
+  if ('--type' in raw) {
+    if (!Object.hasOwn(CAPS, raw['--type'])) return { error: `--type must be one of ${Object.keys(CAPS).join(', ')}.` };
+    out.type = raw['--type'];
+    out.cap = CAPS[out.type];
+  }
   if (!validDate(out.from) || !validDate(out.to)) return { error: 'Pass --from and --to as real dates written YYYY-MM-DD.' };
   if (out.from > out.to) return { error: `--from (${out.from}) is after --to (${out.to}).` };
   return out;
@@ -85,15 +99,15 @@ function minutesOf(time) {
 }
 
 /**
- * Pure: which Tour events change. Any capacity other than `cap` goes to
- * `cap` (the sync writes the same number on its next run); `over` marks an
- * event with more booked than the cap, which keeps everyone. Training, phil
- * and mental sessions are never in it.
+ * Pure: which sessions of `type` (default Tour) change. Any capacity other
+ * than `cap` goes to `cap` (the sync writes the same number on its next
+ * run); `over` marks a session with more booked than the cap, which keeps
+ * everyone. Sessions of any other type are never in it.
  * @return {{change: Array<{id, date, time, from, booked, over}>, same: string[]}}
  */
-export function planCaps(sessions, cap = CAP) {
+export function planCaps(sessions, cap = CAP, type = TOUR) {
   const tours = sessions
-    .filter((s) => s.type === TOUR)
+    .filter((s) => s.type === type)
     .sort((a, b) => String(a.date).localeCompare(String(b.date)) || minutesOf(a.time) - minutesOf(b.time) || a.id.localeCompare(b.id));
   const change = [];
   const same = [];
@@ -159,15 +173,17 @@ export async function main(argv = process.argv.slice(2), { today = chicagoToday(
   if (args.error) { console.error(`${args.error}\n${USAGE}`); return 1; }
   const target = await resolveTarget({ prod: args.prod });
   console.log(`Target: ${target.label}${args.dryRun ? ' (dry run, nothing is written)' : ''}`);
-  console.log(`Tour events ${args.from} to ${args.to}: capacity -> ${CAP}`);
+  const { cap, type } = args;
+  const label = TYPE_LABEL[type];
+  console.log(`${label}s ${args.from} to ${args.to}: capacity -> ${cap}`);
 
   const { sessions, times } = await readSessions(target, args.from, args.to);
-  const { change, same } = planCaps(sessions);
+  const { change, same } = planCaps(sessions, cap, type);
   const over = change.filter((c) => c.over);
-  for (const c of change) console.log(capLine(c));
+  for (const c of change) console.log(capLine(c, cap));
   const total = change.length + same.length;
-  if (!total) { console.log(`No Tour event between ${args.from} and ${args.to}. Nothing to write.`); return 0; }
-  console.log(`${total} Tour event(s): ${change.length} to cap at ${CAP}, ${same.length} already at ${CAP}${over.length ? `, ${over.length} over ${CAP} (everyone kept)` : ''}.`);
+  if (!total) { console.log(`No ${label} between ${args.from} and ${args.to}. Nothing to write.`); return 0; }
+  console.log(`${total} ${label}(s): ${change.length} to cap at ${cap}, ${same.length} already at ${cap}${over.length ? `, ${over.length} over ${cap} (everyone kept)` : ''}.`);
   if (args.dryRun) { console.log(change.length ? 'Run again with --yes instead of --dry-run to write them.' : 'Nothing to write.'); return 0; }
   if (!change.length) { console.log('Nothing to write.'); return 0; }
 
@@ -176,7 +192,7 @@ export async function main(argv = process.argv.slice(2), { today = chicagoToday(
   for (let i = 0; i < change.length; i += BATCH) {
     const slice = change.slice(i, i + BATCH);
     try {
-      await commit(target, slice.map((c) => buildWrite({ id: c.id, updateTime: times.get(c.id) })));
+      await commit(target, slice.map((c) => buildWrite({ id: c.id, updateTime: times.get(c.id), cap })));
       written.push(...slice.map((c) => c.id));
     } catch (e) {
       failed.push(failureNote(slice.map((c) => c.id), e.message));
@@ -185,10 +201,10 @@ export async function main(argv = process.argv.slice(2), { today = chicagoToday(
   let readBack = 0;
   for (const id of written) {
     const after = await getDoc(target, 'sessions', id);
-    if (after?.capacity === CAP) readBack++;
+    if (after?.capacity === cap) readBack++;
     else failed.push(`${id}: written, but capacity reads ${after ? after.capacity : '(gone)'} - check it`);
   }
-  console.log(`Capped at ${CAP}: ${readBack} of ${change.length}.${over.length ? ` Over ${CAP}, everyone kept (no new booking until below ${CAP}): ${over.map((c) => c.id).join(', ')}.` : ''}`);
+  console.log(`Capped at ${cap}: ${readBack} of ${change.length}.${over.length ? ` Over ${cap}, everyone kept (no new booking until below ${cap}): ${over.map((c) => c.id).join(', ')}.` : ''}`);
   if (failed.length) { console.error(failed.map((f) => `  ${f}`).join('\n')); return 1; }
   return 0;
 }
