@@ -53,7 +53,7 @@ All five collections are new. Only the Admin SDK writes `doorEvents`, `doorLimit
 
 | Path | Shape | Who writes | Who reads |
 |---|---|---|---|
-| `doorConfig/main` | `{mode: 'off'\|'staff'\|'all', lat: ?number, lng: ?number, radiusM: int 50..1000, openSeconds: int 1..30, updatedAt: timestamp, updatedByUid: string}` | owner, ops (client, rules-validated) | owner, ops |
+| `doorConfig/main` | `{mode: 'off'\|'staff'\|'all', lat: ?number, lng: ?number, radiusM: int 50..1000, openSeconds: int 1..600, updatedAt: timestamp, updatedByUid: string}` | owner, ops (client, rules-validated) | owner, ops |
 | `doorPauses/{householdId}` | `{householdId, pausedAt: timestamp, pausedByUid, note: ?string (<=200)}` | owner, ops create/delete | owner, ops |
 | `doorRules/{uid}` | `{uid, householdId, athleteId: ?string, role: 'parent'\|'athlete', adult: bool, name, termsVersion, signedAt: timestamp, signedAtMs}` | server (signDoorRules) | the signer; owner, ops |
 | `doorEvents/{uid}_{pressId}` | `{uid, role, name, householdId: ?string, householdName: ?string, athleteId: ?string, atMs, at: timestamp, outcome: 'pending'\|'opened'\|'coalesced'\|'test'\|'denied'\|'error', reason: ?string, altaStatus: ?int, latencyMs: ?int, distanceM: ?int (rounded to 10), accuracyM: ?int, test: bool, nonce: string (the invocation's random mark)}` | server (unlockDoor) | owner, ops; a parent where `householdId == me().householdId`; an athlete where `uid == request.auth.uid` |
@@ -61,6 +61,11 @@ All five collections are new. Only the Admin SDK writes `doorEvents`, `doorLimit
 
 - A missing `doorConfig/main` means `mode: 'off'` (fail closed). Defaults when fields are absent:
   `radiusM` 200, `openSeconds` 5.
+- `openSeconds` is what the app counts down after an unlock, 1 s to 10 min (Alta's Entry open
+  duration range; owner 2026-11-17: the door stays open "a few minutes"). Alta, not the app, holds
+  the door open: staff set the same value in both (section 8). The bounds are
+  `OPEN_SECONDS_MIN`/`OPEN_SECONDS_MAX` in `door-decide.js`, equal in `data/doorAdmin.js` and the
+  rules (a jest test compares all three).
 - No coordinates are ever stored: `doorEvents` keeps only the distance from the academy, rounded to
   10 m, and the reported accuracy.
 - Indexes: `doorEvents` (householdId ASC, atMs DESC) and (uid ASC, atMs DESC). The staff list orders
@@ -71,7 +76,8 @@ All five collections are new. Only the Admin SDK writes `doorEvents`, `doorLimit
 ### 5.1 `functions/portal/door-decide.js` (pure)
 
 Exports `DOOR_TERMS_VERSION = 'door-2026-11-17'`, `STAFF_DOOR_ROLES = ['owner', 'ops']`,
-`DEFAULTS = {radiusM: 200, openSeconds: 5}`, `doorFacility(athletes)` and
+`DEFAULTS = {radiusM: 200, openSeconds: 5}`, `OPEN_SECONDS_MIN = 1`, `OPEN_SECONDS_MAX = 600`,
+`openSecondsOf(config)`, `doorFacility(athletes)` and
 `decide({user, household, athletes, config, paused, myRules, householdRules, today, location, mode})`.
 
 - `doorFacility(athletes)`: `householdFacility` (facility.js, unchanged) over the athletes with an
@@ -170,7 +176,7 @@ expects them (27 functions), `unlockDoor: ['ALTA_UNLOCK_URL']`, `signDoorRules: 
 Add, without touching any other clause:
 - `doorConfig/{id}`: read owner/ops. Write owner/ops only for `id == 'main'`, keys within
   `mode, lat, lng, radiusM, openSeconds, updatedAt, updatedByUid`; `mode` in the three values;
-  `lat`/`lng` null or numbers in range; `radiusM` int 50..1000; `openSeconds` int 1..30;
+  `lat`/`lng` null or numbers in range; `radiusM` int 50..1000; `openSeconds` int 1..600;
   `updatedByUid == request.auth.uid`; `updatedAt == request.time`. No delete.
 - `doorPauses/{householdId}`: read owner/ops; create owner/ops with `householdId` matching the id,
   `pausedByUid == request.auth.uid`, `pausedAt == request.time`, optional `note` string <= 200;
@@ -180,7 +186,8 @@ Add, without touching any other clause:
 - `doorLimits/{id}`: no client access.
 - Probes: `scripts/rules-probes/door.mjs`, registered in `scripts/verify-rules.mjs`. At least: a
   parent cannot write any door collection; ops writes a valid `doorConfig/main` and is refused a bad
-  mode, a radius of 5000 and a foreign `updatedByUid`; a coach cannot read `doorConfig`; a parent
+  mode, a radius of 5000 and a foreign `updatedByUid`; owner and ops may set an open time of 600 s
+  and are refused 601 s and 0 s; a coach cannot read `doorConfig`; a parent
   reads its own household's event and not another's; an athlete reads its own event only; a parent
   reads its own `doorRules` and not another uid's; nobody reads `doorLimits`.
 
@@ -211,8 +218,10 @@ New code goes outside the grandfathered `hooks/live.js`.
   - Before the first press: "The app checks you're at the academy when you unlock." Staff see no
     location line.
   - Copy by outcome/reason (plain, never generic):
-    - opened: "Unlocked - pull the door now." and a countdown of `openSeconds`, then "Didn't open?
-      Hold again."
+    - opened: "Unlocked - pull the door now." and a countdown of `openSeconds` ("Open for 42 s"
+      under a minute, "Open for 2:05" from a minute up), then "Didn't open? Hold again." The
+      countdown runs to an end time (answer time + `openSeconds`), read every second and when the
+      page comes back into view, so a phone that slept or a background tab shows the truth at once.
     - coalesced: "Already unlocked - pull the door."
     - test: "Test household - the door was not opened."
     - sign-rules: "Read and sign the door rules once to turn on Unlock." with a **Sign the door
@@ -245,7 +254,11 @@ New code goes outside the grandfathered `hooks/live.js`.
     "Save this as the academy's location? Only do this inside the academy." with Save and Cancel
     (app-1, spec-3). **Check this phone's distance** runs the family check on this phone ("This
     phone is about N m from the academy ... A family standing here could unlock."). Radius
-    100/200/300/500 m; door open time in seconds.
+    100/200/300/500 m.
+  - **Door open time**: a labelled select of 3 s, 5 s, 10 s, 15 s, 20 s, 30 s, 45 s, 1 min,
+    1 min 30 s, 2 min, then each minute to 10 min (`openTimeText`); a saved value not on the list
+    shows as an extra option in its place. Hint: "Set the same time as the door's Entry open
+    duration in Alta. The app counts it down after an unlock."
   - The staff Unlock (same control, no location).
   - **Recent activity**: the latest 50 `doorEvents` (time in Chicago, name, family, outcome, reason,
     distance).
@@ -268,7 +281,11 @@ New code goes outside the grandfathered `hooks/live.js`.
    the real link (the emulator never POSTs it either way).
 1. In Alta, on "Portal door - DO NOT DELETE": Cloud Key -> Get webhook URL -> Entries: the member door
    only -> end Feb 28 2027 11:59 pm -> Generate links -> copy the **API link**. Do not keep the guest
-   link.
+   link. Then on the member door's entry set **Entry open duration** to how long the door stays
+   unlocked after a press (owner: "a few minutes"; Alta allows 1 s to 10 min on ACU-wired doors).
+   It applies to every unlock of that door, fobs and Alta phone keys included, not only the app's.
+   Once the app is on staging (step 4), choose the same value in Admin -> Facility door -> Door
+   open time, so the app's countdown matches the door.
 2. `npx firebase-tools functions:secrets:set ALTA_UNLOCK_URL --project rypacad`, paste the API link at
    the hidden prompt (a new version over step 0's placeholder). Never in chat or a file.
 3. Deploy `functions:unlockDoor,functions:signDoorRules`, then `firestore:rules,firestore:indexes`.
