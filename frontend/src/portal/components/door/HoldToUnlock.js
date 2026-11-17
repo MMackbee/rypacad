@@ -31,8 +31,11 @@ const srOnly = {
  * sliding off without capture cancels. No long-press menu, no text selection,
  * no page pan from the button. The keyboard and screen-reader path: a click
  * with no finger on the button (Enter, Space, a reader's activate) asks
- * "Unlock the door now?" with Unlock and Cancel, focus on the question.
- * `busy` (press to answer) and `disabled` turn everything off.
+ * "Unlock the door now?" with Unlock and Cancel, focus on the question;
+ * choosing Unlock puts focus back on this button. `busy` (press to answer)
+ * and `disabled` turn everything off; busy is aria-disabled rather than
+ * disabled, so the button keeps keyboard focus through the wait (review
+ * 2026-11-17 app-7: a disabled button drops focus to the page).
  *
  * @param {() => void} onUnlock
  * @param {boolean} [busy]  A press is in flight: "Unlocking" with a spinner.
@@ -107,7 +110,8 @@ export default function HoldToUnlock({ onUnlock, busy = false, disabled = false 
         ref={buttonRef}
         type="button"
         data-door-hold=""
-        disabled={off}
+        disabled={disabled}
+        aria-disabled={off ? 'true' : undefined}
         aria-describedby={hintId}
         onPointerDown={onPointerDown}
         onPointerUp={onPointerEnd}
@@ -172,6 +176,8 @@ export default function HoldToUnlock({ onUnlock, busy = false, disabled = false 
         <UnlockQuestion
           onUnlock={() => {
             setAsking(false);
+            // The question's own Unlock button goes away: keep the place.
+            if (buttonRef.current) buttonRef.current.focus();
             onUnlock();
           }}
           onCancel={closeQuestion}

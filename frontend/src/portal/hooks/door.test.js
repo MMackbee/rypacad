@@ -25,6 +25,7 @@ import { createRoot } from 'react-dom/client';
 import { ERR, LiveDataError } from './live';
 import {
   LOCATION_OPTIONS,
+  LOCATION_PROMPT_WATCHDOG_MS,
   LOCATION_WATCHDOG_MS,
   currentLocation,
   newPressId,
@@ -36,6 +37,30 @@ import {
 
 let online;
 let geo;
+let permissions;
+/** A fake geolocation PermissionStatus: `set(state)` changes it and fires 'change'. */
+function permissionStatus(state) {
+  const listeners = new Set();
+  const status = {
+    state,
+    addEventListener: (type, fn) => { if (type === 'change') listeners.add(fn); },
+    removeEventListener: (type, fn) => listeners.delete(fn),
+    set: (next) => {
+      status.state = next;
+      for (const fn of [...listeners]) fn();
+    },
+    listeners,
+  };
+  return status;
+}
+/** navigator.permissions answering `status` for geolocation (undefined: no Permissions API). */
+function setPermission(status) {
+  permissions = status === undefined ? undefined : { query: async ({ name }) => (name === 'geolocation' ? status : null) };
+}
+/** Lets the permission query's promise settle under fake timers. */
+const settleQuery = async () => {
+  for (let i = 0; i < 5; i += 1) await Promise.resolve();
+};
 const position = (lat, lng, accuracy) => ({ coords: { latitude: lat, longitude: lng, accuracy } });
 /** A fake navigator.geolocation: `answer(success, failure, options)` decides. */
 function setGeolocation(answer) {
@@ -45,6 +70,7 @@ function setGeolocation(answer) {
 beforeAll(() => {
   Object.defineProperty(window.navigator, 'onLine', { configurable: true, get: () => online });
   Object.defineProperty(window.navigator, 'geolocation', { configurable: true, get: () => geo });
+  Object.defineProperty(window.navigator, 'permissions', { configurable: true, get: () => permissions });
 });
 
 beforeEach(() => {
@@ -53,6 +79,7 @@ beforeEach(() => {
   mockAnswers = {};
   online = true;
   setGeolocation((ok) => ok(position(44.97, -93.26, 12)));
+  setPermission(permissionStatus('granted'));
 });
 
 describe('currentLocation', () => {
@@ -77,11 +104,17 @@ describe('currentLocation', () => {
     await expect(currentLocation()).rejects.toMatchObject({ reason: 'location-needed' });
   });
 
+  test('the academy\'s own location (the staff screen) is a fresh reading, never a cached one', async () => {
+    await expect(currentLocation({ fresh: true })).resolves.toEqual({ lat: 44.97, lng: -93.26, accuracy: 12 });
+    expect(geo.calls).toEqual([{ ...LOCATION_OPTIONS, maximumAge: 0 }]);
+  });
+
   test('a phone that never answers is given up on at 12 s', async () => {
     jest.useFakeTimers();
     try {
       setGeolocation(() => {});
       const pending = currentLocation().catch((e) => e);
+      await settleQuery();
       expect(LOCATION_WATCHDOG_MS).toBe(12000);
       jest.advanceTimersByTime(11999);
       let settled = false;
@@ -92,6 +125,71 @@ describe('currentLocation', () => {
       await expect(pending).resolves.toMatchObject({ reason: 'location-needed' });
     } finally {
       jest.useRealTimers();
+    }
+  });
+});
+
+describe('the 12 s watchdog never counts the permission question (review 2026-11-17 app-3)', () => {
+  /** Runs `body` with fake timers and a geolocation that answers only when told. */
+  async function withHeldFix(body) {
+    jest.useFakeTimers();
+    let answer = null;
+    setGeolocation((ok) => { answer = ok; });
+    try {
+      let outcome = null;
+      const pending = currentLocation().then((v) => { outcome = v; }, (e) => { outcome = e; });
+      await settleQuery();
+      const after = async (ms) => {
+        jest.advanceTimersByTime(ms);
+        await settleQuery();
+        return outcome;
+      };
+      await body({ after, fix: async (...p) => { answer(position(...p)); await settleQuery(); return outcome; }, pending });
+    } finally {
+      jest.useRealTimers();
+    }
+  }
+
+  test('while the phone asks "Allow location?", a slow tap and a slow fix still get through', async () => {
+    const status = permissionStatus('prompt');
+    setPermission(status);
+    await withHeldFix(async ({ after, fix }) => {
+      expect(await after(6000)).toBeNull();
+      status.set('granted');
+      // 13 s after the press: past 12 s from the press, 7 s after Allow.
+      expect(await after(7000)).toBeNull();
+      expect(await fix(44.97, -93.26, 9)).toEqual({ lat: 44.97, lng: -93.26, accuracy: 9 });
+    });
+  });
+
+  test('once allowed, the 12 s run from the answer', async () => {
+    const status = permissionStatus('prompt');
+    setPermission(status);
+    await withHeldFix(async ({ after }) => {
+      expect(await after(20000)).toBeNull();
+      status.set('granted');
+      expect(await after(11999)).toBeNull();
+      expect(await after(1)).toMatchObject({ reason: 'location-needed' });
+      expect(status.listeners.size).toBe(0);
+    });
+  });
+
+  test('a question nobody answers is given up on too, later', async () => {
+    setPermission(permissionStatus('prompt'));
+    await withHeldFix(async ({ after }) => {
+      expect(LOCATION_PROMPT_WATCHDOG_MS).toBe(45000);
+      expect(await after(44999)).toBeNull();
+      expect(await after(1)).toMatchObject({ reason: 'location-needed' });
+    });
+  });
+
+  test('no Permissions API, or a query that fails: the longer wait, the question may be showing', async () => {
+    for (const perms of [undefined, { query: async () => { throw new Error('not supported'); } }]) {
+      permissions = perms;
+      await withHeldFix(async ({ after }) => {
+        expect(await after(12000)).toBeNull();
+        expect(await after(33000)).toMatchObject({ reason: 'location-needed' });
+      });
     }
   });
 });

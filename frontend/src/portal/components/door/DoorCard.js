@@ -34,13 +34,25 @@ export default function DoorCard({ practice = false, selfWording = false, staffS
   // A press refused for a reason the card shows as a state (sign-rules after the version moved on, paused meanwhile).
   const [stateReason, setStateReason] = useState(null);
   const [signing, setSigning] = useState(false);
+  // A press that switched the card took the button away: focus goes to
+  // what the card now says (review 2026-11-17 app-7).
+  const stateRef = useRef(null);
+  const switchedByPress = useRef(false);
   const pressing = useDoorPress({
     staff: status?.staff === true,
     openSeconds: status?.openSeconds,
     onReason: (reason) => {
-      if (CARD_REASONS.includes(reason)) setStateReason(reason);
+      if (CARD_REASONS.includes(reason)) {
+        switchedByPress.current = true;
+        setStateReason(reason);
+      }
     },
   });
+  useEffect(() => {
+    if (!stateReason || !switchedByPress.current) return;
+    switchedByPress.current = false;
+    if (stateRef.current) stateRef.current.focus();
+  }, [stateReason]);
 
   // Recheck only when the key really changed: comparing with the last key
   // (not a "first run" flag) stays right when StrictMode runs effects twice.
@@ -68,14 +80,14 @@ export default function DoorCard({ practice = false, selfWording = false, staffS
   } else if (view.reason === 'sign-rules') {
     body = (
       <>
-        <Body size={13} tone={color.text}>{doorCopy('sign-rules')}</Body>
+        <StateMessage ref={stateRef}>{doorCopy('sign-rules')}</StateMessage>
         <Button height={46} onClick={() => setSigning(true)} style={{ marginTop: 12, font: `600 15px ${font.body}` }}>
           Sign the door rules
         </Button>
       </>
     );
   } else {
-    body = <Body size={13} tone={color.text}>{refusalCopy(view.reason, '')}</Body>;
+    body = <StateMessage ref={stateRef}>{refusalCopy(view.reason, '')}</StateMessage>;
   }
 
   return (
@@ -96,6 +108,17 @@ export default function DoorCard({ practice = false, selfWording = false, staffS
     </Card>
   );
 }
+
+/** What the card says instead of the button: a status a press can move focus to. */
+const StateMessage = React.forwardRef(function StateMessage({ children }, ref) {
+  return (
+    <div ref={ref} tabIndex={-1} role="status" style={{ outline: 'none' }}>
+      <Body size={13} tone={color.text}>
+        {children}
+      </Body>
+    </div>
+  );
+});
 
 /**
  * Under the button: the location line before the first press (a family's

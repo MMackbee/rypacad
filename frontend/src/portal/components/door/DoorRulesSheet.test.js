@@ -21,7 +21,8 @@ import { renderScreen } from '../../screens/testRender';
 import { LiveDataError, ERR } from '../../hooks/live';
 import DoorRulesSheet from './DoorRulesSheet';
 
-const RULE = "Use the app's Unlock button only when you are at the door, and only to let in your own household. Never open the door for anyone else.";
+// Review 2026-11-17 (spec-5): the one guest the rules above allow may come in too.
+const RULE = "Use the app's Unlock button only when you are at the door, and only to let in your own household and the one guest the rules allow. Never open the door for anyone else.";
 
 let closed;
 let signed;
@@ -85,6 +86,23 @@ test("a refusal shows the server's words and keeps the sheet open", async () => 
   expect(r.text()).toContain('Reload the app to see the latest rules.');
   expect(signed).toBe(0);
   expect(r.button('Sign').disabled).toBe(false);
+  await r.unmount();
+});
+
+test.each([
+  ['internal', new LiveDataError(ERR.UNKNOWN, 'internal', { code: 'functions/internal' }, null)],
+  ['deadline-exceeded', new LiveDataError(ERR.UNAVAILABLE, 'deadline-exceeded', { code: 'functions/deadline-exceeded' }, null)],
+  ['a plain Error', new Error('Failed to fetch')],
+])('no answer from the server (%s): plain words, never the SDK\'s code', async (label, failure) => {
+  // Review 2026-11-17 (app-5): weak signal showed the bare word "internal".
+  mockFail = failure;
+  const r = await mount();
+  await r.fill('Your full name', 'Dana Hart');
+  await r.click('I agree to the door rules');
+  await r.click('Sign');
+  expect(r.text()).toContain('The door rules were not signed. Check your connection and try again.');
+  expect(r.text()).not.toContain(failure.message);
+  expect(signed).toBe(0);
   await r.unmount();
 });
 

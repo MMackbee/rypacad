@@ -183,10 +183,13 @@ describe('a press', () => {
     mockPress = () => new Promise((resolve) => { release = resolve; });
     const r = await renderScreen(<DoorCard />);
     await hold(r);
-    expect(holdButton(r).disabled).toBe(true);
+    // aria-disabled, not disabled: the button keeps keyboard focus (review 2026-11-17 app-7).
+    expect(holdButton(r).getAttribute('aria-disabled')).toBe('true');
     expect(holdButton(r).textContent).toContain('Unlocking');
+    await hold(r);
+    expect(presses()).toHaveLength(1);
     await act(async () => { release({ outcome: 'coalesced', openSeconds: 3 }); });
-    expect(holdButton(r).disabled).toBe(false);
+    expect(holdButton(r).getAttribute('aria-disabled')).toBeNull();
     expect(r.text()).toContain('Already unlocked - pull the door.');
     await r.unmount();
   });
@@ -262,6 +265,40 @@ describe('a press', () => {
     await r.flush();
     expect(presses()).toHaveLength(1);
     expect(r.text()).toContain('Unlocked - pull the door now.');
+    await r.unmount();
+  });
+});
+
+describe('keyboard and screen reader keep their place (review 2026-11-17 app-7)', () => {
+  test('choosing Unlock in the question leaves focus on the button, through the wait and after the answer', async () => {
+    let release;
+    mockPress = () => new Promise((resolve) => { release = resolve; });
+    const r = await renderScreen(<DoorCard />);
+    await act(async () => { holdButton(r).focus(); holdButton(r).click(); });
+    expect(r.text()).toContain('Unlock the door now?');
+    await r.click('Unlock');
+    await r.flush();
+    expect(document.activeElement).toBe(holdButton(r));
+    expect(holdButton(r).getAttribute('aria-disabled')).toBe('true');
+    await act(async () => { release({ outcome: 'opened', openSeconds: 3 }); });
+    expect(document.activeElement).toBe(holdButton(r));
+    expect(r.text()).toContain('Unlocked - pull the door now.');
+    await r.unmount();
+  });
+
+  test.each([
+    ['paused', 'Door unlocking is paused for your family.'],
+    ['sign-rules', 'Read and sign the door rules once to turn on Unlock.'],
+    ['guardian-rules', 'A parent needs to sign the door rules in their own app first.'],
+  ])('a refusal that switches the card (%s) moves focus to what it now says', async (reason, copy) => {
+    mockPress = refusedWith(reason);
+    const r = await renderScreen(<DoorCard />);
+    await act(async () => { holdButton(r).focus(); holdButton(r).click(); });
+    await r.click('Unlock');
+    await r.flush();
+    expect(holdButton(r)).toBeNull();
+    expect(document.activeElement.textContent).toContain(copy);
+    expect(document.activeElement.getAttribute('role')).toBe('status');
     await r.unmount();
   });
 });

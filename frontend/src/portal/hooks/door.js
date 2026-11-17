@@ -19,8 +19,14 @@ import { DOOR_TERMS_VERSION, doorCopy } from '../data/doorRules';
 
 /** getCurrentPosition's options (spec 7). */
 export const LOCATION_OPTIONS = { enableHighAccuracy: true, timeout: 10000, maximumAge: 30000 };
-/** Some phones never call back at all: give up on our own after this. */
+/** Some phones never call back at all: give up on our own this long after location is allowed. */
 export const LOCATION_WATCHDOG_MS = 12000;
+/**
+ * The wait while the browser may still be asking "Allow location?" (review
+ * 2026-11-17 app-3): the 12 s start only once the permission is granted, so
+ * reading and answering the question never eats into them.
+ */
+export const LOCATION_PROMPT_WATCHDOG_MS = 45000;
 /** The open time when the server's answer carries none in range (doorConfig's default). */
 export const DEFAULT_OPEN_SECONDS = 5;
 
@@ -33,13 +39,28 @@ function refusal(reason, cause = null) {
 
 const offline = () => typeof navigator !== 'undefined' && navigator.onLine === false;
 
+/** The geolocation PermissionStatus, or null (no Permissions API, or the query failed). Never rejects. */
+function geoPermission() {
+  try {
+    const p = typeof navigator !== 'undefined' ? navigator.permissions : undefined;
+    if (!p || typeof p.query !== 'function') return Promise.resolve(null);
+    return Promise.resolve(p.query({ name: 'geolocation' })).catch(() => null);
+  } catch (err) {
+    return Promise.resolve(null);
+  }
+}
+
 /**
  * The phone's position as the server reads it: `{ lat, lng, accuracy }` (m).
  * No geolocation, a refusal, no fix, the browser's 10 s timeout or our own
- * 12 s watchdog all reject 'location-needed'.
+ * watchdog all reject 'location-needed'. The watchdog is 12 s once location
+ * is allowed (from the answer when the browser asks), and 45 s while it
+ * may still be asking or the browser cannot say. `fresh` (the staff
+ * screen setting the academy's own location) takes no cached fix.
  */
-export function currentLocation() {
+export function currentLocation({ fresh = false } = {}) {
   const geo = typeof navigator !== 'undefined' ? navigator.geolocation : undefined;
+  const options = fresh ? { ...LOCATION_OPTIONS, maximumAge: 0 } : LOCATION_OPTIONS;
   return new Promise((resolve, reject) => {
     if (!geo || typeof geo.getCurrentPosition !== 'function') {
       reject(refusal('location-needed'));
@@ -47,13 +68,29 @@ export function currentLocation() {
     }
     let settled = false;
     let timer = null;
+    let status = null;
+    const arm = (ms) => {
+      if (settled) return;
+      clearTimeout(timer);
+      timer = setTimeout(() => finish(reject, refusal('location-needed')), ms);
+    };
+    const onChange = () => {
+      if (status && status.state === 'granted') arm(LOCATION_WATCHDOG_MS);
+    };
     const finish = (fn, value) => {
       if (settled) return;
       settled = true;
       clearTimeout(timer);
+      if (status && typeof status.removeEventListener === 'function') status.removeEventListener('change', onChange);
       fn(value);
     };
-    timer = setTimeout(() => finish(reject, refusal('location-needed')), LOCATION_WATCHDOG_MS);
+    arm(LOCATION_PROMPT_WATCHDOG_MS);
+    geoPermission().then((s) => {
+      if (settled || !s) return;
+      status = s;
+      if (s.state === 'granted') arm(LOCATION_WATCHDOG_MS);
+      else if (typeof s.addEventListener === 'function') s.addEventListener('change', onChange);
+    });
     const onFix = (pos) => {
       const c = (pos && pos.coords) || {};
       const fix = { lat: Number(c.latitude), lng: Number(c.longitude), accuracy: Number(c.accuracy) };
@@ -62,7 +99,7 @@ export function currentLocation() {
       else finish(reject, refusal('location-needed'));
     };
     try {
-      geo.getCurrentPosition(onFix, (err) => finish(reject, refusal('location-needed', err)), LOCATION_OPTIONS);
+      geo.getCurrentPosition(onFix, (err) => finish(reject, refusal('location-needed', err)), options);
     } catch (err) {
       finish(reject, refusal('location-needed', err));
     }

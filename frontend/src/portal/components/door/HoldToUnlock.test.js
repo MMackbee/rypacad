@@ -119,13 +119,31 @@ test('Escape closes the question', async () => {
 test('busy: off, says so, and neither a hold nor a click does anything', async () => {
   const r = await mount({ busy: true });
   const b = holdButton(r);
-  expect(b.disabled).toBe(true);
+  // Off for every input, yet still focusable, so a keyboard user keeps their place (app-7).
+  expect(b.getAttribute('aria-disabled')).toBe('true');
+  expect(b.disabled).toBe(false);
   expect(b.textContent).toContain('Unlocking');
   await fire(b, 'pointerdown');
   await advance(1500);
   await act(async () => { b.click(); });
   expect(unlocks).toBe(0);
   expect(r.text()).not.toContain('Unlock the door now?');
+  await r.unmount();
+});
+
+test('Unlock in the question puts focus back on the button before it unlocks', async () => {
+  let focusedAtUnlock = null;
+  const r = await renderScreen(<HoldToUnlock onUnlock={() => { focusedAtUnlock = document.activeElement; }} />);
+  await act(async () => { holdButton(r).click(); });
+  await r.click('Unlock');
+  expect(focusedAtUnlock).toBe(holdButton(r));
+  expect(document.activeElement).toBe(holdButton(r));
+  await r.unmount();
+});
+
+test('disabled (not busy) is a real disabled button', async () => {
+  const r = await mount({ disabled: true });
+  expect(holdButton(r).disabled).toBe(true);
   await r.unmount();
 });
 

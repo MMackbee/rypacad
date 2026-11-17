@@ -8,6 +8,8 @@ import { signDoorRules } from '../../hooks/door';
 import { doorRulesSections } from '../../data/doorRules';
 
 const AGREE = 'I agree to the door rules';
+/** When no server answered (weak signal, a timeout): the SDK's own message is a code word ("internal"). */
+export const NOT_SIGNED = 'The door rules were not signed. Check your connection and try again.';
 
 /**
  * The door rules sheet (docs/portal/plans/2026-11-17-door-button/00-spec.md 7),
@@ -15,8 +17,10 @@ const AGREE = 'I agree to the door rules';
  * (data/consentTerms.js facilityAccess, which ends "Who may enter" with the
  * door line), in the second person for an adult athlete's own login
  * (`selfWording`); the typed full name; the "I agree" tick; Sign. Signed once
- * per login (signDoorRules). A refusal shows the server's own words and keeps
- * the sheet open; on success `onSigned` (the card closes it and rechecks).
+ * per login (signDoorRules). A refusal shows the server's own words (it
+ * carries a reason) and keeps the sheet open; a failure with no reason - no
+ * answer at all - says NOT_SIGNED (review 2026-11-17 app-5). On success
+ * `onSigned` (the card closes it and rechecks).
  * The house bottom sheet: an overlay on SHEET_Z (data-portal-overlay, so the
  * Feedback button steps aside), a role="dialog" sheet that scrolls inside.
  */
@@ -36,7 +40,7 @@ export default function DoorRulesSheet({ selfWording = false, onClose, onSigned 
       onSigned();
     } catch (err) {
       setSaving(false);
-      setError(err && err.message ? String(err.message) : 'The door rules were not signed. Try again.');
+      setError(err && err.reason && err.message ? String(err.message) : NOT_SIGNED);
     }
   };
 
