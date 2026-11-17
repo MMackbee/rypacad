@@ -242,6 +242,32 @@ describe('Academy location', () => {
     await r.unmount();
   });
 
+  test('the open time shows keyboard focus, and a change while its save is in flight is dropped (review 2026-11-17 a11y-2)', async () => {
+    // Arrow keys on a focused, closed select (Windows) change it once per key: one save at a time, never a write per key.
+    let release;
+    mockAdmin = admin({ saveConfig: (patch) => { saves.push(patch); return new Promise((resolve) => { release = resolve; }); } });
+    const r = await mount();
+    const select = r.container.querySelector('select[aria-label="Door open time"]');
+    const box = select.parentElement;
+    expect(box.style.outline).not.toMatch(/solid/);
+    await act(async () => { select.focus(); });
+    expect(box.style.outline).toMatch(/^2px solid/);
+    await r.fill('Door open time', '240');
+    expect(select.getAttribute('aria-busy')).toBe('true');
+    await r.fill('Door open time', '300');
+    await r.fill('Door open time', '360');
+    expect(saves).toEqual([{ openSeconds: 240 }]);
+    expect(select.value).toBe('5');
+    await act(async () => { release(); });
+    await r.flush();
+    expect(select.getAttribute('aria-busy')).toBeNull();
+    await r.fill('Door open time', '300');
+    expect(saves).toEqual([{ openSeconds: 240 }, { openSeconds: 300 }]);
+    await act(async () => { select.blur(); });
+    expect(box.style.outline).not.toMatch(/solid/);
+    await r.unmount();
+  });
+
   test('a saved open time off the list shows as chosen, in its sorted place', async () => {
     for (const [secs, text, after] of [[6, '6 s', '5 s'], [11, '11 s', '10 s']]) {
       mockAdmin = admin({ config: normalizeConfig({ ...LOCATED, openSeconds: secs }) });

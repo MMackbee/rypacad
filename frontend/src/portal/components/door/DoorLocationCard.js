@@ -1,4 +1,4 @@
-import React, { useId, useState } from 'react';
+import React, { useId, useRef, useState } from 'react';
 import { color, font, radius } from '../../tokens';
 import Button from '../Button';
 import StatusBadge from '../StatusBadge';
@@ -200,9 +200,29 @@ export default function DoorLocationCard({ config, onSave }) {
  * style (components/Field.js SelectField: the 52px box, 16px text so iOS
  * never zooms, the CSS chevron). A saved time not on the list is offered
  * too, in its place, so the select always shows what is stored.
+ *
+ * Review 2026-11-17 a11y-2: the box shows focus (the app's 2px focus ring),
+ * and one save runs at a time. Arrow keys on a focused, closed select
+ * change it once per key on Windows; a change while a save is in flight is
+ * dropped (aria-busy meanwhile) and the select goes back to the stored time.
+ * Not `disabled`: that would take keyboard focus away.
  */
 function OpenTimeSelect({ value, onChange }) {
   const hintId = useId();
+  const [focused, setFocused] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const savingRef = useRef(false);
+  const change = async (e) => {
+    if (savingRef.current) return;
+    savingRef.current = true;
+    setSaving(true);
+    try {
+      await onChange(Number(e.target.value));
+    } finally {
+      savingRef.current = false;
+      setSaving(false);
+    }
+  };
   return (
     <>
       <div
@@ -214,13 +234,18 @@ function OpenTimeSelect({ value, onChange }) {
           display: 'flex',
           alignItems: 'center',
           padding: '0 15px',
+          outline: focused ? `2px solid ${color.primary}` : 'none',
+          outlineOffset: 2,
         }}
       >
         <select
           aria-label="Door open time"
           aria-describedby={hintId}
+          aria-busy={saving || undefined}
           value={String(value)}
-          onChange={(e) => onChange(Number(e.target.value))}
+          onChange={change}
+          onFocus={() => setFocused(true)}
+          onBlur={() => setFocused(false)}
           style={{
             flex: 1,
             minWidth: 0,
