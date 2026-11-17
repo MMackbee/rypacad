@@ -93,11 +93,75 @@ test('rolloverPlan: nothing unused, nothing rolls', () => {
   assert.deepEqual([plan.count, plan.skip], [0, null]);
 });
 
-test('rolloverPlan: a month with no issued tokens never rolls the package ' +
-    'count', () => {
-  const plan = rollover.rolloverPlan(planArgs({tokenPeriod: null,
-    bookings: []}));
-  assert.deepEqual([plan.count, plan.skip], [0, 'not-issued']);
+// Owner 2026-11-16 (the Schmidt case): "she clearly has the tokens", and no
+// records written for it. A month with no record rolls at the package's own
+// count - what the meter showed - for a member since before it began.
+const noRecord = (over) => rollover.rolloverPlan(
+    planArgs(Object.assign({tokenPeriod: null}, over)));
+const member = (billing, over) => Object.assign({packageId: 't-6',
+  householdId: 'hart', billing}, over);
+
+test('rolloverPlan: no record, a member since before the month: the ' +
+    'package count rolls', () => {
+  assert.deepEqual(noRecord(), {count: 2, expiresAt: '2026-12-31',
+    skip: null});
+  assert.equal(noRecord({bookings: []}).count, 6);
+  // Dec 2 still; from Dec 3 a month that is over is not counted again.
+  assert.equal(noRecord({today: '2026-12-02'}).count, 2);
+  assert.equal(noRecord({today: '2026-12-03'}).skip, 'not-issued');
+  assert.equal(noRecord({today: '2026-12-20'}).skip, 'not-issued');
+});
+
+test('rolloverPlan: no record, and not a member when the month began: ' +
+    'nothing rolls', () => {
+  const skip = (athlete, over) => noRecord(Object.assign({athlete},
+      over)).skip;
+  // Signed up Nov 14, or Nov 29 paying for December.
+  assert.equal(skip(member({status: 'active',
+    updatedAt: '2026-11-14T15:00:00Z'})), 'not-issued');
+  assert.equal(skip(member({status: 'active',
+    updatedAt: '2026-11-29T15:00:00Z'})), 'not-issued');
+  // No billing on file, no household, a test athlete or household.
+  assert.equal(skip(member(undefined)), 'not-issued');
+  assert.equal(skip(member({status: 'active'})), 'not-issued');
+  assert.equal(skip(member({status: 'active', updatedAt: OCT_21},
+      {householdId: null})), 'not-issued');
+  assert.equal(skip(member({status: 'active', updatedAt: OCT_21},
+      {test: true})), 'not-issued');
+  assert.equal(skip(paid, {household: {test: true}}), 'not-issued');
+});
+
+test('memberBefore: billing active and last changed before the month began',
+    () => {
+      const at = (updatedAt, status) => ({billing: {status: status || 'active',
+        updatedAt}});
+      const before = (iso) => rollover.memberBefore(at(iso), NOV);
+      assert.equal(before(OCT_21), true);
+      // 11:30 PM Oct 31 in Chicago is still October; 12:30 AM Nov 1 is not.
+      assert.equal(before('2026-11-01T04:30:00Z'), true);
+      assert.equal(before('2026-11-01T05:30:00Z'), false);
+      assert.equal(before('2026-11-29T15:00:00Z'), false);
+      assert.equal(rollover.memberBefore(at(OCT_21, 'past_due'), NOV), false);
+      assert.equal(rollover.memberBefore({billing: {status: 'active'}}, NOV),
+          false);
+      assert.equal(rollover.memberBefore({}, NOV), false);
+      assert.equal(rollover.memberBefore(at({toDate: () => new Date(OCT_21)}),
+          NOV), true);
+      assert.equal(before('not a date'), false);
+    });
+
+test('fallbackStands / packageCountStands: a running month counts from its ' +
+    'third day, for a member since before it', () => {
+  assert.equal(rollover.fallbackStands(NOV, '2026-11-02'), false);
+  assert.equal(rollover.fallbackStands(NOV, '2026-11-03'), true);
+  assert.equal(rollover.fallbackStands(null, '2026-11-30'), false);
+  const stands = (athlete, today, household) => rollover.packageCountStands(
+      {athlete, household, period: NOV, today});
+  assert.equal(stands(paid, '2026-11-16'), true);
+  assert.equal(stands(paid, '2026-11-02'), false);
+  assert.equal(stands(member({status: 'active',
+    updatedAt: '2026-11-14T15:00:00Z'}), '2026-11-16'), false);
+  assert.equal(stands(paid, '2026-11-16', {test: true}), false);
 });
 
 test('rolloverPlan: payment failed, cancelled or unpaid gets nothing', () => {
@@ -178,161 +242,38 @@ test('runTokenRollover: Dec 1 mints November\'s two unused tokens',
           ['2026-12-01', 2, 1, 0]);
     });
 
-// Owner 2026-11-16 (the Schmidt case): "she clearly has the tokens". An
-// active family with no record of the running month has it put on record at
-// the package's count, so its leftovers roll without anyone issuing it.
-const NOV_16 = new Date('2026-11-16T06:05:00Z');
-const recordOf = (docs) => docs['tokenPeriods/sam_2026-11-01'];
-
-test('fallbackStands: a running month counts from its third day', () => {
-  assert.equal(rollover.fallbackStands(NOV, '2026-11-01'), false);
-  assert.equal(rollover.fallbackStands(NOV, '2026-11-02'), false);
-  assert.equal(rollover.fallbackStands(NOV, '2026-11-03'), true);
-  assert.equal(rollover.fallbackStands(null, '2026-11-30'), false);
-});
-
-test('memberBefore: billing active and last changed before the month began',
-    () => {
-      const at = (updatedAt, status) => ({billing: {status: status || 'active',
-        updatedAt}});
-      assert.equal(rollover.memberBefore(at(OCT_21), NOV), true);
-      const before = (iso) => rollover.memberBefore(at(iso), NOV);
-      assert.equal(before('2026-10-31T23:00:00Z'), true);
-      // 11:30 PM Oct 31 in Chicago is still October; 12:30 AM Nov 1 is not.
-      assert.equal(before('2026-11-01T04:30:00Z'), true);
-      assert.equal(rollover.memberBefore(at('2026-11-01T05:30:00Z'), NOV),
-          false);
-      // Signed up Nov 29 and paid for December: not a November member.
-      assert.equal(rollover.memberBefore(at('2026-11-29T15:00:00Z'), NOV),
-          false);
-      assert.equal(rollover.memberBefore(at(OCT_21, 'past_due'), NOV), false);
-      assert.equal(rollover.memberBefore({billing: {status: 'active'}}, NOV),
-          false);
-      assert.equal(rollover.memberBefore({}, NOV), false);
-      assert.equal(rollover.memberBefore(at({toDate: () => new Date(OCT_21)}),
-          NOV), true);
-      assert.equal(rollover.memberBefore(at('not a date'), NOV), false);
-    });
-
-test('runTokenRollover: the running month with no record is put on record ' +
-    'at the package count; Dec 1 then rolls from it', async () => {
-  const docs = world();
+test('runTokenRollover: no November record: Dec 1 rolls from the package ' +
+    'count and writes NO record', async () => {
+  const docs = world({'athletes/sam': paid});
   delete docs['tokenPeriods/sam_2026-11-01'];
   const db = fakeDb(docs);
-  const out = await rollover.runTokenRollover({now: NOV_16, db});
-  assert.deepEqual([out.recorded, out.minted, out.errors], [1, 0, 0]);
-  const r = recordOf(docs);
-  assert.deepEqual([r.athleteId, r.householdId, r.periodKey, r.periodEnd,
-    r.granted, r.source, r.eventId, r.recordedBy],
-  ['sam', 'hart', '2026-11-01', '2026-11-30', 6, 'package', null,
-    'rollover']);
-  assert.ok(r.createdAt);
-  // The next night finds it: nothing more is written.
-  const again = await rollover.runTokenRollover({
-    now: new Date('2026-11-17T06:05:00Z'), db});
-  assert.equal(again.recorded, 0);
-  // Dec 1: November's two unused tokens roll, as for any recorded month.
-  const dec = await rollover.runTokenRollover({now: DEC_1, db});
-  assert.equal(dec.minted, 2);
+  // Mid-November: nothing to do, and nothing written.
+  const before = JSON.stringify(docs);
+  const nov = await rollover.runTokenRollover({
+    now: new Date('2026-11-16T06:05:00Z'), db});
+  assert.equal(nov.minted, 0);
+  assert.equal(JSON.stringify(docs), before);
+  const out = await rollover.runTokenRollover({now: DEC_1, db});
+  assert.equal(out.minted, 2);
+  assert.deepEqual(Object.keys(docs).filter(
+      (p) => p.startsWith('tokenPeriods/')), []);
+  // The next night re-counts the same two; from Dec 3 it leaves them be.
+  const dec2 = await rollover.runTokenRollover({
+    now: new Date('2026-12-02T06:05:00Z'), db});
+  const dec9 = await rollover.runTokenRollover({
+    now: new Date('2026-12-09T06:05:00Z'), db});
+  assert.deepEqual([dec2.minted, dec9.minted, minted(docs).length],
+      [0, 0, 2]);
 });
 
-test('runTokenRollover: a record already there is never touched', async () => {
-  const docs = world();
-  const before = JSON.stringify(recordOf(docs));
-  const out = await rollover.runTokenRollover({now: NOV_16,
-    db: fakeDb(docs)});
-  assert.equal(out.recorded, 0);
-  assert.equal(JSON.stringify(recordOf(docs)), before);
-});
-
-test('runTokenRollover: nothing is recorded on the 1st or 2nd, for a ' +
-    'family on hold or unpaid, or for Elite and the single token',
-async () => {
-  const bare = (...extra) => {
-    const docs = world(...extra);
-    delete docs['tokenPeriods/sam_2026-11-01'];
-    return docs;
-  };
-  const run = async (docs, now) => (await rollover.runTokenRollover(
-      {now, db: fakeDb(docs)})).recorded;
-  assert.equal(await run(bare(), new Date('2026-11-01T06:05:00Z')), 0);
-  assert.equal(await run(bare(), new Date('2026-11-02T06:05:00Z')), 0);
-  assert.equal(await run(bare(), new Date('2026-11-03T06:05:00Z')), 1);
-  assert.equal(await run(bare({'households/hart': {periodAnchorDay: 1,
-    membership: {status: 'past_due'}}}), NOV_16), 0);
-  const sam = (over) => ({'athletes/sam': Object.assign({packageId: 't-6',
-    householdId: 'hart', billing: {status: 'active', updatedAt: OCT_21}},
-  over)});
-  assert.equal(await run(bare(sam({billing: {status: 'pending',
-    updatedAt: OCT_21}})), NOV_16), 0);
-  assert.equal(await run(bare(sam({packageId: 'elite'})), NOV_16), 0);
-  assert.equal(await run(bare(sam({packageId: 'single', billing: {
-    status: 'active', oneTime: true, updatedAt: OCT_21}})), NOV_16), 0);
-  // Review 2026-11-16: signed up Nov 14 (or Nov 29, paying for December) -
-  // billing turned active inside November, so November is not theirs.
-  assert.equal(await run(bare(sam({billing: {status: 'active',
-    updatedAt: '2026-11-14T15:00:00Z'}})), NOV_16), 0);
-  assert.equal(await run(bare(sam({billing: {status: 'active',
-    updatedAt: '2026-11-29T15:00:00Z'}})),
-  new Date('2026-11-30T06:05:00Z')), 0);
-  // No billing on file, a test athlete or household, no household at all.
-  assert.equal(await run(bare(sam({billing: undefined})), NOV_16), 0);
-  assert.equal(await run(bare(sam({test: true})), NOV_16), 0);
-  assert.equal(await run(bare({'households/hart': {periodAnchorDay: 1,
-    test: true}}), NOV_16), 0);
-  assert.equal(await run(bare(sam({householdId: null})), NOV_16), 0);
-  // October does not roll, so October needs no record.
-  assert.equal(await run(bare(), new Date('2026-10-20T06:05:00Z')), 0);
-});
-
-test('runTokenRollover: a package record follows a package change; a ' +
-    'Stripe or ops record never does', async () => {
-  const docs = world({'packages/t-8': {kind: 'tokens', tokens: 8}});
-  delete docs['tokenPeriods/sam_2026-11-01'];
-  const db = fakeDb(docs);
-  await rollover.runTokenRollover({now: NOV_16, db});
-  assert.equal(recordOf(docs).granted, 6);
-  docs['athletes/sam'].packageId = 't-8';
-  const out = await rollover.runTokenRollover({
-    now: new Date('2026-11-17T06:05:00Z'), db});
-  assert.equal(out.recorded, 1);
-  assert.deepEqual([recordOf(docs).granted, recordOf(docs).source],
-      [8, 'package']);
-  recordOf(docs).source = 'ops';
-  docs['athletes/sam'].packageId = 't-6';
-  await rollover.runTokenRollover({now: new Date('2026-11-18T06:05:00Z'), db});
-  assert.equal(recordOf(docs).granted, 8);
-});
-
-test('runTokenRollover: a failed record does not cost the night\'s rollover',
-    async () => {
-      const docs = world();
-      const db = fakeDb(docs);
-      const real = db.collection.bind(db);
-      // December's record read fails on Dec 3; November must still roll.
-      db.collection = (name) => {
-        const col = real(name);
-        if (name !== 'tokenPeriods') return col;
-        return Object.assign({}, col, {doc: (id) => {
-          const ref = col.doc(id);
-          if (!String(id).endsWith('_2026-12-01')) return ref;
-          return Object.assign({}, ref, {get: async () => {
-            throw new Error('unavailable');
-          }});
-        }});
-      };
-      const out = await rollover.runTokenRollover({
-        now: new Date('2026-12-03T06:05:00Z'), db});
-      assert.deepEqual([out.minted, out.errors], [2, 0]);
-    });
-
-test('runTokenRollover: an ENDED month with no record still never rolls ' +
-    '(a family that joined or paid later)', async () => {
-  const docs = world();
+test('runTokenRollover: no November record and no billing before November: ' +
+    'nothing rolls', async () => {
+  const docs = world({'athletes/sam': Object.assign({}, paid, {billing: {
+    status: 'active', updatedAt: '2026-11-29T15:00:00Z'}})});
   delete docs['tokenPeriods/sam_2026-11-01'];
   const out = await rollover.runTokenRollover({now: DEC_1, db: fakeDb(docs)});
   assert.equal(out.minted, 0);
-  assert.equal('tokenPeriods/sam_2026-11-01' in docs, false);
+  assert.deepEqual(minted(docs), []);
 });
 
 test('runTokenRollover: a second run the same month mints nothing more',
