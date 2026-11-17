@@ -66,8 +66,9 @@ function formatCoachDate(raw) {
 export default function CoachDashboard({ variant = 'today', bare = false, role = 'coach', specialistId, onOpenRoster, onOpenAthlete, onSignOut }) {
   const { data } = useCoachDay({ variant });
   const [tab, setTab] = useState('overview');
-  const roster = useCoachRoster();
   const students = role === 'coach' && !specialistId;
+  // Only the Students tab shows the roster: nobody else reads it.
+  const roster = useCoachRoster({ enabled: students });
 
   const blocks = data?.blocks ?? [];
   const none = blocks.length === 0;

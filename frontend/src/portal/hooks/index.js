@@ -2712,8 +2712,13 @@ export function useCoachDay({ variant = 'today' } = {}) {
  * roster rather than one session's attendance (that stays useRoster, screen
  * 13). Live: athletes where coachId == the signed-in coach's uid - the
  * equality filter firestore.rules can prove on a list read.
+ *
+ * `enabled: false` (speed review, 2026-11-17): no read at all and an empty
+ * list. CoachDashboard passes it for everyone without a Students tab -
+ * owner, ops and the specialists open the Today tab too, and read nothing
+ * they are never shown.
  */
-export function useCoachRoster() {
+export function useCoachRoster({ enabled = true } = {}) {
   const live = isLive();
   // Try again after a failed load (review 2026-11-04): nothing else re-reads
   // this list while the screen stays mounted, so the retry is a local count.
@@ -2735,8 +2740,8 @@ export function useCoachRoster() {
   };
 
   const state = useSeedResource(
-    live ? null : ROSTER.map((r) => ({ ...r, meta: hideContractParts(r.meta) })),
-    live ? { source: liveCoachRoster, deps: ['coach-roster', attempt] } : undefined
+    !enabled ? [] : live ? null : ROSTER.map((r) => ({ ...r, meta: hideContractParts(r.meta) })),
+    enabled && live ? { source: liveCoachRoster, deps: ['coach-roster', attempt] } : undefined
   );
   return { ...state, retry: () => setAttempt((n) => n + 1) };
 }
