@@ -401,6 +401,58 @@ describe('useDoorPress', () => {
     }
   });
 
+  test('the countdown runs on the clock: minutes, a phone that slept, the next press and unmount clear it', async () => {
+    jest.useFakeTimers();
+    const added = [];
+    const removed = [];
+    const add = document.addEventListener;
+    const remove = document.removeEventListener;
+    document.addEventListener = function (type, fn, opts) { if (type === 'visibilitychange') added.push(fn); return add.call(this, type, fn, opts); };
+    document.removeEventListener = function (type, fn, opts) { if (type === 'visibilitychange') removed.push(fn); return remove.call(this, type, fn, opts); };
+    try {
+      mockAnswers.callUnlockDoor = { outcome: 'opened', openSeconds: 180 };
+      const h = await mountHook(() => useDoorPress({ staff: true }));
+      await act(async () => { await h.out.current.press(); });
+      expect(h.out.current.left).toBe(180);
+      await act(async () => { jest.advanceTimersByTime(65000); });
+      expect(h.out.current.left).toBe(115);
+      // Asleep for 100 s: no tick ran, the clock moved on; back in view, the truth at once.
+      jest.setSystemTime(Date.now() + 100000);
+      await act(async () => { document.dispatchEvent(new Event('visibilitychange')); });
+      expect(h.out.current.left).toBe(15);
+      expect(added).toHaveLength(1);
+      // The next press stops the first countdown and drops its listener.
+      await act(async () => { await h.out.current.press(); });
+      expect(h.out.current.left).toBe(180);
+      expect(removed).toEqual([added[0]]);
+      expect(added).toHaveLength(2);
+      expect(jest.getTimerCount()).toBe(1);
+      await h.unmount();
+      expect(removed).toEqual(added);
+      expect(jest.getTimerCount()).toBe(0);
+    } finally {
+      document.addEventListener = add;
+      document.removeEventListener = remove;
+      jest.useRealTimers();
+    }
+  });
+
+  test('the countdown stops itself at zero', async () => {
+    jest.useFakeTimers();
+    try {
+      mockAnswers.callUnlockDoor = { outcome: 'opened', openSeconds: 5 };
+      const h = await mountHook(() => useDoorPress({ staff: true }));
+      await act(async () => { await h.out.current.press(); });
+      jest.setSystemTime(Date.now() + 60000);
+      await act(async () => { document.dispatchEvent(new Event('visibilitychange')); });
+      expect(h.out.current.left).toBe(0);
+      expect(jest.getTimerCount()).toBe(0);
+      await h.unmount();
+    } finally {
+      jest.useRealTimers();
+    }
+  });
+
   test('a refusal is kept with its reason, and handed to onReason', async () => {
     const seen = [];
     mockAnswers.callUnlockDoor = () => { throw new LiveDataError(ERR.INVALID, 'Read and sign the door rules once to turn on Unlock.', null, 'sign-rules'); };

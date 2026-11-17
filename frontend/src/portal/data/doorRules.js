@@ -23,6 +23,12 @@ export const LOCATION_NOTE = "The app checks you're at the academy when you unlo
 /** After an opened door's countdown runs out. */
 export const DIDNT_OPEN = "Didn't open? Hold again.";
 
+/** Under an opened door while it counts down: 'Open for 42 s', then 'Open for 2:05' from a minute up. */
+export function openForText(left) {
+  if (left < 60) return `Open for ${left} s`;
+  return `Open for ${Math.floor(left / 60)}:${String(left % 60).padStart(2, '0')}`;
+}
+
 const NO_ANSWER = `The door didn't answer. If you heard the lock click, go in. Otherwise try once more, or call or text ${ACADEMY_PHONE}.`;
 
 const COPY = {

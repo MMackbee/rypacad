@@ -178,6 +178,36 @@ describe('a press', () => {
     await r.unmount();
   });
 
+  test('minutes count down as m:ss; a phone back from sleep past the end offers another go at once', async () => {
+    mockCheck = { ...OPEN, openSeconds: 180 };
+    mockPress = { outcome: 'opened', openSeconds: 180 };
+    const r = await renderScreen(<DoorCard />);
+    await hold(r);
+    expect(r.text()).toContain('Unlocked - pull the door now.');
+    expect(r.text()).toContain('Open for 3:00');
+    await act(async () => { jest.advanceTimersByTime(65000); });
+    expect(r.text()).toContain('Open for 1:55');
+    // The phone slept (or the tab sat in the background): no tick ran, the clock passed the end.
+    jest.setSystemTime(Date.now() + 200000);
+    await act(async () => { document.dispatchEvent(new Event('visibilitychange')); });
+    expect(r.text()).not.toContain('Open for');
+    expect(r.text()).toContain("Didn't open? Hold again.");
+    await r.unmount();
+  });
+
+  test('a 5 s open counts seconds down, then offers another go', async () => {
+    mockPress = { outcome: 'opened', openSeconds: 5 };
+    const r = await renderScreen(<DoorCard />);
+    await hold(r);
+    expect(r.text()).toContain('Open for 5 s');
+    await act(async () => { jest.advanceTimersByTime(1000); });
+    expect(r.text()).toContain('Open for 4 s');
+    await act(async () => { jest.advanceTimersByTime(4000); });
+    expect(r.text()).not.toContain('Open for');
+    expect(r.text()).toContain("Didn't open? Hold again.");
+    await r.unmount();
+  });
+
   test('the button is off from press to answer', async () => {
     let release;
     mockPress = () => new Promise((resolve) => { release = resolve; });

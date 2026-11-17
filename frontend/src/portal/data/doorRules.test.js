@@ -16,6 +16,7 @@ import {
   cardShows,
   doorCopy,
   doorRulesSections,
+  openForText,
   refusalCopy,
 } from './doorRules';
 import { CONSENT_TERMS } from './consentTerms';
@@ -44,6 +45,14 @@ test('copy by outcome, word for word', () => {
   expect(doorCopy('coalesced')).toBe('Already unlocked - pull the door.');
   expect(doorCopy('test')).toBe('Test household - the door was not opened.');
   expect(LOCATION_NOTE).toBe("The app checks you're at the academy when you unlock.");
+});
+
+test('the countdown under an opened door: seconds under a minute, then m:ss', () => {
+  expect(openForText(42)).toBe('Open for 42 s');
+  expect(openForText(59)).toBe('Open for 59 s');
+  expect(openForText(60)).toBe('Open for 1:00');
+  expect(openForText(125)).toBe('Open for 2:05');
+  expect(openForText(600)).toBe('Open for 10:00');
 });
 
 test('copy by reason, word for word', () => {

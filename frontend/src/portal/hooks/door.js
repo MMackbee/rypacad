@@ -207,6 +207,10 @@ export function useDoorStatus({ practice = false } = {}) {
  * `{ kind: 'outcome', outcome, openSeconds }` or `{ kind: 'refusal', reason,
  * message }`; `left` counts an opened door's seconds down to 0. `onReason`
  * hears every refusal's reason, so the card can switch to that state.
+ *
+ * The countdown reads the clock against the end time, every second and
+ * when the page comes back into view: an open time of minutes stays true
+ * through a phone's sleep or a background tab, where the ticks stop.
  */
 export function useDoorPress({ staff = false, openSeconds = DEFAULT_OPEN_SECONDS, onReason } = {}) {
   const [busy, setBusy] = useState(false);
@@ -214,10 +218,28 @@ export function useDoorPress({ staff = false, openSeconds = DEFAULT_OPEN_SECONDS
   const [left, setLeft] = useState(0);
   const busyRef = useRef(false);
   const mounted = useRef(true);
-  const tick = useRef(null);
+  const stop = useRef(null);
   const stopCountdown = () => {
-    clearInterval(tick.current);
-    tick.current = null;
+    if (stop.current) stop.current();
+    stop.current = null;
+  };
+  const startCountdown = (secs) => {
+    const endAt = Date.now() + secs * 1000;
+    const update = () => {
+      const n = Math.max(0, Math.ceil((endAt - Date.now()) / 1000));
+      setLeft(n);
+      if (n === 0) stopCountdown();
+    };
+    const onVisible = () => {
+      if (document.visibilityState !== 'hidden') update();
+    };
+    const timer = setInterval(update, 1000);
+    document.addEventListener('visibilitychange', onVisible);
+    stop.current = () => {
+      clearInterval(timer);
+      document.removeEventListener('visibilitychange', onVisible);
+    };
+    setLeft(secs);
   };
   useEffect(() => {
     mounted.current = true;
@@ -239,15 +261,7 @@ export function useDoorPress({ staff = false, openSeconds = DEFAULT_OPEN_SECONDS
       if (!mounted.current) return;
       const secs = validSeconds(answer?.openSeconds) ? answer.openSeconds : openSeconds;
       setResult({ kind: 'outcome', outcome: answer?.outcome ?? null, openSeconds: secs });
-      if (answer?.outcome === 'opened') {
-        setLeft(secs);
-        tick.current = setInterval(() => {
-          setLeft((n) => {
-            if (n <= 1) stopCountdown();
-            return Math.max(0, n - 1);
-          });
-        }, 1000);
-      }
+      if (answer?.outcome === 'opened') startCountdown(secs);
     } catch (err) {
       if (!mounted.current) return;
       const reason = err && err.reason ? err.reason : null;

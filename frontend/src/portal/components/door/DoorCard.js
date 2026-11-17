@@ -5,7 +5,7 @@ import { Body, Card, SectionLabel } from '../Primitives';
 import HoldToUnlock from './HoldToUnlock';
 import DoorRulesSheet from './DoorRulesSheet';
 import { useDoorPress, useDoorStatus } from '../../hooks/door';
-import { CARD_REASONS, DIDNT_OPEN, LOCATION_NOTE, cardShows, doorCopy, refusalCopy } from '../../data/doorRules';
+import { CARD_REASONS, DIDNT_OPEN, LOCATION_NOTE, cardShows, doorCopy, openForText, refusalCopy } from '../../data/doorRules';
 
 /** The staff screen's line when the check itself failed (families see no card then). */
 export const STAFF_CHECK_FAILED = "The door check didn't load. Reload the page to try again.";
@@ -123,8 +123,8 @@ const StateMessage = React.forwardRef(function StateMessage({ children }, ref) {
 /**
  * Under the button: the location line before the first press (a family's
  * login only), then what the last press did. An opened door counts its open
- * seconds down, then offers another go. The words are a polite live region;
- * the ticking seconds are not read out.
+ * time down ('Open for 42 s', 'Open for 2:05'), then offers another go. The
+ * words are a polite live region; the ticking seconds are not read out.
  */
 function PressMessage({ result, left, busy, staff }) {
   let words = null;
@@ -140,7 +140,7 @@ function PressMessage({ result, left, busy, staff }) {
     tone = color.text;
     if (result.outcome === 'opened' && left > 0) {
       tone = color.primary;
-      after = `Open for ${left} s`;
+      after = openForText(left);
     } else if (result.outcome === 'opened') {
       // The door has locked again.
       words = DIDNT_OPEN;
