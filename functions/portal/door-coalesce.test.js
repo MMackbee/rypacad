@@ -40,7 +40,8 @@ test('a press within the open time is coalesced: no second POST', async () => {
   await press(unlock('press-0001'), {docs, alta});
   const second = await press(unlock('press-0002'),
       {docs, alta, now: later(4999)});
-  assert.deepEqual(second.result, {outcome: 'coalesced', openSeconds: 5});
+  assert.deepEqual(second.result, {outcome: 'coalesced', openSeconds: 5,
+    leftSeconds: 1});
   assert.equal(alta.calls.length, 1);
   assert.equal(docs[SECOND].outcome, 'coalesced');
   assert.deepEqual(docs[LIMITS].opensAtMs, [T0]);
@@ -90,12 +91,38 @@ test('a 180 s open time still coalesces only within 10 s', async () => {
   const first = await press(unlock('press-0001'), {docs, alta});
   assert.deepEqual(first.result, {outcome: 'opened', openSeconds: 180});
   const a = await press(unlock('press-0002'), {docs, alta, now: later(9999)});
-  assert.deepEqual(a.result, {outcome: 'coalesced', openSeconds: 180});
+  assert.deepEqual(a.result, {outcome: 'coalesced', openSeconds: 180,
+    leftSeconds: 170});
   const b = await press(unlock('press-0003'),
       {docs, alta, now: later(10000)});
   assert.deepEqual(b.result, {outcome: 'opened', openSeconds: 180});
   assert.equal(alta.calls.length, 2);
 });
+
+test('a coalesce answers the time the door has left', async () => {
+  // Review 2026-11-17 (coalesce-kills-long-countdown): a second phone, or a
+  // page that lost its countdown, counts down what is left of the open, not
+  // the whole open time. Whole seconds, rounded down, at least 1.
+  for (const [secs, at, left] of [[180, 4000, 176], [180, 9999, 170],
+    [600, 1, 599], [600, 9000, 591], [5, 1000, 4], [5, 4999, 1]]) {
+    const docs = withSeconds(secs);
+    await press(unlock('press-0001'), {docs});
+    const r = await press(unlock('press-0002'), {docs, now: later(at)});
+    assert.deepEqual(r.result, {outcome: 'coalesced', openSeconds: secs,
+      leftSeconds: left}, `${secs} s at ${at}`);
+  }
+});
+
+test('a press id replayed after a coalesce answers without the time left',
+    async () => {
+      // The event keeps no time: the app keeps its own countdown then.
+      const docs = familyDocs();
+      await press(unlock('press-0001'), {docs});
+      await press(unlock('press-0002'), {docs, now: later(2000)});
+      const again = await press(unlock('press-0002'),
+          {docs, now: later(3000)});
+      assert.deepEqual(again.result, {outcome: 'coalesced', openSeconds: 5});
+    });
 
 test('a refusal is never coalesced', async () => {
   const docs = familyDocs();
@@ -110,7 +137,8 @@ test('a test household\'s second press in the window is coalesced too',
         test: true}});
       await press(unlock('press-0001'), {docs});
       const r = await press(unlock('press-0002'), {docs, now: later(2000)});
-      assert.deepEqual(r.result, {outcome: 'coalesced', openSeconds: 5});
+      assert.deepEqual(r.result, {outcome: 'coalesced', openSeconds: 5,
+        leftSeconds: 3});
       assert.equal(r.calls.length, 0);
     });
 
@@ -147,7 +175,8 @@ test('A\'s open confirmed meanwhile: B\'s next press is "already unlocked"',
       docs[LIMITS].lastConfirmedOpenAtMs = T0;
       docs[EVENT].outcome = 'opened';
       const r = await press(unlock('press-0002'), {docs, now: later(3000)});
-      assert.deepEqual(r.result, {outcome: 'coalesced', openSeconds: 5});
+      assert.deepEqual(r.result, {outcome: 'coalesced', openSeconds: 5,
+        leftSeconds: 2});
     });
 
 test('an open that never answered stops blocking after the window',

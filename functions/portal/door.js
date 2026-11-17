@@ -8,7 +8,8 @@
  *   in   {pressId, location: {lat, lng, accuracy}}
  *   out  {outcome: 'opened'|'coalesced'|'test', openSeconds}, or an
  *        HttpsError whose details.reason the app shows (door-decide's
- *        REFUSALS holds every code and its copy)
+ *        REFUSALS holds every code and its copy). A coalesce also says
+ *        leftSeconds, the time the open it joined has left.
  *
  * A press: the caller's users doc, doorConfig/main and, for a family
  * login, the household, its athletes, its doorPauses doc, the caller's
@@ -184,6 +185,21 @@ const coalesceWindow = (openSeconds) =>
   Math.min(COALESCE_MS, openSeconds * 1000);
 
 /**
+ * The whole seconds a confirmed open has left, at least 1 (review
+ * 2026-11-17 coalesce-kills-long-countdown: a second phone, or a page that
+ * lost its countdown, counts down what is left, not the whole open time).
+ * @param {number} openSeconds openSecondsOf(config).
+ * @param {?number} confirmedAtMs lastConfirmedOpenAtMs.
+ * @param {number} nowMs The clock.
+ * @return {number} Seconds.
+ */
+function leftOf(openSeconds, confirmedAtMs, nowMs) {
+  if (confirmedAtMs === null) return openSeconds;
+  const gone = Math.ceil(Math.max(0, nowMs - confirmedAtMs) / 1000);
+  return Math.max(1, openSeconds - gone);
+}
+
+/**
  * @param {*} v A stored value.
  * @return {?number} It, when it is a number.
  */
@@ -197,31 +213,32 @@ const millisOrNull = (v) => (typeof v === 'number' ? v : null);
  * @param {!Object} base eventBase()'s body (its nonce marks this call).
  * @param {number} nowMs The clock.
  * @param {number} windowMs coalesceWindow().
- * @return {!Promise<{outcome: ?string, reason: ?string, replay: ?Object}>}
- *     The step taken. `outcome` null with reason 'rate-limited' wrote
- *     nothing.
+ * @return {!Promise<{outcome: ?string, reason: ?string, replay: ?Object,
+ *     confirmedAtMs: ?number}>} The step taken. `outcome` null with
+ *     reason 'rate-limited' wrote nothing. `confirmedAtMs` is the
+ *     confirmed open a coalesce joined.
  */
 async function reserve(tx, refs, decision, base, nowMs, windowMs) {
   const limSnap = await tx.get(refs.limits);
   const evSnap = await tx.get(refs.event);
+  const lim = dataOf(limSnap) || {};
+  const confirmed = millisOrNull(lim.lastConfirmedOpenAtMs);
   if (evSnap.exists) {
     const ev = evSnap.data() || {};
     // This invocation's own event: the commit applied and the transaction
     // ran again (server-3). Carry on with what was recorded.
     if (base.nonce && ev.nonce === base.nonce) {
       return {outcome: ev.outcome || null, reason: ev.reason || null,
-        replay: null};
+        replay: null, confirmedAtMs: confirmed};
     }
     return {outcome: null, reason: null, replay: ev};
   }
-  const lim = dataOf(limSnap) || {};
   const calls = recent(lim.callsAtMs, nowMs);
   if (calls.length >= CALL_LIMIT) {
     return {outcome: null, reason: 'rate-limited', replay: null};
   }
   const opens = recent(lim.opensAtMs, nowMs);
   const last = millisOrNull(lim.lastOpenedAtMs);
-  const confirmed = millisOrNull(lim.lastConfirmedOpenAtMs);
   // A clock read before an earlier commit counts as inside the window.
   const within = (t) => t !== null && nowMs - t < windowMs;
   const next = {callsAtMs: calls.concat([nowMs]), opensAtMs: opens,
@@ -251,7 +268,7 @@ async function reserve(tx, refs, decision, base, nowMs, windowMs) {
   }
   tx.set(refs.limits, next);
   tx.create(refs.event, Object.assign({}, base, {outcome, reason}));
-  return {outcome, reason, replay: null};
+  return {outcome, reason, replay: null, confirmedAtMs: confirmed};
 }
 
 /**
@@ -402,9 +419,14 @@ async function unlockDoorHandler(data, context, deps) {
         step.outcome === null ? {logged: 'no'} : {}));
     throw refusal(step.reason);
   }
-  if (step.outcome === 'coalesced' || step.outcome === 'test') {
-    logPress(step.outcome, base, where);
-    return {outcome: step.outcome, openSeconds};
+  if (step.outcome === 'test') {
+    logPress('test', base, where);
+    return {outcome: 'test', openSeconds};
+  }
+  if (step.outcome === 'coalesced') {
+    logPress('coalesced', base, where);
+    return {outcome: 'coalesced', openSeconds,
+      leftSeconds: leftOf(openSeconds, step.confirmedAtMs, nowMs)};
   }
 
   const alta = await openDoor({fetch: d.fetch || fetch,
