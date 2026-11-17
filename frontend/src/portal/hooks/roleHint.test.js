@@ -14,6 +14,7 @@ jest.mock('firebase/auth', () => {
       return () => listeners.delete(cb);
     },
     signOut: async (auth) => { auth.currentUser = null; [...listeners].forEach((cb) => cb(null)); },
+    __emit: (auth, user) => { auth.currentUser = user; [...listeners].forEach((cb) => cb(user)); },
     createUserWithEmailAndPassword: () => {}, sendEmailVerification: () => {}, sendPasswordResetEmail: () => {},
     signInWithEmailAndPassword: () => {}, signInWithPopup: () => {},
   };
@@ -32,6 +33,7 @@ jest.mock('firebase/functions', () => ({ httpsCallable: () => async () => ({ dat
 import React, { act } from 'react';
 import { createRoot } from 'react-dom/client';
 import { auth } from '../../firebase';
+import { __emit } from 'firebase/auth';
 import useAuthSession from './useAuthSession';
 import { ROLE_HINT_KEY, clearRoleHint, readRoleHint, roleHintFor, suppressRoleHint, viewerOf, writeRoleHint } from './roleHint';
 import { resetSession } from './sessionStore';
@@ -165,6 +167,28 @@ describe('useAuthSession and the hint', () => {
     await act(async () => { release(); });
     await flush();
     expect(readRoleHint()).toMatchObject({ uid: 'u-next', role: 'parent' });
+  });
+});
+
+// Review 2026-11-17 (F3): auth can report account B straight after account A
+// with no signed-out emission between (a hidden tab's storage poll sees both
+// at once). Nothing of A's session may carry into B's loading state.
+describe('another account straight after this one', () => {
+  test("B's session never carries A's user while B's read is in flight", async () => {
+    mockDocs['users/u-a'] = { role: 'parent', householdId: 'hh-a' };
+    mockDocs['users/u-b'] = { role: 'parent', householdId: 'hh-b' };
+    auth.currentUser = account('u-a');
+    const p = await mountProbe();
+    await flush();
+    expect(p.now().user).toMatchObject({ uid: 'u-a', householdId: 'hh-a' });
+    writeRoleHint({ uid: 'u-b', role: 'parent' }); // B signed in from another tab
+    const release = holdReads();
+    await act(async () => { __emit(auth, account('u-b')); });
+    await flush();
+    expect(p.now()).toMatchObject({ loading: true, user: null, provisioned: false, hint: { uid: 'u-b', role: 'parent' } });
+    await act(async () => { release(); });
+    await flush();
+    expect(p.now()).toMatchObject({ loading: false, user: { uid: 'u-b', householdId: 'hh-b' } });
   });
 });
 

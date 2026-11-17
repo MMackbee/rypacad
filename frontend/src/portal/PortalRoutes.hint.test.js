@@ -1,7 +1,7 @@
 import React, { act } from 'react';
 import { createRoot } from 'react-dom/client';
 import { MemoryRouter, Route, Routes, useLocation } from 'react-router-dom';
-import PortalRoutes from './PortalRoutes';
+import PortalRoutes, { RequireRole } from './PortalRoutes';
 
 /*
  * The cold-start role hint in the guards (speed work 2026-11-17): while
@@ -151,6 +151,33 @@ test("a specialist's hint renders their own day; a plain coach's hint waits inst
   await c.resolve({ uid: 'u-c', role: 'coach' });
   expect(c.pathname()).toBe('/portal/tour');
   await c.unmount();
+});
+
+// Review 2026-11-17 (F3): account B straight after account A (no signed-out
+// emission between) used to keep the same screen instance mounted on B's
+// hint, so its hooks kept A's data under an unchanged identity.
+test('another account straight after this one remounts the guarded screen; its own verification does not', async () => {
+  const mounts = [];
+  function Screen() {
+    React.useEffect(() => { mounts.push('mount'); }, []);
+    return 'SCREEN';
+  }
+  setSession(ready({ uid: 'u-a', role: 'parent', householdId: 'hh-a' }));
+  const container = document.createElement('div');
+  document.body.appendChild(container);
+  const root = createRoot(container);
+  await act(async () => {
+    root.render(<MemoryRouter><RequireRole roles={['parent']}><Screen /></RequireRole></MemoryRouter>);
+  });
+  expect(container.textContent).toBe('SCREEN');
+  expect(mounts).toHaveLength(1);
+  await act(async () => { setSession(loading({ uid: 'u-b', role: 'parent', specialistId: null })); });
+  expect(container.textContent).toBe('SCREEN');
+  expect(mounts).toHaveLength(2);
+  await act(async () => { setSession(ready({ uid: 'u-b', role: 'parent', householdId: 'hh-b' })); });
+  expect(mounts).toHaveLength(2);
+  await act(async () => { root.unmount(); });
+  container.remove();
 });
 
 test("an owner's hint opens the specialist switcher on Sessions", async () => {

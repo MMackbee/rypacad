@@ -201,17 +201,21 @@ export function RequireRole({ roles, selfManaged = false, children }) {
 
   if (!live) return children;
 
+  // Keyed by the account (review 2026-11-17): auth can report another account
+  // straight after this one, with no signed-out state between, and a screen
+  // kept mounted across that would keep the last account's data in its hooks.
+  const screen = (uid) => <React.Fragment key={uid}>{children}</React.Fragment>;
   // Cold start (hooks/roleHint.js): this account's last verified role may
   // render the landing while users/{uid} is in flight, so its chunk and reads
   // start at once. The verified user below decides; the hint never redirects.
-  if (loading) return hint && roles.includes(hint.role) ? children : null;
+  if (loading) return hint && roles.includes(hint.role) ? screen(hint.uid) : null;
   if (!user) return <Navigate to="/portal/signin" replace />;
   if (!provisioned) return <Navigate to="/portal/not-provisioned" replace />;
   const payer = selfManaged && user.role === 'athlete' && user.selfManaged === true;
   if (!roles.includes(user.role) && !payer) {
     return <Navigate to={landingFor(user)} replace />;
   }
-  return children;
+  return screen(user.uid);
 }
 
 /**

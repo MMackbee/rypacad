@@ -239,7 +239,8 @@ export default function useAuthSession({ variant } = {}) {
         if (sessionUserStale(fbUser.uid)) revalidate(fbUser);
         return;
       }
-      setSession((s) => ({ ...s, loading: true, pendingUid: fbUser.uid }));
+      // Another account straight after this one (no signed-out emission between): none of its state carries over.
+      setSession((s) => ({ ...(s.user && s.user.uid !== fbUser.uid ? SIGNED_OUT : s), loading: true, pendingUid: fbUser.uid }));
       resolveProfile(seq, fbUser).then((outcome) => {
         // Sprint 20 (spec 3.2): every NOT_FOUND emission with an email asks
         // claimInvite; an emulator custom-token user has no email -> 'none'.
