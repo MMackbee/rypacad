@@ -21,21 +21,17 @@ import {
 import { CONSENT_TERMS } from './consentTerms';
 
 const SERVER = path.resolve(__dirname, '../../../../functions/portal/door-decide.js');
-const serverFile = fs.existsSync(SERVER);
 
-// The server lane builds door-decide.js in parallel: until it is in this tree the
-// comparison cannot run, and integration runs it for real.
-(serverFile ? test : test.skip)(
-  serverFile
-    ? 'DOOR_TERMS_VERSION equals the server door-decide.js DOOR_TERMS_VERSION'
-    : 'DOOR_TERMS_VERSION equals the server (SKIPPED: functions/portal/door-decide.js is not in this worktree yet; the integration step runs it)',
-  () => {
-    const text = fs.readFileSync(SERVER, 'utf8');
-    const m = text.match(/DOOR_TERMS_VERSION\s*=\s*['"]([^'"]+)['"]/);
-    expect(m).not.toBeNull();
-    expect(DOOR_TERMS_VERSION).toBe(m[1]);
-  }
-);
+// The server's door-decide.js is in the tree since integration: a missing file
+// fails here rather than skipping, so the app can never sign a version the
+// server would refuse as stale-terms.
+test('DOOR_TERMS_VERSION equals the server door-decide.js DOOR_TERMS_VERSION', () => {
+  expect(fs.existsSync(SERVER)).toBe(true);
+  const text = fs.readFileSync(SERVER, 'utf8');
+  const m = text.match(/DOOR_TERMS_VERSION\s*=\s*['"]([^'"]+)['"]/);
+  expect(m).not.toBeNull();
+  expect(DOOR_TERMS_VERSION).toBe(m[1]);
+});
 
 test('the version and number the spec names', () => {
   expect(DOOR_TERMS_VERSION).toBe('door-2026-11-17');
