@@ -229,17 +229,31 @@ describe('Academy location', () => {
     await r.unmount();
   });
 
-  test('the door open time, a second at a time, 1 to 600', async () => {
+  test('the door open time: a labelled select from 3 s to 10 min; a choice saves only the open time', async () => {
     const r = await mount();
-    expect(r.text()).toContain('5 s');
-    await r.click('One second more');
-    await r.click('One second less');
-    expect(saves).toEqual([{ openSeconds: 6 }, { openSeconds: 4 }]);
+    const select = r.container.querySelector('select[aria-label="Door open time"]');
+    expect([...select.options].map((o) => o.textContent)).toEqual(['3 s', '5 s', '10 s', '15 s', '20 s', '30 s', '45 s', '1 min', '1 min 30 s',
+      '2 min', '3 min', '4 min', '5 min', '6 min', '7 min', '8 min', '9 min', '10 min']);
+    expect(select.value).toBe('5');
+    expect(r.text()).toContain("Set the same time as the door's Entry open duration in Alta. The app counts it down after an unlock.");
+    await r.fill('Door open time', '180');
+    expect(saves).toEqual([{ openSeconds: 180 }]);
+    expect(r.button('One second more')).toBeNull();
     await r.unmount();
-    mockAdmin = admin({ config: normalizeConfig({ ...LOCATED, openSeconds: 600 }) });
-    const top = await mount();
-    expect(top.button('One second more').disabled).toBe(true);
-    await top.unmount();
+  });
+
+  test('a saved open time off the list shows as chosen, in its sorted place', async () => {
+    for (const [secs, text, after] of [[6, '6 s', '5 s'], [11, '11 s', '10 s']]) {
+      mockAdmin = admin({ config: normalizeConfig({ ...LOCATED, openSeconds: secs }) });
+      const r = await mount();
+      const select = r.container.querySelector('select[aria-label="Door open time"]');
+      const texts = [...select.options].map((o) => o.textContent);
+      expect(select.value).toBe(String(secs));
+      expect(select.options[select.selectedIndex].textContent).toBe(text);
+      expect(texts.indexOf(text)).toBe(texts.indexOf(after) + 1);
+      expect(texts).toHaveLength(19);
+      await r.unmount();
+    }
   });
 });
 

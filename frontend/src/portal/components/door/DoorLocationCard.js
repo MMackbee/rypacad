@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useId, useState } from 'react';
 import { color, font, radius } from '../../tokens';
 import Button from '../Button';
 import StatusBadge from '../StatusBadge';
@@ -9,10 +9,10 @@ import {
   LOCATION_FIX_MAX_M,
   LOCATION_FIX_WARN_M,
   NEEDS_LOCATION,
-  OPEN_SECONDS_MAX,
-  OPEN_SECONDS_MIN,
   RADIUS_OPTIONS,
   locationSet,
+  openTimeChoices,
+  openTimeText,
   phoneCheck,
 } from '../../data/doorAdmin';
 import { doorCopy } from '../../data/doorRules';
@@ -30,6 +30,8 @@ const accuracyLine = (m) =>
 const checkLine = (c) =>
   `This phone is about ${c.distanceM} m from the academy (reading accurate to about ${c.accuracyM} m). ` +
   (c.ok ? 'A family standing here could unlock.' : 'A family standing here would be too far away to unlock.');
+/** Under the open time choice: the app's countdown only matches the door when Alta says the same. */
+export const OPEN_TIME_HINT = "Set the same time as the door's Entry open duration in Alta. The app counts it down after an unlock.";
 
 /** A save run by a card: its own error line, cleared on the next try. */
 export function useDoorSave(onSave) {
@@ -118,7 +120,6 @@ export default function DoorLocationCard({ config, onSave }) {
     if (here) setCheck(phoneCheck(here, config));
   };
 
-  const secs = config.openSeconds;
   return (
     <Card large>
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 10 }}>
@@ -188,43 +189,73 @@ export default function DoorLocationCard({ config, onSave }) {
       />
 
       <SectionLabel style={{ marginTop: 16, marginBottom: 8 }}>Door open time</SectionLabel>
-      <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-        <StepButton label="One second less" disabled={secs <= OPEN_SECONDS_MIN} onClick={() => save({ openSeconds: secs - 1 })}>
-          −
-        </StepButton>
-        <div style={{ minWidth: 56, textAlign: 'center', font: `600 16px ${font.body}`, color: color.text }}>{secs} s</div>
-        <StepButton label="One second more" disabled={secs >= OPEN_SECONDS_MAX} onClick={() => save({ openSeconds: secs + 1 })}>
-          +
-        </StepButton>
-      </div>
-      <Body size={12} tone={color.textTertiary} style={{ marginTop: 6 }}>
-        Match the door's own unlock time; the app counts it down after an unlock.
-      </Body>
+      <OpenTimeSelect value={config.openSeconds} onChange={(openSeconds) => save({ openSeconds })} />
       <ErrorLine>{error}</ErrorLine>
     </Card>
   );
 }
 
-function StepButton({ label, disabled, onClick, children }) {
+/**
+ * The door's open time, 3 s to 10 min: a native select in the house form
+ * style (components/Field.js SelectField: the 52px box, 16px text so iOS
+ * never zooms, the CSS chevron). A saved time not on the list is offered
+ * too, in its place, so the select always shows what is stored.
+ */
+function OpenTimeSelect({ value, onChange }) {
+  const hintId = useId();
   return (
-    <button
-      type="button"
-      aria-label={label}
-      disabled={disabled}
-      onClick={onClick}
-      style={{
-        width: 44,
-        height: 44,
-        flex: 'none',
-        borderRadius: radius.input,
-        border: `1px solid ${color.border}`,
-        background: color.track,
-        font: `600 18px ${font.body}`,
-        color: disabled ? color.faintText : color.text,
-        cursor: disabled ? 'default' : 'pointer',
-      }}
-    >
-      {children}
-    </button>
+    <>
+      <div
+        style={{
+          height: 52,
+          background: color.surface,
+          border: `1px solid ${color.border}`,
+          borderRadius: radius.input,
+          display: 'flex',
+          alignItems: 'center',
+          padding: '0 15px',
+        }}
+      >
+        <select
+          aria-label="Door open time"
+          aria-describedby={hintId}
+          value={String(value)}
+          onChange={(e) => onChange(Number(e.target.value))}
+          style={{
+            flex: 1,
+            minWidth: 0,
+            background: 'transparent',
+            border: 'none',
+            outline: 'none',
+            appearance: 'none',
+            font: `400 16px ${font.body}`,
+            color: color.text,
+          }}
+        >
+          {openTimeChoices(value).map((s) => (
+            <option key={s} value={String(s)} style={{ background: color.surface }}>
+              {openTimeText(s)}
+            </option>
+          ))}
+        </select>
+        <span
+          aria-hidden="true"
+          style={{
+            width: 8,
+            height: 8,
+            borderRight: `1.5px solid ${color.textTertiary}`,
+            borderBottom: `1.5px solid ${color.textTertiary}`,
+            transform: 'rotate(45deg)',
+            marginBottom: 4,
+            flex: 'none',
+          }}
+        />
+      </div>
+      <div id={hintId}>
+        <Body size={12} tone={color.textTertiary} style={{ marginTop: 6 }}>
+          {OPEN_TIME_HINT}
+        </Body>
+      </div>
+    </>
   );
 }

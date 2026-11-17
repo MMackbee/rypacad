@@ -20,7 +20,8 @@ import { MODES, locationSet } from '../data/doorAdmin';
  * - Academy location (components/door/DoorLocationCard.js): set or not,
  *   "Use this phone's location" (a fresh reading inside the academy, asked
  *   before it is saved), "Check this phone's distance", the reach
- *   (100/200/300/500 m) and the door's open time in seconds.
+ *   (100/200/300/500 m) and the door's open time (a choice of 3 s to
+ *   10 min, matching the door's Entry open duration in Alta).
  * - Staff unlock: the door card's control, no location check (the server
  *   lets owner and ops in from anywhere), rechecked after each saved change.
  * - Recent activity and Paused families (components/door/DoorActivity.js).
