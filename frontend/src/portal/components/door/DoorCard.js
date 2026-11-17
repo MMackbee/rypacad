@@ -27,8 +27,9 @@ export const STAFF_CHECK_FAILED = "The door check didn't load. Reload the page t
  *
  * @param {boolean} [practice]  The onboarding walkthrough: nothing.
  * @param {boolean} [selfWording]  An adult athlete's own login: the rules in the second person.
+ * @param {string} [label]  The card's heading.
  */
-export default function DoorCard({ practice = false, selfWording = false, staffScreen = false, recheckKey = null, style }) {
+export default function DoorCard({ practice = false, selfWording = false, staffScreen = false, recheckKey = null, label = 'Facility door', style }) {
   const { status, error, recheck } = useDoorStatus({ practice });
   // A press refused for a reason the card shows as a state (sign-rules after the version moved on, paused meanwhile).
   const [stateReason, setStateReason] = useState(null);
@@ -79,7 +80,7 @@ export default function DoorCard({ practice = false, selfWording = false, staffS
 
   return (
     <Card large style={style}>
-      <SectionLabel style={{ marginBottom: 12 }}>Facility door</SectionLabel>
+      <SectionLabel style={{ marginBottom: 12 }}>{label}</SectionLabel>
       {body}
       {signing ? (
         <DoorRulesSheet
