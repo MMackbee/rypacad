@@ -210,11 +210,13 @@ export function RequireRole({ roles, selfManaged = false, children }) {
   // render the landing while users/{uid} is in flight, so its chunk and reads
   // start at once. The verified user below decides; the hint never redirects.
   if (loading) return hint && roles.includes(hint.role) ? screen(hint.uid) : <LaunchSplash />;
-  if (!user) return <Navigate to="/portal/signin" replace />;
-  if (!provisioned) return <Navigate to="/portal/not-provisioned" replace />;
+  // Each redirect keeps the splash up until the next screen paints (review
+  // 2026-11-17): <Navigate> alone left an empty root between the two.
+  if (!user) return <LaunchRedirect to="/portal/signin" />;
+  if (!provisioned) return <LaunchRedirect to="/portal/not-provisioned" />;
   const payer = selfManaged && user.role === 'athlete' && user.selfManaged === true;
   if (!roles.includes(user.role) && !payer) {
-    return <Navigate to={landingFor(user)} replace />;
+    return <LaunchRedirect to={landingFor(user)} />;
   }
   return screen(user.uid);
 }
@@ -521,8 +523,9 @@ function SpecialistDayRoute({ onSignOut }) {
   // user looped Navigate against RequireRole's own redirect (integration
   // browser pass: "maximum update depth exceeded"). Wait like RequireRole:
   // a hint renders a day it can show, and never redirects.
-  if (live && loading && !specialistId && !canSwitch) return null;
-  if (live && !specialistId && !canSwitch) return <Navigate to="/portal/tour" replace />;
+  // The splash, not an empty root, while it waits and on the way out (review 2026-11-17).
+  if (live && loading && !specialistId && !canSwitch) return <LaunchSplash />;
+  if (live && !specialistId && !canSwitch) return <LaunchRedirect to="/portal/tour" />;
   return (
     <SpecialistDay
       bare

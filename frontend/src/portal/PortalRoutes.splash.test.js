@@ -35,6 +35,10 @@ jest.mock('./screens/AdminDashboard', () => ({ __esModule: true, default: ({ rol
 jest.mock('./screens/CoachDashboard', () => ({ __esModule: true, default: ({ role }) => `COACH HOME as ${role}` }));
 jest.mock('./screens/ParentDashboard', () => ({ __esModule: true, default: () => 'FAMILY HOME' }));
 jest.mock('./screens/AthleteDashboard', () => ({ __esModule: true, default: () => 'ATHLETE HOME' }));
+jest.mock('./screens/TourStandings', () => ({ __esModule: true, default: ({ role }) => `TOUR as ${role}` }));
+jest.mock('./screens/SpecialistDay', () => ({ __esModule: true, default: () => 'MY SESSIONS' }));
+jest.mock('./screens/NotProvisioned', () => ({ __esModule: true, default: () => 'NOT PROVISIONED' }));
+jest.mock('./screens/SignIn', () => ({ ...jest.requireActual('./screens/SignIn'), __esModule: true, default: () => 'SIGN IN' }));
 jest.mock('./components/FeedbackButton', () => ({ __esModule: true, default: () => null }));
 jest.mock('./hooks/researchConsent', () => ({ useResearchConfirm: () => ({ data: { pending: [] }, loading: false, error: null }), saveResearchConsent: async () => ({}) }));
 
@@ -114,4 +118,47 @@ test('the launch that resolves at the index: no blank frame on the way to the la
   expect(b.pathname()).toBe('/portal/signin');
   expect(b.frames).not.toContain('BLANK');
   await b.unmount();
+});
+
+/*
+ * Review 2026-11-17 (F1): the redirects AFTER the session resolves - the
+ * guard's role mismatch, signed out and not provisioned, and the specialist
+ * day sending a plain coach to the Tour - kept the splash up too, never an
+ * empty root between the two screens (a direct account switch, a cold launch
+ * whose hint disagrees with the verified role).
+ */
+test.each([
+  ['a role this route does not take: the landing of the role it has', '/portal/admin', ready({ uid: 'u-p', role: 'parent', householdId: 'hh' }), '/portal/family', 'FAMILY HOME'],
+  ['signed out: sign-in', '/portal/family', { user: null, provisioned: false, loading: false, error: null, hint: null }, '/portal/signin', 'SIGN IN'],
+  ['no users doc: not provisioned', '/portal/family', { user: { uid: 'u-n', role: null }, provisioned: false, loading: false, error: null, hint: null }, '/portal/not-provisioned', 'NOT PROVISIONED'],
+  ['a plain coach on My Sessions: the Tour', '/portal/my-sessions', ready({ uid: 'u-c', role: 'coach', specialistId: null }), '/portal/tour', 'TOUR as coach'],
+])('%s - the splash, never a blank frame', async (_label, from, session, to, screen) => {
+  setSession(session);
+  const r = await mount(from);
+  expect(r.pathname()).toBe(to);
+  expect(r.text()).toBe(screen);
+  expect(r.frames).not.toContain('BLANK');
+  await r.unmount();
+});
+
+test("the hint names another account's role than the verified one: the splash between the two screens", async () => {
+  setSession(restoring({ uid: 'u-x', role: 'owner', specialistId: null }));
+  const r = await mount('/portal/admin');
+  expect(r.text()).toBe('ADMIN as owner');
+  await r.resolve(ready({ uid: 'u-x', role: 'parent', householdId: 'hh' }));
+  expect(r.pathname()).toBe('/portal/family');
+  expect(r.text()).toBe('FAMILY HOME');
+  expect(r.frames).not.toContain('BLANK');
+  await r.unmount();
+});
+
+test("a plain coach's hint on My Sessions while auth restores: the splash, then the Tour once verified", async () => {
+  setSession(restoring({ uid: 'u-c', role: 'coach', specialistId: null }));
+  const r = await mount('/portal/my-sessions');
+  expect(r.frames.length).toBeGreaterThan(0);
+  expect(r.frames.every((f) => f === 'SPLASH')).toBe(true);
+  await r.resolve(ready({ uid: 'u-c', role: 'coach', specialistId: null }));
+  expect(r.pathname()).toBe('/portal/tour');
+  expect(r.frames).not.toContain('BLANK');
+  await r.unmount();
 });

@@ -168,7 +168,8 @@ test("a specialist's hint renders their own day; a plain coach's hint waits inst
 
   setSession(loading({ uid: 'u-c', role: 'coach', specialistId: null }));
   const c = await mount('/portal/my-sessions');
-  expect(c.text()).toBe('');
+  // The launch splash while it waits, never an empty root (review 2026-11-17).
+  expect(c.text()).toBe('RYP AcademyReach Your Potential');
   expect(c.pathname()).toBe('/portal/my-sessions');
   await c.resolve({ uid: 'u-c', role: 'coach' });
   expect(c.pathname()).toBe('/portal/tour');
