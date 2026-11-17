@@ -28,6 +28,7 @@ jest.mock('firebase/firestore', () => ({
   getDoc: async (ref) => {
     mockReads.push(`${ref.col}/${ref.id}`);
     const data = mockDocs[`${ref.col}/${ref.id}`];
+    if (data instanceof Error) throw data;
     return { exists: () => data !== undefined, data: () => data };
   },
 }));
@@ -191,6 +192,32 @@ test('an unprovisioned account (no users doc) is never cached: each look reads',
   expect(p.now()).toMatchObject({ provisioned: false, user: { uid: 'u-new', role: null } });
   await expect(fetchCurrentUser()).rejects.toMatchObject({ code: 'not-found' });
   expect(userReads('u-new')).toBe(2);
+});
+
+// Review 2026-11-17 (F3): a fresh re-read in flight (the page coming back into view) is newer than the remembered copy.
+test('a caller while a fresh re-read is in flight gets that read, not the remembered copy', async () => {
+  mockDocs['users/u-fly'] = { role: 'parent', notificationPrefs: { reminders: { email: true } } };
+  auth.currentUser = account('u-fly');
+  await mountProbe();
+  await flush();
+  mockDocs['users/u-fly'] = { role: 'parent', notificationPrefs: { reminders: { email: false } } };
+  const fresh = fetchCurrentUser({ fresh: true });
+  const plain = fetchCurrentUser();
+  expect((await plain).notificationPrefs.reminders.email).toBe(false);
+  await fresh;
+  expect(userReads('u-fly')).toBe(2);
+});
+
+test('that re-read failing leaves the caller the remembered copy', async () => {
+  mockDocs['users/u-fly2'] = { role: 'coach' };
+  auth.currentUser = account('u-fly2');
+  await mountProbe();
+  await flush();
+  mockDocs['users/u-fly2'] = Object.assign(new Error('offline'), { code: 'unavailable' });
+  const fresh = fetchCurrentUser({ fresh: true });
+  const plain = fetchCurrentUser();
+  await expect(fresh).rejects.toMatchObject({ code: 'unavailable' });
+  expect(await plain).toMatchObject({ role: 'coach' });
 });
 
 test('fetchCurrentUser hands out copies: a caller editing its profile never edits the shared one', async () => {

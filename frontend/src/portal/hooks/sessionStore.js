@@ -73,11 +73,17 @@ function profileFresh(uid) {
  * scope's account is shared; anyone else reads straight through. A failed
  * read (NOT_FOUND included) is never kept, so the next caller reads again.
  * `fresh` skips the remembered copy but joins a fresh read already in flight.
+ * A fresh read in flight is newer than the remembered copy, so every caller
+ * joins it (review 2026-11-17); if it fails, a plain caller gets the copy.
  */
 export function loadProfile(uid, read, { fresh = false } = {}) {
   if (!uid || uid !== scope) return read();
-  if (!fresh && profileFresh(uid)) return Promise.resolve(copy(profile.value));
-  if (flight && flight.uid === uid && flight.epoch === epoch && (flight.fresh || !fresh)) return flight.promise.then(copy);
+  const joinable = flight && flight.uid === uid && flight.epoch === epoch ? flight : null;
+  if (!fresh && profileFresh(uid)) {
+    const kept = copy(profile.value);
+    return joinable && joinable.fresh ? joinable.promise.then(copy, () => kept) : Promise.resolve(kept);
+  }
+  if (joinable && (joinable.fresh || !fresh)) return joinable.promise.then(copy);
   const gen = generationOf('users');
   const mine = { uid, epoch, fresh, n: ++reads, promise: null };
   mine.promise = Promise.resolve()

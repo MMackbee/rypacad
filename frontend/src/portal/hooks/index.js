@@ -3418,7 +3418,9 @@ export function useAthleteDetail({ athleteId, variant = 'populated' } = {}) {
  * choice and reads back what they saved, as notify.js's channelAllowed does.
  */
 async function liveNotificationPrefs() {
-  const profile = await fetchCurrentUser();
+  // Fresh, never the shared copy: the first toggle writes the WHOLE map back
+  // (saveNotificationPrefs), so a change made elsewhere must be in it (review 2026-11-17).
+  const profile = await fetchCurrentUser({ fresh: true });
   const saved = profile.notificationPrefs || {};
   const categories = NOTIFICATION_CATEGORIES.map((c) => ({
     ...c,
