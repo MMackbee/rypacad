@@ -43,6 +43,16 @@ test('without JavaScript the fonts still load (noscript fallback)', () => {
   expect(html).toMatch(/<noscript>\s*<link rel="stylesheet" href="https:\/\/fonts\.googleapis\.com\/css2\?family=Raleway:wght@400;500;600;700&family=Work\+Sans:wght@400;500;600;700&display=swap" \/>\s*<\/noscript>/);
 });
 
+// Review 2026-11-17 (F4): Chromium derives an installed app's id from
+// start_url when the manifest names none. start_url moved from '.' to
+// '/portal', so without an id every existing Android and desktop install
+// would become a different app (no manifest updates, a second Install).
+test("the manifest keeps the installed app's identity: id '/', the old start_url", () => {
+  const manifest = JSON.parse(fs.readFileSync(path.join(__dirname, '..', 'public', 'manifest.json'), 'utf8'));
+  expect(manifest.id).toBe('/');
+  expect(manifest.start_url).toBe('/portal');
+});
+
 test('the splash is in step with the React launch splash (components/LaunchSplash.js)', () => {
   const component = fs.readFileSync(path.join(__dirname, 'portal', 'components', 'LaunchSplash.js'), 'utf8');
   expect(component).toContain('RYP Academy');

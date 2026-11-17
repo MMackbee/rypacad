@@ -26,6 +26,7 @@
       "purpose": "maskable"
     }
   ],
+  "id": "/",
   "start_url": "/portal",
   "display": "standalone",
   "theme_color": "#000000",
