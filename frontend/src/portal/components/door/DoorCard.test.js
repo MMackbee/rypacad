@@ -53,9 +53,9 @@ const presses = () => mockCalls.filter(([name, p]) => name === 'unlockDoor' && !
 const checks = () => mockCalls.filter(([name, p]) => name === 'unlockDoor' && p.check);
 const holdButton = (r) => r.container.querySelector('[data-door-hold]');
 
-/** A full one-second hold on the button. */
-async function hold(r) {
-  jest.useFakeTimers();
+/** A full one-second hold on the button; `again` keeps the fake clock (and a countdown) already running. */
+async function hold(r, again = false) {
+  if (!again) jest.useFakeTimers();
   const b = holdButton(r);
   await act(async () => { b.dispatchEvent(new MouseEvent('pointerdown', { bubbles: true, button: 0 })); });
   await act(async () => { jest.advanceTimersByTime(1000); });
@@ -295,6 +295,91 @@ describe('a press', () => {
     await r.flush();
     expect(presses()).toHaveLength(1);
     expect(r.text()).toContain('Unlocked - pull the door now.');
+    await r.unmount();
+  });
+});
+
+describe('an open of minutes (review 2026-11-17 app-1 and app-2)', () => {
+  const live = (r) => r.container.querySelector('[aria-live="polite"]').textContent;
+  const minutes = (secs) => {
+    mockCheck = { ...OPEN, openSeconds: secs };
+    mockPress = { outcome: 'opened', openSeconds: secs };
+  };
+
+  test('the retry line comes quietly once a hold opens the door again, not at the end', async () => {
+    minutes(300);
+    const r = await renderScreen(<DoorCard />);
+    await hold(r);
+    await act(async () => { jest.advanceTimersByTime(9000); });
+    expect(r.text()).not.toContain("Didn't open?");
+    await act(async () => { jest.advanceTimersByTime(1000); });
+    expect(r.text()).toContain("Didn't open? Hold again.");
+    expect(r.text()).toContain('Open for 4:50');
+    // Not read out: the live words stay the unlocked line.
+    expect(live(r)).toContain('Unlocked - pull the door now.');
+    expect(live(r)).not.toContain("Didn't open?");
+    await r.unmount();
+  });
+
+  test('when the time runs out the live line says the door locked again, never the retry line', async () => {
+    minutes(300);
+    const r = await renderScreen(<DoorCard />);
+    await hold(r);
+    await act(async () => { jest.advanceTimersByTime(300000); });
+    expect(r.text()).not.toContain('Open for');
+    expect(live(r)).toBe('The door has locked again.');
+    expect(r.text()).toContain("Didn't open? Hold again.");
+    await r.unmount();
+  });
+
+  test('a short open: the retry line at the end, beside "locked again"', async () => {
+    minutes(5);
+    const r = await renderScreen(<DoorCard />);
+    await hold(r);
+    await act(async () => { jest.advanceTimersByTime(4000); });
+    expect(r.text()).not.toContain("Didn't open?");
+    await act(async () => { jest.advanceTimersByTime(1000); });
+    expect(live(r)).toBe('The door has locked again.');
+    expect(r.text()).toContain("Didn't open? Hold again.");
+    await r.unmount();
+  });
+
+  test('a second hold while it counts: "Already unlocked", and the time keeps counting', async () => {
+    minutes(600);
+    const r = await renderScreen(<DoorCard />);
+    await hold(r);
+    await act(async () => { jest.advanceTimersByTime(4000); });
+    mockPress = { outcome: 'coalesced', openSeconds: 600, leftSeconds: 594 };
+    await hold(r, true);
+    expect(presses()).toHaveLength(2);
+    expect(live(r)).toContain('Already unlocked - pull the door.');
+    expect(r.text()).toContain('Open for 9:55');
+    await act(async () => { jest.advanceTimersByTime(5000); });
+    expect(r.text()).toContain('Open for 9:50');
+    expect(r.text()).toContain("Didn't open? Hold again.");
+    await r.unmount();
+  });
+
+  test('a coalesce onto an open this phone did not make counts down the time left', async () => {
+    mockCheck = { ...OPEN, openSeconds: 600 };
+    mockPress = { outcome: 'coalesced', openSeconds: 600, leftSeconds: 597 };
+    const r = await renderScreen(<DoorCard />);
+    await hold(r);
+    expect(live(r)).toContain('Already unlocked - pull the door.');
+    expect(r.text()).toContain('Open for 9:57');
+    await r.unmount();
+  });
+
+  test('a refused second hold keeps the time on screen: the door is still open', async () => {
+    minutes(300);
+    const r = await renderScreen(<DoorCard />);
+    await hold(r);
+    await act(async () => { jest.advanceTimersByTime(20000); });
+    mockPress = refusedWith('too-far');
+    await hold(r, true);
+    expect(live(r)).toBe('You need to be at the academy to unlock the door.');
+    expect(r.text()).toContain('Open for 4:39');
+    expect(r.text()).not.toContain("Didn't open?");
     await r.unmount();
   });
 });

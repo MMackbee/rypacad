@@ -5,7 +5,7 @@ import { Body, Card, SectionLabel } from '../Primitives';
 import HoldToUnlock from './HoldToUnlock';
 import DoorRulesSheet from './DoorRulesSheet';
 import { useDoorPress, useDoorStatus } from '../../hooks/door';
-import { CARD_REASONS, DIDNT_OPEN, LOCATION_NOTE, cardShows, doorCopy, openForText, refusalCopy } from '../../data/doorRules';
+import { CARD_REASONS, DIDNT_OPEN, LOCATION_NOTE, LOCKED_AGAIN, cardShows, doorCopy, openForText, refusalCopy } from '../../data/doorRules';
 
 /** The staff screen's line when the check itself failed (families see no card then). */
 export const STAFF_CHECK_FAILED = "The door check didn't load. Reload the page to try again.";
@@ -74,7 +74,7 @@ export default function DoorCard({ practice = false, selfWording = false, staffS
     body = (
       <>
         <HoldToUnlock onUnlock={pressing.press} busy={pressing.busy} />
-        <PressMessage result={pressing.result} left={pressing.left} busy={pressing.busy} staff={view.staff} />
+        <PressMessage result={pressing.result} left={pressing.left} retry={pressing.retry} busy={pressing.busy} staff={view.staff} />
       </>
     );
   } else if (view.reason === 'sign-rules') {
@@ -122,44 +122,46 @@ const StateMessage = React.forwardRef(function StateMessage({ children }, ref) {
 
 /**
  * Under the button: the location line before the first press (a family's
- * login only), then what the last press did. An opened door counts its open
- * time down ('Open for 42 s', 'Open for 2:05'), then offers another go. The
- * words are a polite live region; the ticking seconds are not read out.
+ * login only), then what the last press did. An open door counts its open
+ * time down ('Open for 42 s', 'Open for 2:05') under any answer while it
+ * runs: a second press, coalesced or refused, leaves it running. Once a
+ * hold would open the door again (`retry`: the server's 10 s, or the open
+ * time if shorter) a quiet "Didn't open? Hold again." joins it, and when
+ * the time runs out the words say the door has locked again (review
+ * 2026-11-17 app-1: with minutes of open time the retry line cannot wait
+ * for the end). The words are a polite live region; the ticking time and
+ * the retry line are not in it.
  */
-function PressMessage({ result, left, busy, staff }) {
+function PressMessage({ result, left, retry, busy, staff }) {
+  const door = result?.kind === 'outcome' && (result.outcome === 'opened' || result.outcome === 'coalesced');
   let words = null;
   let tone = color.textSecondary;
-  let after = null;
   if (busy) {
     words = null;
   } else if (!result) {
     words = staff ? null : LOCATION_NOTE;
     tone = color.textTertiary;
+  } else if (door && retry && left === 0) {
+    words = LOCKED_AGAIN;
   } else if (result.kind === 'outcome') {
     words = doorCopy(result.outcome) || refusalCopy(null);
-    tone = color.text;
-    if (result.outcome === 'opened' && left > 0) {
-      tone = color.primary;
-      after = openForText(left);
-    } else if (result.outcome === 'opened') {
-      // The door has locked again.
-      words = DIDNT_OPEN;
-      tone = color.textSecondary;
-    }
+    tone = result.outcome === 'opened' && left > 0 ? color.primary : color.text;
   } else {
     words = refusalCopy(result.reason, result.message);
     tone = color.error;
   }
+  const quiet = { marginTop: 4, font: `600 12px ${font.body}`, color: color.textSecondary };
   return (
     <div style={{ marginTop: 14, textAlign: 'center' }}>
       <div role="status" aria-live="polite" style={{ font: `500 13px/1.5 ${font.body}`, color: tone }}>
         {words}
       </div>
-      {after ? (
-        <div aria-hidden="true" style={{ marginTop: 4, font: `600 12px ${font.body}`, color: color.textSecondary }}>
-          {after}
+      {left > 0 ? (
+        <div aria-hidden="true" style={quiet}>
+          {openForText(left)}
         </div>
       ) : null}
+      {door && retry && !busy ? <div style={{ ...quiet, fontWeight: 400, color: color.textTertiary }}>{DIDNT_OPEN}</div> : null}
     </div>
   );
 }

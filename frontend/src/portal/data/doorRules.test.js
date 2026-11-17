@@ -13,6 +13,7 @@ import {
   DOOR_RULE_LINE,
   DOOR_TERMS_VERSION,
   LOCATION_NOTE,
+  LOCKED_AGAIN,
   cardShows,
   doorCopy,
   doorRulesSections,
@@ -42,6 +43,7 @@ test('the version and number the spec names', () => {
 test('copy by outcome, word for word', () => {
   expect(doorCopy('opened')).toBe('Unlocked - pull the door now.');
   expect(DIDNT_OPEN).toBe("Didn't open? Hold again.");
+  expect(LOCKED_AGAIN).toBe('The door has locked again.');
   expect(doorCopy('coalesced')).toBe('Already unlocked - pull the door.');
   expect(doorCopy('test')).toBe('Test household - the door was not opened.');
   expect(LOCATION_NOTE).toBe("The app checks you're at the academy when you unlock.");

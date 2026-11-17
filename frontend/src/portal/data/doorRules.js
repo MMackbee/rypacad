@@ -20,8 +20,14 @@ export const DOOR_RULE_LINE =
 /** Under the button before the first press, for a family login (staff unlock from anywhere). */
 export const LOCATION_NOTE = "The app checks you're at the academy when you unlock.";
 
-/** After an opened door's countdown runs out. */
+/**
+ * Quiet, under an open door's countdown, once a hold would open the door
+ * again (the server's 10 s, or the open time if shorter); never read out.
+ */
 export const DIDNT_OPEN = "Didn't open? Hold again.";
+
+/** When an open door's time runs out (review 2026-11-17 app-1: no longer "Didn't open?" minutes later). */
+export const LOCKED_AGAIN = 'The door has locked again.';
 
 /** Under an opened door while it counts down: 'Open for 42 s', then 'Open for 2:05' from a minute up. */
 export function openForText(left) {
