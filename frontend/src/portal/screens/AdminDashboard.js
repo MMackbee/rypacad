@@ -84,6 +84,8 @@ export { outstandingSummary } from '../components/OutstandingCard';
  *   applications card (components/ScholarshipsCard.js) mounts only with this
  *   AND role 'owner'. The route supplies it once the session is known to be
  *   an owner's; ops never mounts the card, so never makes its read.
+ * @param {() => void} [onOpenDoor]  2026-11-17: the Facility door card, to
+ *   /portal/admin/door (owner and ops); hidden without it.
  * @param {object} [demoMembership]  HARNESS-ONLY (Sprint 13, contract v2.1) —
  *   overrides the Membership card's data. useAdminDashboard's seed branch
  *   does not produce a `membership` field in this worktree yet (routing
@@ -99,6 +101,7 @@ export default function AdminDashboard({
   onOpenSignups,
   onOpenScholarships,
   onOpenAssessments,
+  onOpenDoor,
   demoMembership,
 }) {
   const { data } = useAdminDashboard();
@@ -166,6 +169,11 @@ export default function AdminDashboard({
         <SignupsCard onOpenSignups={onOpenSignups} />
         {/* 2026-10-14 (assessments spec 5): owners and ops reach the assessments from here. */}
         {onOpenAssessments ? <AssessmentsEntryCard onOpen={onOpenAssessments} /> : null}
+        {/* The facility door (2026-11-17 spec 7): the same entry card, to /portal/admin/door. */}
+        {onOpenDoor ? (
+          <AssessmentsEntryCard onOpen={onOpenDoor} title="Facility door" label="Open facility door"
+            body="Who can unlock, the academy location, unlocking from here, and who came in." />
+        ) : null}
         {/* Owner only (2026-10-01): mounting the card is the read, which the
             rules refuse to ops. */}
         {role === 'owner' && onOpenScholarships ? <ScholarshipsCard onOpen={onOpenScholarships} /> : null}

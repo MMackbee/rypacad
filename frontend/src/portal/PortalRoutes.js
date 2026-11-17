@@ -24,6 +24,7 @@ import { assessmentAccess } from './data/assessmentAccess';
 import { attendanceReadOnlyFor } from './data/specialists';
 import { CombineRoute, loadCombine } from './CombineRoutes';
 import { StaffAthleteBookingsRoute } from './StaffBookingRoutes';
+import { AdminDoorRoute } from './DoorRoutes';
 import ResearchConfirmGate from './components/ResearchConfirmGate';
 
 /*
@@ -438,6 +439,7 @@ function AdminRoute({ onOpenAthlete, onSignOut }) {
       onOpenSignups={() => navigate('/portal/admin/signups')}
       onOpenScholarships={owner ? () => navigate('/portal/admin/scholarships') : undefined}
       onOpenAssessments={() => navigate('/portal/assessments')}
+      onOpenDoor={() => navigate('/portal/admin/door')}
       onSignOut={onSignOut}
     />
   );
@@ -1129,6 +1131,8 @@ export default function PortalRoutes() {
       />
       {/* Staff booking (2026-11-13): one athlete's bookings, from Admin's Manage bookings card. */}
       <Route path="admin/athletes/:athleteId/bookings" element={<RequireRole roles={['ops', 'owner']}><StaffAthleteBookingsRoute /></RequireRole>} />
+      {/* The facility door (2026-11-17): the switch, the location, the staff unlock, activity and pauses. */}
+      <Route path="admin/door" element={<RequireRole roles={['ops', 'owner']}><AdminDoorRoute /></RequireRole>} />
       <Route
         path="admin/signups"
         element={

@@ -12,6 +12,12 @@ beforeEach(() => { mockConsents = { data: null, loading: false, error: null }; }
  * contract starts it is the line alone (contract-buffer ruling, 2026-09-30).
  */
 
+// The facility door card (2026-11-17 spec 7): a stand-in that shows where it mounts and what it was handed.
+jest.mock('../components/door/DoorCard', () => ({
+  __esModule: true,
+  default: ({ practice, selfWording }) => <div data-door-card={JSON.stringify({ practice: Boolean(practice), selfWording: Boolean(selfWording) })} />,
+}));
+
 let mockContract;
 let mockOnboarding = null;
 let mockOldCaptureFlag = true;
@@ -246,6 +252,27 @@ test('the old "Book your Diagnostic" card never shows from live data (assessment
   expect(r.text()).not.toContain('Book your Diagnostic');
   await r.unmount();
   mockOldCaptureFlag = true;
+});
+
+test('the door card (2026-11-17): near the top; the rules in the second person only for an adult login', async () => {
+  mockContract = null;
+  const doorOf = (r) => JSON.parse(r.container.querySelector('[data-door-card]').getAttribute('data-door-card'));
+  const minor = await renderScreen(<AthleteDashboard bare />);
+  expect(doorOf(minor)).toEqual({ practice: false, selfWording: false });
+  const door = minor.container.querySelector('[data-door-card]');
+  const empty = [...minor.container.querySelectorAll('h1')].find((h) => h.textContent === 'No upcoming sessions');
+  expect(door.compareDocumentPosition(empty) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  await minor.unmount();
+  mockMine = { data: { member: { dob: '2007-03-02' } }, loading: false, error: null };
+  const adult = await renderScreen(<AthleteDashboard bare />);
+  expect(doorOf(adult)).toEqual({ practice: false, selfWording: true });
+  await adult.unmount();
+  mockMine = { data: null, loading: false, error: null };
+  mockSelfManaged = true;
+  const self = await renderScreen(<AthleteDashboard bare practice />);
+  expect(doorOf(self)).toEqual({ practice: true, selfWording: true });
+  await self.unmount();
+  mockSelfManaged = false;
 });
 
 test('the athlete home links to their combine scores', async () => {

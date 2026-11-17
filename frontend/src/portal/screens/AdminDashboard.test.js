@@ -263,6 +263,22 @@ test('the Assessments card opens the assessments screen; it is hidden without a 
   await none.unmount();
 });
 
+// The facility door (2026-11-17 spec 7): owner and ops reach its screen from a card here.
+test('the Facility door card opens the door screen, for owner and ops; hidden without a destination', async () => {
+  for (const role of ['owner', 'ops']) {
+    const opened = [];
+    const r = await renderScreen(<AdminDashboard bare role={role} onOpenDoor={() => opened.push(role)} />);
+    expect(r.text()).toContain('Facility door');
+    expect(r.text()).toContain('Who can unlock, the academy location, unlocking from here, and who came in.');
+    await r.click('Open facility door');
+    expect(opened).toEqual([role]);
+    await r.unmount();
+  }
+  const none = await renderScreen(<AdminDashboard bare role="owner" />);
+  expect(none.button('Open facility door')).toBeNull();
+  await none.unmount();
+});
+
 // Staff booking (owner 2026-11-13, spec 01-spec-admin-booking.md 10.2): find any athlete from Admin.
 test('Manage bookings sits right after Outstanding, for owner and ops', async () => {
   for (const role of ['owner', 'ops']) {

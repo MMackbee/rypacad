@@ -66,6 +66,8 @@ export const CONSENT_TERMS = {
         'Access is for the athletes in your household, and a parent or guardian may come along. The entry code or key is for your family and must not be shared or lent outside it, including to teammates.',
         'An athlete under 16 must be accompanied by a parent, guardian or an adult the guardian has named to the academy in writing.',
         'One guest may come along, but only to watch. Guests may not hit balls or use equipment.',
+        // The facility door button (2026-11-17 spec 3): the door rules are these rules plus this line.
+        "Use the app's Unlock button only when you are at the door, and only to let in your own household. Never open the door for anyone else.",
       ],
     },
     {
