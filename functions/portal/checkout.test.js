@@ -219,7 +219,10 @@ test('athlete role, existing customer, Google account, prorated', async () => {
   assert.equal(b.cancel_url, 'https://portal.test/portal/home');
   assert.equal(b.line_items[1].price_data.unit_amount,
       Math.round(29900 * 19 / 30));
-  assert.equal(b.subscription_data.metadata.prepaidTokens, '4');
+  // Owner ruling 2026-11-17: the price is prorated, the tokens are not.
+  assert.equal(b.subscription_data.metadata.prepaidTokens, '6');
+  assert.equal(b.line_items[1].price_data.product_data.name,
+      '6 tokens - November 2026, prepaid');
   assert.equal(b.custom_text.submit.message, 'Today\'s charge covers the ' +
       'rest of November 2026. Stripe calls the time until monthly billing ' +
       'starts on Dec 1 a free trial - nothing else is charged before then.');

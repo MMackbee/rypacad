@@ -384,8 +384,8 @@ function sessionBody(a) {
   // the same in test and live) Stripe applies it and there is nothing to
   // type; without it the family gets Stripe's "Add promotion code" field
   // and types the code. Stripe accepts one of the two, never both. Tokens
-  // come from metadata, never from the amount, so the discount changes no
-  // balance.
+  // come from the paid package, never from the amount, so the discount
+  // changes no balance.
   if (a.sibling && a.sibling.eligible) {
     if (a.sibling.coupon) body.discounts = [{coupon: a.sibling.coupon}];
     else body.allow_promotion_codes = true;

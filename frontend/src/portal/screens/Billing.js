@@ -1,12 +1,13 @@
 import React, { useRef, useState } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
-import { color, font, radius } from '../tokens';
+import { color, font } from '../tokens';
 import BillingSkeleton from '../components/BillingSkeleton';
+import BillingStatusHero from '../components/BillingStatusHero';
 import BottomTabBar from '../components/BottomTabBar';
 import Button from '../components/Button';
 import FacilityCard from '../components/FacilityCard';
+import { ManageBillingButtons } from '../components/ManageBillingButton';
 import MemberSection from '../components/MemberSection';
-import PayButton from '../components/PayButton';
 import PhoneFrame from '../components/PhoneFrame';
 import SequenceLadder from '../components/SequenceLadder';
 import StaffCancelSheet from '../components/StaffCancelSheet';
@@ -20,9 +21,10 @@ import { BackLink, Banner, Body, Card, ErrorNotice, ScreenTitle, SectionLabel } 
 import { ordinal, statusFor } from '../data/billingHub';
 import { facilitySourceLabel, householdFacility } from '../data/facility';
 import { FACILITY_ACCESS, windowCopyFor } from '../data/packages';
-import { CONNECTED_LINE, PAY_NOW, PENDING_PLAN_LINE, SINGLE_PLAN_LINE } from '../data/billingCopy';
+import { CONNECTED_LINE, PENDING_PLAN_LINE, SINGLE_PLAN_LINE } from '../data/billingCopy';
+import { portalTargets } from '../data/billingPortal';
 import { contractEnabled } from '../data/contractFlag';
-import { householdOnHold, saleOpen, SINGLE_NOT_OPEN_LINE } from '../data/singleToken';
+import { householdOnHold } from '../data/singleToken';
 import { firstOf, staffMayCancel } from '../data/staffCancel';
 import { staffMayBook } from '../data/staffBooking';
 import { BOOK_A_SESSION, testAthleteLine } from '../data/staffBookingCopy';
@@ -44,9 +46,13 @@ import useBillingHub from '../hooks/billing';
  * the plan (packages, billing day, catalogue prices marked pending).
  *
  * NO FAKE MONEY: no card art, no invoice rows, no amounts until Stripe data
- * exists. "Update payment method" opens the Stripe customer portal login
- * link when the academy configured one (REACT_APP_STRIPE_PORTAL_URL);
- * otherwise the hero says to contact the academy.
+ * exists. The past-due hero's "Update payment method" and "Manage billing in
+ * Stripe" on Card & invoices both sign the payer straight into Stripe (owner
+ * 2026-11-17, ManageBillingButton; review F7): shown once the family has a
+ * Stripe customer, one button per customer when there are several
+ * (data/billingPortal.js). The email sign-in link (REACT_APP_STRIPE_PORTAL_URL)
+ * is only the fallback after a failure; with no customer the hero says to
+ * contact the academy.
  *
  * Staff cancel (owner approved 2026-11-12): on the staff view the owner or
  * ops has a Cancel on each Booked or No-show row of a meter's "This period"
@@ -110,13 +116,18 @@ export default function Billing({
 
   // The hub keeps its last data on screen while it re-reads - a cached
   // revisit, the reload after a save - and that data may be minutes old: no
-  // control on it acts until the fresh read lands (review 2026-11-17).
+  // control on it acts until the fresh read lands (review 2026-11-17). Except
+  // the family's own Stripe portal - the hero's Update payment method, Card &
+  // invoices' Manage billing in Stripe - which reads nothing from the hub: it
+  // sits outside the held fieldsets and stays usable (merge 2026-11-17).
   const refreshing = !demo && (hook.isRefreshing === true || Boolean(held));
 
   const members = data?.members ?? [];
   const status = data?.status ?? null;
   const isEmpty = !loading && !error && members.length === 0;
   const self = !staff && role === 'athlete';
+  // Manage billing in Stripe: one button for the family, or one per Stripe customer (data/billingPortal.js).
+  const targets = portalTargets(data?.household, members);
   // A failing card or a lapsed membership: no Add a token on any meter.
   const onHold = householdOnHold(data?.household);
   // Staff cancel: the tapped row and its athlete while the sheet is open, then the line it left.
@@ -176,72 +187,80 @@ export default function Billing({
             Your membership didn't load. Check your connection and try again.
           </ErrorNotice>
         ) : (
-          <fieldset disabled={refreshing} aria-busy={refreshing || undefined} style={CONTROLS}>
-            <StatusHero status={status} portalUrl={staff ? null : data?.portalUrl} staff={staff} />
-            {status?.ladder ? (
-              <Card large>
-                <SectionLabel style={{ marginBottom: 15 }}>Where this stands</SectionLabel>
-                <SequenceLadder rungs={status.ladder} current={status.ladderAt} />
-              </Card>
-            ) : null}
+          <>
+            {/* The family's own Stripe portal reads nothing from the hub: the hero holds only its Pay now. */}
+            <BillingStatusHero status={status} targets={targets} portalUrl={staff ? null : data?.portalUrl} staff={staff} held={refreshing} />
+            <fieldset disabled={refreshing} aria-busy={refreshing || undefined} style={CONTROLS}>
+              {status?.ladder ? (
+                <Card large>
+                  <SectionLabel style={{ marginBottom: 15 }}>Where this stands</SectionLabel>
+                  <SequenceLadder rungs={status.ladder} current={status.ladderAt} />
+                </Card>
+              ) : null}
 
-            {isEmpty ? (
-              <Card large>
-                <SectionLabel style={{ marginBottom: 8 }}>No linked athletes</SectionLabel>
-                <Body size={12}>
-                  This household has no linked athletes yet — link one from Settings before there's anything to bill.
-                </Body>
-              </Card>
-            ) : (
-              members.map((member) => (
-                <MemberSection key={member.athleteId} name={member.name}>
-                  {/* The single token is bought one at a time (ruling 2026-09-29/30): its
-                      meter carries the Buy button, from the day they go on sale; staff never pay.
-                      A pending athlete pays from the hero's Pay now alone (owner 2026-10-01).
-                      A paid monthly token member's meter offers Add a token at their
-                      package's rate (owner 2026-10-10) at any time, whatever is left
-                      (addAnytime; owner 2026-11-11: "lets just put a add tokens button on
-                      the billing page"). */}
-                  <TokenMeter
-                    member={member}
-                    defaultOpen={members.length === 1}
-                    showPrices={staff}
-                    buy={!staff}
-                    onHold={onHold}
-                    addAnytime
-                    onCancelRow={onCancelRow ? onCancelRow(member) : undefined}
-                    onMoveRow={onMoveRow && !isTest(member) ? onMoveRow(member) : undefined}
-                  />
-                  {mayBook ? <StaffBookSlot member={member} test={isTest(member)} onBook={onBook} /> : null}
-                  <CoachingLine coaching={member.coaching} />
-                  {contractEnabled() ? (
-                    // Athlete detail is a parent/staff route; the athlete's own is the Contract.
-                    <ContractLine
-                      contractMinutes={member.contractMinutes}
-                      target={self ? 'contract' : 'athlete'}
-                      onOpen={() => navigate(self ? '/portal/contract' : `/portal/athlete/${member.athleteId}`)}
-                    />
-                  ) : null}
-                  {/* The family page (2026-11-16): everything else staff do for this athlete. */}
-                  {family ? (
-                    <StaffAthletePanel
+              {isEmpty ? (
+                <Card large>
+                  <SectionLabel style={{ marginBottom: 8 }}>No linked athletes</SectionLabel>
+                  <Body size={12}>
+                    This household has no linked athletes yet — link one from Settings before there's anything to bill.
+                  </Body>
+                </Card>
+              ) : (
+                members.map((member) => (
+                  <MemberSection key={member.athleteId} name={member.name}>
+                    {/* The single token is bought one at a time (ruling 2026-09-29/30): its
+                        meter carries the Buy button, from the day they go on sale; staff never pay.
+                        A pending athlete pays from the hero's Pay now alone (owner 2026-10-01).
+                        A paid monthly token member's meter offers Add a token at their
+                        package's rate (owner 2026-10-10) at any time, whatever is left
+                        (addAnytime; owner 2026-11-11: "lets just put a add tokens button on
+                        the billing page"). */}
+                    <TokenMeter
                       member={member}
-                      role={role}
-                      focus={focusId === member.athleteId}
-                      onMoveRow={onMoveRow && !isTest(member) ? onMoveRow(member) : null}
-                      onCancelRow={onCancelRow ? onCancelRow(member) : null}
+                      defaultOpen={members.length === 1}
+                      showPrices={staff}
+                      buy={!staff}
+                      onHold={onHold}
+                      addAnytime
+                      onCancelRow={onCancelRow ? onCancelRow(member) : undefined}
+                      onMoveRow={onMoveRow && !isTest(member) ? onMoveRow(member) : undefined}
                     />
-                  ) : null}
-                </MemberSection>
-              ))
-            )}
+                    {mayBook ? <StaffBookSlot member={member} test={isTest(member)} onBook={onBook} /> : null}
+                    <CoachingLine coaching={member.coaching} />
+                    {contractEnabled() ? (
+                      // Athlete detail is a parent/staff route; the athlete's own is the Contract.
+                      <ContractLine
+                        contractMinutes={member.contractMinutes}
+                        target={self ? 'contract' : 'athlete'}
+                        onOpen={() => navigate(self ? '/portal/contract' : `/portal/athlete/${member.athleteId}`)}
+                      />
+                    ) : null}
+                    {/* The family page (2026-11-16): everything else staff do for this athlete. */}
+                    {family ? (
+                      <StaffAthletePanel
+                        member={member}
+                        role={role}
+                        focus={focusId === member.athleteId}
+                        onMoveRow={onMoveRow && !isTest(member) ? onMoveRow(member) : null}
+                        onCancelRow={onCancelRow ? onCancelRow(member) : null}
+                      />
+                    ) : null}
+                  </MemberSection>
+                ))
+              )}
 
-            {/* ONE family card, never one per athlete (owner ruling 2026-09-30). */}
-            <FacilityCard members={members} readOnly={staff} self={self} />
-            {members.length ? <PlanCard household={data?.household} members={members} showPrices={staff} self={self} /> : null}
-            <ConnectionCard household={data?.household} portalUrl={data?.portalUrl} />
-            {family ? <StaffFamilyAdvanced householdId={householdId ?? data?.household?.id ?? null} anchorDay={data?.household?.anchorDay ?? 1} /> : null}
-          </fieldset>
+              {/* ONE family card, never one per athlete (owner ruling 2026-09-30). */}
+              <FacilityCard members={members} readOnly={staff} self={self} />
+              {members.length ? <PlanCard household={data?.household} members={members} showPrices={staff} self={self} /> : null}
+            </fieldset>
+            {/* Outside the held fieldset: the payer's Manage billing in Stripe never waits on a re-read. */}
+            <ConnectionCard targets={targets} portalUrl={data?.portalUrl} staff={staff} />
+            {family ? (
+              <fieldset disabled={refreshing} aria-busy={refreshing || undefined} style={CONTROLS}>
+                <StaffFamilyAdvanced householdId={householdId ?? data?.household?.id ?? null} anchorDay={data?.household?.anchorDay ?? 1} />
+              </fieldset>
+            ) : null}
+          </>
         )}
       </div>
       {cancelTarget ? (
@@ -284,71 +303,8 @@ export default function Billing({
 
 // The page's controls, held while the hub re-reads: a disabled fieldset
 // disables every button and field inside it; laid out as the column was.
+// The Stripe portal buttons are left outside it (see `refreshing`).
 const CONTROLS = { border: 0, margin: 0, padding: 0, minWidth: 0, display: 'flex', flexDirection: 'column', gap: 18 };
-
-const SURFACES = {
-  default: { background: color.surface, border: color.border },
-  yellow: { background: 'rgba(244,238,25,.06)', border: color.secondary },
-  red: { background: 'rgba(255,68,68,.07)', border: color.error },
-};
-
-/**
- * The membership's standing — Stripe's status, the contract's copy, dates
- * only when recorded. Sprint 20 (spec 4.4): the `pending` branch lists one
- * Pay now per unpaid athlete (createCheckoutSession) instead of the card
- * portal CTA - there is no card to update before the first checkout. A
- * single-token athlete (`perPurchase`) gets the line saying when instead of
- * a button until single tokens go on sale (owner ruling 2026-10-01).
- */
-function StatusHero({ status, portalUrl, staff = false }) {
-  if (!status) return null;
-  const s = SURFACES[status.tone] || SURFACES.default;
-  // Staff read the standing; only the payer updates the card or pays.
-  const cta = staff ? null : status.cta;
-  const pendingAthletes = status.status === 'pending' ? status.pendingAthletes ?? [] : [];
-  return (
-    <div style={{ background: s.background, border: `1px solid ${s.border}`, borderRadius: radius.cardLarge, padding: 17 }}>
-      <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-        <SectionLabel style={{ flex: 1 }}>Membership</SectionLabel>
-        <StatusBadge tone={status.badge.tone}>{status.badge.label}</StatusBadge>
-      </div>
-      <ScreenTitle size={20} style={{ marginTop: 12 }}>
-        {status.title}
-      </ScreenTitle>
-      <Body size={13} style={{ marginTop: 10 }}>
-        {status.body}
-      </Body>
-      {cta && status.status === 'pending' ? (
-        pendingAthletes.map((a) => (
-          <div key={a.athleteId} style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 12, marginTop: 12 }}>
-            <div style={{ flex: 1, minWidth: 0, font: `600 13px ${font.body}`, color: color.text }}>
-              {a.name}
-              {a.perPurchase && !saleOpen() ? <Body size={11} tone={color.textTertiary} style={{ marginTop: 3 }}>{SINGLE_NOT_OPEN_LINE}</Body> : null}
-            </div>
-            {a.perPurchase && !saleOpen() ? null : (
-              <PayButton athleteId={a.athleteId} product="tier" label={PAY_NOW} height={44} style={{ width: 132, flex: 'none' }} />
-            )}
-          </div>
-        ))
-      ) : cta ? (
-        portalUrl ? (
-          <Button
-            variant={status.tone === 'red' ? 'danger' : 'caution'}
-            height={50}
-            style={{ marginTop: 15, boxShadow: 'none' }}
-            onClick={() => window.open(portalUrl, '_blank', 'noopener')}
-          >
-            {cta}
-          </Button>
-        ) : (
-          <Body size={12} tone={color.textSecondary} style={{ marginTop: 12 }}>
-            To update your card, contact the academy. Booking reopens the same day the invoice clears.
-          </Body>
-        )
-      ) : null}
-    </div>
-  );
-}
 
 /**
  * Under a member's meter on the staff view, owner or ops (spec 10.4): Book a
@@ -472,20 +428,21 @@ function PlanCard({ household, members, showPrices = false, self = false }) {
   );
 }
 
-/** No fake money: what is and isn't connected, in one honest line. */
-function ConnectionCard({ household, portalUrl }) {
-  const connected = Boolean(household?.stripeCustomerId);
+/**
+ * No fake money: what is and isn't connected, in one honest line. The payer's
+ * Manage billing in Stripe opens their own portal session - one button, or one
+ * per Stripe customer (`targets`, data/billingPortal.js); the sign-in link
+ * (portalUrl) is only its fallback. Staff never open a family's portal.
+ */
+function ConnectionCard({ targets, portalUrl, staff = false }) {
+  const connected = targets.length > 0;
   return (
     <Card large>
       <SectionLabel style={{ marginBottom: 8 }}>Card &amp; invoices</SectionLabel>
       <Body size={12}>
         {connected ? CONNECTED_LINE : 'Card and invoices are managed in Stripe once you have paid.'}
       </Body>
-      {portalUrl ? (
-        <Button variant="outline" height={42} style={{ marginTop: 12, boxShadow: 'none' }} onClick={() => window.open(portalUrl, '_blank', 'noopener')}>
-          Manage billing in Stripe
-        </Button>
-      ) : null}
+      {connected && !staff ? <ManageBillingButtons targets={targets} fallbackUrl={portalUrl} /> : null}
     </Card>
   );
 }

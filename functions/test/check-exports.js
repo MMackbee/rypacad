@@ -9,7 +9,8 @@
  * cancel, 2026-11-12) and staffBookSession (staff booking tools,
  * 2026-11-13) and tokenRollover (one-month rollover, 2026-11-15) and
  * rollTokenAhead (a leftover token used early, 2026-11-16) and unlockDoor
- * and signDoorRules (the facility door button, 2026-11-17) - 27 in
+ * and signDoorRules (the facility door button, 2026-11-17) and
+ * openBillingPortal (Manage billing in Stripe, 2026-11-17) - 28 in
  * all - and each declares
  * the secrets contract 6.4 binds (spec 8). No emulator:
  * it requires index.js in-process and reads each function's __endpoint.
@@ -24,6 +25,7 @@ const MAIL = ['SMTP_USER', 'SMTP_PASS'];
 const EXPECTED = {
   stripeWebhook: ['STRIPE_WEBHOOK_SECRET', 'STRIPE_SECRET_KEY', ...MAIL],
   createCheckoutSession: ['STRIPE_SECRET_KEY'],
+  openBillingPortal: ['STRIPE_SECRET_KEY'],
   calendlyWebhook: ['CALENDLY_WEBHOOK_SIGNING_KEY'],
   createFamily: [],
   addAthletes: [],
@@ -56,8 +58,9 @@ assert.deepEqual(Object.keys(index).sort(), Object.keys(EXPECTED).sort(),
     'submitScholarship, submitFeedback, mentalCheckinReminders, ' +
     'requestMentalConsent, onMentalConsentSigned, moveBooking, ' +
     'staffCancelBooking, staffBookSession, tokenRollover, ' +
-    'rollTokenAhead, unlockDoor, signDoorRules, nothing else');
-assert.equal(Object.keys(EXPECTED).length, 27, '27 functions');
+    'rollTokenAhead, unlockDoor, signDoorRules, openBillingPortal, ' +
+    'nothing else');
+assert.equal(Object.keys(EXPECTED).length, 28, '28 functions');
 for (const [name, secrets] of Object.entries(EXPECTED)) {
   const ep = index[name].__endpoint || {};
   const got = (ep.secretEnvironmentVariables || []).map((s) => s.key);

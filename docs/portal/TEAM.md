@@ -3306,7 +3306,8 @@ Keystones (build facts):
   per-athlete `athletes.billing` (absent == active) is the booking gate.
 - Window 30 (Elite 45); `BOOKING_OPENS_AT = 1791633600000` (Oct 10 07:00
   Chicago); season starts Nov 3; the checkout payment prepays November,
-  recurring from Dec 1 anchored on the 1st; mid-month joiners prorate both.
+  recurring from Dec 1 anchored on the 1st; mid-month joiners prorate the
+  price, never the tokens (amended 2026-11-17).
 - Yannick books via Calendly (`calendlyWebhook` writes `sessions/cal-<uuid>`,
   `bookings.source: 'calendly'`, flagged never refused); Phil stays on the
   calendar with real `durationMinutes` (sync regex fix).

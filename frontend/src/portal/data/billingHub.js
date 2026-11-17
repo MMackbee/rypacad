@@ -19,6 +19,7 @@ import { afterSeasonEnd } from './season';
 import { contractMinutesFor } from './contractRule';
 import { isSingleTokenId, saleOpen, SINGLE_NOT_OPEN_LINE } from './singleToken';
 import { isRolloverTokenId, rollsUntil } from './rollover';
+import { customerIdsOf } from './billingPortal';
 
 /**
  * The season's first token period - functions/portal/prepaid.js carries the
@@ -303,6 +304,8 @@ export function hubMemberFor(args) {
     // can read "Facility access: paid - waiver pending" (facility billing
     // active, consent absent) versus "active" (both).
     facilityAccessConsent: Boolean(athlete.facilityAccessConsent),
+    // Its own Stripe customers: which Manage billing buttons show (data/billingPortal.js, review 2026-11-17 F2/F3).
+    customerIds: customerIdsOf(athlete),
     // The add-on ticked at sign-up (owner 2026-09-30; createFamily /
     // addAthletes write it, absent == false): the home pending card offers
     // its checkout once the membership is paid (billingCopy facilityRequestState).

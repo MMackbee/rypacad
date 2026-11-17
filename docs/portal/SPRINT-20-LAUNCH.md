@@ -49,11 +49,13 @@ this spec still says `single` works like a tier, 0.14 and 16.2 win.
 12. **Season starts Nov 3** (Nov 2 is set-up day). `data/season.js`
     SEASON_BOUNDS.start moves 2026-11-02 -> 2026-11-03. Oct 10 + 30 = Nov
     9, so the first week is bookable from Oct 10 either way.
-13. **Mid-month joiners prorate both** (ruled 2026-09-28): a family joining
-    after Nov 1 pays the rest of the current month **prorated by days
-    remaining** and gets that month's tokens **prorated the same way
-    (rounded up, never 0)**, then bills in full on the next 1st.
-    `PRORATE_JOINERS = true` is the ruling, not a default (4.2).
+13. **Mid-month joiners prorate the price, not the tokens** (ruled
+    2026-09-28, amended 2026-11-17): a family joining after Nov 1 pays the
+    rest of the current month **prorated by days remaining** and gets the
+    package's **FULL monthly tokens** for that month, then bills in full on
+    the next 1st. `PRORATE_JOINERS = true` is the ruling, not a default
+    (4.2). Owner, 2026-11-17: "Pro rate the rate, not the tokens." (Until
+    then the tokens were prorated the same way, rounded up, never 0.)
 14. **The single session token is a one-time $65 purchase** (ruled
     2026-09-29, details 2026-09-30). Its Stripe price is one-time. Each
     paid Checkout Session is exactly ONE token, `graceTokens/single_{cs}`,
@@ -263,9 +265,9 @@ subscription anchors on the 1st forever after. Which month is prepaid:
   Dec 1. An Elite family may book at once (Phil/Yannick in October, golf
   from Nov 3); a token family's tokens are November's.
 - on or after Nov 1: **the current month**, amount = price x days
-  remaining / days in month, tokens = ceil(tokens x the same fraction),
-  minimum 1 (`PRORATE_JOINERS = true`, ruling 0.13), `trial_end` = next
-  1st. The facility add-on uses the same shape at $300.
+  remaining / days in month (`PRORATE_JOINERS = true`, ruling 0.13), tokens
+  = the package's full count (0.13 as amended 2026-11-17), `trial_end` =
+  next 1st. The facility add-on uses the same shape at $300.
 
 **The 48-hour rule (D11).** Stripe refuses a Checkout `trial_end` less than
 48 hours away. When the next 1st is under 49 hours off at checkout time (the
@@ -437,8 +439,9 @@ money and deliver nothing.
   `billing_reason == 'subscription_create'` (the checkout invoice) the
   period is the PREPAID month named in `subscription_data.metadata
   .prepaidPeriodKey` (`2026-11-01` before Nov 1; the current month's first
-  after), and `granted` = `metadata.prepaidTokens` (the full package count,
-  or the prorated count under 0.13); for every later invoice
+  after), and `granted` = the paid package's full count (since 2026-11-17;
+  `metadata.prepaidTokens` is still written but no longer read); for every
+  later invoice
   (`subscription_cycle`) the period is `lines[].period.start` as today. The
   `tokenPeriods` doc records `source: 'stripe'` and `prepaid: true` on the
   first one.
@@ -994,7 +997,8 @@ ids; sync-before-smoke ordering; test-then-live Stripe endpoints; the
 verification action URL; the cut line. Rejected: none. Owner rulings that
 followed: the checkout payment prepays November and recurring billing
 starts Dec 1 (0.11); season start Nov 3 (0.12); mid-month joiners
-prorate both price and tokens (0.13).
+prorate both price and tokens (0.13; amended 2026-11-17 to the price only,
+with the full tokens).
 
 **Plan check (v3.0.2, same day).** Writing the four lane plans against
 v3.0.1 forced sixteen decisions. Each is now a fact in the contract (marked
