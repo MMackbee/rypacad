@@ -120,6 +120,7 @@ const {onSessionBookedDecrease} = require('./portal/promotion');
 const {MAIL_SECRETS} = require('./portal/secrets');
 const family = require('./portal/family');
 const {createCheckoutSession} = require('./portal/checkout');
+const {openBillingPortal} = require('./portal/billing-portal');
 const {calendlyWebhook} = require('./portal/calendly');
 const {waitlistPositions} = require('./portal/waitlist-positions');
 const single = require('./portal/single');
@@ -172,6 +173,7 @@ exports.createFamily = family.createFamily;
 exports.addAthletes = family.addAthletes;
 exports.claimInvite = family.claimInvite;
 exports.createCheckoutSession = createCheckoutSession;
+exports.openBillingPortal = openBillingPortal;
 exports.calendlyWebhook = calendlyWebhook;
 // The public website's scholarship form (owner 2026-10-01): a public POST
 // that stores the application and emails the director. It is not part of
