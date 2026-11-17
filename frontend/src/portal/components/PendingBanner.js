@@ -6,6 +6,9 @@ import { PAY_NOW, PENDING_TITLE, facilityName, facilityPayLabel, facilityPending
 import { SIBLING_DISCOUNT_NOTE, SIBLING_ORDER_NOTE, siblingPartialNote } from '../data/packages';
 import { saleOpen, SINGLE_ASK_GUARDIAN_LINE, SINGLE_NOT_OPEN_LINE } from '../data/singleToken';
 
+/** A fieldset that only holds its controls: no border, no box of its own. */
+const BARE = { border: 0, margin: 0, padding: 0, minWidth: 0 };
+
 /**
  * One banner, one Pay now per athlete who needs a checkout - pending, or lapsed and re-subscribing (spec 4.4). `title` is the hub status title (the lapsed wording differs); renders nothing when nobody is listed.
  * `siblingDiscount` (the caller's siblingDiscountApplies over the whole family) adds the one-line note Stripe's price would otherwise contradict; a one-time single token is not a membership, so an all-single list never shows it.
@@ -17,8 +20,9 @@ import { saleOpen, SINGLE_ASK_GUARDIAN_LINE, SINGLE_NOT_OPEN_LINE } from '../dat
  * `self` (the adult who is their own household) drops the word "family".
  * A single-token row (`perPurchase`) has no Pay button until single tokens go on sale (owner ruling 2026-10-01; data/singleToken.js saleOpen, the booking-open gate): the row says when instead.
  * `askGuardian` (an under-18 athlete's own login; owner ruling 2026-10-01, data/singleToken.js ownLoginMayBuy is false): from the gate on, a single-token row reads who buys it instead of Pay now. A monthly row keeps its Pay now.
+ * `held` (the caller's billing hub is re-reading, its data maybe minutes old; review 2026-11-17): every control on the card waits - Pay now, the add-on Pay, the row extras - as on Billing (BillingStatusHero), since a checkout acts on who the hub says is unpaid.
  */
-export default function PendingBanner({ pendingAthletes, facilityRows = null, body, title = null, email = null, siblingDiscount = false, plan = null, renderRowExtra = null, self = false, askGuardian = false, style }) {
+export default function PendingBanner({ pendingAthletes, facilityRows = null, body, title = null, email = null, siblingDiscount = false, plan = null, renderRowExtra = null, self = false, askGuardian = false, held = false, style }) {
   const tier = pendingAthletes || [];
   const planOf = (a) => (plan && !a.perPurchase ? plan[a.athleteId] : null) || null;
   const notYet = (a) => a.perPurchase === true && !saleOpen();
@@ -30,36 +34,38 @@ export default function PendingBanner({ pendingAthletes, facilityRows = null, bo
   if (tier.length === 0 && pay.length === 0) return null;
   return (
     <Card tone="yellow" large style={style}>
-      <SectionLabel tone={color.secondary}>{tier.length ? title || PENDING_TITLE : facilityPendingTitle(self)}</SectionLabel>
-      {tier.length > 0 && body ? <Body size={12} style={{ marginTop: 8 }}>{body}</Body> : null}
-      {!plan && siblingDiscount && tier.some((a) => !a.perPurchase) ? (
-        <Body size={12} style={{ marginTop: 8 }}>{SIBLING_DISCOUNT_NOTE}</Body>
-      ) : null}
-      {plan && tier.filter((a) => planOf(a)).length > 1 && tier.every((a) => !planOf(a) || planOf(a).state === 'full') ? (
-        <Body size={12} style={{ marginTop: 8 }}>{SIBLING_ORDER_NOTE}</Body>
-      ) : null}
-      {tier.map((a) => (
-        <div key={a.athleteId} style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 12, marginTop: 12 }}>
-          <div style={{ flex: 1, minWidth: 0, font: `600 13px ${font.body}`, color: color.text }}>
-            {a.name}
-            {renderRowExtra ? renderRowExtra(a) : null}
-            {waiting.has(a.athleteId) ? <Body size={11} tone={color.textTertiary} style={{ marginTop: 3 }}>{facilityWaitingLine(self)}</Body> : null}
-            {planOf(a)?.state === 'discount' ? <Body size={11} style={{ marginTop: 3 }}>{SIBLING_DISCOUNT_NOTE}</Body> : null}
-            {planOf(a)?.state === 'partial' ? <Body size={11} style={{ marginTop: 3 }}>{siblingPartialNote(planOf(a).amount)}</Body> : null}
-            {notYet(a) && !bodySaysWhen ? <Body size={11} tone={color.textTertiary} style={{ marginTop: 3 }}>{SINGLE_NOT_OPEN_LINE}</Body> : null}
-            {guardianBuys(a) ? <Body size={12} style={{ marginTop: 3 }}>{SINGLE_ASK_GUARDIAN_LINE}</Body> : null}
+      <fieldset disabled={held} aria-busy={held || undefined} style={BARE}>
+        <SectionLabel tone={color.secondary}>{tier.length ? title || PENDING_TITLE : facilityPendingTitle(self)}</SectionLabel>
+        {tier.length > 0 && body ? <Body size={12} style={{ marginTop: 8 }}>{body}</Body> : null}
+        {!plan && siblingDiscount && tier.some((a) => !a.perPurchase) ? (
+          <Body size={12} style={{ marginTop: 8 }}>{SIBLING_DISCOUNT_NOTE}</Body>
+        ) : null}
+        {plan && tier.filter((a) => planOf(a)).length > 1 && tier.every((a) => !planOf(a) || planOf(a).state === 'full') ? (
+          <Body size={12} style={{ marginTop: 8 }}>{SIBLING_ORDER_NOTE}</Body>
+        ) : null}
+        {tier.map((a) => (
+          <div key={a.athleteId} style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 12, marginTop: 12 }}>
+            <div style={{ flex: 1, minWidth: 0, font: `600 13px ${font.body}`, color: color.text }}>
+              {a.name}
+              {renderRowExtra ? renderRowExtra(a) : null}
+              {waiting.has(a.athleteId) ? <Body size={11} tone={color.textTertiary} style={{ marginTop: 3 }}>{facilityWaitingLine(self)}</Body> : null}
+              {planOf(a)?.state === 'discount' ? <Body size={11} style={{ marginTop: 3 }}>{SIBLING_DISCOUNT_NOTE}</Body> : null}
+              {planOf(a)?.state === 'partial' ? <Body size={11} style={{ marginTop: 3 }}>{siblingPartialNote(planOf(a).amount)}</Body> : null}
+              {notYet(a) && !bodySaysWhen ? <Body size={11} tone={color.textTertiary} style={{ marginTop: 3 }}>{SINGLE_NOT_OPEN_LINE}</Body> : null}
+              {guardianBuys(a) ? <Body size={12} style={{ marginTop: 3 }}>{SINGLE_ASK_GUARDIAN_LINE}</Body> : null}
+            </div>
+            {notYet(a) || guardianBuys(a) ? null : (
+              <PayButton athleteId={a.athleteId} product="tier" label={PAY_NOW} height={44} email={email} style={{ width: 132, flex: 'none' }} />
+            )}
           </div>
-          {notYet(a) || guardianBuys(a) ? null : (
-            <PayButton athleteId={a.athleteId} product="tier" label={PAY_NOW} height={44} email={email} style={{ width: 132, flex: 'none' }} />
-          )}
-        </div>
-      ))}
-      {pay.map((r) => (
-        <div key={`facility-${r.athleteId}`} style={{ marginTop: 12 }}>
-          {tier.length ? <div style={{ font: `600 13px ${font.body}`, color: color.text, marginBottom: 8 }}>{facilityName(self)}</div> : null}
-          <PayButton athleteId={r.athleteId} product="facility" label={facilityPayLabel(self)} variant="secondary" height={44} email={email} />
-        </div>
-      ))}
+        ))}
+        {pay.map((r) => (
+          <div key={`facility-${r.athleteId}`} style={{ marginTop: 12 }}>
+            {tier.length ? <div style={{ font: `600 13px ${font.body}`, color: color.text, marginBottom: 8 }}>{facilityName(self)}</div> : null}
+            <PayButton athleteId={r.athleteId} product="facility" label={facilityPayLabel(self)} variant="secondary" height={44} email={email} />
+          </div>
+        ))}
+      </fieldset>
     </Card>
   );
 }
