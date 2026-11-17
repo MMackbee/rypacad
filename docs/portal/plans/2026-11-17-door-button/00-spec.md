@@ -116,7 +116,9 @@ feedback.js pattern).
 - `{check: true}` -> `{canUnlock, reason, staff, openSeconds}`. Never throws for a refusal; writes
   nothing; makes no Alta call. Throws only `unauthenticated` (`signed-out`).
 - `{pressId, location}` -> `{outcome: 'opened'|'coalesced'|'test', openSeconds}` or an `HttpsError`
-  with `details.reason`. `pressId` must match `/^[A-Za-z0-9-]{8,64}$/` (`bad-request`).
+  with `details.reason`. A coalesce also answers `leftSeconds`: what the joined open has left,
+  `max(1, openSeconds - ceil((now - lastConfirmedOpenAtMs) / 1000))` (review 2026-11-17
+  coalesce-kills-long-countdown); a replayed press id answers without it. `pressId` must match `/^[A-Za-z0-9-]{8,64}$/` (`bad-request`).
   1. Auth; `users/{uid}` (missing -> `not-provisioned`, permission-denied).
   2. Reads: `doorConfig/main`; for a family caller the household, its athletes (`householdId ==`),
      `doorPauses/{householdId}`, `doorRules/{uid}`, and for a 16-17 athlete
@@ -187,7 +189,8 @@ Add, without touching any other clause:
 - Probes: `scripts/rules-probes/door.mjs`, registered in `scripts/verify-rules.mjs`. At least: a
   parent cannot write any door collection; ops writes a valid `doorConfig/main` and is refused a bad
   mode, a radius of 5000 and a foreign `updatedByUid`; owner and ops may set an open time of 600 s
-  and are refused 601 s and 0 s; a coach cannot read `doorConfig`; a parent
+  and are refused 601 s and 0 s (set and merge); a parent and an athlete login are refused a set
+  and a merge of 600 s; a coach cannot read `doorConfig`; a parent
   reads its own household's event and not another's; an athlete reads its own event only; a parent
   reads its own `doorRules` and not another uid's; nobody reads `doorLimits`.
 
@@ -219,10 +222,17 @@ New code goes outside the grandfathered `hooks/live.js`.
     location line.
   - Copy by outcome/reason (plain, never generic):
     - opened: "Unlocked - pull the door now." and a countdown of `openSeconds` ("Open for 42 s"
-      under a minute, "Open for 2:05" from a minute up), then "Didn't open? Hold again." The
+      under a minute, "Open for 2:05" from a minute up). Once a hold would open the door again
+      (10 s after the answer, or the open time if shorter: the server's coalesce window) a quiet
+      "Didn't open? Hold again." shows under it, outside the live region; when the time runs out
+      the live line says "The door has locked again." (review 2026-11-17 app-1). The live line
+      carries the open time once, off screen ("Open for 5 minutes"); the countdown is outside the
+      live region but readable (a11y-1). A second press keeps the countdown running, through the
+      wait, a coalesce and a refusal; only an opened answer starts it again (app-2). The
       countdown runs to an end time (answer time + `openSeconds`), read every second and when the
       page comes back into view, so a phone that slept or a background tab shows the truth at once.
-    - coalesced: "Already unlocked - pull the door."
+    - coalesced: "Already unlocked - pull the door." under the countdown that is running; with
+      none (another phone on the login, a reload) it counts down the answer's `leftSeconds`.
     - test: "Test household - the door was not opened."
     - sign-rules: "Read and sign the door rules once to turn on Unlock." with a **Sign the door
       rules** button that opens the sheet.
@@ -258,7 +268,10 @@ New code goes outside the grandfathered `hooks/live.js`.
   - **Door open time**: a labelled select of 3 s, 5 s, 10 s, 15 s, 20 s, 30 s, 45 s, 1 min,
     1 min 30 s, 2 min, then each minute to 10 min (`openTimeText`); a saved value not on the list
     shows as an extra option in its place. Hint: "Set the same time as the door's Entry open
-    duration in Alta. The app counts it down after an unlock."
+    duration in Alta. The app counts it down after an unlock." Its box shows the 2px focus ring,
+    and one save runs at a time: a change while a save is in flight (arrow keys on a focused
+    select, Windows) is dropped, with `aria-busy` meanwhile; never `disabled`, which would take
+    keyboard focus away (review 2026-11-17 a11y-2).
   - The staff Unlock (same control, no location).
   - **Recent activity**: the latest 50 `doorEvents` (time in Chicago, name, family, outcome, reason,
     distance).
