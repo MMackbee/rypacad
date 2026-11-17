@@ -171,7 +171,7 @@ function OutstandingRow({ item, last, onOpenAthlete }) {
         {linkable ? (
           <button
             type="button"
-            onClick={() => onOpenAthlete(item.athleteId)}
+            onClick={() => (item.householdId ? onOpenAthlete(item.athleteId, item.householdId) : onOpenAthlete(item.athleteId))}
             style={{
               background: 'none',
               border: 'none',

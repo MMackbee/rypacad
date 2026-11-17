@@ -111,6 +111,12 @@ export default function AdminDashboard({
   // group of reads lands; `status` says which are still loading or failed.
   const { data, status } = useAdminDashboard();
   const outstandingStatus = status?.outstanding ?? SETTLED;
+  // A row that knows its family (Outstanding, the consent tracker) hands the
+  // route { athleteId, householdId }, which opens the family page directly
+  // (data/staffFamily.js staffAthletePath); a bare id takes the redirect.
+  const openAthlete = onOpenAthlete
+    ? (athleteId, householdId) => onOpenAthlete(householdId ? { athleteId, householdId } : athleteId)
+    : undefined;
   const enrollmentRows = data?.enrollment ?? [];
   // All -> every real package row, in the catalogue's own order (4+2, 8+3,
   // 12+4, 16+4, Elite per ENROLLMENT_BY_PACKAGE) -> back to All.
@@ -169,7 +175,7 @@ export default function AdminDashboard({
     >
       <div style={{ padding: '0 22px 24px', display: 'flex', flexDirection: 'column', gap: 12 }}>
         {/* Owner 2026-11-13: folds to one remembered line (components/OutstandingCard.js). */}
-        <OutstandingCard items={outstanding} loading={outstandingStatus.loading} error={outstandingStatus.error} onOpenAthlete={onOpenAthlete} />
+        <OutstandingCard items={outstanding} loading={outstandingStatus.loading} error={outstandingStatus.error} onOpenAthlete={openAthlete} />
         {/* Owner 2026-11-13: add, move or cancel any athlete's booking (spec 01-spec-admin-booking.md 10.2). */}
         <ManageBookingsCard />
         <SignupsCard onOpenSignups={onOpenSignups} />
@@ -188,7 +194,7 @@ export default function AdminDashboard({
         {/* Sprint 17 (contract v2.5): every household -> its staff billing
             view. Hidden when the route supplies no destination (harness). */}
         {onOpenHousehold ? <HouseholdsCard onOpenHousehold={onOpenHousehold} /> : null}
-        {onOpenAthlete ? <ConsentTrackerCard onOpenAthlete={onOpenAthlete} /> : null}
+        {openAthlete ? <ConsentTrackerCard onOpenAthlete={openAthlete} /> : null}
         <EnrollmentCard rows={enrollmentRows} highlight={filtered ? active.id : null} />
         <BlockFillCard bars={data?.blockFill ?? []} reserved={data?.reservedBlocks ?? []} filtered={filtered} />
         {/* Billing card: hidden in live mode per the pin - there was never

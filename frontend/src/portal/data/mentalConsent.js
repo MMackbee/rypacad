@@ -368,7 +368,7 @@ export function trackerRows({ athletes, households, records, bookings, today, ut
     const ds = dates[a.id].sort();
     const status = consentStatusFor(a, recs[a.id] || null, utcToday);
     return {
-      athleteId: a.id, name: a.name ?? '', familyName: homes[a.householdId]?.name ?? null,
+      athleteId: a.id, householdId: a.householdId ?? null, name: a.name ?? '', familyName: homes[a.householdId]?.name ?? null,
       nextMental: ds.find((d) => d >= today) ?? null, lastMental: ds.filter((d) => d < today).pop() ?? null, status, label: STAFF_STATUS_LABEL[status],
     };
   }).sort((x, y) => rank(x) - rank(y) || (rank(x) === 0 ? x.nextMental.localeCompare(y.nextMental) : 0) || x.name.localeCompare(y.name));

@@ -127,12 +127,33 @@ afterEach(() => {
 });
 
 const GOLDEN = require('./index.adminProgressive.golden.json');
+/** The payload as the one-shot code built it: the rows' householdId (the direct family link) came later. */
+const oneShot = (data) => ({ ...data, outstanding: data.outstanding.map(({ householdId, ...row }) => row) });
 
 test('once every group lands, the payload is exactly the one-shot payload', async () => {
   const h = await mountHook(() => useAdminDashboard());
   expect(h.result.current.error).toBeNull();
   expect(h.result.current.loading).toBe(false);
-  expect(h.result.current.data).toEqual(GOLDEN);
+  expect(oneShot(h.result.current.data)).toEqual(GOLDEN);
+  await h.unmount();
+});
+
+test("an athlete's Outstanding row carries the family, so a tap goes straight to the family page", async () => {
+  // A no-show booking whose athlete is not on the roster (gone, or the test family) has no family to name.
+  live.fetchNoShowBookingsSince.mockResolvedValue([...NOSHOWS, { id: 'b9', athleteId: 'gone', status: 'noshow', date: '2026-11-06' }]);
+  const h = await mountHook(() => useAdminDashboard());
+  const rows = h.result.current.data.outstanding.map((r) => [r.id, r.householdId]);
+  expect(rows).toEqual([
+    ['enrollment-pending', undefined],
+    ['noshow-a1', 'whitfield'],
+    ['noshow-a3', 'parker'],
+    ['noshow-gone', null],
+    ['fitness-p-1125', undefined],
+    ['contract-a2', 'whitfield'],
+    ['contract-a1', 'whitfield'],
+    ['baseline-a1', 'whitfield'],
+    ['baseline-a3', 'parker'],
+  ]);
   await h.unmount();
 });
 
@@ -173,7 +194,7 @@ test('each card group paints as its own reads land; Outstanding says loading unt
 
   await act(async () => { calls.resolve(); });
   await flush();
-  expect(now().data).toEqual(GOLDEN);
+  expect(oneShot(now().data)).toEqual(GOLDEN);
   expect(now().status.outstanding).toEqual({ loading: false, error: null });
   expect(now().loading).toBe(false);
   await h.unmount();
@@ -205,6 +226,6 @@ test('a write re-reads only the groups it can change', async () => {
   expect(live.fetchAllAthletes).not.toHaveBeenCalled();
   expect(live.fetchAllHouseholds).not.toHaveBeenCalled();
   expect(live.fetchSessionsInRange.mock.calls).toEqual([FITNESS]);
-  expect(h.result.current.data).toEqual(GOLDEN);
+  expect(oneShot(h.result.current.data)).toEqual(GOLDEN);
   await h.unmount();
 });

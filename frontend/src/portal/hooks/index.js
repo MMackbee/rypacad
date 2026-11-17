@@ -3622,6 +3622,11 @@ function adminOutstanding(athletes, [pending, noshowBookings, contractLogs, wind
     baselineAthleteIds,
     today,
   });
+  // Speed review (2026-11-17): an athlete's row names the family, so a tap
+  // opens the family page directly (data/staffFamily.js staffAthletePath).
+  // Null for an athlete not on the roster (gone, or the test family).
+  const familyOf = new Map(athletes.map((a) => [a.id, a.householdId ?? null]));
+  const householdId = (athleteId) => familyOf.get(athleteId) ?? null;
 
   const outstanding = [];
   if (who.pendingEnrollment.count > 0) {
@@ -3641,6 +3646,7 @@ function adminOutstanding(athletes, [pending, noshowBookings, contractLogs, wind
       id: `noshow-${n.athleteId}`,
       kind: 'noshow',
       athleteId: n.athleteId,
+      householdId: householdId(n.athleteId),
       who: n.name ?? n.athleteId,
       why: `${n.count} no-show${n.count === 1 ? '' : 's'} this month`,
       tag: 'Attendance',
@@ -3657,6 +3663,7 @@ function adminOutstanding(athletes, [pending, noshowBookings, contractLogs, wind
       id: `contract-${c.athleteId}`,
       kind: 'contract',
       athleteId: c.athleteId,
+      householdId: householdId(c.athleteId),
       who: c.name ?? c.athleteId,
       why: `Contract behind — ${c.missed} day${c.missed === 1 ? '' : 's'} missed, ${c.daysLeft} left`,
       tag: 'Contract',
@@ -3669,6 +3676,7 @@ function adminOutstanding(athletes, [pending, noshowBookings, contractLogs, wind
       id: `baseline-${d.athleteId}`,
       kind: 'baseline',
       athleteId: d.athleteId,
+      householdId: householdId(d.athleteId),
       who: d.name ?? d.athleteId,
       why: 'Baseline due',
       tag: 'Assessment',

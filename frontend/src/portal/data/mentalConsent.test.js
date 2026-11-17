@@ -314,4 +314,6 @@ test('trackerRows: every athlete with a mental booking; not signed with a 1:1 ah
   const named = trackerRows({ athletes: [jordan], households: [{ id: 'whitfield', name: 'Whitfield family' }], records: [{ id: 'jordan', ...jordanSigned }],
     bookings: [m('jordan', 'confirmed', '2026-11-19')], today: '2026-11-05', utcToday: '2026-11-05' });
   expect(named[0]).toMatchObject({ familyName: 'Whitfield family', status: 'signed' });
+  // The row names its family, so the Admin tap goes straight to the family page (speed review, 2026-11-17).
+  expect(rows.map((r) => [r.athleteId, r.householdId])).toEqual([['reese', 'whitfield'], ['nico', 'whitfield'], ['jordan', 'whitfield']]);
 });
