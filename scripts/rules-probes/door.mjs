@@ -103,7 +103,11 @@ export async function taskDoor() {
     expect('ops refused a radius of 5000', await setConfig(t.ops, config({ radiusM: 5000 })), 403);
     expect('ops refused a radius of 49', await setConfig(t.ops, config({ radiusM: 49 })), 403);
     expect('ops refused a radius that is not whole', await setConfig(t.ops, config({ radiusM: 200.5 })), 403);
-    expect('ops refused an open time of 31 s', await setConfig(t.ops, config({ openSeconds: 31 })), 403);
+    // The open time is Alta's Entry open duration: whole seconds, 1 s to 10 min.
+    expect('ops sets an open time of 600 s', await setConfig(t.ops, config({ openSeconds: 600 })), 200);
+    expect('owner merges an open time of 600 s', await mergeAs(owner, 'doorConfig', 'main', { openSeconds: 600, updatedByUid: ownerUid }, ['updatedAt']), 200);
+    expect('ops refused an open time of 601 s', await setConfig(t.ops, config({ openSeconds: 601 })), 403);
+    expect('ops refused a merge of an open time of 601 s', await mergeAs(t.ops, 'doorConfig', 'main', { openSeconds: 601, updatedByUid: uid.ops }, ['updatedAt']), 403);
     expect('ops refused an open time of 0 s', await setConfig(t.ops, config({ openSeconds: 0 })), 403);
     expect('ops refused a foreign updatedByUid', await setConfig(t.ops, config({ updatedByUid: uid.parent })), 403);
     expect('ops refused a client clock for updatedAt', await setConfig(t.ops, config({ updatedAt: new Date('2026-11-17T12:00:00Z') }), 'main', []), 403);

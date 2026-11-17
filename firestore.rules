@@ -3070,7 +3070,9 @@ service cloud.firestore {
     // Probed by scripts/rules-probes/door.mjs.
 
     // doorConfig/main: the switch (off / staff / all), the academy's place
-    // and reach, the open time the app counts down. A missing doc, or one
+    // and reach, the open time the app counts down (whole seconds 1..600,
+    // Alta's Entry open duration of 1 s to 10 min; door-decide.js
+    // OPEN_SECONDS_MIN/MAX). A missing doc, or one
     // without a mode, is 'off' to the server, and absent radiusM/openSeconds
     // are 200 m and 5 s, so every field but the stamp is optional here (a
     // merge write of the mode alone is fine); each one present is in range.
@@ -3084,7 +3086,7 @@ service cloud.firestore {
           && (d.get('lat', null) == null || (d.lat is number && d.lat >= -90 && d.lat <= 90))
           && (d.get('lng', null) == null || (d.lng is number && d.lng >= -180 && d.lng <= 180))
           && (!d.keys().hasAny(['radiusM']) || (d.radiusM is int && d.radiusM >= 50 && d.radiusM <= 1000))
-          && (!d.keys().hasAny(['openSeconds']) || (d.openSeconds is int && d.openSeconds >= 1 && d.openSeconds <= 30))
+          && (!d.keys().hasAny(['openSeconds']) || (d.openSeconds is int && d.openSeconds >= 1 && d.openSeconds <= 600))
           && d.get('updatedByUid', null) == request.auth.uid
           && d.get('updatedAt', null) == request.time;
       }
