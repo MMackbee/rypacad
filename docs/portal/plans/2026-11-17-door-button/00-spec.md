@@ -40,7 +40,9 @@ API link as the Secret Manager secret `ALTA_UNLOCK_URL`. Nobody else ever sees i
   rules plus one new line). A 16-17 athlete also needs a parent in the household to have signed.
   This closes review B4/M2/M3/M4 without touching sign-up's consent records.
 - New line in the facility rules (sign-up shows it too): "Use the app's Unlock button only when you
-  are at the door, and only to let in your own household. Never open the door for anyone else."
+  are at the door, and only to let in your own household and the one guest the rules allow. Never
+  open the door for anyone else." (Review 2026-11-17 spec-5: the first wording contradicted "One
+  guest may come along" two lines above it; the owner should confirm this wording.)
 - Around the clock, as the waiver says. No parent notice per unlock in v1. No App Check in v1.
 - The Nov 5 Alta mobile keys stay as the fallback when the internet or Alta is down.
 - Failure messages give the academy number (612) 234-1644 (the website's number).
@@ -54,8 +56,8 @@ All five collections are new. Only the Admin SDK writes `doorEvents`, `doorLimit
 | `doorConfig/main` | `{mode: 'off'\|'staff'\|'all', lat: ?number, lng: ?number, radiusM: int 50..1000, openSeconds: int 1..30, updatedAt: timestamp, updatedByUid: string}` | owner, ops (client, rules-validated) | owner, ops |
 | `doorPauses/{householdId}` | `{householdId, pausedAt: timestamp, pausedByUid, note: ?string (<=200)}` | owner, ops create/delete | owner, ops |
 | `doorRules/{uid}` | `{uid, householdId, athleteId: ?string, role: 'parent'\|'athlete', adult: bool, name, termsVersion, signedAt: timestamp, signedAtMs}` | server (signDoorRules) | the signer; owner, ops |
-| `doorEvents/{uid}_{pressId}` | `{uid, role, name, householdId: ?string, householdName: ?string, athleteId: ?string, atMs, at: timestamp, outcome: 'pending'\|'opened'\|'coalesced'\|'test'\|'denied'\|'error', reason: ?string, altaStatus: ?int, latencyMs: ?int, distanceM: ?int (rounded to 10), accuracyM: ?int, test: bool}` | server (unlockDoor) | owner, ops; a parent where `householdId == me().householdId`; an athlete where `uid == request.auth.uid` |
-| `doorLimits/{uid}` | `{callsAtMs: number[], opensAtMs: number[], lastOpenedAtMs: ?number, updatedAtMs}` | server | nobody |
+| `doorEvents/{uid}_{pressId}` | `{uid, role, name, householdId: ?string, householdName: ?string, athleteId: ?string, atMs, at: timestamp, outcome: 'pending'\|'opened'\|'coalesced'\|'test'\|'denied'\|'error', reason: ?string, altaStatus: ?int, latencyMs: ?int, distanceM: ?int (rounded to 10), accuracyM: ?int, test: bool, nonce: string (the invocation's random mark)}` | server (unlockDoor) | owner, ops; a parent where `householdId == me().householdId`; an athlete where `uid == request.auth.uid` |
+| `doorLimits/{uid}` | `{callsAtMs: number[], opensAtMs: number[], lastOpenedAtMs: ?number, lastConfirmedOpenAtMs: ?number, updatedAtMs}` | server | nobody |
 
 - A missing `doorConfig/main` means `mode: 'off'` (fail closed). Defaults when fields are absent:
   `radiusM` 200, `openSeconds` 5.
@@ -119,19 +121,32 @@ feedback.js pattern).
   5. One transaction on `doorLimits/{uid}` that also `tx.create`s the event:
      - more than 40 calls in the last hour (denied included) -> `rate-limited`;
      - denied -> event `denied` with the reason, then throw (failed-precondition);
-     - `lastOpenedAtMs` within 10 s -> event `coalesced`, no Alta call;
+     - `lastConfirmedOpenAtMs` (set when Alta answered 2xx, or at once for a test household) within
+       the coalesce window -> event `coalesced`, no Alta call. The window is the open time,
+       at most 10 s (review 2026-11-17 server-2: "Hold again" after the countdown is a real open);
+     - `lastOpenedAtMs` within that window but not confirmed (Alta has not answered it) -> event
+       `denied` `in-progress` (unavailable), never "already unlocked" (server-3);
      - 12 opens in the last hour -> `rate-limited`;
      - else record the open (`opensAtMs`, `lastOpenedAtMs`) and create the event `pending`.
+     - The event carries the invocation's `nonce`: a transaction body that runs again after its
+       commit applied finds its own event and carries on, instead of replaying `in-progress`.
   6. Test caller: event `test`, no Alta call, return `{outcome: 'test'}`.
   7. Alta: read `ALTA_UNLOCK_URL`; it must parse as `https:` on `api.openpath.com` or
      `api.eu.openpath.com` with path `/tokens/cloudKeyUnlockTokens/<token>/use`, else event `error`
      `misconfigured` (failed-precondition). POST with no body, `AbortController` at 6 s, no retry.
-     2xx -> event `opened` with `altaStatus` and `latencyMs`. Non-2xx -> `alta-error`; abort ->
+     2xx -> event `opened` with `altaStatus` and `latencyMs`, and `lastConfirmedOpenAtMs` is set to
+     the open's time. Non-2xx -> `alta-error`; abort ->
      `alta-timeout` (both `unavailable`), the open slot is given back, the event records it.
   8. Never log or return the URL or the token, in any message, including thrown errors and their
      causes (a unit test greps every console call and every thrown message for the token).
-- Emulator only: when `process.env.FUNCTIONS_EMULATOR === 'true'` and `DOOR_FAKE_ALTA === '1'`,
-  step 7 answers 204 without any network call. Production never sets either.
+- The emulator never calls Alta (review 2026-11-17 server-1, spec-1: an emulator whose
+  `.secret.local` lacks the name reads the real link from Secret Manager). Under
+  `FUNCTIONS_EMULATOR` (any value but empty, `false` or `0`), step 7 answers 204 when
+  `DOOR_FAKE_ALTA === '1'` and `misconfigured` otherwise, with no network call either way. Production
+  sets neither. `functions/env.template` carries an `ALTA_UNLOCK_URL` placeholder (for `.env.local`
+  and `.secret.local`) and `DOOR_FAKE_ALTA=1`.
+- A check (`{check: true}`) reads only `users/{uid}` and `doorConfig/main` unless the mode is `all`
+  (spec-6): a family's answer is `off` then whatever its household holds. A press reads everything.
 - HttpsError codes: refusals `failed-precondition` (`off`, `no-access`, `under-16`, `paused`,
   `sign-rules`, `guardian-rules`, `not-set-up`, `location-needed`, `too-far`, `not-eligible`,
   `misconfigured`), `resource-exhausted` (`rate-limited`), `unavailable` (`alta-error`,
@@ -181,13 +196,18 @@ New code goes outside the grandfathered `hooks/live.js`.
 - `hooks/door.js`: `useDoorStatus()` (check on mount, only with live data and outside practice mode;
   recheck after signing), `pressUnlock()` (a fresh `crypto.randomUUID()` per press, the location,
   the call), `currentLocation()` (`enableHighAccuracy: true`, `timeout: 10000`,
-  `maximumAge: 30000`, plus a 12 s watchdog; failures map to `location-needed`).
+  `maximumAge: 30000`; `{fresh: true}`, for the staff screen, `maximumAge: 0`; failures map to
+  `location-needed`). Its watchdog is 12 s from when location is allowed (the Permissions API says
+  `granted`, or changes to it), and 45 s while the browser may still be asking or cannot say
+  (review 2026-11-17 app-3: the permission question never eats into the 12 s).
 - `components/door/DoorCard.js`, `HoldToUnlock.js`, `DoorRulesSheet.js`:
   - The card shows when `canUnlock`, or the reason is `sign-rules`, `guardian-rules`, `under-16` or
     `paused`. It is hidden for every other reason, while checking, and on a failed check.
   - Hold to unlock: 1 s hold with a progress ring; release early cancels; no iOS callout or text
     selection; a keyboard and screen-reader path (Enter opens "Unlock the door now?" with Unlock and
-    Cancel). The button is disabled from press to answer.
+    Cancel; Unlock puts focus back on the button). The button is off from press to answer, as
+    `aria-disabled` so it keeps keyboard focus; a refusal that switches the card moves focus to the
+    card's new message (review 2026-11-17 app-7).
   - Before the first press: "The app checks you're at the academy when you unlock." Staff see no
     location line.
   - Copy by outcome/reason (plain, never generic):
@@ -210,33 +230,62 @@ New code goes outside the grandfathered `hooks/live.js`.
       needs a data connection."
   - DoorRulesSheet: the facility rules from `consentTerms.facilityAccess` (with `SELF_WORDING` for an
     adult athlete login), the typed full name, an "I agree to the door rules" tick, **Sign**. On
-    success it closes and the card rechecks.
+    success it closes and the card rechecks. A server refusal shows the server's words; no answer
+    at all shows "The door rules were not signed. Check your connection and try again." (app-5).
 - Mounts: `ParentDashboard` (above `ConsentHomeCard`) and `AthleteDashboard` (near the top).
 - Staff screen `/portal/admin/door` (owner, ops), lazy, reached from a "Facility door" card on the
   admin dashboard:
   - **Who can unlock**: Off / Staff only / Everyone (writes `doorConfig/main.mode`). Everyone stays
     disabled until the academy location is set.
+  - Every change is a merge of only the fields it changes, plus the stamp (review 2026-11-17
+    rules-1, app-2): two staff screens never undo each other's switch or location. The config is
+    read back after each save and when the page comes back into view.
   - **Academy location**: set or not set, and **Use this phone's location** ("Stand inside the
-    academy"); radius 100/200/300/500 m; door open time in seconds.
+    academy"): a fresh reading, refused when rougher than 75 m ("Too rough a reading ..."), then
+    "Save this as the academy's location? Only do this inside the academy." with Save and Cancel
+    (app-1, spec-3). **Check this phone's distance** runs the family check on this phone ("This
+    phone is about N m from the academy ... A family standing here could unlock."). Radius
+    100/200/300/500 m; door open time in seconds.
   - The staff Unlock (same control, no location).
   - **Recent activity**: the latest 50 `doorEvents` (time in Chicago, name, family, outcome, reason,
     distance).
   - **Paused families**: the list with Unpause, and Pause a family (pick an athlete; pauses the
-    household).
+    household). A family another staff member paused meanwhile reads "<family> is already paused."
+    (rules-2). The households directory loads only when a family is paused or the search is used
+    (app-9).
 - Seed and practice modes never call the callables; the card stays hidden there.
 
 ## 8. Release (owner)
 
+0. Before `feat/door-button` is merged into develop (review 2026-11-17 spec-2): unlockDoor binds
+   `ALTA_UNLOCK_URL`, and a declared secret that does not exist fails EVERY functions deploy (the
+   SLACK_FEEDBACK_TOKEN precedent, `functions/env.template`). Run
+   `npx firebase-tools functions:secrets:set ALTA_UNLOCK_URL --project rypacad` and paste a
+   placeholder such as `not-set-yet`: unlockDoor answers `misconfigured` to it and never opens the
+   door. Step 2 replaces it. Also put the template's placeholder line
+   (`ALTA_UNLOCK_URL=https://placeholder.invalid/not-a-real-door-link`) in `functions/.secret.local`
+   and `functions/.env.local` of the main checkout and every worktree, so no emulator ever reads
+   the real link (the emulator never POSTs it either way).
 1. In Alta, on "Portal door - DO NOT DELETE": Cloud Key -> Get webhook URL -> Entries: the member door
    only -> end Feb 28 2027 11:59 pm -> Generate links -> copy the **API link**. Do not keep the guest
    link.
-2. `npx firebase-tools functions:secrets:set ALTA_UNLOCK_URL --project rypacad`, paste at the hidden
-   prompt. Never in chat or a file.
+2. `npx firebase-tools functions:secrets:set ALTA_UNLOCK_URL --project rypacad`, paste the API link at
+   the hidden prompt (a new version over step 0's placeholder). Never in chat or a file.
 3. Deploy `functions:unlockDoor,functions:signDoorRules`, then `firestore:rules,firestore:indexes`.
-4. Push develop (staging). On staging as the owner: Admin -> Facility door -> stand in the academy ->
-   Use this phone's location -> Staff only -> hold Unlock at the door -> the door opens and the event
-   says `opened`.
-5. Everyone. Push develop to main.
+4. Push develop (staging). The test can be done from anywhere (owner 2026-11-17: not at the
+   academy, checking the logs): on staging as the owner, Admin -> Facility door -> Staff only (owner
+   and ops pass with no academy location set) -> hold Unlock. **A staff Unlock really opens the
+   member door** for the open time, wherever the owner is: press it only when the academy is open or
+   someone there knows. Then
+   `npx firebase-tools functions:log --only unlockDoor --project rypacad` shows
+   `unlockDoor: opened uid=... role=owner altaStatus=204 latencyMs=...` (any 2xx), and Recent
+   activity says Opened. `unlockDoor: error ... reason=misconfigured` means the secret is still the
+   placeholder (redeploy unlockDoor after step 2); `reason=alta-error altaStatus=4xx` means the link
+   is wrong or past its end date.
+5. Before Everyone, someone inside the academy: Use this phone's location (a fresh reading, refused
+   when rougher than 75 m, asked before saving), then at the door Check this phone's distance ->
+   "A family standing here could unlock."
+6. Everyone. Push develop to main.
 - If the link leaks: delete the Cloud Key credential in Alta (it kills every link), make a new one,
   set the secret again, redeploy `unlockDoor`. Off switch: Admin -> Facility door -> Off.
 
