@@ -109,6 +109,18 @@ export async function taskDoor() {
     expect('ops refused an open time of 601 s', await setConfig(t.ops, config({ openSeconds: 601 })), 403);
     expect('ops refused a merge of an open time of 601 s', await mergeAs(t.ops, 'doorConfig', 'main', { openSeconds: 601, updatedByUid: uid.ops }, ['updatedAt']), 403);
     expect('ops refused an open time of 0 s', await setConfig(t.ops, config({ openSeconds: 0 })), 403);
+    expect('ops refused a merge of an open time of 0 s', await mergeAs(t.ops, 'doorConfig', 'main', { openSeconds: 0, updatedByUid: uid.ops }, ['updatedAt']), 403);
+    // Review 2026-11-17 probe-spec-owner-refusals: the owner is held to the same range (an owner-only
+    // clause must not widen it), and family logins are refused a write in the new range too.
+    expect('owner refused an open time of 601 s', await setConfig(owner, config({ openSeconds: 601, updatedByUid: ownerUid })), 403);
+    expect('owner refused a merge of an open time of 601 s', await mergeAs(owner, 'doorConfig', 'main', { openSeconds: 601, updatedByUid: ownerUid }, ['updatedAt']), 403);
+    expect('owner refused an open time of 0 s', await setConfig(owner, config({ openSeconds: 0, updatedByUid: ownerUid })), 403);
+    expect('owner refused a merge of an open time of 0 s', await mergeAs(owner, 'doorConfig', 'main', { openSeconds: 0, updatedByUid: ownerUid }, ['updatedAt']), 403);
+    expect('parent cannot set an open time of 600 s', await setConfig(t.parent, config({ openSeconds: 600, updatedByUid: uid.parent })), 403);
+    expect('parent cannot merge an open time of 600 s', await mergeAs(t.parent, 'doorConfig', 'main', { openSeconds: 600, updatedByUid: uid.parent }, ['updatedAt']), 403);
+    expect('athlete login cannot set an open time of 600 s', await setConfig(t.eliteLogin, config({ openSeconds: 600, updatedByUid: uid.eliteLogin })), 403);
+    expect('athlete login cannot merge an open time of 600 s', await mergeAs(t.eliteLogin, 'doorConfig', 'main', { openSeconds: 600, updatedByUid: uid.eliteLogin }, ['updatedAt']), 403);
+    expect('no refused open time was stored', (await call('GET', '/doorConfig/main', null, 'owner')).body?.fields?.openSeconds?.integerValue, '600');
     expect('ops refused a foreign updatedByUid', await setConfig(t.ops, config({ updatedByUid: uid.parent })), 403);
     expect('ops refused a client clock for updatedAt', await setConfig(t.ops, config({ updatedAt: new Date('2026-11-17T12:00:00Z') }), 'main', []), 403);
     expect('ops refused no updatedAt at all', await setConfig(t.ops, config(), 'main', []), 403);
