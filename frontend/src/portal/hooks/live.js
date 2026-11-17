@@ -33,6 +33,7 @@ import {
 } from 'firebase/firestore';
 import { auth, db } from '../../firebase';
 import { bump } from './invalidate';
+import { loadProfile } from './sessionStore';
 import { eliteDailyCapHit, normalizeAnchorDay, periodFallback, periodFor, rolledAheadCount, windowMonthsFor } from '../data/packages';
 import { requestRollAhead, rollAheadApplies } from './rollAhead';
 import { CHANGEABLE_PACKAGE_IDS } from '../data/packageChange';
@@ -138,9 +139,15 @@ export function requireUser() {
  * The caller's users/{uid} doc — role plus athleteId/householdId, which is
  * how the hooks resolve "whose data" without screens passing ids around.
  * Email comes from auth (it is not duplicated into the users doc).
+ * Read once per sign-in and shared (sessionStore.js); `{ fresh: true }`
+ * reads again.
  */
-export async function fetchCurrentUser() {
+export async function fetchCurrentUser(opts) {
   const user = requireUser();
+  return loadProfile(user.uid, () => readUserDoc(user), { fresh: Boolean(opts && opts.fresh === true) });
+}
+
+async function readUserDoc(user) {
   try {
     const snap = await getDoc(doc(db, 'users', user.uid));
     if (!snap.exists()) {
