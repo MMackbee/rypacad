@@ -12,8 +12,12 @@
  *
  * What it writes: athletes/{id}.billing -> status 'active' plus the three
  * Stripe ids (masked to those fields, under an updateTime precondition), and
- * households/{id}.periodAnchorDay = 1 when it is missing (what the webhook
- * sets on a first payment). Nothing in Stripe changes.
+ * on households/{id}, under its own updateTime precondition, what the
+ * webhook sets on a first payment: periodAnchorDay = 1 when it is missing,
+ * and the customer, always added to stripeCustomerIds and made
+ * stripeCustomerId when that is empty (stripe-checkout.js linkCustomer).
+ * Manage billing in Stripe opens that customer (review 2026-11-17 F3).
+ * Nothing in Stripe changes.
  *
  * Why it works afterwards: the webhook finds the athlete by
  * billing.subscriptionId (functions/portal/stripe-resolve.js), so the
@@ -67,8 +71,16 @@ export function refusal({ athlete, pkg, holders }) {
   return null;
 }
 
-/** Pure: the commit writes. `updateTime` is the athlete doc's, read just before. */
-export function buildWrites({ athlete, household, args, updateTime }) {
+/** True when the household has no primary Stripe customer yet. */
+function noPrimary(household) {
+  return !(typeof household.stripeCustomerId === 'string' && household.stripeCustomerId.trim());
+}
+
+/**
+ * Pure: the commit writes. `updateTime` is the athlete doc's and
+ * `householdUpdateTime` the household's, each read before the doc itself.
+ */
+export function buildWrites({ athlete, household, args, updateTime, householdUpdateTime }) {
   const billing = { status: 'active', customerId: args.customer, subscriptionId: args.subscription, priceId: args.price, oneTime: false, checkoutSessionId: null, linkedBy: 'link-subscription' };
   const writes = [{
     update: { name: docName('athletes', athlete.id), fields: fsFields({ billing }) },
@@ -76,9 +88,15 @@ export function buildWrites({ athlete, household, args, updateTime }) {
     updateTransforms: [{ fieldPath: 'billing.updatedAt', setToServerValue: 'REQUEST_TIME' }],
     currentDocument: { updateTime },
   }];
-  if (household.periodAnchorDay == null) {
-    writes.push({ update: { name: docName('households', household.id), fields: fsFields({ periodAnchorDay: 1 }) }, updateMask: { fieldPaths: ['periodAnchorDay'] }, currentDocument: { exists: true } });
-  }
+  const patch = {};
+  if (household.periodAnchorDay == null) patch.periodAnchorDay = 1;
+  if (noPrimary(household)) patch.stripeCustomerId = args.customer;
+  writes.push({
+    update: { name: docName('households', household.id), fields: fsFields(patch) },
+    updateMask: { fieldPaths: Object.keys(patch) },
+    updateTransforms: [{ fieldPath: 'stripeCustomerIds', appendMissingElements: { values: [{ stringValue: args.customer }] } }],
+    currentDocument: householdUpdateTime ? { updateTime: householdUpdateTime } : { exists: true },
+  });
   return writes;
 }
 
@@ -97,6 +115,8 @@ export async function main(argv = process.argv.slice(2)) {
   const users = await queryCollection(target, { from: [{ collectionId: 'users' }], where: eqFilter('email', args.email) });
   const householdId = users.find((u) => u.householdId)?.householdId;
   if (!householdId) { console.error(`No portal login with a family for ${args.email}. They sign up at portal.rypacademy.com first (without paying).`); return 1; }
+  // The updateTime first: a write between the two reads fails the commit rather than going unseen.
+  const householdUpdateTime = await updateTimeOf(target, 'households', householdId);
   const household = { id: householdId, ...(await getDoc(target, 'households', householdId)) };
   const athletes = await queryCollection(target, { from: [{ collectionId: 'athletes' }], where: eqFilter('householdId', householdId) });
   const picked = pickAthlete(athletes, args.athlete);
@@ -108,9 +128,10 @@ export async function main(argv = process.argv.slice(2)) {
   const why = refusal({ athlete, pkg, holders });
   if (why) { console.error(why); return 1; }
   console.log(`  link      ${args.subscription} (customer ${args.customer}, price ${args.price}) -> billing active${household.periodAnchorDay == null ? '; household periodAnchorDay 1' : ''}`);
+  console.log(`  household customer ${args.customer} listed${noPrimary(household) ? ' and made the primary' : `; primary stays ${household.stripeCustomerId}`}`);
   if (args.dryRun) { console.log('Would link it. Run again with --yes instead of --dry-run.'); return 0; }
 
-  await commit(target, buildWrites({ athlete, household, args, updateTime: await updateTimeOf(target, 'athletes', athlete.id) }));
+  await commit(target, buildWrites({ athlete, household, args, updateTime: await updateTimeOf(target, 'athletes', athlete.id), householdUpdateTime }));
   const after = await getDoc(target, 'athletes', athlete.id);
   if (after.billing?.status !== 'active' || after.billing?.subscriptionId !== args.subscription) { console.error('Written, but the athlete does not read back as linked. Check it.'); return 1; }
   console.log(`Linked. ${athlete.name} is paid and can book ${pkg.tokens} sessions a month; Stripe keeps billing the existing subscription.`);

@@ -32,11 +32,34 @@ test('refusal: only an unpaid token-package athlete whose subscription is free',
 
 test('buildWrites: billing fields masked, server time, precondition; anchor only when missing', () => {
   const args = parseArgs([...ARGS, '--yes']);
-  const w = buildWrites({ athlete: { id: 'a1' }, household: { id: 'h1' }, args, updateTime: 'T' });
+  const w = buildWrites({ athlete: { id: 'a1' }, household: { id: 'h1' }, args, updateTime: 'T', householdUpdateTime: 'H' });
   assert.equal(w.length, 2);
   assert.ok(w[0].updateMask.fieldPaths.every((f) => f.startsWith('billing.')));
   assert.deepEqual(w[0].currentDocument, { updateTime: 'T' });
-  assert.equal(buildWrites({ athlete: { id: 'a1' }, household: { id: 'h1', periodAnchorDay: 1 }, args, updateTime: 'T' }).length, 1);
+  assert.ok(w[1].updateMask.fieldPaths.includes('periodAnchorDay'));
+  const anchored = buildWrites({ athlete: { id: 'a1' }, household: { id: 'h1', periodAnchorDay: 1 }, args, updateTime: 'T', householdUpdateTime: 'H' });
+  assert.ok(!anchored[1].updateMask.fieldPaths.includes('periodAnchorDay'));
+});
+
+// Review 2026-11-17 F3: Manage billing in Stripe finds the family's customer on the household too. A link that wrote it
+// to the athlete only left a paying family reading "no billing in Stripe yet", and a later one-time checkout made a
+// second customer the household's primary.
+test('buildWrites: the customer joins the household, as the webhook links it - always in stripeCustomerIds, the primary only when empty', () => {
+  const args = parseArgs([...ARGS, '--yes']);
+  const append = [{ fieldPath: 'stripeCustomerIds', appendMissingElements: { values: [{ stringValue: 'cus_V7Dz10QWvSDT97' }] } }];
+  const [, fresh] = buildWrites({ athlete: { id: 'a1' }, household: { id: 'h1', periodAnchorDay: 1 }, args, updateTime: 'T', householdUpdateTime: 'H' });
+  assert.equal(fresh.update.name, docName('households', 'h1'));
+  assert.deepEqual(fresh.updateMask.fieldPaths, ['stripeCustomerId']);
+  assert.deepEqual(fresh.update.fields, fsFields({ stripeCustomerId: 'cus_V7Dz10QWvSDT97' }));
+  assert.deepEqual(fresh.updateTransforms, append);
+  assert.deepEqual(fresh.currentDocument, { updateTime: 'H' }); // a webhook that set the primary meanwhile fails the commit
+  for (const primary of ['cus_EXISTINGab12cd', 'cus_V7Dz10QWvSDT97']) {
+    const [, kept] = buildWrites({ athlete: { id: 'a1' }, household: { id: 'h1', periodAnchorDay: 1, stripeCustomerId: primary }, args, updateTime: 'T', householdUpdateTime: 'H' });
+    assert.deepEqual(kept.updateMask.fieldPaths, []);
+    assert.deepEqual(kept.updateTransforms, append);
+  }
+  const [, blank] = buildWrites({ athlete: { id: 'a1' }, household: { id: 'h1', periodAnchorDay: 1, stripeCustomerId: '  ' }, args, updateTime: 'T', householdUpdateTime: 'H' });
+  assert.deepEqual(blank.updateMask.fieldPaths, ['stripeCustomerId']);
 });
 
 // Against a real Firestore emulator; skipped unless one is running, e.g.
@@ -62,6 +85,9 @@ test('against the emulator: dry run writes nothing, --yes links only billing, a 
   assert.ok(after.billing.updatedAt);
   assert.equal(after.handicap, 9);
   assert.equal(after.packageId, 't-4');
-  assert.equal((await getDoc(t, 'households', hh)).periodAnchorDay, 1);
+  const household = await getDoc(t, 'households', hh);
+  assert.equal(household.periodAnchorDay, 1);
+  assert.equal(household.stripeCustomerId, 'cus_V7Dz10QWvSDT97');
+  assert.deepEqual(household.stripeCustomerIds, ['cus_V7Dz10QWvSDT97']);
   assert.equal(await run('--yes'), 1); // no longer unpaid
 });
