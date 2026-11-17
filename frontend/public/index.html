@@ -35,8 +35,11 @@
          src/portal/components/LaunchSplash.js. -->
     <style>
       html, body { margin: 0; background: #000000; }
+      /* 100dvh where the browser has it - on a phone 100vh is the tall
+         viewport with the toolbar hidden (PhoneFrame's rule). */
       [data-launch-splash] {
         min-height: 100vh;
+        min-height: 100dvh;
         display: flex;
         flex-direction: column;
         align-items: center;

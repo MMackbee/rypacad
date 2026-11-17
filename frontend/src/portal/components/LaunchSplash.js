@@ -1,5 +1,6 @@
 import React from 'react';
 import { Navigate } from 'react-router-dom';
+import { SUPPORTS_DVH } from './PhoneFrame';
 
 /*
  * The launch splash (speed work 2026-11-17): the same name and line as the
@@ -15,6 +16,9 @@ import { Navigate } from 'react-router-dom';
  * screen's chunk loads.
  */
 const FONT = "-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif";
+// The visible screen tall, like PhoneFrame: on a phone 100vh is the tall
+// viewport with the toolbar hidden (review 2026-11-17).
+export const LAUNCH_MIN_HEIGHT = SUPPORTS_DVH ? '100dvh' : '100vh';
 
 export default function LaunchSplash() {
   return (
@@ -23,7 +27,7 @@ export default function LaunchSplash() {
       role="status"
       aria-label="Loading RYP Academy"
       style={{
-        minHeight: '100vh',
+        minHeight: LAUNCH_MIN_HEIGHT,
         display: 'flex',
         flexDirection: 'column',
         alignItems: 'center',

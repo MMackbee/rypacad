@@ -43,6 +43,16 @@ test('without JavaScript the fonts still load (noscript fallback)', () => {
   expect(html).toMatch(/<noscript>\s*<link rel="stylesheet" href="https:\/\/fonts\.googleapis\.com\/css2\?family=Raleway:wght@400;500;600;700&family=Work\+Sans:wght@400;500;600;700&display=swap" \/>\s*<\/noscript>/);
 });
 
+// Review 2026-11-17 (F6): 100vh on a phone is the tall viewport with the
+// toolbar hidden; the splash takes 100dvh where the browser has it, the
+// 100vh line before it the fallback (PhoneFrame's rule, UX review 2026-09-30).
+test('the HTML splash is the visible screen tall: 100vh, then 100dvh over it', () => {
+  const css = [...page.querySelectorAll('head style')].map((s) => s.textContent).join('\n');
+  const rule = css.match(/\[data-launch-splash\]\s*\{([^}]*)\}/)[1];
+  const heights = [...rule.matchAll(/min-height:\s*([^;]+);/g)].map((m) => m[1].trim());
+  expect(heights).toEqual(['100vh', '100dvh']);
+});
+
 // Review 2026-11-17 (F4): Chromium derives an installed app's id from
 // start_url when the manifest names none. start_url moved from '.' to
 // '/portal', so without an id every existing Android and desktop install
