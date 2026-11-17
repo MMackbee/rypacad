@@ -4,7 +4,7 @@ import { Navigate, Route, Routes, useLocation, useNavigate, useParams, useSearch
 import useAuthSession from './hooks/useAuthSession';
 import { isLive } from './hooks/live';
 import { readRoleHint, viewerOf } from './hooks/roleHint';
-import LaunchSplash from './components/LaunchSplash';
+import LaunchSplash, { LaunchRedirect } from './components/LaunchSplash';
 import { contractEnabled } from './data/contractFlag';
 import SignIn, { LANDING_BY_ROLE } from './screens/SignIn';
 import SignUp from './screens/SignUp';
@@ -35,8 +35,9 @@ import ResearchConfirmGate from './components/ResearchConfirmGate';
  * bundle. The first-visit path stays eager - SignIn, SignUp, AuthAction (the
  * email-link page), Registration, NotProvisioned and the two home
  * dashboards - and everything behind it
- * loads as its own chunk when first routed to. RequireRole renders nothing
- * while the session resolves, so a null Suspense fallback shows no flash.
+ * loads as its own chunk when first routed to. While the first screen's
+ * chunk loads the fallback is the launch splash, as RequireRole shows while
+ * the session resolves (review 2026-11-17: a null fallback was a black frame).
  * Named exports go through a `.then` that re-exports them as `default`.
  */
 const named = (load, name) => lazy(() => load().then((m) => ({ default: m[name] })));
@@ -208,7 +209,7 @@ export function RequireRole({ roles, selfManaged = false, children }) {
   // Cold start (hooks/roleHint.js): this account's last verified role may
   // render the landing while users/{uid} is in flight, so its chunk and reads
   // start at once. The verified user below decides; the hint never redirects.
-  if (loading) return hint && roles.includes(hint.role) ? screen(hint.uid) : null;
+  if (loading) return hint && roles.includes(hint.role) ? screen(hint.uid) : <LaunchSplash />;
   if (!user) return <Navigate to="/portal/signin" replace />;
   if (!provisioned) return <Navigate to="/portal/not-provisioned" replace />;
   const payer = selfManaged && user.role === 'athlete' && user.selfManaged === true;
@@ -338,9 +339,9 @@ function PortalIndex() {
   // The home-screen launch lands here ('/' -> /portal, App.js): the launch
   // splash while auth restores, or straight to the landing this account's
   // cold-start hint names - RequireRole re-routes if users/{uid} disagrees.
-  if (loading) return hint ? <Navigate to={landingFor(hint)} replace /> : <LaunchSplash />;
-  if (!user || !provisioned) return <Navigate to="/portal/signin" replace />;
-  return <Navigate to={landingFor(user)} replace />;
+  if (loading) return hint ? <LaunchRedirect to={landingFor(hint)} /> : <LaunchSplash />;
+  if (!user || !provisioned) return <LaunchRedirect to="/portal/signin" />;
+  return <LaunchRedirect to={landingFor(user)} />;
 }
 
 /**
@@ -831,7 +832,7 @@ export default function PortalRoutes() {
         shows itself only to a signed-in, provisioned account and never on
         sign-in, sign-up or not-provisioned (hooks/feedback.js). */}
     <FeedbackButton />
-    <Suspense fallback={null}>
+    <Suspense fallback={<LaunchSplash />}>
     <Routes>
       <Route index element={<PortalIndex />} />
 

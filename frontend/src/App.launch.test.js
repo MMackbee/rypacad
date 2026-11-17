@@ -1,4 +1,4 @@
-import React, { act } from 'react';
+import React, { Profiler, act } from 'react';
 import { createRoot } from 'react-dom/client';
 import App from './App';
 
@@ -34,6 +34,22 @@ test('live: the home-screen launch goes to the portal index, not the sign-in pag
 
 test('seed mode: / still opens sign-in', async () => {
   expect(await launch('/')).toEqual({ text: 'PORTAL /portal/signin', pathname: '/portal/signin' });
+});
+
+// Review 2026-11-17 (F2): the HTML splash goes at React's first commit, and
+// the '/' redirect rendered nothing - a black frame before the portal.
+test("live: the launch's first frame is the splash, never a blank page", async () => {
+  mockLive.value = true;
+  window.history.replaceState(null, '', '/');
+  const container = document.createElement('div');
+  const root = createRoot(container);
+  const frames = [];
+  const onRender = () => frames.push(container.querySelector('[data-launch-splash]') ? 'SPLASH' : container.textContent.trim() || 'BLANK');
+  await act(async () => { root.render(<Profiler id="app" onRender={onRender}><App /></Profiler>); });
+  expect(frames[0]).toBe('SPLASH');
+  expect(frames).not.toContain('BLANK');
+  expect(container.textContent).toBe('PORTAL /portal');
+  await act(async () => root.unmount());
 });
 
 test('the old /login bookmark still opens sign-in', async () => {

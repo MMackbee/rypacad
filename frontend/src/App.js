@@ -5,6 +5,7 @@ import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-d
 import ErrorBoundary from './components/ErrorBoundary';
 import PortalRoutes from './portal/PortalRoutes';
 import { isLive } from './portal/hooks/live';
+import { LaunchRedirect } from './portal/components/LaunchSplash';
 
 /**
  * The portal IS the app. The 2025 shell (Navbar, LoginPage, UnauthorizedPage,
@@ -17,8 +18,8 @@ function App() {
   return (
     <ErrorBoundary>
       {/* Navigations run as React transitions: the current screen stays up
-          while a lazy route's chunk loads, instead of the blank Suspense
-          fallback in PortalRoutes. */}
+          while a lazy route's chunk loads, instead of the Suspense fallback
+          (the launch splash) in PortalRoutes. */}
       <Router future={{ v7_startTransition: true }}>
         <div className="App">
           <Routes>
@@ -27,8 +28,9 @@ function App() {
 
             {/* The home-screen icon opens '/' (speed work 2026-11-17): live, the
                 portal index sends a signed-in account straight to its landing
-                instead of through sign-in; the review scaffold keeps sign-in. */}
-            <Route path="/" element={<Navigate to={isLive() ? '/portal' : '/portal/signin'} replace />} />
+                instead of through sign-in; the review scaffold keeps sign-in.
+                The launch splash stays up through the redirect. */}
+            <Route path="/" element={<LaunchRedirect to={isLive() ? '/portal' : '/portal/signin'} />} />
 
             {/* Legacy entry points, all superseded by the portal. */}
             <Route path="/login" element={<Navigate to="/portal/signin" replace />} />

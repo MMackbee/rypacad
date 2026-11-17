@@ -75,10 +75,13 @@ afterEach(() => {
   mockSession.value = null;
 });
 
-test('no hint: the guard still renders nothing until the users read lands', async () => {
+// The launch splash, not a blank page, while the guard waits (review 2026-11-17).
+const SPLASH = 'RYP AcademyReach Your Potential';
+
+test('no hint: the guard shows the launch splash until the users read lands', async () => {
   setSession(loading(null));
   const r = await mount('/portal/admin');
-  expect(r.text()).toBe('');
+  expect(r.text()).toBe(SPLASH);
   await r.resolve({ uid: 'u-o', role: 'owner' });
   expect(r.text()).toBe('ADMIN as owner');
   await r.unmount();
@@ -111,10 +114,10 @@ test('a hint the read contradicts re-routes to the verified landing', async () =
   await r.unmount();
 });
 
-test('a hint for a role this route does not take renders nothing and redirects nowhere until the read lands', async () => {
+test('a hint for a role this route does not take shows the splash and redirects nowhere until the read lands', async () => {
   setSession(loading({ uid: 'u-p', role: 'parent', specialistId: null }));
   const r = await mount('/portal/admin');
-  expect(r.text()).toBe('');
+  expect(r.text()).toBe(SPLASH);
   expect(r.pathname()).toBe('/portal/admin');
   await r.resolve({ uid: 'u-p', role: 'ops' });
   expect(r.text()).toBe('ADMIN as ops');
