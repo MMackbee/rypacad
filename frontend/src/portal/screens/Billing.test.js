@@ -127,6 +127,33 @@ test('staff view never pays', async () => {
   await r.unmount();
 });
 
+// Owner 2026-11-17: the button signs the payer straight into Stripe (openBillingPortal), so it needs a Stripe
+// customer on the household, not the sign-in link in the build (ManageBillingButton.test.js covers the tap).
+describe('Manage billing in Stripe', () => {
+  test('shown to the payer once the household has a Stripe customer, with or without the sign-in link', async () => {
+    mockHub.data.portalUrl = null;
+    const r = await renderScreen(<Billing bare />);
+    expect(r.text()).toContain('Your card and invoices are managed in Stripe.');
+    expect(r.button('Manage billing in Stripe')).not.toBeNull();
+    await r.unmount();
+  });
+
+  test('hidden when the household has no Stripe customer yet', async () => {
+    mockHub.data.household = { ...mockHub.data.household, stripeCustomerId: null };
+    const r = await renderScreen(<Billing bare />);
+    expect(r.text()).toContain('Card and invoices are managed in Stripe once you have paid.');
+    expect(r.button('Manage billing in Stripe')).toBeNull();
+    await r.unmount();
+  });
+
+  test("never on the staff view: staff do not open a family's portal", async () => {
+    const r = await renderScreen(<Billing bare staff role="owner" householdId="h1" />);
+    expect(r.text()).toContain('Your card and invoices are managed in Stripe.');
+    expect(r.button('Manage billing in Stripe')).toBeNull();
+    await r.unmount();
+  });
+});
+
 test('the contract line (the requirement, owner 2026-10-28) shows only with the Commitment Contract on (owner ruling 2026-09-30)', async () => {
   const off = await renderScreen(<Billing bare />);
   expect(off.text()).not.toMatch(/contract/i);

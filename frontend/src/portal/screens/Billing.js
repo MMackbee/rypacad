@@ -5,6 +5,7 @@ import BillingSkeleton from '../components/BillingSkeleton';
 import BottomTabBar from '../components/BottomTabBar';
 import Button from '../components/Button';
 import FacilityCard from '../components/FacilityCard';
+import ManageBillingButton from '../components/ManageBillingButton';
 import MemberSection from '../components/MemberSection';
 import PayButton from '../components/PayButton';
 import PhoneFrame from '../components/PhoneFrame';
@@ -46,7 +47,9 @@ import useBillingHub from '../hooks/billing';
  * NO FAKE MONEY: no card art, no invoice rows, no amounts until Stripe data
  * exists. "Update payment method" opens the Stripe customer portal login
  * link when the academy configured one (REACT_APP_STRIPE_PORTAL_URL);
- * otherwise the hero says to contact the academy.
+ * otherwise the hero says to contact the academy. "Manage billing in
+ * Stripe" on Card & invoices signs the payer straight in (owner 2026-11-17,
+ * ManageBillingButton): shown once the household has a Stripe customer.
  *
  * Staff cancel (owner approved 2026-11-12): on the staff view the owner or
  * ops has a Cancel on each Booked or No-show row of a meter's "This period"
@@ -234,7 +237,7 @@ export default function Billing({
             {/* ONE family card, never one per athlete (owner ruling 2026-09-30). */}
             <FacilityCard members={members} readOnly={staff} self={self} />
             {members.length ? <PlanCard household={data?.household} members={members} showPrices={staff} self={self} /> : null}
-            <ConnectionCard household={data?.household} portalUrl={data?.portalUrl} />
+            <ConnectionCard household={data?.household} portalUrl={data?.portalUrl} staff={staff} />
             {family ? <StaffFamilyAdvanced householdId={householdId ?? data?.household?.id ?? null} anchorDay={data?.household?.anchorDay ?? 1} /> : null}
           </>
         )}
@@ -463,8 +466,12 @@ function PlanCard({ household, members, showPrices = false, self = false }) {
   );
 }
 
-/** No fake money: what is and isn't connected, in one honest line. */
-function ConnectionCard({ household, portalUrl }) {
+/**
+ * No fake money: what is and isn't connected, in one honest line. The payer's
+ * Manage billing in Stripe opens their own portal session; the sign-in link
+ * (portalUrl) is only its fallback. Staff never open a family's portal.
+ */
+function ConnectionCard({ household, portalUrl, staff = false }) {
   const connected = Boolean(household?.stripeCustomerId);
   return (
     <Card large>
@@ -472,11 +479,7 @@ function ConnectionCard({ household, portalUrl }) {
       <Body size={12}>
         {connected ? CONNECTED_LINE : 'Card and invoices are managed in Stripe once you have paid.'}
       </Body>
-      {portalUrl ? (
-        <Button variant="outline" height={42} style={{ marginTop: 12, boxShadow: 'none' }} onClick={() => window.open(portalUrl, '_blank', 'noopener')}>
-          Manage billing in Stripe
-        </Button>
-      ) : null}
+      {connected && !staff ? <ManageBillingButton fallbackUrl={portalUrl} /> : null}
     </Card>
   );
 }

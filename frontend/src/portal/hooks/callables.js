@@ -50,6 +50,14 @@ export const callAddAthletes = callable('addAthletes');
 /** `{ url }` (contract 1.5). */
 export const callCreateCheckoutSession = callable('createCheckoutSession');
 /**
+ * `{ returnPath? }` -> `{ url }`: a Stripe customer portal session for the
+ * signed-in payer's own household (functions/portal/billing-portal.js), the
+ * Billing screen's Manage billing in Stripe. Through hooks/billingPortal.js.
+ * A refusal's `reason`: 'not-payer', 'no-customer', 'rate-limited',
+ * 'portal-not-set-up', 'stripe-error', 'bad-request' or 'unavailable'.
+ */
+export const callOpenBillingPortal = callable('openBillingPortal');
+/**
  * `{ sessionIds }` (1 to 50) -> `{ positions: { [sessionId]: { [athleteId]: number } } }`:
  * the caller's own athletes' 1-based places, in the order promotion uses.
  * Screens read it through hooks/waitlist.js#fetchWaitlistPositions, which
