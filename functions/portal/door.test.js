@@ -391,6 +391,24 @@ test('ops in staff-only mode opens from anywhere, with no location',
       assert.equal(ev.distanceM, null);
     });
 
+test('a staff login with no displayName is named by its email, else its role',
+    async () => {
+      // Found in the emulator pass: the owner's users doc has no
+      // displayName, and Recent activity said "Unknown".
+      const cfg = Object.assign({}, familyDocs()['doorConfig/main'],
+          {mode: 'staff'});
+      const byEmail = await press(unlock('press-0001', null), {
+        docs: familyDocs({'users/u-dana': {role: 'owner', displayName: null},
+          'doorConfig/main': cfg}),
+        auth: {uid: 'u-dana', token: {email: 'boss@example.com'}}});
+      assert.equal(byEmail.docs[EVENT].name, 'boss@example.com');
+      const byRole = await press(unlock('press-0001', null), {
+        docs: familyDocs({'users/u-dana': {role: 'ops', displayName: ''},
+          'doorConfig/main': cfg}),
+        auth: {uid: 'u-dana', token: {}}});
+      assert.equal(byRole.docs[EVENT].name, 'Ops');
+    });
+
 // ---- athlete logins: 16 on the Chicago day, a parent's signature ------------
 
 /**

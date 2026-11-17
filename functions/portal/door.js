@@ -110,23 +110,31 @@ async function loadDoor(store, uid, today) {
   return ctx;
 }
 
+/** A staff login's name when it has no other (Recent activity's row). */
+const ROLE_NAMES = {owner: 'Owner', ops: 'Ops'};
+
 /**
  * The event as it is first written; the Alta fields are filled later.
+ * The name is the login's displayName, else its own athlete's name, else
+ * its email (a staff users doc often has no displayName), else its role.
  * @param {string} uid The caller.
  * @param {!Object} ctx From loadDoor.
  * @param {!Object} decision decide()'s answer.
  * @param {number} nowMs The clock.
+ * @param {?Object=} token The caller's auth token claims.
  * @return {!Object} The doorEvents body, without outcome and reason.
  */
-function eventBase(uid, ctx, decision, nowMs) {
+function eventBase(uid, ctx, decision, nowMs, token) {
   const u = ctx.user;
+  const t = token || {};
   const family = FAMILY_ROLES.includes(u.role) && Boolean(u.householdId);
   const own = ctx.athletes.find((a) => a.id === u.athleteId);
   const text = (v) => (typeof v === 'string' && v.trim() ?
       v.trim().slice(0, 120) : null);
   return {
     uid, role: text(u.role), name: text(u.displayName) ||
-        text(own && own.name) || 'Unknown',
+        text(own && own.name) || text(t.name) || text(u.email) ||
+        text(t.email) || ROLE_NAMES[u.role] || 'Unknown',
     householdId: family ? u.householdId : null,
     householdName: family ? text(ctx.household && ctx.household.name) : null,
     athleteId: u.role === 'athlete' ? text(u.athleteId) : null,
@@ -309,7 +317,7 @@ async function unlockDoorHandler(data, context, deps) {
 
   const decision = decide(Object.assign({}, ctx, {today,
     location: req.location, mode: 'unlock'}));
-  const base = eventBase(uid, ctx, decision, nowMs);
+  const base = eventBase(uid, ctx, decision, nowMs, auth.token);
   const step = await store.runTransaction((tx) =>
     reserve(tx, refs, decision, base, nowMs));
   if (step.replay) return replayOf(step.replay, openSeconds);
