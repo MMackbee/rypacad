@@ -121,6 +121,44 @@ test('a network failure is alta-error with no status, no retry', async () => {
   assert.ok(r.logs.some((l) => /ECONNREFUSED/.test(l)), r.logs.join('\n'));
 });
 
+// 2026-11-17: the first live press got a bare 400. Alta words a bad link
+// as "Token error (...)", so the error line carries what Alta said.
+test('a refused request logs what Alta said', async () => {
+  const said = JSON.stringify({statusCode: 400, error: 'Bad Request',
+    message: 'Token error (jwt expired).'});
+  const r = await press(unlock(), {alta: fakeAlta({status: 400, text: said})});
+  assert.equal(r.error.details.reason, 'alta-error');
+  assert.ok(r.logs.some((l) => /unlockDoor: error .*altaStatus=400/.test(l) &&
+      l.includes('alta="Token error (jwt expired)."')), r.logs.join('\n'));
+});
+
+test('what Alta said: plain text kept, unreadable or empty bodies say nothing',
+    async () => {
+      const plain = await press(unlock(),
+          {alta: fakeAlta({status: 503, text: 'Service <b>Unavailable</b>'})});
+      assert.ok(plain.logs.some((l) =>
+        l.includes('alta="Service b Unavailable b"')), plain.logs.join('\n'));
+      for (const text of ['', new Error('stream broke'), undefined]) {
+        const r = await press(unlock(), {alta: fakeAlta({status: 400, text})});
+        assert.equal(r.error.details.reason, 'alta-error');
+        assert.ok(r.logs.some((l) => /unlockDoor: error /.test(l) &&
+            !/alta=/.test(l)), r.logs.join('\n'));
+      }
+    });
+
+test('an open never reads the answer body', async () => {
+  let read = 0;
+  const alta = fakeAlta({status: 204});
+  const fetch = (url, init) => alta.fetch(url, init).then((res) =>
+    Object.assign(res, {text: () => {
+      read += 1;
+      return Promise.resolve('');
+    }}));
+  const r = await press(unlock(), {alta: {fetch, calls: alta.calls}});
+  assert.equal(r.result.outcome, 'opened');
+  assert.equal(read, 0);
+});
+
 test('no answer: aborted at 6 s, alta-timeout, the slot comes back',
     async () => {
       assert.equal(ALTA_TIMEOUT_MS, 6000);
@@ -247,6 +285,14 @@ test('the token and the link appear in no log, error, result or document',
         {env: {ALTA_UNLOCK_URL: `http://api.openpath.com${path}`}},
         {env: {ALTA_UNLOCK_URL: `${URL_OK}?leak=${TOKEN}`}},
         {env: {ALTA_UNLOCK_URL: `https://api.openpath.com/${TOKEN}`}},
+        // Alta's own words quoting the token or the link.
+        {alta: fakeAlta({status: 400, text: JSON.stringify(
+            {message: `Token error (${TOKEN} revoked).`})})},
+        {alta: fakeAlta({status: 400, text: JSON.stringify(
+            {message: `Unknown token at ${URL_OK} - see ${path}`})})},
+        {alta: fakeAlta({status: 400, text: `no such token ${TOKEN}`})},
+        {alta: fakeAlta({status: 400, text: JSON.stringify(
+            {error: encodeURIComponent(URL_OK)})})},
       ];
       const seen = [];
       for (const s of scenarios) {
