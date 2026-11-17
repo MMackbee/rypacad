@@ -1647,7 +1647,7 @@ export function useSpecialistSessions(specialistId) {
           // MAX_WINDOW_MONTHS, not any one athlete's own window - see
           // seedSpecialistDaySessions' comment above.
           source: () => liveSpecialistSessions(specialistId, today, openThrough(new Date(), MAX_WINDOW_MONTHS)),
-          deps: ['specialist-sessions', specialistId, today, sessionsGen, bookingsGen],
+          deps: ['specialist-sessions', specialistId, today], gens: [sessionsGen, bookingsGen], cacheKey: 'specialist-sessions',
         }
       : undefined
   );
@@ -2703,7 +2703,7 @@ export function useCoachDay({ variant = 'today' } = {}) {
           attention: ATTENTION_LIST,
           outstanding: COACH_OUTSTANDING,
         },
-    live ? { source: liveCoachDay, deps: ['coach-day', today, sessionsGen, bookingsGen] } : undefined
+    live ? { source: liveCoachDay, deps: ['coach-day', today], gens: [sessionsGen, bookingsGen], cacheKey: 'coach-day' } : undefined
   );
 }
 
@@ -3726,12 +3726,19 @@ export function useAdminDashboard({ variant = 'populated' } = {}) {
   const w = useMemo(() => adminWindow(today), [today]);
   const roster = useSeedResource(
     null,
-    live ? { source: adminRosterReads, deps: ['admin-roster', athletesGen, householdsGen] } : undefined
+    live
+      ? { source: adminRosterReads, deps: ['admin-roster'], gens: [athletesGen, householdsGen], cacheKey: 'admin-roster' }
+      : undefined
   );
   const week = useSeedResource(
     null,
     live
-      ? { source: () => fetchSessionsInRange(w.weekStart, w.weekEnd), deps: ['admin-week', today, sessionsGen, bookingsGen] }
+      ? {
+          source: () => fetchSessionsInRange(w.weekStart, w.weekEnd),
+          deps: ['admin-week', today],
+          gens: [sessionsGen, bookingsGen],
+          cacheKey: 'admin-week',
+        }
       : undefined
   );
   const calls = useSeedResource(
@@ -3739,7 +3746,9 @@ export function useAdminDashboard({ variant = 'populated' } = {}) {
     live
       ? {
           source: () => adminCallsReads(today, w),
-          deps: ['admin-calls', today, bookingsGen, contractLogsGen, assessmentsGen, enrollmentGen, sessionsGen],
+          deps: ['admin-calls', today],
+          gens: [bookingsGen, contractLogsGen, assessmentsGen, enrollmentGen, sessionsGen],
+          cacheKey: 'admin-calls',
         }
       : undefined
   );

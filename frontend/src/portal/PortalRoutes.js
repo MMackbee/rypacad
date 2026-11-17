@@ -3,6 +3,8 @@ import { Navigate, Route, Routes, useLocation, useNavigate, useParams, useSearch
 
 import useAuthSession from './hooks/useAuthSession';
 import { isLive } from './hooks/live';
+import { readRoleHint, viewerOf } from './hooks/roleHint';
+import LaunchSplash from './components/LaunchSplash';
 import { contractEnabled } from './data/contractFlag';
 import SignIn, { LANDING_BY_ROLE } from './screens/SignIn';
 import SignUp from './screens/SignUp';
@@ -138,6 +140,12 @@ const NEXT_ROUTE_CHUNKS = {
   'my-sessions': [loadRoster, loadAssessmentList, loadCombine],
   admin: [loadAdminSignups, loadBilling, loadAthleteDetail, loadStaff],
 };
+// The launch paths (the index, sign-in) name no screen: warm the landing of
+// the stored role hint instead (speed work 2026-11-17; roleHint.js). A
+// parent's and an athlete's homes ship in main.
+const LANDING_CHUNKS = { owner: [loadAdmin], ops: [loadAdmin], coach: [loadCoachDashboard], mental: [loadSpecialistDay] };
+const landingChunks = (hint) =>
+  !hint ? [] : hint.specialistId ? [loadSpecialistDay] : routeChunks(LANDING_CHUNKS, hint.role);
 const NEXT_WARM_DELAY_MS = 2500;
 // Own keys only: a junk URL like /portal/constructor must not reach Object.prototype.
 // The Contract chunk stays cold while the contract is hidden (data/contractFlag.js).
@@ -189,11 +197,14 @@ const warm = (loads) => loads.forEach((load) => load().catch(() => {}));
  */
 export function RequireRole({ roles, selfManaged = false, children }) {
   const live = isLive();
-  const { user, provisioned, loading } = useAuthSession(live ? undefined : { variant: 'idle' });
+  const { user, provisioned, loading, hint } = useAuthSession(live ? undefined : { variant: 'idle' });
 
   if (!live) return children;
 
-  if (loading) return null;
+  // Cold start (hooks/roleHint.js): this account's last verified role may
+  // render the landing while users/{uid} is in flight, so its chunk and reads
+  // start at once. The verified user below decides; the hint never redirects.
+  if (loading) return hint && roles.includes(hint.role) ? children : null;
   if (!user) return <Navigate to="/portal/signin" replace />;
   if (!provisioned) return <Navigate to="/portal/not-provisioned" replace />;
   const payer = selfManaged && user.role === 'athlete' && user.selfManaged === true;
@@ -318,9 +329,12 @@ function AthleteDetailRoute() {
  */
 function PortalIndex() {
   const live = isLive();
-  const { user, provisioned, loading } = useAuthSession(live ? undefined : { variant: 'idle' });
+  const { user, provisioned, loading, hint } = useAuthSession(live ? undefined : { variant: 'idle' });
   if (!live) return <StatesHarness />;
-  if (loading) return null;
+  // The home-screen launch lands here ('/' -> /portal, App.js): the launch
+  // splash while auth restores, or straight to the landing this account's
+  // cold-start hint names - RequireRole re-routes if users/{uid} disagrees.
+  if (loading) return hint ? <Navigate to={landingFor(hint)} replace /> : <LaunchSplash />;
   if (!user || !provisioned) return <Navigate to="/portal/signin" replace />;
   return <Navigate to={landingFor(user)} replace />;
 }
@@ -425,9 +439,10 @@ function StaffBillingRoute() {
 
 function AdminRoute({ onOpenAthlete, onSignOut }) {
   const live = isLive();
-  const { user } = useAuthSession(live ? undefined : { variant: 'idle' });
+  const session = useAuthSession(live ? undefined : { variant: 'idle' });
+  const { user } = session;
   const navigate = useNavigate();
-  const role = (live && user?.role) || 'owner';
+  const role = (live && viewerOf(session)?.role) || 'owner';
   // Scholarship applications are the owner's alone (2026-10-01). `role`
   // above falls back to 'owner' while this route's own session is still
   // resolving, so the card's destination is handed over only once the
@@ -488,15 +503,19 @@ function ScholarshipsRoute() {
 
 function SpecialistDayRoute({ onSignOut }) {
   const live = isLive();
-  const { user, loading } = useAuthSession(live ? undefined : { variant: 'idle' });
+  const session = useAuthSession(live ? undefined : { variant: 'idle' });
+  const { loading } = session;
+  // The verified user, or while it loads the cold-start hint (roleHint.js).
+  const user = viewerOf(session);
   const navigate = useNavigate();
   const specialistId = (live && user?.specialistId) || (!live ? 'mental' : null);
   const canSwitch = live && !user?.specialistId && ['ops', 'owner'].includes(user?.role ?? '');
   // This route's OWN auth subscription starts loading even after
   // RequireRole's finished — deciding (and redirecting) off a still-null
   // user looped Navigate against RequireRole's own redirect (integration
-  // browser pass: "maximum update depth exceeded"). Wait like RequireRole.
-  if (live && loading) return null;
+  // browser pass: "maximum update depth exceeded"). Wait like RequireRole:
+  // a hint renders a day it can show, and never redirects.
+  if (live && loading && !specialistId && !canSwitch) return null;
   if (live && !specialistId && !canSwitch) return <Navigate to="/portal/tour" replace />;
   return (
     <SpecialistDay
@@ -631,10 +650,12 @@ function TourRoute({ onSignOut }) {
 function CoachDashboardRoute({ onSignOut, onOpenAthlete }) {
   const navigate = useNavigate();
   const live = isLive();
-  const { user, loading } = useAuthSession(live ? undefined : { variant: 'idle' });
-  // Every hook instance starts {user: null, loading: true}: wait, or the first
-  // paint is the plain coach's bar (SpecialistDayRoute does the same).
-  if (live && loading) return null;
+  const session = useAuthSession(live ? undefined : { variant: 'idle' });
+  // A fresh live session starts {user: null, loading: true}: wait, or the
+  // first paint is the plain coach's bar (SpecialistDayRoute does the same) -
+  // unless the cold-start hint (roleHint.js) already names this viewer.
+  const user = viewerOf(session);
+  if (live && session.loading && !user) return null;
   // The screen carries the caller's own tab bar (owner, ops or coach - and,
   // 2026-11-03, Phil's and Yannick's: the specialists see the golf day too;
   // Phil's specialistId picks his tab set and drops the Students tab).
@@ -787,7 +808,9 @@ export default function PortalRoutes() {
 
   // Mount only: the chunk for the screen this page load opened on.
   useEffect(() => {
-    if (isLive()) warm(routeChunks(CURRENT_ROUTE_CHUNKS, segment));
+    if (!isLive()) return;
+    const current = routeChunks(CURRENT_ROUTE_CHUNKS, segment);
+    warm(current.length ? current : landingChunks(readRoleHint()));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 

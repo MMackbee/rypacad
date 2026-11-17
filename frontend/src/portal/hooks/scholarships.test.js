@@ -256,7 +256,8 @@ describe('useScholarships', () => {
 
   test('live: loading, then rows newest first with their counts', async () => {
     const h = await mountHook();
-    expect(h.seen[0]).toEqual({ data: null, loading: true, error: null });
+    // isRefreshing: the hook keeps its rows through a refresh (useSeedResource gens/cacheKey).
+    expect(h.seen[0]).toEqual({ data: null, loading: true, error: null, isRefreshing: false });
     const last = h.seen[h.seen.length - 1];
     expect(last.loading).toBe(false);
     expect(last.data.rows.map((r) => r.id)).toEqual(['newest', 'middle', 'older']);

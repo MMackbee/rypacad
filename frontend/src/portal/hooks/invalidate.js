@@ -37,6 +37,11 @@ export function bump(collectionName) {
   if (set) set.forEach((notify) => notify());
 }
 
+/** A collection's current generation, outside React (the shared users/{uid} profile, sessionStore.js). */
+export function generationOf(collectionName) {
+  return generations.get(collectionName) || 0;
+}
+
 /**
  * This hook instance's current view of a collection's generation. Fold the
  * return value into useSeedResource's `deps` array — when it changes (because
