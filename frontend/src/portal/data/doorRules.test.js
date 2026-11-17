@@ -97,9 +97,9 @@ test('the card shows when the press is open, or for the four reasons a family ca
 });
 
 test('the new rule ends "Who may enter" in the facility rules, and the sheet shows them all', () => {
-  // Review 2026-11-17 (spec-5): never at odds with "One guest may come along" just above it.
+  // Owner 2026-11-17: household only, no guest ("anyone in their household can enter").
   expect(DOOR_RULE_LINE).toBe(
-    "Use the app's Unlock button only when you are at the door, and only to let in your own household and the one guest the rules allow. Never open the door for anyone else."
+    "Use the app's Unlock button only when you are at the door, and only to let in your own household. Never open the door for anyone else."
   );
   const who = CONSENT_TERMS.facilityAccess.find((s) => s.heading === 'Who may enter');
   expect(who.lines[who.lines.length - 1]).toBe(DOOR_RULE_LINE);
