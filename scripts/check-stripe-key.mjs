@@ -4,7 +4,10 @@
 // Part 2 rehearses every call the portal makes with this key, using the
 // portal's own checkout builder: one test-mode Checkout Session is created,
 // read back, then expired. The same is done for the one-time single-token
-// checkout (payment mode). Nothing is charged; no card is involved. With
+// checkout (payment mode). Last, Manage billing in Stripe's customer portal
+// session is asked for a made-up customer: "No such customer" proves the key
+// may make one (a restricted key needs Customer portal: Write). Nothing is
+// charged; no card is involved. With
 // --coupon <id> it also rehearses the sibling discount (a session created
 // with that coupon applied, then expired) and reports the coupon's terms.
 import readline from 'node:readline';
@@ -208,4 +211,14 @@ if (!one || checkout.priceMismatch(one, true)) {
     row('expire the single-token rehearsal', ex.ok, ex.ok ? 'cleaned up' : ex.msg);
   }
 }
+// 8. Manage billing in Stripe (functions/portal/billing-portal.js): a customer portal session. A restricted key needs
+//    "Customer portal: Write" (review 2026-11-17 F1). A made-up customer passes the permission check and then fails
+//    "No such customer", so no session is made. Stripe may check the customer before the portal settings, so OK here
+//    does not prove the settings are saved: release step 1 does that.
+const bp = await api('POST', 'billing_portal/sessions', { customer: 'cus_keycheckmissing', return_url: `${PORTAL_URL}/portal/billing` });
+const bpUnset = /default configuration/i.test(bp.msg);
+row('open the customer portal (Manage billing)', bp.ok || (!denied(bp) && !bpUnset && /customer/i.test(bp.msg)),
+  bp.ok ? 'session made' : denied(bp) ? 'the key needs Customer portal: Write (Developers > API keys > edit the key)'
+    : bpUnset ? 'customer portal not saved in test mode (Settings > Billing > Customer portal > Save)'
+      : /customer/i.test(bp.msg) ? 'permission OK (made-up customer, as expected)' : bp.msg);
 console.log(problems ? `\n${problems} need attention. Paste this output to Claude.` : '\nAll clear: the prices are right and this key can do everything the portal needs.');

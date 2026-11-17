@@ -46,11 +46,11 @@ import { fetchTokenPeriod } from './grace';
 import { fetchWaitlistByAthlete } from './waitlist';
 
 /**
- * The Stripe no-code customer portal login link. Sprint 20 (spec 4.4): no
- * longer optional - without it a failed card has no self-serve fix. The app
- * still renders (the hub omits the link), but a LIVE build without it says
- * so in the console once per page load; seed mode and jest never carry the
- * var and never warn. `live`/`url` are injectable for the unit test.
+ * The Stripe no-code customer portal login link. Since 2026-11-17 Manage
+ * billing in Stripe and the past-due hero sign the payer in directly
+ * (hooks/billingPortal.js), so this link is only the fallback offered under
+ * either after a failure. A LIVE build without it says so in the console once
+ * per page load; seed mode and jest never warn. `live`/`url` are injectable.
  */
 export const STRIPE_PORTAL_URL = process.env.REACT_APP_STRIPE_PORTAL_URL || null;
 let portalUrlWarned = false;
@@ -58,7 +58,7 @@ export function warnMissingPortalUrl({ live = isLive(), url = STRIPE_PORTAL_URL 
   if (portalUrlWarned || !live || url) return false;
   portalUrlWarned = true;
   console.warn(
-    'REACT_APP_STRIPE_PORTAL_URL is not set: the billing hub cannot offer the Stripe customer portal, so a failed card has no self-serve fix (Sprint 20, spec 4.4 - required in production).'
+    'REACT_APP_STRIPE_PORTAL_URL is not set: Manage billing in Stripe and Update payment method still open Stripe directly, but no email sign-in link is offered when that fails.'
   );
   return true;
 }
@@ -88,7 +88,7 @@ function householdView(household, anchorDay) {
     name: household.name ?? null, test: household.test === true,
     anchorDay,
     membership: membershipView(household.membership),
-    stripeCustomerId: household.stripeCustomerId ?? null,
+    stripeCustomerId: household.stripeCustomerId ?? null, stripeCustomerIds: household.stripeCustomerIds ?? [],
   };
 }
 

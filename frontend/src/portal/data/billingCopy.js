@@ -14,6 +14,11 @@ export const PENDING_PLAN_LINE = "Billed monthly from the 1st once you've paid";
 /** The single token is a one-time purchase, never a monthly bill (owner ruling, 2026-09-30). */
 export const SINGLE_PLAN_LINE = `One-time $${SINGLE_TOKEN.price} per session token`;
 export const CONNECTED_LINE = 'Your card and invoices are managed in Stripe.';
+/** Manage billing in Stripe (owner 2026-11-17, components/ManageBillingButton.js): signs the payer straight in; the line and the old sign-in link only on a failure. */
+export const MANAGE_BILLING = 'Manage billing in Stripe';
+export const OPENING_STRIPE = 'Opening Stripe';
+export const PORTAL_ERROR_LINE = "Couldn't open Stripe right now. Try again, or contact the academy.";
+export const PORTAL_FALLBACK_LINK = 'Or sign in to Stripe with your email';
 export const CONFIRMING = 'Confirming your payment...';
 export const CONFIRM_TIMEOUT = 'Still confirming - refresh in a minute, or check your email from Stripe.';
 

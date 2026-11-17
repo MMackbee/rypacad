@@ -3138,6 +3138,17 @@ service cloud.firestore {
       allow read, write: if false;
     }
 
+    // ---- billingPortalLimits -----------------------------------------------
+    // 2026-11-17. openBillingPortal's rate limit (functions/portal/
+    // billing-portal.js, "Manage billing in Stripe"): { openedAtMs: number[],
+    // updatedAtMs }, doc id the caller's uid - at most ten Stripe portal
+    // sessions per rolling ten minutes. Admin SDK only, in a transaction.
+    // Closed to every client, like feedbackLimits: a client that could write
+    // its own doc could reset its own limit.
+    match /billingPortalLimits/{uid} {
+      allow read, write: if false;
+    }
+
     // No catch-all. Everything not matched above is denied.
   }
 }

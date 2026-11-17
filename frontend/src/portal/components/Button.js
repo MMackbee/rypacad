@@ -76,6 +76,16 @@ export function Spinner({ size = 16, track = 'rgba(0,0,0,.25)', head = '#000' })
 }
 
 /**
+ * The spinner in the label's own ink: black on a filled button, the label
+ * colour over a light track on a transparent one - a black spinner on an
+ * outline button over a near-black card could not be seen (review
+ * 2026-11-17 UX-4).
+ */
+function spinnerInk(variantStyle) {
+  return variantStyle.color === '#000' ? {} : { head: variantStyle.color, track: 'rgba(255,255,255,.25)' };
+}
+
+/**
  * @param {'primary'|'pinned'|'secondary'|'outline'|'caution'|'danger'|'dangerOutline'} variant
  * @param {boolean} loading  Renders a spinner; also disables the control.
  * @param {number} height    54 for a form CTA, 56 pinned, 46-50 inline.
@@ -118,7 +128,7 @@ export default function Button({
       }}
       {...rest}
     >
-      {loading ? <Spinner /> : null}
+      {loading ? <Spinner {...spinnerInk(base)} /> : null}
       <span>{children}</span>
     </button>
   );

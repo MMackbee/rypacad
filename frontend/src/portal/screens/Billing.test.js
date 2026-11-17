@@ -1,6 +1,7 @@
 import React from 'react';
 import { renderScreen } from './testRender';
 import Billing from './Billing';
+import { PORTAL_FALLBACK_LINK } from '../data/billingCopy';
 
 let mockHub;
 const ADD_FAMILY = 'Add family facility access · $300/month';
@@ -8,6 +9,33 @@ jest.mock('../components/PayButton', () => ({ __esModule: true, default: ({ athl
 // `buy` is the meter's own Pay/Buy affordance for a single athlete (TokenMeter.test.js covers the button).
 jest.mock('../components/TokenMeter', () => ({ __esModule: true, default: ({ member, buy }) => `METER|${member.athleteId}|${buy ? 'buy' : 'view'}` }));
 jest.mock('../hooks/billing', () => ({ __esModule: true, default: () => mockHub, useBillingHub: () => mockHub, usePaymentConfirmation: () => ({ state: 'idle' }), STRIPE_PORTAL_URL: 'https://billing.stripe.test/p/x' }));
+// Manage billing in Stripe and the past-due hero's button go through openBillingPortal (review 2026-11-17 F7/UX-2):
+// the callable and the live switch are stand-ins here; ManageBillingButton.test.js covers the button itself.
+jest.mock('../hooks/live', () => ({ ...jest.requireActual('../hooks/live'), isLive: () => mockLive }));
+jest.mock('../hooks/callables', () => ({
+  ...jest.requireActual('../hooks/callables'),
+  callOpenBillingPortal: (payload) => {
+    mockPortalCalls.push(payload);
+    return mockPortalAnswer(payload);
+  },
+}));
+const SESSION_URL = 'https://billing.stripe.com/p/session/test_billing';
+const realLocation = window.location;
+let mockLive;
+let mockPortalCalls;
+let mockPortalAnswer;
+let assigned;
+beforeEach(() => {
+  mockLive = false;
+  mockPortalCalls = [];
+  mockPortalAnswer = async () => ({ url: SESSION_URL });
+  assigned = [];
+  delete window.location;
+  window.location = { ...realLocation, assign: (url) => assigned.push(url) };
+});
+afterEach(() => {
+  window.location = realLocation;
+});
 
 beforeEach(() => {
   const m = (id, name, billing) => ({ athleteId: id, name, package: { id: 't-6', name: '6 tokens', kind: 'tokens', price: 299 }, tokens: { left: 6 }, coaching: null, contractMinutes: 20, facilityAccess: false, billing });
@@ -125,6 +153,161 @@ test('staff view never pays', async () => {
   expect(r.button(`${ADD_FAMILY}|a1|facility`)).toBeNull();
   expect(r.text()).toContain('No family facility access add-on.');
   await r.unmount();
+});
+
+// Owner 2026-11-17: the button signs the payer straight into Stripe (openBillingPortal), so it needs a Stripe
+// customer on the household, not the sign-in link in the build (ManageBillingButton.test.js covers the tap).
+describe('Manage billing in Stripe', () => {
+  test('shown to the payer once the household has a Stripe customer, with or without the sign-in link', async () => {
+    mockHub.data.portalUrl = null;
+    const r = await renderScreen(<Billing bare />);
+    expect(r.text()).toContain('Your card and invoices are managed in Stripe.');
+    expect(r.button('Manage billing in Stripe')).not.toBeNull();
+    await r.unmount();
+  });
+
+  test('hidden when the household has no Stripe customer yet', async () => {
+    mockHub.data.household = { ...mockHub.data.household, stripeCustomerId: null };
+    const r = await renderScreen(<Billing bare />);
+    expect(r.text()).toContain('Card and invoices are managed in Stripe once you have paid.');
+    expect(r.button('Manage billing in Stripe')).toBeNull();
+    await r.unmount();
+  });
+
+  test("never on the staff view: staff do not open a family's portal", async () => {
+    const r = await renderScreen(<Billing bare staff role="owner" householdId="h1" />);
+    expect(r.text()).toContain('Your card and invoices are managed in Stripe.');
+    expect(r.button('Manage billing in Stripe')).toBeNull();
+    await r.unmount();
+  });
+
+  // Review F3: scripts/link-subscription.mjs used to write the customer to the athlete only.
+  test('a subscription linked to an athlete only (no household customer) still gets the button', async () => {
+    mockHub.data.household = { ...mockHub.data.household, stripeCustomerId: null };
+    mockHub.data.members[0] = { ...mockHub.data.members[0], customerIds: ['cus_linked'] };
+    const r = await renderScreen(<Billing bare />);
+    expect(r.text()).toContain('Your card and invoices are managed in Stripe.');
+    expect(r.button('Manage billing in Stripe')).not.toBeNull();
+    await r.unmount();
+  });
+
+  // Review F2: never one customer silently when the family has two.
+  test("billing on two Stripe customers: one button per customer, each opening its athlete's", async () => {
+    mockLive = true;
+    mockHub.data.household = { ...mockHub.data.household, stripeCustomerIds: ['cus_1', 'cus_2'] };
+    mockHub.data.members[0] = { ...mockHub.data.members[0], customerIds: ['cus_1'] };
+    mockHub.data.members[1] = { ...mockHub.data.members[1], customerIds: ['cus_2'] };
+    const r = await renderScreen(<Billing bare />);
+    expect(r.button('Manage billing in Stripe')).toBeNull();
+    expect(r.button('Manage billing in Stripe for Jordan')).not.toBeNull();
+    await r.click('Manage billing in Stripe for Reese');
+    expect(mockPortalCalls).toEqual([{ returnPath: '/portal/billing', athleteId: 'a2' }]);
+    expect(assigned).toEqual([SESSION_URL]);
+    await r.unmount();
+  });
+
+  // Review UX-6: the build's sign-in link reaches the button as its fallback.
+  test("a failure offers the build's email sign-in link as the fallback", async () => {
+    mockLive = true;
+    mockPortalAnswer = async () => { throw Object.assign(new Error('Stripe said something.'), { reason: 'stripe-error' }); };
+    const r = await renderScreen(<Billing bare />);
+    await r.click('Manage billing in Stripe');
+    const link = [...r.container.querySelectorAll('a')].find((a) => a.textContent === PORTAL_FALLBACK_LINK);
+    expect(link.getAttribute('href')).toBe('https://billing.stripe.test/p/x');
+    await r.unmount();
+  });
+
+  test('the self-managed 18+ athlete is their own payer: the button opens their portal', async () => {
+    mockLive = true;
+    mockHub.data.household = { id: 'hh-self', name: 'Sam Rivera', anchorDay: 1, membership: null, stripeCustomerId: 'cus_self' };
+    mockHub.data.members = [{ ...mockHub.data.members[0], athleteId: 'a-self', name: 'Sam' }];
+    const r = await renderScreen(<Billing bare role="athlete" />);
+    await r.click('Manage billing in Stripe');
+    expect(mockPortalCalls).toEqual([{ returnPath: '/portal/billing' }]);
+    expect(assigned).toEqual([SESSION_URL]);
+    await r.unmount();
+  });
+});
+
+// Review F7/UX-2: the past-due and lapsed hero's Update payment method is the button a failed card needs most. It opens
+// the signed-in portal session; the email sign-in link is only its fallback after a failure.
+describe('the past-due and lapsed hero', () => {
+  const hero = (status, tone) => ({
+    status, tone, badge: { tone, label: status === 'lapsed' ? 'Restricted' : 'Retry 1 of 3' }, title: "A payment didn't go through",
+    body: 'Stripe retries automatically.', ladder: null, ladderAt: null, cta: 'Update payment method', paused: true, pendingAthletes: [],
+  });
+  const realOpen = window.open;
+  let opened;
+  beforeEach(() => {
+    opened = [];
+    window.open = (...args) => { opened.push(args); return null; };
+  });
+  afterEach(() => {
+    window.open = realOpen;
+  });
+
+  test('Update payment method opens the signed-in session, never the email sign-in link', async () => {
+    mockLive = true;
+    for (const [status, tone] of [['past_due', 'yellow'], ['past_due', 'red'], ['lapsed', 'red']]) {
+      mockPortalCalls = [];
+      assigned = [];
+      mockHub.data.status = hero(status, tone);
+      const r = await renderScreen(<Billing bare />);
+      await r.click('Update payment method');
+      expect(mockPortalCalls).toEqual([{ returnPath: '/portal/billing' }]);
+      expect(assigned).toEqual([SESSION_URL]);
+      await r.unmount();
+    }
+    expect(opened).toEqual([]);
+  });
+
+  test('a family with a customer never reads "contact the academy", even without the sign-in link; a failure offers the link under the hero', async () => {
+    mockLive = true;
+    mockHub.data.status = hero('past_due', 'red');
+    mockHub.data.portalUrl = null;
+    const r = await renderScreen(<Billing bare />);
+    expect(r.text()).not.toContain('To update your card, contact the academy');
+    expect(r.button('Update payment method')).not.toBeNull();
+    await r.unmount();
+    mockHub.data.portalUrl = 'https://billing.stripe.test/p/x';
+    mockPortalAnswer = async () => { throw Object.assign(new Error('Stripe said something.'), { reason: 'stripe-error' }); };
+    const failed = await renderScreen(<Billing bare />);
+    await failed.click('Update payment method');
+    const links = [...failed.container.querySelectorAll('a')].filter((a) => a.textContent === PORTAL_FALLBACK_LINK);
+    expect(links.map((a) => a.getAttribute('href'))).toEqual(['https://billing.stripe.test/p/x']);
+    expect(opened).toEqual([]);
+    await failed.unmount();
+  });
+
+  test('no Stripe customer at all: the hero says to contact the academy and offers no button', async () => {
+    mockHub.data.status = hero('past_due', 'yellow');
+    mockHub.data.household = { ...mockHub.data.household, stripeCustomerId: null };
+    const r = await renderScreen(<Billing bare />);
+    expect(r.text()).toContain('To update your card, contact the academy.');
+    expect(r.button('Update payment method')).toBeNull();
+    await r.unmount();
+  });
+
+  test('two Stripe customers: one hero button per customer, named for its athletes', async () => {
+    mockLive = true;
+    mockHub.data.status = hero('past_due', 'red');
+    mockHub.data.household = { ...mockHub.data.household, stripeCustomerIds: ['cus_1', 'cus_2'] };
+    mockHub.data.members[0] = { ...mockHub.data.members[0], customerIds: ['cus_1'] };
+    mockHub.data.members[1] = { ...mockHub.data.members[1], customerIds: ['cus_2'] };
+    const r = await renderScreen(<Billing bare />);
+    expect(r.button('Update payment method for Reese')).not.toBeNull();
+    await r.click('Update payment method for Jordan');
+    expect(mockPortalCalls).toEqual([{ returnPath: '/portal/billing', athleteId: 'a1' }]);
+    await r.unmount();
+  });
+
+  test('staff read the standing and get no card button', async () => {
+    mockHub.data.status = hero('past_due', 'red');
+    const r = await renderScreen(<Billing bare staff role="owner" householdId="h1" />);
+    expect(r.button('Update payment method')).toBeNull();
+    expect(r.text()).not.toContain('To update your card, contact the academy');
+    await r.unmount();
+  });
 });
 
 test('the contract line (the requirement, owner 2026-10-28) shows only with the Commitment Contract on (owner ruling 2026-09-30)', async () => {

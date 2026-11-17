@@ -5,6 +5,7 @@ import BillingSkeleton from '../components/BillingSkeleton';
 import BottomTabBar from '../components/BottomTabBar';
 import Button from '../components/Button';
 import FacilityCard from '../components/FacilityCard';
+import { ManageBillingButtons } from '../components/ManageBillingButton';
 import MemberSection from '../components/MemberSection';
 import PayButton from '../components/PayButton';
 import PhoneFrame from '../components/PhoneFrame';
@@ -21,6 +22,7 @@ import { ordinal, statusFor } from '../data/billingHub';
 import { facilitySourceLabel, householdFacility } from '../data/facility';
 import { FACILITY_ACCESS, windowCopyFor } from '../data/packages';
 import { CONNECTED_LINE, PAY_NOW, PENDING_PLAN_LINE, SINGLE_PLAN_LINE } from '../data/billingCopy';
+import { portalTargets } from '../data/billingPortal';
 import { contractEnabled } from '../data/contractFlag';
 import { householdOnHold, saleOpen, SINGLE_NOT_OPEN_LINE } from '../data/singleToken';
 import { firstOf, staffMayCancel } from '../data/staffCancel';
@@ -44,9 +46,13 @@ import useBillingHub from '../hooks/billing';
  * the plan (packages, billing day, catalogue prices marked pending).
  *
  * NO FAKE MONEY: no card art, no invoice rows, no amounts until Stripe data
- * exists. "Update payment method" opens the Stripe customer portal login
- * link when the academy configured one (REACT_APP_STRIPE_PORTAL_URL);
- * otherwise the hero says to contact the academy.
+ * exists. The past-due hero's "Update payment method" and "Manage billing in
+ * Stripe" on Card & invoices both sign the payer straight into Stripe (owner
+ * 2026-11-17, ManageBillingButton; review F7): shown once the family has a
+ * Stripe customer, one button per customer when there are several
+ * (data/billingPortal.js). The email sign-in link (REACT_APP_STRIPE_PORTAL_URL)
+ * is only the fallback after a failure; with no customer the hero says to
+ * contact the academy.
  *
  * Staff cancel (owner approved 2026-11-12): on the staff view the owner or
  * ops has a Cancel on each Booked or No-show row of a meter's "This period"
@@ -112,6 +118,8 @@ export default function Billing({
   const status = data?.status ?? null;
   const isEmpty = !loading && !error && members.length === 0;
   const self = !staff && role === 'athlete';
+  // Manage billing in Stripe: one button for the family, or one per Stripe customer (data/billingPortal.js).
+  const targets = portalTargets(data?.household, members);
   // A failing card or a lapsed membership: no Add a token on any meter.
   const onHold = householdOnHold(data?.household);
   // Staff cancel: the tapped row and its athlete while the sheet is open, then the line it left.
@@ -172,7 +180,7 @@ export default function Billing({
           </ErrorNotice>
         ) : (
           <>
-            <StatusHero status={status} portalUrl={staff ? null : data?.portalUrl} staff={staff} />
+            <StatusHero status={status} targets={targets} portalUrl={staff ? null : data?.portalUrl} staff={staff} />
             {status?.ladder ? (
               <Card large>
                 <SectionLabel style={{ marginBottom: 15 }}>Where this stands</SectionLabel>
@@ -234,7 +242,7 @@ export default function Billing({
             {/* ONE family card, never one per athlete (owner ruling 2026-09-30). */}
             <FacilityCard members={members} readOnly={staff} self={self} />
             {members.length ? <PlanCard household={data?.household} members={members} showPrices={staff} self={self} /> : null}
-            <ConnectionCard household={data?.household} portalUrl={data?.portalUrl} />
+            <ConnectionCard targets={targets} portalUrl={data?.portalUrl} staff={staff} />
             {family ? <StaffFamilyAdvanced householdId={householdId ?? data?.household?.id ?? null} anchorDay={data?.household?.anchorDay ?? 1} /> : null}
           </>
         )}
@@ -291,7 +299,7 @@ const SURFACES = {
  * single-token athlete (`perPurchase`) gets the line saying when instead of
  * a button until single tokens go on sale (owner ruling 2026-10-01).
  */
-function StatusHero({ status, portalUrl, staff = false }) {
+function StatusHero({ status, targets = [], portalUrl, staff = false }) {
   if (!status) return null;
   const s = SURFACES[status.tone] || SURFACES.default;
   // Staff read the standing; only the payer updates the card or pays.
@@ -322,15 +330,16 @@ function StatusHero({ status, portalUrl, staff = false }) {
           </div>
         ))
       ) : cta ? (
-        portalUrl ? (
-          <Button
+        // Past due or lapsed: the card update signs the payer straight into Stripe (review 2026-11-17 F7/UX-2).
+        targets.length ? (
+          <ManageBillingButtons
+            targets={targets}
+            label={cta}
             variant={status.tone === 'red' ? 'danger' : 'caution'}
             height={50}
-            style={{ marginTop: 15, boxShadow: 'none' }}
-            onClick={() => window.open(portalUrl, '_blank', 'noopener')}
-          >
-            {cta}
-          </Button>
+            fallbackUrl={portalUrl}
+            style={{ marginTop: 15 }}
+          />
         ) : (
           <Body size={12} tone={color.textSecondary} style={{ marginTop: 12 }}>
             To update your card, contact the academy. Booking reopens the same day the invoice clears.
@@ -463,20 +472,21 @@ function PlanCard({ household, members, showPrices = false, self = false }) {
   );
 }
 
-/** No fake money: what is and isn't connected, in one honest line. */
-function ConnectionCard({ household, portalUrl }) {
-  const connected = Boolean(household?.stripeCustomerId);
+/**
+ * No fake money: what is and isn't connected, in one honest line. The payer's
+ * Manage billing in Stripe opens their own portal session - one button, or one
+ * per Stripe customer (`targets`, data/billingPortal.js); the sign-in link
+ * (portalUrl) is only its fallback. Staff never open a family's portal.
+ */
+function ConnectionCard({ targets, portalUrl, staff = false }) {
+  const connected = targets.length > 0;
   return (
     <Card large>
       <SectionLabel style={{ marginBottom: 8 }}>Card &amp; invoices</SectionLabel>
       <Body size={12}>
         {connected ? CONNECTED_LINE : 'Card and invoices are managed in Stripe once you have paid.'}
       </Body>
-      {portalUrl ? (
-        <Button variant="outline" height={42} style={{ marginTop: 12, boxShadow: 'none' }} onClick={() => window.open(portalUrl, '_blank', 'noopener')}>
-          Manage billing in Stripe
-        </Button>
-      ) : null}
+      {connected && !staff ? <ManageBillingButtons targets={targets} fallbackUrl={portalUrl} /> : null}
     </Card>
   );
 }

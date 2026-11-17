@@ -1,11 +1,10 @@
 import React, { useState } from 'react';
 import { color } from '../tokens';
 import Button from './Button';
-import { Body, Card, SectionLabel } from './Primitives';
+import { Body } from './Primitives';
+import VerifyEmailCard, { refreshIdToken, withVerifiedRetry } from './VerifyEmailCard';
 import * as callables from '../hooks/callables';
 import useAuthSession from '../hooks/useAuthSession';
-import { auth } from '../../firebase';
-import { RESEND, VERIFIED, VERIFY_TITLE, verifyBody } from '../data/authCopy';
 
 /** D14 guard (20-frontend.md "Day-2 sequencing"): a partial callables export rejects plainly instead of throwing TypeError. */
 function notWired(name) {
@@ -33,26 +32,11 @@ export async function startCheckout({ athleteId, product = 'tier', go = (url) =>
 /**
  * One checkout attempt, plus ONE retry when the refusal is 'email-unverified'
  * but the account has verified since this tab's ID token was minted (UX
- * review P-04: the parent verifies in the mail app's tab, comes back, and the
- * old token still says unverified). Reload + forced token refresh - the same
- * pair "I've verified" uses, never the session refresh. Only a second
- * refusal reaches the caller.
+ * review P-04; VerifyEmailCard.js withVerifiedRetry). Only a second refusal
+ * reaches the caller.
  */
 async function checkoutWithFreshToken(args) {
-  try {
-    await startCheckout(args);
-  } catch (err) {
-    const fbUser = auth.currentUser;
-    if (!err || err.reason !== 'email-unverified' || !fbUser) throw err;
-    try {
-      await fbUser.reload();
-      if (!fbUser.emailVerified) throw err;
-      await fbUser.getIdToken(true);
-    } catch (refreshErr) {
-      throw err; // offline or still unverified: the verify card, as before
-    }
-    await startCheckout(args);
-  }
+  await withVerifiedRetry(() => startCheckout(args));
 }
 
 export default function PayButton({ athleteId, product = 'tier', label = 'Pay now', height = 50, variant = 'primary', email = null, go, style }) {
@@ -73,16 +57,9 @@ export default function PayButton({ athleteId, product = 'tier', label = 'Pay no
       setBusy(false);
     }
   };
-  // "I've verified": the function reads email_verified off the ID TOKEN, so
-  // reload the user and force a fresh token (what checkInvite does) - the
-  // session's refresh() alone keeps the stale claim and the card would loop.
-  // Deliberately NOT the session refresh: on the Success receipt that flips
-  // `provisioned` and RegistrationRoute would redirect mid-checkout.
+  // "I've verified": a fresh ID token, then the checkout again (VerifyEmailCard.js refreshIdToken).
   const verified = async () => {
-    const fbUser = auth.currentUser;
-    if (fbUser) {
-      try { await fbUser.reload(); await fbUser.getIdToken(true); } catch (err) { /* offline: the retry below reports it */ }
-    }
+    await refreshIdToken();
     await run();
   };
   const resend = async () => {
@@ -90,19 +67,8 @@ export default function PayButton({ athleteId, product = 'tier', label = 'Pay no
   };
 
   if (state && state.verify) {
-    // Full width whatever the caller's button slot is (the family page and
-    // Billing size the button to 132px; the card would wrap word by word).
-    // The callers' rows wrap, so the card drops under the athlete's name.
     return (
-      <Card tone="yellow" large style={{ flex: '1 1 100%', width: '100%' }}>
-        <SectionLabel tone={color.secondary} style={{ marginBottom: 8 }}>{VERIFY_TITLE}</SectionLabel>
-        <Body size={12}>{verifyBody(email || (user && user.email) || 'your email')}</Body>
-        {resent ? <Body size={11} tone={color.primary} style={{ marginTop: 6 }}>Sent again.</Body> : null}
-        <div style={{ display: 'flex', gap: 8, marginTop: 12 }}>
-          <Button variant="outline" height={44} onClick={resend} style={{ flex: 1, boxShadow: 'none' }}>{RESEND}</Button>
-          <Button height={44} loading={busy} onClick={verified} style={{ flex: 1 }}>{VERIFIED}</Button>
-        </div>
-      </Card>
+      <VerifyEmailCard email={email || (user && user.email) || 'your email'} resent={resent} busy={busy} onResend={resend} onVerified={verified} />
     );
   }
   return (
