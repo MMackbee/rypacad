@@ -1,9 +1,10 @@
 /**
  * The prepaid month (spec 4.2, rulings 0.11 and 0.13): before Nov 1 every
  * checkout prepays November 2026 in full; from Nov 1 it prepays the rest of
- * the current Chicago month, prorated by days remaining (tokens rounded up,
- * never 0), and the subscription first bills at 00:00 Chicago on the next
- * 1st. Pure; `now` is injectable.
+ * the current Chicago month, the PRICE prorated by days remaining while the
+ * tokens stay the package's full monthly count (owner ruling 2026-11-17:
+ * "Pro rate the rate, not the tokens"), and the subscription first bills at
+ * 00:00 Chicago on the next 1st. Pure; `now` is injectable.
  */
 'use strict';
 
@@ -48,7 +49,8 @@ function labelFor(periodKey) {
 }
 
 /**
- * Which month a checkout prepays, and for how much.
+ * Which month a checkout prepays, and for how much. Only the amount is
+ * prorated: `tokens` is always the package's full monthly count.
  * @param {Date|number} now The instant of checkout.
  * @param {{priceCents: number, tokens: ?number, prorate: (boolean|undefined)}}
  *     args The package's monthly price and token count (null == Elite).
@@ -76,8 +78,6 @@ function prepaidPeriodFor(now, args) {
   const daysRemaining = daysInMonth - Number(today.slice(8, 10)) + 1;
   if (daysRemaining >= daysInMonth) return out;
   out.amountCents = Math.round(args.priceCents * daysRemaining / daysInMonth);
-  out.tokens = out.tokens === null ? null :
-      Math.max(1, Math.ceil(out.tokens * daysRemaining / daysInMonth));
   out.prorated = true;
   return out;
 }

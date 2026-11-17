@@ -151,9 +151,11 @@ async function seed() {
       customerId: 'cus_vicfam'}});
   await B.commit();
 }
+// prepaidTokens '3' is a prorated count from a checkout opened before the
+// 2026-11-17 ruling: the webhook must ignore it and grant t-6's full 6.
 const META = (ath, pk) => ({householdId: 'novak', athleteId: ath,
   product: 'tier', packageId: pk, prepaidPeriodKey: '2026-11-01',
-  prepaidTokens: pk === 'elite' ? '' : '6'});
+  prepaidTokens: pk === 'elite' ? '' : '3'});
 // Lines in the order Stripe may list them on the checkout invoice: the
 // one-time prepaid line (a single instant) FIRST, then the subscription line
 // (review finding 7 - invoicePeriod must pick the subscription line).

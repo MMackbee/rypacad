@@ -220,8 +220,9 @@ day", and the owner has ruled that copy stays. The app has to match it before
 the season's first billing month starts on Nov 1:
 
 1. **Mid-month joiners** - built, not yet exercised. `functions/portal/prepaid.js`
-   (`PRORATE_JOINERS = true`, ruling 0.13) prorates the first charge and the
-   month's tokens by days remaining, but only once the Chicago date is on or
+   (`PRORATE_JOINERS = true`, ruling 0.13) prorates the first charge by days
+   remaining - the month's tokens stay in full (owner, 2026-11-17: "Pro rate
+   the rate, not the tokens") - but only once the Chicago date is on or
    after `SEASON_FIRST_PERIOD`, so nothing on production has run it. Unit
    tests exist (`prepaid.test.js`, `checkout.test.js`). Still to do: an
    end-to-end check with the clock past Nov 1 (emulator or a test-mode
