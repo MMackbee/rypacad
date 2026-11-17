@@ -52,6 +52,10 @@
  * The portal's Feedback button calls submitFeedback (portal/feedback.js,
  * 2026-10-15): signed-in, rate-limited, posted to a private Slack channel.
  *
+ * The facility door button (2026-11-17) adds unlockDoor (portal/door.js:
+ * opens the member door through Avigilon Alta) and signDoorRules
+ * (portal/door-rules.js: a family login signs the door rules once).
+ *
  * Mental performance consent (2026-11-05, portal/mental-consent.js and
  * portal/mental-consent-request.js) asks at the top of onBookingCreated and
  * in sessionReminders, and adds two functions:
@@ -127,6 +131,8 @@ const {moveBooking, sendMoveReconfirm} = require('./portal/move');
 const {rollTokenAhead} = require('./portal/roll-ahead');
 const {staffCancelBooking} = require('./portal/staff-cancel');
 const {staffBookSession} = require('./portal/staff-book');
+const {unlockDoor} = require('./portal/door');
+const {signDoorRules} = require('./portal/door-rules');
 const {isFreeComp} = require('./portal/move-decide');
 const {sessionStarted} = require('./portal/session-time');
 
@@ -179,6 +185,10 @@ exports.submitFeedback = submitFeedback;
 // the receipt for a portal signature. Both send mail.
 exports.requestMentalConsent = requestMentalConsent;
 exports.onMentalConsentSigned = mentalConsent.onMentalConsentSigned;
+// The facility door button (2026-11-17): unlockDoor binds ALTA_UNLOCK_URL,
+// which must exist before any functions deploy that includes it.
+exports.unlockDoor = unlockDoor;
+exports.signDoorRules = signDoorRules;
 
 // ==========================================================================
 // NOTIFICATION TRIGGERS (Sprint 14, contract v2.2)
