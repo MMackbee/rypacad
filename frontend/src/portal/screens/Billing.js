@@ -108,6 +108,11 @@ export default function Billing({
       : null
     : hook.data ?? held;
 
+  // The hub keeps its last data on screen while it re-reads - a cached
+  // revisit, the reload after a save - and that data may be minutes old: no
+  // control on it acts until the fresh read lands (review 2026-11-17).
+  const refreshing = !demo && (hook.isRefreshing === true || Boolean(held));
+
   const members = data?.members ?? [];
   const status = data?.status ?? null;
   const isEmpty = !loading && !error && members.length === 0;
@@ -171,7 +176,7 @@ export default function Billing({
             Your membership didn't load. Check your connection and try again.
           </ErrorNotice>
         ) : (
-          <>
+          <fieldset disabled={refreshing} aria-busy={refreshing || undefined} style={CONTROLS}>
             <StatusHero status={status} portalUrl={staff ? null : data?.portalUrl} staff={staff} />
             {status?.ladder ? (
               <Card large>
@@ -236,7 +241,7 @@ export default function Billing({
             {members.length ? <PlanCard household={data?.household} members={members} showPrices={staff} self={self} /> : null}
             <ConnectionCard household={data?.household} portalUrl={data?.portalUrl} />
             {family ? <StaffFamilyAdvanced householdId={householdId ?? data?.household?.id ?? null} anchorDay={data?.household?.anchorDay ?? 1} /> : null}
-          </>
+          </fieldset>
         )}
       </div>
       {cancelTarget ? (
@@ -276,6 +281,10 @@ export default function Billing({
     </PhoneFrame>
   );
 }
+
+// The page's controls, held while the hub re-reads: a disabled fieldset
+// disables every button and field inside it; laid out as the column was.
+const CONTROLS = { border: 0, margin: 0, padding: 0, minWidth: 0, display: 'flex', flexDirection: 'column', gap: 18 };
 
 const SURFACES = {
   default: { background: color.surface, border: color.border },
