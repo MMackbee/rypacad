@@ -23,6 +23,12 @@ const DOOR_TERMS_VERSION = 'door-2026-11-17';
 const STAFF_DOOR_ROLES = ['owner', 'ops'];
 /** `doorConfig/main` fields when absent (spec 4). */
 const DEFAULTS = {radiusM: DEFAULT_RADIUS_M, openSeconds: 5};
+/**
+ * The open time's whole-second range: Alta's Entry open duration (1 s to
+ * 10 min). firestore.rules and the app's data/doorAdmin.js keep the same.
+ */
+const OPEN_SECONDS_MIN = 1;
+const OPEN_SECONDS_MAX = 600;
 const FAMILY_ROLES = ['parent', 'athlete'];
 const LIVE_MODES = ['staff', 'all'];
 const ELITE_ID = 'elite';
@@ -180,16 +186,19 @@ function needsGuardian(user, athletes, today) {
 
 /**
  * The open time the app counts down: `openSeconds` when it is a whole
- * number in 1..30 (the range firestore.rules allows), else 5.
+ * number in OPEN_SECONDS_MIN..OPEN_SECONDS_MAX (the range firestore.rules
+ * allows), else 5.
  * @param {?Object} config `doorConfig/main`.
  * @return {number} Seconds.
  */
 function openSecondsOf(config) {
   const s = config && config.openSeconds;
-  return Number.isInteger(s) && s >= 1 && s <= 30 ? s : DEFAULTS.openSeconds;
+  return Number.isInteger(s) && s >= OPEN_SECONDS_MIN &&
+      s <= OPEN_SECONDS_MAX ? s : DEFAULTS.openSeconds;
 }
 
 module.exports = {
-  ADULT_AGE, DEFAULTS, DOOR_TERMS_VERSION, FAMILY_ROLES, REFUSALS,
-  STAFF_DOOR_ROLES, decide, doorFacility, needsGuardian, openSecondsOf,
+  ADULT_AGE, DEFAULTS, DOOR_TERMS_VERSION, FAMILY_ROLES, OPEN_SECONDS_MAX,
+  OPEN_SECONDS_MIN, REFUSALS, STAFF_DOOR_ROLES, decide, doorFacility,
+  needsGuardian, openSecondsOf,
 };

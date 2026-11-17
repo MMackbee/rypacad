@@ -82,6 +82,21 @@ test('the window follows the open time and never passes 10 s', async () => {
   }
 });
 
+test('a 180 s open time still coalesces only within 10 s', async () => {
+  // Minutes of open time (Alta's Entry open duration) never stretch the
+  // window: a press 10 s on is a real open again, and harmless.
+  const docs = withSeconds(180);
+  const alta = fakeAlta();
+  const first = await press(unlock('press-0001'), {docs, alta});
+  assert.deepEqual(first.result, {outcome: 'opened', openSeconds: 180});
+  const a = await press(unlock('press-0002'), {docs, alta, now: later(9999)});
+  assert.deepEqual(a.result, {outcome: 'coalesced', openSeconds: 180});
+  const b = await press(unlock('press-0003'),
+      {docs, alta, now: later(10000)});
+  assert.deepEqual(b.result, {outcome: 'opened', openSeconds: 180});
+  assert.equal(alta.calls.length, 2);
+});
+
 test('a refusal is never coalesced', async () => {
   const docs = familyDocs();
   await press(unlock('press-0001'), {docs});

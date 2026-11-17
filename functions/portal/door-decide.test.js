@@ -4,8 +4,9 @@
 const assert = require('node:assert/strict');
 const {test, run} = require('./tiny');
 const {todayISO} = require('./lib');
-const {DEFAULTS, DOOR_TERMS_VERSION, REFUSALS, STAFF_DOOR_ROLES, decide,
-  doorFacility} = require('./door-decide');
+const {DEFAULTS, DOOR_TERMS_VERSION, OPEN_SECONDS_MAX, OPEN_SECONDS_MIN,
+  REFUSALS, STAFF_DOOR_ROLES, decide, doorFacility, openSecondsOf} =
+    require('./door-decide');
 
 const TODAY = '2026-11-17';
 const ACADEMY = {lat: 44.9, lng: -93.4};
@@ -51,6 +52,19 @@ test('the contract constants', () => {
   assert.equal(DOOR_TERMS_VERSION, 'door-2026-11-17');
   assert.deepEqual(STAFF_DOOR_ROLES, ['owner', 'ops']);
   assert.deepEqual(DEFAULTS, {radiusM: 200, openSeconds: 5});
+  assert.equal(OPEN_SECONDS_MIN, 1);
+  assert.equal(OPEN_SECONDS_MAX, 600);
+});
+
+test('the open time: a whole number of seconds 1..600, else 5', () => {
+  // Alta's Entry open duration runs 1 s to 10 min (owner: "a few minutes").
+  for (const [s, want] of [[1, 1], [5, 5], [45, 45], [180, 180], [600, 600],
+    [601, 5], [0, 5], [-3, 5], [2.5, 5], ['30', 5], [NaN, 5], [null, 5],
+    [undefined, 5]]) {
+    assert.equal(openSecondsOf({openSeconds: s}), want, String(s));
+  }
+  assert.equal(openSecondsOf(null), 5);
+  assert.equal(openSecondsOf({}), 5);
 });
 
 test('a paid Elite parent with signed rules passes the check', () => {
