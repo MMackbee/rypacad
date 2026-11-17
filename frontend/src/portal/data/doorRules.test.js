@@ -9,12 +9,14 @@ import path from 'path';
 import {
   ACADEMY_PHONE,
   DIDNT_OPEN,
+  DOOR_NO_ANSWER,
   DOOR_RULE_LINE,
   DOOR_TERMS_VERSION,
   LOCATION_NOTE,
   cardShows,
   doorCopy,
   doorRulesSections,
+  refusalCopy,
 } from './doorRules';
 import { CONSENT_TERMS } from './consentTerms';
 
@@ -94,4 +96,14 @@ test('an adult athlete reads the rules in the second person', () => {
   expect(self[0].lines[0]).toContain('Access is for you and any other athlete in your household');
   expect(self.flatMap((s) => s.lines).join(' ')).not.toContain('or for the athlete you are responsible for');
   expect(self[0].lines).toContain(DOOR_RULE_LINE);
+});
+
+test('a refused press reads its own copy, else the server message, else the no-answer line', () => {
+  const noAnswer = "The door didn't answer. If you heard the lock click, go in. Otherwise try once more, or call or text (612) 234-1644.";
+  expect(refusalCopy('too-far', 'server words')).toBe('You need to be at the academy to unlock the door.');
+  expect(refusalCopy('not-set-up', 'The academy has not set the door up yet.')).toBe('The academy has not set the door up yet.');
+  // No reason: the SDK's own message ('internal') is never shown.
+  expect(refusalCopy(null, 'internal')).toBe(noAnswer);
+  expect(refusalCopy('no-access', '')).toBe(noAnswer);
+  expect(DOOR_NO_ANSWER).toBe(noAnswer);
 });

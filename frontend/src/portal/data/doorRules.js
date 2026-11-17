@@ -57,6 +57,18 @@ export function doorCopy(reason) {
   return typeof reason === 'string' && Object.prototype.hasOwnProperty.call(COPY, reason) ? COPY[reason] : null;
 }
 
+/**
+ * What a refused or failed press says: its own copy, else the server's plain
+ * message for a reason this file does not word, else (no reason at all: the
+ * network, a crash, the SDK's own message such as 'internal') the no-answer line.
+ */
+export function refusalCopy(reason, serverMessage) {
+  const own = doorCopy(reason);
+  if (own) return own;
+  if (reason && typeof serverMessage === 'string' && serverMessage.trim()) return serverMessage;
+  return NO_ANSWER;
+}
+
 /** The refusals a family can act on, or should know about: the card shows for these even though Unlock is off. */
 export const CARD_REASONS = ['sign-rules', 'guardian-rules', 'under-16', 'paused'];
 
