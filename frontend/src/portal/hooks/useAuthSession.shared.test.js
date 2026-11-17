@@ -96,7 +96,7 @@ test('a route wrapper mounted after the profile is known starts resolved: no loa
   expect(userReads('u-coach')).toBe(1);
 });
 
-test('sign-out clears the shared profile: a new session waits, and the next sign-in reads again', async () => {
+test('sign-out clears the shared profile: a new session starts signed out, and the next sign-in reads again', async () => {
   mockDocs['users/u-ops'] = { role: 'ops' };
   auth.currentUser = account('u-ops');
   const p = await mountProbe();
@@ -104,7 +104,7 @@ test('sign-out clears the shared profile: a new session waits, and the next sign
   await act(async () => { await p.now().signOut(); });
   expect(p.now()).toMatchObject({ user: null, loading: false });
   const after = await mountProbe();
-  expect(after.first()).toMatchObject({ user: null, loading: true });
+  expect(after.first()).toMatchObject({ user: null, provisioned: false, loading: false });
   await act(async () => { __emit(auth, account('u-ops')); });
   await flush();
   expect(p.now().user).toMatchObject({ role: 'ops' });

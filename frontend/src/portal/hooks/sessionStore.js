@@ -26,7 +26,7 @@ import { setCacheScope } from './resourceCache';
 
 export const PROFILE_TTL_MS = 5 * 60 * 1000;
 
-let scope = null;
+let scope; // undefined until the auth listener first reports; null once it said "signed out"
 let epoch = 0;
 let profile = null; // { uid, value, at, gen, n }
 let reads = 0;
@@ -38,7 +38,12 @@ const copy = (value) => ({ ...value });
 
 /** The uid this page is serving, or null (signed out, or not known yet). */
 export function sessionScope() {
-  return scope;
+  return scope || null;
+}
+
+/** True once the auth listener has reported no account (and none since). */
+export function signedOutKnown() {
+  return scope === null;
 }
 
 /**

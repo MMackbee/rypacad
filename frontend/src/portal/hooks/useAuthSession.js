@@ -16,7 +16,7 @@ import { clearResearchSkips } from './researchSkip';
 import { showsAssessmentsTab } from '../data/assessmentAccess';
 import { publishSelfManaged, resolveSelfManaged, useSelfManaged } from './selfManaged';
 import {
-  forgetSessionUser, peekSessionUser, publishSessionUser, resetSession, sessionUserStale, setSessionScope, subscribeSessionUser,
+  forgetSessionUser, peekSessionUser, publishSessionUser, resetSession, sessionUserStale, setSessionScope, signedOutKnown, subscribeSessionUser,
 } from './sessionStore';
 import { clearRoleHint, roleHintFor, writeRoleHint } from './roleHint';
 
@@ -33,8 +33,7 @@ function claimOnce(uid) {
   return claimFlights.get(key);
 }
 
-// The self-managed athlete (Mike S6 2026-09-30) lives in ./selfManaged.js;
-// both names stay importable from here.
+// The self-managed athlete (Mike S6 2026-09-30): ./selfManaged.js, re-exported.
 export { resolveSelfManaged, useSelfManaged };
 
 /**
@@ -134,9 +133,10 @@ function onVisible() {
   if (document.visibilityState === 'visible' && fbUser && peekSessionUser(fbUser.uid)) revalidate(fbUser);
 }
 
-/** A new instance starts from what the page already knows: resolved, or waiting on this account. */
+/** A new instance starts from what the page already knows: resolved, signed out, or waiting on this account. */
 function initialSession() {
   const fbUser = auth.currentUser;
+  if (!fbUser && signedOutKnown()) return SIGNED_OUT;
   const known = fbUser ? peekSessionUser(fbUser.uid) : null;
   if (known) return { user: withAuth(known.user, fbUser), provisioned: true, loading: false, error: null };
   return { user: null, provisioned: false, loading: true, error: null, pendingUid: fbUser ? fbUser.uid : null };
@@ -483,8 +483,7 @@ export default function useAuthSession({ variant } = {}) {
     provisioned: session.provisioned,
     loading: session.loading,
     error: session.error,
-    // While users/{uid} is in flight: the last verified { uid, role,
-    // specialistId } of THIS account, for the landing only (roleHint.js).
+    // While users/{uid} loads: THIS account's last verified role, for the landing only (roleHint.js).
     hint: session.loading ? roleHintFor(session.pendingUid) : null,
     signIn,
     signInWithEmail,
