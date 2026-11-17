@@ -23,7 +23,8 @@ import {
 import { assessmentAccess } from './data/assessmentAccess';
 import { attendanceReadOnlyFor } from './data/specialists';
 import { CombineRoute, loadCombine } from './CombineRoutes';
-import { StaffAthleteBookingsRoute } from './StaffBookingRoutes';
+import { StaffAthleteRedirect } from './StaffFamilyRoutes';
+import { staffAthletePath } from './data/staffFamily';
 import { AdminDoorRoute } from './DoorRoutes';
 import ResearchConfirmGate from './components/ResearchConfirmGate';
 
@@ -434,7 +435,9 @@ function AdminRoute({ onOpenAthlete, onSignOut }) {
     <AdminDashboard
       bare
       role={role}
-      onOpenAthlete={onOpenAthlete}
+      // 2026-11-16 (one family page): an athlete row on Admin - Outstanding,
+      // the consent tracker - lands on the athlete's FAMILY page.
+      onOpenAthlete={onOpenAthlete ? (id) => navigate(staffAthletePath(id)) : undefined}
       onOpenHousehold={(id) => navigate(`/portal/admin/households/${id}`)}
       onOpenSignups={() => navigate('/portal/admin/signups')}
       onOpenScholarships={owner ? () => navigate('/portal/admin/scholarships') : undefined}
@@ -1129,8 +1132,10 @@ export default function PortalRoutes() {
           </RequireRole>
         }
       />
-      {/* Staff booking (2026-11-13): one athlete's bookings, from Admin's Manage bookings card. */}
-      <Route path="admin/athletes/:athleteId/bookings" element={<RequireRole roles={['ops', 'owner']}><StaffAthleteBookingsRoute /></RequireRole>} />
+      {/* 2026-11-16 (one family page): a click on an athlete lands on the family
+          page, opened on them. The old athlete-bookings link goes there too. */}
+      <Route path="admin/athletes/:athleteId" element={<RequireRole roles={['ops', 'owner']}><StaffAthleteRedirect /></RequireRole>} />
+      <Route path="admin/athletes/:athleteId/bookings" element={<RequireRole roles={['ops', 'owner']}><StaffAthleteRedirect /></RequireRole>} />
       {/* The facility door (2026-11-17): the switch, the location, the staff unlock, activity and pauses. */}
       <Route path="admin/door" element={<RequireRole roles={['ops', 'owner']}><AdminDoorRoute /></RequireRole>} />
       <Route

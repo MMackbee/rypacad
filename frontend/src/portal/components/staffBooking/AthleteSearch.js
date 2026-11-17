@@ -27,13 +27,14 @@ import {
  * which says it cannot be booked).
  *
  * @param {(athlete: object) => void} onPick  searchAthletes' row.
+ * @param {string} [label]  The field's label (Admin's card: "Find a family or athlete").
  */
-export default function AthleteSearch({ onPick, disabledIds = [], disabledLabel = ON_THIS_SESSION, armed = false, disableTest = false }) {
+export default function AthleteSearch({ onPick, disabledIds = [], disabledLabel = ON_THIS_SESSION, armed = false, disableTest = false, label = FIND_ATHLETE_LABEL }) {
   const [query, setQuery] = useState('');
   const [focused, setFocused] = useState(false);
   return (
     <div onFocus={() => setFocused(true)}>
-      <Field label={FIND_ATHLETE_LABEL} placeholder={FIND_ATHLETE_PLACEHOLDER} value={query} onChange={setQuery} />
+      <Field label={label} placeholder={FIND_ATHLETE_PLACEHOLDER} value={query} onChange={setQuery} />
       {armed || focused ? (
         <Results query={query} onPick={onPick} disabledIds={disabledIds} disabledLabel={disabledLabel} disableTest={disableTest} />
       ) : null}

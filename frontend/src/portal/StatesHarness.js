@@ -188,7 +188,8 @@ export const SCREEN_STATES = [
              // card - ops/owner get the editable package pickers, coach/
              // mental see the same facts read-only, parent (the default
              // above) sees nothing here (their own view is Membership.js).
-             ['populated', 'Ops · membership editor', { role: 'ops' }],
+             // 2026-11-16 (one family page): read-only for ops and owner too, with the link to the family page.
+             ['populated', 'Ops · family page link', { role: 'ops' }],
              ['populated', 'Coach · membership read-only', { role: 'coach' }],
              // 2026-10-28 (mental tools, spec 4.3): parents log for their
              // kids. The contract card renders only with

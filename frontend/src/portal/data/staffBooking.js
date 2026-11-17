@@ -111,9 +111,10 @@ const SEARCH_MAX = 8;
 
 /**
  * The directory's athletes (useHouseholdsDirectory: households, each with
- * its athletes) whose name matches every word typed: each word, in any
- * case, must start some word of the name ("jor whit" finds Jordan
- * Whitfield; "ord" finds nobody). Sorted by name, at most eight, each
+ * its athletes) who match every word typed: each word, in any case, must
+ * start some word of the athlete's name, the family's name or the parent's
+ * on file ("jor whit" finds Jordan Whitfield; "whit" every Whitfield
+ * athlete; "ord" finds nobody). Sorted by name, at most eight, each
  * `{ athleteId, name, householdId, householdName, packageName, test }`;
  * `test` when the athlete or the household is a test one. A blank query
  * finds nothing.
@@ -125,7 +126,9 @@ export function searchAthletes(directory, query) {
   for (const h of directory || []) {
     for (const a of (h && h.athletes) || []) {
       if (!a) continue;
-      const name = wordsOf(a.name);
+      // 2026-11-16: the family's name and the parent on file count too, so
+      // "schmidt" or "ben" finds Britta, whose own record is a first name.
+      const name = [...wordsOf(a.name), ...wordsOf(h.name), ...wordsOf(h.guardianName)];
       if (!words.every((w) => name.some((n) => n.startsWith(w)))) continue;
       found.push({
         athleteId: a.id,

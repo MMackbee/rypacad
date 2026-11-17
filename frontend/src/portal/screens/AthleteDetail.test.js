@@ -110,27 +110,20 @@ describe('the staff handicap edit', () => {
   const detail = (over = {}) => ({ data: { athlete: { ...athlete, ...over }, history: [], checklist: [], hasEnoughData: false }, loading: false, error: null });
   beforeEach(() => { mockSetHandicap = jest.fn(async (args) => args); });
 
-  test('ops and owner see the value on file and can change it; the write names this athlete', async () => {
+  // 2026-11-16 (one family page): the edit moved to the family page's Manage
+  // section (components/staffFamily/StaffAthletePanel.test.js); this page
+  // sends the owner and ops there.
+  test('ops and owner: no edit on this page either, and the way to the family page', async () => {
     for (const role of ['ops', 'owner']) {
       mockDetail = detail();
-      mockSetHandicap.mockClear();
       const r = await renderScreen(<AthleteDetail bare athleteId="a1" role={role} backLabel="Admin" onBack={() => {}} />);
-      expect(r.text()).toContain('On file14');
-      await r.fill('Set handicap', '5');
-      await r.click('Save handicap');
-      expect(mockSetHandicap).toHaveBeenCalledTimes(1);
-      expect(mockSetHandicap).toHaveBeenCalledWith({ athleteId: 'a1', handicap: 5 });
-      expect(r.text()).toContain('Handicap saved');
-      expect(r.text()).toContain('On file5');
+      expect(r.container.querySelector('[aria-label="Set handicap"]')).toBeNull();
+      expect(r.button('Save handicap')).toBeNull();
+      expect(r.button('Save membership')).toBeNull();
+      expect(r.button('Manage on the family page')).not.toBeNull();
       await r.unmount();
     }
-  });
-
-  test('none on file reads None', async () => {
-    mockDetail = detail({ handicap: null });
-    const r = await renderScreen(<AthleteDetail bare athleteId="a1" role="ops" backLabel="Admin" onBack={() => {}} />);
-    expect(r.text()).toContain('On fileNone');
-    await r.unmount();
+    expect(mockSetHandicap).not.toHaveBeenCalled();
   });
 
   test('a coach, a mental coach, a parent and an athlete see no handicap edit', async () => {

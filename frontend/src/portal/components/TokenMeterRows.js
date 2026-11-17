@@ -6,7 +6,8 @@ import StaffRowActions from './staffBooking/StaffRowActions';
 import { Body } from './Primitives';
 import { longDayLabel } from '../data/calendar';
 import { firstOf } from '../data/staffCancel';
-import { staffRowLabel } from '../data/staffBookingCopy';
+import { CANCEL_IN_CALENDLY, staffRowLabel } from '../data/staffBookingCopy';
+import { inCalendly } from '../data/staffFamily';
 
 /**
  * The evidence under a TokenMeter (components/TokenMeter.js): every session
@@ -63,6 +64,10 @@ export function Row({ row, last, first, periodStart = null, onCancel = null, onM
           {row.time ? ` · ${row.time}` : ''}
         </div>
         <div style={{ font: `400 11px ${font.body}`, color: color.textTertiary, marginTop: 2 }}>{row.label}</div>
+        {/* The staff view only (2026-11-16): a Calendly 1:1 has no Cancel here - say where it changes. */}
+        {(onMove || onCancel) && inCalendly(row, periodStart) ? (
+          <div style={{ font: `500 11px ${font.body}`, color: color.textSecondary, marginTop: 2 }}>{CANCEL_IN_CALENDLY}</div>
+        ) : null}
       </div>
       <StatusBadge tone={badge.tone}>{badge.label}</StatusBadge>
       <StaffRowActions

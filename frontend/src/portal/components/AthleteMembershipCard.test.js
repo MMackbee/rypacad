@@ -1,6 +1,6 @@
 import React from 'react';
 import { renderScreen } from '../screens/testRender';
-import AthleteMembershipCard from './AthleteMembershipCard';
+import AthleteMembershipCard, { StaffMembershipEditor } from './AthleteMembershipCard';
 
 // Owner ruling 2026-09-30: facility access is the FAMILY's - one add-on or a
 // live Elite membership covers every athlete in the household - so the staff
@@ -51,10 +51,36 @@ test('the household did not load (a coach cannot list it): the athlete\'s own fl
   await due.unmount();
 });
 
-test('the editor (ops, owner) shows the family\'s access beside its own switch; a parent sees no card and asks for nothing', async () => {
+// 2026-11-16 (one family page): the athlete page's card is read-only for the
+// owner and ops too, with the way to the family page; the editor is mounted
+// there (StaffMembershipEditor).
+test('ops and owner read the same facts and get the link to the family page, opened on this athlete', async () => {
   mockFamily = loaded({ access: true, source: 'elite', holderId: null, eliteId: 'sibling' });
-  const ops = await renderScreen(<AthleteMembershipCard athleteId="a1" athlete={athlete()} role="ops" />);
+  for (const role of ['ops', 'owner']) {
+    const r = await renderScreen(<AthleteMembershipCard athleteId="a1" athlete={athlete()} role={role} />, { path: '/portal/athlete/a1' });
+    expect(r.text()).toContain('Package6 tokens');
+    expect(r.text()).toContain('Facility accessYes - Elite');
+    expect(r.text()).toContain('Package, tokens, bookings, handicap and consent are on the family page.');
+    expect(r.button('Save membership')).toBeNull();
+    expect(r.text()).not.toContain('Issue tokens');
+    await r.click('Manage on the family page');
+    expect([r.location().pathname, r.location().search]).toEqual(['/portal/admin/households/h1', '?athlete=a1']);
+    await r.unmount();
+  }
+  const coach = await renderScreen(<AthleteMembershipCard athleteId="a1" athlete={athlete()} role="coach" />);
+  expect(coach.button('Manage on the family page')).toBeNull();
+  expect(coach.text()).not.toContain('are on the family page');
+  await coach.unmount();
+});
+
+test('the editor (the family page) shows the family\'s access beside its own switch; a parent sees no card and asks for nothing', async () => {
+  mockFamily = loaded({ access: true, source: 'elite', holderId: null, eliteId: 'sibling' });
+  const ops = await renderScreen(<StaffMembershipEditor athleteId="a1" athlete={athlete()} />);
   expect(ops.text()).toContain('Family facility accessYes - Elite');
+  expect(ops.text()).toContain('Save membership');
+  expect(ops.text()).toContain('Issue tokens');
+  // The family's own settings are under Advanced, once, not under each athlete.
+  expect(ops.text()).not.toContain('Save Stripe ids');
   await ops.unmount();
   mockAsked.length = 0;
   const parent = await renderScreen(<AthleteMembershipCard athleteId="a1" athlete={athlete()} role="parent" />);

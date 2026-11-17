@@ -3,7 +3,6 @@ import { color, font, radius } from '../tokens';
 import AssessmentsEntryCard from '../components/AssessmentsEntryCard';
 import AthleteMembershipCard from '../components/AthleteMembershipCard';
 import BottomTabBar from '../components/BottomTabBar';
-import HandicapCard from '../components/HandicapCard';
 import { Avatar } from '../components/MediaPlaceholder';
 import ParentContractCard from '../components/ParentContractCard';
 import ConsentDetailCard from '../components/consent/ConsentDetailCard';
@@ -17,6 +16,7 @@ import { loginStatusLine } from '../data/billingCopy';
 import { contractEnabled } from '../data/contractFlag';
 import { reservedTag } from '../data/reserved';
 import { SEED_COMBINE_ATHLETE_ID } from '../data/combine';
+import { staffFamilyRole } from '../data/staffFamily';
 
 /**
  * 09 · Athlete Detail - parent view of one linked athlete.
@@ -92,9 +92,10 @@ export default function AthleteDetail({ variant = 'populated', bare = false, ath
       footer={<BottomTabBar role={role} active={role === 'parent' ? 'home' : undefined} />}
     >
       <div style={{ padding: '0 22px 24px', display: 'flex', flexDirection: 'column', gap: 12 }}>
+        {/* 2026-11-16 (one family page): read-only here for every staff role; the
+            owner and ops change the package, tokens, handicap and consent on
+            the family page, which this card links to. */}
         <AthleteMembershipCard athleteId={athleteId} athlete={athlete} role={role} />
-        {/* The handicap on file, ops and owner only: a reserved block is booked on it. */}
-        <HandicapCard athleteId={athleteId} athlete={athlete} role={role} />
         {/* Assessments (2026-10-14 spec 5): coaches, Phil, ops and owner open
             this athlete's results; the route passes the handler only to them. */}
         {onOpenAssessments ? (
@@ -111,8 +112,9 @@ export default function AthleteDetail({ variant = 'populated', bare = false, ath
             <Body size={12}>{loginStatusLine(athlete)}</Body>
           </Card>
         ) : null}
-        {/* Yannick's consent (2026-10-30): the parent's line; ops and owner the status and paper signatures. */}
-        <ConsentDetailCard athleteId={athleteId} role={role} demoPaperOpen={demoPaperOpen} />
+        {/* Yannick's consent (2026-10-30): the parent's line. The owner's and ops' status and paper
+            signatures are on the family page; `demoPaperOpen` is the states harness showing that sheet. */}
+        {staffFamilyRole(role) && !demoPaperOpen ? null : <ConsentDetailCard athleteId={athleteId} role={role} demoPaperOpen={demoPaperOpen} />}
         <CombineCard athleteId={athleteId ?? SEED_COMBINE_ATHLETE_ID} to={`/portal/combine/${athleteId ?? SEED_COMBINE_ATHLETE_ID}`} />
         {/* Parents log for their kids (owner, 2026-10-28; spec 4.3): the
             child's month calendar and Log today sheet, behind the switch. */}

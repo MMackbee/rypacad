@@ -279,16 +279,17 @@ test('the Facility door card opens the door screen, for owner and ops; hidden wi
   await none.unmount();
 });
 
-// Staff booking (owner 2026-11-13, spec 01-spec-admin-booking.md 10.2): find any athlete from Admin.
-test('Manage bookings sits right after Outstanding, for owner and ops', async () => {
+// The single family page (owner 2026-11-16; it was "Manage bookings", 2026-11-13): find any family from Admin.
+test('Find a family sits right after Outstanding, for owner and ops', async () => {
   for (const role of ['owner', 'ops']) {
     const r = await renderScreen(<AdminDashboard bare role={role} />);
     const text = r.text();
-    const at = text.indexOf('Manage bookings');
+    const at = text.indexOf('Find a family');
     expect(text.indexOf('Outstanding')).toBeGreaterThanOrEqual(0);
     expect(at).toBeGreaterThan(text.indexOf('Outstanding'));
     expect(at).toBeLessThan(text.indexOf('Sign-ups'));
-    expect(text).toContain('Add, move or cancel a session for any athlete.');
+    expect(text).toContain("Search by an athlete's or the family's name. Everything for the family is on one page.");
+    expect(text).not.toContain('Manage bookings');
     await r.unmount();
   }
 });

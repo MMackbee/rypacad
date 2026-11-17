@@ -14,6 +14,7 @@ import { ALL_PACKAGES, FACILITY_ACCESS, packageById, periodFallback, periodFor }
 import { packageSwitchWarning } from '../data/singleToken';
 import { addDaysISO, todayISO } from '../data/calendar';
 import { facilitySourceLabel, householdFacility } from '../data/facility';
+import { MANAGE_ON_FAMILY_PAGE, MANAGE_ON_FAMILY_PAGE_BODY, familyPagePath } from '../data/staffFamily';
 
 /**
  * AthleteDetail's staff-side Membership card (Sprint 12 pin, TEAM.md
@@ -44,6 +45,14 @@ import { facilitySourceLabel, householdFacility } from '../data/facility';
  * save through useHouseholdSettings(householdId).setStripeIds(...) - an
  * EXISTING hook gaining a method, coded directly per the same lesson's other
  * half, same as setPeriodAnchorDay above.
+ *
+ * 2026-11-16 (owner: one family page, every action on it): the editors left
+ * the athlete page. This card is read-only for every staff role now - ops
+ * and owner get a link to the family page beside it - and its pieces are
+ * what the family page mounts: `StaffMembershipEditor` (package, facility
+ * access, Issue tokens) under each athlete (staffFamily/StaffAthletePanel),
+ * `PeriodAnchorEditor` and `StripeIdsEditor` once per household under
+ * Advanced (staffFamily/StaffFamilyAdvanced).
  */
 
 const PACKAGE_SELECT_OPTIONS = ALL_PACKAGES.map((p) => ({
@@ -66,45 +75,58 @@ export default function AthleteMembershipCard({ athleteId, athlete, role }) {
   const familyFacility = family.access ? `Yes - ${facilitySourceLabel(family)}` : 'No';
 
   const currentPackageId = athlete?.packageId ?? null;
+  const packageName = ALL_PACKAGES.find((p) => p.id === currentPackageId)?.name ?? '—';
 
-  if (!canEdit) {
-    const packageName = ALL_PACKAGES.find((p) => p.id === currentPackageId)?.name ?? '—';
-    return (
+  return (
+    <>
       <Card large>
         <SectionLabel style={{ marginBottom: 12 }}>Membership</SectionLabel>
         <ReadOnlyRow label="Package" value={packageName} />
         <ReadOnlyRow label="Facility access" value={familyFacility} style={{ marginTop: 8 }} />
+        {canEdit ? (
+          <Body size={11} tone={color.textTertiary} style={{ marginTop: 10 }}>
+            {MANAGE_ON_FAMILY_PAGE_BODY}
+          </Body>
+        ) : null}
       </Card>
-    );
-  }
-
-  return (
-    <>
-      <MembershipEditor
-        athleteId={athleteId}
-        currentPackageId={currentPackageId}
-        householdId={athlete?.householdId ?? null}
-        initialAnchorDay={athlete?.periodAnchorDay ?? 1}
-        initialFacilityAccess={Boolean(athlete?.facilityAccess)}
-        hasConsent={Boolean(athlete?.facilityAccessConsent)}
-        familyFacility={familyFacility}
-      />
-      {athlete?.householdId ? <HouseholdBillingLink householdId={athlete.householdId} /> : null}
+      {canEdit && athlete?.householdId ? <FamilyPageLink householdId={athlete.householdId} athleteId={athleteId} /> : null}
     </>
   );
 }
 
 /**
- * Sprint 17 (contract v2.5): the staff view of the household's Billing hub -
- * tokens left per athlete and the Stripe standing, exactly what the parent
- * sees. Same green-link row idiom as the Settings rows.
+ * The membership editor for one athlete on the family page: package,
+ * facility access and Issue tokens, off the athlete-detail record. The
+ * family's facility access is named beside the athlete's own switch.
  */
-function HouseholdBillingLink({ householdId }) {
+export function StaffMembershipEditor({ athleteId, athlete }) {
+  const household = useHouseholdFacility(athlete?.householdId ?? null);
+  const own = { id: athleteId, packageId: athlete?.packageId, billing: { status: athlete?.billingStatus }, facilityAccess: athlete?.facilityAccess === true };
+  const family = household.data?.access ? household.data : householdFacility([own]);
+  return (
+    <MembershipEditor
+      athleteId={athleteId}
+      currentPackageId={athlete?.packageId ?? null}
+      anchorDay={athlete?.periodAnchorDay ?? 1}
+      initialFacilityAccess={Boolean(athlete?.facilityAccess)}
+      hasConsent={Boolean(athlete?.facilityAccessConsent)}
+      familyFacility={family.access ? `Yes - ${facilitySourceLabel(family)}` : 'No'}
+    />
+  );
+}
+
+/**
+ * The family page, opened on this athlete (2026-11-16): where the owner and
+ * ops change anything about them. Same green-link row idiom as the Settings
+ * rows.
+ */
+function FamilyPageLink({ householdId, athleteId }) {
   const navigate = useNavigate();
   return (
     <button
       type="button"
-      onClick={() => navigate(`/portal/admin/households/${householdId}`)}
+      aria-label={MANAGE_ON_FAMILY_PAGE}
+      onClick={() => navigate(familyPagePath(householdId, athleteId))}
       style={{
         background: 'none',
         border: 'none',
@@ -118,7 +140,7 @@ function HouseholdBillingLink({ householdId }) {
         cursor: 'pointer',
       }}
     >
-      <span>View household billing — tokens left, standing</span>
+      <span>{MANAGE_ON_FAMILY_PAGE}</span>
       <span aria-hidden="true" style={{ color: color.textTertiary }}>
         ›
       </span>
@@ -135,7 +157,7 @@ function ReadOnlyRow({ label, value, style }) {
   );
 }
 
-function MembershipEditor({ athleteId, currentPackageId, householdId, initialAnchorDay, initialFacilityAccess = false, hasConsent = false, familyFacility = 'No' }) {
+function MembershipEditor({ athleteId, currentPackageId, anchorDay = 1, initialFacilityAccess = false, hasConsent = false, familyFacility = 'No' }) {
   const [packageId, setPackageId] = useState(currentPackageId ?? '');
   // v2.0.1 (Sprint 18): the $300 facility-access add-on, switchable only
   // once the signed waiver is on the athlete (rules enforce the same).
@@ -231,19 +253,7 @@ function MembershipEditor({ athleteId, currentPackageId, householdId, initialAnc
 
       <div style={{ height: 1, background: color.rule, margin: '16px 0' }} />
 
-      <PeriodAnchorEditor householdId={householdId} initialAnchorDay={initialAnchorDay} />
-
-      <div style={{ height: 1, background: color.rule, margin: '16px 0' }} />
-
-      <IssueTokensEditor
-        athleteId={athleteId}
-        packageId={currentPackageId}
-        anchorDay={initialAnchorDay}
-      />
-
-      <div style={{ height: 1, background: color.rule, margin: '16px 0' }} />
-
-      <StripeIdsEditor householdId={householdId} />
+      <IssueTokensEditor athleteId={athleteId} packageId={currentPackageId} anchorDay={anchorDay} />
     </Card>
   );
 }
@@ -337,7 +347,7 @@ function IssueTokensEditor({ athleteId, packageId, anchorDay }) {
  * field) — blank renders as visibly unset rather than a fabricated value,
  * per the team's own "unset values render as visibly unset" rule.
  */
-function StripeIdsEditor({ householdId }) {
+export function StripeIdsEditor({ householdId }) {
   const [stripeCustomerId, setStripeCustomerId] = useState('');
   const [stripeSubscriptionId, setStripeSubscriptionId] = useState('');
   const settings = useHouseholdSettings(householdId);
@@ -395,7 +405,7 @@ function StripeIdsEditor({ householdId }) {
  * Period anchor day (1-28) — the household's token-period start (contract
  * v2.0 pin B), written through useHouseholdSettings(householdId).
  */
-function PeriodAnchorEditor({ householdId, initialAnchorDay }) {
+export function PeriodAnchorEditor({ householdId, initialAnchorDay }) {
   const [anchorDay, setAnchorDay] = useState(initialAnchorDay);
   // The athlete record (and its household's anchor) loads after mount.
   React.useEffect(() => {

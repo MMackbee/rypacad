@@ -1,6 +1,7 @@
-import React, { useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import React, { useRef, useState } from 'react';
+import { useLocation, useNavigate } from 'react-router-dom';
 import { color, font, radius } from '../tokens';
+import BillingSkeleton from '../components/BillingSkeleton';
 import BottomTabBar from '../components/BottomTabBar';
 import Button from '../components/Button';
 import FacilityCard from '../components/FacilityCard';
@@ -8,10 +9,11 @@ import MemberSection from '../components/MemberSection';
 import PayButton from '../components/PayButton';
 import PhoneFrame from '../components/PhoneFrame';
 import SequenceLadder from '../components/SequenceLadder';
-import SkeletonCard, { SkeletonBar } from '../components/Skeleton';
 import StaffCancelSheet from '../components/StaffCancelSheet';
 import StaffAddSheet from '../components/staffBooking/StaffAddSheet';
 import StaffMoveSheet from '../components/staffBooking/StaffMoveSheet';
+import StaffAthletePanel from '../components/staffFamily/StaffAthletePanel';
+import StaffFamilyAdvanced from '../components/staffFamily/StaffFamilyAdvanced';
 import StatusBadge from '../components/StatusBadge';
 import TokenMeter from '../components/TokenMeter';
 import { BackLink, Banner, Body, Card, ErrorNotice, ScreenTitle, SectionLabel } from '../components/Primitives';
@@ -24,6 +26,7 @@ import { householdOnHold, saleOpen, SINGLE_NOT_OPEN_LINE } from '../data/singleT
 import { firstOf, staffMayCancel } from '../data/staffCancel';
 import { staffMayBook } from '../data/staffBooking';
 import { BOOK_A_SESSION, testAthleteLine } from '../data/staffBookingCopy';
+import { FAMILY_STAFF_LABEL, athleteFocus, staffFamilyRole } from '../data/staffFamily';
 import useBillingHub from '../hooks/billing';
 
 /**
@@ -58,6 +61,15 @@ import useBillingHub from '../hooks/billing';
  * never move (plan decision 6). All three sheets leave their line in the
  * same place.
  *
+ * The family page (owner 2026-11-16: "I click on a family in 3 different
+ * spots and get different options in each one"): the staff view is the ONE
+ * place the owner and ops work on a family. Under each athlete's meter and
+ * Book a session sits "Manage {name}" (StaffAthletePanel: package, facility
+ * access, Issue tokens, handicap, consent, bookings further out, the links
+ * to results, combine and the coaching view), and at the foot Advanced
+ * (StaffFamilyAdvanced: billing day, Stripe ids). `?athlete=<id>` opens the
+ * page on one athlete (data/staffFamily.js).
+ *
  * @param {'populated'|'past_due'|'lapsed'|'loading'|'error'|'empty'} variant
  *   Harness-only. Live routes pass nothing.
  */
@@ -75,15 +87,26 @@ export default function Billing({
   const hookVariant = variant === 'past_due' || variant === 'lapsed' ? variant : 'populated';
   const hook = useBillingHub({ variant: hookVariant, householdId });
   const navigate = useNavigate();
+  const location = useLocation();
+  // The family page: the staff view, for the owner and ops.
+  const family = staff && staffFamilyRole(role);
+  const focusId = family ? athleteFocus(location.search) : null;
+
+  // The family page keeps showing what it had while the hub reloads after a
+  // save (Issue tokens, a package, the handicap all bump it): dropping to the
+  // skeleton would close the open Manage section and lose its "saved" note.
+  const kept = useRef(null);
+  if (family && hook.data) kept.current = { householdId, data: hook.data };
+  const held = family && !hook.data && !hook.error && kept.current?.householdId === householdId ? kept.current.data : null;
 
   const demo = variant === 'loading' || variant === 'error' || variant === 'empty';
-  const loading = demo ? variant === 'loading' : hook.loading;
+  const loading = demo ? variant === 'loading' : hook.loading && !held;
   const error = demo ? (variant === 'error' ? new Error("Billing didn't load.") : null) : hook.error;
   const data = demo
     ? variant === 'empty'
       ? { household: null, members: [], status: statusFor(null), portalUrl: null }
       : null
-    : hook.data;
+    : hook.data ?? held;
 
   const members = data?.members ?? [];
   const status = data?.status ?? null;
@@ -124,7 +147,7 @@ export default function Billing({
           {onBack ? <BackLink onClick={onBack}>‹ Admin</BackLink> : null}
           <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginTop: onBack ? 8 : 0 }}>
             <div style={{ flex: 1, minWidth: 0 }}>
-              {staff ? <SectionLabel style={{ marginBottom: 4 }}>Billing · staff view</SectionLabel> : null}
+              {staff ? <SectionLabel style={{ marginBottom: 4 }}>{FAMILY_STAFF_LABEL}</SectionLabel> : null}
               <ScreenTitle size={22}>{staff ? data?.household?.name || 'Household' : 'Billing'}</ScreenTitle>
             </div>
             {status && !loading && !error ? <StatusBadge tone={status.badge.tone}>{status.badge.label}</StatusBadge> : null}
@@ -194,6 +217,16 @@ export default function Billing({
                       onOpen={() => navigate(self ? '/portal/contract' : `/portal/athlete/${member.athleteId}`)}
                     />
                   ) : null}
+                  {/* The family page (2026-11-16): everything else staff do for this athlete. */}
+                  {family ? (
+                    <StaffAthletePanel
+                      member={member}
+                      role={role}
+                      focus={focusId === member.athleteId}
+                      onMoveRow={onMoveRow && !isTest(member) ? onMoveRow(member) : null}
+                      onCancelRow={onCancelRow ? onCancelRow(member) : null}
+                    />
+                  ) : null}
                 </MemberSection>
               ))
             )}
@@ -202,6 +235,7 @@ export default function Billing({
             <FacilityCard members={members} readOnly={staff} self={self} />
             {members.length ? <PlanCard household={data?.household} members={members} showPrices={staff} self={self} /> : null}
             <ConnectionCard household={data?.household} portalUrl={data?.portalUrl} />
+            {family ? <StaffFamilyAdvanced householdId={householdId ?? data?.household?.id ?? null} anchorDay={data?.household?.anchorDay ?? 1} /> : null}
           </>
         )}
       </div>
@@ -444,25 +478,5 @@ function ConnectionCard({ household, portalUrl }) {
         </Button>
       ) : null}
     </Card>
-  );
-}
-
-function BillingSkeleton() {
-  return (
-    <div role="status" aria-label="Loading billing" style={{ display: 'flex', flexDirection: 'column', gap: 18 }}>
-      <SkeletonCard large height={118} />
-      {[0, 1].map((i) => (
-        <div key={i} style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-          <SkeletonBar width={96} height={16} />
-          <SkeletonCard large>
-            <SkeletonBar tone="raised" width={110} height={10} />
-            <SkeletonBar tone="raised" width={72} height={40} style={{ marginTop: 12 }} />
-            <div style={{ marginTop: 14 }}>
-              <SkeletonBar tone="raised" height={8} r={4} />
-            </div>
-          </SkeletonCard>
-        </div>
-      ))}
-    </div>
   );
 }

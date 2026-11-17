@@ -265,6 +265,8 @@ async function liveHouseholdsDirectory() {
     .map((h) => ({
       id: h.id,
       name: h.name ?? null,
+      // The parent on file, for the staff search (data/staffBooking.js searchAthletes).
+      guardianName: h.guardian?.name ?? null,
       status: h.membership?.status ?? 'active',
       test: isTestHousehold(h),
       athletes: (byHousehold.get(h.id) ?? []).sort((x, y) => String(x.name).localeCompare(String(y.name))),

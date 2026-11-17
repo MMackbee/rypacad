@@ -15,6 +15,10 @@ let mockHub;
 let mockCalls;
 jest.mock('../components/PayButton', () => ({ __esModule: true, default: ({ label }) => <button type="button">{label}</button> }));
 jest.mock('../hooks/billing', () => ({ __esModule: true, default: () => mockHub, useBillingHub: () => mockHub, usePaymentConfirmation: () => ({ state: 'idle' }), STRIPE_PORTAL_URL: null }));
+// The family page's Manage sections and Advanced fold (2026-11-16) have their own tests
+// (components/staffFamily/StaffAthletePanel.test.js); stand-ins here, so "every toggle opened" opens the meters alone.
+jest.mock('../components/staffFamily/StaffAthletePanel', () => ({ __esModule: true, default: ({ member }) => <div data-panel={member.athleteId} /> }));
+jest.mock('../components/staffFamily/StaffFamilyAdvanced', () => ({ __esModule: true, default: () => <div data-advanced="" /> }));
 jest.mock('../hooks/staffCancel', () => ({
   staffCancelBookings: async ({ bookingIds, reason }) => {
     mockCalls.push({ bookingIds, reason });
