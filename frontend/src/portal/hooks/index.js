@@ -96,6 +96,7 @@ import useScholarships from './scholarships';
 // 2026-10-14 (assessments spec 8): the admin "Baseline due" row reads the
 // assessment windows, the module that replaced the diagnostics reads.
 import { ASSESSMENTS_KEY, fetchAllAssessmentWindows } from './assessmentsLive';
+import { liveSpecialistSessions } from './specialistSessions';
 import { seasonOf } from '../data/assessmentWindows';
 import { withoutTestFamilies } from '../data/testFamily';
 import {
@@ -1625,58 +1626,6 @@ function seedSpecialistDaySessions(specialistId, today) {
 }
 
 /**
- * Live payload for useSpecialistSessions — the specialist's OWN upcoming
- * sessions, each joined to its live roster (non-cancelled bookings ->
- * athlete names via the per-id join; a name the caller cannot read renders
- * as a count, not a crash). Powers the "My sessions" day view (Sprint 9
- * amendment v1.7.1: specialist-side access). MAX_WINDOW_MONTHS, not any one
- * athlete's own window - see seedSpecialistDaySessions' comment above.
- */
-async function liveSpecialistSessions(specialistId, today) {
-  const toDate = openThrough(new Date(), MAX_WINDOW_MONTHS);
-  const sessions = await fetchSessionsInRange(today, toDate);
-  const mine = sessions
-    // 2026-11-05: a hidden session is left out unless a seat is counted on it
-    // (as on the coach's day), so its roster still opens.
-    .filter((s) => s.type === specialistId && s.status !== 'cancelled' && (!isHiddenSession(s) || Number(s.booked ?? 0) > 0))
-    .sort(byDateThenId);
-
-  const withRosters = await Promise.all(
-    mine.map(async (s) => {
-      const bookings = await fetchBookingsBySession(s.id);
-      const active = bookings.filter((b) => b.status !== 'cancelled');
-      const athletes = await fetchAthletesByIds(active.map((b) => b.athleteId));
-      const nameById = new Map(athletes.map((a) => [a.id, a.name]));
-      // 2026-11-04: a Calendly booking the webhook could not place is HELD
-      // as a session with no booking (functions/portal/calendly.js,
-      // `unresolved: true`) - Yannick's time is taken, so it counts as booked
-      // and the row says so until the academy links it.
-      const unresolved = active.length === 0 && s.unresolved === true;
-      return {
-        sessionId: s.id,
-        date: s.date,
-        dayLabel: dayLabel(s.date, today),
-        time: s.time,
-        booked: unresolved ? 1 : active.length,
-        capacity: s.capacity ?? 1,
-        unresolved,
-        type: s.type,
-        durationMinutes: s.durationMinutes ?? (SPECIALIST_BY_ID.get(s.type)?.durationMinutes ?? DEFAULT_DURATION_MINUTES),
-        athletes: active.map((b) => ({
-          athleteId: b.athleteId,
-          name: nameById.get(b.athleteId) ?? null,
-          // Who is coming (owner ruling, 2026-09-22). The booking is still
-          // FOR the child - absent means they attend, which is every booking
-          // written before the choice existed.
-          attendee: b.attendee ?? 'athlete',
-        })),
-      };
-    })
-  );
-  return { sessions: withRosters };
-}
-
-/**
  * GET /specialists/:id/my-sessions (Sprint 9 amendment v1.7.1) — the
  * signed-in specialist's upcoming sessions with per-session rosters:
  * { data: { sessions: [{ sessionId, date, dayLabel, time, booked,
@@ -1694,7 +1643,10 @@ export function useSpecialistSessions(specialistId) {
     live && specialistId ? null : { sessions: specialistId ? seedSpecialistDaySessions(specialistId, today) : [] },
     live && specialistId
       ? {
-          source: () => liveSpecialistSessions(specialistId, today),
+          // The live rows (hooks/specialistSessions.js, speed review F1):
+          // MAX_WINDOW_MONTHS, not any one athlete's own window - see
+          // seedSpecialistDaySessions' comment above.
+          source: () => liveSpecialistSessions(specialistId, today, openThrough(new Date(), MAX_WINDOW_MONTHS)),
           deps: ['specialist-sessions', specialistId, today, sessionsGen, bookingsGen],
         }
       : undefined
