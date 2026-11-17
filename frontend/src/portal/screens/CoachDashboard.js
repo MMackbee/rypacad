@@ -8,6 +8,7 @@ import { SessionsCalendarCard } from '../components/CalendarCard';
 import PhoneFrame from '../components/PhoneFrame';
 import SessionCard from '../components/SessionCard';
 import StatusBadge from '../components/StatusBadge';
+import CoachDayPending from '../components/CoachDayPending';
 import { Body, Card, ScreenTitle, SectionLabel, SignOutButton } from '../components/Primitives';
 import { useCoachDay, useCoachRoster, useMonthSessions } from '../hooks';
 import { DEFAULT_DURATION_MINUTES } from '../data/schedule';
@@ -64,16 +65,19 @@ function formatCoachDate(raw) {
  * assigned golf coach.
  */
 export default function CoachDashboard({ variant = 'today', bare = false, role = 'coach', specialistId, onOpenRoster, onOpenAthlete, onSignOut }) {
-  const { data } = useCoachDay({ variant });
+  const { data, error } = useCoachDay({ variant });
   const [tab, setTab] = useState('overview');
   const students = role === 'coach' && !specialistId;
   // Only the Students tab shows the roster: nobody else reads it.
   const roster = useCoachRoster({ enabled: students });
 
   const blocks = data?.blocks ?? [];
-  const none = blocks.length === 0;
+  // Still loading (or failed) is not an empty day: no "Off today" until the blocks are in (review 2026-11-17).
+  const none = Boolean(data) && blocks.length === 0;
 
-  const countPill = none
+  const countPill = !data
+    ? null
+    : none
     ? { tone: 'neutral', label: 'Off today' }
     : variant === 'concurrent'
     ? { tone: 'green', label: `${blocks.length} concurrent` }
@@ -93,7 +97,7 @@ export default function CoachDashboard({ variant = 'today', bare = false, role =
             </div>
             <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
               <SignOutButton onSignOut={onSignOut} />
-              <StatusBadge tone={countPill.tone}>{countPill.label}</StatusBadge>
+              {countPill ? <StatusBadge tone={countPill.tone}>{countPill.label}</StatusBadge> : null}
             </div>
           </div>
           <TabStrip value={tab} onChange={setTab} students={students} />
@@ -103,7 +107,7 @@ export default function CoachDashboard({ variant = 'today', bare = false, role =
     >
       <div style={{ padding: '0 22px 24px', display: 'flex', flexDirection: 'column', gap: 12 }}>
         {tab === 'overview' ? (
-          <OverviewTab data={data} blocks={blocks} none={none} onOpenRoster={onOpenRoster} />
+          data ? <OverviewTab data={data} blocks={blocks} none={none} onOpenRoster={onOpenRoster} /> : <CoachDayPending error={error} />
         ) : tab === 'students' && students ? (
           <StudentsTab athletes={roster.data ?? []} loading={roster.loading} error={roster.error} onRetry={roster.retry} onOpenAthlete={onOpenAthlete} />
         ) : (
