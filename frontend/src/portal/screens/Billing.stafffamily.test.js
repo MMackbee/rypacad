@@ -64,6 +64,49 @@ test('?athlete= opens the page on that athlete alone', async () => {
   await r.unmount();
 });
 
+/*
+ * Review 2026-11-17 (F4): an Admin row's householdId comes from cached data.
+ * An athlete moved to another family since opens the old family with an
+ * ?athlete= that matches nobody - the page hands over to the redirect, which
+ * reads where the athlete lives now (or says they are gone).
+ */
+describe('?athlete= the fresh hub does not list', () => {
+  const page = { pathname: '/portal/admin/households/hh1', search: '?athlete=casey' };
+  const at = (r) => `${r.location().pathname}${r.location().search}`;
+
+  test('takes the redirect that finds the family', async () => {
+    const r = await renderScreen(<Billing bare staff role="owner" householdId="hh1" onBack={() => {}} />, { path: page });
+    expect(at(r)).toBe('/portal/admin/athletes/casey');
+    await r.unmount();
+  });
+
+  test('waits while the hub re-reads, then goes', async () => {
+    mockHub = { ...mockHub, isRefreshing: true };
+    const r = await renderScreen(<Billing bare staff role="owner" householdId="hh1" onBack={() => {}} />, { path: page });
+    expect(at(r)).toBe('/portal/admin/households/hh1?athlete=casey');
+    mockHub = { ...mockHub, isRefreshing: false };
+    await r.rerender(<Billing bare staff role="owner" householdId="hh1" onBack={() => {}} />);
+    expect(at(r)).toBe('/portal/admin/athletes/casey');
+    await r.unmount();
+  });
+
+  test('stays when the redirect itself sent it here: no loop', async () => {
+    const r = await renderScreen(<Billing bare staff role="owner" householdId="hh1" onBack={() => {}} />, { path: { ...page, state: { athleteResolved: true } } });
+    expect(at(r)).toBe('/portal/admin/households/hh1?athlete=casey');
+    expect(panels(r)).toHaveLength(2);
+    await r.unmount();
+  });
+
+  test("an athlete the hub lists stays put, and a parent's Billing never redirects", async () => {
+    const r = await renderScreen(<Billing bare staff role="owner" householdId="hh1" onBack={() => {}} />, { path: '/portal/admin/households/hh1?athlete=riley' });
+    expect(at(r)).toBe('/portal/admin/households/hh1?athlete=riley');
+    await r.unmount();
+    const parent = await renderScreen(<Billing bare role="parent" />, { path: '/portal/billing?athlete=casey' });
+    expect(at(parent)).toBe('/portal/billing?athlete=casey');
+    await parent.unmount();
+  });
+});
+
 test('a test athlete keeps Cancel and loses Move, as on the meter', async () => {
   mockHub = hubOf([kid('jordan', 'Jordan Whitfield', { test: true }), kid('riley', 'Riley Whitfield')]);
   const r = await renderScreen(<Billing bare staff role="ops" householdId="hh1" onBack={() => {}} />, { path: '/portal/admin/households/hh1' });

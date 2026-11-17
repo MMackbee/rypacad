@@ -82,6 +82,7 @@ async function mount(path) {
   return {
     container,
     at: () => `${loc.current.pathname}${loc.current.search}`,
+    state: () => loc.current.state,
     unmount: async () => { await act(async () => { root.unmount(); }); container.remove(); },
   };
 }
@@ -112,6 +113,14 @@ test('an athlete link lands on the family page, opened on that athlete - for the
     await r.unmount();
   }
   expect(mockAthleteAsked).toContain('jordan');
+});
+
+test('the redirect marks where it landed, so the family page never sends it back (review 2026-11-17)', async () => {
+  signIn({ uid: 'u-owner', role: 'owner' });
+  const r = await mount(ATHLETE);
+  expect(r.at()).toBe(FAMILY);
+  expect(r.state()).toEqual({ athleteResolved: true });
+  await r.unmount();
 });
 
 test('the old athlete-bookings link goes to the family page too', async () => {

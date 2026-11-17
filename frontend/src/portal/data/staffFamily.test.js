@@ -1,7 +1,7 @@
 /**
  * The single staff family page (owner 2026-11-16): its paths and copy.
  */
-import { athleteFocus, familyPagePath, manageLabel, staffAthletePath, staffFamilyRole } from './staffFamily';
+import { athleteFocus, familyPagePath, focusGone, manageLabel, staffAthletePath, staffFamilyRole } from './staffFamily';
 import { searchAthletes } from './staffBooking';
 
 describe('paths', () => {
@@ -19,6 +19,20 @@ describe('paths', () => {
   test('a row that already knows the family goes straight to the family page (speed review, 2026-11-17)', () => {
     expect(staffAthletePath({ athleteId: 'jordan', householdId: 'whitfield' })).toBe('/portal/admin/households/whitfield?athlete=jordan');
     expect(staffAthletePath({ athleteId: 'a/b', householdId: 'h 1' })).toBe('/portal/admin/households/h%201?athlete=a%2Fb');
+  });
+
+  // Review 2026-11-17 (F4): a direct link is a fast path; the fresh hub decides.
+  test('a page opened on an athlete the fresh hub does not list hands over to the redirect', () => {
+    const hub = (over = {}) => ({ loading: false, error: null, isRefreshing: false, data: { members: [{ athleteId: 'jordan' }] }, ...over });
+    expect(focusGone({ focusId: 'casey', hub: hub() })).toBe(true);
+    expect(focusGone({ focusId: 'jordan', hub: hub() })).toBe(false);
+    expect(focusGone({ focusId: null, hub: hub() })).toBe(false);
+    // Not on data that may be old, nor before or without a read.
+    expect(focusGone({ focusId: 'casey', hub: hub({ isRefreshing: true }) })).toBe(false);
+    expect(focusGone({ focusId: 'casey', hub: hub({ loading: true, data: null }) })).toBe(false);
+    expect(focusGone({ focusId: 'casey', hub: hub({ error: new Error('x'), data: null }) })).toBe(false);
+    // The redirect itself landed here: never back again (no loop).
+    expect(focusGone({ focusId: 'casey', hub: hub(), resolved: true })).toBe(false);
   });
 
   test('the athlete a URL opens on', () => {

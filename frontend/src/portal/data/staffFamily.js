@@ -41,6 +41,23 @@ export function staffAthletePath(athlete) {
   return `/portal/admin/athletes/${encodeURIComponent(athleteId)}`;
 }
 
+/**
+ * Whether a family page opened on `focusId` hands over to the redirect
+ * (review 2026-11-17): an Admin row's householdId comes from cached data, so
+ * the direct link is a fast path only. When the hub's FRESH read lists no
+ * such athlete - moved to another family since - the redirect reads where
+ * they live now, or says they are gone. Never on data that may be old (the
+ * hub re-reading) or missing, and never when the redirect itself landed here
+ * (`resolved`, its navigation state) - no loop.
+ */
+export function focusGone({ focusId, hub, resolved = false }) {
+  if (!focusId || resolved || !hub || !hub.data || hub.loading || hub.error || hub.isRefreshing === true) return false;
+  return !(hub.data.members || []).some((m) => m.athleteId === focusId);
+}
+
+/** The navigation state StaffAthleteRedirect lands with (focusGone's `resolved`). */
+export const FOCUS_RESOLVED = { athleteResolved: true };
+
 /** The athlete a family page URL asks to open on, or null. */
 export function athleteFocus(search) {
   try {

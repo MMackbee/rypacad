@@ -4,7 +4,7 @@ import BottomTabBar from './components/BottomTabBar';
 import PhoneFrame from './components/PhoneFrame';
 import { BackLink, Body, Card, ErrorNotice } from './components/Primitives';
 import { ATHLETE_NOT_ON_FILE, BACK_TO_ADMIN } from './data/staffBookingCopy';
-import { familyPagePath } from './data/staffFamily';
+import { FOCUS_RESOLVED, familyPagePath } from './data/staffFamily';
 import useAuthSession from './hooks/useAuthSession';
 import { isLive } from './hooks/live';
 import { useStaffAthlete } from './hooks/staffBooking';
@@ -29,7 +29,8 @@ export function StaffAthleteRedirect() {
   const live = isLive();
   const { user } = useAuthSession(live ? undefined : { variant: 'idle' });
   const { data, loading, error } = useStaffAthlete(athleteId);
-  if (data?.householdId) return <Navigate replace to={familyPagePath(data.householdId, athleteId)} />;
+  // Marked as resolved: the family page never sends it back here (data/staffFamily.js focusGone).
+  if (data?.householdId) return <Navigate replace to={familyPagePath(data.householdId, athleteId)} state={FOCUS_RESOLVED} />;
   if (data) return <Navigate replace to={`/portal/athlete/${encodeURIComponent(athleteId)}`} />;
   if (loading && !error) return null;
   const role = (live && user?.role) || 'owner';
