@@ -10,7 +10,8 @@
  * Stripe customer portal SESSION for the household's own customer and
  * returns its one-time url.
  *
- *   in   {returnPath?: string}  (only '/portal/billing' is honoured)
+ *   in   {returnPath?: string, athleteId?: string}  (only
+ *        '/portal/billing' is honoured as the return path)
  *   out  {url}
  *
  * Who: the logins that manage a household's billing today - the parent of
@@ -22,10 +23,17 @@
  * resolveSelfManaged). A child's claimed login and every staff role are
  * refused 'not-payer': staff read the Stripe ids on the family page. The
  * household always comes from the caller's own records, never the payload.
+ * A password login whose email is not verified is refused
+ * 'email-unverified', as createCheckoutSession refuses it (review SEC-1):
+ * the old sign-in link proved the caller held the customer's inbox, and a
+ * signed-in session must not skip that proof.
  *
- * The customer is the household's primary `stripeCustomerId` (the one the
- * portal's checkouts made); the older `stripeCustomerIds` are never used.
- * None -> 'no-customer'. Stripe sends the family back to an allowlisted
+ * The customer (billing-portal-customer.js): every Stripe customer the
+ * household holds - its `stripeCustomerId` and `stripeCustomerIds`, and its
+ * athletes' `billing.customerId` / `facilityBilling.customerId`. One ->
+ * that one; several -> the payload's `athleteId` (one of THIS household's
+ * athletes) picks its own, else 'several-customers'; none ->
+ * 'no-customer'. Stripe sends the family back to an allowlisted
  * origin + '/portal/billing': the request's Origin header when it is
  * production or staging (localhost:3005 under the Functions emulator only),
  * else production. A client-supplied url is never used.
@@ -35,11 +43,21 @@
  * a transaction, taken just before the Stripe call. Admin SDK only;
  * firestore.rules closes the collection to every client.
  *
- * Stripe: STRIPE_SECRET_KEY (CHECKOUT_SECRETS), one create, no retry. A
- * Stripe failure is 'stripe-error'; no customer portal saved in this
- * Stripe mode (Dashboard > Settings > Billing > Customer portal) is
- * 'portal-not-set-up'. Every call logs ONE line, ok or error with its
- * reason; never the session url, never more of the customer id than its
+ * Stripe: STRIPE_SECRET_KEY (CHECKOUT_SECRETS). The handler makes one
+ * create; the SDK gives up after 10 s and retries a network failure at
+ * most once (STRIPE_OPTIONS), inside a 30 s function, so the refusal and
+ * its log line land before the platform deadline (review F5). What Stripe
+ * says, in the family's words:
+ *   'portal-not-set-up'  no customer portal saved in this Stripe mode
+ *                        (Dashboard > Settings > Billing > Customer
+ *                        portal), or a key that may not make portal
+ *                        sessions: a restricted key without "Customer
+ *                        portal: Write", or a revoked key (review F1)
+ *   'customer-missing'   Stripe has no such customer in this mode (review
+ *                        F4): deleted, or a test-mode id under a live key
+ *   'stripe-error'       anything else, worth another try
+ * Every call logs ONE line, ok or error with its reason and Stripe's error
+ * type; never the session url, never more of the customer id than its
  * last 4 characters.
  */
 'use strict';
@@ -48,6 +66,7 @@ const functions = require('firebase-functions/v1');
 const admin = require('firebase-admin');
 const Stripe = require('stripe');
 const {CHECKOUT_SECRETS} = require('./secrets');
+const {customerFor} = require('./billing-portal-customer');
 
 const {HttpsError} = functions.https;
 
@@ -61,15 +80,24 @@ const RETURN_PATHS = ['/portal/billing'];
 const RATE_LIMIT = 10;
 const RATE_WINDOW_MS = 10 * 60 * 1000;
 const LIMITS = 'billingPortalLimits';
+/** The function's deadline: room for both SDK attempts and the log line. */
+const TIMEOUT_SECONDS = 30;
+/** The Stripe client: give up after 10 s, retry a network failure once. */
+const STRIPE_OPTIONS = Object.freeze({timeout: 10000, maxNetworkRetries: 1});
 
 const COPY = {
   'signed-out': 'Sign in to manage billing.',
   'bad-request': 'That request could not be read. Refresh the page and ' +
       'try again.',
+  'email-unverified': 'Verify your email to manage billing in Stripe.',
   'not-payer': 'Only the account that pays for this family can manage its ' +
       'billing in Stripe.',
   'no-customer': 'There is no billing in Stripe for this family yet. It ' +
       'starts with the first payment.',
+  'several-customers': 'Your family\'s billing is on more than one Stripe ' +
+      'account. Contact the academy to update your card.',
+  'customer-missing': 'Your billing record in Stripe could not be found. ' +
+      'Contact the academy.',
   'rate-limited': 'Stripe was opened several times in the last few ' +
       'minutes. Try again in a few minutes.',
   'portal-not-set-up': 'Managing billing in Stripe is not switched on yet. ' +
@@ -82,13 +110,21 @@ const COPY = {
 
 let stripeClient;
 
+/**
+ * @param {string} key A Stripe secret key.
+ * @return {!Object} A Stripe client with STRIPE_OPTIONS (no request made).
+ */
+function makeStripe(key) {
+  return new Stripe(key, Object.assign({}, STRIPE_OPTIONS));
+}
+
 /** @return {!Object} The Stripe client, from STRIPE_SECRET_KEY. */
 function stripe() {
   if (!stripeClient) {
     if (!process.env.STRIPE_SECRET_KEY) {
       throw new Error('STRIPE_SECRET_KEY is not configured');
     }
-    stripeClient = new Stripe(process.env.STRIPE_SECRET_KEY);
+    stripeClient = makeStripe(process.env.STRIPE_SECRET_KEY);
   }
   return stripeClient;
 }
@@ -205,6 +241,26 @@ function portalNotSetUp(err) {
 }
 
 /**
+ * What a failed create tells the family (the header's table). Retrying
+ * helps only 'stripe-error'.
+ * @param {*} err What the SDK threw.
+ * @return {!HttpsError} The refusal.
+ */
+function stripeRefusal(err) {
+  const type = err && err.type;
+  if (portalNotSetUp(err) || type === 'StripePermissionError' ||
+      type === 'StripeAuthenticationError') {
+    return refuse('failed-precondition', 'portal-not-set-up');
+  }
+  if (type === 'StripeInvalidRequestError' &&
+      err.code === 'resource_missing' && (err.param === 'customer' ||
+      /no such customer/i.test(String(err.message || '')))) {
+    return refuse('failed-precondition', 'customer-missing');
+  }
+  return refuse('unavailable', 'stripe-error');
+}
+
+/**
  * The checks, then the one Stripe call. `who` collects what the log line
  * may say as it becomes known.
  * @param {*} data The payload.
@@ -217,9 +273,17 @@ async function openPortal(data, context, d, who) {
   const auth = context && context.auth;
   if (!auth || !auth.uid) throw refuse('unauthenticated', 'signed-out');
   who.uid = auth.uid;
+  // As createCheckoutSession (checkout.js): a password login has proved
+  // its inbox before it reaches the payer's billing.
+  const token = auth.token || {};
+  const provider = token.firebase && token.firebase.sign_in_provider;
+  if (provider === 'password' && token.email_verified !== true) {
+    throw refuse('failed-precondition', 'email-unverified');
+  }
   const req = data == null ? {} : data;
   if (typeof req !== 'object' || (req.returnPath != null &&
-      typeof req.returnPath !== 'string')) {
+      typeof req.returnPath !== 'string') || (req.athleteId != null &&
+      (typeof req.athleteId !== 'string' || !req.athleteId))) {
     throw refuse('invalid-argument', 'bad-request');
   }
   const env = d.env || process.env;
@@ -227,9 +291,10 @@ async function openPortal(data, context, d, who) {
   const now = d.now instanceof Date ? d.now : new Date();
   const {id, household} = await payerHousehold(store, auth.uid);
   who.household = id;
-  const customer = typeof household.stripeCustomerId === 'string' ?
-      household.stripeCustomerId.trim() : '';
-  if (!customer) throw refuse('failed-precondition', 'no-customer');
+  const picked = await customerFor(store, {id, household,
+    athleteId: req.athleteId == null ? null : req.athleteId});
+  if (!picked.customer) throw refuse(picked.code, picked.reason);
+  const customer = picked.customer;
   who.customer = customer.slice(-4);
   await takeSlot(store, auth.uid, now.getTime());
   let session;
@@ -240,10 +305,7 @@ async function openPortal(data, context, d, who) {
   } catch (err) {
     who.stripe = [err && err.type, err && err.code].filter(Boolean)
         .join('/') || (err && err.name) || 'error';
-    if (portalNotSetUp(err)) {
-      throw refuse('failed-precondition', 'portal-not-set-up');
-    }
-    throw refuse('unavailable', 'stripe-error');
+    throw stripeRefusal(err);
   }
   const url = session && typeof session.url === 'string' ? session.url : '';
   if (!url.startsWith('https://')) {
@@ -255,7 +317,7 @@ async function openPortal(data, context, d, who) {
 
 /**
  * The callable's body, exported so the unit tests can call it in-process.
- * @param {*} data `{returnPath?}`.
+ * @param {*} data `{returnPath?, athleteId?}`.
  * @param {!Object} context The callable context.
  * @param {{db: (!Object|undefined), stripe: (!Object|undefined),
  *     env: (!Object|undefined), now: (!Date|undefined)}=} deps Test seams.
@@ -281,12 +343,16 @@ async function openBillingPortalHandler(data, context, deps) {
   }
 }
 
-/** The callable. Binds STRIPE_SECRET_KEY, as createCheckoutSession does. */
-const openBillingPortal = functions.runWith({secrets: CHECKOUT_SECRETS})
+/**
+ * The callable. Binds STRIPE_SECRET_KEY, as createCheckoutSession does, and
+ * ends at TIMEOUT_SECONDS, as door.js's unlockDoor sets its own.
+ */
+const openBillingPortal = functions.runWith({secrets: CHECKOUT_SECRETS,
+  timeoutSeconds: TIMEOUT_SECONDS})
     .https.onCall((data, context) => openBillingPortalHandler(data,
         context));
 
 module.exports = {
-  ORIGINS, RATE_LIMIT, RATE_WINDOW_MS, RETURN_PATHS, openBillingPortal,
-  openBillingPortalHandler,
+  ORIGINS, RATE_LIMIT, RATE_WINDOW_MS, RETURN_PATHS, STRIPE_OPTIONS,
+  makeStripe, openBillingPortal, openBillingPortalHandler,
 };

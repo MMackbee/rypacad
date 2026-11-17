@@ -17,7 +17,9 @@ const SELF_CUSTOMER = 'cus_TESTSELFb7c2';
 /**
  * Two families and the staff: hh-a (a parent, a child's own login, Stripe
  * customer), hh-self (an 18+ athlete who signed up for themselves), hh-b
- * (a parent, never paid, only an older customer id).
+ * (a parent, never paid). The webhook's linkCustomer lists the customer in
+ * stripeCustomerIds too; households with more than one customer are in
+ * billing-portal-customer.test.js.
  * @return {!Object} `{'collection/id': body}`.
  */
 function world() {
@@ -36,11 +38,11 @@ function world() {
     'athletes/ath-child': {householdId: 'hh-a', name: 'Child A'},
     'athletes/ath-self': {householdId: 'hh-self', name: 'Adult Self'},
     'households/hh-a': {name: 'Family A', createdBy: 'u-parent',
-      stripeCustomerId: CUSTOMER, stripeCustomerIds: ['cus_OLDERa111']},
+      stripeCustomerId: CUSTOMER, stripeCustomerIds: [CUSTOMER]},
     'households/hh-self': {name: 'Self', createdBy: 'u-self',
       stripeCustomerId: SELF_CUSTOMER},
     'households/hh-b': {name: 'Family B', createdBy: 'u-other',
-      stripeCustomerId: null, stripeCustomerIds: ['cus_OLDERb222']},
+      stripeCustomerId: null, stripeCustomerIds: []},
   };
 }
 
@@ -74,7 +76,8 @@ function stripeError(type, message, code) {
 /**
  * One call through the handler, with console output captured.
  * @param {*} data The payload.
- * @param {!Object=} opts `{uid, docs, stripe, origin, env, now, raw}`.
+ * @param {!Object=} opts `{uid, token, docs, stripe, origin, env, now,
+ *     raw}`; `token` is the ID token's claims ({} by default).
  * @return {!Promise<!Object>} `{result, error, docs, calls, logs}`.
  */
 async function open(data, opts) {
@@ -87,7 +90,7 @@ async function open(data, opts) {
   console.error = (...a) => logs.push(a.join(' '));
   console.warn = (...a) => logs.push(a.join(' '));
   const uid = 'uid' in o ? o.uid : 'u-parent';
-  const context = {auth: uid ? {uid, token: {}} : null};
+  const context = {auth: uid ? {uid, token: o.token || {}} : null};
   if (o.raw !== undefined) context.rawRequest = o.raw;
   else {
     context.rawRequest = {headers: {origin: 'origin' in o ? o.origin :
@@ -159,8 +162,7 @@ test('a parent of ANOTHER household never reaches this one\'s customer, ' +
     'whatever the payload names', async () => {
   const r = await open({householdId: 'hh-a', customer: CUSTOMER},
       {uid: 'u-other'});
-  // hh-b has never paid (only an older id): refused, and Stripe never
-  // sees hh-a's customer.
+  // hh-b has never paid: refused, and Stripe never sees hh-a's customer.
   refused(r, 'failed-precondition', 'no-customer');
   assert.equal(r.calls.length, 0);
   assert.ok(!r.logs.join('\n').includes('hh-a'));
@@ -200,20 +202,49 @@ test('an athlete login whose household was not created by them is refused ' +
   refused(r, 'permission-denied', 'not-payer');
 });
 
-// ---- the customer ---------------------------------------------------------
+// ---- a proven inbox (review 2026-11-17 SEC-1) -----------------------------
 
-test('no primary stripeCustomerId: no-customer, and the older ' +
-    'stripeCustomerIds are never used', async () => {
+test('a password login whose email is not verified is refused, as ' +
+    'createCheckoutSession refuses it: no Stripe call, no slot', async () => {
   const docs = world();
-  docs['households/hh-a'].stripeCustomerId = null;
-  const r = await open({}, {docs});
-  refused(r, 'failed-precondition', 'no-customer');
+  const r = await open({}, {docs, token: {email_verified: false,
+    firebase: {sign_in_provider: 'password'}}});
+  refused(r, 'failed-precondition', 'email-unverified');
   assert.equal(r.calls.length, 0);
-  const blank = world();
-  blank['households/hh-a'].stripeCustomerId = '  ';
-  refused(await open({}, {docs: blank}), 'failed-precondition',
-      'no-customer');
+  assert.equal(docs['billingPortalLimits/u-parent'], undefined);
+  assert.match(r.logs[0], /reason=email-unverified/);
+  // No email_verified claim at all reads as unverified too.
+  refused(await open({}, {token: {firebase: {sign_in_provider: 'password'}}}),
+      'failed-precondition', 'email-unverified');
 });
+
+test('a verified password login opens the portal; another sign-in ' +
+    'provider is not asked, as at checkout', async () => {
+  const verified = await open({}, {token: {email_verified: true,
+    firebase: {sign_in_provider: 'password'}}});
+  assert.equal(verified.error, null);
+  assert.equal(verified.calls.length, 1);
+  const google = await open({}, {token: {
+    firebase: {sign_in_provider: 'google.com'}}});
+  assert.equal(google.error, null);
+});
+
+// ---- the customer (several: billing-portal-customer.test.js) ---------------
+
+test('no Stripe customer on the household or its athletes: no-customer',
+    async () => {
+      const docs = world();
+      docs['households/hh-a'].stripeCustomerId = null;
+      docs['households/hh-a'].stripeCustomerIds = [];
+      const r = await open({}, {docs});
+      refused(r, 'failed-precondition', 'no-customer');
+      assert.equal(r.calls.length, 0);
+      const blank = world();
+      blank['households/hh-a'].stripeCustomerId = '  ';
+      blank['households/hh-a'].stripeCustomerIds = ['', '  ', 42, null];
+      refused(await open({}, {docs: blank}), 'failed-precondition',
+          'no-customer');
+    });
 
 // ---- where Stripe sends them back -----------------------------------------
 
@@ -265,18 +296,55 @@ test('returnPath: a client URL is never trusted; the Billing path is used',
 
 // ---- Stripe ----------------------------------------------------------------
 
-test('a Stripe failure is unavailable / stripe-error, with no retry',
-    async () => {
-      const stripe = fakeStripe(stripeError('StripeInvalidRequestError',
-          `No such customer: '${CUSTOMER}'`, 'resource_missing'));
-      const r = await open({}, {stripe});
-      refused(r, 'unavailable', 'stripe-error');
-      assert.equal(stripe.calls.length, 1);
-      const down = fakeStripe(stripeError('StripeConnectionError',
-          'An error occurred with our connection to Stripe.'));
-      refused(await open({}, {stripe: down}), 'unavailable', 'stripe-error');
-      assert.equal(down.calls.length, 1);
-    });
+test('a passing Stripe failure is unavailable / stripe-error (try again); ' +
+    'the handler itself makes one create', async () => {
+  for (const [type, message] of [
+    ['StripeAPIError', 'An unknown error occurred'],
+    ['StripeConnectionError',
+      'An error occurred with our connection to Stripe.'],
+    ['StripeRateLimitError', 'Too many requests'],
+  ]) {
+    const stripe = fakeStripe(stripeError(type, message));
+    refused(await open({}, {stripe}), 'unavailable', 'stripe-error');
+    assert.equal(stripe.calls.length, 1, type);
+  }
+});
+
+test('a key that may not make portal sessions (a restricted key without ' +
+    'Customer portal: Write, a revoked key) is portal-not-set-up, never ' +
+    '"try again" (review F1)', async () => {
+  for (const [type, message] of [
+    ['StripePermissionError', 'The provided key \'rk_live_****abc\' does ' +
+      'not have the required permissions for this endpoint. Having the ' +
+      '\'rak_billing_portal_session_write\' permission would allow this ' +
+      'request to continue.'],
+    ['StripeAuthenticationError', 'Invalid API Key provided: rk_live_****abc'],
+  ]) {
+    const r = await open({}, {stripe: fakeStripe(stripeError(type,
+        message))});
+    refused(r, 'failed-precondition', 'portal-not-set-up');
+    assert.ok(!/rk_|rak_|permission|api key/i.test(r.error.message), type);
+    assert.match(r.logs[0], new RegExp(`reason=portal-not-set-up .*` +
+        `stripe=${type}`));
+  }
+});
+
+test('a customer Stripe does not have in this mode is customer-missing ' +
+    '(contact the academy), never "try again" (review F4)', async () => {
+  const gone = Object.assign(stripeError('StripeInvalidRequestError',
+      `No such customer: '${CUSTOMER}'`, 'resource_missing'),
+  {param: 'customer'});
+  const r = await open({}, {stripe: fakeStripe(gone)});
+  refused(r, 'failed-precondition', 'customer-missing');
+  assert.match(r.error.message, /academy/);
+  assert.ok(!r.error.message.includes(CUSTOMER));
+  // Some other missing resource is not the family's record: try again.
+  const other = Object.assign(stripeError('StripeInvalidRequestError',
+      'No such configuration: \'bpc_test_x\'', 'resource_missing'),
+  {param: 'configuration'});
+  refused(await open({}, {stripe: fakeStripe(other)}), 'unavailable',
+      'stripe-error');
+});
 
 test('no customer portal configured in Stripe: failed-precondition / ' +
     'portal-not-set-up, in plain words', async () => {
@@ -327,6 +395,7 @@ test('ten opens per login per ten minutes; the eleventh is refused, and ' +
 test('refusals before Stripe (no customer) take no slot', async () => {
   const docs = world();
   docs['households/hh-a'].stripeCustomerId = null;
+  docs['households/hh-a'].stripeCustomerIds = [];
   await open({}, {docs});
   assert.equal(docs['billingPortalLimits/u-parent'], undefined);
 });
@@ -345,7 +414,8 @@ test('one log line per call: never the session url, never the full ' +
       'resource_missing'))});
   assert.equal(failing.logs.length, 1);
   assert.match(failing.logs[0], new RegExp('^openBillingPortal: error ' +
-      'uid=u-parent household=hh-a .*reason=stripe-error'));
+      'uid=u-parent household=hh-a .*reason=customer-missing ' +
+      'stripe=StripeInvalidRequestError/resource_missing'));
   const denied = await open({}, {uid: 'u-child'});
   assert.equal(denied.logs.length, 1);
   assert.match(denied.logs[0],
@@ -364,5 +434,19 @@ test('the callable binds STRIPE_SECRET_KEY like createCheckoutSession',
       const got = (ep.secretEnvironmentVariables || []).map((s) => s.key);
       assert.deepEqual(got, ['STRIPE_SECRET_KEY']);
     });
+
+test('Stripe gives up in time: a 10 s timeout and at most one network ' +
+    'retry, inside a 30 s function, so the error and its log line land ' +
+    'before the platform deadline (review F5)', () => {
+  // A client is only built here; nothing is sent to Stripe.
+  const client = portal.makeStripe('sk_test_notarealkey');
+  assert.equal(client.getApiField('timeout'), 10000);
+  assert.equal(client.getMaxNetworkRetries(), 1);
+  const ep = portal.openBillingPortal.__endpoint || {};
+  assert.equal(ep.timeoutSeconds, 30);
+  const attempts = 1 + client.getMaxNetworkRetries();
+  assert.ok(attempts * client.getApiField('timeout') / 1000 <
+      ep.timeoutSeconds, 'every attempt ends before the function does');
+});
 
 run();
