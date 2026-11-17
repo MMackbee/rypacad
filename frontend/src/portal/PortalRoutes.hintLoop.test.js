@@ -21,6 +21,10 @@ jest.mock('firebase/auth', () => {
       return () => listeners.delete(cb);
     },
     signOut: async (auth) => { auth.currentUser = null; [...listeners].forEach((cb) => cb(null)); },
+    // The same account signing in again: Firebase 9 notifies listeners only
+    // when the uid changes, so no emission follows (review 2026-11-17, AUTH-1).
+    signInWithEmailAndPassword: async (auth) => { mockSignIns.push('email'); return { user: auth.currentUser }; },
+    signInWithPopup: async (auth) => { mockSignIns.push('google'); return { user: auth.currentUser }; },
   };
 });
 jest.mock('firebase/firestore', () => ({
@@ -49,6 +53,7 @@ import { resetSession } from './hooks/sessionStore';
 const mockReads = [];
 const mockDocs = {};
 const mockFail = { value: null };
+const mockSignIns = [];
 
 const account = (uid) => ({ uid, email: `${uid}@example.com`, emailVerified: true, reload: async () => {} });
 const userReads = () => mockReads.filter((r) => r.startsWith('users/')).length;
@@ -74,6 +79,12 @@ async function mount(path) {
     text: () => container.textContent,
     pathname: () => loc.current.pathname,
     visits: () => loc.visits,
+    button: (label) => [...container.querySelectorAll('button')].find((b) => b.textContent.trim() === label) || null,
+    fill: async (label, value) => {
+      const el = container.querySelector(`input[aria-label="${label}"]`);
+      Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value').set.call(el, value);
+      await act(async () => { el.dispatchEvent(new Event('input', { bubbles: true })); });
+    },
     unmount: async () => { await act(async () => { root.unmount(); }); container.remove(); },
   };
 }
@@ -81,6 +92,7 @@ async function mount(path) {
 afterEach(() => {
   resetSession();
   auth.currentUser = null;
+  mockSignIns.length = 0;
   mockReads.length = 0;
   mockFail.value = null;
   Object.keys(mockDocs).forEach((k) => delete mockDocs[k]);
@@ -115,5 +127,22 @@ test('a failed read keeps the stored hint for the next launch', async () => {
   expect(r.pathname()).toBe('/portal/signin');
   // The stored hint survives: offline is not a reason to forget the role.
   expect(readRoleHint()).toMatchObject({ uid: 'u-own', role: 'owner' });
+  await r.unmount();
+});
+
+// F3 (review 2026-11-17): the users read's SDK text never reaches the page.
+test.each([
+  ['unavailable', "We couldn't load your account. Check your connection and try again."],
+  ['permission-denied', "We couldn't load your account. Try again, or contact the academy if it keeps happening."],
+])('a failed users read (%s) reads as plain copy on sign-in, not the SDK message', async (code, copy) => {
+  writeRoleHint({ uid: 'u-own', role: 'owner' });
+  auth.currentUser = account('u-own');
+  mockFail.value = code;
+  const r = await mount('/portal/admin');
+  await flush(40);
+  expect(r.pathname()).toBe('/portal/signin');
+  expect(r.text()).toContain(copy);
+  expect(r.text()).not.toContain('fetchCurrentUser');
+  expect(r.text()).not.toContain('client is offline');
   await r.unmount();
 });

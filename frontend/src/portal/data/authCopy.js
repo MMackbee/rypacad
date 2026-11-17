@@ -46,6 +46,15 @@ export const PARENT_USE_SIGNUP = 'Parent? Use Start sign-up below instead.';
 export const FAMILY_LINK_FAIL =
   'Ask your parent to allow sign-in for this app in Family Link, or create a password login below.';
 
+/**
+ * Signed in, but users/{uid} did not load (review 2026-11-17): plain words,
+ * never the SDK's text. Offline or unavailable says to check the
+ * connection; a refusal or anything else says who to ask.
+ */
+export const ACCOUNT_LOAD_TITLE = "Your account didn't load";
+export const ACCOUNT_LOAD_OFFLINE = "We couldn't load your account. Check your connection and try again.";
+export const ACCOUNT_LOAD_FAILED = "We couldn't load your account. Try again, or contact the academy if it keeps happening.";
+
 /** Which NotProvisioned body renders (spec 3.2 + 2.4's legacy states). */
 export function notProvisionedView({ claimState, legacyStatus }) {
   if (claimState === 'checking' || legacyStatus == null) return 'checking';

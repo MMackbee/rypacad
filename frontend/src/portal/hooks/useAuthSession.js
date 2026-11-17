@@ -19,7 +19,7 @@ import {
   forgetSessionUser, peekSessionUser, publishSessionUser, resetSession, sessionUserStale, setSessionScope, signedOutKnown, subscribeSessionUser,
 } from './sessionStore';
 import { clearRoleHint, roleHintFor, suppressRoleHint, writeRoleHint } from './roleHint';
-import { claimStateOf, createLoginError, resendError, verifyContinueUrl } from './authSessionHelpers';
+import { accountLoadError, claimStateOf, createLoginError, resendError, verifyContinueUrl } from './authSessionHelpers';
 
 // Every screen and guard mounts its own useAuthSession, and each one's
 // NOT_FOUND emission used to fire claimInvite: the first call claimed, the
@@ -221,10 +221,7 @@ export default function useAuthSession({ variant } = {}) {
         return 'not-found';
       }
       suppressRoleHint(); // or sign-in follows it straight back to the landing (roleHint.js)
-      setSession({
-        user: null, provisioned: false, loading: false,
-        error: err instanceof LiveDataError ? err : new LiveDataError(ERR.UNKNOWN, 'Could not load your account. Please try again.', err),
-      });
+      setSession({ user: null, provisioned: false, loading: false, error: accountLoadError(err) });
       return 'error';
     }
   }, []);

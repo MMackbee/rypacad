@@ -3,6 +3,21 @@
  * that file under 500 lines); useAuthSession re-exports all four names.
  */
 import { ERR, LiveDataError } from './live';
+import { ACCOUNT_LOAD_FAILED, ACCOUNT_LOAD_OFFLINE } from '../data/authCopy';
+
+/**
+ * A users/{uid} read that failed for a signed-in account (not NOT_FOUND):
+ * the code kept for callers to branch on, the message plain copy (review
+ * 2026-11-17) - live.js's wrap() prefixes its context to the SDK's own text,
+ * which SignIn would otherwise show verbatim. `reason` marks it as this
+ * failure, apart from a sign-in's own errors.
+ */
+export const ACCOUNT_LOAD_REASON = 'account-load';
+export function accountLoadError(err) {
+  const code = err instanceof LiveDataError ? err.code : ERR.UNKNOWN;
+  const message = code === ERR.UNAVAILABLE ? ACCOUNT_LOAD_OFFLINE : ACCOUNT_LOAD_FAILED;
+  return new LiveDataError(code, message, err, ACCOUNT_LOAD_REASON);
+}
 
 /** claimInvite's `state` (contract 1.4), or 'error' for anything else. */
 export function claimStateOf(result) {
