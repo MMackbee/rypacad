@@ -18,6 +18,7 @@ import { publishSelfManaged, resolveSelfManaged, useSelfManaged } from './selfMa
 import {
   forgetSessionUser, peekSessionUser, publishSessionUser, resetSession, sessionUserStale, setSessionScope, subscribeSessionUser,
 } from './sessionStore';
+import { clearRoleHint, roleHintFor, writeRoleHint } from './roleHint';
 
 // Every screen and guard mounts its own useAuthSession, and each one's
 // NOT_FOUND emission used to fire claimInvite: the first call claimed, the
@@ -109,6 +110,7 @@ function applyUser(user) {
   publishSelfManaged(user.selfManaged);
   publishAssessorTab(showsAssessmentsTab(user));
   publishSessionUser(user);
+  writeRoleHint(user); // the next cold start's landing (roleHint.js)
 }
 
 /**
@@ -237,6 +239,7 @@ export default function useAuthSession({ variant } = {}) {
       if (err instanceof LiveDataError && err.code === ERR.NOT_FOUND) {
         // Exactly the unprovisioned case: a real account with no users/{uid}
         // doc yet. Defined state, not an error.
+        clearRoleHint();
         setSession({ user: unprovisionedUser(fbUser), provisioned: false, loading: false, error: null });
         return 'not-found';
       }
@@ -480,6 +483,9 @@ export default function useAuthSession({ variant } = {}) {
     provisioned: session.provisioned,
     loading: session.loading,
     error: session.error,
+    // While users/{uid} is in flight: the last verified { uid, role,
+    // specialistId } of THIS account, for the landing only (roleHint.js).
+    hint: session.loading ? roleHintFor(session.pendingUid) : null,
     signIn,
     signInWithEmail,
     signOut,

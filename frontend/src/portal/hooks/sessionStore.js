@@ -21,6 +21,7 @@
  * (firestore.rules me() reads users/{uid} itself); this is UI state only.
  */
 import { generationOf } from './invalidate';
+import { clearRoleHint } from './roleHint';
 
 export const PROFILE_TTL_MS = 5 * 60 * 1000;
 
@@ -57,9 +58,10 @@ export function setSessionScope(uid) {
   return true;
 }
 
-/** Sign-out: forget the account. */
+/** Sign-out: forget the account, its cold-start role hint included. */
 export function resetSession() {
   setSessionScope(null);
+  clearRoleHint();
 }
 
 /** Run `hook(uid)` on every scope change; returns an unregister function. */
