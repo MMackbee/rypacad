@@ -50,11 +50,14 @@ export const callAddAthletes = callable('addAthletes');
 /** `{ url }` (contract 1.5). */
 export const callCreateCheckoutSession = callable('createCheckoutSession');
 /**
- * `{ returnPath? }` -> `{ url }`: a Stripe customer portal session for the
+ * `{ returnPath?, athleteId? }` -> `{ url }`: a Stripe customer portal session for the
  * signed-in payer's own household (functions/portal/billing-portal.js), the
  * Billing screen's Manage billing in Stripe. Through hooks/billingPortal.js.
- * A refusal's `reason`: 'not-payer', 'no-customer', 'rate-limited',
- * 'portal-not-set-up', 'stripe-error', 'bad-request' or 'unavailable'.
+ * `athleteId` names whose customer to open when the family's billing sits on
+ * several (data/billingPortal.js). A refusal's `reason`: 'email-unverified',
+ * 'not-payer', 'no-customer', 'several-customers', 'rate-limited',
+ * 'portal-not-set-up', 'customer-missing', 'stripe-error', 'bad-request' or
+ * 'unavailable'.
  */
 export const callOpenBillingPortal = callable('openBillingPortal');
 /**
