@@ -209,4 +209,71 @@ test('liftEndedFreeze: past_due ends with the subscription, singles only',
       assert.equal(kept.writes.length, 0);
     });
 
+// handleEvent end to end (review 2026-11-17): the grant comes from the PAID
+// package - not the athlete's current pick, not the metadata's prorated
+// prepaidTokens. stripe.js resolves admin.firestore() lazily; an own
+// property shadows the namespace getter (as in stripe-legacy.test.js).
+const admin = require('firebase-admin');
+const stripe = require('./stripe');
+
+/**
+ * @param {!Object} docs Documents by path.
+ * @return {{fdb: !Object, writes: !Array}} A fake Firestore and its writes.
+ */
+function webhookDb(docs) {
+  const writes = [];
+  const ref = (c, id) => ({c, id, path: `${c}/${id}`,
+    get: async () => ({exists: docs[`${c}/${id}`] !== undefined}),
+    update: async (data) => writes.push({op: 'update', path: `${c}/${id}`,
+      data})});
+  const fdb = {
+    collection: (c) => ({doc: (id) => ref(c, id)}),
+    runTransaction: async (fn) => fn({
+      get: async (r) => ({exists: docs[r.path] !== undefined, id: r.id,
+        ref: r, data: () => docs[r.path]}),
+      set: (r, data) => writes.push({op: 'set', path: r.path, data}),
+      update: (r, data) => writes.push({op: 'update', path: r.path, data}),
+    }),
+  };
+  return {fdb, writes};
+}
+
+test('handleEvent invoice.paid (checkout): the PAID package\'s full count, ' +
+    'not the athlete\'s pick nor a prorated prepaidTokens (2026-11-17)',
+async () => {
+  // A joiner who opened checkout before the ruling (prepaidTokens '3' on
+  // t-6) and changed the pick to t-4 afterwards; the invoice lands first.
+  const {fdb, writes} = webhookDb({
+    'households/h1': {},
+    'athletes/a1': {householdId: 'h1', packageId: 't-4',
+      billing: {status: 'pending'}},
+    'packages/t-4': {kind: 'tokens', tokens: 4},
+    'packages/t-6': {kind: 'tokens', tokens: 6},
+  });
+  Object.defineProperty(admin, 'firestore',
+      {value: () => fdb, configurable: true, writable: true});
+  const notices = [];
+  const send = b.sendPaymentReceived;
+  b.sendPaymentReceived = async (args) => notices.push(args);
+  try {
+    const out = await stripe.handleEvent({id: 'evt_join', type: 'invoice.paid',
+      data: {object: {object: 'invoice', customer: 'cus_1', metadata: {},
+        billing_reason: 'subscription_create',
+        parent: {subscription_details: {subscription: 'sub_1', metadata: {
+          householdId: 'h1', athleteId: 'a1', product: 'tier',
+          packageId: 't-6', prepaidPeriodKey: '2026-11-01',
+          prepaidTokens: '3'}}},
+        lines: {data: [{parent: {type: 'subscription_item_details'},
+          period: {start: Date.UTC(2026, 10, 17, 18) / 1000,
+            end: Date.UTC(2026, 11, 1, 6) / 1000}}]}}}});
+    assert.equal(out.outcome, 'issued-prepaid');
+    const tp = writes.find((w) => w.path === 'tokenPeriods/a1_2026-11-01');
+    assert.deepEqual([tp.data.granted, tp.data.prepaid, tp.data.periodEnd],
+        [6, true, '2026-11-30']);
+    assert.deepEqual(notices.map((n) => n.pkg.tokens), [6]);
+  } finally {
+    b.sendPaymentReceived = send;
+  }
+});
+
 run();

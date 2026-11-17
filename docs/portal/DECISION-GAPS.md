@@ -268,9 +268,11 @@ Owner rulings, on the record (SPRINT-20-LAUNCH.md 0.11-0.13):
 2. **Season starts Nov 3** (Nov 2 is set-up day): `SEASON_BOUNDS.start`
    2026-11-02 -> 2026-11-03. Oct 10 + 30 = Nov 9, so the first week is
    bookable from Oct 10 either way.
-3. **Mid-month joiners prorate both** price (days remaining / days in
-   month) and tokens (same fraction, rounded up, never 0), then bill in full
-   on the next 1st. `PRORATE_JOINERS = true` is the ruling, not a default.
+3. **Mid-month joiners prorate the price, not the tokens**: the price by
+   days remaining / days in month, with the package's full monthly tokens
+   (owner, amended 2026-11-17: "Pro rate the rate, not the tokens"; the
+   2026-09-28 ruling prorated the tokens too), then bill in full on the next
+   1st. `PRORATE_JOINERS = true` is the ruling, not a default.
 4. **The 48-hour rule (PM ruling D11, 2026-09-28).** Stripe refuses a
    Checkout Session whose `subscription_data.trial_end` is under 48 hours
    away. So a checkout started when the next 1st is under 48 h off (the

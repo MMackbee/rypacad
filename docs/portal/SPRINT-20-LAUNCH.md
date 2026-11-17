@@ -49,13 +49,13 @@ this spec still says `single` works like a tier, 0.14 and 16.2 win.
 12. **Season starts Nov 3** (Nov 2 is set-up day). `data/season.js`
     SEASON_BOUNDS.start moves 2026-11-02 -> 2026-11-03. Oct 10 + 30 = Nov
     9, so the first week is bookable from Oct 10 either way.
-13. **Mid-month joiners prorate both** (ruled 2026-09-28): a family joining
-    after Nov 1 pays the rest of the current month **prorated by days
-    remaining** and gets that month's tokens **prorated the same way
-    (rounded up, never 0)**, then bills in full on the next 1st.
-    `PRORATE_JOINERS = true` is the ruling, not a default (4.2).
-    **Amended 2026-11-17 (owner): "Pro rate the rate, not the tokens."** Only
-    the price is prorated; the joiner gets the package's FULL monthly tokens.
+13. **Mid-month joiners prorate the price, not the tokens** (ruled
+    2026-09-28, amended 2026-11-17): a family joining after Nov 1 pays the
+    rest of the current month **prorated by days remaining** and gets the
+    package's **FULL monthly tokens** for that month, then bills in full on
+    the next 1st. `PRORATE_JOINERS = true` is the ruling, not a default
+    (4.2). Owner, 2026-11-17: "Pro rate the rate, not the tokens." (Until
+    then the tokens were prorated the same way, rounded up, never 0.)
 14. **The single session token is a one-time $65 purchase** (ruled
     2026-09-29, details 2026-09-30). Its Stripe price is one-time. Each
     paid Checkout Session is exactly ONE token, `graceTokens/single_{cs}`,
@@ -997,7 +997,8 @@ ids; sync-before-smoke ordering; test-then-live Stripe endpoints; the
 verification action URL; the cut line. Rejected: none. Owner rulings that
 followed: the checkout payment prepays November and recurring billing
 starts Dec 1 (0.11); season start Nov 3 (0.12); mid-month joiners
-prorate both price and tokens (0.13).
+prorate both price and tokens (0.13; amended 2026-11-17 to the price only,
+with the full tokens).
 
 **Plan check (v3.0.2, same day).** Writing the four lane plans against
 v3.0.1 forced sixteen decisions. Each is now a fact in the contract (marked

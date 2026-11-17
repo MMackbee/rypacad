@@ -2,6 +2,7 @@
 const assert = require('node:assert/strict');
 const {test, run} = require('./tiny');
 const prepaid = require('./prepaid');
+const checkout = require('./checkout');
 
 const OCT = new Date('2026-10-05T18:00:00Z');
 const NOV12 = new Date('2026-11-12T18:00:00Z'); // 19 of 30 days remain
@@ -41,12 +42,33 @@ test('the 1st of a month: full price, full tokens, not prorated', () => {
   assert.equal(p.trialEnd, prepaid.chicagoMidnightUnix('2027-01-01'));
 });
 
+// prepaidPeriodFor alone: a CHECKOUT at this instant prepays December
+// instead (D11, checkout.prepaidFor) - see the Nov 28 case below.
 test('the last day of a month: one day\'s price, the full tokens', () => {
   const p = prepaid.prepaidPeriodFor(NOV30, {priceCents: 29900, tokens: 6});
   assert.deepEqual([p.periodKey, p.amountCents, p.tokens, p.prorated],
       ['2026-11-01', Math.round(29900 / 30), 6, true]);
   assert.equal(prepaid.prepaidPeriodFor(NOV30,
       {priceCents: 21900, tokens: 4}).tokens, 4);
+});
+
+test('the last prorated checkout: Nov 28 22:59 Chicago pays 3 days and ' +
+    'gets the full tokens; 23:01 prepays December (D11)', () => {
+  const pkg = {priceCents: 29900, tokens: 6};
+  const last = checkout.prepaidFor(Date.parse('2026-11-29T04:59:00Z'), pkg);
+  assert.deepEqual([last.periodKey, last.amountCents, last.tokens,
+    last.prorated], ['2026-11-01', 2990, 6, true]);
+  const body = checkout.sessionBody({householdId: 'h1', athleteId: 'a1',
+    product: 'tier', packageId: 't-6', priceId: 'price_t6', currency: 'usd',
+    productName: '6 tokens', prepaid: last, role: 'parent',
+    portalUrl: 'https://portal.test', customerId: 'cus_1'});
+  assert.deepEqual([body.line_items[1].price_data.unit_amount,
+    body.line_items[1].price_data.product_data.name,
+    body.subscription_data.metadata.prepaidTokens],
+  [2990, '6 tokens - November 2026, prepaid', '6']);
+  const rolled = checkout.prepaidFor(Date.parse('2026-11-29T05:01:00Z'), pkg);
+  assert.deepEqual([rolled.periodKey, rolled.amountCents, rolled.tokens,
+    rolled.prorated], ['2026-12-01', 29900, 6, false]);
 });
 
 test('Elite null stays null when prorated; prorate off', () => {

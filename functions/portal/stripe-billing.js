@@ -65,10 +65,12 @@ function householdActive(tx, hh, eventId, period) {
  * `invoice.paid` for ONE athlete's subscription (spec 4.3). The checkout
  * invoice (`subscription_create`) lands in the PREPAID period named in the
  * subscription metadata; every later invoice uses the invoice line's period.
- * Either way `granted` is the paid package's full monthly count (owner
- * ruling 2026-11-17: a mid-month joiner's price is prorated, the tokens are
- * not), so the metadata's `prepaidTokens` - prorated on a checkout opened
- * before that ruling - is never read.
+ * Either way `granted` is `pkg.tokens`, the full monthly count of the
+ * package the caller resolved (stripe.js: the subscription metadata's
+ * packageId when it names one, else the athlete's). Owner ruling
+ * 2026-11-17: a mid-month joiner's price is prorated, the tokens are not,
+ * so the metadata's `prepaidTokens` - prorated on a checkout opened before
+ * that ruling - is never read.
  * @param {!Object} tx The transaction.
  * @param {{db: !Object, event: !Object, hh: !Object, athleteRef: !Object,
  *     athlete: !Object, pkg: ?Object, product: string,
