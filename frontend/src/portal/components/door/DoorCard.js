@@ -42,12 +42,12 @@ export default function DoorCard({ practice = false, selfWording = false, staffS
     },
   });
 
-  const firstKey = useRef(true);
+  // Recheck only when the key really changed: comparing with the last key
+  // (not a "first run" flag) stays right when StrictMode runs effects twice.
+  const lastKey = useRef(recheckKey);
   useEffect(() => {
-    if (firstKey.current) {
-      firstKey.current = false;
-      return;
-    }
+    if (Object.is(lastKey.current, recheckKey)) return;
+    lastKey.current = recheckKey;
     setStateReason(null);
     recheck();
   }, [recheckKey, recheck]);

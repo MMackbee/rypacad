@@ -298,4 +298,18 @@ describe('on the staff screen', () => {
     expect(checks()).toHaveLength(2);
     await r.unmount();
   });
+
+  test('an unchanged recheckKey never rechecks, even when StrictMode runs the effects twice', async () => {
+    // Found in the emulator pass: the dev build (index.js wraps the app in
+    // StrictMode) sent three checks per home load, the third a recheck for a
+    // key that never changed. StrictMode's own second run of the check is
+    // React's; the extra recheck was the card's.
+    const r = await renderScreen(
+      <React.StrictMode>
+        <DoorCard recheckKey="same" />
+      </React.StrictMode>
+    );
+    expect(checks().length).toBeLessThanOrEqual(2);
+    await r.unmount();
+  });
 });
