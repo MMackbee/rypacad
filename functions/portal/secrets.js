@@ -25,8 +25,18 @@ const CALENDLY_SECRETS = ['CALENDLY_WEBHOOK_SIGNING_KEY'];
  * @const {!Array<string>}
  */
 const FEEDBACK_SECRETS = ['SLACK_FEEDBACK_TOKEN'];
+/**
+ * The facility door button (2026-11-17, `door.js`): the Avigilon Alta API
+ * link that opens the member door, bound on unlockDoor only. The owner sets
+ * it at the hidden prompt of `functions:secrets:set`; it must exist in
+ * Secret Manager before feat/door-button is merged into develop - from then
+ * on every functions deploy includes unlockDoor (spec 8 step 0: a
+ * placeholder is enough; unlockDoor answers "misconfigured" to it).
+ * @const {!Array<string>}
+ */
+const DOOR_SECRETS = ['ALTA_UNLOCK_URL'];
 
 module.exports = {
-  CALENDLY_SECRETS, CHECKOUT_SECRETS, FEEDBACK_SECRETS, MAIL_SECRETS,
-  STRIPE_WEBHOOK_SECRETS,
+  CALENDLY_SECRETS, CHECKOUT_SECRETS, DOOR_SECRETS, FEEDBACK_SECRETS,
+  MAIL_SECRETS, STRIPE_WEBHOOK_SECRETS,
 };

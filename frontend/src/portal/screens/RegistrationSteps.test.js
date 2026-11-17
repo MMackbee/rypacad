@@ -357,6 +357,8 @@ test('consent sheets: the adult athlete reads every sheet about themselves; rule
   expect(guardian.text()).toContain('One guest may come along, but only to watch. Guests may not hit balls or use equipment.');
   expect(guardian.text()).toContain('Damage caused by misuse, or by a guest you brought, is charged to the member.');
   expect(guardian.text()).toContain('Facility access is one monthly add-on per household');
+  // The door button's rule (2026-11-17 spec 3): sign-up shows it too, the same for both wordings.
+  expect(guardian.text()).toContain("Use the app's Unlock button only when you are at the door, and only to let in your own household and the one guest the rules allow. Never open the door for anyone else.");
   await guardian.unmount();
 });
 

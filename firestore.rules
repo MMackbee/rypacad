@@ -3061,6 +3061,83 @@ service cloud.firestore {
       allow read, write: if false;
     }
 
+    // ---- the facility door button ----------------------------------------
+    // 2026-11-17 (owner "Lets build it"; docs/portal/plans/2026-11-17-door-button/
+    // 00-spec.md sections 4 and 6). unlockDoor and signDoorRules
+    // (functions/portal/door.js, door-rules.js) write doorEvents, doorLimits
+    // and doorRules with the Admin SDK; no client writes them. Owner and ops
+    // run the door from the staff screen: doorConfig/main and doorPauses.
+    // Probed by scripts/rules-probes/door.mjs.
+
+    // doorConfig/main: the switch (off / staff / all), the academy's place
+    // and reach, the open time the app counts down (whole seconds 1..600,
+    // Alta's Entry open duration of 1 s to 10 min; door-decide.js
+    // OPEN_SECONDS_MIN/MAX). A missing doc, or one
+    // without a mode, is 'off' to the server, and absent radiusM/openSeconds
+    // are 200 m and 5 s, so every field but the stamp is optional here (a
+    // merge write of the mode alone is fine); each one present is in range.
+    // Every write names its writer and the request time.
+    match /doorConfig/{id} {
+      function doorConfigOk() {
+        let d = request.resource.data;
+        return id == 'main'
+          && d.keys().hasOnly(['mode', 'lat', 'lng', 'radiusM', 'openSeconds', 'updatedAt', 'updatedByUid'])
+          && d.get('mode', 'off') in ['off', 'staff', 'all']
+          && (d.get('lat', null) == null || (d.lat is number && d.lat >= -90 && d.lat <= 90))
+          && (d.get('lng', null) == null || (d.lng is number && d.lng >= -180 && d.lng <= 180))
+          && (!d.keys().hasAny(['radiusM']) || (d.radiusM is int && d.radiusM >= 50 && d.radiusM <= 1000))
+          && (!d.keys().hasAny(['openSeconds']) || (d.openSeconds is int && d.openSeconds >= 1 && d.openSeconds <= 600))
+          && d.get('updatedByUid', null) == request.auth.uid
+          && d.get('updatedAt', null) == request.time;
+      }
+      allow read: if signedIn() && me().role in ['ops', 'owner'];
+      allow create, update: if signedIn() && me().role in ['ops', 'owner'] && doorConfigOk();
+    }
+
+    // doorPauses/{householdId}: a family's Unlock switched off by staff.
+    // Created whole (stamped with the creator and the request time) and
+    // deleted to lift it; never edited. Families do not read it: unlockDoor
+    // tells them.
+    match /doorPauses/{householdId} {
+      function doorPauseOk() {
+        let d = request.resource.data;
+        return d.keys().hasOnly(['householdId', 'pausedAt', 'pausedByUid', 'note'])
+          && d.get('householdId', null) == householdId
+          && d.get('pausedByUid', null) == request.auth.uid
+          && d.get('pausedAt', null) == request.time
+          && (d.get('note', null) == null || (d.note is string && d.note.size() <= 200));
+      }
+      allow read: if signedIn() && me().role in ['ops', 'owner'];
+      allow create: if signedIn() && me().role in ['ops', 'owner'] && doorPauseOk();
+      allow delete: if signedIn() && me().role in ['ops', 'owner'];
+    }
+
+    // doorRules/{uid}: the signed door rules, written by signDoorRules. The
+    // signer reads its own; owner and ops read all.
+    match /doorRules/{uid} {
+      allow read: if signedIn() && (request.auth.uid == uid || me().role in ['ops', 'owner']);
+    }
+
+    // doorEvents/{uid}_{pressId}: every press, written by unlockDoor. Owner
+    // and ops read all; a parent its own household's (a list must filter on
+    // householdId); an athlete login its own presses only (a list must filter
+    // on uid). A staff press has no household and no family reads it.
+    match /doorEvents/{eventId} {
+      allow read: if signedIn() && (
+        me().role in ['ops', 'owner']
+        || (me().role == 'parent' && me().get('householdId', null) is string
+            && resource.data.householdId == me().householdId)
+        || (me().role == 'athlete' && resource.data.uid == request.auth.uid)
+      );
+    }
+
+    // doorLimits/{uid}: unlockDoor's rate limits ({callsAtMs, opensAtMs,
+    // lastOpenedAtMs, lastConfirmedOpenAtMs, updatedAtMs}). Closed to every client, like
+    // feedbackLimits: a client that could write its own doc could reset it.
+    match /doorLimits/{uid} {
+      allow read, write: if false;
+    }
+
     // No catch-all. Everything not matched above is denied.
   }
 }

@@ -6,6 +6,12 @@ let mockConsents;
 jest.mock('../hooks/mentalConsent', () => ({ useFamilyConsents: () => mockConsents }));
 beforeEach(() => { mockConsents = { data: null, loading: false, error: null }; });
 
+// The facility door card (2026-11-17 spec 7): a stand-in that shows where it mounts and what it was handed.
+jest.mock('../components/door/DoorCard', () => ({
+  __esModule: true,
+  default: ({ practice, selfWording }) => <div data-door-card={JSON.stringify({ practice: Boolean(practice), selfWording: Boolean(selfWording) })} />,
+}));
+
 let mockHub; let mockConfirm;
 const mockChange = jest.fn(async (athleteId, packageId) => ({ athleteId, packageId }));
 jest.mock('../hooks/packageChange', () => ({ useChangePackage: () => ({ change: mockChange }) }));
@@ -345,6 +351,20 @@ test("mental consent: the home card above the athletes and the line on the athle
   expect(r.text()).toContain("Sign Yannick's consent for Reese before the session on Thu, Nov 12");
   expect(r.text()).toContain('Mental performance consent · Not signed');
   await r.unmount();
+});
+
+test('the door card (2026-11-17): above the consent card, practice handed through', async () => {
+  const reese = consentRow('a2', { nextMental: { date: '2026-11-12', attendee: 'athlete' } });
+  mockConsents = { data: { viewer: 'parent', rows: [reese], byId: { a2: reese } }, loading: false, error: null };
+  const r = await renderScreen(<ParentDashboard bare />, { path: '/portal/family' });
+  const door = r.container.querySelector('[data-door-card]');
+  expect(JSON.parse(door.getAttribute('data-door-card'))).toEqual({ practice: false, selfWording: false });
+  const consent = [...r.container.querySelectorAll('div')].find((d) => d.textContent === "Sign Yannick's consent for Reese before the session on Thu, Nov 12");
+  expect(door.compareDocumentPosition(consent) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  await r.unmount();
+  const practice = await renderScreen(<ParentDashboard bare practice />, { path: '/portal/family' });
+  expect(JSON.parse(practice.container.querySelector('[data-door-card]').getAttribute('data-door-card'))).toEqual({ practice: true, selfWording: false });
+  await practice.unmount();
 });
 
 test('mental consent: nothing while the consent rows are not loaded', async () => {

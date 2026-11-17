@@ -31,8 +31,8 @@ export function wrapCallable(err, context) {
   return new LiveDataError(code, message, err, reason);
 }
 
-function callable(name) {
-  const fn = httpsCallable(functions, name);
+function callable(name, options) {
+  const fn = options ? httpsCallable(functions, name, options) : httpsCallable(functions, name);
   return async (payload = {}) => {
     try {
       const result = await fn(payload);
@@ -93,6 +93,21 @@ export const callStaffCancelBooking = callable('staffCancelBooking');
  * its details. Through hooks/staffBooking.js.
  */
 export const callStaffBookSession = callable('staffBookSession');
+/**
+ * The facility door button (docs/portal/plans/2026-11-17-door-button/00-spec.md
+ * 5.2), through hooks/door.js. `{ check: true }` -> `{ canUnlock, reason,
+ * staff, openSeconds }` and never a refusal; `{ pressId, location? }` ->
+ * `{ outcome: 'opened' | 'coalesced' | 'test', openSeconds }`, or a refusal
+ * whose `reason` data/doorRules.js#doorCopy words. Gives up at 25 s, not the
+ * SDK's 70: the server stops at 20 and the family is standing at the door.
+ */
+export const callUnlockDoor = callable('unlockDoor', { timeout: 25000 });
+/**
+ * `{ name, termsVersion }` -> `{ ok: true, termsVersion }` (spec 5.3): the
+ * signed-in parent or athlete signs the door rules once. A refusal's
+ * `reason`: 'not-eligible', 'bad-request' or 'stale-terms'.
+ */
+export const callSignDoorRules = callable('signDoorRules');
 const claimInvite = callable('claimInvite');
 /** `{ state, householdId, athleteId }` - ids only on 'claimed' (D7); never throws for an expected state (contract 1.4). */
 export const callClaimInvite = () => claimInvite({});
