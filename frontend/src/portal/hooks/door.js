@@ -30,6 +30,12 @@ export const LOCATION_WATCHDOG_MS = 12000;
 export const LOCATION_PROMPT_WATCHDOG_MS = 45000;
 /** The open time when the server's answer carries none in range (doorConfig's default). */
 export const DEFAULT_OPEN_SECONDS = 5;
+/**
+ * How long after an open a hold answers "already unlocked" rather than
+ * opening the door again: functions/portal/door.js COALESCE_MS (a test
+ * compares), or the open time when that is shorter.
+ */
+export const RETRY_AFTER_SECONDS = 10;
 
 const NOT_LIVE = 'The door button only works in the live app.';
 
@@ -201,12 +207,23 @@ export function useDoorStatus({ practice = false } = {}) {
   return { ...state, recheck };
 }
 
+const STOPPED = { left: 0, retry: false };
+
 /**
- * The press as a screen runs it: `{ busy, result, left, press }`. `busy` from
- * press to answer (a press meanwhile is dropped); `result` is
+ * The press as a screen runs it: `{ busy, result, left, retry, press }`.
+ * `busy` from press to answer (a press meanwhile is dropped); `result` is
  * `{ kind: 'outcome', outcome, openSeconds }` or `{ kind: 'refusal', reason,
- * message }`; `left` counts an opened door's seconds down to 0. `onReason`
- * hears every refusal's reason, so the card can switch to that state.
+ * message }`; `left` counts an open door's seconds down to 0; `retry` turns
+ * on once a hold would open the door again (RETRY_AFTER_SECONDS after the
+ * open, or the open time if shorter) and stays on after the countdown ends.
+ * `onReason` hears every refusal's reason, so the card can switch to that
+ * state.
+ *
+ * Only an 'opened' answer starts the countdown again. A second press keeps
+ * the one running, through the wait, a coalesce and a refusal alike: the
+ * door is still open (review 2026-11-17 app-2). A coalesce onto an open
+ * this page is not counting (another phone on the login, a reload) counts
+ * down the server's `leftSeconds`.
  *
  * The countdown reads the clock against the end time, every second and
  * when the page comes back into view: an open time of minutes stays true
@@ -215,7 +232,7 @@ export function useDoorStatus({ practice = false } = {}) {
 export function useDoorPress({ staff = false, openSeconds = DEFAULT_OPEN_SECONDS, onReason } = {}) {
   const [busy, setBusy] = useState(false);
   const [result, setResult] = useState(null);
-  const [left, setLeft] = useState(0);
+  const [clock, setClock] = useState(STOPPED);
   const busyRef = useRef(false);
   const mounted = useRef(true);
   const stop = useRef(null);
@@ -223,12 +240,17 @@ export function useDoorPress({ staff = false, openSeconds = DEFAULT_OPEN_SECONDS
     if (stop.current) stop.current();
     stop.current = null;
   };
-  const startCountdown = (secs) => {
-    const endAt = Date.now() + secs * 1000;
+  /** Counts an open of `secs` down from `leftSecs` (all of it, unless the open began before this answer). */
+  const startCountdown = (secs, leftSecs = secs) => {
+    stopCountdown();
+    const endAt = Date.now() + leftSecs * 1000;
+    const retryAt = endAt - (secs - Math.min(RETRY_AFTER_SECONDS, secs)) * 1000;
     const update = () => {
-      const n = Math.max(0, Math.ceil((endAt - Date.now()) / 1000));
-      setLeft(n);
-      if (n === 0) stopCountdown();
+      const now = Date.now();
+      const left = Math.max(0, Math.ceil((endAt - now) / 1000));
+      const retry = now >= retryAt;
+      setClock((c) => (c.left === left && c.retry === retry ? c : { left, retry }));
+      if (left === 0) stopCountdown();
     };
     const onVisible = () => {
       if (document.visibilityState !== 'hidden') update();
@@ -239,7 +261,7 @@ export function useDoorPress({ staff = false, openSeconds = DEFAULT_OPEN_SECONDS
       clearInterval(timer);
       document.removeEventListener('visibilitychange', onVisible);
     };
-    setLeft(secs);
+    update();
   };
   useEffect(() => {
     mounted.current = true;
@@ -252,20 +274,27 @@ export function useDoorPress({ staff = false, openSeconds = DEFAULT_OPEN_SECONDS
   const press = async () => {
     if (busyRef.current) return;
     busyRef.current = true;
-    stopCountdown();
     setBusy(true);
     setResult(null);
-    setLeft(0);
     try {
       const answer = await pressUnlock({ staff });
       if (!mounted.current) return;
       const secs = validSeconds(answer?.openSeconds) ? answer.openSeconds : openSeconds;
-      setResult({ kind: 'outcome', outcome: answer?.outcome ?? null, openSeconds: secs });
-      if (answer?.outcome === 'opened') startCountdown(secs);
+      const outcome = answer?.outcome ?? null;
+      const left = answer?.leftSeconds;
+      setResult({ kind: 'outcome', outcome, openSeconds: secs });
+      if (outcome === 'opened') {
+        startCountdown(secs);
+      } else if (!stop.current) {
+        // A countdown already running stays (the door is still open); with none, a coalesce counts down what is left.
+        if (outcome === 'coalesced' && Number.isInteger(left) && left >= 1 && left <= secs) startCountdown(secs, left);
+        else setClock(STOPPED);
+      }
     } catch (err) {
       if (!mounted.current) return;
       const reason = err && err.reason ? err.reason : null;
       setResult({ kind: 'refusal', reason, message: err && err.message ? String(err.message) : '' });
+      if (!stop.current) setClock(STOPPED);
       if (onReason) onReason(reason);
     } finally {
       busyRef.current = false;
@@ -273,5 +302,5 @@ export function useDoorPress({ staff = false, openSeconds = DEFAULT_OPEN_SECONDS
     }
   };
 
-  return { busy, result, left, press };
+  return { busy, result, left: clock.left, retry: clock.retry, press };
 }
