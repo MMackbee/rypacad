@@ -2,10 +2,10 @@ import React, { useEffect, useRef, useState } from 'react';
 import { color, font } from '../../tokens';
 import Button from '../Button';
 import { Body, Card, SectionLabel } from '../Primitives';
-import HoldToUnlock from './HoldToUnlock';
+import HoldToUnlock, { srOnly } from './HoldToUnlock';
 import DoorRulesSheet from './DoorRulesSheet';
 import { useDoorPress, useDoorStatus } from '../../hooks/door';
-import { CARD_REASONS, DIDNT_OPEN, LOCATION_NOTE, LOCKED_AGAIN, cardShows, doorCopy, openForText, refusalCopy } from '../../data/doorRules';
+import { CARD_REASONS, DIDNT_OPEN, LOCATION_NOTE, LOCKED_AGAIN, cardShows, doorCopy, openForText, openTimeWords, refusalCopy } from '../../data/doorRules';
 
 /** The staff screen's line when the check itself failed (families see no card then). */
 export const STAFF_CHECK_FAILED = "The door check didn't load. Reload the page to try again.";
@@ -130,7 +130,9 @@ const StateMessage = React.forwardRef(function StateMessage({ children }, ref) {
  * the time runs out the words say the door has locked again (review
  * 2026-11-17 app-1: with minutes of open time the retry line cannot wait
  * for the end). The words are a polite live region; the ticking time and
- * the retry line are not in it.
+ * the retry line are not in it, but a screen reader can read them, and an
+ * opened door's words carry its open time once ("Open for 5 minutes",
+ * review 2026-11-17 a11y-1: the door may stay open for up to 10 minutes).
  */
 function PressMessage({ result, left, retry, busy, staff }) {
   const door = result?.kind === 'outcome' && (result.outcome === 'opened' || result.outcome === 'coalesced');
@@ -150,17 +152,15 @@ function PressMessage({ result, left, retry, busy, staff }) {
     words = refusalCopy(result.reason, result.message);
     tone = color.error;
   }
+  const spoken = !busy && result?.kind === 'outcome' && result.outcome === 'opened' && left > 0;
   const quiet = { marginTop: 4, font: `600 12px ${font.body}`, color: color.textSecondary };
   return (
     <div style={{ marginTop: 14, textAlign: 'center' }}>
       <div role="status" aria-live="polite" style={{ font: `500 13px/1.5 ${font.body}`, color: tone }}>
         {words}
+        {spoken ? <span style={srOnly}>{` Open for ${openTimeWords(result.openSeconds)}.`}</span> : null}
       </div>
-      {left > 0 ? (
-        <div aria-hidden="true" style={quiet}>
-          {openForText(left)}
-        </div>
-      ) : null}
+      {left > 0 ? <div style={quiet}>{openForText(left)}</div> : null}
       {door && retry && !busy ? <div style={{ ...quiet, fontWeight: 400, color: color.textTertiary }}>{DIDNT_OPEN}</div> : null}
     </div>
   );

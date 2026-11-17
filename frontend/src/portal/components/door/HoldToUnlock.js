@@ -12,7 +12,8 @@ const STROKE = 6;
 const R = (SIZE - STROKE) / 2;
 const CIRCUMFERENCE = Math.round(2 * Math.PI * R * 100) / 100;
 
-const srOnly = {
+/** Read by screen readers, never seen. */
+export const srOnly = {
   position: 'absolute',
   width: 1,
   height: 1,

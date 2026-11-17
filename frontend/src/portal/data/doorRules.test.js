@@ -18,6 +18,7 @@ import {
   doorCopy,
   doorRulesSections,
   openForText,
+  openTimeWords,
   refusalCopy,
 } from './doorRules';
 import { CONSENT_TERMS } from './consentTerms';
@@ -55,6 +56,15 @@ test('the countdown under an opened door: seconds under a minute, then m:ss', ()
   expect(openForText(60)).toBe('Open for 1:00');
   expect(openForText(125)).toBe('Open for 2:05');
   expect(openForText(600)).toBe('Open for 10:00');
+});
+
+test('an open time as a screen reader says it (review 2026-11-17 a11y-1)', () => {
+  expect(openTimeWords(1)).toBe('1 second');
+  expect(openTimeWords(45)).toBe('45 seconds');
+  expect(openTimeWords(60)).toBe('1 minute');
+  expect(openTimeWords(61)).toBe('1 minute 1 second');
+  expect(openTimeWords(90)).toBe('1 minute 30 seconds');
+  expect(openTimeWords(600)).toBe('10 minutes');
 });
 
 test('copy by reason, word for word', () => {

@@ -35,6 +35,15 @@ export function openForText(left) {
   return `Open for ${Math.floor(left / 60)}:${String(left % 60).padStart(2, '0')}`;
 }
 
+/** An open time as a screen reader says it: '45 seconds', '1 minute', '1 minute 30 seconds', '10 minutes'. */
+export function openTimeWords(seconds) {
+  const s = Math.max(0, Math.round(Number(seconds) || 0));
+  const unit = (n, word) => `${n} ${word}${n === 1 ? '' : 's'}`;
+  const m = Math.floor(s / 60);
+  if (!m) return unit(s, 'second');
+  return s % 60 ? `${unit(m, 'minute')} ${unit(s % 60, 'second')}` : unit(m, 'minute');
+}
+
 const NO_ANSWER = `The door didn't answer. If you heard the lock click, go in. Otherwise try once more, or call or text ${ACADEMY_PHONE}.`;
 
 const COPY = {

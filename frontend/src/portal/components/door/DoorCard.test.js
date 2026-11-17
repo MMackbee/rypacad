@@ -385,6 +385,20 @@ describe('an open of minutes (review 2026-11-17 app-1 and app-2)', () => {
 });
 
 describe('keyboard and screen reader keep their place (review 2026-11-17 app-7)', () => {
+  test('the open time is said once with the unlocked line, and the countdown can be read (a11y-1)', async () => {
+    mockPress = { outcome: 'opened', openSeconds: 300 };
+    const r = await renderScreen(<DoorCard />);
+    await hold(r);
+    const live = () => r.container.querySelector('[aria-live="polite"]').textContent;
+    expect(live()).toBe('Unlocked - pull the door now. Open for 5 minutes.');
+    const countdown = [...r.container.querySelectorAll('div')].find((d) => d.textContent === 'Open for 5:00');
+    expect(countdown.closest('[aria-hidden="true"], [aria-live]')).toBeNull();
+    await act(async () => { jest.advanceTimersByTime(1000); });
+    expect(countdown.textContent).toBe('Open for 4:59');
+    expect(live()).toBe('Unlocked - pull the door now. Open for 5 minutes.');
+    await r.unmount();
+  });
+
   test('choosing Unlock in the question leaves focus on the button, through the wait and after the answer', async () => {
     let release;
     mockPress = () => new Promise((resolve) => { release = resolve; });
