@@ -9,7 +9,8 @@
  * UI only: no other profile field, and nothing security-relevant reads it -
  * firestore.rules check the real users doc on every request. Written by
  * useAuthSession after a verified read, cleared on sign-out (sessionStore's
- * resetSession) and when the account has no users doc. Every storage call is
+ * resetSession), when the account has no users doc, and when a verified read
+ * finds a role with no landing (review 2026-11-17). Every storage call is
  * guarded: private mode or blocked site data just means no hint.
  *
  * A users read that fails for any other reason (offline, unavailable,
@@ -46,10 +47,18 @@ export function readRoleHint() {
   }
 }
 
-/** After a verified users read: keep the three routing facts, nothing else. */
+/**
+ * After a verified users read: keep the three routing facts, nothing else.
+ * A role with no landing (null, or one this build does not know - a
+ * departed coach set to null) retires the last hint instead of keeping it.
+ */
 export function writeRoleHint(user) {
-  if (user && typeof user.uid === 'string') suppressed = false; // a read succeeded
-  if (!user || typeof user.uid !== 'string' || !ROLES.includes(user.role)) return;
+  if (!user || typeof user.uid !== 'string') return;
+  suppressed = false; // a read succeeded
+  if (!ROLES.includes(user.role)) {
+    clearRoleHint();
+    return;
+  }
   const hint = { uid: user.uid, role: user.role, specialistId: typeof user.specialistId === 'string' ? user.specialistId : null };
   try {
     storage()?.setItem(ROLE_HINT_KEY, JSON.stringify(hint));

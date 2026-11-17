@@ -168,6 +168,30 @@ describe('useAuthSession and the hint', () => {
   });
 });
 
+// Review 2026-11-17 (F2): a verified role with no landing (null, or one the
+// portal does not know) retires the old hint, or every cold start keeps
+// rendering the last role's landing before bouncing.
+describe('a role with no landing', () => {
+  test('clears the stored hint', () => {
+    writeRoleHint({ uid: 'u-c', role: 'coach' });
+    writeRoleHint({ uid: 'u-c', role: null });
+    expect(readRoleHint()).toBeNull();
+    writeRoleHint({ uid: 'u-c', role: 'coach' });
+    writeRoleHint({ uid: 'u-c', role: 'former' });
+    expect(readRoleHint()).toBeNull();
+  });
+
+  test('a verified read that finds no role retires the last staff hint', async () => {
+    writeRoleHint({ uid: 'u-left', role: 'coach' });
+    mockDocs['users/u-left'] = { role: null };
+    auth.currentUser = account('u-left');
+    const p = await mountProbe();
+    await flush();
+    expect(p.now()).toMatchObject({ loading: false, user: { uid: 'u-left', role: null } });
+    expect(readRoleHint()).toBeNull();
+  });
+});
+
 // Review 2026-11-17 (F1): a users read that fails for any reason but
 // NOT_FOUND - offline, unavailable, refused - must not leave the hint driving
 // the launch paths, or RequireRole's redirect to sign-in and sign-in's hint
