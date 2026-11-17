@@ -21,11 +21,13 @@ test('verify copy names the sender and where to look (contract 9.4)', () => {
   expect(EMAIL_IN_USE).toBe('This email already has a login - sign in instead');
 });
 
-test("the sender is Firebase's noreply@<auth domain> unless the console sender is mirrored in", () => {
+// 2026-11-17: the verify template's sender is 'Portal' (Auth config, and the From header of a real
+// verification email), so the copy named an address families could never find.
+test("the sender is the verify template's Portal@<auth domain> unless the console sender is mirrored in", () => {
   const unset = { REACT_APP_VERIFY_EMAIL_SENDER: undefined };
-  expect(authCopyWith({ ...unset, REACT_APP_FIREBASE_AUTH_DOMAIN: undefined }).VERIFY_EMAIL_SENDER).toBe('noreply@rypacad.firebaseapp.com');
-  expect(authCopyWith({ ...unset, REACT_APP_FIREBASE_AUTH_DOMAIN: 'other.firebaseapp.com' }).VERIFY_EMAIL_SENDER).toBe('noreply@other.firebaseapp.com');
-  expect(authCopyWith({ REACT_APP_VERIFY_EMAIL_SENDER: '   ' }).VERIFY_EMAIL_SENDER).toMatch(/^noreply@.+\.firebaseapp\.com$/);
+  expect(authCopyWith({ ...unset, REACT_APP_FIREBASE_AUTH_DOMAIN: undefined }).VERIFY_EMAIL_SENDER).toBe('Portal@rypacad.firebaseapp.com');
+  expect(authCopyWith({ ...unset, REACT_APP_FIREBASE_AUTH_DOMAIN: 'other.firebaseapp.com' }).VERIFY_EMAIL_SENDER).toBe('Portal@other.firebaseapp.com');
+  expect(authCopyWith({ REACT_APP_VERIFY_EMAIL_SENDER: '   ' }).VERIFY_EMAIL_SENDER).toMatch(/^Portal@.+\.firebaseapp\.com$/);
   const custom = authCopyWith({ REACT_APP_VERIFY_EMAIL_SENDER: ' noreply@rypacademy.com ' });
   expect(custom.VERIFY_EMAIL_SENDER).toBe('noreply@rypacademy.com');
   expect(custom.verifyBody('kid@email.com')).toContain('from noreply@rypacademy.com. Open it');

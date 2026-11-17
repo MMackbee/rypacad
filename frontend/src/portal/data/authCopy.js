@@ -5,12 +5,14 @@
  * sender the functions use for notices. Its From address is set in the
  * Firebase console (Authentication > Templates, including a custom sender
  * domain); REACT_APP_VERIFY_EMAIL_SENDER mirrors it here so the copy names
- * the address the email really comes from. Unset, it is Firebase's default,
- * noreply@<authDomain>. The emails can land in Spam, so the copy says where
- * to look.
+ * the address the email really comes from. Unset, it is this project's
+ * verify template sender, Portal@<authDomain> (2026-11-17: read from the Auth
+ * config and a real email's From header; it was wrongly noreply@ here, so
+ * families searched Spam for an address that never sends). The emails can
+ * land in Spam, so the copy says where to look.
  */
 export const VERIFY_EMAIL_SENDER = (process.env.REACT_APP_VERIFY_EMAIL_SENDER || '').trim()
-  || `noreply@${process.env.REACT_APP_FIREBASE_AUTH_DOMAIN || 'rypacad.firebaseapp.com'}`;
+  || `Portal@${process.env.REACT_APP_FIREBASE_AUTH_DOMAIN || 'rypacad.firebaseapp.com'}`;
 export const VERIFY_TITLE = 'Verify your email to finish';
 export function verifyBody(email) {
   return `We sent a link to ${email} from ${VERIFY_EMAIL_SENDER}. Open it, then tap I've verified. Not in your inbox? Check Spam or Junk.`;
