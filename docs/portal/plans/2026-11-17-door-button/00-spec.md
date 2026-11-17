@@ -40,9 +40,9 @@ API link as the Secret Manager secret `ALTA_UNLOCK_URL`. Nobody else ever sees i
   rules plus one new line). A 16-17 athlete also needs a parent in the household to have signed.
   This closes review B4/M2/M3/M4 without touching sign-up's consent records.
 - New line in the facility rules (sign-up shows it too): "Use the app's Unlock button only when you
-  are at the door, and only to let in your own household and the one guest the rules allow. Never
-  open the door for anyone else." (Review 2026-11-17 spec-5: the first wording contradicted "One
-  guest may come along" two lines above it; the owner should confirm this wording.)
+  are at the door, and only to let in your own household. Never open the door for anyone else."
+  (Owner 2026-11-17, after a review suggested adding the one guest: "not one guest, anyone in
+  their household can enter".)
 - Around the clock, as the waiver says. No parent notice per unlock in v1. No App Check in v1.
 - The Nov 5 Alta mobile keys stay as the fallback when the internet or Alta is down.
 - Failure messages give the academy number (612) 234-1644 (the website's number).

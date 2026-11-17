@@ -21,8 +21,8 @@ import { renderScreen } from '../../screens/testRender';
 import { LiveDataError, ERR } from '../../hooks/live';
 import DoorRulesSheet from './DoorRulesSheet';
 
-// Review 2026-11-17 (spec-5): the one guest the rules above allow may come in too.
-const RULE = "Use the app's Unlock button only when you are at the door, and only to let in your own household and the one guest the rules allow. Never open the door for anyone else.";
+// Owner 2026-11-17: the household only, no guest.
+const RULE = "Use the app's Unlock button only when you are at the door, and only to let in your own household. Never open the door for anyone else.";
 
 let closed;
 let signed;

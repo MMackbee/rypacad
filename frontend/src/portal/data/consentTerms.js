@@ -67,8 +67,8 @@ export const CONSENT_TERMS = {
         'An athlete under 16 must be accompanied by a parent, guardian or an adult the guardian has named to the academy in writing.',
         'One guest may come along, but only to watch. Guests may not hit balls or use equipment.',
         // The facility door button (2026-11-17 spec 3): the door rules are these rules plus this line.
-        // It names the one guest above (review 2026-11-17 spec-5), so the two lines never disagree.
-        "Use the app's Unlock button only when you are at the door, and only to let in your own household and the one guest the rules allow. Never open the door for anyone else.",
+        // Owner 2026-11-17: the button lets in the household only ("anyone in their household can enter").
+        "Use the app's Unlock button only when you are at the door, and only to let in your own household. Never open the door for anyone else.",
       ],
     },
     {

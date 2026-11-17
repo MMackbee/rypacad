@@ -15,7 +15,7 @@ export const ACADEMY_PHONE = '(612) 234-1644';
 
 /** The line the door rules add to the facility rules (data/consentTerms.js, the end of "Who may enter"). */
 export const DOOR_RULE_LINE =
-  "Use the app's Unlock button only when you are at the door, and only to let in your own household and the one guest the rules allow. Never open the door for anyone else.";
+  "Use the app's Unlock button only when you are at the door, and only to let in your own household. Never open the door for anyone else.";
 
 /** Under the button before the first press, for a family login (staff unlock from anywhere). */
 export const LOCATION_NOTE = "The app checks you're at the academy when you unlock.";
