@@ -49,7 +49,9 @@ export { claimStateOf, createLoginError, resendError, verifyContinueUrl };
  *     provisioned: boolean, loading, error, signIn(), signInWithEmail(), signOut(),
  *     requestPasswordReset(),
  *     // Sprint 20 (spec 2.1, 3.2; contract 4.1):
- *     createLogin(email, password), refresh(), claimState, checkInvite(), resendVerification() }
+ *     createLogin(email, password), refresh(), claimState, checkInvite(), resendVerification(),
+ *     // review 2026-11-17 (AUTH-1): signed in, but users/{uid} did not load
+ *     accountError }
  *
  * - Auth is the existing app instance from src/firebase.js (project `rypacad`)
  *   — never a second init. signIn() runs the existing Google popup; a popup the
@@ -194,6 +196,7 @@ export default function useAuthSession({ variant } = {}) {
   const seqRef = useRef(0);
   const [claimState, setClaimState] = useState('idle');
   const claimRef = useRef(null); // latest runClaim; the auth effect never re-subscribes
+  const emittedRef = useRef(undefined); // the uid the auth listener last reported here
 
   // Resolve users/{uid} for one emission or refresh; only the latest `seq`
   // may land. Returns 'provisioned' | 'not-found' | 'error' | 'stale'.
@@ -221,7 +224,8 @@ export default function useAuthSession({ variant } = {}) {
         return 'not-found';
       }
       suppressRoleHint(); // or sign-in follows it straight back to the landing (roleHint.js)
-      setSession({ user: null, provisioned: false, loading: false, error: accountLoadError(err) });
+      const error = accountLoadError(err);
+      setSession({ user: null, provisioned: false, loading: false, error, failed: { uid: fbUser.uid, error } });
       return 'error';
     }
   }, []);
@@ -230,6 +234,7 @@ export default function useAuthSession({ variant } = {}) {
     if (demo) return undefined; // demo bypasses real auth entirely
     const unsubscribe = onAuthStateChanged(auth, (fbUser) => {
       const seq = ++seqRef.current;
+      emittedRef.current = fbUser ? fbUser.uid : null;
       if (!fbUser) {
         resetSession(); // the shared profile and everything kept for the account
         publishSelfManaged(false);
@@ -281,6 +286,13 @@ export default function useAuthSession({ variant } = {}) {
     setSession((s) => ({ ...s, loading: true, pendingUid: fbUser.uid }));
     await resolveProfile(seqRef.current, fbUser, true);
   }, [resolveProfile]);
+
+  // Firebase 9 notifies auth listeners only when the uid changes: signing in
+  // again as the account this instance already has (its users read failed)
+  // brings no emission. Re-read instead of waiting on one (AUTH-1, 2026-11-17).
+  const afterSignIn = useCallback(async (before) => {
+    if (auth.currentUser && auth.currentUser.uid === before) await refresh();
+  }, [refresh]);
 
   const runClaim = useCallback(async (seq, fbUser) => {
     setClaimState('checking');
@@ -342,11 +354,11 @@ export default function useAuthSession({ variant } = {}) {
   }, []);
 
   const signIn = useCallback(async () => {
+    const before = emittedRef.current;
     // Clear a stale error so a retry starts clean.
     setSession((s) => (s.error ? { ...s, error: null } : s));
     try {
       await signInWithPopup(auth, provider);
-      // Success lands via onAuthStateChanged — nothing to set here.
     } catch (err) {
       // The user closing the popup is a change of mind, not an error state.
       // Closing the popup and double-clicking the button are both the user
@@ -361,8 +373,10 @@ export default function useAuthSession({ variant } = {}) {
           err
         ),
       }));
+      return;
     }
-  }, []);
+    await afterSignIn(before); // another account lands via onAuthStateChanged
+  }, [afterSignIn]);
 
   // Email/password sign-in. Unlike the popup there is no user-cancel branch,
   // so `loading` flips on immediately and only an error turns it back off —
@@ -370,10 +384,10 @@ export default function useAuthSession({ variant } = {}) {
   // errors get one deliberately unspecific message (which of the two fields
   // is wrong is not the caller's business, per the designed invalid state).
   const signInWithEmail = useCallback(async (email, password) => {
+    const before = emittedRef.current;
     setSession((s) => ({ ...s, loading: true, error: null }));
     try {
       await signInWithEmailAndPassword(auth, email, password);
-      // Success lands via onAuthStateChanged — nothing to set here.
     } catch (err) {
       const code = err && err.code;
       const credential =
@@ -393,8 +407,10 @@ export default function useAuthSession({ variant } = {}) {
         loading: false,
         error: new LiveDataError(credential ? ERR.INVALID : ERR.UNAVAILABLE, message, err),
       }));
+      return;
     }
-  }, []);
+    await afterSignIn(before); // another account lands via onAuthStateChanged
+  }, [afterSignIn]);
 
   // Forgot password (Sprint 10, pin I "Quick wins") — the SignIn screen's
   // real "Forgot password" link (frontend lane wires the sent/error states;
@@ -462,6 +478,8 @@ export default function useAuthSession({ variant } = {}) {
     error: session.error,
     // While users/{uid} loads: THIS account's last verified role, for the landing only (roleHint.js).
     hint: session.loading ? roleHintFor(session.pendingUid) : null,
+    // Signed in, but users/{uid} did not load: SignIn offers Try again (refresh) - signing in again cannot help.
+    accountError: !session.user && session.failed && auth.currentUser && auth.currentUser.uid === session.failed.uid ? session.failed.error : null,
     signIn,
     signInWithEmail,
     signOut,

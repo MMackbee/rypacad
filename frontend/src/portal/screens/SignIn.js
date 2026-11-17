@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { color, font, radius, tint } from '../tokens';
 import Button from '../components/Button';
@@ -11,6 +11,7 @@ import CreateLoginSection from '../components/CreateLoginSection';
 import useAuthSession from '../hooks/useAuthSession';
 import { FAMILY_LINK_FAIL } from '../data/authCopy';
 import LaunchSplash from '../components/LaunchSplash';
+import AccountRetry from '../components/AccountRetry';
 
 /**
  * 01 · Sign In - public.
@@ -67,7 +68,7 @@ function landingPath(user) {
 
 function LiveSignIn({ bare = false, onStartEnrollment, onSignedIn }) {
   const auth = useAuthSession();
-  const { user, provisioned, loading, error, signIn, signInWithEmail, createLogin, hint } = auth;
+  const { user, provisioned, loading, error, signIn, signInWithEmail, createLogin, hint, refresh, accountError } = auth;
   /**
    * Sprint 10 pin I: "Forgot password" wired to a real
    * sendPasswordResetEmail. FALLBACK FLAG: useAuthSession has no
@@ -84,6 +85,9 @@ function LiveSignIn({ bare = false, onStartEnrollment, onSignedIn }) {
   const [showPassword, setShowPassword] = useState(false);
   const [resetStatus, setResetStatus] = useState(null); // null | 'sending' | 'sent' | error string
   const [lastAction, setLastAction] = useState(null);
+  // Still signed in, but the account did not load (AUTH-1): Try again re-reads it.
+  const retry = useCallback(() => { setLastAction('retry'); refresh(); }, [refresh]);
+  const signInError = error && error !== accountError ? error : null;
 
   const handleForgotPassword = async () => {
     if (!email.trim()) {
@@ -145,6 +149,9 @@ function LiveSignIn({ bare = false, onStartEnrollment, onSignedIn }) {
     <PhoneFrame bare={bare}>
       <div style={{ padding: '0 24px 24px', display: 'flex', flexDirection: 'column', flex: 1 }}>
         <BrandHeader />
+        {accountError ? (
+          <AccountRetry message={accountError.message} offline={accountError.code === 'unavailable'} busy={loading && lastAction === 'retry'} onRetry={retry} />
+        ) : null}
 
         {/* The designed form, live. Enter submits from either field; accounts
             are provisioned out-of-band, so there is no sign-up path here. */}
@@ -223,16 +230,16 @@ function LiveSignIn({ bare = false, onStartEnrollment, onSignedIn }) {
           ) : null}
         </div>
 
-        {error ? (
+        {signInError ? (
           // The designed invalid treatment, carrying the seam's message.
           <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 14 }}>
             <AlertGlyph />
             <span style={{ font: `400 12px ${font.body}`, color: color.error }}>
-              {error.message || "Sign-in didn't complete — try again."}
+              {signInError.message || "Sign-in didn't complete — try again."}
             </span>
           </div>
         ) : null}
-        {error && lastAction === 'google' ? (
+        {signInError && lastAction === 'google' ? (
           <Body size={12} style={{ marginTop: 8 }}>{FAMILY_LINK_FAIL}</Body>
         ) : null}
 

@@ -146,3 +146,76 @@ test.each([
   expect(r.text()).not.toContain('client is offline');
   await r.unmount();
 });
+
+/*
+ * AUTH-1 (review 2026-11-17): the visitor the failed read left on sign-in is
+ * still signed in. Signing in again with the same account gets no auth
+ * emission (Firebase 9 notifies only on a uid change), so waiting for one
+ * left the button on 'Signing in' for good. Every way out re-reads users/{uid}.
+ */
+async function stuckOnSignIn() {
+  writeRoleHint({ uid: 'u-own', role: 'owner' });
+  mockDocs['users/u-own'] = { role: 'owner' };
+  auth.currentUser = account('u-own');
+  mockFail.value = 'unavailable';
+  const r = await mount('/portal/admin');
+  await flush(40);
+  expect(r.pathname()).toBe('/portal/signin');
+  mockFail.value = null; // the connection is back
+  return r;
+}
+
+test('signed in but the account did not load: Try again reads it again and lands', async () => {
+  const r = await stuckOnSignIn();
+  expect(r.button('Try again')).not.toBeNull();
+  await act(async () => { r.button('Try again').click(); });
+  await flush(40);
+  expect(r.pathname()).toBe('/portal/admin');
+  expect(r.text()).toContain('ADMIN as owner');
+  await r.unmount();
+});
+
+test('the same account signing in again with its password lands, never stuck on Signing in', async () => {
+  const r = await stuckOnSignIn();
+  await r.fill('Email', 'u-own@example.com');
+  await r.fill('Password', 'pw-test');
+  await act(async () => { r.button('Sign in').click(); });
+  await flush(40);
+  expect(mockSignIns).toEqual(['email']);
+  expect(r.text()).not.toContain('Signing in');
+  expect(r.pathname()).toBe('/portal/admin');
+  await r.unmount();
+});
+
+test('Continue with Google for the same account lands too', async () => {
+  const r = await stuckOnSignIn();
+  const google = [...r.container.querySelectorAll('button')].find((b) => b.textContent.includes('Continue with Google'));
+  await act(async () => { google.click(); });
+  await flush(40);
+  expect(mockSignIns).toEqual(['google']);
+  expect(r.pathname()).toBe('/portal/admin');
+  await r.unmount();
+});
+
+test('the connection coming back retries once on its own', async () => {
+  const r = await stuckOnSignIn();
+  await act(async () => { window.dispatchEvent(new Event('online')); });
+  await flush(40);
+  expect(r.pathname()).toBe('/portal/admin');
+  await r.unmount();
+});
+
+test('a refused read does not retry on the online event (only an unavailable one does)', async () => {
+  writeRoleHint({ uid: 'u-own', role: 'owner' });
+  auth.currentUser = account('u-own');
+  mockFail.value = 'permission-denied';
+  const r = await mount('/portal/admin');
+  await flush(40);
+  const settled = userReads();
+  await act(async () => { window.dispatchEvent(new Event('online')); });
+  await flush(40);
+  expect(userReads()).toBe(settled);
+  expect(r.pathname()).toBe('/portal/signin');
+  expect(r.button('Try again')).not.toBeNull();
+  await r.unmount();
+});
