@@ -72,6 +72,46 @@ test('check: staff hear staff, with the stored open time', async () => {
     openSeconds: 8});
 });
 
+/**
+ * A fake Firestore that records each collection read.
+ * @param {!Array<string>} seen Filled with collection names.
+ * @return {function(!Object): !Object} The press() `db` wrapper.
+ */
+const readsInto = (seen) => (db) => Object.assign({}, db, {
+  collection: (name) => {
+    seen.push(name);
+    return db.collection(name);
+  },
+});
+
+test('check: while the door is off for families, a family check reads ' +
+    'only its users doc and doorConfig', async () => {
+  // Review 2026-11-17 (spec-6): every family home load checks; until the
+  // owner turns Everyone on, the answer is always off.
+  const cfg = familyDocs()['doorConfig/main'];
+  for (const config of [null, Object.assign({}, cfg, {mode: 'off'}),
+    Object.assign({}, cfg, {mode: 'staff'}),
+    Object.assign({}, cfg, {mode: 'open'})]) {
+    const seen = [];
+    const r = await press({check: true}, {db: readsInto(seen),
+      docs: familyDocs({'doorConfig/main': config})});
+    assert.equal(r.result.canUnlock, false, JSON.stringify(config));
+    assert.equal(r.result.reason, 'off', JSON.stringify(config));
+    assert.deepEqual(seen.sort(), ['doorConfig', 'users'],
+        JSON.stringify(config));
+  }
+  const on = [];
+  await press({check: true}, {db: readsInto(on)});
+  assert.ok(on.includes('households') && on.includes('athletes'));
+});
+
+test('a press while off still names the family on its event', async () => {
+  const r = await press(unlock(),
+      {docs: familyDocs({'doorConfig/main': null})});
+  assert.equal(r.error.details.reason, 'off');
+  assert.equal(r.docs[EVENT].householdName, 'Hart family');
+});
+
 test('check: no doorConfig is off', async () => {
   const r = await press({check: true},
       {docs: familyDocs({'doorConfig/main': null})});
@@ -122,14 +162,19 @@ test('a family at the door: one POST, opened, the event and the limits',
       const ev = r.docs[EVENT];
       assert.equal(ev.at.toMillis(), NOW.getTime());
       assert.ok(Number.isInteger(ev.latencyMs) && ev.latencyMs >= 0);
-      assert.deepEqual(Object.assign({}, ev, {at: null, latencyMs: null}), {
+      // The invocation's own mark (a transaction retried after its commit
+      // applied finds it and carries on): random, never the press id.
+      assert.match(ev.nonce, /^[0-9a-f-]{36}$/);
+      assert.deepEqual(Object.assign({}, ev,
+          {at: null, latencyMs: null, nonce: null}), {
         uid: 'u-dana', role: 'parent', name: 'Dana Hart', householdId: 'hh',
         householdName: 'Hart family', athleteId: null, atMs: NOW.getTime(),
         at: null, outcome: 'opened', reason: null, altaStatus: 204,
-        latencyMs: null, distanceM: 0, accuracyM: 15, test: false});
+        latencyMs: null, distanceM: 0, accuracyM: 15, test: false,
+        nonce: null});
       assert.deepEqual(r.docs[LIMITS], {callsAtMs: [NOW.getTime()],
         opensAtMs: [NOW.getTime()], lastOpenedAtMs: NOW.getTime(),
-        updatedAtMs: NOW.getTime()});
+        lastConfirmedOpenAtMs: NOW.getTime(), updatedAtMs: NOW.getTime()});
       assert.ok(r.logs.some((l) => /unlockDoor: opened/.test(l) &&
           /altaStatus=204/.test(l)), r.logs.join('\n'));
     });
@@ -304,61 +349,7 @@ test('11 opens in the hour: the twelfth goes through', async () => {
   assert.equal(r.docs[LIMITS].opensAtMs.length, 12);
 });
 
-// ---- the 10 s coalesce ------------------------------------------------------
-
-test('a second press within 10 s is coalesced: no second POST', async () => {
-  const docs = familyDocs();
-  const alta = fakeAlta();
-  await press(unlock('press-0001'), {docs, alta});
-  const second = await press(unlock('press-0002'),
-      {docs, alta, now: later(9999)});
-  assert.deepEqual(second.result, {outcome: 'coalesced', openSeconds: 5});
-  assert.equal(alta.calls.length, 1);
-  assert.equal(docs['doorEvents/u-dana_press-0002'].outcome, 'coalesced');
-  assert.deepEqual(docs[LIMITS].opensAtMs, [NOW.getTime()]);
-  const third = await press(unlock('press-0003'),
-      {docs, alta, now: later(10000)});
-  assert.equal(third.result.outcome, 'opened');
-  assert.equal(alta.calls.length, 2);
-});
-
-test('a refusal is never coalesced', async () => {
-  const docs = familyDocs();
-  await press(unlock('press-0001'), {docs});
-  const r = await press(unlock('press-0002', FAR), {docs, now: later(3000)});
-  assert.equal(r.error.details.reason, 'too-far');
-});
-
-// ---- an Alta failure gives the open slot back -------------------------------
-
-test('Alta answers 500: alta-error, the event says so, the slot comes back',
-    async () => {
-      const docs = familyDocs();
-      const r = await press(unlock(), {docs,
-        alta: fakeAlta({status: 500})});
-      assert.equal(r.error.code, 'unavailable');
-      assert.equal(r.error.details.reason, 'alta-error');
-      assert.equal(docs[EVENT].outcome, 'error');
-      assert.equal(docs[EVENT].reason, 'alta-error');
-      assert.equal(docs[EVENT].altaStatus, 500);
-      assert.deepEqual(docs[LIMITS].opensAtMs, []);
-      assert.equal(docs[LIMITS].lastOpenedAtMs, null);
-      assert.deepEqual(docs[LIMITS].callsAtMs, [NOW.getTime()]);
-      // Hold again two seconds later: a real open, not "already unlocked".
-      const again = await press(unlock('press-0002'),
-          {docs, now: later(2000)});
-      assert.equal(again.result.outcome, 'opened');
-    });
-
-test('giving the slot back keeps an earlier open\'s coalesce', async () => {
-  const docs = familyDocs();
-  await press(unlock('press-0001'), {docs});
-  // 11 s later the next open fails; the first open stays the last one.
-  await press(unlock('press-0002'), {docs, now: later(11000),
-    alta: fakeAlta({status: 503})});
-  assert.deepEqual(docs[LIMITS].opensAtMs, [NOW.getTime()]);
-  assert.equal(docs[LIMITS].lastOpenedAtMs, NOW.getTime());
-});
+// The coalesce and an Alta failure's slot coming back: door-coalesce.test.js.
 
 // ---- test households and staff ----------------------------------------------
 

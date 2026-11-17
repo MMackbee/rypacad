@@ -18,13 +18,23 @@
  * doorLimits/{uid} that also creates doorEvents/{uid}_{pressId}:
  *   - more than 40 calls in the last hour: rate-limited, nothing written;
  *   - refused: event 'denied' with the reason, then the refusal;
- *   - an open in the last 10 s: event 'coalesced', no Alta request;
+ *   - a CONFIRMED open (Alta answered 2xx) inside the open time, at most
+ *     10 s: event 'coalesced', no Alta request (review 2026-11-17 server-2:
+ *     "Hold again" after the countdown is a real open);
+ *   - an open in that window Alta has not answered yet: event 'denied'
+ *     'in-progress' (server-3: never "already unlocked" onto a door that
+ *     may not move);
  *   - 12 opens in the last hour: event 'denied' 'rate-limited';
  *   - else the open is recorded, event 'pending' ('test' for a test
  *     household, which never reaches Alta).
- * Then Alta (door-alta.js): 2xx is 'opened'; anything else is 'error' with
- * the reason, and the open is given back so "Hold again" opens rather
- * than coalescing onto a door that never moved.
+ * The event carries this invocation's nonce, so a transaction retried
+ * after its commit applied carries on instead of replaying 'in-progress'.
+ * Then Alta (door-alta.js): 2xx is 'opened' and confirms the open; anything
+ * else is 'error' with the reason, and the open is given back so "Hold
+ * again" opens rather than coalescing onto a door that never moved.
+ *
+ * A check reads no household while the door is off for families (spec-6):
+ * every family home load checks, and the answer is 'off' regardless.
  *
  * Every press logs one line (`unlockDoor: <outcome> ...`) so a press can
  * be found in the function's logs. The API link and its token are never
@@ -32,6 +42,7 @@
  */
 'use strict';
 
+const {randomUUID} = require('node:crypto');
 const functions = require('firebase-functions/v1');
 const admin = require('firebase-admin');
 // See portal/staff-cancel.js: the modular export survives the emulator.
@@ -73,14 +84,18 @@ function defaultDb() {
 const dataOf = (snap) => (snap.exists ? snap.data() || {} : null);
 
 /**
- * Every read a door decision needs. Missing documents are nulls.
+ * Every read a door decision needs. Missing documents are nulls. A check
+ * stops after the users doc and doorConfig unless the door is on for
+ * everyone: a family's answer is 'off' then, whatever its household holds.
+ * A press reads on, so its event still names the family.
  * @param {!Object} store An admin Firestore.
  * @param {string} uid The caller.
  * @param {string} today Chicago 'YYYY-MM-DD'.
+ * @param {boolean=} check Whether this is the card's check.
  * @return {!Promise<!Object>} `{user, config, household, athletes, paused,
  *     myRules, householdRules}`.
  */
-async function loadDoor(store, uid, today) {
+async function loadDoor(store, uid, today, check) {
   const [userSnap, configSnap] = await Promise.all([
     store.collection('users').doc(uid).get(),
     store.collection('doorConfig').doc('main').get(),
@@ -90,6 +105,7 @@ async function loadDoor(store, uid, today) {
     householdRules: []};
   const u = ctx.user;
   if (!u || !FAMILY_ROLES.includes(u.role) || !u.householdId) return ctx;
+  if (check && !(ctx.config && ctx.config.mode === 'all')) return ctx;
   const hid = u.householdId;
   const [household, athletes, pause, mine] = await Promise.all([
     store.collection('households').doc(hid).get(),
@@ -122,9 +138,10 @@ const ROLE_NAMES = {owner: 'Owner', ops: 'Ops'};
  * @param {!Object} decision decide()'s answer.
  * @param {number} nowMs The clock.
  * @param {?Object=} token The caller's auth token claims.
+ * @param {string=} nonce This invocation's mark.
  * @return {!Object} The doorEvents body, without outcome and reason.
  */
-function eventBase(uid, ctx, decision, nowMs, token) {
+function eventBase(uid, ctx, decision, nowMs, token, nonce) {
   const u = ctx.user;
   const t = token || {};
   const family = FAMILY_ROLES.includes(u.role) && Boolean(u.householdId);
@@ -141,7 +158,7 @@ function eventBase(uid, ctx, decision, nowMs, token) {
     atMs: nowMs, at: Timestamp.fromMillis(nowMs),
     altaStatus: null, latencyMs: null,
     distanceM: decision.distanceM, accuracyM: decision.accuracyM,
-    test: decision.test,
+    test: decision.test, nonce: nonce || null,
   };
 }
 
@@ -157,21 +174,45 @@ function recent(list, nowMs) {
 }
 
 /**
+ * How long after a confirmed open another press is "already unlocked": the
+ * door's open time, never more than COALESCE_MS (server-2: the app says
+ * "Hold again" once the open time has counted down).
+ * @param {number} openSeconds openSecondsOf(config).
+ * @return {number} Milliseconds.
+ */
+const coalesceWindow = (openSeconds) =>
+  Math.min(COALESCE_MS, openSeconds * 1000);
+
+/**
+ * @param {*} v A stored value.
+ * @return {?number} It, when it is a number.
+ */
+const millisOrNull = (v) => (typeof v === 'number' ? v : null);
+
+/**
  * The transaction's body: the limits, the coalesce and the event.
  * @param {!Object} tx The transaction.
  * @param {!Object} refs `{limits, event}` document references.
  * @param {!Object} decision decide()'s answer.
- * @param {!Object} base eventBase()'s body.
+ * @param {!Object} base eventBase()'s body (its nonce marks this call).
  * @param {number} nowMs The clock.
+ * @param {number} windowMs coalesceWindow().
  * @return {!Promise<{outcome: ?string, reason: ?string, replay: ?Object}>}
  *     The step taken. `outcome` null with reason 'rate-limited' wrote
  *     nothing.
  */
-async function reserve(tx, refs, decision, base, nowMs) {
+async function reserve(tx, refs, decision, base, nowMs, windowMs) {
   const limSnap = await tx.get(refs.limits);
   const evSnap = await tx.get(refs.event);
   if (evSnap.exists) {
-    return {outcome: null, reason: null, replay: evSnap.data() || {}};
+    const ev = evSnap.data() || {};
+    // This invocation's own event: the commit applied and the transaction
+    // ran again (server-3). Carry on with what was recorded.
+    if (base.nonce && ev.nonce === base.nonce) {
+      return {outcome: ev.outcome || null, reason: ev.reason || null,
+        replay: null};
+    }
+    return {outcome: null, reason: null, replay: ev};
   }
   const lim = dataOf(limSnap) || {};
   const calls = recent(lim.callsAtMs, nowMs);
@@ -179,28 +220,60 @@ async function reserve(tx, refs, decision, base, nowMs) {
     return {outcome: null, reason: 'rate-limited', replay: null};
   }
   const opens = recent(lim.opensAtMs, nowMs);
-  const last = typeof lim.lastOpenedAtMs === 'number' ?
-      lim.lastOpenedAtMs : null;
+  const last = millisOrNull(lim.lastOpenedAtMs);
+  const confirmed = millisOrNull(lim.lastConfirmedOpenAtMs);
+  // A clock read before an earlier commit counts as inside the window.
+  const within = (t) => t !== null && nowMs - t < windowMs;
   const next = {callsAtMs: calls.concat([nowMs]), opensAtMs: opens,
-    lastOpenedAtMs: last, updatedAtMs: nowMs};
+    lastOpenedAtMs: last, lastConfirmedOpenAtMs: confirmed,
+    updatedAtMs: nowMs};
   let outcome = 'pending';
   let reason = null;
   if (!decision.ok) {
     outcome = 'denied';
     reason = decision.reason;
-  } else if (last !== null && nowMs - last < COALESCE_MS) {
+  } else if (within(confirmed)) {
     outcome = 'coalesced';
+  } else if (within(last) && (confirmed === null || last > confirmed)) {
+    outcome = 'denied';
+    reason = 'in-progress';
   } else if (opens.length >= OPEN_LIMIT) {
     outcome = 'denied';
     reason = 'rate-limited';
   } else {
     next.opensAtMs = opens.concat([nowMs]);
     next.lastOpenedAtMs = nowMs;
-    if (decision.test) outcome = 'test';
+    if (decision.test) {
+      // A test open "happens" at once: a press right after it coalesces.
+      outcome = 'test';
+      next.lastConfirmedOpenAtMs = nowMs;
+    }
   }
   tx.set(refs.limits, next);
   tx.create(refs.event, Object.assign({}, base, {outcome, reason}));
   return {outcome, reason, replay: null};
+}
+
+/**
+ * Marks the open Alta answered 2xx, so a press in the window coalesces onto
+ * it. Keeps the latest one. Best effort: logged when it fails.
+ * @param {!Object} store An admin Firestore.
+ * @param {!Object} ref doorLimits/{uid}.
+ * @param {number} nowMs The open's time.
+ * @return {!Promise<void>} Resolves either way.
+ */
+async function confirmOpen(store, ref, nowMs) {
+  try {
+    await store.runTransaction(async (tx) => {
+      const lim = dataOf(await tx.get(ref));
+      if (!lim) return;
+      const was = millisOrNull(lim.lastConfirmedOpenAtMs);
+      if (was !== null && was >= nowMs) return;
+      tx.update(ref, {lastConfirmedOpenAtMs: nowMs});
+    });
+  } catch (err) {
+    console.error('unlockDoor: the open was not confirmed:', err && err.name);
+  }
 }
 
 /**
@@ -295,7 +368,7 @@ async function unlockDoorHandler(data, context, deps) {
     throw refusal('bad-request');
   }
   const store = d.db || defaultDb();
-  const ctx = await loadDoor(store, uid, today);
+  const ctx = await loadDoor(store, uid, today, req.check === true);
   const openSeconds = openSecondsOf(ctx.config);
   if (req.check === true) {
     if (!ctx.user) {
@@ -317,9 +390,11 @@ async function unlockDoorHandler(data, context, deps) {
 
   const decision = decide(Object.assign({}, ctx, {today,
     location: req.location, mode: 'unlock'}));
-  const base = eventBase(uid, ctx, decision, nowMs, auth.token);
+  const base = eventBase(uid, ctx, decision, nowMs, auth.token,
+      randomUUID());
+  const windowMs = coalesceWindow(openSeconds);
   const step = await store.runTransaction((tx) =>
-    reserve(tx, refs, decision, base, nowMs));
+    reserve(tx, refs, decision, base, nowMs, windowMs));
   if (step.replay) return replayOf(step.replay, openSeconds);
   const where = {distanceM: decision.distanceM, accuracyM: decision.accuracyM};
   if (step.outcome === null || step.outcome === 'denied') {
@@ -336,7 +411,10 @@ async function unlockDoorHandler(data, context, deps) {
     env: d.env || process.env});
   const answer = {altaStatus: alta.status, latencyMs: alta.latencyMs};
   if (alta.ok) {
-    await settle(refs.event, Object.assign({outcome: 'opened'}, answer));
+    await Promise.all([
+      settle(refs.event, Object.assign({outcome: 'opened'}, answer)),
+      confirmOpen(store, refs.limits, nowMs),
+    ]);
     logPress('opened', base, Object.assign({}, answer, where,
         alta.fake ? {alta: 'emulator fake'} : {}));
     return {outcome: 'opened', openSeconds};

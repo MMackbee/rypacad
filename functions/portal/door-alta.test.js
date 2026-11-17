@@ -4,6 +4,8 @@
 // its token never appear in a log line, an error, a result or a stored
 // document. Alta is door-test-kit's stand-in; no test reaches the network.
 const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const nodePath = require('node:path');
 const {test, run} = require('./tiny');
 const {ALTA_TIMEOUT_MS, unlockUrl} = require('./door-alta');
 const {ENV, TOKEN, URL_OK, fakeAlta, familyDocs, press, unlock} =
@@ -147,15 +149,72 @@ test('emulator fake: FUNCTIONS_EMULATOR true and DOOR_FAKE_ALTA 1 answer 204 ' +
   assert.ok(r.logs.some((l) => /emulator fake/.test(l)));
 });
 
-test('either setting alone, or any other value, still calls Alta', async () => {
-  for (const extra of [{FUNCTIONS_EMULATOR: 'true'}, {DOOR_FAKE_ALTA: '1'},
-    {FUNCTIONS_EMULATOR: 'true', DOOR_FAKE_ALTA: 'true'},
-    {FUNCTIONS_EMULATOR: '1', DOOR_FAKE_ALTA: '1'}]) {
-    const r = await press(unlock(), {env: Object.assign({}, ENV, extra)});
-    assert.equal(r.result.outcome, 'opened', JSON.stringify(extra));
-    assert.equal(r.calls.length, 1, JSON.stringify(extra));
-  }
-});
+test('the emulator never calls Alta: without the fake it is misconfigured',
+    async () => {
+      // Review 2026-11-17 (server-1, spec-1): an emulator whose
+      // .secret.local has no ALTA_UNLOCK_URL reads the REAL link from
+      // Secret Manager, so a press there must never reach the network,
+      // whatever link it was handed.
+      for (const extra of [{FUNCTIONS_EMULATOR: 'true'},
+        {FUNCTIONS_EMULATOR: 'true', DOOR_FAKE_ALTA: 'true'},
+        {FUNCTIONS_EMULATOR: 'true', DOOR_FAKE_ALTA: '0'},
+        {FUNCTIONS_EMULATOR: '1'}, {FUNCTIONS_EMULATOR: 'TRUE'},
+        {FUNCTIONS_EMULATOR: '1', DOOR_FAKE_ALTA: 'yes'}]) {
+        const docs = familyDocs();
+        const r = await press(unlock(), {docs,
+          env: Object.assign({}, ENV, extra)});
+        const label = JSON.stringify(extra);
+        assert.equal(r.calls.length, 0, label);
+        assert.equal(r.error.code, 'failed-precondition', label);
+        assert.equal(r.error.details.reason, 'misconfigured', label);
+        assert.equal(docs[EVENT].outcome, 'error', label);
+        assert.deepEqual(docs[LIMITS].opensAtMs, [], label);
+        assert.ok(r.logs.some((l) => /misconfigured/.test(l) &&
+            /failure=emulator/.test(l)), r.logs.join('\n'));
+      }
+    });
+
+test('any emulator value with DOOR_FAKE_ALTA 1 is the fake, never the network',
+    async () => {
+      for (const flag of ['true', '1', 'TRUE']) {
+        const r = await press(unlock(), {env: Object.assign({}, ENV,
+            {FUNCTIONS_EMULATOR: flag, DOOR_FAKE_ALTA: '1'})});
+        assert.equal(r.result.outcome, 'opened', flag);
+        assert.equal(r.calls.length, 0, flag);
+      }
+    });
+
+test('outside the emulator DOOR_FAKE_ALTA means nothing: Alta is called',
+    async () => {
+      for (const extra of [{DOOR_FAKE_ALTA: '1'},
+        {FUNCTIONS_EMULATOR: '', DOOR_FAKE_ALTA: '1'},
+        {FUNCTIONS_EMULATOR: 'false', DOOR_FAKE_ALTA: '1'}]) {
+        const r = await press(unlock(), {env: Object.assign({}, ENV, extra)});
+        assert.equal(r.result.outcome, 'opened', JSON.stringify(extra));
+        assert.equal(r.calls.length, 1, JSON.stringify(extra));
+      }
+    });
+
+test('env.template keeps a placeholder link the door refuses, and the fake on',
+    () => {
+      // Every worktree copies its emulator env from the template: a
+      // placeholder in .secret.local stops the emulator reading the real
+      // link from Secret Manager (spec-1).
+      const text = fs.readFileSync(nodePath.join(__dirname, '..',
+          'env.template'), 'utf8');
+      const value = (name) => {
+        const line = text.split(/\r?\n/).find((l) =>
+          l.startsWith(`${name}=`));
+        return line === undefined ? undefined : line.slice(name.length + 1);
+      };
+      const placeholder = value('ALTA_UNLOCK_URL');
+      assert.equal(typeof placeholder, 'string');
+      assert.ok(placeholder.length > 0);
+      assert.equal(unlockUrl(placeholder), null);
+      assert.equal(value('DOOR_FAKE_ALTA'), '1');
+      assert.ok(/\.secret\.local/.test(text.slice(text.indexOf(
+          'ALTA_UNLOCK_URL'))));
+    });
 
 test('the fake reads the env the handler was given, never process.env',
     async () => {

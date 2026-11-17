@@ -8,8 +8,12 @@
  * line, an error, its cause, a result or a stored document. Callers get a
  * reason code and a status number, nothing else.
  *
- * Emulator only: with FUNCTIONS_EMULATOR 'true' AND DOOR_FAKE_ALTA '1' the
- * request is not made and the answer is a 204. Production sets neither.
+ * The emulator NEVER makes the request (review 2026-11-17, server-1 and
+ * spec-1): an emulator whose functions/.secret.local lacks ALTA_UNLOCK_URL
+ * reads the real link from Secret Manager, so under FUNCTIONS_EMULATOR the
+ * answer is a fake 204 when DOOR_FAKE_ALTA is '1' and 'misconfigured'
+ * otherwise - fail closed, with no opt-in to the real door. Production
+ * sets neither variable; there DOOR_FAKE_ALTA means nothing.
  */
 'use strict';
 
@@ -41,10 +45,13 @@ function unlockUrl(raw) {
 
 /**
  * @param {!Object} env The environment.
- * @return {boolean} Whether the emulator-only fake answers instead.
+ * @return {boolean} Whether this runs in the functions emulator: any
+ *     FUNCTIONS_EMULATOR value but empty, 'false' or '0' (fail closed).
  */
-function fakeAlta(env) {
-  return env.FUNCTIONS_EMULATOR === 'true' && env.DOOR_FAKE_ALTA === '1';
+function inEmulator(env) {
+  const v = env.FUNCTIONS_EMULATOR;
+  return typeof v === 'string' && v.trim() !== '' &&
+      !['false', '0'].includes(v.trim().toLowerCase());
 }
 
 /**
@@ -84,9 +91,13 @@ function discard(res) {
  */
 async function openDoor(deps) {
   const none = {status: null, latencyMs: null, fake: false, failure: null};
-  if (fakeAlta(deps.env)) {
-    return Object.assign({}, none, {ok: true, reason: null, status: 204,
-      latencyMs: 0, fake: true});
+  if (inEmulator(deps.env)) {
+    if (deps.env.DOOR_FAKE_ALTA === '1') {
+      return Object.assign({}, none, {ok: true, reason: null, status: 204,
+        latencyMs: 0, fake: true});
+    }
+    return Object.assign({}, none, {ok: false, reason: 'misconfigured',
+      failure: 'emulator'});
   }
   const href = unlockUrl(deps.env.ALTA_UNLOCK_URL);
   if (!href) {

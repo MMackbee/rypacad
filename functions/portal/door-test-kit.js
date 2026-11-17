@@ -83,8 +83,9 @@ function fakeAlta(opts) {
 /**
  * One call through the handler, console captured.
  * @param {*} data The payload.
- * @param {!Object=} opts `{docs, alta, env, auth, now}`; pass the same
- *     `docs` map to chain presses.
+ * @param {!Object=} opts `{docs, alta, env, auth, now, db}`; pass the same
+ *     `docs` map to chain presses. `db` wraps the fake Firestore:
+ *     `(fake) => stand-in` (a transaction retried, the reads counted).
  * @return {!Promise<!Object>} `{result, error, docs, calls, logs}`.
  */
 async function press(data, opts) {
@@ -100,11 +101,11 @@ async function press(data, opts) {
   }
   let result = null;
   let error = null;
+  const db = o.db ? o.db(fakeDb(docs)) : fakeDb(docs);
   try {
     result = await unlockDoorHandler(data,
         {auth: 'auth' in o ? o.auth : AUTH},
-        {db: fakeDb(docs), fetch: alta.fetch, env: o.env || ENV,
-          now: o.now || NOW});
+        {db, fetch: alta.fetch, env: o.env || ENV, now: o.now || NOW});
   } catch (err) {
     error = err;
   } finally {
