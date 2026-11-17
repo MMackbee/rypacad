@@ -88,7 +88,7 @@ export default function useSeedResource(value, opts = {}) {
         if (live) setState({ identity, view: view(data, false, null, false) });
       })
       .catch((err) => {
-        if (cached) dropCached(identity);
+        if (cached) dropCached(identity, ticket);
         if (live) setState({ identity, view: view(null, false, err, false) });
       });
     return () => {

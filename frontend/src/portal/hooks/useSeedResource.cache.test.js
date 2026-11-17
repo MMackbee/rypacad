@@ -173,6 +173,54 @@ test('a failed refresh shows the error, not the stale data, and drops the cached
   expect(third.seen[0]).toMatchObject({ data: null, loading: true });
 });
 
+/*
+ * Review 2026-11-17 (F2): reads of one identity can land out of order. A read
+ * that started before a write and lands after the post-write read must not
+ * put the pre-write value back in the cache (a deleted application, a
+ * cancelled booking painted again on the next visit).
+ */
+describe('an older read landing last', () => {
+  const opts = (d, gen) => ({ source: d.source(`gen-${gen}`), deps: ['scholarships'], gens: [gen], cacheKey: 'scholarships' });
+
+  test('never overwrites the newer value in the cache', async () => {
+    const d = deferredSource();
+    const h = await mountHook(opts(d, 0));
+    const older = d.last();
+    await h.rerender(opts(d, 1)); // a write bumped the key while the first read was in flight
+    await settle(d.last(), { rows: ['after-delete'] });
+    await settle(older, { rows: ['after-delete', 'deleted-application'] });
+    expect(h.now().data).toEqual({ rows: ['after-delete'] });
+    await h.unmount();
+    const back = await mountHook(opts(d, 1));
+    expect(back.seen[0]).toMatchObject({ data: { rows: ['after-delete'] }, isRefreshing: true });
+  });
+
+  test('failing, it does not drop the newer cached value', async () => {
+    const d = deferredSource();
+    const h = await mountHook(opts(d, 0));
+    const older = d.last();
+    await h.rerender(opts(d, 1));
+    await settle(d.last(), { rows: ['fresh'] });
+    await act(async () => { older.reject(Object.assign(new Error('offline'), { code: 'unavailable' })); await Promise.resolve(); });
+    expect(h.now().data).toEqual({ rows: ['fresh'] });
+    await h.unmount();
+    const back = await mountHook(opts(d, 1));
+    expect(back.seen[0]).toMatchObject({ data: { rows: ['fresh'] }, isRefreshing: true });
+  });
+
+  test('in order, the newer value still replaces the older one', async () => {
+    const d = deferredSource();
+    const h = await mountHook(opts(d, 0));
+    const older = d.last();
+    await h.rerender(opts(d, 1));
+    await settle(older, { rows: ['before'] });
+    await settle(d.last(), { rows: ['after'] });
+    await h.unmount();
+    const back = await mountHook(opts(d, 1));
+    expect(back.seen[0]).toMatchObject({ data: { rows: ['after'] } });
+  });
+});
+
 test('a hook with neither cacheKey nor gens keeps the old contract exactly', async () => {
   const d = deferredSource();
   const opts = (gen) => ({ source: d.source('plain'), deps: ['plain', gen] });
