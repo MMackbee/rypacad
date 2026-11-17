@@ -141,8 +141,9 @@ function LiveSignIn({ bare = false, onStartEnrollment, onSignedIn }) {
     if (hintPath) navigate(hintPath, { replace: true });
   }, [hintPath, navigate]);
   // A restore that resolved is a redirect (the effect above): keep the
-  // splash up until it lands, never a frame of the form.
-  const redirecting = Boolean(user) && lastAction == null && !onSignedIn;
+  // splash up until it lands, never a frame of the form. A Try again that
+  // lands is the same restore (browser check 2026-11-17).
+  const redirecting = Boolean(user) && (lastAction == null || lastAction === 'retry') && !onSignedIn;
   if (restoring || redirecting) return <LaunchSplash />;
 
   return (

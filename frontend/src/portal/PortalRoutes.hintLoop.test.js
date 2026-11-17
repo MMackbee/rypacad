@@ -66,16 +66,26 @@ async function mount(path) {
   document.body.appendChild(container);
   const root = createRoot(container);
   const loc = { current: null, visits: [] };
+  // What each commit left on screen (a Profiler's onRender runs in the commit).
+  const frames = [];
+  const onRender = () => {
+    const form = Boolean(container.querySelector('input[aria-label="Email"]'));
+    const panel = container.textContent.includes("Your account didn't load");
+    frames.push(container.querySelector('[data-launch-splash]') ? 'SPLASH' : form ? (panel ? 'FORM+PANEL' : 'FORM') : container.textContent.trim() || 'BLANK');
+  };
   await act(async () => {
     root.render(
-      <MemoryRouter initialEntries={[path]}>
-        <Spy onLoc={(l) => { loc.current = l; if (loc.visits[loc.visits.length - 1] !== l.pathname) loc.visits.push(l.pathname); }} />
-        <Routes><Route path="/portal/*" element={<PortalRoutes />} /></Routes>
-      </MemoryRouter>
+      <React.Profiler id="hint-loop" onRender={onRender}>
+        <MemoryRouter initialEntries={[path]}>
+          <Spy onLoc={(l) => { loc.current = l; if (loc.visits[loc.visits.length - 1] !== l.pathname) loc.visits.push(l.pathname); }} />
+          <Routes><Route path="/portal/*" element={<PortalRoutes />} /></Routes>
+        </MemoryRouter>
+      </React.Profiler>
     );
   });
   return {
     container,
+    frames,
     text: () => container.textContent,
     pathname: () => loc.current.pathname,
     visits: () => loc.visits,
@@ -168,10 +178,14 @@ async function stuckOnSignIn() {
 test('signed in but the account did not load: Try again reads it again and lands', async () => {
   const r = await stuckOnSignIn();
   expect(r.button('Try again')).not.toBeNull();
+  const before = r.frames.length;
   await act(async () => { r.button('Try again').click(); });
   await flush(40);
   expect(r.pathname()).toBe('/portal/admin');
   expect(r.text()).toContain('ADMIN as owner');
+  // Browser check 2026-11-17: once the read lands, the splash until Admin
+  // paints - never a frame of the bare form on the way out.
+  expect(r.frames.slice(before)).not.toContain('FORM');
   await r.unmount();
 });
 
