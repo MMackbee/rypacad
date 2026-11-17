@@ -33,6 +33,7 @@ import { taskTourBrackets } from './rules-probes/tour-brackets.mjs';
 import { taskBookingChanges } from './rules-probes/booking-changes.mjs';
 import { taskCombine } from './rules-probes/combine.mjs';
 import { taskMentalNote } from './rules-probes/mental-note.mjs';
+import { taskDoor } from './rules-probes/door.mjs';
 
 let HOST = localEmulatorHost({ required: true });
 const PROJECT = 'demo-rules-probe';
@@ -1172,6 +1173,7 @@ async function runPass(label) {
     await taskBookingChanges();
     await taskCombine();
     await taskMentalNote();
+    await taskDoor();
   } finally { await teardown(); }
 }
 
