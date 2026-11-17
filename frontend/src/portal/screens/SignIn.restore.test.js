@@ -114,6 +114,23 @@ test('a restore that ends signed in goes to the verified landing', async () => {
   await r.unmount();
 });
 
+// Integration browser pass (2026-11-17): the form flashed for a frame
+// between the splash and the landing - the restore ended, the redirect is an
+// effect, and the render in between was the sign-in form.
+test('a restore that ends signed in never shows the form on its way to the landing', async () => {
+  setSession({ ...base, loading: true });
+  const r = await mount();
+  const added = [];
+  const mo = new MutationObserver((records) => records.forEach((rec) => added.push(...rec.addedNodes)));
+  mo.observe(r.container, { childList: true, subtree: true });
+  await act(async () => { setSession({ ...base, user: { uid: 'u-o', role: 'owner' }, provisioned: true }); });
+  mo.takeRecords().forEach((rec) => added.push(...rec.addedNodes));
+  mo.disconnect();
+  expect(r.pathname()).toBe('/portal/admin');
+  expect(added.some((n) => n.nodeType === 1 && (n.matches('input') || n.querySelector('input')))).toBe(false);
+  await r.unmount();
+});
+
 test('an email sign-in the visitor started keeps its form while it resolves', async () => {
   setSession({ ...base });
   const r = await mount();

@@ -136,7 +136,10 @@ function LiveSignIn({ bare = false, onStartEnrollment, onSignedIn }) {
   useEffect(() => {
     if (hintPath) navigate(hintPath, { replace: true });
   }, [hintPath, navigate]);
-  if (restoring) return <LaunchSplash />;
+  // A restore that resolved is a redirect (the effect above): keep the
+  // splash up until it lands, never a frame of the form.
+  const redirecting = Boolean(user) && lastAction == null && !onSignedIn;
+  if (restoring || redirecting) return <LaunchSplash />;
 
   return (
     <PhoneFrame bare={bare}>
