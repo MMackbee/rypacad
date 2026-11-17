@@ -24,14 +24,40 @@
          No crossorigin: both are a plain script and an iframe navigation. -->
     <link rel="preconnect" href="https://apis.google.com" />
     <link rel="preconnect" href="https://%REACT_APP_FIREBASE_AUTH_DOMAIN%" />
-    <link
-      rel="stylesheet"
-      href="https://fonts.googleapis.com/css2?family=Raleway:wght@400;500;600;700&family=Work+Sans:wght@400;500;600;700&display=swap"
-    />
+    <!-- The fonts never block the first paint (2026-11-17): preloaded, then
+         applied when they arrive (print -> all); text shows in the fallback
+         face until then, as display=swap already allowed. -->
+    <link rel="preload" as="style" href="https://fonts.googleapis.com/css2?family=Raleway:wght@400;500;600;700&family=Work+Sans:wght@400;500;600;700&display=swap" />
+    <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Raleway:wght@400;500;600;700&family=Work+Sans:wght@400;500;600;700&display=swap" media="print" onload="this.media='all'" />
+    <noscript><link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Raleway:wght@400;500;600;700&family=Work+Sans:wght@400;500;600;700&display=swap" /></noscript>
+    <!-- The launch splash inside #root shows until React mounts and replaces
+         it: no fetch, system fonts. Keep it in step with
+         src/portal/components/LaunchSplash.js. -->
+    <style>
+      html, body { margin: 0; background: #000000; }
+      [data-launch-splash] {
+        min-height: 100vh;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        gap: 10px;
+        background: #000000;
+        color: #ffffff;
+        font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+      }
+      [data-launch-splash] .launch-name { font-size: 22px; font-weight: 700; letter-spacing: 0.14em; text-transform: uppercase; }
+      [data-launch-splash] .launch-line { font-size: 13px; color: #cccccc; }
+    </style>
     <title>RYP Academy</title>
   </head>
   <body>
     <noscript>You need to enable JavaScript to run this app.</noscript>
-    <div id="root"></div>
+    <div id="root">
+      <div data-launch-splash role="status" aria-label="Loading RYP Academy">
+        <div class="launch-name">RYP Academy</div>
+        <div class="launch-line">Reach Your Potential</div>
+      </div>
+    </div>
   </body>
 </html>
