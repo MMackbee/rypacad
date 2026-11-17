@@ -16,6 +16,8 @@ import { fsFields } from '../lib/firestore-rest.mjs';
 import { BASE, call, commitAs, del, expect, listAs, seed, t, token, uid } from '../verify-rules.mjs';
 
 const ownerUid = 'owner-door-probe';
+// A parent login whose household was never provisioned (householdId null): rules-4.
+const noHouseholdUid = 'p-nohh-probe';
 // `BASE` and `uid` are verify-rules.mjs's, still loading when this module's top level runs: functions, not constants.
 const nameOf = (col, id) => `${BASE.split('/v1/')[1]}/${col}/${id}`;
 const stamp = (fields) => fields.map((fieldPath) => ({ fieldPath, setToServerValue: 'REQUEST_TIME' }));
@@ -25,7 +27,23 @@ const createAs = (auth, col, id, fields, serverTime) => commitAs(auth, [{ update
   currentDocument: { exists: false }, updateTransforms: stamp(serverTime) }]);
 const updateAs = (auth, col, id, fields) => commitAs(auth, [{ update: { name: nameOf(col, id), fields: fsFields(fields) },
   updateMask: { fieldPaths: Object.keys(fields) }, currentDocument: { exists: true } }]);
+// The staff screen's write (review 2026-11-17 rules-1): setDoc(..., { merge: true }) - the given fields only, no precondition.
+const mergeAs = (auth, col, id, fields, serverTime) => commitAs(auth, [{ update: { name: nameOf(col, id), fields: fsFields(fields) },
+  updateMask: { fieldPaths: Object.keys(fields) }, updateTransforms: stamp(serverTime) }]);
 const deleteAs = (auth, col, id) => commitAs(auth, [{ delete: nameOf(col, id) }]);
+// A list where `field` is null (the SDK's where(field, '==', null) is a unary IS_NULL filter).
+async function listNullAs(auth, col, fieldPath) {
+  const res = await fetch(`${BASE}:runQuery`, { method: 'POST', headers: { 'content-type': 'application/json', authorization: `Bearer ${auth}` },
+    body: JSON.stringify({ structuredQuery: { from: [{ collectionId: col }], where: { unaryFilter: { op: 'IS_NULL', field: { fieldPath } } } } }) });
+  const body = await res.json().catch(() => null);
+  const err = Array.isArray(body) ? body.find((r) => r && r.error)?.error : body?.error;
+  return err ? err.code : res.status;
+}
+// doorConfig/main as stored, read past the rules: 'mode|lat|radiusM'.
+const storedConfig = async () => {
+  const f = (await call('GET', '/doorConfig/main', null, 'owner')).body?.fields || {};
+  return [f.mode?.stringValue, f.lat?.doubleValue, f.radiusM?.integerValue].join('|');
+};
 const getAs = async (auth, col, id) => (await call('GET', `/${col}/${id}`, null, auth)).status;
 
 const config = (over) => ({ mode: 'staff', lat: 44.9, lng: -93.4, radiusM: 200, openSeconds: 5, updatedByUid: uid.ops, ...over });
@@ -42,8 +60,10 @@ const signed = (u, householdId, role) => ({ uid: u, householdId, role, termsVers
 export async function taskDoor() {
   console.log('Door button: doorConfig/doorPauses staff-only and shape-checked; doorRules and doorEvents read-only to their own; doorLimits closed');
   const owner = token(ownerUid, { email: 'owner-door@example.com', email_verified: true });
+  const noHousehold = token(noHouseholdUid, { email: 'nohh@example.com', email_verified: true });
   try {
     await seed('users', ownerUid, { role: 'owner' });
+    await seed('users', noHouseholdUid, { role: 'parent', householdId: null, athleteId: null });
     for (const [id, body] of Object.entries(EVENTS())) await seed('doorEvents', id, body);
     await seed('doorRules', uid.parent, signed(uid.parent, 'hh', 'parent'));
     await seed('doorRules', uid.other, signed(uid.other, 'hh-other', 'parent'));
@@ -54,6 +74,9 @@ export async function taskDoor() {
     expect('parent cannot create a pause', await createAs(t.parent, 'doorPauses', 'hh', pause('hh', { pausedByUid: uid.parent }), ['pausedAt']), 403);
     expect('parent cannot sign its own doorRules from the client', await createAs(t.parent, 'doorRules', 'p-new-door', signed(uid.parent, 'hh', 'parent'), []), 403);
     expect('parent cannot overwrite its own doorRules', await updateAs(t.parent, 'doorRules', uid.parent, { termsVersion: 'door-2099-01-01' }), 403);
+    // rules-3: a login with no doorRules doc creating one at its OWN uid (the parent's is seeded, so above is an update).
+    expect('athlete login cannot create doorRules at its own uid', await createAs(t.eliteLogin, 'doorRules', uid.eliteLogin, signed(uid.eliteLogin, 'hh', 'athlete'), []), 403);
+    expect('a parent with no household cannot create doorRules at its own uid', await createAs(noHousehold, 'doorRules', noHouseholdUid, signed(noHouseholdUid, null, 'parent'), []), 403);
     expect('parent cannot write a doorEvent', await createAs(t.parent, 'doorEvents', 'p-probe_press-9999', { uid: uid.parent, householdId: 'hh', outcome: 'opened' }, []), 403);
     expect('parent cannot reset its own doorLimits', await setAs(t.parent, 'doorLimits', uid.parent, { callsAtMs: [], opensAtMs: [] }, []), 403);
     expect('athlete login cannot set doorConfig/main', await setConfig(t.eliteLogin, config({ mode: 'all', updatedByUid: uid.eliteLogin })), 403);
@@ -61,6 +84,17 @@ export async function taskDoor() {
     // doorConfig: owner/ops, 'main' only, every field in range, stamped with their own uid and the request time.
     expect('ops sets a valid doorConfig/main', await setConfig(t.ops, config()), 200);
     expect('owner sets a valid doorConfig/main', await setConfig(owner, config({ mode: 'all', radiusM: 300, openSeconds: 8, updatedByUid: ownerUid })), 200);
+    // rules-1: the screen merges only what changed, stamped; the stored location and reach stay.
+    expect('ops merges the mode alone over an existing main', await mergeAs(t.ops, 'doorConfig', 'main', { mode: 'off', updatedByUid: uid.ops }, ['updatedAt']), 200);
+    expect('the merge kept the academy location and the reach', await storedConfig(), 'off|44.9|300');
+    expect('owner merges the reach alone', await mergeAs(owner, 'doorConfig', 'main', { radiusM: 200, updatedByUid: ownerUid }, ['updatedAt']), 200);
+    expect('ops refused a merge with no stamp', await mergeAs(t.ops, 'doorConfig', 'main', { mode: 'all' }, []), 403);
+    expect('ops refused a merge with the time but the last writer\'s uid', await mergeAs(t.ops, 'doorConfig', 'main', { mode: 'all' }, ['updatedAt']), 403);
+    expect('ops refused a merge naming the owner as writer', await mergeAs(t.ops, 'doorConfig', 'main', { mode: 'all', updatedByUid: ownerUid }, ['updatedAt']), 403);
+    expect('ops refused a merge of a radius of 5000', await mergeAs(t.ops, 'doorConfig', 'main', { radiusM: 5000, updatedByUid: uid.ops }, ['updatedAt']), 403);
+    expect('ops refused a merge of an extra field', await mergeAs(t.ops, 'doorConfig', 'main', { unlockUrl: 'x', updatedByUid: uid.ops }, ['updatedAt']), 403);
+    expect('nothing refused was stored', await storedConfig(), 'off|44.9|200');
+    expect('a parent cannot merge doorConfig/main', await mergeAs(t.parent, 'doorConfig', 'main', { mode: 'all', updatedByUid: uid.parent }, ['updatedAt']), 403);
     expect('ops sets it with no academy location yet (null lat/lng)', await setConfig(t.ops, config({ lat: null, lng: null })), 200);
     expect('ops sets mode alone (absent fields fall back to the defaults)', await setConfig(t.ops, { mode: 'off', updatedByUid: uid.ops }), 200);
     expect('ops reads doorConfig/main', await getAs(t.ops, 'doorConfig', 'main'), 200);
@@ -95,7 +129,8 @@ export async function taskDoor() {
     expect('ops cannot update a pause', await updateAs(t.ops, 'doorPauses', 'hh', { note: 'changed' }), 403);
     expect('ops refused a householdId that is not the doc id', await createAs(t.ops, 'doorPauses', 'hh-x', pause('hh'), ['pausedAt']), 403);
     expect('ops refused a foreign pausedByUid', await createAs(t.ops, 'doorPauses', 'hh-x', pause('hh-x', { pausedByUid: ownerUid }), ['pausedAt']), 403);
-    expect('ops refused a client clock for pausedAt', await createAs(t.ops, 'doorPauses', 'hh-x', pause('hh-x', { pausedAt: new Date() }), []), 403);
+    // A minute old: new Date() could land on request.time's own millisecond on a fast local emulator (seen 1 run in 3).
+    expect('ops refused a client clock for pausedAt', await createAs(t.ops, 'doorPauses', 'hh-x', pause('hh-x', { pausedAt: new Date(Date.now() - 60000) }), []), 403);
     expect('ops refused a note over 200 characters', await createAs(t.ops, 'doorPauses', 'hh-x', pause('hh-x', { note: 'n'.repeat(201) }), ['pausedAt']), 403);
     expect('ops refused an extra field', await createAs(t.ops, 'doorPauses', 'hh-x', pause('hh-x', { until: '2026-12-01' }), ['pausedAt']), 403);
     expect('a coach cannot pause a household', await createAs(t.coach, 'doorPauses', 'hh-x', pause('hh-x', { pausedByUid: uid.coach }), ['pausedAt']), 403);
@@ -117,6 +152,10 @@ export async function taskDoor() {
     expect('parent reads its athlete\'s event (same household)', await getAs(t.parent, 'doorEvents', 'elite-probe_press-0002'), 200);
     expect('parent cannot read another household\'s event', await getAs(t.parent, 'doorEvents', 'p-other-probe_press-0003'), 403);
     expect('parent cannot read a staff event (no household)', await getAs(t.parent, 'doorEvents', 'ops-probe_press-0004'), 403);
+    // rules-4: a parent with householdId null must not match the null household of every staff press.
+    expect('a parent with no household cannot read a staff event', await getAs(noHousehold, 'doorEvents', 'ops-probe_press-0004'), 403);
+    expect('a parent with no household cannot list the events with no household', await listNullAs(noHousehold, 'doorEvents', 'householdId'), 403);
+    expect('ops lists the events with no household', await listNullAs(t.ops, 'doorEvents', 'householdId'), 200);
     expect('parent lists its household\'s events', await listAs(t.parent, 'doorEvents', { householdId: 'hh' }), 200);
     expect('parent cannot list another household\'s events', await listAs(t.parent, 'doorEvents', { householdId: 'hh-other' }), 403);
     expect('parent cannot list every event', await listAs(t.parent, 'doorEvents', {}), 403);
@@ -140,10 +179,11 @@ export async function taskDoor() {
     expect('the limits are untouched', (await call('GET', `/doorLimits/${uid.parent}`, null, 'owner')).body?.fields?.callsAtMs?.arrayValue?.values?.length, 1);
   } finally {
     for (const id of Object.keys(EVENTS()).concat(['p-probe_press-9999'])) await del('doorEvents', id);
-    for (const id of [uid.parent, uid.other, 'p-new-door']) await del('doorRules', id);
+    for (const id of [uid.parent, uid.other, 'p-new-door', uid.eliteLogin, noHouseholdUid]) await del('doorRules', id);
     for (const id of ['hh', 'hh-other', 'hh-x']) await del('doorPauses', id);
     for (const id of ['main', 'second']) await del('doorConfig', id);
     await del('doorLimits', uid.parent);
     await del('users', ownerUid);
+    await del('users', noHouseholdUid);
   }
 }

@@ -20,6 +20,15 @@ export const OPEN_SECONDS_MAX = 30;
 
 export const NEEDS_LOCATION = 'Set the academy location first.';
 
+/**
+ * The roughest phone reading the screen saves as the academy's location
+ * (review 2026-11-17 app-1, spec-3): a Wi-Fi fix indoors is often 65 m; an
+ * IP-based or laptop fix is hundreds of metres off and never saved.
+ */
+export const LOCATION_FIX_MAX_M = 75;
+/** Above this a saved reading shows in the warning tone. */
+export const LOCATION_FIX_WARN_M = 30;
+
 const MODE_IDS = MODES.map(([id]) => id);
 const isInt = (n, lo, hi) => Number.isInteger(n) && n >= lo && n <= hi;
 const isLat = (n) => typeof n === 'number' && Number.isFinite(n) && n >= -90 && n <= 90;
@@ -78,6 +87,53 @@ export function configWrite(config, patch) {
     lng: located ? next.lng : null,
     radiusM: next.radiusM,
     openSeconds: Math.min(OPEN_SECONDS_MAX, Math.max(OPEN_SECONDS_MIN, Number.isFinite(secs) ? secs : DOOR_DEFAULTS.openSeconds)),
+  };
+}
+
+const CONFIG_KEYS = ['mode', 'lat', 'lng', 'radiusM', 'openSeconds'];
+
+/**
+ * Only the fields `patch` changes, checked and cleaned as configWrite does
+ * them (review 2026-11-17 rules-1, app-2): the hook merges them into
+ * doorConfig/main with the stamp, so a screen loaded before another staff
+ * member's change never writes that change back. lat and lng go together.
+ */
+export function configPatch(config, patch) {
+  const full = configWrite(config, patch);
+  const out = {};
+  for (const key of CONFIG_KEYS) if (patch && key in patch) out[key] = full[key];
+  if ('lat' in out || 'lng' in out) {
+    out.lat = full.lat;
+    out.lng = full.lng;
+  }
+  return out;
+}
+
+const EARTH_RADIUS_M = 6371008.8;
+const rad = (deg) => (deg * Math.PI) / 180;
+
+/** Metres between two `{ lat, lng }` (haversine; functions/portal/door-geo.js's formula). */
+export function distanceM(a, b) {
+  const dLat = rad(b.lat - a.lat);
+  const dLng = rad(b.lng - a.lng);
+  const h = Math.sin(dLat / 2) ** 2 + Math.cos(rad(a.lat)) * Math.cos(rad(b.lat)) * Math.sin(dLng / 2) ** 2;
+  return 2 * EARTH_RADIUS_M * Math.asin(Math.min(1, Math.sqrt(h)));
+}
+
+/**
+ * This phone against the academy, the way unlockDoor checks a family
+ * (spec 5.1 step 10: within the reach plus the reading's accuracy, at most
+ * 150 m of it): `{ distanceM (rounded to 10), accuracyM, ok }`, or null
+ * with no academy location.
+ */
+export function phoneCheck(fix, config) {
+  if (!locationSet(config)) return null;
+  const d = distanceM(fix, config);
+  const accuracy = Math.max(0, Number(fix.accuracy) || 0);
+  return {
+    distanceM: Math.round(d / 10) * 10,
+    accuracyM: Math.round(accuracy),
+    ok: d <= config.radiusM + Math.min(accuracy, 150),
   };
 }
 

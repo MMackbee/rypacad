@@ -6,14 +6,18 @@
  * with America/Chicago times.
  */
 import {
+  LOCATION_FIX_MAX_M,
   MODES,
   RADIUS_OPTIONS,
   chicagoTime,
+  configPatch,
   configWrite,
+  distanceM,
   eventRow,
   locationSet,
   normalizeConfig,
   pausedRow,
+  phoneCheck,
 } from './doorAdmin';
 
 const ts = (ms) => ({ toMillis: () => ms });
@@ -66,6 +70,53 @@ describe('configWrite', () => {
     expect(() => configWrite(base, { mode: 'open' })).toThrow();
     expect(() => configWrite(base, { radiusM: 5000 })).toThrow();
     expect(() => configWrite(base, { lat: 120, lng: 0 })).toThrow();
+  });
+});
+
+describe('configPatch (review 2026-11-17 rules-1, app-2)', () => {
+  const base = normalizeConfig({ mode: 'staff', lat: 44.97, lng: -93.26, radiusM: 200, openSeconds: 5 });
+
+  test('only the keys that change: a stale screen never writes back what it did not touch', () => {
+    expect(configPatch(base, { mode: 'all' })).toEqual({ mode: 'all' });
+    expect(configPatch(base, { radiusM: 300 })).toEqual({ radiusM: 300 });
+    expect(configPatch(base, { openSeconds: 31 })).toEqual({ openSeconds: 30 });
+    expect(configPatch(normalizeConfig(null), { mode: 'staff' })).toEqual({ mode: 'staff' });
+  });
+
+  test('lat and lng always travel together; nothing outside the rules\' keys', () => {
+    expect(configPatch(base, { lat: 44.5, lng: -93.1 })).toEqual({ lat: 44.5, lng: -93.1 });
+    expect(configPatch(base, { lat: 44.5 })).toEqual({ lat: 44.5, lng: -93.26 });
+    expect(configPatch(base, { radiusM: 100, updatedByUid: 'x', unlockUrl: 'y' })).toEqual({ radiusM: 100 });
+  });
+
+  test('the same checks as configWrite', () => {
+    expect(() => configPatch(normalizeConfig({ mode: 'staff' }), { mode: 'all' })).toThrow('Set the academy location first.');
+    expect(() => configPatch(base, { radiusM: 5000 })).toThrow();
+  });
+});
+
+describe('a phone reading against the academy (review 2026-11-17 app-1)', () => {
+  test('distanceM: metres on the earth, the server\'s formula', () => {
+    expect(distanceM({ lat: 44.9, lng: -93.4 }, { lat: 44.9, lng: -93.4 })).toBe(0);
+    // 0.05 degrees of latitude is about 5560 m (door.test.js's FAR).
+    expect(Math.round(distanceM({ lat: 44.9, lng: -93.4 }, { lat: 44.95, lng: -93.4 }) / 10) * 10).toBe(5560);
+  });
+
+  test('phoneCheck: how far, how sure, and whether a family standing here could unlock', () => {
+    const academy = normalizeConfig({ mode: 'all', lat: 44.9, lng: -93.4, radiusM: 200 });
+    // About 37 m away with a 7 m reading: kept as 40, inside the reach.
+    expect(phoneCheck({ lat: 44.9003, lng: -93.4002, accuracy: 7 }, academy)).toEqual({ distanceM: 40, accuracyM: 7, ok: true });
+    // 5.5 km away: outside, even with the 150 m the server allows for a rough reading.
+    expect(phoneCheck({ lat: 44.95, lng: -93.4, accuracy: 900 }, academy)).toMatchObject({ distanceM: 5560, ok: false });
+    // 300 m away: in only because a rough reading earns up to 150 m.
+    const near = { lat: 44.9027, lng: -93.4, accuracy: 120 };
+    expect(phoneCheck(near, academy).ok).toBe(true);
+    expect(phoneCheck({ ...near, accuracy: 20 }, academy).ok).toBe(false);
+    expect(phoneCheck(near, normalizeConfig({ mode: 'all' }))).toBeNull();
+  });
+
+  test('the roughest reading the screen saves as the academy', () => {
+    expect(LOCATION_FIX_MAX_M).toBe(75);
   });
 });
 

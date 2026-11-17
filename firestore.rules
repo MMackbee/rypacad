@@ -3130,7 +3130,7 @@ service cloud.firestore {
     }
 
     // doorLimits/{uid}: unlockDoor's rate limits ({callsAtMs, opensAtMs,
-    // lastOpenedAtMs, updatedAtMs}). Closed to every client, like
+    // lastOpenedAtMs, lastConfirmedOpenAtMs, updatedAtMs}). Closed to every client, like
     // feedbackLimits: a client that could write its own doc could reset it.
     match /doorLimits/{uid} {
       allow read, write: if false;

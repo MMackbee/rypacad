@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { TOUCH_MIN, color, font, radius } from '../../tokens';
 import Button from '../Button';
 import StatusBadge from '../StatusBadge';
@@ -66,17 +66,35 @@ export function DoorActivityCard({ events, error, onRefresh }) {
 }
 
 /**
+ * Loads the households directory (every household and every athlete) and
+ * hands it up. Mounted only while the card needs it (review 2026-11-17
+ * app-9): a paused family to name, or the Pause search in use.
+ */
+function DirectoryLoader({ onData }) {
+  const { data } = useHouseholdsDirectory();
+  useEffect(() => {
+    onData(data || null);
+  }, [data, onData]);
+  return null;
+}
+
+/**
  * Paused families (spec 7): each paused household by name with Unpause, and
  * Pause a family - find an athlete, confirm, and their household is paused.
  * Athletes in a household already paused read "Paused" and cannot be picked
- * (the rules allow no second pause doc). Family names come from the
- * households directory.
+ * (the rules allow no second pause doc); a family another staff member
+ * paused meanwhile reads "already paused" (onPause answers 'already').
+ * Family names come from the households directory, loaded only when a
+ * family is paused or the search is first used - not on every open.
  */
 export function DoorPausesCard({ pauses, onPause, onUnpause }) {
-  const { data: directory } = useHouseholdsDirectory();
+  const [searching, setSearching] = useState(false);
+  const [directory, setDirectory] = useState(null);
   const [picked, setPicked] = useState(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState(null);
+  const [note, setNote] = useState(null);
+  const needsDirectory = searching || (pauses || []).length > 0;
   const names = Object.fromEntries((directory || []).map((h) => [h.id, h.name]));
   const pausedIds = new Set((pauses || []).map((p) => p.householdId));
   const pausedAthletes = (directory || []).filter((h) => pausedIds.has(h.id)).flatMap((h) => (h.athletes || []).map((a) => a.id));
@@ -85,6 +103,7 @@ export function DoorPausesCard({ pauses, onPause, onUnpause }) {
   const run = async (fn) => {
     setBusy(true);
     setError(null);
+    setNote(null);
     try {
       await fn();
       return true;
@@ -98,11 +117,17 @@ export function DoorPausesCard({ pauses, onPause, onUnpause }) {
 
   const confirmPause = async () => {
     if (!picked?.householdId) return;
-    if (await run(() => onPause(picked.householdId))) setPicked(null);
+    const family = picked.householdName || 'That family';
+    let answer = null;
+    if (await run(async () => { answer = await onPause(picked.householdId); })) {
+      setPicked(null);
+      if (answer === 'already') setNote(`${family} is already paused.`);
+    }
   };
 
   return (
     <Card large>
+      {needsDirectory ? <DirectoryLoader onData={setDirectory} /> : null}
       <SectionLabel style={{ marginBottom: 8 }}>Paused families</SectionLabel>
       {rows.length ? (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
@@ -148,8 +173,15 @@ export function DoorPausesCard({ pauses, onPause, onUnpause }) {
           </div>
         </div>
       ) : (
-        <AthleteSearch onPick={setPicked} disabledIds={pausedAthletes} disabledLabel="Paused" />
+        <div onFocus={() => setSearching(true)}>
+          <AthleteSearch onPick={setPicked} disabledIds={pausedAthletes} disabledLabel="Paused" />
+        </div>
       )}
+      {note ? (
+        <Body size={12} tone={color.text} style={{ marginTop: 10 }}>
+          {note}
+        </Body>
+      ) : null}
       {error ? (
         <Body size={12} tone={color.error} style={{ marginTop: 10 }}>
           {error}

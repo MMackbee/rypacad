@@ -8,8 +8,8 @@
  * the directory are stand-ins. Plain functions, not jest.fn().
  */
 jest.mock('../hooks/doorAdmin', () => ({ useDoorAdmin: () => mockAdmin }));
-jest.mock('../hooks/door', () => ({ currentLocation: async () => mockLocate() }));
-jest.mock('../hooks/billing', () => ({ useHouseholdsDirectory: () => ({ data: mockDirectory, loading: false, error: null }) }));
+jest.mock('../hooks/door', () => ({ currentLocation: async (opts) => { mockLocateCalls.push(opts); return mockLocate(opts); } }));
+jest.mock('../hooks/billing', () => ({ useHouseholdsDirectory: () => { mockDirectoryReads += 1; return { data: mockDirectory, loading: false, error: null }; } }));
 jest.mock('../components/door/DoorCard', () => ({
   __esModule: true,
   default: ({ staffScreen, recheckKey, label }) => <div data-door-card={JSON.stringify({ staffScreen: Boolean(staffScreen), recheckKey, label })} />,
@@ -17,7 +17,9 @@ jest.mock('../components/door/DoorCard', () => ({
 
 let mockAdmin;
 let mockLocate;
+let mockLocateCalls;
 let mockDirectory;
+let mockDirectoryReads;
 let saves;
 let paused;
 let unpaused;
@@ -54,6 +56,8 @@ beforeEach(() => {
   unpaused = [];
   mockAdmin = admin();
   mockLocate = () => ({ lat: 44.98, lng: -93.27, accuracy: 12.4 });
+  mockLocateCalls = [];
+  mockDirectoryReads = 0;
   mockDirectory = [
     { id: 'hh-hart', name: 'Hart family', status: 'active', athletes: [{ id: 'dana', name: 'Dana Hart', packageName: 'Elite' }] },
     { id: 'hh-lee', name: 'Lee family', status: 'active', athletes: [{ id: 'sam', name: 'Sam Lee', packageName: '8 tokens' }, { id: 'kim', name: 'Kim Lee', packageName: 'Elite' }] },
@@ -124,16 +128,83 @@ describe('Who can unlock', () => {
   });
 });
 
+const SAVE_HERE = "Save this as the academy's location? Only do this inside the academy.";
+
 describe('Academy location', () => {
-  test('not set: this phone sets it, and says how close the reading was', async () => {
+  test('not set: a fresh reading from this phone, a question, then it is saved', async () => {
     mockAdmin = admin({ config: normalizeConfig({ mode: 'off' }) });
     const r = await mount();
     expect(r.text()).toContain('Academy location');
     expect(r.text()).toContain('Not set');
     expect(r.text()).toContain('Stand inside the academy');
     await r.click("Use this phone's location");
+    // Review 2026-11-17 (app-1): never a cached fix for the academy itself.
+    expect(mockLocateCalls).toEqual([{ fresh: true }]);
+    expect(saves).toEqual([]);
+    expect(r.text()).toContain(SAVE_HERE);
+    expect(r.text()).toContain('This reading is accurate to about 12 m.');
+    await r.click('Save');
     expect(saves).toEqual([{ lat: 44.98, lng: -93.27 }]);
+    expect(r.text()).not.toContain(SAVE_HERE);
     expect(r.text()).toContain('Set from this phone, accurate to about 12 m.');
+    await r.unmount();
+  });
+
+  test('Cancel on the question saves nothing', async () => {
+    const r = await mount();
+    await r.click("Use this phone's location");
+    await r.click('Cancel');
+    expect(saves).toEqual([]);
+    expect(r.text()).not.toContain(SAVE_HERE);
+    await r.unmount();
+  });
+
+  test('a rough reading (a laptop, the car park, an IP guess) is never saved', async () => {
+    // Review 2026-11-17 (app-1, spec-3): the screen confirmed an 800 m+ fix in green.
+    mockLocate = () => ({ lat: 44.99, lng: -93.3, accuracy: 812 });
+    const r = await mount();
+    await r.click("Use this phone's location");
+    expect(saves).toEqual([]);
+    expect(r.text()).not.toContain(SAVE_HERE);
+    expect(r.text()).toContain('Too rough a reading (accurate to about 812 m). Step inside the academy and try again.');
+    await r.unmount();
+  });
+
+  test('a borderline reading asks with a warning; 75 m is the most it saves', async () => {
+    mockLocate = () => ({ lat: 44.98, lng: -93.27, accuracy: 75 });
+    const r = await mount();
+    await r.click("Use this phone's location");
+    expect(r.text()).toContain('This reading is accurate to about 75 m. A closer one is better: try again away from the door and windows.');
+    await r.click('Save');
+    expect(saves).toEqual([{ lat: 44.98, lng: -93.27 }]);
+    await r.unmount();
+    mockLocate = () => ({ lat: 44.98, lng: -93.27, accuracy: 76 });
+    const over = await mount();
+    await over.click("Use this phone's location");
+    expect(over.text()).not.toContain(SAVE_HERE);
+    await over.unmount();
+  });
+
+  test('check this phone the way a family is checked, before Everyone is on', async () => {
+    // Review 2026-11-17 (app-1): staff unlock skips the location check, so
+    // nothing else on this screen tries the family path.
+    mockAdmin = admin({ config: normalizeConfig({ ...LOCATED, lat: 44.9, lng: -93.4, radiusM: 200 }) });
+    mockLocate = () => ({ lat: 44.9003, lng: -93.4002, accuracy: 7 });
+    const r = await mount();
+    await r.click("Check this phone's distance");
+    expect(mockLocateCalls).toEqual([{ fresh: true }]);
+    expect(r.text()).toContain('This phone is about 40 m from the academy (reading accurate to about 7 m). A family standing here could unlock.');
+    mockLocate = () => ({ lat: 44.95, lng: -93.4, accuracy: 10 });
+    await r.click("Check this phone's distance");
+    expect(r.text()).toContain('This phone is about 5560 m from the academy (reading accurate to about 10 m). A family standing here would be too far away to unlock.');
+    expect(saves).toEqual([]);
+    await r.unmount();
+  });
+
+  test('no academy location: nothing to check against', async () => {
+    mockAdmin = admin({ config: normalizeConfig({ mode: 'off' }) });
+    const r = await mount();
+    expect(r.text()).not.toContain("Check this phone's distance");
     await r.unmount();
   });
 
@@ -143,6 +214,8 @@ describe('Academy location', () => {
     expect(r.text()).toContain('Set');
     await r.click("Use this phone's location");
     expect(saves).toEqual([]);
+    expect(r.text()).toContain("Turn on Location for this site so the app can check you're at the academy.");
+    await r.click("Check this phone's distance");
     expect(r.text()).toContain("Turn on Location for this site so the app can check you're at the academy.");
     await r.unmount();
   });
@@ -234,6 +307,36 @@ describe('Paused families', () => {
     expect(paused).toEqual(['hh-lee']);
     expect(r.text()).not.toContain('Pause door unlocking for Lee family?');
     await r.unmount();
+  });
+
+  test('a family someone else paused meanwhile: "already paused", not a connection problem', async () => {
+    // Review 2026-11-17 (rules-2): the hook reads the list again and answers 'already'.
+    mockAdmin = admin({ pause: async (id) => { paused.push(id); return 'already'; } });
+    const r = await mount();
+    await search(r, 'sam');
+    await pick(r, 'Sam Lee');
+    await r.click('Pause');
+    expect(paused).toEqual(['hh-lee']);
+    expect(r.text()).toContain('Lee family is already paused.');
+    expect(r.text()).not.toContain("Didn't save");
+    expect(r.text()).not.toContain('Pause door unlocking for Lee family?');
+    await r.unmount();
+  });
+
+  test('the households directory loads only for a paused family\'s name or the search', async () => {
+    // Review 2026-11-17 (app-9): every household and athlete, read on every open of the screen.
+    const none = await mount();
+    expect(none.text()).toContain('No family is paused.');
+    expect(mockDirectoryReads).toBe(0);
+    await act(async () => { none.container.querySelector('input[aria-label="Find an athlete"]').focus(); });
+    expect(mockDirectoryReads).toBeGreaterThan(0);
+    await none.unmount();
+    mockDirectoryReads = 0;
+    mockAdmin = admin({ pauses: [{ householdId: 'hh-hart', pausedAt: null }] });
+    const some = await mount();
+    expect(mockDirectoryReads).toBeGreaterThan(0);
+    expect(some.text()).toContain('Hart family');
+    await some.unmount();
   });
 
   test('Cancel pauses nothing; an athlete in a paused family reads Paused and cannot be picked', async () => {

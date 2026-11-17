@@ -6,6 +6,12 @@
  * listed keys only, serverTimestamp() for the time, the signed-in uid.
  * The server alone writes doorEvents, doorRules and doorLimits.
  *
+ * A config change is a MERGE of only the fields it changes (review
+ * 2026-11-17 rules-1, app-2): two staff screens open at once never undo
+ * each other's switch or location, and the Off switch stays the emergency
+ * stop. The config is read back after each save and whenever the page comes
+ * back into view, so a screen left open does not stay stale.
+ *
  * Seed mode (isLive() false) reads and writes no Firestore: the screen shows
  * an Off door with no location, and changes stay on the page. Imports shared
  * primitives FROM ./live, never the other way (the parallaxLive.js precedent).
@@ -14,7 +20,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { collection, deleteDoc, doc, getDoc, getDocs, limit, orderBy, query, serverTimestamp, setDoc } from 'firebase/firestore';
 import { db } from '../../firebase';
 import { isLive, requireUser, wrap } from './live';
-import { configWrite, normalizeConfig } from '../data/doorAdmin';
+import { configPatch, configWrite, normalizeConfig } from '../data/doorAdmin';
 
 /** How many events Recent activity lists. */
 export const EVENTS_SHOWN = 50;
@@ -31,11 +37,11 @@ export async function fetchDoorConfig() {
   }
 }
 
-/** Writes the whole doorConfig/main: configWrite's five fields plus the server's time and the signed-in uid. */
+/** Merges configPatch's fields into doorConfig/main with the server's time and the signed-in uid. */
 export async function saveDoorConfig(fields) {
   const { uid } = requireUser();
   try {
-    await setDoc(configRef(), { ...fields, updatedAt: serverTimestamp(), updatedByUid: uid });
+    await setDoc(configRef(), { ...fields, updatedAt: serverTimestamp(), updatedByUid: uid }, { merge: true });
   } catch (err) {
     throw wrap(err, 'saveDoorConfig');
   }
@@ -85,9 +91,12 @@ export async function fetchDoorEvents() {
 /**
  * `{ config, pauses, events, loading, error, eventsError, saveConfig(patch),
  * pause(householdId), unpause(householdId), refreshEvents(), reload() }`.
- * saveConfig builds on the latest change even while an earlier one is still
- * saving; a refused write reads the config back. Activity loads on its own,
- * so a failed list never blocks the switch.
+ * saveConfig shows the change at once, writes only the changed fields, and
+ * reads the stored config back once no other save is in flight (a refused
+ * write reads it back too). pause answers 'paused', or 'already' when its
+ * write was refused because the family was paused meanwhile (the list is
+ * read again). Activity loads on its own, so a failed list never blocks the
+ * switch.
  */
 export function useDoorAdmin() {
   const live = isLive();
@@ -98,7 +107,33 @@ export function useDoorAdmin() {
   const [error, setError] = useState(null);
   const [eventsError, setEventsError] = useState(null);
   const latest = useRef(config);
+  const inflight = useRef(0);
+  const mounted = useRef(true);
   const [gen, setGen] = useState(0);
+
+  useEffect(() => {
+    mounted.current = true;
+    return () => { mounted.current = false; };
+  }, []);
+
+  /** The stored config on screen, unless a save is still on its way. */
+  const readBack = useCallback(async () => {
+    const truth = await fetchDoorConfig().catch(() => null);
+    if (!truth || !mounted.current || inflight.current > 0) return;
+    latest.current = truth;
+    setConfig(truth);
+  }, []);
+
+  useEffect(() => {
+    if (!live || typeof document === 'undefined') return undefined;
+    const onShow = () => {
+      if (document.visibilityState !== 'visible' || !latest.current) return;
+      readBack();
+      fetchDoorPauses().then((p) => { if (mounted.current) setPauses(p); }, () => {});
+    };
+    document.addEventListener('visibilitychange', onShow);
+    return () => document.removeEventListener('visibilitychange', onShow);
+  }, [live, readBack]);
 
   const refreshEvents = useCallback(async () => {
     if (!live) return;
@@ -138,28 +173,45 @@ export function useDoorAdmin() {
     const before = latest.current;
     // Not loaded yet: a write now would put the defaults over the stored config.
     if (!before) throw new Error('The door settings have not loaded yet.');
-    const fields = configWrite(before, patch);
-    const optimistic = { ...normalizeConfig(fields), updatedAtMs: before?.updatedAtMs ?? null, updatedByUid: before?.updatedByUid ?? null };
+    const fields = configPatch(before, patch);
+    const optimistic = { ...normalizeConfig(configWrite(before, patch)), updatedAtMs: before?.updatedAtMs ?? null, updatedByUid: before?.updatedByUid ?? null };
     latest.current = optimistic;
     setConfig(optimistic);
     if (!live) return optimistic;
+    inflight.current += 1;
+    let uid;
     try {
-      const uid = await saveDoorConfig(fields);
-      const saved = { ...latest.current, updatedAtMs: Date.now(), updatedByUid: uid };
-      latest.current = saved;
-      setConfig(saved);
-      return saved;
+      uid = await saveDoorConfig(fields);
     } catch (err) {
+      inflight.current -= 1;
       const truth = await fetchDoorConfig().catch(() => before);
       latest.current = truth;
       setConfig(truth);
       throw err;
     }
-  }, [live]);
+    inflight.current -= 1;
+    const saved = { ...latest.current, updatedAtMs: Date.now(), updatedByUid: uid };
+    latest.current = saved;
+    setConfig(saved);
+    // What is stored now, another staff member's change included.
+    if (inflight.current === 0) await readBack();
+    return latest.current;
+  }, [live, readBack]);
 
   const pause = useCallback(async (householdId) => {
-    const uid = live ? await pauseDoorHousehold(householdId) : 'seed';
+    let uid = 'seed';
+    if (live) {
+      try {
+        uid = await pauseDoorHousehold(householdId);
+      } catch (err) {
+        const fresh = await fetchDoorPauses().catch(() => null);
+        if (fresh && mounted.current) setPauses(fresh);
+        if (fresh && fresh.some((p) => p.householdId === householdId)) return 'already';
+        throw err;
+      }
+    }
     setPauses((list) => [...(list || []).filter((p) => p.householdId !== householdId), { householdId, pausedAt: Date.now(), pausedByUid: uid }]);
+    return 'paused';
   }, [live]);
 
   const unpause = useCallback(async (householdId) => {
