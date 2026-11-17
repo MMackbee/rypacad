@@ -76,7 +76,7 @@ describe('the admin dashboard', () => {
     adapter.fetchAllAssessmentWindows.mockResolvedValue([{ id: '2026-27-baseline', athleteId: 'a2', season: '2026-27', kind: 'baseline', status: 'open' }]);
     const h = await mountHook(() => useAdminDashboard());
     expect(h.result.current.data.outstanding).toEqual([
-      { id: 'baseline-a1', kind: 'baseline', athleteId: 'a1', who: 'Jordan Whitfield', why: 'Baseline due', tag: 'Assessment', tone: 'yellow', packageIds: null },
+      { id: 'baseline-a1', kind: 'baseline', athleteId: 'a1', householdId: null, who: 'Jordan Whitfield', why: 'Baseline due', tag: 'Assessment', tone: 'yellow', packageIds: null },
     ]);
     await h.unmount();
   });

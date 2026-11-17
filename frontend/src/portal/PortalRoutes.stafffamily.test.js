@@ -16,6 +16,8 @@ const mockDeferred = { value: false };
 // What the route's read of the athlete answers.
 const mockAthlete = { value: null };
 const mockAthleteAsked = [];
+// What an Admin athlete row hands the route: an id, or { athleteId, householdId } when the row knows the family.
+const mockOpenWith = { value: 'jordan' };
 jest.mock('./StatesHarness', () => ({ __esModule: true, default: () => 'HARNESS' }));
 jest.mock('./screens/AdminDashboard', () => {
   const { createElement } = require('react');
@@ -23,7 +25,7 @@ jest.mock('./screens/AdminDashboard', () => {
     __esModule: true,
     // The button is an athlete row (Outstanding, the consent tracker).
     default: ({ role, onOpenAthlete }) =>
-      createElement('button', { type: 'button', 'data-do': 'athlete', onClick: () => onOpenAthlete('jordan') }, `ADMIN as ${role}`),
+      createElement('button', { type: 'button', 'data-do': 'athlete', onClick: () => onOpenAthlete(mockOpenWith.value) }, `ADMIN as ${role}`),
   };
 });
 jest.mock('./screens/AdminScholarships', () => ({ __esModule: true, default: () => 'SCHOLARSHIPS' }));
@@ -95,6 +97,7 @@ afterEach(() => {
   mockLive.value = false;
   mockUser.value = null;
   mockDeferred.value = false;
+  mockOpenWith.value = 'jordan';
 });
 
 const ATHLETE = '/portal/admin/athletes/jordan';
@@ -124,6 +127,18 @@ test("Admin's athlete rows (Outstanding, the consent tracker) open the family pa
   await act(async () => { r.container.querySelector('[data-do="athlete"]').click(); });
   for (let i = 0; i < 5; i += 1) await act(async () => { await Promise.resolve(); });
   expect(r.at()).toBe(FAMILY);
+  await r.unmount();
+});
+
+test("a row that knows the family goes straight there: the athlete's staff model is never built to find it", async () => {
+  signIn({ uid: 'u-owner', role: 'owner' });
+  mockOpenWith.value = { athleteId: 'jordan', householdId: 'hh1' };
+  const r = await mount('/portal/admin');
+  await act(async () => { r.container.querySelector('[data-do="athlete"]').click(); });
+  for (let i = 0; i < 5; i += 1) await act(async () => { await Promise.resolve(); });
+  expect(r.at()).toBe(FAMILY);
+  expect(r.container.textContent).toContain('FAMILY PAGE hh1 as owner (staff)');
+  expect(mockAthleteAsked).toEqual([]);
   await r.unmount();
 });
 

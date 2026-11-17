@@ -1,0 +1,158 @@
+{
+  "outstanding": [
+    {
+      "id": "enrollment-pending",
+      "kind": "enrollment",
+      "athleteId": null,
+      "who": "1 pending enrollment",
+      "why": "Awaiting review in the enrollment queue",
+      "tag": "Enrollment",
+      "tone": "yellow",
+      "packageIds": null
+    },
+    {
+      "id": "noshow-a1",
+      "kind": "noshow",
+      "athleteId": "a1",
+      "who": "Jordan Whitfield",
+      "why": "2 no-shows this month",
+      "tag": "Attendance",
+      "tone": "red",
+      "packageIds": null
+    },
+    {
+      "id": "noshow-a3",
+      "kind": "noshow",
+      "athleteId": "a3",
+      "who": "Sage Parker",
+      "why": "1 no-show this month",
+      "tag": "Attendance",
+      "tone": "red",
+      "packageIds": null
+    },
+    {
+      "id": "fitness-p-1125",
+      "kind": "fitness",
+      "athleteId": null,
+      "who": "Fitness with no golf · Wed Nov 25, 6:00 PM",
+      "why": "2 booked · the golf block at this time is hidden",
+      "tag": "Fitness",
+      "tone": "red",
+      "packageIds": null
+    },
+    {
+      "id": "contract-a2",
+      "kind": "contract",
+      "athleteId": "a2",
+      "who": "Reese Whitfield",
+      "why": "Contract behind — 7 days missed, 13 left",
+      "tag": "Contract",
+      "tone": "yellow",
+      "packageIds": null
+    },
+    {
+      "id": "contract-a1",
+      "kind": "contract",
+      "athleteId": "a1",
+      "who": "Jordan Whitfield",
+      "why": "Contract behind — 6 days missed, 13 left",
+      "tag": "Contract",
+      "tone": "yellow",
+      "packageIds": null
+    },
+    {
+      "id": "baseline-a1",
+      "kind": "baseline",
+      "athleteId": "a1",
+      "who": "Jordan Whitfield",
+      "why": "Baseline due",
+      "tag": "Assessment",
+      "tone": "yellow",
+      "packageIds": null
+    },
+    {
+      "id": "baseline-a3",
+      "kind": "baseline",
+      "athleteId": "a3",
+      "who": "Sage Parker",
+      "why": "Baseline due",
+      "tag": "Assessment",
+      "tone": "yellow",
+      "packageIds": null
+    }
+  ],
+  "metrics": {
+    "enrolled": 3,
+    "fill": "68%",
+    "fillLabel": "average block fill this week",
+    "enrolledLabel": "enrolled athletes"
+  },
+  "enrollment": [
+    {
+      "id": "t-6",
+      "name": "6 tokens",
+      "athletes": 2
+    },
+    {
+      "id": "t-8",
+      "name": "8 tokens",
+      "athletes": 1
+    }
+  ],
+  "highlightPackage": null,
+  "blockFill": [
+    {
+      "day": "Mon",
+      "pct": 50
+    },
+    {
+      "day": "Tue",
+      "pct": 50
+    },
+    {
+      "day": "Wed",
+      "pct": 100
+    },
+    {
+      "day": "Thu",
+      "pct": 0
+    },
+    {
+      "day": "Fri",
+      "pct": 0
+    },
+    {
+      "day": "Sat",
+      "pct": 0
+    }
+  ],
+  "reservedBlocks": [
+    {
+      "sessionId": "w2",
+      "date": "2026-11-10",
+      "day": "Tue",
+      "time": "3:00 PM",
+      "maxHandicap": 5,
+      "booked": 4,
+      "capacity": 8
+    }
+  ],
+  "filter": {
+    "id": "all",
+    "label": "All tiers",
+    "count": 117
+  },
+  "weekLabel": "Week of Monday, Nov 9",
+  "membership": {
+    "active": 1,
+    "pastDue": 1,
+    "lapsed": 1,
+    "pending": 0,
+    "lapsedHouseholds": [
+      {
+        "id": "moreno",
+        "name": "Moreno family"
+      }
+    ]
+  }
+}

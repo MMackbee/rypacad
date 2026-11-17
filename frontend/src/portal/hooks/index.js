@@ -31,7 +31,7 @@
  * PRACTICE, and reset on exit.
  */
 
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import useSeedResource from './useSeedResource';
 import { useInvalidation } from './invalidate';
 import {
@@ -96,8 +96,9 @@ import useScholarships from './scholarships';
 // 2026-10-14 (assessments spec 8): the admin "Baseline due" row reads the
 // assessment windows, the module that replaced the diagnostics reads.
 import { ASSESSMENTS_KEY, fetchAllAssessmentWindows } from './assessmentsLive';
+import { liveSpecialistSessions } from './specialistSessions';
+import { SETTLED, adminMetrics, adminRoster, adminWeek, adminWindow, groupStatus } from './adminSections';
 import { seasonOf } from '../data/assessmentWindows';
-import { withoutTestFamilies } from '../data/testFamily';
 import {
   COACH,
   COACH_BLOCKS,
@@ -206,7 +207,7 @@ import { cancelDayOpen, sessionStarted } from '../data/sessionStart';
 import { isFreeComp } from '../data/bookingChanges';
 import { handicapLimitOf, handicapOf } from '../data/reserved';
 import { isHiddenSession } from '../data/hiddenSessions';
-import { FITNESS_WINDOW_DAYS, fitnessRow, orphanFitness } from '../data/orphanFitness';
+import { fitnessRow, orphanFitness } from '../data/orphanFitness';
 import { staffRowFields } from '../data/staffBooking';
 
 // 2026-10-02: the academy's handicap edit (hooks/handicap.js), on this seam
@@ -1625,58 +1626,6 @@ function seedSpecialistDaySessions(specialistId, today) {
 }
 
 /**
- * Live payload for useSpecialistSessions — the specialist's OWN upcoming
- * sessions, each joined to its live roster (non-cancelled bookings ->
- * athlete names via the per-id join; a name the caller cannot read renders
- * as a count, not a crash). Powers the "My sessions" day view (Sprint 9
- * amendment v1.7.1: specialist-side access). MAX_WINDOW_MONTHS, not any one
- * athlete's own window - see seedSpecialistDaySessions' comment above.
- */
-async function liveSpecialistSessions(specialistId, today) {
-  const toDate = openThrough(new Date(), MAX_WINDOW_MONTHS);
-  const sessions = await fetchSessionsInRange(today, toDate);
-  const mine = sessions
-    // 2026-11-05: a hidden session is left out unless a seat is counted on it
-    // (as on the coach's day), so its roster still opens.
-    .filter((s) => s.type === specialistId && s.status !== 'cancelled' && (!isHiddenSession(s) || Number(s.booked ?? 0) > 0))
-    .sort(byDateThenId);
-
-  const withRosters = await Promise.all(
-    mine.map(async (s) => {
-      const bookings = await fetchBookingsBySession(s.id);
-      const active = bookings.filter((b) => b.status !== 'cancelled');
-      const athletes = await fetchAthletesByIds(active.map((b) => b.athleteId));
-      const nameById = new Map(athletes.map((a) => [a.id, a.name]));
-      // 2026-11-04: a Calendly booking the webhook could not place is HELD
-      // as a session with no booking (functions/portal/calendly.js,
-      // `unresolved: true`) - Yannick's time is taken, so it counts as booked
-      // and the row says so until the academy links it.
-      const unresolved = active.length === 0 && s.unresolved === true;
-      return {
-        sessionId: s.id,
-        date: s.date,
-        dayLabel: dayLabel(s.date, today),
-        time: s.time,
-        booked: unresolved ? 1 : active.length,
-        capacity: s.capacity ?? 1,
-        unresolved,
-        type: s.type,
-        durationMinutes: s.durationMinutes ?? (SPECIALIST_BY_ID.get(s.type)?.durationMinutes ?? DEFAULT_DURATION_MINUTES),
-        athletes: active.map((b) => ({
-          athleteId: b.athleteId,
-          name: nameById.get(b.athleteId) ?? null,
-          // Who is coming (owner ruling, 2026-09-22). The booking is still
-          // FOR the child - absent means they attend, which is every booking
-          // written before the choice existed.
-          attendee: b.attendee ?? 'athlete',
-        })),
-      };
-    })
-  );
-  return { sessions: withRosters };
-}
-
-/**
  * GET /specialists/:id/my-sessions (Sprint 9 amendment v1.7.1) — the
  * signed-in specialist's upcoming sessions with per-session rosters:
  * { data: { sessions: [{ sessionId, date, dayLabel, time, booked,
@@ -1694,7 +1643,10 @@ export function useSpecialistSessions(specialistId) {
     live && specialistId ? null : { sessions: specialistId ? seedSpecialistDaySessions(specialistId, today) : [] },
     live && specialistId
       ? {
-          source: () => liveSpecialistSessions(specialistId, today),
+          // The live rows (hooks/specialistSessions.js, speed review F1):
+          // MAX_WINDOW_MONTHS, not any one athlete's own window - see
+          // seedSpecialistDaySessions' comment above.
+          source: () => liveSpecialistSessions(specialistId, today, openThrough(new Date(), MAX_WINDOW_MONTHS)),
           deps: ['specialist-sessions', specialistId, today, sessionsGen, bookingsGen],
         }
       : undefined
@@ -2760,8 +2712,13 @@ export function useCoachDay({ variant = 'today' } = {}) {
  * roster rather than one session's attendance (that stays useRoster, screen
  * 13). Live: athletes where coachId == the signed-in coach's uid - the
  * equality filter firestore.rules can prove on a list read.
+ *
+ * `enabled: false` (speed review, 2026-11-17): no read at all and an empty
+ * list. CoachDashboard passes it for everyone without a Students tab -
+ * owner, ops and the specialists open the Today tab too, and read nothing
+ * they are never shown.
  */
-export function useCoachRoster() {
+export function useCoachRoster({ enabled = true } = {}) {
   const live = isLive();
   // Try again after a failed load (review 2026-11-04): nothing else re-reads
   // this list while the screen stays mounted, so the retry is a local count.
@@ -2783,8 +2740,8 @@ export function useCoachRoster() {
   };
 
   const state = useSeedResource(
-    live ? null : ROSTER.map((r) => ({ ...r, meta: hideContractParts(r.meta) })),
-    live ? { source: liveCoachRoster, deps: ['coach-roster', attempt] } : undefined
+    !enabled ? [] : live ? null : ROSTER.map((r) => ({ ...r, meta: hideContractParts(r.meta) })),
+    enabled && live ? { source: liveCoachRoster, deps: ['coach-roster', attempt] } : undefined
   );
   return { ...state, retry: () => setAttempt((n) => n + 1) };
 }
@@ -3530,12 +3487,6 @@ async function liveProfile() {
   return { email: me.email ?? null, displayName: me.displayName ?? null, phone: me.phone ?? null };
 }
 
-function mondayOfWeek(todayIso) {
-  const dow = new Date(`${todayIso}T00:00:00Z`).getUTCDay(); // 0=Sun..6=Sat
-  const diff = dow === 0 ? -6 : 1 - dow;
-  return addDaysISO(todayIso, diff);
-}
-
 /**
  * Pure derivation for the Admin dashboard's "who needs a call" grouping
  * (contract v1.8, D) — no Firestore, no hooks, so it is independently
@@ -3631,55 +3582,38 @@ export function deriveWhoNeedsCall({
  * the unfiltered 'all tiers' view (no interactive filter setter exists on
  * this hook to drive a live re-query from) — reported as not done rather
  * than half-built.
+ *
+ * Speed review F6 (2026-11-17): the eight reads ran in one Promise.all, so
+ * no card painted until the slowest landed. They are now three groups, each
+ * its own resource in useAdminDashboard, and each builder is the part of the
+ * old one-shot derivation that reads only its own group (the roster and week
+ * builders are pure, in hooks/adminSections.js; Outstanding is below):
+ *   roster - athletes + households: enrollment, membership, enrolled count
+ *   week   - this week's sessions: block fill and the reserved blocks
+ *   calls  - pending enrollments, no-shows, contract logs, assessment
+ *            windows, the four-week sessions: with the roster, Outstanding
+ * Together they return exactly what the one-shot code returned
+ * (index.adminProgressive.test.js).
  */
-async function liveAdminDashboard(today) {
-  const monthStart = `${today.slice(0, 7)}-01`;
-  const weekStart = mondayOfWeek(today);
-  const weekEnd = addDaysISO(weekStart, 6);
+const adminRosterReads = () => Promise.all([fetchAllAthletes(), fetchAllHouseholds()]);
 
-  // Owner 2026-11-13: fitness with no golf, read over the next four weeks
-  // (data/orphanFitness.js), hidden and cancelled sessions included.
-  const fitnessTo = addDaysISO(today, FITNESS_WINDOW_DAYS - 1);
+// The assessment windows read may fail on its own (rules that do not
+// grant it yet): that drops the "Baseline due" rows, never the dashboard.
+// The four-week sessions read likewise drops only the fitness rows.
+const adminCallsReads = (today, w) =>
+  Promise.all([
+    fetchPendingEnrollmentRequests(),
+    fetchNoShowBookingsSince(w.monthStart),
+    fetchContractLogsSince(w.monthStart),
+    fetchAllAssessmentWindows().catch(() => null),
+    fetchSessionsInRange(today, w.fitnessTo).catch(() => null),
+  ]);
 
-  // The assessment windows read may fail on its own (rules that do not
-  // grant it yet): that drops the "Baseline due" rows, never the dashboard.
-  // The four-week sessions read likewise drops only the fitness rows.
-  const [allAthletes, sessionsThisWeek, pending, noshowBookings, contractLogs, windows, allHouseholds, fitnessSessions] =
-    await Promise.all([
-      fetchAllAthletes(),
-      fetchSessionsInRange(weekStart, weekEnd),
-      fetchPendingEnrollmentRequests(),
-      fetchNoShowBookingsSince(monthStart),
-      fetchContractLogsSince(monthStart),
-      fetchAllAssessmentWindows().catch(() => null),
-      fetchAllHouseholds(),
-      fetchSessionsInRange(today, fitnessTo).catch(() => null),
-    ]);
-  // Owner 2026-10-15: staging shares this database, so the test family
-  // (test: true, data/testFamily.js) is left out of every count and list
-  // below. It never books, so no booking or contract log names it.
-  const { households, athletes } = withoutTestFamilies({ households: allHouseholds, athletes: allAthletes });
-
-  // Contract v2.1, pin H: membership status counts + who's lapsed - absent
-  // == active, the same default every other membership read in this app
-  // uses. `lapsedHouseholds` links straight to nothing invented — just the
-  // household's own id/name, matching what the admin screen already knows
-  // how to show elsewhere.
-  const membership = { active: 0, pastDue: 0, lapsed: 0, pending: 0, lapsedHouseholds: [] };
-  for (const h of households) {
-    const status = h.membership?.status ?? 'active';
-    if (status === 'past_due') membership.pastDue += 1;
-    else if (status === 'lapsed') {
-      membership.lapsed += 1;
-      membership.lapsedHouseholds.push({ id: h.id, name: h.name ?? null });
-    } else membership.active += 1;
-  }
-  // Sprint 20 (spec 4.4/7): athletes still on checkout - an ATHLETE count beside the household counts, so the dashboard agrees with the sign-ups report.
-  membership.pending = athletes.filter((a) => billingStatusOf(a) === 'pending').length;
-
+/** roster.athletes + calls -> the Outstanding rows, in the folded card's tag order. */
+function adminOutstanding(athletes, [pending, noshowBookings, contractLogs, windows, fitnessSessions], today, w) {
   // This season's baselines only (the list's rule, data/assessmentWindows.js dueStatus): last season's do not count.
   const season = seasonOf(today);
-  const baselineAthleteIds = windows == null ? null : windows.filter((w) => w.kind === 'baseline' && w.season === season).map((w) => w.athleteId);
+  const baselineAthleteIds = windows == null ? null : windows.filter((x) => x.kind === 'baseline' && x.season === season).map((x) => x.athleteId);
   const who = deriveWhoNeedsCall({
     athletes,
     pendingCount: pending.length,
@@ -3688,6 +3622,11 @@ async function liveAdminDashboard(today) {
     baselineAthleteIds,
     today,
   });
+  // Speed review (2026-11-17): an athlete's row names the family, so a tap
+  // opens the family page directly (data/staffFamily.js staffAthletePath).
+  // Null for an athlete not on the roster (gone, or the test family).
+  const familyOf = new Map(athletes.map((a) => [a.id, a.householdId ?? null]));
+  const householdId = (athleteId) => familyOf.get(athleteId) ?? null;
 
   const outstanding = [];
   if (who.pendingEnrollment.count > 0) {
@@ -3707,6 +3646,7 @@ async function liveAdminDashboard(today) {
       id: `noshow-${n.athleteId}`,
       kind: 'noshow',
       athleteId: n.athleteId,
+      householdId: householdId(n.athleteId),
       who: n.name ?? n.athleteId,
       why: `${n.count} no-show${n.count === 1 ? '' : 's'} this month`,
       tag: 'Attendance',
@@ -3716,13 +3656,14 @@ async function liveAdminDashboard(today) {
   }
   // After Attendance, as the folded card's summary reads them (OutstandingCard TAG_ORDER).
   if (fitnessSessions != null) {
-    outstanding.push(...orphanFitness(fitnessSessions, { from: today, to: fitnessTo }).map(fitnessRow));
+    outstanding.push(...orphanFitness(fitnessSessions, { from: today, to: w.fitnessTo }).map(fitnessRow));
   }
   for (const c of who.contractBehind) {
     outstanding.push({
       id: `contract-${c.athleteId}`,
       kind: 'contract',
       athleteId: c.athleteId,
+      householdId: householdId(c.athleteId),
       who: c.name ?? c.athleteId,
       why: `Contract behind — ${c.missed} day${c.missed === 1 ? '' : 's'} missed, ${c.daysLeft} left`,
       tag: 'Contract',
@@ -3735,6 +3676,7 @@ async function liveAdminDashboard(today) {
       id: `baseline-${d.athleteId}`,
       kind: 'baseline',
       athleteId: d.athleteId,
+      householdId: householdId(d.athleteId),
       who: d.name ?? d.athleteId,
       why: 'Baseline due',
       tag: 'Assessment',
@@ -3742,70 +3684,7 @@ async function liveAdminDashboard(today) {
       packageIds: null,
     });
   }
-
-  const byPackage = new Map();
-  for (const a of athletes) {
-    if (!a.packageId) continue;
-    byPackage.set(a.packageId, (byPackage.get(a.packageId) || 0) + 1);
-  }
-  const enrollment = [...byPackage.entries()].map(([id, count]) => ({
-    id,
-    name: packageById(id)?.name ?? id,
-    athletes: count,
-  }));
-
-  // Block fill is PER DAY (Mon..Sat, the seed BLOCK_FILL shape the admin
-  // bars render) over GROUP sessions only — the pin's "group type only"
-  // meant "exclude specialist slots", not "group by type" (PM integration
-  // reconciliation of the routing lane's flagged reading).
-  const fillByDay = new Map(['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'].map((d) => [d, { booked: 0, capacity: 0 }]));
-  let totalBooked = 0;
-  let totalCapacity = 0;
-  // 2026-10-02: the week's handicap-reserved blocks, named beside the bars
-  // (a bar is a whole day, so the tag cannot ride on it) - same read.
-  const reservedBlocks = [];
-  for (const s of sessionsThisWeek) {
-    if (s.status === 'cancelled' || !isGroupBookable(s)) continue;
-    const day = fillByDay.get(shortWeekday(s.date));
-    if (!day) continue; // Sunday: no group blocks by design
-    day.booked += s.booked ?? 0;
-    day.capacity += s.capacity ?? 0;
-    totalBooked += s.booked ?? 0;
-    totalCapacity += s.capacity ?? 0;
-    if (handicapLimitOf(s) != null) {
-      reservedBlocks.push({
-        sessionId: s.id,
-        date: s.date,
-        day: shortWeekday(s.date),
-        time: s.time ?? null,
-        maxHandicap: handicapLimitOf(s),
-        booked: s.booked ?? 0,
-        capacity: s.capacity ?? 0,
-      });
-    }
-  }
-  reservedBlocks.sort((a, b) => a.date.localeCompare(b.date) || (parseTimeToMinutes(a.time) ?? 0) - (parseTimeToMinutes(b.time) ?? 0));
-  const blockFill = [...fillByDay.entries()].map(([day, v]) => ({
-    day,
-    pct: v.capacity ? Math.round((v.booked / v.capacity) * 100) : 0,
-  }));
-
-  return {
-    outstanding,
-    metrics: {
-      enrolled: athletes.length,
-      fill: totalCapacity ? `${Math.round((totalBooked / totalCapacity) * 100)}%` : '—',
-      fillLabel: 'average block fill this week',
-      enrolledLabel: 'enrolled athletes',
-    },
-    enrollment,
-    highlightPackage: null,
-    blockFill,
-    reservedBlocks,
-    filter: TIER_FILTERS[0],
-    weekLabel: `Week of ${longDayLabel(weekStart)}`,
-    membership,
-  };
+  return outstanding;
 }
 
 /**
@@ -3817,9 +3696,16 @@ async function liveAdminDashboard(today) {
  * filter so the header's number and the stat card cannot disagree; block fill
  * is facility-wide and cannot be cut by tier, which the screen says.
  *
- * Live (contract v1.8, D): see liveAdminDashboard above. Subscribed to every
+ * Live (contract v1.8, D): see the groups above. Subscribed to every
  * collection its derivation reads from, so an approval, a no-show mark, a
  * contract log, or a diagnostic publish anywhere all refresh this screen.
+ *
+ * Speed review F6 (2026-11-17), live: three resources (the groups above), so
+ * `data` fills in as each lands - a section whose group has not landed is
+ * null - and each group re-reads only on the writes that can change it.
+ * `status.outstanding` / `status.roster` / `status.week` say which cards are
+ * still loading or failed; `loading` and `error` cover all three, and once
+ * all three land `data` is exactly the one-shot payload.
  */
 export function useAdminDashboard({ variant = 'populated' } = {}) {
   const live = isLive();
@@ -3837,44 +3723,79 @@ export function useAdminDashboard({ variant = 'populated' } = {}) {
   // A session cancelled in the app clears its "Fitness with no golf" row.
   const sessionsGen = useInvalidation('sessions');
 
-  return useSeedResource(
+  const w = useMemo(() => adminWindow(today), [today]);
+  const roster = useSeedResource(
+    null,
+    live ? { source: adminRosterReads, deps: ['admin-roster', athletesGen, householdsGen] } : undefined
+  );
+  const week = useSeedResource(
+    null,
     live
-      ? null
-      : {
-          outstanding: OUTSTANDING.filter(matches),
-          metrics:
-            filter.id === 'all'
-              ? ADMIN_METRICS
-              : { ...ADMIN_METRICS, enrolled: filter.count, enrolledLabel: `athletes on ${filter.label.replace(' only', '')}` },
-          enrollment: ENROLLMENT_BY_PACKAGE,
-          highlightPackage: filter.id === 'all' ? null : filter.id,
-          blockFill: BLOCK_FILL,
-          // The seed season has no handicap-reserved block.
-          reservedBlocks: [],
-          filter,
-          weekLabel: null,
-          // Contract v2.1, pin H: the harness's one named seed household
-          // (HOUSEHOLD/Whitfield) is active — no invented lapsed/past_due
-          // household ships in the default demo state.
-          membership: { active: 1, pastDue: 0, lapsed: 0, pending: 0, lapsedHouseholds: [] },
-        },
+      ? { source: () => fetchSessionsInRange(w.weekStart, w.weekEnd), deps: ['admin-week', today, sessionsGen, bookingsGen] }
+      : undefined
+  );
+  const calls = useSeedResource(
+    null,
     live
       ? {
-          source: () => liveAdminDashboard(today),
-          deps: [
-            'admin-dashboard',
-            today,
-            athletesGen,
-            bookingsGen,
-            contractLogsGen,
-            assessmentsGen,
-            enrollmentGen,
-            householdsGen,
-            sessionsGen,
-          ],
+          source: () => adminCallsReads(today, w),
+          deps: ['admin-calls', today, bookingsGen, contractLogsGen, assessmentsGen, enrollmentGen, sessionsGen],
         }
       : undefined
   );
+  const rosterPart = useMemo(() => (roster.data ? adminRoster(roster.data) : null), [roster.data]);
+  const weekPart = useMemo(() => (week.data ? adminWeek(week.data) : null), [week.data]);
+  const outstanding = useMemo(
+    () => (rosterPart && calls.data ? adminOutstanding(rosterPart.athletes, calls.data, today, w) : null),
+    [rosterPart, calls.data, today, w]
+  );
+
+  if (!live) {
+    return {
+      data: {
+        outstanding: OUTSTANDING.filter(matches),
+        metrics:
+          filter.id === 'all'
+            ? ADMIN_METRICS
+            : { ...ADMIN_METRICS, enrolled: filter.count, enrolledLabel: `athletes on ${filter.label.replace(' only', '')}` },
+        enrollment: ENROLLMENT_BY_PACKAGE,
+        highlightPackage: filter.id === 'all' ? null : filter.id,
+        blockFill: BLOCK_FILL,
+        // The seed season has no handicap-reserved block.
+        reservedBlocks: [],
+        filter,
+        weekLabel: null,
+        // Contract v2.1, pin H: the harness's one named seed household
+        // (HOUSEHOLD/Whitfield) is active — no invented lapsed/past_due
+        // household ships in the default demo state.
+        membership: { active: 1, pastDue: 0, lapsed: 0, pending: 0, lapsedHouseholds: [] },
+      },
+      loading: false,
+      error: null,
+      status: { outstanding: SETTLED, roster: SETTLED, week: SETTLED },
+    };
+  }
+
+  const status = {
+    outstanding: groupStatus(roster, calls),
+    roster: groupStatus(roster),
+    week: groupStatus(week),
+  };
+  const data = rosterPart || weekPart || outstanding
+    ? {
+        outstanding,
+        metrics: rosterPart && weekPart ? adminMetrics(rosterPart, weekPart) : null,
+        enrollment: rosterPart ? rosterPart.enrollment : null,
+        highlightPackage: null,
+        blockFill: weekPart ? weekPart.blockFill : null,
+        reservedBlocks: weekPart ? weekPart.reservedBlocks : null,
+        filter: TIER_FILTERS[0],
+        weekLabel: `Week of ${longDayLabel(w.weekStart)}`,
+        membership: rosterPart ? rosterPart.membership : null,
+      }
+    : null;
+  const all = groupStatus(roster, week, calls);
+  return { data, loading: all.loading, error: all.error, status };
 }
 
 /**

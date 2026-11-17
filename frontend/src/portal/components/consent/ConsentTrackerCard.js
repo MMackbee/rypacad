@@ -36,7 +36,7 @@ export default function ConsentTrackerCard({ onOpenAthlete }) {
         <Body size={12}>No athlete has a mental 1:1 yet.</Body>
       ) : (
         data.map((r) => (
-          <button key={r.athleteId} type="button" onClick={() => onOpenAthlete?.(r.athleteId)} style={rowButton}>
+          <button key={r.athleteId} type="button" onClick={() => (r.householdId ? onOpenAthlete?.(r.athleteId, r.householdId) : onOpenAthlete?.(r.athleteId))} style={rowButton}>
             {lineFor(r)}
           </button>
         ))

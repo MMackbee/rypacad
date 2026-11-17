@@ -39,6 +39,7 @@ jest.mock('./live', () => ({
   fetchSessionsByIds: jest.fn(),
   fetchSessionsInRange: jest.fn(),
 }));
+jest.mock('./specialistLive', () => ({ __esModule: true, fetchBookingsByType: jest.fn() }));
 jest.mock('./waitlist', () => ({
   ...jest.requireActual('./waitlist'),
   __esModule: true,
@@ -57,6 +58,7 @@ import { act } from 'react';
 import { createRoot } from 'react-dom/client';
 import * as hooks from './index';
 import * as live from './live';
+import * as specialistLive from './specialistLive';
 import * as waitlist from './waitlist';
 import * as grace from './grace';
 import * as adapter from './assessmentsLive';
@@ -113,6 +115,7 @@ beforeEach(() => {
   live.fetchSessions.mockResolvedValue(WEEK);
   live.fetchSessionsByIds.mockResolvedValue([]);
   live.fetchBookingsBySession.mockResolvedValue([]);
+  specialistLive.fetchBookingsByType.mockResolvedValue([]);
   live.fetchAthletesByIds.mockResolvedValue([]);
   waitlist.fetchWaitlistByAthlete.mockResolvedValue([]);
   waitlist.fetchWaitlistByHousehold.mockResolvedValue([]);
