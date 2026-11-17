@@ -10,6 +10,7 @@ import { AlertGlyph, Body } from '../components/Primitives';
 import CreateLoginSection from '../components/CreateLoginSection';
 import useAuthSession from '../hooks/useAuthSession';
 import { FAMILY_LINK_FAIL } from '../data/authCopy';
+import LaunchSplash from '../components/LaunchSplash';
 
 /**
  * 01 · Sign In - public.
@@ -51,13 +52,22 @@ export const LANDING_BY_ROLE = {
   owner: '/portal/admin',
 };
 
+/**
+ * v1.7.1: a specialist account (users.specialistId — Yannick, Phil) lands on
+ * their own My Sessions view; PortalRoutes.landingFor applies the same
+ * override on the index redirect.
+ */
+function landingPath(user) {
+  return user.specialistId ? '/portal/my-sessions' : LANDING_BY_ROLE[user.role] ?? '/portal/not-provisioned';
+}
+
 /* ------------------------------------------------------------------------- *
  * Live mode - the /portal/signin route.
  * ------------------------------------------------------------------------- */
 
 function LiveSignIn({ bare = false, onStartEnrollment, onSignedIn }) {
   const auth = useAuthSession();
-  const { user, provisioned, loading, error, signIn, signInWithEmail, createLogin } = auth;
+  const { user, provisioned, loading, error, signIn, signInWithEmail, createLogin, hint } = auth;
   /**
    * Sprint 10 pin I: "Forgot password" wired to a real
    * sendPasswordResetEmail. FALLBACK FLAG: useAuthSession has no
@@ -114,14 +124,19 @@ function LiveSignIn({ bare = false, onStartEnrollment, onSignedIn }) {
       onSignedIn(user);
       return;
     }
-    // v1.7.1: a specialist account (users.specialistId — Yannick, Phil)
-    // lands on their own My Sessions view; PortalRoutes.landingFor applies
-    // the same override on the index redirect.
-    navigate(
-      user.specialistId ? '/portal/my-sessions' : LANDING_BY_ROLE[user.role] ?? '/portal/not-provisioned',
-      { replace: true }
-    );
+    navigate(landingPath(user), { replace: true });
   }, [user, provisioned, onSignedIn, navigate]);
+
+  // A session restoring on a launch (speed work 2026-11-17): no dimmed form
+  // while auth and users/{uid} resolve - the launch splash, or straight to
+  // the landing this account's cold-start hint names (RequireRole re-routes
+  // if the read disagrees). A sign-in the visitor started keeps its form.
+  const restoring = loading && !user && lastAction == null;
+  const hintPath = restoring && hint && !onSignedIn ? landingPath(hint) : null;
+  useEffect(() => {
+    if (hintPath) navigate(hintPath, { replace: true });
+  }, [hintPath, navigate]);
+  if (restoring) return <LaunchSplash />;
 
   return (
     <PhoneFrame bare={bare}>

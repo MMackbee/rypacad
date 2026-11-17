@@ -3,7 +3,8 @@ import { Navigate, Route, Routes, useLocation, useNavigate, useParams, useSearch
 
 import useAuthSession from './hooks/useAuthSession';
 import { isLive } from './hooks/live';
-import { viewerOf } from './hooks/roleHint';
+import { readRoleHint, viewerOf } from './hooks/roleHint';
+import LaunchSplash from './components/LaunchSplash';
 import { contractEnabled } from './data/contractFlag';
 import SignIn, { LANDING_BY_ROLE } from './screens/SignIn';
 import SignUp from './screens/SignUp';
@@ -139,6 +140,12 @@ const NEXT_ROUTE_CHUNKS = {
   'my-sessions': [loadRoster, loadAssessmentList, loadCombine],
   admin: [loadAdminSignups, loadBilling, loadAthleteDetail, loadStaff],
 };
+// The launch paths (the index, sign-in) name no screen: warm the landing of
+// the stored role hint instead (speed work 2026-11-17; roleHint.js). A
+// parent's and an athlete's homes ship in main.
+const LANDING_CHUNKS = { owner: [loadAdmin], ops: [loadAdmin], coach: [loadCoachDashboard], mental: [loadSpecialistDay] };
+const landingChunks = (hint) =>
+  !hint ? [] : hint.specialistId ? [loadSpecialistDay] : routeChunks(LANDING_CHUNKS, hint.role);
 const NEXT_WARM_DELAY_MS = 2500;
 // Own keys only: a junk URL like /portal/constructor must not reach Object.prototype.
 // The Contract chunk stays cold while the contract is hidden (data/contractFlag.js).
@@ -322,9 +329,12 @@ function AthleteDetailRoute() {
  */
 function PortalIndex() {
   const live = isLive();
-  const { user, provisioned, loading } = useAuthSession(live ? undefined : { variant: 'idle' });
+  const { user, provisioned, loading, hint } = useAuthSession(live ? undefined : { variant: 'idle' });
   if (!live) return <StatesHarness />;
-  if (loading) return null;
+  // The home-screen launch lands here ('/' -> /portal, App.js): the launch
+  // splash while auth restores, or straight to the landing this account's
+  // cold-start hint names - RequireRole re-routes if users/{uid} disagrees.
+  if (loading) return hint ? <Navigate to={landingFor(hint)} replace /> : <LaunchSplash />;
   if (!user || !provisioned) return <Navigate to="/portal/signin" replace />;
   return <Navigate to={landingFor(user)} replace />;
 }
@@ -798,7 +808,9 @@ export default function PortalRoutes() {
 
   // Mount only: the chunk for the screen this page load opened on.
   useEffect(() => {
-    if (isLive()) warm(routeChunks(CURRENT_ROUTE_CHUNKS, segment));
+    if (!isLive()) return;
+    const current = routeChunks(CURRENT_ROUTE_CHUNKS, segment);
+    warm(current.length ? current : landingChunks(readRoleHint()));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 

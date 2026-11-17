@@ -4,6 +4,7 @@ import React from 'react';
 import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-dom';
 import ErrorBoundary from './components/ErrorBoundary';
 import PortalRoutes from './portal/PortalRoutes';
+import { isLive } from './portal/hooks/live';
 
 /**
  * The portal IS the app. The 2025 shell (Navbar, LoginPage, UnauthorizedPage,
@@ -24,8 +25,12 @@ function App() {
             {/* Member portal — Phase 1. See docs/portal/design-handoff.md. */}
             <Route path="/portal/*" element={<PortalRoutes />} />
 
+            {/* The home-screen icon opens '/' (speed work 2026-11-17): live, the
+                portal index sends a signed-in account straight to its landing
+                instead of through sign-in; the review scaffold keeps sign-in. */}
+            <Route path="/" element={<Navigate to={isLive() ? '/portal' : '/portal/signin'} replace />} />
+
             {/* Legacy entry points, all superseded by the portal. */}
-            <Route path="/" element={<Navigate to="/portal/signin" replace />} />
             <Route path="/login" element={<Navigate to="/portal/signin" replace />} />
             <Route path="/unauthorized" element={<Navigate to="/portal/signin" replace />} />
             <Route path="/register" element={<Navigate to="/portal/register" replace />} />
