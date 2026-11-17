@@ -22,6 +22,7 @@
  */
 import { generationOf } from './invalidate';
 import { clearRoleHint } from './roleHint';
+import { setCacheScope } from './resourceCache';
 
 export const PROFILE_TTL_MS = 5 * 60 * 1000;
 
@@ -32,7 +33,6 @@ let reads = 0;
 let flight = null; // { uid, epoch, fresh, promise }
 let sessionUser = null; // { uid, user, at }
 const listeners = new Set();
-const resetHooks = new Set();
 
 const copy = (value) => ({ ...value });
 
@@ -43,8 +43,8 @@ export function sessionScope() {
 
 /**
  * The auth listener's account. A different uid (or null) drops the last
- * account's profile, session user and everything registered with
- * onSessionReset (the data cache). Returns whether the scope changed.
+ * account's profile, its session user and the screens' data cache
+ * (resourceCache.js). Returns whether the scope changed.
  */
 export function setSessionScope(uid) {
   const next = uid || null;
@@ -54,7 +54,7 @@ export function setSessionScope(uid) {
   profile = null;
   flight = null;
   sessionUser = null;
-  resetHooks.forEach((hook) => hook(next));
+  setCacheScope(next);
   return true;
 }
 
@@ -62,12 +62,6 @@ export function setSessionScope(uid) {
 export function resetSession() {
   setSessionScope(null);
   clearRoleHint();
-}
-
-/** Run `hook(uid)` on every scope change; returns an unregister function. */
-export function onSessionReset(hook) {
-  resetHooks.add(hook);
-  return () => resetHooks.delete(hook);
 }
 
 function profileFresh(uid) {

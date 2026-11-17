@@ -1695,7 +1695,7 @@ export function useSpecialistSessions(specialistId) {
     live && specialistId
       ? {
           source: () => liveSpecialistSessions(specialistId, today),
-          deps: ['specialist-sessions', specialistId, today, sessionsGen, bookingsGen],
+          deps: ['specialist-sessions', specialistId, today], gens: [sessionsGen, bookingsGen], cacheKey: 'specialist-sessions',
         }
       : undefined
   );
@@ -2751,7 +2751,7 @@ export function useCoachDay({ variant = 'today' } = {}) {
           attention: ATTENTION_LIST,
           outstanding: COACH_OUTSTANDING,
         },
-    live ? { source: liveCoachDay, deps: ['coach-day', today, sessionsGen, bookingsGen] } : undefined
+    live ? { source: liveCoachDay, deps: ['coach-day', today], gens: [sessionsGen, bookingsGen], cacheKey: 'coach-day' } : undefined
   );
 }
 
@@ -3861,17 +3861,9 @@ export function useAdminDashboard({ variant = 'populated' } = {}) {
     live
       ? {
           source: () => liveAdminDashboard(today),
-          deps: [
-            'admin-dashboard',
-            today,
-            athletesGen,
-            bookingsGen,
-            contractLogsGen,
-            assessmentsGen,
-            enrollmentGen,
-            householdsGen,
-            sessionsGen,
-          ],
+          deps: ['admin-dashboard', today],
+          gens: [athletesGen, bookingsGen, contractLogsGen, assessmentsGen, enrollmentGen, householdsGen, sessionsGen],
+          cacheKey: 'admin-dashboard',
         }
       : undefined
   );
