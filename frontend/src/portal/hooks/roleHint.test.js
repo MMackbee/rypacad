@@ -22,6 +22,7 @@ jest.mock('firebase/firestore', () => ({
   doc: (_db, col, id) => ({ col, id }),
   getDoc: async (ref) => {
     await mockGate.promise;
+    if (mockFail.value) throw Object.assign(new Error('Failed to get document because the client is offline.'), { code: mockFail.value });
     const data = mockDocs[`${ref.col}/${ref.id}`];
     return { exists: () => data !== undefined, data: () => data };
   },
@@ -32,10 +33,11 @@ import React, { act } from 'react';
 import { createRoot } from 'react-dom/client';
 import { auth } from '../../firebase';
 import useAuthSession from './useAuthSession';
-import { ROLE_HINT_KEY, clearRoleHint, readRoleHint, roleHintFor, viewerOf, writeRoleHint } from './roleHint';
+import { ROLE_HINT_KEY, clearRoleHint, readRoleHint, roleHintFor, suppressRoleHint, viewerOf, writeRoleHint } from './roleHint';
 import { resetSession } from './sessionStore';
 
 const mockDocs = {};
+const mockFail = { value: null };
 let mockGate = { promise: Promise.resolve() };
 const roots = [];
 const account = (uid) => ({ uid, email: `${uid}@example.com`, emailVerified: true, reload: async () => {} });
@@ -62,6 +64,7 @@ afterEach(async () => {
   resetSession();
   auth.currentUser = null;
   mockGate = { promise: Promise.resolve() };
+  mockFail.value = null;
   Object.keys(mockDocs).forEach((k) => delete mockDocs[k]);
   window.localStorage.clear();
   jest.restoreAllMocks();
@@ -162,5 +165,40 @@ describe('useAuthSession and the hint', () => {
     await act(async () => { release(); });
     await flush();
     expect(readRoleHint()).toMatchObject({ uid: 'u-next', role: 'parent' });
+  });
+});
+
+// Review 2026-11-17 (F1): a users read that fails for any reason but
+// NOT_FOUND - offline, unavailable, refused - must not leave the hint driving
+// the launch paths, or RequireRole's redirect to sign-in and sign-in's hint
+// navigation bounce for as long as the read keeps failing.
+describe('a failed users read', () => {
+  test('suppressRoleHint: not offered for the rest of the page load, the stored copy kept; a verified write offers it again', () => {
+    writeRoleHint({ uid: 'u1', role: 'owner' });
+    suppressRoleHint();
+    expect(roleHintFor('u1')).toBeNull();
+    expect(readRoleHint()).toMatchObject({ uid: 'u1', role: 'owner' });
+    writeRoleHint({ uid: 'u1', role: 'owner' });
+    expect(roleHintFor('u1')).toMatchObject({ uid: 'u1', role: 'owner' });
+  });
+
+  test('stops the hint for this session and every session mounted after it, until a read succeeds', async () => {
+    writeRoleHint({ uid: 'u-off', role: 'owner' });
+    auth.currentUser = account('u-off');
+    mockFail.value = 'unavailable';
+    const first = await mountProbe();
+    expect(first.seen[0]).toMatchObject({ loading: true, hint: { uid: 'u-off', role: 'owner' } });
+    await flush();
+    expect(first.now()).toMatchObject({ loading: false, user: null, hint: null });
+    expect(first.now().error).toBeTruthy();
+    const late = await mountProbe();
+    expect(late.seen[0]).toMatchObject({ loading: true, hint: null });
+    await flush();
+    mockFail.value = null;
+    mockDocs['users/u-off'] = { role: 'owner' };
+    await act(async () => { await late.now().refresh(); });
+    await flush();
+    expect(late.now()).toMatchObject({ loading: false, user: { role: 'owner' } });
+    expect(roleHintFor('u-off')).toMatchObject({ role: 'owner' });
   });
 });

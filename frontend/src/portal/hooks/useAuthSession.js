@@ -18,7 +18,7 @@ import { publishSelfManaged, resolveSelfManaged, useSelfManaged } from './selfMa
 import {
   forgetSessionUser, peekSessionUser, publishSessionUser, resetSession, sessionUserStale, setSessionScope, signedOutKnown, subscribeSessionUser,
 } from './sessionStore';
-import { clearRoleHint, roleHintFor, writeRoleHint } from './roleHint';
+import { clearRoleHint, roleHintFor, suppressRoleHint, writeRoleHint } from './roleHint';
 import { claimStateOf, createLoginError, resendError, verifyContinueUrl } from './authSessionHelpers';
 
 // Every screen and guard mounts its own useAuthSession, and each one's
@@ -210,6 +210,7 @@ export default function useAuthSession({ variant } = {}) {
         setSession({ user: unprovisionedUser(fbUser), provisioned: false, loading: false, error: null });
         return 'not-found';
       }
+      suppressRoleHint(); // or sign-in follows it straight back to the landing (roleHint.js)
       setSession({
         user: null, provisioned: false, loading: false,
         error: err instanceof LiveDataError ? err : new LiveDataError(ERR.UNKNOWN, 'Could not load your account. Please try again.', err),

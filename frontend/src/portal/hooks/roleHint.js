@@ -11,10 +11,19 @@
  * useAuthSession after a verified read, cleared on sign-out (sessionStore's
  * resetSession) and when the account has no users doc. Every storage call is
  * guarded: private mode or blocked site data just means no hint.
+ *
+ * A users read that fails for any other reason (offline, unavailable,
+ * refused) stops the hint for the rest of the page load (review 2026-11-17):
+ * RequireRole sends the visitor to sign-in, and sign-in following the same
+ * hint back to the landing bounced between the two for as long as the read
+ * kept failing. The stored copy stays for the next launch; the next verified
+ * read lifts the stop.
  */
 export const ROLE_HINT_KEY = 'ryp.portal.roleHint';
 
 const ROLES = ['athlete', 'parent', 'coach', 'mental', 'ops', 'owner'];
+
+let suppressed = false; // memory only: this page load
 
 function storage() {
   try {
@@ -39,6 +48,7 @@ export function readRoleHint() {
 
 /** After a verified users read: keep the three routing facts, nothing else. */
 export function writeRoleHint(user) {
+  if (user && typeof user.uid === 'string') suppressed = false; // a read succeeded
   if (!user || typeof user.uid !== 'string' || !ROLES.includes(user.role)) return;
   const hint = { uid: user.uid, role: user.role, specialistId: typeof user.specialistId === 'string' ? user.specialistId : null };
   try {
@@ -49,6 +59,7 @@ export function writeRoleHint(user) {
 }
 
 export function clearRoleHint() {
+  suppressed = false;
   try {
     storage()?.removeItem(ROLE_HINT_KEY);
   } catch (err) {
@@ -56,9 +67,14 @@ export function clearRoleHint() {
   }
 }
 
+/** A users read failed: offer no hint until a read succeeds (see above). */
+export function suppressRoleHint() {
+  suppressed = true;
+}
+
 /** The hint when it belongs to `uid` (the account auth restored), else null. */
 export function roleHintFor(uid) {
-  if (!uid) return null;
+  if (!uid || suppressed) return null;
   const hint = readRoleHint();
   return hint && hint.uid === uid ? hint : null;
 }
