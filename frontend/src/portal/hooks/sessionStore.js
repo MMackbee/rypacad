@@ -36,11 +36,6 @@ const listeners = new Set();
 
 const copy = (value) => ({ ...value });
 
-/** The uid this page is serving, or null (signed out, or not known yet). */
-export function sessionScope() {
-  return scope || null;
-}
-
 /** True once the auth listener has reported no account (and none since). */
 export function signedOutKnown() {
   return scope === null;

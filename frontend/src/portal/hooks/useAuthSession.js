@@ -207,8 +207,8 @@ export default function useAuthSession({ variant } = {}) {
   }, []);
 
   /* ------------------------------ real mode ------------------------------ */
-  // Loading until the first auth emission - unless this account's profile
-  // is already known (another mounted session read it).
+  // Loading until the first auth emission - unless the page already knows
+  // the answer: this account's profile, or that nobody is signed in.
   const [session, setSession] = useState(() => (demo ? SIGNED_OUT : initialSession()));
 
   // Emission sequence: a resolution result only lands if no later auth
