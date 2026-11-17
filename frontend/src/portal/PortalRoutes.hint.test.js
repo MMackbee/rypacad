@@ -31,7 +31,8 @@ jest.mock('./hooks/useAuthSession', () => {
   };
 });
 jest.mock('./StatesHarness', () => ({ __esModule: true, default: () => 'HARNESS' }));
-jest.mock('./screens/AdminDashboard', () => ({ __esModule: true, default: ({ role }) => `ADMIN as ${role}` }));
+const mockAdminProps = { last: null };
+jest.mock('./screens/AdminDashboard', () => ({ __esModule: true, default: (props) => { mockAdminProps.last = props; return `ADMIN as ${props.role}`; } }));
 jest.mock('./screens/CoachDashboard', () => ({ __esModule: true, default: ({ role, specialistId }) => `COACH HOME as ${role}${specialistId ? '/' + specialistId : ''}` }));
 jest.mock('./screens/SpecialistDay', () => ({ __esModule: true, default: ({ specialistId, canSwitch }) => `MY SESSIONS ${specialistId ?? 'none'}${canSwitch ? ' (switch)' : ''}` }));
 jest.mock('./screens/TourStandings', () => ({ __esModule: true, default: () => 'TOUR' }));
@@ -95,6 +96,24 @@ test("an owner's hint renders Admin while the read is in flight, and the read ag
   expect(r.pathname()).toBe('/portal/admin');
   expect(r.text()).toBe('ADMIN as owner');
   await r.unmount();
+});
+
+// Review 2026-11-17 (F3, second pass): the owner's Scholarships card mounts
+// from the owner's hint, so Admin does not shift a card down when the read
+// lands; ops' hint never mounts it (rules refuse ops the read anyway).
+test("the owner's hint mounts the owner-only Scholarships card from the first paint; ops' never does", async () => {
+  setSession(loading({ uid: 'u-o', role: 'owner', specialistId: null }));
+  const o = await mount('/portal/admin');
+  expect(typeof mockAdminProps.last.onOpenScholarships).toBe('function');
+  await o.resolve({ uid: 'u-o', role: 'owner' });
+  expect(typeof mockAdminProps.last.onOpenScholarships).toBe('function');
+  await o.unmount();
+
+  setSession(loading({ uid: 'u-ops', role: 'ops', specialistId: null }));
+  const s = await mount('/portal/admin');
+  expect(mockAdminProps.last.role).toBe('ops');
+  expect(mockAdminProps.last.onOpenScholarships).toBeUndefined();
+  await s.unmount();
 });
 
 test("ops' hint renders ops' Admin, not the owner default", async () => {

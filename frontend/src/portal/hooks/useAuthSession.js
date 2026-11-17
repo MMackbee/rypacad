@@ -107,6 +107,16 @@ function withAuth(user, fbUser) {
   return user.emailVerified === verified ? user : { ...user, emailVerified: verified };
 }
 
+/**
+ * While users/{uid} loads, the tab bar and the athlete's home read the flags
+ * of THIS account's hint (or none), not the plain or the last account's bar;
+ * the verified user's applyUser publishes over them (review 2026-11-17).
+ */
+function seedFromHint(hint) {
+  publishSelfManaged(Boolean(hint) && hint.role === 'athlete' && hint.selfManaged === true);
+  publishAssessorTab(showsAssessmentsTab(hint));
+}
+
 /** A verified user, published to everything that reads it without a session of its own. */
 function applyUser(user) {
   publishSelfManaged(user.selfManaged);
@@ -239,6 +249,7 @@ export default function useAuthSession({ variant } = {}) {
         if (sessionUserStale(fbUser.uid)) revalidate(fbUser);
         return;
       }
+      seedFromHint(roleHintFor(fbUser.uid));
       // Another account straight after this one (no signed-out emission between): none of its state carries over.
       setSession((s) => ({ ...(s.user && s.user.uid !== fbUser.uid ? SIGNED_OUT : s), loading: true, pendingUid: fbUser.uid }));
       resolveProfile(seq, fbUser).then((outcome) => {

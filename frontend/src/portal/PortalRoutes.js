@@ -445,15 +445,16 @@ function StaffBillingRoute() {
 function AdminRoute({ onOpenAthlete, onSignOut }) {
   const live = isLive();
   const session = useAuthSession(live ? undefined : { variant: 'idle' });
-  const { user } = session;
   const navigate = useNavigate();
   const role = (live && viewerOf(session)?.role) || 'owner';
   // Scholarship applications are the owner's alone (2026-10-01). `role`
   // above falls back to 'owner' while this route's own session is still
-  // resolving, so the card's destination is handed over only once the
-  // session HAS resolved to an owner: an ops dashboard never mounts the
-  // card, not even for that first render, and so never makes its read.
-  const owner = live ? user?.role === 'owner' : true;
+  // resolving, so the card's destination is handed over only for a viewer
+  // known to be the owner - the verified user, or while it loads the
+  // owner's own cold-start hint (review 2026-11-17: the card no longer
+  // drops in and shifts the dashboard when the read lands). An ops
+  // dashboard never mounts the card, not even for that first render.
+  const owner = live ? viewerOf(session)?.role === 'owner' : true;
   return (
     <AdminDashboard
       bare

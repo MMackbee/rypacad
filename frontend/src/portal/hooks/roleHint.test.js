@@ -37,6 +37,8 @@ import { __emit } from 'firebase/auth';
 import useAuthSession from './useAuthSession';
 import { ROLE_HINT_KEY, clearRoleHint, readRoleHint, roleHintFor, suppressRoleHint, viewerOf, writeRoleHint } from './roleHint';
 import { resetSession } from './sessionStore';
+import { publishSelfManaged, useSelfManaged } from './selfManaged';
+import { publishAssessorTab, useAssessorTab } from './assessorTab';
 
 const mockDocs = {};
 const mockFail = { value: null };
@@ -67,17 +69,26 @@ afterEach(async () => {
   auth.currentUser = null;
   mockGate = { promise: Promise.resolve() };
   mockFail.value = null;
+  publishSelfManaged(false);
+  publishAssessorTab(false);
   Object.keys(mockDocs).forEach((k) => delete mockDocs[k]);
   window.localStorage.clear();
   jest.restoreAllMocks();
 });
 
 describe('the stored hint', () => {
-  test('round-trips uid, role and specialistId only', () => {
-    writeRoleHint({ uid: 'u1', role: 'coach', specialistId: 'phil', householdId: 'hh', email: 'x@example.com' });
-    expect(JSON.parse(window.localStorage.getItem(ROLE_HINT_KEY))).toEqual({ uid: 'u1', role: 'coach', specialistId: 'phil' });
-    expect(readRoleHint()).toEqual({ uid: 'u1', role: 'coach', specialistId: 'phil' });
-    expect(roleHintFor('u1')).toEqual({ uid: 'u1', role: 'coach', specialistId: 'phil' });
+  // Review 2026-11-17 (F3): plus the two UI flags the first paint needs.
+  test('round-trips uid, role, specialistId and the selfManaged and assessor flags only', () => {
+    writeRoleHint({ uid: 'u1', role: 'coach', specialistId: 'phil', householdId: 'hh', email: 'x@example.com', assessor: true });
+    const stored = { uid: 'u1', role: 'coach', specialistId: 'phil', selfManaged: false, assessor: true };
+    expect(JSON.parse(window.localStorage.getItem(ROLE_HINT_KEY))).toEqual(stored);
+    expect(readRoleHint()).toEqual(stored);
+    expect(roleHintFor('u1')).toEqual(stored);
+    writeRoleHint({ uid: 'u2', role: 'athlete', selfManaged: true });
+    expect(readRoleHint()).toEqual({ uid: 'u2', role: 'athlete', specialistId: null, selfManaged: true, assessor: false });
+    window.localStorage.setItem(ROLE_HINT_KEY, JSON.stringify({ uid: 'u3', role: 'coach', selfManaged: 'yes', assessor: 1 }));
+    expect(readRoleHint()).toEqual({ uid: 'u3', role: 'coach', specialistId: null, selfManaged: false, assessor: false });
+    writeRoleHint({ uid: 'u1', role: 'coach', specialistId: 'phil', assessor: true });
     expect(roleHintFor('someone-else')).toBeNull();
     expect(roleHintFor(null)).toBeNull();
     clearRoleHint();
@@ -121,7 +132,7 @@ describe('useAuthSession and the hint', () => {
     const p = await mountProbe();
     await flush();
     expect(p.now().user.role).toBe('owner');
-    expect(readRoleHint()).toEqual({ uid: 'u-owner', role: 'owner', specialistId: null });
+    expect(readRoleHint()).toEqual({ uid: 'u-owner', role: 'owner', specialistId: null, selfManaged: false, assessor: false });
   });
 
   test('sign-out clears it', async () => {
@@ -167,6 +178,66 @@ describe('useAuthSession and the hint', () => {
     await act(async () => { release(); });
     await flush();
     expect(readRoleHint()).toMatchObject({ uid: 'u-next', role: 'parent' });
+  });
+});
+
+// Review 2026-11-17 (F3, second pass): the tab bar and the athlete's home
+// read the self-managed and Assessments flags from stores the verified
+// resolution publishes. On a hinted cold start they paint from the hint's
+// flags, instead of the plain bar reflowing when users/{uid} lands.
+describe("the hint's UI flags while users/{uid} is in flight", () => {
+  async function mountFlags() {
+    const seen = [];
+    function Probe() { seen.push({ session: useAuthSession(), selfManaged: useSelfManaged(), assessor: useAssessorTab() }); return null; }
+    const root = createRoot(document.createElement('div'));
+    roots.push(root);
+    await act(async () => { root.render(<Probe />); });
+    return { now: () => seen[seen.length - 1] };
+  }
+
+  test("a self-managed athlete's hint gives the payer's tab bar from the first paint, and the read keeps it", async () => {
+    writeRoleHint({ uid: 'u-sm', role: 'athlete', selfManaged: true });
+    mockDocs['users/u-sm'] = { role: 'athlete', householdId: 'hh-sm' };
+    mockDocs['households/hh-sm'] = { createdBy: 'u-sm' };
+    auth.currentUser = account('u-sm');
+    const release = holdReads();
+    const p = await mountFlags();
+    await flush();
+    expect(p.now()).toMatchObject({ session: { loading: true, hint: { role: 'athlete', selfManaged: true } }, selfManaged: true });
+    await act(async () => { release(); });
+    await flush();
+    expect(p.now()).toMatchObject({ session: { loading: false, user: { selfManaged: true } }, selfManaged: true });
+  });
+
+  test("an assessor coach's hint shows the Assessments tab while the read is in flight", async () => {
+    writeRoleHint({ uid: 'u-as', role: 'coach', assessor: true });
+    mockDocs['users/u-as'] = { role: 'coach', assessor: true };
+    auth.currentUser = account('u-as');
+    const release = holdReads();
+    const p = await mountFlags();
+    await flush();
+    expect(p.now()).toMatchObject({ session: { loading: true }, assessor: true, selfManaged: false });
+    await act(async () => { release(); });
+    await flush();
+    expect(p.now()).toMatchObject({ session: { loading: false }, assessor: true });
+  });
+
+  test("a hint the read contradicts gives way to the verified flags; another account's hint seeds nothing", async () => {
+    writeRoleHint({ uid: 'u-was', role: 'athlete', selfManaged: true });
+    mockDocs['users/u-was'] = { role: 'athlete', householdId: 'hh-kid' };
+    mockDocs['households/hh-kid'] = { createdBy: 'u-parent' };
+    auth.currentUser = account('u-was');
+    const p = await mountFlags();
+    await flush();
+    expect(p.now()).toMatchObject({ session: { loading: false, user: { selfManaged: false } }, selfManaged: false });
+
+    await act(async () => { await p.now().session.signOut(); });
+    writeRoleHint({ uid: 'u-other', role: 'coach', assessor: true });
+    const release = holdReads();
+    await act(async () => { __emit(auth, account('u-next')); });
+    await flush();
+    expect(p.now()).toMatchObject({ session: { loading: true, hint: null }, assessor: false, selfManaged: false });
+    await act(async () => { release(); });
   });
 });
 
