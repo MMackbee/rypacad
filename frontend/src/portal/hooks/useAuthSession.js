@@ -19,6 +19,7 @@ import {
   forgetSessionUser, peekSessionUser, publishSessionUser, resetSession, sessionUserStale, setSessionScope, signedOutKnown, subscribeSessionUser,
 } from './sessionStore';
 import { clearRoleHint, roleHintFor, writeRoleHint } from './roleHint';
+import { claimStateOf, createLoginError, resendError, verifyContinueUrl } from './authSessionHelpers';
 
 // Every screen and guard mounts its own useAuthSession, and each one's
 // NOT_FOUND emission used to fire claimInvite: the first call claimed, the
@@ -35,6 +36,8 @@ function claimOnce(uid) {
 
 // The self-managed athlete (Mike S6 2026-09-30): ./selfManaged.js, re-exported.
 export { resolveSelfManaged, useSelfManaged };
+// The invite, verify-link and error helpers: ./authSessionHelpers.js, re-exported.
+export { claimStateOf, createLoginError, resendError, verifyContinueUrl };
 
 /**
  * The portal's auth session — the seam between Firebase auth and every screen.
@@ -145,42 +148,6 @@ function initialSession() {
 /** The signed-in-but-unprovisioned user (no users/{uid} doc yet). */
 function unprovisionedUser(fbUser) {
   return { uid: fbUser.uid, email: fbUser.email != null ? fbUser.email : null, role: null, athleteId: null, householdId: null, assessor: false, emailVerified: Boolean(fbUser.emailVerified), selfManaged: false };
-}
-
-/** claimInvite's `state` (contract 1.4), or 'error' for anything else. */
-export function claimStateOf(result) {
-  const s = result && result.state;
-  return s === 'claimed' || s === 'needs-verification' || s === 'already-claimed' || s === 'none' ? s : 'error';
-}
-
-/**
- * Where the verification email's link returns to (spec 12.1): this build's
- * own origin - portal.rypacademy.com in production (rypacad.ryptest.com
- * before the move), localhost on the emulator. Every one of them must be a
- * Firebase Auth authorized domain, or the send fails and SignUp says so. Firebase's own action handler completes the
- * verification first, then continues here.
- */
-export function verifyContinueUrl() {
-  return `${window.location.origin}/portal/signin`;
-}
-
-export function createLoginError(err) {
-  const code = err && err.code;
-  if (code === 'auth/email-already-in-use') return new LiveDataError(ERR.INVALID, 'This email already has a login - sign in instead', err, 'email-in-use');
-  if (code === 'auth/weak-password') return new LiveDataError(ERR.INVALID, 'Choose a longer password - at least 6 characters.', err, 'weak-password');
-  if (code === 'auth/invalid-email') return new LiveDataError(ERR.INVALID, 'Enter a valid email address.', err, 'invalid-email');
-  if (code === 'auth/too-many-requests') return new LiveDataError(ERR.UNAVAILABLE, 'Too many attempts — wait a few minutes, then try again.', err);
-  if (code === 'auth/operation-not-allowed') return new LiveDataError(ERR.UNAVAILABLE, 'Email sign-in is not enabled yet — use Continue with Google.', err);
-  return new LiveDataError(ERR.UNAVAILABLE, 'Could not create the login. Please try again.', err);
-}
-
-export function resendError(err) {
-  const throttled = err && err.code === 'auth/too-many-requests';
-  return new LiveDataError(
-    throttled ? ERR.UNAVAILABLE : ERR.UNKNOWN,
-    throttled ? 'Too many attempts — wait a few minutes, then try again.' : 'Could not send the verification email. Please try again.',
-    err
-  );
 }
 
 export default function useAuthSession({ variant } = {}) {
