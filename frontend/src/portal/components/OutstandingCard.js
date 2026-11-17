@@ -1,7 +1,8 @@
 import React from 'react';
 import { color, font, radius } from '../tokens';
 import StatusBadge from './StatusBadge';
-import { SectionLabel } from './Primitives';
+import { SkeletonBar } from './Skeleton';
+import { Body, SectionLabel } from './Primitives';
 import useRememberedOpen from '../hooks/rememberedOpen';
 
 /** Where the open/closed choice lives on this device: '1' open, '0' closed. */
@@ -33,6 +34,13 @@ export function outstandingSummary(items) {
     .join(' · ');
 }
 
+const frame = {
+  background: color.surface,
+  border: `1px solid ${color.error}`,
+  borderRadius: radius.cardLarge,
+  padding: 17,
+};
+
 /** SectionLabel's look on a span, since a button holds no block elements. */
 const headingStyle = {
   display: 'block',
@@ -62,20 +70,33 @@ const headingStyle = {
  * `who` as free text, and several rows name a household or a group, not one
  * athlete) - so a row renders as a link only once an id is present, and stays
  * plain text otherwise.
+ *
+ * Speed review F6 (2026-11-17): the dashboard paints card by card, so this
+ * card can be up before its reads land. `loading` shows "Outstanding · …"
+ * and `error` says the list failed - never "Outstanding · 0", which reads as
+ * "nobody needs a call".
  */
-export default function OutstandingCard({ items, onOpenAthlete }) {
+export default function OutstandingCard({ items, loading = false, error = null, onOpenAthlete }) {
   const [open, toggle] = useRememberedOpen(OUTSTANDING_OPEN_KEY, false);
   const label = `Outstanding · ${items.length}`;
 
+  if (loading || error) {
+    return (
+      <div style={frame}>
+        <SectionLabel tone={color.error} style={{ marginBottom: loading ? 10 : 6 }}>
+          {loading ? 'Outstanding · …' : 'Outstanding'}
+        </SectionLabel>
+        {loading ? (
+          <SkeletonBar width="60%" height={11} />
+        ) : (
+          <Body size={12}>Who needs a call didn't load. Check your connection and try again.</Body>
+        )}
+      </div>
+    );
+  }
+
   return (
-    <div
-      style={{
-        background: color.surface,
-        border: `1px solid ${color.error}`,
-        borderRadius: radius.cardLarge,
-        padding: 17,
-      }}
-    >
+    <div style={frame}>
       {items.length === 0 ? (
         <SectionLabel tone={color.error} style={{ marginBottom: 6 }}>
           {label}

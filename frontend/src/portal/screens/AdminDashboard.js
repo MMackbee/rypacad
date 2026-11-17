@@ -33,6 +33,9 @@ function useSignupsFallback() {
 }
 const useSignups = hooks.useSignups || useSignupsFallback;
 
+/** A card whose reads have nothing in flight (and a payload from before `status` existed). */
+const SETTLED = { loading: false, error: null };
+
 // The Outstanding card's fold summary, re-exported for the screen's tests.
 export { outstandingSummary } from '../components/OutstandingCard';
 
@@ -104,7 +107,10 @@ export default function AdminDashboard({
   onOpenDoor,
   demoMembership,
 }) {
-  const { data } = useAdminDashboard();
+  // Speed review F6 (2026-11-17): `data` fills in card by card as each
+  // group of reads lands; `status` says which are still loading or failed.
+  const { data, status } = useAdminDashboard();
+  const outstandingStatus = status?.outstanding ?? SETTLED;
   const enrollmentRows = data?.enrollment ?? [];
   // All -> every real package row, in the catalogue's own order (4+2, 8+3,
   // 12+4, 16+4, Elite per ENROLLMENT_BY_PACKAGE) -> back to All.
@@ -163,7 +169,7 @@ export default function AdminDashboard({
     >
       <div style={{ padding: '0 22px 24px', display: 'flex', flexDirection: 'column', gap: 12 }}>
         {/* Owner 2026-11-13: folds to one remembered line (components/OutstandingCard.js). */}
-        <OutstandingCard items={outstanding} onOpenAthlete={onOpenAthlete} />
+        <OutstandingCard items={outstanding} loading={outstandingStatus.loading} error={outstandingStatus.error} onOpenAthlete={onOpenAthlete} />
         {/* Owner 2026-11-13: add, move or cancel any athlete's booking (spec 01-spec-admin-booking.md 10.2). */}
         <ManageBookingsCard />
         <SignupsCard onOpenSignups={onOpenSignups} />
