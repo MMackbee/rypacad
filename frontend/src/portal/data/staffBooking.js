@@ -102,6 +102,9 @@ export function rosterMembers(rows, householdId, session) {
 }
 
 /** Lower-case words of a name or a query. */
+/** Words every household name carries ("Whitfield family", "New family"): never a match. */
+const FAMILY_NAME_FILLER = new Set(['family', 'household', 'new', 'the']);
+
 function wordsOf(text) {
   return String(text ?? '').trim().toLowerCase().split(/\s+/).filter(Boolean);
 }
@@ -111,25 +114,34 @@ const SEARCH_MAX = 8;
 
 /**
  * The directory's athletes (useHouseholdsDirectory: households, each with
- * its athletes) who match every word typed: each word, in any case, must
- * start some word of the athlete's name, the family's name or the parent's
- * on file ("jor whit" finds Jordan Whitfield; "whit" every Whitfield
- * athlete; "ord" finds nobody). Sorted by name, at most eight, each
+ * its athletes) whose name matches every word typed: each word, in any
+ * case, must start some word of the name ("jor whit" finds Jordan
+ * Whitfield; "ord" finds nobody).
+ *
+ * `{ family: true }` (Admin's Find a family, 2026-11-16) also counts the
+ * family's name and the parent's on file, so "schmidt" or "ben" finds
+ * Britta, whose own record is a first name. Every household is named
+ * "<Surname> family" (or "New family"), so those words of the name are left
+ * out - "f" must not match everybody. Athletes matched by their own name
+ * come first. Without it (the roster's Add athlete) only the athlete's own
+ * name counts. Sorted by name, at most eight, each
  * `{ athleteId, name, householdId, householdName, packageName, test }`;
  * `test` when the athlete or the household is a test one. A blank query
  * finds nothing.
  */
-export function searchAthletes(directory, query) {
+export function searchAthletes(directory, query, { family = false } = {}) {
   const words = wordsOf(query);
   if (!words.length) return [];
   const found = [];
+  const ranks = new Map();
   for (const h of directory || []) {
     for (const a of (h && h.athletes) || []) {
       if (!a) continue;
-      // 2026-11-16: the family's name and the parent on file count too, so
-      // "schmidt" or "ben" finds Britta, whose own record is a first name.
-      const name = [...wordsOf(a.name), ...wordsOf(h.name), ...wordsOf(h.guardianName)];
-      if (!words.every((w) => name.some((n) => n.startsWith(w)))) continue;
+      const own = wordsOf(a.name);
+      const theirs = family ? [...wordsOf(h.name).filter((w) => !FAMILY_NAME_FILLER.has(w)), ...wordsOf(h.guardianName)] : [];
+      const starts = (list, w) => list.some((n) => n.startsWith(w));
+      if (!words.every((w) => starts(own, w) || starts(theirs, w))) continue;
+      ranks.set(a.id, words.every((w) => starts(own, w)) ? 0 : 1);
       found.push({
         athleteId: a.id,
         name: a.name ?? a.id,
@@ -140,7 +152,9 @@ export function searchAthletes(directory, query) {
       });
     }
   }
-  return found.sort((x, y) => String(x.name).localeCompare(String(y.name))).slice(0, SEARCH_MAX);
+  return found
+    .sort((x, y) => ranks.get(x.athleteId) - ranks.get(y.athleteId) || String(x.name).localeCompare(String(y.name)))
+    .slice(0, SEARCH_MAX);
 }
 
 /**

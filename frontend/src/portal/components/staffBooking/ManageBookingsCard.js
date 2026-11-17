@@ -22,7 +22,7 @@ export default function ManageBookingsCard() {
       <Body size={12} style={{ marginBottom: 12 }}>
         {FIND_FAMILY_BODY}
       </Body>
-      <AthleteSearch label={FIND_FAMILY_LABEL} onPick={(a) => navigate(familyPagePath(a.householdId, a.athleteId))} />
+      <AthleteSearch family label={FIND_FAMILY_LABEL} onPick={(a) => navigate(familyPagePath(a.householdId, a.athleteId))} />
     </Card>
   );
 }

@@ -43,7 +43,7 @@ describe('the search finds a family as well as an athlete', () => {
     { id: 'schmidt', name: 'Schmidt', guardianName: 'Ben Schmidt', athletes: [{ id: 'britta', name: 'Britta', packageName: '6 tokens' }] },
     { id: 'parker', name: 'Parker household', test: true, athletes: [{ id: 'sage', name: 'Sage Parker' }] },
   ];
-  const ids = (q) => searchAthletes(directory, q).map((a) => a.athleteId);
+  const ids = (q) => searchAthletes(directory, q, { family: true }).map((a) => a.athleteId);
 
   test('an athlete by name, as before', () => {
     expect(ids('jor whit')).toEqual(['jordan']);
@@ -65,9 +65,39 @@ describe('the search finds a family as well as an athlete', () => {
   });
 
   test('the row still says whose it is and where it leads', () => {
-    expect(searchAthletes(directory, 'britta')[0]).toEqual({
+    expect(searchAthletes(directory, 'britta', { family: true })[0]).toEqual({
       athleteId: 'britta', name: 'Britta', householdId: 'schmidt', householdName: 'Schmidt', packageName: '6 tokens', test: false,
     });
-    expect(searchAthletes(directory, 'parker')[0].test).toBe(true);
+    expect(searchAthletes(directory, 'parker', { family: true })[0].test).toBe(true);
+  });
+
+  // Review 2026-11-17: every live household is named "<Surname> family".
+  test('"family" and "new" in a household\'s name never match: "f" is not everybody', () => {
+    const live = [
+      { id: 'a', name: 'Adams family', guardianName: 'Pat Adams', athletes: [{ id: 'faith', name: 'Faith Adams' }, { id: 'ned', name: 'Ned' }] },
+      { id: 'b', name: 'New family', guardianName: 'Kim Lee', athletes: [{ id: 'zoe', name: 'Zoe' }] },
+    ];
+    const find = (q) => searchAthletes(live, q, { family: true }).map((x) => x.athleteId);
+    expect(find('f')).toEqual(['faith']);
+    expect(find('fam')).toEqual([]);
+    expect(find('family')).toEqual([]);
+    expect(find('n')).toEqual(['ned']);
+    expect(find('new')).toEqual([]);
+    expect(find('adams')).toEqual(['faith', 'ned']);
+  });
+
+  test('an athlete matched by their own name comes before one matched by the family or the parent', () => {
+    const dir = [
+      { id: 'a', name: 'Zed family', guardianName: 'Dana Zed', athletes: [{ id: 'amy', name: 'Amy Zed' }] },
+      { id: 'b', name: 'Young family', guardianName: 'Sam Young', athletes: [{ id: 'dana', name: 'Dana Young' }] },
+    ];
+    expect(searchAthletes(dir, 'dana', { family: true }).map((x) => x.athleteId)).toEqual(['dana', 'amy']);
+  });
+
+  test("the roster's Add athlete (no option) matches the athlete's own name only, as before", () => {
+    expect(searchAthletes(directory, 'whitfield').map((a) => a.athleteId)).toEqual(['jordan']);
+    expect(searchAthletes(directory, 'ben')).toEqual([]);
+    expect(searchAthletes(directory, 'schmidt')).toEqual([]);
+    expect(searchAthletes(directory, 'britta').map((a) => a.athleteId)).toEqual(['britta']);
   });
 });

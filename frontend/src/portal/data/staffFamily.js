@@ -59,6 +59,7 @@ export const COACHING_VIEW = 'Coaching view: attendance and sessions';
 export const OPEN_RESULTS = 'Assessment results';
 export const OPEN_COMBINE = 'Combine';
 export const LATER_BOOKINGS_LABEL = 'Booked further out';
+export const ALL_BOOKINGS_LABEL = 'Bookings';
 export const ATHLETE_LOADING = 'Loading…';
 export const ATHLETE_LOAD_FAILED = "This athlete's details didn't load. Close and open this section to try again.";
 

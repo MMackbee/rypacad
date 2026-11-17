@@ -80,6 +80,18 @@ test('next-period rows on the staff view, with the same actions', async () => {
   await parent.unmount();
 });
 
+// 2026-11-16 (the family page): a Calendly 1:1 has no Cancel here, and the staff row says where it changes.
+test('a Calendly 1:1 on the staff view reads "Cancel in Calendly"; a parent meter says nothing', async () => {
+  const rows = [b('jordan_s1'), b('jordan_c1', { date: '2026-11-11', type: 'mental', source: 'calendly' })];
+  const staff = await renderScreen(<TokenMeter member={member(rows)} defaultOpen onCancelRow={noop} onMoveRow={noop} />);
+  expect(staff.text().split('Cancel in Calendly')).toHaveLength(2);
+  expect(named(staff, 'Cancel')).toHaveLength(1);
+  await staff.unmount();
+  const parent = await renderScreen(<TokenMeter member={member(rows)} defaultOpen />);
+  expect(parent.text()).not.toContain('Cancel in Calendly');
+  await parent.unmount();
+});
+
 test('onMoveRow hands over the row', async () => {
   const tapped = [];
   const r = await renderScreen(<TokenMeter member={member([DEC])} defaultOpen onCancelRow={noop} onMoveRow={(row) => tapped.push(row)} />);

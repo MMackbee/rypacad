@@ -28,26 +28,27 @@ import {
  *
  * @param {(athlete: object) => void} onPick  searchAthletes' row.
  * @param {string} [label]  The field's label (Admin's card: "Find a family or athlete").
+ * @param {boolean} [family]  Also match the family's and the parent's name (Admin's card only).
  */
-export default function AthleteSearch({ onPick, disabledIds = [], disabledLabel = ON_THIS_SESSION, armed = false, disableTest = false, label = FIND_ATHLETE_LABEL }) {
+export default function AthleteSearch({ onPick, disabledIds = [], disabledLabel = ON_THIS_SESSION, armed = false, disableTest = false, label = FIND_ATHLETE_LABEL, family = false }) {
   const [query, setQuery] = useState('');
   const [focused, setFocused] = useState(false);
   return (
     <div onFocus={() => setFocused(true)}>
       <Field label={label} placeholder={FIND_ATHLETE_PLACEHOLDER} value={query} onChange={setQuery} />
       {armed || focused ? (
-        <Results query={query} onPick={onPick} disabledIds={disabledIds} disabledLabel={disabledLabel} disableTest={disableTest} />
+        <Results query={query} onPick={onPick} disabledIds={disabledIds} disabledLabel={disabledLabel} disableTest={disableTest} family={family} />
       ) : null}
     </div>
   );
 }
 
 /** The directory's matches; mounted only once the search is armed, so the directory loads then. */
-function Results({ query, onPick, disabledIds, disabledLabel, disableTest }) {
+function Results({ query, onPick, disabledIds, disabledLabel, disableTest, family }) {
   const { data, error } = useHouseholdsDirectory();
   if (error) return <Body size={12} style={{ marginTop: 10 }}>{ATHLETES_LOAD_FAILED}</Body>;
   if (!data || !String(query).trim()) return null;
-  const found = searchAthletes(data, query);
+  const found = searchAthletes(data, query, { family });
   if (!found.length) return <Body size={12} style={{ marginTop: 10 }}>{noAthleteMatches(query)}</Body>;
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 6, marginTop: 10 }}>

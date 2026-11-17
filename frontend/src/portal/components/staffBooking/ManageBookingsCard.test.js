@@ -92,6 +92,15 @@ test('the Test badge: a test athlete shows it and still opens its screen', async
   await r.unmount();
 });
 
+test('"fam" does not match every Whitfield family athlete', async () => {
+  const r = await mount();
+  await r.focus();
+  await r.fill('Find a family or athlete', 'fam');
+  expect(r.result('Jordan Whitfield')).toBeNull();
+  expect(r.text()).toContain('No athlete matches "fam".');
+  await r.unmount();
+});
+
 test('no match', async () => {
   const r = await mount();
   await r.focus();

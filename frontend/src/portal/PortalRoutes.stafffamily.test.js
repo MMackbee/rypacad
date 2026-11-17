@@ -143,20 +143,24 @@ test('coach, mental, parent and athlete are turned away', async () => {
   }
 });
 
-test('an athlete who is gone, or has no family on file: a line and the way back to Admin', async () => {
+test('an athlete who is gone: a line and the way back to Admin', async () => {
   signIn({ uid: 'u-owner', role: 'owner' });
-  for (const answer of [
-    { data: null, loading: false, error: Object.assign(new Error('gone'), { code: 'not-found' }) },
-    found(null),
-  ]) {
-    mockAthlete.value = answer;
-    const r = await mount(ATHLETE);
-    expect(r.at()).toBe(ATHLETE);
-    expect(r.container.textContent).toContain("That athlete isn't on file.");
-    await act(async () => { [...r.container.querySelectorAll('button')].find((b) => b.textContent.includes('Admin')).click(); });
-    expect(r.at()).toBe('/portal/admin');
-    await r.unmount();
-  }
+  mockAthlete.value = { data: null, loading: false, error: Object.assign(new Error('gone'), { code: 'not-found' }) };
+  const r = await mount(ATHLETE);
+  expect(r.at()).toBe(ATHLETE);
+  expect(r.container.textContent).toContain("That athlete isn't on file.");
+  await act(async () => { [...r.container.querySelectorAll('button')].find((b) => b.textContent.includes('Admin')).click(); });
+  expect(r.at()).toBe('/portal/admin');
+  await r.unmount();
+});
+
+test('an athlete with no family on file goes to the athlete page: there is no family page to show', async () => {
+  signIn({ uid: 'u-owner', role: 'owner' });
+  mockAthlete.value = found(null);
+  const r = await mount(ATHLETE);
+  expect(r.at()).toBe('/portal/athlete/jordan');
+  expect(r.container.textContent).not.toContain("isn't on file");
+  await r.unmount();
 });
 
 test('while the athlete loads nothing is drawn and nothing is guessed', async () => {

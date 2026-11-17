@@ -410,6 +410,9 @@ function StaffBillingRoute() {
   const role = (live && user?.role) || 'owner';
   return (
     <Billing
+      // One instance per family (2026-11-16): the page holds its data over a
+      // reload, and must never hold the last family's into the next.
+      key={householdId}
       bare
       staff
       role={role}

@@ -75,7 +75,13 @@ function PanelBody({ member, role, onMoveRow, onCancelRow }) {
   const athleteId = member.athleteId;
   const navigate = useNavigate();
   const { data, loading, error } = useAthleteDetail({ athleteId });
-  const athlete = data?.athlete ?? null;
+  // The record reloads through "no athlete" after every save here (the
+  // package, the handicap and Issue tokens all bump it): the last one loaded
+  // stays up meanwhile, so an editor never unmounts on its own save and
+  // loses its "saved" note (HandicapCard does the same for itself).
+  const last = useRef(null);
+  if (data?.athlete) last.current = data.athlete;
+  const athlete = data?.athlete ?? last.current;
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 12, marginTop: 12 }}>
       {!athlete && error ? (
@@ -96,7 +102,8 @@ function PanelBody({ member, role, onMoveRow, onCancelRow }) {
           <Body size={12}>{loginStatusLine(athlete)}</Body>
         </Card>
       ) : null}
-      <StaffLaterBookings athleteId={athleteId} onMove={onMoveRow} onCancel={onCancelRow} />
+      {/* With no package the meter above lists nothing: every booking is listed here instead. */}
+      <StaffLaterBookings athleteId={athleteId} all={!member.package} onMove={onMoveRow} onCancel={onCancelRow} />
       <Card>
         <LinkRow label={OPEN_RESULTS} onClick={() => navigate(`/portal/assessments/athlete/${athleteId}`, { state: { name: member.name ?? null } })} />
         <LinkRow label={OPEN_COMBINE} onClick={() => navigate(`/portal/combine/${athleteId}`)} />

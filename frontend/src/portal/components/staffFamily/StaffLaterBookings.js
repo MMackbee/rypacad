@@ -4,7 +4,7 @@ import StatusBadge from '../StatusBadge';
 import StaffRowActions from '../staffBooking/StaffRowActions';
 import { Card, SectionLabel } from '../Primitives';
 import { CANCEL_IN_CALENDLY, rowWhen, staffRowLabel } from '../../data/staffBookingCopy';
-import { LATER_BOOKINGS_LABEL, inCalendly } from '../../data/staffFamily';
+import { ALL_BOOKINGS_LABEL, LATER_BOOKINGS_LABEL, inCalendly } from '../../data/staffFamily';
 import { useStaffAthlete } from '../../hooks/staffBooking';
 
 /**
@@ -15,18 +15,25 @@ import { useStaffAthlete } from '../../hooks/staffBooking';
  * drawn when there are none, while they load, or when they fail to: the
  * meter's rows are the page's main list.
  *
+ * `all`: an athlete with no package has no meter rows at all (TokenMeter
+ * says "No package on file"), so this lists every booking from this period
+ * on - a free session staff added can still be moved or cancelled.
+ *
+ * @param {boolean} [all]  List this period's and next period's rows too.
  * @param {(row: object) => void} [onMove]  The page's Move sheet.
  * @param {(row: object) => void} [onCancel]  The page's Cancel sheet.
  */
-export default function StaffLaterBookings({ athleteId, onMove = null, onCancel = null }) {
+export default function StaffLaterBookings({ athleteId, all = false, onMove = null, onCancel = null }) {
   const { data: model } = useStaffAthlete(athleteId);
-  const rows = model?.groups?.later ?? [];
+  const groups = model?.groups;
+  const rows = !groups ? [] : all ? [...(groups.thisPeriod ?? []), ...(groups.nextPeriod ?? []), ...(groups.later ?? [])] : groups.later ?? [];
   if (!rows.length) return null;
   const test = model.test === true;
+  const label = all ? ALL_BOOKINGS_LABEL : LATER_BOOKINGS_LABEL;
   return (
-    <section data-staff-later={athleteId} aria-label={LATER_BOOKINGS_LABEL}>
+    <section data-staff-later={athleteId} aria-label={label}>
       <Card large>
-        <SectionLabel style={{ marginBottom: 4 }}>{LATER_BOOKINGS_LABEL}</SectionLabel>
+        <SectionLabel style={{ marginBottom: 4 }}>{label}</SectionLabel>
         {rows.map((row, i) => (
           <LaterRow
             key={row.id}

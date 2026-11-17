@@ -19,8 +19,9 @@ import { useStaffAthlete } from './hooks/staffBooking';
  * /portal/admin/athletes/:athleteId (and the old .../bookings link): a click
  * on an ATHLETE by the owner or ops. It finds the athlete's family and lands
  * on the family page, opened on that athlete - there is no separate staff
- * screen per athlete any more. An athlete with no family on file, or one
- * that is gone, gets a line saying so and the way back to Admin.
+ * screen per athlete any more. An athlete with no family on file goes to
+ * the athlete page (there is no family page to show); one that is gone gets
+ * a line saying so and the way back to Admin.
  */
 export function StaffAthleteRedirect() {
   const { athleteId } = useParams();
@@ -29,9 +30,10 @@ export function StaffAthleteRedirect() {
   const { user } = useAuthSession(live ? undefined : { variant: 'idle' });
   const { data, loading, error } = useStaffAthlete(athleteId);
   if (data?.householdId) return <Navigate replace to={familyPagePath(data.householdId, athleteId)} />;
+  if (data) return <Navigate replace to={`/portal/athlete/${encodeURIComponent(athleteId)}`} />;
   if (loading && !error) return null;
   const role = (live && user?.role) || 'owner';
-  const missing = error?.code === 'not-found' || (data && !data.householdId);
+  const missing = error?.code === 'not-found';
   return (
     <PhoneFrame
       bare
