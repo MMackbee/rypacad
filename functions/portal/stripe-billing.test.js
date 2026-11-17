@@ -38,6 +38,22 @@ test('invoice.paid subscription_create: prepaid period from metadata', () => {
       ['active', 1]);
 });
 
+test('invoice.paid subscription_create: the package\'s full count, not ' +
+    'a prorated prepaidTokens from an older checkout (2026-11-17)', () => {
+  // A session opened before the ruling and paid after it still carries
+  // the prorated count in its metadata; the grant is the paid package's.
+  const {tx, writes} = recorder();
+  const out = b.applyAthleteInvoicePaid(tx, {db, hh, athleteRef: aRef,
+    athlete: {billing: {status: 'pending'}}, pkg: T6, product: 'tier',
+    period: {start: '2026-11-17', end: '2026-12-01'},
+    event: {id: 'evt_5', data: {object: {billing_reason: 'subscription_create',
+      parent: {subscription_details: {metadata: {prepaidPeriodKey: '2026-11-01',
+        prepaidTokens: '3'}}}}}}});
+  assert.deepEqual([out.outcome, out.detail.granted], ['issued-prepaid', 6]);
+  const tp = writes.find((w) => w.path === 'tokenPeriods/a1_2026-11-01');
+  assert.deepEqual([tp.data.granted, tp.data.prepaid], [6, true]);
+});
+
 test('invoice.paid subscription_cycle: the invoice line period', () => {
   const {tx, writes} = recorder();
   const out = b.applyAthleteInvoicePaid(tx, {db, hh, athleteRef: aRef,

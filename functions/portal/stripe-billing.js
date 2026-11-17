@@ -64,8 +64,11 @@ function householdActive(tx, hh, eventId, period) {
 /**
  * `invoice.paid` for ONE athlete's subscription (spec 4.3). The checkout
  * invoice (`subscription_create`) lands in the PREPAID period named in the
- * subscription metadata with `granted = prepaidTokens`; every later invoice
- * uses the invoice line's period.
+ * subscription metadata; every later invoice uses the invoice line's period.
+ * Either way `granted` is the paid package's full monthly count (owner
+ * ruling 2026-11-17: a mid-month joiner's price is prorated, the tokens are
+ * not), so the metadata's `prepaidTokens` - prorated on a checkout opened
+ * before that ruling - is never read.
  * @param {!Object} tx The transaction.
  * @param {{db: !Object, event: !Object, hh: !Object, athleteRef: !Object,
  *     athlete: !Object, pkg: ?Object, product: string,
@@ -100,8 +103,7 @@ function applyAthleteInvoicePaid(tx, args) {
   const startKey = prepaid ? meta.prepaidPeriodKey : period.start;
   if (!startKey) return {outcome: 'no-period', firstActive, detail: {}};
   const derived = lib.periodFor(startKey, 1);
-  const parsed = Number.parseInt(meta.prepaidTokens, 10);
-  const granted = prepaid && Number.isInteger(parsed) ? parsed : pkg.tokens;
+  const granted = pkg.tokens;
   const doc = {
     athleteId: athleteRef.id || athleteRef.path.split('/').pop(),
     householdId: hh.id,

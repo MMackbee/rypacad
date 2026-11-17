@@ -54,6 +54,8 @@ this spec still says `single` works like a tier, 0.14 and 16.2 win.
     remaining** and gets that month's tokens **prorated the same way
     (rounded up, never 0)**, then bills in full on the next 1st.
     `PRORATE_JOINERS = true` is the ruling, not a default (4.2).
+    **Amended 2026-11-17 (owner): "Pro rate the rate, not the tokens."** Only
+    the price is prorated; the joiner gets the package's FULL monthly tokens.
 14. **The single session token is a one-time $65 purchase** (ruled
     2026-09-29, details 2026-09-30). Its Stripe price is one-time. Each
     paid Checkout Session is exactly ONE token, `graceTokens/single_{cs}`,
@@ -263,9 +265,9 @@ subscription anchors on the 1st forever after. Which month is prepaid:
   Dec 1. An Elite family may book at once (Phil/Yannick in October, golf
   from Nov 3); a token family's tokens are November's.
 - on or after Nov 1: **the current month**, amount = price x days
-  remaining / days in month, tokens = ceil(tokens x the same fraction),
-  minimum 1 (`PRORATE_JOINERS = true`, ruling 0.13), `trial_end` = next
-  1st. The facility add-on uses the same shape at $300.
+  remaining / days in month (`PRORATE_JOINERS = true`, ruling 0.13), tokens
+  = the package's full count (0.13 as amended 2026-11-17), `trial_end` =
+  next 1st. The facility add-on uses the same shape at $300.
 
 **The 48-hour rule (D11).** Stripe refuses a Checkout `trial_end` less than
 48 hours away. When the next 1st is under 49 hours off at checkout time (the
@@ -437,8 +439,9 @@ money and deliver nothing.
   `billing_reason == 'subscription_create'` (the checkout invoice) the
   period is the PREPAID month named in `subscription_data.metadata
   .prepaidPeriodKey` (`2026-11-01` before Nov 1; the current month's first
-  after), and `granted` = `metadata.prepaidTokens` (the full package count,
-  or the prorated count under 0.13); for every later invoice
+  after), and `granted` = the paid package's full count (since 2026-11-17;
+  `metadata.prepaidTokens` is still written but no longer read); for every
+  later invoice
   (`subscription_cycle`) the period is `lines[].period.start` as today. The
   `tokenPeriods` doc records `source: 'stripe'` and `prepaid: true` on the
   first one.
