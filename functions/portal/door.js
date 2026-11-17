@@ -445,7 +445,8 @@ async function unlockDoorHandler(data, context, deps) {
     reason: alta.reason}, answer));
   await giveBack(store, refs.limits, nowMs);
   logPress('error', base, Object.assign({reason: alta.reason}, answer,
-      alta.failure ? {failure: alta.failure} : {}));
+      alta.failure ? {failure: alta.failure} : {},
+      alta.said ? {alta: JSON.stringify(alta.said)} : {}));
   throw refusal(alta.reason);
 }
 

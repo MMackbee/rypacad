@@ -6,7 +6,8 @@
  * whoever holds the link can open the door until its end date, so the
  * link, and the token inside it, never leave this module - not in a log
  * line, an error, its cause, a result or a stored document. Callers get a
- * reason code and a status number, nothing else.
+ * reason code, a status number and, for a refused request, what Alta said
+ * with the link and anything token-like cut out (saidBy), nothing else.
  *
  * The emulator NEVER makes the request (review 2026-11-17, server-1 and
  * spec-1): an emulator whose functions/.secret.local lacks ALTA_UNLOCK_URL
@@ -81,6 +82,40 @@ function discard(res) {
 }
 
 /**
+ * What Alta said about a refused request, safe to log (2026-11-17: the
+ * first live presses got a bare 400; Alta words a bad link as "Token error
+ * (...)"). The link, its token and any run of 20 or more link-like
+ * characters are cut out, then only plain characters stay, at most 120.
+ * Reading the body is under the same 6 s abort as the request.
+ * @param {*} res The response.
+ * @param {string} href The link that was POSTed to.
+ * @return {!Promise<?string>} The words, or null when there are none.
+ */
+async function saidBy(res, href) {
+  let text;
+  try {
+    if (!res || typeof res.text !== 'function') return null;
+    text = String(await res.text()).slice(0, 4000);
+  } catch (err) {
+    return null;
+  }
+  let words = text;
+  try {
+    const body = JSON.parse(text);
+    if (body && typeof body.message === 'string') words = body.message;
+    else if (body && typeof body.error === 'string') words = body.error;
+  } catch (err) {
+    // Not JSON: the text itself.
+  }
+  const token = href.split('/').slice(-2)[0];
+  const clean = words.split(href).join(' ').split(token).join(' ')
+      .replace(/[A-Za-z0-9_\-.%+/=~]{20,}/g, '[cut]')
+      .replace(/[^A-Za-z0-9 ().,:;'_\-[\]]/g, ' ')
+      .replace(/\s+/g, ' ').trim().slice(0, 120);
+  return clean || null;
+}
+
+/**
  * Opens the door: one POST, no body, no retry, aborted at 6 s.
  * @param {{fetch: !Function, env: !Object}} deps The fetch and the
  *     environment holding ALTA_UNLOCK_URL.
@@ -88,9 +123,11 @@ function discard(res) {
  *     latencyMs: ?number, fake: boolean, failure: ?string}>} `reason` is
  *     null when the door opened, else 'misconfigured' | 'alta-error' |
  *     'alta-timeout'; `failure` is a log-safe label for a thrown request.
+ *     A refused request also has `said`, what Alta said (saidBy) or null.
  */
 async function openDoor(deps) {
-  const none = {status: null, latencyMs: null, fake: false, failure: null};
+  const none = {status: null, latencyMs: null, fake: false, failure: null,
+    said: null};
   if (inEmulator(deps.env)) {
     if (deps.env.DOOR_FAKE_ALTA === '1') {
       return Object.assign({}, none, {ok: true, reason: null, status: 204,
@@ -110,11 +147,15 @@ async function openDoor(deps) {
     const res = await deps.fetch(href, {method: 'POST',
       signal: controller.signal});
     const latencyMs = Date.now() - started;
-    discard(res);
     const status = res && Number.isInteger(res.status) ? res.status : null;
     const ok = status !== null && status >= 200 && status < 300;
-    return Object.assign({}, none, {ok, reason: ok ? null : 'alta-error',
-      status, latencyMs});
+    if (ok) {
+      discard(res);
+      return Object.assign({}, none, {ok, reason: null, status, latencyMs});
+    }
+    const said = await saidBy(res, href);
+    return Object.assign({}, none, {ok, reason: 'alta-error', status,
+      latencyMs, said});
   } catch (err) {
     return Object.assign({}, none, {ok: false,
       reason: controller.signal.aborted ? 'alta-timeout' : 'alta-error',

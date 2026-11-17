@@ -74,8 +74,14 @@ function fakeAlta(opts) {
       });
     }
     const status = o.status || 204;
-    return Promise.resolve({ok: status >= 200 && status < 300, status,
-      statusText: `answer for ${url}`, body: null});
+    const res = {ok: status >= 200 && status < 300, status,
+      statusText: `answer for ${url}`, body: null};
+    // `text`: what Alta's answer body says (an Error makes reading it fail).
+    if (o.text !== undefined) {
+      res.text = () => (o.text instanceof Error ?
+        Promise.reject(o.text) : Promise.resolve(o.text));
+    }
+    return Promise.resolve(res);
   };
   return {fetch, calls};
 }
