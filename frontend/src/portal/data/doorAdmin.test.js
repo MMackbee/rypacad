@@ -5,9 +5,14 @@
  * academy location is set), and the activity and pause rows in plain words
  * with America/Chicago times.
  */
+import fs from 'fs';
+import path from 'path';
 import {
   LOCATION_FIX_MAX_M,
   MODES,
+  OPEN_SECONDS_MAX,
+  OPEN_SECONDS_MIN,
+  OPEN_TIME_OPTIONS,
   RADIUS_OPTIONS,
   chicagoTime,
   configPatch,
@@ -16,6 +21,8 @@ import {
   eventRow,
   locationSet,
   normalizeConfig,
+  openTimeChoices,
+  openTimeText,
   pausedRow,
   phoneCheck,
 } from './doorAdmin';
@@ -36,6 +43,53 @@ describe('normalizeConfig', () => {
     expect(normalizeConfig({ mode: 'open', lat: 44.9, lng: 'x', radiusM: 5000, openSeconds: 2.5 }))
       .toMatchObject({ mode: 'off', lat: null, lng: null, radiusM: 200, openSeconds: 5 });
     expect(normalizeConfig({ lat: 91, lng: 10 })).toMatchObject({ lat: null, lng: null });
+  });
+
+  test('an open time of up to 10 min reads as stored; past it, or not whole seconds, is 5 s', () => {
+    expect(normalizeConfig({ openSeconds: 600 }).openSeconds).toBe(600);
+    expect(normalizeConfig({ openSeconds: 180 }).openSeconds).toBe(180);
+    expect(normalizeConfig({ openSeconds: 601 }).openSeconds).toBe(5);
+    expect(normalizeConfig({ openSeconds: 0 }).openSeconds).toBe(5);
+    expect(normalizeConfig({ openSeconds: '60' }).openSeconds).toBe(5);
+  });
+});
+
+test('the open time bounds equal the server\'s (door-decide.js) and the rules\'', () => {
+  expect([OPEN_SECONDS_MIN, OPEN_SECONDS_MAX]).toEqual([1, 600]);
+  const root = path.resolve(__dirname, '../../../..');
+  const server = fs.readFileSync(path.join(root, 'functions/portal/door-decide.js'), 'utf8');
+  expect(server.match(/OPEN_SECONDS_MIN = (\d+);/)[1]).toBe(String(OPEN_SECONDS_MIN));
+  expect(server.match(/OPEN_SECONDS_MAX = (\d+);/)[1]).toBe(String(OPEN_SECONDS_MAX));
+  const rules = fs.readFileSync(path.join(root, 'firestore.rules'), 'utf8');
+  expect(rules.match(/d\.openSeconds >= (\d+) && d\.openSeconds <= (\d+)/).slice(1)).toEqual([String(OPEN_SECONDS_MIN), String(OPEN_SECONDS_MAX)]);
+});
+
+test('openTimeText: seconds under a minute, then minutes and seconds', () => {
+  expect(openTimeText(5)).toBe('5 s');
+  expect(openTimeText(45)).toBe('45 s');
+  expect(openTimeText(60)).toBe('1 min');
+  expect(openTimeText(90)).toBe('1 min 30 s');
+  expect(openTimeText(180)).toBe('3 min');
+  expect(openTimeText(600)).toBe('10 min');
+  expect(openTimeText(61)).toBe('1 min 1 s');
+});
+
+describe('the open time choices', () => {
+  const SECS = [3, 5, 10, 15, 20, 30, 45, 60, 90, 120, 180, 240, 300, 360, 420, 480, 540, 600];
+
+  test('3 s to 10 min, in order', () => {
+    expect(OPEN_TIME_OPTIONS).toEqual(SECS);
+    expect(OPEN_TIME_OPTIONS.map(openTimeText)).toEqual(['3 s', '5 s', '10 s', '15 s', '20 s', '30 s', '45 s', '1 min', '1 min 30 s', '2 min',
+      '3 min', '4 min', '5 min', '6 min', '7 min', '8 min', '9 min', '10 min']);
+  });
+
+  test('a saved time not on the list joins it in its sorted place; one on it adds nothing', () => {
+    expect(openTimeChoices(180)).toEqual(SECS);
+    expect(openTimeChoices(6)).toEqual([3, 5, 6, ...SECS.slice(2)]);
+    expect(openTimeChoices(11)).toEqual([3, 5, 10, 11, ...SECS.slice(3)]);
+    expect(openTimeChoices(1)).toEqual([1, ...SECS]);
+    expect(openTimeChoices(599)).toEqual([...SECS.slice(0, -1), 599, 600]);
+    expect(openTimeChoices(null)).toEqual(SECS);
   });
 });
 
@@ -64,9 +118,11 @@ describe('configWrite', () => {
     expect(() => configWrite(normalizeConfig({ mode: 'staff' }), { mode: 'all' })).toThrow('Set the academy location first.');
   });
 
-  test('open time stays a whole number of seconds from 1 to 30; a bad mode or radius is refused', () => {
+  test('open time stays a whole number of seconds from 1 to 600; a bad mode or radius is refused', () => {
     expect(configWrite(base, { openSeconds: 0 }).openSeconds).toBe(1);
-    expect(configWrite(base, { openSeconds: 31 }).openSeconds).toBe(30);
+    expect(configWrite(base, { openSeconds: 600 }).openSeconds).toBe(600);
+    expect(configWrite(base, { openSeconds: 601 }).openSeconds).toBe(600);
+    expect(configWrite(base, { openSeconds: 'x' }).openSeconds).toBe(5);
     expect(() => configWrite(base, { mode: 'open' })).toThrow();
     expect(() => configWrite(base, { radiusM: 5000 })).toThrow();
     expect(() => configWrite(base, { lat: 120, lng: 0 })).toThrow();
@@ -79,7 +135,8 @@ describe('configPatch (review 2026-11-17 rules-1, app-2)', () => {
   test('only the keys that change: a stale screen never writes back what it did not touch', () => {
     expect(configPatch(base, { mode: 'all' })).toEqual({ mode: 'all' });
     expect(configPatch(base, { radiusM: 300 })).toEqual({ radiusM: 300 });
-    expect(configPatch(base, { openSeconds: 31 })).toEqual({ openSeconds: 30 });
+    expect(configPatch(base, { openSeconds: 180 })).toEqual({ openSeconds: 180 });
+    expect(configPatch(base, { openSeconds: 601 })).toEqual({ openSeconds: 600 });
     expect(configPatch(normalizeConfig(null), { mode: 'staff' })).toEqual({ mode: 'staff' });
   });
 

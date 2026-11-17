@@ -331,9 +331,16 @@ describe('useDoorStatus', () => {
   });
 
   test('an open time out of range falls back to 5 s; a missing reason is null', async () => {
-    mockAnswers.callUnlockDoor = { canUnlock: false, staff: false, openSeconds: 99 };
+    mockAnswers.callUnlockDoor = { canUnlock: false, staff: false, openSeconds: 601 };
     const h = await mountHook(() => useDoorStatus());
     expect(h.out.current.status).toEqual({ canUnlock: false, reason: null, staff: false, openSeconds: 5 });
+    await h.unmount();
+  });
+
+  test('an open time of up to 10 min is kept', async () => {
+    mockAnswers.callUnlockDoor = { canUnlock: true, reason: null, staff: false, openSeconds: 600 };
+    const h = await mountHook(() => useDoorStatus());
+    expect(h.out.current.status.openSeconds).toBe(600);
     await h.unmount();
   });
 

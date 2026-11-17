@@ -229,14 +229,14 @@ describe('Academy location', () => {
     await r.unmount();
   });
 
-  test('the door open time, a second at a time, 1 to 30', async () => {
+  test('the door open time, a second at a time, 1 to 600', async () => {
     const r = await mount();
     expect(r.text()).toContain('5 s');
     await r.click('One second more');
     await r.click('One second less');
     expect(saves).toEqual([{ openSeconds: 6 }, { openSeconds: 4 }]);
     await r.unmount();
-    mockAdmin = admin({ config: normalizeConfig({ ...LOCATED, openSeconds: 30 }) });
+    mockAdmin = admin({ config: normalizeConfig({ ...LOCATED, openSeconds: 600 }) });
     const top = await mount();
     expect(top.button('One second more').disabled).toBe(true);
     await top.unmount();

@@ -16,6 +16,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { ERR, LiveDataError, isLive } from './live';
 import { callSignDoorRules, callUnlockDoor } from './callables';
 import { DOOR_TERMS_VERSION, doorCopy } from '../data/doorRules';
+import { OPEN_SECONDS_MAX, OPEN_SECONDS_MIN } from '../data/doorAdmin';
 
 /** getCurrentPosition's options (spec 7). */
 export const LOCATION_OPTIONS = { enableHighAccuracy: true, timeout: 10000, maximumAge: 30000 };
@@ -161,7 +162,7 @@ export async function signDoorRules(name) {
   return callSignDoorRules({ name: trimmed, termsVersion: DOOR_TERMS_VERSION });
 }
 
-const validSeconds = (n) => Number.isInteger(n) && n >= 1 && n <= 30;
+const validSeconds = (n) => Number.isInteger(n) && n >= OPEN_SECONDS_MIN && n <= OPEN_SECONDS_MAX;
 
 function cleanStatus(data) {
   return {

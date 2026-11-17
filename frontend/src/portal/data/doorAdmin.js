@@ -15,8 +15,15 @@ export const MODES = [
 ];
 /** The reach choices, metres. */
 export const RADIUS_OPTIONS = [100, 200, 300, 500];
+/**
+ * The open time's whole-second range: Alta's Entry open duration, 1 s to
+ * 10 min. Equal to functions/portal/door-decide.js and firestore.rules (a
+ * jest test reads both and compares).
+ */
 export const OPEN_SECONDS_MIN = 1;
-export const OPEN_SECONDS_MAX = 30;
+export const OPEN_SECONDS_MAX = 600;
+/** The open time choices on the staff screen, seconds: 3 s to 10 min. */
+export const OPEN_TIME_OPTIONS = [3, 5, 10, 15, 20, 30, 45, 60, 90, 120, 180, 240, 300, 360, 420, 480, 540, 600];
 
 export const NEEDS_LOCATION = 'Set the academy location first.';
 
@@ -33,6 +40,21 @@ const MODE_IDS = MODES.map(([id]) => id);
 const isInt = (n, lo, hi) => Number.isInteger(n) && n >= lo && n <= hi;
 const isLat = (n) => typeof n === 'number' && Number.isFinite(n) && n >= -90 && n <= 90;
 const isLng = (n) => typeof n === 'number' && Number.isFinite(n) && n >= -180 && n <= 180;
+
+/** An open time in words: '45 s' under a minute, then '1 min', '1 min 30 s', '10 min'. */
+export function openTimeText(seconds) {
+  const s = Math.round(Number(seconds));
+  if (!Number.isFinite(s) || s < 0) return '';
+  if (s < 60) return `${s} s`;
+  const rest = s % 60;
+  return rest ? `${Math.floor(s / 60)} min ${rest} s` : `${s / 60} min`;
+}
+
+/** OPEN_TIME_OPTIONS, with a saved time that is not on it in its sorted place, so the screen shows the truth. */
+export function openTimeChoices(saved) {
+  if (!isInt(saved, OPEN_SECONDS_MIN, OPEN_SECONDS_MAX) || OPEN_TIME_OPTIONS.includes(saved)) return OPEN_TIME_OPTIONS;
+  return [...OPEN_TIME_OPTIONS, saved].sort((a, b) => a - b);
+}
 
 /** A Firestore Timestamp, a Date or epoch ms as ms; null otherwise. */
 export function toMs(v) {
@@ -71,7 +93,7 @@ export function locationSet(config) {
  * The config fields to write after `patch` (the hook adds updatedAt and
  * updatedByUid): exactly what the rules allow. Throws on a change the rules
  * would refuse, and on Everyone before the academy location is set. An open
- * time is clamped to 1..30 whole seconds.
+ * time is clamped to OPEN_SECONDS_MIN..OPEN_SECONDS_MAX whole seconds.
  */
 export function configWrite(config, patch) {
   const next = { ...normalizeConfig(config), ...patch };
