@@ -3,6 +3,8 @@ import { Navigate, Route, Routes, useLocation, useNavigate, useParams, useSearch
 
 import useAuthSession from './hooks/useAuthSession';
 import { isLive } from './hooks/live';
+import { readRoleHint, viewerOf } from './hooks/roleHint';
+import LaunchSplash, { LaunchRedirect } from './components/LaunchSplash';
 import { contractEnabled } from './data/contractFlag';
 import SignIn, { LANDING_BY_ROLE } from './screens/SignIn';
 import SignUp from './screens/SignUp';
@@ -33,8 +35,9 @@ import ResearchConfirmGate from './components/ResearchConfirmGate';
  * bundle. The first-visit path stays eager - SignIn, SignUp, AuthAction (the
  * email-link page), Registration, NotProvisioned and the two home
  * dashboards - and everything behind it
- * loads as its own chunk when first routed to. RequireRole renders nothing
- * while the session resolves, so a null Suspense fallback shows no flash.
+ * loads as its own chunk when first routed to. While the first screen's
+ * chunk loads the fallback is the launch splash, as RequireRole shows while
+ * the session resolves (review 2026-11-17: a null fallback was a black frame).
  * Named exports go through a `.then` that re-exports them as `default`.
  */
 const named = (load, name) => lazy(() => load().then((m) => ({ default: m[name] })));
@@ -138,6 +141,12 @@ const NEXT_ROUTE_CHUNKS = {
   'my-sessions': [loadRoster, loadAssessmentList, loadCombine],
   admin: [loadAdminSignups, loadBilling, loadAthleteDetail, loadStaff],
 };
+// The launch paths (the index, sign-in) name no screen: warm the landing of
+// the stored role hint instead (speed work 2026-11-17; roleHint.js). A
+// parent's and an athlete's homes ship in main.
+const LANDING_CHUNKS = { owner: [loadAdmin], ops: [loadAdmin], coach: [loadCoachDashboard], mental: [loadSpecialistDay] };
+const landingChunks = (hint) =>
+  !hint ? [] : hint.specialistId ? [loadSpecialistDay] : routeChunks(LANDING_CHUNKS, hint.role);
 const NEXT_WARM_DELAY_MS = 2500;
 // Own keys only: a junk URL like /portal/constructor must not reach Object.prototype.
 // The Contract chunk stays cold while the contract is hidden (data/contractFlag.js).
@@ -189,18 +198,27 @@ const warm = (loads) => loads.forEach((load) => load().catch(() => {}));
  */
 export function RequireRole({ roles, selfManaged = false, children }) {
   const live = isLive();
-  const { user, provisioned, loading } = useAuthSession(live ? undefined : { variant: 'idle' });
+  const { user, provisioned, loading, hint } = useAuthSession(live ? undefined : { variant: 'idle' });
 
   if (!live) return children;
 
-  if (loading) return null;
-  if (!user) return <Navigate to="/portal/signin" replace />;
-  if (!provisioned) return <Navigate to="/portal/not-provisioned" replace />;
+  // Keyed by the account (review 2026-11-17): auth can report another account
+  // straight after this one, with no signed-out state between, and a screen
+  // kept mounted across that would keep the last account's data in its hooks.
+  const screen = (uid) => <React.Fragment key={uid}>{children}</React.Fragment>;
+  // Cold start (hooks/roleHint.js): this account's last verified role may
+  // render the landing while users/{uid} is in flight, so its chunk and reads
+  // start at once. The verified user below decides; the hint never redirects.
+  if (loading) return hint && roles.includes(hint.role) ? screen(hint.uid) : <LaunchSplash />;
+  // Each redirect keeps the splash up until the next screen paints (review
+  // 2026-11-17): <Navigate> alone left an empty root between the two.
+  if (!user) return <LaunchRedirect to="/portal/signin" />;
+  if (!provisioned) return <LaunchRedirect to="/portal/not-provisioned" />;
   const payer = selfManaged && user.role === 'athlete' && user.selfManaged === true;
   if (!roles.includes(user.role) && !payer) {
-    return <Navigate to={landingFor(user)} replace />;
+    return <LaunchRedirect to={landingFor(user)} />;
   }
-  return children;
+  return screen(user.uid);
 }
 
 /**
@@ -318,11 +336,14 @@ function AthleteDetailRoute() {
  */
 function PortalIndex() {
   const live = isLive();
-  const { user, provisioned, loading } = useAuthSession(live ? undefined : { variant: 'idle' });
+  const { user, provisioned, loading, hint } = useAuthSession(live ? undefined : { variant: 'idle' });
   if (!live) return <StatesHarness />;
-  if (loading) return null;
-  if (!user || !provisioned) return <Navigate to="/portal/signin" replace />;
-  return <Navigate to={landingFor(user)} replace />;
+  // The home-screen launch lands here ('/' -> /portal, App.js): the launch
+  // splash while auth restores, or straight to the landing this account's
+  // cold-start hint names - RequireRole re-routes if users/{uid} disagrees.
+  if (loading) return hint ? <LaunchRedirect to={landingFor(hint)} /> : <LaunchSplash />;
+  if (!user || !provisioned) return <LaunchRedirect to="/portal/signin" />;
+  return <LaunchRedirect to={landingFor(user)} />;
 }
 
 /**
@@ -425,15 +446,17 @@ function StaffBillingRoute() {
 
 function AdminRoute({ onOpenAthlete, onSignOut }) {
   const live = isLive();
-  const { user } = useAuthSession(live ? undefined : { variant: 'idle' });
+  const session = useAuthSession(live ? undefined : { variant: 'idle' });
   const navigate = useNavigate();
-  const role = (live && user?.role) || 'owner';
+  const role = (live && viewerOf(session)?.role) || 'owner';
   // Scholarship applications are the owner's alone (2026-10-01). `role`
   // above falls back to 'owner' while this route's own session is still
-  // resolving, so the card's destination is handed over only once the
-  // session HAS resolved to an owner: an ops dashboard never mounts the
-  // card, not even for that first render, and so never makes its read.
-  const owner = live ? user?.role === 'owner' : true;
+  // resolving, so the card's destination is handed over only for a viewer
+  // known to be the owner - the verified user, or while it loads the
+  // owner's own cold-start hint (review 2026-11-17: the card no longer
+  // drops in and shifts the dashboard when the read lands). An ops
+  // dashboard never mounts the card, not even for that first render.
+  const owner = live ? viewerOf(session)?.role === 'owner' : true;
   return (
     <AdminDashboard
       bare
@@ -488,16 +511,21 @@ function ScholarshipsRoute() {
 
 function SpecialistDayRoute({ onSignOut }) {
   const live = isLive();
-  const { user, loading } = useAuthSession(live ? undefined : { variant: 'idle' });
+  const session = useAuthSession(live ? undefined : { variant: 'idle' });
+  const { loading } = session;
+  // The verified user, or while it loads the cold-start hint (roleHint.js).
+  const user = viewerOf(session);
   const navigate = useNavigate();
   const specialistId = (live && user?.specialistId) || (!live ? 'mental' : null);
   const canSwitch = live && !user?.specialistId && ['ops', 'owner'].includes(user?.role ?? '');
   // This route's OWN auth subscription starts loading even after
   // RequireRole's finished — deciding (and redirecting) off a still-null
   // user looped Navigate against RequireRole's own redirect (integration
-  // browser pass: "maximum update depth exceeded"). Wait like RequireRole.
-  if (live && loading) return null;
-  if (live && !specialistId && !canSwitch) return <Navigate to="/portal/tour" replace />;
+  // browser pass: "maximum update depth exceeded"). Wait like RequireRole:
+  // a hint renders a day it can show, and never redirects.
+  // The splash, not an empty root, while it waits and on the way out (review 2026-11-17).
+  if (live && loading && !specialistId && !canSwitch) return <LaunchSplash />;
+  if (live && !specialistId && !canSwitch) return <LaunchRedirect to="/portal/tour" />;
   return (
     <SpecialistDay
       bare
@@ -631,10 +659,12 @@ function TourRoute({ onSignOut }) {
 function CoachDashboardRoute({ onSignOut, onOpenAthlete }) {
   const navigate = useNavigate();
   const live = isLive();
-  const { user, loading } = useAuthSession(live ? undefined : { variant: 'idle' });
-  // Every hook instance starts {user: null, loading: true}: wait, or the first
-  // paint is the plain coach's bar (SpecialistDayRoute does the same).
-  if (live && loading) return null;
+  const session = useAuthSession(live ? undefined : { variant: 'idle' });
+  // A fresh live session starts {user: null, loading: true}: wait, or the
+  // first paint is the plain coach's bar (SpecialistDayRoute does the same) -
+  // unless the cold-start hint (roleHint.js) already names this viewer.
+  const user = viewerOf(session);
+  if (live && session.loading && !user) return null;
   // The screen carries the caller's own tab bar (owner, ops or coach - and,
   // 2026-11-03, Phil's and Yannick's: the specialists see the golf day too;
   // Phil's specialistId picks his tab set and drops the Students tab).
@@ -787,7 +817,9 @@ export default function PortalRoutes() {
 
   // Mount only: the chunk for the screen this page load opened on.
   useEffect(() => {
-    if (isLive()) warm(routeChunks(CURRENT_ROUTE_CHUNKS, segment));
+    if (!isLive()) return;
+    const current = routeChunks(CURRENT_ROUTE_CHUNKS, segment);
+    warm(current.length ? current : landingChunks(readRoleHint()));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -804,7 +836,7 @@ export default function PortalRoutes() {
         shows itself only to a signed-in, provisioned account and never on
         sign-in, sign-up or not-provisioned (hooks/feedback.js). */}
     <FeedbackButton />
-    <Suspense fallback={null}>
+    <Suspense fallback={<LaunchSplash />}>
     <Routes>
       <Route index element={<PortalIndex />} />
 

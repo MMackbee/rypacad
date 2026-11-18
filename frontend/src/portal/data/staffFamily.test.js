@@ -13,6 +13,12 @@ describe('paths', () => {
 
   test('a click on an athlete goes through the route that finds the family', () => {
     expect(staffAthletePath('jordan')).toBe('/portal/admin/athletes/jordan');
+    expect(staffAthletePath({ athleteId: 'jordan', householdId: null })).toBe('/portal/admin/athletes/jordan');
+  });
+
+  test('a row that already knows the family goes straight to the family page (speed review, 2026-11-17)', () => {
+    expect(staffAthletePath({ athleteId: 'jordan', householdId: 'whitfield' })).toBe('/portal/admin/households/whitfield?athlete=jordan');
+    expect(staffAthletePath({ athleteId: 'a/b', householdId: 'h 1' })).toBe('/portal/admin/households/h%201?athlete=a%2Fb');
   });
 
   test('the athlete a URL opens on', () => {

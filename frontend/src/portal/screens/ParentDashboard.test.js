@@ -373,3 +373,25 @@ test('mental consent: nothing while the consent rows are not loaded', async () =
   expect(r.text()).not.toContain("Yannick's consent");
   await r.unmount();
 });
+
+// Review 2026-11-17 (F1), as Billing.refresh.test: the hub on screen may be minutes old while it re-reads.
+test('Pay now, the facility add-on Pay and Change package wait while the hub re-reads, and come back when it lands', async () => {
+  mockHub.data.status.pendingAthletes = [{ athleteId: 'a2', name: 'Reese', status: 'pending', packageId: 'elite', perPurchase: false }];
+  mockHub.data.facilityPending = [{ athleteId: 'a1', name: 'Jordan', state: 'pay' }];
+  const held = (refreshing) => ({ ...mockHub, isRefreshing: refreshing });
+  const acts = (r) => [r.button('Pay now|a2'), r.button('Pay $300 for family facility access|a1'), r.button('Change package for Reese')];
+  mockHub = held(true);
+  const r = await renderScreen(<ParentDashboard bare />, { path: '/portal/family' });
+  expect(r.text()).toContain('Payment pending - finish checkout to start booking');
+  expect(acts(r).every((b) => b && b.matches(':disabled'))).toBe(true);
+  await r.act(async () => { r.button('Change package for Reese').click(); });
+  expect(r.text()).not.toContain("Change Reese's package");
+  // Leaving the page never waits: the tab bar stays usable.
+  expect([...r.container.querySelectorAll('nav button')].some((b) => b.matches(':disabled'))).toBe(false);
+  mockHub = held(false);
+  await r.rerender(<ParentDashboard bare />);
+  expect(acts(r).some((b) => b.matches(':disabled'))).toBe(false);
+  await r.click('Change package for Reese');
+  expect(r.text()).toContain("Change Reese's package");
+  await r.unmount();
+});

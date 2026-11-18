@@ -167,5 +167,5 @@ const EMPTY = { rows: [], counts: { new: 0, approved: 0, declined: 0, all: 0 } }
 export default function useScholarships() {
   const live = isLive();
   const gen = useInvalidation(SCHOLARSHIPS_KEY);
-  return useSeedResource(live ? null : EMPTY, live ? { source: liveScholarships, deps: ['scholarships', gen] } : undefined);
+  return useSeedResource(live ? null : EMPTY, live ? { source: liveScholarships, deps: ['scholarships'], gens: [gen], cacheKey: 'scholarships' } : undefined);
 }

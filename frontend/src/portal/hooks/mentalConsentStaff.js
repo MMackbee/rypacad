@@ -112,6 +112,6 @@ export function useConsentTracker() {
   }
   return useSeedResource(
     seed,
-    live ? { source: () => liveTracker(today, utcToday), deps: ['consent-tracker', today, consentsGen, bookingsGen] } : undefined
+    live ? { source: () => liveTracker(today, utcToday), deps: ['consent-tracker', today], gens: [consentsGen, bookingsGen], cacheKey: 'consent-tracker' } : undefined
   );
 }

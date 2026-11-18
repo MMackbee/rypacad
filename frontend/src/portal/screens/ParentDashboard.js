@@ -186,8 +186,8 @@ export default function ParentDashboard({
           whatsNext={{ athlete: paidChild, product: params.get('product'), onBook: paidChild ? () => setBookFor(paidChild) : undefined,
             facilityDue: facilityPending.some((r) => r.athleteId === paidAthleteId || r.state === 'pay') }}
         />
-        {/* The sibling rule reads the whole family, paid members included. */}
-        <PendingBanner pendingAthletes={pendingAthletes} facilityRows={facilityRows} body={hubStatus?.body} title={hubStatus?.title}
+        {/* The sibling rule reads the whole family, paid members included. Its controls wait while the hub re-reads (review 2026-11-17). */}
+        <PendingBanner pendingAthletes={pendingAthletes} facilityRows={facilityRows} body={hubStatus?.body} title={hubStatus?.title} held={hub.isRefreshing === true}
           siblingDiscount={siblingDiscountApplies(hub.data?.members)} plan={siblingPlan(hub.data?.members)}
           renderRowExtra={(a) => <ChangePackageLink athlete={a} onOpen={setChangeFor} />} />
         {onHold ? (

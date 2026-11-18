@@ -256,4 +256,12 @@ describe('live loaders', () => {
     expect(byId.schedule).toMatchObject({ email: true, push: true });
     await h.unmount();
   });
+
+  // Review 2026-11-17 (F3): the first toggle writes the WHOLE map back, so it is built from a fresh read, never the shared copy.
+  test('useNotificationPrefs reads the profile fresh', async () => {
+    live.fetchCurrentUser.mockResolvedValue({ uid: 'p1', notificationPrefs: {} });
+    const h = await mountHook(() => useNotificationPrefs());
+    expect(live.fetchCurrentUser).toHaveBeenCalledWith({ fresh: true });
+    await h.unmount();
+  });
 });

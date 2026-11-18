@@ -26,11 +26,18 @@ export function familyPagePath(householdId, athleteId = null) {
 }
 
 /**
- * Where a click on an ATHLETE goes when only the athlete is known (an
- * Outstanding row, a consent row, an old bookings link): the route finds the
- * household and lands on the family page, opened on that athlete.
+ * Where a click on an ATHLETE goes when only the athlete is known (an old
+ * bookings link, a row with no family on it): the route finds the household
+ * and lands on the family page, opened on that athlete.
+ *
+ * Speed review (2026-11-17): Admin's Outstanding and consent rows already
+ * know the family and pass `{ athleteId, householdId }`; that goes straight
+ * to the family page, skipping the redirect's read of the athlete's whole
+ * staff model. A bare id, or no householdId, still takes the redirect.
  */
-export function staffAthletePath(athleteId) {
+export function staffAthletePath(athlete) {
+  const { athleteId, householdId } = athlete && typeof athlete === 'object' ? athlete : { athleteId: athlete, householdId: null };
+  if (householdId) return familyPagePath(householdId, athleteId);
   return `/portal/admin/athletes/${encodeURIComponent(athleteId)}`;
 }
 

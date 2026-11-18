@@ -356,7 +356,7 @@ export default function useBillingHub({ variant = 'populated', householdId = nul
   const gens = useTokenGens();
   return useSeedResource(
     live ? null : seedBillingHub(today, variant),
-    live ? { source: () => liveBillingHub(today, householdId), deps: ['billing-hub', householdId, today, ...gens] } : undefined
+    live ? { source: () => liveBillingHub(today, householdId), deps: ['billing-hub', householdId, today], gens, cacheKey: 'billing-hub' } : undefined
   );
 }
 
@@ -394,7 +394,7 @@ export function useHouseholdsDirectory() {
   ];
   return useSeedResource(
     live ? null : seed,
-    live ? { source: liveHouseholdsDirectory, deps: ['households-directory', ...gens] } : undefined
+    live ? { source: liveHouseholdsDirectory, deps: ['households-directory'], gens, cacheKey: 'households-directory' } : undefined
   );
 }
 

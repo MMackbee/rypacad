@@ -64,6 +64,25 @@ test('?athlete= opens the page on that athlete alone', async () => {
   await r.unmount();
 });
 
+/*
+ * Owner 2026-11-18 (review FAM-1): the family page never sends staff away.
+ * An ?athlete= the hub does not list - an athlete a script moved, or a hub
+ * read that came back short offline - opens the family as it is, nobody
+ * opened, as before 3d5815f.
+ */
+test('an ?athlete= the hub does not list stays on the family page, nobody opened', async () => {
+  const at = (r) => `${r.location().pathname}${r.location().search}`;
+  const listed = mockHub;
+  const empty = { ...mockHub, data: { ...mockHub.data, members: [] } };
+  for (const hub of [listed, empty]) {
+    mockHub = hub;
+    const r = await renderScreen(<Billing bare staff role="owner" householdId="hh1" onBack={() => {}} />, { path: '/portal/admin/households/hh1?athlete=casey' });
+    expect(at(r)).toBe('/portal/admin/households/hh1?athlete=casey');
+    expect(panels(r).map((p) => p.dataset.focus)).toEqual(hub === listed ? ['false', 'false'] : []);
+    await r.unmount();
+  }
+});
+
 test('a test athlete keeps Cancel and loses Move, as on the meter', async () => {
   mockHub = hubOf([kid('jordan', 'Jordan Whitfield', { test: true }), kid('riley', 'Riley Whitfield')]);
   const r = await renderScreen(<Billing bare staff role="ops" householdId="hh1" onBack={() => {}} />, { path: '/portal/admin/households/hh1' });

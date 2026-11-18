@@ -9,7 +9,9 @@
  */
 jest.mock('../hooks/doorAdmin', () => ({ useDoorAdmin: () => mockAdmin }));
 jest.mock('../hooks/door', () => ({ currentLocation: async (opts) => { mockLocateCalls.push(opts); return mockLocate(opts); } }));
-jest.mock('../hooks/billing', () => ({ useHouseholdsDirectory: () => { mockDirectoryReads += 1; return { data: mockDirectory, loading: false, error: null }; } }));
+jest.mock('../hooks/billing', () => ({
+  useHouseholdsDirectory: () => { mockDirectoryReads += 1; return { data: mockDirectory, loading: false, error: mockDirectoryError, isRefreshing: mockDirectoryRefreshing }; },
+}));
 jest.mock('../components/door/DoorCard', () => ({
   __esModule: true,
   default: ({ staffScreen, recheckKey, label }) => <div data-door-card={JSON.stringify({ staffScreen: Boolean(staffScreen), recheckKey, label })} />,
@@ -20,6 +22,8 @@ let mockLocate;
 let mockLocateCalls;
 let mockDirectory;
 let mockDirectoryReads;
+let mockDirectoryRefreshing;
+let mockDirectoryError;
 let saves;
 let paused;
 let unpaused;
@@ -58,6 +62,8 @@ beforeEach(() => {
   mockLocate = () => ({ lat: 44.98, lng: -93.27, accuracy: 12.4 });
   mockLocateCalls = [];
   mockDirectoryReads = 0;
+  mockDirectoryRefreshing = false;
+  mockDirectoryError = null;
   mockDirectory = [
     { id: 'hh-hart', name: 'Hart family', status: 'active', athletes: [{ id: 'dana', name: 'Dana Hart', packageName: 'Elite' }] },
     { id: 'hh-lee', name: 'Lee family', status: 'active', athletes: [{ id: 'sam', name: 'Sam Lee', packageName: '8 tokens' }, { id: 'kim', name: 'Kim Lee', packageName: 'Elite' }] },
@@ -377,6 +383,42 @@ describe('Paused families', () => {
     expect(mockDirectoryReads).toBeGreaterThan(0);
     expect(some.text()).toContain('Hart family');
     await some.unmount();
+  });
+
+  /*
+   * Owner 2026-11-18 (review DOOR-1..3): Pause pauses the family the picked
+   * row names, at once, as before 3d5815f. It never waits on the directory
+   * re-reading, and a directory read that fails or comes back empty offline
+   * never leaves it spinning or says the athlete is gone.
+   */
+  test("Pause pauses the picked row's family at once, while the directory re-reads", async () => {
+    mockDirectoryRefreshing = true;
+    const r = await mount();
+    await search(r, 'sam');
+    await pick(r, 'Sam Lee');
+    expect(r.text()).toContain('Pause door unlocking for Lee family?');
+    expect(r.button('Pause').disabled).toBe(false);
+    await r.click('Pause');
+    expect(paused).toEqual(['hh-lee']);
+    await r.unmount();
+  });
+
+  test.each([
+    ['fails', { data: null, error: new Error('offline') }],
+    ['comes back empty offline', { data: [], error: null }],
+  ])('a directory read that %s after the pick never blocks Pause', async (_, after) => {
+    const r = await mount();
+    await search(r, 'sam');
+    await pick(r, 'Sam Lee');
+    mockDirectory = after.data;
+    mockDirectoryError = after.error;
+    await r.rerender(<AdminDoor bare role="owner" onBack={() => saves.push('back')} />);
+    expect(r.text()).toContain('Pause door unlocking for Lee family?');
+    expect(r.text()).not.toContain("isn't on file");
+    expect(r.button('Pause').disabled).toBe(false);
+    await r.click('Pause');
+    expect(paused).toEqual(['hh-lee']);
+    await r.unmount();
   });
 
   test('Cancel pauses nothing; an athlete in a paused family reads Paused and cannot be picked', async () => {

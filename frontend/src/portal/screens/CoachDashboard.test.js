@@ -14,11 +14,13 @@ const mockMonth = (m) => {
   return { data: { days }, loading: false, error: null };
 };
 let mockAttention = [];
+// The whole useCoachDay answer when a test sets it (loading, failed); null = the loaded day above.
+let mockDay = null;
 let mockStudents = [];
 let mockRosterError = null;
 let mockRosterRetries = 0;
 jest.mock('../hooks', () => ({
-  useCoachDay: () => ({ data: { coach: { name: 'Coach', date: '2026-11-04' }, blocks: mockBlocks, attention: mockAttention } }),
+  useCoachDay: () => mockDay || { data: { coach: { name: 'Coach', date: '2026-11-04' }, blocks: mockBlocks, attention: mockAttention }, loading: false, error: null },
   // The real roster hook drops the contract part of meta while the contract is hidden; the mock does the same.
   useCoachRoster: () => ({ data: mockRosterError ? null : mockStudents.map((s) => ({ ...s, meta: jest.requireActual('../data/contractFlag').hideContractParts(s.meta) })), loading: false, error: mockRosterError, retry: () => { mockRosterRetries += 1; } }),
   useMonthSessions: (m) => mockMonth(m),
@@ -55,6 +57,7 @@ async function openSessions(onOpenRoster) {
 beforeEach(() => {
   try { window.localStorage.clear(); } catch (e) { /* storage unavailable */ }
   mockRequested = [];
+  mockDay = null;
   mockRosterError = null;
   mockRosterRetries = 0;
   jest.useFakeTimers('modern');
@@ -78,6 +81,35 @@ test('an owner opens the same day view with their own tab bar and no Students ta
   expect(coach.button('Students')).not.toBeNull();
   await coach.unmount();
   mockBlocks = [];
+});
+
+// Review 2026-11-17 (F2): a day still loading is not an empty day.
+test("while today's blocks load: a skeleton, never 'Off today' or 'No sessions today'", async () => {
+  mockDay = { data: null, loading: true, error: null };
+  const r = await renderScreen(<CoachDashboard bare />);
+  expect(r.text()).not.toContain('Off today');
+  expect(r.text()).not.toContain('No sessions today');
+  expect(r.container.querySelector(`[aria-label="Loading today's sessions"]`)).not.toBeNull();
+  await r.unmount();
+});
+
+test("a day that failed to load says so, never 'Off today'", async () => {
+  mockDay = { data: null, loading: false, error: Object.assign(new Error('offline'), { code: 'unavailable' }) };
+  const r = await renderScreen(<CoachDashboard bare />);
+  expect(r.text()).not.toContain('Off today');
+  expect(r.text()).not.toContain('No sessions today');
+  expect(r.text()).toContain("Today's sessions didn't load");
+  expect(r.button('Try again')).not.toBeNull();
+  await r.unmount();
+});
+
+test("a loaded day with no blocks: 'Off today' and 'No sessions today'", async () => {
+  mockBlocks = [];
+  const r = await renderScreen(<CoachDashboard bare />);
+  expect(r.text()).toContain('Off today');
+  expect(r.text()).toContain('No sessions today');
+  expect(r.container.querySelector(`[aria-label="Loading today's sessions"]`)).toBeNull();
+  await r.unmount();
 });
 
 test('Phil and Yannick open the golf day with their own tab bars and no Students tab (owner ruling 2026-11-03)', async () => {

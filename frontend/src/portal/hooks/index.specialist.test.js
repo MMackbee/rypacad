@@ -4,7 +4,8 @@
  * with `unresolved: true` and no booking (functions/portal/calendly.js).
  * Yannick's row must count it as taken (1/1) and mark it unresolved; once a
  * real booking sits on it, it is an ordinary row. SpecialistDay.test.js
- * mocks this hook, so this is the only test of liveSpecialistSessions.
+ * mocks this hook; specialistSessions.test.js covers the reads (speed review
+ * F1: one bookings query by type, not one per slot).
  * Kept beside index.test.js with its own mock list so the lanes merge cleanly.
  */
 jest.mock('../../firebase', () => ({ __esModule: true, default: {}, auth: { currentUser: null }, db: {}, functions: {}, storage: {} }));
@@ -21,6 +22,7 @@ jest.mock('./live', () => ({
   fetchBookingsBySession: jest.fn(),
   fetchSessionsInRange: jest.fn(),
 }));
+jest.mock('./specialistLive', () => ({ __esModule: true, fetchBookingsByType: jest.fn() }));
 jest.mock('../data/calendar', () => {
   const actual = jest.requireActual('../data/calendar');
   return { ...actual, __esModule: true, todayISO: jest.fn(() => actual.todayISO()) };
@@ -30,6 +32,7 @@ import { act } from 'react';
 import { createRoot } from 'react-dom/client';
 import { useSpecialistSessions } from './index';
 import * as live from './live';
+import * as specialistLive from './specialistLive';
 import * as calendar from '../data/calendar';
 
 // Wed Nov 11 2026, 9 AM in Chicago.
@@ -68,9 +71,9 @@ beforeEach(() => {
     cal('cal-gone', '2026-11-14', { unresolved: true, status: 'cancelled', booked: 0 }),
     cal('cal-open', '2026-11-16', { booked: 0 }),
   ]);
-  live.fetchBookingsBySession.mockImplementation(async (sessionId) => (sessionId === 'cal-linked'
-    ? [{ id: 'jordan_cal-linked', athleteId: 'jordan', sessionId, status: 'confirmed', attendee: 'athlete' }]
-    : []));
+  const linked = { id: 'jordan_cal-linked', athleteId: 'jordan', sessionId: 'cal-linked', type: 'mental', status: 'confirmed', attendee: 'athlete' };
+  specialistLive.fetchBookingsByType.mockImplementation(async (type) => (type === 'mental' ? [linked] : []));
+  live.fetchBookingsBySession.mockImplementation(async (sessionId) => (sessionId === 'cal-linked' ? [linked] : []));
   live.fetchAthletesByIds.mockImplementation(async (ids) => ids.map((id) => ({ id, name: 'Jordan Whitfield' })));
 });
 afterEach(() => {

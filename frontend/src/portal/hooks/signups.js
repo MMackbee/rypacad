@@ -113,5 +113,5 @@ const EMPTY = { rows: [], counts: { all: 0, unpaid: 0, flagged: 0, unresolved: 0
 export default function useSignups() {
   const live = isLive();
   const gens = [useInvalidation('households'), useInvalidation('athletes'), useInvalidation('bookings'), useInvalidation('loginInvites')];
-  return useSeedResource(live ? null : EMPTY, live ? { source: liveSignups, deps: ['signups', ...gens] } : undefined);
+  return useSeedResource(live ? null : EMPTY, live ? { source: liveSignups, deps: ['signups'], gens, cacheKey: 'signups' } : undefined);
 }

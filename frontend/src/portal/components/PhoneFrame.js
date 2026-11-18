@@ -35,7 +35,7 @@ export const FrameEmbedContext = createContext(null);
  * it alone sizes the frame; older browsers drop the dvh height and keep the
  * 100vh floor as before.
  */
-const SUPPORTS_DVH = typeof CSS !== 'undefined' && Boolean(CSS.supports) && CSS.supports('height', '100dvh');
+export const SUPPORTS_DVH = typeof CSS !== 'undefined' && Boolean(CSS.supports) && CSS.supports('height', '100dvh');
 
 /** The bare frame's phone column on a wide screen. The Feedback button lines up with it. */
 export const BARE_MAX_WIDTH = 430;

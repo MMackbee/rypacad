@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import {
   createUserWithEmailAndPassword,
   onAuthStateChanged,
@@ -9,11 +9,17 @@ import {
   signOut as firebaseSignOut,
 } from 'firebase/auth';
 import { auth, provider } from '../../firebase';
-import { ERR, LiveDataError, fetchCurrentUser, fetchHousehold } from './live';
+import { ERR, LiveDataError, fetchCurrentUser } from './live';
 import { callClaimInvite } from './callables';
 import { publishAssessorTab } from './assessorTab';
 import { clearResearchSkips } from './researchSkip';
 import { showsAssessmentsTab } from '../data/assessmentAccess';
+import { publishSelfManaged, resolveSelfManaged, useSelfManaged } from './selfManaged';
+import {
+  forgetSessionUser, peekSessionUser, publishSessionUser, resetSession, sessionUserStale, setSessionScope, signedOutKnown, subscribeSessionUser,
+} from './sessionStore';
+import { clearRoleHint, roleHintFor, suppressRoleHint, writeRoleHint } from './roleHint';
+import { accountLoadError, claimStateOf, createLoginError, resendError, verifyContinueUrl } from './authSessionHelpers';
 
 // Every screen and guard mounts its own useAuthSession, and each one's
 // NOT_FOUND emission used to fire claimInvite: the first call claimed, the
@@ -28,47 +34,10 @@ function claimOnce(uid) {
   return claimFlights.get(key);
 }
 
-/*
- * Self-managed athlete (owner report, Mike S6 2026-09-30): the 18+ athlete who
- * signed up for themselves (createFamily mode 'athlete') is their household's
- * createdBy and its only member - the payer, so they get the parent's Billing
- * and Settings. A child's claimed login sits in the parent's household
- * (createdBy is the parent) and stays a plain athlete. Same test as
- * firestore.rules' athlete package-change branch. One households read per
- * uid per page load, shared by every mounted session (createdBy is
- * server-written); a failed read is false, and the next resolution retries.
- */
-const selfManagedFlights = new Map();
-export function resolveSelfManaged(profile) {
-  if (!profile || profile.role !== 'athlete' || !profile.uid || !profile.householdId) return Promise.resolve(false);
-  const key = `${profile.uid}/${profile.householdId}`;
-  if (!selfManagedFlights.has(key)) {
-    selfManagedFlights.set(key, fetchHousehold(profile.householdId).then(
-      (household) => Boolean(household) && household.createdBy === profile.uid,
-      () => { selfManagedFlights.delete(key); return false; }
-    ));
-  }
-  return selfManagedFlights.get(key);
-}
-
-// The signed-in session's selfManaged for BottomTabBar, which renders on
-// every athlete screen with no session of its own: every resolution
-// publishes it (the same value from each mounted instance), sign-out clears it.
-let selfManagedNow = false;
-const selfManagedListeners = new Set();
-function publishSelfManaged(value) {
-  if (selfManagedNow === value) return;
-  selfManagedNow = value;
-  selfManagedListeners.forEach((listener) => listener());
-}
-function subscribeSelfManaged(listener) {
-  selfManagedListeners.add(listener);
-  return () => selfManagedListeners.delete(listener);
-}
-/** True while the signed-in account is a self-managed athlete; false in seed mode. */
-export function useSelfManaged() {
-  return useSyncExternalStore(subscribeSelfManaged, () => selfManagedNow, () => false);
-}
+// The self-managed athlete (Mike S6 2026-09-30): ./selfManaged.js, re-exported.
+export { resolveSelfManaged, useSelfManaged };
+// The invite, verify-link and error helpers: ./authSessionHelpers.js, re-exported.
+export { claimStateOf, createLoginError, resendError, verifyContinueUrl };
 
 /**
  * The portal's auth session — the seam between Firebase auth and every screen.
@@ -80,7 +49,9 @@ export function useSelfManaged() {
  *     provisioned: boolean, loading, error, signIn(), signInWithEmail(), signOut(),
  *     requestPasswordReset(),
  *     // Sprint 20 (spec 2.1, 3.2; contract 4.1):
- *     createLogin(email, password), refresh(), claimState, checkInvite(), resendVerification() }
+ *     createLogin(email, password), refresh(), claimState, checkInvite(), resendVerification(),
+ *     // review 2026-11-17 (AUTH-1): signed in, but users/{uid} did not load
+ *     accountError }
  *
  * - Auth is the existing app instance from src/firebase.js (project `rypacad`)
  *   — never a second init. signIn() runs the existing Google popup; a popup the
@@ -132,45 +103,63 @@ function toUser(profile, fbUser, selfManaged = false) {
   };
 }
 
-/** The signed-in-but-unprovisioned user (no users/{uid} doc yet). */
-function unprovisionedUser(fbUser) {
-  return { uid: fbUser.uid, email: fbUser.email != null ? fbUser.email : null, role: null, athleteId: null, householdId: null, assessor: false, emailVerified: Boolean(fbUser.emailVerified), selfManaged: false };
-}
-
-/** claimInvite's `state` (contract 1.4), or 'error' for anything else. */
-export function claimStateOf(result) {
-  const s = result && result.state;
-  return s === 'claimed' || s === 'needs-verification' || s === 'already-claimed' || s === 'none' ? s : 'error';
+/** The shared user with this account's current emailVerified (it flips after the link is opened). */
+function withAuth(user, fbUser) {
+  const verified = Boolean(fbUser && fbUser.emailVerified);
+  return user.emailVerified === verified ? user : { ...user, emailVerified: verified };
 }
 
 /**
- * Where the verification email's link returns to (spec 12.1): this build's
- * own origin - portal.rypacademy.com in production (rypacad.ryptest.com
- * before the move), localhost on the emulator. Every one of them must be a
- * Firebase Auth authorized domain, or the send fails and SignUp says so. Firebase's own action handler completes the
- * verification first, then continues here.
+ * While users/{uid} loads, the tab bar and the athlete's home read the flags
+ * of THIS account's hint (or none), not the plain or the last account's bar;
+ * the verified user's applyUser publishes over them (review 2026-11-17).
  */
-export function verifyContinueUrl() {
-  return `${window.location.origin}/portal/signin`;
+function seedFromHint(hint) {
+  publishSelfManaged(Boolean(hint) && hint.role === 'athlete' && hint.selfManaged === true);
+  publishAssessorTab(showsAssessmentsTab(hint));
 }
 
-export function createLoginError(err) {
-  const code = err && err.code;
-  if (code === 'auth/email-already-in-use') return new LiveDataError(ERR.INVALID, 'This email already has a login - sign in instead', err, 'email-in-use');
-  if (code === 'auth/weak-password') return new LiveDataError(ERR.INVALID, 'Choose a longer password - at least 6 characters.', err, 'weak-password');
-  if (code === 'auth/invalid-email') return new LiveDataError(ERR.INVALID, 'Enter a valid email address.', err, 'invalid-email');
-  if (code === 'auth/too-many-requests') return new LiveDataError(ERR.UNAVAILABLE, 'Too many attempts — wait a few minutes, then try again.', err);
-  if (code === 'auth/operation-not-allowed') return new LiveDataError(ERR.UNAVAILABLE, 'Email sign-in is not enabled yet — use Continue with Google.', err);
-  return new LiveDataError(ERR.UNAVAILABLE, 'Could not create the login. Please try again.', err);
+/** A verified user, published to everything that reads it without a session of its own. */
+function applyUser(user) {
+  publishSelfManaged(user.selfManaged);
+  publishAssessorTab(showsAssessmentsTab(user));
+  publishSessionUser(user);
+  writeRoleHint(user); // the next cold start's landing (roleHint.js)
 }
 
-export function resendError(err) {
-  const throttled = err && err.code === 'auth/too-many-requests';
-  return new LiveDataError(
-    throttled ? ERR.UNAVAILABLE : ERR.UNKNOWN,
-    throttled ? 'Too many attempts — wait a few minutes, then try again.' : 'Could not send the verification email. Please try again.',
-    err
-  );
+/**
+ * F4 (speed work 2026-11-17): users/{uid} is read once per sign-in and shared
+ * (sessionStore.js). A role change still reaches an open session: this reads
+ * it again in the background - the page coming back into view, a session
+ * mounting after PROFILE_TTL_MS - and a change re-renders every session. A
+ * failed re-read keeps what the session had; firestore.rules enforce anyway.
+ */
+function revalidate(fbUser) {
+  fetchCurrentUser({ fresh: true })
+    .then((profile) => resolveSelfManaged(profile).then((selfManaged) => {
+      if (auth.currentUser && auth.currentUser.uid === fbUser.uid) applyUser(toUser(profile, fbUser, selfManaged));
+    }))
+    .catch(() => {});
+}
+
+let mountedSessions = 0;
+function onVisible() {
+  const fbUser = auth.currentUser;
+  if (document.visibilityState === 'visible' && fbUser && peekSessionUser(fbUser.uid)) revalidate(fbUser);
+}
+
+/** A new instance starts from what the page already knows: resolved, signed out, or waiting on this account. */
+function initialSession() {
+  const fbUser = auth.currentUser;
+  if (!fbUser && signedOutKnown()) return SIGNED_OUT;
+  const known = fbUser ? peekSessionUser(fbUser.uid) : null;
+  if (known) return { user: withAuth(known.user, fbUser), provisioned: true, loading: false, error: null };
+  return { user: null, provisioned: false, loading: true, error: null, pendingUid: fbUser ? fbUser.uid : null };
+}
+
+/** The signed-in-but-unprovisioned user (no users/{uid} doc yet). */
+function unprovisionedUser(fbUser) {
+  return { uid: fbUser.uid, email: fbUser.email != null ? fbUser.email : null, role: null, athleteId: null, householdId: null, assessor: false, emailVerified: Boolean(fbUser.emailVerified), selfManaged: false };
 }
 
 export default function useAuthSession({ variant } = {}) {
@@ -197,12 +186,9 @@ export default function useAuthSession({ variant } = {}) {
   }, []);
 
   /* ------------------------------ real mode ------------------------------ */
-  const [session, setSession] = useState({
-    user: null,
-    provisioned: false,
-    loading: true, // until the first auth emission
-    error: null,
-  });
+  // Loading until the first auth emission - unless the page already knows
+  // the answer: this account's profile, or that nobody is signed in.
+  const [session, setSession] = useState(() => (demo ? SIGNED_OUT : initialSession()));
 
   // Emission sequence: a resolution result only lands if no later auth
   // emission (or unmount) superseded it — sign-out during a slow users read
@@ -210,35 +196,36 @@ export default function useAuthSession({ variant } = {}) {
   const seqRef = useRef(0);
   const [claimState, setClaimState] = useState('idle');
   const claimRef = useRef(null); // latest runClaim; the auth effect never re-subscribes
+  const emittedRef = useRef(undefined); // the uid the auth listener last reported here
 
   // Resolve users/{uid} for one emission or refresh; only the latest `seq`
   // may land. Returns 'provisioned' | 'not-found' | 'error' | 'stale'.
-  const resolveProfile = useCallback(async (seq, fbUser) => {
+  const resolveProfile = useCallback(async (seq, fbUser, fresh = false) => {
     try {
-      const profile = await fetchCurrentUser();
+      const profile = await (fresh ? fetchCurrentUser({ fresh: true }) : fetchCurrentUser());
       // Before `loading` clears, so a guard never redirects a self-managed
       // athlete off Billing on a half-resolved session. Never rejects.
       const selfManaged = await resolveSelfManaged(profile);
       if (seq !== seqRef.current) return 'stale';
-      publishSelfManaged(selfManaged);
       const user = toUser(profile, fbUser, selfManaged);
-      publishAssessorTab(showsAssessmentsTab(user));
+      applyUser(user);
       setSession({ user, provisioned: true, loading: false, error: null });
       return 'provisioned';
     } catch (err) {
       if (seq !== seqRef.current) return 'stale';
+      forgetSessionUser(fbUser.uid);
       publishSelfManaged(false);
       publishAssessorTab(false);
       if (err instanceof LiveDataError && err.code === ERR.NOT_FOUND) {
         // Exactly the unprovisioned case: a real account with no users/{uid}
         // doc yet. Defined state, not an error.
+        clearRoleHint();
         setSession({ user: unprovisionedUser(fbUser), provisioned: false, loading: false, error: null });
         return 'not-found';
       }
-      setSession({
-        user: null, provisioned: false, loading: false,
-        error: err instanceof LiveDataError ? err : new LiveDataError(ERR.UNKNOWN, 'Could not load your account. Please try again.', err),
-      });
+      suppressRoleHint(); // or sign-in follows it straight back to the landing (roleHint.js)
+      const error = accountLoadError(err);
+      setSession({ user: null, provisioned: false, loading: false, error, failed: { uid: fbUser.uid, error } });
       return 'error';
     }
   }, []);
@@ -247,7 +234,9 @@ export default function useAuthSession({ variant } = {}) {
     if (demo) return undefined; // demo bypasses real auth entirely
     const unsubscribe = onAuthStateChanged(auth, (fbUser) => {
       const seq = ++seqRef.current;
+      emittedRef.current = fbUser ? fbUser.uid : null;
       if (!fbUser) {
+        resetSession(); // the shared profile and everything kept for the account
         publishSelfManaged(false);
         publishAssessorTab(false);
         clearResearchSkips(); // "Skip for now" lasts until sign-out (Review Focus 5)
@@ -255,7 +244,16 @@ export default function useAuthSession({ variant } = {}) {
         setClaimState('idle');
         return;
       }
-      setSession((s) => ({ ...s, loading: true }));
+      setSessionScope(fbUser.uid); // another account: the last one's profile goes
+      const known = peekSessionUser(fbUser.uid);
+      if (known) {
+        setSession({ user: withAuth(known.user, fbUser), provisioned: true, loading: false, error: null });
+        if (sessionUserStale(fbUser.uid)) revalidate(fbUser);
+        return;
+      }
+      seedFromHint(roleHintFor(fbUser.uid));
+      // Another account straight after this one (no signed-out emission between): none of its state carries over.
+      setSession((s) => ({ ...(s.user && s.user.uid !== fbUser.uid ? SIGNED_OUT : s), loading: true, pendingUid: fbUser.uid }));
       resolveProfile(seq, fbUser).then((outcome) => {
         // Sprint 20 (spec 3.2): every NOT_FOUND emission with an email asks
         // claimInvite; an emulator custom-token user has no email -> 'none'.
@@ -264,20 +262,39 @@ export default function useAuthSession({ variant } = {}) {
         claimRef.current(seq, fbUser);
       });
     });
+    // A verified re-read anywhere (another session, a visible page) lands here too.
+    const unlisten = subscribeSessionUser((user) => {
+      const fbUser = auth.currentUser;
+      if (!fbUser || fbUser.uid !== user.uid) return;
+      seqRef.current += 1;
+      setSession({ user: withAuth(user, fbUser), provisioned: true, loading: false, error: null });
+    });
+    if (mountedSessions++ === 0) document.addEventListener('visibilitychange', onVisible);
     return () => {
       seqRef.current += 1; // invalidate any in-flight resolution
       unsubscribe();
+      unlisten();
+      if (--mountedSessions === 0) document.removeEventListener('visibilitychange', onVisible);
     };
   }, [demo, resolveProfile]);
 
   /** Re-run the users/{uid} read under the current sequence (spec 2.2: `provisioned` flips without a reload). */
   const refresh = useCallback(async () => {
     const fbUser = auth.currentUser;
-    if (!fbUser) { publishSelfManaged(false); publishAssessorTab(false); clearResearchSkips(); setSession(SIGNED_OUT); return; }
+    if (!fbUser) { resetSession(); publishSelfManaged(false); publishAssessorTab(false); clearResearchSkips(); setSession(SIGNED_OUT); return; }
+    setSession((s) => ({ ...s, loading: true, pendingUid: fbUser.uid })); // busy at once, not after the reload (review AUTH-R1)
     try { await fbUser.reload(); } catch (err) { /* offline reload: the cached user still resolves */ }
-    setSession((s) => ({ ...s, loading: true }));
-    await resolveProfile(seqRef.current, fbUser);
+    // Signed out (or another account) during the reload: that emission owns the session (review AUTH-R2).
+    if (!auth.currentUser || auth.currentUser.uid !== fbUser.uid) return;
+    await resolveProfile(seqRef.current, fbUser, true);
   }, [resolveProfile]);
+
+  // Firebase 9 notifies auth listeners only when the uid changes: signing in
+  // again as the account this instance already has (its users read failed)
+  // brings no emission. Re-read instead of waiting on one (AUTH-1, 2026-11-17).
+  const afterSignIn = useCallback(async (before) => {
+    if (auth.currentUser && auth.currentUser.uid === before) await refresh();
+  }, [refresh]);
 
   const runClaim = useCallback(async (seq, fbUser) => {
     setClaimState('checking');
@@ -339,11 +356,11 @@ export default function useAuthSession({ variant } = {}) {
   }, []);
 
   const signIn = useCallback(async () => {
+    const before = emittedRef.current;
     // Clear a stale error so a retry starts clean.
     setSession((s) => (s.error ? { ...s, error: null } : s));
     try {
       await signInWithPopup(auth, provider);
-      // Success lands via onAuthStateChanged — nothing to set here.
     } catch (err) {
       // The user closing the popup is a change of mind, not an error state.
       // Closing the popup and double-clicking the button are both the user
@@ -358,8 +375,10 @@ export default function useAuthSession({ variant } = {}) {
           err
         ),
       }));
+      return;
     }
-  }, []);
+    await afterSignIn(before); // another account lands via onAuthStateChanged
+  }, [afterSignIn]);
 
   // Email/password sign-in. Unlike the popup there is no user-cancel branch,
   // so `loading` flips on immediately and only an error turns it back off —
@@ -367,10 +386,10 @@ export default function useAuthSession({ variant } = {}) {
   // errors get one deliberately unspecific message (which of the two fields
   // is wrong is not the caller's business, per the designed invalid state).
   const signInWithEmail = useCallback(async (email, password) => {
+    const before = emittedRef.current;
     setSession((s) => ({ ...s, loading: true, error: null }));
     try {
       await signInWithEmailAndPassword(auth, email, password);
-      // Success lands via onAuthStateChanged — nothing to set here.
     } catch (err) {
       const code = err && err.code;
       const credential =
@@ -390,8 +409,10 @@ export default function useAuthSession({ variant } = {}) {
         loading: false,
         error: new LiveDataError(credential ? ERR.INVALID : ERR.UNAVAILABLE, message, err),
       }));
+      return;
     }
-  }, []);
+    await afterSignIn(before); // another account lands via onAuthStateChanged
+  }, [afterSignIn]);
 
   // Forgot password (Sprint 10, pin I "Quick wins") — the SignIn screen's
   // real "Forgot password" link (frontend lane wires the sent/error states;
@@ -429,6 +450,7 @@ export default function useAuthSession({ variant } = {}) {
   }, []);
 
   const signOut = useCallback(async () => {
+    resetSession(); // nothing of this account outlives the tap, even before the listener hears it
     try {
       await firebaseSignOut(auth); // the auth listener emits the signed-out state
     } catch (err) {
@@ -456,6 +478,10 @@ export default function useAuthSession({ variant } = {}) {
     provisioned: session.provisioned,
     loading: session.loading,
     error: session.error,
+    // While users/{uid} loads: THIS account's last verified role, for the landing only (roleHint.js).
+    hint: session.loading ? roleHintFor(session.pendingUid) : null,
+    // Signed in, but users/{uid} did not load: SignIn offers Try again (refresh) - signing in again cannot help.
+    accountError: !session.user && session.failed && auth.currentUser && auth.currentUser.uid === session.failed.uid ? session.failed.error : null,
     signIn,
     signInWithEmail,
     signOut,
