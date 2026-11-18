@@ -27,7 +27,7 @@ jest.mock('firebase/firestore', () => ({
   doc: (_db, col, id) => ({ col, id }),
   getDoc: async (ref) => {
     mockReads.push(`${ref.col}/${ref.id}`);
-    const data = mockDocs[`${ref.col}/${ref.id}`];
+    const data = await mockDocs[`${ref.col}/${ref.id}`]; // a promise: a read still in flight
     if (data instanceof Error) throw data;
     return { exists: () => data !== undefined, data: () => data };
   },
@@ -224,17 +224,22 @@ test('an unprovisioned account (no users doc) is never cached: each look reads',
   expect(userReads('u-new')).toBe(2);
 });
 
-// Review 2026-11-17 (F3): a fresh re-read in flight (the page coming back into view) is newer than the remembered copy.
-test('a caller while a fresh re-read is in flight gets that read, not the remembered copy', async () => {
+// Review PERF-R3: a plain caller (the Billing hub re-read back from Stripe) never waits on a fresh re-read in
+// flight (the page coming back into view); notification preferences ask for fresh and join it (liveNotificationPrefs).
+test('a plain caller while a fresh re-read is in flight gets the remembered copy at once; a fresh caller joins the read', async () => {
   mockDocs['users/u-fly'] = { role: 'parent', notificationPrefs: { reminders: { email: true } } };
   auth.currentUser = account('u-fly');
   await mountProbe();
   await flush();
-  mockDocs['users/u-fly'] = { role: 'parent', notificationPrefs: { reminders: { email: false } } };
+  let release = () => {};
+  mockDocs['users/u-fly'] = new Promise((resolve) => { release = resolve; });
   const fresh = fetchCurrentUser({ fresh: true });
-  const plain = fetchCurrentUser();
-  expect((await plain).notificationPrefs.reminders.email).toBe(false);
-  await fresh;
+  const joined = fetchCurrentUser({ fresh: true });
+  const plain = await Promise.race([fetchCurrentUser(), new Promise((resolve) => { setTimeout(() => resolve('still waiting'), 50); })]);
+  release({ role: 'parent', notificationPrefs: { reminders: { email: false } } });
+  expect(plain).toMatchObject({ notificationPrefs: { reminders: { email: true } } });
+  expect((await fresh).notificationPrefs.reminders.email).toBe(false);
+  expect((await joined).notificationPrefs.reminders.email).toBe(false);
   expect(userReads('u-fly')).toBe(2);
 });
 
