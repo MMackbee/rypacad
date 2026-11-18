@@ -282,8 +282,10 @@ export default function useAuthSession({ variant } = {}) {
   const refresh = useCallback(async () => {
     const fbUser = auth.currentUser;
     if (!fbUser) { resetSession(); publishSelfManaged(false); publishAssessorTab(false); clearResearchSkips(); setSession(SIGNED_OUT); return; }
+    setSession((s) => ({ ...s, loading: true, pendingUid: fbUser.uid })); // busy at once, not after the reload (review AUTH-R1)
     try { await fbUser.reload(); } catch (err) { /* offline reload: the cached user still resolves */ }
-    setSession((s) => ({ ...s, loading: true, pendingUid: fbUser.uid }));
+    // Signed out (or another account) during the reload: that emission owns the session (review AUTH-R2).
+    if (!auth.currentUser || auth.currentUser.uid !== fbUser.uid) return;
     await resolveProfile(seqRef.current, fbUser, true);
   }, [resolveProfile]);
 

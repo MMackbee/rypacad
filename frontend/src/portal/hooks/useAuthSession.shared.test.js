@@ -174,6 +174,36 @@ test('refresh() always reads again', async () => {
   expect(userReads('u-ref')).toBe(2);
 });
 
+// Review AUTH-R1: Try again on the account panel shows it is working before the account reload returns.
+test('refresh() is busy at once, before the account reload returns; the panel stays up until the read lands', async () => {
+  mockDocs['users/u-slow'] = Object.assign(new Error('offline'), { code: 'unavailable' });
+  let finishReload = () => {};
+  auth.currentUser = { ...account('u-slow'), reload: () => new Promise((resolve) => { finishReload = resolve; }) };
+  const p = await mountProbe();
+  await flush();
+  expect(p.now()).toMatchObject({ loading: false, user: null, accountError: { code: 'unavailable' } });
+  mockDocs['users/u-slow'] = { role: 'parent', householdId: 'hh-s' };
+  let done;
+  await act(async () => { done = p.now().refresh(); });
+  expect(p.now()).toMatchObject({ loading: true, accountError: { code: 'unavailable' } });
+  await act(async () => { finishReload(); await done; });
+  expect(p.now()).toMatchObject({ loading: false, provisioned: true, user: { uid: 'u-slow', role: 'parent' }, accountError: null });
+});
+
+// Review AUTH-R2: the reload finds the session revoked and Firebase signs out - the signed-out form, no account error.
+test('signed out while refresh() reloads the account: signed out, with no error left behind', async () => {
+  mockDocs['users/u-gone'] = Object.assign(new Error('offline'), { code: 'unavailable' });
+  const acct = account('u-gone');
+  auth.currentUser = acct;
+  const p = await mountProbe();
+  await flush();
+  expect(p.now().accountError).toMatchObject({ code: 'unavailable' });
+  acct.reload = async () => { __emit(auth, null); throw Object.assign(new Error('expired'), { code: 'auth/user-token-expired' }); };
+  await act(async () => { await p.now().refresh(); });
+  await flush();
+  expect(p.now()).toMatchObject({ user: null, loading: false, error: null, accountError: null });
+});
+
 test("a write to the users collection (the member's own prefs or phone) makes the next fetchCurrentUser read again", async () => {
   mockDocs['users/u-prefs'] = { role: 'parent', householdId: 'hh-p', phone: null };
   auth.currentUser = account('u-prefs');
