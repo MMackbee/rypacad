@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useRef, useState } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { color, font } from '../tokens';
 import BillingSkeleton from '../components/BillingSkeleton';
@@ -28,7 +28,7 @@ import { householdOnHold } from '../data/singleToken';
 import { firstOf, staffMayCancel } from '../data/staffCancel';
 import { staffMayBook } from '../data/staffBooking';
 import { BOOK_A_SESSION, testAthleteLine } from '../data/staffBookingCopy';
-import { FAMILY_STAFF_LABEL, athleteFocus, focusGone, staffAthletePath, staffFamilyRole } from '../data/staffFamily';
+import { FAMILY_STAFF_LABEL, athleteFocus, staffFamilyRole } from '../data/staffFamily';
 import useBillingHub from '../hooks/billing';
 
 /**
@@ -97,11 +97,6 @@ export default function Billing({
   // The family page: the staff view, for the owner and ops.
   const family = staff && staffFamilyRole(role);
   const focusId = family ? athleteFocus(location.search) : null;
-  // An athlete the fresh hub does not list (moved since the row was cached): the redirect finds them.
-  const gone = focusGone({ focusId, hub: hook, resolved: location.state?.athleteResolved === true });
-  useEffect(() => {
-    if (gone) navigate(staffAthletePath(focusId), { replace: true });
-  }, [gone, focusId, navigate]);
 
   // The family page keeps showing what it had while the hub reloads after a
   // save (Issue tokens, a package, the handicap all bump it): dropping to the
