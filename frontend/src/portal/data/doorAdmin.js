@@ -229,14 +229,3 @@ export function pausedRow(p, names) {
     since: at == null ? 'Paused' : `Paused ${chicagoTime(at)}`,
   };
 }
-
-/**
- * The family an athlete is in per the households directory
- * (useHouseholdsDirectory rows), or null when no household lists them - the
- * one Pause a family pauses, read from the FRESH directory (review
- * 2026-11-17): the search may have offered a cached row, minutes old.
- */
-export function pauseTarget(directory, athleteId) {
-  const h = (directory || []).find((row) => ((row && row.athletes) || []).some((a) => a && a.id === athleteId));
-  return h ? { householdId: h.id, householdName: h.name ?? null } : null;
-}

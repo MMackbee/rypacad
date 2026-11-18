@@ -24,7 +24,6 @@ import {
   openTimeChoices,
   openTimeText,
   pausedRow,
-  pauseTarget,
   phoneCheck,
 } from './doorAdmin';
 
@@ -213,16 +212,4 @@ test('pausedRow: the family name from the directory, else the id; when, in Chica
   expect(pausedRow(p, { 'hh-hart': 'Hart family' })).toEqual({ householdId: 'hh-hart', name: 'Hart family', since: 'Paused Nov 17, 6:42 PM' });
   expect(pausedRow(p, {})).toMatchObject({ name: 'hh-hart' });
   expect(pausedRow({ householdId: 'hh-hart', pausedAt: null }, {})).toMatchObject({ since: 'Paused' });
-});
-
-test('pauseTarget: the family an athlete is in per the directory, or null (review 2026-11-17)', () => {
-  const directory = [
-    { id: 'hh-hart', name: 'Hart family', athletes: [{ id: 'dana' }] },
-    { id: 'hh-lee', name: null, athletes: [null, { id: 'sam' }] },
-    { id: 'hh-empty' },
-  ];
-  expect(pauseTarget(directory, 'dana')).toEqual({ householdId: 'hh-hart', householdName: 'Hart family' });
-  expect(pauseTarget(directory, 'sam')).toEqual({ householdId: 'hh-lee', householdName: null });
-  expect(pauseTarget(directory, 'gone')).toBeNull();
-  expect(pauseTarget(null, 'dana')).toBeNull();
 });

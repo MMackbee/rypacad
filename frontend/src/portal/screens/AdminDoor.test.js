@@ -10,7 +10,7 @@
 jest.mock('../hooks/doorAdmin', () => ({ useDoorAdmin: () => mockAdmin }));
 jest.mock('../hooks/door', () => ({ currentLocation: async (opts) => { mockLocateCalls.push(opts); return mockLocate(opts); } }));
 jest.mock('../hooks/billing', () => ({
-  useHouseholdsDirectory: () => { mockDirectoryReads += 1; return { data: mockDirectory, loading: false, error: null, isRefreshing: mockDirectoryRefreshing }; },
+  useHouseholdsDirectory: () => { mockDirectoryReads += 1; return { data: mockDirectory, loading: false, error: mockDirectoryError, isRefreshing: mockDirectoryRefreshing }; },
 }));
 jest.mock('../components/door/DoorCard', () => ({
   __esModule: true,
@@ -23,6 +23,7 @@ let mockLocateCalls;
 let mockDirectory;
 let mockDirectoryReads;
 let mockDirectoryRefreshing;
+let mockDirectoryError;
 let saves;
 let paused;
 let unpaused;
@@ -62,6 +63,7 @@ beforeEach(() => {
   mockLocateCalls = [];
   mockDirectoryReads = 0;
   mockDirectoryRefreshing = false;
+  mockDirectoryError = null;
   mockDirectory = [
     { id: 'hh-hart', name: 'Hart family', status: 'active', athletes: [{ id: 'dana', name: 'Dana Hart', packageName: 'Elite' }] },
     { id: 'hh-lee', name: 'Lee family', status: 'active', athletes: [{ id: 'sam', name: 'Sam Lee', packageName: '8 tokens' }, { id: 'kim', name: 'Kim Lee', packageName: 'Elite' }] },
@@ -384,43 +386,38 @@ describe('Paused families', () => {
   });
 
   /*
-   * Review 2026-11-17 (F4): the search can offer a cached directory, minutes
-   * old. The pause goes to the family the FRESH read puts the athlete in:
-   * Pause waits for that read, and an athlete it no longer lists pauses nobody.
+   * Owner 2026-11-18 (review DOOR-1..3): Pause pauses the family the picked
+   * row names, at once, as before 3d5815f. It never waits on the directory
+   * re-reading, and a directory read that fails or comes back empty offline
+   * never leaves it spinning or says the athlete is gone.
    */
-  test('Pause waits while the directory re-reads, then pauses the family the fresh read names', async () => {
+  test("Pause pauses the picked row's family at once, while the directory re-reads", async () => {
     mockDirectoryRefreshing = true;
     const r = await mount();
     await search(r, 'sam');
     await pick(r, 'Sam Lee');
-    expect(r.button('Pause').disabled).toBe(true);
-    await act(async () => { r.button('Pause').click(); });
-    expect(paused).toEqual([]);
-    // Sam moved to the Hart family since the cached copy.
-    mockDirectory = [
-      { id: 'hh-hart', name: 'Hart family', status: 'active', athletes: [{ id: 'dana', name: 'Dana Hart' }, { id: 'sam', name: 'Sam Lee' }] },
-      { id: 'hh-lee', name: 'Lee family', status: 'active', athletes: [{ id: 'kim', name: 'Kim Lee' }] },
-    ];
-    mockDirectoryRefreshing = false;
-    await r.rerender(<AdminDoor bare role="owner" onBack={() => saves.push('back')} />);
-    expect(r.text()).toContain('Pause door unlocking for Hart family?');
+    expect(r.text()).toContain('Pause door unlocking for Lee family?');
+    expect(r.button('Pause').disabled).toBe(false);
     await r.click('Pause');
-    expect(paused).toEqual(['hh-hart']);
+    expect(paused).toEqual(['hh-lee']);
     await r.unmount();
   });
 
-  test('an athlete the fresh directory no longer lists: nothing to pause, and it says so', async () => {
-    mockDirectoryRefreshing = true;
+  test.each([
+    ['fails', { data: null, error: new Error('offline') }],
+    ['comes back empty offline', { data: [], error: null }],
+  ])('a directory read that %s after the pick never blocks Pause', async (_, after) => {
     const r = await mount();
     await search(r, 'sam');
     await pick(r, 'Sam Lee');
-    mockDirectory = mockDirectory.filter((h) => h.id !== 'hh-lee');
-    mockDirectoryRefreshing = false;
+    mockDirectory = after.data;
+    mockDirectoryError = after.error;
     await r.rerender(<AdminDoor bare role="owner" onBack={() => saves.push('back')} />);
-    expect(r.text()).toContain("Sam Lee isn't on file any more. Cancel and search again.");
-    expect(r.button('Pause').disabled).toBe(true);
-    await act(async () => { r.button('Pause').click(); });
-    expect(paused).toEqual([]);
+    expect(r.text()).toContain('Pause door unlocking for Lee family?');
+    expect(r.text()).not.toContain("isn't on file");
+    expect(r.button('Pause').disabled).toBe(false);
+    await r.click('Pause');
+    expect(paused).toEqual(['hh-lee']);
     await r.unmount();
   });
 

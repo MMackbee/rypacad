@@ -1,11 +1,11 @@
-import React, { useCallback, useEffect, useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { TOUCH_MIN, color, font, radius } from '../../tokens';
 import Button from '../Button';
 import StatusBadge from '../StatusBadge';
 import AthleteSearch from '../staffBooking/AthleteSearch';
 import { Body, Card, SectionLabel } from '../Primitives';
 import { useHouseholdsDirectory } from '../../hooks/billing';
-import { eventRow, pausedRow, pauseTarget } from '../../data/doorAdmin';
+import { eventRow, pausedRow } from '../../data/doorAdmin';
 
 const TONE_COLOR = { green: color.primary, red: color.error, yellow: color.secondary, neutral: color.textSecondary };
 
@@ -68,15 +68,13 @@ export function DoorActivityCard({ events, error, onRefresh }) {
 /**
  * Loads the households directory (every household and every athlete) and
  * hands it up. Mounted only while the card needs it (review 2026-11-17
- * app-9): a paused family to name, or the Pause search in use. `fresh` is
- * false while the shared cache's copy shows and the read is still running.
+ * app-9): a paused family to name, or the Pause search in use.
  */
 function DirectoryLoader({ onData }) {
-  const { data, isRefreshing } = useHouseholdsDirectory();
-  const fresh = Boolean(data) && isRefreshing !== true;
+  const { data } = useHouseholdsDirectory();
   useEffect(() => {
-    onData(data || null, fresh);
-  }, [data, fresh, onData]);
+    onData(data || null);
+  }, [data, onData]);
   return null;
 }
 
@@ -87,18 +85,11 @@ function DirectoryLoader({ onData }) {
  * (the rules allow no second pause doc); a family another staff member
  * paused meanwhile reads "already paused" (onPause answers 'already').
  * Family names come from the households directory, loaded only when a
- * family is paused or the search is first used - not on every open. The
- * pick may come from a cached copy of it (review 2026-11-17): Pause waits
- * for the fresh read and pauses the family THAT puts the athlete in.
+ * family is paused or the search is first used - not on every open.
  */
 export function DoorPausesCard({ pauses, onPause, onUnpause }) {
   const [searching, setSearching] = useState(false);
   const [directory, setDirectory] = useState(null);
-  const [fresh, setFresh] = useState(false);
-  const onDirectory = useCallback((data, isFresh) => {
-    setDirectory(data);
-    setFresh(isFresh);
-  }, []);
   const [picked, setPicked] = useState(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState(null);
@@ -108,7 +99,6 @@ export function DoorPausesCard({ pauses, onPause, onUnpause }) {
   const pausedIds = new Set((pauses || []).map((p) => p.householdId));
   const pausedAthletes = (directory || []).filter((h) => pausedIds.has(h.id)).flatMap((h) => (h.athletes || []).map((a) => a.id));
   const rows = (pauses || []).map((p) => pausedRow(p, names));
-  const target = picked && fresh ? pauseTarget(directory, picked.athleteId) : null;
 
   const run = async (fn) => {
     setBusy(true);
@@ -126,10 +116,10 @@ export function DoorPausesCard({ pauses, onPause, onUnpause }) {
   };
 
   const confirmPause = async () => {
-    if (!target) return;
-    const family = target.householdName || 'That family';
+    if (!picked?.householdId) return;
+    const family = picked.householdName || 'That family';
     let answer = null;
-    if (await run(async () => { answer = await onPause(target.householdId); })) {
+    if (await run(async () => { answer = await onPause(picked.householdId); })) {
       setPicked(null);
       if (answer === 'already') setNote(`${family} is already paused.`);
     }
@@ -137,7 +127,7 @@ export function DoorPausesCard({ pauses, onPause, onUnpause }) {
 
   return (
     <Card large>
-      {needsDirectory ? <DirectoryLoader onData={onDirectory} /> : null}
+      {needsDirectory ? <DirectoryLoader onData={setDirectory} /> : null}
       <SectionLabel style={{ marginBottom: 8 }}>Paused families</SectionLabel>
       {rows.length ? (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
@@ -168,16 +158,13 @@ export function DoorPausesCard({ pauses, onPause, onUnpause }) {
       {picked ? (
         <div style={{ border: `1px solid ${color.border}`, borderRadius: radius.input, padding: 12 }}>
           <div style={{ font: `600 13px ${font.body}`, color: color.text }}>
-            Pause door unlocking for {(target || picked).householdName || picked.name}?
+            Pause door unlocking for {picked.householdName || picked.name}?
           </div>
           <Body size={12} style={{ marginTop: 4 }}>
-            {fresh && !target
-              ? `${picked.name} isn't on file any more. Cancel and search again.`
-              : 'Nobody in the family can unlock the door until you unpause it. Staff can still let them in.'}
+            Nobody in the family can unlock the door until you unpause it. Staff can still let them in.
           </Body>
           <div style={{ display: 'flex', gap: 10, marginTop: 12 }}>
-            {/* Waits (a spinner) for the fresh directory: the pause goes where the athlete lives now. */}
-            <Button variant="dangerOutline" height={44} loading={busy || !fresh} disabled={fresh && !target} onClick={confirmPause} style={{ boxShadow: 'none', font: `600 14px ${font.body}` }}>
+            <Button variant="dangerOutline" height={44} loading={busy} onClick={confirmPause} style={{ boxShadow: 'none', font: `600 14px ${font.body}` }}>
               Pause
             </Button>
             <Button variant="outline" height={44} disabled={busy} onClick={() => setPicked(null)} style={{ boxShadow: 'none', font: `600 14px ${font.body}` }}>
