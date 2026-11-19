@@ -1613,8 +1613,26 @@ function buildDocs(portal) {
     ],
   ]);
 
+  // The workshop card (hq card 5, docs/portal/TEAM.md "Academy events"): one enabled event three days out,
+  // 8:00 to 8:45 PM Central, and its link document (an example.com placeholder, never a real meeting).
+  // No sign-up is seeded, so the card starts as "I'm coming".
+  const events = new Map();
+  const eventLinks = new Map();
+  {
+    const out = new Date(Date.now() + 3 * 86400000);
+    const day = new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Chicago' }).format(out); // YYYY-MM-DD in Central
+    const [y, m, d] = day.split('-').map(Number);
+    // 8 PM Central is 01:00 or 02:00 UTC the next day (CDT or CST): take the one that reads 20:00 in Chicago.
+    const startsAt = [1, 2].map((h) => new Date(Date.UTC(y, m - 1, d + 1, h, 0, 0)))
+      .find((t) => new Intl.DateTimeFormat('en-GB', { timeZone: 'America/Chicago', hour: '2-digit', hour12: false }).format(t) === '20');
+    events.set('workshop-1', { enabled: true, title: 'RYP Academy Parent Workshop 1 of 4', startsAt, endsAt: new Date(startsAt.getTime() + 45 * 60000) });
+    eventLinks.set('workshop-1', { meetUrl: 'https://example.com/workshop-link-placeholder' });
+  }
+
   return {
     packages,
+    events,
+    eventLinks,
     sessions,
     households,
     athletes,

@@ -3621,3 +3621,54 @@ The lane's calls (not rulings; change on the owner's word):
   their own useAuthSession before reading the role, as SpecialistDayRoute
   does: the first paint was the plain coach's bar / a writable roster for
   one users-doc read.
+
+## Academy events: the workshop card (hq card 5, 2026-11-19)
+
+One card on the parent home and the athlete home for an academy event held
+online (the first: the parent workshop, Mon Nov 23, 8:00 to 8:45 PM Central;
+three more follow). Rules and frontend only: no Cloud Functions change, no
+email or push from the app, no booking or token, no capacity, no staff
+screen. The owner writes `events` and `eventLinks` in the Firebase console;
+nothing about one event is in the code.
+
+Documents (all new; `firestore.rules`, three blocks at the end):
+
+- `events/{eventId}`: `enabled` (bool), `title` (string), `startsAt`
+  (timestamp), `endsAt` (timestamp); optional `summary` (string), `notice`
+  (string; replaces the card's default recording and cameras notice),
+  `recordingUrl` (string; https only). Read: any signed-in account with a
+  `users` doc and a role, when `enabled` is true (a list must filter on
+  `enabled == true`); owner, ops and mental read any. Write: nobody from the
+  client; the console only.
+- `eventLinks/{eventId}`: `meetUrl` (string; https only). Read (get only): an
+  account whose own sign-up `eventSignups/{eventId}_{uid}` exists and says so
+  (its `uid` is the caller and its `eventId` this event: ids like `a_b` + `c`
+  and `a` + `b_c` collide); owner, ops and mental get and list. Write: the
+  console only.
+- `eventSignups/{eventId}_{uid}`: `eventId` (string), `uid` (string),
+  `email` (string, the token's email claim, null when it has none), `name`
+  (string, the `users` doc's `displayName`, null when absent), `createdAt`
+  (timestamp, the request time): exactly those five keys. Create: the person,
+  for an enabled event that has not ended. Delete: the person (takes it
+  back). Update: nobody. Read: the person (a list must filter on `uid`);
+  owner, ops and mental. A coach is not staff for this feature.
+
+The card, by state (times in America/Chicago; `data/events.js` decides,
+`hooks/events.js` reads, `components/events/EventCard.js` renders):
+
+- Before the end, not signed up: title, time line, summary, an invite line
+  and "I'm coming"; after the start, "Happening now" instead of the invite.
+- Signed up, no link, before the start: "You're in" and "I can't come"; from
+  two hours before the start also "Check for the link".
+- Signed up, link set: "You're in." and "Join on Google Meet" (a new tab)
+  until the end; "I can't come" only until the start. A late arrival who
+  signs up after the start gets Join at once.
+- Signed up, no link, started: "The link isn't here yet" and "Check for the
+  link".
+- The notice shows under the content in every state before the end.
+- After the end: nothing, unless `recordingUrl` is an https address; then the
+  title and "Watch the recording" for every signed-in family.
+- Seed mode, the onboarding walkthrough, a disabled or unreadable event and a
+  failed first read all show nothing.
+
+The real Meet link never goes in the repo. Probe: `scripts/rules-probes/events.mjs`.
