@@ -22,6 +22,7 @@ import { useHousehold } from '../hooks';
 import { useFamilyConsents } from '../hooks/mentalConsent';
 import ConsentHomeCard from '../components/consent/ConsentHomeCard';
 import DoorCard from '../components/door/DoorCard';
+import EventCard from '../components/events/EventCard';
 import ConsentLine from '../components/consent/ConsentLine';
 import { ALL_PACKAGES, siblingDiscountApplies, siblingPlan } from '../data/packages';
 import { contractEnabled } from '../data/contractFlag';
@@ -196,6 +197,7 @@ export default function ParentDashboard({
 
         {/* The facility door (2026-11-17 spec 7): hidden unless the server says Unlock or a reason the family can act on. */}
         <DoorCard practice={practice} />
+        <EventCard practice={practice} />
         <ConsentHomeCard rows={consents.data?.rows} />
         {children.map((child) => (
           <ChildCard

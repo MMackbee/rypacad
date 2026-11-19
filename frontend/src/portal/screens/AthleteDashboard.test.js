@@ -17,6 +17,11 @@ jest.mock('../components/door/DoorCard', () => ({
   __esModule: true,
   default: ({ practice, selfWording }) => <div data-door-card={JSON.stringify({ practice: Boolean(practice), selfWording: Boolean(selfWording) })} />,
 }));
+// The workshop card (hq card 5): a stand-in that shows where it mounts and what it was handed.
+jest.mock('../components/events/EventCard', () => ({
+  __esModule: true,
+  default: ({ practice }) => <div data-event-card={JSON.stringify({ practice: Boolean(practice) })} />,
+}));
 
 let mockContract;
 let mockOnboarding = null;
@@ -252,6 +257,16 @@ test('the old "Book your Diagnostic" card never shows from live data (assessment
   expect(r.text()).not.toContain('Book your Diagnostic');
   await r.unmount();
   mockOldCaptureFlag = true;
+});
+
+test('the workshop card (hq card 5): directly after the door card, practice handed through', async () => {
+  mockContract = null;
+  const r = await renderScreen(<AthleteDashboard bare />);
+  expect(r.container.querySelector('[data-door-card]').nextElementSibling.getAttribute('data-event-card')).toBe(JSON.stringify({ practice: false }));
+  await r.unmount();
+  const practice = await renderScreen(<AthleteDashboard bare practice />);
+  expect(practice.container.querySelector('[data-event-card]').getAttribute('data-event-card')).toBe(JSON.stringify({ practice: true }));
+  await practice.unmount();
 });
 
 test('the door card (2026-11-17): near the top; the rules in the second person only for an adult login', async () => {
