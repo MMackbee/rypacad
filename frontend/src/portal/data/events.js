@@ -23,6 +23,10 @@ export const HAPPENING_NOW = 'Happening now. Tap "I\'m coming" to get the Google
 export const IN_WITH_LINK = "You're in.";
 export const IN_NO_LINK_STARTED = "You're in. The link isn't here yet. Check again in a minute.";
 export const WRITE_FAILED = "That didn't save. Check your connection and try again.";
+/** Under the button after "Check for the link" finds none: said once, quietly, and gone when the card's state changes. */
+export const NO_LINK_YET = 'No link yet. Check again in a few minutes.';
+/** Read by screen readers after the label of a link that opens a new tab; never seen. */
+export const NEW_TAB_HINT = ' (opens in a new tab)';
 /** The words beside the link when the event document has no notice of its own (the owner has yet to approve them). */
 export const DEFAULT_NOTICE =
   'This workshop is recorded and the recording will be posted publicly on rypacademy.com. Microphones and cameras stay off; ask questions in the chat. Athletes under 18 join with a parent.';
@@ -133,7 +137,7 @@ export function nextChange(event, now, signedUp) {
  * @param {object} event  normalizeEvent's answer.
  * @param {{signedUp: boolean, meetUrl: ?string, now: number}} state
  * @returns {{show: boolean, kind?: string, title?: string, timeLine?: ?string, summary?: ?string, notice?: ?string,
- *   status?: ?string, primary?: ?{action: string, label: string, href?: string}, quiet?: Array<{action: string, label: string}>}}
+ *   status?: ?string, primary?: ?{action: string, label: string, href?: string, fill?: boolean}, quiet?: Array<{action: string, label: string}>}}
  */
 export function eventView(event, { signedUp, meetUrl, now }) {
   if (!event) return { show: false };
@@ -154,11 +158,13 @@ export function eventView(event, { signedUp, meetUrl, now }) {
       primary: { action: 'come', label: BUTTON_COME }, quiet: [],
     };
   }
-  const quiet = [];
-  if (!started) quiet.push({ action: 'back', label: BUTTON_BACK });
+  const back = started ? [] : [{ action: 'back', label: BUTTON_BACK }];
   if (isHttps(meetUrl)) {
-    return { ...base, kind: 'in', status: IN_WITH_LINK, primary: { action: 'join', label: BUTTON_JOIN, href: meetUrl.trim() }, quiet };
+    // Join is the one thing a signed-up person came for: the only button with the green fill.
+    return { ...base, kind: 'in', status: IN_WITH_LINK, primary: { action: 'join', label: BUTTON_JOIN, href: meetUrl.trim(), fill: true }, quiet: back };
   }
-  if (started || event.startsMs - now <= CHECK_FROM_MS) quiet.push({ action: 'check', label: BUTTON_CHECK });
+  // "Check for the link" is what a person who opens the card in the last two hours came for: it comes first.
+  const check = started || event.startsMs - now <= CHECK_FROM_MS ? [{ action: 'check', label: BUTTON_CHECK }] : [];
+  const quiet = [...check, ...back];
   return { ...base, kind: 'in', status: started ? IN_NO_LINK_STARTED : inNoLinkLine(weekday, onTheDay), primary: null, quiet };
 }

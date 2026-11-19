@@ -30,7 +30,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { collection, deleteDoc, doc, getDoc, getDocs, query, serverTimestamp, setDoc, where } from 'firebase/firestore';
 import { db } from '../../firebase';
 import { isLive, requireUser } from './live';
-import { WRITE_FAILED, eventView, nextChange, normalizeEvent, visibleEvents } from '../data/events';
+import { NO_LINK_YET, WRITE_FAILED, eventView, isHttps, nextChange, normalizeEvent, visibleEvents } from '../data/events';
 
 /** A re-read on the page coming back into view waits at least this long after the last read. */
 export const RECHECK_MIN_MS = 30000;
@@ -70,7 +70,7 @@ async function readAll(now) {
 
 /**
  * @param {{practice?: boolean}} [opts]
- * @returns {{cards: Array<{id: string, view: object, busy: ?string, error: ?string}>,
+ * @returns {{cards: Array<{id: string, view: object, busy: ?string, error: ?string, note: ?string}>,
  *   signUp: (id: string) => Promise<void>, takeBack: (id: string) => Promise<void>, checkLink: (id: string) => Promise<void>}}
  */
 export function useEvents({ practice = false } = {}) {
@@ -80,6 +80,9 @@ export function useEvents({ practice = false } = {}) {
   const [now, setNow] = useState(() => Date.now());
   const [busy, setBusy] = useState({});
   const [errors, setErrors] = useState({});
+  // The quiet line after a check that found no link: {text, status} per event, shown while the card still says `status`.
+  const [notes, setNotes] = useState({});
+  const cardsRef = useRef([]);
   const mounted = useRef(true);
   const readSeq = useRef(0);
   const lastRead = useRef(0);
@@ -133,6 +136,7 @@ export function useEvents({ practice = false } = {}) {
     inFlight.current.add(id);
     setBusy((b) => ({ ...b, [id]: kind }));
     setErrors((e) => ({ ...e, [id]: null }));
+    setNotes((n) => ({ ...n, [id]: null }));
     try {
       await work();
     } catch (err) {
@@ -191,7 +195,11 @@ export function useEvents({ practice = false } = {}) {
   const checkLink = useCallback((id) => run(id, 'check', async () => {
     const url = await readLink(id);
     readSeq.current += 1;
-    if (mounted.current) setData((d) => d && ({ ...d, links: { ...d.links, [id]: url } }));
+    if (!mounted.current) return;
+    setData((d) => d && ({ ...d, links: { ...d.links, [id]: url } }));
+    // No link yet: say so, tied to what the card says now, so any change of state takes the line away.
+    const shown = cardsRef.current.find((c) => c.id === id);
+    if (!isHttps(url) && shown) setNotes((n) => ({ ...n, [id]: { text: NO_LINK_YET, status: shown.view.status } }));
   }), [run]);
 
   const cards = live && data
@@ -203,6 +211,8 @@ export function useEvents({ practice = false } = {}) {
         error: errors[e.id] || null,
       }))
       .filter((c) => c.view.show)
+      .map((c) => ({ ...c, note: notes[c.id] && notes[c.id].status === c.view.status ? notes[c.id].text : null }))
     : [];
+  cardsRef.current = cards;
   return { cards, signUp, takeBack, checkLink };
 }

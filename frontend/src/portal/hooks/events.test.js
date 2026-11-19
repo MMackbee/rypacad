@@ -502,7 +502,7 @@ test('the card moves between states by timer, with no network call', async () =>
   expect(card(h).view.quiet.map((q) => q.action)).toEqual(['back']);
   mockLog.length = 0;
   await advance(3600000); // two hours to go: Check for the link appears
-  expect(card(h).view.quiet.map((q) => q.action)).toEqual(['back', 'check']);
+  expect(card(h).view.quiet.map((q) => q.action)).toEqual(['check', 'back']);
   await advance(2 * 3600000); // exactly the start: the "not here yet" line, no "I can't come"
   expect(card(h).view.status).toBe("You're in. The link isn't here yet. Check again in a minute.");
   expect(card(h).view.quiet.map((q) => q.action)).toEqual(['check']);

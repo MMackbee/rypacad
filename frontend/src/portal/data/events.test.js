@@ -5,7 +5,7 @@
  */
 import {
   BUTTON_BACK, BUTTON_CHECK, BUTTON_COME, BUTTON_JOIN, BUTTON_RECORDING, CHECK_FROM_MS, DEFAULT_NOTICE, HAPPENING_NOW,
-  IN_NO_LINK_STARTED, IN_WITH_LINK, centralDay, eventView, inNoLinkLine, inviteLine, isHttps, nextChange, normalizeEvent,
+  IN_NO_LINK_STARTED, IN_WITH_LINK, NEW_TAB_HINT, NO_LINK_YET, centralDay, eventView, inNoLinkLine, inviteLine, isHttps, nextChange, normalizeEvent,
   timeLine, toMs, visibleEvents, weekdayName,
 } from './events';
 
@@ -143,14 +143,14 @@ describe('eventView: the state table', () => {
     expect(view({ signedUp: true, now: T.twoHours - SEC }).quiet.map((q) => q.action)).toEqual(['back']);
     const near = view({ signedUp: true, now: T.twoHours });
     expect(near.status).toBe("You're in. The link appears here before we start.");
-    expect(near.quiet).toEqual([{ action: 'back', label: BUTTON_BACK }, { action: 'check', label: BUTTON_CHECK }]);
-    expect(view({ signedUp: true, now: START - SEC }).quiet.map((q) => q.action)).toEqual(['back', 'check']);
+    expect(near.quiet).toEqual([{ action: 'check', label: BUTTON_CHECK }, { action: 'back', label: BUTTON_BACK }]);
+    expect(view({ signedUp: true, now: START - SEC }).quiet.map((q) => q.action)).toEqual(['check', 'back']);
     expect(inNoLinkLine('Monday', true)).toBe("You're in. The link appears here before we start.");
   });
   it('signed up, link set, before the end: Join, and "I can\'t come" only until the start', () => {
     const before = view({ signedUp: true, meetUrl: LINK, now: START - SEC });
     expect(before.status).toBe(IN_WITH_LINK);
-    expect(before.primary).toEqual({ action: 'join', label: BUTTON_JOIN, href: LINK });
+    expect(before.primary).toEqual({ action: 'join', label: BUTTON_JOIN, href: LINK, fill: true });
     expect(before.quiet).toEqual([{ action: 'back', label: BUTTON_BACK }]);
     const started = view({ signedUp: true, meetUrl: LINK, now: START });
     expect(started.primary.action).toBe('join');
@@ -165,6 +165,16 @@ describe('eventView: the state table', () => {
       expect(v.primary).toBeNull();
       expect(v.quiet).toEqual([{ action: 'check', label: BUTTON_CHECK }]);
     }
+  });
+  it('only Join takes the green fill: "I\'m coming" and "Watch the recording" do not', () => {
+    expect(view({ signedUp: true, meetUrl: LINK, now: START - SEC }).primary.fill).toBe(true);
+    expect(view({ now: START - SEC }).primary.fill).toBeUndefined();
+    expect(view({ now: START + SEC }).primary.fill).toBeUndefined();
+    expect(view({ now: END }, ev({ recordingUrl: 'https://example.com/r' })).primary.fill).toBeUndefined();
+  });
+  it('the words of this round: the quiet line and the hidden new-tab hint', () => {
+    expect(NO_LINK_YET).toBe('No link yet. Check again in a few minutes.');
+    expect(NEW_TAB_HINT).toBe(' (opens in a new tab)');
   });
   it('a late arrival: signed up after the start with a link readable shows Join at once', () => {
     expect(view({ signedUp: true, meetUrl: LINK, now: START + 20 * 60000 }).primary.action).toBe('join');
