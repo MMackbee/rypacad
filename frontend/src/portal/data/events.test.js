@@ -53,7 +53,7 @@ describe('timeLine', () => {
 describe('isHttps and toMs', () => {
   it.each([
     ['https://example.com/x', true], ['  https://example.com/x ', true], ['HTTPS://example.com/x', true],
-    ['http://example.com/x', false], ['meet.google.com/abc', false], [SCRIPT_URL, false], ['https://', false],
+    ['http://example.com/x', false], ['example.com/abc', false], [SCRIPT_URL, false], ['https://', false],
     ['https:// spaced', false], ['', false], [null, false], [undefined, false], [42, false], [{}, false],
   ])('%j -> %s', (url, ok) => expect(isHttps(url)).toBe(ok));
   it('reads a Timestamp, a Date and a number, and nothing else', () => {
@@ -184,7 +184,7 @@ describe('eventView: the state table', () => {
     expect(view({ now: END - SEC }, rec).kind).toBe('invite');
   });
   it('a link that is not https is not set', () => {
-    for (const bad of ['http://example.com/x', 'meet.google.com/x', SCRIPT_URL, '', null]) {
+    for (const bad of ['http://example.com/x', 'example.com/x', SCRIPT_URL, '', null]) {
       const v = view({ signedUp: true, meetUrl: bad, now: START + SEC });
       expect(v.primary).toBeNull();
       expect(v.status).toBe(IN_NO_LINK_STARTED);

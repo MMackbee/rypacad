@@ -30,6 +30,8 @@ let mockStore;
 let mockFail;
 let mockLog;
 let mockHold;
+let mockHoldList;
+let mockHoldLink;
 const UID = 'u-probe';
 const LINK = 'https://example.com/workshop-link-placeholder';
 // Monday Nov 23 2026, 8:00 to 8:45 PM Central.
@@ -40,11 +42,13 @@ const SEC = 1000;
 const rows = (col) => Object.entries(mockStore[col]).map(([id, data]) => ({ id, data: () => data }));
 async function mockGetDocs(q) {
   mockLog.push(['list', q.col, q.where.map((w) => [w.field, w.op, w.value])]);
+  if (mockHoldList && q.col === 'events') await mockHoldList;
   if (mockFail.has(q.col)) throw Object.assign(new Error('denied'), { code: 'permission-denied' });
   return { docs: rows(q.col).filter((r) => q.where.every((w) => r.data()[w.field] === w.value)) };
 }
 async function mockGetDoc(ref) {
   mockLog.push(['get', `${ref.col}/${ref.id}`]);
+  if (mockHoldLink && ref.col === 'eventLinks') await mockHoldLink;
   if (mockFail.has(ref.col)) throw Object.assign(new Error('denied'), { code: 'permission-denied' });
   const data = mockStore[ref.col][ref.id];
   return { exists: () => data !== undefined, data: () => data };
@@ -57,6 +61,7 @@ async function mockSetDoc(ref, data) {
 }
 async function mockDeleteDoc(ref) {
   mockLog.push(['delete', `${ref.col}/${ref.id}`]);
+  if (mockHold) await mockHold;
   if (mockFail.has('deleteDoc')) throw Object.assign(new Error('offline'), { code: 'unavailable' });
   delete mockStore[ref.col][ref.id];
 }
@@ -77,9 +82,16 @@ beforeEach(() => {
   mockFail = new Set();
   mockLog = [];
   mockHold = null;
+  mockHoldList = null;
+  mockHoldLink = null;
 });
-afterEach(() => { jest.useRealTimers(); });
+// A test that fails before its own unmount must not leave a listener on document for the next one.
+afterEach(async () => {
+  for (const close of [...openMounts]) await close();
+  jest.useRealTimers();
+});
 
+const openMounts = new Set();
 async function mount(opts) {
   const out = { current: null };
   function Probe() {
@@ -88,7 +100,12 @@ async function mount(opts) {
   }
   const root = createRoot(document.createElement('div'));
   await act(async () => { root.render(<Probe />); });
-  return { out, unmount: () => act(async () => root.unmount()) };
+  const unmount = async () => {
+    openMounts.delete(unmount);
+    await act(async () => root.unmount());
+  };
+  openMounts.add(unmount);
+  return { out, unmount };
 }
 const lists = () => mockLog.filter(([k]) => k === 'list');
 const gets = () => mockLog.filter(([k]) => k === 'get');
@@ -283,17 +300,93 @@ test('a double tap sends one write, and the button is busy while it runs', async
   await h.unmount();
 });
 
-test('nothing is set after unmount', async () => {
-  let release;
-  mockHold = new Promise((r) => { release = r; });
-  const errors = jest.spyOn(console, 'error').mockImplementation(() => {});
-  const h = await mount();
-  let p;
-  await act(async () => { p = h.out.current.signUp('e1'); await Promise.resolve(); });
-  await h.unmount();
-  await act(async () => { release(); await p; });
-  expect(errors).not.toHaveBeenCalled();
-  errors.mockRestore();
+// React 18 no longer warns about a state update after unmount, so the guards are watched directly: every
+// state setter the hook creates is wrapped, and a call after the unmount is counted. The first count proves
+// the wrapper sees the hook's calls at all.
+function watchSetters() {
+  const real = React.useState;
+  const wrapped = new WeakMap();
+  const seen = { before: 0, after: 0, unmounted: false };
+  const spy = jest.spyOn(React, 'useState').mockImplementation((init) => {
+    const [value, set] = real(init);
+    if (!wrapped.has(set)) {
+      wrapped.set(set, (...args) => {
+        if (seen.unmounted) seen.after += 1; else seen.before += 1;
+        return set(...args);
+      });
+    }
+    return [value, wrapped.get(set)];
+  });
+  return { seen, stop: () => spy.mockRestore() };
+}
+const settle = async () => { for (let i = 0; i < 25; i += 1) await Promise.resolve(); };
+
+describe('nothing is set after unmount', () => {
+  async function leaveMidFlight(start, release) {
+    const watch = watchSetters();
+    try {
+      const h = await mount();
+      let p;
+      await act(async () => { p = start(h); await Promise.resolve(); });
+      expect(watch.seen.before).toBeGreaterThan(0);
+      await h.unmount();
+      watch.seen.unmounted = true;
+      await act(async () => { release(); await p; await settle(); });
+      return watch.seen.after;
+    } finally {
+      watch.stop();
+    }
+  }
+
+  test('a sign-up that is written after the card left', async () => {
+    let release;
+    mockHold = new Promise((r) => { release = r; });
+    expect(await leaveMidFlight((h) => h.out.current.signUp('e1'), () => release())).toBe(0);
+    expect(writes()).toHaveLength(1);
+  });
+
+  test('a sign-up that fails after the card left', async () => {
+    let release;
+    mockHold = new Promise((r) => { release = r; });
+    mockFail.add('setDoc');
+    expect(await leaveMidFlight((h) => h.out.current.signUp('e1'), () => release())).toBe(0);
+  });
+
+  test('a take-back that is written after the card left', async () => {
+    let release;
+    mockHold = new Promise((r) => { release = r; });
+    mockStore.eventSignups[`e1_${UID}`] = mineFor('e1');
+    expect(await leaveMidFlight((h) => h.out.current.takeBack('e1'), () => release())).toBe(0);
+    expect(writes()).toHaveLength(1);
+  });
+
+  test('a link check that comes back after the card left', async () => {
+    mockStore.eventSignups[`e1_${UID}`] = mineFor('e1');
+    jest.setSystemTime(START + SEC);
+    let release;
+    const check = (h) => {
+      mockHoldLink = new Promise((r) => { release = r; }); // held after the mount's own read, so only the tap waits
+      return h.out.current.checkLink('e1');
+    };
+    expect(await leaveMidFlight(check, () => release())).toBe(0);
+  });
+
+  test('a read that comes back after the card left', async () => {
+    let release;
+    mockHoldList = new Promise((r) => { release = r; });
+    const watch = watchSetters();
+    try {
+      const h = await mount();
+      expect(lists().map((l) => l[1])).toEqual(['events']);
+      await h.unmount();
+      watch.seen.unmounted = true;
+      await act(async () => { release(); await settle(); });
+      expect(lists().map((l) => l[1])).toEqual(['events', 'eventSignups']);
+      expect(watch.seen.after).toBe(0);
+    } finally {
+      watch.stop();
+    }
+  });
 });
 
 test('"Check for the link" re-reads that link', async () => {
