@@ -54,9 +54,13 @@ export async function taskEvents() {
   for (const u of Object.values(U)) tk[u] = token(u, u === U.noEmail ? { email_verified: false } : { email: em(u), email_verified: true });
   const staff = { owner: tk[U.owner], ops: tk[U.ops], mental: tk[U.mental] };
   const link = (auth, id = EV) => getAs(auth, 'eventLinks', id);
-  // Every sign-up id a case below might leave behind, removed at the end.
-  const leftovers = [U.parent, U.athlete, U.other, U.noEmail].flatMap((u) => [EV, LATE].map((e) => `${e}_${u}`)).concat(['a_b_c', 'a_b_x']);
+  // The three collections are this module's alone, so everything in them goes, before the cases and again at the end:
+  // a refused case that slips through a looser rule leaves a document no fixed id list would name.
+  const wipe = async () => {
+    for (const col of ['events', 'eventLinks', 'eventSignups']) for (const id of (await listIds('owner', col, {})).ids) await del(col, id);
+  };
   try {
+    await wipe();
     const roles = { [U.parent]: 'parent', [U.athlete]: 'athlete', [U.other]: 'parent', [U.mental]: 'mental', [U.owner]: 'owner', [U.ops]: 'ops',
       [U.coach]: 'coach', [U.c]: 'parent', [U.bc]: 'parent', [U.noEmail]: 'parent' };
     for (const [u, role] of Object.entries(roles)) {
@@ -174,10 +178,7 @@ export async function taskEvents() {
     expect('collision: c is refused the link of event a too', await link(tk[U.c], A), 403);
     expect('collision: b_c cannot sign up for event a (the doc id is taken; 409)', await signUp(tk[U.bc], U.bc, A), 409);
   } finally {
-    for (const id of leftovers) await del('eventSignups', id);
-    for (const id of Object.keys(events)) { await del('events', id); await del('eventLinks', id); }
-    await del('events', 'ev-new-probe');
-    await del('eventLinks', 'ev-new-probe');
+    await wipe();
     for (const u of Object.values(U)) await del('users', u);
   }
 }
