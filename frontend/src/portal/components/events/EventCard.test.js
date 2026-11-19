@@ -18,6 +18,7 @@ jest.mock('firebase/firestore', () => ({
   },
   getDoc: async (ref) => {
     if (mockFail === ref.col) throw new Error('denied');
+    if (mockHoldLink && ref.col === 'eventLinks') await mockHoldLink;
     const d = mockStore[ref.col][ref.id];
     return { exists: () => d !== undefined, data: () => d };
   },
@@ -43,6 +44,7 @@ let mockStore;
 let mockFail;
 let mockWrites;
 let mockHold;
+let mockHoldLink;
 const LINK = 'https://example.com/workshop-link-placeholder';
 // Monday Nov 23 2026, 8:00 to 8:45 PM Central.
 const START = Date.UTC(2026, 10, 24, 2, 0, 0);
@@ -53,7 +55,7 @@ const signedUp = () => ({ eventId: 'e1', uid: 'u-probe', email: 'probe@example.c
 import React, { act } from 'react';
 import { renderScreen } from '../../screens/testRender';
 import EventCard from './EventCard';
-import { DEFAULT_NOTICE, WRITE_FAILED } from '../../data/events';
+import { DEFAULT_NOTICE, NEW_TAB_HINT, NO_LINK_YET, WRITE_FAILED } from '../../data/events';
 
 beforeEach(() => {
   jest.useFakeTimers('modern');
@@ -62,13 +64,16 @@ beforeEach(() => {
   mockFail = null;
   mockWrites = [];
   mockHold = null;
+  mockHoldLink = null;
   mockStore = { events: { e1: event() }, eventSignups: {}, eventLinks: { e1: { meetUrl: LINK } }, users: { 'u-probe': { role: 'parent', displayName: 'Probe Person' } } };
 });
 afterEach(() => { jest.useRealTimers(); });
 
 const render = (props) => renderScreen(<EventCard {...props} />);
-const buttons = (c) => [...c.querySelectorAll('button, a')].map((b) => b.textContent.trim());
-const find = (c, label) => [...c.querySelectorAll('button, a')].find((b) => b.textContent.trim() === label);
+// The label a person sees: the hidden "(opens in a new tab)" is tested on its own.
+const labelOf = (el) => el.textContent.replace(NEW_TAB_HINT, '').trim();
+const buttons = (c) => [...c.querySelectorAll('button, a')].map(labelOf);
+const find = (c, label) => [...c.querySelectorAll('button, a')].find((b) => labelOf(b) === label);
 const tap = (el) => act(async () => { el.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
 
 test('seed mode and the walkthrough show nothing at all', async () => {
@@ -265,4 +270,148 @@ test('every button and link is at least 44 px tall, and the status lines are liv
   const live = container.querySelector('[role="status"]');
   expect(live).not.toBeNull();
   expect(live.textContent).toContain("You're in.");
+});
+
+describe("the design reviewer's round (fix round 3)", () => {
+  const holdWrites = () => {
+    let release;
+    mockHold = new Promise((r) => { release = r; });
+    return release;
+  };
+  const spinner = (el) => el.querySelector('[aria-hidden="true"]');
+
+  test("while a check runs the tapped button keeps the app's loading look and only the others are disabled", async () => {
+    mockStore.eventSignups['e1_u-probe'] = signedUp();
+    jest.setSystemTime(START - 3600000);
+    delete mockStore.eventLinks.e1;
+    const { container } = await render();
+    expect(buttons(container).sort()).toEqual(['Check for the link', "I can't come"]);
+    const check = find(container, 'Check for the link');
+    const back = find(container, "I can't come");
+    let release;
+    mockHoldLink = new Promise((r) => { release = r; });
+    await tap(check);
+    // The tapped one has the spinner and the label's own ink; the other has the disabled look.
+    expect(spinner(check)).not.toBeNull();
+    expect(spinner(back)).toBeNull();
+    expect(back.disabled).toBe(true);
+    expect(check.style.color).not.toBe(back.style.color);
+    await act(async () => { release(); });
+  });
+
+  test("\"I'm coming\" while it saves has a spinner and the secondary look's own ink", async () => {
+    const release = holdWrites();
+    const { container } = await render();
+    const come = find(container, "I'm coming");
+    const ink = come.style.color;
+    await tap(come);
+    expect(spinner(come)).not.toBeNull();
+    expect(come.style.color).toBe(ink);
+    await act(async () => { release(); });
+  });
+
+  test("\"I'm coming\" and \"Watch the recording\" are quiet; only \"Join on Google Meet\" keeps the fill and the glow", async () => {
+    const a = await render();
+    const come = find(a.container, "I'm coming");
+    expect(come.style.boxShadow).toBe('');
+    expect(come.style.background).not.toContain('0, 175, 81');
+    mockStore.eventSignups['e1_u-probe'] = signedUp();
+    const b = await render();
+    const join = find(b.container, 'Join on Google Meet');
+    expect(join.style.boxShadow).not.toBe('');
+    expect(join.style.background).toContain('0, 175, 81');
+    jest.setSystemTime(END + 3600000);
+    mockStore.events.e1 = event({ recordingUrl: 'https://example.com/recording-placeholder' });
+    const c = await render();
+    const watch = find(c.container, 'Watch the recording');
+    expect(watch.style.boxShadow).toBe('');
+    expect(watch.style.background).toBe(come.style.background);
+    expect(watch.style.color).toBe(come.style.color);
+  });
+
+  test('the title is 16 px', async () => {
+    const { container } = await render();
+    const h3 = container.querySelector('h3');
+    expect(h3.style.fontSize).toBe('16px');
+  });
+
+  test("within two hours \"Check for the link\" comes before \"I can't come\"", async () => {
+    mockStore.eventSignups['e1_u-probe'] = signedUp();
+    delete mockStore.eventLinks.e1;
+    jest.setSystemTime(START - 3600000);
+    const { container } = await render();
+    expect(buttons(container)).toEqual(['Check for the link', "I can't come"]);
+  });
+
+  test('a check that finds nothing: a quiet line in the live region and focus back on the same button', async () => {
+    mockStore.eventSignups['e1_u-probe'] = signedUp();
+    delete mockStore.eventLinks.e1;
+    jest.setSystemTime(START + 60000);
+    const { container } = await render();
+    document.body.appendChild(container);
+    const check = find(container, 'Check for the link');
+    check.focus();
+    // A browser drops focus from a button that goes disabled and jsdom does not: blur it as the browser would.
+    let release;
+    mockHoldLink = new Promise((r) => { release = r; });
+    await tap(check);
+    document.activeElement.blur();
+    await act(async () => { release(); });
+    expect(document.activeElement).toBe(find(container, 'Check for the link'));
+    const live = [...container.querySelectorAll('[role="status"]')].pop();
+    expect(live.textContent).toBe(NO_LINK_YET);
+    expect(live.firstChild.style.color).toBe('rgb(204, 204, 204)');
+    mockHoldLink = null;
+    mockStore.eventLinks.e1 = { meetUrl: LINK };
+    await tap(find(container, 'Check for the link'));
+    expect(container.textContent).not.toContain(NO_LINK_YET);
+    container.remove();
+  });
+
+  test("when the tapped button is gone, focus goes to the status line as before", async () => {
+    const { container } = await render();
+    document.body.appendChild(container);
+    const come = find(container, "I'm coming");
+    come.focus();
+    const release = holdWrites();
+    await tap(come);
+    document.activeElement.blur();
+    await act(async () => { release(); });
+    // "I'm coming" is gone (Join and "I can't come" took its place): focus is on the status line.
+    expect(find(container, "I'm coming")).toBeUndefined();
+    expect(document.activeElement).toBe(container.querySelector('[role="status"][tabindex="-1"]'));
+    container.remove();
+  });
+
+  test("every button and link names its event: aria-describedby points at that card's title", async () => {
+    mockStore.eventSignups['e1_u-probe'] = signedUp();
+    mockStore.events.e0 = event({ title: 'Earlier one', startsAt: new Date(START - 12 * 3600000), endsAt: new Date(END - 12 * 3600000) });
+    const { container } = await render();
+    const els = [...container.querySelectorAll('button, a')];
+    expect(els.length).toBeGreaterThanOrEqual(3);
+    const ids = new Set();
+    for (const el of els) {
+      const id = el.getAttribute('aria-describedby');
+      expect(id).toBeTruthy();
+      const targets = container.querySelectorAll(`[id="${id}"]`);
+      expect(targets).toHaveLength(1);
+      expect(targets[0].tagName).toBe('H3');
+      ids.add(id);
+    }
+    expect([...ids].map((id) => container.querySelector(`[id="${id}"]`).textContent).sort())
+      .toEqual(['Earlier one', 'RYP Academy Parent Workshop 1 of 4']);
+  });
+
+  test('the two links that open a new tab say so to a screen reader and not to the eye', async () => {
+    mockStore.eventSignups['e1_u-probe'] = signedUp();
+    const a = await render();
+    const hint = find(a.container, 'Join on Google Meet').querySelector('span');
+    expect(hint.textContent).toBe(NEW_TAB_HINT);
+    expect(hint.style.position).toBe('absolute');
+    expect(hint.style.width).toBe('1px');
+    jest.setSystemTime(END + 3600000);
+    mockStore.events.e1 = event({ recordingUrl: 'https://example.com/recording-placeholder' });
+    const b = await render();
+    expect(find(b.container, 'Watch the recording').querySelector('span').textContent).toBe(NEW_TAB_HINT);
+  });
 });
