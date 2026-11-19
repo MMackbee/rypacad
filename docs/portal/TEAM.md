@@ -3672,3 +3672,19 @@ The card, by state (times in America/Chicago; `data/events.js` decides,
   failed first read all show nothing.
 
 The real Meet link never goes in the repo. Probe: `scripts/rules-probes/events.mjs`.
+
+### Using it from the console
+
+- Every event is a NEW `events` document with its own new id
+  (`workshop-1`, `workshop-2`, ...), and its link is a new `eventLinks`
+  document under the same id.
+- Never re-date or re-title a document for the next event. The sign-ups
+  (`eventSignups/{eventId}_{uid}`) and the `recordingUrl` belong to the
+  document id, so re-using it would show last time's sign-ups as coming for
+  the new date, give them the new link without a tap, and take the old
+  recording card away.
+- To take a card off the homes, set `enabled` to false. The sign-ups stay.
+- Switching an event off, or letting it end, hides the card but does not
+  take the link back: an account that signed up can still read
+  `eventLinks/{eventId}` until that document is deleted or its `meetUrl`
+  is changed. To take a link back, delete or change that document.
