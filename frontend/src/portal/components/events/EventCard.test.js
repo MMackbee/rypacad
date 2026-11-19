@@ -279,6 +279,14 @@ describe("the design reviewer's round (fix round 3)", () => {
     return release;
   };
   const spinner = (el) => el.querySelector('[aria-hidden="true"]');
+  // jsdom cannot blur a disabled button; focusing an element and removing it leaves focus on the page, as a browser does.
+  const loseFocus = () => {
+    const stray = document.createElement('input');
+    document.body.appendChild(stray);
+    stray.focus();
+    stray.remove();
+    expect(document.activeElement).toBe(document.body);
+  };
 
   test("while a check runs the tapped button keeps the app's loading look and only the others are disabled", async () => {
     mockStore.eventSignups['e1_u-probe'] = signedUp();
@@ -351,11 +359,11 @@ describe("the design reviewer's round (fix round 3)", () => {
     document.body.appendChild(container);
     const check = find(container, 'Check for the link');
     check.focus();
-    // A browser drops focus from a button that goes disabled and jsdom does not: blur it as the browser would.
+    // A browser drops focus from a button that goes disabled and jsdom keeps it: drop it as the browser would.
     let release;
     mockHoldLink = new Promise((r) => { release = r; });
     await tap(check);
-    document.activeElement.blur();
+    loseFocus();
     await act(async () => { release(); });
     expect(document.activeElement).toBe(find(container, 'Check for the link'));
     const live = [...container.querySelectorAll('[role="status"]')].pop();
@@ -375,7 +383,7 @@ describe("the design reviewer's round (fix round 3)", () => {
     come.focus();
     const release = holdWrites();
     await tap(come);
-    document.activeElement.blur();
+    loseFocus();
     await act(async () => { release(); });
     // "I'm coming" is gone (Join and "I can't come" took its place): focus is on the status line.
     expect(find(container, "I'm coming")).toBeUndefined();
