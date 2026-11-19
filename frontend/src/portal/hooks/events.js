@@ -14,7 +14,10 @@
  *             and the end with a timer and no network call;
  *   sign up   reads users/{uid} for displayName and the ID token's email claim,
  *             writes eventSignups/{eventId}_{uid} with exactly five fields, then
- *             reads the link; take-back deletes it and clears the link.
+ *             reads the link; take-back deletes it and clears the link. A refused
+ *             write is followed by one full re-read: when the account already is
+ *             in the state it asked for (signed up or not, from another tab or
+ *             device) that state shows and no error; otherwise the error line.
  *
  * The card fails closed: seed mode (isLive() false), the onboarding walkthrough
  * (`practice`), an unreadable event or a failed first read all show nothing and
@@ -94,8 +97,10 @@ export function useEvents({ practice = false } = {}) {
     try {
       const next = await readAll(Date.now());
       if (mounted.current && seq === readSeq.current) setData(next);
+      return next;
     } catch (err) {
       // Fails closed: a first read that failed leaves nothing to show, a later one keeps what was shown.
+      return null;
     }
   }, []);
 
@@ -145,25 +150,43 @@ export function useEvents({ practice = false } = {}) {
     setData((d) => d && ({ ...d, signed: { ...d.signed, [id]: signed }, links: { ...d.links, [id]: url } }));
   }, []);
 
+  // After a refused write: one full re-read. The account may already be in the state it asked for (the card was
+  // behind the server); then that state shows and there is no error. Otherwise the original failure is thrown.
+  const confirmState = useCallback(async (id, wantSigned, failure) => {
+    const next = await reread();
+    if (next && Boolean(next.signed[id]) === wantSigned) return;
+    throw failure;
+  }, [reread]);
+
   const signUp = useCallback((id) => run(id, 'signup', async () => {
     const user = requireUser();
-    const [mine, token] = await Promise.all([getDoc(doc(db, 'users', user.uid)), user.getIdTokenResult()]);
-    const displayName = mine.exists() ? mine.data().displayName : null;
-    await setDoc(doc(db, 'eventSignups', signupId(id, user.uid)), {
-      eventId: id,
-      uid: user.uid,
-      email: (token && token.claims && token.claims.email) || null,
-      name: displayName === undefined ? null : displayName,
-      createdAt: serverTimestamp(),
-    });
+    try {
+      const [mine, token] = await Promise.all([getDoc(doc(db, 'users', user.uid)), user.getIdTokenResult()]);
+      const displayName = mine.exists() ? mine.data().displayName : null;
+      await setDoc(doc(db, 'eventSignups', signupId(id, user.uid)), {
+        eventId: id,
+        uid: user.uid,
+        email: (token && token.claims && token.claims.email) || null,
+        name: displayName === undefined ? null : displayName,
+        createdAt: serverTimestamp(),
+      });
+    } catch (err) {
+      await confirmState(id, true, err);
+      return;
+    }
     setSigned(id, true, await readLink(id));
-  }), [run, setSigned]);
+  }), [run, setSigned, confirmState]);
 
   const takeBack = useCallback((id) => run(id, 'back', async () => {
     const user = requireUser();
-    await deleteDoc(doc(db, 'eventSignups', signupId(id, user.uid)));
+    try {
+      await deleteDoc(doc(db, 'eventSignups', signupId(id, user.uid)));
+    } catch (err) {
+      await confirmState(id, false, err);
+      return;
+    }
     setSigned(id, false, null);
-  }), [run, setSigned]);
+  }), [run, setSigned, confirmState]);
 
   const checkLink = useCallback((id) => run(id, 'check', async () => {
     const url = await readLink(id);

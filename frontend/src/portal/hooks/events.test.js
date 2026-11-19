@@ -57,12 +57,14 @@ async function mockSetDoc(ref, data) {
   mockLog.push(['set', `${ref.col}/${ref.id}`, data]);
   if (mockHold) await mockHold;
   if (mockFail.has('setDoc')) throw Object.assign(new Error('offline'), { code: 'unavailable' });
+  if (mockStore[ref.col][ref.id] !== undefined) throw Object.assign(new Error('denied'), { code: 'permission-denied' }); // the rules have no update
   mockStore[ref.col][ref.id] = data;
 }
 async function mockDeleteDoc(ref) {
   mockLog.push(['delete', `${ref.col}/${ref.id}`]);
   if (mockHold) await mockHold;
   if (mockFail.has('deleteDoc')) throw Object.assign(new Error('offline'), { code: 'unavailable' });
+  if (mockStore[ref.col][ref.id] === undefined) throw Object.assign(new Error('denied'), { code: 'permission-denied' }); // nothing to delete: the rules refuse
   delete mockStore[ref.col][ref.id];
 }
 
@@ -107,6 +109,7 @@ async function mount(opts) {
   openMounts.add(unmount);
   return { out, unmount };
 }
+const settle = async () => { for (let i = 0; i < 25; i += 1) await Promise.resolve(); };
 const lists = () => mockLog.filter(([k]) => k === 'list');
 const gets = () => mockLog.filter(([k]) => k === 'get');
 const writes = () => mockLog.filter(([k]) => k === 'set' || k === 'delete');
@@ -281,6 +284,68 @@ test('a failed take-back says so and leaves the card as it was', async () => {
   await h.unmount();
 });
 
+test('a sign-up the rules refuse because the account already signed up elsewhere shows that state, no error', async () => {
+  const h = await mount();
+  expect(card(h).view.kind).toBe('invite');
+  mockStore.eventSignups[`e1_${UID}`] = mineFor('e1'); // another tab or device
+  mockLog.length = 0;
+  await act(async () => { await h.out.current.signUp('e1'); });
+  expect(card(h).error).toBeNull();
+  expect(card(h).view).toMatchObject({ kind: 'in', primary: { action: 'join', href: LINK } });
+  expect(card(h).busy).toBeNull();
+  expect(lists().map((l) => l[1])).toEqual(['events', 'eventSignups']); // one full re-read, not a loop
+  await h.unmount();
+});
+
+test('a take-back the rules refuse because the sign-up is already gone shows that state, no error', async () => {
+  mockStore.eventSignups[`e1_${UID}`] = mineFor('e1');
+  const h = await mount();
+  expect(card(h).view.kind).toBe('in');
+  delete mockStore.eventSignups[`e1_${UID}`]; // removed on another device
+  mockLog.length = 0;
+  await act(async () => { await h.out.current.takeBack('e1'); });
+  expect(card(h).error).toBeNull();
+  expect(card(h).view).toMatchObject({ kind: 'invite', primary: { action: 'come' } });
+  expect(lists().map((l) => l[1])).toEqual(['events', 'eventSignups']);
+  await h.unmount();
+});
+
+test('a refused write that the re-read does not explain still says so, after one re-read', async () => {
+  mockFail.add('setDoc');
+  const h = await mount();
+  mockLog.length = 0;
+  await act(async () => { await h.out.current.signUp('e1'); });
+  expect(card(h).error).toBe("That didn't save. Check your connection and try again.");
+  expect(lists().map((l) => l[1])).toEqual(['events', 'eventSignups']);
+  await h.unmount();
+});
+
+test('a failed re-read after a refused write says so too', async () => {
+  mockFail.add('setDoc');
+  const h = await mount();
+  mockFail.add('events');
+  await act(async () => { await h.out.current.signUp('e1'); });
+  expect(card(h).error).toBe("That didn't save. Check your connection and try again.");
+  expect(card(h).view.kind).toBe('invite');
+  await h.unmount();
+});
+
+test('taps while the re-read after a refusal runs do nothing', async () => {
+  mockFail.add('setDoc');
+  const h = await mount();
+  let release;
+  mockHoldList = new Promise((r) => { release = r; });
+  let first;
+  await act(async () => { first = h.out.current.signUp('e1'); await settle(); });
+  expect(card(h).busy).toBe('signup');
+  await act(async () => { h.out.current.signUp('e1'); h.out.current.takeBack('e1'); await settle(); });
+  expect(writes()).toHaveLength(1);
+  await act(async () => { release(); await first; });
+  expect(card(h).busy).toBeNull();
+  expect(card(h).error).not.toBeNull();
+  await h.unmount();
+});
+
 test('a double tap sends one write, and the button is busy while it runs', async () => {
   let release;
   mockHold = new Promise((r) => { release = r; });
@@ -319,8 +384,6 @@ function watchSetters() {
   });
   return { seen, stop: () => spy.mockRestore() };
 }
-const settle = async () => { for (let i = 0; i < 25; i += 1) await Promise.resolve(); };
-
 describe('nothing is set after unmount', () => {
   async function leaveMidFlight(start, release) {
     const watch = watchSetters();
