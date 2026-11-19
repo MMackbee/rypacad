@@ -35,6 +35,7 @@ import { taskCombine } from './rules-probes/combine.mjs';
 import { taskMentalNote } from './rules-probes/mental-note.mjs';
 import { taskDoor } from './rules-probes/door.mjs';
 import { taskBillingPortal } from './rules-probes/billing-portal.mjs';
+import { taskEvents } from './rules-probes/events.mjs';
 
 let HOST = localEmulatorHost({ required: true });
 const PROJECT = 'demo-rules-probe';
@@ -1174,7 +1175,7 @@ async function runPass(label) {
     await taskBookingChanges();
     await taskCombine();
     await taskMentalNote();
-    await taskDoor(); await taskBillingPortal();
+    await taskDoor(); await taskBillingPortal(); await taskEvents();
   } finally { await teardown(); }
 }
 
