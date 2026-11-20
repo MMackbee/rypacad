@@ -3149,6 +3149,71 @@ service cloud.firestore {
       allow read, write: if false;
     }
 
+    // ---- events, eventLinks, eventSignups ----------------------------------
+    // 2026-11-19 (hq card 5, the workshop card; shapes in docs/portal/TEAM.md,
+    // "Academy events"). An academy event held online, shown as one card on the
+    // parent and athlete homes. Staff for this feature is mental, ops or owner;
+    // a coach is not staff here. me() errors for a caller with no users doc, and
+    // an errored condition denies.
+    function eventStaff() {
+      return me().get('role', null) in ['mental', 'ops', 'owner'];
+    }
+
+    // events/{eventId}: what the card shows: { enabled, title, startsAt,
+    // endsAt, summary?, notice?, recordingUrl? }. Written in the Firebase
+    // console only. Any account with a users doc and a role reads an ENABLED
+    // event (a list must filter on enabled == true); staff read any. No client
+    // write.
+    match /events/{eventId} {
+      allow read: if signedIn() && (
+        eventStaff()
+        || (me().get('role', null) is string && resource.data.enabled == true)
+      );
+      allow write: if false;
+    }
+
+    // eventLinks/{eventId}: { meetUrl }, the Google Meet link. Written in the
+    // console only. One document, by id: staff, or a caller whose OWN sign-up
+    // document exists and says so (get() of eventSignups/{eventId}_{uid}, its uid
+    // and eventId matching: ids like a_b+c and a+b_c collide, a bare exists() would not tell them apart). Taking the sign-up back
+    // closes it again. Only staff list. No client write.
+    match /eventLinks/{eventId} {
+      allow get: if signedIn() && (
+        eventStaff()
+        || (get(/databases/$(database)/documents/eventSignups/$(eventId + '_' + request.auth.uid)).data.uid == request.auth.uid
+            && get(/databases/$(database)/documents/eventSignups/$(eventId + '_' + request.auth.uid)).data.eventId == eventId)
+      );
+      allow list: if signedIn() && eventStaff();
+      allow write: if false;
+    }
+
+    // eventSignups/{eventId}_{uid}: one person's "I'm coming": { eventId, uid,
+    // email, name, createdAt }, exactly those five keys. Created by that person
+    // for an enabled event that has not ended; the email is the token's and the
+    // name is the users doc's displayName (null when absent), so the list the
+    // staff read is not forgeable. Deleted by its owner to take it back. Never
+    // edited. Read by its owner (a list must filter on uid) and by staff.
+    match /eventSignups/{signupId} {
+      function signupOk() {
+        let d = request.resource.data;
+        let ev = /databases/$(database)/documents/events/$(d.eventId);
+        return d.keys().hasOnly(['eventId', 'uid', 'email', 'name', 'createdAt'])
+          && d.keys().hasAll(['eventId', 'uid', 'email', 'name', 'createdAt'])
+          && d.eventId is string
+          && signupId == d.eventId + '_' + request.auth.uid
+          && d.uid == request.auth.uid
+          && d.email == request.auth.token.get('email', null)
+          && d.name == me().get('displayName', null)
+          && d.createdAt == request.time
+          && exists(ev)
+          && get(ev).data.enabled == true
+          && request.time < get(ev).data.endsAt;
+      }
+      allow create: if signedIn() && signupOk();
+      allow delete: if signedIn() && resource.data.uid == request.auth.uid;
+      allow read: if signedIn() && (resource.data.uid == request.auth.uid || eventStaff());
+    }
+
     // No catch-all. Everything not matched above is denied.
   }
 }

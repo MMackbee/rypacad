@@ -11,6 +11,11 @@ jest.mock('../components/door/DoorCard', () => ({
   __esModule: true,
   default: ({ practice, selfWording }) => <div data-door-card={JSON.stringify({ practice: Boolean(practice), selfWording: Boolean(selfWording) })} />,
 }));
+// The workshop card (hq card 5): a stand-in that shows where it mounts and what it was handed.
+jest.mock('../components/events/EventCard', () => ({
+  __esModule: true,
+  default: ({ practice }) => <div data-event-card={JSON.stringify({ practice: Boolean(practice) })} />,
+}));
 
 let mockHub; let mockConfirm;
 const mockChange = jest.fn(async (athleteId, packageId) => ({ athleteId, packageId }));
@@ -364,6 +369,16 @@ test('the door card (2026-11-17): above the consent card, practice handed throug
   await r.unmount();
   const practice = await renderScreen(<ParentDashboard bare practice />, { path: '/portal/family' });
   expect(JSON.parse(practice.container.querySelector('[data-door-card]').getAttribute('data-door-card'))).toEqual({ practice: true, selfWording: false });
+  await practice.unmount();
+});
+
+test('the workshop card (hq card 5): directly after the door card, practice handed through', async () => {
+  const r = await renderScreen(<ParentDashboard bare />, { path: '/portal/family' });
+  const door = r.container.querySelector('[data-door-card]');
+  expect(door.nextElementSibling.getAttribute('data-event-card')).toBe(JSON.stringify({ practice: false }));
+  await r.unmount();
+  const practice = await renderScreen(<ParentDashboard bare practice />, { path: '/portal/family' });
+  expect(practice.container.querySelector('[data-event-card]').getAttribute('data-event-card')).toBe(JSON.stringify({ practice: true }));
   await practice.unmount();
 });
 

@@ -8,6 +8,7 @@ import WalkthroughOffer from '../components/WalkthroughOffer';
 import ConsentAthleteHomeLine from '../components/consent/ConsentAthleteHomeLine';
 import CombineCard from '../components/combine/CombineCard';
 import DoorCard from '../components/door/DoorCard';
+import EventCard from '../components/events/EventCard';
 import { useMyTokens } from '../hooks/billing';
 import { useSelfManaged } from '../hooks/useAuthSession';
 import AllowancePools, { GraceLine } from '../components/AllowancePools';
@@ -148,6 +149,7 @@ export default function AthleteDashboard({
         <ChangePackageSheet athlete={changeFor} self onClose={() => setChangeFor(null)} />
         {/* The facility door (2026-11-17): an adult's own login reads the rules as "you". */}
         <DoorCard practice={practice} selfWording={!askGuardian} />
+        <EventCard practice={practice} />
         {/* The harness's 'new' variant only: the live gate was the diagnostics
             read, removed with Diagnostic Capture (assessments spec 8). */}
         {variant === 'new' ? <StartHere onBook={onBook} /> : null}
