@@ -135,6 +135,19 @@ describe('the row', () => {
       expect(a.style.justifyContent).toBe('center');
     }
   });
+  it('keeps each label on one centred line when side by side: 8 px of side padding and centred text', async () => {
+    const { container } = await signedUpCard();
+    for (const label of [CALENDAR_APPLE, CALENDAR_GOOGLE]) {
+      const a = find(container, label);
+      expect(a.style.paddingLeft).toBe('8px');
+      expect(a.style.paddingRight).toBe('8px');
+      expect(a.style.paddingTop).toBe('0px');
+      expect(a.style.paddingBottom).toBe('0px');
+      expect(a.style.textAlign).toBe('center');
+      expect(a.style.whiteSpace).toBe('');
+    }
+  });
+
   it('"Apple or Outlook" is a plain download link: a calendar file, no new tab, no handler', async () => {
     const { container } = await signedUpCard();
     const a = find(container, CALENDAR_APPLE);

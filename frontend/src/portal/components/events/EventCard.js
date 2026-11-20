@@ -114,7 +114,7 @@ function OneEvent({ card, run, style }) {
 
 /** The quiet look of the card's outline buttons, for a link (a link is not a <button>). */
 const QUIET_LINK = {
-  boxSizing: 'border-box', flex: '1 1 140px', height: TAP, padding: '0 16px', textDecoration: 'none',
+  boxSizing: 'border-box', flex: '1 1 140px', height: TAP, padding: '0 8px', textAlign: 'center', textDecoration: 'none',
   display: 'flex', alignItems: 'center', justifyContent: 'center', borderRadius: radius.input,
   font: `600 14px ${font.body}`, background: 'transparent', border: `1px solid ${color.border}`, color: color.text,
 };
