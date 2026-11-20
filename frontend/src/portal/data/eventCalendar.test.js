@@ -74,16 +74,19 @@ describe('utcStamp', () => {
     expect(utcStamp(Date.UTC(2026, 10, 24, 2, 0))).toBe('20261124T020000Z');
     expect(utcStamp(Date.UTC(2026, 0, 5, 23, 59, 59))).toBe('20260105T235959Z');
   });
-  it('gives the same answer under another TZ', () => {
-    const was = process.env.TZ;
+  it('never reads the local time: every local getter fails the test, and the stamps are still right', () => {
+    // Setting process.env.TZ inside Jest does not change the zone, so the guard is a spy:
+    // a stamp built from local getters would call one of these and throw, in any machine zone.
+    const LOCAL = ['getFullYear', 'getMonth', 'getDate', 'getDay', 'getHours', 'getMinutes', 'getSeconds', 'getMilliseconds', 'getTimezoneOffset'];
+    const spies = LOCAL.map((name) => jest.spyOn(Date.prototype, name).mockImplementation(() => {
+      throw new Error(`local time read: ${name}`);
+    }));
     try {
-      for (const tz of ['Pacific/Auckland', 'Asia/Tokyo', 'America/Los_Angeles', 'UTC']) {
-        process.env.TZ = tz;
-        expect(utcStamp(Date.UTC(2026, 10, 24, 2, 0))).toBe('20261124T020000Z');
-        expect(calendarFile({ ...base, meetUrl: LINK })).toBe(WITH_LINK);
-      }
+      expect(utcStamp(Date.UTC(2026, 10, 24, 2, 0))).toBe('20261124T020000Z');
+      expect(calendarFile({ ...base, meetUrl: LINK })).toBe(WITH_LINK);
+      expect(googleCalendarUrl({ ...base, meetUrl: LINK })).toContain('dates=20261124T020000Z%2F20261124T024500Z');
     } finally {
-      if (was === undefined) delete process.env.TZ; else process.env.TZ = was;
+      spies.forEach((spy) => spy.mockRestore());
     }
   });
 });
@@ -106,6 +109,10 @@ describe('calendarFile', () => {
   it('makes the UID from the id, every character outside A-Z a-z 0-9 . _ - replaced by a dash', () => {
     expect(unfold(calendarFile({ ...base, id: 'a b/c_d.e-F9' }))).toContain('UID:a-b-c_d.e-F9@rypacademy.com');
     expect(unfold(calendarFile({ ...base, id: 'x\r\ny;z' }))).toContain('UID:x--y-z@rypacademy.com');
+  });
+  it('turns one character outside the basic plane into one dash, not two', () => {
+    expect(unfold(calendarFile({ ...base, id: 'a\u{1F44D}b' }))).toContain('UID:a-b@rypacademy.com');
+    expect(unfold(calendarFile({ ...base, id: '\u{1F44D}' }))).toContain('UID:-@rypacademy.com');
   });
   it.each([
     ['comma', 'Putting, drills', 'SUMMARY:Putting\\, drills'],

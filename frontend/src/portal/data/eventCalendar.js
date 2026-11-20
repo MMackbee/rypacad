@@ -90,7 +90,7 @@ function fold(line) {
 }
 
 /** The sanitized id for a UID: A-Z a-z 0-9 . _ - kept, every other character a dash. */
-const uidOf = (id) => `${String(id).replace(/[^A-Za-z0-9._-]/g, '-')}@rypacademy.com`;
+const uidOf = (id) => `${String(id).replace(/[^A-Za-z0-9._-]/gu, '-')}@rypacademy.com`;
 
 /**
  * The text of one calendar file for the event.
