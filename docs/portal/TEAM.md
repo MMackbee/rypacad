@@ -3665,6 +3665,10 @@ The card, by state (times in America/Chicago; `data/events.js` decides,
   signs up after the start gets Join at once.
 - Signed up, no link, started: "The link isn't here yet" and "Check for the
   link".
+- Signed up, before the start (link or no link): "Add to your calendar", a
+  calendar file (Apple or Outlook) and a Google Calendar link, built in the
+  browser from what the card holds, with the Meet link when the account can
+  read it. It sits just above "I can't come" (hq card 7).
 - The notice shows under the content in every state before the end.
 - After the end: nothing, unless `recordingUrl` is an https address; then the
   title and "Watch the recording" for every signed-in family.
@@ -3688,3 +3692,6 @@ The real Meet link never goes in the repo. Probe: `scripts/rules-probes/events.m
   take the link back: an account that signed up can still read
   `eventLinks/{eventId}` until that document is deleted or its `meetUrl`
   is changed. To take a link back, delete or change that document.
+- A calendar entry made before the link is in does not get the link later,
+  so put the `eventLinks` document in early if the link should be in
+  people's calendars.
