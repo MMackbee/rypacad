@@ -74,6 +74,8 @@ const render = (props) => renderScreen(<EventCard {...props} />);
 const labelOf = (el) => el.textContent.replace(NEW_TAB_HINT, '').trim();
 const buttons = (c) => [...c.querySelectorAll('button, a')].map(labelOf);
 const find = (c, label) => [...c.querySelectorAll('button, a')].find((b) => labelOf(b) === label);
+// The calendar row of hq card 7 sits above "I can't come" on a signed-up card: its two links (see EventCard.calendar.test.js).
+const CALENDAR = ['Apple or Outlook', 'Google Calendar'];
 const tap = (el) => act(async () => { el.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
 
 test('seed mode and the walkthrough show nothing at all', async () => {
@@ -134,7 +136,7 @@ test('signed up, link set: "You\'re in.", Join as a new-tab link, "I can\'t come
   expect(join.getAttribute('href')).toBe(LINK);
   expect(join.getAttribute('target')).toBe('_blank');
   expect(join.getAttribute('rel')).toBe('noopener noreferrer');
-  expect(buttons(container)).toEqual(['Join on Google Meet', "I can't come"]);
+  expect(buttons(container)).toEqual(['Join on Google Meet', ...CALENDAR, "I can't come"]);
   jest.setSystemTime(START + 1000);
   await act(async () => { document.dispatchEvent(new Event('visibilitychange')); });
   expect(buttons(container)).toEqual(['Join on Google Meet']);
@@ -145,7 +147,7 @@ test('signed up, no link yet, before the start: the line and "I can\'t come"', a
   delete mockStore.eventLinks.e1;
   const { container } = await render();
   expect(container.textContent).toContain("You're in. The link appears here on Monday.");
-  expect(buttons(container)).toEqual(["I can't come"]);
+  expect(buttons(container)).toEqual([...CALENDAR, "I can't come"]);
 });
 
 test('signed up, no link, started: the "not here yet" line and "Check for the link", which finds it', async () => {
@@ -173,7 +175,7 @@ test('tapping "I\'m coming" writes the sign-up and shows Join', async () => {
   const { container } = await render();
   await tap(find(container, "I'm coming"));
   expect(mockWrites).toEqual([['set', 'eventSignups/e1_u-probe', { eventId: 'e1', uid: 'u-probe', email: 'probe@example.com', name: 'Probe Person', createdAt: 'SERVER_TIME' }]]);
-  expect(buttons(container)).toEqual(['Join on Google Meet', "I can't come"]);
+  expect(buttons(container)).toEqual(['Join on Google Meet', ...CALENDAR, "I can't come"]);
 });
 
 test('a late arrival: after the start, one tap and Join is there at once', async () => {
@@ -293,7 +295,7 @@ describe("the design reviewer's round (fix round 3)", () => {
     jest.setSystemTime(START - 3600000);
     delete mockStore.eventLinks.e1;
     const { container } = await render();
-    expect(buttons(container).sort()).toEqual(['Check for the link', "I can't come"]);
+    expect(buttons(container).sort()).toEqual([...CALENDAR, 'Check for the link', "I can't come"].sort());
     const check = find(container, 'Check for the link');
     const back = find(container, "I can't come");
     let release;
@@ -348,7 +350,7 @@ describe("the design reviewer's round (fix round 3)", () => {
     delete mockStore.eventLinks.e1;
     jest.setSystemTime(START - 3600000);
     const { container } = await render();
-    expect(buttons(container)).toEqual(['Check for the link', "I can't come"]);
+    expect(buttons(container)).toEqual(['Check for the link', ...CALENDAR, "I can't come"]);
   });
 
   test('a check that finds nothing: a quiet line in the live region and focus back on the same button', async () => {

@@ -1,10 +1,11 @@
-import React, { useEffect, useId, useRef } from 'react';
+import React, { useEffect, useId, useMemo, useRef, useState } from 'react';
 import { color, font, glow, radius } from '../../tokens';
 import Button from '../Button';
 import { Body, Card, SectionLabel } from '../Primitives';
 import { useEvents } from '../../hooks/events';
 import { srOnly } from '../door/HoldToUnlock';
-import { CARD_HEADING, NEW_TAB_HINT } from '../../data/events';
+import { CALENDAR_APPLE, CALENDAR_GOOGLE, CALENDAR_LABEL, CARD_HEADING, NEW_TAB_HINT } from '../../data/events';
+import { calendarFile, calendarFileHref, googleCalendarUrl } from '../../data/eventCalendar';
 
 /** Tap targets: at least 44 px. */
 const TAP = 46;
@@ -24,6 +25,11 @@ const idOf = (key, action) => `${key}-${action}`;
  * for); "I'm coming" and "Watch the recording" are the quiet `secondary` look, so the card does not
  * outshout a payment banner. While a write runs only the tapped button shows the app's loading look; the
  * card's other buttons are disabled. Every button and link points at the card's title (aria-describedby).
+ *
+ * Calendar row (hq card 7): for a signed-up account until the start, "Add to your calendar" sits just above
+ * "I can't come" with two quiet links built from what the card holds (data/eventCalendar.js): a calendar file for
+ * Apple or Outlook (a plain download link, no script at the tap) and Google Calendar's new-event address (a new
+ * tab). Both addresses are memoised, so a re-render never changes a link under a person's finger.
  *
  * Fails closed: nothing at all in seed mode, in the onboarding walkthrough
  * (`practice`), for a disabled or unreadable event and after a failed first
@@ -48,6 +54,8 @@ function OneEvent({ card, run, style }) {
   const statusRef = useRef(null);
   const pendingFocus = useRef(null);
   const key = useId();
+  // Taken once per card: the calendar file's DTSTAMP, so a re-render does not change a link under a finger.
+  const [stamp] = useState(() => Date.now());
   const titleId = `${key}-title`;
   const buttonId = (action) => idOf(key, action);
   // A button that is busy is disabled, and a disabled button drops focus; a tap that swaps the button away
@@ -68,6 +76,12 @@ function OneEvent({ card, run, style }) {
   };
   const { primary } = view;
   const describe = { 'aria-describedby': titleId };
+  const quietButton = (q) => (
+    <Button key={q.action} id={buttonId(q.action)} variant="outline" height={TAP} loading={busy === q.action} disabled={Boolean(busy) && busy !== q.action}
+      onClick={() => tap(q.action)} style={{ marginTop: 10, font: `600 14px ${font.body}` }} {...describe}>
+      {q.label}
+    </Button>
+  );
   return (
     <Card large style={style}>
       <SectionLabel style={{ marginBottom: 12 }}>{CARD_HEADING}</SectionLabel>
@@ -86,18 +100,48 @@ function OneEvent({ card, run, style }) {
           {primary.label}
         </Button>
       ) : null}
-      {view.quiet.map((q) => (
-        <Button key={q.action} id={buttonId(q.action)} variant="outline" height={TAP} loading={busy === q.action} disabled={Boolean(busy) && busy !== q.action}
-          onClick={() => tap(q.action)} style={{ marginTop: 10, font: `600 14px ${font.body}` }} {...describe}>
-          {q.label}
-        </Button>
-      ))}
+      {view.quiet.filter((q) => q.action !== 'back').map(quietButton)}
+      {view.calendar ? <CalendarRow calendar={view.calendar} stamp={stamp} describe={titleId} /> : null}
+      {view.quiet.filter((q) => q.action === 'back').map(quietButton)}
       <div role="status" style={{ marginTop: error || note ? 10 : 0 }}>
         {error ? <Body size={13} tone={color.error} style={WRAP}>{error}</Body> : null}
         {!error && note ? <Body size={13} tone={color.textSecondary} style={WRAP}>{note}</Body> : null}
       </div>
       {view.notice ? <Body size={12} tone={color.textTertiary} style={{ marginTop: 14, ...WRAP }}>{view.notice}</Body> : null}
     </Card>
+  );
+}
+
+/** The quiet look of the card's outline buttons, for a link (a link is not a <button>). */
+const QUIET_LINK = {
+  boxSizing: 'border-box', flex: '1 1 140px', height: TAP, padding: '0 8px', textAlign: 'center', textDecoration: 'none',
+  display: 'flex', alignItems: 'center', justifyContent: 'center', borderRadius: radius.input,
+  font: `600 14px ${font.body}`, background: 'transparent', border: `1px solid ${color.border}`, color: color.text,
+};
+
+/**
+ * "Add to your calendar" (hq card 7): a calendar file as a plain download link, and Google Calendar's own
+ * new-event address in a new tab. The addresses depend only on the calendar's own values and the card's one
+ * timestamp, so nothing changes under a person's finger when the card re-renders.
+ */
+function CalendarRow({ calendar, stamp, describe }) {
+  const labelId = `${useId()}-calendar`;
+  const { id, title, startsMs, endsMs, meetUrl } = calendar;
+  const { file, google } = useMemo(() => {
+    const entry = { id, title, startsMs, endsMs, meetUrl, appUrl: `${window.location.origin}/portal` };
+    return { file: calendarFileHref(calendarFile({ ...entry, nowMs: stamp })), google: googleCalendarUrl(entry) };
+  }, [id, title, startsMs, endsMs, meetUrl, stamp]);
+  return (
+    <div role="group" aria-labelledby={labelId} style={{ marginTop: 14 }}>
+      <div id={labelId}><Body size={13}>{CALENDAR_LABEL}</Body></div>
+      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 10, marginTop: 8 }}>
+        <a href={file} download="ryp-academy-event.ics" aria-describedby={describe} style={QUIET_LINK}>{CALENDAR_APPLE}</a>
+        <a href={google} target="_blank" rel="noopener noreferrer" aria-describedby={describe} style={QUIET_LINK}>
+          {CALENDAR_GOOGLE}
+          <span style={srOnly}>{NEW_TAB_HINT}</span>
+        </a>
+      </div>
+    </div>
   );
 }
 

@@ -5,7 +5,7 @@
  */
 import {
   BUTTON_BACK, BUTTON_CHECK, BUTTON_COME, BUTTON_JOIN, BUTTON_RECORDING, CHECK_FROM_MS, DEFAULT_NOTICE, HAPPENING_NOW,
-  IN_NO_LINK_STARTED, IN_WITH_LINK, NEW_TAB_HINT, NO_LINK_YET, centralDay, eventView, inNoLinkLine, inviteLine, isHttps, nextChange, normalizeEvent,
+  CALENDAR_APPLE, CALENDAR_GOOGLE, CALENDAR_LABEL, IN_NO_LINK_STARTED, IN_WITH_LINK, NEW_TAB_HINT, NO_LINK_YET, centralDay, eventView, inNoLinkLine, inviteLine, isHttps, nextChange, normalizeEvent,
   timeLine, toMs, visibleEvents, weekdayName,
 } from './events';
 
@@ -210,6 +210,62 @@ describe('eventView: the state table', () => {
     expect(view({ now: START }).notice).toBe(DEFAULT_NOTICE);
   });
   it('no event shows nothing', () => expect(eventView(null, { signedUp: false, meetUrl: null, now: START })).toEqual({ show: false }));
+});
+
+describe('eventView: the calendar entry (hq card 7)', () => {
+  const calendarOf = (state, event = ev()) => view(state, event).calendar;
+
+  it('is there when signed up and before the start: the id, title, both instants and the readable link', () => {
+    expect(calendarOf({ signedUp: true, meetUrl: LINK, now: START - 86400000 })).toEqual({
+      id: 'e1', title: 'Probe workshop', startsMs: START, endsMs: START + 45 * 60 * 1000, meetUrl: LINK,
+    });
+  });
+  it('holds at the boundaries: one second before the start has it, the start itself does not', () => {
+    expect(calendarOf({ signedUp: true, meetUrl: LINK, now: START - SEC })).toBeDefined();
+    expect(view({ signedUp: true, meetUrl: LINK, now: START - SEC })).toHaveProperty('calendar');
+    expect(view({ signedUp: true, meetUrl: LINK, now: START })).not.toHaveProperty('calendar');
+    expect(view({ signedUp: true, meetUrl: LINK, now: START + SEC })).not.toHaveProperty('calendar');
+  });
+  it('is there with and without a link, from a week out to the last second before the start', () => {
+    for (const now of [START - 7 * 86400000, START - CHECK_FROM_MS, START - SEC]) {
+      expect(view({ signedUp: true, meetUrl: null, now })).toHaveProperty('calendar');
+      expect(view({ signedUp: true, meetUrl: LINK, now })).toHaveProperty('calendar');
+    }
+  });
+  it('has no meetUrl without a link, and none for a link that is not https', () => {
+    expect(calendarOf({ signedUp: true, meetUrl: null, now: START - SEC }).meetUrl).toBeNull();
+    for (const bad of ['http://example.com/x', 'example.com/x', SCRIPT_URL, '', undefined]) {
+      expect(calendarOf({ signedUp: true, meetUrl: bad, now: START - SEC }).meetUrl).toBeNull();
+    }
+  });
+  it('carries the trimmed link', () => {
+    expect(calendarOf({ signedUp: true, meetUrl: `  ${LINK} `, now: START - SEC }).meetUrl).toBe(LINK);
+  });
+  it('is absent when not signed up, once started, once ended, and on the recording view', () => {
+    expect(view({ signedUp: false, meetUrl: LINK, now: START - 86400000 })).not.toHaveProperty('calendar');
+    expect(view({ signedUp: true, meetUrl: LINK, now: START + SEC })).not.toHaveProperty('calendar');
+    expect(view({ signedUp: true, meetUrl: LINK, now: END })).toEqual({ show: false });
+    const rec = ev({ recordingUrl: 'https://example.com/r' });
+    for (const signedUp of [true, false]) {
+      expect(view({ signedUp, meetUrl: LINK, now: END }, rec)).not.toHaveProperty('calendar');
+      expect(view({ signedUp, meetUrl: LINK, now: START - SEC }, rec).calendar !== undefined).toBe(signedUp);
+    }
+  });
+  it('the words: the row label and the two controls', () => {
+    expect(CALENDAR_LABEL).toBe('Add to your calendar');
+    expect(CALENDAR_APPLE).toBe('Apple or Outlook');
+    expect(CALENDAR_GOOGLE).toBe('Google Calendar');
+  });
+});
+
+describe('the notice', () => {
+  it('says athletes are welcome to join too, in place of the line about under 18', () => {
+    expect(DEFAULT_NOTICE).toBe(
+      'This workshop is recorded and the recording will be posted publicly on rypacademy.com. Microphones and cameras stay off; ask questions in the chat. Athletes are welcome to join too.',
+    );
+    expect(DEFAULT_NOTICE).not.toContain('under 18');
+    expect(view({ now: START - 86400000 }).notice).toBe(DEFAULT_NOTICE);
+  });
 });
 
 describe('nextChange', () => {
