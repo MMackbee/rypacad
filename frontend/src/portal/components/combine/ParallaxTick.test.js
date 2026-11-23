@@ -189,3 +189,120 @@ test('the fitness assessment: its own label, words and load error (hq card 14)',
   expect(failed.text()).toBe("Fitness assessment didn't load.");
   await failed.unmount();
 });
+
+// ---- hq card 14, fix round 3 ------------------------------------------------
+
+test('readOnly: a mark is status text, not a control (no button, no checkbox, nothing to Tab to)', async () => {
+  const open = await tick({ canTick: false, readOnly: true });
+  expect(open.container.querySelector('[role="checkbox"]')).toBeNull();
+  expect(open.container.querySelector('button, input, [tabindex], [role]')).toBeNull();
+  expect(open.text()).toContain('Parallax intake swings');
+  expect(open.text()).toContain('not done');
+  await open.unmount();
+  const done = await tick({ canTick: false, readOnly: true, milestone: M });
+  expect(done.container.querySelector('button, input, [tabindex], [role]')).toBeNull();
+  expect(done.text()).toContain('Parallax intake swings');
+  expect(done.text()).toContain('done Nov 12 · Luke');
+  expect(done.text()).not.toContain('not done');
+  await done.unmount();
+});
+
+test('readOnly: the fitness words, and a read that did not land still says so (or nothing before it lands)', async () => {
+  const r = await tick({ readOnly: true, label: 'Fitness assessment', loadErrorText: "Fitness assessment didn't load.", milestone: null });
+  expect(r.text()).toContain('Fitness assessment');
+  expect(r.text()).toContain('not done');
+  await r.unmount();
+  const failed = await tick({ readOnly: true, milestone: undefined, loadError: true });
+  expect(failed.text()).toBe("Parallax intake swings didn't load.");
+  await failed.unmount();
+  const waiting = await tick({ readOnly: true, milestone: undefined });
+  expect(waiting.text()).toBe('');
+  await waiting.unmount();
+});
+
+test('readOnly: the state is in the text, the tick glyph and the dash are hidden from a screen reader', async () => {
+  const open = await tick({ readOnly: true });
+  const done = await tick({ readOnly: true, milestone: M });
+  for (const r of [open, done]) {
+    const glyphs = [...r.container.querySelectorAll('[aria-hidden="true"]')];
+    expect(glyphs.length).toBeGreaterThan(0);
+    expect(r.container.querySelector('[aria-label]')).toBeNull();
+  }
+  await open.unmount();
+  await done.unmount();
+});
+
+test('not readOnly (the attendance screen): the control is unchanged', async () => {
+  const r = await tick({ milestone: null });
+  expect(checkbox(r)).not.toBeNull();
+  expect(r.text()).not.toContain('not done');
+  await r.unmount();
+});
+
+test('while a tick is saving the control is dimmed and aria-busy; neither once it is saved', async () => {
+  let finish;
+  const onTick = jest.fn(() => new Promise((resolve) => { finish = resolve; }));
+  const r = await tick({ onTick });
+  expect(checkbox(r).getAttribute('aria-busy')).not.toBe('true');
+  expect(checkbox(r).style.opacity).not.toBe('0.55');
+  await r.click(LABEL);
+  expect(checkbox(r).getAttribute('aria-busy')).toBe('true');
+  expect(checkbox(r).style.opacity).toBe('0.55');
+  await r.act(async () => { finish(); });
+  expect(checkbox(r).getAttribute('aria-busy')).not.toBe('true');
+  expect(checkbox(r).style.opacity).not.toBe('0.55');
+  await r.unmount();
+});
+
+test('while an undo is saving the control is busy too', async () => {
+  let finish;
+  const onUndo = jest.fn(() => new Promise((resolve) => { finish = resolve; }));
+  const r = await tick({ milestone: M, onUndo });
+  await r.click(LABEL);
+  expect(checkbox(r).getAttribute('aria-busy')).toBe('true');
+  await r.act(async () => { finish(); });
+  expect(checkbox(r).getAttribute('aria-busy')).not.toBe('true');
+  await r.unmount();
+});
+
+test('while the owner is clearing a mark the control is busy', async () => {
+  let finish;
+  const onUndo = jest.fn(() => new Promise((resolve) => { finish = resolve; }));
+  const r = await tick({ milestone: M, viewer: OWNER, now: () => T + 86400000, onUndo });
+  await r.click(LABEL);
+  await r.click('Clear Parallax intake swings: Jordan Whitfield');
+  expect(checkbox(r).getAttribute('aria-busy')).toBe('true');
+  expect(checkbox(r).style.opacity).toBe('0.55');
+  await r.act(async () => { finish(); });
+  expect(checkbox(r).getAttribute('aria-busy')).not.toBe('true');
+  await r.unmount();
+});
+
+test("Keep says which mark and whose, like Clear", async () => {
+  const r = await tick({ milestone: M, viewer: OWNER, now: () => T + 86400000 });
+  await r.click(LABEL);
+  expect(r.container.querySelector('button[aria-label="Keep Parallax intake swings: Jordan Whitfield"]')).not.toBeNull();
+  await r.unmount();
+  const fit = await tick({ label: 'Fitness assessment', milestone: M, viewer: OWNER, now: () => T + 86400000 });
+  await fit.click('Fitness assessment: Jordan Whitfield');
+  expect(fit.container.querySelector('button[aria-label="Keep Fitness assessment: Jordan Whitfield"]')).not.toBeNull();
+  await fit.unmount();
+});
+
+test('after Keep, focus returns to the mark\'s tick', async () => {
+  const r = await tick({ milestone: M, viewer: OWNER, now: () => T + 86400000 });
+  await r.click(LABEL);
+  await r.click('Keep Parallax intake swings: Jordan Whitfield');
+  expect(document.activeElement).toBe(checkbox(r));
+  await r.unmount();
+});
+
+test('after Clear, focus returns to the mark\'s tick', async () => {
+  const onUndo = jest.fn(async () => {});
+  const r = await tick({ milestone: M, viewer: OWNER, now: () => T + 86400000, onUndo });
+  await r.click(LABEL);
+  await r.click('Clear Parallax intake swings: Jordan Whitfield');
+  expect(onUndo).toHaveBeenCalledTimes(1);
+  expect(document.activeElement).toBe(checkbox(r));
+  await r.unmount();
+});

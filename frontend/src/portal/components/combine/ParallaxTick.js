@@ -1,9 +1,9 @@
-import React, { useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { TOUCH_MIN, color, font, radius } from '../../tokens';
 import { Body, Tick } from '../Primitives';
 import { ERR } from '../../hooks/live';
 import {
-  INTAKE_LABEL, INTAKE_LOAD_ERROR, INTAKE_SAVE_ERROR, INTAKE_UNDO_LATE, intakeDoneLine, intakeUndo,
+  INTAKE_LABEL, INTAKE_LOAD_ERROR, INTAKE_SAVE_ERROR, INTAKE_UNDO_LATE, MARK_NOT_DONE, intakeDoneLine, intakeUndo,
 } from '../../data/combine';
 
 const pill = (tone) => ({
@@ -28,23 +28,68 @@ const pill = (tone) => ({
  * inside ten minutes; the owner clears any tick behind an inline confirm.
  * `label` and `loadErrorText` default to the Parallax words; the athlete
  * roster passes the fitness assessment's (hq card 14).
+ * `readOnly` (the roster as ops sees it) turns the mark into status text: the
+ * label, then the done line or "not done", no button and nothing to Tab to.
+ * The attendance screen never passes it. While a tick, undo or clear saves,
+ * the control is dimmed and aria-busy (no spinner). After the owner's Clear or
+ * Keep, focus returns to the tick.
  * Who may do what is data/combine.js; `now` is re-read at tap time, so a
  * screen left open past the ten minutes says why instead of failing.
  */
 export default function ParallaxTick({
   name, milestone, viewer, canTick, onTick, onUndo, loadError = false, now = Date.now,
-  label = INTAKE_LABEL, loadErrorText = INTAKE_LOAD_ERROR,
+  label = INTAKE_LABEL, loadErrorText = INTAKE_LOAD_ERROR, readOnly = false,
 }) {
   const [busy, setBusy] = useState(false);
   const [problem, setProblem] = useState(null);
   const [confirming, setConfirming] = useState(false);
+  const [refocus, setRefocus] = useState(false);
+  const tickRef = useRef(null);
+
+  const ticked = Boolean(milestone);
+  const enabled = Boolean(canTick) && !busy && (!ticked || intakeUndo(milestone, viewer, now()) != null);
+
+  // After Clear or Keep the confirm (and the button the finger was on) is gone: put focus back on the tick once it can take it.
+  useEffect(() => {
+    if (refocus && enabled && tickRef.current) {
+      tickRef.current.focus();
+      setRefocus(false);
+    }
+  }, [refocus, enabled]);
 
   if (milestone === undefined) {
     return loadError ? <Body size={11} tone={color.error}>{loadErrorText}</Body> : null;
   }
 
-  const ticked = Boolean(milestone);
-  const enabled = Boolean(canTick) && !busy && (!ticked || intakeUndo(milestone, viewer, now()) != null);
+  if (readOnly) {
+    return (
+      <div style={{ display: 'flex', alignItems: 'flex-start', gap: 10 }}>
+        <span
+          aria-hidden="true"
+          style={{
+            width: 26,
+            height: 26,
+            flex: 'none',
+            borderRadius: radius.pill,
+            boxSizing: 'border-box',
+            background: ticked ? color.primary : 'transparent',
+            color: color.faintText,
+            font: `400 14px/1 ${font.body}`,
+            display: 'grid',
+            placeItems: 'center',
+          }}
+        >
+          {ticked ? <Tick size={11} /> : '–'}
+        </span>
+        <span style={{ display: 'flex', flexDirection: 'column', minWidth: 0 }}>
+          <span style={{ font: `600 12px ${font.body}`, color: color.text }}>{label}</span>
+          <span style={{ font: `400 11px ${font.body}`, color: color.textSecondary, marginTop: 2 }}>
+            {ticked ? intakeDoneLine(milestone) : MARK_NOT_DONE}
+          </span>
+        </span>
+      </div>
+    );
+  }
 
   const run = async (write, failCopy) => {
     setBusy(true);
@@ -52,6 +97,7 @@ export default function ParallaxTick({
     try {
       await write();
       setConfirming(false);
+      setRefocus(true);
     } catch (err) {
       setProblem(failCopy(err));
     }
@@ -77,10 +123,12 @@ export default function ParallaxTick({
   return (
     <div>
       <button
+        ref={tickRef}
         type="button"
         role="checkbox"
         aria-checked={ticked}
         aria-label={`${label}: ${name}`}
+        aria-busy={busy ? 'true' : undefined}
         disabled={!enabled}
         onClick={onClick}
         style={{
@@ -93,6 +141,7 @@ export default function ParallaxTick({
           background: 'transparent',
           textAlign: 'left',
           cursor: enabled ? 'pointer' : 'default',
+          opacity: busy ? 0.55 : undefined,
         }}
       >
         <span
@@ -134,7 +183,8 @@ export default function ParallaxTick({
           </button>
           <button
             type="button"
-            onClick={(e) => { e.stopPropagation(); setConfirming(false); }}
+            aria-label={`Keep ${label}: ${name}`}
+            onClick={(e) => { e.stopPropagation(); setConfirming(false); setRefocus(true); }}
             style={pill(color.textSecondary)}
           >
             Keep
