@@ -383,3 +383,29 @@ test('a Clear that fails moves focus nowhere and says not saved', async () => {
   expect(document.activeElement).not.toBe(checkbox(r));
   await r.unmount();
 });
+
+test('a plain tick with nothing focused (a phone) does not take focus when the save lands', async () => {
+  let finish;
+  const onTick = jest.fn(() => new Promise((resolve) => { finish = resolve; }));
+  const r = await tick({ onTick });
+  await r.click(LABEL);
+  await r.act(async () => { if (document.activeElement) document.activeElement.blur(); });
+  expect(document.activeElement).toBe(document.body);
+  await r.act(async () => { finish(); });
+  expect(checkbox(r).disabled).toBe(false);
+  expect(document.activeElement).not.toBe(checkbox(r));
+  await r.unmount();
+});
+
+test('a plain undo with nothing focused does not take focus when the save lands', async () => {
+  let finish;
+  const onUndo = jest.fn(() => new Promise((resolve) => { finish = resolve; }));
+  const r = await tick({ milestone: M, onUndo });
+  await r.click(LABEL);
+  await r.act(async () => { if (document.activeElement) document.activeElement.blur(); });
+  expect(document.activeElement).toBe(document.body);
+  await r.act(async () => { finish(); });
+  expect(checkbox(r).disabled).toBe(false);
+  expect(document.activeElement).not.toBe(checkbox(r));
+  await r.unmount();
+});
