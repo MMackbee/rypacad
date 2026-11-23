@@ -26,16 +26,21 @@ const pill = (tone) => ({
  * `milestone` undefined renders nothing (or the load error), so a row never
  * reads "not done" before its read lands. Undo is for whoever ticked it,
  * inside ten minutes; the owner clears any tick behind an inline confirm.
+ * `label` and `loadErrorText` default to the Parallax words; the athlete
+ * roster passes the fitness assessment's (hq card 14).
  * Who may do what is data/combine.js; `now` is re-read at tap time, so a
  * screen left open past the ten minutes says why instead of failing.
  */
-export default function ParallaxTick({ name, milestone, viewer, canTick, onTick, onUndo, loadError = false, now = Date.now }) {
+export default function ParallaxTick({
+  name, milestone, viewer, canTick, onTick, onUndo, loadError = false, now = Date.now,
+  label = INTAKE_LABEL, loadErrorText = INTAKE_LOAD_ERROR,
+}) {
   const [busy, setBusy] = useState(false);
   const [problem, setProblem] = useState(null);
   const [confirming, setConfirming] = useState(false);
 
   if (milestone === undefined) {
-    return loadError ? <Body size={11} tone={color.error}>{INTAKE_LOAD_ERROR}</Body> : null;
+    return loadError ? <Body size={11} tone={color.error}>{loadErrorText}</Body> : null;
   }
 
   const ticked = Boolean(milestone);
@@ -75,7 +80,7 @@ export default function ParallaxTick({ name, milestone, viewer, canTick, onTick,
         type="button"
         role="checkbox"
         aria-checked={ticked}
-        aria-label={`${INTAKE_LABEL}: ${name}`}
+        aria-label={`${label}: ${name}`}
         disabled={!enabled}
         onClick={onClick}
         style={{
@@ -107,7 +112,7 @@ export default function ParallaxTick({ name, milestone, viewer, canTick, onTick,
           {ticked ? <Tick size={11} /> : null}
         </span>
         <span style={{ display: 'flex', flexDirection: 'column' }}>
-          <span style={{ font: `600 12px ${font.body}`, color: color.text }}>{INTAKE_LABEL}</span>
+          <span style={{ font: `600 12px ${font.body}`, color: color.text }}>{label}</span>
           {ticked ? (
             <span style={{ font: `400 11px ${font.body}`, color: color.textSecondary, marginTop: 2 }}>
               {intakeDoneLine(milestone)}
@@ -117,10 +122,10 @@ export default function ParallaxTick({ name, milestone, viewer, canTick, onTick,
       </button>
       {confirming ? (
         <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 8, marginTop: 4 }}>
-          <Body size={12} tone={color.text}>{`Clear ${INTAKE_LABEL} for ${name}?`}</Body>
+          <Body size={12} tone={color.text}>{`Clear ${label} for ${name}?`}</Body>
           <button
             type="button"
-            aria-label={`Clear ${INTAKE_LABEL}: ${name}`}
+            aria-label={`Clear ${label}: ${name}`}
             disabled={busy}
             onClick={(e) => { e.stopPropagation(); run(onUndo, undoFailed); }}
             style={pill(color.error)}

@@ -4,6 +4,9 @@
  * per athlete, so "once" is the rules' create-only. Imports shared primitives
  * FROM ./live, never the other way (the mentalConsentLive.js precedent).
  *
+ * The same three calls serve the fitness assessment mark (hq card 14): an
+ * optional doc id, default parallaxIntake, so every existing caller is unchanged.
+ *
  * A tick is a plain setDoc of the four keys data/combine.js intakeDoc builds.
  * When another coach ticked first, the rules see the second write as an
  * update and refuse it: the refusal is re-read, and a tick that is there
@@ -18,7 +21,7 @@ import { INTAKE_DOC_ID } from '../data/combine';
 
 export const INTAKE_KEY = 'milestones';
 
-const intakeRef = (athleteId) => doc(db, 'athletes', athleteId, INTAKE_KEY, INTAKE_DOC_ID);
+const intakeRef = (athleteId, docId) => doc(db, 'athletes', athleteId, INTAKE_KEY, docId);
 
 function requireAthlete(athleteId, context) {
   if (!athleteId) throw new LiveDataError(ERR.INVALID, `${context}: athleteId is required.`);
@@ -30,10 +33,10 @@ export function intakeStamp() {
 }
 
 /** One athlete's tick as stored ({ athleteId, at, by, byName }), or null. */
-export async function fetchIntake(athleteId) {
+export async function fetchIntake(athleteId, docId = INTAKE_DOC_ID) {
   requireAthlete(athleteId, 'fetchIntake');
   try {
-    const snap = await getDoc(intakeRef(athleteId));
+    const snap = await getDoc(intakeRef(athleteId, docId));
     return snap.exists() ? snap.data() : null;
   } catch (err) {
     throw wrap(err, 'fetchIntake');
@@ -41,15 +44,15 @@ export async function fetchIntake(athleteId) {
 }
 
 /** Tick: `{ status: 'done' }`, or `{ status: 'already', milestone }` when someone ticked first. */
-export async function createIntake(athleteId, body) {
+export async function createIntake(athleteId, body, docId = INTAKE_DOC_ID) {
   requireAthlete(athleteId, 'createIntake');
   requireUser();
   try {
-    await setDoc(intakeRef(athleteId), body);
+    await setDoc(intakeRef(athleteId, docId), body);
   } catch (err) {
     const wrapped = wrap(err, 'createIntake');
     if (wrapped.code === ERR.PERMISSION) {
-      const milestone = await fetchIntake(athleteId).catch(() => null);
+      const milestone = await fetchIntake(athleteId, docId).catch(() => null);
       if (milestone) {
         bump(INTAKE_KEY);
         return { status: 'already', milestone };
@@ -62,11 +65,11 @@ export async function createIntake(athleteId, body) {
 }
 
 /** Undo (the ticker inside ten minutes) or the owner's clear; the rules decide which may. */
-export async function deleteIntake(athleteId) {
+export async function deleteIntake(athleteId, docId = INTAKE_DOC_ID) {
   requireAthlete(athleteId, 'deleteIntake');
   requireUser();
   try {
-    await deleteDoc(intakeRef(athleteId));
+    await deleteDoc(intakeRef(athleteId, docId));
   } catch (err) {
     throw wrap(err, 'deleteIntake');
   }

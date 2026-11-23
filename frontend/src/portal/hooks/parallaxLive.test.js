@@ -74,3 +74,30 @@ test('the stamp is the server time; the key names the collection', () => {
   expect(intakeStamp()).toBe('NOW');
   expect(INTAKE_KEY).toBe('milestones');
 });
+
+describe('the fitness assessment mark (hq card 14): the same calls with a doc id', () => {
+  const FIT = 'athletes/a1/milestones/fitnessAssessment';
+
+  test('get, create and delete name the fitness doc; the default is still Parallax', async () => {
+    getDoc.mockResolvedValueOnce({ exists: () => false });
+    expect(await fetchIntake('a1', 'fitnessAssessment')).toBeNull();
+    expect(getDoc).toHaveBeenLastCalledWith({ path: FIT });
+    setDoc.mockResolvedValueOnce();
+    expect(await createIntake('a1', BODY, 'fitnessAssessment')).toEqual({ status: 'done' });
+    expect(setDoc).toHaveBeenLastCalledWith({ path: FIT }, BODY);
+    deleteDoc.mockResolvedValueOnce();
+    await deleteIntake('a1', 'fitnessAssessment');
+    expect(deleteDoc).toHaveBeenLastCalledWith({ path: FIT });
+    deleteDoc.mockResolvedValueOnce();
+    await deleteIntake('a1');
+    expect(deleteDoc).toHaveBeenLastCalledWith({ path: PATH });
+  });
+
+  test("a fitness tick that is already there answers 'already' from the fitness doc", async () => {
+    const theirs = { athleteId: 'a1', at: { toMillis: () => 1 }, by: 'u-sam', byName: 'Sam' };
+    setDoc.mockRejectedValueOnce({ code: 'permission-denied' });
+    getDoc.mockResolvedValueOnce({ exists: () => true, data: () => theirs });
+    expect(await createIntake('a1', BODY, 'fitnessAssessment')).toEqual({ status: 'already', milestone: theirs });
+    expect(getDoc).toHaveBeenLastCalledWith({ path: FIT });
+  });
+});

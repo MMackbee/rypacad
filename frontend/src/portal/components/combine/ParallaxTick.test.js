@@ -172,3 +172,20 @@ test('nothing before the read lands', async () => {
   expect(failed.text()).toBe("Parallax intake swings didn't load.");
   await failed.unmount();
 });
+
+test('the fitness assessment: its own label, words and load error (hq card 14)', async () => {
+  const onUndo = jest.fn(async () => {});
+  const r = await tick({ label: 'Fitness assessment', loadErrorText: "Fitness assessment didn't load.", milestone: M, viewer: OWNER, now: () => T + 86400000, onUndo });
+  expect(r.text()).toContain('Fitness assessment');
+  expect(r.text()).not.toContain('Parallax');
+  expect(checkbox(r).getAttribute('aria-label')).toBe('Fitness assessment: Jordan Whitfield');
+  expect(r.text()).toContain('done Nov 12 · Luke');
+  await r.click('Fitness assessment: Jordan Whitfield');
+  expect(r.text()).toContain('Clear Fitness assessment for Jordan Whitfield?');
+  await r.click('Clear Fitness assessment: Jordan Whitfield');
+  expect(onUndo).toHaveBeenCalledTimes(1);
+  await r.unmount();
+  const failed = await tick({ label: 'Fitness assessment', loadErrorText: "Fitness assessment didn't load.", milestone: undefined, loadError: true });
+  expect(failed.text()).toBe("Fitness assessment didn't load.");
+  await failed.unmount();
+});
