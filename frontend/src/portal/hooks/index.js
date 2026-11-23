@@ -512,7 +512,8 @@ function coachingFor(bookings, today, pkg = null, monthISO = today.slice(0, 7)) 
   const used = (bookings || []).filter(
     (b) => b && b.type === 'mental' && b.status !== 'cancelled' && (b.date || '').slice(0, 7) === month
   ).length;
-  // v2.0.1 (Sprint 18): per package - Elite two a month, everyone else one.
+  // v2.0.1 (Sprint 18) set a cap per package; owner ruling 2026-11-23 removed
+  // it (limit is null for every package, so capReached is always false).
   const limit = mentalCapFor(pkg);
   return { used, limit, capReached: limit != null && used >= limit };
 }

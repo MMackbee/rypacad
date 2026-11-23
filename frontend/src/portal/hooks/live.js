@@ -662,7 +662,8 @@ export function assertWithinBookingWindow(pkg, date, now = new Date()) {
  * exempt someone from.
  */
 function assertMentalCadence(type, date, bookings, pkg) {
-  // v2.0.1 (Sprint 18): per package - Elite two a month, everyone else one.
+  // v2.0.1 (Sprint 18) set a cap per package; owner ruling 2026-11-23 removed
+  // it (null for every package), so this gate only bites if a cap returns.
   const mentalCap = mentalCapFor(pkg);
   if (type === 'mental' && mentalCap != null) {
     const month = date.slice(0, 7);
