@@ -59,13 +59,13 @@ describe('Elite frequency caps (v2.0.1)', () => {
   });
 });
 
-describe('the mental cadence is per package (v2.0.1)', () => {
-  test('Elite two a month, everyone else one', () => {
-    expect(MENTAL_MONTHLY_CAP).toEqual({ elite: 2, default: 1 });
-    expect(mentalCapFor(ELITE)).toBe(2);
-    expect(mentalCapFor(packageById('t-6'))).toBe(1);
-    expect(mentalCapFor(null)).toBe(1);
-    expect(SPECIALIST_MONTHLY_CAP).toEqual({ phil: null, mental: 1 });
+describe('the mental cadence has no limit (owner, 2026-11-23; was one a month, two on Elite)', () => {
+  test('no cap for Elite, for a token package or for no package: tokens are the only limit', () => {
+    expect(MENTAL_MONTHLY_CAP).toEqual({ elite: null, default: null });
+    expect(mentalCapFor(ELITE)).toBeNull();
+    expect(mentalCapFor(packageById('t-6'))).toBeNull();
+    expect(mentalCapFor(null)).toBeNull();
+    expect(SPECIALIST_MONTHLY_CAP).toEqual({ phil: null, mental: null });
   });
 });
 

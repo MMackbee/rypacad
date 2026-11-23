@@ -58,12 +58,25 @@ import { parseISO } from 'date-fns';
 
 const mental = (date) => ({ id: date, type: 'mental', status: 'confirmed', date });
 
-test('coachingFor judges the given month, defaulting to today\'s', () => {
-  const bookings = [mental('2026-10-14'), mental('2026-11-03')];
-  expect(coachingFor(bookings, '2026-10-20')).toEqual({ used: 1, limit: 1, capReached: true });
-  expect(coachingFor(bookings, '2026-10-20', null, '2026-11')).toEqual({ used: 1, limit: 1, capReached: true });
-  expect(coachingFor(bookings, '2026-10-20', null, '2026-12')).toEqual({ used: 0, limit: 1, capReached: false });
-  expect(coachingFor(bookings, '2026-10-20', { kind: 'elite' }, '2026-10')).toEqual({ used: 1, limit: 2, capReached: false });
+test('coachingFor judges the given month, defaulting to today\'s, and never reaches a cap while there is none (owner, 2026-11-23)', () => {
+  const bookings = [mental('2026-10-14'), mental('2026-10-21'), mental('2026-11-03')];
+  expect(coachingFor(bookings, '2026-10-20')).toEqual({ used: 2, limit: null, capReached: false });
+  expect(coachingFor(bookings, '2026-10-20', null, '2026-11')).toEqual({ used: 1, limit: null, capReached: false });
+  expect(coachingFor(bookings, '2026-10-20', null, '2026-12')).toEqual({ used: 0, limit: null, capReached: false });
+  expect(coachingFor(bookings, '2026-10-20', { kind: 'elite' }, '2026-10')).toEqual({ used: 2, limit: null, capReached: false });
+  expect(coachingFor([...bookings, mental('2026-10-28')], '2026-10-20')).toEqual({ used: 3, limit: null, capReached: false });
+});
+
+test('coachingFor still reaches a cap when one is set (the knob stays for the day the owner wants a number again)', () => {
+  jest.isolateModules(() => {
+    jest.doMock('../data/specialists', () => ({ ...jest.requireActual('../data/specialists'), mentalCapFor: (pkg) => (pkg && pkg.kind === 'elite' ? 2 : 1) }));
+    const capped = require('./index');
+    const bookings = [mental('2026-10-14'), mental('2026-11-03')];
+    expect(capped.coachingFor(bookings, '2026-10-20')).toEqual({ used: 1, limit: 1, capReached: true });
+    expect(capped.coachingFor(bookings, '2026-10-20', null, '2026-12')).toEqual({ used: 0, limit: 1, capReached: false });
+    expect(capped.coachingFor(bookings, '2026-10-20', { kind: 'elite' }, '2026-10')).toEqual({ used: 1, limit: 2, capReached: false });
+  });
+  jest.dontMock('../data/specialists');
 });
 
 test('seed mental slots are the three 30-minute Yannick times; Phil slots are 45', () => {
