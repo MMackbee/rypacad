@@ -41,7 +41,7 @@ test('MENTAL_MONTHLY_CAP mirrors frontend data/specialists.js', () => {
       {elite: lit(m[1]), default: lit(m[2])});
 });
 
-test('the handler decides over-cadence through overCadence, not a bare comparison', () => {
+test('the handler flags over-cadence through overCadence()', () => {
   // Only the emulator harness runs the handler, so read the source (as the
   // pin test above does): the call site must use the guarded function.
   const src = fs.readFileSync(path.join(__dirname, 'calendly.js'), 'utf8');
