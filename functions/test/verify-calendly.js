@@ -248,7 +248,14 @@ async function main() {
 
   log('\nSTEP G  the other flags');
   r = await run(variant('invitee-created', 7, {utm: 'sol', email: 'sol@example.test', start: '2026-10-22T21:00:00Z'}));
-  check('second mental this month -> over-cadence (before over-cap)', r, {outcome: 'applied', flag: 'over-cadence'});
+  check('owner 2026-11-23, no monthly cap: a second mental this month raises no cadence flag; a single athlete with no token is still over-cap', r, {outcome: 'applied', flag: 'over-cap'});
+  r = await run(variant('invitee-created', 61, {utm: 'lena', start: '2026-10-27T21:00:00Z'}));
+  check('first mental this month for an athlete with tokens -> no flag, charged from the period', [r.flag, (await get('bookings', `lena_${EVT(61)}`)).chargedFrom], [null, 'period']);
+  r = await run(variant('invitee-created', 62, {utm: 'lena', start: '2026-10-28T21:00:00Z'}));
+  check('a second mental this month -> no cadence flag, charged like any other session', [r.flag, (await get('bookings', `lena_${EVT(62)}`)).chargedFrom], [null, 'period']);
+  r = await run(variant('invitee-created', 63, {utm: 'lena', start: '2026-10-29T21:00:00Z'}));
+  check('a third mental this month -> still no flag, still charged', [r.flag, (await get('bookings', `lena_${EVT(63)}`)).chargedFrom], [null, 'period']);
+  check('three mental sessions, three tokens spent', (await position('lena', 't-6', '2026-10-01')).used, 3);
   r = await run(variant('invitee-created', 8, {utm: 'max', start: '2026-10-23T21:00:00Z'}));
   check('billing pending -> membership-inactive, even for Elite', r, {outcome: 'applied', flag: 'membership-inactive'});
   check('max chargedFrom period, not elite', (await get('bookings', `max_${EVT(8)}`)).chargedFrom, 'period');
