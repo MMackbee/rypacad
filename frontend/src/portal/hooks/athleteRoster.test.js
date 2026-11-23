@@ -158,6 +158,9 @@ test('the fitness tick writes the fitness doc with the four keys, and the row sh
   expect(shown.fitnessAssessment).toMatchObject({ athleteId: 'a-moss', by: 'u-owner', byName: 'Pat' });
   expect(shown.fitnessAssessment.at).toBeInstanceOf(Date);
   expect(shown.parallaxIntake).toBeNull();
+  // Only that athlete's row changed: the other real athlete's marks, both of them, are as they were.
+  expect(result.current.data.marks['a-kim']).toEqual({ parallaxIntake: MARK(), fitnessAssessment: null });
+  expect(Object.keys(result.current.data.marks).sort()).toEqual(['a-kim', 'a-moss']);
   // No reload of the list: nothing was read again.
   expect(mockReads.length).toBe(reads);
   expect(mockCalls.filter((c) => c === 'athletes')).toHaveLength(1);
@@ -188,6 +191,19 @@ test('undo deletes by doc id and the row goes back to not done', async () => {
   await act(async () => { await result.current.undo('a-kim', 'parallaxIntake'); });
   expect(mockWrites[0]).toEqual(['delete', 'a-kim', 'parallaxIntake']);
   expect(result.current.data.marks['a-kim'].parallaxIntake).toBeNull();
+  // The other athlete's marks are untouched (neither one was ever ticked).
+  expect(result.current.data.marks['a-moss']).toEqual({ parallaxIntake: null, fitnessAssessment: null });
+  await unmount();
+});
+
+test('an undo changes only that athlete and that mark: a tick on another athlete stays', async () => {
+  mockMilestones = { 'a-kim': { parallaxIntake: MARK(), fitnessAssessment: MARK('Sam') }, 'a-moss': {} };
+  const { result, unmount } = await mount();
+  await act(async () => { await result.current.tick('a-moss', 'parallaxIntake'); });
+  await act(async () => { await result.current.undo('a-kim', 'parallaxIntake'); });
+  expect(result.current.data.marks['a-kim']).toEqual({ parallaxIntake: null, fitnessAssessment: MARK('Sam') });
+  expect(result.current.data.marks['a-moss'].parallaxIntake).toBeTruthy();
+  expect(result.current.data.marks['a-moss'].fitnessAssessment).toBeNull();
   await unmount();
 });
 
