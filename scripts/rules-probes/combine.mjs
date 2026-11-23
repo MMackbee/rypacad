@@ -138,6 +138,9 @@ async function fitnessCases(k) {
   expect("fitness: athleteId another athlete's refused", await put(t.coach, 'ath-absent', mark('ath-other')), 403);
   expect('fitness: doc id somethingElse refused for the owner', await put(k.owner, 'ath-absent', mark('ath-absent', 'cb-owner', 'Owner'), 'somethingElse'), 403);
   expect('fitness: doc id somethingElse refused for a coach', await put(t.coach, 'ath-absent', mark('ath-absent'), 'somethingElse'), 403);
+  // A near miss of the real id is a different document: wrong case, and a trailing space.
+  expect('fitness: doc id FitnessAssessment (wrong case) refused for the owner', await put(k.owner, 'ath-absent', mark('ath-absent', 'cb-owner', 'Owner'), 'FitnessAssessment'), 403);
+  expect('fitness: doc id "fitnessAssessment " (trailing space) refused for the owner', await put(k.owner, 'ath-absent', mark('ath-absent', 'cb-owner', 'Owner'), 'fitnessAssessment '), 403);
   for (const [who, auth, by] of [['mental', k.mental, 'cb-mental'], ['ops', t.ops, uid.ops], ['the parent', t.parent, uid.parent], ['the athlete login', t.athlete, uid.athlete]]) {
     expect(`fitness: doc id somethingElse refused for ${who}`, await put(auth, 'ath-absent', mark('ath-absent', by, 'Dana'), 'somethingElse'), 403);
   }
