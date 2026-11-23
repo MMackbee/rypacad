@@ -169,7 +169,7 @@ async function main() {
   check('old booking cancelled by calendly', [oldB.status, oldB.cancelledBy, oldB.cancelReason, !!oldB.cancelledAt], ['cancelled', 'calendly', 'member', true]);
   check('old session released', [(await get('sessions', EVT(1))).booked, (await get('sessions', EVT(1))).status], [0, 'cancelled']);
   const newB = await get('bookings', `lena_${EVT(2)}`);
-  check('new booking clean (cadence 1/month not tripped)', [newB.status, newB.flag, newB.chargedFrom, newB.date], ['confirmed', null, 'period', '2026-10-16']);
+  check('new booking clean (no monthly cap on mental sessions)', [newB.status, newB.flag, newB.chargedFrom, newB.date], ['confirmed', null, 'period', '2026-10-16']);
   check('new session 4:30 PM', (await get('sessions', EVT(2))).time, '4:30 PM');
   check('still 1 used, 5 left', (await position('lena', 't-6', '2026-10-01')).left, 5);
   r = await run(fixture('reschedule-canceled'));

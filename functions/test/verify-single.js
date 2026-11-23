@@ -168,10 +168,12 @@ async function p3() {
 
   await set('graceTokens', 'single_cs_c2', purchase('cal', 'calhh'));
   r = await calendly.handleCalendlyEvent(invitee(2, '2026-11-06T21:00:00Z'), {db, now: CLOCK});
-  check('Nov 6: the Nov 4 mental booking counts -> over-cadence', r, {outcome: 'applied', flag: 'over-cadence'});
+  // Owner ruling 2026-11-23: no monthly cap on mental game sessions, so a
+  // second one in the month is not flagged; it spends the second token.
+  check('Nov 6: a second mental session in the month -> no flag (no cap)', r, {outcome: 'applied', flag: null});
   b = await get('bookings', 'cal_cal-single-ev-2');
-  check('Nov 6 booking keeps its flag AND spends the second token', b && [b.date, b.flag, b.chargedFrom, b.graceTokenId],
-      ['2026-11-06', 'over-cadence', 'grace', 'single_cs_c2']);
+  check('Nov 6 booking is unflagged and spends the second token', b && [b.date, b.flag, b.chargedFrom, b.graceTokenId],
+      ['2026-11-06', null, 'grace', 'single_cs_c2']);
 }
 
 // ---------------------------------------------------------------- P4
