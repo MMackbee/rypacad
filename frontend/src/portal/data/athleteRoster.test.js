@@ -1,6 +1,6 @@
 import {
   COUNT_EMPTY, FITNESS_DONE_KEY, PARALLAX_DONE_KEY, ROSTER_FILTERS, SEARCH_PLACEHOLDER,
-  countLine, filterRows, markOf, membershipLabel, rosterRows, searchRows, sortRows,
+  countLine, filterRows, markOf, membershipLabel, missingMarks, rosterRows, searchRows, sortRows,
 } from './athleteRoster';
 
 const TODAY = '2026-11-23';
@@ -184,13 +184,39 @@ describe('countLine', () => {
     expect(countLine({ rows, shown: [], marks })).toBe('Showing 0 of 3 · Parallax 2 done · Fitness 1 done');
   });
 
-  test('one athlete is singular; a mark that did not load is not counted; zero done reads "0 done"', () => {
-    expect(countLine({ rows: rows.slice(0, 1), shown: rows.slice(0, 1), marks: {} })).toBe('1 athlete · Parallax 0 done · Fitness 0 done');
+  test('one athlete is singular; zero done reads "0 done"', () => {
+    const one = { 'a-kim': { [PARALLAX_DONE_KEY]: null, [FITNESS_DONE_KEY]: null } };
+    expect(countLine({ rows: rows.slice(0, 1), shown: rows.slice(0, 1), marks: one })).toBe('1 athlete · Parallax 0 done · Fitness 0 done');
+  });
+
+  // Round 3 (adversarial finding 1): a read that did not land is said, and never counted as done.
+  test("all reads failed: every athlete didn't load, and the done numbers are 0", () => {
+    expect(countLine({ rows, shown: rows, marks: {} })).toBe("3 athletes · Parallax 0 done · Fitness 0 done · 3 didn't load");
+    expect(countLine({ rows, shown: [], marks: undefined })).toBe("Showing 0 of 3 · Parallax 0 done · Fitness 0 done · 3 didn't load");
+  });
+
+  test("one read failed: the line ends with 1 didn't load, counted over all rows and not only those shown", () => {
+    const partial = { ...marks };
+    delete partial['a-bo'];
+    expect(countLine({ rows, shown: rows, marks: partial })).toBe("3 athletes · Parallax 2 done · Fitness 1 done · 1 didn't load");
+    expect(countLine({ rows, shown: rows.slice(0, 1), marks: partial })).toBe("Showing 1 of 3 · Parallax 2 done · Fitness 1 done · 1 didn't load");
+  });
+
+  test('none failed: the line is exactly as before', () => {
+    expect(countLine({ rows, shown: rows, marks })).not.toMatch(/load/);
+  });
+
+  test('missingMarks counts the athletes with either mark unread', () => {
+    expect(missingMarks(rows, marks)).toBe(0);
+    expect(missingMarks(rows, {})).toBe(3);
+    expect(missingMarks(rows, { 'a-kim': { [PARALLAX_DONE_KEY]: null } })).toBe(3);
+    expect(missingMarks([], {})).toBe(0);
   });
 
   test('a large list shows a plain number', () => {
     const many = Array.from({ length: 1284 }, (_, i) => ({ athleteId: `x${i}`, name: `A${i}` }));
-    expect(countLine({ rows: many, shown: many, marks: {} })).toBe('1284 athletes · Parallax 0 done · Fitness 0 done');
+    const read = Object.fromEntries(many.map((r) => [r.athleteId, { [PARALLAX_DONE_KEY]: null, [FITNESS_DONE_KEY]: null }]));
+    expect(countLine({ rows: many, shown: many, marks: read })).toBe('1284 athletes · Parallax 0 done · Fitness 0 done');
   });
 
   test('the empty-result line', () => {

@@ -3,7 +3,7 @@ import {
   bestIds, canDeleteScore, canTickIntake, combineDateFloor, combineDateProblem, combineEntryRole, combineScoreDoc,
   combineSummary, distanceLabel, firstName, formatScore, intakeByName, intakeDoc, intakeDoneLine, intakeUndo,
   parseScore, roleWord, shortDay, sortScores,
-  FITNESS_DOC_ID, FITNESS_LABEL, FITNESS_LOAD_ERROR, INTAKE_DOC_ID, INTAKE_LABEL, INTAKE_LOAD_ERROR, markWords,
+  FITNESS_DOC_ID, FITNESS_LABEL, FITNESS_LOAD_ERROR, INTAKE_DOC_ID, INTAKE_LABEL, INTAKE_LOAD_ERROR, MARK_NOT_DONE, markWords,
 } from './combine';
 
 const at = (iso) => new Date(iso);
@@ -165,6 +165,10 @@ describe('the second one-time mark, the fitness assessment (hq card 14)', () => 
     expect(INTAKE_DOC_ID).toBe('parallaxIntake');
     expect(INTAKE_LABEL).toBe('Parallax intake swings');
     expect(INTAKE_LOAD_ERROR).toBe("Parallax intake swings didn't load.");
+  });
+
+  test('a mark known not to be done reads "not done" (the read-only roster, hq card 14 round 3)', () => {
+    expect(MARK_NOT_DONE).toBe('not done');
   });
 
   test('markWords picks the words by doc id; an unknown id falls back to Parallax', () => {

@@ -50,6 +50,8 @@ export const INTAKE_LOAD_ERROR = "Parallax intake swings didn't load.";
 export const FITNESS_LABEL = 'Fitness assessment';
 export const FITNESS_DOC_ID = 'fitnessAssessment';
 export const FITNESS_LOAD_ERROR = "Fitness assessment didn't load.";
+// A mark known not to be done, where it is status text and not a control (the roster as ops sees it; round 3).
+export const MARK_NOT_DONE = 'not done';
 
 const DISTANCE_IDS = COMBINE_DISTANCES.map((d) => d.id);
 const ENTRY_ROLES = ['coach', 'owner', 'athlete', 'parent'];

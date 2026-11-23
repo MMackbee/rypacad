@@ -121,13 +121,22 @@ export function filterRows(rows, filter, marks, keep) {
 
 const doneCount = (rows, marks, docId) => rows.filter((r) => Boolean(markOf(marks, r.athleteId, docId))).length;
 
+/** How many of these athletes have a mark whose read did not land (either mark unread). */
+export function missingMarks(rows, marks) {
+  return (rows || []).filter((r) => markOf(marks, r.athleteId, PARALLAX_DONE_KEY) === undefined || markOf(marks, r.athleteId, FITNESS_DONE_KEY) === undefined).length;
+}
+
 /**
  * '99 athletes · Parallax 4 done · Fitness 0 done'; with a search or filter
  * on (fewer rows shown than there are): 'Showing 12 of 99 · ...'. The done
- * numbers always count every athlete on the roster.
+ * numbers always count every athlete on the roster, and only marks that were
+ * read. When some athletes' marks did not load the line ends '· 3 didn't
+ * load' (counted over every row, not only those shown).
  */
 export function countLine({ rows, shown, marks }) {
   const total = (rows || []).length;
   const head = (shown || []).length === total ? `${total} ${total === 1 ? 'athlete' : 'athletes'}` : `Showing ${(shown || []).length} of ${total}`;
-  return `${head} · Parallax ${doneCount(rows || [], marks, PARALLAX_DONE_KEY)} done · Fitness ${doneCount(rows || [], marks, FITNESS_DONE_KEY)} done`;
+  const missing = missingMarks(rows, marks);
+  const tail = missing > 0 ? ` · ${missing} didn't load` : '';
+  return `${head} · Parallax ${doneCount(rows || [], marks, PARALLAX_DONE_KEY)} done · Fitness ${doneCount(rows || [], marks, FITNESS_DONE_KEY)} done${tail}`;
 }
