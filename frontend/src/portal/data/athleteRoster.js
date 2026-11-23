@@ -109,12 +109,14 @@ export function markOf(marks, athleteId, docId) {
 
 /**
  * 'all' keeps everyone; 'parallax' and 'fitness' keep the athletes KNOWN not
- * to have that mark. A mark that did not load is not "not done".
+ * to have that mark. A mark that did not load is not "not done". `keep` (a
+ * Set of athlete ids) are rows the owner ticked in this visit: they stay on
+ * screen, in their place, until the filter or the search changes.
  */
-export function filterRows(rows, filter, marks) {
+export function filterRows(rows, filter, marks, keep) {
   const docId = FILTER_MARK[filter];
   if (!docId) return rows || [];
-  return (rows || []).filter((r) => markOf(marks, r.athleteId, docId) === null);
+  return (rows || []).filter((r) => markOf(marks, r.athleteId, docId) === null || Boolean(keep && keep.has(r.athleteId)));
 }
 
 const doneCount = (rows, marks, docId) => rows.filter((r) => Boolean(markOf(marks, r.athleteId, docId))).length;

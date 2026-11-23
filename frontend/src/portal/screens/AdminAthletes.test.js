@@ -228,3 +228,78 @@ test('1,000 athletes render as plain rows', async () => {
   expect(r.text()).toContain('1000 athletes · Parallax 0 done · Fitness 0 done');
   await r.unmount();
 });
+
+// A roster whose tick and undo change the marks the way the hook's do (a new mark, or none).
+function ticking() {
+  mockRoster.tick = async (id, doc) => {
+    mockCalls.push(['tick', id, doc]);
+    mockRoster.data.marks[id][doc] = { athleteId: id, at: new Date(), by: 'u-owner', byName: 'Pat' };
+    return 'done';
+  };
+  mockRoster.undo = async (id, doc) => {
+    mockCalls.push(['undo', id, doc]);
+    mockRoster.data.marks[id][doc] = null;
+  };
+}
+const names = (r) => [...r.container.querySelectorAll('[data-roster-name]')].map((n) => n.textContent);
+
+test('under "Fitness not done" a row ticked in this visit stays, now done, and says so in the count', async () => {
+  ticking();
+  const r = await screen();
+  await r.click('Fitness not done');
+  expect(names(r)).toEqual(['Dana Kim']);
+  await r.click('Fitness assessment: Dana Kim');
+  expect(names(r)).toEqual(['Dana Kim']);
+  expect(r.text()).toContain('Fitness 2 done');
+  expect(r.text()).toContain('done ');
+  await r.unmount();
+});
+
+test('the ticked row goes when the filter is changed and changed back; the filter is then applied afresh', async () => {
+  ticking();
+  const r = await screen();
+  await r.click('Fitness not done');
+  await r.click('Fitness assessment: Dana Kim');
+  await r.click('Everyone');
+  expect(names(r)).toEqual(['Dana Kim', 'Ada Moss', 'Bo Moss']);
+  await r.click('Fitness not done');
+  expect(names(r)).toEqual([]);
+  expect(r.text()).toContain('No athletes match.');
+  await r.unmount();
+});
+
+test('changing the search also lets the ticked row go', async () => {
+  ticking();
+  const r = await screen();
+  await r.click('Fitness not done');
+  await r.click('Fitness assessment: Dana Kim');
+  expect(names(r)).toEqual(['Dana Kim']);
+  await r.fill('Search', 'kim');
+  expect(names(r)).toEqual([]);
+  await r.unmount();
+});
+
+test('undo on a row that stayed leaves it in place, not done again', async () => {
+  ticking();
+  const r = await screen();
+  await r.click('Fitness not done');
+  await r.click('Fitness assessment: Dana Kim');
+  await r.click('Fitness assessment: Dana Kim');
+  // The real hook re-renders the screen with the cleared mark; this mock does it by hand.
+  await r.rerender(<AdminAthletes bare role="owner" onBack={() => {}} onOpenHousehold={() => {}} />);
+  expect(mockCalls).toEqual([['tick', 'a-kim', 'fitnessAssessment'], ['undo', 'a-kim', 'fitnessAssessment']]);
+  expect(names(r)).toEqual(['Dana Kim']);
+  expect(r.text()).toContain('Fitness 1 done');
+  await r.unmount();
+});
+
+test('a row ticked under one filter does not appear under another it never matched', async () => {
+  ticking();
+  const r = await screen();
+  await r.click('Parallax not done');
+  await r.click('Parallax intake swings: Ada Moss');
+  expect(names(r)).toEqual(['Ada Moss']);
+  await r.click('Fitness not done');
+  expect(names(r)).toEqual(['Dana Kim']);
+  await r.unmount();
+});

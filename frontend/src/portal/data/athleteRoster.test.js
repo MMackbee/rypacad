@@ -152,6 +152,19 @@ describe('markOf and filterRows', () => {
   test('Fitness not done likewise', () => {
     expect(filterRows(rows, 'fitness', marks).map((r) => r.athleteId)).toEqual(['a-kim']);
   });
+
+  test('a row in the keep set stays under a filter that no longer matches it, in roster order', () => {
+    const ticked = { ...marks, 'a-ada': { [PARALLAX_DONE_KEY]: mark(), [FITNESS_DONE_KEY]: mark('Owner') } };
+    expect(filterRows(rows, 'parallax', ticked)).toEqual([]);
+    expect(filterRows(rows, 'parallax', ticked, new Set(['a-ada'])).map((r) => r.athleteId)).toEqual(['a-ada']);
+    expect(filterRows(rows, 'fitness', ticked, new Set(['a-ada'])).map((r) => r.athleteId)).toEqual(['a-kim', 'a-ada']);
+  });
+
+  test('the keep set adds nothing on Everyone, and an empty or missing one changes nothing', () => {
+    expect(filterRows(rows, 'all', marks, new Set(['a-ada']))).toHaveLength(3);
+    expect(filterRows(rows, 'fitness', marks, new Set()).map((r) => r.athleteId)).toEqual(['a-kim']);
+    expect(filterRows(rows, 'fitness', marks, undefined).map((r) => r.athleteId)).toEqual(['a-kim']);
+  });
 });
 
 describe('countLine', () => {

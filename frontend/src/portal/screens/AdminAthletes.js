@@ -52,6 +52,14 @@ export default function AdminAthletes({ bare = false, role = 'owner', onBack, on
   const { data, loading, error, retry, tick, undo } = useAthleteRoster();
   const [search, setSearch] = useState('');
   const [filter, setFilter] = useState('all');
+  // Rows ticked while this filter and search have been on: they stay (done, with their undo) until either changes.
+  const [kept, setKept] = useState(() => new Set());
+  const changeSearch = (value) => { setSearch(value); setKept(new Set()); };
+  const changeFilter = (key) => { setFilter(key); setKept(new Set()); };
+  const tickKeeping = (athleteId, docId) => {
+    setKept((prev) => new Set(prev).add(athleteId));
+    return tick(athleteId, docId);
+  };
   // The rows come from the athletes and households alone, so a tick (marks only) never re-sorts the list.
   const athletes = data?.athletes;
   const households = data?.households;
@@ -60,7 +68,7 @@ export default function AdminAthletes({ bare = false, role = 'owner', onBack, on
     [athletes, households]
   );
   const marks = data?.marks;
-  const shown = filterRows(searchRows(rows, search), filter, marks);
+  const shown = filterRows(searchRows(rows, search), filter, marks, kept);
   const canTick = data?.viewer?.role === 'owner';
 
   return (
@@ -81,10 +89,10 @@ export default function AdminAthletes({ bare = false, role = 'owner', onBack, on
           <ErrorNotice title={LOAD_ERROR_TITLE} onRetry={retry}>Check your connection and try again.</ErrorNotice>
         ) : (
           <>
-            <Field label="Search" placeholder={SEARCH_PLACEHOLDER} value={search} onChange={setSearch} />
+            <Field label="Search" placeholder={SEARCH_PLACEHOLDER} value={search} onChange={changeSearch} />
             <div role="group" aria-label="Filter" style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
               {ROSTER_FILTERS.map(([key, label]) => (
-                <button key={key} type="button" aria-pressed={filter === key} onClick={() => setFilter(key)} style={chip(filter === key)}>
+                <button key={key} type="button" aria-pressed={filter === key} onClick={() => changeFilter(key)} style={chip(filter === key)}>
                   {label}
                 </button>
               ))}
@@ -102,7 +110,7 @@ export default function AdminAthletes({ bare = false, role = 'owner', onBack, on
                   marks={marks}
                   viewer={data.viewer}
                   canTick={canTick}
-                  onTick={tick}
+                  onTick={tickKeeping}
                   onUndo={undo}
                   onOpenHousehold={onOpenHousehold}
                 />
