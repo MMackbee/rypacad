@@ -306,3 +306,81 @@ test('after Clear, focus returns to the mark\'s tick', async () => {
   expect(document.activeElement).toBe(checkbox(r));
   await r.unmount();
 });
+
+// ---- hq card 14, fix round 4: focus is never pulled -------------------------
+
+const withInput = (props) => renderScreen(
+  <div>
+    <input aria-label="Search athletes" />
+    <ParallaxTick name="Jordan Whitfield" milestone={null} viewer={LUKE} canTick now={() => T + 3 * 60000} onTick={() => {}} onUndo={() => {}} {...props} />
+  </div>
+);
+const search = (r) => r.container.querySelector('input');
+const focusSearch = (r) => r.act(async () => { search(r).focus(); });
+
+test('a plain tick never moves focus: an input focused while the save is in flight keeps it', async () => {
+  let finish;
+  const onTick = jest.fn(() => new Promise((resolve) => { finish = resolve; }));
+  const r = await withInput({ onTick });
+  await r.click(LABEL);
+  await focusSearch(r);
+  await r.act(async () => { finish(); });
+  expect(document.activeElement).toBe(search(r));
+  await r.unmount();
+});
+
+test('a plain undo inside the ten minutes never moves focus either', async () => {
+  let finish;
+  const onUndo = jest.fn(() => new Promise((resolve) => { finish = resolve; }));
+  const r = await withInput({ milestone: M, onUndo });
+  await r.click(LABEL);
+  await focusSearch(r);
+  await r.act(async () => { finish(); });
+  expect(document.activeElement).toBe(search(r));
+  await r.unmount();
+});
+
+test("a tick that lands as another person's mark leaves no focus owed: a later re-render does not pull focus", async () => {
+  let finish;
+  const onTick = jest.fn(() => new Promise((resolve) => { finish = resolve; }));
+  const el = (milestone) => (
+    <div>
+      <input aria-label="Search athletes" />
+      <ParallaxTick name="Jordan Whitfield" milestone={milestone} viewer={LUKE} canTick now={() => T + 3 * 60000} onTick={onTick} onUndo={() => {}} />
+    </div>
+  );
+  const r = await renderScreen(el(null));
+  await r.click(LABEL);
+  await r.rerender(el({ athleteId: 'a1', at: new Date(T), by: 'u-sam', byName: 'Sam' }));
+  expect(checkbox(r).disabled).toBe(true);
+  await r.act(async () => { finish(); });
+  await focusSearch(r);
+  await r.rerender(el(null));
+  expect(checkbox(r).disabled).toBe(false);
+  expect(document.activeElement).toBe(search(r));
+  await r.unmount();
+});
+
+test('Clear: focus the person moved to another input while the write was in flight stays there', async () => {
+  let finish;
+  const onUndo = jest.fn(() => new Promise((resolve) => { finish = resolve; }));
+  const r = await withInput({ milestone: M, viewer: OWNER, now: () => T + 86400000, onUndo });
+  await r.click(LABEL);
+  await r.click('Clear Parallax intake swings: Jordan Whitfield');
+  await focusSearch(r);
+  await r.act(async () => { finish(); });
+  expect(onUndo).toHaveBeenCalledTimes(1);
+  expect(document.activeElement).toBe(search(r));
+  await r.unmount();
+});
+
+test('a Clear that fails moves focus nowhere and says not saved', async () => {
+  const onUndo = jest.fn(async () => { throw new Error('offline'); });
+  const r = await withInput({ milestone: M, viewer: OWNER, now: () => T + 86400000, onUndo });
+  await r.click(LABEL);
+  await focusSearch(r);
+  await r.click('Clear Parallax intake swings: Jordan Whitfield');
+  expect(r.text()).toContain('Not saved. Tap to try again.');
+  expect(document.activeElement).not.toBe(checkbox(r));
+  await r.unmount();
+});
