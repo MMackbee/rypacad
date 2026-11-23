@@ -3737,8 +3737,8 @@ Fields, exactly these four (`data/combine.js` `intakeDoc`):
 
 Who: a coach or the owner may create it (the roster screen is the owner's);
 nobody updates it; the owner deletes it any time and whoever created it
-within ten minutes; staff (coach, mental, ops, owner) read it, families do
-not. No other id is accepted in `milestones`. Rules: the one `milestones`
+within ten minutes; the staff roles (coach, mental, ops, owner) and any
+account with a `specialistId` read it, families do not. No other id is accepted in `milestones`. Rules: the one `milestones`
 block in `firestore.rules`; probe: `scripts/rules-probes/combine.mjs`.
 
 ### The Parallax mark is unchanged
