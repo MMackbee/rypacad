@@ -33,7 +33,7 @@ test('mentalCapFor: no limit for Elite, a token package or no package',
 test('MENTAL_MONTHLY_CAP mirrors frontend data/specialists.js', () => {
   const src = fs.readFileSync(path.join(__dirname,
       '../../frontend/src/portal/data/specialists.js'), 'utf8');
-  const m = /MENTAL_MONTHLY_CAP\s*=\s*\{\s*elite:\s*(\w+),\s*default:\s*(\w+)\s*\}/
+  const m = /MENTAL_MONTHLY_CAP = \{ elite: (\w+), default: (\w+) \}/
       .exec(src);
   assert.ok(m, 'MENTAL_MONTHLY_CAP literal not found in specialists.js');
   const lit = (s) => (s === 'null' ? null : Number(s));
