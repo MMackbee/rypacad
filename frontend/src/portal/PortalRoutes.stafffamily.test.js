@@ -4,6 +4,8 @@
  * athlete-bookings link - finds the athlete's family and lands on the family
  * page, opened on that athlete. The harness below (mocks, the mount helper)
  * is PortalRoutes.combine.test.js lines 6-97; the family page is a stand-in.
+ * It also covers the athlete roster's route (hq card 14, 2026-11-23): /portal/admin/athletes
+ * for the owner and ops, beside the athlete redirects it must not collide with.
  */
 import React, { act } from 'react';
 import { createRoot } from 'react-dom/client';
@@ -24,8 +26,25 @@ jest.mock('./screens/AdminDashboard', () => {
   return {
     __esModule: true,
     // The button is an athlete row (Outstanding, the consent tracker).
-    default: ({ role, onOpenAthlete }) =>
-      createElement('button', { type: 'button', 'data-do': 'athlete', onClick: () => onOpenAthlete(mockOpenWith.value) }, `ADMIN as ${role}`),
+    default: ({ role, onOpenAthlete, onOpenAthletes }) =>
+      createElement('div', null,
+        createElement('button', { type: 'button', 'data-do': 'athlete', onClick: () => onOpenAthlete(mockOpenWith.value) }, `ADMIN as ${role}`),
+        createElement('button', { type: 'button', 'data-do': 'roster', onClick: onOpenAthletes }, 'Open athlete roster')),
+  };
+});
+// Every render of the roster screen: which role, bare or not.
+const mockRosterRenders = [];
+jest.mock('./screens/AdminAthletes', () => {
+  const { createElement } = require('react');
+  return {
+    __esModule: true,
+    default: ({ role, bare, onBack, onOpenHousehold }) => {
+      mockRosterRenders.push({ role, bare });
+      return createElement('div', null,
+        createElement('span', { 'data-screen': 'roster' }, `ATHLETE ROSTER as ${role}`),
+        createElement('button', { type: 'button', 'data-do': 'back', onClick: onBack }, 'Back'),
+        createElement('button', { type: 'button', 'data-do': 'family', onClick: () => onOpenHousehold('hh9') }, 'Family'));
+    },
   };
 });
 jest.mock('./screens/AdminScholarships', () => ({ __esModule: true, default: () => 'SCHOLARSHIPS' }));
@@ -98,6 +117,7 @@ afterEach(() => {
   mockUser.value = null;
   mockDeferred.value = false;
   mockOpenWith.value = 'jordan';
+  mockRosterRenders.length = 0;
 });
 
 const ATHLETE = '/portal/admin/athletes/jordan';
@@ -185,5 +205,81 @@ test('while the athlete loads nothing is drawn and nothing is guessed', async ()
   expect(r.at()).toBe(ATHLETE);
   expect(r.container.textContent).not.toContain('FAMILY PAGE');
   expect(r.container.textContent).not.toContain("isn't on file");
+  await r.unmount();
+});
+
+// The athlete roster (hq card 14, 2026-11-23).
+const ROSTER = '/portal/admin/athletes';
+const rosterScreen = (r) => r.container.querySelector('[data-screen="roster"]');
+const rosterPress = async (r, what) => {
+  await act(async () => { r.container.querySelector(`[data-do="${what}"]`).click(); });
+  for (let i = 0; i < 5; i += 1) await act(async () => { await Promise.resolve(); });
+};
+
+test('owner and ops reach /portal/admin/athletes, bare, as themselves; it is not the athlete redirect', async () => {
+  for (const role of ['owner', 'ops']) {
+    signIn({ uid: `u-${role}`, role });
+    const r = await mount(ROSTER);
+    expect(r.at()).toBe(ROSTER);
+    expect(rosterScreen(r).textContent).toBe(`ATHLETE ROSTER as ${role}`);
+    expect(mockRosterRenders.every((x) => x.bare === true && x.role === role)).toBe(true);
+    await r.unmount();
+    mockRosterRenders.length = 0;
+  }
+  // The athlete redirect is not asked about: the roster's path is not an athlete id.
+  expect(mockAthleteAsked).toEqual([]);
+});
+
+test('coach, mental, parent and athlete are turned away from the roster', async () => {
+  for (const user of [
+    { uid: 'u-coach', role: 'coach' },
+    { uid: 'u-mental', role: 'mental' },
+    { uid: 'u-parent', role: 'parent', householdId: 'hh1' },
+    { uid: 'u-athlete', role: 'athlete', athleteId: 'jordan' },
+  ]) {
+    signIn(user);
+    const r = await mount(ROSTER);
+    expect(r.container.textContent).not.toContain('ATHLETE ROSTER');
+    expect(r.at()).not.toBe(ROSTER);
+    await r.unmount();
+  }
+  expect(mockRosterRenders).toEqual([]);
+});
+
+test('the Admin dashboard is handed the way in, and the roster Back goes to Admin', async () => {
+  for (const role of ['owner', 'ops']) {
+    signIn({ uid: `u-${role}`, role });
+    const r = await mount('/portal/admin');
+    await rosterPress(r, 'roster');
+    expect(r.at()).toBe(ROSTER);
+    expect(rosterScreen(r).textContent).toBe(`ATHLETE ROSTER as ${role}`);
+    await rosterPress(r, 'back');
+    expect(r.at()).toBe('/portal/admin');
+    await r.unmount();
+  }
+});
+
+test("a family name on the roster opens that household's page", async () => {
+  signIn({ uid: 'u-owner', role: 'owner' });
+  const r = await mount(ROSTER);
+  await rosterPress(r, 'family');
+  expect(r.at()).toBe('/portal/admin/households/hh9');
+  await r.unmount();
+});
+
+test('with the roster route in place, /portal/admin/athletes/<id> still lands on the family page', async () => {
+  signIn({ uid: 'u-owner', role: 'owner' });
+  const r = await mount(ATHLETE);
+  expect(r.at()).toBe(FAMILY);
+  expect(r.container.textContent).not.toContain('ATHLETE ROSTER');
+  await r.unmount();
+});
+
+test('a live session still loading waits, so the roster never sees a guessed role', async () => {
+  signIn({ uid: 'u-ops', role: 'ops' });
+  mockDeferred.value = true;
+  const r = await mount(ROSTER);
+  expect(rosterScreen(r).textContent).toBe('ATHLETE ROSTER as ops');
+  expect(mockRosterRenders.every((x) => x.role === 'ops')).toBe(true);
   await r.unmount();
 });
