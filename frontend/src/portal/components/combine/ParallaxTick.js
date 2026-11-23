@@ -45,17 +45,22 @@ export default function ParallaxTick({
   const [confirming, setConfirming] = useState(false);
   const [refocus, setRefocus] = useState(false);
   const tickRef = useRef(null);
+  const rootRef = useRef(null);
 
   const ticked = Boolean(milestone);
   const enabled = Boolean(canTick) && !busy && (!ticked || intakeUndo(milestone, viewer, now()) != null);
 
-  // After Clear or Keep the confirm (and the button the finger was on) is gone: put focus back on the tick once it can take it.
+  // After Clear or Keep the confirm (and the button the finger was on) is gone: put focus back on the tick,
+  // now or never. Served in the render that follows the request; the request is dropped either way, and
+  // focus is never taken from another field or control the person has moved to meanwhile.
   useEffect(() => {
-    if (refocus && enabled && tickRef.current) {
-      tickRef.current.focus();
-      setRefocus(false);
-    }
-  }, [refocus, enabled]);
+    if (!refocus) return;
+    setRefocus(false);
+    const tick = tickRef.current;
+    const at = document.activeElement;
+    const free = !at || at === document.body || (rootRef.current != null && rootRef.current.contains(at));
+    if (tick && !tick.disabled && free) tick.focus();
+  }, [refocus]);
 
   if (milestone === undefined) {
     return loadError ? <Body size={11} tone={color.error}>{loadErrorText}</Body> : null;
@@ -91,13 +96,15 @@ export default function ParallaxTick({
     );
   }
 
-  const run = async (write, failCopy) => {
+  const run = async (write, failCopy, thenRefocus = false) => {
     setBusy(true);
     setProblem(null);
     try {
       await write();
       setConfirming(false);
-      setRefocus(true);
+      setBusy(false);
+      if (thenRefocus) setRefocus(true);
+      return;
     } catch (err) {
       setProblem(failCopy(err));
     }
@@ -121,7 +128,7 @@ export default function ParallaxTick({
   };
 
   return (
-    <div>
+    <div ref={rootRef}>
       <button
         ref={tickRef}
         type="button"
@@ -176,7 +183,7 @@ export default function ParallaxTick({
             type="button"
             aria-label={`Clear ${label}: ${name}`}
             disabled={busy}
-            onClick={(e) => { e.stopPropagation(); run(onUndo, undoFailed); }}
+            onClick={(e) => { e.stopPropagation(); run(onUndo, undoFailed, true); }}
             style={pill(color.error)}
           >
             Clear

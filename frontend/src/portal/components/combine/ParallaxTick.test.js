@@ -378,7 +378,6 @@ test('a Clear that fails moves focus nowhere and says not saved', async () => {
   const onUndo = jest.fn(async () => { throw new Error('offline'); });
   const r = await withInput({ milestone: M, viewer: OWNER, now: () => T + 86400000, onUndo });
   await r.click(LABEL);
-  await focusSearch(r);
   await r.click('Clear Parallax intake swings: Jordan Whitfield');
   expect(r.text()).toContain('Not saved. Tap to try again.');
   expect(document.activeElement).not.toBe(checkbox(r));
