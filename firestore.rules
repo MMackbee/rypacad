@@ -1000,10 +1000,14 @@ service cloud.firestore {
       // read that doc and coaches have no write branch on it. `by` is the
       // authoritative "who ticked it"; `byName` is a display label the
       // writer supplies (staff-only, not checked against a name). Additive.
+      // Since 2026-11-23 (hq card 14) a second fixed doc, fitnessAssessment, is
+      // the owner's one-time "fitness assessment done" mark, set from the admin
+      // athlete roster. Same four keys, same create, delete and read rules as
+      // parallaxIntake; no other id is accepted. Additive.
       match /milestones/{milestoneId} {
         function intakeShapeOk() {
           let d = request.resource.data;
-          return milestoneId == 'parallaxIntake'
+          return milestoneId in ['parallaxIntake', 'fitnessAssessment']
             && d.keys().hasAll(['athleteId', 'at', 'by', 'byName'])
             && d.keys().hasOnly(['athleteId', 'at', 'by', 'byName'])
             && d.athleteId == athleteId

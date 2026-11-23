@@ -1,5 +1,5 @@
 /**
- * Parallax intake swings and combine scores (docs/portal/plans/2026-11-11-parallax-combine/00-spec.md 3 and 4).
+ * Parallax intake swings, the fitness assessment mark and combine scores (docs/portal/plans/2026-11-11-parallax-combine/00-spec.md 3 and 4).
  * athletes/{id}/milestones/parallaxIntake: one fixed id, create-only; a coach
  * (Phil included) or the owner ticks it with `at` the server time and `by`
  * the caller; nobody updates it; the owner deletes it any time, whoever
@@ -26,6 +26,7 @@ const CB_USERS = [
   ['cb-parent-nohh', { role: 'parent', householdId: null, athleteId: null }],
 ];
 const INTAKE = 'parallaxIntake';
+const FITNESS = 'fitnessAssessment';
 const MS = (a) => `athletes/${a}/milestones`;
 const CS = (a = 'ath-active') => `athletes/${a}/combineScores`;
 const tok = (u) => token(u, { email: `${u}@example.com`, email_verified: true });
@@ -39,7 +40,7 @@ const score = (by, role, extra = {}) => ({ athleteId: 'ath-active', distance: 'u
 // A tick as hooks/parallaxLive.js createIntake sends it: `at` the server's REQUEST_TIME.
 const tick = (auth, a, fields, id = INTAKE) => createAs(auth, MS(a), id, fields, ['at']);
 // A write over an existing tick: the fields under the mask, `at` the server time beside it (the SDK's shape).
-const retick = (auth, a, fields) => commitAs(auth, [patchWrite(MS(a), INTAKE, fields, Object.keys(fields), ['at'])]);
+const retick = (auth, a, fields, id = INTAKE) => commitAs(auth, [patchWrite(MS(a), id, fields, Object.keys(fields), ['at'])]);
 
 /** Every milestone and combine score under the probe athletes, deleted as the emulator admin. */
 async function sweep() {
@@ -102,6 +103,73 @@ async function intakeCases(k) {
   await aged(11);
   expect('intake: the coach deletes their own eleven-minute-old tick refused', await delAs(t.coach, agedPath), 403);
   expect('intake: the owner deletes the eleven-minute-old tick', await delAs(k.owner, agedPath), 200);
+}
+
+/**
+ * The second one-time mark (hq card 14, 2026-11-23): milestones/fitnessAssessment,
+ * the same four keys and the same create, delete and read rules as the Parallax
+ * mark. Only the owner and a coach create it; the screen that ticks it is the
+ * owner's athlete roster.
+ */
+async function fitnessCases(k) {
+  const mark = (a, by = uid.coach, byName = 'Luke', extra = {}) => intake(a, by, byName, extra);
+  const put = (auth, a, fields, id = FITNESS) => tick(auth, a, fields, id);
+  const active = `${MS('ath-active')}/${FITNESS}`;
+  const other = `${MS('ath-other')}/${FITNESS}`;
+  expect('fitness: the owner ticks ath-active', await put(k.owner, 'ath-active', mark('ath-active', 'cb-owner', 'Owner')), 200);
+  expect('fitness: a coach ticks ath-other', await put(t.coach, 'ath-other', mark('ath-other')), 200);
+  expect('fitness: Phil (role coach) ticks ath-elite', await put(k.phil, 'ath-elite', mark('ath-elite', 'cb-phil', 'Phil')), 200);
+  expect('fitness: the owner ticking over a tick refused', await retick(k.owner, 'ath-active', mark('ath-active', 'cb-owner', 'Owner'), FITNESS), 403);
+  expect('fitness: a coach ticking over a tick refused', await retick(t.coach, 'ath-other', mark('ath-other'), FITNESS), 403);
+  expect('fitness: the owner updating one field of the tick refused', await retick(k.owner, 'ath-active', { byName: 'Sam' }, FITNESS), 403);
+
+  for (const [who, auth, by] of [['ops', t.ops, uid.ops], ['mental', k.mental, 'cb-mental'], ['the parent', t.parent, uid.parent], ['the athlete login', t.athlete, uid.athlete], ['a stranger', t.stranger, uid.stranger]]) {
+    expect(`fitness: ${who} ticks refused`, await put(auth, 'ath-absent', mark('ath-absent', by, 'Dana')), 403);
+  }
+  const clientAt = mark('ath-absent', uid.coach, 'Luke', { at: new Date(Date.now() - 60000) });
+  expect('fitness: at a client time a minute ago, no server time, refused', await createAs(t.coach, MS('ath-absent'), FITNESS, clientAt, []), 403);
+  expect('fitness: by another uid refused', await put(t.coach, 'ath-absent', mark('ath-absent', 'cb-coach2')), 403);
+  expect("fitness: byName '' refused", await put(t.coach, 'ath-absent', mark('ath-absent', uid.coach, '')), 403);
+  expect('fitness: byName 41 characters refused', await put(t.coach, 'ath-absent', mark('ath-absent', uid.coach, 'L'.repeat(41))), 403);
+  expect('fitness: an extra key note refused', await put(t.coach, 'ath-absent', mark('ath-absent', uid.coach, 'Luke', { note: 'x' })), 403);
+  const noName = mark('ath-absent');
+  delete noName.byName;
+  expect('fitness: no byName key refused', await put(t.coach, 'ath-absent', noName), 403);
+  expect("fitness: athleteId another athlete's refused", await put(t.coach, 'ath-absent', mark('ath-other')), 403);
+  expect('fitness: doc id somethingElse refused for the owner', await put(k.owner, 'ath-absent', mark('ath-absent', 'cb-owner', 'Owner'), 'somethingElse'), 403);
+  expect('fitness: doc id somethingElse refused for a coach', await put(t.coach, 'ath-absent', mark('ath-absent'), 'somethingElse'), 403);
+  for (const [who, auth, by] of [['mental', k.mental, 'cb-mental'], ['ops', t.ops, uid.ops], ['the parent', t.parent, uid.parent], ['the athlete login', t.athlete, uid.athlete]]) {
+    expect(`fitness: doc id somethingElse refused for ${who}`, await put(auth, 'ath-absent', mark('ath-absent', by, 'Dana'), 'somethingElse'), 403);
+  }
+  expect('fitness: byName exactly 40 characters', await put(t.coach, 'ath-pending', mark('ath-pending', uid.coach, 'L'.repeat(40))), 200);
+
+  for (const [who, auth] of [['the coach', t.coach], ['mental', k.mental], ['ops', t.ops], ['the owner', k.owner], ['Phil', k.phil]]) {
+    expect(`fitness: ${who} reads a mark`, await getAs(auth, other), 200);
+  }
+  expect("fitness: the athlete's own household parent reads it refused", await getAs(t.other, other), 403);
+  const elite = `${MS('ath-elite')}/${FITNESS}`;
+  expect("fitness: an athlete login reads its own athlete's mark refused", await getAs(t.eliteLogin, elite), 403);
+  expect("fitness: a parent of the athlete's household reads the mark refused", await getAs(t.parent, elite), 403);
+  expect('fitness: a stranger reads it refused', await getAs(t.stranger, other), 403);
+  expect('fitness: the coach gets a mark that does not exist: not found', await getAs(t.coach, `${MS('ath-absent')}/${FITNESS}`), 404);
+  // The roster screen lists one athlete's milestones, never a collection group.
+  expect('fitness: the owner lists the milestones of one athlete', await listUnderAs(k.owner, 'athletes/ath-active', 'milestones'), 200);
+  expect('fitness: ops lists the milestones of one athlete', await listUnderAs(t.ops, 'athletes/ath-active', 'milestones'), 200);
+  expect('fitness: a parent lists the milestones of one athlete refused', await listUnderAs(t.parent, 'athletes/ath-active', 'milestones'), 403);
+
+  expect('fitness: a coach deletes a fresh mark the owner ticked refused', await delAs(t.coach, active), 403);
+  expect('fitness: mental deletes the fresh mark refused', await delAs(k.mental, active), 403);
+  expect('fitness: ops deletes the fresh mark refused', await delAs(t.ops, active), 403);
+  expect('fitness: the owner deletes the fresh mark', await delAs(k.owner, active), 200);
+  expect('fitness: the coach who ticked it deletes it inside ten minutes', await delAs(t.coach, other), 200);
+
+  const aged = (min) => seed(MS('ath-elite-pending'), FITNESS, { athleteId: 'ath-elite-pending', at: new Date(Date.now() - min * 60000), by: uid.coach, byName: 'Luke' });
+  const agedPath = `${MS('ath-elite-pending')}/${FITNESS}`;
+  await aged(9);
+  expect('fitness: the coach deletes their own nine-minute-old mark', await delAs(t.coach, agedPath), 200);
+  await aged(11);
+  expect('fitness: the coach deletes their own eleven-minute-old mark refused', await delAs(t.coach, agedPath), 403);
+  expect('fitness: the owner deletes the eleven-minute-old mark', await delAs(k.owner, agedPath), 200);
 }
 
 async function scoreCases(k) {
@@ -193,6 +261,7 @@ export async function taskCombine() {
     for (const [id, fields] of CB_USERS) await seed('users', id, fields);
     await seed('athletes', 'cb-nohh', { name: 'cb-nohh', householdId: null });
     await intakeCases(k);
+    await fitnessCases(k);
     await scoreCases(k);
   } finally {
     await sweep();
