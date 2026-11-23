@@ -1186,10 +1186,10 @@ export default function PortalRoutes() {
           </RequireRole>
         }
       />
-      {/* 2026-11-16 (one family page): a click on an athlete lands on the family
-          page, opened on them. The old athlete-bookings link goes there too. */}
       {/* The roster of every athlete (hq card 14): a static path, never an athlete id. */}
       <Route path="admin/athletes" element={<RequireRole roles={['ops', 'owner']}><AthletesRoute /></RequireRole>} />
+      {/* 2026-11-16 (one family page): a click on an athlete lands on the family
+          page, opened on them. The old athlete-bookings link goes there too. */}
       <Route path="admin/athletes/:athleteId" element={<RequireRole roles={['ops', 'owner']}><StaffAthleteRedirect /></RequireRole>} />
       <Route path="admin/athletes/:athleteId/bookings" element={<RequireRole roles={['ops', 'owner']}><StaffAthleteRedirect /></RequireRole>} />
       {/* The facility door (2026-11-17): the switch, the location, the staff unlock, activity and pauses. */}
