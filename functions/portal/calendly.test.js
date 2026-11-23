@@ -41,4 +41,14 @@ test('MENTAL_MONTHLY_CAP mirrors frontend data/specialists.js', () => {
       {elite: lit(m[1]), default: lit(m[2])});
 });
 
+test('the handler decides over-cadence through overCadence, not a bare comparison', () => {
+  // Only the emulator harness runs the handler, so read the source (as the
+  // pin test above does): the call site must use the guarded function.
+  const src = fs.readFileSync(path.join(__dirname, 'calendly.js'), 'utf8');
+  assert.ok(src.includes('overCadence(mentalThisMonth, mentalCapFor(pkg))'),
+      'the handler must call overCadence(mentalThisMonth, mentalCapFor(pkg))');
+  assert.ok(!/mentalThisMonths*>=/.test(src),
+      'a bare mentalThisMonth >= comparison would flag a null cap');
+});
+
 run();

@@ -181,6 +181,24 @@ describe("Yannick's sessions never take a waitlist", () => {
   });
 });
 
+describe("there is no monthly cap on Yannick's sessions (owner ruling 2026-11-23)", () => {
+  test('a second and a third mental session in the same month get through the booking gate', async () => {
+    const first = session('cal-1117', 'mental', '2026-11-17', '4:00 PM', { capacity: 1 });
+    const second = session('cal-1124', 'mental', '2026-11-24', '4:00 PM', { capacity: 1 });
+    const third = session('cal-1126', 'mental', '2026-11-26', '4:00 PM', { capacity: 1 });
+    const a = await createBooking({ athleteId: 'ava', ...first });
+    expect(a.status).toBe('confirmed');
+    // Ava's second token covers the second session in the month.
+    const b = await caught(createBooking({ athleteId: 'ava', ...second }));
+    expect(b).toBeNull();
+    // Elite: three in the month, no cap either.
+    const fourth = session('cal-1127', 'mental', '2026-11-27', '4:00 PM', { capacity: 1 });
+    for (const slot of [third, fourth]) expect(await caught(createBooking({ athleteId: 'eli', ...slot }))).toBeNull();
+    const fifth = session('cal-1130', 'mental', '2026-11-30', '4:00 PM', { capacity: 1 });
+    expect(await caught(createBooking({ athleteId: 'eli', ...fifth }))).toBeNull();
+  });
+});
+
 describe("Elite's one a day applies to a waitlist place exactly as to a booking", () => {
   const SAME = "Elite includes one training block a day, and there's already one booked that day.";
   test('a second training block that day: the same refusal whether it is open or full', async () => {
