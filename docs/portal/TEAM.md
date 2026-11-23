@@ -3695,3 +3695,58 @@ The real Meet link never goes in the repo. Probe: `scripts/rules-probes/events.m
 - A calendar entry made before the link is in does not get the link later,
   so put the `eventLinks` document in early if the link should be in
   people's calendars.
+
+## Athlete roster and the fitness mark (hq card 14, 2026-11-23)
+
+The owner asked for a list of every athlete in the admin panel, with the
+Parallax intake swings mark and a new fitness assessment mark settable from
+it. Both marks are one-time: "done", kept like the Parallax mark.
+
+### The screen
+
+- Route `/portal/admin/athletes`, for the owner and ops (`RequireRole`),
+  lazy-loaded; it is a fixed path, beside the `admin/athletes/:athleteId`
+  redirects to the family page, which are unchanged. Opened from the
+  "Athletes" card on the Admin dashboard, directly after Sign-ups.
+- One row per real athlete (test families left out, `data/testFamily.js`),
+  by last name: the name; age, package and membership on one line
+  (`Paid`, `Not paid yet`, `Comped`, `Payment failed`, `Ended`, or nothing
+  for an athlete with no billing record); the family's name, which opens the
+  family page; then the two marks. Search (athlete or family name) and three
+  filters: everyone, Parallax not done, fitness not done.
+- Reads (`hooks/athleteRoster.js`), once per open: all athletes, all
+  households, then one `getDocs` of `athletes/{id}/milestones` per real
+  athlete, in parallel. No collection-group query, no listener, no polling;
+  a tick or undo updates its row only. A failed read on one athlete shows that
+  row's "didn't load" line, never a blank list.
+- The owner ticks and undoes (one tap; the one who ticked it undoes it inside
+  ten minutes; the owner clears any mark behind the control's confirm). Ops
+  sees the marks read-only. Coaches keep ticking Parallax from attendance.
+
+### `athletes/{athleteId}/milestones/fitnessAssessment`
+
+A second fixed document beside `parallaxIntake`, created once per athlete.
+Fields, exactly these four (`data/combine.js` `intakeDoc`):
+
+| Field | Type | Notes |
+|---|---|---|
+| `athleteId` | string | the path's athlete id |
+| `at` | timestamp | the server's request time |
+| `by` | string | the writer's uid |
+| `byName` | string | a display label, 1 to 40 characters |
+
+Who: a coach or the owner may create it (the roster screen is the owner's);
+nobody updates it; the owner deletes it any time and whoever created it
+within ten minutes; staff (coach, mental, ops, owner) read it, families do
+not. No other id is accepted in `milestones`. Rules: the one `milestones`
+block in `firestore.rules`; probe: `scripts/rules-probes/combine.mjs`.
+
+### The Parallax mark is unchanged
+
+`athletes/{id}/milestones/parallaxIntake` keeps its fields, rules and
+behaviour. The roster and the coach's attendance screen read and write the
+same document, so a tick in either shows in both (the attendance screen's own
+cache refreshes within ten minutes or on reopening).
+
+Release (the owner's): rules first, then the frontend. Before the rules, a
+fitness tick is refused and the roster says "Not saved. Tap to try again."
