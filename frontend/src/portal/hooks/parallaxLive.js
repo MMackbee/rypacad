@@ -88,6 +88,21 @@ export async function fetchIntake(athleteId, docId = INTAKE_DOC_ID) {
   }
 }
 
+/**
+ * One athlete's mark as the server holds it (getDocFromServer, never the cache), or null when the
+ * server says it is gone; a failed read throws. For re-reads after a notice, where a cached answer
+ * would be the stale one being replaced.
+ */
+export async function fetchIntakeFromServer(athleteId, docId = INTAKE_DOC_ID) {
+  requireAthlete(athleteId, 'fetchIntakeFromServer');
+  try {
+    const snap = await getDocFromServer(intakeRef(athleteId, docId));
+    return snap.exists() ? snap.data() : null;
+  } catch (err) {
+    throw wrap(err, 'fetchIntakeFromServer');
+  }
+}
+
 /** Tick: `{ status: 'done', milestone? }` (milestone: the stored mark, null when the server says it is gone, absent when the read-back failed), or `{ status: 'already', milestone }` when someone ticked first. */
 export async function createIntake(athleteId, body, docId = INTAKE_DOC_ID) {
   requireAthlete(athleteId, 'createIntake');

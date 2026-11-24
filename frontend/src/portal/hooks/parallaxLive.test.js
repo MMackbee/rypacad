@@ -10,7 +10,7 @@ jest.mock('firebase/firestore', () => ({
 }));
 import { deleteDoc, doc, getDoc, runTransaction, serverTimestamp, setDoc } from 'firebase/firestore';
 import { ERR } from './live';
-import { INTAKE_KEY, MARK_CHANGED, createIntake, deleteIntake, deviceStamped, expectedMark, fetchIntake, intakeStamp } from './parallaxLive';
+import { INTAKE_KEY, MARK_CHANGED, createIntake, deleteIntake, deviceStamped, expectedMark, fetchIntake, fetchIntakeFromServer, intakeStamp } from './parallaxLive';
 
 const PATH = 'athletes/a1/milestones/parallaxIntake';
 const BODY = { athleteId: 'a1', at: 'NOW', by: 'u-luke', byName: 'Luke' };
@@ -197,5 +197,27 @@ describe('a tick reads itself back from the server (card 14, round 8)', () => {
     expect(await createIntake('a1', BODY)).toEqual({ status: 'done' });
     getDocFromServer.mockResolvedValueOnce({ exists: () => false });
     expect(await createIntake('a1', BODY)).toEqual({ status: 'done', milestone: null });
+  });
+});
+
+describe('the server-only read of one mark (card 14, round 11)', () => {
+  const { getDocFromServer } = jest.requireMock('firebase/firestore');
+
+  test('returns the stored mark, null when the document is gone, and never calls the cache-capable getDoc', async () => {
+    const m = READ();
+    getDocFromServer.mockResolvedValueOnce({ exists: () => true, data: () => m });
+    expect(await fetchIntakeFromServer('a1')).toEqual(m);
+    expect(getDocFromServer).toHaveBeenLastCalledWith({ path: PATH });
+    getDocFromServer.mockResolvedValueOnce({ exists: () => false });
+    expect(await fetchIntakeFromServer('a1', 'fitnessAssessment')).toBeNull();
+    expect(getDocFromServer).toHaveBeenLastCalledWith({ path: 'athletes/a1/milestones/fitnessAssessment' });
+    expect(getDoc).not.toHaveBeenCalled();
+  });
+
+  test('a failed read throws the wrapped error', async () => {
+    getDocFromServer.mockRejectedValueOnce({ code: 'unavailable' });
+    await expect(fetchIntakeFromServer('a1')).rejects.toMatchObject({ code: ERR.UNAVAILABLE });
+    await expect(fetchIntakeFromServer()).rejects.toMatchObject({ code: ERR.INVALID });
+    expect(getDoc).not.toHaveBeenCalled();
   });
 });

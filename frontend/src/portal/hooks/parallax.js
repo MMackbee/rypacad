@@ -11,7 +11,9 @@
  * athlete during its own read.
  * A mounted screen is also told when one of its athletes is touched by anyone but itself (the roster's
  * write landing, which can come at any time, even after the list is on screen) and reads that athlete
- * again, showing it through its override. A failed read is never cached, and the
+ * again (from the server only), showing it through its override. A re-read that fails is owed: it is tried
+ * again when the browser reports it is back online, and after 5 and then 20 seconds, at most three
+ * retries for one notice; a newer notice starts the count again, and unmounting drops everything owed. A failed read is never cached, and the
  * next account on the same device starts from an empty cache (2026-11-11 review).
  *
  * Never imports hooks/index.js or hooks/useAuthSession.js (screen tests mock
@@ -25,7 +27,7 @@ import { useEffect, useRef, useState } from 'react';
 import useSeedResource from './useSeedResource';
 import { ERR, LiveDataError, fetchCurrentUser, isLive } from './live';
 import { auth } from '../../firebase';
-import { MARK_CHANGED, createIntake, deleteIntake, deviceStamped, expectedMark, fetchIntake, intakeStamp } from './parallaxLive';
+import { MARK_CHANGED, createIntake, deleteIntake, deviceStamped, expectedMark, fetchIntake, fetchIntakeFromServer, intakeStamp } from './parallaxLive';
 import { INTAKE_UNDO_MS, intakeByName, intakeDoc } from '../data/combine';
 
 /** athleteId -> { milestone: milestone|null, readAt: ms }: successful reads and this app's own writes only. */
@@ -47,6 +49,11 @@ export function clearIntakeCache() {
   seed = freshSeed();
 }
 
+/** How many mounted attendance screens are listening (tests). */
+export function listenerCount() {
+  return listeners.size;
+}
+
 /** Forgets one athlete's entry, so the next screen open reads it again (the roster calls this after it writes that athlete's tick). */
 export function forgetIntake(athleteId) {
   cache.delete(athleteId);
@@ -54,6 +61,8 @@ export function forgetIntake(athleteId) {
 }
 
 /** athleteId -> how many times a write or a forget has touched that athlete's entry: a read that started before one is stale. */
+/** Waits before the first two retries of a failed re-read; a third retry waits for the browser to be back online. */
+const RETRY_MS = [5000, 20000];
 const writes = new Map();
 /** Mounted attendance hooks: (athleteId, causedBy) => void, told whenever an athlete's entry is touched. */
 const listeners = new Set();
@@ -146,8 +155,29 @@ export function useParallaxIntakes(athleteIds, { enabled = false } = {}) {
     const mine = new Set(idsKey.split(',').filter(Boolean));
     const me = self.current;
     const running = new Set();
+    // athleteId -> { used, timer }: a failed re-read still owed, with the retries already made.
+    const owed = new Map();
     let active = true;
-    const refresh = async (id) => {
+    const drop = (id) => {
+      const entry = owed.get(id);
+      if (entry) clearTimeout(entry.timer);
+      owed.delete(id);
+      if (!owed.size) window.removeEventListener('online', onOnline);
+    };
+    const retry = (id) => {
+      const entry = owed.get(id);
+      if (!entry || !active) return;
+      drop(id);
+      refresh(id, entry.used + 1);
+    };
+    function onOnline() { [...owed.keys()].forEach(retry); }
+    const owe = (id, used) => {
+      if (!active || used >= RETRY_MS.length + 1) return;
+      const delay = RETRY_MS[used];
+      owed.set(id, { used, timer: delay === undefined ? null : setTimeout(() => retry(id), delay) });
+      window.addEventListener('online', onOnline);
+    };
+    const refresh = async (id, used = 0) => {
       running.add(id);
       try {
         // Up to three reads in a row; an answer overtaken during its own read is neither cached nor shown.
@@ -155,9 +185,10 @@ export function useParallaxIntakes(athleteIds, { enabled = false } = {}) {
           const before = writeCount(id);
           let milestone;
           try {
-            milestone = await fetchIntake(id);
+            milestone = await fetchIntakeFromServer(id);
           } catch (err) {
-            cache.delete(id); // a failed read leaves what is shown, and the next open reads it
+            cache.delete(id); // what is shown stays, the next open reads it, and a retry is owed
+            owe(id, used);
             return;
           }
           if (!active) return;
@@ -174,6 +205,7 @@ export function useParallaxIntakes(athleteIds, { enabled = false } = {}) {
     };
     const touched = (id, causedBy) => {
       if (causedBy === me || !mine.has(id) || running.has(id)) return;
+      drop(id); // a newer notice starts the count again
       refresh(id);
     };
     listeners.add(touched);
@@ -181,6 +213,7 @@ export function useParallaxIntakes(athleteIds, { enabled = false } = {}) {
     return () => {
       active = false;
       listeners.delete(touched);
+      [...owed.keys()].forEach(drop);
     };
   }, [live, counters, idsKey]);
 
