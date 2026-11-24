@@ -7,6 +7,7 @@ import React from 'react';
 import { renderScreen } from '../../screens/testRender';
 import ParallaxTick from './ParallaxTick';
 import { ERR } from '../../hooks/live';
+import { MARK_CHANGED } from '../../data/combine';
 
 const T = Date.parse('2026-11-12T22:00:00Z');
 const M = { athleteId: 'a1', at: new Date(T), by: 'u-luke', byName: 'Luke' };
@@ -407,5 +408,57 @@ test('a plain undo with nothing focused does not take focus when the save lands'
   await r.act(async () => { finish(); });
   expect(checkbox(r).disabled).toBe(false);
   expect(document.activeElement).not.toBe(checkbox(r));
+  await r.unmount();
+});
+
+// ---- hq card 14, fix round 7: a changed mark closes the Clear confirm --------
+
+const changedErr = () => Object.assign(new Error('changed'), { code: ERR.UNKNOWN, reason: MARK_CHANGED });
+const OWNER_CLEAR = 'Clear Parallax intake swings: Jordan Whitfield';
+
+test("the owner's Clear that meets a changed mark closes the confirm, says not saved, and the next tap asks again", async () => {
+  const onUndo = jest.fn(async () => { throw changedErr(); });
+  const r = await withInput({ milestone: M, viewer: OWNER, now: () => T + 86400000, onUndo });
+  await r.act(async () => { checkbox(r).focus(); });
+  await r.click(LABEL);
+  await r.click(OWNER_CLEAR);
+  expect(onUndo).toHaveBeenCalledTimes(1);
+  expect(r.text()).toContain('Not saved. Tap to try again.');
+  expect(r.text()).not.toContain('Clear Parallax intake swings for Jordan Whitfield?');
+  expect(r.container.querySelector(`[aria-label="${OWNER_CLEAR}"]`)).toBeNull();
+  // The next tap opens a new confirm; it deletes nothing by itself.
+  await r.click(LABEL);
+  expect(onUndo).toHaveBeenCalledTimes(1);
+  expect(r.text()).toContain('Clear Parallax intake swings for Jordan Whitfield?');
+  await r.unmount();
+});
+
+test('a changed mark puts focus back on the tick when nothing else held it, and never takes it from another field', async () => {
+  const onUndo = jest.fn(async () => { throw changedErr(); });
+  let r = await tick({ milestone: M, viewer: OWNER, now: () => T + 86400000, onUndo });
+  await r.click(LABEL);
+  await r.click(OWNER_CLEAR);
+  expect(document.activeElement).toBe(checkbox(r));
+  await r.unmount();
+  let finish;
+  const slow = jest.fn(() => new Promise((_, reject) => { finish = () => reject(changedErr()); }));
+  r = await withInput({ milestone: M, viewer: OWNER, now: () => T + 86400000, onUndo: slow });
+  await r.click(LABEL);
+  await r.click(OWNER_CLEAR);
+  const input = r.container.querySelector('input');
+  await r.act(async () => { input.focus(); });
+  await r.act(async () => { finish(); });
+  expect(document.activeElement).toBe(input);
+  await r.unmount();
+});
+
+test("any other failure of the owner's Clear leaves the confirm open", async () => {
+  const onUndo = jest.fn(async () => { throw new Error('offline'); });
+  const r = await tick({ milestone: M, viewer: OWNER, now: () => T + 86400000, onUndo });
+  await r.click(LABEL);
+  await r.click(OWNER_CLEAR);
+  expect(r.text()).toContain('Not saved. Tap to try again.');
+  expect(r.text()).toContain('Clear Parallax intake swings for Jordan Whitfield?');
+  expect(r.container.querySelector(`[aria-label="${OWNER_CLEAR}"]`)).not.toBeNull();
   await r.unmount();
 });

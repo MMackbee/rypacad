@@ -21,11 +21,11 @@ import { doc, getDoc, runTransaction, serverTimestamp, setDoc } from 'firebase/f
 import { db } from '../../firebase';
 import { ERR, LiveDataError, requireUser, wrap } from './live';
 import { bump } from './invalidate';
-import { INTAKE_DOC_ID } from '../data/combine';
+import { INTAKE_DOC_ID, MARK_CHANGED } from '../data/combine';
 
 export const INTAKE_KEY = 'milestones';
-/** `reason` of the error deleteIntake throws when the stored mark is not the one shown; `stored` carries it. */
-export const MARK_CHANGED = 'mark-changed';
+/** `reason` of the error deleteIntake throws when the stored mark is not the one shown; `stored` carries it (defined in data/combine.js). */
+export { MARK_CHANGED };
 
 /** Marks a screen stamped with its own clock (a tick it just wrote): their `at` is not the server's. */
 const deviceMarks = new WeakSet();

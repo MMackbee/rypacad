@@ -44,6 +44,8 @@ export const COMBINE_EMPTY = 'No scores yet.';
 export const NO_SCORE = 'No score yet';
 export const DELETE_PROMPT = 'Delete this score?';
 export const INTAKE_SAVE_ERROR = 'Not saved. Tap to try again.';
+/** `reason` of the error an undo or clear fails with when the stored mark is not the one shown (hooks/parallaxLive.js). */
+export const MARK_CHANGED = 'mark-changed';
 export const INTAKE_UNDO_LATE = 'Ten minutes have passed. Ask the owner to clear it.';
 export const INTAKE_LOAD_ERROR = "Parallax intake swings didn't load.";
 // The second one-time mark (hq card 14, 2026-11-23): the owner's "fitness assessment done", the same four keys.

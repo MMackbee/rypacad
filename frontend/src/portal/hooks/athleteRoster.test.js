@@ -370,6 +370,20 @@ describe("the attendance screen's cache follows the roster's Parallax writes (ca
     await roster.unmount();
   });
 
+  test('a changed mark the roster learns of reaches attendance too', async () => {
+    mockStored = null;
+    const roster = await loadAttendanceThenRoster();
+    mockStored = MARK();
+    mockFetches = [];
+    mockDeleteError = Object.assign(new LiveDataError(ERR.UNKNOWN, 'changed', null, MARK_CHANGED), { stored: MARK('Sam') });
+    await act(async () => { try { await roster.result.current.undo('a-kim', 'parallaxIntake'); } catch (err) { /* the save fails */ } });
+    mockFetches = [];
+    const again = await mount(useAttendance);
+    expect(mockFetches).toEqual(['a-kim']);
+    await again.unmount();
+    await roster.unmount();
+  });
+
   test('a fitness write does not touch it (attendance has no fitness mark)', async () => {
     mockStored = null;
     const roster = await loadAttendanceThenRoster();

@@ -3,7 +3,7 @@ import { TOUCH_MIN, color, font, radius } from '../../tokens';
 import { Body, Tick } from '../Primitives';
 import { ERR } from '../../hooks/live';
 import {
-  INTAKE_LABEL, INTAKE_LOAD_ERROR, INTAKE_SAVE_ERROR, INTAKE_UNDO_LATE, MARK_NOT_DONE, intakeDoneLine, intakeUndo,
+  INTAKE_LABEL, INTAKE_LOAD_ERROR, INTAKE_SAVE_ERROR, INTAKE_UNDO_LATE, MARK_CHANGED, MARK_NOT_DONE, intakeDoneLine, intakeUndo,
 } from '../../data/combine';
 
 const pill = (tone) => ({
@@ -107,6 +107,14 @@ export default function ParallaxTick({
       return;
     } catch (err) {
       setProblem(failCopy(err));
+      // The mark on screen was replaced: the confirm was for a mark that is gone. Close it (the next tap
+      // asks again for the mark now shown) and put focus back on the tick, now or never.
+      if (thenRefocus && err && err.reason === MARK_CHANGED) {
+        setConfirming(false);
+        setBusy(false);
+        setRefocus(true);
+        return;
+      }
     }
     setBusy(false);
   };
