@@ -673,7 +673,7 @@ describe('round 11: a failed notice re-read is tried again, a bounded number of 
     await h.unmount();
   });
 
-  test('with no online event: a retry after 5 seconds, another after 20 seconds, then no more', async () => {
+  test('with no online event: a retry after 5 seconds, another after 20 seconds, then one every 60 seconds, for as long as it takes', async () => {
     const h = await loadedThenFailingNotice();
     await advance(4999);
     expect(reads()).toBe(1);
@@ -685,18 +685,80 @@ describe('round 11: a failed notice re-read is tried again, a bounded number of 
     await advance(1);
     await flush();
     expect(reads()).toBe(3);
-    await advance(600000);
+    await advance(59999);
     await flush();
     expect(reads()).toBe(3);
+    await advance(1);
+    await flush();
+    expect(reads()).toBe(4);
     await h.unmount();
   });
 
-  test('at most three retries for one notice, and a success clears what is owed', async () => {
+  test('P1: the server stays unreachable for ten minutes and then answers: the next timed retry shows the stored state', async () => {
     const h = await loadedThenFailingNotice();
-    for (let i = 0; i < 5; i += 1) { await online(); await flush(); }
-    expect(reads()).toBe(1 + 3);
+    for (let i = 0; i < 600; i += 1) { await advance(1000); await flush(); }
+    // The first read, then one at 5 s, one at 25 s (20 s later), then one per 60 s: 85, 145 ... 565.
+    expect(reads()).toBe(1 + 1 + 1 + 9);
+    expect(h.result.current.data.byAthlete.a1).toEqual(M);
+    adapter.fetchIntake.mockResolvedValue(NEW);
+    await advance(60000);
+    await flush();
+    expect(reads()).toBe(1 + 1 + 1 + 9 + 1);
+    expect(h.result.current.data.byAthlete.a1).toEqual(NEW);
+    expect(jest.getTimerCount()).toBe(0); // a success stops the timers
     await h.unmount();
-    // A success on the first retry: later online events read nothing.
+  });
+
+  test('P2: ten online events while the server is unreachable change nothing about the timers; the next retry shows the stored state', async () => {
+    const h = await loadedThenFailingNotice();
+    for (let i = 0; i < 10; i += 1) { await online(); await flush(); }
+    expect(reads()).toBe(1 + 10);
+    expect(jest.getTimerCount()).toBe(1);
+    adapter.fetchIntake.mockResolvedValue(NEW);
+    await advance(5000);
+    await flush();
+    expect(h.result.current.data.byAthlete.a1).toEqual(NEW);
+    expect(jest.getTimerCount()).toBe(0);
+    await h.unmount();
+  });
+
+  test('an online attempt that fails does not move the timed retry', async () => {
+    const h = await loadedThenFailingNotice();
+    await advance(4000);
+    await online();
+    await flush();
+    expect(reads()).toBe(2);
+    adapter.fetchIntake.mockResolvedValue(NEW);
+    await advance(1000); // five seconds after the notice: the original timer still fires
+    await flush();
+    expect(reads()).toBe(3);
+    expect(h.result.current.data.byAthlete.a1).toEqual(NEW);
+    await h.unmount();
+  });
+
+  test('online during an in-flight retry starts no second read, and a timer during an in-flight read starts none; the timed retry still comes', async () => {
+    const h = await loadedThenFailingNotice();
+    const inflight = [];
+    adapter.fetchIntake.mockReset();
+    adapter.fetchIntake.mockImplementation(() => new Promise((resolve, reject) => { inflight.push({ resolve, reject }); }));
+    await online(); // read 2 starts and stays out
+    await flush();
+    expect(inflight).toHaveLength(1);
+    await online();
+    await flush();
+    expect(inflight).toHaveLength(1); // online during the read: nothing more
+    await advance(5000); // the owed timer fires while that read is out
+    await flush();
+    expect(inflight).toHaveLength(1);
+    await act(async () => { inflight[0].reject(offline()); });
+    await flush();
+    await advance(5000); // the timer was re-armed, so the timed retry still comes
+    await flush();
+    expect(inflight).toHaveLength(2);
+    await h.unmount();
+  });
+
+  test('a success clears what is owed: later online events read nothing', async () => {
     const g = await loadedThenFailingNotice();
     const before = reads();
     adapter.fetchIntake.mockResolvedValue(NEW);
@@ -704,11 +766,77 @@ describe('round 11: a failed notice re-read is tried again, a bounded number of 
     await flush();
     expect(reads()).toBe(before + 1);
     await online();
-    await advance(60000);
+    await advance(600000);
     await flush();
     expect(reads()).toBe(before + 1);
     expect(g.result.current.data.byAthlete.a1).toEqual(NEW);
     await g.unmount();
+  });
+
+  test('a newer notice while a retry read is in flight restarts the wait at 5 seconds, with one timer', async () => {
+    const h = await loadedThenFailingNotice();
+    await advance(5000); // retry 1 starts; make it stay out
+    await flush();
+    const inflight = [];
+    adapter.fetchIntake.mockReset();
+    adapter.fetchIntake.mockImplementation(() => new Promise((resolve, reject) => { inflight.push({ resolve, reject }); }));
+    await advance(20000); // retry 1 failed already (the mock rejected), so retry 2 starts now and stays out
+    await flush();
+    expect(inflight).toHaveLength(1);
+    await act(async () => { forgetIntake('a1'); }); // a newer notice while the retry read is out
+    await act(async () => { inflight[0].reject(offline()); });
+    await flush();
+    expect(jest.getTimerCount()).toBe(1);
+    await advance(4999);
+    await flush();
+    expect(inflight).toHaveLength(1);
+    await advance(1);
+    await flush();
+    expect(inflight).toHaveLength(2);
+    await h.unmount();
+  });
+
+  test('the online listener is added while something is owed and removed when nothing is owed and on unmount', async () => {
+    const add = jest.spyOn(window, 'addEventListener');
+    const remove = jest.spyOn(window, 'removeEventListener');
+    const net = () => add.mock.calls.filter((c) => c[0] === 'online').length - remove.mock.calls.filter((c) => c[0] === 'online').length;
+    try {
+      const h = await loadedThenFailingNotice();
+      expect(net()).toBe(1);
+      adapter.fetchIntake.mockResolvedValue(NEW);
+      await online();
+      await flush();
+      expect(net()).toBe(0); // the success left nothing owed
+      adapter.fetchIntake.mockReset();
+      adapter.fetchIntake.mockRejectedValue(offline());
+      await act(async () => { forgetIntake('a1'); });
+      await flush();
+      expect(net()).toBe(1);
+      await h.unmount();
+      expect(net()).toBe(0);
+      expect(jest.getTimerCount()).toBe(0);
+    } finally {
+      add.mockRestore();
+      remove.mockRestore();
+    }
+  });
+
+  test('an ordinary open, tick and undo start no timer and no online listener', async () => {
+    jest.useFakeTimers('modern');
+    const add = jest.spyOn(window, 'addEventListener');
+    try {
+      adapter.createIntake.mockResolvedValue({ status: 'done', milestone: { ...M, athleteId: 'a2', at: { toMillis: () => 5 } } });
+      adapter.deleteIntake.mockResolvedValue();
+      const h = await mountHook(on(['a1', 'a2']), flush);
+      await act(async () => { await h.result.current.tick('a2'); });
+      await act(async () => { await h.result.current.undo('a2'); });
+      await flush();
+      expect(jest.getTimerCount()).toBe(0);
+      expect(add.mock.calls.filter((c) => c[0] === 'online')).toHaveLength(0);
+      await h.unmount();
+    } finally {
+      add.mockRestore();
+    }
   });
 
   test('a newer notice during the wait restarts the count, and the old timer does not fire a second read', async () => {

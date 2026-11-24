@@ -12,8 +12,9 @@
  * A mounted screen is also told when one of its athletes is touched by anyone but itself (the roster's
  * write landing, which can come at any time, even after the list is on screen) and reads that athlete
  * again (from the server only), showing it through its override. A re-read that fails is owed: it is tried
- * again when the browser reports it is back online, and after 5 and then 20 seconds, at most three
- * retries for one notice; a newer notice starts the count again, and unmounting drops everything owed. A failed read is never cached, and the
+ * again after 5 seconds, 20 seconds, then every 60 seconds for as long as the screen is open, and also when
+ * the browser reports it is back online (an extra trigger, never a budget). A newer notice starts the wait
+ * again from 5 seconds; a success, unmounting or the athlete leaving the list drops what is owed. A failed read is never cached, and the
  * next account on the same device starts from an empty cache (2026-11-11 review).
  *
  * Never imports hooks/index.js or hooks/useAuthSession.js (screen tests mock
@@ -61,8 +62,9 @@ export function forgetIntake(athleteId) {
 }
 
 /** athleteId -> how many times a write or a forget has touched that athlete's entry: a read that started before one is stale. */
-/** Waits before the first two retries of a failed re-read; a third retry waits for the browser to be back online. */
-const RETRY_MS = [5000, 20000];
+/** Waits before the retries of a failed re-read: 5 s, 20 s, then every 60 s, for as long as the screen is open. */
+const RETRY_MS = [5000, 20000, 60000];
+/** athleteId -> how many times a write or a forget has touched that athlete's entry: a read that started before one is stale. */
 const writes = new Map();
 /** Mounted attendance hooks: (athleteId, causedBy) => void, told whenever an athlete's entry is touched. */
 const listeners = new Set();
@@ -155,29 +157,48 @@ export function useParallaxIntakes(athleteIds, { enabled = false } = {}) {
     const mine = new Set(idsKey.split(',').filter(Boolean));
     const me = self.current;
     const running = new Set();
-    // athleteId -> { used, timer }: a failed re-read still owed, with the retries already made.
+    // athleteId -> { used, timer }: a failed re-read still owed; used counts the timed retries already made.
     const owed = new Map();
+    // Athletes whose read was in flight when a newer notice came: if it fails, the wait starts again at 5 seconds.
+    const restart = new Set();
     let active = true;
+    let listening = false; // the window listener is on only while something is owed
+    const delayFor = (used) => RETRY_MS[Math.min(used, RETRY_MS.length - 1)];
     const drop = (id) => {
       const entry = owed.get(id);
       if (entry) clearTimeout(entry.timer);
       owed.delete(id);
-      if (!owed.size) window.removeEventListener('online', onOnline);
+      if (!owed.size && listening) {
+        window.removeEventListener('online', onOnline);
+        listening = false;
+      }
     };
-    const retry = (id) => {
+    function schedule(id, used) {
+      if (!active) return;
+      const entry = owed.get(id);
+      if (entry) clearTimeout(entry.timer);
+      owed.set(id, { used, timer: setTimeout(() => fire(id), delayFor(used)) });
+      if (!listening) {
+        window.addEventListener('online', onOnline);
+        listening = true;
+      }
+    }
+    // The timer: with a read for this athlete already in flight it starts none and waits again.
+    function fire(id) {
       const entry = owed.get(id);
       if (!entry || !active) return;
-      drop(id);
-      refresh(id, entry.used + 1);
-    };
-    function onOnline() { [...owed.keys()].forEach(retry); }
-    const owe = (id, used) => {
-      if (!active || used >= RETRY_MS.length + 1) return;
-      const delay = RETRY_MS[used];
-      owed.set(id, { used, timer: delay === undefined ? null : setTimeout(() => retry(id), delay) });
-      window.addEventListener('online', onOnline);
-    };
-    const refresh = async (id, used = 0) => {
+      if (running.has(id)) {
+        entry.timer = setTimeout(() => fire(id), delayFor(entry.used));
+        return;
+      }
+      refresh(id, entry.used + 1, 'timed');
+    }
+    // Back online: every owed athlete is tried at once (unless a read is in flight); the timers stay as they are.
+    function onOnline() {
+      if (!active) return;
+      [...owed.keys()].forEach((id) => { if (!running.has(id)) refresh(id, owed.get(id).used, 'online'); });
+    }
+    const refresh = async (id, used = 0, how = 'notice') => {
       running.add(id);
       try {
         // Up to three reads in a row; an answer overtaken during its own read is neither cached nor shown.
@@ -188,24 +209,33 @@ export function useParallaxIntakes(athleteIds, { enabled = false } = {}) {
             milestone = await fetchIntakeFromServer(id);
           } catch (err) {
             cache.delete(id); // what is shown stays, the next open reads it, and a retry is owed
-            owe(id, used);
+            if (restart.delete(id)) schedule(id, 0);
+            else if (how !== 'online') schedule(id, used); // a failed attempt from "online" leaves the timers alone
             return;
           }
           if (!active) return;
           if (writeCount(id) === before) {
             cache.set(id, { milestone, readAt: Date.now() });
             setOverrides((o) => ({ ...o, [id]: milestone }));
+            drop(id);
             return;
           }
         }
+        // Overtaken three times: nothing was shown or cached, so the athlete is still owed a read.
         cache.delete(id);
+        schedule(id, 0);
       } finally {
+        restart.delete(id);
         running.delete(id);
       }
     };
     const touched = (id, causedBy) => {
-      if (causedBy === me || !mine.has(id) || running.has(id)) return;
-      drop(id); // a newer notice starts the count again
+      if (causedBy === me || !mine.has(id)) return;
+      if (running.has(id)) {
+        restart.add(id); // the read out now follows the overtaken-answer rule; if it fails the wait restarts
+        return;
+      }
+      drop(id); // a newer notice starts the wait again from 5 seconds
       refresh(id);
     };
     listeners.add(touched);
